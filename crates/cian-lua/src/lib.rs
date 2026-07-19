@@ -47,6 +47,9 @@ pub struct Options {
     pub mask: Option<String>,
     /// Program to run in the embedded shell panel (e.g. "powershell.exe").
     pub shell: Option<String>,
+    /// Duration of split/zoom/close transitions in milliseconds. `0` disables
+    /// animation entirely.
+    pub animation_ms: Option<u64>,
 }
 
 /// Mutable accumulator shared with the Lua callbacks during script execution.
@@ -247,6 +250,12 @@ fn install_api(lua: &Lua, builder: &Rc<RefCell<Builder>>) -> mlua::Result<()> {
                         Err(_) => {
                             bm.errors.push("set_option: shell expects a string".into())
                         }
+                    },
+                    "animation_ms" => match u64::from_lua(val, lua) {
+                        Ok(v) => bm.options.animation_ms = Some(v),
+                        Err(_) => bm
+                            .errors
+                            .push("set_option: animation_ms expects a number".into()),
                     },
                     other => bm
                         .errors

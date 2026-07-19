@@ -82,12 +82,26 @@ impl PtySession {
                 match reader.read(&mut buf) {
                     Ok(0) => break, // EOF: child closed the pty
                     Ok(n) => {
-                        if let Ok(mut p) = reader_parser.lock() {
-                            p.process(&buf[..n]);
+                        match reader_parser.lock() {
+                            Ok(mut p) => p.process(&buf[..n]),
+                            // A poisoned parser never recovers: this pane will
+                            // stop updating for the rest of the session, which
+                            // looks exactly like a hang. Record it and stop.
+                            Err(_) => {
+                                cian_core::log::log(
+                                    "pty reader: parser mutex poisoned; pane output stops here",
+                                );
+                                break;
+                            }
                         }
                         reader_dirty.store(true, Ordering::Relaxed);
                     }
-                    Err(_) => break,
+                    Err(e) => {
+                        if cian_core::log::enabled() {
+                            cian_core::log::log(&format!("pty reader: read error: {}", e));
+                        }
+                        break;
+                    }
                 }
             }
             // Final repaint so the UI reflects the closed/exited state.

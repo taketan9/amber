@@ -3,10 +3,10 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::OnceLock;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use cian_core::ops::{self, Conflict, OpReport};
+use cian_core::ops::{self, Conflict, DeleteMode, OpReport};
 use cian_core::Pane;
 use cian_lua::Config;
 use cian_pty::PtySession;
@@ -23,7 +23,10 @@ use ratatui::backend::{Backend, CrosstermBackend};
 use ratatui::layout::{Constraint, Direction, Layout, Margin, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap};
+use ratatui::widgets::{
+    Block, BorderType, Borders, Clear, List, ListItem, ListState, Paragraph, Scrollbar,
+    ScrollbarOrientation, ScrollbarState, Wrap,
+};
 use ratatui::{Frame, Terminal};
 use serde::{Deserialize, Serialize};
 use tui_term::widget::PseudoTerminal;
@@ -208,6 +211,8 @@ pub enum Mode {
     Visual,
     Search,
     Command,
+    /// Incremental filter: the listing narrows as the user types.
+    Filter,
     Shell,
 }
 
@@ -265,7 +270,9 @@ enum SplitDir {
 /// two child nodes (referenced by slab index).
 enum Node {
     Leaf(PtySession),
-    Split { dir: SplitDir, first: usize, second: usize },
+    /// `ratio` is the percentage of the split's area given to `first`; it is
+    /// what dragging the border between the two children adjusts.
+    Split { dir: SplitDir, first: usize, second: usize, ratio: u16 },
 }
 
 /// One shell tab: a binary tree of PTY panes supporting nested splits. Nodes
@@ -351,7 +358,7 @@ impl ShellTab {
             return;
         }
         let new_leaf = self.alloc(Node::Leaf(new_session));
-        let split_idx = self.alloc(Node::Split { dir, first: old, second: new_leaf });
+        let split_idx = self.alloc(Node::Split { dir, first: old, second: new_leaf, ratio: 50 });
         if old == self.root {
             self.root = split_idx;
         } else if let Some((p, is_first)) = self.parent_of(old) {
@@ -441,6 +448,32 @@ pub struct ShellPane {
     cols: u16,
     shell_cmd: String,
     error: Option<String>,
+    /// Spawns currently in flight on background threads; polled each tick by
+    /// [`ShellPane::poll_pending`]. See [`ShellPane::spawn_async`].
+    pending: Vec<PendingSpawn>,
+    /// `(tab, split node)` for a split that was just created, so the UI can
+    /// animate the new pane growing in. Consumed by whoever reads it.
+    just_split: Option<(usize, usize)>,
+}
+
+/// A PTY spawn running on a background thread, plus what to do with the
+/// session once it arrives.
+struct PendingSpawn {
+    rx: std::sync::mpsc::Receiver<std::result::Result<PtySession, String>>,
+    kind: PendingKind,
+}
+
+/// Where a pending session should be installed once it is ready.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PendingKind {
+    /// The lazily-started first tab (see [`ShellPane::ensure`]).
+    FirstTab,
+    /// An additional tab (F9).
+    NewTab,
+    /// A split of tab `tab`. Applies to whichever leaf is active in that tab
+    /// when the session lands — normally the same one the user asked from,
+    /// since spawns complete in well under a frame.
+    Split { tab: usize, dir: SplitDir },
 }
 
 impl ShellPane {
@@ -453,6 +486,8 @@ impl ShellPane {
             cols: 80,
             shell_cmd,
             error: None,
+            pending: Vec::new(),
+            just_split: None,
         }
     }
 
@@ -476,53 +511,126 @@ impl ShellPane {
         self.tabs.get_mut(self.active).and_then(|t| t.active_pane_mut())
     }
 
-    fn spawn_session_in(&self, cwd: &Path) -> std::result::Result<PtySession, String> {
-        PtySession::new(cwd, &self.shell_cmd, self.rows.max(1), self.cols.max(1))
-            .map_err(|e| e.to_string())
+    /// Start a PTY spawn on a background thread.
+    ///
+    /// Spawning (openpty + fork/exec of the shell) must never run on the UI
+    /// thread: the event loop is single-threaded, so a slow shell startup
+    /// (heavy rc files, a hung `$SHELL`, a stalled network home directory)
+    /// would block *all* input until it returned — the app looked frozen.
+    /// Every spawn path goes through here; results are installed by
+    /// [`ShellPane::poll_pending`].
+    fn spawn_async(&mut self, cwd: &Path, kind: PendingKind) {
+        let cwd = cwd.to_path_buf();
+        let shell_cmd = self.shell_cmd.clone();
+        let rows = self.rows.max(1);
+        let cols = self.cols.max(1);
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            if cian_core::log::enabled() {
+                cian_core::log::log(&format!("spawning shell {:?} in {}", shell_cmd, cwd.display()));
+            }
+            let result = PtySession::new(&cwd, &shell_cmd, rows, cols).map_err(|e| e.to_string());
+            if cian_core::log::enabled() {
+                match &result {
+                    Ok(_) => cian_core::log::log("shell spawned"),
+                    Err(e) => cian_core::log::log(&format!("shell spawn failed: {}", e)),
+                }
+            }
+            let _ = tx.send(result);
+        });
+        self.pending.push(PendingSpawn { rx, kind });
+        self.error = None;
+    }
+
+    /// Whether a spawn of this kind is already in flight.
+    fn is_pending(&self, kind: PendingKind) -> bool {
+        self.pending.iter().any(|p| p.kind == kind)
+    }
+
+    /// True while the panel has no pane yet but one is on its way.
+    fn is_starting(&self) -> bool {
+        self.tabs.is_empty() && !self.pending.is_empty()
     }
 
     /// Spawn the first tab if none exists yet (lazy start on first focus).
     fn ensure(&mut self, cwd: &Path) {
-        if self.tabs.is_empty() {
-            match self.spawn_session_in(cwd) {
-                Ok(s) => {
-                    self.tabs.push(ShellTab::new(s));
-                    self.active = 0;
-                    self.error = None;
+        if self.tabs.is_empty() && !self.is_pending(PendingKind::FirstTab) {
+            self.spawn_async(cwd, PendingKind::FirstTab);
+        }
+    }
+
+    /// Install any background spawns that have completed. Returns true if the
+    /// panel's state changed (so the caller should repaint).
+    fn poll_pending(&mut self) -> bool {
+        if self.pending.is_empty() {
+            return false;
+        }
+        let mut changed = false;
+        let mut still_pending = Vec::with_capacity(self.pending.len());
+        for p in std::mem::take(&mut self.pending) {
+            match p.rx.try_recv() {
+                Ok(Ok(session)) => {
+                    self.install(session, p.kind);
+                    changed = true;
                 }
-                Err(e) => self.error = Some(e),
+                Ok(Err(e)) => {
+                    self.error = Some(e);
+                    changed = true;
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => still_pending.push(p),
+                // The worker vanished without sending (it panicked). Drop it
+                // rather than waiting forever.
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    self.error = Some("shell spawn failed unexpectedly".to_string());
+                    changed = true;
+                }
             }
         }
+        self.pending = still_pending;
+        changed
+    }
+
+    /// Place a freshly-spawned session according to what asked for it.
+    fn install(&mut self, session: PtySession, kind: PendingKind) {
+        match kind {
+            PendingKind::FirstTab => {
+                self.tabs.push(ShellTab::new(session));
+                self.active = self.tabs.len() - 1;
+            }
+            PendingKind::NewTab => {
+                self.tabs.push(ShellTab::new(session));
+                self.active = self.tabs.len() - 1;
+                self.zoom_pane = false;
+            }
+            PendingKind::Split { tab, dir } => match self.tabs.get_mut(tab) {
+                Some(t) => {
+                    t.split(dir, session);
+                    // `split` makes the new leaf active, so its parent is the
+                    // split node that was just created.
+                    self.just_split = t.parent_of(t.active).map(|(p, _)| (tab, p));
+                    // A split must be visible, so leave single-pane zoom.
+                    self.zoom_pane = false;
+                }
+                // The target tab was closed while we were spawning; the
+                // session is dropped here, which kills the shell.
+                None => return,
+            },
+        }
+        self.error = None;
     }
 
     /// Open an additional shell tab.
     fn new_tab(&mut self, cwd: &Path) {
-        match self.spawn_session_in(cwd) {
-            Ok(s) => {
-                self.tabs.push(ShellTab::new(s));
-                self.active = self.tabs.len() - 1;
-                self.error = None;
-            }
-            Err(e) => self.error = Some(e),
-        }
-        self.zoom_pane = false;
+        self.spawn_async(cwd, PendingKind::NewTab);
     }
 
     /// Split the active tab's active pane in `dir`, spawning a new pane.
     fn split_active(&mut self, cwd: &Path, dir: SplitDir) {
-        let session = match self.spawn_session_in(cwd) {
-            Ok(s) => s,
-            Err(e) => {
-                self.error = Some(e);
-                return;
-            }
-        };
-        if let Some(tab) = self.tabs.get_mut(self.active) {
-            tab.split(dir, session);
-            self.error = None;
+        if self.tabs.get(self.active).is_none() {
+            return;
         }
-        // A split must be visible, so leave single-pane zoom.
-        self.zoom_pane = false;
+        let kind = PendingKind::Split { tab: self.active, dir };
+        self.spawn_async(cwd, kind);
     }
 
     fn next_pane(&mut self) {
@@ -612,12 +720,84 @@ enum Popup {
     ConfirmTransfer { op: PendingOp, targets: Vec<PathBuf>, dest: PathBuf },
     TextInput { title: String, prompt: String, buffer: String, kind: InputKind },
     Notice { lines: Vec<String> },
+    /// The key manual. Unlike `Notice` it is far taller than any terminal, so
+    /// it carries a scroll offset (in lines from the top).
+    Manual { lines: Vec<String>, scroll: usize },
+    /// Right-click menu, anchored near the pointer.
+    ContextMenu { items: Vec<MenuItem>, cursor: usize, at: (u16, u16) },
+    /// Background-colour picker for the pane that was right-clicked.
+    ColorPicker { pane: FocusedPane, cursor: usize },
     Search { buffer: String },
     History { entries: Vec<PathBuf>, cursor: usize },
     Shortcuts { entries: Vec<Shortcut>, cursor: usize },
     ConfirmQuit,
     ConfirmClose { target: CloseTarget },
 }
+
+/// An entry in the right-click menu.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MenuItem {
+    Copy,
+    Cut,
+    Paste,
+    CopyToOther,
+    MoveToOther,
+    Delete,
+    Rename,
+    Background,
+}
+
+impl MenuItem {
+    fn label(self) -> &'static str {
+        match self {
+            MenuItem::Copy => "Copy",
+            MenuItem::Cut => "Cut",
+            MenuItem::Paste => "Paste",
+            MenuItem::CopyToOther => "Copy to other pane",
+            MenuItem::MoveToOther => "Move to other pane",
+            MenuItem::Delete => "Delete (to trash)",
+            MenuItem::Rename => "Rename",
+            MenuItem::Background => "Background colour…",
+        }
+    }
+}
+
+/// Work deferred until a shrink transition finishes.
+#[derive(Debug, Clone, Copy)]
+enum PendingClose {
+    /// Remove the shell's active split pane.
+    ShellPane,
+}
+
+/// Whether a clipboard entry will be copied or moved when pasted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ClipOp {
+    Copy,
+    Cut,
+}
+
+/// Files held for a later paste, Explorer-style: copy or cut here, navigate
+/// somewhere else, paste there. Independent of the system clipboard, which
+/// `p`/`Shift+P` still drive.
+#[derive(Debug, Clone)]
+struct FileClipboard {
+    paths: Vec<PathBuf>,
+    op: ClipOp,
+}
+
+/// Preset pane backgrounds. Deliberately dark and low-saturation: these sit
+/// behind a full pane of text, so anything vivid would hurt legibility.
+const PANE_BG_PRESETS: [(&str, Option<Color>); 9] = [
+    ("default", None),
+    ("slate", Some(Color::Rgb(28, 32, 42))),
+    ("ink", Some(Color::Rgb(22, 24, 38))),
+    ("forest", Some(Color::Rgb(24, 38, 30))),
+    ("moss", Some(Color::Rgb(32, 40, 28))),
+    ("wine", Some(Color::Rgb(42, 26, 32))),
+    ("rust", Some(Color::Rgb(44, 32, 24))),
+    ("plum", Some(Color::Rgb(38, 28, 44))),
+    ("steel", Some(Color::Rgb(26, 34, 40))),
+];
 
 /// What a close-confirmation popup will close when accepted.
 #[derive(Debug, Clone, Copy)]
@@ -691,6 +871,146 @@ struct LayoutRects {
     shell: Rect,
 }
 
+/// Which split a draggable border adjusts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DividerTarget {
+    /// The horizontal border between the file panes and the shell panel.
+    Main,
+    /// The vertical border between the left and right file panes.
+    Panes,
+    /// A border inside the shell panel's split tree.
+    ShellSplit { tab: usize, node: usize },
+}
+
+/// A border the user can grab and drag to re-proportion a split. Rebuilt every
+/// frame during rendering, since it depends on the current geometry.
+#[derive(Debug, Clone, Copy)]
+struct Divider {
+    /// The band of cells that counts as grabbing this border.
+    zone: Rect,
+    /// The area being divided; the drag position is mapped into this.
+    parent: Rect,
+    /// Whether the border moves horizontally or vertically.
+    dir: Direction,
+    target: DividerTarget,
+}
+
+impl Divider {
+    /// Convert an absolute mouse position into a percentage for the first
+    /// child, clamped so neither side can be squeezed out of existence.
+    fn ratio_at(&self, col: u16, row: u16) -> u16 {
+        let (pos, start, len) = match self.dir {
+            Direction::Horizontal => (col, self.parent.x, self.parent.width),
+            Direction::Vertical => (row, self.parent.y, self.parent.height),
+        };
+        if len == 0 {
+            return 50;
+        }
+        let offset = pos.saturating_sub(start).min(len);
+        let pct = (offset as u32 * 100 / len as u32) as u16;
+        pct.clamp(MIN_SPLIT_PCT, 100 - MIN_SPLIT_PCT)
+    }
+}
+
+/// Neither side of a split may shrink below this share of its parent, so a
+/// border can never be dragged far enough to make a pane unusable.
+const MIN_SPLIT_PCT: u16 = 15;
+
+/// How long an operation flash stays visible.
+const FLASH_SECS: f32 = 0.45;
+
+/// Default transition length. Long enough to read as motion, short enough that
+/// it never gets in the way of fast keyboard work.
+const DEFAULT_ANIM_MS: u64 = 150;
+
+/// A layout transition in flight.
+///
+/// Transitions are *purely visual*: PTYs keep their old size for the duration
+/// and are resized exactly once, when the transition lands. Resizing a PTY per
+/// frame would send a SIGWINCH storm to the shell and make it reflow a dozen
+/// times, which looks far worse than the animation looks good.
+#[derive(Debug, Clone, Copy)]
+struct Anim {
+    kind: AnimKind,
+    start: Instant,
+    dur: Duration,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum AnimKind {
+    /// A surface growing to fill the window, or shrinking back out of it.
+    Zoom { from: Rect, to: Rect },
+    /// A split's ratio easing between two values — used both when a split is
+    /// created (the new pane grows in) and when one is closed (it shrinks away).
+    Ratio { target: DividerTarget, from: u16, to: u16 },
+}
+
+impl Anim {
+    /// Eased 0.0..=1.0 position through the transition.
+    fn progress(&self) -> f32 {
+        if self.dur.is_zero() {
+            return 1.0;
+        }
+        let t = (self.start.elapsed().as_secs_f32() / self.dur.as_secs_f32()).clamp(0.0, 1.0);
+        // Ease-out cubic: quick to start, settling gently. Reads as "snappy"
+        // rather than "slow" at these durations.
+        1.0 - (1.0 - t).powi(3)
+    }
+
+    fn done(&self) -> bool {
+        self.start.elapsed() >= self.dur
+    }
+}
+
+/// The smallest rect containing both. Zero-sized inputs are ignored so an
+/// absent surface (e.g. while zoomed) does not drag the union to the origin.
+fn union_rect(a: Rect, b: Rect) -> Rect {
+    if a.width == 0 || a.height == 0 {
+        return b;
+    }
+    if b.width == 0 || b.height == 0 {
+        return a;
+    }
+    let x = a.x.min(b.x);
+    let y = a.y.min(b.y);
+    let r = (a.x + a.width).max(b.x + b.width);
+    let bo = (a.y + a.height).max(b.y + b.height);
+    Rect { x, y, width: r - x, height: bo - y }
+}
+
+/// Linear interpolation between two rects at eased position `t`.
+fn lerp_rect(a: Rect, b: Rect, t: f32) -> Rect {
+    let f = |x: u16, y: u16| -> u16 {
+        (x as f32 + (y as f32 - x as f32) * t).round().max(0.0) as u16
+    };
+    Rect {
+        x: f(a.x, b.x),
+        y: f(a.y, b.y),
+        width: f(a.width, b.width).max(1),
+        height: f(a.height, b.height).max(1),
+    }
+}
+
+/// Rendering overrides applied while a transition is in flight.
+#[derive(Debug, Default, Clone, Copy)]
+struct AnimOverride {
+    /// Use this ratio instead of the divider's stored one.
+    ratio: Option<(DividerTarget, u16)>,
+    /// Leave PTY sizes alone; they are applied once the transition lands.
+    freeze_pty: bool,
+}
+
+impl AnimOverride {
+    /// The ratio to render `target` at: the override if it applies, else the
+    /// stored value clamped to a usable range.
+    fn ratio_for(&self, target: DividerTarget, stored: u16) -> u16 {
+        match self.ratio {
+            Some((t, r)) if t == target => r,
+            _ => stored.clamp(MIN_SPLIT_PCT, 100 - MIN_SPLIT_PCT),
+        }
+    }
+}
+
 pub struct App {
     pub left: PaneTabs,
     pub right: PaneTabs,
@@ -699,6 +1019,8 @@ pub struct App {
     pub mode: Mode,
     pub mask: String,
     pub command_buffer: String,
+    /// In-progress text for [`Mode::Filter`].
+    pub filter_buffer: String,
     pub message: Option<String>,
     pub last_file_pane: FocusedPane,
     pub should_quit: bool,
@@ -707,6 +1029,30 @@ pub struct App {
     clipboard: Option<arboard::Clipboard>,
     popup: Popup,
     layout_rects: LayoutRects,
+    /// Percentage of the window given to the file panes; the shell gets the
+    /// rest. Adjusted by dragging the border between them.
+    main_pct: u16,
+    /// Percentage of the file-pane area given to the left pane.
+    panes_pct: u16,
+    /// Draggable borders for the current frame, rebuilt during rendering.
+    dividers: Vec<Divider>,
+    /// The border currently being dragged, if any.
+    drag: Option<Divider>,
+    /// Files awaiting a paste (see [`FileClipboard`]).
+    file_clip: Option<FileClipboard>,
+    /// Pane to briefly highlight after an operation landed there, and when it
+    /// started. Makes it obvious *where* a copy/move/delete took effect.
+    flash: Option<(FocusedPane, Instant)>,
+    /// Layout transition in flight, if any.
+    anim: Option<Anim>,
+    /// Work to run when the current transition finishes (e.g. actually closing
+    /// the pane that just finished shrinking away).
+    anim_then: Option<PendingClose>,
+    /// Transition length; zero disables animation.
+    anim_dur: Duration,
+    /// Per-pane background overrides, indexed by [`Self::bg_slot`].
+    /// Session-only: deliberately not persisted.
+    pane_bg: [Option<Color>; 2],
     last_search_query: Option<String>,
     pub shortcuts: ShortcutStore,
     pending_g: bool,
@@ -750,6 +1096,7 @@ impl App {
             mode: Mode::Normal,
             mask,
             command_buffer: String::new(),
+            filter_buffer: String::new(),
             message: None,
             last_file_pane: FocusedPane::Left,
             should_quit: false,
@@ -758,6 +1105,18 @@ impl App {
             clipboard: arboard::Clipboard::new().ok(),
             popup: Popup::None,
             layout_rects: LayoutRects::default(),
+            main_pct: 60,
+            panes_pct: 50,
+            dividers: Vec::new(),
+            drag: None,
+            file_clip: None,
+            flash: None,
+            anim: None,
+            anim_then: None,
+            anim_dur: Duration::from_millis(
+                config.options.animation_ms.unwrap_or(DEFAULT_ANIM_MS),
+            ),
+            pane_bg: [None, None],
             last_search_query: None,
             shortcuts: ShortcutStore::load_or_default(),
             pending_g: false,
@@ -849,6 +1208,7 @@ impl App {
             "" => {}
             "q" | "quit" => self.should_quit = true,
             "shell" => self.focus(FocusedPane::Shell),
+            "man" | "help" | "h" => self.open_manual(),
             other => self.message = Some(format!("unknown command: :{}", other)),
         }
     }
@@ -1162,6 +1522,59 @@ impl App {
         Ok(())
     }
 
+    // ------- Incremental filter -------
+    /// Start filtering, seeded with the pane's current filter so `/` reopens
+    /// and edits an existing narrowing rather than discarding it.
+    fn start_filter(&mut self) {
+        self.filter_buffer = self.active_pane().map(|p| p.filter.clone()).unwrap_or_default();
+        self.mode = Mode::Filter;
+    }
+
+    /// Push the buffer into the pane, narrowing the listing as the user types.
+    fn apply_filter_buffer(&mut self) {
+        let buf = self.filter_buffer.clone();
+        if let Some(p) = self.active_pane_mut() {
+            p.set_filter(buf);
+        }
+    }
+
+    fn handle_filter_key(&mut self, key: KeyEvent) -> Result<()> {
+        match key.code {
+            // Esc abandons the narrowing entirely and restores the full list.
+            KeyCode::Esc => {
+                self.filter_buffer.clear();
+                if let Some(p) = self.active_pane_mut() {
+                    p.clear_filter();
+                }
+                self.mode = Mode::Normal;
+            }
+            // Enter keeps the filter applied and returns to normal keys, so the
+            // narrowed list can be marked and operated on.
+            KeyCode::Enter => self.mode = Mode::Normal,
+            KeyCode::Backspace => {
+                self.filter_buffer.pop();
+                self.apply_filter_buffer();
+            }
+            KeyCode::Up => {
+                if let Some(p) = self.active_pane_mut() { p.move_cursor(-1); }
+            }
+            KeyCode::Down => {
+                if let Some(p) = self.active_pane_mut() { p.move_cursor(1); }
+            }
+            KeyCode::Char(c) => {
+                self.filter_buffer.push(c);
+                self.apply_filter_buffer();
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    // ------- Manual -------
+    fn open_manual(&mut self) {
+        self.popup = Popup::Manual { lines: manual_lines(&self.keymap), scroll: 0 };
+    }
+
     // ------- Quit confirmation -------
     fn start_quit_confirm(&mut self) {
         self.popup = Popup::ConfirmQuit;
@@ -1170,11 +1583,9 @@ impl App {
     /// Perform a confirmed close (shell split pane or file tab).
     fn execute_close(&mut self, target: CloseTarget) {
         match target {
-            CloseTarget::ShellPane => {
-                if self.shell.close_active_pane() {
-                    self.focus(self.last_file_pane);
-                }
-            }
+            // Shrink the pane away first; the removal happens when the
+            // transition lands (or immediately if animation is off).
+            CloseTarget::ShellPane => self.close_shell_pane_animated(),
             CloseTarget::FileTab(pane) => {
                 let tabs = match pane {
                     FocusedPane::Left => &mut self.left,
@@ -1232,16 +1643,22 @@ impl App {
             FocusedPane::Shell => &mut self.left,
         };
         let _ = other.active_mut().reload();
+        // The destination is where the files appeared, so light that pane.
+        self.flash(other_focus);
         self.show_op_report(&report);
         Ok(())
     }
 
-    fn finish_delete(&mut self) -> Result<()> {
+    fn finish_delete(&mut self, mode: DeleteMode) -> Result<()> {
         let popup = std::mem::replace(&mut self.popup, Popup::None);
         let Popup::ConfirmDelete { targets } = popup else { return Ok(()) };
-        let report = ops::delete_many(&targets);
+        if cian_core::log::enabled() {
+            cian_core::log::log(&format!("delete {:?}: {} target(s)", mode, targets.len()));
+        }
+        let report = ops::delete_many(&targets, mode);
         if let Some(t) = self.active_file_tabs_mut() { let _ = t.active_mut().reload(); }
         if let Some(p) = self.active_pane_mut() { p.clear_marks(); }
+        self.flash(self.focused);
         self.show_op_report(&report);
         Ok(())
     }
@@ -1325,19 +1742,70 @@ impl App {
 
     // ------- Mouse -------
     fn handle_mouse(&mut self, ev: MouseEvent) {
-        if !matches!(ev.kind, MouseEventKind::Down(MouseButton::Left)) {
-            return;
+        let (col, row) = (ev.column, ev.row);
+
+        // A drag in progress owns the mouse until the button comes back up,
+        // even if the pointer strays outside the border's grab zone.
+        if let Some(d) = self.drag {
+            match ev.kind {
+                MouseEventKind::Drag(MouseButton::Left) => {
+                    self.set_divider_ratio(d, d.ratio_at(col, row));
+                    return;
+                }
+                MouseEventKind::Up(MouseButton::Left) => {
+                    self.drag = None;
+                    return;
+                }
+                _ => {}
+            }
         }
-        // ignore clicks while a popup is open
+
+        // Ignore everything else while a popup owns the screen.
         if !matches!(self.popup, Popup::None) {
             return;
         }
-        let (col, row) = (ev.column, ev.row);
+
         let in_rect = |r: Rect| {
             r.width > 0 && r.height > 0
                 && col >= r.x && col < r.x + r.width
                 && row >= r.y && row < r.y + r.height
         };
+
+        // Right-click focuses what was clicked, puts the cursor on the row
+        // under the pointer, and opens the context menu there.
+        if matches!(ev.kind, MouseEventKind::Down(MouseButton::Right)) {
+            let target = if in_rect(self.layout_rects.left) {
+                Some(FocusedPane::Left)
+            } else if in_rect(self.layout_rects.right) {
+                Some(FocusedPane::Right)
+            } else if in_rect(self.layout_rects.shell) {
+                Some(FocusedPane::Shell)
+            } else {
+                None
+            };
+            if let Some(t) = target {
+                if self.focused != t {
+                    self.focus(t);
+                }
+                if t != FocusedPane::Shell {
+                    self.cursor_to_row(t, row);
+                }
+                self.open_context_menu(col, row);
+            }
+            return;
+        }
+
+        if !matches!(ev.kind, MouseEventKind::Down(MouseButton::Left)) {
+            return;
+        }
+
+        // Grabbing a border starts a resize instead of moving focus. Checked
+        // first because the seam overlaps the panes' own border cells.
+        if let Some(d) = self.dividers.iter().copied().find(|d| in_rect(d.zone)) {
+            self.drag = Some(d);
+            return;
+        }
+
         if in_rect(self.layout_rects.left) {
             self.focus(FocusedPane::Left);
         } else if in_rect(self.layout_rects.right) {
@@ -1347,10 +1815,305 @@ impl App {
         }
     }
 
+    // ------- Transitions -------
+
+    fn anim_enabled(&self) -> bool {
+        !self.anim_dur.is_zero()
+    }
+
+    /// Toggle full-window zoom of the focused surface, animating between the
+    /// surface's pane rect and the whole layout area.
+    fn toggle_zoom(&mut self) {
+        let pane_rect = match self.focused {
+            FocusedPane::Left => self.layout_rects.left,
+            FocusedPane::Right => self.layout_rects.right,
+            FocusedPane::Shell => self.layout_rects.shell,
+        };
+        // The full area is the union of everything currently laid out; derived
+        // rather than stored so it stays right at any window size.
+        let full = union_rect(
+            union_rect(self.layout_rects.left, self.layout_rects.right),
+            self.layout_rects.shell,
+        );
+        self.zoomed = !self.zoomed;
+        if pane_rect.width > 0 && full.width > 0 {
+            let (from, to) = if self.zoomed { (pane_rect, full) } else { (full, pane_rect) };
+            self.start_anim(AnimKind::Zoom { from, to });
+        }
+    }
+
+    fn start_anim(&mut self, kind: AnimKind) {
+        if !self.anim_enabled() {
+            return;
+        }
+        self.anim = Some(Anim { kind, start: Instant::now(), dur: self.anim_dur });
+    }
+
+    /// What the renderer should override this frame.
+    fn anim_override(&self) -> AnimOverride {
+        match self.anim {
+            Some(a) => match a.kind {
+                AnimKind::Ratio { target, from, to } => {
+                    let t = a.progress();
+                    let r = (from as f32 + (to as f32 - from as f32) * t).round() as u16;
+                    AnimOverride { ratio: Some((target, r)), freeze_pty: true }
+                }
+                AnimKind::Zoom { .. } => AnimOverride { ratio: None, freeze_pty: true },
+            },
+            None => AnimOverride::default(),
+        }
+    }
+
+    /// Land the current transition now, applying any deferred work. Called
+    /// when the timer expires and whenever the user presses a key, so input is
+    /// never held up waiting for an animation.
+    fn finish_anim(&mut self) {
+        if self.anim.take().is_none() {
+            return;
+        }
+        if let Some(close) = self.anim_then.take() {
+            self.apply_pending_close(close);
+        }
+    }
+
+    /// Perform a close that was deferred until its shrink animation finished.
+    fn apply_pending_close(&mut self, close: PendingClose) {
+        match close {
+            PendingClose::ShellPane => {
+                let empty = self.shell.close_active_pane();
+                if empty {
+                    let back = self.last_file_pane;
+                    self.focus(back);
+                }
+            }
+        }
+    }
+
+    /// Begin closing the active shell split pane, shrinking it away first.
+    /// Falls back to closing immediately when animation is off or the pane is
+    /// the only one in its tab (nothing to shrink into).
+    fn close_shell_pane_animated(&mut self) {
+        let parent = self
+            .shell
+            .tabs
+            .get(self.shell.active)
+            .and_then(|t| t.parent_of(t.active));
+        match (self.anim_enabled(), parent) {
+            (true, Some((p, is_first))) => {
+                let stored = match self
+                    .shell
+                    .tabs
+                    .get(self.shell.active)
+                    .and_then(|t| t.nodes.get(p))
+                    .and_then(|n| n.as_ref())
+                {
+                    Some(Node::Split { ratio, .. }) => *ratio,
+                    _ => 50,
+                };
+                // Drive the closing child's share to nothing.
+                let to = if is_first { 0 } else { 100 };
+                self.anim_then = Some(PendingClose::ShellPane);
+                self.start_anim(AnimKind::Ratio {
+                    target: DividerTarget::ShellSplit { tab: self.shell.active, node: p },
+                    from: stored,
+                    to,
+                });
+            }
+            _ => self.apply_pending_close(PendingClose::ShellPane),
+        }
+    }
+
+    /// Briefly highlight `pane` to show an operation landed there.
+    fn flash(&mut self, pane: FocusedPane) {
+        self.flash = Some((pane, Instant::now()));
+    }
+
+    /// How lit `pane` currently is, 1.0 right after a flash fading to 0.0.
+    /// Returns 0.0 once the flash has expired.
+    fn flash_level(&self, pane: FocusedPane) -> f32 {
+        let Some((p, at)) = self.flash else { return 0.0 };
+        if p != pane {
+            return 0.0;
+        }
+        let e = at.elapsed().as_secs_f32();
+        if e >= FLASH_SECS {
+            0.0
+        } else {
+            1.0 - e / FLASH_SECS
+        }
+    }
+
+    /// Whether a flash is still running and the UI should keep repainting.
+    fn flash_active(&self) -> bool {
+        self.flash.map(|(_, at)| at.elapsed().as_secs_f32() < FLASH_SECS).unwrap_or(false)
+    }
+
+    /// Which `pane_bg` slot a file pane uses.
+    fn bg_slot(pane: FocusedPane) -> Option<usize> {
+        match pane {
+            FocusedPane::Left => Some(0),
+            FocusedPane::Right => Some(1),
+            FocusedPane::Shell => None,
+        }
+    }
+
+    /// Move a file pane's cursor to the entry drawn at absolute screen `row`.
+    /// Out-of-range rows (the border, or empty space past the last entry) leave
+    /// the cursor alone rather than jumping somewhere arbitrary.
+    fn cursor_to_row(&mut self, pane: FocusedPane, row: u16) {
+        let rect = match pane {
+            FocusedPane::Left => self.layout_rects.left,
+            FocusedPane::Right => self.layout_rects.right,
+            FocusedPane::Shell => return,
+        };
+        // The list starts one row in, past the top border.
+        let Some(offset) = row.checked_sub(rect.y + 1) else { return };
+        if offset >= rect.height.saturating_sub(2) {
+            return;
+        }
+        let Some(p) = self.active_pane_mut() else { return };
+        // The list scrolls, so the first visible row is not always entry 0.
+        let view_h = rect.height.saturating_sub(2) as usize;
+        let first = p.cursor.saturating_sub(view_h.saturating_sub(1)).min(
+            p.entries.len().saturating_sub(view_h.min(p.entries.len())),
+        );
+        let idx = first + offset as usize;
+        if idx < p.entries.len() {
+            p.cursor = idx;
+        }
+    }
+
+    fn open_context_menu(&mut self, col: u16, row: u16) {
+        let mut items = Vec::new();
+        if self.focused == FocusedPane::Shell {
+            // A PTY owns its own screen, so only the paste and appearance
+            // entries make sense here.
+            if self.file_clip.is_some() {
+                items.push(MenuItem::Paste);
+            }
+        } else {
+            items.push(MenuItem::Copy);
+            items.push(MenuItem::Cut);
+            if self.file_clip.is_some() {
+                items.push(MenuItem::Paste);
+            }
+            items.push(MenuItem::CopyToOther);
+            items.push(MenuItem::MoveToOther);
+            items.push(MenuItem::Rename);
+            items.push(MenuItem::Delete);
+            items.push(MenuItem::Background);
+        }
+        if items.is_empty() {
+            return;
+        }
+        self.popup = Popup::ContextMenu { items, cursor: 0, at: (col, row) };
+    }
+
+    /// Put the pane's targets into the file clipboard.
+    fn clip_targets(&mut self, op: ClipOp) {
+        let paths = self.active_pane().map(|p| p.target_paths()).unwrap_or_default();
+        if paths.is_empty() {
+            self.message = Some("nothing selected".into());
+            return;
+        }
+        let verb = match op {
+            ClipOp::Copy => "copied",
+            ClipOp::Cut => "cut",
+        };
+        self.message = Some(format!("{} {} item(s)", verb, paths.len()));
+        self.file_clip = Some(FileClipboard { paths, op });
+    }
+
+    /// Paste the file clipboard into the focused pane's directory.
+    fn paste_clip(&mut self) -> Result<()> {
+        let Some(clip) = self.file_clip.clone() else {
+            self.message = Some("clipboard is empty".into());
+            return Ok(());
+        };
+        let dest = match self.focused {
+            FocusedPane::Shell => self.shell_cwd(),
+            _ => match self.active_pane() {
+                Some(p) => p.cwd.clone(),
+                None => return Ok(()),
+            },
+        };
+        // Pasting into the directory the files already live in would be a
+        // no-op at best and a self-overwrite at worst.
+        if clip.paths.iter().any(|p| p.parent() == Some(dest.as_path())) {
+            self.message = Some("already in this directory".into());
+            return Ok(());
+        }
+        let report = match clip.op {
+            ClipOp::Copy => ops::copy_many(&clip.paths, &dest, Conflict::Skip),
+            ClipOp::Cut => ops::move_many(&clip.paths, &dest, Conflict::Skip),
+        };
+        // A cut is consumed by its paste; a copy stays available.
+        if clip.op == ClipOp::Cut {
+            self.file_clip = None;
+        }
+        self.reload_both();
+        self.flash(self.focused);
+        self.show_op_report(&report);
+        Ok(())
+    }
+
+    /// Reload both file panes; a paste can change either of them.
+    fn reload_both(&mut self) {
+        let _ = self.left.active_mut().reload();
+        let _ = self.right.active_mut().reload();
+    }
+
+    fn run_menu_item(&mut self, item: MenuItem) -> Result<()> {
+        self.popup = Popup::None;
+        match item {
+            MenuItem::Copy => self.clip_targets(ClipOp::Copy),
+            MenuItem::Cut => self.clip_targets(ClipOp::Cut),
+            MenuItem::Paste => return self.paste_clip(),
+            MenuItem::CopyToOther => self.start_transfer(PendingOp::Copy),
+            MenuItem::MoveToOther => self.start_transfer(PendingOp::Move),
+            MenuItem::Rename => self.start_rename(),
+            MenuItem::Delete => self.start_delete(),
+            MenuItem::Background => {
+                let pane = self.focused;
+                let cur = Self::bg_slot(pane)
+                    .and_then(|s| self.pane_bg[s])
+                    .and_then(|c| PANE_BG_PRESETS.iter().position(|(_, p)| *p == Some(c)))
+                    .unwrap_or(0);
+                self.popup = Popup::ColorPicker { pane, cursor: cur };
+            }
+        }
+        Ok(())
+    }
+
+    /// Apply a dragged border's new position to whichever split it divides.
+    fn set_divider_ratio(&mut self, d: Divider, pct: u16) {
+        match d.target {
+            DividerTarget::Main => self.main_pct = pct,
+            DividerTarget::Panes => self.panes_pct = pct,
+            DividerTarget::ShellSplit { tab, node } => {
+                if let Some(Node::Split { ratio, .. }) =
+                    self.shell.tabs.get_mut(tab).and_then(|t| t.nodes.get_mut(node)).and_then(|n| n.as_mut())
+                {
+                    *ratio = pct;
+                }
+            }
+        }
+    }
+
     // ------- Key dispatch -------
     fn handle_key(&mut self, key: KeyEvent) -> Result<()> {
         if !matches!(self.popup, Popup::None) {
             return self.handle_popup_key(key);
+        }
+        // Ctrl+. shows the key manual. `?` does the same without needing the
+        // kitty keyboard protocol (plain terminals cannot encode Ctrl+.), and
+        // `:man` works everywhere. Full-screen shell apps keep both keys.
+        if self.focused != FocusedPane::Shell
+            && ((key.code == KeyCode::Char('.') && key.modifiers.contains(KeyModifiers::CONTROL))
+                || (key.code == KeyCode::Char('?') && !key.modifiers.contains(KeyModifiers::CONTROL)))
+        {
+            self.open_manual();
+            return Ok(());
         }
         // F12 toggles full-window zoom of the focused surface; Shift+F12 zooms
         // only the active split pane within the shell. While a full-screen app
@@ -1364,12 +2127,15 @@ impl App {
                     return Ok(());
                 }
             } else if !shell_fullscreen {
-                self.zoomed = !self.zoomed;
+                self.toggle_zoom();
                 return Ok(());
             }
         }
         if self.mode == Mode::Command {
             return self.handle_command_key(key);
+        }
+        if self.mode == Mode::Filter {
+            return self.handle_filter_key(key);
         }
         if self.focused == FocusedPane::Shell {
             return self.handle_shell_key(key);
@@ -1402,6 +2168,53 @@ impl App {
                 KeyCode::Char(c) => { buffer.push(c); return Ok(()); }
                 _ => return Ok(()),
             }
+        }
+        if let Popup::ContextMenu { items, cursor, .. } = &mut self.popup {
+            let n = items.len();
+            match key.code {
+                KeyCode::Esc | KeyCode::Char('q') => self.popup = Popup::None,
+                KeyCode::Char('j') | KeyCode::Down => *cursor = (*cursor + 1) % n,
+                KeyCode::Char('k') | KeyCode::Up => *cursor = (*cursor + n - 1) % n,
+                KeyCode::Enter => {
+                    let item = items[*cursor];
+                    return self.run_menu_item(item);
+                }
+                _ => {}
+            }
+            return Ok(());
+        }
+        if let Popup::ColorPicker { pane, cursor } = &mut self.popup {
+            let n = PANE_BG_PRESETS.len();
+            match key.code {
+                KeyCode::Esc | KeyCode::Char('q') => self.popup = Popup::None,
+                KeyCode::Char('j') | KeyCode::Down => *cursor = (*cursor + 1) % n,
+                KeyCode::Char('k') | KeyCode::Up => *cursor = (*cursor + n - 1) % n,
+                KeyCode::Enter => {
+                    let (pane, idx) = (*pane, *cursor);
+                    if let Some(slot) = Self::bg_slot(pane) {
+                        self.pane_bg[slot] = PANE_BG_PRESETS[idx].1;
+                    }
+                    self.popup = Popup::None;
+                }
+                _ => {}
+            }
+            return Ok(());
+        }
+        if let Popup::Manual { lines, scroll } = &mut self.popup {
+            // The renderer clamps `scroll` to the last full page each frame, so
+            // saturating at the line count here is safe.
+            let last = lines.len().saturating_sub(1);
+            match key.code {
+                KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q') => self.popup = Popup::None,
+                KeyCode::Char('j') | KeyCode::Down => *scroll = (*scroll + 1).min(last),
+                KeyCode::Char('k') | KeyCode::Up => *scroll = scroll.saturating_sub(1),
+                KeyCode::Char('d') | KeyCode::PageDown => *scroll = (*scroll + 10).min(last),
+                KeyCode::Char('u') | KeyCode::PageUp => *scroll = scroll.saturating_sub(10),
+                KeyCode::Char('g') | KeyCode::Home => *scroll = 0,
+                KeyCode::Char('G') | KeyCode::End => *scroll = last,
+                _ => {}
+            }
+            return Ok(());
         }
         if let Popup::History { cursor, entries } = &mut self.popup {
             match key.code {
@@ -1494,13 +2307,15 @@ impl App {
         match key.code {
             KeyCode::Esc | KeyCode::Char('n') => { self.popup = Popup::None; Ok(()) }
             KeyCode::Char('y') => match &self.popup {
-                Popup::ConfirmDelete { .. } => self.finish_delete(),
+                Popup::ConfirmDelete { .. } => self.finish_delete(DeleteMode::Trash),
                 Popup::ConfirmTransfer { .. } => self.finish_transfer(Conflict::Skip),
                 Popup::Notice { .. } => { self.popup = Popup::None; Ok(()) }
                 _ => Ok(()),
             },
+            // `a` is the "I really mean it" variant: overwrite for transfers,
+            // unrecoverable delete instead of a trip through the trash.
             KeyCode::Char('a') => match &self.popup {
-                Popup::ConfirmDelete { .. } => self.finish_delete(),
+                Popup::ConfirmDelete { .. } => self.finish_delete(DeleteMode::Permanent),
                 Popup::ConfirmTransfer { .. } => self.finish_transfer(Conflict::Overwrite),
                 _ => Ok(()),
             },
@@ -1649,7 +2464,10 @@ impl App {
                 self.command_buffer.clear();
             }
             (false, _, KeyCode::Esc) => {
-                if let Some(p) = self.active_pane_mut() { p.clear_marks(); }
+                if let Some(p) = self.active_pane_mut() {
+                    p.clear_marks();
+                    p.clear_filter();
+                }
             }
             // Pane navigation: Shift + H/J/K/L (universally works, no terminal config needed).
             // Ctrl+H/J/K/L is the alternative — needs `enable_kitty_keyboard = true` in WezTerm.
@@ -1692,8 +2510,9 @@ impl App {
             (false, true, KeyCode::F(10)) => {
                 self.popup = Popup::ConfirmClose { target: CloseTarget::FileTab(self.focused) };
             }
-            // search, history, shortcuts
+            // search, filter, history, shortcuts
             (false, false, KeyCode::Char('f')) => self.start_search(),
+            (false, false, KeyCode::Char('/')) => self.start_filter(),
             (false, _, KeyCode::Char('n')) => self.jump_to_next_match(true),
             (false, _, KeyCode::Char('N')) => self.jump_to_next_match(false),
             (false, false, KeyCode::Char('h')) => self.start_history(),
@@ -2101,10 +2920,199 @@ fn shortcut_icon(target: &str) -> &'static str {
             .and_then(|s| s.to_str())
             .map(|s| s.to_string())
             .unwrap_or_default();
-        let entry = cian_core::Entry { name, path: path.clone(), is_dir: false };
+        // Only the name matters here: this is used to pick an icon by extension.
+        let entry =
+            cian_core::Entry { name, path: path.clone(), is_dir: false, len: 0, modified: None };
         return icon_for(&entry);
     }
     "\u{f15b}" // default file
+}
+
+/// One row of the manual: the built-in key(s), the remappable action they run
+/// (if any), and what it does.
+struct ManualEntry {
+    keys: &'static str,
+    action: Option<Action>,
+    desc: &'static str,
+}
+
+const fn entry(keys: &'static str, action: Option<Action>, desc: &'static str) -> ManualEntry {
+    ManualEntry { keys, action, desc }
+}
+
+/// The manual's contents, grouped into sections. Entries carrying an [`Action`]
+/// are remappable, so [`manual_lines`] can append whatever extra keys the user
+/// bound to them in `init.lua`.
+fn manual_sections() -> Vec<(&'static str, Vec<ManualEntry>)> {
+    use Action::*;
+    vec![
+        (
+            "General",
+            vec![
+                entry("q", Some(Quit), "quit (confirms)"),
+                entry(":", Some(Command), "command mode (:q, :shell, :man)"),
+                entry("?, Ctrl+.", None, "show this manual"),
+                entry("Esc", None, "clear marks and filter / leave shell"),
+            ],
+        ),
+        (
+            "Navigation",
+            vec![
+                entry("j, Down", Some(CursorDown), "cursor down"),
+                entry("k, Up", Some(CursorUp), "cursor up"),
+                entry("Shift+D", Some(PageDown), "move 10 lines down"),
+                entry("Shift+U", Some(PageUp), "move 10 lines up"),
+                entry("gg", None, "jump to top"),
+                entry("G", Some(CursorBottom), "jump to bottom"),
+                entry("l, Right, Enter", Some(EnterDir), "enter folder / open file"),
+                entry("-, Left, Bksp", Some(Parent), "parent folder"),
+                entry("h", Some(History), "history popup"),
+                entry("f", Some(Search), "search"),
+                entry("n", Some(SearchNext), "next match"),
+                entry("N", Some(SearchPrev), "previous match"),
+                entry("/", None, "filter list as you type"),
+                entry("Enter, Esc", None, "while filtering: keep / clear it"),
+            ],
+        ),
+        (
+            "Marks and file operations",
+            vec![
+                entry("Space", Some(MarkDown), "toggle mark, move down"),
+                entry("Shift+Space", Some(MarkUp), "toggle mark, move up"),
+                entry("v", Some(Visual), "visual select"),
+                entry("V", Some(InvertMarks), "invert all marks"),
+                entry("y, c", Some(Copy), "copy to opposite pane"),
+                entry("m", Some(Move), "move to opposite pane"),
+                entry("d", Some(Delete), "delete (to trash)"),
+                entry("r", Some(Rename), "rename"),
+                entry("a", Some(NewFile), "new file"),
+                entry("A", Some(NewDir), "new directory"),
+                entry("o", Some(OpenOther), "open in opposite pane"),
+                entry("O", Some(OpenOtherTab), "open in opposite pane's new tab"),
+                entry("p", Some(CopyPath), "copy path text to clipboard"),
+                entry("Shift+P", Some(CopyFileRef), "copy file(s) to clipboard"),
+                entry("s", Some(Shortcuts), "shortcuts menu"),
+            ],
+        ),
+        (
+            "Panes and tabs",
+            vec![
+                entry("Shift+H/J/K/L", None, "move focus between panes"),
+                entry("drag a border", None, "resize any split (mouse)"),
+                entry("right-click", None, "context menu (copy/cut/paste, colour)"),
+                entry("Ctrl+H/J/K/L", None, "same (needs kitty keyboard support)"),
+                entry("t", None, "new tab"),
+                entry("w", None, "close tab"),
+                entry("Tab, Shift+Tab", None, "next / previous tab"),
+                entry("Ctrl+1..9", None, "jump to tab N"),
+                entry("Shift+F1/F2", None, "next / previous tab"),
+                entry("Shift+F10", None, "close tab (confirms)"),
+            ],
+        ),
+        (
+            "Shell panel (focus: click, Shift+J, or :shell)",
+            vec![
+                entry("F1-F8", None, "switch to shell tab 1-8"),
+                entry("F9", None, "new shell tab"),
+                entry("F10", None, "close shell tab"),
+                entry("Shift+F1/F2", None, "focus next / previous split pane"),
+                entry("Shift+F8", None, "split pane left/right"),
+                entry("Shift+F9", None, "split pane top/bottom"),
+                entry("Shift+F10", None, "close split pane (confirms)"),
+                entry("F12", None, "zoom focused surface (toggle)"),
+                entry("Shift+F12", None, "zoom active split pane (toggle)"),
+                entry("Esc", None, "back to files (full-screen apps keep it)"),
+            ],
+        ),
+    ]
+}
+
+/// Render the manual, folding in the user's `init.lua` key overrides.
+///
+/// `cian.set_keymap` is additive — a user-bound key runs the action *in
+/// addition to* the built-in key — so extra keys are appended rather than
+/// replacing the defaults, which is exactly what the running app does.
+pub fn manual_lines(keymap: &HashMap<char, Action>) -> Vec<String> {
+    let mut out = vec!["cian — key manual".to_string()];
+    for (title, entries) in manual_sections() {
+        out.push(String::new());
+        out.push(title.to_string());
+        for e in entries {
+            let mut keys = e.keys.to_string();
+            if let Some(action) = e.action {
+                // Extra keys the user bound to this action, sorted for stability.
+                let mut extra: Vec<char> = keymap
+                    .iter()
+                    .filter(|(_, a)| **a == action)
+                    .map(|(c, _)| *c)
+                    .collect();
+                extra.sort_unstable();
+                for c in extra {
+                    keys.push_str(&format!(", {}", c));
+                }
+            }
+            out.push(format!("  {:<17} {}", keys, e.desc));
+        }
+    }
+    out
+}
+
+/// Plain-text manual for `cian -man`, using the user's own config so the keys
+/// it lists match the keys that will actually work.
+pub fn manual_text() -> String {
+    let config = cian_lua::load();
+    let mut keymap: HashMap<char, Action> = HashMap::new();
+    for (c, name) in &config.keymaps {
+        if let Some(a) = action_from_name(name) {
+            keymap.insert(*c, a);
+        }
+    }
+    manual_lines(&keymap).join("\n")
+}
+
+/// One-screen usage synopsis for `cian -h`.
+pub fn usage_text() -> String {
+    [
+        "cian — a two-pane terminal file manager",
+        "",
+        "USAGE:",
+        "    cian [LEFT_PATH] [RIGHT_PATH]",
+        "",
+        "ARGS:",
+        "    LEFT_PATH     directory for the left pane  (default: current dir)",
+        "    RIGHT_PATH    directory for the right pane (default: current dir)",
+        "",
+        "OPTIONS:",
+        "    -h, --help    show this help",
+        "    -man, --man   show the full key manual (also Ctrl+. or ? in-app)",
+        "",
+        "CONFIG:",
+        "    ~/.config/cian/init.lua      (override dir with $CIAN_CONFIG_DIR)",
+        "    ~/.config/cian/shortcuts.toml",
+        "",
+        "ENVIRONMENT:",
+        "    CIAN_LOG      append diagnostics to this file (debugging)",
+    ]
+    .join("\n")
+}
+
+/// Restore the terminal before a panic unwinds out of the TUI.
+///
+/// Without this, a panic leaves the terminal in raw mode inside the alternate
+/// screen: the panic message is invisible, the shell prompt is unusable, and
+/// the user has to run `reset`. The hook puts the terminal back first, so the
+/// backtrace lands on a normal screen (and in `$CIAN_LOG` if enabled).
+fn install_panic_hook() {
+    let original = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let mut out = io::stdout();
+        let _ = execute!(out, PopKeyboardEnhancementFlags);
+        let _ = execute!(out, DisableMouseCapture);
+        let _ = disable_raw_mode();
+        let _ = execute!(out, LeaveAlternateScreen);
+        cian_core::log::log(&format!("PANIC: {}", info));
+        original(info);
+    }));
 }
 
 pub fn run(left: PathBuf, right: PathBuf) -> Result<()> {
@@ -2134,6 +3142,9 @@ pub fn run(left: PathBuf, right: PathBuf) -> Result<()> {
         }
         app.popup = Popup::Notice { lines };
     }
+
+    install_panic_hook();
+    cian_core::log::log("cian starting");
 
     let mut stdout = io::stdout();
     enable_raw_mode()?;
@@ -2170,10 +3181,15 @@ fn run_loop<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Result<()>
         }
         // Short timeout so live shell output is picked up promptly; we only
         // actually repaint when something changed (input, resize, or new
-        // shell output), so the loop stays cheap when idle.
-        if event::poll(Duration::from_millis(33))? {
+        // shell output), so the loop stays cheap when idle. While a transition
+        // or flash is running we tick faster so the motion stays smooth.
+        let tick = if app.anim.is_some() || app.flash.is_some() { 16 } else { 33 };
+        if event::poll(Duration::from_millis(tick))? {
             match event::read()? {
                 Event::Key(key) if key.kind == KeyEventKind::Press => {
+                    // Input always wins over eye candy: land any transition
+                    // immediately rather than making the user wait for it.
+                    app.finish_anim();
                     app.handle_key(key)?;
                     needs_redraw = true;
                 }
@@ -2188,6 +3204,33 @@ fn run_loop<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Result<()>
         // Repaint when any pane in the active shell tab produced new output.
         if app.shell.take_active_tab_dirty() {
             needs_redraw = true;
+        }
+        // Install the shell tab once its background spawn (see `ensure`) lands.
+        if app.shell.poll_pending() {
+            needs_redraw = true;
+        }
+        // A freshly-created split grows in from nothing.
+        if let Some((tab, node)) = app.shell.just_split.take() {
+            app.start_anim(AnimKind::Ratio {
+                target: DividerTarget::ShellSplit { tab, node },
+                from: 100,
+                to: 50,
+            });
+        }
+        // Drive any transition in flight, landing it when its time is up.
+        if let Some(a) = app.anim {
+            needs_redraw = true;
+            if a.done() {
+                app.finish_anim();
+            }
+        }
+        // A fading flash needs frames of its own; clear it once it expires so
+        // the loop can go back to sleep.
+        if app.flash.is_some() {
+            needs_redraw = true;
+            if !app.flash_active() {
+                app.flash = None;
+            }
         }
         // If the focused pane's shell has exited (e.g. the user typed `exit`),
         // close that pane; if its tab (and the whole panel) empties, return to
@@ -2215,17 +3258,19 @@ fn run_loop<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Result<()>
 }
 
 /// Normal three-surface layout: left/right file panes on top, shell below.
-fn draw_split(f: &mut Frame, main_area: Rect, app: &mut App) {
+fn draw_split(f: &mut Frame, main_area: Rect, app: &mut App, ov: AnimOverride) {
+    let main_pct = ov.ratio_for(DividerTarget::Main, app.main_pct);
     let main_split = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
+        .constraints([Constraint::Percentage(main_pct), Constraint::Percentage(100 - main_pct)])
         .split(main_area);
     let panes_area = main_split[0];
     let shell_area = main_split[1];
 
+    let panes_pct = ov.ratio_for(DividerTarget::Panes, app.panes_pct);
     let panes_split = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .constraints([Constraint::Percentage(panes_pct), Constraint::Percentage(100 - panes_pct)])
         .split(panes_area);
 
     app.layout_rects = LayoutRects {
@@ -2234,42 +3279,91 @@ fn draw_split(f: &mut Frame, main_area: Rect, app: &mut App) {
         shell: shell_area,
     };
 
+    let mut dividers = vec![
+        Divider {
+            zone: seam_zone(Direction::Vertical, panes_area, shell_area),
+            parent: main_area,
+            dir: Direction::Vertical,
+            target: DividerTarget::Main,
+        },
+        Divider {
+            zone: seam_zone(Direction::Horizontal, panes_split[0], panes_split[1]),
+            parent: panes_area,
+            dir: Direction::Horizontal,
+            target: DividerTarget::Panes,
+        },
+    ];
+
     let visual_for_left = if app.focused == FocusedPane::Left { app.visual_anchor } else { None };
     let visual_for_right = if app.focused == FocusedPane::Right { app.visual_anchor } else { None };
 
-    draw_file_pane(f, panes_split[0], &app.left, app.focused == FocusedPane::Left, visual_for_left, app.mode);
-    draw_file_pane(f, panes_split[1], &app.right, app.focused == FocusedPane::Right, visual_for_right, app.mode);
+    let (bg_l, bg_r) = (app.pane_bg[0], app.pane_bg[1]);
+    let (fl_l, fl_r) = (app.flash_level(FocusedPane::Left), app.flash_level(FocusedPane::Right));
+    draw_file_pane(f, panes_split[0], &app.left, app.focused == FocusedPane::Left, visual_for_left, app.mode, bg_l, fl_l);
+    draw_file_pane(f, panes_split[1], &app.right, app.focused == FocusedPane::Right, visual_for_right, app.mode, bg_r, fl_r);
     // draw_shell sizes each pane's PTY to its computed sub-rect.
-    draw_shell(f, shell_area, &mut app.shell, app.focused == FocusedPane::Shell);
+    draw_shell(f, shell_area, &mut app.shell, app.focused == FocusedPane::Shell, &mut dividers, ov);
+    app.dividers = dividers;
+}
+
+/// The focused surface drawn at an arbitrary rect, used as the floating layer
+/// of a zoom transition. Deliberately does not touch `app.layout_rects`: the
+/// backdrop already set those, and hit-testing should follow the resting
+/// layout rather than a rect that is still moving.
+fn draw_zoom_overlay(f: &mut Frame, rect: Rect, app: &mut App, ov: AnimOverride) {
+    let mut sink = Vec::new();
+    match app.focused {
+        FocusedPane::Left => {
+            let (bg, fl) = (app.pane_bg[0], app.flash_level(FocusedPane::Left));
+            let va = app.visual_anchor;
+            draw_file_pane(f, rect, &app.left, true, va, app.mode, bg, fl);
+        }
+        FocusedPane::Right => {
+            let (bg, fl) = (app.pane_bg[1], app.flash_level(FocusedPane::Right));
+            let va = app.visual_anchor;
+            draw_file_pane(f, rect, &app.right, true, va, app.mode, bg, fl);
+        }
+        FocusedPane::Shell => {
+            draw_shell(f, rect, &mut app.shell, true, &mut sink, ov);
+        }
+    }
 }
 
 /// Zoomed layout: only the focused surface, filling the available area.
-fn draw_zoomed(f: &mut Frame, area: Rect, app: &mut App) {
+fn draw_zoomed(f: &mut Frame, area: Rect, app: &mut App, ov: AnimOverride) {
     let mut rects = LayoutRects::default();
+    // Only the shell's internal splits are draggable while zoomed; the
+    // main/panes borders are not on screen.
+    let mut dividers = Vec::new();
     match app.focused {
         FocusedPane::Left => {
             rects.left = area;
             app.layout_rects = rects;
             let va = app.visual_anchor;
-            draw_file_pane(f, area, &app.left, true, va, app.mode);
+            let (bg, fl) = (app.pane_bg[0], app.flash_level(FocusedPane::Left));
+            draw_file_pane(f, area, &app.left, true, va, app.mode, bg, fl);
         }
         FocusedPane::Right => {
             rects.right = area;
             app.layout_rects = rects;
             let va = app.visual_anchor;
-            draw_file_pane(f, area, &app.right, true, va, app.mode);
+            let (bg, fl) = (app.pane_bg[1], app.flash_level(FocusedPane::Right));
+            draw_file_pane(f, area, &app.right, true, va, app.mode, bg, fl);
         }
         FocusedPane::Shell => {
             rects.shell = area;
             app.layout_rects = rects;
-            draw_shell(f, area, &mut app.shell, true);
+            draw_shell(f, area, &mut app.shell, true, &mut dividers, ov);
         }
     }
+    app.dividers = dividers;
 }
 
 fn draw(f: &mut Frame, app: &mut App) {
     let area = f.area();
-    let bottom_lines = if app.mode == Mode::Command { 2 } else { 1 };
+    // Command and filter modes both add a prompt line above the status bar.
+    let prompt_line = matches!(app.mode, Mode::Command | Mode::Filter);
+    let bottom_lines = if prompt_line { 2 } else { 1 };
     let vertical = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Min(1), Constraint::Length(bottom_lines)])
@@ -2277,23 +3371,44 @@ fn draw(f: &mut Frame, app: &mut App) {
     let main_area = vertical[0];
     let bottom_area = vertical[1];
 
-    if app.zoomed {
-        draw_zoomed(f, main_area, app);
+    let ov = app.anim_override();
+    // A zoom transition draws the normal layout as a backdrop and floats the
+    // zooming surface above it, so it visibly grows out of (or shrinks back
+    // into) its own pane.
+    if let Some(Anim { kind: AnimKind::Zoom { from, to }, .. }) = app.anim {
+        let t = app.anim.map(|a| a.progress()).unwrap_or(1.0);
+        draw_split(f, main_area, app, ov);
+        let rect = lerp_rect(from, to, t);
+        f.render_widget(Clear, rect);
+        draw_zoom_overlay(f, rect, app, ov);
+    } else if app.zoomed {
+        draw_zoomed(f, main_area, app, ov);
     } else {
-        draw_split(f, main_area, app);
+        draw_split(f, main_area, app, ov);
     }
 
-    if app.mode == Mode::Command {
+    if prompt_line {
         let cmd_area = Rect::new(bottom_area.x, bottom_area.y, bottom_area.width, 1);
         let status_area = Rect::new(bottom_area.x, bottom_area.y + 1, bottom_area.width, 1);
-        draw_command_line(f, cmd_area, &app.command_buffer);
+        if app.mode == Mode::Filter {
+            let matched = app.active_pane().map(|p| p.entries.len()).unwrap_or(0);
+            let total = app.active_pane().map(|p| p.all_entries.len()).unwrap_or(0);
+            draw_prompt_line(
+                f,
+                cmd_area,
+                &format!("filter /{}_", app.filter_buffer),
+                &format!("{}/{} match  Enter=keep  Esc=clear", matched, total),
+            );
+        } else {
+            draw_command_line(f, cmd_area, &app.command_buffer);
+        }
         draw_status(f, status_area, app);
     } else {
         draw_status(f, bottom_area, app);
     }
 
     if !matches!(app.popup, Popup::None) {
-        draw_popup(f, area, &app.popup);
+        draw_popup(f, area, &mut app.popup);
     }
 }
 
@@ -2482,6 +3597,7 @@ fn shell_tabs_title<'a>(tabs: &'a ShellPane, focused: bool) -> Line<'a> {
     Line::from(spans)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn draw_file_pane(
     f: &mut Frame,
     area: Rect,
@@ -2489,23 +3605,42 @@ fn draw_file_pane(
     focused: bool,
     visual_anchor: Option<usize>,
     mode: Mode,
+    bg: Option<Color>,
+    flash: f32,
 ) {
     let focus_bg = focus_badge_color(mode);
-    let border_style = if focused {
+    let mut border_style = if focused {
         Style::default().fg(focus_bg).add_modifier(Modifier::BOLD)
     } else {
         Style::default().fg(Color::DarkGray)
     };
+    // An operation that just landed here lights the border, fading out.
+    if flash > 0.0 {
+        border_style = Style::default().fg(fade(theme().accent, flash)).add_modifier(Modifier::BOLD);
+    }
     let max_title_w = area.width.saturating_sub(2);
-    let block = Block::default()
+    let mut block = Block::default()
         .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
         .border_style(border_style)
         .title(tabs_title(tabs, focused, focus_bg, max_title_w));
+    if let Some(c) = bg {
+        block = block.style(Style::default().bg(c));
+    }
 
     let pane = tabs.active_ref();
     let visual_range = visual_anchor.map(|a| {
         if a <= pane.cursor { (a, pane.cursor) } else { (pane.cursor, a) }
     });
+
+    // Columns are dropped progressively on narrow panes so the name always
+    // keeps a usable amount of room.
+    let inner_w = area.width.saturating_sub(2);
+    let show_time = inner_w >= 52;
+    let show_size = inner_w >= 34;
+    let meta_w = if show_time { SIZE_COL_W + TIME_COL_W + 2 } else if show_size { SIZE_COL_W + 1 } else { 0 };
+    // 2 mark + icon + 2 spaces
+    let name_w = inner_w.saturating_sub(meta_w + 5) as usize;
 
     let items: Vec<ListItem> = pane.entries.iter().enumerate().map(|(i, e)| {
         let marked = pane.is_marked(i);
@@ -2520,25 +3655,96 @@ fn draw_file_pane(
         } else {
             Style::default().fg(Color::Rgb(180, 180, 200))
         };
-        let mut item = ListItem::new(Line::from(vec![
+
+        let name = truncate(&e.name, name_w);
+        let mut spans = vec![
             Span::styled(mark_symbol, mark_style),
             Span::styled(format!("{}  ", icon_for(e)), icon_style),
-            Span::styled(e.name.clone(), name_style),
-        ]));
+            Span::styled(format!("{:<w$}", name, w = name_w), name_style),
+        ];
+        let meta_style = Style::default().fg(Color::Rgb(130, 130, 155));
+        if show_size {
+            // Directories have no meaningful byte count of their own.
+            let s = if e.is_dir { "—".to_string() } else { cian_core::human_size(e.len) };
+            spans.push(Span::styled(
+                format!(" {:>w$}", s, w = SIZE_COL_W as usize),
+                meta_style,
+            ));
+        }
+        if show_time {
+            let t = e.modified.map(cian_core::format_time).unwrap_or_else(|| "-".into());
+            spans.push(Span::styled(format!(" {}", t), meta_style));
+        }
+
+        let mut item = ListItem::new(Line::from(spans));
         if in_visual { item = item.style(Style::default().bg(theme().visual_bg)); }
         item
     }).collect();
 
-    let list = List::new(items).block(block).highlight_style(
-        Style::default().bg(theme().selected_bg).add_modifier(Modifier::BOLD),
-    );
+    // An unfocused pane recedes so the focused one reads as the active surface.
+    let mut list_style = if focused {
+        Style::default()
+    } else {
+        Style::default().add_modifier(Modifier::DIM)
+    };
+    if let Some(c) = bg {
+        list_style = list_style.bg(c);
+    }
+    let list = List::new(items)
+        .block(block)
+        .style(list_style)
+        .highlight_style(
+            Style::default().bg(theme().selected_bg).add_modifier(Modifier::BOLD),
+        );
 
     let mut state = ListState::default();
     if !pane.entries.is_empty() { state.select(Some(pane.cursor)); }
     f.render_stateful_widget(list, area, &mut state);
+
+    draw_list_scrollbar(f, area, pane.entries.len(), pane.cursor, focused);
 }
 
-fn draw_shell(f: &mut Frame, area: Rect, shell: &mut ShellPane, focused: bool) {
+/// Fixed widths so the columns line up between the two panes.
+const SIZE_COL_W: u16 = 5;
+const TIME_COL_W: u16 = 16;
+
+/// Draw a scrollbar on a pane's right border when the listing overflows.
+fn draw_list_scrollbar(f: &mut Frame, area: Rect, total: usize, cursor: usize, focused: bool) {
+    let view_h = area.height.saturating_sub(2);
+    if view_h == 0 || total <= view_h as usize {
+        return;
+    }
+    let track = Rect::new(area.x + area.width.saturating_sub(1), area.y + 1, 1, view_h);
+    let mut state = ScrollbarState::new(total).position(cursor);
+    let style = if focused {
+        Style::default().fg(theme().accent)
+    } else {
+        Style::default().fg(Color::Rgb(90, 90, 110))
+    };
+    // The bar sits on the pane's right border, so the track keeps drawing the
+    // border line and only the thumb thickens. Without this the border looks
+    // broken wherever the thumb happens to be.
+    f.render_stateful_widget(
+        Scrollbar::new(ScrollbarOrientation::VerticalRight)
+            .thumb_symbol("┃")
+            .thumb_style(style)
+            .track_symbol(Some("│"))
+            .track_style(Style::default().fg(Color::DarkGray))
+            .begin_symbol(None)
+            .end_symbol(None),
+        track,
+        &mut state,
+    );
+}
+
+fn draw_shell(
+    f: &mut Frame,
+    area: Rect,
+    shell: &mut ShellPane,
+    focused: bool,
+    dividers: &mut Vec<Divider>,
+    ov: AnimOverride,
+) {
     let border_style = if focused {
         Style::default().fg(theme().accent).add_modifier(Modifier::BOLD)
     } else {
@@ -2546,6 +3752,7 @@ fn draw_shell(f: &mut Frame, area: Rect, shell: &mut ShellPane, focused: bool) {
     };
     let block = Block::default()
         .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
         .border_style(border_style)
         .title(shell_tabs_title(shell, focused));
     let inner = area.inner(Margin { vertical: 1, horizontal: 1 });
@@ -2559,6 +3766,8 @@ fn draw_shell(f: &mut Frame, area: Rect, shell: &mut ShellPane, focused: bool) {
     if shell.tabs.get(active).is_none() {
         let body = if let Some(err) = &shell.error {
             format!("shell failed to start: {}", err)
+        } else if shell.is_starting() {
+            "starting shell…".to_string()
         } else {
             "shell pane — focus here (Shift+J / click / :shell) to start a shell. \
              Esc returns to the files."
@@ -2585,18 +3794,22 @@ fn draw_shell(f: &mut Frame, area: Rect, shell: &mut ShellPane, focused: bool) {
     }
 
     let root = shell.tabs[active].root;
-    if let Some(tab) = shell.tabs.get_mut(active) {
-        resize_node(tab, root, inner, false);
+    // While a transition runs the PTYs keep their old size; the real resize
+    // happens on the frame after it lands.
+    if !ov.freeze_pty {
+        if let Some(tab) = shell.tabs.get_mut(active) {
+            resize_node(tab, active, root, inner, false, ov);
+        }
     }
     let tab = &shell.tabs[active];
-    render_node(f, tab, root, inner, tab.active, focused, false);
+    render_node(f, tab, active, root, inner, tab.active, focused, false, dividers, ov);
 }
 
 /// Recursively size each leaf's PTY to its rect. `bordered` is true for leaves
 /// inside a split (which draw a 1-cell border), false for a lone root leaf.
-fn resize_node(tab: &mut ShellTab, i: usize, area: Rect, bordered: bool) {
+fn resize_node(tab: &mut ShellTab, tab_idx: usize, i: usize, area: Rect, bordered: bool, ov: AnimOverride) {
     let split = match tab.nodes.get(i).and_then(|n| n.as_ref()) {
-        Some(Node::Split { dir, first, second }) => Some((*dir, *first, *second)),
+        Some(Node::Split { dir, first, second, ratio }) => Some((*dir, *first, *second, *ratio)),
         Some(Node::Leaf(_)) => None,
         None => return,
     };
@@ -2611,24 +3824,29 @@ fn resize_node(tab: &mut ShellTab, i: usize, area: Rect, bordered: bool) {
                 s.resize(h, w);
             }
         }
-        Some((dir, first, second)) => {
-            let rects = split_rects(dir, area);
-            resize_node(tab, first, rects.0, true);
-            resize_node(tab, second, rects.1, true);
+        Some((dir, first, second, ratio)) => {
+            let r = ov.ratio_for(DividerTarget::ShellSplit { tab: tab_idx, node: i }, ratio);
+            let rects = split_rects(dir, area, r);
+            resize_node(tab, tab_idx, first, rects.0, true, ov);
+            resize_node(tab, tab_idx, second, rects.1, true, ov);
         }
     }
 }
 
 /// Recursively render the split tree. Leaves inside a split get a border (the
 /// active one highlighted); a lone root leaf fills its area without one.
+#[allow(clippy::too_many_arguments)]
 fn render_node(
     f: &mut Frame,
     tab: &ShellTab,
+    tab_idx: usize,
     i: usize,
     area: Rect,
     active_leaf: usize,
     focused: bool,
     bordered: bool,
+    dividers: &mut Vec<Divider>,
+    ov: AnimOverride,
 ) {
     match tab.nodes.get(i).and_then(|n| n.as_ref()) {
         Some(Node::Leaf(session)) => {
@@ -2639,7 +3857,8 @@ fn render_node(
                 } else {
                     Style::default().fg(Color::DarkGray)
                 };
-                let blk = Block::default().borders(Borders::ALL).border_style(bs);
+                let blk = Block::default().borders(Borders::ALL)
+        .border_type(BorderType::Rounded).border_style(bs);
                 let pinner = area.inner(Margin { vertical: 1, horizontal: 1 });
                 f.render_widget(blk, area);
                 pinner
@@ -2650,26 +3869,75 @@ fn render_node(
                 f.render_widget(PseudoTerminal::new(parser.screen()), target);
             }
         }
-        Some(Node::Split { dir, first, second }) => {
-            let rects = split_rects(*dir, area);
-            render_node(f, tab, *first, rects.0, active_leaf, focused, true);
-            render_node(f, tab, *second, rects.1, active_leaf, focused, true);
+        Some(Node::Split { dir, first, second, ratio }) => {
+            let target = DividerTarget::ShellSplit { tab: tab_idx, node: i };
+            let rects = split_rects(*dir, area, ov.ratio_for(target, *ratio));
+            let d = match dir {
+                SplitDir::LeftRight => Direction::Horizontal,
+                SplitDir::TopBottom => Direction::Vertical,
+            };
+            dividers.push(Divider {
+                zone: seam_zone(d, rects.0, rects.1),
+                parent: area,
+                dir: d,
+                target,
+            });
+            render_node(f, tab, tab_idx, *first, rects.0, active_leaf, focused, true, dividers, ov);
+            render_node(f, tab, tab_idx, *second, rects.1, active_leaf, focused, true, dividers, ov);
         }
         None => {}
     }
 }
 
-/// Split a rect 50/50 along the given direction.
-fn split_rects(dir: SplitDir, area: Rect) -> (Rect, Rect) {
+/// Split a rect along `dir`, giving `ratio` percent of it to the first child.
+fn split_rects(dir: SplitDir, area: Rect, ratio: u16) -> (Rect, Rect) {
     let direction = match dir {
         SplitDir::LeftRight => Direction::Horizontal,
         SplitDir::TopBottom => Direction::Vertical,
     };
+    let first = ratio.min(100);
     let rects = Layout::default()
         .direction(direction)
-        .constraints([Constraint::Ratio(1, 2), Constraint::Ratio(1, 2)])
+        .constraints([Constraint::Percentage(first), Constraint::Percentage(100 - first)])
         .split(area);
     (rects[0], rects[1])
+}
+
+/// The band of cells that counts as grabbing the border between `a` and `b`.
+/// The two rects are adjacent, so the seam is the last row/column of `a` plus
+/// the first of `b` — two cells, which is a comfortable grab target.
+fn seam_zone(dir: Direction, a: Rect, b: Rect) -> Rect {
+    match dir {
+        Direction::Horizontal => Rect {
+            x: a.x + a.width.saturating_sub(1),
+            y: a.y,
+            width: 2.min(b.x + b.width - (a.x + a.width.saturating_sub(1))),
+            height: a.height,
+        },
+        Direction::Vertical => Rect {
+            x: a.x,
+            y: a.y + a.height.saturating_sub(1),
+            width: a.width,
+            height: 2.min(b.y + b.height - (a.y + a.height.saturating_sub(1))),
+        },
+    }
+}
+
+/// A prompt line with a right-aligned hint, used by filter mode.
+fn draw_prompt_line(f: &mut Frame, area: Rect, left: &str, right: &str) {
+    let style = Style::default()
+        .bg(Color::Rgb(20, 20, 30))
+        .fg(Color::White)
+        .add_modifier(Modifier::BOLD);
+    f.render_widget(Paragraph::new(left).style(style), area);
+    let w = right.chars().count() as u16 + 1;
+    if area.width > w {
+        let hint = Rect::new(area.x + area.width - w, area.y, w, 1);
+        f.render_widget(
+            Paragraph::new(right).style(style.fg(Color::DarkGray).remove_modifier(Modifier::BOLD)),
+            hint,
+        );
+    }
 }
 
 fn draw_command_line(f: &mut Frame, area: Rect, buf: &str) {
@@ -2680,12 +3948,27 @@ fn draw_command_line(f: &mut Frame, area: Rect, buf: &str) {
     f.render_widget(p, area);
 }
 
+/// Blend `c` toward white by `t` (0 = unchanged, 1 = fully lit). Used for the
+/// operation flash, which fades a border back to its resting colour.
+fn fade(c: Color, t: f32) -> Color {
+    let t = t.clamp(0.0, 1.0);
+    let (r, g, b) = match c {
+        Color::Rgb(r, g, b) => (r, g, b),
+        // Named colours have no components to blend; approximate with a light
+        // neutral so the flash still reads.
+        _ => (200, 220, 255),
+    };
+    let mix = |v: u8| (v as f32 + (255.0 - v as f32) * t) as u8;
+    Color::Rgb(mix(r), mix(g), mix(b))
+}
+
 fn focus_badge_color(mode: Mode) -> Color {
     match mode {
         Mode::Normal => theme().accent,
         Mode::Visual => Color::Rgb(255, 140, 0),
         Mode::Search => Color::Rgb(80, 200, 120),
         Mode::Command => Color::Rgb(200, 100, 200),
+        Mode::Filter => Color::Rgb(80, 200, 120),
         Mode::Shell => Color::Rgb(200, 160, 60),
     }
 }
@@ -2729,6 +4012,17 @@ fn draw_status(f: &mut Frame, area: Rect, app: &App) {
         chip(format!("mask {}", app.mask), Color::Rgb(180, 180, 220)),
     ];
 
+    // A narrowed listing must never look like a complete one, so the active
+    // filter stays visible after leaving filter mode.
+    if let Some(filter) = app.active_pane().map(|p| p.filter.clone()).filter(|f| !f.is_empty()) {
+        let total = app.active_pane().map(|p| p.all_entries.len()).unwrap_or(0);
+        spans.push(dim_sep.clone());
+        spans.push(chip(
+            format!("filter /{} ({} of {})", filter, item_count, total),
+            Color::Rgb(80, 200, 120),
+        ));
+    }
+
     if app.zoomed {
         spans.push(dim_sep.clone());
         spans.push(chip("[zoom]".to_string(), theme().accent));
@@ -2769,15 +4063,148 @@ fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
     Rect::new(x, y, w, h)
 }
 
-fn draw_popup(f: &mut Frame, area: Rect, popup: &Popup) {
+fn draw_popup(f: &mut Frame, area: Rect, popup: &mut Popup) {
+    // The manual is taller than any terminal, so it renders as a scrolling
+    // viewport rather than the fixed block the other popups use.
+    if let Popup::Manual { lines, scroll } = popup {
+        let height = area.height.saturating_sub(2).max(6);
+        let width: u16 = 70u16.min(area.width.saturating_sub(2));
+        let rect = centered_rect(width, height, area);
+        let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
+        let view_h = inner.height.saturating_sub(1) as usize;
+
+        // Clamp so the last page sits flush with the bottom; this also
+        // normalises an over-scrolled offset from the key handler.
+        let max_scroll = lines.len().saturating_sub(view_h);
+        *scroll = (*scroll).min(max_scroll);
+        let offset = *scroll;
+
+        f.render_widget(Clear, rect);
+        let pos = match (offset * 100).checked_div(max_scroll) {
+            Some(pct) => format!(" {}% ", pct),
+            // Everything fits; there is nothing to scroll.
+            None => " all ".to_string(),
+        };
+        let block = Block::default()
+            .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
+            .title(" manual ")
+            .title_bottom(pos);
+        f.render_widget(block, rect);
+
+        let body: Vec<Line> = lines
+            .iter()
+            .skip(offset)
+            .take(view_h)
+            .map(|l| Line::from(l.clone()))
+            .collect();
+        let body_area = Rect::new(inner.x, inner.y, inner.width, view_h as u16);
+        f.render_widget(Paragraph::new(body), body_area);
+
+        let footer_area =
+            Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1);
+        let footer = Paragraph::new(" j/k scroll  u/d page  g/G top/bottom  Esc close ").style(
+            Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD),
+        );
+        f.render_widget(footer, footer_area);
+        return;
+    }
+    // The context menu is anchored at the pointer rather than centred, so it
+    // sizes and positions itself.
+    if let Popup::ContextMenu { items, cursor, at } = popup {
+        let w = items.iter().map(|i| i.label().len()).max().unwrap_or(10) as u16 + 4;
+        let h = items.len() as u16 + 2;
+        // Keep the whole menu on screen when clicking near an edge.
+        let x = at.0.min(area.width.saturating_sub(w));
+        let y = at.1.min(area.height.saturating_sub(h));
+        let rect = Rect::new(x, y, w.min(area.width), h.min(area.height));
+
+        f.render_widget(Clear, rect);
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(theme().accent))
+            .style(Style::default().bg(Color::Rgb(24, 24, 34)));
+        let inner = rect.inner(Margin { vertical: 1, horizontal: 1 });
+        f.render_widget(block, rect);
+
+        let rows: Vec<Line> = items
+            .iter()
+            .enumerate()
+            .map(|(i, item)| {
+                let sel = i == *cursor;
+                let style = if sel {
+                    Style::default().bg(theme().selected_bg).add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(Color::Rgb(210, 210, 225))
+                };
+                Line::from(Span::styled(
+                    format!("{}{:<w$}", if sel { "▸ " } else { "  " }, item.label(), w = (w - 4) as usize),
+                    style,
+                ))
+            })
+            .collect();
+        f.render_widget(Paragraph::new(rows), inner);
+        return;
+    }
+
+    if let Popup::ColorPicker { cursor, .. } = popup {
+        let w = 26u16.min(area.width);
+        let h = PANE_BG_PRESETS.len() as u16 + 3;
+        let rect = centered_rect(w, h.min(area.height), area);
+        f.render_widget(Clear, rect);
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
+            .title(" background ");
+        let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
+        f.render_widget(block, rect);
+
+        let rows: Vec<Line> = PANE_BG_PRESETS
+            .iter()
+            .enumerate()
+            .map(|(i, (name, color))| {
+                let sel = i == *cursor;
+                // A swatch of the actual colour, so the name is not the only cue.
+                let swatch = Span::styled(
+                    "  ",
+                    Style::default().bg(color.unwrap_or(Color::Rgb(16, 16, 20))),
+                );
+                let label = Span::styled(
+                    format!(" {}{}", if sel { "▸ " } else { "  " }, name),
+                    if sel {
+                        Style::default().add_modifier(Modifier::BOLD).fg(theme().accent)
+                    } else {
+                        Style::default().fg(Color::Rgb(200, 200, 215))
+                    },
+                );
+                Line::from(vec![swatch, label])
+            })
+            .collect();
+        let body_area = Rect::new(inner.x, inner.y, inner.width, inner.height.saturating_sub(1));
+        f.render_widget(Paragraph::new(rows), body_area);
+        let footer_area =
+            Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1);
+        f.render_widget(
+            Paragraph::new(" Enter=apply  Esc=cancel ").style(
+                Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD),
+            ),
+            footer_area,
+        );
+        return;
+    }
+
+    let popup: &Popup = popup;
     let (title, body, footer) = match popup {
         Popup::ConfirmDelete { targets } => {
             let title = " delete ".to_string();
-            let head = format!("{} item(s) will be deleted:", targets.len());
+            let head = format!("{} item(s) → trash:", targets.len());
             let mut lines = vec![head, String::new()];
             for p in targets.iter().take(8) { lines.push(format!("  {}", p.display())); }
             if targets.len() > 8 { lines.push(format!("  ... and {} more", targets.len() - 8)); }
-            (title, lines, " y=Yes  n=No  a=Yes(force)  Esc=cancel ".to_string())
+            (title, lines, " y=trash  a=delete permanently  n/Esc=cancel ".to_string())
         }
         Popup::ConfirmTransfer { op, targets, dest } => {
             let verb = match op { PendingOp::Copy => "copy", PendingOp::Move => "move" };
@@ -2863,7 +4290,11 @@ fn draw_popup(f: &mut Frame, area: Rect, popup: &Popup) {
                 " Enter=open  a=add  d=delete  r=edit  p=copy target  Esc=close ".to_string(),
             )
         }
-        Popup::None => return,
+        // All handled above, before this match.
+        Popup::Manual { .. }
+        | Popup::ContextMenu { .. }
+        | Popup::ColorPicker { .. }
+        | Popup::None => return,
     };
 
     let height = (body.len() as u16 + 4).max(6).min(area.height.saturating_sub(2));
@@ -2873,6 +4304,7 @@ fn draw_popup(f: &mut Frame, area: Rect, popup: &Popup) {
     f.render_widget(Clear, rect);
     let block = Block::default()
         .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
         .title(title);
     let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
@@ -2889,4 +4321,624 @@ fn draw_popup(f: &mut Frame, area: Rect, popup: &Popup) {
         Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD),
     );
     f.render_widget(footer_p, footer_area);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ratatui::backend::TestBackend;
+
+    fn key(c: char) -> KeyEvent {
+        KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE)
+    }
+    fn code(k: KeyCode) -> KeyEvent {
+        KeyEvent::new(k, KeyModifiers::NONE)
+    }
+
+    /// An app rooted at a temp dir containing `names`.
+    fn app_with(names: &[&str]) -> (tempfile::TempDir, App) {
+        let dir = tempfile::tempdir().unwrap();
+        for n in names {
+            std::fs::write(dir.path().join(n), b"").unwrap();
+        }
+        let p = dir.path().to_path_buf();
+        let app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        (dir, app)
+    }
+
+    /// Render `app` onto a `w`x`h` test terminal and return the text of each row.
+    fn render(app: &mut App, w: u16, h: u16) -> Vec<String> {
+        let mut terminal = Terminal::new(TestBackend::new(w, h)).unwrap();
+        terminal.draw(|f| draw(f, app)).unwrap();
+        let buf = terminal.backend().buffer().clone();
+        (0..buf.area.height)
+            .map(|y| {
+                (0..buf.area.width)
+                    .map(|x| buf[(x, y)].symbol().to_string())
+                    .collect::<String>()
+                    .trim_end()
+                    .to_string()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn slash_filters_the_listing_incrementally() {
+        let (_d, mut app) = app_with(&["alpha.rs", "beta.rs", "gamma.txt"]);
+        assert_eq!(app.active_pane().unwrap().entries.len(), 3);
+
+        app.handle_key(key('/')).unwrap();
+        assert_eq!(app.mode, Mode::Filter);
+
+        app.handle_key(key('r')).unwrap();
+        app.handle_key(key('s')).unwrap();
+        assert_eq!(app.active_pane().unwrap().entries.len(), 2);
+
+        // Backspace widens the match: "r" still excludes gamma.txt.
+        app.handle_key(code(KeyCode::Backspace)).unwrap();
+        assert_eq!(app.active_pane().unwrap().entries.len(), 2);
+
+        // Emptying the buffer restores the full listing.
+        app.handle_key(code(KeyCode::Backspace)).unwrap();
+        assert_eq!(app.filter_buffer, "");
+        assert_eq!(app.active_pane().unwrap().entries.len(), 3);
+    }
+
+    #[test]
+    fn enter_keeps_the_filter_and_esc_clears_it() {
+        let (_d, mut app) = app_with(&["a.txt", "b.md"]);
+
+        app.handle_key(key('/')).unwrap();
+        app.handle_key(key('m')).unwrap();
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+        assert_eq!(app.mode, Mode::Normal);
+        assert_eq!(app.active_pane().unwrap().entries.len(), 1, "filter should survive Enter");
+
+        // Esc in normal mode drops the narrowing.
+        app.handle_key(code(KeyCode::Esc)).unwrap();
+        assert_eq!(app.active_pane().unwrap().entries.len(), 2);
+    }
+
+    #[test]
+    fn esc_while_filtering_restores_the_full_list() {
+        let (_d, mut app) = app_with(&["a.txt", "b.md"]);
+        app.handle_key(key('/')).unwrap();
+        app.handle_key(key('m')).unwrap();
+        assert_eq!(app.active_pane().unwrap().entries.len(), 1);
+        app.handle_key(code(KeyCode::Esc)).unwrap();
+        assert_eq!(app.mode, Mode::Normal);
+        assert_eq!(app.active_pane().unwrap().entries.len(), 2);
+    }
+
+    #[test]
+    fn question_mark_opens_the_manual() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        app.handle_key(key('?')).unwrap();
+        assert!(matches!(app.popup, Popup::Manual { .. }));
+        app.handle_key(code(KeyCode::Esc)).unwrap();
+        assert!(matches!(app.popup, Popup::None));
+    }
+
+    #[test]
+    fn ctrl_dot_opens_the_manual() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        app.handle_key(KeyEvent::new(KeyCode::Char('.'), KeyModifiers::CONTROL)).unwrap();
+        assert!(matches!(app.popup, Popup::Manual { .. }));
+    }
+
+    /// Regression: the manual is ~50 lines, far taller than a normal terminal.
+    /// Every line must be reachable by scrolling rather than silently clipped.
+    #[test]
+    fn manual_scrolls_to_reveal_its_last_section() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        app.handle_key(key('?')).unwrap();
+
+        let top = render(&mut app, 100, 24).join("\n");
+        assert!(top.contains("key manual"), "manual header should be visible");
+        assert!(
+            !top.contains("zoom active split pane"),
+            "the last section cannot already fit on a 24-row terminal"
+        );
+
+        // G jumps to the bottom; the final section must now be on screen.
+        app.handle_key(key('G')).unwrap();
+        let bottom = render(&mut app, 100, 24).join("\n");
+        assert!(
+            bottom.contains("zoom active split pane"),
+            "scrolling to the end must reveal the last section; got:\n{}",
+            bottom
+        );
+    }
+
+    #[test]
+    fn manual_scroll_is_clamped_at_both_ends() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        app.handle_key(key('?')).unwrap();
+
+        // Scrolling up at the top is a no-op, not an underflow panic.
+        for _ in 0..5 {
+            app.handle_key(key('k')).unwrap();
+        }
+        let Popup::Manual { scroll, .. } = &app.popup else { panic!("expected manual") };
+        assert_eq!(*scroll, 0);
+
+        // Paging past the end settles on the last page after a render.
+        for _ in 0..50 {
+            app.handle_key(key('d')).unwrap();
+        }
+        let _ = render(&mut app, 100, 24);
+        let Popup::Manual { scroll, lines } = &app.popup else { panic!("expected manual") };
+        assert!(*scroll < lines.len(), "scroll must stay inside the document");
+    }
+
+    /// The manual reflects `init.lua` overrides rather than a hardcoded list.
+    #[test]
+    fn manual_lists_user_bound_keys() {
+        let mut keymap = HashMap::new();
+        keymap.insert('x', Action::Delete);
+        let text = manual_lines(&keymap).join("\n");
+        assert!(text.contains("d, x"), "user-bound key missing from manual:\n{}", text);
+    }
+
+    fn mouse(kind: MouseEventKind, col: u16, row: u16) -> MouseEvent {
+        MouseEvent { kind, column: col, row, modifiers: KeyModifiers::NONE }
+    }
+
+    /// Grab a divider, drag it, release. Returns the app for further asserts.
+    fn drag_divider(app: &mut App, target: DividerTarget, to: (u16, u16)) {
+        let d = app
+            .dividers
+            .iter()
+            .copied()
+            .find(|d| d.target == target)
+            .unwrap_or_else(|| panic!("no divider for {:?} in {:?}", target, app.dividers));
+        let grab = (d.zone.x, d.zone.y);
+        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), grab.0, grab.1));
+        assert!(app.drag.is_some(), "grabbing the seam should start a drag");
+        app.handle_mouse(mouse(MouseEventKind::Drag(MouseButton::Left), to.0, to.1));
+        app.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), to.0, to.1));
+        assert!(app.drag.is_none(), "releasing should end the drag");
+    }
+
+    #[test]
+    fn dragging_the_vertical_seam_resizes_the_file_panes() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        let _ = render(&mut app, 100, 40);
+        assert_eq!(app.panes_pct, 50);
+
+        // Drag the left/right seam to roughly a quarter of the width.
+        drag_divider(&mut app, DividerTarget::Panes, (25, 10));
+        assert!(
+            (20..=30).contains(&app.panes_pct),
+            "expected ~25%, got {}",
+            app.panes_pct
+        );
+
+        // The rendered rects must follow.
+        let _ = render(&mut app, 100, 40);
+        assert!(
+            app.layout_rects.left.width < app.layout_rects.right.width,
+            "left pane should now be the narrow one"
+        );
+    }
+
+    #[test]
+    fn dragging_the_horizontal_seam_resizes_the_shell_panel() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        let _ = render(&mut app, 100, 40);
+        assert_eq!(app.main_pct, 60);
+
+        drag_divider(&mut app, DividerTarget::Main, (50, 10));
+        assert!(app.main_pct < 60, "shell should have grown, got {}", app.main_pct);
+
+        let before = app.layout_rects.shell.height;
+        let _ = render(&mut app, 100, 40);
+        assert!(app.layout_rects.shell.height > before / 2, "shell rect should follow the drag");
+    }
+
+    #[test]
+    fn a_split_cannot_be_dragged_past_its_minimum() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        let _ = render(&mut app, 100, 40);
+
+        // Drag far past the left edge; the pane must keep a usable width.
+        drag_divider(&mut app, DividerTarget::Panes, (0, 10));
+        assert_eq!(app.panes_pct, MIN_SPLIT_PCT);
+
+        drag_divider(&mut app, DividerTarget::Panes, (999, 10));
+        assert_eq!(app.panes_pct, 100 - MIN_SPLIT_PCT);
+    }
+
+    #[test]
+    fn grabbing_a_seam_does_not_change_focus() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        let _ = render(&mut app, 100, 40);
+        app.focus(FocusedPane::Left);
+
+        let d = app.dividers.iter().copied().find(|d| d.target == DividerTarget::Main).unwrap();
+        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), d.zone.x, d.zone.y));
+        assert_eq!(app.focused, FocusedPane::Left, "grabbing a border must not steal focus");
+    }
+
+    #[test]
+    fn clicking_inside_a_pane_still_moves_focus() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        let _ = render(&mut app, 100, 40);
+        app.focus(FocusedPane::Left);
+
+        let r = app.layout_rects.right;
+        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), r.x + 5, r.y + 3));
+        assert_eq!(app.focused, FocusedPane::Right);
+        assert!(app.drag.is_none());
+    }
+
+    /// An app with two *different* directories, one per pane.
+    fn app_two_dirs(
+        left: &[&str],
+        right: &[&str],
+    ) -> (tempfile::TempDir, tempfile::TempDir, App) {
+        let l = tempfile::tempdir().unwrap();
+        let r = tempfile::tempdir().unwrap();
+        for n in left {
+            std::fs::write(l.path().join(n), b"x").unwrap();
+        }
+        for n in right {
+            std::fs::write(r.path().join(n), b"y").unwrap();
+        }
+        let app = App::new(
+            l.path().to_path_buf(),
+            r.path().to_path_buf(),
+            cian_lua::Config::default(),
+        )
+        .unwrap();
+        (l, r, app)
+    }
+
+    #[test]
+    fn copy_then_paste_duplicates_into_the_other_directory() {
+        let (_l, r, mut app) = app_two_dirs(&["doc.txt"], &[]);
+        app.focus(FocusedPane::Left);
+        app.run_menu_item(MenuItem::Copy).unwrap();
+        assert!(app.file_clip.is_some());
+
+        app.focus(FocusedPane::Right);
+        app.run_menu_item(MenuItem::Paste).unwrap();
+
+        assert!(r.path().join("doc.txt").exists(), "file should have been pasted");
+        // A copy stays on the clipboard for pasting again elsewhere.
+        assert!(app.file_clip.is_some(), "copy should survive its paste");
+    }
+
+    #[test]
+    fn cut_then_paste_moves_and_empties_the_clipboard() {
+        let (l, r, mut app) = app_two_dirs(&["move_me.txt"], &[]);
+        app.focus(FocusedPane::Left);
+        app.run_menu_item(MenuItem::Cut).unwrap();
+
+        app.focus(FocusedPane::Right);
+        app.run_menu_item(MenuItem::Paste).unwrap();
+
+        assert!(r.path().join("move_me.txt").exists(), "should exist at destination");
+        assert!(!l.path().join("move_me.txt").exists(), "should be gone from source");
+        assert!(app.file_clip.is_none(), "a cut is consumed by its paste");
+    }
+
+    #[test]
+    fn pasting_into_the_source_directory_is_refused() {
+        let (l, _r, mut app) = app_two_dirs(&["a.txt"], &[]);
+        app.focus(FocusedPane::Left);
+        app.run_menu_item(MenuItem::Copy).unwrap();
+        // Paste straight back where it came from.
+        app.run_menu_item(MenuItem::Paste).unwrap();
+
+        let n = std::fs::read_dir(l.path()).unwrap().count();
+        assert_eq!(n, 1, "must not duplicate into the same directory");
+        assert!(app.message.as_deref().unwrap_or("").contains("already"));
+    }
+
+    #[test]
+    fn paste_only_appears_in_the_menu_once_something_is_held() {
+        let (_l, _r, mut app) = app_two_dirs(&["a.txt"], &[]);
+        let _ = render(&mut app, 100, 40);
+
+        app.open_context_menu(5, 5);
+        let Popup::ContextMenu { items, .. } = &app.popup else { panic!("no menu") };
+        assert!(!items.contains(&MenuItem::Paste), "nothing held yet");
+        app.popup = Popup::None;
+
+        app.clip_targets(ClipOp::Copy);
+        app.open_context_menu(5, 5);
+        let Popup::ContextMenu { items, .. } = &app.popup else { panic!("no menu") };
+        assert!(items.contains(&MenuItem::Paste));
+    }
+
+    #[test]
+    fn right_click_focuses_the_pane_and_opens_the_menu() {
+        let (_d, mut app) = app_with(&["a.txt", "b.txt"]);
+        let _ = render(&mut app, 100, 40);
+        app.focus(FocusedPane::Left);
+
+        let r = app.layout_rects.right;
+        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Right), r.x + 5, r.y + 2));
+        assert_eq!(app.focused, FocusedPane::Right, "right-click should move focus");
+        assert!(matches!(app.popup, Popup::ContextMenu { .. }));
+    }
+
+    #[test]
+    fn the_shell_menu_omits_file_operations() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        app.clip_targets(ClipOp::Copy);
+        app.focus(FocusedPane::Shell);
+        app.open_context_menu(5, 5);
+        let Popup::ContextMenu { items, .. } = &app.popup else { panic!("no menu") };
+        assert!(items.contains(&MenuItem::Paste));
+        assert!(!items.contains(&MenuItem::Delete), "delete makes no sense in a PTY");
+        assert!(!items.contains(&MenuItem::Rename));
+    }
+
+    #[test]
+    fn the_colour_picker_sets_only_the_chosen_pane() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        app.focus(FocusedPane::Right);
+        app.run_menu_item(MenuItem::Background).unwrap();
+        assert!(matches!(app.popup, Popup::ColorPicker { .. }));
+
+        // Move off "default" and apply.
+        app.handle_key(key('j')).unwrap();
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+
+        assert!(app.pane_bg[1].is_some(), "right pane should be tinted");
+        assert!(app.pane_bg[0].is_none(), "left pane must be untouched");
+        assert!(matches!(app.popup, Popup::None));
+    }
+
+    #[test]
+    fn a_flash_fades_out_and_then_expires() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        assert_eq!(app.flash_level(FocusedPane::Left), 0.0);
+
+        app.flash(FocusedPane::Left);
+        assert!(app.flash_level(FocusedPane::Left) > 0.9, "should start near full");
+        assert_eq!(app.flash_level(FocusedPane::Right), 0.0, "only the named pane lights");
+        assert!(app.flash_active());
+
+        // Pretend the flash started long ago.
+        app.flash = Some((FocusedPane::Left, Instant::now() - Duration::from_secs(2)));
+        assert_eq!(app.flash_level(FocusedPane::Left), 0.0);
+        assert!(!app.flash_active());
+    }
+
+    #[test]
+    fn easing_stays_in_range_and_hits_both_ends() {
+        let a = Anim {
+            kind: AnimKind::Zoom { from: Rect::new(0, 0, 10, 10), to: Rect::new(0, 0, 20, 20) },
+            start: Instant::now(),
+            dur: Duration::from_millis(100),
+        };
+        assert!(a.progress() < 0.2, "should start near zero");
+        assert!(!a.done());
+
+        let ended = Anim { start: Instant::now() - Duration::from_secs(1), ..a };
+        assert_eq!(ended.progress(), 1.0);
+        assert!(ended.done());
+
+        // A zero-length transition is already over.
+        let instant = Anim { dur: Duration::ZERO, ..a };
+        assert_eq!(instant.progress(), 1.0);
+        assert!(instant.done());
+    }
+
+    #[test]
+    fn lerp_rect_interpolates_between_its_endpoints() {
+        let a = Rect::new(0, 0, 10, 10);
+        let b = Rect::new(10, 20, 30, 40);
+        assert_eq!(lerp_rect(a, b, 0.0), a);
+        assert_eq!(lerp_rect(a, b, 1.0), b);
+        let mid = lerp_rect(a, b, 0.5);
+        assert_eq!((mid.x, mid.y, mid.width, mid.height), (5, 10, 20, 25));
+        // Never collapses to nothing, which would make a widget panic.
+        let z = lerp_rect(Rect::new(0, 0, 0, 0), Rect::new(0, 0, 0, 0), 0.5);
+        assert!(z.width >= 1 && z.height >= 1);
+    }
+
+    #[test]
+    fn union_rect_ignores_empty_inputs() {
+        let a = Rect::new(0, 0, 10, 5);
+        let b = Rect::new(10, 0, 10, 5);
+        assert_eq!(union_rect(a, b), Rect::new(0, 0, 20, 5));
+        assert_eq!(union_rect(a, Rect::new(0, 0, 0, 0)), a);
+        assert_eq!(union_rect(Rect::new(0, 0, 0, 0), b), b);
+    }
+
+    #[test]
+    fn zoom_toggles_and_animates() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        let _ = render(&mut app, 100, 40);
+        assert!(!app.zoomed);
+
+        app.toggle_zoom();
+        assert!(app.zoomed);
+        assert!(app.anim.is_some(), "zoom should start a transition");
+        // The overlay must be growing toward something larger than the pane.
+        let Some(Anim { kind: AnimKind::Zoom { from, to }, .. }) = app.anim else {
+            panic!("expected a zoom")
+        };
+        assert!(to.width > from.width, "{:?} -> {:?}", from, to);
+
+        app.finish_anim();
+        assert!(app.anim.is_none());
+
+        // Zooming back out reverses the direction.
+        app.toggle_zoom();
+        let Some(Anim { kind: AnimKind::Zoom { from, to }, .. }) = app.anim else {
+            panic!("expected a zoom")
+        };
+        assert!(to.width < from.width);
+    }
+
+    #[test]
+    fn animation_can_be_switched_off_by_config() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.txt"), b"x").unwrap();
+        let mut config = cian_lua::Config::default();
+        config.options.animation_ms = Some(0);
+        let p = dir.path().to_path_buf();
+        let mut app = App::new(p.clone(), p, config).unwrap();
+        let _ = render(&mut app, 100, 40);
+
+        app.toggle_zoom();
+        assert!(app.zoomed, "the zoom itself must still happen");
+        assert!(app.anim.is_none(), "but with no transition");
+    }
+
+    #[test]
+    fn the_ratio_override_only_applies_to_its_own_divider() {
+        let ov = AnimOverride {
+            ratio: Some((DividerTarget::Panes, 90)),
+            freeze_pty: true,
+        };
+        assert_eq!(ov.ratio_for(DividerTarget::Panes, 50), 90);
+        // Other dividers fall through to their stored value.
+        assert_eq!(ov.ratio_for(DividerTarget::Main, 60), 60);
+        // Stored values are clamped; overrides are not, so a close animation
+        // can drive a pane all the way to zero.
+        assert_eq!(ov.ratio_for(DividerTarget::Main, 99), 100 - MIN_SPLIT_PCT);
+        let zero = AnimOverride { ratio: Some((DividerTarget::Main, 0)), freeze_pty: true };
+        assert_eq!(zero.ratio_for(DividerTarget::Main, 50), 0);
+    }
+
+    #[test]
+    fn a_deferred_close_runs_when_its_transition_lands() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        // Nothing to close, but the deferral machinery should still fire
+        // exactly once and then clear itself.
+        app.anim_then = Some(PendingClose::ShellPane);
+        app.start_anim(AnimKind::Ratio {
+            target: DividerTarget::Main,
+            from: 50,
+            to: 0,
+        });
+        assert!(app.anim.is_some());
+
+        app.finish_anim();
+        assert!(app.anim.is_none());
+        assert!(app.anim_then.is_none(), "deferred work must be consumed");
+    }
+
+    #[test]
+    fn split_ratio_survives_a_render_round_trip() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        let _ = render(&mut app, 100, 40);
+        app.panes_pct = 30;
+        let _ = render(&mut app, 100, 40);
+        // 30% of a 100-wide window, give or take rounding.
+        assert!(
+            (28..=32).contains(&app.layout_rects.left.width),
+            "got {}",
+            app.layout_rects.left.width
+        );
+    }
+
+    /// Right-clicking a row must select the file actually drawn on that row,
+    /// including after the list has scrolled.
+    #[test]
+    fn right_click_selects_the_row_under_the_pointer_when_scrolled() {
+        let names: Vec<String> = (0..60).map(|i| format!("f{:02}.txt", i)).collect();
+        let refs: Vec<&str> = names.iter().map(|s| s.as_str()).collect();
+        let (_d, mut app) = app_with(&refs);
+        let _ = render(&mut app, 100, 40);
+        app.focus(FocusedPane::Left);
+
+        let rect = app.layout_rects.left;
+        let view_h = rect.height.saturating_sub(2);
+
+        // Every combination of scroll position and clicked row must agree.
+        for cursor in [0usize, 5, 20, 45, 59] {
+            for off in 0..view_h.min(8) {
+                if let Some(p) = app.active_pane_mut() {
+                    p.cursor = cursor;
+                }
+                let before = render(&mut app, 100, 40);
+                let row = rect.y + 1 + off;
+                let lo = rect.x as usize;
+                let hi = (rect.x + rect.width) as usize;
+                let drawn: String =
+                    before[row as usize].chars().skip(lo).take(hi - lo).collect();
+                app.handle_mouse(mouse(
+                    MouseEventKind::Down(MouseButton::Right),
+                    rect.x + 3,
+                    row,
+                ));
+                let sel = app.active_pane().unwrap().selected().unwrap().name.clone();
+                assert!(
+                    drawn.contains(&sel),
+                    "cursor {} row-offset {}: screen showed {:?}, selected {:?}",
+                    cursor,
+                    off,
+                    drawn.trim(),
+                    sel
+                );
+                app.popup = Popup::None;
+            }
+        }
+    }
+
+    #[test]
+    fn right_click_on_a_single_screenful_selects_correctly() {
+        let (_d, mut app) = app_with(&["a.txt", "b.txt", "c.txt"]);
+        let _ = render(&mut app, 100, 40);
+        app.focus(FocusedPane::Left);
+        let rect = app.layout_rects.left;
+        // Clicking past the last entry must leave the cursor where it was
+        // rather than jumping somewhere arbitrary.
+        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Right), rect.x + 3, rect.y + 1));
+        assert_eq!(app.active_pane().unwrap().cursor, 0);
+        app.popup = Popup::None;
+
+        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Right), rect.x + 3, rect.y + 2));
+        assert_eq!(app.active_pane().unwrap().cursor, 1);
+        app.popup = Popup::None;
+
+        // A row inside the pane but past the last entry: stay put.
+        let before = app.active_pane().unwrap().cursor;
+        let blank = rect.y + rect.height - 3;
+        assert!(blank > rect.y + 3, "test needs a pane taller than the listing");
+        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Right), rect.x + 3, blank));
+        assert_eq!(app.focused, FocusedPane::Left, "still inside the pane");
+        assert_eq!(app.active_pane().unwrap().cursor, before, "empty space must not move it");
+        app.popup = Popup::None;
+
+        // The pane's own border row is not a list row either.
+        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Right), rect.x + 3, rect.y));
+        assert_eq!(app.active_pane().unwrap().cursor, before, "the border must not move it");
+    }
+
+    /// Degenerate geometry must not panic (u16 underflow in seam maths).
+    #[test]
+    fn rendering_survives_a_tiny_terminal() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        for (w, h) in [(1u16, 1u16), (2, 2), (4, 3), (10, 4), (1, 40), (40, 1)] {
+            let _ = render(&mut app, w, h);
+        }
+        // And with a popup open, which does its own rect maths.
+        app.open_manual();
+        for (w, h) in [(1u16, 1u16), (3, 3), (12, 5)] {
+            let _ = render(&mut app, w, h);
+        }
+    }
+
+    #[test]
+    fn shell_panel_starts_empty_and_focusing_it_does_not_block() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        assert_eq!(app.shell.count(), 0);
+
+        // Focusing the shell must return immediately, leaving the spawn in
+        // flight rather than blocking the event loop on fork/exec.
+        app.focus(FocusedPane::Shell);
+        assert!(app.shell.is_starting(), "spawn should be pending, not resolved inline");
+
+        // The placeholder renders without a session present.
+        let out = render(&mut app, 100, 24).join("\n");
+        assert!(out.contains("starting shell"), "expected placeholder; got:\n{}", out);
+    }
 }

@@ -30,6 +30,10 @@ cian.set_option("mask", "*.*")              -- default file mask shown in the st
 -- (Windows). On Windows, use PowerShell with:
 -- cian.set_option("shell", "powershell.exe")   -- or "pwsh.exe" for PowerShell 7
 
+-- Length of the split / maximize / close transitions, in milliseconds.
+-- Set to 0 to turn animation off entirely.
+cian.set_option("animation_ms", 150)
+
 ----------------------------------------------------------------------
 -- Keymaps — bind a single key to an action name. These are *additive
 -- overrides*: a key you bind here takes priority, every other key keeps its

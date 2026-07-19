@@ -9,8 +9,54 @@ Cross-platform: macOS / Windows / Linux.
 ## Status
 
 Early development. Working: two-pane navigation, marks/visual selection, file
-operations (copy/move/delete/rename/create), history, shortcuts, search,
-clipboard integration, Lua configuration, and an embedded PTY shell panel.
+operations (copy/move/delete/rename/create), incremental filtering, history,
+shortcuts, search, clipboard integration, Lua configuration, and an embedded
+PTY shell panel.
+
+## Help
+
+Press **`?`** (or `Ctrl+.`, or `:man`) inside cian for the full key manual —
+it is generated from the live keymap, so it also lists any keys you bound in
+`init.lua`. From a shell, `cian -man` prints the same thing and `cian -h`
+prints the command-line usage.
+
+## Mouse
+
+Drag any border to re-proportion the split it divides — the two file panes, the
+file/shell divider, and every split inside the shell panel. Neither side can be
+dragged below 15% of its parent.
+
+Right-click a pane for a context menu: copy, cut, paste, copy/move to the other
+pane, rename, delete, and a per-pane background colour. Copy and cut fill a file
+clipboard that persists while you navigate, so you can copy here, move
+somewhere else, and paste there — the system clipboard is separate and is still
+driven by `p` / `Shift+P`. Background colours are session-only.
+
+## Animation
+
+Splitting, maximizing (`F12`) and closing a pane animate over 150ms. PTYs are
+resized once, when the transition lands, so the shell never reflows mid-flight.
+Any keypress lands the transition immediately — input is never held up by it.
+Tune or disable it:
+
+```lua
+cian.set_option("animation_ms", 250)   -- slower
+cian.set_option("animation_ms", 0)     -- off
+```
+
+## Deleting
+
+`d` moves items to the OS trash (Finder's Trash / the Windows Recycle Bin), so
+a mistake is recoverable. The confirmation popup offers `a` to delete
+permanently instead.
+
+## Filtering
+
+`/` narrows the listing as you type (case-insensitive substring). **Enter**
+keeps the filter applied so you can mark and operate on just the matches;
+**Esc** clears it. The status bar shows the active filter and how many of the
+directory's entries it matches, so a narrowed pane never looks like a full one.
+Changing directory always clears the filter.
 
 ## Architecture
 
@@ -83,6 +129,19 @@ next / previous tab, and `Shift+F10` closes the active tab (asking first).
 cargo build --release
 ./target/release/cian
 ```
+
+## Troubleshooting
+
+If cian misbehaves, set `CIAN_LOG` to capture diagnostics — shell spawns,
+panics, and PTY errors are appended there, and the variable being unset (the
+default) makes logging a no-op:
+
+```sh
+CIAN_LOG=/tmp/cian.log cian
+```
+
+A panic restores the terminal before it unwinds, so you should never be left
+in raw mode needing `reset`.
 
 ## Install on Windows (offline)
 

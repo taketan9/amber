@@ -8,4 +8,9 @@ description = "Domain logic for cian: file operations, marks, history, bookmarks
 
 [dependencies]
 anyhow   = { workspace = true }
+chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
 fs_extra = { workspace = true }
+trash = { version = "5.2.3", default-features = false }
+
+[dev-dependencies]
+tempfile = "3.27.0"

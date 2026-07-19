@@ -7,6 +7,7 @@ license.workspace = true
 description = "PTY-backed shell pane for cian (portable-pty + vt100)"
 
 [dependencies]
+cian-core    = { workspace = true }
 portable-pty = { workspace = true }
 vt100        = { workspace = true }
 anyhow       = { workspace = true }

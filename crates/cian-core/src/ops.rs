@@ -84,11 +84,28 @@ pub fn move_one(src: &Path, dest_dir: &Path, on_conflict: Conflict) -> Result<bo
     Ok(true)
 }
 
-pub fn delete_one(src: &Path) -> Result<()> {
-    if src.is_dir() {
-        fs::remove_dir_all(src).with_context(|| format!("rm -r {}", src.display()))?;
-    } else {
-        fs::remove_file(src).with_context(|| format!("rm {}", src.display()))?;
+/// How a delete disposes of its targets.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeleteMode {
+    /// Move to the OS trash (Finder's Trash / the Windows Recycle Bin), so the
+    /// user can undo a mistake. The default: `d` is one keystroke away from
+    /// destroying work, and a file manager used daily must be forgiving.
+    Trash,
+    /// Unlink immediately. Unrecoverable.
+    Permanent,
+}
+
+pub fn delete_one(src: &Path, mode: DeleteMode) -> Result<()> {
+    match mode {
+        DeleteMode::Trash => trash::delete(src)
+            .with_context(|| format!("move to trash: {}", src.display()))?,
+        DeleteMode::Permanent => {
+            if src.is_dir() {
+                fs::remove_dir_all(src).with_context(|| format!("rm -r {}", src.display()))?;
+            } else {
+                fs::remove_file(src).with_context(|| format!("rm {}", src.display()))?;
+            }
+        }
     }
     Ok(())
 }
@@ -146,10 +163,10 @@ pub fn move_many(srcs: &[PathBuf], dest_dir: &Path, on_conflict: Conflict) -> Op
     report
 }
 
-pub fn delete_many(srcs: &[PathBuf]) -> OpReport {
+pub fn delete_many(srcs: &[PathBuf], mode: DeleteMode) -> OpReport {
     let mut report = OpReport::default();
     for src in srcs {
-        match delete_one(src) {
+        match delete_one(src, mode) {
             Ok(()) => report.ok += 1,
             Err(e) => report.note_error(format!("{}: {}", src.display(), e)),
         }

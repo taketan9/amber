@@ -1,9 +1,11 @@
 use std::collections::HashSet;
 use std::fs;
 use std::path::PathBuf;
+use std::time::SystemTime;
 
 use anyhow::{Context, Result};
 
+pub mod log;
 pub mod ops;
 
 #[derive(Debug, Clone)]
@@ -11,6 +13,10 @@ pub struct Entry {
     pub name: String,
     pub path: PathBuf,
     pub is_dir: bool,
+    /// Size in bytes. Meaningless for directories, which report `0`.
+    pub len: u64,
+    /// Last modification time, if the filesystem reports one.
+    pub modified: Option<SystemTime>,
 }
 
 impl Entry {
@@ -21,14 +27,56 @@ impl Entry {
             .into_string()
             .map_err(|raw| anyhow::anyhow!("non-utf8 filename: {:?}", raw))?;
         let is_dir = de.file_type()?.is_dir();
-        Ok(Self { name, path, is_dir })
+        // Metadata can fail on broken symlinks and races; the entry is still
+        // worth listing, so fall back to unknown size/time rather than drop it.
+        let meta = de.metadata().ok();
+        let len = meta.as_ref().map(|m| m.len()).unwrap_or(0);
+        let modified = meta.as_ref().and_then(|m| m.modified().ok());
+        Ok(Self { name, path, is_dir, len, modified })
     }
+}
+
+/// Format a byte count the way a file manager should: short, aligned, and
+/// never more than one decimal place.
+pub fn human_size(bytes: u64) -> String {
+    const UNITS: [&str; 7] = ["B", "K", "M", "G", "T", "P", "E"];
+    if bytes < 1024 {
+        return format!("{}{}", bytes, UNITS[0]);
+    }
+    let mut v = bytes as f64;
+    let mut unit = 0;
+    while v >= 1024.0 && unit < UNITS.len() - 1 {
+        v /= 1024.0;
+        unit += 1;
+    }
+    if v < 10.0 {
+        format!("{:.1}{}", v, UNITS[unit])
+    } else {
+        format!("{:.0}{}", v, UNITS[unit])
+    }
+}
+
+/// Format a timestamp as local `YYYY-MM-DD HH:MM`.
+///
+/// Uses chrono's `Local` rather than a hand-rolled offset: getting the zone
+/// right means DST rules and per-platform system calls, and cian is built and
+/// shipped for Windows from CI where that code could not be tested locally.
+pub fn format_time(t: SystemTime) -> String {
+    let dt: chrono::DateTime<chrono::Local> = t.into();
+    dt.format("%Y-%m-%d %H:%M").to_string()
 }
 
 #[derive(Debug, Clone)]
 pub struct Pane {
     pub cwd: PathBuf,
+    /// The visible list: [`Pane::all_entries`] narrowed by [`Pane::filter`].
+    /// Everything else (cursor, marks, file operations, rendering) works off
+    /// this, so filtering automatically scopes them all to what is on screen.
     pub entries: Vec<Entry>,
+    /// Every entry in `cwd`, before filtering.
+    pub all_entries: Vec<Entry>,
+    /// Case-insensitive substring that narrows the listing. Empty shows all.
+    pub filter: String,
     pub cursor: usize,
     /// Marked entries keyed by full path (survives reload).
     pub marks: HashSet<PathBuf>,
@@ -47,6 +95,8 @@ impl Pane {
         let mut pane = Self {
             cwd,
             entries: Vec::new(),
+            all_entries: Vec::new(),
+            filter: String::new(),
             cursor: 0,
             marks: HashSet::new(),
             history: Vec::new(),
@@ -74,14 +124,48 @@ impl Pane {
             (false, true) => std::cmp::Ordering::Greater,
             _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
         });
-        self.entries = entries;
+        self.all_entries = entries;
+        self.apply_filter();
+        // Forget marks whose path no longer exists in this directory. This
+        // checks the unfiltered list on purpose: narrowing the view must not
+        // silently drop marks on entries the filter is hiding.
+        let live: HashSet<PathBuf> = self.all_entries.iter().map(|e| e.path.clone()).collect();
+        self.marks.retain(|p| live.contains(p));
+        Ok(())
+    }
+
+    /// Rebuild `entries` from `all_entries` according to `filter`.
+    fn apply_filter(&mut self) {
+        if self.filter.is_empty() {
+            self.entries = self.all_entries.clone();
+        } else {
+            let needle = self.filter.to_lowercase();
+            self.entries = self
+                .all_entries
+                .iter()
+                .filter(|e| e.name.to_lowercase().contains(&needle))
+                .cloned()
+                .collect();
+        }
         if self.cursor >= self.entries.len() {
             self.cursor = self.entries.len().saturating_sub(1);
         }
-        // forget marks whose path no longer exists in this directory
-        let live: HashSet<PathBuf> = self.entries.iter().map(|e| e.path.clone()).collect();
-        self.marks.retain(|p| live.contains(p));
-        Ok(())
+    }
+
+    /// Narrow the listing. Passing an empty string shows everything again.
+    pub fn set_filter(&mut self, filter: impl Into<String>) {
+        self.filter = filter.into();
+        self.apply_filter();
+    }
+
+    /// Drop the filter. Called whenever the pane changes directory, since a
+    /// filter left over from the previous folder would hide files the user
+    /// has no reason to expect are missing.
+    pub fn clear_filter(&mut self) {
+        if !self.filter.is_empty() {
+            self.filter.clear();
+            self.apply_filter();
+        }
     }
 
     pub fn move_cursor(&mut self, delta: isize) {
@@ -101,6 +185,7 @@ impl Pane {
                 self.cwd = e.path;
                 self.cursor = 0;
                 self.marks.clear();
+                self.filter.clear();
                 self.reload()?;
             }
         }
@@ -115,6 +200,7 @@ impl Pane {
             self.cwd = parent;
             self.cursor = 0;
             self.marks.clear();
+            self.filter.clear();
             self.reload()?;
         }
         Ok(())
@@ -126,6 +212,7 @@ impl Pane {
         self.cwd = path;
         self.cursor = 0;
         self.marks.clear();
+        self.filter.clear();
         self.reload()?;
         Ok(())
     }
@@ -175,5 +262,167 @@ impl Pane {
         } else {
             Vec::new()
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A pane over a temp dir containing `names` (all plain files).
+    fn pane_with(names: &[&str]) -> (tempfile::TempDir, Pane) {
+        let dir = tempfile::tempdir().unwrap();
+        for n in names {
+            fs::write(dir.path().join(n), b"").unwrap();
+        }
+        let pane = Pane::new(dir.path()).unwrap();
+        (dir, pane)
+    }
+
+    fn names(pane: &Pane) -> Vec<String> {
+        pane.entries.iter().map(|e| e.name.clone()).collect()
+    }
+
+    #[test]
+    fn filter_narrows_and_is_case_insensitive() {
+        let (_d, mut pane) = pane_with(&["Alpha.rs", "beta.rs", "gamma.txt"]);
+        assert_eq!(pane.entries.len(), 3);
+
+        pane.set_filter("RS");
+        assert_eq!(names(&pane), vec!["Alpha.rs", "beta.rs"]);
+
+        pane.set_filter("alp");
+        assert_eq!(names(&pane), vec!["Alpha.rs"]);
+    }
+
+    #[test]
+    fn clearing_filter_restores_every_entry() {
+        let (_d, mut pane) = pane_with(&["a.txt", "b.txt", "c.md"]);
+        pane.set_filter("md");
+        assert_eq!(pane.entries.len(), 1);
+        pane.clear_filter();
+        assert_eq!(pane.entries.len(), 3);
+    }
+
+    #[test]
+    fn filter_clamps_cursor_into_range() {
+        let (_d, mut pane) = pane_with(&["a.txt", "b.txt", "c.txt"]);
+        pane.cursor = 2;
+        pane.set_filter("a.txt");
+        // Only one entry survives, so the cursor must not dangle past it.
+        assert_eq!(pane.entries.len(), 1);
+        assert_eq!(pane.cursor, 0);
+    }
+
+    #[test]
+    fn no_match_yields_empty_list_and_zero_cursor() {
+        let (_d, mut pane) = pane_with(&["a.txt"]);
+        pane.set_filter("zzz");
+        assert!(pane.entries.is_empty());
+        assert_eq!(pane.cursor, 0);
+        assert!(pane.selected().is_none());
+        assert!(pane.target_paths().is_empty());
+    }
+
+    /// Regression guard: reload() prunes marks against the *unfiltered* list,
+    /// so a mark on a hidden entry must survive a reload while filtered.
+    #[test]
+    fn reload_while_filtered_keeps_marks_on_hidden_entries() {
+        let (_d, mut pane) = pane_with(&["keep.txt", "hidden.md"]);
+        let hidden = pane
+            .all_entries
+            .iter()
+            .find(|e| e.name == "hidden.md")
+            .unwrap()
+            .path
+            .clone();
+        pane.marks.insert(hidden.clone());
+
+        pane.set_filter("keep");
+        assert_eq!(names(&pane), vec!["keep.txt"]);
+
+        pane.reload().unwrap();
+        assert!(pane.marks.contains(&hidden), "mark on a filtered-out entry was dropped");
+    }
+
+    #[test]
+    fn filter_survives_reload_but_not_directory_change() {
+        let (dir, mut pane) = pane_with(&["a.txt", "b.md"]);
+        fs::create_dir(dir.path().join("sub")).unwrap();
+        fs::write(dir.path().join("sub").join("inner.txt"), b"").unwrap();
+
+        pane.set_filter("md");
+        pane.reload().unwrap();
+        assert_eq!(pane.filter, "md", "reload must not drop the filter");
+
+        pane.jump_to(dir.path().join("sub")).unwrap();
+        assert_eq!(pane.filter, "", "changing directory must clear the filter");
+        assert_eq!(names(&pane), vec!["inner.txt"]);
+    }
+
+    #[test]
+    fn target_paths_prefers_marks_over_cursor() {
+        let (_d, mut pane) = pane_with(&["a.txt", "b.txt"]);
+        assert_eq!(pane.target_paths().len(), 1, "falls back to the cursor");
+        pane.set_mark_at(0);
+        pane.set_mark_at(1);
+        assert_eq!(pane.target_paths().len(), 2);
+    }
+}
+
+#[cfg(test)]
+mod format_tests {
+    use super::*;
+    use std::time::{Duration, UNIX_EPOCH};
+
+    #[test]
+    fn human_size_scales_and_stays_short() {
+        assert_eq!(human_size(0), "0B");
+        assert_eq!(human_size(512), "512B");
+        assert_eq!(human_size(1024), "1.0K");
+        assert_eq!(human_size(1536), "1.5K");
+        assert_eq!(human_size(10 * 1024), "10K");
+        assert_eq!(human_size(1024 * 1024), "1.0M");
+        assert_eq!(human_size(3 * 1024 * 1024 * 1024), "3.0G");
+        // Never wider than 5 columns, so the column can be fixed-width.
+        for n in [0u64, 1, 999, 1023, 1024, u64::MAX] {
+            assert!(human_size(n).len() <= 5, "{} -> {}", n, human_size(n));
+        }
+    }
+
+    /// The bug this replaced: timestamps rendered in UTC instead of local
+    /// time. 2021-01-01 00:00 UTC is 09:00 the same day in JST, so a UTC
+    /// implementation shows the wrong hour (and, near midnight, wrong date).
+    #[test]
+    fn format_time_uses_the_local_zone_not_utc() {
+        let t = UNIX_EPOCH + Duration::from_secs(1_609_459_200); // 2021-01-01 00:00 UTC
+        let local = chrono::DateTime::<chrono::Local>::from(t);
+        let offset_secs = local.offset().local_minus_utc() as i64;
+
+        let s = format_time(t);
+        // Derive what local time *should* be from the offset the OS reports,
+        // so this passes in any zone the test happens to run in.
+        let expect = chrono::DateTime::<chrono::Utc>::from(t) + chrono::Duration::seconds(offset_secs);
+        assert_eq!(s, expect.format("%Y-%m-%d %H:%M").to_string());
+
+        // And specifically: in a +09:00 zone this instant must read 09:00.
+        if offset_secs == 9 * 3600 {
+            assert_eq!(s, "2021-01-01 09:00", "JST should be UTC+9");
+        }
+    }
+
+    #[test]
+    fn format_time_renders_a_sortable_stamp() {
+        // 2021-01-01 00:00:00 UTC
+        let t = UNIX_EPOCH + Duration::from_secs(1_609_459_200);
+        let s = format_time(t);
+        assert_eq!(s.len(), 16, "fixed width for column alignment: {:?}", s);
+        assert!(s.starts_with("202"), "{}", s);
+        // Shape must be YYYY-MM-DD HH:MM regardless of the machine's zone.
+        let bytes = s.as_bytes();
+        assert_eq!(bytes[4], b'-');
+        assert_eq!(bytes[7], b'-');
+        assert_eq!(bytes[10], b' ');
+        assert_eq!(bytes[13], b':');
     }
 }
