@@ -1054,7 +1054,7 @@ pub struct App {
     anim_dur: Duration,
     /// Per-pane background overrides, indexed by [`Self::bg_slot`].
     /// Session-only: deliberately not persisted.
-    pane_bg: [Option<Color>; 2],
+    pane_bg: [Option<Color>; 3],
     last_search_query: Option<String>,
     pub shortcuts: ShortcutStore,
     pending_g: bool,
@@ -1118,7 +1118,7 @@ impl App {
             anim_dur: Duration::from_millis(
                 config.options.animation_ms.unwrap_or(DEFAULT_ANIM_MS),
             ),
-            pane_bg: [None, None],
+            pane_bg: [None, None, None],
             last_search_query: None,
             shortcuts: ShortcutStore::load_or_default(),
             pending_g: false,
@@ -1955,7 +1955,7 @@ impl App {
         match pane {
             FocusedPane::Left => Some(0),
             FocusedPane::Right => Some(1),
-            FocusedPane::Shell => None,
+            FocusedPane::Shell => Some(2),
         }
     }
 
@@ -1988,11 +1988,12 @@ impl App {
     fn open_context_menu(&mut self, col: u16, row: u16) {
         let mut items = Vec::new();
         if self.focused == FocusedPane::Shell {
-            // A PTY owns its own screen, so only the paste and appearance
-            // entries make sense here.
+            // A PTY owns its own screen, so the file operations make no sense
+            // here — but pasting and appearance still do.
             if self.file_clip.is_some() {
                 items.push(MenuItem::Paste);
             }
+            items.push(MenuItem::Background);
         } else {
             items.push(MenuItem::Copy);
             items.push(MenuItem::Cut);
@@ -3306,7 +3307,7 @@ fn draw_split(f: &mut Frame, main_area: Rect, app: &mut App, ov: AnimOverride) {
     draw_file_pane(f, panes_split[0], &app.left, app.focused == FocusedPane::Left, visual_for_left, app.mode, bg_l, fl_l);
     draw_file_pane(f, panes_split[1], &app.right, app.focused == FocusedPane::Right, visual_for_right, app.mode, bg_r, fl_r);
     // draw_shell sizes each pane's PTY to its computed sub-rect.
-    draw_shell(f, shell_area, &mut app.shell, app.focused == FocusedPane::Shell, &mut dividers, ov);
+    draw_shell(f, shell_area, &mut app.shell, app.focused == FocusedPane::Shell, &mut dividers, ov, app.pane_bg[2]);
     app.dividers = dividers;
 }
 
@@ -3328,7 +3329,7 @@ fn draw_zoom_overlay(f: &mut Frame, rect: Rect, app: &mut App, ov: AnimOverride)
             draw_file_pane(f, rect, &app.right, true, va, app.mode, bg, fl);
         }
         FocusedPane::Shell => {
-            draw_shell(f, rect, &mut app.shell, true, &mut sink, ov);
+            draw_shell(f, rect, &mut app.shell, true, &mut sink, ov, app.pane_bg[2]);
         }
     }
 }
@@ -3357,7 +3358,7 @@ fn draw_zoomed(f: &mut Frame, area: Rect, app: &mut App, ov: AnimOverride) {
         FocusedPane::Shell => {
             rects.shell = area;
             app.layout_rects = rects;
-            draw_shell(f, area, &mut app.shell, true, &mut dividers, ov);
+            draw_shell(f, area, &mut app.shell, true, &mut dividers, ov, app.pane_bg[2]);
         }
     }
     app.dividers = dividers;
@@ -3741,7 +3742,44 @@ fn draw_list_scrollbar(f: &mut Frame, area: Rect, total: usize, cursor: usize, f
     );
 }
 
+/// Draw the shell panel, then apply its background tint.
+///
+/// The tint has to be a post-pass. The PTY widget writes an explicit `Reset`
+/// background into every cell the shell left uncoloured, which would clobber
+/// any background set on the block underneath. Recolouring only the cells
+/// that are still `Reset` tints the panel while leaving alone every colour
+/// the shell chose for itself (ls colours, a vim theme, and so on).
+#[allow(clippy::too_many_arguments)]
 fn draw_shell(
+    f: &mut Frame,
+    area: Rect,
+    shell: &mut ShellPane,
+    focused: bool,
+    dividers: &mut Vec<Divider>,
+    ov: AnimOverride,
+    bg: Option<Color>,
+) {
+    draw_shell_inner(f, area, shell, focused, dividers, ov);
+    if let Some(c) = bg {
+        tint_default_cells(f, area, c);
+    }
+}
+
+/// Repaint every still-uncoloured cell in `area` with `bg`.
+fn tint_default_cells(f: &mut Frame, area: Rect, bg: Color) {
+    let buf = f.buffer_mut();
+    for y in area.y..area.y.saturating_add(area.height) {
+        for x in area.x..area.x.saturating_add(area.width) {
+            if let Some(cell) = buf.cell_mut((x, y)) {
+                if cell.bg == Color::Reset {
+                    cell.set_bg(bg);
+                }
+            }
+        }
+    }
+}
+
+fn draw_shell_inner(
     f: &mut Frame,
     area: Rect,
     shell: &mut ShellPane,
@@ -4350,6 +4388,13 @@ mod tests {
         (dir, app)
     }
 
+    /// Render and hand back the raw buffer, for checking colours.
+    fn render_buf(app: &mut App, w: u16, h: u16) -> ratatui::buffer::Buffer {
+        let mut terminal = Terminal::new(TestBackend::new(w, h)).unwrap();
+        terminal.draw(|f| draw(f, app)).unwrap();
+        terminal.backend().buffer().clone()
+    }
+
     /// Render `app` onto a `w`x`h` test terminal and return the text of each row.
     fn render(app: &mut App, w: u16, h: u16) -> Vec<String> {
         let mut terminal = Terminal::new(TestBackend::new(w, h)).unwrap();
@@ -4710,7 +4755,7 @@ mod tests {
         assert!(app.file_clip.is_none());
         app.open_context_menu(5, 5);
         let Popup::ContextMenu { items, .. } = &app.popup else { panic!("no menu") };
-        assert_eq!(items, &vec![MenuItem::Manual]);
+        assert_eq!(items, &vec![MenuItem::Background, MenuItem::Manual]);
     }
 
     #[test]
@@ -4981,6 +5026,80 @@ mod tests {
         for (w, h) in [(1u16, 1u16), (3, 3), (12, 5)] {
             let _ = render(&mut app, w, h);
         }
+    }
+
+    #[test]
+    fn the_shell_menu_offers_a_background_colour() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        app.focus(FocusedPane::Shell);
+        app.open_context_menu(5, 5);
+        let Popup::ContextMenu { items, .. } = &app.popup else { panic!("no menu") };
+        assert!(
+            items.contains(&MenuItem::Background),
+            "the shell pane should be tintable too, got {:?}",
+            items
+        );
+    }
+
+    #[test]
+    fn the_colour_picker_tints_the_shell_slot() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        app.focus(FocusedPane::Shell);
+        app.run_menu_item(MenuItem::Background).unwrap();
+        app.handle_key(key('j')).unwrap();
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+
+        assert!(app.pane_bg[2].is_some(), "shell slot should be set");
+        assert!(app.pane_bg[0].is_none() && app.pane_bg[1].is_none(), "file panes untouched");
+    }
+
+    /// The tint is a post-pass over the rendered cells, so prove it actually
+    /// reaches the shell panel and stops at its edge.
+    #[test]
+    fn the_shell_tint_covers_the_panel_and_nothing_else() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        let tint = Color::Rgb(24, 38, 30);
+        app.pane_bg[2] = Some(tint);
+
+        let buf = render_buf(&mut app, 100, 40);
+        let shell = app.layout_rects.shell;
+        let left = app.layout_rects.left;
+        assert!(shell.height > 2 && left.height > 2, "need a real layout");
+
+        let mid = buf[(shell.x + 5, shell.y + shell.height / 2)].bg;
+        assert_eq!(mid, tint, "shell interior should be tinted");
+
+        let in_files = buf[(left.x + 5, left.y + left.height / 2)].bg;
+        assert_ne!(in_files, tint, "the tint must not leak into the file panes");
+    }
+
+    /// Cells the shell coloured for itself must survive the tint, or ls
+    /// colours and vim themes would be flattened.
+    #[test]
+    fn the_tint_leaves_explicitly_coloured_cells_alone() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        // Give a file pane a background so there are non-Reset cells to guard,
+        // then tint the whole screen area and check they are preserved.
+        let painted = Color::Rgb(40, 0, 0);
+        app.pane_bg[0] = Some(painted);
+        let tint = Color::Rgb(0, 0, 40);
+
+        let mut terminal = Terminal::new(TestBackend::new(100, 40)).unwrap();
+        terminal
+            .draw(|f| {
+                draw(f, &mut app);
+                tint_default_cells(f, f.area(), tint);
+            })
+            .unwrap();
+        let buf = terminal.backend().buffer().clone();
+
+        let left = app.layout_rects.left;
+        let cell = buf[(left.x + 5, left.y + left.height / 2)].bg;
+        assert_eq!(cell, painted, "an already-coloured cell must not be repainted");
+
+        // And a cell that was Reset did get the tint.
+        let right = app.layout_rects.right;
+        assert_eq!(buf[(right.x + 5, right.y + right.height / 2)].bg, tint);
     }
 
     #[test]

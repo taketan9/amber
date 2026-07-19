@@ -28,8 +28,12 @@ file/shell divider, and every split inside the shell panel. Neither side can be
 dragged below 15% of its parent.
 
 Right-click a pane for a context menu: copy, cut, paste, copy/move to the other
-pane, rename, delete, a per-pane background colour, and the key manual (which
-is offered in every menu, including the shell's). Copy and cut fill a file
+pane, rename, delete, a per-pane background colour, and the key manual (the
+last two are offered in the shell's menu too).
+
+Background colours apply to whichever pane you right-clicked, the shell panel
+included. In the shell the tint only fills cells the shell left uncoloured, so
+`ls` colours and editor themes come through untouched. Copy and cut fill a file
 clipboard that persists while you navigate, so you can copy here, move
 somewhere else, and paste there — the system clipboard is separate and is still
 driven by `p` / `Shift+P`. Background colours are session-only.
