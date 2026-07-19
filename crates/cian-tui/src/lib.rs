@@ -745,6 +745,7 @@ enum MenuItem {
     Delete,
     Rename,
     Background,
+    Manual,
 }
 
 impl MenuItem {
@@ -758,6 +759,7 @@ impl MenuItem {
             MenuItem::Delete => "Delete (to trash)",
             MenuItem::Rename => "Rename",
             MenuItem::Background => "Background colour…",
+            MenuItem::Manual => "Key manual  (?)",
         }
     }
 }
@@ -2003,9 +2005,10 @@ impl App {
             items.push(MenuItem::Delete);
             items.push(MenuItem::Background);
         }
-        if items.is_empty() {
-            return;
-        }
+        // Always last, and present in every menu: the point of it is to be
+        // findable when you cannot remember anything else — including in the
+        // shell, where it is otherwise the only entry worth showing.
+        items.push(MenuItem::Manual);
         self.popup = Popup::ContextMenu { items, cursor: 0, at: (col, row) };
     }
 
@@ -2073,6 +2076,7 @@ impl App {
             MenuItem::MoveToOther => self.start_transfer(PendingOp::Move),
             MenuItem::Rename => self.start_rename(),
             MenuItem::Delete => self.start_delete(),
+            MenuItem::Manual => self.open_manual(),
             MenuItem::Background => {
                 let pane = self.focused;
                 let cur = Self::bg_slot(pane)
@@ -2951,7 +2955,7 @@ fn manual_sections() -> Vec<(&'static str, Vec<ManualEntry>)> {
             vec![
                 entry("q", Some(Quit), "quit (confirms)"),
                 entry(":", Some(Command), "command mode (:q, :shell, :man)"),
-                entry("?, Ctrl+.", None, "show this manual"),
+                entry("?, Ctrl+.", None, "show this manual (also right-click)"),
                 entry("Esc", None, "clear marks and filter / leave shell"),
             ],
         ),
@@ -4674,6 +4678,58 @@ mod tests {
         assert!(items.contains(&MenuItem::Paste));
         assert!(!items.contains(&MenuItem::Delete), "delete makes no sense in a PTY");
         assert!(!items.contains(&MenuItem::Rename));
+    }
+
+    /// The manual has to be reachable from the menu everywhere — that is the
+    /// whole point of putting it there.
+    #[test]
+    fn every_context_menu_offers_the_manual() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        for pane in [FocusedPane::Left, FocusedPane::Right, FocusedPane::Shell] {
+            app.focus(pane);
+            app.open_context_menu(5, 5);
+            let Popup::ContextMenu { items, .. } = &app.popup else {
+                panic!("no menu for {:?}", pane)
+            };
+            assert_eq!(
+                items.last(),
+                Some(&MenuItem::Manual),
+                "manual should be the last entry for {:?}",
+                pane
+            );
+            app.popup = Popup::None;
+        }
+    }
+
+    /// Right-clicking the shell with an empty clipboard used to open nothing
+    /// at all; the manual entry means there is always something to show.
+    #[test]
+    fn the_shell_menu_opens_even_with_an_empty_clipboard() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        app.focus(FocusedPane::Shell);
+        assert!(app.file_clip.is_none());
+        app.open_context_menu(5, 5);
+        let Popup::ContextMenu { items, .. } = &app.popup else { panic!("no menu") };
+        assert_eq!(items, &vec![MenuItem::Manual]);
+    }
+
+    #[test]
+    fn choosing_the_manual_from_the_menu_opens_it() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        let _ = render(&mut app, 100, 40);
+        app.open_context_menu(5, 5);
+
+        // Walk to the last entry and activate it with the keyboard.
+        let Popup::ContextMenu { items, .. } = &app.popup else { panic!("no menu") };
+        let steps = items.len() - 1;
+        for _ in 0..steps {
+            app.handle_key(key('j')).unwrap();
+        }
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+
+        assert!(matches!(app.popup, Popup::Manual { .. }), "expected the manual");
+        let screen = render(&mut app, 100, 40).join("\n");
+        assert!(screen.contains("key manual"), "manual should be on screen");
     }
 
     #[test]

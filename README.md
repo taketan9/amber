@@ -15,7 +15,8 @@ PTY shell panel.
 
 ## Help
 
-Press **`?`** (or `Ctrl+.`, or `:man`) inside cian for the full key manual —
+Press **`?`** (or `Ctrl+.`, `:man`, or **right-click → Key manual**) inside
+cian for the full key manual —
 it is generated from the live keymap, so it also lists any keys you bound in
 `init.lua`. From a shell, `cian -man` prints the same thing and `cian -h`
 prints the command-line usage.
@@ -27,7 +28,8 @@ file/shell divider, and every split inside the shell panel. Neither side can be
 dragged below 15% of its parent.
 
 Right-click a pane for a context menu: copy, cut, paste, copy/move to the other
-pane, rename, delete, and a per-pane background colour. Copy and cut fill a file
+pane, rename, delete, a per-pane background colour, and the key manual (which
+is offered in every menu, including the shell's). Copy and cut fill a file
 clipboard that persists while you navigate, so you can copy here, move
 somewhere else, and paste there — the system clipboard is separate and is still
 driven by `p` / `Shift+P`. Background colours are session-only.
