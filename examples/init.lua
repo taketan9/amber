@@ -60,7 +60,8 @@ cian.set_option("key_hints", true)
 cian.set_option("animation_ms", 150)
 
 ----------------------------------------------------------------------
--- SSH targets — press Shift+S (or `:ssh`) for the picker.
+-- SSH targets — Shift+S, `:ssh`, or right-click → SSH connect…
+-- (right-click is the one that works from inside the shell pane).
 --
 -- Declare hosts once and the users once; the picker asks for the host, then
 -- the user, so 8 hosts x 4 users is 12 lines here rather than 32 aliases you

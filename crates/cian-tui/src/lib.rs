@@ -750,6 +750,7 @@ enum MenuItem {
     Delete,
     Rename,
     Background,
+    Ssh,
     Manual,
 }
 
@@ -764,6 +765,7 @@ impl MenuItem {
             MenuItem::Delete => "Delete (to trash)",
             MenuItem::Rename => "Rename",
             MenuItem::Background => "Background colour…",
+            MenuItem::Ssh => "SSH connect…",
             MenuItem::Manual => "Key manual  (?)",
         }
     }
@@ -2187,7 +2189,10 @@ impl App {
         let mut items = Vec::new();
         if self.focused == FocusedPane::Shell {
             // A PTY owns its own screen, so the file operations make no sense
-            // here — but pasting and appearance still do.
+            // here. SSH leads: keys never reach the picker while the shell has
+            // focus, so this menu is the only way to open it without first
+            // leaving the shell — which is exactly where you want it.
+            items.push(MenuItem::Ssh);
             if self.file_clip.is_some() {
                 items.push(MenuItem::Paste);
             }
@@ -2202,6 +2207,7 @@ impl App {
             items.push(MenuItem::MoveToOther);
             items.push(MenuItem::Rename);
             items.push(MenuItem::Delete);
+            items.push(MenuItem::Ssh);
             items.push(MenuItem::Background);
         }
         // Always last, and present in every menu: the point of it is to be
@@ -2276,6 +2282,7 @@ impl App {
             MenuItem::Rename => self.start_rename(),
             MenuItem::Delete => self.start_delete(),
             MenuItem::Manual => self.open_manual(),
+            MenuItem::Ssh => self.start_ssh(),
             MenuItem::Background => {
                 let pane = self.focused;
                 let cur = Self::bg_slot(pane)
@@ -3262,7 +3269,7 @@ fn manual_sections() -> Vec<(&'static str, Vec<ManualEntry>)> {
                 entry("N", Some(SearchPrev), "previous match"),
                 entry("/", None, "filter list as you type"),
                 entry(",", None, "sort by name / size / date / ext"),
-                entry("Shift+S", None, "ssh connection picker (also :ssh)"),
+                entry("Shift+S", None, "ssh picker (also :ssh, or right-click)"),
                 entry("Enter, Esc", None, "while filtering: keep / clear it"),
             ],
         ),
@@ -5374,6 +5381,35 @@ mod tests {
 
     /// The manual has to be reachable from the menu everywhere — that is the
     /// whole point of putting it there.
+    /// Keys never reach the picker while the shell has focus, so the menu is
+    /// the only route to SSH from there. It must lead the shell's menu.
+    #[test]
+    fn the_shell_menu_leads_with_ssh() {
+        let (_d, mut app) = app_with_ssh();
+        app.focus(FocusedPane::Shell);
+        app.open_context_menu(5, 5);
+        let Popup::ContextMenu { items, .. } = &app.popup else { panic!("no menu") };
+        assert_eq!(items.first(), Some(&MenuItem::Ssh), "got {:?}", items);
+    }
+
+    #[test]
+    fn the_menu_reaches_the_ssh_picker_from_the_shell() {
+        let (_d, mut app) = app_with_ssh();
+        app.focus(FocusedPane::Shell);
+        app.run_menu_item(MenuItem::Ssh).unwrap();
+        assert!(matches!(app.popup, Popup::SshHosts { .. }), "should open the picker");
+    }
+
+    /// Both panes offer it, since the picker is useful from either.
+    #[test]
+    fn the_file_menu_offers_ssh_too() {
+        let (_d, mut app) = app_with_ssh();
+        app.focus(FocusedPane::Left);
+        app.open_context_menu(5, 5);
+        let Popup::ContextMenu { items, .. } = &app.popup else { panic!("no menu") };
+        assert!(items.contains(&MenuItem::Ssh), "got {:?}", items);
+    }
+
     #[test]
     fn every_context_menu_offers_the_manual() {
         let (_d, mut app) = app_with(&["a.txt"]);
@@ -5402,7 +5438,7 @@ mod tests {
         assert!(app.file_clip.is_none());
         app.open_context_menu(5, 5);
         let Popup::ContextMenu { items, .. } = &app.popup else { panic!("no menu") };
-        assert_eq!(items, &vec![MenuItem::Background, MenuItem::Manual]);
+        assert_eq!(items, &vec![MenuItem::Ssh, MenuItem::Background, MenuItem::Manual]);
     }
 
     #[test]

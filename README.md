@@ -58,8 +58,12 @@ permanently instead.
 
 ## SSH
 
-`Shift+S` (or `:ssh`) opens a two-stage picker: choose a host, then a user on
-it. Typing in the host stage filters. Hosts with a single user connect
+`Shift+S`, `:ssh`, or **right-click → SSH connect…** opens a two-stage picker:
+choose a host, then a user on it.
+
+Right-click is the one that works while the shell pane has focus: keys go
+straight to the shell there, so `Shift+S` would just type an `S`. SSH leads the
+shell pane's context menu for that reason. Typing in the host stage filters. Hosts with a single user connect
 straight away. The command is typed into the shell panel, so your own shell
 config and agent apply, and the tab drops back to a local prompt when the
 session ends.
