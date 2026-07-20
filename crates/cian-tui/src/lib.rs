@@ -3077,26 +3077,35 @@ pub fn manual_text() -> String {
 
 /// One-screen usage synopsis for `cian -h`.
 pub fn usage_text() -> String {
+    // Report the paths this build actually resolves rather than the Unix
+    // spelling: on Windows `~/.config/...` is not something the user can paste
+    // anywhere, and "where does my config go?" is the first thing they need.
+    let cfg = cian_lua::config_path()
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|| "(could not resolve a home directory)".into());
+    let shortcuts = ShortcutStore::default_path().display().to_string();
+
     [
-        "cian — a two-pane terminal file manager",
-        "",
-        "USAGE:",
-        "    cian [LEFT_PATH] [RIGHT_PATH]",
-        "",
-        "ARGS:",
-        "    LEFT_PATH     directory for the left pane  (default: current dir)",
-        "    RIGHT_PATH    directory for the right pane (default: current dir)",
-        "",
-        "OPTIONS:",
-        "    -h, --help    show this help",
-        "    -man, --man   show the full key manual (also Ctrl+. or ? in-app)",
-        "",
-        "CONFIG:",
-        "    ~/.config/cian/init.lua      (override dir with $CIAN_CONFIG_DIR)",
-        "    ~/.config/cian/shortcuts.toml",
-        "",
-        "ENVIRONMENT:",
-        "    CIAN_LOG      append diagnostics to this file (debugging)",
+        "cian — a two-pane terminal file manager".to_string(),
+        String::new(),
+        "USAGE:".to_string(),
+        "    cian [LEFT_PATH] [RIGHT_PATH]".to_string(),
+        String::new(),
+        "ARGS:".to_string(),
+        "    LEFT_PATH     directory for the left pane  (default: current dir)".to_string(),
+        "    RIGHT_PATH    directory for the right pane (default: current dir)".to_string(),
+        String::new(),
+        "OPTIONS:".to_string(),
+        "    -h, --help    show this help".to_string(),
+        "    -man, --man   show the full key manual (also ? or Ctrl+. in-app)".to_string(),
+        String::new(),
+        "CONFIG:".to_string(),
+        format!("    {}", cfg),
+        format!("    {}", shortcuts),
+        "    (override the config directory with $CIAN_CONFIG_DIR)".to_string(),
+        String::new(),
+        "ENVIRONMENT:".to_string(),
+        "    CIAN_LOG      append diagnostics to this file (debugging)".to_string(),
     ]
     .join("\n")
 }

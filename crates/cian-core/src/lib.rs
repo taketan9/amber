@@ -88,10 +88,12 @@ const HISTORY_CAP: usize = 30;
 
 impl Pane {
     pub fn new(cwd: impl Into<PathBuf>) -> Result<Self> {
-        let cwd = cwd
-            .into()
-            .canonicalize()
-            .context("invalid initial path")?;
+        // `dunce` rather than `Path::canonicalize`, which on Windows returns an
+        // extended-length path (`\\?\C:\...`). That prefix is a filesystem
+        // convention the Windows *Shell* does not accept, so it would show up
+        // in pane titles and, worse, break trashing a file — every entry path
+        // is built by joining onto this one.
+        let cwd = dunce::canonicalize(cwd.into()).context("invalid initial path")?;
         let mut pane = Self {
             cwd,
             entries: Vec::new(),
@@ -277,6 +279,36 @@ mod tests {
         }
         let pane = Pane::new(dir.path()).unwrap();
         (dir, pane)
+    }
+
+    /// Paths must stay in the form the Windows Shell understands.
+    ///
+    /// `Path::canonicalize` returns `\\?\C:\...` on Windows. That prefix is a
+    /// filesystem convention the Shell rejects, so it would show up in pane
+    /// titles and make trashing fail — and since every entry path is joined
+    /// onto the pane's cwd, one bad root poisons all of them. This assertion
+    /// only means anything on the Windows CI runner, which is the point.
+    #[test]
+    fn pane_paths_avoid_the_extended_length_prefix() {
+        let (_d, pane) = pane_with(&["a.txt"]);
+        assert!(pane.cwd.is_absolute(), "cwd should still be absolute");
+        assert!(!pane.entries.is_empty());
+
+        #[cfg(windows)]
+        {
+            assert!(
+                !pane.cwd.to_string_lossy().starts_with(r"\\?\"),
+                "extended-length prefix leaked into cwd: {:?}",
+                pane.cwd
+            );
+            for e in &pane.entries {
+                assert!(
+                    !e.path.to_string_lossy().starts_with(r"\\?\"),
+                    "extended-length prefix leaked into an entry: {:?}",
+                    e.path
+                );
+            }
+        }
     }
 
     fn names(pane: &Pane) -> Vec<String> {
