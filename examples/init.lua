@@ -66,10 +66,19 @@ cian.set_option("animation_ms", 150)
 -- the user, so 8 hosts x 4 users is 12 lines here rather than 32 aliases you
 -- would have to remember. Type in the host stage to filter.
 --
--- Authentication is left to ssh itself: set up key auth (ssh-keygen +
--- ssh-copy-id, or ssh-agent on Windows) and connecting becomes two keystrokes
--- with nothing to type. Passwords are deliberately not stored here — see the
--- README section "SSH".
+-- Authentication: key auth (ssh-keygen + ssh-copy-id, or ssh-agent on Windows)
+-- needs nothing here and is the least work overall. If you do need a password,
+-- a user entry can carry one and cian types it when ssh prompts:
+--
+--   users = {
+--     { name = "postgres", password = "..." },              -- plaintext, here
+--     { name = "deploy", password_cmd = "pass srv/deploy" },-- from a store
+--     "root",                                               -- key auth
+--   }
+--
+-- A stored password is a plaintext secret in a file that gets backed up and
+-- copied around; `chmod 600` this file, and prefer password_cmd where you can.
+-- See the README section "SSH".
 ----------------------------------------------------------------------
 -- cian.ssh({
 --   users = { "root", "deploy", "app", "taketan" },  -- offered for every host

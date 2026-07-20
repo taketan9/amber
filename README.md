@@ -78,10 +78,34 @@ cian.ssh({
 Eight hosts times four users is a dozen lines here instead of 32 aliases to
 remember — the picker does the remembering.
 
-**Passwords are not stored.** cian has no field for them and does not type
-them. Set up key authentication instead (`ssh-keygen` + `ssh-copy-id`, or
-`ssh-agent` on Windows); it is less work than maintaining a credential list,
-and it makes connecting genuinely keystroke-free rather than merely shorter.
+### Passwords
+
+A login can carry a password, which cian types when ssh asks for one:
+
+```lua
+users = {
+  { name = "postgres", password = "..." },        -- stored in this file
+  { name = "deploy", password_cmd = "pass srv/deploy" },  -- from a credential store
+  "root",                                          -- key auth; nothing stored
+}
+```
+
+ssh reads the password from its controlling terminal rather than stdin, so it
+cannot be piped in — but cian owns that terminal, so it writes to the PTY when
+the prompt appears. This is what TeraTerm's `.ttl` macros do, and expect(1)
+before them. cian waits for the prompt rather than sending blindly, so a host
+on key auth simply never receives anything and the attempt expires after 20
+seconds. A host-key confirmation is never answered automatically.
+
+The password is never logged (including under `CIAN_LOG`), never shown in the
+status bar, and redacted from debug output.
+
+**Understand the trade.** `password` puts a plaintext secret in a file that
+gets backed up, copied between machines, and shared more readily than its
+contents deserve. On Unix, cian warns at startup if such a file is readable by
+anyone else. `password_cmd` avoids storing anything by taking the value from a
+credential manager. Key authentication avoids the question entirely and is
+usually less work to set up than a credential list is to maintain.
 
 ## Sorting
 

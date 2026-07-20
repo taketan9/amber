@@ -52,6 +52,58 @@ pub struct Options {
     pub key_hints: Option<bool>,
 }
 
+/// A login on a host.
+///
+/// `password` is stored exactly as written in `init.lua`. That is a plaintext
+/// secret in a file, with everything that implies — it is opt-in, per user, and
+/// `password_cmd` exists so the value can come from a credential store instead
+/// without changing anything else. cian never logs or displays either.
+#[derive(Clone)]
+pub struct SshUser {
+    pub name: String,
+    pub password: Option<String>,
+    /// Shell command whose stdout is the password (trailing newline trimmed).
+    pub password_cmd: Option<String>,
+}
+
+impl SshUser {
+    pub fn plain(name: impl Into<String>) -> Self {
+        Self { name: name.into(), password: None, password_cmd: None }
+    }
+
+    pub fn has_secret(&self) -> bool {
+        self.password.is_some() || self.password_cmd.is_some()
+    }
+
+    /// Resolve the secret to send, running `password_cmd` if that is the source.
+    pub fn secret(&self) -> Option<String> {
+        if let Some(p) = &self.password {
+            return Some(p.clone());
+        }
+        let cmd = self.password_cmd.as_ref()?;
+        let out = if cfg!(windows) {
+            Command::new("cmd").args(["/C", cmd]).output().ok()?
+        } else {
+            Command::new("sh").arg("-c").arg(cmd).output().ok()?
+        };
+        if !out.status.success() {
+            return None;
+        }
+        Some(String::from_utf8_lossy(&out.stdout).trim_end_matches(['\r', '\n']).to_string())
+    }
+}
+
+/// Never let a secret reach a log line or a panic message.
+impl std::fmt::Debug for SshUser {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SshUser")
+            .field("name", &self.name)
+            .field("password", &self.password.as_ref().map(|_| "<redacted>"))
+            .field("password_cmd", &self.password_cmd.as_ref().map(|_| "<redacted>"))
+            .finish()
+    }
+}
+
 /// One SSH target: a host plus the users worth offering for it.
 #[derive(Debug, Clone)]
 pub struct SshHost {
@@ -59,7 +111,7 @@ pub struct SshHost {
     pub name: String,
     /// Hostname or address passed to `ssh`.
     pub host: String,
-    pub users: Vec<String>,
+    pub users: Vec<SshUser>,
     pub port: Option<u16>,
 }
 
@@ -151,9 +203,40 @@ fn escape_hint(err: &str) -> Vec<String> {
 
 pub fn load() -> Config {
     match config_path() {
-        Some(p) if p.exists() => load_from(&p),
+        Some(p) if p.exists() => {
+            let mut c = load_from(&p);
+            // Only worth saying if the file actually holds a secret.
+            if c.ssh_hosts.iter().any(|h| h.users.iter().any(|u| u.password.is_some())) {
+                c.errors.extend(permission_warning(&p));
+            }
+            c
+        }
         _ => Config::default(),
     }
+}
+
+/// Warn when a config holding plaintext passwords is readable by anyone else
+/// on the machine. Storing them is the user's call; leaving them world-readable
+/// is almost never intended.
+#[cfg(unix)]
+fn permission_warning(path: &Path) -> Vec<String> {
+    use std::os::unix::fs::PermissionsExt;
+    let Ok(meta) = std::fs::metadata(path) else { return Vec::new() };
+    let mode = meta.permissions().mode() & 0o077;
+    if mode == 0 {
+        return Vec::new();
+    }
+    vec![
+        format!("init.lua holds SSH passwords but is readable by others (mode {:o}).", meta.permissions().mode() & 0o777),
+        format!("  fix: chmod 600 {}", path.display()),
+    ]
+}
+
+#[cfg(not(unix))]
+fn permission_warning(_path: &Path) -> Vec<String> {
+    // Windows ACLs are not a mode bitmask; a meaningful check would need the
+    // security API, and a wrong warning is worse than none.
+    Vec::new()
 }
 
 fn load_from(path: &Path) -> Config {
@@ -207,6 +290,35 @@ fn load_from(path: &Path) -> Config {
         errors,
         _lua: Some(lua),
     }
+}
+
+/// Parse a `users` list, where each entry is either a bare name or a table
+/// carrying credentials:
+///
+/// ```lua
+/// users = { "root", { name = "deploy", password = "..." } }
+/// ```
+///
+/// Mixing the two matters: it lets a host move to key auth one login at a
+/// time, dropping the stored secret as each one is migrated.
+fn parse_users(t: Option<Table>) -> mlua::Result<Vec<SshUser>> {
+    let Some(t) = t else { return Ok(Vec::new()) };
+    let mut out = Vec::new();
+    for v in t.sequence_values::<Value>() {
+        match v? {
+            Value::String(s) => out.push(SshUser::plain(s.to_str()?.to_owned())),
+            Value::Table(u) => {
+                let Some(name) = u.get::<Option<String>>("name")? else { continue };
+                out.push(SshUser {
+                    name,
+                    password: u.get::<Option<String>>("password")?,
+                    password_cmd: u.get::<Option<String>>("password_cmd")?,
+                });
+            }
+            _ => {}
+        }
+    }
+    Ok(out)
 }
 
 fn install_api(lua: &Lua, builder: &Rc<RefCell<Builder>>) -> mlua::Result<()> {
@@ -316,8 +428,7 @@ fn install_api(lua: &Lua, builder: &Rc<RefCell<Builder>>) -> mlua::Result<()> {
             lua.create_function(move |_, t: Table| {
                 let mut bm = b.borrow_mut();
                 // Fleet-wide default, overridable per host.
-                let default_users: Vec<String> =
-                    t.get::<Option<Vec<String>>>("users")?.unwrap_or_default();
+                let default_users = parse_users(t.get::<Option<Table>>("users")?)?;
                 let hosts: Vec<Table> = match t.get::<Option<Vec<Table>>>("hosts")? {
                     Some(v) => v,
                     None => {
@@ -335,8 +446,8 @@ fn install_api(lua: &Lua, builder: &Rc<RefCell<Builder>>) -> mlua::Result<()> {
                     };
                     // `name` is what the picker shows; default to the address.
                     let name = h.get::<Option<String>>("name")?.unwrap_or_else(|| host.clone());
-                    let users = match h.get::<Option<Vec<String>>>("users")? {
-                        Some(v) => v,
+                    let users = match h.get::<Option<Table>>("users")? {
+                        Some(t) => parse_users(Some(t))?,
                         None => default_users.clone(),
                     };
                     if users.is_empty() {

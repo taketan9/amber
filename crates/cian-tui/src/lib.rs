@@ -769,6 +769,51 @@ impl MenuItem {
     }
 }
 
+/// A password held until ssh asks for it.
+///
+/// ssh reads the password from its controlling terminal rather than stdin, so
+/// it cannot be piped in — but cian *owns* that terminal, so writing to the PTY
+/// when the prompt appears works. This is the same approach TeraTerm's `.ttl`
+/// macros take (`wait 'password:'` / `sendln`), and expect(1) before them.
+///
+/// Waiting for the prompt rather than sending blindly is what keeps this from
+/// breaking everything else: a host on key auth never prompts, so the secret is
+/// simply never sent and the deadline quietly expires.
+struct PendingAuth {
+    secret: String,
+    /// Give up after this; the connection was probably keyed, refused, or is
+    /// asking something else entirely (a host-key confirmation, an MFA code).
+    deadline: Instant,
+}
+
+/// Never let a secret reach a log line or a panic message.
+impl std::fmt::Debug for PendingAuth {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PendingAuth").field("secret", &"<redacted>").finish()
+    }
+}
+
+/// How long to watch for a password prompt before giving up.
+const AUTH_WINDOW: Duration = Duration::from_secs(20);
+
+/// Does this screen end in something asking for a password?
+///
+/// Deliberately narrow: only a prompt on the last non-empty line counts, so
+/// the word "password" scrolling past in a log cannot trigger a send.
+fn looks_like_password_prompt(screen: &str) -> bool {
+    let Some(last) = screen.lines().map(|l| l.trim_end()).rfind(|l| !l.is_empty())
+    else {
+        return false;
+    };
+    let l = last.to_lowercase();
+    // A host-key question also ends in a colon but must not be answered with a
+    // password; it is handled by the user.
+    if l.contains("yes/no") || l.contains("fingerprint") {
+        return false;
+    }
+    (l.contains("password") || l.contains("passphrase")) && l.trim_end().ends_with(':')
+}
+
 /// Work deferred until a shrink transition finishes.
 #[derive(Debug, Clone, Copy)]
 enum PendingClose {
@@ -1062,6 +1107,8 @@ pub struct App {
     /// PTY spawns on a background thread, so the shell may not exist yet at
     /// the moment the user picks a connection.
     pending_shell_input: Option<String>,
+    /// A password waiting for ssh to ask for it. See [`PendingAuth`].
+    pending_auth: Option<PendingAuth>,
     /// Per-pane background overrides, indexed by [`Self::bg_slot`].
     /// Session-only: deliberately not persisted.
     pane_bg: [Option<Color>; 3],
@@ -1124,6 +1171,7 @@ impl App {
             ),
             show_key_hints: config.options.key_hints.unwrap_or(true),
             pending_shell_input: None,
+            pending_auth: None,
             pane_bg: [None, None, None],
             last_search_query: None,
             shortcuts: ShortcutStore::load_or_default(),
@@ -1625,13 +1673,58 @@ impl App {
     /// tab drops back to a local prompt instead of closing.
     fn ssh_connect(&mut self, idx: usize, user: &str) {
         let Some(h) = self.config.ssh_hosts.get(idx) else { return };
-        let mut cmd = format!("ssh {}@{}", user, h.host);
+        let Some(u) = h.users.iter().find(|u| u.name == user) else { return };
+        let mut cmd = format!("ssh {}@{}", u.name, h.host);
         if let Some(p) = h.port {
             cmd.push_str(&format!(" -p {}", p));
         }
-        let label = format!("{}@{}", user, h.name);
+        let label = format!("{}@{}", u.name, h.name);
+        // Resolved before the command is sent so a slow `password_cmd` cannot
+        // make us miss the prompt.
+        let secret = u.secret();
         self.run_in_shell(cmd);
-        self.message = Some(format!("→ {}", label));
+        match secret {
+            Some(s) => {
+                self.pending_auth =
+                    Some(PendingAuth { secret: s, deadline: Instant::now() + AUTH_WINDOW });
+                self.message = Some(format!("→ {} (sending password on prompt)", label));
+            }
+            None => self.message = Some(format!("→ {}", label)),
+        }
+    }
+
+    /// Send the held password if ssh is now asking for one.
+    ///
+    /// Returns true if the UI should repaint. The secret is written straight to
+    /// the PTY and never logged, echoed, or put in `message`.
+    fn poll_pending_auth(&mut self) -> bool {
+        let Some(auth) = &self.pending_auth else { return false };
+        if Instant::now() > auth.deadline {
+            // Expired: keyed host, refused login, or a prompt we do not answer.
+            self.pending_auth = None;
+            return false;
+        }
+        // Nothing to look at until the command has actually been delivered.
+        if self.pending_shell_input.is_some() {
+            return false;
+        }
+        let asking = match self.shell.active_session() {
+            Some(s) => match s.parser().lock() {
+                Ok(p) => looks_like_password_prompt(&p.screen().contents()),
+                Err(_) => false,
+            },
+            None => false,
+        };
+        if !asking {
+            return false;
+        }
+        let Some(auth) = self.pending_auth.take() else { return false };
+        if let Some(s) = self.shell.active_session_mut() {
+            let mut line = auth.secret;
+            line.push('\n');
+            s.write_input(line.as_bytes());
+        }
+        true
     }
 
     /// Send a command line to the shell panel, starting the shell if needed.
@@ -2309,8 +2402,9 @@ impl App {
                         // A host with one user needs no second stage.
                         let users = self.config.ssh_hosts[i].users.clone();
                         if users.len() == 1 {
+                            let only = users[0].name.clone();
                             self.popup = Popup::None;
-                            self.ssh_connect(i, &users[0]);
+                            self.ssh_connect(i, &only);
                         } else {
                             self.popup = Popup::SshUsers { host: i, cursor: 0 };
                         }
@@ -2349,7 +2443,7 @@ impl App {
                 KeyCode::Char('k') | KeyCode::Up => *cursor = (*cursor + n - 1) % n,
                 KeyCode::Enter => {
                     let (h, c) = (*host, *cursor);
-                    let user = self.config.ssh_hosts[h].users[c].clone();
+                    let user = self.config.ssh_hosts[h].users[c].name.clone();
                     self.popup = Popup::None;
                     self.ssh_connect(h, &user);
                 }
@@ -3420,6 +3514,11 @@ fn run_loop<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Result<()>
         if app.pending_shell_input.is_some() {
             app.flush_pending_shell_input();
             needs_redraw = true;
+        }
+        // ssh asks for a password on its own schedule, so watch for the prompt
+        // rather than sending blindly.
+        if app.pending_auth.is_some() {
+            needs_redraw |= app.poll_pending_auth();
         }
         // A freshly-created split grows in from nothing.
         if let Some((tab, node)) = app.shell.just_split.take() {
@@ -4616,7 +4715,7 @@ fn draw_popup(f: &mut Frame, area: Rect, popup: &mut Popup, hosts: &[cian_lua::S
                 Style::default().fg(Color::Rgb(205, 205, 218))
             };
             let users = if hst.users.len() == 1 {
-                hst.users[0].clone()
+                hst.users[0].name.clone()
             } else {
                 format!("{} users", hst.users.len())
             };
@@ -4666,8 +4765,10 @@ fn draw_popup(f: &mut Frame, area: Rect, popup: &mut Popup, hosts: &[cian_lua::S
                 } else {
                     Style::default().fg(Color::Rgb(205, 205, 218))
                 };
+                // A key marks logins that will authenticate without typing.
+                let mark = if u.has_secret() { "  🔑" } else { "" };
                 Line::from(Span::styled(
-                    format!("{}{}@{}", if sel { "▸ " } else { "  " }, u, hst.host),
+                    format!("{}{}@{}{}", if sel { "▸ " } else { "  " }, u.name, hst.host, mark),
                     style,
                 ))
             })
@@ -5762,13 +5863,17 @@ mod tests {
             cian_lua::SshHost {
                 name: "web1".into(),
                 host: "10.0.1.11".into(),
-                users: vec!["root".into(), "deploy".into()],
+                users: vec![cian_lua::SshUser::plain("root"), cian_lua::SshUser::plain("deploy")],
                 port: None,
             },
             cian_lua::SshHost {
                 name: "db1".into(),
                 host: "10.0.2.31".into(),
-                users: vec!["postgres".into()],
+                users: vec![cian_lua::SshUser {
+                    name: "postgres".into(),
+                    password: Some("hunter2".into()),
+                    password_cmd: None,
+                }],
                 port: Some(2222),
             },
         ];
@@ -5843,6 +5948,84 @@ mod tests {
         let Popup::Notice { lines } = &app.popup else { panic!("expected a notice") };
         let text = lines.join("\n");
         assert!(text.contains("cian.ssh"), "should show how to configure it:\n{}", text);
+    }
+
+    #[test]
+    fn a_password_prompt_is_recognised_only_at_the_end_of_the_screen() {
+        assert!(looks_like_password_prompt("root@10.0.2.31's password:"));
+        assert!(looks_like_password_prompt("Password:"));
+        assert!(looks_like_password_prompt("Enter passphrase for key '/x/id_ed25519':"));
+        // Trailing blank lines are ignored.
+        assert!(looks_like_password_prompt("Password:\n\n  \n"));
+    }
+
+    #[test]
+    fn things_that_must_not_be_mistaken_for_a_password_prompt() {
+        // The word scrolling past in output is not a prompt.
+        assert!(!looks_like_password_prompt("password rotation done\n$ "));
+        assert!(!looks_like_password_prompt("Failed password for root\n$ "));
+        // A host-key question ends in a colon but must be answered by a human.
+        assert!(!looks_like_password_prompt(
+            "The authenticity of host 'x' can't be established.\n\
+             ED25519 key fingerprint is SHA256:abc.\n\
+             Are you sure you want to continue connecting (yes/no)?:"
+        ));
+        assert!(!looks_like_password_prompt(""));
+        assert!(!looks_like_password_prompt("$ "));
+    }
+
+    #[test]
+    fn connecting_as_a_user_with_a_secret_arms_the_prompt_watcher() {
+        let (_d, mut app) = app_with_ssh();
+        app.ssh_connect(1, "postgres");
+        assert!(app.pending_auth.is_some(), "should be waiting for the prompt");
+        // The secret must not appear in anything the user or a log can see.
+        let msg = app.message.clone().unwrap_or_default();
+        assert!(!msg.contains("hunter2"), "secret leaked into the status message: {}", msg);
+        assert!(!format!("{:?}", app.pending_auth).contains("hunter2"), "secret leaked via Debug");
+    }
+
+    #[test]
+    fn a_user_without_a_secret_does_not_arm_it() {
+        let (_d, mut app) = app_with_ssh();
+        app.ssh_connect(0, "root");
+        assert!(app.pending_auth.is_none(), "key-auth logins must not wait to type anything");
+    }
+
+    #[test]
+    fn the_watcher_gives_up_after_its_window() {
+        let (_d, mut app) = app_with_ssh();
+        app.ssh_connect(1, "postgres");
+        // Pretend the window has passed with no prompt — a keyed host, say.
+        app.pending_auth = Some(PendingAuth {
+            secret: "hunter2".into(),
+            deadline: Instant::now() - Duration::from_secs(1),
+        });
+        app.pending_shell_input = None;
+        assert!(!app.poll_pending_auth());
+        assert!(app.pending_auth.is_none(), "should have expired rather than waiting forever");
+    }
+
+    /// The command is queued while the PTY spawns; the password must not be
+    /// sent before the command it answers has even been delivered.
+    #[test]
+    fn nothing_is_sent_while_the_command_is_still_queued() {
+        let (_d, mut app) = app_with_ssh();
+        app.ssh_connect(1, "postgres");
+        assert!(app.pending_shell_input.is_some(), "command should be queued");
+        assert!(!app.poll_pending_auth());
+        assert!(app.pending_auth.is_some(), "still armed, just not fired");
+    }
+
+    #[test]
+    fn a_secret_can_come_from_a_command_instead_of_the_file() {
+        let u = cian_lua::SshUser {
+            name: "deploy".into(),
+            password: None,
+            password_cmd: Some("printf 'from-store'".into()),
+        };
+        assert!(u.has_secret());
+        assert_eq!(u.secret().as_deref(), Some("from-store"));
     }
 
     #[test]
