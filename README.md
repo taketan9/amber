@@ -95,6 +95,25 @@ The file is optional — cian runs with defaults if it is absent. Any syntax or
 runtime error is shown in a startup notice and cian falls back to defaults for
 whatever could not be applied, so a broken config never blocks startup.
 
+### Windows paths need `[[...]]`
+
+A backslash starts an escape sequence in Lua, so pasting a path into `"..."` is
+a syntax error — and it takes the *whole* config file down with it, leaving you
+on the default shell wondering why none of your settings applied:
+
+```lua
+-- BAD: \W is not a valid escape, and this kills the entire file
+cian.set_option("shell", "C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe")
+
+-- GOOD: backslashes are literal inside long brackets
+cian.set_option("shell", [[C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe]])
+
+-- Also fine: a bare name is looked up on PATH
+cian.set_option("shell", "powershell.exe")
+```
+
+cian adds this hint to the startup notice whenever it sees an invalid escape.
+
 See [`examples/init.lua`](examples/init.lua) for a fully-commented template and
 the complete list of bindable actions.
 

@@ -118,6 +118,23 @@ pub fn config_path() -> Option<PathBuf> {
 
 /// Load the configuration. Never panics and never returns an error: anything
 /// that goes wrong is recorded in [`Config::errors`] and defaults are used.
+/// Turn Lua's terse "invalid escape sequence" into advice.
+///
+/// Pasting a Windows path straight into a quoted string — the natural thing to
+/// do for `shell` — makes `\W`, `\S`, `\v` … look like escape sequences, and
+/// the resulting syntax error takes the *whole* config down with it. The raw
+/// message gives no hint that backslashes are the problem, so spell it out.
+fn escape_hint(err: &str) -> Vec<String> {
+    if !err.contains("invalid escape sequence") {
+        return Vec::new();
+    }
+    vec![
+        "  hint: a backslash starts an escape sequence in Lua, so a Windows".into(),
+        "  path cannot be pasted into \"...\" as-is. Use [[...]] instead:".into(),
+        "    cian.set_option(\"shell\", [[C:\\path\\to\\shell.exe]])".into(),
+    ]
+}
+
 pub fn load() -> Config {
     match config_path() {
         Some(p) if p.exists() => load_from(&p),
@@ -149,6 +166,7 @@ fn load_from(path: &Path) -> Config {
     let mut errors = Vec::new();
     if let Err(e) = lua.load(&src).set_name("init.lua").exec() {
         errors.push(format!("init.lua: {}", e));
+        errors.extend(escape_hint(&e.to_string()));
     }
 
     // Pull the accumulated config out by cloning; the Lua handles stay valid
@@ -328,4 +346,27 @@ fn os_open(target: &str) -> std::io::Result<()> {
         .stderr(Stdio::null())
         .spawn()?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A Windows path pasted into a quoted string is the likeliest way for a
+    /// config to fail, and Lua's own message never mentions backslashes.
+    #[test]
+    fn an_invalid_escape_gets_a_windows_path_hint() {
+        let msg = r#"syntax error: [string "init.lua"]:1: invalid escape sequence near '"C:\W'"#;
+        let hint = escape_hint(msg);
+        assert!(!hint.is_empty(), "should explain the backslash problem");
+        let joined = hint.join("\n");
+        assert!(joined.contains("[[...]]"), "should show the fix: {}", joined);
+        assert!(joined.contains("escape sequence"), "should name the cause");
+    }
+
+    #[test]
+    fn unrelated_errors_get_no_hint() {
+        assert!(escape_hint("attempt to call a nil value").is_empty());
+        assert!(escape_hint(r#"set_option: unknown option "nope""#).is_empty());
+    }
 }

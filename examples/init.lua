@@ -26,9 +26,30 @@ cian.set_theme({
 ----------------------------------------------------------------------
 cian.set_option("clipboard_on_copy", true) -- also push paths to the OS clipboard on copy/move
 cian.set_option("mask", "*.*")              -- default file mask shown in the status bar
--- Program for the embedded shell panel. Defaults to $SHELL (Unix) / cmd.exe
--- (Windows). On Windows, use PowerShell with:
--- cian.set_option("shell", "powershell.exe")   -- or "pwsh.exe" for PowerShell 7
+----------------------------------------------------------------------
+-- Shell panel program
+--
+-- Defaults to $SHELL on Unix and %COMSPEC% (cmd.exe) on Windows.
+--
+-- IMPORTANT, Windows users: a backslash starts an escape sequence in Lua,
+-- so a path pasted into "..." is a *syntax error* that takes this whole
+-- file down with it — leaving you on the default shell (cmd.exe) wondering
+-- why nothing applied. Write full paths in [[...]], where backslashes are
+-- literal:
+--
+--     BAD   "C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"
+--     GOOD  [[C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe]]
+--
+-- The bare exe name also works and is looked up on PATH: "powershell.exe".
+----------------------------------------------------------------------
+local is_windows = package.config:sub(1, 1) == "\\"
+if is_windows then
+  -- Windows PowerShell 5.1, which ships with every Windows install.
+  cian.set_option("shell", [[C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe]])
+
+  -- PowerShell 7 instead, if you have it (the path varies by install):
+  -- cian.set_option("shell", [[C:\Program Files\PowerShell\7\pwsh.exe]])
+end
 
 -- Length of the split / maximize / close transitions, in milliseconds.
 -- Set to 0 to turn animation off entirely.
