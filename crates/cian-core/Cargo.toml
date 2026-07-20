@@ -10,7 +10,11 @@ description = "Domain logic for cian: file operations, marks, history, bookmarks
 anyhow   = { workspace = true }
 chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
 fs_extra = { workspace = true }
-trash = { version = "5.2.3", default-features = false }
+# `coinit_apartmentthreaded` is not optional on Windows: trash fails to compile
+# without one of its coinit_* features, and the Shell file APIs it calls want an
+# apartment-threaded COM runtime. Default features are otherwise off because the
+# `chrono` one only powers trash's listing/restore API, which cian does not use.
+trash = { version = "5.2.3", default-features = false, features = ["coinit_apartmentthreaded"] }
 
 [dev-dependencies]
 tempfile = "3.27.0"
