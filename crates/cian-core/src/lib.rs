@@ -66,6 +66,44 @@ pub fn format_time(t: SystemTime) -> String {
     dt.format("%Y-%m-%d %H:%M").to_string()
 }
 
+/// What the listing is ordered by.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SortKey {
+    Name,
+    Size,
+    Modified,
+    Extension,
+}
+
+impl SortKey {
+    pub fn label(self) -> &'static str {
+        match self {
+            SortKey::Name => "name",
+            SortKey::Size => "size",
+            SortKey::Modified => "date",
+            SortKey::Extension => "ext",
+        }
+    }
+
+    /// The order the picker offers, so the UI and the core agree.
+    pub const ALL: [SortKey; 4] =
+        [SortKey::Name, SortKey::Size, SortKey::Modified, SortKey::Extension];
+}
+
+/// How a pane's listing is ordered.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Sort {
+    pub key: SortKey,
+    /// Largest / newest / last-alphabetically first.
+    pub reverse: bool,
+}
+
+impl Default for Sort {
+    fn default() -> Self {
+        Self { key: SortKey::Name, reverse: false }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Pane {
     pub cwd: PathBuf,
@@ -77,6 +115,8 @@ pub struct Pane {
     pub all_entries: Vec<Entry>,
     /// Case-insensitive substring that narrows the listing. Empty shows all.
     pub filter: String,
+    /// Ordering of the listing.
+    pub sort: Sort,
     pub cursor: usize,
     /// Marked entries keyed by full path (survives reload).
     pub marks: HashSet<PathBuf>,
@@ -99,6 +139,7 @@ impl Pane {
             entries: Vec::new(),
             all_entries: Vec::new(),
             filter: String::new(),
+            sort: Sort::default(),
             cursor: 0,
             marks: HashSet::new(),
             history: Vec::new(),
@@ -116,17 +157,13 @@ impl Pane {
     }
 
     pub fn reload(&mut self) -> Result<()> {
-        let mut entries: Vec<Entry> = fs::read_dir(&self.cwd)
+        let entries: Vec<Entry> = fs::read_dir(&self.cwd)
             .with_context(|| format!("read_dir failed: {}", self.cwd.display()))?
             .filter_map(|res| res.ok())
             .filter_map(|de| Entry::from_dir_entry(de).ok())
             .collect();
-        entries.sort_by(|a, b| match (a.is_dir, b.is_dir) {
-            (true, false) => std::cmp::Ordering::Less,
-            (false, true) => std::cmp::Ordering::Greater,
-            _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
-        });
         self.all_entries = entries;
+        self.apply_sort();
         self.apply_filter();
         // Forget marks whose path no longer exists in this directory. This
         // checks the unfiltered list on purpose: narrowing the view must not
@@ -134,6 +171,52 @@ impl Pane {
         let live: HashSet<PathBuf> = self.all_entries.iter().map(|e| e.path.clone()).collect();
         self.marks.retain(|p| live.contains(p));
         Ok(())
+    }
+
+    /// Order `all_entries` according to `sort`.
+    ///
+    /// Directories always come first regardless of key or direction — that is
+    /// what navigation depends on, and burying folders among files to satisfy
+    /// a size sort would make the pane much harder to move around in.
+    fn apply_sort(&mut self) {
+        let sort = self.sort;
+        self.all_entries.sort_by(|a, b| {
+            match (a.is_dir, b.is_dir) {
+                (true, false) => return std::cmp::Ordering::Less,
+                (false, true) => return std::cmp::Ordering::Greater,
+                _ => {}
+            }
+            let by_name = |x: &Entry, y: &Entry| x.name.to_lowercase().cmp(&y.name.to_lowercase());
+            let ord = match sort.key {
+                SortKey::Name => by_name(a, b),
+                // Ties fall back to name so the order is stable and predictable
+                // rather than filesystem-dependent.
+                SortKey::Size => a.len.cmp(&b.len).then_with(|| by_name(a, b)),
+                SortKey::Modified => a.modified.cmp(&b.modified).then_with(|| by_name(a, b)),
+                SortKey::Extension => {
+                    let ext = |e: &Entry| {
+                        std::path::Path::new(&e.name)
+                            .extension()
+                            .and_then(|x| x.to_str())
+                            .unwrap_or("")
+                            .to_lowercase()
+                    };
+                    ext(a).cmp(&ext(b)).then_with(|| by_name(a, b))
+                }
+            };
+            if sort.reverse {
+                ord.reverse()
+            } else {
+                ord
+            }
+        });
+    }
+
+    /// Change the ordering and re-apply it, keeping the filter intact.
+    pub fn set_sort(&mut self, sort: Sort) {
+        self.sort = sort;
+        self.apply_sort();
+        self.apply_filter();
     }
 
     /// Rebuild `entries` from `all_entries` according to `filter`.
@@ -309,6 +392,61 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn sorting_by_size_orders_files_and_keeps_directories_first() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir(dir.path().join("zzz_folder")).unwrap();
+        fs::write(dir.path().join("big.bin"), vec![0u8; 3000]).unwrap();
+        fs::write(dir.path().join("mid.bin"), vec![0u8; 200]).unwrap();
+        fs::write(dir.path().join("small.bin"), b"x").unwrap();
+        let mut pane = Pane::new(dir.path()).unwrap();
+
+        pane.set_sort(Sort { key: SortKey::Size, reverse: false });
+        assert_eq!(
+            names(&pane),
+            vec!["zzz_folder", "small.bin", "mid.bin", "big.bin"],
+            "directories stay on top even when sorting by size"
+        );
+
+        pane.set_sort(Sort { key: SortKey::Size, reverse: true });
+        assert_eq!(names(&pane), vec!["zzz_folder", "big.bin", "mid.bin", "small.bin"]);
+    }
+
+    #[test]
+    fn sorting_by_extension_then_name() {
+        let (_d, mut pane) = pane_with(&["b.rs", "a.rs", "c.md"]);
+        pane.set_sort(Sort { key: SortKey::Extension, reverse: false });
+        // .md before .rs, and within .rs alphabetically.
+        assert_eq!(names(&pane), vec!["c.md", "a.rs", "b.rs"]);
+    }
+
+    #[test]
+    fn sorting_survives_reload_and_composes_with_the_filter() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("big.log"), vec![0u8; 3000]).unwrap();
+        fs::write(dir.path().join("small.log"), b"x").unwrap();
+        fs::write(dir.path().join("other.txt"), vec![0u8; 900]).unwrap();
+        let mut pane = Pane::new(dir.path()).unwrap();
+
+        pane.set_sort(Sort { key: SortKey::Size, reverse: true });
+        pane.set_filter("log");
+        assert_eq!(names(&pane), vec!["big.log", "small.log"], "sort applies within the filter");
+
+        pane.reload().unwrap();
+        assert_eq!(pane.sort.key, SortKey::Size, "reload must not reset the order");
+        assert_eq!(names(&pane), vec!["big.log", "small.log"]);
+    }
+
+    #[test]
+    fn default_order_is_name_ascending_with_directories_first() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir(dir.path().join("zdir")).unwrap();
+        fs::write(dir.path().join("a.txt"), b"").unwrap();
+        let pane = Pane::new(dir.path()).unwrap();
+        assert_eq!(pane.sort, Sort::default());
+        assert_eq!(names(&pane), vec!["zdir", "a.txt"]);
     }
 
     fn names(pane: &Pane) -> Vec<String> {

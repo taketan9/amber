@@ -7,7 +7,6 @@
 //! cian.set_theme({ accent = "#00d7d7", mark_fg = "yellow" })
 //! cian.set_keymap("x", "delete")          -- bind key `x` to the delete action
 //! cian.set_option("clipboard_on_copy", false)
-//! cian.set_option("mask", "*.rs")
 //! cian.on_open("md", function(path)        -- extension-dispatch execution
 //!   cian.spawn({ "open", "-a", "Typora", path })
 //! end)
@@ -44,12 +43,13 @@ pub struct Theme {
 #[derive(Debug, Clone, Default)]
 pub struct Options {
     pub clipboard_on_copy: Option<bool>,
-    pub mask: Option<String>,
     /// Program to run in the embedded shell panel (e.g. "powershell.exe").
     pub shell: Option<String>,
     /// Duration of split/zoom/close transitions in milliseconds. `0` disables
     /// animation entirely.
     pub animation_ms: Option<u64>,
+    /// Show the contextual key-hint bar above the status line.
+    pub key_hints: Option<bool>,
 }
 
 /// Mutable accumulator shared with the Lua callbacks during script execution.
@@ -243,7 +243,7 @@ fn install_api(lua: &Lua, builder: &Rc<RefCell<Builder>>) -> mlua::Result<()> {
         )?;
     }
 
-    // cian.set_option("clipboard_on_copy", false) / cian.set_option("mask", "*.rs")
+    // cian.set_option("clipboard_on_copy", false)
     {
         let b = builder.clone();
         cian.set(
@@ -257,17 +257,25 @@ fn install_api(lua: &Lua, builder: &Rc<RefCell<Builder>>) -> mlua::Result<()> {
                             .errors
                             .push("set_option: clipboard_on_copy expects a boolean".into()),
                     },
-                    "mask" => match String::from_lua(val, lua) {
-                        Ok(v) => bm.options.mask = Some(v),
-                        Err(_) => {
-                            bm.errors.push("set_option: mask expects a string".into())
-                        }
-                    },
+                    // Removed: `mask` was only ever displayed, never applied.
+                    // Name it explicitly so an old config gets told what to do
+                    // instead of a bare "unknown option".
+                    "mask" => bm.errors.push(
+                        "set_option: `mask` was removed — it never filtered anything. \
+                         Press `/` in the app to narrow the listing instead."
+                            .into(),
+                    ),
                     "shell" => match String::from_lua(val, lua) {
                         Ok(v) => bm.options.shell = Some(v),
                         Err(_) => {
                             bm.errors.push("set_option: shell expects a string".into())
                         }
+                    },
+                    "key_hints" => match bool::from_lua(val, lua) {
+                        Ok(v) => bm.options.key_hints = Some(v),
+                        Err(_) => bm
+                            .errors
+                            .push("set_option: key_hints expects a boolean".into()),
                     },
                     "animation_ms" => match u64::from_lua(val, lua) {
                         Ok(v) => bm.options.animation_ms = Some(v),

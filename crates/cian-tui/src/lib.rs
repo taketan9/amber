@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use cian_core::ops::{self, Conflict, DeleteMode, OpReport};
-use cian_core::Pane;
+use cian_core::{Pane, Sort, SortKey};
 use cian_lua::Config;
 use cian_pty::PtySession;
 use crossterm::event::{
@@ -727,6 +727,8 @@ enum Popup {
     ContextMenu { items: Vec<MenuItem>, cursor: usize, at: (u16, u16) },
     /// Background-colour picker for the pane that was right-clicked.
     ColorPicker { pane: FocusedPane, cursor: usize },
+    /// Sort-order picker for the focused pane.
+    SortPicker { cursor: usize },
     Search { buffer: String },
     History { entries: Vec<PathBuf>, cursor: usize },
     Shortcuts { entries: Vec<Shortcut>, cursor: usize },
@@ -1019,7 +1021,6 @@ pub struct App {
     pub shell: ShellPane,
     pub focused: FocusedPane,
     pub mode: Mode,
-    pub mask: String,
     pub command_buffer: String,
     /// In-progress text for [`Mode::Filter`].
     pub filter_buffer: String,
@@ -1052,6 +1053,8 @@ pub struct App {
     anim_then: Option<PendingClose>,
     /// Transition length; zero disables animation.
     anim_dur: Duration,
+    /// Show the contextual key-hint bar.
+    show_key_hints: bool,
     /// Per-pane background overrides, indexed by [`Self::bg_slot`].
     /// Session-only: deliberately not persisted.
     pane_bg: [Option<Color>; 3],
@@ -1080,11 +1083,6 @@ impl App {
             }
         }
         let clipboard_on_copy = config.options.clipboard_on_copy.unwrap_or(true);
-        let mask = config
-            .options
-            .mask
-            .clone()
-            .unwrap_or_else(|| "*.*".to_string());
         let shell_cmd = config
             .options
             .shell
@@ -1096,7 +1094,6 @@ impl App {
             shell: ShellPane::new(shell_cmd),
             focused: FocusedPane::Left,
             mode: Mode::Normal,
-            mask,
             command_buffer: String::new(),
             filter_buffer: String::new(),
             message: None,
@@ -1118,6 +1115,7 @@ impl App {
             anim_dur: Duration::from_millis(
                 config.options.animation_ms.unwrap_or(DEFAULT_ANIM_MS),
             ),
+            show_key_hints: config.options.key_hints.unwrap_or(true),
             pane_bg: [None, None, None],
             last_search_query: None,
             shortcuts: ShortcutStore::load_or_default(),
@@ -1570,6 +1568,26 @@ impl App {
             _ => {}
         }
         Ok(())
+    }
+
+    // ------- Sorting -------
+    fn start_sort_picker(&mut self) {
+        // Open on the pane's current key, so the picker shows where you are.
+        let cur = self
+            .active_pane()
+            .and_then(|p| SortKey::ALL.iter().position(|k| *k == p.sort.key))
+            .unwrap_or(0);
+        self.popup = Popup::SortPicker { cursor: cur };
+    }
+
+    /// Apply a sort key. Choosing the key that is already active flips the
+    /// direction, which is how column headers behave everywhere else.
+    fn apply_sort_key(&mut self, key: SortKey) {
+        let Some(p) = self.active_pane_mut() else { return };
+        let reverse = if p.sort.key == key { !p.sort.reverse } else { false };
+        p.set_sort(Sort { key, reverse });
+        let arrow = if reverse { "descending" } else { "ascending" };
+        self.message = Some(format!("sorted by {} ({})", key.label(), arrow));
     }
 
     // ------- Manual -------
@@ -2188,6 +2206,26 @@ impl App {
             }
             return Ok(());
         }
+        if let Popup::SortPicker { cursor } = &mut self.popup {
+            let n = SortKey::ALL.len();
+            match key.code {
+                KeyCode::Esc | KeyCode::Char('q') => self.popup = Popup::None,
+                KeyCode::Char('j') | KeyCode::Down => *cursor = (*cursor + 1) % n,
+                KeyCode::Char('k') | KeyCode::Up => *cursor = (*cursor + n - 1) % n,
+                KeyCode::Enter => {
+                    let key = SortKey::ALL[*cursor];
+                    self.popup = Popup::None;
+                    self.apply_sort_key(key);
+                }
+                // Direct picks, so the picker is skippable once memorised.
+                KeyCode::Char('n') => { self.popup = Popup::None; self.apply_sort_key(SortKey::Name); }
+                KeyCode::Char('s') => { self.popup = Popup::None; self.apply_sort_key(SortKey::Size); }
+                KeyCode::Char('d') => { self.popup = Popup::None; self.apply_sort_key(SortKey::Modified); }
+                KeyCode::Char('e') => { self.popup = Popup::None; self.apply_sort_key(SortKey::Extension); }
+                _ => {}
+            }
+            return Ok(());
+        }
         if let Popup::ColorPicker { pane, cursor } = &mut self.popup {
             let n = PANE_BG_PRESETS.len();
             match key.code {
@@ -2518,6 +2556,7 @@ impl App {
             // search, filter, history, shortcuts
             (false, false, KeyCode::Char('f')) => self.start_search(),
             (false, false, KeyCode::Char('/')) => self.start_filter(),
+            (false, false, KeyCode::Char(',')) => self.start_sort_picker(),
             (false, _, KeyCode::Char('n')) => self.jump_to_next_match(true),
             (false, _, KeyCode::Char('N')) => self.jump_to_next_match(false),
             (false, false, KeyCode::Char('h')) => self.start_history(),
@@ -2976,6 +3015,7 @@ fn manual_sections() -> Vec<(&'static str, Vec<ManualEntry>)> {
                 entry("n", Some(SearchNext), "next match"),
                 entry("N", Some(SearchPrev), "previous match"),
                 entry("/", None, "filter list as you type"),
+                entry(",", None, "sort by name / size / date / ext"),
                 entry("Enter, Esc", None, "while filtering: keep / clear it"),
             ],
         ),
@@ -3375,9 +3415,12 @@ fn draw_zoomed(f: &mut Frame, area: Rect, app: &mut App, ov: AnimOverride) {
 
 fn draw(f: &mut Frame, app: &mut App) {
     let area = f.area();
-    // Command and filter modes both add a prompt line above the status bar.
+    // Command and filter modes add a prompt line above the status bar; the key
+    // hints take another. A very short window drops the hints rather than the
+    // listing.
     let prompt_line = matches!(app.mode, Mode::Command | Mode::Filter);
-    let bottom_lines = if prompt_line { 2 } else { 1 };
+    let hint_line = app.show_key_hints && area.height >= 12;
+    let bottom_lines = 1 + u16::from(prompt_line) + u16::from(hint_line);
     let vertical = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Min(1), Constraint::Length(bottom_lines)])
@@ -3401,24 +3444,46 @@ fn draw(f: &mut Frame, app: &mut App) {
         draw_split(f, main_area, app, ov);
     }
 
-    if prompt_line {
-        let cmd_area = Rect::new(bottom_area.x, bottom_area.y, bottom_area.width, 1);
-        let status_area = Rect::new(bottom_area.x, bottom_area.y + 1, bottom_area.width, 1);
-        if app.mode == Mode::Filter {
-            let matched = app.active_pane().map(|p| p.entries.len()).unwrap_or(0);
-            let total = app.active_pane().map(|p| p.all_entries.len()).unwrap_or(0);
-            draw_prompt_line(
-                f,
-                cmd_area,
-                &format!("filter /{}_", app.filter_buffer),
-                &format!("{}/{} match  Enter=keep  Esc=clear", matched, total),
-            );
-        } else {
-            draw_command_line(f, cmd_area, &app.command_buffer);
+    // Stack the bottom rows: [prompt] [hints] [status]. Each is claimed only if
+    // the strip actually has room — a window can be short enough that Layout
+    // hands back fewer rows than were asked for, and writing past the buffer
+    // panics.
+    let end = bottom_area.y.saturating_add(bottom_area.height);
+    let mut row = bottom_area.y;
+    let claim = |row: &mut u16| -> Option<Rect> {
+        if *row >= end {
+            return None;
         }
-        draw_status(f, status_area, app);
-    } else {
-        draw_status(f, bottom_area, app);
+        let r = Rect::new(bottom_area.x, *row, bottom_area.width, 1);
+        *row += 1;
+        Some(r)
+    };
+
+    // Note: `claim` must only be called for rows that are actually drawn, so
+    // each branch guards its flag *before* claiming.
+    if prompt_line {
+        if let Some(cmd_area) = claim(&mut row) {
+            if app.mode == Mode::Filter {
+                let matched = app.active_pane().map(|p| p.entries.len()).unwrap_or(0);
+                let total = app.active_pane().map(|p| p.all_entries.len()).unwrap_or(0);
+                draw_prompt_line(
+                    f,
+                    cmd_area,
+                    &format!("filter /{}_", app.filter_buffer),
+                    &format!("{}/{} match  Enter=keep  Esc=clear", matched, total),
+                );
+            } else {
+                draw_command_line(f, cmd_area, &app.command_buffer);
+            }
+        }
+    }
+    if hint_line {
+        if let Some(r) = claim(&mut row) {
+            draw_key_hints(f, r, app);
+        }
+    }
+    if let Some(r) = claim(&mut row) {
+        draw_status(f, r, app);
     }
 
     if !matches!(app.popup, Popup::None) {
@@ -3587,6 +3652,85 @@ fn icon_for(entry: &cian_core::Entry) -> &'static str {
     }
 }
 
+/// Broad kinds of file, used to colour the listing.
+///
+/// Deliberately coarse: the point is that a glance separates "code" from
+/// "archive" from "image", not that every extension gets its own hue. Too many
+/// colours read as noise rather than structure.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FileKind {
+    Directory,
+    Code,
+    Config,
+    Document,
+    Image,
+    Media,
+    Archive,
+    Executable,
+    /// Dotfiles and other things that are usually background noise.
+    Muted,
+    Plain,
+}
+
+impl FileKind {
+    fn color(self) -> Color {
+        match self {
+            // Not `Color::Blue`: the terminal's ANSI blue is #0000ee, which is
+            // close to unreadable on a dark background.
+            FileKind::Directory => Color::Rgb(96, 165, 250),
+            FileKind::Code => Color::Rgb(250, 204, 21),
+            FileKind::Config => Color::Rgb(148, 190, 210),
+            FileKind::Document => Color::Rgb(226, 226, 236),
+            FileKind::Image => Color::Rgb(216, 130, 220),
+            FileKind::Media => Color::Rgb(120, 200, 190),
+            FileKind::Archive => Color::Rgb(240, 130, 120),
+            FileKind::Executable => Color::Rgb(126, 217, 130),
+            FileKind::Muted => Color::Rgb(128, 128, 148),
+            FileKind::Plain => Color::Rgb(205, 205, 218),
+        }
+    }
+
+    fn bold(self) -> bool {
+        matches!(self, FileKind::Directory | FileKind::Executable)
+    }
+}
+
+/// Classify an entry for colouring. Mirrors the categories [`icon_for`] draws
+/// from, so a file's icon and its colour always agree.
+fn kind_for(entry: &cian_core::Entry) -> FileKind {
+    if entry.is_dir {
+        return FileKind::Directory;
+    }
+    // Dotfiles recede: they are rarely the thing being looked for.
+    if entry.name.starts_with('.') {
+        return FileKind::Muted;
+    }
+    let ext = std::path::Path::new(&entry.name)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+    match ext.as_str() {
+        "rs" | "py" | "js" | "mjs" | "cjs" | "ts" | "tsx" | "jsx" | "go" | "c" | "h" | "cpp"
+        | "cc" | "cxx" | "hpp" | "java" | "rb" | "php" | "lua" | "swift" | "kt" | "kts"
+        | "vue" | "svelte" | "html" | "htm" | "css" | "scss" | "sass" | "less" => FileKind::Code,
+        "toml" | "ini" | "conf" | "cfg" | "yaml" | "yml" | "json" | "jsonc" | "xml" | "env" => {
+            FileKind::Config
+        }
+        "md" | "markdown" | "txt" | "log" | "pdf" | "doc" | "docx" | "xls" | "xlsx" | "ppt"
+        | "pptx" | "rtf" | "csv" | "tsv" => FileKind::Document,
+        "png" | "jpg" | "jpeg" | "gif" | "bmp" | "svg" | "webp" | "ico" | "tif" | "tiff" => {
+            FileKind::Image
+        }
+        "mp3" | "wav" | "flac" | "ogg" | "m4a" | "aac" | "mp4" | "mov" | "mkv" | "avi" | "webm"
+        | "wmv" => FileKind::Media,
+        "zip" | "tar" | "gz" | "7z" | "rar" | "bz2" | "xz" | "zst" | "tgz" => FileKind::Archive,
+        "exe" | "msi" | "bat" | "cmd" | "ps1" | "sh" | "bash" | "zsh" | "fish" | "app"
+        | "dll" | "so" | "dylib" => FileKind::Executable,
+        _ => FileKind::Plain,
+    }
+}
+
 fn shell_tabs_title<'a>(tabs: &'a ShellPane, focused: bool) -> Line<'a> {
     let mut spans: Vec<Span<'a>> = Vec::new();
     spans.push(Span::raw(" "));
@@ -3661,14 +3805,13 @@ fn draw_file_pane(
         let in_visual = visual_range.map(|(a, b)| i >= a && i <= b).unwrap_or(false);
         let mark_symbol = if marked { "● " } else { "  " };
         let mark_style = Style::default().fg(theme().mark_fg).add_modifier(Modifier::BOLD);
-        let name_style = if e.is_dir {
-            Style::default().fg(Color::Blue).add_modifier(Modifier::BOLD)
-        } else { Style::default() };
-        let icon_style = if e.is_dir {
-            Style::default().fg(theme().accent)
-        } else {
-            Style::default().fg(Color::Rgb(180, 180, 200))
-        };
+        let kind = kind_for(e);
+        let mut name_style = Style::default().fg(kind.color());
+        if kind.bold() {
+            name_style = name_style.add_modifier(Modifier::BOLD);
+        }
+        // The icon carries the same colour so the row reads as one unit.
+        let icon_style = Style::default().fg(kind.color());
 
         let name = truncate(&e.name, name_w);
         let mut spans = vec![
@@ -4024,6 +4167,75 @@ fn focus_badge_color(mode: Mode) -> Color {
     }
 }
 
+/// The keys worth advertising in the current context.
+///
+/// Deliberately short and mode-specific: a bar listing everything is wallpaper
+/// that stops being read. `?` is always last so the full manual is reachable
+/// from whatever state the user is stuck in.
+fn key_hints(app: &App) -> Vec<(&'static str, &'static str)> {
+    if app.focused == FocusedPane::Shell {
+        return vec![
+            ("Esc", "files"),
+            ("F9", "new tab"),
+            ("S-F8/F9", "split"),
+            ("S-F10", "close"),
+            ("F12", "zoom"),
+            ("?", "help"),
+        ];
+    }
+    match app.mode {
+        Mode::Visual => vec![
+            ("j/k", "extend"),
+            ("Enter", "confirm"),
+            ("Esc", "cancel"),
+        ],
+        Mode::Filter => vec![
+            ("type", "narrow"),
+            ("Enter", "keep"),
+            ("Esc", "clear"),
+        ],
+        Mode::Command => vec![("Enter", "run"), ("Esc", "cancel")],
+        _ => vec![
+            ("l/-", "in/out"),
+            ("Space", "mark"),
+            ("y/m", "copy/move"),
+            ("d", "delete"),
+            ("r", "rename"),
+            ("/", "filter"),
+            (",", "sort"),
+            ("Shift+J", "shell"),
+            ("?", "help"),
+        ],
+    }
+}
+
+fn draw_key_hints(f: &mut Frame, area: Rect, app: &App) {
+    let key_style = Style::default()
+        .fg(theme().accent)
+        .bg(theme().status_bg)
+        .add_modifier(Modifier::BOLD);
+    let desc_style = Style::default().fg(Color::Rgb(150, 150, 170)).bg(theme().status_bg);
+    let gap = Span::styled("   ", desc_style);
+
+    let mut spans = vec![Span::styled(" ", desc_style)];
+    let mut used = 1u16;
+    for (k, d) in key_hints(app) {
+        // +4 for the space between key and label plus the trailing gap.
+        let w = k.chars().count() as u16 + d.chars().count() as u16 + 4;
+        if used + w > area.width {
+            break;
+        }
+        used += w;
+        spans.push(Span::styled(k, key_style));
+        spans.push(Span::styled(format!(" {}", d), desc_style));
+        spans.push(gap.clone());
+    }
+    f.render_widget(
+        Paragraph::new(Line::from(spans)).style(Style::default().bg(theme().status_bg)),
+        area,
+    );
+}
+
 fn draw_status(f: &mut Frame, area: Rect, app: &App) {
     let focus_label = match app.focused {
         FocusedPane::Left => "L",
@@ -4060,7 +4272,13 @@ fn draw_status(f: &mut Frame, area: Rect, app: &App) {
             if mark_count > 0 { theme().mark_fg } else { Color::Rgb(140, 140, 160) },
         ),
         dim_sep.clone(),
-        chip(format!("mask {}", app.mask), Color::Rgb(180, 180, 220)),
+        chip(
+            match app.active_pane() {
+                Some(p) => format!("{} {}", p.sort.key.label(), if p.sort.reverse { "▼" } else { "▲" }),
+                None => "—".to_string(),
+            },
+            Color::Rgb(180, 180, 220),
+        ),
     ];
 
     // A narrowed listing must never look like a complete one, so the active
@@ -4197,6 +4415,55 @@ fn draw_popup(f: &mut Frame, area: Rect, popup: &mut Popup) {
             })
             .collect();
         f.render_widget(Paragraph::new(rows), inner);
+        return;
+    }
+
+    if let Popup::SortPicker { cursor } = popup {
+        let w = 34u16.min(area.width);
+        let h = SortKey::ALL.len() as u16 + 3;
+        let rect = centered_rect(w, h.min(area.height), area);
+        f.render_widget(Clear, rect);
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
+            .title(" sort by ");
+        let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
+        f.render_widget(block, rect);
+
+        let rows: Vec<Line> = SortKey::ALL
+            .iter()
+            .enumerate()
+            .map(|(i, k)| {
+                let sel = i == *cursor;
+                let style = if sel {
+                    Style::default().fg(theme().accent).add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(Color::Rgb(200, 200, 215))
+                };
+                // The shortcut letter doubles as the mnemonic.
+                let hint = match k {
+                    SortKey::Name => "n",
+                    SortKey::Size => "s",
+                    SortKey::Modified => "d",
+                    SortKey::Extension => "e",
+                };
+                Line::from(Span::styled(
+                    format!("{}{}  ({})", if sel { "▸ " } else { "  " }, k.label(), hint),
+                    style,
+                ))
+            })
+            .collect();
+        let body_area = Rect::new(inner.x, inner.y, inner.width, inner.height.saturating_sub(1));
+        f.render_widget(Paragraph::new(rows), body_area);
+        let footer_area =
+            Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1);
+        f.render_widget(
+            Paragraph::new(" Enter=apply (again = reverse)  Esc ").style(
+                Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD),
+            ),
+            footer_area,
+        );
         return;
     }
 
@@ -4345,6 +4612,7 @@ fn draw_popup(f: &mut Frame, area: Rect, popup: &mut Popup) {
         Popup::Manual { .. }
         | Popup::ContextMenu { .. }
         | Popup::ColorPicker { .. }
+        | Popup::SortPicker { .. }
         | Popup::None => return,
     };
 
@@ -5109,6 +5377,112 @@ mod tests {
         // And a cell that was Reset did get the tint.
         let right = app.layout_rects.right;
         assert_eq!(buf[(right.x + 5, right.y + right.height / 2)].bg, tint);
+    }
+
+    #[test]
+    fn comma_opens_the_sort_picker_and_enter_applies_it() {
+        let (_d, mut app) = app_with(&["b.rs", "a.rs", "c.md"]);
+        app.handle_key(key(',')).unwrap();
+        assert!(matches!(app.popup, Popup::SortPicker { .. }));
+
+        // Jump straight to extension with its mnemonic.
+        app.handle_key(key('e')).unwrap();
+        assert!(matches!(app.popup, Popup::None));
+        let p = app.active_pane().unwrap();
+        assert_eq!(p.sort.key, SortKey::Extension);
+        assert!(!p.sort.reverse);
+    }
+
+    /// Picking the key that is already active flips the direction, the way a
+    /// column header does.
+    #[test]
+    fn choosing_the_active_key_again_reverses_it() {
+        let (_d, mut app) = app_with(&["a.txt", "b.txt"]);
+        app.apply_sort_key(SortKey::Size);
+        assert!(!app.active_pane().unwrap().sort.reverse);
+        app.apply_sort_key(SortKey::Size);
+        assert!(app.active_pane().unwrap().sort.reverse, "second pick should reverse");
+        app.apply_sort_key(SortKey::Name);
+        assert!(!app.active_pane().unwrap().sort.reverse, "a different key resets direction");
+    }
+
+    #[test]
+    fn sorting_is_per_pane() {
+        let (_d, mut app) = app_with(&["a.txt", "b.txt"]);
+        app.focus(FocusedPane::Left);
+        app.apply_sort_key(SortKey::Size);
+        assert_eq!(app.left.active_ref().sort.key, SortKey::Size);
+        assert_eq!(app.right.active_ref().sort.key, SortKey::Name, "other pane untouched");
+    }
+
+    #[test]
+    fn the_status_bar_shows_the_active_order() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        let screen = render(&mut app, 100, 40).join("\n");
+        assert!(screen.contains("name ▲"), "ascending indicator missing:\n{}", screen);
+
+        app.apply_sort_key(SortKey::Modified);
+        app.apply_sort_key(SortKey::Modified);
+        let screen = render(&mut app, 100, 40).join("\n");
+        assert!(screen.contains("date ▼"), "descending indicator missing:\n{}", screen);
+    }
+
+    #[test]
+    fn the_key_hint_bar_is_contextual() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        let normal = render(&mut app, 110, 40).join("\n");
+        assert!(normal.contains("sort"), "normal hints missing:\n{}", normal);
+        assert!(normal.contains("filter"));
+
+        // Visual mode advertises a different, shorter set.
+        app.visual_start();
+        let visual = render(&mut app, 110, 40).join("\n");
+        assert!(visual.contains("extend"), "visual hints missing:\n{}", visual);
+        assert!(!visual.contains("rename"), "normal-mode hints should be gone");
+    }
+
+    #[test]
+    fn the_key_hint_bar_can_be_switched_off() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.txt"), b"x").unwrap();
+        let mut config = cian_lua::Config::default();
+        config.options.key_hints = Some(false);
+        let p = dir.path().to_path_buf();
+        let mut app = App::new(p.clone(), p, config).unwrap();
+
+        let screen = render(&mut app, 110, 40).join("\n");
+        assert!(!screen.contains("? help"), "hints should be hidden");
+        // The row it would have used goes back to the listing.
+        assert!(screen.contains("a.txt"));
+    }
+
+    /// The bottom rows are claimed one at a time, so a row must only be
+    /// consumed by a bar that is actually drawn. Getting that wrong shifts
+    /// everything below it down by one and blanks the last line.
+    #[test]
+    fn the_status_bar_sits_on_the_last_row_in_every_mode() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+
+        let normal = render(&mut app, 110, 40);
+        assert!(normal[39].contains("items"), "status row: {:?}", normal[39]);
+        assert!(normal[38].contains("help"), "hints above it: {:?}", normal[38]);
+
+        // Filter mode adds a prompt row above the hints; the status bar must
+        // still be the bottom line.
+        app.handle_key(key('/')).unwrap();
+        let filtering = render(&mut app, 110, 40);
+        assert!(filtering[39].contains("items"), "status row: {:?}", filtering[39]);
+        assert!(filtering[37].contains("filter /"), "prompt row: {:?}", filtering[37]);
+    }
+
+    /// A short window drops the hints rather than squeezing the listing out.
+    #[test]
+    fn a_short_window_drops_the_hints() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        let tall = render(&mut app, 110, 40).join("\n");
+        assert!(tall.contains("? help"));
+        let short = render(&mut app, 110, 10).join("\n");
+        assert!(!short.contains("? help"), "hints should yield on a short window");
     }
 
     #[test]

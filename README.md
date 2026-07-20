@@ -56,6 +56,21 @@ cian.set_option("animation_ms", 0)     -- off
 a mistake is recoverable. The confirmation popup offers `a` to delete
 permanently instead.
 
+## Sorting
+
+`,` opens the sort picker: name, size, date or extension, with `n`/`s`/`d`/`e`
+as direct shortcuts. Choosing the key that is already active reverses it, the
+way a column header does. Directories always stay at the top regardless — a
+size sort that scattered folders through the listing would make the pane much
+harder to navigate. The order is per-pane and shown in the status bar
+(`size ▼`).
+
+## Key hints
+
+A bar above the status line lists the keys that apply right now, and changes
+with the mode. Turn it off with `cian.set_option("key_hints", false)`; it also
+yields automatically on a short window.
+
 ## Filtering
 
 `/` narrows the listing as you type (case-insensitive substring). **Enter**
@@ -70,7 +85,7 @@ Cargo workspace, split into five crates:
 
 | Crate | Role |
 |---|---|
-| `cian-core` | Pure domain logic: file ops, marks, history, bookmarks, masks, search |
+| `cian-core` | Pure domain logic: file ops, marks, history, sorting, filtering, search |
 | `cian-tui`  | Rendering & input (ratatui + crossterm), layout, popups |
 | `cian-pty`  | Embedded shell pane (portable-pty + alacritty_terminal) |
 | `cian-lua`  | Lua configuration host (mlua): keymaps, themes, ext-open DSL |

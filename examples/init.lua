@@ -25,7 +25,8 @@ cian.set_theme({
 -- Options
 ----------------------------------------------------------------------
 cian.set_option("clipboard_on_copy", true) -- also push paths to the OS clipboard on copy/move
-cian.set_option("mask", "*.*")              -- default file mask shown in the status bar
+-- (`mask` was removed: it never filtered anything. Press `/` in the app
+--  to narrow the listing instead.)
 ----------------------------------------------------------------------
 -- Shell panel program
 --
@@ -50,6 +51,9 @@ if is_windows then
   -- PowerShell 7 instead, if you have it (the path varies by install):
   -- cian.set_option("shell", [[C:\Program Files\PowerShell\7\pwsh.exe]])
 end
+
+-- Contextual key-hint bar above the status line.
+cian.set_option("key_hints", true)
 
 -- Length of the split / maximize / close transitions, in milliseconds.
 -- Set to 0 to turn animation off entirely.
