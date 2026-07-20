@@ -52,6 +52,17 @@ pub struct Options {
     pub key_hints: Option<bool>,
 }
 
+/// One SSH target: a host plus the users worth offering for it.
+#[derive(Debug, Clone)]
+pub struct SshHost {
+    /// Label shown in the picker.
+    pub name: String,
+    /// Hostname or address passed to `ssh`.
+    pub host: String,
+    pub users: Vec<String>,
+    pub port: Option<u16>,
+}
+
 /// Mutable accumulator shared with the Lua callbacks during script execution.
 #[derive(Default)]
 struct Builder {
@@ -59,6 +70,7 @@ struct Builder {
     options: Options,
     keymaps: Vec<(char, String)>,
     ext_open: HashMap<String, Function>,
+    ssh_hosts: Vec<SshHost>,
     errors: Vec<String>,
 }
 
@@ -73,6 +85,8 @@ pub struct Config {
     /// `(key, action-name)` pairs the user explicitly bound. The UI validates
     /// the action names and reports any it does not recognise.
     pub keymaps: Vec<(char, String)>,
+    /// SSH targets declared with `cian.ssh{...}`.
+    pub ssh_hosts: Vec<SshHost>,
     /// Non-fatal problems collected while loading (surfaced in a notice popup).
     pub errors: Vec<String>,
     ext_open: HashMap<String, Function>,
@@ -171,13 +185,14 @@ fn load_from(path: &Path) -> Config {
 
     // Pull the accumulated config out by cloning; the Lua handles stay valid
     // because we move `lua` into the returned Config below.
-    let (theme, options, keymaps, ext_open, builder_errors) = {
+    let (theme, options, keymaps, ext_open, ssh_hosts, builder_errors) = {
         let b = builder.borrow();
         (
             b.theme.clone(),
             b.options.clone(),
             b.keymaps.clone(),
             b.ext_open.clone(),
+            b.ssh_hosts.clone(),
             b.errors.clone(),
         )
     };
@@ -188,6 +203,7 @@ fn load_from(path: &Path) -> Config {
         options,
         keymaps,
         ext_open,
+        ssh_hosts,
         errors,
         _lua: Some(lua),
     }
@@ -286,6 +302,52 @@ fn install_api(lua: &Lua, builder: &Rc<RefCell<Builder>>) -> mlua::Result<()> {
                     other => bm
                         .errors
                         .push(format!("set_option: unknown option {:?}", other)),
+                }
+                Ok(())
+            })?,
+        )?;
+    }
+
+    // cian.ssh { users = {...}, hosts = { { name=, host=, users= }, ... } }
+    {
+        let b = builder.clone();
+        cian.set(
+            "ssh",
+            lua.create_function(move |_, t: Table| {
+                let mut bm = b.borrow_mut();
+                // Fleet-wide default, overridable per host.
+                let default_users: Vec<String> =
+                    t.get::<Option<Vec<String>>>("users")?.unwrap_or_default();
+                let hosts: Vec<Table> = match t.get::<Option<Vec<Table>>>("hosts")? {
+                    Some(v) => v,
+                    None => {
+                        bm.errors.push("cian.ssh: expected a `hosts` list".into());
+                        return Ok(());
+                    }
+                };
+                for h in hosts {
+                    let host: String = match h.get::<Option<String>>("host")? {
+                        Some(v) => v,
+                        None => {
+                            bm.errors.push("cian.ssh: a host entry is missing `host`".into());
+                            continue;
+                        }
+                    };
+                    // `name` is what the picker shows; default to the address.
+                    let name = h.get::<Option<String>>("name")?.unwrap_or_else(|| host.clone());
+                    let users = match h.get::<Option<Vec<String>>>("users")? {
+                        Some(v) => v,
+                        None => default_users.clone(),
+                    };
+                    if users.is_empty() {
+                        bm.errors.push(format!(
+                            "cian.ssh: host {:?} has no users (set `users` here or at the top level)",
+                            name
+                        ));
+                        continue;
+                    }
+                    let port = h.get::<Option<u16>>("port")?;
+                    bm.ssh_hosts.push(SshHost { name, host, users, port });
                 }
                 Ok(())
             })?,

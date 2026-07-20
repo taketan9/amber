@@ -60,6 +60,27 @@ cian.set_option("key_hints", true)
 cian.set_option("animation_ms", 150)
 
 ----------------------------------------------------------------------
+-- SSH targets — press Shift+S (or `:ssh`) for the picker.
+--
+-- Declare hosts once and the users once; the picker asks for the host, then
+-- the user, so 8 hosts x 4 users is 12 lines here rather than 32 aliases you
+-- would have to remember. Type in the host stage to filter.
+--
+-- Authentication is left to ssh itself: set up key auth (ssh-keygen +
+-- ssh-copy-id, or ssh-agent on Windows) and connecting becomes two keystrokes
+-- with nothing to type. Passwords are deliberately not stored here — see the
+-- README section "SSH".
+----------------------------------------------------------------------
+-- cian.ssh({
+--   users = { "root", "deploy", "app", "taketan" },  -- offered for every host
+--   hosts = {
+--     { name = "web1",  host = "10.0.1.11" },
+--     { name = "db1",   host = "10.0.2.31", users = { "postgres", "root" } },
+--     { name = "bast",  host = "203.0.113.9", port = 2222 },
+--   },
+-- })
+
+----------------------------------------------------------------------
 -- Keymaps — bind a single key to an action name. These are *additive
 -- overrides*: a key you bind here takes priority, every other key keeps its
 -- default. Useful for adding aliases without losing the defaults.

@@ -729,6 +729,9 @@ enum Popup {
     ColorPicker { pane: FocusedPane, cursor: usize },
     /// Sort-order picker for the focused pane.
     SortPicker { cursor: usize },
+    /// SSH: pick a host, then a user on it.
+    SshHosts { cursor: usize, filter: String },
+    SshUsers { host: usize, cursor: usize },
     Search { buffer: String },
     History { entries: Vec<PathBuf>, cursor: usize },
     Shortcuts { entries: Vec<Shortcut>, cursor: usize },
@@ -1055,6 +1058,10 @@ pub struct App {
     anim_dur: Duration,
     /// Show the contextual key-hint bar.
     show_key_hints: bool,
+    /// A command to type into the shell once it is ready. Needed because the
+    /// PTY spawns on a background thread, so the shell may not exist yet at
+    /// the moment the user picks a connection.
+    pending_shell_input: Option<String>,
     /// Per-pane background overrides, indexed by [`Self::bg_slot`].
     /// Session-only: deliberately not persisted.
     pane_bg: [Option<Color>; 3],
@@ -1116,6 +1123,7 @@ impl App {
                 config.options.animation_ms.unwrap_or(DEFAULT_ANIM_MS),
             ),
             show_key_hints: config.options.key_hints.unwrap_or(true),
+            pending_shell_input: None,
             pane_bg: [None, None, None],
             last_search_query: None,
             shortcuts: ShortcutStore::load_or_default(),
@@ -1209,6 +1217,7 @@ impl App {
             "q" | "quit" => self.should_quit = true,
             "shell" => self.focus(FocusedPane::Shell),
             "man" | "help" | "h" => self.open_manual(),
+            "ssh" => self.start_ssh(),
             other => self.message = Some(format!("unknown command: :{}", other)),
         }
     }
@@ -1568,6 +1577,84 @@ impl App {
             _ => {}
         }
         Ok(())
+    }
+
+    // ------- SSH -------
+
+    /// Hosts matching the picker's current filter, as `(index, host)`.
+    fn ssh_matches(&self, filter: &str) -> Vec<(usize, &cian_lua::SshHost)> {
+        let needle = filter.to_lowercase();
+        self.config
+            .ssh_hosts
+            .iter()
+            .enumerate()
+            .filter(|(_, h)| {
+                needle.is_empty()
+                    || h.name.to_lowercase().contains(&needle)
+                    || h.host.to_lowercase().contains(&needle)
+            })
+            .collect()
+    }
+
+    fn start_ssh(&mut self) {
+        if self.config.ssh_hosts.is_empty() {
+            self.popup = Popup::Notice {
+                lines: vec![
+                    "No SSH hosts configured.".to_string(),
+                    String::new(),
+                    "Declare them in init.lua:".to_string(),
+                    String::new(),
+                    "  cian.ssh({".to_string(),
+                    "    users = { \"root\", \"deploy\" },".to_string(),
+                    "    hosts = {".to_string(),
+                    "      { name = \"web1\", host = \"10.0.1.11\" },".to_string(),
+                    "    },".to_string(),
+                    "  })".to_string(),
+                ],
+            };
+            return;
+        }
+        self.popup = Popup::SshHosts { cursor: 0, filter: String::new() };
+    }
+
+    /// Connect as `user` to host index `idx`, by typing the command into the
+    /// shell panel.
+    ///
+    /// Typing it into a shell rather than spawning `ssh` directly means the
+    /// user's own shell config and agent apply, and when the session ends the
+    /// tab drops back to a local prompt instead of closing.
+    fn ssh_connect(&mut self, idx: usize, user: &str) {
+        let Some(h) = self.config.ssh_hosts.get(idx) else { return };
+        let mut cmd = format!("ssh {}@{}", user, h.host);
+        if let Some(p) = h.port {
+            cmd.push_str(&format!(" -p {}", p));
+        }
+        let label = format!("{}@{}", user, h.name);
+        self.run_in_shell(cmd);
+        self.message = Some(format!("→ {}", label));
+    }
+
+    /// Send a command line to the shell panel, starting the shell if needed.
+    fn run_in_shell(&mut self, mut cmd: String) {
+        cmd.push('\n');
+        let cwd = self.shell_cwd();
+        self.shell.ensure(&cwd);
+        self.focus(FocusedPane::Shell);
+        match self.shell.active_session_mut() {
+            Some(s) => s.write_input(cmd.as_bytes()),
+            // Still spawning: hand it to `poll_pending`'s follow-up.
+            None => self.pending_shell_input = Some(cmd),
+        }
+    }
+
+    /// Deliver a command queued while the shell was still starting.
+    fn flush_pending_shell_input(&mut self) {
+        let Some(cmd) = self.pending_shell_input.take() else { return };
+        match self.shell.active_session_mut() {
+            Some(s) => s.write_input(cmd.as_bytes()),
+            // Not ready yet — put it back and try again next tick.
+            None => self.pending_shell_input = Some(cmd),
+        }
     }
 
     // ------- Sorting -------
@@ -2206,6 +2293,70 @@ impl App {
             }
             return Ok(());
         }
+        if let Popup::SshHosts { cursor, filter } = &mut self.popup {
+            match key.code {
+                KeyCode::Esc => self.popup = Popup::None,
+                KeyCode::Down => *cursor += 1,
+                KeyCode::Up => *cursor = cursor.saturating_sub(1),
+                KeyCode::Backspace => {
+                    filter.pop();
+                    *cursor = 0;
+                }
+                KeyCode::Enter => {
+                    let (cursor, filter) = (*cursor, filter.clone());
+                    let picked = self.ssh_matches(&filter).get(cursor).map(|(i, _)| *i);
+                    if let Some(i) = picked {
+                        // A host with one user needs no second stage.
+                        let users = self.config.ssh_hosts[i].users.clone();
+                        if users.len() == 1 {
+                            self.popup = Popup::None;
+                            self.ssh_connect(i, &users[0]);
+                        } else {
+                            self.popup = Popup::SshUsers { host: i, cursor: 0 };
+                        }
+                    }
+                }
+                // Typing filters; there is no other use for plain characters
+                // here, so no modifier is needed to start searching.
+                KeyCode::Char(c) => {
+                    filter.push(c);
+                    *cursor = 0;
+                }
+                _ => {}
+            }
+            // Keep the cursor inside the filtered list.
+            if let Popup::SshHosts { cursor, filter } = &mut self.popup {
+                let n = self.config.ssh_hosts.iter().filter(|h| {
+                    let needle = filter.to_lowercase();
+                    needle.is_empty()
+                        || h.name.to_lowercase().contains(&needle)
+                        || h.host.to_lowercase().contains(&needle)
+                }).count();
+                *cursor = (*cursor).min(n.saturating_sub(1));
+            }
+            return Ok(());
+        }
+        if let Popup::SshUsers { host, cursor } = &mut self.popup {
+            let n = self.config.ssh_hosts.get(*host).map(|h| h.users.len()).unwrap_or(0);
+            if n == 0 {
+                self.popup = Popup::None;
+                return Ok(());
+            }
+            match key.code {
+                // Esc steps back to the host list rather than closing outright.
+                KeyCode::Esc => self.popup = Popup::SshHosts { cursor: 0, filter: String::new() },
+                KeyCode::Char('j') | KeyCode::Down => *cursor = (*cursor + 1) % n,
+                KeyCode::Char('k') | KeyCode::Up => *cursor = (*cursor + n - 1) % n,
+                KeyCode::Enter => {
+                    let (h, c) = (*host, *cursor);
+                    let user = self.config.ssh_hosts[h].users[c].clone();
+                    self.popup = Popup::None;
+                    self.ssh_connect(h, &user);
+                }
+                _ => {}
+            }
+            return Ok(());
+        }
         if let Popup::SortPicker { cursor } = &mut self.popup {
             let n = SortKey::ALL.len();
             match key.code {
@@ -2557,6 +2708,7 @@ impl App {
             (false, false, KeyCode::Char('f')) => self.start_search(),
             (false, false, KeyCode::Char('/')) => self.start_filter(),
             (false, false, KeyCode::Char(',')) => self.start_sort_picker(),
+            (false, true, KeyCode::Char('S')) => self.start_ssh(),
             (false, _, KeyCode::Char('n')) => self.jump_to_next_match(true),
             (false, _, KeyCode::Char('N')) => self.jump_to_next_match(false),
             (false, false, KeyCode::Char('h')) => self.start_history(),
@@ -3016,6 +3168,7 @@ fn manual_sections() -> Vec<(&'static str, Vec<ManualEntry>)> {
                 entry("N", Some(SearchPrev), "previous match"),
                 entry("/", None, "filter list as you type"),
                 entry(",", None, "sort by name / size / date / ext"),
+                entry("Shift+S", None, "ssh connection picker (also :ssh)"),
                 entry("Enter, Esc", None, "while filtering: keep / clear it"),
             ],
         ),
@@ -3263,6 +3416,11 @@ fn run_loop<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Result<()>
         if app.shell.poll_pending() {
             needs_redraw = true;
         }
+        // A connection picked before the shell finished starting.
+        if app.pending_shell_input.is_some() {
+            app.flush_pending_shell_input();
+            needs_redraw = true;
+        }
         // A freshly-created split grows in from nothing.
         if let Some((tab, node)) = app.shell.just_split.take() {
             app.start_anim(AnimKind::Ratio {
@@ -3487,7 +3645,7 @@ fn draw(f: &mut Frame, app: &mut App) {
     }
 
     if !matches!(app.popup, Popup::None) {
-        draw_popup(f, area, &mut app.popup);
+        draw_popup(f, area, &mut app.popup, &app.config.ssh_hosts);
     }
 }
 
@@ -4332,7 +4490,7 @@ fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
     Rect::new(x, y, w, h)
 }
 
-fn draw_popup(f: &mut Frame, area: Rect, popup: &mut Popup) {
+fn draw_popup(f: &mut Frame, area: Rect, popup: &mut Popup, hosts: &[cian_lua::SshHost]) {
     // The manual is taller than any terminal, so it renders as a scrolling
     // viewport rather than the fixed block the other popups use.
     if let Popup::Manual { lines, scroll } = popup {
@@ -4415,6 +4573,115 @@ fn draw_popup(f: &mut Frame, area: Rect, popup: &mut Popup) {
             })
             .collect();
         f.render_widget(Paragraph::new(rows), inner);
+        return;
+    }
+
+    if let Popup::SshHosts { cursor, filter } = popup {
+        let needle = filter.to_lowercase();
+        let matches: Vec<&cian_lua::SshHost> = hosts
+            .iter()
+            .filter(|h| {
+                needle.is_empty()
+                    || h.name.to_lowercase().contains(&needle)
+                    || h.host.to_lowercase().contains(&needle)
+            })
+            .collect();
+        let w = 56u16.min(area.width);
+        let h = (matches.len() as u16 + 5).min(area.height.saturating_sub(2)).max(6);
+        let rect = centered_rect(w, h, area);
+        f.render_widget(Clear, rect);
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
+            .title(" ssh — host ");
+        let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
+        f.render_widget(block, rect);
+
+        let mut lines = vec![Line::from(Span::styled(
+            format!("/{}_", filter),
+            Style::default().fg(theme().accent).add_modifier(Modifier::BOLD),
+        ))];
+        if matches.is_empty() {
+            lines.push(Line::from(Span::styled(
+                "  (no match)",
+                Style::default().fg(Color::Rgb(150, 150, 170)),
+            )));
+        }
+        for (i, hst) in matches.iter().enumerate() {
+            let sel = i == *cursor;
+            let style = if sel {
+                Style::default().fg(theme().accent).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::Rgb(205, 205, 218))
+            };
+            let users = if hst.users.len() == 1 {
+                hst.users[0].clone()
+            } else {
+                format!("{} users", hst.users.len())
+            };
+            lines.push(Line::from(vec![
+                Span::styled(format!("{}{:<16}", if sel { "▸ " } else { "  " }, hst.name), style),
+                Span::styled(
+                    format!("{:<22} {}", hst.host, users),
+                    Style::default().fg(Color::Rgb(140, 140, 165)),
+                ),
+            ]));
+        }
+        let body_area = Rect::new(inner.x, inner.y, inner.width, inner.height.saturating_sub(1));
+        f.render_widget(Paragraph::new(lines), body_area);
+        let footer_area =
+            Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1);
+        f.render_widget(
+            Paragraph::new(" type to filter  ↑↓ select  Enter next  Esc cancel ").style(
+                Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD),
+            ),
+            footer_area,
+        );
+        return;
+    }
+
+    if let Popup::SshUsers { host, cursor } = popup {
+        let Some(hst) = hosts.get(*host) else { return };
+        let w = 40u16.min(area.width);
+        let h = (hst.users.len() as u16 + 4).min(area.height.saturating_sub(2)).max(6);
+        let rect = centered_rect(w, h, area);
+        f.render_widget(Clear, rect);
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
+            .title(format!(" ssh — {} ", hst.name));
+        let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
+        f.render_widget(block, rect);
+
+        let lines: Vec<Line> = hst
+            .users
+            .iter()
+            .enumerate()
+            .map(|(i, u)| {
+                let sel = i == *cursor;
+                let style = if sel {
+                    Style::default().fg(theme().accent).add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(Color::Rgb(205, 205, 218))
+                };
+                Line::from(Span::styled(
+                    format!("{}{}@{}", if sel { "▸ " } else { "  " }, u, hst.host),
+                    style,
+                ))
+            })
+            .collect();
+        let body_area = Rect::new(inner.x, inner.y, inner.width, inner.height.saturating_sub(1));
+        f.render_widget(Paragraph::new(lines), body_area);
+        let footer_area =
+            Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1);
+        f.render_widget(
+            Paragraph::new(" Enter connect   Esc back ").style(
+                Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD),
+            ),
+            footer_area,
+        );
         return;
     }
 
@@ -4613,6 +4880,8 @@ fn draw_popup(f: &mut Frame, area: Rect, popup: &mut Popup) {
         | Popup::ContextMenu { .. }
         | Popup::ColorPicker { .. }
         | Popup::SortPicker { .. }
+        | Popup::SshHosts { .. }
+        | Popup::SshUsers { .. }
         | Popup::None => return,
     };
 
@@ -5483,6 +5752,97 @@ mod tests {
         assert!(tall.contains("? help"));
         let short = render(&mut app, 110, 10).join("\n");
         assert!(!short.contains("? help"), "hints should yield on a short window");
+    }
+
+    fn app_with_ssh() -> (tempfile::TempDir, App) {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.txt"), b"x").unwrap();
+        let mut config = cian_lua::Config::default();
+        config.ssh_hosts = vec![
+            cian_lua::SshHost {
+                name: "web1".into(),
+                host: "10.0.1.11".into(),
+                users: vec!["root".into(), "deploy".into()],
+                port: None,
+            },
+            cian_lua::SshHost {
+                name: "db1".into(),
+                host: "10.0.2.31".into(),
+                users: vec!["postgres".into()],
+                port: Some(2222),
+            },
+        ];
+        let p = dir.path().to_path_buf();
+        let app = App::new(p.clone(), p, config).unwrap();
+        (dir, app)
+    }
+
+    #[test]
+    fn the_ssh_picker_filters_hosts_as_you_type() {
+        let (_d, mut app) = app_with_ssh();
+        app.start_ssh();
+        assert_eq!(app.ssh_matches("").len(), 2);
+
+        app.handle_key(key('d')).unwrap();
+        app.handle_key(key('b')).unwrap();
+        let Popup::SshHosts { filter, .. } = &app.popup else { panic!("no picker") };
+        assert_eq!(filter, "db");
+        assert_eq!(app.ssh_matches("db").len(), 1);
+
+        // Backspace widens it again.
+        app.handle_key(code(KeyCode::Backspace)).unwrap();
+        let Popup::SshHosts { filter, .. } = &app.popup else { panic!("no picker") };
+        assert_eq!(filter, "d");
+    }
+
+    /// A host with several users needs the second stage; one with a single
+    /// user should connect straight away.
+    #[test]
+    fn a_single_user_host_skips_the_second_stage() {
+        let (_d, mut app) = app_with_ssh();
+        app.start_ssh();
+        app.handle_key(key('d')).unwrap();
+        app.handle_key(key('b')).unwrap();
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+        assert!(matches!(app.popup, Popup::None), "should have connected already");
+        assert!(app.message.as_deref().unwrap_or("").contains("postgres@db1"));
+    }
+
+    #[test]
+    fn a_multi_user_host_offers_its_users() {
+        let (_d, mut app) = app_with_ssh();
+        app.start_ssh();
+        app.handle_key(key('w')).unwrap();
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+        let Popup::SshUsers { host, .. } = &app.popup else { panic!("expected the user stage") };
+        assert_eq!(app.config.ssh_hosts[*host].name, "web1");
+
+        // Esc steps back to the host list rather than closing outright.
+        app.handle_key(code(KeyCode::Esc)).unwrap();
+        assert!(matches!(app.popup, Popup::SshHosts { .. }));
+    }
+
+    #[test]
+    fn connecting_types_the_command_into_the_shell() {
+        let (_d, mut app) = app_with_ssh();
+        // No shell yet, so the command has to be queued for the spawn.
+        assert_eq!(app.shell.count(), 0);
+        app.ssh_connect(1, "postgres");
+        assert_eq!(app.focused, FocusedPane::Shell, "should hand over to the shell");
+        assert_eq!(
+            app.pending_shell_input.as_deref(),
+            Some("ssh postgres@10.0.2.31 -p 2222\n"),
+            "port should be carried through"
+        );
+    }
+
+    #[test]
+    fn the_picker_explains_itself_when_nothing_is_configured() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        app.start_ssh();
+        let Popup::Notice { lines } = &app.popup else { panic!("expected a notice") };
+        let text = lines.join("\n");
+        assert!(text.contains("cian.ssh"), "should show how to configure it:\n{}", text);
     }
 
     #[test]

@@ -56,6 +56,33 @@ cian.set_option("animation_ms", 0)     -- off
 a mistake is recoverable. The confirmation popup offers `a` to delete
 permanently instead.
 
+## SSH
+
+`Shift+S` (or `:ssh`) opens a two-stage picker: choose a host, then a user on
+it. Typing in the host stage filters. Hosts with a single user connect
+straight away. The command is typed into the shell panel, so your own shell
+config and agent apply, and the tab drops back to a local prompt when the
+session ends.
+
+```lua
+cian.ssh({
+  users = { "root", "deploy", "app", "taketan" },   -- offered for every host
+  hosts = {
+    { name = "web1", host = "10.0.1.11" },
+    { name = "db1",  host = "10.0.2.31", users = { "postgres", "root" } },
+    { name = "bast", host = "203.0.113.9", port = 2222 },
+  },
+})
+```
+
+Eight hosts times four users is a dozen lines here instead of 32 aliases to
+remember — the picker does the remembering.
+
+**Passwords are not stored.** cian has no field for them and does not type
+them. Set up key authentication instead (`ssh-keygen` + `ssh-copy-id`, or
+`ssh-agent` on Windows); it is less work than maintaining a credential list,
+and it makes connecting genuinely keystroke-free rather than merely shorter.
+
 ## Sorting
 
 `,` opens the sort picker: name, size, date or extension, with `n`/`s`/`d`/`e`
