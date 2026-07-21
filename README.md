@@ -35,8 +35,17 @@ Background colors apply to whichever pane you right-clicked — including a
 single split inside the shell, not the whole panel. In the shell the tint only fills cells the shell left uncolored, so
 `ls` colors and editor themes come through untouched. Copy and cut fill a file
 clipboard that persists while you navigate, so you can copy here, move
-somewhere else, and paste there — the system clipboard is separate and is still
-driven by `p` / `Shift+P`. Background colors are session-only.
+somewhere else, and paste there.
+
+**Paste** takes cian's own clipboard when it holds something, and otherwise
+falls back to the *system* clipboard — so a file copied in Explorer or Finder
+pastes into the focused pane. The status line says which of the two it used.
+`:paste` does the same from the command line. Clipboard entries that are not
+real paths are ignored, since the platform queries return plain clipboard text
+coerced into one.
+
+`p` and `Shift+P` go the other way, putting paths or file references onto the
+system clipboard. Background colors are session-only.
 
 ## Animation
 

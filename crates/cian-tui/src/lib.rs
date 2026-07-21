@@ -1313,6 +1313,7 @@ impl App {
             "q" | "quit" => self.should_quit = true,
             "shell" => self.focus(FocusedPane::Shell),
             "man" | "help" | "h" => self.open_manual(),
+            "paste" => { let _ = self.paste_clip(); }
             "ssh" => self.start_ssh(),
             other => self.message = Some(format!("unknown command: :{}", other)),
         }
@@ -2284,16 +2285,14 @@ impl App {
             // focus, so this menu is the only way to open it without first
             // leaving the shell — which is exactly where you want it.
             items.push(MenuItem::Ssh);
-            if self.file_clip.is_some() {
-                items.push(MenuItem::Paste);
-            }
+            items.push(MenuItem::Paste);
             items.push(MenuItem::Background);
         } else {
             items.push(MenuItem::Copy);
             items.push(MenuItem::Cut);
-            if self.file_clip.is_some() {
-                items.push(MenuItem::Paste);
-            }
+            // Always offered: it can also paste from the system clipboard, and
+            // hiding it made a file just copied in Explorer look unpasteable.
+            items.push(MenuItem::Paste);
             items.push(MenuItem::CopyToOther);
             items.push(MenuItem::MoveToOther);
             items.push(MenuItem::Rename);
@@ -2325,9 +2324,19 @@ impl App {
 
     /// Paste the file clipboard into the focused pane's directory.
     fn paste_clip(&mut self) -> Result<()> {
-        let Some(clip) = self.file_clip.clone() else {
-            self.message = Some("clipboard is empty".into());
-            return Ok(());
+        // cian's own register wins when set — it was filled deliberately, from
+        // here. Otherwise fall back to the OS clipboard, so a file copied in
+        // Explorer or Finder pastes as you would expect.
+        let (clip, from_os) = match self.file_clip.clone() {
+            Some(c) => (c, false),
+            None => {
+                let paths = os_clipboard_files();
+                if paths.is_empty() {
+                    self.message = Some("clipboard has no files".into());
+                    return Ok(());
+                }
+                (FileClipboard { paths, op: ClipOp::Copy }, true)
+            }
         };
         let dest = match self.focused {
             FocusedPane::Shell => self.shell_cwd(),
@@ -2352,6 +2361,13 @@ impl App {
         }
         self.reload_both();
         self.flash(self.focused);
+        if from_os && report.errors.is_empty() {
+            // Say where they came from, so "paste" is never ambiguous about
+            // which of the two clipboards it just used.
+            self.message =
+                Some(format!("pasted {} item(s) from the system clipboard", report.ok));
+            return Ok(());
+        }
         self.show_op_report(&report);
         Ok(())
     }
@@ -3234,6 +3250,45 @@ fn expand_tilde(p: &Path) -> PathBuf {
 
 /// Put native file references on the clipboard so Finder/Explorer can paste
 /// the actual files (not just the path string).
+/// Files currently on the OS clipboard, e.g. copied in Explorer or Finder.
+///
+/// Every candidate is checked against the filesystem before being returned:
+/// the platform queries happily hand back plain clipboard *text* interpreted
+/// as a path (copying the word "hello" yields `/hello` on macOS), and acting
+/// on that would be at best a confusing error.
+fn os_clipboard_files() -> Vec<PathBuf> {
+    keep_existing(os_clipboard_files_raw())
+}
+
+/// Drop anything that is not actually a file or directory on disk.
+fn keep_existing(paths: Vec<PathBuf>) -> Vec<PathBuf> {
+    paths.into_iter().filter(|p| p.exists()).collect()
+}
+
+#[cfg(target_os = "macos")]
+fn os_clipboard_files_raw() -> Vec<PathBuf> {
+    // `the clipboard as «class furl»` only ever yields one file; coercing to a
+    // list handles both the single- and multi-file cases.
+    const SCRIPT: &str = r#"set out to ""
+try
+  set items_ to the clipboard as list
+  repeat with i in items_
+    set out to out & POSIX path of i & linefeed
+  end repeat
+end try
+return out"#;
+    let out = match Command::new("osascript").args(["-e", SCRIPT]).output() {
+        Ok(o) if o.status.success() => o.stdout,
+        _ => return Vec::new(),
+    };
+    String::from_utf8_lossy(&out)
+        .lines()
+        .map(|l| l.trim())
+        .filter(|l| !l.is_empty())
+        .map(PathBuf::from)
+        .collect()
+}
+
 #[cfg(target_os = "macos")]
 fn os_clipboard_file_refs(paths: &[PathBuf]) -> Result<()> {
     let escape = |s: &str| s.replace('\\', "\\\\").replace('"', "\\\"");
@@ -5517,20 +5572,42 @@ mod tests {
         assert!(app.message.as_deref().unwrap_or("").contains("already"));
     }
 
+    /// Paste is always offered, because it can also take files from the system
+    /// clipboard. Hiding it until cian's own register was filled made a file
+    /// just copied in Explorer look unpasteable.
     #[test]
-    fn paste_only_appears_in_the_menu_once_something_is_held() {
+    fn paste_is_always_offered() {
         let (_l, _r, mut app) = app_two_dirs(&["a.txt"], &[]);
         let _ = render(&mut app, 100, 40);
 
         app.open_context_menu(5, 5);
         let Popup::ContextMenu { items, .. } = &app.popup else { panic!("no menu") };
-        assert!(!items.contains(&MenuItem::Paste), "nothing held yet");
+        assert!(items.contains(&MenuItem::Paste), "offered with nothing held");
         app.popup = Popup::None;
 
         app.clip_targets(ClipOp::Copy);
         app.open_context_menu(5, 5);
         let Popup::ContextMenu { items, .. } = &app.popup else { panic!("no menu") };
-        assert!(items.contains(&MenuItem::Paste));
+        assert!(items.contains(&MenuItem::Paste), "and still offered once held");
+    }
+
+    /// Plain text on the clipboard must never be treated as a path: the
+    /// platform queries return the text coerced into one (copying "hello"
+    /// yields `/hello` on macOS), and acting on that would be nonsense.
+    #[test]
+    fn clipboard_candidates_that_do_not_exist_are_dropped() {
+        let dir = tempfile::tempdir().unwrap();
+        let real = dir.path().join("real.txt");
+        std::fs::write(&real, b"x").unwrap();
+
+        let kept = keep_existing(vec![
+            real.clone(),
+            PathBuf::from("/just some copied text"),
+            dir.path().to_path_buf(),
+            PathBuf::from(""),
+        ]);
+        assert_eq!(kept, vec![real, dir.path().to_path_buf()], "only real entries survive");
+        assert!(keep_existing(Vec::new()).is_empty());
     }
 
     #[test]
@@ -5610,13 +5687,16 @@ mod tests {
     /// Right-clicking the shell with an empty clipboard used to open nothing
     /// at all; the manual entry means there is always something to show.
     #[test]
-    fn the_shell_menu_opens_even_with_an_empty_clipboard() {
+    fn the_shell_menu_has_its_own_reduced_set() {
         let (_d, mut app) = app_with(&["a.txt"]);
         app.focus(FocusedPane::Shell);
         assert!(app.file_clip.is_none());
         app.open_context_menu(5, 5);
         let Popup::ContextMenu { items, .. } = &app.popup else { panic!("no menu") };
-        assert_eq!(items, &vec![MenuItem::Ssh, MenuItem::Background, MenuItem::Manual]);
+        assert_eq!(
+            items,
+            &vec![MenuItem::Ssh, MenuItem::Paste, MenuItem::Background, MenuItem::Manual]
+        );
     }
 
     #[test]
