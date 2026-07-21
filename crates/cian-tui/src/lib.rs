@@ -1103,6 +1103,12 @@ pub struct App {
     anim_then: Option<PendingClose>,
     /// Transition length; zero disables animation.
     anim_dur: Duration,
+    /// The focused surface's rect from before it was zoomed.
+    ///
+    /// While zoomed, `layout_rects` describes the zoomed layout — the focused
+    /// surface fills the window and the others are empty — so the rect to
+    /// shrink back into is not recoverable from it and has to be kept.
+    zoom_return: Option<Rect>,
     /// Show the contextual key-hint bar.
     show_key_hints: bool,
     /// A command to type into the shell once it is ready. Needed because the
@@ -1172,6 +1178,7 @@ impl App {
                 config.options.animation_ms.unwrap_or(DEFAULT_ANIM_MS),
             ),
             show_key_hints: config.options.key_hints.unwrap_or(true),
+            zoom_return: None,
             pending_shell_input: None,
             pending_auth: None,
             pane_bg: [None, None, None],
@@ -2026,21 +2033,40 @@ impl App {
     /// Toggle full-window zoom of the focused surface, animating between the
     /// surface's pane rect and the whole layout area.
     fn toggle_zoom(&mut self) {
-        let pane_rect = match self.focused {
-            FocusedPane::Left => self.layout_rects.left,
-            FocusedPane::Right => self.layout_rects.right,
-            FocusedPane::Shell => self.layout_rects.shell,
-        };
         // The full area is the union of everything currently laid out; derived
-        // rather than stored so it stays right at any window size.
+        // rather than stored so it stays right at any window size. While
+        // zoomed this is just the focused surface, which already fills it.
         let full = union_rect(
             union_rect(self.layout_rects.left, self.layout_rects.right),
             self.layout_rects.shell,
         );
-        self.zoomed = !self.zoomed;
-        if pane_rect.width > 0 && full.width > 0 {
-            let (from, to) = if self.zoomed { (pane_rect, full) } else { (full, pane_rect) };
-            self.start_anim(AnimKind::Zoom { from, to });
+        if self.zoomed {
+            // Shrink back into where the surface came from. Taken from
+            // `zoom_return` because `layout_rects` now describes the zoomed
+            // layout; reading the focused pane's rect here would give the full
+            // area again, making the transition a no-op.
+            let back = self.zoom_return.take();
+            self.zoomed = false;
+            if let Some(back) = back {
+                // A resize while zoomed can leave the remembered rect outside
+                // the window; snapping is better than flying in from nowhere.
+                let fits = back.x + back.width <= full.x + full.width
+                    && back.y + back.height <= full.y + full.height;
+                if fits && back.width > 0 && full.width > 0 {
+                    self.start_anim(AnimKind::Zoom { from: full, to: back });
+                }
+            }
+        } else {
+            let pane_rect = match self.focused {
+                FocusedPane::Left => self.layout_rects.left,
+                FocusedPane::Right => self.layout_rects.right,
+                FocusedPane::Shell => self.layout_rects.shell,
+            };
+            self.zoomed = true;
+            self.zoom_return = Some(pane_rect);
+            if pane_rect.width > 0 && full.width > 0 {
+                self.start_anim(AnimKind::Zoom { from: pane_rect, to: full });
+            }
         }
     }
 
@@ -3369,6 +3395,15 @@ pub fn manual_text() -> String {
     manual_lines(&keymap).join("\n")
 }
 
+/// Version line for `cian --version`.
+///
+/// Includes the commit because "which build am I running?" is otherwise
+/// unanswerable, and an old exe left on PATH looks exactly like missing
+/// features.
+pub fn version_text() -> String {
+    format!("cian {} ({})", env!("CARGO_PKG_VERSION"), env!("CIAN_COMMIT"))
+}
+
 /// One-screen usage synopsis for `cian -h`.
 pub fn usage_text() -> String {
     // Report the paths this build actually resolves rather than the Unix
@@ -3391,6 +3426,7 @@ pub fn usage_text() -> String {
         String::new(),
         "OPTIONS:".to_string(),
         "    -h, --help    show this help".to_string(),
+        "    -V, --version show the version and commit".to_string(),
         "    -man, --man   show the full key manual (also ? or Ctrl+. in-app)".to_string(),
         String::new(),
         "CONFIG:".to_string(),
@@ -5534,30 +5570,56 @@ mod tests {
         assert_eq!(union_rect(Rect::new(0, 0, 0, 0), b), b);
     }
 
+    /// Both directions must actually travel. The un-zoom used to read the
+    /// focused pane's rect out of `layout_rects`, which by then described the
+    /// *zoomed* layout — so `from` and `to` were both the full window and the
+    /// transition, while running, moved nothing.
     #[test]
-    fn zoom_toggles_and_animates() {
+    fn zoom_animates_in_both_directions() {
         let (_d, mut app) = app_with(&["a.txt"]);
         let _ = render(&mut app, 100, 40);
         assert!(!app.zoomed);
+        let pane = app.layout_rects.left;
 
         app.toggle_zoom();
         assert!(app.zoomed);
-        assert!(app.anim.is_some(), "zoom should start a transition");
-        // The overlay must be growing toward something larger than the pane.
         let Some(Anim { kind: AnimKind::Zoom { from, to }, .. }) = app.anim else {
             panic!("expected a zoom")
         };
-        assert!(to.width > from.width, "{:?} -> {:?}", from, to);
-
+        assert_eq!(from, pane, "should grow out of the pane it was in");
+        assert!(to.width > from.width && to.height > from.height, "{:?} -> {:?}", from, to);
         app.finish_anim();
-        assert!(app.anim.is_none());
 
-        // Zooming back out reverses the direction.
+        // Rendering while zoomed overwrites layout_rects with the zoomed
+        // layout — the exact condition that broke the way back.
+        let _ = render(&mut app, 100, 40);
+
         app.toggle_zoom();
+        assert!(!app.zoomed);
         let Some(Anim { kind: AnimKind::Zoom { from, to }, .. }) = app.anim else {
-            panic!("expected a zoom")
+            panic!("expected a zoom back")
         };
-        assert!(to.width < from.width);
+        assert_ne!(from, to, "the way back must travel, not sit still");
+        assert!(to.width < from.width && to.height < from.height, "{:?} -> {:?}", from, to);
+        assert_eq!(to, pane, "should shrink into the pane it came from");
+    }
+
+    #[test]
+    fn zooming_the_shell_returns_to_the_shell_rect() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        let _ = render(&mut app, 100, 40);
+        app.focus(FocusedPane::Shell);
+        let shell = app.layout_rects.shell;
+
+        app.toggle_zoom();
+        app.finish_anim();
+        let _ = render(&mut app, 100, 40);
+        app.toggle_zoom();
+
+        let Some(Anim { kind: AnimKind::Zoom { to, .. }, .. }) = app.anim else {
+            panic!("expected a zoom back")
+        };
+        assert_eq!(to, shell, "each surface returns to its own rect");
     }
 
     #[test]

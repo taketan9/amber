@@ -225,6 +225,15 @@ cargo build --release
 ./target/release/cian
 ```
 
+## Which build am I running?
+
+```sh
+cian --version     # cian 0.1.0 (7f92bae)
+```
+
+The commit is baked in at build time. Worth checking first when a feature
+seems missing: an older `cian.exe` left on PATH looks exactly like a bug.
+
 ## Troubleshooting
 
 If cian misbehaves, set `CIAN_LOG` to capture diagnostics — shell spawns,

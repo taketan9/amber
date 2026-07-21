@@ -5,6 +5,10 @@ use anyhow::{Context, Result};
 
 fn main() -> Result<()> {
     let args: Vec<String> = env::args().skip(1).collect();
+    if args.iter().any(|a| matches!(a.as_str(), "-v" | "-V" | "--version")) {
+        println!("{}", cian_tui::version_text());
+        return Ok(());
+    }
     if args.iter().any(|a| matches!(a.as_str(), "-h" | "--help")) {
         println!("{}", cian_tui::usage_text());
         return Ok(());
