@@ -3314,6 +3314,43 @@ fn os_clipboard_file_refs(paths: &[PathBuf]) -> Result<()> {
 }
 
 #[cfg(target_os = "linux")]
+fn os_clipboard_files_raw() -> Vec<PathBuf> {
+    let read = |cmd: &str, args: &[&str]| -> Option<String> {
+        let o = Command::new(cmd).args(args).output().ok()?;
+        o.status.success().then(|| String::from_utf8_lossy(&o.stdout).into_owned())
+    };
+    // Wayland first, then X11, mirroring the write side.
+    let text = read("wl-paste", &["--type", "text/uri-list"])
+        .or_else(|| read("xclip", &["-selection", "clipboard", "-t", "text/uri-list", "-o"]))
+        .unwrap_or_default();
+    text.lines()
+        .map(|l| l.trim())
+        .filter(|l| !l.is_empty())
+        .map(|l| PathBuf::from(percent_decode(l.strip_prefix("file://").unwrap_or(l))))
+        .collect()
+}
+
+/// Turn `%20`-style escapes in a `file://` URI back into bytes.
+#[cfg(target_os = "linux")]
+fn percent_decode(s: &str) -> String {
+    let b = s.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'%' && i + 2 < b.len() {
+            if let Ok(v) = u8::from_str_radix(&s[i + 1..i + 3], 16) {
+                out.push(v);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(b[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+#[cfg(target_os = "linux")]
 fn os_clipboard_file_refs(paths: &[PathBuf]) -> Result<()> {
     use std::io::Write;
     let uris = paths
@@ -3348,8 +3385,50 @@ fn os_clipboard_file_refs(paths: &[PathBuf]) -> Result<()> {
 }
 
 #[cfg(target_os = "windows")]
-fn os_clipboard_file_refs(_paths: &[PathBuf]) -> Result<()> {
-    anyhow::bail!("file-reference clipboard not yet implemented on Windows");
+fn os_clipboard_files_raw() -> Vec<PathBuf> {
+    let out = Command::new("powershell")
+        .args([
+            "-NoProfile",
+            "-Command",
+            "Get-Clipboard -Format FileDropList | ForEach-Object { $_.FullName }",
+        ])
+        .output();
+    let out = match out {
+        Ok(o) if o.status.success() => o.stdout,
+        _ => return Vec::new(),
+    };
+    String::from_utf8_lossy(&out)
+        .lines()
+        .map(|l| l.trim())
+        .filter(|l| !l.is_empty())
+        .map(PathBuf::from)
+        .collect()
+}
+
+#[cfg(target_os = "windows")]
+fn os_clipboard_file_refs(paths: &[PathBuf]) -> Result<()> {
+    // Was a stub that always failed, so Shift+P did nothing on the platform
+    // where Explorer interop matters most.
+    if paths.is_empty() {
+        return Ok(());
+    }
+    // Single-quoted PowerShell literals: the only escape needed is a doubled
+    // quote, which leaves spaces and backslashes alone.
+    let list = paths
+        .iter()
+        .map(|p| format!("'{}'", p.display().to_string().replace('\'', "''")))
+        .collect::<Vec<_>>()
+        .join(",");
+    let status = Command::new("powershell")
+        .args(["-NoProfile", "-Command", &format!("Set-Clipboard -Path {}", list)])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()?;
+    if !status.success() {
+        anyhow::bail!("Set-Clipboard exited with status {}", status);
+    }
+    Ok(())
 }
 
 fn shortcut_icon(target: &str) -> &'static str {
