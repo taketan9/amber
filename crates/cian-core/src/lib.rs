@@ -5,11 +5,13 @@ use std::time::SystemTime;
 
 use anyhow::{Context, Result};
 
+pub mod archive;
 pub mod attrs;
 pub mod log;
 pub mod ops;
 pub mod progress;
 pub mod search;
+pub mod viewer;
 
 #[derive(Debug, Clone)]
 pub struct Entry {

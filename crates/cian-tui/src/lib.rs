@@ -798,6 +798,15 @@ enum Popup {
     ColorPicker { pane: FocusedPane, cursor: usize },
     /// Sort-order picker for the focused pane.
     SortPicker { cursor: usize },
+    /// A file's contents, scrollable.
+    Viewer { title: String, view: cian_core::viewer::View, scroll: usize },
+    /// An archive's members, with extraction from the list.
+    Archive {
+        path: PathBuf,
+        members: Vec<cian_core::archive::Member>,
+        cursor: usize,
+        scroll: usize,
+    },
     /// Where to send a copy or move: recent destinations plus a way to type
     /// somewhere new.
     DestPicker { op: PendingOp, targets: Vec<PathBuf>, cursor: usize },
@@ -1457,6 +1466,7 @@ impl App {
             "paste" => { let _ = self.paste_clip(); }
             "cd" | "goto" => self.start_jump_path(),
             "hidden" => self.toggle_hidden(),
+            "view" | "look" => self.look_inside(),
             "copyto" => self.start_dest_picker(PendingOp::Copy),
             "moveto" => self.start_dest_picker(PendingOp::Move),
             "attr" | "attrs" => self.show_attributes(),
@@ -2027,6 +2037,75 @@ impl App {
             out.push(("recent".to_string(), p.clone()));
         }
         out
+    }
+
+    // ------- Looking inside things -------
+
+    /// F3: show what is in the highlighted entry.
+    ///
+    /// One key for both because the question is the same — "what is in here" —
+    /// and the answer's shape follows from the file: an archive lists its
+    /// members, anything else is read.
+    fn look_inside(&mut self) {
+        let Some(entry) = self.active_pane().and_then(|p| p.selected().cloned()) else {
+            self.message = Some("nothing selected".into());
+            return;
+        };
+        if entry.is_dir {
+            self.message = Some("that is a directory — Enter to go in".into());
+            return;
+        }
+        if cian_core::archive::is_archive(&entry.path) {
+            match cian_core::archive::list(&entry.path) {
+                Ok(members) => {
+                    self.popup = Popup::Archive {
+                        path: entry.path,
+                        members,
+                        cursor: 0,
+                        scroll: 0,
+                    };
+                    return;
+                }
+                // Named like an archive but unreadable as one: fall through to
+                // the viewer rather than refusing outright.
+                Err(e) => self.message = Some(format!("not a readable archive: {}", e)),
+            }
+        }
+        match cian_core::viewer::view_file(&entry.path) {
+            Ok(view) => {
+                self.popup = Popup::Viewer {
+                    title: entry.name.clone(),
+                    view,
+                    scroll: 0,
+                }
+            }
+            Err(e) => self.message = Some(format!("cannot view: {}", e)),
+        }
+    }
+
+    /// Pull members out of the open archive into the opposite pane.
+    fn extract_from_archive(&mut self, all: bool) {
+        let Popup::Archive { path, members, cursor, .. } = &self.popup else { return };
+        let (path, chosen) = (
+            path.clone(),
+            if all {
+                Vec::new()
+            } else {
+                match members.get(*cursor) {
+                    Some(m) => vec![m.name.clone()],
+                    None => return,
+                }
+            },
+        );
+        let Some(dest) = self.opposite_pane_cwd() else {
+            self.message = Some("no destination pane".into());
+            return;
+        };
+        self.popup = Popup::None;
+        self.remember_dest(&dest);
+        self.start_op("extracting", move |ctl| {
+            cian_core::archive::extract(&path, &chosen, &dest, ctl)
+        });
     }
 
     // ------- Hidden files, attributes, checksums -------
@@ -3420,6 +3499,38 @@ impl App {
             }
             return Ok(());
         }
+        if let Popup::Viewer { view, scroll, .. } = &mut self.popup {
+            let last = view.lines.len().saturating_sub(1);
+            match key.code {
+                KeyCode::Esc | KeyCode::Char('q') => self.popup = Popup::None,
+                KeyCode::Char('j') | KeyCode::Down => *scroll = (*scroll + 1).min(last),
+                KeyCode::Char('k') | KeyCode::Up => *scroll = scroll.saturating_sub(1),
+                KeyCode::Char('d') | KeyCode::PageDown => *scroll = (*scroll + 20).min(last),
+                KeyCode::Char('u') | KeyCode::PageUp => *scroll = scroll.saturating_sub(20),
+                KeyCode::Char('g') | KeyCode::Home => *scroll = 0,
+                KeyCode::Char('G') | KeyCode::End => *scroll = last,
+                _ => {}
+            }
+            return Ok(());
+        }
+        if let Popup::Archive { members, cursor, .. } = &mut self.popup {
+            let n = members.len();
+            match key.code {
+                KeyCode::Esc | KeyCode::Char('q') => self.popup = Popup::None,
+                KeyCode::Char('j') | KeyCode::Down => {
+                    if n > 0 {
+                        *cursor = (*cursor + 1).min(n - 1);
+                    }
+                }
+                KeyCode::Char('k') | KeyCode::Up => *cursor = cursor.saturating_sub(1),
+                KeyCode::Char('g') | KeyCode::Home => *cursor = 0,
+                KeyCode::Char('G') | KeyCode::End => *cursor = n.saturating_sub(1),
+                KeyCode::Char('a') => self.extract_from_archive(true),
+                KeyCode::Enter => self.extract_from_archive(false),
+                _ => {}
+            }
+            return Ok(());
+        }
         if let Popup::SortPicker { cursor } = &mut self.popup {
             let n = SortKey::ALL.len();
             match key.code {
@@ -3819,6 +3930,7 @@ impl App {
             (true, _, KeyCode::Char('f')) => self.start_grep_prompt(),
             (false, false, KeyCode::Char(',')) => self.start_sort_picker(),
             (false, false, KeyCode::Char('z')) => self.start_jump_path(),
+            (false, false, KeyCode::F(3)) => self.look_inside(),
             // Manual refresh, for the cases the timer cannot see — a file
             // whose contents changed without the directory being touched.
             (true, _, KeyCode::Char('r')) | (false, false, KeyCode::F(5)) => {
@@ -4465,6 +4577,7 @@ fn manual_sections() -> Vec<(&'static str, Vec<ManualEntry>)> {
                 entry("gg", None, "jump to top"),
                 entry("G", Some(CursorBottom), "jump to bottom"),
                 entry("l, Enter", Some(EnterDir), "enter folder / open file"),
+                entry("F3", None, "look inside: view a file, list an archive"),
                 entry("-, Bksp", Some(Parent), "parent folder"),
                 entry("Left / Right", None, "focus the left / right pane"),
                 entry("h", Some(History), "history popup"),
@@ -5785,6 +5898,7 @@ fn key_hints(app: &App) -> Vec<(&'static str, &'static str)> {
             (",", "sort"),
             ("S-F", "find"),
             ("C-F", "grep"),
+            ("F3", "view"),
             ("S-J", "shell"),
             ("?", "help"),
         ],
@@ -6510,6 +6624,140 @@ fn draw_popup(
         return;
     }
 
+    if let Popup::Viewer { title, view, scroll } = popup {
+        let w = area.width.saturating_sub(4);
+        let h = area.height.saturating_sub(2);
+        let rect = centered_rect(w, h, area);
+        f.render_widget(Clear, rect);
+        let kind = match view.kind {
+            cian_core::viewer::ViewKind::Text => "text",
+            cian_core::viewer::ViewKind::Binary => "binary",
+        };
+        let size = cian_core::human_size(view.total_bytes);
+        let cut = if view.truncated { "  (first 4M shown)" } else { "" };
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_type(border_type())
+            .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
+            .title(format!(" {}  —  {}, {}{} ", title, kind, size, cut));
+        let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
+        f.render_widget(block, rect);
+
+        let body_h = inner.height.saturating_sub(1) as usize;
+        let max_scroll = view.lines.len().saturating_sub(body_h);
+        *scroll = (*scroll).min(max_scroll);
+
+        let numbered = view.kind == cian_core::viewer::ViewKind::Text;
+        let gutter = if numbered {
+            format!("{}", view.lines.len()).len().max(3) + 1
+        } else {
+            0
+        };
+        let rows: Vec<Line> = view
+            .lines
+            .iter()
+            .enumerate()
+            .skip(*scroll)
+            .take(body_h)
+            .map(|(i, l)| {
+                let body = truncate(l, inner.width as usize - gutter);
+                if numbered {
+                    Line::from(vec![
+                        Span::styled(
+                            format!("{:>w$} ", i + 1, w = gutter - 1),
+                            Style::default().fg(Color::Rgb(110, 110, 135)),
+                        ),
+                        Span::raw(body),
+                    ])
+                } else {
+                    Line::from(Span::styled(body, Style::default().fg(Color::Rgb(200, 200, 215))))
+                }
+            })
+            .collect();
+        f.render_widget(
+            Paragraph::new(rows),
+            Rect::new(inner.x, inner.y, inner.width, body_h as u16),
+        );
+        let pos = match max_scroll {
+            0 => "all".to_string(),
+            m => format!("{}%", *scroll * 100 / m),
+        };
+        f.render_widget(
+            Paragraph::new(format!(" j/k scroll  u/d page  g/G ends  Esc close      {} ", pos))
+                .style(
+                    Style::default()
+                        .fg(Color::Black)
+                        .bg(theme().accent)
+                        .add_modifier(Modifier::BOLD),
+                ),
+            Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1),
+        );
+        return;
+    }
+
+    if let Popup::Archive { path, members, cursor, scroll } = popup {
+        let w = 96u16.min(area.width.saturating_sub(2));
+        let h = area.height.saturating_sub(4).max(8);
+        let rect = centered_rect(w, h, area);
+        f.render_widget(Clear, rect);
+        let name = path.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+        let total: u64 = members.iter().map(|m| m.size).sum();
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_type(border_type())
+            .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
+            .title(format!(
+                " {}  —  {} entries, {} unpacked ",
+                name,
+                members.len(),
+                cian_core::human_size(total)
+            ));
+        let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
+        f.render_widget(block, rect);
+
+        let body_h = inner.height.saturating_sub(1) as usize;
+        if *cursor < *scroll {
+            *scroll = *cursor;
+        } else if body_h > 0 && *cursor >= *scroll + body_h {
+            *scroll = *cursor + 1 - body_h;
+        }
+        for (row, (i, m)) in members.iter().enumerate().skip(*scroll).take(body_h).enumerate() {
+            let sel = i == *cursor;
+            let line = Rect::new(inner.x, inner.y + row as u16, inner.width, 1);
+            if sel {
+                f.render_widget(
+                    Block::default().style(Style::default().bg(theme().selected_bg)),
+                    line,
+                );
+            }
+            let base = if sel { Style::default().bg(theme().selected_bg) } else { Style::default() };
+            let size = if m.is_dir { "—".to_string() } else { cian_core::human_size(m.size) };
+            let name_w = inner.width as usize - 14;
+            f.render_widget(
+                Paragraph::new(Line::from(vec![
+                    Span::styled(if sel { " ▸ " } else { "   " }, base),
+                    Span::styled(
+                        format!("{:<w$}", truncate_middle(&m.name, name_w), w = name_w),
+                        if m.is_dir {
+                            base.fg(FileKind::Directory.color()).add_modifier(Modifier::BOLD)
+                        } else {
+                            base.fg(Color::Rgb(225, 225, 240))
+                        },
+                    ),
+                    Span::styled(format!("{:>6}", size), base.fg(Color::Rgb(140, 140, 165))),
+                ])),
+                line,
+            );
+        }
+        f.render_widget(
+            Paragraph::new(" Enter=extract this   a=extract all   Esc=close ").style(
+                Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD),
+            ),
+            Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1),
+        );
+        return;
+    }
+
     if let Popup::SortPicker { cursor } = popup {
         let w = 34u16.min(area.width);
         let h = SortKey::ALL.len() as u16 + 3;
@@ -6676,6 +6924,8 @@ fn draw_popup(
         | Popup::Shortcuts { .. }
         | Popup::FindResults { .. }
         | Popup::DestPicker { .. }
+        | Popup::Viewer { .. }
+        | Popup::Archive { .. }
         | Popup::None => return,
     };
 
@@ -8441,6 +8691,90 @@ mod tests {
         assert_eq!(choices[0].0, "other pane");
         assert_eq!(choices[0].1.file_name(), r.path().file_name());
         assert!(choices.iter().any(|(k, p)| k == "recent" && p == Path::new("/tmp/somewhere")));
+    }
+
+    #[test]
+    fn f3_views_a_text_file() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::write(d.path().join("a.rs"), "fn main() {}\nsecond\n").unwrap();
+        let p = d.path().to_path_buf();
+        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+
+        app.handle_key(code(KeyCode::F(3))).unwrap();
+        let Popup::Viewer { view, title, .. } = &app.popup else {
+            panic!("expected the viewer, got {:?}", app.popup)
+        };
+        assert_eq!(title, "a.rs");
+        assert_eq!(view.kind, cian_core::viewer::ViewKind::Text);
+        assert_eq!(view.lines, vec!["fn main() {}", "second"]);
+    }
+
+    #[test]
+    fn f3_on_an_archive_lists_it_instead() {
+        let d = tempfile::tempdir().unwrap();
+        {
+            use std::io::Write as _;
+            let f = std::fs::File::create(d.path().join("a.zip")).unwrap();
+            let mut w = zip::ZipWriter::new(f);
+            let o: zip::write::FileOptions<()> = zip::write::FileOptions::default();
+            w.start_file("inside.txt", o).unwrap();
+            w.write_all(b"hi").unwrap();
+            w.finish().unwrap();
+        }
+        let p = d.path().to_path_buf();
+        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+
+        app.handle_key(code(KeyCode::F(3))).unwrap();
+        let Popup::Archive { members, .. } = &app.popup else {
+            panic!("expected the archive list, got {:?}", app.popup)
+        };
+        assert_eq!(members.len(), 1);
+        assert_eq!(members[0].name, "inside.txt");
+    }
+
+    #[test]
+    fn extracting_sends_the_members_to_the_other_pane() {
+        let src = tempfile::tempdir().unwrap();
+        let out = tempfile::tempdir().unwrap();
+        {
+            use std::io::Write as _;
+            let f = std::fs::File::create(src.path().join("a.zip")).unwrap();
+            let mut w = zip::ZipWriter::new(f);
+            let o: zip::write::FileOptions<()> = zip::write::FileOptions::default();
+            w.start_file("inside.txt", o).unwrap();
+            w.write_all(b"hi").unwrap();
+            w.finish().unwrap();
+        }
+        let mut app = App::new(
+            src.path().to_path_buf(),
+            out.path().to_path_buf(),
+            cian_lua::Config::default(),
+        )
+        .unwrap();
+
+        app.handle_key(code(KeyCode::F(3))).unwrap();
+        app.extract_from_archive(true);
+        assert!(app.op_job.is_some(), "extraction runs on the worker");
+
+        let start = Instant::now();
+        while app.op_job.is_some() && start.elapsed() < Duration::from_secs(5) {
+            app.poll_op_job();
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert_eq!(std::fs::read_to_string(out.path().join("inside.txt")).unwrap(), "hi");
+        // The destination is worth remembering like any other transfer target.
+        assert!(app.dest_history.iter().any(|p| p.file_name() == out.path().file_name()));
+    }
+
+    #[test]
+    fn f3_on_a_directory_says_so_rather_than_opening_a_blank_viewer() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::create_dir(d.path().join("sub")).unwrap();
+        let p = d.path().to_path_buf();
+        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        app.handle_key(code(KeyCode::F(3))).unwrap();
+        assert!(matches!(app.popup, Popup::None));
+        assert!(app.message.as_deref().unwrap_or("").contains("directory"));
     }
 
     #[test]

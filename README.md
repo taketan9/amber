@@ -165,6 +165,26 @@ anyone else. `password_cmd` avoids storing anything by taking the value from a
 credential manager. Key authentication avoids the question entirely and is
 usually less work to set up than a credential list is to maintain.
 
+## Looking inside things
+
+**`F3`** answers "what is in here" without leaving cian. On a text file it
+opens a scrollable viewer with line numbers; on a binary one, a hex dump,
+since showing a compiled file as text is a screenful of mojibake that answers
+nothing. Only the first 4 MB is read, so opening a huge log is instant.
+
+On a **zip** (also `.jar`, `.whl`, `.epub`) it lists the members instead, with
+their unpacked sizes. `Enter` extracts the highlighted one into the opposite
+pane, `a` extracts all — on the worker thread, with the usual progress bar and
+Esc.
+
+Member paths are checked before anything is written: an archive can name
+`../../etc/passwd` or an absolute path, and a naive extractor obliges. Those
+are refused individually and the rest of the archive still comes out.
+
+Only zip is handled. It is what Windows reads and writes without extra
+software, and claiming to open archives while failing on half of them would be
+worse than being clear about the one.
+
 ## Searching
 
 `f` jumps between matches in the current listing. **`Shift+F`** searches the

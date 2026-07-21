@@ -18,6 +18,7 @@ sha2 = { version = "0.10.9", default-features = false, features = ["std"] }
 # apartment-threaded COM runtime. Default features are otherwise off because the
 # `chrono` one only powers trash's listing/restore API, which cian does not use.
 trash = { version = "5.2.3", default-features = false, features = ["coinit_apartmentthreaded"] }
+zip = { version = "4.2.0", default-features = false, features = ["deflate"] }
 
 [dev-dependencies]
 tempfile = "3.27.0"
