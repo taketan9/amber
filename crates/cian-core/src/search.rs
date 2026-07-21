@@ -18,24 +18,78 @@ pub struct Hit {
     /// show — the absolute one is mostly the root repeated.
     pub rel: PathBuf,
     pub is_dir: bool,
+    /// For a content match: the 1-based line number and the line itself.
+    pub line: Option<(usize, String)>,
+}
+
+/// What a search looks at.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Mode {
+    /// Match entry names.
+    Name,
+    /// Match the text inside files.
+    Content,
 }
 
 /// What to look for.
 #[derive(Debug, Clone)]
 pub struct Query {
-    /// Matched case-insensitively against the entry's name.
+    /// Matched case-insensitively.
     pub needle: String,
     /// Descend into directories whose name starts with a dot.
     pub include_hidden: bool,
+    pub mode: Mode,
 }
 
 impl Query {
     pub fn new(needle: impl Into<String>) -> Self {
-        Self { needle: needle.into().to_lowercase(), include_hidden: false }
+        Self { needle: needle.into().to_lowercase(), include_hidden: false, mode: Mode::Name }
+    }
+
+    pub fn content(needle: impl Into<String>) -> Self {
+        Self { mode: Mode::Content, ..Self::new(needle) }
     }
 
     fn matches(&self, name: &str) -> bool {
         self.needle.is_empty() || name.to_lowercase().contains(&self.needle)
+    }
+}
+
+/// Files larger than this are not read looking for text. A grep that stalls on
+/// a database dump or a disk image is worse than one that admits it skipped it.
+pub const MAX_GREP_BYTES: u64 = 8 * 1024 * 1024;
+
+/// How much of a file to sniff for NUL bytes before deciding it is binary.
+const SNIFF: usize = 8000;
+
+/// Report every line of `path` containing the needle.
+///
+/// Skips files that are too big, and files that look binary — matching inside
+/// a compiled object produces unreadable "lines" and no useful answer.
+fn grep_file(
+    path: &Path,
+    needle: &str,
+    cancel: &AtomicBool,
+    mut on_line: impl FnMut(usize, String),
+) {
+    let Ok(meta) = fs::metadata(path) else { return };
+    if meta.len() > MAX_GREP_BYTES {
+        return;
+    }
+    let Ok(bytes) = fs::read(path) else { return };
+    if bytes[..bytes.len().min(SNIFF)].contains(&0) {
+        return;
+    }
+    let Ok(text) = String::from_utf8(bytes) else { return };
+    for (i, line) in text.lines().enumerate() {
+        if cancel.load(Ordering::Relaxed) {
+            return;
+        }
+        if line.to_lowercase().contains(needle) {
+            // Long lines are useless in a result list and expensive to carry.
+            let shown: String = line.trim().chars().take(300).collect();
+            on_line(i + 1, shown);
+        }
     }
 }
 
@@ -81,12 +135,39 @@ pub fn search(
             let hidden = name.starts_with('.');
             let is_dir = e.file_type().map(|t| t.is_dir()).unwrap_or(false);
 
-            if query.matches(&name) && (query.include_hidden || !hidden) {
-                let rel = path.strip_prefix(root).unwrap_or(&path).to_path_buf();
-                on_hit(Hit { path: path.clone(), rel, is_dir });
-                found += 1;
-                if found >= MAX_HITS {
-                    return Outcome::Truncated;
+            let visible = query.include_hidden || !hidden;
+            match query.mode {
+                Mode::Name => {
+                    if visible && query.matches(&name) {
+                        let rel = path.strip_prefix(root).unwrap_or(&path).to_path_buf();
+                        on_hit(Hit { path: path.clone(), rel, is_dir, line: None });
+                        found += 1;
+                        if found >= MAX_HITS {
+                            return Outcome::Truncated;
+                        }
+                    }
+                }
+                Mode::Content => {
+                    if visible && !is_dir && !query.needle.is_empty() {
+                        let rel = path.strip_prefix(root).unwrap_or(&path).to_path_buf();
+                        let mut stop = false;
+                        grep_file(&path, &query.needle, cancel, |n, text| {
+                            if found < MAX_HITS {
+                                on_hit(Hit {
+                                    path: path.clone(),
+                                    rel: rel.clone(),
+                                    is_dir: false,
+                                    line: Some((n, text)),
+                                });
+                                found += 1;
+                            } else {
+                                stop = true;
+                            }
+                        });
+                        if stop {
+                            return Outcome::Truncated;
+                        }
+                    }
                 }
             }
             // Symlinked directories are not followed: a link back up the tree
@@ -192,5 +273,84 @@ mod tests {
         let (names, out) = run(d.path(), Query::new("main"));
         assert_eq!(out, Outcome::Complete);
         assert_eq!(names.len(), 2);
+    }
+}
+
+#[cfg(test)]
+mod grep_tests {
+    use super::*;
+
+    fn tree() -> tempfile::TempDir {
+        let d = tempfile::tempdir().unwrap();
+        fs::create_dir_all(d.path().join("src")).unwrap();
+        fs::write(d.path().join("a.txt"), "alpha\nTODO: fix this\nomega\n").unwrap();
+        fs::write(d.path().join("src/b.rs"), "fn main() {}\n// todo later\n").unwrap();
+        fs::write(d.path().join("clean.txt"), "nothing here\n").unwrap();
+        // A binary file that contains the needle as bytes.
+        fs::write(d.path().join("blob.bin"), b"\x00\x01todo\x00\xff").unwrap();
+        d
+    }
+
+    fn run(root: &Path, needle: &str) -> Vec<(String, usize, String)> {
+        let cancel = AtomicBool::new(false);
+        let mut out = Vec::new();
+        search(root, &Query::content(needle), &cancel, &mut |h| {
+            let (n, text) = h.line.clone().unwrap();
+            out.push((h.rel.display().to_string().replace('\\', "/"), n, text));
+        });
+        out.sort();
+        out
+    }
+
+    #[test]
+    fn finds_matching_lines_with_their_numbers() {
+        let d = tree();
+        let hits = run(d.path(), "todo");
+        assert_eq!(
+            hits,
+            vec![
+                ("a.txt".to_string(), 2, "TODO: fix this".to_string()),
+                ("src/b.rs".to_string(), 2, "// todo later".to_string()),
+            ],
+            "case-insensitive, line-numbered, and recursive"
+        );
+    }
+
+    /// Matching inside a compiled artefact yields unreadable "lines" and never
+    /// answers the question that was asked.
+    #[test]
+    fn binary_files_are_skipped() {
+        let d = tree();
+        let hits = run(d.path(), "todo");
+        assert!(!hits.iter().any(|(p, _, _)| p.contains("blob")), "{:?}", hits);
+    }
+
+    #[test]
+    fn files_over_the_size_limit_are_skipped() {
+        let d = tempfile::tempdir().unwrap();
+        let big = d.path().join("huge.log");
+        let mut text = String::with_capacity(MAX_GREP_BYTES as usize + 64);
+        while text.len() < MAX_GREP_BYTES as usize + 32 {
+            text.push_str("filler line\n");
+        }
+        text.push_str("needle here\n");
+        fs::write(&big, &text).unwrap();
+        assert!(fs::metadata(&big).unwrap().len() > MAX_GREP_BYTES);
+        assert!(run(d.path(), "needle").is_empty(), "should not read a huge file");
+    }
+
+    #[test]
+    fn an_empty_needle_matches_nothing_rather_than_every_line() {
+        let d = tree();
+        assert!(run(d.path(), "").is_empty());
+    }
+
+    #[test]
+    fn a_name_search_still_reports_no_line() {
+        let d = tree();
+        let cancel = AtomicBool::new(false);
+        let mut lines = Vec::new();
+        search(d.path(), &Query::new("a.txt"), &cancel, &mut |h| lines.push(h.line.clone()));
+        assert_eq!(lines, vec![None]);
     }
 }

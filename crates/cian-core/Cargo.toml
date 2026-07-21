@@ -11,6 +11,8 @@ anyhow   = { workspace = true }
 chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
 dunce = "1.0.5"
 fs_extra = { workspace = true }
+md-5 = { version = "0.10.6", default-features = false, features = ["std"] }
+sha2 = { version = "0.10.9", default-features = false, features = ["std"] }
 # `coinit_apartmentthreaded` is not optional on Windows: trash fails to compile
 # without one of its coinit_* features, and the Shell file APIs it calls want an
 # apartment-threaded COM runtime. Default features are otherwise off because the

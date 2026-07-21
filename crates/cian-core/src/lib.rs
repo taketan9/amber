@@ -5,6 +5,7 @@ use std::time::SystemTime;
 
 use anyhow::{Context, Result};
 
+pub mod attrs;
 pub mod log;
 pub mod ops;
 pub mod progress;
@@ -117,6 +118,10 @@ pub struct Pane {
     pub all_entries: Vec<Entry>,
     /// Case-insensitive substring that narrows the listing. Empty shows all.
     pub filter: String,
+    /// Show entries whose name starts with a dot. Defaults to true, which is
+    /// what cian has always done; most file managers hide them, so it is a
+    /// toggle rather than a fixed choice.
+    pub show_hidden: bool,
     /// Ordering of the listing.
     pub sort: Sort,
     pub cursor: usize,
@@ -144,6 +149,7 @@ impl Pane {
             entries: Vec::new(),
             all_entries: Vec::new(),
             filter: String::new(),
+            show_hidden: true,
             sort: Sort::default(),
             cursor: 0,
             marks: HashSet::new(),
@@ -243,19 +249,18 @@ impl Pane {
         self.apply_filter();
     }
 
-    /// Rebuild `entries` from `all_entries` according to `filter`.
+    /// Rebuild `entries` from `all_entries` according to `filter` and
+    /// `show_hidden`.
     fn apply_filter(&mut self) {
-        if self.filter.is_empty() {
-            self.entries = self.all_entries.clone();
-        } else {
-            let needle = self.filter.to_lowercase();
-            self.entries = self
-                .all_entries
-                .iter()
-                .filter(|e| e.name.to_lowercase().contains(&needle))
-                .cloned()
-                .collect();
-        }
+        let needle = self.filter.to_lowercase();
+        let show_hidden = self.show_hidden;
+        self.entries = self
+            .all_entries
+            .iter()
+            .filter(|e| show_hidden || !e.name.starts_with('.'))
+            .filter(|e| needle.is_empty() || e.name.to_lowercase().contains(&needle))
+            .cloned()
+            .collect();
         if self.cursor >= self.entries.len() {
             self.cursor = self.entries.len().saturating_sub(1);
         }
@@ -265,6 +270,16 @@ impl Pane {
     pub fn set_filter(&mut self, filter: impl Into<String>) {
         self.filter = filter.into();
         self.apply_filter();
+    }
+
+    /// Show or hide dotfiles. Kept across directory changes, unlike the
+    /// filter: it is a preference about how you want to look at things, not a
+    /// query about one folder.
+    pub fn set_show_hidden(&mut self, show: bool) {
+        if self.show_hidden != show {
+            self.show_hidden = show;
+            self.apply_filter();
+        }
     }
 
     /// Drop the filter. Called whenever the pane changes directory, since a
@@ -495,6 +510,32 @@ mod tests {
         assert!(pane.is_stale(), "a removed entry counts too");
         pane.reload().unwrap();
         assert!(!names(&pane).contains(&"appeared.txt".to_string()));
+    }
+
+    #[test]
+    fn hidden_entries_can_be_toggled_and_the_choice_outlives_a_reload() {
+        let (_d, mut pane) = pane_with(&["a.txt", ".config", ".env"]);
+        assert!(pane.show_hidden, "cian has always shown them; that is the default");
+        assert_eq!(names(&pane).len(), 3);
+
+        pane.set_show_hidden(false);
+        assert_eq!(names(&pane), vec!["a.txt"]);
+
+        // A preference about how to look at things, not a query about one
+        // folder, so it survives a reload — unlike the filter.
+        pane.reload().unwrap();
+        assert_eq!(names(&pane), vec!["a.txt"]);
+
+        pane.set_show_hidden(true);
+        assert_eq!(names(&pane).len(), 3);
+    }
+
+    #[test]
+    fn hiding_composes_with_the_filter() {
+        let (_d, mut pane) = pane_with(&["notes.txt", ".notes.swp", "other.md"]);
+        pane.set_show_hidden(false);
+        pane.set_filter("notes");
+        assert_eq!(names(&pane), vec!["notes.txt"], "the dotfile stays hidden");
     }
 
     fn names(pane: &Pane) -> Vec<String> {

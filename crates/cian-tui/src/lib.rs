@@ -821,6 +821,9 @@ enum MenuItem {
     Delete,
     Rename,
     Background,
+    HiddenToggle,
+    Attributes,
+    Hash,
     Ssh,
     Manual,
 }
@@ -836,6 +839,9 @@ impl MenuItem {
             MenuItem::Delete => "Delete (to trash)",
             MenuItem::Rename => "Rename",
             MenuItem::Background => "Background color…",
+            MenuItem::HiddenToggle => "Show / hide dotfiles",
+            MenuItem::Attributes => "Attributes…",
+            MenuItem::Hash => "Checksum…",
             MenuItem::Ssh => "SSH connect…",
             MenuItem::Manual => "Key manual  (?)",
         }
@@ -919,6 +925,7 @@ struct FindJob {
     /// formatting it while `popup` is mutably borrowed for drawing.
     root_label: String,
     query: String,
+    mode: cian_core::search::Mode,
     done: Option<cian_core::search::Outcome>,
 }
 
@@ -991,6 +998,8 @@ enum InputKind {
     JumpPath,
     /// A name to search for, recursively from the current directory.
     FindRecursive,
+    /// Text to look for inside the files below the current directory.
+    GrepRecursive,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1415,9 +1424,33 @@ impl App {
             "man" | "help" | "h" => self.open_manual(),
             "paste" => { let _ = self.paste_clip(); }
             "cd" | "goto" => self.start_jump_path(),
+            "hidden" => self.toggle_hidden(),
+            "attr" | "attrs" => self.show_attributes(),
+            "grep" => self.start_grep_prompt(),
+            "find" => self.start_find_prompt(),
             "menu" => self.open_menu_at_cursor(),
             "ssh" => self.start_ssh(),
-            other => self.message = Some(format!("unknown command: :{}", other)),
+            other => {
+                // Commands that carry an argument.
+                if let Some(arg) = other.strip_prefix("chmod ") {
+                    self.set_attr_command(arg);
+                } else if let Some(arg) = other.strip_prefix("hash") {
+                    match cian_core::attrs::HashKind::parse(arg) {
+                        Some(k) => self.start_hash(k),
+                        None => {
+                            self.message = Some(format!("unknown hash: {} (md5 or sha256)", arg.trim()))
+                        }
+                    }
+                } else if let Some(arg) = other.strip_prefix("readonly ") {
+                    match arg.trim() {
+                        "on" | "true" | "1" => self.set_readonly_command(true),
+                        "off" | "false" | "0" => self.set_readonly_command(false),
+                        _ => self.message = Some("usage: :readonly on|off".into()),
+                    }
+                } else {
+                    self.message = Some(format!("unknown command: :{}", other));
+                }
+            }
         }
     }
 
@@ -1926,6 +1959,126 @@ impl App {
         self.message = Some(format!("sorted by {} ({})", key.label(), arrow));
     }
 
+    // ------- Hidden files, attributes, checksums -------
+    fn toggle_hidden(&mut self) {
+        let Some(p) = self.active_pane_mut() else { return };
+        let show = !p.show_hidden;
+        p.set_show_hidden(show);
+        self.message =
+            Some(if show { "showing dotfiles".into() } else { "hiding dotfiles".to_string() });
+    }
+
+    fn show_attributes(&mut self) {
+        let paths = self.active_pane().map(|p| p.target_paths()).unwrap_or_default();
+        if paths.is_empty() {
+            self.message = Some("nothing selected".into());
+            return;
+        }
+        let mut lines = Vec::new();
+        for path in paths.iter().take(20) {
+            let name = path.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+            match cian_core::attrs::read_attrs(path) {
+                Ok(a) => {
+                    let owner = a.owner.as_ref().map(|o| format!("   owner {}", o)).unwrap_or_default();
+                    lines.push(format!("{:<28} {}{}", truncate(&name, 28), a.describe(), owner));
+                }
+                Err(e) => lines.push(format!("{:<28} {}", truncate(&name, 28), e)),
+            }
+        }
+        if paths.len() > 20 {
+            lines.push(format!("... and {} more", paths.len() - 20));
+        }
+        lines.push(String::new());
+        lines.push("change with  :chmod 644   or  :readonly on|off".to_string());
+        self.popup = Popup::Notice { lines };
+    }
+
+    /// Checksum the selection on a worker thread — the files worth hashing are
+    /// the big ones, which is exactly when doing it inline would freeze.
+    fn start_hash(&mut self, kind: cian_core::attrs::HashKind) {
+        let paths: Vec<PathBuf> = self
+            .active_pane()
+            .map(|p| p.target_paths())
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|p| p.is_file())
+            .collect();
+        if paths.is_empty() {
+            self.message = Some("no files selected".into());
+            return;
+        }
+        self.start_op("hashing", move |ctl| {
+            let mut report = OpReport::default();
+            let total = paths.len();
+            for (i, path) in paths.iter().enumerate() {
+                if ctl.cancel.load(Ordering::Relaxed) {
+                    break;
+                }
+                let p = cian_core::progress::Progress {
+                    files_done: i,
+                    files_total: total,
+                    current: path.display().to_string(),
+                    ..Default::default()
+                };
+                (ctl.on_progress)(&p);
+                match cian_core::attrs::hash_file(path, kind, ctl.cancel) {
+                    Ok(Some(sum)) => {
+                        let name = path
+                            .file_name()
+                            .map(|s| s.to_string_lossy().into_owned())
+                            .unwrap_or_default();
+                        // Carried on the report so the result survives to be
+                        // shown; there is no other channel back.
+                        report.note_error(format!("{}  {}  {}", kind.label(), sum, name));
+                    }
+                    Ok(None) => break,
+                    Err(e) => report.note_error(format!("{}: {}", path.display(), e)),
+                }
+            }
+            report
+        });
+    }
+
+    fn set_attr_command(&mut self, arg: &str) {
+        let paths = self.active_pane().map(|p| p.target_paths()).unwrap_or_default();
+        if paths.is_empty() {
+            self.message = Some("nothing selected".into());
+            return;
+        }
+        let mut ok = 0;
+        let mut err = None;
+        for path in &paths {
+            match cian_core::attrs::set_mode(path, arg) {
+                Ok(()) => ok += 1,
+                Err(e) => {
+                    err = Some(e.to_string());
+                    break;
+                }
+            }
+        }
+        self.reload_both();
+        self.message = Some(match err {
+            Some(e) => format!("chmod failed: {}", e),
+            None => format!("chmod {} on {} item(s)", arg, ok),
+        });
+    }
+
+    fn set_readonly_command(&mut self, on: bool) {
+        let paths = self.active_pane().map(|p| p.target_paths()).unwrap_or_default();
+        if paths.is_empty() {
+            self.message = Some("nothing selected".into());
+            return;
+        }
+        let mut ok = 0;
+        for path in &paths {
+            if cian_core::attrs::set_readonly(path, on).is_ok() {
+                ok += 1;
+            }
+        }
+        self.reload_both();
+        self.message = Some(format!("read-only {} on {} item(s)", if on { "set" } else { "cleared" }, ok));
+    }
+
     // ------- Recursive search -------
     fn start_find_prompt(&mut self) {
         self.popup = Popup::TextInput {
@@ -1936,10 +2089,22 @@ impl App {
         };
     }
 
+    fn start_grep_prompt(&mut self) {
+        self.popup = Popup::TextInput {
+            title: "grep (recursive)".into(),
+            prompt: "text inside files   (Ctrl+V paste, Ctrl+U clear):".into(),
+            buffer: String::new(),
+            kind: InputKind::GrepRecursive,
+        };
+    }
+
     /// Walk the tree below the focused pane on a worker thread.
-    fn start_find(&mut self, needle: &str) {
+    fn start_find(&mut self, needle: &str, mode: cian_core::search::Mode) {
         let Some(root) = self.active_pane().map(|p| p.cwd.clone()) else { return };
-        let query = cian_core::search::Query::new(needle);
+        let mut query = cian_core::search::Query::new(needle);
+        query.mode = mode;
+        query.include_hidden =
+            self.active_pane().map(|p| p.show_hidden).unwrap_or(false);
         let cancel = Arc::new(AtomicBool::new(false));
         let (tx, rx) = std::sync::mpsc::channel();
         let worker_cancel = Arc::clone(&cancel);
@@ -1960,6 +2125,7 @@ impl App {
                 .map(|s| s.to_string_lossy().into_owned())
                 .unwrap_or_else(|| root.display().to_string()),
             query: needle.to_string(),
+            mode,
             done: None,
         });
         self.popup = Popup::FindResults { hits: Vec::new(), cursor: 0, scroll: 0 };
@@ -2326,7 +2492,11 @@ impl App {
             }
             InputKind::JumpPath => return self.finish_jump_path(&name),
             InputKind::FindRecursive => {
-                self.start_find(&name);
+                self.start_find(&name, cian_core::search::Mode::Name);
+                return Ok(());
+            }
+            InputKind::GrepRecursive => {
+                self.start_find(&name, cian_core::search::Mode::Content);
                 return Ok(());
             }
             InputKind::ShortcutName { editing_index } => {
@@ -2688,6 +2858,9 @@ impl App {
             items.push(MenuItem::MoveToOther);
             items.push(MenuItem::Rename);
             items.push(MenuItem::Delete);
+            items.push(MenuItem::Attributes);
+            items.push(MenuItem::Hash);
+            items.push(MenuItem::HiddenToggle);
             items.push(MenuItem::Ssh);
             items.push(MenuItem::Background);
         }
@@ -2781,6 +2954,9 @@ impl App {
             MenuItem::Delete => self.start_delete(),
             MenuItem::Manual => self.open_manual(),
             MenuItem::Ssh => self.start_ssh(),
+            MenuItem::HiddenToggle => self.toggle_hidden(),
+            MenuItem::Attributes => self.show_attributes(),
+            MenuItem::Hash => self.start_hash(cian_core::attrs::HashKind::Sha256),
             MenuItem::Background => {
                 let pane = self.focused;
                 let current = match pane {
@@ -3411,6 +3587,7 @@ impl App {
             (false, false, KeyCode::Char('f')) => self.start_search(),
             (false, false, KeyCode::Char('/')) => self.start_filter(),
             (false, true, KeyCode::Char('F')) => self.start_find_prompt(),
+            (true, _, KeyCode::Char('f')) => self.start_grep_prompt(),
             (false, false, KeyCode::Char(',')) => self.start_sort_picker(),
             (false, false, KeyCode::Char('z')) => self.start_jump_path(),
             // Manual refresh, for the cases the timer cannot see — a file
@@ -4065,7 +4242,8 @@ fn manual_sections() -> Vec<(&'static str, Vec<ManualEntry>)> {
                 entry("z", None, "go to a typed path (also :cd)"),
                 entry("Ctrl+R, F5", None, "refresh now"),
                 entry("f", Some(Search), "search in this folder"),
-                entry("Shift+F", None, "search the whole tree below here"),
+                entry("Shift+F", None, "find by name, whole tree below here"),
+                entry("Ctrl+F", None, "grep inside files, whole tree below here"),
                 entry("n", Some(SearchNext), "next match"),
                 entry("N", Some(SearchPrev), "previous match"),
                 entry("/", None, "filter list as you type"),
@@ -4094,6 +4272,9 @@ fn manual_sections() -> Vec<(&'static str, Vec<ManualEntry>)> {
                 entry("p", Some(CopyPath), "copy path text to clipboard"),
                 entry("Shift+P", Some(CopyFileRef), "copy file(s) to clipboard"),
                 entry("s", Some(Shortcuts), "shortcuts menu"),
+                entry(":hidden", None, "show / hide dotfiles (also right-click)"),
+                entry(":attr", None, "attributes;  :chmod 644,  :readonly on|off"),
+                entry(":hash", None, "checksum;  :hash md5  /  :hash sha256"),
                 entry("Shift+Enter", None, "context menu for the entry (also :menu)"),
             ],
         ),
@@ -4619,7 +4800,7 @@ fn draw(f: &mut Frame, app: &mut App) {
         let find_state = app
             .find_job
             .as_ref()
-            .map(|j| (j.query.as_str(), j.root_label.as_str(), j.done));
+            .map(|j| (j.query.as_str(), j.root_label.as_str(), j.done, j.mode));
         draw_popup(f, area, &mut app.popup, &app.config.ssh_hosts, find_state);
     }
 }
@@ -5366,6 +5547,7 @@ fn key_hints(app: &App) -> Vec<(&'static str, &'static str)> {
             ("r", "rename"),
             ("/", "filter"),
             ("S-F", "find"),
+            ("C-F", "grep"),
             (",", "sort"),
             ("z", "go to"),
             ("Shift+J", "shell"),
@@ -5636,7 +5818,7 @@ fn draw_popup(
     area: Rect,
     popup: &mut Popup,
     hosts: &[cian_lua::SshHost],
-    find: Option<(&str, &str, Option<cian_core::search::Outcome>)>,
+    find: Option<(&str, &str, Option<cian_core::search::Outcome>, cian_core::search::Mode)>,
 ) {
     // The manual is taller than any terminal, so it renders as a scrolling
     // viewport rather than the fixed block the other popups use.
@@ -5840,7 +6022,11 @@ fn draw_popup(
         let rect = centered_rect(w, h, area);
         f.render_widget(Clear, rect);
         let title = match find {
-            Some((query, root, done)) => {
+            Some((query, root, done, mode)) => {
+                let verb = match mode {
+                    cian_core::search::Mode::Name => "find",
+                    cian_core::search::Mode::Content => "grep",
+                };
                 let state = match done {
                     None => "searching…".to_string(),
                     Some(cian_core::search::Outcome::Complete) => format!("{} found", hits.len()),
@@ -5851,7 +6037,7 @@ fn draw_popup(
                         format!("{} found (too many, stopped)", hits.len())
                     }
                 };
-                format!(" find \"{}\" in {} — {} ", query, root, state)
+                format!(" {} \"{}\" in {} — {} ", verb, query, root, state)
             }
             None => " find ".to_string(),
         };
@@ -5895,22 +6081,38 @@ fn draw_popup(
                 None => (String::new(), rel.clone()),
             };
             let avail = inner.width.saturating_sub(4) as usize;
-            let dir_shown = truncate_middle(&dir, avail.saturating_sub(width(&name)));
-            f.render_widget(
-                Paragraph::new(Line::from(vec![
-                    Span::styled(if sel { " ▸ " } else { "   " }, base),
-                    Span::styled(dir_shown, base.fg(Color::Rgb(135, 135, 160))),
-                    Span::styled(
-                        name,
+            let mut spans = vec![Span::styled(if sel { " ▸ " } else { "   " }, base)];
+            match &hit.line {
+                // A content match: the location is a prefix, the matched text
+                // is the answer, so give the text the room and the emphasis.
+                Some((n, text)) => {
+                    let loc = format!("{}:{}  ", rel, n);
+                    let loc_w = width(&loc).min(avail / 2);
+                    spans.push(Span::styled(
+                        truncate_middle(&loc, loc_w),
+                        base.fg(Color::Rgb(135, 135, 160)),
+                    ));
+                    spans.push(Span::styled(
+                        truncate(text, avail.saturating_sub(loc_w)),
+                        base.fg(Color::Rgb(225, 225, 240)),
+                    ));
+                }
+                None => {
+                    spans.push(Span::styled(
+                        truncate_middle(&dir, avail.saturating_sub(width(&name))),
+                        base.fg(Color::Rgb(135, 135, 160)),
+                    ));
+                    spans.push(Span::styled(
+                        name.clone(),
                         if hit.is_dir {
                             base.fg(FileKind::Directory.color()).add_modifier(Modifier::BOLD)
                         } else {
                             base.fg(Color::Rgb(225, 225, 240))
                         },
-                    ),
-                ])),
-                line_area,
-            );
+                    ));
+                }
+            }
+            f.render_widget(Paragraph::new(Line::from(spans)), line_area);
         }
         f.render_widget(
             Paragraph::new(" Enter=go  j/k=move  Esc=close ").style(
@@ -7740,7 +7942,7 @@ mod tests {
         let p = d.path().to_path_buf();
         let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
 
-        app.start_find("main.rs");
+        app.start_find("main.rs", cian_core::search::Mode::Name);
         drain_find(&mut app);
         // Pick the deepest hit, whichever position it landed in.
         let idx = match &app.popup {
@@ -7767,7 +7969,7 @@ mod tests {
         let d = find_tree();
         let p = d.path().to_path_buf();
         let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
-        app.start_find("nothing-matches-this");
+        app.start_find("nothing-matches-this", cian_core::search::Mode::Name);
         drain_find(&mut app);
         let Popup::FindResults { hits, .. } = &app.popup else { panic!("no results popup") };
         assert!(hits.is_empty());
@@ -7779,11 +7981,58 @@ mod tests {
         let d = find_tree();
         let p = d.path().to_path_buf();
         let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
-        app.start_find("main");
+        app.start_find("main", cian_core::search::Mode::Name);
         assert!(app.find_job.is_some());
         app.handle_key(code(KeyCode::Esc)).unwrap();
         assert!(matches!(app.popup, Popup::None));
         assert!(app.find_job.is_none(), "Esc must release the search");
+    }
+
+    #[test]
+    fn ctrl_f_greps_inside_files_and_reports_the_line() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::write(d.path().join("a.txt"), "one\nTODO: fix\nthree\n").unwrap();
+        std::fs::write(d.path().join("b.txt"), "nothing\n").unwrap();
+        let p = d.path().to_path_buf();
+        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+
+        app.handle_key(KeyEvent::new(KeyCode::Char('f'), KeyModifiers::CONTROL)).unwrap();
+        let Popup::TextInput { kind, .. } = &app.popup else { panic!("no prompt") };
+        assert!(matches!(kind, InputKind::GrepRecursive));
+        for c in "todo".chars() {
+            app.handle_key(key(c)).unwrap();
+        }
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+        drain_find(&mut app);
+
+        let Popup::FindResults { hits, .. } = &app.popup else { panic!("no results") };
+        assert_eq!(hits.len(), 1);
+        let (n, text) = hits[0].line.clone().expect("a content hit carries its line");
+        assert_eq!(n, 2, "1-based line number");
+        assert_eq!(text, "TODO: fix");
+    }
+
+    #[test]
+    fn the_menu_offers_the_new_entries() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        let _ = render(&mut app, 100, 40);
+        app.focus(FocusedPane::Left);
+        app.open_context_menu(5, 5);
+        let Popup::ContextMenu { items, .. } = &app.popup else { panic!("no menu") };
+        for want in [MenuItem::HiddenToggle, MenuItem::Attributes, MenuItem::Hash] {
+            assert!(items.contains(&want), "{:?} missing from {:?}", want, items);
+        }
+    }
+
+    #[test]
+    fn the_menu_toggles_dotfiles_for_the_focused_pane_only() {
+        let (_d, mut app) = app_with(&["a.txt", ".hidden"]);
+        app.focus(FocusedPane::Left);
+        assert_eq!(app.left.active_ref().entries.len(), 2);
+
+        app.run_menu_item(MenuItem::HiddenToggle).unwrap();
+        assert_eq!(app.left.active_ref().entries.len(), 1, "dotfile hidden here");
+        assert_eq!(app.right.active_ref().entries.len(), 2, "and not in the other pane");
     }
 
     #[test]

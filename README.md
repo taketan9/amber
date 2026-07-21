@@ -157,10 +157,32 @@ whole tree below the pane's directory, on a worker thread — results appear as
 they are found rather than after the walk finishes, `Esc` stops it, and Enter
 on a result moves the pane into that directory with the cursor on the entry.
 
+**`Ctrl+F`** greps *inside* the files instead, listing each matching line with
+its number. Binary files are skipped (a match inside a compiled object is
+unreadable and answers nothing) and so are files over 8 MB, so a stray database
+dump cannot stall the search.
+
 The walk is breadth-first, so shallow matches — usually the wanted ones —
 arrive first and a search abandoned early has still produced something useful.
 Hidden directories are skipped, symlinked directories are not followed (a link
 back up the tree would loop), and the search stops at 5000 hits.
+
+## Attributes, checksums, dotfiles
+
+`:attr` shows permissions and owner for the selection; `:chmod 644` and
+`:readonly on|off` change them. `:hash` checksums the selected files —
+`:hash md5` or `:hash sha256` — on a worker thread with the same progress bar
+and Esc as any other long operation, since the files worth checksumming are the
+big ones.
+
+`:hidden` shows or hides dotfiles for the focused pane. All three are also in
+the right-click menu. Dotfiles are shown by default, which is what cian has
+always done; `cian.set_option("show_hidden", false)` changes that.
+
+Note that `:chmod` is octal only. Symbolic forms like `u+x` are a small
+language of their own, and half-implementing them would be worse than saying
+no. On Windows there are no mode bits at all, so `:chmod` refuses and points at
+`:readonly`.
 
 ## Going to a path
 

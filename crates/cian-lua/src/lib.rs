@@ -52,6 +52,8 @@ pub struct Options {
     pub key_hints: Option<bool>,
     /// Border corners: "rounded", "plain", or unset for per-terminal defaults.
     pub borders: Option<String>,
+    /// Start with dotfiles visible. Defaults to true.
+    pub show_hidden: Option<bool>,
 }
 
 /// A login on a host.
@@ -406,6 +408,12 @@ fn install_api(lua: &Lua, builder: &Rc<RefCell<Builder>>) -> mlua::Result<()> {
                         Err(_) => bm
                             .errors
                             .push("set_option: borders expects \"rounded\" or \"plain\"".into()),
+                    },
+                    "show_hidden" => match bool::from_lua(val, lua) {
+                        Ok(v) => bm.options.show_hidden = Some(v),
+                        Err(_) => bm
+                            .errors
+                            .push("set_option: show_hidden expects a boolean".into()),
                     },
                     "key_hints" => match bool::from_lua(val, lua) {
                         Ok(v) => bm.options.key_hints = Some(v),
