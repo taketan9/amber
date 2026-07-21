@@ -23,6 +23,7 @@ use ratatui::backend::{Backend, CrosstermBackend};
 use ratatui::layout::{Constraint, Direction, Layout, Margin, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
+use unicode_width::UnicodeWidthStr;
 use ratatui::widgets::{
     Block, BorderType, Borders, Clear, List, ListItem, ListState, Paragraph, Scrollbar,
     ScrollbarOrientation, ScrollbarState, Wrap,
@@ -3098,14 +3099,17 @@ impl App {
             (false, false, KeyCode::Char('k')) | (_, _, KeyCode::Up) => {
                 if let Some(p) = self.active_pane_mut() { p.move_cursor(-1); }
             }
-            // Parent: h was reassigned to history; use -, Backspace, or Left arrow instead.
+            // Parent: `-` or Backspace. The arrows move between panes instead,
+            // which is what a two-pane layout makes people reach for — using
+            // them for up/into a directory was reported as confusing.
             (false, false, KeyCode::Char('-'))
-            | (_, _, KeyCode::Left)
             | (_, _, KeyCode::Backspace) => {
                 if let Some(p) = self.active_pane_mut() { p.go_parent()?; }
             }
-            // FIX: l / Right only enters directories; never opens files.
-            (false, false, KeyCode::Char('l')) | (_, _, KeyCode::Right) => {
+            (_, _, KeyCode::Left) => self.focus(FocusedPane::Left),
+            (_, _, KeyCode::Right) => self.focus(FocusedPane::Right),
+            // `l` only enters directories; never opens files.
+            (false, false, KeyCode::Char('l')) => {
                 if let Some(p) = self.active_pane_mut() {
                     let is_dir = p.selected().map(|e| e.is_dir).unwrap_or(false);
                     if is_dir { p.enter_selected()?; }
@@ -3678,8 +3682,9 @@ fn manual_sections() -> Vec<(&'static str, Vec<ManualEntry>)> {
                 entry("Shift+U", Some(PageUp), "move 10 lines up"),
                 entry("gg", None, "jump to top"),
                 entry("G", Some(CursorBottom), "jump to bottom"),
-                entry("l, Right, Enter", Some(EnterDir), "enter folder / open file"),
-                entry("-, Left, Bksp", Some(Parent), "parent folder"),
+                entry("l, Enter", Some(EnterDir), "enter folder / open file"),
+                entry("-, Bksp", Some(Parent), "parent folder"),
+                entry("Left / Right", None, "focus the left / right pane"),
                 entry("h", Some(History), "history popup"),
                 entry("z", None, "go to a typed path (also :cd)"),
                 entry("f", Some(Search), "search"),
@@ -5096,6 +5101,56 @@ fn truncate(s: &str, max: usize) -> String {
     }
 }
 
+/// Display width of a string in terminal cells.
+///
+/// Not `chars().count()`: CJK characters occupy two cells, so a Japanese
+/// shortcut name padded by character count pushes everything after it out of
+/// alignment and off the right edge.
+fn width(s: &str) -> usize {
+    UnicodeWidthStr::width(s)
+}
+
+/// Pad to `w` display cells, accounting for wide characters.
+fn pad_to(s: &str, w: usize) -> String {
+    let mut out = s.to_string();
+    for _ in width(s)..w {
+        out.push(' ');
+    }
+    out
+}
+
+/// Shorten from the middle, keeping both ends.
+///
+/// Paths and URLs carry their meaning at opposite ends — the final directory
+/// of one, the host of the other — so cutting either end loses what identifies
+/// it. Removing the middle keeps both.
+fn truncate_middle(s: &str, max: usize) -> String {
+    if width(s) <= max {
+        return s.to_string();
+    }
+    if max <= 3 {
+        return truncate(s, max);
+    }
+    // Budget in display cells from each end, so wide characters cost two.
+    let keep = max - 1;
+    let (head_budget, tail_budget) = (keep.div_ceil(2), keep / 2);
+    let take_from = |it: &mut dyn Iterator<Item = char>, budget: usize| -> String {
+        let (mut out, mut used) = (String::new(), 0usize);
+        for c in it {
+            let cw = UnicodeWidthStr::width(c.to_string().as_str());
+            if used + cw > budget {
+                break;
+            }
+            used += cw;
+            out.push(c);
+        }
+        out
+    };
+    let h = take_from(&mut s.chars(), head_budget);
+    let t: String = take_from(&mut s.chars().rev(), tail_budget).chars().rev().collect();
+    format!("{}…{}", h, t)
+}
+
 fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
     let w = width.min(area.width.saturating_sub(2));
     let h = height.min(area.height.saturating_sub(2));
@@ -5296,6 +5351,104 @@ fn draw_popup(f: &mut Frame, area: Rect, popup: &mut Popup, hosts: &[cian_lua::S
             Paragraph::new(" Enter connect   Esc back ").style(
                 Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD),
             ),
+            footer_area,
+        );
+        return;
+    }
+
+    if let Popup::Shortcuts { entries, cursor } = popup {
+        // Wide, because these are paths and URLs; the generic 70-column popup
+        // wrapped them across lines, which made the list unreadable.
+        let w = 96u16.min(area.width.saturating_sub(2));
+        let h = (entries.len() as u16 + 5).max(8).min(area.height.saturating_sub(2));
+        let rect = centered_rect(w, h, area);
+        f.render_widget(Clear, rect);
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_type(border_type())
+            .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
+            .title(" shortcuts ");
+        let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
+        f.render_widget(block, rect);
+
+        let body_h = inner.height.saturating_sub(1);
+        let footer_area =
+            Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1);
+
+        if entries.is_empty() {
+            let hint = vec![
+                Line::from(Span::styled(
+                    "(no shortcuts yet)",
+                    Style::default().fg(Color::Rgb(150, 150, 170)),
+                )),
+                Line::from(""),
+                Line::from("Press `a` to add one. Targets can be URLs, paths, or apps."),
+            ];
+            f.render_widget(
+                Paragraph::new(hint),
+                Rect::new(inner.x, inner.y, inner.width, body_h),
+            );
+        } else {
+            // Name column sized to the longest name, within reason, so the
+            // targets line up in a column of their own.
+            let name_w = entries
+                .iter()
+                .map(|s| width(&s.name))
+                .max()
+                .unwrap_or(8)
+                .clamp(8, 24);
+            let target_w = (inner.width as usize).saturating_sub(name_w + 8);
+
+            // Keep the selected row visible once the list outgrows the popup.
+            let view = body_h as usize;
+            let first = cursor.saturating_sub(view.saturating_sub(1));
+            for (row, (i, sc)) in entries.iter().enumerate().skip(first).take(view).enumerate() {
+                let sel = i == *cursor;
+                let y = inner.y + row as u16;
+                let line_area = Rect::new(inner.x, y, inner.width, 1);
+                if sel {
+                    // A full-width bar, not just a marker: which row is active
+                    // has to be obvious at a glance.
+                    f.render_widget(
+                        Block::default().style(Style::default().bg(theme().selected_bg)),
+                        line_area,
+                    );
+                }
+                let base = if sel {
+                    Style::default().bg(theme().selected_bg)
+                } else {
+                    Style::default()
+                };
+                let name_style = if sel {
+                    base.fg(theme().accent).add_modifier(Modifier::BOLD)
+                } else {
+                    base.fg(Color::Rgb(225, 225, 240)).add_modifier(Modifier::BOLD)
+                };
+                // The target is reference material: same row, quieter, so the
+                // name is what the eye lands on.
+                let target_style = base.fg(Color::Rgb(140, 140, 165));
+                f.render_widget(
+                    Paragraph::new(Line::from(vec![
+                        Span::styled(if sel { " ▸ " } else { "   " }, name_style),
+                        Span::styled(format!("{}  ", shortcut_icon(&sc.target)), base),
+                        Span::styled(
+                            format!("{}  ", pad_to(&truncate_middle(&sc.name, name_w), name_w)),
+                            name_style,
+                        ),
+                        Span::styled(truncate_middle(&sc.target, target_w), target_style),
+                    ])),
+                    line_area,
+                );
+            }
+        }
+        f.render_widget(
+            Paragraph::new(" Enter=open  a=add  d=delete  r=edit  p=copy target  Esc=close ")
+                .style(
+                    Style::default()
+                        .fg(Color::Black)
+                        .bg(theme().accent)
+                        .add_modifier(Modifier::BOLD),
+                ),
             footer_area,
         );
         return;
@@ -6862,6 +7015,44 @@ mod tests {
         );
         assert!(round ^ square, "exactly one corner style should be on screen");
         assert_eq!(round, border_type() == BorderType::Rounded);
+    }
+
+    /// Names are often Japanese here, and CJK characters take two cells. Using
+    /// the character count to pad pushed everything after a Japanese name two
+    /// columns right and off the edge.
+    #[test]
+    fn width_and_padding_count_cells_not_characters() {
+        assert_eq!(width("work"), 4);
+        assert_eq!(width("社内Wiki"), 8, "two cells per CJK character");
+        assert_eq!("社内Wiki".chars().count(), 6, "which is not the character count");
+
+        assert_eq!(width(&pad_to("社内Wiki", 12)), 12);
+        assert_eq!(width(&pad_to("work", 12)), 12);
+        // Already at or past the target: left alone rather than truncated.
+        assert_eq!(pad_to("work", 2), "work");
+    }
+
+    /// Paths identify themselves at the end, URLs at the start. Cutting either
+    /// end loses what tells them apart, so the middle goes.
+    #[test]
+    fn middle_truncation_keeps_both_ends() {
+        assert_eq!(truncate_middle("short", 20), "short");
+        let long = "/var/log/application/deploy/current/output.log";
+        let cut = truncate_middle(long, 20);
+        assert!(width(&cut) <= 20, "must fit: {:?} is {}", cut, width(&cut));
+        assert!(cut.starts_with("/var"), "keeps the head: {:?}", cut);
+        assert!(cut.ends_with(".log"), "keeps the tail: {:?}", cut);
+        assert!(cut.contains('…'));
+
+        // Wide characters cost two cells here too.
+        let jp = truncate_middle("社内ドキュメント一覧ページ", 10);
+        assert!(width(&jp) <= 10, "{:?} is {} cells", jp, width(&jp));
+
+        // Degenerate widths must not panic or overrun.
+        for w in 0..6 {
+            let out = truncate_middle("/some/path/file.txt", w);
+            assert!(width(&out) <= w.max(1), "w={} gave {:?}", w, out);
+        }
     }
 
     #[test]

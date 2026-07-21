@@ -23,6 +23,10 @@ prints the command-line usage.
 
 ## Mouse
 
+**Left** and **Right** move focus between the two file panes — the thing a
+two-pane layout makes you reach for. `l` / `Enter` enter a directory and `-` /
+`Backspace` go up, as before.
+
 Drag any border to re-proportion the split it divides — the two file panes, the
 file/shell divider, and every split inside the shell panel. Neither side can be
 dragged below 15% of its parent.
