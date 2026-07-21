@@ -139,6 +139,16 @@ highlighted entry. It needs a terminal that tells Shift+Enter apart from plain
 Enter: the Windows console does, and on Unix it wants the kitty keyboard
 protocol (WezTerm, kitty, foot). `:menu` works everywhere.
 
+## Selecting
+
+`v` starts a visual selection; `Enter` marks it. Inside visual mode `a` selects
+the whole listing, and `gg` / `G` extend to the top or bottom — so both `v a`
+and `gg v G` select everything.
+
+Text fields (rename, new file, shortcut name and target) take **Ctrl+V** to
+paste and **Ctrl+U** to clear. A new shortcut's target starts filled in with
+the entry under the cursor, since that is usually what is being bookmarked.
+
 ## Sorting
 
 `,` opens the sort picker: name, size, date or extension, with `n`/`s`/`d`/`e`

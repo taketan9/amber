@@ -1419,6 +1419,11 @@ impl App {
         }
     }
 
+    /// Text on the system clipboard, if any.
+    fn clipboard_text(&mut self) -> Option<String> {
+        self.clipboard.as_mut()?.get_text().ok().filter(|t| !t.is_empty())
+    }
+
     fn push_clipboard(&mut self, paths: &[PathBuf]) {
         if !self.clipboard_on_copy { return; }
         let Some(cb) = self.clipboard.as_mut() else { return; };
@@ -2062,13 +2067,20 @@ impl App {
             }
             InputKind::JumpPath => return self.finish_jump_path(&name),
             InputKind::ShortcutName { editing_index } => {
-                // chain into the next step: target input
+                // chain into the next step: target input. A new shortcut
+                // defaults to the entry under the cursor, which is what you
+                // are almost always bookmarking — and saves typing a path that
+                // is already on screen.
+                let here = self
+                    .active_pane()
+                    .and_then(|p| p.selected().map(|e| e.path.display().to_string()))
+                    .unwrap_or_default();
                 let prev_target = editing_index
                     .and_then(|i| self.shortcuts.entries.get(i).map(|s| s.target.clone()))
-                    .unwrap_or_default();
+                    .unwrap_or(here);
                 self.popup = Popup::TextInput {
                     title: "shortcut — target".into(),
-                    prompt: "URL / path (~ ok) / app:".into(),
+                    prompt: "URL / path / app   (Ctrl+V paste, Ctrl+U clear):".into(),
                     buffer: prev_target,
                     kind: InputKind::ShortcutTarget {
                         editing_index: *editing_index,
@@ -2583,11 +2595,33 @@ impl App {
     }
 
     fn handle_popup_key(&mut self, key: KeyEvent) -> Result<()> {
-        if let Popup::TextInput { buffer, .. } = &mut self.popup {
+        if matches!(self.popup, Popup::TextInput { .. }) {
+            let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+            // Ctrl+V pastes. Handled before the buffer is borrowed because it
+            // needs the clipboard, which lives on `self`.
+            if ctrl && matches!(key.code, KeyCode::Char('v') | KeyCode::Char('V')) {
+                let text = self.clipboard_text();
+                if let Popup::TextInput { buffer, .. } = &mut self.popup {
+                    match text {
+                        // Paths and URLs are what get pasted here, and a
+                        // trailing newline from `pwd` or a browser would
+                        // otherwise end up inside the value.
+                        Some(t) => buffer.push_str(t.trim_end_matches(['\r', '\n'])),
+                        None => self.message = Some("clipboard has no text".into()),
+                    }
+                }
+                return Ok(());
+            }
+            let Popup::TextInput { buffer, .. } = &mut self.popup else { return Ok(()) };
             match key.code {
                 KeyCode::Esc => { self.popup = Popup::None; return Ok(()); }
                 KeyCode::Enter => { return self.finish_text_input(); }
                 KeyCode::Backspace => { buffer.pop(); return Ok(()); }
+                // Clear the line, as in any readline prompt.
+                KeyCode::Char('u') | KeyCode::Char('U') if ctrl => { buffer.clear(); return Ok(()); }
+                // Without this guard every Ctrl+<key> inserted its bare letter,
+                // so Ctrl+V typed a "v" instead of pasting.
+                KeyCode::Char(_) if ctrl => return Ok(()),
                 KeyCode::Char(c) => { buffer.push(c); return Ok(()); }
                 _ => return Ok(()),
             }
@@ -2943,6 +2977,14 @@ impl App {
 
     fn handle_visual_key(&mut self, mut key: KeyEvent) -> Result<()> {
         normalize_jp_key(&mut key);
+        // `gg` works here too, so `gg` then visual then `G` selects everything.
+        if self.pending_g {
+            self.pending_g = false;
+            if matches!(key.code, KeyCode::Char('g')) {
+                if let Some(p) = self.active_pane_mut() { p.cursor = 0; }
+                return Ok(());
+            }
+        }
         match key.code {
             KeyCode::Esc => self.visual_cancel_and_clear_all(),
             KeyCode::Enter | KeyCode::Char('v') => self.visual_commit(),
@@ -2952,9 +2994,39 @@ impl App {
             KeyCode::Char('k') | KeyCode::Up => {
                 if let Some(p) = self.active_pane_mut() { p.move_cursor(-1); }
             }
+            // Stretch the selection over the whole listing in one keystroke.
+            KeyCode::Char('a') => self.visual_select_all(),
+            KeyCode::Char('g') => self.pending_g = true,
+            KeyCode::Char('G') | KeyCode::End => {
+                if let Some(p) = self.active_pane_mut() {
+                    if !p.entries.is_empty() { p.cursor = p.entries.len() - 1; }
+                }
+            }
+            KeyCode::Home => {
+                if let Some(p) = self.active_pane_mut() { p.cursor = 0; }
+            }
+            KeyCode::Char('D') | KeyCode::PageDown => {
+                if let Some(p) = self.active_pane_mut() { p.move_cursor(10); }
+            }
+            KeyCode::Char('U') | KeyCode::PageUp => {
+                if let Some(p) = self.active_pane_mut() { p.move_cursor(-10); }
+            }
             _ => {}
         }
         Ok(())
+    }
+
+    /// Anchor at the top and put the cursor at the bottom, so the whole
+    /// listing is selected and Enter marks it.
+    fn visual_select_all(&mut self) {
+        let last = match self.active_pane() {
+            Some(p) if !p.entries.is_empty() => p.entries.len() - 1,
+            _ => return,
+        };
+        self.visual_anchor = Some(0);
+        if let Some(p) = self.active_pane_mut() {
+            p.cursor = last;
+        }
     }
 
     fn handle_normal_key(&mut self, mut key: KeyEvent) -> Result<()> {
@@ -3702,6 +3774,8 @@ fn manual_sections() -> Vec<(&'static str, Vec<ManualEntry>)> {
                 entry("Space", Some(MarkDown), "toggle mark, move down"),
                 entry("Shift+Space", Some(MarkUp), "toggle mark, move up"),
                 entry("v", Some(Visual), "visual select"),
+                entry("  a", None, "  in visual: select all (or gg v G)"),
+                entry("  gg / G", None, "  in visual: extend to top / bottom"),
                 entry("V", Some(InvertMarks), "invert all marks"),
                 entry("y, c", Some(Copy), "copy to opposite pane"),
                 entry("m", Some(Move), "move to opposite pane"),
@@ -4947,6 +5021,8 @@ fn key_hints(app: &App) -> Vec<(&'static str, &'static str)> {
     match app.mode {
         Mode::Visual => vec![
             ("j/k", "extend"),
+            ("a", "all"),
+            ("gg/G", "top/bottom"),
             ("Enter", "confirm"),
             ("Esc", "cancel"),
         ],
@@ -7053,6 +7129,100 @@ mod tests {
             let out = truncate_middle("/some/path/file.txt", w);
             assert!(width(&out) <= w.max(1), "w={} gave {:?}", w, out);
         }
+    }
+
+    #[test]
+    fn visual_a_selects_the_whole_listing() {
+        let (_d, mut app) = app_with(&["a.txt", "b.txt", "c.txt", "d.txt"]);
+        app.handle_key(key('v')).unwrap();
+        assert_eq!(app.mode, Mode::Visual);
+        app.handle_key(key('a')).unwrap();
+
+        assert_eq!(app.visual_anchor, Some(0), "anchored at the top");
+        assert_eq!(app.active_pane().unwrap().cursor, 3, "cursor at the bottom");
+
+        // Enter commits the range to marks.
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+        assert_eq!(app.active_pane().unwrap().mark_count(), 4);
+    }
+
+    /// The other route the user asked for: gg, visual, G.
+    #[test]
+    fn gg_then_visual_then_g_selects_everything() {
+        let (_d, mut app) = app_with(&["a.txt", "b.txt", "c.txt", "d.txt"]);
+        if let Some(p) = app.active_pane_mut() {
+            p.cursor = 2;
+        }
+        app.handle_key(key('g')).unwrap();
+        app.handle_key(key('g')).unwrap();
+        assert_eq!(app.active_pane().unwrap().cursor, 0);
+
+        app.handle_key(key('v')).unwrap();
+        app.handle_key(key('G')).unwrap();
+        assert_eq!(app.active_pane().unwrap().cursor, 3, "G must move in visual mode too");
+
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+        assert_eq!(app.active_pane().unwrap().mark_count(), 4);
+    }
+
+    #[test]
+    fn gg_works_inside_visual_mode() {
+        let (_d, mut app) = app_with(&["a.txt", "b.txt", "c.txt"]);
+        if let Some(p) = app.active_pane_mut() {
+            p.cursor = 2;
+        }
+        app.handle_key(key('v')).unwrap();
+        app.handle_key(key('g')).unwrap();
+        app.handle_key(key('g')).unwrap();
+        assert_eq!(app.active_pane().unwrap().cursor, 0);
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+        assert_eq!(app.active_pane().unwrap().mark_count(), 3);
+    }
+
+    /// Ctrl+<key> used to fall through to the plain-character arm, so Ctrl+V
+    /// typed a literal "v" into the field instead of pasting.
+    #[test]
+    fn ctrl_keys_do_not_type_their_letter_into_a_text_field() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        app.start_shortcut_add();
+        app.handle_key(key('w')).unwrap();
+        app.handle_key(KeyEvent::new(KeyCode::Char('v'), KeyModifiers::CONTROL)).unwrap();
+        let Popup::TextInput { buffer, .. } = &app.popup else { panic!("no field") };
+        assert!(!buffer.contains('v'), "Ctrl+V leaked a character: {:?}", buffer);
+        assert_eq!(buffer, "w");
+    }
+
+    #[test]
+    fn ctrl_u_clears_the_field() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        app.start_shortcut_add();
+        for c in "typo".chars() {
+            app.handle_key(key(c)).unwrap();
+        }
+        app.handle_key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL)).unwrap();
+        let Popup::TextInput { buffer, .. } = &app.popup else { panic!("no field") };
+        assert!(buffer.is_empty());
+    }
+
+    /// A new shortcut is nearly always for the thing under the cursor, so the
+    /// target starts filled in rather than blank.
+    #[test]
+    fn a_new_shortcut_defaults_its_target_to_the_current_entry() {
+        let (_d, mut app) = app_with(&["a.txt", "b.txt"]);
+        if let Some(p) = app.active_pane_mut() {
+            p.cursor = 1;
+        }
+        let expected = app.active_pane().unwrap().selected().unwrap().path.clone();
+
+        app.start_shortcut_add();
+        for c in "mine".chars() {
+            app.handle_key(key(c)).unwrap();
+        }
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+
+        let Popup::TextInput { buffer, kind, .. } = &app.popup else { panic!("no target step") };
+        assert!(matches!(kind, InputKind::ShortcutTarget { .. }));
+        assert_eq!(buffer, &expected.display().to_string());
     }
 
     #[test]
