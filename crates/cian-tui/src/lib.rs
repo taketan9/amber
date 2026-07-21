@@ -5539,18 +5539,20 @@ fn key_hints(app: &App) -> Vec<(&'static str, &'static str)> {
             ("Esc", "clear"),
         ],
         Mode::Command => vec![("Enter", "run"), ("Esc", "cancel")],
+        // Ordered by how often each is reached for: a narrow window drops
+        // from the end, and `? help` is reserved separately. Kept short on
+        // purpose — a bar listing everything becomes wallpaper, and the
+        // manual is one keystroke away.
         _ => vec![
             ("l/-", "in/out"),
             ("Space", "mark"),
-            ("y/m", "copy/move"),
+            ("y/m", "copy/mv"),
             ("d", "delete"),
-            ("r", "rename"),
             ("/", "filter"),
+            (",", "sort"),
             ("S-F", "find"),
             ("C-F", "grep"),
-            (",", "sort"),
-            ("z", "go to"),
-            ("Shift+J", "shell"),
+            ("S-J", "shell"),
             ("?", "help"),
         ],
     }
