@@ -7,6 +7,7 @@ use anyhow::{Context, Result};
 
 pub mod archive;
 pub mod attrs;
+pub mod diff;
 pub mod log;
 pub mod ops;
 pub mod progress;

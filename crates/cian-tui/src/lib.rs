@@ -800,6 +800,19 @@ enum Popup {
     SortPicker { cursor: usize },
     /// A file's contents, scrollable.
     Viewer { title: String, view: cian_core::viewer::View, scroll: usize },
+    /// The left pane's file against the right pane's, side by side.
+    ///
+    /// Both the full row list and the folded one are kept: folding is a toggle
+    /// people flick back and forth, and recomputing it belongs nowhere near
+    /// the render path.
+    Diff {
+        left: String,
+        right: String,
+        result: cian_core::diff::Diff,
+        folded: Vec<cian_core::diff::Row>,
+        fold: bool,
+        scroll: usize,
+    },
     /// An archive's members, with extraction from the list.
     Archive {
         path: PathBuf,
@@ -837,6 +850,7 @@ enum MenuItem {
     HiddenToggle,
     Attributes,
     Hash,
+    Compare,
     Ssh,
     Manual,
 }
@@ -856,6 +870,7 @@ impl MenuItem {
             MenuItem::HiddenToggle => "Show / hide dotfiles",
             MenuItem::Attributes => "Attributes…",
             MenuItem::Hash => "Checksum…",
+            MenuItem::Compare => "Compare left ↔ right",
             MenuItem::Ssh => "SSH connect…",
             MenuItem::Manual => "Key manual  (?)",
         }
@@ -1467,6 +1482,7 @@ impl App {
             "cd" | "goto" => self.start_jump_path(),
             "hidden" => self.toggle_hidden(),
             "view" | "look" => self.look_inside(),
+            "diff" | "compare" => self.open_diff(),
             "copyto" => self.start_dest_picker(PendingOp::Copy),
             "moveto" => self.start_dest_picker(PendingOp::Move),
             "attr" | "attrs" => self.show_attributes(),
@@ -2080,6 +2096,41 @@ impl App {
                 }
             }
             Err(e) => self.message = Some(format!("cannot view: {}", e)),
+        }
+    }
+
+    /// Compare the file under the left pane's cursor with the right pane's.
+    ///
+    /// Deliberately not "the focused pane against the other one": the whole
+    /// gesture is to put A on the left and B on the right, and which pane the
+    /// cursor happens to be in at the moment of pressing the key should not
+    /// silently swap the two sides of the result.
+    fn open_diff(&mut self) {
+        let pick = |t: &PaneTabs| t.active_ref().selected().cloned();
+        let (Some(a), Some(b)) = (pick(&self.left), pick(&self.right)) else {
+            self.message = Some("select a file in each pane to compare".into());
+            return;
+        };
+        if a.is_dir || b.is_dir {
+            self.message = Some("directories cannot be compared, only files".into());
+            return;
+        }
+        match cian_core::diff::diff_files(&a.path, &b.path) {
+            Ok(result) => {
+                let folded = cian_core::diff::fold(&result.rows, cian_core::diff::CONTEXT);
+                self.popup = Popup::Diff {
+                    left: a.name.clone(),
+                    right: b.name.clone(),
+                    result,
+                    folded,
+                    // Folded to begin with: the differences are what was asked
+                    // for, and on two near-identical files the unfolded view
+                    // opens on a screen of agreement.
+                    fold: true,
+                    scroll: 0,
+                };
+            }
+            Err(e) => self.message = Some(format!("cannot compare: {}", e)),
         }
     }
 
@@ -3124,6 +3175,7 @@ impl App {
             items.push(MenuItem::Delete);
             items.push(MenuItem::Attributes);
             items.push(MenuItem::Hash);
+            items.push(MenuItem::Compare);
             items.push(MenuItem::HiddenToggle);
             items.push(MenuItem::Ssh);
             items.push(MenuItem::Background);
@@ -3222,6 +3274,7 @@ impl App {
             MenuItem::HiddenToggle => self.toggle_hidden(),
             MenuItem::Attributes => self.show_attributes(),
             MenuItem::Hash => self.start_hash(cian_core::attrs::HashKind::Sha256),
+            MenuItem::Compare => self.open_diff(),
             MenuItem::Background => {
                 let pane = self.focused;
                 let current = match pane {
@@ -3509,6 +3562,42 @@ impl App {
                 KeyCode::Char('u') | KeyCode::PageUp => *scroll = scroll.saturating_sub(20),
                 KeyCode::Char('g') | KeyCode::Home => *scroll = 0,
                 KeyCode::Char('G') | KeyCode::End => *scroll = last,
+                _ => {}
+            }
+            return Ok(());
+        }
+        if let Popup::Diff { result, folded, fold, scroll, .. } = &mut self.popup {
+            let rows: &[cian_core::diff::Row] = if *fold { folded } else { &result.rows };
+            let last = rows.len().saturating_sub(1);
+            match key.code {
+                KeyCode::Esc | KeyCode::Char('q') => self.popup = Popup::None,
+                KeyCode::Char('j') | KeyCode::Down => *scroll = (*scroll + 1).min(last),
+                KeyCode::Char('k') | KeyCode::Up => *scroll = scroll.saturating_sub(1),
+                KeyCode::Char('d') | KeyCode::PageDown => *scroll = (*scroll + 20).min(last),
+                KeyCode::Char('u') | KeyCode::PageUp => *scroll = scroll.saturating_sub(20),
+                KeyCode::Char('g') | KeyCode::Home => *scroll = 0,
+                KeyCode::Char('G') | KeyCode::End => *scroll = last,
+                // Jumping between differences is the reason to open this at
+                // all; scrolling to hunt for the next one is the thing every
+                // diff viewer exists to save you from.
+                KeyCode::Char('n') => {
+                    if let Some(i) =
+                        rows.iter().enumerate().skip(*scroll + 1).find(|(_, r)| r.is_difference())
+                    {
+                        *scroll = i.0;
+                    }
+                }
+                KeyCode::Char('N') => {
+                    if let Some(i) = rows[..*scroll].iter().rposition(|r| r.is_difference()) {
+                        *scroll = i;
+                    }
+                }
+                KeyCode::Char('f') => {
+                    *fold = !*fold;
+                    // The row lists differ in length, so a kept offset would
+                    // land somewhere unrelated.
+                    *scroll = 0;
+                }
                 _ => {}
             }
             return Ok(());
@@ -3931,6 +4020,9 @@ impl App {
             (false, false, KeyCode::Char(',')) => self.start_sort_picker(),
             (false, false, KeyCode::Char('z')) => self.start_jump_path(),
             (false, false, KeyCode::F(3)) => self.look_inside(),
+            // `=` for "are these equal": free, mnemonic, and next to the
+            // keys already used for the two panes.
+            (false, false, KeyCode::Char('=')) => self.open_diff(),
             // Manual refresh, for the cases the timer cannot see — a file
             // whose contents changed without the directory being touched.
             (true, _, KeyCode::Char('r')) | (false, false, KeyCode::F(5)) => {
@@ -4578,6 +4670,7 @@ fn manual_sections() -> Vec<(&'static str, Vec<ManualEntry>)> {
                 entry("G", Some(CursorBottom), "jump to bottom"),
                 entry("l, Enter", Some(EnterDir), "enter folder / open file"),
                 entry("F3", None, "look inside: view a file, list an archive"),
+                entry("=", None, "compare the left pane's file with the right pane's"),
                 entry("-, Bksp", Some(Parent), "parent folder"),
                 entry("Left / Right", None, "focus the left / right pane"),
                 entry("h", Some(History), "history popup"),
@@ -5900,6 +5993,9 @@ fn key_hints(app: &App) -> Vec<(&'static str, &'static str)> {
             ("C-F", "grep"),
             ("F3", "view"),
             ("S-J", "shell"),
+            // Last, so it is the first to drop on a narrow window: comparing
+            // two files is the rarest of these by some distance.
+            ("=", "diff"),
             ("?", "help"),
         ],
     }
@@ -6695,6 +6791,124 @@ fn draw_popup(
         return;
     }
 
+    if let Popup::Diff { left, right, result, folded, fold, scroll } = popup {
+        use cian_core::diff::Row;
+
+        let rect = centered_rect(area.width.saturating_sub(2), area.height.saturating_sub(2), area);
+        f.render_widget(Clear, rect);
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_type(border_type())
+            .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
+            .title(format!(
+                " {} ↔ {}  —  {} ",
+                left,
+                right,
+                cian_core::diff::summary(result)
+            ));
+        let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
+        f.render_widget(block, rect);
+
+        let body_h = inner.height.saturating_sub(1) as usize;
+        let rows: &[Row] = if *fold { folded } else { &result.rows };
+        let max_scroll = rows.len().saturating_sub(body_h);
+        *scroll = (*scroll).min(max_scroll);
+
+        // Two equal columns with a marker between them, so the eye can run
+        // straight down either file.
+        let gutter = 5usize;
+        let col = (inner.width as usize).saturating_sub(3 + gutter * 2) / 2;
+
+        let dim = Style::default().fg(Color::Rgb(150, 150, 168));
+        let num = Style::default().fg(Color::Rgb(105, 105, 130));
+        let del = Style::default().fg(Color::Rgb(255, 140, 145));
+        let add = Style::default().fg(Color::Rgb(130, 225, 150));
+        let chg = Style::default().fg(Color::Rgb(240, 210, 120));
+
+        let cell = |line: Option<&cian_core::diff::Line>, style: Style| -> Vec<Span<'static>> {
+            match line {
+                Some(l) => vec![
+                    Span::styled(format!("{:>w$} ", l.no, w = gutter - 1), num),
+                    Span::styled(pad_to(&truncate(&l.text, col), col), style),
+                ],
+                // An absent side is left blank rather than filled, so the gap
+                // itself shows which file the line is missing from.
+                None => vec![Span::raw(" ".repeat(gutter + col))],
+            }
+        };
+
+        let body: Vec<Line> = rows
+            .iter()
+            .skip(*scroll)
+            .take(body_h)
+            .map(|r| match r {
+                Row::Skipped { lines } => Line::from(Span::styled(
+                    format!("{:^w$}", format!("⋯ {} identical lines", lines), w = inner.width as usize),
+                    Style::default().fg(Color::Rgb(95, 95, 120)),
+                )),
+                Row::Same { left: l, right: rr } => {
+                    let mut s = cell(Some(l), dim);
+                    s.push(Span::styled(" │ ", num));
+                    s.extend(cell(Some(rr), dim));
+                    Line::from(s)
+                }
+                Row::Changed { left: l, right: rr } => {
+                    let mut s = cell(Some(l), chg);
+                    s.push(Span::styled(" ~ ", chg.add_modifier(Modifier::BOLD)));
+                    s.extend(cell(Some(rr), chg));
+                    Line::from(s)
+                }
+                Row::Removed { left: l } => {
+                    let mut s = cell(Some(l), del);
+                    s.push(Span::styled(" - ", del.add_modifier(Modifier::BOLD)));
+                    s.extend(cell(None, del));
+                    Line::from(s)
+                }
+                Row::Added { right: rr } => {
+                    let mut s = cell(None, add);
+                    s.push(Span::styled(" + ", add.add_modifier(Modifier::BOLD)));
+                    s.extend(cell(Some(rr), add));
+                    Line::from(s)
+                }
+            })
+            .collect();
+
+        // A binary comparison has no rows; say why rather than showing a void.
+        let body = if result.binary {
+            vec![Line::from(Span::styled(
+                if result.identical {
+                    "  These are binary files, and they are byte-for-byte the same."
+                } else {
+                    "  These are binary files, and their contents differ."
+                },
+                dim,
+            ))]
+        } else if result.identical {
+            vec![Line::from(Span::styled("  The two files are identical.", add))]
+        } else {
+            body
+        };
+
+        f.render_widget(
+            Paragraph::new(body),
+            Rect::new(inner.x, inner.y, inner.width, body_h as u16),
+        );
+        let pos = match max_scroll {
+            0 => "all".to_string(),
+            m => format!("{}%", *scroll * 100 / m),
+        };
+        f.render_widget(
+            Paragraph::new(format!(
+                " n/N next/prev change  f {}  j/k scroll  u/d page  Esc close      {} ",
+                if *fold { "show all" } else { "fold" },
+                pos
+            ))
+            .style(Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD)),
+            Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1),
+        );
+        return;
+    }
+
     if let Popup::Archive { path, members, cursor, scroll } = popup {
         let w = 96u16.min(area.width.saturating_sub(2));
         let h = area.height.saturating_sub(4).max(8);
@@ -6925,6 +7139,7 @@ fn draw_popup(
         | Popup::FindResults { .. }
         | Popup::DestPicker { .. }
         | Popup::Viewer { .. }
+        | Popup::Diff { .. }
         | Popup::Archive { .. }
         | Popup::None => return,
     };
@@ -8691,6 +8906,142 @@ mod tests {
         assert_eq!(choices[0].0, "other pane");
         assert_eq!(choices[0].1.file_name(), r.path().file_name());
         assert!(choices.iter().any(|(k, p)| k == "recent" && p == Path::new("/tmp/somewhere")));
+    }
+
+    /// Two panes, one file each, both cursors on the first entry.
+    fn two_panes_with(
+        a: &str,
+        b: &str,
+    ) -> (tempfile::TempDir, tempfile::TempDir, App) {
+        let l = tempfile::tempdir().unwrap();
+        let r = tempfile::tempdir().unwrap();
+        std::fs::write(l.path().join("a.txt"), a).unwrap();
+        std::fs::write(r.path().join("b.txt"), b).unwrap();
+        let app = App::new(l.path().to_path_buf(), r.path().to_path_buf(), cian_lua::Config::default())
+            .unwrap();
+        (l, r, app)
+    }
+
+    #[test]
+    fn equals_compares_the_two_panes_files() {
+        let (_l, _r, mut app) = two_panes_with("one\ntwo\nthree\n", "one\nTWO\nthree\n");
+        app.handle_key(code(KeyCode::Char('='))).unwrap();
+
+        let Popup::Diff { left, right, result, .. } = &app.popup else {
+            panic!("expected the diff, got {:?}", app.popup)
+        };
+        assert_eq!((left.as_str(), right.as_str()), ("a.txt", "b.txt"));
+        assert_eq!(result.changed, 1);
+        assert!(!result.identical);
+    }
+
+    /// Which pane holds the focus must not decide which file is the "before".
+    #[test]
+    fn the_left_pane_is_always_the_left_side() {
+        let (_l, _r, mut app) = two_panes_with("old\n", "new\n");
+        app.focus(FocusedPane::Right);
+        app.handle_key(code(KeyCode::Char('='))).unwrap();
+
+        let Popup::Diff { result, left, .. } = &app.popup else { panic!("no diff") };
+        assert_eq!(left, "a.txt");
+        match &result.rows[0] {
+            cian_core::diff::Row::Changed { left, right } => {
+                assert_eq!((left.text.as_str(), right.text.as_str()), ("old", "new"));
+            }
+            other => panic!("expected a change, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn comparing_a_directory_says_so_instead_of_opening() {
+        let l = tempfile::tempdir().unwrap();
+        let r = tempfile::tempdir().unwrap();
+        std::fs::create_dir(l.path().join("adir")).unwrap();
+        std::fs::write(r.path().join("b.txt"), "x").unwrap();
+        let mut app =
+            App::new(l.path().to_path_buf(), r.path().to_path_buf(), cian_lua::Config::default())
+                .unwrap();
+
+        app.handle_key(code(KeyCode::Char('='))).unwrap();
+        assert!(matches!(app.popup, Popup::None));
+        assert!(app.message.as_deref().unwrap().contains("directories"));
+    }
+
+    #[test]
+    fn an_empty_pane_reports_rather_than_opening_an_empty_diff() {
+        let l = tempfile::tempdir().unwrap();
+        let r = tempfile::tempdir().unwrap();
+        std::fs::write(r.path().join("b.txt"), "x").unwrap();
+        let mut app =
+            App::new(l.path().to_path_buf(), r.path().to_path_buf(), cian_lua::Config::default())
+                .unwrap();
+
+        app.handle_key(code(KeyCode::Char('='))).unwrap();
+        assert!(matches!(app.popup, Popup::None));
+        assert!(app.message.as_deref().unwrap().contains("select a file"));
+    }
+
+    #[test]
+    fn n_jumps_to_the_next_difference_and_f_unfolds() {
+        // Two differences far enough apart that folding hides the gap.
+        let mut a: Vec<String> = (0..40).map(|i| format!("line {}", i)).collect();
+        let b = a.clone();
+        a[5] = "first change".into();
+        a[30] = "second change".into();
+        let (_l, _r, mut app) =
+            two_panes_with(&(a.join("\n") + "\n"), &(b.join("\n") + "\n"));
+        app.handle_key(code(KeyCode::Char('='))).unwrap();
+
+        let Popup::Diff { folded, scroll, fold, .. } = &app.popup else { panic!("no diff") };
+        assert!(*fold, "opens folded");
+        assert_eq!(*scroll, 0);
+        let folded_len = folded.len();
+
+        app.handle_key(code(KeyCode::Char('n'))).unwrap();
+        let Popup::Diff { folded, scroll, .. } = &app.popup else { panic!("no diff") };
+        assert!(folded[*scroll].is_difference(), "n landed on a change");
+        let first = *scroll;
+
+        app.handle_key(code(KeyCode::Char('n'))).unwrap();
+        let Popup::Diff { folded, scroll, .. } = &app.popup else { panic!("no diff") };
+        assert!(*scroll > first && folded[*scroll].is_difference(), "and on to the next");
+        let second = *scroll;
+
+        app.handle_key(code(KeyCode::Char('N'))).unwrap();
+        let Popup::Diff { scroll, .. } = &app.popup else { panic!("no diff") };
+        assert_eq!(*scroll, first, "N goes back");
+        assert!(second > first);
+
+        app.handle_key(code(KeyCode::Char('f'))).unwrap();
+        let Popup::Diff { fold, result, scroll, .. } = &app.popup else { panic!("no diff") };
+        assert!(!*fold);
+        assert_eq!(*scroll, 0, "the row lists differ in length; the old offset is meaningless");
+        assert!(result.rows.len() > folded_len, "unfolding shows more");
+    }
+
+    #[test]
+    fn esc_closes_the_diff() {
+        let (_l, _r, mut app) = two_panes_with("a\n", "b\n");
+        app.handle_key(code(KeyCode::Char('='))).unwrap();
+        assert!(matches!(app.popup, Popup::Diff { .. }));
+        app.handle_key(code(KeyCode::Esc)).unwrap();
+        assert!(matches!(app.popup, Popup::None));
+    }
+
+    #[test]
+    fn the_diff_renders_without_panicking_at_any_size() {
+        let (_l, _r, mut app) = two_panes_with("one\ntwo\n", "one\nTWO\nthree\n");
+        app.handle_key(code(KeyCode::Char('='))).unwrap();
+        let wide = render(&mut app, 120, 30).join("\n");
+        assert!(wide.contains("a.txt ↔ b.txt"), "both names in the title:\n{}", wide);
+        assert!(wide.contains("two") && wide.contains("TWO"), "both sides shown:\n{}", wide);
+        assert!(wide.contains("three"), "the added line too:\n{}", wide);
+
+        // Narrow enough that the column arithmetic would underflow if it were
+        // not saturating.
+        for (w, h) in [(80u16, 24u16), (24, 8), (10, 5)] {
+            render(&mut app, w, h);
+        }
     }
 
     #[test]
