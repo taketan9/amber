@@ -82,11 +82,36 @@ cian.set_option("animation_ms", 150)
 -- See the README section "SSH".
 ----------------------------------------------------------------------
 -- cian.ssh({
---   users = { "root", "deploy", "app", "taketan" },  -- offered for every host
+--   -- Users offered for every host. Bare names use key auth (or ask for a
+--   -- password interactively, exactly as `ssh` normally would).
+--   users = { "root", "deploy" },
+--
 --   hosts = {
---     { name = "web1",  host = "10.0.1.11" },
---     { name = "db1",   host = "10.0.2.31", users = { "postgres", "root" } },
---     { name = "bast",  host = "203.0.113.9", port = 2222 },
+--     -- Uses the shared user list above.
+--     { name = "web1", host = "10.0.1.11" },
+--
+--     -- Its own users, each carrying a password cian types on the prompt.
+--     -- Note the shape: a table with `name =`, not a bare string.
+--     { name = "web2", host = "10.0.1.12",
+--       users = {
+--         { name = "root",   password = "..." },
+--         { name = "deploy", password = "..." },
+--       } },
+--
+--     -- Mixed: one login stored, one on key auth. Migrate a host to keys one
+--     -- login at a time by turning its table back into a bare name.
+--     { name = "db1", host = "10.0.2.31",
+--       users = {
+--         { name = "postgres", password = "..." },
+--         "root",
+--       } },
+--
+--     -- A non-default port, and a password from a credential store instead of
+--     -- from this file.
+--     { name = "bast", host = "203.0.113.9", port = 2222,
+--       users = {
+--         { name = "admin", password_cmd = "pass srv/bast" },
+--       } },
 --   },
 -- })
 
