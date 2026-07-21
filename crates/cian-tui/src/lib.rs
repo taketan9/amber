@@ -2,7 +2,8 @@ use std::collections::HashMap;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
@@ -884,6 +885,26 @@ fn looks_like_password_prompt(screen: &str) -> bool {
     (l.contains("password") || l.contains("passphrase")) && l.trim_end().ends_with(':')
 }
 
+/// A file operation running on a worker thread.
+///
+/// Copies and moves used to run inline: a 700 MB file locked the UI for
+/// fourteen seconds with nothing on screen explaining why. The work now runs
+/// off the event loop, reports progress back over a channel, and watches a
+/// flag it can be told to stop by.
+struct OpJob {
+    rx: std::sync::mpsc::Receiver<OpMsg>,
+    cancel: Arc<AtomicBool>,
+    /// What to call it in the popup.
+    label: &'static str,
+    latest: cian_core::progress::Progress,
+    started: Instant,
+}
+
+enum OpMsg {
+    Tick(cian_core::progress::Progress),
+    Done(OpReport),
+}
+
 /// Work deferred until a shrink transition finishes.
 #[derive(Debug, Clone, Copy)]
 enum PendingClose {
@@ -1197,6 +1218,8 @@ pub struct App {
     pending_shell_input: Option<String>,
     /// A password waiting for ssh to ask for it. See [`PendingAuth`].
     pending_auth: Option<PendingAuth>,
+    /// A copy/move/delete running on a worker thread.
+    op_job: Option<OpJob>,
     /// Per-pane background overrides, indexed by [`Self::bg_slot`].
     /// Session-only: deliberately not persisted.
     pane_bg: [Option<Color>; 2],
@@ -1262,6 +1285,7 @@ impl App {
             zoom_return: None,
             pending_shell_input: None,
             pending_auth: None,
+            op_job: None,
             pane_bg: [None, None],
             last_search_query: None,
             shortcuts: ShortcutStore::load_or_default(),
@@ -1987,34 +2011,107 @@ impl App {
         self.message = Some(format!("pattern not found: {}", query));
     }
 
+    /// Run a file operation on a worker thread, showing a progress popup.
+    fn start_op<F>(&mut self, label: &'static str, work: F)
+    where
+        F: FnOnce(&mut cian_core::progress::Ctl) -> OpReport + Send + 'static,
+    {
+        let cancel = Arc::new(AtomicBool::new(false));
+        let (tx, rx) = std::sync::mpsc::channel();
+        let worker_cancel = Arc::clone(&cancel);
+        let worker_tx = tx.clone();
+        std::thread::spawn(move || {
+            // Rate-limit the updates: a chunked copy calls back on every
+            // megabyte, and forwarding all of that would flood the channel
+            // and repaint far more often than a screen can show.
+            let mut last = Instant::now() - Duration::from_secs(1);
+            let mut on_progress = |p: &cian_core::progress::Progress| {
+                if last.elapsed() >= Duration::from_millis(60) {
+                    last = Instant::now();
+                    let _ = worker_tx.send(OpMsg::Tick(p.clone()));
+                }
+            };
+            let mut ctl = cian_core::progress::Ctl {
+                cancel: &worker_cancel,
+                on_progress: &mut on_progress,
+            };
+            let report = work(&mut ctl);
+            let _ = tx.send(OpMsg::Done(report));
+        });
+        self.op_job = Some(OpJob {
+            rx,
+            cancel,
+            label,
+            latest: cian_core::progress::Progress::default(),
+            started: Instant::now(),
+        });
+        self.popup = Popup::None;
+    }
+
+    /// Drain worker updates. Returns true if the UI should repaint.
+    fn poll_op_job(&mut self) -> bool {
+        let Some(job) = &mut self.op_job else { return false };
+        let mut changed = false;
+        let mut finished = None;
+        loop {
+            match job.rx.try_recv() {
+                Ok(OpMsg::Tick(p)) => {
+                    job.latest = p;
+                    changed = true;
+                }
+                Ok(OpMsg::Done(r)) => {
+                    finished = Some(r);
+                    changed = true;
+                    break;
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                // The worker vanished without reporting; do not wait forever.
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    finished = Some(OpReport::default());
+                    changed = true;
+                    break;
+                }
+            }
+        }
+        if let Some(report) = finished {
+            let cancelled = self.op_job.as_ref().map(|j| j.cancel.load(Ordering::Relaxed));
+            self.op_job = None;
+            self.reload_both();
+            if let Some(p) = self.active_pane_mut() {
+                p.clear_marks();
+            }
+            self.flash(self.focused);
+            if cancelled == Some(true) {
+                self.message = Some(format!(
+                    "cancelled — {} done before stopping",
+                    report.ok
+                ));
+            } else {
+                self.show_op_report(&report);
+            }
+        }
+        changed
+    }
+
+    fn cancel_op_job(&mut self) {
+        if let Some(job) = &self.op_job {
+            job.cancel.store(true, Ordering::Relaxed);
+            self.message = Some("stopping…".into());
+        }
+    }
+
     fn finish_transfer(&mut self, conflict: Conflict) -> Result<()> {
         let popup = std::mem::replace(&mut self.popup, Popup::None);
         let Popup::ConfirmTransfer { op, targets, dest } = popup else { return Ok(()) };
-        let report = match op {
-            PendingOp::Copy => {
-                self.push_clipboard(&targets);
-                ops::copy_many(&targets, &dest, conflict)
-            }
-            PendingOp::Move => {
-                self.push_clipboard(&targets);
-                ops::move_many(&targets, &dest, conflict)
-            }
+        self.push_clipboard(&targets);
+        let label = match op {
+            PendingOp::Copy => "copying",
+            PendingOp::Move => "moving",
         };
-        if let Some(t) = self.active_file_tabs_mut() { let _ = t.active_mut().reload(); }
-        let other_focus = match self.focused {
-            FocusedPane::Left => FocusedPane::Right,
-            FocusedPane::Right => FocusedPane::Left,
-            FocusedPane::Shell => FocusedPane::Left,
-        };
-        let other = match other_focus {
-            FocusedPane::Left => &mut self.left,
-            FocusedPane::Right => &mut self.right,
-            FocusedPane::Shell => &mut self.left,
-        };
-        let _ = other.active_mut().reload();
-        // The destination is where the files appeared, so light that pane.
-        self.flash(other_focus);
-        self.show_op_report(&report);
+        self.start_op(label, move |ctl| match op {
+            PendingOp::Copy => cian_core::progress::copy_many(&targets, &dest, conflict, ctl),
+            PendingOp::Move => cian_core::progress::move_many(&targets, &dest, conflict, ctl),
+        });
         Ok(())
     }
 
@@ -2024,11 +2121,9 @@ impl App {
         if cian_core::log::enabled() {
             cian_core::log::log(&format!("delete {:?}: {} target(s)", mode, targets.len()));
         }
-        let report = ops::delete_many(&targets, mode);
-        if let Some(t) = self.active_file_tabs_mut() { let _ = t.active_mut().reload(); }
-        if let Some(p) = self.active_pane_mut() { p.clear_marks(); }
-        self.flash(self.focused);
-        self.show_op_report(&report);
+        self.start_op("deleting", move |ctl| {
+            cian_core::progress::delete_many(&targets, mode, ctl)
+        });
         Ok(())
     }
 
@@ -2550,6 +2645,14 @@ impl App {
 
     // ------- Key dispatch -------
     fn handle_key(&mut self, key: KeyEvent) -> Result<()> {
+        // A running operation owns Esc: stopping it is the only thing anyone
+        // wants from the keyboard while it is on screen.
+        if self.op_job.is_some() {
+            if key.code == KeyCode::Esc {
+                self.cancel_op_job();
+            }
+            return Ok(());
+        }
         if !matches!(self.popup, Popup::None) {
             return self.handle_popup_key(key);
         }
@@ -4030,7 +4133,8 @@ fn run_loop<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Result<()>
         // actually repaint when something changed (input, resize, or new
         // shell output), so the loop stays cheap when idle. While a transition
         // or flash is running we tick faster so the motion stays smooth.
-        let tick = if app.anim.is_some() || app.flash.is_some() { 16 } else { 33 };
+        let tick =
+            if app.anim.is_some() || app.flash.is_some() || app.op_job.is_some() { 16 } else { 33 };
         if event::poll(Duration::from_millis(tick))? {
             match event::read()? {
                 Event::Key(key) if key.kind == KeyEventKind::Press => {
@@ -4080,6 +4184,10 @@ fn run_loop<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Result<()>
             if a.done() {
                 app.finish_anim();
             }
+        }
+        // A running file operation reports in over a channel.
+        if app.op_job.is_some() {
+            needs_redraw |= app.poll_op_job();
         }
         // A fading flash needs frames of its own; clear it once it expires so
         // the loop can go back to sleep.
@@ -4293,6 +4401,9 @@ fn draw(f: &mut Frame, app: &mut App) {
         draw_status(f, r, app);
     }
 
+    if app.op_job.is_some() {
+        draw_op_progress(f, area, app);
+    }
     if !matches!(app.popup, Popup::None) {
         draw_popup(f, area, &mut app.popup, &app.config.ssh_hosts);
     }
@@ -5233,6 +5344,74 @@ fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
     let x = area.x + (area.width.saturating_sub(w)) / 2;
     let y = area.y + (area.height.saturating_sub(h)) / 2;
     Rect::new(x, y, w, h)
+}
+
+/// A progress bar for the running file operation, and the way to stop it.
+fn draw_op_progress(f: &mut Frame, area: Rect, app: &App) {
+    let Some(job) = &app.op_job else { return };
+    let p = &job.latest;
+
+    let w = 74u16.min(area.width.saturating_sub(2));
+    let rect = centered_rect(w, 8, area);
+    f.render_widget(Clear, rect);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(border_type())
+        .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
+        .title(format!(" {} ", job.label));
+    let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
+    f.render_widget(block, rect);
+
+    // Which entry, shortened from the middle so the directory and the filename
+    // both stay legible.
+    f.render_widget(
+        Paragraph::new(truncate_middle(&p.current, inner.width as usize))
+            .style(Style::default().fg(Color::Rgb(190, 190, 210))),
+        Rect::new(inner.x, inner.y, inner.width, 1),
+    );
+
+    let frac = p.fraction().clamp(0.0, 1.0);
+    let bar_y = inner.y + 2;
+    f.render_widget(
+        Block::default().style(Style::default().bg(Color::Rgb(50, 50, 66))),
+        Rect::new(inner.x, bar_y, inner.width, 1),
+    );
+    let filled = ((inner.width as f32) * frac).round() as u16;
+    if filled > 0 {
+        f.render_widget(
+            Block::default().style(Style::default().bg(theme().accent)),
+            Rect::new(inner.x, bar_y, filled.min(inner.width), 1),
+        );
+    }
+
+    let counts = if p.bytes_total > 0 {
+        format!(
+            "{} / {}   ({} of {} files)",
+            cian_core::human_size(p.bytes_done),
+            cian_core::human_size(p.bytes_total),
+            p.files_done,
+            p.files_total
+        )
+    } else {
+        format!("{} of {} files", p.files_done, p.files_total)
+    };
+    // Elapsed time, so a slow volume looks slow rather than stuck.
+    let secs = job.started.elapsed().as_secs();
+    let elapsed = if secs >= 60 {
+        format!("{}m{:02}s", secs / 60, secs % 60)
+    } else {
+        format!("{}s", secs)
+    };
+    f.render_widget(
+        Paragraph::new(format!("{:>3}%   {}   ·  {}", (frac * 100.0) as u16, counts, elapsed)),
+        Rect::new(inner.x, bar_y + 2, inner.width, 1),
+    );
+    f.render_widget(
+        Paragraph::new(" Esc = stop ").style(
+            Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD),
+        ),
+        Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1),
+    );
 }
 
 fn draw_popup(f: &mut Frame, area: Rect, popup: &mut Popup, hosts: &[cian_lua::SshHost]) {

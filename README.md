@@ -63,6 +63,19 @@ cian.set_option("animation_ms", 250)   -- slower
 cian.set_option("animation_ms", 0)     -- off
 ```
 
+## File operations
+
+Copies, moves and deletes run on a worker thread with a progress bar: how far
+along, how many files, how much data, and how long it has been going. **Esc**
+stops it. Previously these ran inline — copying a 700 MB file locked the whole
+UI for fourteen seconds with nothing on screen to explain why.
+
+Files are copied in chunks, so the bar advances *within* a large file and a
+cancel is acted on in a fraction of a second rather than at the next file
+boundary. A cancelled copy removes its half-written destination instead of
+leaving something that looks complete. Moves try a rename first, which is
+instant within a volume, and only fall back to copy-then-delete across one.
+
 ## Deleting
 
 `d` moves items to the OS trash (Finder's Trash / the Windows Recycle Bin), so
