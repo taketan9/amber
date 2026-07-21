@@ -120,6 +120,21 @@ anyone else. `password_cmd` avoids storing anything by taking the value from a
 credential manager. Key authentication avoids the question entirely and is
 usually less work to set up than a credential list is to maintain.
 
+## Going to a path
+
+`z` (or `:cd`) prompts for a path, seeded with the current directory. A
+directory is entered; a file is opened with whatever `Enter` would use,
+including any `on_open` handler from `init.lua`. `~`, `$VAR`, `${VAR}` and
+`%VAR%` are expanded, and a surrounding pair of quotes is stripped — so a path
+copied out of a shell or an Explorer address bar can be pasted in as-is.
+
+## Context menu from the keyboard
+
+`Shift+Enter` opens the same menu the right mouse button does, next to the
+highlighted entry. It needs a terminal that tells Shift+Enter apart from plain
+Enter: the Windows console does, and on Unix it wants the kitty keyboard
+protocol (WezTerm, kitty, foot). `:menu` works everywhere.
+
 ## Sorting
 
 `,` opens the sort picker: name, size, date or extension, with `n`/`s`/`d`/`e`

@@ -904,6 +904,8 @@ enum InputKind {
     NewDir { parent: PathBuf },
     ShortcutName { editing_index: Option<usize> },
     ShortcutTarget { editing_index: Option<usize>, name: String },
+    /// A path typed to jump to (or a file to open).
+    JumpPath,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1314,6 +1316,8 @@ impl App {
             "shell" => self.focus(FocusedPane::Shell),
             "man" | "help" | "h" => self.open_manual(),
             "paste" => { let _ = self.paste_clip(); }
+            "cd" | "goto" => self.start_jump_path(),
+            "menu" => self.open_menu_at_cursor(),
             "ssh" => self.start_ssh(),
             other => self.message = Some(format!("unknown command: :{}", other)),
         }
@@ -1819,6 +1823,77 @@ impl App {
         self.message = Some(format!("sorted by {} ({})", key.label(), arrow));
     }
 
+    // ------- Jump to a typed path -------
+    fn start_jump_path(&mut self) {
+        // Seed with the current directory: most jumps are edits of where you
+        // already are, and it doubles as a reminder of the expected form.
+        let here = self.active_pane().map(|p| p.cwd.display().to_string()).unwrap_or_default();
+        self.popup = Popup::TextInput {
+            title: "go to path".into(),
+            prompt: "directory to enter, or file to open:".into(),
+            buffer: here,
+            kind: InputKind::JumpPath,
+        };
+    }
+
+    /// Enter a typed directory, or open a typed file with its usual program.
+    fn finish_jump_path(&mut self, raw: &str) -> Result<()> {
+        let raw = raw.trim();
+        if raw.is_empty() {
+            self.message = Some("cancelled".into());
+            return Ok(());
+        }
+        let path = expand_path(raw);
+        if !path.exists() {
+            self.message = Some(format!("no such path: {}", path.display()));
+            return Ok(());
+        }
+        if path.is_dir() {
+            if let Some(p) = self.active_pane_mut() {
+                p.jump_to(path.clone())?;
+            }
+            self.message = Some(format!("→ {}", path.display()));
+            return Ok(());
+        }
+        // A file: put the cursor on it in its own directory, then open it the
+        // same way Enter would — including any init.lua on_open handler.
+        if let Some(parent) = path.parent().map(|p| p.to_path_buf()) {
+            if let Some(p) = self.active_pane_mut() {
+                let _ = p.jump_to(parent);
+                if let Some(i) = p.entries.iter().position(|e| e.path == path) {
+                    p.cursor = i;
+                }
+            }
+        }
+        self.open_externally();
+        Ok(())
+    }
+
+    /// Open the context menu beside the highlighted entry, as though it had
+    /// been right-clicked.
+    fn open_menu_at_cursor(&mut self) {
+        let rect = match self.focused {
+            FocusedPane::Left => self.layout_rects.left,
+            FocusedPane::Right => self.layout_rects.right,
+            FocusedPane::Shell => self.layout_rects.shell,
+        };
+        if rect.width == 0 || rect.height == 0 {
+            return;
+        }
+        // Anchor on the cursor's row so the menu appears next to what it acts
+        // on, the same as a right-click would.
+        let view_h = rect.height.saturating_sub(2);
+        let offset = self
+            .active_pane()
+            .map(|p| {
+                let first = p.cursor.saturating_sub(view_h.saturating_sub(1) as usize);
+                (p.cursor - first) as u16
+            })
+            .unwrap_or(0);
+        let row = (rect.y + 1 + offset).min(rect.y + rect.height.saturating_sub(1));
+        self.open_context_menu(rect.x + 4, row);
+    }
+
     // ------- Manual -------
     fn open_manual(&mut self) {
         self.popup = Popup::Manual { lines: manual_lines(&self.keymap), scroll: 0 };
@@ -1945,6 +2020,7 @@ impl App {
             InputKind::NewDir { parent } => {
                 ops::create_dir(parent, &name).map(|p| format!("mkdir: {}", p.display()))
             }
+            InputKind::JumpPath => return self.finish_jump_path(&name),
             InputKind::ShortcutName { editing_index } => {
                 // chain into the next step: target input
                 let prev_target = editing_index
@@ -2926,6 +3002,12 @@ impl App {
             (false, false, KeyCode::Char('f')) => self.start_search(),
             (false, false, KeyCode::Char('/')) => self.start_filter(),
             (false, false, KeyCode::Char(',')) => self.start_sort_picker(),
+            (false, false, KeyCode::Char('z')) => self.start_jump_path(),
+            // Shift+Enter opens the same menu the right mouse button does, for
+            // the entry under the cursor. Needs a terminal that distinguishes
+            // it from plain Enter (the Windows console does; on Unix it wants
+            // the kitty keyboard protocol) — `:menu` always works.
+            (false, true, KeyCode::Enter) => self.open_menu_at_cursor(),
             (false, true, KeyCode::Char('S')) => self.start_ssh(),
             (false, _, KeyCode::Char('n')) => self.jump_to_next_match(true),
             (false, _, KeyCode::Char('N')) => self.jump_to_next_match(false),
@@ -3232,6 +3314,67 @@ fn home_dir() -> Option<PathBuf> {
         .map(PathBuf::from)
 }
 
+/// Expand `~`, `$VAR`/`${VAR}` and `%VAR%` in a typed path.
+///
+/// A path is usually typed after copying it from somewhere, and the somewhere
+/// is often a shell or an Explorer address bar, where these forms are normal.
+fn expand_path(input: &str) -> PathBuf {
+    let mut out = String::with_capacity(input.len());
+    let b: Vec<char> = input.chars().collect();
+    let mut i = 0;
+    while i < b.len() {
+        match b[i] {
+            // %VAR% (Windows)
+            '%' => {
+                if let Some(end) = b[i + 1..].iter().position(|c| *c == '%') {
+                    let name: String = b[i + 1..i + 1 + end].iter().collect();
+                    if let Some(v) = std::env::var_os(&name) {
+                        out.push_str(&v.to_string_lossy());
+                        i += end + 2;
+                        continue;
+                    }
+                }
+                out.push('%');
+                i += 1;
+            }
+            // $VAR and ${VAR} (Unix)
+            '$' => {
+                let (name, adv) = if b.get(i + 1) == Some(&'{') {
+                    match b[i + 2..].iter().position(|c| *c == '}') {
+                        Some(end) => (b[i + 2..i + 2 + end].iter().collect::<String>(), end + 3),
+                        None => (String::new(), 1),
+                    }
+                } else {
+                    let end = b[i + 1..]
+                        .iter()
+                        .position(|c| !c.is_alphanumeric() && *c != '_')
+                        .unwrap_or(b.len() - i - 1);
+                    (b[i + 1..i + 1 + end].iter().collect::<String>(), end + 1)
+                };
+                match (name.is_empty(), std::env::var_os(&name)) {
+                    (false, Some(v)) => {
+                        out.push_str(&v.to_string_lossy());
+                        i += adv;
+                    }
+                    _ => {
+                        out.push('$');
+                        i += 1;
+                    }
+                }
+            }
+            c => {
+                out.push(c);
+                i += 1;
+            }
+        }
+    }
+    // Quotes survive copy-paste from shells and Explorer; strip a matched pair.
+    let t = out.trim();
+    let unquoted = |q: char| t.strip_prefix(q).and_then(|x| x.strip_suffix(q));
+    let t = unquoted('"').or_else(|| unquoted('\'')).unwrap_or(t);
+    expand_tilde(Path::new(t))
+}
+
 fn expand_tilde(p: &Path) -> PathBuf {
     if let Some(s) = p.to_str() {
         if let Some(rest) = s.strip_prefix("~/") {
@@ -3499,6 +3642,7 @@ fn manual_sections() -> Vec<(&'static str, Vec<ManualEntry>)> {
                 entry("l, Right, Enter", Some(EnterDir), "enter folder / open file"),
                 entry("-, Left, Bksp", Some(Parent), "parent folder"),
                 entry("h", Some(History), "history popup"),
+                entry("z", None, "go to a typed path (also :cd)"),
                 entry("f", Some(Search), "search"),
                 entry("n", Some(SearchNext), "next match"),
                 entry("N", Some(SearchPrev), "previous match"),
@@ -3526,6 +3670,7 @@ fn manual_sections() -> Vec<(&'static str, Vec<ManualEntry>)> {
                 entry("p", Some(CopyPath), "copy path text to clipboard"),
                 entry("Shift+P", Some(CopyFileRef), "copy file(s) to clipboard"),
                 entry("s", Some(Shortcuts), "shortcuts menu"),
+                entry("Shift+Enter", None, "context menu for the entry (also :menu)"),
             ],
         ),
         (
@@ -4779,6 +4924,7 @@ fn key_hints(app: &App) -> Vec<(&'static str, &'static str)> {
             ("r", "rename"),
             ("/", "filter"),
             (",", "sort"),
+            ("z", "go to"),
             ("Shift+J", "shell"),
             ("?", "help"),
         ],
@@ -4793,18 +4939,33 @@ fn draw_key_hints(f: &mut Frame, area: Rect, app: &App) {
     let desc_style = Style::default().fg(Color::Rgb(150, 150, 170)).bg(theme().status_bg);
     let gap = Span::styled("   ", desc_style);
 
+    let hints = key_hints(app);
+    // +4 for the space between key and label plus the trailing gap.
+    let width_of = |(k, d): &(&str, &str)| k.chars().count() as u16 + d.chars().count() as u16 + 4;
+
+    // The last hint is always `? help`. It is the way out of not knowing any
+    // of the others, so it must never be the entry that a narrow window drops
+    // — reserve its width and truncate the middle instead.
+    let (body, tail) = hints.split_at(hints.len().saturating_sub(1));
+    let reserved: u16 = tail.iter().map(width_of).sum();
+
     let mut spans = vec![Span::styled(" ", desc_style)];
     let mut used = 1u16;
-    for (k, d) in key_hints(app) {
-        // +4 for the space between key and label plus the trailing gap.
-        let w = k.chars().count() as u16 + d.chars().count() as u16 + 4;
-        if used + w > area.width {
+    for h in body {
+        let w = width_of(h);
+        if used + w + reserved > area.width {
             break;
         }
         used += w;
-        spans.push(Span::styled(k, key_style));
-        spans.push(Span::styled(format!(" {}", d), desc_style));
+        spans.push(Span::styled(h.0, key_style));
+        spans.push(Span::styled(format!(" {}", h.1), desc_style));
         spans.push(gap.clone());
+    }
+    for h in tail {
+        if used + width_of(h) <= area.width {
+            spans.push(Span::styled(h.0, key_style));
+            spans.push(Span::styled(format!(" {}", h.1), desc_style));
+        }
     }
     f.render_widget(
         Paragraph::new(Line::from(spans)).style(Style::default().bg(theme().status_bg)),
@@ -6346,6 +6507,18 @@ mod tests {
         assert!(filtering[37].contains("filter /"), "prompt row: {:?}", filtering[37]);
     }
 
+    /// `? help` is the way out of not knowing any other key, so a narrow
+    /// window must drop something else. Adding one hint used to push it off
+    /// the end.
+    #[test]
+    fn the_help_hint_survives_a_narrow_window() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        for w in [40u16, 60, 80, 110, 200] {
+            let screen = render(&mut app, w, 40).join("\n");
+            assert!(screen.contains("? help"), "lost at width {}:\n{}", w, screen);
+        }
+    }
+
     /// A short window drops the hints rather than squeezing the listing out.
     #[test]
     fn a_short_window_drops_the_hints() {
@@ -6527,6 +6700,101 @@ mod tests {
         };
         assert!(u.has_secret());
         assert_eq!(u.secret().as_deref(), Some("from-store"));
+    }
+
+    #[test]
+    fn z_prompts_for_a_path_seeded_with_the_current_directory() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        let here = app.active_pane().unwrap().cwd.clone();
+        app.handle_key(key('z')).unwrap();
+        let Popup::TextInput { buffer, kind, .. } = &app.popup else { panic!("no prompt") };
+        assert!(matches!(kind, InputKind::JumpPath));
+        assert_eq!(buffer, &here.display().to_string(), "seeded with where you are");
+    }
+
+    #[test]
+    fn a_typed_directory_is_entered() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("sub")).unwrap();
+        std::fs::write(dir.path().join("sub").join("inner.txt"), b"x").unwrap();
+        let p = dir.path().to_path_buf();
+        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+
+        let target = dir.path().join("sub");
+        app.finish_jump_path(&target.display().to_string()).unwrap();
+        // jump_to canonicalises, so compare on the final component.
+        assert_eq!(app.active_pane().unwrap().cwd.file_name().unwrap(), "sub");
+        assert_eq!(app.active_pane().unwrap().entries[0].name, "inner.txt");
+    }
+
+    /// Naming a file should land the cursor on it, so the pane is left
+    /// somewhere useful rather than wherever it happened to be.
+    #[test]
+    fn a_typed_file_moves_the_cursor_to_it() {
+        let dir = tempfile::tempdir().unwrap();
+        for n in ["a.txt", "b.txt", "c.txt"] {
+            std::fs::write(dir.path().join(n), b"x").unwrap();
+        }
+        let p = dir.path().to_path_buf();
+        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+
+        let target = dir.path().join("c.txt");
+        app.finish_jump_path(&target.display().to_string()).unwrap();
+        let pane = app.active_pane().unwrap();
+        assert_eq!(pane.selected().unwrap().name, "c.txt");
+    }
+
+    #[test]
+    fn a_path_that_does_not_exist_says_so_and_stays_put() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        let before = app.active_pane().unwrap().cwd.clone();
+        app.finish_jump_path("/no/such/place/at/all").unwrap();
+        assert_eq!(app.active_pane().unwrap().cwd, before, "must not move");
+        assert!(app.message.as_deref().unwrap_or("").contains("no such path"));
+    }
+
+    /// Paths get typed after copying them out of a shell or an address bar,
+    /// which is where these forms come from.
+    #[test]
+    fn typed_paths_expand_env_vars_tildes_and_quotes() {
+        let dir = tempfile::tempdir().unwrap();
+        let sub = dir.path().join("sub");
+        std::fs::create_dir(&sub).unwrap();
+        std::env::set_var("CIAN_TEST_BASE", dir.path());
+
+        for form in [
+            "$CIAN_TEST_BASE/sub",
+            "${CIAN_TEST_BASE}/sub",
+            "%CIAN_TEST_BASE%/sub",
+        ] {
+            assert_eq!(expand_path(form), sub, "failed to expand {:?}", form);
+        }
+        // Surrounding quotes, as pasted from a shell.
+        let quoted = format!("\"{}\"", sub.display());
+        assert_eq!(expand_path(&quoted), sub);
+
+        // An unset variable is left alone rather than silently becoming empty.
+        assert_eq!(expand_path("$CIAN_NOT_SET_ANYWHERE"), PathBuf::from("$CIAN_NOT_SET_ANYWHERE"));
+        std::env::remove_var("CIAN_TEST_BASE");
+    }
+
+    #[test]
+    fn shift_enter_opens_the_context_menu_by_the_cursor() {
+        let (_d, mut app) = app_with(&["a.txt", "b.txt", "c.txt"]);
+        let _ = render(&mut app, 100, 40);
+        app.focus(FocusedPane::Left);
+        if let Some(p) = app.active_pane_mut() {
+            p.cursor = 2;
+        }
+
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::SHIFT)).unwrap();
+        let Popup::ContextMenu { at, items, .. } = &app.popup else {
+            panic!("expected the context menu")
+        };
+        assert!(items.contains(&MenuItem::Delete), "the file-pane menu");
+        let left = app.layout_rects.left;
+        assert!(at.0 >= left.x && at.0 < left.x + left.width, "anchored in the pane");
+        assert_eq!(at.1, left.y + 1 + 2, "on the cursor's row");
     }
 
     #[test]
