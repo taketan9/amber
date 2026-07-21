@@ -52,6 +52,11 @@ if is_windows then
   -- cian.set_option("shell", [[C:\Program Files\PowerShell\7\pwsh.exe]])
 end
 
+-- Border corners. Left unset, cian uses square corners in the legacy Windows
+-- console (whose fonts often lack the rounded glyphs, leaving the corners
+-- visibly misaligned) and rounded ones everywhere else.
+-- cian.set_option("borders", "rounded")   -- or "plain"
+
 -- Contextual key-hint bar above the status line.
 cian.set_option("key_hints", true)
 

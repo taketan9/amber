@@ -62,6 +62,45 @@ fn theme() -> &'static ResolvedTheme {
     THEME.get_or_init(ResolvedTheme::default)
 }
 
+/// Which corner glyphs the borders use. Set once at startup; see
+/// [`resolve_border_type`].
+static BORDERS: OnceLock<BorderType> = OnceLock::new();
+
+fn border_type() -> BorderType {
+    *BORDERS.get_or_init(|| resolve_border_type(None))
+}
+
+/// Pick rounded or square corners.
+///
+/// Rounded corners are `╭╮╯╰` (U+256D–U+2570), which plenty of console fonts —
+/// Consolas and Lucida Console among them — simply do not contain, while the
+/// straight `─│` (U+2500, U+2502) are in almost all of them. Windows then
+/// font-links just the corners to some other face, whose metrics differ, and
+/// the frame looks a few pixels out at each corner while its sides stay put.
+///
+/// So: square corners in the legacy Windows console, rounded where the
+/// terminal is known to cope, and an explicit `borders` option to override.
+fn resolve_border_type(configured: Option<&str>) -> BorderType {
+    match configured.map(|s| s.trim().to_lowercase()).as_deref() {
+        Some("plain") | Some("square") => return BorderType::Plain,
+        Some("rounded") => return BorderType::Rounded,
+        _ => {}
+    }
+    if cfg!(windows) && !modern_terminal() {
+        BorderType::Plain
+    } else {
+        BorderType::Rounded
+    }
+}
+
+/// Whether the host terminal advertises itself as a modern one. The legacy
+/// Windows console sets none of these.
+fn modern_terminal() -> bool {
+    std::env::var_os("WT_SESSION").is_some()
+        || std::env::var_os("WEZTERM_PANE").is_some()
+        || std::env::var_os("TERM_PROGRAM").is_some()
+}
+
 /// Remappable normal-mode actions. Keys the user binds via `cian.set_keymap`
 /// resolve to one of these; the default key handling is otherwise untouched.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -3804,12 +3843,7 @@ fn terminal_advice() -> Vec<String> {
     if !cfg!(windows) {
         return Vec::new();
     }
-    // Windows Terminal and WezTerm both advertise themselves; the legacy
-    // conhost advertises nothing.
-    let modern = std::env::var_os("WT_SESSION").is_some()
-        || std::env::var_os("WEZTERM_PANE").is_some()
-        || std::env::var_os("TERM_PROGRAM").is_some();
-    if modern {
+    if modern_terminal() {
         return Vec::new();
     }
     vec![
@@ -3849,6 +3883,7 @@ pub fn run(left: PathBuf, right: PathBuf) -> Result<()> {
     // Resolve and install the color theme before any drawing happens.
     let (resolved, theme_errors) = resolve_theme(&config.theme);
     let _ = THEME.set(resolved);
+    let _ = BORDERS.set(resolve_border_type(config.options.borders.as_deref()));
 
     // Collect all non-fatal config issues for a single startup notice.
     let mut startup_errors = config.errors.clone();
@@ -4472,7 +4507,7 @@ fn draw_file_pane(
     let max_title_w = area.width.saturating_sub(2);
     let mut block = Block::default()
         .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
+        .border_type(border_type())
         .border_style(border_style)
         .title(tabs_title(tabs, focused, focus_bg, max_title_w));
     if let Some(c) = bg {
@@ -4645,7 +4680,7 @@ fn draw_shell_inner(
     };
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
+        .border_type(border_type())
         .border_style(border_style)
         .title(shell_tabs_title(shell, focused));
     let inner = area.inner(Margin { vertical: 1, horizontal: 1 });
@@ -4756,7 +4791,7 @@ fn render_node(
                     Style::default().fg(Color::DarkGray)
                 };
                 let blk = Block::default().borders(Borders::ALL)
-        .border_type(BorderType::Rounded).border_style(bs);
+        .border_type(border_type()).border_style(bs);
                 let pinner = area.inner(Margin { vertical: 1, horizontal: 1 });
                 f.render_widget(blk, area);
                 pinner
@@ -5093,7 +5128,7 @@ fn draw_popup(f: &mut Frame, area: Rect, popup: &mut Popup, hosts: &[cian_lua::S
         };
         let block = Block::default()
             .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
+        .border_type(border_type())
             .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
             .title(" manual ")
             .title_bottom(pos);
@@ -5129,7 +5164,7 @@ fn draw_popup(f: &mut Frame, area: Rect, popup: &mut Popup, hosts: &[cian_lua::S
         f.render_widget(Clear, rect);
         let block = Block::default()
             .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
+            .border_type(border_type())
             .border_style(Style::default().fg(theme().accent))
             .style(Style::default().bg(Color::Rgb(24, 24, 34)));
         let inner = rect.inner(Margin { vertical: 1, horizontal: 1 });
@@ -5171,7 +5206,7 @@ fn draw_popup(f: &mut Frame, area: Rect, popup: &mut Popup, hosts: &[cian_lua::S
         f.render_widget(Clear, rect);
         let block = Block::default()
             .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
+            .border_type(border_type())
             .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
             .title(" ssh — host ");
         let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
@@ -5228,7 +5263,7 @@ fn draw_popup(f: &mut Frame, area: Rect, popup: &mut Popup, hosts: &[cian_lua::S
         f.render_widget(Clear, rect);
         let block = Block::default()
             .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
+            .border_type(border_type())
             .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
             .title(format!(" ssh — {} ", hst.name));
         let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
@@ -5273,7 +5308,7 @@ fn draw_popup(f: &mut Frame, area: Rect, popup: &mut Popup, hosts: &[cian_lua::S
         f.render_widget(Clear, rect);
         let block = Block::default()
             .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
+            .border_type(border_type())
             .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
             .title(" sort by ");
         let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
@@ -5322,7 +5357,7 @@ fn draw_popup(f: &mut Frame, area: Rect, popup: &mut Popup, hosts: &[cian_lua::S
         f.render_widget(Clear, rect);
         let block = Block::default()
             .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
+            .border_type(border_type())
             .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
             .title(" background ");
         let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
@@ -5473,7 +5508,7 @@ fn draw_popup(f: &mut Frame, area: Rect, popup: &mut Popup, hosts: &[cian_lua::S
     f.render_widget(Clear, rect);
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
+        .border_type(border_type())
         .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
         .title(title);
     let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
@@ -6795,6 +6830,38 @@ mod tests {
         let left = app.layout_rects.left;
         assert!(at.0 >= left.x && at.0 < left.x + left.width, "anchored in the pane");
         assert_eq!(at.1, left.y + 1 + 2, "on the cursor's row");
+    }
+
+    /// Rounded corners are missing from several stock console fonts, so
+    /// Windows font-links only the corners and the frame looks a few pixels
+    /// out at each one. Square corners are in every font.
+    #[test]
+    fn border_corners_fall_back_to_square_where_fonts_lack_the_rounded_ones() {
+        // An explicit setting always wins, on every platform.
+        assert_eq!(resolve_border_type(Some("plain")), BorderType::Plain);
+        assert_eq!(resolve_border_type(Some("square")), BorderType::Plain);
+        assert_eq!(resolve_border_type(Some("rounded")), BorderType::Rounded);
+        assert_eq!(resolve_border_type(Some("  Rounded  ")), BorderType::Rounded);
+        // An unrecognised value falls through to the automatic choice rather
+        // than failing; a bad config should not cost you your borders.
+        let auto = resolve_border_type(None);
+        assert_eq!(resolve_border_type(Some("nonsense")), auto);
+
+        // Unix terminals handle the rounded set.
+        #[cfg(not(windows))]
+        assert_eq!(auto, BorderType::Rounded);
+    }
+
+    #[test]
+    fn the_rendered_frame_uses_the_chosen_corner_glyphs() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        let screen = render(&mut app, 100, 40).join("\n");
+        let (round, square) = (
+            screen.contains('\u{256d}'),
+            screen.contains('\u{250c}'),
+        );
+        assert!(round ^ square, "exactly one corner style should be on screen");
+        assert_eq!(round, border_type() == BorderType::Rounded);
     }
 
     #[test]

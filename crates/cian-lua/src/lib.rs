@@ -50,6 +50,8 @@ pub struct Options {
     pub animation_ms: Option<u64>,
     /// Show the contextual key-hint bar above the status line.
     pub key_hints: Option<bool>,
+    /// Border corners: "rounded", "plain", or unset for per-terminal defaults.
+    pub borders: Option<String>,
 }
 
 /// A login on a host.
@@ -398,6 +400,12 @@ fn install_api(lua: &Lua, builder: &Rc<RefCell<Builder>>) -> mlua::Result<()> {
                         Err(_) => {
                             bm.errors.push("set_option: shell expects a string".into())
                         }
+                    },
+                    "borders" => match String::from_lua(val, lua) {
+                        Ok(v) => bm.options.borders = Some(v),
+                        Err(_) => bm
+                            .errors
+                            .push("set_option: borders expects \"rounded\" or \"plain\"".into()),
                     },
                     "key_hints" => match bool::from_lua(val, lua) {
                         Ok(v) => bm.options.key_hints = Some(v),

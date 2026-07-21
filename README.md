@@ -258,6 +258,21 @@ cian --version     # cian 0.1.0 (7f92bae)
 The commit is baked in at build time. Worth checking first when a feature
 seems missing: an older `cian.exe` left on PATH looks exactly like a bug.
 
+## Border corners
+
+Rounded corners (`╭╮╯╰`, U+256D–U+2570) are missing from several stock console
+fonts — Consolas and Lucida Console among them — while the straight `─│` are in
+almost all of them. Windows then font-links only the corners to another face,
+whose metrics differ, so the frame looks a few pixels out at each corner while
+its sides stay put.
+
+cian therefore uses square corners in the legacy Windows console and rounded
+ones elsewhere. Force it either way:
+
+```lua
+cian.set_option("borders", "rounded")   -- or "plain"
+```
+
 ## Running it standalone
 
 cian cannot restyle the console it is launched into; the font and colors belong
