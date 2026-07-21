@@ -1068,6 +1068,10 @@ impl Divider {
 /// border can never be dragged far enough to make a pane unusable.
 const MIN_SPLIT_PCT: u16 = 15;
 
+/// How often the panes are checked against the filesystem. Long enough to be
+/// invisible in cost, short enough that a file appearing feels immediate.
+const WATCH_INTERVAL: Duration = Duration::from_millis(1200);
+
 /// How long an operation flash stays visible.
 const FLASH_SECS: f32 = 0.45;
 
@@ -1220,6 +1224,8 @@ pub struct App {
     pending_auth: Option<PendingAuth>,
     /// A copy/move/delete running on a worker thread.
     op_job: Option<OpJob>,
+    /// When the panes were last checked against the filesystem.
+    last_watch: Instant,
     /// Per-pane background overrides, indexed by [`Self::bg_slot`].
     /// Session-only: deliberately not persisted.
     pane_bg: [Option<Color>; 2],
@@ -1286,6 +1292,7 @@ impl App {
             pending_shell_input: None,
             pending_auth: None,
             op_job: None,
+            last_watch: Instant::now(),
             pane_bg: [None, None],
             last_search_query: None,
             shortcuts: ShortcutStore::load_or_default(),
@@ -2088,6 +2095,32 @@ impl App {
                 ));
             } else {
                 self.show_op_report(&report);
+            }
+        }
+        changed
+    }
+
+    /// Reload any pane whose directory changed underneath it.
+    ///
+    /// cian only ever reloaded after its own actions, so a file created by
+    /// something else — a build, a download, a colleague's sync — simply never
+    /// appeared. Returns true if anything was refreshed.
+    fn poll_external_changes(&mut self) -> bool {
+        if self.last_watch.elapsed() < WATCH_INTERVAL {
+            return false;
+        }
+        self.last_watch = Instant::now();
+        // Not while an operation runs: it will reload at the end anyway, and
+        // re-reading a directory being written to would just fight it.
+        if self.op_job.is_some() {
+            return false;
+        }
+        let mut changed = false;
+        for tabs in [&mut self.left, &mut self.right] {
+            let pane = tabs.active_mut();
+            if pane.is_stale() {
+                let _ = pane.reload();
+                changed = true;
             }
         }
         changed
@@ -3218,6 +3251,12 @@ impl App {
             (false, false, KeyCode::Char('/')) => self.start_filter(),
             (false, false, KeyCode::Char(',')) => self.start_sort_picker(),
             (false, false, KeyCode::Char('z')) => self.start_jump_path(),
+            // Manual refresh, for the cases the timer cannot see — a file
+            // whose contents changed without the directory being touched.
+            (true, _, KeyCode::Char('r')) | (false, false, KeyCode::F(5)) => {
+                self.reload_both();
+                self.message = Some("refreshed".into());
+            }
             // Shift+Enter opens the same menu the right mouse button does, for
             // the entry under the cursor. Needs a terminal that distinguishes
             // it from plain Enter (the Windows console does; on Unix it wants
@@ -3862,6 +3901,7 @@ fn manual_sections() -> Vec<(&'static str, Vec<ManualEntry>)> {
                 entry("Left / Right", None, "focus the left / right pane"),
                 entry("h", Some(History), "history popup"),
                 entry("z", None, "go to a typed path (also :cd)"),
+                entry("Ctrl+R, F5", None, "refresh now"),
                 entry("f", Some(Search), "search"),
                 entry("n", Some(SearchNext), "next match"),
                 entry("N", Some(SearchPrev), "previous match"),
@@ -4184,6 +4224,10 @@ fn run_loop<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Result<()>
             if a.done() {
                 app.finish_anim();
             }
+        }
+        // Catch changes made by anything other than cian.
+        if app.poll_external_changes() {
+            needs_redraw = true;
         }
         // A running file operation reports in over a channel.
         if app.op_job.is_some() {

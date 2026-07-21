@@ -123,6 +123,9 @@ pub struct Pane {
     pub marks: HashSet<PathBuf>,
     /// Recently visited paths for this pane (most recent first, deduped, capped).
     pub history: Vec<PathBuf>,
+    /// `cwd`'s modification time as of the last read, used to notice changes
+    /// made by anything other than cian.
+    stamp: Option<SystemTime>,
 }
 
 const HISTORY_CAP: usize = 30;
@@ -144,6 +147,7 @@ impl Pane {
             cursor: 0,
             marks: HashSet::new(),
             history: Vec::new(),
+            stamp: None,
         };
         pane.reload()?;
         Ok(pane)
@@ -157,7 +161,25 @@ impl Pane {
         }
     }
 
+    /// Whether `cwd` has changed since it was last read.
+    ///
+    /// A directory's own mtime moves when an entry is added, removed or
+    /// renamed, which covers "a file appeared while I was looking at this" —
+    /// the case where a stale listing actively misleads. Checking one stat is
+    /// cheap enough to do on a timer; re-reading the whole directory is not.
+    pub fn is_stale(&self) -> bool {
+        let now = fs::metadata(&self.cwd).ok().and_then(|m| m.modified().ok());
+        match (now, self.stamp) {
+            (Some(a), Some(b)) => a != b,
+            // No timestamp either time: nothing to compare, assume unchanged
+            // rather than reloading forever.
+            (None, None) => false,
+            _ => true,
+        }
+    }
+
     pub fn reload(&mut self) -> Result<()> {
+        self.stamp = fs::metadata(&self.cwd).ok().and_then(|m| m.modified().ok());
         let entries: Vec<Entry> = fs::read_dir(&self.cwd)
             .with_context(|| format!("read_dir failed: {}", self.cwd.display()))?
             .filter_map(|res| res.ok())
@@ -448,6 +470,30 @@ mod tests {
         let pane = Pane::new(dir.path()).unwrap();
         assert_eq!(pane.sort, Sort::default());
         assert_eq!(names(&pane), vec!["zdir", "a.txt"]);
+    }
+
+    /// cian only ever reloaded after its own actions, so a file created by
+    /// anything else never appeared.
+    #[test]
+    fn a_pane_notices_its_directory_changing_underneath_it() {
+        let (dir, mut pane) = pane_with(&["a.txt"]);
+        assert!(!pane.is_stale(), "nothing has happened yet");
+
+        // Directory mtimes have coarse resolution on some filesystems; make
+        // sure the change lands in a later tick.
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        fs::write(dir.path().join("appeared.txt"), b"x").unwrap();
+        assert!(pane.is_stale(), "a new entry should show as stale");
+
+        pane.reload().unwrap();
+        assert!(!pane.is_stale(), "reloading clears it");
+        assert!(names(&pane).contains(&"appeared.txt".to_string()));
+
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        fs::remove_file(dir.path().join("appeared.txt")).unwrap();
+        assert!(pane.is_stale(), "a removed entry counts too");
+        pane.reload().unwrap();
+        assert!(!names(&pane).contains(&"appeared.txt".to_string()));
     }
 
     fn names(pane: &Pane) -> Vec<String> {

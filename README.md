@@ -63,6 +63,19 @@ cian.set_option("animation_ms", 250)   -- slower
 cian.set_option("animation_ms", 0)     -- off
 ```
 
+## Keeping up with the filesystem
+
+A file created by something else — a build, a download, a sync — used to never
+appear: cian only reloaded after its own actions. Each pane's directory is now
+checked about once a second and re-read when it has changed, so entries
+appearing and disappearing show up on their own. Measured: a file created
+externally shows within a second.
+
+The check is one `stat` of the directory, not a re-read of it, so it costs
+nothing on a large listing. That does mean a change to a file's *contents*
+without any entry being added or removed is not noticed; `Ctrl+R` (or `F5`)
+forces a full refresh.
+
 ## File operations
 
 Copies, moves and deletes run on a worker thread with a progress bar: how far
