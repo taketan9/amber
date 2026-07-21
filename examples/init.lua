@@ -9,7 +9,7 @@
 -- `cian` table.
 
 ----------------------------------------------------------------------
--- Theme — colours accept "#rrggbb", "r,g,b", or a named colour
+-- Theme — colors accept "#rrggbb", "r,g,b", or a named color
 -- (cyan, red, yellow, blue, green, magenta, white, black, gray, darkgray,
 --  lightblue, ...). Omit any field to keep its default.
 ----------------------------------------------------------------------

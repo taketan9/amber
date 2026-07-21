@@ -16,7 +16,7 @@ use crossterm::event::{
     PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
 };
 use crossterm::execute;
-use crossterm::terminal::{
+use crossterm::terminal::{SetTitle, 
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
 use ratatui::backend::{Backend, CrosstermBackend};
@@ -31,7 +31,7 @@ use ratatui::{Frame, Terminal};
 use serde::{Deserialize, Serialize};
 use tui_term::widget::PseudoTerminal;
 
-/// Resolved colour palette. Defaults match the original built-in theme; a
+/// Resolved color palette. Defaults match the original built-in theme; a
 /// `~/.config/cian/init.lua` calling `cian.set_theme{...}` overrides any field.
 #[derive(Debug, Clone, Copy)]
 struct ResolvedTheme {
@@ -134,7 +134,7 @@ fn action_from_name(name: &str) -> Option<Action> {
     })
 }
 
-/// Parse a user colour spec: `#rrggbb`, `r,g,b`, or a named colour.
+/// Parse a user color spec: `#rrggbb`, `r,g,b`, or a named color.
 fn parse_color(s: &str) -> Option<Color> {
     let s = s.trim();
     if let Some(hex) = s.strip_prefix('#') {
@@ -178,7 +178,7 @@ fn parse_color(s: &str) -> Option<Color> {
 }
 
 /// Resolve a Lua [`Theme`] into a concrete palette, collecting any invalid
-/// colour specs as human-readable errors (the default is kept for those).
+/// color specs as human-readable errors (the default is kept for those).
 fn resolve_theme(t: &cian_lua::Theme) -> (ResolvedTheme, Vec<String>) {
     let mut c = ResolvedTheme::default();
     let mut errors = Vec::new();
@@ -269,7 +269,9 @@ enum SplitDir {
 /// A node in a shell tab's split tree: a leaf PTY pane, or a binary split of
 /// two child nodes (referenced by slab index).
 enum Node {
-    Leaf(PtySession),
+    /// A live pane. `bg` tints only this pane, so split panes can be told
+    /// apart at a glance — the whole point of colouring them.
+    Leaf { session: PtySession, bg: Option<Color> },
     /// `ratio` is the percentage of the split's area given to `first`; it is
     /// what dragging the border between the two children adjusts.
     Split { dir: SplitDir, first: usize, second: usize, ratio: u16 },
@@ -286,7 +288,7 @@ struct ShellTab {
 
 impl ShellTab {
     fn new(session: PtySession) -> Self {
-        Self { nodes: vec![Some(Node::Leaf(session))], root: 0, active: 0 }
+        Self { nodes: vec![Some(Node::Leaf { session, bg: None })], root: 0, active: 0 }
     }
 
     fn alloc(&mut self, node: Node) -> usize {
@@ -301,20 +303,20 @@ impl ShellTab {
 
     fn active_pane(&self) -> Option<&PtySession> {
         match self.nodes.get(self.active).and_then(|n| n.as_ref()) {
-            Some(Node::Leaf(s)) => Some(s),
+            Some(Node::Leaf { session, .. }) => Some(session),
             _ => None,
         }
     }
     fn active_pane_mut(&mut self) -> Option<&mut PtySession> {
         match self.nodes.get_mut(self.active).and_then(|n| n.as_mut()) {
-            Some(Node::Leaf(s)) => Some(s),
+            Some(Node::Leaf { session, .. }) => Some(session),
             _ => None,
         }
     }
 
     fn collect_leaves(&self, i: usize, out: &mut Vec<usize>) {
         match self.nodes.get(i).and_then(|n| n.as_ref()) {
-            Some(Node::Leaf(_)) => out.push(i),
+            Some(Node::Leaf { .. }) => out.push(i),
             Some(Node::Split { first, second, .. }) => {
                 self.collect_leaves(*first, out);
                 self.collect_leaves(*second, out);
@@ -354,10 +356,10 @@ impl ShellTab {
     /// Split the active leaf into (old, new) along `dir`; new becomes active.
     fn split(&mut self, dir: SplitDir, new_session: PtySession) {
         let old = self.active;
-        if !matches!(self.nodes.get(old).and_then(|n| n.as_ref()), Some(Node::Leaf(_))) {
+        if !matches!(self.nodes.get(old).and_then(|n| n.as_ref()), Some(Node::Leaf { .. })) {
             return;
         }
-        let new_leaf = self.alloc(Node::Leaf(new_session));
+        let new_leaf = self.alloc(Node::Leaf { session: new_session, bg: None });
         let split_idx = self.alloc(Node::Split { dir, first: old, second: new_leaf, ratio: 50 });
         if old == self.root {
             self.root = split_idx;
@@ -388,7 +390,7 @@ impl ShellTab {
     /// if the tab is now empty.
     fn close_active(&mut self) -> bool {
         let leaf = self.active;
-        if !matches!(self.nodes.get(leaf).and_then(|n| n.as_ref()), Some(Node::Leaf(_))) {
+        if !matches!(self.nodes.get(leaf).and_then(|n| n.as_ref()), Some(Node::Leaf { .. })) {
             return self.leaves().is_empty();
         }
         if leaf == self.root {
@@ -427,7 +429,7 @@ impl ShellTab {
 
     fn for_each_leaf_mut(&mut self, f: &mut dyn FnMut(&mut PtySession)) {
         for n in self.nodes.iter_mut() {
-            if let Some(Node::Leaf(s)) = n {
+            if let Some(Node::Leaf { session: s, .. }) = n {
                 f(s);
             }
         }
@@ -501,6 +503,32 @@ impl ShellPane {
 
     fn active_tab(&self) -> Option<&ShellTab> {
         self.tabs.get(self.active)
+    }
+
+    /// How many split panes the active tab has.
+    fn active_pane_count(&self) -> usize {
+        self.active_tab().map(|t| t.leaves().len()).unwrap_or(0)
+    }
+
+    /// Set the active pane's background. Per pane, not per panel: the point is
+    /// to tell one split from another.
+    fn set_active_pane_bg(&mut self, color: Option<Color>) {
+        let active = self.active;
+        if let Some(t) = self.tabs.get_mut(active) {
+            let leaf = t.active;
+            if let Some(Node::Leaf { bg, .. }) = t.nodes.get_mut(leaf).and_then(|n| n.as_mut()) {
+                *bg = color;
+            }
+        }
+    }
+
+    /// The active pane's background, for pre-selecting it in the picker.
+    fn active_pane_bg(&self) -> Option<Color> {
+        let t = self.active_tab()?;
+        match t.nodes.get(t.active).and_then(|n| n.as_ref()) {
+            Some(Node::Leaf { bg, .. }) => *bg,
+            _ => None,
+        }
     }
 
     fn active_session(&self) -> Option<&PtySession> {
@@ -725,7 +753,7 @@ enum Popup {
     Manual { lines: Vec<String>, scroll: usize },
     /// Right-click menu, anchored near the pointer.
     ContextMenu { items: Vec<MenuItem>, cursor: usize, at: (u16, u16) },
-    /// Background-colour picker for the pane that was right-clicked.
+    /// Background-color picker for the pane that was right-clicked.
     ColorPicker { pane: FocusedPane, cursor: usize },
     /// Sort-order picker for the focused pane.
     SortPicker { cursor: usize },
@@ -764,7 +792,7 @@ impl MenuItem {
             MenuItem::MoveToOther => "Move to other pane",
             MenuItem::Delete => "Delete (to trash)",
             MenuItem::Rename => "Rename",
-            MenuItem::Background => "Background colour…",
+            MenuItem::Background => "Background color…",
             MenuItem::Ssh => "SSH connect…",
             MenuItem::Manual => "Key manual  (?)",
         }
@@ -839,18 +867,25 @@ struct FileClipboard {
     op: ClipOp,
 }
 
-/// Preset pane backgrounds. Deliberately dark and low-saturation: these sit
-/// behind a full pane of text, so anything vivid would hurt legibility.
+/// Preset pane backgrounds.
+///
+/// These exist to answer "which pane am I typing into?", so they are pitched
+/// to be unmistakable at a glance rather than tasteful — an earlier, subtler
+/// set failed at exactly that. Still dark enough to keep normal terminal
+/// foreground colors readable on top.
+/// Evenly spaced around the hue wheel at a fixed, low brightness, so no two
+/// are confusable and all keep foreground text readable. Verified by
+/// `the_palette_is_distinct_enough_to_tell_panes_apart`.
 const PANE_BG_PRESETS: [(&str, Option<Color>); 9] = [
     ("default", None),
-    ("slate", Some(Color::Rgb(28, 32, 42))),
-    ("ink", Some(Color::Rgb(22, 24, 38))),
-    ("forest", Some(Color::Rgb(24, 38, 30))),
-    ("moss", Some(Color::Rgb(32, 40, 28))),
-    ("wine", Some(Color::Rgb(42, 26, 32))),
-    ("rust", Some(Color::Rgb(44, 32, 24))),
-    ("plum", Some(Color::Rgb(38, 28, 44))),
-    ("steel", Some(Color::Rgb(26, 34, 40))),
+    ("navy", Some(Color::Rgb(17, 45, 87))),
+    ("teal", Some(Color::Rgb(17, 87, 69))),
+    ("forest", Some(Color::Rgb(25, 87, 17))),
+    ("olive", Some(Color::Rgb(85, 87, 17))),
+    ("rust", Some(Color::Rgb(87, 29, 17))),
+    ("wine", Some(Color::Rgb(87, 17, 65))),
+    ("plum", Some(Color::Rgb(49, 17, 87))),
+    ("slate", Some(Color::Rgb(62, 69, 87))),
 ];
 
 /// What a close-confirmation popup will close when accepted.
@@ -1089,6 +1124,9 @@ pub struct App {
     panes_pct: u16,
     /// Draggable borders for the current frame, rebuilt during rendering.
     dividers: Vec<Divider>,
+    /// `(tab, leaf, rect)` for each shell split pane on screen, so a click can
+    /// land on the pane under the pointer rather than whichever was active.
+    shell_leaves: Vec<(usize, usize, Rect)>,
     /// The border currently being dragged, if any.
     drag: Option<Divider>,
     /// Files awaiting a paste (see [`FileClipboard`]).
@@ -1119,7 +1157,7 @@ pub struct App {
     pending_auth: Option<PendingAuth>,
     /// Per-pane background overrides, indexed by [`Self::bg_slot`].
     /// Session-only: deliberately not persisted.
-    pane_bg: [Option<Color>; 3],
+    pane_bg: [Option<Color>; 2],
     last_search_query: Option<String>,
     pub shortcuts: ShortcutStore,
     pending_g: bool,
@@ -1169,6 +1207,7 @@ impl App {
             main_pct: 60,
             panes_pct: 50,
             dividers: Vec::new(),
+            shell_leaves: Vec::new(),
             drag: None,
             file_clip: None,
             flash: None,
@@ -1181,7 +1220,7 @@ impl App {
             zoom_return: None,
             pending_shell_input: None,
             pending_auth: None,
-            pane_bg: [None, None, None],
+            pane_bg: [None, None],
             last_search_query: None,
             shortcuts: ShortcutStore::load_or_default(),
             pending_g: false,
@@ -1996,8 +2035,12 @@ impl App {
                 if self.focused != t {
                     self.focus(t);
                 }
-                if t != FocusedPane::Shell {
-                    self.cursor_to_row(t, row);
+                match t {
+                    // Act on the split pane under the pointer, not whichever
+                    // happened to be active — otherwise a right-click on the
+                    // left half colours the right one.
+                    FocusedPane::Shell => self.select_shell_leaf_at(col, row),
+                    _ => self.cursor_to_row(t, row),
                 }
                 self.open_context_menu(col, row);
             }
@@ -2021,6 +2064,8 @@ impl App {
             self.focus(FocusedPane::Right);
         } else if in_rect(self.layout_rects.shell) {
             self.focus(FocusedPane::Shell);
+            // Clicking a split should focus that split, as in any multiplexer.
+            self.select_shell_leaf_at(col, row);
         }
     }
 
@@ -2181,7 +2226,27 @@ impl App {
         match pane {
             FocusedPane::Left => Some(0),
             FocusedPane::Right => Some(1),
-            FocusedPane::Shell => Some(2),
+            // The shell's background lives on the split pane itself.
+            FocusedPane::Shell => None,
+        }
+    }
+
+    /// Make the shell split pane under the pointer the active one.
+    ///
+    /// Without this, clicking a pane focuses the panel but leaves the previous
+    /// pane active, so anything acting on "the active pane" targets the wrong
+    /// half of a split.
+    fn select_shell_leaf_at(&mut self, col: u16, row: u16) {
+        let hit = self.shell_leaves.iter().copied().find(|(_, _, r)| {
+            r.width > 0 && r.height > 0
+                && col >= r.x && col < r.x + r.width
+                && row >= r.y && row < r.y + r.height
+        });
+        if let Some((tab, leaf, _)) = hit {
+            self.shell.active = tab;
+            if let Some(t) = self.shell.tabs.get_mut(tab) {
+                t.active = leaf;
+            }
         }
     }
 
@@ -2311,8 +2376,11 @@ impl App {
             MenuItem::Ssh => self.start_ssh(),
             MenuItem::Background => {
                 let pane = self.focused;
-                let cur = Self::bg_slot(pane)
-                    .and_then(|s| self.pane_bg[s])
+                let current = match pane {
+                    FocusedPane::Shell => self.shell.active_pane_bg(),
+                    _ => Self::bg_slot(pane).and_then(|s| self.pane_bg[s]),
+                };
+                let cur = current
                     .and_then(|c| PANE_BG_PRESETS.iter().position(|(_, p)| *p == Some(c)))
                     .unwrap_or(0);
                 self.popup = Popup::ColorPicker { pane, cursor: cur };
@@ -2512,8 +2580,15 @@ impl App {
                 KeyCode::Char('k') | KeyCode::Up => *cursor = (*cursor + n - 1) % n,
                 KeyCode::Enter => {
                     let (pane, idx) = (*pane, *cursor);
-                    if let Some(slot) = Self::bg_slot(pane) {
-                        self.pane_bg[slot] = PANE_BG_PRESETS[idx].1;
+                    let color = PANE_BG_PRESETS[idx].1;
+                    match pane {
+                        // Only the split pane that was clicked, not the panel.
+                        FocusedPane::Shell => self.shell.set_active_pane_bg(color),
+                        _ => {
+                            if let Some(slot) = Self::bg_slot(pane) {
+                                self.pane_bg[slot] = color;
+                            }
+                        }
                     }
                     self.popup = Popup::None;
                 }
@@ -3324,7 +3399,7 @@ fn manual_sections() -> Vec<(&'static str, Vec<ManualEntry>)> {
             vec![
                 entry("Shift+H/J/K/L", None, "move focus between panes"),
                 entry("drag a border", None, "resize any split (mouse)"),
-                entry("right-click", None, "context menu (copy/cut/paste, colour)"),
+                entry("right-click", None, "context menu (copy/cut/paste, color)"),
                 entry("Ctrl+H/J/K/L", None, "same (needs kitty keyboard support)"),
                 entry("t", None, "new tab"),
                 entry("w", None, "close tab"),
@@ -3440,6 +3515,35 @@ pub fn usage_text() -> String {
     .join("\n")
 }
 
+/// Note when the host terminal will not do cian justice.
+///
+/// cian cannot restyle the console it was launched into — the font and colors
+/// belong to the host. Running `cian.exe` straight from Explorer or cmd lands
+/// in the legacy console, where Nerd Font icons become boxes. Saying so once
+/// at startup beats leaving it looking broken.
+fn terminal_advice() -> Vec<String> {
+    if !cfg!(windows) {
+        return Vec::new();
+    }
+    // Windows Terminal and WezTerm both advertise themselves; the legacy
+    // conhost advertises nothing.
+    let modern = std::env::var_os("WT_SESSION").is_some()
+        || std::env::var_os("WEZTERM_PANE").is_some()
+        || std::env::var_os("TERM_PROGRAM").is_some();
+    if modern {
+        return Vec::new();
+    }
+    vec![
+        "This looks like the legacy Windows console.".to_string(),
+        "cian works, but file-type icons need a Nerd Font, which that console".to_string(),
+        "cannot use. For the intended look, start it from Windows Terminal:".to_string(),
+        String::new(),
+        "    wt cian".to_string(),
+        String::new(),
+        "or from WezTerm. (This notice only appears in the legacy console.)".to_string(),
+    ]
+}
+
 /// Restore the terminal before a panic unwinds out of the TUI.
 ///
 /// Without this, a panic leaves the terminal in raw mode inside the alternate
@@ -3463,7 +3567,7 @@ pub fn run(left: PathBuf, right: PathBuf) -> Result<()> {
     // Load user config (never fails; problems are reported below).
     let config = cian_lua::load();
 
-    // Resolve and install the colour theme before any drawing happens.
+    // Resolve and install the color theme before any drawing happens.
     let (resolved, theme_errors) = resolve_theme(&config.theme);
     let _ = THEME.set(resolved);
 
@@ -3475,6 +3579,8 @@ pub fn run(left: PathBuf, right: PathBuf) -> Result<()> {
             startup_errors.push(format!("keymap: unknown action {:?} (key '{}')", name, c));
         }
     }
+
+    startup_errors.extend(terminal_advice());
 
     let mut app = App::new(left, right, config)?;
     if !startup_errors.is_empty() {
@@ -3489,6 +3595,10 @@ pub fn run(left: PathBuf, right: PathBuf) -> Result<()> {
 
     install_panic_hook();
     cian_core::log::log("cian starting");
+
+    // Name the window. Costs nothing and stops a bare `cian.exe` from sitting
+    // in a console still labelled with whatever launched it.
+    let _ = execute!(io::stdout(), SetTitle("cian"));
 
     let mut stdout = io::stdout();
     enable_raw_mode()?;
@@ -3633,6 +3743,7 @@ fn draw_split(f: &mut Frame, main_area: Rect, app: &mut App, ov: AnimOverride) {
         shell: shell_area,
     };
 
+    let mut leaves = Vec::new();
     let mut dividers = vec![
         Divider {
             zone: seam_zone(Direction::Vertical, panes_area, shell_area),
@@ -3656,8 +3767,9 @@ fn draw_split(f: &mut Frame, main_area: Rect, app: &mut App, ov: AnimOverride) {
     draw_file_pane(f, panes_split[0], &app.left, app.focused == FocusedPane::Left, visual_for_left, app.mode, bg_l, fl_l);
     draw_file_pane(f, panes_split[1], &app.right, app.focused == FocusedPane::Right, visual_for_right, app.mode, bg_r, fl_r);
     // draw_shell sizes each pane's PTY to its computed sub-rect.
-    draw_shell(f, shell_area, &mut app.shell, app.focused == FocusedPane::Shell, &mut dividers, ov, app.pane_bg[2]);
+    draw_shell(f, shell_area, &mut app.shell, app.focused == FocusedPane::Shell, &mut dividers, &mut leaves, ov);
     app.dividers = dividers;
+    app.shell_leaves = leaves;
 }
 
 /// The focused surface drawn at an arbitrary rect, used as the floating layer
@@ -3678,7 +3790,7 @@ fn draw_zoom_overlay(f: &mut Frame, rect: Rect, app: &mut App, ov: AnimOverride)
             draw_file_pane(f, rect, &app.right, true, va, app.mode, bg, fl);
         }
         FocusedPane::Shell => {
-            draw_shell(f, rect, &mut app.shell, true, &mut sink, ov, app.pane_bg[2]);
+            draw_shell(f, rect, &mut app.shell, true, &mut sink, &mut Vec::new(), ov);
         }
     }
 }
@@ -3689,6 +3801,7 @@ fn draw_zoomed(f: &mut Frame, area: Rect, app: &mut App, ov: AnimOverride) {
     // Only the shell's internal splits are draggable while zoomed; the
     // main/panes borders are not on screen.
     let mut dividers = Vec::new();
+    let mut leaves = Vec::new();
     match app.focused {
         FocusedPane::Left => {
             rects.left = area;
@@ -3707,10 +3820,11 @@ fn draw_zoomed(f: &mut Frame, area: Rect, app: &mut App, ov: AnimOverride) {
         FocusedPane::Shell => {
             rects.shell = area;
             app.layout_rects = rects;
-            draw_shell(f, area, &mut app.shell, true, &mut dividers, ov, app.pane_bg[2]);
+            draw_shell(f, area, &mut app.shell, true, &mut dividers, &mut leaves, ov);
         }
     }
     app.dividers = dividers;
+    app.shell_leaves = leaves;
 }
 
 fn draw(f: &mut Frame, app: &mut App) {
@@ -3952,11 +4066,11 @@ fn icon_for(entry: &cian_core::Entry) -> &'static str {
     }
 }
 
-/// Broad kinds of file, used to colour the listing.
+/// Broad kinds of file, used to color the listing.
 ///
 /// Deliberately coarse: the point is that a glance separates "code" from
 /// "archive" from "image", not that every extension gets its own hue. Too many
-/// colours read as noise rather than structure.
+/// colors read as noise rather than structure.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum FileKind {
     Directory,
@@ -3995,8 +4109,8 @@ impl FileKind {
     }
 }
 
-/// Classify an entry for colouring. Mirrors the categories [`icon_for`] draws
-/// from, so a file's icon and its colour always agree.
+/// Classify an entry for coloring. Mirrors the categories [`icon_for`] draws
+/// from, so a file's icon and its color always agree.
 fn kind_for(entry: &cian_core::Entry) -> FileKind {
     if entry.is_dir {
         return FileKind::Directory;
@@ -4110,7 +4224,7 @@ fn draw_file_pane(
         if kind.bold() {
             name_style = name_style.add_modifier(Modifier::BOLD);
         }
-        // The icon carries the same colour so the row reads as one unit.
+        // The icon carries the same color so the row reads as one unit.
         let icon_style = Style::default().fg(kind.color());
 
         let name = truncate(&e.name, name_w);
@@ -4197,10 +4311,10 @@ fn draw_list_scrollbar(f: &mut Frame, area: Rect, total: usize, cursor: usize, f
 /// Draw the shell panel, then apply its background tint.
 ///
 /// The tint has to be a post-pass. The PTY widget writes an explicit `Reset`
-/// background into every cell the shell left uncoloured, which would clobber
-/// any background set on the block underneath. Recolouring only the cells
-/// that are still `Reset` tints the panel while leaving alone every colour
-/// the shell chose for itself (ls colours, a vim theme, and so on).
+/// background into every cell the shell left uncolored, which would clobber
+/// any background set on the block underneath. Recoloring only the cells
+/// that are still `Reset` tints the panel while leaving alone every color
+/// the shell chose for itself (ls colors, a vim theme, and so on).
 #[allow(clippy::too_many_arguments)]
 fn draw_shell(
     f: &mut Frame,
@@ -4208,16 +4322,13 @@ fn draw_shell(
     shell: &mut ShellPane,
     focused: bool,
     dividers: &mut Vec<Divider>,
+    leaves: &mut Vec<(usize, usize, Rect)>,
     ov: AnimOverride,
-    bg: Option<Color>,
 ) {
-    draw_shell_inner(f, area, shell, focused, dividers, ov);
-    if let Some(c) = bg {
-        tint_default_cells(f, area, c);
-    }
+    draw_shell_inner(f, area, shell, focused, dividers, leaves, ov);
 }
 
-/// Repaint every still-uncoloured cell in `area` with `bg`.
+/// Repaint every still-uncolored cell in `area` with `bg`.
 fn tint_default_cells(f: &mut Frame, area: Rect, bg: Color) {
     let buf = f.buffer_mut();
     for y in area.y..area.y.saturating_add(area.height) {
@@ -4237,6 +4348,7 @@ fn draw_shell_inner(
     shell: &mut ShellPane,
     focused: bool,
     dividers: &mut Vec<Divider>,
+    leaves: &mut Vec<(usize, usize, Rect)>,
     ov: AnimOverride,
 ) {
     let border_style = if focused {
@@ -4275,13 +4387,16 @@ fn draw_shell_inner(
     if shell.zoom_pane {
         let leaf = shell.tabs[active].active;
         if let Some(tab) = shell.tabs.get_mut(active) {
-            if let Some(Node::Leaf(s)) = tab.nodes.get_mut(leaf).and_then(|n| n.as_mut()) {
+            if let Some(Node::Leaf { session: s, .. }) = tab.nodes.get_mut(leaf).and_then(|n| n.as_mut()) {
                 s.resize(inner.height.max(1), inner.width.max(1));
             }
         }
-        if let Some(Node::Leaf(s)) = shell.tabs[active].nodes.get(leaf).and_then(|n| n.as_ref()) {
+        if let Some(Node::Leaf { session: s, bg }) = shell.tabs[active].nodes.get(leaf).and_then(|n| n.as_ref()) {
             if let Ok(parser) = s.parser().lock() {
                 f.render_widget(PseudoTerminal::new(parser.screen()), inner);
+            }
+            if let Some(c) = bg {
+                tint_default_cells(f, inner, *c);
             }
         }
         return;
@@ -4296,7 +4411,7 @@ fn draw_shell_inner(
         }
     }
     let tab = &shell.tabs[active];
-    render_node(f, tab, active, root, inner, tab.active, focused, false, dividers, ov);
+    render_node(f, tab, active, root, inner, tab.active, focused, false, dividers, leaves, ov);
 }
 
 /// Recursively size each leaf's PTY to its rect. `bordered` is true for leaves
@@ -4304,7 +4419,7 @@ fn draw_shell_inner(
 fn resize_node(tab: &mut ShellTab, tab_idx: usize, i: usize, area: Rect, bordered: bool, ov: AnimOverride) {
     let split = match tab.nodes.get(i).and_then(|n| n.as_ref()) {
         Some(Node::Split { dir, first, second, ratio }) => Some((*dir, *first, *second, *ratio)),
-        Some(Node::Leaf(_)) => None,
+        Some(Node::Leaf { .. }) => None,
         None => return,
     };
     match split {
@@ -4314,7 +4429,7 @@ fn resize_node(tab: &mut ShellTab, tab_idx: usize, i: usize, area: Rect, bordere
             } else {
                 (area.height.max(1), area.width.max(1))
             };
-            if let Some(Node::Leaf(s)) = tab.nodes[i].as_mut() {
+            if let Some(Node::Leaf { session: s, .. }) = tab.nodes[i].as_mut() {
                 s.resize(h, w);
             }
         }
@@ -4340,10 +4455,12 @@ fn render_node(
     focused: bool,
     bordered: bool,
     dividers: &mut Vec<Divider>,
+    leaves: &mut Vec<(usize, usize, Rect)>,
     ov: AnimOverride,
 ) {
     match tab.nodes.get(i).and_then(|n| n.as_ref()) {
-        Some(Node::Leaf(session)) => {
+        Some(Node::Leaf { session, bg }) => {
+            leaves.push((tab_idx, i, area));
             let target = if bordered {
                 let is_active = focused && i == active_leaf;
                 let bs = if is_active {
@@ -4362,6 +4479,12 @@ fn render_node(
             if let Ok(parser) = session.parser().lock() {
                 f.render_widget(PseudoTerminal::new(parser.screen()), target);
             }
+            // Tint after the PTY has drawn: it writes an explicit Reset
+            // background into every cell the shell left uncolored, which would
+            // otherwise clobber anything set underneath.
+            if let Some(c) = bg {
+                tint_default_cells(f, area, *c);
+            }
         }
         Some(Node::Split { dir, first, second, ratio }) => {
             let target = DividerTarget::ShellSplit { tab: tab_idx, node: i };
@@ -4376,8 +4499,8 @@ fn render_node(
                 dir: d,
                 target,
             });
-            render_node(f, tab, tab_idx, *first, rects.0, active_leaf, focused, true, dividers, ov);
-            render_node(f, tab, tab_idx, *second, rects.1, active_leaf, focused, true, dividers, ov);
+            render_node(f, tab, tab_idx, *first, rects.0, active_leaf, focused, true, dividers, leaves, ov);
+            render_node(f, tab, tab_idx, *second, rects.1, active_leaf, focused, true, dividers, leaves, ov);
         }
         None => {}
     }
@@ -4443,12 +4566,12 @@ fn draw_command_line(f: &mut Frame, area: Rect, buf: &str) {
 }
 
 /// Blend `c` toward white by `t` (0 = unchanged, 1 = fully lit). Used for the
-/// operation flash, which fades a border back to its resting colour.
+/// operation flash, which fades a border back to its resting color.
 fn fade(c: Color, t: f32) -> Color {
     let t = t.clamp(0.0, 1.0);
     let (r, g, b) = match c {
         Color::Rgb(r, g, b) => (r, g, b),
-        // Named colours have no components to blend; approximate with a light
+        // Named colors have no components to blend; approximate with a light
         // neutral so the flash still reads.
         _ => (200, 220, 255),
     };
@@ -4474,14 +4597,21 @@ fn focus_badge_color(mode: Mode) -> Color {
 /// from whatever state the user is stuck in.
 fn key_hints(app: &App) -> Vec<(&'static str, &'static str)> {
     if app.focused == FocusedPane::Shell {
-        return vec![
-            ("Esc", "files"),
+        let mut v = vec![("Esc", "files")];
+        // Moving between split panes only exists once there is a split, and it
+        // is the hint most worth showing then — the key is easy to forget and
+        // there is nothing on screen otherwise to suggest it.
+        if app.shell.active_pane_count() > 1 {
+            v.push(("S-F1/F2", "prev/next pane"));
+        }
+        v.extend([
             ("F9", "new tab"),
             ("S-F8/F9", "split"),
             ("S-F10", "close"),
             ("F12", "zoom"),
             ("?", "help"),
-        ];
+        ]);
+        return v;
     }
     match app.mode {
         Mode::Visual => vec![
@@ -4896,7 +5026,7 @@ fn draw_popup(f: &mut Frame, area: Rect, popup: &mut Popup, hosts: &[cian_lua::S
             .enumerate()
             .map(|(i, (name, color))| {
                 let sel = i == *cursor;
-                // A swatch of the actual colour, so the name is not the only cue.
+                // A swatch of the actual color, so the name is not the only cue.
                 let swatch = Span::styled(
                     "  ",
                     Style::default().bg(color.unwrap_or(Color::Rgb(16, 16, 20))),
@@ -5078,7 +5208,7 @@ mod tests {
         (dir, app)
     }
 
-    /// Render and hand back the raw buffer, for checking colours.
+    /// Render and hand back the raw buffer, for checking colors.
     fn render_buf(app: &mut App, w: u16, h: u16) -> ratatui::buffer::Buffer {
         let mut terminal = Terminal::new(TestBackend::new(w, h)).unwrap();
         terminal.draw(|f| draw(f, app)).unwrap();
@@ -5497,7 +5627,7 @@ mod tests {
     }
 
     #[test]
-    fn the_colour_picker_sets_only_the_chosen_pane() {
+    fn the_color_picker_sets_only_the_chosen_pane() {
         let (_d, mut app) = app_with(&["a.txt"]);
         app.focus(FocusedPane::Right);
         app.run_menu_item(MenuItem::Background).unwrap();
@@ -5774,7 +5904,7 @@ mod tests {
     }
 
     #[test]
-    fn the_shell_menu_offers_a_background_colour() {
+    fn the_shell_menu_offers_a_background_color() {
         let (_d, mut app) = app_with(&["a.txt"]);
         app.focus(FocusedPane::Shell);
         app.open_context_menu(5, 5);
@@ -5787,41 +5917,143 @@ mod tests {
     }
 
     #[test]
-    fn the_colour_picker_tints_the_shell_slot() {
+    fn the_color_picker_tints_only_the_active_split_pane() {
         let (_d, mut app) = app_with(&["a.txt"]);
         app.focus(FocusedPane::Shell);
         app.run_menu_item(MenuItem::Background).unwrap();
         app.handle_key(key('j')).unwrap();
         app.handle_key(code(KeyCode::Enter)).unwrap();
 
-        assert!(app.pane_bg[2].is_some(), "shell slot should be set");
-        assert!(app.pane_bg[0].is_none() && app.pane_bg[1].is_none(), "file panes untouched");
+        // The file panes keep their own (unset) backgrounds.
+        assert!(app.pane_bg[0].is_none() && app.pane_bg[1].is_none());
+        // With no shell running there is no pane to color, and nothing panics.
+        assert!(app.shell.active_pane_bg().is_none());
     }
 
-    /// The tint is a post-pass over the rendered cells, so prove it actually
-    /// reaches the shell panel and stops at its edge.
+    /// A pane's color must stop at that pane. This used to be stored per
+    /// panel, so coloring one split painted every split and every tab —
+    /// including ones meant to keep the terminal's own background.
     #[test]
-    fn the_shell_tint_covers_the_panel_and_nothing_else() {
+    fn a_pane_tint_stops_at_that_pane() {
         let (_d, mut app) = app_with(&["a.txt"]);
-        let tint = Color::Rgb(24, 38, 30);
-        app.pane_bg[2] = Some(tint);
+        let tint = Color::Rgb(17, 45, 87);
+        app.pane_bg[0] = Some(tint);
 
         let buf = render_buf(&mut app, 100, 40);
-        let shell = app.layout_rects.shell;
         let left = app.layout_rects.left;
-        assert!(shell.height > 2 && left.height > 2, "need a real layout");
+        let right = app.layout_rects.right;
+        assert!(left.height > 2 && right.height > 2, "need a real layout");
 
-        let mid = buf[(shell.x + 5, shell.y + shell.height / 2)].bg;
-        assert_eq!(mid, tint, "shell interior should be tinted");
-
-        let in_files = buf[(left.x + 5, left.y + left.height / 2)].bg;
-        assert_ne!(in_files, tint, "the tint must not leak into the file panes");
+        assert_eq!(
+            buf[(left.x + 5, left.y + left.height / 2)].bg,
+            tint,
+            "the colored pane should be tinted"
+        );
+        assert_ne!(
+            buf[(right.x + 5, right.y + right.height / 2)].bg,
+            tint,
+            "the tint must not reach the other pane"
+        );
     }
 
-    /// Cells the shell coloured for itself must survive the tint, or ls
-    /// colours and vim themes would be flattened.
+    /// Two split panes, each with its own background — the case that was
+    /// impossible when the color lived on the panel.
     #[test]
-    fn the_tint_leaves_explicitly_coloured_cells_alone() {
+    fn split_panes_hold_separate_backgrounds() {
+        let dir = tempfile::tempdir().unwrap();
+        let sh = cian_pty::default_shell();
+        let mk = || cian_pty::PtySession::new(dir.path(), &sh, 24, 80).unwrap();
+
+        let mut tab = ShellTab::new(mk());
+        let first = tab.active;
+        tab.split(SplitDir::LeftRight, mk());
+        let second = tab.active;
+        assert_ne!(first, second, "split should make a second leaf");
+
+        let set = |t: &mut ShellTab, leaf: usize, c: Color| {
+            if let Some(Node::Leaf { bg, .. }) = t.nodes.get_mut(leaf).and_then(|n| n.as_mut()) {
+                *bg = Some(c);
+            }
+        };
+        let get = |t: &ShellTab, leaf: usize| match t.nodes.get(leaf).and_then(|n| n.as_ref()) {
+            Some(Node::Leaf { bg, .. }) => *bg,
+            _ => None,
+        };
+
+        set(&mut tab, first, Color::Rgb(17, 45, 87));
+        assert_eq!(get(&tab, first), Some(Color::Rgb(17, 45, 87)));
+        assert_eq!(get(&tab, second), None, "the sibling must stay on the default");
+
+        set(&mut tab, second, Color::Rgb(87, 29, 17));
+        assert_eq!(get(&tab, first), Some(Color::Rgb(17, 45, 87)), "unchanged by its sibling");
+        assert_eq!(get(&tab, second), Some(Color::Rgb(87, 29, 17)));
+    }
+
+    /// Clicking a split must act on the pane under the pointer. Without this,
+    /// right-clicking the left half of a split colored the right half —
+    /// whichever happened to be active.
+    #[test]
+    fn clicking_a_split_selects_the_pane_under_the_pointer() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        let _ = render(&mut app, 100, 40);
+
+        // Two leaves side by side, standing in for a real split.
+        let shell = app.layout_rects.shell;
+        let half = shell.width / 2;
+        app.shell_leaves = vec![
+            (0, 7, Rect::new(shell.x, shell.y, half, shell.height)),
+            (0, 9, Rect::new(shell.x + half, shell.y, half, shell.height)),
+        ];
+        app.shell.tabs.push(ShellTab { nodes: Vec::new(), root: 0, active: 9 });
+
+        app.select_shell_leaf_at(shell.x + 2, shell.y + 2);
+        assert_eq!(app.shell.tabs[0].active, 7, "should pick the left pane");
+
+        app.select_shell_leaf_at(shell.x + half + 2, shell.y + 2);
+        assert_eq!(app.shell.tabs[0].active, 9, "should pick the right pane");
+
+        // A point outside every pane leaves the selection alone.
+        app.select_shell_leaf_at(0, 0);
+        assert_eq!(app.shell.tabs[0].active, 9);
+    }
+
+    #[test]
+    fn the_shell_hints_mention_pane_switching_only_when_split() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        app.focus(FocusedPane::Shell);
+        // No panes yet: the key would do nothing, so it is not advertised.
+        assert!(!key_hints(&app).iter().any(|(k, _)| *k == "S-F1/F2"));
+    }
+
+    #[test]
+    fn the_palette_is_distinct_enough_to_tell_panes_apart() {
+        // The first entry is "no color"; the rest must be visibly different
+        // from one another, which an earlier too-subtle set was not.
+        let colors: Vec<(u8, u8, u8)> = PANE_BG_PRESETS
+            .iter()
+            .filter_map(|(_, c)| match c {
+                Some(Color::Rgb(r, g, b)) => Some((*r, *g, *b)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(colors.len(), PANE_BG_PRESETS.len() - 1);
+        for (i, a) in colors.iter().enumerate() {
+            for b in colors.iter().skip(i + 1) {
+                let d = (a.0 as i32 - b.0 as i32).abs()
+                    + (a.1 as i32 - b.1 as i32).abs()
+                    + (a.2 as i32 - b.2 as i32).abs();
+                assert!(d >= 60, "{:?} and {:?} are too close to tell apart", a, b);
+            }
+            // Dark enough that normal foreground text stays readable.
+            let lum = 0.299 * a.0 as f32 + 0.587 * a.1 as f32 + 0.114 * a.2 as f32;
+            assert!(lum < 90.0, "{:?} is too light for text on top (lum {})", a, lum);
+        }
+    }
+
+    /// Cells the shell colored for itself must survive the tint, or ls
+    /// colors and vim themes would be flattened.
+    #[test]
+    fn the_tint_leaves_explicitly_colored_cells_alone() {
         let (_d, mut app) = app_with(&["a.txt"]);
         // Give a file pane a background so there are non-Reset cells to guard,
         // then tint the whole screen area and check they are preserved.
@@ -5840,7 +6072,7 @@ mod tests {
 
         let left = app.layout_rects.left;
         let cell = buf[(left.x + 5, left.y + left.height / 2)].bg;
-        assert_eq!(cell, painted, "an already-coloured cell must not be repainted");
+        assert_eq!(cell, painted, "an already-colored cell must not be repainted");
 
         // And a cell that was Reset did get the tint.
         let right = app.layout_rects.right;

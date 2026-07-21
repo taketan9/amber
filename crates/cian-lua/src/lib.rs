@@ -14,7 +14,7 @@
 //!
 //! Loading never fails the program: any syntax/runtime error is captured in
 //! [`Config::errors`] and the UI falls back to defaults for whatever could not
-//! be applied. This crate stays UI-agnostic — colours are passed through as raw
+//! be applied. This crate stays UI-agnostic — colors are passed through as raw
 //! strings and parsed by the UI layer.
 
 use std::cell::RefCell;
@@ -25,11 +25,11 @@ use std::rc::Rc;
 
 use mlua::{Function, FromLua, Lua, Table, Value};
 
-/// A colour spec exactly as the user wrote it: `"#rrggbb"`, a named colour
+/// A color spec exactly as the user wrote it: `"#rrggbb"`, a named color
 /// (`"cyan"`, `"yellow"`), or `"r,g,b"`. Parsed by the UI layer.
 pub type ColorSpec = String;
 
-/// User-supplied colour overrides. `None` means "keep the built-in default".
+/// User-supplied color overrides. `None` means "keep the built-in default".
 #[derive(Debug, Clone, Default)]
 pub struct Theme {
     pub accent: Option<ColorSpec>,

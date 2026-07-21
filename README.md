@@ -28,15 +28,15 @@ file/shell divider, and every split inside the shell panel. Neither side can be
 dragged below 15% of its parent.
 
 Right-click a pane for a context menu: copy, cut, paste, copy/move to the other
-pane, rename, delete, a per-pane background colour, and the key manual (the
+pane, rename, delete, a per-pane background color, and the key manual (the
 last two are offered in the shell's menu too).
 
-Background colours apply to whichever pane you right-clicked, the shell panel
-included. In the shell the tint only fills cells the shell left uncoloured, so
-`ls` colours and editor themes come through untouched. Copy and cut fill a file
+Background colors apply to whichever pane you right-clicked — including a
+single split inside the shell, not the whole panel. In the shell the tint only fills cells the shell left uncolored, so
+`ls` colors and editor themes come through untouched. Copy and cut fill a file
 clipboard that persists while you navigate, so you can copy here, move
 somewhere else, and paste there — the system clipboard is separate and is still
-driven by `p` / `Shift+P`. Background colours are session-only.
+driven by `p` / `Shift+P`. Background colors are session-only.
 
 ## Animation
 
@@ -233,6 +233,19 @@ cian --version     # cian 0.1.0 (7f92bae)
 
 The commit is baked in at build time. Worth checking first when a feature
 seems missing: an older `cian.exe` left on PATH looks exactly like a bug.
+
+## Running it standalone
+
+cian cannot restyle the console it is launched into; the font and colors belong
+to the host terminal. Double-clicking `cian.exe`, or running it from `cmd`,
+lands in the legacy Windows console, where the Nerd Font icons come out as
+boxes. It says so once at startup when it detects that.
+
+For the intended look, launch it from Windows Terminal or WezTerm:
+
+```powershell
+wt cian
+```
 
 ## Troubleshooting
 

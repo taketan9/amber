@@ -60,7 +60,7 @@ impl PtySession {
 
         let mut cmd = CommandBuilder::new(shell);
         cmd.cwd(cwd);
-        // Advertise a capable terminal so programs emit colour/cursor sequences
+        // Advertise a capable terminal so programs emit color/cursor sequences
         // that vt100 understands.
         cmd.env("TERM", "xterm-256color");
 
