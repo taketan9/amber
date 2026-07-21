@@ -144,7 +144,7 @@ pub fn set_mode(path: &Path, spec: &str) -> Result<()> {
     {
         // Windows has no mode bits; the closest thing is the read-only flag,
         // and silently reinterpreting 644 as "read-only" would be a lie.
-        let _ = mode;
+        let _ = (mode, path);
         anyhow::bail!("Windows has no mode bits — use `:readonly on|off` instead")
     }
 }
