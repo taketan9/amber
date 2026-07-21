@@ -3416,8 +3416,8 @@ fn manual_sections() -> Vec<(&'static str, Vec<ManualEntry>)> {
                 entry("F9", None, "new shell tab"),
                 entry("F10", None, "close shell tab"),
                 entry("Shift+F1/F2", None, "focus next / previous split pane"),
-                entry("Shift+F8", None, "split pane left/right"),
-                entry("Shift+F9", None, "split pane top/bottom"),
+                entry("Shift+F8", None, "v-split (panes side by side)"),
+                entry("Shift+F9", None, "h-split (panes stacked)"),
                 entry("Shift+F10", None, "close split pane (confirms)"),
                 entry("F12", None, "zoom focused surface (toggle)"),
                 entry("Shift+F12", None, "zoom active split pane (toggle)"),
@@ -4272,7 +4272,7 @@ fn draw_file_pane(
     if !pane.entries.is_empty() { state.select(Some(pane.cursor)); }
     f.render_stateful_widget(list, area, &mut state);
 
-    draw_list_scrollbar(f, area, pane.entries.len(), pane.cursor, focused);
+    draw_list_scrollbar(f, area, pane.entries.len(), pane.cursor, focused, border_style);
 }
 
 /// Fixed widths so the columns line up between the two panes.
@@ -4280,27 +4280,35 @@ const SIZE_COL_W: u16 = 5;
 const TIME_COL_W: u16 = 16;
 
 /// Draw a scrollbar on a pane's right border when the listing overflows.
-fn draw_list_scrollbar(f: &mut Frame, area: Rect, total: usize, cursor: usize, focused: bool) {
+fn draw_list_scrollbar(
+    f: &mut Frame,
+    area: Rect,
+    total: usize,
+    cursor: usize,
+    focused: bool,
+    border: Style,
+) {
     let view_h = area.height.saturating_sub(2);
     if view_h == 0 || total <= view_h as usize {
         return;
     }
     let track = Rect::new(area.x + area.width.saturating_sub(1), area.y + 1, 1, view_h);
     let mut state = ScrollbarState::new(total).position(cursor);
-    let style = if focused {
-        Style::default().fg(theme().accent)
+    // The bar sits *on* the pane's right border, so the track has to be the
+    // border: same glyph, same style. Drawing it in its own dimmer color made
+    // the right edge look broken — bright where the thumb was, faded
+    // elsewhere, while the other three sides stayed the border color.
+    let thumb = if focused {
+        border.add_modifier(Modifier::REVERSED)
     } else {
-        Style::default().fg(Color::Rgb(90, 90, 110))
+        Style::default().fg(Color::Rgb(120, 120, 145))
     };
-    // The bar sits on the pane's right border, so the track keeps drawing the
-    // border line and only the thumb thickens. Without this the border looks
-    // broken wherever the thumb happens to be.
     f.render_stateful_widget(
         Scrollbar::new(ScrollbarOrientation::VerticalRight)
-            .thumb_symbol("┃")
-            .thumb_style(style)
+            .thumb_symbol("│")
+            .thumb_style(thumb)
             .track_symbol(Some("│"))
-            .track_style(Style::default().fg(Color::DarkGray))
+            .track_style(border)
             .begin_symbol(None)
             .end_symbol(None),
         track,
@@ -4606,10 +4614,11 @@ fn key_hints(app: &App) -> Vec<(&'static str, &'static str)> {
         }
         v.extend([
             ("F9", "new tab"),
-            // Spelled out on both keys: "S-F8/F9" reads as "Shift+F8 or F9",
-            // and plain F9 is new-tab, sitting right next to it. That
-            // ambiguity sent someone splitting with the wrong key.
-            ("S-F8/S-F9", "split"),
+            // Named per key rather than as a pair. "S-F8/F9" read as
+            // "Shift+F8 or F9" — with plain F9 (new tab) sitting right beside
+            // it — and gave no clue which key gave which orientation.
+            ("S-F8", "v-split"),
+            ("S-F9", "h-split"),
             ("S-F10", "close"),
             ("F12", "zoom"),
             ("?", "help"),

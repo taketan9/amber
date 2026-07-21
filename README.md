@@ -204,8 +204,8 @@ because some setups swallow the Ctrl modifier before it reaches the app):
 | `F9` | new shell tab |
 | `F10` | close shell tab |
 | `Shift+F1` / `Shift+F2` | focus next / previous split pane |
-| `Shift+F8` | split the active pane left/right |
-| `Shift+F9` | split the active pane top/bottom |
+| `Shift+F8` | **v-split** — divide the active pane into two side by side |
+| `Shift+F9` | **h-split** — divide the active pane into two stacked |
 | `Shift+F10` | close the active split pane (asks first) |
 | `F12` | zoom the focused surface to fill the window (toggle) |
 | `Shift+F12` | zoom just the active split pane (toggle) |
