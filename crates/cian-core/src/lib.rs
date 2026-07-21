@@ -8,6 +8,7 @@ use anyhow::{Context, Result};
 pub mod log;
 pub mod ops;
 pub mod progress;
+pub mod search;
 
 #[derive(Debug, Clone)]
 pub struct Entry {

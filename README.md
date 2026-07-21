@@ -150,6 +150,18 @@ anyone else. `password_cmd` avoids storing anything by taking the value from a
 credential manager. Key authentication avoids the question entirely and is
 usually less work to set up than a credential list is to maintain.
 
+## Searching
+
+`f` jumps between matches in the current listing. **`Shift+F`** searches the
+whole tree below the pane's directory, on a worker thread — results appear as
+they are found rather than after the walk finishes, `Esc` stops it, and Enter
+on a result moves the pane into that directory with the cursor on the entry.
+
+The walk is breadth-first, so shallow matches — usually the wanted ones —
+arrive first and a search abandoned early has still produced something useful.
+Hidden directories are skipped, symlinked directories are not followed (a link
+back up the tree would loop), and the search stops at 5000 hits.
+
 ## Going to a path
 
 `z` (or `:cd`) prompts for a path, seeded with the current directory. A

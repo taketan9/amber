@@ -798,6 +798,8 @@ enum Popup {
     ColorPicker { pane: FocusedPane, cursor: usize },
     /// Sort-order picker for the focused pane.
     SortPicker { cursor: usize },
+    /// Results of a recursive search, filling in as they are found.
+    FindResults { hits: Vec<cian_core::search::Hit>, cursor: usize, scroll: usize },
     /// SSH: pick a host, then a user on it.
     SshHosts { cursor: usize, filter: String },
     SshUsers { host: usize, cursor: usize },
@@ -905,6 +907,26 @@ enum OpMsg {
     Done(OpReport),
 }
 
+/// A recursive search running on a worker thread.
+///
+/// Kept separate from [`OpJob`] because results stream in rather than a single
+/// report arriving at the end: a search over a big tree should be usable while
+/// it is still going.
+struct FindJob {
+    rx: std::sync::mpsc::Receiver<FindMsg>,
+    cancel: Arc<AtomicBool>,
+    /// Pre-rendered for the popup title; the borrow checker objects to
+    /// formatting it while `popup` is mutably borrowed for drawing.
+    root_label: String,
+    query: String,
+    done: Option<cian_core::search::Outcome>,
+}
+
+enum FindMsg {
+    Hit(cian_core::search::Hit),
+    Done(cian_core::search::Outcome),
+}
+
 /// Work deferred until a shrink transition finishes.
 #[derive(Debug, Clone, Copy)]
 enum PendingClose {
@@ -967,6 +989,8 @@ enum InputKind {
     ShortcutTarget { editing_index: Option<usize>, name: String },
     /// A path typed to jump to (or a file to open).
     JumpPath,
+    /// A name to search for, recursively from the current directory.
+    FindRecursive,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1224,6 +1248,8 @@ pub struct App {
     pending_auth: Option<PendingAuth>,
     /// A copy/move/delete running on a worker thread.
     op_job: Option<OpJob>,
+    /// A recursive search running on a worker thread.
+    find_job: Option<FindJob>,
     /// When the panes were last checked against the filesystem.
     last_watch: Instant,
     /// Per-pane background overrides, indexed by [`Self::bg_slot`].
@@ -1292,6 +1318,7 @@ impl App {
             pending_shell_input: None,
             pending_auth: None,
             op_job: None,
+            find_job: None,
             last_watch: Instant::now(),
             pane_bg: [None, None],
             last_search_query: None,
@@ -1899,6 +1926,110 @@ impl App {
         self.message = Some(format!("sorted by {} ({})", key.label(), arrow));
     }
 
+    // ------- Recursive search -------
+    fn start_find_prompt(&mut self) {
+        self.popup = Popup::TextInput {
+            title: "find (recursive)".into(),
+            prompt: "name contains   (Ctrl+V paste, Ctrl+U clear):".into(),
+            buffer: String::new(),
+            kind: InputKind::FindRecursive,
+        };
+    }
+
+    /// Walk the tree below the focused pane on a worker thread.
+    fn start_find(&mut self, needle: &str) {
+        let Some(root) = self.active_pane().map(|p| p.cwd.clone()) else { return };
+        let query = cian_core::search::Query::new(needle);
+        let cancel = Arc::new(AtomicBool::new(false));
+        let (tx, rx) = std::sync::mpsc::channel();
+        let worker_cancel = Arc::clone(&cancel);
+        let worker_root = root.clone();
+        std::thread::spawn(move || {
+            let mut on_hit = |h: cian_core::search::Hit| {
+                let _ = tx.send(FindMsg::Hit(h));
+            };
+            let outcome =
+                cian_core::search::search(&worker_root, &query, &worker_cancel, &mut on_hit);
+            let _ = tx.send(FindMsg::Done(outcome));
+        });
+        self.find_job = Some(FindJob {
+            rx,
+            cancel,
+            root_label: root
+                .file_name()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_else(|| root.display().to_string()),
+            query: needle.to_string(),
+            done: None,
+        });
+        self.popup = Popup::FindResults { hits: Vec::new(), cursor: 0, scroll: 0 };
+    }
+
+    /// Collect whatever the search has produced. Returns true to repaint.
+    fn poll_find_job(&mut self) -> bool {
+        let Some(job) = &mut self.find_job else { return false };
+        let mut changed = false;
+        let mut batch = Vec::new();
+        loop {
+            match job.rx.try_recv() {
+                Ok(FindMsg::Hit(h)) => batch.push(h),
+                Ok(FindMsg::Done(o)) => {
+                    job.done = Some(o);
+                    changed = true;
+                    break;
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    if job.done.is_none() {
+                        job.done = Some(cian_core::search::Outcome::Complete);
+                        changed = true;
+                    }
+                    break;
+                }
+            }
+        }
+        if !batch.is_empty() {
+            changed = true;
+            if let Popup::FindResults { hits, .. } = &mut self.popup {
+                hits.extend(batch);
+            }
+        }
+        changed
+    }
+
+    /// Go to the highlighted result: into the directory, or onto the file.
+    fn open_find_hit(&mut self) -> Result<()> {
+        let Popup::FindResults { hits, cursor, .. } = &self.popup else { return Ok(()) };
+        let Some(hit) = hits.get(*cursor).cloned() else { return Ok(()) };
+        self.popup = Popup::None;
+        self.stop_find();
+
+        let (dir, name) = if hit.is_dir {
+            (hit.path.clone(), None)
+        } else {
+            match hit.path.parent() {
+                Some(p) => (p.to_path_buf(), Some(hit.path.clone())),
+                None => return Ok(()),
+            }
+        };
+        if let Some(p) = self.active_pane_mut() {
+            p.jump_to(dir)?;
+            if let Some(target) = name {
+                if let Some(i) = p.entries.iter().position(|e| e.path == target) {
+                    p.cursor = i;
+                }
+            }
+        }
+        self.message = Some(format!("→ {}", hit.rel.display()));
+        Ok(())
+    }
+
+    fn stop_find(&mut self) {
+        if let Some(job) = self.find_job.take() {
+            job.cancel.store(true, Ordering::Relaxed);
+        }
+    }
+
     // ------- Jump to a typed path -------
     fn start_jump_path(&mut self) {
         // Seed with the current directory: most jumps are edits of where you
@@ -2194,6 +2325,10 @@ impl App {
                 ops::create_dir(parent, &name).map(|p| format!("mkdir: {}", p.display()))
             }
             InputKind::JumpPath => return self.finish_jump_path(&name),
+            InputKind::FindRecursive => {
+                self.start_find(&name);
+                return Ok(());
+            }
             InputKind::ShortcutName { editing_index } => {
                 // chain into the next step: target input. A new shortcut
                 // defaults to the entry under the cursor, which is what you
@@ -2854,6 +2989,32 @@ impl App {
             }
             return Ok(());
         }
+        if let Popup::FindResults { hits, cursor, .. } = &mut self.popup {
+            let n = hits.len();
+            match key.code {
+                KeyCode::Esc | KeyCode::Char('q') => {
+                    self.popup = Popup::None;
+                    self.stop_find();
+                }
+                KeyCode::Char('j') | KeyCode::Down => {
+                    if n > 0 {
+                        *cursor = (*cursor + 1).min(n - 1);
+                    }
+                }
+                KeyCode::Char('k') | KeyCode::Up => *cursor = cursor.saturating_sub(1),
+                KeyCode::Char('d') | KeyCode::PageDown => {
+                    if n > 0 {
+                        *cursor = (*cursor + 10).min(n - 1);
+                    }
+                }
+                KeyCode::Char('u') | KeyCode::PageUp => *cursor = cursor.saturating_sub(10),
+                KeyCode::Char('g') | KeyCode::Home => *cursor = 0,
+                KeyCode::Char('G') | KeyCode::End => *cursor = n.saturating_sub(1),
+                KeyCode::Enter => return self.open_find_hit(),
+                _ => {}
+            }
+            return Ok(());
+        }
         if let Popup::SortPicker { cursor } = &mut self.popup {
             let n = SortKey::ALL.len();
             match key.code {
@@ -3249,6 +3410,7 @@ impl App {
             // search, filter, history, shortcuts
             (false, false, KeyCode::Char('f')) => self.start_search(),
             (false, false, KeyCode::Char('/')) => self.start_filter(),
+            (false, true, KeyCode::Char('F')) => self.start_find_prompt(),
             (false, false, KeyCode::Char(',')) => self.start_sort_picker(),
             (false, false, KeyCode::Char('z')) => self.start_jump_path(),
             // Manual refresh, for the cases the timer cannot see — a file
@@ -3902,7 +4064,8 @@ fn manual_sections() -> Vec<(&'static str, Vec<ManualEntry>)> {
                 entry("h", Some(History), "history popup"),
                 entry("z", None, "go to a typed path (also :cd)"),
                 entry("Ctrl+R, F5", None, "refresh now"),
-                entry("f", Some(Search), "search"),
+                entry("f", Some(Search), "search in this folder"),
+                entry("Shift+F", None, "search the whole tree below here"),
                 entry("n", Some(SearchNext), "next match"),
                 entry("N", Some(SearchPrev), "previous match"),
                 entry("/", None, "filter list as you type"),
@@ -4225,6 +4388,10 @@ fn run_loop<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Result<()>
                 app.finish_anim();
             }
         }
+        // Search results stream in while the walk continues.
+        if app.find_job.is_some() {
+            needs_redraw |= app.poll_find_job();
+        }
         // Catch changes made by anything other than cian.
         if app.poll_external_changes() {
             needs_redraw = true;
@@ -4449,7 +4616,11 @@ fn draw(f: &mut Frame, app: &mut App) {
         draw_op_progress(f, area, app);
     }
     if !matches!(app.popup, Popup::None) {
-        draw_popup(f, area, &mut app.popup, &app.config.ssh_hosts);
+        let find_state = app
+            .find_job
+            .as_ref()
+            .map(|j| (j.query.as_str(), j.root_label.as_str(), j.done));
+        draw_popup(f, area, &mut app.popup, &app.config.ssh_hosts, find_state);
     }
 }
 
@@ -5194,6 +5365,7 @@ fn key_hints(app: &App) -> Vec<(&'static str, &'static str)> {
             ("d", "delete"),
             ("r", "rename"),
             ("/", "filter"),
+            ("S-F", "find"),
             (",", "sort"),
             ("z", "go to"),
             ("Shift+J", "shell"),
@@ -5458,7 +5630,14 @@ fn draw_op_progress(f: &mut Frame, area: Rect, app: &App) {
     );
 }
 
-fn draw_popup(f: &mut Frame, area: Rect, popup: &mut Popup, hosts: &[cian_lua::SshHost]) {
+#[allow(clippy::type_complexity)]
+fn draw_popup(
+    f: &mut Frame,
+    area: Rect,
+    popup: &mut Popup,
+    hosts: &[cian_lua::SshHost],
+    find: Option<(&str, &str, Option<cian_core::search::Outcome>)>,
+) {
     // The manual is taller than any terminal, so it renders as a scrolling
     // viewport rather than the fixed block the other popups use.
     if let Popup::Manual { lines, scroll } = popup {
@@ -5651,6 +5830,93 @@ fn draw_popup(f: &mut Frame, area: Rect, popup: &mut Popup, hosts: &[cian_lua::S
                 Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD),
             ),
             footer_area,
+        );
+        return;
+    }
+
+    if let Popup::FindResults { hits, cursor, scroll } = popup {
+        let w = 96u16.min(area.width.saturating_sub(2));
+        let h = area.height.saturating_sub(4).max(8);
+        let rect = centered_rect(w, h, area);
+        f.render_widget(Clear, rect);
+        let title = match find {
+            Some((query, root, done)) => {
+                let state = match done {
+                    None => "searching…".to_string(),
+                    Some(cian_core::search::Outcome::Complete) => format!("{} found", hits.len()),
+                    Some(cian_core::search::Outcome::Cancelled) => {
+                        format!("{} found (stopped)", hits.len())
+                    }
+                    Some(cian_core::search::Outcome::Truncated) => {
+                        format!("{} found (too many, stopped)", hits.len())
+                    }
+                };
+                format!(" find \"{}\" in {} — {} ", query, root, state)
+            }
+            None => " find ".to_string(),
+        };
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_type(border_type())
+            .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
+            .title(truncate_middle(&title, w.saturating_sub(4) as usize));
+        let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
+        f.render_widget(block, rect);
+
+        let body_h = inner.height.saturating_sub(1) as usize;
+        // Keep the cursor on screen as results stream in beneath it.
+        if *cursor < *scroll {
+            *scroll = *cursor;
+        } else if body_h > 0 && *cursor >= *scroll + body_h {
+            *scroll = *cursor + 1 - body_h;
+        }
+
+        if hits.is_empty() {
+            f.render_widget(
+                Paragraph::new("(nothing yet)").style(Style::default().fg(Color::Rgb(150, 150, 170))),
+                Rect::new(inner.x, inner.y, inner.width, 1),
+            );
+        }
+        for (row, (i, hit)) in hits.iter().enumerate().skip(*scroll).take(body_h).enumerate() {
+            let sel = i == *cursor;
+            let y = inner.y + row as u16;
+            let line_area = Rect::new(inner.x, y, inner.width, 1);
+            if sel {
+                f.render_widget(
+                    Block::default().style(Style::default().bg(theme().selected_bg)),
+                    line_area,
+                );
+            }
+            let base = if sel { Style::default().bg(theme().selected_bg) } else { Style::default() };
+            // The directory part is context; the name is the answer.
+            let rel = hit.rel.display().to_string();
+            let (dir, name) = match rel.rfind(std::path::MAIN_SEPARATOR) {
+                Some(i) => (rel[..=i].to_string(), rel[i + 1..].to_string()),
+                None => (String::new(), rel.clone()),
+            };
+            let avail = inner.width.saturating_sub(4) as usize;
+            let dir_shown = truncate_middle(&dir, avail.saturating_sub(width(&name)));
+            f.render_widget(
+                Paragraph::new(Line::from(vec![
+                    Span::styled(if sel { " ▸ " } else { "   " }, base),
+                    Span::styled(dir_shown, base.fg(Color::Rgb(135, 135, 160))),
+                    Span::styled(
+                        name,
+                        if hit.is_dir {
+                            base.fg(FileKind::Directory.color()).add_modifier(Modifier::BOLD)
+                        } else {
+                            base.fg(Color::Rgb(225, 225, 240))
+                        },
+                    ),
+                ])),
+                line_area,
+            );
+        }
+        f.render_widget(
+            Paragraph::new(" Enter=go  j/k=move  Esc=close ").style(
+                Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD),
+            ),
+            Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1),
         );
         return;
     }
@@ -5909,40 +6175,6 @@ fn draw_popup(f: &mut Frame, area: Rect, popup: &mut Popup, hosts: &[cian_lua::S
                 " y / Enter = yes   n / Esc = no ".to_string(),
             )
         }
-        Popup::Shortcuts { entries, cursor } => {
-            let title = " shortcuts ".to_string();
-            let mut lines: Vec<String> = if entries.is_empty() {
-                vec![
-                    "(no shortcuts yet)".to_string(),
-                    String::new(),
-                    "Press `a` to add your first one.".to_string(),
-                    String::new(),
-                    "Targets can be URLs (https://...), paths (~/foo),".to_string(),
-                    "or apps (e.g. /Applications/Safari.app).".to_string(),
-                ]
-            } else {
-                let mut lines = vec![format!("{} entries:", entries.len()), String::new()];
-                for (i, s) in entries.iter().enumerate() {
-                    let marker = if i == *cursor { "▸ " } else { "  " };
-                    let icon = shortcut_icon(&s.target);
-                    lines.push(format!(
-                        "{}{}  {:<20} {}",
-                        marker,
-                        icon,
-                        truncate(&s.name, 20),
-                        s.target
-                    ));
-                }
-                lines
-            };
-            lines.push(String::new());
-            lines.push(format!("(file: {})", ShortcutStore::default_path().display()));
-            (
-                title,
-                lines,
-                " Enter=open  a=add  d=delete  r=edit  p=copy target  Esc=close ".to_string(),
-            )
-        }
         // All handled above, before this match.
         Popup::Manual { .. }
         | Popup::ContextMenu { .. }
@@ -5950,6 +6182,8 @@ fn draw_popup(f: &mut Frame, area: Rect, popup: &mut Popup, hosts: &[cian_lua::S
         | Popup::SortPicker { .. }
         | Popup::SshHosts { .. }
         | Popup::SshUsers { .. }
+        | Popup::Shortcuts { .. }
+        | Popup::FindResults { .. }
         | Popup::None => return,
     };
 
@@ -7402,17 +7636,22 @@ mod tests {
         assert_eq!(app.active_pane().unwrap().mark_count(), 3);
     }
 
-    /// Ctrl+<key> used to fall through to the plain-character arm, so Ctrl+V
-    /// typed a literal "v" into the field instead of pasting.
+    /// Ctrl+<key> used to fall through to the plain-character arm, so every
+    /// Ctrl combination typed its bare letter into the field.
+    ///
+    /// Checked with a binding that does nothing rather than Ctrl+V: that one
+    /// really does paste, and asserting on the result would depend on whatever
+    /// happened to be on the machine's clipboard.
     #[test]
-    fn ctrl_keys_do_not_type_their_letter_into_a_text_field() {
+    fn unbound_ctrl_keys_do_not_type_their_letter_into_a_text_field() {
         let (_d, mut app) = app_with(&["a.txt"]);
         app.start_shortcut_add();
         app.handle_key(key('w')).unwrap();
-        app.handle_key(KeyEvent::new(KeyCode::Char('v'), KeyModifiers::CONTROL)).unwrap();
+        for c in ['x', 'a', 'k'] {
+            app.handle_key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL)).unwrap();
+        }
         let Popup::TextInput { buffer, .. } = &app.popup else { panic!("no field") };
-        assert!(!buffer.contains('v'), "Ctrl+V leaked a character: {:?}", buffer);
-        assert_eq!(buffer, "w");
+        assert_eq!(buffer, "w", "a Ctrl combination leaked its letter");
     }
 
     #[test]
@@ -7446,6 +7685,105 @@ mod tests {
         let Popup::TextInput { buffer, kind, .. } = &app.popup else { panic!("no target step") };
         assert!(matches!(kind, InputKind::ShortcutTarget { .. }));
         assert_eq!(buffer, &expected.display().to_string());
+    }
+
+    /// Wait for the search worker to finish, draining as it goes.
+    fn drain_find(app: &mut App) {
+        let start = Instant::now();
+        while start.elapsed() < Duration::from_secs(5) {
+            app.poll_find_job();
+            if app.find_job.as_ref().and_then(|j| j.done).is_some() {
+                app.poll_find_job();
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        panic!("search did not finish");
+    }
+
+    fn find_tree() -> tempfile::TempDir {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(d.path().join("src/deep")).unwrap();
+        std::fs::create_dir_all(d.path().join("build")).unwrap();
+        std::fs::write(d.path().join("readme.md"), b"").unwrap();
+        std::fs::write(d.path().join("src/main.rs"), b"").unwrap();
+        std::fs::write(d.path().join("src/deep/main.rs"), b"").unwrap();
+        std::fs::write(d.path().join("build/main.o"), b"").unwrap();
+        d
+    }
+
+    #[test]
+    fn shift_f_searches_the_tree_below_the_pane() {
+        let d = find_tree();
+        let p = d.path().to_path_buf();
+        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+
+        app.handle_key(KeyEvent::new(KeyCode::Char('F'), KeyModifiers::SHIFT)).unwrap();
+        let Popup::TextInput { kind, .. } = &app.popup else { panic!("no prompt") };
+        assert!(matches!(kind, InputKind::FindRecursive));
+
+        for c in "main".chars() {
+            app.handle_key(key(c)).unwrap();
+        }
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+        drain_find(&mut app);
+
+        let Popup::FindResults { hits, .. } = &app.popup else { panic!("no results") };
+        assert_eq!(hits.len(), 3, "got {:?}", hits.iter().map(|h| &h.rel).collect::<Vec<_>>());
+    }
+
+    /// Choosing a result should leave the pane somewhere useful: in the file's
+    /// directory, with the cursor on it.
+    #[test]
+    fn choosing_a_result_navigates_to_it() {
+        let d = find_tree();
+        let p = d.path().to_path_buf();
+        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+
+        app.start_find("main.rs");
+        drain_find(&mut app);
+        // Pick the deepest hit, whichever position it landed in.
+        let idx = match &app.popup {
+            Popup::FindResults { hits, .. } => hits
+                .iter()
+                .position(|h| h.rel.to_string_lossy().contains("deep"))
+                .expect("expected a hit under src/deep"),
+            _ => panic!("no results"),
+        };
+        if let Popup::FindResults { cursor, .. } = &mut app.popup {
+            *cursor = idx;
+        }
+        app.open_find_hit().unwrap();
+
+        assert!(matches!(app.popup, Popup::None), "the popup should close");
+        let pane = app.active_pane().unwrap();
+        assert_eq!(pane.cwd.file_name().unwrap(), "deep");
+        assert_eq!(pane.selected().unwrap().name, "main.rs");
+        assert!(app.find_job.is_none(), "the worker should be released");
+    }
+
+    #[test]
+    fn a_search_with_no_matches_says_so_rather_than_hanging() {
+        let d = find_tree();
+        let p = d.path().to_path_buf();
+        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        app.start_find("nothing-matches-this");
+        drain_find(&mut app);
+        let Popup::FindResults { hits, .. } = &app.popup else { panic!("no results popup") };
+        assert!(hits.is_empty());
+        assert_eq!(app.find_job.as_ref().unwrap().done, Some(cian_core::search::Outcome::Complete));
+    }
+
+    #[test]
+    fn closing_the_results_stops_the_worker() {
+        let d = find_tree();
+        let p = d.path().to_path_buf();
+        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        app.start_find("main");
+        assert!(app.find_job.is_some());
+        app.handle_key(code(KeyCode::Esc)).unwrap();
+        assert!(matches!(app.popup, Popup::None));
+        assert!(app.find_job.is_none(), "Esc must release the search");
     }
 
     #[test]
