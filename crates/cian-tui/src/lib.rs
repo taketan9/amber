@@ -4602,11 +4602,14 @@ fn key_hints(app: &App) -> Vec<(&'static str, &'static str)> {
         // is the hint most worth showing then — the key is easy to forget and
         // there is nothing on screen otherwise to suggest it.
         if app.shell.active_pane_count() > 1 {
-            v.push(("S-F1/F2", "prev/next pane"));
+            v.push(("S-F1/S-F2", "prev/next pane"));
         }
         v.extend([
             ("F9", "new tab"),
-            ("S-F8/F9", "split"),
+            // Spelled out on both keys: "S-F8/F9" reads as "Shift+F8 or F9",
+            // and plain F9 is new-tab, sitting right next to it. That
+            // ambiguity sent someone splitting with the wrong key.
+            ("S-F8/S-F9", "split"),
             ("S-F10", "close"),
             ("F12", "zoom"),
             ("?", "help"),
