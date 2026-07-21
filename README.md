@@ -31,6 +31,21 @@ Drag any border to re-proportion the split it divides — the two file panes, th
 file/shell divider, and every split inside the shell panel. Neither side can be
 dragged below 15% of its parent.
 
+Drag an entry onto the other pane to copy it there, or Shift-drag to move —
+the usual confirmation follows, so a slip of the mouse is not destructive.
+Dropping onto the shell panel types the paths at the prompt instead, which is
+as close as a console application gets to dragging a file into a terminal.
+
+cian cannot take part in the *system's* drag and drop: a console application
+has no window to be a drag source or target, so dragging to or from Explorer
+is not possible and will not be. Dropping a file onto the terminal window makes
+the terminal paste its path, which is the terminal's doing, not cian's.
+
+`:copyto` and `:moveto` (and **Copy to…** in the menu) send the selection
+somewhere other than the opposite pane, offering the directories used recently
+— the ones that are not the other pane tend to be the same few, and retyping
+them is the tedious part. `n` in that picker types a fresh path.
+
 Right-click a pane for a context menu: copy, cut, paste, copy/move to the other
 pane, rename, delete, a per-pane background color, and the key manual (the
 last two are offered in the shell's menu too).

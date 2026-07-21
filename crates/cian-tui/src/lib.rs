@@ -776,7 +776,7 @@ impl ShellPane {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PendingOp {
     Copy,
     Move,
@@ -798,6 +798,9 @@ enum Popup {
     ColorPicker { pane: FocusedPane, cursor: usize },
     /// Sort-order picker for the focused pane.
     SortPicker { cursor: usize },
+    /// Where to send a copy or move: recent destinations plus a way to type
+    /// somewhere new.
+    DestPicker { op: PendingOp, targets: Vec<PathBuf>, cursor: usize },
     /// Results of a recursive search, filling in as they are found.
     FindResults { hits: Vec<cian_core::search::Hit>, cursor: usize, scroll: usize },
     /// SSH: pick a host, then a user on it.
@@ -818,6 +821,7 @@ enum MenuItem {
     Paste,
     CopyToOther,
     MoveToOther,
+    CopyToPath,
     Delete,
     Rename,
     Background,
@@ -836,6 +840,7 @@ impl MenuItem {
             MenuItem::Paste => "Paste",
             MenuItem::CopyToOther => "Copy to other pane",
             MenuItem::MoveToOther => "Move to other pane",
+            MenuItem::CopyToPath => "Copy to…  (recent / typed)",
             MenuItem::Delete => "Delete (to trash)",
             MenuItem::Rename => "Rename",
             MenuItem::Background => "Background color…",
@@ -1000,6 +1005,8 @@ enum InputKind {
     FindRecursive,
     /// Text to look for inside the files below the current directory.
     GrepRecursive,
+    /// A directory typed as the destination of a pending copy or move.
+    DestPath { op: PendingOp, targets: Vec<PathBuf> },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1105,6 +1112,9 @@ const MIN_SPLIT_PCT: u16 = 15;
 /// invisible in cost, short enough that a file appearing feels immediate.
 const WATCH_INTERVAL: Duration = Duration::from_millis(1200);
 
+/// How many copy/move destinations to remember.
+const DEST_HISTORY_CAP: usize = 15;
+
 /// How long an operation flash stays visible.
 const FLASH_SECS: f32 = 0.45;
 
@@ -1200,6 +1210,22 @@ impl AnimOverride {
     }
 }
 
+/// Files being dragged from one pane to another.
+///
+/// cian cannot take part in the OS's drag and drop — a console application has
+/// no window to be a drag source or target — but it owns the mouse events
+/// inside its own surface, so dragging between its panes works.
+#[derive(Debug, Clone)]
+struct FileDrag {
+    from: FocusedPane,
+    paths: Vec<PathBuf>,
+    /// Where the pointer is now, so the drop target can be highlighted.
+    over: Option<FocusedPane>,
+    /// True once the pointer has actually moved; a press and release without
+    /// motion is a click, not a drag.
+    moved: bool,
+}
+
 pub struct App {
     pub left: PaneTabs,
     pub right: PaneTabs,
@@ -1229,6 +1255,10 @@ pub struct App {
     shell_leaves: Vec<(usize, usize, Rect)>,
     /// The border currently being dragged, if any.
     drag: Option<Divider>,
+    /// Files picked up by the mouse and not yet dropped.
+    file_drag: Option<FileDrag>,
+    /// Directories recently copied or moved into, most recent first.
+    dest_history: Vec<PathBuf>,
     /// Files awaiting a paste (see [`FileClipboard`]).
     file_clip: Option<FileClipboard>,
     /// Pane to briefly highlight after an operation landed there, and when it
@@ -1315,6 +1345,8 @@ impl App {
             dividers: Vec::new(),
             shell_leaves: Vec::new(),
             drag: None,
+            file_drag: None,
+            dest_history: Vec::new(),
             file_clip: None,
             flash: None,
             anim: None,
@@ -1425,6 +1457,8 @@ impl App {
             "paste" => { let _ = self.paste_clip(); }
             "cd" | "goto" => self.start_jump_path(),
             "hidden" => self.toggle_hidden(),
+            "copyto" => self.start_dest_picker(PendingOp::Copy),
+            "moveto" => self.start_dest_picker(PendingOp::Move),
             "attr" | "attrs" => self.show_attributes(),
             "grep" => self.start_grep_prompt(),
             "find" => self.start_find_prompt(),
@@ -1959,6 +1993,42 @@ impl App {
         self.message = Some(format!("sorted by {} ({})", key.label(), arrow));
     }
 
+    /// Note a directory as a copy/move destination.
+    ///
+    /// Most transfers go to the other pane, but the ones that do not tend to
+    /// repeat — a build output, a share, a scratch folder — and retyping the
+    /// path each time is the tedious part.
+    fn remember_dest(&mut self, dest: &Path) {
+        self.dest_history.retain(|p| p != dest);
+        self.dest_history.insert(0, dest.to_path_buf());
+        self.dest_history.truncate(DEST_HISTORY_CAP);
+    }
+
+    /// Offer somewhere other than the opposite pane to send the selection.
+    fn start_dest_picker(&mut self, op: PendingOp) {
+        let targets = self.active_pane().map(|p| p.target_paths()).unwrap_or_default();
+        if targets.is_empty() {
+            self.message = Some("nothing selected".into());
+            return;
+        }
+        self.popup = Popup::DestPicker { op, targets, cursor: 0 };
+    }
+
+    /// Rows of the destination picker: the opposite pane first, then history.
+    fn dest_choices(&self) -> Vec<(String, PathBuf)> {
+        let mut out = Vec::new();
+        if let Some(other) = self.opposite_pane_cwd() {
+            out.push(("other pane".to_string(), other));
+        }
+        for p in &self.dest_history {
+            if out.iter().any(|(_, q)| q == p) {
+                continue;
+            }
+            out.push(("recent".to_string(), p.clone()));
+        }
+        out
+    }
+
     // ------- Hidden files, attributes, checksums -------
     fn toggle_hidden(&mut self) {
         let Some(p) = self.active_pane_mut() else { return };
@@ -2434,6 +2504,7 @@ impl App {
         let popup = std::mem::replace(&mut self.popup, Popup::None);
         let Popup::ConfirmTransfer { op, targets, dest } = popup else { return Ok(()) };
         self.push_clipboard(&targets);
+        self.remember_dest(&dest);
         let label = match op {
             PendingOp::Copy => "copying",
             PendingOp::Move => "moving",
@@ -2497,6 +2568,16 @@ impl App {
             }
             InputKind::GrepRecursive => {
                 self.start_find(&name, cian_core::search::Mode::Content);
+                return Ok(());
+            }
+            InputKind::DestPath { op, targets } => {
+                let dest = expand_path(&name);
+                if !dest.is_dir() {
+                    self.message = Some(format!("not a directory: {}", dest.display()));
+                    return Ok(());
+                }
+                self.popup =
+                    Popup::ConfirmTransfer { op: *op, targets: targets.clone(), dest };
                 return Ok(());
             }
             InputKind::ShortcutName { editing_index } => {
@@ -2609,6 +2690,43 @@ impl App {
             return;
         }
 
+        let pane_at = |col: u16, row: u16| -> Option<FocusedPane> {
+            let hit = |r: Rect| {
+                r.width > 0 && r.height > 0
+                    && col >= r.x && col < r.x + r.width
+                    && row >= r.y && row < r.y + r.height
+            };
+            if hit(self.layout_rects.left) {
+                Some(FocusedPane::Left)
+            } else if hit(self.layout_rects.right) {
+                Some(FocusedPane::Right)
+            } else if hit(self.layout_rects.shell) {
+                Some(FocusedPane::Shell)
+            } else {
+                None
+            }
+        };
+
+        // A file drag in progress owns the mouse until release.
+        if self.file_drag.is_some() {
+            match ev.kind {
+                MouseEventKind::Drag(MouseButton::Left) => {
+                    let over = pane_at(col, row);
+                    if let Some(d) = &mut self.file_drag {
+                        d.moved = true;
+                        d.over = over;
+                    }
+                    return;
+                }
+                MouseEventKind::Up(MouseButton::Left) => {
+                    let over = pane_at(col, row);
+                    self.finish_file_drag(over, ev.modifiers);
+                    return;
+                }
+                _ => {}
+            }
+        }
+
         if !matches!(ev.kind, MouseEventKind::Down(MouseButton::Left)) {
             return;
         }
@@ -2620,14 +2738,80 @@ impl App {
             return;
         }
 
-        if in_rect(self.layout_rects.left) {
-            self.focus(FocusedPane::Left);
-        } else if in_rect(self.layout_rects.right) {
-            self.focus(FocusedPane::Right);
-        } else if in_rect(self.layout_rects.shell) {
-            self.focus(FocusedPane::Shell);
-            // Clicking a split should focus that split, as in any multiplexer.
-            self.select_shell_leaf_at(col, row);
+        match pane_at(col, row) {
+            Some(FocusedPane::Shell) => {
+                self.focus(FocusedPane::Shell);
+                // Clicking a split should focus that split, as in any multiplexer.
+                self.select_shell_leaf_at(col, row);
+            }
+            Some(pane) => {
+                self.focus(pane);
+                // Put the cursor on the row that was clicked, then arm a drag
+                // from it. Whether it becomes a drag or stays a click is
+                // decided on release.
+                self.cursor_to_row(pane, row);
+                let paths = self.active_pane().map(|p| p.target_paths()).unwrap_or_default();
+                if !paths.is_empty() {
+                    self.file_drag =
+                        Some(FileDrag { from: pane, paths, over: Some(pane), moved: false });
+                }
+            }
+            None => {}
+        }
+    }
+
+    /// Resolve a finished drag.
+    ///
+    /// Dropping onto the other file pane transfers; onto the shell it types
+    /// the paths, which is the closest thing to dragging a file into a
+    /// terminal. Anything else — including a press and release in place, which
+    /// is just a click — does nothing.
+    fn finish_file_drag(&mut self, over: Option<FocusedPane>, mods: KeyModifiers) {
+        let Some(drag) = self.file_drag.take() else { return };
+        if !drag.moved {
+            return;
+        }
+        let Some(target) = over else { return };
+        if target == drag.from {
+            return;
+        }
+        match target {
+            FocusedPane::Shell => {
+                let quoted: Vec<String> = drag
+                    .paths
+                    .iter()
+                    .map(|p| {
+                        let s = p.display().to_string();
+                        // Quote only when needed, so the common case stays
+                        // something you would have typed yourself.
+                        if s.contains(' ') { format!("\"{}\"", s) } else { s }
+                    })
+                    .collect();
+                let text = quoted.join(" ");
+                self.focus(FocusedPane::Shell);
+                let cwd = self.shell_cwd();
+                self.shell.ensure(&cwd);
+                match self.shell.active_session_mut() {
+                    Some(s) => s.write_input(text.as_bytes()),
+                    None => self.pending_shell_input = Some(text),
+                }
+                self.message = Some(format!("{} path(s) → shell", drag.paths.len()));
+            }
+            dest_pane => {
+                let dest = match dest_pane {
+                    FocusedPane::Left => self.left.active_ref().cwd.clone(),
+                    FocusedPane::Right => self.right.active_ref().cwd.clone(),
+                    FocusedPane::Shell => return,
+                };
+                // Shift means move, matching what every other file manager
+                // does with a modifier on a drag.
+                let op = if mods.contains(KeyModifiers::SHIFT) {
+                    PendingOp::Move
+                } else {
+                    PendingOp::Copy
+                };
+                self.popup = Popup::ConfirmTransfer { op, targets: drag.paths, dest };
+            }
         }
     }
 
@@ -2856,6 +3040,7 @@ impl App {
             items.push(MenuItem::Paste);
             items.push(MenuItem::CopyToOther);
             items.push(MenuItem::MoveToOther);
+            items.push(MenuItem::CopyToPath);
             items.push(MenuItem::Rename);
             items.push(MenuItem::Delete);
             items.push(MenuItem::Attributes);
@@ -2950,6 +3135,7 @@ impl App {
             MenuItem::Paste => return self.paste_clip(),
             MenuItem::CopyToOther => self.start_transfer(PendingOp::Copy),
             MenuItem::MoveToOther => self.start_transfer(PendingOp::Move),
+            MenuItem::CopyToPath => self.start_dest_picker(PendingOp::Copy),
             MenuItem::Rename => self.start_rename(),
             MenuItem::Delete => self.start_delete(),
             MenuItem::Manual => self.open_manual(),
@@ -3187,6 +3373,49 @@ impl App {
                 KeyCode::Char('g') | KeyCode::Home => *cursor = 0,
                 KeyCode::Char('G') | KeyCode::End => *cursor = n.saturating_sub(1),
                 KeyCode::Enter => return self.open_find_hit(),
+                _ => {}
+            }
+            return Ok(());
+        }
+        if matches!(self.popup, Popup::DestPicker { .. }) {
+            let n = self.dest_choices().len();
+            let Popup::DestPicker { cursor, .. } = &mut self.popup else { return Ok(()) };
+            match key.code {
+                KeyCode::Esc | KeyCode::Char('q') => self.popup = Popup::None,
+                KeyCode::Char('j') | KeyCode::Down => {
+                    if n > 0 {
+                        *cursor = (*cursor + 1).min(n - 1);
+                    }
+                }
+                KeyCode::Char('k') | KeyCode::Up => *cursor = cursor.saturating_sub(1),
+                // Somewhere not in the list yet.
+                KeyCode::Char('n') => {
+                    let Popup::DestPicker { op, targets, .. } =
+                        std::mem::replace(&mut self.popup, Popup::None)
+                    else {
+                        return Ok(());
+                    };
+                    self.popup = Popup::TextInput {
+                        title: "destination".into(),
+                        prompt: "copy/move to which directory:".into(),
+                        buffer: self
+                            .opposite_pane_cwd()
+                            .map(|p| p.display().to_string())
+                            .unwrap_or_default(),
+                        kind: InputKind::DestPath { op, targets },
+                    };
+                }
+                KeyCode::Enter => {
+                    let c = *cursor;
+                    let Popup::DestPicker { op, targets, .. } =
+                        std::mem::replace(&mut self.popup, Popup::None)
+                    else {
+                        return Ok(());
+                    };
+                    if let Some((_, dest)) = self.dest_choices().into_iter().nth(c) {
+                        self.popup = Popup::ConfirmTransfer { op, targets, dest };
+                    }
+                }
                 _ => {}
             }
             return Ok(());
@@ -4283,6 +4512,9 @@ fn manual_sections() -> Vec<(&'static str, Vec<ManualEntry>)> {
             vec![
                 entry("Shift+H/J/K/L", None, "move focus between panes"),
                 entry("drag a border", None, "resize any split (mouse)"),
+                entry("drag an entry", None, "to the other pane: copy (Shift: move)"),
+                entry("  ", None, "  onto the shell: type its path there"),
+                entry(":copyto", None, "copy to a recent or typed directory"),
                 entry("right-click", None, "context menu (copy/cut/paste, color)"),
                 entry("Ctrl+H/J/K/L", None, "same (needs kitty keyboard support)"),
                 entry("t", None, "new tab"),
@@ -4801,7 +5033,8 @@ fn draw(f: &mut Frame, app: &mut App) {
             .find_job
             .as_ref()
             .map(|j| (j.query.as_str(), j.root_label.as_str(), j.done, j.mode));
-        draw_popup(f, area, &mut app.popup, &app.config.ssh_hosts, find_state);
+        let dests = app.dest_choices();
+        draw_popup(f, area, &mut app.popup, &app.config.ssh_hosts, find_state, &dests);
     }
 }
 
@@ -5821,6 +6054,7 @@ fn draw_popup(
     popup: &mut Popup,
     hosts: &[cian_lua::SshHost],
     find: Option<(&str, &str, Option<cian_core::search::Outcome>, cian_core::search::Mode)>,
+    dests: &[(String, PathBuf)],
 ) {
     // The manual is taller than any terminal, so it renders as a scrolling
     // viewport rather than the fixed block the other popups use.
@@ -6223,6 +6457,59 @@ fn draw_popup(
         return;
     }
 
+    if let Popup::DestPicker { op, targets, cursor } = popup {
+        let rows = dests.len();
+        let w = 84u16.min(area.width.saturating_sub(2));
+        let h = (rows as u16 + 6).min(area.height.saturating_sub(2));
+        let rect = centered_rect(w, h, area);
+        f.render_widget(Clear, rect);
+        let verb = match op {
+            PendingOp::Copy => "copy",
+            PendingOp::Move => "move",
+        };
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_type(border_type())
+            .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
+            .title(format!(" {} {} item(s) to ", verb, targets.len()));
+        let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
+        f.render_widget(block, rect);
+
+        for (i, (kind, path)) in dests.iter().enumerate().take(inner.height.saturating_sub(2) as usize) {
+            let sel = i == *cursor;
+            let y = inner.y + i as u16;
+            let line = Rect::new(inner.x, y, inner.width, 1);
+            if sel {
+                f.render_widget(
+                    Block::default().style(Style::default().bg(theme().selected_bg)),
+                    line,
+                );
+            }
+            let base = if sel { Style::default().bg(theme().selected_bg) } else { Style::default() };
+            f.render_widget(
+                Paragraph::new(Line::from(vec![
+                    Span::styled(if sel { " ▸ " } else { "   " }, base),
+                    Span::styled(
+                        format!("{:<11}", kind),
+                        base.fg(Color::Rgb(135, 135, 160)),
+                    ),
+                    Span::styled(
+                        truncate_middle(&path.display().to_string(), inner.width as usize - 16),
+                        base.fg(Color::Rgb(225, 225, 240)),
+                    ),
+                ])),
+                line,
+            );
+        }
+        f.render_widget(
+            Paragraph::new(" Enter=send here   n=type a path   Esc=cancel ").style(
+                Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD),
+            ),
+            Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1),
+        );
+        return;
+    }
+
     if let Popup::SortPicker { cursor } = popup {
         let w = 34u16.min(area.width);
         let h = SortKey::ALL.len() as u16 + 3;
@@ -6388,6 +6675,7 @@ fn draw_popup(
         | Popup::SshUsers { .. }
         | Popup::Shortcuts { .. }
         | Popup::FindResults { .. }
+        | Popup::DestPicker { .. }
         | Popup::None => return,
     };
 
@@ -8035,6 +8323,124 @@ mod tests {
         app.run_menu_item(MenuItem::HiddenToggle).unwrap();
         assert_eq!(app.left.active_ref().entries.len(), 1, "dotfile hidden here");
         assert_eq!(app.right.active_ref().entries.len(), 2, "and not in the other pane");
+    }
+
+    /// Dragging from one pane to the other should raise the transfer
+    /// confirmation, not act silently.
+    #[test]
+    fn dragging_between_panes_offers_a_transfer() {
+        let (_l, r, mut app) = app_two_dirs(&["doc.txt"], &[]);
+        let _ = render(&mut app, 100, 40);
+        let (left, right) = (app.layout_rects.left, app.layout_rects.right);
+
+        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), left.x + 5, left.y + 1));
+        assert!(app.file_drag.is_some(), "pressing on an entry arms a drag");
+
+        app.handle_mouse(mouse(
+            MouseEventKind::Drag(MouseButton::Left),
+            right.x + 5,
+            right.y + 1,
+        ));
+        app.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), right.x + 5, right.y + 1));
+
+        let Popup::ConfirmTransfer { op, targets, dest } = &app.popup else {
+            panic!("expected a transfer confirmation, got {:?}", app.popup)
+        };
+        assert_eq!(*op, PendingOp::Copy, "a plain drag copies");
+        assert_eq!(targets.len(), 1);
+        assert_eq!(dest.file_name(), r.path().file_name());
+        assert!(app.file_drag.is_none(), "the drag is released");
+    }
+
+    #[test]
+    fn shift_dragging_moves_instead_of_copying() {
+        let (_l, _r, mut app) = app_two_dirs(&["doc.txt"], &[]);
+        let _ = render(&mut app, 100, 40);
+        let (left, right) = (app.layout_rects.left, app.layout_rects.right);
+
+        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), left.x + 5, left.y + 1));
+        app.handle_mouse(mouse(MouseEventKind::Drag(MouseButton::Left), right.x + 5, right.y + 1));
+        let mut up = mouse(MouseEventKind::Up(MouseButton::Left), right.x + 5, right.y + 1);
+        up.modifiers = KeyModifiers::SHIFT;
+        app.handle_mouse(up);
+
+        let Popup::ConfirmTransfer { op, .. } = &app.popup else { panic!("no confirmation") };
+        assert_eq!(*op, PendingOp::Move);
+    }
+
+    /// Press and release without moving is a click. It must not transfer
+    /// anything, or every click would raise a dialog.
+    #[test]
+    fn a_click_without_movement_is_not_a_drag() {
+        let (_l, _r, mut app) = app_two_dirs(&["doc.txt"], &[]);
+        let _ = render(&mut app, 100, 40);
+        let left = app.layout_rects.left;
+
+        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), left.x + 5, left.y + 1));
+        app.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), left.x + 5, left.y + 1));
+        assert!(matches!(app.popup, Popup::None), "a click must not start a transfer");
+        assert!(app.file_drag.is_none());
+    }
+
+    #[test]
+    fn dropping_back_on_the_same_pane_does_nothing() {
+        let (_l, _r, mut app) = app_two_dirs(&["a.txt", "b.txt"], &[]);
+        let _ = render(&mut app, 100, 40);
+        let left = app.layout_rects.left;
+
+        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), left.x + 5, left.y + 1));
+        app.handle_mouse(mouse(MouseEventKind::Drag(MouseButton::Left), left.x + 5, left.y + 2));
+        app.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), left.x + 5, left.y + 2));
+        assert!(matches!(app.popup, Popup::None));
+    }
+
+    /// The nearest thing to dragging a file into a terminal.
+    #[test]
+    fn dragging_onto_the_shell_types_the_paths() {
+        let (_l, _r, mut app) = app_two_dirs(&["doc.txt"], &[]);
+        let _ = render(&mut app, 100, 40);
+        let (left, shell) = (app.layout_rects.left, app.layout_rects.shell);
+
+        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), left.x + 5, left.y + 1));
+        app.handle_mouse(mouse(MouseEventKind::Drag(MouseButton::Left), shell.x + 5, shell.y + 2));
+        app.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), shell.x + 5, shell.y + 2));
+
+        assert_eq!(app.focused, FocusedPane::Shell);
+        let queued = app.pending_shell_input.clone().unwrap_or_default();
+        assert!(queued.contains("doc.txt"), "got {:?}", queued);
+        assert!(!queued.ends_with('\n'), "paths are typed, not run");
+    }
+
+    #[test]
+    fn destinations_are_remembered_most_recent_first_and_deduped() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        app.remember_dest(Path::new("/tmp/one"));
+        app.remember_dest(Path::new("/tmp/two"));
+        app.remember_dest(Path::new("/tmp/one"));
+        assert_eq!(
+            app.dest_history,
+            vec![PathBuf::from("/tmp/one"), PathBuf::from("/tmp/two")],
+            "re-using a destination promotes it rather than duplicating it"
+        );
+
+        for i in 0..DEST_HISTORY_CAP + 5 {
+            app.remember_dest(&PathBuf::from(format!("/tmp/d{}", i)));
+        }
+        assert_eq!(app.dest_history.len(), DEST_HISTORY_CAP, "the list is capped");
+    }
+
+    #[test]
+    fn the_destination_picker_leads_with_the_other_pane() {
+        let (_l, r, mut app) = app_two_dirs(&["a.txt"], &[]);
+        app.remember_dest(Path::new("/tmp/somewhere"));
+        app.focus(FocusedPane::Left);
+        app.start_dest_picker(PendingOp::Copy);
+
+        assert!(matches!(app.popup, Popup::DestPicker { .. }));
+        let choices = app.dest_choices();
+        assert_eq!(choices[0].0, "other pane");
+        assert_eq!(choices[0].1.file_name(), r.path().file_name());
+        assert!(choices.iter().any(|(k, p)| k == "recent" && p == Path::new("/tmp/somewhere")));
     }
 
     #[test]
