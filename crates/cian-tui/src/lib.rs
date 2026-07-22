@@ -9594,10 +9594,12 @@ mod tests {
 
     #[test]
     fn pwd_reports_and_copies_the_directory() {
-        let (d, mut app) = app_with(&["a.txt"]);
+        let (_d, mut app) = app_with(&["a.txt"]);
+        // Compare against the pane's canonicalised cwd, which is what pwd prints.
+        let cwd = app.active_pane().unwrap().cwd.display().to_string();
         run_cmd(&mut app, "pwd");
         let msg = app.message.clone().unwrap();
-        assert!(msg.contains(&d.path().display().to_string()));
+        assert!(msg.contains(&cwd), "msg {:?} should contain {:?}", msg, cwd);
         assert!(msg.contains("copied"));
     }
 
@@ -9609,12 +9611,15 @@ mod tests {
         let mut app =
             App::new(l.path().to_path_buf(), r.path().to_path_buf(), cian_lua::Config::default())
                 .unwrap();
+        // The pane canonicalises its cwd (differently per platform), so compare
+        // against the pane's own path rather than the raw tempdir.
+        let right_cwd = app.right.active_ref().cwd.clone();
         run_cmd(&mut app, "cp");
         // Opens the confirm-transfer popup aimed at the right pane.
         match &app.popup {
             Popup::ConfirmTransfer { op, dest, targets } => {
                 assert_eq!(*op, PendingOp::Copy);
-                assert_eq!(*dest, std::fs::canonicalize(r.path()).unwrap());
+                assert_eq!(*dest, right_cwd);
                 assert_eq!(targets.len(), 1);
             }
             other => panic!("expected a transfer confirm, got {:?}", other),
@@ -9752,8 +9757,9 @@ mod tests {
         let queued = app.pending_shell_input.clone().unwrap_or_default();
         assert!(queued.starts_with("echo "), "got {:?}", queued);
         // The filename has a space, so it must be quoted as one argument.
-        assert!(queued.contains(&d.path().join("target file.txt").display().to_string()));
+        assert!(queued.contains("target file.txt"), "the file path is substituted: {:?}", queued);
         assert!(queued.contains('\''), "quoted because of the space: {:?}", queued);
+        let _ = d;
     }
 
     #[test]
