@@ -4412,7 +4412,13 @@ impl App {
 
         match (ctrl, shift, key.code) {
             (false, _, KeyCode::Char('q')) => self.start_quit_confirm(),
-            (false, false, KeyCode::Char(':')) => {
+            // `_` for shift, not `false`: `:` is Shift+; on most layouts, and a
+            // terminal with the kitty keyboard protocol (WezTerm, kitty, foot)
+            // reports that Shift, so `(false, false, …)` never matched there and
+            // `:` did nothing. The character already encodes the shift; whether
+            // the modifier is also set is irrelevant. Same for the punctuation
+            // bindings below.
+            (false, _, KeyCode::Char(':')) => {
                 self.mode = Mode::Command;
                 self.command_buffer.clear();
             }
@@ -4465,15 +4471,15 @@ impl App {
             }
             // search, filter, history, shortcuts
             (false, false, KeyCode::Char('f')) => self.start_search(),
-            (false, false, KeyCode::Char('/')) => self.start_filter(),
+            (false, _, KeyCode::Char('/')) => self.start_filter(),
             (false, true, KeyCode::Char('F')) => self.start_find_prompt(),
             (true, _, KeyCode::Char('f')) => self.start_grep_prompt(),
-            (false, false, KeyCode::Char(',')) => self.start_sort_picker(),
+            (false, _, KeyCode::Char(',')) => self.start_sort_picker(),
             (false, false, KeyCode::Char('z')) => self.start_jump_path(),
             (false, false, KeyCode::F(3)) => self.look_inside(),
             // `=` for "are these equal": free, mnemonic, and next to the
             // keys already used for the two panes.
-            (false, false, KeyCode::Char('=')) => self.open_diff(),
+            (false, _, KeyCode::Char('=')) => self.open_diff(),
             // Manual refresh, for the cases the timer cannot see — a file
             // whose contents changed without the directory being touched.
             (true, _, KeyCode::Char('r')) | (false, false, KeyCode::F(5)) => {
@@ -9566,6 +9572,33 @@ mod tests {
         app.command_buffer = line.to_string();
         app.mode = Mode::Command;
         app.run_command();
+    }
+
+    /// A terminal with the kitty keyboard protocol (WezTerm, kitty) reports the
+    /// Shift held to type `:`, so the binding must not require Shift to be
+    /// absent — otherwise `:` does nothing there and command mode is unreachable.
+    #[test]
+    fn colon_opens_command_mode_even_with_shift_reported() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        app.handle_key(KeyEvent::new(KeyCode::Char(':'), KeyModifiers::SHIFT)).unwrap();
+        assert_eq!(app.mode, Mode::Command, "Shift+: must still enter command mode");
+        // And it still works without the modifier (a plain-PTY terminal).
+        app.mode = Mode::Normal;
+        app.handle_key(code(KeyCode::Char(':'))).unwrap();
+        assert_eq!(app.mode, Mode::Command);
+    }
+
+    /// The other shifted-punctuation bindings, likewise reachable with the
+    /// modifier set.
+    #[test]
+    fn punctuation_bindings_ignore_the_shift_modifier() {
+        let (_d, mut app) = app_with(&["a.txt", "b.txt"]);
+        app.handle_key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::SHIFT)).unwrap();
+        assert_eq!(app.mode, Mode::Filter, "/ opens the filter regardless of shift");
+        app.handle_key(code(KeyCode::Esc)).unwrap();
+
+        app.handle_key(KeyEvent::new(KeyCode::Char(','), KeyModifiers::SHIFT)).unwrap();
+        assert!(matches!(app.popup, Popup::SortPicker { .. }), ", opens the sort picker");
     }
 
     #[test]
