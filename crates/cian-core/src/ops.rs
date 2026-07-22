@@ -245,8 +245,10 @@ mod make_touch_tests {
         fs::write(&p, b"keep me").unwrap();
         let before = fs::metadata(&p).unwrap().modified().unwrap();
         // Force a distinctly older stamp, then touch and confirm it advanced.
+        // The handle must be writable to set times on Windows, so open for
+        // write rather than read.
         let old = before - std::time::Duration::from_secs(120);
-        fs::File::open(&p).unwrap().set_modified(old).unwrap();
+        fs::OpenOptions::new().write(true).open(&p).unwrap().set_modified(old).unwrap();
         touch(d.path(), "note.txt").unwrap();
         let after = fs::metadata(&p).unwrap().modified().unwrap();
         assert!(after > old, "mtime moved forward");
