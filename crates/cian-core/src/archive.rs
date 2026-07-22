@@ -201,6 +201,140 @@ pub fn extract(
     report
 }
 
+/// Build a zip at `dest` from `sources`, optionally encrypted with `password`.
+///
+/// Directories are added recursively, with their tree preserved relative to
+/// the source's own name, so zipping `proj/` yields members `proj/...`. When a
+/// password is given the members are AES-256 encrypted — strong, but note that
+/// Windows Explorer's built-in unzip cannot open AES zips (7-Zip and the like
+/// can); the caller is expected to have warned about that.
+pub fn create_zip(
+    sources: &[PathBuf],
+    dest: &Path,
+    password: Option<&str>,
+    ctl: &mut Ctl,
+) -> OpReport {
+    use std::io::Write as _;
+
+    let mut report = OpReport::default();
+    let f = match fs::File::create(dest) {
+        Ok(f) => f,
+        Err(e) => {
+            report.note_error(format!("{}: {}", dest.display(), e));
+            return report;
+        }
+    };
+    let mut zip = zip::ZipWriter::new(f);
+
+    // Gather the members first so progress has a total and so an empty
+    // selection is caught before a file is created.
+    let mut jobs: Vec<(PathBuf, String)> = Vec::new();
+    for src in sources {
+        let base = match src.file_name().and_then(|n| n.to_str()) {
+            Some(n) => n.to_string(),
+            None => {
+                report.note_error(format!("{}: unusable name", src.display()));
+                continue;
+            }
+        };
+        if src.is_dir() {
+            collect_tree(src, &base, &mut jobs, &mut report);
+        } else {
+            jobs.push((src.clone(), base));
+        }
+    }
+
+    let mut p = Progress {
+        files_total: jobs.len(),
+        bytes_total: jobs.iter().filter_map(|(pth, _)| fs::metadata(pth).ok().map(|m| m.len())).sum(),
+        ..Default::default()
+    };
+
+    let base_opts: zip::write::FileOptions<()> =
+        zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+
+    for (path, name) in jobs {
+        if ctl.cancel.load(Ordering::Relaxed) {
+            drop(zip);
+            let _ = fs::remove_file(dest);
+            return report;
+        }
+        p.current = name.clone();
+        (ctl.on_progress)(&p);
+
+        // `FileOptions` is Copy, so `base_opts` is reused each iteration.
+        let opts = match password {
+            Some(pw) => base_opts.with_aes_encryption(zip::AesMode::Aes256, pw),
+            None => base_opts,
+        };
+        if let Err(e) = zip.start_file(&name, opts) {
+            report.note_error(format!("{}: {}", name, e));
+            continue;
+        }
+        let mut src_f = match fs::File::open(&path) {
+            Ok(f) => f,
+            Err(e) => {
+                report.note_error(format!("{}: {}", name, e));
+                continue;
+            }
+        };
+        let mut buf = vec![0u8; 256 * 1024];
+        let mut failed = false;
+        loop {
+            match src_f.read(&mut buf) {
+                Ok(0) => break,
+                Ok(n) => {
+                    if let Err(e) = zip.write_all(&buf[..n]) {
+                        report.note_error(format!("{}: {}", name, e));
+                        failed = true;
+                        break;
+                    }
+                    p.bytes_done += n as u64;
+                    (ctl.on_progress)(&p);
+                }
+                Err(e) => {
+                    report.note_error(format!("{}: {}", name, e));
+                    failed = true;
+                    break;
+                }
+            }
+        }
+        if !failed {
+            report.ok += 1;
+        }
+        p.files_done += 1;
+    }
+
+    if let Err(e) = zip.finish() {
+        report.note_error(format!("{}: {}", dest.display(), e));
+    }
+    report
+}
+
+/// Add every file under `dir` to `jobs`, naming each member relative to
+/// `prefix` so the directory structure is kept inside the zip.
+fn collect_tree(dir: &Path, prefix: &str, jobs: &mut Vec<(PathBuf, String)>, report: &mut OpReport) {
+    let rd = match fs::read_dir(dir) {
+        Ok(rd) => rd,
+        Err(e) => {
+            report.note_error(format!("{}: {}", dir.display(), e));
+            return;
+        }
+    };
+    for e in rd.flatten() {
+        let path = e.path();
+        let name = e.file_name().to_string_lossy().into_owned();
+        // Forward slashes: the zip format mandates them, and a backslash from
+        // Windows would otherwise be stored as part of the name.
+        let member = format!("{}/{}", prefix, name);
+        if path.is_dir() {
+            collect_tree(&path, &member, jobs, report);
+        } else {
+            jobs.push((path, member));
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -318,5 +452,66 @@ mod tests {
         let f = d.path().join("notazip.zip");
         fs::write(&f, b"just text").unwrap();
         assert!(list(&f).is_err());
+    }
+
+    #[test]
+    fn creates_a_zip_preserving_directory_structure() {
+        let d = tempfile::tempdir().unwrap();
+        fs::create_dir_all(d.path().join("proj/sub")).unwrap();
+        fs::write(d.path().join("proj/top.txt"), b"top").unwrap();
+        fs::write(d.path().join("proj/sub/inner.txt"), b"inner").unwrap();
+        fs::write(d.path().join("loose.txt"), b"loose").unwrap();
+
+        let out = d.path().join("bundle.zip");
+        let cancel = AtomicBool::new(false);
+        let mut n = |_: &Progress| {};
+        let report = create_zip(
+            &[d.path().join("proj"), d.path().join("loose.txt")],
+            &out,
+            None,
+            &mut ctl(&cancel, &mut n),
+        );
+        assert!(report.errors.is_empty(), "{:?}", report.errors);
+        assert_eq!(report.ok, 3);
+
+        let names: Vec<String> = list(&out).unwrap().into_iter().map(|m| m.name).collect();
+        assert!(names.contains(&"proj/top.txt".to_string()), "{:?}", names);
+        assert!(names.contains(&"proj/sub/inner.txt".to_string()), "{:?}", names);
+        assert!(names.contains(&"loose.txt".to_string()), "{:?}", names);
+    }
+
+    /// A password-protected member must actually refuse the wrong password and
+    /// yield its contents with the right one.
+    #[test]
+    fn a_password_zip_round_trips_only_with_the_password() {
+        let d = tempfile::tempdir().unwrap();
+        fs::write(d.path().join("secret.txt"), b"classified").unwrap();
+        let out = d.path().join("locked.zip");
+        let cancel = AtomicBool::new(false);
+        let mut n = |_: &Progress| {};
+        let report =
+            create_zip(&[d.path().join("secret.txt")], &out, Some("hunter2"), &mut ctl(&cancel, &mut n));
+        assert_eq!(report.ok, 1, "{:?}", report.errors);
+
+        let f = fs::File::open(&out).unwrap();
+        let mut zip = zip::ZipArchive::new(f).unwrap();
+        // Wrong password is refused.
+        assert!(zip.by_name_decrypt("secret.txt", b"wrong").is_err());
+        // Right password yields the bytes.
+        let mut e = zip.by_name_decrypt("secret.txt", b"hunter2").unwrap();
+        let mut got = String::new();
+        e.read_to_string(&mut got).unwrap();
+        assert_eq!(got, "classified");
+    }
+
+    #[test]
+    fn cancelling_a_zip_leaves_no_half_file_behind() {
+        let d = tempfile::tempdir().unwrap();
+        fs::write(d.path().join("a.txt"), b"data").unwrap();
+        let out = d.path().join("x.zip");
+        let cancel = AtomicBool::new(true);
+        let mut n = |_: &Progress| {};
+        create_zip(&[d.path().join("a.txt")], &out, None, &mut ctl(&cancel, &mut n));
+        assert!(!out.exists(), "a cancelled zip is cleaned up");
     }
 }

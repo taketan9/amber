@@ -138,6 +138,43 @@ pub fn create_dir(parent: &Path, name: &str) -> Result<PathBuf> {
     Ok(p)
 }
 
+/// `mkdir`, optionally `-p`.
+///
+/// `spec` may contain path separators (`a/b/c`); without `parents` every
+/// component but the last must already exist, matching plain `mkdir`. With
+/// `parents` the whole chain is made and an existing target is not an error,
+/// matching `mkdir -p`.
+pub fn make_dir(parent: &Path, spec: &str, parents: bool) -> Result<PathBuf> {
+    let p = parent.join(spec);
+    if parents {
+        fs::create_dir_all(&p).with_context(|| format!("mkdir -p {}", p.display()))?;
+    } else {
+        if p.exists() {
+            anyhow::bail!("already exists: {} (use -p to ignore)", p.display());
+        }
+        fs::create_dir(&p).with_context(|| format!("mkdir {}", p.display()))?;
+    }
+    Ok(p)
+}
+
+/// `touch`: create the file if missing, otherwise bump its modification time.
+pub fn touch(parent: &Path, name: &str) -> Result<PathBuf> {
+    let p = parent.join(name);
+    let existed = p.exists();
+    let f = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&p)
+        .with_context(|| format!("touch {}", p.display()))?;
+    if existed {
+        // Only worth moving the clock on a file that was already there; a
+        // fresh one is already stamped now.
+        f.set_modified(std::time::SystemTime::now())
+            .with_context(|| format!("touch {}", p.display()))?;
+    }
+    Ok(p)
+}
+
 /// Bulk copy with a single conflict policy applied to every source.
 pub fn copy_many(srcs: &[PathBuf], dest_dir: &Path, on_conflict: Conflict) -> OpReport {
     let mut report = OpReport::default();
@@ -172,4 +209,47 @@ pub fn delete_many(srcs: &[PathBuf], mode: DeleteMode) -> OpReport {
         }
     }
     report
+}
+
+#[cfg(test)]
+mod make_touch_tests {
+    use super::*;
+
+    #[test]
+    fn mkdir_p_creates_a_chain_and_tolerates_existing() {
+        let d = tempfile::tempdir().unwrap();
+        let made = make_dir(d.path(), "a/b/c", true).unwrap();
+        assert!(made.is_dir());
+        assert!(d.path().join("a/b/c").is_dir());
+        // -p run twice is not an error.
+        assert!(make_dir(d.path(), "a/b/c", true).is_ok());
+    }
+
+    #[test]
+    fn plain_mkdir_needs_the_parent_and_refuses_an_existing_dir() {
+        let d = tempfile::tempdir().unwrap();
+        // No parent yet: plain mkdir fails.
+        assert!(make_dir(d.path(), "x/y", false).is_err());
+        make_dir(d.path(), "x", false).unwrap();
+        make_dir(d.path(), "x/y", false).unwrap();
+        // Existing: refused without -p.
+        assert!(make_dir(d.path(), "x", false).is_err());
+    }
+
+    #[test]
+    fn touch_creates_then_bumps_the_mtime() {
+        let d = tempfile::tempdir().unwrap();
+        let p = touch(d.path(), "note.txt").unwrap();
+        assert!(p.is_file());
+        // Content is preserved when touched again (append mode, nothing written).
+        fs::write(&p, b"keep me").unwrap();
+        let before = fs::metadata(&p).unwrap().modified().unwrap();
+        // Force a distinctly older stamp, then touch and confirm it advanced.
+        let old = before - std::time::Duration::from_secs(120);
+        fs::File::open(&p).unwrap().set_modified(old).unwrap();
+        touch(d.path(), "note.txt").unwrap();
+        let after = fs::metadata(&p).unwrap().modified().unwrap();
+        assert!(after > old, "mtime moved forward");
+        assert_eq!(fs::read(&p).unwrap(), b"keep me", "contents untouched");
+    }
 }

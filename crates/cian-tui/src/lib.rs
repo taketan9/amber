@@ -12,9 +12,9 @@ use cian_core::{Pane, Sort, SortKey};
 use cian_lua::Config;
 use cian_pty::PtySession;
 use crossterm::event::{
-    self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyEventKind,
-    KeyModifiers, KeyboardEnhancementFlags, MouseButton, MouseEvent, MouseEventKind,
-    PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
+    self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
+    Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, KeyboardEnhancementFlags, MouseButton,
+    MouseEvent, MouseEventKind, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
 };
 use crossterm::execute;
 use crossterm::terminal::{SetTitle, 
@@ -1031,6 +1031,15 @@ enum InputKind {
     GrepRecursive,
     /// A directory typed as the destination of a pending copy or move.
     DestPath { op: PendingOp, targets: Vec<PathBuf> },
+    /// A password for a zip about to be created. Rendered masked.
+    ZipPassword { dest: PathBuf, sources: Vec<PathBuf> },
+}
+
+impl InputKind {
+    /// Whether the field holds a secret and should be shown as dots.
+    fn is_secret(&self) -> bool {
+        matches!(self, InputKind::ZipPassword { .. })
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1473,44 +1482,417 @@ impl App {
         let raw = self.command_buffer.trim().to_string();
         self.command_buffer.clear();
         self.mode = Mode::Normal;
-        match raw.as_str() {
-            "" => {}
+        if raw.is_empty() {
+            return;
+        }
+        // `!cmd` is a shell escape: everything after the bang is the command,
+        // so it is split off before tokenising (the command has its own
+        // quoting, and `%`-substitution happens inside).
+        if let Some(rest) = raw.strip_prefix('!') {
+            self.run_bang(rest);
+            return;
+        }
+
+        // Split into a verb and its arguments. Whitespace-separated is enough:
+        // the commands that take a path accept it as the whole remainder, and
+        // the ones that take flags take single tokens.
+        let mut parts = raw.split_whitespace();
+        let verb = parts.next().unwrap_or("");
+        let args: Vec<&str> = parts.collect();
+        let rest = raw[verb.len()..].trim(); // the arguments as one string
+
+        match verb {
             "q" | "quit" => self.should_quit = true,
             "shell" => self.focus(FocusedPane::Shell),
             "man" | "help" | "h" => self.open_manual(),
             "paste" => { let _ = self.paste_clip(); }
-            "cd" | "goto" => self.start_jump_path(),
             "hidden" => self.toggle_hidden(),
             "view" | "look" => self.look_inside(),
             "diff" | "compare" => self.open_diff(),
             "copyto" => self.start_dest_picker(PendingOp::Copy),
             "moveto" => self.start_dest_picker(PendingOp::Move),
-            "attr" | "attrs" => self.show_attributes(),
             "grep" => self.start_grep_prompt(),
             "find" => self.start_find_prompt(),
             "menu" => self.open_menu_at_cursor(),
             "ssh" => self.start_ssh(),
-            other => {
-                // Commands that carry an argument.
-                if let Some(arg) = other.strip_prefix("chmod ") {
-                    self.set_attr_command(arg);
-                } else if let Some(arg) = other.strip_prefix("hash") {
-                    match cian_core::attrs::HashKind::parse(arg) {
-                        Some(k) => self.start_hash(k),
-                        None => {
-                            self.message = Some(format!("unknown hash: {} (md5 or sha256)", arg.trim()))
-                        }
-                    }
-                } else if let Some(arg) = other.strip_prefix("readonly ") {
-                    match arg.trim() {
-                        "on" | "true" | "1" => self.set_readonly_command(true),
-                        "off" | "false" | "0" => self.set_readonly_command(false),
-                        _ => self.message = Some("usage: :readonly on|off".into()),
-                    }
+
+            // Navigation.
+            "cd" | "goto" => {
+                if rest.is_empty() {
+                    self.start_jump_path();
                 } else {
-                    self.message = Some(format!("unknown command: :{}", other));
+                    let _ = self.cmd_cd(rest);
                 }
             }
+            "pwd" => self.cmd_pwd(),
+
+            // Creation.
+            "mkdir" | "md" => self.cmd_mkdir(&args),
+            "touch" => self.cmd_touch(&args),
+
+            // Transfers: no argument means "to the other pane", matching the
+            // y/m keys; an argument is an explicit destination.
+            "cp" | "copy" => self.cmd_transfer(PendingOp::Copy, rest),
+            "mv" | "move" => self.cmd_transfer(PendingOp::Move, rest),
+            "rm" | "del" | "delete" => self.start_delete(),
+
+            // Inspection.
+            "ls" | "dir" => self.cmd_ls(&args),
+            "stat" | "attr" | "attrs" => self.show_attributes(),
+            "file" => self.cmd_file(),
+            "wc" => self.cmd_wc(),
+            "head" => self.cmd_peek(cian_core::inspect::End::Head, &args),
+            "tail" => self.cmd_peek(cian_core::inspect::End::Tail, &args),
+            "df" => self.cmd_df(&args),
+
+            // Attributes and integrity.
+            "chmod" => self.set_attr_command(rest),
+            "readonly" => match rest {
+                "on" | "true" | "1" => self.set_readonly_command(true),
+                "off" | "false" | "0" => self.set_readonly_command(false),
+                _ => self.message = Some("usage: :readonly on|off".into()),
+            },
+            "hash" | "sha256" | "md5" => {
+                // `:hash md5` or `:md5` both work.
+                let spec = if verb == "hash" { rest } else { verb };
+                match cian_core::attrs::HashKind::parse(spec) {
+                    Some(k) => self.start_hash(k),
+                    None => self.message = Some(format!("unknown hash: {} (md5 or sha256)", spec)),
+                }
+            }
+
+            // Archiving.
+            "zip" => self.cmd_zip(&args),
+
+            other => self.message = Some(format!("unknown command: :{}", other)),
+        }
+    }
+
+    /// `pwd`: show the focused pane's directory and put it on the clipboard,
+    /// since the usual reason to ask is to paste it somewhere.
+    fn cmd_pwd(&mut self) {
+        let Some(p) = self.active_pane() else {
+            self.message = Some("no active pane".into());
+            return;
+        };
+        let path = p.cwd.display().to_string();
+        if let Some(cb) = self.clipboard.as_mut() {
+            let _ = cb.set_text(path.clone());
+        }
+        self.message = Some(format!("{}  (copied)", path));
+    }
+
+    /// `cd <path>`: enter a directory directly, without the prompt.
+    fn cmd_cd(&mut self, arg: &str) -> Result<()> {
+        // `cd -` / `cd ..` / `cd ~` are worth honouring since the muscle memory
+        // is universal; everything else is a path.
+        let target = match arg {
+            "-" => self.active_pane().and_then(|p| p.history.get(1).cloned()),
+            _ => Some(expand_path(arg)),
+        };
+        let Some(target) = target else {
+            self.message = Some("no previous directory".into());
+            return Ok(());
+        };
+        if !target.is_dir() {
+            self.message = Some(format!("not a directory: {}", target.display()));
+            return Ok(());
+        }
+        if let Some(p) = self.active_pane_mut() {
+            p.jump_to(target.clone())?;
+        }
+        self.message = Some(format!("→ {}", target.display()));
+        Ok(())
+    }
+
+    /// `mkdir <name>` / `mkdir -p a/b/c`, created in the focused directory.
+    fn cmd_mkdir(&mut self, args: &[&str]) {
+        let parents = args.contains(&"-p");
+        let names: Vec<&str> = args.iter().copied().filter(|a| !a.starts_with('-')).collect();
+        if names.is_empty() {
+            self.message = Some("usage: :mkdir [-p] <name>".into());
+            return;
+        }
+        let Some(cwd) = self.active_pane().map(|p| p.cwd.clone()) else { return };
+        let mut made = 0;
+        for name in &names {
+            match cian_core::ops::make_dir(&cwd, name, parents) {
+                Ok(_) => made += 1,
+                Err(e) => {
+                    self.message = Some(format!("mkdir: {}", e));
+                    break;
+                }
+            }
+        }
+        if made > 0 {
+            self.reload_active();
+            if self.message.is_none() {
+                self.message = Some(format!("mkdir: created {}", made));
+            }
+        }
+    }
+
+    /// `touch <name>...`: create empty files, or bump the mtime of existing ones.
+    fn cmd_touch(&mut self, args: &[&str]) {
+        let names: Vec<&str> = args.iter().copied().filter(|a| !a.starts_with('-')).collect();
+        if names.is_empty() {
+            self.message = Some("usage: :touch <name>".into());
+            return;
+        }
+        let Some(cwd) = self.active_pane().map(|p| p.cwd.clone()) else { return };
+        let mut n = 0;
+        for name in &names {
+            match cian_core::ops::touch(&cwd, name) {
+                Ok(_) => n += 1,
+                Err(e) => {
+                    self.message = Some(format!("touch: {}", e));
+                    break;
+                }
+            }
+        }
+        if n > 0 {
+            self.reload_active();
+            if self.message.is_none() {
+                self.message = Some(format!("touch: {}", n));
+            }
+        }
+    }
+
+    /// `cp`/`mv`: no argument moves the selection to the other pane; an
+    /// argument is an explicit destination directory (or, for a single item, a
+    /// new path).
+    fn cmd_transfer(&mut self, op: PendingOp, arg: &str) {
+        if arg.is_empty() {
+            self.start_transfer(op);
+            return;
+        }
+        let targets = self.active_pane().map(|p| p.target_paths()).unwrap_or_default();
+        if targets.is_empty() {
+            self.message = Some("nothing to operate on".into());
+            return;
+        }
+        let dest = expand_path(arg);
+        if dest.is_dir() {
+            self.popup = Popup::ConfirmTransfer { op, targets, dest };
+            return;
+        }
+        // Not an existing directory: only meaningful as a rename/copy of a
+        // single item to that exact path, and only if its parent exists.
+        if targets.len() != 1 {
+            self.message = Some(format!("not a directory: {}", dest.display()));
+            return;
+        }
+        let parent_ok = dest.parent().map(|p| p.as_os_str().is_empty() || p.is_dir()).unwrap_or(false);
+        if !parent_ok {
+            self.message = Some(format!("no such directory: {}", dest.display()));
+            return;
+        }
+        let src = &targets[0];
+        let res = match op {
+            PendingOp::Move => std::fs::rename(src, &dest).map_err(anyhow::Error::from),
+            PendingOp::Copy => cian_core::ops::copy_one(src, dest.parent().unwrap_or(&dest), Conflict::Overwrite)
+                .and_then(|_| {
+                    // copy_one lands it under the parent with the source name;
+                    // if a different name was asked for, put it right.
+                    let landed = dest.parent().unwrap_or(&dest).join(src.file_name().unwrap_or_default());
+                    if landed != dest { std::fs::rename(&landed, &dest)?; }
+                    Ok(())
+                }),
+        };
+        match res {
+            Ok(_) => {
+                self.reload_both();
+                self.message = Some(format!("{} → {}", if op == PendingOp::Move { "mv" } else { "cp" }, dest.display()));
+            }
+            Err(e) => self.message = Some(format!("{}: {}", if op == PendingOp::Move { "mv" } else { "cp" }, e)),
+        }
+    }
+
+    /// `ls`: refresh the listing. `ls -a` toggles hidden files, which is the
+    /// one flag that makes sense when the pane already *is* the listing.
+    fn cmd_ls(&mut self, args: &[&str]) {
+        if args.iter().any(|a| a.contains('a')) {
+            self.toggle_hidden();
+        } else {
+            self.reload_active();
+            self.message = Some("refreshed".into());
+        }
+    }
+
+    /// `file`: name what the selection is, by magic number and content.
+    fn cmd_file(&mut self) {
+        let paths = self.active_pane().map(|p| p.target_paths()).unwrap_or_default();
+        if paths.is_empty() {
+            self.message = Some("nothing selected".into());
+            return;
+        }
+        let mut lines = Vec::new();
+        for path in paths.iter().take(30) {
+            let name = path.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+            let desc = cian_core::inspect::classify(path).unwrap_or_else(|e| e.to_string());
+            lines.push(format!("{:<28} {}", truncate(&name, 28), desc));
+        }
+        if paths.len() > 30 {
+            lines.push(format!("... and {} more", paths.len() - 30));
+        }
+        self.popup = Popup::Notice { lines };
+    }
+
+    /// `wc`: line, word and byte counts for the selection, with a total.
+    fn cmd_wc(&mut self) {
+        let paths = self.active_pane().map(|p| p.target_paths()).unwrap_or_default();
+        if paths.is_empty() {
+            self.message = Some("nothing selected".into());
+            return;
+        }
+        let mut lines = vec![format!("{:>9} {:>9} {:>11}  name", "lines", "words", "bytes"), String::new()];
+        let mut tot = cian_core::inspect::Counts::default();
+        let mut shown = 0;
+        for path in paths.iter().take(30) {
+            let name = path.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+            match cian_core::inspect::count(path) {
+                Ok(c) => {
+                    tot.lines += c.lines;
+                    tot.words += c.words;
+                    tot.bytes += c.bytes;
+                    lines.push(format!("{:>9} {:>9} {:>11}  {}", c.lines, c.words, c.bytes, truncate(&name, 30)));
+                    shown += 1;
+                }
+                Err(e) => lines.push(format!("{:>31}  {}: {}", "", truncate(&name, 20), e)),
+            }
+        }
+        if shown > 1 {
+            lines.push(String::new());
+            lines.push(format!("{:>9} {:>9} {:>11}  total", tot.lines, tot.words, tot.bytes));
+        }
+        self.popup = Popup::Notice { lines };
+    }
+
+    /// `head`/`tail [-n N]`: the first or last N lines of the selected file.
+    fn cmd_peek(&mut self, end: cian_core::inspect::End, args: &[&str]) {
+        let n = parse_dash_n(args).unwrap_or(10);
+        let Some(path) = self.active_pane().and_then(|p| p.selected().map(|e| e.path.clone())) else {
+            self.message = Some("nothing selected".into());
+            return;
+        };
+        match cian_core::inspect::peek(&path, end, n) {
+            Ok(rows) => {
+                let which = if end == cian_core::inspect::End::Head { "head" } else { "tail" };
+                let name = path.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+                let mut lines = vec![format!("{} -n {}  {}", which, n, name), String::new()];
+                lines.extend(rows.into_iter().map(|l| truncate(&l, 200)));
+                self.popup = Popup::Notice { lines };
+            }
+            Err(e) => self.message = Some(format!("{}", e)),
+        }
+    }
+
+    /// `df [-h|-k|-m|-g]`: free space on the focused pane's filesystem.
+    fn cmd_df(&mut self, args: &[&str]) {
+        let unit = match args.iter().find(|a| a.starts_with('-')) {
+            Some(flag) => match cian_core::inspect::Unit::parse(flag) {
+                Some(u) => u,
+                None => {
+                    self.message = Some(format!("df: unknown flag {} (try -h -k -m -g)", flag));
+                    return;
+                }
+            },
+            None => cian_core::inspect::Unit::Human,
+        };
+        let Some(cwd) = self.active_pane().map(|p| p.cwd.clone()) else { return };
+        match cian_core::inspect::disk_space(&cwd) {
+            Ok(s) => {
+                let lines = vec![
+                    format!("filesystem holding  {}", cwd.display()),
+                    String::new(),
+                    format!("total      {}", unit.format(s.total)),
+                    format!("used       {}   ({}%)", unit.format(s.used()), s.percent_used()),
+                    format!("available  {}", unit.format(s.available)),
+                ];
+                self.popup = Popup::Notice { lines };
+            }
+            Err(e) => self.message = Some(format!("df: {}", e)),
+        }
+    }
+
+    /// `zip [-e] <name>`: bundle the selection. `-e` asks for a password and
+    /// AES-encrypts the result.
+    fn cmd_zip(&mut self, args: &[&str]) {
+        let encrypt = args.contains(&"-e") || args.contains(&"-p");
+        let name = args.iter().copied().find(|a| !a.starts_with('-'));
+        let Some(name) = name else {
+            self.message = Some("usage: :zip [-e] <name.zip>".into());
+            return;
+        };
+        let sources = self.active_pane().map(|p| p.target_paths()).unwrap_or_default();
+        if sources.is_empty() {
+            self.message = Some("nothing selected to zip".into());
+            return;
+        }
+        let Some(cwd) = self.active_pane().map(|p| p.cwd.clone()) else { return };
+        let mut fname = name.to_string();
+        if !fname.to_lowercase().ends_with(".zip") {
+            fname.push_str(".zip");
+        }
+        let dest = cwd.join(&fname);
+        if dest.exists() {
+            self.message = Some(format!("already exists: {}", fname));
+            return;
+        }
+        if encrypt {
+            // Collect the password on a masked prompt, then build the zip when
+            // it is submitted.
+            self.popup = Popup::TextInput {
+                title: "zip password".into(),
+                prompt: "password (AES-256; Explorer cannot open — use 7-Zip):".into(),
+                buffer: String::new(),
+                kind: InputKind::ZipPassword { dest, sources },
+            };
+        } else {
+            self.start_zip(dest, sources, None);
+        }
+    }
+
+    /// Kick off zip creation on a worker, with progress and cancel like the
+    /// other bulk operations.
+    fn start_zip(&mut self, dest: PathBuf, sources: Vec<PathBuf>, password: Option<String>) {
+        self.start_op("zipping", move |ctl| {
+            cian_core::archive::create_zip(&sources, &dest, password.as_deref(), ctl)
+        });
+    }
+
+    /// `!cmd`: run a shell command in the shell panel, with `%` substituted by
+    /// the selected paths, `%f` by the current file, `%d` by the directory.
+    fn run_bang(&mut self, cmd: &str) {
+        let cmd = cmd.trim();
+        if cmd.is_empty() {
+            self.message = Some("usage: :!<command>   (% = selection, %f = file, %d = dir)".into());
+            return;
+        }
+        let pane = self.active_pane();
+        let cwd = pane.map(|p| p.cwd.display().to_string()).unwrap_or_default();
+        let file = pane
+            .and_then(|p| p.selected().map(|e| e.path.display().to_string()))
+            .unwrap_or_default();
+        let sel: Vec<String> = pane
+            .map(|p| p.target_paths())
+            .unwrap_or_default()
+            .iter()
+            .map(|p| shell_quote(&p.display().to_string()))
+            .collect();
+        let sel = sel.join(" ");
+
+        // Longer tokens first so `%f`/`%d` are not eaten by `%`.
+        let expanded = cmd
+            .replace("%f", &shell_quote(&file))
+            .replace("%d", &shell_quote(&cwd))
+            .replace('%', &sel);
+        self.run_in_shell(expanded);
+    }
+
+    fn reload_active(&mut self) {
+        if let Some(p) = self.active_pane_mut() {
+            let _ = p.reload();
         }
     }
 
@@ -2710,6 +3092,15 @@ impl App {
                     Popup::ConfirmTransfer { op: *op, targets: targets.clone(), dest };
                 return Ok(());
             }
+            InputKind::ZipPassword { dest, sources } => {
+                // An empty password here means "never mind the encryption".
+                if name.is_empty() {
+                    self.message = Some("zip cancelled".into());
+                    return Ok(());
+                }
+                self.start_zip(dest.clone(), sources.clone(), Some(name));
+                return Ok(());
+            }
             InputKind::ShortcutName { editing_index } => {
                 // chain into the next step: target input. A new shortcut
                 // defaults to the entry under the cursor, which is what you
@@ -3792,14 +4183,74 @@ impl App {
     }
 
     fn handle_command_key(&mut self, key: KeyEvent) -> Result<()> {
+        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        // Paths are what get typed here, and they are the thing most worth
+        // pasting rather than retyping. Ctrl+V mirrors the text-input prompt.
+        if ctrl && matches!(key.code, KeyCode::Char('v') | KeyCode::Char('V')) {
+            if let Some(t) = self.clipboard_text() {
+                self.insert_into_active_text(&t);
+            } else {
+                self.message = Some("clipboard has no text".into());
+            }
+            return Ok(());
+        }
         match key.code {
             KeyCode::Esc => { self.command_buffer.clear(); self.mode = Mode::Normal; }
             KeyCode::Enter => self.run_command(),
             KeyCode::Backspace => { self.command_buffer.pop(); }
+            // Clear the line, as in any readline prompt.
+            KeyCode::Char('u') | KeyCode::Char('U') if ctrl => self.command_buffer.clear(),
+            // Otherwise a bare Ctrl+<key> would type its letter into the line.
+            KeyCode::Char(_) if ctrl => {}
             KeyCode::Char(c) => self.command_buffer.push(c),
             _ => {}
         }
         Ok(())
+    }
+
+    /// Insert pasted or typed text into whichever text field currently has the
+    /// focus. Used by Ctrl+V and by a terminal bracketed-paste event, so a
+    /// paste lands in the same place a keystroke would.
+    ///
+    /// Newlines are stripped: a path copied from `pwd`, a browser, or another
+    /// pane carries a trailing one, and a bracketed paste of several lines
+    /// would otherwise smuggle an Enter into a single-line prompt.
+    fn insert_into_active_text(&mut self, text: &str) {
+        let clean: String = text.chars().filter(|c| *c != '\n' && *c != '\r').collect();
+        if clean.is_empty() {
+            return;
+        }
+        match &mut self.popup {
+            Popup::TextInput { buffer, .. } | Popup::Search { buffer } => {
+                buffer.push_str(&clean);
+                return;
+            }
+            Popup::SshHosts { filter, .. } => {
+                filter.push_str(&clean);
+                return;
+            }
+            _ => {}
+        }
+        match self.mode {
+            Mode::Command => self.command_buffer.push_str(&clean),
+            Mode::Filter => {
+                self.filter_buffer.push_str(&clean);
+                self.apply_filter_buffer();
+            }
+            // A paste into the shell belongs to whatever is running there —
+            // the prompt, or a full-screen editor. The original text is sent,
+            // newlines and all, since a multi-line paste into a shell is a
+            // deliberate thing. The raw bytes go through unwrapped: this does
+            // not track whether the child turned on bracketed paste, and a
+            // `\x1b[200~` wrapper sent to a program that did not would show up
+            // as literal garbage.
+            _ if self.focused == FocusedPane::Shell => {
+                if let Some(s) = self.shell.active_session_mut() {
+                    s.write_input(text.as_bytes());
+                }
+            }
+            _ => {}
+        }
     }
 
     fn handle_shell_key(&mut self, key: KeyEvent) -> Result<()> {
@@ -4347,6 +4798,37 @@ fn home_dir() -> Option<PathBuf> {
 ///
 /// A path is usually typed after copying it from somewhere, and the somewhere
 /// is often a shell or an Explorer address bar, where these forms are normal.
+/// Parse a `-n N` argument (or the bare `-N` shorthand `head`/`tail` accept).
+fn parse_dash_n(args: &[&str]) -> Option<usize> {
+    let mut it = args.iter().copied();
+    while let Some(a) = it.next() {
+        if a == "-n" {
+            return it.next().and_then(|v| v.parse().ok());
+        }
+        // `-20` shorthand.
+        if let Some(num) = a.strip_prefix('-') {
+            if let Ok(n) = num.parse::<usize>() {
+                return Some(n);
+            }
+        }
+    }
+    None
+}
+
+/// Quote a path for a POSIX shell (single quotes, with the usual `'\''`
+/// escape). On Windows the shell is usually PowerShell or cmd, whose quoting
+/// differs, but a path with no odd characters passes through either way and
+/// this at least keeps spaces together.
+fn shell_quote(s: &str) -> String {
+    if s.is_empty() {
+        return String::new();
+    }
+    if s.chars().all(|c| c.is_alphanumeric() || "._-/:\\".contains(c)) {
+        return s.to_string();
+    }
+    format!("'{}'", s.replace('\'', "'\\''"))
+}
+
 fn expand_path(input: &str) -> PathBuf {
     let mut out = String::with_capacity(input.len());
     let b: Vec<char> = input.chars().collect();
@@ -4732,6 +5214,25 @@ fn manual_sections() -> Vec<(&'static str, Vec<ManualEntry>)> {
             ],
         ),
         (
+            "Commands (type : then the name — Linux-style)",
+            vec![
+                entry(":mkdir", None, "make a directory;  :mkdir -p a/b/c"),
+                entry(":touch", None, "create a file, or bump its mtime"),
+                entry(":cp / :mv", None, "no arg → other pane;  or  :mv <dest>"),
+                entry(":rm", None, "delete the selection (to trash)"),
+                entry(":cd", None, ":cd <path>  /  :cd ..  /  :cd -  /  :cd ~"),
+                entry(":pwd", None, "show the directory, copy it to the clipboard"),
+                entry(":ls", None, "refresh;  :ls -a  toggles dotfiles"),
+                entry(":stat", None, "attributes (same as :attr)"),
+                entry(":file", None, "what the selection is, by content"),
+                entry(":wc", None, "line / word / byte counts"),
+                entry(":head / :tail", None, "first / last lines;  :tail -n 40"),
+                entry(":df", None, "free disk space;  :df -h -k -m -g"),
+                entry(":zip", None, "bundle selection;  :zip -e  for a password"),
+                entry(":!cmd", None, "run in shell;  % = selection, %f file, %d dir"),
+            ],
+        ),
+        (
             "Shell panel (focus: click, Shift+J, or :shell)",
             vec![
                 entry("F1-F8", None, "switch to shell tab 1-8"),
@@ -4872,6 +5373,7 @@ fn install_panic_hook() {
     std::panic::set_hook(Box::new(move |info| {
         let mut out = io::stdout();
         let _ = execute!(out, PopKeyboardEnhancementFlags);
+        let _ = execute!(out, DisableBracketedPaste);
         let _ = execute!(out, DisableMouseCapture);
         let _ = disable_raw_mode();
         let _ = execute!(out, LeaveAlternateScreen);
@@ -4920,7 +5422,7 @@ pub fn run(left: PathBuf, right: PathBuf) -> Result<()> {
 
     let mut stdout = io::stdout();
     enable_raw_mode()?;
-    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
+    execute!(stdout, EnterAlternateScreen, EnableMouseCapture, EnableBracketedPaste)?;
     // Ask the terminal to disambiguate Ctrl-h / Ctrl-i / Ctrl-m from Backspace/Tab/Enter.
     // Supported by WezTerm, kitty, foot, etc. Silently ignored elsewhere.
     let kbd_enhanced = execute!(
@@ -4937,6 +5439,7 @@ pub fn run(left: PathBuf, right: PathBuf) -> Result<()> {
     if kbd_enhanced {
         let _ = execute!(terminal.backend_mut(), PopKeyboardEnhancementFlags);
     }
+    let _ = execute!(terminal.backend_mut(), DisableBracketedPaste);
     let _ = execute!(terminal.backend_mut(), DisableMouseCapture);
     disable_raw_mode()?;
     execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
@@ -4968,6 +5471,13 @@ fn run_loop<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Result<()>
                 }
                 Event::Mouse(m) => {
                     app.handle_mouse(m);
+                    needs_redraw = true;
+                }
+                // A terminal paste (Cmd/Ctrl+V, right-click, middle-click)
+                // arrives whole rather than as keystrokes, so it lands in the
+                // active field atomically and its newlines are stripped.
+                Event::Paste(text) => {
+                    app.insert_into_active_text(&text);
                     needs_redraw = true;
                 }
                 Event::Resize(_, _) => needs_redraw = true,
@@ -7087,8 +7597,15 @@ fn draw_popup(
             if targets.len() > 8 { lines.push(format!("  ... and {} more", targets.len() - 8)); }
             (title, lines, " y=Yes(skip on conflict)  a=Yes(overwrite)  n/Esc=cancel ".to_string())
         }
-        Popup::TextInput { title, prompt, buffer, .. } => {
-            let body = vec![prompt.clone(), format!(">{}_", buffer)];
+        Popup::TextInput { title, prompt, buffer, kind } => {
+            // A password is shown as dots so it does not sit in plain sight on
+            // a shared screen or a screenshot.
+            let shown = if kind.is_secret() {
+                "•".repeat(buffer.chars().count())
+            } else {
+                buffer.clone()
+            };
+            let body = vec![prompt.clone(), format!(">{}_", shown)];
             (format!(" {} ", title), body, " Enter=ok  Esc=cancel ".to_string())
         }
         Popup::Notice { lines } => {
@@ -9042,6 +9559,218 @@ mod tests {
         for (w, h) in [(80u16, 24u16), (24, 8), (10, 5)] {
             render(&mut app, w, h);
         }
+    }
+
+    /// Run a `:`-command as if it were typed and Enter pressed.
+    fn run_cmd(app: &mut App, line: &str) {
+        app.command_buffer = line.to_string();
+        app.mode = Mode::Command;
+        app.run_command();
+    }
+
+    #[test]
+    fn mkdir_makes_a_directory_and_dash_p_makes_the_chain() {
+        let (d, mut app) = app_with(&["existing.txt"]);
+        run_cmd(&mut app, "mkdir fresh");
+        assert!(d.path().join("fresh").is_dir());
+        // Plain mkdir into a missing parent fails and says so.
+        run_cmd(&mut app, "mkdir a/b/c");
+        assert!(!d.path().join("a/b/c").exists());
+        assert!(app.message.as_deref().unwrap().to_lowercase().contains("mkdir"));
+        // -p builds the whole path.
+        run_cmd(&mut app, "mkdir -p a/b/c");
+        assert!(d.path().join("a/b/c").is_dir());
+        // The new entries show up without an explicit refresh.
+        assert!(app.active_pane().unwrap().all_entries.iter().any(|e| e.name == "fresh"));
+    }
+
+    #[test]
+    fn touch_creates_a_file_that_appears_in_the_listing() {
+        let (d, mut app) = app_with(&["a.txt"]);
+        run_cmd(&mut app, "touch new.log");
+        assert!(d.path().join("new.log").is_file());
+        assert!(app.active_pane().unwrap().all_entries.iter().any(|e| e.name == "new.log"));
+    }
+
+    #[test]
+    fn pwd_reports_and_copies_the_directory() {
+        let (d, mut app) = app_with(&["a.txt"]);
+        run_cmd(&mut app, "pwd");
+        let msg = app.message.clone().unwrap();
+        assert!(msg.contains(&d.path().display().to_string()));
+        assert!(msg.contains("copied"));
+    }
+
+    #[test]
+    fn cp_with_no_argument_targets_the_other_pane() {
+        let l = tempfile::tempdir().unwrap();
+        let r = tempfile::tempdir().unwrap();
+        std::fs::write(l.path().join("doc.txt"), b"hi").unwrap();
+        let mut app =
+            App::new(l.path().to_path_buf(), r.path().to_path_buf(), cian_lua::Config::default())
+                .unwrap();
+        run_cmd(&mut app, "cp");
+        // Opens the confirm-transfer popup aimed at the right pane.
+        match &app.popup {
+            Popup::ConfirmTransfer { op, dest, targets } => {
+                assert_eq!(*op, PendingOp::Copy);
+                assert_eq!(*dest, std::fs::canonicalize(r.path()).unwrap());
+                assert_eq!(targets.len(), 1);
+            }
+            other => panic!("expected a transfer confirm, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn mv_with_a_path_renames_a_single_file() {
+        let (d, mut app) = app_with(&["old.txt", "z.txt"]);
+        // Cursor on the first entry (sorted): old.txt.
+        app.active_pane_mut().unwrap().cursor = 0;
+        let first = app.active_pane().unwrap().selected().unwrap().name.clone();
+        run_cmd(&mut app, &format!("mv {}", d.path().join("renamed.txt").display()));
+        assert!(d.path().join("renamed.txt").is_file(), "moved to the new name");
+        assert!(!d.path().join(&first).exists(), "original is gone");
+    }
+
+    #[test]
+    fn rm_asks_before_deleting() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        run_cmd(&mut app, "rm");
+        assert!(matches!(app.popup, Popup::ConfirmDelete { .. }), "rm confirms first");
+    }
+
+    #[test]
+    fn ls_dash_a_toggles_hidden() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        let before = app.active_pane().unwrap().show_hidden;
+        run_cmd(&mut app, "ls -a");
+        assert_ne!(app.active_pane().unwrap().show_hidden, before);
+    }
+
+    #[test]
+    fn file_and_wc_open_a_notice() {
+        let (d, mut app) = app_with(&["notes.txt"]);
+        std::fs::write(d.path().join("notes.txt"), "one two three\nsecond line\n").unwrap();
+        app.reload_active();
+        app.active_pane_mut().unwrap().cursor = 0;
+
+        run_cmd(&mut app, "file");
+        let Popup::Notice { lines } = &app.popup else { panic!("file → notice") };
+        assert!(lines.iter().any(|l| l.contains("text")), "{:?}", lines);
+
+        run_cmd(&mut app, "wc");
+        let Popup::Notice { lines } = &app.popup else { panic!("wc → notice") };
+        // 2 newlines, 5 words.
+        assert!(lines.iter().any(|l| l.contains(" 2 ") && l.contains(" 5 ")), "{:?}", lines);
+    }
+
+    #[test]
+    fn head_and_tail_show_the_right_ends() {
+        let (d, mut app) = app_with(&["log.txt"]);
+        let text: String = (1..=50).map(|i| format!("line {}\n", i)).collect();
+        std::fs::write(d.path().join("log.txt"), text).unwrap();
+        app.reload_active();
+        app.active_pane_mut().unwrap().cursor = 0;
+
+        run_cmd(&mut app, "head -n 2");
+        let Popup::Notice { lines } = &app.popup else { panic!("head → notice") };
+        assert!(lines.iter().any(|l| l == "line 1"));
+        assert!(!lines.iter().any(|l| l == "line 3"), "only 2 asked for: {:?}", lines);
+
+        run_cmd(&mut app, "tail -n 2");
+        let Popup::Notice { lines } = &app.popup else { panic!("tail → notice") };
+        assert!(lines.iter().any(|l| l == "line 50"));
+        assert!(lines.iter().any(|l| l == "line 49"));
+    }
+
+    #[test]
+    fn df_reports_free_space() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        run_cmd(&mut app, "df -h");
+        let Popup::Notice { lines } = &app.popup else { panic!("df → notice") };
+        assert!(lines.iter().any(|l| l.starts_with("total")));
+        assert!(lines.iter().any(|l| l.starts_with("available")));
+
+        run_cmd(&mut app, "df -z");
+        assert!(app.message.as_deref().unwrap().contains("unknown flag"), "bad flag reported");
+    }
+
+    #[test]
+    fn zip_bundles_the_selection() {
+        let (d, mut app) = app_with(&["one.txt", "two.txt"]);
+        std::fs::write(d.path().join("one.txt"), b"1").unwrap();
+        // Mark both so the whole selection is zipped.
+        app.reload_active();
+        let paths: Vec<PathBuf> =
+            app.active_pane().unwrap().all_entries.iter().map(|e| e.path.clone()).collect();
+        for p in paths {
+            app.active_pane_mut().unwrap().marks.insert(p);
+        }
+        run_cmd(&mut app, "zip bundle");
+        // The op runs on a worker; drain it to completion.
+        for _ in 0..200 {
+            if app.op_job.is_none() { break; }
+            app.poll_op_job();
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert!(d.path().join("bundle.zip").is_file(), "zip created");
+        let names: Vec<String> = cian_core::archive::list(&d.path().join("bundle.zip"))
+            .unwrap()
+            .into_iter()
+            .map(|m| m.name)
+            .collect();
+        assert!(names.contains(&"one.txt".to_string()), "{:?}", names);
+    }
+
+    #[test]
+    fn zip_dash_e_asks_for_a_password_which_is_masked() {
+        let (d, mut app) = app_with(&["secret.txt"]);
+        app.active_pane_mut().unwrap().cursor = 0;
+        run_cmd(&mut app, "zip -e locked");
+        match &app.popup {
+            Popup::TextInput { kind, .. } => {
+                assert!(kind.is_secret(), "the password field is a secret");
+            }
+            other => panic!("expected a password prompt, got {:?}", other),
+        }
+        // The masked field renders as dots, not the typed text.
+        app.handle_key(code(KeyCode::Char('p'))).unwrap();
+        app.handle_key(code(KeyCode::Char('w'))).unwrap();
+        let shown = render(&mut app, 80, 20).join("\n");
+        assert!(shown.contains("••"), "password shown masked:\n{}", shown);
+        assert!(!shown.contains(">pw"), "the literal password must not appear");
+        let _ = d;
+    }
+
+    #[test]
+    fn bang_runs_in_the_shell_with_substitutions() {
+        let (d, mut app) = app_with(&["target file.txt"]);
+        app.active_pane_mut().unwrap().cursor = 0;
+        run_cmd(&mut app, "!echo %f");
+        assert_eq!(app.focused, FocusedPane::Shell, "hands over to the shell");
+        // No shell spawned in tests, so the command is queued verbatim.
+        let queued = app.pending_shell_input.clone().unwrap_or_default();
+        assert!(queued.starts_with("echo "), "got {:?}", queued);
+        // The filename has a space, so it must be quoted as one argument.
+        assert!(queued.contains(&d.path().join("target file.txt").display().to_string()));
+        assert!(queued.contains('\''), "quoted because of the space: {:?}", queued);
+    }
+
+    #[test]
+    fn an_unknown_command_says_so() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        run_cmd(&mut app, "frobnicate");
+        assert!(app.message.as_deref().unwrap().contains("unknown command"));
+    }
+
+    #[test]
+    fn paste_lands_in_the_command_line() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        app.mode = Mode::Command;
+        app.command_buffer = "cd ".into();
+        // A bracketed-paste event carrying a path, with a stray newline.
+        app.insert_into_active_text("/some/path\n");
+        assert_eq!(app.command_buffer, "cd /some/path", "newline stripped, text appended");
     }
 
     #[test]
