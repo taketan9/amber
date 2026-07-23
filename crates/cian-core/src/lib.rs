@@ -68,6 +68,11 @@ pub fn human_size(bytes: u64) -> String {
 /// Uses chrono's `Local` rather than a hand-rolled offset: getting the zone
 /// right means DST rules and per-platform system calls, and cian is built and
 /// shipped for Windows from CI where that code could not be tested locally.
+/// Current local time as `YYYYMMDD_HHMMSS`, for building log file names.
+pub fn timestamp_compact() -> String {
+    chrono::Local::now().format("%Y%m%d_%H%M%S").to_string()
+}
+
 pub fn format_time(t: SystemTime) -> String {
     let dt: chrono::DateTime<chrono::Local> = t.into();
     dt.format("%Y-%m-%d %H:%M").to_string()

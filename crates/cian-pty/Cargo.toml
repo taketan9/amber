@@ -11,3 +11,6 @@ cian-core    = { workspace = true }
 portable-pty = { workspace = true }
 vt100        = { workspace = true }
 anyhow       = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3.27.0"

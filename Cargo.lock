@@ -213,6 +213,7 @@ dependencies = [
  "anyhow",
  "cian-core",
  "portable-pty",
+ "tempfile",
  "vt100",
 ]
 

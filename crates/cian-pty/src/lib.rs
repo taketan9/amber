@@ -12,7 +12,7 @@
 //! polling.
 
 use std::io::{Read, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
@@ -20,6 +20,13 @@ use std::thread::JoinHandle;
 use anyhow::Result;
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 use vt100::Parser;
+
+mod log_sink;
+use log_sink::LogSink;
+
+/// A per-session output log, shared with the reader thread. `None` when not
+/// logging.
+type LogSlot = Arc<Mutex<Option<LogSink>>>;
 
 /// The user's preferred shell, falling back to a sane default per platform.
 pub fn default_shell() -> String {
@@ -39,6 +46,8 @@ pub struct PtySession {
     child: Box<dyn Child + Send + Sync>,
     rows: u16,
     cols: u16,
+    /// Optional session log, shared with the reader thread.
+    log: LogSlot,
     // Kept so the reader thread is owned by the session; it exits on EOF when
     // the child dies (or when the session is dropped and the master closes).
     _reader: JoinHandle<()>,
@@ -74,14 +83,23 @@ impl PtySession {
         let parser = Arc::new(Mutex::new(Parser::new(rows, cols, 0)));
         let dirty = Arc::new(AtomicBool::new(true));
 
+        let log: LogSlot = Arc::new(Mutex::new(None));
         let reader_parser = Arc::clone(&parser);
         let reader_dirty = Arc::clone(&dirty);
+        let reader_log = Arc::clone(&log);
         let reader = std::thread::spawn(move || {
             let mut buf = [0u8; 8192];
             loop {
                 match reader.read(&mut buf) {
                     Ok(0) => break, // EOF: child closed the pty
                     Ok(n) => {
+                        // Tee to the session log first, so a scrubbed
+                        // transcript captures exactly what was received.
+                        if let Ok(mut slot) = reader_log.lock() {
+                            if let Some(sink) = slot.as_mut() {
+                                sink.write_bytes(&buf[..n]);
+                            }
+                        }
                         match reader_parser.lock() {
                             Ok(mut p) => p.process(&buf[..n]),
                             // A poisoned parser never recovers: this pane will
@@ -116,8 +134,36 @@ impl PtySession {
             child,
             rows,
             cols,
+            log,
             _reader: reader,
         })
+    }
+
+    /// Start writing a scrubbed transcript of this session's output to `path`,
+    /// replacing any log already running. The reader thread picks it up on its
+    /// next read.
+    pub fn start_log(&self, path: &Path) -> Result<()> {
+        let sink = LogSink::create(path)?;
+        if let Ok(mut slot) = self.log.lock() {
+            *slot = Some(sink);
+        }
+        Ok(())
+    }
+
+    /// Stop logging, flushing and closing the file.
+    pub fn stop_log(&self) {
+        if let Ok(mut slot) = self.log.lock() {
+            *slot = None;
+        }
+    }
+
+    pub fn is_logging(&self) -> bool {
+        self.log.lock().map(|s| s.is_some()).unwrap_or(false)
+    }
+
+    /// The path currently being logged to, if any.
+    pub fn log_path(&self) -> Option<PathBuf> {
+        self.log.lock().ok().and_then(|s| s.as_ref().map(|k| k.path().to_path_buf()))
     }
 
     /// Shared parser handle. Lock it and call `.screen()` to render.

@@ -1016,6 +1016,10 @@ enum MenuItem {
     Hash,
     Compare,
     Ssh,
+    /// Begin recording this shell pane's output to a log file.
+    StartLog,
+    /// Stop the recording running on this shell pane.
+    StopLog,
     Quit,
     Manual,
 }
@@ -1037,6 +1041,8 @@ impl MenuItem {
             MenuItem::Hash => "Checksum…",
             MenuItem::Compare => "Compare left ↔ right",
             MenuItem::Ssh => "SSH connect…",
+            MenuItem::StartLog => "Start session log…",
+            MenuItem::StopLog => "Stop session log  ●",
             MenuItem::Quit => "Quit cian  (q)",
             MenuItem::Manual => "Key manual  (?)",
         }
@@ -1201,6 +1207,8 @@ enum InputKind {
     ZipPassword { dest: PathBuf, sources: Vec<PathBuf> },
     /// A new name for a single file being copied/moved into `dest_dir`.
     TransferAs { op: PendingOp, src: PathBuf, dest_dir: PathBuf },
+    /// A directory to write a session log into; the file name is generated.
+    LogDir,
 }
 
 impl InputKind {
@@ -1469,6 +1477,8 @@ pub struct App {
     /// The active shell pane's slot rect, stashed on pane-zoom so the shrink
     /// back knows where to land (the split rects are gone while zoomed).
     pane_zoom_return: Option<Rect>,
+    /// Wall-clock start, used to phase the slow "recording" border pulse.
+    started: Instant,
     /// The border currently being dragged, if any.
     drag: Option<Divider>,
     /// Files picked up by the mouse and not yet dropped.
@@ -1566,6 +1576,7 @@ impl App {
             tab_rects: Vec::new(),
             menu_rect: Rect::new(0, 0, 0, 0),
             pane_zoom_return: None,
+            started: Instant::now(),
             drag: None,
             file_drag: None,
             dest_history: Vec::new(),
@@ -2145,6 +2156,82 @@ impl App {
     /// Text on the system clipboard, if any.
     fn clipboard_text(&mut self) -> Option<String> {
         self.clipboard.as_mut()?.get_text().ok().filter(|t| !t.is_empty())
+    }
+
+    /// Ask where to write this shell pane's session log. The file name is
+    /// generated on submit from the time and the pane's host.
+    fn start_log_prompt(&mut self) {
+        if self.shell.active_session().is_none() {
+            self.message = Some("no shell here to log".into());
+            return;
+        }
+        // Seed with a sensible directory: the focused file pane's, else home.
+        let seed = self
+            .last_file_pane_cwd()
+            .map(|p| p.display().to_string())
+            .unwrap_or_default();
+        self.popup = text_input(
+            "session log — folder",
+            "directory to save the log in  (Ctrl+V paste):",
+            seed,
+            InputKind::LogDir,
+        );
+    }
+
+    /// Start logging the active shell pane into `dir`, building the file name
+    /// from the timestamp and the pane's host (e.g. `20260723_140501_myhost.log`).
+    fn start_session_log(&mut self, dir: &str) {
+        let dir = expand_path(dir.trim());
+        if !dir.is_dir() {
+            self.message = Some(format!("not a directory: {}", dir.display()));
+            return;
+        }
+        // Host from the pane's title (`user@host: cwd`), sanitized; a plain
+        // "shell" when the shell set no title.
+        let host = self
+            .shell
+            .active_title()
+            .and_then(|t| host_from_title(&t))
+            .unwrap_or_else(|| "shell".to_string());
+        let name = format!("{}_{}.log", cian_core::timestamp_compact(), host);
+        let path = dir.join(&name);
+        match self.shell.active_session() {
+            Some(s) => match s.start_log(&path) {
+                Ok(()) => self.message = Some(format!("● logging to {}", path.display())),
+                Err(e) => self.message = Some(format!("log failed: {}", e)),
+            },
+            None => self.message = Some("no shell here to log".into()),
+        }
+    }
+
+    fn stop_session_log(&mut self) {
+        match self.shell.active_session() {
+            Some(s) if s.is_logging() => {
+                let where_ = s.log_path().map(|p| p.display().to_string()).unwrap_or_default();
+                s.stop_log();
+                self.message = Some(format!("log saved: {}", where_));
+            }
+            _ => self.message = Some("this pane is not logging".into()),
+        }
+    }
+
+    /// Any shell pane currently recording, across all tabs? Drives the pulsing
+    /// border and the keep-repainting-while-logging tick.
+    fn any_logging(&self) -> bool {
+        self.shell.tabs.iter().any(|t| {
+            t.nodes.iter().any(|n| {
+                matches!(n, Some(Node::Leaf { session, .. }) if session.is_logging())
+            })
+        })
+    }
+
+    /// The last-focused file pane's directory, for seeding prompts.
+    fn last_file_pane_cwd(&self) -> Option<PathBuf> {
+        let tabs = match self.last_file_pane {
+            FocusedPane::Right => &self.right,
+            _ => &self.left,
+        };
+        Some(tabs.active_ref().cwd.clone())
     }
 
     /// Send the clipboard's text to the shell, as typing it would. Raw, with
@@ -3308,6 +3395,10 @@ impl App {
                 self.start_zip(dest.clone(), sources.clone(), Some(name));
                 return Ok(());
             }
+            InputKind::LogDir => {
+                self.start_session_log(&name);
+                return Ok(());
+            }
             InputKind::TransferAs { op, src, dest_dir } => {
                 let target = dest_dir.join(&name);
                 let verb = if *op == PendingOp::Move { "mv" } else { "cp" };
@@ -3880,6 +3971,13 @@ impl App {
             // leaving the shell — which is exactly where you want it.
             items.push(MenuItem::Ssh);
             items.push(MenuItem::Paste);
+            // Session logging, per pane: offer start or stop depending on
+            // whether this pane is already recording.
+            if self.shell.active_session().map(|s| s.is_logging()).unwrap_or(false) {
+                items.push(MenuItem::StopLog);
+            } else {
+                items.push(MenuItem::StartLog);
+            }
             items.push(MenuItem::Background);
         } else {
             items.push(MenuItem::Copy);
@@ -3994,6 +4092,8 @@ impl App {
             MenuItem::Delete => self.start_delete(),
             MenuItem::Manual => self.open_manual(),
             MenuItem::Ssh => self.start_ssh(),
+            MenuItem::StartLog => self.start_log_prompt(),
+            MenuItem::StopLog => self.stop_session_log(),
             MenuItem::Quit => self.start_quit_confirm(),
             MenuItem::HiddenToggle => self.toggle_hidden(),
             MenuItem::Attributes => self.show_attributes(),
@@ -5294,6 +5394,23 @@ fn parse_dash_n(args: &[&str]) -> Option<usize> {
     None
 }
 
+/// Pull a host name out of a terminal title like `user@host: ~/dir`, for a
+/// log file name. Returns a filesystem-safe token, or None if there's no `@`.
+fn host_from_title(title: &str) -> Option<String> {
+    let after_at = title.split('@').nth(1)?;
+    // The host runs up to the first `:`, space, or slash.
+    let host: String = after_at
+        .chars()
+        .take_while(|c| !matches!(c, ':' | ' ' | '/' | '\t'))
+        .filter(|c| c.is_alphanumeric() || matches!(c, '.' | '-' | '_'))
+        .collect();
+    if host.is_empty() {
+        None
+    } else {
+        Some(host)
+    }
+}
+
 /// Quote a path for a POSIX shell (single quotes, with the usual `'\''`
 /// escape). On Windows the shell is usually PowerShell or cmd, whose quoting
 /// differs, but a path with no odd characters passes through either way and
@@ -5995,6 +6112,7 @@ pub fn run(left: PathBuf, right: PathBuf) -> Result<()> {
 
 fn run_loop<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Result<()> {
     let mut needs_redraw = true;
+    let mut last_pulse = Instant::now();
     loop {
         if needs_redraw {
             terminal.draw(|f| draw(f, app))?;
@@ -6032,6 +6150,13 @@ fn run_loop<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Result<()>
         }
         // Repaint when any pane in the active shell tab produced new output.
         if app.shell.take_active_tab_dirty() {
+            needs_redraw = true;
+        }
+        // While a pane is recording, keep the frame alive so its carmine
+        // border can pulse — throttled to ~8 fps, which is plenty for a
+        // 10-second cycle and stays cheap.
+        if app.any_logging() && last_pulse.elapsed() >= Duration::from_millis(125) {
+            last_pulse = Instant::now();
             needs_redraw = true;
         }
         // Install the shell tab once its background spawn (see `ensure`) lands.
@@ -6155,7 +6280,8 @@ fn draw_split(f: &mut Frame, main_area: Rect, app: &mut App, ov: AnimOverride) {
     draw_file_pane(f, panes_split[0], &app.left, app.focused == FocusedPane::Left, visual_for_left, app.mode, bg_l, fl_l, FocusedPane::Left, &mut tab_rects);
     draw_file_pane(f, panes_split[1], &app.right, app.focused == FocusedPane::Right, visual_for_right, app.mode, bg_r, fl_r, FocusedPane::Right, &mut tab_rects);
     // draw_shell sizes each pane's PTY to its computed sub-rect.
-    draw_shell(f, shell_area, &mut app.shell, app.focused == FocusedPane::Shell, &mut dividers, &mut leaves, ov, &mut tab_rects);
+    let log_border = recording_pulse(app.started.elapsed());
+    draw_shell(f, shell_area, &mut app.shell, app.focused == FocusedPane::Shell, &mut dividers, &mut leaves, ov, &mut tab_rects, log_border);
     app.dividers = dividers;
     app.shell_leaves = leaves;
     app.tab_rects = tab_rects;
@@ -6179,7 +6305,8 @@ fn draw_zoom_overlay(f: &mut Frame, rect: Rect, app: &mut App, ov: AnimOverride)
             draw_file_pane(f, rect, &app.right, true, va, app.mode, bg, fl, FocusedPane::Right, &mut Vec::new());
         }
         FocusedPane::Shell => {
-            draw_shell(f, rect, &mut app.shell, true, &mut sink, &mut Vec::new(), ov, &mut Vec::new());
+            let log_border = recording_pulse(app.started.elapsed());
+            draw_shell(f, rect, &mut app.shell, true, &mut sink, &mut Vec::new(), ov, &mut Vec::new(), log_border);
         }
     }
 }
@@ -6243,7 +6370,8 @@ fn draw_zoomed(f: &mut Frame, area: Rect, app: &mut App, ov: AnimOverride) {
         FocusedPane::Shell => {
             rects.shell = area;
             app.layout_rects = rects;
-            draw_shell(f, area, &mut app.shell, true, &mut dividers, &mut leaves, ov, &mut tab_rects);
+            let log_border = recording_pulse(app.started.elapsed());
+            draw_shell(f, area, &mut app.shell, true, &mut dividers, &mut leaves, ov, &mut tab_rects, log_border);
         }
     }
     app.dividers = dividers;
@@ -6825,8 +6953,9 @@ fn draw_shell(
     leaves: &mut Vec<(usize, usize, Rect)>,
     ov: AnimOverride,
     tab_rects: &mut Vec<(FocusedPane, usize, Rect)>,
+    log_border: Color,
 ) {
-    draw_shell_inner(f, area, shell, focused, dividers, leaves, ov, tab_rects);
+    draw_shell_inner(f, area, shell, focused, dividers, leaves, ov, tab_rects, log_border);
 }
 
 /// Repaint every still-uncolored cell in `area` with `bg`.
@@ -6873,8 +7002,24 @@ fn draw_shell_inner(
     leaves: &mut Vec<(usize, usize, Rect)>,
     ov: AnimOverride,
     tab_rects: &mut Vec<(FocusedPane, usize, Rect)>,
+    log_border: Color,
 ) {
-    let border_style = if focused {
+    // The panel border turns to the pulsing carmine when the pane it frames
+    // (a lone leaf, or a maximized one) is recording.
+    let panel_logs = shell
+        .active_tab()
+        .map(|t| {
+            let single = t.leaves().len() == 1;
+            (single || shell.zoom_pane)
+                && matches!(
+                    t.nodes.get(t.active).and_then(|n| n.as_ref()),
+                    Some(Node::Leaf { session, .. }) if session.is_logging()
+                )
+        })
+        .unwrap_or(false);
+    let border_style = if panel_logs {
+        Style::default().fg(log_border).add_modifier(Modifier::BOLD)
+    } else if focused {
         Style::default().fg(theme().accent).add_modifier(Modifier::BOLD)
     } else {
         Style::default().fg(theme().border)
@@ -6963,7 +7108,7 @@ fn draw_shell_inner(
         }
     }
     let tab = &shell.tabs[active];
-    render_node(f, tab, active, root, inner, tab.active, focused, false, dividers, leaves, ov);
+    render_node(f, tab, active, root, inner, tab.active, focused, false, dividers, leaves, ov, log_border);
     // Fill any cell the shell left at the terminal default with the theme's
     // base, so a light theme's shell panel matches the rest.
     if let Some(bg) = theme().base_bg {
@@ -7014,13 +7159,16 @@ fn render_node(
     dividers: &mut Vec<Divider>,
     leaves: &mut Vec<(usize, usize, Rect)>,
     ov: AnimOverride,
+    log_border: Color,
 ) {
     match tab.nodes.get(i).and_then(|n| n.as_ref()) {
         Some(Node::Leaf { session, bg }) => {
             leaves.push((tab_idx, i, area));
             let target = if bordered {
                 let is_active = focused && i == active_leaf;
-                let bs = if is_active {
+                let bs = if session.is_logging() {
+                    Style::default().fg(log_border).add_modifier(Modifier::BOLD)
+                } else if is_active {
                     Style::default().fg(theme().accent).add_modifier(Modifier::BOLD)
                 } else {
                     Style::default().fg(Color::DarkGray)
@@ -7056,8 +7204,8 @@ fn render_node(
                 dir: d,
                 target,
             });
-            render_node(f, tab, tab_idx, *first, rects.0, active_leaf, focused, true, dividers, leaves, ov);
-            render_node(f, tab, tab_idx, *second, rects.1, active_leaf, focused, true, dividers, leaves, ov);
+            render_node(f, tab, tab_idx, *first, rects.0, active_leaf, focused, true, dividers, leaves, ov, log_border);
+            render_node(f, tab, tab_idx, *second, rects.1, active_leaf, focused, true, dividers, leaves, ov, log_border);
         }
         None => {}
     }
@@ -7124,6 +7272,19 @@ fn draw_command_line(f: &mut Frame, area: Rect, buf: &str) {
 
 /// Blend `c` toward white by `t` (0 = unchanged, 1 = fully lit). Used for the
 /// operation flash, which fades a border back to its resting color.
+/// The recording-border color at time `elapsed`: carmine that pulses between a
+/// deep and a bright shade on a ~10-second cycle, so a logging pane reads as
+/// "● recording" without ever disappearing.
+fn recording_pulse(elapsed: std::time::Duration) -> Color {
+    let period = 10.0_f32;
+    let phase = (elapsed.as_secs_f32() % period) / period;
+    // Smooth 0→1→0 over the cycle (cosine), never reaching either extreme.
+    let level = 0.5 - 0.5 * (2.0 * std::f32::consts::PI * phase).cos();
+    let lerp = |a: u8, b: u8| (a as f32 + (b as f32 - a as f32) * level) as u8;
+    // Deep carmine → bright carmine.
+    Color::Rgb(lerp(120, 214), lerp(0, 45), lerp(20, 70))
+}
+
 fn fade(c: Color, t: f32) -> Color {
     let t = t.clamp(0.0, 1.0);
     let (r, g, b) = match c {
@@ -8936,11 +9097,36 @@ mod tests {
             &vec![
                 MenuItem::Ssh,
                 MenuItem::Paste,
+                MenuItem::StartLog,
                 MenuItem::Background,
                 MenuItem::Quit,
                 MenuItem::Manual
             ]
         );
+    }
+
+    #[test]
+    fn a_host_name_is_pulled_from_a_terminal_title() {
+        assert_eq!(host_from_title("taketan@web01: ~/proj"), Some("web01".into()));
+        assert_eq!(host_from_title("root@db-server:/var"), Some("db-server".into()));
+        // No `@` — nothing to take.
+        assert_eq!(host_from_title("just a title"), None);
+    }
+
+    #[test]
+    fn the_log_prompt_asks_for_a_folder_when_a_shell_exists() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        // No shell yet → it declines rather than opening a prompt.
+        app.start_log_prompt();
+        assert!(matches!(app.popup, Popup::None));
+        assert!(app.message.as_deref().unwrap().contains("no shell"));
+    }
+
+    #[test]
+    fn starting_a_log_in_a_bad_directory_is_refused() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        app.start_session_log("/no/such/directory/anywhere");
+        assert!(app.message.as_deref().unwrap().contains("not a directory"));
     }
 
     #[test]
