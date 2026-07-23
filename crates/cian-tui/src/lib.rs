@@ -561,10 +561,6 @@ impl ShellPane {
         }
     }
 
-    fn toggle_pane_zoom(&mut self) {
-        self.zoom_pane = !self.zoom_pane;
-    }
-
     fn count(&self) -> usize {
         self.tabs.len()
     }
@@ -1236,6 +1232,10 @@ struct Anim {
 enum AnimKind {
     /// A surface growing to fill the window, or shrinking back out of it.
     Zoom { from: Rect, to: Rect },
+    /// One shell split pane growing to fill the shell panel (Shift+F12), or
+    /// shrinking back into its slot. Like `Zoom`, but the backdrop keeps the
+    /// splits so the pane visibly grows out of them.
+    PaneZoom { from: Rect, to: Rect },
     /// A split's ratio easing between two values — used both when a split is
     /// created (the new pane grows in) and when one is closed (it shrinks away).
     Ratio { target: DividerTarget, from: u16, to: u16 },
@@ -1294,6 +1294,9 @@ struct AnimOverride {
     ratio: Option<(DividerTarget, u16)>,
     /// Leave PTY sizes alone; they are applied once the transition lands.
     freeze_pty: bool,
+    /// Draw the shell's split panes even when one is flagged maximized — used
+    /// while a pane-zoom transition floats the growing pane above the splits.
+    show_splits: bool,
 }
 
 impl AnimOverride {
@@ -1355,6 +1358,9 @@ pub struct App {
     tab_rects: Vec<(FocusedPane, usize, Rect)>,
     /// The context menu's on-screen rect (inner area), for clicking its items.
     menu_rect: Rect,
+    /// The active shell pane's slot rect, stashed on pane-zoom so the shrink
+    /// back knows where to land (the split rects are gone while zoomed).
+    pane_zoom_return: Option<Rect>,
     /// The border currently being dragged, if any.
     drag: Option<Divider>,
     /// Files picked up by the mouse and not yet dropped.
@@ -1451,6 +1457,7 @@ impl App {
             shell_leaves: Vec::new(),
             tab_rects: Vec::new(),
             menu_rect: Rect::new(0, 0, 0, 0),
+            pane_zoom_return: None,
             drag: None,
             file_drag: None,
             dest_history: Vec::new(),
@@ -3549,6 +3556,47 @@ impl App {
         }
     }
 
+    /// Maximize the active shell pane, or restore it, animating the pane out of
+    /// (or back into) its slot the way full-window zoom animates.
+    fn toggle_pane_zoom_animated(&mut self) {
+        // The shell panel's inner area (inside its border).
+        let s = self.layout_rects.shell;
+        let full = Rect::new(
+            s.x.saturating_add(1),
+            s.y.saturating_add(1),
+            s.width.saturating_sub(2),
+            s.height.saturating_sub(2),
+        );
+        if self.shell.zoom_pane {
+            // Restoring: shrink back into the slot stashed on the way in.
+            let back = self.pane_zoom_return.take();
+            self.shell.zoom_pane = false;
+            if let Some(back) = back {
+                if back != full && back.width > 0 {
+                    self.start_anim(AnimKind::PaneZoom { from: full, to: back });
+                }
+            }
+        } else {
+            // Maximizing: grow from the active pane's current slot.
+            let slot = self.active_shell_leaf_rect();
+            self.shell.zoom_pane = true;
+            if let Some(slot) = slot {
+                self.pane_zoom_return = Some(slot);
+                if slot != full && slot.width > 0 {
+                    self.start_anim(AnimKind::PaneZoom { from: slot, to: full });
+                }
+            }
+        }
+    }
+
+    /// The on-screen rect of the active shell split pane, from the last frame's
+    /// captured leaf rects.
+    fn active_shell_leaf_rect(&self) -> Option<Rect> {
+        let tab = self.shell.active;
+        let leaf = self.shell.tabs.get(tab).map(|t| t.active)?;
+        self.shell_leaves.iter().find(|(t, l, _)| *t == tab && *l == leaf).map(|(_, _, r)| *r)
+    }
+
     fn start_anim(&mut self, kind: AnimKind) {
         if !self.anim_enabled() {
             return;
@@ -3563,9 +3611,14 @@ impl App {
                 AnimKind::Ratio { target, from, to } => {
                     let t = a.progress();
                     let r = (from as f32 + (to as f32 - from as f32) * t).round() as u16;
-                    AnimOverride { ratio: Some((target, r)), freeze_pty: true }
+                    AnimOverride { ratio: Some((target, r)), freeze_pty: true, show_splits: false }
                 }
-                AnimKind::Zoom { .. } => AnimOverride { ratio: None, freeze_pty: true },
+                AnimKind::Zoom { .. } => {
+                    AnimOverride { ratio: None, freeze_pty: true, show_splits: false }
+                }
+                AnimKind::PaneZoom { .. } => {
+                    AnimOverride { ratio: None, freeze_pty: true, show_splits: true }
+                }
             },
             None => AnimOverride::default(),
         }
@@ -3969,7 +4022,7 @@ impl App {
                 self.focused == FocusedPane::Shell && self.shell.active_modes().0;
             if key.modifiers.contains(KeyModifiers::SHIFT) {
                 if self.focused == FocusedPane::Shell && !shell_fullscreen {
-                    self.shell.toggle_pane_zoom();
+                    self.toggle_pane_zoom_animated();
                     return Ok(());
                 }
             } else if !shell_fullscreen {
@@ -5931,12 +5984,12 @@ fn run_loop<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Result<()>
                 .active_session_mut()
                 .map(|s| !s.is_alive())
                 .unwrap_or(false);
-            if exited {
-                let empty = app.shell.close_active_pane();
-                if empty {
-                    let back = app.last_file_pane;
-                    app.focus(back);
-                }
+            // `anim_then.is_none()` guards against re-firing every tick while
+            // the closing animation runs (the dead pane is still active until
+            // it lands). The animated close shrinks the pane away and merges
+            // its sibling back in, the same as Shift+F10 does.
+            if exited && app.anim_then.is_none() {
+                app.close_shell_pane_animated();
                 app.message = Some("shell exited".into());
                 needs_redraw = true;
             }
@@ -6023,6 +6076,36 @@ fn draw_zoom_overlay(f: &mut Frame, rect: Rect, app: &mut App, ov: AnimOverride)
     }
 }
 
+/// Float the active shell pane's terminal at `rect`, for the pane-zoom
+/// transition. Just the one pane's screen, bordered, so it reads as that pane
+/// growing rather than the whole panel.
+fn draw_pane_zoom_overlay(f: &mut Frame, rect: Rect, app: &mut App) {
+    if rect.width < 2 || rect.height < 2 {
+        return;
+    }
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(border_type())
+        .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD));
+    let inner = rect.inner(Margin { vertical: 1, horizontal: 1 });
+    f.render_widget(block, rect);
+
+    let tab = app.shell.active;
+    let leaf = app.shell.tabs.get(tab).map(|t| t.active);
+    if let Some(leaf) = leaf {
+        if let Some(Node::Leaf { session, bg }) =
+            app.shell.tabs.get(tab).and_then(|t| t.nodes.get(leaf)).and_then(|n| n.as_ref())
+        {
+            if let Ok(parser) = session.parser().lock() {
+                f.render_widget(PseudoTerminal::new(parser.screen()), inner);
+            }
+            if let Some(c) = bg {
+                tint_default_cells(f, inner, *c);
+            }
+        }
+    }
+}
+
 /// Zoomed layout: only the focused surface, filling the available area.
 fn draw_zoomed(f: &mut Frame, area: Rect, app: &mut App, ov: AnimOverride) {
     let mut rects = LayoutRects::default();
@@ -6082,6 +6165,14 @@ fn draw(f: &mut Frame, app: &mut App) {
         let rect = lerp_rect(from, to, t);
         f.render_widget(Clear, rect);
         draw_zoom_overlay(f, rect, app, ov);
+    } else if let Some(Anim { kind: AnimKind::PaneZoom { from, to }, .. }) = app.anim {
+        // Backdrop keeps the shell's splits (ov.show_splits); the active pane
+        // floats above them, growing out of or shrinking into its slot.
+        let t = app.anim.map(|a| a.progress()).unwrap_or(1.0);
+        draw_split(f, main_area, app, ov);
+        let rect = lerp_rect(from, to, t);
+        f.render_widget(Clear, rect);
+        draw_pane_zoom_overlay(f, rect, app);
     } else if app.zoomed {
         draw_zoomed(f, main_area, app, ov);
     } else {
@@ -6682,8 +6773,10 @@ fn draw_shell_inner(
         return;
     }
 
-    // Shift+F12: show only the active leaf, filling the panel.
-    if shell.zoom_pane {
+    // Shift+F12: show only the active leaf, filling the panel. Suppressed
+    // while a pane-zoom transition runs, so the splits show as the backdrop
+    // the pane grows out of.
+    if shell.zoom_pane && !ov.show_splits {
         let leaf = shell.tabs[active].active;
         if let Some(tab) = shell.tabs.get_mut(active) {
             if let Some(Node::Leaf { session: s, .. }) = tab.nodes.get_mut(leaf).and_then(|n| n.as_mut()) {
@@ -8829,6 +8922,7 @@ mod tests {
         let ov = AnimOverride {
             ratio: Some((DividerTarget::Panes, 90)),
             freeze_pty: true,
+            show_splits: false,
         };
         assert_eq!(ov.ratio_for(DividerTarget::Panes, 50), 90);
         // Other dividers fall through to their stored value.
@@ -8836,7 +8930,8 @@ mod tests {
         // Stored values are clamped; overrides are not, so a close animation
         // can drive a pane all the way to zero.
         assert_eq!(ov.ratio_for(DividerTarget::Main, 99), 100 - MIN_SPLIT_PCT);
-        let zero = AnimOverride { ratio: Some((DividerTarget::Main, 0)), freeze_pty: true };
+        let zero =
+            AnimOverride { ratio: Some((DividerTarget::Main, 0)), freeze_pty: true, show_splits: false };
         assert_eq!(zero.ratio_for(DividerTarget::Main, 50), 0);
     }
 
