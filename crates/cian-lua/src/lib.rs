@@ -58,6 +58,9 @@ pub struct Options {
     pub borders: Option<String>,
     /// Start with dotfiles visible. Defaults to true.
     pub show_hidden: Option<bool>,
+    /// Directory both panes open in when cian is started with no path
+    /// argument. Unset falls back to the Desktop, then the working directory.
+    pub home: Option<String>,
 }
 
 /// A login on a host.
@@ -436,6 +439,12 @@ fn install_api(lua: &Lua, builder: &Rc<RefCell<Builder>>) -> mlua::Result<()> {
                         Err(_) => bm
                             .errors
                             .push("set_option: show_hidden expects a boolean".into()),
+                    },
+                    "home" => match String::from_lua(val, lua) {
+                        Ok(v) => bm.options.home = Some(v),
+                        Err(_) => {
+                            bm.errors.push("set_option: home expects a directory path".into())
+                        }
                     },
                     "key_hints" => match bool::from_lua(val, lua) {
                         Ok(v) => bm.options.key_hints = Some(v),

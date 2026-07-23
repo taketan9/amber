@@ -2135,9 +2135,15 @@ impl App {
     }
 
     fn open_in_other_pane(&mut self, new_tab: bool) -> Result<()> {
-        let target = match self.active_pane().and_then(|p| p.selected()) {
-            Some(e) if e.is_dir => e.path.clone(),
-            _ => { self.message = Some("not a directory".into()); return Ok(()); }
+        // A directory opens the other pane on it; anything else (a file, or an
+        // empty pane) opens the other pane on *this* directory, so the two
+        // panes line up on the same folder.
+        let target = match self.active_pane() {
+            Some(p) => match p.selected() {
+                Some(e) if e.is_dir => e.path.clone(),
+                _ => p.cwd.clone(),
+            },
+            None => return Ok(()),
         };
         let other = match self.focused {
             FocusedPane::Left => &mut self.right,
@@ -3429,6 +3435,7 @@ impl App {
         }
         if let Some(report) = finished {
             let cancelled = self.op_job.as_ref().map(|j| j.cancel.load(Ordering::Relaxed));
+            let label = self.op_job.as_ref().map(|j| j.label).unwrap_or("");
             self.op_job = None;
             self.reload_both();
             if let Some(p) = self.active_pane_mut() {
@@ -3442,6 +3449,24 @@ impl App {
                 ));
             } else {
                 self.show_op_report(&report);
+                // A checksum is worth pasting into a verify field, so put the
+                // digest(s) straight onto the clipboard when hashing finishes.
+                if label == "hashing" {
+                    let sums: Vec<String> = report
+                        .errors
+                        .iter()
+                        .filter_map(|l| l.split_whitespace().nth(1).map(str::to_string))
+                        .collect();
+                    if !sums.is_empty() {
+                        if let Some(cb) = self.clipboard.as_mut() {
+                            let _ = cb.set_text(sums.join("\n"));
+                        }
+                        if let Popup::Notice { lines } = &mut self.popup {
+                            lines.push(String::new());
+                            lines.push("→ copied to the clipboard".to_string());
+                        }
+                    }
+                }
             }
         }
         changed
@@ -3787,16 +3812,9 @@ impl App {
             return;
         }
 
-        // Grabbing a border starts a resize instead of moving focus. Checked
-        // before tabs and panes because the seam overlaps both the panes' own
-        // border cells and, at its top, a tab label.
-        if let Some(d) = self.dividers.iter().copied().find(|d| in_rect(d.zone)) {
-            self.drag = Some(d);
-            return;
-        }
-
-        // Clicking a tab label on a border switches to that tab, focusing its
-        // pane first.
+        // Clicking a tab label switches to that tab. Checked before the border
+        // drag, because the shell's tab bar sits on the files|shell seam row —
+        // divider-first would swallow every shell-tab click as a drag.
         if let Some((pane, idx, _)) = self.tab_rects.iter().copied().find(|(_, _, r)| in_rect(*r)) {
             self.focus(pane);
             match pane {
@@ -3807,6 +3825,12 @@ impl App {
                     }
                 }
             }
+            return;
+        }
+
+        // Grabbing a border (away from any tab label) starts a resize.
+        if let Some(d) = self.dividers.iter().copied().find(|d| in_rect(d.zone)) {
+            self.drag = Some(d);
             return;
         }
 
@@ -4684,6 +4708,26 @@ impl App {
             }
             return Ok(());
         }
+        // A notice (op results, attributes, checksums, wc…) can be copied
+        // whole with `y`, so a hash or a path can be lifted out of it.
+        if let Popup::Notice { lines } = &self.popup {
+            match key.code {
+                KeyCode::Char('y') | KeyCode::Char('c') => {
+                    let text = lines.join("\n");
+                    if let Some(cb) = self.clipboard.as_mut() {
+                        let _ = cb.set_text(text);
+                    }
+                    self.message = Some("copied".into());
+                    self.popup = Popup::None;
+                    return Ok(());
+                }
+                KeyCode::Enter | KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('q') => {
+                    self.popup = Popup::None;
+                    return Ok(());
+                }
+                _ => return Ok(()),
+            }
+        }
         if let Popup::Diff { result, folded, fold, scroll, .. } = &mut self.popup {
             let rows: &[cian_core::diff::Row] = if *fold { folded } else { &result.rows };
             let last = rows.len().saturating_sub(1);
@@ -5215,29 +5259,26 @@ impl App {
             (_, _, KeyCode::BackTab) => {
                 if let Some(t) = self.active_file_tabs_mut() { t.prev_tab(); }
             }
-            (true, _, KeyCode::Char(c)) if c.is_ascii_digit() => {
-                if let Some(d) = c.to_digit(10) {
-                    if d >= 1 {
-                        if let Some(t) = self.active_file_tabs_mut() { t.select(d as usize - 1); }
-                    }
-                }
-            }
-            // Tab management: t = new tab, w = close active tab (Ctrl variants intentionally absent).
+            // Tab management: t = new tab, w = close active tab.
             (false, false, KeyCode::Char('t')) => {
                 if let Some(t) = self.active_file_tabs_mut() { t.add_clone()?; }
             }
             (false, false, KeyCode::Char('w')) => {
                 if let Some(t) = self.active_file_tabs_mut() { t.close_active(); }
             }
-            // Consistent F-key tab controls (parallel the shell's pane controls):
-            // Shift+F1/F2 = next/prev tab, Shift+F10 = close tab (with confirm).
-            (false, true, KeyCode::F(1)) => {
-                if let Some(t) = self.active_file_tabs_mut() { t.next_tab(); }
+            // F-key tab controls, matching the shell panel: F9 = new tab,
+            // F1/F2 = previous/next tab, F10 = close tab (with confirm). Plain
+            // and shifted both work, so the muscle memory carries over.
+            (false, _, KeyCode::F(9)) => {
+                if let Some(t) = self.active_file_tabs_mut() { t.add_clone()?; }
             }
-            (false, true, KeyCode::F(2)) => {
+            (false, _, KeyCode::F(1)) => {
                 if let Some(t) = self.active_file_tabs_mut() { t.prev_tab(); }
             }
-            (false, true, KeyCode::F(10)) => {
+            (false, _, KeyCode::F(2)) => {
+                if let Some(t) = self.active_file_tabs_mut() { t.next_tab(); }
+            }
+            (false, _, KeyCode::F(10)) => {
                 self.popup = Popup::ConfirmClose { target: CloseTarget::FileTab(self.focused) };
             }
             // search, filter, history, shortcuts
@@ -6065,12 +6106,12 @@ fn manual_sections() -> Vec<(&'static str, Vec<ManualEntry>)> {
                 entry(":copyto", None, "copy to a recent or typed directory"),
                 entry("right-click", None, "context menu (copy/cut/paste, color)"),
                 entry("Ctrl+H/J/K/L", None, "same (needs kitty keyboard support)"),
-                entry("t", None, "new tab"),
+                entry("t, F9", None, "new tab"),
                 entry("w", None, "close tab"),
+                entry("F1 / F2", None, "previous / next tab"),
                 entry("Tab, Shift+Tab", None, "next / previous tab"),
-                entry("Ctrl+1..9", None, "jump to tab N"),
-                entry("Shift+F1/F2", None, "next / previous tab"),
-                entry("Shift+F10", None, "close tab (confirms)"),
+                entry("click a tab", None, "switch to it (mouse)"),
+                entry("F10", None, "close tab (confirms)"),
             ],
         ),
         (
@@ -6244,9 +6285,35 @@ fn install_panic_hook() {
     }));
 }
 
-pub fn run(left: PathBuf, right: PathBuf) -> Result<()> {
+/// The directory to open when no path was given on the command line: the
+/// configured `home`, else the Desktop, else the home directory, else `.`.
+fn default_home(config: &cian_lua::Config) -> PathBuf {
+    if let Some(h) = &config.options.home {
+        let p = expand_path(h);
+        if p.is_dir() {
+            return p;
+        }
+    }
+    if let Some(home) = home_dir() {
+        let desktop = home.join("Desktop");
+        if desktop.is_dir() {
+            return desktop;
+        }
+        if home.is_dir() {
+            return home;
+        }
+    }
+    PathBuf::from(".")
+}
+
+pub fn run(left: Option<PathBuf>, right: Option<PathBuf>) -> Result<()> {
     // Load user config (never fails; problems are reported below).
     let config = cian_lua::load();
+
+    // Fill in either pane not given a path on the command line.
+    let fallback = default_home(&config);
+    let left = left.unwrap_or_else(|| fallback.clone());
+    let right = right.unwrap_or(fallback);
 
     // Resolve and install the color theme before any drawing happens.
     let (resolved, theme_errors) = resolve_theme(&config.theme);
@@ -6774,10 +6841,14 @@ fn tabs_title<'a>(
             if focused {
                 Style::default().fg(Color::Black).bg(focus_bg).add_modifier(Modifier::BOLD)
             } else {
-                Style::default().fg(Color::White).bg(Color::DarkGray)
+                // Active but unfocused: an accent-tinted bar so it stays legible
+                // whatever the pane background is (DarkGray vanished on some).
+                Style::default().fg(Color::Black).bg(theme().border).add_modifier(Modifier::BOLD)
             }
         } else {
-            Style::default().fg(Color::DarkGray)
+            // Inactive tabs: a readable mid grey from the theme, not DarkGray,
+            // which was the same tone as some backgrounds.
+            Style::default().fg(theme().dim).add_modifier(Modifier::BOLD)
         };
         let label = label_for(i, &tabs.tabs[i], is_active);
         let w = label.chars().count() as u16;
@@ -6785,7 +6856,7 @@ fn tabs_title<'a>(
         col += w;
         spans.push(Span::styled(label, style));
         if pos + 1 < shown.len() {
-            spans.push(Span::styled("│", Style::default().fg(Color::DarkGray)));
+            spans.push(Span::styled("│", Style::default().fg(theme().dim)));
             col += 1;
         }
     }
@@ -8740,7 +8811,7 @@ fn draw_popup(
             (format!(" {} ", title), body, " Enter=ok  ←→ move  Esc=cancel ".to_string())
         }
         Popup::Notice { lines } => {
-            (" notice ".to_string(), lines.clone(), " Enter / Esc = close ".to_string())
+            (" notice ".to_string(), lines.clone(), " y = copy   Enter / Esc = close ".to_string())
         }
         Popup::Search { buffer } => {
             (
@@ -9026,7 +9097,9 @@ mod tests {
             .copied()
             .find(|d| d.target == target)
             .unwrap_or_else(|| panic!("no divider for {:?} in {:?}", target, app.dividers));
-        let grab = (d.zone.x, d.zone.y);
+        // Grab the middle of the seam, not its very corner — the corner shares
+        // a cell with a tab label, which now wins the click.
+        let grab = (d.zone.x + d.zone.width / 2, d.zone.y + d.zone.height / 2);
         app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), grab.0, grab.1));
         assert!(app.drag.is_some(), "grabbing the seam should start a drag");
         app.handle_mouse(mouse(MouseEventKind::Drag(MouseButton::Left), to.0, to.1));
@@ -11066,6 +11139,73 @@ mod tests {
         // A bracketed-paste event carrying a path, with a stray newline.
         app.insert_into_active_text("/some/path\n");
         assert_eq!(app.command_buffer, "cd /some/path", "newline stripped, text appended");
+    }
+
+    #[test]
+    fn o_on_a_file_mirrors_the_directory_to_the_other_pane() {
+        let l = tempfile::tempdir().unwrap();
+        let r = tempfile::tempdir().unwrap();
+        std::fs::write(l.path().join("doc.txt"), b"x").unwrap();
+        std::fs::create_dir(r.path().join("elsewhere")).unwrap();
+        let mut app =
+            App::new(l.path().to_path_buf(), r.path().to_path_buf(), cian_lua::Config::default())
+                .unwrap();
+        app.focus(FocusedPane::Left);
+        app.active_pane_mut().unwrap().cursor = 0; // doc.txt (a file)
+        app.open_in_other_pane(false).unwrap();
+        assert_eq!(
+            app.right.active_ref().cwd,
+            app.left.active_ref().cwd,
+            "the other pane lines up on this directory"
+        );
+    }
+
+    #[test]
+    fn f_keys_manage_file_tabs() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        app.focus(FocusedPane::Left);
+        assert_eq!(app.left.tabs.len(), 1);
+        app.handle_key(code(KeyCode::F(9))).unwrap(); // new tab
+        assert_eq!(app.left.tabs.len(), 2);
+        assert_eq!(app.left.active, 1);
+        app.handle_key(code(KeyCode::F(1))).unwrap(); // previous
+        assert_eq!(app.left.active, 0);
+        app.handle_key(code(KeyCode::F(2))).unwrap(); // next
+        assert_eq!(app.left.active, 1);
+    }
+
+    #[test]
+    fn ctrl_digit_no_longer_jumps_file_tabs() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        app.focus(FocusedPane::Left);
+        app.left.add_clone().unwrap(); // now 2 tabs, active 1
+        // Ctrl+1 used to select tab 0; it must not any more.
+        app.handle_key(KeyEvent::new(KeyCode::Char('1'), KeyModifiers::CONTROL)).unwrap();
+        assert_eq!(app.left.active, 1, "Ctrl+1 is no longer a tab jump");
+    }
+
+    #[test]
+    fn the_default_home_prefers_config_then_desktop() {
+        // A configured home directory wins when it exists.
+        let d = tempfile::tempdir().unwrap();
+        let mut config = cian_lua::Config::default();
+        config.options.home = Some(d.path().display().to_string());
+        assert_eq!(default_home(&config), d.path());
+
+        // A configured but missing directory falls through (to Desktop/home/.).
+        let mut config = cian_lua::Config::default();
+        config.options.home = Some("/definitely/not/here".into());
+        let fallback = default_home(&config);
+        assert_ne!(fallback, PathBuf::from("/definitely/not/here"));
+    }
+
+    #[test]
+    fn a_notice_can_be_copied_then_closes() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        app.popup = Popup::Notice { lines: vec!["abc123".into()] };
+        app.handle_key(code(KeyCode::Char('y'))).unwrap();
+        assert!(matches!(app.popup, Popup::None));
+        assert_eq!(app.message.as_deref(), Some("copied"));
     }
 
     #[test]

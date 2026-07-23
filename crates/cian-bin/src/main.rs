@@ -1,7 +1,7 @@
 use std::env;
 use std::path::PathBuf;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 
 fn main() -> Result<()> {
     let args: Vec<String> = env::args().skip(1).collect();
@@ -17,11 +17,10 @@ fn main() -> Result<()> {
         println!("{}", cian_tui::manual_text());
         return Ok(());
     }
-    let cwd = env::current_dir().context("cannot determine current directory")?;
-    let left = args
-        .first()
-        .map(PathBuf::from)
-        .unwrap_or_else(|| cwd.clone());
-    let right = args.get(1).map(PathBuf::from).unwrap_or(cwd);
+    // Paths default to the configured home (see cian_tui::run) when omitted,
+    // rather than to the process's working directory — which, launched from a
+    // shortcut, is wherever the exe sits.
+    let left = args.first().map(PathBuf::from);
+    let right = args.get(1).map(PathBuf::from);
     cian_tui::run(left, right)
 }
