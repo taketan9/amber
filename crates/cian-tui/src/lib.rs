@@ -42,6 +42,33 @@ struct ResolvedTheme {
     selected_bg: Color,
     visual_bg: Color,
     mark_fg: Color,
+    /// The surface behind panes and the shell. `None` leaves the terminal's own
+    /// background showing (the dark default's behaviour); a light theme paints
+    /// it so the look holds up on any terminal.
+    base_bg: Option<Color>,
+    /// Quieter greys for secondary text and borders.
+    dim: Color,
+    border: Color,
+    /// Background of menus and dialogs.
+    popup_bg: Color,
+    /// File-type accents, indexed by [`FileKind`].
+    file: FilePalette,
+}
+
+/// The eight file-type accents plus the two neutral tones, kept together so a
+/// theme swaps them as a set.
+#[derive(Debug, Clone, Copy)]
+struct FilePalette {
+    directory: Color,
+    code: Color,
+    config: Color,
+    document: Color,
+    image: Color,
+    media: Color,
+    archive: Color,
+    executable: Color,
+    muted: Color,
+    plain: Color,
 }
 
 impl Default for ResolvedTheme {
@@ -52,6 +79,68 @@ impl Default for ResolvedTheme {
             selected_bg: Color::Rgb(60, 60, 90),
             visual_bg: Color::Rgb(80, 60, 30),
             mark_fg: Color::Yellow,
+            base_bg: None,
+            dim: Color::Rgb(130, 130, 155),
+            border: Color::DarkGray,
+            popup_bg: Color::Rgb(24, 24, 34),
+            file: FilePalette {
+                directory: Color::Rgb(96, 165, 250),
+                code: Color::Rgb(250, 204, 21),
+                config: Color::Rgb(148, 190, 210),
+                document: Color::Rgb(226, 226, 236),
+                image: Color::Rgb(216, 130, 220),
+                media: Color::Rgb(120, 200, 190),
+                archive: Color::Rgb(240, 130, 120),
+                executable: Color::Rgb(126, 217, 130),
+                muted: Color::Rgb(128, 128, 148),
+                plain: Color::Rgb(205, 205, 218),
+            },
+        }
+    }
+}
+
+impl ResolvedTheme {
+    /// Ethan Schoonover's Solarized Light. The eight accents are unchanged from
+    /// the palette (they are tuned to read on the light *and* dark bases); the
+    /// neutrals map to base00/base1 for text and base2 for surfaces.
+    fn solarized_light() -> Self {
+        let base00 = Color::Rgb(0x65, 0x7b, 0x83); // body text
+        let base01 = Color::Rgb(0x58, 0x6e, 0x75); // emphasized text
+        let base1 = Color::Rgb(0x93, 0xa1, 0xa1); // comments / secondary
+        let base2 = Color::Rgb(0xee, 0xe8, 0xd5); // highlighted surface
+        let base3 = Color::Rgb(0xfd, 0xf6, 0xe3); // background
+        let blue = Color::Rgb(0x26, 0x8b, 0xd2);
+        let yellow = Color::Rgb(0xb5, 0x89, 0x00);
+        let orange = Color::Rgb(0xcb, 0x4b, 0x16);
+        let red = Color::Rgb(0xdc, 0x32, 0x2f);
+        let magenta = Color::Rgb(0xd3, 0x36, 0x82);
+        let cyan = Color::Rgb(0x2a, 0xa1, 0x98);
+        let green = Color::Rgb(0x85, 0x99, 0x00);
+        Self {
+            accent: blue,
+            status_bg: base2,
+            selected_bg: Color::Rgb(0xdc, 0xd5, 0xbe), // a touch darker than base2
+            visual_bg: Color::Rgb(0xf7, 0xe4, 0xb0), // warm highlight
+            mark_fg: orange,
+            base_bg: Some(base3),
+            dim: base1,
+            border: base1,
+            // Menus and dialogs stay on Solarized's dark base (base02): a dark
+            // panel over the light surface, so their existing light text reads
+            // without recoloring every popup.
+            popup_bg: Color::Rgb(0x07, 0x36, 0x42),
+            file: FilePalette {
+                directory: blue,
+                code: yellow,
+                config: cyan,
+                document: base01,
+                image: magenta,
+                media: cyan,
+                archive: red,
+                executable: green,
+                muted: base1,
+                plain: base00,
+            },
         }
     }
 }
@@ -220,9 +309,28 @@ fn parse_color(s: &str) -> Option<Color> {
 
 /// Resolve a Lua [`Theme`] into a concrete palette, collecting any invalid
 /// color specs as human-readable errors (the default is kept for those).
+/// Named palettes selectable with `cian.set_theme "<name>"`.
+fn theme_preset(name: &str) -> Option<ResolvedTheme> {
+    match name.trim().to_lowercase().replace([' ', '_'], "-").as_str() {
+        "solarized-light" | "solarized" => Some(ResolvedTheme::solarized_light()),
+        "default" | "dark" => Some(ResolvedTheme::default()),
+        _ => None,
+    }
+}
+
 fn resolve_theme(t: &cian_lua::Theme) -> (ResolvedTheme, Vec<String>) {
-    let mut c = ResolvedTheme::default();
     let mut errors = Vec::new();
+    // Start from the named preset if one was chosen, else the dark default.
+    let mut c = match &t.preset {
+        Some(name) => theme_preset(name).unwrap_or_else(|| {
+            errors.push(format!(
+                "theme.preset: unknown preset {:?} (try \"solarized-light\")",
+                name
+            ));
+            ResolvedTheme::default()
+        }),
+        None => ResolvedTheme::default(),
+    };
     let mut apply = |spec: &Option<String>, slot: &mut Color, label: &str| {
         if let Some(s) = spec {
             match parse_color(s) {
@@ -6142,6 +6250,11 @@ fn draw_zoomed(f: &mut Frame, area: Rect, app: &mut App, ov: AnimOverride) {
 
 fn draw(f: &mut Frame, app: &mut App) {
     let area = f.area();
+    // A light theme paints the whole surface so gaps, the shell panel and the
+    // bottom bars share one background rather than showing the terminal's own.
+    if let Some(bg) = theme().base_bg {
+        f.render_widget(Block::default().style(Style::default().bg(bg)), area);
+    }
     // Command and filter modes add a prompt line above the status bar; the key
     // hints take another. A very short window drops the hints rather than the
     // listing.
@@ -6445,19 +6558,20 @@ enum FileKind {
 
 impl FileKind {
     fn color(self) -> Color {
+        // From the active theme's palette, so a light theme recolors the whole
+        // set at once rather than fighting these fixed values.
+        let p = &theme().file;
         match self {
-            // Not `Color::Blue`: the terminal's ANSI blue is #0000ee, which is
-            // close to unreadable on a dark background.
-            FileKind::Directory => Color::Rgb(96, 165, 250),
-            FileKind::Code => Color::Rgb(250, 204, 21),
-            FileKind::Config => Color::Rgb(148, 190, 210),
-            FileKind::Document => Color::Rgb(226, 226, 236),
-            FileKind::Image => Color::Rgb(216, 130, 220),
-            FileKind::Media => Color::Rgb(120, 200, 190),
-            FileKind::Archive => Color::Rgb(240, 130, 120),
-            FileKind::Executable => Color::Rgb(126, 217, 130),
-            FileKind::Muted => Color::Rgb(128, 128, 148),
-            FileKind::Plain => Color::Rgb(205, 205, 218),
+            FileKind::Directory => p.directory,
+            FileKind::Code => p.code,
+            FileKind::Config => p.config,
+            FileKind::Document => p.document,
+            FileKind::Image => p.image,
+            FileKind::Media => p.media,
+            FileKind::Archive => p.archive,
+            FileKind::Executable => p.executable,
+            FileKind::Muted => p.muted,
+            FileKind::Plain => p.plain,
         }
     }
 
@@ -6549,10 +6663,11 @@ fn draw_file_pane(
     tab_rects: &mut Vec<(FocusedPane, usize, Rect)>,
 ) {
     let focus_bg = focus_badge_color(mode);
+    let bg = bg.or(theme().base_bg);
     let mut border_style = if focused {
         Style::default().fg(focus_bg).add_modifier(Modifier::BOLD)
     } else {
-        Style::default().fg(Color::DarkGray)
+        Style::default().fg(theme().border)
     };
     // An operation that just landed here lights the border, fading out.
     if flash > 0.0 {
@@ -6607,7 +6722,7 @@ fn draw_file_pane(
             Span::styled(format!("{}  ", icon_for(e)), icon_style),
             Span::styled(format!("{:<w$}", name, w = name_w), name_style),
         ];
-        let meta_style = Style::default().fg(Color::Rgb(130, 130, 155));
+        let meta_style = Style::default().fg(theme().dim);
         if show_size {
             // Directories have no meaningful byte count of their own.
             let s = if e.is_dir { "—".to_string() } else { cian_core::human_size(e.len) };
@@ -6739,7 +6854,7 @@ fn draw_shell_inner(
     let border_style = if focused {
         Style::default().fg(theme().accent).add_modifier(Modifier::BOLD)
     } else {
-        Style::default().fg(Color::DarkGray)
+        Style::default().fg(theme().border)
     };
     let mut offsets = Vec::new();
     let title = shell_tabs_title(shell, focused, &mut offsets);
@@ -6810,6 +6925,9 @@ fn draw_shell_inner(
                 );
             }
         }
+        if let Some(bg) = theme().base_bg {
+            tint_default_cells(f, inner, bg);
+        }
         return;
     }
 
@@ -6823,6 +6941,11 @@ fn draw_shell_inner(
     }
     let tab = &shell.tabs[active];
     render_node(f, tab, active, root, inner, tab.active, focused, false, dividers, leaves, ov);
+    // Fill any cell the shell left at the terminal default with the theme's
+    // base, so a light theme's shell panel matches the rest.
+    if let Some(bg) = theme().base_bg {
+        tint_default_cells(f, inner, bg);
+    }
 }
 
 /// Recursively size each leaf's PTY to its rect. `bordered` is true for leaves
@@ -7409,7 +7532,7 @@ fn draw_popup(
             .borders(Borders::ALL)
             .border_type(border_type())
             .border_style(Style::default().fg(theme().accent))
-            .style(Style::default().bg(Color::Rgb(24, 24, 34)));
+            .style(Style::default().bg(theme().popup_bg));
         let inner = rect.inner(Margin { vertical: 1, horizontal: 1 });
         f.render_widget(block, rect);
 
@@ -8287,6 +8410,7 @@ fn draw_popup(
         .borders(Borders::ALL)
         .border_type(border_type())
         .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
+        .style(Style::default().bg(theme().popup_bg))
         .title(title);
     let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
     f.render_widget(block, rect);
@@ -8314,6 +8438,45 @@ mod tests {
     }
     fn code(k: KeyCode) -> KeyEvent {
         KeyEvent::new(k, KeyModifiers::NONE)
+    }
+
+    #[test]
+    fn the_solarized_light_preset_paints_a_light_base() {
+        let t = cian_lua::Theme { preset: Some("solarized-light".into()), ..Default::default() };
+        let (c, errors) = resolve_theme(&t);
+        assert!(errors.is_empty(), "{:?}", errors);
+        assert_eq!(c.base_bg, Some(Color::Rgb(0xfd, 0xf6, 0xe3)), "base3 background");
+        assert_eq!(c.accent, Color::Rgb(0x26, 0x8b, 0xd2), "solarized blue accent");
+        assert_eq!(c.file.directory, Color::Rgb(0x26, 0x8b, 0xd2));
+    }
+
+    #[test]
+    fn the_default_theme_keeps_the_dark_look() {
+        let (c, errors) = resolve_theme(&cian_lua::Theme::default());
+        assert!(errors.is_empty());
+        assert_eq!(c.base_bg, None, "no painted background — the terminal shows through");
+        assert_eq!(c.accent, Color::Cyan);
+    }
+
+    #[test]
+    fn per_key_overrides_apply_on_top_of_a_preset() {
+        let t = cian_lua::Theme {
+            preset: Some("solarized-light".into()),
+            accent: Some("#ff0000".into()),
+            ..Default::default()
+        };
+        let (c, errors) = resolve_theme(&t);
+        assert!(errors.is_empty());
+        assert_eq!(c.accent, Color::Rgb(255, 0, 0), "override wins");
+        assert_eq!(c.base_bg, Some(Color::Rgb(0xfd, 0xf6, 0xe3)), "rest stays solarized");
+    }
+
+    #[test]
+    fn an_unknown_preset_reports_and_falls_back_to_dark() {
+        let t = cian_lua::Theme { preset: Some("nope".into()), ..Default::default() };
+        let (c, errors) = resolve_theme(&t);
+        assert!(errors.iter().any(|e| e.contains("unknown preset")), "{:?}", errors);
+        assert_eq!(c.base_bg, None);
     }
 
     /// An app rooted at a temp dir containing `names`.

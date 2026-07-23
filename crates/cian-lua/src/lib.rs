@@ -4,6 +4,7 @@
 //! exposes a small WezTerm-flavoured `cian` API to user scripts:
 //!
 //! ```lua
+//! cian.set_theme "solarized-light"   -- a named preset, or
 //! cian.set_theme({ accent = "#00d7d7", mark_fg = "yellow" })
 //! cian.set_keymap("x", "delete")          -- bind key `x` to the delete action
 //! cian.set_option("clipboard_on_copy", false)
@@ -32,6 +33,9 @@ pub type ColorSpec = String;
 /// User-supplied color overrides. `None` means "keep the built-in default".
 #[derive(Debug, Clone, Default)]
 pub struct Theme {
+    /// A named palette to start from — e.g. "solarized-light". Unset uses the
+    /// built-in dark theme. Per-key overrides below still apply on top.
+    pub preset: Option<String>,
     pub accent: Option<ColorSpec>,
     pub status_bg: Option<ColorSpec>,
     pub selected_bg: Option<ColorSpec>,
@@ -328,13 +332,31 @@ fn parse_users(t: Option<Table>) -> mlua::Result<Vec<SshUser>> {
 fn install_api(lua: &Lua, builder: &Rc<RefCell<Builder>>) -> mlua::Result<()> {
     let cian = lua.create_table()?;
 
-    // cian.set_theme { accent = "...", status_bg = "...", ... }
+    // cian.set_theme "solarized-light"   -- pick a preset, or
+    // cian.set_theme { preset = "solarized-light", accent = "#...", ... }
     {
         let b = builder.clone();
         cian.set(
             "set_theme",
-            lua.create_function(move |_, t: Table| {
+            lua.create_function(move |_, v: mlua::Value| {
                 let mut bm = b.borrow_mut();
+                // A bare string is shorthand for choosing a preset.
+                let t = match v {
+                    mlua::Value::String(s) => {
+                        bm.theme.preset = Some(s.to_str()?.to_string());
+                        return Ok(());
+                    }
+                    mlua::Value::Table(t) => t,
+                    other => {
+                        return Err(mlua::Error::runtime(format!(
+                            "set_theme expects a table or a preset name, got {}",
+                            other.type_name()
+                        )))
+                    }
+                };
+                if let Some(v) = t.get::<Option<String>>("preset")? {
+                    bm.theme.preset = Some(v);
+                }
                 if let Some(v) = t.get::<Option<String>>("accent")? {
                     bm.theme.accent = Some(v);
                 }
