@@ -10,6 +10,9 @@ description = "Domain logic for cian: file operations, marks, history, bookmarks
 anyhow   = { workspace = true }
 chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
 dunce = "1.0.5"
+# Text decoding for the viewer (Shift_JIS / UTF-16 …). Pure Rust, the same
+# engine Firefox uses; no C dependency, so the Windows build stays clean.
+encoding_rs = "0.8"
 # Cross-platform free/total disk space for `:df`. Tiny, uses the OS call
 # directly (statvfs / GetDiskFreeSpaceEx) rather than shelling out.
 fs2 = "0.4.3"

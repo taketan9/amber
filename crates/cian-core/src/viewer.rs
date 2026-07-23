@@ -4,6 +4,10 @@
 //! this reads a bounded prefix rather than the whole file: opening a 4 GB log
 //! to look at its first page should not cost 4 GB of memory or any noticeable
 //! wait. Binary files are rendered as hex instead of as mojibake.
+//!
+//! The raw prefix is kept so the text can be re-decoded in another encoding on
+//! demand — a Shift_JIS or UTF-16 file opened as UTF-8 is mojibake until the
+//! viewer is told which encoding it really is.
 
 use std::fs;
 use std::io::Read;
@@ -26,15 +30,95 @@ pub enum ViewKind {
     Binary,
 }
 
+/// Text encodings the viewer can decode. Deliberately short — the ones that
+/// actually turn up on a Japanese Windows machine.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TextEncoding {
+    Utf8,
+    ShiftJis,
+    Utf16Le,
+    Utf16Be,
+}
+
+impl TextEncoding {
+    pub fn label(self) -> &'static str {
+        match self {
+            TextEncoding::Utf8 => "UTF-8",
+            TextEncoding::ShiftJis => "Shift_JIS",
+            TextEncoding::Utf16Le => "UTF-16LE",
+            TextEncoding::Utf16Be => "UTF-16BE",
+        }
+    }
+
+    /// The next encoding in a cycle, for a "switch encoding" key.
+    pub fn next(self) -> Self {
+        match self {
+            TextEncoding::Utf8 => TextEncoding::ShiftJis,
+            TextEncoding::ShiftJis => TextEncoding::Utf16Le,
+            TextEncoding::Utf16Le => TextEncoding::Utf16Be,
+            TextEncoding::Utf16Be => TextEncoding::Utf8,
+        }
+    }
+
+    fn engine(self) -> &'static encoding_rs::Encoding {
+        match self {
+            TextEncoding::Utf8 => encoding_rs::UTF_8,
+            TextEncoding::ShiftJis => encoding_rs::SHIFT_JIS,
+            TextEncoding::Utf16Le => encoding_rs::UTF_16LE,
+            TextEncoding::Utf16Be => encoding_rs::UTF_16BE,
+        }
+    }
+
+    fn decode(self, bytes: &[u8]) -> String {
+        // `decode` also strips a leading BOM and never fails — invalid bytes
+        // become U+FFFD, which is what a viewer wants.
+        self.engine().decode(bytes).0.into_owned()
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct View {
     pub kind: ViewKind,
-    /// Display lines, already split and expanded.
+    /// Display lines, already split and expanded, in the current encoding.
     pub lines: Vec<String>,
     /// Total size of the file, which may exceed what was read.
     pub total_bytes: u64,
     /// True when the file was longer than [`VIEW_LIMIT`].
     pub truncated: bool,
+    /// The encoding `lines` were decoded with.
+    pub encoding: TextEncoding,
+    /// The raw prefix that was read, kept so [`View::redecode`] can rebuild
+    /// `lines` in a different encoding.
+    bytes: Vec<u8>,
+}
+
+impl View {
+    /// Re-decode the kept bytes as `enc`, switching to text if it was showing
+    /// hex (choosing an encoding is a deliberate "read this as text").
+    pub fn redecode(&mut self, enc: TextEncoding) {
+        self.encoding = enc;
+        self.kind = ViewKind::Text;
+        self.lines = to_lines(&enc.decode(&self.bytes));
+    }
+}
+
+/// Split decoded text into display lines, expanding tabs so they do not
+/// collapse to one cell and misalign everything after them.
+fn to_lines(text: &str) -> Vec<String> {
+    text.lines().map(|l| l.replace('\t', "    ")).collect()
+}
+
+/// Guess the encoding from a byte-order mark, if present.
+fn bom_encoding(bytes: &[u8]) -> Option<TextEncoding> {
+    if bytes.starts_with(&[0xEF, 0xBB, 0xBF]) {
+        Some(TextEncoding::Utf8)
+    } else if bytes.starts_with(&[0xFF, 0xFE]) {
+        Some(TextEncoding::Utf16Le)
+    } else if bytes.starts_with(&[0xFE, 0xFF]) {
+        Some(TextEncoding::Utf16Be)
+    } else {
+        None
+    }
 }
 
 /// Read the beginning of `path` for display.
@@ -53,21 +137,30 @@ pub fn view_file(path: &Path) -> Result<View> {
         .read_to_end(&mut buf)
         .with_context(|| format!("read {}", path.display()))?;
 
+    // A UTF-16 BOM means text even though the bytes are full of NULs; honour it
+    // before the NUL sniff writes the file off as binary.
+    if let Some(enc) = bom_encoding(&buf) {
+        let lines = to_lines(&enc.decode(&buf));
+        return Ok(View { kind: ViewKind::Text, lines, total_bytes, truncated, encoding: enc, bytes: buf });
+    }
+
     // A NUL in the first few KB is the usual signal; UTF-8 text does not
     // contain one, and every binary format seems to within its header.
     let binary = buf[..buf.len().min(SNIFF)].contains(&0);
     if binary {
-        return Ok(View { kind: ViewKind::Binary, lines: hex_dump(&buf), total_bytes, truncated });
+        let lines = hex_dump(&buf);
+        return Ok(View {
+            kind: ViewKind::Binary,
+            lines,
+            total_bytes,
+            truncated,
+            encoding: TextEncoding::Utf8,
+            bytes: buf,
+        });
     }
 
-    let text = String::from_utf8_lossy(&buf);
-    let lines = text
-        .lines()
-        // Tabs are common in source and would otherwise render as a single
-        // cell, misaligning everything after them.
-        .map(|l| l.replace('\t', "    "))
-        .collect();
-    Ok(View { kind: ViewKind::Text, lines, total_bytes, truncated })
+    let lines = to_lines(&TextEncoding::Utf8.decode(&buf));
+    Ok(View { kind: ViewKind::Text, lines, total_bytes, truncated, encoding: TextEncoding::Utf8, bytes: buf })
 }
 
 /// `offset  hex bytes  |ascii|`, sixteen bytes to a line.
@@ -105,6 +198,7 @@ mod tests {
         assert_eq!(v.kind, ViewKind::Text);
         assert_eq!(v.lines, vec!["one", "    two", "three"]);
         assert!(!v.truncated);
+        assert_eq!(v.encoding, TextEncoding::Utf8);
     }
 
     /// Showing a compiled file as text produces a screen of mojibake that
@@ -164,5 +258,48 @@ mod tests {
     fn a_directory_is_refused() {
         let d = tempfile::tempdir().unwrap();
         assert!(view_file(d.path()).is_err());
+    }
+
+    /// A Shift_JIS file is mojibake as UTF-8 but readable once re-decoded.
+    #[test]
+    fn shift_jis_can_be_re_decoded() {
+        let d = tempfile::tempdir().unwrap();
+        let f = d.path().join("sjis.txt");
+        // "日本語" in Shift_JIS.
+        let sjis = [0x93, 0xfa, 0x96, 0x7b, 0x8c, 0xea, b'\n'];
+        fs::write(&f, sjis).unwrap();
+        let mut v = view_file(&f).unwrap();
+        assert_eq!(v.kind, ViewKind::Text);
+        assert_ne!(v.lines[0], "日本語", "as UTF-8 it is mojibake");
+        v.redecode(TextEncoding::ShiftJis);
+        assert_eq!(v.lines[0], "日本語", "Shift_JIS decodes correctly");
+        assert_eq!(v.encoding, TextEncoding::ShiftJis);
+    }
+
+    /// A UTF-16LE file has NULs, so it is hex by default; choosing UTF-16
+    /// switches it to readable text.
+    #[test]
+    fn utf16_without_bom_is_hex_until_chosen() {
+        let d = tempfile::tempdir().unwrap();
+        let f = d.path().join("u16.txt");
+        // "Hi" in UTF-16LE, no BOM.
+        fs::write(&f, [0x48, 0x00, 0x69, 0x00]).unwrap();
+        let mut v = view_file(&f).unwrap();
+        assert_eq!(v.kind, ViewKind::Binary, "NULs make it look binary");
+        v.redecode(TextEncoding::Utf16Le);
+        assert_eq!(v.kind, ViewKind::Text);
+        assert_eq!(v.lines[0], "Hi");
+    }
+
+    /// A UTF-16LE BOM is recognised as text straight away.
+    #[test]
+    fn a_utf16_bom_is_read_as_text() {
+        let d = tempfile::tempdir().unwrap();
+        let f = d.path().join("bom.txt");
+        fs::write(&f, [0xFF, 0xFE, 0x48, 0x00, 0x69, 0x00]).unwrap();
+        let v = view_file(&f).unwrap();
+        assert_eq!(v.kind, ViewKind::Text);
+        assert_eq!(v.encoding, TextEncoding::Utf16Le);
+        assert_eq!(v.lines[0], "Hi");
     }
 }

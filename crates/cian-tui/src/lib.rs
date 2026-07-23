@@ -985,7 +985,14 @@ enum Popup {
     /// Sort-order picker for the focused pane.
     SortPicker { cursor: usize },
     /// A file's contents, scrollable.
-    Viewer { title: String, view: cian_core::viewer::View, scroll: usize },
+    Viewer {
+        title: String,
+        view: cian_core::viewer::View,
+        scroll: usize,
+        /// Selected line range `(anchor, cursor)` as absolute line indices, for
+        /// copying. `None` when nothing is selected.
+        sel: Option<(usize, usize)>,
+    },
     /// The left pane's file against the right pane's, side by side.
     ///
     /// Both the full row list and the folded one are kept: folding is a toggle
@@ -1504,6 +1511,8 @@ pub struct App {
     tab_rects: Vec<(FocusedPane, usize, Rect)>,
     /// The context menu's on-screen rect (inner area), for clicking its items.
     menu_rect: Rect,
+    /// The viewer's text body rect, for mapping a mouse click to a line.
+    viewer_rect: Rect,
     /// The active shell pane's slot rect, stashed on pane-zoom so the shrink
     /// back knows where to land (the split rects are gone while zoomed).
     pane_zoom_return: Option<Rect>,
@@ -1610,6 +1619,7 @@ impl App {
             shell_leaves: Vec::new(),
             tab_rects: Vec::new(),
             menu_rect: Rect::new(0, 0, 0, 0),
+            viewer_rect: Rect::new(0, 0, 0, 0),
             pane_zoom_return: None,
             started: Instant::now(),
             scp_dir: None,
@@ -2275,6 +2285,37 @@ impl App {
             _ => &self.left,
         };
         Some(tabs.active_ref().cwd.clone())
+    }
+
+    /// Copy the viewer's selected lines (or the whole file when nothing is
+    /// selected) to the clipboard.
+    fn copy_viewer_selection(&mut self) {
+        let text = if let Popup::Viewer { view, sel, .. } = &self.popup {
+            let n = view.lines.len();
+            let range = match sel {
+                Some((a, b)) => (*a.min(b))..=(*a.max(b)).min(n.saturating_sub(1)),
+                None => 0..=n.saturating_sub(1),
+            };
+            if n == 0 {
+                String::new()
+            } else {
+                view.lines[*range.start()..=*range.end()].join("\n")
+            }
+        } else {
+            return;
+        };
+        if text.is_empty() {
+            self.message = Some("nothing to copy".into());
+            return;
+        }
+        if let Some(cb) = self.clipboard.as_mut() {
+            let _ = cb.set_text(text);
+        }
+        self.message = Some("copied".into());
+        // A copy from a selection ends the gesture; leave the viewer open.
+        if let Popup::Viewer { sel, .. } = &mut self.popup {
+            *sel = None;
+        }
     }
 
     /// Send the clipboard's text to the shell, as typing it would. Raw, with
@@ -2949,6 +2990,7 @@ impl App {
                     title: entry.name.clone(),
                     view,
                     scroll: 0,
+                    sel: None,
                 }
             }
             Err(e) => self.message = Some(format!("cannot view: {}", e)),
@@ -3699,6 +3741,36 @@ impl App {
                 }
                 _ => {}
             }
+        }
+
+        // In the viewer, drag selects a range of lines; right-click (or `c`)
+        // copies it. Handled before the blanket popup guard below.
+        if matches!(self.popup, Popup::Viewer { .. }) {
+            let body = self.viewer_rect;
+            let line_at = |row: u16, scroll: usize, n: usize| -> usize {
+                let rel = row.saturating_sub(body.y) as usize;
+                (scroll + rel).min(n.saturating_sub(1))
+            };
+            let in_body = col >= body.x
+                && col < body.x + body.width
+                && row >= body.y
+                && row < body.y + body.height;
+            match ev.kind {
+                MouseEventKind::Down(MouseButton::Left) if in_body => {
+                    if let Popup::Viewer { view, scroll, sel, .. } = &mut self.popup {
+                        let l = line_at(row, *scroll, view.lines.len());
+                        *sel = Some((l, l));
+                    }
+                }
+                MouseEventKind::Drag(MouseButton::Left) => {
+                    if let Popup::Viewer { view, scroll, sel: Some(s), .. } = &mut self.popup {
+                        s.1 = line_at(row, *scroll, view.lines.len());
+                    }
+                }
+                MouseEventKind::Down(MouseButton::Right) => self.copy_viewer_selection(),
+                _ => {}
+            }
+            return;
         }
 
         // The context menu is mouse-navigable: hovering a row highlights it,
@@ -4694,7 +4766,24 @@ impl App {
             }
             return Ok(());
         }
-        if let Popup::Viewer { view, scroll, .. } = &mut self.popup {
+        if matches!(self.popup, Popup::Viewer { .. }) {
+            // Shift+Enter cycles the text encoding (UTF-8 → Shift_JIS → UTF-16…)
+            // and re-decodes the same bytes.
+            if key.code == KeyCode::Enter && key.modifiers.contains(KeyModifiers::SHIFT) {
+                if let Popup::Viewer { view, sel, .. } = &mut self.popup {
+                    let next = view.encoding.next();
+                    view.redecode(next);
+                    *sel = None;
+                }
+                return Ok(());
+            }
+            // c / y copy the selected lines, or the whole file if nothing is
+            // selected.
+            if matches!(key.code, KeyCode::Char('c') | KeyCode::Char('y')) {
+                self.copy_viewer_selection();
+                return Ok(());
+            }
+            let Popup::Viewer { view, scroll, sel, .. } = &mut self.popup else { return Ok(()) };
             let last = view.lines.len().saturating_sub(1);
             match key.code {
                 KeyCode::Esc | KeyCode::Char('q') => self.popup = Popup::None,
@@ -4703,7 +4792,7 @@ impl App {
                 KeyCode::Char('d') | KeyCode::PageDown => *scroll = (*scroll + 20).min(last),
                 KeyCode::Char('u') | KeyCode::PageUp => *scroll = scroll.saturating_sub(20),
                 KeyCode::Char('g') | KeyCode::Home => *scroll = 0,
-                KeyCode::Char('G') | KeyCode::End => *scroll = last,
+                KeyCode::Char('G') | KeyCode::End => { *scroll = last; let _ = sel; }
                 _ => {}
             }
             return Ok(());
@@ -6051,6 +6140,7 @@ fn manual_sections() -> Vec<(&'static str, Vec<ManualEntry>)> {
                 entry("G", Some(CursorBottom), "jump to bottom"),
                 entry("l, Enter", Some(EnterDir), "enter folder / open file"),
                 entry("F3", None, "look inside: view a file, list an archive"),
+                entry("  in viewer", None, "drag=select, c=copy, Shift+Enter=encoding"),
                 entry("=", None, "compare the left pane's file with the right pane's"),
                 entry("-, Bksp", Some(Parent), "parent folder"),
                 entry("Left / Right", None, "focus the left / right pane"),
@@ -6739,6 +6829,10 @@ fn draw(f: &mut Frame, app: &mut App) {
         if let Popup::ContextMenu { items, at, .. } = &app.popup {
             app.menu_rect = context_menu_rect(items, *at, area);
         }
+        // And the viewer's text body, so a drag maps to a line.
+        if matches!(app.popup, Popup::Viewer { .. }) {
+            app.viewer_rect = viewer_body_rect(area);
+        }
         let find_state = app
             .find_job
             .as_ref()
@@ -6746,6 +6840,17 @@ fn draw(f: &mut Frame, app: &mut App) {
         let dests = app.dest_choices();
         draw_popup(f, area, &mut app.popup, &app.config.ssh_hosts, find_state, &dests);
     }
+}
+
+/// The viewer's text body rect, mirroring its renderer's geometry so a mouse
+/// click maps to the right line.
+fn viewer_body_rect(area: Rect) -> Rect {
+    let w = area.width.saturating_sub(4);
+    let h = area.height.saturating_sub(2);
+    let rect = centered_rect(w, h, area);
+    let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
+    let body_h = inner.height.saturating_sub(1);
+    Rect::new(inner.x, inner.y, inner.width, body_h)
 }
 
 /// The rect the context menu occupies, from its anchor and item count. Shared
@@ -8424,13 +8529,13 @@ fn draw_popup(
         return;
     }
 
-    if let Popup::Viewer { title, view, scroll } = popup {
+    if let Popup::Viewer { title, view, scroll, sel } = popup {
         let w = area.width.saturating_sub(4);
         let h = area.height.saturating_sub(2);
         let rect = centered_rect(w, h, area);
         f.render_widget(Clear, rect);
         let kind = match view.kind {
-            cian_core::viewer::ViewKind::Text => "text",
+            cian_core::viewer::ViewKind::Text => view.encoding.label(),
             cian_core::viewer::ViewKind::Binary => "binary",
         };
         let size = cian_core::human_size(view.total_bytes);
@@ -8453,6 +8558,8 @@ fn draw_popup(
         } else {
             0
         };
+        // Selected line range, for highlighting.
+        let sel_range = sel.map(|(a, b)| (a.min(b), a.max(b)));
         let rows: Vec<Line> = view
             .lines
             .iter()
@@ -8460,36 +8567,35 @@ fn draw_popup(
             .skip(*scroll)
             .take(body_h)
             .map(|(i, l)| {
+                let selected = sel_range.map(|(a, b)| i >= a && i <= b).unwrap_or(false);
+                let base =
+                    if selected { Style::default().bg(theme().selected_bg) } else { Style::default() };
                 let body = truncate(l, inner.width as usize - gutter);
                 if numbered {
                     Line::from(vec![
                         Span::styled(
                             format!("{:>w$} ", i + 1, w = gutter - 1),
-                            Style::default().fg(Color::Rgb(110, 110, 135)),
+                            base.fg(Color::Rgb(110, 110, 135)),
                         ),
-                        Span::raw(body),
+                        Span::styled(body, base.fg(Color::Rgb(210, 210, 222))),
                     ])
                 } else {
-                    Line::from(Span::styled(body, Style::default().fg(Color::Rgb(200, 200, 215))))
+                    Line::from(Span::styled(body, base.fg(Color::Rgb(200, 200, 215))))
                 }
             })
             .collect();
-        f.render_widget(
-            Paragraph::new(rows),
-            Rect::new(inner.x, inner.y, inner.width, body_h as u16),
-        );
+        let body_area = Rect::new(inner.x, inner.y, inner.width, body_h as u16);
+        f.render_widget(Paragraph::new(rows), body_area);
         let pos = match max_scroll {
             0 => "all".to_string(),
             m => format!("{}%", *scroll * 100 / m),
         };
         f.render_widget(
-            Paragraph::new(format!(" j/k scroll  u/d page  g/G ends  Esc close      {} ", pos))
-                .style(
-                    Style::default()
-                        .fg(Color::Black)
-                        .bg(theme().accent)
-                        .add_modifier(Modifier::BOLD),
-                ),
+            Paragraph::new(format!(
+                " drag=select  c=copy  S-Enter=encoding  j/k u/d g/G  Esc close   {} ",
+                pos
+            ))
+            .style(Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD)),
             Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1),
         );
         return;
@@ -11463,6 +11569,39 @@ mod tests {
         assert_eq!(title, "a.rs");
         assert_eq!(view.kind, cian_core::viewer::ViewKind::Text);
         assert_eq!(view.lines, vec!["fn main() {}", "second"]);
+    }
+
+    #[test]
+    fn the_viewer_copies_a_selected_line_range() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::write(d.path().join("a.txt"), "one\ntwo\nthree\nfour\n").unwrap();
+        let p = d.path().to_path_buf();
+        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        app.handle_key(code(KeyCode::F(3))).unwrap();
+
+        // Select lines 1..=2 (two, three) and copy with `c`.
+        if let Popup::Viewer { sel, .. } = &mut app.popup {
+            *sel = Some((1, 2));
+        }
+        app.copy_viewer_selection();
+        assert_eq!(app.message.as_deref(), Some("copied"));
+        // Selection cleared after the copy; viewer stays open.
+        assert!(matches!(app.popup, Popup::Viewer { sel: None, .. }));
+    }
+
+    #[test]
+    fn shift_enter_cycles_the_viewer_encoding() {
+        let d = tempfile::tempdir().unwrap();
+        // "日本語" in Shift_JIS: mojibake as UTF-8 until switched.
+        std::fs::write(d.path().join("s.txt"), [0x93u8, 0xfa, 0x96, 0x7b, 0x8c, 0xea, b'\n']).unwrap();
+        let p = d.path().to_path_buf();
+        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        app.handle_key(code(KeyCode::F(3))).unwrap();
+        // Shift+Enter → Shift_JIS.
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::SHIFT)).unwrap();
+        let Popup::Viewer { view, .. } = &app.popup else { panic!("no viewer") };
+        assert_eq!(view.encoding, cian_core::viewer::TextEncoding::ShiftJis);
+        assert_eq!(view.lines[0], "日本語");
     }
 
     #[test]
