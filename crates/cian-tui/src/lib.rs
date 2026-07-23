@@ -6212,6 +6212,9 @@ fn draw_pane_zoom_overlay(f: &mut Frame, rect: Rect, app: &mut App) {
             }
         }
     }
+    if let Some(base) = theme().base_bg {
+        tint_shell_base(f, inner, base, theme().file.plain);
+    }
 }
 
 /// Zoomed layout: only the focused surface, filling the available area.
@@ -6840,6 +6843,26 @@ fn tint_default_cells(f: &mut Frame, area: Rect, bg: Color) {
     }
 }
 
+/// Like [`tint_default_cells`], but also recolors the *foreground* of cells the
+/// shell left at the terminal default. On a light theme the shell's own default
+/// text is otherwise a pale terminal color on the pale base — the letters you
+/// type look washed out. Colors the shell chose for itself are left alone.
+fn tint_shell_base(f: &mut Frame, area: Rect, bg: Color, fg: Color) {
+    let buf = f.buffer_mut();
+    for y in area.y..area.y.saturating_add(area.height) {
+        for x in area.x..area.x.saturating_add(area.width) {
+            if let Some(cell) = buf.cell_mut((x, y)) {
+                if cell.bg == Color::Reset {
+                    cell.set_bg(bg);
+                }
+                if cell.fg == Color::Reset {
+                    cell.set_fg(fg);
+                }
+            }
+        }
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn draw_shell_inner(
     f: &mut Frame,
@@ -6926,7 +6949,7 @@ fn draw_shell_inner(
             }
         }
         if let Some(bg) = theme().base_bg {
-            tint_default_cells(f, inner, bg);
+            tint_shell_base(f, inner, bg, theme().file.plain);
         }
         return;
     }
@@ -6944,7 +6967,7 @@ fn draw_shell_inner(
     // Fill any cell the shell left at the terminal default with the theme's
     // base, so a light theme's shell panel matches the rest.
     if let Some(bg) = theme().base_bg {
-        tint_default_cells(f, inner, bg);
+        tint_shell_base(f, inner, bg, theme().file.plain);
     }
 }
 
