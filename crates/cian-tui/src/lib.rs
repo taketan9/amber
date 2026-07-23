@@ -787,7 +787,15 @@ enum Popup {
     None,
     ConfirmDelete { targets: Vec<PathBuf> },
     ConfirmTransfer { op: PendingOp, targets: Vec<PathBuf>, dest: PathBuf },
-    TextInput { title: String, prompt: String, buffer: String, kind: InputKind },
+    TextInput {
+        title: String,
+        prompt: String,
+        buffer: String,
+        kind: InputKind,
+        /// Caret position, as a char index into `buffer`, so the middle of a
+        /// name can be edited rather than only its end.
+        cursor: usize,
+    },
     Notice { lines: Vec<String> },
     /// The key manual. Unlike `Notice` it is far taller than any terminal, so
     /// it carries a scroll offset (in lines from the top).
@@ -1033,6 +1041,8 @@ enum InputKind {
     DestPath { op: PendingOp, targets: Vec<PathBuf> },
     /// A password for a zip about to be created. Rendered masked.
     ZipPassword { dest: PathBuf, sources: Vec<PathBuf> },
+    /// A new name for a single file being copied/moved into `dest_dir`.
+    TransferAs { op: PendingOp, src: PathBuf, dest_dir: PathBuf },
 }
 
 impl InputKind {
@@ -1316,6 +1326,9 @@ pub struct App {
     /// PTY spawns on a background thread, so the shell may not exist yet at
     /// the moment the user picks a connection.
     pending_shell_input: Option<String>,
+    /// A target path chosen for a shortcut being added from somewhere other
+    /// than the file cursor (e.g. the history list), consumed by the name step.
+    pending_shortcut_target: Option<String>,
     /// A password waiting for ssh to ask for it. See [`PendingAuth`].
     pending_auth: Option<PendingAuth>,
     /// A copy/move/delete running on a worker thread.
@@ -1390,6 +1403,7 @@ impl App {
             show_key_hints: config.options.key_hints.unwrap_or(true),
             zoom_return: None,
             pending_shell_input: None,
+            pending_shortcut_target: None,
             pending_auth: None,
             op_job: None,
             find_job: None,
@@ -1842,12 +1856,12 @@ impl App {
         if encrypt {
             // Collect the password on a masked prompt, then build the zip when
             // it is submitted.
-            self.popup = Popup::TextInput {
-                title: "zip password".into(),
-                prompt: "password (AES-256; Explorer cannot open — use 7-Zip):".into(),
-                buffer: String::new(),
-                kind: InputKind::ZipPassword { dest, sources },
-            };
+            self.popup = text_input(
+                "zip password",
+                "password (AES-256; Explorer cannot open — use 7-Zip):",
+                String::new(),
+                InputKind::ZipPassword { dest, sources },
+            );
         } else {
             self.start_zip(dest, sources, None);
         }
@@ -2027,30 +2041,30 @@ impl App {
     fn start_rename(&mut self) {
         let Some(p) = self.active_pane() else { return };
         let Some(e) = p.selected() else { return };
-        self.popup = Popup::TextInput {
-            title: "rename".into(),
-            prompt: "new name:".into(),
-            buffer: e.name.clone(),
-            kind: InputKind::Rename { original: e.path.clone() },
-        };
+        self.popup = text_input(
+                "rename",
+                "new name:",
+                e.name.clone(),
+                InputKind::Rename { original: e.path.clone() },
+            );
     }
     fn start_new_file(&mut self) {
         let Some(p) = self.active_pane() else { return };
-        self.popup = Popup::TextInput {
-            title: "new file".into(),
-            prompt: "name:".into(),
-            buffer: String::new(),
-            kind: InputKind::NewFile { parent: p.cwd.clone() },
-        };
+        self.popup = text_input(
+                "new file",
+                "name:",
+                String::new(),
+                InputKind::NewFile { parent: p.cwd.clone() },
+            );
     }
     fn start_new_dir(&mut self) {
         let Some(p) = self.active_pane() else { return };
-        self.popup = Popup::TextInput {
-            title: "new directory".into(),
-            prompt: "name:".into(),
-            buffer: String::new(),
-            kind: InputKind::NewDir { parent: p.cwd.clone() },
-        };
+        self.popup = text_input(
+                "new directory",
+                "name:",
+                String::new(),
+                InputKind::NewDir { parent: p.cwd.clone() },
+            );
     }
 
     // ------- Search -------
@@ -2085,22 +2099,22 @@ impl App {
     }
 
     fn start_shortcut_add(&mut self) {
-        self.popup = Popup::TextInput {
-            title: "new shortcut — name".into(),
-            prompt: "name:".into(),
-            buffer: String::new(),
-            kind: InputKind::ShortcutName { editing_index: None },
-        };
+        self.popup = text_input(
+                "new shortcut — name",
+                "name:",
+                String::new(),
+                InputKind::ShortcutName { editing_index: None },
+            );
     }
 
     fn start_shortcut_edit(&mut self, idx: usize) {
         let Some(s) = self.shortcuts.entries.get(idx).cloned() else { return };
-        self.popup = Popup::TextInput {
-            title: "edit shortcut — name".into(),
-            prompt: "name:".into(),
-            buffer: s.name,
-            kind: InputKind::ShortcutName { editing_index: Some(idx) },
-        };
+        self.popup = text_input(
+                "edit shortcut — name",
+                "name:",
+                s.name,
+                InputKind::ShortcutName { editing_index: Some(idx) },
+            );
     }
 
     fn copy_paths_to_clipboard(&mut self) {
@@ -2680,21 +2694,21 @@ impl App {
 
     // ------- Recursive search -------
     fn start_find_prompt(&mut self) {
-        self.popup = Popup::TextInput {
-            title: "find (recursive)".into(),
-            prompt: "name contains   (Ctrl+V paste, Ctrl+U clear):".into(),
-            buffer: String::new(),
-            kind: InputKind::FindRecursive,
-        };
+        self.popup = text_input(
+                "find (recursive)",
+                "name contains   (Ctrl+V paste, Ctrl+U clear):",
+                String::new(),
+                InputKind::FindRecursive,
+            );
     }
 
     fn start_grep_prompt(&mut self) {
-        self.popup = Popup::TextInput {
-            title: "grep (recursive)".into(),
-            prompt: "text inside files   (Ctrl+V paste, Ctrl+U clear):".into(),
-            buffer: String::new(),
-            kind: InputKind::GrepRecursive,
-        };
+        self.popup = text_input(
+                "grep (recursive)",
+                "text inside files   (Ctrl+V paste, Ctrl+U clear):",
+                String::new(),
+                InputKind::GrepRecursive,
+            );
     }
 
     /// Walk the tree below the focused pane on a worker thread.
@@ -2800,12 +2814,12 @@ impl App {
         // Seed with the current directory: most jumps are edits of where you
         // already are, and it doubles as a reminder of the expected form.
         let here = self.active_pane().map(|p| p.cwd.display().to_string()).unwrap_or_default();
-        self.popup = Popup::TextInput {
-            title: "go to path".into(),
-            prompt: "directory to enter, or file to open:".into(),
-            buffer: here,
-            kind: InputKind::JumpPath,
-        };
+        self.popup = text_input(
+                "go to path",
+                "directory to enter, or file to open:",
+                here,
+                InputKind::JumpPath,
+            );
     }
 
     /// Enter a typed directory, or open a typed file with its usual program.
@@ -3118,27 +3132,55 @@ impl App {
                 self.start_zip(dest.clone(), sources.clone(), Some(name));
                 return Ok(());
             }
+            InputKind::TransferAs { op, src, dest_dir } => {
+                let target = dest_dir.join(&name);
+                let verb = if *op == PendingOp::Move { "mv" } else { "cp" };
+                let res = match op {
+                    PendingOp::Move => std::fs::rename(src, &target).map_err(anyhow::Error::from),
+                    PendingOp::Copy => cian_core::ops::copy_one(src, dest_dir, Conflict::Overwrite)
+                        .and_then(|_| {
+                            let landed =
+                                dest_dir.join(src.file_name().unwrap_or_default());
+                            if landed != target {
+                                std::fs::rename(&landed, &target)?;
+                            }
+                            Ok(())
+                        }),
+                };
+                match res {
+                    Ok(_) => {
+                        self.reload_both();
+                        self.message = Some(format!("{} → {}", verb, target.display()));
+                    }
+                    Err(e) => self.message = Some(format!("{}: {}", verb, e)),
+                }
+                return Ok(());
+            }
             InputKind::ShortcutName { editing_index } => {
                 // chain into the next step: target input. A new shortcut
                 // defaults to the entry under the cursor, which is what you
                 // are almost always bookmarking — and saves typing a path that
                 // is already on screen.
+                // A target chosen elsewhere (the history list) wins; otherwise
+                // default to the entry under the cursor, which is what you are
+                // almost always bookmarking.
                 let here = self
-                    .active_pane()
-                    .and_then(|p| p.selected().map(|e| e.path.display().to_string()))
+                    .pending_shortcut_target
+                    .take()
+                    .or_else(|| {
+                        self.active_pane()
+                            .and_then(|p| p.selected().map(|e| e.path.display().to_string()))
+                    })
                     .unwrap_or_default();
                 let prev_target = editing_index
                     .and_then(|i| self.shortcuts.entries.get(i).map(|s| s.target.clone()))
                     .unwrap_or(here);
-                self.popup = Popup::TextInput {
-                    title: "shortcut — target".into(),
-                    prompt: "URL / path / app   (Ctrl+V paste, Ctrl+U clear):".into(),
-                    buffer: prev_target,
-                    kind: InputKind::ShortcutTarget {
-                        editing_index: *editing_index,
-                        name,
-                    },
-                };
+                self.popup = text_input(
+                    "shortcut — target",
+                    "URL / path / app   (Ctrl+V paste, Ctrl+U clear):",
+                    prev_target,
+                    InputKind::ShortcutTarget { editing_index: *editing_index, name },
+                );
                 return Ok(());
             }
             InputKind::ShortcutTarget { editing_index, name: stored_name } => {
@@ -3778,28 +3820,42 @@ impl App {
             // needs the clipboard, which lives on `self`.
             if ctrl && matches!(key.code, KeyCode::Char('v') | KeyCode::Char('V')) {
                 let text = self.clipboard_text();
-                if let Popup::TextInput { buffer, .. } = &mut self.popup {
+                if let Popup::TextInput { buffer, cursor, .. } = &mut self.popup {
                     match text {
                         // Paths and URLs are what get pasted here, and a
                         // trailing newline from `pwd` or a browser would
-                        // otherwise end up inside the value.
-                        Some(t) => buffer.push_str(t.trim_end_matches(['\r', '\n'])),
+                        // otherwise end up inside the value. Inserted at the
+                        // caret, not always the end.
+                        Some(t) => insert_str_at(buffer, cursor, t.trim_end_matches(['\r', '\n'])),
                         None => self.message = Some("clipboard has no text".into()),
                     }
                 }
                 return Ok(());
             }
-            let Popup::TextInput { buffer, .. } = &mut self.popup else { return Ok(()) };
+            let Popup::TextInput { buffer, cursor, .. } = &mut self.popup else { return Ok(()) };
+            let len = buffer.chars().count();
             match key.code {
                 KeyCode::Esc => { self.popup = Popup::None; return Ok(()); }
                 KeyCode::Enter => { return self.finish_text_input(); }
-                KeyCode::Backspace => { buffer.pop(); return Ok(()); }
+                // Caret movement, so the middle of a name can be reached.
+                KeyCode::Left => { *cursor = cursor.saturating_sub(1); return Ok(()); }
+                KeyCode::Right => { *cursor = (*cursor + 1).min(len); return Ok(()); }
+                KeyCode::Home => { *cursor = 0; return Ok(()); }
+                KeyCode::End => { *cursor = len; return Ok(()); }
+                KeyCode::Char('a') if ctrl => { *cursor = 0; return Ok(()); }
+                KeyCode::Char('e') if ctrl => { *cursor = len; return Ok(()); }
+                KeyCode::Backspace => { backspace_at(buffer, cursor); return Ok(()); }
+                KeyCode::Delete => { delete_at(buffer, cursor); return Ok(()); }
                 // Clear the line, as in any readline prompt.
-                KeyCode::Char('u') | KeyCode::Char('U') if ctrl => { buffer.clear(); return Ok(()); }
+                KeyCode::Char('u') | KeyCode::Char('U') if ctrl => {
+                    buffer.clear();
+                    *cursor = 0;
+                    return Ok(());
+                }
                 // Without this guard every Ctrl+<key> inserted its bare letter,
                 // so Ctrl+V typed a "v" instead of pasting.
                 KeyCode::Char(_) if ctrl => return Ok(()),
-                KeyCode::Char(c) => { buffer.push(c); return Ok(()); }
+                KeyCode::Char(c) => { insert_char_at(buffer, cursor, c); return Ok(()); }
                 _ => return Ok(()),
             }
         }
@@ -3812,6 +3868,18 @@ impl App {
                 }
                 KeyCode::Enter => { self.finish_search(); return Ok(()); }
                 KeyCode::Backspace => { buffer.pop(); return Ok(()); }
+                // Up/Down walk the matches while the box is still open, so
+                // several files with the same substring can be visited without
+                // closing and reopening the search.
+                KeyCode::Down | KeyCode::Up => {
+                    let forward = key.code == KeyCode::Down;
+                    let q = buffer.trim().to_string();
+                    if !q.is_empty() {
+                        self.last_search_query = Some(q);
+                        self.jump_to_next_match(forward);
+                    }
+                    return Ok(());
+                }
                 KeyCode::Char(c) => { buffer.push(c); return Ok(()); }
                 _ => return Ok(()),
             }
@@ -3939,15 +4007,15 @@ impl App {
                     else {
                         return Ok(());
                     };
-                    self.popup = Popup::TextInput {
-                        title: "destination".into(),
-                        prompt: "copy/move to which directory:".into(),
-                        buffer: self
+                    self.popup = text_input(
+                "destination",
+                "copy/move to which directory:",
+                self
                             .opposite_pane_cwd()
                             .map(|p| p.display().to_string())
                             .unwrap_or_default(),
-                        kind: InputKind::DestPath { op, targets },
-                    };
+                InputKind::DestPath { op, targets },
+            );
                 }
                 KeyCode::Enter => {
                     let c = *cursor;
@@ -4104,6 +4172,17 @@ impl App {
                     if *cursor > 0 { *cursor -= 1; }
                     return Ok(());
                 }
+                // `a` bookmarks the highlighted path as a shortcut: the target
+                // is filled in for you, and you just type a name.
+                KeyCode::Char('a') => {
+                    let target = entries.get(*cursor).map(|p| p.display().to_string());
+                    self.popup = Popup::None;
+                    if let Some(t) = target {
+                        self.pending_shortcut_target = Some(t);
+                        self.start_shortcut_add();
+                    }
+                    return Ok(());
+                }
                 _ => return Ok(()),
             }
         }
@@ -4182,7 +4261,10 @@ impl App {
         }
         match key.code {
             KeyCode::Esc | KeyCode::Char('n') => { self.popup = Popup::None; Ok(()) }
-            KeyCode::Char('y') => match &self.popup {
+            // Enter is the same as `y` here: the plain "yes" everyone reaches
+            // for. (Overwrite/permanent stays on its own key so it is never
+            // the accidental default.)
+            KeyCode::Char('y') | KeyCode::Enter => match &self.popup {
                 Popup::ConfirmDelete { .. } => self.finish_delete(DeleteMode::Trash),
                 Popup::ConfirmTransfer { .. } => self.finish_transfer(Conflict::Skip),
                 Popup::Notice { .. } => { self.popup = Popup::None; Ok(()) }
@@ -4195,8 +4277,26 @@ impl App {
                 Popup::ConfirmTransfer { .. } => self.finish_transfer(Conflict::Overwrite),
                 _ => Ok(()),
             },
-            KeyCode::Enter => {
-                if matches!(self.popup, Popup::Notice { .. }) { self.popup = Popup::None; }
+            // A single-item move/copy can be renamed on the way: `r` opens an
+            // editable name seeded with the destination filename.
+            KeyCode::Char('r') => {
+                if let Popup::ConfirmTransfer { op, targets, dest } = &self.popup {
+                    if targets.len() == 1 {
+                        let op = *op;
+                        let src = targets[0].clone();
+                        let dest = dest.clone();
+                        let name =
+                            src.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+                        self.popup = text_input(
+                            match op { PendingOp::Move => "move as", PendingOp::Copy => "copy as" },
+                            "new name in the destination:",
+                            name,
+                            InputKind::TransferAs { op, src, dest_dir: dest },
+                        );
+                    } else {
+                        self.message = Some("rename applies to a single item".into());
+                    }
+                }
                 Ok(())
             }
             _ => Ok(()),
@@ -4242,7 +4342,11 @@ impl App {
             return;
         }
         match &mut self.popup {
-            Popup::TextInput { buffer, .. } | Popup::Search { buffer } => {
+            Popup::TextInput { buffer, cursor, .. } => {
+                insert_str_at(buffer, cursor, &clean);
+                return;
+            }
+            Popup::Search { buffer } => {
                 buffer.push_str(&clean);
                 return;
             }
@@ -4854,6 +4958,70 @@ fn shell_quote(s: &str) -> String {
         return s.to_string();
     }
     format!("'{}'", s.replace('\'', "'\\''"))
+}
+
+/// Build a text-input popup with the caret at the end of the seeded text —
+/// where you want it for editing an existing name or path.
+fn text_input(
+    title: impl Into<String>,
+    prompt: impl Into<String>,
+    buffer: String,
+    kind: InputKind,
+) -> Popup {
+    let cursor = buffer.chars().count();
+    Popup::TextInput { title: title.into(), prompt: prompt.into(), buffer, kind, cursor }
+}
+
+/// Byte offset of the `n`-th char, or the string's length past the end. Used to
+/// edit a `String` at a caret expressed as a char index (so CJK is handled).
+fn char_byte(s: &str, char_idx: usize) -> usize {
+    s.char_indices().nth(char_idx).map(|(b, _)| b).unwrap_or(s.len())
+}
+
+fn insert_str_at(buffer: &mut String, cursor: &mut usize, s: &str) {
+    let b = char_byte(buffer, *cursor);
+    buffer.insert_str(b, s);
+    *cursor += s.chars().count();
+}
+
+fn insert_char_at(buffer: &mut String, cursor: &mut usize, c: char) {
+    let b = char_byte(buffer, *cursor);
+    buffer.insert(b, c);
+    *cursor += 1;
+}
+
+/// Delete the char before the caret (Backspace).
+fn backspace_at(buffer: &mut String, cursor: &mut usize) {
+    if *cursor == 0 {
+        return;
+    }
+    let start = char_byte(buffer, *cursor - 1);
+    let end = char_byte(buffer, *cursor);
+    buffer.replace_range(start..end, "");
+    *cursor -= 1;
+}
+
+/// Delete the char at the caret (Delete).
+fn delete_at(buffer: &mut String, cursor: &mut usize) {
+    let n = buffer.chars().count();
+    if *cursor >= n {
+        return;
+    }
+    let start = char_byte(buffer, *cursor);
+    let end = char_byte(buffer, *cursor + 1);
+    buffer.replace_range(start..end, "");
+}
+
+/// Render a single-line field with a visible caret at `cursor`, masking the
+/// text with dots when it is a secret.
+fn field_with_caret(buffer: &str, cursor: usize, secret: bool) -> String {
+    let shown: String = if secret {
+        "•".repeat(buffer.chars().count())
+    } else {
+        buffer.to_string()
+    };
+    let split = char_byte(&shown, cursor);
+    format!(">{}▏{}", &shown[..split], &shown[split..])
 }
 
 fn expand_path(input: &str) -> PathBuf {
@@ -7206,6 +7374,59 @@ fn draw_popup(
         return;
     }
 
+    if let Popup::History { entries, cursor } = popup {
+        // Its own renderer rather than the plain-text popup, so the selected
+        // row gets the same highlight bar the shortcuts list has.
+        let w = 96u16.min(area.width.saturating_sub(2));
+        let h = (entries.len() as u16 + 5).max(6).min(area.height.saturating_sub(2));
+        let rect = centered_rect(w, h, area);
+        f.render_widget(Clear, rect);
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_type(border_type())
+            .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
+            .title(format!(" history ({}) ", entries.len()));
+        let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
+        f.render_widget(block, rect);
+
+        let body_h = inner.height.saturating_sub(1) as usize;
+        let first = cursor.saturating_sub(body_h.saturating_sub(1));
+        for (row, (i, p)) in entries.iter().enumerate().skip(first).take(body_h).enumerate() {
+            let sel = i == *cursor;
+            let line_area = Rect::new(inner.x, inner.y + row as u16, inner.width, 1);
+            if sel {
+                f.render_widget(
+                    Block::default().style(Style::default().bg(theme().selected_bg)),
+                    line_area,
+                );
+            }
+            let base =
+                if sel { Style::default().bg(theme().selected_bg) } else { Style::default() };
+            let text_style = if sel {
+                base.fg(theme().accent).add_modifier(Modifier::BOLD)
+            } else {
+                base.fg(Color::Rgb(215, 215, 230))
+            };
+            f.render_widget(
+                Paragraph::new(Line::from(vec![
+                    Span::styled(if sel { " ▸ " } else { "   " }, text_style),
+                    Span::styled(
+                        truncate_middle(&p.display().to_string(), inner.width as usize - 4),
+                        text_style,
+                    ),
+                ])),
+                line_area,
+            );
+        }
+        f.render_widget(
+            Paragraph::new(" ↑↓/jk select  Enter jump  a add shortcut  Esc cancel ").style(
+                Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD),
+            ),
+            Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1),
+        );
+        return;
+    }
+
     if let Popup::DestPicker { op, targets, cursor } = popup {
         let rows = dests.len();
         let w = 84u16.min(area.width.saturating_sub(2));
@@ -7624,18 +7845,18 @@ fn draw_popup(
             let mut lines = vec![head, String::new()];
             for p in targets.iter().take(8) { lines.push(format!("  {}", p.display())); }
             if targets.len() > 8 { lines.push(format!("  ... and {} more", targets.len() - 8)); }
-            (title, lines, " y=Yes(skip on conflict)  a=Yes(overwrite)  n/Esc=cancel ".to_string())
-        }
-        Popup::TextInput { title, prompt, buffer, kind } => {
-            // A password is shown as dots so it does not sit in plain sight on
-            // a shared screen or a screenshot.
-            let shown = if kind.is_secret() {
-                "•".repeat(buffer.chars().count())
+            let foot = if targets.len() == 1 {
+                " y/Enter=Yes  a=overwrite  r=rename  n/Esc=cancel "
             } else {
-                buffer.clone()
+                " y/Enter=Yes(skip)  a=overwrite  n/Esc=cancel "
             };
-            let body = vec![prompt.clone(), format!(">{}_", shown)];
-            (format!(" {} ", title), body, " Enter=ok  Esc=cancel ".to_string())
+            (title, lines, foot.to_string())
+        }
+        Popup::TextInput { title, prompt, buffer, kind, cursor } => {
+            // The caret is drawn where editing will happen; a password is shown
+            // as dots so it does not sit in plain sight.
+            let body = vec![prompt.clone(), field_with_caret(buffer, *cursor, kind.is_secret())];
+            (format!(" {} ", title), body, " Enter=ok  ←→ move  Esc=cancel ".to_string())
         }
         Popup::Notice { lines } => {
             (" notice ".to_string(), lines.clone(), " Enter / Esc = close ".to_string())
@@ -7644,17 +7865,8 @@ fn draw_popup(
             (
                 " search ".to_string(),
                 vec!["find (substring, case-insensitive):".into(), format!("/{}_", buffer)],
-                " Enter=jump  Esc=cancel  (then n/N for next/prev) ".to_string(),
+                " ↑↓ step matches  Enter=jump  Esc=cancel  (then n/N) ".to_string(),
             )
-        }
-        Popup::History { entries, cursor } => {
-            let mut lines: Vec<String> =
-                vec![format!("recent paths ({} entries):", entries.len()), String::new()];
-            for (i, p) in entries.iter().enumerate() {
-                let marker = if i == *cursor { "▸ " } else { "  " };
-                lines.push(format!("{}{}", marker, p.display()));
-            }
-            (" history ".to_string(), lines, " ↑↓/jk select  Enter jump  Esc cancel ".to_string())
         }
         Popup::ConfirmQuit => {
             (
@@ -7682,6 +7894,7 @@ fn draw_popup(
         | Popup::SshHosts { .. }
         | Popup::SshUsers { .. }
         | Popup::Shortcuts { .. }
+        | Popup::History { .. }
         | Popup::FindResults { .. }
         | Popup::DestPicker { .. }
         | Popup::Viewer { .. }
@@ -9590,6 +9803,15 @@ mod tests {
         }
     }
 
+    /// Wait for a background file operation to finish.
+    fn drain_op(app: &mut App) {
+        for _ in 0..200 {
+            if app.op_job.is_none() { break; }
+            app.poll_op_job();
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+    }
+
     /// Run a `:`-command as if it were typed and Enter pressed.
     fn run_cmd(app: &mut App, line: &str) {
         app.command_buffer = line.to_string();
@@ -9768,12 +9990,7 @@ mod tests {
             app.active_pane_mut().unwrap().marks.insert(p);
         }
         run_cmd(&mut app, "zip bundle");
-        // The op runs on a worker; drain it to completion.
-        for _ in 0..200 {
-            if app.op_job.is_none() { break; }
-            app.poll_op_job();
-            std::thread::sleep(std::time::Duration::from_millis(5));
-        }
+        drain_op(&mut app);
         assert!(d.path().join("bundle.zip").is_file(), "zip created");
         let names: Vec<String> = cian_core::archive::list(&d.path().join("bundle.zip"))
             .unwrap()
@@ -9833,6 +10050,138 @@ mod tests {
         // A bracketed-paste event carrying a path, with a stray newline.
         app.insert_into_active_text("/some/path\n");
         assert_eq!(app.command_buffer, "cd /some/path", "newline stripped, text appended");
+    }
+
+    // ---- editing, confirms, search, history refinements ----
+
+    #[test]
+    fn the_text_field_edits_at_the_caret_not_only_the_end() {
+        let (_d, mut app) = app_with(&["report.txt"]);
+        app.active_pane_mut().unwrap().cursor = 0;
+        app.handle_key(code(KeyCode::Char('r'))).unwrap(); // rename prompt
+        // Seeded with the name, caret at the end.
+        {
+            let Popup::TextInput { buffer, cursor, .. } = &app.popup else { panic!("no prompt") };
+            assert_eq!(buffer, "report.txt");
+            assert_eq!(*cursor, "report.txt".chars().count());
+        }
+        // Move left past ".txt" (4 chars) and insert.
+        for _ in 0..4 { app.handle_key(code(KeyCode::Left)).unwrap(); }
+        for c in "_v2".chars() { app.handle_key(code(KeyCode::Char(c))).unwrap(); }
+        let Popup::TextInput { buffer, .. } = &app.popup else { panic!("no prompt") };
+        assert_eq!(buffer, "report_v2.txt", "inserted before the extension");
+
+        // Home, then Delete removes the first char.
+        app.handle_key(code(KeyCode::Home)).unwrap();
+        app.handle_key(code(KeyCode::Delete)).unwrap();
+        let Popup::TextInput { buffer, cursor, .. } = &app.popup else { panic!("no prompt") };
+        assert_eq!(buffer, "eport_v2.txt");
+        assert_eq!(*cursor, 0);
+
+        // Backspace at the start is a no-op, not a panic.
+        app.handle_key(code(KeyCode::Backspace)).unwrap();
+        let Popup::TextInput { buffer, .. } = &app.popup else { panic!("no prompt") };
+        assert_eq!(buffer, "eport_v2.txt");
+    }
+
+    #[test]
+    fn caret_editing_handles_multibyte_characters() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        app.popup = text_input("t", "p", "あい".to_string(), InputKind::JumpPath);
+        // Caret at end (2 chars). Left once → between あ and い. Insert 'X'.
+        app.handle_key(code(KeyCode::Left)).unwrap();
+        app.handle_key(code(KeyCode::Char('X'))).unwrap();
+        let Popup::TextInput { buffer, .. } = &app.popup else { panic!("no prompt") };
+        assert_eq!(buffer, "あXい", "insert respects char boundaries");
+    }
+
+    #[test]
+    fn enter_is_yes_on_a_transfer_confirm() {
+        let l = tempfile::tempdir().unwrap();
+        let r = tempfile::tempdir().unwrap();
+        std::fs::write(l.path().join("doc.txt"), b"hi").unwrap();
+        let mut app =
+            App::new(l.path().to_path_buf(), r.path().to_path_buf(), cian_lua::Config::default())
+                .unwrap();
+        run_cmd(&mut app, "cp"); // ConfirmTransfer to the right pane
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+        drain_op(&mut app);
+        assert!(r.path().join("doc.txt").is_file(), "Enter confirmed the copy");
+    }
+
+    #[test]
+    fn r_on_a_move_confirm_renames_into_the_destination() {
+        let l = tempfile::tempdir().unwrap();
+        let r = tempfile::tempdir().unwrap();
+        std::fs::write(l.path().join("old.txt"), b"data").unwrap();
+        let mut app =
+            App::new(l.path().to_path_buf(), r.path().to_path_buf(), cian_lua::Config::default())
+                .unwrap();
+        app.active_pane_mut().unwrap().cursor = 0;
+        app.handle_key(code(KeyCode::Char('m'))).unwrap(); // move confirm
+        app.handle_key(code(KeyCode::Char('r'))).unwrap(); // rename & move
+        // Seeded with the source name; clear it and type a new one.
+        let Popup::TextInput { kind: InputKind::TransferAs { .. }, .. } = &app.popup else {
+            panic!("expected the rename prompt, got {:?}", app.popup)
+        };
+        app.handle_key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL)).unwrap();
+        for c in "new.txt".chars() { app.handle_key(code(KeyCode::Char(c))).unwrap(); }
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+
+        assert!(r.path().join("new.txt").is_file(), "moved under the new name");
+        assert!(!l.path().join("old.txt").exists(), "and gone from the source");
+    }
+
+    #[test]
+    fn search_arrows_step_through_the_matches() {
+        let (_d, mut app) = app_with(&["a1.txt", "a2.txt", "zzz.txt"]);
+        // Sorted: a1, a2, zzz.
+        app.handle_key(code(KeyCode::Char('f'))).unwrap(); // search
+        app.handle_key(code(KeyCode::Char('a'))).unwrap(); // matches a1, a2
+        app.handle_key(code(KeyCode::Down)).unwrap();
+        let first = app.active_pane().unwrap().cursor;
+        assert!(app.active_pane().unwrap().entries[first].name.contains('a'));
+        app.handle_key(code(KeyCode::Down)).unwrap();
+        let second = app.active_pane().unwrap().cursor;
+        assert_ne!(first, second, "Down moved to the other match");
+        assert!(app.active_pane().unwrap().entries[second].name.contains('a'));
+    }
+
+    #[test]
+    fn history_a_bookmarks_the_selected_path_as_a_shortcut() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        // Seed some history and open it.
+        app.active_pane_mut().unwrap().history =
+            vec![PathBuf::from("/tmp/one"), PathBuf::from("/tmp/two")];
+        app.handle_key(code(KeyCode::Char('h'))).unwrap();
+        assert!(matches!(app.popup, Popup::History { .. }));
+        app.handle_key(code(KeyCode::Down)).unwrap(); // select /tmp/two
+        app.handle_key(code(KeyCode::Char('a'))).unwrap(); // add shortcut
+
+        // Now on the name step; type a name and continue.
+        let Popup::TextInput { kind: InputKind::ShortcutName { .. }, .. } = &app.popup else {
+            panic!("expected the shortcut-name prompt, got {:?}", app.popup)
+        };
+        for c in "mydir".chars() { app.handle_key(code(KeyCode::Char(c))).unwrap(); }
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+
+        // The target step must be pre-filled with the chosen history path.
+        let Popup::TextInput { buffer, kind: InputKind::ShortcutTarget { .. }, .. } = &app.popup
+        else {
+            panic!("expected the target step, got {:?}", app.popup)
+        };
+        assert_eq!(buffer, "/tmp/two", "target seeded from the history selection");
+    }
+
+    #[test]
+    fn the_history_popup_highlights_the_selection() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        app.active_pane_mut().unwrap().history =
+            vec![PathBuf::from("/tmp/alpha"), PathBuf::from("/tmp/beta")];
+        app.handle_key(code(KeyCode::Char('h'))).unwrap();
+        let shown = render(&mut app, 100, 20).join("\n");
+        assert!(shown.contains("▸"), "the selected row has a marker:\n{}", shown);
+        assert!(shown.contains("/tmp/alpha") && shown.contains("/tmp/beta"), "{}", shown);
     }
 
     /// Right-click Paste in the shell must send text to the terminal, not try
