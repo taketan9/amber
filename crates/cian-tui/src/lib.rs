@@ -21,7 +21,7 @@ use crossterm::terminal::{SetTitle,
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
 use ratatui::backend::{Backend, CrosstermBackend};
-use ratatui::layout::{Constraint, Direction, Layout, Margin, Rect};
+use ratatui::layout::{Alignment, Constraint, Direction, Layout, Margin, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use unicode_width::UnicodeWidthStr;
@@ -576,6 +576,31 @@ impl ShellPane {
     /// How many split panes the active tab has.
     fn active_pane_count(&self) -> usize {
         self.active_tab().map(|t| t.leaves().len()).unwrap_or(0)
+    }
+
+    /// The active pane's terminal title (what the shell/program set via OSC) —
+    /// usually `user@host: cwd`. Empty titles return None.
+    fn active_title(&self) -> Option<String> {
+        let t = self.active_tab()?;
+        let s = match t.nodes.get(t.active).and_then(|n| n.as_ref()) {
+            Some(Node::Leaf { session, .. }) => session,
+            _ => return None,
+        };
+        let title = s.parser().lock().ok()?.screen().title().trim().to_string();
+        if title.is_empty() { None } else { Some(title) }
+    }
+
+    /// The active pane's position among the tab's panes, `(index, total)`,
+    /// 1-based — for the "1 of 3" hint while one pane is maximized.
+    fn active_pane_position(&self) -> (usize, usize) {
+        match self.active_tab() {
+            Some(t) => {
+                let leaves = t.leaves();
+                let pos = leaves.iter().position(|&l| l == t.active).map(|i| i + 1).unwrap_or(1);
+                (pos, leaves.len())
+            }
+            None => (1, 1),
+        }
     }
 
     /// Set the active pane's background. Per pane, not per panel: the point is
@@ -6673,6 +6698,25 @@ fn draw_shell_inner(
                 tint_default_cells(f, inner, *c);
             }
         }
+        // A maximized pane hides its siblings; say how many, so it is clear
+        // this is one of several and not the whole tab.
+        let (pos, total) = shell.active_pane_position();
+        if total > 1 {
+            let badge = format!(" ▣ pane {}/{}  ({} hidden) ", pos, total, total - 1);
+            let bw = badge.chars().count() as u16;
+            if bw < inner.width {
+                let at = Rect::new(inner.x + inner.width - bw, inner.y, bw, 1);
+                f.render_widget(
+                    Paragraph::new(badge).style(
+                        Style::default()
+                            .fg(Color::Black)
+                            .bg(theme().accent)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    at,
+                );
+            }
+        }
         return;
     }
 
@@ -7050,6 +7094,25 @@ fn draw_status(f: &mut Frame, area: Rect, app: &App) {
     let line = Line::from(spans);
     let p = Paragraph::new(line).style(Style::default().bg(theme().status_bg));
     f.render_widget(p, area);
+
+    // The active shell pane's title (its `user@host: cwd`), right-aligned so it
+    // sits in the bottom-right and tracks whichever split/tab is active —
+    // rather than staying on the first pane. Drawn as its own right-aligned
+    // paragraph over the same row.
+    if let Some(title) = app.shell.active_title() {
+        let shown = format!(" {} ", truncate(&title, (area.width / 2).max(8) as usize));
+        f.render_widget(
+            Paragraph::new(shown)
+                .alignment(Alignment::Right)
+                .style(
+                    Style::default()
+                        .fg(Color::Rgb(150, 200, 235))
+                        .bg(theme().status_bg)
+                        .add_modifier(Modifier::BOLD),
+                ),
+            area,
+        );
+    }
 }
 
 fn truncate(s: &str, max: usize) -> String {
