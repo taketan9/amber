@@ -993,6 +993,17 @@ enum Popup {
         /// copying. `None` when nothing is selected.
         sel: Option<(usize, usize)>,
     },
+    /// The recursive comparison of two directories: a list of differing paths.
+    DirCompare {
+        left: String,
+        right: String,
+        left_root: PathBuf,
+        right_root: PathBuf,
+        entries: Vec<cian_core::dirdiff::Entry>,
+        cursor: usize,
+        scroll: usize,
+        truncated: bool,
+    },
     /// The left pane's file against the right pane's, side by side.
     ///
     /// Both the full row list and the folded one are kept: folding is a toggle
@@ -1154,6 +1165,17 @@ enum OpMsg {
 /// Kept separate from [`OpJob`] because results stream in rather than a single
 /// report arriving at the end: a search over a big tree should be usable while
 /// it is still going.
+/// A directory comparison running on a worker thread; the whole result arrives
+/// at once when the walk finishes.
+struct DiffJob {
+    rx: std::sync::mpsc::Receiver<cian_core::dirdiff::DirDiff>,
+    cancel: Arc<AtomicBool>,
+    left_root: PathBuf,
+    right_root: PathBuf,
+    left: String,
+    right: String,
+}
+
 struct FindJob {
     rx: std::sync::mpsc::Receiver<FindMsg>,
     cancel: Arc<AtomicBool>,
@@ -1562,6 +1584,7 @@ pub struct App {
     op_job: Option<OpJob>,
     /// A recursive search running on a worker thread.
     find_job: Option<FindJob>,
+    diff_job: Option<DiffJob>,
     /// When the panes were last checked against the filesystem.
     last_watch: Instant,
     /// Per-pane background overrides, indexed by [`Self::bg_slot`].
@@ -1641,6 +1664,7 @@ impl App {
             pending_auth: None,
             op_job: None,
             find_job: None,
+            diff_job: None,
             last_watch: Instant::now(),
             pane_bg: [None, None],
             last_search_query: None,
@@ -3006,11 +3030,16 @@ impl App {
     fn open_diff(&mut self) {
         let pick = |t: &PaneTabs| t.active_ref().selected().cloned();
         let (Some(a), Some(b)) = (pick(&self.left), pick(&self.right)) else {
-            self.message = Some("select a file in each pane to compare".into());
+            self.message = Some("select a file (or a folder) in each pane to compare".into());
             return;
         };
+        // Two directories: a recursive tree comparison. Two files: a line diff.
+        if a.is_dir && b.is_dir {
+            self.start_dir_compare(a.path.clone(), b.path.clone(), a.name.clone(), b.name.clone());
+            return;
+        }
         if a.is_dir || b.is_dir {
-            self.message = Some("directories cannot be compared, only files".into());
+            self.message = Some("compare two files, or two folders — not one of each".into());
             return;
         }
         match cian_core::diff::diff_files(&a.path, &b.path) {
@@ -3030,6 +3059,84 @@ impl App {
             }
             Err(e) => self.message = Some(format!("cannot compare: {}", e)),
         }
+    }
+
+    /// Compare two directory trees on a worker thread, showing the differing
+    /// paths when it finishes. Esc cancels a long walk.
+    fn start_dir_compare(&mut self, left: PathBuf, right: PathBuf, ln: String, rn: String) {
+        let cancel = Arc::new(AtomicBool::new(false));
+        let (tx, rx) = std::sync::mpsc::channel();
+        let worker_cancel = Arc::clone(&cancel);
+        let (l, r) = (left.clone(), right.clone());
+        std::thread::spawn(move || {
+            let diff = cian_core::dirdiff::compare(&l, &r, &worker_cancel);
+            let _ = tx.send(diff);
+        });
+        self.diff_job = Some(DiffJob {
+            rx,
+            cancel,
+            left_root: left,
+            right_root: right,
+            left: ln,
+            right: rn,
+        });
+        self.message = Some("comparing folders… (Esc to stop)".into());
+    }
+
+    /// Install the directory-comparison result when the worker finishes.
+    fn poll_diff_job(&mut self) -> bool {
+        let Some(job) = &self.diff_job else { return false };
+        let Ok(diff) = job.rx.try_recv() else { return false };
+        let job = self.diff_job.take().unwrap();
+        if diff.cancelled {
+            self.message = Some("comparison cancelled".into());
+            return true;
+        }
+        if diff.is_identical() {
+            self.message = Some(format!("{} and {} match — no differences", job.left, job.right));
+            return true;
+        }
+        self.popup = Popup::DirCompare {
+            left: job.left,
+            right: job.right,
+            left_root: job.left_root,
+            right_root: job.right_root,
+            entries: diff.entries,
+            cursor: 0,
+            scroll: 0,
+            truncated: diff.truncated,
+        };
+        true
+    }
+
+    /// Jump both panes to the highlighted diff entry (whichever side has it),
+    /// putting the cursor on it, and close the comparison.
+    fn dir_compare_goto(&mut self) {
+        let Popup::DirCompare { entries, cursor, left_root, right_root, .. } = &self.popup else {
+            return;
+        };
+        let Some(e) = entries.get(*cursor) else { return };
+        use cian_core::dirdiff::Status;
+        let rel = e.rel.clone();
+        let (status, lr, rr) = (e.status, left_root.clone(), right_root.clone());
+        self.popup = Popup::None;
+        let go = |pane: &mut PaneTabs, root: &Path, rel: &Path| {
+            let full = root.join(rel);
+            let dir = if full.is_dir() { full.clone() } else { full.parent().map(|p| p.to_path_buf()).unwrap_or(full.clone()) };
+            let p = pane.active_mut();
+            if p.jump_to(dir).is_ok() {
+                if let Some(i) = p.entries.iter().position(|x| x.path == full) {
+                    p.cursor = i;
+                }
+            }
+        };
+        if status != Status::OnlyRight {
+            go(&mut self.left, &lr, &rel);
+        }
+        if status != Status::OnlyLeft {
+            go(&mut self.right, &rr, &rel);
+        }
+        self.message = Some(format!("→ {}", rel.display()));
     }
 
     /// Pull members out of the open archive into the opposite pane.
@@ -4477,6 +4584,15 @@ impl App {
             }
             return Ok(());
         }
+        // A directory comparison is likewise interruptible with Esc.
+        if self.diff_job.is_some() {
+            if key.code == KeyCode::Esc {
+                if let Some(j) = &self.diff_job {
+                    j.cancel.store(true, Ordering::Relaxed);
+                }
+            }
+            return Ok(());
+        }
         if !matches!(self.popup, Popup::None) {
             return self.handle_popup_key(key);
         }
@@ -4816,6 +4932,24 @@ impl App {
                 }
                 _ => return Ok(()),
             }
+        }
+        if let Popup::DirCompare { entries, cursor, scroll, .. } = &mut self.popup {
+            let n = entries.len();
+            match key.code {
+                KeyCode::Esc | KeyCode::Char('q') => self.popup = Popup::None,
+                KeyCode::Char('j') | KeyCode::Down => {
+                    if n > 0 { *cursor = (*cursor + 1).min(n - 1); }
+                }
+                KeyCode::Char('k') | KeyCode::Up => *cursor = cursor.saturating_sub(1),
+                KeyCode::Char('d') | KeyCode::PageDown => *cursor = (*cursor + 20).min(n.saturating_sub(1)),
+                KeyCode::Char('u') | KeyCode::PageUp => *cursor = cursor.saturating_sub(20),
+                KeyCode::Char('g') | KeyCode::Home => *cursor = 0,
+                KeyCode::Char('G') | KeyCode::End => *cursor = n.saturating_sub(1),
+                // Jump both panes to the highlighted difference.
+                KeyCode::Enter => self.dir_compare_goto(),
+                _ => { let _ = scroll; }
+            }
+            return Ok(());
         }
         if let Popup::Diff { result, folded, fold, scroll, .. } = &mut self.popup {
             let rows: &[cian_core::diff::Row] = if *fold { folded } else { &result.rows };
@@ -6141,7 +6275,7 @@ fn manual_sections() -> Vec<(&'static str, Vec<ManualEntry>)> {
                 entry("l, Enter", Some(EnterDir), "enter folder / open file"),
                 entry("F3", None, "look inside: view a file, list an archive"),
                 entry("  in viewer", None, "drag=select, c=copy, Shift+Enter=encoding"),
-                entry("=", None, "compare the left pane's file with the right pane's"),
+                entry("=", None, "compare left ↔ right: two files (line diff), or two folders (recursive)"),
                 entry("-, Bksp", Some(Parent), "parent folder"),
                 entry("Left / Right", None, "focus the left / right pane"),
                 entry("h", Some(History), "history popup"),
@@ -6547,6 +6681,10 @@ fn run_loop<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Result<()>
         // Search results stream in while the walk continues.
         if app.find_job.is_some() {
             needs_redraw |= app.poll_find_job();
+        }
+        // A directory comparison lands its whole result at once.
+        if app.diff_job.is_some() {
+            needs_redraw |= app.poll_diff_job();
         }
         // Catch changes made by anything other than cian.
         if app.poll_external_changes() {
@@ -8601,6 +8739,76 @@ fn draw_popup(
         return;
     }
 
+    if let Popup::DirCompare { left, right, entries, cursor, scroll, truncated, .. } = popup {
+        use cian_core::dirdiff::Status;
+        let rect = centered_rect(area.width.saturating_sub(2), area.height.saturating_sub(2), area);
+        f.render_widget(Clear, rect);
+        let counts = {
+            let (mut a, mut d, mut m) = (0, 0, 0);
+            for e in entries.iter() {
+                match e.status {
+                    Status::OnlyRight => a += 1,
+                    Status::OnlyLeft => d += 1,
+                    Status::Differ => m += 1,
+                }
+            }
+            let cut = if *truncated { "  (stopped at 5000)" } else { "" };
+            format!("~{} +{} -{}{}", m, a, d, cut)
+        };
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_type(border_type())
+            .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
+            .title(format!(" {}  ↔  {}   —   {} ", left, right, counts));
+        let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
+        f.render_widget(block, rect);
+
+        let body_h = (inner.height.saturating_sub(1) as usize).max(1);
+        // Keep the cursor on screen.
+        if *cursor < *scroll {
+            *scroll = *cursor;
+        } else if *cursor >= *scroll + body_h {
+            *scroll = *cursor + 1 - body_h;
+        }
+        let first = *scroll;
+        let add = Color::Rgb(130, 225, 150);
+        let del = Color::Rgb(255, 140, 145);
+        let chg = Color::Rgb(240, 210, 120);
+        for (row, (i, e)) in entries.iter().enumerate().skip(first).take(body_h).enumerate() {
+            let sel = i == *cursor;
+            let y = inner.y + row as u16;
+            let line = Rect::new(inner.x, y, inner.width, 1);
+            if sel {
+                f.render_widget(Block::default().style(Style::default().bg(theme().selected_bg)), line);
+            }
+            let base = if sel { Style::default().bg(theme().selected_bg) } else { Style::default() };
+            let (mark, col) = match e.status {
+                Status::OnlyRight => ("+ ", add),
+                Status::OnlyLeft => ("- ", del),
+                Status::Differ => ("~ ", chg),
+            };
+            let mut name = e.rel.display().to_string().replace('\\', "/");
+            if e.is_dir {
+                name.push('/');
+            }
+            f.render_widget(
+                Paragraph::new(Line::from(vec![
+                    Span::styled(format!(" {}", mark), base.fg(col).add_modifier(Modifier::BOLD)),
+                    Span::styled(truncate_middle(&name, inner.width as usize - 4), base.fg(col)),
+                ])),
+                line,
+            );
+        }
+        f.render_widget(
+            Paragraph::new(
+                " + right-only   - left-only   ~ differ    Enter=go to   j/k  Esc close ",
+            )
+            .style(Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD)),
+            Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1),
+        );
+        return;
+    }
+
     if let Popup::Diff { left, right, result, folded, fold, scroll } = popup {
         use cian_core::diff::Row;
 
@@ -8949,6 +9157,7 @@ fn draw_popup(
         | Popup::DestPicker { .. }
         | Popup::Viewer { .. }
         | Popup::Diff { .. }
+        | Popup::DirCompare { .. }
         | Popup::Archive { .. }
         | Popup::None => return,
     };
@@ -10901,7 +11110,7 @@ mod tests {
     }
 
     #[test]
-    fn comparing_a_directory_says_so_instead_of_opening() {
+    fn comparing_a_directory_against_a_file_is_refused() {
         let l = tempfile::tempdir().unwrap();
         let r = tempfile::tempdir().unwrap();
         std::fs::create_dir(l.path().join("adir")).unwrap();
@@ -10912,7 +11121,48 @@ mod tests {
 
         app.handle_key(code(KeyCode::Char('='))).unwrap();
         assert!(matches!(app.popup, Popup::None));
-        assert!(app.message.as_deref().unwrap().contains("directories"));
+        assert!(app.message.as_deref().unwrap().contains("not one of each"));
+    }
+
+    #[test]
+    fn comparing_two_directories_lists_the_differences() {
+        let l = tempfile::tempdir().unwrap();
+        let r = tempfile::tempdir().unwrap();
+        std::fs::create_dir(l.path().join("proj")).unwrap();
+        std::fs::create_dir(r.path().join("proj")).unwrap();
+        std::fs::write(l.path().join("proj/same.txt"), b"xy").unwrap();
+        std::fs::write(r.path().join("proj/same.txt"), b"xy").unwrap();
+        // Equal size AND mtime, so the quick compare treats them as identical.
+        let t = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_000_000);
+        cian_core::dirdiff::set_mtime(&l.path().join("proj/same.txt"), t).unwrap();
+        cian_core::dirdiff::set_mtime(&r.path().join("proj/same.txt"), t).unwrap();
+        std::fs::write(l.path().join("proj/only_left.txt"), b"l").unwrap();
+        std::fs::write(r.path().join("proj/changed.txt"), b"aaaa").unwrap();
+        std::fs::write(l.path().join("proj/changed.txt"), b"a").unwrap();
+        let mut app =
+            App::new(l.path().to_path_buf(), r.path().to_path_buf(), cian_lua::Config::default())
+                .unwrap();
+        // Cursor on "proj" in each pane.
+        app.left.active_mut().cursor = 0;
+        app.right.active_mut().cursor = 0;
+
+        app.handle_key(code(KeyCode::Char('='))).unwrap();
+        assert!(app.diff_job.is_some(), "comparison started on a worker");
+        // Drain the worker.
+        for _ in 0..200 {
+            if app.diff_job.is_none() { break; }
+            app.poll_diff_job();
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        let Popup::DirCompare { entries, .. } = &app.popup else {
+            panic!("expected the comparison, got {:?}", app.popup)
+        };
+        let paths: Vec<String> =
+            entries.iter().map(|e| e.rel.display().to_string().replace('\\', "/")).collect();
+        // Paths are relative to the compared folders (proj), not the roots.
+        assert!(paths.contains(&"only_left.txt".to_string()), "{:?}", paths);
+        assert!(paths.contains(&"changed.txt".to_string()), "{:?}", paths);
+        assert!(!paths.contains(&"same.txt".to_string()), "identical file omitted: {:?}", paths);
     }
 
     #[test]
