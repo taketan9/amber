@@ -7722,14 +7722,6 @@ fn draw_status(f: &mut Frame, area: Rect, app: &App) {
             format!("marks {}", mark_count),
             if mark_count > 0 { theme().mark_fg } else { Color::Rgb(140, 140, 160) },
         ),
-        dim_sep.clone(),
-        chip(
-            match app.active_pane() {
-                Some(p) => format!("{} {}", p.sort.key.label(), if p.sort.reverse { "▼" } else { "▲" }),
-                None => "—".to_string(),
-            },
-            Color::Rgb(180, 180, 220),
-        ),
     ];
 
     // A narrowed listing must never look like a complete one, so the active
@@ -9974,15 +9966,17 @@ mod tests {
     }
 
     #[test]
-    fn the_status_bar_shows_the_active_order() {
+    fn the_status_bar_drops_the_sort_indicator_but_keeps_the_counts() {
         let (_d, mut app) = app_with(&["a.txt"]);
         let screen = render(&mut app, 100, 40).join("\n");
-        assert!(screen.contains("name ▲"), "ascending indicator missing:\n{}", screen);
+        // The sort chip was removed; the item/mark counts stay.
+        assert!(!screen.contains("name ▲"), "the sort indicator should be gone:\n{}", screen);
+        assert!(screen.contains("items"));
+        assert!(screen.contains("marks"));
 
+        // Sorting still works even though it is no longer shown here.
         app.apply_sort_key(SortKey::Modified);
-        app.apply_sort_key(SortKey::Modified);
-        let screen = render(&mut app, 100, 40).join("\n");
-        assert!(screen.contains("date ▼"), "descending indicator missing:\n{}", screen);
+        assert_eq!(app.active_pane().unwrap().sort.key, SortKey::Modified);
     }
 
     #[test]
