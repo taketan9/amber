@@ -938,6 +938,28 @@ enum PendingOp {
     Move,
 }
 
+/// Which way an SFTP transfer goes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ScpDir {
+    /// Local files → remote directory.
+    Upload,
+    /// A remote file → local directory.
+    Download,
+}
+
+/// A transfer waiting on the remote path being typed. Held on `App` rather than
+/// in the popup so the resolved password never reaches a `Debug`-formatted
+/// `Popup`.
+struct ScpPending {
+    target: cian_scp::Target,
+    label: String,
+    dir: ScpDir,
+    /// Upload: the local files to send. Download: unused.
+    locals: Vec<PathBuf>,
+    /// Download: the local directory to save into. Upload: unused.
+    local_dir: PathBuf,
+}
+
 #[derive(Debug, Clone)]
 enum Popup {
     None,
@@ -1016,6 +1038,10 @@ enum MenuItem {
     Hash,
     Compare,
     Ssh,
+    /// Send the selected file(s) to a server over SFTP.
+    ScpUpload,
+    /// Fetch a file from a server over SFTP into this pane.
+    ScpDownload,
     /// Begin recording this shell pane's output to a log file.
     StartLog,
     /// Stop the recording running on this shell pane.
@@ -1041,6 +1067,8 @@ impl MenuItem {
             MenuItem::Hash => "Checksum…",
             MenuItem::Compare => "Compare left ↔ right",
             MenuItem::Ssh => "SSH connect…",
+            MenuItem::ScpUpload => "SFTP upload → server…",
+            MenuItem::ScpDownload => "SFTP download ← server…",
             MenuItem::StartLog => "Start session log…",
             MenuItem::StopLog => "Stop session log  ●",
             MenuItem::Quit => "Quit cian  (q)",
@@ -1209,6 +1237,8 @@ enum InputKind {
     TransferAs { op: PendingOp, src: PathBuf, dest_dir: PathBuf },
     /// A directory to write a session log into; the file name is generated.
     LogDir,
+    /// The remote path for a pending SFTP transfer (details on `App`).
+    ScpRemote,
 }
 
 impl InputKind {
@@ -1479,6 +1509,11 @@ pub struct App {
     pane_zoom_return: Option<Rect>,
     /// Wall-clock start, used to phase the slow "recording" border pulse.
     started: Instant,
+    /// The local side of an SFTP transfer being set up, carried through the SSH
+    /// host/user picker: `(direction, files to upload, local save dir)`.
+    scp_dir: Option<(ScpDir, Vec<PathBuf>, PathBuf)>,
+    /// An SFTP transfer whose remote path is being entered, if any.
+    scp_pending: Option<ScpPending>,
     /// The border currently being dragged, if any.
     drag: Option<Divider>,
     /// Files picked up by the mouse and not yet dropped.
@@ -1577,6 +1612,8 @@ impl App {
             menu_rect: Rect::new(0, 0, 0, 0),
             pane_zoom_return: None,
             started: Instant::now(),
+            scp_dir: None,
+            scp_pending: None,
             drag: None,
             file_drag: None,
             dest_history: Vec::new(),
@@ -2590,6 +2627,143 @@ impl App {
         self.popup = Popup::SshHosts { cursor: 0, filter: String::new() };
     }
 
+    /// Begin an SFTP transfer: capture the local side, then reuse the SSH
+    /// host/user picker to choose the server. `ssh_pick` routes back here once
+    /// a user is chosen because [`App::scp_dir`] is set.
+    fn start_scp(&mut self, dir: ScpDir) {
+        if self.config.ssh_hosts.is_empty() {
+            self.start_ssh(); // shows the "configure a host" notice
+            return;
+        }
+        let (locals, local_dir) = match dir {
+            ScpDir::Upload => {
+                let files: Vec<PathBuf> = self
+                    .active_pane()
+                    .map(|p| p.target_paths())
+                    .unwrap_or_default()
+                    .into_iter()
+                    .filter(|p| p.is_file())
+                    .collect();
+                if files.is_empty() {
+                    self.message = Some("select a file to upload".into());
+                    return;
+                }
+                (files, PathBuf::new())
+            }
+            ScpDir::Download => {
+                let dir = match self.active_pane() {
+                    Some(p) => p.cwd.clone(),
+                    None => return,
+                };
+                (Vec::new(), dir)
+            }
+        };
+        self.scp_dir = Some((dir, locals, local_dir));
+        self.popup = Popup::SshHosts { cursor: 0, filter: String::new() };
+    }
+
+    /// After a host+user is picked for a transfer, resolve the connection and
+    /// ask for the remote path.
+    fn scp_after_pick(&mut self, host_idx: usize, user: &str) {
+        let Some((dir, locals, local_dir)) = self.scp_dir.take() else { return };
+        let Some(h) = self.config.ssh_hosts.get(host_idx) else { return };
+        let Some(u) = h.users.iter().find(|u| u.name == user) else { return };
+        let Some(password) = u.secret() else {
+            self.message = Some(format!(
+                "no password set for {}@{} — SFTP needs one in init.lua",
+                u.name, h.name
+            ));
+            return;
+        };
+        let target = cian_scp::Target {
+            host: h.host.clone(),
+            port: h.port.unwrap_or(22),
+            user: u.name.clone(),
+            password,
+        };
+        let label = format!("{}@{}", u.name, h.name);
+        let (title, prompt, seed) = match dir {
+            ScpDir::Upload => (
+                "SFTP upload — remote folder",
+                "remote directory to upload into:",
+                String::new(),
+            ),
+            ScpDir::Download => (
+                "SFTP download — remote file",
+                "remote file path to download:",
+                String::new(),
+            ),
+        };
+        self.scp_pending = Some(ScpPending { target, label, dir, locals, local_dir });
+        self.popup = text_input(title, prompt, seed, InputKind::ScpRemote);
+    }
+
+    /// Run the pending transfer against `remote` (a directory for upload, a file
+    /// for download), on a worker thread with the shared progress popup.
+    fn start_scp_transfer(&mut self, remote: &str) {
+        let Some(p) = self.scp_pending.take() else { return };
+        let remote = remote.trim().to_string();
+        if remote.is_empty() {
+            self.message = Some("cancelled (no remote path)".into());
+            return;
+        }
+        let ScpPending { target, label, dir, locals, local_dir } = p;
+        let verb = if dir == ScpDir::Upload { "uploading" } else { "downloading" };
+        self.message = Some(format!("{} {} …", verb, label));
+        self.start_op(if dir == ScpDir::Upload { "uploading" } else { "downloading" }, move |ctl| {
+            let mut report = OpReport::default();
+            // Bridge cian-scp's byte progress into the shared op progress.
+            let cancel = ctl.cancel;
+            match dir {
+                ScpDir::Upload => {
+                    let total = locals.len();
+                    for (i, local) in locals.iter().enumerate() {
+                        if cancel.load(Ordering::Relaxed) {
+                            break;
+                        }
+                        let fname = local.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+                        let dest = format!("{}/{}", remote.trim_end_matches('/'), fname);
+                        let cur = fname.clone();
+                        let mut fwd = |done: u64, tot: u64| {
+                            (ctl.on_progress)(&cian_core::progress::Progress {
+                                bytes_done: done,
+                                bytes_total: tot,
+                                files_done: i,
+                                files_total: total,
+                                current: cur.clone(),
+                            });
+                        };
+                        let mut sctl = cian_scp::Ctl { cancel, on_progress: &mut fwd };
+                        match cian_scp::upload(&target, local, &dest, &mut sctl) {
+                            Ok(()) => report.ok += 1,
+                            Err(e) => report.note_error(format!("{}: {}", fname, e)),
+                        }
+                    }
+                }
+                ScpDir::Download => {
+                    let fname = remote.rsplit('/').next().unwrap_or("download").to_string();
+                    let dest = local_dir.join(&fname);
+                    let cur = fname.clone();
+                    let mut fwd = |done: u64, tot: u64| {
+                        (ctl.on_progress)(&cian_core::progress::Progress {
+                            bytes_done: done,
+                            bytes_total: tot,
+                            files_done: 0,
+                            files_total: 1,
+                            current: cur.clone(),
+                        });
+                    };
+                    let mut sctl = cian_scp::Ctl { cancel, on_progress: &mut fwd };
+                    match cian_scp::download(&target, &remote, &dest, &mut sctl) {
+                        Ok(()) => report.ok += 1,
+                        Err(e) => report.note_error(format!("{}: {}", fname, e)),
+                    }
+                }
+            }
+            report
+        });
+    }
+
     /// Connect as `user` to host index `idx`, by typing the command into the
     /// shell panel.
     ///
@@ -3399,6 +3573,10 @@ impl App {
                 self.start_session_log(&name);
                 return Ok(());
             }
+            InputKind::ScpRemote => {
+                self.start_scp_transfer(&name);
+                return Ok(());
+            }
             InputKind::TransferAs { op, src, dest_dir } => {
                 let target = dest_dir.join(&name);
                 let verb = if *op == PendingOp::Move { "mv" } else { "cp" };
@@ -3994,6 +4172,11 @@ impl App {
             items.push(MenuItem::Hash);
             items.push(MenuItem::Compare);
             items.push(MenuItem::HiddenToggle);
+            // SFTP transfer, offered only when servers are configured.
+            if !self.config.ssh_hosts.is_empty() {
+                items.push(MenuItem::ScpUpload);
+                items.push(MenuItem::ScpDownload);
+            }
             items.push(MenuItem::Ssh);
             items.push(MenuItem::Background);
         }
@@ -4092,6 +4275,8 @@ impl App {
             MenuItem::Delete => self.start_delete(),
             MenuItem::Manual => self.open_manual(),
             MenuItem::Ssh => self.start_ssh(),
+            MenuItem::ScpUpload => self.start_scp(ScpDir::Upload),
+            MenuItem::ScpDownload => self.start_scp(ScpDir::Download),
             MenuItem::StartLog => self.start_log_prompt(),
             MenuItem::StopLog => self.stop_session_log(),
             MenuItem::Quit => self.start_quit_confirm(),
@@ -4340,7 +4525,12 @@ impl App {
         }
         if let Popup::SshHosts { cursor, filter } = &mut self.popup {
             match key.code {
-                KeyCode::Esc => self.popup = Popup::None,
+                // Cancelling the picker abandons any transfer being set up, so
+                // a later plain :ssh does not get routed into SFTP.
+                KeyCode::Esc => {
+                    self.popup = Popup::None;
+                    self.scp_dir = None;
+                }
                 KeyCode::Down => *cursor += 1,
                 KeyCode::Up => *cursor = cursor.saturating_sub(1),
                 KeyCode::Backspace => {
@@ -4356,7 +4546,11 @@ impl App {
                         if users.len() == 1 {
                             let only = users[0].name.clone();
                             self.popup = Popup::None;
-                            self.ssh_connect(i, &only);
+                            if self.scp_dir.is_some() {
+                                self.scp_after_pick(i, &only);
+                            } else {
+                                self.ssh_connect(i, &only);
+                            }
                         } else {
                             self.popup = Popup::SshUsers { host: i, cursor: 0 };
                         }
@@ -4397,7 +4591,11 @@ impl App {
                     let (h, c) = (*host, *cursor);
                     let user = self.config.ssh_hosts[h].users[c].name.clone();
                     self.popup = Popup::None;
-                    self.ssh_connect(h, &user);
+                    if self.scp_dir.is_some() {
+                        self.scp_after_pick(h, &user);
+                    } else {
+                        self.ssh_connect(h, &user);
+                    }
                 }
                 _ => {}
             }
@@ -5852,6 +6050,7 @@ fn manual_sections() -> Vec<(&'static str, Vec<ManualEntry>)> {
                 entry(":hidden", None, "show / hide dotfiles (also right-click)"),
                 entry(":attr", None, "attributes;  :chmod 644,  :readonly on|off"),
                 entry(":hash", None, "checksum;  :hash md5  /  :hash sha256"),
+                entry("right-click", None, "SFTP upload/download to a configured host"),
                 entry("Shift+Enter", None, "context menu for the entry (also :menu)"),
             ],
         ),
@@ -9103,6 +9302,68 @@ mod tests {
                 MenuItem::Manual
             ]
         );
+    }
+
+    #[test]
+    fn scp_upload_walks_picker_then_asks_for_the_remote_path() {
+        let (_d, mut app) = app_with_ssh();
+        app.active_pane_mut().unwrap().cursor = 0; // a.txt
+        app.start_scp(ScpDir::Upload);
+        assert!(matches!(app.popup, Popup::SshHosts { .. }), "opens the host picker");
+        assert!(app.scp_dir.is_some());
+
+        // Pick db1 (single user, has a password) → straight to the remote prompt.
+        app.command_buffer.clear();
+        // Filter to db1 then Enter.
+        for c in "db1".chars() {
+            app.handle_key(code(KeyCode::Char(c))).unwrap();
+        }
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+
+        match &app.popup {
+            Popup::TextInput { kind: InputKind::ScpRemote, .. } => {}
+            other => panic!("expected the remote-path prompt, got {:?}", other),
+        }
+        let p = app.scp_pending.as_ref().expect("a pending transfer");
+        assert_eq!(p.target.host, "10.0.2.31");
+        assert_eq!(p.target.port, 2222);
+        assert_eq!(p.target.user, "postgres");
+        assert_eq!(p.dir, ScpDir::Upload);
+        assert_eq!(p.locals.len(), 1);
+    }
+
+    #[test]
+    fn scp_upload_without_a_selected_file_is_refused() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::create_dir(d.path().join("onlydir")).unwrap();
+        let mut config = cian_lua::Config::default();
+        config.ssh_hosts = vec![cian_lua::SshHost {
+            name: "web1".into(),
+            host: "10.0.1.11".into(),
+            users: vec![cian_lua::SshUser::plain("root")],
+            port: None,
+        }];
+        let p = d.path().to_path_buf();
+        let mut app = App::new(p.clone(), p, config).unwrap();
+        app.active_pane_mut().unwrap().cursor = 0; // the directory
+        app.start_scp(ScpDir::Upload);
+        assert!(matches!(app.popup, Popup::None));
+        assert!(app.message.as_deref().unwrap().contains("select a file"));
+    }
+
+    #[test]
+    fn scp_needs_a_password_for_the_user() {
+        let (_d, mut app) = app_with_ssh();
+        app.active_pane_mut().unwrap().cursor = 0;
+        app.start_scp(ScpDir::Upload);
+        // web1 / root has no password configured.
+        for c in "web1".chars() {
+            app.handle_key(code(KeyCode::Char(c))).unwrap();
+        }
+        app.handle_key(code(KeyCode::Enter)).unwrap(); // host web1 → user list
+        app.handle_key(code(KeyCode::Enter)).unwrap(); // first user (root)
+        assert!(app.scp_pending.is_none());
+        assert!(app.message.as_deref().unwrap().contains("no password"));
     }
 
     #[test]

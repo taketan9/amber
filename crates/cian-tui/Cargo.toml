@@ -10,6 +10,7 @@ description = "Terminal UI for cian: ratatui rendering, input, layout, popups"
 cian-core = { workspace = true }
 cian-lua  = { workspace = true }
 cian-pty  = { workspace = true }
+cian-scp  = { workspace = true }
 ratatui   = { workspace = true }
 crossterm = { workspace = true }
 anyhow    = { workspace = true }

@@ -20,6 +20,7 @@ repository = "https://github.com/taketan9/cian"
 cian-core = { path = "crates/cian-core" }
 cian-tui  = { path = "crates/cian-tui"  }
 cian-pty  = { path = "crates/cian-pty"  }
+cian-scp  = { path = "crates/cian-scp"  }
 cian-lua  = { path = "crates/cian-lua"  }
 
 # External crates (pinned at workspace level so all crates use the same version)

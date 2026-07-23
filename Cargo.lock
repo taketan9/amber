@@ -417,6 +417,7 @@ dependencies = [
  "cian-core",
  "cian-lua",
  "cian-pty",
+ "cian-scp",
  "crossterm",
  "ratatui",
  "serde",
