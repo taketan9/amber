@@ -1957,6 +1957,23 @@ impl App {
         self.clipboard.as_mut()?.get_text().ok().filter(|t| !t.is_empty())
     }
 
+    /// Send the clipboard's text to the shell, as typing it would. Raw, with
+    /// newlines: pasting a command line into a shell is meant to run it, and
+    /// this does not know whether the child enabled bracketed paste, so it
+    /// adds no wrapper (a stray `\x1b[200~` would otherwise print as garbage).
+    fn paste_text_to_shell(&mut self) {
+        match self.clipboard_text() {
+            Some(t) => {
+                if let Some(s) = self.shell.active_session_mut() {
+                    s.write_input(t.as_bytes());
+                } else {
+                    self.message = Some("no shell to paste into".into());
+                }
+            }
+            None => self.message = Some("clipboard has no text".into()),
+        }
+    }
+
     fn push_clipboard(&mut self, paths: &[PathBuf]) {
         if !self.clipboard_on_copy { return; }
         let Some(cb) = self.clipboard.as_mut() else { return; };
@@ -3654,6 +3671,10 @@ impl App {
         match item {
             MenuItem::Copy => self.clip_targets(ClipOp::Copy),
             MenuItem::Cut => self.clip_targets(ClipOp::Cut),
+            // In the shell, "Paste" means the text on the clipboard goes to
+            // the running program — the terminal sense of paste. Only in a file
+            // pane does it mean the file clipboard.
+            MenuItem::Paste if self.focused == FocusedPane::Shell => self.paste_text_to_shell(),
             MenuItem::Paste => return self.paste_clip(),
             MenuItem::CopyToOther => self.start_transfer(PendingOp::Copy),
             MenuItem::MoveToOther => self.start_transfer(PendingOp::Move),
@@ -5250,6 +5271,8 @@ fn manual_sections() -> Vec<(&'static str, Vec<ManualEntry>)> {
                 entry("Shift+F10", None, "close split pane (confirms)"),
                 entry("F12", None, "zoom focused surface (toggle)"),
                 entry("Shift+F12", None, "zoom active split pane (toggle)"),
+                entry("Shift+drag", None, "select text to copy (the terminal's own selection)"),
+                entry("right-click → Paste", None, "paste clipboard text into the shell"),
                 entry("Esc", None, "back to files (full-screen apps keep it)"),
             ],
         ),
@@ -9810,6 +9833,20 @@ mod tests {
         // A bracketed-paste event carrying a path, with a stray newline.
         app.insert_into_active_text("/some/path\n");
         assert_eq!(app.command_buffer, "cd /some/path", "newline stripped, text appended");
+    }
+
+    /// Right-click Paste in the shell must send text to the terminal, not try
+    /// to paste files as it does in a file pane.
+    #[test]
+    fn shell_paste_sends_text_not_files() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        app.focus(FocusedPane::Shell);
+        app.file_clip = None;
+        app.run_menu_item(MenuItem::Paste).unwrap();
+        // Whatever the clipboard held, this took the shell text path — never
+        // the file path, whose messages talk about "files".
+        let msg = app.message.clone().unwrap_or_default();
+        assert!(!msg.contains("files"), "should not paste files in the shell: {:?}", msg);
     }
 
     #[test]
