@@ -1165,15 +1165,24 @@ enum OpMsg {
 /// Kept separate from [`OpJob`] because results stream in rather than a single
 /// report arriving at the end: a search over a big tree should be usable while
 /// it is still going.
-/// A directory comparison running on a worker thread; the whole result arrives
-/// at once when the walk finishes.
+/// A directory comparison running on a worker thread. It streams progress and
+/// delivers the whole result when the walk finishes.
 struct DiffJob {
-    rx: std::sync::mpsc::Receiver<cian_core::dirdiff::DirDiff>,
+    rx: std::sync::mpsc::Receiver<DiffMsg>,
     cancel: Arc<AtomicBool>,
     left_root: PathBuf,
     right_root: PathBuf,
     left: String,
     right: String,
+    /// Latest progress, for the bar.
+    latest: cian_core::progress::Progress,
+    label: &'static str,
+    started: Instant,
+}
+
+enum DiffMsg {
+    Tick(cian_core::progress::Progress),
+    Done(cian_core::dirdiff::DirDiff),
 }
 
 struct FindJob {
@@ -3069,8 +3078,17 @@ impl App {
         let worker_cancel = Arc::clone(&cancel);
         let (l, r) = (left.clone(), right.clone());
         std::thread::spawn(move || {
-            let diff = cian_core::dirdiff::compare(&l, &r, &worker_cancel);
-            let _ = tx.send(diff);
+            // Rate-limit the ticks: the core already reports every 16 entries,
+            // but a huge tree still produces plenty; forward at most ~30/s.
+            let mut last = Instant::now() - Duration::from_secs(1);
+            let mut on_progress = |p: &cian_core::progress::Progress| {
+                if last.elapsed() >= Duration::from_millis(33) {
+                    last = Instant::now();
+                    let _ = tx.send(DiffMsg::Tick(p.clone()));
+                }
+            };
+            let diff = cian_core::dirdiff::compare(&l, &r, &worker_cancel, &mut on_progress);
+            let _ = tx.send(DiffMsg::Done(diff));
         });
         self.diff_job = Some(DiffJob {
             rx,
@@ -3079,14 +3097,32 @@ impl App {
             right_root: right,
             left: ln,
             right: rn,
+            latest: cian_core::progress::Progress::default(),
+            label: "comparing folders",
+            started: Instant::now(),
         });
-        self.message = Some("comparing folders… (Esc to stop)".into());
     }
 
-    /// Install the directory-comparison result when the worker finishes.
+    /// Drain progress and install the result when the worker finishes.
     fn poll_diff_job(&mut self) -> bool {
-        let Some(job) = &self.diff_job else { return false };
-        let Ok(diff) = job.rx.try_recv() else { return false };
+        let Some(job) = &mut self.diff_job else { return false };
+        let mut done = None;
+        let mut changed = false;
+        loop {
+            match job.rx.try_recv() {
+                Ok(DiffMsg::Tick(p)) => {
+                    job.latest = p;
+                    changed = true;
+                }
+                Ok(DiffMsg::Done(d)) => {
+                    done = Some(d);
+                    changed = true;
+                    break;
+                }
+                Err(_) => break,
+            }
+        }
+        let Some(diff) = done else { return changed };
         let job = self.diff_job.take().unwrap();
         if diff.cancelled {
             self.message = Some("comparison cancelled".into());
@@ -6962,6 +6998,10 @@ fn draw(f: &mut Frame, app: &mut App) {
     if app.op_job.is_some() {
         draw_op_progress(f, area, app);
     }
+    // The directory comparison shows the same bar while it runs.
+    if let Some(job) = &app.diff_job {
+        draw_progress_bar(f, area, job.label, &job.latest, job.started);
+    }
     if !matches!(app.popup, Popup::None) {
         // Remember where the context menu landed so a click can hit its rows.
         if let Popup::ContextMenu { items, at, .. } = &app.popup {
@@ -8090,8 +8130,18 @@ fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
 /// A progress bar for the running file operation, and the way to stop it.
 fn draw_op_progress(f: &mut Frame, area: Rect, app: &App) {
     let Some(job) = &app.op_job else { return };
-    let p = &job.latest;
+    draw_progress_bar(f, area, job.label, &job.latest, job.started);
+}
 
+/// A centered progress dialog: label, current item, a bar, counts and elapsed.
+/// Shared by file operations and the directory comparison.
+fn draw_progress_bar(
+    f: &mut Frame,
+    area: Rect,
+    label: &str,
+    p: &cian_core::progress::Progress,
+    started: Instant,
+) {
     let w = 74u16.min(area.width.saturating_sub(2));
     let rect = centered_rect(w, 8, area);
     f.render_widget(Clear, rect);
@@ -8099,7 +8149,7 @@ fn draw_op_progress(f: &mut Frame, area: Rect, app: &App) {
         .borders(Borders::ALL)
         .border_type(border_type())
         .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
-        .title(format!(" {} ", job.label));
+        .title(format!(" {} ", label));
     let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
     f.render_widget(block, rect);
 
@@ -8137,7 +8187,7 @@ fn draw_op_progress(f: &mut Frame, area: Rect, app: &App) {
         format!("{} of {} files", p.files_done, p.files_total)
     };
     // Elapsed time, so a slow volume looks slow rather than stuck.
-    let secs = job.started.elapsed().as_secs();
+    let secs = started.elapsed().as_secs();
     let elapsed = if secs >= 60 {
         format!("{}m{:02}s", secs / 60, secs % 60)
     } else {

@@ -1,17 +1,20 @@
 //! Comparing two directory trees and listing what differs.
 //!
 //! The question this answers is "which files and folders are not the same
-//! between these two trees" — not *how* their contents differ. So it never
-//! reads a file: two files are judged the same when their size and
-//! modification time match, the way rsync's and robocopy's quick scans do.
-//! That keeps it instant even on a large tree, at the cost of missing an edit
-//! that somehow preserved both size and mtime.
+//! between these two trees" — not *how* their contents differ. Two files are
+//! the same when their sizes match and, if they do, their bytes match: an
+//! accurate compare that never depends on timestamps. Reading same-sized files
+//! makes it heavier than a stat-only scan, so it reports progress and can be
+//! cancelled.
 
 use std::collections::BTreeSet;
 use std::fs;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::SystemTime;
+
+use crate::progress::Progress;
 
 /// Why an entry is listed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -54,14 +57,58 @@ impl DirDiff {
 pub const MAX_ENTRIES: usize = 5000;
 
 /// Compare `left` and `right` recursively, reporting every path that differs.
-pub fn compare(left: &Path, right: &Path, cancel: &AtomicBool) -> DirDiff {
+///
+/// `on_progress` is called as the walk advances, with `files_done`/`files_total`
+/// counting entries examined — a first stat-only pass counts the total so the
+/// bar can show a real percentage.
+pub fn compare(
+    left: &Path,
+    right: &Path,
+    cancel: &AtomicBool,
+    on_progress: &mut dyn FnMut(&Progress),
+) -> DirDiff {
+    let total = count_entries(left, right, Path::new(""), cancel);
     let mut out = DirDiff::default();
-    walk(left, right, Path::new(""), cancel, &mut out);
+    let mut done = 0usize;
+    let mut last_report = 0usize;
+    walk(left, right, Path::new(""), cancel, total, &mut done, &mut last_report, on_progress, &mut out);
     out.entries.sort_by(|a, b| a.rel.cmp(&b.rel));
     out
 }
 
-fn walk(left: &Path, right: &Path, rel: &Path, cancel: &AtomicBool, out: &mut DirDiff) {
+/// Stat-only first pass: how many union entries the comparison will examine.
+fn count_entries(left: &Path, right: &Path, rel: &Path, cancel: &AtomicBool) -> usize {
+    if cancel.load(Ordering::Relaxed) {
+        return 0;
+    }
+    let ln = names(&left.join(rel));
+    let rn = names(&right.join(rel));
+    let all: BTreeSet<&String> = ln.iter().chain(rn.iter()).collect();
+    let mut n = 0;
+    for name in all {
+        n += 1;
+        let child = rel.join(name);
+        let l = fs::symlink_metadata(left.join(&child)).ok();
+        let r = fs::symlink_metadata(right.join(&child)).ok();
+        if matches!((&l, &r), (Some(a), Some(b)) if a.is_dir() && b.is_dir()) {
+            n += count_entries(left, right, &child, cancel);
+        }
+    }
+    n
+}
+
+#[allow(clippy::too_many_arguments)]
+fn walk(
+    left: &Path,
+    right: &Path,
+    rel: &Path,
+    cancel: &AtomicBool,
+    total: usize,
+    done: &mut usize,
+    last_report: &mut usize,
+    on_progress: &mut dyn FnMut(&Progress),
+    out: &mut DirDiff,
+) {
     if cancel.load(Ordering::Relaxed) {
         out.cancelled = true;
         return;
@@ -78,6 +125,10 @@ fn walk(left: &Path, right: &Path, rel: &Path, cancel: &AtomicBool, out: &mut Di
     let all: BTreeSet<&String> = ln.iter().chain(rn.iter()).collect();
 
     for name in all {
+        if cancel.load(Ordering::Relaxed) {
+            out.cancelled = true;
+            return;
+        }
         if out.entries.len() >= MAX_ENTRIES {
             out.truncated = true;
             return;
@@ -87,6 +138,19 @@ fn walk(left: &Path, right: &Path, rel: &Path, cancel: &AtomicBool, out: &mut Di
         let rp = right.join(&child);
         let lm = fs::symlink_metadata(&lp).ok();
         let rm = fs::symlink_metadata(&rp).ok();
+
+        *done += 1;
+        // Report at most every 16 entries so the channel is not flooded.
+        if *done - *last_report >= 16 {
+            *last_report = *done;
+            let p = Progress {
+                files_done: *done,
+                files_total: total,
+                current: child.display().to_string(),
+                ..Default::default()
+            };
+            on_progress(&p);
+        }
 
         match (lm, rm) {
             (Some(l), None) => {
@@ -100,11 +164,11 @@ fn walk(left: &Path, right: &Path, rel: &Path, cancel: &AtomicBool, out: &mut Di
                 if both_dirs {
                     // Recurse; the directory itself is "the same" — only its
                     // differing contents get listed.
-                    walk(left, right, &child, cancel, out);
+                    walk(left, right, &child, cancel, total, done, last_report, on_progress, out);
                 } else if l.is_dir() != r.is_dir() {
                     // One a directory, the other a file: a real difference.
                     out.entries.push(Entry { rel: child, status: Status::Differ, is_dir: false });
-                } else if files_differ(&l, &r) {
+                } else if files_differ(&lp, &rp, &l, &r, cancel) {
                     out.entries.push(Entry { rel: child, status: Status::Differ, is_dir: false });
                 }
             }
@@ -119,16 +183,55 @@ fn names(dir: &Path) -> Vec<String> {
     rd.flatten().filter_map(|e| e.file_name().into_string().ok()).collect()
 }
 
-/// Two non-directory entries differ when their size or modification time does.
-fn files_differ(l: &fs::Metadata, r: &fs::Metadata) -> bool {
+/// Two files differ when their sizes differ, or — at equal size — when their
+/// bytes do. A file that cannot be read is treated as differing rather than
+/// silently reported as identical.
+fn files_differ(lp: &Path, rp: &Path, l: &fs::Metadata, r: &fs::Metadata, cancel: &AtomicBool) -> bool {
     if l.len() != r.len() {
         return true;
     }
-    match (l.modified().ok(), r.modified().ok()) {
-        (Some(a), Some(b)) => a != b,
-        // No timestamps to compare and equal sizes: call them the same.
-        _ => false,
+    // An unreadable file is treated as differing rather than silently "same".
+    contents_differ(lp, rp, cancel).unwrap_or(true)
+}
+
+/// Compare two same-sized files byte for byte, short-circuiting on the first
+/// mismatch and checking the cancel flag between chunks.
+fn contents_differ(lp: &Path, rp: &Path, cancel: &AtomicBool) -> std::io::Result<bool> {
+    let mut lf = fs::File::open(lp)?;
+    let mut rf = fs::File::open(rp)?;
+    let mut lb = vec![0u8; 64 * 1024];
+    let mut rb = vec![0u8; 64 * 1024];
+    loop {
+        if cancel.load(Ordering::Relaxed) {
+            return Ok(false); // caller will notice the cancel and discard
+        }
+        let ln = read_full(&mut lf, &mut lb)?;
+        let rn = read_full(&mut rf, &mut rb)?;
+        if ln != rn {
+            return Ok(true);
+        }
+        if ln == 0 {
+            return Ok(false); // both reached EOF together, all bytes equal
+        }
+        if lb[..ln] != rb[..rn] {
+            return Ok(true);
+        }
     }
+}
+
+/// Fill `buf` as far as possible, returning how many bytes were read (0 at EOF).
+/// A short read from one file must not be mistaken for a difference.
+fn read_full(f: &mut fs::File, buf: &mut [u8]) -> std::io::Result<usize> {
+    let mut n = 0;
+    while n < buf.len() {
+        match f.read(&mut buf[n..]) {
+            Ok(0) => break,
+            Ok(k) => n += k,
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(e) => return Err(e),
+        }
+    }
+    Ok(n)
 }
 
 /// Set a path's modification time (test helper, and handy for callers).
@@ -144,7 +247,7 @@ mod tests {
 
     fn run(l: &Path, r: &Path) -> Vec<(String, Status)> {
         let cancel = AtomicBool::new(false);
-        compare(l, r, &cancel)
+        compare(l, r, &cancel, &mut |_| {})
             .entries
             .into_iter()
             .map(|e| (e.rel.display().to_string().replace('\\', "/"), e.status))
@@ -152,7 +255,7 @@ mod tests {
     }
 
     #[test]
-    fn identical_trees_report_nothing() {
+    fn identical_trees_report_nothing_regardless_of_mtime() {
         let l = tempfile::tempdir().unwrap();
         let r = tempfile::tempdir().unwrap();
         for d in [l.path(), r.path()] {
@@ -160,14 +263,34 @@ mod tests {
             fs::write(d.join("a.txt"), b"hello").unwrap();
             fs::write(d.join("sub/b.txt"), b"world").unwrap();
         }
-        // Match the mtimes so the quick check sees them as equal.
-        let t = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
-        for d in [l.path(), r.path()] {
-            set_mtime(&d.join("a.txt"), t).unwrap();
-            set_mtime(&d.join("sub/b.txt"), t).unwrap();
+        // Deliberately give one side a different mtime: content compare ignores
+        // timestamps, so the trees are still identical.
+        set_mtime(&l.path().join("a.txt"), SystemTime::UNIX_EPOCH + Duration::from_secs(5)).unwrap();
+        let cancel = AtomicBool::new(false);
+        assert!(compare(l.path(), r.path(), &cancel, &mut |_| {}).is_identical());
+    }
+
+    #[test]
+    fn same_size_but_different_bytes_is_a_diff() {
+        let l = tempfile::tempdir().unwrap();
+        let r = tempfile::tempdir().unwrap();
+        fs::write(l.path().join("f.txt"), b"aaaaa").unwrap();
+        fs::write(r.path().join("f.txt"), b"aaaab").unwrap(); // same length, last byte differs
+        assert_eq!(run(l.path(), r.path()), vec![("f.txt".to_string(), Status::Differ)]);
+    }
+
+    #[test]
+    fn progress_is_reported() {
+        let l = tempfile::tempdir().unwrap();
+        let r = tempfile::tempdir().unwrap();
+        for i in 0..40 {
+            fs::write(l.path().join(format!("f{i}")), b"x").unwrap();
+            fs::write(r.path().join(format!("f{i}")), b"x").unwrap();
         }
         let cancel = AtomicBool::new(false);
-        assert!(compare(l.path(), r.path(), &cancel).is_identical());
+        let mut seen_total = 0;
+        compare(l.path(), r.path(), &cancel, &mut |p| seen_total = p.files_total);
+        assert!(seen_total >= 40, "a total was reported: {}", seen_total);
     }
 
     #[test]
@@ -197,15 +320,15 @@ mod tests {
     }
 
     #[test]
-    fn a_newer_mtime_at_equal_size_is_a_diff() {
+    fn same_size_same_bytes_different_mtime_is_not_a_diff() {
         let l = tempfile::tempdir().unwrap();
         let r = tempfile::tempdir().unwrap();
         fs::write(l.path().join("f.txt"), b"12345").unwrap();
-        fs::write(r.path().join("f.txt"), b"12345").unwrap(); // same size
+        fs::write(r.path().join("f.txt"), b"12345").unwrap();
         let base = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
         set_mtime(&l.path().join("f.txt"), base).unwrap();
         set_mtime(&r.path().join("f.txt"), base + Duration::from_secs(60)).unwrap();
-        assert_eq!(run(l.path(), r.path()), vec![("f.txt".to_string(), Status::Differ)]);
+        assert!(run(l.path(), r.path()).is_empty(), "content is equal, timestamps ignored");
     }
 
     #[test]
@@ -223,7 +346,7 @@ mod tests {
         let r = tempfile::tempdir().unwrap();
         fs::write(l.path().join("a"), b"x").unwrap();
         let cancel = AtomicBool::new(true);
-        let d = compare(l.path(), r.path(), &cancel);
+        let d = compare(l.path(), r.path(), &cancel, &mut |_| {});
         assert!(d.cancelled);
     }
 }
