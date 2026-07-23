@@ -394,6 +394,33 @@ impl ShellTab {
         None
     }
 
+    /// Walk up from the active leaf to the nearest split laid out along `want`,
+    /// returning its node index. Used to pick which boundary a resize key moves
+    /// — a Left/Right key resizes the nearest side-by-side split, Up/Down the
+    /// nearest stacked one.
+    fn nearest_split(&self, want: SplitDir) -> Option<usize> {
+        let mut child = self.active;
+        while let Some((parent, _)) = self.parent_of(child) {
+            if let Some(Node::Split { dir, .. }) = self.nodes.get(parent).and_then(|n| n.as_ref()) {
+                if *dir == want {
+                    return Some(parent);
+                }
+            }
+            child = parent;
+        }
+        None
+    }
+
+    /// Nudge a split's ratio by `delta`, clamped so neither child vanishes.
+    fn nudge_split(&mut self, node: usize, delta: i16) {
+        if let Some(Node::Split { ratio, .. }) =
+            self.nodes.get_mut(node).and_then(|n| n.as_mut())
+        {
+            let next = (*ratio as i16 + delta).clamp(MIN_SPLIT_PCT as i16, 100 - MIN_SPLIT_PCT as i16);
+            *ratio = next as u16;
+        }
+    }
+
     /// Split the active leaf into (old, new) along `dir`; new becomes active.
     fn split(&mut self, dir: SplitDir, new_session: PtySession) {
         let old = self.active;
@@ -3744,6 +3771,63 @@ impl App {
         Ok(())
     }
 
+    /// Grow or shrink a pane from the keyboard, moving the relevant divider in
+    /// the arrow's direction (Right pushes the divider right, so the pane on
+    /// its left grows, and so on). Which divider depends on where the focus is:
+    ///
+    /// - a file pane: Left/Right move the left|right split, Up/Down the
+    ///   files|shell split;
+    /// - the shell: Left/Right resize the nearest side-by-side split; Up/Down
+    ///   resize the nearest stacked split, or the files|shell split when the
+    ///   shell has none.
+    fn resize_split(&mut self, dir: KeyCode) {
+        const STEP: i16 = 4;
+        let clamp = |v: i16| v.clamp(MIN_SPLIT_PCT as i16, 100 - MIN_SPLIT_PCT as i16) as u16;
+        // The files|shell divider is `main_pct` = height given to the files;
+        // Down grows the files, Up grows the shell.
+        let main = |s: &mut Self, delta: i16| s.main_pct = clamp(s.main_pct as i16 + delta);
+
+        match self.focused {
+            FocusedPane::Left | FocusedPane::Right => match dir {
+                // `panes_pct` is the left pane's width: Right grows the left.
+                KeyCode::Right => self.panes_pct = clamp(self.panes_pct as i16 + STEP),
+                KeyCode::Left => self.panes_pct = clamp(self.panes_pct as i16 - STEP),
+                KeyCode::Down => main(self, STEP),
+                KeyCode::Up => main(self, -STEP),
+                _ => {}
+            },
+            FocusedPane::Shell => {
+                let active = self.shell.active;
+                // Resolve which inner split (if any) the key targets before any
+                // mutable borrow, so the fallback can touch `self.main_pct`.
+                let want = match dir {
+                    KeyCode::Left | KeyCode::Right => Some(SplitDir::LeftRight),
+                    KeyCode::Up | KeyCode::Down => Some(SplitDir::TopBottom),
+                    _ => None,
+                };
+                let node = want.and_then(|w| {
+                    self.shell.tabs.get(active).and_then(|t| t.nearest_split(w))
+                });
+                let delta = match dir {
+                    KeyCode::Right | KeyCode::Down => STEP,
+                    KeyCode::Left | KeyCode::Up => -STEP,
+                    _ => 0,
+                };
+                match node {
+                    Some(n) => {
+                        if let Some(t) = self.shell.tabs.get_mut(active) {
+                            t.nudge_split(n, delta);
+                        }
+                    }
+                    // No inner split along this axis: Up/Down still move the
+                    // files|shell divider so the whole shell grows or shrinks.
+                    None if matches!(dir, KeyCode::Up | KeyCode::Down) => main(self, delta),
+                    None => {}
+                }
+            }
+        }
+    }
+
     /// Apply a dragged border's new position to whichever split it divides.
     fn set_divider_ratio(&mut self, d: Divider, pct: u16) {
         match d.target {
@@ -3780,6 +3864,19 @@ impl App {
                 || (key.code == KeyCode::Char('?') && !key.modifiers.contains(KeyModifiers::CONTROL)))
         {
             self.open_manual();
+            return Ok(());
+        }
+        // Ctrl+Shift+Arrow resizes panes from the keyboard, the counterpart to
+        // dragging a border. Global (works from the shell too); the modifier
+        // combination is not one a shell program expects on an arrow key.
+        if key.modifiers.contains(KeyModifiers::CONTROL)
+            && key.modifiers.contains(KeyModifiers::SHIFT)
+            && matches!(
+                key.code,
+                KeyCode::Left | KeyCode::Right | KeyCode::Up | KeyCode::Down
+            )
+        {
+            self.resize_split(key.code);
             return Ok(());
         }
         // F12 toggles full-window zoom of the focused surface; Shift+F12 zooms
@@ -5394,6 +5491,7 @@ fn manual_sections() -> Vec<(&'static str, Vec<ManualEntry>)> {
             "Panes and tabs",
             vec![
                 entry("Shift+H/J/K/L", None, "move focus between panes"),
+                entry("Ctrl+Shift+←→↑↓", None, "resize panes (border follows the arrow)"),
                 entry("drag a border", None, "resize any split (mouse)"),
                 entry("drag an entry", None, "to the other pane: copy (Shift: move)"),
                 entry("  ", None, "  onto the shell: type its path there"),
@@ -10050,6 +10148,58 @@ mod tests {
         // A bracketed-paste event carrying a path, with a stray newline.
         app.insert_into_active_text("/some/path\n");
         assert_eq!(app.command_buffer, "cd /some/path", "newline stripped, text appended");
+    }
+
+    // ---- keyboard pane resize ----
+
+    fn ctrl_shift(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::CONTROL | KeyModifiers::SHIFT)
+    }
+
+    #[test]
+    fn ctrl_shift_arrows_resize_the_file_panes() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        app.focus(FocusedPane::Left);
+        assert_eq!(app.panes_pct, 50);
+        assert_eq!(app.main_pct, 60);
+
+        // Right pushes the left|right divider right → left pane grows.
+        app.handle_key(ctrl_shift(KeyCode::Right)).unwrap();
+        assert!(app.panes_pct > 50, "left grew: {}", app.panes_pct);
+        let wider = app.panes_pct;
+        app.handle_key(ctrl_shift(KeyCode::Left)).unwrap();
+        assert!(app.panes_pct < wider, "left shrank back");
+
+        // Down grows the file area (files|shell divider moves down).
+        app.handle_key(ctrl_shift(KeyCode::Down)).unwrap();
+        assert!(app.main_pct > 60, "files grew: {}", app.main_pct);
+        app.handle_key(ctrl_shift(KeyCode::Up)).unwrap();
+        app.handle_key(ctrl_shift(KeyCode::Up)).unwrap();
+        assert!(app.main_pct < 60, "and shrank past the start");
+    }
+
+    #[test]
+    fn resize_is_clamped_so_a_pane_never_vanishes() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        app.focus(FocusedPane::Left);
+        for _ in 0..50 {
+            app.handle_key(ctrl_shift(KeyCode::Left)).unwrap();
+        }
+        assert_eq!(app.panes_pct, MIN_SPLIT_PCT, "cannot shrink below the floor");
+        for _ in 0..50 {
+            app.handle_key(ctrl_shift(KeyCode::Right)).unwrap();
+        }
+        assert_eq!(app.panes_pct, 100 - MIN_SPLIT_PCT, "nor grow past the ceiling");
+    }
+
+    #[test]
+    fn from_the_shell_up_down_resizes_the_shell_area() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        app.focus(FocusedPane::Shell);
+        assert_eq!(app.main_pct, 60);
+        // With no inner split, Up grows the shell (files|shell divider up).
+        app.handle_key(ctrl_shift(KeyCode::Up)).unwrap();
+        assert!(app.main_pct < 60, "shell grew: {}", app.main_pct);
     }
 
     // ---- editing, confirms, search, history refinements ----
