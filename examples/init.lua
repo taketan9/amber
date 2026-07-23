@@ -1,155 +1,161 @@
--- cian configuration — example init.lua
+-- ============================================================================
+--  cian — configuration
+-- ============================================================================
 --
--- Place this file at ~/.config/cian/init.lua (or set $CIAN_CONFIG_DIR to a
--- directory containing init.lua). Everything here is optional; cian runs with
--- sensible defaults if the file is missing. Any error in this file is shown in
--- a startup notice and cian continues with defaults for whatever failed.
+--  Everything below is COMMENTED OUT. Delete the leading "-- " on any line to
+--  turn that setting on. With nothing uncommented, cian runs on its defaults.
 --
--- The API is intentionally WezTerm-flavoured: you call functions on the global
--- `cian` table.
+--  Where this file goes:
+--    Linux / macOS : ~/.config/cian/init.lua
+--    Windows       : %USERPROFILE%\.config\cian\init.lua
+--                    (e.g. C:\Users\you\.config\cian\init.lua)
+--    Or set $CIAN_CONFIG_DIR to point somewhere else; cian reads
+--    $CIAN_CONFIG_DIR/init.lua then.
+--
+--  It is plain Lua 5.4, so you can use variables, functions and `if` around
+--  any of this (e.g. a different shell per machine). Mistakes are never fatal:
+--  cian collects them and shows a notice on startup instead of refusing to run.
+--
+--  See the full key list any time with `?` in the app, `:man`, or `cian -man`.
+-- ============================================================================
 
-----------------------------------------------------------------------
--- Theme — colors accept "#rrggbb", "r,g,b", or a named color
--- (cyan, red, yellow, blue, green, magenta, white, black, gray, darkgray,
---  lightblue, ...). Omit any field to keep its default.
-----------------------------------------------------------------------
-cian.set_theme({
-  accent      = "#00d7d7", -- focused-pane border, icons, active tab
-  status_bg   = "#28283c", -- status bar background
-  selected_bg = "#3c3c5a", -- cursor row highlight
-  visual_bg   = "#503c1e", -- visual-mode selection
-  mark_fg     = "yellow",  -- mark indicator
-})
 
-----------------------------------------------------------------------
--- Options
-----------------------------------------------------------------------
-cian.set_option("clipboard_on_copy", true) -- also push paths to the OS clipboard on copy/move
--- (`mask` was removed: it never filtered anything. Press `/` in the app
---  to narrow the listing instead.)
-----------------------------------------------------------------------
--- Shell panel program
---
--- Defaults to $SHELL on Unix and %COMSPEC% (cmd.exe) on Windows.
---
--- IMPORTANT, Windows users: a backslash starts an escape sequence in Lua,
--- so a path pasted into "..." is a *syntax error* that takes this whole
--- file down with it — leaving you on the default shell (cmd.exe) wondering
--- why nothing applied. Write full paths in [[...]], where backslashes are
--- literal:
---
---     BAD   "C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"
---     GOOD  [[C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe]]
---
--- The bare exe name also works and is looked up on PATH: "powershell.exe".
-----------------------------------------------------------------------
-local is_windows = package.config:sub(1, 1) == "\\"
-if is_windows then
-  -- Windows PowerShell 5.1, which ships with every Windows install.
-  cian.set_option("shell", [[C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe]])
+-- ----------------------------------------------------------------------------
+--  THEME
+-- ----------------------------------------------------------------------------
+-- Start from a named preset. Built in: "solarized-light" (aka "solarized"),
+-- and "default" / "dark" (the built-in dark theme, which is the default).
+-- cian.set_theme "solarized-light"
 
-  -- PowerShell 7 instead, if you have it (the path varies by install):
-  -- cian.set_option("shell", [[C:\Program Files\PowerShell\7\pwsh.exe]])
-end
+-- …or tune individual colors. Values are "#rrggbb" or a color name
+-- ("yellow", "cyan", …). Any key you leave out keeps its current value, and a
+-- preset can be combined with overrides:
+-- cian.set_theme {
+--   preset      = "solarized-light",  -- optional base to start from
+--   accent      = "#268bd2",  -- focused borders, highlights, the bar
+--   status_bg   = "#eee8d5",  -- background of the bottom status line
+--   selected_bg = "#dcd5be",  -- highlight behind the selected row
+--   visual_bg   = "#f7e4b0",  -- highlight while marking in visual mode
+--   mark_fg     = "#cb4b16",  -- color of the ● on marked files
+-- }
 
--- Border corners. Left unset, cian uses square corners in the legacy Windows
--- console (whose fonts often lack the rounded glyphs, leaving the corners
--- visibly misaligned) and rounded ones everywhere else.
--- cian.set_option("borders", "rounded")   -- or "plain"
 
--- Contextual key-hint bar above the status line.
-cian.set_option("key_hints", true)
+-- ----------------------------------------------------------------------------
+--  OPTIONS  —  cian.set_option(name, value)
+-- ----------------------------------------------------------------------------
 
--- Length of the split / maximize / close transitions, in milliseconds.
--- Set to 0 to turn animation off entirely.
-cian.set_option("animation_ms", 150)
+-- The directory both panes open in when cian is started with no path argument.
+-- Defaults to the Desktop, then your home folder. Handy when launched from a
+-- shortcut, where the working directory would otherwise be wherever the exe is.
+-- cian.set_option("home", "C:\\Users\\you\\Desktop")   -- Windows
+-- cian.set_option("home", "~/Desktop")                 -- Linux / macOS (~ and $VARS expand)
 
-----------------------------------------------------------------------
--- SSH targets — Shift+S, `:ssh`, or right-click → SSH connect…
--- (right-click is the one that works from inside the shell pane).
+-- Which shell runs in the embedded shell panel. Defaults to $SHELL / %COMSPEC%.
+-- cian.set_option("shell", "powershell.exe")
+-- cian.set_option("shell", "pwsh.exe")     -- PowerShell 7
+-- cian.set_option("shell", "/bin/zsh")
+
+-- Also put files on the SYSTEM clipboard when you copy with `y` (so they paste
+-- in Explorer / Finder too). Default: true.
+-- cian.set_option("clipboard_on_copy", true)
+
+-- Show dotfiles (names starting with ".") on startup. Toggle live with the
+-- right-click menu. Default: true.
+-- cian.set_option("show_hidden", true)
+
+-- Border corners: "rounded" (╭╮╯╰) or "plain" (square). Unset auto-picks —
+-- rounded where the terminal/font can render them, square in the legacy
+-- Windows console. Force "plain" if the corners look misaligned.
+-- cian.set_option("borders", "rounded")
+
+-- The contextual key-hint bar above the status line. Default: true. Set false
+-- for a cleaner screen once the keys are muscle memory.
+-- cian.set_option("key_hints", true)
+
+-- Split / zoom / close animation length, in milliseconds. 0 disables all
+-- animation. Default is a short, snappy transition.
+-- cian.set_option("animation_ms", 120)
+-- cian.set_option("animation_ms", 0)      -- off
+
+
+-- ----------------------------------------------------------------------------
+--  EXTRA KEY BINDINGS  —  cian.set_keymap("key", "action")
+-- ----------------------------------------------------------------------------
+-- Binds an ADDITIONAL single key to a built-in action; the default keys keep
+-- working too. `key` is one character. Example: also delete with "x".
+-- cian.set_keymap("x", "delete")
+-- cian.set_keymap("e", "open_external")   -- open with the OS default app
 --
--- Declare hosts once and the users once; the picker asks for the host, then
--- the user, so 8 hosts x 4 users is 12 lines here rather than 32 aliases you
--- would have to remember. Type in the host stage to filter.
+-- Every action name you can bind:
+--   Movement : cursor_down  cursor_up  cursor_bottom  page_down  page_up
+--              parent  enter
+--   Marking  : mark_down  mark_up  invert_marks  visual
+--   Files    : copy  move  delete  rename  new_file  new_dir
+--   Panes    : open_other  open_other_tab
+--   Open     : open_external           (hand the file to the OS opener)
+--   Clipboard: copy_path  copy_file_ref
+--   Find     : search  search_next  search_prev
+--   Misc     : history  shortcuts  command  quit
+
+
+-- ----------------------------------------------------------------------------
+--  SSH HOSTS  —  cian.ssh { ... }
+-- ----------------------------------------------------------------------------
+-- Populates the SSH picker (right-click → SSH connect, or in the shell) and the
+-- SFTP upload/download flow. `users` at the top level is the fleet-wide default;
+-- a host can override it. A user is either a bare name, or a table carrying its
+-- password so cian can log in for you.
 --
--- Authentication: key auth (ssh-keygen + ssh-copy-id, or ssh-agent on Windows)
--- needs nothing here and is the least work overall. If you do need a password,
--- a user entry can carry one and cian types it when ssh prompts:
+-- SECURITY NOTE: a plain `password` here is stored in clear text in this file.
+-- Prefer `password_cmd`, which runs a command and uses its stdout — so the
+-- secret lives in your OS credential store, not on disk.
 --
---   users = {
---     { name = "postgres", password = "..." },              -- plaintext, here
---     { name = "deploy", password_cmd = "pass srv/deploy" },-- from a store
---     "root",                                               -- key auth
---   }
---
--- A stored password is a plaintext secret in a file that gets backed up and
--- copied around; `chmod 600` this file, and prefer password_cmd where you can.
--- See the README section "SSH".
-----------------------------------------------------------------------
--- cian.ssh({
---   -- Users offered for every host. Bare names use key auth (or ask for a
---   -- password interactively, exactly as `ssh` normally would).
+-- cian.ssh {
+--   -- Applied to every host that doesn't list its own users:
 --   users = { "root", "deploy" },
 --
 --   hosts = {
---     -- Uses the shared user list above.
+--     -- Simplest: a name for the picker and an address. Uses the default users.
 --     { name = "web1", host = "10.0.1.11" },
 --
---     -- Its own users, each carrying a password cian types on the prompt.
---     -- Note the shape: a table with `name =`, not a bare string.
---     { name = "web2", host = "10.0.1.12",
---       users = {
---         { name = "root",   password = "..." },
---         { name = "deploy", password = "..." },
---       } },
+--     -- A non-standard port:
+--     { name = "db1",  host = "10.0.2.31", port = 2222 },
 --
---     -- Mixed: one login stored, one on key auth. Migrate a host to keys one
---     -- login at a time by turning its table back into a bare name.
---     { name = "db1", host = "10.0.2.31",
+--     -- Per-host users, one with a password typed in for auto-login:
+--     { name = "stage", host = "stage.example.com",
 --       users = {
---         { name = "postgres", password = "..." },
---         "root",
---       } },
---
---     -- A non-default port, and a password from a credential store instead of
---     -- from this file.
---     { name = "bast", host = "203.0.113.9", port = 2222,
---       users = {
---         { name = "admin", password_cmd = "pass srv/bast" },
---       } },
+--         "readonly",                                    -- prompts, no auto-login
+--         { name = "admin", password = "hunter2" },      -- clear text (avoid)
+--         { name = "ci",    password_cmd = "pass show ci/stage" },  -- from a store
+--       },
+--     },
 --   },
--- })
+-- }
 
-----------------------------------------------------------------------
--- Keymaps — bind a single key to an action name. These are *additive
--- overrides*: a key you bind here takes priority, every other key keeps its
--- default. Useful for adding aliases without losing the defaults.
+
+-- ----------------------------------------------------------------------------
+--  OPEN HANDLERS & HELPERS
+-- ----------------------------------------------------------------------------
+-- What Enter (or `open_external`) does for a given extension. The handler gets
+-- the full path. Use cian.spawn to launch a program detached, or cian.open to
+-- hand the path to the OS default opener.
 --
--- Available actions:
---   cursor_down, cursor_up, cursor_bottom, page_up, page_down,
---   parent, enter, quit, search, search_next, search_prev,
---   history, shortcuts, copy, move, delete, rename, new_file, new_dir,
---   open_other, open_other_tab, open_external, copy_path, copy_file_ref,
---   mark_down, mark_up, invert_marks, visual, command
-----------------------------------------------------------------------
--- cian.set_keymap("x", "delete")   -- add `x` as an alias for delete
--- cian.set_keymap("e", "rename")   -- add `e` as an alias for rename
-
--- 日本語入力(IME)のまま使う:
---   ・全角英数モード(ｑ ｄ ｊ ｋ …)は設定不要で全コマンドがそのまま動きます。
---   ・ひらがなを直接コマンドに割り当てたい場合は、かなを1文字キーとして指定:
--- cian.set_keymap("あ", "new_file")   -- 「あ」で新規ファイル
--- cian.set_keymap("ふ", "search")     -- 「ふ」で検索 など、覚えやすい字で自由に
-
-----------------------------------------------------------------------
--- Extension-dispatch execution — decide how files open by extension.
--- The handler receives the absolute path as a string. Use cian.spawn{...}
--- to launch a process, or cian.open(path) for the OS default opener.
-----------------------------------------------------------------------
 -- cian.on_open("md", function(path)
---   cian.spawn({ "open", "-a", "Typora", path })   -- macOS example
+--   cian.spawn { "code", path }          -- open Markdown in VS Code
 -- end)
 --
 -- cian.on_open("png", function(path)
---   cian.open(path)   -- explicitly hand to the OS default app
+--   cian.open(path)                      -- let the OS pick the image viewer
 -- end)
+--
+-- cian.on_open("csv", function(path)
+--   cian.spawn { "nvim", path }
+-- end)
+
+
+-- ----------------------------------------------------------------------------
+--  A note on shortcuts
+-- ----------------------------------------------------------------------------
+-- Bookmarks (the `s` menu) are managed inside the app — press `a` there, or `a`
+-- on a path in the history list — and saved to shortcuts.toml next to this file.
+-- There is nothing to configure here for them.

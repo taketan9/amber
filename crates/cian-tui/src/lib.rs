@@ -6494,6 +6494,7 @@ pub fn usage_text() -> String {
         format!("    {}", cfg),
         format!("    {}", shortcuts),
         "    (override the config directory with $CIAN_CONFIG_DIR)".to_string(),
+        "    a fully-commented starter init.lua is in examples/init.lua".to_string(),
         String::new(),
         "ENVIRONMENT:".to_string(),
         "    CIAN_LOG      append diagnostics to this file (debugging)".to_string(),
