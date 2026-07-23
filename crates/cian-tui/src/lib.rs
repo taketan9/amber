@@ -887,6 +887,7 @@ enum MenuItem {
     Hash,
     Compare,
     Ssh,
+    Quit,
     Manual,
 }
 
@@ -907,6 +908,7 @@ impl MenuItem {
             MenuItem::Hash => "Checksum…",
             MenuItem::Compare => "Compare left ↔ right",
             MenuItem::Ssh => "SSH connect…",
+            MenuItem::Quit => "Quit cian  (q)",
             MenuItem::Manual => "Key manual  (?)",
         }
     }
@@ -1323,6 +1325,11 @@ pub struct App {
     /// `(tab, leaf, rect)` for each shell split pane on screen, so a click can
     /// land on the pane under the pointer rather than whichever was active.
     shell_leaves: Vec<(usize, usize, Rect)>,
+    /// Clickable tab-label rects, rebuilt each frame: which pane's strip, the
+    /// tab index, and where it sits, so a tab can be switched with the mouse.
+    tab_rects: Vec<(FocusedPane, usize, Rect)>,
+    /// The context menu's on-screen rect (inner area), for clicking its items.
+    menu_rect: Rect,
     /// The border currently being dragged, if any.
     drag: Option<Divider>,
     /// Files picked up by the mouse and not yet dropped.
@@ -1417,6 +1424,8 @@ impl App {
             panes_pct: 50,
             dividers: Vec::new(),
             shell_leaves: Vec::new(),
+            tab_rects: Vec::new(),
+            menu_rect: Rect::new(0, 0, 0, 0),
             drag: None,
             file_drag: None,
             dest_history: Vec::new(),
@@ -3258,6 +3267,37 @@ impl App {
             }
         }
 
+        // The context menu is mouse-navigable: hovering a row highlights it,
+        // clicking it runs it. Handled before the blanket popup guard below.
+        if matches!(self.popup, Popup::ContextMenu { .. }) {
+            let m = self.menu_rect;
+            let top = m.y + 1; // first row inside the border
+            let in_cols = col >= m.x && col < m.x + m.width;
+            if let Popup::ContextMenu { items, cursor, .. } = &mut self.popup {
+                let n = items.len();
+                let idx = row.saturating_sub(top) as usize;
+                let on_row = in_cols && row >= top && idx < n;
+                match ev.kind {
+                    MouseEventKind::Moved | MouseEventKind::Drag(MouseButton::Left) => {
+                        if on_row {
+                            *cursor = idx;
+                        }
+                    }
+                    MouseEventKind::Down(MouseButton::Left) => {
+                        if on_row {
+                            let item = items[idx];
+                            let _ = self.run_menu_item(item);
+                        } else {
+                            // A click off the menu dismisses it, as menus do.
+                            self.popup = Popup::None;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            return;
+        }
+
         // Ignore everything else while a popup owns the screen.
         if !matches!(self.popup, Popup::None) {
             return;
@@ -3339,9 +3379,25 @@ impl App {
         }
 
         // Grabbing a border starts a resize instead of moving focus. Checked
-        // first because the seam overlaps the panes' own border cells.
+        // before tabs and panes because the seam overlaps both the panes' own
+        // border cells and, at its top, a tab label.
         if let Some(d) = self.dividers.iter().copied().find(|d| in_rect(d.zone)) {
             self.drag = Some(d);
+            return;
+        }
+
+        // Clicking a tab label on a border switches to that tab, focusing its
+        // pane first.
+        if let Some((pane, idx, _)) = self.tab_rects.iter().copied().find(|(_, _, r)| in_rect(*r)) {
+            self.focus(pane);
+            match pane {
+                FocusedPane::Shell => self.shell.select(idx),
+                _ => {
+                    if let Some(t) = self.active_file_tabs_mut() {
+                        t.select(idx);
+                    }
+                }
+            }
             return;
         }
 
@@ -3657,9 +3713,9 @@ impl App {
             items.push(MenuItem::Ssh);
             items.push(MenuItem::Background);
         }
-        // Always last, and present in every menu: the point of it is to be
-        // findable when you cannot remember anything else — including in the
-        // shell, where it is otherwise the only entry worth showing.
+        // Quit and the manual are offered in every menu, so both are reachable
+        // by mouse alone (quitting otherwise needs `q`, which the shell eats).
+        items.push(MenuItem::Quit);
         items.push(MenuItem::Manual);
         self.popup = Popup::ContextMenu { items, cursor: 0, at: (col, row) };
     }
@@ -3752,6 +3808,7 @@ impl App {
             MenuItem::Delete => self.start_delete(),
             MenuItem::Manual => self.open_manual(),
             MenuItem::Ssh => self.start_ssh(),
+            MenuItem::Quit => self.start_quit_confirm(),
             MenuItem::HiddenToggle => self.toggle_hidden(),
             MenuItem::Attributes => self.show_attributes(),
             MenuItem::Hash => self.start_hash(cian_core::attrs::HashKind::Sha256),
@@ -4487,6 +4544,14 @@ impl App {
         // screen) is running, in which case Esc belongs to that app (e.g. vim).
         if key.code == KeyCode::Esc && !alt_screen {
             self.focus(self.last_file_pane);
+            return Ok(());
+        }
+        // Shift+Enter opens the shell's context menu, the way it does in a file
+        // pane — the shell cannot type `:menu`, so this is its way in by
+        // keyboard (right-click is the other). Passed through to a full-screen
+        // app, which may want it.
+        if key.code == KeyCode::Enter && key.modifiers.contains(KeyModifiers::SHIFT) && !alt_screen {
+            self.open_menu_at_cursor();
             return Ok(());
         }
         // Tab and split controls via F-keys — reserved only at a normal prompt.
@@ -5880,6 +5945,7 @@ fn draw_split(f: &mut Frame, main_area: Rect, app: &mut App, ov: AnimOverride) {
     };
 
     let mut leaves = Vec::new();
+    let mut tab_rects = Vec::new();
     let mut dividers = vec![
         Divider {
             zone: seam_zone(Direction::Vertical, panes_area, shell_area),
@@ -5900,12 +5966,13 @@ fn draw_split(f: &mut Frame, main_area: Rect, app: &mut App, ov: AnimOverride) {
 
     let (bg_l, bg_r) = (app.pane_bg[0], app.pane_bg[1]);
     let (fl_l, fl_r) = (app.flash_level(FocusedPane::Left), app.flash_level(FocusedPane::Right));
-    draw_file_pane(f, panes_split[0], &app.left, app.focused == FocusedPane::Left, visual_for_left, app.mode, bg_l, fl_l);
-    draw_file_pane(f, panes_split[1], &app.right, app.focused == FocusedPane::Right, visual_for_right, app.mode, bg_r, fl_r);
+    draw_file_pane(f, panes_split[0], &app.left, app.focused == FocusedPane::Left, visual_for_left, app.mode, bg_l, fl_l, FocusedPane::Left, &mut tab_rects);
+    draw_file_pane(f, panes_split[1], &app.right, app.focused == FocusedPane::Right, visual_for_right, app.mode, bg_r, fl_r, FocusedPane::Right, &mut tab_rects);
     // draw_shell sizes each pane's PTY to its computed sub-rect.
-    draw_shell(f, shell_area, &mut app.shell, app.focused == FocusedPane::Shell, &mut dividers, &mut leaves, ov);
+    draw_shell(f, shell_area, &mut app.shell, app.focused == FocusedPane::Shell, &mut dividers, &mut leaves, ov, &mut tab_rects);
     app.dividers = dividers;
     app.shell_leaves = leaves;
+    app.tab_rects = tab_rects;
 }
 
 /// The focused surface drawn at an arbitrary rect, used as the floating layer
@@ -5918,15 +5985,15 @@ fn draw_zoom_overlay(f: &mut Frame, rect: Rect, app: &mut App, ov: AnimOverride)
         FocusedPane::Left => {
             let (bg, fl) = (app.pane_bg[0], app.flash_level(FocusedPane::Left));
             let va = app.visual_anchor;
-            draw_file_pane(f, rect, &app.left, true, va, app.mode, bg, fl);
+            draw_file_pane(f, rect, &app.left, true, va, app.mode, bg, fl, FocusedPane::Left, &mut Vec::new());
         }
         FocusedPane::Right => {
             let (bg, fl) = (app.pane_bg[1], app.flash_level(FocusedPane::Right));
             let va = app.visual_anchor;
-            draw_file_pane(f, rect, &app.right, true, va, app.mode, bg, fl);
+            draw_file_pane(f, rect, &app.right, true, va, app.mode, bg, fl, FocusedPane::Right, &mut Vec::new());
         }
         FocusedPane::Shell => {
-            draw_shell(f, rect, &mut app.shell, true, &mut sink, &mut Vec::new(), ov);
+            draw_shell(f, rect, &mut app.shell, true, &mut sink, &mut Vec::new(), ov, &mut Vec::new());
         }
     }
 }
@@ -5938,29 +6005,31 @@ fn draw_zoomed(f: &mut Frame, area: Rect, app: &mut App, ov: AnimOverride) {
     // main/panes borders are not on screen.
     let mut dividers = Vec::new();
     let mut leaves = Vec::new();
+    let mut tab_rects = Vec::new();
     match app.focused {
         FocusedPane::Left => {
             rects.left = area;
             app.layout_rects = rects;
             let va = app.visual_anchor;
             let (bg, fl) = (app.pane_bg[0], app.flash_level(FocusedPane::Left));
-            draw_file_pane(f, area, &app.left, true, va, app.mode, bg, fl);
+            draw_file_pane(f, area, &app.left, true, va, app.mode, bg, fl, FocusedPane::Left, &mut tab_rects);
         }
         FocusedPane::Right => {
             rects.right = area;
             app.layout_rects = rects;
             let va = app.visual_anchor;
             let (bg, fl) = (app.pane_bg[1], app.flash_level(FocusedPane::Right));
-            draw_file_pane(f, area, &app.right, true, va, app.mode, bg, fl);
+            draw_file_pane(f, area, &app.right, true, va, app.mode, bg, fl, FocusedPane::Right, &mut tab_rects);
         }
         FocusedPane::Shell => {
             rects.shell = area;
             app.layout_rects = rects;
-            draw_shell(f, area, &mut app.shell, true, &mut dividers, &mut leaves, ov);
+            draw_shell(f, area, &mut app.shell, true, &mut dividers, &mut leaves, ov, &mut tab_rects);
         }
     }
     app.dividers = dividers;
     app.shell_leaves = leaves;
+    app.tab_rects = tab_rects;
 }
 
 fn draw(f: &mut Frame, app: &mut App) {
@@ -6040,6 +6109,10 @@ fn draw(f: &mut Frame, app: &mut App) {
         draw_op_progress(f, area, app);
     }
     if !matches!(app.popup, Popup::None) {
+        // Remember where the context menu landed so a click can hit its rows.
+        if let Popup::ContextMenu { items, at, .. } = &app.popup {
+            app.menu_rect = context_menu_rect(items, *at, area);
+        }
         let find_state = app
             .find_job
             .as_ref()
@@ -6049,10 +6122,29 @@ fn draw(f: &mut Frame, app: &mut App) {
     }
 }
 
+/// The rect the context menu occupies, from its anchor and item count. Shared
+/// by the renderer and the mouse handler so a click lands where the row is
+/// drawn.
+fn context_menu_rect(items: &[MenuItem], at: (u16, u16), area: Rect) -> Rect {
+    let w = items.iter().map(|i| i.label().len()).max().unwrap_or(10) as u16 + 4;
+    let h = items.len() as u16 + 2;
+    let x = at.0.min(area.width.saturating_sub(w));
+    let y = at.1.min(area.height.saturating_sub(h));
+    Rect::new(x, y, w.min(area.width), h.min(area.height))
+}
+
 /// Build a tab strip. Active tab uses full path; inactive tabs use just the
 /// directory name. If the labels overflow `max_width`, the rest collapse into
 /// a `+N` marker so the active tab stays visible.
-fn tabs_title<'a>(tabs: &'a PaneTabs, focused: bool, focus_bg: Color, max_width: u16) -> Line<'a> {
+fn tabs_title<'a>(
+    tabs: &'a PaneTabs,
+    focused: bool,
+    focus_bg: Color,
+    max_width: u16,
+    // Filled with (tab index, column offset from the title's start, width) for
+    // each visible tab, so a click can be mapped back to a tab.
+    offsets: &mut Vec<(usize, u16, u16)>,
+) -> Line<'a> {
     fn label_for(i: usize, tab: &Pane, is_active: bool) -> String {
         let main = if is_active {
             tab.cwd.display().to_string()
@@ -6109,12 +6201,13 @@ fn tabs_title<'a>(tabs: &'a PaneTabs, focused: bool, focus_bg: Color, max_width:
     let hidden_right = total.saturating_sub(right + 1);
 
     let mut spans: Vec<Span<'a>> = Vec::new();
+    // Track the running column offset so each tab's on-screen span is known.
+    let mut col: u16 = 1; // the leading space below
     spans.push(Span::raw(" "));
     if hidden_left > 0 {
-        spans.push(Span::styled(
-            format!("+{} ", hidden_left),
-            Style::default().fg(Color::DarkGray),
-        ));
+        let s = format!("+{} ", hidden_left);
+        col += s.chars().count() as u16;
+        spans.push(Span::styled(s, Style::default().fg(Color::DarkGray)));
     }
     for (pos, &i) in shown.iter().enumerate() {
         let is_active = i == active;
@@ -6128,9 +6221,13 @@ fn tabs_title<'a>(tabs: &'a PaneTabs, focused: bool, focus_bg: Color, max_width:
             Style::default().fg(Color::DarkGray)
         };
         let label = label_for(i, &tabs.tabs[i], is_active);
+        let w = label.chars().count() as u16;
+        offsets.push((i, col, w));
+        col += w;
         spans.push(Span::styled(label, style));
         if pos + 1 < shown.len() {
             spans.push(Span::styled("│", Style::default().fg(Color::DarkGray)));
+            col += 1;
         }
     }
     if hidden_right > 0 {
@@ -6289,8 +6386,13 @@ fn kind_for(entry: &cian_core::Entry) -> FileKind {
     }
 }
 
-fn shell_tabs_title<'a>(tabs: &'a ShellPane, focused: bool) -> Line<'a> {
+fn shell_tabs_title<'a>(
+    tabs: &'a ShellPane,
+    focused: bool,
+    offsets: &mut Vec<(usize, u16, u16)>,
+) -> Line<'a> {
     let mut spans: Vec<Span<'a>> = Vec::new();
+    let mut col: u16 = 1; // the leading space below
     spans.push(Span::raw(" "));
     for i in 0..tabs.count().max(1) {
         let label = format!(" shell {} ", i + 1);
@@ -6304,9 +6406,13 @@ fn shell_tabs_title<'a>(tabs: &'a ShellPane, focused: bool) -> Line<'a> {
             // Readable medium grey for inactive tabs (DarkGray was too dim).
             Style::default().fg(Color::Gray)
         };
+        let w = label.chars().count() as u16;
+        offsets.push((i, col, w));
+        col += w;
         spans.push(Span::styled(label, style));
         if i + 1 < tabs.count() {
             spans.push(Span::styled("│", Style::default().fg(Color::Gray)));
+            col += 1;
         }
     }
     spans.push(Span::raw(" "));
@@ -6323,6 +6429,8 @@ fn draw_file_pane(
     mode: Mode,
     bg: Option<Color>,
     flash: f32,
+    pane_id: FocusedPane,
+    tab_rects: &mut Vec<(FocusedPane, usize, Rect)>,
 ) {
     let focus_bg = focus_badge_color(mode);
     let mut border_style = if focused {
@@ -6335,11 +6443,17 @@ fn draw_file_pane(
         border_style = Style::default().fg(fade(theme().accent, flash)).add_modifier(Modifier::BOLD);
     }
     let max_title_w = area.width.saturating_sub(2);
+    let mut offsets = Vec::new();
+    let title = tabs_title(tabs, focused, focus_bg, max_title_w, &mut offsets);
+    // The title is drawn on the top border row, one cell in from the corner.
+    for (i, off, w) in offsets {
+        tab_rects.push((pane_id, i, Rect::new(area.x + 1 + off, area.y, w, 1)));
+    }
     let mut block = Block::default()
         .borders(Borders::ALL)
         .border_type(border_type())
         .border_style(border_style)
-        .title(tabs_title(tabs, focused, focus_bg, max_title_w));
+        .title(title);
     if let Some(c) = bg {
         block = block.style(Style::default().bg(c));
     }
@@ -6476,8 +6590,9 @@ fn draw_shell(
     dividers: &mut Vec<Divider>,
     leaves: &mut Vec<(usize, usize, Rect)>,
     ov: AnimOverride,
+    tab_rects: &mut Vec<(FocusedPane, usize, Rect)>,
 ) {
-    draw_shell_inner(f, area, shell, focused, dividers, leaves, ov);
+    draw_shell_inner(f, area, shell, focused, dividers, leaves, ov, tab_rects);
 }
 
 /// Repaint every still-uncolored cell in `area` with `bg`.
@@ -6494,6 +6609,7 @@ fn tint_default_cells(f: &mut Frame, area: Rect, bg: Color) {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn draw_shell_inner(
     f: &mut Frame,
     area: Rect,
@@ -6502,17 +6618,23 @@ fn draw_shell_inner(
     dividers: &mut Vec<Divider>,
     leaves: &mut Vec<(usize, usize, Rect)>,
     ov: AnimOverride,
+    tab_rects: &mut Vec<(FocusedPane, usize, Rect)>,
 ) {
     let border_style = if focused {
         Style::default().fg(theme().accent).add_modifier(Modifier::BOLD)
     } else {
         Style::default().fg(Color::DarkGray)
     };
+    let mut offsets = Vec::new();
+    let title = shell_tabs_title(shell, focused, &mut offsets);
+    for (i, off, w) in offsets {
+        tab_rects.push((FocusedPane::Shell, i, Rect::new(area.x + 1 + off, area.y, w, 1)));
+    }
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(border_type())
         .border_style(border_style)
-        .title(shell_tabs_title(shell, focused));
+        .title(title);
     let inner = area.inner(Margin { vertical: 1, horizontal: 1 });
     f.render_widget(block, area);
 
@@ -6765,7 +6887,10 @@ fn key_hints(app: &App) -> Vec<(&'static str, &'static str)> {
             ("S-F9", "h-split"),
             ("S-F10", "close"),
             ("F12", "zoom"),
-            ("?", "help"),
+            // No `? help` here: in the shell `?` is a literal character that
+            // goes to the running program, so advertising it would be a lie.
+            // Shift+Enter opens the menu, which leads to the manual.
+            ("S-Enter", "menu"),
         ]);
         return v;
     }
@@ -7121,11 +7246,7 @@ fn draw_popup(
     // sizes and positions itself.
     if let Popup::ContextMenu { items, cursor, at } = popup {
         let w = items.iter().map(|i| i.label().len()).max().unwrap_or(10) as u16 + 4;
-        let h = items.len() as u16 + 2;
-        // Keep the whole menu on screen when clicking near an edge.
-        let x = at.0.min(area.width.saturating_sub(w));
-        let y = at.1.min(area.height.saturating_sub(h));
-        let rect = Rect::new(x, y, w.min(area.width), h.min(area.height));
+        let rect = context_menu_rect(items, *at, area);
 
         f.render_widget(Clear, rect);
         let block = Block::default()
@@ -8470,7 +8591,13 @@ mod tests {
         let Popup::ContextMenu { items, .. } = &app.popup else { panic!("no menu") };
         assert_eq!(
             items,
-            &vec![MenuItem::Ssh, MenuItem::Paste, MenuItem::Background, MenuItem::Manual]
+            &vec![
+                MenuItem::Ssh,
+                MenuItem::Paste,
+                MenuItem::Background,
+                MenuItem::Quit,
+                MenuItem::Manual
+            ]
         );
     }
 
@@ -10148,6 +10275,55 @@ mod tests {
         // A bracketed-paste event carrying a path, with a stray newline.
         app.insert_into_active_text("/some/path\n");
         assert_eq!(app.command_buffer, "cd /some/path", "newline stripped, text appended");
+    }
+
+    #[test]
+    fn clicking_a_tab_switches_to_it() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        app.focus(FocusedPane::Left);
+        app.left.add_clone().unwrap(); // second tab, now active
+        // Wide enough that the first tab is not collapsed into a +N marker.
+        let _ = render(&mut app, 300, 40);
+        assert_eq!(app.left.active, 1);
+
+        let (_, _, r) = app
+            .tab_rects
+            .iter()
+            .copied()
+            .find(|(p, i, _)| *p == FocusedPane::Left && *i == 0)
+            .expect("a rect for the left pane's first tab");
+        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), r.x + 1, r.y));
+        assert_eq!(app.left.active, 0, "clicking the first tab selected it");
+        assert_eq!(app.focused, FocusedPane::Left);
+    }
+
+    #[test]
+    fn the_context_menu_runs_the_item_that_was_clicked() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        app.focus(FocusedPane::Left);
+        let _ = render(&mut app, 100, 40);
+        // Open the menu at a known spot, then render so menu_rect is set.
+        app.open_context_menu(10, 10);
+        let _ = render(&mut app, 100, 40);
+        let m = app.menu_rect;
+        // The Quit item is second-to-last; click its row.
+        let (quit_idx, _) = {
+            let Popup::ContextMenu { items, .. } = &app.popup else { panic!("no menu") };
+            items.iter().enumerate().find(|(_, it)| **it == MenuItem::Quit).expect("quit item")
+        };
+        let row = m.y + 1 + quit_idx as u16;
+        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), m.x + 2, row));
+        assert!(matches!(app.popup, Popup::ConfirmQuit), "clicking Quit opened the confirm");
+    }
+
+    #[test]
+    fn clicking_off_the_context_menu_dismisses_it() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        let _ = render(&mut app, 100, 40);
+        app.open_context_menu(10, 10);
+        let _ = render(&mut app, 100, 40);
+        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), 1, 1));
+        assert!(matches!(app.popup, Popup::None));
     }
 
     // ---- keyboard pane resize ----
