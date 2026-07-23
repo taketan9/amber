@@ -4,6 +4,7 @@ members = [
     "crates/cian-core",
     "crates/cian-tui",
     "crates/cian-pty",
+    "crates/cian-scp",
     "crates/cian-lua",
     "crates/cian-bin",
 ]
