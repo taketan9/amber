@@ -1122,6 +1122,9 @@ impl std::fmt::Debug for PendingAuth {
 /// How long to watch for a password prompt before giving up.
 const AUTH_WINDOW: Duration = Duration::from_secs(20);
 
+/// Two clicks closer together than this on the same row count as a double-click.
+const DOUBLE_CLICK: Duration = Duration::from_millis(400);
+
 /// Does this screen end in something asking for a password?
 ///
 /// Deliberately narrow: only a prompt on the last non-empty line counts, so
@@ -1554,6 +1557,9 @@ pub struct App {
     scp_dir: Option<(ScpDir, Vec<PathBuf>, PathBuf)>,
     /// An SFTP transfer whose remote path is being entered, if any.
     scp_pending: Option<ScpPending>,
+    /// Time and row of the last left-click in a file pane, to detect a
+    /// double-click (which activates the entry).
+    last_click: Option<(Instant, u16)>,
     /// The border currently being dragged, if any.
     drag: Option<Divider>,
     /// Files picked up by the mouse and not yet dropped.
@@ -1649,6 +1655,7 @@ impl App {
             panes_pct: 50,
             dividers: Vec::new(),
             shell_leaves: Vec::new(),
+            last_click: None,
             tab_rects: Vec::new(),
             menu_rect: Rect::new(0, 0, 0, 0),
             viewer_rect: Rect::new(0, 0, 0, 0),
@@ -4057,10 +4064,24 @@ impl App {
             }
             Some(pane) => {
                 self.focus(pane);
-                // Put the cursor on the row that was clicked, then arm a drag
-                // from it. Whether it becomes a drag or stays a click is
-                // decided on release.
+                // Put the cursor on the row that was clicked.
                 self.cursor_to_row(pane, row);
+                // A second click on the same row in quick succession is a
+                // double-click: enter a directory, or open a file with its OS
+                // default program — the same as Enter / the open key.
+                let now = Instant::now();
+                let is_double = self
+                    .last_click
+                    .map(|(t, r)| r == row && now.duration_since(t) < DOUBLE_CLICK)
+                    .unwrap_or(false);
+                if is_double {
+                    self.last_click = None;
+                    let _ = self.activate_selected();
+                    return;
+                }
+                self.last_click = Some((now, row));
+                // Otherwise arm a drag from here; whether it becomes a drag or
+                // stays a click is decided on release.
                 let paths = self.active_pane().map(|p| p.target_paths()).unwrap_or_default();
                 if !paths.is_empty() {
                     self.file_drag =
@@ -4069,6 +4090,22 @@ impl App {
             }
             None => {}
         }
+    }
+
+    /// Act on the selected entry as Enter would: enter a directory, or open a
+    /// file with its OS default program (or an init.lua `on_open` handler).
+    fn activate_selected(&mut self) -> Result<()> {
+        let is_dir = self.active_pane().and_then(|p| p.selected()).map(|e| e.is_dir);
+        match is_dir {
+            Some(true) => {
+                if let Some(p) = self.active_pane_mut() {
+                    p.enter_selected()?;
+                }
+            }
+            Some(false) => self.open_externally(),
+            None => {}
+        }
+        Ok(())
     }
 
     /// Resolve a finished drag.
@@ -6361,6 +6398,7 @@ fn manual_sections() -> Vec<(&'static str, Vec<ManualEntry>)> {
                 entry("Shift+H/J/K/L", None, "move focus between panes"),
                 entry("Ctrl+Shift+←→↑↓", None, "resize panes (border follows the arrow)"),
                 entry("drag a border", None, "resize any split (mouse)"),
+                entry("double-click", None, "enter a folder, or open a file (OS default)"),
                 entry("drag an entry", None, "to the other pane: copy (Shift: move)"),
                 entry("  ", None, "  onto the shell: type its path there"),
                 entry(":copyto", None, "copy to a recent or typed directory"),
@@ -11607,6 +11645,46 @@ mod tests {
         app.handle_key(code(KeyCode::Char('y'))).unwrap();
         assert!(matches!(app.popup, Popup::None));
         assert_eq!(app.message.as_deref(), Some("copied"));
+    }
+
+    #[test]
+    fn double_clicking_a_directory_enters_it() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::create_dir(d.path().join("sub")).unwrap();
+        std::fs::write(d.path().join("sub/inner.txt"), b"x").unwrap();
+        let p = d.path().to_path_buf();
+        let mut app = App::new(p.clone(), p.clone(), cian_lua::Config::default()).unwrap();
+        let _ = render(&mut app, 100, 40);
+        let r = app.layout_rects.left;
+        // First content row is the top border + 1; "sub" sorts first (dirs first).
+        let (cx, cy) = (r.x + 3, r.y + 1);
+        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), cx, cy));
+        app.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), cx, cy));
+        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), cx, cy));
+
+        assert_eq!(
+            app.left.active_ref().cwd,
+            std::fs::canonicalize(d.path().join("sub")).unwrap(),
+            "double-click entered the directory"
+        );
+    }
+
+    #[test]
+    fn a_slow_second_click_is_not_a_double_click() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::create_dir(d.path().join("sub")).unwrap();
+        let p = d.path().to_path_buf();
+        let mut app = App::new(p.clone(), p.clone(), cian_lua::Config::default()).unwrap();
+        let _ = render(&mut app, 100, 40);
+        let r = app.layout_rects.left;
+        let (cx, cy) = (r.x + 3, r.y + 1);
+        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), cx, cy));
+        app.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), cx, cy));
+        // Age the first click past the double-click window.
+        app.last_click = Some((Instant::now() - Duration::from_secs(2), cy));
+        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), cx, cy));
+        assert_eq!(app.left.active_ref().cwd, std::fs::canonicalize(d.path()).unwrap(),
+            "a slow second click just selects, does not enter");
     }
 
     #[test]
