@@ -192,6 +192,25 @@ fn modern_terminal() -> bool {
         || std::env::var_os("TERM_PROGRAM").is_some()
 }
 
+/// Interface language for the key manual / help text. Japanese is the default;
+/// `cian.set_option("lang", "en")` switches to English.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Lang {
+    Ja,
+    En,
+}
+
+impl Lang {
+    /// From the `lang` option; anything but an explicit "en" is Japanese (the
+    /// Lua layer already rejects values other than "ja"/"en").
+    fn from_opt(opt: Option<&str>) -> Lang {
+        match opt {
+            Some("en") => Lang::En,
+            _ => Lang::Ja,
+        }
+    }
+}
+
 /// Remappable normal-mode actions. Keys the user binds via `cian.set_keymap`
 /// resolve to one of these; the default key handling is otherwise untouched.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1674,6 +1693,8 @@ pub struct App {
     zoom_return: Option<Rect>,
     /// Show the contextual key-hint bar.
     show_key_hints: bool,
+    /// Interface language for the key manual (Japanese by default).
+    lang: Lang,
     /// A command to type into the shell once it is ready. Needed because the
     /// PTY spawns on a background thread, so the shell may not exist yet at
     /// the moment the user picks a connection.
@@ -1765,6 +1786,7 @@ impl App {
                 config.options.animation_ms.unwrap_or(DEFAULT_ANIM_MS),
             ),
             show_key_hints: config.options.key_hints.unwrap_or(true),
+            lang: Lang::from_opt(config.options.lang.as_deref()),
             zoom_return: None,
             pending_shell_input: None,
             pending_shortcut_target: None,
@@ -3619,7 +3641,7 @@ impl App {
 
     // ------- Manual -------
     fn open_manual(&mut self) {
-        self.popup = Popup::Manual { lines: manual_lines(&self.keymap), scroll: 0 };
+        self.popup = Popup::Manual { lines: manual_lines(&self.keymap, self.lang), scroll: 0 };
     }
 
     // ------- Quit confirmation -------
@@ -6730,155 +6752,178 @@ fn shortcut_icon(target: &str) -> &'static str {
 }
 
 /// One row of the manual: the built-in key(s), the remappable action they run
-/// (if any), and what it does.
+/// (if any), and what it does, in English and Japanese.
 struct ManualEntry {
     keys: &'static str,
     action: Option<Action>,
-    desc: &'static str,
+    en: &'static str,
+    ja: &'static str,
 }
 
-const fn entry(keys: &'static str, action: Option<Action>, desc: &'static str) -> ManualEntry {
-    ManualEntry { keys, action, desc }
+impl ManualEntry {
+    fn desc(&self, lang: Lang) -> &'static str {
+        match lang {
+            Lang::En => self.en,
+            Lang::Ja => self.ja,
+        }
+    }
+}
+
+const fn entry(
+    keys: &'static str,
+    action: Option<Action>,
+    en: &'static str,
+    ja: &'static str,
+) -> ManualEntry {
+    ManualEntry { keys, action, en, ja }
 }
 
 /// The manual's contents, grouped into sections. Entries carrying an [`Action`]
 /// are remappable, so [`manual_lines`] can append whatever extra keys the user
 /// bound to them in `init.lua`.
-fn manual_sections() -> Vec<(&'static str, Vec<ManualEntry>)> {
+fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
     use Action::*;
     vec![
         (
-            "General",
+            ("General", "基本"),
             vec![
-                entry("q", Some(Quit), "quit (confirms)"),
-                entry(":", Some(Command), "command mode (:q, :shell, :man)"),
-                entry("?, Ctrl+.", None, "show this manual (also right-click)"),
-                entry("Esc", None, "clear marks and filter / leave shell"),
+                entry("q", Some(Quit), "quit (confirms)", "終了（確認あり）"),
+                entry(":", Some(Command), "command mode (:q, :shell, :man)", "コマンドモード（:q, :shell, :man）"),
+                entry("?, Ctrl+.", None, "show this manual (also right-click)", "このマニュアルを表示（右クリックでも）"),
+                entry("Esc", None, "clear marks and filter / leave shell", "マーク・フィルタ解除／シェルを抜ける"),
             ],
         ),
         (
-            "Navigation",
+            ("Navigation", "移動"),
             vec![
-                entry("j, Down", Some(CursorDown), "cursor down"),
-                entry("k, Up", Some(CursorUp), "cursor up"),
-                entry("Shift+D", Some(PageDown), "move 10 lines down"),
-                entry("Shift+U", Some(PageUp), "move 10 lines up"),
-                entry("gg", None, "jump to top"),
-                entry("G", Some(CursorBottom), "jump to bottom"),
-                entry("l, Enter", Some(EnterDir), "enter folder / open file"),
-                entry("F3", None, "look inside: view a file, list an archive"),
-                entry("  in viewer", None, "drag=select, c=copy, Shift+Enter=encoding"),
-                entry("=", None, "compare left ↔ right: two files (line diff), or two folders (recursive)"),
-                entry("-, Bksp", Some(Parent), "parent folder"),
-                entry("Left / Right", None, "focus the left / right pane"),
-                entry("h", Some(History), "history popup"),
-                entry("z", None, "go to a typed path (also :cd)"),
-                entry("Ctrl+R, F5", None, "refresh now"),
-                entry("f", Some(Search), "search in this folder"),
-                entry("Shift+F", None, "find by name, whole tree below here"),
-                entry("Ctrl+F", None, "grep inside files, whole tree below here"),
-                entry("n", Some(SearchNext), "next match"),
-                entry("N", Some(SearchPrev), "previous match"),
-                entry("/", None, "filter list as you type"),
-                entry(",", None, "sort by name / size / date / ext"),
-                entry("Shift+S", None, "ssh picker (also :ssh, or right-click)"),
-                entry("Enter, Esc", None, "while filtering: keep / clear it"),
+                entry("j, Down", Some(CursorDown), "cursor down", "カーソルを下へ"),
+                entry("k, Up", Some(CursorUp), "cursor up", "カーソルを上へ"),
+                entry("Shift+D", Some(PageDown), "move 10 lines down", "10行下へ"),
+                entry("Shift+U", Some(PageUp), "move 10 lines up", "10行上へ"),
+                entry("gg", None, "jump to top", "先頭へジャンプ"),
+                entry("G", Some(CursorBottom), "jump to bottom", "末尾へジャンプ"),
+                entry("l, Enter", Some(EnterDir), "enter folder / open file", "フォルダに入る／ファイルを開く"),
+                entry("F3", None, "look inside: view a file, list an archive", "中身を見る：ファイル閲覧・書庫の一覧"),
+                entry("  in viewer", None, "drag=select, c=copy, Shift+Enter=encoding", "ビューア内：ドラッグ=選択, c=コピー, Shift+Enter=文字コード"),
+                entry("=", None, "compare left ↔ right: two files (line diff), or two folders (recursive)", "左右を比較：ファイル同士（行差分）／フォルダ同士（再帰）"),
+                entry("-, Bksp", Some(Parent), "parent folder", "親フォルダへ"),
+                entry("Left / Right", None, "focus the left / right pane", "左／右のペインにフォーカス"),
+                entry("h", Some(History), "history popup", "履歴ポップアップ"),
+                entry("z", None, "go to a typed path (also :cd)", "入力したパスへ移動（:cd でも）"),
+                entry("Ctrl+R, F5", None, "refresh now", "今すぐ再読み込み"),
+                entry("f", Some(Search), "search in this folder", "このフォルダ内を検索"),
+                entry("Shift+F", None, "find by name, whole tree below here", "名前で検索（ここ以下のツリー全体）"),
+                entry("Ctrl+F", None, "grep inside files, whole tree below here", "ファイル内をgrep（ここ以下のツリー全体）"),
+                entry("n", Some(SearchNext), "next match", "次のマッチ"),
+                entry("N", Some(SearchPrev), "previous match", "前のマッチ"),
+                entry("/", None, "filter list as you type", "入力に応じて一覧を絞り込み"),
+                entry(",", None, "sort by name / size / date / ext", "ソート：名前／サイズ／日付／拡張子"),
+                entry("Shift+S", None, "ssh picker (also :ssh, or right-click)", "SSHピッカー（:ssh・右クリックでも）"),
+                entry("Enter, Esc", None, "while filtering: keep / clear it", "フィルタ中：適用したまま／解除"),
             ],
         ),
         (
-            "Marks and file operations",
+            ("Marks and file operations", "マークとファイル操作"),
             vec![
-                entry("Space", Some(MarkDown), "toggle mark, move down"),
-                entry("Shift+Space", Some(MarkUp), "toggle mark, move up"),
-                entry("v", Some(Visual), "visual select"),
-                entry("  a", None, "  in visual: select all (or gg v G)"),
-                entry("  gg / G", None, "  in visual: extend to top / bottom"),
-                entry("V", Some(InvertMarks), "invert all marks"),
-                entry("y, c", Some(Copy), "copy to opposite pane"),
-                entry("m", Some(Move), "move to opposite pane"),
-                entry("d", Some(Delete), "delete (to trash)"),
-                entry("r", Some(Rename), "rename"),
-                entry("a", Some(NewFile), "new file"),
-                entry("A", Some(NewDir), "new directory"),
-                entry("o", Some(OpenOther), "open in opposite pane"),
-                entry("O", Some(OpenOtherTab), "open in opposite pane's new tab"),
-                entry("p", Some(CopyPath), "copy path text to clipboard"),
-                entry("Shift+P", Some(CopyFileRef), "copy file(s) to clipboard"),
-                entry("s", Some(Shortcuts), "shortcuts menu"),
-                entry(":hidden", None, "show / hide dotfiles (also right-click)"),
-                entry(":attr", None, "attributes;  :chmod 644,  :readonly on|off"),
-                entry(":hash", None, "checksum;  :hash md5  /  :hash sha256"),
-                entry("right-click", None, "upload/download to a configured host (SFTP or SCP)"),
-                entry("Shift+Enter", None, "context menu for the entry (also :menu)"),
+                entry("Space", Some(MarkDown), "toggle mark, move down", "マーク切替して下へ"),
+                entry("Shift+Space", Some(MarkUp), "toggle mark, move up", "マーク切替して上へ"),
+                entry("v", Some(Visual), "visual select", "ビジュアル選択"),
+                entry("  a", None, "  in visual: select all (or gg v G)", "  ビジュアル中：全選択（gg v G でも）"),
+                entry("  gg / G", None, "  in visual: extend to top / bottom", "  ビジュアル中：先頭／末尾まで伸ばす"),
+                entry("V", Some(InvertMarks), "invert all marks", "全マークを反転"),
+                entry("y, c", Some(Copy), "copy to opposite pane", "反対ペインへコピー"),
+                entry("m", Some(Move), "move to opposite pane", "反対ペインへ移動"),
+                entry("d", Some(Delete), "delete (to trash)", "削除（ゴミ箱へ）"),
+                entry("r", Some(Rename), "rename", "リネーム"),
+                entry("a", Some(NewFile), "new file", "新規ファイル"),
+                entry("A", Some(NewDir), "new directory", "新規ディレクトリ"),
+                entry("o", Some(OpenOther), "open in opposite pane", "反対ペインで開く"),
+                entry("O", Some(OpenOtherTab), "open in opposite pane's new tab", "反対ペインの新規タブで開く"),
+                entry("p", Some(CopyPath), "copy path text to clipboard", "パス文字列をクリップボードにコピー"),
+                entry("Shift+P", Some(CopyFileRef), "copy file(s) to clipboard", "ファイルをクリップボードにコピー"),
+                entry("s", Some(Shortcuts), "shortcuts menu", "ショートカットメニュー"),
+                entry(":hidden", None, "show / hide dotfiles (also right-click)", "ドットファイルの表示切替（右クリックでも）"),
+                entry(":attr", None, "attributes;  :chmod 644,  :readonly on|off", "属性；  :chmod 644,  :readonly on|off"),
+                entry(":hash", None, "checksum;  :hash md5  /  :hash sha256", "チェックサム；  :hash md5  /  :hash sha256"),
+                entry("right-click", None, "upload/download to a configured host (SFTP or SCP)", "設定したホストへアップ／ダウンロード（SFTP/SCP）"),
+                entry("Shift+Enter", None, "context menu for the entry (also :menu)", "エントリのコンテキストメニュー（:menu でも）"),
             ],
         ),
         (
-            "Panes and tabs",
+            ("Panes and tabs", "ペインとタブ"),
             vec![
-                entry("Shift+H/J/K/L", None, "move focus between panes"),
-                entry("Ctrl+Shift+←→↑↓", None, "resize panes (border follows the arrow)"),
-                entry("drag a border", None, "resize any split (mouse)"),
-                entry("double-click", None, "enter a folder, or open a file (OS default)"),
-                entry("drag an entry", None, "to the other pane: copy (Shift: move)"),
-                entry("  ", None, "  onto the shell: type its path there"),
-                entry(":copyto", None, "copy to a recent or typed directory"),
-                entry("right-click", None, "context menu (copy/cut/paste, color)"),
-                entry("Ctrl+H/J/K/L", None, "same (needs kitty keyboard support)"),
-                entry("t, F9", None, "new tab"),
-                entry("w", None, "close tab"),
-                entry("F1 / F2", None, "previous / next tab"),
-                entry("Tab, Shift+Tab", None, "next / previous tab"),
-                entry("click a tab", None, "switch to it (mouse)"),
-                entry("F10", None, "close tab (confirms)"),
+                entry("Shift+H/J/K/L", None, "move focus between panes", "ペイン間でフォーカス移動"),
+                entry("Ctrl+Shift+←→↑↓", None, "resize panes (border follows the arrow)", "ペインのリサイズ（境界が矢印方向へ）"),
+                entry("drag a border", None, "resize any split (mouse)", "境界をドラッグで分割をリサイズ（マウス）"),
+                entry("double-click", None, "enter a folder, or open a file (OS default)", "フォルダに入る／ファイルを開く（OS標準）"),
+                entry("drag an entry", None, "to the other pane: copy (Shift: move)", "反対ペインへ：コピー（Shift で移動）"),
+                entry("  ", None, "  onto the shell: type its path there", "  シェルへ：パスをそこに入力"),
+                entry(":copyto", None, "copy to a recent or typed directory", "最近使った／入力したディレクトリへコピー"),
+                entry("right-click", None, "context menu (copy/cut/paste, color)", "コンテキストメニュー（コピー/カット/貼付、色）"),
+                entry("Ctrl+H/J/K/L", None, "same (needs kitty keyboard support)", "同上（kittyキーボード対応が必要）"),
+                entry("t, F9", None, "new tab", "新規タブ"),
+                entry("w", None, "close tab", "タブを閉じる"),
+                entry("F1 / F2", None, "previous / next tab", "前／次のタブ"),
+                entry("Tab, Shift+Tab", None, "next / previous tab", "次／前のタブ"),
+                entry("click a tab", None, "switch to it (mouse)", "クリックで切替（マウス）"),
+                entry("F10", None, "close tab (confirms)", "タブを閉じる（確認あり）"),
             ],
         ),
         (
-            "Commands (type : then the name — Linux-style)",
+            ("Commands (type : then the name — Linux-style)", "コマンド（: に続けて名前を入力 — Linux風）"),
             vec![
-                entry(":mkdir", None, "make a directory;  :mkdir -p a/b/c"),
-                entry(":touch", None, "create a file, or bump its mtime"),
-                entry(":cp / :mv", None, "no arg → other pane;  or  :mv <dest>"),
-                entry(":rm", None, "delete the selection (to trash)"),
-                entry(":cd", None, ":cd <path>  /  :cd ..  /  :cd -  /  :cd ~"),
-                entry(":pwd", None, "show the directory, copy it to the clipboard"),
-                entry(":ls", None, "refresh;  :ls -a  toggles dotfiles"),
-                entry(":stat", None, "attributes (same as :attr)"),
-                entry(":file", None, "what the selection is, by content"),
-                entry(":wc", None, "line / word / byte counts"),
-                entry(":head / :tail", None, "first / last lines;  :tail -n 40"),
-                entry(":df", None, "free disk space;  :df -h -k -m -g"),
-                entry(":zip", None, "bundle selection;  :zip -e  for a password"),
-                entry(":!cmd", None, "run in shell;  % = selection, %f file, %d dir"),
+                entry(":mkdir", None, "make a directory;  :mkdir -p a/b/c", "ディレクトリ作成；  :mkdir -p a/b/c"),
+                entry(":touch", None, "create a file, or bump its mtime", "ファイル作成／mtimeを更新"),
+                entry(":cp / :mv", None, "no arg → other pane;  or  :mv <dest>", "引数なし→反対ペイン；  または  :mv <宛先>"),
+                entry(":rm", None, "delete the selection (to trash)", "選択物を削除（ゴミ箱へ）"),
+                entry(":cd", None, ":cd <path>  /  :cd ..  /  :cd -  /  :cd ~", ":cd <パス>  /  :cd ..  /  :cd -  /  :cd ~"),
+                entry(":pwd", None, "show the directory, copy it to the clipboard", "ディレクトリを表示しクリップボードにコピー"),
+                entry(":ls", None, "refresh;  :ls -a  toggles dotfiles", "再読み込み；  :ls -a でドットファイル切替"),
+                entry(":stat", None, "attributes (same as :attr)", "属性（:attr と同じ）"),
+                entry(":file", None, "what the selection is, by content", "選択物の種別を内容から判定"),
+                entry(":wc", None, "line / word / byte counts", "行／単語／バイト数"),
+                entry(":head / :tail", None, "first / last lines;  :tail -n 40", "先頭／末尾の行；  :tail -n 40"),
+                entry(":df", None, "free disk space;  :df -h -k -m -g", "ディスク空き容量；  :df -h -k -m -g"),
+                entry(":zip", None, "bundle selection;  :zip -e  for a password", "選択物をまとめる；  :zip -e でパスワード付き"),
+                entry(":!cmd", None, "run in shell;  % = selection, %f file, %d dir", "シェルで実行；  % =選択, %f ファイル, %d ディレクトリ"),
             ],
         ),
         (
-            "Shell panel (focus: click, Shift+J, or :shell)",
+            ("Shell panel (focus: click, Shift+J, or :shell)", "シェルパネル（フォーカス：クリック・Shift+J・:shell）"),
             vec![
-                entry("F1-F8", None, "switch to shell tab 1-8"),
-                entry("F9", None, "new shell tab"),
-                entry("F10", None, "close shell tab"),
-                entry("Shift+F1/F2", None, "focus next / previous split pane"),
-                entry("Shift+F8", None, "v-split (panes side by side)"),
-                entry("Shift+F9", None, "h-split (panes stacked)"),
-                entry("Shift+F10", None, "close split pane (confirms)"),
-                entry("F12", None, "zoom focused surface (toggle)"),
-                entry("Shift+F12", None, "zoom active split pane (toggle)"),
-                entry("drag", None, "select text; it is copied to the clipboard on release"),
-                entry("right-click", None, "menu: paste, log, SFTP, text encoding, color"),
-                entry("Esc", None, "back to files (full-screen apps keep it)"),
+                entry("F1-F8", None, "switch to shell tab 1-8", "シェルタブ 1-8 に切替"),
+                entry("F9", None, "new shell tab", "新規シェルタブ"),
+                entry("F10", None, "close shell tab", "シェルタブを閉じる"),
+                entry("Shift+F1/F2", None, "focus next / previous split pane", "次／前の分割ペインにフォーカス"),
+                entry("Shift+F8", None, "v-split (panes side by side)", "左右分割（ペインを横に並べる）"),
+                entry("Shift+F9", None, "h-split (panes stacked)", "上下分割（ペインを縦に積む）"),
+                entry("Shift+F10", None, "close split pane (confirms)", "分割ペインを閉じる（確認あり）"),
+                entry("F12", None, "zoom focused surface (toggle)", "フォーカス中の面をズーム（トグル）"),
+                entry("Shift+F12", None, "zoom active split pane (toggle)", "アクティブな分割ペインをズーム（トグル）"),
+                entry("drag", None, "select text; it is copied to the clipboard on release", "テキスト選択；離すとクリップボードにコピー"),
+                entry("right-click", None, "menu: paste, log, SFTP, text encoding, color", "メニュー：貼付、ログ、SFTP、文字コード、色"),
+                entry("Esc", None, "back to files (full-screen apps keep it)", "ファイルに戻る（全画面アプリはEscを保持）"),
             ],
         ),
     ]
 }
 
-/// Render the manual, folding in the user's `init.lua` key overrides.
+/// Render the manual in `lang`, folding in the user's `init.lua` key overrides.
 ///
-/// `cian.set_keymap` is additive — a user-bound key runs the action *in
-/// addition to* the built-in key — so extra keys are appended rather than
-/// replacing the defaults, which is exactly what the running app does.
-pub fn manual_lines(keymap: &HashMap<char, Action>) -> Vec<String> {
-    let mut out = vec!["cian — key manual".to_string()];
-    for (title, entries) in manual_sections() {
+/// A user-bound key is appended to the action's built-in keys, matching what
+/// the running app does (a binding replaces its default; extra aliases show up
+/// here so the manual and the keyboard agree).
+pub fn manual_lines(keymap: &HashMap<char, Action>, lang: Lang) -> Vec<String> {
+    let header = match lang {
+        Lang::En => "cian — key manual",
+        Lang::Ja => "cian — キー一覧",
+    };
+    let mut out = vec![header.to_string()];
+    for ((en_title, ja_title), entries) in manual_sections() {
+        let title = match lang {
+            Lang::En => en_title,
+            Lang::Ja => ja_title,
+        };
         out.push(String::new());
         out.push(title.to_string());
         for e in entries {
@@ -6895,14 +6940,14 @@ pub fn manual_lines(keymap: &HashMap<char, Action>) -> Vec<String> {
                     keys.push_str(&format!(", {}", c));
                 }
             }
-            out.push(format!("  {:<17} {}", keys, e.desc));
+            out.push(format!("  {:<17} {}", keys, e.desc(lang)));
         }
     }
     out
 }
 
 /// Plain-text manual for `cian -man`, using the user's own config so the keys
-/// it lists match the keys that will actually work.
+/// it lists match the keys that will actually work — and its `lang` option.
 pub fn manual_text() -> String {
     let config = cian_lua::load();
     let mut keymap: HashMap<char, Action> = HashMap::new();
@@ -6911,7 +6956,8 @@ pub fn manual_text() -> String {
             keymap.insert(*c, a);
         }
     }
-    manual_lines(&keymap).join("\n")
+    let lang = Lang::from_opt(config.options.lang.as_deref());
+    manual_lines(&keymap, lang).join("\n")
 }
 
 /// Version line for `cian --version`.
@@ -7480,6 +7526,7 @@ fn draw(f: &mut Frame, app: &mut App) {
             .as_ref()
             .map(|j| (j.query.as_str(), j.root_label.as_str(), j.done, j.mode));
         let dests = app.dest_choices();
+        let lang = app.lang;
         app.popup_zones.clear();
         draw_popup(
             f,
@@ -7489,6 +7536,7 @@ fn draw(f: &mut Frame, app: &mut App) {
             find_state,
             &dests,
             &mut app.popup_zones,
+            lang,
         );
     } else {
         app.popup_zones.clear();
@@ -8691,6 +8739,7 @@ fn push_row_zone(zones: &mut Vec<PopupZone>, inner: Rect, y: u16, idx: usize) {
     });
 }
 
+#[allow(clippy::too_many_arguments)]
 fn draw_popup(
     f: &mut Frame,
     area: Rect,
@@ -8699,6 +8748,7 @@ fn draw_popup(
     find: Option<(&str, &str, Option<cian_core::search::Outcome>, cian_core::search::Mode)>,
     dests: &[(String, PathBuf)],
     zones: &mut Vec<PopupZone>,
+    lang: Lang,
 ) {
     // The manual is taller than any terminal, so it renders as a scrolling
     // viewport rather than the fixed block the other popups use.
@@ -8740,7 +8790,11 @@ fn draw_popup(
 
         let footer_area =
             Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1);
-        let footer = Paragraph::new(" j/k scroll  u/d page  g/G top/bottom  Esc close ").style(
+        let footer_text = match lang {
+            Lang::En => " j/k scroll  u/d page  g/G top/bottom  Esc close ",
+            Lang::Ja => " j/k スクロール  u/d ページ  g/G 先頭/末尾  Esc 閉じる ",
+        };
+        let footer = Paragraph::new(footer_text).style(
             Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD),
         );
         f.render_widget(footer, footer_area);
@@ -9911,6 +9965,19 @@ mod tests {
         app_with_keymaps(names, Vec::new())
     }
 
+    /// Like `app_with`, but with the `lang` option set.
+    fn app_with_lang(names: &[&str], lang: &str) -> (tempfile::TempDir, App) {
+        let dir = tempfile::tempdir().unwrap();
+        for n in names {
+            std::fs::write(dir.path().join(n), b"").unwrap();
+        }
+        let p = dir.path().to_path_buf();
+        let mut config = cian_lua::Config::default();
+        config.options.lang = Some(lang.to_string());
+        let app = App::new(p.clone(), p, config).unwrap();
+        (dir, app)
+    }
+
     /// Like `app_with`, but with `cian.set_keymap` overrides applied.
     fn app_with_keymaps(names: &[&str], keymaps: Vec<(char, String)>) -> (tempfile::TempDir, App) {
         let dir = tempfile::tempdir().unwrap();
@@ -10145,7 +10212,7 @@ mod tests {
     /// Every line must be reachable by scrolling rather than silently clipped.
     #[test]
     fn manual_scrolls_to_reveal_its_last_section() {
-        let (_d, mut app) = app_with(&["a.txt"]);
+        let (_d, mut app) = app_with_lang(&["a.txt"], "en");
         app.handle_key(key('?')).unwrap();
 
         let top = render(&mut app, 100, 24).join("\n");
@@ -10191,8 +10258,25 @@ mod tests {
     fn manual_lists_user_bound_keys() {
         let mut keymap = HashMap::new();
         keymap.insert('x', Action::Delete);
-        let text = manual_lines(&keymap).join("\n");
+        let text = manual_lines(&keymap, Lang::En).join("\n");
         assert!(text.contains("d, x"), "user-bound key missing from manual:\n{}", text);
+    }
+
+    #[test]
+    fn the_manual_defaults_to_japanese_and_switches_to_english() {
+        let keymap = HashMap::new();
+        let ja = manual_lines(&keymap, Lang::Ja).join("\n");
+        assert!(ja.contains("キー一覧"), "Japanese header:\n{ja}");
+        assert!(ja.contains("削除（ゴミ箱へ）"), "Japanese description present");
+        let en = manual_lines(&keymap, Lang::En).join("\n");
+        assert!(en.contains("key manual"), "English header");
+        assert!(en.contains("delete (to trash)"), "English description present");
+
+        // The `lang` option drives which one an App shows.
+        let (_d, app_ja) = app_with(&["a.rs"]);
+        assert_eq!(app_ja.lang, Lang::Ja, "default is Japanese");
+        let (_d2, app_en) = app_with_lang(&["a.rs"], "en");
+        assert_eq!(app_en.lang, Lang::En, "lang=en switches to English");
     }
 
     fn mouse(kind: MouseEventKind, col: u16, row: u16) -> MouseEvent {
@@ -10577,7 +10661,7 @@ mod tests {
 
     #[test]
     fn choosing_the_manual_from_the_menu_opens_it() {
-        let (_d, mut app) = app_with(&["a.txt"]);
+        let (_d, mut app) = app_with_lang(&["a.txt"], "en");
         let _ = render(&mut app, 100, 40);
         app.open_context_menu(5, 5);
 

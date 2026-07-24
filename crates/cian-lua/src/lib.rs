@@ -61,6 +61,9 @@ pub struct Options {
     /// Directory both panes open in when cian is started with no path
     /// argument. Unset falls back to the Desktop, then the working directory.
     pub home: Option<String>,
+    /// Interface language for the key manual and help text: "ja" (default) or
+    /// "en".
+    pub lang: Option<String>,
 }
 
 /// A login on a host.
@@ -457,6 +460,15 @@ fn install_api(lua: &Lua, builder: &Rc<RefCell<Builder>>) -> mlua::Result<()> {
                         Err(_) => bm
                             .errors
                             .push("set_option: animation_ms expects a number".into()),
+                    },
+                    "lang" => match String::from_lua(val, lua) {
+                        Ok(v) if v == "ja" || v == "en" => bm.options.lang = Some(v),
+                        Ok(_) => bm
+                            .errors
+                            .push("set_option: lang expects \"ja\" or \"en\"".into()),
+                        Err(_) => {
+                            bm.errors.push("set_option: lang expects \"ja\" or \"en\"".into())
+                        }
                     },
                     other => bm
                         .errors

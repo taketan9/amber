@@ -72,6 +72,10 @@
 -- for a cleaner screen once the keys are muscle memory.
 -- cian.set_option("key_hints", true)
 
+-- Language of the key manual / help (the ? / Ctrl+. / :man screen).
+-- Default: "ja" (Japanese). Uncomment to switch it to English.
+-- cian.set_option("lang", "en")
+
 -- Split / zoom / close animation length, in milliseconds. 0 disables all
 -- animation. Default is a short, snappy transition.
 -- cian.set_option("animation_ms", 120)
