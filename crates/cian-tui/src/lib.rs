@@ -938,6 +938,21 @@ enum PendingOp {
     Move,
 }
 
+/// A drag-selection inside a shell pane, in that pane's grid coordinates
+/// (row/col relative to the PTY area), used to copy terminal text.
+#[derive(Debug, Clone, Copy)]
+struct ShellSel {
+    tab: usize,
+    leaf: usize,
+    /// The PTY area on screen, to map cells for highlighting.
+    inner: Rect,
+    /// Anchor and moving end, as `(grid_row, grid_col)`.
+    anchor: (u16, u16),
+    end: (u16, u16),
+    /// True once the pointer moved — a bare click just focuses.
+    dragged: bool,
+}
+
 /// Which way an SFTP transfer goes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ScpDir {
@@ -1537,9 +1552,10 @@ pub struct App {
     panes_pct: u16,
     /// Draggable borders for the current frame, rebuilt during rendering.
     dividers: Vec<Divider>,
-    /// `(tab, leaf, rect)` for each shell split pane on screen, so a click can
-    /// land on the pane under the pointer rather than whichever was active.
-    shell_leaves: Vec<(usize, usize, Rect)>,
+    /// `(tab, leaf, outer rect, inner PTY rect)` for each shell split pane on
+    /// screen, so a click can land on the pane under the pointer and a drag can
+    /// map to a terminal cell.
+    shell_leaves: Vec<(usize, usize, Rect, Rect)>,
     /// Clickable tab-label rects, rebuilt each frame: which pane's strip, the
     /// tab index, and where it sits, so a tab can be switched with the mouse.
     tab_rects: Vec<(FocusedPane, usize, Rect)>,
@@ -1560,6 +1576,9 @@ pub struct App {
     /// Time and row of the last left-click in a file pane, to detect a
     /// double-click (which activates the entry).
     last_click: Option<(Instant, u16)>,
+    /// An in-progress or finished text selection in a shell pane (its own
+    /// selection, since cian holds the mouse the terminal would otherwise use).
+    shell_sel: Option<ShellSel>,
     /// The border currently being dragged, if any.
     drag: Option<Divider>,
     /// Files picked up by the mouse and not yet dropped.
@@ -1656,6 +1675,7 @@ impl App {
             dividers: Vec::new(),
             shell_leaves: Vec::new(),
             last_click: None,
+            shell_sel: None,
             tab_rects: Vec::new(),
             menu_rect: Rect::new(0, 0, 0, 0),
             viewer_rect: Rect::new(0, 0, 0, 0),
@@ -4030,6 +4050,29 @@ impl App {
             }
         }
 
+        // A shell-pane selection in progress: extend on drag, copy on release.
+        if self.shell_sel.is_some() {
+            match ev.kind {
+                MouseEventKind::Drag(MouseButton::Left) => {
+                    if let Some(sel) = &mut self.shell_sel {
+                        sel.end = grid_pos(sel.inner, col, row);
+                        sel.dragged = true;
+                    }
+                    return;
+                }
+                MouseEventKind::Up(MouseButton::Left) => {
+                    let dragged = self.shell_sel.map(|s| s.dragged).unwrap_or(false);
+                    if dragged {
+                        self.copy_shell_selection(); // copy-on-select; keep the highlight
+                    } else {
+                        self.shell_sel = None; // a bare click, not a selection
+                    }
+                    return;
+                }
+                _ => {}
+            }
+        }
+
         if !matches!(ev.kind, MouseEventKind::Down(MouseButton::Left)) {
             return;
         }
@@ -4061,6 +4104,25 @@ impl App {
                 self.focus(FocusedPane::Shell);
                 // Clicking a split should focus that split, as in any multiplexer.
                 self.select_shell_leaf_at(col, row);
+                // Begin a text selection anchored here, if the click landed on a
+                // pane's terminal area. A plain drag then selects (no Shift), and
+                // release copies.
+                self.shell_sel = self
+                    .shell_leaves
+                    .iter()
+                    .copied()
+                    .find(|(_, _, _, inner)| {
+                        inner.width > 0
+                            && inner.height > 0
+                            && col >= inner.x
+                            && col < inner.x + inner.width
+                            && row >= inner.y
+                            && row < inner.y + inner.height
+                    })
+                    .map(|(tab, leaf, _, inner)| {
+                        let a = grid_pos(inner, col, row);
+                        ShellSel { tab, leaf, inner, anchor: a, end: a, dragged: false }
+                    });
             }
             Some(pane) => {
                 self.focus(pane);
@@ -4247,7 +4309,7 @@ impl App {
     fn active_shell_leaf_rect(&self) -> Option<Rect> {
         let tab = self.shell.active;
         let leaf = self.shell.tabs.get(tab).map(|t| t.active)?;
-        self.shell_leaves.iter().find(|(t, l, _)| *t == tab && *l == leaf).map(|(_, _, r)| *r)
+        self.shell_leaves.iter().find(|(t, l, _, _)| *t == tab && *l == leaf).map(|(_, _, r, _)| *r)
     }
 
     fn start_anim(&mut self, kind: AnimKind) {
@@ -4376,13 +4438,47 @@ impl App {
     /// Without this, clicking a pane focuses the panel but leaves the previous
     /// pane active, so anything acting on "the active pane" targets the wrong
     /// half of a split.
+    /// Copy the current shell selection's text to the clipboard, reading it
+    /// from the pane's terminal grid.
+    fn copy_shell_selection(&mut self) {
+        let Some(sel) = self.shell_sel else { return };
+        let Some(session) = self
+            .shell
+            .tabs
+            .get(sel.tab)
+            .and_then(|t| t.nodes.get(sel.leaf))
+            .and_then(|n| n.as_ref())
+            .and_then(|n| match n {
+                Node::Leaf { session, .. } => Some(session),
+                _ => None,
+            })
+        else {
+            return;
+        };
+        // Order the two ends so start is before end in reading order.
+        let (a, b) = (sel.anchor, sel.end);
+        let (start, endp) = if (a.0, a.1) <= (b.0, b.1) { (a, b) } else { (b, a) };
+        let text = match session.parser().lock() {
+            Ok(p) => p.screen().contents_between(start.0, start.1, endp.0, endp.1),
+            Err(_) => return,
+        };
+        let text = text.trim_end_matches(['\n', ' ']).to_string();
+        if text.is_empty() {
+            return;
+        }
+        if let Some(cb) = self.clipboard.as_mut() {
+            let _ = cb.set_text(text);
+        }
+        self.message = Some("copied".into());
+    }
+
     fn select_shell_leaf_at(&mut self, col: u16, row: u16) {
-        let hit = self.shell_leaves.iter().copied().find(|(_, _, r)| {
+        let hit = self.shell_leaves.iter().copied().find(|(_, _, r, _)| {
             r.width > 0 && r.height > 0
                 && col >= r.x && col < r.x + r.width
                 && row >= r.y && row < r.y + r.height
         });
-        if let Some((tab, leaf, _)) = hit {
+        if let Some((tab, leaf, _, _)) = hit {
             self.shell.active = tab;
             if let Some(t) = self.shell.tabs.get_mut(tab) {
                 t.active = leaf;
@@ -5357,6 +5453,9 @@ impl App {
     }
 
     fn handle_shell_key(&mut self, key: KeyEvent) -> Result<()> {
+        // Any keypress ends a mouse selection's highlight — the screen is about
+        // to change under it anyway.
+        self.shell_sel = None;
         let (alt_screen, app_cursor) = self.shell.active_modes();
         if self.debug_keys {
             self.message = Some(format!(
@@ -5946,6 +6045,38 @@ fn host_from_title(title: &str) -> Option<String> {
     }
 }
 
+/// Reverse the cells covered by a shell selection, so the drag is visible. The
+/// selection is linear (like a terminal's): from the anchor to the end in
+/// reading order, whole rows in between.
+fn highlight_shell_selection(f: &mut Frame, sel: &ShellSel) {
+    let inner = sel.inner;
+    if inner.width == 0 || inner.height == 0 {
+        return;
+    }
+    let (a, b) = (sel.anchor, sel.end);
+    let (start, end) = if (a.0, a.1) <= (b.0, b.1) { (a, b) } else { (b, a) };
+    let buf = f.buffer_mut();
+    for gr in start.0..=end.0 {
+        let first = if gr == start.0 { start.1 } else { 0 };
+        let last = if gr == end.0 { end.1 } else { inner.width.saturating_sub(1) };
+        for gc in first..=last {
+            let x = inner.x + gc;
+            let y = inner.y + gr;
+            if let Some(cell) = buf.cell_mut((x, y)) {
+                cell.set_style(Style::default().add_modifier(Modifier::REVERSED));
+            }
+        }
+    }
+}
+
+/// Map an on-screen `(col, row)` to a `(grid_row, grid_col)` inside `inner`,
+/// clamped to the area — for translating a mouse position to a terminal cell.
+fn grid_pos(inner: Rect, col: u16, row: u16) -> (u16, u16) {
+    let gr = row.saturating_sub(inner.y).min(inner.height.saturating_sub(1));
+    let gc = col.saturating_sub(inner.x).min(inner.width.saturating_sub(1));
+    (gr, gc)
+}
+
 /// Quote a path for a POSIX shell (single quotes, with the usual `'\''`
 /// escape). On Windows the shell is usually PowerShell or cmd, whose quoting
 /// differs, but a path with no odd characters passes through either way and
@@ -6443,7 +6574,7 @@ fn manual_sections() -> Vec<(&'static str, Vec<ManualEntry>)> {
                 entry("Shift+F10", None, "close split pane (confirms)"),
                 entry("F12", None, "zoom focused surface (toggle)"),
                 entry("Shift+F12", None, "zoom active split pane (toggle)"),
-                entry("Shift+drag", None, "select text to copy (the terminal's own selection)"),
+                entry("drag", None, "select text; it is copied to the clipboard on release"),
                 entry("right-click → Paste", None, "paste clipboard text into the shell"),
                 entry("Esc", None, "back to files (full-screen apps keep it)"),
             ],
@@ -6990,6 +7121,11 @@ fn draw(f: &mut Frame, app: &mut App) {
         draw_zoomed(f, main_area, app, ov);
     } else {
         draw_split(f, main_area, app, ov);
+    }
+
+    // Reverse the cells of a shell text selection, over whatever was drawn.
+    if let Some(sel) = app.shell_sel {
+        highlight_shell_selection(f, &sel);
     }
 
     // Stack the bottom rows: [prompt] [hints] [status]. Each is claimed only if
@@ -7542,7 +7678,7 @@ fn draw_shell(
     shell: &mut ShellPane,
     focused: bool,
     dividers: &mut Vec<Divider>,
-    leaves: &mut Vec<(usize, usize, Rect)>,
+    leaves: &mut Vec<(usize, usize, Rect, Rect)>,
     ov: AnimOverride,
     tab_rects: &mut Vec<(FocusedPane, usize, Rect)>,
     log_border: Color,
@@ -7591,7 +7727,7 @@ fn draw_shell_inner(
     shell: &mut ShellPane,
     focused: bool,
     dividers: &mut Vec<Divider>,
-    leaves: &mut Vec<(usize, usize, Rect)>,
+    leaves: &mut Vec<(usize, usize, Rect, Rect)>,
     ov: AnimOverride,
     tab_rects: &mut Vec<(FocusedPane, usize, Rect)>,
     log_border: Color,
@@ -7749,13 +7885,12 @@ fn render_node(
     focused: bool,
     bordered: bool,
     dividers: &mut Vec<Divider>,
-    leaves: &mut Vec<(usize, usize, Rect)>,
+    leaves: &mut Vec<(usize, usize, Rect, Rect)>,
     ov: AnimOverride,
     log_border: Color,
 ) {
     match tab.nodes.get(i).and_then(|n| n.as_ref()) {
         Some(Node::Leaf { session, bg }) => {
-            leaves.push((tab_idx, i, area));
             let target = if bordered {
                 let is_active = focused && i == active_leaf;
                 let bs = if session.is_logging() {
@@ -7773,6 +7908,8 @@ fn render_node(
             } else {
                 area
             };
+            // (tab, leaf, outer area for focus, inner PTY area for selection).
+            leaves.push((tab_idx, i, area, target));
             if let Ok(parser) = session.parser().lock() {
                 f.render_widget(PseudoTerminal::new(parser.screen()), target);
             }
@@ -10254,10 +10391,9 @@ mod tests {
         // Two leaves side by side, standing in for a real split.
         let shell = app.layout_rects.shell;
         let half = shell.width / 2;
-        app.shell_leaves = vec![
-            (0, 7, Rect::new(shell.x, shell.y, half, shell.height)),
-            (0, 9, Rect::new(shell.x + half, shell.y, half, shell.height)),
-        ];
+        let l0 = Rect::new(shell.x, shell.y, half, shell.height);
+        let l1 = Rect::new(shell.x + half, shell.y, half, shell.height);
+        app.shell_leaves = vec![(0, 7, l0, l0), (0, 9, l1, l1)];
         app.shell.tabs.push(ShellTab { nodes: Vec::new(), root: 0, active: 9 });
 
         app.select_shell_leaf_at(shell.x + 2, shell.y + 2);
