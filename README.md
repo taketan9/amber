@@ -1,5 +1,7 @@
 # cian
 
+**English** · [日本語](README.ja.md)
+
 **C**omfortable **I**nterface for **A**gile File e**X**plorer **N**avigation —
 a modern two-pane terminal file manager inspired by [AFXW (あふｗ)](https://akt.d.dooo.jp/akt_afxw.htm).
 
@@ -8,24 +10,30 @@ Cross-platform: macOS / Windows / Linux.
 
 ## Status
 
-Early development. Working: two-pane navigation, marks/visual selection, file
-operations (copy/move/delete/rename/create), incremental filtering, history,
-shortcuts, search, clipboard integration, Lua configuration, and an embedded
-PTY shell panel.
+Early development, but broadly usable. Working: two-pane navigation,
+marks/visual selection, file operations (copy/move/delete/rename/create) with a
+progress bar, incremental filtering, history, shortcuts, in-listing and
+recursive search/grep, sorting, file and directory diff, a text/hex/zip viewer,
+checksums and attributes, clipboard integration, an embedded PTY shell panel
+with tabs and splits, built-in SFTP/SCP transfer, Lua configuration, a fully
+remappable keymap, and a mouse-operable UI (including clickable dialogs).
 
 ## Help
 
 Press **`?`** (or `Ctrl+.`, `:man`, or **right-click → Key manual**) inside
-cian for the full key manual —
-it is generated from the live keymap, so it also lists any keys you bound in
-`init.lua`. From a shell, `cian -man` prints the same thing and `cian -h`
-prints the command-line usage.
+cian for the full key manual — it is generated from the live keymap, so it also
+lists any keys you bound in `init.lua`. From a shell, `cian -man` prints the
+same thing and `cian -h` prints the command-line usage.
 
 ## Mouse
 
+Almost everything is reachable with the mouse.
+
 **Left** and **Right** move focus between the two file panes — the thing a
 two-pane layout makes you reach for. `l` / `Enter` enter a directory and `-` /
-`Backspace` go up, as before.
+`Backspace` go up, as before. A **double-click** activates an entry: a directory
+is entered, a file is opened with its OS default program (or an `init.lua`
+`on_open` handler).
 
 Drag any border to re-proportion the split it divides — the two file panes, the
 file/shell divider, and every split inside the shell panel. Neither side can be
@@ -41,6 +49,13 @@ has no window to be a drag source or target, so dragging to or from Explorer
 is not possible and will not be. Dropping a file onto the terminal window makes
 the terminal paste its path, which is the terminal's doing, not cian's.
 
+**Dialogs and pickers are clickable too.** A confirmation dialog shows real
+`[ Yes ]` / `[ No ]` (and `[ Overwrite ]` / `[ Rename ]`) buttons; every list —
+the sort and encoding pickers, SSH host/user, find results, copy-to, history,
+shortcuts, the directory comparison, an archive's members — selects a row on
+click, and the mouse wheel scrolls whatever popup is open. The keyboard
+shortcuts still work; the clicks just stand in for them.
+
 `:copyto` and `:moveto` (and **Copy to…** in the menu) send the selection
 somewhere other than the opposite pane, offering the directories used recently
 — the ones that are not the other pane tend to be the same few, and retyping
@@ -51,10 +66,10 @@ pane, rename, delete, a per-pane background color, and the key manual (the
 last two are offered in the shell's menu too).
 
 Background colors apply to whichever pane you right-clicked — including a
-single split inside the shell, not the whole panel. In the shell the tint only fills cells the shell left uncolored, so
-`ls` colors and editor themes come through untouched. Copy and cut fill a file
-clipboard that persists while you navigate, so you can copy here, move
-somewhere else, and paste there.
+single split inside the shell, not the whole panel. In the shell the tint only
+fills cells the shell left uncolored, so `ls` colors and editor themes come
+through untouched. Copy and cut fill a file clipboard that persists while you
+navigate, so you can copy here, move somewhere else, and paste there.
 
 **Paste** takes cian's own clipboard when it holds something, and otherwise
 falls back to the *system* clipboard — so a file copied in Explorer or Finder
@@ -104,11 +119,52 @@ boundary. A cancelled copy removes its half-written destination instead of
 leaving something that looks complete. Moves try a rename first, which is
 instant within a volume, and only fall back to copy-then-delete across one.
 
+### When the destination needs administrator rights (Windows)
+
+Writing into a protected directory (`C:\Program Files`, `C:\Windows`) fails for
+an ordinary process with "Access is denied", and nothing cian does gets past the
+ACL. When a copy or move hits that specific error, cian says so plainly and, on
+Windows, offers to **retry as administrator**: a UAC prompt appears, then the
+transfer is redone elevated (robocopy for trees, Copy-Item for single files).
+That elevated copy runs in its own process, so it has no in-app progress bar —
+cian waits for it and reports the outcome ("as administrator"). The simpler
+alternative is to launch cian itself elevated, after which every destination is
+writable. On other platforms the notice just names the cause and suggests a
+writable folder.
+
 ## Deleting
 
 `d` moves items to the OS trash (Finder's Trash / the Windows Recycle Bin), so
 a mistake is recoverable. The confirmation popup offers `a` to delete
 permanently instead.
+
+## Comparing files and directories
+
+`=` (or `:diff`) compares the left pane's file against the right pane's, side by
+side, with differing lines highlighted; `n` / `N` jump between changes and `f`
+folds the identical runs away.
+
+Point the two panes at two **directories** and `=` compares them recursively
+instead, listing every path that differs — added on one side, missing on the
+other, or present in both but not identical. Files are compared byte-for-byte
+(not just size and timestamp), on a worker thread with a progress bar and Esc,
+so a "same" verdict really means the same. Enter on a result moves both panes to
+that path.
+
+## File transfer (SFTP / SCP)
+
+With SSH hosts configured (see below), the right-click menu gains **Upload →
+server** and **Download ← server**. Pick a host and user, type the remote
+directory (upload) or file (download), and the transfer runs on the usual worker
+thread with the progress bar and Esc.
+
+It is pure-Rust — no external `scp` binary — and picks the wire protocol
+automatically over one authenticated connection: **SFTP** first (what modern
+`scp` uses), falling back to the classic **SCP** protocol when the server has no
+SFTP subsystem, which is the case on some appliances and locked-down sshd
+configs. The status line reports which one carried it ("via SFTP" / "via SCP").
+Single files and whole directories are supported; the host key is currently
+accepted without a known-hosts check (a documented gap).
 
 ## SSH
 
@@ -117,10 +173,10 @@ choose a host, then a user on it.
 
 Right-click is the one that works while the shell pane has focus: keys go
 straight to the shell there, so `Shift+S` would just type an `S`. SSH leads the
-shell pane's context menu for that reason. Typing in the host stage filters. Hosts with a single user connect
-straight away. The command is typed into the shell panel, so your own shell
-config and agent apply, and the tab drops back to a local prompt when the
-session ends.
+shell pane's context menu for that reason. Typing in the host stage filters.
+Hosts with a single user connect straight away. The command is typed into the
+shell panel, so your own shell config and agent apply, and the tab drops back to
+a local prompt when the session ends.
 
 ```lua
 cian.ssh({
@@ -134,11 +190,13 @@ cian.ssh({
 ```
 
 Eight hosts times four users is a dozen lines here instead of 32 aliases to
-remember — the picker does the remembering.
+remember — the picker does the remembering. The same host list feeds the SFTP/SCP
+transfer flow above.
 
 ### Passwords
 
-A login can carry a password, which cian types when ssh asks for one:
+A login can carry a password, which cian types when ssh asks for one (and which
+SFTP/SCP uses to authenticate):
 
 ```lua
 users = {
@@ -170,7 +228,10 @@ usually less work to set up than a credential list is to maintain.
 **`F3`** answers "what is in here" without leaving cian. On a text file it
 opens a scrollable viewer with line numbers; on a binary one, a hex dump,
 since showing a compiled file as text is a screenful of mojibake that answers
-nothing. Only the first 4 MB is read, so opening a huge log is instant.
+nothing. Only the first 4 MB is read, so opening a huge log is instant. In the
+viewer you can drag to select and `c` to copy the selection, and `Shift+Enter`
+switches the text encoding (UTF-8 / Shift_JIS / UTF-16) when a file was decoded
+wrong.
 
 On a **zip** (also `.jar`, `.whl`, `.epub`) it lists the members instead, with
 their unpacked sizes. `Enter` extracts the highlighted one into the opposite
@@ -267,15 +328,35 @@ keeps the filter applied so you can mark and operate on just the matches;
 directory's entries it matches, so a narrowed pane never looks like a full one.
 Changing directory always clears the filter.
 
+## Remapping keys
+
+Every file-pane action has a name and can be bound to a key in `init.lua`.
+Because a user binding is consulted before the built-in keys, binding a key
+**replaces** its default rather than only adding an alias, and `"none"` turns a
+key off entirely:
+
+```lua
+cian.set_keymap("x", "delete")   -- add: x now deletes too
+cian.set_keymap("d", "rename")   -- change: d renames instead of deleting
+cian.set_keymap("d", "none")     -- disable: d does nothing
+```
+
+[`examples/init.lua`](examples/init.lua) lists every default binding as the
+`set_keymap` line that would recreate it, so you can uncomment-and-edit to move
+or disable any of them, along with the full list of action names. Structural
+keys (arrows, Enter, Backspace, Tab, the F-keys, and Ctrl-/Shift- combinations)
+are built in and not remapped here.
+
 ## Architecture
 
-Cargo workspace, split into five crates:
+Cargo workspace, split into six crates:
 
 | Crate | Role |
 |---|---|
-| `cian-core` | Pure domain logic: file ops, marks, history, sorting, filtering, search |
-| `cian-tui`  | Rendering & input (ratatui + crossterm), layout, popups |
-| `cian-pty`  | Embedded shell pane (portable-pty + alacritty_terminal) |
+| `cian-core` | Pure domain logic: file ops, marks, history, sorting, filtering, search, diff, elevation |
+| `cian-tui`  | Rendering & input (ratatui + crossterm), layout, popups, mouse |
+| `cian-pty`  | Embedded shell pane (portable-pty + vt100 + tui-term) |
+| `cian-scp`  | Built-in SFTP/SCP file transfer (pure-Rust russh, no C deps) |
 | `cian-lua`  | Lua configuration host (mlua): keymaps, themes, ext-open DSL |
 | `cian-bin`  | Entry point — produces the `cian` binary |
 
@@ -288,7 +369,7 @@ API on the global `cian` table:
 ```lua
 cian.set_theme({ accent = "#00d7d7", mark_fg = "yellow" })
 cian.set_option("clipboard_on_copy", false)
-cian.set_keymap("x", "delete")          -- additive override; defaults stay intact
+cian.set_keymap("x", "delete")           -- binding a key replaces its default; "none" disables
 cian.on_open("md", function(path)        -- extension-dispatch execution
   cian.spawn({ "open", "-a", "Typora", path })
 end)
@@ -327,6 +408,15 @@ Focus it with `Shift+J` (from a file pane), a mouse click, or `:shell`. While
 the shell is focused, keys go straight to it; press **Esc** to return to the
 files. Esc is passed through to full-screen programs (vim, less, htop, …) so
 they keep working — it only leaves the shell at a normal prompt.
+
+**Selecting text:** because cian owns the mouse, the terminal's own selection
+does not reach the shell. Instead, plain-drag inside a shell pane to select, and
+the selection is copied to the clipboard on release — no modifier needed.
+
+**Right-click** in a shell pane for its menu: SSH connect, paste, start/stop a
+**session log** (a scrubbed transcript written to a file), SFTP/SCP
+upload/download, and a **text-encoding** picker (UTF-8 / Shift_JIS / UTF-16LE /
+UTF-16BE) for shells that speak a non-UTF-8 codepage.
 
 Shell tabs are driven by function keys (Ctrl-based shortcuts are unreliable
 because some setups swallow the Ctrl modifier before it reaches the app):
