@@ -1104,11 +1104,11 @@ impl MenuItem {
             MenuItem::Hash => "Checksum…",
             MenuItem::Compare => "Compare left ↔ right",
             MenuItem::Ssh => "SSH connect…",
-            MenuItem::ScpUpload => "SFTP upload → server…",
-            MenuItem::ScpDownload => "SFTP download ← server…",
+            MenuItem::ScpUpload => "Upload → server…",
+            MenuItem::ScpDownload => "Download ← server…",
             MenuItem::StartLog => "Start session log…",
             MenuItem::StopLog => "Stop session log  ●",
-            MenuItem::Encoding => "Text encoding (cycle)",
+            MenuItem::Encoding => "Text encoding…",
             MenuItem::Quit => "Quit cian  (q)",
             MenuItem::Manual => "Key manual  (?)",
         }
@@ -2787,7 +2787,7 @@ impl App {
         let Some(u) = h.users.iter().find(|u| u.name == user) else { return };
         let Some(password) = u.secret() else {
             self.message = Some(format!(
-                "no password set for {}@{} — SFTP needs one in init.lua",
+                "no password set for {}@{} — a transfer needs one in init.lua",
                 u.name, h.name
             ));
             return;
@@ -2852,7 +2852,10 @@ impl App {
                         };
                         let mut sctl = cian_scp::Ctl { cancel, on_progress: &mut fwd };
                         match cian_scp::upload(&target, local, &dest, &mut sctl) {
-                            Ok(()) => report.ok += 1,
+                            Ok(via) => {
+                                report.ok += 1;
+                                report.note = Some(format!("via {}", via.label()));
+                            }
                             Err(e) => report.note_error(format!("{}: {}", fname, e)),
                         }
                     }
@@ -2872,7 +2875,10 @@ impl App {
                     };
                     let mut sctl = cian_scp::Ctl { cancel, on_progress: &mut fwd };
                     match cian_scp::download(&target, &remote, &dest, &mut sctl) {
-                        Ok(()) => report.ok += 1,
+                        Ok(via) => {
+                            report.ok += 1;
+                            report.note = Some(format!("via {}", via.label()));
+                        }
                         Err(e) => report.note_error(format!("{}: {}", fname, e)),
                     }
                 }
@@ -3766,7 +3772,11 @@ impl App {
             }
             self.popup = Popup::Notice { lines };
         } else {
-            self.message = Some(format!("done — {} ok · {} skipped", report.ok, report.skipped));
+            let mut msg = format!("done — {} ok · {} skipped", report.ok, report.skipped);
+            if let Some(note) = &report.note {
+                msg.push_str(&format!(" ({})", note));
+            }
+            self.message = Some(msg);
         }
     }
 
@@ -6566,7 +6576,7 @@ fn manual_sections() -> Vec<(&'static str, Vec<ManualEntry>)> {
                 entry(":hidden", None, "show / hide dotfiles (also right-click)"),
                 entry(":attr", None, "attributes;  :chmod 644,  :readonly on|off"),
                 entry(":hash", None, "checksum;  :hash md5  /  :hash sha256"),
-                entry("right-click", None, "SFTP upload/download to a configured host"),
+                entry("right-click", None, "upload/download to a configured host (SFTP or SCP)"),
                 entry("Shift+Enter", None, "context menu for the entry (also :menu)"),
             ],
         ),

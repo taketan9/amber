@@ -102,7 +102,9 @@
 --  SSH HOSTS  —  cian.ssh { ... }
 -- ----------------------------------------------------------------------------
 -- Populates the SSH picker (right-click → SSH connect, or in the shell) and the
--- SFTP upload/download flow. `users` at the top level is the fleet-wide default;
+-- file upload/download flow. Transfers use SFTP, falling back to the classic
+-- SCP protocol automatically when the server has no SFTP subsystem; the status
+-- line shows which one carried it. `users` at the top level is the fleet-wide default;
 -- a host can override it. A user is either a bare name, or a table carrying its
 -- password so cian can log in for you.
 --

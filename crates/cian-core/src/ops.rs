@@ -23,6 +23,9 @@ pub struct OpReport {
     pub ok: usize,
     pub skipped: usize,
     pub errors: Vec<String>,
+    /// Optional trailing note for the summary line (e.g. which transport a
+    /// transfer used). Not an error; purely informational.
+    pub note: Option<String>,
 }
 
 impl OpReport {
@@ -30,6 +33,9 @@ impl OpReport {
         self.ok += other.ok;
         self.skipped += other.skipped;
         self.errors.extend(other.errors);
+        if other.note.is_some() {
+            self.note = other.note;
+        }
     }
     pub fn note_error(&mut self, msg: impl Into<String>) {
         self.errors.push(msg.into());
