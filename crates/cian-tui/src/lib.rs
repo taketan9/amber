@@ -999,6 +999,8 @@ enum Popup {
     ColorPicker { pane: FocusedPane, cursor: usize },
     /// Sort-order picker for the focused pane.
     SortPicker { cursor: usize },
+    /// Choose the encoding the active shell pane's output is decoded with.
+    EncodingPicker { cursor: usize },
     /// A file's contents, scrollable.
     Viewer {
         title: String,
@@ -4667,11 +4669,15 @@ impl App {
             MenuItem::StartLog => self.start_log_prompt(),
             MenuItem::StopLog => self.stop_session_log(),
             MenuItem::Encoding => {
-                if let Some(s) = self.shell.active_session() {
-                    let next = s.cycle_encoding();
-                    self.message = Some(format!("shell encoding: {}", next.label()));
-                } else {
-                    self.message = Some("no shell here".into());
+                match self.shell.active_session() {
+                    Some(s) => {
+                        let cur = cian_core::viewer::TextEncoding::ALL
+                            .iter()
+                            .position(|e| *e == s.encoding())
+                            .unwrap_or(0);
+                        self.popup = Popup::EncodingPicker { cursor: cur };
+                    }
+                    None => self.message = Some("no shell here".into()),
                 }
             }
             MenuItem::Quit => self.start_quit_confirm(),
@@ -5213,6 +5219,24 @@ impl App {
                 KeyCode::Char('s') => { self.popup = Popup::None; self.apply_sort_key(SortKey::Size); }
                 KeyCode::Char('d') => { self.popup = Popup::None; self.apply_sort_key(SortKey::Modified); }
                 KeyCode::Char('e') => { self.popup = Popup::None; self.apply_sort_key(SortKey::Extension); }
+                _ => {}
+            }
+            return Ok(());
+        }
+        if let Popup::EncodingPicker { cursor } = &mut self.popup {
+            let n = cian_core::viewer::TextEncoding::ALL.len();
+            match key.code {
+                KeyCode::Esc | KeyCode::Char('q') => self.popup = Popup::None,
+                KeyCode::Char('j') | KeyCode::Down => *cursor = (*cursor + 1) % n,
+                KeyCode::Char('k') | KeyCode::Up => *cursor = (*cursor + n - 1) % n,
+                KeyCode::Enter => {
+                    let enc = cian_core::viewer::TextEncoding::ALL[*cursor];
+                    self.popup = Popup::None;
+                    if let Some(s) = self.shell.active_session() {
+                        s.set_encoding(enc);
+                        self.message = Some(format!("shell encoding: {}", enc.label()));
+                    }
+                }
                 _ => {}
             }
             return Ok(());
@@ -9288,6 +9312,48 @@ fn draw_popup(
         return;
     }
 
+    if let Popup::EncodingPicker { cursor } = popup {
+        use cian_core::viewer::TextEncoding;
+        let w = 34u16.min(area.width);
+        let h = TextEncoding::ALL.len() as u16 + 3;
+        let rect = centered_rect(w, h.min(area.height), area);
+        f.render_widget(Clear, rect);
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_type(border_type())
+            .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
+            .title(" text encoding ");
+        let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
+        f.render_widget(block, rect);
+        let rows: Vec<Line> = TextEncoding::ALL
+            .iter()
+            .enumerate()
+            .map(|(i, e)| {
+                let sel = i == *cursor;
+                let style = if sel {
+                    Style::default().fg(theme().accent).add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(Color::Rgb(200, 200, 215))
+                };
+                Line::from(Span::styled(
+                    format!("{}{}", if sel { "▸ " } else { "  " }, e.label()),
+                    style,
+                ))
+            })
+            .collect();
+        f.render_widget(
+            Paragraph::new(rows),
+            Rect::new(inner.x, inner.y, inner.width, inner.height.saturating_sub(1)),
+        );
+        f.render_widget(
+            Paragraph::new(" Enter=apply  Esc=cancel ").style(
+                Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD),
+            ),
+            Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1),
+        );
+        return;
+    }
+
     if let Popup::ColorPicker { cursor, .. } = popup {
         let w = 26u16.min(area.width);
         let h = PANE_BG_PRESETS.len() as u16 + 3;
@@ -9398,6 +9464,7 @@ fn draw_popup(
         | Popup::ContextMenu { .. }
         | Popup::ColorPicker { .. }
         | Popup::SortPicker { .. }
+        | Popup::EncodingPicker { .. }
         | Popup::SshHosts { .. }
         | Popup::SshUsers { .. }
         | Popup::Shortcuts { .. }

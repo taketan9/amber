@@ -167,15 +167,13 @@ impl PtySession {
         self.encoding.lock().map(|e| *e).unwrap_or(TextEncoding::Utf8)
     }
 
-    /// Switch to the next encoding in the cycle and redraw. Takes effect on the
+    /// Set the encoding the shell output is decoded with. Takes effect on the
     /// next output; already-drawn cells keep their glyphs until overwritten.
-    pub fn cycle_encoding(&self) -> TextEncoding {
-        let next = self.encoding().next();
+    pub fn set_encoding(&self, enc: TextEncoding) {
         if let Ok(mut e) = self.encoding.lock() {
-            *e = next;
+            *e = enc;
         }
         self.dirty.store(true, Ordering::Relaxed);
-        next
     }
 
     /// Start writing a scrubbed transcript of this session's output to `path`,

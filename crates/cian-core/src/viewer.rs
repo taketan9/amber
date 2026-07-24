@@ -41,6 +41,14 @@ pub enum TextEncoding {
 }
 
 impl TextEncoding {
+    /// All encodings, in the order a picker offers them.
+    pub const ALL: [TextEncoding; 4] = [
+        TextEncoding::Utf8,
+        TextEncoding::ShiftJis,
+        TextEncoding::Utf16Le,
+        TextEncoding::Utf16Be,
+    ];
+
     pub fn label(self) -> &'static str {
         match self {
             TextEncoding::Utf8 => "UTF-8",
