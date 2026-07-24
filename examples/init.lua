@@ -79,23 +79,87 @@
 
 
 -- ----------------------------------------------------------------------------
---  EXTRA KEY BINDINGS  —  cian.set_keymap("key", "action")
+--  KEY BINDINGS  —  cian.set_keymap("key", "action")
 -- ----------------------------------------------------------------------------
--- Binds an ADDITIONAL single key to a built-in action; the default keys keep
--- working too. `key` is one character. Example: also delete with "x".
--- cian.set_keymap("x", "delete")
--- cian.set_keymap("e", "open_external")   -- open with the OS default app
+-- `key` is one character. Binding a key to an action makes that key trigger it
+-- in the file panes. This works two ways:
 --
--- Every action name you can bind:
---   Movement : cursor_down  cursor_up  cursor_bottom  page_down  page_up
---              parent  enter
+--   * ADD a key:      cian.set_keymap("x", "delete")   -- x now deletes too
+--   * CHANGE a key:   binding a key that already has a default REPLACES the
+--                     default. `cian.set_keymap("d", "rename")` makes `d`
+--                     rename instead of delete.
+--   * DISABLE a key:  bind it to "none".  cian.set_keymap("d", "none")
+--
+-- The DEFAULT bindings are listed below, each as the line that would recreate
+-- it. They are commented out because they are already active — uncomment one
+-- only to move it (change the "key") or turn it off ("none"). Structural keys
+-- (arrows, Enter, Backspace, Tab, the F-keys, and Ctrl-/Shift- combos) are
+-- built in and not remappable here; everything below is.
+--
+--   -- Movement
+--   cian.set_keymap("j", "cursor_down")
+--   cian.set_keymap("k", "cursor_up")
+--   cian.set_keymap("g", "cursor_top")      -- (the `gg` chord; see note)
+--   cian.set_keymap("G", "cursor_bottom")
+--   cian.set_keymap("D", "page_down")
+--   cian.set_keymap("U", "page_up")
+--   cian.set_keymap("l", "enter")           -- enter the highlighted directory
+--   cian.set_keymap("-", "parent")          -- go up to the parent directory
+--
+--   -- Marking / selection
+--   cian.set_keymap(" ", "mark_down")       -- space: toggle mark, move down
+--   cian.set_keymap("v", "visual")          -- visual (range) select mode
+--   cian.set_keymap("V", "invert_marks")
+--
+--   -- File operations
+--   cian.set_keymap("y", "copy")            -- (c is a second default for copy)
+--   cian.set_keymap("m", "move")
+--   cian.set_keymap("d", "delete")          -- to the trash
+--   cian.set_keymap("r", "rename")
+--   cian.set_keymap("a", "new_file")
+--   cian.set_keymap("A", "new_dir")
+--   cian.set_keymap("o", "open_other")      -- open into the opposite pane
+--   cian.set_keymap("O", "open_other_tab")  -- …in a new tab there
+--   cian.set_keymap("e", "open_external")   -- hand the file to the OS opener
+--
+--   -- Clipboard
+--   cian.set_keymap("p", "copy_path")       -- copy path text
+--   cian.set_keymap("P", "copy_file_ref")   -- copy a file reference (Finder/Explorer)
+--
+--   -- Find / filter / sort
+--   cian.set_keymap("f", "search")          -- search within this listing
+--   cian.set_keymap("n", "search_next")
+--   cian.set_keymap("N", "search_prev")
+--   cian.set_keymap("/", "filter")          -- incremental filter
+--   cian.set_keymap("F", "find_recursive")  -- find files by name, recursively
+--   cian.set_keymap(",", "sort")            -- open the sort-order picker
+--   cian.set_keymap("z", "jump_path")       -- jump to a typed path
+--   cian.set_keymap("=", "diff")            -- diff the two panes' files
+--
+--   -- Tabs, panels, tools
+--   cian.set_keymap("t", "new_tab")
+--   cian.set_keymap("w", "close_tab")
+--   cian.set_keymap("h", "history")
+--   cian.set_keymap("s", "shortcuts")       -- the bookmarks menu
+--   cian.set_keymap(":", "command")         -- the : command line
+--   cian.set_keymap("q", "quit")
+--
+-- The full list of action names (for the second argument):
+--   Movement : cursor_down  cursor_up  cursor_top  cursor_bottom
+--              page_down  page_up  parent  enter
 --   Marking  : mark_down  mark_up  invert_marks  visual
 --   Files    : copy  move  delete  rename  new_file  new_dir
---   Panes    : open_other  open_other_tab
---   Open     : open_external           (hand the file to the OS opener)
+--              open_other  open_other_tab  open_external
 --   Clipboard: copy_path  copy_file_ref
---   Find     : search  search_next  search_prev
---   Misc     : history  shortcuts  command  quit
+--   Find     : search  search_next  search_prev  filter
+--              find_recursive  grep_recursive  sort  jump_path  diff
+--   Panels   : new_tab  close_tab  history  shortcuts  ssh  view  menu
+--   Misc     : refresh  manual  command  quit  none  (none disables the key)
+--
+-- Note: `cursor_top` is bound to the `gg` chord (press g twice), a vim-ism
+-- that a single key cannot reproduce; naming it here is only so it appears in
+-- the manual. `grep_recursive` (search file contents) has no default letter —
+-- bind one if you want it, e.g. cian.set_keymap("G", "grep_recursive").
 
 
 -- ----------------------------------------------------------------------------

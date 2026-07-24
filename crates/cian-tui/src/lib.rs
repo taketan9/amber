@@ -198,6 +198,7 @@ fn modern_terminal() -> bool {
 pub enum Action {
     CursorDown,
     CursorUp,
+    CursorTop,
     CursorBottom,
     PageUp,
     PageDown,
@@ -225,6 +226,22 @@ pub enum Action {
     InvertMarks,
     Visual,
     Command,
+    Filter,
+    FindRecursive,
+    GrepRecursive,
+    Sort,
+    JumpPath,
+    View,
+    Diff,
+    Refresh,
+    Menu,
+    Ssh,
+    NewTab,
+    CloseTab,
+    Manual,
+    /// Bound to a key to disable it — the key does nothing, shadowing whatever
+    /// default it would otherwise trigger.
+    Nop,
 }
 
 /// Map a Lua action name to an [`Action`]. Unknown names are reported as
@@ -233,6 +250,7 @@ fn action_from_name(name: &str) -> Option<Action> {
     Some(match name {
         "cursor_down" => Action::CursorDown,
         "cursor_up" => Action::CursorUp,
+        "cursor_top" => Action::CursorTop,
         "cursor_bottom" => Action::CursorBottom,
         "page_up" => Action::PageUp,
         "page_down" => Action::PageDown,
@@ -260,6 +278,20 @@ fn action_from_name(name: &str) -> Option<Action> {
         "invert_marks" => Action::InvertMarks,
         "visual" => Action::Visual,
         "command" => Action::Command,
+        "filter" => Action::Filter,
+        "find_recursive" => Action::FindRecursive,
+        "grep_recursive" => Action::GrepRecursive,
+        "sort" => Action::Sort,
+        "jump_path" => Action::JumpPath,
+        "view" => Action::View,
+        "diff" => Action::Diff,
+        "refresh" => Action::Refresh,
+        "menu" => Action::Menu,
+        "ssh" => Action::Ssh,
+        "new_tab" => Action::NewTab,
+        "close_tab" => Action::CloseTab,
+        "manual" => Action::Manual,
+        "none" | "nop" | "unbind" => Action::Nop,
         _ => return None,
     })
 }
@@ -5959,6 +5991,9 @@ impl App {
             Action::CursorUp => {
                 if let Some(p) = self.active_pane_mut() { p.move_cursor(-1); }
             }
+            Action::CursorTop => {
+                if let Some(p) = self.active_pane_mut() { p.cursor = 0; }
+            }
             Action::CursorBottom => {
                 if let Some(p) = self.active_pane_mut() {
                     if !p.entries.is_empty() { p.cursor = p.entries.len() - 1; }
@@ -6016,6 +6051,31 @@ impl App {
                 self.mode = Mode::Command;
                 self.command_buffer.clear();
             }
+            Action::Filter => self.start_filter(),
+            Action::FindRecursive => self.start_find_prompt(),
+            Action::GrepRecursive => self.start_grep_prompt(),
+            Action::Sort => self.start_sort_picker(),
+            Action::JumpPath => self.start_jump_path(),
+            Action::View => self.look_inside(),
+            Action::Diff => self.open_diff(),
+            Action::Refresh => {
+                self.reload_both();
+                self.message = Some("refreshed".into());
+            }
+            Action::Menu => self.open_menu_at_cursor(),
+            Action::Ssh => self.start_ssh(),
+            Action::NewTab => {
+                if let Some(t) = self.active_file_tabs_mut() {
+                    t.add_clone()?;
+                }
+            }
+            Action::CloseTab => {
+                if let Some(t) = self.active_file_tabs_mut() {
+                    t.close_active();
+                }
+            }
+            Action::Manual => self.open_manual(),
+            Action::Nop => {}
         }
         Ok(())
     }
@@ -9764,13 +9824,79 @@ mod tests {
 
     /// An app rooted at a temp dir containing `names`.
     fn app_with(names: &[&str]) -> (tempfile::TempDir, App) {
+        app_with_keymaps(names, Vec::new())
+    }
+
+    /// Like `app_with`, but with `cian.set_keymap` overrides applied.
+    fn app_with_keymaps(names: &[&str], keymaps: Vec<(char, String)>) -> (tempfile::TempDir, App) {
         let dir = tempfile::tempdir().unwrap();
         for n in names {
             std::fs::write(dir.path().join(n), b"").unwrap();
         }
         let p = dir.path().to_path_buf();
-        let app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        let mut config = cian_lua::Config::default();
+        config.keymaps = keymaps;
+        let app = App::new(p.clone(), p, config).unwrap();
         (dir, app)
+    }
+
+    #[test]
+    fn a_user_keymap_rebinds_and_disables_keys() {
+        let (_d, mut app) = app_with_keymaps(
+            &["a.rs", "b.rs"],
+            vec![
+                ('x', "delete".into()), // bind a new key to an action
+                ('d', "none".into()),   // and turn the default off
+            ],
+        );
+        // `x` now opens the delete confirm…
+        app.handle_key(key('x')).unwrap();
+        assert!(matches!(app.popup, Popup::ConfirmDelete { .. }), "x deletes");
+        app.handle_key(code(KeyCode::Esc)).unwrap();
+        // …while the disabled `d` does nothing.
+        app.handle_key(key('d')).unwrap();
+        assert!(matches!(app.popup, Popup::None), "d is unbound");
+    }
+
+    #[test]
+    fn every_action_named_in_the_example_config_resolves() {
+        // Guards against the docs drifting from the code: each
+        // `set_keymap("k", "action")` in examples/init.lua must name a real
+        // action, so a user copying a line always gets a working binding.
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../examples/init.lua");
+        let text = std::fs::read_to_string(path).expect("read examples/init.lua");
+        let mut checked = 0;
+        for line in text.lines() {
+            // Only the real binding lines (`cian.set_keymap("k", "action")`),
+            // not the "key"/"action" placeholder in the section header or the
+            // prose examples that have text before the call.
+            let trimmed = line.trim_start_matches(['-', ' ']);
+            if !trimmed.starts_with("cian.set_keymap(") {
+                continue;
+            }
+            let Some(rest) = trimmed.split_once("set_keymap(").map(|(_, r)| r) else { continue };
+            // The action is the second quoted string on the line.
+            let quoted: Vec<&str> = rest.split('"').collect();
+            if quoted.len() >= 4 {
+                let action = quoted[3];
+                assert!(
+                    action_from_name(action).is_some(),
+                    "examples/init.lua names unknown action {:?}",
+                    action
+                );
+                checked += 1;
+            }
+        }
+        assert!(checked > 20, "expected to have checked the documented bindings, got {checked}");
+    }
+
+    #[test]
+    fn a_newly_named_action_is_bindable() {
+        // `sort` had no bindable name before; confirm it now resolves and works.
+        assert_eq!(action_from_name("sort"), Some(Action::Sort));
+        let (_d, mut app) = app_with_keymaps(&["a.rs"], vec![('S', "sort".into())]);
+        app.handle_key(KeyEvent::new(KeyCode::Char('S'), KeyModifiers::SHIFT)).unwrap();
+        assert!(matches!(app.popup, Popup::SortPicker { .. }), "S opens the sort picker");
     }
 
     /// Render and hand back the raw buffer, for checking colors.
