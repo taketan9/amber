@@ -1056,6 +1056,29 @@ enum Popup {
     ConfirmClose { target: CloseTarget },
 }
 
+/// A clickable region of the on-screen popup, registered by `draw_popup` and
+/// consumed by the mouse handler. Rather than duplicate every popup's layout in
+/// the mouse code, the draw side (which owns the geometry) records what each
+/// rect means, and clicks are turned back into the popup's own key actions.
+#[derive(Debug, Clone, Copy)]
+struct PopupZone {
+    rect: Rect,
+    kind: ZoneKind,
+}
+
+/// What clicking a [`PopupZone`] does, expressed as the keystroke it stands in
+/// for so the existing popup key handlers do the actual work.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ZoneKind {
+    /// Put the list cursor on this index, then confirm (Enter).
+    SelectRow(usize),
+    /// Stand in for a character key (a confirm dialog's y/n/a/r button).
+    Char(char),
+    /// Stand in for Enter / Esc (dialog OK / cancel).
+    Enter,
+    Esc,
+}
+
 /// An entry in the right-click menu.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum MenuItem {
@@ -1568,6 +1591,9 @@ pub struct App {
     menu_rect: Rect,
     /// The viewer's text body rect, for mapping a mouse click to a line.
     viewer_rect: Rect,
+    /// Clickable regions of whatever popup is on screen, rebuilt every frame by
+    /// `draw_popup`, so dialogs and pickers can be driven entirely by mouse.
+    popup_zones: Vec<PopupZone>,
     /// The active shell pane's slot rect, stashed on pane-zoom so the shrink
     /// back knows where to land (the split rects are gone while zoomed).
     pane_zoom_return: Option<Rect>,
@@ -1684,6 +1710,7 @@ impl App {
             tab_rects: Vec::new(),
             menu_rect: Rect::new(0, 0, 0, 0),
             viewer_rect: Rect::new(0, 0, 0, 0),
+            popup_zones: Vec::new(),
             pane_zoom_return: None,
             started: Instant::now(),
             scp_dir: None,
@@ -3994,8 +4021,11 @@ impl App {
             return;
         }
 
-        // Ignore everything else while a popup owns the screen.
+        // Every other popup — confirm dialogs and list pickers — is driven
+        // through the hit zones the renderer registered, so it is fully
+        // clickable. The wheel scrolls whatever is on screen.
         if !matches!(self.popup, Popup::None) {
+            let _ = self.handle_popup_mouse(ev);
             return;
         }
 
@@ -4172,6 +4202,79 @@ impl App {
             }
             None => {}
         }
+    }
+
+    /// The zone under the pointer, if any. Later zones win, so a small button
+    /// drawn on top of a wider row is reachable.
+    fn zone_at(&self, col: u16, row: u16) -> Option<ZoneKind> {
+        self.popup_zones
+            .iter()
+            .rev()
+            .find(|z| {
+                let r = z.rect;
+                r.width > 0
+                    && r.height > 0
+                    && col >= r.x
+                    && col < r.x + r.width
+                    && row >= r.y
+                    && row < r.y + r.height
+            })
+            .map(|z| z.kind)
+    }
+
+    /// Point the active popup's list cursor at `i`. A no-op for popups that have
+    /// no cursor (confirm dialogs, notices).
+    fn set_popup_cursor(&mut self, i: usize) {
+        match &mut self.popup {
+            Popup::ContextMenu { cursor, .. }
+            | Popup::ColorPicker { cursor, .. }
+            | Popup::SortPicker { cursor, .. }
+            | Popup::EncodingPicker { cursor, .. }
+            | Popup::DirCompare { cursor, .. }
+            | Popup::Archive { cursor, .. }
+            | Popup::DestPicker { cursor, .. }
+            | Popup::FindResults { cursor, .. }
+            | Popup::SshHosts { cursor, .. }
+            | Popup::SshUsers { cursor, .. }
+            | Popup::History { cursor, .. }
+            | Popup::Shortcuts { cursor, .. } => *cursor = i,
+            _ => {}
+        }
+    }
+
+    /// Drive the on-screen popup with the mouse: the wheel scrolls, a click on a
+    /// registered zone replays the keystroke it stands for so all the existing
+    /// popup key handling does the real work.
+    fn handle_popup_mouse(&mut self, ev: MouseEvent) -> Result<()> {
+        let (col, row) = (ev.column, ev.row);
+        let synth = |code| KeyEvent::new(code, KeyModifiers::NONE);
+        match ev.kind {
+            // The wheel moves the cursor / scroll of whatever is open; every
+            // list and scroll popup accepts Down/Up.
+            MouseEventKind::ScrollDown => return self.handle_popup_key(synth(KeyCode::Down)),
+            MouseEventKind::ScrollUp => return self.handle_popup_key(synth(KeyCode::Up)),
+            // Hovering (or dragging over) a row highlights it, as the menu does.
+            MouseEventKind::Moved | MouseEventKind::Drag(MouseButton::Left) => {
+                if let Some(ZoneKind::SelectRow(i)) = self.zone_at(col, row) {
+                    self.set_popup_cursor(i);
+                }
+            }
+            MouseEventKind::Down(MouseButton::Left) => match self.zone_at(col, row) {
+                Some(ZoneKind::SelectRow(i)) => {
+                    self.set_popup_cursor(i);
+                    return self.handle_popup_key(synth(KeyCode::Enter));
+                }
+                Some(ZoneKind::Char(c)) => return self.handle_popup_key(synth(KeyCode::Char(c))),
+                Some(ZoneKind::Enter) => return self.handle_popup_key(synth(KeyCode::Enter)),
+                Some(ZoneKind::Esc) => return self.handle_popup_key(synth(KeyCode::Esc)),
+                // A click in dead space inside the popup does nothing; a click
+                // right outside it is ignored too, so a mis-aimed click never
+                // silently confirms a destructive dialog.
+                None => {}
+            },
+            _ => {}
+        }
+        Ok(())
     }
 
     /// Act on the selected entry as Enter would: enter a directory, or open a
@@ -7248,7 +7351,18 @@ fn draw(f: &mut Frame, app: &mut App) {
             .as_ref()
             .map(|j| (j.query.as_str(), j.root_label.as_str(), j.done, j.mode));
         let dests = app.dest_choices();
-        draw_popup(f, area, &mut app.popup, &app.config.ssh_hosts, find_state, &dests);
+        app.popup_zones.clear();
+        draw_popup(
+            f,
+            area,
+            &mut app.popup,
+            &app.config.ssh_hosts,
+            find_state,
+            &dests,
+            &mut app.popup_zones,
+        );
+    } else {
+        app.popup_zones.clear();
     }
 }
 
@@ -8439,6 +8553,15 @@ fn draw_progress_bar(
 }
 
 #[allow(clippy::type_complexity)]
+/// Register one clickable row spanning `inner`'s width at `y`, standing in for
+/// selecting list index `idx`.
+fn push_row_zone(zones: &mut Vec<PopupZone>, inner: Rect, y: u16, idx: usize) {
+    zones.push(PopupZone {
+        rect: Rect::new(inner.x, y, inner.width, 1),
+        kind: ZoneKind::SelectRow(idx),
+    });
+}
+
 fn draw_popup(
     f: &mut Frame,
     area: Rect,
@@ -8446,6 +8569,7 @@ fn draw_popup(
     hosts: &[cian_lua::SshHost],
     find: Option<(&str, &str, Option<cian_core::search::Outcome>, cian_core::search::Mode)>,
     dests: &[(String, PathBuf)],
+    zones: &mut Vec<PopupZone>,
 ) {
     // The manual is taller than any terminal, so it renders as a scrolling
     // viewport rather than the fixed block the other popups use.
@@ -8579,6 +8703,8 @@ fn draw_popup(
                     Style::default().fg(Color::Rgb(140, 140, 165)),
                 ),
             ]));
+            // Row 0 is the filter line, so host `i` sits one below it.
+            push_row_zone(zones, inner, inner.y + 1 + i as u16, i);
         }
         let body_area = Rect::new(inner.x, inner.y, inner.width, inner.height.saturating_sub(1));
         f.render_widget(Paragraph::new(lines), body_area);
@@ -8626,6 +8752,9 @@ fn draw_popup(
                 ))
             })
             .collect();
+        for i in 0..hst.users.len() {
+            push_row_zone(zones, inner, inner.y + i as u16, i);
+        }
         let body_area = Rect::new(inner.x, inner.y, inner.width, inner.height.saturating_sub(1));
         f.render_widget(Paragraph::new(lines), body_area);
         let footer_area =
@@ -8690,6 +8819,7 @@ fn draw_popup(
             let sel = i == *cursor;
             let y = inner.y + row as u16;
             let line_area = Rect::new(inner.x, y, inner.width, 1);
+            push_row_zone(zones, inner, y, i);
             if sel {
                 f.render_widget(
                     Block::default().style(Style::default().bg(theme().selected_bg)),
@@ -8796,6 +8926,7 @@ fn draw_popup(
                 let sel = i == *cursor;
                 let y = inner.y + row as u16;
                 let line_area = Rect::new(inner.x, y, inner.width, 1);
+                push_row_zone(zones, inner, y, i);
                 if sel {
                     // A full-width bar, not just a marker: which row is active
                     // has to be obvious at a glance.
@@ -8864,6 +8995,7 @@ fn draw_popup(
         for (row, (i, p)) in entries.iter().enumerate().skip(first).take(body_h).enumerate() {
             let sel = i == *cursor;
             let line_area = Rect::new(inner.x, inner.y + row as u16, inner.width, 1);
+            push_row_zone(zones, inner, inner.y + row as u16, i);
             if sel {
                 f.render_widget(
                     Block::default().style(Style::default().bg(theme().selected_bg)),
@@ -8919,6 +9051,7 @@ fn draw_popup(
             let sel = i == *cursor;
             let y = inner.y + i as u16;
             let line = Rect::new(inner.x, y, inner.width, 1);
+            push_row_zone(zones, inner, y, i);
             if sel {
                 f.render_widget(
                     Block::default().style(Style::default().bg(theme().selected_bg)),
@@ -9061,6 +9194,7 @@ fn draw_popup(
             let sel = i == *cursor;
             let y = inner.y + row as u16;
             let line = Rect::new(inner.x, y, inner.width, 1);
+            push_row_zone(zones, inner, y, i);
             if sel {
                 f.render_widget(Block::default().style(Style::default().bg(theme().selected_bg)), line);
             }
@@ -9239,6 +9373,7 @@ fn draw_popup(
         for (row, (i, m)) in members.iter().enumerate().skip(*scroll).take(body_h).enumerate() {
             let sel = i == *cursor;
             let line = Rect::new(inner.x, inner.y + row as u16, inner.width, 1);
+            push_row_zone(zones, inner, inner.y + row as u16, i);
             if sel {
                 f.render_widget(
                     Block::default().style(Style::default().bg(theme().selected_bg)),
@@ -9311,6 +9446,9 @@ fn draw_popup(
             .collect();
         let body_area = Rect::new(inner.x, inner.y, inner.width, inner.height.saturating_sub(1));
         f.render_widget(Paragraph::new(rows), body_area);
+        for i in 0..SortKey::ALL.len() {
+            push_row_zone(zones, inner, inner.y + i as u16, i);
+        }
         let footer_area =
             Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1);
         f.render_widget(
@@ -9355,6 +9493,9 @@ fn draw_popup(
             Paragraph::new(rows),
             Rect::new(inner.x, inner.y, inner.width, inner.height.saturating_sub(1)),
         );
+        for i in 0..TextEncoding::ALL.len() {
+            push_row_zone(zones, inner, inner.y + i as u16, i);
+        }
         f.render_widget(
             Paragraph::new(" Enter=apply  Esc=cancel ").style(
                 Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD),
@@ -9400,6 +9541,9 @@ fn draw_popup(
             .collect();
         let body_area = Rect::new(inner.x, inner.y, inner.width, inner.height.saturating_sub(1));
         f.render_widget(Paragraph::new(rows), body_area);
+        for i in 0..PANE_BG_PRESETS.len() {
+            push_row_zone(zones, inner, inner.y + i as u16, i);
+        }
         let footer_area =
             Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1);
         f.render_widget(
@@ -9502,12 +9646,64 @@ fn draw_popup(
     let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
     f.render_widget(block, rect);
 
+    // Clickable buttons for the dialogs. Each stands in for the key it mirrors,
+    // so the keyboard shortcuts in the footer keep working unchanged.
+    let buttons: Vec<(&str, ZoneKind)> = match popup {
+        Popup::ConfirmDelete { .. } => vec![
+            ("Trash", ZoneKind::Enter),
+            ("Delete!", ZoneKind::Char('a')),
+            ("Cancel", ZoneKind::Esc),
+        ],
+        Popup::ConfirmTransfer { targets, .. } => {
+            let mut b = vec![("Yes", ZoneKind::Enter), ("Overwrite", ZoneKind::Char('a'))];
+            if targets.len() == 1 {
+                b.push(("Rename", ZoneKind::Char('r')));
+            }
+            b.push(("Cancel", ZoneKind::Esc));
+            b
+        }
+        Popup::Notice { .. } => vec![("Copy", ZoneKind::Char('y')), ("Close", ZoneKind::Enter)],
+        Popup::TextInput { .. } => vec![("OK", ZoneKind::Enter), ("Cancel", ZoneKind::Esc)],
+        Popup::Search { .. } => vec![("Jump", ZoneKind::Enter), ("Cancel", ZoneKind::Esc)],
+        Popup::ConfirmQuit | Popup::ConfirmClose { .. } => {
+            vec![("Yes", ZoneKind::Enter), ("No", ZoneKind::Esc)]
+        }
+        _ => vec![],
+    };
+
     let body_text: Vec<Line> = body.into_iter().map(Line::from).collect();
-    let body_area = Rect::new(inner.x, inner.y, inner.width, inner.height.saturating_sub(1));
+    // A dialog gets a dedicated button row above the hint footer; everything
+    // else keeps the single hint line.
+    let button_row = !buttons.is_empty() && inner.height >= 3;
+    let body_h = inner.height.saturating_sub(if button_row { 2 } else { 1 });
+    let body_area = Rect::new(inner.x, inner.y, inner.width, body_h);
     let footer_area = Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1);
 
     let p = Paragraph::new(body_text).wrap(Wrap { trim: false });
     f.render_widget(p, body_area);
+
+    if button_row {
+        let btn_area = Rect::new(inner.x, inner.y + inner.height.saturating_sub(2), inner.width, 1);
+        let mut x = btn_area.x;
+        for (label, kind) in &buttons {
+            let text = format!("[ {} ]", label);
+            let w = text.chars().count() as u16;
+            if x + w > btn_area.x + btn_area.width {
+                break;
+            }
+            let r = Rect::new(x, btn_area.y, w, 1);
+            f.render_widget(
+                Paragraph::new(text).style(
+                    Style::default()
+                        .fg(theme().accent)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                r,
+            );
+            zones.push(PopupZone { rect: r, kind: *kind });
+            x += w + 2; // a gap so adjacent buttons are visually distinct
+        }
+    }
 
     let footer_p = Paragraph::new(footer).style(
         Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD),
@@ -9598,6 +9794,64 @@ mod tests {
                     .to_string()
             })
             .collect()
+    }
+
+    /// Click the centre of the first popup zone matching `want`, after a render
+    /// has registered the zones. Returns false if no such zone exists.
+    fn click_zone(app: &mut App, want: ZoneKind) -> bool {
+        let hit = app.popup_zones.iter().find(|z| z.kind == want).map(|z| z.rect);
+        match hit {
+            Some(r) => {
+                app.handle_mouse(mouse(
+                    MouseEventKind::Down(MouseButton::Left),
+                    r.x + r.width / 2,
+                    r.y,
+                ));
+                true
+            }
+            None => false,
+        }
+    }
+
+    #[test]
+    fn clicking_a_sort_picker_row_applies_it() {
+        let (_d, mut app) = app_with(&["a.rs", "b.rs"]);
+        app.start_sort_picker();
+        assert!(matches!(app.popup, Popup::SortPicker { .. }));
+        // Render so the row hit-zones are registered, then click the 3rd entry.
+        let _ = render(&mut app, 100, 40);
+        assert!(click_zone(&mut app, ZoneKind::SelectRow(2)), "row zone present");
+        // A pick closes the picker and applies that key.
+        assert!(matches!(app.popup, Popup::None), "picker closed after a click");
+        assert_eq!(app.active_pane().unwrap().sort.key, SortKey::ALL[2]);
+    }
+
+    #[test]
+    fn clicking_a_confirm_dialog_button_answers_it() {
+        let (_d, mut app) = app_with(&["a.rs"]);
+        app.start_quit_confirm();
+        assert!(matches!(app.popup, Popup::ConfirmQuit));
+        let _ = render(&mut app, 100, 40);
+        // The "No" button cancels without quitting.
+        assert!(click_zone(&mut app, ZoneKind::Esc), "No button present");
+        assert!(matches!(app.popup, Popup::None));
+        assert!(!app.should_quit);
+
+        app.start_quit_confirm();
+        let _ = render(&mut app, 100, 40);
+        assert!(click_zone(&mut app, ZoneKind::Enter), "Yes button present");
+        assert!(app.should_quit, "clicking Yes quits");
+    }
+
+    #[test]
+    fn the_mouse_wheel_scrolls_the_manual() {
+        let (_d, mut app) = app_with(&["a.rs"]);
+        app.open_manual();
+        let _ = render(&mut app, 100, 40);
+        app.handle_mouse(mouse(MouseEventKind::ScrollDown, 50, 20));
+        app.handle_mouse(mouse(MouseEventKind::ScrollDown, 50, 20));
+        let Popup::Manual { scroll, .. } = &app.popup else { panic!("expected manual") };
+        assert_eq!(*scroll, 2, "two wheel notches scrolled two lines");
     }
 
     #[test]
