@@ -166,6 +166,9 @@ pub fn copy_many(
                 // Cancelled: stop without recording an error.
                 Ok(false) => break,
                 Err(e) => {
+                    if crate::elevate::is_permission_denied(&e) {
+                        report.permission_denied = true;
+                    }
                     report.note_error(format!("{}: {}", abs.display(), e));
                     failed = true;
                 }

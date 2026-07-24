@@ -9,6 +9,7 @@ pub mod archive;
 pub mod attrs;
 pub mod diff;
 pub mod dirdiff;
+pub mod elevate;
 pub mod inspect;
 pub mod log;
 pub mod ops;

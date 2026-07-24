@@ -1086,6 +1086,9 @@ enum Popup {
     Shortcuts { entries: Vec<Shortcut>, cursor: usize },
     ConfirmQuit,
     ConfirmClose { target: CloseTarget },
+    /// A copy/move failed because the destination needs administrator rights.
+    /// Offers to redo it elevated (Windows only).
+    ConfirmElevate { op: PendingOp, targets: Vec<PathBuf>, dest: PathBuf },
 }
 
 /// A clickable region of the on-screen popup, registered by `draw_popup` and
@@ -1626,6 +1629,9 @@ pub struct App {
     /// Clickable regions of whatever popup is on screen, rebuilt every frame by
     /// `draw_popup`, so dialogs and pickers can be driven entirely by mouse.
     popup_zones: Vec<PopupZone>,
+    /// The last copy/move that failed on a permission error, kept so a Windows
+    /// user can retry it elevated. `(op, sources, destination dir)`.
+    pending_elevation: Option<(PendingOp, Vec<PathBuf>, PathBuf)>,
     /// The active shell pane's slot rect, stashed on pane-zoom so the shrink
     /// back knows where to land (the split rects are gone while zoomed).
     pane_zoom_return: Option<Rect>,
@@ -1743,6 +1749,7 @@ impl App {
             menu_rect: Rect::new(0, 0, 0, 0),
             viewer_rect: Rect::new(0, 0, 0, 0),
             popup_zones: Vec::new(),
+            pending_elevation: None,
             pane_zoom_return: None,
             started: Instant::now(),
             scp_dir: None,
@@ -3729,11 +3736,24 @@ impl App {
                 p.clear_marks();
             }
             self.flash(self.focused);
+            // A permission failure on a copy/move is the one case with a real
+            // way out on Windows: offer to redo it with administrator rights.
+            // On other platforms just fall through to the friendlier report.
+            let elevate = report.permission_denied
+                && cfg!(windows)
+                && self.pending_elevation.is_some();
+            if !report.permission_denied {
+                self.pending_elevation = None;
+            }
             if cancelled == Some(true) {
+                self.pending_elevation = None;
                 self.message = Some(format!(
                     "cancelled — {} done before stopping",
                     report.ok
                 ));
+            } else if elevate {
+                let (op, targets, dest) = self.pending_elevation.take().unwrap();
+                self.popup = Popup::ConfirmElevate { op, targets, dest };
             } else {
                 self.show_op_report(&report);
                 // A checksum is worth pasting into a verify field, so put the
@@ -3801,11 +3821,40 @@ impl App {
             PendingOp::Copy => "copying",
             PendingOp::Move => "moving",
         };
+        // Remembered so a permission failure can offer an elevated retry; the
+        // op-completion handler clears this unless it actually hit that wall.
+        self.pending_elevation = Some((op, targets.clone(), dest.clone()));
         self.start_op(label, move |ctl| match op {
             PendingOp::Copy => cian_core::progress::copy_many(&targets, &dest, conflict, ctl),
             PendingOp::Move => cian_core::progress::move_many(&targets, &dest, conflict, ctl),
         });
         Ok(())
+    }
+
+    /// Redo the remembered copy/move with administrator rights (Windows UAC).
+    /// The elevated process runs the transfer itself, so there is no in-app
+    /// progress — cian just waits on the worker and reports the outcome.
+    fn run_elevated_transfer(&mut self) {
+        let popup = std::mem::replace(&mut self.popup, Popup::None);
+        let Popup::ConfirmElevate { op, targets, dest } = popup else { return };
+        let move_after = op == PendingOp::Move;
+        let n = targets.len();
+        let items: Vec<cian_core::elevate::CopyItem> = targets
+            .into_iter()
+            .map(|src| cian_core::elevate::CopyItem { src, dest_dir: dest.clone() })
+            .collect();
+        self.message = Some("waiting for the administrator prompt…".into());
+        self.start_op("elevating", move |_ctl| {
+            let mut report = OpReport::default();
+            match cian_core::elevate::elevated_copy(&items, move_after) {
+                Ok(()) => {
+                    report.ok = n;
+                    report.note = Some("as administrator".into());
+                }
+                Err(e) => report.note_error(e.to_string()),
+            }
+            report
+        });
     }
 
     fn finish_delete(&mut self, mode: DeleteMode) -> Result<()> {
@@ -3825,6 +3874,18 @@ impl App {
             let mut lines = vec![format!(
                 "{} ok · {} skipped · {} errors", report.ok, report.skipped, report.errors.len()
             )];
+            // Turn the raw "Access is denied (os error 5)" into something that
+            // says what to do about it.
+            if report.permission_denied {
+                lines.push(String::new());
+                lines.push("Permission denied — this location needs administrator rights.".into());
+                if cfg!(windows) {
+                    lines.push("Run cian as administrator, or copy to a writable folder.".into());
+                } else {
+                    lines.push("Copy to a folder you can write to, or fix its permissions.".into());
+                }
+                lines.push(String::new());
+            }
             lines.extend(report.errors.iter().take(8).cloned());
             if report.errors.len() > 8 {
                 lines.push(format!("... and {} more", report.errors.len() - 8));
@@ -5520,6 +5581,14 @@ impl App {
                     self.popup = Popup::None;
                     self.execute_close(target);
                 }
+                KeyCode::Char('n') | KeyCode::Esc => { self.popup = Popup::None; }
+                _ => {}
+            }
+            return Ok(());
+        }
+        if matches!(self.popup, Popup::ConfirmElevate { .. }) {
+            match key.code {
+                KeyCode::Char('y') | KeyCode::Enter => self.run_elevated_transfer(),
                 KeyCode::Char('n') | KeyCode::Esc => { self.popup = Popup::None; }
                 _ => {}
             }
@@ -9673,6 +9742,18 @@ fn draw_popup(
                 " y / Enter = yes   n / Esc = no ".to_string(),
             )
         }
+        Popup::ConfirmElevate { op, targets, dest } => {
+            let verb = match op { PendingOp::Copy => "copy", PendingOp::Move => "move" };
+            (
+                " administrator rights ".to_string(),
+                vec![
+                    format!("{} needs administrator rights to write to", dest.display()),
+                    String::new(),
+                    format!("Retry the {} of {} item(s) elevated? A UAC prompt will appear.", verb, targets.len()),
+                ],
+                " y/Enter = retry as admin   n/Esc = cancel ".to_string(),
+            )
+        }
         // All handled above, before this match.
         Popup::Manual { .. }
         | Popup::ContextMenu { .. }
@@ -9727,6 +9808,9 @@ fn draw_popup(
         Popup::Search { .. } => vec![("Jump", ZoneKind::Enter), ("Cancel", ZoneKind::Esc)],
         Popup::ConfirmQuit | Popup::ConfirmClose { .. } => {
             vec![("Yes", ZoneKind::Enter), ("No", ZoneKind::Esc)]
+        }
+        Popup::ConfirmElevate { .. } => {
+            vec![("Retry as admin", ZoneKind::Enter), ("Cancel", ZoneKind::Esc)]
         }
         _ => vec![],
     };
@@ -9838,6 +9922,19 @@ mod tests {
         config.keymaps = keymaps;
         let app = App::new(p.clone(), p, config).unwrap();
         (dir, app)
+    }
+
+    #[test]
+    fn a_permission_error_explains_admin_rights() {
+        let (_d, mut app) = app_with(&["a.rs"]);
+        let mut report = OpReport { permission_denied: true, ..Default::default() };
+        report.note_error("C:/Program Files/x: Access is denied (os error 5)");
+        app.show_op_report(&report);
+        let Popup::Notice { lines } = &app.popup else { panic!("expected a notice") };
+        assert!(
+            lines.iter().any(|l| l.contains("administrator rights")),
+            "the notice names the cause: {lines:?}"
+        );
     }
 
     #[test]

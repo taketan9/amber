@@ -26,6 +26,9 @@ pub struct OpReport {
     /// Optional trailing note for the summary line (e.g. which transport a
     /// transfer used). Not an error; purely informational.
     pub note: Option<String>,
+    /// At least one error was an OS "permission denied". On Windows this is the
+    /// signal to offer an elevated (administrator) retry.
+    pub permission_denied: bool,
 }
 
 impl OpReport {
@@ -33,6 +36,7 @@ impl OpReport {
         self.ok += other.ok;
         self.skipped += other.skipped;
         self.errors.extend(other.errors);
+        self.permission_denied |= other.permission_denied;
         if other.note.is_some() {
             self.note = other.note;
         }
