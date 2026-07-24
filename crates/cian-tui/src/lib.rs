@@ -1079,6 +1079,8 @@ enum MenuItem {
     StartLog,
     /// Stop the recording running on this shell pane.
     StopLog,
+    /// Cycle the encoding the shell output is decoded with.
+    Encoding,
     Quit,
     Manual,
 }
@@ -1104,6 +1106,7 @@ impl MenuItem {
             MenuItem::ScpDownload => "SFTP download ← server…",
             MenuItem::StartLog => "Start session log…",
             MenuItem::StopLog => "Stop session log  ●",
+            MenuItem::Encoding => "Text encoding (cycle)",
             MenuItem::Quit => "Quit cian  (q)",
             MenuItem::Manual => "Key manual  (?)",
         }
@@ -2338,6 +2341,20 @@ impl App {
         })
     }
 
+    /// The file pane a file-oriented action should use: the focused one, or —
+    /// when the shell has focus — the last file pane that did.
+    fn effective_file_pane(&self) -> &Pane {
+        let tabs = match self.focused {
+            FocusedPane::Left => &self.left,
+            FocusedPane::Right => &self.right,
+            FocusedPane::Shell => match self.last_file_pane {
+                FocusedPane::Right => &self.right,
+                _ => &self.left,
+            },
+        };
+        tabs.active_ref()
+    }
+
     /// The last-focused file pane's directory, for seeding prompts.
     fn last_file_pane_cwd(&self) -> Option<PathBuf> {
         let tabs = match self.last_file_pane {
@@ -2742,28 +2759,19 @@ impl App {
             self.start_ssh(); // shows the "configure a host" notice
             return;
         }
+        // Works from the shell too, acting on the last-focused file pane.
+        let pane = self.effective_file_pane();
         let (locals, local_dir) = match dir {
             ScpDir::Upload => {
-                let files: Vec<PathBuf> = self
-                    .active_pane()
-                    .map(|p| p.target_paths())
-                    .unwrap_or_default()
-                    .into_iter()
-                    .filter(|p| p.is_file())
-                    .collect();
+                let files: Vec<PathBuf> =
+                    pane.target_paths().into_iter().filter(|p| p.is_file()).collect();
                 if files.is_empty() {
                     self.message = Some("select a file to upload".into());
                     return;
                 }
                 (files, PathBuf::new())
             }
-            ScpDir::Download => {
-                let dir = match self.active_pane() {
-                    Some(p) => p.cwd.clone(),
-                    None => return,
-                };
-                (Vec::new(), dir)
-            }
+            ScpDir::Download => (Vec::new(), pane.cwd.clone()),
         };
         self.scp_dir = Some((dir, locals, local_dir));
         self.popup = Popup::SshHosts { cursor: 0, filter: String::new() };
@@ -4528,6 +4536,13 @@ impl App {
             } else {
                 items.push(MenuItem::StartLog);
             }
+            // Re-decode the shell's output (Shift_JIS, UTF-16, …).
+            items.push(MenuItem::Encoding);
+            // SFTP to/from a configured host, acting on the last file pane.
+            if !self.config.ssh_hosts.is_empty() {
+                items.push(MenuItem::ScpUpload);
+                items.push(MenuItem::ScpDownload);
+            }
             items.push(MenuItem::Background);
         } else {
             items.push(MenuItem::Copy);
@@ -4651,6 +4666,14 @@ impl App {
             MenuItem::ScpDownload => self.start_scp(ScpDir::Download),
             MenuItem::StartLog => self.start_log_prompt(),
             MenuItem::StopLog => self.stop_session_log(),
+            MenuItem::Encoding => {
+                if let Some(s) = self.shell.active_session() {
+                    let next = s.cycle_encoding();
+                    self.message = Some(format!("shell encoding: {}", next.label()));
+                } else {
+                    self.message = Some("no shell here".into());
+                }
+            }
             MenuItem::Quit => self.start_quit_confirm(),
             MenuItem::HiddenToggle => self.toggle_hidden(),
             MenuItem::Attributes => self.show_attributes(),
@@ -6575,7 +6598,7 @@ fn manual_sections() -> Vec<(&'static str, Vec<ManualEntry>)> {
                 entry("F12", None, "zoom focused surface (toggle)"),
                 entry("Shift+F12", None, "zoom active split pane (toggle)"),
                 entry("drag", None, "select text; it is copied to the clipboard on release"),
-                entry("right-click → Paste", None, "paste clipboard text into the shell"),
+                entry("right-click", None, "menu: paste, log, SFTP, text encoding, color"),
                 entry("Esc", None, "back to files (full-screen apps keep it)"),
             ],
         ),
@@ -9897,12 +9920,14 @@ mod tests {
         assert!(app.file_clip.is_none());
         app.open_context_menu(5, 5);
         let Popup::ContextMenu { items, .. } = &app.popup else { panic!("no menu") };
+        // No SSH hosts configured here, so SFTP entries are omitted.
         assert_eq!(
             items,
             &vec![
                 MenuItem::Ssh,
                 MenuItem::Paste,
                 MenuItem::StartLog,
+                MenuItem::Encoding,
                 MenuItem::Background,
                 MenuItem::Quit,
                 MenuItem::Manual

@@ -69,9 +69,10 @@ impl TextEncoding {
         }
     }
 
-    fn decode(self, bytes: &[u8]) -> String {
-        // `decode` also strips a leading BOM and never fails — invalid bytes
-        // become U+FFFD, which is what a viewer wants.
+    /// Decode `bytes` in this encoding. Strips a leading BOM and never fails —
+    /// invalid bytes become U+FFFD, which is what a viewer (or a terminal
+    /// showing a mis-encoded stream) wants.
+    pub fn decode(self, bytes: &[u8]) -> String {
         self.engine().decode(bytes).0.into_owned()
     }
 }

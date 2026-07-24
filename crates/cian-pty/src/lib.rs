@@ -28,6 +28,12 @@ use log_sink::LogSink;
 /// logging.
 type LogSlot = Arc<Mutex<Option<LogSink>>>;
 
+pub use cian_core::viewer::TextEncoding;
+
+/// The encoding the reader decodes PTY output with before feeding vt100 (which
+/// speaks UTF-8). Shared so a menu can change it live.
+type EncSlot = Arc<Mutex<TextEncoding>>;
+
 /// The user's preferred shell, falling back to a sane default per platform.
 pub fn default_shell() -> String {
     if cfg!(windows) {
@@ -48,6 +54,8 @@ pub struct PtySession {
     cols: u16,
     /// Optional session log, shared with the reader thread.
     log: LogSlot,
+    /// Input encoding, shared with the reader thread.
+    encoding: EncSlot,
     // Kept so the reader thread is owned by the session; it exits on EOF when
     // the child dies (or when the session is dropped and the master closes).
     _reader: JoinHandle<()>,
@@ -84,24 +92,38 @@ impl PtySession {
         let dirty = Arc::new(AtomicBool::new(true));
 
         let log: LogSlot = Arc::new(Mutex::new(None));
+        let encoding: EncSlot = Arc::new(Mutex::new(TextEncoding::Utf8));
         let reader_parser = Arc::clone(&parser);
         let reader_dirty = Arc::clone(&dirty);
         let reader_log = Arc::clone(&log);
+        let reader_enc = Arc::clone(&encoding);
         let reader = std::thread::spawn(move || {
             let mut buf = [0u8; 8192];
             loop {
                 match reader.read(&mut buf) {
                     Ok(0) => break, // EOF: child closed the pty
                     Ok(n) => {
+                        // Decode to UTF-8 when a non-UTF-8 encoding is chosen
+                        // (e.g. a Shift_JIS shell); UTF-8 passes through as-is.
+                        // Per-chunk decoding can split a multi-byte character at
+                        // a read boundary, a rare and harmless single glyph.
+                        let enc = reader_enc.lock().map(|e| *e).unwrap_or(TextEncoding::Utf8);
+                        let owned;
+                        let bytes: &[u8] = if enc == TextEncoding::Utf8 {
+                            &buf[..n]
+                        } else {
+                            owned = enc.decode(&buf[..n]).into_bytes();
+                            &owned
+                        };
                         // Tee to the session log first, so a scrubbed
-                        // transcript captures exactly what was received.
+                        // transcript captures what was shown (already UTF-8).
                         if let Ok(mut slot) = reader_log.lock() {
                             if let Some(sink) = slot.as_mut() {
-                                sink.write_bytes(&buf[..n]);
+                                sink.write_bytes(bytes);
                             }
                         }
                         match reader_parser.lock() {
-                            Ok(mut p) => p.process(&buf[..n]),
+                            Ok(mut p) => p.process(bytes),
                             // A poisoned parser never recovers: this pane will
                             // stop updating for the rest of the session, which
                             // looks exactly like a hang. Record it and stop.
@@ -135,8 +157,25 @@ impl PtySession {
             rows,
             cols,
             log,
+            encoding,
             _reader: reader,
         })
+    }
+
+    /// The encoding the shell output is currently decoded with.
+    pub fn encoding(&self) -> TextEncoding {
+        self.encoding.lock().map(|e| *e).unwrap_or(TextEncoding::Utf8)
+    }
+
+    /// Switch to the next encoding in the cycle and redraw. Takes effect on the
+    /// next output; already-drawn cells keep their glyphs until overwritten.
+    pub fn cycle_encoding(&self) -> TextEncoding {
+        let next = self.encoding().next();
+        if let Ok(mut e) = self.encoding.lock() {
+            *e = next;
+        }
+        self.dirty.store(true, Ordering::Relaxed);
+        next
     }
 
     /// Start writing a scrubbed transcript of this session's output to `path`,
