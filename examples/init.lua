@@ -218,9 +218,15 @@
 -- window). Data sent to the model is only what a feature needs (file names and
 -- sizes; file contents only when a feature explicitly requires it).
 --
+-- The endpoint and model default to the crmaine environment
+-- (https://apim-jri-dev-apim1.azure-api.net/llmoai, model gpt-5.4) with broker
+-- auth, so in that setup `cian.ai {}` on its own is enough to turn AI on.
+-- cian.ai {}
+--
+-- Override any of it:
 -- cian.ai {
 --   endpoint    = "https://your-apim.azure-api.net/llmoai",  -- Azure OpenAI / APIM
---   model       = "gpt-5-mini",
+--   model       = "gpt-5.4",
 --   auth_mode   = "broker",    -- "broker" (Windows AAD), "apikey", or "mock" (offline echo)
 --   -- python   = "python",    -- interpreter to use (default: "python")
 --   -- api_version  = "2025-04-01-preview",

@@ -1584,8 +1584,21 @@ enum MenuItem {
     AiChat,
     /// Generate a shell command from a description (shell pane).
     AiShellCmd,
+    /// A submenu grouping the AI actions (drills down when chosen).
+    AiMenu,
+    /// A submenu grouping the file-transfer actions.
+    SendMenu,
+    /// Goes back up from a submenu to its parent.
+    Back,
     Quit,
     Manual,
+}
+
+impl MenuItem {
+    /// Group items open a submenu instead of acting; this is their marker.
+    fn is_group(self) -> bool {
+        matches!(self, MenuItem::AiMenu | MenuItem::SendMenu)
+    }
 }
 
 impl MenuItem {
@@ -1617,8 +1630,11 @@ impl MenuItem {
                 Lang::En => "日本語に切替",
                 Lang::Ja => "Switch to English",
             },
-            MenuItem::AiChat => tr(lang, "AI: chat…", "AI: チャット…"),
-            MenuItem::AiShellCmd => tr(lang, "AI: command from description…", "AI: 説明からコマンド生成…"),
+            MenuItem::AiChat => tr(lang, "Chat…", "チャット…"),
+            MenuItem::AiShellCmd => tr(lang, "Command from description…", "説明からコマンド生成…"),
+            MenuItem::AiMenu => tr(lang, "AI ▸", "AI ▸"),
+            MenuItem::SendMenu => tr(lang, "Transfer ▸", "転送 ▸"),
+            MenuItem::Back => tr(lang, "◂ Back", "◂ 戻る"),
             MenuItem::Manual => tr(lang, "Key manual  (?)", "キー一覧  (?)"),
         }
     }
@@ -2135,6 +2151,9 @@ pub struct App {
     tab_rects: Vec<(FocusedPane, usize, Rect)>,
     /// The context menu's on-screen rect (inner area), for clicking its items.
     menu_rect: Rect,
+    /// Parent context menus stashed while a submenu is open, so Esc/← drills
+    /// back up instead of closing everything.
+    menu_stack: Vec<Popup>,
     /// The viewer's text body rect, for mapping a mouse click to a line.
     viewer_rect: Rect,
     /// Clickable regions of whatever popup is on screen, rebuilt every frame by
@@ -2286,6 +2305,7 @@ impl App {
             shell_sel: None,
             tab_rects: Vec::new(),
             menu_rect: Rect::new(0, 0, 0, 0),
+            menu_stack: Vec::new(),
             viewer_rect: Rect::new(0, 0, 0, 0),
             popup_zones: Vec::new(),
             pending_elevation: None,
@@ -5499,9 +5519,15 @@ impl App {
                             let item = items[idx];
                             let _ = self.run_menu_item(item);
                         } else {
-                            // A click off the menu dismisses it, as menus do.
+                            // A click off the menu dismisses it entirely, as
+                            // menus do — including any parent levels.
+                            self.menu_stack.clear();
                             self.popup = Popup::None;
                         }
+                    }
+                    MouseEventKind::Down(MouseButton::Right) => {
+                        // Right-click inside a submenu backs out one level.
+                        self.menu_back();
                     }
                     _ => {}
                 }
@@ -6181,8 +6207,7 @@ impl App {
             }
             items.push(MenuItem::Background);
             if ai {
-                items.push(MenuItem::AiShellCmd);
-                items.push(MenuItem::AiChat);
+                items.push(MenuItem::AiMenu);
             }
         } else {
             items.push(MenuItem::Copy);
@@ -6201,13 +6226,12 @@ impl App {
             items.push(MenuItem::HiddenToggle);
             // SFTP transfer, offered only when servers are configured.
             if !self.config.ssh_hosts.is_empty() {
-                items.push(MenuItem::ScpUpload);
-                items.push(MenuItem::ScpDownload);
+                items.push(MenuItem::SendMenu);
             }
             items.push(MenuItem::Ssh);
             items.push(MenuItem::Background);
             if ai {
-                items.push(MenuItem::AiChat);
+                items.push(MenuItem::AiMenu);
             }
         }
         // Language toggle, quit and the manual are in every menu, so all are
@@ -6216,7 +6240,48 @@ impl App {
         items.push(MenuItem::Lang);
         items.push(MenuItem::Quit);
         items.push(MenuItem::Manual);
+        self.menu_stack.clear();
         self.popup = Popup::ContextMenu { items, cursor: 0, at: (col, row) };
+    }
+
+    /// The children a group item drills into (context-dependent). `None` for a
+    /// leaf item.
+    fn submenu_children(&self, item: MenuItem) -> Option<Vec<MenuItem>> {
+        match item {
+            MenuItem::AiMenu => {
+                let mut v = vec![MenuItem::AiChat];
+                if self.focused == FocusedPane::Shell {
+                    v.insert(0, MenuItem::AiShellCmd);
+                }
+                v.push(MenuItem::Back);
+                Some(v)
+            }
+            MenuItem::SendMenu => {
+                Some(vec![MenuItem::ScpUpload, MenuItem::ScpDownload, MenuItem::Back])
+            }
+            _ => None,
+        }
+    }
+
+    /// Open a submenu, stashing the current menu so `Back`/Esc returns to it.
+    fn open_submenu(&mut self, items: Vec<MenuItem>) {
+        let at = match &self.popup {
+            Popup::ContextMenu { at, .. } => *at,
+            _ => (0, 0),
+        };
+        let parent = std::mem::replace(&mut self.popup, Popup::None);
+        if matches!(parent, Popup::ContextMenu { .. }) {
+            self.menu_stack.push(parent);
+        }
+        self.popup = Popup::ContextMenu { items, cursor: 0, at };
+    }
+
+    /// Go back up one menu level, or close the menu when at the top.
+    fn menu_back(&mut self) {
+        match self.menu_stack.pop() {
+            Some(parent) => self.popup = parent,
+            None => self.popup = Popup::None,
+        }
     }
 
     /// Put the pane's targets into the file clipboard.
@@ -6293,8 +6358,20 @@ impl App {
     }
 
     fn run_menu_item(&mut self, item: MenuItem) -> Result<()> {
+        // A group drills into its submenu; Back climbs out — neither acts.
+        if let Some(children) = self.submenu_children(item) {
+            self.open_submenu(children);
+            return Ok(());
+        }
+        if item == MenuItem::Back {
+            self.menu_back();
+            return Ok(());
+        }
+        // A leaf action closes the whole (possibly nested) menu.
+        self.menu_stack.clear();
         self.popup = Popup::None;
         match item {
+            MenuItem::AiMenu | MenuItem::SendMenu | MenuItem::Back => {} // handled above
             MenuItem::Copy => self.clip_targets(ClipOp::Copy),
             MenuItem::Cut => self.clip_targets(ClipOp::Cut),
             // In the shell, "Paste" means the text on the clipboard goes to
@@ -6627,11 +6704,18 @@ impl App {
         if let Popup::ContextMenu { items, cursor, .. } = &mut self.popup {
             let n = items.len();
             match key.code {
-                KeyCode::Esc | KeyCode::Char('q') => self.popup = Popup::None,
+                // Esc / q / ← climb out of a submenu, or close at the top.
+                KeyCode::Esc | KeyCode::Char('q') | KeyCode::Left | KeyCode::Char('h') => {
+                    self.menu_back()
+                }
                 KeyCode::Char('j') | KeyCode::Down => *cursor = (*cursor + 1) % n,
                 KeyCode::Char('k') | KeyCode::Up => *cursor = (*cursor + n - 1) % n,
-                KeyCode::Enter => {
+                // → / l drills into a group.
+                KeyCode::Enter | KeyCode::Right | KeyCode::Char('l') => {
                     let item = items[*cursor];
+                    if key.code != KeyCode::Enter && !item.is_group() {
+                        return Ok(()); // →/l only acts on groups
+                    }
                     return self.run_menu_item(item);
                 }
                 _ => {}
@@ -11939,6 +12023,32 @@ mod tests {
             }
             other => panic!("expected the command-confirm popup, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn the_context_menu_drills_into_submenus_and_back() {
+        // With SSH hosts, the file menu offers a "Transfer ▸" group.
+        let (_d, mut app) = app_with_ssh();
+        app.open_context_menu(5, 5);
+        let has_group = matches!(&app.popup, Popup::ContextMenu { items, .. } if items.contains(&MenuItem::SendMenu));
+        assert!(has_group, "file menu has a Transfer group");
+
+        // Drill in: the submenu shows the SFTP actions and a Back item.
+        app.run_menu_item(MenuItem::SendMenu).unwrap();
+        match &app.popup {
+            Popup::ContextMenu { items, .. } => {
+                assert!(items.contains(&MenuItem::ScpUpload));
+                assert!(items.contains(&MenuItem::Back));
+            }
+            other => panic!("expected the submenu, got {:?}", other),
+        }
+        assert_eq!(app.menu_stack.len(), 1, "parent stashed");
+
+        // Back returns to the parent menu, not to nothing.
+        app.run_menu_item(MenuItem::Back).unwrap();
+        let back_at_parent = matches!(&app.popup, Popup::ContextMenu { items, .. } if items.contains(&MenuItem::SendMenu));
+        assert!(back_at_parent, "Back climbed to the parent");
+        assert!(app.menu_stack.is_empty());
     }
 
     #[test]
