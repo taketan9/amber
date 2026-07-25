@@ -1194,6 +1194,36 @@ enum ViewVisual {
     Block,
 }
 
+/// Shell-style wildcard match: `*` matches any run, `?` any one char.
+/// Both `pat` and `name` should already be the case folded to compare.
+fn glob_match(pat: &str, name: &str) -> bool {
+    let p: Vec<char> = pat.chars().collect();
+    let s: Vec<char> = name.chars().collect();
+    // Classic two-pointer glob with backtracking on the last `*`.
+    let (mut pi, mut si) = (0usize, 0usize);
+    let (mut star, mut mark) = (None, 0usize);
+    while si < s.len() {
+        if pi < p.len() && (p[pi] == '?' || p[pi] == s[si]) {
+            pi += 1;
+            si += 1;
+        } else if pi < p.len() && p[pi] == '*' {
+            star = Some(pi);
+            mark = si;
+            pi += 1;
+        } else if let Some(sp) = star {
+            pi = sp + 1;
+            mark += 1;
+            si = mark;
+        } else {
+            return false;
+        }
+    }
+    while pi < p.len() && p[pi] == '*' {
+        pi += 1;
+    }
+    pi == p.len()
+}
+
 /// The length in characters of viewer line `l` (0 if out of range).
 fn vlen(view: &cian_core::viewer::View, l: usize) -> usize {
     view.lines.get(l).map(|s| s.chars().count()).unwrap_or(0)
@@ -2294,6 +2324,9 @@ impl App {
             "menu" => self.open_menu_at_cursor(),
             "ssh" => self.start_ssh(),
             "reload" | "source" => self.reload_config(),
+            // Mark / unmark entries whose name matches a glob (`:mark *.rs`).
+            "mark" | "select" => self.cmd_mark(rest, true),
+            "unmark" | "deselect" => self.cmd_mark(rest, false),
 
             // Navigation.
             "cd" | "goto" => {
@@ -2362,6 +2395,34 @@ impl App {
     }
 
     /// `cd <path>`: enter a directory directly, without the prompt.
+    /// `:mark <glob>` / `:unmark <glob>` — (un)mark every entry whose name
+    /// matches the wildcard pattern (`*`, `?`; case-insensitive). No pattern
+    /// acts on all entries.
+    fn cmd_mark(&mut self, pattern: &str, mark: bool) {
+        let pat = pattern.trim();
+        let Some(p) = self.active_pane_mut() else { return };
+        let mut n = 0usize;
+        for i in 0..p.entries.len() {
+            let name = p.entries[i].name.to_lowercase();
+            if pat.is_empty() || glob_match(&pat.to_lowercase(), &name) {
+                let was = p.is_marked(i);
+                if mark && !was {
+                    p.set_mark_at(i);
+                    n += 1;
+                } else if !mark && was {
+                    p.toggle_mark_at(i);
+                    n += 1;
+                }
+            }
+        }
+        self.message = Some(format!(
+            "{} {} entr{}",
+            if mark { "marked" } else { "unmarked" },
+            n,
+            if n == 1 { "y" } else { "ies" }
+        ));
+    }
+
     fn cmd_cd(&mut self, arg: &str) -> Result<()> {
         // `cd -` / `cd ..` / `cd ~` are worth honouring since the muscle memory
         // is universal; everything else is a path.
@@ -7803,6 +7864,7 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry(":head / :tail", None, "first / last lines;  :tail -n 40", "先頭／末尾の行；  :tail -n 40"),
                 entry(":df", None, "free disk space;  :df -h -k -m -g", "ディスク空き容量；  :df -h -k -m -g"),
                 entry(":reload", None, "re-read init.lua (theme/border need a restart)", "init.luaを再読込（テーマ/枠は再起動が必要）"),
+                entry(":mark", None, "mark by wildcard;  :mark *.rs   :unmark *", "ワイルドカードでマーク；  :mark *.rs   :unmark *"),
                 entry(":zip", None, "bundle selection;  :zip -e  for a password", "選択物をまとめる；  :zip -e でパスワード付き"),
                 entry(":!cmd", None, "run in shell;  % = selection, %f file, %d dir", "シェルで実行；  % =選択, %f ファイル, %d ディレクトリ"),
             ],
@@ -11123,6 +11185,31 @@ mod tests {
         let legacy = "[[shortcuts]]\nname = \"srv\"\ntarget = \"/srv\"\n";
         let parsed: ShortcutsFile = toml::from_str(legacy).unwrap();
         assert_eq!(parsed.shortcuts[0].target, "/srv");
+    }
+
+    #[test]
+    fn glob_match_handles_stars_and_question_marks() {
+        assert!(glob_match("*.rs", "main.rs"));
+        assert!(glob_match("*.rs", ".rs"));
+        assert!(!glob_match("*.rs", "main.rst"));
+        assert!(glob_match("a?c", "abc"));
+        assert!(!glob_match("a?c", "ac"));
+        assert!(glob_match("*", "anything"));
+        assert!(glob_match("test_*", "test_foo"));
+        assert!(!glob_match("test_*", "footest"));
+        assert!(glob_match("a*b*c", "axxbyyc"));
+    }
+
+    #[test]
+    fn mark_command_marks_matching_entries() {
+        let (_d, mut app) = app_with(&["a.rs", "b.rs", "c.txt", "readme.md"]);
+        app.command_buffer = "mark *.rs".into();
+        app.run_command();
+        assert_eq!(app.active_pane().unwrap().mark_count(), 2, "two .rs marked");
+        // Unmark one class, then all.
+        app.command_buffer = "unmark *.rs".into();
+        app.run_command();
+        assert_eq!(app.active_pane().unwrap().mark_count(), 0);
     }
 
     #[test]
