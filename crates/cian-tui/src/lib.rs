@@ -1090,7 +1090,7 @@ enum Popup {
     /// Sort-order picker for the focused pane.
     SortPicker { cursor: usize },
     /// Choose the encoding the active shell pane's output is decoded with.
-    EncodingPicker { cursor: usize },
+    EncodingPicker { cursor: usize, target: EncTarget },
     /// A file's contents, scrollable.
     Viewer {
         title: String,
@@ -1164,6 +1164,15 @@ enum Popup {
     /// A copy/move failed because the destination needs administrator rights.
     /// Offers to redo it elevated (Windows only).
     ConfirmElevate { op: PendingOp, targets: Vec<PathBuf>, dest: PathBuf },
+}
+
+/// What the encoding picker applies its choice to.
+#[derive(Debug, Clone)]
+enum EncTarget {
+    /// The active shell pane's live output decoding.
+    Shell,
+    /// A stashed F3 viewer to re-decode and restore when the pick is made.
+    Viewer(Box<Popup>),
 }
 
 /// The F3 viewer's visual-selection mode, matching vim's three flavours.
@@ -2860,13 +2869,21 @@ impl App {
             self.viewer_reveal_in_pane();
             return Ok(());
         }
-        // `e` re-decodes the same bytes under the next text encoding.
+        // `e` opens the encoding picker; the choice re-decodes this file.
         if !ctrl && key.code == KeyCode::Char('e') {
-            if let Popup::Viewer { view, visual, .. } = &mut self.popup {
-                let next = view.encoding.next();
-                view.redecode(next);
-                *visual = None;
-            }
+            let cur = if let Popup::Viewer { view, .. } = &self.popup {
+                cian_core::viewer::TextEncoding::ALL
+                    .iter()
+                    .position(|enc| *enc == view.encoding)
+                    .unwrap_or(0)
+            } else {
+                0
+            };
+            let viewer = std::mem::replace(&mut self.popup, Popup::None);
+            self.popup = Popup::EncodingPicker {
+                cursor: cur,
+                target: EncTarget::Viewer(Box::new(viewer)),
+            };
             return Ok(());
         }
         // y / c copy the selection (or the whole file when nothing is selected).
@@ -3074,6 +3091,38 @@ impl App {
             self.message = Some("no search — press / first".into());
         } else if not_found {
             self.message = Some("no match".into());
+        }
+    }
+
+    /// Apply (or cancel, with `None`) an encoding-picker choice to whatever it
+    /// targeted, then close it — restoring a stashed viewer when it came from F3.
+    fn finish_encoding_pick(&mut self, chosen: Option<cian_core::viewer::TextEncoding>) {
+        let target = match std::mem::replace(&mut self.popup, Popup::None) {
+            Popup::EncodingPicker { target, .. } => target,
+            other => {
+                self.popup = other;
+                return;
+            }
+        };
+        match target {
+            EncTarget::Shell => {
+                if let Some(enc) = chosen {
+                    if let Some(s) = self.shell.active_session() {
+                        s.set_encoding(enc);
+                        self.message = Some(format!("shell encoding: {}", enc.label()));
+                    }
+                }
+            }
+            EncTarget::Viewer(mut viewer) => {
+                if let Some(enc) = chosen {
+                    if let Popup::Viewer { view, visual, .. } = viewer.as_mut() {
+                        view.redecode(enc);
+                        *visual = None;
+                        self.message = Some(format!("encoding: {}", enc.label()));
+                    }
+                }
+                self.popup = *viewer;
+            }
         }
     }
 
@@ -5764,7 +5813,8 @@ impl App {
                             .iter()
                             .position(|e| *e == s.encoding())
                             .unwrap_or(0);
-                        self.popup = Popup::EncodingPicker { cursor: cur };
+                        self.popup =
+                            Popup::EncodingPicker { cursor: cur, target: EncTarget::Shell };
                     }
                     None => self.message = Some("no shell here".into()),
                 }
@@ -6284,23 +6334,29 @@ impl App {
             }
             return Ok(());
         }
-        if let Popup::EncodingPicker { cursor } = &mut self.popup {
+        if let Popup::EncodingPicker { cursor, .. } = &mut self.popup {
             let n = cian_core::viewer::TextEncoding::ALL.len();
             match key.code {
-                KeyCode::Esc | KeyCode::Char('q') => self.popup = Popup::None,
-                KeyCode::Char('j') | KeyCode::Down => *cursor = (*cursor + 1) % n,
-                KeyCode::Char('k') | KeyCode::Up => *cursor = (*cursor + n - 1) % n,
+                KeyCode::Char('j') | KeyCode::Down => {
+                    *cursor = (*cursor + 1) % n;
+                    return Ok(());
+                }
+                KeyCode::Char('k') | KeyCode::Up => {
+                    *cursor = (*cursor + n - 1) % n;
+                    return Ok(());
+                }
+                KeyCode::Esc | KeyCode::Char('q') => {
+                    // Cancel: restore a stashed viewer unchanged, else just close.
+                    self.finish_encoding_pick(None);
+                    return Ok(());
+                }
                 KeyCode::Enter => {
                     let enc = cian_core::viewer::TextEncoding::ALL[*cursor];
-                    self.popup = Popup::None;
-                    if let Some(s) = self.shell.active_session() {
-                        s.set_encoding(enc);
-                        self.message = Some(format!("shell encoding: {}", enc.label()));
-                    }
+                    self.finish_encoding_pick(Some(enc));
+                    return Ok(());
                 }
-                _ => {}
+                _ => return Ok(()),
             }
-            return Ok(());
         }
         if let Popup::ColorPicker { pane, cursor } = &mut self.popup {
             let n = PANE_BG_PRESETS.len();
@@ -10612,7 +10668,7 @@ fn draw_popup(
         return;
     }
 
-    if let Popup::EncodingPicker { cursor } = popup {
+    if let Popup::EncodingPicker { cursor, .. } = popup {
         use cian_core::viewer::TextEncoding;
         let w = 34u16.min(area.width);
         let h = TextEncoding::ALL.len() as u16 + 3;
@@ -14024,18 +14080,44 @@ mod tests {
     }
 
     #[test]
-    fn e_cycles_the_viewer_encoding() {
+    fn e_opens_the_encoding_picker_and_applies_the_choice() {
         let d = tempfile::tempdir().unwrap();
         // "日本語" in Shift_JIS: mojibake as UTF-8 until switched.
         std::fs::write(d.path().join("s.txt"), [0x93u8, 0xfa, 0x96, 0x7b, 0x8c, 0xea, b'\n']).unwrap();
         let p = d.path().to_path_buf();
         let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
         app.handle_key(code(KeyCode::F(3))).unwrap();
-        // `e` → Shift_JIS.
+
+        // `e` opens the picker (a list), not an immediate cycle.
         app.handle_key(key('e')).unwrap();
-        let Popup::Viewer { view, .. } = &app.popup else { panic!("no viewer") };
+        assert!(
+            matches!(app.popup, Popup::EncodingPicker { target: EncTarget::Viewer(_), .. }),
+            "e opens the picker targeting the viewer"
+        );
+        // Move to Shift_JIS and confirm; the viewer comes back re-decoded.
+        let sjis = cian_core::viewer::TextEncoding::ALL
+            .iter()
+            .position(|e| *e == cian_core::viewer::TextEncoding::ShiftJis)
+            .unwrap();
+        if let Popup::EncodingPicker { cursor, .. } = &mut app.popup {
+            *cursor = sjis;
+        }
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+        let Popup::Viewer { view, .. } = &app.popup else { panic!("viewer restored") };
         assert_eq!(view.encoding, cian_core::viewer::TextEncoding::ShiftJis);
         assert_eq!(view.lines[0], "日本語");
+    }
+
+    #[test]
+    fn cancelling_the_encoding_picker_restores_the_viewer_unchanged() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::write(d.path().join("s.txt"), b"plain\n").unwrap();
+        let p = d.path().to_path_buf();
+        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        app.handle_key(code(KeyCode::F(3))).unwrap();
+        app.handle_key(key('e')).unwrap();
+        app.handle_key(code(KeyCode::Esc)).unwrap();
+        assert!(matches!(app.popup, Popup::Viewer { .. }), "Esc returns to the viewer");
     }
 
     #[test]
