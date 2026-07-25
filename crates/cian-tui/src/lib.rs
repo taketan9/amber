@@ -1170,7 +1170,15 @@ enum Popup {
     ConfirmQuit,
     ConfirmClose { target: CloseTarget },
     /// The AI chat: a transcript, an input line, and whether a reply is pending.
-    AiChat { input: String, log: Vec<ChatMsg>, scroll: usize, pending: bool },
+    /// `sel` is a selected range of wrapped transcript lines `(anchor, cursor)`,
+    /// for copying, mirroring the F3 viewer's line selection.
+    AiChat {
+        input: String,
+        log: Vec<ChatMsg>,
+        scroll: usize,
+        pending: bool,
+        sel: Option<(usize, usize)>,
+    },
     /// A copy/move failed because the destination needs administrator rights.
     /// Offers to redo it elevated (Windows only).
     ConfirmElevate { op: PendingOp, targets: Vec<PathBuf>, dest: PathBuf },
@@ -2165,6 +2173,12 @@ pub struct App {
     ai_ready: Option<bool>,
     /// A pending AI request running on a worker thread.
     ai_job: Option<AiJob>,
+    /// The chat transcript's on-screen body rect, the effective scroll offset,
+    /// and the flat wrapped lines — rebuilt each frame so a mouse drag can map
+    /// to a line range and copy it.
+    ai_rect: Rect,
+    ai_scroll: usize,
+    ai_lines: Vec<String>,
     diff_job: Option<DiffJob>,
     /// When the panes were last checked against the filesystem.
     last_watch: Instant,
@@ -2263,6 +2277,9 @@ impl App {
             }),
             ai_ready: None,
             ai_job: None,
+            ai_rect: Rect::new(0, 0, 0, 0),
+            ai_scroll: 0,
+            ai_lines: Vec::new(),
             zoom_return: None,
             pending_shell_input: None,
             pending_shortcut_target: None,
@@ -4644,13 +4661,19 @@ impl App {
                 Some("AI unavailable (python, packages, or sign-in) — feature hidden".into());
             return;
         }
-        self.popup = Popup::AiChat { input: String::new(), log: Vec::new(), scroll: usize::MAX, pending: false };
+        self.popup = Popup::AiChat {
+            input: String::new(),
+            log: Vec::new(),
+            scroll: usize::MAX,
+            pending: false,
+            sel: None,
+        };
     }
 
     /// Send the typed line to the model on a worker thread.
     fn send_ai_message(&mut self) {
         let Some(cfg) = self.ai.clone() else { return };
-        let Popup::AiChat { input, log, pending, scroll } = &mut self.popup else { return };
+        let Popup::AiChat { input, log, pending, scroll, .. } = &mut self.popup else { return };
         let question = input.trim().to_string();
         if question.is_empty() || *pending {
             return;
@@ -4668,6 +4691,38 @@ impl App {
             let _ = tx.send(r);
         });
         self.ai_job = Some(AiJob { rx });
+    }
+
+    /// Copy the chat: the selected transcript lines if a range is selected,
+    /// otherwise the whole of the last assistant reply.
+    fn copy_ai_text(&mut self) {
+        let text = if let Popup::AiChat { log, sel, .. } = &self.popup {
+            match sel {
+                Some((a, b)) => {
+                    let lo = (*a).min(*b);
+                    let hi = (*a).max(*b).min(self.ai_lines.len().saturating_sub(1));
+                    if self.ai_lines.is_empty() {
+                        String::new()
+                    } else {
+                        self.ai_lines[lo..=hi].join("\n")
+                    }
+                }
+                None => log.iter().rev().find(|m| !m.user).map(|m| m.text.clone()).unwrap_or_default(),
+            }
+        } else {
+            return;
+        };
+        if text.trim().is_empty() {
+            self.message = Some("nothing to copy".into());
+            return;
+        }
+        if let Some(cb) = self.clipboard.as_mut() {
+            let _ = cb.set_text(text);
+        }
+        self.message = Some("copied".into());
+        if let Popup::AiChat { sel, .. } = &mut self.popup {
+            *sel = None;
+        }
     }
 
     /// Drain the AI worker; append the reply (or an error) when it lands.
@@ -5236,6 +5291,59 @@ impl App {
                     }
                 }
                 MouseEventKind::Down(MouseButton::Right) => self.copy_viewer_selection(),
+                _ => {}
+            }
+            return;
+        }
+
+        // In the AI chat, drag selects transcript lines and copies on release;
+        // the wheel scrolls; right-click copies. Same feel as the viewer.
+        if matches!(self.popup, Popup::AiChat { .. }) {
+            let body = self.ai_rect;
+            let n = self.ai_lines.len();
+            let scroll = self.ai_scroll;
+            let line_at = |row: u16| -> usize {
+                let rel = row.saturating_sub(body.y) as usize;
+                (scroll + rel).min(n.saturating_sub(1))
+            };
+            let in_body = body.width > 0
+                && col >= body.x
+                && col < body.x + body.width
+                && row >= body.y
+                && row < body.y + body.height;
+            match ev.kind {
+                MouseEventKind::Down(MouseButton::Left) if in_body && n > 0 => {
+                    let l = line_at(row);
+                    if let Popup::AiChat { sel, .. } = &mut self.popup {
+                        *sel = Some((l, l));
+                    }
+                }
+                MouseEventKind::Drag(MouseButton::Left) if n > 0 => {
+                    let l = line_at(row);
+                    if let Popup::AiChat { sel: Some(s), .. } = &mut self.popup {
+                        s.1 = l;
+                    }
+                }
+                MouseEventKind::Up(MouseButton::Left) => {
+                    // A drag that actually spanned lines copies; a bare click clears.
+                    let dragged = matches!(self.popup, Popup::AiChat { sel: Some((a, b)), .. } if a != b);
+                    if dragged {
+                        self.copy_ai_text();
+                    } else if let Popup::AiChat { sel, .. } = &mut self.popup {
+                        *sel = None;
+                    }
+                }
+                MouseEventKind::ScrollDown => {
+                    if let Popup::AiChat { scroll, .. } = &mut self.popup {
+                        *scroll = scroll.saturating_add(3);
+                    }
+                }
+                MouseEventKind::ScrollUp => {
+                    if let Popup::AiChat { scroll, .. } = &mut self.popup {
+                        *scroll = scroll.saturating_sub(3);
+                    }
+                }
+                MouseEventKind::Down(MouseButton::Right) => self.copy_ai_text(),
                 _ => {}
             }
             return;
@@ -6323,21 +6431,27 @@ impl App {
                         input.clear();
                     }
                 }
+                // Ctrl+V pastes the clipboard into the input.
                 KeyCode::Char('v') if ctrl => {
                     let text = self.clipboard_text();
                     if let (Some(t), Popup::AiChat { input, .. }) = (text, &mut self.popup) {
                         input.push_str(t.trim_end_matches(['\r', '\n']));
                     }
                 }
+                // Ctrl+Y copies the current selection, or the last reply if none.
+                KeyCode::Char('y') if ctrl => self.copy_ai_text(),
+                KeyCode::Char('c') if ctrl => self.copy_ai_text(),
                 KeyCode::Char(_) if ctrl => {}
                 KeyCode::Backspace => {
-                    if let Popup::AiChat { input, .. } = &mut self.popup {
+                    if let Popup::AiChat { input, sel, .. } = &mut self.popup {
                         input.pop();
+                        *sel = None;
                     }
                 }
                 KeyCode::Char(c) => {
-                    if let Popup::AiChat { input, .. } = &mut self.popup {
+                    if let Popup::AiChat { input, sel, .. } = &mut self.popup {
                         input.push(c);
+                        *sel = None; // typing dismisses a selection
                     }
                 }
                 _ => {}
@@ -6909,6 +7023,10 @@ impl App {
             }
             Popup::SshHosts { filter, .. } => {
                 filter.push_str(&clean);
+                return;
+            }
+            Popup::AiChat { input, .. } => {
+                input.push_str(&clean);
                 return;
             }
             _ => {}
@@ -8721,6 +8839,12 @@ fn draw(f: &mut Frame, app: &mut App) {
     if let Some(job) = &app.diff_job {
         draw_progress_bar(f, area, job.label, &job.latest, job.started, app.lang);
     }
+    // The chat has its own renderer so it can stash the transcript geometry on
+    // `app` for mouse selection.
+    if matches!(app.popup, Popup::AiChat { .. }) {
+        draw_ai_chat(f, area, app);
+        return;
+    }
     if !matches!(app.popup, Popup::None) {
         // Remember where the context menu landed so a click can hit its rows.
         if let Popup::ContextMenu { items, at, .. } = &app.popup {
@@ -9998,6 +10122,97 @@ fn push_row_zone(zones: &mut Vec<PopupZone>, inner: Rect, y: u16, idx: usize) {
     });
 }
 
+/// The AI chat, rendered with `&mut App` so it can stash the transcript's rect,
+/// scroll and flat lines for mouse selection.
+fn draw_ai_chat(f: &mut Frame, area: Rect, app: &mut App) {
+    let lang = app.lang;
+    let width: u16 = 76u16.min(area.width.saturating_sub(2));
+    let height = area.height.saturating_sub(2).max(8);
+    let rect = centered_rect(width, height, area);
+    f.render_widget(Clear, rect);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(border_type())
+        .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
+        .style(Style::default().bg(theme().popup_bg))
+        .title(tr(lang, " AI chat ", " AI チャット "))
+        .title_bottom(tr(
+            lang,
+            " Enter=send  drag/Ctrl+Y=copy  Ctrl+V=paste  ↑↓  Esc ",
+            " Enter=送信  ドラッグ/Ctrl+Y=コピー  Ctrl+V=貼付  ↑↓  Esc ",
+        ));
+    let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
+    f.render_widget(block, rect);
+    let body_w = inner.width.max(1) as usize;
+    let view_h = inner.height.saturating_sub(1) as usize;
+
+    let mut flat: Vec<String> = Vec::new();
+    let mut shown: Vec<Line> = Vec::new();
+    let mut input_str = String::new();
+    let mut off = 0usize;
+    if let Popup::AiChat { input, log, scroll, pending, sel } = &mut app.popup {
+        // Flat plain-text lines (for copying) and their styled counterparts.
+        let mut styled: Vec<Line> = Vec::new();
+        let push = |flat: &mut Vec<String>, styled: &mut Vec<Line>, prefix: &str, prefix_c: Color, body: String, body_c: Color| {
+            styled.push(Line::from(vec![
+                Span::styled(prefix.to_string(), Style::default().fg(prefix_c).add_modifier(Modifier::BOLD)),
+                Span::styled(body.clone(), Style::default().fg(body_c)),
+            ]));
+            flat.push(body);
+        };
+        for m in log.iter() {
+            let (tag, tag_c, body_c) = if m.user {
+                ("you ", theme().accent, Color::Rgb(225, 225, 240))
+            } else {
+                ("ai  ", Color::Rgb(130, 205, 150), Color::Rgb(205, 210, 220))
+            };
+            let mut first = true;
+            for raw in m.text.split('\n') {
+                for chunk in wrap_str(raw, body_w.saturating_sub(4)) {
+                    let prefix = if first { tag } else { "    " };
+                    push(&mut flat, &mut styled, prefix, tag_c, chunk, body_c);
+                    first = false;
+                }
+            }
+            styled.push(Line::from(""));
+            flat.push(String::new());
+        }
+        if *pending {
+            styled.push(Line::from(Span::styled(
+                tr(lang, "ai  …thinking", "ai  …考え中"),
+                Style::default().fg(Color::Rgb(150, 150, 170)).add_modifier(Modifier::ITALIC),
+            )));
+            flat.push(String::new());
+        }
+        let max_scroll = flat.len().saturating_sub(view_h);
+        off = (*scroll).min(max_scroll);
+        *scroll = off; // usize::MAX means "stick to bottom"; clamp it here
+        input_str = input.clone();
+
+        let sel_range = sel.map(|(a, b)| (a.min(b), a.max(b)));
+        for (i, line) in styled.into_iter().enumerate().skip(off).take(view_h) {
+            let selected = sel_range.map(|(a, b)| i >= a && i <= b).unwrap_or(false);
+            shown.push(if selected {
+                line.style(Style::default().bg(theme().selected_bg))
+            } else {
+                line
+            });
+        }
+    }
+
+    // Stash the geometry so a mouse drag can map to a line range and copy it.
+    app.ai_rect = Rect::new(inner.x, inner.y, inner.width, view_h as u16);
+    app.ai_scroll = off;
+    app.ai_lines = flat;
+
+    f.render_widget(Paragraph::new(shown), app.ai_rect);
+    f.render_widget(
+        Paragraph::new(format!("> {}", input_str))
+            .style(Style::default().fg(Color::Rgb(240, 240, 250)).bg(theme().selected_bg)),
+        Rect::new(inner.x, inner.y + view_h as u16, inner.width, 1),
+    );
+}
+
 #[allow(clippy::too_many_arguments)]
 fn draw_popup(
     f: &mut Frame,
@@ -10011,72 +10226,6 @@ fn draw_popup(
 ) {
     // The manual is taller than any terminal, so it renders as a scrolling
     // viewport rather than the fixed block the other popups use.
-    if let Popup::AiChat { input, log, scroll, pending } = popup {
-        let width: u16 = 76u16.min(area.width.saturating_sub(2));
-        let height = area.height.saturating_sub(2).max(8);
-        let rect = centered_rect(width, height, area);
-        f.render_widget(Clear, rect);
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .border_type(border_type())
-            .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
-            .style(Style::default().bg(theme().popup_bg))
-            .title(tr(lang, " AI chat ", " AI チャット "))
-            .title_bottom(tr(lang, " Enter=send  ↑↓=scroll  Esc=close ", " Enter=送信  ↑↓=スクロール  Esc=閉じる "));
-        let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
-        f.render_widget(block, rect);
-
-        // Wrap the transcript into lines, tagging speaker with a coloured prefix.
-        let body_w = inner.width.max(1) as usize;
-        let mut lines: Vec<Line> = Vec::new();
-        for m in log.iter() {
-            let (tag, tag_c, body_c) = if m.user {
-                ("you ", theme().accent, Color::Rgb(225, 225, 240))
-            } else {
-                ("ai  ", Color::Rgb(130, 205, 150), Color::Rgb(205, 210, 220))
-            };
-            let mut first = true;
-            for raw in m.text.split('\n') {
-                for chunk in wrap_str(raw, body_w.saturating_sub(4)) {
-                    let prefix = if first { tag } else { "    " };
-                    lines.push(Line::from(vec![
-                        Span::styled(prefix.to_string(), Style::default().fg(tag_c).add_modifier(Modifier::BOLD)),
-                        Span::styled(chunk, Style::default().fg(body_c)),
-                    ]));
-                    first = false;
-                }
-            }
-            lines.push(Line::from(""));
-        }
-        if *pending {
-            lines.push(Line::from(Span::styled(
-                tr(lang, "ai  …thinking", "ai  …考え中"),
-                Style::default().fg(Color::Rgb(150, 150, 170)).add_modifier(Modifier::ITALIC),
-            )));
-        }
-
-        // Transcript occupies all but the last (input) row.
-        let view_h = inner.height.saturating_sub(1) as usize;
-        let max_scroll = lines.len().saturating_sub(view_h);
-        let off = (*scroll).min(max_scroll);
-        *scroll = off; // clamp (usize::MAX means "stick to bottom")
-        let shown: Vec<Line> = lines.into_iter().skip(off).take(view_h).collect();
-        f.render_widget(
-            Paragraph::new(shown),
-            Rect::new(inner.x, inner.y, inner.width, view_h as u16),
-        );
-
-        // Input line.
-        let prompt = format!("> {}", input);
-        f.render_widget(
-            Paragraph::new(prompt).style(
-                Style::default().fg(Color::Rgb(240, 240, 250)).bg(theme().selected_bg),
-            ),
-            Rect::new(inner.x, inner.y + view_h as u16, inner.width, 1),
-        );
-        return;
-    }
-
     if let Popup::Manual { lines, scroll } = popup {
         let height = area.height.saturating_sub(2).max(6);
         let width: u16 = 70u16.min(area.width.saturating_sub(2));
@@ -11553,6 +11702,30 @@ mod tests {
             }
             other => panic!("expected the chat, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn ai_chat_copy_uses_selection_then_last_reply() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        app.popup = Popup::AiChat {
+            input: String::new(),
+            log: vec![
+                ChatMsg { user: true, text: "hi".into() },
+                ChatMsg { user: false, text: "the answer\nline two".into() },
+            ],
+            scroll: 0,
+            pending: false,
+            sel: Some((0, 1)),
+        };
+        // A selection copies those flat lines (as the draw would have populated).
+        app.ai_lines = vec!["one".into(), "two".into(), "three".into()];
+        app.copy_ai_text();
+        assert_eq!(app.message.as_deref(), Some("copied"));
+        assert!(matches!(app.popup, Popup::AiChat { sel: None, .. }), "selection cleared");
+
+        // With no selection, it copies the last assistant reply.
+        app.copy_ai_text();
+        assert_eq!(app.message.as_deref(), Some("copied"));
     }
 
     #[test]
