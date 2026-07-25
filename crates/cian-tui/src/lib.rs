@@ -1171,7 +1171,9 @@ enum Popup {
     SshUsers { host: usize, cursor: usize },
     Search { buffer: String },
     History { entries: Vec<PathBuf>, cursor: usize },
-    Shortcuts { entries: Vec<Shortcut>, cursor: usize },
+    /// Bookmarks. `entries` is the whole tree; `path` is the group currently
+    /// open (a breadcrumb of indices), and `cursor` indexes within that level.
+    Shortcuts { entries: Vec<Shortcut>, cursor: usize, path: Vec<usize> },
     ConfirmQuit,
     ConfirmClose { target: CloseTarget },
     /// An AI-generated shell command awaiting review before it goes to the
@@ -1832,8 +1834,10 @@ enum InputKind {
     Rename { original: PathBuf },
     NewFile { parent: PathBuf },
     NewDir { parent: PathBuf },
-    ShortcutName { editing_index: Option<usize> },
-    ShortcutTarget { editing_index: Option<usize>, name: String },
+    /// Naming a shortcut. `path` is the group it lives in; `edit_idx` is set
+    /// when renaming an existing one; `group` makes it a folder (no target).
+    ShortcutName { path: Vec<usize>, edit_idx: Option<usize>, group: bool },
+    ShortcutTarget { path: Vec<usize>, edit_idx: Option<usize>, name: String },
     /// A path typed to jump to (or a file to open).
     JumpPath,
     /// A name to search for, recursively from the current directory.
@@ -1861,10 +1865,52 @@ impl InputKind {
     }
 }
 
+/// A bookmark: either a leaf (`target` set) or a group/folder (`children` set)
+/// that drills into more shortcuts. The two are mutually exclusive.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Shortcut {
     pub name: String,
-    pub target: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub children: Option<Vec<Shortcut>>,
+}
+
+impl Shortcut {
+    fn leaf(name: String, target: String) -> Self {
+        Self { name, target: Some(target), children: None }
+    }
+    fn group(name: String) -> Self {
+        Self { name, target: None, children: Some(Vec::new()) }
+    }
+    fn is_group(&self) -> bool {
+        self.children.is_some()
+    }
+    fn target_str(&self) -> &str {
+        self.target.as_deref().unwrap_or("")
+    }
+}
+
+/// The list of shortcuts at `path` (indices to descend through groups). Empty if
+/// the path does not resolve.
+fn sc_level<'a>(entries: &'a [Shortcut], path: &[usize]) -> &'a [Shortcut] {
+    let mut cur = entries;
+    for &i in path {
+        match cur.get(i).and_then(|s| s.children.as_deref()) {
+            Some(ch) => cur = ch,
+            None => return &[],
+        }
+    }
+    cur
+}
+
+/// Mutable variant of [`sc_level`].
+fn sc_level_mut<'a>(entries: &'a mut Vec<Shortcut>, path: &[usize]) -> Option<&'a mut Vec<Shortcut>> {
+    let mut cur = entries;
+    for &i in path {
+        cur = cur.get_mut(i)?.children.as_mut()?;
+    }
+    Some(cur)
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
@@ -3633,26 +3679,42 @@ impl App {
         self.popup = Popup::Shortcuts {
             entries: self.shortcuts.entries.clone(),
             cursor: 0,
+            path: Vec::new(),
         };
     }
 
-    fn start_shortcut_add(&mut self) {
-        self.popup = text_input(
-                "new shortcut — name",
-                "name:",
-                String::new(),
-                InputKind::ShortcutName { editing_index: None },
-            );
+    /// Re-open the shortcuts popup at `path`/`cursor` from the saved store (used
+    /// after an add/edit/delete so the view reflects the change).
+    fn reopen_shortcuts(&mut self, path: Vec<usize>, cursor: usize) {
+        let n = sc_level(&self.shortcuts.entries, &path).len();
+        self.popup = Popup::Shortcuts {
+            entries: self.shortcuts.entries.clone(),
+            cursor: cursor.min(n.saturating_sub(1)),
+            path,
+        };
     }
 
-    fn start_shortcut_edit(&mut self, idx: usize) {
-        let Some(s) = self.shortcuts.entries.get(idx).cloned() else { return };
+    /// Prompt for a new shortcut's name in the group at `path`. `group` makes a
+    /// folder (name only, no target step).
+    fn start_shortcut_add(&mut self, path: Vec<usize>, group: bool) {
+        let title = if group { "new folder — name" } else { "new shortcut — name" };
         self.popup = text_input(
-                "edit shortcut — name",
-                "name:",
-                s.name,
-                InputKind::ShortcutName { editing_index: Some(idx) },
-            );
+            title,
+            "name:",
+            String::new(),
+            InputKind::ShortcutName { path, edit_idx: None, group },
+        );
+    }
+
+    fn start_shortcut_edit(&mut self, path: Vec<usize>, idx: usize) {
+        let Some(s) = sc_level(&self.shortcuts.entries, &path).get(idx).cloned() else { return };
+        let group = s.is_group();
+        self.popup = text_input(
+            "edit shortcut — name",
+            "name:",
+            s.name,
+            InputKind::ShortcutName { path, edit_idx: Some(idx), group },
+        );
     }
 
     fn copy_paths_to_clipboard(&mut self) {
@@ -3690,21 +3752,26 @@ impl App {
         }
     }
 
-    fn copy_shortcut_target_to_clipboard(&mut self, idx: usize) {
-        let Some(entry) = self.shortcuts.entries.get(idx).cloned() else { return };
+    fn copy_shortcut_target_to_clipboard(&mut self, path: &[usize], idx: usize) {
+        let Some(entry) = sc_level(&self.shortcuts.entries, path).get(idx).cloned() else { return };
+        let target = entry.target_str().to_string();
         let Some(cb) = self.clipboard.as_mut() else {
             self.message = Some("clipboard unavailable".into());
             return;
         };
-        match cb.set_text(entry.target.clone()) {
-            Ok(()) => self.message = Some(format!("◂ copied: {}", truncate(&entry.target, 50))),
+        match cb.set_text(target.clone()) {
+            Ok(()) => self.message = Some(format!("◂ copied: {}", truncate(&target, 50))),
             Err(e) => self.message = Some(format!("clipboard error: {}", e)),
         }
     }
 
-    fn execute_shortcut(&mut self, idx: usize) -> Result<()> {
-        let Some(entry) = self.shortcuts.entries.get(idx).cloned() else { return Ok(()) };
-        let target = entry.target.clone();
+    fn execute_shortcut(&mut self, path: &[usize], idx: usize) -> Result<()> {
+        let Some(entry) = sc_level(&self.shortcuts.entries, path).get(idx).cloned() else { return Ok(()) };
+        // Groups are descended in the key handler, not executed.
+        if entry.is_group() {
+            return Ok(());
+        }
+        let target = entry.target_str().to_string();
 
         // URL?
         if target.starts_with("http://")
@@ -5317,14 +5384,23 @@ impl App {
                 }
                 return Ok(());
             }
-            InputKind::ShortcutName { editing_index } => {
-                // chain into the next step: target input. A new shortcut
-                // defaults to the entry under the cursor, which is what you
-                // are almost always bookmarking — and saves typing a path that
-                // is already on screen.
-                // A target chosen elsewhere (the history list) wins; otherwise
-                // default to the entry under the cursor, which is what you are
-                // almost always bookmarking.
+            InputKind::ShortcutName { path, edit_idx, group } => {
+                if *group {
+                    // A folder needs no target: create/rename it and reopen.
+                    let p = path.clone();
+                    if let Some(lvl) = sc_level_mut(&mut self.shortcuts.entries, &p) {
+                        match edit_idx {
+                            Some(i) if *i < lvl.len() => lvl[*i].name = name,
+                            _ => lvl.push(Shortcut::group(name)),
+                        }
+                    }
+                    let cursor = edit_idx.unwrap_or(sc_level(&self.shortcuts.entries, &p).len().saturating_sub(1));
+                    let _ = self.shortcuts.save();
+                    self.reopen_shortcuts(p, cursor);
+                    return Ok(());
+                }
+                // A leaf chains into the target step. New shortcuts default to a
+                // target picked elsewhere (history) or the entry under the cursor.
                 let here = self
                     .pending_shortcut_target
                     .take()
@@ -5333,32 +5409,45 @@ impl App {
                             .and_then(|p| p.selected().map(|e| e.path.display().to_string()))
                     })
                     .unwrap_or_default();
-                let prev_target = editing_index
-                    .and_then(|i| self.shortcuts.entries.get(i).map(|s| s.target.clone()))
+                let prev_target = edit_idx
+                    .and_then(|i| sc_level(&self.shortcuts.entries, path).get(i).map(|s| s.target_str().to_string()))
+                    .filter(|t| !t.is_empty())
                     .unwrap_or(here);
                 self.popup = text_input(
                     "shortcut — target",
                     "URL / path / app   (Ctrl+V paste, Ctrl+U clear):",
                     prev_target,
-                    InputKind::ShortcutTarget { editing_index: *editing_index, name },
+                    InputKind::ShortcutTarget { path: path.clone(), edit_idx: *edit_idx, name },
                 );
                 return Ok(());
             }
-            InputKind::ShortcutTarget { editing_index, name: stored_name } => {
+            InputKind::ShortcutTarget { path, edit_idx, name: stored_name } => {
                 let target = name; // `name` here is actually the trimmed buffer
                 if target.is_empty() {
                     self.message = Some("cancelled (empty target)".into());
                     return Ok(());
                 }
-                let entry = Shortcut { name: stored_name.clone(), target };
-                match editing_index {
-                    Some(i) => {
-                        if let Some(s) = self.shortcuts.entries.get_mut(*i) { *s = entry; }
+                let entry = Shortcut::leaf(stored_name.clone(), target);
+                let p = path.clone();
+                let cursor = if let Some(lvl) = sc_level_mut(&mut self.shortcuts.entries, &p) {
+                    match edit_idx {
+                        Some(i) if *i < lvl.len() => {
+                            lvl[*i] = entry;
+                            *i
+                        }
+                        _ => {
+                            lvl.push(entry);
+                            lvl.len() - 1
+                        }
                     }
-                    None => self.shortcuts.entries.push(entry),
-                }
+                } else {
+                    0
+                };
                 match self.shortcuts.save() {
-                    Ok(()) => self.message = Some("shortcut saved".into()),
+                    Ok(()) => {
+                        self.message = Some("shortcut saved".into());
+                        self.reopen_shortcuts(p, cursor);
+                    }
                     Err(e) => self.popup = Popup::Notice { lines: vec![format!("save failed: {}", e)] },
                 }
                 return Ok(());
@@ -7067,62 +7156,87 @@ impl App {
                     self.popup = Popup::None;
                     if let Some(t) = target {
                         self.pending_shortcut_target = Some(t);
-                        self.start_shortcut_add();
+                        self.start_shortcut_add(Vec::new(), false);
                     }
                     return Ok(());
                 }
                 _ => return Ok(()),
             }
         }
-        if let Popup::Shortcuts { cursor, entries } = &mut self.popup {
+        if let Popup::Shortcuts { cursor, entries, path } = &mut self.popup {
+            let level = sc_level(entries, path);
+            let n = level.len();
+            let cur_is_group = level.get(*cursor).map(|s| s.is_group()).unwrap_or(false);
             match key.code {
-                KeyCode::Esc => { self.popup = Popup::None; return Ok(()); }
-                KeyCode::Enter => {
-                    let idx = *cursor;
-                    self.popup = Popup::None;
-                    return self.execute_shortcut(idx);
+                // Esc / q / ← climb out of a group, or close at the top.
+                KeyCode::Esc | KeyCode::Char('q') | KeyCode::Left | KeyCode::Char('h') => {
+                    if path.pop().is_some() {
+                        *cursor = 0;
+                    } else {
+                        self.popup = Popup::None;
+                    }
+                }
+                // Enter/→ descend into a group; Enter on a leaf runs it.
+                KeyCode::Enter | KeyCode::Right | KeyCode::Char('l') => {
+                    if n == 0 {
+                        return Ok(());
+                    }
+                    if cur_is_group {
+                        path.push(*cursor);
+                        *cursor = 0;
+                    } else if key.code == KeyCode::Enter {
+                        let (p, idx) = (path.clone(), *cursor);
+                        self.popup = Popup::None;
+                        return self.execute_shortcut(&p, idx);
+                    }
                 }
                 KeyCode::Char('j') | KeyCode::Down => {
-                    if !entries.is_empty() && *cursor + 1 < entries.len() { *cursor += 1; }
-                    return Ok(());
+                    if n > 0 && *cursor + 1 < n {
+                        *cursor += 1;
+                    }
                 }
                 KeyCode::Char('k') | KeyCode::Up => {
-                    if *cursor > 0 { *cursor -= 1; }
-                    return Ok(());
+                    *cursor = cursor.saturating_sub(1);
                 }
+                // `a` adds a shortcut in this group; `A` adds a subfolder. The
+                // uppercase char is the signal — the SHIFT modifier bit is not
+                // reliably reported for letters across terminals.
                 KeyCode::Char('a') => {
+                    let p = path.clone();
                     self.popup = Popup::None;
-                    self.start_shortcut_add();
-                    return Ok(());
+                    self.start_shortcut_add(p, false);
+                }
+                KeyCode::Char('A') => {
+                    let p = path.clone();
+                    self.popup = Popup::None;
+                    self.start_shortcut_add(p, true);
                 }
                 KeyCode::Char('d') => {
-                    if !entries.is_empty() {
-                        let idx = *cursor;
-                        entries.remove(idx);
-                        self.shortcuts.entries = entries.clone();
+                    if n > 0 {
+                        let (p, idx) = (path.clone(), *cursor);
+                        if let Some(lvl) = sc_level_mut(&mut self.shortcuts.entries, &p) {
+                            if idx < lvl.len() {
+                                lvl.remove(idx);
+                            }
+                        }
                         let _ = self.shortcuts.save();
-                        if *cursor >= entries.len() && *cursor > 0 { *cursor -= 1; }
-                        if entries.is_empty() { self.popup = Popup::None; }
+                        self.reopen_shortcuts(p, idx);
                     }
-                    return Ok(());
                 }
                 KeyCode::Char('r') => {
-                    if !entries.is_empty() {
-                        let idx = *cursor;
+                    if n > 0 {
+                        let (p, idx) = (path.clone(), *cursor);
                         self.popup = Popup::None;
-                        self.start_shortcut_edit(idx);
+                        self.start_shortcut_edit(p, idx);
                     }
-                    return Ok(());
                 }
-                KeyCode::Char('p') => {
-                    if !entries.is_empty() {
-                        let idx = *cursor;
-                        self.copy_shortcut_target_to_clipboard(idx);
-                    }
-                    return Ok(());
+                KeyCode::Char('p') if n > 0 && !cur_is_group => {
+                    let (p, idx) = (path.clone(), *cursor);
+                    self.copy_shortcut_target_to_clipboard(&p, idx);
                 }
-                _ => return Ok(()),
+                _ => {}
             }
+            return Ok(());
         }
         if matches!(self.popup, Popup::ConfirmQuit) {
             match key.code {
@@ -10771,18 +10885,29 @@ fn draw_popup(
         return;
     }
 
-    if let Popup::Shortcuts { entries, cursor } = popup {
+    if let Popup::Shortcuts { entries, cursor, path } = popup {
+        let level = sc_level(entries, path);
         // Wide, because these are paths and URLs; the generic 70-column popup
         // wrapped them across lines, which made the list unreadable.
         let w = 96u16.min(area.width.saturating_sub(2));
-        let h = (entries.len() as u16 + 5).max(8).min(area.height.saturating_sub(2));
+        let h = (level.len() as u16 + 5).max(8).min(area.height.saturating_sub(2));
         let rect = centered_rect(w, h, area);
         f.render_widget(Clear, rect);
+        // Breadcrumb of the current group path in the title.
+        let mut crumb = String::new();
+        let mut walk: &[Shortcut] = entries;
+        for &i in path.iter() {
+            if let Some(s) = walk.get(i) {
+                crumb.push_str(&format!(" / {}", s.name));
+                walk = s.children.as_deref().unwrap_or(&[]);
+            }
+        }
+        let title = format!("{}{} ", tr(lang, " shortcuts", " ショートカット"), crumb);
         let block = Block::default()
             .borders(Borders::ALL)
             .border_type(border_type())
             .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
-            .title(tr(lang, " shortcuts ", " ショートカット "));
+            .title(title);
         let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
         f.render_widget(block, rect);
 
@@ -10790,14 +10915,14 @@ fn draw_popup(
         let footer_area =
             Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1);
 
-        if entries.is_empty() {
+        if level.is_empty() {
             let hint = vec![
                 Line::from(Span::styled(
-                    "(no shortcuts yet)",
+                    tr(lang, "(empty)", "（空）"),
                     Style::default().fg(Color::Rgb(150, 150, 170)),
                 )),
                 Line::from(""),
-                Line::from("Press `a` to add one. Targets can be URLs, paths, or apps."),
+                Line::from(tr(lang, "a = add a shortcut,  A = add a folder.", "a = ショートカット追加,  A = フォルダ追加。")),
             ];
             f.render_widget(
                 Paragraph::new(hint),
@@ -10806,7 +10931,7 @@ fn draw_popup(
         } else {
             // Name column sized to the longest name, within reason, so the
             // targets line up in a column of their own.
-            let name_w = entries
+            let name_w = level
                 .iter()
                 .map(|s| width(&s.name))
                 .max()
@@ -10817,7 +10942,7 @@ fn draw_popup(
             // Keep the selected row visible once the list outgrows the popup.
             let view = body_h as usize;
             let first = cursor.saturating_sub(view.saturating_sub(1));
-            for (row, (i, sc)) in entries.iter().enumerate().skip(first).take(view).enumerate() {
+            for (row, (i, sc)) in level.iter().enumerate().skip(first).take(view).enumerate() {
                 let sel = i == *cursor;
                 let y = inner.y + row as u16;
                 let line_area = Rect::new(inner.x, y, inner.width, 1);
@@ -10843,22 +10968,28 @@ fn draw_popup(
                 // The target is reference material: same row, quieter, so the
                 // name is what the eye lands on.
                 let target_style = base.fg(Color::Rgb(140, 140, 165));
+                // A folder shows a ▸ and its child count instead of a target.
+                let (icon, tail) = if sc.is_group() {
+                    ("▸".to_string(), format!("{} items", sc.children.as_ref().map(|c| c.len()).unwrap_or(0)))
+                } else {
+                    (shortcut_icon(sc.target_str()).to_string(), truncate_middle(sc.target_str(), target_w))
+                };
                 f.render_widget(
                     Paragraph::new(Line::from(vec![
                         Span::styled(if sel { " ▸ " } else { "   " }, name_style),
-                        Span::styled(format!("{}  ", shortcut_icon(&sc.target)), base),
+                        Span::styled(format!("{}  ", icon), base),
                         Span::styled(
                             format!("{}  ", pad_to(&truncate_middle(&sc.name, name_w), name_w)),
                             name_style,
                         ),
-                        Span::styled(truncate_middle(&sc.target, target_w), target_style),
+                        Span::styled(tail, target_style),
                     ])),
                     line_area,
                 );
             }
         }
         f.render_widget(
-            Paragraph::new(tr(lang, " Enter=open  a=add  d=delete  r=edit  p=copy target  Esc=close ", " Enter=開く  a=追加  d=削除  r=編集  p=対象コピー  Esc=閉じる "))
+            Paragraph::new(tr(lang, " Enter=open/into  a=add  A=folder  d=del  r=edit  ←=back  Esc ", " Enter=開く/入る  a=追加  A=フォルダ  d=削除  r=編集  ←=戻る  Esc "))
                 .style(
                     Style::default()
                         .fg(Color::Black)
@@ -11890,8 +12021,8 @@ mod tests {
         let path = dir.path().join("shortcuts.yaml");
         let store = ShortcutStore {
             entries: vec![
-                Shortcut { name: "home".into(), target: "~/".into() },
-                Shortcut { name: "docs".into(), target: "https://example.com".into() },
+                Shortcut::leaf("home".into(), "~/".into()),
+                Shortcut::leaf("docs".into(), "https://example.com".into()),
             ],
             path: path.clone(),
         };
@@ -11907,7 +12038,7 @@ mod tests {
         // A pre-existing TOML file must still parse, so migration keeps entries.
         let legacy = "[[shortcuts]]\nname = \"srv\"\ntarget = \"/srv\"\n";
         let parsed: ShortcutsFile = toml::from_str(legacy).unwrap();
-        assert_eq!(parsed.shortcuts[0].target, "/srv");
+        assert_eq!(parsed.shortcuts[0].target.as_deref(), Some("/srv"));
     }
 
     #[test]
@@ -13824,7 +13955,7 @@ mod tests {
     #[test]
     fn unbound_ctrl_keys_do_not_type_their_letter_into_a_text_field() {
         let (_d, mut app) = app_with(&["a.txt"]);
-        app.start_shortcut_add();
+        app.start_shortcut_add(Vec::new(), false);
         app.handle_key(key('w')).unwrap();
         for c in ['x', 'a', 'k'] {
             app.handle_key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL)).unwrap();
@@ -13836,7 +13967,7 @@ mod tests {
     #[test]
     fn ctrl_u_clears_the_field() {
         let (_d, mut app) = app_with(&["a.txt"]);
-        app.start_shortcut_add();
+        app.start_shortcut_add(Vec::new(), false);
         for c in "typo".chars() {
             app.handle_key(key(c)).unwrap();
         }
@@ -13855,7 +13986,7 @@ mod tests {
         }
         let expected = app.active_pane().unwrap().selected().unwrap().path.clone();
 
-        app.start_shortcut_add();
+        app.start_shortcut_add(Vec::new(), false);
         for c in "mine".chars() {
             app.handle_key(key(c)).unwrap();
         }
@@ -13864,6 +13995,62 @@ mod tests {
         let Popup::TextInput { buffer, kind, .. } = &app.popup else { panic!("no target step") };
         assert!(matches!(kind, InputKind::ShortcutTarget { .. }));
         assert_eq!(buffer, &expected.display().to_string());
+    }
+
+    /// `A` makes a folder in the current level; Enter steps in; `A` again nests;
+    /// Esc/← climbs back out. The tree is what gets saved.
+    #[test]
+    fn shortcuts_menu_creates_and_navigates_nested_folders() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        // Bookmarks live in a temp dir so the test never touches the real config,
+        // and start empty so indices are predictable regardless of the dev's own.
+        let sd = tempfile::tempdir().unwrap();
+        app.shortcuts.path = sd.path().join("shortcuts.yaml");
+        app.shortcuts.entries.clear();
+
+        // Open the menu and add a top-level folder "Projects" with `A`.
+        app.start_shortcuts();
+        app.handle_key(key('A')).unwrap();
+        for c in "Projects".chars() {
+            app.handle_key(key(c)).unwrap();
+        }
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+
+        // Back in the menu, the folder is there; step into it with Enter.
+        assert!(matches!(&app.popup, Popup::Shortcuts { path, .. } if path.is_empty()));
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+        let Popup::Shortcuts { path, .. } = &app.popup else { panic!("menu closed") };
+        assert_eq!(path, &vec![0], "stepped into the folder");
+
+        // Add a leaf shortcut inside it: name then target.
+        app.handle_key(key('a')).unwrap();
+        for c in "cian".chars() {
+            app.handle_key(key(c)).unwrap();
+        }
+        app.handle_key(code(KeyCode::Enter)).unwrap(); // name -> target step
+        // Clear the auto-filled target and type our own.
+        app.handle_key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL)).unwrap();
+        for c in "~/workspace/cian".chars() {
+            app.handle_key(key(c)).unwrap();
+        }
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+
+        // The store now holds Projects/cian.
+        assert_eq!(app.shortcuts.entries.len(), 1);
+        let projects = &app.shortcuts.entries[0];
+        assert_eq!(projects.name, "Projects");
+        assert!(projects.is_group());
+        let kids = projects.children.as_ref().unwrap();
+        assert_eq!(kids.len(), 1);
+        assert_eq!(kids[0].name, "cian");
+        assert_eq!(kids[0].target.as_deref(), Some("~/workspace/cian"));
+
+        // Esc climbs back to the top rather than closing.
+        assert!(matches!(&app.popup, Popup::Shortcuts { path, .. } if path == &vec![0]));
+        app.handle_key(code(KeyCode::Esc)).unwrap();
+        assert!(matches!(&app.popup, Popup::Shortcuts { path, .. } if path.is_empty()));
+        app.handle_key(code(KeyCode::Esc)).unwrap();
+        assert!(matches!(app.popup, Popup::None), "Esc at the top closes the menu");
     }
 
     /// Wait for the search worker to finish, draining as it goes.
