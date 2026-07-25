@@ -753,6 +753,11 @@ enum PendingKind {
 }
 
 impl ShellPane {
+    /// The configured shell program (path/name), for prompts that need it.
+    fn command(&self) -> &str {
+        &self.shell_cmd
+    }
+
     fn new(shell_cmd: String) -> Self {
         Self {
             tabs: Vec::new(),
@@ -1169,6 +1174,9 @@ enum Popup {
     Shortcuts { entries: Vec<Shortcut>, cursor: usize },
     ConfirmQuit,
     ConfirmClose { target: CloseTarget },
+    /// An AI-generated shell command awaiting review before it goes to the
+    /// prompt (never auto-run).
+    AiShellConfirm { command: String },
     /// The AI chat: a transcript, an input line, and whether a reply is pending.
     /// `sel` is a selected range of wrapped transcript lines `(anchor, cursor)`,
     /// for copying, mirroring the F3 viewer's line selection.
@@ -1202,6 +1210,19 @@ enum ViewVisual {
     Line,
     /// `Ctrl-v`: block-wise, the rectangle of columns between them.
     Block,
+}
+
+/// Clean an AI-generated shell command: drop ``` fences and surrounding
+/// backticks, and take the first non-empty line (models sometimes add prose).
+fn clean_ai_command(raw: &str) -> String {
+    for line in raw.lines() {
+        let t = line.trim();
+        if t.is_empty() || t.starts_with("```") {
+            continue;
+        }
+        return t.trim_matches('`').trim().to_string();
+    }
+    String::new()
 }
 
 /// Shell-style wildcard match: `*` matches any run, `?` any one char.
@@ -1559,6 +1580,10 @@ enum MenuItem {
     Encoding,
     /// Toggle the interface language (English ↔ Japanese).
     Lang,
+    /// Open the AI chat.
+    AiChat,
+    /// Generate a shell command from a description (shell pane).
+    AiShellCmd,
     Quit,
     Manual,
 }
@@ -1592,6 +1617,8 @@ impl MenuItem {
                 Lang::En => "日本語に切替",
                 Lang::Ja => "Switch to English",
             },
+            MenuItem::AiChat => tr(lang, "AI: chat…", "AI: チャット…"),
+            MenuItem::AiShellCmd => tr(lang, "AI: command from description…", "AI: 説明からコマンド生成…"),
             MenuItem::Manual => tr(lang, "Key manual  (?)", "キー一覧  (?)"),
         }
     }
@@ -1706,10 +1733,21 @@ enum FindMsg {
     Done(cian_core::search::Outcome),
 }
 
-/// A pending AI chat request; the worker sends the assistant's reply (or an
-/// error message) back over the channel.
+/// What a finished AI reply should be used for, so one job plumbing serves
+/// every AI feature.
+#[derive(Debug, Clone)]
+enum AiPurpose {
+    /// Append to the chat transcript.
+    Chat,
+    /// A shell command to review and insert at the prompt.
+    ShellCommand,
+}
+
+/// A pending AI request; the worker sends the assistant's reply (or an error
+/// message) back over the channel, tagged with what to do with it.
 struct AiJob {
     rx: std::sync::mpsc::Receiver<Result<String, String>>,
+    purpose: AiPurpose,
 }
 
 /// One line of an AI chat transcript.
@@ -1796,6 +1834,8 @@ enum InputKind {
     LogDir,
     /// The remote path for a pending SFTP transfer (details on `App`).
     ScpRemote,
+    /// A natural-language description to turn into a shell command via AI.
+    AiShellCmd,
 }
 
 impl InputKind {
@@ -2441,6 +2481,13 @@ impl App {
             "menu" => self.open_menu_at_cursor(),
             "ssh" => self.start_ssh(),
             "ai" | "chat" => self.open_ai_chat(),
+            "aicmd" => {
+                if rest.is_empty() {
+                    self.start_ai_shell_prompt();
+                } else {
+                    self.start_ai_shell_cmd(rest);
+                }
+            }
             "reload" | "source" => self.reload_config(),
             // Mark / unmark entries whose name matches a glob (`:mark *.rs`).
             "mark" | "select" => self.cmd_mark(rest, true),
@@ -3994,6 +4041,19 @@ impl App {
         true
     }
 
+    /// Type an AI-suggested command at the shell prompt WITHOUT running it —
+    /// the user reviews it and presses Enter. Focuses the shell.
+    fn insert_ai_command_at_prompt(&mut self, cmd: &str) {
+        let cwd = self.shell_cwd();
+        self.shell.ensure(&cwd);
+        self.focus(FocusedPane::Shell);
+        match self.shell.active_session_mut() {
+            Some(s) => s.write_input(cmd.as_bytes()),
+            None => self.pending_shell_input = Some(cmd.to_string()),
+        }
+        self.message = Some("command at prompt — review and press Enter".into());
+    }
+
     /// Send a command line to the shell panel, starting the shell if needed.
     fn run_in_shell(&mut self, mut cmd: String) {
         cmd.push('\n');
@@ -4670,27 +4730,84 @@ impl App {
         };
     }
 
-    /// Send the typed line to the model on a worker thread.
-    fn send_ai_message(&mut self) {
+    /// Fire an AI request on a worker thread, tagged with what to do with the
+    /// reply. Only one runs at a time.
+    fn ai_request(&mut self, purpose: AiPurpose, system: String, user: String) {
         let Some(cfg) = self.ai.clone() else { return };
-        let Popup::AiChat { input, log, pending, scroll, .. } = &mut self.popup else { return };
-        let question = input.trim().to_string();
-        if question.is_empty() || *pending {
+        if self.ai_job.is_some() {
+            self.message = Some("AI is busy".into());
             return;
         }
-        input.clear();
-        log.push(ChatMsg { user: true, text: question.clone() });
-        *pending = true;
-        *scroll = usize::MAX;
-        // A short system prompt keeps replies terminal-friendly.
-        let system = "You are a concise assistant embedded in a terminal file \
-                      manager. Answer briefly in plain text.";
         let (tx, rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
-            let r = cian_ai::chat(&cfg, system, &question).map_err(|e| e.to_string());
+            let r = cian_ai::chat(&cfg, &system, &user).map_err(|e| e.to_string());
             let _ = tx.send(r);
         });
-        self.ai_job = Some(AiJob { rx });
+        self.ai_job = Some(AiJob { rx, purpose });
+    }
+
+    /// Send the typed chat line to the model.
+    fn send_ai_message(&mut self) {
+        let question = if let Popup::AiChat { input, log, pending, scroll, .. } = &mut self.popup {
+            let q = input.trim().to_string();
+            if q.is_empty() || *pending {
+                return;
+            }
+            input.clear();
+            log.push(ChatMsg { user: true, text: q.clone() });
+            *pending = true;
+            *scroll = usize::MAX;
+            q
+        } else {
+            return;
+        };
+        let system = "You are a concise assistant embedded in a terminal file \
+                      manager. Answer briefly in plain text."
+            .to_string();
+        self.ai_request(AiPurpose::Chat, system, question);
+    }
+
+    /// Open the "describe a command" prompt (if AI is available).
+    fn start_ai_shell_prompt(&mut self) {
+        if self.ai.is_none() {
+            self.message = Some("AI not configured — add cian.ai{...} to init.lua".into());
+            return;
+        }
+        if !self.ai_ready() {
+            self.message = Some("AI unavailable (python, packages, or sign-in)".into());
+            return;
+        }
+        self.popup = text_input(
+            "AI shell command",
+            "describe what you want to do:",
+            String::new(),
+            InputKind::AiShellCmd,
+        );
+    }
+
+    /// Ask the model for a shell command that does what `description` says, then
+    /// show it for review before it touches the prompt.
+    fn start_ai_shell_cmd(&mut self, description: &str) {
+        let description = description.trim().to_string();
+        if description.is_empty() {
+            return;
+        }
+        let shell = self.shell_cmd_name();
+        let os = if cfg!(windows) { "Windows" } else if cfg!(target_os = "macos") { "macOS" } else { "Linux" };
+        let system = format!(
+            "You translate a request into ONE shell command for {shell} on {os}. \
+             Output ONLY the command — no explanation, no markdown, no code fences.",
+        );
+        self.message = Some("asking AI for a command…".into());
+        self.ai_request(AiPurpose::ShellCommand, system, description);
+    }
+
+    /// The shell program's base name, for the command-generation prompt.
+    fn shell_cmd_name(&self) -> String {
+        std::path::Path::new(self.shell.command())
+            .file_name()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "sh".into())
     }
 
     /// Copy the chat: the selected transcript lines if a range is selected,
@@ -4725,12 +4842,17 @@ impl App {
         }
     }
 
-    /// Drain the AI worker; append the reply (or an error) when it lands.
+    /// Drain the AI worker and route the reply by its purpose.
     fn poll_ai_job(&mut self) -> bool {
         let Some(job) = &self.ai_job else { return false };
-        match job.rx.try_recv() {
-            Ok(result) => {
-                self.ai_job = None;
+        let result = match job.rx.try_recv() {
+            Ok(r) => r,
+            Err(std::sync::mpsc::TryRecvError::Empty) => return false,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => Err("AI worker died".to_string()),
+        };
+        let purpose = self.ai_job.take().map(|j| j.purpose).unwrap_or(AiPurpose::Chat);
+        match purpose {
+            AiPurpose::Chat => {
                 if let Popup::AiChat { log, pending, scroll, .. } = &mut self.popup {
                     *pending = false;
                     *scroll = usize::MAX;
@@ -4739,17 +4861,20 @@ impl App {
                         Err(e) => log.push(ChatMsg { user: false, text: format!("[error] {}", e) }),
                     }
                 }
-                true
             }
-            Err(std::sync::mpsc::TryRecvError::Empty) => false,
-            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                self.ai_job = None;
-                if let Popup::AiChat { pending, .. } = &mut self.popup {
-                    *pending = false;
+            AiPurpose::ShellCommand => match result {
+                Ok(text) => {
+                    let command = clean_ai_command(&text);
+                    if command.is_empty() {
+                        self.message = Some("AI returned no command".into());
+                    } else {
+                        self.popup = Popup::AiShellConfirm { command };
+                    }
                 }
-                true
-            }
+                Err(e) => self.message = Some(format!("AI: {}", e)),
+            },
         }
+        true
     }
 
     /// Re-read `init.lua` and apply everything that can change without a
@@ -5115,6 +5240,10 @@ impl App {
             }
             InputKind::GrepRecursive => {
                 self.start_find(&name, cian_core::search::Mode::Content);
+                return Ok(());
+            }
+            InputKind::AiShellCmd => {
+                self.start_ai_shell_cmd(&name);
                 return Ok(());
             }
             InputKind::DestPath { op, targets } => {
@@ -6025,6 +6154,9 @@ impl App {
     }
 
     fn open_context_menu(&mut self, col: u16, row: u16) {
+        // Whether the AI helper is usable, checked (and cached) up front so the
+        // AI entries only appear when they will work.
+        let ai = self.ai.is_some() && self.ai_ready();
         let mut items = Vec::new();
         if self.focused == FocusedPane::Shell {
             // A PTY owns its own screen, so the file operations make no sense
@@ -6048,6 +6180,10 @@ impl App {
                 items.push(MenuItem::ScpDownload);
             }
             items.push(MenuItem::Background);
+            if ai {
+                items.push(MenuItem::AiShellCmd);
+                items.push(MenuItem::AiChat);
+            }
         } else {
             items.push(MenuItem::Copy);
             items.push(MenuItem::Cut);
@@ -6070,6 +6206,9 @@ impl App {
             }
             items.push(MenuItem::Ssh);
             items.push(MenuItem::Background);
+            if ai {
+                items.push(MenuItem::AiChat);
+            }
         }
         // Language toggle, quit and the manual are in every menu, so all are
         // reachable by mouse alone (quitting otherwise needs `q`, which the
@@ -6174,6 +6313,8 @@ impl App {
             MenuItem::ScpDownload => self.start_scp(ScpDir::Download),
             MenuItem::StartLog => self.start_log_prompt(),
             MenuItem::StopLog => self.stop_session_log(),
+            MenuItem::AiChat => self.open_ai_chat(),
+            MenuItem::AiShellCmd => self.start_ai_shell_prompt(),
             MenuItem::Lang => {
                 // Flip the interface language; every localized string reads
                 // `self.lang` at draw time, so the next frame is fully in the
@@ -6926,6 +7067,18 @@ impl App {
             match key.code {
                 KeyCode::Char('y') | KeyCode::Enter => self.run_elevated_transfer(),
                 KeyCode::Char('n') | KeyCode::Esc => { self.popup = Popup::None; }
+                _ => {}
+            }
+            return Ok(());
+        }
+        if let Popup::AiShellConfirm { command } = &self.popup {
+            match key.code {
+                KeyCode::Char('y') | KeyCode::Enter => {
+                    let cmd = command.clone();
+                    self.popup = Popup::None;
+                    self.insert_ai_command_at_prompt(&cmd);
+                }
+                KeyCode::Char('n') | KeyCode::Esc => self.popup = Popup::None,
                 _ => {}
             }
             return Ok(());
@@ -8206,6 +8359,7 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry(":reload", None, "re-read init.lua (theme/border need a restart)", "init.luaを再読込（テーマ/枠は再起動が必要）"),
                 entry(":mark", None, "mark by wildcard;  :mark *.rs   :unmark *", "ワイルドカードでマーク；  :mark *.rs   :unmark *"),
                 entry(":ai", None, "AI chat  (needs cian.ai in init.lua)", "AIチャット  (init.luaのcian.aiが必要)"),
+                entry(":aicmd", None, "AI: shell command from a description", "AI: 説明からシェルコマンド生成"),
                 entry(":zip", None, "bundle selection;  :zip -e  for a password", "選択物をまとめる；  :zip -e でパスワード付き"),
                 entry(":!cmd", None, "run in shell;  % = selection, %f file, %d dir", "シェルで実行；  % =選択, %f ファイル, %d ディレクトリ"),
             ],
@@ -11406,6 +11560,17 @@ fn draw_popup(
                 tr(lang, " y / Enter = yes   n / Esc = no ", " y / Enter = はい   n / Esc = いいえ ").to_string(),
             )
         }
+        Popup::AiShellConfirm { command } => {
+            (
+                tr(lang, " AI command ", " AI コマンド ").to_string(),
+                vec![
+                    tr(lang, "Insert this command at the shell prompt?", "このコマンドをシェルのプロンプトに入力しますか？").to_string(),
+                    String::new(),
+                    format!("  {}", command),
+                ],
+                tr(lang, " y/Enter = insert   n/Esc = cancel ", " y/Enter = 入力   n/Esc = 取消 ").to_string(),
+            )
+        }
         Popup::ConfirmElevate { op, targets, dest } => {
             let verb = match (op, lang) {
                 (PendingOp::Copy, Lang::Ja) => "コピー",
@@ -11504,6 +11669,10 @@ fn draw_popup(
         ],
         Popup::ConfirmElevate { .. } => vec![
             (tr(lang, "Retry as admin", "管理者として再試行"), ZoneKind::Enter),
+            (tr(lang, "Cancel", "取消"), ZoneKind::Esc),
+        ],
+        Popup::AiShellConfirm { .. } => vec![
+            (tr(lang, "Insert", "入力"), ZoneKind::Enter),
             (tr(lang, "Cancel", "取消"), ZoneKind::Esc),
         ],
         _ => vec![],
@@ -11726,6 +11895,50 @@ mod tests {
         // With no selection, it copies the last assistant reply.
         app.copy_ai_text();
         assert_eq!(app.message.as_deref(), Some("copied"));
+    }
+
+    #[test]
+    fn clean_ai_command_strips_fences_and_prose() {
+        assert_eq!(clean_ai_command("ls -la"), "ls -la");
+        assert_eq!(clean_ai_command("```sh\nls -la\n```"), "ls -la");
+        assert_eq!(clean_ai_command("`git status`"), "git status");
+        assert_eq!(clean_ai_command("\n\n  find . -name '*.log'  \n"), "find . -name '*.log'");
+    }
+
+    #[test]
+    fn ai_shell_command_flow_yields_a_confirm_popup() {
+        let have_py = std::process::Command::new("python3")
+            .arg("--version")
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false);
+        if !have_py {
+            eprintln!("no python3; skipping");
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().to_path_buf();
+        let mut config = cian_lua::Config::default();
+        config.ai = Some(cian_lua::AiOptions {
+            python: "python3".into(),
+            auth_mode: "mock".into(),
+            ..Default::default()
+        });
+        let mut app = App::new(p.clone(), p, config).unwrap();
+
+        app.start_ai_shell_cmd("compress the logs");
+        // Wait for the worker; the mock echoes the request as the "command".
+        let start = Instant::now();
+        while app.ai_job.is_some() && start.elapsed() < Duration::from_secs(10) {
+            app.poll_ai_job();
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        match &app.popup {
+            Popup::AiShellConfirm { command } => {
+                assert!(command.contains("compress the logs"), "got {command:?}");
+            }
+            other => panic!("expected the command-confirm popup, got {:?}", other),
+        }
     }
 
     #[test]
