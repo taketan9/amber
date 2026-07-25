@@ -237,8 +237,12 @@ The viewer is vim-flavoured: a cursor moves with `h`/`j`/`k`/`l`, `w`/`b`,
 `0`/`$`, `gg`/`G` and `Ctrl-d`/`Ctrl-u`; `/` searches (all matches highlighted,
 `n`/`N` step through them), `42G` jumps to a line, `%` to the matching bracket,
 `{`/`}` between paragraphs. `v` / `V` / `Ctrl-v` start character-, line- and
-block-wise visual selection, and `y` (or `c`) copies it. `Shift+Enter` switches
-the text encoding (UTF-8 / Shift_JIS / UTF-16) when a file was decoded wrong.
+block-wise visual selection, and `y` (or `c`) copies it. `e` switches the text
+encoding (UTF-8 / Shift_JIS / UTF-16) when a file was decoded wrong, and
+`Shift+Enter` reveals the file in the pane (jump to its folder, cursor on it).
+
+When the viewer was opened from a grep hit (below), `Ctrl+n` / `Ctrl+N` step to
+the next / previous hit's preview without going back to the list.
 
 On an archive — **zip** (also `.jar`, `.whl`, `.epub`) or a **tarball**
 (`.tar`, `.tar.gz`, `.tgz`) — it lists the members instead, with their unpacked

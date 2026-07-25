@@ -1094,6 +1094,8 @@ enum Popup {
     /// A file's contents, scrollable.
     Viewer {
         title: String,
+        /// The file on disk, so `Shift+Enter` can reveal it in the pane.
+        path: PathBuf,
         view: cian_core::viewer::View,
         /// First visible line.
         scroll: usize,
@@ -2852,7 +2854,14 @@ impl App {
         }
 
         // Shift+Enter re-decodes the same bytes under the next text encoding.
+        // Shift+Enter reveals the viewed file in the pane: jump there, cursor
+        // on it, and close the viewer.
         if key.code == KeyCode::Enter && shift {
+            self.viewer_reveal_in_pane();
+            return Ok(());
+        }
+        // `e` re-decodes the same bytes under the next text encoding.
+        if !ctrl && key.code == KeyCode::Char('e') {
             if let Popup::Viewer { view, visual, .. } = &mut self.popup {
                 let next = view.encoding.next();
                 view.redecode(next);
@@ -2872,7 +2881,14 @@ impl App {
             }
             return Ok(());
         }
-        // n / N jump to the next / previous match of the last search.
+        // Ctrl+n / Ctrl+N step to the next / previous grep hit's preview,
+        // without returning to the results list.
+        if ctrl && matches!(key.code, KeyCode::Char('n') | KeyCode::Char('N')) {
+            let forward = key.code == KeyCode::Char('n') && !shift;
+            self.viewer_grep_step(forward);
+            return Ok(());
+        }
+        // n / N jump to the next / previous match of the in-file search.
         if !ctrl && matches!(key.code, KeyCode::Char('n') | KeyCode::Char('N')) {
             let forward = key.code == KeyCode::Char('n');
             self.viewer_search_jump(forward);
@@ -3058,6 +3074,72 @@ impl App {
             self.message = Some("no search — press / first".into());
         } else if not_found {
             self.message = Some("no match".into());
+        }
+    }
+
+    /// Shift+Enter in the viewer: close it and move the active pane to the
+    /// viewed file's directory, cursor on the file.
+    fn viewer_reveal_in_pane(&mut self) {
+        let path = if let Popup::Viewer { path, .. } = &self.popup {
+            path.clone()
+        } else {
+            return;
+        };
+        let Some(dir) = path.parent().map(|p| p.to_path_buf()) else { return };
+        self.popup = Popup::None;
+        self.find_return = None;
+        self.stop_find();
+        if let Some(p) = self.active_pane_mut() {
+            if p.jump_to(dir).is_ok() {
+                if let Some(i) = p.entries.iter().position(|e| e.path == path) {
+                    p.cursor = i;
+                }
+            }
+        }
+        self.message = Some(format!("→ {}", path.display()));
+    }
+
+    /// Ctrl+n / Ctrl+N in the viewer: preview the next/previous grep hit
+    /// directly, keeping the stashed results in step. A no-op unless the viewer
+    /// was opened from a grep result.
+    fn viewer_grep_step(&mut self, forward: bool) {
+        let hit = {
+            let Some(back) = self.find_return.as_mut() else {
+                self.message = Some("not viewing a grep hit".into());
+                return;
+            };
+            let Popup::FindResults { hits, cursor, .. } = back.as_mut() else { return };
+            let n = hits.len();
+            if n == 0 {
+                return;
+            }
+            // Step to the next/previous hit that has a line (a content match).
+            let mut idx = *cursor;
+            let mut found = None;
+            for _ in 0..n {
+                idx = if forward { (idx + 1) % n } else { (idx + n - 1) % n };
+                if hits[idx].line.is_some() {
+                    found = Some(idx);
+                    break;
+                }
+            }
+            match found {
+                Some(i) => {
+                    *cursor = i;
+                    hits[i].clone()
+                }
+                None => return,
+            }
+        };
+        if let Some((lineno, _)) = &hit.line {
+            let name = hit
+                .path
+                .file_name()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_else(|| hit.rel.display().to_string());
+            // open_viewer_at replaces the popup but leaves `find_return` intact.
+            self.open_viewer_at(&hit.path, &name, lineno.saturating_sub(1));
+            self.message = Some(format!("{}  (Ctrl+n/N next/prev · Esc list)", hit.rel.display()));
         }
     }
 
@@ -3791,6 +3873,7 @@ impl App {
                 let line = line0.min(last);
                 self.popup = Popup::Viewer {
                     title: title.to_string(),
+                    path: path.to_path_buf(),
                     view,
                     scroll: line.saturating_sub(4), // show a little context above
                     line,
@@ -7554,7 +7637,8 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry("G", Some(CursorBottom), "jump to bottom", "末尾へジャンプ"),
                 entry("l, Enter", Some(EnterDir), "enter folder / open file", "フォルダに入る／ファイルを開く"),
                 entry("F3", None, "look inside: view a file, list an archive", "中身を見る：ファイル閲覧・書庫の一覧"),
-                entry("  in viewer", None, "hjkl move, /n/N search, %/{/} jump, NG line, v/V/C-v select, y copy", "ビューア内：hjkl移動, /n/N検索, %/{/}移動, NG行, v/V/C-v選択, yコピー"),
+                entry("  in viewer", None, "hjkl move, /n/N search, %/{/}/NG jump, v/V/C-v select y copy", "ビューア内：hjkl移動, /n/N検索, %/{/}/NG移動, v/V/C-v選択 yコピー"),
+                entry("  from a grep hit", None, "Ctrl+n/N next/prev hit, Shift+Enter reveal in pane, e encoding", "grepヒットから：Ctrl+n/N 次/前, Shift+Enter 場所へ, e 文字コード"),
                 entry("=", None, "compare left ↔ right: two files (line diff), or two folders (recursive)", "左右を比較：ファイル同士（行差分）／フォルダ同士（再帰）"),
                 entry("-, Bksp", Some(Parent), "parent folder", "親フォルダへ"),
                 entry("Left / Right", None, "focus the left / right pane", "左／右のペインにフォーカス"),
@@ -10205,8 +10289,8 @@ fn draw_popup(
             Some(q) => format!("/{}_", q),
             None => format!(
                 "{}{} ",
-                tr(lang, " / search  n/N next  v/V/C-v select  y copy  % bracket  { } para  NG  Esc   ",
-                    " / 検索  n/N 次へ  v/V/C-v 選択  y コピー  % 対応括弧  { } 段落  NG 行  Esc   "),
+                tr(lang, " / search  n/N  v/V select  y copy  % { }  C-n/N hit  S-Enter reveal  e enc  Esc   ",
+                    " / 検索  n/N  v/V 選択  y コピー  % { }  C-n/N 次ヒット  S-Enter 場所へ  e 文字コード  Esc   "),
                 pos
             ),
         };
@@ -13940,18 +14024,64 @@ mod tests {
     }
 
     #[test]
-    fn shift_enter_cycles_the_viewer_encoding() {
+    fn e_cycles_the_viewer_encoding() {
         let d = tempfile::tempdir().unwrap();
         // "日本語" in Shift_JIS: mojibake as UTF-8 until switched.
         std::fs::write(d.path().join("s.txt"), [0x93u8, 0xfa, 0x96, 0x7b, 0x8c, 0xea, b'\n']).unwrap();
         let p = d.path().to_path_buf();
         let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
         app.handle_key(code(KeyCode::F(3))).unwrap();
-        // Shift+Enter → Shift_JIS.
-        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::SHIFT)).unwrap();
+        // `e` → Shift_JIS.
+        app.handle_key(key('e')).unwrap();
         let Popup::Viewer { view, .. } = &app.popup else { panic!("no viewer") };
         assert_eq!(view.encoding, cian_core::viewer::TextEncoding::ShiftJis);
         assert_eq!(view.lines[0], "日本語");
+    }
+
+    #[test]
+    fn shift_enter_reveals_the_viewed_file_in_the_pane() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::create_dir(d.path().join("sub")).unwrap();
+        std::fs::write(d.path().join("sub").join("deep.txt"), "content\n").unwrap();
+        let p = d.path().to_path_buf();
+        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        // Open the file directly in the viewer, then Shift+Enter to reveal it.
+        app.open_viewer_at(&d.path().join("sub").join("deep.txt"), "deep.txt", 0);
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::SHIFT)).unwrap();
+        assert!(matches!(app.popup, Popup::None), "viewer closed");
+        let pane = app.active_pane().unwrap();
+        assert!(pane.cwd.ends_with("sub"), "pane moved into the file's dir: {:?}", pane.cwd);
+        assert_eq!(pane.selected().map(|e| e.name.as_str()), Some("deep.txt"));
+    }
+
+    #[test]
+    fn ctrl_n_steps_through_grep_hits_in_the_viewer() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::write(d.path().join("a.txt"), "NEEDLE one\n").unwrap();
+        std::fs::write(d.path().join("b.txt"), "two NEEDLE\n").unwrap();
+        let p = d.path().to_path_buf();
+        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        app.start_find("NEEDLE", cian_core::search::Mode::Content);
+        drain_find(&mut app);
+        // Sort of results is by rel path, so a.txt is first. Open it.
+        if let Popup::FindResults { cursor, .. } = &mut app.popup {
+            *cursor = 0;
+        }
+        app.open_find_hit().unwrap();
+        let first = match &app.popup {
+            Popup::Viewer { title, .. } => title.clone(),
+            _ => panic!("viewer"),
+        };
+        // Ctrl+n → the other file's hit.
+        app.handle_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::CONTROL)).unwrap();
+        let second = match &app.popup {
+            Popup::Viewer { title, .. } => title.clone(),
+            other => panic!("expected viewer, got {:?}", other),
+        };
+        assert_ne!(first, second, "Ctrl+n moved to the other hit");
+        // Esc still returns to the (stepped) results list.
+        app.handle_key(code(KeyCode::Esc)).unwrap();
+        assert!(matches!(app.popup, Popup::FindResults { .. }));
     }
 
     #[test]
