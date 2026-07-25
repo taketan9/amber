@@ -1826,6 +1826,12 @@ impl ShortcutStore {
     }
 }
 
+/// A pane's cached git status and the directory it was computed for.
+struct GitState {
+    cwd: PathBuf,
+    status: Option<cian_core::git::RepoStatus>,
+}
+
 #[derive(Debug, Default, Clone, Copy)]
 struct LayoutRects {
     left: Rect,
@@ -2091,6 +2097,9 @@ pub struct App {
     show_key_hints: bool,
     /// Interface language for the key manual (Japanese by default).
     lang: Lang,
+    /// Cached git status per file pane `[left, right]`, recomputed when the
+    /// pane's directory changes or on an explicit refresh.
+    git: [Option<GitState>; 2],
     /// A command to type into the shell once it is ready. Needed because the
     /// PTY spawns on a background thread, so the shell may not exist yet at
     /// the moment the user picks a connection.
@@ -2193,6 +2202,7 @@ impl App {
             ),
             show_key_hints: config.options.key_hints.unwrap_or(true),
             lang: Lang::from_opt(config.options.lang.as_deref()),
+            git: [None, None],
             zoom_return: None,
             pending_shell_input: None,
             pending_shortcut_target: None,
@@ -2215,6 +2225,36 @@ impl App {
 
     /// The directory a newly-spawned shell should start in: the cwd of the
     /// file pane we were last on.
+    /// Recompute each pane's git status when its directory has changed since the
+    /// last cache. Called once per frame; the `git` shell-out only runs on an
+    /// actual directory change, so it costs nothing while browsing one folder.
+    fn ensure_git(&mut self) {
+        for (idx, tabs) in [&self.left, &self.right].into_iter().enumerate() {
+            let cwd = tabs.active_ref().cwd.clone();
+            let stale = self.git[idx].as_ref().map(|g| g.cwd != cwd).unwrap_or(true);
+            if stale {
+                let status = cian_core::git::status(&cwd);
+                self.git[idx] = Some(GitState { cwd, status });
+            }
+        }
+    }
+
+    /// Drop the git cache so the next frame recomputes it — after a git action
+    /// or a file operation that may have changed the working tree.
+    fn invalidate_git(&mut self) {
+        self.git = [None, None];
+    }
+
+    /// The git status for a file pane, if it sits in a repo.
+    fn git_for(&self, pane: FocusedPane) -> Option<&cian_core::git::RepoStatus> {
+        let idx = match pane {
+            FocusedPane::Left => 0,
+            FocusedPane::Right => 1,
+            FocusedPane::Shell => return None,
+        };
+        self.git[idx].as_ref().and_then(|g| g.status.as_ref())
+    }
+
     fn shell_cwd(&self) -> PathBuf {
         let tabs = match self.last_file_pane {
             FocusedPane::Right => &self.right,
@@ -5862,6 +5902,8 @@ impl App {
     fn reload_both(&mut self) {
         let _ = self.left.active_mut().reload();
         let _ = self.right.active_mut().reload();
+        // A file op or refresh may have changed the working tree.
+        self.invalidate_git();
     }
 
     fn run_menu_item(&mut self, item: MenuItem) -> Result<()> {
@@ -8251,6 +8293,7 @@ fn run_loop<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Result<()>
 
 /// Normal three-surface layout: left/right file panes on top, shell below.
 fn draw_split(f: &mut Frame, main_area: Rect, app: &mut App, ov: AnimOverride) {
+    app.ensure_git();
     let main_pct = ov.ratio_for(DividerTarget::Main, app.main_pct);
     let main_split = Layout::default()
         .direction(Direction::Vertical)
@@ -8293,8 +8336,8 @@ fn draw_split(f: &mut Frame, main_area: Rect, app: &mut App, ov: AnimOverride) {
 
     let (bg_l, bg_r) = (app.pane_bg[0], app.pane_bg[1]);
     let (fl_l, fl_r) = (app.flash_level(FocusedPane::Left), app.flash_level(FocusedPane::Right));
-    draw_file_pane(f, panes_split[0], &app.left, app.focused == FocusedPane::Left, visual_for_left, app.mode, bg_l, fl_l, FocusedPane::Left, &mut tab_rects);
-    draw_file_pane(f, panes_split[1], &app.right, app.focused == FocusedPane::Right, visual_for_right, app.mode, bg_r, fl_r, FocusedPane::Right, &mut tab_rects);
+    draw_file_pane(f, panes_split[0], &app.left, app.focused == FocusedPane::Left, visual_for_left, app.mode, bg_l, fl_l, FocusedPane::Left, &mut tab_rects, app.git_for(FocusedPane::Left));
+    draw_file_pane(f, panes_split[1], &app.right, app.focused == FocusedPane::Right, visual_for_right, app.mode, bg_r, fl_r, FocusedPane::Right, &mut tab_rects, app.git_for(FocusedPane::Right));
     // draw_shell sizes each pane's PTY to its computed sub-rect.
     let log_border = recording_pulse(app.started.elapsed());
     draw_shell(f, shell_area, &mut app.shell, app.focused == FocusedPane::Shell, &mut dividers, &mut leaves, ov, &mut tab_rects, log_border);
@@ -8313,12 +8356,12 @@ fn draw_zoom_overlay(f: &mut Frame, rect: Rect, app: &mut App, ov: AnimOverride)
         FocusedPane::Left => {
             let (bg, fl) = (app.pane_bg[0], app.flash_level(FocusedPane::Left));
             let va = app.visual_anchor;
-            draw_file_pane(f, rect, &app.left, true, va, app.mode, bg, fl, FocusedPane::Left, &mut Vec::new());
+            draw_file_pane(f, rect, &app.left, true, va, app.mode, bg, fl, FocusedPane::Left, &mut Vec::new(), app.git_for(FocusedPane::Left));
         }
         FocusedPane::Right => {
             let (bg, fl) = (app.pane_bg[1], app.flash_level(FocusedPane::Right));
             let va = app.visual_anchor;
-            draw_file_pane(f, rect, &app.right, true, va, app.mode, bg, fl, FocusedPane::Right, &mut Vec::new());
+            draw_file_pane(f, rect, &app.right, true, va, app.mode, bg, fl, FocusedPane::Right, &mut Vec::new(), app.git_for(FocusedPane::Right));
         }
         FocusedPane::Shell => {
             let log_border = recording_pulse(app.started.elapsed());
@@ -8374,14 +8417,14 @@ fn draw_zoomed(f: &mut Frame, area: Rect, app: &mut App, ov: AnimOverride) {
             app.layout_rects = rects;
             let va = app.visual_anchor;
             let (bg, fl) = (app.pane_bg[0], app.flash_level(FocusedPane::Left));
-            draw_file_pane(f, area, &app.left, true, va, app.mode, bg, fl, FocusedPane::Left, &mut tab_rects);
+            draw_file_pane(f, area, &app.left, true, va, app.mode, bg, fl, FocusedPane::Left, &mut tab_rects, app.git_for(FocusedPane::Left));
         }
         FocusedPane::Right => {
             rects.right = area;
             app.layout_rects = rects;
             let va = app.visual_anchor;
             let (bg, fl) = (app.pane_bg[1], app.flash_level(FocusedPane::Right));
-            draw_file_pane(f, area, &app.right, true, va, app.mode, bg, fl, FocusedPane::Right, &mut tab_rects);
+            draw_file_pane(f, area, &app.right, true, va, app.mode, bg, fl, FocusedPane::Right, &mut tab_rects, app.git_for(FocusedPane::Right));
         }
         FocusedPane::Shell => {
             rects.shell = area;
@@ -8849,6 +8892,7 @@ fn draw_file_pane(
     flash: f32,
     pane_id: FocusedPane,
     tab_rects: &mut Vec<(FocusedPane, usize, Rect)>,
+    git: Option<&cian_core::git::RepoStatus>,
 ) {
     let focus_bg = focus_badge_color(mode);
     let bg = bg.or(theme().base_bg);
@@ -8887,9 +8931,11 @@ fn draw_file_pane(
     let inner_w = area.width.saturating_sub(2);
     let show_time = inner_w >= 52;
     let show_size = inner_w >= 34;
+    // A git badge column (badge + space) only when the pane sits in a repo.
+    let git_w: u16 = if git.is_some() { 2 } else { 0 };
     let meta_w = if show_time { SIZE_COL_W + TIME_COL_W + 2 } else if show_size { SIZE_COL_W + 1 } else { 0 };
     // 2 mark + icon + 2 spaces
-    let name_w = inner_w.saturating_sub(meta_w + 5) as usize;
+    let name_w = inner_w.saturating_sub(meta_w + 5 + git_w) as usize;
 
     let items: Vec<ListItem> = pane.entries.iter().enumerate().map(|(i, e)| {
         let marked = pane.is_marked(i);
@@ -8905,11 +8951,22 @@ fn draw_file_pane(
         let icon_style = Style::default().fg(kind.color());
 
         let name = truncate(&e.name, name_w);
-        let mut spans = vec![
+        let mut spans = Vec::new();
+        if git.is_some() {
+            let (badge, color) = git
+                .and_then(|g| g.mark_for(&e.path))
+                .map(|m| (m.badge(), git_mark_color(m)))
+                .unwrap_or(("", Color::Reset));
+            spans.push(Span::styled(
+                format!("{:<1} ", badge),
+                Style::default().fg(color).add_modifier(Modifier::BOLD),
+            ));
+        }
+        spans.extend([
             Span::styled(mark_symbol, mark_style),
             Span::styled(format!("{}  ", icon_for(e)), icon_style),
             Span::styled(format!("{:<w$}", name, w = name_w), name_style),
-        ];
+        ]);
         let meta_style = Style::default().fg(theme().dim);
         if show_size {
             // Directories have no meaningful byte count of their own.
@@ -8950,6 +9007,18 @@ fn draw_file_pane(
     f.render_stateful_widget(list, area, &mut state);
 
     draw_list_scrollbar(f, area, pane.entries.len(), pane.cursor, focused, border_style);
+}
+
+/// The colour of a git status badge.
+fn git_mark_color(m: cian_core::git::GitMark) -> Color {
+    use cian_core::git::GitMark::*;
+    match m {
+        Staged => Color::Rgb(130, 225, 150),   // green
+        Modified => Color::Rgb(240, 210, 120),  // yellow
+        Untracked => Color::Rgb(130, 170, 210), // blue-grey
+        Conflict => Color::Rgb(255, 130, 135),  // red
+        DirDirty => Color::Rgb(180, 165, 110),  // muted yellow
+    }
 }
 
 /// Fixed widths so the columns line up between the two panes.
