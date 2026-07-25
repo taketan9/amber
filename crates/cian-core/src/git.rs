@@ -81,7 +81,12 @@ pub struct RepoStatus {
 /// lower-cased on Windows (its filesystem is case-insensitive). This absorbs the
 /// separator and case differences between `git`'s output and cian's paths.
 fn norm(path: &Path) -> String {
-    let s = path.to_string_lossy().replace('\\', "/");
+    let mut s = path.to_string_lossy().replace('\\', "/");
+    // Drop the Windows verbatim prefix (`\\?\C:\…` → `C:/…`) so a canonicalised
+    // path lines up with git's plain output.
+    if let Some(rest) = s.strip_prefix("//?/") {
+        s = rest.to_string();
+    }
     let s = s.trim_end_matches('/').to_string();
     if cfg!(windows) {
         s.to_lowercase()
@@ -266,6 +271,14 @@ mod tests {
             ("feature/x".into(), 3, 0)
         );
         assert_eq!(parse_branch_line("HEAD (no branch)"), ("HEAD".into(), 0, 0));
+    }
+
+    #[test]
+    fn norm_strips_the_windows_verbatim_prefix() {
+        // A canonicalised Windows path (`\\?\C:\…`) must key the same as git's
+        // plain `C:/…` output.
+        assert_eq!(norm(Path::new(r"\\?\C:\a\b")), norm(Path::new(r"C:\a\b")));
+        assert_eq!(norm(Path::new("/a/b/")), norm(Path::new("/a/b")));
     }
 
     #[test]
