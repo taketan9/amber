@@ -2047,6 +2047,9 @@ pub struct App {
     op_job: Option<OpJob>,
     /// A recursive search running on a worker thread.
     find_job: Option<FindJob>,
+    /// The grep-results popup stashed while viewing one hit in F3, so Esc from
+    /// the viewer returns to the list rather than closing everything.
+    find_return: Option<Box<Popup>>,
     diff_job: Option<DiffJob>,
     /// When the panes were last checked against the filesystem.
     last_watch: Instant,
@@ -2139,6 +2142,7 @@ impl App {
             pending_auth: None,
             op_job: None,
             find_job: None,
+            find_return: None,
             diff_job: None,
             last_watch: Instant::now(),
             pane_bg: [None, None],
@@ -3014,7 +3018,12 @@ impl App {
             *scroll = (*scroll).min(n.saturating_sub(body_h));
         }
         if close {
-            self.popup = Popup::None;
+            // If this viewer was opened from a grep hit, go back to the results
+            // list so the next hit is one keystroke away; otherwise just close.
+            match self.find_return.take() {
+                Some(back) => self.popup = *back,
+                None => self.popup = Popup::None,
+            }
         }
         Ok(())
     }
@@ -4109,6 +4118,7 @@ impl App {
 
     /// Walk the tree below the focused pane on a worker thread.
     fn start_find(&mut self, needle: &str, mode: cian_core::search::Mode) {
+        self.find_return = None; // a fresh search invalidates any stashed list
         let Some(root) = self.active_pane().map(|p| p.cwd.clone()) else { return };
         let mut query = cian_core::search::Query::new(needle);
         query.mode = mode;
@@ -4176,20 +4186,26 @@ impl App {
     fn open_find_hit(&mut self) -> Result<()> {
         let Popup::FindResults { hits, cursor, .. } = &self.popup else { return Ok(()) };
         let Some(hit) = hits.get(*cursor).cloned() else { return Ok(()) };
-        self.popup = Popup::None;
-        self.stop_find();
 
         // A grep hit (content match) opens the viewer right on the matched
-        // line — the whole reason you grepped. A name match navigates to it.
+        // line — the whole reason you grepped. The results list is stashed so
+        // Esc from the viewer returns to it, for scanning hit after hit. A name
+        // match just navigates to the file.
         if let Some((lineno, _)) = &hit.line {
+            let results = std::mem::replace(&mut self.popup, Popup::None);
+            self.find_return = Some(Box::new(results));
+            self.stop_find(); // freeze the list; the stash already holds the hits
             let name = hit
                 .path
                 .file_name()
                 .map(|s| s.to_string_lossy().into_owned())
                 .unwrap_or_else(|| hit.rel.display().to_string());
             self.open_viewer_at(&hit.path, &name, lineno.saturating_sub(1));
+            self.message = Some("Esc → back to results".into());
             return Ok(());
         }
+        self.popup = Popup::None;
+        self.stop_find();
 
         let (dir, name) = if hit.is_dir {
             (hit.path.clone(), None)
@@ -12779,6 +12795,17 @@ mod tests {
             }
             other => panic!("expected the viewer, got {:?}", other),
         }
+
+        // Esc from the viewer returns to the grep results, not to nothing.
+        app.handle_key(code(KeyCode::Esc)).unwrap();
+        assert!(
+            matches!(app.popup, Popup::FindResults { .. }),
+            "Esc returns to the results list, got {:?}",
+            app.popup
+        );
+        // A second Esc closes the results.
+        app.handle_key(code(KeyCode::Esc)).unwrap();
+        assert!(matches!(app.popup, Popup::None));
     }
 
     /// Choosing a result should leave the pane somewhere useful: in the file's
