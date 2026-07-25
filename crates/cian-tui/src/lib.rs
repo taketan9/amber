@@ -35,7 +35,7 @@ use tui_term::widget::PseudoTerminal;
 
 /// Resolved color palette. Defaults match the original built-in theme; a
 /// `~/.config/cian/init.lua` calling `cian.set_theme{...}` overrides any field.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 struct ResolvedTheme {
     accent: Color,
     status_bg: Color,
@@ -57,7 +57,7 @@ struct ResolvedTheme {
 
 /// The eight file-type accents plus the two neutral tones, kept together so a
 /// theme swaps them as a set.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 struct FilePalette {
     directory: Color,
     code: Color,
@@ -463,6 +463,10 @@ impl PaneTabs {
     }
     pub fn active_ref(&self) -> &Pane { &self.tabs[self.active] }
     pub fn active_mut(&mut self) -> &mut Pane { &mut self.tabs[self.active] }
+    /// Every tab's pane, for settings (like show-hidden) that apply to all.
+    pub fn all_mut(&mut self) -> impl Iterator<Item = &mut Pane> {
+        self.tabs.iter_mut()
+    }
     pub fn next_tab(&mut self) {
         if !self.tabs.is_empty() {
             self.active = (self.active + 1) % self.tabs.len();
@@ -1806,9 +1810,16 @@ impl App {
             .shell
             .clone()
             .unwrap_or_else(cian_pty::default_shell);
+        // Honour the show_hidden option on the initial panes (it defaults to
+        // true, cian's long-standing behaviour).
+        let show_hidden = config.options.show_hidden.unwrap_or(true);
+        let mut left_pane = Pane::new(left)?;
+        let mut right_pane = Pane::new(right)?;
+        left_pane.set_show_hidden(show_hidden);
+        right_pane.set_show_hidden(show_hidden);
         Ok(Self {
-            left: PaneTabs::single(Pane::new(left)?),
-            right: PaneTabs::single(Pane::new(right)?),
+            left: PaneTabs::single(left_pane),
+            right: PaneTabs::single(right_pane),
             shell: ShellPane::new(shell_cmd),
             focused: FocusedPane::Left,
             mode: Mode::Normal,
@@ -1978,6 +1989,7 @@ impl App {
             "find" => self.start_find_prompt(),
             "menu" => self.open_menu_at_cursor(),
             "ssh" => self.start_ssh(),
+            "reload" | "source" => self.reload_config(),
 
             // Navigation.
             "cd" | "goto" => {
@@ -3704,6 +3716,66 @@ impl App {
     // ------- Manual -------
     fn open_manual(&mut self) {
         self.popup = Popup::Manual { lines: manual_lines(&self.keymap, self.lang), scroll: 0 };
+    }
+
+    /// Re-read `init.lua` and apply everything that can change without a
+    /// restart: keymaps, options, SSH hosts and open handlers. The colour theme
+    /// and border style are installed once at startup (into set-once globals),
+    /// so a change to those is reported as needing a restart rather than being
+    /// silently ignored.
+    fn reload_config(&mut self) {
+        let config = cian_lua::load();
+
+        // Rebuild the user keymap, validating action names as at startup.
+        let mut keymap: HashMap<char, Action> = HashMap::new();
+        let mut problems: Vec<String> = config.errors.clone();
+        for (c, name) in &config.keymaps {
+            match action_from_name(name) {
+                Some(a) => {
+                    keymap.insert(*c, a);
+                }
+                None => problems.push(format!("keymap: unknown action {:?} (key '{}')", name, c)),
+            }
+        }
+        self.keymap = keymap;
+
+        // Live-applicable options.
+        self.lang = Lang::from_opt(config.options.lang.as_deref());
+        self.show_key_hints = config.options.key_hints.unwrap_or(true);
+        self.clipboard_on_copy = config.options.clipboard_on_copy.unwrap_or(true);
+        self.anim_dur =
+            Duration::from_millis(config.options.animation_ms.unwrap_or(DEFAULT_ANIM_MS));
+        let show_hidden = config.options.show_hidden.unwrap_or(true);
+        for tabs in [&mut self.left, &mut self.right] {
+            for pane in tabs.all_mut() {
+                pane.set_show_hidden(show_hidden);
+            }
+        }
+
+        // Theme and borders live in set-once globals; note if the file now asks
+        // for something different, since we cannot swap them in place.
+        let (resolved, theme_errors) = resolve_theme(&config.theme);
+        problems.extend(theme_errors);
+        let theme_changed = resolved != *theme();
+        let borders_changed =
+            resolve_border_type(config.options.borders.as_deref()) != border_type();
+
+        // ssh hosts and on_open handlers come along with the replaced config.
+        self.config = config;
+
+        if !problems.is_empty() {
+            let mut lines = vec!["reloaded with issues:".to_string(), String::new()];
+            let total = problems.len();
+            lines.extend(problems.into_iter().take(10));
+            if total > 10 {
+                lines.push(format!("... and {} more", total - 10));
+            }
+            self.popup = Popup::Notice { lines };
+        } else if theme_changed || borders_changed {
+            self.message = Some("config reloaded — restart to apply theme/border changes".into());
+        } else {
+            self.message = Some("config reloaded".into());
+        }
     }
 
     // ------- Quit confirmation -------
@@ -6976,6 +7048,7 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry(":wc", None, "line / word / byte counts", "行／単語／バイト数"),
                 entry(":head / :tail", None, "first / last lines;  :tail -n 40", "先頭／末尾の行；  :tail -n 40"),
                 entry(":df", None, "free disk space;  :df -h -k -m -g", "ディスク空き容量；  :df -h -k -m -g"),
+                entry(":reload", None, "re-read init.lua (theme/border need a restart)", "init.luaを再読込（テーマ/枠は再起動が必要）"),
                 entry(":zip", None, "bundle selection;  :zip -e  for a password", "選択物をまとめる；  :zip -e でパスワード付き"),
                 entry(":!cmd", None, "run in shell;  % = selection, %f file, %d dir", "シェルで実行；  % =選択, %f ファイル, %d ディレクトリ"),
             ],
@@ -10263,6 +10336,26 @@ mod tests {
             }
         }
         assert!(checked > 20, "expected to have checked the documented bindings, got {checked}");
+    }
+
+    #[test]
+    fn reload_reapplies_the_keymap_live() {
+        let (_d, mut app) = app_with(&["a.rs"]);
+        // No user binding yet: `x` is not delete.
+        assert!(!app.keymap.contains_key(&'x'));
+        // Point CIAN_CONFIG_DIR at a temp config that binds x -> delete, then
+        // reload — the running app should pick it up without a restart.
+        let cfgdir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            cfgdir.path().join("init.lua"),
+            "cian.set_keymap(\"x\", \"delete\")\n",
+        )
+        .unwrap();
+        std::env::set_var("CIAN_CONFIG_DIR", cfgdir.path());
+        app.command_buffer = "reload".into();
+        app.run_command();
+        std::env::remove_var("CIAN_CONFIG_DIR");
+        assert_eq!(app.keymap.get(&'x'), Some(&Action::Delete), "reload bound x live");
     }
 
     #[test]
