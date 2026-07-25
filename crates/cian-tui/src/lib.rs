@@ -1095,10 +1095,19 @@ enum Popup {
     Viewer {
         title: String,
         view: cian_core::viewer::View,
+        /// First visible line.
         scroll: usize,
-        /// Selected line range `(anchor, cursor)` as absolute line indices, for
-        /// copying. `None` when nothing is selected.
-        sel: Option<(usize, usize)>,
+        /// Cursor line (absolute).
+        line: usize,
+        /// Cursor column, as a char index into that line.
+        col: usize,
+        /// Remembered column for vertical motion (vim's "goal column");
+        /// `usize::MAX` means "end of line" (as after `$`).
+        goal: usize,
+        /// Active visual selection mode; `None` in normal mode.
+        visual: Option<ViewVisual>,
+        /// Selection anchor `(line, col)`, meaningful while `visual` is `Some`.
+        anchor: (usize, usize),
     },
     /// The recursive comparison of two directories: a list of differing paths.
     DirCompare {
@@ -1147,6 +1156,117 @@ enum Popup {
     /// A copy/move failed because the destination needs administrator rights.
     /// Offers to redo it elevated (Windows only).
     ConfirmElevate { op: PendingOp, targets: Vec<PathBuf>, dest: PathBuf },
+}
+
+/// The F3 viewer's visual-selection mode, matching vim's three flavours.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ViewVisual {
+    /// `v`: character-wise, from the anchor cell to the cursor cell.
+    Char,
+    /// `V`: line-wise, whole lines between anchor and cursor.
+    Line,
+    /// `Ctrl-v`: block-wise, the rectangle of columns between them.
+    Block,
+}
+
+/// The length in characters of viewer line `l` (0 if out of range).
+fn vlen(view: &cian_core::viewer::View, l: usize) -> usize {
+    view.lines.get(l).map(|s| s.chars().count()).unwrap_or(0)
+}
+
+/// `w`: the start of the next word, moving onto the next line when the current
+/// one runs out. Words are runs of non-whitespace (a simplification of vim's
+/// word/WORD split that reads naturally for code).
+fn viewer_word_forward(
+    view: &cian_core::viewer::View,
+    line: usize,
+    col: usize,
+    last: usize,
+) -> (usize, usize) {
+    let chars: Vec<char> = view.lines.get(line).map(|s| s.chars().collect()).unwrap_or_default();
+    let mut i = col;
+    // Skip the rest of the current word, then any whitespace.
+    while i < chars.len() && !chars[i].is_whitespace() {
+        i += 1;
+    }
+    while i < chars.len() && chars[i].is_whitespace() {
+        i += 1;
+    }
+    if i < chars.len() {
+        return (line, i);
+    }
+    // Fell off the end: first non-blank of the next non-empty line.
+    let mut l = line + 1;
+    while l <= last {
+        let c: Vec<char> = view.lines[l].chars().collect();
+        let first = c.iter().position(|ch| !ch.is_whitespace()).unwrap_or(0);
+        if !c.is_empty() {
+            return (l, first);
+        }
+        l += 1;
+    }
+    (line, chars.len())
+}
+
+/// `b`: the start of the current or previous word.
+fn viewer_word_back(view: &cian_core::viewer::View, line: usize, col: usize) -> (usize, usize) {
+    let chars: Vec<char> = view.lines.get(line).map(|s| s.chars().collect()).unwrap_or_default();
+    let mut i = col;
+    if i == 0 {
+        // At the line start: end of the previous line's last word.
+        if line == 0 {
+            return (0, 0);
+        }
+        let prev = line - 1;
+        let c: Vec<char> = view.lines[prev].chars().collect();
+        let mut j = c.len();
+        while j > 0 && c[j - 1].is_whitespace() {
+            j -= 1;
+        }
+        while j > 0 && !c[j - 1].is_whitespace() {
+            j -= 1;
+        }
+        return (prev, j);
+    }
+    i -= 1;
+    while i > 0 && chars[i].is_whitespace() {
+        i -= 1;
+    }
+    while i > 0 && !chars[i - 1].is_whitespace() {
+        i -= 1;
+    }
+    (line, i)
+}
+
+/// Order two `(line, col)` positions so the earlier one comes first.
+fn order_pos(a: (usize, usize), b: (usize, usize)) -> ((usize, usize), (usize, usize)) {
+    if a <= b {
+        (a, b)
+    } else {
+        (b, a)
+    }
+}
+
+/// Char-wise text between two ordered positions, end-inclusive (vim `v` yank).
+fn viewer_charwise(lines: &[String], s: (usize, usize), e: (usize, usize)) -> String {
+    let take = |l: usize, from: usize, to_incl: Option<usize>| -> String {
+        let chars: Vec<char> = lines.get(l).map(|x| x.chars().collect()).unwrap_or_default();
+        let end = match to_incl {
+            Some(c) => (c + 1).min(chars.len()),
+            None => chars.len(),
+        };
+        let start = from.min(end);
+        chars[start..end].iter().collect()
+    };
+    if s.0 == e.0 {
+        return take(s.0, s.1, Some(e.1));
+    }
+    let mut out = vec![take(s.0, s.1, None)];
+    for l in (s.0 + 1)..e.0 {
+        out.push(lines.get(l).cloned().unwrap_or_default());
+    }
+    out.push(take(e.0, 0, Some(e.1)));
+    out.join("\n")
 }
 
 /// A clickable region of the on-screen popup, registered by `draw_popup` and
@@ -2530,17 +2650,174 @@ impl App {
 
     /// Copy the viewer's selected lines (or the whole file when nothing is
     /// selected) to the clipboard.
-    fn copy_viewer_selection(&mut self) {
-        let text = if let Popup::Viewer { view, sel, .. } = &self.popup {
+    /// The vim-flavoured keymap for the F3 viewer: a cursor that moves with
+    /// h/j/k/l and friends, and v / V / Ctrl-v visual selection with y/c to
+    /// copy. The rendered body height (from `viewer_rect`) sizes the page moves
+    /// and keeps the cursor on screen.
+    fn handle_viewer_key(&mut self, key: KeyEvent) -> Result<()> {
+        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        let shift = key.modifiers.contains(KeyModifiers::SHIFT);
+
+        // Shift+Enter re-decodes the same bytes under the next text encoding.
+        if key.code == KeyCode::Enter && shift {
+            if let Popup::Viewer { view, visual, .. } = &mut self.popup {
+                let next = view.encoding.next();
+                view.redecode(next);
+                *visual = None;
+            }
+            return Ok(());
+        }
+        // y / c copy the selection (or the whole file when nothing is selected).
+        if !ctrl && matches!(key.code, KeyCode::Char('c') | KeyCode::Char('y')) {
+            self.copy_viewer_selection();
+            return Ok(());
+        }
+
+        let body_h = (self.viewer_rect.height as usize).max(1);
+        let half = (body_h / 2).max(1);
+        let mut close = false;
+        if let Popup::Viewer { view, scroll, line, col, goal, visual, anchor, .. } = &mut self.popup {
             let n = view.lines.len();
-            let range = match sel {
-                Some((a, b)) => (*a.min(b))..=(*a.max(b)).min(n.saturating_sub(1)),
-                None => 0..=n.saturating_sub(1),
+            let last = n.saturating_sub(1);
+            // Move the cursor to a line, landing at the goal column (clamped).
+            let to_line = |ln: usize, line: &mut usize, col: &mut usize, goal: usize| {
+                *line = ln.min(last);
+                let len = vlen(view, *line);
+                *col = if goal == usize::MAX { len } else { goal.min(len) };
             };
+            let start_visual = |mode: ViewVisual, visual: &mut Option<ViewVisual>, anchor: &mut (usize, usize), line: usize, col: usize| {
+                if *visual == Some(mode) {
+                    *visual = None; // pressing the same key again leaves visual
+                } else {
+                    if visual.is_none() {
+                        *anchor = (line, col);
+                    }
+                    *visual = Some(mode);
+                }
+            };
+
+            match (ctrl, key.code) {
+                (false, KeyCode::Esc) | (false, KeyCode::Char('q')) => {
+                    // Esc first drops out of visual mode, then closes.
+                    if visual.is_some() {
+                        *visual = None;
+                    } else {
+                        close = true;
+                    }
+                }
+                (false, KeyCode::Char('v')) => start_visual(ViewVisual::Char, visual, anchor, *line, *col),
+                (false, KeyCode::Char('V')) => start_visual(ViewVisual::Line, visual, anchor, *line, *col),
+                (true, KeyCode::Char('v')) => start_visual(ViewVisual::Block, visual, anchor, *line, *col),
+                (false, KeyCode::Char('o')) if visual.is_some() => {
+                    // Swap the cursor and the anchor.
+                    let a = *anchor;
+                    *anchor = (*line, *col);
+                    *line = a.0;
+                    *col = a.1;
+                    *goal = *col;
+                }
+
+                // Vertical motion keeps the goal column.
+                (false, KeyCode::Char('j')) | (_, KeyCode::Down) => to_line(*line + 1, line, col, *goal),
+                (false, KeyCode::Char('k')) | (_, KeyCode::Up) => to_line(line.saturating_sub(1), line, col, *goal),
+                (false, KeyCode::Char('d')) | (true, KeyCode::Char('d')) | (_, KeyCode::PageDown) => {
+                    to_line(*line + half, line, col, *goal)
+                }
+                (false, KeyCode::Char('u')) | (true, KeyCode::Char('u')) | (_, KeyCode::PageUp) => {
+                    to_line(line.saturating_sub(half), line, col, *goal)
+                }
+                (true, KeyCode::Char('f')) => to_line(*line + body_h, line, col, *goal),
+                (true, KeyCode::Char('b')) => to_line(line.saturating_sub(body_h), line, col, *goal),
+                (false, KeyCode::Char('g')) => to_line(0, line, col, *goal),
+                (false, KeyCode::Char('G')) => to_line(last, line, col, *goal),
+
+                // Horizontal motion resets the goal to the real column.
+                (false, KeyCode::Char('h')) | (_, KeyCode::Left) => {
+                    *col = col.saturating_sub(1);
+                    *goal = *col;
+                }
+                (false, KeyCode::Char('l')) | (_, KeyCode::Right) => {
+                    let len = vlen(view, *line);
+                    if *col < len {
+                        *col += 1;
+                    }
+                    *goal = *col;
+                }
+                (false, KeyCode::Char('0')) | (_, KeyCode::Home) => {
+                    *col = 0;
+                    *goal = 0;
+                }
+                (false, KeyCode::Char('$')) | (_, KeyCode::End) => {
+                    *col = vlen(view, *line);
+                    *goal = usize::MAX;
+                }
+                (false, KeyCode::Char('w')) => {
+                    let (nl, nc) = viewer_word_forward(view, *line, *col, last);
+                    *line = nl;
+                    *col = nc;
+                    *goal = *col;
+                }
+                (false, KeyCode::Char('b')) => {
+                    let (nl, nc) = viewer_word_back(view, *line, *col);
+                    *line = nl;
+                    *col = nc;
+                    *goal = *col;
+                }
+                _ => {}
+            }
+
+            // Keep the cursor on screen.
+            *line = (*line).min(last);
+            if *line < *scroll {
+                *scroll = *line;
+            } else if *line >= *scroll + body_h {
+                *scroll = *line + 1 - body_h;
+            }
+            *scroll = (*scroll).min(n.saturating_sub(body_h));
+        }
+        if close {
+            self.popup = Popup::None;
+        }
+        Ok(())
+    }
+
+    fn copy_viewer_selection(&mut self) {
+        let text = if let Popup::Viewer { view, line, col, visual, anchor, .. } = &self.popup {
+            let lines = &view.lines;
+            let n = lines.len();
             if n == 0 {
                 String::new()
             } else {
-                view.lines[*range.start()..=*range.end()].join("\n")
+                match visual {
+                    // No selection: copy the whole file, as before.
+                    None => lines.join("\n"),
+                    Some(ViewVisual::Line) => {
+                        let (a, b) = (anchor.0.min(*line), anchor.0.max(*line).min(n - 1));
+                        lines[a..=b].join("\n")
+                    }
+                    Some(ViewVisual::Char) => {
+                        // Order the two endpoints, then take an inclusive
+                        // char-wise span across the lines between them.
+                        let (s, e) = order_pos((anchor.0, anchor.1), (*line, *col));
+                        viewer_charwise(lines, s, e)
+                    }
+                    Some(ViewVisual::Block) => {
+                        let (l0, l1) = (anchor.0.min(*line), anchor.0.max(*line).min(n - 1));
+                        let (c0, c1) = (anchor.1.min(*col), anchor.1.max(*col));
+                        (l0..=l1)
+                            .map(|l| {
+                                let chars: Vec<char> = lines[l].chars().collect();
+                                let hi = (c1 + 1).min(chars.len());
+                                if c0 >= hi {
+                                    String::new()
+                                } else {
+                                    chars[c0..hi].iter().collect()
+                                }
+                            })
+                            .collect::<Vec<_>>()
+                            .join("\n")
+                    }
+                }
             }
         } else {
             return;
@@ -2553,9 +2830,9 @@ impl App {
             let _ = cb.set_text(text);
         }
         self.message = Some("copied".into());
-        // A copy from a selection ends the gesture; leave the viewer open.
-        if let Popup::Viewer { sel, .. } = &mut self.popup {
-            *sel = None;
+        // A copy ends the visual gesture; leave the viewer open.
+        if let Popup::Viewer { visual, .. } = &mut self.popup {
+            *visual = None;
         }
     }
 
@@ -3228,7 +3505,11 @@ impl App {
                     title: entry.name.clone(),
                     view,
                     scroll: 0,
-                    sel: None,
+                    line: 0,
+                    col: 0,
+                    goal: 0,
+                    visual: None,
+                    anchor: (0, 0),
                 }
             }
             Err(e) => self.message = Some(format!("cannot view: {}", e)),
@@ -4209,28 +4490,51 @@ impl App {
             }
         }
 
-        // In the viewer, drag selects a range of lines; right-click (or `c`)
-        // copies it. Handled before the blanket popup guard below.
+        // In the viewer: a click places the cursor on that line, a drag selects
+        // whole lines (line-wise visual), the wheel scrolls, and right-click
+        // copies. Handled before the blanket popup guard below.
         if matches!(self.popup, Popup::Viewer { .. }) {
             let body = self.viewer_rect;
+            let body_h = (body.height as usize).max(1);
             let line_at = |row: u16, scroll: usize, n: usize| -> usize {
                 let rel = row.saturating_sub(body.y) as usize;
                 (scroll + rel).min(n.saturating_sub(1))
             };
-            let in_body = col >= body.x
-                && col < body.x + body.width
-                && row >= body.y
-                && row < body.y + body.height;
             match ev.kind {
-                MouseEventKind::Down(MouseButton::Left) if in_body => {
-                    if let Popup::Viewer { view, scroll, sel, .. } = &mut self.popup {
+                MouseEventKind::Down(MouseButton::Left) => {
+                    if let Popup::Viewer { view, scroll, line, col, goal, visual, anchor, .. } =
+                        &mut self.popup
+                    {
                         let l = line_at(row, *scroll, view.lines.len());
-                        *sel = Some((l, l));
+                        *line = l;
+                        *col = 0;
+                        *goal = 0;
+                        *anchor = (l, 0);
+                        *visual = None; // a bare click just moves the cursor
                     }
                 }
                 MouseEventKind::Drag(MouseButton::Left) => {
-                    if let Popup::Viewer { view, scroll, sel: Some(s), .. } = &mut self.popup {
-                        s.1 = line_at(row, *scroll, view.lines.len());
+                    if let Popup::Viewer { view, scroll, line, visual, .. } = &mut self.popup {
+                        *line = line_at(row, *scroll, view.lines.len());
+                        *visual = Some(ViewVisual::Line);
+                    }
+                }
+                MouseEventKind::ScrollDown | MouseEventKind::ScrollUp => {
+                    if let Popup::Viewer { view, scroll, line, col, goal, .. } = &mut self.popup {
+                        let n = view.lines.len();
+                        let last = n.saturating_sub(1);
+                        if matches!(ev.kind, MouseEventKind::ScrollDown) {
+                            *line = (*line + 3).min(last);
+                        } else {
+                            *line = line.saturating_sub(3);
+                        }
+                        *col = (*goal).min(vlen(view, *line));
+                        if *line < *scroll {
+                            *scroll = *line;
+                        } else if *line >= *scroll + body_h {
+                            *scroll = *line + 1 - body_h;
+                        }
+                        *scroll = (*scroll).min(n.saturating_sub(body_h));
                     }
                 }
                 MouseEventKind::Down(MouseButton::Right) => self.copy_viewer_selection(),
@@ -5473,35 +5777,7 @@ impl App {
             return Ok(());
         }
         if matches!(self.popup, Popup::Viewer { .. }) {
-            // Shift+Enter cycles the text encoding (UTF-8 → Shift_JIS → UTF-16…)
-            // and re-decodes the same bytes.
-            if key.code == KeyCode::Enter && key.modifiers.contains(KeyModifiers::SHIFT) {
-                if let Popup::Viewer { view, sel, .. } = &mut self.popup {
-                    let next = view.encoding.next();
-                    view.redecode(next);
-                    *sel = None;
-                }
-                return Ok(());
-            }
-            // c / y copy the selected lines, or the whole file if nothing is
-            // selected.
-            if matches!(key.code, KeyCode::Char('c') | KeyCode::Char('y')) {
-                self.copy_viewer_selection();
-                return Ok(());
-            }
-            let Popup::Viewer { view, scroll, sel, .. } = &mut self.popup else { return Ok(()) };
-            let last = view.lines.len().saturating_sub(1);
-            match key.code {
-                KeyCode::Esc | KeyCode::Char('q') => self.popup = Popup::None,
-                KeyCode::Char('j') | KeyCode::Down => *scroll = (*scroll + 1).min(last),
-                KeyCode::Char('k') | KeyCode::Up => *scroll = scroll.saturating_sub(1),
-                KeyCode::Char('d') | KeyCode::PageDown => *scroll = (*scroll + 20).min(last),
-                KeyCode::Char('u') | KeyCode::PageUp => *scroll = scroll.saturating_sub(20),
-                KeyCode::Char('g') | KeyCode::Home => *scroll = 0,
-                KeyCode::Char('G') | KeyCode::End => { *scroll = last; let _ = sel; }
-                _ => {}
-            }
-            return Ok(());
+            return self.handle_viewer_key(key);
         }
         // A notice (op results, attributes, checksums, wc…) can be copied
         // whole with `y`, so a hash or a path can be lifted out of it.
@@ -6968,7 +7244,7 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry("G", Some(CursorBottom), "jump to bottom", "末尾へジャンプ"),
                 entry("l, Enter", Some(EnterDir), "enter folder / open file", "フォルダに入る／ファイルを開く"),
                 entry("F3", None, "look inside: view a file, list an archive", "中身を見る：ファイル閲覧・書庫の一覧"),
-                entry("  in viewer", None, "drag=select, c=copy, Shift+Enter=encoding", "ビューア内：ドラッグ=選択, c=コピー, Shift+Enter=文字コード"),
+                entry("  in viewer", None, "hjkl move, v/V/Ctrl-v select, y copy, Shift+Enter encoding", "ビューア内：hjkl移動, v/V/Ctrl-v選択, yコピー, Shift+Enter文字コード"),
                 entry("=", None, "compare left ↔ right: two files (line diff), or two folders (recursive)", "左右を比較：ファイル同士（行差分）／フォルダ同士（再帰）"),
                 entry("-, Bksp", Some(Parent), "parent folder", "親フォルダへ"),
                 entry("Left / Right", None, "focus the left / right pane", "左／右のペインにフォーカス"),
@@ -9462,7 +9738,7 @@ fn draw_popup(
         return;
     }
 
-    if let Popup::Viewer { title, view, scroll, sel } = popup {
+    if let Popup::Viewer { title, view, scroll, line, col, visual, anchor, .. } = popup {
         let w = area.width.saturating_sub(4);
         let h = area.height.saturating_sub(2);
         let rect = centered_rect(w, h, area);
@@ -9473,11 +9749,20 @@ fn draw_popup(
         };
         let size = cian_core::human_size(view.total_bytes);
         let cut = if view.truncated { "  (first 4M shown)" } else { "" };
+        // A little mode badge in the title, so which visual mode is active — and
+        // where the cursor sits — is never a guess.
+        let mode = match visual {
+            None => String::new(),
+            Some(ViewVisual::Char) => "  [VISUAL]".into(),
+            Some(ViewVisual::Line) => "  [V-LINE]".into(),
+            Some(ViewVisual::Block) => "  [V-BLOCK]".into(),
+        };
         let block = Block::default()
             .borders(Borders::ALL)
             .border_type(border_type())
             .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
-            .title(format!(" {}  —  {}, {}{} ", title, kind, size, cut));
+            .title(format!(" {}  —  {}, {}{} ", title, kind, size, cut))
+            .title_bottom(format!(" {}:{}{} ", *line + 1, *col + 1, mode));
         let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
         f.render_widget(block, rect);
 
@@ -9491,8 +9776,44 @@ fn draw_popup(
         } else {
             0
         };
-        // Selected line range, for highlighting.
-        let sel_range = sel.map(|(a, b)| (a.min(b), a.max(b)));
+        let avail = (inner.width as usize).saturating_sub(gutter);
+
+        // Ordered selection endpoints, for the highlight geometry.
+        let (s0, e0) = order_pos(*anchor, (*line, *col));
+        let sel_bg = Style::default().bg(theme().selected_bg);
+        let cursor_style = Style::default().add_modifier(Modifier::REVERSED);
+        let text_fg = if numbered { Color::Rgb(210, 210, 222) } else { Color::Rgb(200, 200, 215) };
+
+        // The inclusive selected column range on absolute line `i`, if any.
+        let sel_cols = |i: usize, len: usize| -> Option<(usize, usize)> {
+            match visual {
+                None => None,
+                Some(ViewVisual::Line) => {
+                    if i >= s0.0 && i <= e0.0 { Some((0, len)) } else { None }
+                }
+                Some(ViewVisual::Block) => {
+                    if i >= s0.0 && i <= e0.0 {
+                        Some((anchor.1.min(*col), anchor.1.max(*col)))
+                    } else {
+                        None
+                    }
+                }
+                Some(ViewVisual::Char) => {
+                    if i < s0.0 || i > e0.0 {
+                        None
+                    } else if s0.0 == e0.0 {
+                        Some((s0.1, e0.1))
+                    } else if i == s0.0 {
+                        Some((s0.1, len))
+                    } else if i == e0.0 {
+                        Some((0, e0.1))
+                    } else {
+                        Some((0, len))
+                    }
+                }
+            }
+        };
+
         let rows: Vec<Line> = view
             .lines
             .iter()
@@ -9500,21 +9821,46 @@ fn draw_popup(
             .skip(*scroll)
             .take(body_h)
             .map(|(i, l)| {
-                let selected = sel_range.map(|(a, b)| i >= a && i <= b).unwrap_or(false);
-                let base =
-                    if selected { Style::default().bg(theme().selected_bg) } else { Style::default() };
-                let body = truncate(l, inner.width as usize - gutter);
+                let chars: Vec<char> = l.chars().take(avail).collect();
+                let len = chars.len();
+                let sel = sel_cols(i, len);
+                let cur = if i == *line { Some(*col) } else { None };
+                let cell_style = |j: usize| -> Style {
+                    if cur == Some(j) {
+                        cursor_style.fg(text_fg)
+                    } else if sel.map(|(a, b)| j >= a && j <= b).unwrap_or(false) {
+                        sel_bg.fg(text_fg)
+                    } else {
+                        Style::default().fg(text_fg)
+                    }
+                };
+                // Build the body char-by-char, merging same-styled runs.
+                let mut spans: Vec<Span> = Vec::new();
                 if numbered {
-                    Line::from(vec![
-                        Span::styled(
-                            format!("{:>w$} ", i + 1, w = gutter - 1),
-                            base.fg(Color::Rgb(110, 110, 135)),
-                        ),
-                        Span::styled(body, base.fg(Color::Rgb(210, 210, 222))),
-                    ])
-                } else {
-                    Line::from(Span::styled(body, base.fg(Color::Rgb(200, 200, 215))))
+                    spans.push(Span::styled(
+                        format!("{:>w$} ", i + 1, w = gutter - 1),
+                        Style::default().fg(Color::Rgb(110, 110, 135)),
+                    ));
                 }
+                let mut run = String::new();
+                let mut run_style = cell_style(0);
+                for (j, ch) in chars.iter().enumerate() {
+                    let st = cell_style(j);
+                    if st != run_style && !run.is_empty() {
+                        spans.push(Span::styled(std::mem::take(&mut run), run_style));
+                    }
+                    run_style = st;
+                    run.push(*ch);
+                }
+                if !run.is_empty() {
+                    spans.push(Span::styled(run, run_style));
+                }
+                // The cursor can sit just past the last char (empty line, or end
+                // of line): show it as a reversed space so it stays visible.
+                if cur == Some(len) {
+                    spans.push(Span::styled(" ".to_string(), cursor_style));
+                }
+                Line::from(spans)
             })
             .collect();
         let body_area = Rect::new(inner.x, inner.y, inner.width, body_h as u16);
@@ -9526,8 +9872,8 @@ fn draw_popup(
         f.render_widget(
             Paragraph::new(format!(
                 "{}{} ",
-                tr(lang, " drag=select  c=copy  S-Enter=encoding  j/k u/d g/G  Esc close   ",
-                    " ドラッグ=選択  c=コピー  S-Enter=文字コード  j/k u/d g/G  Esc 閉じる   "),
+                tr(lang, " hjkl move  v/V/C-v select  y copy  gg/G  Esc close   ",
+                    " hjkl 移動  v/V/C-v 選択  y コピー  gg/G  Esc 閉じる   "),
                 pos
             ))
             .style(Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD)),
@@ -13107,21 +13453,50 @@ mod tests {
     }
 
     #[test]
-    fn the_viewer_copies_a_selected_line_range() {
+    fn the_viewer_line_visual_selects_and_copies_a_range() {
         let d = tempfile::tempdir().unwrap();
         std::fs::write(d.path().join("a.txt"), "one\ntwo\nthree\nfour\n").unwrap();
         let p = d.path().to_path_buf();
         let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
         app.handle_key(code(KeyCode::F(3))).unwrap();
+        let _ = render(&mut app, 100, 30); // size viewer_rect so motion works
 
-        // Select lines 1..=2 (two, three) and copy with `c`.
-        if let Popup::Viewer { sel, .. } = &mut app.popup {
-            *sel = Some((1, 2));
-        }
-        app.copy_viewer_selection();
+        // Move to line 1 (two), start line-visual, extend to line 2 (three).
+        app.handle_key(key('j')).unwrap();
+        app.handle_key(key('V')).unwrap();
+        app.handle_key(key('j')).unwrap();
+        assert!(
+            matches!(app.popup, Popup::Viewer { visual: Some(ViewVisual::Line), .. }),
+            "line-visual is active"
+        );
+        app.handle_key(key('y')).unwrap();
         assert_eq!(app.message.as_deref(), Some("copied"));
-        // Selection cleared after the copy; viewer stays open.
-        assert!(matches!(app.popup, Popup::Viewer { sel: None, .. }));
+        // Visual ends after the copy; the viewer stays open.
+        assert!(matches!(app.popup, Popup::Viewer { visual: None, .. }));
+    }
+
+    #[test]
+    fn the_viewer_char_visual_yanks_across_lines() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::write(d.path().join("a.txt"), "abcd\nefgh\n").unwrap();
+        let p = d.path().to_path_buf();
+        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        app.handle_key(code(KeyCode::F(3))).unwrap();
+        let _ = render(&mut app, 100, 30);
+        // From (0,1)=b, char-visual to (1,1)=f → "bcd\nef".
+        app.handle_key(key('l')).unwrap();
+        app.handle_key(key('v')).unwrap();
+        app.handle_key(key('j')).unwrap();
+        // cursor col follows the goal (1) on line 1.
+        let text = if let Popup::Viewer { view, line, col, visual, anchor, .. } = &app.popup {
+            assert_eq!((*line, *col), (1, 1));
+            let (s, e) = order_pos(*anchor, (*line, *col));
+            assert!(visual.is_some());
+            viewer_charwise(&view.lines, s, e)
+        } else {
+            panic!("viewer")
+        };
+        assert_eq!(text, "bcd\nef");
     }
 
     #[test]
