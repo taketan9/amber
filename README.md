@@ -380,12 +380,20 @@ loop:
   a Conventional-Commits-style message; you get an editable preview (`e` to
   edit, `Enter`/`c` to commit, `Esc` to cancel) before anything is committed.
   With nothing staged it says so rather than committing an empty change.
+- **Detect junk** (file pane): `:aijunk`, or right-click **AI ▸ → Detect junk
+  files**. cian sends only the listing's metadata (names, sizes, dir flags —
+  never contents) and the model flags likely-disposable entries (build output,
+  caches, temp and editor-backup files, OS cruft). You get a checklist —
+  Space/click toggles, `a` toggles all — and approving hands the checked paths
+  to the *normal* delete confirmation, so nothing is removed without the usual
+  trash/permanent choice. A name the model invents matches nothing, so it can
+  only ever target files that were actually shown.
 
 The AI part is the one place cian is not a single self-contained binary — it
 opts into an external interpreter and network — which is why it is strictly
 optional and off unless configured. See
 [`examples/init.lua`](examples/init.lua) for the settings. More AI features
-(junk detection, structure suggestions, all approval-gated) are planned.
+(structure suggestions, bulk rename, all approval-gated) are planned.
 
 ## Architecture
 

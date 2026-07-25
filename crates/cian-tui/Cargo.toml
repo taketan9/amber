@@ -19,6 +19,7 @@ arboard   = { workspace = true }
 toml       = { workspace = true }
 serde_yml  = { workspace = true }
 serde     = { workspace = true }
+serde_json = { workspace = true }
 tui-term  = { workspace = true }
 unicode-width = "0.1"
 

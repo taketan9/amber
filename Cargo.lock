@@ -435,6 +435,7 @@ dependencies = [
  "crossterm",
  "ratatui",
  "serde",
+ "serde_json",
  "serde_yml",
  "tempfile",
  "toml",

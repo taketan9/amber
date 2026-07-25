@@ -1196,6 +1196,19 @@ enum Popup {
     /// `dir` is the repo the staged diff came from; `stat` summarises the files;
     /// `editing` toggles between preview and typing into `buffer`.
     CommitMessage { buffer: String, stat: String, dir: PathBuf, editing: bool },
+    /// The AI's junk-file suggestions, each toggleable, before deletion. Nothing
+    /// is deleted from here directly — approving hands the checked paths to the
+    /// normal delete confirmation.
+    JunkReview { items: Vec<JunkItem>, cursor: usize, scroll: usize },
+}
+
+/// One candidate the junk detector flagged: a path, why it thinks so, and
+/// whether it is currently checked for deletion.
+#[derive(Debug, Clone)]
+struct JunkItem {
+    path: PathBuf,
+    reason: String,
+    selected: bool,
 }
 
 /// What the encoding picker applies its choice to.
@@ -1245,6 +1258,43 @@ fn clean_ai_commit_message(raw: &str) -> String {
     }
     let text = lines.join("\n");
     text.trim().to_string()
+}
+
+/// Parse the junk detector's reply into concrete candidates. The model is asked
+/// for a JSON array of `{name, reason}`; we strip any fences, parse leniently,
+/// and keep only names that match a real entry in `names` (so a hallucinated or
+/// mistyped name can never target a file that was not shown). Returns items
+/// pre-checked for deletion.
+fn parse_junk_reply(raw: &str, names: &[(String, PathBuf)]) -> Vec<JunkItem> {
+    #[derive(serde::Deserialize)]
+    struct Hit {
+        name: String,
+        #[serde(default)]
+        reason: String,
+    }
+    // Isolate the JSON array: models sometimes wrap it in prose or ``` fences.
+    let start = raw.find('[');
+    let end = raw.rfind(']');
+    let json = match (start, end) {
+        (Some(s), Some(e)) if e > s => &raw[s..=e],
+        _ => return Vec::new(),
+    };
+    let hits: Vec<Hit> = serde_json::from_str(json).unwrap_or_default();
+    let mut out = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for hit in hits {
+        // Match by exact name against what was shown; ignore anything else.
+        if let Some((_, path)) = names.iter().find(|(n, _)| *n == hit.name) {
+            if seen.insert(path.clone()) {
+                out.push(JunkItem {
+                    path: path.clone(),
+                    reason: hit.reason.trim().to_string(),
+                    selected: true,
+                });
+            }
+        }
+    }
+    out
 }
 
 /// Cap a diff at roughly `max_bytes` on a line boundary so the AI request stays
@@ -1626,6 +1676,8 @@ enum MenuItem {
     AiShellCmd,
     /// Draft a git commit message from the staged diff.
     AiCommit,
+    /// Detect junk files in the current directory.
+    AiJunk,
     /// A submenu grouping the AI actions (drills down when chosen).
     AiMenu,
     /// A submenu grouping the file-transfer actions.
@@ -1689,6 +1741,7 @@ impl MenuItem {
             MenuItem::AiChat => tr(lang, "Chat", "チャット"),
             MenuItem::AiShellCmd => tr(lang, "Command from description", "説明からコマンド生成"),
             MenuItem::AiCommit => tr(lang, "Draft commit message", "コミットメッセージ生成"),
+            MenuItem::AiJunk => tr(lang, "Detect junk files", "ゴミファイル検出"),
             MenuItem::AiMenu => tr(lang, "AI ▸", "AI ▸"),
             MenuItem::SendMenu => tr(lang, "Transfer ▸", "転送 ▸"),
             MenuItem::WindowMenu => tr(lang, "Window ▸", "ウィンドウ ▸"),
@@ -1824,6 +1877,10 @@ enum AiPurpose {
     /// A git commit message drafted from the staged diff. `dir`/`stat` are
     /// carried through so the editable preview can commit into the right repo.
     CommitMessage { dir: PathBuf, stat: String },
+    /// Junk-file detection over a directory listing. `names` is the name→path
+    /// list the model was shown, so its answer can be validated back to real,
+    /// absolute paths (a hallucinated name simply matches nothing).
+    Junk { names: Vec<(String, PathBuf)> },
 }
 
 /// A pending AI request; the worker sends the assistant's reply (or an error
@@ -2349,6 +2406,8 @@ pub struct App {
     ai_rect: Rect,
     ai_scroll: usize,
     ai_lines: Vec<String>,
+    /// The junk-review list body rect, stashed so a click can map to a row.
+    junk_rect: Rect,
     diff_job: Option<DiffJob>,
     /// When the panes were last checked against the filesystem.
     last_watch: Instant,
@@ -2449,6 +2508,7 @@ impl App {
             ai_ready: None,
             ai_job: None,
             ai_rect: Rect::new(0, 0, 0, 0),
+            junk_rect: Rect::new(0, 0, 0, 0),
             ai_scroll: 0,
             ai_lines: Vec::new(),
             zoom_return: None,
@@ -2620,6 +2680,7 @@ impl App {
                 }
             }
             "aicommit" | "commitmsg" => self.start_ai_commit_message(),
+            "aijunk" | "junk" => self.start_ai_junk(),
             "reload" | "source" => self.reload_config(),
             // Mark / unmark entries whose name matches a glob (`:mark *.rs`).
             "mark" | "select" => self.cmd_mark(rest, true),
@@ -5024,6 +5085,74 @@ impl App {
         self.ai_request(AiPurpose::CommitMessage { dir, stat }, system, diff);
     }
 
+    /// Ask the AI which entries in the active pane look like junk (build output,
+    /// caches, temp/backup files, OS cruft), then show them for review. Only
+    /// metadata (names, sizes, dir flags) leaves the machine — never contents.
+    fn start_ai_junk(&mut self) {
+        if self.ai.is_none() {
+            self.message = Some("AI not configured — add cian.ai{...} to init.lua".into());
+            return;
+        }
+        // Snapshot the listing up front so the immutable pane borrow is dropped
+        // before `ai_ready()` (which needs &mut self).
+        let Some(pane) = self.active_pane() else { return };
+        let dir = pane.cwd.clone();
+        // Skip the ".." entry; everything else is fair game.
+        let rows: Vec<(String, PathBuf, bool, u64)> = pane
+            .entries
+            .iter()
+            .filter(|e| e.name != "..")
+            .map(|e| (e.name.clone(), e.path.clone(), e.is_dir, e.len))
+            .collect();
+        if rows.is_empty() {
+            self.message = Some("nothing here to scan".into());
+            return;
+        }
+        if !self.ai_ready() {
+            self.message = Some("AI unavailable (python, packages, or sign-in)".into());
+            return;
+        }
+        // The name→path map used both to build the prompt and to validate the
+        // reply back to real paths.
+        let names: Vec<(String, PathBuf)> =
+            rows.iter().map(|(n, p, _, _)| (n.clone(), p.clone())).collect();
+        // A compact one-line-per-entry listing (name, kind, size).
+        let mut listing = String::new();
+        for (name, _, is_dir, len) in rows.iter().take(400) {
+            let kind = if *is_dir { "dir " } else { "file" };
+            let size = if *is_dir { String::new() } else { cian_core::human_size(*len) };
+            listing.push_str(&format!("{}\t{}\t{}\n", kind, size, name));
+        }
+        let system = "You spot disposable JUNK in a directory listing: build output \
+             (target, build, dist, node_modules, __pycache__, .gradle), caches, \
+             logs, temp and editor-backup files (*.tmp, *.bak, *~, *.swp), and OS \
+             cruft (.DS_Store, Thumbs.db, desktop.ini). Be CONSERVATIVE — never \
+             flag source code, documents, configs, or anything whose loss would \
+             hurt. Reply with ONLY a JSON array of objects {\"name\": string, \
+             \"reason\": short string}, using names exactly as given. Empty array \
+             if nothing is clearly junk. No prose, no code fences."
+            .to_string();
+        let user = format!("Directory: {}\n\nEntries (kind, size, name):\n{}", dir.display(), listing);
+        self.message = Some("asking AI to find junk…".into());
+        self.ai_request(AiPurpose::Junk { names }, system, user);
+    }
+
+    /// Hand the checked junk candidates to the normal delete confirmation, so
+    /// removal goes through the same trash/permanent path (and its own y/Enter
+    /// approval) as any other delete — never straight to disk from here.
+    fn confirm_junk_deletion(&mut self) {
+        let targets: Vec<PathBuf> = if let Popup::JunkReview { items, .. } = &self.popup {
+            items.iter().filter(|it| it.selected).map(|it| it.path.clone()).collect()
+        } else {
+            return;
+        };
+        if targets.is_empty() {
+            self.message = Some("nothing checked".into());
+            return;
+        }
+        self.popup = Popup::ConfirmDelete { targets };
+    }
+
     /// Commit the staged changes with the (possibly edited) drafted message.
     fn commit_with_drafted_message(&mut self) {
         let (dir, message) = if let Popup::CommitMessage { dir, buffer, .. } = &self.popup {
@@ -5129,6 +5258,17 @@ impl App {
                         self.message = Some("AI returned no message".into());
                     } else {
                         self.popup = Popup::CommitMessage { buffer: msg, stat, dir, editing: false };
+                    }
+                }
+                Err(e) => self.message = Some(format!("AI: {}", e)),
+            },
+            AiPurpose::Junk { names, .. } => match result {
+                Ok(text) => {
+                    let items = parse_junk_reply(&text, &names);
+                    if items.is_empty() {
+                        self.message = Some("AI found no obvious junk".into());
+                    } else {
+                        self.popup = Popup::JunkReview { items, cursor: 0, scroll: 0 };
                     }
                 }
                 Err(e) => self.message = Some(format!("AI: {}", e)),
@@ -5756,6 +5896,32 @@ impl App {
                 }
                 MouseEventKind::Down(MouseButton::Right) => self.copy_ai_text(),
                 _ => {}
+            }
+            return;
+        }
+
+        // Junk review: a click toggles the row's checkbox (and moves the cursor
+        // to it); the wheel scrolls. Approval is still Enter/the button.
+        if matches!(self.popup, Popup::JunkReview { .. }) {
+            let body = self.junk_rect;
+            let row_at = |row: u16, scroll: usize, n: usize| -> Option<usize> {
+                if row < body.y || row >= body.y + body.height { return None; }
+                let idx = scroll + (row - body.y) as usize;
+                if idx < n { Some(idx) } else { None }
+            };
+            if let Popup::JunkReview { items, cursor, scroll } = &mut self.popup {
+                let n = items.len();
+                match ev.kind {
+                    MouseEventKind::Down(MouseButton::Left) => {
+                        if let Some(idx) = row_at(row, *scroll, n) {
+                            *cursor = idx;
+                            items[idx].selected = !items[idx].selected;
+                        }
+                    }
+                    MouseEventKind::ScrollDown => *scroll = (*scroll + 1).min(n.saturating_sub(1)),
+                    MouseEventKind::ScrollUp => *scroll = scroll.saturating_sub(1),
+                    _ => {}
+                }
             }
             return;
         }
@@ -6518,8 +6684,10 @@ impl App {
                 if self.focused == FocusedPane::Shell {
                     v.insert(0, MenuItem::AiShellCmd);
                 } else {
-                    // In a file pane the AI can draft a commit for its repo.
+                    // In a file pane the AI can draft a commit for its repo and
+                    // scan the folder for junk.
                     v.insert(0, MenuItem::AiCommit);
+                    v.insert(0, MenuItem::AiJunk);
                 }
                 v.push(MenuItem::Back);
                 Some(v)
@@ -6708,6 +6876,7 @@ impl App {
             MenuItem::AiChat => self.open_ai_chat(),
             MenuItem::AiShellCmd => self.start_ai_shell_prompt(),
             MenuItem::AiCommit => self.start_ai_commit_message(),
+            MenuItem::AiJunk => self.start_ai_junk(),
             MenuItem::Lang => {
                 // Flip the interface language; every localized string reads
                 // `self.lang` at draw time, so the next frame is fully in the
@@ -7531,6 +7700,30 @@ impl App {
                     }
                 }
                 KeyCode::Esc | KeyCode::Char('n') => self.popup = Popup::None,
+                _ => {}
+            }
+            return Ok(());
+        }
+        if let Popup::JunkReview { items, cursor, .. } = &mut self.popup {
+            let n = items.len();
+            match key.code {
+                KeyCode::Esc | KeyCode::Char('q') => self.popup = Popup::None,
+                KeyCode::Char('j') | KeyCode::Down => {
+                    if n > 0 { *cursor = (*cursor + 1).min(n - 1); }
+                }
+                KeyCode::Char('k') | KeyCode::Up => *cursor = cursor.saturating_sub(1),
+                KeyCode::Char('g') | KeyCode::Home => *cursor = 0,
+                KeyCode::Char('G') | KeyCode::End => *cursor = n.saturating_sub(1),
+                // Space toggles the item under the cursor; `a` toggles all.
+                KeyCode::Char(' ') => {
+                    if let Some(it) = items.get_mut(*cursor) { it.selected = !it.selected; }
+                }
+                KeyCode::Char('a') => {
+                    let all_on = items.iter().all(|it| it.selected);
+                    for it in items.iter_mut() { it.selected = !all_on; }
+                }
+                // Enter/d hands the checked paths to the normal delete confirm.
+                KeyCode::Enter | KeyCode::Char('d') => self.confirm_junk_deletion(),
                 _ => {}
             }
             return Ok(());
@@ -9455,6 +9648,10 @@ fn draw(f: &mut Frame, app: &mut App) {
         draw_commit_message(f, area, app);
         return;
     }
+    if matches!(app.popup, Popup::JunkReview { .. }) {
+        draw_junk_review(f, area, app);
+        return;
+    }
     if !matches!(app.popup, Popup::None) {
         // Remember where the context menu landed so a click can hit its rows.
         if let Popup::ContextMenu { items, at, .. } = &app.popup {
@@ -10895,6 +11092,68 @@ fn draw_commit_message(f: &mut Frame, area: Rect, app: &mut App) {
     f.render_widget(Paragraph::new(lines), inner);
 }
 
+/// The junk-review list: a checkbox per candidate, its name, size and the
+/// reason the AI gave. Nothing is deleted here — Enter hands the checked ones
+/// to the normal delete confirmation.
+fn draw_junk_review(f: &mut Frame, area: Rect, app: &mut App) {
+    let lang = app.lang;
+    let width: u16 = 88u16.min(area.width.saturating_sub(2));
+    let height = area.height.saturating_sub(2).clamp(8, 30);
+    let rect = centered_rect(width, height, area);
+    f.render_widget(Clear, rect);
+    let (n, checked) = if let Popup::JunkReview { items, .. } = &app.popup {
+        (items.len(), items.iter().filter(|i| i.selected).count())
+    } else {
+        (0, 0)
+    };
+    let title = if lang == Lang::Ja {
+        format!(" ゴミ候補  {}/{} 選択 ", checked, n)
+    } else {
+        format!(" junk candidates  {}/{} checked ", checked, n)
+    };
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(border_type())
+        .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
+        .style(Style::default().bg(theme().popup_bg))
+        .title(title)
+        .title_bottom(tr(lang,
+            " Space/click=toggle  a=all  Enter/d=delete checked  Esc=cancel ",
+            " Space/クリック=切替  a=全て  Enter/d=選択を削除  Esc=取消 "));
+    let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
+    f.render_widget(block, rect);
+
+    let body_h = inner.height as usize;
+    let body_w = inner.width as usize;
+    let mut rows: Vec<Line> = Vec::new();
+    if let Popup::JunkReview { items, cursor, scroll } = &mut app.popup {
+        // Keep the cursor in view.
+        if *cursor < *scroll {
+            *scroll = *cursor;
+        } else if *cursor >= *scroll + body_h {
+            *scroll = *cursor + 1 - body_h;
+        }
+        for (i, it) in items.iter().enumerate().skip(*scroll).take(body_h) {
+            let sel = i == *cursor;
+            let checkbox = if it.selected { "[x] " } else { "[ ] " };
+            let box_c = if it.selected { theme().mark_fg } else { Color::Rgb(120, 120, 140) };
+            let name = it.path.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+            let name_c = if sel { theme().accent } else { Color::Rgb(230, 230, 245) };
+            let reason = if it.reason.is_empty() { String::new() } else { format!("— {}", it.reason) };
+            let base = if sel { Style::default().bg(theme().selected_bg) } else { Style::default() };
+            rows.push(Line::from(vec![
+                Span::styled(checkbox, base.fg(box_c).add_modifier(Modifier::BOLD)),
+                Span::styled(format!("{}  ", pad_to(&truncate_middle(&name, 28), 28)),
+                    base.fg(name_c).add_modifier(Modifier::BOLD)),
+                Span::styled(truncate(&reason, body_w.saturating_sub(36)),
+                    base.fg(Color::Rgb(150, 150, 170))),
+            ]));
+        }
+        app.junk_rect = Rect::new(inner.x, inner.y, inner.width, body_h.min(items.len().saturating_sub(*scroll)) as u16);
+    }
+    f.render_widget(Paragraph::new(rows), inner);
+}
+
 #[allow(clippy::too_many_arguments)]
 fn draw_popup(
     f: &mut Frame,
@@ -12161,6 +12420,7 @@ fn draw_popup(
         | Popup::Archive { .. }
         | Popup::AiChat { .. }
         | Popup::CommitMessage { .. }
+        | Popup::JunkReview { .. }
         | Popup::None => return,
     };
 
@@ -12449,6 +12709,79 @@ mod tests {
         assert_eq!(clean_ai_command("```sh\nls -la\n```"), "ls -la");
         assert_eq!(clean_ai_command("`git status`"), "git status");
         assert_eq!(clean_ai_command("\n\n  find . -name '*.log'  \n"), "find . -name '*.log'");
+    }
+
+    #[test]
+    fn parse_junk_reply_validates_names_and_strips_prose() {
+        let names = vec![
+            ("target".to_string(), PathBuf::from("/p/target")),
+            ("main.rs".to_string(), PathBuf::from("/p/main.rs")),
+            (".DS_Store".to_string(), PathBuf::from("/p/.DS_Store")),
+        ];
+        // Fenced, with prose around it, and a hallucinated name that must be dropped.
+        let raw = "Here is the junk:\n```json\n[\
+            {\"name\":\"target\",\"reason\":\"build output\"},\
+            {\"name\":\".DS_Store\",\"reason\":\"macOS cruft\"},\
+            {\"name\":\"nonexistent\",\"reason\":\"made up\"}\
+            ]\n```\n";
+        let items = parse_junk_reply(raw, &names);
+        let got: Vec<&str> = items.iter().map(|i| i.path.file_name().unwrap().to_str().unwrap()).collect();
+        assert_eq!(got, vec!["target", ".DS_Store"], "only shown names survive");
+        assert!(items.iter().all(|i| i.selected), "candidates start checked");
+        assert_eq!(items[0].reason, "build output");
+        // Never flags source — it just isn't in the reply, and couldn't be added.
+        assert!(!got.contains(&"main.rs"));
+    }
+
+    #[test]
+    fn parse_junk_reply_empty_or_garbage_is_no_items() {
+        let names = vec![("x".to_string(), PathBuf::from("/p/x"))];
+        assert!(parse_junk_reply("[]", &names).is_empty());
+        assert!(parse_junk_reply("I could not find any junk.", &names).is_empty());
+    }
+
+    #[test]
+    fn junk_review_approval_routes_checked_paths_to_delete_confirm() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        app.popup = Popup::JunkReview {
+            items: vec![
+                JunkItem { path: PathBuf::from("/p/target"), reason: "build".into(), selected: true },
+                JunkItem { path: PathBuf::from("/p/keep"), reason: "".into(), selected: false },
+                JunkItem { path: PathBuf::from("/p/cache"), reason: "cache".into(), selected: true },
+            ],
+            cursor: 0,
+            scroll: 0,
+        };
+        // Enter approves: only the checked ones go to the delete confirmation.
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+        match &app.popup {
+            Popup::ConfirmDelete { targets } => {
+                assert_eq!(targets, &vec![PathBuf::from("/p/target"), PathBuf::from("/p/cache")]);
+            }
+            other => panic!("expected the delete confirm, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn junk_review_space_toggles_and_a_selects_all() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        app.popup = Popup::JunkReview {
+            items: vec![
+                JunkItem { path: PathBuf::from("/p/1"), reason: String::new(), selected: true },
+                JunkItem { path: PathBuf::from("/p/2"), reason: String::new(), selected: true },
+            ],
+            cursor: 0,
+            scroll: 0,
+        };
+        // Space unchecks the first.
+        app.handle_key(code(KeyCode::Char(' '))).unwrap();
+        // `a` toggles all: since not all are on, it turns all on.
+        app.handle_key(code(KeyCode::Char('a'))).unwrap();
+        if let Popup::JunkReview { items, .. } = &app.popup {
+            assert!(items.iter().all(|i| i.selected), "a turned everything on");
+        } else {
+            panic!("popup changed");
+        }
     }
 
     #[test]
