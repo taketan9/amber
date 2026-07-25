@@ -217,6 +217,46 @@ fn parse_branch_line(rest: &str) -> (String, u32, u32) {
     (branch, ahead, behind)
 }
 
+/// The staged diff (`git diff --cached`), or `None` if not in a repo. An empty
+/// string means "in a repo, but nothing staged".
+pub fn staged_diff(dir: &Path) -> Option<String> {
+    // `--no-color` so the AI sees plain text, not ANSI escapes.
+    let out = git_output(dir, &["diff", "--cached", "--no-color"])?;
+    Some(String::from_utf8_lossy(&out).into_owned())
+}
+
+/// A short summary of what is staged (`git diff --cached --stat`), for showing
+/// the user which files a generated message covers.
+pub fn staged_stat(dir: &Path) -> Option<String> {
+    let out = git_output(dir, &["diff", "--cached", "--stat", "--no-color"])?;
+    Some(String::from_utf8_lossy(&out).trim_end().to_string())
+}
+
+/// Commit the staged changes with `message`. Fails if nothing is staged or the
+/// commit is rejected (e.g. a hook, or a missing identity); the git error text
+/// is returned so it can be shown in-app. Output is captured, never printed, so
+/// it cannot corrupt the TUI.
+pub fn commit(dir: &Path, message: &str) -> Result<()> {
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(["commit", "-m", message])
+        .output()
+        .context("run git commit")?;
+    if out.status.success() {
+        Ok(())
+    } else {
+        let err = String::from_utf8_lossy(&out.stderr);
+        let err = err.trim();
+        let msg = if err.is_empty() {
+            String::from_utf8_lossy(&out.stdout).trim().to_string()
+        } else {
+            err.to_string()
+        };
+        anyhow::bail!("{}", if msg.is_empty() { "git commit failed".into() } else { msg })
+    }
+}
+
 /// `git add` the given paths.
 pub fn stage(dir: &Path, paths: &[PathBuf]) -> Result<()> {
     run_git(dir, "add", paths)
@@ -324,5 +364,43 @@ mod tests {
         unstage(dir, &[dir.join("staged.txt")]).unwrap();
         let st = status(dir).unwrap();
         assert_eq!(st.mark_for(&dir.join("staged.txt")), Some(GitMark::Untracked));
+    }
+
+    /// The staged diff feeds the AI commit-message feature; commit clears it.
+    /// Sets an identity locally so the test does not depend on the runner's.
+    #[test]
+    fn staged_diff_and_commit_round_trip() {
+        let d = tempfile::tempdir().unwrap();
+        let dir = &std::fs::canonicalize(d.path()).unwrap();
+        let init_ok = Command::new("git")
+            .arg("-C")
+            .arg(dir)
+            .args(["init", "-q"])
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if !init_ok {
+            eprintln!("git not available; skipping");
+            return;
+        }
+        // A repo-local identity, so `commit` does not depend on global config.
+        for kv in [["user.email", "t@example.com"], ["user.name", "Test"]] {
+            let _ = Command::new("git").arg("-C").arg(dir).args(["config", kv[0], kv[1]]).status();
+        }
+
+        // Nothing staged yet: an empty (but Some) diff.
+        assert_eq!(staged_diff(dir).as_deref(), Some(""));
+
+        std::fs::write(dir.join("a.txt"), "hello\n").unwrap();
+        stage(dir, &[dir.join("a.txt")]).unwrap();
+        let diff = staged_diff(dir).expect("in a repo");
+        assert!(diff.contains("a.txt") && diff.contains("+hello"), "diff:\n{diff}");
+
+        commit(dir, "add a.txt").unwrap();
+        // Post-commit the stage is empty again.
+        assert_eq!(staged_diff(dir).as_deref(), Some(""));
+        // The message landed.
+        let log = git_output(dir, &["log", "-1", "--pretty=%s"]).unwrap();
+        assert_eq!(String::from_utf8_lossy(&log).trim(), "add a.txt");
     }
 }

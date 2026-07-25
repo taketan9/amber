@@ -369,6 +369,18 @@ sign-in are unavailable the whole feature stays silent and cian runs exactly as
 before; `auth_mode = "mock"` gives an offline echo for wiring it up, and an
 `api_base_url` points it at a local OpenAI-compatible server (Ollama, LM Studio).
 
+Beyond chat, the AI can act on what you have open, always with a human in the
+loop:
+
+- **Command from a description** (shell pane): `:aicmd <what you want>`, or the
+  right-click **AI ▸** menu. The generated command is shown for review and only
+  inserted at the prompt — never run for you.
+- **Commit message** (file pane): `:aicommit`, or right-click **AI ▸ → Draft
+  commit message**. cian reads the staged diff (`git diff --cached`) and drafts
+  a Conventional-Commits-style message; you get an editable preview (`e` to
+  edit, `Enter`/`c` to commit, `Esc` to cancel) before anything is committed.
+  With nothing staged it says so rather than committing an empty change.
+
 The AI part is the one place cian is not a single self-contained binary — it
 opts into an external interpreter and network — which is why it is strictly
 optional and off unless configured. See

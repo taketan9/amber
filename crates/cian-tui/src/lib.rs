@@ -1192,6 +1192,10 @@ enum Popup {
     /// A copy/move failed because the destination needs administrator rights.
     /// Offers to redo it elevated (Windows only).
     ConfirmElevate { op: PendingOp, targets: Vec<PathBuf>, dest: PathBuf },
+    /// An AI-drafted commit message, shown editable before it is committed.
+    /// `dir` is the repo the staged diff came from; `stat` summarises the files;
+    /// `editing` toggles between preview and typing into `buffer`.
+    CommitMessage { buffer: String, stat: String, dir: PathBuf, editing: bool },
 }
 
 /// What the encoding picker applies its choice to.
@@ -1225,6 +1229,40 @@ fn clean_ai_command(raw: &str) -> String {
         return t.trim_matches('`').trim().to_string();
     }
     String::new()
+}
+
+/// Strip code fences and leading/trailing blank lines from an AI-drafted commit
+/// message. Models sometimes wrap the whole thing in ```; the content inside is
+/// what we want.
+fn clean_ai_commit_message(raw: &str) -> String {
+    let mut lines: Vec<&str> = raw.lines().collect();
+    // Drop a leading ```… fence and its matching close, if present.
+    if lines.first().map(|l| l.trim_start().starts_with("```")).unwrap_or(false) {
+        lines.remove(0);
+        if let Some(pos) = lines.iter().rposition(|l| l.trim() == "```") {
+            lines.truncate(pos);
+        }
+    }
+    let text = lines.join("\n");
+    text.trim().to_string()
+}
+
+/// Cap a diff at roughly `max_bytes` on a line boundary so the AI request stays
+/// within budget, appending a marker when truncated.
+fn truncate_diff_for_ai(diff: &str, max_bytes: usize) -> String {
+    if diff.len() <= max_bytes {
+        return diff.to_string();
+    }
+    let mut out = String::with_capacity(max_bytes + 64);
+    for line in diff.lines() {
+        if out.len() + line.len() + 1 > max_bytes {
+            break;
+        }
+        out.push_str(line);
+        out.push('\n');
+    }
+    out.push_str("\n[diff truncated — summarise from what is shown above]\n");
+    out
 }
 
 /// Shell-style wildcard match: `*` matches any run, `?` any one char.
@@ -1586,6 +1624,8 @@ enum MenuItem {
     AiChat,
     /// Generate a shell command from a description (shell pane).
     AiShellCmd,
+    /// Draft a git commit message from the staged diff.
+    AiCommit,
     /// A submenu grouping the AI actions (drills down when chosen).
     AiMenu,
     /// A submenu grouping the file-transfer actions.
@@ -1634,6 +1674,7 @@ impl MenuItem {
             },
             MenuItem::AiChat => tr(lang, "Chat…", "チャット…"),
             MenuItem::AiShellCmd => tr(lang, "Command from description…", "説明からコマンド生成…"),
+            MenuItem::AiCommit => tr(lang, "Draft commit message…", "コミットメッセージ生成…"),
             MenuItem::AiMenu => tr(lang, "AI ▸", "AI ▸"),
             MenuItem::SendMenu => tr(lang, "Transfer ▸", "転送 ▸"),
             MenuItem::Back => tr(lang, "◂ Back", "◂ 戻る"),
@@ -1759,6 +1800,9 @@ enum AiPurpose {
     Chat,
     /// A shell command to review and insert at the prompt.
     ShellCommand,
+    /// A git commit message drafted from the staged diff. `dir`/`stat` are
+    /// carried through so the editable preview can commit into the right repo.
+    CommitMessage { dir: PathBuf, stat: String },
 }
 
 /// A pending AI request; the worker sends the assistant's reply (or an error
@@ -2554,6 +2598,7 @@ impl App {
                     self.start_ai_shell_cmd(rest);
                 }
             }
+            "aicommit" | "commitmsg" => self.start_ai_commit_message(),
             "reload" | "source" => self.reload_config(),
             // Mark / unmark entries whose name matches a glob (`:mark *.rs`).
             "mark" | "select" => self.cmd_mark(rest, true),
@@ -4889,6 +4934,70 @@ impl App {
         self.ai_request(AiPurpose::ShellCommand, system, description);
     }
 
+    /// Draft a commit message from the staged diff of the active pane's repo,
+    /// then show it editable before committing. Silent-ish when AI is off, and
+    /// helpful when the stage is empty (the common "forgot to `git add`" case).
+    fn start_ai_commit_message(&mut self) {
+        if self.ai.is_none() {
+            self.message = Some("AI not configured — add cian.ai{...} to init.lua".into());
+            return;
+        }
+        let Some(dir) = self.active_pane().map(|p| p.cwd.clone()) else { return };
+        // Not in a repo at all?
+        let Some(diff) = cian_core::git::staged_diff(&dir) else {
+            self.message = Some("not a git repository".into());
+            return;
+        };
+        if diff.trim().is_empty() {
+            self.message = Some("nothing staged — `git add` first (or stage from the pane)".into());
+            return;
+        }
+        if !self.ai_ready() {
+            self.message = Some("AI unavailable (python, packages, or sign-in)".into());
+            return;
+        }
+        let stat = cian_core::git::staged_stat(&dir).unwrap_or_default();
+        // Keep the payload bounded: a huge diff would blow the token budget and
+        // rarely improves the message. The stat line still names every file.
+        let diff = truncate_diff_for_ai(&diff, 12_000);
+        let system = "You write a git commit message for the given staged diff. \
+             Use the Conventional Commits style: a concise subject line under ~70 \
+             characters (an optional type prefix like feat:/fix:/refactor: is fine), \
+             then a blank line and a short body of bullet points explaining WHY, \
+             only if it adds something. Output ONLY the commit message — no code \
+             fences, no preamble."
+            .to_string();
+        self.message = Some("asking AI to draft a commit message…".into());
+        self.ai_request(AiPurpose::CommitMessage { dir, stat }, system, diff);
+    }
+
+    /// Commit the staged changes with the (possibly edited) drafted message.
+    fn commit_with_drafted_message(&mut self) {
+        let (dir, message) = if let Popup::CommitMessage { dir, buffer, .. } = &self.popup {
+            (dir.clone(), buffer.trim().to_string())
+        } else {
+            return;
+        };
+        if message.is_empty() {
+            self.message = Some("empty message — nothing committed".into());
+            return;
+        }
+        self.popup = Popup::None;
+        match cian_core::git::commit(&dir, &message) {
+            Ok(()) => {
+                let subject = message.lines().next().unwrap_or("").to_string();
+                self.message = Some(format!("✔ committed: {}", truncate(&subject, 60)));
+                // The stage is now clean; refresh the markers.
+                self.invalidate_git();
+            }
+            Err(e) => {
+                self.popup = Popup::Notice {
+                    lines: vec!["commit failed:".into(), String::new(), e.to_string()],
+                };
+            }
+        }
+    }
+
     /// The shell program's base name, for the command-generation prompt.
     fn shell_cmd_name(&self) -> String {
         std::path::Path::new(self.shell.command())
@@ -4956,6 +5065,17 @@ impl App {
                         self.message = Some("AI returned no command".into());
                     } else {
                         self.popup = Popup::AiShellConfirm { command };
+                    }
+                }
+                Err(e) => self.message = Some(format!("AI: {}", e)),
+            },
+            AiPurpose::CommitMessage { dir, stat } => match result {
+                Ok(text) => {
+                    let msg = clean_ai_commit_message(&text);
+                    if msg.is_empty() {
+                        self.message = Some("AI returned no message".into());
+                    } else {
+                        self.popup = Popup::CommitMessage { buffer: msg, stat, dir, editing: false };
                     }
                 }
                 Err(e) => self.message = Some(format!("AI: {}", e)),
@@ -6341,6 +6461,9 @@ impl App {
                 let mut v = vec![MenuItem::AiChat];
                 if self.focused == FocusedPane::Shell {
                     v.insert(0, MenuItem::AiShellCmd);
+                } else {
+                    // In a file pane the AI can draft a commit for its repo.
+                    v.insert(0, MenuItem::AiCommit);
                 }
                 v.push(MenuItem::Back);
                 Some(v)
@@ -6481,6 +6604,7 @@ impl App {
             MenuItem::StopLog => self.stop_session_log(),
             MenuItem::AiChat => self.open_ai_chat(),
             MenuItem::AiShellCmd => self.start_ai_shell_prompt(),
+            MenuItem::AiCommit => self.start_ai_commit_message(),
             MenuItem::Lang => {
                 // Flip the interface language; every localized string reads
                 // `self.lang` at draw time, so the next frame is fully in the
@@ -7277,6 +7401,33 @@ impl App {
                     self.insert_ai_command_at_prompt(&cmd);
                 }
                 KeyCode::Char('n') | KeyCode::Esc => self.popup = Popup::None,
+                _ => {}
+            }
+            return Ok(());
+        }
+        if let Popup::CommitMessage { buffer, editing, .. } = &mut self.popup {
+            if *editing {
+                // Typing mode: edit the message freely; Esc returns to preview.
+                match key.code {
+                    KeyCode::Esc => *editing = false,
+                    KeyCode::Enter => buffer.push('\n'),
+                    KeyCode::Backspace => { buffer.pop(); }
+                    KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        buffer.push(c);
+                    }
+                    _ => {}
+                }
+                return Ok(());
+            }
+            // Preview mode: commit, edit, or cancel.
+            match key.code {
+                KeyCode::Enter | KeyCode::Char('c') => self.commit_with_drafted_message(),
+                KeyCode::Char('e') => {
+                    if let Popup::CommitMessage { editing, .. } = &mut self.popup {
+                        *editing = true;
+                    }
+                }
+                KeyCode::Esc | KeyCode::Char('n') => self.popup = Popup::None,
                 _ => {}
             }
             return Ok(());
@@ -9197,6 +9348,10 @@ fn draw(f: &mut Frame, app: &mut App) {
         draw_ai_chat(f, area, app);
         return;
     }
+    if matches!(app.popup, Popup::CommitMessage { .. }) {
+        draw_commit_message(f, area, app);
+        return;
+    }
     if !matches!(app.popup, Popup::None) {
         // Remember where the context menu landed so a click can hit its rows.
         if let Popup::ContextMenu { items, at, .. } = &app.popup {
@@ -10565,6 +10720,73 @@ fn draw_ai_chat(f: &mut Frame, area: Rect, app: &mut App) {
     );
 }
 
+/// The editable commit-message preview. `editing` shows a caret and a different
+/// footer; otherwise it is a read-only preview with commit / edit / cancel keys.
+fn draw_commit_message(f: &mut Frame, area: Rect, app: &mut App) {
+    let lang = app.lang;
+    let Popup::CommitMessage { buffer, stat, editing, .. } = &app.popup else { return };
+    let editing = *editing;
+    let width: u16 = 80u16.min(area.width.saturating_sub(2));
+    let height = area.height.saturating_sub(2).clamp(10, 30);
+    let rect = centered_rect(width, height, area);
+    f.render_widget(Clear, rect);
+    let title = if editing {
+        tr(lang, " commit message — editing ", " コミットメッセージ — 編集中 ")
+    } else {
+        tr(lang, " commit message ", " コミットメッセージ ")
+    };
+    let footer = if editing {
+        tr(lang, " type to edit   Enter=newline   Esc=done editing ",
+              " 入力で編集   Enter=改行   Esc=編集終了 ")
+    } else {
+        tr(lang, " Enter/c=commit   e=edit   Esc=cancel ",
+              " Enter/c=コミット   e=編集   Esc=取消 ")
+    };
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(border_type())
+        .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
+        .style(Style::default().bg(theme().popup_bg))
+        .title(title)
+        .title_bottom(footer);
+    let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
+    f.render_widget(block, rect);
+
+    let body_w = inner.width.max(1) as usize;
+    let mut lines: Vec<Line> = Vec::new();
+    // The staged-files summary, quietly, so the reviewer sees what it covers.
+    if !stat.is_empty() {
+        for raw in stat.lines() {
+            for chunk in wrap_str(raw, body_w) {
+                lines.push(Line::from(Span::styled(
+                    chunk,
+                    Style::default().fg(Color::Rgb(140, 140, 165)),
+                )));
+            }
+        }
+        lines.push(Line::from(Span::styled(
+            "─".repeat(body_w.min(60)),
+            Style::default().fg(Color::Rgb(90, 90, 110)),
+        )));
+    }
+    // The message itself. A trailing block marks the edit point when editing.
+    let subject_c = Color::Rgb(235, 235, 245);
+    let body_c = Color::Rgb(205, 210, 220);
+    let shown = if editing { format!("{}\u{2588}", buffer) } else { buffer.clone() };
+    for (i, raw) in shown.split('\n').enumerate() {
+        let c = if i == 0 { subject_c } else { body_c };
+        let modifier = if i == 0 { Modifier::BOLD } else { Modifier::empty() };
+        let wrapped = wrap_str(raw, body_w);
+        if wrapped.is_empty() {
+            lines.push(Line::from(""));
+        }
+        for chunk in wrapped {
+            lines.push(Line::from(Span::styled(chunk, Style::default().fg(c).add_modifier(modifier))));
+        }
+    }
+    f.render_widget(Paragraph::new(lines), inner);
+}
+
 #[allow(clippy::too_many_arguments)]
 fn draw_popup(
     f: &mut Frame,
@@ -11830,6 +12052,7 @@ fn draw_popup(
         | Popup::DirCompare { .. }
         | Popup::Archive { .. }
         | Popup::AiChat { .. }
+        | Popup::CommitMessage { .. }
         | Popup::None => return,
     };
 
@@ -12118,6 +12341,85 @@ mod tests {
         assert_eq!(clean_ai_command("```sh\nls -la\n```"), "ls -la");
         assert_eq!(clean_ai_command("`git status`"), "git status");
         assert_eq!(clean_ai_command("\n\n  find . -name '*.log'  \n"), "find . -name '*.log'");
+    }
+
+    #[test]
+    fn clean_ai_commit_message_strips_a_wrapping_fence() {
+        assert_eq!(clean_ai_commit_message("feat: add x\n\n- why"), "feat: add x\n\n- why");
+        assert_eq!(clean_ai_commit_message("```\nfix: bug\n```"), "fix: bug");
+        assert_eq!(clean_ai_commit_message("\n\n  chore: tidy  \n\n"), "chore: tidy");
+    }
+
+    #[test]
+    fn truncate_diff_for_ai_caps_on_a_line_boundary() {
+        let big = "line one\nline two\nline three\n".repeat(100);
+        let out = truncate_diff_for_ai(&big, 40);
+        assert!(out.len() < big.len());
+        assert!(out.contains("truncated"), "marks the cut: {out:?}");
+        // Only whole lines are kept before the marker.
+        let before_marker = out.split("\n\n[").next().unwrap();
+        assert!(before_marker.split('\n').all(|l| l.is_empty() || big.contains(l)));
+    }
+
+    /// The whole commit-message flow with a throwaway repo: draft (mock), edit,
+    /// and commit — then the message is in the log and the stage is clean.
+    #[test]
+    fn ai_commit_message_flow_drafts_edits_and_commits() {
+        let have_py = std::process::Command::new("python3")
+            .arg("--version")
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false);
+        if !have_py {
+            eprintln!("no python3; skipping");
+            return;
+        }
+        let d = tempfile::tempdir().unwrap();
+        let dir = std::fs::canonicalize(d.path()).unwrap();
+        let git_ok = std::process::Command::new("git")
+            .arg("-C").arg(&dir).args(["init", "-q"]).status()
+            .map(|s| s.success()).unwrap_or(false);
+        if !git_ok {
+            eprintln!("no git; skipping");
+            return;
+        }
+        for kv in [["user.email", "t@example.com"], ["user.name", "Test"]] {
+            let _ = std::process::Command::new("git").arg("-C").arg(&dir).args(["config", kv[0], kv[1]]).status();
+        }
+        std::fs::write(dir.join("a.txt"), "hello\n").unwrap();
+        cian_core::git::stage(&dir, &[dir.join("a.txt")]).unwrap();
+
+        let mut config = cian_lua::Config::default();
+        config.ai = Some(cian_lua::AiOptions {
+            python: "python3".into(),
+            auth_mode: "mock".into(),
+            ..Default::default()
+        });
+        let mut app = App::new(dir.clone(), dir.clone(), config).unwrap();
+
+        app.start_ai_commit_message();
+        let start = Instant::now();
+        while app.ai_job.is_some() && start.elapsed() < Duration::from_secs(10) {
+            app.poll_ai_job();
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(matches!(app.popup, Popup::CommitMessage { .. }), "draft popup, got {:?}", app.popup);
+
+        // Replace the drafted text with our own: e → edit, clear, type.
+        app.handle_key(key('e')).unwrap();
+        if let Popup::CommitMessage { buffer, .. } = &mut app.popup {
+            buffer.clear();
+        }
+        for c in "add a.txt".chars() {
+            app.handle_key(key(c)).unwrap();
+        }
+        app.handle_key(code(KeyCode::Esc)).unwrap(); // leave edit mode
+        app.handle_key(code(KeyCode::Enter)).unwrap(); // commit
+
+        assert!(matches!(app.popup, Popup::None), "committed, popup closed: {:?}", app.popup);
+        assert_eq!(cian_core::git::staged_diff(&dir).as_deref(), Some(""), "stage is clean");
+        let log = std::process::Command::new("git").arg("-C").arg(&dir).args(["log", "-1", "--pretty=%s"]).output().unwrap();
+        assert_eq!(String::from_utf8_lossy(&log.stdout).trim(), "add a.txt");
     }
 
     #[test]
