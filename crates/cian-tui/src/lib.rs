@@ -4179,6 +4179,18 @@ impl App {
         self.popup = Popup::None;
         self.stop_find();
 
+        // A grep hit (content match) opens the viewer right on the matched
+        // line — the whole reason you grepped. A name match navigates to it.
+        if let Some((lineno, _)) = &hit.line {
+            let name = hit
+                .path
+                .file_name()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_else(|| hit.rel.display().to_string());
+            self.open_viewer_at(&hit.path, &name, lineno.saturating_sub(1));
+            return Ok(());
+        }
+
         let (dir, name) = if hit.is_dir {
             (hit.path.clone(), None)
         } else {
@@ -12740,6 +12752,33 @@ mod tests {
 
         let Popup::FindResults { hits, .. } = &app.popup else { panic!("no results") };
         assert_eq!(hits.len(), 3, "got {:?}", hits.iter().map(|h| &h.rel).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn choosing_a_grep_hit_opens_the_viewer_at_that_line() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::write(
+            d.path().join("code.txt"),
+            "first line\nsecond has TARGET here\nthird line\n",
+        )
+        .unwrap();
+        let p = d.path().to_path_buf();
+        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+
+        app.start_find("TARGET", cian_core::search::Mode::Content);
+        drain_find(&mut app);
+        let has_hit = matches!(&app.popup, Popup::FindResults { hits, .. } if !hits.is_empty());
+        assert!(has_hit, "grep found the line");
+
+        app.open_find_hit().unwrap();
+        // The viewer opened on the matched line (line 2 → 0-based index 1).
+        match &app.popup {
+            Popup::Viewer { line, view, .. } => {
+                assert_eq!(*line, 1, "cursor on the matched line");
+                assert!(view.lines[*line].contains("TARGET"));
+            }
+            other => panic!("expected the viewer, got {:?}", other),
+        }
     }
 
     /// Choosing a result should leave the pane somewhere useful: in the file's

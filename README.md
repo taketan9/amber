@@ -231,10 +231,14 @@ usually less work to set up than a credential list is to maintain.
 **`F3`** answers "what is in here" without leaving cian. On a text file it
 opens a scrollable viewer with line numbers; on a binary one, a hex dump,
 since showing a compiled file as text is a screenful of mojibake that answers
-nothing. Only the first 4 MB is read, so opening a huge log is instant. In the
-viewer you can drag to select and `c` to copy the selection, and `Shift+Enter`
-switches the text encoding (UTF-8 / Shift_JIS / UTF-16) when a file was decoded
-wrong.
+nothing. Only the first 4 MB is read, so opening a huge log is instant.
+
+The viewer is vim-flavoured: a cursor moves with `h`/`j`/`k`/`l`, `w`/`b`,
+`0`/`$`, `gg`/`G` and `Ctrl-d`/`Ctrl-u`; `/` searches (all matches highlighted,
+`n`/`N` step through them), `42G` jumps to a line, `%` to the matching bracket,
+`{`/`}` between paragraphs. `v` / `V` / `Ctrl-v` start character-, line- and
+block-wise visual selection, and `y` (or `c`) copies it. `Shift+Enter` switches
+the text encoding (UTF-8 / Shift_JIS / UTF-16) when a file was decoded wrong.
 
 On an archive — **zip** (also `.jar`, `.whl`, `.epub`) or a **tarball**
 (`.tar`, `.tar.gz`, `.tgz`) — it lists the members instead, with their unpacked
@@ -256,9 +260,10 @@ they are found rather than after the walk finishes, `Esc` stops it, and Enter
 on a result moves the pane into that directory with the cursor on the entry.
 
 **`Ctrl+F`** greps *inside* the files instead, listing each matching line with
-its number. Binary files are skipped (a match inside a compiled object is
-unreadable and answers nothing) and so are files over 8 MB, so a stray database
-dump cannot stall the search.
+its number. `Enter` on a grep hit opens the F3 viewer right on that line — the
+whole point of grepping. Binary files are skipped (a match inside a compiled
+object is unreadable and answers nothing) and so are files over 8 MB, so a
+stray database dump cannot stall the search.
 
 The walk is breadth-first, so shallow matches — usually the wanted ones —
 arrive first and a search abandoned early has still produced something useful.
