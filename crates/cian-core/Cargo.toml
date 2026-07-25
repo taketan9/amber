@@ -29,6 +29,11 @@ trash = { version = "5.2.3", default-features = false, features = ["coinit_apart
 # cryptographically broken and not exposed by the crate's public API, so AES
 # is the only real choice; the UI warns that Explorer cannot open the result.
 zip = { version = "4.2.0", default-features = false, features = ["deflate", "aes-crypto"] }
+# tar + gzip reading, for looking inside .tar / .tar.gz / .tgz. flate2's
+# rust_backend (miniz_oxide) keeps this pure-Rust — no C, so the single Windows
+# binary still builds without a toolchain.
+tar = "0.4"
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
 
 [dev-dependencies]
 tempfile = "3.27.0"

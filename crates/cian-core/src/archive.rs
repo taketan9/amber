@@ -27,20 +27,60 @@ pub struct Member {
     pub compressed: u64,
 }
 
+/// The archive formats cian can look inside.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Kind {
+    Zip,
+    Tar,
+    TarGz,
+}
+
+/// Classify by name. `.tar.gz`/`.tgz` are matched on the whole filename because
+/// `Path::extension` only sees the trailing `.gz`.
+fn kind(path: &Path) -> Option<Kind> {
+    let name = path.file_name()?.to_str()?.to_lowercase();
+    if name.ends_with(".tar.gz") || name.ends_with(".tgz") {
+        return Some(Kind::TarGz);
+    }
+    if name.ends_with(".tar") {
+        return Some(Kind::Tar);
+    }
+    match path.extension().and_then(|e| e.to_str()).map(|e| e.to_lowercase()).as_deref() {
+        Some("zip") | Some("jar") | Some("xpi") | Some("whl") | Some("epub") => Some(Kind::Zip),
+        _ => None,
+    }
+}
+
 /// Whether cian can look inside this file, judged by extension.
 ///
 /// Extension rather than content sniffing: the answer decides what a keypress
 /// does, so it has to be known before the file is opened, and being wrong
 /// merely means falling back to the viewer.
 pub fn is_archive(path: &Path) -> bool {
-    matches!(
-        path.extension().and_then(|e| e.to_str()).map(|e| e.to_lowercase()).as_deref(),
-        Some("zip") | Some("jar") | Some("xpi") | Some("whl") | Some("epub")
-    )
+    kind(path).is_some()
+}
+
+/// A reader over a tarball, transparently gunzipped when `gz`.
+fn tar_reader(path: &Path, gz: bool) -> Result<Box<dyn Read>> {
+    let f = fs::File::open(path).with_context(|| format!("open {}", path.display()))?;
+    Ok(if gz {
+        Box::new(flate2::read::GzDecoder::new(f))
+    } else {
+        Box::new(f)
+    })
 }
 
 /// List an archive's contents.
 pub fn list(path: &Path) -> Result<Vec<Member>> {
+    match kind(path) {
+        Some(Kind::Tar) => list_tar(tar_reader(path, false)?),
+        Some(Kind::TarGz) => list_tar(tar_reader(path, true)?),
+        // Zip, and anything unrecognised, are tried as a zip.
+        _ => list_zip(path),
+    }
+}
+
+fn list_zip(path: &Path) -> Result<Vec<Member>> {
     let f = fs::File::open(path).with_context(|| format!("open {}", path.display()))?;
     let mut zip = zip::ZipArchive::new(f)
         .with_context(|| format!("not a readable zip: {}", path.display()))?;
@@ -56,6 +96,25 @@ pub fn list(path: &Path) -> Result<Vec<Member>> {
     }
     // Archives are stored in whatever order they were written; a listing wants
     // to be predictable.
+    out.sort_by_key(|m| m.name.to_lowercase());
+    Ok(out)
+}
+
+fn list_tar(reader: Box<dyn Read>) -> Result<Vec<Member>> {
+    let mut ar = tar::Archive::new(reader);
+    let mut out = Vec::new();
+    for entry in ar.entries().context("read tar")? {
+        let entry = entry.context("tar entry")?;
+        let header = entry.header();
+        let is_dir = header.entry_type().is_dir();
+        let size = header.size().unwrap_or(0);
+        let name = entry.path().map(|p| p.to_string_lossy().into_owned()).unwrap_or_default();
+        if name.is_empty() {
+            continue;
+        }
+        // A tar has no per-entry compressed size; show the stored size.
+        out.push(Member { name, is_dir, size, compressed: size });
+    }
     out.sort_by_key(|m| m.name.to_lowercase());
     Ok(out)
 }
@@ -89,12 +148,132 @@ fn safe_join(dest: &Path, name: &str) -> Option<PathBuf> {
 }
 
 /// Extract `members` — or all of them, if empty — into `dest`.
-pub fn extract(
+pub fn extract(archive: &Path, members: &[String], dest: &Path, ctl: &mut Ctl) -> OpReport {
+    match kind(archive) {
+        Some(Kind::Tar) => extract_tar(archive, false, members, dest, ctl),
+        Some(Kind::TarGz) => extract_tar(archive, true, members, dest, ctl),
+        _ => extract_zip(archive, members, dest, ctl),
+    }
+}
+
+/// Stream a tarball (optionally gunzipped), writing the wanted members. Tar is
+/// sequential, so this walks the whole archive once, skipping over anything not
+/// requested. A first header-only pass gives the progress bar its totals.
+fn extract_tar(
     archive: &Path,
+    gz: bool,
     members: &[String],
     dest: &Path,
     ctl: &mut Ctl,
 ) -> OpReport {
+    use std::io::Write as _;
+    let mut report = OpReport::default();
+    let wants = |name: &str| members.is_empty() || members.iter().any(|m| m == name);
+
+    // Totals from a header scan (re-decompresses for .gz, cheap enough for a
+    // denominator).
+    let (files_total, bytes_total) = match tar_reader(archive, gz).and_then(list_tar) {
+        Ok(list) => (
+            list.iter().filter(|m| !m.is_dir && wants(&m.name)).count(),
+            list.iter().filter(|m| !m.is_dir && wants(&m.name)).map(|m| m.size).sum(),
+        ),
+        Err(e) => {
+            report.note_error(format!("{}: {}", archive.display(), e));
+            return report;
+        }
+    };
+    let mut p = Progress { files_total, bytes_total, ..Default::default() };
+
+    let reader = match tar_reader(archive, gz) {
+        Ok(r) => r,
+        Err(e) => {
+            report.note_error(format!("{}: {}", archive.display(), e));
+            return report;
+        }
+    };
+    let mut ar = tar::Archive::new(reader);
+    let entries = match ar.entries() {
+        Ok(e) => e,
+        Err(e) => {
+            report.note_error(format!("{}: {}", archive.display(), e));
+            return report;
+        }
+    };
+    for entry in entries {
+        if ctl.cancel.load(Ordering::Relaxed) {
+            break;
+        }
+        let mut e = match entry {
+            Ok(e) => e,
+            Err(err) => {
+                report.note_error(format!("tar entry: {}", err));
+                continue;
+            }
+        };
+        let name = e.path().map(|pp| pp.to_string_lossy().into_owned()).unwrap_or_default();
+        if name.is_empty() || !wants(&name) {
+            continue;
+        }
+        let Some(target) = safe_join(dest, &name) else {
+            report.note_error(format!("{}: refused, escapes the destination", name));
+            continue;
+        };
+        if e.header().entry_type().is_dir() {
+            if let Err(err) = fs::create_dir_all(&target) {
+                report.note_error(format!("{}: {}", name, err));
+            }
+            continue;
+        }
+        if let Some(parent) = target.parent() {
+            if let Err(err) = fs::create_dir_all(parent) {
+                report.note_error(format!("{}: {}", name, err));
+                continue;
+            }
+        }
+        p.current = name.clone();
+        (ctl.on_progress)(&p);
+        let mut out = match fs::File::create(&target) {
+            Ok(f) => f,
+            Err(err) => {
+                report.note_error(format!("{}: {}", name, err));
+                continue;
+            }
+        };
+        let mut buf = vec![0u8; 256 * 1024];
+        let mut failed = false;
+        loop {
+            if ctl.cancel.load(Ordering::Relaxed) {
+                drop(out);
+                let _ = fs::remove_file(&target);
+                return report;
+            }
+            match e.read(&mut buf) {
+                Ok(0) => break,
+                Ok(n) => {
+                    if let Err(err) = out.write_all(&buf[..n]) {
+                        report.note_error(format!("{}: {}", name, err));
+                        failed = true;
+                        break;
+                    }
+                    p.bytes_done += n as u64;
+                    (ctl.on_progress)(&p);
+                }
+                Err(err) => {
+                    report.note_error(format!("{}: {}", name, err));
+                    failed = true;
+                    break;
+                }
+            }
+        }
+        if !failed {
+            report.ok += 1;
+        }
+        p.files_done += 1;
+    }
+    report
+}
+
+fn extract_zip(archive: &Path, members: &[String], dest: &Path, ctl: &mut Ctl) -> OpReport {
     let mut report = OpReport::default();
     let f = match fs::File::open(archive) {
         Ok(f) => f,
@@ -359,13 +538,70 @@ mod tests {
         Ctl { cancel: c, on_progress: f }
     }
 
+    /// Build a tarball at `dir/a.tar` (or `.tar.gz` when `gz`) with the same
+    /// shape as `make_zip`, so the tests can compare list/extract behaviour.
+    fn make_tar(dir: &Path, gz: bool) -> PathBuf {
+        let path = dir.join(if gz { "a.tar.gz" } else { "a.tar" });
+        let write_tar = |w: &mut dyn Write| {
+            let mut b = tar::Builder::new(w);
+            let mut add = |name: &str, body: &[u8]| {
+                let mut h = tar::Header::new_gnu();
+                h.set_size(body.len() as u64);
+                h.set_mode(0o644);
+                h.set_cksum();
+                b.append_data(&mut h, name, body).unwrap();
+            };
+            add("readme.txt", b"hello from the archive");
+            add("sub/inner.txt", b"nested");
+            b.finish().unwrap();
+        };
+        let f = fs::File::create(&path).unwrap();
+        if gz {
+            let mut enc = flate2::write::GzEncoder::new(f, flate2::Compression::default());
+            write_tar(&mut enc);
+            enc.finish().unwrap();
+        } else {
+            let mut bw = std::io::BufWriter::new(f);
+            write_tar(&mut bw);
+            bw.flush().unwrap();
+        }
+        path
+    }
+
     #[test]
     fn recognises_archives_by_extension() {
         assert!(is_archive(Path::new("x.zip")));
         assert!(is_archive(Path::new("X.ZIP")));
         assert!(is_archive(Path::new("lib.jar")));
+        assert!(is_archive(Path::new("src.tar")));
+        assert!(is_archive(Path::new("src.tar.gz")));
+        assert!(is_archive(Path::new("src.TGZ")));
         assert!(!is_archive(Path::new("notes.txt")));
         assert!(!is_archive(Path::new("noext")));
+    }
+
+    #[test]
+    fn lists_and_extracts_tar_and_tar_gz() {
+        for gz in [false, true] {
+            let d = tempfile::tempdir().unwrap();
+            let t = make_tar(d.path(), gz);
+            let members = list(&t).unwrap_or_else(|e| panic!("list (gz={gz}): {e}"));
+            let names: Vec<&str> = members.iter().map(|m| m.name.as_str()).collect();
+            assert!(names.contains(&"readme.txt"), "gz={gz}: {names:?}");
+            assert!(names.contains(&"sub/inner.txt"), "gz={gz}: {names:?}");
+
+            let out = d.path().join("out");
+            let cancel = AtomicBool::new(false);
+            let mut prog = |_: &Progress| {};
+            let mut c = ctl(&cancel, &mut prog);
+            let report = extract(&t, &[], &out, &mut c);
+            assert!(report.errors.is_empty(), "gz={gz}: {:?}", report.errors);
+            assert_eq!(
+                fs::read_to_string(out.join("readme.txt")).unwrap(),
+                "hello from the archive"
+            );
+            assert_eq!(fs::read_to_string(out.join("sub/inner.txt")).unwrap(), "nested");
+        }
     }
 
     #[test]

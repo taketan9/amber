@@ -236,18 +236,17 @@ viewer you can drag to select and `c` to copy the selection, and `Shift+Enter`
 switches the text encoding (UTF-8 / Shift_JIS / UTF-16) when a file was decoded
 wrong.
 
-On a **zip** (also `.jar`, `.whl`, `.epub`) it lists the members instead, with
-their unpacked sizes. `Enter` extracts the highlighted one into the opposite
-pane, `a` extracts all — on the worker thread, with the usual progress bar and
-Esc.
+On an archive — **zip** (also `.jar`, `.whl`, `.epub`) or a **tarball**
+(`.tar`, `.tar.gz`, `.tgz`) — it lists the members instead, with their unpacked
+sizes. `Enter` extracts the highlighted one into the opposite pane, `a` extracts
+all — on the worker thread, with the usual progress bar and Esc.
 
 Member paths are checked before anything is written: an archive can name
 `../../etc/passwd` or an absolute path, and a naive extractor obliges. Those
 are refused individually and the rest of the archive still comes out.
 
-Only zip is handled. It is what Windows reads and writes without extra
-software, and claiming to open archives while failing on half of them would be
-worse than being clear about the one.
+Reading covers zip and gzipped/plain tar; `:zip` still writes zip only (it is
+what Windows reads and writes without extra software).
 
 ## Searching
 
