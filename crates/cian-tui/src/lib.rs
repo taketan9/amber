@@ -1667,6 +1667,9 @@ struct FileDrag {
     /// True once the pointer has actually moved; a press and release without
     /// motion is a click, not a drag.
     moved: bool,
+    /// The entry index the drag started on. A drag that stays inside the origin
+    /// pane rubber-band-selects from here to the row under the pointer.
+    anchor: usize,
 }
 
 pub struct App {
@@ -4259,9 +4262,25 @@ impl App {
             match ev.kind {
                 MouseEventKind::Drag(MouseButton::Left) => {
                     let over = pane_at(col, row);
+                    let (from, anchor) =
+                        self.file_drag.as_ref().map(|d| (d.from, d.anchor)).unwrap();
                     if let Some(d) = &mut self.file_drag {
                         d.moved = true;
                         d.over = over;
+                    }
+                    // Dragging inside the origin pane rubber-band-selects rows
+                    // between the anchor and the pointer, like a file manager.
+                    // Dragging onto the other pane stays a copy/move gesture.
+                    if over == Some(from) && from != FocusedPane::Shell {
+                        self.cursor_to_row(from, row);
+                        if let Some(p) = self.active_pane_mut() {
+                            let cur = p.cursor;
+                            let (lo, hi) = (anchor.min(cur), anchor.max(cur));
+                            p.clear_marks();
+                            for i in lo..=hi {
+                                p.set_mark_at(i);
+                            }
+                        }
                     }
                     return;
                 }
@@ -4272,6 +4291,18 @@ impl App {
                 }
                 _ => {}
             }
+        }
+
+        // The mouse wheel scrolls the file pane under the pointer.
+        if matches!(ev.kind, MouseEventKind::ScrollDown | MouseEventKind::ScrollUp) {
+            if let Some(pane @ (FocusedPane::Left | FocusedPane::Right)) = pane_at(col, row) {
+                self.focus(pane);
+                let delta: isize = if matches!(ev.kind, MouseEventKind::ScrollDown) { 3 } else { -3 };
+                if let Some(p) = self.active_pane_mut() {
+                    p.move_cursor(delta);
+                }
+            }
+            return;
         }
 
         // A shell-pane selection in progress: extend on drag, copy on release.
@@ -4367,11 +4398,13 @@ impl App {
                 }
                 self.last_click = Some((now, row));
                 // Otherwise arm a drag from here; whether it becomes a drag or
-                // stays a click is decided on release.
+                // stays a click is decided on release. The cursor was just put
+                // on the clicked row, so that is the selection anchor.
+                let anchor = self.active_pane().map(|p| p.cursor).unwrap_or(0);
                 let paths = self.active_pane().map(|p| p.target_paths()).unwrap_or_default();
                 if !paths.is_empty() {
                     self.file_drag =
-                        Some(FileDrag { from: pane, paths, over: Some(pane), moved: false });
+                        Some(FileDrag { from: pane, paths, over: Some(pane), moved: false, anchor });
                 }
             }
             None => {}
@@ -10279,6 +10312,35 @@ mod tests {
             }
             None => false,
         }
+    }
+
+    #[test]
+    fn the_wheel_scrolls_the_file_pane_under_the_pointer() {
+        let names: Vec<String> = (0..40).map(|i| format!("f{:02}.txt", i)).collect();
+        let refs: Vec<&str> = names.iter().map(|s| s.as_str()).collect();
+        let (_d, mut app) = app_with(&refs);
+        let _ = render(&mut app, 100, 40);
+        let start = app.active_pane().unwrap().cursor;
+        let left = app.layout_rects.left;
+        app.handle_mouse(mouse(MouseEventKind::ScrollDown, left.x + 3, left.y + 3));
+        let after = app.active_pane().unwrap().cursor;
+        assert!(after > start, "wheel down moved the cursor down: {start} -> {after}");
+        app.handle_mouse(mouse(MouseEventKind::ScrollUp, left.x + 3, left.y + 3));
+        assert!(app.active_pane().unwrap().cursor < after, "wheel up moved it back up");
+    }
+
+    #[test]
+    fn dragging_inside_a_pane_rubber_band_selects() {
+        let (_d, mut app) = app_with(&["a.txt", "b.txt", "c.txt", "d.txt"]);
+        let _ = render(&mut app, 100, 40);
+        let left = app.layout_rects.left;
+        // Press on the first row, drag down two rows, release inside the pane.
+        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), left.x + 3, left.y + 1));
+        app.handle_mouse(mouse(MouseEventKind::Drag(MouseButton::Left), left.x + 3, left.y + 3));
+        app.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), left.x + 3, left.y + 3));
+        // The dragged-over range is now marked (3 rows), not a copy to elsewhere.
+        assert_eq!(app.active_pane().unwrap().mark_count(), 3, "range is marked");
+        assert!(app.file_drag.is_none(), "drag released");
     }
 
     #[test]
