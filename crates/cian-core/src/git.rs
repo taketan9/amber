@@ -279,33 +279,37 @@ mod tests {
     }
 
     /// End-to-end against a real throwaway repo, skipped when git is absent.
+    /// Deliberately needs no commit — `git commit` depends on an identity and
+    /// signing config that vary across CI runners, whereas add/untracked do not.
     #[test]
     fn status_of_a_real_repo() {
         let d = tempfile::tempdir().unwrap();
         // Canonicalise so paths match `git rev-parse --show-toplevel` (which
         // resolves symlinks like macOS's /var → /private/var).
         let dir = &std::fs::canonicalize(d.path()).unwrap();
-        if Command::new("git").arg("-C").arg(dir).arg("init").status().map(|s| !s.success()).unwrap_or(true) {
+        let init_ok = Command::new("git")
+            .arg("-C")
+            .arg(dir)
+            .args(["init", "-q"])
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if !init_ok {
             eprintln!("git not available; skipping");
             return;
         }
-        // Identity so commits work in CI.
-        let _ = Command::new("git").arg("-C").arg(dir).args(["config", "user.email", "t@e"]).status();
-        let _ = Command::new("git").arg("-C").arg(dir).args(["config", "user.name", "t"]).status();
-        std::fs::write(dir.join("tracked.txt"), "one\n").unwrap();
-        let _ = Command::new("git").arg("-C").arg(dir).args(["add", "."]).status();
-        let _ = Command::new("git").arg("-C").arg(dir).args(["commit", "-m", "init"]).status();
-        // Now: modify tracked, add an untracked file.
-        std::fs::write(dir.join("tracked.txt"), "one\ntwo\n").unwrap();
-        std::fs::write(dir.join("new.txt"), "x\n").unwrap();
+        std::fs::write(dir.join("staged.txt"), "x\n").unwrap();
+        std::fs::write(dir.join("untracked.txt"), "y\n").unwrap();
+        assert!(stage(dir, &[dir.join("staged.txt")]).is_ok(), "git add");
 
-        let st = status(dir).expect("a repo");
-        assert_eq!(st.mark_for(&dir.join("tracked.txt")), Some(GitMark::Modified));
-        assert_eq!(st.mark_for(&dir.join("new.txt")), Some(GitMark::Untracked));
+        let st = status(dir).expect("in a repo");
+        assert_eq!(st.mark_for(&dir.join("staged.txt")), Some(GitMark::Staged));
+        assert_eq!(st.mark_for(&dir.join("untracked.txt")), Some(GitMark::Untracked));
+        assert_eq!(st.mark_for(&dir.join("does-not-exist")), None);
 
-        // Stage the modification; it flips to staged.
-        stage(dir, &[dir.join("tracked.txt")]).unwrap();
+        // Unstage puts it back to untracked (it was never committed).
+        unstage(dir, &[dir.join("staged.txt")]).unwrap();
         let st = status(dir).unwrap();
-        assert_eq!(st.mark_for(&dir.join("tracked.txt")), Some(GitMark::Staged));
+        assert_eq!(st.mark_for(&dir.join("staged.txt")), Some(GitMark::Untracked));
     }
 }
