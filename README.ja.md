@@ -352,16 +352,33 @@ cian.set_keymap("d", "none")     -- 無効化：d は何もしない
 （矢印、Enter、Backspace、Tab、Fキー、Ctrl-/Shift- の組み合わせ）は組み込みで、
 ここでの再割り当て対象外です。
 
+## AI（任意）
+
+`cian.ai{...}` を設定すると、`:ai` で Azure OpenAI を使ったチャットが開きます。
+cianは、crmaine拡張と同じWindowsブローカ（WAM）サインインを使う小さな同梱
+Pythonヘルパー経由で接続します（ヘルパーはバイナリに埋め込まれ、初回に書き
+出されるので別途配布は不要。必要なのはPythonと `azure`/`openai` の数パッケージ
+だけ）。Python・パッケージ・サインインのいずれかが無ければ機能は**無音で
+不使用**になり、cianは従来どおり動きます。`auth_mode = "mock"` は配線確認用の
+オフラインエコー、`api_base_url` はローカルのOpenAI互換サーバ（Ollama等）を
+指せます。
+
+AI部分だけはcianが単一自己完結バイナリでなくなる（外部インタプリタと
+ネットワークに依存する）唯一の箇所なので、設定しない限り完全にオフです。
+設定は [`examples/init.lua`](examples/init.lua) を参照。承認ゲート付きの
+ゴミ検出・構成提案などのAI機能は今後追加予定です。
+
 ## アーキテクチャ
 
-Cargoワークスペースで、6つのクレートに分かれています：
+Cargoワークスペースで、7つのクレートに分かれています：
 
 | クレート | 役割 |
 |---|---|
-| `cian-core` | 純粋なドメインロジック：ファイル操作、マーク、履歴、ソート、フィルタ、検索、差分、昇格 |
+| `cian-core` | 純粋なドメインロジック：ファイル操作、マーク、履歴、ソート、フィルタ、検索、差分、昇格、git |
 | `cian-tui`  | 描画と入力（ratatui + crossterm）、レイアウト、ポップアップ、マウス |
 | `cian-pty`  | 組み込みシェルペイン（portable-pty + vt100 + tui-term） |
 | `cian-scp`  | 組み込みSFTP/SCPファイル転送（ピュアRustのrussh、C依存なし） |
+| `cian-ai`   | 任意のAIヘルパー（同梱Pythonブローカ認証スクリプト経由でAzure OpenAI） |
 | `cian-lua`  | Lua設定ホスト（mlua）：キーマップ、テーマ、ext-open DSL |
 | `cian-bin`  | エントリポイント — `cian` バイナリを生成 |
 

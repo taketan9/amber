@@ -358,16 +358,34 @@ or disable any of them, along with the full list of action names. Structural
 keys (arrows, Enter, Backspace, Tab, the F-keys, and Ctrl-/Shift- combinations)
 are built in and not remapped here.
 
+## AI (optional)
+
+With `cian.ai{...}` configured, `:ai` opens a chat backed by Azure OpenAI. cian
+reaches it through a small bundled Python helper that uses the same Windows
+broker (WAM) sign-in as the crmaine extension — there is nothing to install
+beyond Python and a couple of `azure`/`openai` packages, and the helper is
+embedded in the binary and written out on first use. If Python, the packages, or
+sign-in are unavailable the whole feature stays silent and cian runs exactly as
+before; `auth_mode = "mock"` gives an offline echo for wiring it up, and an
+`api_base_url` points it at a local OpenAI-compatible server (Ollama, LM Studio).
+
+The AI part is the one place cian is not a single self-contained binary — it
+opts into an external interpreter and network — which is why it is strictly
+optional and off unless configured. See
+[`examples/init.lua`](examples/init.lua) for the settings. More AI features
+(junk detection, structure suggestions, all approval-gated) are planned.
+
 ## Architecture
 
-Cargo workspace, split into six crates:
+Cargo workspace, split into seven crates:
 
 | Crate | Role |
 |---|---|
-| `cian-core` | Pure domain logic: file ops, marks, history, sorting, filtering, search, diff, elevation |
+| `cian-core` | Pure domain logic: file ops, marks, history, sorting, filtering, search, diff, elevation, git |
 | `cian-tui`  | Rendering & input (ratatui + crossterm), layout, popups, mouse |
 | `cian-pty`  | Embedded shell pane (portable-pty + vt100 + tui-term) |
 | `cian-scp`  | Built-in SFTP/SCP file transfer (pure-Rust russh, no C deps) |
+| `cian-ai`   | Optional AI helper (Azure OpenAI via a bundled Python broker-auth script) |
 | `cian-lua`  | Lua configuration host (mlua): keymaps, themes, ext-open DSL |
 | `cian-bin`  | Entry point — produces the `cian` binary |
 

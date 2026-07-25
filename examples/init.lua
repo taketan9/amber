@@ -205,6 +205,31 @@
 
 
 -- ----------------------------------------------------------------------------
+--  AI  —  cian.ai { ... }   (optional; needs Python + Azure OpenAI access)
+-- ----------------------------------------------------------------------------
+-- Enables cian's AI features (`:ai` chat, and later junk detection / structure
+-- suggestions). cian talks to Azure OpenAI through a small bundled Python
+-- helper using the same Windows broker (WAM) auth as crmaine. If Python, the
+-- packages, or sign-in are unavailable, the AI features stay silent — cian runs
+-- exactly as before. Without this block, AI is off entirely.
+--
+-- The helper needs these Python packages: `openai`, and for broker auth
+-- `azure-identity-broker` (and `pywin32` for the sign-in dialog's parent
+-- window). Data sent to the model is only what a feature needs (file names and
+-- sizes; file contents only when a feature explicitly requires it).
+--
+-- cian.ai {
+--   endpoint    = "https://your-apim.azure-api.net/llmoai",  -- Azure OpenAI / APIM
+--   model       = "gpt-5-mini",
+--   auth_mode   = "broker",    -- "broker" (Windows AAD), "apikey", or "mock" (offline echo)
+--   -- python   = "python",    -- interpreter to use (default: "python")
+--   -- api_version  = "2025-04-01-preview",
+--   -- api_key      = "...",   -- only for auth_mode = "apikey"
+--   -- api_base_url = "http://localhost:11434/v1",  -- Ollama / LM Studio (OpenAI-compatible)
+-- }
+
+
+-- ----------------------------------------------------------------------------
 --  OPEN HANDLERS & HELPERS
 -- ----------------------------------------------------------------------------
 -- What Enter (or `open_external`) does for a given extension. The handler gets

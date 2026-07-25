@@ -129,6 +129,34 @@ pub struct SshHost {
     pub port: Option<u16>,
 }
 
+/// AI settings from `cian.ai{...}`. Presence enables the (optional) AI
+/// features; the TUI still verifies the helper actually works before showing
+/// them. Fields mirror crmaine's backend so the same Azure endpoint is reached.
+#[derive(Debug, Clone)]
+pub struct AiOptions {
+    pub python: String,
+    pub endpoint: String,
+    pub model: String,
+    pub api_version: String,
+    pub auth_mode: String,
+    pub api_key: String,
+    pub api_base_url: String,
+}
+
+impl Default for AiOptions {
+    fn default() -> Self {
+        Self {
+            python: "python".into(),
+            endpoint: String::new(),
+            model: "gpt-5-mini".into(),
+            api_version: "2025-04-01-preview".into(),
+            auth_mode: "broker".into(),
+            api_key: String::new(),
+            api_base_url: String::new(),
+        }
+    }
+}
+
 /// Mutable accumulator shared with the Lua callbacks during script execution.
 #[derive(Default)]
 struct Builder {
@@ -137,6 +165,7 @@ struct Builder {
     keymaps: Vec<(char, String)>,
     ext_open: HashMap<String, Function>,
     ssh_hosts: Vec<SshHost>,
+    ai: Option<AiOptions>,
     errors: Vec<String>,
 }
 
@@ -153,6 +182,8 @@ pub struct Config {
     pub keymaps: Vec<(char, String)>,
     /// SSH targets declared with `cian.ssh{...}`.
     pub ssh_hosts: Vec<SshHost>,
+    /// AI settings declared with `cian.ai{...}`, if any.
+    pub ai: Option<AiOptions>,
     /// Non-fatal problems collected while loading (surfaced in a notice popup).
     pub errors: Vec<String>,
     ext_open: HashMap<String, Function>,
@@ -282,7 +313,7 @@ fn load_from(path: &Path) -> Config {
 
     // Pull the accumulated config out by cloning; the Lua handles stay valid
     // because we move `lua` into the returned Config below.
-    let (theme, options, keymaps, ext_open, ssh_hosts, builder_errors) = {
+    let (theme, options, keymaps, ext_open, ssh_hosts, ai, builder_errors) = {
         let b = builder.borrow();
         (
             b.theme.clone(),
@@ -290,6 +321,7 @@ fn load_from(path: &Path) -> Config {
             b.keymaps.clone(),
             b.ext_open.clone(),
             b.ssh_hosts.clone(),
+            b.ai.clone(),
             b.errors.clone(),
         )
     };
@@ -301,6 +333,7 @@ fn load_from(path: &Path) -> Config {
         keymaps,
         ext_open,
         ssh_hosts,
+        ai,
         errors,
         _lua: Some(lua),
     }
@@ -519,6 +552,27 @@ fn install_api(lua: &Lua, builder: &Rc<RefCell<Builder>>) -> mlua::Result<()> {
                     let port = h.get::<Option<u16>>("port")?;
                     bm.ssh_hosts.push(SshHost { name, host, users, port });
                 }
+                Ok(())
+            })?,
+        )?;
+    }
+
+    // cian.ai { endpoint=, model=, auth_mode=, python=, api_version=, api_key=, api_base_url= }
+    {
+        let b = builder.clone();
+        cian.set(
+            "ai",
+            lua.create_function(move |_, t: Table| {
+                let mut ai = AiOptions::default();
+                let get = |k: &str| -> Option<String> { t.get::<Option<String>>(k).ok().flatten() };
+                if let Some(v) = get("python") { ai.python = v; }
+                if let Some(v) = get("endpoint") { ai.endpoint = v; }
+                if let Some(v) = get("model") { ai.model = v; }
+                if let Some(v) = get("api_version") { ai.api_version = v; }
+                if let Some(v) = get("auth_mode") { ai.auth_mode = v; }
+                if let Some(v) = get("api_key") { ai.api_key = v; }
+                if let Some(v) = get("api_base_url") { ai.api_base_url = v; }
+                b.borrow_mut().ai = Some(ai);
                 Ok(())
             })?,
         )?;

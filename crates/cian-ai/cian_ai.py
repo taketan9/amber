@@ -1,0 +1,131 @@
+#!/usr/bin/env python3
+"""cian AI helper — Azure OpenAI chat over Windows broker (WAM) auth.
+
+This is a small, self-contained sibling of crmaine's python_backend: it reuses
+the exact broker-auth client so cian can talk to the same Azure OpenAI endpoint,
+but without any RAG/indexing. cian embeds this file in its binary and writes it
+out to a cache dir at runtime, so there is nothing to ship separately.
+
+Protocol (single request per process):
+
+    python cian_ai.py --check
+        Verify the required packages import for the given auth mode. Prints
+        {"ok": true} / {"ok": false, "error": "..."} and exits 0/1. Does NOT
+        contact the network or prompt for auth.
+
+    python cian_ai.py            (request JSON on stdin)
+        {"messages": [{"role": "...", "content": "..."}],
+         "model": "...", "endpoint": "...", "api_version": "...",
+         "auth_mode": "broker|apikey|mock", "api_key": "...",
+         "api_base_url": "...", "max_tokens": 1024}
+        Prints {"ok": true, "content": "..."} or {"ok": false, "error": "..."}.
+
+Everything is one process per call; cian runs it on a worker thread. Azure
+packages are imported lazily so `--check` for apikey/mock does not need them and
+so a broken azure install cannot hang plain apikey use.
+"""
+import json
+import sys
+
+
+def read_request():
+    raw = sys.stdin.read()
+    return json.loads(raw) if raw.strip() else {}
+
+
+def emit(obj):
+    sys.stdout.write(json.dumps(obj, ensure_ascii=False))
+    sys.stdout.flush()
+
+
+def build_client(req):
+    """Return an OpenAI-compatible client for the requested auth mode. Mirrors
+    crmaine's _get_client so the broker path is identical."""
+    auth = req.get("auth_mode", "broker")
+    endpoint = req.get("endpoint", "")
+    api_version = req.get("api_version", "2025-04-01-preview")
+    api_key = req.get("api_key", "")
+    api_base_url = req.get("api_base_url", "")
+
+    if auth == "broker":
+        try:
+            import win32gui  # optional; gives the auth dialog a parent window
+            parent_hwnd = win32gui.GetForegroundWindow()
+        except Exception:
+            parent_hwnd = 0
+        from azure.identity.broker import InteractiveBrowserBrokerCredential
+        from azure.identity import get_bearer_token_provider
+        from openai import AzureOpenAI
+
+        credential = InteractiveBrowserBrokerCredential(
+            parent_window_handle=parent_hwnd,
+            use_default_broker_account=True,
+        )
+        return AzureOpenAI(
+            api_version=api_version,
+            azure_endpoint=endpoint,
+            azure_ad_token_provider=get_bearer_token_provider(
+                credential, "https://cognitiveservices.azure.com/.default"
+            ),
+        )
+
+    if auth == "apikey":
+        from openai import OpenAI, AzureOpenAI
+        if api_base_url:
+            return OpenAI(api_key=api_key or "ollama", base_url=api_base_url)
+        if endpoint:
+            return AzureOpenAI(api_key=api_key, azure_endpoint=endpoint, api_version=api_version)
+        return OpenAI(api_key=api_key)
+
+    raise ValueError(f"unknown auth_mode: {auth}")
+
+
+def do_check(auth):
+    """Import what the auth mode needs, without contacting anything."""
+    if auth == "mock":
+        return
+    import openai  # noqa: F401
+    if auth == "broker":
+        import azure.identity  # noqa: F401
+        import azure.identity.broker  # noqa: F401
+
+
+def main():
+    if "--check" in sys.argv:
+        # The auth mode can be passed as `--check <mode>`; default broker.
+        auth = "broker"
+        if "--check" in sys.argv:
+            i = sys.argv.index("--check")
+            if i + 1 < len(sys.argv):
+                auth = sys.argv[i + 1]
+        try:
+            do_check(auth)
+            emit({"ok": True})
+            sys.exit(0)
+        except Exception as e:  # noqa: BLE001
+            emit({"ok": False, "error": f"{type(e).__name__}: {e}"})
+            sys.exit(1)
+
+    try:
+        req = read_request()
+        messages = req.get("messages", [])
+        if req.get("auth_mode") == "mock":
+            # Offline echo, for wiring up and testing cian without a network.
+            last = messages[-1]["content"] if messages else ""
+            emit({"ok": True, "content": f"[mock] {last}"})
+            return
+        client = build_client(req)
+        model = req.get("model", "gpt-5-mini")
+        kwargs = {"model": model, "messages": messages}
+        if req.get("max_tokens"):
+            kwargs["max_tokens"] = req["max_tokens"]
+        resp = client.chat.completions.create(**kwargs)
+        content = resp.choices[0].message.content or ""
+        emit({"ok": True, "content": content})
+    except Exception as e:  # noqa: BLE001
+        emit({"ok": False, "error": f"{type(e).__name__}: {e}"})
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

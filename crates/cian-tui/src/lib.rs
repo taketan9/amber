@@ -1169,6 +1169,8 @@ enum Popup {
     Shortcuts { entries: Vec<Shortcut>, cursor: usize },
     ConfirmQuit,
     ConfirmClose { target: CloseTarget },
+    /// The AI chat: a transcript, an input line, and whether a reply is pending.
+    AiChat { input: String, log: Vec<ChatMsg>, scroll: usize, pending: bool },
     /// A copy/move failed because the destination needs administrator rights.
     /// Offers to redo it elevated (Windows only).
     ConfirmElevate { op: PendingOp, targets: Vec<PathBuf>, dest: PathBuf },
@@ -1222,6 +1224,32 @@ fn glob_match(pat: &str, name: &str) -> bool {
         pi += 1;
     }
     pi == p.len()
+}
+
+/// Break `s` into chunks no wider than `width` display columns, on the char
+/// boundary (no hyphenation). A blank string yields one empty chunk so the line
+/// still takes a row.
+fn wrap_str(s: &str, width: usize) -> Vec<String> {
+    let width = width.max(1);
+    if s.is_empty() {
+        return vec![String::new()];
+    }
+    let mut out = Vec::new();
+    let mut cur = String::new();
+    let mut w = 0usize;
+    for ch in s.chars() {
+        let cw = UnicodeWidthStr::width(ch.to_string().as_str()).max(1);
+        if w + cw > width && !cur.is_empty() {
+            out.push(std::mem::take(&mut cur));
+            w = 0;
+        }
+        cur.push(ch);
+        w += cw;
+    }
+    if !cur.is_empty() {
+        out.push(cur);
+    }
+    out
 }
 
 /// The length in characters of viewer line `l` (0 if out of range).
@@ -1670,6 +1698,20 @@ enum FindMsg {
     Done(cian_core::search::Outcome),
 }
 
+/// A pending AI chat request; the worker sends the assistant's reply (or an
+/// error message) back over the channel.
+struct AiJob {
+    rx: std::sync::mpsc::Receiver<Result<String, String>>,
+}
+
+/// One line of an AI chat transcript.
+#[derive(Debug, Clone)]
+struct ChatMsg {
+    /// True for the user's turn, false for the assistant's.
+    user: bool,
+    text: String,
+}
+
 /// Work deferred until a shrink transition finishes.
 #[derive(Debug, Clone, Copy)]
 enum PendingClose {
@@ -2116,6 +2158,13 @@ pub struct App {
     /// The grep-results popup stashed while viewing one hit in F3, so Esc from
     /// the viewer returns to the list rather than closing everything.
     find_return: Option<Box<Popup>>,
+    /// AI helper config from `cian.ai{...}`; `None` disables every AI feature.
+    ai: Option<cian_ai::AiConfig>,
+    /// Whether the AI helper actually works (python + packages + sign-in),
+    /// checked lazily on first use and cached. `None` until checked.
+    ai_ready: Option<bool>,
+    /// A pending AI request running on a worker thread.
+    ai_job: Option<AiJob>,
     diff_job: Option<DiffJob>,
     /// When the panes were last checked against the filesystem.
     last_watch: Instant,
@@ -2203,6 +2252,17 @@ impl App {
             show_key_hints: config.options.key_hints.unwrap_or(true),
             lang: Lang::from_opt(config.options.lang.as_deref()),
             git: [None, None],
+            ai: config.ai.as_ref().map(|a| cian_ai::AiConfig {
+                python: a.python.clone(),
+                endpoint: a.endpoint.clone(),
+                model: a.model.clone(),
+                api_version: a.api_version.clone(),
+                auth_mode: a.auth_mode.clone(),
+                api_key: a.api_key.clone(),
+                api_base_url: a.api_base_url.clone(),
+            }),
+            ai_ready: None,
+            ai_job: None,
             zoom_return: None,
             pending_shell_input: None,
             pending_shortcut_target: None,
@@ -2363,6 +2423,7 @@ impl App {
             "find" => self.start_find_prompt(),
             "menu" => self.open_menu_at_cursor(),
             "ssh" => self.start_ssh(),
+            "ai" | "chat" => self.open_ai_chat(),
             "reload" | "source" => self.reload_config(),
             // Mark / unmark entries whose name matches a glob (`:mark *.rs`).
             "mark" | "select" => self.cmd_mark(rest, true),
@@ -4558,6 +4619,84 @@ impl App {
         self.popup = Popup::Manual { lines: manual_lines(&self.keymap, self.lang), scroll: 0 };
     }
 
+    // ------- AI -------
+
+    /// Is the AI helper configured and working? Checks lazily once (spawning the
+    /// python `--check`) and caches, so a missing helper stays silent and costs
+    /// nothing after the first look.
+    fn ai_ready(&mut self) -> bool {
+        let Some(cfg) = self.ai.clone() else { return false };
+        if let Some(ready) = self.ai_ready {
+            return ready;
+        }
+        let ready = cian_ai::available(&cfg);
+        self.ai_ready = Some(ready);
+        ready
+    }
+
+    fn open_ai_chat(&mut self) {
+        if self.ai.is_none() {
+            self.message = Some("AI not configured — add cian.ai{...} to init.lua".into());
+            return;
+        }
+        if !self.ai_ready() {
+            self.message =
+                Some("AI unavailable (python, packages, or sign-in) — feature hidden".into());
+            return;
+        }
+        self.popup = Popup::AiChat { input: String::new(), log: Vec::new(), scroll: usize::MAX, pending: false };
+    }
+
+    /// Send the typed line to the model on a worker thread.
+    fn send_ai_message(&mut self) {
+        let Some(cfg) = self.ai.clone() else { return };
+        let Popup::AiChat { input, log, pending, scroll } = &mut self.popup else { return };
+        let question = input.trim().to_string();
+        if question.is_empty() || *pending {
+            return;
+        }
+        input.clear();
+        log.push(ChatMsg { user: true, text: question.clone() });
+        *pending = true;
+        *scroll = usize::MAX;
+        // A short system prompt keeps replies terminal-friendly.
+        let system = "You are a concise assistant embedded in a terminal file \
+                      manager. Answer briefly in plain text.";
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let r = cian_ai::chat(&cfg, system, &question).map_err(|e| e.to_string());
+            let _ = tx.send(r);
+        });
+        self.ai_job = Some(AiJob { rx });
+    }
+
+    /// Drain the AI worker; append the reply (or an error) when it lands.
+    fn poll_ai_job(&mut self) -> bool {
+        let Some(job) = &self.ai_job else { return false };
+        match job.rx.try_recv() {
+            Ok(result) => {
+                self.ai_job = None;
+                if let Popup::AiChat { log, pending, scroll, .. } = &mut self.popup {
+                    *pending = false;
+                    *scroll = usize::MAX;
+                    match result {
+                        Ok(text) => log.push(ChatMsg { user: false, text }),
+                        Err(e) => log.push(ChatMsg { user: false, text: format!("[error] {}", e) }),
+                    }
+                }
+                true
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => false,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                self.ai_job = None;
+                if let Popup::AiChat { pending, .. } = &mut self.popup {
+                    *pending = false;
+                }
+                true
+            }
+        }
+    }
+
     /// Re-read `init.lua` and apply everything that can change without a
     /// restart: keymaps, options, SSH hosts and open handlers. The colour theme
     /// and border style are installed once at startup (into set-once globals),
@@ -6163,6 +6302,47 @@ impl App {
                 KeyCode::Char(c) => { insert_char_at(buffer, cursor, c); return Ok(()); }
                 _ => return Ok(()),
             }
+        }
+        if matches!(self.popup, Popup::AiChat { .. }) {
+            let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+            match key.code {
+                KeyCode::Esc => self.popup = Popup::None,
+                KeyCode::Enter => self.send_ai_message(),
+                KeyCode::PageUp | KeyCode::Up => {
+                    if let Popup::AiChat { scroll, .. } = &mut self.popup {
+                        *scroll = scroll.saturating_sub(3);
+                    }
+                }
+                KeyCode::PageDown | KeyCode::Down => {
+                    if let Popup::AiChat { scroll, .. } = &mut self.popup {
+                        *scroll = scroll.saturating_add(3);
+                    }
+                }
+                KeyCode::Char('u') if ctrl => {
+                    if let Popup::AiChat { input, .. } = &mut self.popup {
+                        input.clear();
+                    }
+                }
+                KeyCode::Char('v') if ctrl => {
+                    let text = self.clipboard_text();
+                    if let (Some(t), Popup::AiChat { input, .. }) = (text, &mut self.popup) {
+                        input.push_str(t.trim_end_matches(['\r', '\n']));
+                    }
+                }
+                KeyCode::Char(_) if ctrl => {}
+                KeyCode::Backspace => {
+                    if let Popup::AiChat { input, .. } = &mut self.popup {
+                        input.pop();
+                    }
+                }
+                KeyCode::Char(c) => {
+                    if let Popup::AiChat { input, .. } = &mut self.popup {
+                        input.push(c);
+                    }
+                }
+                _ => {}
+            }
+            return Ok(());
         }
         if let Popup::Search { buffer } = &mut self.popup {
             match key.code {
@@ -7907,6 +8087,7 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry(":df", None, "free disk space;  :df -h -k -m -g", "ディスク空き容量；  :df -h -k -m -g"),
                 entry(":reload", None, "re-read init.lua (theme/border need a restart)", "init.luaを再読込（テーマ/枠は再起動が必要）"),
                 entry(":mark", None, "mark by wildcard;  :mark *.rs   :unmark *", "ワイルドカードでマーク；  :mark *.rs   :unmark *"),
+                entry(":ai", None, "AI chat  (needs cian.ai in init.lua)", "AIチャット  (init.luaのcian.aiが必要)"),
                 entry(":zip", None, "bundle selection;  :zip -e  for a password", "選択物をまとめる；  :zip -e でパスワード付き"),
                 entry(":!cmd", None, "run in shell;  % = selection, %f file, %d dir", "シェルで実行；  % =選択, %f ファイル, %d ディレクトリ"),
             ],
@@ -8257,6 +8438,10 @@ fn run_loop<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Result<()>
         // A running file operation reports in over a channel.
         if app.op_job.is_some() {
             needs_redraw |= app.poll_op_job();
+        }
+        // A pending AI reply lands over its own channel.
+        if app.ai_job.is_some() {
+            needs_redraw |= app.poll_ai_job();
         }
         // A fading flash needs frames of its own; clear it once it expires so
         // the loop can go back to sleep.
@@ -9826,6 +10011,72 @@ fn draw_popup(
 ) {
     // The manual is taller than any terminal, so it renders as a scrolling
     // viewport rather than the fixed block the other popups use.
+    if let Popup::AiChat { input, log, scroll, pending } = popup {
+        let width: u16 = 76u16.min(area.width.saturating_sub(2));
+        let height = area.height.saturating_sub(2).max(8);
+        let rect = centered_rect(width, height, area);
+        f.render_widget(Clear, rect);
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_type(border_type())
+            .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
+            .style(Style::default().bg(theme().popup_bg))
+            .title(tr(lang, " AI chat ", " AI チャット "))
+            .title_bottom(tr(lang, " Enter=send  ↑↓=scroll  Esc=close ", " Enter=送信  ↑↓=スクロール  Esc=閉じる "));
+        let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
+        f.render_widget(block, rect);
+
+        // Wrap the transcript into lines, tagging speaker with a coloured prefix.
+        let body_w = inner.width.max(1) as usize;
+        let mut lines: Vec<Line> = Vec::new();
+        for m in log.iter() {
+            let (tag, tag_c, body_c) = if m.user {
+                ("you ", theme().accent, Color::Rgb(225, 225, 240))
+            } else {
+                ("ai  ", Color::Rgb(130, 205, 150), Color::Rgb(205, 210, 220))
+            };
+            let mut first = true;
+            for raw in m.text.split('\n') {
+                for chunk in wrap_str(raw, body_w.saturating_sub(4)) {
+                    let prefix = if first { tag } else { "    " };
+                    lines.push(Line::from(vec![
+                        Span::styled(prefix.to_string(), Style::default().fg(tag_c).add_modifier(Modifier::BOLD)),
+                        Span::styled(chunk, Style::default().fg(body_c)),
+                    ]));
+                    first = false;
+                }
+            }
+            lines.push(Line::from(""));
+        }
+        if *pending {
+            lines.push(Line::from(Span::styled(
+                tr(lang, "ai  …thinking", "ai  …考え中"),
+                Style::default().fg(Color::Rgb(150, 150, 170)).add_modifier(Modifier::ITALIC),
+            )));
+        }
+
+        // Transcript occupies all but the last (input) row.
+        let view_h = inner.height.saturating_sub(1) as usize;
+        let max_scroll = lines.len().saturating_sub(view_h);
+        let off = (*scroll).min(max_scroll);
+        *scroll = off; // clamp (usize::MAX means "stick to bottom")
+        let shown: Vec<Line> = lines.into_iter().skip(off).take(view_h).collect();
+        f.render_widget(
+            Paragraph::new(shown),
+            Rect::new(inner.x, inner.y, inner.width, view_h as u16),
+        );
+
+        // Input line.
+        let prompt = format!("> {}", input);
+        f.render_widget(
+            Paragraph::new(prompt).style(
+                Style::default().fg(Color::Rgb(240, 240, 250)).bg(theme().selected_bg),
+            ),
+            Rect::new(inner.x, inner.y + view_h as u16, inner.width, 1),
+        );
+        return;
+    }
+
     if let Popup::Manual { lines, scroll } = popup {
         let height = area.height.saturating_sub(2).max(6);
         let width: u16 = 70u16.min(area.width.saturating_sub(2));
@@ -11049,6 +11300,7 @@ fn draw_popup(
         | Popup::Diff { .. }
         | Popup::DirCompare { .. }
         | Popup::Archive { .. }
+        | Popup::AiChat { .. }
         | Popup::None => return,
     };
 
@@ -11254,6 +11506,62 @@ mod tests {
         let legacy = "[[shortcuts]]\nname = \"srv\"\ntarget = \"/srv\"\n";
         let parsed: ShortcutsFile = toml::from_str(legacy).unwrap();
         assert_eq!(parsed.shortcuts[0].target, "/srv");
+    }
+
+    #[test]
+    fn ai_chat_round_trips_a_mock_reply() {
+        let have_py = std::process::Command::new("python3")
+            .arg("--version")
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false);
+        if !have_py {
+            eprintln!("no python3; skipping");
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().to_path_buf();
+        let mut config = cian_lua::Config::default();
+        config.ai = Some(cian_lua::AiOptions {
+            python: "python3".into(),
+            auth_mode: "mock".into(),
+            ..Default::default()
+        });
+        let mut app = App::new(p.clone(), p, config).unwrap();
+        assert!(app.ai.is_some(), "AI configured");
+
+        app.open_ai_chat();
+        assert!(matches!(app.popup, Popup::AiChat { .. }), "chat opened (mock is available)");
+        if let Popup::AiChat { input, .. } = &mut app.popup {
+            *input = "hello".into();
+        }
+        app.send_ai_message();
+        // Wait for the worker's reply.
+        let start = Instant::now();
+        while app.ai_job.is_some() && start.elapsed() < Duration::from_secs(10) {
+            app.poll_ai_job();
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        match &app.popup {
+            Popup::AiChat { log, .. } => {
+                assert!(log.iter().any(|m| m.user && m.text == "hello"), "user turn recorded");
+                assert!(
+                    log.iter().any(|m| !m.user && m.text.contains("[mock] hello")),
+                    "assistant echoed via the mock helper: {:?}",
+                    log
+                );
+            }
+            other => panic!("expected the chat, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn ai_chat_is_silent_without_config() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        assert!(app.ai.is_none());
+        app.open_ai_chat();
+        assert!(matches!(app.popup, Popup::None), "no chat without cian.ai config");
+        assert!(app.message.as_deref().unwrap_or("").contains("not configured"));
     }
 
     #[test]

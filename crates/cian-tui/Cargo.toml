@@ -11,6 +11,7 @@ cian-core = { workspace = true }
 cian-lua  = { workspace = true }
 cian-pty  = { workspace = true }
 cian-scp  = { workspace = true }
+cian-ai   = { workspace = true }
 ratatui   = { workspace = true }
 crossterm = { workspace = true }
 anyhow    = { workspace = true }
