@@ -1465,7 +1465,7 @@ impl ShortcutStore {
         // Prefer the YAML file; fall back to a legacy TOML one and migrate it.
         if let Some(entries) = std::fs::read_to_string(&path)
             .ok()
-            .and_then(|s| serde_yaml::from_str::<ShortcutsFile>(&s).ok())
+            .and_then(|s| serde_yml::from_str::<ShortcutsFile>(&s).ok())
             .map(|f| f.shortcuts)
         {
             return Self { entries, path };
@@ -1490,7 +1490,7 @@ impl ShortcutStore {
             let _ = std::fs::create_dir_all(parent);
         }
         let file = ShortcutsFile { shortcuts: self.entries.clone() };
-        let s = serde_yaml::to_string(&file)?;
+        let s = serde_yml::to_string(&file)?;
         std::fs::write(&self.path, s)?;
         Ok(())
     }
@@ -10265,7 +10265,7 @@ mod tests {
         let text = std::fs::read_to_string(&path).unwrap();
         assert!(text.contains("name: home"), "written as YAML:\n{text}");
         // Round-trips through the YAML parser the loader uses.
-        let back: ShortcutsFile = serde_yaml::from_str(&text).unwrap();
+        let back: ShortcutsFile = serde_yml::from_str(&text).unwrap();
         assert_eq!(back.shortcuts.len(), 2);
         assert_eq!(back.shortcuts[0].name, "home");
 
