@@ -201,12 +201,20 @@ pub enum Lang {
 }
 
 impl Lang {
-    /// From the `lang` option; anything but an explicit "en" is Japanese (the
+    /// From the `lang` option; anything but an explicit "ja" is English (the
     /// Lua layer already rejects values other than "ja"/"en").
     fn from_opt(opt: Option<&str>) -> Lang {
         match opt {
-            Some("en") => Lang::En,
-            _ => Lang::Ja,
+            Some("ja") => Lang::Ja,
+            _ => Lang::En,
+        }
+    }
+
+    /// Toggle to the other language.
+    fn toggled(self) -> Lang {
+        match self {
+            Lang::En => Lang::Ja,
+            Lang::Ja => Lang::En,
         }
     }
 }
@@ -1483,6 +1491,8 @@ enum MenuItem {
     StopLog,
     /// Cycle the encoding the shell output is decoded with.
     Encoding,
+    /// Toggle the interface language (English ↔ Japanese).
+    Lang,
     Quit,
     Manual,
 }
@@ -1510,6 +1520,12 @@ impl MenuItem {
             MenuItem::StopLog => tr(lang, "Stop session log  ●", "セッションログ停止  ●"),
             MenuItem::Encoding => tr(lang, "Text encoding…", "文字コード…"),
             MenuItem::Quit => tr(lang, "Quit cian  (q)", "cian を終了  (q)"),
+            // Labelled with the language it switches *to*, so the action is
+            // clear whichever language the menu is currently in.
+            MenuItem::Lang => match lang {
+                Lang::En => "日本語に切替",
+                Lang::Ja => "Switch to English",
+            },
             MenuItem::Manual => tr(lang, "Key manual  (?)", "キー一覧  (?)"),
         }
     }
@@ -5707,8 +5723,10 @@ impl App {
             items.push(MenuItem::Ssh);
             items.push(MenuItem::Background);
         }
-        // Quit and the manual are offered in every menu, so both are reachable
-        // by mouse alone (quitting otherwise needs `q`, which the shell eats).
+        // Language toggle, quit and the manual are in every menu, so all are
+        // reachable by mouse alone (quitting otherwise needs `q`, which the
+        // shell eats).
+        items.push(MenuItem::Lang);
         items.push(MenuItem::Quit);
         items.push(MenuItem::Manual);
         self.popup = Popup::ContextMenu { items, cursor: 0, at: (col, row) };
@@ -5806,6 +5824,16 @@ impl App {
             MenuItem::ScpDownload => self.start_scp(ScpDir::Download),
             MenuItem::StartLog => self.start_log_prompt(),
             MenuItem::StopLog => self.stop_session_log(),
+            MenuItem::Lang => {
+                // Flip the interface language; every localized string reads
+                // `self.lang` at draw time, so the next frame is fully in the
+                // new language.
+                self.lang = self.lang.toggled();
+                self.message = Some(match self.lang {
+                    Lang::En => "language: English".into(),
+                    Lang::Ja => "言語: 日本語".into(),
+                });
+            }
             MenuItem::Encoding => {
                 match self.shell.active_session() {
                     Some(s) => {
@@ -11418,41 +11446,53 @@ mod tests {
     }
 
     #[test]
-    fn the_status_and_hints_are_japanese_by_default() {
-        // A wide (CJK) glyph occupies two terminal cells, so the row
-        // reconstruction inserts a space after each; strip spaces before
-        // matching the words.
-        let flat = |app: &mut App| render(app, 110, 40).join("\n").replace(' ', "");
+    fn the_status_and_hints_default_to_english_and_switch_to_japanese() {
+        // Default is English.
         let (_d, mut app) = app_with(&["a.txt"]);
-        let screen = flat(&mut app);
+        let en = render(&mut app, 110, 40).join("\n");
+        assert!(en.contains("items") && en.contains("help"), "English chrome:\n{en}");
+
+        // lang=ja renders the chrome in Japanese. A wide (CJK) glyph occupies
+        // two cells, so the row reconstruction inserts a space after each; strip
+        // spaces before matching the words.
+        let flat = |app: &mut App| render(app, 110, 40).join("\n").replace(' ', "");
+        let (_d2, mut ja) = app_with_lang(&["a.txt"], "ja");
+        let screen = flat(&mut ja);
         assert!(screen.contains("件"), "status counts in Japanese:\n{screen}");
         assert!(screen.contains("ヘルプ"), "help hint in Japanese");
-        // The right-click menu is Japanese too.
-        app.open_context_menu(5, 5);
-        let menu = flat(&mut app);
+        ja.open_context_menu(5, 5);
+        let menu = flat(&mut ja);
         assert!(menu.contains("コピー"), "menu in Japanese:\n{menu}");
-
-        // English config flips it back.
-        let (_d2, mut en) = app_with_lang(&["a.txt"], "en");
-        let es = render(&mut en, 110, 40).join("\n");
-        assert!(es.contains("items") && es.contains("help"), "English chrome:\n{es}");
     }
 
     #[test]
-    fn the_manual_defaults_to_japanese_and_switches_to_english() {
+    fn the_manual_defaults_to_english_and_switches_to_japanese() {
         let keymap = HashMap::new();
-        let ja = manual_lines(&keymap, Lang::Ja).join("\n");
-        assert!(ja.contains("キー一覧"), "Japanese header:\n{ja}");
-        assert!(ja.contains("削除（ゴミ箱へ）"), "Japanese description present");
         let en = manual_lines(&keymap, Lang::En).join("\n");
         assert!(en.contains("key manual"), "English header");
         assert!(en.contains("delete (to trash)"), "English description present");
+        let ja = manual_lines(&keymap, Lang::Ja).join("\n");
+        assert!(ja.contains("キー一覧"), "Japanese header:\n{ja}");
+        assert!(ja.contains("削除（ゴミ箱へ）"), "Japanese description present");
 
         // The `lang` option drives which one an App shows.
-        let (_d, app_ja) = app_with(&["a.rs"]);
-        assert_eq!(app_ja.lang, Lang::Ja, "default is Japanese");
-        let (_d2, app_en) = app_with_lang(&["a.rs"], "en");
-        assert_eq!(app_en.lang, Lang::En, "lang=en switches to English");
+        let (_d, app_en) = app_with(&["a.rs"]);
+        assert_eq!(app_en.lang, Lang::En, "default is English");
+        let (_d2, app_ja) = app_with_lang(&["a.rs"], "ja");
+        assert_eq!(app_ja.lang, Lang::Ja, "lang=ja switches to Japanese");
+    }
+
+    #[test]
+    fn the_menu_language_toggle_flips_the_interface() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        assert_eq!(app.lang, Lang::En, "starts English");
+        app.run_menu_item(MenuItem::Lang).unwrap();
+        assert_eq!(app.lang, Lang::Ja, "toggled to Japanese");
+        // The label reflects the language it switches *to*.
+        assert_eq!(MenuItem::Lang.label(Lang::Ja), "Switch to English");
+        assert_eq!(MenuItem::Lang.label(Lang::En), "日本語に切替");
+        app.run_menu_item(MenuItem::Lang).unwrap();
+        assert_eq!(app.lang, Lang::En, "toggled back to English");
     }
 
     fn mouse(kind: MouseEventKind, col: u16, row: u16) -> MouseEvent {
@@ -11743,6 +11783,7 @@ mod tests {
                 MenuItem::StartLog,
                 MenuItem::Encoding,
                 MenuItem::Background,
+                MenuItem::Lang,
                 MenuItem::Quit,
                 MenuItem::Manual
             ]

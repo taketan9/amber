@@ -25,8 +25,8 @@ cian for the full key manual — it is generated from the live keymap, so it als
 lists any keys you bound in `init.lua`. From a shell, `cian -man` prints the
 same thing and `cian -h` prints the command-line usage.
 
-The manual is in **Japanese by default**; switch it to English with
-`cian.set_option("lang", "en")`.
+The interface is **English by default**; switch it to Japanese with
+`cian.set_option("lang", "ja")`, or toggle live from the right-click menu.
 
 ## Mouse
 
