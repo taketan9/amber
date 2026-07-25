@@ -75,6 +75,11 @@ pub struct Attrs {
     pub readonly: bool,
     /// Owner, as a name where one can be resolved.
     pub owner: Option<String>,
+    /// Size in bytes. `None` for directories, where a byte count is not what
+    /// anyone means by "size".
+    pub size: Option<u64>,
+    /// True for a directory, so callers can label it rather than show a size.
+    pub is_dir: bool,
 }
 
 impl Attrs {
@@ -106,6 +111,10 @@ impl Attrs {
 pub fn read_attrs(path: &Path) -> Result<Attrs> {
     let meta = fs::metadata(path).with_context(|| format!("stat {}", path.display()))?;
     let readonly = meta.permissions().readonly();
+    let is_dir = meta.is_dir();
+    // A directory's byte length is a filesystem detail, not the "size" a user
+    // means; leave it out and let the caller label it as a folder.
+    let size = if is_dir { None } else { Some(meta.len()) };
 
     #[cfg(unix)]
     {
@@ -115,11 +124,11 @@ pub fn read_attrs(path: &Path) -> Result<Attrs> {
         // Resolving a uid to a name needs the passwd database; showing the
         // number is better than pretending to know.
         let owner = Some(meta.uid().to_string());
-        Ok(Attrs { mode: Some(mode), readonly, owner })
+        Ok(Attrs { mode: Some(mode), readonly, owner, size, is_dir })
     }
     #[cfg(not(unix))]
     {
-        Ok(Attrs { mode: None, readonly, owner: None })
+        Ok(Attrs { mode: None, readonly, owner: None, size, is_dir })
     }
 }
 

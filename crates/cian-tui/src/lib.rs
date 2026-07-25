@@ -1630,6 +1630,20 @@ enum MenuItem {
     AiMenu,
     /// A submenu grouping the file-transfer actions.
     SendMenu,
+    /// A submenu grouping the shell window actions (splits, tabs, zoom).
+    WindowMenu,
+    /// Split the active shell tab left/right (S-F8).
+    ShellSplitLR,
+    /// Split the active shell tab top/bottom (S-F9).
+    ShellSplitTB,
+    /// Open a new shell tab (F9).
+    ShellNewTab,
+    /// Close the active shell split pane (S-F10).
+    ShellCloseSplit,
+    /// Close the active shell tab (F10).
+    ShellCloseTab,
+    /// Zoom the shell surface (F12).
+    ShellZoom,
     /// Goes back up from a submenu to its parent.
     Back,
     Quit,
@@ -1639,7 +1653,7 @@ enum MenuItem {
 impl MenuItem {
     /// Group items open a submenu instead of acting; this is their marker.
     fn is_group(self) -> bool {
-        matches!(self, MenuItem::AiMenu | MenuItem::SendMenu)
+        matches!(self, MenuItem::AiMenu | MenuItem::SendMenu | MenuItem::WindowMenu)
     }
 }
 
@@ -1651,20 +1665,20 @@ impl MenuItem {
             MenuItem::Paste => tr(lang, "Paste", "貼り付け"),
             MenuItem::CopyToOther => tr(lang, "Copy to other pane", "反対ペインへコピー"),
             MenuItem::MoveToOther => tr(lang, "Move to other pane", "反対ペインへ移動"),
-            MenuItem::CopyToPath => tr(lang, "Copy to…  (recent / typed)", "指定先へコピー…  (履歴/入力)"),
+            MenuItem::CopyToPath => tr(lang, "Copy to  (recent / typed)", "指定先へコピー  (履歴/入力)"),
             MenuItem::Delete => tr(lang, "Delete (to trash)", "削除（ゴミ箱へ）"),
             MenuItem::Rename => tr(lang, "Rename", "リネーム"),
-            MenuItem::Background => tr(lang, "Background color…", "背景色…"),
+            MenuItem::Background => tr(lang, "Background color", "背景色"),
             MenuItem::HiddenToggle => tr(lang, "Show / hide dotfiles", "ドットファイルの表示切替"),
-            MenuItem::Attributes => tr(lang, "Attributes…", "属性…"),
-            MenuItem::Hash => tr(lang, "Checksum…", "チェックサム…"),
+            MenuItem::Attributes => tr(lang, "Attributes", "属性"),
+            MenuItem::Hash => tr(lang, "Checksum", "チェックサム"),
             MenuItem::Compare => tr(lang, "Compare left ↔ right", "左右を比較"),
-            MenuItem::Ssh => tr(lang, "SSH connect…", "SSH接続…"),
-            MenuItem::ScpUpload => tr(lang, "Upload → server…", "アップロード → サーバ…"),
-            MenuItem::ScpDownload => tr(lang, "Download ← server…", "ダウンロード ← サーバ…"),
-            MenuItem::StartLog => tr(lang, "Start session log…", "セッションログ開始…"),
+            MenuItem::Ssh => tr(lang, "SSH connect", "SSH接続"),
+            MenuItem::ScpUpload => tr(lang, "Upload → server", "アップロード → サーバ"),
+            MenuItem::ScpDownload => tr(lang, "Download ← server", "ダウンロード ← サーバ"),
+            MenuItem::StartLog => tr(lang, "Start session log", "セッションログ開始"),
             MenuItem::StopLog => tr(lang, "Stop session log  ●", "セッションログ停止  ●"),
-            MenuItem::Encoding => tr(lang, "Text encoding…", "文字コード…"),
+            MenuItem::Encoding => tr(lang, "Text encoding", "文字コード"),
             MenuItem::Quit => tr(lang, "Quit cian  (q)", "cian を終了  (q)"),
             // Labelled with the language it switches *to*, so the action is
             // clear whichever language the menu is currently in.
@@ -1672,11 +1686,18 @@ impl MenuItem {
                 Lang::En => "日本語に切替",
                 Lang::Ja => "Switch to English",
             },
-            MenuItem::AiChat => tr(lang, "Chat…", "チャット…"),
-            MenuItem::AiShellCmd => tr(lang, "Command from description…", "説明からコマンド生成…"),
-            MenuItem::AiCommit => tr(lang, "Draft commit message…", "コミットメッセージ生成…"),
+            MenuItem::AiChat => tr(lang, "Chat", "チャット"),
+            MenuItem::AiShellCmd => tr(lang, "Command from description", "説明からコマンド生成"),
+            MenuItem::AiCommit => tr(lang, "Draft commit message", "コミットメッセージ生成"),
             MenuItem::AiMenu => tr(lang, "AI ▸", "AI ▸"),
             MenuItem::SendMenu => tr(lang, "Transfer ▸", "転送 ▸"),
+            MenuItem::WindowMenu => tr(lang, "Window ▸", "ウィンドウ ▸"),
+            MenuItem::ShellSplitLR => tr(lang, "Split left / right  (S-F8)", "左右に分割  (S-F8)"),
+            MenuItem::ShellSplitTB => tr(lang, "Split top / bottom  (S-F9)", "上下に分割  (S-F9)"),
+            MenuItem::ShellNewTab => tr(lang, "New tab  (F9)", "新規タブ  (F9)"),
+            MenuItem::ShellCloseSplit => tr(lang, "Close split pane  (S-F10)", "分割パネルを閉じる  (S-F10)"),
+            MenuItem::ShellCloseTab => tr(lang, "Close tab  (F10)", "タブを閉じる  (F10)"),
+            MenuItem::ShellZoom => tr(lang, "Zoom  (F12)", "ズーム  (F12)"),
             MenuItem::Back => tr(lang, "◂ Back", "◂ 戻る"),
             MenuItem::Manual => tr(lang, "Key manual  (?)", "キー一覧  (?)"),
         }
@@ -2827,12 +2848,24 @@ impl App {
     /// `ls`: refresh the listing. `ls -a` toggles hidden files, which is the
     /// one flag that makes sense when the pane already *is* the listing.
     fn cmd_ls(&mut self, args: &[&str]) {
-        if args.iter().any(|a| a.contains('a')) {
+        // `:ls -a` still toggles dotfiles (the long-standing behaviour). A plain
+        // `:ls` now shows the same Attributes window as the menu, but for every
+        // entry in the listing — a detailed `ls -l`-style view.
+        if args.iter().any(|a| a.starts_with('-') && a.contains('a')) {
             self.toggle_hidden();
-        } else {
-            self.reload_active();
-            self.message = Some("refreshed".into());
+            return;
         }
+        let paths: Vec<PathBuf> = match self.active_pane() {
+            Some(p) => p.entries.iter().map(|e| e.path.clone()).collect(),
+            None => Vec::new(),
+        };
+        if paths.is_empty() {
+            self.message = Some("empty directory".into());
+            return;
+        }
+        // Same cap as the Attributes window — the popup is not scrollable, and a
+        // longer list would clip; the trailing "… and N more" says so.
+        self.popup = Popup::Notice { lines: self.attributes_lines(&paths, 40) };
     }
 
     /// `file`: name what the selection is, by magic number and content.
@@ -4511,23 +4544,43 @@ impl App {
             self.message = Some("nothing selected".into());
             return;
         }
+        self.popup = Popup::Notice { lines: self.attributes_lines(&paths, 40) };
+    }
+
+    /// Build the Attributes listing (permissions, size, owner) for `paths`,
+    /// capped at `limit` rows. Shared by the Attributes menu/`:attr` and `:ls`.
+    fn attributes_lines(&self, paths: &[PathBuf], limit: usize) -> Vec<String> {
+        let ja = self.lang == Lang::Ja;
         let mut lines = Vec::new();
-        for path in paths.iter().take(20) {
+        for path in paths.iter().take(limit) {
             let name = path.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
             match cian_core::attrs::read_attrs(path) {
                 Ok(a) => {
-                    let owner = a.owner.as_ref().map(|o| format!("   owner {}", o)).unwrap_or_default();
-                    lines.push(format!("{:<28} {}{}", truncate(&name, 28), a.describe(), owner));
+                    // A folder is labelled as such; a file shows its byte size,
+                    // right-aligned so the sizes form a readable column.
+                    let size = if a.is_dir {
+                        format!("{:>10}", tr(self.lang, "<dir>", "<フォルダ>"))
+                    } else {
+                        format!("{:>10}", cian_core::human_size(a.size.unwrap_or(0)))
+                    };
+                    let owner = a.owner.as_ref().map(|o| format!("  owner {}", o)).unwrap_or_default();
+                    lines.push(format!("{:<28} {}  {}{}", truncate(&name, 28), a.describe(), size, owner));
                 }
                 Err(e) => lines.push(format!("{:<28} {}", truncate(&name, 28), e)),
             }
         }
-        if paths.len() > 20 {
-            lines.push(format!("... and {} more", paths.len() - 20));
+        if paths.len() > limit {
+            lines.push(if ja {
+                format!("... 他 {} 件", paths.len() - limit)
+            } else {
+                format!("... and {} more", paths.len() - limit)
+            });
         }
         lines.push(String::new());
-        lines.push("change with  :chmod 644   or  :readonly on|off".to_string());
-        self.popup = Popup::Notice { lines };
+        lines.push(tr(self.lang,
+            "change with  :chmod 644   or  :readonly on|off",
+            "変更:  :chmod 644   または  :readonly on|off").to_string());
+        lines
     }
 
     /// Checksum the selection on a worker thread — the files worth hashing are
@@ -6415,6 +6468,9 @@ impl App {
                 items.push(MenuItem::ScpDownload);
             }
             items.push(MenuItem::Background);
+            // Window operations (splits, tabs, zoom) that otherwise live only on
+            // the F-keys, so they are reachable by mouse.
+            items.push(MenuItem::WindowMenu);
             if ai {
                 items.push(MenuItem::AiMenu);
             }
@@ -6470,6 +6526,23 @@ impl App {
             }
             MenuItem::SendMenu => {
                 Some(vec![MenuItem::ScpUpload, MenuItem::ScpDownload, MenuItem::Back])
+            }
+            MenuItem::WindowMenu => {
+                let mut v = vec![
+                    MenuItem::ShellSplitLR,
+                    MenuItem::ShellSplitTB,
+                    MenuItem::ShellNewTab,
+                ];
+                // Offer the close that matches what is active: a split pane if
+                // this tab is split, otherwise the tab itself.
+                if self.shell.active_pane_count() > 1 {
+                    v.push(MenuItem::ShellCloseSplit);
+                } else {
+                    v.push(MenuItem::ShellCloseTab);
+                }
+                v.push(MenuItem::ShellZoom);
+                v.push(MenuItem::Back);
+                Some(v)
             }
             _ => None,
         }
@@ -6583,7 +6656,37 @@ impl App {
         self.menu_stack.clear();
         self.popup = Popup::None;
         match item {
-            MenuItem::AiMenu | MenuItem::SendMenu | MenuItem::Back => {} // handled above
+            MenuItem::AiMenu | MenuItem::SendMenu | MenuItem::WindowMenu | MenuItem::Back => {} // handled above
+            MenuItem::ShellSplitLR => {
+                let cwd = self.shell_cwd();
+                self.shell.split_active(&cwd, SplitDir::LeftRight);
+                self.focus(FocusedPane::Shell);
+            }
+            MenuItem::ShellSplitTB => {
+                let cwd = self.shell_cwd();
+                self.shell.split_active(&cwd, SplitDir::TopBottom);
+                self.focus(FocusedPane::Shell);
+            }
+            MenuItem::ShellNewTab => {
+                let cwd = self.shell_cwd();
+                self.shell.new_tab(&cwd);
+                self.focus(FocusedPane::Shell);
+            }
+            MenuItem::ShellCloseSplit => {
+                self.popup = Popup::ConfirmClose { target: CloseTarget::ShellPane };
+            }
+            MenuItem::ShellCloseTab => {
+                if self.shell.close_active() {
+                    self.focus(self.last_file_pane);
+                }
+            }
+            MenuItem::ShellZoom => {
+                self.focus(FocusedPane::Shell);
+                // Don't fight a full-screen TUI running in the pane.
+                if !self.shell.active_modes().0 {
+                    self.toggle_zoom();
+                }
+            }
             MenuItem::Copy => self.clip_targets(ClipOp::Copy),
             MenuItem::Cut => self.clip_targets(ClipOp::Cut),
             // In the shell, "Paste" means the text on the clipboard goes to
@@ -10275,13 +10378,16 @@ fn key_hints(app: &App) -> Vec<(&'static str, &'static str)> {
             v.push(("S-F1/S-F2", d("prev/next pane", "前/次のペイン")));
         }
         v.extend([
+            // F1..F8 jump straight to tab N; naming F1/F2 stands in for the row.
+            ("F1/F2", d("tab 1/2", "タブ1/2")),
             ("F9", d("new tab", "新規タブ")),
+            ("F10", d("close tab", "タブを閉じる")),
             // Named per key rather than as a pair. "S-F8/F9" read as
             // "Shift+F8 or F9" — with plain F9 (new tab) sitting right beside
             // it — and gave no clue which key gave which orientation.
             ("S-F8", d("v-split", "左右分割")),
             ("S-F9", d("h-split", "上下分割")),
-            ("S-F10", d("close", "閉じる")),
+            ("S-F10", d("close split", "分割を閉じる")),
             ("F12", d("zoom", "ズーム")),
             // No `? help` here: in the shell `?` is a literal character that
             // goes to the running program, so advertising it would be a lie.
@@ -10309,15 +10415,17 @@ fn key_hints(app: &App) -> Vec<(&'static str, &'static str)> {
         // purpose — a bar listing everything becomes wallpaper, and the
         // manual is one keystroke away.
         _ => vec![
-            ("l/-", d("in/out", "入/出")),
             ("Space", d("mark", "マーク")),
-            ("y/m", d("copy/mv", "コピー/移動")),
-            ("d", d("delete", "削除")),
             ("/", d("filter", "絞込")),
             (",", d("sort", "並替")),
             ("S-F", d("find", "検索")),
             ("C-F", d("grep", "grep")),
             ("F3", d("view", "閲覧")),
+            // The tab F-keys, which are otherwise invisible: F1/F2 step tabs,
+            // F9 opens one, F10 closes one.
+            ("F1/F2", d("prev/next tab", "前/次タブ")),
+            ("F9", d("new tab", "新規タブ")),
+            ("F10", d("close tab", "タブを閉じる")),
             ("S-J", d("shell", "シェル")),
             // Last, so it is the first to drop on a narrow window: comparing
             // two files is the rarest of these by some distance.
@@ -11927,8 +12035,8 @@ fn draw_popup(
             if targets.len() > 8 {
                 lines.push(tr_count(lang, targets.len() - 8));
             }
-            let foot = tr(lang, " y=trash  a=delete permanently  n/Esc=cancel ",
-                " y=ゴミ箱  a=完全削除  n/Esc=取消 ");
+            let foot = tr(lang, " y/Enter=trash  a=delete permanently  n/Esc=cancel ",
+                " y/Enter=ゴミ箱  a=完全削除  n/Esc=取消 ");
             (title, lines, foot.to_string())
         }
         Popup::ConfirmTransfer { op, targets, dest } => {
@@ -13176,11 +13284,42 @@ mod tests {
                 MenuItem::StartLog,
                 MenuItem::Encoding,
                 MenuItem::Background,
+                MenuItem::WindowMenu,
                 MenuItem::Lang,
                 MenuItem::Quit,
                 MenuItem::Manual
             ]
         );
+    }
+
+    #[test]
+    fn shell_window_submenu_offers_splits_tabs_and_zoom() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        app.focus(FocusedPane::Shell);
+        app.open_context_menu(3, 3);
+        // Drill into Window ▸.
+        app.run_menu_item(MenuItem::WindowMenu).unwrap();
+        let Popup::ContextMenu { items, .. } = &app.popup else { panic!("no submenu") };
+        assert!(items.contains(&MenuItem::ShellSplitLR));
+        assert!(items.contains(&MenuItem::ShellSplitTB));
+        assert!(items.contains(&MenuItem::ShellNewTab));
+        assert!(items.contains(&MenuItem::ShellZoom));
+        // A single (unsplit) tab offers "close tab", not "close split".
+        assert!(items.contains(&MenuItem::ShellCloseTab));
+        assert!(!items.contains(&MenuItem::ShellCloseSplit));
+        assert!(items.contains(&MenuItem::Back));
+    }
+
+    #[test]
+    fn attributes_lines_show_a_size_for_a_file() {
+        let d = tempfile::tempdir().unwrap();
+        let f = d.path().join("data.bin");
+        std::fs::write(&f, vec![0u8; 2048]).unwrap();
+        let (_d2, app) = app_with(&["a.txt"]);
+        let lines = app.attributes_lines(&[f], 40);
+        // Human-readable size appears on the entry's row.
+        assert!(lines.iter().any(|l| l.contains("data.bin") && (l.contains("2.0K") || l.contains("2K") || l.contains("2048"))),
+            "size shown: {lines:?}");
     }
 
     #[test]
