@@ -211,6 +211,41 @@ impl Lang {
     }
 }
 
+/// Pick the English or Japanese form of a fixed UI string.
+fn tr(lang: Lang, en: &'static str, ja: &'static str) -> &'static str {
+    match lang {
+        Lang::En => en,
+        Lang::Ja => ja,
+    }
+}
+
+/// Localize the known progress-operation labels (`start_op`'s first argument).
+/// Anything unrecognised (e.g. a directory path) is shown unchanged.
+fn tr_op_label(lang: Lang, label: &str) -> String {
+    if lang == Lang::En {
+        return label.to_string();
+    }
+    match label {
+        "copying" => "コピー中",
+        "moving" => "移動中",
+        "uploading" => "アップロード中",
+        "downloading" => "ダウンロード中",
+        "hashing" => "チェックサム計算中",
+        "elevating" => "管理者権限で実行中",
+        "comparing" => "比較中",
+        other => return other.to_string(),
+    }
+    .to_string()
+}
+
+/// The "... and N more" overflow line, localized.
+fn tr_count(lang: Lang, more: usize) -> String {
+    match lang {
+        Lang::En => format!("  ... and {} more", more),
+        Lang::Ja => format!("  ... 他 {} 件", more),
+    }
+}
+
 /// Remappable normal-mode actions. Keys the user binds via `cian.set_keymap`
 /// resolve to one of these; the default key handling is otherwise untouched.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1165,29 +1200,29 @@ enum MenuItem {
 }
 
 impl MenuItem {
-    fn label(self) -> &'static str {
+    fn label(self, lang: Lang) -> &'static str {
         match self {
-            MenuItem::Copy => "Copy",
-            MenuItem::Cut => "Cut",
-            MenuItem::Paste => "Paste",
-            MenuItem::CopyToOther => "Copy to other pane",
-            MenuItem::MoveToOther => "Move to other pane",
-            MenuItem::CopyToPath => "Copy to…  (recent / typed)",
-            MenuItem::Delete => "Delete (to trash)",
-            MenuItem::Rename => "Rename",
-            MenuItem::Background => "Background color…",
-            MenuItem::HiddenToggle => "Show / hide dotfiles",
-            MenuItem::Attributes => "Attributes…",
-            MenuItem::Hash => "Checksum…",
-            MenuItem::Compare => "Compare left ↔ right",
-            MenuItem::Ssh => "SSH connect…",
-            MenuItem::ScpUpload => "Upload → server…",
-            MenuItem::ScpDownload => "Download ← server…",
-            MenuItem::StartLog => "Start session log…",
-            MenuItem::StopLog => "Stop session log  ●",
-            MenuItem::Encoding => "Text encoding…",
-            MenuItem::Quit => "Quit cian  (q)",
-            MenuItem::Manual => "Key manual  (?)",
+            MenuItem::Copy => tr(lang, "Copy", "コピー"),
+            MenuItem::Cut => tr(lang, "Cut", "カット"),
+            MenuItem::Paste => tr(lang, "Paste", "貼り付け"),
+            MenuItem::CopyToOther => tr(lang, "Copy to other pane", "反対ペインへコピー"),
+            MenuItem::MoveToOther => tr(lang, "Move to other pane", "反対ペインへ移動"),
+            MenuItem::CopyToPath => tr(lang, "Copy to…  (recent / typed)", "指定先へコピー…  (履歴/入力)"),
+            MenuItem::Delete => tr(lang, "Delete (to trash)", "削除（ゴミ箱へ）"),
+            MenuItem::Rename => tr(lang, "Rename", "リネーム"),
+            MenuItem::Background => tr(lang, "Background color…", "背景色…"),
+            MenuItem::HiddenToggle => tr(lang, "Show / hide dotfiles", "ドットファイルの表示切替"),
+            MenuItem::Attributes => tr(lang, "Attributes…", "属性…"),
+            MenuItem::Hash => tr(lang, "Checksum…", "チェックサム…"),
+            MenuItem::Compare => tr(lang, "Compare left ↔ right", "左右を比較"),
+            MenuItem::Ssh => tr(lang, "SSH connect…", "SSH接続…"),
+            MenuItem::ScpUpload => tr(lang, "Upload → server…", "アップロード → サーバ…"),
+            MenuItem::ScpDownload => tr(lang, "Download ← server…", "ダウンロード ← サーバ…"),
+            MenuItem::StartLog => tr(lang, "Start session log…", "セッションログ開始…"),
+            MenuItem::StopLog => tr(lang, "Stop session log  ●", "セッションログ停止  ●"),
+            MenuItem::Encoding => tr(lang, "Text encoding…", "文字コード…"),
+            MenuItem::Quit => tr(lang, "Quit cian  (q)", "cian を終了  (q)"),
+            MenuItem::Manual => tr(lang, "Key manual  (?)", "キー一覧  (?)"),
         }
     }
 }
@@ -7534,12 +7569,12 @@ fn draw(f: &mut Frame, app: &mut App) {
     }
     // The directory comparison shows the same bar while it runs.
     if let Some(job) = &app.diff_job {
-        draw_progress_bar(f, area, job.label, &job.latest, job.started);
+        draw_progress_bar(f, area, job.label, &job.latest, job.started, app.lang);
     }
     if !matches!(app.popup, Popup::None) {
         // Remember where the context menu landed so a click can hit its rows.
         if let Popup::ContextMenu { items, at, .. } = &app.popup {
-            app.menu_rect = context_menu_rect(items, *at, area);
+            app.menu_rect = context_menu_rect(items, *at, area, app.lang);
         }
         // And the viewer's text body, so a drag maps to a line.
         if matches!(app.popup, Popup::Viewer { .. }) {
@@ -7581,8 +7616,8 @@ fn viewer_body_rect(area: Rect) -> Rect {
 /// The rect the context menu occupies, from its anchor and item count. Shared
 /// by the renderer and the mouse handler so a click lands where the row is
 /// drawn.
-fn context_menu_rect(items: &[MenuItem], at: (u16, u16), area: Rect) -> Rect {
-    let w = items.iter().map(|i| i.label().len()).max().unwrap_or(10) as u16 + 4;
+fn context_menu_rect(items: &[MenuItem], at: (u16, u16), area: Rect, lang: Lang) -> Rect {
+    let w = items.iter().map(|i| width(i.label(lang))).max().unwrap_or(10) as u16 + 4;
     let h = items.len() as u16 + 2;
     let x = at.0.min(area.width.saturating_sub(w));
     let y = at.1.min(area.height.saturating_sub(h));
@@ -8415,63 +8450,72 @@ fn focus_badge_color(mode: Mode) -> Color {
 /// that stops being read. `?` is always last so the full manual is reachable
 /// from whatever state the user is stuck in.
 fn key_hints(app: &App) -> Vec<(&'static str, &'static str)> {
+    // Pick the English or Japanese label; the key column is the same either way.
+    let ja = app.lang == Lang::Ja;
+    let d = move |en: &'static str, jp: &'static str| -> &'static str {
+        if ja {
+            jp
+        } else {
+            en
+        }
+    };
     if app.focused == FocusedPane::Shell {
-        let mut v = vec![("Esc", "files")];
+        let mut v = vec![("Esc", d("files", "ファイル"))];
         // Moving between split panes only exists once there is a split, and it
         // is the hint most worth showing then — the key is easy to forget and
         // there is nothing on screen otherwise to suggest it.
         if app.shell.active_pane_count() > 1 {
-            v.push(("S-F1/S-F2", "prev/next pane"));
+            v.push(("S-F1/S-F2", d("prev/next pane", "前/次のペイン")));
         }
         v.extend([
-            ("F9", "new tab"),
+            ("F9", d("new tab", "新規タブ")),
             // Named per key rather than as a pair. "S-F8/F9" read as
             // "Shift+F8 or F9" — with plain F9 (new tab) sitting right beside
             // it — and gave no clue which key gave which orientation.
-            ("S-F8", "v-split"),
-            ("S-F9", "h-split"),
-            ("S-F10", "close"),
-            ("F12", "zoom"),
+            ("S-F8", d("v-split", "左右分割")),
+            ("S-F9", d("h-split", "上下分割")),
+            ("S-F10", d("close", "閉じる")),
+            ("F12", d("zoom", "ズーム")),
             // No `? help` here: in the shell `?` is a literal character that
             // goes to the running program, so advertising it would be a lie.
             // Shift+Enter opens the menu, which leads to the manual.
-            ("S-Enter", "menu"),
+            ("S-Enter", d("menu", "メニュー")),
         ]);
         return v;
     }
     match app.mode {
         Mode::Visual => vec![
-            ("j/k", "extend"),
-            ("a", "all"),
-            ("gg/G", "top/bottom"),
-            ("Enter", "confirm"),
-            ("Esc", "cancel"),
+            ("j/k", d("extend", "伸ばす")),
+            ("a", d("all", "全選択")),
+            ("gg/G", d("top/bottom", "先頭/末尾")),
+            ("Enter", d("confirm", "確定")),
+            ("Esc", d("cancel", "取消")),
         ],
         Mode::Filter => vec![
-            ("type", "narrow"),
-            ("Enter", "keep"),
-            ("Esc", "clear"),
+            ("type", d("narrow", "絞込")),
+            ("Enter", d("keep", "適用")),
+            ("Esc", d("clear", "解除")),
         ],
-        Mode::Command => vec![("Enter", "run"), ("Esc", "cancel")],
+        Mode::Command => vec![("Enter", d("run", "実行")), ("Esc", d("cancel", "取消"))],
         // Ordered by how often each is reached for: a narrow window drops
         // from the end, and `? help` is reserved separately. Kept short on
         // purpose — a bar listing everything becomes wallpaper, and the
         // manual is one keystroke away.
         _ => vec![
-            ("l/-", "in/out"),
-            ("Space", "mark"),
-            ("y/m", "copy/mv"),
-            ("d", "delete"),
-            ("/", "filter"),
-            (",", "sort"),
-            ("S-F", "find"),
-            ("C-F", "grep"),
-            ("F3", "view"),
-            ("S-J", "shell"),
+            ("l/-", d("in/out", "入/出")),
+            ("Space", d("mark", "マーク")),
+            ("y/m", d("copy/mv", "コピー/移動")),
+            ("d", d("delete", "削除")),
+            ("/", d("filter", "絞込")),
+            (",", d("sort", "並替")),
+            ("S-F", d("find", "検索")),
+            ("C-F", d("grep", "grep")),
+            ("F3", d("view", "閲覧")),
+            ("S-J", d("shell", "シェル")),
             // Last, so it is the first to drop on a narrow window: comparing
             // two files is the rarest of these by some distance.
-            ("=", "diff"),
-            ("?", "help"),
+            ("=", d("diff", "差分")),
+            ("?", d("help", "ヘルプ")),
         ],
     }
 }
@@ -8485,8 +8529,9 @@ fn draw_key_hints(f: &mut Frame, area: Rect, app: &App) {
     let gap = Span::styled("   ", desc_style);
 
     let hints = key_hints(app);
-    // +4 for the space between key and label plus the trailing gap.
-    let width_of = |(k, d): &(&str, &str)| k.chars().count() as u16 + d.chars().count() as u16 + 4;
+    // +4 for the space between key and label plus the trailing gap. Display
+    // width, not char count, so wide (CJK) labels don't overflow the row.
+    let width_of = |(k, d): &(&str, &str)| width(k) as u16 + width(d) as u16 + 4;
 
     // The last hint is always `? help`. It is the way out of not knowing any
     // of the others, so it must never be the entry that a narrow window drops
@@ -8541,16 +8586,27 @@ fn draw_status(f: &mut Frame, area: Rect, app: &App) {
         )
     };
 
+    let ja = app.lang == Lang::Ja;
+    let items_chip = if ja {
+        format!("{} 件", item_count)
+    } else {
+        format!("{} items", item_count)
+    };
+    let marks_chip = if ja {
+        format!("マーク {}", mark_count)
+    } else {
+        format!("marks {}", mark_count)
+    };
     let mut spans: Vec<Span> = vec![
         Span::styled(
             format!(" {} ", focus_label),
             Style::default().fg(Color::Black).bg(badge_bg).add_modifier(Modifier::BOLD),
         ),
         pad.clone(),
-        chip(format!("{} items", item_count), Color::White),
+        chip(items_chip, Color::White),
         dim_sep.clone(),
         chip(
-            format!("marks {}", mark_count),
+            marks_chip,
             if mark_count > 0 { theme().mark_fg } else { Color::Rgb(140, 140, 160) },
         ),
     ];
@@ -8560,10 +8616,12 @@ fn draw_status(f: &mut Frame, area: Rect, app: &App) {
     if let Some(filter) = app.active_pane().map(|p| p.filter.clone()).filter(|f| !f.is_empty()) {
         let total = app.active_pane().map(|p| p.all_entries.len()).unwrap_or(0);
         spans.push(dim_sep.clone());
-        spans.push(chip(
-            format!("filter /{} ({} of {})", filter, item_count, total),
-            Color::Rgb(80, 200, 120),
-        ));
+        let filter_chip = if ja {
+            format!("フィルタ /{} ({}/{} 件)", filter, item_count, total)
+        } else {
+            format!("filter /{} ({} of {})", filter, item_count, total)
+        };
+        spans.push(chip(filter_chip, Color::Rgb(80, 200, 120)));
     }
 
     if app.zoomed {
@@ -8678,7 +8736,7 @@ fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
 /// A progress bar for the running file operation, and the way to stop it.
 fn draw_op_progress(f: &mut Frame, area: Rect, app: &App) {
     let Some(job) = &app.op_job else { return };
-    draw_progress_bar(f, area, job.label, &job.latest, job.started);
+    draw_progress_bar(f, area, job.label, &job.latest, job.started, app.lang);
 }
 
 /// A centered progress dialog: label, current item, a bar, counts and elapsed.
@@ -8689,6 +8747,7 @@ fn draw_progress_bar(
     label: &str,
     p: &cian_core::progress::Progress,
     started: Instant,
+    lang: Lang,
 ) {
     let w = 74u16.min(area.width.saturating_sub(2));
     let rect = centered_rect(w, 8, area);
@@ -8697,7 +8756,7 @@ fn draw_progress_bar(
         .borders(Borders::ALL)
         .border_type(border_type())
         .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
-        .title(format!(" {} ", label));
+        .title(format!(" {} ", tr_op_label(lang, label)));
     let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
     f.render_widget(block, rect);
 
@@ -8746,7 +8805,7 @@ fn draw_progress_bar(
         Rect::new(inner.x, bar_y + 2, inner.width, 1),
     );
     f.render_widget(
-        Paragraph::new(" Esc = stop ").style(
+        Paragraph::new(tr(lang, " Esc = stop ", " Esc = 中止 ")).style(
             Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD),
         ),
         Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1),
@@ -8799,7 +8858,7 @@ fn draw_popup(
             .borders(Borders::ALL)
         .border_type(border_type())
             .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
-            .title(" manual ")
+            .title(tr(lang, " manual ", " キー一覧 "))
             .title_bottom(pos);
         f.render_widget(block, rect);
 
@@ -8827,8 +8886,8 @@ fn draw_popup(
     // The context menu is anchored at the pointer rather than centred, so it
     // sizes and positions itself.
     if let Popup::ContextMenu { items, cursor, at } = popup {
-        let w = items.iter().map(|i| i.label().len()).max().unwrap_or(10) as u16 + 4;
-        let rect = context_menu_rect(items, *at, area);
+        let w = items.iter().map(|i| width(i.label(lang))).max().unwrap_or(10) as u16 + 4;
+        let rect = context_menu_rect(items, *at, area, lang);
 
         f.render_widget(Clear, rect);
         let block = Block::default()
@@ -8850,7 +8909,7 @@ fn draw_popup(
                     Style::default().fg(Color::Rgb(210, 210, 225))
                 };
                 Line::from(Span::styled(
-                    format!("{}{:<w$}", if sel { "▸ " } else { "  " }, item.label(), w = (w - 4) as usize),
+                    format!("{}{}", if sel { "▸ " } else { "  " }, pad_to(item.label(lang), (w - 4) as usize)),
                     style,
                 ))
             })
@@ -8877,7 +8936,7 @@ fn draw_popup(
             .borders(Borders::ALL)
             .border_type(border_type())
             .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
-            .title(" ssh — host ");
+            .title(tr(lang, " ssh — host ", " SSH — ホスト "));
         let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
         f.render_widget(block, rect);
 
@@ -8918,7 +8977,7 @@ fn draw_popup(
         let footer_area =
             Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1);
         f.render_widget(
-            Paragraph::new(" type to filter  ↑↓ select  Enter next  Esc cancel ").style(
+            Paragraph::new(tr(lang, " type to filter  ↑↓ select  Enter next  Esc cancel ", " 入力で絞込  ↑↓ 選択  Enter 次へ  Esc 取消 ")).style(
                 Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD),
             ),
             footer_area,
@@ -8936,7 +8995,7 @@ fn draw_popup(
             .borders(Borders::ALL)
             .border_type(border_type())
             .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
-            .title(format!(" ssh — {} ", hst.name));
+            .title(format!(" {} — {} ", tr(lang, "ssh", "SSH"), hst.name));
         let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
         f.render_widget(block, rect);
 
@@ -8967,7 +9026,7 @@ fn draw_popup(
         let footer_area =
             Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1);
         f.render_widget(
-            Paragraph::new(" Enter connect   Esc back ").style(
+            Paragraph::new(tr(lang, " Enter connect   Esc back ", " Enter 接続   Esc 戻る ")).style(
                 Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD),
             ),
             footer_area,
@@ -9075,7 +9134,7 @@ fn draw_popup(
             f.render_widget(Paragraph::new(Line::from(spans)), line_area);
         }
         f.render_widget(
-            Paragraph::new(" Enter=go  j/k=move  Esc=close ").style(
+            Paragraph::new(tr(lang, " Enter=go  j/k=move  Esc=close ", " Enter=移動  j/k=カーソル  Esc=閉じる ")).style(
                 Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD),
             ),
             Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1),
@@ -9094,7 +9153,7 @@ fn draw_popup(
             .borders(Borders::ALL)
             .border_type(border_type())
             .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
-            .title(" shortcuts ");
+            .title(tr(lang, " shortcuts ", " ショートカット "));
         let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
         f.render_widget(block, rect);
 
@@ -9170,7 +9229,7 @@ fn draw_popup(
             }
         }
         f.render_widget(
-            Paragraph::new(" Enter=open  a=add  d=delete  r=edit  p=copy target  Esc=close ")
+            Paragraph::new(tr(lang, " Enter=open  a=add  d=delete  r=edit  p=copy target  Esc=close ", " Enter=開く  a=追加  d=削除  r=編集  p=対象コピー  Esc=閉じる "))
                 .style(
                     Style::default()
                         .fg(Color::Black)
@@ -9193,7 +9252,7 @@ fn draw_popup(
             .borders(Borders::ALL)
             .border_type(border_type())
             .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
-            .title(format!(" history ({}) ", entries.len()));
+            .title(format!(" {} ({}) ", tr(lang, "history", "履歴"), entries.len()));
         let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
         f.render_widget(block, rect);
 
@@ -9228,7 +9287,7 @@ fn draw_popup(
             );
         }
         f.render_widget(
-            Paragraph::new(" ↑↓/jk select  Enter jump  a add shortcut  Esc cancel ").style(
+            Paragraph::new(tr(lang, " ↑↓/jk select  Enter jump  a add shortcut  Esc cancel ", " ↑↓/jk 選択  Enter 移動  a ショートカット追加  Esc 取消 ")).style(
                 Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD),
             ),
             Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1),
@@ -9242,15 +9301,22 @@ fn draw_popup(
         let h = (rows as u16 + 6).min(area.height.saturating_sub(2));
         let rect = centered_rect(w, h, area);
         f.render_widget(Clear, rect);
-        let verb = match op {
-            PendingOp::Copy => "copy",
-            PendingOp::Move => "move",
+        let verb = match (op, lang) {
+            (PendingOp::Copy, Lang::En) => "copy",
+            (PendingOp::Move, Lang::En) => "move",
+            (PendingOp::Copy, Lang::Ja) => "コピー",
+            (PendingOp::Move, Lang::Ja) => "移動",
+        };
+        let dp_title = if lang == Lang::Ja {
+            format!(" {} 件を{} ", targets.len(), verb)
+        } else {
+            format!(" {} {} item(s) to ", verb, targets.len())
         };
         let block = Block::default()
             .borders(Borders::ALL)
             .border_type(border_type())
             .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
-            .title(format!(" {} {} item(s) to ", verb, targets.len()));
+            .title(dp_title);
         let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
         f.render_widget(block, rect);
 
@@ -9282,7 +9348,7 @@ fn draw_popup(
             );
         }
         f.render_widget(
-            Paragraph::new(" Enter=send here   n=type a path   Esc=cancel ").style(
+            Paragraph::new(tr(lang, " Enter=send here   n=type a path   Esc=cancel ", " Enter=ここへ   n=パス入力   Esc=取消 ")).style(
                 Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD),
             ),
             Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1),
@@ -9353,7 +9419,9 @@ fn draw_popup(
         };
         f.render_widget(
             Paragraph::new(format!(
-                " drag=select  c=copy  S-Enter=encoding  j/k u/d g/G  Esc close   {} ",
+                "{}{} ",
+                tr(lang, " drag=select  c=copy  S-Enter=encoding  j/k u/d g/G  Esc close   ",
+                    " ドラッグ=選択  c=コピー  S-Enter=文字コード  j/k u/d g/G  Esc 閉じる   "),
                 pos
             ))
             .style(Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD)),
@@ -9424,9 +9492,10 @@ fn draw_popup(
             );
         }
         f.render_widget(
-            Paragraph::new(
+            Paragraph::new(tr(lang,
                 " + right-only   - left-only   ~ differ    Enter=go to   j/k  Esc close ",
-            )
+                " + 右のみ   - 左のみ   ~ 相違    Enter=移動   j/k  Esc 閉じる ",
+            ))
             .style(Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD)),
             Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1),
         );
@@ -9539,10 +9608,14 @@ fn draw_popup(
             0 => "all".to_string(),
             m => format!("{}%", *scroll * 100 / m),
         };
+        let fold_word = if *fold { tr(lang, "show all", "全表示") } else { tr(lang, "fold", "畳む") };
         f.render_widget(
             Paragraph::new(format!(
-                " n/N next/prev change  f {}  j/k scroll  u/d page  Esc close      {} ",
-                if *fold { "show all" } else { "fold" },
+                "{}{}  {}{}      {} ",
+                tr(lang, " n/N next/prev change  f ", " n/N 変更へ移動  f "),
+                fold_word,
+                tr(lang, "j/k scroll  u/d page  Esc close", "j/k スクロール  u/d ページ  Esc 閉じる"),
+                "",
                 pos
             ))
             .style(Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD)),
@@ -9607,7 +9680,7 @@ fn draw_popup(
             );
         }
         f.render_widget(
-            Paragraph::new(" Enter=extract this   a=extract all   Esc=close ").style(
+            Paragraph::new(tr(lang, " Enter=extract this   a=extract all   Esc=close ", " Enter=これを展開   a=全展開   Esc=閉じる ")).style(
                 Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD),
             ),
             Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1),
@@ -9624,7 +9697,7 @@ fn draw_popup(
             .borders(Borders::ALL)
             .border_type(border_type())
             .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
-            .title(" sort by ");
+            .title(tr(lang, " sort by ", " 並び替え "));
         let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
         f.render_widget(block, rect);
 
@@ -9659,7 +9732,7 @@ fn draw_popup(
         let footer_area =
             Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1);
         f.render_widget(
-            Paragraph::new(" Enter=apply (again = reverse)  Esc ").style(
+            Paragraph::new(tr(lang, " Enter=apply (again = reverse)  Esc ", " Enter=適用（再度で逆順）  Esc ")).style(
                 Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD),
             ),
             footer_area,
@@ -9677,7 +9750,7 @@ fn draw_popup(
             .borders(Borders::ALL)
             .border_type(border_type())
             .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
-            .title(" text encoding ");
+            .title(tr(lang, " text encoding ", " 文字コード "));
         let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
         f.render_widget(block, rect);
         let rows: Vec<Line> = TextEncoding::ALL
@@ -9704,7 +9777,7 @@ fn draw_popup(
             push_row_zone(zones, inner, inner.y + i as u16, i);
         }
         f.render_widget(
-            Paragraph::new(" Enter=apply  Esc=cancel ").style(
+            Paragraph::new(tr(lang, " Enter=apply  Esc=cancel ", " Enter=適用  Esc=取消 ")).style(
                 Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD),
             ),
             Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1),
@@ -9721,7 +9794,7 @@ fn draw_popup(
             .borders(Borders::ALL)
             .border_type(border_type())
             .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
-            .title(" background ");
+            .title(tr(lang, " background ", " 背景色 "));
         let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
         f.render_widget(block, rect);
 
@@ -9754,7 +9827,7 @@ fn draw_popup(
         let footer_area =
             Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1);
         f.render_widget(
-            Paragraph::new(" Enter=apply  Esc=cancel ").style(
+            Paragraph::new(tr(lang, " Enter=apply  Esc=cancel ", " Enter=適用  Esc=取消 ")).style(
                 Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD),
             ),
             footer_area,
@@ -9765,24 +9838,40 @@ fn draw_popup(
     let popup: &Popup = popup;
     let (title, body, footer) = match popup {
         Popup::ConfirmDelete { targets } => {
-            let title = " delete ".to_string();
-            let head = format!("{} item(s) → trash:", targets.len());
+            let title = tr(lang, " delete ", " 削除 ").to_string();
+            let head = if lang == Lang::Ja {
+                format!("{} 件 → ゴミ箱:", targets.len())
+            } else {
+                format!("{} item(s) → trash:", targets.len())
+            };
             let mut lines = vec![head, String::new()];
             for p in targets.iter().take(8) { lines.push(format!("  {}", p.display())); }
-            if targets.len() > 8 { lines.push(format!("  ... and {} more", targets.len() - 8)); }
-            (title, lines, " y=trash  a=delete permanently  n/Esc=cancel ".to_string())
+            if targets.len() > 8 {
+                lines.push(tr_count(lang, targets.len() - 8));
+            }
+            let foot = tr(lang, " y=trash  a=delete permanently  n/Esc=cancel ",
+                " y=ゴミ箱  a=完全削除  n/Esc=取消 ");
+            (title, lines, foot.to_string())
         }
         Popup::ConfirmTransfer { op, targets, dest } => {
-            let verb = match op { PendingOp::Copy => "copy", PendingOp::Move => "move" };
-            let title = format!(" {} ", verb);
-            let head = format!("{} item(s) → {}", targets.len(), dest.display());
+            let title = match (op, lang) {
+                (PendingOp::Copy, Lang::Ja) => " コピー ",
+                (PendingOp::Move, Lang::Ja) => " 移動 ",
+                (PendingOp::Copy, Lang::En) => " copy ",
+                (PendingOp::Move, Lang::En) => " move ",
+            }.to_string();
+            let head = format!("{} {} → {}", targets.len(), tr(lang, "item(s)", "件"), dest.display());
             let mut lines = vec![head, String::new()];
             for p in targets.iter().take(8) { lines.push(format!("  {}", p.display())); }
-            if targets.len() > 8 { lines.push(format!("  ... and {} more", targets.len() - 8)); }
+            if targets.len() > 8 {
+                lines.push(tr_count(lang, targets.len() - 8));
+            }
             let foot = if targets.len() == 1 {
-                " y/Enter=Yes  a=overwrite  r=rename  n/Esc=cancel "
+                tr(lang, " y/Enter=Yes  a=overwrite  r=rename  n/Esc=cancel ",
+                    " y/Enter=実行  a=上書き  r=改名  n/Esc=取消 ")
             } else {
-                " y/Enter=Yes(skip)  a=overwrite  n/Esc=cancel "
+                tr(lang, " y/Enter=Yes(skip)  a=overwrite  n/Esc=cancel ",
+                    " y/Enter=実行(重複はスキップ)  a=上書き  n/Esc=取消 ")
             };
             (title, lines, foot.to_string())
         }
@@ -9790,46 +9879,71 @@ fn draw_popup(
             // The caret is drawn where editing will happen; a password is shown
             // as dots so it does not sit in plain sight.
             let body = vec![prompt.clone(), field_with_caret(buffer, *cursor, kind.is_secret())];
-            (format!(" {} ", title), body, " Enter=ok  ←→ move  Esc=cancel ".to_string())
+            let foot = tr(lang, " Enter=ok  ←→ move  Esc=cancel ", " Enter=決定  ←→ 移動  Esc=取消 ");
+            (format!(" {} ", title), body, foot.to_string())
         }
         Popup::Notice { lines } => {
-            (" notice ".to_string(), lines.clone(), " y = copy   Enter / Esc = close ".to_string())
+            let title = tr(lang, " notice ", " お知らせ ").to_string();
+            let foot = tr(lang, " y = copy   Enter / Esc = close ", " y = コピー   Enter / Esc = 閉じる ");
+            (title, lines.clone(), foot.to_string())
         }
         Popup::Search { buffer } => {
             (
-                " search ".to_string(),
-                vec!["find (substring, case-insensitive):".into(), format!("/{}_", buffer)],
-                " ↑↓ step matches  Enter=jump  Esc=cancel  (then n/N) ".to_string(),
+                tr(lang, " search ", " 検索 ").to_string(),
+                vec![
+                    tr(lang, "find (substring, case-insensitive):", "検索（部分一致・大小無視）:").to_string(),
+                    format!("/{}_", buffer),
+                ],
+                tr(lang, " ↑↓ step matches  Enter=jump  Esc=cancel  (then n/N) ",
+                    " ↑↓ マッチ移動  Enter=ジャンプ  Esc=取消  (後で n/N) ").to_string(),
             )
         }
         Popup::ConfirmQuit => {
             (
-                " quit cian? ".to_string(),
-                vec!["Are you sure you want to quit?".into()],
-                " y / Enter = yes   n / Esc = no ".to_string(),
+                tr(lang, " quit cian? ", " cian を終了？ ").to_string(),
+                vec![tr(lang, "Are you sure you want to quit?", "本当に終了しますか？").to_string()],
+                tr(lang, " y / Enter = yes   n / Esc = no ", " y / Enter = はい   n / Esc = いいえ ").to_string(),
             )
         }
         Popup::ConfirmClose { target } => {
-            let what = match target {
-                CloseTarget::ShellPane => "this shell pane",
-                CloseTarget::FileTab(_) => "this tab",
+            let what = match (target, lang) {
+                (CloseTarget::ShellPane, Lang::Ja) => "このシェルペイン",
+                (CloseTarget::FileTab(_), Lang::Ja) => "このタブ",
+                (CloseTarget::ShellPane, Lang::En) => "this shell pane",
+                (CloseTarget::FileTab(_), Lang::En) => "this tab",
             };
+            let head = if lang == Lang::Ja { format!("{}を閉じますか？", what) } else { format!("Close {}?", what) };
             (
-                " close? ".to_string(),
-                vec![format!("Close {}?", what)],
-                " y / Enter = yes   n / Esc = no ".to_string(),
+                tr(lang, " close? ", " 閉じる？ ").to_string(),
+                vec![head],
+                tr(lang, " y / Enter = yes   n / Esc = no ", " y / Enter = はい   n / Esc = いいえ ").to_string(),
             )
         }
         Popup::ConfirmElevate { op, targets, dest } => {
-            let verb = match op { PendingOp::Copy => "copy", PendingOp::Move => "move" };
-            (
-                " administrator rights ".to_string(),
+            let verb = match (op, lang) {
+                (PendingOp::Copy, Lang::Ja) => "コピー",
+                (PendingOp::Move, Lang::Ja) => "移動",
+                (PendingOp::Copy, Lang::En) => "copy",
+                (PendingOp::Move, Lang::En) => "move",
+            };
+            let body = if lang == Lang::Ja {
+                vec![
+                    format!("{} への書き込みには管理者権限が必要です", dest.display()),
+                    String::new(),
+                    format!("{} 件の{}を昇格して再試行しますか？ UACの確認が出ます。", targets.len(), verb),
+                ]
+            } else {
                 vec![
                     format!("{} needs administrator rights to write to", dest.display()),
                     String::new(),
                     format!("Retry the {} of {} item(s) elevated? A UAC prompt will appear.", verb, targets.len()),
-                ],
-                " y/Enter = retry as admin   n/Esc = cancel ".to_string(),
+                ]
+            };
+            (
+                tr(lang, " administrator rights ", " 管理者権限 ").to_string(),
+                body,
+                tr(lang, " y/Enter = retry as admin   n/Esc = cancel ",
+                    " y/Enter = 管理者として再試行   n/Esc = 取消 ").to_string(),
             )
         }
         // All handled above, before this match.
@@ -9869,27 +9983,41 @@ fn draw_popup(
     // so the keyboard shortcuts in the footer keep working unchanged.
     let buttons: Vec<(&str, ZoneKind)> = match popup {
         Popup::ConfirmDelete { .. } => vec![
-            ("Trash", ZoneKind::Enter),
-            ("Delete!", ZoneKind::Char('a')),
-            ("Cancel", ZoneKind::Esc),
+            (tr(lang, "Trash", "ゴミ箱"), ZoneKind::Enter),
+            (tr(lang, "Delete!", "完全削除"), ZoneKind::Char('a')),
+            (tr(lang, "Cancel", "取消"), ZoneKind::Esc),
         ],
         Popup::ConfirmTransfer { targets, .. } => {
-            let mut b = vec![("Yes", ZoneKind::Enter), ("Overwrite", ZoneKind::Char('a'))];
+            let mut b = vec![
+                (tr(lang, "Yes", "実行"), ZoneKind::Enter),
+                (tr(lang, "Overwrite", "上書き"), ZoneKind::Char('a')),
+            ];
             if targets.len() == 1 {
-                b.push(("Rename", ZoneKind::Char('r')));
+                b.push((tr(lang, "Rename", "改名"), ZoneKind::Char('r')));
             }
-            b.push(("Cancel", ZoneKind::Esc));
+            b.push((tr(lang, "Cancel", "取消"), ZoneKind::Esc));
             b
         }
-        Popup::Notice { .. } => vec![("Copy", ZoneKind::Char('y')), ("Close", ZoneKind::Enter)],
-        Popup::TextInput { .. } => vec![("OK", ZoneKind::Enter), ("Cancel", ZoneKind::Esc)],
-        Popup::Search { .. } => vec![("Jump", ZoneKind::Enter), ("Cancel", ZoneKind::Esc)],
-        Popup::ConfirmQuit | Popup::ConfirmClose { .. } => {
-            vec![("Yes", ZoneKind::Enter), ("No", ZoneKind::Esc)]
-        }
-        Popup::ConfirmElevate { .. } => {
-            vec![("Retry as admin", ZoneKind::Enter), ("Cancel", ZoneKind::Esc)]
-        }
+        Popup::Notice { .. } => vec![
+            (tr(lang, "Copy", "コピー"), ZoneKind::Char('y')),
+            (tr(lang, "Close", "閉じる"), ZoneKind::Enter),
+        ],
+        Popup::TextInput { .. } => vec![
+            (tr(lang, "OK", "決定"), ZoneKind::Enter),
+            (tr(lang, "Cancel", "取消"), ZoneKind::Esc),
+        ],
+        Popup::Search { .. } => vec![
+            (tr(lang, "Jump", "ジャンプ"), ZoneKind::Enter),
+            (tr(lang, "Cancel", "取消"), ZoneKind::Esc),
+        ],
+        Popup::ConfirmQuit | Popup::ConfirmClose { .. } => vec![
+            (tr(lang, "Yes", "はい"), ZoneKind::Enter),
+            (tr(lang, "No", "いいえ"), ZoneKind::Esc),
+        ],
+        Popup::ConfirmElevate { .. } => vec![
+            (tr(lang, "Retry as admin", "管理者として再試行"), ZoneKind::Enter),
+            (tr(lang, "Cancel", "取消"), ZoneKind::Esc),
+        ],
         _ => vec![],
     };
 
@@ -10310,6 +10438,27 @@ mod tests {
         keymap.insert('x', Action::Delete);
         let text = manual_lines(&keymap, Lang::En).join("\n");
         assert!(text.contains("d, x"), "user-bound key missing from manual:\n{}", text);
+    }
+
+    #[test]
+    fn the_status_and_hints_are_japanese_by_default() {
+        // A wide (CJK) glyph occupies two terminal cells, so the row
+        // reconstruction inserts a space after each; strip spaces before
+        // matching the words.
+        let flat = |app: &mut App| render(app, 110, 40).join("\n").replace(' ', "");
+        let (_d, mut app) = app_with(&["a.txt"]);
+        let screen = flat(&mut app);
+        assert!(screen.contains("件"), "status counts in Japanese:\n{screen}");
+        assert!(screen.contains("ヘルプ"), "help hint in Japanese");
+        // The right-click menu is Japanese too.
+        app.open_context_menu(5, 5);
+        let menu = flat(&mut app);
+        assert!(menu.contains("コピー"), "menu in Japanese:\n{menu}");
+
+        // English config flips it back.
+        let (_d2, mut en) = app_with_lang(&["a.txt"], "en");
+        let es = render(&mut en, 110, 40).join("\n");
+        assert!(es.contains("items") && es.contains("help"), "English chrome:\n{es}");
     }
 
     #[test]
@@ -11220,7 +11369,7 @@ mod tests {
 
     #[test]
     fn the_status_bar_drops_the_sort_indicator_but_keeps_the_counts() {
-        let (_d, mut app) = app_with(&["a.txt"]);
+        let (_d, mut app) = app_with_lang(&["a.txt"], "en");
         let screen = render(&mut app, 100, 40).join("\n");
         // The sort chip was removed; the item/mark counts stay.
         assert!(!screen.contains("name ▲"), "the sort indicator should be gone:\n{}", screen);
@@ -11234,7 +11383,7 @@ mod tests {
 
     #[test]
     fn the_key_hint_bar_is_contextual() {
-        let (_d, mut app) = app_with(&["a.txt"]);
+        let (_d, mut app) = app_with_lang(&["a.txt"], "en");
         let normal = render(&mut app, 110, 40).join("\n");
         assert!(normal.contains("sort"), "normal hints missing:\n{}", normal);
         assert!(normal.contains("filter"));
@@ -11266,7 +11415,7 @@ mod tests {
     /// everything below it down by one and blanks the last line.
     #[test]
     fn the_status_bar_sits_on_the_last_row_in_every_mode() {
-        let (_d, mut app) = app_with(&["a.txt"]);
+        let (_d, mut app) = app_with_lang(&["a.txt"], "en");
 
         let normal = render(&mut app, 110, 40);
         assert!(normal[39].contains("items"), "status row: {:?}", normal[39]);
@@ -11285,7 +11434,7 @@ mod tests {
     /// the end.
     #[test]
     fn the_help_hint_survives_a_narrow_window() {
-        let (_d, mut app) = app_with(&["a.txt"]);
+        let (_d, mut app) = app_with_lang(&["a.txt"], "en");
         for w in [40u16, 60, 80, 110, 200] {
             let screen = render(&mut app, w, 40).join("\n");
             assert!(screen.contains("? help"), "lost at width {}:\n{}", w, screen);
@@ -11295,7 +11444,7 @@ mod tests {
     /// A short window drops the hints rather than squeezing the listing out.
     #[test]
     fn a_short_window_drops_the_hints() {
-        let (_d, mut app) = app_with(&["a.txt"]);
+        let (_d, mut app) = app_with_lang(&["a.txt"], "en");
         let tall = render(&mut app, 110, 40).join("\n");
         assert!(tall.contains("? help"));
         let short = render(&mut app, 110, 10).join("\n");
