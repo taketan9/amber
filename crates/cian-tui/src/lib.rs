@@ -1108,6 +1108,12 @@ enum Popup {
         visual: Option<ViewVisual>,
         /// Selection anchor `(line, col)`, meaningful while `visual` is `Some`.
         anchor: (usize, usize),
+        /// While typing a `/` search, the text entered so far; `None` otherwise.
+        find_input: Option<String>,
+        /// The confirmed search pattern, kept for `n`/`N` and match highlight.
+        find_query: Option<String>,
+        /// A pending numeric count typed before a motion (vim's `42G`).
+        count: Option<usize>,
     },
     /// The recursive comparison of two directories: a list of differing paths.
     DirCompare {
@@ -1236,6 +1242,153 @@ fn viewer_word_back(view: &cian_core::viewer::View, line: usize, col: usize) -> 
         i -= 1;
     }
     (line, i)
+}
+
+/// `%`: from the bracket at or after the cursor on its line, the matching
+/// bracket, scanning across lines and honouring nesting. `None` if there is no
+/// bracket to jump from or its pair is unbalanced.
+fn viewer_match_bracket(
+    view: &cian_core::viewer::View,
+    line: usize,
+    col: usize,
+) -> Option<(usize, usize)> {
+    const PAIRS: [(char, char); 3] = [('(', ')'), ('[', ']'), ('{', '}')];
+    let opener = |c: char| PAIRS.iter().find(|(o, _)| *o == c).map(|(_, cl)| *cl);
+    let closer = |c: char| PAIRS.iter().find(|(_, cl)| *cl == c).map(|(o, _)| *o);
+
+    let chars: Vec<char> = view.lines.get(line)?.chars().collect();
+    // Find the bracket to jump from: the one under the cursor, else the next on
+    // the line.
+    let mut start = col;
+    while start < chars.len() && opener(chars[start]).is_none() && closer(chars[start]).is_none() {
+        start += 1;
+    }
+    let br = *chars.get(start)?;
+
+    if let Some(want_close) = opener(br) {
+        // Scan forward for the matching closer.
+        let mut depth = 0i32;
+        let mut l = line;
+        let mut c = start;
+        loop {
+            let cs: Vec<char> = view.lines.get(l).map(|s| s.chars().collect()).unwrap_or_default();
+            while c < cs.len() {
+                if cs[c] == br {
+                    depth += 1;
+                } else if cs[c] == want_close {
+                    depth -= 1;
+                    if depth == 0 {
+                        return Some((l, c));
+                    }
+                }
+                c += 1;
+            }
+            l += 1;
+            c = 0;
+            if l >= view.lines.len() {
+                return None;
+            }
+        }
+    } else if let Some(want_open) = closer(br) {
+        // Scan backward for the matching opener.
+        let mut depth = 0i32;
+        let mut l = line as isize;
+        let mut c = start as isize;
+        loop {
+            let cs: Vec<char> = view.lines.get(l as usize).map(|s| s.chars().collect()).unwrap_or_default();
+            while c >= 0 {
+                let ch = cs[c as usize];
+                if ch == br {
+                    depth += 1;
+                } else if ch == want_open {
+                    depth -= 1;
+                    if depth == 0 {
+                        return Some((l as usize, c as usize));
+                    }
+                }
+                c -= 1;
+            }
+            l -= 1;
+            if l < 0 {
+                return None;
+            }
+            c = view.lines.get(l as usize).map(|s| s.chars().count() as isize - 1).unwrap_or(-1);
+        }
+    } else {
+        None
+    }
+}
+
+/// `{` / `}`: the previous/next blank line (paragraph boundary).
+fn viewer_paragraph(view: &cian_core::viewer::View, line: usize, forward: bool) -> usize {
+    let blank = |l: usize| view.lines.get(l).map(|s| s.trim().is_empty()).unwrap_or(true);
+    let last = view.lines.len().saturating_sub(1);
+    if forward {
+        let mut l = line + 1;
+        while l < last && !blank(l) {
+            l += 1;
+        }
+        l.min(last)
+    } else {
+        if line == 0 {
+            return 0;
+        }
+        let mut l = line - 1;
+        while l > 0 && !blank(l) {
+            l -= 1;
+        }
+        l
+    }
+}
+
+/// The next/previous match of `query` (case-insensitive substring) from `from`,
+/// wrapping around the file. Returns the match's start `(line, col)`.
+fn viewer_find(
+    view: &cian_core::viewer::View,
+    from: (usize, usize),
+    query: &str,
+    forward: bool,
+) -> Option<(usize, usize)> {
+    if query.is_empty() || view.lines.is_empty() {
+        return None;
+    }
+    let needle = query.to_lowercase();
+    let n = view.lines.len();
+    // Character-column of a byte match within a line.
+    let col_of = |line: &str, byte: usize| line[..byte].chars().count();
+
+    if forward {
+        // Current line after the cursor, then following lines, then wrap.
+        for step in 0..=n {
+            let l = (from.0 + step) % n;
+            let hay = view.lines[l].to_lowercase();
+            let start_char = if step == 0 { from.1 + 1 } else { 0 };
+            let start_byte = view.lines[l]
+                .char_indices()
+                .nth(start_char)
+                .map(|(b, _)| b)
+                .unwrap_or(view.lines[l].len());
+            if let Some(rel) = hay[start_byte.min(hay.len())..].find(&needle) {
+                return Some((l, col_of(&view.lines[l], start_byte + rel)));
+            }
+        }
+    } else {
+        for step in 0..=n {
+            let l = (from.0 + n - (step % n)) % n;
+            let hay = view.lines[l].to_lowercase();
+            // On the cursor line, only matches strictly before the cursor.
+            let limit_char = if step == 0 { from.1 } else { view.lines[l].chars().count() };
+            let limit_byte = view.lines[l]
+                .char_indices()
+                .nth(limit_char)
+                .map(|(b, _)| b)
+                .unwrap_or(view.lines[l].len());
+            if let Some(rel) = hay[..limit_byte.min(hay.len())].rfind(&needle) {
+                return Some((l, col_of(&view.lines[l], rel)));
+            }
+        }
+    }
+    None
 }
 
 /// Order two `(line, col)` positions so the earlier one comes first.
@@ -2658,6 +2811,42 @@ impl App {
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         let shift = key.modifiers.contains(KeyModifiers::SHIFT);
 
+        // While typing a `/` search, keys build the query; Enter runs it.
+        if matches!(self.popup, Popup::Viewer { find_input: Some(_), .. }) {
+            match key.code {
+                KeyCode::Esc => {
+                    if let Popup::Viewer { find_input, .. } = &mut self.popup {
+                        *find_input = None;
+                    }
+                }
+                KeyCode::Enter => {
+                    let q = if let Popup::Viewer { find_input, .. } = &mut self.popup {
+                        find_input.take().unwrap_or_default()
+                    } else {
+                        String::new()
+                    };
+                    if !q.is_empty() {
+                        if let Popup::Viewer { find_query, .. } = &mut self.popup {
+                            *find_query = Some(q);
+                        }
+                        self.viewer_search_jump(true);
+                    }
+                }
+                KeyCode::Backspace => {
+                    if let Popup::Viewer { find_input: Some(s), .. } = &mut self.popup {
+                        s.pop();
+                    }
+                }
+                KeyCode::Char(c) if !ctrl => {
+                    if let Popup::Viewer { find_input: Some(s), .. } = &mut self.popup {
+                        s.push(c);
+                    }
+                }
+                _ => {}
+            }
+            return Ok(());
+        }
+
         // Shift+Enter re-decodes the same bytes under the next text encoding.
         if key.code == KeyCode::Enter && shift {
             if let Popup::Viewer { view, visual, .. } = &mut self.popup {
@@ -2672,11 +2861,37 @@ impl App {
             self.copy_viewer_selection();
             return Ok(());
         }
+        // `/` opens the search prompt.
+        if !ctrl && key.code == KeyCode::Char('/') {
+            if let Popup::Viewer { find_input, .. } = &mut self.popup {
+                *find_input = Some(String::new());
+            }
+            return Ok(());
+        }
+        // n / N jump to the next / previous match of the last search.
+        if !ctrl && matches!(key.code, KeyCode::Char('n') | KeyCode::Char('N')) {
+            let forward = key.code == KeyCode::Char('n');
+            self.viewer_search_jump(forward);
+            return Ok(());
+        }
+        // A numeric prefix builds a count for the next motion (vim's `42G`).
+        if !ctrl {
+            if let KeyCode::Char(c @ '0'..='9') = key.code {
+                if let Popup::Viewer { count, .. } = &mut self.popup {
+                    if c != '0' || count.is_some() {
+                        let d = c as usize - '0' as usize;
+                        *count = Some(count.unwrap_or(0).saturating_mul(10) + d);
+                        return Ok(());
+                    }
+                }
+            }
+        }
 
         let body_h = (self.viewer_rect.height as usize).max(1);
         let half = (body_h / 2).max(1);
         let mut close = false;
-        if let Popup::Viewer { view, scroll, line, col, goal, visual, anchor, .. } = &mut self.popup {
+        if let Popup::Viewer { view, scroll, line, col, goal, visual, anchor, count, .. } = &mut self.popup {
+            let cnt = count.take();
             let n = view.lines.len();
             let last = n.saturating_sub(1);
             // Move the cursor to a line, landing at the goal column (clamped).
@@ -2729,7 +2944,30 @@ impl App {
                 (true, KeyCode::Char('f')) => to_line(*line + body_h, line, col, *goal),
                 (true, KeyCode::Char('b')) => to_line(line.saturating_sub(body_h), line, col, *goal),
                 (false, KeyCode::Char('g')) => to_line(0, line, col, *goal),
-                (false, KeyCode::Char('G')) => to_line(last, line, col, *goal),
+                // `G` goes to the bottom, or to line N when a count was typed.
+                (false, KeyCode::Char('G')) => {
+                    let target = cnt.map(|c| c.saturating_sub(1)).unwrap_or(last);
+                    to_line(target, line, col, *goal);
+                }
+                // `%` jumps to the matching bracket.
+                (false, KeyCode::Char('%')) => {
+                    if let Some((nl, nc)) = viewer_match_bracket(view, *line, *col) {
+                        *line = nl;
+                        *col = nc;
+                        *goal = nc;
+                    }
+                }
+                // `{` / `}` jump between paragraph (blank-line) boundaries.
+                (false, KeyCode::Char('{')) => {
+                    *line = viewer_paragraph(view, *line, false);
+                    *col = 0;
+                    *goal = 0;
+                }
+                (false, KeyCode::Char('}')) => {
+                    *line = viewer_paragraph(view, *line, true);
+                    *col = 0;
+                    *goal = 0;
+                }
 
                 // Horizontal motion resets the goal to the real column.
                 (false, KeyCode::Char('h')) | (_, KeyCode::Left) => {
@@ -2779,6 +3017,39 @@ impl App {
             self.popup = Popup::None;
         }
         Ok(())
+    }
+
+    /// Jump the viewer cursor to the next/previous match of the active search,
+    /// scrolling it into view. Wraps around the file.
+    fn viewer_search_jump(&mut self, forward: bool) {
+        let body_h = (self.viewer_rect.height as usize).max(1);
+        let mut no_query = false;
+        let mut not_found = false;
+        if let Popup::Viewer { view, scroll, line, col, goal, find_query, .. } = &mut self.popup {
+            match find_query.clone() {
+                None => no_query = true,
+                Some(q) => match viewer_find(view, (*line, *col), &q, forward) {
+                    Some((nl, nc)) => {
+                        *line = nl;
+                        *col = nc;
+                        *goal = nc;
+                        let n = view.lines.len();
+                        if *line < *scroll {
+                            *scroll = *line;
+                        } else if *line >= *scroll + body_h {
+                            *scroll = *line + 1 - body_h;
+                        }
+                        *scroll = (*scroll).min(n.saturating_sub(body_h));
+                    }
+                    None => not_found = true,
+                },
+            }
+        }
+        if no_query {
+            self.message = Some("no search — press / first".into());
+        } else if not_found {
+            self.message = Some("no match".into());
+        }
     }
 
     fn copy_viewer_selection(&mut self) {
@@ -3499,17 +3770,28 @@ impl App {
                 Err(e) => self.message = Some(format!("not a readable archive: {}", e)),
             }
         }
-        match cian_core::viewer::view_file(&entry.path) {
+        self.open_viewer_at(&entry.path, &entry.name, 0);
+    }
+
+    /// Open the F3 viewer on `path`, with the cursor on `line0` (0-based). Used
+    /// by F3 (line 0) and by "open a grep hit at its line".
+    fn open_viewer_at(&mut self, path: &Path, title: &str, line0: usize) {
+        match cian_core::viewer::view_file(path) {
             Ok(view) => {
+                let last = view.lines.len().saturating_sub(1);
+                let line = line0.min(last);
                 self.popup = Popup::Viewer {
-                    title: entry.name.clone(),
+                    title: title.to_string(),
                     view,
-                    scroll: 0,
-                    line: 0,
+                    scroll: line.saturating_sub(4), // show a little context above
+                    line,
                     col: 0,
                     goal: 0,
                     visual: None,
                     anchor: (0, 0),
+                    find_input: None,
+                    find_query: None,
+                    count: None,
                 }
             }
             Err(e) => self.message = Some(format!("cannot view: {}", e)),
@@ -7244,7 +7526,7 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry("G", Some(CursorBottom), "jump to bottom", "末尾へジャンプ"),
                 entry("l, Enter", Some(EnterDir), "enter folder / open file", "フォルダに入る／ファイルを開く"),
                 entry("F3", None, "look inside: view a file, list an archive", "中身を見る：ファイル閲覧・書庫の一覧"),
-                entry("  in viewer", None, "hjkl move, v/V/Ctrl-v select, y copy, Shift+Enter encoding", "ビューア内：hjkl移動, v/V/Ctrl-v選択, yコピー, Shift+Enter文字コード"),
+                entry("  in viewer", None, "hjkl move, /n/N search, %/{/} jump, NG line, v/V/C-v select, y copy", "ビューア内：hjkl移動, /n/N検索, %/{/}移動, NG行, v/V/C-v選択, yコピー"),
                 entry("=", None, "compare left ↔ right: two files (line diff), or two folders (recursive)", "左右を比較：ファイル同士（行差分）／フォルダ同士（再帰）"),
                 entry("-, Bksp", Some(Parent), "parent folder", "親フォルダへ"),
                 entry("Left / Right", None, "focus the left / right pane", "左／右のペインにフォーカス"),
@@ -9738,7 +10020,7 @@ fn draw_popup(
         return;
     }
 
-    if let Popup::Viewer { title, view, scroll, line, col, visual, anchor, .. } = popup {
+    if let Popup::Viewer { title, view, scroll, line, col, visual, anchor, find_input, find_query, .. } = popup {
         let w = area.width.saturating_sub(4);
         let h = area.height.saturating_sub(2);
         let rect = centered_rect(w, h, area);
@@ -9782,7 +10064,24 @@ fn draw_popup(
         let (s0, e0) = order_pos(*anchor, (*line, *col));
         let sel_bg = Style::default().bg(theme().selected_bg);
         let cursor_style = Style::default().add_modifier(Modifier::REVERSED);
+        let search_bg = Style::default().bg(Color::Rgb(120, 100, 0)).fg(Color::Rgb(255, 240, 190));
         let text_fg = if numbered { Color::Rgb(210, 210, 222) } else { Color::Rgb(200, 200, 215) };
+        // Character columns matched by the active search, per line, for highlight.
+        let needle = find_query.as_ref().map(|q| q.to_lowercase()).filter(|q| !q.is_empty());
+        let match_cols = |l: &str| -> Vec<(usize, usize)> {
+            let Some(nd) = needle.as_ref() else { return Vec::new() };
+            let hay = l.to_lowercase();
+            let nlen = nd.chars().count();
+            let mut out = Vec::new();
+            let mut from = 0usize;
+            while let Some(rel) = hay[from..].find(nd.as_str()) {
+                let byte = from + rel;
+                let start = hay[..byte].chars().count();
+                out.push((start, start + nlen.saturating_sub(1)));
+                from = byte + nd.len().max(1);
+            }
+            out
+        };
 
         // The inclusive selected column range on absolute line `i`, if any.
         let sel_cols = |i: usize, len: usize| -> Option<(usize, usize)> {
@@ -9825,11 +10124,15 @@ fn draw_popup(
                 let len = chars.len();
                 let sel = sel_cols(i, len);
                 let cur = if i == *line { Some(*col) } else { None };
+                let matches = match_cols(l);
                 let cell_style = |j: usize| -> Style {
+                    // Priority: cursor over selection over a search match.
                     if cur == Some(j) {
                         cursor_style.fg(text_fg)
                     } else if sel.map(|(a, b)| j >= a && j <= b).unwrap_or(false) {
                         sel_bg.fg(text_fg)
+                    } else if matches.iter().any(|(a, b)| j >= *a && j <= *b) {
+                        search_bg
                     } else {
                         Style::default().fg(text_fg)
                     }
@@ -9869,14 +10172,19 @@ fn draw_popup(
             0 => "all".to_string(),
             m => format!("{}%", *scroll * 100 / m),
         };
-        f.render_widget(
-            Paragraph::new(format!(
+        // While typing a search, the footer is the `/` prompt; otherwise hints.
+        let footer = match find_input {
+            Some(q) => format!("/{}_", q),
+            None => format!(
                 "{}{} ",
-                tr(lang, " hjkl move  v/V/C-v select  y copy  gg/G  Esc close   ",
-                    " hjkl 移動  v/V/C-v 選択  y コピー  gg/G  Esc 閉じる   "),
+                tr(lang, " / search  n/N next  v/V/C-v select  y copy  % bracket  { } para  NG  Esc   ",
+                    " / 検索  n/N 次へ  v/V/C-v 選択  y コピー  % 対応括弧  { } 段落  NG 行  Esc   "),
                 pos
-            ))
-            .style(Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD)),
+            ),
+        };
+        f.render_widget(
+            Paragraph::new(footer)
+                .style(Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD)),
             Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1),
         );
         return;
@@ -13473,6 +13781,72 @@ mod tests {
         assert_eq!(app.message.as_deref(), Some("copied"));
         // Visual ends after the copy; the viewer stays open.
         assert!(matches!(app.popup, Popup::Viewer { visual: None, .. }));
+    }
+
+    /// Drive the viewer with a sequence of plain-char keys.
+    fn vkeys(app: &mut App, s: &str) {
+        for c in s.chars() {
+            app.handle_key(key(c)).unwrap();
+        }
+    }
+
+    #[test]
+    fn the_viewer_searches_and_jumps_between_matches() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::write(d.path().join("a.txt"), "alpha\nbeta needle\ngamma\nneedle again\n").unwrap();
+        let p = d.path().to_path_buf();
+        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        app.handle_key(code(KeyCode::F(3))).unwrap();
+        let _ = render(&mut app, 100, 30);
+
+        // /needle<CR> jumps to the first match (line 1, col 5).
+        app.handle_key(key('/')).unwrap();
+        vkeys(&mut app, "needle");
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+        if let Popup::Viewer { line, col, .. } = &app.popup {
+            assert_eq!((*line, *col), (1, 5), "first match");
+        } else {
+            panic!("viewer");
+        }
+        // n advances to the next match (line 3, col 0).
+        app.handle_key(key('n')).unwrap();
+        if let Popup::Viewer { line, col, .. } = &app.popup {
+            assert_eq!((*line, *col), (3, 0), "second match");
+        } else {
+            panic!("viewer");
+        }
+    }
+
+    #[test]
+    fn the_viewer_goto_line_and_bracket_match() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::write(d.path().join("a.txt"), "fn f() {\n    body\n}\nfour\nfive\n").unwrap();
+        let p = d.path().to_path_buf();
+        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        app.handle_key(code(KeyCode::F(3))).unwrap();
+        let _ = render(&mut app, 100, 30);
+
+        // 4G jumps to line 4 (0-based index 3).
+        vkeys(&mut app, "4");
+        app.handle_key(key('G')).unwrap();
+        if let Popup::Viewer { line, .. } = &app.popup {
+            assert_eq!(*line, 3, "goto line 4");
+        } else {
+            panic!("viewer");
+        }
+        // Back to the top, move onto the `{` (col 7 of "fn f() {"), then % to
+        // its matching `}` on line 2.
+        app.handle_key(key('g')).unwrap();
+        vkeys(&mut app, "lllllll"); // 7 × l → col 7 = '{'
+        if let Popup::Viewer { col, .. } = &app.popup {
+            assert_eq!(*col, 7, "cursor on the brace");
+        }
+        vkeys(&mut app, "%");
+        if let Popup::Viewer { line, .. } = &app.popup {
+            assert_eq!(*line, 2, "matching brace is on line 2");
+        } else {
+            panic!("viewer");
+        }
     }
 
     #[test]
