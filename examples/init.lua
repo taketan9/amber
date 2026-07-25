@@ -227,5 +227,5 @@
 --  A note on shortcuts
 -- ----------------------------------------------------------------------------
 -- Bookmarks (the `s` menu) are managed inside the app — press `a` there, or `a`
--- on a path in the history list — and saved to shortcuts.toml next to this file.
+-- on a path in the history list — and saved to shortcuts.yaml next to this file.
 -- There is nothing to configure here for them.

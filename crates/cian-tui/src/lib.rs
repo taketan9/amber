@@ -1404,22 +1404,46 @@ pub struct ShortcutStore {
 }
 
 impl ShortcutStore {
-    fn default_path() -> PathBuf {
+    fn config_dir() -> PathBuf {
         home_dir()
             .unwrap_or_else(|| PathBuf::from("."))
             .join(".config")
             .join("cian")
-            .join("shortcuts.toml")
+    }
+
+    /// The YAML file bookmarks are stored in now.
+    fn default_path() -> PathBuf {
+        Self::config_dir().join("shortcuts.yaml")
+    }
+
+    /// The old TOML file, read once to migrate anyone who has one.
+    fn legacy_toml_path() -> PathBuf {
+        Self::config_dir().join("shortcuts.toml")
     }
 
     pub fn load_or_default() -> Self {
         let path = Self::default_path();
-        let entries = std::fs::read_to_string(&path)
+        // Prefer the YAML file; fall back to a legacy TOML one and migrate it.
+        if let Some(entries) = std::fs::read_to_string(&path)
+            .ok()
+            .and_then(|s| serde_yaml::from_str::<ShortcutsFile>(&s).ok())
+            .map(|f| f.shortcuts)
+        {
+            return Self { entries, path };
+        }
+        let legacy = Self::legacy_toml_path();
+        if let Some(entries) = std::fs::read_to_string(&legacy)
             .ok()
             .and_then(|s| toml::from_str::<ShortcutsFile>(&s).ok())
             .map(|f| f.shortcuts)
-            .unwrap_or_default();
-        Self { entries, path }
+        {
+            // One-time migration: write the YAML copy and leave the old file in
+            // place (harmless, and a safety net if something goes wrong).
+            let store = Self { entries, path };
+            let _ = store.save();
+            return store;
+        }
+        Self { entries: Vec::new(), path }
     }
 
     pub fn save(&self) -> Result<()> {
@@ -1427,7 +1451,7 @@ impl ShortcutStore {
             let _ = std::fs::create_dir_all(parent);
         }
         let file = ShortcutsFile { shortcuts: self.entries.clone() };
-        let s = toml::to_string_pretty(&file)?;
+        let s = serde_yaml::to_string(&file)?;
         std::fs::write(&self.path, s)?;
         Ok(())
     }
@@ -9989,6 +10013,32 @@ mod tests {
         config.keymaps = keymaps;
         let app = App::new(p.clone(), p, config).unwrap();
         (dir, app)
+    }
+
+    #[test]
+    fn shortcuts_save_as_yaml_and_legacy_toml_still_parses() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("shortcuts.yaml");
+        let store = ShortcutStore {
+            entries: vec![
+                Shortcut { name: "home".into(), target: "~/".into() },
+                Shortcut { name: "docs".into(), target: "https://example.com".into() },
+            ],
+            path: path.clone(),
+        };
+        store.save().unwrap();
+
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("name: home"), "written as YAML:\n{text}");
+        // Round-trips through the YAML parser the loader uses.
+        let back: ShortcutsFile = serde_yaml::from_str(&text).unwrap();
+        assert_eq!(back.shortcuts.len(), 2);
+        assert_eq!(back.shortcuts[0].name, "home");
+
+        // A pre-existing TOML file must still parse, so migration keeps entries.
+        let legacy = "[[shortcuts]]\nname = \"srv\"\ntarget = \"/srv\"\n";
+        let parsed: ShortcutsFile = toml::from_str(legacy).unwrap();
+        assert_eq!(parsed.shortcuts[0].target, "/srv");
     }
 
     #[test]
