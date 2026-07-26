@@ -1463,6 +1463,50 @@ fn parse_rename_reply(raw: &str, names: &[(String, PathBuf)]) -> Vec<RenameItem>
     out
 }
 
+/// Parse the semantic-search reply into an ordered list of catalog hits. The
+/// model returns a JSON array of `{path, reason}`; we keep only paths that match
+/// a real catalog entry (compared with separators normalised), in the order the
+/// model ranked them, deduped. The reason is folded into the hit's line text so
+/// the results list can show *why* each file matched.
+fn parse_sem_search_reply(raw: &str, catalog: &[cian_core::search::Hit]) -> Vec<cian_core::search::Hit> {
+    #[derive(serde::Deserialize)]
+    struct Hit {
+        path: String,
+        #[serde(default)]
+        reason: String,
+    }
+    let norm = |s: &str| s.replace('\\', "/");
+    let start = raw.find('[');
+    let end = raw.rfind(']');
+    let json = match (start, end) {
+        (Some(s), Some(e)) if e > s => &raw[s..=e],
+        _ => return Vec::new(),
+    };
+    let picks: Vec<Hit> = serde_json::from_str(json).unwrap_or_default();
+    let mut out = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for pick in picks {
+        let want = norm(&pick.path);
+        if let Some(h) = catalog.iter().find(|h| norm(&h.rel.display().to_string()) == want) {
+            if seen.insert(want.clone()) {
+                let mut h = h.clone();
+                // Fold the reason into the hit's "line" so the results list can
+                // show it and Enter previews the file in F3 (line 1), mirroring
+                // the grep→viewer flow. The catalog is files-only, so this never
+                // tries to open a directory in the viewer.
+                let reason = pick.reason.trim();
+                h.line = Some((1, if reason.is_empty() {
+                    "(relevant)".to_string()
+                } else {
+                    reason.chars().take(200).collect()
+                }));
+                out.push(h);
+            }
+        }
+    }
+    out
+}
+
 /// Cap arbitrary text at roughly `max_bytes` on a line boundary (a char
 /// boundary if a single line is longer), appending a marker when truncated.
 fn truncate_text_for_ai(text: &str, max_bytes: usize) -> String {
@@ -1856,6 +1900,8 @@ enum MenuItem {
     AiStructure,
     /// Bulk-rename the marked files (or the whole listing) by an instruction.
     AiRename,
+    /// Semantic search over the tree from a natural-language query.
+    AiSearch,
     /// A submenu grouping the git actions (stage / unstage / discard).
     GitMenu,
     /// `git add` the selection.
@@ -1932,6 +1978,7 @@ impl MenuItem {
             MenuItem::AiJunk => tr(lang, "Detect junk files", "ゴミファイル検出"),
             MenuItem::AiStructure => tr(lang, "Suggest folder structure", "フォルダ構成を提案"),
             MenuItem::AiRename => tr(lang, "Bulk rename", "一括リネーム"),
+            MenuItem::AiSearch => tr(lang, "Semantic search", "セマンティック検索"),
             MenuItem::GitMenu => tr(lang, "Git ▸", "Git ▸"),
             MenuItem::GitStage => tr(lang, "Stage  (git add)", "ステージ  (git add)"),
             MenuItem::GitUnstage => tr(lang, "Unstage  (git reset)", "アンステージ  (git reset)"),
@@ -2082,6 +2129,9 @@ enum AiPurpose {
     /// Bulk rename over a chosen set of files. `names` validates the reply back
     /// to real paths.
     Rename { names: Vec<(String, PathBuf)> },
+    /// Semantic search: the model picks relevant paths from a catalog. `hits`
+    /// is the catalog it was shown, so the reply validates back to real hits.
+    SemSearch { hits: Vec<cian_core::search::Hit> },
 }
 
 /// A pending AI request; the worker sends the assistant's reply (or an error
@@ -2181,6 +2231,8 @@ enum InputKind {
     AiShellCmd,
     /// A natural-language instruction for how to bulk-rename the chosen files.
     AiRename,
+    /// A natural-language query for semantic search over the tree.
+    AiSearch,
 }
 
 impl InputKind {
@@ -3001,6 +3053,13 @@ impl App {
                     self.start_ai_rename_prompt();
                 } else {
                     self.start_ai_rename(rest);
+                }
+            }
+            "aisearch" | "semsearch" | "ask" => {
+                if rest.is_empty() {
+                    self.start_ai_search_prompt();
+                } else {
+                    self.start_ai_search(rest);
                 }
             }
             "reload" | "source" => self.reload_config(),
@@ -5725,6 +5784,71 @@ impl App {
         self.ai_request(AiPurpose::Rename { names }, system, user);
     }
 
+    /// Prompt for a natural-language query, then semantic-search the tree.
+    fn start_ai_search_prompt(&mut self) {
+        if self.ai.is_none() {
+            self.message = Some("AI not configured — add cian.ai{...} to init.lua".into());
+            return;
+        }
+        if !self.ai_ready() {
+            self.message = Some("AI unavailable (python, packages, or sign-in)".into());
+            return;
+        }
+        self.popup = text_input(
+            "AI semantic search",
+            "describe what you're looking for:",
+            String::new(),
+            InputKind::AiSearch,
+        );
+    }
+
+    /// Build a catalog of file paths under the active pane and ask the model
+    /// which are most relevant to `query`. Metadata only — paths, not contents.
+    fn start_ai_search(&mut self, query: &str) {
+        let query = query.trim().to_string();
+        if query.is_empty() {
+            self.message = Some("cancelled (no query)".into());
+            return;
+        }
+        let Some(root) = self.active_pane().map(|p| p.cwd.clone()) else { return };
+        // Collect up to a bounded number of file paths, breadth-first, stopping
+        // early so a huge tree cannot stall the UI. Files only — the results
+        // preview in F3, and a directory has nothing to preview.
+        const CATALOG_CAP: usize = 600;
+        let cancel = std::sync::Arc::new(AtomicBool::new(false));
+        let mut catalog: Vec<cian_core::search::Hit> = Vec::new();
+        let q = cian_core::search::Query { needle: String::new(), include_hidden: false, mode: cian_core::search::Mode::Name };
+        {
+            let cancel = &cancel;
+            let catalog = &mut catalog;
+            cian_core::search::search(&root, &q, cancel, &mut |h| {
+                if !h.is_dir {
+                    catalog.push(h);
+                    if catalog.len() >= CATALOG_CAP {
+                        cancel.store(true, Ordering::Relaxed);
+                    }
+                }
+            });
+        }
+        if catalog.is_empty() {
+            self.message = Some("no files here to search".into());
+            return;
+        }
+        let listing: String = catalog.iter()
+            .map(|h| format!("{}\n", h.rel.display().to_string().replace('\\', "/")))
+            .collect();
+        let system = "You do semantic file search. Given a list of file paths and \
+             a natural-language query, return the paths whose names/locations are \
+             most relevant to the query, most relevant first. Reply with ONLY a \
+             JSON array of objects {\"path\": string (exactly as given), \
+             \"reason\": short string}. Use only paths from the list. Empty array \
+             if none are a good match. No prose, no code fences."
+            .to_string();
+        let user = format!("Query: {}\n\nPaths:\n{}", query, listing);
+        self.message = Some("asking AI to find relevant files…".into());
+        self.ai_request(AiPurpose::SemSearch { hits: catalog }, system, user);
+    }
+
     /// Run the checked renames in place, then reload and report.
     fn apply_rename_plan(&mut self) {
         let renames: Vec<(PathBuf, String)> = if let Popup::RenameReview { items, .. } = &self.popup {
@@ -5908,6 +6032,20 @@ impl App {
                         self.message = Some("AI proposed no renames".into());
                     } else {
                         self.popup = Popup::RenameReview { items, cursor: 0, scroll: 0 };
+                    }
+                }
+                Err(e) => self.message = Some(format!("AI: {}", e)),
+            },
+            AiPurpose::SemSearch { hits } => match result {
+                Ok(text) => {
+                    let matched = parse_sem_search_reply(&text, &hits);
+                    if matched.is_empty() {
+                        self.message = Some("AI found no relevant files".into());
+                    } else {
+                        // Reuse the find-results list: F3 preview, Ctrl+n/N, Esc.
+                        self.find_return = None;
+                        self.message = Some(format!("{} relevant file(s) — Enter previews", matched.len()));
+                        self.popup = Popup::FindResults { hits: matched, cursor: 0, scroll: 0 };
                     }
                 }
                 Err(e) => self.message = Some(format!("AI: {}", e)),
@@ -6287,6 +6425,10 @@ impl App {
             }
             InputKind::AiRename => {
                 self.start_ai_rename(&name);
+                return Ok(());
+            }
+            InputKind::AiSearch => {
+                self.start_ai_search(&name);
                 return Ok(());
             }
             InputKind::DestPath { op, targets } => {
@@ -7427,6 +7569,7 @@ impl App {
                     // scan the folder for junk, and suggest a structure.
                     v.insert(0, MenuItem::AiCommit);
                     v.insert(0, MenuItem::AiRename);
+                    v.insert(0, MenuItem::AiSearch);
                     v.insert(0, MenuItem::AiStructure);
                     v.insert(0, MenuItem::AiJunk);
                 }
@@ -7626,6 +7769,7 @@ impl App {
             MenuItem::AiJunk => self.start_ai_junk(),
             MenuItem::AiStructure => self.start_ai_structure(),
             MenuItem::AiRename => self.start_ai_rename_prompt(),
+            MenuItem::AiSearch => self.start_ai_search_prompt(),
             MenuItem::GitStage => self.git_stage(),
             MenuItem::GitUnstage => self.git_unstage(),
             MenuItem::GitDiscard => self.git_discard_prompt(),
@@ -13825,6 +13969,59 @@ mod tests {
         } else {
             panic!("popup changed");
         }
+    }
+
+    #[test]
+    fn parse_sem_search_reply_matches_orders_and_folds_reasons() {
+        let hit = |rel: &str| cian_core::search::Hit {
+            path: PathBuf::from("/root").join(rel),
+            rel: PathBuf::from(rel),
+            is_dir: false,
+            line: None,
+        };
+        let catalog = vec![hit("src/db.rs"), hit("README.md"), hit("src/ui.rs")];
+        // Ranked: ui first, then db; a made-up path is dropped.
+        let raw = "```json\n[\
+            {\"path\":\"src/ui.rs\",\"reason\":\"UI code\"},\
+            {\"path\":\"src/db.rs\",\"reason\":\"database layer\"},\
+            {\"path\":\"nope.rs\",\"reason\":\"invented\"}\
+            ]\n```";
+        let out = parse_sem_search_reply(raw, &catalog);
+        let rels: Vec<String> = out.iter().map(|h| h.rel.display().to_string()).collect();
+        assert_eq!(rels, vec!["src/ui.rs", "src/db.rs"], "kept order, dropped the invented path");
+        // The reason is folded into the line so the list shows it and Enter previews.
+        assert_eq!(out[0].line.as_ref().map(|(n, t)| (*n, t.as_str())), Some((1, "UI code")));
+    }
+
+    #[test]
+    fn ai_search_builds_a_catalog_and_fires_a_request() {
+        let have_py = std::process::Command::new("python3")
+            .arg("--version").output().map(|o| o.status.success()).unwrap_or(false);
+        if !have_py {
+            eprintln!("no python3; skipping");
+            return;
+        }
+        let d = tempfile::tempdir().unwrap();
+        std::fs::create_dir(d.path().join("src")).unwrap();
+        std::fs::write(d.path().join("src/db.rs"), b"x").unwrap();
+        std::fs::write(d.path().join("README.md"), b"x").unwrap();
+        let p = d.path().to_path_buf();
+        let mut config = cian_lua::Config::default();
+        config.ai = Some(cian_lua::AiOptions {
+            python: "python3".into(), auth_mode: "mock".into(), ..Default::default()
+        });
+        let mut app = App::new(p.clone(), p, config).unwrap();
+
+        app.start_ai_search("the database code");
+        assert!(app.ai_job.is_some(), "a request was fired over the catalog");
+        // The mock echoes (not JSON), so the pipeline reports no matches.
+        let start = Instant::now();
+        while app.ai_job.is_some() && start.elapsed() < Duration::from_secs(10) {
+            app.poll_ai_job();
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(app.message.as_deref().unwrap_or("").contains("no relevant"),
+            "mock reply parses to no matches: {:?}", app.message);
     }
 
     #[test]

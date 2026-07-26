@@ -424,6 +424,13 @@ loop:
   (bounded to keep the request small), so it is a deliberate keystroke rather
   than automatic. The summary opens in the AI chat, where it can be scrolled,
   selected and copied.
+- **Semantic search** (file pane): `:aisearch <what you're looking for>`, or
+  right-click **AI ▸ → Semantic search**. cian walks the tree, collects up to a
+  few hundred file **paths** (names only — no contents), and asks the model
+  which are most relevant to your description. The matches open in the same
+  results list as `find`/`grep`: Enter previews the file in F3, `Ctrl+n`/`Ctrl+N`
+  step between them, Esc returns to the list. A path the model invents matches
+  nothing.
 - **Bulk rename** (file pane): `:airename`, or right-click **AI ▸ → Bulk
   rename**. It asks how to rename ("snake_case", "add a date prefix", …), then
   proposes new names for the marked files — or the whole listing when nothing
