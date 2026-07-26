@@ -403,6 +403,11 @@ loop:
   files. It can only ever move files *into* new sub-folders of the current
   directory: destinations are validated to reject `..`, absolute paths and
   drives, and a name the model invents matches nothing.
+- **Summarise a file** (F3 viewer): press **`S`** while viewing a file. Unlike
+  the metadata-only features above, this sends the file's **text** to the model
+  (bounded to keep the request small), so it is a deliberate keystroke rather
+  than automatic. The summary opens in the AI chat, where it can be scrolled,
+  selected and copied.
 
 The AI part is the one place cian is not a single self-contained binary — it
 opts into an external interpreter and network — which is why it is strictly

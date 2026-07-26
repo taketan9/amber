@@ -1391,6 +1391,32 @@ fn truncate_diff_for_ai(diff: &str, max_bytes: usize) -> String {
     out
 }
 
+/// Cap arbitrary text at roughly `max_bytes` on a line boundary (a char
+/// boundary if a single line is longer), appending a marker when truncated.
+fn truncate_text_for_ai(text: &str, max_bytes: usize) -> String {
+    if text.len() <= max_bytes {
+        return text.to_string();
+    }
+    let mut out = String::with_capacity(max_bytes + 64);
+    for line in text.lines() {
+        if out.len() + line.len() + 1 > max_bytes {
+            // A single over-long line: take a char-boundary prefix of it.
+            if out.is_empty() {
+                let mut end = max_bytes.min(line.len());
+                while end > 0 && !line.is_char_boundary(end) {
+                    end -= 1;
+                }
+                out.push_str(&line[..end]);
+            }
+            break;
+        }
+        out.push_str(line);
+        out.push('\n');
+    }
+    out.push_str("\n[truncated — summarise from what is shown above]\n");
+    out
+}
+
 /// Shell-style wildcard match: `*` matches any run, `?` any one char.
 /// Both `pat` and `name` should already be the case folded to compare.
 fn glob_match(pat: &str, name: &str) -> bool {
@@ -3468,6 +3494,7 @@ impl App {
         let body_h = (self.viewer_rect.height as usize).max(1);
         let half = (body_h / 2).max(1);
         let mut close = false;
+        let mut summarize = false;
         if let Popup::Viewer { view, scroll, line, col, goal, visual, anchor, count, .. } = &mut self.popup {
             let cnt = count.take();
             let n = view.lines.len();
@@ -3501,6 +3528,9 @@ impl App {
                 (false, KeyCode::Char('v')) => start_visual(ViewVisual::Char, visual, anchor, *line, *col),
                 (false, KeyCode::Char('V')) => start_visual(ViewVisual::Line, visual, anchor, *line, *col),
                 (true, KeyCode::Char('v')) => start_visual(ViewVisual::Block, visual, anchor, *line, *col),
+                // `S` summarises the file with the AI (sends its text). Handled
+                // after the borrow ends, below.
+                (false, KeyCode::Char('S')) => summarize = true,
                 (false, KeyCode::Char('o')) if visual.is_some() => {
                     // Swap the cursor and the anchor.
                     let a = *anchor;
@@ -3590,6 +3620,10 @@ impl App {
                 *scroll = *line + 1 - body_h;
             }
             *scroll = (*scroll).min(n.saturating_sub(body_h));
+        }
+        if summarize {
+            self.summarize_viewer();
+            return Ok(());
         }
         if close {
             // If this viewer was opened from a grep hit, go back to the results
@@ -5069,6 +5103,48 @@ impl App {
             pending: false,
             sel: None,
         };
+    }
+
+    /// Summarise the file open in the F3 viewer. Unlike the metadata-only
+    /// features, this sends the file's TEXT to the model (a content-egress
+    /// action), so it is gated behind an explicit key in the viewer. The reply
+    /// opens in the AI chat, where it can be read, selected and copied.
+    fn summarize_viewer(&mut self) {
+        if self.ai.is_none() {
+            self.message = Some("AI not configured — add cian.ai{...} to init.lua".into());
+            return;
+        }
+        // Pull the decoded text and a name out of the viewer.
+        let (name, content) = if let Popup::Viewer { title, view, .. } = &self.popup {
+            (title.clone(), view.lines.join("\n"))
+        } else {
+            return;
+        };
+        if content.trim().is_empty() {
+            self.message = Some("nothing to summarise".into());
+            return;
+        }
+        if !self.ai_ready() {
+            self.message = Some("AI unavailable (python, packages, or sign-in)".into());
+            return;
+        }
+        // Bound the payload: a summary rarely needs the whole of a large file,
+        // and an unbounded body would blow the token budget.
+        let body = truncate_text_for_ai(&content, 24_000);
+        let system = "You summarise a file's contents for a developer. Give a \
+             short, plain-text summary: what it is, its purpose, and the key \
+             points or structure. Be concise; no preamble, no markdown headings."
+            .to_string();
+        // Open the chat with the request shown, so the reply lands in a place
+        // that can be scrolled, selected and copied — and followed up in.
+        self.popup = Popup::AiChat {
+            input: String::new(),
+            log: vec![ChatMsg { user: true, text: format!("Summarise {}", name) }],
+            scroll: usize::MAX,
+            pending: true,
+            sel: None,
+        };
+        self.ai_request(AiPurpose::Chat, system, body);
     }
 
     /// Fire an AI request on a worker thread, tagged with what to do with the
@@ -11571,8 +11647,8 @@ fn draw_popup(
         let footer_area =
             Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1);
         let footer_text = match lang {
-            Lang::En => " j/k scroll  u/d page  g/G top/bottom  Esc close ",
-            Lang::Ja => " j/k スクロール  u/d ページ  g/G 先頭/末尾  Esc 閉じる ",
+            Lang::En => " j/k scroll  u/d page  g/G top/bottom  S AI summary  Esc close ",
+            Lang::Ja => " j/k スクロール  u/d ページ  g/G 先頭/末尾  S AI要約  Esc 閉じる ",
         };
         let footer = Paragraph::new(footer_text).style(
             Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD),
@@ -13148,6 +13224,56 @@ mod tests {
         } else {
             panic!("popup changed");
         }
+    }
+
+    #[test]
+    fn truncate_text_for_ai_caps_and_handles_one_long_line() {
+        let short = "a\nb\nc\n";
+        assert_eq!(truncate_text_for_ai(short, 1000), short, "short text is unchanged");
+        // A single line longer than the cap is cut on a char boundary.
+        let long = "x".repeat(5000);
+        let out = truncate_text_for_ai(&long, 100);
+        assert!(out.len() < long.len() && out.contains("truncated"));
+        // Multibyte: cutting must not split a char.
+        let multi = "あ".repeat(2000);
+        let out = truncate_text_for_ai(&multi, 100);
+        assert!(out.starts_with("あ") && out.contains("truncated"));
+    }
+
+    /// Pressing `S` in the viewer sends the file's text and opens the chat with
+    /// the reply (mock: an echo of the body).
+    #[test]
+    fn viewer_summarize_opens_the_chat_with_a_reply() {
+        let have_py = std::process::Command::new("python3")
+            .arg("--version").output().map(|o| o.status.success()).unwrap_or(false);
+        if !have_py {
+            eprintln!("no python3; skipping");
+            return;
+        }
+        let d = tempfile::tempdir().unwrap();
+        std::fs::write(d.path().join("readme.txt"), "hello world\nsecond line\n").unwrap();
+        let p = d.path().to_path_buf();
+        let mut config = cian_lua::Config::default();
+        config.ai = Some(cian_lua::AiOptions {
+            python: "python3".into(), auth_mode: "mock".into(), ..Default::default()
+        });
+        let mut app = App::new(p.clone(), p, config).unwrap();
+        app.active_pane_mut().unwrap().cursor = 1; // readme.txt (index 0 is `..`)
+        let _ = render(&mut app, 100, 40);
+        app.look_inside(); // open the F3 viewer
+        assert!(matches!(app.popup, Popup::Viewer { .. }), "viewer open");
+        let _ = render(&mut app, 100, 40);
+
+        app.handle_key(code(KeyCode::Char('S'))).unwrap();
+        assert!(matches!(app.popup, Popup::AiChat { .. }), "summarise opened the chat");
+        let start = Instant::now();
+        while app.ai_job.is_some() && start.elapsed() < Duration::from_secs(10) {
+            app.poll_ai_job();
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let Popup::AiChat { log, .. } = &app.popup else { panic!("chat closed") };
+        assert!(log.iter().any(|m| !m.user && m.text.contains("hello world")),
+            "the mock echoed the file text back as the summary: {log:?}");
     }
 
     #[test]
