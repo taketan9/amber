@@ -52,6 +52,7 @@ impl App {
             items.push(MenuItem::Hash);
             items.push(MenuItem::Compare);
             items.push(MenuItem::FindDupes);
+            items.push(MenuItem::Count);
             // Archiving: "Extract here" when the cursor is on an archive, and
             // "Compress ▸" whenever there is something selected to pack.
             let on_archive = self
@@ -348,6 +349,7 @@ impl App {
             MenuItem::Hash => self.start_hash(cian_core::attrs::HashKind::Sha256),
             MenuItem::Compare => self.open_diff(),
             MenuItem::FindDupes => self.start_dupes(),
+            MenuItem::Count => self.start_count(),
             MenuItem::Extract => self.extract_selected(),
             MenuItem::CompressZip => self.prompt_compress(CompressKind::Zip),
             MenuItem::CompressZipEnc => self.prompt_compress(CompressKind::ZipEnc),

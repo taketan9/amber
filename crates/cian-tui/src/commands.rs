@@ -128,8 +128,12 @@ impl App {
             // Archiving.
             "zip" => self.cmd_zip(&args),
             "tar" => self.cmd_tar(&args, false),
-            "targz" | "tgz" | "tarball" => self.cmd_tar(&args, true),
-            "unzip" | "untar" | "extract" | "unar" => self.extract_selected(),
+            "targz" | "tgz" | "tarball" | "tar.gz" => self.cmd_tar(&args, true),
+            // Extraction auto-detects the format (zip / tar / tar.gz), so all of
+            // these aliases do the same thing on the archive under the cursor.
+            "unzip" | "untar" | "untargz" | "untar.gz" | "untgz" | "extract" | "unar" => {
+                self.extract_selected()
+            }
 
             other => self.message = Some(format!("unknown command: :{}", other)),
         }

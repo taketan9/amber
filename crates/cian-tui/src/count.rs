@@ -38,14 +38,11 @@ impl App {
         self.message = Some(tr(self.lang, "counting…", "カウント中…").into());
     }
 
-    /// Marked entries if any, else the active pane's directory (counted whole).
+    /// What to count: the marked entries, or — with nothing marked — the entry
+    /// under the cursor (a directory is walked recursively). `target_paths`
+    /// gives exactly that (marks, else the cursor, never `..`).
     fn count_targets(&self) -> Vec<PathBuf> {
-        let Some(p) = self.active_pane() else { return Vec::new() };
-        if p.mark_count() > 0 {
-            p.target_paths()
-        } else {
-            vec![p.cwd.clone()]
-        }
+        self.active_pane().map(|p| p.target_paths()).unwrap_or_default()
     }
 
     /// Install a finished count as a notice. Returns true if a report landed.

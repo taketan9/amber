@@ -223,12 +223,14 @@ fn inline(text: &str, base: Style, _width: usize) -> Vec<Span<'static>> {
     };
     while i < chars.len() {
         let c = chars[i];
-        // Inline code `...`
+        // Inline code `...`. The coloured background is the marker, so the text
+        // is not padded — padding it looked wrong hugged against punctuation,
+        // e.g. `(`meso`)` rendering as `( meso )`.
         if c == '`' {
             if let Some(end) = chars[i + 1..].iter().position(|&x| x == '`') {
                 flush(&mut spans, &mut buf);
                 let inner: String = chars[i + 1..i + 1 + end].iter().collect();
-                spans.push(Span::styled(format!(" {} ", inner), code_style));
+                spans.push(Span::styled(inner, code_style));
                 i += end + 2;
                 continue;
             }
@@ -319,5 +321,15 @@ mod tests {
         let sp = inline("a **b** c", Style::default(), 40);
         // "a ", "b" (bold), " c" — the bold word is its own span.
         assert!(sp.iter().any(|s| s.content == "b" && s.style.add_modifier.contains(Modifier::BOLD)));
+    }
+
+    #[test]
+    fn inline_code_in_parens_is_not_padded() {
+        // Regression: `(`meso`)` must render the code tight, not "( meso )".
+        let sp = inline("hoge(`meso`)", Style::default(), 40);
+        assert!(sp.iter().any(|s| s.content == "meso"), "code content is exactly `meso`: {:?}",
+            sp.iter().map(|s| s.content.as_ref()).collect::<Vec<_>>());
+        let flat: String = sp.iter().map(|s| s.content.as_ref()).collect();
+        assert_eq!(flat, "hoge(meso)", "no stray spaces around the code");
     }
 }

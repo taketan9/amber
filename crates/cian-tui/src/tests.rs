@@ -354,8 +354,17 @@
             extensions: vec!["rs".into()],
             ..Default::default()
         };
-        // Reload the pane so the new files are listed, then count the directory.
+        // Reload, then mark the two .rs files: `:count` counts the marked
+        // entries (or, unmarked, the one under the cursor) — not the whole dir.
         app.reload_both();
+        {
+            let p = app.active_pane_mut().unwrap();
+            for i in 0..p.entries.len() {
+                if p.entries[i].name.ends_with(".rs") {
+                    p.toggle_mark_at(i);
+                }
+            }
+        }
         app.start_count();
         assert!(app.count_job.is_some(), "count started on a worker");
 
@@ -374,6 +383,34 @@
                 assert!(!text.contains("not counted"), "txt excluded");
             }
             _ => panic!("no count notice: {:?}", app.popup),
+        }
+    }
+
+    #[test]
+    fn count_targets_the_cursor_not_the_whole_directory() {
+        let (d, mut app) = app_with(&[]);
+        // A subdirectory with one file, plus a sibling file that must NOT count.
+        std::fs::create_dir(d.path().join("sub")).unwrap();
+        std::fs::write(d.path().join("sub/inner.rs"), "let a = 1;\nlet b = 2;\n").unwrap();
+        std::fs::write(d.path().join("outside.rs"), "let c = 3;\n").unwrap();
+        app.count_opts = cian_core::count::Options { extensions: vec!["rs".into()], ..Default::default() };
+        app.reload_both();
+        // Cursor on the `sub` folder (nothing marked) → count walks just it.
+        app.active_pane_mut().unwrap().cursor =
+            app.active_pane().unwrap().entries.iter().position(|e| e.name == "sub").unwrap();
+        app.start_count();
+        for _ in 0..200 {
+            if app.poll_count() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        if let Popup::Notice { lines } = &app.popup {
+            let text = lines.join("\n");
+            // 1 file, 2 code lines from sub/inner.rs; outside.rs excluded.
+            assert!(text.contains("2") && !text.contains('3'), "counted only the cursor's dir: {text}");
+        } else {
+            panic!("no count notice");
         }
     }
 

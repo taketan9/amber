@@ -555,6 +555,8 @@ enum MenuItem {
     CompressTarGz,
     /// Extract the archive under the cursor into a fresh sub-folder.
     Extract,
+    /// Count files/steps under the selection (`:count`).
+    Count,
     /// A submenu grouping the AI actions (drills down when chosen).
     AiMenu,
     /// A submenu grouping the file-transfer actions.
@@ -614,6 +616,7 @@ impl MenuItem {
             MenuItem::CompressZipEnc => tr(lang, "→ .zip  (password)", "→ .zip  (パスワード)"),
             MenuItem::CompressTarGz => tr(lang, "→ .tar.gz", "→ .tar.gz"),
             MenuItem::Extract => tr(lang, "Extract here", "ここに解凍"),
+            MenuItem::Count => tr(lang, "Count files & steps", "ファイル・ステップ数を数える"),
             MenuItem::Ssh => tr(lang, "SSH connect", "SSH接続"),
             MenuItem::ScpUpload => tr(lang, "Upload → server", "アップロード → サーバ"),
             MenuItem::ScpDownload => tr(lang, "Download ← server", "ダウンロード ← サーバ"),
