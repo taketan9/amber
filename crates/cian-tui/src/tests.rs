@@ -4421,6 +4421,17 @@
     }
 
     #[test]
+    fn disk_usage_cache_populates_for_the_active_pane() {
+        let d = tempfile::tempdir().unwrap();
+        let p = std::fs::canonicalize(d.path()).unwrap();
+        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        assert!(app.disk_for(app.focused).is_none(), "cold before the first refresh");
+        app.ensure_git();
+        let u = app.disk_for(app.focused).expect("mount is queryable");
+        assert!(u.total > 0 && u.free <= u.total);
+    }
+
+    #[test]
     fn svn_status_log_and_diff() {
         use std::process::Command;
         // Needs both svnadmin (to make a repo) and svn (to check one out).

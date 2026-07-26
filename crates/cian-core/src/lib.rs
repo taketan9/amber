@@ -10,6 +10,7 @@ pub mod attrs;
 pub mod count;
 pub mod dedup;
 pub mod diff;
+pub mod disk;
 pub mod dirdiff;
 pub mod elevate;
 pub mod git;

@@ -38,6 +38,7 @@ flate2 = { version = "1", default-features = false, features = ["rust_backend"] 
 # all Rust decoders), so the single-binary/no-C story holds; only the common
 # raster formats are enabled to keep the build lean.
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif", "bmp", "webp"] }
+fs4 = "1.1.0"
 
 [dev-dependencies]
 tempfile = "3.27.0"

@@ -22,9 +22,25 @@ impl App {
                 } else {
                     (None, None)
                 };
-                self.git[idx] = Some(GitState { cwd, kind, status });
+                self.git[idx] = Some(GitState { cwd: cwd.clone(), kind, status });
+            }
+            // Free-space cache: same cwd-keyed refresh as git. Cheap local
+            // syscall, only when the directory actually changed.
+            let disk_stale = self.disk[idx].as_ref().map(|(d, _)| *d != cwd).unwrap_or(true);
+            if disk_stale {
+                self.disk[idx] = Some((cwd.clone(), cian_core::disk::usage(&cwd)));
             }
         }
+    }
+
+    /// The cached disk usage for a file pane, if its mount could be queried.
+    pub(crate) fn disk_for(&self, pane: FocusedPane) -> Option<cian_core::disk::Usage> {
+        let idx = match pane {
+            FocusedPane::Left => 0,
+            FocusedPane::Right => 1,
+            FocusedPane::Shell => return None,
+        };
+        self.disk[idx].as_ref().and_then(|(_, u)| *u)
     }
 
     /// The VCS the active file pane's directory belongs to, if any.
@@ -60,6 +76,8 @@ impl App {
     /// or a file operation that may have changed the working tree.
     pub(crate) fn invalidate_git(&mut self) {
         self.git = [None, None];
+        // A copy/move/delete/extract changes free space too — re-probe it.
+        self.disk = [None, None];
     }
 
     /// The selection to act on for a git command: marked files, else the entry

@@ -1432,6 +1432,27 @@ fn draw_status(f: &mut Frame, area: Rect, app: &App) {
         spans.push(chip(label, color));
     }
 
+    // Free space on the active pane's mount — always in view, since a copy or
+    // an extract of a huge tree is a glance away from "will this fit". Amber
+    // past 80% used, red past 95%, so a filling disk announces itself.
+    if let Some(u) = app.disk_for(app.focused) {
+        spans.push(dim_sep.clone());
+        let frac = u.used_fraction();
+        let color = if frac >= 0.95 {
+            Color::Rgb(230, 110, 110)
+        } else if frac >= 0.80 {
+            Color::Rgb(240, 210, 120)
+        } else {
+            Color::Rgb(130, 175, 210)
+        };
+        let label = format!(
+            "\u{f0a0} {} free / {}",
+            cian_core::disk::human_size(u.free),
+            cian_core::disk::human_size(u.total),
+        );
+        spans.push(chip(label, color));
+    }
+
     if app.zoomed {
         spans.push(dim_sep.clone());
         spans.push(chip("[zoom]".to_string(), theme().accent));

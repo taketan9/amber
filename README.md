@@ -367,6 +367,13 @@ language of their own, and half-implementing them would be worse than saying
 no. On Windows there are no mode bits at all, so `:chmod` refuses and points at
 `:readonly`.
 
+## Free space
+
+The status line always shows the **free space** on the active pane's mount
+(` 12.3G free / 100G`), so a copy or an extract of a huge tree is a glance away
+from "will this fit". It turns amber past 80% used and red past 95%. The figure
+refreshes when you change directory and after any file operation.
+
 ## Git
 
 When a pane sits inside a git repository, each entry carries a status badge:

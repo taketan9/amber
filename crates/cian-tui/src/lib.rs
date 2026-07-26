@@ -1427,6 +1427,11 @@ pub struct App {
     /// Cached git status per file pane `[left, right]`, recomputed when the
     /// pane's directory changes or on an explicit refresh.
     git: [Option<GitState>; 2],
+    /// Cached free/total disk space of each file pane's mount `[left, right]`,
+    /// refreshed alongside `git` when the pane's directory changes or after a
+    /// file operation. `Some(cwd, None)` remembers a mount that could not be
+    /// queried, so we don't re-probe it every frame.
+    disk: [Option<(PathBuf, Option<cian_core::disk::Usage>)>; 2],
     /// A command to type into the shell once it is ready. Needed because the
     /// PTY spawns on a background thread, so the shell may not exist yet at
     /// the moment the user picks a connection.
@@ -1572,6 +1577,7 @@ impl App {
             show_key_hints: config.options.key_hints.unwrap_or(true),
             lang: Lang::from_opt(config.options.lang.as_deref()),
             git: [None, None],
+            disk: [None, None],
             ai: config.ai.as_ref().map(|a| cian_ai::AiConfig {
                 python: a.python.clone(),
                 endpoint: a.endpoint.clone(),
