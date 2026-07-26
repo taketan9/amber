@@ -1200,6 +1200,10 @@ enum Popup {
     /// is deleted from here directly — approving hands the checked paths to the
     /// normal delete confirmation.
     JunkReview { items: Vec<JunkItem>, cursor: usize, scroll: usize },
+    /// The AI's proposed folder structure: a set of moves (file → subfolder),
+    /// each toggleable. Approving runs the checked moves, creating folders as
+    /// needed. `dir` is the folder the moves are relative to.
+    StructureReview { items: Vec<MoveItem>, cursor: usize, scroll: usize, dir: PathBuf },
 }
 
 /// One candidate the junk detector flagged: a path, why it thinks so, and
@@ -1207,6 +1211,18 @@ enum Popup {
 #[derive(Debug, Clone)]
 struct JunkItem {
     path: PathBuf,
+    reason: String,
+    selected: bool,
+}
+
+/// One proposed move in a structure suggestion: take `path` (its name shown as
+/// `name`) into the sub-folder `dest` (relative to the pane's directory,
+/// created if missing), with the AI's short rationale.
+#[derive(Debug, Clone)]
+struct MoveItem {
+    path: PathBuf,
+    name: String,
+    dest: String,
     reason: String,
     selected: bool,
 }
@@ -1293,6 +1309,66 @@ fn parse_junk_reply(raw: &str, names: &[(String, PathBuf)]) -> Vec<JunkItem> {
                 });
             }
         }
+    }
+    out
+}
+
+/// Sanitise an AI-proposed destination sub-folder: a single relative segment
+/// path with no `..`, no absolute root, no drive — so a plan can only ever move
+/// files *into* new folders under the current directory, never elsewhere.
+fn clean_dest_folder(raw: &str) -> Option<String> {
+    let t = raw.trim();
+    if t.is_empty() {
+        return None;
+    }
+    // Reject anything that could escape the current directory — checked before
+    // any trimming so a leading separator or a drive letter can't slip through.
+    if t.starts_with('/') || t.starts_with('\\') || t.contains(':') {
+        return None;
+    }
+    let t = t.trim_end_matches(['/', '\\']);
+    let parts: Vec<&str> = t.split(['/', '\\']).collect();
+    if parts.is_empty() || parts.iter().any(|p| p.is_empty() || *p == "." || *p == "..") {
+        return None;
+    }
+    Some(parts.join("/"))
+}
+
+/// Parse the structure suggester's reply into concrete moves. The model returns
+/// a JSON array of `{name, folder, reason}`; we keep only names matching a real
+/// entry and folders that are safe relative sub-paths, and drop no-ops (a file
+/// "moved" into a folder it is already the same as). Pre-checked for action.
+fn parse_structure_reply(raw: &str, names: &[(String, PathBuf)]) -> Vec<MoveItem> {
+    #[derive(serde::Deserialize)]
+    struct Hit {
+        name: String,
+        #[serde(default)]
+        folder: String,
+        #[serde(default)]
+        reason: String,
+    }
+    let start = raw.find('[');
+    let end = raw.rfind(']');
+    let json = match (start, end) {
+        (Some(s), Some(e)) if e > s => &raw[s..=e],
+        _ => return Vec::new(),
+    };
+    let hits: Vec<Hit> = serde_json::from_str(json).unwrap_or_default();
+    let mut out = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for hit in hits {
+        let Some((_, path)) = names.iter().find(|(n, _)| *n == hit.name) else { continue };
+        let Some(dest) = clean_dest_folder(&hit.folder) else { continue };
+        if !seen.insert(path.clone()) {
+            continue;
+        }
+        out.push(MoveItem {
+            path: path.clone(),
+            name: hit.name.clone(),
+            dest,
+            reason: hit.reason.trim().to_string(),
+            selected: true,
+        });
     }
     out
 }
@@ -1678,6 +1754,8 @@ enum MenuItem {
     AiCommit,
     /// Detect junk files in the current directory.
     AiJunk,
+    /// Suggest an organised folder structure for the current directory.
+    AiStructure,
     /// Open the shortcuts / bookmarks menu (the `s` key).
     Shortcuts,
     /// A submenu grouping the AI actions (drills down when chosen).
@@ -1744,6 +1822,7 @@ impl MenuItem {
             MenuItem::AiShellCmd => tr(lang, "Command from description", "説明からコマンド生成"),
             MenuItem::AiCommit => tr(lang, "Draft commit message", "コミットメッセージ生成"),
             MenuItem::AiJunk => tr(lang, "Detect junk files", "ゴミファイル検出"),
+            MenuItem::AiStructure => tr(lang, "Suggest folder structure", "フォルダ構成を提案"),
             MenuItem::Shortcuts => tr(lang, "Shortcuts  (s)", "ショートカット  (s)"),
             MenuItem::AiMenu => tr(lang, "AI ▸", "AI ▸"),
             MenuItem::SendMenu => tr(lang, "Transfer ▸", "転送 ▸"),
@@ -1884,6 +1963,9 @@ enum AiPurpose {
     /// list the model was shown, so its answer can be validated back to real,
     /// absolute paths (a hallucinated name simply matches nothing).
     Junk { names: Vec<(String, PathBuf)> },
+    /// Structure suggestion over a directory listing. `names` validates the
+    /// reply back to real paths; `dir` is the folder moves are relative to.
+    Structure { names: Vec<(String, PathBuf)>, dir: PathBuf },
 }
 
 /// A pending AI request; the worker sends the assistant's reply (or an error
@@ -2416,6 +2498,8 @@ pub struct App {
     ai_lines: Vec<String>,
     /// The junk-review list body rect, stashed so a click can map to a row.
     junk_rect: Rect,
+    /// The structure-review list body rect, for the same reason.
+    struct_rect: Rect,
     diff_job: Option<DiffJob>,
     /// When the panes were last checked against the filesystem.
     last_watch: Instant,
@@ -2517,6 +2601,7 @@ impl App {
             ai_job: None,
             ai_rect: Rect::new(0, 0, 0, 0),
             junk_rect: Rect::new(0, 0, 0, 0),
+            struct_rect: Rect::new(0, 0, 0, 0),
             ai_scroll: 0,
             ai_lines: Vec::new(),
             zoom_return: None,
@@ -2689,6 +2774,7 @@ impl App {
             }
             "aicommit" | "commitmsg" => self.start_ai_commit_message(),
             "aijunk" | "junk" => self.start_ai_junk(),
+            "aiorganize" | "aistructure" | "organize" => self.start_ai_structure(),
             "reload" | "source" => self.reload_config(),
             // Mark / unmark entries whose name matches a glob (`:mark *.rs`).
             "mark" | "select" => self.cmd_mark(rest, true),
@@ -5146,6 +5232,100 @@ impl App {
         self.ai_request(AiPurpose::Junk { names }, system, user);
     }
 
+    /// Ask the AI to propose an organised folder layout for the active pane,
+    /// then show the moves for review. Metadata only (names, sizes, dir flags).
+    fn start_ai_structure(&mut self) {
+        if self.ai.is_none() {
+            self.message = Some("AI not configured — add cian.ai{...} to init.lua".into());
+            return;
+        }
+        let Some(pane) = self.active_pane() else { return };
+        let dir = pane.cwd.clone();
+        let rows: Vec<(String, PathBuf, bool, u64)> = pane
+            .entries
+            .iter()
+            .filter(|e| !e.is_parent)
+            .map(|e| (e.name.clone(), e.path.clone(), e.is_dir, e.len))
+            .collect();
+        if rows.is_empty() {
+            self.message = Some("nothing here to organise".into());
+            return;
+        }
+        if !self.ai_ready() {
+            self.message = Some("AI unavailable (python, packages, or sign-in)".into());
+            return;
+        }
+        let names: Vec<(String, PathBuf)> =
+            rows.iter().map(|(n, p, _, _)| (n.clone(), p.clone())).collect();
+        let mut listing = String::new();
+        for (name, _, is_dir, len) in rows.iter().take(400) {
+            let kind = if *is_dir { "dir " } else { "file" };
+            let size = if *is_dir { String::new() } else { cian_core::human_size(*len) };
+            listing.push_str(&format!("{}\t{}\t{}\n", kind, size, name));
+        }
+        let system = "You propose a tidy folder structure for a directory by \
+             grouping loose files into sub-folders (e.g. images/, docs/, src/, \
+             archive/2023/). Only MOVE existing entries into sub-folders — never \
+             rename, never delete, never move a file out of this directory. Group \
+             by obvious type or theme; leave a file where it is if no grouping is \
+             clearly better (omit it). Prefer a few meaningful folders over many \
+             tiny ones. Reply with ONLY a JSON array of objects {\"name\": string \
+             (exactly as given), \"folder\": string (a NEW or existing sub-folder, \
+             a simple relative path, no ..), \"reason\": short string}. Empty array \
+             if the directory is already well organised. No prose, no code fences."
+            .to_string();
+        let user = format!("Directory: {}\n\nEntries (kind, size, name):\n{}", dir.display(), listing);
+        self.message = Some("asking AI to suggest a structure…".into());
+        self.ai_request(AiPurpose::Structure { names, dir }, system, user);
+    }
+
+    /// Run the checked moves from a structure suggestion on a worker: create
+    /// each destination sub-folder (under the pane's directory) and move the
+    /// file in. Skips on name conflict rather than overwriting.
+    fn apply_structure_plan(&mut self) {
+        let (dir, moves) = if let Popup::StructureReview { items, dir, .. } = &self.popup {
+            let picked: Vec<(PathBuf, String)> = items
+                .iter()
+                .filter(|it| it.selected)
+                .map(|it| (it.path.clone(), it.dest.clone()))
+                .collect();
+            (dir.clone(), picked)
+        } else {
+            return;
+        };
+        if moves.is_empty() {
+            self.message = Some("nothing checked".into());
+            return;
+        }
+        self.popup = Popup::None;
+        self.start_op("organising", move |ctl| {
+            let mut report = OpReport::default();
+            let total = moves.len();
+            for (i, (src, folder)) in moves.iter().enumerate() {
+                if ctl.cancel.load(Ordering::Relaxed) {
+                    break;
+                }
+                (ctl.on_progress)(&cian_core::progress::Progress {
+                    files_done: i,
+                    files_total: total,
+                    current: src.display().to_string(),
+                    ..Default::default()
+                });
+                let dest_dir = dir.join(folder);
+                if let Err(e) = cian_core::ops::make_dir(&dir, folder, true) {
+                    report.note_error(format!("{}: {}", folder, e));
+                    continue;
+                }
+                match cian_core::ops::move_one(src, &dest_dir, Conflict::Skip) {
+                    Ok(true) => report.ok += 1,
+                    Ok(false) => report.skipped += 1,
+                    Err(e) => report.note_error(format!("{}: {}", src.display(), e)),
+                }
+            }
+            report
+        });
+    }
+
     /// Hand the checked junk candidates to the normal delete confirmation, so
     /// removal goes through the same trash/permanent path (and its own y/Enter
     /// approval) as any other delete — never straight to disk from here.
@@ -5278,6 +5458,17 @@ impl App {
                         self.message = Some("AI found no obvious junk".into());
                     } else {
                         self.popup = Popup::JunkReview { items, cursor: 0, scroll: 0 };
+                    }
+                }
+                Err(e) => self.message = Some(format!("AI: {}", e)),
+            },
+            AiPurpose::Structure { names, dir } => match result {
+                Ok(text) => {
+                    let items = parse_structure_reply(&text, &names);
+                    if items.is_empty() {
+                        self.message = Some("AI had no structure changes to suggest".into());
+                    } else {
+                        self.popup = Popup::StructureReview { items, cursor: 0, scroll: 0, dir };
                     }
                 }
                 Err(e) => self.message = Some(format!("AI: {}", e)),
@@ -5919,6 +6110,31 @@ impl App {
                 if idx < n { Some(idx) } else { None }
             };
             if let Popup::JunkReview { items, cursor, scroll } = &mut self.popup {
+                let n = items.len();
+                match ev.kind {
+                    MouseEventKind::Down(MouseButton::Left) => {
+                        if let Some(idx) = row_at(row, *scroll, n) {
+                            *cursor = idx;
+                            items[idx].selected = !items[idx].selected;
+                        }
+                    }
+                    MouseEventKind::ScrollDown => *scroll = (*scroll + 1).min(n.saturating_sub(1)),
+                    MouseEventKind::ScrollUp => *scroll = scroll.saturating_sub(1),
+                    _ => {}
+                }
+            }
+            return;
+        }
+
+        // Structure review: same feel as junk review — click a row to toggle it.
+        if matches!(self.popup, Popup::StructureReview { .. }) {
+            let body = self.struct_rect;
+            let row_at = |row: u16, scroll: usize, n: usize| -> Option<usize> {
+                if row < body.y || row >= body.y + body.height { return None; }
+                let idx = scroll + (row - body.y) as usize;
+                if idx < n { Some(idx) } else { None }
+            };
+            if let Popup::StructureReview { items, cursor, scroll, .. } = &mut self.popup {
                 let n = items.len();
                 match ev.kind {
                     MouseEventKind::Down(MouseButton::Left) => {
@@ -6721,9 +6937,10 @@ impl App {
                 if self.focused == FocusedPane::Shell {
                     v.insert(0, MenuItem::AiShellCmd);
                 } else {
-                    // In a file pane the AI can draft a commit for its repo and
-                    // scan the folder for junk.
+                    // In a file pane the AI can draft a commit for its repo,
+                    // scan the folder for junk, and suggest a structure.
                     v.insert(0, MenuItem::AiCommit);
+                    v.insert(0, MenuItem::AiStructure);
                     v.insert(0, MenuItem::AiJunk);
                 }
                 v.push(MenuItem::Back);
@@ -6914,6 +7131,7 @@ impl App {
             MenuItem::AiShellCmd => self.start_ai_shell_prompt(),
             MenuItem::AiCommit => self.start_ai_commit_message(),
             MenuItem::AiJunk => self.start_ai_junk(),
+            MenuItem::AiStructure => self.start_ai_structure(),
             MenuItem::Shortcuts => self.start_shortcuts(),
             MenuItem::Lang => {
                 // Flip the interface language; every localized string reads
@@ -7762,6 +7980,29 @@ impl App {
                 }
                 // Enter/d hands the checked paths to the normal delete confirm.
                 KeyCode::Enter | KeyCode::Char('d') => self.confirm_junk_deletion(),
+                _ => {}
+            }
+            return Ok(());
+        }
+        if let Popup::StructureReview { items, cursor, .. } = &mut self.popup {
+            let n = items.len();
+            match key.code {
+                KeyCode::Esc | KeyCode::Char('q') => self.popup = Popup::None,
+                KeyCode::Char('j') | KeyCode::Down => {
+                    if n > 0 { *cursor = (*cursor + 1).min(n - 1); }
+                }
+                KeyCode::Char('k') | KeyCode::Up => *cursor = cursor.saturating_sub(1),
+                KeyCode::Char('g') | KeyCode::Home => *cursor = 0,
+                KeyCode::Char('G') | KeyCode::End => *cursor = n.saturating_sub(1),
+                KeyCode::Char(' ') => {
+                    if let Some(it) = items.get_mut(*cursor) { it.selected = !it.selected; }
+                }
+                KeyCode::Char('a') => {
+                    let all_on = items.iter().all(|it| it.selected);
+                    for it in items.iter_mut() { it.selected = !all_on; }
+                }
+                // Enter/m runs the checked moves (creating folders as needed).
+                KeyCode::Enter | KeyCode::Char('m') => self.apply_structure_plan(),
                 _ => {}
             }
             return Ok(());
@@ -9696,6 +9937,10 @@ fn draw(f: &mut Frame, app: &mut App) {
         draw_junk_review(f, area, app);
         return;
     }
+    if matches!(app.popup, Popup::StructureReview { .. }) {
+        draw_structure_review(f, area, app);
+        return;
+    }
     if !matches!(app.popup, Popup::None) {
         // Remember where the context menu landed so a click can hit its rows.
         if let Popup::ContextMenu { items, at, .. } = &app.popup {
@@ -11213,6 +11458,67 @@ fn draw_junk_review(f: &mut Frame, area: Rect, app: &mut App) {
     f.render_widget(Paragraph::new(rows), inner);
 }
 
+/// The structure-suggestion review: a checkbox per proposed move showing
+/// `name → folder/`, with the AI's reason. Enter runs the checked moves.
+fn draw_structure_review(f: &mut Frame, area: Rect, app: &mut App) {
+    let lang = app.lang;
+    let width: u16 = 92u16.min(area.width.saturating_sub(2));
+    let height = area.height.saturating_sub(2).clamp(8, 30);
+    let rect = centered_rect(width, height, area);
+    f.render_widget(Clear, rect);
+    let (n, checked) = if let Popup::StructureReview { items, .. } = &app.popup {
+        (items.len(), items.iter().filter(|i| i.selected).count())
+    } else {
+        (0, 0)
+    };
+    let title = if lang == Lang::Ja {
+        format!(" 構成の提案  {}/{} 選択 ", checked, n)
+    } else {
+        format!(" suggested structure  {}/{} checked ", checked, n)
+    };
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(border_type())
+        .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
+        .style(Style::default().bg(theme().popup_bg))
+        .title(title)
+        .title_bottom(tr(lang,
+            " Space/click=toggle  a=all  Enter/m=move checked  Esc=cancel ",
+            " Space/クリック=切替  a=全て  Enter/m=選択を移動  Esc=取消 "));
+    let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
+    f.render_widget(block, rect);
+
+    let body_h = inner.height as usize;
+    let body_w = inner.width as usize;
+    let mut rows: Vec<Line> = Vec::new();
+    if let Popup::StructureReview { items, cursor, scroll, .. } = &mut app.popup {
+        if *cursor < *scroll {
+            *scroll = *cursor;
+        } else if *cursor >= *scroll + body_h {
+            *scroll = *cursor + 1 - body_h;
+        }
+        for (i, it) in items.iter().enumerate().skip(*scroll).take(body_h) {
+            let sel = i == *cursor;
+            let checkbox = if it.selected { "[x] " } else { "[ ] " };
+            let box_c = if it.selected { theme().mark_fg } else { Color::Rgb(120, 120, 140) };
+            let name_c = if sel { theme().accent } else { Color::Rgb(230, 230, 245) };
+            let base = if sel { Style::default().bg(theme().selected_bg) } else { Style::default() };
+            // `name  →  folder/`, then the reason quietly at the end.
+            let arrow = format!("{}  →  {}/", pad_to(&truncate_middle(&it.name, 26), 26), it.dest);
+            let reason = if it.reason.is_empty() { String::new() } else { format!("   — {}", it.reason) };
+            rows.push(Line::from(vec![
+                Span::styled(checkbox, base.fg(box_c).add_modifier(Modifier::BOLD)),
+                Span::styled(truncate(&arrow, body_w.saturating_sub(6)),
+                    base.fg(name_c).add_modifier(Modifier::BOLD)),
+                Span::styled(truncate(&reason, body_w.saturating_sub(4)),
+                    base.fg(Color::Rgb(150, 150, 170))),
+            ]));
+        }
+        app.struct_rect = Rect::new(inner.x, inner.y, inner.width, body_h.min(items.len().saturating_sub(*scroll)) as u16);
+    }
+    f.render_widget(Paragraph::new(rows), inner);
+}
+
 #[allow(clippy::too_many_arguments)]
 fn draw_popup(
     f: &mut Frame,
@@ -12480,6 +12786,7 @@ fn draw_popup(
         | Popup::AiChat { .. }
         | Popup::CommitMessage { .. }
         | Popup::JunkReview { .. }
+        | Popup::StructureReview { .. }
         | Popup::None => return,
     };
 
@@ -12841,6 +13148,63 @@ mod tests {
         } else {
             panic!("popup changed");
         }
+    }
+
+    #[test]
+    fn clean_dest_folder_rejects_escapes() {
+        assert_eq!(clean_dest_folder("images"), Some("images".to_string()));
+        assert_eq!(clean_dest_folder(" docs/2023 "), Some("docs/2023".to_string()));
+        assert_eq!(clean_dest_folder("a\\b"), Some("a/b".to_string()));
+        // Anything that could escape the current directory is refused.
+        assert_eq!(clean_dest_folder("../evil"), None);
+        assert_eq!(clean_dest_folder("/abs"), None);
+        assert_eq!(clean_dest_folder("C:/x"), None);
+        assert_eq!(clean_dest_folder("a/../b"), None);
+        assert_eq!(clean_dest_folder(""), None);
+    }
+
+    #[test]
+    fn parse_structure_reply_validates_names_and_folders() {
+        let names = vec![
+            ("cat.jpg".to_string(), PathBuf::from("/p/cat.jpg")),
+            ("notes.md".to_string(), PathBuf::from("/p/notes.md")),
+        ];
+        let raw = "```json\n[\
+            {\"name\":\"cat.jpg\",\"folder\":\"images\",\"reason\":\"an image\"},\
+            {\"name\":\"notes.md\",\"folder\":\"../escape\",\"reason\":\"bad folder\"},\
+            {\"name\":\"ghost.txt\",\"folder\":\"docs\",\"reason\":\"not shown\"}\
+            ]\n```";
+        let items = parse_structure_reply(raw, &names);
+        assert_eq!(items.len(), 1, "only the valid, real-name move survives");
+        assert_eq!(items[0].name, "cat.jpg");
+        assert_eq!(items[0].dest, "images");
+        assert!(items[0].selected);
+    }
+
+    /// The whole structure flow: build a review popup by hand and approve it —
+    /// the checked file is moved into a freshly created sub-folder.
+    #[test]
+    fn structure_plan_moves_checked_files_into_new_folders() {
+        let (d, mut app) = app_with(&["cat.jpg", "keep.txt"]);
+        let dir = app.active_pane().unwrap().cwd.clone();
+        app.popup = Popup::StructureReview {
+            items: vec![
+                MoveItem { path: d.path().join("cat.jpg"), name: "cat.jpg".into(),
+                    dest: "images".into(), reason: "image".into(), selected: true },
+                MoveItem { path: d.path().join("keep.txt"), name: "keep.txt".into(),
+                    dest: "docs".into(), reason: String::new(), selected: false },
+            ],
+            cursor: 0,
+            scroll: 0,
+            dir,
+        };
+        app.handle_key(code(KeyCode::Enter)).unwrap(); // run the checked moves
+        drain_op(&mut app);
+        assert!(d.path().join("images/cat.jpg").is_file(), "moved into the new folder");
+        assert!(!d.path().join("cat.jpg").exists(), "gone from the root");
+        // The unchecked one is left where it was, and its folder not created.
+        assert!(d.path().join("keep.txt").is_file(), "unchecked stays put");
+        assert!(!d.path().join("docs").exists(), "no folder for an unchecked move");
     }
 
     #[test]

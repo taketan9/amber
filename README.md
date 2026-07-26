@@ -395,12 +395,20 @@ loop:
   to the *normal* delete confirmation, so nothing is removed without the usual
   trash/permanent choice. A name the model invents matches nothing, so it can
   only ever target files that were actually shown.
+- **Suggest structure** (file pane): `:aiorganize`, or right-click **AI ▸ →
+  Suggest folder structure**. From the same metadata the model proposes a set
+  of moves that group loose files into sub-folders (`images/`, `docs/`, …). You
+  review the plan as `name → folder/` rows — Space/click toggles, `a` toggles
+  all — and approving (Enter/`m`) creates the folders and moves the checked
+  files. It can only ever move files *into* new sub-folders of the current
+  directory: destinations are validated to reject `..`, absolute paths and
+  drives, and a name the model invents matches nothing.
 
 The AI part is the one place cian is not a single self-contained binary — it
 opts into an external interpreter and network — which is why it is strictly
 optional and off unless configured. See
 [`examples/init.lua`](examples/init.lua) for the settings. More AI features
-(structure suggestions, bulk rename, all approval-gated) are planned.
+(bulk rename, F3 summaries, all approval-gated) are planned.
 
 ## Architecture
 
