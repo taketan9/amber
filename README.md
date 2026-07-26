@@ -594,6 +594,19 @@ receive the function keys unchanged.
 The file panes use the parallel controls: `Shift+F1` / `Shift+F2` switch to the
 next / previous tab, and `Shift+F10` closes the active tab (asking first).
 
+## Counting files and steps
+
+`:count` is cian's built-in kazoechao: it tallies files, lines and **steps**
+(source lines) under the target — the marked entries if any, otherwise the
+active pane's whole directory tree — on a worker thread, and shows the total
+plus a per-extension breakdown. `.git`/`.svn`/`.hg` and binary files are skipped.
+
+What a "step" is comes from `count.lua`: which `extensions` to include (omit for
+every text file), whether `count_blank` / `count_comments` fold those lines into
+the step total (both off = SLOC), and the `comment_prefixes` that mark a comment
+line. It is portable-aware like the rest of the config; see
+[`examples/count.lua`](examples/count.lua).
+
 ## Macros
 
 A **layout macro** builds a whole shell working-set in one keystroke: split the

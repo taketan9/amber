@@ -44,6 +44,7 @@ mod ssh;
 mod gitui;
 mod commands;
 mod actions;
+mod count;
 mod macro_run;
 mod mouse;
 mod menu;
@@ -1309,6 +1310,10 @@ pub struct App {
     macro_error: Option<String>,
     /// A layout macro currently building itself out across ticks.
     macro_run: Option<macro_run::MacroRun>,
+    /// File/step-counter settings from `count.lua` (portable-aware).
+    count_opts: cian_core::count::Options,
+    /// A running count, delivering its report when finished.
+    count_job: Option<std::sync::mpsc::Receiver<cian_core::count::Report>>,
     pending_g: bool,
     /// When true, only the focused surface is drawn, filling the window.
     pub zoomed: bool,
@@ -1345,6 +1350,7 @@ impl App {
         left_pane.set_show_hidden(show_hidden);
         right_pane.set_show_hidden(show_hidden);
         let (macros, macro_error) = macro_run::load_macros();
+        let count_opts = count::load_count_opts();
         Ok(Self {
             left: PaneTabs::single(left_pane),
             right: PaneTabs::single(right_pane),
@@ -1425,6 +1431,8 @@ impl App {
             macros,
             macro_error,
             macro_run: None,
+            count_opts,
+            count_job: None,
             pending_g: false,
             zoomed: false,
             debug_keys: std::env::var("CIAN_DEBUG_KEYS").is_ok(),
@@ -2389,6 +2397,7 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry("Shift+P", Some(CopyFileRef), "copy file(s) to clipboard", "ファイルをクリップボードにコピー"),
                 entry("s", Some(Shortcuts), "shortcuts menu", "ショートカットメニュー"),
                 entry("@", None, "run a macro (layout builder; also :macros)", "マクロを実行（レイアウト構築；:macros でも）"),
+                entry(":count", None, "count files & steps (marked, or the whole tree)", "ファイル・ステップ数を数える（マーク or ツリー全体）"),
                 entry(":hidden", None, "show / hide dotfiles (also right-click)", "ドットファイルの表示切替（右クリックでも）"),
                 entry(":attr", None, "attributes;  :chmod 644,  :readonly on|off", "属性；  :chmod 644,  :readonly on|off"),
                 entry(":hash", None, "checksum;  :hash md5  /  :hash sha256", "チェックサム；  :hash md5  /  :hash sha256"),
@@ -2782,6 +2791,10 @@ fn run_loop<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Result<()>
         // Advance a running layout macro (splits, colours, commands) once the
         // shell is idle between spawns.
         if app.macro_run.is_some() && app.tick_macro() {
+            needs_redraw = true;
+        }
+        // A finished file/step count shows its report.
+        if app.count_job.is_some() && app.poll_count() {
             needs_redraw = true;
         }
         // A connection picked before the shell finished starting.

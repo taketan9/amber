@@ -1261,10 +1261,11 @@ impl App {
         }
         self.keymap = keymap;
 
-        // Re-read macro.lua and shortcuts too, so `:reload` picks them up.
+        // Re-read macro.lua, count.lua and shortcuts too, so `:reload` picks them up.
         let (macros, macro_error) = crate::macro_run::load_macros();
         self.macros = macros;
         self.macro_error = macro_error;
+        self.count_opts = crate::count::load_count_opts();
         self.shortcuts = ShortcutStore::load_or_default();
 
         // Live-applicable options.

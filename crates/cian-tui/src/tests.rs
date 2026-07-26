@@ -163,6 +163,39 @@
     }
 
     #[test]
+    fn count_reports_files_and_steps() {
+        let (d, mut app) = app_with(&[]);
+        std::fs::write(d.path().join("a.rs"), "fn main() {}\n\n// note\nlet x = 1;\n").unwrap();
+        std::fs::write(d.path().join("b.rs"), "let y = 2;\n").unwrap();
+        std::fs::write(d.path().join("skip.txt"), "not counted\n").unwrap();
+        app.count_opts = cian_core::count::Options {
+            extensions: vec!["rs".into()],
+            ..Default::default()
+        };
+        // Reload the pane so the new files are listed, then count the directory.
+        app.reload_both();
+        app.start_count();
+        assert!(app.count_job.is_some(), "count started on a worker");
+
+        // Wait for the worker, then let poll install the report.
+        for _ in 0..200 {
+            if app.poll_count() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        match &app.popup {
+            Popup::Notice { lines } => {
+                let text = lines.join("\n");
+                assert!(text.contains("2"), "two rs files: {text}");
+                assert!(text.to_lowercase().contains("step"), "shows a step line: {text}");
+                assert!(!text.contains("not counted"), "txt excluded");
+            }
+            _ => panic!("no count notice: {:?}", app.popup),
+        }
+    }
+
+    #[test]
     fn a_macro_can_be_started_by_name() {
         // Backs the `--macro-name` startup option.
         let (_d, mut app) = app_with(&["a.txt"]);
