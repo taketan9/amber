@@ -383,10 +383,18 @@ You can act on the selection without leaving cian:
 - `:unstage` (`:reset`) — `git reset HEAD`, keeping the worktree changes.
 - `:discard` (`:revert`) — `git checkout --` to throw away worktree changes to
   tracked files; it confirms first, since that cannot be undone.
+- `:gitlog` — the commit log in a scrollable popup (the selected file's *history*
+  when the cursor is on a tracked file, otherwise the whole repo). `Enter` on a
+  commit shows its diff in the viewer.
+- `:gitdiff` — the selected file's working-tree changes versus HEAD, in the
+  viewer (scrollable, searchable, copyable).
+- In the F3 viewer, **`B`** toggles a **blame** gutter — the short hash, author
+  and date of the commit that last touched each line, so "who changed this, and
+  when" is right there.
 
-The same three are under right-click **Git ▸** (shown only in a repo), and the
-AI can draft a commit message from the staged diff (see below). cian shells out
-to the `git` on your PATH — there is no library dependency to keep the binary
+All of these are under right-click **Git ▸** (shown only in a repo), and the AI
+can draft a commit message from the staged diff (see below). cian shells out to
+the `git` on your PATH — there is no library dependency to keep the binary
 self-contained.
 
 ## Going to a path

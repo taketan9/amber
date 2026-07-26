@@ -585,6 +585,27 @@ impl App {
             }
             return Ok(());
         }
+        if let Popup::GitLog { commits, cursor, scroll, dir, .. } = &mut self.popup {
+            let n = commits.len().max(1);
+            match key.code {
+                KeyCode::Esc | KeyCode::Char('q') => self.popup = Popup::None,
+                KeyCode::Char('j') | KeyCode::Down => *cursor = (*cursor + 1).min(n - 1),
+                KeyCode::Char('k') | KeyCode::Up => *cursor = cursor.saturating_sub(1),
+                KeyCode::Char('g') | KeyCode::Home => *cursor = 0,
+                KeyCode::Char('G') | KeyCode::End => *cursor = n - 1,
+                KeyCode::Enter => {
+                    let hash = commits.get(*cursor).map(|c| c.hash.clone());
+                    let dir = dir.clone();
+                    if let Some(h) = hash {
+                        self.git_show_commit(&h, &dir);
+                    }
+                }
+                _ => {
+                    let _ = scroll;
+                }
+            }
+            return Ok(());
+        }
         if let Popup::Macros { cursor, names } = &mut self.popup {
             let n = names.len().max(1);
             match key.code {

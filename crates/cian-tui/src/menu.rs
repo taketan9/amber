@@ -131,6 +131,8 @@ impl App {
                 MenuItem::GitStage,
                 MenuItem::GitUnstage,
                 MenuItem::GitDiscard,
+                MenuItem::GitDiff,
+                MenuItem::GitHistory,
                 MenuItem::Back,
             ]),
             MenuItem::WindowMenu => {
@@ -337,6 +339,8 @@ impl App {
             MenuItem::GitStage => self.git_stage(),
             MenuItem::GitUnstage => self.git_unstage(),
             MenuItem::GitDiscard => self.git_discard_prompt(),
+            MenuItem::GitHistory => self.start_git_log(),
+            MenuItem::GitDiff => self.git_diff_file(),
             MenuItem::Shortcuts => self.start_shortcuts(),
             MenuItem::Lang => {
                 // Flip the interface language; every localized string reads

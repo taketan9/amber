@@ -4366,6 +4366,61 @@
     }
 
     #[test]
+    fn git_log_diff_and_blame() {
+        use std::process::Command;
+        let d = tempfile::tempdir().unwrap();
+        let dir = std::fs::canonicalize(d.path()).unwrap();
+        let ok = Command::new("git").arg("-C").arg(&dir).args(["init", "-q"]).status()
+            .map(|s| s.success()).unwrap_or(false);
+        if !ok {
+            eprintln!("git not available; skipping");
+            return;
+        }
+        for kv in [["user.email", "t@e.com"], ["user.name", "Alice"], ["core.autocrlf", "false"]] {
+            let _ = Command::new("git").arg("-C").arg(&dir).args(["config", kv[0], kv[1]]).status();
+        }
+        std::fs::write(dir.join("f.rs"), "let a = 1;\nlet b = 2;\n").unwrap();
+        Command::new("git").arg("-C").arg(&dir).args(["add", "."]).status().unwrap();
+        Command::new("git").arg("-C").arg(&dir).args(["commit", "-qm", "seed"]).status().unwrap();
+
+        let mut app = App::new(dir.clone(), dir.clone(), cian_lua::Config::default()).unwrap();
+        // Give the pane's git status a moment (ensure_git runs in the loop; call it).
+        app.ensure_git();
+        app.active_pane_mut().unwrap().cursor =
+            app.active_pane().unwrap().entries.iter().position(|e| e.name == "f.rs").unwrap();
+
+        // History → a GitLog popup with the seed commit; Enter shows its diff.
+        app.start_git_log();
+        match &app.popup {
+            Popup::GitLog { commits, .. } => assert_eq!(commits[0].subject, "seed"),
+            _ => panic!("no git log popup"),
+        }
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+        assert!(matches!(app.popup, Popup::Viewer { .. }), "commit diff opens in the viewer");
+        app.handle_key(code(KeyCode::Esc)).unwrap();
+
+        // Diff vs HEAD after an edit.
+        std::fs::write(dir.join("f.rs"), "let a = 1;\nlet B = 2;\n").unwrap();
+        let _ = app.active_file_tabs_mut().map(|t| t.active_mut().reload());
+        app.active_pane_mut().unwrap().cursor =
+            app.active_pane().unwrap().entries.iter().position(|e| e.name == "f.rs").unwrap();
+        app.git_diff_file();
+        match &app.popup {
+            Popup::Viewer { view, .. } => assert!(view.lines.join("\n").contains("+let B = 2;"), "diff shown"),
+            _ => panic!("diff did not open"),
+        }
+        app.handle_key(code(KeyCode::Esc)).unwrap();
+
+        // F3 then B toggles blame.
+        app.handle_key(code(KeyCode::F(3))).unwrap();
+        app.handle_key(KeyEvent::new(KeyCode::Char('B'), KeyModifiers::SHIFT)).unwrap();
+        match &app.popup {
+            Popup::Viewer { blame, .. } => assert!(!blame.is_empty(), "blame computed"),
+            _ => panic!("not a viewer"),
+        }
+    }
+
+    #[test]
     fn f3_syntax_highlights_recognised_code() {
         let d = tempfile::tempdir().unwrap();
         std::fs::write(d.path().join("a.rs"), "fn main() {\n    let x = 1; // hi\n}\n").unwrap();

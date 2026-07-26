@@ -238,6 +238,15 @@ enum Popup {
     /// The macro launcher: pick a macro from `macro.lua` to run. Names are held
     /// here so the renderer stays independent of `App`.
     Macros { cursor: usize, names: Vec<String> },
+    /// A git commit log (repo-wide or one file's history). Enter shows the
+    /// selected commit's diff in the viewer.
+    GitLog {
+        title: String,
+        dir: PathBuf,
+        commits: Vec<cian_core::git::Commit>,
+        cursor: usize,
+        scroll: usize,
+    },
     /// An image shown as half-block cells (works in any 24-bit terminal). The
     /// decoded grid is cached for the size it was last drawn at; a resize or a
     /// decode failure updates it in the render.
@@ -298,6 +307,9 @@ enum Popup {
         /// The inner width the preview was last wrapped to, so the render can
         /// tell when a resize means it must re-render.
         md_width: u16,
+        /// Per-line git blame, shown as a left gutter when non-empty. Toggled
+        /// with `B`; empty means off.
+        blame: Vec<cian_core::git::BlameLine>,
         /// Syntax-highlight language for this file, if recognised. Drives the
         /// per-character colours in source (non-preview) mode.
         hl_lang: Option<cian_core::highlight::Lang>,
@@ -552,6 +564,10 @@ enum MenuItem {
     GitUnstage,
     /// `git checkout --` the selection (discard worktree changes).
     GitDiscard,
+    /// The commit log (repo, or the selected file's history).
+    GitHistory,
+    /// The selected file's working-tree diff vs HEAD.
+    GitDiff,
     /// Open the shortcuts / bookmarks menu (the `s` key).
     Shortcuts,
     /// A submenu grouping the compress-to-archive actions.
@@ -656,6 +672,8 @@ impl MenuItem {
             MenuItem::GitStage => tr(lang, "Stage  (git add)", "ステージ  (git add)"),
             MenuItem::GitUnstage => tr(lang, "Unstage  (git reset)", "アンステージ  (git reset)"),
             MenuItem::GitDiscard => tr(lang, "Discard changes  (git checkout)", "変更を破棄  (git checkout)"),
+            MenuItem::GitHistory => tr(lang, "History / log  (git log)", "履歴 / ログ  (git log)"),
+            MenuItem::GitDiff => tr(lang, "Diff vs HEAD  (git diff)", "HEADとの差分  (git diff)"),
             MenuItem::Shortcuts => tr(lang, "Shortcuts  (s)", "ショートカット  (s)"),
             MenuItem::AiMenu => tr(lang, "AI ▸", "AI ▸"),
             MenuItem::SendMenu => tr(lang, "Transfer ▸", "転送 ▸"),
@@ -2479,6 +2497,7 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry("  edit in viewer", None, "i = built-in editor (Ctrl+S save, Esc/Q leave), E = external", "ビューア内編集：i 内蔵（Ctrl+S 保存, Esc/Q 終了）／ E 外部エディタ"),
                 entry(":edit", None, "edit the file in your external editor (E in the viewer)", "外部エディタで編集（ビューア内は E）"),
                 entry("  in viewer", None, "hjkl move, /n/N search, %/{/}/NG jump, v/V/C-v select y copy", "ビューア内：hjkl移動, /n/N検索, %/{/}/NG移動, v/V/C-v選択 yコピー"),
+                entry("  B in viewer", None, "toggle the git blame gutter (who last changed each line)", "ビューア内：git blame ガター切替（各行の最終変更者）"),
                 entry("  from a grep hit", None, "Ctrl+n/N next/prev hit, Shift+Enter reveal in pane, e encoding", "grepヒットから：Ctrl+n/N 次/前, Shift+Enter 場所へ, e 文字コード"),
                 entry("=", None, "compare left ↔ right: two files (line diff), or two folders (recursive)", "左右を比較：ファイル同士（行差分）／フォルダ同士（再帰）"),
                 entry("-, Bksp", Some(Parent), "parent folder", "親フォルダへ"),
@@ -2526,6 +2545,8 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry(":hash", None, "checksum;  :hash md5  /  :hash sha256", "チェックサム；  :hash md5  /  :hash sha256"),
                 entry(":stage / :unstage", None, "git add / git reset the selection (in a repo)", "選択を git add / git reset（リポジトリ内）"),
                 entry(":discard", None, "git checkout -- : throw away worktree changes", "git checkout -- ：作業ツリーの変更を破棄"),
+                entry(":gitlog", None, "commit log / a file's history (also right-click Git ▸)", "コミットログ／ファイル履歴（右クリック Git ▸ でも）"),
+                entry(":gitdiff", None, "the selected file's diff vs HEAD (also right-click)", "選択ファイルの HEAD との差分（右クリックでも）"),
                 entry("right-click", None, "upload/download to a configured host (SFTP or SCP)", "設定したホストへアップ／ダウンロード（SFTP/SCP）"),
                 entry("M / Shift+Enter", Some(Menu), "context menu for the entry (also :menu)", "エントリのコンテキストメニュー（:menu でも）"),
             ],

@@ -298,9 +298,11 @@ pub(crate) fn draw(f: &mut Frame, app: &mut App) {
         }
         // And the viewer's text body, so a drag maps to a line — plus the
         // line-number gutter width, so it maps to a char column too.
-        if let Popup::Viewer { view, preview, .. } = &app.popup {
+        if let Popup::Viewer { view, preview, blame, editing, .. } = &app.popup {
             app.viewer_rect = viewer_body_rect(area);
-            app.viewer_gutter = if !*preview && view.kind == cian_core::viewer::ViewKind::Text {
+            app.viewer_gutter = if !blame.is_empty() && !*preview && !*editing {
+                BLAME_W as u16
+            } else if !*preview && view.kind == cian_core::viewer::ViewKind::Text {
                 (format!("{}", view.lines.len()).len().max(3) + 1) as u16
             } else {
                 0
@@ -1636,6 +1638,9 @@ fn draw_image(f: &mut Frame, area: Rect, app: &mut App) {
     );
 }
 
+/// Width of the viewer's blame gutter: `hash(7) + " " + author(11) + " "`.
+const BLAME_W: usize = 20;
+
 /// Colour for a syntax-highlight category (a VS Code-dark-ish palette).
 fn hl_style(cat: cian_core::highlight::Category) -> Style {
     use cian_core::highlight::Category as C;
@@ -2603,7 +2608,7 @@ fn draw_popup(
         return;
     }
 
-    if let Popup::Viewer { title, view, scroll, line, col, visual, anchor, find_input, find_query, git_lines, markdown, preview, source, md_styles, md_width, editing, dirty, editable, hl, hl_lang, .. } = popup {
+    if let Popup::Viewer { title, view, scroll, line, col, visual, anchor, find_input, find_query, git_lines, markdown, preview, source, md_styles, md_width, editing, dirty, editable, hl, hl_lang, blame, .. } = popup {
         let w = area.width.saturating_sub(4);
         let h = area.height.saturating_sub(2);
         let rect = centered_rect(w, h, area);
@@ -2688,9 +2693,13 @@ fn draw_popup(
         }
 
         // Line numbers and the git change bar belong to the source only; the
-        // rendered preview is a document, not a file listing.
-        let numbered = !*preview && view.kind == cian_core::viewer::ViewKind::Text;
-        let gutter = if numbered {
+        // rendered preview is a document, not a file listing. The blame gutter,
+        // when on, takes the left column instead of line numbers.
+        let show_blame = !blame.is_empty() && !*preview && !*editing;
+        let numbered = !*preview && !show_blame && view.kind == cian_core::viewer::ViewKind::Text;
+        let gutter = if show_blame {
+            BLAME_W
+        } else if numbered {
             format!("{}", view.lines.len()).len().max(3) + 1
         } else {
             0
@@ -2781,6 +2790,25 @@ fn draw_popup(
                 };
                 // Build the body char-by-char, merging same-styled runs.
                 let mut spans: Vec<Span> = Vec::new();
+                if show_blame {
+                    // "hash author……" per line, dimmed; a run of the same commit
+                    // reads as one block.
+                    let (hash, who) = blame
+                        .get(i)
+                        .map(|b| (b.hash.as_str(), b.author.as_str()))
+                        .unwrap_or(("", ""));
+                    let who: String = who.chars().take(11).collect();
+                    let same_as_prev = i > 0 && blame.get(i - 1).map(|p| p.hash.as_str()) == Some(hash);
+                    let (shown_hash, shown_who) = if same_as_prev {
+                        (String::new(), String::new()) // repeat block: leave blank
+                    } else {
+                        (hash.to_string(), who)
+                    };
+                    spans.push(Span::styled(
+                        format!("{:<7} {:<11} ", shown_hash, shown_who),
+                        Style::default().fg(Color::Rgb(120, 120, 145)),
+                    ));
+                }
                 if numbered {
                     // The line number, then a 1-column separator that doubles as
                     // the git change bar (green added / amber modified / red for
@@ -3147,6 +3175,56 @@ fn draw_popup(
         return;
     }
 
+    if let Popup::GitLog { title, commits, cursor, scroll, .. } = popup {
+        let rect = centered_rect(area.width.saturating_sub(4), area.height.saturating_sub(4), area);
+        f.render_widget(Clear, rect);
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_type(border_type())
+            .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
+            .title(format!(" {} ", title))
+            .title_bottom(tr(lang, " Enter=show diff  j/k  g/G  Esc ", " Enter=差分表示  j/k  g/G  Esc "));
+        let inner = rect.inner(Margin { vertical: 1, horizontal: 1 });
+        f.render_widget(block, rect);
+        let body_h = inner.height as usize;
+        if *cursor < *scroll {
+            *scroll = *cursor;
+        } else if *cursor >= *scroll + body_h {
+            *scroll = *cursor + 1 - body_h;
+        }
+        let hash_w = 8usize;
+        let date_w = 10usize;
+        let author_w = 14usize;
+        let subj_w = (inner.width as usize).saturating_sub(hash_w + date_w + author_w + 3);
+        let rows: Vec<Line> = commits
+            .iter()
+            .enumerate()
+            .skip(*scroll)
+            .take(body_h)
+            .map(|(i, c)| {
+                let sel = i == *cursor;
+                let author: String = c.author.chars().take(author_w).collect();
+                let subject: String = c.subject.chars().take(subj_w).collect();
+                let line = format!(
+                    "{:<hw$} {:<dw$} {:<aw$} {}",
+                    c.hash, c.date, author, subject,
+                    hw = hash_w, dw = date_w, aw = author_w,
+                );
+                let style = if sel {
+                    Style::default().fg(Color::Black).bg(theme().accent)
+                } else {
+                    Style::default().fg(Color::Rgb(200, 200, 215))
+                };
+                Line::from(Span::styled(line, style))
+            })
+            .collect();
+        for i in 0..commits.len().min(body_h) {
+            push_row_zone(zones, inner, inner.y + i as u16, *scroll + i);
+        }
+        f.render_widget(Paragraph::new(rows), inner);
+        return;
+    }
+
     if let Popup::Macros { cursor, names } = popup {
         let widest = names.iter().map(|n| n.chars().count()).max().unwrap_or(10);
         let w = (widest as u16 + 8).clamp(28, area.width);
@@ -3493,6 +3571,7 @@ fn draw_popup(
         | Popup::ColorPicker { .. }
         | Popup::SortPicker { .. }
         | Popup::Macros { .. }
+        | Popup::GitLog { .. }
         | Popup::EncodingPicker { .. }
         | Popup::SshHosts { .. }
         | Popup::SshUsers { .. }

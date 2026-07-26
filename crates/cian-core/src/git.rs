@@ -238,6 +238,106 @@ pub fn staged_stat(dir: &Path) -> Option<String> {
     Some(String::from_utf8_lossy(&out).trim_end().to_string())
 }
 
+/// One commit in a log listing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Commit {
+    /// Short hash.
+    pub hash: String,
+    /// Author date, `YYYY-MM-DD`.
+    pub date: String,
+    pub author: String,
+    pub subject: String,
+}
+
+/// Recent commits, newest first (up to `limit`). `path`, when given, limits the
+/// log to commits that touched that file.
+pub fn log(dir: &Path, path: Option<&Path>, limit: usize) -> Vec<Commit> {
+    let n = format!("-{}", limit.max(1));
+    // Unit-separator (0x1f) between fields survives any subject text.
+    let mut args: Vec<String> = vec![
+        "log".into(),
+        "--no-color".into(),
+        "--date=short".into(),
+        "--pretty=format:%h\u{1f}%ad\u{1f}%an\u{1f}%s".into(),
+        n,
+    ];
+    let path_str;
+    if let Some(path) = path {
+        args.push("--".into());
+        path_str = path.to_string_lossy().into_owned();
+        args.push(path_str);
+    }
+    let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
+    let Some(out) = git_output(dir, &arg_refs) else { return Vec::new() };
+    String::from_utf8_lossy(&out)
+        .lines()
+        .filter_map(|line| {
+            let mut f = line.split('\u{1f}');
+            Some(Commit {
+                hash: f.next()?.to_string(),
+                date: f.next()?.to_string(),
+                author: f.next()?.to_string(),
+                subject: f.next().unwrap_or("").to_string(),
+            })
+        })
+        .collect()
+}
+
+/// The working-tree changes of `file` versus HEAD, as a unified diff (empty when
+/// there are none).
+pub fn file_diff(dir: &Path, file: &Path) -> Option<String> {
+    let out = git_output(dir, &["diff", "HEAD", "--no-color", "--", &file.to_string_lossy()])?;
+    Some(String::from_utf8_lossy(&out).into_owned())
+}
+
+/// A commit shown as a unified diff (`git show <hash>`).
+pub fn show(dir: &Path, hash: &str) -> Option<String> {
+    let out = git_output(dir, &["show", "--no-color", hash])?;
+    Some(String::from_utf8_lossy(&out).into_owned())
+}
+
+/// One line's blame: short commit hash, author, and date.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct BlameLine {
+    pub hash: String,
+    pub author: String,
+    pub date: String,
+}
+
+/// Per-line blame for `file`, one entry per line in order. `None` when the file
+/// is not tracked or git failed. Uncommitted lines blame to a zero hash and
+/// "Not Committed Yet".
+pub fn blame(dir: &Path, file: &Path) -> Option<Vec<BlameLine>> {
+    let out = git_output(dir, &["blame", "--line-porcelain", "--", &file.to_string_lossy()])?;
+    let text = String::from_utf8_lossy(&out);
+    let mut lines = Vec::new();
+    let (mut hash, mut author, mut date) = (String::new(), String::new(), String::new());
+    for line in text.lines() {
+        if let Some(rest) = line.strip_prefix("author ") {
+            author = rest.to_string();
+        } else if let Some(rest) = line.strip_prefix("author-time ") {
+            if let Some(d) = rest.trim().parse::<i64>().ok().and_then(epoch_ymd) {
+                date = d;
+            }
+        } else if line.starts_with('\t') {
+            // The content line closes a group; commit the accumulated blame.
+            lines.push(BlameLine { hash: hash.clone(), author: author.clone(), date: date.clone() });
+        } else {
+            // A group header: "<40-hex> <orig> <final> [count]".
+            let first = line.split(' ').next().unwrap_or("");
+            if first.len() >= 7 && first.bytes().all(|b| b.is_ascii_hexdigit()) {
+                hash = first[..7].to_string(); // match `git log %h`
+            }
+        }
+    }
+    Some(lines)
+}
+
+/// A unix timestamp as `YYYY-MM-DD`.
+fn epoch_ymd(ts: i64) -> Option<String> {
+    chrono::DateTime::from_timestamp(ts, 0).map(|d| d.format("%Y-%m-%d").to_string())
+}
+
 /// Commit the staged changes with `message`. Fails if nothing is staged or the
 /// commit is rejected (e.g. a hook, or a missing identity); the git error text
 /// is returned so it can be shown in-app. Output is captured, never printed, so
@@ -492,6 +592,46 @@ mod tests {
         let mn = line_changes(dir, &n).unwrap();
         assert_eq!(mn.get(&0), Some(&LineChange::Added));
         assert_eq!(mn.get(&1), Some(&LineChange::Added));
+    }
+
+    #[test]
+    fn log_blame_and_file_diff() {
+        let d = tempfile::tempdir().unwrap();
+        let dir = &std::fs::canonicalize(d.path()).unwrap();
+        let init_ok = Command::new("git").arg("-C").arg(dir).args(["init", "-q"]).status()
+            .map(|s| s.success()).unwrap_or(false);
+        if !init_ok {
+            eprintln!("git not available; skipping");
+            return;
+        }
+        for kv in [["user.email", "t@e.com"], ["user.name", "Alice"], ["core.autocrlf", "false"]] {
+            let _ = Command::new("git").arg("-C").arg(dir).args(["config", kv[0], kv[1]]).status();
+        }
+        let f = dir.join("f.txt");
+        std::fs::write(&f, "one\ntwo\n").unwrap();
+        Command::new("git").arg("-C").arg(dir).args(["add", "."]).status().unwrap();
+        Command::new("git").arg("-C").arg(dir).args(["commit", "-qm", "first commit"]).status().unwrap();
+
+        // log lists the commit.
+        let commits = log(dir, None, 10);
+        assert_eq!(commits.len(), 1);
+        assert_eq!(commits[0].subject, "first commit");
+        assert_eq!(commits[0].author, "Alice");
+        assert!(commits[0].date.len() == 10, "YYYY-MM-DD");
+
+        // blame attributes both committed lines to Alice.
+        let b = blame(dir, &f).expect("blame");
+        assert_eq!(b.len(), 2);
+        assert_eq!(b[0].author, "Alice");
+        assert_eq!(b[0].hash, commits[0].hash);
+
+        // file_diff shows a working-tree change vs HEAD.
+        std::fs::write(&f, "one\nTWO\n").unwrap();
+        let diff = file_diff(dir, &f).expect("diff");
+        assert!(diff.contains("-two") && diff.contains("+TWO"), "unified diff: {diff}");
+        // Uncommitted line now blames to the zero hash.
+        let b2 = blame(dir, &f).unwrap();
+        assert!(b2[1].hash.starts_with("0000"), "line 2 is not committed yet: {:?}", b2[1]);
     }
 
     /// The staged diff feeds the AI commit-message feature; commit clears it.

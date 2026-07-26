@@ -553,6 +553,7 @@ impl App {
             | Popup::ColorPicker { cursor, .. }
             | Popup::SortPicker { cursor, .. }
             | Popup::Macros { cursor, .. }
+            | Popup::GitLog { cursor, .. }
             | Popup::EncodingPicker { cursor, .. }
             | Popup::DirCompare { cursor, .. }
             | Popup::Archive { cursor, .. }

@@ -535,6 +535,7 @@ impl App {
                     source,
                     md_styles: Vec::new(),
                     md_width: 0,
+                    blame: Vec::new(),
                     hl_lang,
                     hl: Vec::new(),
                     // A real text file (not a hex dump) can be edited in place.
@@ -589,6 +590,7 @@ impl App {
                     source,
                     md_styles: Vec::new(),
                     md_width: 0,
+                    blame: Vec::new(),
                     hl_lang: None,
                     hl: Vec::new(),
                     // Extracted document text is not the file on disk; read-only.

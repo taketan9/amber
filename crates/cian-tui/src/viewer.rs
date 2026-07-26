@@ -133,6 +133,11 @@ impl App {
             self.popup = Popup::None;
             return Ok(());
         }
+        // `B` toggles the git blame gutter.
+        if !ctrl && key.code == KeyCode::Char('B') {
+            self.toggle_viewer_blame();
+            return Ok(());
+        }
         // `/`, `f` and `Shift+F` all open the search prompt (the pane's own
         // find keys, so the reflex carries over into the viewer and preview).
         if !ctrl && matches!(key.code, KeyCode::Char('/') | KeyCode::Char('f') | KeyCode::Char('F')) {

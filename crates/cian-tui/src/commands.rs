@@ -65,6 +65,8 @@ impl App {
             "stage" | "add" => self.git_stage(),
             "unstage" | "reset" => self.git_unstage(),
             "discard" | "revert" | "checkout" => self.git_discard_prompt(),
+            "gitlog" | "log" | "history" => self.start_git_log(),
+            "gitdiff" | "gdiff" => self.git_diff_file(),
             "aicommit" | "commitmsg" => self.start_ai_commit_message(),
             "aijunk" | "junk" => self.start_ai_junk(),
             "aiorganize" | "aistructure" | "organize" => self.start_ai_structure(),
