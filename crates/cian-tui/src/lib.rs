@@ -2202,19 +2202,20 @@ struct FileClipboard {
 /// to be unmistakable at a glance rather than tasteful — an earlier, subtler
 /// set failed at exactly that. Still dark enough to keep normal terminal
 /// foreground colors readable on top.
-/// Evenly spaced around the hue wheel at a fixed, low brightness, so no two
-/// are confusable and all keep foreground text readable. Verified by
-/// `the_palette_is_distinct_enough_to_tell_panes_apart`.
+/// Saturated hues spaced around the wheel, pushed as strong as they can go
+/// while foreground text stays readable (luminance kept under 90). Blue carries
+/// little luminance, so blues can run brightest; greens are held back most.
+/// Verified by `the_palette_is_distinct_enough_to_tell_panes_apart`.
 const PANE_BG_PRESETS: [(&str, Option<Color>); 9] = [
     ("default", None),
-    ("navy", Some(Color::Rgb(17, 45, 87))),
-    ("teal", Some(Color::Rgb(17, 87, 69))),
-    ("forest", Some(Color::Rgb(25, 87, 17))),
-    ("olive", Some(Color::Rgb(85, 87, 17))),
-    ("rust", Some(Color::Rgb(87, 29, 17))),
-    ("wine", Some(Color::Rgb(87, 17, 65))),
-    ("plum", Some(Color::Rgb(49, 17, 87))),
-    ("slate", Some(Color::Rgb(62, 69, 87))),
+    ("navy", Some(Color::Rgb(10, 40, 140))),
+    ("teal", Some(Color::Rgb(10, 105, 105))),
+    ("forest", Some(Color::Rgb(20, 110, 20))),
+    ("olive", Some(Color::Rgb(108, 88, 10))),
+    ("rust", Some(Color::Rgb(140, 45, 15))),
+    ("wine", Some(Color::Rgb(135, 15, 80))),
+    ("plum", Some(Color::Rgb(75, 15, 140))),
+    ("slate", Some(Color::Rgb(70, 85, 120))),
 ];
 
 /// What a close-confirmation popup will close when accepted.
