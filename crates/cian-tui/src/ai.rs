@@ -125,10 +125,45 @@ impl App {
         self.ai_request(AiPurpose::Chat, system, body);
     }
 
+    /// Precondition facts to feed the model: the `cian.ai_context{...}` facts
+    /// from init.lua, plus the connected server's `notes` when the active shell
+    /// is on a known SSH host. Empty when nothing is configured.
+    pub(crate) fn ai_context_block(&self) -> String {
+        let mut facts: Vec<String> = self.config.ai_context.clone();
+        // The server the active shell is logged into, matched to a configured
+        // host so its recorded OS / middleware / versions can be handed over.
+        if let Some(host) = self.shell.active_title().and_then(|t| host_from_title(&t)) {
+            for h in &self.config.ssh_hosts {
+                if h.host == host || h.name == host {
+                    if let Some(notes) = &h.notes {
+                        facts.push(format!("The server '{}' ({}): {}", h.name, h.host, notes));
+                    }
+                }
+            }
+        }
+        if facts.is_empty() {
+            return String::new();
+        }
+        let mut s = String::from("Context about the user's environment you can rely on:\n");
+        for f in &facts {
+            s.push_str("- ");
+            s.push_str(f);
+            s.push('\n');
+        }
+        s
+    }
+
     /// Fire an AI request on a worker thread, tagged with what to do with the
     /// reply. Only one runs at a time.
     pub(crate) fn ai_request(&mut self, purpose: AiPurpose, system: String, user: String) {
         let Some(cfg) = self.ai.clone() else { return };
+        // Prepend the user's environment facts so every purpose benefits.
+        let context = self.ai_context_block();
+        let system = if context.is_empty() {
+            system
+        } else {
+            format!("{}\n{}", context, system)
+        };
         if self.ai_job.is_some() {
             self.message = Some("AI is busy".into());
             return;

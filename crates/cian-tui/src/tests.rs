@@ -111,6 +111,20 @@
     }
 
     #[test]
+    fn ai_context_facts_are_folded_into_prompts() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        // No facts configured → no context block.
+        assert!(app.ai_context_block().is_empty());
+
+        // Global facts from cian.ai_context appear as bullet points.
+        app.config.ai_context = vec!["The panes browse RHEL 8.".into(), "Prefer POSIX sh.".into()];
+        let block = app.ai_context_block();
+        assert!(block.contains("Context about the user's environment"));
+        assert!(block.contains("- The panes browse RHEL 8."));
+        assert!(block.contains("- Prefer POSIX sh."));
+    }
+
+    #[test]
     fn the_macro_launcher_opens_and_starts_a_run() {
         let (_d, mut app) = app_with(&["a.txt"]);
         // Start from a known-empty set (the dev machine may have a real macro.lua).
@@ -1590,6 +1604,7 @@
             host: "10.0.1.11".into(),
             users: vec![cian_lua::SshUser::plain("root")],
             port: None,
+            notes: None,
         }];
         let p = d.path().to_path_buf();
         let mut app = App::new(p.clone(), p, config).unwrap();
@@ -2241,6 +2256,7 @@
                 host: "10.0.1.11".into(),
                 users: vec![cian_lua::SshUser::plain("root"), cian_lua::SshUser::plain("deploy")],
                 port: None,
+                notes: None,
             },
             cian_lua::SshHost {
                 name: "db1".into(),
@@ -2251,6 +2267,7 @@
                     password_cmd: None,
                 }],
                 port: Some(2222),
+                notes: None,
             },
         ];
         let p = dir.path().to_path_buf();

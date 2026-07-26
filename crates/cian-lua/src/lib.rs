@@ -130,6 +130,9 @@ pub struct SshHost {
     pub host: String,
     pub users: Vec<SshUser>,
     pub port: Option<u16>,
+    /// Free-text facts about this server (OS, installed middleware, versions),
+    /// fed to the AI as context when a shell is connected here. `None` = none.
+    pub notes: Option<String>,
 }
 
 /// AI settings from `cian.ai{...}`. Presence enables the (optional) AI
@@ -171,6 +174,8 @@ struct Builder {
     ext_open: HashMap<String, Function>,
     ssh_hosts: Vec<SshHost>,
     ai: Option<AiOptions>,
+    /// Precondition facts about the environment, fed to every AI prompt.
+    ai_context: Vec<String>,
     errors: Vec<String>,
 }
 
@@ -189,6 +194,9 @@ pub struct Config {
     pub ssh_hosts: Vec<SshHost>,
     /// AI settings declared with `cian.ai{...}`, if any.
     pub ai: Option<AiOptions>,
+    /// Precondition facts declared with `cian.ai_context{...}`, prepended to
+    /// every AI prompt so answers assume the user's actual environment.
+    pub ai_context: Vec<String>,
     /// Non-fatal problems collected while loading (surfaced in a notice popup).
     pub errors: Vec<String>,
     ext_open: HashMap<String, Function>,
@@ -381,7 +389,7 @@ fn load_from(path: &Path) -> Config {
 
     // Pull the accumulated config out by cloning; the Lua handles stay valid
     // because we move `lua` into the returned Config below.
-    let (theme, options, keymaps, ext_open, ssh_hosts, ai, builder_errors) = {
+    let (theme, options, keymaps, ext_open, ssh_hosts, ai, ai_context, builder_errors) = {
         let b = builder.borrow();
         (
             b.theme.clone(),
@@ -390,6 +398,7 @@ fn load_from(path: &Path) -> Config {
             b.ext_open.clone(),
             b.ssh_hosts.clone(),
             b.ai.clone(),
+            b.ai_context.clone(),
             b.errors.clone(),
         )
     };
@@ -402,6 +411,7 @@ fn load_from(path: &Path) -> Config {
         ext_open,
         ssh_hosts,
         ai,
+        ai_context,
         errors,
         _lua: Some(lua),
     }
@@ -618,7 +628,8 @@ fn install_api(lua: &Lua, builder: &Rc<RefCell<Builder>>) -> mlua::Result<()> {
                         continue;
                     }
                     let port = h.get::<Option<u16>>("port")?;
-                    bm.ssh_hosts.push(SshHost { name, host, users, port });
+                    let notes = h.get::<Option<String>>("notes")?.filter(|s| !s.trim().is_empty());
+                    bm.ssh_hosts.push(SshHost { name, host, users, port, notes });
                 }
                 Ok(())
             })?,
@@ -641,6 +652,44 @@ fn install_api(lua: &Lua, builder: &Rc<RefCell<Builder>>) -> mlua::Result<()> {
                 if let Some(v) = get("api_key") { ai.api_key = v; }
                 if let Some(v) = get("api_base_url") { ai.api_base_url = v; }
                 b.borrow_mut().ai = Some(ai);
+                Ok(())
+            })?,
+        )?;
+    }
+
+    // cian.ai_context("fact")  or  cian.ai_context{ "fact one", "fact two" }
+    //
+    // Precondition facts the AI should assume — e.g. the OS the file panes
+    // browse, the deployment target, house conventions. Prepended to every AI
+    // prompt. Additive across calls.
+    {
+        let b = builder.clone();
+        cian.set(
+            "ai_context",
+            lua.create_function(move |_, v: Value| {
+                let mut bm = b.borrow_mut();
+                match v {
+                    Value::String(s) => {
+                        let f = s.to_str()?.trim().to_string();
+                        if !f.is_empty() {
+                            bm.ai_context.push(f);
+                        }
+                    }
+                    Value::Table(t) => {
+                        for item in t.sequence_values::<String>() {
+                            let f = item?.trim().to_string();
+                            if !f.is_empty() {
+                                bm.ai_context.push(f);
+                            }
+                        }
+                    }
+                    other => {
+                        bm.errors.push(format!(
+                            "cian.ai_context: expected a string or a list of strings, got {}",
+                            other.type_name()
+                        ));
+                    }
+                }
                 Ok(())
             })?,
         )?;
@@ -713,6 +762,49 @@ fn os_open(target: &str) -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ai_context_and_host_notes_parse() {
+        let dir = tempfile::tempdir().unwrap();
+        let init = dir.path().join("init.lua");
+        std::fs::write(
+            &init,
+            r#"
+            cian.ai_context("The file panes browse a RHEL 8 NFS mount.")
+            cian.ai_context{ "Prefer POSIX sh.", "Deploy target is Oracle 19c." }
+            cian.ssh{
+              users = { "root" },
+              hosts = {
+                { name = "db", host = "10.0.0.9", notes = "RHEL 8, Oracle 19c, nginx 1.24" },
+                { name = "web", host = "10.0.0.10" },
+              },
+            }
+            "#,
+        )
+        .unwrap();
+        let cfg = load_from(&init);
+        assert!(cfg.errors.is_empty(), "{:?}", cfg.errors);
+        assert_eq!(
+            cfg.ai_context,
+            vec![
+                "The file panes browse a RHEL 8 NFS mount.",
+                "Prefer POSIX sh.",
+                "Deploy target is Oracle 19c.",
+            ]
+        );
+        assert_eq!(cfg.ssh_hosts[0].notes.as_deref(), Some("RHEL 8, Oracle 19c, nginx 1.24"));
+        assert_eq!(cfg.ssh_hosts[1].notes, None);
+    }
+
+    #[test]
+    fn ai_context_rejects_a_number() {
+        let dir = tempfile::tempdir().unwrap();
+        let init = dir.path().join("init.lua");
+        std::fs::write(&init, "cian.ai_context(42)").unwrap();
+        let cfg = load_from(&init);
+        assert!(cfg.ai_context.is_empty());
+        assert!(cfg.errors.iter().any(|e| e.contains("ai_context")), "{:?}", cfg.errors);
+    }
 
     #[test]
     fn portable_copy_next_to_exe_wins_for_reading() {

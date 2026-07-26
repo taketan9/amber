@@ -474,6 +474,14 @@ loop:
   proposed name is validated to a bare filename (no path, no `..`), a target
   that already exists is skipped, and a name the model invents matches nothing.
 
+**Give the AI your context.** Generic answers assume a generic machine.
+`cian.ai_context("…")` (a string or a list) records facts about *your*
+environment — the OS the panes browse, the deployment target, house
+conventions — and cian prepends them to every AI prompt above. Per-server
+facts belong on the SSH host instead: a host's `notes = "RHEL 8; Oracle 19c; …"`
+is handed to the model automatically whenever the active shell is logged into
+that host, so "explain the last error" already knows what it is looking at.
+
 The AI part is the one place cian is not a single self-contained binary — it
 opts into an external interpreter and network — which is why it is strictly
 optional and off unless configured. See

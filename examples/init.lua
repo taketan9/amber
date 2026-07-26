@@ -206,6 +206,11 @@
 --         { name = "ci",    password_cmd = "pass show ci/stage" },  -- from a store
 --       },
 --     },
+--
+--     -- `notes` records facts about the server (OS, middleware, versions).
+--     -- When a shell is connected here, the AI is told them (see ai_context).
+--     { name = "db1", host = "10.0.2.31",
+--       notes = "RHEL 8.9; Oracle 19c; disk is tight on /u01" },
 --   },
 -- }
 
@@ -238,6 +243,18 @@
 --   -- api_version  = "2025-04-01-preview",
 --   -- api_key      = "...",   -- only for auth_mode = "apikey"
 --   -- api_base_url = "http://localhost:11434/v1",  -- Ollama / LM Studio (OpenAI-compatible)
+-- }
+--
+-- Precondition facts — cian.ai_context(...)
+-- Tell the AI what it can assume about YOUR environment, so its answers fit it
+-- instead of being generic. Prepended to every AI prompt (chat, "explain the
+-- last error", command suggestions, …). Pass a string or a list; additive
+-- across calls. Per-server facts are better placed in a host's `notes` above —
+-- those are added automatically when the shell is logged into that host.
+-- cian.ai_context("The file panes browse a RHEL 8 NFS mount from macOS.")
+-- cian.ai_context{
+--   "We deploy to RHEL 8 with Oracle 19c and nginx 1.24.",
+--   "Prefer POSIX sh; the servers do not have bash-isms enabled.",
 -- }
 
 
