@@ -886,6 +886,27 @@ impl App {
         });
     }
 
+    /// `:unzip` / `:extract` (and the right-click menu): extract the archive
+    /// under the cursor into a fresh sub-folder of the active pane, named after
+    /// the archive. Works for zip and tar/tar.gz.
+    pub(crate) fn extract_selected(&mut self) {
+        let Some(p) = self.active_pane() else { return };
+        let Some(e) = p.selected().filter(|e| !e.is_parent) else {
+            self.message = Some(tr(self.lang, "select an archive to extract", "解凍する書庫を選択してください").into());
+            return;
+        };
+        if e.is_dir || !cian_core::archive::is_archive(&e.path) {
+            self.message = Some(format!("{}: {}", tr(self.lang, "not an archive", "書庫ではありません"), e.name));
+            return;
+        }
+        let archive = e.path.clone();
+        let dest = unique_dir(&p.cwd, &archive_stem(&e.name));
+        self.start_op("extracting", move |ctl| {
+            let _ = std::fs::create_dir_all(&dest);
+            cian_core::archive::extract(&archive, &[], &dest, ctl)
+        });
+    }
+
     // ------- Hidden files, attributes, checksums -------
     pub(crate) fn toggle_hidden(&mut self) {
         let Some(p) = self.active_pane_mut() else { return };
@@ -1657,6 +1678,36 @@ impl App {
                 self.start_zip(dest.clone(), sources.clone(), Some(name));
                 return Ok(());
             }
+            InputKind::CompressName { kind, sources } => {
+                if name.is_empty() {
+                    self.message = Some("compress cancelled".into());
+                    return Ok(());
+                }
+                let Some(cwd) = self.active_pane().map(|p| p.cwd.clone()) else { return Ok(()) };
+                let (ext, gz) = match kind {
+                    CompressKind::Zip => (".zip", None),
+                    CompressKind::TarGz => (".tar.gz", Some(true)),
+                };
+                let mut fname = name.clone();
+                let low = fname.to_lowercase();
+                let has_ext = match kind {
+                    CompressKind::TarGz => low.ends_with(".tar.gz") || low.ends_with(".tgz"),
+                    _ => low.ends_with(ext),
+                };
+                if !has_ext {
+                    fname.push_str(ext);
+                }
+                let dest = cwd.join(&fname);
+                if dest.exists() {
+                    self.message = Some(format!("already exists: {}", fname));
+                    return Ok(());
+                }
+                match gz {
+                    None => self.start_zip(dest, sources.clone(), None),
+                    Some(g) => self.start_tar(dest, sources.clone(), g),
+                }
+                return Ok(());
+            }
             InputKind::LogDir => {
                 self.start_session_log(&name);
                 return Ok(());
@@ -1765,4 +1816,35 @@ impl App {
         }
         Ok(())
     }
+}
+
+/// The base name of an archive without its extension, handling the two-part
+/// `.tar.gz` / `.tar.bz2` / `.tar.xz` / `.tgz` cases: `proj.tar.gz` → `proj`.
+fn archive_stem(name: &str) -> String {
+    let low = name.to_lowercase();
+    for suf in [".tar.gz", ".tar.bz2", ".tar.xz", ".tgz"] {
+        if low.ends_with(suf) {
+            return name[..name.len() - suf.len()].to_string();
+        }
+    }
+    match name.rfind('.') {
+        Some(i) if i > 0 => name[..i].to_string(),
+        _ => name.to_string(),
+    }
+}
+
+/// A directory path under `parent` named `stem`, made unique by appending
+/// `-1`, `-2`, … so extracting never merges into an existing folder.
+fn unique_dir(parent: &Path, stem: &str) -> PathBuf {
+    let base = parent.join(stem);
+    if !base.exists() {
+        return base;
+    }
+    for n in 1.. {
+        let cand = parent.join(format!("{stem}-{n}"));
+        if !cand.exists() {
+            return cand;
+        }
+    }
+    base
 }

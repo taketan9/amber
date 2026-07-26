@@ -189,6 +189,66 @@
         assert!(matches!(app.popup, Popup::None), "viewer stepped aside");
     }
 
+    /// Spin the op-job worker to completion (bulk copy/zip/extract run threaded).
+    fn drain_op_job(app: &mut App) {
+        for _ in 0..400 {
+            if app.op_job.is_none() {
+                return;
+            }
+            app.poll_op_job();
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        panic!("op job did not finish");
+    }
+
+    #[test]
+    fn unzip_extracts_into_a_named_subfolder() {
+        let (d, mut app) = app_with(&[]);
+        // Build a real zip in the pane's directory.
+        let cancel = std::sync::atomic::AtomicBool::new(false);
+        let mut prog = |_: &cian_core::progress::Progress| {};
+        let mut ctl = cian_core::progress::Ctl { cancel: &cancel, on_progress: &mut prog };
+        std::fs::write(d.path().join("payload.txt"), b"inside the zip").unwrap();
+        let archive = d.path().join("bundle.zip");
+        cian_core::archive::create_zip(&[d.path().join("payload.txt")], &archive, None, &mut ctl);
+
+        app.reload_both();
+        app.active_pane_mut().unwrap().cursor =
+            app.active_pane().unwrap().entries.iter().position(|e| e.name == "bundle.zip").unwrap();
+        app.extract_selected();
+        drain_op_job(&mut app);
+
+        // Extracted into ./bundle/ next to the archive.
+        let extracted = d.path().join("bundle").join("payload.txt");
+        assert!(extracted.is_file(), "payload extracted: {:?}", extracted);
+        assert_eq!(std::fs::read_to_string(extracted).unwrap(), "inside the zip");
+    }
+
+    #[test]
+    fn compress_menu_builds_a_zip() {
+        let (d, mut app) = app_with(&["a.rs", "b.rs"]);
+        // Mark both files, then run the Compress ▸ .zip flow.
+        {
+            let p = app.active_pane_mut().unwrap();
+            for i in 0..p.entries.len() {
+                if !p.entries[i].is_parent {
+                    p.toggle_mark_at(i);
+                }
+            }
+        }
+        app.prompt_compress(CompressKind::Zip);
+        // Type the archive name and submit.
+        if let Popup::TextInput { buffer, .. } = &mut app.popup {
+            buffer.clear();
+            buffer.push_str("out");
+        } else {
+            panic!("no name prompt");
+        }
+        app.finish_text_input().unwrap();
+        drain_op_job(&mut app);
+        assert!(d.path().join("out.zip").is_file(), "out.zip created");
+    }
+
     #[test]
     fn count_reports_files_and_steps() {
         let (d, mut app) = app_with(&[]);
@@ -4090,9 +4150,38 @@
         }
         app.handle_key(key('p')).unwrap();
         assert!(matches!(&app.popup, Popup::Viewer { preview: true, .. }), "back to preview");
-        // Esc closes.
+        // Esc peels state: the still-active search clears first (viewer stays),
+        // then a second Esc closes.
         app.handle_key(code(KeyCode::Esc)).unwrap();
-        assert!(matches!(app.popup, Popup::None));
+        match &app.popup {
+            Popup::Viewer { find_query, .. } => assert!(find_query.is_none(), "search cleared, not closed"),
+            _ => panic!("first Esc should have kept the viewer open"),
+        }
+        app.handle_key(code(KeyCode::Esc)).unwrap();
+        assert!(matches!(app.popup, Popup::None), "second Esc closes");
+    }
+
+    #[test]
+    fn viewer_esc_clears_search_before_closing() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::write(d.path().join("a.txt"), "alpha\nbeta\ngamma\n").unwrap();
+        let p = d.path().to_path_buf();
+        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        app.active_pane_mut().unwrap().cursor =
+            app.active_pane().unwrap().entries.iter().position(|e| e.name == "a.txt").unwrap();
+        app.handle_key(code(KeyCode::F(3))).unwrap();
+        let _ = render(&mut app, 100, 30);
+
+        // Run a `/` search, then Esc: it clears the search (viewer stays), and a
+        // second Esc closes — never dropping the viewer while a search is active.
+        app.handle_key(key('/')).unwrap();
+        for c in "beta".chars() { app.handle_key(key(c)).unwrap(); }
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+        assert!(matches!(&app.popup, Popup::Viewer { find_query: Some(_), .. }), "search active");
+        app.handle_key(code(KeyCode::Esc)).unwrap();
+        assert!(matches!(&app.popup, Popup::Viewer { find_query: None, .. }), "Esc cleared the search");
+        app.handle_key(code(KeyCode::Esc)).unwrap();
+        assert!(matches!(app.popup, Popup::None), "Esc then closes");
     }
 
     #[test]

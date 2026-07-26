@@ -525,6 +525,14 @@ enum MenuItem {
     GitDiscard,
     /// Open the shortcuts / bookmarks menu (the `s` key).
     Shortcuts,
+    /// A submenu grouping the compress-to-archive actions.
+    CompressMenu,
+    /// Compress the selection to a `.zip`.
+    CompressZip,
+    /// Compress the selection to a `.tar.gz`.
+    CompressTarGz,
+    /// Extract the archive under the cursor into a fresh sub-folder.
+    Extract,
     /// A submenu grouping the AI actions (drills down when chosen).
     AiMenu,
     /// A submenu grouping the file-transfer actions.
@@ -552,7 +560,14 @@ enum MenuItem {
 impl MenuItem {
     /// Group items open a submenu instead of acting; this is their marker.
     fn is_group(self) -> bool {
-        matches!(self, MenuItem::AiMenu | MenuItem::SendMenu | MenuItem::WindowMenu | MenuItem::GitMenu)
+        matches!(
+            self,
+            MenuItem::AiMenu
+                | MenuItem::SendMenu
+                | MenuItem::WindowMenu
+                | MenuItem::GitMenu
+                | MenuItem::CompressMenu
+        )
     }
 }
 
@@ -572,6 +587,10 @@ impl MenuItem {
             MenuItem::Attributes => tr(lang, "Attributes", "属性"),
             MenuItem::Hash => tr(lang, "Checksum", "チェックサム"),
             MenuItem::Compare => tr(lang, "Compare left ↔ right", "左右を比較"),
+            MenuItem::CompressMenu => tr(lang, "Compress ▸", "圧縮 ▸"),
+            MenuItem::CompressZip => tr(lang, "→ .zip", "→ .zip"),
+            MenuItem::CompressTarGz => tr(lang, "→ .tar.gz", "→ .tar.gz"),
+            MenuItem::Extract => tr(lang, "Extract here", "ここに解凍"),
             MenuItem::Ssh => tr(lang, "SSH connect", "SSH接続"),
             MenuItem::ScpUpload => tr(lang, "Upload → server", "アップロード → サーバ"),
             MenuItem::ScpDownload => tr(lang, "Download ← server", "ダウンロード ← サーバ"),
@@ -852,6 +871,16 @@ enum InputKind {
     /// A filename to save the diff/compare result into (the text is carried
     /// here because the source popup is replaced by the prompt).
     DiffSaveAs { text: String },
+    /// A name for an archive about to be created from `sources`, in the given
+    /// format. The extension is appended if missing.
+    CompressName { kind: CompressKind, sources: Vec<PathBuf> },
+}
+
+/// The archive format chosen from the right-click "Compress" submenu.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CompressKind {
+    Zip,
+    TarGz,
 }
 
 impl InputKind {
@@ -2453,6 +2482,8 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry(":ai", None, "AI chat  (needs cian.ai in init.lua)", "AIチャット  (init.luaのcian.aiが必要)"),
                 entry(":aicmd", None, "AI: shell command from a description", "AI: 説明からシェルコマンド生成"),
                 entry(":zip", None, "bundle selection;  :zip -e  for a password", "選択物をまとめる；  :zip -e でパスワード付き"),
+                entry(":tar / :targz", None, "make a .tar / .tar.gz (also right-click ▸ Compress)", ".tar / .tar.gz を作成（右クリック▸圧縮でも）"),
+                entry(":unzip", None, "extract the archive here (also right-click ▸ Extract)", "書庫をここに解凍（右クリック▸解凍でも）"),
                 entry(":!cmd", None, "run in shell;  % = selection, %f file, %d dir", "シェルで実行；  % =選択, %f ファイル, %d ディレクトリ"),
             ],
         ),

@@ -490,6 +490,91 @@ pub fn create_zip(
     report
 }
 
+/// Create a tarball at `dest` from `sources`; `gz` gzips it (`.tar.gz`).
+/// Directories are added recursively with their tree preserved under the
+/// source's own name, matching [`create_zip`]. A cancelled run removes the
+/// partial file, so a half-written archive is never left behind.
+pub fn create_tar(sources: &[PathBuf], dest: &Path, gz: bool, ctl: &mut Ctl) -> OpReport {
+    use std::io::{BufWriter, Write};
+
+    let mut report = OpReport::default();
+
+    // Same gathering as create_zip: flatten directories to file members first.
+    let mut jobs: Vec<(PathBuf, String)> = Vec::new();
+    for src in sources {
+        let base = match src.file_name().and_then(|n| n.to_str()) {
+            Some(n) => n.to_string(),
+            None => {
+                report.note_error(format!("{}: unusable name", src.display()));
+                continue;
+            }
+        };
+        if src.is_dir() {
+            collect_tree(src, &base, &mut jobs, &mut report);
+        } else {
+            jobs.push((src.clone(), base));
+        }
+    }
+
+    let mut p = Progress {
+        files_total: jobs.len(),
+        bytes_total: jobs.iter().filter_map(|(pth, _)| fs::metadata(pth).ok().map(|m| m.len())).sum(),
+        ..Default::default()
+    };
+
+    let f = match fs::File::create(dest) {
+        Ok(f) => f,
+        Err(e) => {
+            report.note_error(format!("{}: {}", dest.display(), e));
+            return report;
+        }
+    };
+
+    // Generic over the writer so the gzip and plain paths share the member loop
+    // while each still owns a concrete writer to finish/flush correctly.
+    fn write_members<W: Write>(
+        w: W,
+        jobs: &[(PathBuf, String)],
+        ctl: &mut Ctl<'_>,
+        report: &mut OpReport,
+        p: &mut Progress,
+    ) -> std::io::Result<W> {
+        let mut b = tar::Builder::new(w);
+        for (path, name) in jobs {
+            if ctl.cancel.load(Ordering::Relaxed) {
+                break;
+            }
+            p.current = name.clone();
+            (ctl.on_progress)(p);
+            match b.append_path_with_name(path, name) {
+                Ok(()) => {
+                    report.ok += 1;
+                    p.files_done += 1;
+                    p.bytes_done += fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+                    (ctl.on_progress)(p);
+                }
+                Err(e) => report.note_error(format!("{}: {}", name, e)),
+            }
+        }
+        b.into_inner()
+    }
+
+    let result = if gz {
+        let enc = flate2::write::GzEncoder::new(f, flate2::Compression::default());
+        write_members(enc, &jobs, ctl, &mut report, &mut p).and_then(|enc| enc.finish().map(|_| ()))
+    } else {
+        let bw = BufWriter::new(f);
+        write_members(bw, &jobs, ctl, &mut report, &mut p).and_then(|mut bw| bw.flush())
+    };
+    if let Err(e) = result {
+        report.note_error(format!("{}: {}", dest.display(), e));
+    }
+    if ctl.cancel.load(Ordering::Relaxed) {
+        let _ = fs::remove_file(dest);
+    }
+    report
+}
+
 /// Add every file under `dir` to `jobs`, naming each member relative to
 /// `prefix` so the directory structure is kept inside the zip.
 fn collect_tree(dir: &Path, prefix: &str, jobs: &mut Vec<(PathBuf, String)>, report: &mut OpReport) {
@@ -601,6 +686,37 @@ mod tests {
                 "hello from the archive"
             );
             assert_eq!(fs::read_to_string(out.join("sub/inner.txt")).unwrap(), "nested");
+        }
+    }
+
+    #[test]
+    fn creates_tar_and_tar_gz_that_round_trip() {
+        for gz in [false, true] {
+            let d = tempfile::tempdir().unwrap();
+            // A directory to zip up: proj/main.rs and proj/sub/mod.rs.
+            let proj = d.path().join("proj");
+            fs::create_dir_all(proj.join("sub")).unwrap();
+            fs::write(proj.join("main.rs"), b"fn main() {}").unwrap();
+            fs::write(proj.join("sub/mod.rs"), b"// mod").unwrap();
+
+            let dest = d.path().join(if gz { "out.tar.gz" } else { "out.tar" });
+            let cancel = AtomicBool::new(false);
+            let mut prog = |_: &Progress| {};
+            let mut c = ctl(&cancel, &mut prog);
+            let report = create_tar(std::slice::from_ref(&proj), &dest, gz, &mut c);
+            assert!(report.errors.is_empty(), "gz={gz}: {:?}", report.errors);
+            assert_eq!(report.ok, 2, "gz={gz}: two files added");
+
+            // Read it back and extract; the tree is preserved under `proj/`.
+            let members = list(&dest).unwrap();
+            let names: Vec<&str> = members.iter().map(|m| m.name.as_str()).collect();
+            assert!(names.contains(&"proj/main.rs"), "gz={gz}: {names:?}");
+            assert!(names.contains(&"proj/sub/mod.rs"), "gz={gz}: {names:?}");
+
+            let out = d.path().join("out");
+            let mut c2 = ctl(&cancel, &mut prog);
+            extract(&dest, &[], &out, &mut c2);
+            assert_eq!(fs::read_to_string(out.join("proj/main.rs")).unwrap(), "fn main() {}");
         }
     }
 

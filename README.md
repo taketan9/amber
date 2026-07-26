@@ -292,8 +292,13 @@ Member paths are checked before anything is written: an archive can name
 `../../etc/passwd` or an absolute path, and a naive extractor obliges. Those
 are refused individually and the rest of the archive still comes out.
 
-Reading covers zip and gzipped/plain tar; `:zip` still writes zip only (it is
-what Windows reads and writes without extra software).
+**Extract without opening it:** `:unzip` (or right-click **▸ Extract here**) on
+the archive under the cursor unpacks the whole thing into a fresh sub-folder
+named after it — no member list, no clobbering. **Compress:** `:zip [-e]`,
+`:tar` and `:targz` bundle the marked files (or the cursor's) into the pane,
+and right-click **▸ Compress** offers `.zip` / `.tar.gz` with a name prompt.
+Reading and writing both cover zip and gzipped/plain tar; AES-encrypted zips
+(`:zip -e`) are strong but need 7-Zip to open, not Explorer's built-in unzip.
 
 ## Searching
 

@@ -147,7 +147,7 @@ impl App {
         let half = (body_h / 2).max(1);
         let mut close = false;
         let mut summarize = false;
-        if let Popup::Viewer { view, scroll, line, col, goal, visual, anchor, count, .. } = &mut self.popup {
+        if let Popup::Viewer { view, scroll, line, col, goal, visual, anchor, count, find_query, .. } = &mut self.popup {
             let cnt = count.take();
             let n = view.lines.len();
             let last = n.saturating_sub(1);
@@ -190,14 +190,19 @@ impl App {
             }
 
             match (ctrl, key.code) {
-                (false, KeyCode::Esc) | (false, KeyCode::Char('q')) => {
-                    // Esc first drops out of visual mode, then closes.
+                (false, KeyCode::Esc) => {
+                    // Esc peels state off one layer at a time: leave visual
+                    // selection, then clear an active search (its highlights),
+                    // and only then close. `q` below always closes outright.
                     if visual.is_some() {
                         *visual = None;
+                    } else if find_query.is_some() {
+                        *find_query = None;
                     } else {
                         close = true;
                     }
                 }
+                (false, KeyCode::Char('q')) => close = true,
                 (false, KeyCode::Char('v')) => start_visual(ViewVisual::Char, visual, anchor, *line, *col),
                 (false, KeyCode::Char('V')) => start_visual(ViewVisual::Line, visual, anchor, *line, *col),
                 (true, KeyCode::Char('v')) => start_visual(ViewVisual::Block, visual, anchor, *line, *col),

@@ -126,6 +126,9 @@ impl App {
 
             // Archiving.
             "zip" => self.cmd_zip(&args),
+            "tar" => self.cmd_tar(&args, false),
+            "targz" | "tgz" | "tarball" => self.cmd_tar(&args, true),
+            "unzip" | "untar" | "extract" | "unar" => self.extract_selected(),
 
             other => self.message = Some(format!("unknown command: :{}", other)),
         }
@@ -462,6 +465,69 @@ impl App {
         self.start_op("zipping", move |ctl| {
             cian_core::archive::create_zip(&sources, &dest, password.as_deref(), ctl)
         });
+    }
+
+    /// `:tar <name>` / `:targz <name>` — tar up the marked files (or the cursor's)
+    /// into the active pane's directory.
+    pub(crate) fn cmd_tar(&mut self, args: &[&str], gz: bool) {
+        let Some(name) = args.iter().copied().find(|a| !a.starts_with('-')) else {
+            self.message = Some(if gz { "usage: :targz <name>" } else { "usage: :tar <name>" }.into());
+            return;
+        };
+        let sources = self.active_pane().map(|p| p.target_paths()).unwrap_or_default();
+        if sources.is_empty() {
+            self.message = Some("nothing selected to archive".into());
+            return;
+        }
+        let Some(cwd) = self.active_pane().map(|p| p.cwd.clone()) else { return };
+        let mut fname = name.to_string();
+        let low = fname.to_lowercase();
+        if gz {
+            if !(low.ends_with(".tar.gz") || low.ends_with(".tgz")) {
+                fname.push_str(".tar.gz");
+            }
+        } else if !low.ends_with(".tar") {
+            fname.push_str(".tar");
+        }
+        let dest = cwd.join(&fname);
+        if dest.exists() {
+            self.message = Some(format!("already exists: {}", fname));
+            return;
+        }
+        self.start_tar(dest, sources, gz);
+    }
+
+    /// Kick off tar creation on a worker (progress + cancel like zip).
+    pub(crate) fn start_tar(&mut self, dest: PathBuf, sources: Vec<PathBuf>, gz: bool) {
+        let label = if gz { "tarring gz" } else { "tarring" };
+        self.start_op(label, move |ctl| cian_core::archive::create_tar(&sources, &dest, gz, ctl));
+    }
+
+    /// From the right-click Compress submenu: gather the selection and ask for
+    /// the archive name; [`Self::finish_text_input`] builds it on submit.
+    pub(crate) fn prompt_compress(&mut self, kind: CompressKind) {
+        let sources = self.active_pane().map(|p| p.target_paths()).unwrap_or_default();
+        if sources.is_empty() {
+            self.message = Some(tr(self.lang, "nothing selected to compress", "圧縮対象がありません").into());
+            return;
+        }
+        // A sensible default name: the single selection's stem, else the folder's.
+        let default = sources
+            .first()
+            .filter(|_| sources.len() == 1)
+            .and_then(|p| p.file_stem().and_then(|s| s.to_str()).map(|s| s.to_string()))
+            .or_else(|| self.active_pane().and_then(|p| p.cwd.file_name().and_then(|n| n.to_str()).map(|s| s.to_string())))
+            .unwrap_or_else(|| "archive".to_string());
+        let ext = match kind {
+            CompressKind::Zip => ".zip",
+            CompressKind::TarGz => ".tar.gz",
+        };
+        self.popup = text_input(
+            "compress",
+            format!("archive name (adds {}):", ext),
+            default,
+            InputKind::CompressName { kind, sources },
+        );
     }
 
     /// `!cmd`: run a shell command in the shell panel, with `%` substituted by

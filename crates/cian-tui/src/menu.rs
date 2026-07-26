@@ -52,6 +52,20 @@ impl App {
             items.push(MenuItem::Hash);
             items.push(MenuItem::Compare);
             items.push(MenuItem::FindDupes);
+            // Archiving: "Extract here" when the cursor is on an archive, and
+            // "Compress ▸" whenever there is something selected to pack.
+            let on_archive = self
+                .active_pane()
+                .and_then(|p| p.selected())
+                .map(|e| !e.is_dir && cian_core::archive::is_archive(&e.path))
+                .unwrap_or(false);
+            if on_archive {
+                items.push(MenuItem::Extract);
+            }
+            let has_targets = self.active_pane().map(|p| !p.target_paths().is_empty()).unwrap_or(false);
+            if has_targets {
+                items.push(MenuItem::CompressMenu);
+            }
             items.push(MenuItem::HiddenToggle);
             // Git actions, only when this pane sits in a repository.
             if self.git_for(self.focused).is_some() {
@@ -125,6 +139,9 @@ impl App {
                 v.push(MenuItem::ShellZoom);
                 v.push(MenuItem::Back);
                 Some(v)
+            }
+            MenuItem::CompressMenu => {
+                Some(vec![MenuItem::CompressZip, MenuItem::CompressTarGz, MenuItem::Back])
             }
             _ => None,
         }
@@ -238,7 +255,7 @@ impl App {
         self.menu_stack.clear();
         self.popup = Popup::None;
         match item {
-            MenuItem::AiMenu | MenuItem::SendMenu | MenuItem::WindowMenu | MenuItem::GitMenu | MenuItem::Back => {} // handled above
+            MenuItem::AiMenu | MenuItem::SendMenu | MenuItem::WindowMenu | MenuItem::GitMenu | MenuItem::CompressMenu | MenuItem::Back => {} // handled above
             MenuItem::ShellSplitLR => {
                 let cwd = self.shell_cwd();
                 self.shell.split_active(&cwd, SplitDir::LeftRight);
@@ -328,6 +345,9 @@ impl App {
             MenuItem::Hash => self.start_hash(cian_core::attrs::HashKind::Sha256),
             MenuItem::Compare => self.open_diff(),
             MenuItem::FindDupes => self.start_dupes(),
+            MenuItem::Extract => self.extract_selected(),
+            MenuItem::CompressZip => self.prompt_compress(CompressKind::Zip),
+            MenuItem::CompressTarGz => self.prompt_compress(CompressKind::TarGz),
             MenuItem::Background => {
                 let pane = self.focused;
                 let current = match pane {
