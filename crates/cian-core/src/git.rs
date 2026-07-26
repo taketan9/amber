@@ -197,8 +197,14 @@ pub fn status(dir: &Path) -> Option<RepoStatus> {
 }
 
 /// Parse the porcelain branch header body (everything after `## `).
-/// Examples: `main...origin/main [ahead 2, behind 1]`, `main`, `HEAD (no branch)`.
+/// Examples: `main...origin/main [ahead 2, behind 1]`, `main`,
+/// `No commits yet on trunk` (an unborn branch), `HEAD (no branch)`.
 fn parse_branch_line(rest: &str) -> (String, u32, u32) {
+    // A brand-new repo with no commits: "No commits yet on <branch>".
+    if let Some(name) = rest.strip_prefix("No commits yet on ") {
+        let branch = name.split_whitespace().next().unwrap_or("").to_string();
+        return (if branch.is_empty() { "(unborn)".into() } else { branch }, 0, 0);
+    }
     let name_part = rest.split("...").next().unwrap_or(rest);
     let branch = name_part.split_whitespace().next().unwrap_or("").to_string();
     let mut ahead = 0;
@@ -320,6 +326,8 @@ mod tests {
             ("feature/x".into(), 3, 0)
         );
         assert_eq!(parse_branch_line("HEAD (no branch)"), ("HEAD".into(), 0, 0));
+        // A fresh repo before its first commit.
+        assert_eq!(parse_branch_line("No commits yet on trunk"), ("trunk".into(), 0, 0));
     }
 
     #[test]

@@ -11722,6 +11722,26 @@ fn draw_status(f: &mut Frame, area: Rect, app: &App) {
         spans.push(chip(filter_chip, Color::Rgb(80, 200, 120)));
     }
 
+    // The git branch of the active pane's repository, with ahead/behind and a
+    // changed-file count — the "branch bar" every developer glances at.
+    if let Some(git) = app.git_for(app.focused) {
+        spans.push(dim_sep.clone());
+        let mut label = format!("\u{e0a0} {}", git.branch); //
+        if git.ahead > 0 {
+            label.push_str(&format!(" ↑{}", git.ahead));
+        }
+        if git.behind > 0 {
+            label.push_str(&format!(" ↓{}", git.behind));
+        }
+        let changed = git.changed_count();
+        if changed > 0 {
+            label.push_str(&format!("  ✚{}", changed));
+        }
+        // Green when clean, amber when there are uncommitted changes.
+        let color = if changed > 0 { Color::Rgb(240, 210, 120) } else { Color::Rgb(130, 205, 150) };
+        spans.push(chip(label, color));
+    }
+
     if app.zoomed {
         spans.push(dim_sep.clone());
         spans.push(chip("[zoom]".to_string(), theme().accent));
@@ -13847,6 +13867,24 @@ mod tests {
         assert_eq!(clean_ai_command("```sh\nls -la\n```"), "ls -la");
         assert_eq!(clean_ai_command("`git status`"), "git status");
         assert_eq!(clean_ai_command("\n\n  find . -name '*.log'  \n"), "find . -name '*.log'");
+    }
+
+    /// The status line shows the repo's branch when the pane is in one.
+    #[test]
+    fn the_status_line_shows_the_git_branch() {
+        let d = tempfile::tempdir().unwrap();
+        let dir = std::fs::canonicalize(d.path()).unwrap();
+        let ok = std::process::Command::new("git")
+            .arg("-C").arg(&dir).args(["init", "-q", "-b", "trunk"]).status()
+            .map(|s| s.success()).unwrap_or(false);
+        if !ok {
+            eprintln!("no git (or too old for -b); skipping");
+            return;
+        }
+        std::fs::write(dir.join("a.txt"), "x").unwrap();
+        let mut app = App::new(dir.clone(), dir, cian_lua::Config::default()).unwrap();
+        let screen = render(&mut app, 120, 30).join("\n");
+        assert!(screen.contains("trunk"), "branch shown in the status line:\n{screen}");
     }
 
     /// Stage / unstage / discard through the app on a real throwaway repo.
