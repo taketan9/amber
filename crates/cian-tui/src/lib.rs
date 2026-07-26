@@ -3697,6 +3697,7 @@ impl App {
     fn handle_viewer_key(&mut self, key: KeyEvent) -> Result<()> {
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         let shift = key.modifiers.contains(KeyModifiers::SHIFT);
+        let alt = key.modifiers.contains(KeyModifiers::ALT);
 
         // While typing a `/` search, keys build the query; Enter runs it.
         if matches!(self.popup, Popup::Viewer { find_input: Some(_), .. }) {
@@ -3821,18 +3822,25 @@ impl App {
                 }
             };
 
-            // Shift+arrow selects like an editor: begin a character-wise
-            // selection at the cursor (if not already selecting), then the motion
-            // arm below moves the cursor, extending it. Shift+Home/End/PageUp/Dn
-            // extend too. A plain arrow keeps vim's behaviour.
+            // Modifier+arrow selects like an editor and the motion arm below
+            // extends it: Alt+arrow is block-wise (a rectangle), Shift+arrow is
+            // character-wise. Both begin at the cursor; a plain arrow keeps vim's
+            // behaviour. Home/End/PageUp/Dn extend the same way.
             let is_arrow = matches!(
                 key.code,
                 KeyCode::Left | KeyCode::Right | KeyCode::Up | KeyCode::Down
                     | KeyCode::Home | KeyCode::End | KeyCode::PageUp | KeyCode::PageDown
             );
-            if shift && is_arrow && visual.is_none() {
-                *anchor = (*line, *col);
-                *visual = Some(ViewVisual::Char);
+            if is_arrow {
+                if alt {
+                    if visual.is_none() {
+                        *anchor = (*line, *col);
+                    }
+                    *visual = Some(ViewVisual::Block);
+                } else if shift && visual.is_none() {
+                    *anchor = (*line, *col);
+                    *visual = Some(ViewVisual::Char);
+                }
             }
 
             match (ctrl, key.code) {
@@ -6622,14 +6630,20 @@ impl App {
                     }
                 }
                 MouseEventKind::Drag(MouseButton::Left) => {
+                    // Holding Alt while dragging makes a block (rectangular)
+                    // selection; otherwise it is character-wise.
+                    let mode = if ev.modifiers.contains(KeyModifiers::ALT) {
+                        ViewVisual::Block
+                    } else {
+                        ViewVisual::Char
+                    };
                     if let Popup::Viewer { view, scroll, line, col, goal, visual, .. } = &mut self.popup {
                         let l = line_at(row, *scroll, view.lines.len());
                         let c = col_at(view, l);
                         *line = l;
                         *col = c;
                         *goal = c;
-                        // Character-wise selection, extending from the press.
-                        *visual = Some(ViewVisual::Char);
+                        *visual = Some(mode);
                     }
                 }
                 MouseEventKind::ScrollDown | MouseEventKind::ScrollUp => {
@@ -12342,8 +12356,8 @@ fn draw_popup(
         let footer_area =
             Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1);
         let footer_text = match lang {
-            Lang::En => " j/k move  v / Shift+↕ / drag select  y copy  S AI summary  Esc ",
-            Lang::Ja => " j/k 移動  v / Shift+↕ / ドラッグ 選択  y コピー  S AI要約  Esc ",
+            Lang::En => " j/k move  Shift+↕/drag select · Ctrl+v/Alt block  y copy  S AI  Esc ",
+            Lang::Ja => " j/k 移動  Shift+↕/ドラッグ 選択 · Ctrl+v/Alt 矩形  y コピー  S AI  Esc ",
         };
         let footer = Paragraph::new(footer_text).style(
             Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD),
@@ -17549,6 +17563,41 @@ mod tests {
         app.handle_key(key('y')).unwrap();
         assert_eq!(app.message.as_deref(), Some("copied"));
         assert!(matches!(app.popup, Popup::Viewer { visual: None, .. }));
+    }
+
+    #[test]
+    fn the_viewer_alt_arrow_and_alt_drag_select_a_block() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::write(d.path().join("a.txt"), "hello world\nsecond line\nthird row!!\n").unwrap();
+        let p = d.path().to_path_buf();
+        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        app.handle_key(code(KeyCode::F(3))).unwrap();
+        let _ = render(&mut app, 100, 30);
+
+        // Alt+Down then Alt+Right builds a rectangle from the cursor.
+        app.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::ALT)).unwrap();
+        app.handle_key(KeyEvent::new(KeyCode::Right, KeyModifiers::ALT)).unwrap();
+        app.handle_key(KeyEvent::new(KeyCode::Right, KeyModifiers::ALT)).unwrap();
+        match &app.popup {
+            Popup::Viewer { visual: Some(ViewVisual::Block), anchor, line, col, .. } => {
+                assert_eq!(*anchor, (0, 0));
+                assert_eq!((*line, *col), (1, 2), "block cursor advanced down 1, right 2");
+            }
+            other => panic!("expected a block selection, got {:?}", other),
+        }
+        app.handle_key(code(KeyCode::Esc)).unwrap(); // drop the selection
+
+        // Alt+drag also makes a block selection.
+        let body = app.viewer_rect;
+        let x0 = body.x + app.viewer_gutter;
+        let mut down = mouse(MouseEventKind::Down(MouseButton::Left), x0 + 1, body.y);
+        down.modifiers = KeyModifiers::ALT;
+        app.handle_mouse(down);
+        let mut drag = mouse(MouseEventKind::Drag(MouseButton::Left), x0 + 4, body.y + 2);
+        drag.modifiers = KeyModifiers::ALT;
+        app.handle_mouse(drag);
+        assert!(matches!(app.popup, Popup::Viewer { visual: Some(ViewVisual::Block), .. }),
+            "alt-drag makes a block selection");
     }
 
     #[test]

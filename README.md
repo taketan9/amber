@@ -244,7 +244,9 @@ The viewer is vim-flavoured: a cursor moves with `h`/`j`/`k`/`l`, `w`/`b`,
 `0`/`$`, `gg`/`G` and `Ctrl-d`/`Ctrl-u`; `/` searches (all matches highlighted,
 `n`/`N` step through them), `42G` jumps to a line, `%` to the matching bracket,
 `{`/`}` between paragraphs. `v` / `V` / `Ctrl-v` start character-, line- and
-block-wise visual selection, and `y` (or `c`) copies it. `e` switches the text
+block-wise visual selection; **Shift+arrow** selects character-wise and
+**Alt+arrow** block-wise like an editor; a left-click **drag** selects (hold
+**Alt** for a rectangle). `y` (or `c`), or right-click, copies it. `e` switches the text
 encoding (UTF-8 / Shift_JIS / UTF-16) when a file was decoded wrong, and
 `Shift+Enter` reveals the file in the pane (jump to its folder, cursor on it).
 
