@@ -79,15 +79,21 @@ pub fn parse(src: &str) -> Result<Vec<Macro>, String> {
         .eval()
         .map_err(|e| e.to_string())?;
     match val {
+        // Either a single macro ({ name =, panes = }) — the natural shape for a
+        // per-macro file in macro/ — or a list of them (macro.lua).
         Value::Table(t) => {
-            let mut out = Vec::new();
-            for m in t.clone().sequence_values::<Table>() {
-                out.push(macro_from(&m.map_err(|e| e.to_string())?)?);
+            if t.contains_key("name").map_err(|e| e.to_string())? {
+                Ok(vec![macro_from(&t)?])
+            } else {
+                let mut out = Vec::new();
+                for m in t.sequence_values::<Table>() {
+                    out.push(macro_from(&m.map_err(|e| e.to_string())?)?);
+                }
+                Ok(out)
             }
-            Ok(out)
         }
         Value::Nil => Ok(Vec::new()),
-        other => Err(format!("macro.lua must return a table, got {}", other.type_name())),
+        other => Err(format!("a macro file must return a table, got {}", other.type_name())),
     }
 }
 
@@ -174,5 +180,14 @@ mod tests {
     #[test]
     fn a_non_table_return_is_an_error() {
         assert!(parse("return 7").is_err());
+    }
+
+    #[test]
+    fn a_single_macro_file_parses() {
+        // The shape a per-macro file in macro/ uses: one macro, not a list.
+        let macros = parse(r#"return { name = "Solo", panes = { { cmd = "echo hi" } } }"#).unwrap();
+        assert_eq!(macros.len(), 1);
+        assert_eq!(macros[0].name, "Solo");
+        assert_eq!(macros[0].panes.len(), 1);
     }
 }

@@ -620,6 +620,19 @@ panes are easy to tell apart), and `log` (a directory to record the session to).
 Because each split spawns asynchronously, cian builds the layout pane-by-pane as
 the shells come up. See [`examples/macro.lua`](examples/macro.lua).
 
+**One macro per file.** As an alternative to the single list, put a `macro/`
+directory next to `init.lua` with one file each — `macro/Adeploy.lua`,
+`macro/Bdbcheck.lua` — where each returns a single `{ name =, panes = }` table.
+They load in filename order alongside `macro.lua`. See
+[`examples/macro/Adeploy.lua`](examples/macro/Adeploy.lua).
+
+**Run one at startup** (TeraTerm-`.ttl` style). `cian --macro path/to/thing.lua`
+builds that macro's layout the moment cian comes up; a bare `cian thing.lua`
+does the same, so associating `.lua` with `cian.exe` makes a macro file run on
+double-click. `cian --macro-name "Two local shells"` runs a named macro from
+your normal config instead. Either way cian stays open afterwards — the macro
+just seeds the session.
+
 ## Build
 
 ```sh

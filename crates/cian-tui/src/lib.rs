@@ -2537,6 +2537,9 @@ pub fn usage_text() -> String {
         String::new(),
         "USAGE:".to_string(),
         "    cian [LEFT_PATH] [RIGHT_PATH]".to_string(),
+        "    cian --macro <FILE.lua>        run a macro file once at startup".to_string(),
+        "    cian <FILE.lua>                same (a *.lua argument is a macro)".to_string(),
+        "    cian --macro-name <NAME>       run a named macro from your config".to_string(),
         String::new(),
         "ARGS:".to_string(),
         "    LEFT_PATH     directory for the left pane  (default: current dir)".to_string(),
@@ -2546,6 +2549,8 @@ pub fn usage_text() -> String {
         "    -h, --help    show this help".to_string(),
         "    -V, --version show the version and commit".to_string(),
         "    -man, --man   show the full key manual (also ? or Ctrl+. in-app)".to_string(),
+        "    -m, --macro <FILE.lua>   build a macro's layout at startup".to_string(),
+        "    --macro-name <NAME>      build a named macro from macro.lua / macro/".to_string(),
         String::new(),
         "CONFIG:".to_string(),
         format!("    {}", cfg),
@@ -2624,7 +2629,20 @@ fn default_home(config: &cian_lua::Config) -> PathBuf {
     PathBuf::from(".")
 }
 
-pub fn run(left: Option<PathBuf>, right: Option<PathBuf>) -> Result<()> {
+/// What to run once, automatically, at startup — driven by the command line.
+/// This is cian's TeraTerm-`.ttl`-style hook: point it at a macro and cian comes
+/// up with that layout already built.
+pub enum StartupMacro {
+    /// Nothing — the normal interactive start.
+    None,
+    /// `--macro <file>` (or a `*.lua` argument): load this file and run its
+    /// first macro once.
+    File(PathBuf),
+    /// `--macro-name <name>`: run a macro of this name from the loaded config.
+    Named(String),
+}
+
+pub fn run(left: Option<PathBuf>, right: Option<PathBuf>, startup: StartupMacro) -> Result<()> {
     // Load user config (never fails; problems are reported below).
     let config = cian_lua::load();
 
@@ -2656,6 +2674,22 @@ pub fn run(left: Option<PathBuf>, right: Option<PathBuf>) -> Result<()> {
             lines.push(format!("... and {} more", total - 10));
         }
         app.popup = Popup::Notice { lines };
+    }
+
+    // A startup macro (from `--macro` / `--macro-name` / a `*.lua` argument):
+    // queue it so it builds as soon as the shell is up, like a TeraTerm `.ttl`.
+    match startup {
+        StartupMacro::None => {}
+        StartupMacro::Named(name) => {
+            if !app.start_macro_by_name(&name) {
+                app.message = Some(format!("no macro named {:?} (check macro.lua / macro/)", name));
+            }
+        }
+        StartupMacro::File(path) => match cian_lua::macros::load(&path) {
+            Ok(ms) if !ms.is_empty() => app.begin_macro(&ms[0]),
+            Ok(_) => app.message = Some(format!("{}: no macro found in file", path.display())),
+            Err(e) => app.message = Some(format!("macro {}: {}", path.display(), e)),
+        },
     }
 
     install_panic_hook();

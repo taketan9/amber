@@ -163,6 +163,20 @@
     }
 
     #[test]
+    fn a_macro_can_be_started_by_name() {
+        // Backs the `--macro-name` startup option.
+        let (_d, mut app) = app_with(&["a.txt"]);
+        app.macros = cian_lua::macros::parse(
+            r#"return { { name = "Deploy", panes = { { cmd = "echo go" } } } }"#,
+        )
+        .unwrap();
+        assert!(!app.start_macro_by_name("Nope"), "unknown name is rejected");
+        assert!(app.macro_run.is_none());
+        assert!(app.start_macro_by_name("Deploy"), "known name starts");
+        assert!(app.macro_run.is_some());
+    }
+
+    #[test]
     fn ai_chat_round_trips_a_mock_reply() {
         let have_py = std::process::Command::new("python3")
             .arg("--version")

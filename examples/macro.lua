@@ -10,6 +10,15 @@
 --    Windows       : %USERPROFILE%\.config\cian\macro.lua
 --  Portable: a macro.lua sitting next to the cian executable wins over this.
 --
+--  One macro per file: instead of (or as well as) this list, put a `macro/`
+--  directory next to init.lua and give each macro its own file, e.g.
+--  macro/Adeploy.lua, macro/Bdbcheck.lua. They load in filename order and each
+--  returns a single { name =, panes = } table. See examples/macro/Adeploy.lua.
+--
+--  Run one at startup, TeraTerm-.ttl style:  cian --macro path/to/thing.lua
+--  (a bare `cian thing.lua` works too, so a .lua file associated with cian.exe
+--  runs on double-click), or  cian --macro-name "Two local shells".
+--
 --  A macro returns { name = ..., panes = { ... } }. The FIRST pane is the shell
 --  pane you are on; each later pane is split off the previous one:
 --    dir   = "right" (side by side) or "down" (stacked). Default "right".

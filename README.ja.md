@@ -606,6 +606,18 @@ return {
 非同期に起動するため、cianはシェルが立ち上がるのに合わせてペインを1つずつ
 構築します。[`examples/macro.lua`](examples/macro.lua) を参照。
 
+**1マクロ1ファイル。** 単一リストの代わりに、`init.lua` の隣に `macro/`
+ディレクトリを置き、`macro/Adeploy.lua`・`macro/Bdbcheck.lua` のように1つずつ
+ファイル分けできます（各ファイルは単一の `{ name =, panes = }` テーブルを返す）。
+ファイル名順に、`macro.lua` と併せて読み込まれます。
+[`examples/macro/Adeploy.lua`](examples/macro/Adeploy.lua) を参照。
+
+**起動時に1回実行**（TeraTermの`.ttl`風）。`cian --macro path/to/thing.lua` で
+起動と同時にそのマクロのレイアウトを構築します。`cian thing.lua` でも同じなので、
+`.lua` を `cian.exe` に関連付ければマクロファイルのダブルクリックで実行できます。
+`cian --macro-name "Two local shells"` なら通常設定内の名前付きマクロを実行。
+いずれの場合もcianはそのまま開いたまま — マクロは初期状態を用意するだけです。
+
 ## ビルド
 
 ```sh

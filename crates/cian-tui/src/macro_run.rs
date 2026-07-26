@@ -28,16 +28,42 @@ pub(crate) struct MacroRun {
     first: bool,
 }
 
-/// Load `macro.lua` (portable-aware). Returns the macros and, separately, any
-/// parse error so the launcher can explain an empty list.
+/// Load macros (portable-aware): first `macro.lua` (a list of macros), then
+/// each `macro/*.lua` file (one macro — or a list — per file), sorted by
+/// filename. Returns the macros and, separately, any parse errors so the
+/// launcher can explain a short or empty list.
 pub(crate) fn load_macros() -> (Vec<Macro>, Option<String>) {
-    let Some(path) = cian_lua::config_read_path("macro.lua").filter(|p| p.exists()) else {
-        return (Vec::new(), None);
-    };
-    match cian_lua::macros::load(&path) {
-        Ok(macros) => (macros, None),
-        Err(e) => (Vec::new(), Some(format!("macro.lua: {}", e))),
+    let mut macros = Vec::new();
+    let mut errors: Vec<String> = Vec::new();
+
+    if let Some(path) = cian_lua::config_read_path("macro.lua").filter(|p| p.exists()) {
+        match cian_lua::macros::load(&path) {
+            Ok(mut m) => macros.append(&mut m),
+            Err(e) => errors.push(format!("macro.lua: {}", e)),
+        }
     }
+
+    // One file per macro, e.g. macro/Adeploy.lua, macro/Bdbcheck.lua.
+    if let Some(dir) = cian_lua::config_read_path("macro").filter(|p| p.is_dir()) {
+        let mut files: Vec<std::path::PathBuf> = std::fs::read_dir(&dir)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.extension().and_then(|x| x.to_str()) == Some("lua"))
+            .collect();
+        files.sort();
+        for f in files {
+            let label = f.file_name().and_then(|n| n.to_str()).unwrap_or("macro").to_string();
+            match cian_lua::macros::load(&f) {
+                Ok(mut m) => macros.append(&mut m),
+                Err(e) => errors.push(format!("{}: {}", label, e)),
+            }
+        }
+    }
+
+    let error = if errors.is_empty() { None } else { Some(errors.join("; ")) };
+    (macros, error)
 }
 
 impl App {
@@ -58,19 +84,34 @@ impl App {
         self.popup = Popup::Macros { cursor: 0, names: self.macro_names() };
     }
 
-    /// Begin running macro `idx`. The build proceeds in [`App::tick_macro`].
+    /// Begin running macro `idx` from the loaded set. The build proceeds in
+    /// [`App::tick_macro`].
     pub(crate) fn run_macro(&mut self, idx: usize) {
-        let Some(m) = self.macros.get(idx) else { return };
-        let name = m.name.clone();
+        let Some(m) = self.macros.get(idx).cloned() else { return };
+        self.popup = Popup::None;
+        self.begin_macro(&m);
+    }
+
+    /// Start running macro named `name` (from the loaded set). Returns false if
+    /// there is no such macro — used by the `--macro-name` startup option.
+    pub(crate) fn start_macro_by_name(&mut self, name: &str) -> bool {
+        let Some(m) = self.macros.iter().find(|m| m.name == name).cloned() else {
+            return false;
+        };
+        self.begin_macro(&m);
+        true
+    }
+
+    /// Kick off building `m`'s layout, focusing the shell it builds into.
+    pub(crate) fn begin_macro(&mut self, m: &Macro) {
         self.macro_run = Some(MacroRun {
-            name: name.clone(),
+            name: m.name.clone(),
             queue: m.panes.iter().cloned().collect(),
             apply: None,
             first: true,
         });
-        self.popup = Popup::None;
         self.focus(FocusedPane::Shell);
-        self.message = Some(tr(self.lang, "running macro: ", "マクロ実行中: ").to_string() + &name);
+        self.message = Some(tr(self.lang, "running macro: ", "マクロ実行中: ").to_string() + &m.name);
     }
 
     /// Advance a running macro by one step. Returns true if anything changed
