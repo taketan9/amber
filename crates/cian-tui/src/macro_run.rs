@@ -8,12 +8,17 @@
 //! that "split, ssh here, split, ssh there, start logging" collapses to one key.
 
 use std::collections::VecDeque;
+use std::time::{Duration, Instant};
 
-use cian_lua::macros::{Macro, PaneStep, Split};
+use cian_lua::macros::{Macro, PaneStep, Split, Step};
 
 use crate::{theme, tr, App, FocusedPane, Popup, SplitDir};
 
-/// A layout macro in the middle of building itself.
+/// Nobody wants a mistyped `wait = 100000` to wedge cian; cap any single pause
+/// or prompt-wait here.
+const MAX_WAIT_SECS: f64 = 600.0;
+
+/// A macro in the middle of building itself.
 pub(crate) struct MacroRun {
     /// For the "macro done" message.
     name: String,
@@ -21,11 +26,18 @@ pub(crate) struct MacroRun {
     /// later one is split off the previous.
     queue: VecDeque<PaneStep>,
     /// A pane that now exists (its spawn has landed) and still needs its colour,
-    /// log and command applied.
+    /// log and scripted steps applied.
     apply: Option<PaneStep>,
     /// True until the first pane has been consumed (it is the shell pane you are
     /// on, so it is applied without a split).
     first: bool,
+    /// The current pane's remaining scripted steps (send / wait / expect).
+    steps: VecDeque<Step>,
+    /// When a timed `wait` ends, if one is in progress.
+    wait_until: Option<Instant>,
+    /// An `expect` in progress: the (lower-cased) text to watch for and the
+    /// deadline after which we give up and move on.
+    expect: Option<(String, Instant)>,
 }
 
 /// Load macros (portable-aware): first `macro.lua` (a list of macros), then
@@ -109,13 +121,18 @@ impl App {
             queue: m.panes.iter().cloned().collect(),
             apply: None,
             first: true,
+            steps: VecDeque::new(),
+            wait_until: None,
+            expect: None,
         });
         self.focus(FocusedPane::Shell);
         self.message = Some(tr(self.lang, "running macro: ", "マクロ実行中: ").to_string() + &m.name);
     }
 
-    /// Advance a running macro by one step. Returns true if anything changed
-    /// (so the caller repaints). Called each tick from the main loop.
+    /// Advance a running macro. Returns true if anything changed (so the caller
+    /// repaints). Called each tick from the main loop. It processes one thing
+    /// per tick — apply a landed pane, run/observe one scripted step, or start
+    /// the next pane — so waits and prompt-waits are honoured without blocking.
     pub(crate) fn tick_macro(&mut self) -> bool {
         if self.macro_run.is_none() {
             return false;
@@ -131,47 +148,80 @@ impl App {
             return true; // the first shell is still starting; try again next tick
         }
 
-        // Apply a pane whose spawn has landed.
-        if let Some(step) = self.macro_run.as_mut().and_then(|r| r.apply.take()) {
-            self.apply_macro_step(&step);
+        // Own the runner for the tick so we can freely call other `self` methods.
+        let mut run = self.macro_run.take().unwrap();
+
+        // 1. A pane whose spawn just landed: colour/log it and load its steps.
+        if let Some(step) = run.apply.take() {
+            self.apply_pane(&step, &mut run);
         }
 
-        // Start the next pane, or finish.
-        let next = self.macro_run.as_mut().and_then(|r| r.queue.pop_front());
-        match next {
-            Some(step) => {
-                let first = self.macro_run.as_ref().map(|r| r.first).unwrap_or(false);
-                if let Some(r) = self.macro_run.as_mut() {
-                    r.first = false;
+        // 2. A timed pause still in progress.
+        if let Some(t) = run.wait_until {
+            if Instant::now() < t {
+                self.macro_run = Some(run);
+                return true;
+            }
+            run.wait_until = None;
+        }
+
+        // 3. Waiting for a prompt/text to appear.
+        if let Some((needle, deadline)) = run.expect.clone() {
+            if self.shell_screen_has(&needle) {
+                run.expect = None;
+            } else if Instant::now() >= deadline {
+                run.expect = None;
+                self.message = Some(format!("macro: gave up waiting for {:?}", needle));
+            } else {
+                self.macro_run = Some(run);
+                return true;
+            }
+        }
+
+        // 4. Run the current pane's next scripted step.
+        if let Some(step) = run.steps.pop_front() {
+            match step {
+                Step::Send(line) => self.type_line_in_active(&line),
+                Step::Wait(secs) => {
+                    run.wait_until = Some(Instant::now() + secs_to_dur(secs));
                 }
+                Step::Expect { text, timeout } => {
+                    run.expect = Some((text.to_lowercase(), Instant::now() + secs_to_dur(timeout)));
+                }
+            }
+            self.macro_run = Some(run);
+            return true;
+        }
+
+        // 5. Current pane finished; start the next one, or we are done.
+        match run.queue.pop_front() {
+            Some(next) => {
+                let first = run.first;
+                run.first = false;
                 if !first {
                     // Split off the previous pane; the new pane becomes active
                     // when the spawn lands, and we apply to it then.
-                    let dir = match step.dir {
+                    let dir = match next.dir {
                         Split::Right => SplitDir::LeftRight,
                         Split::Down => SplitDir::TopBottom,
                     };
                     self.shell.split_active(&cwd, dir);
                 }
-                if let Some(r) = self.macro_run.as_mut() {
-                    r.apply = Some(step);
-                }
+                run.apply = Some(next);
+                self.macro_run = Some(run);
             }
             None => {
-                // Nothing left to start; once the last apply is done we are through.
-                if self.macro_run.as_ref().map(|r| r.apply.is_none()).unwrap_or(true) {
-                    if let Some(r) = self.macro_run.take() {
-                        self.message =
-                            Some(tr(self.lang, "macro done: ", "マクロ完了: ").to_string() + &r.name);
-                    }
-                }
+                self.message =
+                    Some(tr(self.lang, "macro done: ", "マクロ完了: ").to_string() + &run.name);
+                // Drop `run`: the macro is finished.
             }
         }
         true
     }
 
-    /// Colour, log and run commands for the pane that is now active.
-    fn apply_macro_step(&mut self, step: &PaneStep) {
+    /// Colour and log the now-active pane, and load its command + scripted steps
+    /// into the runner to be played out over the following ticks.
+    fn apply_pane(&mut self, step: &PaneStep, run: &mut MacroRun) {
         if let Some(spec) = &step.bg {
             if let Some(c) = theme::parse_color(spec) {
                 self.shell.set_active_pane_bg(Some(c));
@@ -180,12 +230,21 @@ impl App {
         if let Some(dir) = &step.log {
             self.start_session_log(dir);
         }
+        run.steps.clear();
         if let Some(cmd) = &step.cmd {
-            self.type_line_in_active(cmd);
+            run.steps.push_back(Step::Send(cmd.clone()));
         }
-        for line in &step.steps {
-            self.type_line_in_active(line);
-        }
+        run.steps.extend(step.steps.iter().cloned());
+    }
+
+    /// Does the active shell pane's visible screen contain `needle` (already
+    /// lower-cased)? Used by `expect` to wait for a prompt.
+    fn shell_screen_has(&self, needle: &str) -> bool {
+        self.shell
+            .active_session()
+            .and_then(|s| s.parser().lock().ok().map(|p| p.screen().contents()))
+            .map(|c| c.to_lowercase().contains(needle))
+            .unwrap_or(false)
     }
 
     /// Type one line into the active shell pane and press Enter.
@@ -201,4 +260,9 @@ impl App {
     pub(crate) fn macro_names(&self) -> Vec<String> {
         self.macros.iter().map(|m| m.name.clone()).collect()
     }
+}
+
+/// A non-negative, capped duration from a seconds value.
+fn secs_to_dur(secs: f64) -> Duration {
+    Duration::from_secs_f64(secs.clamp(0.0, MAX_WAIT_SECS))
 }

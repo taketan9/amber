@@ -23,27 +23,45 @@ use std::path::Path;
 use mlua::{Lua, Table, Value};
 
 /// One macro: a name and the panes it builds.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct Macro {
     pub name: String,
     pub panes: Vec<PaneStep>,
 }
 
 /// One pane in a layout macro.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct PaneStep {
     /// How this pane splits off the previous one. Ignored for the first pane.
     pub dir: Split,
-    /// A command line to run in the pane (typed, then Enter).
+    /// A command line to run in the pane (typed, then Enter). Runs before `steps`.
     pub cmd: Option<String>,
-    /// Further lines sent in order after `cmd` — e.g. an in-tool login sequence.
-    pub steps: Vec<String>,
+    /// A scripted sequence run in the pane after `cmd`: type lines, pause, or
+    /// wait for a prompt to appear — an in-tool login (`sqlplus /nolog` →
+    /// `connect …`), a paced command run, etc.
+    pub steps: Vec<Step>,
     /// Background colour spec for the pane (a `"#rrggbb"` / named / `"r,g,b"`
     /// string, parsed by the UI).
     pub bg: Option<String>,
     /// A directory to start a session log in for this pane.
     pub log: Option<String>,
 }
+
+/// One scripted action inside a pane. In Lua a bare string is a `Send`; a table
+/// is `{ send = }`, `{ wait = seconds }`, or `{ expect = "text", timeout = s }`.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Step {
+    /// Type a line and press Enter.
+    Send(String),
+    /// Pause for this many seconds before the next step.
+    Wait(f64),
+    /// Wait until `text` appears in the pane (case-insensitive), or `timeout`
+    /// seconds pass — for logins/tools that are ready only when they say so.
+    Expect { text: String, timeout: f64 },
+}
+
+/// Default seconds to wait on an `expect` before giving up and moving on.
+const DEFAULT_EXPECT_TIMEOUT: f64 = 30.0;
 
 /// The split direction for a pane relative to the previous one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -122,11 +140,42 @@ fn pane_from(t: &Table) -> Result<PaneStep, String> {
     let log = t.get::<Option<String>>("log").unwrap_or(None).filter(|s| !s.is_empty());
     let mut steps = Vec::new();
     if let Ok(Value::Table(st)) = t.get::<Value>("steps") {
-        for s in st.sequence_values::<String>() {
-            steps.push(s.map_err(|e| e.to_string())?);
+        for s in st.sequence_values::<Value>() {
+            if let Some(step) = step_from(s.map_err(|e| e.to_string())?)? {
+                steps.push(step);
+            }
         }
     }
     Ok(PaneStep { dir, cmd, steps, bg, log })
+}
+
+/// Parse one entry of a `steps` list: a bare string (`Send`), or a table
+/// carrying `send` / `wait` / `expect`.
+fn step_from(v: Value) -> Result<Option<Step>, String> {
+    match v {
+        Value::String(s) => {
+            let line = s.to_str().map_err(|e| e.to_string())?.to_string();
+            Ok(Some(Step::Send(line)))
+        }
+        Value::Table(t) => {
+            if let Some(send) = t.get::<Option<String>>("send").map_err(|e| e.to_string())? {
+                Ok(Some(Step::Send(send)))
+            } else if let Some(secs) = t.get::<Option<f64>>("wait").map_err(|e| e.to_string())? {
+                Ok(Some(Step::Wait(secs.max(0.0))))
+            } else if let Some(text) = t.get::<Option<String>>("expect").map_err(|e| e.to_string())? {
+                let timeout = t
+                    .get::<Option<f64>>("timeout")
+                    .map_err(|e| e.to_string())?
+                    .filter(|s| *s > 0.0)
+                    .unwrap_or(DEFAULT_EXPECT_TIMEOUT);
+                Ok(Some(Step::Expect { text, timeout }))
+            } else {
+                Err("a step table needs one of `send`, `wait`, or `expect`".into())
+            }
+        }
+        Value::Nil => Ok(None),
+        other => Err(format!("a step must be a string or a table, got {}", other.type_name())),
+    }
 }
 
 #[cfg(test)]
@@ -155,7 +204,40 @@ mod tests {
         assert_eq!(m.panes[0].dir, Split::Right); // default for the first pane
         assert_eq!(m.panes[1].dir, Split::Right);
         assert_eq!(m.panes[2].dir, Split::Down);
-        assert_eq!(m.panes[2].steps, vec!["sqlplus /nolog", "connect u/p@db"]);
+        assert_eq!(
+            m.panes[2].steps,
+            vec![Step::Send("sqlplus /nolog".into()), Step::Send("connect u/p@db".into())]
+        );
+    }
+
+    #[test]
+    fn steps_can_wait_and_expect() {
+        let src = r#"return { { name = "login", panes = { {
+            cmd = "ssh admin@db",
+            steps = {
+              { expect = "password:", timeout = 15 },
+              { send = "hunter2" },
+              { wait = 2 },
+              "sqlplus /nolog",
+              { expect = "SQL>" },
+            },
+        } } } }"#;
+        let m = &parse(src).unwrap()[0];
+        assert_eq!(
+            m.panes[0].steps,
+            vec![
+                Step::Expect { text: "password:".into(), timeout: 15.0 },
+                Step::Send("hunter2".into()),
+                Step::Wait(2.0),
+                Step::Send("sqlplus /nolog".into()),
+                Step::Expect { text: "SQL>".into(), timeout: 30.0 }, // default timeout
+            ]
+        );
+    }
+
+    #[test]
+    fn a_step_table_without_a_verb_is_an_error() {
+        assert!(parse(r#"return { { name = "x", panes = { { steps = { { foo = 1 } } } } } }"#).is_err());
     }
 
     #[test]

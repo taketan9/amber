@@ -23,7 +23,14 @@
 --  pane you are on; each later pane is split off the previous one:
 --    dir   = "right" (side by side) or "down" (stacked). Default "right".
 --    cmd   = a command line to run (typed, then Enter) — e.g. an ssh line.
---    steps = extra lines sent in order after cmd (e.g. an in-tool login).
+--    steps = a scripted sequence run after cmd, played out over time so it can
+--            wait for a prompt instead of racing ahead. Each step is:
+--              "text"                       -- send a line (Enter)
+--              { send = "text" }            -- send a line
+--              { wait = 2 }                 -- pause 2 seconds
+--              { expect = "SQL>" }          -- wait until text appears
+--              { expect = "pw:", timeout=20 } -- ...or give up after 20s
+--            See examples/macro/Bmacro.lua for a scripted DB login.
 --    bg    = pane background colour ("#rrggbb", a name, or "r,g,b"), so each
 --            pane is easy to tell apart.
 --    log   = a directory to start a session log in for that pane.

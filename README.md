@@ -614,11 +614,20 @@ return {
 }
 ```
 
-Per pane: `dir` (`"right"` | `"down"`), `cmd` (a line to run), `steps` (more
-lines sent after it — e.g. `sqlplus /nolog` then `connect …`), `bg` (a colour so
-panes are easy to tell apart), and `log` (a directory to record the session to).
-Because each split spawns asynchronously, cian builds the layout pane-by-pane as
-the shells come up. See [`examples/macro.lua`](examples/macro.lua).
+Per pane: `dir` (`"right"` | `"down"`), `cmd` (a line to run), `steps` (a
+scripted sequence run after it), `bg` (a colour so panes are easy to tell
+apart), and `log` (a directory to record the session to). Because each split
+spawns asynchronously, cian builds the layout pane-by-pane as the shells come up.
+See [`examples/macro.lua`](examples/macro.lua).
+
+**Scripted steps** are played out over time, so a login can wait for its prompt
+instead of racing ahead. Each `steps` entry is a line to send (`"text"` or
+`{ send = "text" }`), a pause (`{ wait = 2 }`), or a prompt-wait
+(`{ expect = "SQL>" }`, optionally `{ expect = "password:", timeout = 20 }` —
+`expect` matches case-insensitively and gives up after the timeout). That turns
+"ssh in, wait for the password prompt, log in, wait for the shell, launch
+sqlplus, connect" into a macro that survives a slow link — see
+[`examples/macro/Bmacro.lua`](examples/macro/Bmacro.lua).
 
 **One macro per file.** As an alternative to the single list, put a `macro/`
 directory next to `init.lua` with one file each — `macro/Adeploy.lua`,

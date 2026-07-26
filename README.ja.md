@@ -601,10 +601,19 @@ return {
 ```
 
 ペインごとに：`dir`（`"right"` | `"down"`）、`cmd`（実行する1行）、`steps`
-（その後に順に送る行 — 例 `sqlplus /nolog` の次に `connect …`）、`bg`（ペイン
-を見分けるための色）、`log`（セッションを記録するディレクトリ）。各分割は
-非同期に起動するため、cianはシェルが立ち上がるのに合わせてペインを1つずつ
-構築します。[`examples/macro.lua`](examples/macro.lua) を参照。
+（その後に走らせるスクリプト列）、`bg`（ペインを見分けるための色）、`log`
+（セッションを記録するディレクトリ）。各分割は非同期に起動するため、cianは
+シェルが立ち上がるのに合わせてペインを1つずつ構築します。
+[`examples/macro.lua`](examples/macro.lua) を参照。
+
+**スクリプトステップ**は時間をかけて1つずつ実行されるので、ログインは
+先走らずにプロンプトを待てます。各 `steps` 要素は、送る行（`"text"` または
+`{ send = "text" }`）、一時停止（`{ wait = 2 }`）、プロンプト待ち
+（`{ expect = "SQL>" }`、省略可 `{ expect = "password:", timeout = 20 }` —
+`expect` は大文字小文字を無視、タイムアウトで打ち切り）です。これで「ssh接続 →
+パスワードプロンプトを待つ → ログイン → シェルを待つ → sqlplus起動 → connect」を、
+遅い回線でも壊れないマクロにできます。
+[`examples/macro/Bmacro.lua`](examples/macro/Bmacro.lua) を参照。
 
 **1マクロ1ファイル。** 単一リストの代わりに、`init.lua` の隣に `macro/`
 ディレクトリを置き、`macro/Adeploy.lua`・`macro/Bdbcheck.lua` のように1つずつ
