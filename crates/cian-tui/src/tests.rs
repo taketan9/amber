@@ -3079,6 +3079,38 @@
         assert!(!result.identical);
     }
 
+    #[test]
+    fn identical_files_report_a_notice_not_an_empty_diff() {
+        let (_l, _r, mut app) = two_panes_with("same\nlines\n", "same\nlines\n");
+        app.handle_key(code(KeyCode::Char('='))).unwrap();
+        match &app.popup {
+            Popup::Notice { lines } => assert!(lines.iter().any(|l| l.contains("identical"))),
+            other => panic!("expected an identical notice, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn a_diff_can_be_copied_and_saved() {
+        let (l, _r, mut app) = two_panes_with("one\ntwo\n", "one\nTWO\n");
+        app.handle_key(code(KeyCode::Char('='))).unwrap();
+        assert!(matches!(app.popup, Popup::Diff { .. }));
+
+        // c copies a unified-style text with the changed lines.
+        app.handle_key(code(KeyCode::Char('c'))).unwrap();
+        assert_eq!(app.message.as_deref(), Some("◂ diff copied"));
+
+        // w prompts for a filename; saving writes it into the active pane's dir
+        // (the left pane, which is focused by default).
+        app.handle_key(code(KeyCode::Char('w'))).unwrap();
+        assert!(matches!(&app.popup, Popup::TextInput { kind: InputKind::DiffSaveAs { .. }, .. }));
+        // Clear the default and type a name.
+        app.handle_key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL)).unwrap();
+        for c in "out.diff".chars() { app.handle_key(key(c)).unwrap(); }
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+        let saved = std::fs::read_to_string(l.path().join("out.diff")).unwrap();
+        assert!(saved.contains("- two") && saved.contains("+ TWO"), "saved diff:\n{saved}");
+    }
+
     /// Which pane holds the focus must not decide which file is the "before".
     #[test]
     fn the_left_pane_is_always_the_left_side() {

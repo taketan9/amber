@@ -102,6 +102,36 @@ pub fn diff_files(left: &Path, right: &Path) -> Result<Diff> {
     Ok(d)
 }
 
+/// Like [`diff_files`], but decode both sides with an explicit encoding first —
+/// for the diff viewer's "switch encoding" the same way the F3 viewer offers.
+pub fn diff_files_with_encoding(
+    left: &Path,
+    right: &Path,
+    enc: crate::viewer::TextEncoding,
+) -> Result<Diff> {
+    let mut a = view_file(left)?;
+    let mut b = view_file(right)?;
+    let truncated = a.truncated || b.truncated;
+    if a.kind == ViewKind::Binary || b.kind == ViewKind::Binary {
+        let identical = a.total_bytes == b.total_bytes && a.lines == b.lines;
+        return Ok(Diff {
+            rows: Vec::new(),
+            added: 0,
+            removed: 0,
+            changed: 0,
+            truncated,
+            binary: true,
+            identical,
+            too_large: false,
+        });
+    }
+    a.redecode(enc);
+    b.redecode(enc);
+    let mut d = diff_lines(&a.lines, &b.lines);
+    d.truncated = truncated;
+    Ok(d)
+}
+
 /// The line-level comparison, separated from any file reading so it can be
 /// tested directly.
 pub fn diff_lines(a: &[String], b: &[String]) -> Diff {

@@ -342,6 +342,23 @@ impl App {
                 }
                 self.popup = *viewer;
             }
+            EncTarget::Diff(mut diff) => {
+                if let (Some(enc), Popup::Diff { left_path, right_path, result, folded, encoding, scroll, .. }) =
+                    (chosen, diff.as_mut())
+                {
+                    match cian_core::diff::diff_files_with_encoding(left_path, right_path, enc) {
+                        Ok(d) => {
+                            *folded = cian_core::diff::fold(&d.rows, cian_core::diff::CONTEXT);
+                            *result = d;
+                            *encoding = enc;
+                            *scroll = 0;
+                            self.message = Some(format!("encoding: {}", enc.label()));
+                        }
+                        Err(e) => self.message = Some(format!("re-diff failed: {}", e)),
+                    }
+                }
+                self.popup = *diff;
+            }
         }
     }
 

@@ -475,6 +475,9 @@ impl App {
                 KeyCode::Char('G') | KeyCode::End => *cursor = n.saturating_sub(1),
                 // Jump both panes to the highlighted difference.
                 KeyCode::Enter => self.dir_compare_goto(),
+                // c/p copy the list; w saves it to the active pane.
+                KeyCode::Char('c') | KeyCode::Char('p') => self.copy_diff(),
+                KeyCode::Char('w') => self.start_diff_save_as(),
                 _ => { let _ = scroll; }
             }
             return Ok(());
@@ -511,6 +514,10 @@ impl App {
                     // land somewhere unrelated.
                     *scroll = 0;
                 }
+                // c/p copy the diff as text; w saves it; e switches encoding.
+                KeyCode::Char('c') | KeyCode::Char('p') => self.copy_diff(),
+                KeyCode::Char('w') => self.start_diff_save_as(),
+                KeyCode::Char('e') => self.open_diff_encoding_picker(),
                 _ => {}
             }
             return Ok(());

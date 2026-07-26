@@ -2753,7 +2753,7 @@ fn draw_popup(
         return;
     }
 
-    if let Popup::Diff { left, right, result, folded, fold, scroll } = popup {
+    if let Popup::Diff { left, right, result, folded, fold, scroll, encoding, .. } = popup {
         use cian_core::diff::Row;
 
         let rect = centered_rect(area.width.saturating_sub(2), area.height.saturating_sub(2), area);
@@ -2862,11 +2862,13 @@ fn draw_popup(
         let fold_word = if *fold { tr(lang, "show all", "全表示") } else { tr(lang, "fold", "畳む") };
         f.render_widget(
             Paragraph::new(format!(
-                "{}{}  {}{}      {} ",
-                tr(lang, " n/N next/prev change  f ", " n/N 変更へ移動  f "),
+                "{}{}  {}  {}  [{}] {} ",
+                tr(lang, " n/N change  f ", " n/N 変更  f "),
                 fold_word,
-                tr(lang, "j/k scroll  u/d page  Esc close", "j/k スクロール  u/d ページ  Esc 閉じる"),
-                "",
+                tr(lang, "c copy  w save  e enc  g/G  Esc",
+                      "c コピー  w 保存  e 文字コード  g/G  Esc"),
+                tr(lang, "j/k u/d", "j/k u/d"),
+                encoding.label(),
                 pos
             ))
             .style(Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD)),

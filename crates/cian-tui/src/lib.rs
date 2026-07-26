@@ -277,6 +277,12 @@ enum Popup {
     Diff {
         left: String,
         right: String,
+        /// The two files on disk, so the encoding can be switched (re-diff) and
+        /// the result saved.
+        left_path: PathBuf,
+        right_path: PathBuf,
+        /// The encoding both sides were decoded with.
+        encoding: cian_core::viewer::TextEncoding,
         result: cian_core::diff::Diff,
         folded: Vec<cian_core::diff::Row>,
         fold: bool,
@@ -393,6 +399,8 @@ enum EncTarget {
     Shell,
     /// A stashed F3 viewer to re-decode and restore when the pick is made.
     Viewer(Box<Popup>),
+    /// A stashed file diff to re-run under the chosen encoding.
+    Diff(Box<Popup>),
 }
 
 /// The F3 viewer's visual-selection mode, matching vim's three flavours.
@@ -810,6 +818,9 @@ enum InputKind {
     AiRename,
     /// A natural-language query for semantic search over the tree.
     AiSearch,
+    /// A filename to save the diff/compare result into (the text is carried
+    /// here because the source popup is replaced by the prompt).
+    DiffSaveAs { text: String },
 }
 
 impl InputKind {

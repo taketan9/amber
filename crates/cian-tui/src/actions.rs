@@ -532,10 +532,25 @@ impl App {
         }
         match cian_core::diff::diff_files(&a.path, &b.path) {
             Ok(result) => {
+                // Identical files get a clear notice rather than a diff of
+                // nothing — the same feedback the folder compare now gives.
+                if !result.rows.iter().any(|r| r.is_difference()) {
+                    self.popup = Popup::Notice {
+                        lines: vec![
+                            tr(self.lang, "The two files are identical.", "2つのファイルは同一です。").to_string(),
+                            String::new(),
+                            format!("{}  ↔  {}", a.name, b.name),
+                        ],
+                    };
+                    return;
+                }
                 let folded = cian_core::diff::fold(&result.rows, cian_core::diff::CONTEXT);
                 self.popup = Popup::Diff {
                     left: a.name.clone(),
                     right: b.name.clone(),
+                    left_path: a.path.clone(),
+                    right_path: b.path.clone(),
+                    encoding: cian_core::viewer::TextEncoding::Utf8,
                     result,
                     folded,
                     // Folded to begin with: the differences are what was asked
@@ -608,7 +623,15 @@ impl App {
             return true;
         }
         if diff.is_identical() {
-            self.message = Some(format!("{} and {} match — no differences", job.left, job.right));
+            // A clear notice, not just a status line — the compare felt
+            // unresponsive when identical folders only whispered a message.
+            self.popup = Popup::Notice {
+                lines: vec![
+                    tr(self.lang, "The two folders are identical.", "2つのフォルダは同一です。").to_string(),
+                    String::new(),
+                    format!("{}  ↔  {}", job.left, job.right),
+                ],
+            };
             return true;
         }
         self.popup = Popup::DirCompare {
@@ -652,6 +675,88 @@ impl App {
             go(&mut self.right, &rr, &rel);
         }
         self.message = Some(format!("→ {}", rel.display()));
+    }
+
+    /// The open diff (file or folder) rendered as plain text, for copy/save.
+    fn diff_as_text(&self) -> Option<String> {
+        use cian_core::diff::Row;
+        match &self.popup {
+            Popup::Diff { left, right, result, .. } => {
+                let mut out = format!("--- {}\n+++ {}\n", left, right);
+                if result.binary {
+                    out.push_str(if result.identical {
+                        "(binary files, identical)\n"
+                    } else {
+                        "(binary files differ)\n"
+                    });
+                    return Some(out);
+                }
+                for r in &result.rows {
+                    match r {
+                        Row::Same { left: l, .. } => out.push_str(&format!("  {}\n", l.text)),
+                        Row::Removed { left: l } => out.push_str(&format!("- {}\n", l.text)),
+                        Row::Added { right: rr } => out.push_str(&format!("+ {}\n", rr.text)),
+                        Row::Changed { left: l, right: rr } => {
+                            out.push_str(&format!("- {}\n+ {}\n", l.text, rr.text));
+                        }
+                        Row::Skipped { lines } => out.push_str(&format!("  … {} identical lines\n", lines)),
+                    }
+                }
+                Some(out)
+            }
+            Popup::DirCompare { left, right, entries, .. } => {
+                use cian_core::dirdiff::Status;
+                let mut out = format!("# compare  {}  ↔  {}\n", left, right);
+                for e in entries {
+                    let mark = match e.status {
+                        Status::OnlyLeft => "-",
+                        Status::OnlyRight => "+",
+                        Status::Differ => "~",
+                    };
+                    out.push_str(&format!("{} {}\n", mark, e.rel.display()));
+                }
+                Some(out)
+            }
+            _ => None,
+        }
+    }
+
+    /// Copy the diff/compare result to the clipboard.
+    pub(crate) fn copy_diff(&mut self) {
+        let Some(text) = self.diff_as_text() else { return };
+        match self.clipboard.as_mut() {
+            Some(cb) => {
+                let _ = cb.set_text(text);
+                self.message = Some("◂ diff copied".into());
+            }
+            None => self.message = Some("clipboard unavailable".into()),
+        }
+    }
+
+    /// Prompt for a filename and save the diff/compare result into the active
+    /// pane's directory.
+    pub(crate) fn start_diff_save_as(&mut self) {
+        let Some(text) = self.diff_as_text() else { return };
+        self.popup = text_input(
+            "save diff as",
+            "filename (in the active pane's directory):",
+            "diff.txt".to_string(),
+            InputKind::DiffSaveAs { text },
+        );
+    }
+
+    /// Stash the current file diff and open the encoding picker for it.
+    pub(crate) fn open_diff_encoding_picker(&mut self) {
+        if !matches!(self.popup, Popup::Diff { .. }) {
+            return;
+        }
+        let cur = if let Popup::Diff { encoding, .. } = &self.popup {
+            cian_core::viewer::TextEncoding::ALL.iter().position(|e| e == encoding).unwrap_or(0)
+        } else {
+            0
+        };
+        let diff = std::mem::replace(&mut self.popup, Popup::None);
+        self.popup = Popup::EncodingPicker { cursor: cur, target: EncTarget::Diff(Box::new(diff)) };
     }
 
     /// Pull members out of the open archive into the opposite pane.
@@ -1408,6 +1513,20 @@ impl App {
             }
             InputKind::AiSearch => {
                 self.start_ai_search(&name);
+                return Ok(());
+            }
+            InputKind::DiffSaveAs { text } => {
+                let dir = self.active_pane().map(|p| p.cwd.clone());
+                if let Some(dir) = dir {
+                    let path = dir.join(&name);
+                    match std::fs::write(&path, text) {
+                        Ok(()) => {
+                            self.message = Some(format!("saved diff → {}", path.display()));
+                            self.reload_active();
+                        }
+                        Err(e) => self.message = Some(format!("save failed: {}", e)),
+                    }
+                }
                 return Ok(());
             }
             InputKind::DestPath { op, targets } => {
