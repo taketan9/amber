@@ -82,6 +82,12 @@
 -- cian.set_option("animation_ms", 120)
 -- cian.set_option("animation_ms", 0)      -- off
 
+-- External editor for `E` in the F3 viewer and `:edit`. A command line; the
+-- file is appended. Unset falls back to $VISUAL / $EDITOR, then the first of
+-- nvim -> vim -> vi found on PATH (and if none is found, cian says so).
+-- cian.set_option("editor", "nvim")
+-- cian.set_option("editor", "code -w")   -- VS Code, waiting for the tab to close
+
 
 -- ----------------------------------------------------------------------------
 --  KEY BINDINGS  —  cian.set_keymap("key", "action")

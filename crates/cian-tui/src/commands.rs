@@ -41,6 +41,7 @@ impl App {
             "find" => self.start_find_prompt(),
             "menu" => self.open_menu_at_cursor(),
             "count" | "steps" => self.start_count(),
+            "edit" | "e" => self.edit_selected_file(),
             "macro" | "macros" => self.start_macros(),
             "ssh" => self.start_ssh(),
             "ai" | "chat" => self.open_ai_chat(),

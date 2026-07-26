@@ -45,6 +45,7 @@ mod gitui;
 mod commands;
 mod actions;
 mod count;
+mod edit;
 mod macro_run;
 mod mouse;
 mod menu;
@@ -1314,6 +1315,9 @@ pub struct App {
     count_opts: cian_core::count::Options,
     /// A running count, delivering its report when finished.
     count_job: Option<std::sync::mpsc::Receiver<cian_core::count::Report>>,
+    /// A file the user asked to edit; the main loop suspends the TUI, runs the
+    /// external editor, and restores. See [`crate::edit`].
+    pending_edit: Option<edit::PendingEdit>,
     pending_g: bool,
     /// When true, only the focused surface is drawn, filling the window.
     pub zoomed: bool,
@@ -1433,6 +1437,7 @@ impl App {
             macro_run: None,
             count_opts,
             count_job: None,
+            pending_edit: None,
             pending_g: false,
             zoomed: false,
             debug_keys: std::env::var("CIAN_DEBUG_KEYS").is_ok(),
@@ -2356,6 +2361,7 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry("G", Some(CursorBottom), "jump to bottom", "末尾へジャンプ"),
                 entry("l, Enter", Some(EnterDir), "enter folder / open file", "フォルダに入る／ファイルを開く"),
                 entry("F3", None, "look inside: view a file, list an archive", "中身を見る：ファイル閲覧・書庫の一覧"),
+                entry(":edit", None, "edit the file in your editor (E in the viewer)", "エディタで編集（ビューア内は E）"),
                 entry("  in viewer", None, "hjkl move, /n/N search, %/{/}/NG jump, v/V/C-v select y copy", "ビューア内：hjkl移動, /n/N検索, %/{/}/NG移動, v/V/C-v選択 yコピー"),
                 entry("  from a grep hit", None, "Ctrl+n/N next/prev hit, Shift+Enter reveal in pane, e encoding", "grepヒットから：Ctrl+n/N 次/前, Shift+Enter 場所へ, e 文字コード"),
                 entry("=", None, "compare left ↔ right: two files (line diff), or two folders (recursive)", "左右を比較：ファイル同士（行差分）／フォルダ同士（再帰）"),
@@ -2735,6 +2741,52 @@ pub fn run(left: Option<PathBuf>, right: Option<PathBuf>, startup: StartupMacro)
     result
 }
 
+/// Suspend the TUI, run the external editor attached to the real terminal on
+/// the queued file, then restore the alternate screen and reload. cian owns the
+/// terminal here, so this is where the leave/enter dance belongs.
+fn suspend_and_edit<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Result<()> {
+    let Some(edit) = app.pending_edit.take() else { return Ok(()) };
+    let Some(cmd) = edit::resolve_editor(&app.config) else {
+        app.message = Some(tr(
+            app.lang,
+            "no editor found — install nvim/vim/vi, or set cian.set_option(\"editor\", …)",
+            "エディタが見つかりません — nvim/vim/vi を入れるか cian.set_option(\"editor\", …) を設定してください",
+        ).into());
+        return Ok(());
+    };
+
+    // Hand the terminal back to a normal cooked state for the editor.
+    let mut out = io::stdout();
+    disable_raw_mode()?;
+    let _ = execute!(out, PopKeyboardEnhancementFlags);
+    execute!(out, DisableBracketedPaste, DisableMouseCapture, LeaveAlternateScreen)?;
+
+    let status = Command::new(&cmd[0]).args(&cmd[1..]).arg(&edit.path).status();
+
+    // Take it back and rebuild the screen.
+    enable_raw_mode()?;
+    execute!(out, EnterAlternateScreen, EnableMouseCapture, EnableBracketedPaste)?;
+    let _ = execute!(
+        out,
+        PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
+    );
+    terminal.clear()?;
+
+    match status {
+        Ok(s) if s.success() || s.code().is_some() => {}
+        Ok(_) => app.message = Some("editor exited abnormally".into()),
+        Err(e) => app.message = Some(format!("could not launch editor: {}", e)),
+    }
+
+    // The file may have changed on disk; refresh the panes and, if the edit came
+    // from the viewer, re-open it on the (possibly changed) file.
+    app.reload_both();
+    if edit.reopen_viewer {
+        app.open_viewer_at(&edit.path, &edit.title, 0);
+    }
+    Ok(())
+}
+
 fn run_loop<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Result<()> {
     let mut needs_redraw = true;
     let mut last_pulse = Instant::now();
@@ -2795,6 +2847,11 @@ fn run_loop<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Result<()>
         }
         // A finished file/step count shows its report.
         if app.count_job.is_some() && app.poll_count() {
+            needs_redraw = true;
+        }
+        // An edit request suspends the TUI, runs the editor, and restores.
+        if app.pending_edit.is_some() {
+            suspend_and_edit(terminal, app)?;
             needs_redraw = true;
         }
         // A connection picked before the shell finished starting.

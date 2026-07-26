@@ -2706,14 +2706,14 @@ fn draw_popup(
             Some(q) => format!("/{}_", q),
             None => {
                 let hints = if *preview {
-                    tr(lang, " / f search  n/N  v/V select  y copy  p source  ",
-                          " / f 検索  n/N  v/V 選択  y コピー  p ソース  ")
+                    tr(lang, " / f search  n/N  v/V select  y copy  E edit  p source  ",
+                          " / f 検索  n/N  v/V 選択  y コピー  E 編集  p ソース  ")
                 } else if *markdown {
-                    tr(lang, " / f search  n/N  v/V select  y copy  e enc  p preview  ",
-                          " / f 検索  n/N  v/V 選択  y コピー  e 文字コード  p プレビュー  ")
+                    tr(lang, " / f search  n/N  v/V select  y copy  E edit  e enc  p preview  ",
+                          " / f 検索  n/N  v/V 選択  y コピー  E 編集  e 文字コード  p プレビュー  ")
                 } else {
-                    tr(lang, " / f search  n/N  v/V select  y copy  S-Enter reveal  e enc  ",
-                          " / f 検索  n/N  v/V 選択  y コピー  S-Enter 場所へ  e 文字コード  ")
+                    tr(lang, " / f search  n/N  v/V select  y copy  E edit  S-Enter reveal  e enc  ",
+                          " / f 検索  n/N  v/V 選択  y コピー  E 編集  S-Enter 場所へ  e 文字コード  ")
                 };
                 format!("{}{} ", hints, pos)
             }

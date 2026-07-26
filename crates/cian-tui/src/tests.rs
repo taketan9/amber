@@ -163,6 +163,33 @@
     }
 
     #[test]
+    fn edit_queues_the_file_for_the_external_editor() {
+        let (_d, mut app) = app_with(&["note.txt"]);
+        // Put the cursor on the file (index 0 may be the synthetic `..`).
+        {
+            let p = app.active_pane_mut().unwrap();
+            p.cursor = p.entries.iter().position(|e| e.name == "note.txt").unwrap();
+        }
+        // `:edit` on a file queues it (the main loop runs the editor).
+        app.edit_selected_file();
+        match &app.pending_edit {
+            Some(e) => {
+                assert!(e.path.ends_with("note.txt"));
+                assert!(!e.reopen_viewer, ":edit does not re-open the viewer");
+            }
+            None => panic!("edit was not queued"),
+        }
+
+        // From the F3 viewer, `E` queues it and asks to re-open the viewer after.
+        app.pending_edit = None;
+        app.handle_key(code(KeyCode::F(3))).unwrap();
+        app.handle_key(KeyEvent::new(KeyCode::Char('E'), KeyModifiers::SHIFT)).unwrap();
+        let e = app.pending_edit.as_ref().expect("viewer edit queued");
+        assert!(e.reopen_viewer, "viewer edit re-opens the viewer");
+        assert!(matches!(app.popup, Popup::None), "viewer stepped aside");
+    }
+
+    #[test]
     fn count_reports_files_and_steps() {
         let (d, mut app) = app_with(&[]);
         std::fs::write(d.path().join("a.rs"), "fn main() {}\n\n// note\nlet x = 1;\n").unwrap();

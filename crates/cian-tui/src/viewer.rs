@@ -102,6 +102,13 @@ impl App {
             self.copy_viewer_selection();
             return Ok(());
         }
+        // `E` opens the file in the external editor (nvim → vim → vi, or the
+        // configured one); the viewer re-opens on it afterwards.
+        if !ctrl && key.code == KeyCode::Char('E') {
+            self.edit_viewed_file();
+            self.popup = Popup::None;
+            return Ok(());
+        }
         // `/`, `f` and `Shift+F` all open the search prompt (the pane's own
         // find keys, so the reflex carries over into the viewer and preview).
         if !ctrl && matches!(key.code, KeyCode::Char('/') | KeyCode::Char('f') | KeyCode::Char('F')) {

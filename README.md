@@ -273,6 +273,13 @@ block-wise visual selection; **Shift+arrow** selects character-wise and
 encoding (UTF-8 / Shift_JIS / UTF-16) when a file was decoded wrong, and
 `Shift+Enter` reveals the file in the pane (jump to its folder, cursor on it).
 
+**Editing.** Press **`E`** in the viewer (or `:edit` / `:e` on a file in a
+pane) to open it in your editor. cian doesn't embed one — a usable vim/nvim is
+tens of megabytes with its runtime — so it shells out: the `editor` option from
+`init.lua` if set, else `$VISUAL` / `$EDITOR`, else the first of **nvim → vim →
+vi** on `PATH` (and it says so if none is found). cian steps aside for the
+editor and takes the screen back when it exits, reloading the file.
+
 When the viewer was opened from a grep hit (below), `Ctrl+n` / `Ctrl+N` step to
 the next / previous hit's preview without going back to the list.
 

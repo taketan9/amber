@@ -68,6 +68,10 @@ pub struct Options {
     /// Interface language for the key manual and help text: "ja" (default) or
     /// "en".
     pub lang: Option<String>,
+    /// External editor for `E` in the viewer / `:edit`. A command line, e.g.
+    /// "nvim" or "code -w". Unset falls back to $VISUAL/$EDITOR, then nvim →
+    /// vim → vi on PATH.
+    pub editor: Option<String>,
 }
 
 /// A login on a host.
@@ -559,6 +563,12 @@ fn install_api(lua: &Lua, builder: &Rc<RefCell<Builder>>) -> mlua::Result<()> {
                         Ok(v) => bm.options.home = Some(v),
                         Err(_) => {
                             bm.errors.push("set_option: home expects a directory path".into())
+                        }
+                    },
+                    "editor" => match String::from_lua(val, lua) {
+                        Ok(v) => bm.options.editor = Some(v),
+                        Err(_) => {
+                            bm.errors.push("set_option: editor expects a command string".into())
                         }
                     },
                     "key_hints" => match bool::from_lua(val, lua) {
