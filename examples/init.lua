@@ -123,8 +123,10 @@
 --   cian.set_keymap("r", "rename")
 --   cian.set_keymap("a", "new_file")
 --   cian.set_keymap("A", "new_dir")
---   cian.set_keymap("o", "open_other")      -- open into the opposite pane
---   cian.set_keymap("O", "open_other_tab")  -- …in a new tab there
+--   cian.set_keymap("o", "sync_from_other") -- this pane → other pane's dir
+--   cian.set_keymap("O", "sync_to_other")   -- other pane → this pane's dir
+--   -- (open-into-the-opposite-pane lives on Ctrl+Enter; bind it here if you
+--   --  prefer a letter: cian.set_keymap("o", "open_other"))
 --   cian.set_keymap("e", "open_external")   -- hand the file to the OS opener
 --
 --   -- Clipboard
@@ -155,6 +157,7 @@
 --   Marking  : mark_down  mark_up  invert_marks  visual
 --   Files    : copy  move  delete  rename  new_file  new_dir
 --              open_other  open_other_tab  open_external
+--              sync_from_other  sync_to_other
 --   Clipboard: copy_path  copy_file_ref
 --   Find     : search  search_next  search_prev  filter
 --              find_recursive  grep_recursive  sort  jump_path  diff

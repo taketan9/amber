@@ -280,6 +280,10 @@ pub enum Action {
     NewDir,
     OpenOther,
     OpenOtherTab,
+    /// Make the active pane show the other pane's directory (pull).
+    SyncFromOther,
+    /// Make the other pane show the active pane's directory (push).
+    SyncToOther,
     OpenExternal,
     CopyPath,
     CopyFileRef,
@@ -332,6 +336,8 @@ fn action_from_name(name: &str) -> Option<Action> {
         "new_dir" => Action::NewDir,
         "open_other" => Action::OpenOther,
         "open_other_tab" => Action::OpenOtherTab,
+        "sync_from_other" => Action::SyncFromOther,
+        "sync_to_other" => Action::SyncToOther,
         "open_external" => Action::OpenExternal,
         "copy_path" => Action::CopyPath,
         "copy_file_ref" => Action::CopyFileRef,
@@ -3336,6 +3342,47 @@ impl App {
             if new_tab { "new tab in" } else { "opened in" },
             target.display()
         ));
+        Ok(())
+    }
+
+    /// `o` — make the ACTIVE pane show the same directory as the other pane
+    /// (pull). E.g. on the right pane, the right pane jumps to the left's cwd.
+    fn sync_active_from_other(&mut self) -> Result<()> {
+        let other_cwd = match self.focused {
+            FocusedPane::Left => self.right.active_ref().cwd.clone(),
+            FocusedPane::Right => self.left.active_ref().cwd.clone(),
+            FocusedPane::Shell => return Ok(()),
+        };
+        if let Some(p) = self.active_pane_mut() {
+            if p.cwd == other_cwd {
+                self.message = Some("panes already in the same directory".into());
+                return Ok(());
+            }
+            p.jump_to(other_cwd.clone())?;
+        }
+        self.message = Some(format!("this pane → {}", other_cwd.display()));
+        Ok(())
+    }
+
+    /// `O` — make the OTHER pane show the same directory as the active pane
+    /// (push). E.g. on the right pane, the left pane jumps to the right's cwd.
+    fn sync_other_from_active(&mut self) -> Result<()> {
+        let cwd = match self.active_pane() {
+            Some(p) => p.cwd.clone(),
+            None => return Ok(()),
+        };
+        let other = match self.focused {
+            FocusedPane::Left => &mut self.right,
+            FocusedPane::Right => &mut self.left,
+            FocusedPane::Shell => return Ok(()),
+        };
+        if other.active_ref().cwd == cwd {
+            self.message = Some("panes already in the same directory".into());
+            return Ok(());
+        }
+        other.active_mut().jump_to(cwd.clone())?;
+        // Focus stays on the active pane.
+        self.message = Some(format!("other pane → {}", cwd.display()));
         Ok(())
     }
 
@@ -8763,9 +8810,11 @@ impl App {
             // Ctrl+Enter / Ctrl+Shift+Enter need kitty keyboard protocol to be distinguished.
             (true, false, KeyCode::Enter) => { self.open_in_other_pane(false)?; }
             (true, true, KeyCode::Enter) => { self.open_in_other_pane(true)?; }
-            // Universal aliases (always work, no terminal config needed).
-            (false, false, KeyCode::Char('o')) => { self.open_in_other_pane(false)?; }
-            (false, true, KeyCode::Char('O')) => { self.open_in_other_pane(true)?; }
+            // `o` pulls the other pane's directory into this one; `O` pushes
+            // this pane's directory onto the other. (Open-into-other-pane lives
+            // on Ctrl+Enter above.)
+            (false, false, KeyCode::Char('o')) => { self.sync_active_from_other()?; }
+            (false, true, KeyCode::Char('O')) => { self.sync_other_from_active()?; }
             // Enter alone keeps the OS-open behavior until viewer ships in sprint 5.
             (false, _, KeyCode::Enter) => {
                 let is_dir = self.active_pane()
@@ -8831,6 +8880,8 @@ impl App {
             Action::NewDir => self.start_new_dir(),
             Action::OpenOther => self.open_in_other_pane(false)?,
             Action::OpenOtherTab => self.open_in_other_pane(true)?,
+            Action::SyncFromOther => self.sync_active_from_other()?,
+            Action::SyncToOther => self.sync_other_from_active()?,
             Action::OpenExternal => self.open_externally(),
             Action::CopyPath => self.copy_paths_to_clipboard(),
             Action::CopyFileRef => self.copy_file_refs_to_clipboard(),
@@ -9556,8 +9607,9 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry("r", Some(Rename), "rename", "リネーム"),
                 entry("a", Some(NewFile), "new file", "新規ファイル"),
                 entry("A", Some(NewDir), "new directory", "新規ディレクトリ"),
-                entry("o", Some(OpenOther), "open in opposite pane", "反対ペインで開く"),
-                entry("O", Some(OpenOtherTab), "open in opposite pane's new tab", "反対ペインの新規タブで開く"),
+                entry("o", Some(SyncFromOther), "this pane → other pane's directory", "このペインを反対ペインと同じ場所に"),
+                entry("O", Some(SyncToOther), "other pane → this pane's directory", "反対ペインをこのペインと同じ場所に"),
+                entry("Ctrl+Enter", Some(OpenOther), "open in the opposite pane", "反対ペインで開く"),
                 entry("p", Some(CopyPath), "copy path text to clipboard", "パス文字列をクリップボードにコピー"),
                 entry("Shift+P", Some(CopyFileRef), "copy file(s) to clipboard", "ファイルをクリップボードにコピー"),
                 entry("s", Some(Shortcuts), "shortcuts menu", "ショートカットメニュー"),
@@ -14353,6 +14405,29 @@ mod tests {
         )
         .unwrap();
         (l, r, app)
+    }
+
+    /// `o` pulls the other pane's directory into the active one; `O` pushes the
+    /// active pane's directory onto the other. Focus never moves.
+    #[test]
+    fn o_and_shift_o_sync_the_two_panes_directories() {
+        let (l, r, mut app) = app_two_dirs(&["a.txt"], &["b.txt"]);
+        let (ldir, rdir) = (l.path().to_path_buf(), r.path().to_path_buf());
+        assert_ne!(app.left.active_ref().cwd, app.right.active_ref().cwd);
+
+        // On the right pane, `o` makes the right pane show the left's directory.
+        app.focus(FocusedPane::Right);
+        app.handle_key(key('o')).unwrap();
+        assert!(app.right.active_ref().cwd.ends_with(ldir.file_name().unwrap()),
+            "right pulled the left's dir");
+        assert_eq!(app.focused, FocusedPane::Right, "focus stays put");
+
+        // Reset the right pane, then `O` pushes the right's dir onto the left.
+        app.right.active_mut().jump_to(rdir.clone()).unwrap();
+        app.handle_key(KeyEvent::new(KeyCode::Char('O'), KeyModifiers::SHIFT)).unwrap();
+        assert!(app.left.active_ref().cwd.ends_with(rdir.file_name().unwrap()),
+            "left received the right's dir");
+        assert_eq!(app.focused, FocusedPane::Right, "focus still on the right");
     }
 
     #[test]
