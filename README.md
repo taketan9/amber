@@ -557,6 +557,10 @@ conventions — and cian prepends them to every AI prompt above. Per-server
 facts belong on the SSH host instead: a host's `notes = "RHEL 8; Oracle 19c; …"`
 is handed to the model automatically whenever the active shell is logged into
 that host, so "explain the last error" already knows what it is looking at.
+[`examples/init.lua`](examples/init.lua) has a fuller worked block for an
+on-prem enterprise shop (RHEL + AIX, Oracle, WebLogic, HULFT, JP1) to copy from,
+including the kind of guardrails worth stating — confirm destructive commands,
+don't guess, mind file/DB size, and assume no internet beyond the AI API.
 
 The AI part is the one place cian is not a single self-contained binary — it
 opts into an external interpreter and network — which is why it is strictly

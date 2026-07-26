@@ -262,6 +262,37 @@
 --   "We deploy to RHEL 8 with Oracle 19c and nginx 1.24.",
 --   "Prefer POSIX sh; the servers do not have bash-isms enabled.",
 -- }
+--
+-- A fuller, worked example for an on-prem enterprise shop (Windows terminal →
+-- RHEL + AIX, Oracle, WebLogic, HULFT, JP1). Copy what fits and edit freely.
+-- The strings can be in any language; writing them in Japanese also nudges the
+-- model to answer in Japanese. Uncomment to use:
+-- cian.ai_context{
+--   -- 端末・母艦
+--   "cian は Windows 10 + Windows Terminal 上で動かしている。ローカル側のパスやコマンドは Windows 前提（PowerShell / cmd）で考える。",
+--   "回答は日本語でお願いします。",
+--
+--   -- 接続先サーバ
+--   "シェルからは SSH で社内サーバに入る。AP サーバは RHEL、それ以外（バッチ／DB／運用管理）はすべて AIX。",
+--   "AIX では GNU 拡張が使えないことが多い。ps / df / awk / sed 等は AIX(POSIX) の書式で提案し、GNU 固有オプション（--long-opts, sed -i など）は避けるか代替を併記する。",
+--   "主要ミドルは Oracle 19c（移行途上で 11g も稼働）、WebLogic、Java 1.8、HULFT、JP1。",
+--
+--   -- 環境構成
+--   "開発 / 検証 / 本番の 3 面構成。検証・本番は Act/Stb の冗長構成（AP サーバのみ両稼働）。",
+--   "本番および待機系(Stb)での操作は特に慎重に。系切替やクラスタ・レプリケーションに影響し得る操作は、必ず確認を取ってから。",
+--
+--   -- サーバの役割
+--   "AP サーバ(RHEL) = API / Web 画面の提供。バッチサーバ(AIX) = バッチ処理と HULFT でのデータ授受。DB サーバ(AIX) = Oracle（現行 11g、19c へ移行計画中）。運用管理サーバ(AIX) = JP1 でバッチをスケジューリング。",
+--
+--   -- シェルの流儀
+--   "接続先では bash 拡張を使ってよい。Oracle 操作は sqlplus を多用する。",
+--
+--   -- 守ってほしいこと
+--   "破壊的・不可逆なコマンド（rm, truncate, DROP / DELETE, 上書きリダイレクト, HULFT 送信, JP1 ジョブの強制終了など）は、実行を勧める前に必ず確認する。",
+--   "推測で断定しない。確証がなければ「未確認」と明示し、確かめる手順を先に示す。",
+--   "DB もファイルも巨大なことがある。まずサイズ・行数・容量と空きを確認し、余裕があることを確かめてから重い操作を勧める（巨大ファイルの cat、巨大ディレクトリの ls -R、SELECT * の全件取得、索引を使わないフルスキャン等を避ける）。パフォーマンスを意識した手順にする。",
+--   "オフライン環境。AI 用の API 以外はインターネットに出られない。ダウンロード、パッケージ導入（pip / yum / dnf / wget / curl 取得）、外部リポジトリ参照を伴う手順は提案しない。すでにサーバにあるものだけで完結させる。",
+-- }
 
 
 -- ----------------------------------------------------------------------------

@@ -808,6 +808,20 @@ mod tests {
     }
 
     #[test]
+    fn shipped_example_init_parses_cleanly() {
+        // The template users copy must always load without errors — the AI
+        // context block and every other snippet in it stay valid Lua.
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../examples/init.lua");
+        if !path.exists() {
+            eprintln!("example init.lua not found at {}; skipping", path.display());
+            return;
+        }
+        let cfg = load_from(&path);
+        assert!(cfg.errors.is_empty(), "{:?}", cfg.errors);
+    }
+
+    #[test]
     fn ai_context_rejects_a_number() {
         let dir = tempfile::tempdir().unwrap();
         let init = dir.path().join("init.lua");
