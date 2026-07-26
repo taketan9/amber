@@ -4366,6 +4366,71 @@
     }
 
     #[test]
+    fn dir_compare_copy_across_reconciles_entries() {
+        use std::sync::atomic::AtomicBool;
+        use std::sync::Arc;
+        let l = tempfile::tempdir().unwrap();
+        let r = tempfile::tempdir().unwrap();
+        std::fs::write(l.path().join("only_left.txt"), b"L").unwrap();
+        std::fs::write(l.path().join("both.txt"), b"AAA").unwrap();
+        std::fs::write(r.path().join("both.txt"), b"BBB").unwrap();
+
+        let mut app = App::new(
+            l.path().to_path_buf(),
+            r.path().to_path_buf(),
+            cian_lua::Config::default(),
+        )
+        .unwrap();
+
+        // Build the folder comparison synchronously (skip the async job).
+        let cancel = Arc::new(AtomicBool::new(false));
+        let diff = cian_core::dirdiff::compare(l.path(), r.path(), &cancel, &mut |_| {});
+        let find = |app: &App, name: &str| {
+            let Popup::DirCompare { entries, .. } = &app.popup else { panic!("not dircompare") };
+            entries.iter().position(|e| e.rel.to_string_lossy() == name)
+        };
+        let set = |app: &mut App, cur: usize| {
+            if let Popup::DirCompare { cursor, .. } = &mut app.popup { *cursor = cur; }
+        };
+        let mk = |app: &mut App, entries: Vec<cian_core::dirdiff::Entry>| {
+            app.popup = Popup::DirCompare {
+                left: "L".into(), right: "R".into(),
+                left_root: l.path().to_path_buf(), right_root: r.path().to_path_buf(),
+                entries, cursor: 0, scroll: 0, truncated: false,
+            };
+        };
+        mk(&mut app, diff.entries.clone());
+
+        // only_left.txt → right: destination absent, so it copies immediately
+        // and the entry drops out (both sides now match).
+        let i = find(&app, "only_left.txt").unwrap();
+        set(&mut app, i);
+        app.dir_compare_copy(true);
+        assert!(r.path().join("only_left.txt").exists(), "created on the right");
+        assert!(find(&app, "only_left.txt").is_none(), "entry reconciled");
+
+        // both.txt differs → overwrite needs confirmation.
+        let i = find(&app, "both.txt").unwrap();
+        set(&mut app, i);
+        app.dir_compare_copy(true);
+        assert!(matches!(app.popup, Popup::ConfirmDiffCopy { .. }), "overwrite confirms");
+        app.confirm_diff_copy();
+        assert_eq!(std::fs::read(r.path().join("both.txt")).unwrap(), b"AAA", "overwritten");
+
+        // Cancel path restores the comparison without copying.
+        mk(&mut app, cian_core::dirdiff::compare(l.path(), r.path(), &cancel, &mut |_| {}).entries);
+        std::fs::write(l.path().join("both.txt"), b"CCC").unwrap();
+        std::fs::write(r.path().join("both.txt"), b"DDD").unwrap();
+        mk(&mut app, cian_core::dirdiff::compare(l.path(), r.path(), &cancel, &mut |_| {}).entries);
+        let i = find(&app, "both.txt").unwrap();
+        set(&mut app, i);
+        app.dir_compare_copy(true);
+        app.cancel_diff_copy();
+        assert!(matches!(app.popup, Popup::DirCompare { .. }), "comparison restored");
+        assert_eq!(std::fs::read(r.path().join("both.txt")).unwrap(), b"DDD", "not copied on cancel");
+    }
+
+    #[test]
     fn git_log_diff_and_blame() {
         use std::process::Command;
         let d = tempfile::tempdir().unwrap();

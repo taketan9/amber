@@ -3559,6 +3559,31 @@ fn draw_popup(
                 tr(lang, " y/Enter = discard   n/Esc = cancel ", " y/Enter = 破棄   n/Esc = 取消 ").to_string(),
             )
         }
+        Popup::ConfirmDiffCopy { src, dst, is_dir, .. } => {
+            let what = if *is_dir {
+                tr(lang, "directory", "ディレクトリ")
+            } else {
+                tr(lang, "file", "ファイル")
+            };
+            let head = if lang == Lang::Ja {
+                format!("既存の{}を上書きします:", what)
+            } else {
+                format!("overwrite the existing {}:", what)
+            };
+            let lines = vec![
+                head,
+                String::new(),
+                format!("  {} {}", tr(lang, "from", "元"), src.display()),
+                format!("  {}   {}", tr(lang, "to", "先"), dst.display()),
+                String::new(),
+                tr(lang, "The destination will be replaced.", "コピー先は置き換えられます。").to_string(),
+            ];
+            (
+                tr(lang, " copy across ", " 反対側へコピー ").to_string(),
+                lines,
+                tr(lang, " y/Enter = overwrite   n/Esc = cancel ", " y/Enter = 上書き   n/Esc = 取消 ").to_string(),
+            )
+        }
         Popup::ConfirmElevate { op, targets, dest } => {
             let verb = match (op, lang) {
                 (PendingOp::Copy, Lang::Ja) => "コピー",

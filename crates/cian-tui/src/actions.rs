@@ -880,6 +880,130 @@ impl App {
         );
     }
 
+    /// `>` / `<` in the folder compare: copy the highlighted entry across to the
+    /// other tree at the same relative path. `to_right` copies left→right.
+    /// A file or a whole directory; creates missing parent folders; confirms
+    /// before overwriting an existing target.
+    pub(crate) fn dir_compare_copy(&mut self, to_right: bool) {
+        let Popup::DirCompare { entries, cursor, left_root, right_root, .. } = &self.popup else {
+            return;
+        };
+        use cian_core::dirdiff::Status;
+        let Some(e) = entries.get(*cursor) else { return };
+        // The source must exist on the side we copy *from*.
+        let missing_source = (to_right && e.status == Status::OnlyRight)
+            || (!to_right && e.status == Status::OnlyLeft);
+        if missing_source {
+            self.message = Some(
+                tr(self.lang, "nothing to copy on that side", "その側にコピー元がありません").into(),
+            );
+            return;
+        }
+        let (from_root, into_root) =
+            if to_right { (left_root, right_root) } else { (right_root, left_root) };
+        let src = from_root.join(&e.rel);
+        let dst = into_root.join(&e.rel);
+        let is_dir = e.is_dir;
+        self.begin_diff_copy(src, dst, is_dir);
+    }
+
+    /// `>` / `<` in the file diff: copy one side's file over the other. Always an
+    /// overwrite (both files exist), so it always confirms.
+    pub(crate) fn diff_copy(&mut self, to_right: bool) {
+        let Popup::Diff { left_path, right_path, .. } = &self.popup else { return };
+        let (src, dst) = if to_right {
+            (left_path.clone(), right_path.clone())
+        } else {
+            (right_path.clone(), left_path.clone())
+        };
+        self.begin_diff_copy(src, dst, false);
+    }
+
+    /// Shared entry point: copy `src` onto `dst`. Copies straight away when the
+    /// destination does not exist (nothing is lost); otherwise stashes the
+    /// comparison popup and asks before overwriting.
+    fn begin_diff_copy(&mut self, src: PathBuf, dst: PathBuf, is_dir: bool) {
+        if dst.exists() {
+            let back = std::mem::replace(&mut self.popup, Popup::None);
+            self.popup = Popup::ConfirmDiffCopy { src, dst, is_dir, back: Box::new(back) };
+        } else {
+            self.perform_diff_copy(&src, &dst, is_dir);
+            self.after_diff_copy(&dst);
+        }
+    }
+
+    /// Confirmed overwrite: restore the comparison, do the copy, refresh it.
+    pub(crate) fn confirm_diff_copy(&mut self) {
+        let Popup::ConfirmDiffCopy { src, dst, is_dir, back } =
+            std::mem::replace(&mut self.popup, Popup::None)
+        else {
+            return;
+        };
+        self.popup = *back;
+        self.perform_diff_copy(&src, &dst, is_dir);
+        self.after_diff_copy(&dst);
+    }
+
+    /// Cancelled overwrite: just put the comparison back.
+    pub(crate) fn cancel_diff_copy(&mut self) {
+        if let Popup::ConfirmDiffCopy { back, .. } =
+            std::mem::replace(&mut self.popup, Popup::None)
+        {
+            self.popup = *back;
+        }
+    }
+
+    /// Do the copy, reporting success/failure to the status line. Uses
+    /// `ops::copy_one` (a file or a whole directory), creating the destination's
+    /// parent directories first so a deep only-on-one-side path lands.
+    fn perform_diff_copy(&mut self, src: &Path, dst: &Path, _is_dir: bool) {
+        let Some(dest_dir) = dst.parent() else {
+            self.message = Some("bad destination".into());
+            return;
+        };
+        if let Err(e) = std::fs::create_dir_all(dest_dir) {
+            self.message = Some(format!("copy failed: {}", e));
+            return;
+        }
+        match cian_core::ops::copy_one(src, dest_dir, Conflict::Overwrite) {
+            Ok(_) => {
+                let name = src.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+                self.message = Some(format!("◂ copied {} → {}", name, dst.display()));
+            }
+            Err(e) => self.message = Some(format!("copy failed: {}", e)),
+        }
+    }
+
+    /// After a successful copy-across, refresh the comparison so it reflects the
+    /// now-reconciled state: the folder compare drops the entry (both sides
+    /// match now); the file diff closes (the two files are identical). Both
+    /// panes are reloaded in case the copy landed in a visible directory.
+    fn after_diff_copy(&mut self, _dst: &Path) {
+        match &mut self.popup {
+            Popup::DirCompare { entries, cursor, .. } => {
+                if *cursor < entries.len() {
+                    entries.remove(*cursor);
+                }
+                if !entries.is_empty() {
+                    *cursor = (*cursor).min(entries.len() - 1);
+                } else {
+                    self.popup = Popup::None;
+                    self.message = Some(
+                        tr(self.lang, "folders reconciled", "フォルダを同期しました").into(),
+                    );
+                }
+            }
+            Popup::Diff { .. } => {
+                self.popup = Popup::None;
+            }
+            _ => {}
+        }
+        self.invalidate_git();
+        // Reload both listings — the copy may have landed in either pane.
+        let _ = self.left.active_mut().reload();
+        let _ = self.right.active_mut().reload();
+    }
+
     /// Stash the current file diff and open the encoding picker for it.
     pub(crate) fn open_diff_encoding_picker(&mut self) {
         if !matches!(self.popup, Popup::Diff { .. }) {

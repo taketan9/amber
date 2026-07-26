@@ -501,6 +501,9 @@ impl App {
                 // c/p copy the list; w saves it to the active pane.
                 KeyCode::Char('c') | KeyCode::Char('p') => self.copy_diff(),
                 KeyCode::Char('w') => self.start_diff_save_as(),
+                // >/< copy the highlighted entry across to the other tree.
+                KeyCode::Char('>') | KeyCode::Char('.') => self.dir_compare_copy(true),
+                KeyCode::Char('<') | KeyCode::Char(',') => self.dir_compare_copy(false),
                 _ => { let _ = scroll; }
             }
             return Ok(());
@@ -563,6 +566,9 @@ impl App {
                 KeyCode::Char('c') | KeyCode::Char('p') => self.copy_diff(),
                 KeyCode::Char('w') => self.start_diff_save_as(),
                 KeyCode::Char('e') => self.open_diff_encoding_picker(),
+                // >/< copy one side's file over the other (confirms).
+                KeyCode::Char('>') | KeyCode::Char('.') => self.diff_copy(true),
+                KeyCode::Char('<') | KeyCode::Char(',') => self.diff_copy(false),
                 _ => {}
             }
             return Ok(());
@@ -969,7 +975,16 @@ impl App {
             return Ok(());
         }
         match key.code {
-            KeyCode::Esc | KeyCode::Char('n') => { self.popup = Popup::None; Ok(()) }
+            KeyCode::Esc | KeyCode::Char('n') => {
+                // A cancelled copy-across restores the comparison it came from;
+                // everything else just closes.
+                if matches!(self.popup, Popup::ConfirmDiffCopy { .. }) {
+                    self.cancel_diff_copy();
+                } else {
+                    self.popup = Popup::None;
+                }
+                Ok(())
+            }
             // Enter is the same as `y` here: the plain "yes" everyone reaches
             // for. (Overwrite/permanent stays on its own key so it is never
             // the accidental default.)
@@ -977,6 +992,7 @@ impl App {
                 Popup::ConfirmDelete { .. } => self.finish_delete(DeleteMode::Trash),
                 Popup::ConfirmTransfer { .. } => self.finish_transfer(Conflict::Skip),
                 Popup::ConfirmDiscard { .. } => { self.git_discard(); Ok(()) }
+                Popup::ConfirmDiffCopy { .. } => { self.confirm_diff_copy(); Ok(()) }
                 Popup::Notice { .. } => { self.popup = Popup::None; Ok(()) }
                 _ => Ok(()),
             },

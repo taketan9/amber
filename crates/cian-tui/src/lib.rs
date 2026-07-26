@@ -216,6 +216,10 @@ enum Popup {
     None,
     ConfirmDelete { targets: Vec<PathBuf> },
     ConfirmTransfer { op: PendingOp, targets: Vec<PathBuf>, dest: PathBuf },
+    /// Overwrite confirmation for a copy-across from a comparison view (`<`/`>`
+    /// in the file diff or the folder compare). `back` is the comparison popup
+    /// to restore whether the copy is confirmed or cancelled.
+    ConfirmDiffCopy { src: PathBuf, dst: PathBuf, is_dir: bool, back: Box<Popup> },
     TextInput {
         title: String,
         prompt: String,
@@ -2545,6 +2549,8 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry("  B in viewer", None, "toggle the git blame gutter (who last changed each line)", "ビューア内：git blame ガター切替（各行の最終変更者）"),
                 entry("  from a grep hit", None, "Ctrl+n/N next/prev hit, Shift+Enter reveal in pane, e encoding", "grepヒットから：Ctrl+n/N 次/前, Shift+Enter 場所へ, e 文字コード"),
                 entry("=", None, "compare left ↔ right: two files (line diff), or two folders (recursive)", "左右を比較：ファイル同士（行差分）／フォルダ同士（再帰）"),
+                entry("  > / <", None, "  in a comparison: copy the entry across to the other side (confirms overwrite)", "  比較画面：エントリを反対側へコピー（上書きは確認）"),
+                entry("  c / w", None, "  in a comparison: copy result to clipboard / save it to the active pane", "  比較画面：結果をクリップボードへ／アクティブペインに保存"),
                 entry("-, Bksp", Some(Parent), "parent folder", "親フォルダへ"),
                 entry("Left / Right", None, "focus the left / right pane", "左／右のペインにフォーカス"),
                 entry("h", Some(History), "history popup", "履歴ポップアップ"),

@@ -166,6 +166,15 @@ other, or present in both but not identical. Files are compared byte-for-byte
 so a "same" verdict really means the same. Enter on a result moves both panes to
 that path.
 
+From either comparison you can **reconcile the two sides**, WinMerge-style,
+without leaving it: **`>`** copies the highlighted entry left→right, **`<`**
+copies it right→left — a single file or a whole subtree, creating any missing
+parent folders, and asking before it overwrites an existing target. In the
+folder compare a reconciled entry drops off the list; in the file diff the two
+files become identical and it closes. **`c`** copies the diff/compare text to the
+clipboard, **`w`** writes it to a file in the active pane, and (file diff only)
+**`e`** re-decodes both sides in another encoding.
+
 `:dupes` (or right-click **Find duplicate files**) finds byte-identical files
 anywhere under the current pane, on a worker thread. It groups by size first and
 only hashes the size-collisions, so most files are never read. The results are a
