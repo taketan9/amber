@@ -1,5 +1,6 @@
     use super::*;
     use ratatui::backend::TestBackend;
+    use ratatui::widgets::BorderType;
 
     fn key(c: char) -> KeyEvent {
         KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE)
