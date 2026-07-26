@@ -83,6 +83,18 @@ impl TextEncoding {
     pub fn decode(self, bytes: &[u8]) -> String {
         self.engine().decode(bytes).0.into_owned()
     }
+
+    /// Encode `text` back to this encoding, for saving an edited file in the
+    /// encoding it was read in. UTF-16 is not one of encoding_rs' output
+    /// encodings, so those two are written by hand.
+    pub fn encode(self, text: &str) -> Vec<u8> {
+        match self {
+            TextEncoding::Utf8 => text.as_bytes().to_vec(),
+            TextEncoding::ShiftJis => self.engine().encode(text).0.into_owned(),
+            TextEncoding::Utf16Le => text.encode_utf16().flat_map(|u| u.to_le_bytes()).collect(),
+            TextEncoding::Utf16Be => text.encode_utf16().flat_map(|u| u.to_be_bytes()).collect(),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -293,6 +305,19 @@ mod tests {
         v.redecode(TextEncoding::ShiftJis);
         assert_eq!(v.lines[0], "日本語", "Shift_JIS decodes correctly");
         assert_eq!(v.encoding, TextEncoding::ShiftJis);
+    }
+
+    #[test]
+    fn encode_round_trips_each_encoding() {
+        // What the in-viewer editor relies on to save in the file's own encoding.
+        let text = "日本語 abc\n";
+        for enc in TextEncoding::ALL {
+            let bytes = enc.encode(text);
+            assert_eq!(enc.decode(&bytes), text, "{:?} round-trips", enc);
+        }
+        // Shift_JIS and UTF-16 really change the bytes (not just UTF-8).
+        assert_ne!(TextEncoding::ShiftJis.encode(text), text.as_bytes());
+        assert_ne!(TextEncoding::Utf16Le.encode(text), text.as_bytes());
     }
 
     /// A UTF-16LE file has NULs, so it is hex by default; choosing UTF-16

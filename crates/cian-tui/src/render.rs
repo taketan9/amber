@@ -2577,7 +2577,7 @@ fn draw_popup(
         return;
     }
 
-    if let Popup::Viewer { title, view, scroll, line, col, visual, anchor, find_input, find_query, git_lines, markdown, preview, source, md_styles, md_width, .. } = popup {
+    if let Popup::Viewer { title, view, scroll, line, col, visual, anchor, find_input, find_query, git_lines, markdown, preview, source, md_styles, md_width, editing, dirty, editable, .. } = popup {
         let w = area.width.saturating_sub(4);
         let h = area.height.saturating_sub(2);
         let rect = centered_rect(w, h, area);
@@ -2612,12 +2612,17 @@ fn draw_popup(
         let cut = if view.truncated { "  (first 4M shown)" } else { "" };
         // A little mode badge in the title, so which visual mode is active — and
         // where the cursor sits — is never a guess.
-        let mode = match visual {
-            None => String::new(),
-            Some(ViewVisual::Char) => "  [VISUAL]".into(),
-            Some(ViewVisual::Line) => "  [V-LINE]".into(),
-            Some(ViewVisual::Block) => "  [V-BLOCK]".into(),
+        let mode = if *editing {
+            "  [EDIT]".to_string()
+        } else {
+            match visual {
+                None => String::new(),
+                Some(ViewVisual::Char) => "  [VISUAL]".into(),
+                Some(ViewVisual::Line) => "  [V-LINE]".into(),
+                Some(ViewVisual::Block) => "  [V-BLOCK]".into(),
+            }
         };
+        let dirty_mark = if *dirty { " ●" } else { "" };
         let head = if *preview {
             tr(lang, "Markdown preview", "Markdown プレビュー").to_string()
         } else {
@@ -2627,7 +2632,7 @@ fn draw_popup(
             .borders(Borders::ALL)
             .border_type(border_type())
             .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
-            .title(format!(" {}  —  {} ", title, head))
+            .title(format!(" {}{}  —  {} ", title, dirty_mark, head))
             .title_bottom(format!(" {}:{}{} ", *line + 1, *col + 1, mode));
         let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
         f.render_widget(block, rect);
@@ -2780,21 +2785,35 @@ fn draw_popup(
             0 => "all".to_string(),
             m => format!("{}%", *scroll * 100 / m),
         };
-        // While typing a search, the footer is the `/` prompt; otherwise hints.
-        let footer = match find_input {
-            Some(q) => format!("/{}_", q),
-            None => {
-                let hints = if *preview {
-                    tr(lang, " / f search  n/N  v/V select  y copy  E edit  p source  ",
-                          " / f 検索  n/N  v/V 選択  y コピー  E 編集  p ソース  ")
-                } else if *markdown {
-                    tr(lang, " / f search  n/N  v/V select  y copy  E edit  e enc  p preview  ",
-                          " / f 検索  n/N  v/V 選択  y コピー  E 編集  e 文字コード  p プレビュー  ")
-                } else {
-                    tr(lang, " / f search  n/N  v/V select  y copy  E edit  S-Enter reveal  e enc  ",
-                          " / f 検索  n/N  v/V 選択  y コピー  E 編集  S-Enter 場所へ  e 文字コード  ")
-                };
-                format!("{}{} ", hints, pos)
+        // While editing, the footer shows the editor keys; while typing a
+        // search, the `/` prompt; otherwise the usual hints.
+        let ed = if *editable { tr(lang, " i edit ", " i 編集 ") } else { " " };
+        let footer = if *editing {
+            tr(lang,
+                " EDIT — type to insert   Ctrl+S save   Esc leave   Shift+Q discard ",
+                " 編集中 — 入力で挿入   Ctrl+S 保存   Esc 終了   Shift+Q 破棄 ").to_string()
+        } else {
+            match find_input {
+                Some(q) => format!("/{}_", q),
+                None => {
+                    let hints = if *preview {
+                        format!("{}{}{}",
+                            tr(lang, " / f search  n/N  v/V select  y copy ", " / f 検索  n/N  v/V 選択  y コピー "),
+                            ed,
+                            tr(lang, " E ext-edit  p source  ", " E 外部編集  p ソース  "))
+                    } else if *markdown {
+                        format!("{}{}{}",
+                            tr(lang, " / f search  n/N  v/V select  y copy ", " / f 検索  n/N  v/V 選択  y コピー "),
+                            ed,
+                            tr(lang, " e enc  p preview  ", " e 文字コード  p プレビュー  "))
+                    } else {
+                        format!("{}{}{}",
+                            tr(lang, " / f search  n/N  v/V select  y copy ", " / f 検索  n/N  v/V 選択  y コピー "),
+                            ed,
+                            tr(lang, " E ext-edit  S-Enter reveal  e enc  ", " E 外部編集  S-Enter 場所へ  e 文字コード  "))
+                    };
+                    format!("{}{} ", hints, pos)
+                }
             }
         };
         f.render_widget(

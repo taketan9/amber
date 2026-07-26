@@ -52,6 +52,30 @@ impl App {
             return Ok(());
         }
 
+        // While editing, the built-in plain-text editor owns every key.
+        if matches!(self.popup, Popup::Viewer { editing: true, .. }) {
+            return self.handle_editor_key(key);
+        }
+        // `i` enters the editor on an editable text file. A Markdown preview
+        // drops to its source first, since edits belong on the raw file.
+        if !ctrl && !alt && key.code == KeyCode::Char('i')
+            && matches!(self.popup, Popup::Viewer { editable: true, .. })
+        {
+            if let Popup::Viewer { preview, editing, line, col, scroll, visual, .. } = &mut self.popup {
+                if *preview {
+                    *preview = false;
+                    (*line, *col, *scroll, *visual) = (0, 0, 0, None);
+                }
+                *editing = true;
+            }
+            self.message = Some(tr(
+                self.lang,
+                "editing — type to insert, Ctrl+S save, Esc leave",
+                "編集中 — 入力で挿入, Ctrl+S 保存, Esc 終了",
+            ).into());
+            return Ok(());
+        }
+
         // `p` toggles between the raw source and the rendered Markdown preview.
         // The preview is a full viewer — cursor, visual selection, `/` search and
         // the mouse all work over the rendered document — so this only flips the
@@ -147,7 +171,8 @@ impl App {
         let half = (body_h / 2).max(1);
         let mut close = false;
         let mut summarize = false;
-        if let Popup::Viewer { view, scroll, line, col, goal, visual, anchor, count, find_query, .. } = &mut self.popup {
+        let mut warn_unsaved = false;
+        if let Popup::Viewer { view, scroll, line, col, goal, visual, anchor, count, find_query, dirty, .. } = &mut self.popup {
             let cnt = count.take();
             let n = view.lines.len();
             let last = n.saturating_sub(1);
@@ -193,16 +218,27 @@ impl App {
                 (false, KeyCode::Esc) => {
                     // Esc peels state off one layer at a time: leave visual
                     // selection, then clear an active search (its highlights),
-                    // and only then close. `q` below always closes outright.
+                    // then refuse to drop unsaved edits, and only then close.
+                    // `q` behaves the same; `Q` discards and closes.
                     if visual.is_some() {
                         *visual = None;
                     } else if find_query.is_some() {
                         *find_query = None;
+                    } else if *dirty {
+                        warn_unsaved = true;
                     } else {
                         close = true;
                     }
                 }
-                (false, KeyCode::Char('q')) => close = true,
+                (false, KeyCode::Char('q')) => {
+                    if *dirty {
+                        warn_unsaved = true;
+                    } else {
+                        close = true;
+                    }
+                }
+                // Discard unsaved edits and close.
+                (false, KeyCode::Char('Q')) => close = true,
                 (false, KeyCode::Char('v')) => start_visual(ViewVisual::Char, visual, anchor, *line, *col),
                 (false, KeyCode::Char('V')) => start_visual(ViewVisual::Line, visual, anchor, *line, *col),
                 (true, KeyCode::Char('v')) => start_visual(ViewVisual::Block, visual, anchor, *line, *col),
@@ -298,6 +334,14 @@ impl App {
                 *scroll = *line + 1 - body_h;
             }
             *scroll = (*scroll).min(n.saturating_sub(body_h));
+        }
+        if warn_unsaved {
+            self.message = Some(tr(
+                self.lang,
+                "unsaved edits — Ctrl+S to save, or Shift+Q to discard & close",
+                "未保存の編集 — Ctrl+S で保存、Shift+Q で破棄して閉じる",
+            ).into());
+            return Ok(());
         }
         if summarize {
             self.summarize_viewer();
@@ -407,6 +451,161 @@ impl App {
             return;
         };
         self.reveal_path_in_pane(&path);
+    }
+
+    /// The built-in plain-text editor: modeless while `editing` — printable keys
+    /// insert, the usual editing/motion keys apply, Ctrl+S saves, Esc leaves.
+    fn handle_editor_key(&mut self, key: KeyEvent) -> Result<()> {
+        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        if ctrl && matches!(key.code, KeyCode::Char('s') | KeyCode::Char('S')) {
+            self.save_viewer_file();
+            return Ok(());
+        }
+        if key.code == KeyCode::Esc {
+            if let Popup::Viewer { editing, .. } = &mut self.popup {
+                *editing = false;
+            }
+            self.message = Some(tr(self.lang, "left edit mode", "編集モード終了").into());
+            return Ok(());
+        }
+        let body_h = (self.viewer_rect.height as usize).max(1).saturating_sub(1).max(1);
+        if let Popup::Viewer { view, line, col, scroll, goal, dirty, .. } = &mut self.popup {
+            let lines = &mut view.lines;
+            if lines.is_empty() {
+                lines.push(String::new());
+            }
+            let line_chars = |lines: &[String], l: usize| -> Vec<char> { lines[l].chars().collect() };
+            let last_line = lines.len().saturating_sub(1);
+            *line = (*line).min(last_line);
+            let cur_len = lines[*line].chars().count();
+            *col = (*col).min(cur_len);
+            match key.code {
+                KeyCode::Char(c) if !ctrl => {
+                    let mut chs = line_chars(lines, *line);
+                    chs.insert(*col, c);
+                    lines[*line] = chs.into_iter().collect();
+                    *col += 1;
+                    *dirty = true;
+                }
+                KeyCode::Tab => {
+                    let mut chs = line_chars(lines, *line);
+                    for _ in 0..4 {
+                        chs.insert(*col, ' ');
+                        *col += 1;
+                    }
+                    lines[*line] = chs.into_iter().collect();
+                    *dirty = true;
+                }
+                KeyCode::Enter => {
+                    let chs = line_chars(lines, *line);
+                    let head: String = chs[..*col].iter().collect();
+                    let tail: String = chs[*col..].iter().collect();
+                    lines[*line] = head;
+                    lines.insert(*line + 1, tail);
+                    *line += 1;
+                    *col = 0;
+                    *dirty = true;
+                }
+                KeyCode::Backspace => {
+                    if *col > 0 {
+                        let mut chs = line_chars(lines, *line);
+                        chs.remove(*col - 1);
+                        lines[*line] = chs.into_iter().collect();
+                        *col -= 1;
+                    } else if *line > 0 {
+                        let cur = lines.remove(*line);
+                        *line -= 1;
+                        *col = lines[*line].chars().count();
+                        lines[*line].push_str(&cur);
+                    }
+                    *dirty = true;
+                }
+                KeyCode::Delete => {
+                    let chs = line_chars(lines, *line);
+                    if *col < chs.len() {
+                        let mut chs = chs;
+                        chs.remove(*col);
+                        lines[*line] = chs.into_iter().collect();
+                        *dirty = true;
+                    } else if *line + 1 < lines.len() {
+                        let next = lines.remove(*line + 1);
+                        lines[*line].push_str(&next);
+                        *dirty = true;
+                    }
+                }
+                KeyCode::Left => {
+                    if *col > 0 {
+                        *col -= 1;
+                    } else if *line > 0 {
+                        *line -= 1;
+                        *col = lines[*line].chars().count();
+                    }
+                }
+                KeyCode::Right => {
+                    if *col < cur_len {
+                        *col += 1;
+                    } else if *line < last_line {
+                        *line += 1;
+                        *col = 0;
+                    }
+                }
+                KeyCode::Up => {
+                    if *line > 0 {
+                        *line -= 1;
+                        *col = (*col).min(lines[*line].chars().count());
+                    }
+                }
+                KeyCode::Down => {
+                    if *line < last_line {
+                        *line += 1;
+                        *col = (*col).min(lines[*line].chars().count());
+                    }
+                }
+                KeyCode::Home => *col = 0,
+                KeyCode::End => *col = cur_len,
+                KeyCode::PageUp => {
+                    *line = line.saturating_sub(body_h);
+                    *col = (*col).min(lines[*line].chars().count());
+                }
+                KeyCode::PageDown => {
+                    *line = (*line + body_h).min(last_line);
+                    *col = (*col).min(lines[*line].chars().count());
+                }
+                _ => {}
+            }
+            *goal = *col;
+            // Keep the cursor on screen (the render also follows it).
+            if *line < *scroll {
+                *scroll = *line;
+            } else if *line >= *scroll + body_h {
+                *scroll = *line + 1 - body_h;
+            }
+        }
+        Ok(())
+    }
+
+    /// Write the edited buffer back to disk in the file's own encoding.
+    fn save_viewer_file(&mut self) {
+        let (path, bytes) = if let Popup::Viewer { path, view, .. } = &self.popup {
+            let text = view.lines.join("\n") + "\n";
+            (path.clone(), view.encoding.encode(&text))
+        } else {
+            return;
+        };
+        match std::fs::write(&path, bytes) {
+            Ok(()) => {
+                if let Popup::Viewer { dirty, source, view, .. } = &mut self.popup {
+                    *dirty = false;
+                    // Keep the preview's source copy in step with what's on disk.
+                    *source = view.lines.clone();
+                }
+                self.message = Some(format!("saved: {}", path.display()));
+                if let Some(t) = self.active_file_tabs_mut() {
+                    let _ = t.active_mut().reload();
+                }
+            }
+            Err(e) => self.message = Some(format!("save failed: {}", e)),
+        }
     }
 
     /// Close whatever is open, jump the active pane to `path`'s folder, and put

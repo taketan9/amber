@@ -511,6 +511,7 @@ impl App {
                     Some("md") | Some("markdown") | Some("mkd") | Some("mdown")
                 );
                 let source = view.lines.clone();
+                let editable = matches!(view.kind, cian_core::viewer::ViewKind::Text);
                 self.popup = Popup::Viewer {
                     title: title.to_string(),
                     path: path.to_path_buf(),
@@ -530,6 +531,10 @@ impl App {
                     source,
                     md_styles: Vec::new(),
                     md_width: 0,
+                    // A real text file (not a hex dump) can be edited in place.
+                    editable,
+                    editing: false,
+                    dirty: false,
                 }
             }
             Err(e) => self.message = Some(format!("cannot view: {}", e)),
@@ -578,6 +583,10 @@ impl App {
                     source,
                     md_styles: Vec::new(),
                     md_width: 0,
+                    // Extracted document text is not the file on disk; read-only.
+                    editable: false,
+                    editing: false,
+                    dirty: false,
                 };
             }
             Err(e) => self.message = Some(format!("cannot read document: {}", e)),

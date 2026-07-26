@@ -294,6 +294,14 @@ enum Popup {
         /// The inner width the preview was last wrapped to, so the render can
         /// tell when a resize means it must re-render.
         md_width: u16,
+        /// True for a real text file that can be edited and saved in place
+        /// (false for a hex dump, an extracted Office document, etc).
+        editable: bool,
+        /// In the built-in plain-text editor: keys insert/delete instead of
+        /// navigating. Toggled with `i`; left with `Esc`.
+        editing: bool,
+        /// Unsaved edits are present.
+        dirty: bool,
     },
     /// The recursive comparison of two directories: a list of differing paths.
     DirCompare {
@@ -2417,7 +2425,8 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry("G", Some(CursorBottom), "jump to bottom", "末尾へジャンプ"),
                 entry("l, Enter", Some(EnterDir), "enter folder / open file", "フォルダに入る／ファイルを開く"),
                 entry("F3", None, "look inside: text/hex, an image, or an archive's list", "中身を見る：テキスト/16進・画像・書庫の一覧"),
-                entry(":edit", None, "edit the file in your editor (E in the viewer)", "エディタで編集（ビューア内は E）"),
+                entry("  edit in viewer", None, "i = built-in editor (Ctrl+S save, Esc/Q leave), E = external", "ビューア内編集：i 内蔵（Ctrl+S 保存, Esc/Q 終了）／ E 外部エディタ"),
+                entry(":edit", None, "edit the file in your external editor (E in the viewer)", "外部エディタで編集（ビューア内は E）"),
                 entry("  in viewer", None, "hjkl move, /n/N search, %/{/}/NG jump, v/V/C-v select y copy", "ビューア内：hjkl移動, /n/N検索, %/{/}/NG移動, v/V/C-v選択 yコピー"),
                 entry("  from a grep hit", None, "Ctrl+n/N next/prev hit, Shift+Enter reveal in pane, e encoding", "grepヒットから：Ctrl+n/N 次/前, Shift+Enter 場所へ, e 文字コード"),
                 entry("=", None, "compare left ↔ right: two files (line diff), or two folders (recursive)", "左右を比較：ファイル同士（行差分）／フォルダ同士（再帰）"),

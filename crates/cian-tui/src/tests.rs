@@ -4257,6 +4257,62 @@
     }
 
     #[test]
+    fn the_viewer_edits_and_saves_a_text_file() {
+        let d = tempfile::tempdir().unwrap();
+        let file = d.path().join("note.txt");
+        std::fs::write(&file, "hello\nworld\n").unwrap();
+        let p = d.path().to_path_buf();
+        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        app.active_pane_mut().unwrap().cursor =
+            app.active_pane().unwrap().entries.iter().position(|e| e.name == "note.txt").unwrap();
+        app.handle_key(code(KeyCode::F(3))).unwrap();
+        let _ = render(&mut app, 100, 30);
+
+        // Enter edit mode and type at the start of line 1.
+        app.handle_key(key('i')).unwrap();
+        assert!(matches!(app.popup, Popup::Viewer { editing: true, .. }), "editing started");
+        for c in "AB".chars() {
+            app.handle_key(key(c)).unwrap();
+        }
+        // A newline splits the line.
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+        assert!(matches!(app.popup, Popup::Viewer { dirty: true, .. }), "buffer is dirty");
+
+        // Ctrl+S writes it back.
+        app.handle_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL)).unwrap();
+        assert!(matches!(app.popup, Popup::Viewer { dirty: false, .. }), "saved → clean");
+        let on_disk = std::fs::read_to_string(&file).unwrap();
+        assert_eq!(on_disk, "AB\nhello\nworld\n", "edit persisted: {on_disk:?}");
+
+        // Esc leaves edit mode; another Esc closes (nothing unsaved now).
+        app.handle_key(code(KeyCode::Esc)).unwrap();
+        assert!(matches!(app.popup, Popup::Viewer { editing: false, .. }));
+        app.handle_key(code(KeyCode::Esc)).unwrap();
+        assert!(matches!(app.popup, Popup::None));
+    }
+
+    #[test]
+    fn the_viewer_refuses_to_drop_unsaved_edits() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::write(d.path().join("a.txt"), "x\n").unwrap();
+        let p = d.path().to_path_buf();
+        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        app.active_pane_mut().unwrap().cursor =
+            app.active_pane().unwrap().entries.iter().position(|e| e.name == "a.txt").unwrap();
+        app.handle_key(code(KeyCode::F(3))).unwrap();
+        let _ = render(&mut app, 100, 30);
+        app.handle_key(key('i')).unwrap();
+        app.handle_key(key('z')).unwrap(); // dirty
+        app.handle_key(code(KeyCode::Esc)).unwrap(); // leave edit mode
+        // Esc / q won't discard unsaved work…
+        app.handle_key(code(KeyCode::Esc)).unwrap();
+        assert!(matches!(app.popup, Popup::Viewer { dirty: true, .. }), "still open, warned");
+        // …but Shift+Q does.
+        app.handle_key(KeyEvent::new(KeyCode::Char('Q'), KeyModifiers::SHIFT)).unwrap();
+        assert!(matches!(app.popup, Popup::None), "Shift+Q discards and closes");
+    }
+
+    #[test]
     fn viewer_esc_clears_search_before_closing() {
         let d = tempfile::tempdir().unwrap();
         std::fs::write(d.path().join("a.txt"), "alpha\nbeta\ngamma\n").unwrap();

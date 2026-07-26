@@ -281,12 +281,18 @@ block-wise visual selection; **Shift+arrow** selects character-wise and
 encoding (UTF-8 / Shift_JIS / UTF-16) when a file was decoded wrong, and
 `Shift+Enter` reveals the file in the pane (jump to its folder, cursor on it).
 
-**Editing.** Press **`E`** in the viewer (or `:edit` / `:e` on a file in a
-pane) to open it in your editor. cian doesn't embed one — a usable vim/nvim is
-tens of megabytes with its runtime — so it shells out: the `editor` option from
-`init.lua` if set, else `$VISUAL` / `$EDITOR`, else the first of **nvim → vim →
-vi** on `PATH` (and it says so if none is found). cian steps aside for the
-editor and takes the screen back when it exits, reloading the file.
+**Editing.** Press **`i`** in the viewer to edit the file right there — a plain,
+modeless text editor (arrows/Home/End/PageUp-Dn move, typing inserts, Enter/
+Backspace/Delete/Tab as expected). **`Ctrl+S`** saves in the file's own encoding,
+`Esc` leaves edit mode, and closing with unsaved changes is refused (`Ctrl+S` to
+save, `Shift+Q` to discard). It's a simple editor, not vim — but it needs no
+separate window and nothing bundled. On a Markdown file `i` drops the preview to
+the source first.
+
+Prefer your own editor? **`E`** (or `:edit` / `:e` on a file in a pane) shells
+out to it instead — the `editor` option from `init.lua` if set, else `$VISUAL` /
+`$EDITOR`, else the first of **nvim → vim → vi** on `PATH`. cian steps aside for
+it and takes the screen back when it exits, reloading the file.
 
 When the viewer was opened from a grep hit (below), `Ctrl+n` / `Ctrl+N` step to
 the next / previous hit's preview without going back to the list.
