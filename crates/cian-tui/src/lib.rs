@@ -13717,7 +13717,7 @@ mod tests {
             eprintln!("no git; skipping");
             return;
         }
-        for kv in [["user.email", "t@example.com"], ["user.name", "Test"]] {
+        for kv in [["user.email", "t@example.com"], ["user.name", "Test"], ["core.autocrlf", "false"]] {
             let _ = std::process::Command::new("git").arg("-C").arg(&dir).args(["config", kv[0], kv[1]]).status();
         }
         // Commit an initial file so we have a tracked file to modify/discard.
