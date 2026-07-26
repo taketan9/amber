@@ -406,6 +406,12 @@ impl App {
         } else {
             return;
         };
+        self.reveal_path_in_pane(&path);
+    }
+
+    /// Close whatever is open, jump the active pane to `path`'s folder, and put
+    /// the cursor on it. Shared by the viewer and image preview's Shift+Enter.
+    pub(crate) fn reveal_path_in_pane(&mut self, path: &std::path::Path) {
         let Some(dir) = path.parent().map(|p| p.to_path_buf()) else { return };
         self.popup = Popup::None;
         self.find_return = None;

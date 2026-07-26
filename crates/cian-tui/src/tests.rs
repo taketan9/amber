@@ -315,6 +315,36 @@
     }
 
     #[test]
+    fn f3_on_an_image_opens_the_half_block_preview() {
+        let (d, mut app) = app_with(&[]);
+        // A small PNG in the pane's directory.
+        let mut img = image::RgbImage::new(20, 12);
+        for px in img.pixels_mut() {
+            *px = image::Rgb([30, 160, 90]);
+        }
+        img.save(d.path().join("pic.png")).unwrap();
+        app.reload_both();
+        app.active_pane_mut().unwrap().cursor =
+            app.active_pane().unwrap().entries.iter().position(|e| e.name == "pic.png").unwrap();
+
+        // F3 opens the image preview, not the hex/text viewer.
+        app.handle_key(code(KeyCode::F(3))).unwrap();
+        assert!(matches!(app.popup, Popup::ImageView { .. }), "image preview opened, got {:?}", app.popup);
+        // Rendering decodes and caches a thumbnail sized to the box.
+        let _ = render(&mut app, 80, 24);
+        match &app.popup {
+            Popup::ImageView { shown: Some((_, _, t)), error: None, .. } => {
+                assert!(t.cols > 0 && t.rows > 0, "decoded to cells");
+                assert_eq!((t.src_w, t.src_h), (20, 12));
+            }
+            other => panic!("no cached thumbnail: {:?}", other),
+        }
+        // Esc closes.
+        app.handle_key(code(KeyCode::Esc)).unwrap();
+        assert!(matches!(app.popup, Popup::None));
+    }
+
+    #[test]
     fn count_reports_files_and_steps() {
         let (d, mut app) = app_with(&[]);
         std::fs::write(d.path().join("a.rs"), "fn main() {}\n\n// note\nlet x = 1;\n").unwrap();

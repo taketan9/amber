@@ -441,6 +441,29 @@ impl App {
         if matches!(self.popup, Popup::Viewer { .. }) {
             return self.handle_viewer_key(key);
         }
+        // The image preview: Esc/q close, Shift+Enter reveals it in the pane,
+        // `E` opens it in the external editor.
+        if let Popup::ImageView { path, title, .. } = &self.popup {
+            let shift = key.modifiers.contains(KeyModifiers::SHIFT);
+            match key.code {
+                KeyCode::Esc | KeyCode::Char('q') => self.popup = Popup::None,
+                KeyCode::Enter if shift => {
+                    let path = path.clone();
+                    self.popup = Popup::None;
+                    self.reveal_path_in_pane(&path);
+                }
+                KeyCode::Char('E') => {
+                    self.pending_edit = Some(crate::edit::PendingEdit {
+                        path: path.clone(),
+                        title: title.clone(),
+                        reopen_viewer: false,
+                    });
+                    self.popup = Popup::None;
+                }
+                _ => {}
+            }
+            return Ok(());
+        }
         // A notice (op results, attributes, checksums, wc…) can be copied
         // whole with `y`, so a hash or a path can be lifted out of it.
         if let Popup::Notice { lines } = &self.popup {

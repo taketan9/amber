@@ -13,6 +13,7 @@ pub mod diff;
 pub mod dirdiff;
 pub mod elevate;
 pub mod git;
+pub mod image;
 pub mod inspect;
 pub mod log;
 pub mod office;

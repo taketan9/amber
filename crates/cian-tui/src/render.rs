@@ -265,6 +265,12 @@ pub(crate) fn draw(f: &mut Frame, app: &mut App) {
         draw_ai_chat(f, area, app);
         return;
     }
+    // The image preview decodes to fit its box and caches by size, so it takes
+    // `&mut app` too.
+    if matches!(app.popup, Popup::ImageView { .. }) {
+        draw_image(f, area, app);
+        return;
+    }
     if matches!(app.popup, Popup::CommitMessage { .. }) {
         draw_commit_message(f, area, app);
         return;
@@ -1547,6 +1553,79 @@ fn push_row_zone(zones: &mut Vec<PopupZone>, inner: Rect, y: u16, idx: usize) {
 
 /// The AI chat, rendered with `&mut App` so it can stash the transcript's rect,
 /// scroll and flat lines for mouse selection.
+/// The image preview: the picture as half-block (`▀`) cells — top pixel is the
+/// glyph's foreground, bottom pixel its background — so it renders in any 24-bit
+/// terminal without a graphics protocol. Decoded to fit and cached by size.
+fn draw_image(f: &mut Frame, area: Rect, app: &mut App) {
+    let lang = app.lang;
+    let rect = centered_rect(area.width.saturating_sub(2), area.height.saturating_sub(2), area);
+    f.render_widget(Clear, rect);
+    let inner = rect.inner(Margin { vertical: 1, horizontal: 1 });
+    let body_w = inner.width;
+    let body_h = inner.height.saturating_sub(1); // leave a row for the footer
+
+    // (Re)decode when first shown or after a resize.
+    let (title, caption, rows, err) = if let Popup::ImageView { path, title, shown, error } = &mut app.popup {
+        if error.is_none() && shown.as_ref().map(|(c, r, _)| (*c, *r)) != Some((body_w, body_h)) {
+            match cian_core::image::thumbnail(path, body_w, body_h) {
+                Ok(t) => *shown = Some((body_w, body_h, t)),
+                Err(e) => *error = Some(e.to_string()),
+            }
+        }
+        let mut rows: Vec<Line> = Vec::new();
+        let mut caption = String::new();
+        if let Some((_, _, t)) = shown {
+            caption = format!("{}×{}px", t.src_w, t.src_h);
+            for ry in 0..t.rows as usize {
+                let mut spans: Vec<Span> = Vec::with_capacity(t.cols as usize);
+                for cx in 0..t.cols as usize {
+                    let (top, bot) = t.cells[ry * t.cols as usize + cx];
+                    spans.push(Span::styled(
+                        "▀",
+                        Style::default()
+                            .fg(Color::Rgb(top.0, top.1, top.2))
+                            .bg(Color::Rgb(bot.0, bot.1, bot.2)),
+                    ));
+                }
+                rows.push(Line::from(spans));
+            }
+        }
+        (title.clone(), caption, rows, error.clone())
+    } else {
+        (String::new(), String::new(), Vec::new(), None)
+    };
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(border_type())
+        .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
+        .style(Style::default().bg(theme().popup_bg))
+        .title(format!(" {}  —  {} ", title, caption));
+    f.render_widget(block, rect);
+
+    if let Some(e) = err {
+        f.render_widget(
+            Paragraph::new(format!("cannot show image: {}", e)).style(Style::default().fg(Color::Rgb(230, 120, 120))),
+            inner,
+        );
+    } else {
+        // Centre the picture in its box, vertically and horizontally.
+        let img_h = rows.len() as u16;
+        let img_w = rows.first().map(|l| l.spans.len() as u16).unwrap_or(0);
+        let top = inner.y + (body_h.saturating_sub(img_h)) / 2;
+        let left = inner.x + (body_w.saturating_sub(img_w)) / 2;
+        let pic = Rect::new(left, top, img_w.min(body_w), img_h.min(body_h));
+        f.render_widget(Paragraph::new(rows), pic);
+    }
+
+    let footer_area = Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1);
+    f.render_widget(
+        Paragraph::new(tr(lang, " S-Enter reveal   E edit   Esc close ", " S-Enter 場所へ   E 編集   Esc 閉じる "))
+            .style(Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD)),
+        footer_area,
+    );
+}
+
 fn draw_ai_chat(f: &mut Frame, area: Rect, app: &mut App) {
     let lang = app.lang;
     let width: u16 = 76u16.min(area.width.saturating_sub(2));
@@ -3365,6 +3444,7 @@ fn draw_popup(
         | Popup::DirCompare { .. }
         | Popup::Archive { .. }
         | Popup::AiChat { .. }
+        | Popup::ImageView { .. }
         | Popup::CommitMessage { .. }
         | Popup::JunkReview { .. }
         | Popup::StructureReview { .. }

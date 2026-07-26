@@ -253,6 +253,14 @@ terminal, with `mermaid` blocks shown as a clearly-labelled source box (a
 terminal cannot draw the diagram itself). Press **`p`** to toggle between the
 preview and the raw source.
 
+**Images** (`.png`, `.jpg`, `.gif`, `.bmp`, `.webp`) preview right in the
+terminal. cian draws them with half-block characters — each cell is two stacked
+pixels coloured independently — so it needs nothing but 24-bit colour and works
+the same in Windows Terminal, iTerm2 and the rest, no graphics protocol or
+particular version required. It's a coarse preview, not a photo viewer, but
+enough to tell what a file is; `E` opens it in your editor, `Shift+Enter` jumps
+to it in the pane, `Esc` closes.
+
 **Office and PDF documents** preview as text, with nothing else installed.
 `.docx`, `.xlsx` and `.pptx` are ZIP-of-XML and are read directly; a PDF's text
 is pulled from its content streams; the legacy binary `.doc`/`.xls`/`.ppt` fall

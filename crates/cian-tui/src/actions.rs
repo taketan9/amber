@@ -478,6 +478,16 @@ impl App {
     /// Open the F3 viewer on `path`, with the cursor on `line0` (0-based). Used
     /// by F3 (line 0) and by "open a grep hit at its line".
     pub(crate) fn open_viewer_at(&mut self, path: &Path, title: &str, line0: usize) {
+        // Images preview as half-block cells rather than a hex dump.
+        if cian_core::image::is_image(path) {
+            self.popup = Popup::ImageView {
+                path: path.to_path_buf(),
+                title: title.to_string(),
+                shown: None,
+                error: None,
+            };
+            return;
+        }
         // Office/PDF documents are extracted to text first (fully in-process, no
         // external converter), then shown in the ordinary viewer so search,
         // selection and copy all work over them.

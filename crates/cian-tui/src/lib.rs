@@ -234,6 +234,17 @@ enum Popup {
     /// The macro launcher: pick a macro from `macro.lua` to run. Names are held
     /// here so the renderer stays independent of `App`.
     Macros { cursor: usize, names: Vec<String> },
+    /// An image shown as half-block cells (works in any 24-bit terminal). The
+    /// decoded grid is cached for the size it was last drawn at; a resize or a
+    /// decode failure updates it in the render.
+    ImageView {
+        path: PathBuf,
+        title: String,
+        /// `(cols, rows, thumbnail)` cached for the last drawn inner size.
+        shown: Option<(u16, u16, cian_core::image::Thumb)>,
+        /// Why the image could not be decoded, if it could not.
+        error: Option<String>,
+    },
     /// Choose the encoding the active shell pane's output is decoded with.
     EncodingPicker { cursor: usize, target: EncTarget },
     /// A file's contents, scrollable.
@@ -819,15 +830,24 @@ struct FileClipboard {
 /// while foreground text stays readable (luminance kept under 90). Blue carries
 /// little luminance, so blues can run brightest; greens are held back most.
 /// Verified by `the_palette_is_distinct_enough_to_tell_panes_apart`.
-const PANE_BG_PRESETS: [(&str, Option<Color>); 9] = [
+/// Per-pane background tints: dark enough for foreground text to stay readable
+/// (luminance < 90), and pairwise distinct enough to tell two panes apart at a
+/// glance — both enforced by a test. A richer, more saturated spread than the
+/// original set, and more of them.
+const PANE_BG_PRESETS: [(&str, Option<Color>); 14] = [
     ("default", None),
     ("navy", Some(Color::Rgb(10, 40, 140))),
-    ("teal", Some(Color::Rgb(10, 105, 105))),
-    ("forest", Some(Color::Rgb(20, 110, 20))),
-    ("olive", Some(Color::Rgb(108, 88, 10))),
-    ("rust", Some(Color::Rgb(140, 45, 15))),
-    ("wine", Some(Color::Rgb(135, 15, 80))),
-    ("plum", Some(Color::Rgb(75, 15, 140))),
+    ("ocean", Some(Color::Rgb(15, 95, 160))),
+    ("teal", Some(Color::Rgb(10, 110, 110))),
+    ("forest", Some(Color::Rgb(25, 120, 25))),
+    ("moss", Some(Color::Rgb(60, 100, 40))),
+    ("olive", Some(Color::Rgb(110, 90, 10))),
+    ("mocha", Some(Color::Rgb(95, 60, 35))),
+    ("rust", Some(Color::Rgb(150, 50, 15))),
+    ("crimson", Some(Color::Rgb(160, 25, 45))),
+    ("wine", Some(Color::Rgb(140, 15, 85))),
+    ("plum", Some(Color::Rgb(85, 20, 150))),
+    ("steel", Some(Color::Rgb(40, 60, 90))),
     ("slate", Some(Color::Rgb(70, 85, 120))),
 ];
 
@@ -2396,7 +2416,7 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry("gg", None, "jump to top", "先頭へジャンプ"),
                 entry("G", Some(CursorBottom), "jump to bottom", "末尾へジャンプ"),
                 entry("l, Enter", Some(EnterDir), "enter folder / open file", "フォルダに入る／ファイルを開く"),
-                entry("F3", None, "look inside: view a file, list an archive", "中身を見る：ファイル閲覧・書庫の一覧"),
+                entry("F3", None, "look inside: text/hex, an image, or an archive's list", "中身を見る：テキスト/16進・画像・書庫の一覧"),
                 entry(":edit", None, "edit the file in your editor (E in the viewer)", "エディタで編集（ビューア内は E）"),
                 entry("  in viewer", None, "hjkl move, /n/N search, %/{/}/NG jump, v/V/C-v select y copy", "ビューア内：hjkl移動, /n/N検索, %/{/}/NG移動, v/V/C-v選択 yコピー"),
                 entry("  from a grep hit", None, "Ctrl+n/N next/prev hit, Shift+Enter reveal in pane, e encoding", "grepヒットから：Ctrl+n/N 次/前, Shift+Enter 場所へ, e 文字コード"),

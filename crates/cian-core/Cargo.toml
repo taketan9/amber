@@ -34,6 +34,10 @@ zip = { version = "4.2.0", default-features = false, features = ["deflate", "aes
 # binary still builds without a toolchain.
 tar = "0.4"
 flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+# Image decoding for the F3 half-block preview. Pure Rust (png/jpeg/gif/… are
+# all Rust decoders), so the single-binary/no-C story holds; only the common
+# raster formats are enabled to keep the build lean.
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif", "bmp", "webp"] }
 
 [dev-dependencies]
 tempfile = "3.27.0"
