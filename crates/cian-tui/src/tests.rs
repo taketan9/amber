@@ -4342,6 +4342,33 @@
     }
 
     #[test]
+    fn f3_syntax_highlights_recognised_code() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::write(d.path().join("a.rs"), "fn main() {\n    let x = 1; // hi\n}\n").unwrap();
+        let p = d.path().to_path_buf();
+        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        app.active_pane_mut().unwrap().cursor =
+            app.active_pane().unwrap().entries.iter().position(|e| e.name == "a.rs").unwrap();
+        app.handle_key(code(KeyCode::F(3))).unwrap();
+        assert!(matches!(&app.popup, Popup::Viewer { hl_lang: Some(_), .. }), "rust detected");
+        // The render computes and caches the per-char highlight styles.
+        let _ = render(&mut app, 100, 30);
+        match &app.popup {
+            Popup::Viewer { hl, .. } => {
+                assert!(!hl.is_empty(), "highlight computed");
+                // `fn` (keyword mauve) differs from a plain identifier's colour.
+                let kw = hl[0][0];
+                let plain = hl[2][0]; // the closing `}` line, char 0
+                assert_ne!(kw.fg, plain.fg, "keyword coloured differently from plain");
+            }
+            _ => panic!("not a viewer"),
+        }
+        // A .txt file is not highlighted.
+        std::fs::write(d.path().join("b.txt"), "plain\n").unwrap();
+        app.handle_key(code(KeyCode::Esc)).unwrap();
+    }
+
+    #[test]
     fn the_viewer_edits_and_saves_a_text_file() {
         let d = tempfile::tempdir().unwrap();
         let file = d.path().join("note.txt");

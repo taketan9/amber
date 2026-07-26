@@ -512,6 +512,10 @@ impl App {
                 );
                 let source = view.lines.clone();
                 let editable = matches!(view.kind, cian_core::viewer::ViewKind::Text);
+                // Highlight recognised code (Markdown keeps its rendered preview).
+                let hl_lang = (!markdown && editable)
+                    .then(|| cian_core::highlight::detect(path))
+                    .flatten();
                 self.popup = Popup::Viewer {
                     title: title.to_string(),
                     path: path.to_path_buf(),
@@ -531,6 +535,8 @@ impl App {
                     source,
                     md_styles: Vec::new(),
                     md_width: 0,
+                    hl_lang,
+                    hl: Vec::new(),
                     // A real text file (not a hex dump) can be edited in place.
                     editable,
                     editing: false,
@@ -583,6 +589,8 @@ impl App {
                     source,
                     md_styles: Vec::new(),
                     md_width: 0,
+                    hl_lang: None,
+                    hl: Vec::new(),
                     // Extracted document text is not the file on disk; read-only.
                     editable: false,
                     editing: false,

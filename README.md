@@ -276,6 +276,12 @@ but because it lands in the same viewer, search, selection and copy all work
 over it. This keeps cian's offline, single-binary promise: no converter, no
 network, just the one executable.
 
+Recognised source files are **syntax-highlighted** — keywords, types, strings,
+comments, numbers, and markup tags/attributes get their own colours. It's a
+small built-in lexer (no external grammar library, so the single binary stays
+lean), covering Rust, Python, JavaScript/TypeScript, Java, HTML/XML/JSP, CSS,
+SQL, shell, Lua, YAML and JSON. Unknown types are shown plain.
+
 The viewer is vim-flavoured: a cursor moves with `h`/`j`/`k`/`l`, `w`/`b`,
 `0`/`$`, `gg`/`G` and `Ctrl-d`/`Ctrl-u`; `/` searches (all matches highlighted,
 `n`/`N` step through them), `42G` jumps to a line, `%` to the matching bracket,

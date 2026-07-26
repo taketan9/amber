@@ -295,6 +295,12 @@ enum Popup {
         /// The inner width the preview was last wrapped to, so the render can
         /// tell when a resize means it must re-render.
         md_width: u16,
+        /// Syntax-highlight language for this file, if recognised. Drives the
+        /// per-character colours in source (non-preview) mode.
+        hl_lang: Option<cian_core::highlight::Lang>,
+        /// Cached per-character highlight styles, parallel to `view.lines`.
+        /// Empty until computed (and cleared on edit / re-decode so it refreshes).
+        hl: Vec<Vec<Style>>,
         /// True for a real text file that can be edited and saved in place
         /// (false for a hex dump, an extracted Office document, etc).
         editable: bool,

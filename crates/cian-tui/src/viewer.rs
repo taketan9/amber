@@ -412,10 +412,12 @@ impl App {
             }
             EncTarget::Viewer(mut viewer) => {
                 if let Some(enc) = chosen {
-                    if let Popup::Viewer { view, visual, source, .. } = viewer.as_mut() {
+                    if let Popup::Viewer { view, visual, source, hl, .. } = viewer.as_mut() {
                         view.redecode(enc);
-                        // Keep the preview's source in step with the new decode.
+                        // Keep the preview's source in step with the new decode,
+                        // and drop the highlight cache so it recomputes.
                         *source = view.lines.clone();
+                        hl.clear();
                         *visual = None;
                         self.message = Some(format!("encoding: {}", enc.label()));
                     }
@@ -469,7 +471,9 @@ impl App {
             return Ok(());
         }
         let body_h = (self.viewer_rect.height as usize).max(1).saturating_sub(1).max(1);
-        if let Popup::Viewer { view, line, col, scroll, goal, dirty, .. } = &mut self.popup {
+        if let Popup::Viewer { view, line, col, scroll, goal, dirty, hl, .. } = &mut self.popup {
+            // Any edit invalidates the cached highlight; it recomputes on exit.
+            hl.clear();
             let lines = &mut view.lines;
             if lines.is_empty() {
                 lines.push(String::new());

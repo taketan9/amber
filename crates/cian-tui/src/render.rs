@@ -1626,6 +1626,22 @@ fn draw_image(f: &mut Frame, area: Rect, app: &mut App) {
     );
 }
 
+/// Colour for a syntax-highlight category (a VS Code-dark-ish palette).
+fn hl_style(cat: cian_core::highlight::Category) -> Style {
+    use cian_core::highlight::Category as C;
+    let c = match cat {
+        C::Plain => Color::Rgb(210, 210, 222),
+        C::Keyword => Color::Rgb(197, 134, 192), // mauve
+        C::Type => Color::Rgb(78, 201, 176),      // teal
+        C::Str => Color::Rgb(206, 145, 120),      // salmon
+        C::Comment => Color::Rgb(106, 153, 85),   // green
+        C::Number => Color::Rgb(181, 206, 168),   // pale green
+        C::Tag => Color::Rgb(86, 156, 214),       // blue
+        C::Attr => Color::Rgb(156, 220, 254),     // light blue
+    };
+    Style::default().fg(c)
+}
+
 fn draw_ai_chat(f: &mut Frame, area: Rect, app: &mut App) {
     let lang = app.lang;
     let width: u16 = 76u16.min(area.width.saturating_sub(2));
@@ -2577,7 +2593,7 @@ fn draw_popup(
         return;
     }
 
-    if let Popup::Viewer { title, view, scroll, line, col, visual, anchor, find_input, find_query, git_lines, markdown, preview, source, md_styles, md_width, editing, dirty, editable, .. } = popup {
+    if let Popup::Viewer { title, view, scroll, line, col, visual, anchor, find_input, find_query, git_lines, markdown, preview, source, md_styles, md_width, editing, dirty, editable, hl, hl_lang, .. } = popup {
         let w = area.width.saturating_sub(4);
         let h = area.height.saturating_sub(2);
         let rect = centered_rect(w, h, area);
@@ -2603,6 +2619,20 @@ fn draw_popup(
         }
         *line = (*line).min(view.lines.len().saturating_sub(1));
         *col = (*col).min(view.lines.get(*line).map(|l| l.chars().count()).unwrap_or(0));
+
+        // Syntax highlight source code (not the Markdown preview, not while
+        // editing). Computed once and cached; the cache is cleared on an edit
+        // or re-decode so it refreshes. Colours come from the per-char category.
+        if !*preview && !*editing {
+            if let Some(lang) = hl_lang {
+                if hl.is_empty() {
+                    *hl = cian_core::highlight::highlight(&view.lines, *lang)
+                        .into_iter()
+                        .map(|cats| cats.into_iter().map(hl_style).collect())
+                        .collect();
+                }
+            }
+        }
 
         let kind = match view.kind {
             cian_core::viewer::ViewKind::Text => view.encoding.label(),
@@ -2733,6 +2763,8 @@ fn draw_popup(
                         search_bg
                     } else if *preview {
                         md_styles.get(i).and_then(|s| s.get(j)).copied().unwrap_or_default()
+                    } else if !*editing && !hl.is_empty() {
+                        hl.get(i).and_then(|s| s.get(j)).copied().unwrap_or(Style::default().fg(text_fg))
                     } else {
                         Style::default().fg(text_fg)
                     }
