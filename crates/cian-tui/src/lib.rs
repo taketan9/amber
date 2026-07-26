@@ -2517,6 +2517,8 @@ pub struct App {
     menu_stack: Vec<Popup>,
     /// The viewer's text body rect, for mapping a mouse click to a line.
     viewer_rect: Rect,
+    /// The viewer's line-number gutter width, so a click maps to a char column.
+    viewer_gutter: u16,
     /// Clickable regions of whatever popup is on screen, rebuilt every frame by
     /// `draw_popup`, so dialogs and pickers can be driven entirely by mouse.
     popup_zones: Vec<PopupZone>,
@@ -2674,6 +2676,7 @@ impl App {
             menu_rect: Rect::new(0, 0, 0, 0),
             menu_stack: Vec::new(),
             viewer_rect: Rect::new(0, 0, 0, 0),
+            viewer_gutter: 0,
             popup_zones: Vec::new(),
             pending_elevation: None,
             pane_zoom_return: None,
@@ -3643,6 +3646,20 @@ impl App {
                     *visual = Some(mode);
                 }
             };
+
+            // Shift+arrow selects like an editor: begin a character-wise
+            // selection at the cursor (if not already selecting), then the motion
+            // arm below moves the cursor, extending it. Shift+Home/End/PageUp/Dn
+            // extend too. A plain arrow keeps vim's behaviour.
+            let is_arrow = matches!(
+                key.code,
+                KeyCode::Left | KeyCode::Right | KeyCode::Up | KeyCode::Down
+                    | KeyCode::Home | KeyCode::End | KeyCode::PageUp | KeyCode::PageDown
+            );
+            if shift && is_arrow && visual.is_none() {
+                *anchor = (*line, *col);
+                *visual = Some(ViewVisual::Char);
+            }
 
             match (ctrl, key.code) {
                 (false, KeyCode::Esc) | (false, KeyCode::Char('q')) => {
@@ -6314,9 +6331,17 @@ impl App {
         if matches!(self.popup, Popup::Viewer { .. }) {
             let body = self.viewer_rect;
             let body_h = (body.height as usize).max(1);
+            // The clicked column, offset past the line-number gutter, so a click
+            // lands on the character under the pointer (not just its line).
+            let text_x = body.x + self.viewer_gutter;
+            let ecol = col;
             let line_at = |row: u16, scroll: usize, n: usize| -> usize {
                 let rel = row.saturating_sub(body.y) as usize;
                 (scroll + rel).min(n.saturating_sub(1))
+            };
+            let col_at = |view: &cian_core::viewer::View, l: usize| -> usize {
+                let rel = ecol.saturating_sub(text_x) as usize;
+                rel.min(vlen(view, l))
             };
             match ev.kind {
                 MouseEventKind::Down(MouseButton::Left) => {
@@ -6324,17 +6349,23 @@ impl App {
                         &mut self.popup
                     {
                         let l = line_at(row, *scroll, view.lines.len());
+                        let c = col_at(view, l);
                         *line = l;
-                        *col = 0;
-                        *goal = 0;
-                        *anchor = (l, 0);
+                        *col = c;
+                        *goal = c;
+                        *anchor = (l, c);
                         *visual = None; // a bare click just moves the cursor
                     }
                 }
                 MouseEventKind::Drag(MouseButton::Left) => {
-                    if let Popup::Viewer { view, scroll, line, visual, .. } = &mut self.popup {
-                        *line = line_at(row, *scroll, view.lines.len());
-                        *visual = Some(ViewVisual::Line);
+                    if let Popup::Viewer { view, scroll, line, col, goal, visual, .. } = &mut self.popup {
+                        let l = line_at(row, *scroll, view.lines.len());
+                        let c = col_at(view, l);
+                        *line = l;
+                        *col = c;
+                        *goal = c;
+                        // Character-wise selection, extending from the press.
+                        *visual = Some(ViewVisual::Char);
                     }
                 }
                 MouseEventKind::ScrollDown | MouseEventKind::ScrollUp => {
@@ -10319,9 +10350,15 @@ fn draw(f: &mut Frame, app: &mut App) {
         if let Popup::ContextMenu { items, at, .. } = &app.popup {
             app.menu_rect = context_menu_rect(items, *at, area, app.lang);
         }
-        // And the viewer's text body, so a drag maps to a line.
-        if matches!(app.popup, Popup::Viewer { .. }) {
+        // And the viewer's text body, so a drag maps to a line — plus the
+        // line-number gutter width, so it maps to a char column too.
+        if let Popup::Viewer { view, .. } = &app.popup {
             app.viewer_rect = viewer_body_rect(area);
+            app.viewer_gutter = if view.kind == cian_core::viewer::ViewKind::Text {
+                (format!("{}", view.lines.len()).len().max(3) + 1) as u16
+            } else {
+                0
+            };
         }
         let find_state = app
             .find_job
@@ -12003,8 +12040,8 @@ fn draw_popup(
         let footer_area =
             Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1);
         let footer_text = match lang {
-            Lang::En => " j/k scroll  u/d page  g/G top/bottom  S AI summary  Esc close ",
-            Lang::Ja => " j/k スクロール  u/d ページ  g/G 先頭/末尾  S AI要約  Esc 閉じる ",
+            Lang::En => " j/k move  v / Shift+↕ / drag select  y copy  S AI summary  Esc ",
+            Lang::Ja => " j/k 移動  v / Shift+↕ / ドラッグ 選択  y コピー  S AI要約  Esc ",
         };
         let footer = Paragraph::new(footer_text).style(
             Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD),
@@ -16989,6 +17026,58 @@ mod tests {
         assert_eq!(app.message.as_deref(), Some("copied"));
         // Visual ends after the copy; the viewer stays open.
         assert!(matches!(app.popup, Popup::Viewer { visual: None, .. }));
+    }
+
+    #[test]
+    fn the_viewer_shift_arrow_selects_characters() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::write(d.path().join("a.txt"), "hello world\nsecond\n").unwrap();
+        let p = d.path().to_path_buf();
+        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        app.handle_key(code(KeyCode::F(3))).unwrap();
+        let _ = render(&mut app, 100, 30);
+
+        // Shift+Right three times: a character-wise selection begins at col 0
+        // and the cursor advances, extending it.
+        for _ in 0..3 {
+            app.handle_key(KeyEvent::new(KeyCode::Right, KeyModifiers::SHIFT)).unwrap();
+        }
+        match &app.popup {
+            Popup::Viewer { visual: Some(ViewVisual::Char), anchor, col, .. } => {
+                assert_eq!(*anchor, (0, 0), "anchored where selection began");
+                assert_eq!(*col, 3, "cursor advanced three chars");
+            }
+            other => panic!("expected a char selection, got {:?}", other),
+        }
+        // A plain motion keeps the vim-style selection; `y` copies and ends it.
+        app.handle_key(key('y')).unwrap();
+        assert_eq!(app.message.as_deref(), Some("copied"));
+        assert!(matches!(app.popup, Popup::Viewer { visual: None, .. }));
+    }
+
+    #[test]
+    fn the_viewer_mouse_drag_selects_characters() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::write(d.path().join("a.txt"), "hello world\nsecond line\n").unwrap();
+        let p = d.path().to_path_buf();
+        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        app.handle_key(code(KeyCode::F(3))).unwrap();
+        let _ = render(&mut app, 100, 30);
+        let body = app.viewer_rect;
+        let x0 = body.x + app.viewer_gutter;
+        // Press on (line 0, char 2), drag to (line 0, char 8): a char selection.
+        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), x0 + 2, body.y));
+        app.handle_mouse(mouse(MouseEventKind::Drag(MouseButton::Left), x0 + 8, body.y));
+        match &app.popup {
+            Popup::Viewer { visual: Some(ViewVisual::Char), anchor, line, col, .. } => {
+                assert_eq!(*anchor, (0, 2), "anchored at the press char");
+                assert_eq!((*line, *col), (0, 8), "cursor at the drag char");
+            }
+            other => panic!("expected a char selection, got {:?}", other),
+        }
+        // Right-click copies the selection.
+        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Right), x0 + 8, body.y));
+        assert_eq!(app.message.as_deref(), Some("copied"));
     }
 
     /// Drive the viewer with a sequence of plain-char keys.
