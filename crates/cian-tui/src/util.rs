@@ -1,0 +1,308 @@
+//! Pure, self-contained helpers shared across the TUI: glob matching, display
+//! wrapping, and the F3 viewer's cursor/selection geometry. Nothing here touches
+//! `App` state, so it lives apart from the main file for readability.
+
+use unicode_width::UnicodeWidthStr;
+
+/// Shell-style wildcard match: `*` matches any run, `?` any one char.
+/// Both `pat` and `name` should already be case folded to compare.
+pub(crate) fn glob_match(pat: &str, name: &str) -> bool {
+    let p: Vec<char> = pat.chars().collect();
+    let s: Vec<char> = name.chars().collect();
+    // Classic two-pointer glob with backtracking on the last `*`.
+    let (mut pi, mut si) = (0usize, 0usize);
+    let (mut star, mut mark) = (None, 0usize);
+    while si < s.len() {
+        if pi < p.len() && (p[pi] == '?' || p[pi] == s[si]) {
+            pi += 1;
+            si += 1;
+        } else if pi < p.len() && p[pi] == '*' {
+            star = Some(pi);
+            mark = si;
+            pi += 1;
+        } else if let Some(sp) = star {
+            pi = sp + 1;
+            mark += 1;
+            si = mark;
+        } else {
+            return false;
+        }
+    }
+    while pi < p.len() && p[pi] == '*' {
+        pi += 1;
+    }
+    pi == p.len()
+}
+
+/// Break `s` into chunks no wider than `width` display columns, on the char
+/// boundary (no hyphenation). A blank string yields one empty chunk so the line
+/// still takes a row.
+pub(crate) fn wrap_str(s: &str, width: usize) -> Vec<String> {
+    let width = width.max(1);
+    if s.is_empty() {
+        return vec![String::new()];
+    }
+    let mut out = Vec::new();
+    let mut cur = String::new();
+    let mut w = 0usize;
+    for ch in s.chars() {
+        let cw = UnicodeWidthStr::width(ch.to_string().as_str()).max(1);
+        if w + cw > width && !cur.is_empty() {
+            out.push(std::mem::take(&mut cur));
+            w = 0;
+        }
+        cur.push(ch);
+        w += cw;
+    }
+    if !cur.is_empty() {
+        out.push(cur);
+    }
+    out
+}
+
+/// The length in characters of viewer line `l` (0 if out of range).
+pub(crate) fn vlen(view: &cian_core::viewer::View, l: usize) -> usize {
+    view.lines.get(l).map(|s| s.chars().count()).unwrap_or(0)
+}
+
+/// `w`: the start of the next word, moving onto the next line when the current
+/// one runs out. Words are runs of non-whitespace (a simplification of vim's
+/// word/WORD split that reads naturally for code).
+pub(crate) fn viewer_word_forward(
+    view: &cian_core::viewer::View,
+    line: usize,
+    col: usize,
+    last: usize,
+) -> (usize, usize) {
+    let chars: Vec<char> = view.lines.get(line).map(|s| s.chars().collect()).unwrap_or_default();
+    let mut i = col;
+    // Skip the rest of the current word, then any whitespace.
+    while i < chars.len() && !chars[i].is_whitespace() {
+        i += 1;
+    }
+    while i < chars.len() && chars[i].is_whitespace() {
+        i += 1;
+    }
+    if i < chars.len() {
+        return (line, i);
+    }
+    // Fell off the end: first non-blank of the next non-empty line.
+    let mut l = line + 1;
+    while l <= last {
+        let c: Vec<char> = view.lines[l].chars().collect();
+        let first = c.iter().position(|ch| !ch.is_whitespace()).unwrap_or(0);
+        if !c.is_empty() {
+            return (l, first);
+        }
+        l += 1;
+    }
+    (line, chars.len())
+}
+
+/// `b`: the start of the current or previous word.
+pub(crate) fn viewer_word_back(view: &cian_core::viewer::View, line: usize, col: usize) -> (usize, usize) {
+    let chars: Vec<char> = view.lines.get(line).map(|s| s.chars().collect()).unwrap_or_default();
+    let mut i = col;
+    if i == 0 {
+        // At the line start: end of the previous line's last word.
+        if line == 0 {
+            return (0, 0);
+        }
+        let prev = line - 1;
+        let c: Vec<char> = view.lines[prev].chars().collect();
+        let mut j = c.len();
+        while j > 0 && c[j - 1].is_whitespace() {
+            j -= 1;
+        }
+        while j > 0 && !c[j - 1].is_whitespace() {
+            j -= 1;
+        }
+        return (prev, j);
+    }
+    i -= 1;
+    while i > 0 && chars[i].is_whitespace() {
+        i -= 1;
+    }
+    while i > 0 && !chars[i - 1].is_whitespace() {
+        i -= 1;
+    }
+    (line, i)
+}
+
+/// `%`: from the bracket at or after the cursor on its line, the matching
+/// bracket, scanning across lines and honouring nesting. `None` if there is no
+/// bracket to jump from or its pair is unbalanced.
+pub(crate) fn viewer_match_bracket(
+    view: &cian_core::viewer::View,
+    line: usize,
+    col: usize,
+) -> Option<(usize, usize)> {
+    const PAIRS: [(char, char); 3] = [('(', ')'), ('[', ']'), ('{', '}')];
+    let opener = |c: char| PAIRS.iter().find(|(o, _)| *o == c).map(|(_, cl)| *cl);
+    let closer = |c: char| PAIRS.iter().find(|(_, cl)| *cl == c).map(|(o, _)| *o);
+
+    let chars: Vec<char> = view.lines.get(line)?.chars().collect();
+    // Find the bracket to jump from: the one under the cursor, else the next on
+    // the line.
+    let mut start = col;
+    while start < chars.len() && opener(chars[start]).is_none() && closer(chars[start]).is_none() {
+        start += 1;
+    }
+    let br = *chars.get(start)?;
+
+    if let Some(want_close) = opener(br) {
+        // Scan forward for the matching closer.
+        let mut depth = 0i32;
+        let mut l = line;
+        let mut c = start;
+        loop {
+            let cs: Vec<char> = view.lines.get(l).map(|s| s.chars().collect()).unwrap_or_default();
+            while c < cs.len() {
+                if cs[c] == br {
+                    depth += 1;
+                } else if cs[c] == want_close {
+                    depth -= 1;
+                    if depth == 0 {
+                        return Some((l, c));
+                    }
+                }
+                c += 1;
+            }
+            l += 1;
+            c = 0;
+            if l >= view.lines.len() {
+                return None;
+            }
+        }
+    } else if let Some(want_open) = closer(br) {
+        // Scan backward for the matching opener.
+        let mut depth = 0i32;
+        let mut l = line as isize;
+        let mut c = start as isize;
+        loop {
+            let cs: Vec<char> = view.lines.get(l as usize).map(|s| s.chars().collect()).unwrap_or_default();
+            while c >= 0 {
+                let ch = cs[c as usize];
+                if ch == br {
+                    depth += 1;
+                } else if ch == want_open {
+                    depth -= 1;
+                    if depth == 0 {
+                        return Some((l as usize, c as usize));
+                    }
+                }
+                c -= 1;
+            }
+            l -= 1;
+            if l < 0 {
+                return None;
+            }
+            c = view.lines.get(l as usize).map(|s| s.chars().count() as isize - 1).unwrap_or(-1);
+        }
+    } else {
+        None
+    }
+}
+
+/// `{` / `}`: the previous/next blank line (paragraph boundary).
+pub(crate) fn viewer_paragraph(view: &cian_core::viewer::View, line: usize, forward: bool) -> usize {
+    let blank = |l: usize| view.lines.get(l).map(|s| s.trim().is_empty()).unwrap_or(true);
+    let last = view.lines.len().saturating_sub(1);
+    if forward {
+        let mut l = line + 1;
+        while l < last && !blank(l) {
+            l += 1;
+        }
+        l.min(last)
+    } else {
+        if line == 0 {
+            return 0;
+        }
+        let mut l = line - 1;
+        while l > 0 && !blank(l) {
+            l -= 1;
+        }
+        l
+    }
+}
+
+/// The next/previous match of `query` (case-insensitive substring) from `from`,
+/// wrapping around the file. Returns the match's start `(line, col)`.
+pub(crate) fn viewer_find(
+    view: &cian_core::viewer::View,
+    from: (usize, usize),
+    query: &str,
+    forward: bool,
+) -> Option<(usize, usize)> {
+    if query.is_empty() || view.lines.is_empty() {
+        return None;
+    }
+    let needle = query.to_lowercase();
+    let n = view.lines.len();
+    // Character-column of a byte match within a line.
+    let col_of = |line: &str, byte: usize| line[..byte].chars().count();
+
+    if forward {
+        // Current line after the cursor, then following lines, then wrap.
+        for step in 0..=n {
+            let l = (from.0 + step) % n;
+            let hay = view.lines[l].to_lowercase();
+            let start_char = if step == 0 { from.1 + 1 } else { 0 };
+            let start_byte = view.lines[l]
+                .char_indices()
+                .nth(start_char)
+                .map(|(b, _)| b)
+                .unwrap_or(view.lines[l].len());
+            if let Some(rel) = hay[start_byte.min(hay.len())..].find(&needle) {
+                return Some((l, col_of(&view.lines[l], start_byte + rel)));
+            }
+        }
+    } else {
+        for step in 0..=n {
+            let l = (from.0 + n - (step % n)) % n;
+            let hay = view.lines[l].to_lowercase();
+            // On the cursor line, only matches strictly before the cursor.
+            let limit_char = if step == 0 { from.1 } else { view.lines[l].chars().count() };
+            let limit_byte = view.lines[l]
+                .char_indices()
+                .nth(limit_char)
+                .map(|(b, _)| b)
+                .unwrap_or(view.lines[l].len());
+            if let Some(rel) = hay[..limit_byte.min(hay.len())].rfind(&needle) {
+                return Some((l, col_of(&view.lines[l], rel)));
+            }
+        }
+    }
+    None
+}
+
+/// Order two `(line, col)` positions so the earlier one comes first.
+pub(crate) fn order_pos(a: (usize, usize), b: (usize, usize)) -> ((usize, usize), (usize, usize)) {
+    if a <= b {
+        (a, b)
+    } else {
+        (b, a)
+    }
+}
+
+/// Char-wise text between two ordered positions, end-inclusive (vim `v` yank).
+pub(crate) fn viewer_charwise(lines: &[String], s: (usize, usize), e: (usize, usize)) -> String {
+    let take = |l: usize, from: usize, to_incl: Option<usize>| -> String {
+        let chars: Vec<char> = lines.get(l).map(|x| x.chars().collect()).unwrap_or_default();
+        let end = match to_incl {
+            Some(c) => (c + 1).min(chars.len()),
+            None => chars.len(),
+        };
+        let start = from.min(end);
+        chars[start..end].iter().collect()
+    };
+    if s.0 == e.0 {
+        return take(s.0, s.1, Some(e.1));
+    }
+    let mut out = vec![take(s.0, s.1, None)];
+    for l in (s.0 + 1)..e.0 {
+        out.push(lines.get(l).cloned().unwrap_or_default());
+    }
+    out.push(take(e.0, 0, Some(e.1)));
+    out.join("\n")
+}
