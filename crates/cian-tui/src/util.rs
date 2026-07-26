@@ -3,6 +3,7 @@
 //! `App` state, so it lives apart from the main file for readability.
 
 use unicode_width::UnicodeWidthStr;
+use ratatui::layout::Rect;
 
 /// Shell-style wildcard match: `*` matches any run, `?` any one char.
 /// Both `pat` and `name` should already be case folded to compare.
@@ -305,4 +306,87 @@ pub(crate) fn viewer_charwise(lines: &[String], s: (usize, usize), e: (usize, us
     }
     out.push(take(e.0, 0, Some(e.1)));
     out.join("\n")
+}
+
+pub(crate) fn truncate(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        s.to_string()
+    } else {
+        let cut: String = s.chars().take(max.saturating_sub(1)).collect();
+        format!("{}…", cut)
+    }
+}
+
+/// Display width of a string in terminal cells.
+///
+/// Not `chars().count()`: CJK characters occupy two cells, so a Japanese
+/// shortcut name padded by character count pushes everything after it out of
+/// alignment and off the right edge.
+pub(crate) fn width(s: &str) -> usize {
+    UnicodeWidthStr::width(s)
+}
+
+/// Pad to `w` display cells, accounting for wide characters.
+pub(crate) fn pad_to(s: &str, w: usize) -> String {
+    let mut out = s.to_string();
+    for _ in width(s)..w {
+        out.push(' ');
+    }
+    out
+}
+
+/// Shorten from the middle, keeping both ends.
+///
+/// Paths and URLs carry their meaning at opposite ends — the final directory
+/// of one, the host of the other — so cutting either end loses what identifies
+/// it. Removing the middle keeps both.
+pub(crate) fn truncate_middle(s: &str, max: usize) -> String {
+    if width(s) <= max {
+        return s.to_string();
+    }
+    if max <= 3 {
+        return truncate(s, max);
+    }
+    // Budget in display cells from each end, so wide characters cost two.
+    let keep = max - 1;
+    let (head_budget, tail_budget) = (keep.div_ceil(2), keep / 2);
+    let take_from = |it: &mut dyn Iterator<Item = char>, budget: usize| -> String {
+        let (mut out, mut used) = (String::new(), 0usize);
+        for c in it {
+            let cw = UnicodeWidthStr::width(c.to_string().as_str());
+            if used + cw > budget {
+                break;
+            }
+            used += cw;
+            out.push(c);
+        }
+        out
+    };
+    let h = take_from(&mut s.chars(), head_budget);
+    let t: String = take_from(&mut s.chars().rev(), tail_budget).chars().rev().collect();
+    format!("{}…{}", h, t)
+}
+
+pub(crate) fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
+    let w = width.min(area.width.saturating_sub(2));
+    let h = height.min(area.height.saturating_sub(2));
+    let x = area.x + (area.width.saturating_sub(w)) / 2;
+    let y = area.y + (area.height.saturating_sub(h)) / 2;
+    Rect::new(x, y, w, h)
+}
+
+/// The smallest rect containing both. Zero-sized inputs are ignored so an
+/// absent surface (e.g. while zoomed) does not drag the union to the origin.
+pub(crate) fn union_rect(a: Rect, b: Rect) -> Rect {
+    if a.width == 0 || a.height == 0 {
+        return b;
+    }
+    if b.width == 0 || b.height == 0 {
+        return a;
+    }
+    let x = a.x.min(b.x);
+    let y = a.y.min(b.y);
+    let r = (a.x + a.width).max(b.x + b.width);
+    let bo = (a.y + a.height).max(b.y + b.height);
+    Rect { x, y, width: r - x, height: bo - y }
 }
