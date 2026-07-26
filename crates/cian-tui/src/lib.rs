@@ -261,7 +261,22 @@ enum Popup {
         /// True for a Markdown file, so `p` can toggle a rendered preview.
         markdown: bool,
         /// Showing the rendered Markdown preview rather than the raw source.
+        ///
+        /// The preview is a *full* viewer: `view.lines` is swapped for the
+        /// rendered plain text (so the cursor, visual selection, `/` search and
+        /// mouse all work over the rendered document), and `md_styles` carries
+        /// the per-character colour applied underneath. The render owns the
+        /// swap: it re-renders when `preview` flips or the width changes.
         preview: bool,
+        /// The original source lines, kept so leaving preview can restore them
+        /// (and so the preview can be re-wrapped when the width changes).
+        source: Vec<String>,
+        /// Per-character base style parallel to `view.lines` while previewing;
+        /// empty in source mode.
+        md_styles: Vec<Vec<Style>>,
+        /// The inner width the preview was last wrapped to, so the render can
+        /// tell when a resize means it must re-render.
+        md_width: u16,
     },
     /// The recursive comparison of two directories: a list of differing paths.
     DirCompare {
@@ -1169,10 +1184,6 @@ pub struct App {
     viewer_rect: Rect,
     /// The viewer's line-number gutter width, so a click maps to a char column.
     viewer_gutter: u16,
-    /// Number of rendered lines in the Markdown preview, stashed each frame so
-    /// the key handler can bound scrolling in preview mode (where the display
-    /// line count differs from the source line count).
-    viewer_preview_lines: usize,
     /// Clickable regions of whatever popup is on screen, rebuilt every frame by
     /// `draw_popup`, so dialogs and pickers can be driven entirely by mouse.
     popup_zones: Vec<PopupZone>,
@@ -1335,7 +1346,6 @@ impl App {
             menu_stack: Vec::new(),
             viewer_rect: Rect::new(0, 0, 0, 0),
             viewer_gutter: 0,
-            viewer_preview_lines: 0,
             popup_zones: Vec::new(),
             pending_elevation: None,
             pane_zoom_return: None,

@@ -52,41 +52,20 @@ impl App {
             return Ok(());
         }
 
-        // Markdown preview mode: a simpler, scroll-only view of the rendered
-        // document (the styled line count differs from the source, so scrolling
-        // is bounded by the count the renderer stashed last frame).
-        if matches!(self.popup, Popup::Viewer { preview: true, .. }) {
-            let body_h = (self.viewer_rect.height as usize).max(1);
-            let last = self.viewer_preview_lines.saturating_sub(1);
-            if let Popup::Viewer { scroll, preview, title, .. } = &mut self.popup {
-                match key.code {
-                    KeyCode::Esc | KeyCode::Char('q') => { self.popup = Popup::None; return Ok(()); }
-                    KeyCode::Char('p') => {
-                        *preview = false;
-                        self.message = Some(tr(self.lang, "markdown: source", "Markdown: ソース").into());
-                        return Ok(());
-                    }
-                    KeyCode::Char('j') | KeyCode::Down => *scroll = (*scroll + 1).min(last),
-                    KeyCode::Char('k') | KeyCode::Up => *scroll = scroll.saturating_sub(1),
-                    KeyCode::Char('d') | KeyCode::PageDown => *scroll = (*scroll + body_h / 2).min(last),
-                    KeyCode::Char('u') | KeyCode::PageUp => *scroll = scroll.saturating_sub(body_h / 2),
-                    KeyCode::Char('g') | KeyCode::Home => *scroll = 0,
-                    KeyCode::Char('G') | KeyCode::End => *scroll = last,
-                    KeyCode::Char('S') => { let _ = title; self.summarize_viewer(); return Ok(()); }
-                    KeyCode::Char('y') | KeyCode::Char('c') => { self.copy_viewer_selection(); return Ok(()); }
-                    KeyCode::Enter if shift => { self.viewer_reveal_in_pane(); return Ok(()); }
-                    _ => {}
-                }
-                return Ok(());
-            }
-        }
-
-        // `p` toggles into the rendered Markdown preview (source-mode only, since
-        // preview mode handles `p` above).
+        // `p` toggles between the raw source and the rendered Markdown preview.
+        // The preview is a full viewer — cursor, visual selection, `/` search and
+        // the mouse all work over the rendered document — so this only flips the
+        // flag and resets the cursor; the render swaps `view.lines` in and out.
         if !ctrl && key.code == KeyCode::Char('p') {
-            if let Popup::Viewer { preview, markdown: true, .. } = &mut self.popup {
-                *preview = true;
-                self.message = Some(tr(self.lang, "markdown: preview", "Markdown: プレビュー").into());
+            if let Popup::Viewer { preview, markdown: true, line, col, scroll, visual, .. } = &mut self.popup {
+                *preview = !*preview;
+                let on = *preview;
+                (*line, *col, *scroll, *visual) = (0, 0, 0, None);
+                self.message = Some(if on {
+                    tr(self.lang, "markdown: preview", "Markdown: プレビュー").into()
+                } else {
+                    tr(self.lang, "markdown: source", "Markdown: ソース").into()
+                });
             }
             return Ok(());
         }
@@ -98,8 +77,11 @@ impl App {
             self.viewer_reveal_in_pane();
             return Ok(());
         }
-        // `e` opens the encoding picker; the choice re-decodes this file.
-        if !ctrl && key.code == KeyCode::Char('e') {
+        // `e` opens the encoding picker; the choice re-decodes this file. Only
+        // in source mode — the rendered preview owns `view.lines`.
+        if !ctrl && key.code == KeyCode::Char('e')
+            && !matches!(self.popup, Popup::Viewer { preview: true, .. })
+        {
             let cur = if let Popup::Viewer { view, .. } = &self.popup {
                 cian_core::viewer::TextEncoding::ALL
                     .iter()
@@ -120,8 +102,9 @@ impl App {
             self.copy_viewer_selection();
             return Ok(());
         }
-        // `/` opens the search prompt.
-        if !ctrl && key.code == KeyCode::Char('/') {
+        // `/`, `f` and `Shift+F` all open the search prompt (the pane's own
+        // find keys, so the reflex carries over into the viewer and preview).
+        if !ctrl && matches!(key.code, KeyCode::Char('/') | KeyCode::Char('f') | KeyCode::Char('F')) {
             if let Popup::Viewer { find_input, .. } = &mut self.popup {
                 *find_input = Some(String::new());
             }
@@ -373,8 +356,10 @@ impl App {
             }
             EncTarget::Viewer(mut viewer) => {
                 if let Some(enc) = chosen {
-                    if let Popup::Viewer { view, visual, .. } = viewer.as_mut() {
+                    if let Popup::Viewer { view, visual, source, .. } = viewer.as_mut() {
                         view.redecode(enc);
+                        // Keep the preview's source in step with the new decode.
+                        *source = view.lines.clone();
                         *visual = None;
                         self.message = Some(format!("encoding: {}", enc.label()));
                     }

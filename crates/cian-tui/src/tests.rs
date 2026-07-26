@@ -3920,12 +3920,40 @@
         app.handle_key(code(KeyCode::F(3))).unwrap();
         // A .md file opens straight into rendered preview.
         assert!(matches!(&app.popup, Popup::Viewer { markdown: true, preview: true, .. }), "opened in preview");
+        // The render swaps the rendered document into view.lines (and fills the
+        // per-char style grid) so the whole viewer works over the preview.
         let _ = render(&mut app, 100, 30);
-        assert!(app.viewer_preview_lines > 0, "the preview rendered some lines");
+        if let Popup::Viewer { view, md_styles, source, .. } = &app.popup {
+            let flat = view.lines.join("\n");
+            assert!(flat.contains("mermaid diagram"), "mermaid label is rendered");
+            assert!(flat.contains("A-->B"), "the diagram source is kept");
+            assert!(!md_styles.is_empty(), "per-char styles were built");
+            assert!(source.iter().any(|l| l == "# Title"), "the raw source is preserved");
+        } else {
+            panic!("not a viewer");
+        }
 
-        // p toggles to raw source, p again back to preview.
+        // Search works in preview: `/` then a query jumps the cursor to a match.
+        app.handle_key(key('/')).unwrap();
+        for c in "mermaid".chars() { app.handle_key(key(c)).unwrap(); }
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+        if let Popup::Viewer { view, line, find_query, .. } = &app.popup {
+            assert_eq!(find_query.as_deref(), Some("mermaid"), "search is confirmed");
+            assert!(view.lines[*line].contains("mermaid"), "cursor landed on a match");
+        } else {
+            panic!("not a viewer");
+        }
+
+        // p toggles to raw source (view.lines becomes the file text again), p back.
         app.handle_key(key('p')).unwrap();
-        assert!(matches!(&app.popup, Popup::Viewer { preview: false, .. }), "toggled to source");
+        let _ = render(&mut app, 100, 30);
+        if let Popup::Viewer { view, md_styles, preview, .. } = &app.popup {
+            assert!(!*preview, "toggled to source");
+            assert!(md_styles.is_empty(), "styles dropped in source mode");
+            assert!(view.lines.iter().any(|l| l == "# Title"), "shows raw source");
+        } else {
+            panic!("not a viewer");
+        }
         app.handle_key(key('p')).unwrap();
         assert!(matches!(&app.popup, Popup::Viewer { preview: true, .. }), "back to preview");
         // Esc closes.

@@ -10,6 +10,29 @@ use ratatui::text::{Line, Span};
 use crate::theme;
 use crate::util::wrap_str;
 
+/// Render Markdown to a plain-text grid plus a parallel per-character style
+/// grid. The viewer drives its cursor / selection / search over the plain text
+/// and paints each character with the matching base style, so all the viewer's
+/// machinery works over the rendered document unchanged.
+pub(crate) fn render_styled(source: &[String], width: usize) -> (Vec<String>, Vec<Vec<Style>>) {
+    let lines = render(source, width);
+    let mut plain = Vec::with_capacity(lines.len());
+    let mut styles = Vec::with_capacity(lines.len());
+    for line in &lines {
+        let mut text = String::new();
+        let mut st = Vec::new();
+        for span in &line.spans {
+            for ch in span.content.chars() {
+                text.push(ch);
+                st.push(span.style);
+            }
+        }
+        plain.push(text);
+        styles.push(st);
+    }
+    (plain, styles)
+}
+
 /// Render Markdown `source` lines into styled, width-wrapped display lines.
 pub(crate) fn render(source: &[String], width: usize) -> Vec<Line<'static>> {
     let width = width.max(8);

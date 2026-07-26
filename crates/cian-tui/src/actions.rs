@@ -493,6 +493,7 @@ impl App {
                     path.extension().and_then(|e| e.to_str()).map(|e| e.to_lowercase()).as_deref(),
                     Some("md") | Some("markdown") | Some("mkd") | Some("mdown")
                 );
+                let source = view.lines.clone();
                 self.popup = Popup::Viewer {
                     title: title.to_string(),
                     path: path.to_path_buf(),
@@ -509,6 +510,9 @@ impl App {
                     git_lines,
                     markdown,
                     preview: markdown,
+                    source,
+                    md_styles: Vec::new(),
+                    md_width: 0,
                 }
             }
             Err(e) => self.message = Some(format!("cannot view: {}", e)),

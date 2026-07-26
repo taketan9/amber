@@ -265,11 +265,6 @@ pub(crate) fn draw(f: &mut Frame, app: &mut App) {
         draw_ai_chat(f, area, app);
         return;
     }
-    // Markdown preview has its own renderer (styled document, own scroll count).
-    if matches!(app.popup, Popup::Viewer { preview: true, .. }) {
-        draw_md_preview(f, area, app);
-        return;
-    }
     if matches!(app.popup, Popup::CommitMessage { .. }) {
         draw_commit_message(f, area, app);
         return;
@@ -297,9 +292,9 @@ pub(crate) fn draw(f: &mut Frame, app: &mut App) {
         }
         // And the viewer's text body, so a drag maps to a line — plus the
         // line-number gutter width, so it maps to a char column too.
-        if let Popup::Viewer { view, .. } = &app.popup {
+        if let Popup::Viewer { view, preview, .. } = &app.popup {
             app.viewer_rect = viewer_body_rect(area);
-            app.viewer_gutter = if view.kind == cian_core::viewer::ViewKind::Text {
+            app.viewer_gutter = if !*preview && view.kind == cian_core::viewer::ViewKind::Text {
                 (format!("{}", view.lines.len()).len().max(3) + 1) as u16
             } else {
                 0
@@ -1552,41 +1547,6 @@ fn push_row_zone(zones: &mut Vec<PopupZone>, inner: Rect, y: u16, idx: usize) {
 
 /// The AI chat, rendered with `&mut App` so it can stash the transcript's rect,
 /// scroll and flat lines for mouse selection.
-/// The Markdown preview: the source rendered to styled lines, scrolled by the
-/// stashed line count. `p` toggles back to the raw source viewer.
-fn draw_md_preview(f: &mut Frame, area: Rect, app: &mut App) {
-    let lang = app.lang;
-    let w = area.width.saturating_sub(4);
-    let h = area.height.saturating_sub(2);
-    let rect = centered_rect(w, h, area);
-    f.render_widget(Clear, rect);
-    let title = if let Popup::Viewer { title, .. } = &app.popup { title.clone() } else { String::new() };
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_type(border_type())
-        .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
-        .style(Style::default().bg(theme().popup_bg))
-        .title(format!(" {}  —  {} ", title, tr(lang, "markdown preview", "Markdown プレビュー")))
-        .title_bottom(tr(lang,
-            " p source  j/k u/d scroll  g/G  S summary  y copy  Esc ",
-            " p ソース  j/k u/d スクロール  g/G  S 要約  y コピー  Esc "));
-    let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
-    f.render_widget(block, rect);
-    let body_h = inner.height as usize;
-    let body_w = inner.width as usize;
-
-    let mut shown: Vec<Line> = Vec::new();
-    if let Popup::Viewer { view, scroll, .. } = &mut app.popup {
-        let rendered = crate::markdown::render(&view.lines, body_w);
-        let total = rendered.len();
-        let max_scroll = total.saturating_sub(body_h);
-        *scroll = (*scroll).min(max_scroll);
-        shown = rendered.into_iter().skip(*scroll).take(body_h).collect();
-        app.viewer_preview_lines = total;
-    }
-    f.render_widget(Paragraph::new(shown), inner);
-}
-
 fn draw_ai_chat(f: &mut Frame, area: Rect, app: &mut App) {
     let lang = app.lang;
     let width: u16 = 76u16.min(area.width.saturating_sub(2));
@@ -2538,11 +2498,33 @@ fn draw_popup(
         return;
     }
 
-    if let Popup::Viewer { title, view, scroll, line, col, visual, anchor, find_input, find_query, git_lines, markdown, .. } = popup {
+    if let Popup::Viewer { title, view, scroll, line, col, visual, anchor, find_input, find_query, git_lines, markdown, preview, source, md_styles, md_width, .. } = popup {
         let w = area.width.saturating_sub(4);
         let h = area.height.saturating_sub(2);
         let rect = centered_rect(w, h, area);
         f.render_widget(Clear, rect);
+
+        // The preview owns `view.lines`: render the source to plain text plus a
+        // parallel per-character style grid at the current width and swap it in;
+        // leaving preview (or a width change) restores/re-wraps. Everything below
+        // — cursor, visual selection, `/` search, the mouse — then works over
+        // whichever text is on screen.
+        let inner_w = rect.width.saturating_sub(4).max(1);
+        if *preview {
+            if md_styles.is_empty() || *md_width != inner_w {
+                let (plain, styles) = crate::markdown::render_styled(source, inner_w as usize);
+                view.lines = plain;
+                *md_styles = styles;
+                *md_width = inner_w;
+            }
+        } else if !md_styles.is_empty() {
+            view.lines = source.clone();
+            md_styles.clear();
+            *md_width = 0;
+        }
+        *line = (*line).min(view.lines.len().saturating_sub(1));
+        *col = (*col).min(view.lines.get(*line).map(|l| l.chars().count()).unwrap_or(0));
+
         let kind = match view.kind {
             cian_core::viewer::ViewKind::Text => view.encoding.label(),
             cian_core::viewer::ViewKind::Binary => "binary",
@@ -2557,11 +2539,16 @@ fn draw_popup(
             Some(ViewVisual::Line) => "  [V-LINE]".into(),
             Some(ViewVisual::Block) => "  [V-BLOCK]".into(),
         };
+        let head = if *preview {
+            tr(lang, "Markdown preview", "Markdown プレビュー").to_string()
+        } else {
+            format!("{}, {}{}", kind, size, cut)
+        };
         let block = Block::default()
             .borders(Borders::ALL)
             .border_type(border_type())
             .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
-            .title(format!(" {}  —  {}, {}{} ", title, kind, size, cut))
+            .title(format!(" {}  —  {} ", title, head))
             .title_bottom(format!(" {}:{}{} ", *line + 1, *col + 1, mode));
         let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
         f.render_widget(block, rect);
@@ -2569,8 +2556,16 @@ fn draw_popup(
         let body_h = inner.height.saturating_sub(1) as usize;
         let max_scroll = view.lines.len().saturating_sub(body_h);
         *scroll = (*scroll).min(max_scroll);
+        // Keep the cursor on screen (preview scrolls by moving the cursor too).
+        if *line < *scroll {
+            *scroll = *line;
+        } else if *line >= *scroll + body_h.max(1) {
+            *scroll = *line + 1 - body_h.max(1);
+        }
 
-        let numbered = view.kind == cian_core::viewer::ViewKind::Text;
+        // Line numbers and the git change bar belong to the source only; the
+        // rendered preview is a document, not a file listing.
+        let numbered = !*preview && view.kind == cian_core::viewer::ViewKind::Text;
         let gutter = if numbered {
             format!("{}", view.lines.len()).len().max(3) + 1
         } else {
@@ -2644,13 +2639,16 @@ fn draw_popup(
                 let cur = if i == *line { Some(*col) } else { None };
                 let matches = match_cols(l);
                 let cell_style = |j: usize| -> Style {
-                    // Priority: cursor over selection over a search match.
+                    // Priority: cursor over selection over a search match; the
+                    // resting style is the Markdown colour in preview, else plain.
                     if cur == Some(j) {
                         cursor_style.fg(text_fg)
                     } else if sel.map(|(a, b)| j >= a && j <= b).unwrap_or(false) {
                         sel_bg.fg(text_fg)
                     } else if matches.iter().any(|(a, b)| j >= *a && j <= *b) {
                         search_bg
+                    } else if *preview {
+                        md_styles.get(i).and_then(|s| s.get(j)).copied().unwrap_or_default()
                     } else {
                         Style::default().fg(text_fg)
                     }
@@ -2706,13 +2704,19 @@ fn draw_popup(
         // While typing a search, the footer is the `/` prompt; otherwise hints.
         let footer = match find_input {
             Some(q) => format!("/{}_", q),
-            None => format!(
-                "{}{}{} ",
-                tr(lang, " / search  n/N  v/V select  y copy  S-Enter reveal  e enc",
-                    " / 検索  n/N  v/V 選択  y コピー  S-Enter 場所へ  e 文字コード"),
-                if *markdown { tr(lang, "  p preview  ", "  p プレビュー  ") } else { "  " },
-                pos
-            ),
+            None => {
+                let hints = if *preview {
+                    tr(lang, " / f search  n/N  v/V select  y copy  p source  ",
+                          " / f 検索  n/N  v/V 選択  y コピー  p ソース  ")
+                } else if *markdown {
+                    tr(lang, " / f search  n/N  v/V select  y copy  e enc  p preview  ",
+                          " / f 検索  n/N  v/V 選択  y コピー  e 文字コード  p プレビュー  ")
+                } else {
+                    tr(lang, " / f search  n/N  v/V select  y copy  S-Enter reveal  e enc  ",
+                          " / f 検索  n/N  v/V 選択  y コピー  S-Enter 場所へ  e 文字コード  ")
+                };
+                format!("{}{} ", hints, pos)
+            }
         };
         f.render_widget(
             Paragraph::new(footer)
