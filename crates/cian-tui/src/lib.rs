@@ -1219,6 +1219,21 @@ enum Popup {
     /// Confirm discarding (reverting) worktree changes to tracked files. This
     /// throws away uncommitted work, so it is gated behind its own dialog.
     ConfirmDiscard { targets: Vec<PathBuf>, dir: PathBuf },
+    /// Duplicate files found by content, grouped, each toggleable. Approving
+    /// hands the checked copies to the normal delete confirmation.
+    DupeReview { items: Vec<DupeItem>, cursor: usize, scroll: usize },
+}
+
+/// One file in a duplicate group. `group` is its 0-based group index (files in
+/// the same group are byte-identical); `keeper` marks the one row per group left
+/// unchecked by default, so approving deletes the redundant copies, not all of
+/// them.
+#[derive(Debug, Clone)]
+struct DupeItem {
+    path: PathBuf,
+    group: usize,
+    keeper: bool,
+    selected: bool,
 }
 
 /// One candidate the junk detector flagged: a path, why it thinks so, and
@@ -1901,6 +1916,8 @@ enum MenuItem {
     AiCommit,
     /// Detect junk files in the current directory.
     AiJunk,
+    /// Find duplicate files by content (not AI).
+    FindDupes,
     /// Suggest an organised folder structure for the current directory.
     AiStructure,
     /// Bulk-rename the marked files (or the whole listing) by an instruction.
@@ -1982,6 +1999,7 @@ impl MenuItem {
             MenuItem::AiExplainError => tr(lang, "Explain the last error", "直近のエラーを説明"),
             MenuItem::AiCommit => tr(lang, "Draft commit message", "コミットメッセージ生成"),
             MenuItem::AiJunk => tr(lang, "Detect junk files", "ゴミファイル検出"),
+            MenuItem::FindDupes => tr(lang, "Find duplicate files", "重複ファイルを検出"),
             MenuItem::AiStructure => tr(lang, "Suggest folder structure", "フォルダ構成を提案"),
             MenuItem::AiRename => tr(lang, "Bulk rename", "一括リネーム"),
             MenuItem::AiSearch => tr(lang, "Semantic search", "セマンティック検索"),
@@ -2680,6 +2698,10 @@ pub struct App {
     struct_rect: Rect,
     /// The rename-review list body rect, for the same reason.
     rename_rect: Rect,
+    /// The dupe-review list body rect, for the same reason.
+    dupe_rect: Rect,
+    /// A running duplicate scan, delivering its groups when finished.
+    dupes_job: Option<std::sync::mpsc::Receiver<Vec<Vec<PathBuf>>>>,
     diff_job: Option<DiffJob>,
     /// When the panes were last checked against the filesystem.
     last_watch: Instant,
@@ -2784,6 +2806,8 @@ impl App {
             junk_rect: Rect::new(0, 0, 0, 0),
             struct_rect: Rect::new(0, 0, 0, 0),
             rename_rect: Rect::new(0, 0, 0, 0),
+            dupe_rect: Rect::new(0, 0, 0, 0),
+            dupes_job: None,
             ai_scroll: 0,
             ai_lines: Vec::new(),
             zoom_return: None,
@@ -3069,6 +3093,7 @@ impl App {
                 }
             }
             "aierror" | "explain" => self.explain_shell_error(),
+            "dupes" | "dup" | "duplicates" => self.start_dupes(),
             "reload" | "source" => self.reload_config(),
             // Mark / unmark entries whose name matches a glob (`:mark *.rs`).
             "mark" | "select" => self.cmd_mark(rest, true),
@@ -5944,6 +5969,89 @@ impl App {
         self.show_op_report(&report);
     }
 
+    /// Scan the active pane's tree for byte-identical files on a worker thread.
+    fn start_dupes(&mut self) {
+        if self.dupes_job.is_some() {
+            self.message = Some("a duplicate scan is already running".into());
+            return;
+        }
+        let Some(root) = self.active_pane().map(|p| p.cwd.clone()) else { return };
+        // Collect files recursively, bounded so a giant tree cannot run away.
+        const CAP: usize = 20_000;
+        let cancel = std::sync::Arc::new(AtomicBool::new(false));
+        let mut files: Vec<PathBuf> = Vec::new();
+        let q = cian_core::search::Query { needle: String::new(), include_hidden: false, mode: cian_core::search::Mode::Name };
+        {
+            let cancel = &cancel;
+            let files = &mut files;
+            cian_core::search::search(&root, &q, cancel, &mut |h| {
+                if !h.is_dir {
+                    files.push(h.path);
+                    if files.len() >= CAP {
+                        cancel.store(true, Ordering::Relaxed);
+                    }
+                }
+            });
+        }
+        if files.len() < 2 {
+            self.message = Some("nothing to compare".into());
+            return;
+        }
+        self.message = Some(format!("scanning {} files for duplicates…", files.len()));
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let cancel = AtomicBool::new(false);
+            let groups = cian_core::dedup::find_duplicates(&files, &cancel);
+            let _ = tx.send(groups);
+        });
+        self.dupes_job = Some(rx);
+    }
+
+    /// Drain the duplicate scan; when it finishes, open the review popup.
+    fn poll_dupes_job(&mut self) -> bool {
+        let Some(rx) = &self.dupes_job else { return false };
+        let groups = match rx.try_recv() {
+            Ok(g) => g,
+            Err(std::sync::mpsc::TryRecvError::Empty) => return false,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                self.dupes_job = None;
+                return false;
+            }
+        };
+        self.dupes_job = None;
+        if groups.is_empty() {
+            self.message = Some("no duplicate files found".into());
+            return true;
+        }
+        // Flatten into rows: the first file of each group is the keeper (left
+        // unchecked); the rest are pre-checked for deletion.
+        let mut items = Vec::new();
+        for (g, group) in groups.iter().enumerate() {
+            for (i, path) in group.iter().enumerate() {
+                let keeper = i == 0;
+                items.push(DupeItem { path: path.clone(), group: g, keeper, selected: !keeper });
+            }
+        }
+        let dupes = groups.len();
+        self.message = Some(format!("{} duplicate group(s) — review and delete", dupes));
+        self.popup = Popup::DupeReview { items, cursor: 0, scroll: 0 };
+        true
+    }
+
+    /// Hand the checked duplicate copies to the normal delete confirmation.
+    fn confirm_dupe_deletion(&mut self) {
+        let targets: Vec<PathBuf> = if let Popup::DupeReview { items, .. } = &self.popup {
+            items.iter().filter(|it| it.selected).map(|it| it.path.clone()).collect()
+        } else {
+            return;
+        };
+        if targets.is_empty() {
+            self.message = Some("nothing checked".into());
+            return;
+        }
+        self.popup = Popup::ConfirmDelete { targets };
+    }
+
     /// Hand the checked junk candidates to the normal delete confirmation, so
     /// removal goes through the same trash/permanent path (and its own y/Enter
     /// approval) as any other delete — never straight to disk from here.
@@ -6797,6 +6905,31 @@ impl App {
             return;
         }
 
+        // Dupe review: same feel — click a row to toggle it.
+        if matches!(self.popup, Popup::DupeReview { .. }) {
+            let body = self.dupe_rect;
+            let row_at = |row: u16, scroll: usize, n: usize| -> Option<usize> {
+                if row < body.y || row >= body.y + body.height { return None; }
+                let idx = scroll + (row - body.y) as usize;
+                if idx < n { Some(idx) } else { None }
+            };
+            if let Popup::DupeReview { items, cursor, scroll } = &mut self.popup {
+                let n = items.len();
+                match ev.kind {
+                    MouseEventKind::Down(MouseButton::Left) => {
+                        if let Some(idx) = row_at(row, *scroll, n) {
+                            *cursor = idx;
+                            items[idx].selected = !items[idx].selected;
+                        }
+                    }
+                    MouseEventKind::ScrollDown => *scroll = (*scroll + 1).min(n.saturating_sub(1)),
+                    MouseEventKind::ScrollUp => *scroll = scroll.saturating_sub(1),
+                    _ => {}
+                }
+            }
+            return;
+        }
+
         // Structure review: same feel as junk review — click a row to toggle it.
         if matches!(self.popup, Popup::StructureReview { .. }) {
             let body = self.struct_rect;
@@ -7601,6 +7734,7 @@ impl App {
             items.push(MenuItem::Attributes);
             items.push(MenuItem::Hash);
             items.push(MenuItem::Compare);
+            items.push(MenuItem::FindDupes);
             items.push(MenuItem::HiddenToggle);
             // Git actions, only when this pane sits in a repository.
             if self.git_for(self.focused).is_some() {
@@ -7876,6 +8010,7 @@ impl App {
             MenuItem::Attributes => self.show_attributes(),
             MenuItem::Hash => self.start_hash(cian_core::attrs::HashKind::Sha256),
             MenuItem::Compare => self.open_diff(),
+            MenuItem::FindDupes => self.start_dupes(),
             MenuItem::Background => {
                 let pane = self.focused;
                 let current = match pane {
@@ -8695,6 +8830,28 @@ impl App {
                 }
                 // Enter/d hands the checked paths to the normal delete confirm.
                 KeyCode::Enter | KeyCode::Char('d') => self.confirm_junk_deletion(),
+                _ => {}
+            }
+            return Ok(());
+        }
+        if let Popup::DupeReview { items, cursor, .. } = &mut self.popup {
+            let n = items.len();
+            match key.code {
+                KeyCode::Esc | KeyCode::Char('q') => self.popup = Popup::None,
+                KeyCode::Char('j') | KeyCode::Down => {
+                    if n > 0 { *cursor = (*cursor + 1).min(n - 1); }
+                }
+                KeyCode::Char('k') | KeyCode::Up => *cursor = cursor.saturating_sub(1),
+                KeyCode::Char('g') | KeyCode::Home => *cursor = 0,
+                KeyCode::Char('G') | KeyCode::End => *cursor = n.saturating_sub(1),
+                KeyCode::Char(' ') => {
+                    if let Some(it) = items.get_mut(*cursor) { it.selected = !it.selected; }
+                }
+                KeyCode::Char('a') => {
+                    let all_on = items.iter().all(|it| it.selected);
+                    for it in items.iter_mut() { it.selected = !all_on; }
+                }
+                KeyCode::Enter | KeyCode::Char('d') => self.confirm_dupe_deletion(),
                 _ => {}
             }
             return Ok(());
@@ -10391,6 +10548,10 @@ fn run_loop<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Result<()>
         if app.ai_job.is_some() {
             needs_redraw |= app.poll_ai_job();
         }
+        // A running duplicate scan reports its groups when done.
+        if app.dupes_job.is_some() {
+            needs_redraw |= app.poll_dupes_job();
+        }
         // A fading flash needs frames of its own; clear it once it expires so
         // the loop can go back to sleep.
         if app.flash.is_some() {
@@ -10681,6 +10842,10 @@ fn draw(f: &mut Frame, app: &mut App) {
     }
     if matches!(app.popup, Popup::JunkReview { .. }) {
         draw_junk_review(f, area, app);
+        return;
+    }
+    if matches!(app.popup, Popup::DupeReview { .. }) {
+        draw_dupe_review(f, area, app);
         return;
     }
     if matches!(app.popup, Popup::StructureReview { .. }) {
@@ -12234,6 +12399,68 @@ fn draw_junk_review(f: &mut Frame, area: Rect, app: &mut App) {
     f.render_widget(Paragraph::new(rows), inner);
 }
 
+/// The duplicate-file review: files grouped by identical content, a checkbox
+/// per copy (the keeper of each group left unchecked). Enter deletes the checked.
+fn draw_dupe_review(f: &mut Frame, area: Rect, app: &mut App) {
+    let lang = app.lang;
+    let width: u16 = 96u16.min(area.width.saturating_sub(2));
+    let height = area.height.saturating_sub(2).clamp(8, 30);
+    let rect = centered_rect(width, height, area);
+    f.render_widget(Clear, rect);
+    let (n, checked) = if let Popup::DupeReview { items, .. } = &app.popup {
+        (items.len(), items.iter().filter(|i| i.selected).count())
+    } else {
+        (0, 0)
+    };
+    let title = if lang == Lang::Ja {
+        format!(" 重複ファイル  {}/{} 選択 ", checked, n)
+    } else {
+        format!(" duplicate files  {}/{} checked ", checked, n)
+    };
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(border_type())
+        .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
+        .style(Style::default().bg(theme().popup_bg))
+        .title(title)
+        .title_bottom(tr(lang,
+            " Space/click=toggle  a=all  Enter/d=delete checked  Esc=cancel ",
+            " Space/クリック=切替  a=全て  Enter/d=選択を削除  Esc=取消 "));
+    let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
+    f.render_widget(block, rect);
+
+    let body_h = inner.height as usize;
+    let body_w = inner.width as usize;
+    let mut rows: Vec<Line> = Vec::new();
+    if let Popup::DupeReview { items, cursor, scroll } = &mut app.popup {
+        if *cursor < *scroll {
+            *scroll = *cursor;
+        } else if *cursor >= *scroll + body_h {
+            *scroll = *cursor + 1 - body_h;
+        }
+        for (i, it) in items.iter().enumerate().skip(*scroll).take(body_h) {
+            let sel = i == *cursor;
+            // A group-change gets a subtle "#N" tag so the groups read apart.
+            let group_start = i == 0 || items.get(i.wrapping_sub(1)).map(|p| p.group != it.group).unwrap_or(true);
+            let checkbox = if it.selected { "[x] " } else { "[ ] " };
+            let box_c = if it.selected { theme().mark_fg } else { Color::Rgb(120, 120, 140) };
+            let base = if sel { Style::default().bg(theme().selected_bg) } else { Style::default() };
+            let tag = if group_start { format!("#{} ", it.group + 1) } else { "   ".to_string() };
+            let path_c = if it.keeper { Color::Rgb(130, 205, 150) } else { Color::Rgb(220, 220, 235) };
+            let suffix = if it.keeper { tr(lang, "  (keep)", "  (残す)") } else { "" };
+            let shown = it.path.display().to_string();
+            rows.push(Line::from(vec![
+                Span::styled(checkbox, base.fg(box_c).add_modifier(Modifier::BOLD)),
+                Span::styled(tag, base.fg(Color::Rgb(150, 150, 170))),
+                Span::styled(truncate_middle(&shown, body_w.saturating_sub(14)), base.fg(path_c)),
+                Span::styled(suffix, base.fg(Color::Rgb(130, 205, 150))),
+            ]));
+        }
+        app.dupe_rect = Rect::new(inner.x, inner.y, inner.width, body_h.min(items.len().saturating_sub(*scroll)) as u16);
+    }
+    f.render_widget(Paragraph::new(rows), inner);
+}
+
 /// The structure-suggestion review: a checkbox per proposed move showing
 /// `name → folder/`, with the AI's reason. Enter runs the checked moves.
 fn draw_structure_review(f: &mut Frame, area: Rect, app: &mut App) {
@@ -13662,6 +13889,7 @@ fn draw_popup(
         | Popup::JunkReview { .. }
         | Popup::StructureReview { .. }
         | Popup::RenameReview { .. }
+        | Popup::DupeReview { .. }
         | Popup::None => return,
     };
 
@@ -14081,6 +14309,39 @@ mod tests {
         let names = vec![("x".to_string(), PathBuf::from("/p/x"))];
         assert!(parse_junk_reply("[]", &names).is_empty());
         assert!(parse_junk_reply("I could not find any junk.", &names).is_empty());
+    }
+
+    /// The whole duplicate flow: scan a dir with two identical files, wait for
+    /// the worker, and check the review pre-selects the redundant copy.
+    #[test]
+    fn dupe_scan_finds_copies_and_preselects_all_but_one() {
+        let (d, mut app) = app_with(&["one.txt", "two.txt", "unique.txt"]);
+        std::fs::write(d.path().join("one.txt"), b"same bytes here").unwrap();
+        std::fs::write(d.path().join("two.txt"), b"same bytes here").unwrap();
+        std::fs::write(d.path().join("unique.txt"), b"different").unwrap();
+        app.reload_active();
+
+        app.start_dupes();
+        assert!(app.dupes_job.is_some(), "scan running on a worker");
+        let start = Instant::now();
+        while app.dupes_job.is_some() && start.elapsed() < Duration::from_secs(10) {
+            app.poll_dupes_job();
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let Popup::DupeReview { items, .. } = &app.popup else {
+            panic!("expected the dupe review, got {:?}", app.popup)
+        };
+        // Two identical files → one group of two; exactly one is pre-checked.
+        assert_eq!(items.len(), 2, "the duplicate pair (unique.txt omitted)");
+        assert_eq!(items.iter().filter(|i| i.selected).count(), 1, "keep one, check the other");
+        assert_eq!(items.iter().filter(|i| i.keeper).count(), 1);
+
+        // Approving hands the checked copy to the delete confirmation.
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+        match &app.popup {
+            Popup::ConfirmDelete { targets } => assert_eq!(targets.len(), 1),
+            other => panic!("expected delete confirm, got {:?}", other),
+        }
     }
 
     #[test]

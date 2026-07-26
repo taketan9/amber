@@ -161,6 +161,13 @@ other, or present in both but not identical. Files are compared byte-for-byte
 so a "same" verdict really means the same. Enter on a result moves both panes to
 that path.
 
+`:dupes` (or right-click **Find duplicate files**) finds byte-identical files
+anywhere under the current pane, on a worker thread. It groups by size first and
+only hashes the size-collisions, so most files are never read. The results are a
+grouped checklist — one file per group is left as the keeper, the rest
+pre-checked — and approving hands the checked copies to the ordinary delete
+confirmation, so nothing is removed without the usual trash/permanent choice.
+
 ## File transfer (SFTP / SCP)
 
 With SSH hosts configured (see below), the right-click menu gains **Upload →
@@ -462,7 +469,7 @@ Cargo workspace, split into seven crates:
 
 | Crate | Role |
 |---|---|
-| `cian-core` | Pure domain logic: file ops, marks, history, sorting, filtering, search, diff, elevation, git |
+| `cian-core` | Pure domain logic: file ops, marks, history, sorting, filtering, search, diff, dedup, elevation, git |
 | `cian-tui`  | Rendering & input (ratatui + crossterm), layout, popups, mouse |
 | `cian-pty`  | Embedded shell pane (portable-pty + vt100 + tui-term) |
 | `cian-scp`  | Built-in SFTP/SCP file transfer (pure-Rust russh, no C deps) |

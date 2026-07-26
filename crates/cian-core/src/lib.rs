@@ -7,6 +7,7 @@ use anyhow::{Context, Result};
 
 pub mod archive;
 pub mod attrs;
+pub mod dedup;
 pub mod diff;
 pub mod dirdiff;
 pub mod elevate;
