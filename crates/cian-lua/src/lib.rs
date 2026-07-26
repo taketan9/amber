@@ -26,6 +26,7 @@ use std::rc::Rc;
 
 use mlua::{Function, FromLua, Lua, Table, Value};
 
+pub mod macros;
 pub mod shortcuts;
 
 /// A color spec exactly as the user wrote it: `"#rrggbb"`, a named color

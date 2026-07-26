@@ -552,6 +552,7 @@ impl App {
             Popup::ContextMenu { cursor, .. }
             | Popup::ColorPicker { cursor, .. }
             | Popup::SortPicker { cursor, .. }
+            | Popup::Macros { cursor, .. }
             | Popup::EncodingPicker { cursor, .. }
             | Popup::DirCompare { cursor, .. }
             | Popup::Archive { cursor, .. }

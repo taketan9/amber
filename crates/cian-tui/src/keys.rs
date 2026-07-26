@@ -562,6 +562,20 @@ impl App {
             }
             return Ok(());
         }
+        if let Popup::Macros { cursor, names } = &mut self.popup {
+            let n = names.len().max(1);
+            match key.code {
+                KeyCode::Esc | KeyCode::Char('q') => self.popup = Popup::None,
+                KeyCode::Char('j') | KeyCode::Down => *cursor = (*cursor + 1) % n,
+                KeyCode::Char('k') | KeyCode::Up => *cursor = (*cursor + n - 1) % n,
+                KeyCode::Enter => {
+                    let idx = *cursor;
+                    self.run_macro(idx);
+                }
+                _ => {}
+            }
+            return Ok(());
+        }
         if let Popup::SortPicker { cursor } = &mut self.popup {
             let n = SortKey::ALL.len();
             match key.code {
@@ -1288,6 +1302,8 @@ impl App {
             (false, _, KeyCode::Char('N')) => self.jump_to_next_match(false),
             (false, false, KeyCode::Char('h')) => self.start_history(),
             (false, false, KeyCode::Char('s')) => self.start_shortcuts(),
+            // `@` — vim's play-a-macro key — opens the macro launcher.
+            (false, _, KeyCode::Char('@')) => self.start_macros(),
             // navigation: gg/G + Shift+U/D for fast cursor moves
             (false, false, KeyCode::Char('g')) => { self.pending_g = true; }
             (false, _, KeyCode::Char('G')) => {

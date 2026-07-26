@@ -40,6 +40,7 @@ impl App {
             "grep" => self.start_grep_prompt(),
             "find" => self.start_find_prompt(),
             "menu" => self.open_menu_at_cursor(),
+            "macro" | "macros" => self.start_macros(),
             "ssh" => self.start_ssh(),
             "ai" | "chat" => self.open_ai_chat(),
             "aicmd" => {

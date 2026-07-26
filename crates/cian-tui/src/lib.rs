@@ -44,6 +44,7 @@ mod ssh;
 mod gitui;
 mod commands;
 mod actions;
+mod macro_run;
 mod mouse;
 mod menu;
 mod keys;
@@ -228,6 +229,9 @@ enum Popup {
     ColorPicker { pane: FocusedPane, cursor: usize },
     /// Sort-order picker for the focused pane.
     SortPicker { cursor: usize },
+    /// The macro launcher: pick a macro from `macro.lua` to run. Names are held
+    /// here so the renderer stays independent of `App`.
+    Macros { cursor: usize, names: Vec<String> },
     /// Choose the encoding the active shell pane's output is decoded with.
     EncodingPicker { cursor: usize, target: EncTarget },
     /// A file's contents, scrollable.
@@ -1299,6 +1303,12 @@ pub struct App {
     pane_bg: [Option<Color>; 2],
     last_search_query: Option<String>,
     pub shortcuts: ShortcutStore,
+    /// User-defined macros loaded from `macro.lua` (portable-aware).
+    macros: Vec<cian_lua::macros::Macro>,
+    /// Why `macro.lua` failed to load, if it did — shown when the menu is empty.
+    macro_error: Option<String>,
+    /// A layout macro currently building itself out across ticks.
+    macro_run: Option<macro_run::MacroRun>,
     pending_g: bool,
     /// When true, only the focused surface is drawn, filling the window.
     pub zoomed: bool,
@@ -1334,6 +1344,7 @@ impl App {
         let mut right_pane = Pane::new(right)?;
         left_pane.set_show_hidden(show_hidden);
         right_pane.set_show_hidden(show_hidden);
+        let (macros, macro_error) = macro_run::load_macros();
         Ok(Self {
             left: PaneTabs::single(left_pane),
             right: PaneTabs::single(right_pane),
@@ -1411,6 +1422,9 @@ impl App {
             pane_bg: [None, None],
             last_search_query: None,
             shortcuts: ShortcutStore::load_or_default(),
+            macros,
+            macro_error,
+            macro_run: None,
             pending_g: false,
             zoomed: false,
             debug_keys: std::env::var("CIAN_DEBUG_KEYS").is_ok(),
@@ -2374,6 +2388,7 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry("p", Some(CopyPath), "copy path text to clipboard", "パス文字列をクリップボードにコピー"),
                 entry("Shift+P", Some(CopyFileRef), "copy file(s) to clipboard", "ファイルをクリップボードにコピー"),
                 entry("s", Some(Shortcuts), "shortcuts menu", "ショートカットメニュー"),
+                entry("@", None, "run a macro (layout builder; also :macros)", "マクロを実行（レイアウト構築；:macros でも）"),
                 entry(":hidden", None, "show / hide dotfiles (also right-click)", "ドットファイルの表示切替（右クリックでも）"),
                 entry(":attr", None, "attributes;  :chmod 644,  :readonly on|off", "属性；  :chmod 644,  :readonly on|off"),
                 entry(":hash", None, "checksum;  :hash md5  /  :hash sha256", "チェックサム；  :hash md5  /  :hash sha256"),
@@ -2728,6 +2743,11 @@ fn run_loop<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Result<()>
         }
         // Install the shell tab once its background spawn (see `ensure`) lands.
         if app.shell.poll_pending() {
+            needs_redraw = true;
+        }
+        // Advance a running layout macro (splits, colours, commands) once the
+        // shell is idle between spawns.
+        if app.macro_run.is_some() && app.tick_macro() {
             needs_redraw = true;
         }
         // A connection picked before the shell finished starting.

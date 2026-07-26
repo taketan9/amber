@@ -586,6 +586,32 @@ receive the function keys unchanged.
 The file panes use the parallel controls: `Shift+F1` / `Shift+F2` switch to the
 next / previous tab, and `Shift+F10` closes the active tab (asking first).
 
+## Macros
+
+A **layout macro** builds a whole shell working-set in one keystroke: split the
+panel, connect each pane somewhere, tint them apart, start logging — done. Press
+**`@`** (vim's play-a-macro key) to pick one, or run `:macros`.
+
+Macros live in `macro.lua` (portable-aware, like the rest of the config). Each
+returns a name and a list of panes; the first pane is the shell you are on, and
+each later pane is split off the previous one:
+
+```lua
+return {
+  { name = "Prod: db + app + logs", panes = {
+    { cmd = "ssh admin@db",  bg = "40,24,24", log = "~/cian-logs" },
+    { dir = "right", cmd = "ssh admin@app", bg = "24,40,24" },
+    { dir = "down",  cmd = "ssh admin@app", steps = { "tail -f /var/log/app.log" } },
+  }},
+}
+```
+
+Per pane: `dir` (`"right"` | `"down"`), `cmd` (a line to run), `steps` (more
+lines sent after it — e.g. `sqlplus /nolog` then `connect …`), `bg` (a colour so
+panes are easy to tell apart), and `log` (a directory to record the session to).
+Because each split spawns asynchronously, cian builds the layout pane-by-pane as
+the shells come up. See [`examples/macro.lua`](examples/macro.lua).
+
 ## Build
 
 ```sh

@@ -344,6 +344,12 @@ impl ShellPane {
         self.pending.iter().any(|p| p.kind == kind)
     }
 
+    /// True while any spawn is in flight. A macro waits for this to clear
+    /// between splits, so each pane lands before the next is built.
+    pub(crate) fn busy(&self) -> bool {
+        !self.pending.is_empty()
+    }
+
     /// True while the panel has no pane yet but one is on its way.
     pub(crate) fn is_starting(&self) -> bool {
         self.tabs.is_empty() && !self.pending.is_empty()

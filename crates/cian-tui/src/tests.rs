@@ -111,6 +111,44 @@
     }
 
     #[test]
+    fn the_macro_launcher_opens_and_starts_a_run() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        // Start from a known-empty set (the dev machine may have a real macro.lua).
+        app.macros.clear();
+        app.macro_error = None;
+        // No macros defined → `@` explains rather than opening an empty menu.
+        app.handle_key(key('@')).unwrap();
+        assert!(matches!(app.popup, Popup::None), "no empty menu");
+        assert!(app.message.as_deref().unwrap_or("").contains("macro"));
+
+        // Inject a couple of macros (as if loaded from macro.lua).
+        app.macros = cian_lua::macros::parse(
+            r#"return {
+                { name = "First",  panes = { { cmd = "echo one" } } },
+                { name = "Second", panes = { { cmd = "echo two" }, { dir = "down", cmd = "echo three" } } },
+            }"#,
+        )
+        .unwrap();
+
+        // `@` now opens the launcher listing both names.
+        app.handle_key(key('@')).unwrap();
+        match &app.popup {
+            Popup::Macros { names, cursor } => {
+                assert_eq!(names, &["First".to_string(), "Second".to_string()]);
+                assert_eq!(*cursor, 0);
+            }
+            _ => panic!("launcher did not open"),
+        }
+
+        // Move to the second and run it: the run starts and focus moves to the shell.
+        app.handle_key(key('j')).unwrap();
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+        assert!(matches!(app.popup, Popup::None), "launcher closed on run");
+        assert!(app.macro_run.is_some(), "a macro run is in progress");
+        assert_eq!(app.focused, FocusedPane::Shell, "shell focused for the macro");
+    }
+
+    #[test]
     fn ai_chat_round_trips_a_mock_reply() {
         let have_py = std::process::Command::new("python3")
             .arg("--version")

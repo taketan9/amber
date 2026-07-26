@@ -3007,6 +3007,51 @@ fn draw_popup(
         return;
     }
 
+    if let Popup::Macros { cursor, names } = popup {
+        let widest = names.iter().map(|n| n.chars().count()).max().unwrap_or(10);
+        let w = (widest as u16 + 8).clamp(28, area.width);
+        let h = (names.len() as u16 + 3).min(area.height);
+        let rect = centered_rect(w, h, area);
+        f.render_widget(Clear, rect);
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_type(border_type())
+            .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
+            .title(tr(lang, " run a macro ", " マクロを実行 "));
+        let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
+        f.render_widget(block, rect);
+
+        let rows: Vec<Line> = names
+            .iter()
+            .enumerate()
+            .map(|(i, name)| {
+                let sel = i == *cursor;
+                let style = if sel {
+                    Style::default().fg(theme().accent).add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(Color::Rgb(200, 200, 215))
+                };
+                Line::from(Span::styled(
+                    format!("{}{}", if sel { "▸ " } else { "  " }, name),
+                    style,
+                ))
+            })
+            .collect();
+        let body_area = Rect::new(inner.x, inner.y, inner.width, inner.height.saturating_sub(1));
+        f.render_widget(Paragraph::new(rows), body_area);
+        for i in 0..names.len() {
+            push_row_zone(zones, inner, inner.y + i as u16, i);
+        }
+        let footer_area = Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1);
+        f.render_widget(
+            Paragraph::new(tr(lang, " Enter=run  j/k  Esc ", " Enter=実行  j/k  Esc ")).style(
+                Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD),
+            ),
+            footer_area,
+        );
+        return;
+    }
+
     if let Popup::SortPicker { cursor } = popup {
         let w = 34u16.min(area.width);
         let h = SortKey::ALL.len() as u16 + 3;
@@ -3307,6 +3352,7 @@ fn draw_popup(
         | Popup::ContextMenu { .. }
         | Popup::ColorPicker { .. }
         | Popup::SortPicker { .. }
+        | Popup::Macros { .. }
         | Popup::EncodingPicker { .. }
         | Popup::SshHosts { .. }
         | Popup::SshUsers { .. }
