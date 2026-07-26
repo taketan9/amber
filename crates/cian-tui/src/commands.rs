@@ -82,6 +82,20 @@ impl App {
                     self.start_ai_rename(rest);
                 }
             }
+            // Pattern-based (non-AI) bulk rename. With no argument it prompts;
+            // with one it applies the pattern straight to the review checklist.
+            "brename" | "bren" | "renumber" | "renum" => {
+                if rest.is_empty() {
+                    self.start_bulk_rename();
+                } else {
+                    let targets = self.active_pane().map(|p| p.target_paths()).unwrap_or_default();
+                    if targets.is_empty() {
+                        self.message = Some(tr(self.lang, "nothing selected to rename", "リネーム対象がありません").into());
+                    } else {
+                        self.build_bulk_rename(&targets, rest);
+                    }
+                }
+            }
             "aisearch" | "semsearch" | "ask" => {
                 if rest.is_empty() {
                     self.start_ai_search_prompt();

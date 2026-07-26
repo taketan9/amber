@@ -590,6 +590,8 @@ enum MenuItem {
     SvnUpdate,
     /// `svn commit` the selection (prompts for a message).
     SvnCommit,
+    /// Pattern-based bulk rename of the marked files (`:brename`).
+    BulkRename,
     /// Open the shortcuts / bookmarks menu (the `s` key).
     Shortcuts,
     /// A submenu grouping the compress-to-archive actions.
@@ -689,7 +691,7 @@ impl MenuItem {
             MenuItem::AiJunk => tr(lang, "Detect junk files", "ゴミファイル検出"),
             MenuItem::FindDupes => tr(lang, "Find duplicate files", "重複ファイルを検出"),
             MenuItem::AiStructure => tr(lang, "Suggest folder structure", "フォルダ構成を提案"),
-            MenuItem::AiRename => tr(lang, "Bulk rename", "一括リネーム"),
+            MenuItem::AiRename => tr(lang, "AI rename", "AIリネーム"),
             MenuItem::AiSearch => tr(lang, "Semantic search", "セマンティック検索"),
             MenuItem::GitMenu => tr(lang, "Git ▸", "Git ▸"),
             MenuItem::GitStage => tr(lang, "Stage  (git add)", "ステージ  (git add)"),
@@ -705,6 +707,7 @@ impl MenuItem {
             MenuItem::SvnLog => tr(lang, "History / log  (svn log)", "履歴 / ログ  (svn log)"),
             MenuItem::SvnUpdate => tr(lang, "Update  (svn update)", "更新  (svn update)"),
             MenuItem::SvnCommit => tr(lang, "Commit…  (svn commit)", "コミット…  (svn commit)"),
+            MenuItem::BulkRename => tr(lang, "Bulk rename…  (:brename)", "一括リネーム…  (:brename)"),
             MenuItem::Shortcuts => tr(lang, "Shortcuts  (s)", "ショートカット  (s)"),
             MenuItem::AiMenu => tr(lang, "AI ▸", "AI ▸"),
             MenuItem::SendMenu => tr(lang, "Transfer ▸", "転送 ▸"),
@@ -1006,6 +1009,8 @@ enum InputKind {
     ExtractPassword { archive: PathBuf, members: Vec<String>, dest: PathBuf },
     /// The log message for an `svn commit` of the given paths.
     SvnCommit { paths: Vec<PathBuf> },
+    /// A bulk-rename pattern (template or `s/re/rep/flags`) for these files.
+    BulkRenamePattern { targets: Vec<PathBuf> },
 }
 
 /// The archive format chosen from the right-click "Compress" submenu.
@@ -2581,6 +2586,7 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry("m", Some(Move), "move to opposite pane", "反対ペインへ移動"),
                 entry("d", Some(Delete), "delete (to trash)", "削除（ゴミ箱へ）"),
                 entry("r", Some(Rename), "rename", "リネーム"),
+                entry(":brename", None, "bulk rename by pattern: {name}_{n3}.{ext} or s/re/rep/gi (preview first)", "パターン一括リネーム：{name}_{n3}.{ext} / s/re/rep/gi（先にプレビュー）"),
                 entry("a", Some(NewFile), "new file", "新規ファイル"),
                 entry("A", Some(NewDir), "new directory", "新規ディレクトリ"),
                 entry("o", Some(SyncFromOther), "this pane → other pane's directory", "このペインを反対ペインと同じ場所に"),

@@ -4366,6 +4366,50 @@
     }
 
     #[test]
+    fn bulk_rename_previews_then_applies() {
+        let d = tempfile::tempdir().unwrap();
+        for n in ["a.txt", "b.txt"] {
+            std::fs::write(d.path().join(n), b"x").unwrap();
+        }
+        let p = d.path().to_path_buf();
+        let mut app = App::new(p.clone(), p.clone(), cian_lua::Config::default()).unwrap();
+        let targets = vec![p.join("a.txt"), p.join("b.txt")];
+
+        // Template with a padded counter → a review checklist, nothing on disk yet.
+        app.build_bulk_rename(&targets, "img_{n2}.{ext}");
+        match &app.popup {
+            Popup::RenameReview { items, .. } => {
+                assert_eq!(items.len(), 2);
+                assert_eq!(items[0].new, "img_01.txt");
+                assert_eq!(items[1].new, "img_02.txt");
+            }
+            _ => panic!("no review popup"),
+        }
+        assert!(p.join("a.txt").exists(), "not renamed until applied");
+
+        app.apply_rename_plan();
+        assert!(p.join("img_01.txt").exists() && p.join("img_02.txt").exists(), "renamed");
+        assert!(!p.join("a.txt").exists());
+
+        // A regex substitution over the current names.
+        let targets = vec![p.join("img_01.txt"), p.join("img_02.txt")];
+        app.build_bulk_rename(&targets, "s/img/photo/");
+        match &app.popup {
+            Popup::RenameReview { items, .. } => assert_eq!(items[0].new, "photo_01.txt"),
+            _ => panic!("no review popup"),
+        }
+
+        // A pattern that changes nothing reports rather than opening a review.
+        app.popup = Popup::None;
+        app.build_bulk_rename(&targets, "{name}.{ext}");
+        assert!(matches!(app.popup, Popup::None), "no-op does not open a review");
+
+        // A malformed pattern is reported, not opened.
+        app.build_bulk_rename(&targets, "s/[/x/");
+        assert!(matches!(app.popup, Popup::None), "bad pattern does not open a review");
+    }
+
+    #[test]
     fn dir_compare_copy_across_reconciles_entries() {
         use std::sync::atomic::AtomicBool;
         use std::sync::Arc;

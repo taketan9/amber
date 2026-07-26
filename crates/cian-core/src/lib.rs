@@ -21,6 +21,7 @@ pub mod log;
 pub mod office;
 pub mod ops;
 pub mod progress;
+pub mod rename;
 pub mod search;
 pub mod svn;
 pub mod viewer;

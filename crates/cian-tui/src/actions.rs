@@ -84,6 +84,58 @@ impl App {
                 InputKind::Rename { original: e.path.clone() },
             );
     }
+    /// `:brename` / right-click: pattern-based bulk rename of the marked files
+    /// (or the one under the cursor). Prompts for the pattern; the proposed
+    /// names are shown for review (the same checklist the AI rename uses)
+    /// before anything touches disk.
+    pub(crate) fn start_bulk_rename(&mut self) {
+        let targets = self.active_pane().map(|p| p.target_paths()).unwrap_or_default();
+        if targets.is_empty() {
+            self.message = Some(tr(self.lang, "nothing selected to rename", "リネーム対象がありません").into());
+            return;
+        }
+        self.popup = text_input(
+            "bulk rename",
+            "pattern:  {name}_{n3}.{ext}   or   s/regex/replacement/gi",
+            String::new(),
+            InputKind::BulkRenamePattern { targets },
+        );
+    }
+
+    /// Build the rename review from a bulk pattern applied to `targets`. Reports
+    /// a bad pattern rather than opening an empty review.
+    pub(crate) fn build_bulk_rename(&mut self, targets: &[PathBuf], pattern: &str) {
+        let names: Vec<String> = targets
+            .iter()
+            .map(|p| p.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default())
+            .collect();
+        let news = match cian_core::rename::plan_batch(pattern, &names, cian_core::rename::Numbering::default()) {
+            Ok(v) => v,
+            Err(e) => {
+                self.message = Some(format!("rename pattern: {}", e));
+                return;
+            }
+        };
+        // Only offer entries that actually change to a non-empty, path-free name.
+        let items: Vec<RenameItem> = targets
+            .iter()
+            .zip(names.iter())
+            .zip(news.iter())
+            .filter(|((_, old), new)| new.as_str() != old.as_str() && !new.is_empty() && !new.contains('/') && !new.contains('\\'))
+            .map(|((path, old), new)| RenameItem {
+                path: path.clone(),
+                old: old.clone(),
+                new: new.clone(),
+                selected: true,
+            })
+            .collect();
+        if items.is_empty() {
+            self.message = Some(tr(self.lang, "the pattern changed no names", "パターンで変わる名前がありません").into());
+            return;
+        }
+        self.popup = Popup::RenameReview { items, cursor: 0, scroll: 0 };
+    }
+
     pub(crate) fn start_new_file(&mut self) {
         let Some(p) = self.active_pane() else { return };
         self.popup = text_input(
@@ -2012,6 +2064,15 @@ impl App {
                 }
                 let paths = paths.clone();
                 self.svn_commit(&paths, &name);
+                return Ok(());
+            }
+            InputKind::BulkRenamePattern { targets } => {
+                if name.trim().is_empty() {
+                    self.message = Some("rename cancelled".into());
+                    return Ok(());
+                }
+                let targets = targets.clone();
+                self.build_bulk_rename(&targets, &name);
                 return Ok(());
             }
             InputKind::LogDir => {

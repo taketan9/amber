@@ -182,6 +182,25 @@ grouped checklist — one file per group is left as the keeper, the rest
 pre-checked — and approving hands the checked copies to the ordinary delete
 confirmation, so nothing is removed without the usual trash/permanent choice.
 
+## Bulk rename
+
+`:brename` (or right-click **Bulk rename…**) renames the marked files — or the
+one under the cursor — by a pattern, no AI and no network. Two forms:
+
+- **Template**: the pattern *is* the new name, with `{name}` (the original stem),
+  `{ext}` (its extension), and `{n}` a counter — `{n3}` zero-pads to width 3.
+  `report_{n3}.{ext}` → `report_001.log`, `report_002.csv`, … Since the template
+  is the whole name, include `.{ext}` yourself.
+- **Substitution**: `s/regex/replacement/flags` — a regular-expression search and
+  replace over the whole filename. `${1}` references a capture (use the braces so
+  `${1}_` is not read as a group name); flags are `g` (every match) and `i`
+  (case-insensitive). `s/ (\d+) /_${1}/` , `s/IMG/photo/i`, …
+
+Either way the proposed names open in the same review checklist as the AI rename
+— `old → new` rows, Space/`a` to toggle — and only the checked ones are applied.
+Names that do not change, that end up empty, or that contain a path separator are
+dropped from the list, and an existing target is skipped rather than clobbered.
+
 ## File transfer (SFTP / SCP)
 
 With SSH hosts configured (see below), the right-click menu gains **Upload →
@@ -558,13 +577,14 @@ loop:
   results list as `find`/`grep`: Enter previews the file in F3, `Ctrl+n`/`Ctrl+N`
   step between them, Esc returns to the list. A path the model invents matches
   nothing.
-- **Bulk rename** (file pane): `:airename`, or right-click **AI ▸ → Bulk
-  rename**. It asks how to rename ("snake_case", "add a date prefix", …), then
-  proposes new names for the marked files — or the whole listing when nothing
-  is marked. You review the plan as `old → new` rows (Space/click toggles, `a`
-  toggles all) and approving (Enter/`r`) renames the checked files in place. A
-  proposed name is validated to a bare filename (no path, no `..`), a target
-  that already exists is skipped, and a name the model invents matches nothing.
+- **AI rename** (file pane): `:airename`, or right-click **AI ▸ → AI rename**.
+  It asks how to rename ("snake_case", "add a date prefix", …), then proposes new
+  names for the marked files — or the whole listing when nothing is marked. You
+  review the plan as `old → new` rows (Space/click toggles, `a` toggles all) and
+  approving (Enter/`r`) renames the checked files in place. A proposed name is
+  validated to a bare filename (no path, no `..`), a target that already exists
+  is skipped, and a name the model invents matches nothing. For a rename you can
+  spell out as a pattern, the offline **`:brename`** below needs no AI.
 
 **Give the AI your context.** Generic answers assume a generic machine.
 `cian.ai_context("…")` (a string or a list) records facts about *your*

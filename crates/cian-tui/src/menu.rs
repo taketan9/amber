@@ -74,6 +74,7 @@ impl App {
             }
             let has_targets = self.active_pane().map(|p| !p.target_paths().is_empty()).unwrap_or(false);
             if has_targets {
+                items.push(MenuItem::BulkRename);
                 items.push(MenuItem::CompressMenu);
             }
             items.push(MenuItem::HiddenToggle);
@@ -360,6 +361,7 @@ impl App {
             MenuItem::SvnLog => self.start_git_log(),
             MenuItem::SvnUpdate => self.svn_update(),
             MenuItem::SvnCommit => self.svn_commit_prompt(),
+            MenuItem::BulkRename => self.start_bulk_rename(),
             MenuItem::Shortcuts => self.start_shortcuts(),
             MenuItem::Lang => {
                 // Flip the interface language; every localized string reads
