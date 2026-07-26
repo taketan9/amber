@@ -488,6 +488,11 @@ impl App {
                     .unwrap_or_default();
                 let last = view.lines.len().saturating_sub(1);
                 let line = line0.min(last);
+                // Markdown files open in rendered preview; `p` toggles the source.
+                let markdown = matches!(
+                    path.extension().and_then(|e| e.to_str()).map(|e| e.to_lowercase()).as_deref(),
+                    Some("md") | Some("markdown") | Some("mkd") | Some("mdown")
+                );
                 self.popup = Popup::Viewer {
                     title: title.to_string(),
                     path: path.to_path_buf(),
@@ -502,6 +507,8 @@ impl App {
                     find_query: None,
                     count: None,
                     git_lines,
+                    markdown,
+                    preview: markdown,
                 }
             }
             Err(e) => self.message = Some(format!("cannot view: {}", e)),

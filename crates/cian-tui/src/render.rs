@@ -265,6 +265,11 @@ pub(crate) fn draw(f: &mut Frame, app: &mut App) {
         draw_ai_chat(f, area, app);
         return;
     }
+    // Markdown preview has its own renderer (styled document, own scroll count).
+    if matches!(app.popup, Popup::Viewer { preview: true, .. }) {
+        draw_md_preview(f, area, app);
+        return;
+    }
     if matches!(app.popup, Popup::CommitMessage { .. }) {
         draw_commit_message(f, area, app);
         return;
@@ -1547,6 +1552,41 @@ fn push_row_zone(zones: &mut Vec<PopupZone>, inner: Rect, y: u16, idx: usize) {
 
 /// The AI chat, rendered with `&mut App` so it can stash the transcript's rect,
 /// scroll and flat lines for mouse selection.
+/// The Markdown preview: the source rendered to styled lines, scrolled by the
+/// stashed line count. `p` toggles back to the raw source viewer.
+fn draw_md_preview(f: &mut Frame, area: Rect, app: &mut App) {
+    let lang = app.lang;
+    let w = area.width.saturating_sub(4);
+    let h = area.height.saturating_sub(2);
+    let rect = centered_rect(w, h, area);
+    f.render_widget(Clear, rect);
+    let title = if let Popup::Viewer { title, .. } = &app.popup { title.clone() } else { String::new() };
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(border_type())
+        .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
+        .style(Style::default().bg(theme().popup_bg))
+        .title(format!(" {}  —  {} ", title, tr(lang, "markdown preview", "Markdown プレビュー")))
+        .title_bottom(tr(lang,
+            " p source  j/k u/d scroll  g/G  S summary  y copy  Esc ",
+            " p ソース  j/k u/d スクロール  g/G  S 要約  y コピー  Esc "));
+    let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
+    f.render_widget(block, rect);
+    let body_h = inner.height as usize;
+    let body_w = inner.width as usize;
+
+    let mut shown: Vec<Line> = Vec::new();
+    if let Popup::Viewer { view, scroll, .. } = &mut app.popup {
+        let rendered = crate::markdown::render(&view.lines, body_w);
+        let total = rendered.len();
+        let max_scroll = total.saturating_sub(body_h);
+        *scroll = (*scroll).min(max_scroll);
+        shown = rendered.into_iter().skip(*scroll).take(body_h).collect();
+        app.viewer_preview_lines = total;
+    }
+    f.render_widget(Paragraph::new(shown), inner);
+}
+
 fn draw_ai_chat(f: &mut Frame, area: Rect, app: &mut App) {
     let lang = app.lang;
     let width: u16 = 76u16.min(area.width.saturating_sub(2));
@@ -1999,8 +2039,8 @@ fn draw_popup(
         let footer_area =
             Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1);
         let footer_text = match lang {
-            Lang::En => " j/k move  Shift+↕/drag select · Ctrl+v/Alt block  y copy  S AI  Esc ",
-            Lang::Ja => " j/k 移動  Shift+↕/ドラッグ 選択 · Ctrl+v/Alt 矩形  y コピー  S AI  Esc ",
+            Lang::En => " j/k scroll  u/d page  g/G  Esc close ",
+            Lang::Ja => " j/k スクロール  u/d ページ  g/G  Esc 閉じる ",
         };
         let footer = Paragraph::new(footer_text).style(
             Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD),
@@ -2498,7 +2538,7 @@ fn draw_popup(
         return;
     }
 
-    if let Popup::Viewer { title, view, scroll, line, col, visual, anchor, find_input, find_query, git_lines, .. } = popup {
+    if let Popup::Viewer { title, view, scroll, line, col, visual, anchor, find_input, find_query, git_lines, markdown, .. } = popup {
         let w = area.width.saturating_sub(4);
         let h = area.height.saturating_sub(2);
         let rect = centered_rect(w, h, area);
@@ -2667,9 +2707,10 @@ fn draw_popup(
         let footer = match find_input {
             Some(q) => format!("/{}_", q),
             None => format!(
-                "{}{} ",
-                tr(lang, " / search  n/N  v/V select  y copy  % { }  C-n/N hit  S-Enter reveal  e enc  Esc   ",
-                    " / 検索  n/N  v/V 選択  y コピー  % { }  C-n/N 次ヒット  S-Enter 場所へ  e 文字コード  Esc   "),
+                "{}{}{} ",
+                tr(lang, " / search  n/N  v/V select  y copy  S-Enter reveal  e enc",
+                    " / 検索  n/N  v/V 選択  y コピー  S-Enter 場所へ  e 文字コード"),
+                if *markdown { tr(lang, "  p preview  ", "  p プレビュー  ") } else { "  " },
                 pos
             ),
         };

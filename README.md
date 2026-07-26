@@ -247,6 +247,12 @@ opens a scrollable viewer with line numbers; on a binary one, a hex dump,
 since showing a compiled file as text is a screenful of mojibake that answers
 nothing. Only the first 4 MB is read, so opening a huge log is instant.
 
+A **Markdown** file (`.md`) opens straight into a rendered preview — headings,
+emphasis, lists, blockquotes, rules, links and code blocks styled for the
+terminal, with `mermaid` blocks shown as a clearly-labelled source box (a
+terminal cannot draw the diagram itself). Press **`p`** to toggle between the
+preview and the raw source.
+
 The viewer is vim-flavoured: a cursor moves with `h`/`j`/`k`/`l`, `w`/`b`,
 `0`/`$`, `gg`/`G` and `Ctrl-d`/`Ctrl-u`; `/` searches (all matches highlighted,
 `n`/`N` step through them), `42G` jumps to a line, `%` to the matching bracket,

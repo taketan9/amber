@@ -3911,6 +3911,29 @@
     }
 
     #[test]
+    fn a_markdown_file_opens_in_preview_and_toggles_to_source() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::write(d.path().join("readme.md"), "# Title\n\n- item\n\n```mermaid\ngraph TD; A-->B\n```\n").unwrap();
+        let p = d.path().to_path_buf();
+        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+
+        app.handle_key(code(KeyCode::F(3))).unwrap();
+        // A .md file opens straight into rendered preview.
+        assert!(matches!(&app.popup, Popup::Viewer { markdown: true, preview: true, .. }), "opened in preview");
+        let _ = render(&mut app, 100, 30);
+        assert!(app.viewer_preview_lines > 0, "the preview rendered some lines");
+
+        // p toggles to raw source, p again back to preview.
+        app.handle_key(key('p')).unwrap();
+        assert!(matches!(&app.popup, Popup::Viewer { preview: false, .. }), "toggled to source");
+        app.handle_key(key('p')).unwrap();
+        assert!(matches!(&app.popup, Popup::Viewer { preview: true, .. }), "back to preview");
+        // Esc closes.
+        app.handle_key(code(KeyCode::Esc)).unwrap();
+        assert!(matches!(app.popup, Popup::None));
+    }
+
+    #[test]
     fn the_viewer_line_visual_selects_and_copies_a_range() {
         let d = tempfile::tempdir().unwrap();
         std::fs::write(d.path().join("a.txt"), "one\ntwo\nthree\nfour\n").unwrap();
