@@ -1135,6 +1135,9 @@ enum Popup {
         find_query: Option<String>,
         /// A pending numeric count typed before a motion (vim's `42G`).
         count: Option<usize>,
+        /// Per-line git change status vs HEAD (the change gutter), keyed by
+        /// 0-based line index. Empty when not tracked or unchanged.
+        git_lines: std::collections::HashMap<usize, cian_core::git::LineChange>,
     },
     /// The recursive comparison of two directories: a list of differing paths.
     DirCompare {
@@ -4843,6 +4846,12 @@ impl App {
     fn open_viewer_at(&mut self, path: &Path, title: &str, line0: usize) {
         match cian_core::viewer::view_file(path) {
             Ok(view) => {
+                // The git change gutter: which lines differ from HEAD. Best
+                // effort — empty when the file is not in a repo or is unchanged.
+                let git_lines = path
+                    .parent()
+                    .and_then(|dir| cian_core::git::line_changes(dir, path))
+                    .unwrap_or_default();
                 let last = view.lines.len().saturating_sub(1);
                 let line = line0.min(last);
                 self.popup = Popup::Viewer {
@@ -4858,6 +4867,7 @@ impl App {
                     find_input: None,
                     find_query: None,
                     count: None,
+                    git_lines,
                 }
             }
             Err(e) => self.message = Some(format!("cannot view: {}", e)),
@@ -12831,7 +12841,7 @@ fn draw_popup(
         return;
     }
 
-    if let Popup::Viewer { title, view, scroll, line, col, visual, anchor, find_input, find_query, .. } = popup {
+    if let Popup::Viewer { title, view, scroll, line, col, visual, anchor, find_input, find_query, git_lines, .. } = popup {
         let w = area.width.saturating_sub(4);
         let h = area.height.saturating_sub(2);
         let rect = centered_rect(w, h, area);
@@ -12951,10 +12961,23 @@ fn draw_popup(
                 // Build the body char-by-char, merging same-styled runs.
                 let mut spans: Vec<Span> = Vec::new();
                 if numbered {
+                    // The line number, then a 1-column separator that doubles as
+                    // the git change bar (green added / amber modified / red for
+                    // a deletion just above). Keeping the width fixed means the
+                    // mouse column mapping is unaffected.
                     spans.push(Span::styled(
-                        format!("{:>w$} ", i + 1, w = gutter - 1),
+                        format!("{:>w$}", i + 1, w = gutter.saturating_sub(1)),
                         Style::default().fg(Color::Rgb(110, 110, 135)),
                     ));
+                    // The 1-column separator (previously a plain space) is the
+                    // change bar.
+                    let (bar, bar_c) = match git_lines.get(&i) {
+                        Some(cian_core::git::LineChange::Added) => ("▏", Color::Rgb(130, 205, 150)),
+                        Some(cian_core::git::LineChange::Modified) => ("▏", Color::Rgb(240, 210, 120)),
+                        Some(cian_core::git::LineChange::DeletedBefore) => ("▁", Color::Rgb(230, 120, 120)),
+                        None => (" ", Color::Reset),
+                    };
+                    spans.push(Span::styled(bar.to_string(), Style::default().fg(bar_c)));
                 }
                 let mut run = String::new();
                 let mut run_style = cell_style(0);
@@ -13867,6 +13890,37 @@ mod tests {
         assert_eq!(clean_ai_command("```sh\nls -la\n```"), "ls -la");
         assert_eq!(clean_ai_command("`git status`"), "git status");
         assert_eq!(clean_ai_command("\n\n  find . -name '*.log'  \n"), "find . -name '*.log'");
+    }
+
+    /// The F3 viewer shows a git change bar for lines that differ from HEAD.
+    #[test]
+    fn the_viewer_shows_a_git_change_bar() {
+        let d = tempfile::tempdir().unwrap();
+        let dir = std::fs::canonicalize(d.path()).unwrap();
+        let ok = std::process::Command::new("git")
+            .arg("-C").arg(&dir).args(["init", "-q"]).status()
+            .map(|s| s.success()).unwrap_or(false);
+        if !ok {
+            eprintln!("no git; skipping");
+            return;
+        }
+        for kv in [["user.email", "t@e.com"], ["user.name", "T"], ["core.autocrlf", "false"]] {
+            let _ = std::process::Command::new("git").arg("-C").arg(&dir).args(["config", kv[0], kv[1]]).status();
+        }
+        let f = dir.join("code.txt");
+        std::fs::write(&f, "keep\nold\nkeep2\n").unwrap();
+        std::process::Command::new("git").arg("-C").arg(&dir).args(["add", "."]).status().unwrap();
+        std::process::Command::new("git").arg("-C").arg(&dir).args(["commit", "-qm", "init"]).status().unwrap();
+        std::fs::write(&f, "keep\nNEW\nkeep2\n").unwrap();
+
+        let mut app = App::new(dir.clone(), dir.clone(), cian_lua::Config::default()).unwrap();
+        app.open_viewer_at(&f, "code.txt", 0);
+        // The map was computed for the modified file.
+        let Popup::Viewer { git_lines, .. } = &app.popup else { panic!("no viewer") };
+        assert_eq!(git_lines.get(&1), Some(&cian_core::git::LineChange::Modified), "line 2 modified");
+        // And the change bar renders on screen.
+        let screen = render(&mut app, 100, 30).join("\n");
+        assert!(screen.contains('▏'), "change bar shown:\n{screen}");
     }
 
     /// The status line shows the repo's branch when the pane is in one.

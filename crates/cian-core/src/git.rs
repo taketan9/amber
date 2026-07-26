@@ -263,6 +263,84 @@ pub fn commit(dir: &Path, message: &str) -> Result<()> {
     }
 }
 
+/// How a working-file line differs from its committed (HEAD) version, for the
+/// viewer's change gutter.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LineChange {
+    /// A line with no counterpart in HEAD.
+    Added,
+    /// A line that replaced a different one.
+    Modified,
+    /// One or more lines were deleted immediately before this one.
+    DeletedBefore,
+}
+
+/// Per-line change status of `file` versus its committed version, keyed by
+/// 0-based working-file line index. `None` when not in a repo or git is absent;
+/// an empty map means the file matches HEAD (or is unmodified). An untracked or
+/// brand-new file reports every line as [`LineChange::Added`].
+pub fn line_changes(dir: &Path, file: &Path) -> Option<std::collections::HashMap<usize, LineChange>> {
+    // Locate the file within its repo (git wants a repo-relative path).
+    let root_out = git_output(dir, &["rev-parse", "--show-toplevel"])?;
+    let root = PathBuf::from(String::from_utf8_lossy(&root_out).trim());
+    let rel = norm_rel(&root, file)?;
+
+    let work = std::fs::read_to_string(file).ok()?;
+    let work_lines: Vec<String> = work.lines().map(|s| s.to_string()).collect();
+
+    // The committed version. Absent (new/untracked file) → the whole file is new.
+    let spec = format!("HEAD:{}", rel);
+    let head = git_output(dir, &["show", &spec]);
+    let mut map = std::collections::HashMap::new();
+    let Some(head_bytes) = head else {
+        for i in 0..work_lines.len() {
+            map.insert(i, LineChange::Added);
+        }
+        return Some(map);
+    };
+    let head_text = String::from_utf8_lossy(&head_bytes);
+    let head_lines: Vec<String> = head_text.lines().map(|s| s.to_string()).collect();
+
+    let d = crate::diff::diff_lines(&head_lines, &work_lines);
+    let mut pending_del = false;
+    for row in &d.rows {
+        use crate::diff::Row;
+        match row {
+            Row::Changed { right, .. } => {
+                map.insert(right.no.saturating_sub(1), LineChange::Modified);
+                pending_del = false;
+            }
+            Row::Added { right } => {
+                let mark = if pending_del { LineChange::Modified } else { LineChange::Added };
+                map.insert(right.no.saturating_sub(1), mark);
+                pending_del = false;
+            }
+            Row::Removed { .. } => pending_del = true,
+            Row::Same { right, .. } => {
+                if pending_del {
+                    map.entry(right.no.saturating_sub(1)).or_insert(LineChange::DeletedBefore);
+                    pending_del = false;
+                }
+            }
+            Row::Skipped { .. } => {}
+        }
+    }
+    Some(map)
+}
+
+/// A repo-relative, forward-slashed path for `file` under `root`, or `None` if
+/// `file` is not inside `root`.
+fn norm_rel(root: &Path, file: &Path) -> Option<String> {
+    let r = norm(root);
+    let f = norm(file);
+    let rest = f.strip_prefix(&r)?.trim_start_matches('/');
+    if rest.is_empty() {
+        None
+    } else {
+        Some(rest.to_string())
+    }
+}
+
 /// `git add` the given paths.
 pub fn stage(dir: &Path, paths: &[PathBuf]) -> Result<()> {
     run_git(dir, "add", paths)
@@ -381,6 +459,39 @@ mod tests {
         unstage(dir, &[dir.join("staged.txt")]).unwrap();
         let st = status(dir).unwrap();
         assert_eq!(st.mark_for(&dir.join("staged.txt")), Some(GitMark::Untracked));
+    }
+
+    /// Per-line change status against HEAD, for the F3 viewer's git lens.
+    #[test]
+    fn line_changes_classify_added_modified_and_deletions() {
+        let d = tempfile::tempdir().unwrap();
+        let dir = &std::fs::canonicalize(d.path()).unwrap();
+        let init_ok = Command::new("git").arg("-C").arg(dir).args(["init", "-q"]).status()
+            .map(|s| s.success()).unwrap_or(false);
+        if !init_ok {
+            eprintln!("git not available; skipping");
+            return;
+        }
+        for kv in [["user.email", "t@e.com"], ["user.name", "T"], ["core.autocrlf", "false"]] {
+            let _ = Command::new("git").arg("-C").arg(dir).args(["config", kv[0], kv[1]]).status();
+        }
+        let f = dir.join("f.txt");
+        std::fs::write(&f, "a\nb\nc\nd\n").unwrap();
+        Command::new("git").arg("-C").arg(dir).args(["add", "."]).status().unwrap();
+        Command::new("git").arg("-C").arg(dir).args(["commit", "-qm", "init"]).status().unwrap();
+
+        // Modify line 2, delete line 3, append a new line.
+        std::fs::write(&f, "a\nB\nd\ne\n").unwrap();
+        let m = line_changes(dir, &f).expect("in a repo");
+        assert_eq!(m.get(&0), None, "line 1 unchanged");
+        assert_eq!(m.get(&1), Some(&LineChange::Modified), "line 2 modified");
+        assert_eq!(m.get(&3), Some(&LineChange::Added), "the appended line is new");
+        // A brand-new untracked file: every line is added.
+        let n = dir.join("new.txt");
+        std::fs::write(&n, "x\ny\n").unwrap();
+        let mn = line_changes(dir, &n).unwrap();
+        assert_eq!(mn.get(&0), Some(&LineChange::Added));
+        assert_eq!(mn.get(&1), Some(&LineChange::Added));
     }
 
     /// The staged diff feeds the AI commit-message feature; commit clears it.

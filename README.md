@@ -302,7 +302,13 @@ no. On Windows there are no mode bits at all, so `:chmod` refuses and points at
 
 When a pane sits inside a git repository, each entry carries a status badge:
 `●` staged, `✚` modified, `?` untracked, `‼` conflict, and `~` on a folder that
-contains changes below it. You can act on the selection without leaving cian:
+contains changes below it. The status line shows a **branch bar** — the current
+branch, ahead/behind counts, and how many files have changed (green when clean,
+amber when not). Open a tracked file with F3 and a **change gutter** marks each
+line against HEAD: green for added, amber for modified, a red underline where
+lines were deleted.
+
+You can act on the selection without leaving cian:
 
 - `:stage` (`:add`) — `git add` the marked files, or the one under the cursor.
 - `:unstage` (`:reset`) — `git reset HEAD`, keeping the worktree changes.
