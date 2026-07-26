@@ -879,6 +879,23 @@ impl Shortcut {
     fn target_str(&self) -> &str {
         self.target.as_deref().unwrap_or("")
     }
+
+    /// Convert from the UI-agnostic node the Lua store round-trips.
+    fn from_node(n: &cian_lua::shortcuts::Node) -> Self {
+        Self {
+            name: n.name.clone(),
+            target: n.target.clone(),
+            children: n.children.as_ref().map(|ch| ch.iter().map(Shortcut::from_node).collect()),
+        }
+    }
+
+    fn to_node(&self) -> cian_lua::shortcuts::Node {
+        cian_lua::shortcuts::Node {
+            name: self.name.clone(),
+            target: self.target.clone(),
+            children: self.children.as_ref().map(|ch| ch.iter().map(Shortcut::to_node).collect()),
+        }
+    }
 }
 
 /// The list of shortcuts at `path` (indices to descend through groups). Empty if
@@ -922,37 +939,41 @@ impl ShortcutStore {
             .join("cian")
     }
 
-    /// The YAML file bookmarks are stored in now.
+    /// The Lua file bookmarks are stored in now.
     fn default_path() -> PathBuf {
+        Self::config_dir().join("shortcuts.lua")
+    }
+
+    /// The previous YAML file, read once to migrate anyone who has one.
+    fn legacy_yaml_path() -> PathBuf {
         Self::config_dir().join("shortcuts.yaml")
     }
 
-    /// The old TOML file, read once to migrate anyone who has one.
+    /// The original TOML file, read once to migrate anyone still on it.
     fn legacy_toml_path() -> PathBuf {
         Self::config_dir().join("shortcuts.toml")
     }
 
     pub fn load_or_default() -> Self {
         let path = Self::default_path();
-        // Prefer the YAML file; fall back to a legacy TOML one and migrate it.
-        if let Some(entries) = std::fs::read_to_string(&path)
-            .ok()
-            .and_then(|s| serde_yml::from_str::<ShortcutsFile>(&s).ok())
-            .map(|f| f.shortcuts)
-        {
-            return Self { entries, path };
+        // Prefer the Lua file.
+        if let Ok(nodes) = cian_lua::shortcuts::load(&path) {
+            return Self { entries: nodes.iter().map(Shortcut::from_node).collect(), path };
         }
-        let legacy = Self::legacy_toml_path();
-        if let Some(entries) = std::fs::read_to_string(&legacy)
-            .ok()
-            .and_then(|s| toml::from_str::<ShortcutsFile>(&s).ok())
-            .map(|f| f.shortcuts)
-        {
-            // One-time migration: write the YAML copy and leave the old file in
-            // place (harmless, and a safety net if something goes wrong).
-            let store = Self { entries, path };
-            let _ = store.save();
-            return store;
+        // Otherwise migrate a legacy YAML, then a legacy TOML, writing the Lua
+        // copy and leaving the old file in place (a harmless safety net).
+        for legacy in [Self::legacy_yaml_path(), Self::legacy_toml_path()] {
+            let Ok(text) = std::fs::read_to_string(&legacy) else { continue };
+            let parsed = if legacy.extension().and_then(|e| e.to_str()) == Some("yaml") {
+                serde_yml::from_str::<ShortcutsFile>(&text).ok()
+            } else {
+                toml::from_str::<ShortcutsFile>(&text).ok()
+            };
+            if let Some(file) = parsed {
+                let store = Self { entries: file.shortcuts, path };
+                let _ = store.save();
+                return store;
+            }
         }
         Self { entries: Vec::new(), path }
     }
@@ -961,9 +982,8 @@ impl ShortcutStore {
         if let Some(parent) = self.path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
-        let file = ShortcutsFile { shortcuts: self.entries.clone() };
-        let s = serde_yml::to_string(&file)?;
-        std::fs::write(&self.path, s)?;
+        let nodes: Vec<cian_lua::shortcuts::Node> = self.entries.iter().map(Shortcut::to_node).collect();
+        std::fs::write(&self.path, cian_lua::shortcuts::to_lua(&nodes))?;
         Ok(())
     }
 }

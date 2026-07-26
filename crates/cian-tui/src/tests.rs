@@ -80,9 +80,9 @@
     }
 
     #[test]
-    fn shortcuts_save_as_yaml_and_legacy_toml_still_parses() {
+    fn shortcuts_save_as_lua_and_legacy_formats_still_migrate() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("shortcuts.yaml");
+        let path = dir.path().join("shortcuts.lua");
         let store = ShortcutStore {
             entries: vec![
                 Shortcut::leaf("home".into(), "~/".into()),
@@ -93,16 +93,21 @@
         store.save().unwrap();
 
         let text = std::fs::read_to_string(&path).unwrap();
-        assert!(text.contains("name: home"), "written as YAML:\n{text}");
-        // Round-trips through the YAML parser the loader uses.
-        let back: ShortcutsFile = serde_yml::from_str(&text).unwrap();
-        assert_eq!(back.shortcuts.len(), 2);
-        assert_eq!(back.shortcuts[0].name, "home");
+        assert!(text.contains("return {"), "written as Lua:\n{text}");
+        assert!(text.contains("name = \"home\""), "written as Lua:\n{text}");
+        // Round-trips through the Lua reader the loader uses.
+        let back = cian_lua::shortcuts::parse(&text).unwrap();
+        assert_eq!(back.len(), 2);
+        assert_eq!(back[0].name, "home");
 
-        // A pre-existing TOML file must still parse, so migration keeps entries.
-        let legacy = "[[shortcuts]]\nname = \"srv\"\ntarget = \"/srv\"\n";
-        let parsed: ShortcutsFile = toml::from_str(legacy).unwrap();
-        assert_eq!(parsed.shortcuts[0].target.as_deref(), Some("/srv"));
+        // A pre-existing YAML/TOML file must still parse, so migration keeps
+        // entries for anyone on the old formats.
+        let yaml = "shortcuts:\n  - name: srv\n    target: /srv\n";
+        let from_yaml: ShortcutsFile = serde_yml::from_str(yaml).unwrap();
+        assert_eq!(from_yaml.shortcuts[0].target.as_deref(), Some("/srv"));
+        let toml_src = "[[shortcuts]]\nname = \"srv\"\ntarget = \"/srv\"\n";
+        let from_toml: ShortcutsFile = toml::from_str(toml_src).unwrap();
+        assert_eq!(from_toml.shortcuts[0].target.as_deref(), Some("/srv"));
     }
 
     #[test]
@@ -2638,7 +2643,7 @@
         // Bookmarks live in a temp dir so the test never touches the real config,
         // and start empty so indices are predictable regardless of the dev's own.
         let sd = tempfile::tempdir().unwrap();
-        app.shortcuts.path = sd.path().join("shortcuts.yaml");
+        app.shortcuts.path = sd.path().join("shortcuts.lua");
         app.shortcuts.entries.clear();
 
         // Open the menu and add a top-level folder "Projects" with `A`.

@@ -265,10 +265,10 @@
 --  A note on shortcuts
 -- ----------------------------------------------------------------------------
 -- Bookmarks (the `s` menu) are managed inside the app — press `a` there, or `a`
--- on a path in the history list — and saved to shortcuts.yaml next to this file.
+-- on a path in the history list — and saved to shortcuts.lua next to this file.
 -- There is nothing to configure here for them.
 --
 -- The menu is hierarchical: `A` (Shift+a) makes a FOLDER at the level you are
 -- currently in, Enter / → steps into a folder, and Esc / ← steps back out. See
--- examples/shortcuts.yaml for a nested example (targets can be paths, URLs or
+-- examples/shortcuts.lua for a nested example (targets can be paths, URLs or
 -- apps; folders can nest as deep as you like).
