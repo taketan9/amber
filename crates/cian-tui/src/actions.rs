@@ -478,6 +478,13 @@ impl App {
     /// Open the F3 viewer on `path`, with the cursor on `line0` (0-based). Used
     /// by F3 (line 0) and by "open a grep hit at its line".
     pub(crate) fn open_viewer_at(&mut self, path: &Path, title: &str, line0: usize) {
+        // Office/PDF documents are extracted to text first (fully in-process, no
+        // external converter), then shown in the ordinary viewer so search,
+        // selection and copy all work over them.
+        if cian_core::office::classify(path).is_some() {
+            self.open_document_viewer(path, title, line0);
+            return;
+        }
         match cian_core::viewer::view_file(path) {
             Ok(view) => {
                 // The git change gutter: which lines differ from HEAD. Best
@@ -516,6 +523,54 @@ impl App {
                 }
             }
             Err(e) => self.message = Some(format!("cannot view: {}", e)),
+        }
+    }
+
+    /// Open an Office/PDF document as extracted text in the viewer.
+    pub(crate) fn open_document_viewer(&mut self, path: &Path, title: &str, line0: usize) {
+        let total_bytes = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+        match cian_core::office::extract(path) {
+            Ok((doc, mut lines)) => {
+                // A one-line header naming the format, and — for the legacy
+                // binary formats — an honest note that the text is approximate.
+                let mut header = vec![format!("── {} ──", doc.label())];
+                if doc.is_best_effort() {
+                    header.push(tr(
+                        self.lang,
+                        "(legacy binary — best-effort text; re-save as the modern format for a faithful view)",
+                        "(旧バイナリ形式 — テキスト抽出は簡易です。正確な表示には新形式で保存し直してください)",
+                    ).to_string());
+                }
+                header.push(String::new());
+                lines.splice(0..0, header);
+
+                let text = lines.join("\n");
+                let view = cian_core::viewer::View::from_text(text, total_bytes, false);
+                let last = view.lines.len().saturating_sub(1);
+                let line = line0.min(last);
+                let source = view.lines.clone();
+                self.popup = Popup::Viewer {
+                    title: format!("{}  ·  {}", title, doc.label()),
+                    path: path.to_path_buf(),
+                    view,
+                    scroll: line.saturating_sub(4),
+                    line,
+                    col: 0,
+                    goal: 0,
+                    visual: None,
+                    anchor: (0, 0),
+                    find_input: None,
+                    find_query: None,
+                    count: None,
+                    git_lines: std::collections::HashMap::new(),
+                    markdown: false,
+                    preview: false,
+                    source,
+                    md_styles: Vec::new(),
+                    md_width: 0,
+                };
+            }
+            Err(e) => self.message = Some(format!("cannot read document: {}", e)),
         }
     }
 

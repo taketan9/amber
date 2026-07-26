@@ -3962,6 +3962,57 @@
     }
 
     #[test]
+    fn a_docx_previews_as_searchable_text() {
+        use std::io::Write;
+        let d = tempfile::tempdir().unwrap();
+        // A minimal .docx: a zip with word/document.xml.
+        let docx = d.path().join("report.docx");
+        {
+            let f = std::fs::File::create(&docx).unwrap();
+            let mut zw = zip::ZipWriter::new(f);
+            let opts: zip::write::FileOptions<'_, ()> =
+                zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+            zw.start_file("word/document.xml", opts).unwrap();
+            zw.write_all(
+                br#"<w:document><w:body>
+                    <w:p><w:r><w:t>Quarterly results</w:t></w:r></w:p>
+                    <w:p><w:r><w:t>Revenue is up</w:t></w:r></w:p>
+                </w:body></w:document>"#,
+            )
+            .unwrap();
+            zw.finish().unwrap();
+        }
+        let p = d.path().to_path_buf();
+        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+
+        // F3 opens the extracted document in the ordinary viewer (not markdown).
+        app.handle_key(code(KeyCode::F(3))).unwrap();
+        let _ = render(&mut app, 100, 30);
+        if let Popup::Viewer { view, markdown, preview, .. } = &app.popup {
+            assert!(!*markdown && !*preview, "a document, not a markdown preview");
+            let flat = view.lines.join("\n");
+            assert!(flat.contains("Word"), "header names the format");
+            assert!(flat.contains("Quarterly results"), "body text extracted: {:?}", view.lines);
+            assert!(flat.contains("Revenue is up"));
+        } else {
+            panic!("F3 did not open a viewer");
+        }
+
+        // Search works over the extracted text, just like any file.
+        app.handle_key(key('/')).unwrap();
+        for c in "Revenue".chars() { app.handle_key(key(c)).unwrap(); }
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+        if let Popup::Viewer { view, line, .. } = &app.popup {
+            assert!(view.lines[*line].contains("Revenue"), "search jumped to the match");
+        } else {
+            panic!("not a viewer");
+        }
+        app.handle_key(code(KeyCode::Esc)).unwrap();
+        app.handle_key(code(KeyCode::Esc)).unwrap();
+        assert!(matches!(app.popup, Popup::None));
+    }
+
+    #[test]
     fn the_viewer_line_visual_selects_and_copies_a_range() {
         let d = tempfile::tempdir().unwrap();
         std::fs::write(d.path().join("a.txt"), "one\ntwo\nthree\nfour\n").unwrap();

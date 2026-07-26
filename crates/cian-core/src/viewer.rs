@@ -102,6 +102,16 @@ pub struct View {
 }
 
 impl View {
+    /// Build a text view from already-extracted text (e.g. an Office/PDF
+    /// document decoded by [`crate::office`]). The text itself becomes the kept
+    /// bytes, so the encoding switch and everything else in the viewer behave
+    /// exactly as for a real text file.
+    pub fn from_text(text: String, total_bytes: u64, truncated: bool) -> View {
+        let bytes = text.into_bytes();
+        let lines = to_lines(&String::from_utf8_lossy(&bytes));
+        View { kind: ViewKind::Text, lines, total_bytes, truncated, encoding: TextEncoding::Utf8, bytes }
+    }
+
     /// Re-decode the kept bytes as `enc`, switching to text if it was showing
     /// hex (choosing an encoding is a deliberate "read this as text").
     pub fn redecode(&mut self, enc: TextEncoding) {
