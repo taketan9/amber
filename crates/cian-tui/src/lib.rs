@@ -932,39 +932,34 @@ pub struct ShortcutStore {
 }
 
 impl ShortcutStore {
-    fn config_dir() -> PathBuf {
-        home_dir()
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join(".config")
-            .join("cian")
+    /// The Lua file bookmarks are stored in now. Portable-aware: a copy next to
+    /// the executable wins for both reading and writing (see [`cian_lua`]).
+    pub fn default_path() -> PathBuf {
+        cian_lua::config_write_path("shortcuts.lua")
+            .unwrap_or_else(|| PathBuf::from("shortcuts.lua"))
     }
 
-    /// The Lua file bookmarks are stored in now.
-    fn default_path() -> PathBuf {
-        Self::config_dir().join("shortcuts.lua")
-    }
-
-    /// The previous YAML file, read once to migrate anyone who has one.
-    fn legacy_yaml_path() -> PathBuf {
-        Self::config_dir().join("shortcuts.yaml")
-    }
-
-    /// The original TOML file, read once to migrate anyone still on it.
-    fn legacy_toml_path() -> PathBuf {
-        Self::config_dir().join("shortcuts.toml")
+    /// A legacy `shortcuts.<ext>` to migrate, resolved the same portable-aware
+    /// way as the Lua file so a carried-along old file is still found.
+    fn legacy_path(ext: &str) -> Option<PathBuf> {
+        cian_lua::config_read_path(&format!("shortcuts.{ext}"))
+            .filter(|p| p.exists())
     }
 
     pub fn load_or_default() -> Self {
-        let path = Self::default_path();
-        // Prefer the Lua file.
-        if let Ok(nodes) = cian_lua::shortcuts::load(&path) {
-            return Self { entries: nodes.iter().map(Shortcut::from_node).collect(), path };
+        // Prefer the Lua file (portable copy first, then the user dir).
+        if let Some(lua) = cian_lua::config_read_path("shortcuts.lua").filter(|p| p.exists()) {
+            if let Ok(nodes) = cian_lua::shortcuts::load(&lua) {
+                return Self { entries: nodes.iter().map(Shortcut::from_node).collect(), path: Self::default_path() };
+            }
         }
         // Otherwise migrate a legacy YAML, then a legacy TOML, writing the Lua
         // copy and leaving the old file in place (a harmless safety net).
-        for legacy in [Self::legacy_yaml_path(), Self::legacy_toml_path()] {
+        let path = Self::default_path();
+        for ext in ["yaml", "toml"] {
+            let Some(legacy) = Self::legacy_path(ext) else { continue };
             let Ok(text) = std::fs::read_to_string(&legacy) else { continue };
-            let parsed = if legacy.extension().and_then(|e| e.to_str()) == Some("yaml") {
+            let parsed = if ext == "yaml" {
                 serde_yml::from_str::<ShortcutsFile>(&text).ok()
             } else {
                 toml::from_str::<ShortcutsFile>(&text).ok()

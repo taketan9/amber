@@ -219,16 +219,79 @@ fn home_dir() -> Option<PathBuf> {
         .map(PathBuf::from)
 }
 
-/// Resolve the config file path: `$CIAN_CONFIG_DIR/init.lua` if set, otherwise
-/// `~/.config/cian/init.lua`.
-pub fn config_path() -> Option<PathBuf> {
+/// The cian config files that mark a directory as a cian config directory. Used
+/// for portable-mode detection: if any of these sits next to the executable,
+/// that directory is treated as a portable config set.
+const CONFIG_MARKERS: [&str; 3] = ["init.lua", "shortcuts.lua", "macro.lua"];
+
+/// The directory the running executable lives in, resolved through symlinks.
+fn exe_dir() -> Option<PathBuf> {
+    std::env::current_exe().ok()?.parent().map(|p| p.to_path_buf())
+}
+
+/// The user config directory: `$CIAN_CONFIG_DIR` if set, else `~/.config/cian`.
+pub fn user_config_dir() -> Option<PathBuf> {
     if let Ok(dir) = std::env::var("CIAN_CONFIG_DIR") {
         if !dir.is_empty() {
-            return Some(PathBuf::from(dir).join("init.lua"));
+            return Some(PathBuf::from(dir));
         }
     }
-    let home = home_dir()?;
-    Some(home.join(".config").join("cian").join("init.lua"))
+    Some(home_dir()?.join(".config").join("cian"))
+}
+
+/// True when the executable's directory holds a cian config file — i.e. cian is
+/// being run "portable", carried around with its config next to it.
+pub fn is_portable() -> bool {
+    exe_dir()
+        .map(|d| CONFIG_MARKERS.iter().any(|m| d.join(m).exists()))
+        .unwrap_or(false)
+}
+
+/// Where to **read** config file `name` from. A copy sitting next to the
+/// executable wins (portable: carry cian + its `*.lua` on a stick and they take
+/// precedence); otherwise the user config directory.
+pub fn config_read_path(name: &str) -> Option<PathBuf> {
+    read_path_in(exe_dir().as_deref(), user_config_dir().as_deref(), name)
+}
+
+/// Where to **write** config file `name`. Next to the executable when a copy is
+/// already there, or when the executable directory is a portable config set
+/// (so bookmarks/macros created in portable mode stay with the binary);
+/// otherwise the user config directory.
+pub fn config_write_path(name: &str) -> Option<PathBuf> {
+    write_path_in(exe_dir().as_deref(), user_config_dir().as_deref(), name)
+}
+
+/// The read-resolution logic, split out from the executable lookup so it can be
+/// tested against real directories: the portable copy next to the executable
+/// wins only if it actually exists, else the user directory.
+fn read_path_in(exe_dir: Option<&Path>, user_dir: Option<&Path>, name: &str) -> Option<PathBuf> {
+    if let Some(dir) = exe_dir {
+        let p = dir.join(name);
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    user_dir.map(|d| d.join(name))
+}
+
+/// The write-resolution logic (see [`read_path_in`]): next to the executable if
+/// that file is already there or the directory is a portable config set, else
+/// the user directory.
+fn write_path_in(exe_dir: Option<&Path>, user_dir: Option<&Path>, name: &str) -> Option<PathBuf> {
+    if let Some(dir) = exe_dir {
+        let here = dir.join(name);
+        if here.exists() || CONFIG_MARKERS.iter().any(|m| dir.join(m).exists()) {
+            return Some(here);
+        }
+    }
+    user_dir.map(|d| d.join(name))
+}
+
+/// Resolve `init.lua`: the portable copy next to the executable if present,
+/// otherwise `$CIAN_CONFIG_DIR`/`~/.config/cian`.
+pub fn config_path() -> Option<PathBuf> {
+    config_read_path("init.lua")
 }
 
 /// Load the configuration. Never panics and never returns an error: anything
@@ -649,6 +712,53 @@ fn os_open(target: &str) -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn portable_copy_next_to_exe_wins_for_reading() {
+        let exe = tempfile::tempdir().unwrap();
+        let user = tempfile::tempdir().unwrap();
+        // No file next to the exe yet → read resolves to the user dir.
+        assert_eq!(
+            read_path_in(Some(exe.path()), Some(user.path()), "init.lua"),
+            Some(user.path().join("init.lua"))
+        );
+        // Drop a copy next to the exe → it now wins.
+        std::fs::write(exe.path().join("init.lua"), "-- portable").unwrap();
+        assert_eq!(
+            read_path_in(Some(exe.path()), Some(user.path()), "init.lua"),
+            Some(exe.path().join("init.lua"))
+        );
+    }
+
+    #[test]
+    fn writes_go_beside_the_exe_only_in_portable_mode() {
+        let exe = tempfile::tempdir().unwrap();
+        let user = tempfile::tempdir().unwrap();
+        // Nothing portable next to the exe → a new file is written to the user dir.
+        assert_eq!(
+            write_path_in(Some(exe.path()), Some(user.path()), "shortcuts.lua"),
+            Some(user.path().join("shortcuts.lua"))
+        );
+        // Once init.lua sits beside the exe, the directory is a portable set, so
+        // a freshly-created shortcuts.lua stays with the binary.
+        std::fs::write(exe.path().join("init.lua"), "-- portable").unwrap();
+        assert_eq!(
+            write_path_in(Some(exe.path()), Some(user.path()), "shortcuts.lua"),
+            Some(exe.path().join("shortcuts.lua"))
+        );
+    }
+
+    #[test]
+    fn an_existing_file_beside_the_exe_is_written_in_place() {
+        let exe = tempfile::tempdir().unwrap();
+        let user = tempfile::tempdir().unwrap();
+        std::fs::write(exe.path().join("shortcuts.lua"), "return {}").unwrap();
+        // Even without any other marker, an existing copy keeps being written there.
+        assert_eq!(
+            write_path_in(Some(exe.path()), Some(user.path()), "shortcuts.lua"),
+            Some(exe.path().join("shortcuts.lua"))
+        );
+    }
 
     /// A Windows path pasted into a quoted string is the likeliest way for a
     /// config to fail, and Lua's own message never mentions backslashes.

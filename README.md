@@ -512,6 +512,13 @@ The file is optional — cian runs with defaults if it is absent. Any syntax or
 runtime error is shown in a startup notice and cian falls back to defaults for
 whatever could not be applied, so a broken config never blocks startup.
 
+**Portable mode.** If `init.lua`, `shortcuts.lua` or `macro.lua` sits in the
+same directory as the cian executable, that directory wins over
+`~/.config/cian` — for reading *and* for the files cian writes back
+(bookmarks, macros). Drop the binary and its `*.lua` on a USB stick and the
+whole setup travels together, leaving no trace on the host. With nothing beside
+the executable, cian behaves exactly as before, from `~/.config/cian`.
+
 `:reload` re-reads `init.lua` without restarting — keymaps, options, SSH hosts
 and open handlers apply immediately. The color theme and border style are
 installed once at startup, so a change to those still needs a restart; `:reload`
