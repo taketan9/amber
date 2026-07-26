@@ -369,6 +369,40 @@ impl App {
             }
             return Ok(());
         }
+        if let Popup::Snippets { cursor, filter } = &mut self.popup {
+            match key.code {
+                KeyCode::Esc => self.popup = Popup::None,
+                KeyCode::Down => *cursor += 1,
+                KeyCode::Up => *cursor = cursor.saturating_sub(1),
+                KeyCode::Backspace => { filter.pop(); *cursor = 0; }
+                KeyCode::Enter => {
+                    let (cursor, filter) = (*cursor, filter.clone());
+                    if let Some(i) = self.snippet_matches(&filter).get(cursor).map(|(i, _)| *i) {
+                        // send_snippet either opens a confirm (leave it up) or
+                        // delivers to the shell (the picker has done its job).
+                        self.send_snippet(i);
+                        if matches!(self.popup, Popup::Snippets { .. }) {
+                            self.popup = Popup::None;
+                        }
+                    }
+                }
+                // Typing filters the list.
+                KeyCode::Char(c) => { filter.push(c); *cursor = 0; }
+                _ => {}
+            }
+            // Keep the cursor inside the filtered list. Count via `config`
+            // (a disjoint field) so it does not clash with the `popup` borrow.
+            if let Popup::Snippets { cursor, filter } = &mut self.popup {
+                let needle = filter.to_lowercase();
+                let n = self.config.snippets.iter().filter(|s| {
+                    needle.is_empty()
+                        || s.name.to_lowercase().contains(&needle)
+                        || s.cmd.to_lowercase().contains(&needle)
+                }).count();
+                *cursor = (*cursor).min(n.saturating_sub(1));
+            }
+            return Ok(());
+        }
         if let Popup::FindResults { hits, cursor, .. } = &mut self.popup {
             let n = hits.len();
             match key.code {
@@ -993,6 +1027,12 @@ impl App {
                 Popup::ConfirmTransfer { .. } => self.finish_transfer(Conflict::Skip),
                 Popup::ConfirmDiscard { .. } => { self.git_discard(); Ok(()) }
                 Popup::ConfirmDiffCopy { .. } => { self.confirm_diff_copy(); Ok(()) }
+                Popup::ConfirmSnippet { cmd, enter, .. } => {
+                    let (cmd, enter) = (cmd.clone(), *enter);
+                    self.popup = Popup::None;
+                    self.deliver_snippet(&cmd, enter);
+                    Ok(())
+                }
                 Popup::Notice { .. } => { self.popup = Popup::None; Ok(()) }
                 _ => Ok(()),
             },

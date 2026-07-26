@@ -320,6 +320,7 @@ pub(crate) fn draw(f: &mut Frame, app: &mut App) {
             area,
             &mut app.popup,
             &app.config.ssh_hosts,
+            &app.config.snippets,
             find_state,
             &dests,
             &mut app.popup_zones,
@@ -2084,6 +2085,7 @@ fn draw_popup(
     area: Rect,
     popup: &mut Popup,
     hosts: &[cian_lua::SshHost],
+    snippets: &[cian_lua::Snippet],
     find: Option<(&str, &str, Option<cian_core::search::Outcome>, cian_core::search::Mode)>,
     dests: &[(String, PathBuf)],
     zones: &mut Vec<PopupZone>,
@@ -2234,6 +2236,70 @@ fn draw_popup(
             Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1);
         f.render_widget(
             Paragraph::new(tr(lang, " type to filter  ↑↓ select  Enter next  Esc cancel ", " 入力で絞込  ↑↓ 選択  Enter 次へ  Esc 取消 ")).style(
+                Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD),
+            ),
+            footer_area,
+        );
+        return;
+    }
+
+    if let Popup::Snippets { cursor, filter } = popup {
+        let needle = filter.to_lowercase();
+        let matches: Vec<&cian_lua::Snippet> = snippets
+            .iter()
+            .filter(|s| {
+                needle.is_empty()
+                    || s.name.to_lowercase().contains(&needle)
+                    || s.cmd.to_lowercase().contains(&needle)
+            })
+            .collect();
+        let w = 64u16.min(area.width);
+        let h = (matches.len() as u16 + 5).min(area.height.saturating_sub(2)).max(6);
+        let rect = centered_rect(w, h, area);
+        f.render_widget(Clear, rect);
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_type(border_type())
+            .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
+            .title(tr(lang, " snippets → shell ", " スニペット → シェル "));
+        let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
+        f.render_widget(block, rect);
+
+        let mut lines = vec![Line::from(Span::styled(
+            format!("/{}_", filter),
+            Style::default().fg(theme().accent).add_modifier(Modifier::BOLD),
+        ))];
+        if matches.is_empty() {
+            lines.push(Line::from(Span::styled(
+                "  (no match)",
+                Style::default().fg(Color::Rgb(150, 150, 170)),
+            )));
+        }
+        for (i, s) in matches.iter().enumerate() {
+            let sel = i == *cursor;
+            let style = if sel {
+                Style::default().fg(theme().accent).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::Rgb(205, 205, 218))
+            };
+            // A tag shows what will happen: run, type-only, or confirm-first.
+            let tag = if s.confirm { "?" } else if s.enter { "↵" } else { "…" };
+            lines.push(Line::from(vec![
+                Span::styled(format!("{}{} ", if sel { "▸ " } else { "  " }, tag), style),
+                Span::styled(format!("{:<20}", truncate(&s.name, 20)), style),
+                Span::styled(
+                    format!("  {}", truncate(&s.cmd, (inner.width as usize).saturating_sub(26))),
+                    Style::default().fg(Color::Rgb(140, 140, 165)),
+                ),
+            ]));
+            push_row_zone(zones, inner, inner.y + 1 + i as u16, i);
+        }
+        let body_area = Rect::new(inner.x, inner.y, inner.width, inner.height.saturating_sub(1));
+        f.render_widget(Paragraph::new(lines), body_area);
+        let footer_area =
+            Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1);
+        f.render_widget(
+            Paragraph::new(tr(lang, " type to filter  ↑↓ select  Enter send  Esc cancel ", " 入力で絞込  ↑↓ 選択  Enter 送信  Esc 取消 ")).style(
                 Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD),
             ),
             footer_area,
@@ -3584,6 +3650,19 @@ fn draw_popup(
                 tr(lang, " y/Enter = overwrite   n/Esc = cancel ", " y/Enter = 上書き   n/Esc = 取消 ").to_string(),
             )
         }
+        Popup::ConfirmSnippet { name, cmd, .. } => {
+            let head = if lang == Lang::Ja {
+                format!("スニペットを送信しますか？  「{}」", name)
+            } else {
+                format!("send this snippet?  \"{}\"", name)
+            };
+            let lines = vec![head, String::new(), format!("  $ {}", cmd)];
+            (
+                tr(lang, " send snippet ", " スニペット送信 ").to_string(),
+                lines,
+                tr(lang, " y/Enter = send   n/Esc = cancel ", " y/Enter = 送信   n/Esc = 取消 ").to_string(),
+            )
+        }
         Popup::ConfirmElevate { op, targets, dest } => {
             let verb = match (op, lang) {
                 (PendingOp::Copy, Lang::Ja) => "コピー",
@@ -3621,6 +3700,7 @@ fn draw_popup(
         | Popup::EncodingPicker { .. }
         | Popup::SshHosts { .. }
         | Popup::SshUsers { .. }
+        | Popup::Snippets { .. }
         | Popup::Shortcuts { .. }
         | Popup::History { .. }
         | Popup::FindResults { .. }

@@ -704,6 +704,23 @@ SFTP/SCPのアップロード／ダウンロード、そしてUTF-8以外のコ�
 ファイルペインは並行するコントロールを使います：`Shift+F1` / `Shift+F2` で
 次／前のタブに切り替え、`Shift+F10` でアクティブなタブを閉じます（確認あり）。
 
+**コマンドスニペット。** 何度も打つ定型 — sqlplusログイン、ログのtail、HULFTの
+ジョブ — を init.lua に一度書いておき、ピッカーから投入します：
+
+```lua
+cian.snippets{
+  { name = "sqlplus 開発", cmd = "sqlplus user@DEVDB", enter = false },
+  { name = "アプリログ tail", cmd = "tail -f /var/log/app/app.log" },
+  { name = "hulft 送信",   cmd = "utlsend -f SENDID -sync", confirm = true },
+}
+```
+
+`:snip`（右クリック **スニペット → シェル**）でランチャーが開き、入力で絞り込み、
+Enterで選んだ行をアクティブなシェルへ送信します。`enter`（既定 true）は即実行、
+`false` はプロンプトに入力して確認してから実行。`confirm = true` は送信前に確認
+（破壊的なもの向け）。一覧のタグで種別が分かります — `↵` 実行、`…` 入力のみ、
+`?` 確認あり。
+
 ## ファイル・ステップ数のカウント
 
 `:count` はcian内蔵の kazoechao です。対象（マークがあればそれ、無ければ

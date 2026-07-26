@@ -4366,6 +4366,39 @@
     }
 
     #[test]
+    fn snippet_launcher_filters_and_confirms() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().to_path_buf();
+        let mut cfg = cian_lua::Config::default();
+        cfg.snippets = vec![
+            cian_lua::Snippet { name: "list".into(), cmd: "ls -la".into(), enter: true, confirm: false },
+            cian_lua::Snippet { name: "danger".into(), cmd: "rm -rf x".into(), enter: true, confirm: true },
+        ];
+        let mut app = App::new(p.clone(), p, cfg).unwrap();
+
+        // Opening lists all; typing filters by name/command.
+        app.start_snippets();
+        assert!(matches!(app.popup, Popup::Snippets { .. }), "launcher opens");
+        assert_eq!(app.snippet_matches("").len(), 2);
+        assert_eq!(app.snippet_matches("dang").len(), 1);
+        assert_eq!(app.snippet_matches("ls").len(), 1, "matches command text too");
+
+        // A plain snippet is delivered and the picker closes.
+        app.send_snippet(0);
+        assert!(!matches!(app.popup, Popup::ConfirmSnippet { .. }), "no confirm for a safe snippet");
+
+        // A confirm-flagged snippet routes through the confirmation.
+        app.send_snippet(1);
+        match &app.popup {
+            Popup::ConfirmSnippet { name, cmd, .. } => {
+                assert_eq!(name, "danger");
+                assert_eq!(cmd, "rm -rf x");
+            }
+            _ => panic!("destructive snippet must confirm"),
+        }
+    }
+
+    #[test]
     fn bulk_rename_previews_then_applies() {
         let d = tempfile::tempdir().unwrap();
         for n in ["a.txt", "b.txt"] {

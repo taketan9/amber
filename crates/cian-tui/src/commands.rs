@@ -72,6 +72,7 @@ impl App {
             "svnupdate" | "update" | "up" => self.svn_update(),
             "svncommit" | "commit" | "ci" => self.svn_commit_prompt(),
             "svnresolve" | "resolve" => self.svn_resolve(),
+            "snip" | "snippet" | "snippets" => self.start_snippets(),
             "aicommit" | "commitmsg" => self.start_ai_commit_message(),
             "aijunk" | "junk" => self.start_ai_junk(),
             "aiorganize" | "aistructure" | "organize" => self.start_ai_structure(),

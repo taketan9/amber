@@ -91,6 +91,10 @@ impl App {
                 items.push(MenuItem::SendMenu);
             }
             items.push(MenuItem::Ssh);
+            // The snippet launcher, offered only when snippets are configured.
+            if !self.config.snippets.is_empty() {
+                items.push(MenuItem::Snippets);
+            }
             items.push(MenuItem::Background);
             if ai {
                 items.push(MenuItem::AiMenu);
@@ -362,6 +366,7 @@ impl App {
             MenuItem::SvnUpdate => self.svn_update(),
             MenuItem::SvnCommit => self.svn_commit_prompt(),
             MenuItem::BulkRename => self.start_bulk_rename(),
+            MenuItem::Snippets => self.start_snippets(),
             MenuItem::Shortcuts => self.start_shortcuts(),
             MenuItem::Lang => {
                 // Flip the interface language; every localized string reads

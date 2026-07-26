@@ -296,6 +296,25 @@
 
 
 -- ----------------------------------------------------------------------------
+--  COMMAND SNIPPETS  —  cian.snippets { ... }   (optional)
+-- ----------------------------------------------------------------------------
+-- A launcher for the shell commands you type again and again — sqlplus logins,
+-- log tails, HULFT jobs. Open it with `:snip` (or right-click "Snippets →
+-- shell"), type to filter, Enter to send to the active shell pane.
+--
+-- Each entry: `cmd` (required, the text sent), `name` (label; defaults to cmd),
+-- `enter` (default true = run it immediately; false = type it for review), and
+-- `confirm` (default false = send at once; true = ask first — use it for
+-- anything destructive). Additive across calls.
+-- cian.snippets{
+--   { name = "sqlplus 開発DB", cmd = "sqlplus user@DEVDB", enter = false },
+--   { name = "アプリログ tail", cmd = "tail -f /var/log/app/app.log" },
+--   { name = "HULFT 送信 定型", cmd = "utlsend -f SENDID -sync", confirm = true },
+--   { name = "df 空き確認",     cmd = "df -g" },
+-- }
+
+
+-- ----------------------------------------------------------------------------
 --  OPEN HANDLERS & HELPERS
 -- ----------------------------------------------------------------------------
 -- What Enter (or `open_external`) does for a given extension. The handler gets

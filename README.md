@@ -726,6 +726,23 @@ automatically once it finishes building (`sync = true`).
 The file panes use the parallel controls: `Shift+F1` / `Shift+F2` switch to the
 next / previous tab, and `Shift+F10` closes the active tab (asking first).
 
+**Command snippets.** For the lines you type again and again — a sqlplus login, a
+log tail, a HULFT job — declare them once in init.lua and fire them from a picker:
+
+```lua
+cian.snippets{
+  { name = "sqlplus dev", cmd = "sqlplus user@DEVDB", enter = false },
+  { name = "tail app log", cmd = "tail -f /var/log/app/app.log" },
+  { name = "hulft send",  cmd = "utlsend -f SENDID -sync", confirm = true },
+}
+```
+
+`:snip` (or right-click **Snippets → shell**) opens the launcher; type to filter,
+Enter sends the chosen line to the active shell. `enter` (default true) runs it
+immediately, or `false` types it at the prompt for you to review and run;
+`confirm = true` asks first, for anything destructive. A tag in the list shows
+which each is — `↵` run, `…` type-only, `?` confirm-first.
+
 ## Counting files and steps
 
 `:count` is cian's built-in kazoechao: it tallies files, lines and **steps**

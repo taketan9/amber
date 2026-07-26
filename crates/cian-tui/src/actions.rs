@@ -426,6 +426,59 @@ impl App {
         }
     }
 
+    // ------- Snippets -------
+
+    /// `:snip` / right-click: open the command-snippet launcher.
+    pub(crate) fn start_snippets(&mut self) {
+        if self.config.snippets.is_empty() {
+            self.message = Some(
+                tr(self.lang, "no snippets configured (cian.snippets{…} in init.lua)",
+                   "スニペット未設定（init.lua の cian.snippets{…}）").into(),
+            );
+            return;
+        }
+        self.popup = Popup::Snippets { cursor: 0, filter: String::new() };
+    }
+
+    /// The snippets matching `filter` (case-insensitive, over name and command),
+    /// paired with their index in `config.snippets`.
+    pub(crate) fn snippet_matches(&self, filter: &str) -> Vec<(usize, &cian_lua::Snippet)> {
+        let needle = filter.to_lowercase();
+        self.config
+            .snippets
+            .iter()
+            .enumerate()
+            .filter(|(_, s)| {
+                needle.is_empty()
+                    || s.name.to_lowercase().contains(&needle)
+                    || s.cmd.to_lowercase().contains(&needle)
+            })
+            .collect()
+    }
+
+    /// Send the snippet at `index` to the shell — after a confirm when it is
+    /// flagged. Splits from `deliver_snippet` so the confirm path shares it.
+    pub(crate) fn send_snippet(&mut self, index: usize) {
+        let Some(s) = self.config.snippets.get(index) else { return };
+        let (name, cmd, enter, confirm) = (s.name.clone(), s.cmd.clone(), s.enter, s.confirm);
+        if confirm {
+            self.popup = Popup::ConfirmSnippet { name, cmd, enter };
+        } else {
+            self.deliver_snippet(&cmd, enter);
+        }
+    }
+
+    /// Actually hand a snippet to the shell: run it (with a newline) when
+    /// `enter`, otherwise type it at the prompt for review.
+    pub(crate) fn deliver_snippet(&mut self, cmd: &str, enter: bool) {
+        if enter {
+            self.run_in_shell(cmd.to_string());
+            self.message = Some(tr(self.lang, "snippet sent", "スニペットを送信").into());
+        } else {
+            self.insert_ai_command_at_prompt(cmd);
+        }
+    }
+
     /// Deliver a command queued while the shell was still starting.
     pub(crate) fn flush_pending_shell_input(&mut self) {
         let Some(cmd) = self.pending_shell_input.take() else { return };

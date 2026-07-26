@@ -381,6 +381,11 @@ enum Popup {
     /// SSH: pick a host, then a user on it.
     SshHosts { cursor: usize, filter: String },
     SshUsers { host: usize, cursor: usize },
+    /// The command-snippet launcher: pick one to send to the active shell.
+    /// Items come from `config.snippets`, filtered by `filter`.
+    Snippets { cursor: usize, filter: String },
+    /// Confirm sending a snippet flagged `confirm = true` (a destructive one).
+    ConfirmSnippet { name: String, cmd: String, enter: bool },
     Search { buffer: String },
     History { entries: Vec<PathBuf>, cursor: usize },
     /// Bookmarks. `entries` is the whole tree; `path` is the group currently
@@ -592,6 +597,8 @@ enum MenuItem {
     SvnCommit,
     /// Pattern-based bulk rename of the marked files (`:brename`).
     BulkRename,
+    /// Open the command-snippet launcher (`:snip`).
+    Snippets,
     /// Open the shortcuts / bookmarks menu (the `s` key).
     Shortcuts,
     /// A submenu grouping the compress-to-archive actions.
@@ -708,6 +715,7 @@ impl MenuItem {
             MenuItem::SvnUpdate => tr(lang, "Update  (svn update)", "更新  (svn update)"),
             MenuItem::SvnCommit => tr(lang, "Commit…  (svn commit)", "コミット…  (svn commit)"),
             MenuItem::BulkRename => tr(lang, "Bulk rename…  (:brename)", "一括リネーム…  (:brename)"),
+            MenuItem::Snippets => tr(lang, "Snippets → shell  (:snip)", "スニペット → シェル  (:snip)"),
             MenuItem::Shortcuts => tr(lang, "Shortcuts  (s)", "ショートカット  (s)"),
             MenuItem::AiMenu => tr(lang, "AI ▸", "AI ▸"),
             MenuItem::SendMenu => tr(lang, "Transfer ▸", "転送 ▸"),
@@ -2669,6 +2677,7 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry("F12", None, "zoom focused surface (toggle)", "フォーカス中の面をズーム（トグル）"),
                 entry("Shift+F12", None, "zoom active split pane (toggle)", "アクティブな分割ペインをズーム（トグル）"),
                 entry(":sync", None, "synchronize: type into all panes at once (also right-click)", "同時入力：全ペインへ一括入力（右クリックでも）"),
+                entry(":snip", None, "snippet launcher → send a saved command to the shell (cian.snippets)", "スニペットランチャー → 定型コマンドをシェルへ送信（cian.snippets）"),
                 entry("drag", None, "select text; it is copied to the clipboard on release", "テキスト選択；離すとクリップボードにコピー"),
                 entry("right-click", None, "menu: paste, log, SFTP, text encoding, color", "メニュー：貼付、ログ、SFTP、文字コード、色"),
                 entry("Esc", None, "back to files (full-screen apps keep it)", "ファイルに戻る（全画面アプリはEscを保持）"),

@@ -140,6 +140,21 @@ pub struct SshHost {
     pub notes: Option<String>,
 }
 
+/// One command snippet from `cian.snippets{...}`: a labelled line of shell
+/// text sent to the active shell pane on demand.
+#[derive(Debug, Clone)]
+pub struct Snippet {
+    /// Label shown in the picker.
+    pub name: String,
+    /// The shell text to send.
+    pub cmd: String,
+    /// Append a newline so it runs immediately. Defaults to `true` — a snippet
+    /// is a one-action launcher; set `enter = false` to type it for review.
+    pub enter: bool,
+    /// Ask before sending (for destructive commands). Defaults to `false`.
+    pub confirm: bool,
+}
+
 /// AI settings from `cian.ai{...}`. Presence enables the (optional) AI
 /// features; the TUI still verifies the helper actually works before showing
 /// them. Fields mirror crmaine's backend so the same Azure endpoint is reached.
@@ -181,6 +196,8 @@ struct Builder {
     ai: Option<AiOptions>,
     /// Precondition facts about the environment, fed to every AI prompt.
     ai_context: Vec<String>,
+    /// Command snippets declared with `cian.snippets{...}`.
+    snippets: Vec<Snippet>,
     errors: Vec<String>,
 }
 
@@ -202,6 +219,9 @@ pub struct Config {
     /// Precondition facts declared with `cian.ai_context{...}`, prepended to
     /// every AI prompt so answers assume the user's actual environment.
     pub ai_context: Vec<String>,
+    /// Command snippets declared with `cian.snippets{...}`, sent to the active
+    /// shell pane from the `:snip` picker.
+    pub snippets: Vec<Snippet>,
     /// Non-fatal problems collected while loading (surfaced in a notice popup).
     pub errors: Vec<String>,
     ext_open: HashMap<String, Function>,
@@ -394,7 +414,7 @@ fn load_from(path: &Path) -> Config {
 
     // Pull the accumulated config out by cloning; the Lua handles stay valid
     // because we move `lua` into the returned Config below.
-    let (theme, options, keymaps, ext_open, ssh_hosts, ai, ai_context, builder_errors) = {
+    let (theme, options, keymaps, ext_open, ssh_hosts, ai, ai_context, snippets, builder_errors) = {
         let b = builder.borrow();
         (
             b.theme.clone(),
@@ -404,6 +424,7 @@ fn load_from(path: &Path) -> Config {
             b.ssh_hosts.clone(),
             b.ai.clone(),
             b.ai_context.clone(),
+            b.snippets.clone(),
             b.errors.clone(),
         )
     };
@@ -417,6 +438,7 @@ fn load_from(path: &Path) -> Config {
         ssh_hosts,
         ai,
         ai_context,
+        snippets,
         errors,
         _lua: Some(lua),
     }
@@ -706,6 +728,42 @@ fn install_api(lua: &Lua, builder: &Rc<RefCell<Builder>>) -> mlua::Result<()> {
         )?;
     }
 
+    // cian.snippets{ { name=, cmd=, enter=, confirm= }, ... }
+    //
+    // Command snippets sent to the active shell pane from the `:snip` picker.
+    // `enter` (default true) runs it immediately; `confirm` (default false)
+    // asks first. Additive across calls.
+    {
+        let b = builder.clone();
+        cian.set(
+            "snippets",
+            lua.create_function(move |_, t: Table| {
+                let mut bm = b.borrow_mut();
+                let entries: Vec<Table> = match t.sequence_values::<Table>().collect::<mlua::Result<_>>() {
+                    Ok(v) => v,
+                    Err(e) => {
+                        bm.errors.push(format!("cian.snippets: expected a list of tables ({})", e));
+                        return Ok(());
+                    }
+                };
+                for s in entries {
+                    let cmd = match s.get::<Option<String>>("cmd")? {
+                        Some(c) if !c.is_empty() => c,
+                        _ => {
+                            bm.errors.push("cian.snippets: an entry is missing `cmd`".into());
+                            continue;
+                        }
+                    };
+                    let name = s.get::<Option<String>>("name")?.unwrap_or_else(|| cmd.clone());
+                    let enter = s.get::<Option<bool>>("enter")?.unwrap_or(true);
+                    let confirm = s.get::<Option<bool>>("confirm")?.unwrap_or(false);
+                    bm.snippets.push(Snippet { name, cmd, enter, confirm });
+                }
+                Ok(())
+            })?,
+        )?;
+    }
+
     // cian.on_open("md", function(path) ... end)
     {
         let b = builder.clone();
@@ -819,6 +877,34 @@ mod tests {
         }
         let cfg = load_from(&path);
         assert!(cfg.errors.is_empty(), "{:?}", cfg.errors);
+    }
+
+    #[test]
+    fn snippets_parse_with_defaults() {
+        let dir = tempfile::tempdir().unwrap();
+        let init = dir.path().join("init.lua");
+        std::fs::write(
+            &init,
+            r#"
+            cian.snippets{
+              { name = "sqlplus dev", cmd = "sqlplus u@DEV" },
+              { cmd = "tail -f /var/log/app.log", enter = false },
+              { name = "danger", cmd = "rm -rf tmp", confirm = true },
+              { name = "no cmd" },
+            }
+            "#,
+        )
+        .unwrap();
+        let cfg = load_from(&init);
+        assert_eq!(cfg.snippets.len(), 3, "the entry without cmd is dropped");
+        assert_eq!(cfg.snippets[0].name, "sqlplus dev");
+        assert!(cfg.snippets[0].enter, "enter defaults to true");
+        assert!(!cfg.snippets[0].confirm, "confirm defaults to false");
+        // A missing name falls back to the command text.
+        assert_eq!(cfg.snippets[1].name, "tail -f /var/log/app.log");
+        assert!(!cfg.snippets[1].enter, "enter=false honoured");
+        assert!(cfg.snippets[2].confirm, "confirm=true honoured");
+        assert!(cfg.errors.iter().any(|e| e.contains("missing `cmd`")), "{:?}", cfg.errors);
     }
 
     #[test]
