@@ -1204,6 +1204,9 @@ enum Popup {
     /// each toggleable. Approving runs the checked moves, creating folders as
     /// needed. `dir` is the folder the moves are relative to.
     StructureReview { items: Vec<MoveItem>, cursor: usize, scroll: usize, dir: PathBuf },
+    /// The AI's proposed renames (old → new), each toggleable. Approving renames
+    /// the checked files in place.
+    RenameReview { items: Vec<RenameItem>, cursor: usize, scroll: usize },
 }
 
 /// One candidate the junk detector flagged: a path, why it thinks so, and
@@ -1224,6 +1227,16 @@ struct MoveItem {
     name: String,
     dest: String,
     reason: String,
+    selected: bool,
+}
+
+/// One proposed rename: `path` (currently named `old`) becomes `new` (a bare
+/// filename in the same directory).
+#[derive(Debug, Clone)]
+struct RenameItem {
+    path: PathBuf,
+    old: String,
+    new: String,
     selected: bool,
 }
 
@@ -1388,6 +1401,56 @@ fn truncate_diff_for_ai(diff: &str, max_bytes: usize) -> String {
         out.push('\n');
     }
     out.push_str("\n[diff truncated — summarise from what is shown above]\n");
+    out
+}
+
+/// Sanitise an AI-proposed new filename: a single path segment, no separators,
+/// no `..`/`.`, no drive, and not empty — so a rename can only ever change a
+/// name within the same directory, never move a file elsewhere.
+fn clean_filename(raw: &str) -> Option<String> {
+    let t = raw.trim();
+    if t.is_empty() || t == "." || t == ".." {
+        return None;
+    }
+    if t.contains('/') || t.contains('\\') || t.contains(':') || t.contains('\0') {
+        return None;
+    }
+    Some(t.to_string())
+}
+
+/// Parse the bulk-rename reply into concrete renames. The model returns a JSON
+/// array of `{name, new_name}`; we keep only entries whose `name` matches a real
+/// file and whose `new_name` is a safe filename that actually differs, and drop
+/// duplicate targets (two files renamed to the same thing). Pre-checked.
+fn parse_rename_reply(raw: &str, names: &[(String, PathBuf)]) -> Vec<RenameItem> {
+    #[derive(serde::Deserialize)]
+    struct Hit {
+        name: String,
+        #[serde(default, alias = "newName", alias = "new")]
+        new_name: String,
+    }
+    let start = raw.find('[');
+    let end = raw.rfind(']');
+    let json = match (start, end) {
+        (Some(s), Some(e)) if e > s => &raw[s..=e],
+        _ => return Vec::new(),
+    };
+    let hits: Vec<Hit> = serde_json::from_str(json).unwrap_or_default();
+    let mut out = Vec::new();
+    let mut used_src = std::collections::HashSet::new();
+    let mut used_dst = std::collections::HashSet::new();
+    for hit in hits {
+        let Some((old, path)) = names.iter().find(|(n, _)| *n == hit.name) else { continue };
+        let Some(new) = clean_filename(&hit.new_name) else { continue };
+        if new == *old {
+            continue; // no-op
+        }
+        // One proposal per source, and no two files renamed to the same name.
+        if !used_src.insert(old.clone()) || !used_dst.insert(new.clone()) {
+            continue;
+        }
+        out.push(RenameItem { path: path.clone(), old: old.clone(), new, selected: true });
+    }
     out
 }
 
@@ -1782,6 +1845,8 @@ enum MenuItem {
     AiJunk,
     /// Suggest an organised folder structure for the current directory.
     AiStructure,
+    /// Bulk-rename the marked files (or the whole listing) by an instruction.
+    AiRename,
     /// Open the shortcuts / bookmarks menu (the `s` key).
     Shortcuts,
     /// A submenu grouping the AI actions (drills down when chosen).
@@ -1849,6 +1914,7 @@ impl MenuItem {
             MenuItem::AiCommit => tr(lang, "Draft commit message", "コミットメッセージ生成"),
             MenuItem::AiJunk => tr(lang, "Detect junk files", "ゴミファイル検出"),
             MenuItem::AiStructure => tr(lang, "Suggest folder structure", "フォルダ構成を提案"),
+            MenuItem::AiRename => tr(lang, "Bulk rename", "一括リネーム"),
             MenuItem::Shortcuts => tr(lang, "Shortcuts  (s)", "ショートカット  (s)"),
             MenuItem::AiMenu => tr(lang, "AI ▸", "AI ▸"),
             MenuItem::SendMenu => tr(lang, "Transfer ▸", "転送 ▸"),
@@ -1992,6 +2058,9 @@ enum AiPurpose {
     /// Structure suggestion over a directory listing. `names` validates the
     /// reply back to real paths; `dir` is the folder moves are relative to.
     Structure { names: Vec<(String, PathBuf)>, dir: PathBuf },
+    /// Bulk rename over a chosen set of files. `names` validates the reply back
+    /// to real paths.
+    Rename { names: Vec<(String, PathBuf)> },
 }
 
 /// A pending AI request; the worker sends the assistant's reply (or an error
@@ -2089,6 +2158,8 @@ enum InputKind {
     ScpRemote,
     /// A natural-language description to turn into a shell command via AI.
     AiShellCmd,
+    /// A natural-language instruction for how to bulk-rename the chosen files.
+    AiRename,
 }
 
 impl InputKind {
@@ -2526,6 +2597,8 @@ pub struct App {
     junk_rect: Rect,
     /// The structure-review list body rect, for the same reason.
     struct_rect: Rect,
+    /// The rename-review list body rect, for the same reason.
+    rename_rect: Rect,
     diff_job: Option<DiffJob>,
     /// When the panes were last checked against the filesystem.
     last_watch: Instant,
@@ -2628,6 +2701,7 @@ impl App {
             ai_rect: Rect::new(0, 0, 0, 0),
             junk_rect: Rect::new(0, 0, 0, 0),
             struct_rect: Rect::new(0, 0, 0, 0),
+            rename_rect: Rect::new(0, 0, 0, 0),
             ai_scroll: 0,
             ai_lines: Vec::new(),
             zoom_return: None,
@@ -2801,6 +2875,13 @@ impl App {
             "aicommit" | "commitmsg" => self.start_ai_commit_message(),
             "aijunk" | "junk" => self.start_ai_junk(),
             "aiorganize" | "aistructure" | "organize" => self.start_ai_structure(),
+            "airename" | "rename" => {
+                if rest.is_empty() {
+                    self.start_ai_rename_prompt();
+                } else {
+                    self.start_ai_rename(rest);
+                }
+            }
             "reload" | "source" => self.reload_config(),
             // Mark / unmark entries whose name matches a glob (`:mark *.rs`).
             "mark" | "select" => self.cmd_mark(rest, true),
@@ -5402,6 +5483,101 @@ impl App {
         });
     }
 
+    /// Ask how to rename, then propose new names for the chosen files. The files
+    /// are the marked ones, or the whole listing when nothing is marked.
+    fn start_ai_rename_prompt(&mut self) {
+        if self.ai.is_none() {
+            self.message = Some("AI not configured — add cian.ai{...} to init.lua".into());
+            return;
+        }
+        if !self.ai_ready() {
+            self.message = Some("AI unavailable (python, packages, or sign-in)".into());
+            return;
+        }
+        // Which files: marks if any, else every real entry in the listing.
+        let any = self.active_pane().map(|p| {
+            p.mark_count() > 0 || p.entries.iter().any(|e| !e.is_parent)
+        }).unwrap_or(false);
+        if !any {
+            self.message = Some("nothing here to rename".into());
+            return;
+        }
+        self.popup = text_input(
+            "AI bulk rename",
+            "how should these be renamed? (e.g. snake_case, add a date prefix):",
+            String::new(),
+            InputKind::AiRename,
+        );
+    }
+
+    /// Send the chosen files' names plus the instruction to the model and show
+    /// its proposed renames for review.
+    fn start_ai_rename(&mut self, instruction: &str) {
+        let instruction = instruction.trim().to_string();
+        if instruction.is_empty() {
+            self.message = Some("cancelled (no instruction)".into());
+            return;
+        }
+        let Some(pane) = self.active_pane() else { return };
+        // Marked files, or the whole listing (never the `..` row).
+        let chosen: Vec<(String, PathBuf)> = if pane.mark_count() > 0 {
+            pane.entries.iter()
+                .filter(|e| !e.is_parent && pane.marks.contains(&e.path))
+                .map(|e| (e.name.clone(), e.path.clone()))
+                .collect()
+        } else {
+            pane.entries.iter()
+                .filter(|e| !e.is_parent)
+                .map(|e| (e.name.clone(), e.path.clone()))
+                .collect()
+        };
+        if chosen.is_empty() {
+            self.message = Some("nothing to rename".into());
+            return;
+        }
+        let listing: String = chosen.iter().take(400).map(|(n, _)| format!("{}\n", n)).collect();
+        let system = "You propose new file names following the user's instruction. \
+             Keep it a RENAME only: never change the folder, never add a path. \
+             Preserve the extension unless the instruction says otherwise. Reply \
+             with ONLY a JSON array of objects {\"name\": string (exactly as \
+             given), \"new_name\": string (a bare filename, no path)}. Include \
+             only files that should change; omit the rest. No prose, no fences."
+            .to_string();
+        let user = format!("Instruction: {}\n\nFiles:\n{}", instruction, listing);
+        let names = chosen;
+        self.message = Some("asking AI for new names…".into());
+        self.ai_request(AiPurpose::Rename { names }, system, user);
+    }
+
+    /// Run the checked renames in place, then reload and report.
+    fn apply_rename_plan(&mut self) {
+        let renames: Vec<(PathBuf, String)> = if let Popup::RenameReview { items, .. } = &self.popup {
+            items.iter().filter(|it| it.selected).map(|it| (it.path.clone(), it.new.clone())).collect()
+        } else {
+            return;
+        };
+        if renames.is_empty() {
+            self.message = Some("nothing checked".into());
+            return;
+        }
+        self.popup = Popup::None;
+        let mut report = OpReport::default();
+        for (src, new) in &renames {
+            // Skip if the target already exists, rather than clobbering it.
+            if src.parent().map(|p| p.join(new).exists()).unwrap_or(false) {
+                report.skipped += 1;
+                continue;
+            }
+            match cian_core::ops::rename_in_place(src, new) {
+                Ok(_) => report.ok += 1,
+                Err(e) => report.note_error(format!("{}: {}", src.display(), e)),
+            }
+        }
+        self.reload_active();
+        self.flash(self.focused);
+        self.show_op_report(&report);
+    }
+
     /// Hand the checked junk candidates to the normal delete confirmation, so
     /// removal goes through the same trash/permanent path (and its own y/Enter
     /// approval) as any other delete — never straight to disk from here.
@@ -5545,6 +5721,17 @@ impl App {
                         self.message = Some("AI had no structure changes to suggest".into());
                     } else {
                         self.popup = Popup::StructureReview { items, cursor: 0, scroll: 0, dir };
+                    }
+                }
+                Err(e) => self.message = Some(format!("AI: {}", e)),
+            },
+            AiPurpose::Rename { names } => match result {
+                Ok(text) => {
+                    let items = parse_rename_reply(&text, &names);
+                    if items.is_empty() {
+                        self.message = Some("AI proposed no renames".into());
+                    } else {
+                        self.popup = Popup::RenameReview { items, cursor: 0, scroll: 0 };
                     }
                 }
                 Err(e) => self.message = Some(format!("AI: {}", e)),
@@ -5922,6 +6109,10 @@ impl App {
                 self.start_ai_shell_cmd(&name);
                 return Ok(());
             }
+            InputKind::AiRename => {
+                self.start_ai_rename(&name);
+                return Ok(());
+            }
             InputKind::DestPath { op, targets } => {
                 let dest = expand_path(&name);
                 if !dest.is_dir() {
@@ -6211,6 +6402,31 @@ impl App {
                 if idx < n { Some(idx) } else { None }
             };
             if let Popup::StructureReview { items, cursor, scroll, .. } = &mut self.popup {
+                let n = items.len();
+                match ev.kind {
+                    MouseEventKind::Down(MouseButton::Left) => {
+                        if let Some(idx) = row_at(row, *scroll, n) {
+                            *cursor = idx;
+                            items[idx].selected = !items[idx].selected;
+                        }
+                    }
+                    MouseEventKind::ScrollDown => *scroll = (*scroll + 1).min(n.saturating_sub(1)),
+                    MouseEventKind::ScrollUp => *scroll = scroll.saturating_sub(1),
+                    _ => {}
+                }
+            }
+            return;
+        }
+
+        // Rename review: same feel — click a row to toggle it.
+        if matches!(self.popup, Popup::RenameReview { .. }) {
+            let body = self.rename_rect;
+            let row_at = |row: u16, scroll: usize, n: usize| -> Option<usize> {
+                if row < body.y || row >= body.y + body.height { return None; }
+                let idx = scroll + (row - body.y) as usize;
+                if idx < n { Some(idx) } else { None }
+            };
+            if let Popup::RenameReview { items, cursor, scroll } = &mut self.popup {
                 let n = items.len();
                 match ev.kind {
                     MouseEventKind::Down(MouseButton::Left) => {
@@ -7016,6 +7232,7 @@ impl App {
                     // In a file pane the AI can draft a commit for its repo,
                     // scan the folder for junk, and suggest a structure.
                     v.insert(0, MenuItem::AiCommit);
+                    v.insert(0, MenuItem::AiRename);
                     v.insert(0, MenuItem::AiStructure);
                     v.insert(0, MenuItem::AiJunk);
                 }
@@ -7208,6 +7425,7 @@ impl App {
             MenuItem::AiCommit => self.start_ai_commit_message(),
             MenuItem::AiJunk => self.start_ai_junk(),
             MenuItem::AiStructure => self.start_ai_structure(),
+            MenuItem::AiRename => self.start_ai_rename_prompt(),
             MenuItem::Shortcuts => self.start_shortcuts(),
             MenuItem::Lang => {
                 // Flip the interface language; every localized string reads
@@ -8079,6 +8297,29 @@ impl App {
                 }
                 // Enter/m runs the checked moves (creating folders as needed).
                 KeyCode::Enter | KeyCode::Char('m') => self.apply_structure_plan(),
+                _ => {}
+            }
+            return Ok(());
+        }
+        if let Popup::RenameReview { items, cursor, .. } = &mut self.popup {
+            let n = items.len();
+            match key.code {
+                KeyCode::Esc | KeyCode::Char('q') => self.popup = Popup::None,
+                KeyCode::Char('j') | KeyCode::Down => {
+                    if n > 0 { *cursor = (*cursor + 1).min(n - 1); }
+                }
+                KeyCode::Char('k') | KeyCode::Up => *cursor = cursor.saturating_sub(1),
+                KeyCode::Char('g') | KeyCode::Home => *cursor = 0,
+                KeyCode::Char('G') | KeyCode::End => *cursor = n.saturating_sub(1),
+                KeyCode::Char(' ') => {
+                    if let Some(it) = items.get_mut(*cursor) { it.selected = !it.selected; }
+                }
+                KeyCode::Char('a') => {
+                    let all_on = items.iter().all(|it| it.selected);
+                    for it in items.iter_mut() { it.selected = !all_on; }
+                }
+                // Enter/r renames the checked files.
+                KeyCode::Enter | KeyCode::Char('r') => self.apply_rename_plan(),
                 _ => {}
             }
             return Ok(());
@@ -10017,6 +10258,10 @@ fn draw(f: &mut Frame, app: &mut App) {
         draw_structure_review(f, area, app);
         return;
     }
+    if matches!(app.popup, Popup::RenameReview { .. }) {
+        draw_rename_review(f, area, app);
+        return;
+    }
     if !matches!(app.popup, Popup::None) {
         // Remember where the context menu landed so a click can hit its rows.
         if let Popup::ContextMenu { items, at, .. } = &app.popup {
@@ -11595,6 +11840,65 @@ fn draw_structure_review(f: &mut Frame, area: Rect, app: &mut App) {
     f.render_widget(Paragraph::new(rows), inner);
 }
 
+/// The bulk-rename review: a checkbox per proposed rename showing `old → new`.
+/// Enter renames the checked files in place.
+fn draw_rename_review(f: &mut Frame, area: Rect, app: &mut App) {
+    let lang = app.lang;
+    let width: u16 = 92u16.min(area.width.saturating_sub(2));
+    let height = area.height.saturating_sub(2).clamp(8, 30);
+    let rect = centered_rect(width, height, area);
+    f.render_widget(Clear, rect);
+    let (n, checked) = if let Popup::RenameReview { items, .. } = &app.popup {
+        (items.len(), items.iter().filter(|i| i.selected).count())
+    } else {
+        (0, 0)
+    };
+    let title = if lang == Lang::Ja {
+        format!(" リネーム候補  {}/{} 選択 ", checked, n)
+    } else {
+        format!(" proposed renames  {}/{} checked ", checked, n)
+    };
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(border_type())
+        .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
+        .style(Style::default().bg(theme().popup_bg))
+        .title(title)
+        .title_bottom(tr(lang,
+            " Space/click=toggle  a=all  Enter/r=rename checked  Esc=cancel ",
+            " Space/クリック=切替  a=全て  Enter/r=選択をリネーム  Esc=取消 "));
+    let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
+    f.render_widget(block, rect);
+
+    let body_h = inner.height as usize;
+    let body_w = inner.width as usize;
+    let half = body_w.saturating_sub(8) / 2;
+    let mut rows: Vec<Line> = Vec::new();
+    if let Popup::RenameReview { items, cursor, scroll } = &mut app.popup {
+        if *cursor < *scroll {
+            *scroll = *cursor;
+        } else if *cursor >= *scroll + body_h {
+            *scroll = *cursor + 1 - body_h;
+        }
+        for (i, it) in items.iter().enumerate().skip(*scroll).take(body_h) {
+            let sel = i == *cursor;
+            let checkbox = if it.selected { "[x] " } else { "[ ] " };
+            let box_c = if it.selected { theme().mark_fg } else { Color::Rgb(120, 120, 140) };
+            let base = if sel { Style::default().bg(theme().selected_bg) } else { Style::default() };
+            let old_c = if sel { Color::Rgb(230, 230, 245) } else { Color::Rgb(200, 200, 215) };
+            rows.push(Line::from(vec![
+                Span::styled(checkbox, base.fg(box_c).add_modifier(Modifier::BOLD)),
+                Span::styled(format!("{}  →  ", pad_to(&truncate_middle(&it.old, half), half)),
+                    base.fg(old_c)),
+                Span::styled(truncate_middle(&it.new, half),
+                    base.fg(theme().accent).add_modifier(Modifier::BOLD)),
+            ]));
+        }
+        app.rename_rect = Rect::new(inner.x, inner.y, inner.width, body_h.min(items.len().saturating_sub(*scroll)) as u16);
+    }
+    f.render_widget(Paragraph::new(rows), inner);
+}
+
 #[allow(clippy::too_many_arguments)]
 fn draw_popup(
     f: &mut Frame,
@@ -12863,6 +13167,7 @@ fn draw_popup(
         | Popup::CommitMessage { .. }
         | Popup::JunkReview { .. }
         | Popup::StructureReview { .. }
+        | Popup::RenameReview { .. }
         | Popup::None => return,
     };
 
@@ -13224,6 +13529,59 @@ mod tests {
         } else {
             panic!("popup changed");
         }
+    }
+
+    #[test]
+    fn clean_filename_rejects_paths_and_specials() {
+        assert_eq!(clean_filename(" report_v2.txt "), Some("report_v2.txt".to_string()));
+        assert_eq!(clean_filename("a/b.txt"), None);
+        assert_eq!(clean_filename("a\\b.txt"), None);
+        assert_eq!(clean_filename(".."), None);
+        assert_eq!(clean_filename("."), None);
+        assert_eq!(clean_filename(""), None);
+        assert_eq!(clean_filename("C:evil"), None);
+    }
+
+    #[test]
+    fn parse_rename_reply_validates_and_dedupes() {
+        let names = vec![
+            ("IMG_1.jpg".to_string(), PathBuf::from("/p/IMG_1.jpg")),
+            ("IMG_2.jpg".to_string(), PathBuf::from("/p/IMG_2.jpg")),
+            ("keep.txt".to_string(), PathBuf::from("/p/keep.txt")),
+        ];
+        let raw = "[\
+            {\"name\":\"IMG_1.jpg\",\"new_name\":\"photo_01.jpg\"},\
+            {\"name\":\"IMG_2.jpg\",\"new_name\":\"../escape.jpg\"},\
+            {\"name\":\"keep.txt\",\"new_name\":\"keep.txt\"},\
+            {\"name\":\"ghost\",\"new_name\":\"x.jpg\"}\
+            ]";
+        let items = parse_rename_reply(raw, &names);
+        // Only IMG_1 survives: IMG_2's target escapes, keep is a no-op, ghost unknown.
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].old, "IMG_1.jpg");
+        assert_eq!(items[0].new, "photo_01.jpg");
+    }
+
+    /// The whole rename flow: build the review popup and approve — the checked
+    /// file is renamed in place, the unchecked left alone.
+    #[test]
+    fn rename_plan_renames_checked_files() {
+        let (d, mut app) = app_with(&["IMG_1.jpg", "keep.txt"]);
+        app.popup = Popup::RenameReview {
+            items: vec![
+                RenameItem { path: d.path().join("IMG_1.jpg"), old: "IMG_1.jpg".into(),
+                    new: "photo_01.jpg".into(), selected: true },
+                RenameItem { path: d.path().join("keep.txt"), old: "keep.txt".into(),
+                    new: "notes.txt".into(), selected: false },
+            ],
+            cursor: 0,
+            scroll: 0,
+        };
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+        assert!(d.path().join("photo_01.jpg").is_file(), "renamed");
+        assert!(!d.path().join("IMG_1.jpg").exists(), "old name gone");
+        assert!(d.path().join("keep.txt").is_file(), "unchecked untouched");
+        assert!(!d.path().join("notes.txt").exists());
     }
 
     #[test]

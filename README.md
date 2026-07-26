@@ -408,12 +408,18 @@ loop:
   (bounded to keep the request small), so it is a deliberate keystroke rather
   than automatic. The summary opens in the AI chat, where it can be scrolled,
   selected and copied.
+- **Bulk rename** (file pane): `:airename`, or right-click **AI ▸ → Bulk
+  rename**. It asks how to rename ("snake_case", "add a date prefix", …), then
+  proposes new names for the marked files — or the whole listing when nothing
+  is marked. You review the plan as `old → new` rows (Space/click toggles, `a`
+  toggles all) and approving (Enter/`r`) renames the checked files in place. A
+  proposed name is validated to a bare filename (no path, no `..`), a target
+  that already exists is skipped, and a name the model invents matches nothing.
 
 The AI part is the one place cian is not a single self-contained binary — it
 opts into an external interpreter and network — which is why it is strictly
 optional and off unless configured. See
-[`examples/init.lua`](examples/init.lua) for the settings. More AI features
-(bulk rename, F3 summaries, all approval-gated) are planned.
+[`examples/init.lua`](examples/init.lua) for the settings.
 
 ## Architecture
 
