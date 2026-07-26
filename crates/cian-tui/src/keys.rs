@@ -585,7 +585,7 @@ impl App {
             }
             return Ok(());
         }
-        if let Popup::GitLog { commits, cursor, scroll, dir, .. } = &mut self.popup {
+        if let Popup::GitLog { commits, cursor, scroll, dir, vcs, .. } = &mut self.popup {
             let n = commits.len().max(1);
             match key.code {
                 KeyCode::Esc | KeyCode::Char('q') => self.popup = Popup::None,
@@ -596,8 +596,9 @@ impl App {
                 KeyCode::Enter => {
                     let hash = commits.get(*cursor).map(|c| c.hash.clone());
                     let dir = dir.clone();
+                    let vcs = *vcs;
                     if let Some(h) = hash {
-                        self.git_show_commit(&h, &dir);
+                        self.git_show_commit(&h, &dir, vcs);
                     }
                 }
                 _ => {

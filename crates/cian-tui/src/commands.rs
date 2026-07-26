@@ -62,11 +62,16 @@ impl App {
                     self.start_ai_shell_cmd(rest);
                 }
             }
-            "stage" | "add" => self.git_stage(),
+            // These dispatch to git or svn based on the pane's VCS.
+            "stage" | "add" | "svnadd" => self.git_stage(),
             "unstage" | "reset" => self.git_unstage(),
-            "discard" | "revert" | "checkout" => self.git_discard_prompt(),
-            "gitlog" | "log" | "history" => self.start_git_log(),
-            "gitdiff" | "gdiff" => self.git_diff_file(),
+            "discard" | "revert" | "checkout" | "svnrevert" => self.git_discard_prompt(),
+            "gitlog" | "log" | "history" | "svnlog" => self.start_git_log(),
+            "gitdiff" | "gdiff" | "svndiff" => self.git_diff_file(),
+            // SVN-only working-copy operations.
+            "svnupdate" | "update" | "up" => self.svn_update(),
+            "svncommit" | "commit" | "ci" => self.svn_commit_prompt(),
+            "svnresolve" | "resolve" => self.svn_resolve(),
             "aicommit" | "commitmsg" => self.start_ai_commit_message(),
             "aijunk" | "junk" => self.start_ai_junk(),
             "aiorganize" | "aistructure" | "organize" => self.start_ai_structure(),

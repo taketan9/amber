@@ -4421,6 +4421,62 @@
     }
 
     #[test]
+    fn svn_status_log_and_diff() {
+        use std::process::Command;
+        // Needs both svnadmin (to make a repo) and svn (to check one out).
+        let have = |bin: &str| Command::new(bin).arg("--version").output().map(|o| o.status.success()).unwrap_or(false);
+        if !have("svnadmin") || !have("svn") {
+            eprintln!("svn not available; skipping");
+            return;
+        }
+        let root = tempfile::tempdir().unwrap();
+        let repo = std::fs::canonicalize(root.path()).unwrap().join("repo");
+        assert!(Command::new("svnadmin").args(["create"]).arg(&repo).status().unwrap().success());
+        let url = format!("file://{}", repo.display());
+        let wc_parent = tempfile::tempdir().unwrap();
+        let wc = std::fs::canonicalize(wc_parent.path()).unwrap().join("wc");
+        assert!(Command::new("svn").args(["checkout", &url]).arg(&wc).status().unwrap().success());
+
+        std::fs::write(wc.join("f.rs"), "let a = 1;\nlet b = 2;\n").unwrap();
+        let svn = |args: &[&str]| assert!(Command::new("svn").current_dir(&wc).args(args).status().unwrap().success(), "svn {:?}", args);
+        svn(&["add", "f.rs"]);
+        svn(&["commit", "-m", "seed"]);
+
+        let mut app = App::new(wc.clone(), wc.clone(), cian_lua::Config::default()).unwrap();
+        app.ensure_git();
+        // The status bar label comes from RepoStatus.branch → "svn r1".
+        assert_eq!(app.vcs_kind(), Some(Vcs::Svn), "detected as svn");
+        assert!(app.git_for(app.focused).map(|s| s.branch.starts_with("svn r")).unwrap_or(false), "revision label");
+
+        app.active_pane_mut().unwrap().cursor =
+            app.active_pane().unwrap().entries.iter().position(|e| e.name == "f.rs").unwrap();
+
+        // History → GitLog popup carrying Vcs::Svn; Enter shows the revision diff.
+        app.start_git_log();
+        match &app.popup {
+            Popup::GitLog { commits, vcs, .. } => {
+                assert_eq!(*vcs, Vcs::Svn);
+                assert_eq!(commits[0].subject, "seed");
+            }
+            _ => panic!("no svn log popup"),
+        }
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+        assert!(matches!(app.popup, Popup::Viewer { .. }), "revision diff opens in the viewer");
+        app.handle_key(code(KeyCode::Esc)).unwrap();
+
+        // Diff vs BASE after an edit.
+        std::fs::write(wc.join("f.rs"), "let a = 1;\nlet B = 2;\n").unwrap();
+        let _ = app.active_file_tabs_mut().map(|t| t.active_mut().reload());
+        app.active_pane_mut().unwrap().cursor =
+            app.active_pane().unwrap().entries.iter().position(|e| e.name == "f.rs").unwrap();
+        app.git_diff_file();
+        match &app.popup {
+            Popup::Viewer { view, .. } => assert!(view.lines.join("\n").contains("+let B = 2;"), "diff shown"),
+            _ => panic!("diff did not open"),
+        }
+    }
+
+    #[test]
     fn f3_syntax_highlights_recognised_code() {
         let d = tempfile::tempdir().unwrap();
         std::fs::write(d.path().join("a.rs"), "fn main() {\n    let x = 1; // hi\n}\n").unwrap();

@@ -14,9 +14,45 @@ impl App {
             let cwd = tabs.active_ref().cwd.clone();
             let stale = self.git[idx].as_ref().map(|g| g.cwd != cwd).unwrap_or(true);
             if stale {
-                let status = cian_core::git::status(&cwd);
-                self.git[idx] = Some(GitState { cwd, status });
+                // Git first, then svn; a directory is at most one of them.
+                let (kind, status) = if let Some(s) = cian_core::git::status(&cwd) {
+                    (Some(Vcs::Git), Some(s))
+                } else if let Some(s) = cian_core::svn::status(&cwd) {
+                    (Some(Vcs::Svn), Some(s))
+                } else {
+                    (None, None)
+                };
+                self.git[idx] = Some(GitState { cwd, kind, status });
             }
+        }
+    }
+
+    /// The VCS the active file pane's directory belongs to, if any.
+    pub(crate) fn vcs_kind(&self) -> Option<Vcs> {
+        let idx = match self.focused {
+            FocusedPane::Left => 0,
+            FocusedPane::Right => 1,
+            FocusedPane::Shell => return None,
+        };
+        self.git[idx].as_ref().and_then(|g| g.kind)
+    }
+
+    /// The active file pane's directory plus its VCS, if it is under one.
+    /// Falls back to a direct probe (the cache is cold right after an action).
+    pub(crate) fn vcs_dir(&self) -> Option<(PathBuf, Vcs)> {
+        if !matches!(self.focused, FocusedPane::Left | FocusedPane::Right) {
+            return None;
+        }
+        let cwd = self.active_pane()?.cwd.clone();
+        if let Some(kind) = self.vcs_kind() {
+            return Some((cwd, kind));
+        }
+        if cian_core::git::status(&cwd).is_some() {
+            Some((cwd, Vcs::Git))
+        } else if cian_core::svn::is_working_copy(&cwd) {
+            Some((cwd, Vcs::Svn))
+        } else {
+            None
         }
     }
 
@@ -26,33 +62,16 @@ impl App {
         self.git = [None, None];
     }
 
-    /// The active file pane's directory, if it sits in a git repository. Uses
-    /// the cached status when it is warm, and falls back to a direct check (the
-    /// cache is cold right after a git action invalidates it).
-    pub(crate) fn git_repo_dir(&self) -> Option<PathBuf> {
-        match self.focused {
-            FocusedPane::Left | FocusedPane::Right => {
-                let cwd = self.active_pane()?.cwd.clone();
-                if self.git_for(self.focused).is_some() || cian_core::git::status(&cwd).is_some() {
-                    Some(cwd)
-                } else {
-                    None
-                }
-            }
-            _ => None,
-        }
-    }
-
     /// The selection to act on for a git command: marked files, else the entry
     /// under the cursor (never the `..` row).
     pub(crate) fn git_targets(&self) -> Vec<PathBuf> {
         self.active_pane().map(|p| p.target_paths()).unwrap_or_default()
     }
 
-    /// `git add` the selection.
+    /// Stage the selection: `git add` in git, `svn add` in an svn working copy.
     pub(crate) fn git_stage(&mut self) {
-        let Some(dir) = self.git_repo_dir() else {
-            self.message = Some("not a git repository".into());
+        let Some((dir, kind)) = self.vcs_dir() else {
+            self.message = Some("not a version-controlled directory".into());
             return;
         };
         let paths = self.git_targets();
@@ -60,22 +79,30 @@ impl App {
             self.message = Some("nothing selected".into());
             return;
         }
-        match cian_core::git::stage(&dir, &paths) {
+        let (res, verb) = match kind {
+            Vcs::Git => (cian_core::git::stage(&dir, &paths), "git add"),
+            Vcs::Svn => (cian_core::svn::add(&dir, &paths), "svn add"),
+        };
+        match res {
             Ok(()) => {
-                self.message = Some(format!("● staged {} path(s)", paths.len()));
+                self.message = Some(format!("● added {} path(s)", paths.len()));
                 self.invalidate_git();
                 self.reload_active();
             }
-            Err(e) => self.message = Some(format!("git add: {}", e)),
+            Err(e) => self.message = Some(format!("{}: {}", verb, e)),
         }
     }
 
-    /// `git reset HEAD` the selection (unstage, keeping worktree changes).
+    /// `git reset HEAD` the selection (unstage). Git-only — svn has no index.
     pub(crate) fn git_unstage(&mut self) {
-        let Some(dir) = self.git_repo_dir() else {
-            self.message = Some("not a git repository".into());
+        let Some((dir, kind)) = self.vcs_dir() else {
+            self.message = Some("not a version-controlled directory".into());
             return;
         };
+        if kind != Vcs::Git {
+            self.message = Some("svn has no staging area to unstage".into());
+            return;
+        }
         let paths = self.git_targets();
         if paths.is_empty() {
             self.message = Some("nothing selected".into());
@@ -93,8 +120,8 @@ impl App {
 
     /// Open the confirm dialog for discarding worktree changes to the selection.
     pub(crate) fn git_discard_prompt(&mut self) {
-        let Some(dir) = self.git_repo_dir() else {
-            self.message = Some("not a git repository".into());
+        let Some((dir, _kind)) = self.vcs_dir() else {
+            self.message = Some("not a version-controlled directory".into());
             return;
         };
         let paths = self.git_targets();
@@ -105,18 +132,109 @@ impl App {
         self.popup = Popup::ConfirmDiscard { targets: paths, dir };
     }
 
-    /// `git checkout --` the selection: throw away worktree changes to tracked
-    /// files (untracked files are left alone). Called after the confirm.
+    /// Discard worktree changes to the selection: `git checkout --` in git,
+    /// `svn revert` in an svn working copy. Called after the confirm.
     pub(crate) fn git_discard(&mut self) {
         let popup = std::mem::replace(&mut self.popup, Popup::None);
         let Popup::ConfirmDiscard { targets, dir } = popup else { return };
-        match cian_core::git::discard(&dir, &targets) {
+        let kind = self.vcs_kind().unwrap_or(Vcs::Git);
+        let (res, verb) = match kind {
+            Vcs::Git => (cian_core::git::discard(&dir, &targets), "git checkout"),
+            Vcs::Svn => (cian_core::svn::revert(&dir, &targets), "svn revert"),
+        };
+        match res {
             Ok(()) => {
-                self.message = Some(format!("discarded changes to {} path(s)", targets.len()));
+                self.message = Some(format!("reverted changes to {} path(s)", targets.len()));
                 self.invalidate_git();
                 self.reload_active();
             }
-            Err(e) => self.message = Some(format!("git checkout: {}", e)),
+            Err(e) => self.message = Some(format!("{}: {}", verb, e)),
+        }
+    }
+
+    /// `svn resolve --accept working` the selection (svn only).
+    pub(crate) fn svn_resolve(&mut self) {
+        let Some((dir, kind)) = self.vcs_dir() else {
+            self.message = Some("not a version-controlled directory".into());
+            return;
+        };
+        if kind != Vcs::Svn {
+            self.message = Some("resolve is svn-only".into());
+            return;
+        }
+        let paths = self.git_targets();
+        if paths.is_empty() {
+            self.message = Some("nothing selected".into());
+            return;
+        }
+        match cian_core::svn::resolve(&dir, &paths) {
+            Ok(()) => {
+                self.message = Some(format!("resolved {} path(s)", paths.len()));
+                self.invalidate_git();
+                self.reload_active();
+            }
+            Err(e) => self.message = Some(format!("svn resolve: {}", e)),
+        }
+    }
+
+    /// `svn update` the working copy (svn only; touches the network).
+    pub(crate) fn svn_update(&mut self) {
+        let Some((dir, kind)) = self.vcs_dir() else {
+            self.message = Some("not a version-controlled directory".into());
+            return;
+        };
+        if kind != Vcs::Svn {
+            self.message = Some("update is svn-only".into());
+            return;
+        }
+        match cian_core::svn::update(&dir) {
+            Ok(()) => {
+                self.message = Some("● svn update complete".into());
+                self.invalidate_git();
+                self.reload_active();
+            }
+            Err(e) => self.message = Some(format!("svn update: {}", e)),
+        }
+    }
+
+    /// Open a text prompt for the commit message, then `svn commit` (svn only).
+    pub(crate) fn svn_commit_prompt(&mut self) {
+        let Some((_dir, kind)) = self.vcs_dir() else {
+            self.message = Some("not a version-controlled directory".into());
+            return;
+        };
+        if kind != Vcs::Svn {
+            self.message = Some("commit is svn-only here".into());
+            return;
+        }
+        let paths = self.git_targets();
+        if paths.is_empty() {
+            self.message = Some("nothing selected to commit".into());
+            return;
+        }
+        self.popup = text_input(
+            "svn commit",
+            "message:",
+            String::new(),
+            InputKind::SvnCommit { paths },
+        );
+    }
+
+    /// `svn commit -m <message>` the given paths (called when the input popup
+    /// is confirmed).
+    pub(crate) fn svn_commit(&mut self, paths: &[PathBuf], message: &str) {
+        let Some((dir, _kind)) = self.vcs_dir() else { return };
+        if paths.is_empty() {
+            self.message = Some("nothing selected to commit".into());
+            return;
+        }
+        match cian_core::svn::commit(&dir, paths, message) {
+            Ok(()) => {
+                self.message = Some(format!("● committed {} path(s)", paths.len()));
+                self.invalidate_git();
+                self.reload_active();
+            }
+            Err(e) => self.message = Some(format!("svn commit: {}", e)),
         }
     }
 
@@ -167,8 +285,8 @@ impl App {
     /// `:gitdiff` / right-click: show the selected file's working-tree changes
     /// versus HEAD, in the viewer.
     pub(crate) fn git_diff_file(&mut self) {
-        let Some(dir) = self.git_repo_dir() else {
-            self.message = Some("not a git repository".into());
+        let Some((dir, kind)) = self.vcs_dir() else {
+            self.message = Some("not a version-controlled directory".into());
             return;
         };
         let Some(entry) = self.active_pane().and_then(|p| p.selected()).filter(|e| !e.is_parent) else {
@@ -176,18 +294,22 @@ impl App {
             return;
         };
         let (path, name) = (entry.path.clone(), entry.name.clone());
-        match cian_core::git::file_diff(&dir, &path) {
-            Some(d) if !d.trim().is_empty() => self.open_text_viewer(&format!("git diff HEAD — {}", name), d),
-            Some(_) => self.message = Some(format!("{}: no changes vs HEAD", name)),
-            None => self.message = Some("git diff failed".into()),
+        let (diff, base) = match kind {
+            Vcs::Git => (cian_core::git::file_diff(&dir, &path), "HEAD"),
+            Vcs::Svn => (cian_core::svn::file_diff(&dir, &path), "BASE"),
+        };
+        match diff {
+            Some(d) if !d.trim().is_empty() => self.open_text_viewer(&format!("diff {} — {}", base, name), d),
+            Some(_) => self.message = Some(format!("{}: no changes vs {}", name, base)),
+            None => self.message = Some("diff failed".into()),
         }
     }
 
     /// `@`/`:gitlog` / right-click: the commit log — one file's history when the
-    /// cursor is on a tracked file, otherwise the whole repository.
+    /// cursor is on a tracked file, otherwise the whole repository/working copy.
     pub(crate) fn start_git_log(&mut self) {
-        let Some(dir) = self.git_repo_dir() else {
-            self.message = Some("not a git repository".into());
+        let Some((dir, kind)) = self.vcs_dir() else {
+            self.message = Some("not a version-controlled directory".into());
             return;
         };
         let file = self
@@ -195,27 +317,39 @@ impl App {
             .and_then(|p| p.selected())
             .filter(|e| !e.is_parent && !e.is_dir)
             .map(|e| (e.path.clone(), e.name.clone()));
-        let commits = cian_core::git::log(&dir, file.as_ref().map(|(p, _)| p.as_path()), 300);
+        let path_arg = file.as_ref().map(|(p, _)| p.as_path());
+        let commits = match kind {
+            Vcs::Git => cian_core::git::log(&dir, path_arg, 300),
+            Vcs::Svn => cian_core::svn::log(&dir, path_arg, 300),
+        };
         if commits.is_empty() {
             self.message = Some("no commits".into());
             return;
         }
-        let title = match &file {
-            Some((_, name)) => format!("git log — {}", name),
-            None => "git log".to_string(),
+        let vcs_name = match kind {
+            Vcs::Git => "git",
+            Vcs::Svn => "svn",
         };
-        self.popup = Popup::GitLog { title, dir, commits, cursor: 0, scroll: 0 };
+        let title = match &file {
+            Some((_, name)) => format!("{} log — {}", vcs_name, name),
+            None => format!("{} log", vcs_name),
+        };
+        self.popup = Popup::GitLog { title, dir, commits, cursor: 0, scroll: 0, vcs: kind };
     }
 
-    /// Show a commit's diff (`git show`) in the viewer.
-    pub(crate) fn git_show_commit(&mut self, hash: &str, dir: &Path) {
-        match cian_core::git::show(dir, hash) {
+    /// Show a commit's diff (`git show` / `svn diff -c`) in the viewer.
+    pub(crate) fn git_show_commit(&mut self, hash: &str, dir: &Path, vcs: Vcs) {
+        let diff = match vcs {
+            Vcs::Git => cian_core::git::show(dir, hash),
+            Vcs::Svn => cian_core::svn::show(dir, hash),
+        };
+        match diff {
             Some(s) => self.open_text_viewer(&format!("commit {}", hash), s),
-            None => self.message = Some("git show failed".into()),
+            None => self.message = Some("show failed".into()),
         }
     }
 
-    /// `B` in the viewer: toggle the git blame gutter for the viewed file.
+    /// `B` in the viewer: toggle the blame gutter (git or svn) for the file.
     pub(crate) fn toggle_viewer_blame(&mut self) {
         let path = if let Popup::Viewer { path, blame, .. } = &self.popup {
             if !blame.is_empty() {
@@ -231,14 +365,18 @@ impl App {
             return;
         };
         let Some(dir) = path.parent() else { return };
-        match cian_core::git::blame(dir, &path) {
-            Some(b) if !b.is_empty() => {
+        // Git first, else svn (matching how the change gutter is sourced).
+        let blame = cian_core::git::blame(dir, &path)
+            .filter(|b| !b.is_empty())
+            .or_else(|| cian_core::svn::blame(dir, &path).filter(|b| !b.is_empty()));
+        match blame {
+            Some(b) => {
                 if let Popup::Viewer { blame, .. } = &mut self.popup {
                     *blame = b;
                 }
                 self.message = Some(tr(self.lang, "blame on", "blame オン").into());
             }
-            _ => self.message = Some(tr(self.lang, "no blame (untracked or not a repo)", "blame不可（未追跡/非リポジトリ）").into()),
+            None => self.message = Some(tr(self.lang, "no blame (untracked or not a repo)", "blame不可（未追跡/非リポジトリ）").into()),
         }
     }
 }

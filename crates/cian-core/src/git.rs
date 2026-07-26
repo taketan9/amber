@@ -60,6 +60,18 @@ impl FileState {
             _ => GitMark::Modified,
         }
     }
+
+    /// Synthesize codes that yield `mark` — so a backend that speaks GitMark
+    /// (svn) can build a [`RepoStatus`].
+    fn from_mark(mark: GitMark) -> Self {
+        let (index, worktree) = match mark {
+            GitMark::Staged | GitMark::DirDirty => ('M', ' '),
+            GitMark::Modified => (' ', 'M'),
+            GitMark::Untracked => ('?', '?'),
+            GitMark::Conflict => ('U', 'U'),
+        };
+        FileState { index, worktree }
+    }
 }
 
 /// Everything cian shows about a repository the pane sits in.
@@ -115,6 +127,33 @@ impl RepoStatus {
             .values()
             .filter(|s| s.mark() != GitMark::Untracked)
             .count()
+    }
+
+    /// Build a status from precomputed per-file marks — used by the SVN backend,
+    /// which shares GitMark and this display type. `label` fills the "branch"
+    /// slot (e.g. `"svn r123"`). Containing directories are tainted automatically.
+    pub fn from_marks(
+        root: PathBuf,
+        label: String,
+        marks: impl IntoIterator<Item = (PathBuf, GitMark)>,
+    ) -> Self {
+        let mut files = HashMap::new();
+        let mut dirty_dirs = HashSet::new();
+        for (abs, mark) in marks {
+            let mut cur = abs.parent();
+            while let Some(d) = cur {
+                if !d.starts_with(&root) && d != root {
+                    break;
+                }
+                dirty_dirs.insert(norm(d));
+                if d == root {
+                    break;
+                }
+                cur = d.parent();
+            }
+            files.insert(norm(&abs), FileState::from_mark(mark));
+        }
+        RepoStatus { root, branch: label, ahead: 0, behind: 0, files, dirty_dirs }
     }
 }
 
@@ -400,8 +439,18 @@ pub fn line_changes(dir: &Path, file: &Path) -> Option<std::collections::HashMap
     };
     let head_text = String::from_utf8_lossy(&head_bytes);
     let head_lines: Vec<String> = head_text.lines().map(|s| s.to_string()).collect();
+    changes_from_lines(&head_lines, &work_lines, &mut map);
+    Some(map)
+}
 
-    let d = crate::diff::diff_lines(&head_lines, &work_lines);
+/// Diff `base` against `work` and record each working line's change into `map`.
+/// Shared by the git and svn gutters (they differ only in how `base` is fetched).
+pub(crate) fn changes_from_lines(
+    base: &[String],
+    work: &[String],
+    map: &mut std::collections::HashMap<usize, LineChange>,
+) {
+    let d = crate::diff::diff_lines(base, work);
     let mut pending_del = false;
     for row in &d.rows {
         use crate::diff::Row;
@@ -425,7 +474,6 @@ pub fn line_changes(dir: &Path, file: &Path) -> Option<std::collections::HashMap
             Row::Skipped { .. } => {}
         }
     }
-    Some(map)
 }
 
 /// A repo-relative, forward-slashed path for `file` under `root`, or `None` if

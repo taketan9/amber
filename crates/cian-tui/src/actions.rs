@@ -497,11 +497,15 @@ impl App {
         }
         match cian_core::viewer::view_file(path) {
             Ok(view) => {
-                // The git change gutter: which lines differ from HEAD. Best
-                // effort — empty when the file is not in a repo or is unchanged.
+                // The change gutter: which lines differ from the VCS base. Best
+                // effort — git first, then svn; empty when the file is not
+                // version-controlled or is unchanged.
                 let git_lines = path
                     .parent()
-                    .and_then(|dir| cian_core::git::line_changes(dir, path))
+                    .and_then(|dir| {
+                        cian_core::git::line_changes(dir, path)
+                            .or_else(|| cian_core::svn::line_changes(dir, path))
+                    })
                     .unwrap_or_default();
                 let last = view.lines.len().saturating_sub(1);
                 let line = line0.min(last);
@@ -1875,6 +1879,15 @@ impl App {
                     return Ok(());
                 }
                 self.run_extract(archive.clone(), members.clone(), dest.clone(), Some(name));
+                return Ok(());
+            }
+            InputKind::SvnCommit { paths } => {
+                if name.is_empty() {
+                    self.message = Some("commit cancelled (empty message)".into());
+                    return Ok(());
+                }
+                let paths = paths.clone();
+                self.svn_commit(&paths, &name);
                 return Ok(());
             }
             InputKind::LogDir => {

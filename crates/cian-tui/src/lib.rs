@@ -246,6 +246,8 @@ enum Popup {
         commits: Vec<cian_core::git::Commit>,
         cursor: usize,
         scroll: usize,
+        /// Which VCS produced the log — decides how Enter shows a commit.
+        vcs: Vcs,
     },
     /// An image shown as half-block cells (works in any 24-bit terminal). The
     /// decoded grid is cached for the size it was last drawn at; a resize or a
@@ -568,6 +570,22 @@ enum MenuItem {
     GitHistory,
     /// The selected file's working-tree diff vs HEAD.
     GitDiff,
+    /// A submenu grouping the svn actions (add / revert / update / commit …).
+    SvnMenu,
+    /// `svn add` the selection.
+    SvnAdd,
+    /// `svn revert` the selection (discard local changes).
+    SvnRevert,
+    /// `svn resolve --accept working` the selection.
+    SvnResolve,
+    /// The selected file's working-copy diff vs BASE.
+    SvnDiff,
+    /// The commit log (working copy, or the selected file's history).
+    SvnLog,
+    /// `svn update` the working copy.
+    SvnUpdate,
+    /// `svn commit` the selection (prompts for a message).
+    SvnCommit,
     /// Open the shortcuts / bookmarks menu (the `s` key).
     Shortcuts,
     /// A submenu grouping the compress-to-archive actions.
@@ -619,6 +637,7 @@ impl MenuItem {
                 | MenuItem::SendMenu
                 | MenuItem::WindowMenu
                 | MenuItem::GitMenu
+                | MenuItem::SvnMenu
                 | MenuItem::CompressMenu
         )
     }
@@ -674,6 +693,14 @@ impl MenuItem {
             MenuItem::GitDiscard => tr(lang, "Discard changes  (git checkout)", "変更を破棄  (git checkout)"),
             MenuItem::GitHistory => tr(lang, "History / log  (git log)", "履歴 / ログ  (git log)"),
             MenuItem::GitDiff => tr(lang, "Diff vs HEAD  (git diff)", "HEADとの差分  (git diff)"),
+            MenuItem::SvnMenu => tr(lang, "SVN ▸", "SVN ▸"),
+            MenuItem::SvnAdd => tr(lang, "Add  (svn add)", "追加  (svn add)"),
+            MenuItem::SvnRevert => tr(lang, "Revert changes  (svn revert)", "変更を破棄  (svn revert)"),
+            MenuItem::SvnResolve => tr(lang, "Resolve conflict  (svn resolve)", "競合を解決  (svn resolve)"),
+            MenuItem::SvnDiff => tr(lang, "Diff vs BASE  (svn diff)", "BASEとの差分  (svn diff)"),
+            MenuItem::SvnLog => tr(lang, "History / log  (svn log)", "履歴 / ログ  (svn log)"),
+            MenuItem::SvnUpdate => tr(lang, "Update  (svn update)", "更新  (svn update)"),
+            MenuItem::SvnCommit => tr(lang, "Commit…  (svn commit)", "コミット…  (svn commit)"),
             MenuItem::Shortcuts => tr(lang, "Shortcuts  (s)", "ショートカット  (s)"),
             MenuItem::AiMenu => tr(lang, "AI ▸", "AI ▸"),
             MenuItem::SendMenu => tr(lang, "Transfer ▸", "転送 ▸"),
@@ -973,6 +1000,8 @@ enum InputKind {
     CompressName { kind: CompressKind, sources: Vec<PathBuf> },
     /// The password for an encrypted zip about to be extracted. Rendered masked.
     ExtractPassword { archive: PathBuf, members: Vec<String>, dest: PathBuf },
+    /// The log message for an `svn commit` of the given paths.
+    SvnCommit { paths: Vec<PathBuf> },
 }
 
 /// The archive format chosen from the right-click "Compress" submenu.
@@ -1119,9 +1148,19 @@ impl ShortcutStore {
     }
 }
 
-/// A pane's cached git status and the directory it was computed for.
+/// Which version-control system a pane's directory belongs to. Both report the
+/// same [`cian_core::git::RepoStatus`] display type, so the UI is identical.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Vcs {
+    Git,
+    Svn,
+}
+
+/// A pane's cached VCS status and the directory it was computed for.
 struct GitState {
     cwd: PathBuf,
+    /// Which VCS the status came from (`None` when the directory is in neither).
+    kind: Option<Vcs>,
     status: Option<cian_core::git::RepoStatus>,
 }
 
@@ -2544,9 +2583,12 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry(":attr", None, "attributes;  :chmod 644,  :readonly on|off", "属性；  :chmod 644,  :readonly on|off"),
                 entry(":hash", None, "checksum;  :hash md5  /  :hash sha256", "チェックサム；  :hash md5  /  :hash sha256"),
                 entry(":stage / :unstage", None, "git add / git reset the selection (in a repo)", "選択を git add / git reset（リポジトリ内）"),
-                entry(":discard", None, "git checkout -- : throw away worktree changes", "git checkout -- ：作業ツリーの変更を破棄"),
-                entry(":gitlog", None, "commit log / a file's history (also right-click Git ▸)", "コミットログ／ファイル履歴（右クリック Git ▸ でも）"),
-                entry(":gitdiff", None, "the selected file's diff vs HEAD (also right-click)", "選択ファイルの HEAD との差分（右クリックでも）"),
+                entry(":discard", None, "git/svn: throw away worktree changes (git checkout / svn revert)", "作業ツリーの変更を破棄（git checkout / svn revert）"),
+                entry(":gitlog", None, "commit log / a file's history — git or svn (also right-click)", "コミットログ／ファイル履歴 — git・svn（右クリックでも）"),
+                entry(":gitdiff", None, "the selected file's diff vs HEAD/BASE — git or svn", "選択ファイルの HEAD／BASE との差分 — git・svn"),
+                entry(":svnupdate", None, "svn update the working copy (also right-click SVN ▸)", "svn update で作業コピーを更新（右クリック SVN ▸ でも）"),
+                entry(":svncommit", None, "svn commit the selection (prompts for a message)", "選択を svn commit（メッセージ入力）"),
+                entry(":svnresolve", None, "svn resolve --accept working (mark conflicts resolved)", "svn resolve --accept working（競合を解決）"),
                 entry("right-click", None, "upload/download to a configured host (SFTP or SCP)", "設定したホストへアップ／ダウンロード（SFTP/SCP）"),
                 entry("M / Shift+Enter", Some(Menu), "context menu for the entry (also :menu)", "エントリのコンテキストメニュー（:menu でも）"),
             ],

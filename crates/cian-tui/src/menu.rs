@@ -77,9 +77,11 @@ impl App {
                 items.push(MenuItem::CompressMenu);
             }
             items.push(MenuItem::HiddenToggle);
-            // Git actions, only when this pane sits in a repository.
-            if self.git_for(self.focused).is_some() {
-                items.push(MenuItem::GitMenu);
+            // VCS actions, only when this pane sits in a repo / working copy.
+            match self.vcs_kind() {
+                Some(Vcs::Git) => items.push(MenuItem::GitMenu),
+                Some(Vcs::Svn) => items.push(MenuItem::SvnMenu),
+                None => {}
             }
             // The bookmarks menu, reachable by mouse as well as the `s` key.
             items.push(MenuItem::Shortcuts);
@@ -133,6 +135,16 @@ impl App {
                 MenuItem::GitDiscard,
                 MenuItem::GitDiff,
                 MenuItem::GitHistory,
+                MenuItem::Back,
+            ]),
+            MenuItem::SvnMenu => Some(vec![
+                MenuItem::SvnAdd,
+                MenuItem::SvnRevert,
+                MenuItem::SvnResolve,
+                MenuItem::SvnDiff,
+                MenuItem::SvnLog,
+                MenuItem::SvnUpdate,
+                MenuItem::SvnCommit,
                 MenuItem::Back,
             ]),
             MenuItem::WindowMenu => {
@@ -270,7 +282,7 @@ impl App {
         self.menu_stack.clear();
         self.popup = Popup::None;
         match item {
-            MenuItem::AiMenu | MenuItem::SendMenu | MenuItem::WindowMenu | MenuItem::GitMenu | MenuItem::CompressMenu | MenuItem::Back => {} // handled above
+            MenuItem::AiMenu | MenuItem::SendMenu | MenuItem::WindowMenu | MenuItem::GitMenu | MenuItem::SvnMenu | MenuItem::CompressMenu | MenuItem::Back => {} // handled above
             MenuItem::ShellSplitLR => {
                 let cwd = self.shell_cwd();
                 self.shell.split_active(&cwd, SplitDir::LeftRight);
@@ -341,6 +353,13 @@ impl App {
             MenuItem::GitDiscard => self.git_discard_prompt(),
             MenuItem::GitHistory => self.start_git_log(),
             MenuItem::GitDiff => self.git_diff_file(),
+            MenuItem::SvnAdd => self.git_stage(),
+            MenuItem::SvnRevert => self.git_discard_prompt(),
+            MenuItem::SvnResolve => self.svn_resolve(),
+            MenuItem::SvnDiff => self.git_diff_file(),
+            MenuItem::SvnLog => self.start_git_log(),
+            MenuItem::SvnUpdate => self.svn_update(),
+            MenuItem::SvnCommit => self.svn_commit_prompt(),
             MenuItem::Shortcuts => self.start_shortcuts(),
             MenuItem::Lang => {
                 // Flip the interface language; every localized string reads

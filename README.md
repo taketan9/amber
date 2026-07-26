@@ -397,6 +397,30 @@ can draft a commit message from the staged diff (see below). cian shells out to
 the `git` on your PATH — there is no library dependency to keep the binary
 self-contained.
 
+## Subversion (SVN)
+
+Many shops manage code in Subversion. cian treats an svn working copy exactly
+like a git repo: the **same status badges** (`●` add/delete/replace, `✚`
+modified, `?` unversioned, `‼` conflict, `~` on a folder with changes below), the
+**same change gutter** in the F3 viewer (working file versus `BASE`), and the
+status line shows `svn r<rev>` where git shows its branch. It is detected
+automatically — a directory is at most one of git or svn — so the commands and
+the right-click menu just do the right thing.
+
+- `:stage` (`:add`) — `svn add` the selection.
+- `:discard` (`:revert`) — `svn revert` (confirms first).
+- `:gitdiff` — the file's changes versus `BASE`, in the viewer.
+- `:gitlog` — the log (a file's history, or the whole working copy); `Enter` on a
+  revision shows it as a diff.
+- `B` in the viewer toggles a **blame** gutter (`svn blame`).
+- `:svnupdate` — `svn update` the working copy.
+- `:svncommit` — `svn commit` the selection; it prompts for a message.
+- `:svnresolve` — `svn resolve --accept working` to clear a conflict.
+
+The same actions live under right-click **SVN ▸** (shown only in a working copy).
+`svn update` and `svn commit` touch the network. cian shells out to the `svn` on
+your PATH; if it is not installed, working copies simply show no VCS decorations.
+
 ## Going to a path
 
 `z` (or `:cd`) prompts for a path, seeded with the current directory. A
