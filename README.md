@@ -737,10 +737,12 @@ cian.snippets{
 }
 ```
 
-**`!`** (the shell "bang"), `:snip`, or right-click **Snippets → shell** (the top
-entry) opens the launcher; type to filter, Enter sends the chosen line to the
-active shell. A `cmd` may hold several lines (a Lua `[[ ]]` string is tidiest) —
-with `enter = true` they run in sequence. `enter` (default true) runs it
+**Ctrl+Shift+Enter** (it works even while the shell pane is focused, since cian
+sees the key before the terminal does), `:snip`, or right-click **Snippets →
+shell** (the top entry) opens the launcher; type to filter, Enter sends the
+chosen line to the active shell. A `cmd` may hold several lines (a Lua `[[ ]]`
+string is tidiest) — with `enter = true` they run in sequence. `enter`
+(default true) runs it
 immediately, or `false` types it at the prompt for you to review and run;
 `confirm = true` asks first, for anything destructive. A tag in the list shows
 which each is — `↵` run, `…` type-only, `?` confirm-first.

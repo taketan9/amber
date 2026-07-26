@@ -121,6 +121,20 @@ impl App {
             self.resize_split(key.code);
             return Ok(());
         }
+        // Ctrl+Shift+Enter opens the snippet launcher from anywhere — crucially
+        // while the SHELL pane is focused, where a plain key would just be typed
+        // into the terminal. cian sees the keystroke before the PTY does, so
+        // this global intercept works in either pane. (Needs a terminal that
+        // reports the modifiers with Enter — the Windows console and kitty-
+        // protocol terminals do; `:snip` and the top of the right-click menu
+        // are the fallbacks elsewhere.)
+        if key.code == KeyCode::Enter
+            && key.modifiers.contains(KeyModifiers::CONTROL)
+            && key.modifiers.contains(KeyModifiers::SHIFT)
+        {
+            self.start_snippets();
+            return Ok(());
+        }
         // F12 toggles full-window zoom of the focused surface; Shift+F12 zooms
         // only the active split pane within the shell. While a full-screen app
         // runs in the shell, both are passed through to it.
@@ -1410,10 +1424,6 @@ impl App {
             (false, false, KeyCode::Char('s')) => self.start_shortcuts(),
             // `@` — vim's play-a-macro key — opens the macro launcher.
             (false, _, KeyCode::Char('@')) => self.start_macros(),
-            // `!` — the shell "bang" — opens the snippet launcher. A reliable
-            // single key everywhere (Ctrl+Shift+Enter is already taken by
-            // open-in-other-pane, and modifier+Enter needs kitty keyboard).
-            (false, _, KeyCode::Char('!')) => self.start_snippets(),
             // navigation: gg/G + Shift+U/D for fast cursor moves
             (false, false, KeyCode::Char('g')) => { self.pending_g = true; }
             (false, _, KeyCode::Char('G')) => {
@@ -1478,9 +1488,11 @@ impl App {
                     if is_dir { p.enter_selected()?; }
                 }
             }
-            // Ctrl+Enter / Ctrl+Shift+Enter need kitty keyboard protocol to be distinguished.
+            // Ctrl+Enter opens the selected dir (else this cwd) in the other
+            // pane, same tab. (Ctrl+Shift+Enter is the global snippet launcher;
+            // `O` pushes this pane's directory to the other one.) Needs a
+            // terminal that reports the modifier with Enter.
             (true, false, KeyCode::Enter) => { self.open_in_other_pane(false)?; }
-            (true, true, KeyCode::Enter) => { self.open_in_other_pane(true)?; }
             // `o` pulls the other pane's directory into this one; `O` pushes
             // this pane's directory onto the other. (Open-into-other-pane lives
             // on Ctrl+Enter above.)

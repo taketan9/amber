@@ -4376,10 +4376,19 @@
         ];
         let mut app = App::new(p.clone(), p, cfg).unwrap();
 
-        // The `!` key opens it from a file pane.
-        app.handle_key(code(KeyCode::Char('!'))).unwrap();
-        assert!(matches!(app.popup, Popup::Snippets { .. }), "! opens the launcher");
+        // Ctrl+Shift+Enter opens it from a file pane...
+        let cse = KeyEvent::new(KeyCode::Enter, KeyModifiers::CONTROL | KeyModifiers::SHIFT);
+        app.handle_key(cse).unwrap();
+        assert!(matches!(app.popup, Popup::Snippets { .. }), "Ctrl+Shift+Enter opens the launcher");
         app.popup = Popup::None;
+
+        // ...and also while the shell pane is focused (the whole point — a plain
+        // key there would go to the terminal instead).
+        app.focused = FocusedPane::Shell;
+        app.handle_key(cse).unwrap();
+        assert!(matches!(app.popup, Popup::Snippets { .. }), "opens from the shell too");
+        app.popup = Popup::None;
+        app.focused = FocusedPane::Left;
 
         // Opening lists all; typing filters by name/command.
         app.start_snippets();

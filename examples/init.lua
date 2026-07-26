@@ -302,8 +302,8 @@
 -- log tails, HULFT jobs. Open it with `:snip` (or right-click "Snippets →
 -- shell"), type to filter, Enter to send to the active shell pane.
 --
--- Open it with `!` (the shell "bang"), `:snip`, or right-click "Snippets →
--- shell" (top of the menu).
+-- Open it with Ctrl+Shift+Enter (works even while the shell pane is focused),
+-- `:snip`, or right-click "Snippets → shell" (top of the menu).
 --
 -- Each entry: `cmd` (required, the text sent), `name` (label; defaults to cmd),
 -- `enter` (default true = run it immediately; false = type it for review), and
