@@ -1364,6 +1364,8 @@ impl App {
             }
             (false, false, KeyCode::Char('m')) => self.start_transfer(PendingOp::Move),
             (false, false, KeyCode::Char('d')) => self.start_delete(),
+            // Undo the last rename / create / move (also `:undo`).
+            (false, false, KeyCode::Char('u')) => self.undo_last(),
             (false, false, KeyCode::Char('r')) => self.start_rename(),
             (false, false, KeyCode::Char('a')) => self.start_new_file(),
             (false, true, KeyCode::Char('A')) => self.start_new_dir(),

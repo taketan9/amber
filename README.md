@@ -148,6 +148,11 @@ writable folder.
 a mistake is recoverable. The confirmation popup offers `a` to delete
 permanently instead.
 
+**`u`** (or `:undo`) reverses the last rename, file/folder creation, or move
+between panes — the common "oops" that isn't already covered by the trash. It
+walks a small stack back, so a few of them undo in turn; a move only undoes if
+it completed cleanly (a partial one with conflicts is left as-is).
+
 ## Comparing files and directories
 
 `=` (or `:diff`) compares the left pane's file against the right pane's, side by
@@ -559,6 +564,13 @@ same directory as the cian executable, that directory wins over
 (bookmarks, macros). Drop the binary and its `*.lua` on a USB stick and the
 whole setup travels together, leaving no trace on the host. With nothing beside
 the executable, cian behaves exactly as before, from `~/.config/cian`.
+
+**Session.** Started with no path argument, cian reopens the two directories it
+was showing last time (and which pane had focus). This is remembered per user in
+`session.json` next to `init.lua` — portable-aware, so it travels on the stick
+too — and holds nothing but the two paths. Passing a directory on the command
+line overrides it; a remembered directory that no longer exists is quietly
+dropped.
 
 `:reload` re-reads `init.lua` without restarting — keymaps, options, SSH hosts
 and open handlers apply immediately. The color theme and border style are

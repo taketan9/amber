@@ -4257,6 +4257,54 @@
     }
 
     #[test]
+    fn undo_reverses_a_rename() {
+        let (d, mut app) = app_with(&["old.txt"]);
+        app.active_pane_mut().unwrap().cursor =
+            app.active_pane().unwrap().entries.iter().position(|e| e.name == "old.txt").unwrap();
+        app.start_rename();
+        if let Popup::TextInput { buffer, .. } = &mut app.popup {
+            buffer.clear();
+            buffer.push_str("new.txt");
+        } else {
+            panic!("no rename prompt");
+        }
+        app.finish_text_input().unwrap();
+        assert!(d.path().join("new.txt").exists() && !d.path().join("old.txt").exists());
+
+        app.undo_last();
+        assert!(d.path().join("old.txt").exists(), "rename undone");
+        assert!(!d.path().join("new.txt").exists());
+        // Nothing left to undo.
+        app.undo_last();
+        assert!(app.message.as_deref().unwrap_or("").contains("undo"));
+    }
+
+    #[test]
+    fn undo_reverses_a_move_between_panes() {
+        let src = tempfile::tempdir().unwrap();
+        let dst = tempfile::tempdir().unwrap();
+        std::fs::write(src.path().join("f.txt"), b"data").unwrap();
+        let mut app = App::new(
+            src.path().to_path_buf(),
+            dst.path().to_path_buf(),
+            cian_lua::Config::default(),
+        )
+        .unwrap();
+        app.active_pane_mut().unwrap().cursor =
+            app.active_pane().unwrap().entries.iter().position(|e| e.name == "f.txt").unwrap();
+
+        app.start_transfer(PendingOp::Move);
+        assert!(matches!(app.popup, Popup::ConfirmTransfer { .. }), "move confirm");
+        app.finish_transfer(Conflict::Overwrite).unwrap();
+        drain_op_job(&mut app);
+        assert!(dst.path().join("f.txt").exists() && !src.path().join("f.txt").exists(), "moved");
+
+        app.undo_last();
+        assert!(src.path().join("f.txt").exists(), "move undone");
+        assert!(!dst.path().join("f.txt").exists());
+    }
+
+    #[test]
     fn the_viewer_edits_and_saves_a_text_file() {
         let d = tempfile::tempdir().unwrap();
         let file = d.path().join("note.txt");

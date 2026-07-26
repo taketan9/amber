@@ -1447,6 +1447,7 @@ impl App {
             label,
             latest: cian_core::progress::Progress::default(),
             started: Instant::now(),
+            undo: None,
         });
         self.popup = Popup::None;
     }
@@ -1479,7 +1480,15 @@ impl App {
         if let Some(report) = finished {
             let cancelled = self.op_job.as_ref().map(|j| j.cancel.load(Ordering::Relaxed));
             let label = self.op_job.as_ref().map(|j| j.label).unwrap_or("");
+            let undo = self.op_job.as_mut().and_then(|j| j.undo.take());
             self.op_job = None;
+            // Record the undo only when the op finished cleanly (a partial move
+            // with conflicts/errors would make undo ambiguous).
+            if cancelled == Some(false) && report.errors.is_empty() {
+                if let Some(a) = undo {
+                    self.record_undo(a);
+                }
+            }
             self.reload_both();
             if let Some(p) = self.active_pane_mut() {
                 p.clear_marks();
@@ -1561,6 +1570,72 @@ impl App {
         }
     }
 
+    /// Remember a reversible operation for `u`. The stack is capped so a long
+    /// session cannot grow it without bound.
+    pub(crate) fn record_undo(&mut self, action: UndoAction) {
+        const UNDO_CAP: usize = 64;
+        self.undo_stack.push(action);
+        if self.undo_stack.len() > UNDO_CAP {
+            self.undo_stack.remove(0);
+        }
+    }
+
+    /// `u` — reverse the last recorded operation (rename / create / move).
+    pub(crate) fn undo_last(&mut self) {
+        let Some(action) = self.undo_stack.pop() else {
+            self.message = Some(tr(self.lang, "nothing to undo", "元に戻す操作はありません").into());
+            return;
+        };
+        let msg = match action {
+            UndoAction::Rename { from, to } => {
+                if !to.exists() {
+                    format!("cannot undo rename: {} is gone", to.display())
+                } else if from.exists() {
+                    format!("cannot undo rename: {} already exists", from.display())
+                } else {
+                    match std::fs::rename(&to, &from) {
+                        Ok(()) => format!("undo: renamed back to {}", from.display()),
+                        Err(e) => format!("undo failed: {}", e),
+                    }
+                }
+            }
+            UndoAction::Created { path } => {
+                let r = if path.is_dir() {
+                    std::fs::remove_dir(&path) // only if empty — a filled dir stays
+                } else {
+                    std::fs::remove_file(&path)
+                };
+                match r {
+                    Ok(()) => format!("undo: removed {}", path.display()),
+                    Err(e) => format!("undo failed: {}", e),
+                }
+            }
+            UndoAction::Moved { pairs } => {
+                let (mut ok, mut fail) = (0usize, 0usize);
+                for (now, back) in pairs {
+                    if !now.exists() || back.exists() {
+                        fail += 1;
+                        continue;
+                    }
+                    if let Some(parent) = back.parent() {
+                        let _ = std::fs::create_dir_all(parent);
+                    }
+                    match std::fs::rename(&now, &back) {
+                        Ok(()) => ok += 1,
+                        Err(_) => fail += 1,
+                    }
+                }
+                if fail == 0 {
+                    format!("undo: moved {} back", ok)
+                } else {
+                    format!("undo: moved {} back, {} could not be undone", ok, fail)
+                }
+            }
+        };
+        self.reload_both();
+        self.message = Some(msg);
+    }
+
     pub(crate) fn finish_transfer(&mut self, conflict: Conflict) -> Result<()> {
         let popup = std::mem::replace(&mut self.popup, Popup::None);
         let Popup::ConfirmTransfer { op, targets, dest } = popup else { return Ok(()) };
@@ -1573,10 +1648,22 @@ impl App {
         // Remembered so a permission failure can offer an elevated retry; the
         // op-completion handler clears this unless it actually hit that wall.
         self.pending_elevation = Some((op, targets.clone(), dest.clone()));
+        // A move can be undone: each target ends up at dest/<name>, and undo
+        // moves it back. (Copies are additive, so they are not tracked.)
+        let undo = (op == PendingOp::Move).then(|| {
+            let pairs = targets
+                .iter()
+                .filter_map(|t| t.file_name().map(|n| (dest.join(n), t.clone())))
+                .collect();
+            UndoAction::Moved { pairs }
+        });
         self.start_op(label, move |ctl| match op {
             PendingOp::Copy => cian_core::progress::copy_many(&targets, &dest, conflict, ctl),
             PendingOp::Move => cian_core::progress::move_many(&targets, &dest, conflict, ctl),
         });
+        if let Some(job) = self.op_job.as_mut() {
+            job.undo = undo;
+        }
         Ok(())
     }
 
@@ -1658,15 +1745,27 @@ impl App {
             return Ok(());
         }
         let result = match &kind {
-            InputKind::Rename { original } => {
-                ops::rename_in_place(original, &name).map(|p| format!("renamed: {}", p.display()))
-            }
-            InputKind::NewFile { parent } => {
-                ops::create_file(parent, &name).map(|p| format!("created: {}", p.display()))
-            }
-            InputKind::NewDir { parent } => {
-                ops::create_dir(parent, &name).map(|p| format!("mkdir: {}", p.display()))
-            }
+            InputKind::Rename { original } => match ops::rename_in_place(original, &name) {
+                Ok(p) => {
+                    self.record_undo(UndoAction::Rename { from: original.clone(), to: p.clone() });
+                    Ok(format!("renamed: {}", p.display()))
+                }
+                Err(e) => Err(e),
+            },
+            InputKind::NewFile { parent } => match ops::create_file(parent, &name) {
+                Ok(p) => {
+                    self.record_undo(UndoAction::Created { path: p.clone() });
+                    Ok(format!("created: {}", p.display()))
+                }
+                Err(e) => Err(e),
+            },
+            InputKind::NewDir { parent } => match ops::create_dir(parent, &name) {
+                Ok(p) => {
+                    self.record_undo(UndoAction::Created { path: p.clone() });
+                    Ok(format!("mkdir: {}", p.display()))
+                }
+                Err(e) => Err(e),
+            },
             InputKind::JumpPath => return self.finish_jump_path(&name),
             InputKind::FindRecursive => {
                 self.start_find(&name, cian_core::search::Mode::Name);

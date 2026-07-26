@@ -47,6 +47,7 @@ mod actions;
 mod count;
 mod edit;
 mod macro_run;
+mod session;
 mod mouse;
 mod menu;
 mod keys;
@@ -716,6 +717,20 @@ struct OpJob {
     label: &'static str,
     latest: cian_core::progress::Progress,
     started: Instant,
+    /// Pushed onto the undo stack if the op finishes cleanly (set for moves).
+    undo: Option<UndoAction>,
+}
+
+/// A reversible file operation, for the `u` undo stack. Deletes are excluded —
+/// they go to the OS trash, which has its own restore.
+#[derive(Debug, Clone)]
+enum UndoAction {
+    /// Undo by renaming `to` back to `from`.
+    Rename { from: PathBuf, to: PathBuf },
+    /// Undo by removing what was just created.
+    Created { path: PathBuf },
+    /// Undo by moving each `.0` (where it is now) back to `.1` (where it was).
+    Moved { pairs: Vec<(PathBuf, PathBuf)> },
 }
 
 enum OpMsg {
@@ -1382,6 +1397,8 @@ pub struct App {
     /// A file the user asked to edit; the main loop suspends the TUI, runs the
     /// external editor, and restores. See [`crate::edit`].
     pending_edit: Option<edit::PendingEdit>,
+    /// Reversible operations, newest last; `u` undoes the last one.
+    undo_stack: Vec<UndoAction>,
     pending_g: bool,
     /// When true, only the focused surface is drawn, filling the window.
     pub zoomed: bool,
@@ -1502,6 +1519,7 @@ impl App {
             count_opts,
             count_job: None,
             pending_edit: None,
+            undo_stack: Vec::new(),
             pending_g: false,
             zoomed: false,
             debug_keys: std::env::var("CIAN_DEBUG_KEYS").is_ok(),
@@ -2455,6 +2473,7 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry("  a", None, "  in visual: select all (or gg v G)", "  ビジュアル中：全選択（gg v G でも）"),
                 entry("  gg / G", None, "  in visual: extend to top / bottom", "  ビジュアル中：先頭／末尾まで伸ばす"),
                 entry("V", Some(InvertMarks), "invert all marks", "全マークを反転"),
+                entry("u", None, "undo the last rename / create / move (also :undo)", "直前のリネーム／作成／移動を取り消し（:undo でも）"),
                 entry("y, c", Some(Copy), "copy to opposite pane", "反対ペインへコピー"),
                 entry("m", Some(Move), "move to opposite pane", "反対ペインへ移動"),
                 entry("d", Some(Delete), "delete (to trash)", "削除（ゴミ箱へ）"),
@@ -2728,10 +2747,20 @@ pub fn run(left: Option<PathBuf>, right: Option<PathBuf>, startup: StartupMacro)
     // Load user config (never fails; problems are reported below).
     let config = cian_lua::load();
 
-    // Fill in either pane not given a path on the command line.
+    // With no paths on the command line, pick up where the last session left
+    // off; an explicit path always wins over the remembered one.
+    let session = if left.is_none() && right.is_none() {
+        session::restore()
+    } else {
+        None
+    };
     let fallback = default_home(&config);
-    let left = left.unwrap_or_else(|| fallback.clone());
-    let right = right.unwrap_or(fallback);
+    let left = left
+        .or_else(|| session.as_ref().and_then(|s| s.left_dir()))
+        .unwrap_or_else(|| fallback.clone());
+    let right = right
+        .or_else(|| session.as_ref().and_then(|s| s.right_dir()))
+        .unwrap_or(fallback);
 
     // Resolve and install the color theme before any drawing happens.
     let theme_errors = theme::install(&config.theme, config.options.borders.as_deref());
@@ -2748,6 +2777,10 @@ pub fn run(left: Option<PathBuf>, right: Option<PathBuf>, startup: StartupMacro)
     startup_errors.extend(terminal_advice());
 
     let mut app = App::new(left, right, config)?;
+    // Restore which pane had focus, if a session set it.
+    if session.as_ref().map(|s| s.focused_right()).unwrap_or(false) {
+        app.focus(FocusedPane::Right);
+    }
     if !startup_errors.is_empty() {
         let mut lines = vec!["config loaded with issues:".to_string(), String::new()];
         let total = startup_errors.len();
@@ -2796,6 +2829,9 @@ pub fn run(left: Option<PathBuf>, right: Option<PathBuf>, startup: StartupMacro)
     let mut terminal = Terminal::new(backend)?;
 
     let result = run_loop(&mut terminal, &mut app);
+
+    // Remember where the panes were for next launch.
+    app.save_session();
 
     if kbd_enhanced {
         let _ = execute!(terminal.backend_mut(), PopKeyboardEnhancementFlags);
