@@ -60,6 +60,17 @@ pub fn is_archive(path: &Path) -> bool {
     kind(path).is_some()
 }
 
+/// True when `path` is a zip with at least one encrypted member — so the caller
+/// knows to ask for a password before extracting. (tar has no encryption.)
+pub fn zip_needs_password(path: &Path) -> bool {
+    if kind(path) != Some(Kind::Zip) {
+        return false;
+    }
+    let Ok(f) = fs::File::open(path) else { return false };
+    let Ok(mut zip) = zip::ZipArchive::new(f) else { return false };
+    (0..zip.len()).any(|i| zip.by_index_raw(i).map(|e| e.encrypted() && !e.is_dir()).unwrap_or(false))
+}
+
 /// A reader over a tarball, transparently gunzipped when `gz`.
 fn tar_reader(path: &Path, gz: bool) -> Result<Box<dyn Read>> {
     let f = fs::File::open(path).with_context(|| format!("open {}", path.display()))?;
@@ -86,7 +97,10 @@ fn list_zip(path: &Path) -> Result<Vec<Member>> {
         .with_context(|| format!("not a readable zip: {}", path.display()))?;
     let mut out = Vec::with_capacity(zip.len());
     for i in 0..zip.len() {
-        let e = zip.by_index(i).with_context(|| format!("entry {} of {}", i, path.display()))?;
+        // `by_index_raw` reads the entry's metadata without decrypting it, so a
+        // password-protected zip still lists its members (names and sizes live
+        // in the central directory, not behind the password).
+        let e = zip.by_index_raw(i).with_context(|| format!("entry {} of {}", i, path.display()))?;
         out.push(Member {
             name: e.name().to_string(),
             is_dir: e.is_dir(),
@@ -147,12 +161,19 @@ fn safe_join(dest: &Path, name: &str) -> Option<PathBuf> {
     }
 }
 
-/// Extract `members` — or all of them, if empty — into `dest`.
-pub fn extract(archive: &Path, members: &[String], dest: &Path, ctl: &mut Ctl) -> OpReport {
+/// Extract `members` — or all of them, if empty — into `dest`. `password` is
+/// used for encrypted zip members (ignored for tar, which has no encryption).
+pub fn extract(
+    archive: &Path,
+    members: &[String],
+    dest: &Path,
+    password: Option<&str>,
+    ctl: &mut Ctl,
+) -> OpReport {
     match kind(archive) {
         Some(Kind::Tar) => extract_tar(archive, false, members, dest, ctl),
         Some(Kind::TarGz) => extract_tar(archive, true, members, dest, ctl),
-        _ => extract_zip(archive, members, dest, ctl),
+        _ => extract_zip(archive, members, dest, password, ctl),
     }
 }
 
@@ -273,7 +294,13 @@ fn extract_tar(
     report
 }
 
-fn extract_zip(archive: &Path, members: &[String], dest: &Path, ctl: &mut Ctl) -> OpReport {
+fn extract_zip(
+    archive: &Path,
+    members: &[String],
+    dest: &Path,
+    password: Option<&str>,
+    ctl: &mut Ctl,
+) -> OpReport {
     let mut report = OpReport::default();
     let f = match fs::File::open(archive) {
         Ok(f) => f,
@@ -290,17 +317,19 @@ fn extract_zip(archive: &Path, members: &[String], dest: &Path, ctl: &mut Ctl) -
         }
     };
 
+    // Metadata reads use `by_index_raw` so an encrypted zip can still be
+    // filtered and sized without the password.
     let wanted: Vec<usize> = (0..zip.len())
         .filter(|i| {
             members.is_empty()
-                || zip.by_index(*i).map(|e| members.iter().any(|m| m == e.name())).unwrap_or(false)
+                || zip.by_index_raw(*i).map(|e| members.iter().any(|m| m == e.name())).unwrap_or(false)
         })
         .collect();
     let mut p = Progress {
         files_total: wanted.len(),
         bytes_total: wanted
             .iter()
-            .filter_map(|i| zip.by_index(*i).ok().map(|e| e.size()))
+            .filter_map(|i| zip.by_index_raw(*i).ok().map(|e| e.size()))
             .sum(),
         ..Default::default()
     };
@@ -309,7 +338,21 @@ fn extract_zip(archive: &Path, members: &[String], dest: &Path, ctl: &mut Ctl) -
         if ctl.cancel.load(Ordering::Relaxed) {
             break;
         }
-        let mut e = match zip.by_index(i) {
+        // Decrypt with the password only for entries that need it; a wrong
+        // password surfaces as a per-member error, so the run reports it.
+        let encrypted = zip.by_index_raw(i).map(|e| e.encrypted()).unwrap_or(false);
+        let opened = if encrypted {
+            match password {
+                Some(pw) => zip.by_index_decrypt(i, pw.as_bytes()),
+                None => {
+                    report.note_error(format!("entry {}: encrypted — a password is required", i));
+                    continue;
+                }
+            }
+        } else {
+            zip.by_index(i)
+        };
+        let mut e = match opened {
             Ok(e) => e,
             Err(err) => {
                 report.note_error(format!("entry {}: {}", i, err));
@@ -679,7 +722,7 @@ mod tests {
             let cancel = AtomicBool::new(false);
             let mut prog = |_: &Progress| {};
             let mut c = ctl(&cancel, &mut prog);
-            let report = extract(&t, &[], &out, &mut c);
+            let report = extract(&t, &[], &out, None, &mut c);
             assert!(report.errors.is_empty(), "gz={gz}: {:?}", report.errors);
             assert_eq!(
                 fs::read_to_string(out.join("readme.txt")).unwrap(),
@@ -715,7 +758,7 @@ mod tests {
 
             let out = d.path().join("out");
             let mut c2 = ctl(&cancel, &mut prog);
-            extract(&dest, &[], &out, &mut c2);
+            extract(&dest, &[], &out, None, &mut c2);
             assert_eq!(fs::read_to_string(out.join("proj/main.rs")).unwrap(), "fn main() {}");
         }
     }
@@ -739,7 +782,7 @@ mod tests {
         let out = tempfile::tempdir().unwrap();
         let cancel = AtomicBool::new(false);
         let mut n = |_: &Progress| {};
-        let report = extract(&z, &[], out.path(), &mut ctl(&cancel, &mut n));
+        let report = extract(&z, &[], out.path(), None, &mut ctl(&cancel, &mut n));
 
         assert!(report.errors.is_empty(), "{:?}", report.errors);
         assert_eq!(fs::read_to_string(out.path().join("readme.txt")).unwrap(), "hello from the archive");
@@ -753,7 +796,7 @@ mod tests {
         let out = tempfile::tempdir().unwrap();
         let cancel = AtomicBool::new(false);
         let mut n = |_: &Progress| {};
-        extract(&z, &["readme.txt".to_string()], out.path(), &mut ctl(&cancel, &mut n));
+        extract(&z, &["readme.txt".to_string()], out.path(), None, &mut ctl(&cancel, &mut n));
 
         assert!(out.path().join("readme.txt").exists());
         assert!(!out.path().join("sub/inner.txt").exists(), "only what was asked for");
@@ -790,7 +833,7 @@ mod tests {
         let out = tempfile::tempdir().unwrap();
         let cancel = AtomicBool::new(false);
         let mut n = |_: &Progress| {};
-        let report = extract(&path, &[], out.path(), &mut ctl(&cancel, &mut n));
+        let report = extract(&path, &[], out.path(), None, &mut ctl(&cancel, &mut n));
 
         assert_eq!(report.ok, 1, "the safe member still came out");
         assert!(report.errors.iter().any(|e| e.contains("escapes")), "{:?}", report.errors);
@@ -854,6 +897,38 @@ mod tests {
         let mut got = String::new();
         e.read_to_string(&mut got).unwrap();
         assert_eq!(got, "classified");
+    }
+
+    #[test]
+    fn encrypted_zip_lists_and_extracts_with_the_password() {
+        let d = tempfile::tempdir().unwrap();
+        fs::write(d.path().join("secret.txt"), b"classified").unwrap();
+        let out = d.path().join("locked.zip");
+        let cancel = AtomicBool::new(false);
+        let mut n = |_: &Progress| {};
+        create_zip(&[d.path().join("secret.txt")], &out, Some("hunter2"), &mut ctl(&cancel, &mut n));
+
+        // Listing works without the password (this is what F3 does), and the zip
+        // is flagged as needing one.
+        assert!(zip_needs_password(&out), "flagged encrypted");
+        let names: Vec<String> = list(&out).unwrap().into_iter().map(|m| m.name).collect();
+        assert_eq!(names, vec!["secret.txt"], "lists despite encryption");
+
+        // No / wrong password → a reported error, nothing written.
+        let none = d.path().join("none");
+        let r = extract(&out, &[], &none, None, &mut ctl(&cancel, &mut n));
+        assert!(!r.errors.is_empty(), "no password is refused");
+        assert!(!none.join("secret.txt").exists());
+
+        let wrong = d.path().join("wrong");
+        let r = extract(&out, &[], &wrong, Some("nope"), &mut ctl(&cancel, &mut n));
+        assert!(!r.errors.is_empty(), "wrong password is refused");
+
+        // Right password extracts the plaintext.
+        let ok = d.path().join("ok");
+        let r = extract(&out, &[], &ok, Some("hunter2"), &mut ctl(&cancel, &mut n));
+        assert!(r.errors.is_empty(), "{:?}", r.errors);
+        assert_eq!(fs::read_to_string(ok.join("secret.txt")).unwrap(), "classified");
     }
 
     #[test]

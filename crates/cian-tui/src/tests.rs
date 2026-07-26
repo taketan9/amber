@@ -225,6 +225,43 @@
     }
 
     #[test]
+    fn encrypted_zip_lists_on_f3_and_extracts_after_a_password() {
+        let (d, mut app) = app_with(&[]);
+        // Build an AES zip in the pane's directory.
+        let cancel = std::sync::atomic::AtomicBool::new(false);
+        let mut prog = |_: &cian_core::progress::Progress| {};
+        let mut ctl = cian_core::progress::Ctl { cancel: &cancel, on_progress: &mut prog };
+        std::fs::write(d.path().join("secret.txt"), b"top secret").unwrap();
+        let archive = d.path().join("locked.zip");
+        cian_core::archive::create_zip(&[d.path().join("secret.txt")], &archive, Some("hunter2"), &mut ctl);
+
+        app.reload_both();
+        app.active_pane_mut().unwrap().cursor =
+            app.active_pane().unwrap().entries.iter().position(|e| e.name == "locked.zip").unwrap();
+
+        // F3 lists the members (no more garbled hex dump).
+        app.handle_key(code(KeyCode::F(3))).unwrap();
+        assert!(matches!(app.popup, Popup::Archive { .. }), "F3 shows the archive listing, got {:?}", app.popup);
+        app.handle_key(code(KeyCode::Esc)).unwrap();
+
+        // Extract asks for the password first.
+        app.extract_selected();
+        assert!(
+            matches!(&app.popup, Popup::TextInput { kind: InputKind::ExtractPassword { .. }, .. }),
+            "encrypted extract prompts for a password"
+        );
+        // The wrong password extracts nothing; the right one yields the file.
+        if let Popup::TextInput { buffer, .. } = &mut app.popup {
+            buffer.push_str("hunter2");
+        }
+        app.finish_text_input().unwrap();
+        drain_op_job(&mut app);
+        let got = d.path().join("locked").join("secret.txt");
+        assert!(got.is_file(), "extracted with the password: {:?}", got);
+        assert_eq!(std::fs::read_to_string(got).unwrap(), "top secret");
+    }
+
+    #[test]
     fn compress_menu_builds_a_zip() {
         let (d, mut app) = app_with(&["a.rs", "b.rs"]);
         // Mark both files, then run the Compress ▸ .zip flow.
@@ -247,6 +284,34 @@
         app.finish_text_input().unwrap();
         drain_op_job(&mut app);
         assert!(d.path().join("out.zip").is_file(), "out.zip created");
+    }
+
+    #[test]
+    fn compress_menu_password_zip_chains_to_a_password_prompt() {
+        let (d, mut app) = app_with(&["a.rs"]);
+        app.active_pane_mut().unwrap().cursor =
+            app.active_pane().unwrap().entries.iter().position(|e| e.name == "a.rs").unwrap();
+        // Encrypted-zip flow: name prompt → password prompt → build.
+        app.prompt_compress(CompressKind::ZipEnc);
+        if let Popup::TextInput { buffer, .. } = &mut app.popup {
+            buffer.clear();
+            buffer.push_str("safe");
+        } else {
+            panic!("no name prompt");
+        }
+        app.finish_text_input().unwrap();
+        assert!(
+            matches!(&app.popup, Popup::TextInput { kind: InputKind::ZipPassword { .. }, .. }),
+            "the name prompt chains into a password prompt"
+        );
+        if let Popup::TextInput { buffer, .. } = &mut app.popup {
+            buffer.push_str("hunter2");
+        }
+        app.finish_text_input().unwrap();
+        drain_op_job(&mut app);
+        let out = d.path().join("safe.zip");
+        assert!(out.is_file(), "safe.zip created");
+        assert!(cian_core::archive::zip_needs_password(&out), "it is encrypted");
     }
 
     #[test]

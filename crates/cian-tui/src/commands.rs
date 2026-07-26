@@ -519,7 +519,7 @@ impl App {
             .or_else(|| self.active_pane().and_then(|p| p.cwd.file_name().and_then(|n| n.to_str()).map(|s| s.to_string())))
             .unwrap_or_else(|| "archive".to_string());
         let ext = match kind {
-            CompressKind::Zip => ".zip",
+            CompressKind::Zip | CompressKind::ZipEnc => ".zip",
             CompressKind::TarGz => ".tar.gz",
         };
         self.popup = text_input(

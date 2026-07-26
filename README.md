@@ -296,9 +296,16 @@ are refused individually and the rest of the archive still comes out.
 the archive under the cursor unpacks the whole thing into a fresh sub-folder
 named after it — no member list, no clobbering. **Compress:** `:zip [-e]`,
 `:tar` and `:targz` bundle the marked files (or the cursor's) into the pane,
-and right-click **▸ Compress** offers `.zip` / `.tar.gz` with a name prompt.
-Reading and writing both cover zip and gzipped/plain tar; AES-encrypted zips
-(`:zip -e`) are strong but need 7-Zip to open, not Explorer's built-in unzip.
+and right-click **▸ Compress** offers `.zip`, `.zip (password)` and `.tar.gz`
+with a name prompt. Reading and writing both cover zip and gzipped/plain tar.
+
+**Encrypted zips** are handled throughout. F3 still lists the members (the names
+and sizes live in the central directory, not behind the password), so a locked
+zip no longer shows as garbled bytes; extracting one — from `:unzip`, the
+right-click menu, or the member list — asks for the password first, and a wrong
+one is reported rather than writing junk. AES-256 zips (`:zip -e` or the
+password compress item) are strong, but need 7-Zip to open, not Explorer's
+built-in unzip.
 
 ## Searching
 

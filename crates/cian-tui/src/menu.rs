@@ -140,9 +140,12 @@ impl App {
                 v.push(MenuItem::Back);
                 Some(v)
             }
-            MenuItem::CompressMenu => {
-                Some(vec![MenuItem::CompressZip, MenuItem::CompressTarGz, MenuItem::Back])
-            }
+            MenuItem::CompressMenu => Some(vec![
+                MenuItem::CompressZip,
+                MenuItem::CompressZipEnc,
+                MenuItem::CompressTarGz,
+                MenuItem::Back,
+            ]),
             _ => None,
         }
     }
@@ -347,6 +350,7 @@ impl App {
             MenuItem::FindDupes => self.start_dupes(),
             MenuItem::Extract => self.extract_selected(),
             MenuItem::CompressZip => self.prompt_compress(CompressKind::Zip),
+            MenuItem::CompressZipEnc => self.prompt_compress(CompressKind::ZipEnc),
             MenuItem::CompressTarGz => self.prompt_compress(CompressKind::TarGz),
             MenuItem::Background => {
                 let pane = self.focused;

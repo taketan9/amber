@@ -529,6 +529,8 @@ enum MenuItem {
     CompressMenu,
     /// Compress the selection to a `.zip`.
     CompressZip,
+    /// Compress the selection to a password-protected `.zip`.
+    CompressZipEnc,
     /// Compress the selection to a `.tar.gz`.
     CompressTarGz,
     /// Extract the archive under the cursor into a fresh sub-folder.
@@ -589,6 +591,7 @@ impl MenuItem {
             MenuItem::Compare => tr(lang, "Compare left ↔ right", "左右を比較"),
             MenuItem::CompressMenu => tr(lang, "Compress ▸", "圧縮 ▸"),
             MenuItem::CompressZip => tr(lang, "→ .zip", "→ .zip"),
+            MenuItem::CompressZipEnc => tr(lang, "→ .zip  (password)", "→ .zip  (パスワード)"),
             MenuItem::CompressTarGz => tr(lang, "→ .tar.gz", "→ .tar.gz"),
             MenuItem::Extract => tr(lang, "Extract here", "ここに解凍"),
             MenuItem::Ssh => tr(lang, "SSH connect", "SSH接続"),
@@ -874,19 +877,23 @@ enum InputKind {
     /// A name for an archive about to be created from `sources`, in the given
     /// format. The extension is appended if missing.
     CompressName { kind: CompressKind, sources: Vec<PathBuf> },
+    /// The password for an encrypted zip about to be extracted. Rendered masked.
+    ExtractPassword { archive: PathBuf, members: Vec<String>, dest: PathBuf },
 }
 
 /// The archive format chosen from the right-click "Compress" submenu.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CompressKind {
     Zip,
+    /// A password-protected (AES-256) zip.
+    ZipEnc,
     TarGz,
 }
 
 impl InputKind {
     /// Whether the field holds a secret and should be shown as dots.
     fn is_secret(&self) -> bool {
-        matches!(self, InputKind::ZipPassword { .. })
+        matches!(self, InputKind::ZipPassword { .. } | InputKind::ExtractPassword { .. })
     }
 }
 

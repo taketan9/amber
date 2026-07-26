@@ -881,9 +881,7 @@ impl App {
         };
         self.popup = Popup::None;
         self.remember_dest(&dest);
-        self.start_op("extracting", move |ctl| {
-            cian_core::archive::extract(&path, &chosen, &dest, ctl)
-        });
+        self.start_extract(path, chosen, dest);
     }
 
     /// `:unzip` / `:extract` (and the right-click menu): extract the archive
@@ -901,9 +899,35 @@ impl App {
         }
         let archive = e.path.clone();
         let dest = unique_dir(&p.cwd, &archive_stem(&e.name));
+        self.start_extract(archive, Vec::new(), dest);
+    }
+
+    /// Extract `members` (empty = all) of `archive` into `dest`, asking for a
+    /// password first when the zip is encrypted.
+    pub(crate) fn start_extract(&mut self, archive: PathBuf, members: Vec<String>, dest: PathBuf) {
+        if cian_core::archive::zip_needs_password(&archive) {
+            self.popup = text_input(
+                "encrypted zip",
+                "password:",
+                String::new(),
+                InputKind::ExtractPassword { archive, members, dest },
+            );
+        } else {
+            self.run_extract(archive, members, dest, None);
+        }
+    }
+
+    /// Kick off the extraction on a worker (after any password was collected).
+    pub(crate) fn run_extract(
+        &mut self,
+        archive: PathBuf,
+        members: Vec<String>,
+        dest: PathBuf,
+        password: Option<String>,
+    ) {
         self.start_op("extracting", move |ctl| {
             let _ = std::fs::create_dir_all(&dest);
-            cian_core::archive::extract(&archive, &[], &dest, ctl)
+            cian_core::archive::extract(&archive, &members, &dest, password.as_deref(), ctl)
         });
     }
 
@@ -1684,15 +1708,15 @@ impl App {
                     return Ok(());
                 }
                 let Some(cwd) = self.active_pane().map(|p| p.cwd.clone()) else { return Ok(()) };
-                let (ext, gz) = match kind {
-                    CompressKind::Zip => (".zip", None),
-                    CompressKind::TarGz => (".tar.gz", Some(true)),
+                let ext = match kind {
+                    CompressKind::Zip | CompressKind::ZipEnc => ".zip",
+                    CompressKind::TarGz => ".tar.gz",
                 };
                 let mut fname = name.clone();
                 let low = fname.to_lowercase();
                 let has_ext = match kind {
                     CompressKind::TarGz => low.ends_with(".tar.gz") || low.ends_with(".tgz"),
-                    _ => low.ends_with(ext),
+                    _ => low.ends_with(".zip"),
                 };
                 if !has_ext {
                     fname.push_str(ext);
@@ -1702,10 +1726,27 @@ impl App {
                     self.message = Some(format!("already exists: {}", fname));
                     return Ok(());
                 }
-                match gz {
-                    None => self.start_zip(dest, sources.clone(), None),
-                    Some(g) => self.start_tar(dest, sources.clone(), g),
+                match kind {
+                    CompressKind::Zip => self.start_zip(dest, sources.clone(), None),
+                    CompressKind::TarGz => self.start_tar(dest, sources.clone(), true),
+                    // Encrypted: chain to the password prompt, which builds it.
+                    CompressKind::ZipEnc => {
+                        self.popup = text_input(
+                            "zip password",
+                            "password (AES-256; open with 7-Zip, not Explorer):",
+                            String::new(),
+                            InputKind::ZipPassword { dest, sources: sources.clone() },
+                        );
+                    }
                 }
+                return Ok(());
+            }
+            InputKind::ExtractPassword { archive, members, dest } => {
+                if name.is_empty() {
+                    self.message = Some("extract cancelled".into());
+                    return Ok(());
+                }
+                self.run_extract(archive.clone(), members.clone(), dest.clone(), Some(name));
                 return Ok(());
             }
             InputKind::LogDir => {
