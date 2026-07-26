@@ -11841,18 +11841,22 @@ fn key_hints(app: &App) -> Vec<(&'static str, &'static str)> {
         // purpose — a bar listing everything becomes wallpaper, and the
         // manual is one keystroke away.
         _ => vec![
+            // Switching focus between the two file panes and the shell is the
+            // core two-pane move, so it leads the bar.
+            ("←→", d("panes", "ペイン")),
+            ("S-J", d("shell", "シェル")),
             ("Space", d("mark", "マーク")),
             ("/", d("filter", "絞込")),
             (",", d("sort", "並替")),
             ("S-F", d("find", "検索")),
             ("C-F", d("grep", "grep")),
             ("F3", d("view", "閲覧")),
+            ("M", d("menu", "メニュー")),
             // The tab F-keys, which are otherwise invisible: F1/F2 step tabs,
             // F9 opens one, F10 closes one.
             ("F1/F2", d("prev/next tab", "前/次タブ")),
             ("F9", d("new tab", "新規タブ")),
             ("F10", d("close tab", "タブを閉じる")),
-            ("S-J", d("shell", "シェル")),
             // Last, so it is the first to drop on a narrow window: comparing
             // two files is the rarest of these by some distance.
             ("=", d("diff", "差分")),

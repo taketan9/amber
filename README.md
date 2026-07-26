@@ -497,7 +497,7 @@ runtime error is shown in a startup notice and cian falls back to defaults for
 whatever could not be applied, so a broken config never blocks startup.
 
 `:reload` re-reads `init.lua` without restarting — keymaps, options, SSH hosts
-and open handlers apply immediately. The colour theme and border style are
+and open handlers apply immediately. The color theme and border style are
 installed once at startup, so a change to those still needs a restart; `:reload`
 says so when it sees one.
 
