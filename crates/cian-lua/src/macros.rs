@@ -27,6 +27,9 @@ use mlua::{Lua, Table, Value};
 pub struct Macro {
     pub name: String,
     pub panes: Vec<PaneStep>,
+    /// Turn on input broadcast (synchronize) across the built panes once the
+    /// layout is up — for "run the same command on every server" setups.
+    pub sync: bool,
 }
 
 /// One pane in a layout macro.
@@ -126,7 +129,8 @@ fn macro_from(t: &Table) -> Result<Macro, String> {
     if panes.is_empty() {
         return Err(format!("macro {:?} has no panes", name));
     }
-    Ok(Macro { name, panes })
+    let sync = t.get::<Option<bool>>("sync").unwrap_or(None).unwrap_or(false);
+    Ok(Macro { name, panes, sync })
 }
 
 fn pane_from(t: &Table) -> Result<PaneStep, String> {
@@ -262,6 +266,14 @@ mod tests {
     #[test]
     fn a_non_table_return_is_an_error() {
         assert!(parse("return 7").is_err());
+    }
+
+    #[test]
+    fn sync_flag_parses() {
+        let on = &parse(r#"return { { name = "x", sync = true, panes = { { cmd = "a" } } } }"#).unwrap()[0];
+        assert!(on.sync);
+        let off = &parse(r#"return { { name = "x", panes = { { cmd = "a" } } } }"#).unwrap()[0];
+        assert!(!off.sync, "sync defaults to false");
     }
 
     #[test]

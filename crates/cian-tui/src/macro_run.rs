@@ -38,6 +38,8 @@ pub(crate) struct MacroRun {
     /// An `expect` in progress: the (lower-cased) text to watch for and the
     /// deadline after which we give up and move on.
     expect: Option<(String, Instant)>,
+    /// Turn on input broadcast once the whole layout is built.
+    sync: bool,
 }
 
 /// Load macros (portable-aware): first `macro.lua` (a list of macros), then
@@ -124,6 +126,7 @@ impl App {
             steps: VecDeque::new(),
             wait_until: None,
             expect: None,
+            sync: m.sync,
         });
         self.focus(FocusedPane::Shell);
         self.message = Some(tr(self.lang, "running macro: ", "マクロ実行中: ").to_string() + &m.name);
@@ -211,6 +214,11 @@ impl App {
                 self.macro_run = Some(run);
             }
             None => {
+                // The layout is built. Turn on input broadcast if asked, so the
+                // same keystrokes now reach every pane the macro made.
+                if run.sync {
+                    self.shell.set_broadcast(true);
+                }
                 self.message =
                     Some(tr(self.lang, "macro done: ", "マクロ完了: ").to_string() + &run.name);
                 // Drop `run`: the macro is finished.

@@ -19,7 +19,10 @@
 --  (a bare `cian thing.lua` works too, so a .lua file associated with cian.exe
 --  runs on double-click), or  cian --macro-name "Two local shells".
 --
---  A macro returns { name = ..., panes = { ... } }. The FIRST pane is the shell
+--  A macro returns { name = ..., panes = { ... }, sync = false }. Set
+--  `sync = true` to turn on input broadcast (synchronize) once the layout is
+--  built, so the same keystrokes then reach every pane at once. The FIRST pane
+--  is the shell
 --  pane you are on; each later pane is split off the previous one:
 --    dir   = "right" (side by side) or "down" (stacked). Default "right".
 --    cmd   = a command line to run (typed, then Enter) — e.g. an ssh line.

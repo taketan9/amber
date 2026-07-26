@@ -1009,8 +1009,9 @@ fn draw_shell_inner(
             resize_node(tab, active, root, inner, false, ov);
         }
     }
+    let broadcast = shell.is_broadcasting();
     let tab = &shell.tabs[active];
-    render_node(f, tab, active, root, inner, tab.active, focused, false, dividers, leaves, ov, log_border);
+    render_node(f, tab, active, root, inner, tab.active, focused, false, dividers, leaves, ov, log_border, broadcast);
     // Fill any cell the shell left at the terminal default with the theme's
     // base, so a light theme's shell panel matches the rest.
     if let Some(bg) = theme().base_bg {
@@ -1062,20 +1063,29 @@ fn render_node(
     leaves: &mut Vec<(usize, usize, Rect, Rect)>,
     ov: AnimOverride,
     log_border: Color,
+    broadcast: bool,
 ) {
     match tab.nodes.get(i).and_then(|n| n.as_ref()) {
         Some(Node::Leaf { session, bg }) => {
             let target = if bordered {
                 let is_active = focused && i == active_leaf;
-                let bs = if session.is_logging() {
+                // Broadcast/synchronize is the loudest state (input hits every
+                // pane), so it wins the border colour — a bright amber with a
+                // `⇄` badge on each pane it targets.
+                let bs = if broadcast {
+                    Style::default().fg(Color::Rgb(255, 176, 32)).add_modifier(Modifier::BOLD)
+                } else if session.is_logging() {
                     Style::default().fg(log_border).add_modifier(Modifier::BOLD)
                 } else if is_active {
                     Style::default().fg(theme().accent).add_modifier(Modifier::BOLD)
                 } else {
                     Style::default().fg(Color::DarkGray)
                 };
-                let blk = Block::default().borders(Borders::ALL)
+                let mut blk = Block::default().borders(Borders::ALL)
         .border_type(border_type()).border_style(bs);
+                if broadcast {
+                    blk = blk.title(" ⇄ SYNC ");
+                }
                 let pinner = area.inner(Margin { vertical: 1, horizontal: 1 });
                 f.render_widget(blk, area);
                 pinner
@@ -1107,8 +1117,8 @@ fn render_node(
                 dir: d,
                 target,
             });
-            render_node(f, tab, tab_idx, *first, rects.0, active_leaf, focused, true, dividers, leaves, ov, log_border);
-            render_node(f, tab, tab_idx, *second, rects.1, active_leaf, focused, true, dividers, leaves, ov, log_border);
+            render_node(f, tab, tab_idx, *first, rects.0, active_leaf, focused, true, dividers, leaves, ov, log_border, broadcast);
+            render_node(f, tab, tab_idx, *second, rects.1, active_leaf, focused, true, dividers, leaves, ov, log_border, broadcast);
         }
         None => {}
     }

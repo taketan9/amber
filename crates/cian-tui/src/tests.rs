@@ -125,6 +125,19 @@
     }
 
     #[test]
+    fn broadcast_needs_more_than_one_pane() {
+        // With no split panes, synchronize can't turn on (it would be pointless
+        // and dangerous), and the toggle is a no-op.
+        let mut app = {
+            let (_d, a) = app_with(&["a.txt"]);
+            a
+        };
+        assert!(!app.shell.set_broadcast(true), "no panes → stays off");
+        assert!(!app.shell.is_broadcasting());
+        assert!(!app.shell.toggle_broadcast(), "toggle is a no-op with <2 panes");
+    }
+
+    #[test]
     fn the_macro_launcher_opens_and_starts_a_run() {
         let (_d, mut app) = app_with(&["a.txt"]);
         // Start from a known-empty set (the dev machine may have a real macro.lua).

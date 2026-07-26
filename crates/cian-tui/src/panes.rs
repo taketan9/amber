@@ -238,6 +238,38 @@ impl ShellPane {
             error: None,
             pending: Vec::new(),
             just_split: None,
+            broadcast: false,
+        }
+    }
+
+    /// True while input is being broadcast to every pane in the active tab.
+    /// Auto-false when the tab is down to a single pane (broadcast is pointless
+    /// and dangerous there).
+    pub(crate) fn is_broadcasting(&self) -> bool {
+        self.broadcast && self.active_pane_count() > 1
+    }
+
+    /// Toggle input broadcast for the active tab. Returns the new state; a no-op
+    /// (stays off) when there is only one pane. The `explicit_on` hint lets a
+    /// macro force it on.
+    pub(crate) fn set_broadcast(&mut self, on: bool) -> bool {
+        self.broadcast = on && self.active_pane_count() > 1;
+        self.broadcast
+    }
+
+    pub(crate) fn toggle_broadcast(&mut self) -> bool {
+        self.set_broadcast(!self.broadcast)
+    }
+
+    /// Send `bytes` to every pane in the active tab (the broadcast path).
+    pub(crate) fn write_all_panes(&mut self, bytes: &[u8]) {
+        let active = self.active;
+        if let Some(t) = self.tabs.get_mut(active) {
+            for i in t.leaves() {
+                if let Some(Node::Leaf { session, .. }) = t.nodes.get_mut(i).and_then(|n| n.as_mut()) {
+                    session.write_input(bytes);
+                }
+            }
         }
     }
 

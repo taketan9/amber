@@ -142,6 +142,9 @@ pub struct ShellPane {
     /// `(tab, split node)` for a split that was just created, so the UI can
     /// animate the new pane growing in. Consumed by whoever reads it.
     just_split: Option<(usize, usize)>,
+    /// Synchronize/broadcast input: keystrokes go to every pane in the active
+    /// tab at once. Only meaningful with more than one pane.
+    broadcast: bool,
 }
 
 /// A PTY spawn running on a background thread, plus what to do with the
@@ -581,6 +584,10 @@ enum MenuItem {
     ShellCloseTab,
     /// Zoom the shell surface (F12).
     ShellZoom,
+    /// Start broadcasting input to every pane in the active shell tab.
+    SyncStart,
+    /// Stop broadcasting input.
+    SyncStop,
     /// Goes back up from a submenu to its parent.
     Back,
     Quit,
@@ -659,6 +666,8 @@ impl MenuItem {
             MenuItem::ShellCloseSplit => tr(lang, "Close split pane  (S-F10)", "分割パネルを閉じる  (S-F10)"),
             MenuItem::ShellCloseTab => tr(lang, "Close tab  (F10)", "タブを閉じる  (F10)"),
             MenuItem::ShellZoom => tr(lang, "Zoom  (F12)", "ズーム  (F12)"),
+            MenuItem::SyncStart => tr(lang, "Synchronize input  ⇄", "同時入力を開始  ⇄"),
+            MenuItem::SyncStop => tr(lang, "Stop synchronize  ⇄", "同時入力を停止  ⇄"),
             MenuItem::Back => tr(lang, "◂ Back", "◂ 戻る"),
             MenuItem::Manual => tr(lang, "Key manual  (?)", "キー一覧  (?)"),
         }
@@ -2563,6 +2572,7 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry("Shift+F10", None, "close split pane (confirms)", "分割ペインを閉じる（確認あり）"),
                 entry("F12", None, "zoom focused surface (toggle)", "フォーカス中の面をズーム（トグル）"),
                 entry("Shift+F12", None, "zoom active split pane (toggle)", "アクティブな分割ペインをズーム（トグル）"),
+                entry(":sync", None, "synchronize: type into all panes at once (also right-click)", "同時入力：全ペインへ一括入力（右クリックでも）"),
                 entry("drag", None, "select text; it is copied to the clipboard on release", "テキスト選択；離すとクリップボードにコピー"),
                 entry("right-click", None, "menu: paste, log, SFTP, text encoding, color", "メニュー：貼付、ログ、SFTP、文字コード、色"),
                 entry("Esc", None, "back to files (full-screen apps keep it)", "ファイルに戻る（全画面アプリはEscを保持）"),

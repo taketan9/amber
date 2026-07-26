@@ -31,6 +31,15 @@ impl App {
                 items.push(MenuItem::ScpDownload);
             }
             items.push(MenuItem::Background);
+            // Synchronize input across the tab's panes — only when there's more
+            // than one pane to synchronize.
+            if self.shell.active_pane_count() > 1 {
+                if self.shell.is_broadcasting() {
+                    items.push(MenuItem::SyncStop);
+                } else {
+                    items.push(MenuItem::SyncStart);
+                }
+            }
             // Window operations (splits, tabs, zoom) that otherwise live only on
             // the F-keys, so they are reachable by mouse.
             items.push(MenuItem::WindowMenu);
@@ -289,6 +298,15 @@ impl App {
                 if !self.shell.active_modes().0 {
                     self.toggle_zoom();
                 }
+            }
+            MenuItem::SyncStart | MenuItem::SyncStop => {
+                self.focus(FocusedPane::Shell);
+                let on = self.shell.set_broadcast(matches!(item, MenuItem::SyncStart));
+                self.message = Some(if on {
+                    tr(self.lang, "⇄ synchronize ON — input goes to all panes", "⇄ 同時入力 ON — 全ペインに入力").into()
+                } else {
+                    tr(self.lang, "synchronize off", "同時入力 OFF").into()
+                });
             }
             MenuItem::Copy => self.clip_targets(ClipOp::Copy),
             MenuItem::Cut => self.clip_targets(ClipOp::Cut),

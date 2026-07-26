@@ -1062,7 +1062,9 @@ impl App {
             // `\x1b[200~` wrapper sent to a program that did not would show up
             // as literal garbage.
             _ if self.focused == FocusedPane::Shell => {
-                if let Some(s) = self.shell.active_session_mut() {
+                if self.shell.is_broadcasting() {
+                    self.shell.write_all_panes(text.as_bytes());
+                } else if let Some(s) = self.shell.active_session_mut() {
                     s.write_input(text.as_bytes());
                 }
             }
@@ -1147,9 +1149,12 @@ impl App {
                 _ => {}
             }
         }
-        // Everything else is forwarded to the shell.
+        // Everything else is forwarded to the shell — to every pane in the tab
+        // when broadcast/synchronize is on, otherwise just the active one.
         if let Some(bytes) = encode_key(key, app_cursor) {
-            if let Some(s) = self.shell.active_session_mut() {
+            if self.shell.is_broadcasting() {
+                self.shell.write_all_panes(&bytes);
+            } else if let Some(s) = self.shell.active_session_mut() {
                 s.write_input(&bytes);
             }
         }

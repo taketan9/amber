@@ -40,6 +40,15 @@ impl App {
             "grep" => self.start_grep_prompt(),
             "find" => self.start_find_prompt(),
             "menu" => self.open_menu_at_cursor(),
+            "sync" | "broadcast" => {
+                self.focus(FocusedPane::Shell);
+                let on = self.shell.toggle_broadcast();
+                self.message = Some(if on {
+                    "⇄ synchronize ON — input goes to all panes in this tab".into()
+                } else {
+                    "synchronize off".into()
+                });
+            }
             "count" | "steps" => self.start_count(),
             "undo" => self.undo_last(),
             "edit" | "e" => self.edit_selected_file(),

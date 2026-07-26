@@ -642,6 +642,15 @@ arbitrary layouts (e.g. one pane on the left, two stacked on the right). These
 keys are only active at a normal prompt; full-screen apps (vim, htop, …)
 receive the function keys unchanged.
 
+**Synchronize input** across a tab's panes with right-click **▸ Synchronize
+input** (or `:sync`): what you type then goes to *every* pane at once — run the
+same command on a row of servers in one shot (tmux's `synchronize-panes`). While
+it's on, the panes wear a bright **amber ⇄ SYNC** border so it's unmistakable,
+and it turns itself off when a tab drops back to a single pane. Because a keypress
+hits every pane, be deliberate — a destructive command runs everywhere, and a
+password typed while synced is sent to all of them. A layout macro can turn it on
+automatically once it finishes building (`sync = true`).
+
 The file panes use the parallel controls: `Shift+F1` / `Shift+F2` switch to the
 next / previous tab, and `Shift+F10` closes the active tab (asking first).
 
