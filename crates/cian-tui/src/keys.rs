@@ -1,0 +1,1450 @@
+//! Keyboard handling: the top-level key router, popup and shell key handling,
+//! the remappable-action dispatch, and split-resize. Split out of lib.rs as an
+//! `impl App` block.
+use super::*;
+
+impl App {
+    /// Grow or shrink a pane from the keyboard, moving the relevant divider in
+    /// the arrow's direction (Right pushes the divider right, so the pane on
+    /// its left grows, and so on). Which divider depends on where the focus is:
+    ///
+    /// - a file pane: Left/Right move the left|right split, Up/Down the
+    ///   files|shell split;
+    /// - the shell: Left/Right resize the nearest side-by-side split; Up/Down
+    ///   resize the nearest stacked split, or the files|shell split when the
+    ///   shell has none.
+    pub(crate) fn resize_split(&mut self, dir: KeyCode) {
+        const STEP: i16 = 4;
+        let clamp = |v: i16| v.clamp(MIN_SPLIT_PCT as i16, 100 - MIN_SPLIT_PCT as i16) as u16;
+        // The files|shell divider is `main_pct` = height given to the files;
+        // Down grows the files, Up grows the shell.
+        let main = |s: &mut Self, delta: i16| s.main_pct = clamp(s.main_pct as i16 + delta);
+
+        match self.focused {
+            FocusedPane::Left | FocusedPane::Right => match dir {
+                // `panes_pct` is the left pane's width: Right grows the left.
+                KeyCode::Right => self.panes_pct = clamp(self.panes_pct as i16 + STEP),
+                KeyCode::Left => self.panes_pct = clamp(self.panes_pct as i16 - STEP),
+                KeyCode::Down => main(self, STEP),
+                KeyCode::Up => main(self, -STEP),
+                _ => {}
+            },
+            FocusedPane::Shell => {
+                let active = self.shell.active;
+                // Resolve which inner split (if any) the key targets before any
+                // mutable borrow, so the fallback can touch `self.main_pct`.
+                let want = match dir {
+                    KeyCode::Left | KeyCode::Right => Some(SplitDir::LeftRight),
+                    KeyCode::Up | KeyCode::Down => Some(SplitDir::TopBottom),
+                    _ => None,
+                };
+                let node = want.and_then(|w| {
+                    self.shell.tabs.get(active).and_then(|t| t.nearest_split(w))
+                });
+                let delta = match dir {
+                    KeyCode::Right | KeyCode::Down => STEP,
+                    KeyCode::Left | KeyCode::Up => -STEP,
+                    _ => 0,
+                };
+                match node {
+                    Some(n) => {
+                        if let Some(t) = self.shell.tabs.get_mut(active) {
+                            t.nudge_split(n, delta);
+                        }
+                    }
+                    // No inner split along this axis: Up/Down still move the
+                    // files|shell divider so the whole shell grows or shrinks.
+                    None if matches!(dir, KeyCode::Up | KeyCode::Down) => main(self, delta),
+                    None => {}
+                }
+            }
+        }
+    }
+
+    /// Apply a dragged border's new position to whichever split it divides.
+    pub(crate) fn set_divider_ratio(&mut self, d: Divider, pct: u16) {
+        match d.target {
+            DividerTarget::Main => self.main_pct = pct,
+            DividerTarget::Panes => self.panes_pct = pct,
+            DividerTarget::ShellSplit { tab, node } => {
+                if let Some(Node::Split { ratio, .. }) =
+                    self.shell.tabs.get_mut(tab).and_then(|t| t.nodes.get_mut(node)).and_then(|n| n.as_mut())
+                {
+                    *ratio = pct;
+                }
+            }
+        }
+    }
+
+    // ------- Key dispatch -------
+    pub(crate) fn handle_key(&mut self, key: KeyEvent) -> Result<()> {
+        // A running operation owns Esc: stopping it is the only thing anyone
+        // wants from the keyboard while it is on screen.
+        if self.op_job.is_some() {
+            if key.code == KeyCode::Esc {
+                self.cancel_op_job();
+            }
+            return Ok(());
+        }
+        // A directory comparison is likewise interruptible with Esc.
+        if self.diff_job.is_some() {
+            if key.code == KeyCode::Esc {
+                if let Some(j) = &self.diff_job {
+                    j.cancel.store(true, Ordering::Relaxed);
+                }
+            }
+            return Ok(());
+        }
+        if !matches!(self.popup, Popup::None) {
+            return self.handle_popup_key(key);
+        }
+        // Ctrl+. shows the key manual. `?` does the same without needing the
+        // kitty keyboard protocol (plain terminals cannot encode Ctrl+.), and
+        // `:man` works everywhere. Full-screen shell apps keep both keys.
+        if self.focused != FocusedPane::Shell
+            && ((key.code == KeyCode::Char('.') && key.modifiers.contains(KeyModifiers::CONTROL))
+                || (key.code == KeyCode::Char('?') && !key.modifiers.contains(KeyModifiers::CONTROL)))
+        {
+            self.open_manual();
+            return Ok(());
+        }
+        // Ctrl+Shift+Arrow resizes panes from the keyboard, the counterpart to
+        // dragging a border. Global (works from the shell too); the modifier
+        // combination is not one a shell program expects on an arrow key.
+        if key.modifiers.contains(KeyModifiers::CONTROL)
+            && key.modifiers.contains(KeyModifiers::SHIFT)
+            && matches!(
+                key.code,
+                KeyCode::Left | KeyCode::Right | KeyCode::Up | KeyCode::Down
+            )
+        {
+            self.resize_split(key.code);
+            return Ok(());
+        }
+        // F12 toggles full-window zoom of the focused surface; Shift+F12 zooms
+        // only the active split pane within the shell. While a full-screen app
+        // runs in the shell, both are passed through to it.
+        if key.code == KeyCode::F(12) {
+            let shell_fullscreen =
+                self.focused == FocusedPane::Shell && self.shell.active_modes().0;
+            if key.modifiers.contains(KeyModifiers::SHIFT) {
+                if self.focused == FocusedPane::Shell && !shell_fullscreen {
+                    self.toggle_pane_zoom_animated();
+                    return Ok(());
+                }
+            } else if !shell_fullscreen {
+                self.toggle_zoom();
+                return Ok(());
+            }
+        }
+        if self.mode == Mode::Command {
+            return self.handle_command_key(key);
+        }
+        if self.mode == Mode::Filter {
+            return self.handle_filter_key(key);
+        }
+        if self.focused == FocusedPane::Shell {
+            return self.handle_shell_key(key);
+        }
+        if self.mode == Mode::Visual {
+            return self.handle_visual_key(key);
+        }
+        self.handle_normal_key(key)
+    }
+
+    pub(crate) fn handle_popup_key(&mut self, key: KeyEvent) -> Result<()> {
+        if matches!(self.popup, Popup::TextInput { .. }) {
+            let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+            // Ctrl+V pastes. Handled before the buffer is borrowed because it
+            // needs the clipboard, which lives on `self`.
+            if ctrl && matches!(key.code, KeyCode::Char('v') | KeyCode::Char('V')) {
+                let text = self.clipboard_text();
+                if let Popup::TextInput { buffer, cursor, .. } = &mut self.popup {
+                    match text {
+                        // Paths and URLs are what get pasted here, and a
+                        // trailing newline from `pwd` or a browser would
+                        // otherwise end up inside the value. Inserted at the
+                        // caret, not always the end.
+                        Some(t) => insert_str_at(buffer, cursor, t.trim_end_matches(['\r', '\n'])),
+                        None => self.message = Some("clipboard has no text".into()),
+                    }
+                }
+                return Ok(());
+            }
+            let Popup::TextInput { buffer, cursor, .. } = &mut self.popup else { return Ok(()) };
+            let len = buffer.chars().count();
+            match key.code {
+                KeyCode::Esc => { self.popup = Popup::None; return Ok(()); }
+                KeyCode::Enter => { return self.finish_text_input(); }
+                // Caret movement, so the middle of a name can be reached.
+                KeyCode::Left => { *cursor = cursor.saturating_sub(1); return Ok(()); }
+                KeyCode::Right => { *cursor = (*cursor + 1).min(len); return Ok(()); }
+                KeyCode::Home => { *cursor = 0; return Ok(()); }
+                KeyCode::End => { *cursor = len; return Ok(()); }
+                KeyCode::Char('a') if ctrl => { *cursor = 0; return Ok(()); }
+                KeyCode::Char('e') if ctrl => { *cursor = len; return Ok(()); }
+                KeyCode::Backspace => { backspace_at(buffer, cursor); return Ok(()); }
+                KeyCode::Delete => { delete_at(buffer, cursor); return Ok(()); }
+                // Clear the line, as in any readline prompt.
+                KeyCode::Char('u') | KeyCode::Char('U') if ctrl => {
+                    buffer.clear();
+                    *cursor = 0;
+                    return Ok(());
+                }
+                // Without this guard every Ctrl+<key> inserted its bare letter,
+                // so Ctrl+V typed a "v" instead of pasting.
+                KeyCode::Char(_) if ctrl => return Ok(()),
+                KeyCode::Char(c) => { insert_char_at(buffer, cursor, c); return Ok(()); }
+                _ => return Ok(()),
+            }
+        }
+        if matches!(self.popup, Popup::AiChat { .. }) {
+            let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+            match key.code {
+                KeyCode::Esc => self.popup = Popup::None,
+                KeyCode::Enter => self.send_ai_message(),
+                KeyCode::PageUp | KeyCode::Up => {
+                    if let Popup::AiChat { scroll, .. } = &mut self.popup {
+                        *scroll = scroll.saturating_sub(3);
+                    }
+                }
+                KeyCode::PageDown | KeyCode::Down => {
+                    if let Popup::AiChat { scroll, .. } = &mut self.popup {
+                        *scroll = scroll.saturating_add(3);
+                    }
+                }
+                KeyCode::Char('u') if ctrl => {
+                    if let Popup::AiChat { input, .. } = &mut self.popup {
+                        input.clear();
+                    }
+                }
+                // Ctrl+V pastes the clipboard into the input.
+                KeyCode::Char('v') if ctrl => {
+                    let text = self.clipboard_text();
+                    if let (Some(t), Popup::AiChat { input, .. }) = (text, &mut self.popup) {
+                        input.push_str(t.trim_end_matches(['\r', '\n']));
+                    }
+                }
+                // Ctrl+Y copies the current selection, or the last reply if none.
+                KeyCode::Char('y') if ctrl => self.copy_ai_text(),
+                KeyCode::Char('c') if ctrl => self.copy_ai_text(),
+                KeyCode::Char(_) if ctrl => {}
+                KeyCode::Backspace => {
+                    if let Popup::AiChat { input, sel, .. } = &mut self.popup {
+                        input.pop();
+                        *sel = None;
+                    }
+                }
+                KeyCode::Char(c) => {
+                    if let Popup::AiChat { input, sel, .. } = &mut self.popup {
+                        input.push(c);
+                        *sel = None; // typing dismisses a selection
+                    }
+                }
+                _ => {}
+            }
+            return Ok(());
+        }
+        if let Popup::Search { buffer } = &mut self.popup {
+            match key.code {
+                KeyCode::Esc => {
+                    self.popup = Popup::None;
+                    self.mode = Mode::Normal;
+                    return Ok(());
+                }
+                KeyCode::Enter => { self.finish_search(); return Ok(()); }
+                KeyCode::Backspace => { buffer.pop(); return Ok(()); }
+                // Up/Down walk the matches while the box is still open, so
+                // several files with the same substring can be visited without
+                // closing and reopening the search.
+                KeyCode::Down | KeyCode::Up => {
+                    let forward = key.code == KeyCode::Down;
+                    let q = buffer.trim().to_string();
+                    if !q.is_empty() {
+                        self.last_search_query = Some(q);
+                        self.jump_to_next_match(forward);
+                    }
+                    return Ok(());
+                }
+                KeyCode::Char(c) => { buffer.push(c); return Ok(()); }
+                _ => return Ok(()),
+            }
+        }
+        if let Popup::ContextMenu { items, cursor, .. } = &mut self.popup {
+            let n = items.len();
+            match key.code {
+                // Esc / q / ← climb out of a submenu, or close at the top.
+                KeyCode::Esc | KeyCode::Char('q') | KeyCode::Left | KeyCode::Char('h') => {
+                    self.menu_back()
+                }
+                KeyCode::Char('j') | KeyCode::Down => *cursor = (*cursor + 1) % n,
+                KeyCode::Char('k') | KeyCode::Up => *cursor = (*cursor + n - 1) % n,
+                // → / l drills into a group.
+                KeyCode::Enter | KeyCode::Right | KeyCode::Char('l') => {
+                    let item = items[*cursor];
+                    if key.code != KeyCode::Enter && !item.is_group() {
+                        return Ok(()); // →/l only acts on groups
+                    }
+                    return self.run_menu_item(item);
+                }
+                _ => {}
+            }
+            return Ok(());
+        }
+        if let Popup::SshHosts { cursor, filter } = &mut self.popup {
+            match key.code {
+                // Cancelling the picker abandons any transfer being set up, so
+                // a later plain :ssh does not get routed into SFTP.
+                KeyCode::Esc => {
+                    self.popup = Popup::None;
+                    self.scp_dir = None;
+                }
+                KeyCode::Down => *cursor += 1,
+                KeyCode::Up => *cursor = cursor.saturating_sub(1),
+                KeyCode::Backspace => {
+                    filter.pop();
+                    *cursor = 0;
+                }
+                KeyCode::Enter => {
+                    let (cursor, filter) = (*cursor, filter.clone());
+                    let picked = self.ssh_matches(&filter).get(cursor).map(|(i, _)| *i);
+                    if let Some(i) = picked {
+                        // A host with one user needs no second stage.
+                        let users = self.config.ssh_hosts[i].users.clone();
+                        if users.len() == 1 {
+                            let only = users[0].name.clone();
+                            self.popup = Popup::None;
+                            if self.scp_dir.is_some() {
+                                self.scp_after_pick(i, &only);
+                            } else {
+                                self.ssh_connect(i, &only);
+                            }
+                        } else {
+                            self.popup = Popup::SshUsers { host: i, cursor: 0 };
+                        }
+                    }
+                }
+                // Typing filters; there is no other use for plain characters
+                // here, so no modifier is needed to start searching.
+                KeyCode::Char(c) => {
+                    filter.push(c);
+                    *cursor = 0;
+                }
+                _ => {}
+            }
+            // Keep the cursor inside the filtered list.
+            if let Popup::SshHosts { cursor, filter } = &mut self.popup {
+                let n = self.config.ssh_hosts.iter().filter(|h| {
+                    let needle = filter.to_lowercase();
+                    needle.is_empty()
+                        || h.name.to_lowercase().contains(&needle)
+                        || h.host.to_lowercase().contains(&needle)
+                }).count();
+                *cursor = (*cursor).min(n.saturating_sub(1));
+            }
+            return Ok(());
+        }
+        if let Popup::SshUsers { host, cursor } = &mut self.popup {
+            let n = self.config.ssh_hosts.get(*host).map(|h| h.users.len()).unwrap_or(0);
+            if n == 0 {
+                self.popup = Popup::None;
+                return Ok(());
+            }
+            match key.code {
+                // Esc steps back to the host list rather than closing outright.
+                KeyCode::Esc => self.popup = Popup::SshHosts { cursor: 0, filter: String::new() },
+                KeyCode::Char('j') | KeyCode::Down => *cursor = (*cursor + 1) % n,
+                KeyCode::Char('k') | KeyCode::Up => *cursor = (*cursor + n - 1) % n,
+                KeyCode::Enter => {
+                    let (h, c) = (*host, *cursor);
+                    let user = self.config.ssh_hosts[h].users[c].name.clone();
+                    self.popup = Popup::None;
+                    if self.scp_dir.is_some() {
+                        self.scp_after_pick(h, &user);
+                    } else {
+                        self.ssh_connect(h, &user);
+                    }
+                }
+                _ => {}
+            }
+            return Ok(());
+        }
+        if let Popup::FindResults { hits, cursor, .. } = &mut self.popup {
+            let n = hits.len();
+            match key.code {
+                KeyCode::Esc | KeyCode::Char('q') => {
+                    self.popup = Popup::None;
+                    self.stop_find();
+                }
+                KeyCode::Char('j') | KeyCode::Down => {
+                    if n > 0 {
+                        *cursor = (*cursor + 1).min(n - 1);
+                    }
+                }
+                KeyCode::Char('k') | KeyCode::Up => *cursor = cursor.saturating_sub(1),
+                KeyCode::Char('d') | KeyCode::PageDown => {
+                    if n > 0 {
+                        *cursor = (*cursor + 10).min(n - 1);
+                    }
+                }
+                KeyCode::Char('u') | KeyCode::PageUp => *cursor = cursor.saturating_sub(10),
+                KeyCode::Char('g') | KeyCode::Home => *cursor = 0,
+                KeyCode::Char('G') | KeyCode::End => *cursor = n.saturating_sub(1),
+                KeyCode::Enter => return self.open_find_hit(),
+                _ => {}
+            }
+            return Ok(());
+        }
+        if matches!(self.popup, Popup::DestPicker { .. }) {
+            let n = self.dest_choices().len();
+            let Popup::DestPicker { cursor, .. } = &mut self.popup else { return Ok(()) };
+            match key.code {
+                KeyCode::Esc | KeyCode::Char('q') => self.popup = Popup::None,
+                KeyCode::Char('j') | KeyCode::Down => {
+                    if n > 0 {
+                        *cursor = (*cursor + 1).min(n - 1);
+                    }
+                }
+                KeyCode::Char('k') | KeyCode::Up => *cursor = cursor.saturating_sub(1),
+                // Somewhere not in the list yet.
+                KeyCode::Char('n') => {
+                    let Popup::DestPicker { op, targets, .. } =
+                        std::mem::replace(&mut self.popup, Popup::None)
+                    else {
+                        return Ok(());
+                    };
+                    self.popup = text_input(
+                "destination",
+                "copy/move to which directory:",
+                self
+                            .opposite_pane_cwd()
+                            .map(|p| p.display().to_string())
+                            .unwrap_or_default(),
+                InputKind::DestPath { op, targets },
+            );
+                }
+                KeyCode::Enter => {
+                    let c = *cursor;
+                    let Popup::DestPicker { op, targets, .. } =
+                        std::mem::replace(&mut self.popup, Popup::None)
+                    else {
+                        return Ok(());
+                    };
+                    if let Some((_, dest)) = self.dest_choices().into_iter().nth(c) {
+                        self.popup = Popup::ConfirmTransfer { op, targets, dest };
+                    }
+                }
+                _ => {}
+            }
+            return Ok(());
+        }
+        if matches!(self.popup, Popup::Viewer { .. }) {
+            return self.handle_viewer_key(key);
+        }
+        // A notice (op results, attributes, checksums, wc…) can be copied
+        // whole with `y`, so a hash or a path can be lifted out of it.
+        if let Popup::Notice { lines } = &self.popup {
+            match key.code {
+                KeyCode::Char('y') | KeyCode::Char('c') => {
+                    let text = lines.join("\n");
+                    if let Some(cb) = self.clipboard.as_mut() {
+                        let _ = cb.set_text(text);
+                    }
+                    self.message = Some("copied".into());
+                    self.popup = Popup::None;
+                    return Ok(());
+                }
+                KeyCode::Enter | KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('q') => {
+                    self.popup = Popup::None;
+                    return Ok(());
+                }
+                _ => return Ok(()),
+            }
+        }
+        if let Popup::DirCompare { entries, cursor, scroll, .. } = &mut self.popup {
+            let n = entries.len();
+            match key.code {
+                KeyCode::Esc | KeyCode::Char('q') => self.popup = Popup::None,
+                KeyCode::Char('j') | KeyCode::Down => {
+                    if n > 0 { *cursor = (*cursor + 1).min(n - 1); }
+                }
+                KeyCode::Char('k') | KeyCode::Up => *cursor = cursor.saturating_sub(1),
+                KeyCode::Char('d') | KeyCode::PageDown => *cursor = (*cursor + 20).min(n.saturating_sub(1)),
+                KeyCode::Char('u') | KeyCode::PageUp => *cursor = cursor.saturating_sub(20),
+                KeyCode::Char('g') | KeyCode::Home => *cursor = 0,
+                KeyCode::Char('G') | KeyCode::End => *cursor = n.saturating_sub(1),
+                // Jump both panes to the highlighted difference.
+                KeyCode::Enter => self.dir_compare_goto(),
+                _ => { let _ = scroll; }
+            }
+            return Ok(());
+        }
+        if let Popup::Diff { result, folded, fold, scroll, .. } = &mut self.popup {
+            let rows: &[cian_core::diff::Row] = if *fold { folded } else { &result.rows };
+            let last = rows.len().saturating_sub(1);
+            match key.code {
+                KeyCode::Esc | KeyCode::Char('q') => self.popup = Popup::None,
+                KeyCode::Char('j') | KeyCode::Down => *scroll = (*scroll + 1).min(last),
+                KeyCode::Char('k') | KeyCode::Up => *scroll = scroll.saturating_sub(1),
+                KeyCode::Char('d') | KeyCode::PageDown => *scroll = (*scroll + 20).min(last),
+                KeyCode::Char('u') | KeyCode::PageUp => *scroll = scroll.saturating_sub(20),
+                KeyCode::Char('g') | KeyCode::Home => *scroll = 0,
+                KeyCode::Char('G') | KeyCode::End => *scroll = last,
+                // Jumping between differences is the reason to open this at
+                // all; scrolling to hunt for the next one is the thing every
+                // diff viewer exists to save you from.
+                KeyCode::Char('n') => {
+                    if let Some(i) =
+                        rows.iter().enumerate().skip(*scroll + 1).find(|(_, r)| r.is_difference())
+                    {
+                        *scroll = i.0;
+                    }
+                }
+                KeyCode::Char('N') => {
+                    if let Some(i) = rows[..*scroll].iter().rposition(|r| r.is_difference()) {
+                        *scroll = i;
+                    }
+                }
+                KeyCode::Char('f') => {
+                    *fold = !*fold;
+                    // The row lists differ in length, so a kept offset would
+                    // land somewhere unrelated.
+                    *scroll = 0;
+                }
+                _ => {}
+            }
+            return Ok(());
+        }
+        if let Popup::Archive { members, cursor, .. } = &mut self.popup {
+            let n = members.len();
+            match key.code {
+                KeyCode::Esc | KeyCode::Char('q') => self.popup = Popup::None,
+                KeyCode::Char('j') | KeyCode::Down => {
+                    if n > 0 {
+                        *cursor = (*cursor + 1).min(n - 1);
+                    }
+                }
+                KeyCode::Char('k') | KeyCode::Up => *cursor = cursor.saturating_sub(1),
+                KeyCode::Char('g') | KeyCode::Home => *cursor = 0,
+                KeyCode::Char('G') | KeyCode::End => *cursor = n.saturating_sub(1),
+                KeyCode::Char('a') => self.extract_from_archive(true),
+                KeyCode::Enter => self.extract_from_archive(false),
+                _ => {}
+            }
+            return Ok(());
+        }
+        if let Popup::SortPicker { cursor } = &mut self.popup {
+            let n = SortKey::ALL.len();
+            match key.code {
+                KeyCode::Esc | KeyCode::Char('q') => self.popup = Popup::None,
+                KeyCode::Char('j') | KeyCode::Down => *cursor = (*cursor + 1) % n,
+                KeyCode::Char('k') | KeyCode::Up => *cursor = (*cursor + n - 1) % n,
+                KeyCode::Enter => {
+                    let key = SortKey::ALL[*cursor];
+                    self.popup = Popup::None;
+                    self.apply_sort_key(key);
+                }
+                // Direct picks, so the picker is skippable once memorised.
+                KeyCode::Char('n') => { self.popup = Popup::None; self.apply_sort_key(SortKey::Name); }
+                KeyCode::Char('s') => { self.popup = Popup::None; self.apply_sort_key(SortKey::Size); }
+                KeyCode::Char('d') => { self.popup = Popup::None; self.apply_sort_key(SortKey::Modified); }
+                KeyCode::Char('e') => { self.popup = Popup::None; self.apply_sort_key(SortKey::Extension); }
+                _ => {}
+            }
+            return Ok(());
+        }
+        if let Popup::EncodingPicker { cursor, .. } = &mut self.popup {
+            let n = cian_core::viewer::TextEncoding::ALL.len();
+            match key.code {
+                KeyCode::Char('j') | KeyCode::Down => {
+                    *cursor = (*cursor + 1) % n;
+                    return Ok(());
+                }
+                KeyCode::Char('k') | KeyCode::Up => {
+                    *cursor = (*cursor + n - 1) % n;
+                    return Ok(());
+                }
+                KeyCode::Esc | KeyCode::Char('q') => {
+                    // Cancel: restore a stashed viewer unchanged, else just close.
+                    self.finish_encoding_pick(None);
+                    return Ok(());
+                }
+                KeyCode::Enter => {
+                    let enc = cian_core::viewer::TextEncoding::ALL[*cursor];
+                    self.finish_encoding_pick(Some(enc));
+                    return Ok(());
+                }
+                _ => return Ok(()),
+            }
+        }
+        if let Popup::ColorPicker { pane, cursor } = &mut self.popup {
+            let n = PANE_BG_PRESETS.len();
+            match key.code {
+                KeyCode::Esc | KeyCode::Char('q') => self.popup = Popup::None,
+                KeyCode::Char('j') | KeyCode::Down => *cursor = (*cursor + 1) % n,
+                KeyCode::Char('k') | KeyCode::Up => *cursor = (*cursor + n - 1) % n,
+                KeyCode::Enter => {
+                    let (pane, idx) = (*pane, *cursor);
+                    let color = PANE_BG_PRESETS[idx].1;
+                    match pane {
+                        // Only the split pane that was clicked, not the panel.
+                        FocusedPane::Shell => self.shell.set_active_pane_bg(color),
+                        _ => {
+                            if let Some(slot) = Self::bg_slot(pane) {
+                                self.pane_bg[slot] = color;
+                            }
+                        }
+                    }
+                    self.popup = Popup::None;
+                }
+                _ => {}
+            }
+            return Ok(());
+        }
+        if let Popup::Manual { lines, scroll } = &mut self.popup {
+            // The renderer clamps `scroll` to the last full page each frame, so
+            // saturating at the line count here is safe.
+            let last = lines.len().saturating_sub(1);
+            match key.code {
+                KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q') => self.popup = Popup::None,
+                KeyCode::Char('j') | KeyCode::Down => *scroll = (*scroll + 1).min(last),
+                KeyCode::Char('k') | KeyCode::Up => *scroll = scroll.saturating_sub(1),
+                KeyCode::Char('d') | KeyCode::PageDown => *scroll = (*scroll + 10).min(last),
+                KeyCode::Char('u') | KeyCode::PageUp => *scroll = scroll.saturating_sub(10),
+                KeyCode::Char('g') | KeyCode::Home => *scroll = 0,
+                KeyCode::Char('G') | KeyCode::End => *scroll = last,
+                _ => {}
+            }
+            return Ok(());
+        }
+        if let Popup::History { cursor, entries } = &mut self.popup {
+            match key.code {
+                KeyCode::Esc => { self.popup = Popup::None; return Ok(()); }
+                KeyCode::Enter => { return self.finish_history(); }
+                KeyCode::Char('j') | KeyCode::Down => {
+                    if *cursor + 1 < entries.len() { *cursor += 1; }
+                    return Ok(());
+                }
+                KeyCode::Char('k') | KeyCode::Up => {
+                    if *cursor > 0 { *cursor -= 1; }
+                    return Ok(());
+                }
+                // `a` bookmarks the highlighted path as a shortcut: the target
+                // is filled in for you, and you just type a name.
+                KeyCode::Char('a') => {
+                    let target = entries.get(*cursor).map(|p| p.display().to_string());
+                    self.popup = Popup::None;
+                    if let Some(t) = target {
+                        self.pending_shortcut_target = Some(t);
+                        self.start_shortcut_add(Vec::new(), false);
+                    }
+                    return Ok(());
+                }
+                _ => return Ok(()),
+            }
+        }
+        if let Popup::Shortcuts { cursor, entries, path } = &mut self.popup {
+            let level = sc_level(entries, path);
+            let n = level.len();
+            let cur_is_group = level.get(*cursor).map(|s| s.is_group()).unwrap_or(false);
+            match key.code {
+                // Esc / q / ← climb out of a group, or close at the top.
+                KeyCode::Esc | KeyCode::Char('q') | KeyCode::Left | KeyCode::Char('h') => {
+                    if path.pop().is_some() {
+                        *cursor = 0;
+                    } else {
+                        self.popup = Popup::None;
+                    }
+                }
+                // Enter/→ descend into a group; Enter on a leaf runs it.
+                KeyCode::Enter | KeyCode::Right | KeyCode::Char('l') => {
+                    if n == 0 {
+                        return Ok(());
+                    }
+                    if cur_is_group {
+                        path.push(*cursor);
+                        *cursor = 0;
+                    } else if key.code == KeyCode::Enter {
+                        let (p, idx) = (path.clone(), *cursor);
+                        self.popup = Popup::None;
+                        return self.execute_shortcut(&p, idx);
+                    }
+                }
+                KeyCode::Char('j') | KeyCode::Down => {
+                    if n > 0 && *cursor + 1 < n {
+                        *cursor += 1;
+                    }
+                }
+                KeyCode::Char('k') | KeyCode::Up => {
+                    *cursor = cursor.saturating_sub(1);
+                }
+                // `a` adds a shortcut in this group; `A` adds a subfolder. The
+                // uppercase char is the signal — the SHIFT modifier bit is not
+                // reliably reported for letters across terminals.
+                KeyCode::Char('a') => {
+                    let p = path.clone();
+                    self.popup = Popup::None;
+                    self.start_shortcut_add(p, false);
+                }
+                KeyCode::Char('A') => {
+                    let p = path.clone();
+                    self.popup = Popup::None;
+                    self.start_shortcut_add(p, true);
+                }
+                KeyCode::Char('d') => {
+                    if n > 0 {
+                        let (p, idx) = (path.clone(), *cursor);
+                        if let Some(lvl) = sc_level_mut(&mut self.shortcuts.entries, &p) {
+                            if idx < lvl.len() {
+                                lvl.remove(idx);
+                            }
+                        }
+                        let _ = self.shortcuts.save();
+                        self.reopen_shortcuts(p, idx);
+                    }
+                }
+                KeyCode::Char('r') => {
+                    if n > 0 {
+                        let (p, idx) = (path.clone(), *cursor);
+                        self.popup = Popup::None;
+                        self.start_shortcut_edit(p, idx);
+                    }
+                }
+                KeyCode::Char('p') if n > 0 && !cur_is_group => {
+                    let (p, idx) = (path.clone(), *cursor);
+                    self.copy_shortcut_target_to_clipboard(&p, idx);
+                }
+                _ => {}
+            }
+            return Ok(());
+        }
+        if matches!(self.popup, Popup::ConfirmQuit) {
+            match key.code {
+                KeyCode::Char('y') | KeyCode::Enter => {
+                    self.popup = Popup::None;
+                    self.should_quit = true;
+                }
+                KeyCode::Char('n') | KeyCode::Esc => { self.popup = Popup::None; }
+                _ => {}
+            }
+            return Ok(());
+        }
+        if let Popup::ConfirmClose { target } = &self.popup {
+            let target = *target;
+            match key.code {
+                KeyCode::Char('y') | KeyCode::Enter => {
+                    self.popup = Popup::None;
+                    self.execute_close(target);
+                }
+                KeyCode::Char('n') | KeyCode::Esc => { self.popup = Popup::None; }
+                _ => {}
+            }
+            return Ok(());
+        }
+        if matches!(self.popup, Popup::ConfirmElevate { .. }) {
+            match key.code {
+                KeyCode::Char('y') | KeyCode::Enter => self.run_elevated_transfer(),
+                KeyCode::Char('n') | KeyCode::Esc => { self.popup = Popup::None; }
+                _ => {}
+            }
+            return Ok(());
+        }
+        if let Popup::AiShellConfirm { command } = &self.popup {
+            match key.code {
+                KeyCode::Char('y') | KeyCode::Enter => {
+                    let cmd = command.clone();
+                    self.popup = Popup::None;
+                    self.insert_ai_command_at_prompt(&cmd);
+                }
+                KeyCode::Char('n') | KeyCode::Esc => self.popup = Popup::None,
+                _ => {}
+            }
+            return Ok(());
+        }
+        if let Popup::CommitMessage { buffer, editing, .. } = &mut self.popup {
+            if *editing {
+                // Typing mode: edit the message freely; Esc returns to preview.
+                match key.code {
+                    KeyCode::Esc => *editing = false,
+                    KeyCode::Enter => buffer.push('\n'),
+                    KeyCode::Backspace => { buffer.pop(); }
+                    KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        buffer.push(c);
+                    }
+                    _ => {}
+                }
+                return Ok(());
+            }
+            // Preview mode: commit, edit, or cancel.
+            match key.code {
+                KeyCode::Enter | KeyCode::Char('c') => self.commit_with_drafted_message(),
+                KeyCode::Char('e') => {
+                    if let Popup::CommitMessage { editing, .. } = &mut self.popup {
+                        *editing = true;
+                    }
+                }
+                KeyCode::Esc | KeyCode::Char('n') => self.popup = Popup::None,
+                _ => {}
+            }
+            return Ok(());
+        }
+        if let Popup::JunkReview { items, cursor, .. } = &mut self.popup {
+            let n = items.len();
+            match key.code {
+                KeyCode::Esc | KeyCode::Char('q') => self.popup = Popup::None,
+                KeyCode::Char('j') | KeyCode::Down => {
+                    if n > 0 { *cursor = (*cursor + 1).min(n - 1); }
+                }
+                KeyCode::Char('k') | KeyCode::Up => *cursor = cursor.saturating_sub(1),
+                KeyCode::Char('g') | KeyCode::Home => *cursor = 0,
+                KeyCode::Char('G') | KeyCode::End => *cursor = n.saturating_sub(1),
+                // Space toggles the item under the cursor; `a` toggles all.
+                KeyCode::Char(' ') => {
+                    if let Some(it) = items.get_mut(*cursor) { it.selected = !it.selected; }
+                }
+                KeyCode::Char('a') => {
+                    let all_on = items.iter().all(|it| it.selected);
+                    for it in items.iter_mut() { it.selected = !all_on; }
+                }
+                // Enter/d hands the checked paths to the normal delete confirm.
+                KeyCode::Enter | KeyCode::Char('d') => self.confirm_junk_deletion(),
+                _ => {}
+            }
+            return Ok(());
+        }
+        if let Popup::DupeReview { items, cursor, .. } = &mut self.popup {
+            let n = items.len();
+            match key.code {
+                KeyCode::Esc | KeyCode::Char('q') => self.popup = Popup::None,
+                KeyCode::Char('j') | KeyCode::Down => {
+                    if n > 0 { *cursor = (*cursor + 1).min(n - 1); }
+                }
+                KeyCode::Char('k') | KeyCode::Up => *cursor = cursor.saturating_sub(1),
+                KeyCode::Char('g') | KeyCode::Home => *cursor = 0,
+                KeyCode::Char('G') | KeyCode::End => *cursor = n.saturating_sub(1),
+                KeyCode::Char(' ') => {
+                    if let Some(it) = items.get_mut(*cursor) { it.selected = !it.selected; }
+                }
+                KeyCode::Char('a') => {
+                    let all_on = items.iter().all(|it| it.selected);
+                    for it in items.iter_mut() { it.selected = !all_on; }
+                }
+                KeyCode::Enter | KeyCode::Char('d') => self.confirm_dupe_deletion(),
+                _ => {}
+            }
+            return Ok(());
+        }
+        if let Popup::StructureReview { items, cursor, .. } = &mut self.popup {
+            let n = items.len();
+            match key.code {
+                KeyCode::Esc | KeyCode::Char('q') => self.popup = Popup::None,
+                KeyCode::Char('j') | KeyCode::Down => {
+                    if n > 0 { *cursor = (*cursor + 1).min(n - 1); }
+                }
+                KeyCode::Char('k') | KeyCode::Up => *cursor = cursor.saturating_sub(1),
+                KeyCode::Char('g') | KeyCode::Home => *cursor = 0,
+                KeyCode::Char('G') | KeyCode::End => *cursor = n.saturating_sub(1),
+                KeyCode::Char(' ') => {
+                    if let Some(it) = items.get_mut(*cursor) { it.selected = !it.selected; }
+                }
+                KeyCode::Char('a') => {
+                    let all_on = items.iter().all(|it| it.selected);
+                    for it in items.iter_mut() { it.selected = !all_on; }
+                }
+                // Enter/m runs the checked moves (creating folders as needed).
+                KeyCode::Enter | KeyCode::Char('m') => self.apply_structure_plan(),
+                _ => {}
+            }
+            return Ok(());
+        }
+        if let Popup::RenameReview { items, cursor, .. } = &mut self.popup {
+            let n = items.len();
+            match key.code {
+                KeyCode::Esc | KeyCode::Char('q') => self.popup = Popup::None,
+                KeyCode::Char('j') | KeyCode::Down => {
+                    if n > 0 { *cursor = (*cursor + 1).min(n - 1); }
+                }
+                KeyCode::Char('k') | KeyCode::Up => *cursor = cursor.saturating_sub(1),
+                KeyCode::Char('g') | KeyCode::Home => *cursor = 0,
+                KeyCode::Char('G') | KeyCode::End => *cursor = n.saturating_sub(1),
+                KeyCode::Char(' ') => {
+                    if let Some(it) = items.get_mut(*cursor) { it.selected = !it.selected; }
+                }
+                KeyCode::Char('a') => {
+                    let all_on = items.iter().all(|it| it.selected);
+                    for it in items.iter_mut() { it.selected = !all_on; }
+                }
+                // Enter/r renames the checked files.
+                KeyCode::Enter | KeyCode::Char('r') => self.apply_rename_plan(),
+                _ => {}
+            }
+            return Ok(());
+        }
+        match key.code {
+            KeyCode::Esc | KeyCode::Char('n') => { self.popup = Popup::None; Ok(()) }
+            // Enter is the same as `y` here: the plain "yes" everyone reaches
+            // for. (Overwrite/permanent stays on its own key so it is never
+            // the accidental default.)
+            KeyCode::Char('y') | KeyCode::Enter => match &self.popup {
+                Popup::ConfirmDelete { .. } => self.finish_delete(DeleteMode::Trash),
+                Popup::ConfirmTransfer { .. } => self.finish_transfer(Conflict::Skip),
+                Popup::ConfirmDiscard { .. } => { self.git_discard(); Ok(()) }
+                Popup::Notice { .. } => { self.popup = Popup::None; Ok(()) }
+                _ => Ok(()),
+            },
+            // `a` is the "I really mean it" variant: overwrite for transfers,
+            // unrecoverable delete instead of a trip through the trash.
+            KeyCode::Char('a') => match &self.popup {
+                Popup::ConfirmDelete { .. } => self.finish_delete(DeleteMode::Permanent),
+                Popup::ConfirmTransfer { .. } => self.finish_transfer(Conflict::Overwrite),
+                _ => Ok(()),
+            },
+            // A single-item move/copy can be renamed on the way: `r` opens an
+            // editable name seeded with the destination filename.
+            KeyCode::Char('r') => {
+                if let Popup::ConfirmTransfer { op, targets, dest } = &self.popup {
+                    if targets.len() == 1 {
+                        let op = *op;
+                        let src = targets[0].clone();
+                        let dest = dest.clone();
+                        let name =
+                            src.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+                        self.popup = text_input(
+                            match op { PendingOp::Move => "move as", PendingOp::Copy => "copy as" },
+                            "new name in the destination:",
+                            name,
+                            InputKind::TransferAs { op, src, dest_dir: dest },
+                        );
+                    } else {
+                        self.message = Some("rename applies to a single item".into());
+                    }
+                }
+                Ok(())
+            }
+            _ => Ok(()),
+        }
+    }
+
+    pub(crate) fn handle_command_key(&mut self, key: KeyEvent) -> Result<()> {
+        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        // Paths are what get typed here, and they are the thing most worth
+        // pasting rather than retyping. Ctrl+V mirrors the text-input prompt.
+        if ctrl && matches!(key.code, KeyCode::Char('v') | KeyCode::Char('V')) {
+            if let Some(t) = self.clipboard_text() {
+                self.insert_into_active_text(&t);
+            } else {
+                self.message = Some("clipboard has no text".into());
+            }
+            return Ok(());
+        }
+        match key.code {
+            KeyCode::Esc => { self.command_buffer.clear(); self.mode = Mode::Normal; }
+            KeyCode::Enter => self.run_command(),
+            KeyCode::Backspace => { self.command_buffer.pop(); }
+            // Clear the line, as in any readline prompt.
+            KeyCode::Char('u') | KeyCode::Char('U') if ctrl => self.command_buffer.clear(),
+            // Otherwise a bare Ctrl+<key> would type its letter into the line.
+            KeyCode::Char(_) if ctrl => {}
+            KeyCode::Char(c) => self.command_buffer.push(c),
+            _ => {}
+        }
+        Ok(())
+    }
+
+    /// Insert pasted or typed text into whichever text field currently has the
+    /// focus. Used by Ctrl+V and by a terminal bracketed-paste event, so a
+    /// paste lands in the same place a keystroke would.
+    ///
+    /// Newlines are stripped: a path copied from `pwd`, a browser, or another
+    /// pane carries a trailing one, and a bracketed paste of several lines
+    /// would otherwise smuggle an Enter into a single-line prompt.
+    pub(crate) fn insert_into_active_text(&mut self, text: &str) {
+        let clean: String = text.chars().filter(|c| *c != '\n' && *c != '\r').collect();
+        if clean.is_empty() {
+            return;
+        }
+        match &mut self.popup {
+            Popup::TextInput { buffer, cursor, .. } => {
+                insert_str_at(buffer, cursor, &clean);
+                return;
+            }
+            Popup::Search { buffer } => {
+                buffer.push_str(&clean);
+                return;
+            }
+            Popup::SshHosts { filter, .. } => {
+                filter.push_str(&clean);
+                return;
+            }
+            Popup::AiChat { input, .. } => {
+                input.push_str(&clean);
+                return;
+            }
+            _ => {}
+        }
+        match self.mode {
+            Mode::Command => self.command_buffer.push_str(&clean),
+            Mode::Filter => {
+                self.filter_buffer.push_str(&clean);
+                self.apply_filter_buffer();
+            }
+            // A paste into the shell belongs to whatever is running there —
+            // the prompt, or a full-screen editor. The original text is sent,
+            // newlines and all, since a multi-line paste into a shell is a
+            // deliberate thing. The raw bytes go through unwrapped: this does
+            // not track whether the child turned on bracketed paste, and a
+            // `\x1b[200~` wrapper sent to a program that did not would show up
+            // as literal garbage.
+            _ if self.focused == FocusedPane::Shell => {
+                if let Some(s) = self.shell.active_session_mut() {
+                    s.write_input(text.as_bytes());
+                }
+            }
+            _ => {}
+        }
+    }
+
+    pub(crate) fn handle_shell_key(&mut self, key: KeyEvent) -> Result<()> {
+        // Any keypress ends a mouse selection's highlight — the screen is about
+        // to change under it anyway.
+        self.shell_sel = None;
+        let (alt_screen, app_cursor) = self.shell.active_modes();
+        if self.debug_keys {
+            self.message = Some(format!(
+                "key={:?} mods={:?} alt_screen={}",
+                key.code, key.modifiers, alt_screen
+            ));
+        }
+        // Esc returns to the file pane — unless a full-screen app (alternate
+        // screen) is running, in which case Esc belongs to that app (e.g. vim).
+        if key.code == KeyCode::Esc && !alt_screen {
+            self.focus(self.last_file_pane);
+            return Ok(());
+        }
+        // Shift+Enter opens the shell's context menu, the way it does in a file
+        // pane — the shell cannot type `:menu`, so this is its way in by
+        // keyboard (right-click is the other). Passed through to a full-screen
+        // app, which may want it.
+        if key.code == KeyCode::Enter && key.modifiers.contains(KeyModifiers::SHIFT) && !alt_screen {
+            self.open_menu_at_cursor();
+            return Ok(());
+        }
+        // Tab and split controls via F-keys — reserved only at a normal prompt.
+        // The Ctrl modifier is swallowed before reaching the app on some setups
+        // (IME/OS), so F-keys (independent escape sequences) are used instead.
+        // Shift+F drives splits. While a full-screen app runs (alternate screen)
+        // they pass through, like F12.
+        if !alt_screen {
+            let shift = key.modifiers.contains(KeyModifiers::SHIFT);
+            match key.code {
+                // Pane navigation (parallels file-pane tab nav): Shift+F1/F2.
+                KeyCode::F(1) if shift => {
+                    self.shell.next_pane();
+                    return Ok(());
+                }
+                KeyCode::F(2) if shift => {
+                    self.shell.prev_pane();
+                    return Ok(());
+                }
+                // Splits within the active tab: Shift+F8 left/right, F9 top/bottom.
+                KeyCode::F(8) if shift => {
+                    let cwd = self.shell_cwd();
+                    self.shell.split_active(&cwd, SplitDir::LeftRight);
+                    return Ok(());
+                }
+                KeyCode::F(9) if shift => {
+                    let cwd = self.shell_cwd();
+                    self.shell.split_active(&cwd, SplitDir::TopBottom);
+                    return Ok(());
+                }
+                // Close the active split pane, with confirmation.
+                KeyCode::F(10) if shift => {
+                    self.popup = Popup::ConfirmClose { target: CloseTarget::ShellPane };
+                    return Ok(());
+                }
+                // Tab controls: plain F-keys.
+                KeyCode::F(n @ 1..=8) if !shift => {
+                    self.shell.select((n - 1) as usize);
+                    return Ok(());
+                }
+                KeyCode::F(9) if !shift => {
+                    let cwd = self.shell_cwd();
+                    self.shell.new_tab(&cwd);
+                    return Ok(());
+                }
+                KeyCode::F(10) if !shift => {
+                    if self.shell.close_active() {
+                        self.focus(self.last_file_pane);
+                    }
+                    return Ok(());
+                }
+                _ => {}
+            }
+        }
+        // Everything else is forwarded to the shell.
+        if let Some(bytes) = encode_key(key, app_cursor) {
+            if let Some(s) = self.shell.active_session_mut() {
+                s.write_input(&bytes);
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn handle_visual_key(&mut self, mut key: KeyEvent) -> Result<()> {
+        normalize_jp_key(&mut key);
+        // `gg` works here too, so `gg` then visual then `G` selects everything.
+        if self.pending_g {
+            self.pending_g = false;
+            if matches!(key.code, KeyCode::Char('g')) {
+                if let Some(p) = self.active_pane_mut() { p.cursor = 0; }
+                return Ok(());
+            }
+        }
+        match key.code {
+            KeyCode::Esc => self.visual_cancel_and_clear_all(),
+            KeyCode::Enter | KeyCode::Char('v') => self.visual_commit(),
+            KeyCode::Char('j') | KeyCode::Down => {
+                if let Some(p) = self.active_pane_mut() { p.move_cursor(1); }
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                if let Some(p) = self.active_pane_mut() { p.move_cursor(-1); }
+            }
+            // Stretch the selection over the whole listing in one keystroke.
+            KeyCode::Char('a') => self.visual_select_all(),
+            KeyCode::Char('g') => self.pending_g = true,
+            KeyCode::Char('G') | KeyCode::End => {
+                if let Some(p) = self.active_pane_mut() {
+                    if !p.entries.is_empty() { p.cursor = p.entries.len() - 1; }
+                }
+            }
+            KeyCode::Home => {
+                if let Some(p) = self.active_pane_mut() { p.cursor = 0; }
+            }
+            KeyCode::Char('D') | KeyCode::PageDown => {
+                if let Some(p) = self.active_pane_mut() { p.move_cursor(10); }
+            }
+            KeyCode::Char('U') | KeyCode::PageUp => {
+                if let Some(p) = self.active_pane_mut() { p.move_cursor(-10); }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    /// Anchor at the top and put the cursor at the bottom, so the whole
+    /// listing is selected and Enter marks it.
+    pub(crate) fn visual_select_all(&mut self) {
+        let last = match self.active_pane() {
+            Some(p) if !p.entries.is_empty() => p.entries.len() - 1,
+            _ => return,
+        };
+        self.visual_anchor = Some(0);
+        if let Some(p) = self.active_pane_mut() {
+            p.cursor = last;
+        }
+    }
+
+    pub(crate) fn handle_normal_key(&mut self, mut key: KeyEvent) -> Result<()> {
+        // Full-width input (全角英数) → ASCII so commands work without leaving
+        // the Japanese IME. Kana can be bound per-key via init.lua.
+        normalize_jp_key(&mut key);
+        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        let shift = key.modifiers.contains(KeyModifiers::SHIFT);
+
+        // `gg` chord → jump to top
+        if self.pending_g {
+            self.pending_g = false;
+            if matches!(key.code, KeyCode::Char('g')) && !ctrl {
+                if let Some(p) = self.active_pane_mut() { p.cursor = 0; }
+                return Ok(());
+            }
+            // anything else: fall through to normal handling
+        }
+
+        // User keymap overrides: plain character keys (no Ctrl). Only keys the
+        // user explicitly bound appear here, so default behaviour is untouched
+        // for everything else.
+        if !ctrl {
+            if let KeyCode::Char(c) = key.code {
+                if let Some(action) = self.keymap.get(&c).copied() {
+                    return self.execute_action(action);
+                }
+            }
+        }
+
+        match (ctrl, shift, key.code) {
+            (false, _, KeyCode::Char('q')) => self.start_quit_confirm(),
+            // `_` for shift, not `false`: `:` is Shift+; on most layouts, and a
+            // terminal with the kitty keyboard protocol (WezTerm, kitty, foot)
+            // reports that Shift, so `(false, false, …)` never matched there and
+            // `:` did nothing. The character already encodes the shift; whether
+            // the modifier is also set is irrelevant. Same for the punctuation
+            // bindings below.
+            (false, _, KeyCode::Char(':')) => {
+                self.mode = Mode::Command;
+                self.command_buffer.clear();
+            }
+            (false, _, KeyCode::Esc) => {
+                if let Some(p) = self.active_pane_mut() {
+                    p.clear_marks();
+                    p.clear_filter();
+                }
+            }
+            // Pane navigation: Shift + H/J/K/L (universally works, no terminal config needed).
+            // Ctrl+H/J/K/L is the alternative — needs `enable_kitty_keyboard = true` in WezTerm.
+            (false, _, KeyCode::Char('H')) => self.focus_direction('h'),
+            (false, _, KeyCode::Char('J')) => self.focus_direction('j'),
+            (false, _, KeyCode::Char('K')) => self.focus_direction('k'),
+            (false, _, KeyCode::Char('L')) => self.focus_direction('l'),
+            (true, _, KeyCode::Char('h')) => self.focus_direction('h'),
+            (true, _, KeyCode::Char('j')) => self.focus_direction('j'),
+            (true, _, KeyCode::Char('k')) => self.focus_direction('k'),
+            (true, _, KeyCode::Char('l')) => self.focus_direction('l'),
+            (false, false, KeyCode::Tab) => {
+                if let Some(t) = self.active_file_tabs_mut() { t.next_tab(); }
+            }
+            (_, _, KeyCode::BackTab) => {
+                if let Some(t) = self.active_file_tabs_mut() { t.prev_tab(); }
+            }
+            // Tab management: t = new tab, w = close active tab.
+            (false, false, KeyCode::Char('t')) => {
+                if let Some(t) = self.active_file_tabs_mut() { t.add_clone()?; }
+            }
+            (false, false, KeyCode::Char('w')) => {
+                if let Some(t) = self.active_file_tabs_mut() { t.close_active(); }
+            }
+            // F-key tab controls, matching the shell panel: F9 = new tab,
+            // F1/F2 = previous/next tab, F10 = close tab (with confirm). Plain
+            // and shifted both work, so the muscle memory carries over.
+            (false, _, KeyCode::F(9)) => {
+                if let Some(t) = self.active_file_tabs_mut() { t.add_clone()?; }
+            }
+            (false, _, KeyCode::F(1)) => {
+                if let Some(t) = self.active_file_tabs_mut() { t.prev_tab(); }
+            }
+            (false, _, KeyCode::F(2)) => {
+                if let Some(t) = self.active_file_tabs_mut() { t.next_tab(); }
+            }
+            (false, _, KeyCode::F(10)) => {
+                self.popup = Popup::ConfirmClose { target: CloseTarget::FileTab(self.focused) };
+            }
+            // search, filter, history, shortcuts
+            (false, false, KeyCode::Char('f')) => self.start_search(),
+            (false, _, KeyCode::Char('/')) => self.start_filter(),
+            (false, true, KeyCode::Char('F')) => self.start_find_prompt(),
+            (true, _, KeyCode::Char('f')) => self.start_grep_prompt(),
+            (false, _, KeyCode::Char(',')) => self.start_sort_picker(),
+            (false, false, KeyCode::Char('z')) => self.start_jump_path(),
+            (false, false, KeyCode::F(3)) => self.look_inside(),
+            // `=` for "are these equal": free, mnemonic, and next to the
+            // keys already used for the two panes.
+            (false, _, KeyCode::Char('=')) => self.open_diff(),
+            // Manual refresh, for the cases the timer cannot see — a file
+            // whose contents changed without the directory being touched.
+            (true, _, KeyCode::Char('r')) | (false, false, KeyCode::F(5)) => {
+                self.reload_both();
+                self.message = Some("refreshed".into());
+            }
+            // `M` (and Shift+Enter, where the terminal can report it) opens the
+            // same menu the right mouse button does, for the entry under the
+            // cursor. Shift+Enter needs a terminal that distinguishes it from
+            // plain Enter — the Windows console does, and Unix terminals with
+            // the kitty keyboard protocol (kitty, WezTerm, foot). macOS
+            // Terminal.app cannot, so `M` is the reliable key there; `:menu`
+            // always works too.
+            (false, _, KeyCode::Char('M')) => self.open_menu_at_cursor(),
+            (false, true, KeyCode::Enter) => self.open_menu_at_cursor(),
+            (false, true, KeyCode::Char('S')) => self.start_ssh(),
+            (false, _, KeyCode::Char('n')) => self.jump_to_next_match(true),
+            (false, _, KeyCode::Char('N')) => self.jump_to_next_match(false),
+            (false, false, KeyCode::Char('h')) => self.start_history(),
+            (false, false, KeyCode::Char('s')) => self.start_shortcuts(),
+            // navigation: gg/G + Shift+U/D for fast cursor moves
+            (false, false, KeyCode::Char('g')) => { self.pending_g = true; }
+            (false, _, KeyCode::Char('G')) => {
+                if let Some(p) = self.active_pane_mut() {
+                    if !p.entries.is_empty() { p.cursor = p.entries.len() - 1; }
+                }
+            }
+            (false, _, KeyCode::Char('U')) => {
+                if let Some(p) = self.active_pane_mut() { p.move_cursor(-10); }
+            }
+            (false, _, KeyCode::Char('D')) => {
+                if let Some(p) = self.active_pane_mut() { p.move_cursor(10); }
+            }
+            // p = copy path strings; P = copy file references (Finder/Explorer-style)
+            (false, false, KeyCode::Char('p')) => self.copy_paths_to_clipboard(),
+            (false, true, KeyCode::Char('P')) => self.copy_file_refs_to_clipboard(),
+            (false, false, KeyCode::Char(' ')) => {
+                if let Some(p) = self.active_pane_mut() {
+                    let i = p.cursor; p.toggle_mark_at(i); p.move_cursor(1);
+                }
+            }
+            (false, true, KeyCode::Char(' ')) => {
+                if let Some(p) = self.active_pane_mut() {
+                    let i = p.cursor; p.toggle_mark_at(i); p.move_cursor(-1);
+                }
+            }
+            (false, false, KeyCode::Char('v')) => self.visual_start(),
+            (false, true, KeyCode::Char('V')) => {
+                if let Some(p) = self.active_pane_mut() {
+                    for i in 0..p.entries.len() { p.toggle_mark_at(i); }
+                }
+            }
+            (false, false, KeyCode::Char('y')) | (false, false, KeyCode::Char('c')) => {
+                self.start_transfer(PendingOp::Copy);
+            }
+            (false, false, KeyCode::Char('m')) => self.start_transfer(PendingOp::Move),
+            (false, false, KeyCode::Char('d')) => self.start_delete(),
+            (false, false, KeyCode::Char('r')) => self.start_rename(),
+            (false, false, KeyCode::Char('a')) => self.start_new_file(),
+            (false, true, KeyCode::Char('A')) => self.start_new_dir(),
+            (false, false, KeyCode::Char('j')) | (_, _, KeyCode::Down) => {
+                if let Some(p) = self.active_pane_mut() { p.move_cursor(1); }
+            }
+            (false, false, KeyCode::Char('k')) | (_, _, KeyCode::Up) => {
+                if let Some(p) = self.active_pane_mut() { p.move_cursor(-1); }
+            }
+            // Parent: `-` or Backspace. The arrows move between panes instead,
+            // which is what a two-pane layout makes people reach for — using
+            // them for up/into a directory was reported as confusing.
+            (false, false, KeyCode::Char('-'))
+            | (_, _, KeyCode::Backspace) => {
+                if let Some(p) = self.active_pane_mut() { p.go_parent()?; }
+            }
+            (_, _, KeyCode::Left) => self.focus(FocusedPane::Left),
+            (_, _, KeyCode::Right) => self.focus(FocusedPane::Right),
+            // `l` only enters directories; never opens files.
+            (false, false, KeyCode::Char('l')) => {
+                if let Some(p) = self.active_pane_mut() {
+                    let is_dir = p.selected().map(|e| e.is_dir).unwrap_or(false);
+                    if is_dir { p.enter_selected()?; }
+                }
+            }
+            // Ctrl+Enter / Ctrl+Shift+Enter need kitty keyboard protocol to be distinguished.
+            (true, false, KeyCode::Enter) => { self.open_in_other_pane(false)?; }
+            (true, true, KeyCode::Enter) => { self.open_in_other_pane(true)?; }
+            // `o` pulls the other pane's directory into this one; `O` pushes
+            // this pane's directory onto the other. (Open-into-other-pane lives
+            // on Ctrl+Enter above.)
+            (false, false, KeyCode::Char('o')) => { self.sync_active_from_other()?; }
+            (false, true, KeyCode::Char('O')) => { self.sync_other_from_active()?; }
+            // Enter alone keeps the OS-open behavior until viewer ships in sprint 5.
+            (false, _, KeyCode::Enter) => {
+                let is_dir = self.active_pane()
+                    .and_then(|p| p.selected())
+                    .map(|e| e.is_dir)
+                    .unwrap_or(false);
+                if is_dir {
+                    if let Some(p) = self.active_pane_mut() { p.enter_selected()?; }
+                } else {
+                    self.open_externally();
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    /// Run a remappable action (dispatched from a user keymap override). The
+    /// bodies mirror the default key handlers exactly so behaviour is identical
+    /// whether triggered by a default key or a user-bound one.
+    pub(crate) fn execute_action(&mut self, action: Action) -> Result<()> {
+        match action {
+            Action::CursorDown => {
+                if let Some(p) = self.active_pane_mut() { p.move_cursor(1); }
+            }
+            Action::CursorUp => {
+                if let Some(p) = self.active_pane_mut() { p.move_cursor(-1); }
+            }
+            Action::CursorTop => {
+                if let Some(p) = self.active_pane_mut() { p.cursor = 0; }
+            }
+            Action::CursorBottom => {
+                if let Some(p) = self.active_pane_mut() {
+                    if !p.entries.is_empty() { p.cursor = p.entries.len() - 1; }
+                }
+            }
+            Action::PageUp => {
+                if let Some(p) = self.active_pane_mut() { p.move_cursor(-10); }
+            }
+            Action::PageDown => {
+                if let Some(p) = self.active_pane_mut() { p.move_cursor(10); }
+            }
+            Action::Parent => {
+                if let Some(p) = self.active_pane_mut() { p.go_parent()?; }
+            }
+            Action::EnterDir => {
+                if let Some(p) = self.active_pane_mut() {
+                    let is_dir = p.selected().map(|e| e.is_dir).unwrap_or(false);
+                    if is_dir { p.enter_selected()?; }
+                }
+            }
+            Action::Quit => self.start_quit_confirm(),
+            Action::Search => self.start_search(),
+            Action::SearchNext => self.jump_to_next_match(true),
+            Action::SearchPrev => self.jump_to_next_match(false),
+            Action::History => self.start_history(),
+            Action::Shortcuts => self.start_shortcuts(),
+            Action::Copy => self.start_transfer(PendingOp::Copy),
+            Action::Move => self.start_transfer(PendingOp::Move),
+            Action::Delete => self.start_delete(),
+            Action::Rename => self.start_rename(),
+            Action::NewFile => self.start_new_file(),
+            Action::NewDir => self.start_new_dir(),
+            Action::OpenOther => self.open_in_other_pane(false)?,
+            Action::OpenOtherTab => self.open_in_other_pane(true)?,
+            Action::SyncFromOther => self.sync_active_from_other()?,
+            Action::SyncToOther => self.sync_other_from_active()?,
+            Action::OpenExternal => self.open_externally(),
+            Action::CopyPath => self.copy_paths_to_clipboard(),
+            Action::CopyFileRef => self.copy_file_refs_to_clipboard(),
+            Action::MarkDown => {
+                if let Some(p) = self.active_pane_mut() {
+                    let i = p.cursor; p.toggle_mark_at(i); p.move_cursor(1);
+                }
+            }
+            Action::MarkUp => {
+                if let Some(p) = self.active_pane_mut() {
+                    let i = p.cursor; p.toggle_mark_at(i); p.move_cursor(-1);
+                }
+            }
+            Action::InvertMarks => {
+                if let Some(p) = self.active_pane_mut() {
+                    for i in 0..p.entries.len() { p.toggle_mark_at(i); }
+                }
+            }
+            Action::Visual => self.visual_start(),
+            Action::Command => {
+                self.mode = Mode::Command;
+                self.command_buffer.clear();
+            }
+            Action::Filter => self.start_filter(),
+            Action::FindRecursive => self.start_find_prompt(),
+            Action::GrepRecursive => self.start_grep_prompt(),
+            Action::Sort => self.start_sort_picker(),
+            Action::JumpPath => self.start_jump_path(),
+            Action::View => self.look_inside(),
+            Action::Diff => self.open_diff(),
+            Action::Refresh => {
+                self.reload_both();
+                self.message = Some("refreshed".into());
+            }
+            Action::Menu => self.open_menu_at_cursor(),
+            Action::Ssh => self.start_ssh(),
+            Action::NewTab => {
+                if let Some(t) = self.active_file_tabs_mut() {
+                    t.add_clone()?;
+                }
+            }
+            Action::CloseTab => {
+                if let Some(t) = self.active_file_tabs_mut() {
+                    t.close_active();
+                }
+            }
+            Action::Manual => self.open_manual(),
+            Action::Nop => {}
+        }
+        Ok(())
+    }
+}
