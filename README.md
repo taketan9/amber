@@ -34,9 +34,16 @@ Almost everything is reachable with the mouse.
 
 **Left** and **Right** move focus between the two file panes — the thing a
 two-pane layout makes you reach for. `l` / `Enter` enter a directory and `-` /
-`Backspace` go up, as before. A **double-click** activates an entry: a directory
-is entered, a file is opened with its OS default program (or an `init.lua`
+`Backspace` go up, as before. Each pane also lists a **`..`** row at the top:
+`Enter` it, or single-click it, to step up a level — handy for mouse-first
+navigation. A **double-click** activates any other entry: a directory is
+entered, a file is opened with its OS default program (or an `init.lua`
 `on_open` handler).
+
+A single left-click just moves the cursor to a row — it never marks. To mark a
+range with the mouse, **drag** across the rows (a rubber-band selection);
+marking individual files is `Space`. The `..` row is navigation only: it can be
+neither marked nor used as the target of an operation.
 
 Drag any border to re-proportion the split it divides — the two file panes, the
 file/shell divider, and every split inside the shell panel. Neither side can be

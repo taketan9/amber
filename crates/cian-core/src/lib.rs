@@ -27,6 +27,10 @@ pub struct Entry {
     pub len: u64,
     /// Last modification time, if the filesystem reports one.
     pub modified: Option<SystemTime>,
+    /// True for the synthetic `..` row that steps up to the parent directory.
+    /// It is navigable but never a target: it cannot be marked, copied, moved,
+    /// renamed or deleted, and file operations skip it.
+    pub is_parent: bool,
 }
 
 impl Entry {
@@ -42,7 +46,19 @@ impl Entry {
         let meta = de.metadata().ok();
         let len = meta.as_ref().map(|m| m.len()).unwrap_or(0);
         let modified = meta.as_ref().and_then(|m| m.modified().ok());
-        Ok(Self { name, path, is_dir, len, modified })
+        Ok(Self { name, path, is_dir, len, modified, is_parent: false })
+    }
+
+    /// The synthetic `..` entry pointing at `parent`.
+    fn parent_row(parent: PathBuf) -> Self {
+        Self {
+            name: "..".to_string(),
+            path: parent,
+            is_dir: true,
+            len: 0,
+            modified: None,
+            is_parent: true,
+        }
     }
 }
 
@@ -169,6 +185,7 @@ impl Pane {
             stamp: None,
         };
         pane.reload()?;
+        pane.cursor_to_first_real();
         Ok(pane)
     }
 
@@ -266,13 +283,22 @@ impl Pane {
     fn apply_filter(&mut self) {
         let needle = self.filter.to_lowercase();
         let show_hidden = self.show_hidden;
-        self.entries = self
+        let mut entries: Vec<Entry> = self
             .all_entries
             .iter()
             .filter(|e| show_hidden || !e.name.starts_with('.'))
             .filter(|e| needle.is_empty() || e.name.to_lowercase().contains(&needle))
             .cloned()
             .collect();
+        // A `..` row at the very top, so stepping up a level is a visible,
+        // clickable target (as in classic file managers). Not at the filesystem
+        // root, which has no parent. It always shows, even under a filter —
+        // hiding the way out would be surprising — but never when it would not
+        // match: it is navigation, not a listed file.
+        if let Some(parent) = self.cwd.parent().map(|p| p.to_path_buf()) {
+            entries.insert(0, Entry::parent_row(parent));
+        }
+        self.entries = entries;
         if self.cursor >= self.entries.len() {
             self.cursor = self.entries.len().saturating_sub(1);
         }
@@ -319,10 +345,10 @@ impl Pane {
                 let prev = self.cwd.clone();
                 self.push_history(prev);
                 self.cwd = e.path;
-                self.cursor = 0;
                 self.marks.clear();
                 self.filter.clear();
                 self.reload()?;
+                self.cursor_to_first_real();
             }
         }
         Ok(())
@@ -334,10 +360,10 @@ impl Pane {
             let prev = self.cwd.clone();
             self.push_history(prev);
             self.cwd = parent;
-            self.cursor = 0;
             self.marks.clear();
             self.filter.clear();
             self.reload()?;
+            self.cursor_to_first_real();
         }
         Ok(())
     }
@@ -346,11 +372,17 @@ impl Pane {
         let prev = self.cwd.clone();
         self.push_history(prev);
         self.cwd = path;
-        self.cursor = 0;
         self.marks.clear();
         self.filter.clear();
         self.reload()?;
+        self.cursor_to_first_real();
         Ok(())
+    }
+
+    /// Park the cursor on the first real entry, skipping the `..` row, so a
+    /// freshly opened directory does not start with the cursor on "up a level".
+    fn cursor_to_first_real(&mut self) {
+        self.cursor = self.entries.iter().position(|e| !e.is_parent).unwrap_or(0);
     }
 
     pub fn selected(&self) -> Option<&Entry> {
@@ -359,6 +391,9 @@ impl Pane {
 
     pub fn toggle_mark_at(&mut self, idx: usize) {
         if let Some(e) = self.entries.get(idx) {
+            if e.is_parent {
+                return; // `..` is navigation, never a selection
+            }
             let p = e.path.clone();
             if !self.marks.remove(&p) {
                 self.marks.insert(p);
@@ -368,6 +403,9 @@ impl Pane {
 
     pub fn set_mark_at(&mut self, idx: usize) {
         if let Some(e) = self.entries.get(idx) {
+            if e.is_parent {
+                return;
+            }
             self.marks.insert(e.path.clone());
         }
     }
@@ -388,12 +426,15 @@ impl Pane {
     }
 
     /// Return marked paths, or if none marked, the cursor's path as a fallback.
+    /// The synthetic `..` row is never a target — acting on the cursor while it
+    /// sits on `..` (delete, copy, rename, …) yields nothing rather than
+    /// operating on the parent directory.
     pub fn target_paths(&self) -> Vec<PathBuf> {
         if !self.marks.is_empty() {
             let mut v: Vec<PathBuf> = self.marks.iter().cloned().collect();
             v.sort();
             v
-        } else if let Some(e) = self.selected() {
+        } else if let Some(e) = self.selected().filter(|e| !e.is_parent) {
             vec![e.path.clone()]
         } else {
             Vec::new()
@@ -550,14 +591,21 @@ mod tests {
         assert_eq!(names(&pane), vec!["notes.txt"], "the dotfile stays hidden");
     }
 
+    /// The listed names, excluding the synthetic `..` navigation row (a temp
+    /// dir always has a parent, so it is always present).
     fn names(pane: &Pane) -> Vec<String> {
-        pane.entries.iter().map(|e| e.name.clone()).collect()
+        pane.entries.iter().filter(|e| !e.is_parent).map(|e| e.name.clone()).collect()
+    }
+
+    /// Count of real entries (without the `..` row).
+    fn real_len(pane: &Pane) -> usize {
+        pane.entries.iter().filter(|e| !e.is_parent).count()
     }
 
     #[test]
     fn filter_narrows_and_is_case_insensitive() {
         let (_d, mut pane) = pane_with(&["Alpha.rs", "beta.rs", "gamma.txt"]);
-        assert_eq!(pane.entries.len(), 3);
+        assert_eq!(real_len(&pane), 3);
 
         pane.set_filter("RS");
         assert_eq!(names(&pane), vec!["Alpha.rs", "beta.rs"]);
@@ -570,28 +618,32 @@ mod tests {
     fn clearing_filter_restores_every_entry() {
         let (_d, mut pane) = pane_with(&["a.txt", "b.txt", "c.md"]);
         pane.set_filter("md");
-        assert_eq!(pane.entries.len(), 1);
+        assert_eq!(real_len(&pane), 1);
         pane.clear_filter();
-        assert_eq!(pane.entries.len(), 3);
+        assert_eq!(real_len(&pane), 3);
     }
 
     #[test]
     fn filter_clamps_cursor_into_range() {
         let (_d, mut pane) = pane_with(&["a.txt", "b.txt", "c.txt"]);
-        pane.cursor = 2;
+        pane.cursor = 3;
         pane.set_filter("a.txt");
-        // Only one entry survives, so the cursor must not dangle past it.
-        assert_eq!(pane.entries.len(), 1);
-        assert_eq!(pane.cursor, 0);
+        // Only `..` and the one match survive, so the cursor must not dangle
+        // past the end of the list.
+        assert_eq!(real_len(&pane), 1);
+        assert_eq!(pane.entries.len(), 2, "`..` plus the match");
+        assert!(pane.cursor < pane.entries.len());
     }
 
     #[test]
     fn no_match_yields_empty_list_and_zero_cursor() {
         let (_d, mut pane) = pane_with(&["a.txt"]);
         pane.set_filter("zzz");
-        assert!(pane.entries.is_empty());
+        // No real matches, but `..` stays as the way out.
+        assert_eq!(real_len(&pane), 0);
         assert_eq!(pane.cursor, 0);
-        assert!(pane.selected().is_none());
+        assert!(pane.selected().map(|e| e.is_parent).unwrap_or(false), "only `..` remains");
+        // `..` is never a target, so acting on the cursor yields nothing.
         assert!(pane.target_paths().is_empty());
     }
 
@@ -634,9 +686,12 @@ mod tests {
     #[test]
     fn target_paths_prefers_marks_over_cursor() {
         let (_d, mut pane) = pane_with(&["a.txt", "b.txt"]);
+        // Move off the `..` row (index 0) onto a real entry first.
+        pane.cursor = 1;
         assert_eq!(pane.target_paths().len(), 1, "falls back to the cursor");
-        pane.set_mark_at(0);
+        // set_mark_at skips `..`, so marking indices 1 and 2 marks both files.
         pane.set_mark_at(1);
+        pane.set_mark_at(2);
         assert_eq!(pane.target_paths().len(), 2);
     }
 }

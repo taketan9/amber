@@ -1678,6 +1678,8 @@ enum MenuItem {
     AiCommit,
     /// Detect junk files in the current directory.
     AiJunk,
+    /// Open the shortcuts / bookmarks menu (the `s` key).
+    Shortcuts,
     /// A submenu grouping the AI actions (drills down when chosen).
     AiMenu,
     /// A submenu grouping the file-transfer actions.
@@ -1742,6 +1744,7 @@ impl MenuItem {
             MenuItem::AiShellCmd => tr(lang, "Command from description", "説明からコマンド生成"),
             MenuItem::AiCommit => tr(lang, "Draft commit message", "コミットメッセージ生成"),
             MenuItem::AiJunk => tr(lang, "Detect junk files", "ゴミファイル検出"),
+            MenuItem::Shortcuts => tr(lang, "Shortcuts  (s)", "ショートカット  (s)"),
             MenuItem::AiMenu => tr(lang, "AI ▸", "AI ▸"),
             MenuItem::SendMenu => tr(lang, "Transfer ▸", "転送 ▸"),
             MenuItem::WindowMenu => tr(lang, "Window ▸", "ウィンドウ ▸"),
@@ -2284,6 +2287,11 @@ struct FileDrag {
     /// The entry index the drag started on. A drag that stays inside the origin
     /// pane rubber-band-selects from here to the row under the pointer.
     anchor: usize,
+    /// True once the pointer has reached a row other than the anchor, i.e. a
+    /// real rubber-band selection has begun. A press-and-release on one row —
+    /// even if the terminal reports a stray same-cell Drag — must stay a click
+    /// and never touch the marks.
+    rubber: bool,
 }
 
 pub struct App {
@@ -2917,7 +2925,7 @@ impl App {
             return;
         }
         let paths: Vec<PathBuf> = match self.active_pane() {
-            Some(p) => p.entries.iter().map(|e| e.path.clone()).collect(),
+            Some(p) => p.entries.iter().filter(|e| !e.is_parent).map(|e| e.path.clone()).collect(),
             None => Vec::new(),
         };
         if paths.is_empty() {
@@ -4427,7 +4435,8 @@ impl App {
     /// cursor happens to be in at the moment of pressing the key should not
     /// silently swap the two sides of the result.
     fn open_diff(&mut self) {
-        let pick = |t: &PaneTabs| t.active_ref().selected().cloned();
+        // The `..` row is never a comparison subject; treat it as no selection.
+        let pick = |t: &PaneTabs| t.active_ref().selected().filter(|e| !e.is_parent).cloned();
         let (Some(a), Some(b)) = (pick(&self.left), pick(&self.right)) else {
             self.message = Some("select a file (or a folder) in each pane to compare".into());
             return;
@@ -5101,7 +5110,7 @@ impl App {
         let rows: Vec<(String, PathBuf, bool, u64)> = pane
             .entries
             .iter()
-            .filter(|e| e.name != "..")
+            .filter(|e| !e.is_parent)
             .map(|e| (e.name.clone(), e.path.clone(), e.is_dir, e.len))
             .collect();
         if rows.is_empty() {
@@ -6038,12 +6047,24 @@ impl App {
                     // Dragging onto the other pane stays a copy/move gesture.
                     if over == Some(from) && from != FocusedPane::Shell {
                         self.cursor_to_row(from, row);
-                        if let Some(p) = self.active_pane_mut() {
-                            let cur = p.cursor;
-                            let (lo, hi) = (anchor.min(cur), anchor.max(cur));
-                            p.clear_marks();
-                            for i in lo..=hi {
-                                p.set_mark_at(i);
+                        // Only start marking once the pointer has actually left
+                        // the anchor row: a click that jitters within one cell
+                        // reports a same-row Drag, and that must not mark. Once a
+                        // real rubber-band has begun, keep updating it (even back
+                        // onto the anchor row).
+                        let cur = self.active_pane().map(|p| p.cursor).unwrap_or(anchor);
+                        let rubber = self.file_drag.as_ref().map(|d| d.rubber).unwrap_or(false)
+                            || cur != anchor;
+                        if let Some(d) = &mut self.file_drag {
+                            d.rubber = rubber;
+                        }
+                        if rubber {
+                            if let Some(p) = self.active_pane_mut() {
+                                let (lo, hi) = (anchor.min(cur), anchor.max(cur));
+                                p.clear_marks();
+                                for i in lo..=hi {
+                                    p.set_mark_at(i);
+                                }
                             }
                         }
                     }
@@ -6148,6 +6169,14 @@ impl App {
                 self.focus(pane);
                 // Put the cursor on the row that was clicked.
                 self.cursor_to_row(pane, row);
+                // The `..` row has no other purpose, so a single click on it
+                // steps up a level immediately rather than waiting for a
+                // double-click — it can be neither marked nor dragged.
+                if self.active_pane().and_then(|p| p.selected()).map(|e| e.is_parent).unwrap_or(false) {
+                    self.last_click = None;
+                    let _ = self.activate_selected();
+                    return;
+                }
                 // A second click on the same row in quick succession is a
                 // double-click: enter a directory, or open a file with its OS
                 // default program — the same as Enter / the open key.
@@ -6168,8 +6197,14 @@ impl App {
                 let anchor = self.active_pane().map(|p| p.cursor).unwrap_or(0);
                 let paths = self.active_pane().map(|p| p.target_paths()).unwrap_or_default();
                 if !paths.is_empty() {
-                    self.file_drag =
-                        Some(FileDrag { from: pane, paths, over: Some(pane), moved: false, anchor });
+                    self.file_drag = Some(FileDrag {
+                        from: pane,
+                        paths,
+                        over: Some(pane),
+                        moved: false,
+                        anchor,
+                        rubber: false,
+                    });
                 }
             }
             None => {}
@@ -6655,6 +6690,8 @@ impl App {
             items.push(MenuItem::Hash);
             items.push(MenuItem::Compare);
             items.push(MenuItem::HiddenToggle);
+            // The bookmarks menu, reachable by mouse as well as the `s` key.
+            items.push(MenuItem::Shortcuts);
             // SFTP transfer, offered only when servers are configured.
             if !self.config.ssh_hosts.is_empty() {
                 items.push(MenuItem::SendMenu);
@@ -6877,6 +6914,7 @@ impl App {
             MenuItem::AiShellCmd => self.start_ai_shell_prompt(),
             MenuItem::AiCommit => self.start_ai_commit_message(),
             MenuItem::AiJunk => self.start_ai_junk(),
+            MenuItem::Shortcuts => self.start_shortcuts(),
             MenuItem::Lang => {
                 // Flip the interface language; every localized string reads
                 // `self.lang` at draw time, so the next frame is fully in the
@@ -8860,8 +8898,14 @@ fn shortcut_icon(target: &str) -> &'static str {
             .map(|s| s.to_string())
             .unwrap_or_default();
         // Only the name matters here: this is used to pick an icon by extension.
-        let entry =
-            cian_core::Entry { name, path: path.clone(), is_dir: false, len: 0, modified: None };
+        let entry = cian_core::Entry {
+            name,
+            path: path.clone(),
+            is_dir: false,
+            len: 0,
+            modified: None,
+            is_parent: false,
+        };
         return icon_for(&entry);
     }
     "\u{f15b}" // default file
@@ -9818,6 +9862,11 @@ fn tabs_title<'a>(
 
 /// Pick a Nerd Font glyph based on the entry name/extension.
 fn icon_for(entry: &cian_core::Entry) -> &'static str {
+    // The synthetic `..` row gets an up-level arrow so it reads as navigation,
+    // not as a folder that happens to be called "..".
+    if entry.is_parent {
+        return "\u{f062}"; // arrow-up
+    }
     if entry.is_dir {
         return match entry.name.as_str() {
             ".git" => "\u{e702}",
@@ -10085,15 +10134,25 @@ fn draw_file_pane(
         ]);
         let meta_style = Style::default().fg(theme().dim);
         if show_size {
-            // Directories have no meaningful byte count of their own.
-            let s = if e.is_dir { "—".to_string() } else { cian_core::human_size(e.len) };
+            // Directories have no meaningful byte count; the `..` row shows none.
+            let s = if e.is_parent {
+                String::new()
+            } else if e.is_dir {
+                "—".to_string()
+            } else {
+                cian_core::human_size(e.len)
+            };
             spans.push(Span::styled(
                 format!(" {:>w$}", s, w = SIZE_COL_W as usize),
                 meta_style,
             ));
         }
         if show_time {
-            let t = e.modified.map(cian_core::format_time).unwrap_or_else(|| "-".into());
+            let t = if e.is_parent {
+                String::new()
+            } else {
+                e.modified.map(cian_core::format_time).unwrap_or_else(|| "-".into())
+            };
             spans.push(Span::styled(format!(" {}", t), meta_style));
         }
 
@@ -13111,11 +13170,12 @@ mod tests {
         let (_d, mut app) = app_with(&["a.txt", "b.txt", "c.txt", "d.txt"]);
         let _ = render(&mut app, 100, 40);
         let left = app.layout_rects.left;
-        // Press on the first row, drag down two rows, release inside the pane.
-        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), left.x + 3, left.y + 1));
-        app.handle_mouse(mouse(MouseEventKind::Drag(MouseButton::Left), left.x + 3, left.y + 3));
-        app.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), left.x + 3, left.y + 3));
-        // The dragged-over range is now marked (3 rows), not a copy to elsewhere.
+        // Row 1 is the `..` row; the files start on row 2. Press on the first
+        // file, drag down two more, release inside the pane.
+        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), left.x + 3, left.y + 2));
+        app.handle_mouse(mouse(MouseEventKind::Drag(MouseButton::Left), left.x + 3, left.y + 4));
+        app.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), left.x + 3, left.y + 4));
+        // The dragged-over range is now marked (3 files), not a copy to elsewhere.
         assert_eq!(app.active_pane().unwrap().mark_count(), 3, "range is marked");
         assert!(app.file_drag.is_none(), "drag released");
     }
@@ -13164,23 +13224,24 @@ mod tests {
     #[test]
     fn slash_filters_the_listing_incrementally() {
         let (_d, mut app) = app_with(&["alpha.rs", "beta.rs", "gamma.txt"]);
-        assert_eq!(app.active_pane().unwrap().entries.len(), 3);
+        // Counts include the synthetic `..` row, so a 3-file dir lists 4.
+        assert_eq!(app.active_pane().unwrap().entries.len(), 4);
 
         app.handle_key(key('/')).unwrap();
         assert_eq!(app.mode, Mode::Filter);
 
         app.handle_key(key('r')).unwrap();
         app.handle_key(key('s')).unwrap();
-        assert_eq!(app.active_pane().unwrap().entries.len(), 2);
+        assert_eq!(app.active_pane().unwrap().entries.len(), 3);
 
         // Backspace widens the match: "r" still excludes gamma.txt.
         app.handle_key(code(KeyCode::Backspace)).unwrap();
-        assert_eq!(app.active_pane().unwrap().entries.len(), 2);
+        assert_eq!(app.active_pane().unwrap().entries.len(), 3);
 
         // Emptying the buffer restores the full listing.
         app.handle_key(code(KeyCode::Backspace)).unwrap();
         assert_eq!(app.filter_buffer, "");
-        assert_eq!(app.active_pane().unwrap().entries.len(), 3);
+        assert_eq!(app.active_pane().unwrap().entries.len(), 4);
     }
 
     #[test]
@@ -13191,11 +13252,12 @@ mod tests {
         app.handle_key(key('m')).unwrap();
         app.handle_key(code(KeyCode::Enter)).unwrap();
         assert_eq!(app.mode, Mode::Normal);
-        assert_eq!(app.active_pane().unwrap().entries.len(), 1, "filter should survive Enter");
+        // `..` plus the one match survives the filter.
+        assert_eq!(app.active_pane().unwrap().entries.len(), 2, "filter should survive Enter");
 
         // Esc in normal mode drops the narrowing.
         app.handle_key(code(KeyCode::Esc)).unwrap();
-        assert_eq!(app.active_pane().unwrap().entries.len(), 2);
+        assert_eq!(app.active_pane().unwrap().entries.len(), 3);
     }
 
     #[test]
@@ -13203,10 +13265,10 @@ mod tests {
         let (_d, mut app) = app_with(&["a.txt", "b.md"]);
         app.handle_key(key('/')).unwrap();
         app.handle_key(key('m')).unwrap();
-        assert_eq!(app.active_pane().unwrap().entries.len(), 1);
+        assert_eq!(app.active_pane().unwrap().entries.len(), 2, "`..` plus the match");
         app.handle_key(code(KeyCode::Esc)).unwrap();
         assert_eq!(app.mode, Mode::Normal);
-        assert_eq!(app.active_pane().unwrap().entries.len(), 2);
+        assert_eq!(app.active_pane().unwrap().entries.len(), 3);
     }
 
     #[test]
@@ -13658,7 +13720,7 @@ mod tests {
     #[test]
     fn scp_upload_walks_picker_then_asks_for_the_remote_path() {
         let (_d, mut app) = app_with_ssh();
-        app.active_pane_mut().unwrap().cursor = 0; // a.txt
+        app.active_pane_mut().unwrap().cursor = 1; // a.txt (index 0 is the `..` row)
         app.start_scp(ScpDir::Upload);
         assert!(matches!(app.popup, Popup::SshHosts { .. }), "opens the host picker");
         assert!(app.scp_dir.is_some());
@@ -13705,7 +13767,7 @@ mod tests {
     #[test]
     fn scp_needs_a_password_for_the_user() {
         let (_d, mut app) = app_with_ssh();
-        app.active_pane_mut().unwrap().cursor = 0;
+        app.active_pane_mut().unwrap().cursor = 1; // a real file, not the `..` row
         app.start_scp(ScpDir::Upload);
         // web1 / root has no password configured.
         for c in "web1".chars() {
@@ -14529,7 +14591,8 @@ mod tests {
         app.finish_jump_path(&target.display().to_string()).unwrap();
         // jump_to canonicalises, so compare on the final component.
         assert_eq!(app.active_pane().unwrap().cwd.file_name().unwrap(), "sub");
-        assert_eq!(app.active_pane().unwrap().entries[0].name, "inner.txt");
+        // entries[0] is the `..` row; the first real entry follows it.
+        assert_eq!(app.active_pane().unwrap().entries[1].name, "inner.txt");
     }
 
     /// Naming a file should land the cursor on it, so the pane is left
@@ -14680,9 +14743,10 @@ mod tests {
         app.handle_key(key('a')).unwrap();
 
         assert_eq!(app.visual_anchor, Some(0), "anchored at the top");
-        assert_eq!(app.active_pane().unwrap().cursor, 3, "cursor at the bottom");
+        // 4 files plus the `..` row → last index is 4.
+        assert_eq!(app.active_pane().unwrap().cursor, 4, "cursor at the bottom");
 
-        // Enter commits the range to marks.
+        // Enter commits the range to marks; `..` is never marked, so 4 files.
         app.handle_key(code(KeyCode::Enter)).unwrap();
         assert_eq!(app.active_pane().unwrap().mark_count(), 4);
     }
@@ -14700,7 +14764,8 @@ mod tests {
 
         app.handle_key(key('v')).unwrap();
         app.handle_key(key('G')).unwrap();
-        assert_eq!(app.active_pane().unwrap().cursor, 3, "G must move in visual mode too");
+        // 4 files plus the `..` row → last index is 4.
+        assert_eq!(app.active_pane().unwrap().cursor, 4, "G must move in visual mode too");
 
         app.handle_key(code(KeyCode::Enter)).unwrap();
         assert_eq!(app.active_pane().unwrap().mark_count(), 4);
@@ -14709,8 +14774,10 @@ mod tests {
     #[test]
     fn gg_works_inside_visual_mode() {
         let (_d, mut app) = app_with(&["a.txt", "b.txt", "c.txt"]);
+        // Start on the last file (index 3, after the `..` row) so the range up
+        // to the top covers all three files.
         if let Some(p) = app.active_pane_mut() {
-            p.cursor = 2;
+            p.cursor = 3;
         }
         app.handle_key(key('v')).unwrap();
         app.handle_key(key('g')).unwrap();
@@ -14995,20 +15062,29 @@ mod tests {
         app.focus(FocusedPane::Left);
         app.open_context_menu(5, 5);
         let Popup::ContextMenu { items, .. } = &app.popup else { panic!("no menu") };
-        for want in [MenuItem::HiddenToggle, MenuItem::Attributes, MenuItem::Hash] {
+        for want in [MenuItem::HiddenToggle, MenuItem::Attributes, MenuItem::Hash, MenuItem::Shortcuts] {
             assert!(items.contains(&want), "{:?} missing from {:?}", want, items);
         }
+    }
+
+    #[test]
+    fn the_menu_shortcuts_entry_opens_the_bookmarks() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        app.focus(FocusedPane::Left);
+        app.run_menu_item(MenuItem::Shortcuts).unwrap();
+        assert!(matches!(app.popup, Popup::Shortcuts { .. }), "opened the shortcuts menu");
     }
 
     #[test]
     fn the_menu_toggles_dotfiles_for_the_focused_pane_only() {
         let (_d, mut app) = app_with(&["a.txt", ".hidden"]);
         app.focus(FocusedPane::Left);
-        assert_eq!(app.left.active_ref().entries.len(), 2);
+        // Counts include the `..` row: 2 files + `..` = 3.
+        assert_eq!(app.left.active_ref().entries.len(), 3);
 
         app.run_menu_item(MenuItem::HiddenToggle).unwrap();
-        assert_eq!(app.left.active_ref().entries.len(), 1, "dotfile hidden here");
-        assert_eq!(app.right.active_ref().entries.len(), 2, "and not in the other pane");
+        assert_eq!(app.left.active_ref().entries.len(), 2, "dotfile hidden here");
+        assert_eq!(app.right.active_ref().entries.len(), 3, "and not in the other pane");
     }
 
     /// Dragging from one pane to the other should raise the transfer
@@ -15019,15 +15095,16 @@ mod tests {
         let _ = render(&mut app, 100, 40);
         let (left, right) = (app.layout_rects.left, app.layout_rects.right);
 
-        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), left.x + 5, left.y + 1));
+        // Row 1 is `..`; press on the file on row 2.
+        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), left.x + 5, left.y + 2));
         assert!(app.file_drag.is_some(), "pressing on an entry arms a drag");
 
         app.handle_mouse(mouse(
             MouseEventKind::Drag(MouseButton::Left),
             right.x + 5,
-            right.y + 1,
+            right.y + 2,
         ));
-        app.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), right.x + 5, right.y + 1));
+        app.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), right.x + 5, right.y + 2));
 
         let Popup::ConfirmTransfer { op, targets, dest } = &app.popup else {
             panic!("expected a transfer confirmation, got {:?}", app.popup)
@@ -15044,14 +15121,53 @@ mod tests {
         let _ = render(&mut app, 100, 40);
         let (left, right) = (app.layout_rects.left, app.layout_rects.right);
 
-        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), left.x + 5, left.y + 1));
-        app.handle_mouse(mouse(MouseEventKind::Drag(MouseButton::Left), right.x + 5, right.y + 1));
-        let mut up = mouse(MouseEventKind::Up(MouseButton::Left), right.x + 5, right.y + 1);
+        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), left.x + 5, left.y + 2));
+        app.handle_mouse(mouse(MouseEventKind::Drag(MouseButton::Left), right.x + 5, right.y + 2));
+        let mut up = mouse(MouseEventKind::Up(MouseButton::Left), right.x + 5, right.y + 2);
         up.modifiers = KeyModifiers::SHIFT;
         app.handle_mouse(up);
 
         let Popup::ConfirmTransfer { op, .. } = &app.popup else { panic!("no confirmation") };
         assert_eq!(*op, PendingOp::Move);
+    }
+
+    /// Regression: a click that the terminal reported with a stray same-row
+    /// Drag used to mark that row. Clicking file A then file B then A must
+    /// leave the marks untouched — a bare click is not a mark.
+    #[test]
+    fn clicking_files_never_marks_them() {
+        let (_d, mut app) = app_with(&["a.txt", "b.txt", "c.txt"]);
+        let _ = render(&mut app, 100, 40);
+        let left = app.layout_rects.left;
+        // Rows: 1 = `..`, 2 = a.txt, 3 = b.txt, 4 = c.txt.
+        for cy in [left.y + 2, left.y + 3, left.y + 2] {
+            // A press, a same-row drag (the terminal's jitter), then release.
+            app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), left.x + 3, cy));
+            app.handle_mouse(mouse(MouseEventKind::Drag(MouseButton::Left), left.x + 3, cy));
+            app.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), left.x + 3, cy));
+        }
+        assert_eq!(app.active_pane().unwrap().mark_count(), 0, "clicks must not mark");
+    }
+
+    /// The `..` row navigates up on a single click, and can never be marked.
+    #[test]
+    fn the_parent_row_navigates_up_and_is_never_marked() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::create_dir(d.path().join("sub")).unwrap();
+        std::fs::write(d.path().join("sub/inner.txt"), b"x").unwrap();
+        let start = d.path().join("sub");
+        let mut app = App::new(start.clone(), start, cian_lua::Config::default()).unwrap();
+        let _ = render(&mut app, 100, 40);
+        let left = app.layout_rects.left;
+        // The first row is `..`; a single click steps up to the parent.
+        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), left.x + 3, left.y + 1));
+        assert!(!app.left.active_ref().cwd.ends_with("sub"), "left sub via ..");
+        // Marking the `..` row (e.g. via Space on it) is a no-op.
+        if let Some(p) = app.active_pane_mut() {
+            p.cursor = 0; // back onto `..`
+            p.toggle_mark_at(0);
+        }
+        assert_eq!(app.active_pane().unwrap().mark_count(), 0, "`..` is never marked");
     }
 
     /// Press and release without moving is a click. It must not transfer
@@ -15087,7 +15203,7 @@ mod tests {
         let _ = render(&mut app, 100, 40);
         let (left, shell) = (app.layout_rects.left, app.layout_rects.shell);
 
-        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), left.x + 5, left.y + 1));
+        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), left.x + 5, left.y + 2));
         app.handle_mouse(mouse(MouseEventKind::Drag(MouseButton::Left), shell.x + 5, shell.y + 2));
         app.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), shell.x + 5, shell.y + 2));
 
@@ -15206,9 +15322,9 @@ mod tests {
         let mut app =
             App::new(l.path().to_path_buf(), r.path().to_path_buf(), cian_lua::Config::default())
                 .unwrap();
-        // Cursor on "proj" in each pane.
-        app.left.active_mut().cursor = 0;
-        app.right.active_mut().cursor = 0;
+        // Cursor on "proj" in each pane (index 0 is the `..` row).
+        app.left.active_mut().cursor = 1;
+        app.right.active_mut().cursor = 1;
 
         app.handle_key(code(KeyCode::Char('='))).unwrap();
         assert!(app.diff_job.is_some(), "comparison started on a worker");
@@ -15410,8 +15526,8 @@ mod tests {
     #[test]
     fn mv_with_a_path_renames_a_single_file() {
         let (d, mut app) = app_with(&["old.txt", "z.txt"]);
-        // Cursor on the first entry (sorted): old.txt.
-        app.active_pane_mut().unwrap().cursor = 0;
+        // Cursor on the first file (index 0 is the `..` row): old.txt.
+        app.active_pane_mut().unwrap().cursor = 1;
         let first = app.active_pane().unwrap().selected().unwrap().name.clone();
         run_cmd(&mut app, &format!("mv {}", d.path().join("renamed.txt").display()));
         assert!(d.path().join("renamed.txt").is_file(), "moved to the new name");
@@ -15438,7 +15554,7 @@ mod tests {
         let (d, mut app) = app_with(&["notes.txt"]);
         std::fs::write(d.path().join("notes.txt"), "one two three\nsecond line\n").unwrap();
         app.reload_active();
-        app.active_pane_mut().unwrap().cursor = 0;
+        app.active_pane_mut().unwrap().cursor = 1; // notes.txt (index 0 is `..`)
 
         run_cmd(&mut app, "file");
         let Popup::Notice { lines } = &app.popup else { panic!("file → notice") };
@@ -15456,7 +15572,7 @@ mod tests {
         let text: String = (1..=50).map(|i| format!("line {}\n", i)).collect();
         std::fs::write(d.path().join("log.txt"), text).unwrap();
         app.reload_active();
-        app.active_pane_mut().unwrap().cursor = 0;
+        app.active_pane_mut().unwrap().cursor = 1; // log.txt (index 0 is `..`)
 
         run_cmd(&mut app, "head -n 2");
         let Popup::Notice { lines } = &app.popup else { panic!("head → notice") };
@@ -15506,7 +15622,7 @@ mod tests {
     #[test]
     fn zip_dash_e_asks_for_a_password_which_is_masked() {
         let (d, mut app) = app_with(&["secret.txt"]);
-        app.active_pane_mut().unwrap().cursor = 0;
+        app.active_pane_mut().unwrap().cursor = 1; // secret.txt (index 0 is `..`)
         run_cmd(&mut app, "zip -e locked");
         match &app.popup {
             Popup::TextInput { kind, .. } => {
@@ -15526,7 +15642,7 @@ mod tests {
     #[test]
     fn bang_runs_in_the_shell_with_substitutions() {
         let (d, mut app) = app_with(&["target file.txt"]);
-        app.active_pane_mut().unwrap().cursor = 0;
+        app.active_pane_mut().unwrap().cursor = 1; // the file (index 0 is `..`)
         run_cmd(&mut app, "!echo %f");
         assert_eq!(app.focused, FocusedPane::Shell, "hands over to the shell");
         // No shell spawned in tests, so the command is queued verbatim.
@@ -15565,7 +15681,7 @@ mod tests {
             App::new(l.path().to_path_buf(), r.path().to_path_buf(), cian_lua::Config::default())
                 .unwrap();
         app.focus(FocusedPane::Left);
-        app.active_pane_mut().unwrap().cursor = 0; // doc.txt (a file)
+        app.active_pane_mut().unwrap().cursor = 1; // doc.txt (a file; index 0 is `..`)
         app.open_in_other_pane(false).unwrap();
         assert_eq!(
             app.right.active_ref().cwd,
@@ -15631,8 +15747,8 @@ mod tests {
         let mut app = App::new(p.clone(), p.clone(), cian_lua::Config::default()).unwrap();
         let _ = render(&mut app, 100, 40);
         let r = app.layout_rects.left;
-        // First content row is the top border + 1; "sub" sorts first (dirs first).
-        let (cx, cy) = (r.x + 3, r.y + 1);
+        // Row 1 is the `..` row; "sub" (dirs first) is on row 2.
+        let (cx, cy) = (r.x + 3, r.y + 2);
         app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), cx, cy));
         app.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), cx, cy));
         app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), cx, cy));
@@ -15655,7 +15771,8 @@ mod tests {
         let _ = render(&mut app, 100, 40);
         let root = app.left.active_ref().cwd.clone();
         let r = app.layout_rects.left;
-        let (cx, cy) = (r.x + 3, r.y + 1);
+        // Row 2 is "sub"; row 1 is the `..` row (which would navigate up).
+        let (cx, cy) = (r.x + 3, r.y + 2);
         app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), cx, cy));
         app.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), cx, cy));
         // Age the first click past the double-click window.
@@ -15771,7 +15888,7 @@ mod tests {
     #[test]
     fn the_text_field_edits_at_the_caret_not_only_the_end() {
         let (_d, mut app) = app_with(&["report.txt"]);
-        app.active_pane_mut().unwrap().cursor = 0;
+        app.active_pane_mut().unwrap().cursor = 1; // report.txt (index 0 is `..`)
         app.handle_key(code(KeyCode::Char('r'))).unwrap(); // rename prompt
         // Seeded with the name, caret at the end.
         {
@@ -15831,7 +15948,7 @@ mod tests {
         let mut app =
             App::new(l.path().to_path_buf(), r.path().to_path_buf(), cian_lua::Config::default())
                 .unwrap();
-        app.active_pane_mut().unwrap().cursor = 0;
+        app.active_pane_mut().unwrap().cursor = 1; // old.txt (index 0 is `..`)
         app.handle_key(code(KeyCode::Char('m'))).unwrap(); // move confirm
         app.handle_key(code(KeyCode::Char('r'))).unwrap(); // rename & move
         // Seeded with the source name; clear it and type a new one.
