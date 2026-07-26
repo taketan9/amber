@@ -302,15 +302,44 @@
 -- log tails, HULFT jobs. Open it with `:snip` (or right-click "Snippets →
 -- shell"), type to filter, Enter to send to the active shell pane.
 --
+-- Open it with `!` (the shell "bang"), `:snip`, or right-click "Snippets →
+-- shell" (top of the menu).
+--
 -- Each entry: `cmd` (required, the text sent), `name` (label; defaults to cmd),
 -- `enter` (default true = run it immediately; false = type it for review), and
 -- `confirm` (default false = send at once; true = ask first — use it for
 -- anything destructive). Additive across calls.
+--
+-- `cmd` may hold MULTIPLE commands — put each on its own line (a Lua `[[ ]]`
+-- string is the tidiest) and, with enter = true, they run in sequence.
+--
+-- A worked set for an on-prem Oracle / HULFT / JP1 shop. Copy what fits.
 -- cian.snippets{
---   { name = "sqlplus 開発DB", cmd = "sqlplus user@DEVDB", enter = false },
---   { name = "アプリログ tail", cmd = "tail -f /var/log/app/app.log" },
---   { name = "HULFT 送信 定型", cmd = "utlsend -f SENDID -sync", confirm = true },
---   { name = "df 空き確認",     cmd = "df -g" },
+--   -- ── 参照系（安全なので enter=true で即実行）──────────────────────
+--   { name = "df 空き確認",        cmd = "df -g" },            -- AIX は df -g（RHEL は df -h）
+--   { name = "ディスク使用 top",   cmd = "du -sh * | sort -rh | head" },
+--   { name = "アプリログ tail",    cmd = "tail -f /var/log/app/app.log" },
+--   { name = "プロセス確認 (java)", cmd = "ps -ef | grep -i java | grep -v grep" },
+--   { name = "自分のジョブ",        cmd = "ps -fu $LOGNAME" },
+--
+--   -- ── まとめて流す（複数行。cd してから中身を確認）────────────────
+--   { name = "配置先を確認", cmd = [[
+-- cd /app/deploy/current
+-- pwd
+-- ls -ltr *]] },
+--
+--   -- ── 接続系（enter=false で接続先を目視してから Enter）───────────
+--   { name = "sqlplus 開発19c",  cmd = "sqlplus app@DEV19C",  enter = false },
+--   { name = "sqlplus 検証11g",  cmd = "sqlplus app@STG11G",  enter = false },
+--   { name = "WebLogic 環境",     cmd = ". /app/wls/setDomainEnv.sh", enter = false },
+--
+--   -- ── 状態照会（HULFT / JP1）──────────────────────────────────────
+--   { name = "HULFT 配信状況",   cmd = "utllist -o d" },
+--   { name = "JP1 ジョブ状態",   cmd = "jpqjobget -F AJSROOT1 -l" },
+--
+--   -- ── 副作用あり（confirm=true で送信前に確認）───────────────────
+--   { name = "HULFT 送信 定型",  cmd = "utlsend -f SENDID -sync", confirm = true },
+--   { name = "AP 再起動",         cmd = "/app/bin/restart.sh", confirm = true },
 -- }
 
 

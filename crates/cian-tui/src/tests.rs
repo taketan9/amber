@@ -4376,6 +4376,11 @@
         ];
         let mut app = App::new(p.clone(), p, cfg).unwrap();
 
+        // The `!` key opens it from a file pane.
+        app.handle_key(code(KeyCode::Char('!'))).unwrap();
+        assert!(matches!(app.popup, Popup::Snippets { .. }), "! opens the launcher");
+        app.popup = Popup::None;
+
         // Opening lists all; typing filters by name/command.
         app.start_snippets();
         assert!(matches!(app.popup, Popup::Snippets { .. }), "launcher opens");

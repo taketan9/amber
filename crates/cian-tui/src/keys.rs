@@ -1410,6 +1410,10 @@ impl App {
             (false, false, KeyCode::Char('s')) => self.start_shortcuts(),
             // `@` — vim's play-a-macro key — opens the macro launcher.
             (false, _, KeyCode::Char('@')) => self.start_macros(),
+            // `!` — the shell "bang" — opens the snippet launcher. A reliable
+            // single key everywhere (Ctrl+Shift+Enter is already taken by
+            // open-in-other-pane, and modifier+Enter needs kitty keyboard).
+            (false, _, KeyCode::Char('!')) => self.start_snippets(),
             // navigation: gg/G + Shift+U/D for fast cursor moves
             (false, false, KeyCode::Char('g')) => { self.pending_g = true; }
             (false, _, KeyCode::Char('G')) => {

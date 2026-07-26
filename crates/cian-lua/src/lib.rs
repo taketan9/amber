@@ -890,13 +890,19 @@ mod tests {
               { name = "sqlplus dev", cmd = "sqlplus u@DEV" },
               { cmd = "tail -f /var/log/app.log", enter = false },
               { name = "danger", cmd = "rm -rf tmp", confirm = true },
+              { name = "seq", cmd = [[
+cd /x
+pwd
+ls]] },
               { name = "no cmd" },
             }
             "#,
         )
         .unwrap();
         let cfg = load_from(&init);
-        assert_eq!(cfg.snippets.len(), 3, "the entry without cmd is dropped");
+        assert_eq!(cfg.snippets.len(), 4, "the entry without cmd is dropped");
+        // A multi-line cmd keeps its newlines so it runs as a sequence.
+        assert_eq!(cfg.snippets[3].cmd, "cd /x\npwd\nls");
         assert_eq!(cfg.snippets[0].name, "sqlplus dev");
         assert!(cfg.snippets[0].enter, "enter defaults to true");
         assert!(!cfg.snippets[0].confirm, "confirm defaults to false");

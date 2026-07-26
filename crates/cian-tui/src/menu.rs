@@ -9,6 +9,11 @@ impl App {
         // AI entries only appear when they will work.
         let ai = self.ai.is_some() && self.ai_ready();
         let mut items = Vec::new();
+        // The snippet launcher sits at the very top of either menu — it is the
+        // most-reached-for entry and always targets the shell.
+        if !self.config.snippets.is_empty() {
+            items.push(MenuItem::Snippets);
+        }
         if self.focused == FocusedPane::Shell {
             // A PTY owns its own screen, so the file operations make no sense
             // here. SSH leads: keys never reach the picker while the shell has
@@ -91,10 +96,6 @@ impl App {
                 items.push(MenuItem::SendMenu);
             }
             items.push(MenuItem::Ssh);
-            // The snippet launcher, offered only when snippets are configured.
-            if !self.config.snippets.is_empty() {
-                items.push(MenuItem::Snippets);
-            }
             items.push(MenuItem::Background);
             if ai {
                 items.push(MenuItem::AiMenu);
