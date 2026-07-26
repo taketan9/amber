@@ -287,6 +287,11 @@ enum Popup {
         folded: Vec<cian_core::diff::Row>,
         fold: bool,
         scroll: usize,
+        /// A confirmed text search; rows containing it are highlighted and
+        /// `n`/`N` step between them. `None` when no search is active.
+        find: Option<String>,
+        /// While typing a `/` search, the text entered so far.
+        find_input: Option<String>,
     },
     /// An archive's members, with extraction from the list.
     Archive {

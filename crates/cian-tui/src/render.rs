@@ -2753,7 +2753,7 @@ fn draw_popup(
         return;
     }
 
-    if let Popup::Diff { left, right, result, folded, fold, scroll, encoding, .. } = popup {
+    if let Popup::Diff { left, right, result, folded, fold, scroll, encoding, find, find_input, .. } = popup {
         use cian_core::diff::Row;
 
         let rect = centered_rect(area.width.saturating_sub(2), area.height.saturating_sub(2), area);
@@ -2799,39 +2799,55 @@ fn draw_popup(
             }
         };
 
+        // Rows whose text matches the active search get a highlight bar.
+        let needle = find.as_ref().map(|s| s.to_lowercase());
+        let row_matches = |r: &Row| -> bool {
+            let Some(q) = &needle else { return false };
+            let has = |o: Option<&cian_core::diff::Line>| o.map(|l| l.text.to_lowercase().contains(q)).unwrap_or(false);
+            match r {
+                Row::Same { left, right } | Row::Changed { left, right } => has(Some(left)) || has(Some(right)),
+                Row::Removed { left } => has(Some(left)),
+                Row::Added { right } => has(Some(right)),
+                Row::Skipped { .. } => false,
+            }
+        };
+        let search_bg = Style::default().bg(Color::Rgb(80, 70, 20));
         let body: Vec<Line> = rows
             .iter()
             .skip(*scroll)
             .take(body_h)
-            .map(|r| match r {
-                Row::Skipped { lines } => Line::from(Span::styled(
-                    format!("{:^w$}", format!("⋯ {} identical lines", lines), w = inner.width as usize),
-                    Style::default().fg(Color::Rgb(95, 95, 120)),
-                )),
-                Row::Same { left: l, right: rr } => {
-                    let mut s = cell(Some(l), dim);
-                    s.push(Span::styled(" │ ", num));
-                    s.extend(cell(Some(rr), dim));
-                    Line::from(s)
-                }
-                Row::Changed { left: l, right: rr } => {
-                    let mut s = cell(Some(l), chg);
-                    s.push(Span::styled(" ~ ", chg.add_modifier(Modifier::BOLD)));
-                    s.extend(cell(Some(rr), chg));
-                    Line::from(s)
-                }
-                Row::Removed { left: l } => {
-                    let mut s = cell(Some(l), del);
-                    s.push(Span::styled(" - ", del.add_modifier(Modifier::BOLD)));
-                    s.extend(cell(None, del));
-                    Line::from(s)
-                }
-                Row::Added { right: rr } => {
-                    let mut s = cell(None, add);
-                    s.push(Span::styled(" + ", add.add_modifier(Modifier::BOLD)));
-                    s.extend(cell(Some(rr), add));
-                    Line::from(s)
-                }
+            .map(|r| {
+                let line = match r {
+                    Row::Skipped { lines } => Line::from(Span::styled(
+                        format!("{:^w$}", format!("⋯ {} identical lines", lines), w = inner.width as usize),
+                        Style::default().fg(Color::Rgb(95, 95, 120)),
+                    )),
+                    Row::Same { left: l, right: rr } => {
+                        let mut s = cell(Some(l), dim);
+                        s.push(Span::styled(" │ ", num));
+                        s.extend(cell(Some(rr), dim));
+                        Line::from(s)
+                    }
+                    Row::Changed { left: l, right: rr } => {
+                        let mut s = cell(Some(l), chg);
+                        s.push(Span::styled(" ~ ", chg.add_modifier(Modifier::BOLD)));
+                        s.extend(cell(Some(rr), chg));
+                        Line::from(s)
+                    }
+                    Row::Removed { left: l } => {
+                        let mut s = cell(Some(l), del);
+                        s.push(Span::styled(" - ", del.add_modifier(Modifier::BOLD)));
+                        s.extend(cell(None, del));
+                        Line::from(s)
+                    }
+                    Row::Added { right: rr } => {
+                        let mut s = cell(None, add);
+                        s.push(Span::styled(" + ", add.add_modifier(Modifier::BOLD)));
+                        s.extend(cell(Some(rr), add));
+                        Line::from(s)
+                    }
+                };
+                if row_matches(r) { line.style(search_bg) } else { line }
             })
             .collect();
 
@@ -2860,17 +2876,22 @@ fn draw_popup(
             m => format!("{}%", *scroll * 100 / m),
         };
         let fold_word = if *fold { tr(lang, "show all", "全表示") } else { tr(lang, "fold", "畳む") };
-        f.render_widget(
-            Paragraph::new(format!(
-                "{}{}  {}  {}  [{}] {} ",
-                tr(lang, " n/N change  f ", " n/N 変更  f "),
+        // A live `/` search prompt takes over the footer while typing.
+        let footer = if let Some(q) = find_input {
+            format!(" /{}_ ", q)
+        } else {
+            format!(
+                "{}{}  {}  [{}] {} ",
+                tr(lang, " n/N change  / find  f ", " n/N 変更  / 検索  f "),
                 fold_word,
                 tr(lang, "c copy  w save  e enc  g/G  Esc",
                       "c コピー  w 保存  e 文字コード  g/G  Esc"),
-                tr(lang, "j/k u/d", "j/k u/d"),
                 encoding.label(),
                 pos
-            ))
+            )
+        };
+        f.render_widget(
+            Paragraph::new(footer)
             .style(Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD)),
             Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1),
         );

@@ -3111,6 +3111,30 @@
         assert!(saved.contains("- two") && saved.contains("+ TWO"), "saved diff:\n{saved}");
     }
 
+    #[test]
+    fn the_diff_can_be_searched() {
+        // Put a distinctive word far down so a search has to move the view.
+        let mut a: Vec<String> = (0..30).map(|i| format!("line {}", i)).collect();
+        let b = a.clone();
+        a[25] = "NEEDLE here".into();
+        let (_l, _r, mut app) = two_panes_with(&(a.join("\n") + "\n"), &(b.join("\n") + "\n"));
+        app.handle_key(code(KeyCode::Char('='))).unwrap();
+        // Unfold so every row is present and the index is predictable.
+        app.handle_key(code(KeyCode::Char('f'))).unwrap();
+
+        // /NEEDLE<CR> jumps the view to the matching row and remembers the query.
+        app.handle_key(code(KeyCode::Char('/'))).unwrap();
+        for c in "needle".chars() { app.handle_key(key(c)).unwrap(); }
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+        let Popup::Diff { find, scroll, .. } = &app.popup else { panic!("no diff") };
+        assert_eq!(find.as_deref(), Some("needle"), "query kept");
+        assert_eq!(*scroll, 25, "jumped to the matching row");
+
+        // Esc clears the search but keeps the diff open.
+        app.handle_key(code(KeyCode::Esc)).unwrap();
+        assert!(matches!(&app.popup, Popup::Diff { find: None, .. }));
+    }
+
     /// Which pane holds the focus must not decide which file is the "before".
     #[test]
     fn the_left_pane_is_always_the_left_side() {

@@ -558,6 +558,8 @@ impl App {
                     // opens on a screen of agreement.
                     fold: true,
                     scroll: 0,
+                    find: None,
+                    find_input: None,
                 };
             }
             Err(e) => self.message = Some(format!("cannot compare: {}", e)),
@@ -718,6 +720,40 @@ impl App {
                 Some(out)
             }
             _ => None,
+        }
+    }
+
+    /// Move the diff view to the next/previous row whose text matches the
+    /// active search (case-insensitive). `from_here` includes the current row
+    /// (used right after confirming a search).
+    pub(crate) fn diff_search_jump(&mut self, forward: bool, from_here: bool) {
+        use cian_core::diff::Row;
+        let Popup::Diff { result, folded, fold, scroll, find, .. } = &mut self.popup else { return };
+        let Some(q) = find.as_ref().map(|s| s.to_lowercase()) else { return };
+        let rows: &[Row] = if *fold { folded } else { &result.rows };
+        let hit = |r: &Row| -> bool {
+            let txt = |o: Option<&cian_core::diff::Line>| o.map(|l| l.text.to_lowercase()).unwrap_or_default();
+            match r {
+                Row::Same { left, right } => txt(Some(left)).contains(&q) || txt(Some(right)).contains(&q),
+                Row::Changed { left, right } => txt(Some(left)).contains(&q) || txt(Some(right)).contains(&q),
+                Row::Removed { left } => txt(Some(left)).contains(&q),
+                Row::Added { right } => txt(Some(right)).contains(&q),
+                Row::Skipped { .. } => false,
+            }
+        };
+        let n = rows.len();
+        if n == 0 {
+            return;
+        }
+        let found = if forward {
+            let start = if from_here { *scroll } else { *scroll + 1 };
+            (start..n).find(|&i| hit(&rows[i]))
+        } else {
+            (0..*scroll).rev().find(|&i| hit(&rows[i]))
+        };
+        match found {
+            Some(i) => *scroll = i,
+            None => self.message = Some(tr(self.lang, "no more matches", "一致なし").into()),
         }
     }
 

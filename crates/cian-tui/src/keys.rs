@@ -482,20 +482,42 @@ impl App {
             }
             return Ok(());
         }
-        if let Popup::Diff { result, folded, fold, scroll, .. } = &mut self.popup {
+        if let Popup::Diff { result, folded, fold, scroll, find, find_input, .. } = &mut self.popup {
+            // While typing a `/` search, keys build the query.
+            if let Some(buf) = find_input {
+                match key.code {
+                    KeyCode::Esc => { *find_input = None; }
+                    KeyCode::Enter => {
+                        let q = buf.trim().to_string();
+                        *find_input = None;
+                        *find = if q.is_empty() { None } else { Some(q) };
+                        self.diff_search_jump(true, true);
+                    }
+                    KeyCode::Backspace => { buf.pop(); }
+                    KeyCode::Char(c) => buf.push(c),
+                    _ => {}
+                }
+                return Ok(());
+            }
             let rows: &[cian_core::diff::Row] = if *fold { folded } else { &result.rows };
             let last = rows.len().saturating_sub(1);
+            let searching = find.is_some();
             match key.code {
-                KeyCode::Esc | KeyCode::Char('q') => self.popup = Popup::None,
+                KeyCode::Esc | KeyCode::Char('q') => {
+                    // Esc clears an active search first, then closes.
+                    if find.is_some() { *find = None; } else { self.popup = Popup::None; }
+                }
                 KeyCode::Char('j') | KeyCode::Down => *scroll = (*scroll + 1).min(last),
                 KeyCode::Char('k') | KeyCode::Up => *scroll = scroll.saturating_sub(1),
                 KeyCode::Char('d') | KeyCode::PageDown => *scroll = (*scroll + 20).min(last),
                 KeyCode::Char('u') | KeyCode::PageUp => *scroll = scroll.saturating_sub(20),
                 KeyCode::Char('g') | KeyCode::Home => *scroll = 0,
                 KeyCode::Char('G') | KeyCode::End => *scroll = last,
-                // Jumping between differences is the reason to open this at
-                // all; scrolling to hunt for the next one is the thing every
-                // diff viewer exists to save you from.
+                // `/` searches the diff text; n/N step matches while a search is
+                // active, otherwise they step between differences (the default).
+                KeyCode::Char('/') => { *find_input = Some(String::new()); }
+                KeyCode::Char('n') if searching => self.diff_search_jump(true, false),
+                KeyCode::Char('N') if searching => self.diff_search_jump(false, false),
                 KeyCode::Char('n') => {
                     if let Some(i) =
                         rows.iter().enumerate().skip(*scroll + 1).find(|(_, r)| r.is_difference())
