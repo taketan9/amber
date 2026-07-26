@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 
 use cian_lua::macros::{Macro, PaneStep, Split, Step};
 
-use crate::{theme, tr, App, FocusedPane, Popup, SplitDir};
+use crate::{tr, App, FocusedPane, Popup, SplitDir};
 
 /// Nobody wants a mistyped `wait = 100000` to wedge cian; cap any single pause
 /// or prompt-wait here.
@@ -40,6 +40,9 @@ pub(crate) struct MacroRun {
     expect: Option<(String, Instant)>,
     /// Turn on input broadcast once the whole layout is built.
     sync: bool,
+    /// The shell-leaf id of each pane created so far, in `panes` order, so a
+    /// later pane's `from = N` can split off pane N rather than the previous.
+    leaf_ids: Vec<usize>,
 }
 
 /// Load macros (portable-aware): first `macro.lua` (a list of macros), then
@@ -127,8 +130,13 @@ impl App {
             wait_until: None,
             expect: None,
             sync: m.sync,
+            leaf_ids: Vec::new(),
         });
         self.focus(FocusedPane::Shell);
+        // Maximize the shell panel so a grid has the whole window.
+        if m.zoom && !self.zoomed {
+            self.toggle_zoom();
+        }
         self.message = Some(tr(self.lang, "running macro: ", "マクロ実行中: ").to_string() + &m.name);
     }
 
@@ -202,8 +210,15 @@ impl App {
                 let first = run.first;
                 run.first = false;
                 if !first {
-                    // Split off the previous pane; the new pane becomes active
-                    // when the spawn lands, and we apply to it then.
+                    // `from = N` (1-based) splits pane N rather than the previous
+                    // one — the key to a real grid. Focus that pane's leaf first.
+                    if let Some(n) = next.from {
+                        if let Some(&leaf) = run.leaf_ids.get(n.saturating_sub(1)) {
+                            self.shell.focus_leaf(leaf);
+                        }
+                    }
+                    // Split off the (now focused) pane; the new pane becomes
+                    // active when the spawn lands, and we apply to it then.
                     let dir = match next.dir {
                         Split::Right => SplitDir::LeftRight,
                         Split::Down => SplitDir::TopBottom,
@@ -227,11 +242,15 @@ impl App {
         true
     }
 
-    /// Colour and log the now-active pane, and load its command + scripted steps
-    /// into the runner to be played out over the following ticks.
+    /// Colour and log the now-active pane, remember its leaf id (so a later
+    /// `from` can target it), and load its command + scripted steps.
     fn apply_pane(&mut self, step: &PaneStep, run: &mut MacroRun) {
+        // Record this pane's leaf id in creation order.
+        if let Some(id) = self.shell.active_leaf_id() {
+            run.leaf_ids.push(id);
+        }
         if let Some(spec) = &step.bg {
-            if let Some(c) = theme::parse_color(spec) {
+            if let Some(c) = crate::resolve_bg(spec) {
                 self.shell.set_active_pane_bg(Some(c));
             }
         }

@@ -886,11 +886,26 @@ const PANE_BG_PRESETS: [(&str, Option<Color>); 14] = [
     ("mocha", Some(Color::Rgb(95, 60, 35))),
     ("rust", Some(Color::Rgb(150, 50, 15))),
     ("crimson", Some(Color::Rgb(160, 25, 45))),
-    ("wine", Some(Color::Rgb(140, 15, 85))),
+    // Named for Taketan's own project, crmaine — the emoticon marks it as a nod.
+    ("crmaine (^_-)", Some(Color::Rgb(140, 15, 85))),
     ("plum", Some(Color::Rgb(85, 20, 150))),
     ("steel", Some(Color::Rgb(40, 60, 90))),
     ("slate", Some(Color::Rgb(70, 85, 120))),
 ];
+
+/// Resolve a macro's `bg = "…"`: a preset name (matched on its first word, so
+/// `"crmaine"` finds `"crmaine (^_-)"`), else a `#rrggbb` / named / `"r,g,b"`
+/// spec. `None` for an unknown spec or the "default" preset.
+pub(crate) fn resolve_bg(spec: &str) -> Option<Color> {
+    let key = spec.trim().to_lowercase();
+    for (name, color) in PANE_BG_PRESETS {
+        let first = name.split_whitespace().next().unwrap_or(name).to_lowercase();
+        if first == key {
+            return color;
+        }
+    }
+    theme::parse_color(spec)
+}
 
 /// What a close-confirmation popup will close when accepted.
 #[derive(Debug, Clone, Copy)]

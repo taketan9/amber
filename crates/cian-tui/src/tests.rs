@@ -125,6 +125,17 @@
     }
 
     #[test]
+    fn resolve_bg_accepts_preset_names_and_specs() {
+        // Preset by name (crmaine matches "crmaine (^_-)"), plus hex / r,g,b.
+        assert_eq!(resolve_bg("navy"), Some(Color::Rgb(10, 40, 140)));
+        assert_eq!(resolve_bg("crmaine"), Some(Color::Rgb(140, 15, 85)));
+        assert_eq!(resolve_bg("#402018"), Some(Color::Rgb(0x40, 0x20, 0x18)));
+        assert_eq!(resolve_bg("40,24,24"), Some(Color::Rgb(40, 24, 24)));
+        assert_eq!(resolve_bg("default"), None);
+        assert_eq!(resolve_bg("nonsense"), None);
+    }
+
+    #[test]
     fn broadcast_needs_more_than_one_pane() {
         // With no split panes, synchronize can't turn on (it would be pointless
         // and dangerous), and the toggle is a no-op.

@@ -25,6 +25,8 @@
 --  is the shell
 --  pane you are on; each later pane is split off the previous one:
 --    dir   = "right" (side by side) or "down" (stacked). Default "right".
+--    from  = which earlier pane to split off (1-based; default = the previous
+--            one). This is how you build a real grid — see macro/Cgrid4.lua.
 --    cmd   = a command line to run (typed, then Enter) — e.g. an ssh line.
 --    steps = a scripted sequence run after cmd, played out over time so it can
 --            wait for a prompt instead of racing ahead. Each step is:

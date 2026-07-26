@@ -702,6 +702,15 @@ instead of racing ahead. Each `steps` entry is a line to send (`"text"` or
 sqlplus, connect" into a macro that survives a slow link — see
 [`examples/macro/Bmacro.lua`](examples/macro/Bmacro.lua).
 
+By default a pane splits off the previous one, which cascades. To build a real
+**grid**, a pane can say `from = N` — split off pane *N* (1-based) instead — plus
+`zoom = true` to maximize the shell panel first and `sync = true` to synchronize
+input once it's built. A 2×2 of servers is
+[`examples/macro/Cgrid4.lua`](examples/macro/Cgrid4.lua): pane 1 top-left, pane 2
+= `from 1` right, pane 3 = `from 1` down, pane 4 = `from 2` down. A pane's `bg`
+also accepts a background-preset name (`"navy"`, `"crmaine"`, …), not just a
+colour spec.
+
 **One macro per file.** As an alternative to the single list, put a `macro/`
 directory next to `init.lua` with one file each — `macro/Adeploy.lua`,
 `macro/Bdbcheck.lua` — where each returns a single `{ name =, panes = }` table.

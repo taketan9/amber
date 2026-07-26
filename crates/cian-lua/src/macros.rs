@@ -30,13 +30,20 @@ pub struct Macro {
     /// Turn on input broadcast (synchronize) across the built panes once the
     /// layout is up — for "run the same command on every server" setups.
     pub sync: bool,
+    /// Maximize the shell panel (as F12 does) before building the layout, so a
+    /// multi-pane grid has the whole window.
+    pub zoom: bool,
 }
 
 /// One pane in a layout macro.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct PaneStep {
-    /// How this pane splits off the previous one. Ignored for the first pane.
+    /// How this pane splits off its source. Ignored for the first pane.
     pub dir: Split,
+    /// Which earlier pane to split off (1-based, in `panes` order). `None` =
+    /// the pane created just before this one. Lets a macro build a real grid:
+    /// split pane 1 right for pane 2, split pane 1 down for pane 3, etc.
+    pub from: Option<usize>,
     /// A command line to run in the pane (typed, then Enter). Runs before `steps`.
     pub cmd: Option<String>,
     /// A scripted sequence run in the pane after `cmd`: type lines, pause, or
@@ -130,7 +137,8 @@ fn macro_from(t: &Table) -> Result<Macro, String> {
         return Err(format!("macro {:?} has no panes", name));
     }
     let sync = t.get::<Option<bool>>("sync").unwrap_or(None).unwrap_or(false);
-    Ok(Macro { name, panes, sync })
+    let zoom = t.get::<Option<bool>>("zoom").unwrap_or(None).unwrap_or(false);
+    Ok(Macro { name, panes, sync, zoom })
 }
 
 fn pane_from(t: &Table) -> Result<PaneStep, String> {
@@ -139,6 +147,7 @@ fn pane_from(t: &Table) -> Result<PaneStep, String> {
         .unwrap_or(None)
         .map(|s| Split::parse(&s))
         .unwrap_or_default();
+    let from = t.get::<Option<usize>>("from").unwrap_or(None).filter(|n| *n > 0);
     let cmd = t.get::<Option<String>>("cmd").unwrap_or(None).filter(|s| !s.is_empty());
     let bg = t.get::<Option<String>>("bg").unwrap_or(None).filter(|s| !s.is_empty());
     let log = t.get::<Option<String>>("log").unwrap_or(None).filter(|s| !s.is_empty());
@@ -150,7 +159,7 @@ fn pane_from(t: &Table) -> Result<PaneStep, String> {
             }
         }
     }
-    Ok(PaneStep { dir, cmd, steps, bg, log })
+    Ok(PaneStep { dir, from, cmd, steps, bg, log })
 }
 
 /// Parse one entry of a `steps` list: a bare string (`Send`), or a table
@@ -266,6 +275,22 @@ mod tests {
     #[test]
     fn a_non_table_return_is_an_error() {
         assert!(parse("return 7").is_err());
+    }
+
+    #[test]
+    fn from_and_zoom_parse() {
+        let m = &parse(
+            r#"return { { name = "grid", zoom = true, panes = {
+                { cmd = "a" },
+                { from = 1, dir = "right", cmd = "b" },
+                { from = 1, dir = "down", cmd = "c" },
+            } } }"#,
+        )
+        .unwrap()[0];
+        assert!(m.zoom);
+        assert_eq!(m.panes[0].from, None, "first pane has no source");
+        assert_eq!(m.panes[1].from, Some(1));
+        assert_eq!(m.panes[2].from, Some(1));
     }
 
     #[test]

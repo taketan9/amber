@@ -682,6 +682,14 @@ return {
 遅い回線でも壊れないマクロにできます。
 [`examples/macro/Bmacro.lua`](examples/macro/Bmacro.lua) を参照。
 
+既定では各ペインは「直前のペイン」から分割されカスケードします。真の**グリッド**
+を作るには、ペインに `from = N`（N番目のペイン＝1始まり、から分割）を指定し、
+さらに `zoom = true`（先にシェルパネルを最大化）・`sync = true`（構築後に同時入力）
+を組み合わせます。2×2のサーバ配置例が
+[`examples/macro/Cgrid4.lua`](examples/macro/Cgrid4.lua)：ペイン1=左上、ペイン2=
+`from 1` 右、ペイン3=`from 1` 下、ペイン4=`from 2` 下。ペインの `bg` は色指定
+だけでなく**背景プリセット名**（`"navy"`・`"crmaine"` など）も受け付けます。
+
 **1マクロ1ファイル。** 単一リストの代わりに、`init.lua` の隣に `macro/`
 ディレクトリを置き、`macro/Adeploy.lua`・`macro/Bdbcheck.lua` のように1つずつ
 ファイル分けできます（各ファイルは単一の `{ name =, panes = }` テーブルを返す）。

@@ -286,6 +286,23 @@ impl ShellPane {
         self.active_tab().map(|t| t.leaves().len()).unwrap_or(0)
     }
 
+    /// The active tab's active leaf node id — a stable handle a macro can save
+    /// to later split *that* pane (see [`Self::focus_leaf`]).
+    pub(crate) fn active_leaf_id(&self) -> Option<usize> {
+        let t = self.active_tab()?;
+        matches!(t.nodes.get(t.active), Some(Some(Node::Leaf { .. }))).then_some(t.active)
+    }
+
+    /// Make leaf node `id` the active pane in the active tab (if it is a leaf).
+    pub(crate) fn focus_leaf(&mut self, id: usize) {
+        let active = self.active;
+        if let Some(t) = self.tabs.get_mut(active) {
+            if matches!(t.nodes.get(id), Some(Some(Node::Leaf { .. }))) {
+                t.active = id;
+            }
+        }
+    }
+
     /// The active pane's terminal title (what the shell/program set via OSC) —
     /// usually `user@host: cwd`. Empty titles return None.
     pub(crate) fn active_title(&self) -> Option<String> {
