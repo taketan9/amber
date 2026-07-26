@@ -1213,6 +1213,9 @@ enum Popup {
     /// The AI's proposed renames (old → new), each toggleable. Approving renames
     /// the checked files in place.
     RenameReview { items: Vec<RenameItem>, cursor: usize, scroll: usize },
+    /// Confirm discarding (reverting) worktree changes to tracked files. This
+    /// throws away uncommitted work, so it is gated behind its own dialog.
+    ConfirmDiscard { targets: Vec<PathBuf>, dir: PathBuf },
 }
 
 /// One candidate the junk detector flagged: a path, why it thinks so, and
@@ -1853,6 +1856,14 @@ enum MenuItem {
     AiStructure,
     /// Bulk-rename the marked files (or the whole listing) by an instruction.
     AiRename,
+    /// A submenu grouping the git actions (stage / unstage / discard).
+    GitMenu,
+    /// `git add` the selection.
+    GitStage,
+    /// `git reset HEAD` the selection.
+    GitUnstage,
+    /// `git checkout --` the selection (discard worktree changes).
+    GitDiscard,
     /// Open the shortcuts / bookmarks menu (the `s` key).
     Shortcuts,
     /// A submenu grouping the AI actions (drills down when chosen).
@@ -1882,7 +1893,7 @@ enum MenuItem {
 impl MenuItem {
     /// Group items open a submenu instead of acting; this is their marker.
     fn is_group(self) -> bool {
-        matches!(self, MenuItem::AiMenu | MenuItem::SendMenu | MenuItem::WindowMenu)
+        matches!(self, MenuItem::AiMenu | MenuItem::SendMenu | MenuItem::WindowMenu | MenuItem::GitMenu)
     }
 }
 
@@ -1921,6 +1932,10 @@ impl MenuItem {
             MenuItem::AiJunk => tr(lang, "Detect junk files", "ゴミファイル検出"),
             MenuItem::AiStructure => tr(lang, "Suggest folder structure", "フォルダ構成を提案"),
             MenuItem::AiRename => tr(lang, "Bulk rename", "一括リネーム"),
+            MenuItem::GitMenu => tr(lang, "Git ▸", "Git ▸"),
+            MenuItem::GitStage => tr(lang, "Stage  (git add)", "ステージ  (git add)"),
+            MenuItem::GitUnstage => tr(lang, "Unstage  (git reset)", "アンステージ  (git reset)"),
+            MenuItem::GitDiscard => tr(lang, "Discard changes  (git checkout)", "変更を破棄  (git checkout)"),
             MenuItem::Shortcuts => tr(lang, "Shortcuts  (s)", "ショートカット  (s)"),
             MenuItem::AiMenu => tr(lang, "AI ▸", "AI ▸"),
             MenuItem::SendMenu => tr(lang, "Transfer ▸", "転送 ▸"),
@@ -2755,6 +2770,100 @@ impl App {
         self.git = [None, None];
     }
 
+    /// The active file pane's directory, if it sits in a git repository. Uses
+    /// the cached status when it is warm, and falls back to a direct check (the
+    /// cache is cold right after a git action invalidates it).
+    fn git_repo_dir(&self) -> Option<PathBuf> {
+        match self.focused {
+            FocusedPane::Left | FocusedPane::Right => {
+                let cwd = self.active_pane()?.cwd.clone();
+                if self.git_for(self.focused).is_some() || cian_core::git::status(&cwd).is_some() {
+                    Some(cwd)
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
+    }
+
+    /// The selection to act on for a git command: marked files, else the entry
+    /// under the cursor (never the `..` row).
+    fn git_targets(&self) -> Vec<PathBuf> {
+        self.active_pane().map(|p| p.target_paths()).unwrap_or_default()
+    }
+
+    /// `git add` the selection.
+    fn git_stage(&mut self) {
+        let Some(dir) = self.git_repo_dir() else {
+            self.message = Some("not a git repository".into());
+            return;
+        };
+        let paths = self.git_targets();
+        if paths.is_empty() {
+            self.message = Some("nothing selected".into());
+            return;
+        }
+        match cian_core::git::stage(&dir, &paths) {
+            Ok(()) => {
+                self.message = Some(format!("● staged {} path(s)", paths.len()));
+                self.invalidate_git();
+                self.reload_active();
+            }
+            Err(e) => self.message = Some(format!("git add: {}", e)),
+        }
+    }
+
+    /// `git reset HEAD` the selection (unstage, keeping worktree changes).
+    fn git_unstage(&mut self) {
+        let Some(dir) = self.git_repo_dir() else {
+            self.message = Some("not a git repository".into());
+            return;
+        };
+        let paths = self.git_targets();
+        if paths.is_empty() {
+            self.message = Some("nothing selected".into());
+            return;
+        }
+        match cian_core::git::unstage(&dir, &paths) {
+            Ok(()) => {
+                self.message = Some(format!("unstaged {} path(s)", paths.len()));
+                self.invalidate_git();
+                self.reload_active();
+            }
+            Err(e) => self.message = Some(format!("git reset: {}", e)),
+        }
+    }
+
+    /// Open the confirm dialog for discarding worktree changes to the selection.
+    fn git_discard_prompt(&mut self) {
+        let Some(dir) = self.git_repo_dir() else {
+            self.message = Some("not a git repository".into());
+            return;
+        };
+        let paths = self.git_targets();
+        if paths.is_empty() {
+            self.message = Some("nothing selected".into());
+            return;
+        }
+        self.popup = Popup::ConfirmDiscard { targets: paths, dir };
+    }
+
+    /// `git checkout --` the selection: throw away worktree changes to tracked
+    /// files (untracked files are left alone). Called after the confirm.
+    fn git_discard(&mut self) {
+        let popup = std::mem::replace(&mut self.popup, Popup::None);
+        let Popup::ConfirmDiscard { targets, dir } = popup else { return };
+        match cian_core::git::discard(&dir, &targets) {
+            Ok(()) => {
+                self.message = Some(format!("discarded changes to {} path(s)", targets.len()));
+                self.invalidate_git();
+                self.reload_active();
+            }
+            Err(e) => self.message = Some(format!("git checkout: {}", e)),
+        }
+    }
+
     /// The git status for a file pane, if it sits in a repo.
     fn git_for(&self, pane: FocusedPane) -> Option<&cian_core::git::RepoStatus> {
         let idx = match pane {
@@ -2881,6 +2990,9 @@ impl App {
                     self.start_ai_shell_cmd(rest);
                 }
             }
+            "stage" | "add" => self.git_stage(),
+            "unstage" | "reset" => self.git_unstage(),
+            "discard" | "revert" | "checkout" => self.git_discard_prompt(),
             "aicommit" | "commitmsg" => self.start_ai_commit_message(),
             "aijunk" | "junk" => self.start_ai_junk(),
             "aiorganize" | "aistructure" | "organize" => self.start_ai_structure(),
@@ -7276,6 +7388,10 @@ impl App {
             items.push(MenuItem::Hash);
             items.push(MenuItem::Compare);
             items.push(MenuItem::HiddenToggle);
+            // Git actions, only when this pane sits in a repository.
+            if self.git_for(self.focused).is_some() {
+                items.push(MenuItem::GitMenu);
+            }
             // The bookmarks menu, reachable by mouse as well as the `s` key.
             items.push(MenuItem::Shortcuts);
             // SFTP transfer, offered only when servers are configured.
@@ -7320,6 +7436,12 @@ impl App {
             MenuItem::SendMenu => {
                 Some(vec![MenuItem::ScpUpload, MenuItem::ScpDownload, MenuItem::Back])
             }
+            MenuItem::GitMenu => Some(vec![
+                MenuItem::GitStage,
+                MenuItem::GitUnstage,
+                MenuItem::GitDiscard,
+                MenuItem::Back,
+            ]),
             MenuItem::WindowMenu => {
                 let mut v = vec![
                     MenuItem::ShellSplitLR,
@@ -7449,7 +7571,7 @@ impl App {
         self.menu_stack.clear();
         self.popup = Popup::None;
         match item {
-            MenuItem::AiMenu | MenuItem::SendMenu | MenuItem::WindowMenu | MenuItem::Back => {} // handled above
+            MenuItem::AiMenu | MenuItem::SendMenu | MenuItem::WindowMenu | MenuItem::GitMenu | MenuItem::Back => {} // handled above
             MenuItem::ShellSplitLR => {
                 let cwd = self.shell_cwd();
                 self.shell.split_active(&cwd, SplitDir::LeftRight);
@@ -7504,6 +7626,9 @@ impl App {
             MenuItem::AiJunk => self.start_ai_junk(),
             MenuItem::AiStructure => self.start_ai_structure(),
             MenuItem::AiRename => self.start_ai_rename_prompt(),
+            MenuItem::GitStage => self.git_stage(),
+            MenuItem::GitUnstage => self.git_unstage(),
+            MenuItem::GitDiscard => self.git_discard_prompt(),
             MenuItem::Shortcuts => self.start_shortcuts(),
             MenuItem::Lang => {
                 // Flip the interface language; every localized string reads
@@ -8410,6 +8535,7 @@ impl App {
             KeyCode::Char('y') | KeyCode::Enter => match &self.popup {
                 Popup::ConfirmDelete { .. } => self.finish_delete(DeleteMode::Trash),
                 Popup::ConfirmTransfer { .. } => self.finish_transfer(Conflict::Skip),
+                Popup::ConfirmDiscard { .. } => { self.git_discard(); Ok(()) }
                 Popup::Notice { .. } => { self.popup = Popup::None; Ok(()) }
                 _ => Ok(()),
             },
@@ -9647,6 +9773,8 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry(":hidden", None, "show / hide dotfiles (also right-click)", "ドットファイルの表示切替（右クリックでも）"),
                 entry(":attr", None, "attributes;  :chmod 644,  :readonly on|off", "属性；  :chmod 644,  :readonly on|off"),
                 entry(":hash", None, "checksum;  :hash md5  /  :hash sha256", "チェックサム；  :hash md5  /  :hash sha256"),
+                entry(":stage / :unstage", None, "git add / git reset the selection (in a repo)", "選択を git add / git reset（リポジトリ内）"),
+                entry(":discard", None, "git checkout -- : throw away worktree changes", "git checkout -- ：作業ツリーの変更を破棄"),
                 entry("right-click", None, "upload/download to a configured host (SFTP or SCP)", "設定したホストへアップ／ダウンロード（SFTP/SCP）"),
                 entry("Shift+Enter", None, "context menu for the entry (also :menu)", "エントリのコンテキストメニュー（:menu でも）"),
             ],
@@ -13209,6 +13337,32 @@ fn draw_popup(
                 tr(lang, " y/Enter = insert   n/Esc = cancel ", " y/Enter = 入力   n/Esc = 取消 ").to_string(),
             )
         }
+        Popup::ConfirmDiscard { targets, .. } => {
+            let head = if lang == Lang::Ja {
+                format!("{} 件の変更を破棄（元に戻す）:", targets.len())
+            } else {
+                format!("discard changes to {} path(s):", targets.len())
+            };
+            let mut lines = vec![
+                head,
+                String::new(),
+            ];
+            for p in targets.iter().take(8) {
+                lines.push(format!("  {}", p.display()));
+            }
+            if targets.len() > 8 {
+                lines.push(tr_count(lang, targets.len() - 8));
+            }
+            lines.push(String::new());
+            lines.push(tr(lang,
+                "This throws away uncommitted changes and cannot be undone.",
+                "コミットしていない変更は失われ、元に戻せません。").to_string());
+            (
+                tr(lang, " discard changes ", " 変更を破棄 ").to_string(),
+                lines,
+                tr(lang, " y/Enter = discard   n/Esc = cancel ", " y/Enter = 破棄   n/Esc = 取消 ").to_string(),
+            )
+        }
         Popup::ConfirmElevate { op, targets, dest } => {
             let verb = match (op, lang) {
                 (PendingOp::Copy, Lang::Ja) => "コピー",
@@ -13315,6 +13469,10 @@ fn draw_popup(
         ],
         Popup::AiShellConfirm { .. } => vec![
             (tr(lang, "Insert", "入力"), ZoneKind::Enter),
+            (tr(lang, "Cancel", "取消"), ZoneKind::Esc),
+        ],
+        Popup::ConfirmDiscard { .. } => vec![
+            (tr(lang, "Discard", "破棄"), ZoneKind::Enter),
             (tr(lang, "Cancel", "取消"), ZoneKind::Esc),
         ],
         _ => vec![],
@@ -13545,6 +13703,55 @@ mod tests {
         assert_eq!(clean_ai_command("```sh\nls -la\n```"), "ls -la");
         assert_eq!(clean_ai_command("`git status`"), "git status");
         assert_eq!(clean_ai_command("\n\n  find . -name '*.log'  \n"), "find . -name '*.log'");
+    }
+
+    /// Stage / unstage / discard through the app on a real throwaway repo.
+    #[test]
+    fn git_stage_unstage_and_discard_operate_on_the_selection() {
+        let d = tempfile::tempdir().unwrap();
+        let dir = std::fs::canonicalize(d.path()).unwrap();
+        let git_ok = std::process::Command::new("git")
+            .arg("-C").arg(&dir).args(["init", "-q"]).status()
+            .map(|s| s.success()).unwrap_or(false);
+        if !git_ok {
+            eprintln!("no git; skipping");
+            return;
+        }
+        for kv in [["user.email", "t@example.com"], ["user.name", "Test"]] {
+            let _ = std::process::Command::new("git").arg("-C").arg(&dir).args(["config", kv[0], kv[1]]).status();
+        }
+        // Commit an initial file so we have a tracked file to modify/discard.
+        std::fs::write(dir.join("tracked.txt"), "one\n").unwrap();
+        std::process::Command::new("git").arg("-C").arg(&dir).args(["add", "."]).status().unwrap();
+        std::process::Command::new("git").arg("-C").arg(&dir).args(["commit", "-qm", "init"]).status().unwrap();
+        std::fs::write(dir.join("tracked.txt"), "one\ntwo\n").unwrap();
+
+        let mut app = App::new(dir.clone(), dir.clone(), cian_lua::Config::default()).unwrap();
+        let _ = render(&mut app, 100, 40); // computes git status
+        // Cursor onto tracked.txt (index 0 is `..`).
+        let idx = app.active_pane().unwrap().entries.iter()
+            .position(|e| e.name == "tracked.txt").unwrap();
+        app.active_pane_mut().unwrap().cursor = idx;
+
+        // Stage: the worktree change becomes staged.
+        app.git_stage();
+        let st = cian_core::git::status(&dir).unwrap();
+        assert_eq!(st.mark_for(&dir.join("tracked.txt")), Some(cian_core::git::GitMark::Staged));
+
+        // Unstage: back to a plain worktree modification.
+        app.git_stage(); // (re-stage to ensure state)
+        app.git_unstage();
+        let st = cian_core::git::status(&dir).unwrap();
+        assert_eq!(st.mark_for(&dir.join("tracked.txt")), Some(cian_core::git::GitMark::Modified));
+
+        // Discard: confirm dialog, then the change is gone.
+        let _ = render(&mut app, 100, 40);
+        app.active_pane_mut().unwrap().cursor = idx;
+        app.git_discard_prompt();
+        assert!(matches!(app.popup, Popup::ConfirmDiscard { .. }), "discard confirms first");
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+        assert_eq!(std::fs::read_to_string(dir.join("tracked.txt")).unwrap(), "one\n",
+            "worktree change reverted");
     }
 
     #[test]

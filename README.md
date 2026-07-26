@@ -298,6 +298,22 @@ language of their own, and half-implementing them would be worse than saying
 no. On Windows there are no mode bits at all, so `:chmod` refuses and points at
 `:readonly`.
 
+## Git
+
+When a pane sits inside a git repository, each entry carries a status badge:
+`●` staged, `✚` modified, `?` untracked, `‼` conflict, and `~` on a folder that
+contains changes below it. You can act on the selection without leaving cian:
+
+- `:stage` (`:add`) — `git add` the marked files, or the one under the cursor.
+- `:unstage` (`:reset`) — `git reset HEAD`, keeping the worktree changes.
+- `:discard` (`:revert`) — `git checkout --` to throw away worktree changes to
+  tracked files; it confirms first, since that cannot be undone.
+
+The same three are under right-click **Git ▸** (shown only in a repo), and the
+AI can draft a commit message from the staged diff (see below). cian shells out
+to the `git` on your PATH — there is no library dependency to keep the binary
+self-contained.
+
 ## Going to a path
 
 `z` (or `:cd`) prompts for a path, seeded with the current directory. A

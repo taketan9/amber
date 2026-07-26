@@ -282,16 +282,25 @@ fn run_git(dir: &Path, verb: &str, paths: &[PathBuf]) -> Result<()> {
 }
 
 fn run_git_args(dir: &Path, args: &[String]) -> Result<()> {
-    let status = Command::new("git")
+    // Capture output rather than inheriting it: git writes progress to the
+    // terminal (`git reset` prints "Unstaged changes after reset…"), which would
+    // corrupt the TUI. On failure the captured stderr becomes the error text.
+    let out = Command::new("git")
         .arg("-C")
         .arg(dir)
         .args(args)
-        .status()
+        .output()
         .context("run git")?;
-    if status.success() {
+    if out.status.success() {
         Ok(())
     } else {
-        anyhow::bail!("git {} failed", args.first().cloned().unwrap_or_default())
+        let err = String::from_utf8_lossy(&out.stderr);
+        let err = err.trim();
+        if err.is_empty() {
+            anyhow::bail!("git {} failed", args.first().cloned().unwrap_or_default())
+        } else {
+            anyhow::bail!("{}", err)
+        }
     }
 }
 
