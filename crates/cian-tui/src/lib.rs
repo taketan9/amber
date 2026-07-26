@@ -9267,10 +9267,14 @@ impl App {
                 self.reload_both();
                 self.message = Some("refreshed".into());
             }
-            // Shift+Enter opens the same menu the right mouse button does, for
-            // the entry under the cursor. Needs a terminal that distinguishes
-            // it from plain Enter (the Windows console does; on Unix it wants
-            // the kitty keyboard protocol) — `:menu` always works.
+            // `M` (and Shift+Enter, where the terminal can report it) opens the
+            // same menu the right mouse button does, for the entry under the
+            // cursor. Shift+Enter needs a terminal that distinguishes it from
+            // plain Enter — the Windows console does, and Unix terminals with
+            // the kitty keyboard protocol (kitty, WezTerm, foot). macOS
+            // Terminal.app cannot, so `M` is the reliable key there; `:menu`
+            // always works too.
+            (false, _, KeyCode::Char('M')) => self.open_menu_at_cursor(),
             (false, true, KeyCode::Enter) => self.open_menu_at_cursor(),
             (false, true, KeyCode::Char('S')) => self.start_ssh(),
             (false, _, KeyCode::Char('n')) => self.jump_to_next_match(true),
@@ -10151,7 +10155,7 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry(":stage / :unstage", None, "git add / git reset the selection (in a repo)", "選択を git add / git reset（リポジトリ内）"),
                 entry(":discard", None, "git checkout -- : throw away worktree changes", "git checkout -- ：作業ツリーの変更を破棄"),
                 entry("right-click", None, "upload/download to a configured host (SFTP or SCP)", "設定したホストへアップ／ダウンロード（SFTP/SCP）"),
-                entry("Shift+Enter", None, "context menu for the entry (also :menu)", "エントリのコンテキストメニュー（:menu でも）"),
+                entry("M / Shift+Enter", Some(Menu), "context menu for the entry (also :menu)", "エントリのコンテキストメニュー（:menu でも）"),
             ],
         ),
         (
@@ -16857,6 +16861,21 @@ mod tests {
         for want in [MenuItem::HiddenToggle, MenuItem::Attributes, MenuItem::Hash, MenuItem::Shortcuts] {
             assert!(items.contains(&want), "{:?} missing from {:?}", want, items);
         }
+    }
+
+    /// `M` opens the context menu on every terminal (Shift+Enter can't be
+    /// distinguished from Enter on e.g. macOS Terminal.app).
+    #[test]
+    fn m_key_opens_the_context_menu() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        let _ = render(&mut app, 100, 40);
+        app.focus(FocusedPane::Left);
+        app.handle_key(KeyEvent::new(KeyCode::Char('M'), KeyModifiers::SHIFT)).unwrap();
+        assert!(matches!(app.popup, Popup::ContextMenu { .. }), "M opened the menu");
+        // Also works when the terminal doesn't tag the uppercase char with SHIFT.
+        app.popup = Popup::None;
+        app.handle_key(KeyEvent::new(KeyCode::Char('M'), KeyModifiers::NONE)).unwrap();
+        assert!(matches!(app.popup, Popup::ContextMenu { .. }), "M works without a SHIFT tag too");
     }
 
     #[test]

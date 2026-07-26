@@ -148,6 +148,9 @@
 --   cian.set_keymap("w", "close_tab")
 --   cian.set_keymap("h", "history")
 --   cian.set_keymap("s", "shortcuts")       -- the bookmarks menu
+--   cian.set_keymap("M", "menu")            -- the right-click context menu
+--                                           -- (Shift+Enter also, where the
+--                                           --  terminal can report it)
 --   cian.set_keymap(":", "command")         -- the : command line
 --   cian.set_keymap("q", "quit")
 --
