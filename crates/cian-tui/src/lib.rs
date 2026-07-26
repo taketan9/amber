@@ -1895,6 +1895,8 @@ enum MenuItem {
     AiChat,
     /// Generate a shell command from a description (shell pane).
     AiShellCmd,
+    /// Explain the error shown in the shell pane.
+    AiExplainError,
     /// Draft a git commit message from the staged diff.
     AiCommit,
     /// Detect junk files in the current directory.
@@ -1977,6 +1979,7 @@ impl MenuItem {
             },
             MenuItem::AiChat => tr(lang, "Chat", "チャット"),
             MenuItem::AiShellCmd => tr(lang, "Command from description", "説明からコマンド生成"),
+            MenuItem::AiExplainError => tr(lang, "Explain the last error", "直近のエラーを説明"),
             MenuItem::AiCommit => tr(lang, "Draft commit message", "コミットメッセージ生成"),
             MenuItem::AiJunk => tr(lang, "Detect junk files", "ゴミファイル検出"),
             MenuItem::AiStructure => tr(lang, "Suggest folder structure", "フォルダ構成を提案"),
@@ -3065,6 +3068,7 @@ impl App {
                     self.start_ai_search(rest);
                 }
             }
+            "aierror" | "explain" => self.explain_shell_error(),
             "reload" | "source" => self.reload_config(),
             // Mark / unmark entries whose name matches a glob (`:mark *.rs`).
             "mark" | "select" => self.cmd_mark(rest, true),
@@ -5481,6 +5485,50 @@ impl App {
         self.ai_request(AiPurpose::Chat, system, body);
     }
 
+    /// Explain the error visible in the active shell pane. Sends the visible
+    /// terminal text (a content-egress action, hence an explicit command/menu
+    /// item), and opens the reply in the AI chat.
+    fn explain_shell_error(&mut self) {
+        if self.ai.is_none() {
+            self.message = Some("AI not configured — add cian.ai{...} to init.lua".into());
+            return;
+        }
+        // Grab the visible screen of the active shell pane.
+        let screen = self.shell.active_session().and_then(|s| {
+            s.parser().lock().ok().map(|p| p.screen().contents())
+        });
+        let Some(screen) = screen else {
+            self.message = Some("no shell here".into());
+            return;
+        };
+        // Collapse the trailing blank rows a terminal screen is padded with.
+        let text = screen.trim_end().to_string();
+        if text.is_empty() {
+            self.message = Some("nothing on the shell to explain".into());
+            return;
+        }
+        if !self.ai_ready() {
+            self.message = Some("AI unavailable (python, packages, or sign-in)".into());
+            return;
+        }
+        let body = truncate_text_for_ai(&text, 8_000);
+        let os = if cfg!(windows) { "Windows" } else if cfg!(target_os = "macos") { "macOS" } else { "Linux" };
+        let system = format!(
+            "You explain shell/terminal errors for a developer on {os}. Given the \
+             recent terminal output, say plainly what went wrong and the most \
+             likely fix (a command or a change). If there is no error, say the \
+             output looks fine. Be concise; plain text, no markdown headings.",
+        );
+        self.popup = Popup::AiChat {
+            input: String::new(),
+            log: vec![ChatMsg { user: true, text: "Explain the last error".into() }],
+            scroll: usize::MAX,
+            pending: true,
+            sel: None,
+        };
+        self.ai_request(AiPurpose::Chat, system, body);
+    }
+
     /// Fire an AI request on a worker thread, tagged with what to do with the
     /// reply. Only one runs at a time.
     fn ai_request(&mut self, purpose: AiPurpose, system: String, user: String) {
@@ -7587,6 +7635,7 @@ impl App {
             MenuItem::AiMenu => {
                 let mut v = vec![MenuItem::AiChat];
                 if self.focused == FocusedPane::Shell {
+                    v.insert(0, MenuItem::AiExplainError);
                     v.insert(0, MenuItem::AiShellCmd);
                 } else {
                     // In a file pane the AI can draft a commit for its repo,
@@ -7789,6 +7838,7 @@ impl App {
             MenuItem::StopLog => self.stop_session_log(),
             MenuItem::AiChat => self.open_ai_chat(),
             MenuItem::AiShellCmd => self.start_ai_shell_prompt(),
+            MenuItem::AiExplainError => self.explain_shell_error(),
             MenuItem::AiCommit => self.start_ai_commit_message(),
             MenuItem::AiJunk => self.start_ai_junk(),
             MenuItem::AiStructure => self.start_ai_structure(),
@@ -15155,6 +15205,17 @@ mod tests {
                 MenuItem::Manual
             ]
         );
+    }
+
+    #[test]
+    fn explain_error_without_a_shell_reports_it() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        // Force AI on (mock) so we get past the config gate to the shell check.
+        app.ai = Some(cian_ai::AiConfig { auth_mode: "mock".into(), ..Default::default() });
+        app.focus(FocusedPane::Shell);
+        app.explain_shell_error();
+        assert!(app.message.as_deref().unwrap_or("").contains("no shell"),
+            "reports the absence of a shell: {:?}", app.message);
     }
 
     #[test]

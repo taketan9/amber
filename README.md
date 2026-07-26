@@ -427,6 +427,10 @@ loop:
   files. It can only ever move files *into* new sub-folders of the current
   directory: destinations are validated to reject `..`, absolute paths and
   drives, and a name the model invents matches nothing.
+- **Explain an error** (shell pane): `:aierror`, or right-click **AI ▸ →
+  Explain the last error**. cian sends the shell pane's visible text and the
+  model explains what went wrong and the likely fix, in the AI chat. Like the
+  summary below, this sends terminal *text*, so it is an explicit action.
 - **Summarise a file** (F3 viewer): press **`S`** while viewing a file. Unlike
   the metadata-only features above, this sends the file's **text** to the model
   (bounded to keep the request small), so it is a deliberate keystroke rather
