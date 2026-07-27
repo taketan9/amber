@@ -251,6 +251,18 @@
 --   -- api_base_url = "http://localhost:11434/v1",  -- Ollama / LM Studio (OpenAI-compatible)
 -- }
 --
+-- 404 "Resource not found"? With broker/Azure auth the `model` is the DEPLOYMENT
+-- NAME and lands in the request URL (…/openai/deployments/<model>/chat/…), so a
+-- wrong one 404s — set `model` (and `api_version`) to match your working client.
+-- If instead your gateway is OpenAI-compatible (it wants /chat/completions with
+-- the model in the body, not the /openai/deployments/ path), set `api_base_url`
+-- to the gateway base and cian will use that route with the broker token:
+-- cian.ai {
+--   auth_mode    = "broker",
+--   api_base_url = "https://your-apim.azure-api.net/llmoai",  -- OpenAI-compatible route
+--   model        = "<your model>",
+-- }
+--
 -- Precondition facts — cian.ai_context(...)
 -- Tell the AI what it can assume about YOUR environment, so its answers fit it
 -- instead of being generic. Prepended to every AI prompt (chat, "explain the

@@ -55,18 +55,25 @@ def build_client(req):
             parent_hwnd = 0
         from azure.identity.broker import InteractiveBrowserBrokerCredential
         from azure.identity import get_bearer_token_provider
-        from openai import AzureOpenAI
 
         credential = InteractiveBrowserBrokerCredential(
             parent_window_handle=parent_hwnd,
             use_default_broker_account=True,
         )
+        scope = "https://cognitiveservices.azure.com/.default"
+        # An OpenAI-compatible gateway (APIM exposing /chat/completions with the
+        # model in the body) is reached with a plain OpenAI client and the broker
+        # token as the bearer key, rather than the Azure /openai/deployments/...
+        # path. Opt in by setting api_base_url alongside broker auth.
+        if api_base_url:
+            from openai import OpenAI
+            token = credential.get_token(scope).token
+            return OpenAI(api_key=token, base_url=api_base_url)
+        from openai import AzureOpenAI
         return AzureOpenAI(
             api_version=api_version,
             azure_endpoint=endpoint,
-            azure_ad_token_provider=get_bearer_token_provider(
-                credential, "https://cognitiveservices.azure.com/.default"
-            ),
+            azure_ad_token_provider=get_bearer_token_provider(credential, scope),
         )
 
     if auth == "apikey":
