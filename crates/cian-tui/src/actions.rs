@@ -1603,7 +1603,7 @@ impl App {
 
     // ------- Manual -------
     pub(crate) fn open_manual(&mut self) {
-        self.popup = Popup::Manual { lines: manual_lines(&self.keymap, self.lang), scroll: 0 };
+        self.popup = Popup::Manual { lines: manual_lines(&self.keymap, self.menu_lang), scroll: 0 };
     }
 
     // ------- AI -------
@@ -1646,6 +1646,10 @@ impl App {
 
         // Live-applicable options.
         self.lang = Lang::from_opt(config.options.lang.as_deref());
+        self.menu_lang = match config.options.menu_lang.as_deref() {
+            Some(s) => Lang::from_opt(Some(s)),
+            None => self.lang,
+        };
         self.show_key_hints = config.options.key_hints.unwrap_or(true);
         self.clipboard_on_copy = config.options.clipboard_on_copy.unwrap_or(true);
         self.anim_dur =

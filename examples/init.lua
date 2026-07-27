@@ -77,6 +77,12 @@
 -- (You can also toggle live from the right-click menu.)
 -- cian.set_option("lang", "ja")
 
+-- Language for JUST the key manual (`?`) and the right-click context menu,
+-- overriding `lang` for those two surfaces only. Handy to keep the interface in
+-- English but read the menu / manual in Japanese (or vice versa). Unset =
+-- follow `lang`.
+-- cian.set_option("menu_lang", "ja")
+
 -- Split / zoom / close animation length, in milliseconds. 0 disables all
 -- animation. Default is a short, snappy transition.
 -- cian.set_option("animation_ms", 120)

@@ -68,6 +68,9 @@ pub struct Options {
     /// Interface language for the key manual and help text: "ja" (default) or
     /// "en".
     pub lang: Option<String>,
+    /// Language for the key manual (`?`) and the right-click context menu only,
+    /// overriding `lang` for those two surfaces. Unset = follow `lang`.
+    pub menu_lang: Option<String>,
     /// External editor for `E` in the viewer / `:edit`. A command line, e.g.
     /// "nvim" or "code -w". Unset falls back to $VISUAL/$EDITOR, then nvim →
     /// vim → vi on PATH.
@@ -615,6 +618,15 @@ fn install_api(lua: &Lua, builder: &Rc<RefCell<Builder>>) -> mlua::Result<()> {
                             .push("set_option: lang expects \"ja\" or \"en\"".into()),
                         Err(_) => {
                             bm.errors.push("set_option: lang expects \"ja\" or \"en\"".into())
+                        }
+                    },
+                    "menu_lang" => match String::from_lua(val, lua) {
+                        Ok(v) if v == "ja" || v == "en" => bm.options.menu_lang = Some(v),
+                        Ok(_) => bm
+                            .errors
+                            .push("set_option: menu_lang expects \"ja\" or \"en\"".into()),
+                        Err(_) => {
+                            bm.errors.push("set_option: menu_lang expects \"ja\" or \"en\"".into())
                         }
                     },
                     other => bm

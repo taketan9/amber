@@ -717,7 +717,9 @@ impl MenuItem {
             MenuItem::BulkRename => tr(lang, "Bulk rename…  (:brename)", "一括リネーム…  (:brename)"),
             MenuItem::Snippets => tr(lang, "Snippets → shell  (:snip)", "スニペット → シェル  (:snip)"),
             MenuItem::Shortcuts => tr(lang, "Shortcuts  (s)", "ショートカット  (s)"),
-            MenuItem::AiMenu => tr(lang, "crmaine - Ajent ▸", "crmaine - Ajent ▸"),
+            // 🤖 stands in for crmaine's icon — a terminal menu cannot embed the
+            // PNG/SVG (which is itself just the "CRMAINE" wordmark as text).
+            MenuItem::AiMenu => tr(lang, "🤖 crmaine - Ajent ▸", "🤖 crmaine - Ajent ▸"),
             MenuItem::SendMenu => tr(lang, "Transfer ▸", "転送 ▸"),
             MenuItem::WindowMenu => tr(lang, "Window ▸", "ウィンドウ ▸"),
             MenuItem::ShellSplitLR => tr(lang, "Split left / right  (S-F8)", "左右に分割  (S-F8)"),
@@ -1455,6 +1457,9 @@ pub struct App {
     show_key_hints: bool,
     /// Interface language for the key manual (Japanese by default).
     lang: Lang,
+    /// Language for the key manual and the right-click menu specifically —
+    /// `menu_lang` overrides `lang` for those two surfaces; else follows `lang`.
+    menu_lang: Lang,
     /// Cached git status per file pane `[left, right]`, recomputed when the
     /// pane's directory changes or on an explicit refresh.
     git: [Option<GitState>; 2],
@@ -1607,6 +1612,10 @@ impl App {
             ),
             show_key_hints: config.options.key_hints.unwrap_or(true),
             lang: Lang::from_opt(config.options.lang.as_deref()),
+            menu_lang: match config.options.menu_lang.as_deref() {
+                Some(s) => Lang::from_opt(Some(s)),
+                None => Lang::from_opt(config.options.lang.as_deref()),
+            },
             git: [None, None],
             disk: [None, None],
             ai: ai_config_from(&config),

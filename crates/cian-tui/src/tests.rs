@@ -4366,6 +4366,26 @@
     }
 
     #[test]
+    fn menu_lang_overrides_lang_for_menu_and_manual() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().to_path_buf();
+        let mut cfg = cian_lua::Config::default();
+        cfg.options.lang = Some("en".into());
+        cfg.options.menu_lang = Some("ja".into());
+        let app = App::new(p.clone(), p, cfg).unwrap();
+        assert_eq!(app.lang, Lang::En, "the rest of the UI stays English");
+        assert_eq!(app.menu_lang, Lang::Ja, "menu + manual follow menu_lang");
+
+        // Unset menu_lang follows lang.
+        let d2 = tempfile::tempdir().unwrap();
+        let p2 = d2.path().to_path_buf();
+        let mut cfg2 = cian_lua::Config::default();
+        cfg2.options.lang = Some("ja".into());
+        let app2 = App::new(p2.clone(), p2, cfg2).unwrap();
+        assert_eq!(app2.menu_lang, Lang::Ja, "falls back to lang when unset");
+    }
+
+    #[test]
     fn where_shows_config_paths() {
         let d = tempfile::tempdir().unwrap();
         let p = d.path().to_path_buf();

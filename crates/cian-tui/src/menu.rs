@@ -10,9 +10,13 @@ impl App {
         let ai = self.ai.is_some() && self.ai_ready();
         let mut items = Vec::new();
         // The snippet launcher sits at the very top of either menu — it is the
-        // most-reached-for entry and always targets the shell.
+        // most-reached-for entry and always targets the shell. crmaine - Ajent
+        // (the AI submenu) follows it as the second entry when AI is available.
         if !self.config.snippets.is_empty() {
             items.push(MenuItem::Snippets);
+        }
+        if ai {
+            items.push(MenuItem::AiMenu);
         }
         if self.focused == FocusedPane::Shell {
             // A PTY owns its own screen, so the file operations make no sense
@@ -48,9 +52,6 @@ impl App {
             // Window operations (splits, tabs, zoom) that otherwise live only on
             // the F-keys, so they are reachable by mouse.
             items.push(MenuItem::WindowMenu);
-            if ai {
-                items.push(MenuItem::AiMenu);
-            }
         } else {
             items.push(MenuItem::Copy);
             items.push(MenuItem::Cut);
@@ -97,9 +98,6 @@ impl App {
             }
             items.push(MenuItem::Ssh);
             items.push(MenuItem::Background);
-            if ai {
-                items.push(MenuItem::AiMenu);
-            }
         }
         // Language toggle, quit and the manual are in every menu, so all are
         // reachable by mouse alone (quitting otherwise needs `q`, which the

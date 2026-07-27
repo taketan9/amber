@@ -294,7 +294,7 @@ pub(crate) fn draw(f: &mut Frame, app: &mut App) {
     if !matches!(app.popup, Popup::None) {
         // Remember where the context menu landed so a click can hit its rows.
         if let Popup::ContextMenu { items, at, .. } = &app.popup {
-            app.menu_rect = context_menu_rect(items, *at, area, app.lang);
+            app.menu_rect = context_menu_rect(items, *at, area, app.menu_lang);
         }
         // And the viewer's text body, so a drag maps to a line — plus the
         // line-number gutter width, so it maps to a char column too.
@@ -314,6 +314,7 @@ pub(crate) fn draw(f: &mut Frame, app: &mut App) {
             .map(|j| (j.query.as_str(), j.root_label.as_str(), j.done, j.mode));
         let dests = app.dest_choices();
         let lang = app.lang;
+        let menu_lang = app.menu_lang;
         app.popup_zones.clear();
         draw_popup(
             f,
@@ -325,6 +326,7 @@ pub(crate) fn draw(f: &mut Frame, app: &mut App) {
             &dests,
             &mut app.popup_zones,
             lang,
+            menu_lang,
         );
     } else {
         app.popup_zones.clear();
@@ -2109,6 +2111,7 @@ fn draw_popup(
     dests: &[(String, PathBuf)],
     zones: &mut Vec<PopupZone>,
     lang: Lang,
+    menu_lang: Lang,
 ) {
     // The manual is taller than any terminal, so it renders as a scrolling
     // viewport rather than the fixed block the other popups use.
@@ -2163,6 +2166,9 @@ fn draw_popup(
     // The context menu is anchored at the pointer rather than centred, so it
     // sizes and positions itself.
     if let Popup::ContextMenu { items, cursor, at } = popup {
+        // The context menu follows `menu_lang` (which may differ from the rest
+        // of the UI) so it can be pinned to Japanese on an English interface.
+        let lang = menu_lang;
         let w = items.iter().map(|i| width(i.label(lang))).max().unwrap_or(10) as u16 + 4;
         let rect = context_menu_rect(items, *at, area, lang);
 
