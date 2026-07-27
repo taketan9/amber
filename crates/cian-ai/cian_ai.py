@@ -123,8 +123,38 @@ def main():
         content = resp.choices[0].message.content or ""
         emit({"ok": True, "content": content})
     except Exception as e:  # noqa: BLE001
-        emit({"ok": False, "error": f"{type(e).__name__}: {e}"})
+        emit({"ok": False, "error": describe_error(e, req)})
         sys.exit(1)
+
+
+def describe_error(e, req):
+    """A message that makes an HTTP failure actionable — the attempted URL, the
+    model/deployment and api-version — so a 404 can be compared with a working
+    setup. With Azure/broker auth the model IS the deployment name and lands in
+    the URL path, so a wrong one yields exactly '404 Resource Not Found'."""
+    base = f"{type(e).__name__}: {e}"
+    url = None
+    # openai>=1.0 status errors carry the httpx response/request.
+    resp = getattr(e, "response", None)
+    if resp is not None:
+        try:
+            url = str(resp.request.url)
+        except Exception:  # noqa: BLE001
+            url = None
+    bits = [base]
+    if url:
+        bits.append(f"url={url}")
+    bits.append(f"model/deployment={req.get('model', '')!r}")
+    bits.append(f"api_version={req.get('api_version', '')!r}")
+    bits.append(f"endpoint={req.get('endpoint', '')!r}")
+    hint = getattr(e, "status_code", None)
+    if hint == 404:
+        bits.append(
+            "hint: 404 usually means the deployment name (model) does not exist "
+            "at this endpoint, or the api-version is unsupported — set them in "
+            "cian.ai{ model=..., api_version=... } to match your working client."
+        )
+    return "  |  ".join(bits)
 
 
 if __name__ == "__main__":

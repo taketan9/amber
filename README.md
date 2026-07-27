@@ -538,14 +538,14 @@ Beyond chat, the AI can act on what you have open, always with a human in the
 loop:
 
 - **Command from a description** (shell pane): `:aicmd <what you want>`, or the
-  right-click **AI ▸** menu. The generated command is shown for review and only
+  right-click **crmaine - Ajent ▸** menu. The generated command is shown for review and only
   inserted at the prompt — never run for you.
-- **Commit message** (file pane): `:aicommit`, or right-click **AI ▸ → Draft
+- **Commit message** (file pane): `:aicommit`, or right-click **crmaine - Ajent ▸ → Draft
   commit message**. cian reads the staged diff (`git diff --cached`) and drafts
   a Conventional-Commits-style message; you get an editable preview (`e` to
   edit, `Enter`/`c` to commit, `Esc` to cancel) before anything is committed.
   With nothing staged it says so rather than committing an empty change.
-- **Detect junk** (file pane): `:aijunk`, or right-click **AI ▸ → Detect junk
+- **Detect junk** (file pane): `:aijunk`, or right-click **crmaine - Ajent ▸ → Detect junk
   files**. cian sends only the listing's metadata (names, sizes, dir flags —
   never contents) and the model flags likely-disposable entries (build output,
   caches, temp and editor-backup files, OS cruft). You get a checklist —
@@ -553,7 +553,7 @@ loop:
   to the *normal* delete confirmation, so nothing is removed without the usual
   trash/permanent choice. A name the model invents matches nothing, so it can
   only ever target files that were actually shown.
-- **Suggest structure** (file pane): `:aiorganize`, or right-click **AI ▸ →
+- **Suggest structure** (file pane): `:aiorganize`, or right-click **crmaine - Ajent ▸ →
   Suggest folder structure**. From the same metadata the model proposes a set
   of moves that group loose files into sub-folders (`images/`, `docs/`, …). You
   review the plan as `name → folder/` rows — Space/click toggles, `a` toggles
@@ -561,7 +561,7 @@ loop:
   files. It can only ever move files *into* new sub-folders of the current
   directory: destinations are validated to reject `..`, absolute paths and
   drives, and a name the model invents matches nothing.
-- **Explain an error** (shell pane): `:aierror`, or right-click **AI ▸ →
+- **Explain an error** (shell pane): `:aierror`, or right-click **crmaine - Ajent ▸ →
   Explain the last error**. cian sends the shell pane's visible text and the
   model explains what went wrong and the likely fix, in the AI chat. Like the
   summary below, this sends terminal *text*, so it is an explicit action.
@@ -571,13 +571,13 @@ loop:
   than automatic. The summary opens in the AI chat, where it can be scrolled,
   selected and copied.
 - **Semantic search** (file pane): `:aisearch <what you're looking for>`, or
-  right-click **AI ▸ → Semantic search**. cian walks the tree, collects up to a
+  right-click **crmaine - Ajent ▸ → Semantic search**. cian walks the tree, collects up to a
   few hundred file **paths** (names only — no contents), and asks the model
   which are most relevant to your description. The matches open in the same
   results list as `find`/`grep`: Enter previews the file in F3, `Ctrl+n`/`Ctrl+N`
   step between them, Esc returns to the list. A path the model invents matches
   nothing.
-- **AI rename** (file pane): `:airename`, or right-click **AI ▸ → AI rename**.
+- **AI rename** (file pane): `:airename`, or right-click **crmaine - Ajent ▸ → AI rename**.
   It asks how to rename ("snake_case", "add a date prefix", …), then proposes new
   names for the marked files — or the whole listing when nothing is marked. You
   review the plan as `old → new` rows (Space/click toggles, `a` toggles all) and

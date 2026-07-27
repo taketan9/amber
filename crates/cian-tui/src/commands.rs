@@ -54,8 +54,8 @@ impl App {
             "edit" | "e" => self.edit_selected_file(),
             "macro" | "macros" => self.start_macros(),
             "ssh" => self.start_ssh(),
-            "ai" | "chat" => self.open_ai_chat(),
-            "aicmd" => {
+            "ai" | "chat" | "crmaine" => self.open_ai_chat(),
+            "aicmd" | "crmainecmd" => {
                 if rest.is_empty() {
                     self.start_ai_shell_prompt();
                 } else {
@@ -73,10 +73,10 @@ impl App {
             "svncommit" | "commit" | "ci" => self.svn_commit_prompt(),
             "svnresolve" | "resolve" => self.svn_resolve(),
             "snip" | "snippet" | "snippets" => self.start_snippets(),
-            "aicommit" | "commitmsg" => self.start_ai_commit_message(),
-            "aijunk" | "junk" => self.start_ai_junk(),
-            "aiorganize" | "aistructure" | "organize" => self.start_ai_structure(),
-            "airename" | "rename" => {
+            "aicommit" | "commitmsg" | "crmainecommit" => self.start_ai_commit_message(),
+            "aijunk" | "junk" | "crmainejunk" => self.start_ai_junk(),
+            "aiorganize" | "aistructure" | "organize" | "crmaineorganize" => self.start_ai_structure(),
+            "airename" | "rename" | "crmainerename" => {
                 if rest.is_empty() {
                     self.start_ai_rename_prompt();
                 } else {
@@ -97,14 +97,14 @@ impl App {
                     }
                 }
             }
-            "aisearch" | "semsearch" | "ask" => {
+            "aisearch" | "semsearch" | "ask" | "crmainesearch" => {
                 if rest.is_empty() {
                     self.start_ai_search_prompt();
                 } else {
                     self.start_ai_search(rest);
                 }
             }
-            "aierror" | "explain" => self.explain_shell_error(),
+            "aierror" | "explain" | "crmaineerror" => self.explain_shell_error(),
             "dupes" | "dup" | "duplicates" => self.start_dupes(),
             "reload" | "source" => self.reload_config(),
             // Mark / unmark entries whose name matches a glob (`:mark *.rs`).

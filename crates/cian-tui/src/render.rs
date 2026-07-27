@@ -1707,26 +1707,27 @@ fn draw_ai_chat(f: &mut Frame, area: Rect, app: &mut App) {
     let mut off = 0usize;
     if let Popup::AiChat { input, log, scroll, pending, sel } = &mut app.popup {
         // Flat plain-text lines (for copying) and their styled counterparts.
+        // Each turn is a speaker header line followed by the wrapped body,
+        // indented — the "crmaine - Ajent" name is too long to sit inline.
         let mut styled: Vec<Line> = Vec::new();
-        let push = |flat: &mut Vec<String>, styled: &mut Vec<Line>, prefix: &str, prefix_c: Color, body: String, body_c: Color| {
-            styled.push(Line::from(vec![
-                Span::styled(prefix.to_string(), Style::default().fg(prefix_c).add_modifier(Modifier::BOLD)),
-                Span::styled(body.clone(), Style::default().fg(body_c)),
-            ]));
-            flat.push(body);
-        };
         for m in log.iter() {
-            let (tag, tag_c, body_c) = if m.user {
-                ("you ", theme().accent, Color::Rgb(225, 225, 240))
+            let (name, name_c, body_c) = if m.user {
+                ("you", theme().accent, Color::Rgb(225, 225, 240))
             } else {
-                ("ai  ", Color::Rgb(130, 205, 150), Color::Rgb(205, 210, 220))
+                ("crmaine - Ajent", Color::Rgb(130, 205, 150), Color::Rgb(205, 210, 220))
             };
-            let mut first = true;
+            styled.push(Line::from(Span::styled(
+                name.to_string(),
+                Style::default().fg(name_c).add_modifier(Modifier::BOLD),
+            )));
+            flat.push(name.to_string());
             for raw in m.text.split('\n') {
-                for chunk in wrap_str(raw, body_w.saturating_sub(4)) {
-                    let prefix = if first { tag } else { "    " };
-                    push(&mut flat, &mut styled, prefix, tag_c, chunk, body_c);
-                    first = false;
+                for chunk in wrap_str(raw, body_w.saturating_sub(2)) {
+                    styled.push(Line::from(vec![
+                        Span::raw("  "),
+                        Span::styled(chunk.clone(), Style::default().fg(body_c)),
+                    ]));
+                    flat.push(chunk);
                 }
             }
             styled.push(Line::from(""));
@@ -1734,7 +1735,7 @@ fn draw_ai_chat(f: &mut Frame, area: Rect, app: &mut App) {
         }
         if *pending {
             styled.push(Line::from(Span::styled(
-                tr(lang, "ai  …thinking", "ai  …考え中"),
+                tr(lang, "crmaine - Ajent …thinking", "crmaine - Ajent …考え中"),
                 Style::default().fg(Color::Rgb(150, 150, 170)).add_modifier(Modifier::ITALIC),
             )));
             flat.push(String::new());
