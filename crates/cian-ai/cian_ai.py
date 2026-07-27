@@ -123,15 +123,31 @@ def main():
             return
         client = build_client(req)
         model = req.get("model", "gpt-5-mini")
-        kwargs = {"model": model, "messages": messages}
-        if req.get("max_tokens"):
-            kwargs["max_tokens"] = req["max_tokens"]
-        resp = client.chat.completions.create(**kwargs)
+        resp = create_chat(client, model, messages, req.get("max_tokens") or 0)
         content = resp.choices[0].message.content or ""
         emit({"ok": True, "content": content})
     except Exception as e:  # noqa: BLE001
         emit({"ok": False, "error": describe_error(e, req)})
         sys.exit(1)
+
+
+def create_chat(client, model, messages, max_out):
+    """Create a chat completion, coping with the output-token parameter rename.
+    Newer models (gpt-5, o-series) require `max_completion_tokens` and reject
+    `max_tokens`; older ones only accept `max_tokens`. Try the new name, then the
+    old one, then no limit — so a parameter mismatch never blocks the reply."""
+    base = {"model": model, "messages": messages}
+    if not max_out:
+        return client.chat.completions.create(**base)
+    try:
+        return client.chat.completions.create(**base, max_completion_tokens=max_out)
+    except Exception as e:  # noqa: BLE001
+        if "max_completion_tokens" in str(e) or "max_tokens" in str(e):
+            try:
+                return client.chat.completions.create(**base, max_tokens=max_out)
+            except Exception:  # noqa: BLE001
+                return client.chat.completions.create(**base)
+        raise
 
 
 def pkg_versions():
