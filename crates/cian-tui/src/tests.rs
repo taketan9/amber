@@ -4366,6 +4366,18 @@
     }
 
     #[test]
+    fn readable_on_flips_with_background_luminance() {
+        use crate::render::readable_on;
+        use ratatui::style::Color;
+        // Light ground (Solarized Light selection) → dark text.
+        let dark = readable_on(Color::Rgb(0xdc, 0xd5, 0xbe));
+        assert!(matches!(dark, Color::Rgb(r, _, _) if r < 80), "dark text on light bg");
+        // Dark ground (default selection) → light text.
+        let light = readable_on(Color::Rgb(60, 60, 90));
+        assert!(matches!(light, Color::Rgb(r, _, _) if r > 180), "light text on dark bg");
+    }
+
+    #[test]
     fn snippet_launcher_filters_and_confirms() {
         let d = tempfile::tempdir().unwrap();
         let p = d.path().to_path_buf();

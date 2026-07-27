@@ -1679,6 +1679,22 @@ fn hl_style(cat: cian_core::highlight::Category) -> Style {
     Style::default().fg(c)
 }
 
+/// A text color that reads clearly on `bg`: near-black on a light background,
+/// near-white on a dark one. Keeps popup text legible under any theme — a light
+/// theme (e.g. Solarized Light) would otherwise show pale text on a pale ground.
+pub(crate) fn readable_on(bg: Color) -> Color {
+    let (r, g, b) = match bg {
+        Color::Rgb(r, g, b) => (r as f32, g as f32, b as f32),
+        _ => return Color::Rgb(225, 225, 240), // unknown → assume a dark ground
+    };
+    let lum = 0.299 * r + 0.587 * g + 0.114 * b;
+    if lum > 140.0 {
+        Color::Rgb(30, 32, 40)
+    } else {
+        Color::Rgb(228, 228, 240)
+    }
+}
+
 fn draw_ai_chat(f: &mut Frame, area: Rect, app: &mut App) {
     let lang = app.lang;
     let width: u16 = 76u16.min(area.width.saturating_sub(2));
@@ -1710,11 +1726,13 @@ fn draw_ai_chat(f: &mut Frame, area: Rect, app: &mut App) {
         // Each turn is a speaker header line followed by the wrapped body,
         // indented — the "crmaine - Ajent" name is too long to sit inline.
         let mut styled: Vec<Line> = Vec::new();
+        // Message text must contrast with the popup ground under any theme.
+        let body_c = readable_on(theme().popup_bg);
         for m in log.iter() {
-            let (name, name_c, body_c) = if m.user {
-                ("you", theme().accent, Color::Rgb(225, 225, 240))
+            let (name, name_c) = if m.user {
+                ("you", theme().accent)
             } else {
-                ("crmaine - Ajent", Color::Rgb(130, 205, 150), Color::Rgb(205, 210, 220))
+                ("crmaine - Ajent", Color::Rgb(130, 205, 150))
             };
             styled.push(Line::from(Span::styled(
                 name.to_string(),
@@ -1764,7 +1782,7 @@ fn draw_ai_chat(f: &mut Frame, area: Rect, app: &mut App) {
     f.render_widget(Paragraph::new(shown), app.ai_rect);
     f.render_widget(
         Paragraph::new(format!("> {}", input_str))
-            .style(Style::default().fg(Color::Rgb(240, 240, 250)).bg(theme().selected_bg)),
+            .style(Style::default().fg(readable_on(theme().selected_bg)).add_modifier(Modifier::BOLD).bg(theme().selected_bg)),
         Rect::new(inner.x, inner.y + view_h as u16, inner.width, 1),
     );
 }
