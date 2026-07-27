@@ -107,7 +107,7 @@ def main():
                 auth = sys.argv[i + 1]
         try:
             do_check(auth)
-            emit({"ok": True})
+            emit({"ok": True, "pkgs": pkg_versions()})
             sys.exit(0)
         except Exception as e:  # noqa: BLE001
             emit({"ok": False, "error": f"{type(e).__name__}: {e}"})
@@ -134,6 +134,23 @@ def main():
         sys.exit(1)
 
 
+def pkg_versions():
+    """openai / azure-identity-broker versions, so a URL that differs from a
+    working client (different SDK major → different Azure path) is visible."""
+    out = {}
+    try:
+        import openai
+        out["openai"] = getattr(openai, "__version__", "?")
+    except Exception:  # noqa: BLE001
+        out["openai"] = "not importable"
+    try:
+        from importlib import metadata
+        out["azure-identity-broker"] = metadata.version("azure-identity-broker")
+    except Exception:  # noqa: BLE001
+        pass
+    return out
+
+
 def describe_error(e, req):
     """A message that makes an HTTP failure actionable — the attempted URL, the
     model/deployment and api-version — so a 404 can be compared with a working
@@ -154,12 +171,15 @@ def describe_error(e, req):
     bits.append(f"model/deployment={req.get('model', '')!r}")
     bits.append(f"api_version={req.get('api_version', '')!r}")
     bits.append(f"endpoint={req.get('endpoint', '')!r}")
+    vers = pkg_versions()
+    bits.append("pkgs=" + ", ".join(f"{k} {v}" for k, v in vers.items()))
     hint = getattr(e, "status_code", None)
     if hint == 404:
         bits.append(
-            "hint: 404 usually means the deployment name (model) does not exist "
-            "at this endpoint, or the api-version is unsupported — set them in "
-            "cian.ai{ model=..., api_version=... } to match your working client."
+            "hint: 404 can also mean the openai SDK version builds a different "
+            "Azure URL than your working client — match its openai version "
+            "(point cian.ai{ python=... } at the same interpreter), or check the "
+            "deployment name / api-version in cian.ai{ model=..., api_version=... }."
         )
     return "  |  ".join(bits)
 
