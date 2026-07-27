@@ -176,7 +176,10 @@ impl Default for AiOptions {
             // Same Azure APIM endpoint / model family as crmaine, so `cian.ai{}`
             // with no fields works in that environment.
             endpoint: "https://apim-jri-dev-apim1.azure-api.net/llmoai".into(),
-            model: "gpt-5.4".into(),
+            // crmaine's own default model (its VSCode setting defaults to
+            // ["gpt-5-mini"]). "gpt-5.4" was a guess and is not a deployed model
+            // in that environment, so it 404s on the Azure deployment path.
+            model: "gpt-5-mini".into(),
             api_version: "2025-04-01-preview".into(),
             auth_mode: "broker".into(),
             api_key: String::new(),
