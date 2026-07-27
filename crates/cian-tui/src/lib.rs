@@ -1113,6 +1113,20 @@ pub struct ShortcutStore {
     pub path: PathBuf,
 }
 
+/// Build the request-side [`cian_ai::AiConfig`] from the parsed Lua config.
+/// Shared by startup and `:reload` so AI settings can be tuned live.
+pub(crate) fn ai_config_from(config: &cian_lua::Config) -> Option<cian_ai::AiConfig> {
+    config.ai.as_ref().map(|a| cian_ai::AiConfig {
+        python: a.python.clone(),
+        endpoint: a.endpoint.clone(),
+        model: a.model.clone(),
+        api_version: a.api_version.clone(),
+        auth_mode: a.auth_mode.clone(),
+        api_key: a.api_key.clone(),
+        api_base_url: a.api_base_url.clone(),
+    })
+}
+
 impl ShortcutStore {
     /// The Lua file bookmarks are stored in now. Portable-aware: a copy next to
     /// the executable wins for both reading and writing (see [`cian_lua`]).
@@ -1595,15 +1609,7 @@ impl App {
             lang: Lang::from_opt(config.options.lang.as_deref()),
             git: [None, None],
             disk: [None, None],
-            ai: config.ai.as_ref().map(|a| cian_ai::AiConfig {
-                python: a.python.clone(),
-                endpoint: a.endpoint.clone(),
-                model: a.model.clone(),
-                api_version: a.api_version.clone(),
-                auth_mode: a.auth_mode.clone(),
-                api_key: a.api_key.clone(),
-                api_base_url: a.api_base_url.clone(),
-            }),
+            ai: ai_config_from(&config),
             ai_ready: None,
             ai_job: None,
             ai_rect: Rect::new(0, 0, 0, 0),
