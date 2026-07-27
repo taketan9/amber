@@ -178,6 +178,67 @@ impl App {
         }
     }
 
+    /// `:where` — show exactly which config files cian is reading and writing.
+    /// The one question this answers: when an edit "isn't reflected", which
+    /// `shortcuts.lua` (or init.lua …) is cian actually using? A portable copy
+    /// next to the executable silently wins over `~/.config/cian`.
+    pub(crate) fn show_config_paths(&mut self) {
+        let mut lines: Vec<String> = Vec::new();
+        let portable = cian_lua::is_portable();
+        lines.push(format!(
+            "portable mode: {}",
+            if portable { "YES — files next to the .exe win over ~/.config/cian" } else { "no" }
+        ));
+        lines.push(String::new());
+        // Each config file: the path cian resolves for reading, and its status.
+        for name in ["init.lua", "shortcuts.lua", "macro.lua", "count.lua"] {
+            let p = cian_lua::config_read_path(name);
+            let (path_str, status) = match &p {
+                Some(p) if p.exists() => {
+                    // For shortcuts.lua, check it actually parses — a bad
+                    // hand-edit is otherwise ignored in silence.
+                    let st = if name == "shortcuts.lua" {
+                        match cian_lua::shortcuts::load(p) {
+                            Ok(n) => format!("loaded, {} entr{}", n.len(), if n.len() == 1 { "y" } else { "ies" }),
+                            Err(e) => format!("PARSE ERROR: {}", e),
+                        }
+                    } else {
+                        "present".into()
+                    };
+                    (p.display().to_string(), st)
+                }
+                Some(p) => (p.display().to_string(), "not present".into()),
+                None => ("(unresolved)".into(), String::new()),
+            };
+            lines.push(format!("{:<14} {}", format!("{}:", name), path_str));
+            if !status.is_empty() {
+                lines.push(format!("               → {}", status));
+            }
+        }
+        lines.push(String::new());
+        lines.push(format!(
+            "exe dir:         {}",
+            cian_lua::exe_dir().map(|p| p.display().to_string()).unwrap_or_else(|| "?".into())
+        ));
+        lines.push(format!(
+            "user config dir: {}",
+            cian_lua::user_config_dir().map(|p| p.display().to_string()).unwrap_or_else(|| "?".into())
+        ));
+        // The home confusion: a stray HOME (Git Bash/MSYS) redirects ~/.config.
+        let home = std::env::var("HOME").unwrap_or_default();
+        let up = std::env::var("USERPROFILE").unwrap_or_default();
+        if !home.is_empty() {
+            lines.push(format!("HOME=           {}", home));
+        }
+        if !up.is_empty() {
+            lines.push(format!("USERPROFILE=    {}", up));
+        }
+        if !home.is_empty() && !up.is_empty() && home != up {
+            lines.push("note: HOME differs from USERPROFILE — cian uses HOME for ~/.config/cian.".into());
+        }
+        self.popup = Popup::Notice { lines };
+    }
+
     // ------- Shortcuts -------
     pub(crate) fn start_shortcuts(&mut self) {
         self.popup = Popup::Shortcuts {
@@ -1574,6 +1635,14 @@ impl App {
         self.macro_error = macro_error;
         self.count_opts = crate::count::load_count_opts();
         self.shortcuts = ShortcutStore::load_or_default();
+        // A hand-edited shortcuts.lua that fails to parse is otherwise loaded as
+        // "empty" in silence — surface it so an edit that "isn't reflected" is
+        // explained rather than swallowed.
+        if let Some(p) = cian_lua::config_read_path("shortcuts.lua").filter(|p| p.exists()) {
+            if let Err(e) = cian_lua::shortcuts::load(&p) {
+                problems.push(format!("shortcuts.lua: {}", e));
+            }
+        }
 
         // Live-applicable options.
         self.lang = Lang::from_opt(config.options.lang.as_deref());

@@ -107,6 +107,7 @@ impl App {
             "aierror" | "explain" | "crmaineerror" => self.explain_shell_error(),
             "dupes" | "dup" | "duplicates" => self.start_dupes(),
             "reload" | "source" => self.reload_config(),
+            "where" | "config" | "paths" => self.show_config_paths(),
             // Mark / unmark entries whose name matches a glob (`:mark *.rs`).
             "mark" | "select" => self.cmd_mark(rest, true),
             "unmark" | "deselect" => self.cmd_mark(rest, false),

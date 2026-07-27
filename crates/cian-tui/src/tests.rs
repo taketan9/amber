@@ -4366,6 +4366,33 @@
     }
 
     #[test]
+    fn where_shows_config_paths() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().to_path_buf();
+        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        app.show_config_paths();
+        match &app.popup {
+            Popup::Notice { lines } => {
+                assert!(lines.iter().any(|l| l.starts_with("portable mode:")), "reports portable status");
+                assert!(lines.iter().any(|l| l.contains("shortcuts.lua")), "lists shortcuts.lua");
+                assert!(lines.iter().any(|l| l.contains("user config dir:")), "shows the user config dir");
+            }
+            _ => panic!("no notice"),
+        }
+    }
+
+    #[test]
+    fn malformed_shortcuts_lua_is_an_error_not_silence() {
+        // The parser must reject a bad hand-edit so the app can surface it
+        // instead of loading an empty list without a word.
+        assert!(cian_lua::shortcuts::parse("return 42").is_err(), "non-table rejected");
+        assert!(cian_lua::shortcuts::parse("this is not lua {{{").is_err(), "syntax error rejected");
+        assert!(cian_lua::shortcuts::parse("return { { target = \"/x\" } }").is_err(), "entry without name rejected");
+        // A well-formed file still parses.
+        assert!(cian_lua::shortcuts::parse("return { { name = \"home\", target = \"/home\" } }").is_ok());
+    }
+
+    #[test]
     fn readable_on_flips_with_background_luminance() {
         use crate::render::readable_on;
         use ratatui::style::Color;

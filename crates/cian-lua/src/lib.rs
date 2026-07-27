@@ -259,7 +259,7 @@ fn home_dir() -> Option<PathBuf> {
 const CONFIG_MARKERS: [&str; 3] = ["init.lua", "shortcuts.lua", "macro.lua"];
 
 /// The directory the running executable lives in, resolved through symlinks.
-fn exe_dir() -> Option<PathBuf> {
+pub fn exe_dir() -> Option<PathBuf> {
     std::env::current_exe().ok()?.parent().map(|p| p.to_path_buf())
 }
 
