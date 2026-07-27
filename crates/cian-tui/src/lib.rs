@@ -717,9 +717,10 @@ impl MenuItem {
             MenuItem::BulkRename => tr(lang, "Bulk rename…  (:brename)", "一括リネーム…  (:brename)"),
             MenuItem::Snippets => tr(lang, "Snippets → shell  (:snip)", "スニペット → シェル  (:snip)"),
             MenuItem::Shortcuts => tr(lang, "Shortcuts  (s)", "ショートカット  (s)"),
-            // 🤖 stands in for crmaine's icon — a terminal menu cannot embed the
-            // PNG/SVG (which is itself just the "CRMAINE" wordmark as text).
-            MenuItem::AiMenu => tr(lang, "🤖 crmaine - Ajent ▸", "🤖 crmaine - Ajent ▸"),
+            // Ⓒ stands in for crmaine's icon — a terminal menu cannot embed the
+            // PNG/SVG, which is itself just the "CRMAINE" wordmark as text, so a
+            // circled C echoes it most closely.
+            MenuItem::AiMenu => tr(lang, "Ⓒ crmaine - Ajent ▸", "Ⓒ crmaine - Ajent ▸"),
             MenuItem::SendMenu => tr(lang, "Transfer ▸", "転送 ▸"),
             MenuItem::WindowMenu => tr(lang, "Window ▸", "ウィンドウ ▸"),
             MenuItem::ShellSplitLR => tr(lang, "Split left / right  (S-F8)", "左右に分割  (S-F8)"),
