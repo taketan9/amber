@@ -38,7 +38,7 @@ impl Default for AiConfig {
             python: "python".into(),
             // Same Azure APIM endpoint and model family as crmaine, so an empty
             // `cian.ai{}` works out of the box in that environment.
-            endpoint: "https://apim-jri-dev-apim1.azure-api.net/llmoai".into(),
+            endpoint: "https://apim-jri-dev-apim1.azure-api.net/llmaoai".into(),
             // crmaine's own default model; "gpt-5.4" was a guess and is not
             // deployed in that environment (404 on the deployment path).
             model: "gpt-5-mini".into(),

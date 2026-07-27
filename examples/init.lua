@@ -236,13 +236,13 @@
 -- sizes; file contents only when a feature explicitly requires it).
 --
 -- The endpoint and model default to the crmaine environment
--- (https://apim-jri-dev-apim1.azure-api.net/llmoai, model gpt-5-mini) with
+-- (https://apim-jri-dev-apim1.azure-api.net/llmaoai, model gpt-5-mini) with
 -- broker auth, so in that setup `cian.ai {}` on its own is enough to turn AI on.
 -- cian.ai {}
 --
 -- Override any of it:
 -- cian.ai {
---   endpoint    = "https://your-apim.azure-api.net/llmoai",  -- Azure OpenAI / APIM
+--   endpoint    = "https://your-apim.azure-api.net/llmaoai",  -- Azure OpenAI / APIM
 --   model       = "gpt-5-mini",
 --   auth_mode   = "broker",    -- "broker" (Windows AAD), "apikey", or "mock" (offline echo)
 --   -- python   = "python",    -- interpreter to use (default: "python")
@@ -259,7 +259,7 @@
 -- to the gateway base and cian will use that route with the broker token:
 -- cian.ai {
 --   auth_mode    = "broker",
---   api_base_url = "https://your-apim.azure-api.net/llmoai",  -- OpenAI-compatible route
+--   api_base_url = "https://your-apim.azure-api.net/llmaoai",  -- OpenAI-compatible route
 --   model        = "<your model>",
 -- }
 --
