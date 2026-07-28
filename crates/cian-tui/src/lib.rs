@@ -621,6 +621,20 @@ enum MenuItem {
     SendMenu,
     /// A submenu grouping the shell window actions (splits, tabs, zoom).
     WindowMenu,
+    /// A submenu grouping the less-common file actions (copy/move to other
+    /// pane, copy to a path, bulk rename).
+    FileMenu,
+    /// A submenu grouping archive actions (compress ▸, extract here).
+    ArchiveMenu,
+    /// A submenu grouping the read-only "inspect" actions (attributes, hash,
+    /// compare, count, find duplicates).
+    InspectMenu,
+    /// A submenu grouping view/misc actions (show hidden, language, copy path).
+    ViewMenu,
+    /// A submenu grouping the shell session actions (logging, encoding).
+    SessionMenu,
+    /// Copy the selection's path text to the system clipboard (the `p` key).
+    CopyPathText,
     /// Split the active shell tab left/right (S-F8).
     ShellSplitLR,
     /// Split the active shell tab top/bottom (S-F9).
@@ -651,6 +665,11 @@ impl MenuItem {
             MenuItem::AiMenu
                 | MenuItem::SendMenu
                 | MenuItem::WindowMenu
+                | MenuItem::FileMenu
+                | MenuItem::ArchiveMenu
+                | MenuItem::InspectMenu
+                | MenuItem::ViewMenu
+                | MenuItem::SessionMenu
                 | MenuItem::GitMenu
                 | MenuItem::SvnMenu
                 | MenuItem::CompressMenu
@@ -726,6 +745,12 @@ impl MenuItem {
             MenuItem::AiMenu => tr(lang, "Ⓒ crmaine - Ajent ▸", "Ⓒ crmaine - Ajent ▸"),
             MenuItem::SendMenu => tr(lang, "Transfer ▸", "転送 ▸"),
             MenuItem::WindowMenu => tr(lang, "Window ▸", "ウィンドウ ▸"),
+            MenuItem::FileMenu => tr(lang, "File ▸", "ファイル操作 ▸"),
+            MenuItem::ArchiveMenu => tr(lang, "Archive ▸", "書庫 ▸"),
+            MenuItem::InspectMenu => tr(lang, "Inspect ▸", "調べる ▸"),
+            MenuItem::ViewMenu => tr(lang, "View ▸", "表示 ▸"),
+            MenuItem::SessionMenu => tr(lang, "Session ▸", "セッション ▸"),
+            MenuItem::CopyPathText => tr(lang, "Copy path text  (p)", "パスをコピー  (p)"),
             MenuItem::ShellSplitLR => tr(lang, "Split left / right  (S-F8)", "左右に分割  (S-F8)"),
             MenuItem::ShellSplitTB => tr(lang, "Split top / bottom  (S-F9)", "上下に分割  (S-F9)"),
             MenuItem::ShellNewTab => tr(lang, "New tab  (F9)", "新規タブ  (F9)"),

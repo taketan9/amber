@@ -1749,7 +1749,9 @@
         app.focus(FocusedPane::Shell);
         app.open_context_menu(5, 5);
         let Popup::ContextMenu { items, .. } = &app.popup else { panic!("no menu") };
-        assert_eq!(items.first(), Some(&MenuItem::Ssh), "got {:?}", items);
+        // SSH is still reachable from the shell menu (the only route to it while
+        // the shell has focus), now sitting after Paste / Transfer ▸.
+        assert!(items.contains(&MenuItem::Ssh), "got {:?}", items);
     }
 
     #[test]
@@ -1798,16 +1800,16 @@
         assert!(app.file_clip.is_none());
         app.open_context_menu(5, 5);
         let Popup::ContextMenu { items, .. } = &app.popup else { panic!("no menu") };
-        // No SSH hosts configured here, so SFTP entries are omitted.
+        // No SSH hosts configured here, so Transfer ▸ is omitted; logging and
+        // encoding fold into Session ▸.
         assert_eq!(
             items,
             &vec![
-                MenuItem::Ssh,
                 MenuItem::Paste,
-                MenuItem::StartLog,
-                MenuItem::Encoding,
-                MenuItem::Background,
+                MenuItem::Ssh,
+                MenuItem::SessionMenu,
                 MenuItem::WindowMenu,
+                MenuItem::Background,
                 MenuItem::Lang,
                 MenuItem::Quit,
                 MenuItem::Manual
@@ -3204,9 +3206,16 @@
         app.focus(FocusedPane::Left);
         app.open_context_menu(5, 5);
         let Popup::ContextMenu { items, .. } = &app.popup else { panic!("no menu") };
-        for want in [MenuItem::HiddenToggle, MenuItem::Attributes, MenuItem::Hash, MenuItem::Shortcuts] {
+        // Top level carries the groups + Shortcuts; the old flat entries now
+        // live one level down.
+        for want in [MenuItem::InspectMenu, MenuItem::ViewMenu, MenuItem::Shortcuts] {
             assert!(items.contains(&want), "{:?} missing from {:?}", want, items);
         }
+        // Attributes / Hash are under Inspect ▸; Show-hidden is under View ▸.
+        let inspect = app.submenu_children(MenuItem::InspectMenu).unwrap();
+        assert!(inspect.contains(&MenuItem::Attributes) && inspect.contains(&MenuItem::Hash));
+        let view = app.submenu_children(MenuItem::ViewMenu).unwrap();
+        assert!(view.contains(&MenuItem::HiddenToggle));
     }
 
     /// `M` opens the context menu on every terminal (Shift+Enter can't be

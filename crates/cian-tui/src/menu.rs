@@ -9,104 +9,73 @@ impl App {
         // AI entries only appear when they will work.
         let ai = self.ai.is_some() && self.ai_ready();
         let mut items = Vec::new();
-        // The snippet launcher sits at the very top of either menu — it is the
-        // most-reached-for entry and always targets the shell. crmaine - Ajent
-        // (the AI submenu) follows it as the second entry when AI is available.
-        if !self.config.snippets.is_empty() {
-            items.push(MenuItem::Snippets);
-        }
+        // Launchers lead both menus, in the agreed order: crmaine ▸, snippets,
+        // macros. Each appears only when it has something to offer.
         if ai {
             items.push(MenuItem::AiMenu);
         }
-        // Layout macros — the heavier sibling of snippets — when any are defined.
+        if !self.config.snippets.is_empty() {
+            items.push(MenuItem::Snippets);
+        }
         if !self.macros.is_empty() {
             items.push(MenuItem::Macros);
         }
+        let has_hosts = !self.config.ssh_hosts.is_empty();
         if self.focused == FocusedPane::Shell {
-            // A PTY owns its own screen, so the file operations make no sense
-            // here. SSH leads: keys never reach the picker while the shell has
-            // focus, so this menu is the only way to open it without first
-            // leaving the shell — which is exactly where you want it.
-            items.push(MenuItem::Ssh);
+            // A PTY owns its own screen, so file operations make no sense here.
             items.push(MenuItem::Paste);
-            // Session logging, per pane: offer start or stop depending on
-            // whether this pane is already recording.
-            if self.shell.active_session().map(|s| s.is_logging()).unwrap_or(false) {
-                items.push(MenuItem::StopLog);
-            } else {
-                items.push(MenuItem::StartLog);
+            if has_hosts {
+                items.push(MenuItem::SendMenu); // Transfer ▸
             }
-            // Re-decode the shell's output (Shift_JIS, UTF-16, …).
-            items.push(MenuItem::Encoding);
-            // SFTP to/from a configured host, acting on the last file pane.
-            if !self.config.ssh_hosts.is_empty() {
-                items.push(MenuItem::ScpUpload);
-                items.push(MenuItem::ScpDownload);
-            }
-            items.push(MenuItem::Background);
-            // Synchronize input across the tab's panes — only when there's more
-            // than one pane to synchronize.
+            // SSH leads: keys never reach the picker while the shell has focus,
+            // so this menu is the only way to open it without leaving the shell.
+            items.push(MenuItem::Ssh);
+            items.push(MenuItem::SessionMenu); // log ▸ / encoding
+            // Synchronize input — only when there's more than one pane.
             if self.shell.active_pane_count() > 1 {
-                if self.shell.is_broadcasting() {
-                    items.push(MenuItem::SyncStop);
+                items.push(if self.shell.is_broadcasting() {
+                    MenuItem::SyncStop
                 } else {
-                    items.push(MenuItem::SyncStart);
-                }
+                    MenuItem::SyncStart
+                });
             }
-            // Window operations (splits, tabs, zoom) that otherwise live only on
-            // the F-keys, so they are reachable by mouse.
             items.push(MenuItem::WindowMenu);
+            items.push(MenuItem::Background);
+            items.push(MenuItem::Lang);
         } else {
+            // Frequent file ops sit at the top level; the rest fold into groups.
             items.push(MenuItem::Copy);
             items.push(MenuItem::Cut);
-            // Always offered: it can also paste from the system clipboard, and
-            // hiding it made a file just copied in Explorer look unpasteable.
             items.push(MenuItem::Paste);
-            items.push(MenuItem::CopyToOther);
-            items.push(MenuItem::MoveToOther);
-            items.push(MenuItem::CopyToPath);
             items.push(MenuItem::Rename);
             items.push(MenuItem::Delete);
-            items.push(MenuItem::Attributes);
-            items.push(MenuItem::Hash);
-            items.push(MenuItem::Compare);
-            items.push(MenuItem::FindDupes);
-            items.push(MenuItem::Count);
-            // Archiving: "Extract here" when the cursor is on an archive, and
-            // "Compress ▸" whenever there is something selected to pack.
+            items.push(MenuItem::FileMenu); // to-other / copy-to / bulk rename
+            // Archive ▸ when there is something to pack, or the cursor is on one.
+            let has_targets = self.active_pane().map(|p| !p.target_paths().is_empty()).unwrap_or(false);
             let on_archive = self
                 .active_pane()
                 .and_then(|p| p.selected())
                 .map(|e| !e.is_dir && cian_core::archive::is_archive(&e.path))
                 .unwrap_or(false);
-            if on_archive {
-                items.push(MenuItem::Extract);
+            if has_targets || on_archive {
+                items.push(MenuItem::ArchiveMenu);
             }
-            let has_targets = self.active_pane().map(|p| !p.target_paths().is_empty()).unwrap_or(false);
-            if has_targets {
-                items.push(MenuItem::BulkRename);
-                items.push(MenuItem::CompressMenu);
+            items.push(MenuItem::InspectMenu); // attributes / hash / compare / count / dupes
+            if has_hosts {
+                items.push(MenuItem::SendMenu); // Transfer ▸
             }
-            items.push(MenuItem::HiddenToggle);
-            // VCS actions, only when this pane sits in a repo / working copy.
             match self.vcs_kind() {
                 Some(Vcs::Git) => items.push(MenuItem::GitMenu),
                 Some(Vcs::Svn) => items.push(MenuItem::SvnMenu),
                 None => {}
             }
-            // The bookmarks menu, reachable by mouse as well as the `s` key.
             items.push(MenuItem::Shortcuts);
-            // SFTP transfer, offered only when servers are configured.
-            if !self.config.ssh_hosts.is_empty() {
-                items.push(MenuItem::SendMenu);
-            }
             items.push(MenuItem::Ssh);
             items.push(MenuItem::Background);
+            items.push(MenuItem::ViewMenu); // show hidden / language / copy path
         }
-        // Language toggle, quit and the manual are in every menu, so all are
-        // reachable by mouse alone (quitting otherwise needs `q`, which the
-        // shell eats).
-        items.push(MenuItem::Lang);
+        // Quit and the manual close every menu — reachable by mouse alone
+        // (quitting otherwise needs `q`, which the shell eats).
         items.push(MenuItem::Quit);
         items.push(MenuItem::Manual);
         self.menu_stack.clear();
@@ -178,6 +147,52 @@ impl App {
                 MenuItem::CompressTarGz,
                 MenuItem::Back,
             ]),
+            MenuItem::FileMenu => Some(vec![
+                MenuItem::CopyToOther,
+                MenuItem::MoveToOther,
+                MenuItem::CopyToPath,
+                MenuItem::BulkRename,
+                MenuItem::Back,
+            ]),
+            MenuItem::ArchiveMenu => {
+                let mut v = vec![MenuItem::CompressMenu];
+                // "Extract here" only when the cursor is on an archive.
+                let on_archive = self
+                    .active_pane()
+                    .and_then(|p| p.selected())
+                    .map(|e| !e.is_dir && cian_core::archive::is_archive(&e.path))
+                    .unwrap_or(false);
+                if on_archive {
+                    v.push(MenuItem::Extract);
+                }
+                v.push(MenuItem::Back);
+                Some(v)
+            }
+            MenuItem::InspectMenu => Some(vec![
+                MenuItem::Attributes,
+                MenuItem::Hash,
+                MenuItem::Compare,
+                MenuItem::Count,
+                MenuItem::FindDupes,
+                MenuItem::Back,
+            ]),
+            MenuItem::ViewMenu => Some(vec![
+                MenuItem::HiddenToggle,
+                MenuItem::Lang,
+                MenuItem::CopyPathText,
+                MenuItem::Back,
+            ]),
+            MenuItem::SessionMenu => {
+                let mut v = Vec::new();
+                if self.shell.active_session().map(|s| s.is_logging()).unwrap_or(false) {
+                    v.push(MenuItem::StopLog);
+                } else {
+                    v.push(MenuItem::StartLog);
+                }
+                v.push(MenuItem::Encoding);
+                v.push(MenuItem::Back);
+                Some(v)
+            }
             _ => None,
         }
     }
@@ -290,7 +305,8 @@ impl App {
         self.menu_stack.clear();
         self.popup = Popup::None;
         match item {
-            MenuItem::AiMenu | MenuItem::SendMenu | MenuItem::WindowMenu | MenuItem::GitMenu | MenuItem::SvnMenu | MenuItem::CompressMenu | MenuItem::Back => {} // handled above
+            MenuItem::AiMenu | MenuItem::SendMenu | MenuItem::WindowMenu | MenuItem::GitMenu | MenuItem::SvnMenu | MenuItem::CompressMenu | MenuItem::FileMenu | MenuItem::ArchiveMenu | MenuItem::InspectMenu | MenuItem::ViewMenu | MenuItem::SessionMenu | MenuItem::Back => {} // handled above
+            MenuItem::CopyPathText => self.copy_paths_to_clipboard(),
             MenuItem::ShellSplitLR => {
                 let cwd = self.shell_cwd();
                 self.shell.split_active(&cwd, SplitDir::LeftRight);
