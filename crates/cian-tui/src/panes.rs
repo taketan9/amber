@@ -140,13 +140,14 @@ impl ShellTab {
 
     /// Split the active leaf into (old, new) along `dir`; new becomes active.
     pub(crate) fn split(&mut self, dir: SplitDir, new_session: PtySession) {
-        self.split_from(self.active, dir, new_session);
+        self.split_from(self.active, dir, 50, new_session);
     }
 
     /// Split leaf `old` (falling back to the active leaf if `old` is not a valid
-    /// leaf). Used so an async split lands on the intended pane even if the
-    /// active leaf moved between queueing and installing the spawn.
-    pub(crate) fn split_from(&mut self, old: usize, dir: SplitDir, new_session: PtySession) {
+    /// leaf), the source pane keeping `ratio` percent. Used so an async split
+    /// lands on the intended pane even if the active leaf moved between queueing
+    /// and installing the spawn.
+    pub(crate) fn split_from(&mut self, old: usize, dir: SplitDir, ratio: u16, new_session: PtySession) {
         let old = if matches!(self.nodes.get(old).and_then(|n| n.as_ref()), Some(Node::Leaf { .. })) {
             old
         } else {
@@ -156,7 +157,7 @@ impl ShellTab {
             return;
         }
         let new_leaf = self.alloc(Node::Leaf { session: new_session, bg: None });
-        let split_idx = self.alloc(Node::Split { dir, first: old, second: new_leaf, ratio: 50 });
+        let split_idx = self.alloc(Node::Split { dir, first: old, second: new_leaf, ratio: ratio.clamp(5, 95) });
         if old == self.root {
             self.root = split_idx;
         } else if let Some((p, is_first)) = self.parent_of(old) {
@@ -456,10 +457,10 @@ impl ShellPane {
                 self.active = self.tabs.len() - 1;
                 self.zoom_pane = false;
             }
-            PendingKind::Split { tab, dir, leaf } => match self.tabs.get_mut(tab) {
+            PendingKind::Split { tab, dir, leaf, ratio } => match self.tabs.get_mut(tab) {
                 Some(t) => {
                     match leaf {
-                        Some(l) => t.split_from(l, dir, session),
+                        Some(l) => t.split_from(l, dir, ratio, session),
                         None => t.split(dir, session),
                     }
                     // `split` makes the new leaf active, so its parent is the
@@ -486,17 +487,18 @@ impl ShellPane {
         if self.tabs.get(self.active).is_none() {
             return;
         }
-        let kind = PendingKind::Split { tab: self.active, dir, leaf: None };
+        let kind = PendingKind::Split { tab: self.active, dir, leaf: None, ratio: 50 };
         self.spawn_async(cwd, kind);
     }
 
-    /// Split a specific `leaf` of the active tab — used by a layout macro so its
-    /// `from = N` lands on the right pane even though the spawn is asynchronous.
-    pub(crate) fn split_leaf(&mut self, cwd: &Path, leaf: usize, dir: SplitDir) {
+    /// Split a specific `leaf` of the active tab, the source keeping `ratio`
+    /// percent — used by a layout macro so its `from = N` lands on the right
+    /// pane (with the right proportions) even though the spawn is asynchronous.
+    pub(crate) fn split_leaf(&mut self, cwd: &Path, leaf: usize, dir: SplitDir, ratio: u16) {
         if self.tabs.get(self.active).is_none() {
             return;
         }
-        let kind = PendingKind::Split { tab: self.active, dir, leaf: Some(leaf) };
+        let kind = PendingKind::Split { tab: self.active, dir, leaf: Some(leaf), ratio };
         self.spawn_async(cwd, kind);
     }
 

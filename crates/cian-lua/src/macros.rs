@@ -55,6 +55,9 @@ pub struct PaneStep {
     pub bg: Option<String>,
     /// A directory to start a session log in for this pane.
     pub log: Option<String>,
+    /// Percentage of the split the *source* pane keeps (5–95). `None` = 50/50.
+    /// Lets a grid make even thirds (33 then 50) instead of 1/2, 1/4, 1/4.
+    pub ratio: Option<u16>,
 }
 
 /// One scripted action inside a pane. In Lua a bare string is a `Send`; a table
@@ -151,6 +154,7 @@ fn pane_from(t: &Table) -> Result<PaneStep, String> {
     let cmd = t.get::<Option<String>>("cmd").unwrap_or(None).filter(|s| !s.is_empty());
     let bg = t.get::<Option<String>>("bg").unwrap_or(None).filter(|s| !s.is_empty());
     let log = t.get::<Option<String>>("log").unwrap_or(None).filter(|s| !s.is_empty());
+    let ratio = t.get::<Option<u16>>("ratio").unwrap_or(None).map(|r| r.clamp(5, 95));
     let mut steps = Vec::new();
     if let Ok(Value::Table(st)) = t.get::<Value>("steps") {
         for s in st.sequence_values::<Value>() {
@@ -159,7 +163,7 @@ fn pane_from(t: &Table) -> Result<PaneStep, String> {
             }
         }
     }
-    Ok(PaneStep { dir, from, cmd, steps, bg, log })
+    Ok(PaneStep { dir, from, cmd, steps, bg, log, ratio })
 }
 
 /// Parse one entry of a `steps` list: a bare string (`Send`), or a table
@@ -221,6 +225,38 @@ mod tests {
             m.panes[2].steps,
             vec![Step::Send("sqlplus /nolog".into()), Step::Send("connect u/p@db".into())]
         );
+    }
+
+    #[test]
+    fn ratio_parses_and_clamps() {
+        let src = r#"return { { name = "g", panes = {
+            { cmd = "a" },
+            { from = 1, dir = "right", ratio = 33, cmd = "b" },
+            { from = 1, dir = "down",  ratio = 200, cmd = "c" },
+        } } }"#;
+        let m = &parse(src).unwrap()[0];
+        assert_eq!(m.panes[0].ratio, None);
+        assert_eq!(m.panes[1].ratio, Some(33));
+        assert_eq!(m.panes[2].ratio, Some(95), "clamped to 95");
+    }
+
+    #[test]
+    fn shipped_grid6_macro_parses() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../examples/macro/Cgrid6.lua");
+        if !path.exists() {
+            eprintln!("example macro not found; skipping");
+            return;
+        }
+        let ms = parse(&std::fs::read_to_string(&path).unwrap()).expect("Cgrid6.lua parses");
+        let m = &ms[0];
+        assert_eq!(m.panes.len(), 6, "six panes");
+        assert!(!m.sync && m.zoom);
+        assert_eq!(m.panes[0].from, None);
+        // Even-thirds ratios: the two column tops keep 33%.
+        assert_eq!(m.panes[2].ratio, Some(33));
+        assert_eq!(m.panes[3].ratio, Some(33));
+        assert_eq!(m.panes[5].from, Some(4), "pane 6 splits off pane 4");
     }
 
     #[test]

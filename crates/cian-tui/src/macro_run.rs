@@ -223,8 +223,9 @@ impl App {
                         Split::Right => SplitDir::LeftRight,
                         Split::Down => SplitDir::TopBottom,
                     };
+                    let ratio = next.ratio.unwrap_or(50);
                     match target {
-                        Some(leaf) => self.shell.split_leaf(&cwd, leaf, dir),
+                        Some(leaf) => self.shell.split_leaf(&cwd, leaf, dir, ratio),
                         None => self.shell.split_active(&cwd, dir),
                     }
                 }

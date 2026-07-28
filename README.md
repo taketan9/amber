@@ -847,6 +847,12 @@ accepts a background-preset name (`"navy"`, `"crmaine"`, …), not just a colour
 spec. The password sits in the macro file in plain text — the same opt-in
 trade-off as an SSH password in init.lua.
 
+A pane can also set **`ratio`** — the percentage the pane it splits off *keeps*
+(default 50). That is how a taller grid stays even:
+[`examples/macro/Cgrid6.lua`](examples/macro/Cgrid6.lua) builds a 2×3 of six
+panes with `ratio = 33` on the first row split (then 50 on the second), so the
+three rows come out even thirds instead of 1/2, 1/4, 1/4.
+
 **One macro per file.** As an alternative to the single list, put a `macro/`
 directory next to `init.lua` with one file each — `macro/Adeploy.lua`,
 `macro/Bdbcheck.lua` — where each returns a single `{ name =, panes = }` table.

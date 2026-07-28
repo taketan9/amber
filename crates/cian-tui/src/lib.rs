@@ -168,7 +168,8 @@ enum PendingKind {
     /// A split of tab `tab`. `leaf` is the specific leaf node to split (so a
     /// macro's `from = N` targets the intended pane regardless of what is active
     /// when the spawn lands); `None` splits whatever is active at install time.
-    Split { tab: usize, dir: SplitDir, leaf: Option<usize> },
+    /// `ratio` is the percentage the source pane keeps (for even grid thirds).
+    Split { tab: usize, dir: SplitDir, leaf: Option<usize>, ratio: u16 },
 }
 
 
