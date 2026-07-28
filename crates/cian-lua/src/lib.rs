@@ -62,6 +62,9 @@ pub struct Options {
     pub borders: Option<String>,
     /// Start with dotfiles visible. Defaults to true.
     pub show_hidden: Option<bool>,
+    /// Use Nerd Font glyphs (file-type icons, the branch/disk symbols). Default
+    /// true; set false on a terminal without a Nerd Font so nothing mojibakes.
+    pub nerd_fonts: Option<bool>,
     /// Directory both panes open in when cian is started with no path
     /// argument. Unset falls back to the Desktop, then the working directory.
     pub home: Option<String>,
@@ -586,6 +589,12 @@ fn install_api(lua: &Lua, builder: &Rc<RefCell<Builder>>) -> mlua::Result<()> {
                         Err(_) => bm
                             .errors
                             .push("set_option: show_hidden expects a boolean".into()),
+                    },
+                    "nerd_fonts" => match bool::from_lua(val, lua) {
+                        Ok(v) => bm.options.nerd_fonts = Some(v),
+                        Err(_) => bm
+                            .errors
+                            .push("set_option: nerd_fonts expects a boolean".into()),
                     },
                     "home" => match String::from_lua(val, lua) {
                         Ok(v) => bm.options.home = Some(v),

@@ -63,6 +63,11 @@
 -- right-click menu. Default: true.
 -- cian.set_option("show_hidden", true)
 
+-- Nerd Font glyphs — the file-type icons and the branch / disk symbols in the
+-- status line. Default true. Set false on a terminal WITHOUT a Nerd Font so
+-- those glyphs are dropped (no mojibake); folders are still marked by colour.
+-- cian.set_option("nerd_fonts", false)
+
 -- Border corners: "rounded" (╭╮╯╰) or "plain" (square). Unset auto-picks —
 -- rounded where the terminal/font can render them, square in the legacy
 -- Windows console. Force "plain" if the corners look misaligned.

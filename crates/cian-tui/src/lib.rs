@@ -2560,6 +2560,9 @@ fn os_clipboard_file_refs(paths: &[PathBuf]) -> Result<()> {
 }
 
 fn shortcut_icon(target: &str) -> &'static str {
+    if !theme::nerd_fonts() {
+        return "";
+    }
     if target.starts_with("http://")
         || target.starts_with("https://")
         || target.starts_with("file://")
@@ -2979,7 +2982,11 @@ pub fn run(left: Option<PathBuf>, right: Option<PathBuf>, startup: StartupMacro)
         .unwrap_or(fallback);
 
     // Resolve and install the color theme before any drawing happens.
-    let theme_errors = theme::install(&config.theme, config.options.borders.as_deref());
+    let theme_errors = theme::install(
+        &config.theme,
+        config.options.borders.as_deref(),
+        config.options.nerd_fonts.unwrap_or(true),
+    );
 
     // Collect all non-fatal config issues for a single startup notice.
     let mut startup_errors = config.errors.clone();

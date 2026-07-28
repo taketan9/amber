@@ -135,6 +135,14 @@ pub(crate) fn border_type() -> BorderType {
     *BORDERS.get_or_init(|| resolve_border_type(None))
 }
 
+/// Whether Nerd Font glyphs may be used (file icons, branch/disk symbols). Set
+/// once at startup from `cian.set_option("nerd_fonts", …)`; defaults to true.
+static NERD: OnceLock<bool> = OnceLock::new();
+
+pub(crate) fn nerd_fonts() -> bool {
+    *NERD.get_or_init(|| true)
+}
+
 /// Pick rounded or square corners.
 ///
 /// Rounded corners are `╭╮╯╰` (U+256D–U+2570), which plenty of console fonts —
@@ -423,9 +431,10 @@ pub(crate) fn resolve_theme(t: &cian_lua::Theme) -> (ResolvedTheme, Vec<String>)
 
 /// Resolve and install the theme + border style into the process-wide statics
 /// (call once, before drawing). Returns the non-fatal theme errors to report.
-pub(crate) fn install(theme: &cian_lua::Theme, borders: Option<&str>) -> Vec<String> {
+pub(crate) fn install(theme: &cian_lua::Theme, borders: Option<&str>, nerd: bool) -> Vec<String> {
     let (resolved, errs) = resolve_theme(theme);
     let _ = THEME.set(resolved);
     let _ = BORDERS.set(resolve_border_type(borders));
+    let _ = NERD.set(nerd);
     errs
 }

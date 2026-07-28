@@ -561,6 +561,11 @@ fn tabs_title<'a>(
 
 /// Pick a Nerd Font glyph based on the entry name/extension.
 pub(crate) fn icon_for(entry: &cian_core::Entry) -> &'static str {
+    // Without a Nerd Font, drop the icons entirely — directory colour still
+    // marks folders, and no glyph mojibakes on a plain terminal.
+    if !crate::theme::nerd_fonts() {
+        return "";
+    }
     // The synthetic `..` row gets an up-level arrow so it reads as navigation,
     // not as a folder that happens to be called "..".
     if entry.is_parent {
@@ -1512,7 +1517,8 @@ fn draw_status(f: &mut Frame, area: Rect, app: &App) {
     // changed-file count — the "branch bar" every developer glances at.
     if let Some(git) = app.git_for(app.focused) {
         spans.push(dim_sep.clone());
-        let mut label = format!("\u{e0a0} {}", git.branch); //
+        let branch_glyph = if nerd_fonts() { "\u{e0a0} " } else { "" };
+        let mut label = format!("{}{}", branch_glyph, git.branch);
         if git.ahead > 0 {
             label.push_str(&format!(" ↑{}", git.ahead));
         }
@@ -1542,7 +1548,8 @@ fn draw_status(f: &mut Frame, area: Rect, app: &App) {
             Color::Rgb(130, 175, 210)
         };
         let label = format!(
-            "\u{f0a0} {} free / {}",
+            "{}{} free / {}",
+            if nerd_fonts() { "\u{f0a0} " } else { "" },
             cian_core::disk::human_size(u.free),
             cian_core::disk::human_size(u.total),
         );
