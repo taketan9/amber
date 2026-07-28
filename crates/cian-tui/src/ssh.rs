@@ -381,9 +381,16 @@ impl App {
         }
     }
 
-    /// Ask for the mode to apply to downloaded files (blank keeps them as-is;
-    /// on Windows the mode is a no-op).
+    /// Ask for the mode to apply to downloaded files. Skipped on Windows: NTFS
+    /// has no Unix permission bits, so a chmod on the local file can never take
+    /// effect — asking for one there is only misleading (a downloaded file shows
+    /// up as 644 via a Samba/NFS view no matter what was typed). The upload chmod
+    /// still works because it is applied server-side over SFTP.
     pub(crate) fn prompt_download_chmod(&mut self, files: Vec<String>, dir: PathBuf) {
+        if cfg!(windows) {
+            self.start_remote_download(files, dir, None);
+            return;
+        }
         self.popup = text_input(
             "download — chmod",
             "mode for downloaded files (octal, e.g. 644; blank = keep):",
@@ -425,8 +432,13 @@ impl App {
                 let mut sctl = cian_scp::Ctl { cancel, on_progress: &mut fwd };
                 match cian_scp::download(&target, remote, &dest, &mut sctl) {
                     Ok(via) => {
-                        chmod_local(&dest, mode);
+                        // The file is down; a chmod failure is secondary, so still
+                        // count it as a success but surface why the mode did not
+                        // stick rather than silently dropping it.
                         report.ok += 1;
+                        if let Err(e) = chmod_local(&dest, mode) {
+                            report.note_error(format!("{}: downloaded, but chmod failed: {}", fname, e));
+                        }
                         report.note = Some(format!("via {}", via.label()));
                     }
                     Err(e) => report.note_error(format!("{}: {}", fname, e)),
@@ -602,15 +614,18 @@ fn parent_remote(cwd: &str) -> String {
 /// Apply Unix permission bits to a just-downloaded local file. A no-op on
 /// Windows (NTFS has no Unix mode) and when `mode` is `None`.
 #[cfg(unix)]
-fn chmod_local(path: &std::path::Path, mode: Option<u32>) {
+fn chmod_local(path: &std::path::Path, mode: Option<u32>) -> std::io::Result<()> {
     use std::os::unix::fs::PermissionsExt;
     if let Some(m) = mode {
-        let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(m));
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(m))?;
     }
+    Ok(())
 }
 
 #[cfg(not(unix))]
-fn chmod_local(_path: &std::path::Path, _mode: Option<u32>) {}
+fn chmod_local(_path: &std::path::Path, _mode: Option<u32>) -> std::io::Result<()> {
+    Ok(())
+}
 
 /// The user's Desktop, if it exists.
 fn dirs_desktop() -> Option<PathBuf> {

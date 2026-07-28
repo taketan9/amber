@@ -2,6 +2,11 @@
     use ratatui::backend::TestBackend;
     use ratatui::widgets::BorderType;
 
+    /// The active theme lives in a process-wide global, so tests that mutate or
+    /// assert on it must not run concurrently with each other. They all take this
+    /// lock first.
+    static THEME_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     fn key(c: char) -> KeyEvent {
         KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE)
     }
@@ -1920,6 +1925,7 @@
 
     #[test]
     fn theme_picker_previews_live_and_esc_restores() {
+        let _g = THEME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let (_d, mut app) = app_with(&["a.txt"]);
         let before = crate::theme::theme();
         app.start_theme_picker();
@@ -1935,6 +1941,7 @@
 
     #[test]
     fn pane_theme_override_is_scoped_and_clearable() {
+        let _g = THEME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let (_d, mut app) = app_with(&["a.txt"]);
         let app_theme = crate::theme::theme();
         // Right pane (side 1) gallery: preview leaves the global app theme alone.
@@ -1982,12 +1989,18 @@
 
     #[test]
     fn theme_set_by_name_sticks() {
+        let _g = THEME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        // set_theme_by_name persists to state.toml; point the config dir at a
+        // tempdir so the test never clobbers the real ~/.config/cian.
+        let cfg = tempfile::tempdir().unwrap();
+        std::env::set_var("CIAN_CONFIG_DIR", cfg.path());
         let (_d, mut app) = app_with(&["a.txt"]);
         app.set_theme_by_name("dracula");
         assert_eq!(crate::theme::theme(), crate::theme::ResolvedTheme::DRACULA);
         assert_eq!(app.theme_name, "dracula");
         // Restore the default so other tests reading the global are unaffected.
         crate::theme::set_theme(crate::theme::ResolvedTheme::DARK);
+        std::env::remove_var("CIAN_CONFIG_DIR");
     }
 
     #[test]
