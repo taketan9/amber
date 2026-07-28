@@ -1924,12 +1924,14 @@ impl App {
             .last_file_pane_cwd()
             .map(|p| p.display().to_string())
             .unwrap_or_default();
-        self.popup = text_input(
-            "session log — folder",
-            "directory to save the log in  (Ctrl+V paste):",
-            seed,
-            InputKind::LogDir,
-        );
+        // Preview the generated file name so it is clear what lands in the dir.
+        let host = self
+            .shell
+            .active_title()
+            .and_then(|t| host_from_title(&t))
+            .unwrap_or_else(|| "shell".to_string());
+        let prompt = format!("directory for the log  (file: <time>_{}.log):", host);
+        self.popup = text_input("session log — folder", &prompt, seed, InputKind::LogDir);
     }
 
     /// Start logging the active shell pane into `dir`, building the file name

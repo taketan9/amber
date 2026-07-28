@@ -483,9 +483,11 @@ impl App {
         }
         let Some(auth) = self.pending_auth.take() else { return false };
         if let Some(s) = self.shell.active_session_mut() {
-            let mut line = auth.secret;
-            line.push('\n');
-            s.write_input(line.as_bytes());
+            // Submit with a carriage return — a getpass/readpassphrase prompt
+            // reads the line ended by Enter (CR), which a bare `\n` may not be.
+            let mut bytes = auth.secret.into_bytes();
+            bytes.push(b'\r');
+            s.write_input(&bytes);
         }
         true
     }

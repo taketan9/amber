@@ -1803,11 +1803,18 @@
         assert!(app.file_clip.is_none());
         app.open_context_menu(5, 5);
         let Popup::ContextMenu { items, .. } = &app.popup else { panic!("no menu") };
+        // Strip the optional launchers (present only when snippets/AI/macros are
+        // configured in the ambient config dir) so the core set is stable.
+        let core: Vec<MenuItem> = items
+            .iter()
+            .cloned()
+            .filter(|i| !matches!(i, MenuItem::Snippets | MenuItem::AiMenu | MenuItem::Macros))
+            .collect();
         // No SSH hosts configured here, so Transfer ▸ is omitted; logging and
         // encoding fold into Session ▸.
         assert_eq!(
-            items,
-            &vec![
+            core,
+            vec![
                 MenuItem::Paste,
                 MenuItem::Ssh,
                 MenuItem::SessionMenu,

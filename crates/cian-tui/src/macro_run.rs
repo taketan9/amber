@@ -191,6 +191,9 @@ impl App {
 
         // 4. Run the current pane's next scripted step.
         if let Some(step) = run.steps.pop_front() {
+            if cian_core::log::enabled() {
+                cian_core::log::log(&format!("macro: step {:?}", step));
+            }
             match step {
                 Step::Send(line) => self.type_line_in_active(&line),
                 Step::Wait(secs) => {
@@ -224,6 +227,12 @@ impl App {
                         Split::Down => SplitDir::TopBottom,
                     };
                     let ratio = next.ratio.unwrap_or(50);
+                    if cian_core::log::enabled() {
+                        cian_core::log::log(&format!(
+                            "macro: split from={:?} target_leaf={:?} dir={:?} ratio={} leaf_ids={:?}",
+                            next.from, target, dir, ratio, run.leaf_ids
+                        ));
+                    }
                     match target {
                         Some(leaf) => self.shell.split_leaf(&cwd, leaf, dir, ratio),
                         None => self.shell.split_active(&cwd, dir),
@@ -253,6 +262,13 @@ impl App {
         if let Some(id) = self.shell.active_leaf_id() {
             run.leaf_ids.push(id);
         }
+        if cian_core::log::enabled() {
+            cian_core::log::log(&format!(
+                "macro: applied pane (leaf {:?}); leaf_ids now {:?}",
+                self.shell.active_leaf_id(),
+                run.leaf_ids
+            ));
+        }
         if let Some(spec) = &step.bg {
             if let Some(c) = crate::resolve_bg(spec) {
                 self.shell.set_active_pane_bg(Some(c));
@@ -278,11 +294,13 @@ impl App {
             .unwrap_or(false)
     }
 
-    /// Type one line into the active shell pane and press Enter.
+    /// Type one line into the active shell pane and press Enter. Enter is a
+    /// carriage return (`\r`) — what a real keypress sends — so it also submits
+    /// a password at a getpass prompt, where a bare `\n` may not.
     fn type_line_in_active(&mut self, line: &str) {
         if let Some(s) = self.shell.active_session_mut() {
             let mut bytes = line.as_bytes().to_vec();
-            bytes.push(b'\n');
+            bytes.push(b'\r');
             s.write_input(&bytes);
         }
     }

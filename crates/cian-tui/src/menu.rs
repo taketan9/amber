@@ -45,6 +45,7 @@ impl App {
         } else {
             // Frequent file ops sit at the top level; the rest fold into groups.
             items.push(MenuItem::Copy);
+            items.push(MenuItem::CopyPathText); // directly under Copy
             items.push(MenuItem::Cut);
             items.push(MenuItem::Paste);
             items.push(MenuItem::Rename);
@@ -179,7 +180,6 @@ impl App {
             MenuItem::ViewMenu => Some(vec![
                 MenuItem::HiddenToggle,
                 MenuItem::Lang,
-                MenuItem::CopyPathText,
                 MenuItem::Back,
             ]),
             MenuItem::SessionMenu => {
