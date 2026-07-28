@@ -2193,10 +2193,11 @@ fn draw_popup(
                 } else {
                     Style::default().fg(Color::Rgb(210, 210, 225))
                 };
-                // "▸ " left marker + label padded to the widest + a matching
-                // 2-cell right gutter, so both sides breathe equally.
+                // The selected row is framed "▸ label ◂"; others get equal blank
+                // 2-cell gutters on both sides so every row lines up.
+                let (left, right) = if sel { ("▸ ", " ◂") } else { ("  ", "  ") };
                 Line::from(Span::styled(
-                    format!("{}{}  ", if sel { "▸ " } else { "  " }, pad_to(item.label(lang), maxlabel)),
+                    format!("{}{}{}", left, pad_to(item.label(lang), maxlabel), right),
                     style,
                 ))
             })
