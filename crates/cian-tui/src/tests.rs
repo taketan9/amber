@@ -1241,6 +1241,61 @@
             .collect()
     }
 
+    /// The visible-window optimization must render the same rows ratatui would:
+    /// the cursor stays on screen and far-away rows are excluded.
+    #[test]
+    fn big_directory_windows_to_the_cursor() {
+        let d = tempfile::tempdir().unwrap();
+        for i in 0..500 {
+            std::fs::write(d.path().join(format!("file_{i:04}.rs")), b"x").unwrap();
+        }
+        // The right pane opens an empty dir so only the left column shows file_*.
+        let empty = tempfile::tempdir().unwrap();
+        let config = cian_lua::Config::default();
+        let mut app = App::new(d.path().to_path_buf(), empty.path().to_path_buf(), config).unwrap();
+        app.focus(FocusedPane::Left);
+        let idx = app
+            .active_pane()
+            .unwrap()
+            .entries
+            .iter()
+            .position(|e| e.name == "file_0400.rs")
+            .unwrap();
+        app.active_pane_mut().unwrap().cursor = idx;
+        let joined = render(&mut app, 120, 50).join("\n");
+        assert!(joined.contains("file_0400.rs"), "the cursor row must be visible");
+        assert!(joined.contains("file_0399.rs"), "its neighbour is on screen too");
+        assert!(!joined.contains("file_0000.rs"), "rows far above are windowed out");
+        assert!(!joined.contains("file_0499.rs"), "rows far below are windowed out");
+    }
+
+    /// Micro-bench (run with `--ignored --nocapture`): time N renders of a pane
+    /// holding a large directory, cursor parked deep in the list. Prints the
+    /// per-frame cost so the windowing optimization can be measured.
+    #[test]
+    #[ignore]
+    fn bench_render_big_directory() {
+        let d = tempfile::tempdir().unwrap();
+        for i in 0..5000 {
+            std::fs::write(d.path().join(format!("file_{i:05}.rs")), b"x").unwrap();
+        }
+        let mut config = cian_lua::Config::default();
+        config.options.home = Some(d.path().display().to_string());
+        let mut app = App::new(d.path().to_path_buf(), d.path().to_path_buf(), config).unwrap();
+        // Park the cursor deep so the visible window is far from the top.
+        app.active_pane_mut().unwrap().cursor = 4000;
+        let mut terminal = Terminal::new(TestBackend::new(120, 50)).unwrap();
+        // Warm up.
+        terminal.draw(|f| draw(f, &mut app)).unwrap();
+        let n = 400;
+        let start = std::time::Instant::now();
+        for _ in 0..n {
+            terminal.draw(|f| draw(f, &mut app)).unwrap();
+        }
+        let per = start.elapsed() / n;
+        println!("bench_render_big_directory: {per:?}/frame over {n} frames (5000 entries)");
+    }
+
     /// Click the centre of the first popup zone matching `want`, after a render
     /// has registered the zones. Returns false if no such zone exists.
     fn click_zone(app: &mut App, want: ZoneKind) -> bool {

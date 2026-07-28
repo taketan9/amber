@@ -788,16 +788,19 @@ fn draw_file_pane(
     tab_rects: &mut Vec<(FocusedPane, usize, Rect)>,
     git: Option<&cian_core::git::RepoStatus>,
 ) {
+    // Read the active theme once — `theme()` now takes a lock, and the row loop
+    // below would otherwise hit it thousands of times per frame.
+    let th = theme();
     let focus_bg = focus_badge_color(mode);
-    let bg = bg.or(theme().base_bg);
+    let bg = bg.or(th.base_bg);
     let mut border_style = if focused {
         Style::default().fg(focus_bg).add_modifier(Modifier::BOLD)
     } else {
-        Style::default().fg(theme().border)
+        Style::default().fg(th.border)
     };
     // An operation that just landed here lights the border, fading out.
     if flash > 0.0 {
-        border_style = Style::default().fg(fade(theme().accent, flash)).add_modifier(Modifier::BOLD);
+        border_style = Style::default().fg(fade(th.accent, flash)).add_modifier(Modifier::BOLD);
     }
     let max_title_w = area.width.saturating_sub(2);
     let mut offsets = Vec::new();
@@ -831,18 +834,32 @@ fn draw_file_pane(
     // 2 mark + icon + 2 spaces
     let name_w = inner_w.saturating_sub(meta_w + 5 + git_w) as usize;
 
-    let items: Vec<ListItem> = pane.entries.iter().enumerate().map(|(i, e)| {
+    // Build ListItems only for the rows the viewport can actually show. ratatui
+    // renders a fresh `ListState` (offset 0) by scrolling just enough to keep the
+    // selected row visible, which for uniform 1-row items lands the window at
+    // `[cursor+1-height, cursor+1)`. Replicating that here turns per-frame work
+    // from O(entries) into O(visible) — the difference between a snappy and a
+    // sluggish pane on a directory with thousands of files.
+    let total = pane.entries.len();
+    let list_h = area.height.saturating_sub(2) as usize; // top + bottom border rows
+    let start = if list_h == 0 { pane.cursor } else { pane.cursor.saturating_sub(list_h - 1) };
+    let end = start.saturating_add(list_h).min(total);
+    let mark_style = Style::default().fg(th.mark_fg).add_modifier(Modifier::BOLD);
+    let meta_style = Style::default().fg(th.dim);
+
+    let items: Vec<ListItem> = pane.entries[start..end].iter().enumerate().map(|(vi, e)| {
+        let i = start + vi; // absolute index for marks / visual range / git
         let marked = pane.is_marked(i);
         let in_visual = visual_range.map(|(a, b)| i >= a && i <= b).unwrap_or(false);
         let mark_symbol = if marked { "● " } else { "  " };
-        let mark_style = Style::default().fg(theme().mark_fg).add_modifier(Modifier::BOLD);
         let kind = kind_for(e);
-        let mut name_style = Style::default().fg(kind.color());
+        let kind_color = kind.color();
+        let mut name_style = Style::default().fg(kind_color);
         if kind.bold() {
             name_style = name_style.add_modifier(Modifier::BOLD);
         }
         // The icon carries the same color so the row reads as one unit.
-        let icon_style = Style::default().fg(kind.color());
+        let icon_style = Style::default().fg(kind_color);
 
         let name = truncate(&e.name, name_w);
         let mut spans = Vec::new();
@@ -861,7 +878,6 @@ fn draw_file_pane(
             Span::styled(format!("{}  ", icon_for(e)), icon_style),
             Span::styled(format!("{:<w$}", name, w = name_w), name_style),
         ]);
-        let meta_style = Style::default().fg(theme().dim);
         if show_size {
             // Directories have no meaningful byte count; the `..` row shows none.
             let s = if e.is_parent {
@@ -886,7 +902,7 @@ fn draw_file_pane(
         }
 
         let mut item = ListItem::new(Line::from(spans));
-        if in_visual { item = item.style(Style::default().bg(theme().visual_bg)); }
+        if in_visual { item = item.style(Style::default().bg(th.visual_bg)); }
         item
     }).collect();
 
@@ -903,11 +919,13 @@ fn draw_file_pane(
         .block(block)
         .style(list_style)
         .highlight_style(
-            Style::default().bg(theme().selected_bg).add_modifier(Modifier::BOLD),
+            Style::default().bg(th.selected_bg).add_modifier(Modifier::BOLD),
         );
 
+    // The items are already the visible slice, so the selection is addressed
+    // relative to `start` and the state's own offset stays at 0.
     let mut state = ListState::default();
-    if !pane.entries.is_empty() { state.select(Some(pane.cursor)); }
+    if !pane.entries.is_empty() { state.select(Some(pane.cursor - start)); }
     f.render_stateful_widget(list, area, &mut state);
 
     draw_list_scrollbar(f, area, pane.entries.len(), pane.cursor, focused, border_style);
