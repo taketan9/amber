@@ -149,6 +149,10 @@ pub struct ShellPane {
 
 /// A PTY spawn running on a background thread, plus what to do with the
 /// session once it arrives.
+/// The result channel for an async remote directory listing: `(cwd, entries)`
+/// on success, an error string otherwise.
+type RemoteLsRx = std::sync::mpsc::Receiver<Result<(String, Vec<cian_scp::RemoteEntry>), String>>;
+
 struct PendingSpawn {
     rx: std::sync::mpsc::Receiver<std::result::Result<PtySession, String>>,
     kind: PendingKind,
@@ -381,6 +385,20 @@ enum Popup {
     /// SSH: pick a host, then a user on it.
     SshHosts { cursor: usize, filter: String },
     SshUsers { host: usize, cursor: usize },
+    /// Browse a remote directory over SFTP to choose files to download. `cwd` is
+    /// the remote directory; `marked` are file names selected for download.
+    RemoteBrowser {
+        label: String,
+        cwd: String,
+        entries: Vec<cian_scp::RemoteEntry>,
+        cursor: usize,
+        scroll: usize,
+        marked: std::collections::BTreeSet<String>,
+        loading: bool,
+    },
+    /// Pick where a set of remote files download to: the left/right pane, the
+    /// Desktop, or a typed path. `files` are the chosen remote file paths.
+    LocalDest { files: Vec<String>, cursor: usize },
     /// The command-snippet launcher: pick one to send to the active shell.
     /// Items come from `config.snippets`, filtered by `filter`.
     Snippets { cursor: usize, filter: String },
@@ -1048,6 +1066,8 @@ enum InputKind {
     ExtractPassword { archive: PathBuf, members: Vec<String>, dest: PathBuf },
     /// The log message for an `svn commit` of the given paths.
     SvnCommit { paths: Vec<PathBuf> },
+    /// A typed local directory to download the given remote files into.
+    LocalDestPath { files: Vec<String> },
     /// A bulk-rename pattern (template or `s/re/rep/flags`) for these files.
     BulkRenamePattern { targets: Vec<PathBuf> },
 }
@@ -1452,6 +1472,12 @@ pub struct App {
     scp_dir: Option<(ScpDir, Vec<PathBuf>, PathBuf)>,
     /// An SFTP transfer whose remote path is being entered, if any.
     scp_pending: Option<ScpPending>,
+    /// The server connection being browsed for a download, reused for the
+    /// directory listings and the transfer itself.
+    scp_target: Option<(cian_scp::Target, String)>,
+    /// A pending remote directory listing: the worker sends `(cwd, entries)` or
+    /// an error message. Polled from the main loop.
+    remote_ls: Option<RemoteLsRx>,
     /// Time and row of the last left-click in a file pane, to detect a
     /// double-click (which activates the entry).
     last_click: Option<(Instant, u16)>,
@@ -1629,6 +1655,8 @@ impl App {
             started: Instant::now(),
             scp_dir: None,
             scp_pending: None,
+            scp_target: None,
+            remote_ls: None,
             drag: None,
             file_drag: None,
             dest_history: Vec::new(),
@@ -3115,6 +3143,10 @@ fn run_loop<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Result<()>
         // Advance a running layout macro (splits, colours, commands) once the
         // shell is idle between spawns.
         if app.macro_run.is_some() && app.tick_macro() {
+            needs_redraw = true;
+        }
+        // Install a finished remote directory listing into the download browser.
+        if app.remote_ls.is_some() && app.poll_remote_ls() {
             needs_redraw = true;
         }
         // A finished file/step count shows its report.

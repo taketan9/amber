@@ -2336,6 +2336,106 @@ fn draw_popup(
         return;
     }
 
+    if let Popup::RemoteBrowser { label, cwd, entries, cursor, scroll, marked, loading } = popup {
+        let w = 70u16.min(area.width);
+        let h = area.height.saturating_sub(4).clamp(8, 30);
+        let rect = centered_rect(w, h, area);
+        f.render_widget(Clear, rect);
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_type(border_type())
+            .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
+            .title(format!(" download ← {}  :  {} ", label, cwd))
+            .title_bottom(tr(
+                lang,
+                " Enter=open/mark  Space=mark  -=up  d=download  Esc ",
+                " Enter=開く/選択  Space=選択  -=上  d=ダウンロード  Esc ",
+            ));
+        let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
+        f.render_widget(block, rect);
+        let view_h = inner.height as usize;
+        if *loading {
+            f.render_widget(
+                Paragraph::new(tr(lang, "  …listing", "  …取得中"))
+                    .style(Style::default().fg(Color::Rgb(150, 150, 170)).add_modifier(Modifier::ITALIC)),
+                inner,
+            );
+            return;
+        }
+        *scroll = (*scroll).min(cursor.saturating_sub(view_h.saturating_sub(1)));
+        if *cursor < *scroll {
+            *scroll = *cursor;
+        }
+        let mut lines: Vec<Line> = Vec::new();
+        if entries.is_empty() {
+            lines.push(Line::from(Span::styled("  (empty)", Style::default().fg(Color::Rgb(150, 150, 170)))));
+        }
+        for (i, e) in entries.iter().enumerate().skip(*scroll).take(view_h) {
+            let sel = i == *cursor;
+            let checked = marked.contains(&e.name);
+            let mark = if checked { "◉ " } else if sel { "▸ " } else { "  " };
+            let (icon, name_c) = if e.is_dir {
+                ("▸ ", theme().file.directory)
+            } else {
+                ("  ", Color::Rgb(205, 205, 218))
+            };
+            let size = if e.is_dir { String::new() } else { cian_core::disk::human_size(e.size) };
+            let style = if sel {
+                Style::default().fg(theme().accent).add_modifier(Modifier::BOLD)
+            } else if checked {
+                Style::default().fg(Color::Rgb(130, 205, 150))
+            } else {
+                Style::default().fg(name_c)
+            };
+            lines.push(Line::from(vec![
+                Span::styled(format!("{}{}", mark, icon), style),
+                Span::styled(format!("{:<40}", truncate(&e.name, 40)), style),
+                Span::styled(format!("{:>10}", size), Style::default().fg(Color::Rgb(140, 140, 165))),
+            ]));
+            push_row_zone(zones, inner, inner.y + (i - *scroll) as u16, i);
+        }
+        f.render_widget(Paragraph::new(lines), inner);
+        return;
+    }
+
+    if let Popup::LocalDest { files, cursor } = popup {
+        let opts_len = 4usize;
+        let w = 56u16.min(area.width);
+        let h = (opts_len as u16 + 4).min(area.height);
+        let rect = centered_rect(w, h, area);
+        f.render_widget(Clear, rect);
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_type(border_type())
+            .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
+            .title(format!(" download {} file(s) to… ", files.len()));
+        let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
+        f.render_widget(block, rect);
+        // Labels only; the actual dirs are resolved when a row is chosen.
+        let labels = [
+            tr(lang, "Left pane", "左ペイン"),
+            tr(lang, "Right pane", "右ペイン"),
+            tr(lang, "Desktop", "デスクトップ"),
+            tr(lang, "Type a path…", "パスを入力…"),
+        ];
+        let rows: Vec<Line> = labels
+            .iter()
+            .enumerate()
+            .map(|(i, l)| {
+                let sel = i == *cursor;
+                let style = if sel {
+                    Style::default().fg(theme().accent).add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(Color::Rgb(205, 205, 218))
+                };
+                push_row_zone(zones, inner, inner.y + i as u16, i);
+                Line::from(Span::styled(format!("{}{}", if sel { "▸ " } else { "  " }, l), style))
+            })
+            .collect();
+        f.render_widget(Paragraph::new(rows), inner);
+        return;
+    }
+
     if let Popup::SshUsers { host, cursor } = popup {
         let Some(hst) = hosts.get(*host) else { return };
         let w = 40u16.min(area.width);
@@ -3730,6 +3830,8 @@ fn draw_popup(
         | Popup::SshHosts { .. }
         | Popup::SshUsers { .. }
         | Popup::Snippets { .. }
+        | Popup::RemoteBrowser { .. }
+        | Popup::LocalDest { .. }
         | Popup::Shortcuts { .. }
         | Popup::History { .. }
         | Popup::FindResults { .. }

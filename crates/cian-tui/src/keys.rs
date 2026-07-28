@@ -417,6 +417,41 @@ impl App {
             }
             return Ok(());
         }
+        if let Popup::RemoteBrowser { entries, cursor, .. } = &mut self.popup {
+            let n = entries.len();
+            match key.code {
+                KeyCode::Esc | KeyCode::Char('q') => {
+                    self.popup = Popup::None;
+                    self.scp_target = None;
+                    self.remote_ls = None;
+                }
+                KeyCode::Char('j') | KeyCode::Down => { if n > 0 { *cursor = (*cursor + 1).min(n - 1); } }
+                KeyCode::Char('k') | KeyCode::Up => *cursor = cursor.saturating_sub(1),
+                KeyCode::Char('g') | KeyCode::Home => *cursor = 0,
+                KeyCode::Char('G') | KeyCode::End => *cursor = n.saturating_sub(1),
+                KeyCode::Enter | KeyCode::Char('l') | KeyCode::Right => self.remote_browser_enter(),
+                KeyCode::Char(' ') => self.remote_browser_mark(),
+                KeyCode::Char('-') | KeyCode::Backspace | KeyCode::Char('h') | KeyCode::Left => {
+                    self.remote_browser_parent()
+                }
+                KeyCode::Char('d') => self.remote_browser_download(),
+                _ => {}
+            }
+            return Ok(());
+        }
+        if let Popup::LocalDest { cursor, .. } = &mut self.popup {
+            match key.code {
+                KeyCode::Esc | KeyCode::Char('q') => { self.popup = Popup::None; self.scp_target = None; }
+                KeyCode::Char('j') | KeyCode::Down => *cursor = (*cursor + 1).min(3),
+                KeyCode::Char('k') | KeyCode::Up => *cursor = cursor.saturating_sub(1),
+                KeyCode::Enter => {
+                    let c = *cursor;
+                    self.local_dest_pick(c);
+                }
+                _ => {}
+            }
+            return Ok(());
+        }
         if let Popup::FindResults { hits, cursor, .. } = &mut self.popup {
             let n = hits.len();
             match key.code {

@@ -63,7 +63,31 @@ impl App {
             ScpDir::Download => (Vec::new(), pane.cwd.clone()),
         };
         self.scp_dir = Some((dir, locals, local_dir));
+        // From the shell, if it is logged into a configured host we can
+        // authenticate, go straight to that server; otherwise show the picker.
+        if self.focused == FocusedPane::Shell {
+            if let Some((idx, user)) = self.connected_shell_host() {
+                self.scp_after_pick(idx, &user);
+                return;
+            }
+        }
         self.popup = Popup::SshHosts { cursor: 0, filter: String::new() };
+    }
+
+    /// The configured host+user the active shell is logged into, if its title is
+    /// `user@host` for a host we have a usable (password-bearing) login for.
+    fn connected_shell_host(&self) -> Option<(usize, String)> {
+        let title = self.shell.active_title()?;
+        let user = title.split('@').next()?.trim();
+        if user.is_empty() {
+            return None;
+        }
+        let host = host_from_title(&title)?;
+        let idx = self.config.ssh_hosts.iter().position(|h| {
+            (h.host == host || h.name == host)
+                && h.users.iter().any(|u| u.name == user && u.has_secret())
+        })?;
+        Some((idx, user.to_string()))
     }
 
     /// After a host+user is picked for a transfer, resolve the connection and
@@ -86,20 +110,236 @@ impl App {
             password,
         };
         let label = format!("{}@{}", u.name, h.name);
-        let (title, prompt, seed) = match dir {
-            ScpDir::Upload => (
-                "SFTP upload — remote folder",
-                "remote directory to upload into:",
-                String::new(),
-            ),
-            ScpDir::Download => (
-                "SFTP download — remote file",
-                "remote file path to download:",
-                String::new(),
-            ),
+        match dir {
+            ScpDir::Upload => {
+                // Upload still asks for the destination folder as text.
+                self.scp_pending = Some(ScpPending { target, label, dir, locals, local_dir });
+                self.popup = text_input(
+                    "SFTP upload — remote folder",
+                    "remote directory to upload into:",
+                    String::new(),
+                    InputKind::ScpRemote,
+                );
+            }
+            ScpDir::Download => {
+                // Download opens a remote browser: navigate, mark files, then
+                // pick where they land locally.
+                self.scp_target = Some((target, label.clone()));
+                self.open_remote_browser(label, ".");
+            }
+        }
+    }
+
+    /// Open the remote file browser at `cwd` and kick off its listing.
+    pub(crate) fn open_remote_browser(&mut self, label: String, cwd: &str) {
+        self.popup = Popup::RemoteBrowser {
+            label,
+            cwd: cwd.to_string(),
+            entries: Vec::new(),
+            cursor: 0,
+            scroll: 0,
+            marked: std::collections::BTreeSet::new(),
+            loading: true,
         };
-        self.scp_pending = Some(ScpPending { target, label, dir, locals, local_dir });
-        self.popup = text_input(title, prompt, seed, InputKind::ScpRemote);
+        self.remote_ls_spawn(cwd.to_string());
+    }
+
+    /// List remote directory `path` on a worker thread; the result lands in
+    /// [`App::poll_remote_ls`].
+    fn remote_ls_spawn(&mut self, path: String) {
+        let Some((target, _)) = self.scp_target.clone() else { return };
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let res = cian_scp::list_dir(&target, &path).map(|e| (path, e)).map_err(|e| e.to_string());
+            let _ = tx.send(res);
+        });
+        self.remote_ls = Some(rx);
+    }
+
+    /// Install a finished remote listing into the open browser. Returns true if
+    /// anything changed (so the caller repaints).
+    pub(crate) fn poll_remote_ls(&mut self) -> bool {
+        let Some(rx) = &self.remote_ls else { return false };
+        match rx.try_recv() {
+            Ok(result) => {
+                self.remote_ls = None;
+                match result {
+                    Ok((cwd_new, entries)) => {
+                        if let Popup::RemoteBrowser { cwd, entries: es, cursor, scroll, loading, marked, .. } =
+                            &mut self.popup
+                        {
+                            *cwd = cwd_new;
+                            *es = entries;
+                            *cursor = 0;
+                            *scroll = 0;
+                            *loading = false;
+                            marked.clear();
+                        }
+                    }
+                    Err(e) => {
+                        self.popup = Popup::None;
+                        self.scp_target = None;
+                        self.message = Some(format!("remote listing failed: {}", e));
+                    }
+                }
+                true
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => false,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                self.remote_ls = None;
+                true
+            }
+        }
+    }
+
+    /// Enter the highlighted remote entry: descend into a directory, or mark a
+    /// file and move on (Enter on a file selects it for download).
+    pub(crate) fn remote_browser_enter(&mut self) {
+        let (dir_to, is_dir_name) = {
+            let Popup::RemoteBrowser { cwd, entries, cursor, .. } = &self.popup else { return };
+            let Some(e) = entries.get(*cursor) else { return };
+            if e.is_dir {
+                (Some(join_remote(cwd, &e.name)), None)
+            } else {
+                (None, Some(e.name.clone()))
+            }
+        };
+        if let Some(path) = dir_to {
+            if let Popup::RemoteBrowser { loading, .. } = &mut self.popup {
+                *loading = true;
+            }
+            self.remote_ls_spawn(path);
+        } else if let Some(name) = is_dir_name {
+            if let Popup::RemoteBrowser { marked, cursor, entries, .. } = &mut self.popup {
+                if !marked.insert(name.clone()) {
+                    marked.remove(&name);
+                }
+                *cursor = (*cursor + 1).min(entries.len().saturating_sub(1));
+            }
+        }
+    }
+
+    /// Go to the parent of the current remote directory.
+    pub(crate) fn remote_browser_parent(&mut self) {
+        let parent = if let Popup::RemoteBrowser { cwd, .. } = &self.popup {
+            parent_remote(cwd)
+        } else {
+            return;
+        };
+        if let Popup::RemoteBrowser { loading, .. } = &mut self.popup {
+            *loading = true;
+        }
+        self.remote_ls_spawn(parent);
+    }
+
+    /// Toggle the mark on the highlighted file (directories can't be marked).
+    pub(crate) fn remote_browser_mark(&mut self) {
+        if let Popup::RemoteBrowser { entries, cursor, marked, .. } = &mut self.popup {
+            if let Some(e) = entries.get(*cursor) {
+                if !e.is_dir && !marked.insert(e.name.clone()) {
+                    marked.remove(&e.name);
+                }
+            }
+            *cursor = (*cursor + 1).min(entries.len().saturating_sub(1));
+        }
+    }
+
+    /// Confirm the remote selection (marked files, else the file under the
+    /// cursor) and move on to choose the local destination.
+    pub(crate) fn remote_browser_download(&mut self) {
+        let files: Vec<String> = if let Popup::RemoteBrowser { cwd, entries, cursor, marked, .. } = &self.popup {
+            if !marked.is_empty() {
+                marked.iter().map(|n| join_remote(cwd, n)).collect()
+            } else {
+                match entries.get(*cursor).filter(|e| !e.is_dir) {
+                    Some(e) => vec![join_remote(cwd, &e.name)],
+                    None => Vec::new(),
+                }
+            }
+        } else {
+            return;
+        };
+        if files.is_empty() {
+            self.message = Some("mark a file (Space) or put the cursor on one".into());
+            return;
+        }
+        self.popup = Popup::LocalDest { files, cursor: 0 };
+    }
+
+    /// The four local-destination choices, in order, as (label, resolved dir).
+    /// The last (`None` dir) means "type a path".
+    pub(crate) fn local_dest_options(&self) -> Vec<(String, Option<PathBuf>)> {
+        let desktop = dirs_desktop();
+        vec![
+            ("Left pane".into(), Some(self.left.active_ref().cwd.clone())),
+            ("Right pane".into(), Some(self.right.active_ref().cwd.clone())),
+            ("Desktop".into(), desktop),
+            ("Type a path…".into(), None),
+        ]
+    }
+
+    /// Act on the chosen local destination: download into a resolved dir, or
+    /// prompt for a typed path.
+    pub(crate) fn local_dest_pick(&mut self, cursor: usize) {
+        let files = if let Popup::LocalDest { files, .. } = &self.popup { files.clone() } else { return };
+        let opts = self.local_dest_options();
+        let Some((_, dir)) = opts.get(cursor) else { return };
+        match dir {
+            Some(dir) => {
+                let dir = dir.clone();
+                self.start_remote_download(files, dir);
+            }
+            None => {
+                self.popup = text_input(
+                    "download to",
+                    "local directory:",
+                    self.active_pane().map(|p| p.cwd.display().to_string()).unwrap_or_default(),
+                    InputKind::LocalDestPath { files },
+                );
+            }
+        }
+    }
+
+    /// Download `files` (remote paths) into `local_dir` on a worker thread.
+    pub(crate) fn start_remote_download(&mut self, files: Vec<String>, local_dir: PathBuf) {
+        let Some((target, label)) = self.scp_target.take() else { return };
+        self.popup = Popup::None;
+        if let Err(e) = std::fs::create_dir_all(&local_dir) {
+            self.message = Some(format!("cannot create {}: {}", local_dir.display(), e));
+            return;
+        }
+        self.message = Some(format!("downloading {} file(s) from {} …", files.len(), label));
+        self.start_op("downloading", move |ctl| {
+            let mut report = OpReport::default();
+            let cancel = ctl.cancel;
+            let total = files.len();
+            for (i, remote) in files.iter().enumerate() {
+                if cancel.load(Ordering::Relaxed) {
+                    break;
+                }
+                let fname = remote.rsplit('/').next().unwrap_or("download").to_string();
+                let dest = local_dir.join(&fname);
+                let cur = fname.clone();
+                let mut fwd = |done: u64, tot: u64| {
+                    (ctl.on_progress)(&cian_core::progress::Progress {
+                        bytes_done: done,
+                        bytes_total: tot,
+                        files_done: i,
+                        files_total: total,
+                        current: cur.clone(),
+                    });
+                };
+                let mut sctl = cian_scp::Ctl { cancel, on_progress: &mut fwd };
+                match cian_scp::download(&target, remote, &dest, &mut sctl) {
+                    Ok(via) => {
+                        report.ok += 1;
+                        report.note = Some(format!("via {}", via.label()));
+                    }
+                    Err(e) => report.note_error(format!("{}: {}", fname, e)),
+                }
+            }
+            report
+        });
     }
 
     /// Run the pending transfer against `remote` (a directory for upload, a file
@@ -234,5 +474,58 @@ impl App {
             s.write_input(line.as_bytes());
         }
         true
+    }
+}
+
+/// Join a remote directory and a child name into a remote path (POSIX `/`).
+fn join_remote(cwd: &str, name: &str) -> String {
+    match cwd {
+        "." | "" => name.to_string(),
+        "/" => format!("/{}", name),
+        _ => format!("{}/{}", cwd.trim_end_matches('/'), name),
+    }
+}
+
+/// The parent of a remote path. Home-relative "." stays "."; an absolute path
+/// climbs toward "/".
+fn parent_remote(cwd: &str) -> String {
+    match cwd {
+        "." | "" => ".".to_string(),
+        "/" => "/".to_string(),
+        _ => {
+            let trimmed = cwd.trim_end_matches('/');
+            match trimmed.rsplit_once('/') {
+                Some(("", _)) => "/".to_string(),      // "/foo" -> "/"
+                Some((parent, _)) => parent.to_string(),
+                None => ".".to_string(),                 // "foo" (relative) -> "."
+            }
+        }
+    }
+}
+
+/// The user's Desktop, if it exists.
+fn dirs_desktop() -> Option<PathBuf> {
+    let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"))?;
+    let d = PathBuf::from(home).join("Desktop");
+    d.is_dir().then_some(d)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{join_remote, parent_remote};
+
+    #[test]
+    fn remote_path_join_and_parent() {
+        assert_eq!(join_remote(".", "docs"), "docs");
+        assert_eq!(join_remote("/var", "log"), "/var/log");
+        assert_eq!(join_remote("/", "etc"), "/etc");
+        assert_eq!(join_remote("a/b", "c"), "a/b/c");
+
+        assert_eq!(parent_remote("."), ".");
+        assert_eq!(parent_remote("/"), "/");
+        assert_eq!(parent_remote("/var/log"), "/var");
+        assert_eq!(parent_remote("/var"), "/");     // climbs to root
+        assert_eq!(parent_remote("a/b"), "a");
+        assert_eq!(parent_remote("docs"), ".");     // relative single -> home
     }
 }

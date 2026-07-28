@@ -203,10 +203,25 @@ dropped from the list, and an existing target is skipped rather than clobbered.
 
 ## File transfer (SFTP / SCP)
 
-With SSH hosts configured (see below), the right-click menu gains **Upload →
-server** and **Download ← server**. Pick a host and user, type the remote
-directory (upload) or file (download), and the transfer runs on the usual worker
-thread with the progress bar and Esc.
+With SSH hosts configured (see below), the right-click menu's **Transfer ▸**
+holds **Upload → server** and **Download ← server** (in a file pane or the
+shell).
+
+**Upload** sends the marked files — or the one under the cursor — after you pick
+a host/user and type the remote destination folder.
+
+**Download** opens a **remote file browser**: after connecting you navigate the
+server's directories (Enter/`l` to open a folder, `-` to go up), **`Space` to
+mark files** (or Enter/`d` on a single one), then choose where they land — the
+**left pane**, the **right pane**, the **Desktop**, or a **typed path**. Each
+listing is fetched over SFTP on a worker thread.
+
+**From the shell**, if the pane is already logged into a configured host (its
+title reads `user@host` and that login has a password in init.lua), Transfer
+goes straight to that server; otherwise it shows the host picker like a file
+pane does.
+
+Transfers run on the usual worker thread with the progress bar and Esc.
 
 It is pure-Rust — no external `scp` binary — and picks the wire protocol
 automatically over one authenticated connection: **SFTP** first (what modern

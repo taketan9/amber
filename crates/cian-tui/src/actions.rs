@@ -2205,6 +2205,16 @@ impl App {
                 self.build_bulk_rename(&targets, &name);
                 return Ok(());
             }
+            InputKind::LocalDestPath { files } => {
+                if name.trim().is_empty() {
+                    self.message = Some("download cancelled".into());
+                    return Ok(());
+                }
+                let files = files.clone();
+                let dir = expand_path(&name);
+                self.start_remote_download(files, dir);
+                return Ok(());
+            }
             InputKind::LogDir => {
                 self.start_session_log(&name);
                 return Ok(());

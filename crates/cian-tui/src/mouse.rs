@@ -562,6 +562,8 @@ impl App {
             | Popup::SshHosts { cursor, .. }
             | Popup::SshUsers { cursor, .. }
             | Popup::Snippets { cursor, .. }
+            | Popup::RemoteBrowser { cursor, .. }
+            | Popup::LocalDest { cursor, .. }
             | Popup::History { cursor, .. }
             | Popup::Shortcuts { cursor, .. } => *cursor = i,
             _ => {}

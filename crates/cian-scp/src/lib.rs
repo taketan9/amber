@@ -126,6 +126,44 @@ pub fn download(
     })
 }
 
+/// One entry in a remote directory listing (for the download browser).
+#[derive(Debug, Clone)]
+pub struct RemoteEntry {
+    pub name: String,
+    pub is_dir: bool,
+    pub size: u64,
+}
+
+/// List a remote directory over SFTP (browsing needs the SFTP subsystem; the
+/// classic SCP protocol cannot enumerate). Directories sort first, then by name.
+pub fn list_dir(target: &Target, remote_path: &str) -> Result<Vec<RemoteEntry>> {
+    on_runtime(|| async {
+        let handle = connect(target).await?;
+        let sftp = open_sftp(&handle)
+            .await
+            .context("this server has no SFTP subsystem, so remote browsing is unavailable")?;
+        let read = sftp.read_dir(remote_path).await.context("read remote directory")?;
+        let mut out = Vec::new();
+        for entry in read {
+            let name = entry.file_name();
+            if name == "." || name == ".." {
+                continue;
+            }
+            let meta = entry.metadata();
+            out.push(RemoteEntry {
+                is_dir: meta.is_dir(),
+                size: meta.size.unwrap_or(0),
+                name,
+            });
+        }
+        out.sort_by(|a, b| {
+            b.is_dir.cmp(&a.is_dir).then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+        });
+        let _ = sftp.close().await;
+        Ok(out)
+    })
+}
+
 // ── SFTP ────────────────────────────────────────────────────────────────────
 
 async fn sftp_upload(
