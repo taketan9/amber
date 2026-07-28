@@ -35,6 +35,9 @@
 -- You can also switch at runtime — no restart needed: `:theme` opens a gallery
 -- that previews each preset live (Enter keeps it, Esc cancels), or
 -- `:theme <name>` sets one directly. It's also under the right-click menu.
+-- A theme chosen this way is remembered (saved to state.toml next to your
+-- config — see `:where`) and re-applied on the next launch, taking precedence
+-- over the cian.set_theme above. So this line is really just the default.
 
 -- …or tune individual colors. Values are "#rrggbb" or a color name
 -- ("yellow", "cyan", …). Any key you leave out keeps its current value, and a

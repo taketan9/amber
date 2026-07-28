@@ -2268,6 +2268,51 @@ fn os_open_string(target: &str) -> Result<()> {
     Ok(())
 }
 
+/// The file cian writes runtime preferences to (theme, and room for more
+/// later). It sits with the other config in the portable dir or `~/.config/cian`
+/// and is managed by cian, not hand-edited — `:theme` keeps it in sync.
+const STATE_FILE: &str = "state.toml";
+
+/// The theme name saved from a previous session's `:theme`, if any. Applied at
+/// startup on top of init.lua so a chosen theme survives a restart.
+pub(crate) fn load_saved_theme() -> Option<String> {
+    let path = cian_lua::config_read_path(STATE_FILE)?;
+    let text = std::fs::read_to_string(path).ok()?;
+    parse_theme_pref(&text)
+}
+
+/// Pull the `theme = "name"` value out of the state file's text. Parsed by hand
+/// (no TOML dependency for one value); split out so it can be tested directly.
+pub(crate) fn parse_theme_pref(text: &str) -> Option<String> {
+    for line in text.lines() {
+        let line = line.trim();
+        if line.starts_with('#') {
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("theme") {
+            if let Some(val) = rest.trim_start().strip_prefix('=') {
+                let val = val.trim().trim_matches('"').trim();
+                if !val.is_empty() {
+                    return Some(val.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Persist the chosen whole-app theme so the next launch keeps it. Best-effort:
+/// a read-only config dir just means it does not stick, which is not worth
+/// interrupting the user over.
+pub(crate) fn save_theme_pref(name: &str) {
+    let Some(path) = cian_lua::config_write_path(STATE_FILE) else { return };
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let body = format!("# cian runtime state — managed by cian (see :where)\ntheme = \"{name}\"\n");
+    let _ = std::fs::write(path, body);
+}
+
 /// Reveal `path` in the OS file manager, selecting it where the platform's
 /// manager supports it. Windows Explorer and macOS Finder select the file
 /// itself; Linux has no portable "select", so its parent folder is opened.
@@ -3212,6 +3257,13 @@ pub fn run(left: Option<PathBuf>, right: Option<PathBuf>, startup: StartupMacro)
         config.options.borders.as_deref(),
         config.options.nerd_fonts.unwrap_or(true),
     );
+    // A theme chosen via `:theme` in a previous session overrides init.lua's, so
+    // the choice survives a restart. Unknown names are ignored (init.lua wins).
+    if let Some(name) = load_saved_theme() {
+        if let Some(t) = theme_preset(&name) {
+            set_theme(t);
+        }
+    }
 
     // Collect all non-fatal config issues for a single startup notice.
     let mut startup_errors = config.errors.clone();

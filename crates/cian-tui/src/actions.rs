@@ -191,7 +191,7 @@ impl App {
         ));
         lines.push(String::new());
         // Each config file: the path cian resolves for reading, and its status.
-        for name in ["init.lua", "shortcuts.lua", "macro.lua", "count.lua"] {
+        for name in ["init.lua", "shortcuts.lua", "macro.lua", "count.lua", "state.toml"] {
             let p = cian_lua::config_read_path(name);
             let (path_str, status) = match &p {
                 Some(p) if p.exists() => {
@@ -1745,7 +1745,8 @@ impl App {
                         set_theme(t);
                     }
                     self.theme_name = name.to_string();
-                    self.message = Some(format!("theme: {name}"));
+                    save_theme_pref(name); // persist so the next launch keeps it
+                    self.message = Some(format!("theme: {name} (saved)"));
                 }
                 ThemeScope::Pane { side, .. } => {
                     let s = *side;
@@ -1787,7 +1788,8 @@ impl App {
             Some(t) => {
                 set_theme(t);
                 self.theme_name = theme_name_of(&t).unwrap_or("custom").to_string();
-                self.message = Some(format!("theme: {}", self.theme_name));
+                save_theme_pref(&self.theme_name); // persist across restarts
+                self.message = Some(format!("theme: {} (saved)", self.theme_name));
             }
             None => {
                 self.message =

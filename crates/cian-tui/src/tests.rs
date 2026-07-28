@@ -1967,6 +1967,20 @@
     }
 
     #[test]
+    fn saved_theme_round_trips_through_the_state_format() {
+        use crate::parse_theme_pref;
+        // The exact shape save_theme_pref writes (comment header + quoted value).
+        let body = "# cian runtime state — managed by cian (see :where)\ntheme = \"dracula\"\n";
+        assert_eq!(parse_theme_pref(body).as_deref(), Some("dracula"));
+        // Tolerant of spacing and missing quotes; comments and blanks ignored.
+        assert_eq!(parse_theme_pref("theme=nord").as_deref(), Some("nord"));
+        assert_eq!(parse_theme_pref("  theme   =   \"one-dark\"  ").as_deref(), Some("one-dark"));
+        assert_eq!(parse_theme_pref("# theme = \"ignored\"\n").as_deref(), None);
+        assert_eq!(parse_theme_pref("theme = \"\"\n").as_deref(), None);
+        assert_eq!(parse_theme_pref("nothing here").as_deref(), None);
+    }
+
+    #[test]
     fn theme_set_by_name_sticks() {
         let (_d, mut app) = app_with(&["a.txt"]);
         app.set_theme_by_name("dracula");
