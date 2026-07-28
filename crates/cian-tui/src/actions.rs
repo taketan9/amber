@@ -2167,7 +2167,10 @@ impl App {
         let popup = std::mem::replace(&mut self.popup, Popup::None);
         let Popup::TextInput { buffer, kind, .. } = popup else { return Ok(()) };
         let name = buffer.trim().to_string();
-        if name.is_empty() {
+        // A blank chmod means "keep the default", so it is valid there; every
+        // other field still treats empty as a cancel.
+        let chmod_field = matches!(kind, InputKind::UploadChmod { .. } | InputKind::DownloadChmod { .. });
+        if name.is_empty() && !chmod_field {
             self.message = Some("cancelled (empty name)".into());
             return Ok(());
         }
@@ -2358,14 +2361,17 @@ impl App {
                 self.manual_ssh_finish(user.clone(), host.clone(), *port, name.clone(), *for_scp);
                 return Ok(());
             }
-            InputKind::UploadChmod { remote } => {
-                let remote = remote.clone();
+            InputKind::UploadChmod { remote, idx } => {
                 let (mode, err) = parse_chmod(&name);
                 if let Some(e) = err {
+                    // Invalid mode: re-ask this same file rather than dropping the
+                    // whole upload (the old behaviour, which silently lost it).
                     self.message = Some(e);
+                    self.prompt_upload_chmod(remote.clone(), *idx);
                     return Ok(());
                 }
-                self.start_scp_transfer(&remote, mode);
+                self.scp_upload_modes.push(mode);
+                self.prompt_upload_chmod(remote.clone(), *idx + 1);
                 return Ok(());
             }
             InputKind::DownloadChmod { files, dir } => {

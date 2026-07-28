@@ -106,12 +106,12 @@ impl App {
     /// configured host or was typed in manually. Consumes `scp_dir` (the pending
     /// local side + direction) set up in [`App::start_scp`].
     pub(crate) fn scp_dispatch(&mut self, target: cian_scp::Target, label: String) {
-        let Some((dir, locals, local_dir)) = self.scp_dir.take() else { return };
+        let Some((dir, locals, _local_dir)) = self.scp_dir.take() else { return };
         match dir {
             ScpDir::Upload => {
                 // Upload browses the server (WinSCP-style) to pick the
                 // destination folder; the pending holds the local files to send.
-                self.scp_pending = Some(ScpPending { target: target.clone(), label: label.clone(), dir, locals, local_dir });
+                self.scp_pending = Some(ScpPending { target: target.clone(), label: label.clone(), locals });
                 self.scp_target = Some((target, label.clone()));
                 self.open_remote_browser(label, ".", BrowsePurpose::Upload);
             }
@@ -328,22 +328,93 @@ impl App {
     }
 
     /// Confirm the current remote directory as the upload destination and move on
-    /// to the chmod prompt. The pending upload (target + local files) is already
-    /// captured; we only needed the folder.
+    /// to the chmod prompts. The pending upload (target + local files) is already
+    /// captured; we only needed the folder. Each file is asked for its own mode.
     pub(crate) fn remote_browser_upload_here(&mut self) {
         let cwd = if let Popup::RemoteBrowser { cwd, purpose: BrowsePurpose::Upload, .. } = &self.popup {
             cwd.clone()
         } else {
             return;
         };
-        let n = self.scp_pending.as_ref().map(|p| p.locals.len()).unwrap_or(0);
         self.scp_target = None; // done browsing; the upload runs off scp_pending
+        self.scp_upload_modes.clear();
+        self.prompt_upload_chmod(cwd, 0);
+    }
+
+    /// Ask for the `idx`-th pending file's upload mode (one prompt per file, so
+    /// each can differ). Once every file has a mode, kick off the upload. `Enter`
+    /// on the seeded value reuses the previous file's mode, so accepting the same
+    /// mode for all is just repeated Enters.
+    pub(crate) fn prompt_upload_chmod(&mut self, remote: String, idx: usize) {
+        let Some(p) = self.scp_pending.as_ref() else { return };
+        let n = p.locals.len();
+        if idx >= n {
+            self.run_scp_upload(remote);
+            return;
+        }
+        let fname = p.locals[idx]
+            .file_name()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        // Seed with the previous file's mode (or 777) so repeating is one keypress.
+        let seed = self
+            .scp_upload_modes
+            .last()
+            .and_then(|m| *m)
+            .map(|m| format!("{m:o}"))
+            .unwrap_or_else(|| "777".to_string());
         self.popup = text_input(
-            "upload — chmod",
-            format!("upload {n} file(s) into {cwd} — mode (octal, e.g. 777; blank = keep):"),
-            "777".to_string(),
-            InputKind::UploadChmod { remote: cwd },
+            format!("upload chmod — {}/{}", idx + 1, n),
+            format!("mode for {fname} (octal e.g. 777; blank = keep server default):"),
+            seed,
+            InputKind::UploadChmod { remote, idx },
         );
+    }
+
+    /// Upload the pending files, each with its collected mode, on a worker thread.
+    pub(crate) fn run_scp_upload(&mut self, remote: String) {
+        let Some(p) = self.scp_pending.take() else { return };
+        let remote = remote.trim().to_string();
+        if remote.is_empty() {
+            self.message = Some("cancelled (no remote path)".into());
+            return;
+        }
+        let ScpPending { target, label, locals, .. } = p;
+        let modes = std::mem::take(&mut self.scp_upload_modes);
+        self.popup = Popup::None;
+        self.message = Some(format!("uploading {} …", label));
+        self.start_op("uploading", move |ctl| {
+            let mut report = OpReport::default();
+            let cancel = ctl.cancel;
+            let total = locals.len();
+            for (i, local) in locals.iter().enumerate() {
+                if cancel.load(Ordering::Relaxed) {
+                    break;
+                }
+                let fname = local.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+                let dest = format!("{}/{}", remote.trim_end_matches('/'), fname);
+                let cur = fname.clone();
+                let mut fwd = |done: u64, tot: u64| {
+                    (ctl.on_progress)(&cian_core::progress::Progress {
+                        bytes_done: done,
+                        bytes_total: tot,
+                        files_done: i,
+                        files_total: total,
+                        current: cur.clone(),
+                    });
+                };
+                let mode = modes.get(i).copied().flatten();
+                let mut sctl = cian_scp::Ctl { cancel, on_progress: &mut fwd };
+                match cian_scp::upload(&target, local, &dest, mode, &mut sctl) {
+                    Ok(via) => {
+                        report.ok += 1;
+                        report.note = Some(format!("via {}", via.label()));
+                    }
+                    Err(e) => report.note_error(format!("{}: {}", fname, e)),
+                }
+            }
+            report
+        });
     }
 
     /// The four local-destination choices, in order, as (label, resolved dir).
@@ -442,78 +513,6 @@ impl App {
                         report.note = Some(format!("via {}", via.label()));
                     }
                     Err(e) => report.note_error(format!("{}: {}", fname, e)),
-                }
-            }
-            report
-        });
-    }
-
-    /// Run the pending transfer against `remote` (a directory for upload, a file
-    /// for download), on a worker thread with the shared progress popup.
-    pub(crate) fn start_scp_transfer(&mut self, remote: &str, mode: Option<u32>) {
-        let Some(p) = self.scp_pending.take() else { return };
-        let remote = remote.trim().to_string();
-        if remote.is_empty() {
-            self.message = Some("cancelled (no remote path)".into());
-            return;
-        }
-        let ScpPending { target, label, dir, locals, local_dir } = p;
-        let verb = if dir == ScpDir::Upload { "uploading" } else { "downloading" };
-        self.message = Some(format!("{} {} …", verb, label));
-        self.start_op(if dir == ScpDir::Upload { "uploading" } else { "downloading" }, move |ctl| {
-            let mut report = OpReport::default();
-            // Bridge cian-scp's byte progress into the shared op progress.
-            let cancel = ctl.cancel;
-            match dir {
-                ScpDir::Upload => {
-                    let total = locals.len();
-                    for (i, local) in locals.iter().enumerate() {
-                        if cancel.load(Ordering::Relaxed) {
-                            break;
-                        }
-                        let fname = local.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
-                        let dest = format!("{}/{}", remote.trim_end_matches('/'), fname);
-                        let cur = fname.clone();
-                        let mut fwd = |done: u64, tot: u64| {
-                            (ctl.on_progress)(&cian_core::progress::Progress {
-                                bytes_done: done,
-                                bytes_total: tot,
-                                files_done: i,
-                                files_total: total,
-                                current: cur.clone(),
-                            });
-                        };
-                        let mut sctl = cian_scp::Ctl { cancel, on_progress: &mut fwd };
-                        match cian_scp::upload(&target, local, &dest, mode, &mut sctl) {
-                            Ok(via) => {
-                                report.ok += 1;
-                                report.note = Some(format!("via {}", via.label()));
-                            }
-                            Err(e) => report.note_error(format!("{}: {}", fname, e)),
-                        }
-                    }
-                }
-                ScpDir::Download => {
-                    let fname = remote.rsplit('/').next().unwrap_or("download").to_string();
-                    let dest = local_dir.join(&fname);
-                    let cur = fname.clone();
-                    let mut fwd = |done: u64, tot: u64| {
-                        (ctl.on_progress)(&cian_core::progress::Progress {
-                            bytes_done: done,
-                            bytes_total: tot,
-                            files_done: 0,
-                            files_total: 1,
-                            current: cur.clone(),
-                        });
-                    };
-                    let mut sctl = cian_scp::Ctl { cancel, on_progress: &mut fwd };
-                    match cian_scp::download(&target, &remote, &dest, &mut sctl) {
-                        Ok(via) => {
-                            report.ok += 1;
-                            report.note = Some(format!("via {}", via.label()));
-                        }
-                        Err(e) => report.note_error(format!("{}: {}", fname, e)),
-                    }
                 }
             }
             report

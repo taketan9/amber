@@ -212,11 +212,9 @@ enum ScpDir {
 struct ScpPending {
     target: cian_scp::Target,
     label: String,
-    dir: ScpDir,
-    /// Upload: the local files to send. Download: unused.
+    /// The local files to send (upload only; download uses `scp_target` + the
+    /// remote browser instead).
     locals: Vec<PathBuf>,
-    /// Download: the local directory to save into. Upload: unused.
-    local_dir: PathBuf,
 }
 
 #[derive(Debug, Clone)]
@@ -1134,8 +1132,10 @@ enum InputKind {
     SvnCommit { paths: Vec<PathBuf> },
     /// A typed local directory to download the given remote files into.
     LocalDestPath { files: Vec<String> },
-    /// The chmod mode (octal, e.g. 777; blank = keep) for an upload to `remote`.
-    UploadChmod { remote: String },
+    /// The chmod mode (octal, e.g. 777; blank = keep) for the `idx`-th pending
+    /// upload file to `remote`. Files are prompted one at a time so each can get
+    /// its own mode; the collected modes live in `App::scp_upload_modes`.
+    UploadChmod { remote: String, idx: usize },
     /// The chmod mode for files just downloaded into `dir` (local, Unix only).
     DownloadChmod { files: Vec<String>, dir: PathBuf },
     /// A bulk-rename pattern (template or `s/re/rep/flags`) for these files.
@@ -1548,6 +1548,9 @@ pub struct App {
     scp_dir: Option<(ScpDir, Vec<PathBuf>, PathBuf)>,
     /// An SFTP transfer whose remote path is being entered, if any.
     scp_pending: Option<ScpPending>,
+    /// Per-file chmod modes collected while prompting an upload one file at a
+    /// time (index-aligned with `scp_pending.locals`).
+    scp_upload_modes: Vec<Option<u32>>,
     /// The server connection being browsed for a download, reused for the
     /// directory listings and the transfer itself.
     scp_target: Option<(cian_scp::Target, String)>,
@@ -1745,6 +1748,7 @@ impl App {
             started: Instant::now(),
             scp_dir: None,
             scp_pending: None,
+            scp_upload_modes: Vec::new(),
             scp_target: None,
             remote_ls: None,
             drag: None,

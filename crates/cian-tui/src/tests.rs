@@ -2068,8 +2068,68 @@
         assert_eq!(p.target.host, "10.0.2.31");
         assert_eq!(p.target.port, 2222);
         assert_eq!(p.target.user, "postgres");
-        assert_eq!(p.dir, ScpDir::Upload);
         assert_eq!(p.locals.len(), 1);
+    }
+
+    /// Multi-file upload asks for each file's chmod in turn: a valid mode
+    /// advances, an invalid one re-asks the same file (without losing the
+    /// upload), and a blank keeps the server default.
+    #[test]
+    fn upload_chmod_is_per_file_and_reprompts_on_error() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        // Stand in a pending 3-file upload directly (skips the network browser).
+        app.scp_pending = Some(crate::ScpPending {
+            target: cian_scp::Target {
+                host: "h".into(),
+                port: 22,
+                user: "u".into(),
+                password: "p".into(),
+            },
+            label: "u@h".into(),
+            locals: vec![
+                std::path::PathBuf::from("/tmp/one.txt"),
+                std::path::PathBuf::from("/tmp/two.txt"),
+                std::path::PathBuf::from("/tmp/three.txt"),
+            ],
+        });
+        app.scp_upload_modes.clear();
+
+        let set_buf = |app: &mut App, s: &str| {
+            if let Popup::TextInput { buffer, cursor, .. } = &mut app.popup {
+                *buffer = s.to_string();
+                *cursor = buffer.chars().count();
+            } else {
+                panic!("expected a chmod TextInput, got {:?}", app.popup);
+            }
+        };
+
+        app.prompt_upload_chmod("/dest".into(), 0);
+        match &app.popup {
+            Popup::TextInput { kind: InputKind::UploadChmod { idx: 0, .. }, title, .. } => {
+                assert!(title.contains("1/3"), "shows file 1 of 3: {title}");
+            }
+            other => panic!("expected file-1 chmod prompt, got {:?}", other),
+        }
+
+        // File 1: a valid mode advances to file 2.
+        set_buf(&mut app, "755");
+        app.finish_text_input().unwrap();
+        assert_eq!(app.scp_upload_modes, vec![Some(0o755)]);
+        assert!(matches!(app.popup, Popup::TextInput { kind: InputKind::UploadChmod { idx: 1, .. }, .. }));
+
+        // File 2: an invalid mode re-asks the same file and keeps the pending upload.
+        set_buf(&mut app, "zzz");
+        app.finish_text_input().unwrap();
+        assert!(app.message.as_deref().unwrap_or("").contains("invalid chmod"));
+        assert_eq!(app.scp_upload_modes, vec![Some(0o755)], "no mode recorded for the bad entry");
+        assert!(matches!(app.popup, Popup::TextInput { kind: InputKind::UploadChmod { idx: 1, .. }, .. }));
+        assert!(app.scp_pending.is_some(), "the upload is not dropped on a bad mode");
+
+        // File 2 again: blank keeps the server default and advances to file 3.
+        set_buf(&mut app, "");
+        app.finish_text_input().unwrap();
+        assert_eq!(app.scp_upload_modes, vec![Some(0o755), None]);
+        assert!(matches!(app.popup, Popup::TextInput { kind: InputKind::UploadChmod { idx: 2, .. }, .. }));
     }
 
     #[test]
