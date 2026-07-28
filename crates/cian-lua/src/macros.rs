@@ -241,8 +241,9 @@ mod tests {
         assert!(m.zoom, "zoom is on");
         assert_eq!(m.panes[0].from, None, "pane 1 is the current shell");
         assert_eq!(m.panes[3].from, Some(2), "pane 4 splits off pane 2");
-        for p in &m.panes {
-            assert_eq!(p.cmd.as_deref(), Some("ssh A@ABCserver"));
+        let expected = ["ssh A@ABCserver", "ssh B@DEFserver", "ssh C@GHIserver", "ssh D@JKLserver"];
+        for (p, want) in m.panes.iter().zip(expected) {
+            assert_eq!(p.cmd.as_deref(), Some(want), "each pane sshes to its own host");
             assert!(matches!(p.steps.first(), Some(Step::Expect { .. })), "waits for the prompt");
             assert!(matches!(p.steps.last(), Some(Step::Send(_))), "sends the password");
         }
