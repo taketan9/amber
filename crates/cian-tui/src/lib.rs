@@ -599,6 +599,8 @@ enum MenuItem {
     BulkRename,
     /// Open the command-snippet launcher (`:snip`).
     Snippets,
+    /// Open the layout-macro launcher (`@` / `:macros`).
+    Macros,
     /// Open the shortcuts / bookmarks menu (the `s` key).
     Shortcuts,
     /// A submenu grouping the compress-to-archive actions.
@@ -716,6 +718,7 @@ impl MenuItem {
             MenuItem::SvnCommit => tr(lang, "Commit…  (svn commit)", "コミット…  (svn commit)"),
             MenuItem::BulkRename => tr(lang, "Bulk rename…  (:brename)", "一括リネーム…  (:brename)"),
             MenuItem::Snippets => tr(lang, "Snippets → shell  (:snip)", "スニペット → シェル  (:snip)"),
+            MenuItem::Macros => tr(lang, "Macros → layout  (@)", "マクロ → レイアウト  (@)"),
             MenuItem::Shortcuts => tr(lang, "Shortcuts  (s)", "ショートカット  (s)"),
             // Ⓒ stands in for crmaine's icon — a terminal menu cannot embed the
             // PNG/SVG, which is itself just the "CRMAINE" wordmark as text, so a
@@ -2619,7 +2622,7 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry("p", Some(CopyPath), "copy path text to clipboard", "パス文字列をクリップボードにコピー"),
                 entry("Shift+P", Some(CopyFileRef), "copy file(s) to clipboard", "ファイルをクリップボードにコピー"),
                 entry("s", Some(Shortcuts), "shortcuts menu", "ショートカットメニュー"),
-                entry("@", None, "run a macro (layout builder; also :macros)", "マクロを実行（レイアウト構築；:macros でも）"),
+                entry("@", None, "run a macro (layout builder; also :macros / right-click)", "マクロを実行（レイアウト構築；:macros／右クリックでも）"),
                 entry(":count", None, "count files & steps (marked, or the whole tree)", "ファイル・ステップ数を数える（マーク or ツリー全体）"),
                 entry(":hidden", None, "show / hide dotfiles (also right-click)", "ドットファイルの表示切替（右クリックでも）"),
                 entry(":attr", None, "attributes;  :chmod 644,  :readonly on|off", "属性；  :chmod 644,  :readonly on|off"),

@@ -764,7 +764,29 @@ line. It is portable-aware like the rest of the config; see
 
 A **layout macro** builds a whole shell working-set in one keystroke: split the
 panel, connect each pane somewhere, tint them apart, start logging — done. Press
-**`@`** (vim's play-a-macro key) to pick one, or run `:macros`.
+**`@`** (vim's play-a-macro key) to pick one, run `:macros`, or use the
+right-click menu (shown when any macro is defined).
+
+### Snippets vs macros — which do I use?
+
+They overlap, so here is the line between them:
+
+| | **Snippet** | **Macro** |
+|---|---|---|
+| What it does | sends a command (or a few lines) to **one** shell | builds a **multi-pane layout**: splits, connects, tints, logs |
+| Scope | the active shell pane | the whole shell panel |
+| Defined in | `cian.snippets{}` in init.lua | `macro.lua` / `macro/*.lua` |
+| Run with | Ctrl+Shift+Enter · `:snip` · right-click (top) | `@` · `:macros` · right-click |
+| Timing | fires at once | a tick-driven build (panes spawn asynchronously), with `wait` / `expect` |
+| Think of it as | a clipboard of commands | tmux layout + a TeraTerm login script |
+
+A snippet's `cmd` can hold several lines that run in sequence, so **"could I just
+use a snippet?" is often yes** — for anything that stays in one shell. Reach for a
+macro when the *shape of the screen* is the work: several panes, each SSH'd to a
+different server, waiting on prompts before logging in, colour-coded, recording
+to a log. That "open everything the right way" step is what a snippet can't do —
+it never splits panes or waits for a prompt. Rule of thumb: **one shell → snippet;
+several panes wired up → macro.**
 
 Macros live in `macro.lua` (portable-aware, like the rest of the config). Each
 returns a name and a list of panes; the first pane is the shell you are on, and

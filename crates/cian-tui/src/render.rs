@@ -348,7 +348,9 @@ fn viewer_body_rect(area: Rect) -> Rect {
 /// by the renderer and the mouse handler so a click lands where the row is
 /// drawn.
 fn context_menu_rect(items: &[MenuItem], at: (u16, u16), area: Rect, lang: Lang) -> Rect {
-    let w = items.iter().map(|i| width(i.label(lang))).max().unwrap_or(10) as u16 + 4;
+    // +6 = a 2-cell gutter on each side of the label (matching the "▸ " marker
+    // on the left) plus the two borders, so the rows sit evenly inside the box.
+    let w = items.iter().map(|i| width(i.label(lang))).max().unwrap_or(10) as u16 + 6;
     let h = items.len() as u16 + 2;
     let x = at.0.min(area.width.saturating_sub(w));
     let y = at.1.min(area.height.saturating_sub(h));
@@ -2169,7 +2171,7 @@ fn draw_popup(
         // The context menu follows `menu_lang` (which may differ from the rest
         // of the UI) so it can be pinned to Japanese on an English interface.
         let lang = menu_lang;
-        let w = items.iter().map(|i| width(i.label(lang))).max().unwrap_or(10) as u16 + 4;
+        let maxlabel = items.iter().map(|i| width(i.label(lang))).max().unwrap_or(10);
         let rect = context_menu_rect(items, *at, area, lang);
 
         f.render_widget(Clear, rect);
@@ -2191,8 +2193,10 @@ fn draw_popup(
                 } else {
                     Style::default().fg(Color::Rgb(210, 210, 225))
                 };
+                // "▸ " left marker + label padded to the widest + a matching
+                // 2-cell right gutter, so both sides breathe equally.
                 Line::from(Span::styled(
-                    format!("{}{}", if sel { "▸ " } else { "  " }, pad_to(item.label(lang), (w - 4) as usize)),
+                    format!("{}{}  ", if sel { "▸ " } else { "  " }, pad_to(item.label(lang), maxlabel)),
                     style,
                 ))
             })

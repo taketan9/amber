@@ -18,6 +18,10 @@ impl App {
         if ai {
             items.push(MenuItem::AiMenu);
         }
+        // Layout macros — the heavier sibling of snippets — when any are defined.
+        if !self.macros.is_empty() {
+            items.push(MenuItem::Macros);
+        }
         if self.focused == FocusedPane::Shell {
             // A PTY owns its own screen, so the file operations make no sense
             // here. SSH leads: keys never reach the picker while the shell has
@@ -366,6 +370,7 @@ impl App {
             MenuItem::SvnCommit => self.svn_commit_prompt(),
             MenuItem::BulkRename => self.start_bulk_rename(),
             MenuItem::Snippets => self.start_snippets(),
+            MenuItem::Macros => self.start_macros(),
             MenuItem::Shortcuts => self.start_shortcuts(),
             MenuItem::Lang => {
                 // Flip the interface language; every localized string reads
