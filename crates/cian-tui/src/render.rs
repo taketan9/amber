@@ -2338,7 +2338,8 @@ fn draw_popup(
             .borders(Borders::ALL)
             .border_type(border_type())
             .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
-            .title(tr(lang, " ssh — host ", " SSH — ホスト "));
+            .title(tr(lang, " ssh — host ", " SSH — ホスト "))
+            .title_bottom(tr(lang, " Enter=select  F2=type by hand  Esc ", " Enter=選択  F2=手入力  Esc "));
         let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
         f.render_widget(block, rect);
 
@@ -2451,21 +2452,36 @@ fn draw_popup(
         return;
     }
 
-    if let Popup::RemoteBrowser { label, cwd, entries, cursor, scroll, marked, loading } = popup {
+    if let Popup::RemoteBrowser { label, cwd, entries, cursor, scroll, marked, loading, purpose } = popup {
+        let uploading = *purpose == BrowsePurpose::Upload;
         let w = 70u16.min(area.width);
         let h = area.height.saturating_sub(4).clamp(8, 30);
         let rect = centered_rect(w, h, area);
         f.render_widget(Clear, rect);
+        let title = if uploading {
+            format!(" upload → {}  :  {} ", label, cwd)
+        } else {
+            format!(" download ← {}  :  {} ", label, cwd)
+        };
+        let footer = if uploading {
+            tr(
+                lang,
+                " Enter=open  -=up  u=upload here  Esc ",
+                " Enter=開く  -=上  u=ここへアップロード  Esc ",
+            )
+        } else {
+            tr(
+                lang,
+                " Enter=open/mark  Space=mark  -=up  d=download  Esc ",
+                " Enter=開く/選択  Space=選択  -=上  d=ダウンロード  Esc ",
+            )
+        };
         let block = Block::default()
             .borders(Borders::ALL)
             .border_type(border_type())
             .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
-            .title(format!(" download ← {}  :  {} ", label, cwd))
-            .title_bottom(tr(
-                lang,
-                " Enter=open/mark  Space=mark  -=up  d=download  Esc ",
-                " Enter=開く/選択  Space=選択  -=上  d=ダウンロード  Esc ",
-            ));
+            .title(title)
+            .title_bottom(footer);
         let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
         f.render_widget(block, rect);
         let view_h = inner.height as usize;

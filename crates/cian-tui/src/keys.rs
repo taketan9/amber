@@ -315,6 +315,12 @@ impl App {
                 }
                 KeyCode::Down => *cursor += 1,
                 KeyCode::Up => *cursor = cursor.saturating_sub(1),
+                // F2: skip the configured list and type server/user/password by
+                // hand (#2). Works for both a plain login and a transfer.
+                KeyCode::F(2) => {
+                    self.start_manual_ssh();
+                    return Ok(());
+                }
                 KeyCode::Backspace => {
                     filter.pop();
                     *cursor = 0;
@@ -417,12 +423,14 @@ impl App {
             }
             return Ok(());
         }
-        if let Popup::RemoteBrowser { entries, cursor, .. } = &mut self.popup {
+        if let Popup::RemoteBrowser { entries, cursor, purpose, .. } = &mut self.popup {
             let n = entries.len();
+            let uploading = *purpose == BrowsePurpose::Upload;
             match key.code {
                 KeyCode::Esc | KeyCode::Char('q') => {
                     self.popup = Popup::None;
                     self.scp_target = None;
+                    self.scp_pending = None;
                     self.remote_ls = None;
                 }
                 KeyCode::Char('j') | KeyCode::Down => { if n > 0 { *cursor = (*cursor + 1).min(n - 1); } }
@@ -430,11 +438,14 @@ impl App {
                 KeyCode::Char('g') | KeyCode::Home => *cursor = 0,
                 KeyCode::Char('G') | KeyCode::End => *cursor = n.saturating_sub(1),
                 KeyCode::Enter | KeyCode::Char('l') | KeyCode::Right => self.remote_browser_enter(),
-                KeyCode::Char(' ') => self.remote_browser_mark(),
+                // Space marks a file to fetch — only meaningful when downloading.
+                KeyCode::Char(' ') if !uploading => self.remote_browser_mark(),
                 KeyCode::Char('-') | KeyCode::Backspace | KeyCode::Char('h') | KeyCode::Left => {
                     self.remote_browser_parent()
                 }
-                KeyCode::Char('d') => self.remote_browser_download(),
+                // `d` fetches the marked files; `u` drops the pending uploads here.
+                KeyCode::Char('d') if !uploading => self.remote_browser_download(),
+                KeyCode::Char('u') if uploading => self.remote_browser_upload_here(),
                 _ => {}
             }
             return Ok(());

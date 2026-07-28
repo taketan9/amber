@@ -2219,20 +2219,36 @@ impl App {
                 self.start_session_log(&name);
                 return Ok(());
             }
-            InputKind::ScpRemote => {
-                // After the remote folder, ask for the mode (seeded 777, the
-                // common case; blank keeps the server default).
-                let remote = name.trim().to_string();
-                if remote.is_empty() {
-                    self.message = Some("cancelled (no remote path)".into());
+            InputKind::ManualSshTarget { for_scp } => {
+                let for_scp = *for_scp;
+                let raw = name.trim();
+                if raw.is_empty() {
+                    self.message = Some("cancelled".into());
+                    self.scp_dir = None;
                     return Ok(());
                 }
-                self.popup = text_input(
-                    "upload — chmod",
-                    "mode after upload (octal, e.g. 777; blank = keep):",
-                    "777".to_string(),
-                    InputKind::UploadChmod { remote },
-                );
+                // Parse user@host[:port]; a bare host defaults the user to root.
+                let (user, rest) = match raw.split_once('@') {
+                    Some((u, r)) => (u.trim().to_string(), r.trim()),
+                    None => ("root".to_string(), raw),
+                };
+                let (host, port) = match rest.rsplit_once(':') {
+                    Some((h, p)) => match p.trim().parse::<u16>() {
+                        Ok(n) => (h.trim().to_string(), n),
+                        Err(_) => (rest.to_string(), 22),
+                    },
+                    None => (rest.to_string(), 22),
+                };
+                if host.is_empty() {
+                    self.message = Some("need a host (user@host)".into());
+                    self.scp_dir = None;
+                    return Ok(());
+                }
+                self.manual_ssh_password(user, host, port, for_scp);
+                return Ok(());
+            }
+            InputKind::ManualSshPass { user, host, port, for_scp } => {
+                self.manual_ssh_finish(user.clone(), host.clone(), *port, name.clone(), *for_scp);
                 return Ok(());
             }
             InputKind::UploadChmod { remote } => {

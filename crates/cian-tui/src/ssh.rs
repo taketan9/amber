@@ -20,21 +20,10 @@ impl App {
     }
 
     pub(crate) fn start_ssh(&mut self) {
+        // With nothing configured, go straight to typing a server by hand (#2)
+        // rather than a dead-end notice.
         if self.config.ssh_hosts.is_empty() {
-            self.popup = Popup::Notice {
-                lines: vec![
-                    "No SSH hosts configured.".to_string(),
-                    String::new(),
-                    "Declare them in init.lua:".to_string(),
-                    String::new(),
-                    "  cian.ssh({".to_string(),
-                    "    users = { \"root\", \"deploy\" },".to_string(),
-                    "    hosts = {".to_string(),
-                    "      { name = \"web1\", host = \"10.0.1.11\" },".to_string(),
-                    "    },".to_string(),
-                    "  })".to_string(),
-                ],
-            };
+            self.start_manual_ssh();
             return;
         }
         self.popup = Popup::SshHosts { cursor: 0, filter: String::new() };
@@ -44,10 +33,6 @@ impl App {
     /// host/user picker to choose the server. `ssh_pick` routes back here once
     /// a user is chosen because [`App::scp_dir`] is set.
     pub(crate) fn start_scp(&mut self, dir: ScpDir) {
-        if self.config.ssh_hosts.is_empty() {
-            self.start_ssh(); // shows the "configure a host" notice
-            return;
-        }
         // Works from the shell too, acting on the last-focused file pane.
         let pane = self.effective_file_pane();
         let (locals, local_dir) = match dir {
@@ -63,6 +48,11 @@ impl App {
             ScpDir::Download => (Vec::new(), pane.cwd.clone()),
         };
         self.scp_dir = Some((dir, locals, local_dir));
+        // Nothing configured: type the server by hand (#2).
+        if self.config.ssh_hosts.is_empty() {
+            self.start_manual_ssh();
+            return;
+        }
         // From the shell, if it is logged into a configured host we can
         // authenticate, go straight to that server; otherwise show the picker.
         if self.focused == FocusedPane::Shell {
@@ -93,7 +83,6 @@ impl App {
     /// After a host+user is picked for a transfer, resolve the connection and
     /// ask for the remote path.
     pub(crate) fn scp_after_pick(&mut self, host_idx: usize, user: &str) {
-        let Some((dir, locals, local_dir)) = self.scp_dir.take() else { return };
         let Some(h) = self.config.ssh_hosts.get(host_idx) else { return };
         let Some(u) = h.users.iter().find(|u| u.name == user) else { return };
         let Some(password) = u.secret() else {
@@ -110,28 +99,86 @@ impl App {
             password,
         };
         let label = format!("{}@{}", u.name, h.name);
+        self.scp_dispatch(target, label);
+    }
+
+    /// Kick off the transfer for a resolved `target`, whether it came from a
+    /// configured host or was typed in manually. Consumes `scp_dir` (the pending
+    /// local side + direction) set up in [`App::start_scp`].
+    pub(crate) fn scp_dispatch(&mut self, target: cian_scp::Target, label: String) {
+        let Some((dir, locals, local_dir)) = self.scp_dir.take() else { return };
         match dir {
             ScpDir::Upload => {
-                // Upload still asks for the destination folder as text.
-                self.scp_pending = Some(ScpPending { target, label, dir, locals, local_dir });
-                self.popup = text_input(
-                    "SFTP upload — remote folder",
-                    "remote directory to upload into:",
-                    String::new(),
-                    InputKind::ScpRemote,
-                );
+                // Upload browses the server (WinSCP-style) to pick the
+                // destination folder; the pending holds the local files to send.
+                self.scp_pending = Some(ScpPending { target: target.clone(), label: label.clone(), dir, locals, local_dir });
+                self.scp_target = Some((target, label.clone()));
+                self.open_remote_browser(label, ".", BrowsePurpose::Upload);
             }
             ScpDir::Download => {
                 // Download opens a remote browser: navigate, mark files, then
                 // pick where they land locally.
                 self.scp_target = Some((target, label.clone()));
-                self.open_remote_browser(label, ".");
+                self.open_remote_browser(label, ".", BrowsePurpose::Download);
             }
         }
     }
 
+    /// Start typing a connection by hand from the host picker (#2): server, user,
+    /// then password. `for_scp` remembers whether a transfer is being set up so
+    /// the final step either kicks off the transfer or logs a shell in.
+    pub(crate) fn start_manual_ssh(&mut self) {
+        let for_scp = self.scp_dir.is_some();
+        self.popup = text_input(
+            "manual connection — server",
+            "user@host  (e.g. root@10.0.1.5, or deploy@web1:2222):",
+            String::new(),
+            InputKind::ManualSshTarget { for_scp },
+        );
+    }
+
+    /// Second manual step: ask for the password for `user@host:port`.
+    pub(crate) fn manual_ssh_password(&mut self, user: String, host: String, port: u16, for_scp: bool) {
+        self.popup = text_input(
+            "manual connection — password",
+            format!("password for {user}@{host} (blank = none):"),
+            String::new(),
+            InputKind::ManualSshPass { user, host, port, for_scp },
+        );
+    }
+
+    /// Final manual step: build the connection and either run the transfer or log
+    /// the shell in (typing `ssh …` and feeding the password on the prompt).
+    pub(crate) fn manual_ssh_finish(&mut self, user: String, host: String, port: u16, password: String, for_scp: bool) {
+        let label = format!("{user}@{host}");
+        if for_scp {
+            if password.is_empty() {
+                self.message = Some("a transfer needs a password".into());
+                self.scp_dir = None;
+                return;
+            }
+            let target = cian_scp::Target { host, port, user, password };
+            self.scp_dispatch(target, label);
+            return;
+        }
+        // Plain shell login: type the command, then feed the password (if any) on
+        // the prompt via the existing pending-auth watcher.
+        let mut cmd = format!("ssh {user}@{host}");
+        if port != 22 {
+            cmd.push_str(&format!(" -p {port}"));
+        }
+        self.popup = Popup::None;
+        self.run_in_shell(cmd);
+        if password.is_empty() {
+            self.message = Some(format!("→ {label}"));
+        } else {
+            self.pending_auth = Some(PendingAuth { secret: password, deadline: Instant::now() + AUTH_WINDOW });
+            self.message = Some(format!("→ {label} (sending password on prompt)"));
+        }
+    }
+
     /// Open the remote file browser at `cwd` and kick off its listing.
-    pub(crate) fn open_remote_browser(&mut self, label: String, cwd: &str) {
+    pub(crate) fn open_remote_browser(&mut self, label: String, cwd: &str, purpose: BrowsePurpose) {
         self.popup = Popup::RemoteBrowser {
             label,
             cwd: cwd.to_string(),
@@ -140,6 +187,7 @@ impl App {
             scroll: 0,
             marked: std::collections::BTreeSet::new(),
             loading: true,
+            purpose,
         };
         self.remote_ls_spawn(cwd.to_string());
     }
@@ -196,10 +244,13 @@ impl App {
     /// file and move on (Enter on a file selects it for download).
     pub(crate) fn remote_browser_enter(&mut self) {
         let (dir_to, is_dir_name) = {
-            let Popup::RemoteBrowser { cwd, entries, cursor, .. } = &self.popup else { return };
+            let Popup::RemoteBrowser { cwd, entries, cursor, purpose, .. } = &self.popup else { return };
             let Some(e) = entries.get(*cursor) else { return };
             if e.is_dir {
                 (Some(join_remote(cwd, &e.name)), None)
+            } else if *purpose == BrowsePurpose::Upload {
+                // Uploading picks a *folder*; a file under the cursor is a no-op.
+                (None, None)
             } else {
                 (None, Some(e.name.clone()))
             }
@@ -264,6 +315,25 @@ impl App {
             return;
         }
         self.popup = Popup::LocalDest { files, cursor: 0 };
+    }
+
+    /// Confirm the current remote directory as the upload destination and move on
+    /// to the chmod prompt. The pending upload (target + local files) is already
+    /// captured; we only needed the folder.
+    pub(crate) fn remote_browser_upload_here(&mut self) {
+        let cwd = if let Popup::RemoteBrowser { cwd, purpose: BrowsePurpose::Upload, .. } = &self.popup {
+            cwd.clone()
+        } else {
+            return;
+        };
+        let n = self.scp_pending.as_ref().map(|p| p.locals.len()).unwrap_or(0);
+        self.scp_target = None; // done browsing; the upload runs off scp_pending
+        self.popup = text_input(
+            "upload — chmod",
+            format!("upload {n} file(s) into {cwd} — mode (octal, e.g. 777; blank = keep):"),
+            "777".to_string(),
+            InputKind::UploadChmod { remote: cwd },
+        );
     }
 
     /// The four local-destination choices, in order, as (label, resolved dir).

@@ -399,6 +399,8 @@ enum Popup {
         scroll: usize,
         marked: std::collections::BTreeSet<String>,
         loading: bool,
+        /// Download (mark files to fetch) or Upload (choose a destination folder).
+        purpose: BrowsePurpose,
     },
     /// Pick where a set of remote files download to: the left/right pane, the
     /// Desktop, or a typed path. `files` are the chosen remote file paths.
@@ -452,6 +454,14 @@ enum Popup {
     /// Duplicate files found by content, grouped, each toggleable. Approving
     /// hands the checked copies to the normal delete confirmation.
     DupeReview { items: Vec<DupeItem>, cursor: usize, scroll: usize },
+}
+
+/// Why the remote browser is open: to fetch files, or to choose a folder to
+/// upload the pending local files into.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum BrowsePurpose {
+    Download,
+    Upload,
 }
 
 /// One file in a duplicate group. `group` is its 0-based group index (files in
@@ -1055,8 +1065,6 @@ enum InputKind {
     TransferAs { op: PendingOp, src: PathBuf, dest_dir: PathBuf },
     /// A directory to write a session log into; the file name is generated.
     LogDir,
-    /// The remote path for a pending SFTP transfer (details on `App`).
-    ScpRemote,
     /// A natural-language description to turn into a shell command via AI.
     AiShellCmd,
     /// A natural-language instruction for how to bulk-rename the chosen files.
@@ -1081,6 +1089,12 @@ enum InputKind {
     DownloadChmod { files: Vec<String>, dir: PathBuf },
     /// A bulk-rename pattern (template or `s/re/rep/flags`) for these files.
     BulkRenamePattern { targets: Vec<PathBuf> },
+    /// Manual connection (#2), step 1: `user@host[:port]` typed by hand.
+    /// `for_scp` is true when a transfer is being set up (vs a plain shell login).
+    ManualSshTarget { for_scp: bool },
+    /// Manual connection, step 2: the password for the typed server. Rendered
+    /// masked.
+    ManualSshPass { user: String, host: String, port: u16, for_scp: bool },
 }
 
 /// The archive format chosen from the right-click "Compress" submenu.
@@ -1095,7 +1109,7 @@ enum CompressKind {
 impl InputKind {
     /// Whether the field holds a secret and should be shown as dots.
     fn is_secret(&self) -> bool {
-        matches!(self, InputKind::ZipPassword { .. } | InputKind::ExtractPassword { .. })
+        matches!(self, InputKind::ZipPassword { .. } | InputKind::ExtractPassword { .. } | InputKind::ManualSshPass { .. })
     }
 }
 

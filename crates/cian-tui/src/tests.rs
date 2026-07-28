@@ -1869,14 +1869,14 @@
     }
 
     #[test]
-    fn scp_upload_walks_picker_then_asks_for_the_remote_path() {
+    fn scp_upload_walks_picker_then_browses_the_server() {
         let (_d, mut app) = app_with_ssh();
         app.active_pane_mut().unwrap().cursor = 1; // a.txt (index 0 is the `..` row)
         app.start_scp(ScpDir::Upload);
         assert!(matches!(app.popup, Popup::SshHosts { .. }), "opens the host picker");
         assert!(app.scp_dir.is_some());
 
-        // Pick db1 (single user, has a password) → straight to the remote prompt.
+        // Pick db1 (single user, has a password) → the WinSCP-style remote browser.
         app.command_buffer.clear();
         // Filter to db1 then Enter.
         for c in "db1".chars() {
@@ -1885,8 +1885,8 @@
         app.handle_key(code(KeyCode::Enter)).unwrap();
 
         match &app.popup {
-            Popup::TextInput { kind: InputKind::ScpRemote, .. } => {}
-            other => panic!("expected the remote-path prompt, got {:?}", other),
+            Popup::RemoteBrowser { purpose: BrowsePurpose::Upload, .. } => {}
+            other => panic!("expected the upload browser, got {:?}", other),
         }
         let p = app.scp_pending.as_ref().expect("a pending transfer");
         assert_eq!(p.target.host, "10.0.2.31");
@@ -1894,6 +1894,33 @@
         assert_eq!(p.target.user, "postgres");
         assert_eq!(p.dir, ScpDir::Upload);
         assert_eq!(p.locals.len(), 1);
+    }
+
+    #[test]
+    fn manual_ssh_target_parses_user_host_port() {
+        let (_d, mut app) = app_with_ssh();
+        app.active_pane_mut().unwrap().cursor = 1; // a.txt
+        app.start_scp(ScpDir::Upload);
+        // F2 from the host picker → type the server by hand.
+        app.handle_key(code(KeyCode::F(2))).unwrap();
+        assert!(matches!(
+            app.popup,
+            Popup::TextInput { kind: InputKind::ManualSshTarget { for_scp: true }, .. }
+        ));
+        for c in "deploy@web9:2201".chars() {
+            app.handle_key(code(KeyCode::Char(c))).unwrap();
+        }
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+        // Advances to the masked password step, carrying the parsed pieces.
+        match &app.popup {
+            Popup::TextInput { kind: InputKind::ManualSshPass { user, host, port, for_scp }, .. } => {
+                assert_eq!(user, "deploy");
+                assert_eq!(host, "web9");
+                assert_eq!(*port, 2201);
+                assert!(for_scp);
+            }
+            other => panic!("expected the password prompt, got {:?}", other),
+        }
     }
 
     #[test]
@@ -2637,12 +2664,18 @@
     }
 
     #[test]
-    fn the_picker_explains_itself_when_nothing_is_configured() {
+    fn nothing_configured_drops_into_manual_entry() {
         let (_d, mut app) = app_with(&["a.txt"]);
         app.start_ssh();
-        let Popup::Notice { lines } = &app.popup else { panic!("expected a notice") };
-        let text = lines.join("\n");
-        assert!(text.contains("cian.ssh"), "should show how to configure it:\n{}", text);
+        // With no hosts to pick, go straight to typing a server by hand (#2).
+        assert!(
+            matches!(
+                app.popup,
+                Popup::TextInput { kind: InputKind::ManualSshTarget { for_scp: false }, .. }
+            ),
+            "expected the manual-connection prompt, got {:?}",
+            app.popup
+        );
     }
 
     #[test]
