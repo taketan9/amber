@@ -65,6 +65,7 @@ impl App {
                 items.push(MenuItem::ArchiveMenu);
             }
             items.push(MenuItem::InspectMenu); // attributes / hash / compare / count / dupes
+            items.push(MenuItem::OsMenu); // open / open-with / reveal / properties
             if has_hosts {
                 items.push(MenuItem::SendMenu); // Transfer ▸
             }
@@ -178,6 +179,15 @@ impl App {
                 MenuItem::Compare,
                 MenuItem::Count,
                 MenuItem::FindDupes,
+                MenuItem::Back,
+            ]),
+            // The OS-native actions (#9): hand the selected file to the shell's
+            // own verbs rather than reimplementing them.
+            MenuItem::OsMenu => Some(vec![
+                MenuItem::OpenDefault,
+                MenuItem::OpenWithOs,
+                MenuItem::RevealInOs,
+                MenuItem::PropertiesOs,
                 MenuItem::Back,
             ]),
             MenuItem::ViewMenu => Some(vec![
@@ -310,7 +320,11 @@ impl App {
         self.menu_stack.clear();
         self.popup = Popup::None;
         match item {
-            MenuItem::AiMenu | MenuItem::SendMenu | MenuItem::WindowMenu | MenuItem::GitMenu | MenuItem::SvnMenu | MenuItem::CompressMenu | MenuItem::FileMenu | MenuItem::ArchiveMenu | MenuItem::InspectMenu | MenuItem::ViewMenu | MenuItem::SessionMenu | MenuItem::Back => {} // handled above
+            MenuItem::AiMenu | MenuItem::SendMenu | MenuItem::WindowMenu | MenuItem::GitMenu | MenuItem::SvnMenu | MenuItem::CompressMenu | MenuItem::FileMenu | MenuItem::ArchiveMenu | MenuItem::InspectMenu | MenuItem::OsMenu | MenuItem::ViewMenu | MenuItem::SessionMenu | MenuItem::Back => {} // handled above
+            MenuItem::OpenDefault => self.open_externally(),
+            MenuItem::OpenWithOs => self.open_with_os(),
+            MenuItem::RevealInOs => self.reveal_in_os(),
+            MenuItem::PropertiesOs => self.properties_os(),
             MenuItem::CopyPathText => self.copy_paths_to_clipboard(),
             MenuItem::ShellSplitLR => {
                 let cwd = self.shell_cwd();

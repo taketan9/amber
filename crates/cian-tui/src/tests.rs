@@ -1731,6 +1731,41 @@
     }
 
     #[test]
+    fn file_menu_offers_the_os_actions_group() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        app.focus(FocusedPane::Left);
+        app.open_context_menu(5, 5);
+        let Popup::ContextMenu { items, .. } = &app.popup else { panic!("no menu") };
+        assert!(items.contains(&MenuItem::OsMenu), "file menu offers the OS group");
+        assert!(MenuItem::OsMenu.is_group());
+        let kids = app.submenu_children(MenuItem::OsMenu).expect("group has children");
+        assert_eq!(
+            kids,
+            vec![
+                MenuItem::OpenDefault,
+                MenuItem::OpenWithOs,
+                MenuItem::RevealInOs,
+                MenuItem::PropertiesOs,
+                MenuItem::Back,
+            ]
+        );
+        // The reveal/properties labels adapt to the host OS and are never blank.
+        for it in [MenuItem::RevealInOs, MenuItem::PropertiesOs, MenuItem::OpenWithOs] {
+            assert!(!it.label(Lang::En).is_empty());
+            assert!(!it.label(Lang::Ja).is_empty());
+        }
+    }
+
+    #[test]
+    fn the_os_group_is_absent_from_the_shell_menu() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        app.focus(FocusedPane::Shell);
+        app.open_context_menu(5, 5);
+        let Popup::ContextMenu { items, .. } = &app.popup else { panic!("no menu") };
+        assert!(!items.contains(&MenuItem::OsMenu), "the OS group is file-pane only");
+    }
+
+    #[test]
     fn the_shell_menu_omits_file_operations() {
         let (_d, mut app) = app_with(&["a.txt"]);
         app.clip_targets(ClipOp::Copy);

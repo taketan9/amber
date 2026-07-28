@@ -583,6 +583,16 @@ enum MenuItem {
     ThemePick,
     /// Open the theme gallery for just the active file pane (#8).
     ThemePickPane,
+    /// OS-native actions group (#9).
+    OsMenu,
+    /// Open the selection with its default app (the OS "Open" verb).
+    OpenDefault,
+    /// Show the OS "Open with…" application picker.
+    OpenWithOs,
+    /// Reveal the selection in the OS file manager.
+    RevealInOs,
+    /// Open the OS properties / Get-Info panel.
+    PropertiesOs,
     HiddenToggle,
     Attributes,
     Hash,
@@ -726,6 +736,7 @@ impl MenuItem {
                 | MenuItem::GitMenu
                 | MenuItem::SvnMenu
                 | MenuItem::CompressMenu
+                | MenuItem::OsMenu
         )
     }
 }
@@ -744,6 +755,25 @@ impl MenuItem {
             MenuItem::Background => tr(lang, "Background color", "背景色"),
             MenuItem::ThemePick => tr(lang, "Theme (whole app)…  (:theme)", "テーマ（全体）…  (:theme)"),
             MenuItem::ThemePickPane => tr(lang, "Theme (this pane)…", "テーマ（このペイン）…"),
+            MenuItem::OsMenu => tr(lang, "Open / reveal  ▸", "開く / 場所  ▸"),
+            MenuItem::OpenDefault => tr(lang, "Open", "開く"),
+            MenuItem::OpenWithOs => tr(lang, "Open with…", "プログラムから開く…"),
+            MenuItem::RevealInOs => {
+                if cfg!(target_os = "windows") {
+                    tr(lang, "Show in Explorer", "エクスプローラーで表示")
+                } else if cfg!(target_os = "macos") {
+                    tr(lang, "Reveal in Finder", "Finder で表示")
+                } else {
+                    tr(lang, "Show in file manager", "ファイルマネージャで表示")
+                }
+            }
+            MenuItem::PropertiesOs => {
+                if cfg!(target_os = "macos") {
+                    tr(lang, "Get Info", "情報を見る")
+                } else {
+                    tr(lang, "Properties", "プロパティ")
+                }
+            }
             MenuItem::HiddenToggle => tr(lang, "Show / hide dotfiles  (:hidden)", "ドットファイルの表示切替  (:hidden)"),
             MenuItem::Attributes => tr(lang, "Attributes  (:attr)", "属性  (:attr)"),
             MenuItem::Hash => tr(lang, "Checksum  (:hash)", "チェックサム  (:hash)"),
@@ -1958,6 +1988,48 @@ impl App {
         }
     }
 
+    /// The path under the cursor in the active file pane, if any. Shared by the
+    /// OS-native actions below.
+    fn selected_os_path(&self) -> Option<PathBuf> {
+        self.active_pane().and_then(|p| p.selected()).map(|e| e.path.clone())
+    }
+
+    /// Reveal the selected file in the OS file manager (#9).
+    fn reveal_in_os(&mut self) {
+        let Some(path) = self.selected_os_path() else {
+            self.message = Some("nothing selected".into());
+            return;
+        };
+        match os_reveal(&path) {
+            Ok(()) => self.message = Some(format!("revealed: {}", path.display())),
+            Err(e) => self.message = Some(format!("reveal failed: {e}")),
+        }
+    }
+
+    /// Show the OS "Open with…" picker for the selected file (#9).
+    fn open_with_os(&mut self) {
+        let Some(path) = self.selected_os_path() else {
+            self.message = Some("nothing selected".into());
+            return;
+        };
+        match os_open_with(&path) {
+            Ok(()) => self.message = Some(format!("open with…: {}", path.display())),
+            Err(e) => self.message = Some(e.to_string()),
+        }
+    }
+
+    /// Open the OS properties / Get-Info panel for the selected file (#9).
+    fn properties_os(&mut self) {
+        let Some(path) = self.selected_os_path() else {
+            self.message = Some("nothing selected".into());
+            return;
+        };
+        match os_properties(&path) {
+            Ok(()) => self.message = Some(format!("properties: {}", path.display())),
+            Err(e) => self.message = Some(e.to_string()),
+        }
+    }
+
     /// Text on the system clipboard, if any.
     fn clipboard_text(&mut self) -> Option<String> {
         self.clipboard.as_mut()?.get_text().ok().filter(|t| !t.is_empty())
@@ -2194,6 +2266,107 @@ fn os_open_string(target: &str) -> Result<()> {
         .stderr(Stdio::null())
         .spawn()?;
     Ok(())
+}
+
+/// Reveal `path` in the OS file manager, selecting it where the platform's
+/// manager supports it. Windows Explorer and macOS Finder select the file
+/// itself; Linux has no portable "select", so its parent folder is opened.
+fn os_reveal(path: &Path) -> Result<()> {
+    #[cfg(target_os = "macos")]
+    let mut cmd = {
+        let mut c = Command::new("open");
+        c.arg("-R").arg(path);
+        c
+    };
+    #[cfg(target_os = "windows")]
+    let mut cmd = {
+        // `/select,<path>` is one argument (comma-joined). Explorer exits 1 even
+        // on success, so we only spawn — never wait on or check its status.
+        let mut c = Command::new("explorer");
+        c.arg(format!("/select,{}", path.display()));
+        c
+    };
+    #[cfg(target_os = "linux")]
+    let mut cmd = {
+        let dir = path.parent().unwrap_or(path);
+        let mut c = Command::new("xdg-open");
+        c.arg(dir);
+        c
+    };
+    cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn()?;
+    Ok(())
+}
+
+/// Show the OS "Open with…" application picker for `path`. Only Windows has a
+/// portable shell command for this (`OpenAs_RunDLL`); elsewhere it is reported
+/// as unsupported so the menu can degrade gracefully.
+#[allow(unused_variables)]
+fn os_open_with(path: &Path) -> Result<()> {
+    #[cfg(target_os = "windows")]
+    {
+        Command::new("rundll32.exe")
+            .arg("shell32.dll,OpenAs_RunDLL")
+            .arg(path)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()?;
+        Ok(())
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        anyhow::bail!("\u{201c}Open with\u{201d} is only available on Windows");
+    }
+}
+
+/// Open the OS properties / Get-Info panel for `path`. macOS opens Finder's
+/// information window; Windows invokes the shell "Properties" verb via
+/// PowerShell (best-effort — the verb name can be localized). Linux has no
+/// portable equivalent.
+#[allow(unused_variables)]
+fn os_properties(path: &Path) -> Result<()> {
+    #[cfg(target_os = "macos")]
+    {
+        // The path is passed as an argv item (not spliced into the script) so a
+        // name with quotes or backslashes cannot break the AppleScript.
+        Command::new("osascript")
+            .args([
+                "-e", "on run argv",
+                "-e", "tell application \"Finder\"",
+                "-e", "activate",
+                "-e", "open information window of (POSIX file (item 1 of argv))",
+                "-e", "end tell",
+                "-e", "end run",
+            ])
+            .arg(path)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()?;
+        Ok(())
+    }
+    #[cfg(target_os = "windows")]
+    {
+        // Shell.Application's Properties verb. The path arrives as $args[0], not
+        // spliced into the script text.
+        let script = "$p=$args[0]; \
+             (New-Object -ComObject Shell.Application)\
+             .Namespace((Split-Path $p))\
+             .ParseName((Split-Path $p -Leaf))\
+             .InvokeVerb('Properties')";
+        Command::new("powershell")
+            .args(["-NoProfile", "-Command", script])
+            .arg(path)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()?;
+        Ok(())
+    }
+    #[cfg(target_os = "linux")]
+    {
+        anyhow::bail!("Properties is not available on this platform");
+    }
 }
 
 /// The user's home directory: `$HOME`, or `$USERPROFILE` on Windows.
