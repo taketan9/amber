@@ -750,7 +750,7 @@ impl MenuItem {
             MenuItem::CopyToOther => tr(lang, "Copy to other pane  (y)", "反対ペインへコピー  (y)"),
             MenuItem::MoveToOther => tr(lang, "Move to other pane  (m)", "反対ペインへ移動  (m)"),
             MenuItem::CopyToPath => tr(lang, "Copy to…  (:copyto)", "指定先へコピー  (:copyto)"),
-            MenuItem::Delete => tr(lang, "Delete → trash  (d)", "削除 → ゴミ箱  (d)"),
+            MenuItem::Delete => tr(lang, "Delete  (d)", "削除  (d)"),
             MenuItem::Rename => tr(lang, "Rename  (r)", "リネーム  (r)"),
             MenuItem::Background => tr(lang, "Background color", "背景色"),
             MenuItem::ThemePick => tr(lang, "Theme (whole app)…  (:theme)", "テーマ（全体）…  (:theme)"),
@@ -821,13 +821,13 @@ impl MenuItem {
             MenuItem::SvnUpdate => tr(lang, "Update  (svn update)", "更新  (svn update)"),
             MenuItem::SvnCommit => tr(lang, "Commit…  (svn commit)", "コミット…  (svn commit)"),
             MenuItem::BulkRename => tr(lang, "Bulk rename…  (:brename)", "一括リネーム…  (:brename)"),
-            MenuItem::Snippets => tr(lang, "Snippets → shell  (:snip)", "スニペット → シェル  (:snip)"),
-            MenuItem::Macros => tr(lang, "Macros → layout  (@)", "マクロ → レイアウト  (@)"),
+            MenuItem::Snippets => tr(lang, "Snippets  (:snip)", "スニペット  (:snip)"),
+            MenuItem::Macros => tr(lang, "Macros  (@)", "マクロ  (@)"),
             MenuItem::Shortcuts => tr(lang, "Shortcuts  (s)", "ショートカット  (s)"),
             // Ⓒ stands in for crmaine's icon — a terminal menu cannot embed the
             // PNG/SVG, which is itself just the "CRMAINE" wordmark as text, so a
             // circled C echoes it most closely.
-            MenuItem::AiMenu => tr(lang, "Ⓒ crmaine - Ajent ▸", "Ⓒ crmaine - Ajent ▸"),
+            MenuItem::AiMenu => tr(lang, "Ⓒ crmaine ▸", "Ⓒ crmaine ▸"),
             MenuItem::SendMenu => tr(lang, "Transfer ▸", "転送 ▸"),
             MenuItem::WindowMenu => tr(lang, "Window ▸", "ウィンドウ ▸"),
             MenuItem::FileMenu => tr(lang, "File ▸", "ファイル操作 ▸"),

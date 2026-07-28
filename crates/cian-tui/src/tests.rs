@@ -4632,7 +4632,7 @@
         use crate::render::menu_label_parts;
         assert_eq!(menu_label_parts("Bulk rename…  (:brename)"), ("Bulk rename…", "(:brename)"));
         assert_eq!(menu_label_parts("Copy"), ("Copy", ""));
-        assert_eq!(menu_label_parts("Ⓒ crmaine - Ajent ▸"), ("Ⓒ crmaine - Ajent ▸", ""));
+        assert_eq!(menu_label_parts("Ⓒ crmaine ▸"), ("Ⓒ crmaine ▸", ""));
     }
 
     #[test]

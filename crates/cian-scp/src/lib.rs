@@ -139,12 +139,23 @@ pub struct RemoteEntry {
 
 /// List a remote directory over SFTP (browsing needs the SFTP subsystem; the
 /// classic SCP protocol cannot enumerate). Directories sort first, then by name.
-pub fn list_dir(target: &Target, remote_path: &str) -> Result<Vec<RemoteEntry>> {
+///
+/// Returns the *canonical absolute* path alongside the entries: the caller may
+/// pass a relative path like "." (the login home), and resolving it to e.g.
+/// `/home/userA` is what lets the browser climb up past the home directory all
+/// the way to `/`.
+pub fn list_dir(target: &Target, remote_path: &str) -> Result<(String, Vec<RemoteEntry>)> {
     on_runtime(|| async {
         let handle = connect(target).await?;
         let sftp = open_sftp(&handle)
             .await
             .context("this server has no SFTP subsystem, so remote browsing is unavailable")?;
+        // Resolve "." / relative paths to an absolute path so parent navigation
+        // has something to climb; fall back to the input if the server refuses.
+        let canon = sftp
+            .canonicalize(remote_path)
+            .await
+            .unwrap_or_else(|_| remote_path.to_string());
         let read = sftp.read_dir(remote_path).await.context("read remote directory")?;
         let mut out = Vec::new();
         for entry in read {
@@ -163,7 +174,7 @@ pub fn list_dir(target: &Target, remote_path: &str) -> Result<Vec<RemoteEntry>> 
             b.is_dir.cmp(&a.is_dir).then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
         });
         let _ = sftp.close().await;
-        Ok(out)
+        Ok((canon, out))
     })
 }
 

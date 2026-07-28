@@ -65,7 +65,6 @@ impl App {
                 items.push(MenuItem::ArchiveMenu);
             }
             items.push(MenuItem::InspectMenu); // attributes / hash / compare / count / dupes
-            items.push(MenuItem::OsMenu); // open / open-with / reveal / properties
             if has_hosts {
                 items.push(MenuItem::SendMenu); // Transfer ▸
             }
@@ -78,6 +77,10 @@ impl App {
             items.push(MenuItem::Ssh);
             items.push(MenuItem::Background);
             items.push(MenuItem::ViewMenu); // show hidden / language / copy path
+            // The OS-native group sits last, just above Quit / the manual, so
+            // "Show in Explorer / Finder" is always in the same easy-to-reach
+            // spot (third from the bottom).
+            items.push(MenuItem::OsMenu); // open / open-with / reveal / properties
         }
         // Quit and the manual close every menu — reachable by mouse alone
         // (quitting otherwise needs `q`, which the shell eats).

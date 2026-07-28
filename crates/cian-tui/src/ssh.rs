@@ -198,7 +198,9 @@ impl App {
         let Some((target, _)) = self.scp_target.clone() else { return };
         let (tx, rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
-            let res = cian_scp::list_dir(&target, &path).map(|e| (path, e)).map_err(|e| e.to_string());
+            // list_dir returns the canonical absolute path of `path`, which
+            // becomes the browser's cwd so parent navigation can climb to "/".
+            let res = cian_scp::list_dir(&target, &path).map_err(|e| e.to_string());
             let _ = tx.send(res);
         });
         self.remote_ls = Some(rx);
@@ -212,7 +214,12 @@ impl App {
             Ok(result) => {
                 self.remote_ls = None;
                 match result {
-                    Ok((cwd_new, entries)) => {
+                    Ok((cwd_new, mut entries)) => {
+                        // A ".." row to step up one level, like the file panes —
+                        // except at the filesystem root, where there is no up.
+                        if cwd_new != "/" {
+                            entries.insert(0, cian_scp::RemoteEntry { name: "..".into(), is_dir: true, size: 0 });
+                        }
                         if let Popup::RemoteBrowser { cwd, entries: es, cursor, scroll, loading, marked, .. } =
                             &mut self.popup
                         {
@@ -246,7 +253,10 @@ impl App {
         let (dir_to, is_dir_name) = {
             let Popup::RemoteBrowser { cwd, entries, cursor, purpose, .. } = &self.popup else { return };
             let Some(e) = entries.get(*cursor) else { return };
-            if e.is_dir {
+            if e.is_dir && e.name == ".." {
+                // The synthetic up-row: climb to the parent (cwd is absolute).
+                (Some(parent_remote(cwd)), None)
+            } else if e.is_dir {
                 (Some(join_remote(cwd, &e.name)), None)
             } else if *purpose == BrowsePurpose::Upload {
                 // Uploading picks a *folder*; a file under the cursor is a no-op.
@@ -626,5 +636,11 @@ mod tests {
         assert_eq!(parent_remote("/var"), "/");     // climbs to root
         assert_eq!(parent_remote("a/b"), "a");
         assert_eq!(parent_remote("docs"), ".");     // relative single -> home
+
+        // The reported case: connected as userA (home /home/userA), climbing up
+        // must reach /home and then / rather than stopping at home.
+        assert_eq!(parent_remote("/home/userA"), "/home");
+        assert_eq!(parent_remote("/home"), "/");
+        assert_eq!(parent_remote("/home/userA/"), "/home"); // trailing slash tolerated
     }
 }

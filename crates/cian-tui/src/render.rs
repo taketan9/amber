@@ -2551,6 +2551,7 @@ fn draw_popup(
 
     if let Popup::RemoteBrowser { label, cwd, entries, cursor, scroll, marked, loading, purpose } = popup {
         let uploading = *purpose == BrowsePurpose::Upload;
+        let th = theme();
         let w = 70u16.min(area.width);
         let h = area.height.saturating_sub(4).clamp(8, 30);
         let rect = centered_rect(w, h, area);
@@ -2603,24 +2604,41 @@ fn draw_popup(
             let checked = marked.contains(&e.name);
             let mark = if checked { "◉ " } else if sel { "▸ " } else { "  " };
             let (icon, name_c) = if e.is_dir {
-                ("▸ ", theme().file.directory)
+                ("▸ ", th.file.directory)
             } else {
-                ("  ", Color::Rgb(205, 205, 218))
+                ("  ", th.file.plain)
             };
             let size = if e.is_dir { String::new() } else { cian_core::disk::human_size(e.size) };
-            let style = if sel {
-                Style::default().fg(theme().accent).add_modifier(Modifier::BOLD)
+            // Base fg per row; the selected row also gets a full-width background
+            // below so it reads as the focused row, like the file panes.
+            let base = if sel {
+                Style::default().fg(th.accent).add_modifier(Modifier::BOLD)
             } else if checked {
                 Style::default().fg(Color::Rgb(130, 205, 150))
             } else {
                 Style::default().fg(name_c)
             };
-            lines.push(Line::from(vec![
-                Span::styled(format!("{}{}", mark, icon), style),
-                Span::styled(format!("{:<40}", truncate(&e.name, 40)), style),
-                Span::styled(format!("{:>10}", size), Style::default().fg(Color::Rgb(140, 140, 165))),
-            ]));
+            let mut line = Line::from(vec![
+                Span::styled(format!("{}{}", mark, icon), base),
+                Span::styled(format!("{:<40}", truncate(&e.name, 40)), base),
+                Span::styled(format!("{:>10}", size), Style::default().fg(th.dim)),
+            ]);
+            if sel {
+                line = line.style(Style::default().bg(th.selected_bg));
+            }
+            lines.push(line);
             push_row_zone(zones, inner, inner.y + (i - *scroll) as u16, i);
+        }
+        // Paint the selected row's background across the full inner width first,
+        // then the text on top (the spans carry no bg, so it shows through).
+        if !entries.is_empty() && *cursor >= *scroll {
+            let sel_y = inner.y + (*cursor - *scroll) as u16;
+            if sel_y < inner.y + inner.height {
+                f.render_widget(
+                    Block::default().style(Style::default().bg(th.selected_bg)),
+                    Rect::new(inner.x, sel_y, inner.width, 1),
+                );
+            }
         }
         f.render_widget(Paragraph::new(lines), inner);
         return;
