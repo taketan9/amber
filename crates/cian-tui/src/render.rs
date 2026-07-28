@@ -409,6 +409,24 @@ fn menu_dims(items: &[MenuItem], lang: Lang) -> (usize, usize) {
     (name_w.max(6), hint_w)
 }
 
+/// A text-input field line with the cursor shown as a highlighted character
+/// (reverse video), so moving the cursor never shifts the text. A password is
+/// masked; a cursor at the end highlights a trailing space (a block cursor).
+fn caret_line(buffer: &str, cursor: usize, secret: bool) -> Line<'static> {
+    let shown: String = if secret { "•".repeat(buffer.chars().count()) } else { buffer.to_string() };
+    let chars: Vec<char> = shown.chars().collect();
+    let cur = cursor.min(chars.len());
+    let before: String = chars[..cur].iter().collect();
+    let at: String = chars.get(cur).map(|c| c.to_string()).unwrap_or_else(|| " ".to_string());
+    let after: String = chars.get(cur + 1..).map(|s| s.iter().collect()).unwrap_or_default();
+    Line::from(vec![
+        Span::raw(">"),
+        Span::raw(before),
+        Span::styled(at, Style::default().fg(Color::Black).bg(theme().accent)),
+        Span::raw(after),
+    ])
+}
+
 /// Right-align `s` within `w` cells (pad on the left).
 fn pad_left(s: &str, w: usize) -> String {
     let sw = width(s);
@@ -3750,10 +3768,11 @@ fn draw_popup(
             };
             (title, lines, foot.to_string())
         }
-        Popup::TextInput { title, prompt, buffer, kind, cursor } => {
-            // The caret is drawn where editing will happen; a password is shown
-            // as dots so it does not sit in plain sight.
-            let body = vec![prompt.clone(), field_with_caret(buffer, *cursor, kind.is_secret())];
+        Popup::TextInput { title, prompt, .. } => {
+            // The field line is filled in below as a styled Line (the cursor
+            // highlights a character rather than inserting one, so nothing
+            // shifts as it moves).
+            let body = vec![prompt.clone(), String::new()];
             let foot = tr(lang, " Enter=ok  ←→ move  Esc=cancel ", " Enter=決定  ←→ 移動  Esc=取消 ");
             (format!(" {} ", title), body, foot.to_string())
         }
@@ -3991,7 +4010,14 @@ fn draw_popup(
         _ => vec![],
     };
 
-    let body_text: Vec<Line> = body.into_iter().map(Line::from).collect();
+    let mut body_text: Vec<Line> = body.into_iter().map(Line::from).collect();
+    // The text-input field renders the cursor as a highlighted character so
+    // moving it never shifts the surrounding text (was inserting a caret glyph).
+    if let Popup::TextInput { buffer, cursor, kind, .. } = popup {
+        if body_text.len() >= 2 {
+            body_text[1] = caret_line(buffer, *cursor, kind.is_secret());
+        }
+    }
     // A dialog gets a dedicated button row above the hint footer; everything
     // else keeps the single hint line.
     let button_row = !buttons.is_empty() && inner.height >= 3;

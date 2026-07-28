@@ -2290,16 +2290,6 @@ fn delete_at(buffer: &mut String, cursor: &mut usize) {
 
 /// Render a single-line field with a visible caret at `cursor`, masking the
 /// text with dots when it is a secret.
-fn field_with_caret(buffer: &str, cursor: usize, secret: bool) -> String {
-    let shown: String = if secret {
-        "•".repeat(buffer.chars().count())
-    } else {
-        buffer.to_string()
-    };
-    let split = char_byte(&shown, cursor);
-    format!(">{}▏{}", &shown[..split], &shown[split..])
-}
-
 /// Parse a chmod field: blank → no change `(None, None)`; a valid octal mode →
 /// `(Some(mode), None)`; anything else → `(None, Some(error))`.
 fn parse_chmod(s: &str) -> (Option<u32>, Option<String>) {
