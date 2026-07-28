@@ -1113,8 +1113,9 @@ fn draw_shell_inner(
         }
     }
     let broadcast = shell.is_broadcasting();
+    let sync_members = shell.sync_members.clone();
     let tab = &shell.tabs[active];
-    render_node(f, tab, active, root, inner, tab.active, focused, false, dividers, leaves, ov, log_border, broadcast);
+    render_node(f, tab, active, root, inner, tab.active, focused, false, dividers, leaves, ov, log_border, broadcast, &sync_members);
     // Fill any cell the shell left at the terminal default with the theme's
     // base, so a light theme's shell panel matches the rest.
     if let Some(bg) = theme().base_bg {
@@ -1167,15 +1168,19 @@ fn render_node(
     ov: AnimOverride,
     log_border: Color,
     broadcast: bool,
+    sync_members: &std::collections::BTreeSet<usize>,
 ) {
     match tab.nodes.get(i).and_then(|n| n.as_ref()) {
         Some(Node::Leaf { session, bg }) => {
             let target = if bordered {
                 let is_active = focused && i == active_leaf;
+                // A pane is a live sync target when broadcast is on AND either the
+                // member set is empty (all panes) or it lists this leaf.
+                let sync_here = broadcast && (sync_members.is_empty() || sync_members.contains(&i));
                 // Broadcast/synchronize is the loudest state (input hits every
                 // pane), so it wins the border colour — a bright amber with a
                 // `⇄` badge on each pane it targets.
-                let bs = if broadcast {
+                let bs = if sync_here {
                     Style::default().fg(Color::Rgb(255, 176, 32)).add_modifier(Modifier::BOLD)
                 } else if session.is_logging() {
                     Style::default().fg(log_border).add_modifier(Modifier::BOLD)
@@ -1186,8 +1191,16 @@ fn render_node(
                 };
                 let mut blk = Block::default().borders(Borders::ALL)
         .border_type(border_type()).border_style(bs);
-                if broadcast {
-                    blk = blk.title(" ⇄ SYNC ");
+                if sync_here {
+                    // Show the group size (n/total) only when it is a real subset.
+                    let title = if sync_members.is_empty() {
+                        " ⇄ SYNC ".to_string()
+                    } else {
+                        let all = tab.leaves();
+                        let live = all.iter().filter(|l| sync_members.contains(l)).count();
+                        format!(" ⇄ SYNC {}/{} ", live, all.len())
+                    };
+                    blk = blk.title(title);
                 }
                 let pinner = area.inner(Margin { vertical: 1, horizontal: 1 });
                 f.render_widget(blk, area);
@@ -1220,8 +1233,8 @@ fn render_node(
                 dir: d,
                 target,
             });
-            render_node(f, tab, tab_idx, *first, rects.0, active_leaf, focused, true, dividers, leaves, ov, log_border, broadcast);
-            render_node(f, tab, tab_idx, *second, rects.1, active_leaf, focused, true, dividers, leaves, ov, log_border, broadcast);
+            render_node(f, tab, tab_idx, *first, rects.0, active_leaf, focused, true, dividers, leaves, ov, log_border, broadcast, sync_members);
+            render_node(f, tab, tab_idx, *second, rects.1, active_leaf, focused, true, dividers, leaves, ov, log_border, broadcast, sync_members);
         }
         None => {}
     }

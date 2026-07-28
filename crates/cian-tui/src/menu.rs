@@ -33,11 +33,13 @@ impl App {
             items.push(MenuItem::SessionMenu); // log ▸ / encoding
             // Synchronize input — only when there's more than one pane.
             if self.shell.active_pane_count() > 1 {
-                items.push(if self.shell.is_broadcasting() {
-                    MenuItem::SyncStop
+                if self.shell.is_broadcasting() {
+                    items.push(MenuItem::SyncStop);
+                    // Narrow (or widen) the group to just the chosen panes.
+                    items.push(MenuItem::SyncMember);
                 } else {
-                    MenuItem::SyncStart
-                });
+                    items.push(MenuItem::SyncStart);
+                }
             }
             items.push(MenuItem::WindowMenu);
             items.push(MenuItem::Background);
@@ -344,6 +346,16 @@ impl App {
                     tr(self.lang, "⇄ synchronize ON — input goes to all panes", "⇄ 同時入力 ON — 全ペインに入力").into()
                 } else {
                     tr(self.lang, "synchronize off", "同時入力 OFF").into()
+                });
+            }
+            MenuItem::SyncMember => {
+                self.focus(FocusedPane::Shell);
+                let n = self.shell.toggle_sync_member();
+                let total = self.shell.active_pane_count();
+                self.message = Some(if n == 0 {
+                    tr(self.lang, "⇄ sync group cleared — all panes", "⇄ 同時入力グループ解除 — 全ペイン").into()
+                } else {
+                    format!("⇄ sync group: {n}/{total}")
                 });
             }
             MenuItem::Copy => self.clip_targets(ClipOp::Copy),

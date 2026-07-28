@@ -145,6 +145,9 @@ pub struct ShellPane {
     /// Synchronize/broadcast input: keystrokes go to every pane in the active
     /// tab at once. Only meaningful with more than one pane.
     broadcast: bool,
+    /// When non-empty, sync goes only to these leaf node ids (a subset of the
+    /// active tab's panes) instead of every pane. Empty = all panes.
+    sync_members: std::collections::BTreeSet<usize>,
 }
 
 /// A PTY spawn running on a background thread, plus what to do with the
@@ -670,6 +673,8 @@ enum MenuItem {
     SyncStart,
     /// Stop broadcasting input.
     SyncStop,
+    /// Add/remove the focused pane from the sync group (subset of panes).
+    SyncMember,
     /// Goes back up from a submenu to its parent.
     Back,
     Quit,
@@ -778,6 +783,7 @@ impl MenuItem {
             MenuItem::ShellZoom => tr(lang, "Zoom  (F12)", "ズーム  (F12)"),
             MenuItem::SyncStart => tr(lang, "Synchronize input  ⇄", "同時入力を開始  ⇄"),
             MenuItem::SyncStop => tr(lang, "Stop synchronize  ⇄", "同時入力を停止  ⇄"),
+            MenuItem::SyncMember => tr(lang, "Toggle this pane in sync group  ⇄", "このペインを同時入力に含める/外す  ⇄"),
             MenuItem::Back => tr(lang, "◂ Back", "◂ 戻る"),
             MenuItem::Manual => tr(lang, "Key manual  (?)", "キー一覧  (?)"),
         }

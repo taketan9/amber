@@ -251,6 +251,7 @@ impl ShellPane {
             pending: Vec::new(),
             just_split: None,
             broadcast: false,
+            sync_members: std::collections::BTreeSet::new(),
         }
     }
 
@@ -266,6 +267,9 @@ impl ShellPane {
     /// macro force it on.
     pub(crate) fn set_broadcast(&mut self, on: bool) -> bool {
         self.broadcast = on && self.active_pane_count() > 1;
+        if !self.broadcast {
+            self.sync_members.clear(); // a fresh sync starts as "all panes"
+        }
         self.broadcast
     }
 
@@ -273,16 +277,32 @@ impl ShellPane {
         self.set_broadcast(!self.broadcast)
     }
 
-    /// Send `bytes` to every pane in the active tab (the broadcast path).
+    /// Send `bytes` to the sync target panes of the active tab: the chosen
+    /// members if any are set, otherwise every pane (the broadcast path).
     pub(crate) fn write_all_panes(&mut self, bytes: &[u8]) {
         let active = self.active;
+        let members = self.sync_members.clone();
         if let Some(t) = self.tabs.get_mut(active) {
             for i in t.leaves() {
+                if !members.is_empty() && !members.contains(&i) {
+                    continue;
+                }
                 if let Some(Node::Leaf { session, .. }) = t.nodes.get_mut(i).and_then(|n| n.as_mut()) {
                     session.write_input(bytes);
                 }
             }
         }
+    }
+
+    /// Toggle whether the active pane is in the sync group. When the group has
+    /// members, only they receive synced input. Returns the new member count.
+    pub(crate) fn toggle_sync_member(&mut self) -> usize {
+        if let Some(id) = self.active_leaf_id() {
+            if !self.sync_members.insert(id) {
+                self.sync_members.remove(&id);
+            }
+        }
+        self.sync_members.len()
     }
 
     pub(crate) fn count(&self) -> usize {
