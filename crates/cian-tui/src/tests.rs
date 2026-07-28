@@ -473,6 +473,7 @@
         });
         let mut app = App::new(p.clone(), p, config).unwrap();
         assert!(app.ai.is_some(), "AI configured");
+        app.ai_ready = Some(true); // the probe is async; treat mock as ready
 
         app.open_ai_chat();
         assert!(matches!(app.popup, Popup::AiChat { .. }), "chat opened (mock is available)");
@@ -873,6 +874,7 @@
             python: "python3".into(), auth_mode: "mock".into(), ..Default::default()
         });
         let mut app = App::new(p.clone(), p, config).unwrap();
+        app.ai_ready = Some(true); // the probe is async; treat mock as ready
         app.active_pane_mut().unwrap().cursor = 1; // readme.txt (index 0 is `..`)
         let _ = render(&mut app, 100, 40);
         app.look_inside(); // open the F3 viewer
@@ -1001,6 +1003,7 @@
             ..Default::default()
         });
         let mut app = App::new(dir.clone(), dir.clone(), config).unwrap();
+        app.ai_ready = Some(true); // the probe is async; treat mock as ready
 
         app.start_ai_commit_message();
         let start = Instant::now();

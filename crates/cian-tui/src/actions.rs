@@ -1674,7 +1674,7 @@ impl App {
         // Rebuild the AI request config too, and re-probe availability, so
         // endpoint/model/api_base_url can be tuned with `:reload` alone.
         self.ai = crate::ai_config_from(&self.config);
-        self.ai_ready = None;
+        self.spawn_ai_probe();
 
         if !problems.is_empty() {
             let mut lines = vec!["reloaded with issues:".to_string(), String::new()];

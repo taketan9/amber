@@ -1547,8 +1547,15 @@ pub struct App {
     /// AI helper config from `cian.ai{...}`; `None` disables every AI feature.
     ai: Option<cian_ai::AiConfig>,
     /// Whether the AI helper actually works (python + packages + sign-in),
-    /// checked lazily on first use and cached. `None` until checked.
+    /// probed once on a background thread at startup and cached. `None` until
+    /// the probe lands (treated as "not ready yet" — the AI menu stays hidden).
     ai_ready: Option<bool>,
+    /// The in-flight AI availability probe (see [`App::spawn_ai_probe`]). Polled
+    /// from the main loop; the check must never block the UI thread — it spawns
+    /// python, which can take seconds on the first run.
+    ai_probe: Option<std::sync::mpsc::Receiver<bool>>,
+    /// When the app started, for the brief "starting up" splash.
+    startup_at: Instant,
     /// A pending AI request running on a worker thread.
     ai_job: Option<AiJob>,
     /// The chat transcript's on-screen body rect, the effective scroll offset,
@@ -1682,6 +1689,8 @@ impl App {
             disk: [None, None],
             ai: ai_config_from(&config),
             ai_ready: None,
+            ai_probe: None,
+            startup_at: Instant::now(),
             ai_job: None,
             ai_rect: Rect::new(0, 0, 0, 0),
             junk_rect: Rect::new(0, 0, 0, 0),
@@ -2992,6 +3001,9 @@ pub fn run(left: Option<PathBuf>, right: Option<PathBuf>, startup: StartupMacro)
     startup_errors.extend(terminal_advice());
 
     let mut app = App::new(left, right, config)?;
+    // Probe AI availability off-thread so the first right-click never blocks on
+    // python starting up.
+    app.spawn_ai_probe();
     // Restore which pane had focus, if a session set it.
     if session.as_ref().map(|s| s.focused_right()).unwrap_or(false) {
         app.focus(FocusedPane::Right);
@@ -3165,6 +3177,14 @@ fn run_loop<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Result<()>
         }
         // Install a finished remote directory listing into the download browser.
         if app.remote_ls.is_some() && app.poll_remote_ls() {
+            needs_redraw = true;
+        }
+        // Install the AI availability probe's result (unblocks the AI menu).
+        if app.ai_probe.is_some() && app.poll_ai_probe() {
+            needs_redraw = true;
+        }
+        // Keep repainting while the startup splash spins.
+        if app.is_starting_up() {
             needs_redraw = true;
         }
         // A finished file/step count shows its report.

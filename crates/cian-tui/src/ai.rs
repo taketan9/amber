@@ -7,17 +7,55 @@
 use super::*;
 
 impl App {
-    /// Is the AI helper configured and working? Checks lazily once (spawning the
-    /// python `--check`) and caches, so a missing helper stays silent and costs
-    /// nothing after the first look.
+    /// Is the AI helper configured and working? Returns the cached result of the
+    /// background probe (see [`Self::spawn_ai_probe`]); `false` until the probe
+    /// lands, so this NEVER blocks — the python `--check` can take seconds and
+    /// must not freeze the UI (e.g. when building the right-click menu).
     pub(crate) fn ai_ready(&mut self) -> bool {
-        let Some(cfg) = self.ai.clone() else { return false };
-        if let Some(ready) = self.ai_ready {
-            return ready;
+        if self.ai.is_none() {
+            return false;
         }
-        let ready = cian_ai::available(&cfg);
-        self.ai_ready = Some(ready);
-        ready
+        self.ai_ready.unwrap_or(false)
+    }
+
+    /// Kick off the AI availability check on a worker thread. Called at startup
+    /// and after `:reload`; the result is installed by [`Self::poll_ai_probe`].
+    pub(crate) fn spawn_ai_probe(&mut self) {
+        self.ai_ready = None;
+        self.ai_probe = None;
+        let Some(cfg) = self.ai.clone() else { return };
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(cian_ai::available(&cfg));
+        });
+        self.ai_probe = Some(rx);
+    }
+
+    /// Install the AI probe's result once it lands. Returns true if it changed.
+    pub(crate) fn poll_ai_probe(&mut self) -> bool {
+        let Some(rx) = &self.ai_probe else { return false };
+        match rx.try_recv() {
+            Ok(ready) => {
+                self.ai_ready = Some(ready);
+                self.ai_probe = None;
+                true
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => false,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                self.ai_ready = Some(false);
+                self.ai_probe = None;
+                true
+            }
+        }
+    }
+
+    /// True during the brief startup window — while the AI probe is still
+    /// running, or for a short minimum — so a "starting up" splash can show.
+    /// Capped so it can never linger.
+    pub(crate) fn is_starting_up(&self) -> bool {
+        let e = self.startup_at.elapsed();
+        e < std::time::Duration::from_secs(6)
+            && (self.ai_probe.is_some() || e < std::time::Duration::from_millis(1200))
     }
 
     pub(crate) fn open_ai_chat(&mut self) {

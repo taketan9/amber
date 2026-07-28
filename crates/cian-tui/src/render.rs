@@ -331,6 +331,42 @@ pub(crate) fn draw(f: &mut Frame, app: &mut App) {
     } else {
         app.popup_zones.clear();
     }
+
+    // A brief "starting up" splash while the AI probe runs — non-blocking (it
+    // never intercepts input, and yields the moment a popup opens), just so the
+    // first couple of seconds don't feel dead.
+    if matches!(app.popup, Popup::None) && app.is_starting_up() {
+        draw_startup_splash(f, area, app.startup_at.elapsed().as_millis());
+    }
+}
+
+/// A centered, animated "starting up" card. Drawn over the UI; purely cosmetic.
+fn draw_startup_splash(f: &mut Frame, area: Rect, elapsed_ms: u128) {
+    const SPIN: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+    let frame = SPIN[((elapsed_ms / 90) % SPIN.len() as u128) as usize];
+    let w = 34u16.min(area.width);
+    let h = 5u16.min(area.height);
+    let rect = centered_rect(w, h, area);
+    f.render_widget(Clear, rect);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(border_type())
+        .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
+        .style(Style::default().bg(theme().popup_bg));
+    let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
+    f.render_widget(block, rect);
+    let lines = vec![
+        Line::from(vec![
+            Span::styled(format!("{}  ", frame), Style::default().fg(theme().accent).add_modifier(Modifier::BOLD)),
+            Span::styled("cian", Style::default().fg(theme().accent).add_modifier(Modifier::BOLD)),
+            Span::styled("  starting up…", Style::default().fg(Color::Rgb(180, 180, 200))),
+        ]),
+        Line::from(Span::styled(
+            "  checking AI helper (crmaine)…",
+            Style::default().fg(Color::Rgb(140, 140, 165)).add_modifier(Modifier::ITALIC),
+        )),
+    ];
+    f.render_widget(Paragraph::new(lines).alignment(Alignment::Center), inner);
 }
 
 /// The viewer's text body rect, mirroring its renderer's geometry so a mouse
