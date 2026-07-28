@@ -4432,6 +4432,14 @@
     }
 
     #[test]
+    fn menu_label_splits_name_and_hint() {
+        use crate::render::menu_label_parts;
+        assert_eq!(menu_label_parts("Bulk rename…  (:brename)"), ("Bulk rename…", "(:brename)"));
+        assert_eq!(menu_label_parts("Copy"), ("Copy", ""));
+        assert_eq!(menu_label_parts("Ⓒ crmaine - Ajent ▸"), ("Ⓒ crmaine - Ajent ▸", ""));
+    }
+
+    #[test]
     fn chmod_field_parses_octal() {
         use crate::parse_chmod;
         assert_eq!(parse_chmod("777"), (Some(0o777), None));

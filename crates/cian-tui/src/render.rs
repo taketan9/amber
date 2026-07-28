@@ -383,10 +383,47 @@ fn viewer_body_rect(area: Rect) -> Rect {
 /// The rect the context menu occupies, from its anchor and item count. Shared
 /// by the renderer and the mouse handler so a click lands where the row is
 /// drawn.
+/// Split a menu label into (name, hint), where the hint is a trailing
+/// `(…)`-style key/command annotation preceded by two spaces (e.g.
+/// `"Bulk rename…  (:brename)"` → `("Bulk rename…", "(:brename)")`). No hint
+/// yields an empty second element.
+pub(crate) fn menu_label_parts(label: &str) -> (&str, &str) {
+    if label.ends_with(')') {
+        if let Some(pos) = label.rfind("  (") {
+            return (label[..pos].trim_end(), &label[pos + 2..]);
+        }
+    }
+    (label, "")
+}
+
+/// The widest name and widest hint across a menu's items — so names left-align
+/// and hints right-align in a common column.
+fn menu_dims(items: &[MenuItem], lang: Lang) -> (usize, usize) {
+    let mut name_w = 0;
+    let mut hint_w = 0;
+    for i in items {
+        let (n, h) = menu_label_parts(i.label(lang));
+        name_w = name_w.max(width(n));
+        hint_w = hint_w.max(width(h));
+    }
+    (name_w.max(6), hint_w)
+}
+
+/// Right-align `s` within `w` cells (pad on the left).
+fn pad_left(s: &str, w: usize) -> String {
+    let sw = width(s);
+    if sw >= w {
+        s.to_string()
+    } else {
+        format!("{}{}", " ".repeat(w - sw), s)
+    }
+}
+
 fn context_menu_rect(items: &[MenuItem], at: (u16, u16), area: Rect, lang: Lang) -> Rect {
-    // +6 = a 2-cell gutter on each side of the label (matching the "▸ " marker
-    // on the left) plus the two borders, so the rows sit evenly inside the box.
-    let w = items.iter().map(|i| width(i.label(lang))).max().unwrap_or(10) as u16 + 6;
+    // marker(2) + name + gap(2, if any hint) + hint + right gutter(2) + borders(2).
+    let (name_w, hint_w) = menu_dims(items, lang);
+    let hint_col = if hint_w > 0 { hint_w + 2 } else { 0 };
+    let w = (2 + name_w + hint_col + 2 + 2) as u16;
     let h = items.len() as u16 + 2;
     let x = at.0.min(area.width.saturating_sub(w));
     let y = at.1.min(area.height.saturating_sub(h));
@@ -2207,7 +2244,7 @@ fn draw_popup(
         // The context menu follows `menu_lang` (which may differ from the rest
         // of the UI) so it can be pinned to Japanese on an English interface.
         let lang = menu_lang;
-        let maxlabel = items.iter().map(|i| width(i.label(lang))).max().unwrap_or(10);
+        let (name_w, hint_w) = menu_dims(items, lang);
         let rect = context_menu_rect(items, *at, area, lang);
 
         f.render_widget(Clear, rect);
@@ -2229,12 +2266,16 @@ fn draw_popup(
                 } else {
                     Style::default().fg(Color::Rgb(210, 210, 225))
                 };
-                // Left marker ("▸ " selected, "  " otherwise) and a matching
-                // 2-cell blank gutter on the right, so both sides are even.
-                Line::from(Span::styled(
-                    format!("{}{}  ", if sel { "▸ " } else { "  " }, pad_to(item.label(lang), maxlabel)),
-                    style,
-                ))
+                // "▸ name … (hint)": name left-aligned, hint right-aligned in a
+                // shared column, with even 2-cell gutters on both sides.
+                let (name, hint) = menu_label_parts(item.label(lang));
+                let marker = if sel { "▸ " } else { "  " };
+                let body = if hint_w > 0 {
+                    format!("{}{}  {}  ", marker, pad_to(name, name_w), pad_left(hint, hint_w))
+                } else {
+                    format!("{}{}  ", marker, pad_to(name, name_w))
+                };
+                Line::from(Span::styled(body, style))
             })
             .collect();
         f.render_widget(Paragraph::new(rows), inner);
