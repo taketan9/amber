@@ -1844,6 +1844,39 @@
     }
 
     #[test]
+    fn pane_theme_override_is_scoped_and_clearable() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        let app_theme = crate::theme::theme();
+        // Right pane (side 1) gallery: preview leaves the global app theme alone.
+        app.start_pane_theme_picker(1);
+        app.handle_key(code(KeyCode::Char('j'))).unwrap();
+        assert_eq!(crate::theme::theme(), app_theme, "pane preview must not touch the global");
+        assert!(app.pane_theme[1].is_some(), "the right pane gained an override");
+        assert!(app.pane_theme[0].is_none(), "the left pane is untouched");
+        // Keep it.
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+        let kept = app.pane_theme[1].clone();
+        assert!(kept.is_some());
+        // Reopen and clear with `x` → follows the app again.
+        app.start_pane_theme_picker(1);
+        app.handle_key(code(KeyCode::Char('x'))).unwrap();
+        assert!(app.pane_theme[1].is_none(), "x clears the override");
+        assert!(matches!(app.popup, Popup::None));
+    }
+
+    #[test]
+    fn pane_theme_picker_esc_restores_previous_override() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        app.pane_theme[0] = Some("nord".to_string());
+        app.start_pane_theme_picker(0);
+        app.handle_key(code(KeyCode::Char('j'))).unwrap();
+        app.handle_key(code(KeyCode::Char('j'))).unwrap();
+        // Cancel → the pane's prior override comes back.
+        app.handle_key(code(KeyCode::Esc)).unwrap();
+        assert_eq!(app.pane_theme[0].as_deref(), Some("nord"));
+    }
+
+    #[test]
     fn theme_set_by_name_sticks() {
         let (_d, mut app) = app_with(&["a.txt"]);
         app.set_theme_by_name("dracula");

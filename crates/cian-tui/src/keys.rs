@@ -471,6 +471,8 @@ impl App {
                 KeyCode::Enter | KeyCode::Char('l') => self.theme_picker_commit(),
                 KeyCode::Char('j') | KeyCode::Down => self.theme_picker_move(1),
                 KeyCode::Char('k') | KeyCode::Up => self.theme_picker_move(-1),
+                // Pane-scoped only: drop the override, follow the app theme.
+                KeyCode::Char('x') => self.theme_picker_clear_pane(),
                 _ => {}
             }
             return Ok(());

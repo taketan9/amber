@@ -183,6 +183,7 @@ impl App {
             MenuItem::ViewMenu => Some(vec![
                 MenuItem::HiddenToggle,
                 MenuItem::ThemePick,
+                MenuItem::ThemePickPane,
                 MenuItem::Lang,
                 MenuItem::Back,
             ]),
@@ -402,6 +403,10 @@ impl App {
             MenuItem::Snippets => self.start_snippets(),
             MenuItem::Macros => self.start_macros(),
             MenuItem::ThemePick => self.start_theme_picker(),
+            MenuItem::ThemePickPane => {
+                let side = matches!(self.focused, FocusedPane::Right) as usize;
+                self.start_pane_theme_picker(side);
+            }
             MenuItem::Shortcuts => self.start_shortcuts(),
             MenuItem::Lang => {
                 // Flip the interface language; every localized string reads

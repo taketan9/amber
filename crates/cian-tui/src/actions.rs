@@ -1695,47 +1695,90 @@ impl App {
 
     // ------- Theme gallery (#8) -------
 
-    /// Open the theme gallery (`:theme` with no argument, or the menu). The
-    /// cursor starts on the active theme; moving it previews each preset live.
+    /// Open the whole-app theme gallery (`:theme` with no argument, or the menu).
+    /// The cursor starts on the active theme; moving it previews each preset live.
     pub(crate) fn start_theme_picker(&mut self) {
         let current = theme();
         let cursor = theme_name_of(&current)
             .and_then(|n| THEME_NAMES.iter().position(|&m| m == n))
             .unwrap_or(0);
-        self.popup = Popup::ThemePicker { cursor, revert: current };
+        self.popup = Popup::ThemePicker { cursor, scope: ThemeScope::App { revert: current } };
     }
 
-    /// Move the gallery cursor by `delta` (wrapping) and preview that preset.
+    /// Open the gallery targeting a single file pane (0 = left, 1 = right). The
+    /// preview recolors just that pane; the rest of the app keeps its theme.
+    pub(crate) fn start_pane_theme_picker(&mut self, side: usize) {
+        let revert = self.pane_theme[side].clone();
+        let cursor = revert
+            .as_deref()
+            .and_then(|n| THEME_NAMES.iter().position(|&m| m == n))
+            .unwrap_or(0);
+        self.popup = Popup::ThemePicker { cursor, scope: ThemeScope::Pane { side, revert } };
+    }
+
+    /// Move the gallery cursor by `delta` (wrapping) and preview that preset,
+    /// applying it to whichever target the gallery drives.
     pub(crate) fn theme_picker_move(&mut self, delta: isize) {
-        if let Popup::ThemePicker { cursor, .. } = &mut self.popup {
+        if let Popup::ThemePicker { cursor, scope } = &mut self.popup {
             let n = THEME_NAMES.len() as isize;
             let c = (*cursor as isize + delta).rem_euclid(n) as usize;
             *cursor = c;
-            if let Some(t) = theme_preset(THEME_NAMES[c]) {
-                set_theme(t);
+            let name = THEME_NAMES[c];
+            match scope {
+                ThemeScope::App { .. } => {
+                    if let Some(t) = theme_preset(name) {
+                        set_theme(t);
+                    }
+                }
+                ThemeScope::Pane { side, .. } => self.pane_theme[*side] = Some(name.to_string()),
             }
         }
     }
 
     /// Keep the previewed theme and close the gallery.
     pub(crate) fn theme_picker_commit(&mut self) {
-        if let Popup::ThemePicker { cursor, .. } = &self.popup {
+        if let Popup::ThemePicker { cursor, scope } = &self.popup {
             let name = THEME_NAMES[*cursor];
-            if let Some(t) = theme_preset(name) {
-                set_theme(t);
+            match scope {
+                ThemeScope::App { .. } => {
+                    if let Some(t) = theme_preset(name) {
+                        set_theme(t);
+                    }
+                    self.theme_name = name.to_string();
+                    self.message = Some(format!("theme: {name}"));
+                }
+                ThemeScope::Pane { side, .. } => {
+                    let s = *side;
+                    self.pane_theme[s] = Some(name.to_string());
+                    let which = if s == 0 { "left" } else { "right" };
+                    self.message = Some(format!("{which} pane theme: {name}"));
+                }
             }
-            self.theme_name = name.to_string();
-            self.message = Some(format!("theme: {name}"));
         }
         self.popup = Popup::None;
     }
 
-    /// Cancel the gallery: restore the palette we had when it opened.
+    /// Cancel the gallery: restore whatever the target had when it opened.
     pub(crate) fn theme_picker_cancel(&mut self) {
-        if let Popup::ThemePicker { revert, .. } = &self.popup {
-            set_theme(*revert);
+        if let Popup::ThemePicker { scope, .. } = &self.popup {
+            match scope {
+                ThemeScope::App { revert } => set_theme(*revert),
+                ThemeScope::Pane { side, revert } => self.pane_theme[*side] = revert.clone(),
+            }
         }
         self.popup = Popup::None;
+    }
+
+    /// Clear a pane's theme override so it follows the app theme again (the `x`
+    /// key in a pane-scoped gallery). A no-op for the app-scoped gallery.
+    pub(crate) fn theme_picker_clear_pane(&mut self) {
+        if let Popup::ThemePicker { scope: ThemeScope::Pane { side, .. }, .. } = &self.popup {
+            let s = *side;
+            self.pane_theme[s] = None;
+            let which = if s == 0 { "left" } else { "right" };
+            self.message = Some(format!("{which} pane follows the app theme"));
+            self.popup = Popup::None;
+        }
     }
 
     /// `:theme <name>` — switch directly, no gallery.

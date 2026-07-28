@@ -406,9 +406,9 @@ enum Popup {
     /// Desktop, or a typed path. `files` are the chosen remote file paths.
     LocalDest { files: Vec<String>, cursor: usize },
     /// The theme gallery (#8): each preset previews live as the cursor moves;
-    /// Enter keeps it, Esc restores `revert` (the palette on entry, which may be
-    /// a custom config that no preset name matches).
-    ThemePicker { cursor: usize, revert: ResolvedTheme },
+    /// Enter keeps it, Esc restores what was active on entry. `scope` says
+    /// whether it drives the whole app or just one file pane.
+    ThemePicker { cursor: usize, scope: ThemeScope },
     /// The command-snippet launcher: pick one to send to the active shell.
     /// Items come from `config.snippets`, filtered by `filter`.
     Snippets { cursor: usize, filter: String },
@@ -466,6 +466,17 @@ enum Popup {
 pub(crate) enum BrowsePurpose {
     Download,
     Upload,
+}
+
+/// What a [`Popup::ThemePicker`] drives (#8): the whole application, or one file
+/// pane. Each carries what to restore if the gallery is cancelled.
+#[derive(Clone, Debug)]
+pub(crate) enum ThemeScope {
+    /// Whole-app theme; `revert` is the palette that was active on entry.
+    App { revert: ResolvedTheme },
+    /// One file pane's override; `side` is 0 = left, 1 = right, and `revert` is
+    /// the pane's previous override name (`None` = it was following the app).
+    Pane { side: usize, revert: Option<String> },
 }
 
 /// One file in a duplicate group. `group` is its 0-based group index (files in
@@ -568,8 +579,10 @@ enum MenuItem {
     Delete,
     Rename,
     Background,
-    /// Open the theme gallery (#8).
+    /// Open the theme gallery (#8) for the whole app.
     ThemePick,
+    /// Open the theme gallery for just the active file pane (#8).
+    ThemePickPane,
     HiddenToggle,
     Attributes,
     Hash,
@@ -729,7 +742,8 @@ impl MenuItem {
             MenuItem::Delete => tr(lang, "Delete → trash  (d)", "削除 → ゴミ箱  (d)"),
             MenuItem::Rename => tr(lang, "Rename  (r)", "リネーム  (r)"),
             MenuItem::Background => tr(lang, "Background color", "背景色"),
-            MenuItem::ThemePick => tr(lang, "Theme…  (:theme)", "テーマ…  (:theme)"),
+            MenuItem::ThemePick => tr(lang, "Theme (whole app)…  (:theme)", "テーマ（全体）…  (:theme)"),
+            MenuItem::ThemePickPane => tr(lang, "Theme (this pane)…", "テーマ（このペイン）…"),
             MenuItem::HiddenToggle => tr(lang, "Show / hide dotfiles  (:hidden)", "ドットファイルの表示切替  (:hidden)"),
             MenuItem::Attributes => tr(lang, "Attributes  (:attr)", "属性  (:attr)"),
             MenuItem::Hash => tr(lang, "Checksum  (:hash)", "チェックサム  (:hash)"),
@@ -1611,6 +1625,9 @@ pub struct App {
     /// Per-pane background overrides, indexed by [`Self::bg_slot`].
     /// Session-only: deliberately not persisted.
     pane_bg: [Option<Color>; 2],
+    /// Per-pane theme override (#8) by preset name, indexed [left, right]. `None`
+    /// follows the whole-app theme. Session-only.
+    pane_theme: [Option<String>; 2],
     last_search_query: Option<String>,
     pub shortcuts: ShortcutStore,
     /// User-defined macros loaded from `macro.lua` (portable-aware).
@@ -1743,6 +1760,7 @@ impl App {
             diff_job: None,
             last_watch: Instant::now(),
             pane_bg: [None, None],
+            pane_theme: [None, None],
             last_search_query: None,
             shortcuts: ShortcutStore::load_or_default(),
             macros,
