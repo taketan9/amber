@@ -822,9 +822,12 @@ By default a pane splits off the previous one, which cascades. To build a real
 `zoom = true` to maximize the shell panel first and `sync = true` to synchronize
 input once it's built. A 2×2 of servers is
 [`examples/macro/Cgrid4.lua`](examples/macro/Cgrid4.lua): pane 1 top-left, pane 2
-= `from 1` right, pane 3 = `from 1` down, pane 4 = `from 2` down. A pane's `bg`
-also accepts a background-preset name (`"navy"`, `"crmaine"`, …), not just a
-colour spec.
+= `from 1` right, pane 3 = `from 1` down, pane 4 = `from 2` down — each one
+**`ssh`-ing in and logging in with a password** via an `expect` / `send` pair
+(`sync` off there, so the four are driven independently). A pane's `bg` also
+accepts a background-preset name (`"navy"`, `"crmaine"`, …), not just a colour
+spec. The password sits in the macro file in plain text — the same opt-in
+trade-off as an SSH password in init.lua.
 
 **One macro per file.** As an alternative to the single list, put a `macro/`
 directory next to `init.lua` with one file each — `macro/Adeploy.lua`,

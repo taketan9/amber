@@ -224,6 +224,31 @@ mod tests {
     }
 
     #[test]
+    fn shipped_grid_macro_parses() {
+        // The 2×2 SSH-login example must always load: 4 panes, sync off, each
+        // logging in with an expect/send pair.
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../examples/macro/Cgrid4.lua");
+        if !path.exists() {
+            eprintln!("example macro not found; skipping");
+            return;
+        }
+        let src = std::fs::read_to_string(&path).unwrap();
+        let ms = parse(&src).expect("Cgrid4.lua parses");
+        let m = &ms[0];
+        assert_eq!(m.panes.len(), 4, "four panes");
+        assert!(!m.sync, "sync is off");
+        assert!(m.zoom, "zoom is on");
+        assert_eq!(m.panes[0].from, None, "pane 1 is the current shell");
+        assert_eq!(m.panes[3].from, Some(2), "pane 4 splits off pane 2");
+        for p in &m.panes {
+            assert_eq!(p.cmd.as_deref(), Some("ssh A@ABCserver"));
+            assert!(matches!(p.steps.first(), Some(Step::Expect { .. })), "waits for the prompt");
+            assert!(matches!(p.steps.last(), Some(Step::Send(_))), "sends the password");
+        }
+    }
+
+    #[test]
     fn steps_can_wait_and_expect() {
         let src = r#"return { { name = "login", panes = { {
             cmd = "ssh admin@db",
