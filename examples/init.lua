@@ -17,6 +17,8 @@
 --  cian collects them and shows a notice on startup instead of refusing to run.
 --
 --  See the full key list any time with `?` in the app, `:man`, or `cian -man`.
+--
+--  日本語版はこのファイルの日本語訳 examples/init.ja.lua にあります。
 -- ============================================================================
 
 
