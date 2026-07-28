@@ -106,6 +106,13 @@ impl App {
             }
             "aierror" | "explain" | "crmaineerror" => self.explain_shell_error(),
             "dupes" | "dup" | "duplicates" => self.start_dupes(),
+            "theme" | "colorscheme" | "colourscheme" => {
+                if rest.is_empty() {
+                    self.start_theme_picker();
+                } else {
+                    self.set_theme_by_name(rest);
+                }
+            }
             "reload" | "source" => self.reload_config(),
             "where" | "config" | "paths" => self.show_config_paths(),
             // Mark / unmark entries whose name matches a glob (`:mark *.rs`).

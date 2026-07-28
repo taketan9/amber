@@ -2,7 +2,7 @@
 //! remappable `Action` enum — resolved from init.lua and installed into
 //! process-wide statics at startup. Split out of lib.rs.
 
-use std::sync::OnceLock;
+use std::sync::{OnceLock, RwLock};
 
 use ratatui::style::Color;
 use ratatui::widgets::BorderType;
@@ -47,84 +47,216 @@ pub(crate) struct FilePalette {
 
 impl Default for ResolvedTheme {
     fn default() -> Self {
-        Self {
-            accent: Color::Cyan, // cian-blue, kept consistent across the app
-            status_bg: Color::Rgb(40, 40, 55),
-            selected_bg: Color::Rgb(60, 60, 90),
-            visual_bg: Color::Rgb(80, 60, 30),
-            mark_fg: Color::Yellow,
-            base_bg: None,
-            dim: Color::Rgb(130, 130, 155),
-            border: Color::DarkGray,
-            popup_bg: Color::Rgb(24, 24, 34),
-            file: FilePalette {
-                directory: Color::Rgb(96, 165, 250),
-                code: Color::Rgb(250, 204, 21),
-                config: Color::Rgb(148, 190, 210),
-                document: Color::Rgb(226, 226, 236),
-                image: Color::Rgb(216, 130, 220),
-                media: Color::Rgb(120, 200, 190),
-                archive: Color::Rgb(240, 130, 120),
-                executable: Color::Rgb(126, 217, 130),
-                muted: Color::Rgb(128, 128, 148),
-                plain: Color::Rgb(205, 205, 218),
-            },
-        }
+        Self::DARK
+    }
+}
+
+/// `0xRRGGBB` → a ratatui truecolor. `const` so whole palettes are compile-time
+/// constants.
+const fn rgb(v: u32) -> Color {
+    Color::Rgb((v >> 16) as u8, (v >> 8) as u8, v as u8)
+}
+
+/// A compact palette spec: the handful of colors a well-known theme actually
+/// defines, from which [`from_spec`] derives every [`ResolvedTheme`] slot. Named
+/// after the ANSI-ish roles most palettes publish, so a theme reads at a glance.
+struct Spec {
+    bg: u32,
+    fg: u32,
+    dim: u32,
+    border: u32,
+    accent: u32,
+    sel: u32,
+    visual: u32,
+    mark: u32,
+    /// Dialogs/menus keep dark surfaces (their body text is light), so light
+    /// themes still pass this a dark color.
+    popup: u32,
+    status: u32,
+    // File-type accents.
+    blue: u32,
+    yellow: u32,
+    cyan: u32,
+    magenta: u32,
+    red: u32,
+    green: u32,
+    doc: u32,
+}
+
+/// Expand a [`Spec`] into the full resolved palette. `const` so every preset is
+/// a `const ResolvedTheme`.
+const fn from_spec(s: Spec) -> ResolvedTheme {
+    ResolvedTheme {
+        accent: rgb(s.accent),
+        status_bg: rgb(s.status),
+        selected_bg: rgb(s.sel),
+        visual_bg: rgb(s.visual),
+        mark_fg: rgb(s.mark),
+        base_bg: Some(rgb(s.bg)),
+        dim: rgb(s.dim),
+        border: rgb(s.border),
+        popup_bg: rgb(s.popup),
+        file: FilePalette {
+            directory: rgb(s.blue),
+            code: rgb(s.yellow),
+            config: rgb(s.cyan),
+            document: rgb(s.doc),
+            image: rgb(s.magenta),
+            media: rgb(s.cyan),
+            archive: rgb(s.red),
+            executable: rgb(s.green),
+            muted: rgb(s.dim),
+            plain: rgb(s.fg),
+        },
     }
 }
 
 impl ResolvedTheme {
-    /// Ethan Schoonover's Solarized Light. The eight accents are unchanged from
-    /// the palette (they are tuned to read on the light *and* dark bases); the
-    /// neutrals map to base00/base1 for text and base2 for surfaces.
-    fn solarized_light() -> Self {
-        let base00 = Color::Rgb(0x65, 0x7b, 0x83); // body text
-        let base01 = Color::Rgb(0x58, 0x6e, 0x75); // emphasized text
-        let base1 = Color::Rgb(0x93, 0xa1, 0xa1); // comments / secondary
-        let base2 = Color::Rgb(0xee, 0xe8, 0xd5); // highlighted surface
-        let base3 = Color::Rgb(0xfd, 0xf6, 0xe3); // background
-        let blue = Color::Rgb(0x26, 0x8b, 0xd2);
-        let yellow = Color::Rgb(0xb5, 0x89, 0x00);
-        let orange = Color::Rgb(0xcb, 0x4b, 0x16);
-        let red = Color::Rgb(0xdc, 0x32, 0x2f);
-        let magenta = Color::Rgb(0xd3, 0x36, 0x82);
-        let cyan = Color::Rgb(0x2a, 0xa1, 0x98);
-        let green = Color::Rgb(0x85, 0x99, 0x00);
-        Self {
-            accent: blue,
-            status_bg: base2,
-            selected_bg: Color::Rgb(0xdc, 0xd5, 0xbe), // a touch darker than base2
-            visual_bg: Color::Rgb(0xf7, 0xe4, 0xb0), // warm highlight
-            mark_fg: orange,
-            base_bg: Some(base3),
-            dim: base1,
-            border: base1,
-            // Menus and dialogs stay on Solarized's dark base (base02): a dark
-            // panel over the light surface, so their existing light text reads
-            // without recoloring every popup.
-            popup_bg: Color::Rgb(0x07, 0x36, 0x42),
-            file: FilePalette {
-                directory: blue,
-                code: yellow,
-                config: cyan,
-                document: base01,
-                image: magenta,
-                media: cyan,
-                archive: red,
-                executable: green,
-                muted: base1,
-                plain: base00,
-            },
-        }
-    }
+    /// The original built-in dark theme. Unlike the named presets it leaves
+    /// `base_bg` as `None`, so the terminal's own background shows through.
+    pub(crate) const DARK: ResolvedTheme = ResolvedTheme {
+        accent: Color::Cyan, // cian-blue, kept consistent across the app
+        status_bg: rgb(0x282837),
+        selected_bg: rgb(0x3c3c5a),
+        visual_bg: rgb(0x503c1e),
+        mark_fg: Color::Yellow,
+        base_bg: None,
+        dim: rgb(0x82829b),
+        border: Color::DarkGray,
+        popup_bg: rgb(0x181822),
+        file: FilePalette {
+            directory: rgb(0x60a5fa),
+            code: rgb(0xfacc15),
+            config: rgb(0x94bed2),
+            document: rgb(0xe2e2ec),
+            image: rgb(0xd882dc),
+            media: rgb(0x78c8be),
+            archive: rgb(0xf08278),
+            executable: rgb(0x7ed982),
+            muted: rgb(0x808094),
+            plain: rgb(0xcdcdda),
+        },
+    };
+
+    // Ethan Schoonover's Solarized, light and dark. Popups stay on Solarized's
+    // dark base02 so their light body text reads over the light surface.
+    pub(crate) const SOLARIZED_LIGHT: ResolvedTheme = from_spec(Spec {
+        bg: 0xfdf6e3, fg: 0x657b83, dim: 0x93a1a1, border: 0x93a1a1,
+        accent: 0x268bd2, sel: 0xdcd5be, visual: 0xf7e4b0, mark: 0xcb4b16,
+        popup: 0x073642, status: 0xeee8d5,
+        blue: 0x268bd2, yellow: 0xb58900, cyan: 0x2aa198, magenta: 0xd33682,
+        red: 0xdc322f, green: 0x859900, doc: 0x586e75,
+    });
+    pub(crate) const SOLARIZED_DARK: ResolvedTheme = from_spec(Spec {
+        bg: 0x002b36, fg: 0x839496, dim: 0x586e75, border: 0x586e75,
+        accent: 0x268bd2, sel: 0x073642, visual: 0x0a4a5a, mark: 0xcb4b16,
+        popup: 0x073642, status: 0x073642,
+        blue: 0x268bd2, yellow: 0xb58900, cyan: 0x2aa198, magenta: 0xd33682,
+        red: 0xdc322f, green: 0x859900, doc: 0x93a1a1,
+    });
+    pub(crate) const DRACULA: ResolvedTheme = from_spec(Spec {
+        bg: 0x282a36, fg: 0xf8f8f2, dim: 0x6272a4, border: 0x6272a4,
+        accent: 0xbd93f9, sel: 0x44475a, visual: 0x424458, mark: 0xffb86c,
+        popup: 0x21222c, status: 0x191a21,
+        blue: 0xbd93f9, yellow: 0xf1fa8c, cyan: 0x8be9fd, magenta: 0xff79c6,
+        red: 0xff5555, green: 0x50fa7b, doc: 0xf8f8f2,
+    });
+    pub(crate) const NORD: ResolvedTheme = from_spec(Spec {
+        bg: 0x2e3440, fg: 0xd8dee9, dim: 0x4c566a, border: 0x4c566a,
+        accent: 0x88c0d0, sel: 0x3b4252, visual: 0x434c5e, mark: 0xebcb8b,
+        popup: 0x272c36, status: 0x3b4252,
+        blue: 0x81a1c1, yellow: 0xebcb8b, cyan: 0x88c0d0, magenta: 0xb48ead,
+        red: 0xbf616a, green: 0xa3be8c, doc: 0xe5e9f0,
+    });
+    pub(crate) const GRUVBOX_DARK: ResolvedTheme = from_spec(Spec {
+        bg: 0x282828, fg: 0xebdbb2, dim: 0x928374, border: 0x504945,
+        accent: 0xfe8019, sel: 0x3c3836, visual: 0x504945, mark: 0xfabd2f,
+        popup: 0x1d2021, status: 0x3c3836,
+        blue: 0x83a598, yellow: 0xfabd2f, cyan: 0x8ec07c, magenta: 0xd3869b,
+        red: 0xfb4934, green: 0xb8bb26, doc: 0xebdbb2,
+    });
+    pub(crate) const GRUVBOX_LIGHT: ResolvedTheme = from_spec(Spec {
+        bg: 0xfbf1c7, fg: 0x3c3836, dim: 0x7c6f64, border: 0xd5c4a1,
+        accent: 0xaf3a03, sel: 0xebdbb2, visual: 0xd5c4a1, mark: 0xb57614,
+        popup: 0x282828, status: 0xebdbb2,
+        blue: 0x076678, yellow: 0xb57614, cyan: 0x427b58, magenta: 0x8f3f71,
+        red: 0x9d0006, green: 0x79740e, doc: 0x3c3836,
+    });
+    pub(crate) const TOKYO_NIGHT: ResolvedTheme = from_spec(Spec {
+        bg: 0x1a1b26, fg: 0xc0caf5, dim: 0x565f89, border: 0x292e42,
+        accent: 0x7aa2f7, sel: 0x292e42, visual: 0x33467c, mark: 0xe0af68,
+        popup: 0x16161e, status: 0x16161e,
+        blue: 0x7aa2f7, yellow: 0xe0af68, cyan: 0x7dcfff, magenta: 0xbb9af7,
+        red: 0xf7768e, green: 0x9ece6a, doc: 0xc0caf5,
+    });
+    pub(crate) const CATPPUCCIN_MOCHA: ResolvedTheme = from_spec(Spec {
+        bg: 0x1e1e2e, fg: 0xcdd6f4, dim: 0x6c7086, border: 0x313244,
+        accent: 0x89b4fa, sel: 0x313244, visual: 0x45475a, mark: 0xf9e2af,
+        popup: 0x181825, status: 0x181825,
+        blue: 0x89b4fa, yellow: 0xf9e2af, cyan: 0x94e2d5, magenta: 0xf5c2e7,
+        red: 0xf38ba8, green: 0xa6e3a1, doc: 0xcdd6f4,
+    });
+    pub(crate) const CATPPUCCIN_LATTE: ResolvedTheme = from_spec(Spec {
+        bg: 0xeff1f5, fg: 0x4c4f69, dim: 0x6c6f85, border: 0xccd0da,
+        accent: 0x1e66f5, sel: 0xccd0da, visual: 0xdce0e8, mark: 0xdf8e1d,
+        popup: 0x1e1e2e, status: 0xccd0da,
+        blue: 0x1e66f5, yellow: 0xdf8e1d, cyan: 0x179299, magenta: 0xea76cb,
+        red: 0xd20f39, green: 0x40a02b, doc: 0x4c4f69,
+    });
+    pub(crate) const MONOKAI: ResolvedTheme = from_spec(Spec {
+        bg: 0x272822, fg: 0xf8f8f2, dim: 0x75715e, border: 0x3e3d32,
+        accent: 0x66d9ef, sel: 0x3e3d32, visual: 0x49483e, mark: 0xfd971f,
+        popup: 0x1e1f1c, status: 0x3e3d32,
+        blue: 0x66d9ef, yellow: 0xe6db74, cyan: 0x66d9ef, magenta: 0xae81ff,
+        red: 0xf92672, green: 0xa6e22e, doc: 0xf8f8f2,
+    });
+    pub(crate) const ONE_DARK: ResolvedTheme = from_spec(Spec {
+        bg: 0x282c34, fg: 0xabb2bf, dim: 0x5c6370, border: 0x3b4048,
+        accent: 0x61afef, sel: 0x3b4048, visual: 0x3e4451, mark: 0xe5c07b,
+        popup: 0x21252b, status: 0x21252b,
+        blue: 0x61afef, yellow: 0xe5c07b, cyan: 0x56b6c2, magenta: 0xc678dd,
+        red: 0xe06c75, green: 0x98c379, doc: 0xabb2bf,
+    });
+    pub(crate) const GITHUB_LIGHT: ResolvedTheme = from_spec(Spec {
+        bg: 0xffffff, fg: 0x24292e, dim: 0x6a737d, border: 0xd1d5da,
+        accent: 0x0366d6, sel: 0xeef2f5, visual: 0xdbe9ff, mark: 0xe36209,
+        popup: 0x24292e, status: 0xf6f8fa,
+        blue: 0x0366d6, yellow: 0xb08800, cyan: 0x1b7c83, magenta: 0x6f42c1,
+        red: 0xd73a49, green: 0x22863a, doc: 0x24292e,
+    });
 }
 
-/// Process-wide resolved theme. Set once at startup from the Lua config so the
-/// stateless draw helpers can read it without threading it through every call.
-static THEME: OnceLock<ResolvedTheme> = OnceLock::new();
+/// The named presets, in gallery order. `default` is the transparent-background
+/// built-in; the rest paint their own surface.
+pub(crate) const THEME_NAMES: &[&str] = &[
+    "default",
+    "solarized-light",
+    "solarized-dark",
+    "dracula",
+    "nord",
+    "gruvbox-dark",
+    "gruvbox-light",
+    "tokyo-night",
+    "catppuccin-mocha",
+    "catppuccin-latte",
+    "monokai",
+    "one-dark",
+    "github-light",
+];
 
-pub(crate) fn theme() -> &'static ResolvedTheme {
-    THEME.get_or_init(ResolvedTheme::default)
+/// Process-wide active theme. Unlike the old set-once global this is swappable
+/// so `:theme` can change the look live; the stateless draw helpers read it
+/// through [`theme`] without threading a palette through every call. Reads take
+/// a copy — `ResolvedTheme` is `Copy` and small.
+static THEME: RwLock<ResolvedTheme> = RwLock::new(ResolvedTheme::DARK);
+
+pub(crate) fn theme() -> ResolvedTheme {
+    *THEME.read().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Swap the active theme (from `:theme`, the picker preview, or `:reload`).
+pub(crate) fn set_theme(t: ResolvedTheme) {
+    *THEME.write().unwrap_or_else(|e| e.into_inner()) = t;
 }
 
 /// Which corner glyphs the borders use. Set once at startup; see
@@ -393,11 +525,28 @@ pub(crate) fn parse_color(s: &str) -> Option<Color> {
 /// color specs as human-readable errors (the default is kept for those).
 /// Named palettes selectable with `cian.set_theme "<name>"`.
 pub(crate) fn theme_preset(name: &str) -> Option<ResolvedTheme> {
-    match name.trim().to_lowercase().replace([' ', '_'], "-").as_str() {
-        "solarized-light" | "solarized" => Some(ResolvedTheme::solarized_light()),
-        "default" | "dark" => Some(ResolvedTheme::default()),
-        _ => None,
-    }
+    Some(match name.trim().to_lowercase().replace([' ', '_'], "-").as_str() {
+        "default" | "dark" => ResolvedTheme::DARK,
+        "solarized-light" | "solarized" => ResolvedTheme::SOLARIZED_LIGHT,
+        "solarized-dark" => ResolvedTheme::SOLARIZED_DARK,
+        "dracula" => ResolvedTheme::DRACULA,
+        "nord" => ResolvedTheme::NORD,
+        "gruvbox-dark" | "gruvbox" => ResolvedTheme::GRUVBOX_DARK,
+        "gruvbox-light" => ResolvedTheme::GRUVBOX_LIGHT,
+        "tokyo-night" | "tokyonight" => ResolvedTheme::TOKYO_NIGHT,
+        "catppuccin-mocha" | "catppuccin" | "mocha" => ResolvedTheme::CATPPUCCIN_MOCHA,
+        "catppuccin-latte" | "latte" => ResolvedTheme::CATPPUCCIN_LATTE,
+        "monokai" => ResolvedTheme::MONOKAI,
+        "one-dark" | "onedark" => ResolvedTheme::ONE_DARK,
+        "github-light" | "github" => ResolvedTheme::GITHUB_LIGHT,
+        _ => return None,
+    })
+}
+
+/// The preset name whose palette matches `t`, if any (so the picker and status
+/// bar can name the active theme). Compares by value since presets are `Copy`.
+pub(crate) fn theme_name_of(t: &ResolvedTheme) -> Option<&'static str> {
+    THEME_NAMES.iter().copied().find(|n| theme_preset(n).as_ref() == Some(t))
 }
 
 pub(crate) fn resolve_theme(t: &cian_lua::Theme) -> (ResolvedTheme, Vec<String>) {
@@ -433,7 +582,7 @@ pub(crate) fn resolve_theme(t: &cian_lua::Theme) -> (ResolvedTheme, Vec<String>)
 /// (call once, before drawing). Returns the non-fatal theme errors to report.
 pub(crate) fn install(theme: &cian_lua::Theme, borders: Option<&str>, nerd: bool) -> Vec<String> {
     let (resolved, errs) = resolve_theme(theme);
-    let _ = THEME.set(resolved);
+    set_theme(resolved);
     let _ = BORDERS.set(resolve_border_type(borders));
     let _ = NERD.set(nerd);
     errs

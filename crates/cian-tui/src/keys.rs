@@ -463,6 +463,18 @@ impl App {
             }
             return Ok(());
         }
+        if matches!(self.popup, Popup::ThemePicker { .. }) {
+            match key.code {
+                // Esc / q restore the theme we opened with; Enter keeps the
+                // previewed one. j/k (and arrows) move and preview live.
+                KeyCode::Esc | KeyCode::Char('q') => self.theme_picker_cancel(),
+                KeyCode::Enter | KeyCode::Char('l') => self.theme_picker_commit(),
+                KeyCode::Char('j') | KeyCode::Down => self.theme_picker_move(1),
+                KeyCode::Char('k') | KeyCode::Up => self.theme_picker_move(-1),
+                _ => {}
+            }
+            return Ok(());
+        }
         if let Popup::FindResults { hits, cursor, .. } = &mut self.popup {
             let n = hits.len();
             match key.code {

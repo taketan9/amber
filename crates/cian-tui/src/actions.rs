@@ -1661,11 +1661,13 @@ impl App {
             }
         }
 
-        // Theme and borders live in set-once globals; note if the file now asks
-        // for something different, since we cannot swap them in place.
+        // The theme can be swapped live, so apply whatever the file now resolves
+        // to. Borders still live in a set-once global (they change the glyphs the
+        // whole frame is built from), so those still need a restart.
         let (resolved, theme_errors) = resolve_theme(&config.theme);
         problems.extend(theme_errors);
-        let theme_changed = resolved != *theme();
+        set_theme(resolved);
+        self.theme_name = theme_name_of(&resolved).unwrap_or("custom").to_string();
         let borders_changed =
             resolve_border_type(config.options.borders.as_deref()) != border_type();
 
@@ -1684,10 +1686,70 @@ impl App {
                 lines.push(format!("... and {} more", total - 10));
             }
             self.popup = Popup::Notice { lines };
-        } else if theme_changed || borders_changed {
-            self.message = Some("config reloaded — restart to apply theme/border changes".into());
+        } else if borders_changed {
+            self.message = Some("config reloaded — restart to apply the border change".into());
         } else {
             self.message = Some("config reloaded".into());
+        }
+    }
+
+    // ------- Theme gallery (#8) -------
+
+    /// Open the theme gallery (`:theme` with no argument, or the menu). The
+    /// cursor starts on the active theme; moving it previews each preset live.
+    pub(crate) fn start_theme_picker(&mut self) {
+        let current = theme();
+        let cursor = theme_name_of(&current)
+            .and_then(|n| THEME_NAMES.iter().position(|&m| m == n))
+            .unwrap_or(0);
+        self.popup = Popup::ThemePicker { cursor, revert: current };
+    }
+
+    /// Move the gallery cursor by `delta` (wrapping) and preview that preset.
+    pub(crate) fn theme_picker_move(&mut self, delta: isize) {
+        if let Popup::ThemePicker { cursor, .. } = &mut self.popup {
+            let n = THEME_NAMES.len() as isize;
+            let c = (*cursor as isize + delta).rem_euclid(n) as usize;
+            *cursor = c;
+            if let Some(t) = theme_preset(THEME_NAMES[c]) {
+                set_theme(t);
+            }
+        }
+    }
+
+    /// Keep the previewed theme and close the gallery.
+    pub(crate) fn theme_picker_commit(&mut self) {
+        if let Popup::ThemePicker { cursor, .. } = &self.popup {
+            let name = THEME_NAMES[*cursor];
+            if let Some(t) = theme_preset(name) {
+                set_theme(t);
+            }
+            self.theme_name = name.to_string();
+            self.message = Some(format!("theme: {name}"));
+        }
+        self.popup = Popup::None;
+    }
+
+    /// Cancel the gallery: restore the palette we had when it opened.
+    pub(crate) fn theme_picker_cancel(&mut self) {
+        if let Popup::ThemePicker { revert, .. } = &self.popup {
+            set_theme(*revert);
+        }
+        self.popup = Popup::None;
+    }
+
+    /// `:theme <name>` — switch directly, no gallery.
+    pub(crate) fn set_theme_by_name(&mut self, name: &str) {
+        match theme_preset(name) {
+            Some(t) => {
+                set_theme(t);
+                self.theme_name = theme_name_of(&t).unwrap_or("custom").to_string();
+                self.message = Some(format!("theme: {}", self.theme_name));
+            }
+            None => {
+                self.message =
+                    Some(format!("unknown theme {name:?} — :theme with no argument lists them"));
+            }
         }
     }
 

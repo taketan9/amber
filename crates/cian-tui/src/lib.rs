@@ -405,6 +405,10 @@ enum Popup {
     /// Pick where a set of remote files download to: the left/right pane, the
     /// Desktop, or a typed path. `files` are the chosen remote file paths.
     LocalDest { files: Vec<String>, cursor: usize },
+    /// The theme gallery (#8): each preset previews live as the cursor moves;
+    /// Enter keeps it, Esc restores `revert` (the palette on entry, which may be
+    /// a custom config that no preset name matches).
+    ThemePicker { cursor: usize, revert: ResolvedTheme },
     /// The command-snippet launcher: pick one to send to the active shell.
     /// Items come from `config.snippets`, filtered by `filter`.
     Snippets { cursor: usize, filter: String },
@@ -564,6 +568,8 @@ enum MenuItem {
     Delete,
     Rename,
     Background,
+    /// Open the theme gallery (#8).
+    ThemePick,
     HiddenToggle,
     Attributes,
     Hash,
@@ -723,6 +729,7 @@ impl MenuItem {
             MenuItem::Delete => tr(lang, "Delete → trash  (d)", "削除 → ゴミ箱  (d)"),
             MenuItem::Rename => tr(lang, "Rename  (r)", "リネーム  (r)"),
             MenuItem::Background => tr(lang, "Background color", "背景色"),
+            MenuItem::ThemePick => tr(lang, "Theme…  (:theme)", "テーマ…  (:theme)"),
             MenuItem::HiddenToggle => tr(lang, "Show / hide dotfiles  (:hidden)", "ドットファイルの表示切替  (:hidden)"),
             MenuItem::Attributes => tr(lang, "Attributes  (:attr)", "属性  (:attr)"),
             MenuItem::Hash => tr(lang, "Checksum  (:hash)", "チェックサム  (:hash)"),
@@ -1535,6 +1542,10 @@ pub struct App {
     zoom_return: Option<Rect>,
     /// Show the contextual key-hint bar.
     show_key_hints: bool,
+    /// The active theme's preset name (e.g. "dracula"), or "custom" when the
+    /// config tweaked colors past any named preset. Drives the `:theme` picker's
+    /// initial highlight and the status readout.
+    theme_name: String,
     /// Interface language for the key manual (Japanese by default).
     lang: Lang,
     /// Language for the key manual and the right-click menu specifically —
@@ -1700,6 +1711,8 @@ impl App {
                 config.options.animation_ms.unwrap_or(DEFAULT_ANIM_MS),
             ),
             show_key_hints: config.options.key_hints.unwrap_or(true),
+            // `theme::install` has already set the active theme from the config.
+            theme_name: theme_name_of(&theme()).unwrap_or("custom").to_string(),
             lang: Lang::from_opt(config.options.lang.as_deref()),
             menu_lang: match config.options.menu_lang.as_deref() {
                 Some(s) => Lang::from_opt(Some(s)),
@@ -2768,7 +2781,8 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry(":wc", None, "line / word / byte counts", "行／単語／バイト数"),
                 entry(":head / :tail", None, "first / last lines;  :tail -n 40", "先頭／末尾の行；  :tail -n 40"),
                 entry(":df", None, "free disk space;  :df -h -k -m -g", "ディスク空き容量；  :df -h -k -m -g"),
-                entry(":reload", None, "re-read init.lua (theme/border need a restart)", "init.luaを再読込（テーマ/枠は再起動が必要）"),
+                entry(":theme", None, "theme gallery;  :theme dracula  sets one directly", "テーマ一覧；  :theme dracula で直接指定"),
+                entry(":reload", None, "re-read init.lua (borders need a restart)", "init.luaを再読込（枠線は再起動が必要）"),
                 entry(":where", None, "which config files cian reads/writes (portable vs ~/.config)", "cianが読み書きする設定ファイルの場所（ポータブル/~/.config）"),
                 entry(":mark", None, "mark by wildcard;  :mark *.rs   :unmark *", "ワイルドカードでマーク；  :mark *.rs   :unmark *"),
                 entry(":ai", None, "AI chat  (needs cian.ai in init.lua)", "AIチャット  (init.luaのcian.aiが必要)"),

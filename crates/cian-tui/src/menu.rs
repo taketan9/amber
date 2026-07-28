@@ -43,6 +43,7 @@ impl App {
             }
             items.push(MenuItem::WindowMenu);
             items.push(MenuItem::Background);
+            items.push(MenuItem::ThemePick);
             items.push(MenuItem::Lang);
         } else {
             // Frequent file ops sit at the top level; the rest fold into groups.
@@ -181,6 +182,7 @@ impl App {
             ]),
             MenuItem::ViewMenu => Some(vec![
                 MenuItem::HiddenToggle,
+                MenuItem::ThemePick,
                 MenuItem::Lang,
                 MenuItem::Back,
             ]),
@@ -399,6 +401,7 @@ impl App {
             MenuItem::BulkRename => self.start_bulk_rename(),
             MenuItem::Snippets => self.start_snippets(),
             MenuItem::Macros => self.start_macros(),
+            MenuItem::ThemePick => self.start_theme_picker(),
             MenuItem::Shortcuts => self.start_shortcuts(),
             MenuItem::Lang => {
                 // Flip the interface language; every localized string reads

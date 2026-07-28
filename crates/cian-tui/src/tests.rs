@@ -1820,11 +1820,37 @@
                 MenuItem::SessionMenu,
                 MenuItem::WindowMenu,
                 MenuItem::Background,
+                MenuItem::ThemePick,
                 MenuItem::Lang,
                 MenuItem::Quit,
                 MenuItem::Manual
             ]
         );
+    }
+
+    #[test]
+    fn theme_picker_previews_live_and_esc_restores() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        let before = crate::theme::theme();
+        app.start_theme_picker();
+        assert!(matches!(app.popup, Popup::ThemePicker { .. }));
+        // Moving the cursor applies the previewed preset to the live global.
+        app.handle_key(code(KeyCode::Char('j'))).unwrap();
+        assert_ne!(crate::theme::theme(), before, "preview should swap the theme");
+        // Esc restores whatever was active on entry.
+        app.handle_key(code(KeyCode::Esc)).unwrap();
+        assert_eq!(crate::theme::theme(), before, "cancel restores the original");
+        assert!(matches!(app.popup, Popup::None));
+    }
+
+    #[test]
+    fn theme_set_by_name_sticks() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        app.set_theme_by_name("dracula");
+        assert_eq!(crate::theme::theme(), crate::theme::ResolvedTheme::DRACULA);
+        assert_eq!(app.theme_name, "dracula");
+        // Restore the default so other tests reading the global are unaffected.
+        crate::theme::set_theme(crate::theme::ResolvedTheme::DARK);
     }
 
     #[test]

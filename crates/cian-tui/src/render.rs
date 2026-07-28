@@ -660,7 +660,7 @@ impl FileKind {
     fn color(self) -> Color {
         // From the active theme's palette, so a light theme recolors the whole
         // set at once rather than fighting these fixed values.
-        let p = &theme().file;
+        let p = theme().file;
         match self {
             FileKind::Directory => p.directory,
             FileKind::Code => p.code,
@@ -2226,6 +2226,51 @@ fn draw_popup(
     lang: Lang,
     menu_lang: Lang,
 ) {
+    // The theme gallery. The active theme is already applied live (the global
+    // was swapped as the cursor moved), so the popup itself renders in the
+    // previewed palette; a swatch row lets palettes be compared at a glance.
+    if let Popup::ThemePicker { cursor, .. } = popup {
+        let names = crate::theme::THEME_NAMES;
+        let w = 44u16.min(area.width);
+        let h = (names.len() as u16 + 4).min(area.height.saturating_sub(2)).max(8);
+        let rect = centered_rect(w, h, area);
+        f.render_widget(Clear, rect);
+        f.render_widget(Block::default().style(Style::default().bg(theme().popup_bg)), rect);
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_type(border_type())
+            .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
+            .title(tr(lang, " theme ", " テーマ "))
+            .title_bottom(tr(
+                lang,
+                " j/k=preview  Enter=keep  Esc=cancel ",
+                " j/k=プレビュー  Enter=決定  Esc=取消 ",
+            ));
+        let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
+        f.render_widget(block, rect);
+        let view_h = inner.height as usize;
+        let scroll = cursor.saturating_sub(view_h.saturating_sub(1)).min(*cursor);
+        let mut lines: Vec<Line> = Vec::new();
+        for (i, name) in names.iter().enumerate().skip(scroll).take(view_h) {
+            let sel = i == *cursor;
+            let pal = crate::theme::theme_preset(name).unwrap_or_default();
+            // A compact swatch: directory / code / archive / executable accents.
+            let sw = |c: Color| Span::styled("█", Style::default().fg(c));
+            let name_style = if sel {
+                Style::default().fg(theme().accent).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(theme().file.plain)
+            };
+            lines.push(Line::from(vec![
+                Span::styled(if sel { "▸ " } else { "  " }, name_style),
+                Span::styled(format!("{:<20}", name), name_style),
+                sw(pal.file.directory), sw(pal.file.code), sw(pal.file.archive),
+                sw(pal.file.executable), sw(pal.accent),
+            ]));
+        }
+        f.render_widget(Paragraph::new(lines), inner);
+        return;
+    }
     // The manual is taller than any terminal, so it renders as a scrolling
     // viewport rather than the fixed block the other popups use.
     if let Popup::Manual { lines, scroll } = popup {
@@ -3962,6 +4007,7 @@ fn draw_popup(
         | Popup::SshHosts { .. }
         | Popup::SshUsers { .. }
         | Popup::Snippets { .. }
+        | Popup::ThemePicker { .. }
         | Popup::RemoteBrowser { .. }
         | Popup::LocalDest { .. }
         | Popup::Shortcuts { .. }

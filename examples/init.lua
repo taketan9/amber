@@ -23,9 +23,18 @@
 -- ----------------------------------------------------------------------------
 --  THEME
 -- ----------------------------------------------------------------------------
--- Start from a named preset. Built in: "solarized-light" (aka "solarized"),
--- and "default" / "dark" (the built-in dark theme, which is the default).
--- cian.set_theme "solarized-light"
+-- Start from a named preset. Built in:
+--   "default" / "dark"        (the built-in dark theme, the default)
+--   "solarized-light"         (aka "solarized"),  "solarized-dark"
+--   "dracula", "nord", "monokai", "one-dark", "tokyo-night"
+--   "gruvbox-dark", "gruvbox-light"
+--   "catppuccin-mocha" (aka "catppuccin"), "catppuccin-latte"
+--   "github-light"
+-- cian.set_theme "dracula"
+--
+-- You can also switch at runtime — no restart needed: `:theme` opens a gallery
+-- that previews each preset live (Enter keeps it, Esc cancels), or
+-- `:theme <name>` sets one directly. It's also under the right-click menu.
 
 -- …or tune individual colors. Values are "#rrggbb" or a color name
 -- ("yellow", "cyan", …). Any key you leave out keeps its current value, and a
