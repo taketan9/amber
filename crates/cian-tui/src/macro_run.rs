@@ -211,19 +211,22 @@ impl App {
                 run.first = false;
                 if !first {
                     // `from = N` (1-based) splits pane N rather than the previous
-                    // one — the key to a real grid. Focus that pane's leaf first.
-                    if let Some(n) = next.from {
-                        if let Some(&leaf) = run.leaf_ids.get(n.saturating_sub(1)) {
-                            self.shell.focus_leaf(leaf);
-                        }
-                    }
-                    // Split off the (now focused) pane; the new pane becomes
-                    // active when the spawn lands, and we apply to it then.
+                    // one — the key to a real grid. Otherwise split off the pane
+                    // built just before. Target the leaf explicitly so the async
+                    // split lands on it even though `active` may move meanwhile.
+                    let target = next
+                        .from
+                        .and_then(|n| run.leaf_ids.get(n.saturating_sub(1)))
+                        .or_else(|| run.leaf_ids.last())
+                        .copied();
                     let dir = match next.dir {
                         Split::Right => SplitDir::LeftRight,
                         Split::Down => SplitDir::TopBottom,
                     };
-                    self.shell.split_active(&cwd, dir);
+                    match target {
+                        Some(leaf) => self.shell.split_leaf(&cwd, leaf, dir),
+                        None => self.shell.split_active(&cwd, dir),
+                    }
                 }
                 run.apply = Some(next);
                 self.macro_run = Some(run);

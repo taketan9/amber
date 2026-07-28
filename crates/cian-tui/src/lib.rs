@@ -161,10 +161,10 @@ enum PendingKind {
     FirstTab,
     /// An additional tab (F9).
     NewTab,
-    /// A split of tab `tab`. Applies to whichever leaf is active in that tab
-    /// when the session lands — normally the same one the user asked from,
-    /// since spawns complete in well under a frame.
-    Split { tab: usize, dir: SplitDir },
+    /// A split of tab `tab`. `leaf` is the specific leaf node to split (so a
+    /// macro's `from = N` targets the intended pane regardless of what is active
+    /// when the spawn lands); `None` splits whatever is active at install time.
+    Split { tab: usize, dir: SplitDir, leaf: Option<usize> },
 }
 
 
