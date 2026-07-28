@@ -4422,6 +4422,16 @@
     }
 
     #[test]
+    fn chmod_field_parses_octal() {
+        use crate::parse_chmod;
+        assert_eq!(parse_chmod("777"), (Some(0o777), None));
+        assert_eq!(parse_chmod(" 644 "), (Some(0o644), None));
+        assert_eq!(parse_chmod(""), (None, None)); // blank = keep
+        assert!(parse_chmod("999").1.is_some(), "8/9 are not octal");
+        assert!(parse_chmod("rwx").1.is_some(), "symbolic not accepted");
+    }
+
+    #[test]
     fn readable_on_flips_with_background_luminance() {
         use crate::render::readable_on;
         use ratatui::style::Color;

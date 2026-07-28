@@ -81,10 +81,13 @@ impl Handler for BlindClient {
 /// Upload a local file to `remote_path` on the server. Tries SFTP, then falls
 /// back to the classic SCP protocol if the SFTP subsystem is unavailable.
 /// Returns which transport actually carried it.
+/// Upload `local` to `remote_path`. `mode` (Unix permission bits, e.g. `0o777`)
+/// is applied to the uploaded file when given.
 pub fn upload(
     target: &Target,
     local: &Path,
     remote_path: &str,
+    mode: Option<u32>,
     ctl: &mut Ctl,
 ) -> Result<Transport> {
     on_runtime(|| async {
@@ -92,11 +95,11 @@ pub fn upload(
         let total = std::fs::metadata(local).map(|m| m.len()).unwrap_or(0);
         match open_sftp(&handle).await {
             Ok(sftp) => {
-                sftp_upload(&sftp, local, remote_path, total, ctl).await?;
+                sftp_upload(&sftp, local, remote_path, total, mode, ctl).await?;
                 Ok(Transport::Sftp)
             }
             Err(_) => {
-                scp_upload(&handle, local, remote_path, total, ctl).await?;
+                scp_upload(&handle, local, remote_path, total, mode, ctl).await?;
                 Ok(Transport::Scp)
             }
         }
@@ -171,6 +174,7 @@ async fn sftp_upload(
     local: &Path,
     remote_path: &str,
     total: u64,
+    mode: Option<u32>,
     ctl: &mut Ctl<'_>,
 ) -> Result<()> {
     let mut src = tokio::fs::File::open(local)
@@ -197,6 +201,11 @@ async fn sftp_upload(
         (ctl.on_progress)(done, total);
     }
     dst.shutdown().await.context("finish remote file")?;
+    // Apply the requested permission bits (e.g. 0o777) to the uploaded file.
+    if let Some(m) = mode {
+        let attrs = russh_sftp::protocol::FileAttributes { permissions: Some(m), ..Default::default() };
+        let _ = sftp.set_metadata(remote_path, attrs).await;
+    }
     let _ = sftp.close().await;
     Ok(())
 }
@@ -284,6 +293,7 @@ async fn scp_upload(
     local: &Path,
     remote_path: &str,
     total: u64,
+    mode: Option<u32>,
     ctl: &mut Ctl<'_>,
 ) -> Result<()> {
     // `remote_path` is the full destination file path; scp -t wants a target
@@ -302,7 +312,7 @@ async fn scp_upload(
     let mut src = tokio::fs::File::open(local)
         .await
         .with_context(|| format!("open {}", local.display()))?;
-    scp_send(&mut stream, &name, total, &mut src, ctl).await
+    scp_send(&mut stream, &name, total, mode, &mut src, ctl).await
 }
 
 /// Drive the SCP "sink" protocol on an established stream: announce the file,
@@ -312,6 +322,7 @@ async fn scp_send<S, R>(
     stream: &mut S,
     name: &str,
     total: u64,
+    mode: Option<u32>,
     src: &mut R,
     ctl: &mut Ctl<'_>,
 ) -> Result<()>
@@ -320,7 +331,8 @@ where
     R: AsyncReadExt + Unpin,
 {
     read_ack(stream).await?; // remote ready
-    let header = format!("C0644 {} {}\n", total, name);
+    // The C-line's mode governs the created file's permissions (default 0644).
+    let header = format!("C{:04o} {} {}\n", mode.unwrap_or(0o644) & 0o7777, total, name);
     stream.write_all(header.as_bytes()).await.context("send scp header")?;
     stream.flush().await.ok();
     read_ack(stream).await?; // header accepted
@@ -519,12 +531,12 @@ mod tests {
             let mut prog = |_a: u64, _b: u64| {};
             let mut ctl = Ctl { cancel: &cancel, on_progress: &mut prog };
             let mut src = std::io::Cursor::new(payload.clone());
-            scp_send(&mut ours, "file.txt", payload.len() as u64, &mut src, &mut ctl)
+            scp_send(&mut ours, "file.txt", payload.len() as u64, Some(0o777), &mut src, &mut ctl)
                 .await
                 .unwrap();
 
             let (header, body, expect) = server.await.unwrap();
-            assert_eq!(header, format!("C0644 {} file.txt", expect.len()));
+            assert_eq!(header, format!("C0777 {} file.txt", expect.len()));
             assert_eq!(body, expect);
         });
     }

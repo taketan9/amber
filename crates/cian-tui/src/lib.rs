@@ -1068,6 +1068,10 @@ enum InputKind {
     SvnCommit { paths: Vec<PathBuf> },
     /// A typed local directory to download the given remote files into.
     LocalDestPath { files: Vec<String> },
+    /// The chmod mode (octal, e.g. 777; blank = keep) for an upload to `remote`.
+    UploadChmod { remote: String },
+    /// The chmod mode for files just downloaded into `dir` (local, Unix only).
+    DownloadChmod { files: Vec<String>, dir: PathBuf },
     /// A bulk-rename pattern (template or `s/re/rep/flags`) for these files.
     BulkRenamePattern { targets: Vec<PathBuf> },
 }
@@ -2282,6 +2286,19 @@ fn field_with_caret(buffer: &str, cursor: usize, secret: bool) -> String {
     };
     let split = char_byte(&shown, cursor);
     format!(">{}▏{}", &shown[..split], &shown[split..])
+}
+
+/// Parse a chmod field: blank → no change `(None, None)`; a valid octal mode →
+/// `(Some(mode), None)`; anything else → `(None, Some(error))`.
+fn parse_chmod(s: &str) -> (Option<u32>, Option<String>) {
+    let t = s.trim();
+    if t.is_empty() {
+        return (None, None);
+    }
+    match u32::from_str_radix(t, 8) {
+        Ok(m) if m <= 0o7777 => (Some(m), None),
+        _ => (None, Some(format!("invalid chmod {:?} — use an octal mode like 777", t))),
+    }
 }
 
 fn expand_path(input: &str) -> PathBuf {

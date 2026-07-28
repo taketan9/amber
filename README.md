@@ -208,12 +208,15 @@ holds **Upload → server** and **Download ← server** (in a file pane or the
 shell).
 
 **Upload** sends the marked files — or the one under the cursor — after you pick
-a host/user and type the remote destination folder.
+a host/user and type the remote destination folder, then a **chmod** field
+(seeded `777`, the common case; blank keeps the server default) sets the
+uploaded files' mode.
 
 **Download** opens a **remote file browser**: after connecting you navigate the
 server's directories (Enter/`l` to open a folder, `-` to go up), **`Space` to
 mark files** (or Enter/`d` on a single one), then choose where they land — the
-**left pane**, the **right pane**, the **Desktop**, or a **typed path**. Each
+**left pane**, the **right pane**, the **Desktop**, or a **typed path** — and an
+optional **chmod** for the downloaded files (blank keeps them; Unix only). Each
 listing is fetched over SFTP on a worker thread.
 
 **From the shell**, if the pane is already logged into a configured host (its

@@ -286,8 +286,9 @@ impl App {
         let Some((_, dir)) = opts.get(cursor) else { return };
         match dir {
             Some(dir) => {
+                // L / R / Desktop: on to the chmod step (local, Unix only).
                 let dir = dir.clone();
-                self.start_remote_download(files, dir);
+                self.prompt_download_chmod(files, dir);
             }
             None => {
                 self.popup = text_input(
@@ -300,8 +301,20 @@ impl App {
         }
     }
 
-    /// Download `files` (remote paths) into `local_dir` on a worker thread.
-    pub(crate) fn start_remote_download(&mut self, files: Vec<String>, local_dir: PathBuf) {
+    /// Ask for the mode to apply to downloaded files (blank keeps them as-is;
+    /// on Windows the mode is a no-op).
+    pub(crate) fn prompt_download_chmod(&mut self, files: Vec<String>, dir: PathBuf) {
+        self.popup = text_input(
+            "download — chmod",
+            "mode for downloaded files (octal, e.g. 644; blank = keep):",
+            String::new(),
+            InputKind::DownloadChmod { files, dir },
+        );
+    }
+
+    /// Download `files` (remote paths) into `local_dir` on a worker thread, then
+    /// apply `mode` to each (Unix; a no-op elsewhere).
+    pub(crate) fn start_remote_download(&mut self, files: Vec<String>, local_dir: PathBuf, mode: Option<u32>) {
         let Some((target, label)) = self.scp_target.take() else { return };
         self.popup = Popup::None;
         if let Err(e) = std::fs::create_dir_all(&local_dir) {
@@ -332,6 +345,7 @@ impl App {
                 let mut sctl = cian_scp::Ctl { cancel, on_progress: &mut fwd };
                 match cian_scp::download(&target, remote, &dest, &mut sctl) {
                     Ok(via) => {
+                        chmod_local(&dest, mode);
                         report.ok += 1;
                         report.note = Some(format!("via {}", via.label()));
                     }
@@ -344,7 +358,7 @@ impl App {
 
     /// Run the pending transfer against `remote` (a directory for upload, a file
     /// for download), on a worker thread with the shared progress popup.
-    pub(crate) fn start_scp_transfer(&mut self, remote: &str) {
+    pub(crate) fn start_scp_transfer(&mut self, remote: &str, mode: Option<u32>) {
         let Some(p) = self.scp_pending.take() else { return };
         let remote = remote.trim().to_string();
         if remote.is_empty() {
@@ -378,7 +392,7 @@ impl App {
                             });
                         };
                         let mut sctl = cian_scp::Ctl { cancel, on_progress: &mut fwd };
-                        match cian_scp::upload(&target, local, &dest, &mut sctl) {
+                        match cian_scp::upload(&target, local, &dest, mode, &mut sctl) {
                             Ok(via) => {
                                 report.ok += 1;
                                 report.note = Some(format!("via {}", via.label()));
@@ -502,6 +516,19 @@ fn parent_remote(cwd: &str) -> String {
         }
     }
 }
+
+/// Apply Unix permission bits to a just-downloaded local file. A no-op on
+/// Windows (NTFS has no Unix mode) and when `mode` is `None`.
+#[cfg(unix)]
+fn chmod_local(path: &std::path::Path, mode: Option<u32>) {
+    use std::os::unix::fs::PermissionsExt;
+    if let Some(m) = mode {
+        let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(m));
+    }
+}
+
+#[cfg(not(unix))]
+fn chmod_local(_path: &std::path::Path, _mode: Option<u32>) {}
 
 /// The user's Desktop, if it exists.
 fn dirs_desktop() -> Option<PathBuf> {

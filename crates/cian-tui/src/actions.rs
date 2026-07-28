@@ -2212,7 +2212,7 @@ impl App {
                 }
                 let files = files.clone();
                 let dir = expand_path(&name);
-                self.start_remote_download(files, dir);
+                self.prompt_download_chmod(files, dir);
                 return Ok(());
             }
             InputKind::LogDir => {
@@ -2220,7 +2220,39 @@ impl App {
                 return Ok(());
             }
             InputKind::ScpRemote => {
-                self.start_scp_transfer(&name);
+                // After the remote folder, ask for the mode (seeded 777, the
+                // common case; blank keeps the server default).
+                let remote = name.trim().to_string();
+                if remote.is_empty() {
+                    self.message = Some("cancelled (no remote path)".into());
+                    return Ok(());
+                }
+                self.popup = text_input(
+                    "upload — chmod",
+                    "mode after upload (octal, e.g. 777; blank = keep):",
+                    "777".to_string(),
+                    InputKind::UploadChmod { remote },
+                );
+                return Ok(());
+            }
+            InputKind::UploadChmod { remote } => {
+                let remote = remote.clone();
+                let (mode, err) = parse_chmod(&name);
+                if let Some(e) = err {
+                    self.message = Some(e);
+                    return Ok(());
+                }
+                self.start_scp_transfer(&remote, mode);
+                return Ok(());
+            }
+            InputKind::DownloadChmod { files, dir } => {
+                let (files, dir) = (files.clone(), dir.clone());
+                let (mode, err) = parse_chmod(&name);
+                if let Some(e) = err {
+                    self.message = Some(e);
+                    return Ok(());
+                }
+                self.start_remote_download(files, dir, mode);
                 return Ok(());
             }
             InputKind::TransferAs { op, src, dest_dir } => {
