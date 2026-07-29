@@ -4746,8 +4746,8 @@
         let _ = render(&mut app, 100, 30);
         if let Popup::Viewer { view, md_styles, source, .. } = &app.popup {
             let flat = view.lines.join("\n");
-            assert!(flat.contains("mermaid diagram"), "mermaid label is rendered");
-            assert!(flat.contains("A-->B"), "the diagram source is kept");
+            assert!(flat.contains("mermaid flow"), "mermaid flow is rendered");
+            assert!(flat.contains('▶'), "the flow shows an arrow edge");
             assert!(!md_styles.is_empty(), "per-char styles were built");
             assert!(source.iter().any(|l| l == "# Title"), "the raw source is preserved");
         } else {

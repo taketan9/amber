@@ -1,8 +1,10 @@
 //! A small Markdown → styled-terminal-lines renderer for the F3 viewer's
 //! preview mode. It is a pragmatic, line-based parser (headings, emphasis,
 //! inline/fenced code, blockquotes, lists, rules, links) — not a full CommonMark
-//! engine — plus special handling for ```mermaid``` blocks, which are shown as a
-//! clearly-boxed source block (a terminal cannot draw the diagram itself).
+//! engine. Pipe tables render as bordered, aligned boxes, task lists as
+//! checkboxes, and ```mermaid``` `graph`/`flowchart` blocks become a readable
+//! arrow-list "flow" (a terminal cannot draw the diagram itself); other mermaid
+//! diagram types fall back to a clearly-boxed source block.
 
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -59,6 +61,15 @@ fn plain(text: &str) -> String {
         .iter()
         .map(|s| s.content.as_ref())
         .collect()
+}
+
+/// Lighten an RGB colour by `n` per channel — used to lift code blocks and
+/// blockquotes off the viewer's (themed) background so they stand out.
+fn elevate(c: Color, n: u8) -> Color {
+    match c {
+        Color::Rgb(r, g, b) => Color::Rgb(r.saturating_add(n), g.saturating_add(n), b.saturating_add(n)),
+        _ => Color::Rgb(45, 45, 62),
+    }
 }
 
 /// Truncate `s` to `w` display columns, ending with `…` if it was cut.
@@ -245,13 +256,20 @@ pub(crate) fn render(source: &[String], width: usize) -> Vec<Line<'static>> {
             continue;
         }
 
-        // Blockquote.
+        // Blockquote — a coloured left bar over a subtly raised background band
+        // so it reads as a quote against the themed viewer surface.
         if let Some(rest) = trimmed.strip_prefix('>') {
-            let bar = Style::default().fg(Color::Rgb(120, 170, 210));
-            let body = Style::default().fg(Color::Rgb(170, 185, 205)).add_modifier(Modifier::ITALIC);
+            let qbg = elevate(theme().popup_bg, 14);
+            let bar = Style::default().fg(theme().accent).bg(qbg).add_modifier(Modifier::BOLD);
+            let body = Style::default().fg(Color::Rgb(200, 210, 225)).bg(qbg).add_modifier(Modifier::ITALIC);
             for chunk in wrap_str(rest.trim_start(), width.saturating_sub(2)) {
-                let mut spans = vec![Span::styled("▏ ".to_string(), bar)];
+                let mut spans = vec![Span::styled("▎ ".to_string(), bar)];
                 spans.extend(inline(&chunk, body, width));
+                // Pad the band to full width so the background is a solid block.
+                let used: usize = spans.iter().map(|s| s.content.width()).sum();
+                if used < width {
+                    spans.push(Span::styled(" ".repeat(width - used), Style::default().bg(qbg)));
+                }
                 out.push(Line::from(spans));
             }
             i += 1;
@@ -282,12 +300,29 @@ pub(crate) fn render(source: &[String], width: usize) -> Vec<Line<'static>> {
         // Unordered / ordered list item.
         if let Some((marker, text, indent)) = list_item(raw) {
             let pad = " ".repeat(indent);
-            let bullet = Style::default().fg(theme().accent).add_modifier(Modifier::BOLD);
+            // GitHub task list: `- [ ]` / `- [x]` becomes a checkbox glyph in
+            // place of the bullet, with the marker stripped from the text.
+            let (marker, text, mstyle) = if let Some(r) = task_item(&text) {
+                match r {
+                    (true, rest) => (
+                        "☑".to_string(),
+                        rest,
+                        Style::default().fg(Color::Rgb(126, 211, 133)).add_modifier(Modifier::BOLD),
+                    ),
+                    (false, rest) => (
+                        "☐".to_string(),
+                        rest,
+                        Style::default().fg(theme().dim).add_modifier(Modifier::BOLD),
+                    ),
+                }
+            } else {
+                (marker, text, Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
+            };
             let avail = width.saturating_sub(indent + marker.chars().count() + 1);
             let wrapped = inline(&text, Style::default().fg(Color::Rgb(210, 210, 224)), avail);
             let mut spans = vec![
                 Span::styled(pad.clone(), Style::default()),
-                Span::styled(format!("{} ", marker), bullet),
+                Span::styled(format!("{} ", marker), mstyle),
             ];
             spans.extend(wrapped);
             out.push(Line::from(spans));
@@ -359,13 +394,236 @@ fn list_item(raw: &str) -> Option<(String, String, usize)> {
     None
 }
 
-/// A fenced code block as boxed, monospaced lines. `mermaid` gets a labelled
-/// header so the notation is clearly visible even though the diagram isn't drawn.
+/// One token of a flowchart line: a node reference (raw text incl. any brackets)
+/// or an arrow with its optional `|label|`.
+enum Tok {
+    Node(String),
+    Arrow(String),
+}
+
+/// Collect `id[label]` / `id(label)` / `id{label}` / `id((label))` declarations
+/// from one line into `map` (id → display label), so a later bare `id` in an
+/// edge can be shown by its label.
+fn collect_node_labels(line: &str, map: &mut std::collections::HashMap<String, String>) {
+    let chars: Vec<char> = line.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i].is_alphanumeric() || chars[i] == '_' {
+            let start = i;
+            while i < chars.len() && (chars[i].is_alphanumeric() || chars[i] == '_') {
+                i += 1;
+            }
+            let id: String = chars[start..i].iter().collect();
+            if let Some((label, next)) = read_bracket_label(&chars, i) {
+                map.entry(id).or_insert(label);
+                i = next;
+            }
+        } else {
+            i += 1;
+        }
+    }
+}
+
+/// If `chars[i]` opens a node label (`[`, `(`, `{`, possibly doubled like `((`),
+/// return the inner label (quotes stripped) and the index past the close.
+fn read_bracket_label(chars: &[char], i: usize) -> Option<(String, usize)> {
+    let open = *chars.get(i)?;
+    let close = match open {
+        '[' => ']',
+        '(' => ')',
+        '{' => '}',
+        _ => return None,
+    };
+    let mut j = i;
+    let mut depth = 0; // count leading opens (handles (( )) / [[ ]])
+    while chars.get(j) == Some(&open) {
+        depth += 1;
+        j += 1;
+    }
+    let text_start = j;
+    let mut closes = 0;
+    while j < chars.len() && closes < depth {
+        if chars[j] == close {
+            closes += 1;
+        } else {
+            closes = 0;
+        }
+        j += 1;
+    }
+    let label: String = chars[text_start..j.saturating_sub(depth)].iter().collect();
+    let label = label.trim().trim_matches('"').trim().to_string();
+    Some((label, j))
+}
+
+/// The display label for a node reference token like `A`, `A[X]`, `A(( Y ))`.
+fn node_label(token: &str, map: &std::collections::HashMap<String, String>) -> String {
+    let chars: Vec<char> = token.trim().chars().collect();
+    let mut i = 0;
+    while i < chars.len() && (chars[i].is_alphanumeric() || chars[i] == '_') {
+        i += 1;
+    }
+    let id: String = chars[..i].iter().collect();
+    if let Some((label, _)) = read_bracket_label(&chars, i) {
+        if !label.is_empty() {
+            return label;
+        }
+    }
+    map.get(&id).cloned().unwrap_or(id)
+}
+
+/// Tokenise a flowchart line into nodes and arrows.
+fn tokenize_flow(line: &str) -> Vec<Tok> {
+    let s = line.trim().trim_end_matches(';');
+    let chars: Vec<char> = s.chars().collect();
+    let mut toks = Vec::new();
+    let mut i = 0;
+    let mut buf = String::new();
+    let mut depth = 0i32; // inside [] () {}
+    while i < chars.len() {
+        let c = chars[i];
+        if depth == 0 && (c == '-' || c == '=' || c == '<') {
+            // Start of an arrow.
+            if !buf.trim().is_empty() {
+                toks.push(Tok::Node(std::mem::take(&mut buf)));
+            } else {
+                buf.clear();
+            }
+            while i < chars.len() && matches!(chars[i], '-' | '=' | '.' | '<' | '>') {
+                i += 1;
+            }
+            if matches!(chars.get(i), Some('x') | Some('o')) {
+                i += 1; // --x / --o arrowheads
+            }
+            let mut label = String::new();
+            if chars.get(i) == Some(&'|') {
+                i += 1;
+                while i < chars.len() && chars[i] != '|' {
+                    label.push(chars[i]);
+                    i += 1;
+                }
+                i += 1; // closing |
+            }
+            toks.push(Tok::Arrow(label.trim().to_string()));
+            continue;
+        }
+        if matches!(c, '[' | '(' | '{') {
+            depth += 1;
+        } else if matches!(c, ']' | ')' | '}') {
+            depth -= 1;
+        }
+        buf.push(c);
+        i += 1;
+    }
+    if !buf.trim().is_empty() {
+        toks.push(Tok::Node(buf));
+    }
+    toks
+}
+
+/// Render a `graph` / `flowchart` mermaid block as a readable list of edges
+/// (`from ──label──▶ to`) with node labels resolved. `None` for non-flow diagram
+/// types (sequence, class, …), which fall back to the source box.
+fn mermaid_flow(lines: &[String], width: usize) -> Option<Vec<Line<'static>>> {
+    let mut idx = 0;
+    while idx < lines.len() && lines[idx].trim().is_empty() {
+        idx += 1;
+    }
+    let header = lines.get(idx)?.trim();
+    if !(header.starts_with("graph") || header.starts_with("flowchart")) {
+        return None;
+    }
+
+    let mut map = std::collections::HashMap::new();
+    for l in lines {
+        collect_node_labels(l, &mut map);
+    }
+
+    // Edges may sit after the direction on the header line (`graph TD; A-->B`)
+    // as well as on their own lines, so parse the header's tail too.
+    let head_tail = header.split_once(';').map(|(_, t)| t.to_string()).unwrap_or_default();
+    let mut edges: Vec<(String, String, String)> = Vec::new();
+    for l in std::iter::once(&head_tail).chain(lines[idx + 1..].iter()) {
+        let lt = l.trim();
+        if lt.is_empty() || lt.starts_with("%%") || lt.starts_with("subgraph") || lt == "end" {
+            continue;
+        }
+        let toks = tokenize_flow(l);
+        let mut k = 0;
+        while k + 2 < toks.len() + 1 {
+            if let (Some(Tok::Node(a)), Some(Tok::Arrow(lbl)), Some(Tok::Node(b))) =
+                (toks.get(k), toks.get(k + 1), toks.get(k + 2))
+            {
+                edges.push((node_label(a, &map), lbl.clone(), node_label(b, &map)));
+                k += 2; // chain: reuse b as the next `from`
+            } else {
+                break;
+            }
+        }
+    }
+    if edges.is_empty() {
+        return None;
+    }
+
+    let base = theme().popup_bg;
+    let bg = elevate(base, 14);
+    let node = Style::default().fg(Color::Rgb(224, 228, 238)).bg(bg).add_modifier(Modifier::BOLD);
+    let arrow = Style::default().fg(theme().accent).bg(bg);
+    let lbl = Style::default().fg(Color::Rgb(180, 205, 150)).bg(bg).add_modifier(Modifier::ITALIC);
+    let fill = Style::default().bg(bg);
+
+    let mut out = Vec::new();
+    out.push(Line::from(Span::styled(
+        format!("{:<w$}", " mermaid flow ", w = width),
+        Style::default().bg(elevate(base, 30)).fg(theme().accent).add_modifier(Modifier::BOLD),
+    )));
+    for (from, elabel, to) in &edges {
+        let mut spans = vec![Span::styled("  ".to_string(), fill), Span::styled(from.clone(), node)];
+        if elabel.is_empty() {
+            spans.push(Span::styled("  ──▶  ".to_string(), arrow));
+        } else {
+            spans.push(Span::styled("  ──".to_string(), arrow));
+            spans.push(Span::styled(elabel.clone(), lbl));
+            spans.push(Span::styled("──▶  ".to_string(), arrow));
+        }
+        spans.push(Span::styled(to.clone(), node));
+        let used: usize = spans.iter().map(|s| s.content.width()).sum();
+        if used < width {
+            spans.push(Span::styled(" ".repeat(width - used), fill));
+        }
+        out.push(Line::from(spans));
+    }
+    Some(out)
+}
+
+/// A task-list item `[ ] rest` / `[x] rest` → `(checked, rest)`.
+fn task_item(text: &str) -> Option<(bool, String)> {
+    let t = text.trim_start();
+    if let Some(r) = t.strip_prefix("[ ]") {
+        return Some((false, r.trim_start().to_string()));
+    }
+    for mark in ["[x]", "[X]"] {
+        if let Some(r) = t.strip_prefix(mark) {
+            return Some((true, r.trim_start().to_string()));
+        }
+    }
+    None
+}
+
+/// A fenced code block as boxed, monospaced lines, on a theme-derived surface
+/// raised off the viewer background. A ```mermaid``` block is first parsed into a
+/// readable flow (arrows between node labels); only if that fails does it fall
+/// back to the labelled source box (a terminal cannot draw the diagram itself).
 fn code_block(lang: &str, lines: &[String], width: usize) -> Vec<Line<'static>> {
-    let bg = Style::default().bg(Color::Rgb(30, 30, 42));
+    if lang == "mermaid" {
+        if let Some(flow) = mermaid_flow(lines, width) {
+            return flow;
+        }
+    }
+    let base = theme().popup_bg;
+    let bg = Style::default().bg(elevate(base, 18));
     let mut out = Vec::new();
     let label = if lang == "mermaid" {
-        " mermaid diagram (source) ".to_string()
+        " mermaid (source) ".to_string()
     } else if lang.is_empty() {
         " code ".to_string()
     } else {
@@ -373,9 +631,9 @@ fn code_block(lang: &str, lines: &[String], width: usize) -> Vec<Line<'static>> 
     };
     out.push(Line::from(Span::styled(
         format!("{:<w$}", label, w = width),
-        Style::default().bg(Color::Rgb(45, 45, 62)).fg(theme().accent).add_modifier(Modifier::BOLD),
+        Style::default().bg(elevate(base, 34)).fg(theme().accent).add_modifier(Modifier::BOLD),
     )));
-    let code_fg = if lang == "mermaid" { Color::Rgb(150, 205, 235) } else { Color::Rgb(200, 205, 215) };
+    let code_fg = Color::Rgb(210, 214, 224);
     for l in lines {
         let shown = format!("  {:<w$}", l, w = width.saturating_sub(2));
         out.push(Line::from(Span::styled(shown, bg.fg(code_fg))));
@@ -483,12 +741,12 @@ mod tests {
     fn headings_lists_and_code_render_to_lines() {
         let src = lines("# Title\n\nSome **bold** and `code`.\n\n- one\n- two\n\n```mermaid\ngraph TD; A-->B\n```\n");
         let out = render(&src, 40);
-        // The title text survives (styling aside), the mermaid label appears,
-        // and the diagram source line is kept.
+        // The title text survives (styling aside), and the mermaid flow renders
+        // the A → B edge with node labels and an arrow.
         let flat: Vec<String> = out.iter().map(|l| l.spans.iter().map(|s| s.content.as_ref()).collect::<String>()).collect();
         assert!(flat.iter().any(|l| l.contains("Title")));
-        assert!(flat.iter().any(|l| l.contains("mermaid diagram")));
-        assert!(flat.iter().any(|l| l.contains("A-->B")));
+        assert!(flat.iter().any(|l| l.contains("mermaid flow")));
+        assert!(flat.iter().any(|l| l.contains("A") && l.contains("▶") && l.contains("B")));
         assert!(flat.iter().any(|l| l.contains("• one")));
     }
 
@@ -510,6 +768,23 @@ mod tests {
         assert!(flat.iter().any(|l| l.contains("hi") && !l.contains("**hi**")), "markers stripped");
         // Right-aligned Qty column: "12" hugs the right padding.
         assert!(flat.iter().any(|l| l.contains("12 │")), "right-aligned qty: {flat:?}");
+    }
+
+    #[test]
+    fn mermaid_flow_and_tasklist_render() {
+        let src = lines("```mermaid\ngraph TD\n    A[ファイラー] -->|F3| B(ビューア)\n    B --> C{Markdown?}\n    C -->|Yes| D[プレビュー]\n    C -->|No| E[プレーン]\n```\n\n- [ ] todo\n- [x] done\n");
+        let out = render(&src, 60);
+        let flat: Vec<String> = out
+            .iter()
+            .map(|l| l.spans.iter().map(|s| s.content.as_ref()).collect::<String>())
+            .collect();
+        // Node labels resolved (not raw ids), arrows and edge labels shown.
+        assert!(flat.iter().any(|l| l.contains("ファイラー") && l.contains("ビューア") && l.contains("F3")));
+        assert!(flat.iter().any(|l| l.contains("Markdown?") && l.contains("Yes") && l.contains("プレビュー")));
+        assert!(!flat.iter().any(|l| l.contains("A[ファイラー]")), "raw node syntax gone");
+        // Task list: checkboxes, not bullets with literal [ ].
+        assert!(flat.iter().any(|l| l.contains("☐") && l.contains("todo") && !l.contains("[ ]")));
+        assert!(flat.iter().any(|l| l.contains("☑") && l.contains("done") && !l.contains("[x]")));
     }
 
     #[test]

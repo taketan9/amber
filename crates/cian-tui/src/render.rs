@@ -3142,6 +3142,9 @@ fn draw_popup(
             .borders(Borders::ALL)
             .border_type(border_type())
             .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
+            // The viewer takes the theme's popup surface, so it is never plain
+            // black and code blocks / quotes (raised off this) read against it.
+            .style(Style::default().bg(theme().popup_bg))
             .title(format!(" {}{}  —  {} ", title, dirty_mark, head))
             .title_bottom(format!(" {}:{}{} ", *line + 1, *col + 1, mode));
         let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
