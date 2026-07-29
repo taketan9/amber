@@ -46,6 +46,40 @@ impl App {
             None => self.message = Some(tr(self.lang, "nothing to edit", "編集対象がありません").into()),
         }
     }
+
+    /// `:edittab` / right-click "Edit in new tab": open the file under the cursor
+    /// in the editor (the configured one, else nvim → vim → vi if installed) in a
+    /// fresh shell tab, so cian keeps running. Does nothing but explain if no
+    /// editor is on PATH.
+    pub(crate) fn edit_in_new_tab(&mut self) {
+        let path = match self.active_pane().and_then(|p| p.selected()) {
+            Some(e) if e.is_parent => None,
+            Some(e) if e.is_dir => {
+                self.message = Some(tr(self.lang, "that is a directory", "ディレクトリです").into());
+                return;
+            }
+            Some(e) => Some(e.path.clone()),
+            None => None,
+        };
+        let Some(path) = path else {
+            self.message = Some(tr(self.lang, "nothing to edit", "編集対象がありません").into());
+            return;
+        };
+        let Some(words) = crate::edit::resolve_editor(&self.config) else {
+            self.message = Some(tr(
+                self.lang,
+                "no editor found — install nvim/vim/vi, or set cian.set_option(\"editor\", …)",
+                "エディタが見つかりません — nvim/vim/vi を入れるか cian.set_option(\"editor\", …) を設定",
+            ).into());
+            return;
+        };
+        // Quote the path so a name with spaces survives the shell.
+        let cmd = format!("{} \"{}\"", words.join(" "), path.display());
+        let cwd = self.shell_cwd();
+        self.shell.new_tab_running(&cwd, cmd);
+        self.focus(crate::FocusedPane::Shell);
+        self.message = Some(format!("editing {} in a new tab", path.display()));
+    }
 }
 
 /// Resolve the editor command (without the file argument) for `config`,

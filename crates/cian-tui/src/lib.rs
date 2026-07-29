@@ -142,6 +142,10 @@ pub struct ShellPane {
     /// `(tab, split node)` for a split that was just created, so the UI can
     /// animate the new pane growing in. Consumed by whoever reads it.
     just_split: Option<(usize, usize)>,
+    /// A command to type into the next tab the moment it lands (used to open a
+    /// file in an editor in a fresh tab; the tab spawn is async, so the command
+    /// cannot be sent until the PTY exists).
+    pending_tab_cmd: Option<String>,
     /// Synchronize/broadcast input: keystrokes go to every pane in the active
     /// tab at once. Only meaningful with more than one pane.
     broadcast: bool,
@@ -576,6 +580,8 @@ enum MenuItem {
     CopyToPath,
     Delete,
     Rename,
+    /// Open the selection in the editor in a new shell tab.
+    EditTab,
     Background,
     /// Open the theme gallery (#8) for the whole app.
     ThemePick,
@@ -750,6 +756,7 @@ impl MenuItem {
             MenuItem::CopyToPath => tr(lang, "Copy to…  (:copyto)", "指定先へコピー  (:copyto)"),
             MenuItem::Delete => tr(lang, "Delete  (d)", "削除  (d)"),
             MenuItem::Rename => tr(lang, "Rename  (r)", "リネーム  (r)"),
+            MenuItem::EditTab => tr(lang, "Edit in new tab  (:edittab)", "新規タブで編集  (:edittab)"),
             MenuItem::Background => tr(lang, "Background color", "背景色"),
             MenuItem::ThemePick => tr(lang, "Theme (whole app)…  (:theme)", "テーマ（全体）…  (:theme)"),
             MenuItem::ThemePickPane => tr(lang, "Theme (this pane)…", "テーマ（このペイン）…"),
@@ -2925,6 +2932,7 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry("F3", None, "look inside: text/hex, an image, or an archive's list", "中身を見る：テキスト/16進・画像・書庫の一覧"),
                 entry("  edit in viewer", None, "i = built-in editor (Ctrl+S save, Esc/Q leave), E = external", "ビューア内編集：i 内蔵（Ctrl+S 保存, Esc/Q 終了）／ E 外部エディタ"),
                 entry(":edit", None, "edit the file in your external editor (E in the viewer)", "外部エディタで編集（ビューア内は E）"),
+                entry(":edittab", None, "open the file in nvim/vim/vi in a new shell tab", "新規シェルタブで nvim/vim/vi でファイルを開く"),
                 entry("  in viewer", None, "hjkl move, /n/N search, %/{/}/NG jump, v/V/C-v select y copy", "ビューア内：hjkl移動, /n/N検索, %/{/}/NG移動, v/V/C-v選択 yコピー"),
                 entry("  B in viewer", None, "toggle the git blame gutter (who last changed each line)", "ビューア内：git blame ガター切替（各行の最終変更者）"),
                 entry("  from a grep hit", None, "Ctrl+n/N next/prev hit, Shift+Enter reveal in pane, e encoding", "grepヒットから：Ctrl+n/N 次/前, Shift+Enter 場所へ, e 文字コード"),

@@ -191,7 +191,7 @@ impl App {
         ));
         lines.push(String::new());
         // Each config file: the path cian resolves for reading, and its status.
-        for name in ["init.lua", "shortcuts.lua", "macro.lua", "count.lua", "state.toml"] {
+        for name in ["init.lua", "ssh.lua", "keymap.lua", "shortcuts.lua", "macro.lua", "count.lua", "state.toml"] {
             let p = cian_lua::config_read_path(name);
             let (path_str, status) = match &p {
                 Some(p) if p.exists() => {

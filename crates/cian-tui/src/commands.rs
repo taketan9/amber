@@ -52,6 +52,7 @@ impl App {
             "count" | "steps" => self.start_count(),
             "undo" => self.undo_last(),
             "edit" | "e" => self.edit_selected_file(),
+            "edittab" | "tabedit" | "et" => self.edit_in_new_tab(),
             "macro" | "macros" => self.start_macros(),
             "ssh" => self.start_ssh(),
             "ai" | "chat" | "crmaine" => self.open_ai_chat(),

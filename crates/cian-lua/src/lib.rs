@@ -360,9 +360,16 @@ pub fn load() -> Config {
     match config_path() {
         Some(p) if p.exists() => {
             let mut c = load_from(&p);
-            // Only worth saying if the file actually holds a secret.
+            // Only worth saying if a config actually holds a secret — and the
+            // secret may live in ssh.lua now rather than init.lua, so check both.
             if c.ssh_hosts.iter().any(|h| h.users.iter().any(|u| u.password.is_some())) {
-                c.errors.extend(permission_warning(&p));
+                let dir = p.parent();
+                // Only files that can carry a password (init.lua, ssh.lua).
+                for name in ["init.lua", "ssh.lua"] {
+                    if let Some(f) = dir.map(|d| d.join(name)).filter(|f| f.exists()) {
+                        c.errors.extend(permission_warning(&f));
+                    }
+                }
             }
             c
         }
@@ -381,8 +388,9 @@ fn permission_warning(path: &Path) -> Vec<String> {
     if mode == 0 {
         return Vec::new();
     }
+    let name = path.file_name().and_then(|s| s.to_str()).unwrap_or("the config");
     vec![
-        format!("init.lua holds SSH passwords but is readable by others (mode {:o}).", meta.permissions().mode() & 0o777),
+        format!("{} holds SSH passwords but is readable by others (mode {:o}).", name, meta.permissions().mode() & 0o777),
         format!("  fix: chmod 600 {}", path.display()),
     ]
 }
@@ -394,17 +402,13 @@ fn permission_warning(_path: &Path) -> Vec<String> {
     Vec::new()
 }
 
-fn load_from(path: &Path) -> Config {
-    let src = match std::fs::read_to_string(path) {
-        Ok(s) => s,
-        Err(e) => {
-            return Config {
-                errors: vec![format!("cannot read {}: {}", path.display(), e)],
-                ..Config::default()
-            };
-        }
-    };
+/// The optional config files that may sit next to `init.lua` to keep it tidy:
+/// SSH hosts and key bindings can each move to their own file. They are plain
+/// Lua too, sharing init.lua's `cian.*` API, so `cian.ssh{…}` in `ssh.lua` and
+/// `cian.set_keymap(…)` in `keymap.lua` accumulate into the same config.
+pub const SPLIT_CONFIG_FILES: [&str; 2] = ["ssh.lua", "keymap.lua"];
 
+fn load_from(path: &Path) -> Config {
     let lua = Lua::new();
     let builder = Rc::new(RefCell::new(Builder::default()));
 
@@ -416,9 +420,27 @@ fn load_from(path: &Path) -> Config {
     }
 
     let mut errors = Vec::new();
-    if let Err(e) = lua.load(&src).set_name("init.lua").exec() {
-        errors.push(format!("init.lua: {}", e));
-        errors.extend(escape_hint(&e.to_string()));
+    // init.lua first, then any split-out files in the same directory, all sharing
+    // one Lua context so their cian.* calls build one config.
+    let mut files = vec![path.to_path_buf()];
+    if let Some(dir) = path.parent() {
+        files.extend(SPLIT_CONFIG_FILES.iter().map(|n| dir.join(n)).filter(|p| p.exists()));
+    }
+    for f in &files {
+        let name = f.file_name().and_then(|s| s.to_str()).unwrap_or("config.lua").to_string();
+        let src = match std::fs::read_to_string(f) {
+            Ok(s) => s,
+            Err(e) => {
+                // A missing init.lua is the caller's concern; a listed extra was
+                // filtered for existence, so a read error here is worth flagging.
+                errors.push(format!("cannot read {}: {}", f.display(), e));
+                continue;
+            }
+        };
+        if let Err(e) = lua.load(&src).set_name(&name).exec() {
+            errors.push(format!("{}: {}", name, e));
+            errors.extend(escape_hint(&e.to_string()));
+        }
     }
 
     // Pull the accumulated config out by cloning; the Lua handles stay valid
@@ -855,6 +877,41 @@ fn os_open(target: &str) -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ssh_and_keymap_can_live_in_their_own_files() {
+        let dir = tempfile::tempdir().unwrap();
+        // init.lua keeps only display / AI, per the intended split.
+        std::fs::write(
+            dir.path().join("init.lua"),
+            "cian.set_theme \"dracula\"\ncian.ai_context(\"deploy to RHEL 8\")\n",
+        )
+        .unwrap();
+        // SSH hosts move to ssh.lua …
+        std::fs::write(
+            dir.path().join("ssh.lua"),
+            "cian.ssh{ users = { \"root\" }, hosts = { { name = \"db\", host = \"10.0.0.9\" } } }\n",
+        )
+        .unwrap();
+        // … and key bindings to keymap.lua, all sharing one config.
+        std::fs::write(
+            dir.path().join("keymap.lua"),
+            "cian.set_keymap(\"x\", \"delete\")\n",
+        )
+        .unwrap();
+
+        let cfg = load_from(&dir.path().join("init.lua"));
+        assert!(cfg.errors.is_empty(), "{:?}", cfg.errors);
+        assert_eq!(cfg.theme.preset.as_deref(), Some("dracula"), "init.lua still applies");
+        assert_eq!(cfg.ai_context, vec!["deploy to RHEL 8"]);
+        assert_eq!(cfg.ssh_hosts.len(), 1, "ssh.lua contributed a host");
+        assert_eq!(cfg.ssh_hosts[0].name, "db");
+        assert!(
+            cfg.keymaps.iter().any(|(k, a)| *k == 'x' && a == "delete"),
+            "keymap.lua bound x → delete: {:?}",
+            cfg.keymaps
+        );
+    }
 
     #[test]
     fn ai_context_and_host_notes_parse() {

@@ -19,6 +19,13 @@
 --  See the full key list any time with `?` in the app, `:man`, or `cian -man`.
 --
 --  日本語版はこのファイルの日本語訳 examples/init.ja.lua にあります。
+--
+--  Keeping init.lua tidy: the SSH hosts and the key bindings can each move to
+--  their own file next to this one — ssh.lua and keymap.lua (see examples/).
+--  cian loads them right after init.lua into the same config, so `cian.ssh{…}`
+--  and `cian.set_keymap(…)` work there exactly as they do here. That lets
+--  init.lua stay focused on display, Git/SVN and AI. `:where` shows which files
+--  are found.
 -- ============================================================================
 
 

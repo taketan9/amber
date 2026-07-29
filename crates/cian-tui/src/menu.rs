@@ -53,6 +53,7 @@ impl App {
             items.push(MenuItem::Paste);
             items.push(MenuItem::Rename);
             items.push(MenuItem::Delete);
+            items.push(MenuItem::EditTab); // open in the editor in a new shell tab
             items.push(MenuItem::FileMenu); // to-other / copy-to / bulk rename
             // Archive ▸ when there is something to pack, or the cursor is on one.
             let has_targets = self.active_pane().map(|p| !p.target_paths().is_empty()).unwrap_or(false);
@@ -419,6 +420,7 @@ impl App {
             MenuItem::BulkRename => self.start_bulk_rename(),
             MenuItem::Snippets => self.start_snippets(),
             MenuItem::Macros => self.start_macros(),
+            MenuItem::EditTab => self.edit_in_new_tab(),
             MenuItem::ThemePick => self.start_theme_picker(),
             MenuItem::ThemePickPane => {
                 let side = matches!(self.focused, FocusedPane::Right) as usize;

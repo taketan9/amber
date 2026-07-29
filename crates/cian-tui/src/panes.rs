@@ -250,6 +250,7 @@ impl ShellPane {
             error: None,
             pending: Vec::new(),
             just_split: None,
+            pending_tab_cmd: None,
             broadcast: false,
             sync_members: std::collections::BTreeSet::new(),
         }
@@ -476,6 +477,13 @@ impl ShellPane {
                 self.tabs.push(ShellTab::new(session));
                 self.active = self.tabs.len() - 1;
                 self.zoom_pane = false;
+                // If this tab was opened to run something (e.g. an editor on a
+                // file), send it now that the shell exists.
+                if let Some(cmd) = self.pending_tab_cmd.take() {
+                    if let Some(s) = self.active_session_mut() {
+                        s.write_input(cmd.as_bytes());
+                    }
+                }
             }
             PendingKind::Split { tab, dir, leaf, ratio } => match self.tabs.get_mut(tab) {
                 Some(t) => {
@@ -499,6 +507,17 @@ impl ShellPane {
 
     /// Open an additional shell tab.
     pub(crate) fn new_tab(&mut self, cwd: &Path) {
+        self.spawn_async(cwd, PendingKind::NewTab);
+    }
+
+    /// Open a new tab and run `cmd` in it as soon as its shell exists — used to
+    /// launch an editor on a file in a fresh tab without leaving cian. A trailing
+    /// newline is added so the command runs.
+    pub(crate) fn new_tab_running(&mut self, cwd: &Path, mut cmd: String) {
+        if !cmd.ends_with('\n') {
+            cmd.push('\n');
+        }
+        self.pending_tab_cmd = Some(cmd);
         self.spawn_async(cwd, PendingKind::NewTab);
     }
 

@@ -2604,6 +2604,29 @@
         }
     }
 
+    /// `new_tab_running` (behind "Edit in new tab") must actually open a tab; the
+    /// command is delivered when the tab's shell lands.
+    #[test]
+    fn new_tab_running_opens_a_new_tab() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        let cwd = app.active_pane().unwrap().cwd.clone();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        app.shell.ensure(&cwd);
+        while app.shell.count() == 0 {
+            app.shell.poll_pending();
+            assert!(std::time::Instant::now() < deadline, "first tab never spawned");
+            std::thread::sleep(std::time::Duration::from_millis(3));
+        }
+        let before = app.shell.count();
+        app.shell.new_tab_running(&cwd, "echo hi".into());
+        while app.shell.count() == before {
+            app.shell.poll_pending();
+            assert!(std::time::Instant::now() < deadline, "new tab never opened");
+            std::thread::sleep(std::time::Duration::from_millis(3));
+        }
+        assert_eq!(app.shell.count(), before + 1, "a fresh tab opened for the editor");
+    }
+
     /// End-to-end: drive a 2×2 grid macro through the real tick loop (async PTY
     /// spawns and all) and confirm the *built* layout is a grid, not four
     /// columns — the actual #1 report. This exercises the leaf-id bookkeeping

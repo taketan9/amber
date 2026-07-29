@@ -1,0 +1,35 @@
+-- ssh.lua — SSH hosts, split out of init.lua.
+--
+-- OPTIONAL. Put this file next to init.lua (same directory: ~/.config/cian/, or
+-- beside the .exe in a portable set). cian loads it right after init.lua into
+-- the SAME config, so `cian.ssh{…}` here is exactly as if it were in init.lua —
+-- it just keeps init.lua focused on display / Git-SVN / AI.
+--
+-- SECURITY NOTE: a plain `password` here sits in clear text on disk, same as in
+-- init.lua. Prefer `password_cmd` (its stdout is used, so the secret can live in
+-- your OS credential store), or key auth. cian warns at startup if this file
+-- holds a password and is world-readable — `chmod 600 ssh.lua` to silence it.
+--
+-- See examples/init.lua for the full explanation of every field.
+
+-- cian.ssh {
+--   -- Applied to every host that doesn't list its own users:
+--   users = { "root", "deploy" },
+--
+--   hosts = {
+--     { name = "web1", host = "10.0.1.11" },
+--     { name = "db1",  host = "10.0.2.31", port = 2222 },
+--
+--     { name = "stage", host = "stage.example.com",
+--       users = {
+--         "readonly",                                   -- prompts, no auto-login
+--         { name = "admin", password = "hunter2" },     -- clear text (avoid)
+--         { name = "ci",    password_cmd = "pass show ci/stage" }, -- from a store
+--       },
+--     },
+--
+--     -- `notes` are handed to the AI when a shell is logged into this host.
+--     { name = "db1", host = "10.0.2.31",
+--       notes = "RHEL 8.9; Oracle 19c; disk is tight on /u01" },
+--   },
+-- }
