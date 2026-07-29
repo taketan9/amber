@@ -3334,10 +3334,16 @@ fn draw_popup(
             match find_input {
                 Some(q) => format!("/{}_", q),
                 None => {
+                    let mmd = source.iter().any(|l| {
+                        let t = l.trim_start();
+                        (t.starts_with("```") || t.starts_with("~~~"))
+                            && t.trim_start_matches(['`', '~']).trim().eq_ignore_ascii_case("mermaid")
+                    });
                     let hints = if *preview {
-                        format!("{}{}{}",
+                        format!("{}{}{}{}",
                             tr(lang, " / f search  n/N  v/V select  y copy ", " / f 検索  n/N  v/V 選択  y コピー "),
                             ed,
+                            if mmd { tr(lang, " m diagram ", " m 図 ") } else { "" },
                             tr(lang, " E ext-edit  p source  ", " E 外部編集  p ソース  "))
                     } else if *markdown {
                         format!("{}{}{}",

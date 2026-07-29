@@ -138,6 +138,12 @@ impl App {
             self.toggle_viewer_blame();
             return Ok(());
         }
+        // `m` opens any mermaid blocks as a real diagram in the browser (the
+        // terminal shows the readable flow; this is the crisp picture).
+        if !ctrl && key.code == KeyCode::Char('m') {
+            self.open_mermaid_in_browser();
+            return Ok(());
+        }
         // `/`, `f` and `Shift+F` all open the search prompt (the pane's own
         // find keys, so the reflex carries over into the viewer and preview).
         if !ctrl && matches!(key.code, KeyCode::Char('/') | KeyCode::Char('f') | KeyCode::Char('F')) {
@@ -731,5 +737,123 @@ impl App {
         if let Popup::Viewer { visual, .. } = &mut self.popup {
             *visual = None;
         }
+    }
+
+    /// `m` in the viewer: write the document's mermaid blocks into a self-
+    /// contained HTML page and open it in the OS default browser, so the actual
+    /// diagram is rendered (the terminal only shows the readable flow). Uses a
+    /// local `mermaid.min.js` (config dir / beside the exe) when present so it
+    /// works offline; otherwise the CDN, so it just works when online.
+    pub(crate) fn open_mermaid_in_browser(&mut self) {
+        let Popup::Viewer { source, .. } = &self.popup else { return };
+        let blocks = extract_mermaid_blocks(source);
+        if blocks.is_empty() {
+            self.message = Some(tr(self.lang, "no mermaid blocks here", "mermaid ブロックがありません").into());
+            return;
+        }
+        let dir = std::env::temp_dir().join("cian-mermaid");
+        if let Err(e) = std::fs::create_dir_all(&dir) {
+            self.message = Some(format!("cannot create temp dir: {e}"));
+            return;
+        }
+        // Prefer a local mermaid.min.js (offline); copy it next to the page.
+        let local = cian_lua::config_read_path("mermaid.min.js").filter(|p| p.exists());
+        let script = match &local {
+            Some(js) => {
+                let _ = std::fs::copy(js, dir.join("mermaid.min.js"));
+                "<script src=\"mermaid.min.js\"></script>\n<script>mermaid.initialize({startOnLoad:true});</script>"
+                    .to_string()
+            }
+            None => "<script type=\"module\">import mermaid from \"https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs\";mermaid.initialize({startOnLoad:true});</script>".to_string(),
+        };
+        let html = mermaid_html(&blocks, &script);
+        let page = dir.join("diagram.html");
+        if let Err(e) = std::fs::write(&page, html) {
+            self.message = Some(format!("cannot write page: {e}"));
+            return;
+        }
+        match os_open(&page) {
+            Ok(()) => {
+                let how = if local.is_some() { "offline" } else { "via CDN" };
+                self.message = Some(format!("opened {} mermaid block(s) in the browser ({how})", blocks.len()));
+            }
+            Err(e) => self.message = Some(format!("open failed: {e}")),
+        }
+    }
+}
+
+/// Pull the contents of each ```mermaid ...``` fenced block out of `source`.
+fn extract_mermaid_blocks(source: &[String]) -> Vec<String> {
+    let mut blocks = Vec::new();
+    let mut i = 0;
+    while i < source.len() {
+        let t = source[i].trim_start();
+        let is_mermaid_fence = (t.starts_with("```") || t.starts_with("~~~"))
+            && t.trim_start_matches(['`', '~']).trim().eq_ignore_ascii_case("mermaid");
+        if is_mermaid_fence {
+            i += 1;
+            let mut body = String::new();
+            while i < source.len()
+                && !(source[i].trim_start().starts_with("```") || source[i].trim_start().starts_with("~~~"))
+            {
+                body.push_str(&source[i]);
+                body.push('\n');
+                i += 1;
+            }
+            i += 1; // consume the closing fence
+            if !body.trim().is_empty() {
+                blocks.push(body);
+            }
+        } else {
+            i += 1;
+        }
+    }
+    blocks
+}
+
+/// A self-contained HTML page rendering `blocks` as mermaid diagrams.
+fn mermaid_html(blocks: &[String], script: &str) -> String {
+    let escape = |s: &str| s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;");
+    let mut body = String::new();
+    for b in blocks {
+        body.push_str("<pre class=\"mermaid\">\n");
+        body.push_str(&escape(b));
+        body.push_str("</pre>\n");
+    }
+    format!(
+        "<!doctype html><html><head><meta charset=\"utf-8\"><title>cian — mermaid</title>\
+<style>body{{background:#0f1116;color:#cdd0d8;font-family:system-ui,sans-serif;margin:0;padding:20px}}\
+h3{{margin:0 0 12px;font-weight:600}}\
+.mermaid{{background:#fff;border-radius:10px;padding:16px;margin:16px 0;overflow:auto}}</style>\
+</head><body><h3>cian — mermaid</h3>{body}{script}</body></html>"
+    )
+}
+
+#[cfg(test)]
+mod mermaid_tests {
+    use super::{extract_mermaid_blocks, mermaid_html};
+
+    fn lines(s: &str) -> Vec<String> {
+        s.lines().map(str::to_string).collect()
+    }
+
+    #[test]
+    fn extracts_only_mermaid_fences() {
+        let src = lines(
+            "# t\n\n```rust\nlet x=1;\n```\n\n```mermaid\ngraph TD\nA-->B\n```\n\ntext\n\n```mermaid\nsequenceDiagram\nA->>B: hi\n```\n",
+        );
+        let blocks = extract_mermaid_blocks(&src);
+        assert_eq!(blocks.len(), 2, "two mermaid blocks, the rust one skipped");
+        assert!(blocks[0].contains("graph TD") && blocks[0].contains("A-->B"));
+        assert!(blocks[1].contains("sequenceDiagram"));
+        assert!(!blocks.iter().any(|b| b.contains("let x=1")));
+    }
+
+    #[test]
+    fn html_escapes_and_embeds_script() {
+        let html = mermaid_html(&["graph TD\nA-->B & <C>\n".into()], "<script>1</script>");
+        assert!(html.contains("class=\"mermaid\""));
+        assert!(html.contains("A--&gt;B &amp; &lt;C&gt;"), "angle brackets & amp escaped: {html}");
+        assert!(html.contains("<script>1</script>"), "the script tag is embedded");
     }
 }
