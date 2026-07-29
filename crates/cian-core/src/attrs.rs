@@ -36,17 +36,47 @@ impl HashKind {
     }
 }
 
+/// An incremental digest: feed it bytes as they arrive, then `finish` for the
+/// hex string. Lets a hash be computed over a stream that never lands in one
+/// file — a remote file read back over SFTP to verify a transfer, say — so the
+/// hashing lives in one place instead of being reimplemented per source.
+pub struct Hasher {
+    kind: HashKind,
+    md5: md5::Md5,
+    sha: sha2::Sha256,
+}
+
+impl Hasher {
+    pub fn new(kind: HashKind) -> Self {
+        use md5::Digest as _;
+        Self { kind, md5: md5::Md5::new(), sha: sha2::Sha256::new() }
+    }
+
+    pub fn update(&mut self, bytes: &[u8]) {
+        use md5::Digest as _;
+        match self.kind {
+            HashKind::Md5 => self.md5.update(bytes),
+            HashKind::Sha256 => self.sha.update(bytes),
+        }
+    }
+
+    pub fn finish(self) -> String {
+        use md5::Digest as _;
+        match self.kind {
+            HashKind::Md5 => format!("{:x}", self.md5.finalize()),
+            HashKind::Sha256 => format!("{:x}", self.sha.finalize()),
+        }
+    }
+}
+
 /// Hash a file, reading it in chunks so a large one neither loads into memory
 /// nor delays a cancel until it finishes.
 ///
 /// Returns `Ok(None)` if it was cancelled.
 pub fn hash_file(path: &Path, kind: HashKind, cancel: &AtomicBool) -> Result<Option<String>> {
-    use md5::Digest as _;
-
     let mut f = fs::File::open(path).with_context(|| format!("open {}", path.display()))?;
     let mut buf = vec![0u8; 1024 * 1024];
-    let mut md5 = md5::Md5::new();
-    let mut sha = sha2::Sha256::new();
+    let mut hasher = Hasher::new(kind);
     loop {
         if cancel.load(Ordering::Relaxed) {
             return Ok(None);
@@ -55,15 +85,9 @@ pub fn hash_file(path: &Path, kind: HashKind, cancel: &AtomicBool) -> Result<Opt
         if n == 0 {
             break;
         }
-        match kind {
-            HashKind::Md5 => md5.update(&buf[..n]),
-            HashKind::Sha256 => sha.update(&buf[..n]),
-        }
+        hasher.update(&buf[..n]);
     }
-    Ok(Some(match kind {
-        HashKind::Md5 => format!("{:x}", md5.finalize()),
-        HashKind::Sha256 => format!("{:x}", sha.finalize()),
-    }))
+    Ok(Some(hasher.finish()))
 }
 
 /// A file's permissions in the form the platform actually uses.
@@ -188,6 +212,27 @@ mod tests {
             hash_file(&f, HashKind::Sha256, &cancel).unwrap().unwrap(),
             "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
         );
+    }
+
+    #[test]
+    fn incremental_hasher_matches_hash_file_across_chunk_boundaries() {
+        let d = tempfile::tempdir().unwrap();
+        let f = d.path().join("data");
+        // Content longer than the streaming buffer, fed to the Hasher in awkward
+        // slices, must still equal the whole-file hash — this is exactly what
+        // transfer verification relies on when it hashes a remote read.
+        let bytes: Vec<u8> = (0..100_000u32).map(|i| (i % 251) as u8).collect();
+        fs::write(&f, &bytes).unwrap();
+        let cancel = AtomicBool::new(false);
+
+        for kind in [HashKind::Md5, HashKind::Sha256] {
+            let whole = hash_file(&f, kind, &cancel).unwrap().unwrap();
+            let mut h = Hasher::new(kind);
+            for chunk in bytes.chunks(7777) {
+                h.update(chunk);
+            }
+            assert_eq!(h.finish(), whole, "{:?} streamed != whole-file", kind);
+        }
     }
 
     /// Files worth checksumming are the big ones, so the read has to be

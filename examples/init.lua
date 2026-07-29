@@ -80,6 +80,12 @@
 -- プローラー / Finder にも貼り付けられる）。既定: true。
 -- cian.set_option("clipboard_on_copy", true)
 
+-- SFTP のアップロード/ダウンロード後、リモートのファイルを読み直してローカルと
+-- チェックサムを比較し、不一致なら警告する。既定: false（データをもう一度読む
+-- ため、帯域より整合性が大事なときだけ有効に）。SFTP が必要（SCP フォールバック
+-- は読み直せない）。
+-- cian.set_option("verify_transfers", true)
+
 -- 起動時にドットファイル（"." で始まる名前）を表示する。右クリックメニューで
 -- ライブに切り替え可能。既定: true。
 -- cian.set_option("show_hidden", true)

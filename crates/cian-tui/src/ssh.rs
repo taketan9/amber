@@ -381,6 +381,7 @@ impl App {
         }
         let ScpPending { target, label, locals, .. } = p;
         let modes = std::mem::take(&mut self.scp_upload_modes);
+        let verify = self.config.options.verify_transfers.unwrap_or(false);
         self.popup = Popup::None;
         self.message = Some(format!("uploading {} …", label));
         self.start_op("uploading", move |ctl| {
@@ -409,6 +410,15 @@ impl App {
                     Ok(via) => {
                         report.ok += 1;
                         report.note = Some(format!("via {}", via.label()));
+                        // Verify only when SFTP carried it: the SCP fallback
+                        // cannot be re-read for a second checksum.
+                        if verify && via == cian_scp::Transport::Sftp {
+                            if let Err(e) = verify_transfer(&target, &dest, local, cancel) {
+                                report.note_error(format!("{}: {}", fname, e));
+                            } else {
+                                report.note = Some(format!("via {} ✓ verified", via.label()));
+                            }
+                        }
                     }
                     Err(e) => report.note_error(format!("{}: {}", fname, e)),
                 }
@@ -474,6 +484,7 @@ impl App {
     /// apply `mode` to each (Unix; a no-op elsewhere).
     pub(crate) fn start_remote_download(&mut self, files: Vec<String>, local_dir: PathBuf, mode: Option<u32>) {
         let Some((target, label)) = self.scp_target.take() else { return };
+        let verify = self.config.options.verify_transfers.unwrap_or(false);
         self.popup = Popup::None;
         if let Err(e) = std::fs::create_dir_all(&local_dir) {
             self.message = Some(format!("cannot create {}: {}", local_dir.display(), e));
@@ -511,6 +522,15 @@ impl App {
                             report.note_error(format!("{}: downloaded, but chmod failed: {}", fname, e));
                         }
                         report.note = Some(format!("via {}", via.label()));
+                        // Confirm the local copy matches the file still on the
+                        // server (SFTP only — SCP cannot be re-read).
+                        if verify && via == cian_scp::Transport::Sftp {
+                            if let Err(e) = verify_transfer(&target, remote, &dest, cancel) {
+                                report.note_error(format!("{}: {}", fname, e));
+                            } else {
+                                report.note = Some(format!("via {} ✓ verified", via.label()));
+                            }
+                        }
                     }
                     Err(e) => report.note_error(format!("{}: {}", fname, e)),
                 }
@@ -590,6 +610,37 @@ fn join_remote(cwd: &str, name: &str) -> String {
         "." | "" => name.to_string(),
         "/" => format!("/{}", name),
         _ => format!("{}/{}", cwd.trim_end_matches('/'), name),
+    }
+}
+
+/// Re-read a just-transferred file from the server over SFTP and compare its
+/// checksum with the local copy's. `Ok(())` when they match; `Err(reason)` on a
+/// mismatch (the transfer corrupted or truncated the file) or when the check
+/// could not be run. Runs on the transfer worker thread, so it honours the same
+/// cancel flag.
+fn verify_transfer(
+    target: &cian_scp::Target,
+    remote_path: &str,
+    local_path: &std::path::Path,
+    cancel: &std::sync::atomic::AtomicBool,
+) -> std::result::Result<(), String> {
+    use cian_core::attrs::{hash_file, HashKind, Hasher};
+    let kind = HashKind::Sha256;
+    let local = match hash_file(local_path, kind, cancel) {
+        Ok(Some(h)) => h,
+        Ok(None) => return Err("verify cancelled".into()),
+        Err(e) => return Err(format!("verify: reading the local file failed: {}", e)),
+    };
+    let mut hasher = Hasher::new(kind);
+    if let Err(e) = cian_scp::remote_read(target, remote_path, cancel, &mut |b| hasher.update(b)) {
+        return Err(format!("verify unavailable: {}", e));
+    }
+    let remote = hasher.finish();
+    if remote == local {
+        Ok(())
+    } else {
+        let short = |s: &str| s.chars().take(12).collect::<String>();
+        Err(format!("CHECKSUM MISMATCH — local {}… ≠ remote {}…", short(&local), short(&remote)))
     }
 }
 

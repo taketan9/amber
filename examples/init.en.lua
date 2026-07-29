@@ -80,6 +80,12 @@
 -- in Explorer / Finder too). Default: true.
 -- cian.set_option("clipboard_on_copy", true)
 
+-- After an SFTP upload/download, re-read the remote file and compare its
+-- checksum with the local one, warning on a mismatch. Default: false (it reads
+-- the data a second time, so turn it on when integrity matters more than
+-- bandwidth). Needs SFTP — the SCP fallback cannot be re-read.
+-- cian.set_option("verify_transfers", true)
+
 -- Show dotfiles (names starting with ".") on startup. Toggle live with the
 -- right-click menu. Default: true.
 -- cian.set_option("show_hidden", true)

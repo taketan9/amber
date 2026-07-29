@@ -51,6 +51,11 @@ pub struct Theme {
 #[derive(Debug, Clone, Default)]
 pub struct Options {
     pub clipboard_on_copy: Option<bool>,
+    /// After an SFTP upload/download, re-read the remote file and compare its
+    /// checksum with the local one, warning on a mismatch. Off by default: it is
+    /// worth the second read of the data only when integrity matters more than
+    /// bandwidth. Verification needs SFTP (the SCP fallback cannot be re-read).
+    pub verify_transfers: Option<bool>,
     /// Program to run in the embedded shell panel (e.g. "powershell.exe").
     pub shell: Option<String>,
     /// Duration of split/zoom/close transitions in milliseconds. `0` disables
@@ -585,6 +590,12 @@ fn install_api(lua: &Lua, builder: &Rc<RefCell<Builder>>) -> mlua::Result<()> {
                         Err(_) => bm
                             .errors
                             .push("set_option: clipboard_on_copy expects a boolean".into()),
+                    },
+                    "verify_transfers" => match bool::from_lua(val, lua) {
+                        Ok(v) => bm.options.verify_transfers = Some(v),
+                        Err(_) => bm
+                            .errors
+                            .push("set_option: verify_transfers expects a boolean".into()),
                     },
                     // Removed: `mask` was only ever displayed, never applied.
                     // Name it explicitly so an old config gets told what to do

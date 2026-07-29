@@ -129,6 +129,44 @@ pub fn download(
     })
 }
 
+/// Stream a remote file's bytes through `on_bytes`, so a caller can verify a
+/// transfer by re-reading the file and hashing it on its own side.
+///
+/// SFTP only: the classic SCP path is driven by exec'ing a one-shot command and
+/// is not a dependable second reader, so an [`Err`] here means "verification
+/// unavailable" (no SFTP subsystem, or the read failed) rather than "the file is
+/// bad". Honours the cancel flag between chunks.
+pub fn remote_read(
+    target: &Target,
+    remote_path: &str,
+    cancel: &AtomicBool,
+    on_bytes: &mut dyn FnMut(&[u8]),
+) -> Result<()> {
+    on_runtime(|| async {
+        let handle = connect(target).await?;
+        let sftp = open_sftp(&handle)
+            .await
+            .context("this server has no SFTP subsystem, so a transfer cannot be verified")?;
+        let mut src = sftp
+            .open(remote_path)
+            .await
+            .with_context(|| format!("open remote {} for verify", remote_path))?;
+        let mut buf = vec![0u8; CHUNK];
+        loop {
+            if cancel.load(Ordering::Relaxed) {
+                return Err(anyhow!("cancelled"));
+            }
+            let n = src.read(&mut buf).await.context("read remote")?;
+            if n == 0 {
+                break;
+            }
+            on_bytes(&buf[..n]);
+        }
+        let _ = sftp.close().await;
+        Ok(())
+    })
+}
+
 /// One entry in a remote directory listing (for the download browser).
 #[derive(Debug, Clone)]
 pub struct RemoteEntry {
