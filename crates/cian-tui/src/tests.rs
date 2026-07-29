@@ -2569,6 +2569,88 @@
         );
     }
 
+    /// The exact split sequence a 2×2 grid macro issues (Cgrid4: pane2 splits
+    /// pane1 right, pane3 splits pane1 down, pane4 splits pane2 down) must build
+    /// a real grid — a left/right split whose two columns are each split into
+    /// rows — not four side-by-side columns.
+    #[test]
+    fn macro_grid_from_targets_build_a_2x2() {
+        let dir = tempfile::tempdir().unwrap();
+        let sh = cian_pty::default_shell();
+        let mk = || cian_pty::PtySession::new(dir.path(), &sh, 24, 80).unwrap();
+
+        let mut tab = ShellTab::new(mk());
+        let mut leaf_ids = vec![tab.active]; // pane 1
+        tab.split_from(leaf_ids[0], SplitDir::LeftRight, 50, mk()); // pane2 from=1 right
+        leaf_ids.push(tab.active);
+        tab.split_from(leaf_ids[0], SplitDir::TopBottom, 50, mk()); // pane3 from=1 down
+        leaf_ids.push(tab.active);
+        tab.split_from(leaf_ids[1], SplitDir::TopBottom, 50, mk()); // pane4 from=2 down
+        leaf_ids.push(tab.active);
+
+        assert_eq!(tab.leaves().len(), 4, "four panes");
+        let Some(Node::Split { dir, first, second, .. }) = tab.nodes.get(tab.root).and_then(|n| n.as_ref())
+        else {
+            panic!("root should be a split");
+        };
+        assert_eq!(*dir, SplitDir::LeftRight, "the outer split makes two columns");
+        for (label, child) in [("left", *first), ("right", *second)] {
+            match tab.nodes.get(child).and_then(|n| n.as_ref()) {
+                Some(Node::Split { dir, .. }) => {
+                    assert_eq!(*dir, SplitDir::TopBottom, "{label} column is split into rows");
+                }
+                _ => panic!("{label} column should be a top/bottom split"),
+            }
+        }
+    }
+
+    /// End-to-end: drive a 2×2 grid macro through the real tick loop (async PTY
+    /// spawns and all) and confirm the *built* layout is a grid, not four
+    /// columns — the actual #1 report. This exercises the leaf-id bookkeeping
+    /// that the synchronous tree test cannot.
+    #[test]
+    fn macro_builds_a_real_2x2_grid_end_to_end() {
+        use cian_lua::macros::{Macro, PaneStep, Split};
+        let pane = |from: Option<usize>, dir: Split| PaneStep { dir, from, ..Default::default() };
+        let m = Macro {
+            name: "grid".into(),
+            sync: false,
+            zoom: false,
+            panes: vec![
+                pane(None, Split::Right),    // pane 1 (the shell you're on)
+                pane(Some(1), Split::Right), // pane 2: split pane 1 → right
+                pane(Some(1), Split::Down),  // pane 3: split pane 1 → down
+                pane(Some(2), Split::Down),  // pane 4: split pane 2 → down
+            ],
+        };
+
+        let (_d, mut app) = app_with(&["a.txt"]);
+        app.begin_macro(&m);
+        let start = std::time::Instant::now();
+        while app.macro_run.is_some() {
+            app.shell.poll_pending();
+            app.tick_macro();
+            assert!(start.elapsed() < std::time::Duration::from_secs(20), "macro did not finish");
+            std::thread::sleep(std::time::Duration::from_millis(3));
+        }
+
+        let tab = app.shell.active_tab().expect("a shell tab");
+        assert_eq!(tab.leaves().len(), 4, "the macro built four panes");
+        let Some(Node::Split { dir, first, second, .. }) = tab.nodes.get(tab.root).and_then(|n| n.as_ref())
+        else {
+            panic!("root should be a split");
+        };
+        assert_eq!(*dir, SplitDir::LeftRight, "two columns, not four");
+        for (label, child) in [("left", *first), ("right", *second)] {
+            match tab.nodes.get(child).and_then(|n| n.as_ref()) {
+                Some(Node::Split { dir, .. }) => {
+                    assert_eq!(*dir, SplitDir::TopBottom, "{label} column split into two rows");
+                }
+                _ => panic!("{label} column should be a top/bottom split (got a bare pane)"),
+            }
+        }
+    }
+
     /// Two split panes, each with its own background — the case that was
     /// impossible when the color lived on the panel.
     #[test]
