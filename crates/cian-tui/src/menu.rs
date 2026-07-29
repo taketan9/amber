@@ -25,6 +25,8 @@ impl App {
         // pane-specific actions, pane-specific groups, then the shared blocks
         // (connect/transfer, appearance, footer).
         if self.focused == FocusedPane::Shell {
+            // The shell can't type `:`, so offer the command line explicitly.
+            items.push(MenuItem::CommandInput);
             // Pane action: only "paste" (send to the PTY) makes sense here.
             items.push(MenuItem::Paste);
             // Shell-specific groups.
@@ -386,6 +388,7 @@ impl App {
             MenuItem::Paste if self.focused == FocusedPane::Shell => self.paste_text_to_shell(),
             MenuItem::Paste => return self.paste_clip(),
             MenuItem::PasteHere => return self.paste_clip(),
+            MenuItem::CommandInput => self.enter_command_mode(),
             MenuItem::CopyToOther => self.start_transfer(PendingOp::Copy),
             MenuItem::MoveToOther => self.start_transfer(PendingOp::Move),
             MenuItem::CopyToPath => self.start_dest_picker(PendingOp::Copy),

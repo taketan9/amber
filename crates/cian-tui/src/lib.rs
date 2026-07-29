@@ -574,6 +574,8 @@ enum ZoneKind {
 enum MenuItem {
     Copy,
     Cut,
+    /// Enter cian's `:` command line (shell menu — the shell can't type `:`).
+    CommandInput,
     /// Shell paste (send the clipboard to the PTY).
     Paste,
     /// File-clipboard paste into the focused pane (Ctrl+V).
@@ -757,6 +759,7 @@ impl MenuItem {
             // action (send to the PTY) and keeps its own :paste hint below.
             MenuItem::PasteHere => tr(lang, "Paste  (Ctrl+V)", "貼り付け  (Ctrl+V)"),
             MenuItem::Paste => tr(lang, "Paste  (:paste)", "貼り付け  (:paste)"),
+            MenuItem::CommandInput => tr(lang, "Command…  (Ctrl+Enter)", "コマンド入力…  (Ctrl+Enter)"),
             MenuItem::CopyToOther => tr(lang, "Copy to other pane  (c)", "反対ペインへコピー  (c)"),
             MenuItem::MoveToOther => tr(lang, "Move to other pane  (m)", "反対ペインへ移動  (m)"),
             MenuItem::CopyToPath => tr(lang, "Copy to…  (:copyto)", "指定先へコピー  (:copyto)"),

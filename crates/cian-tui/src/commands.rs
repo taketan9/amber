@@ -4,6 +4,14 @@
 use super::*;
 
 impl App {
+    /// Enter the `:` command line. From the shell this is the only keyboard way
+    /// in (typing `:` there goes to the terminal), reached by Ctrl+Enter or the
+    /// "Command…" menu item.
+    pub(crate) fn enter_command_mode(&mut self) {
+        self.command_buffer.clear();
+        self.mode = Mode::Command;
+    }
+
     pub(crate) fn run_command(&mut self) {
         let raw = self.command_buffer.trim().to_string();
         self.command_buffer.clear();

@@ -1241,6 +1241,18 @@ impl App {
             self.focus(self.last_file_pane);
             return Ok(());
         }
+        // Ctrl+Enter opens cian's `:` command line — typing `:` here would just
+        // go to the terminal, so this is the shell's keyboard way in (the
+        // "Command…" menu item is the fallback where the terminal cannot report
+        // the modifier). Passed through to a full-screen app.
+        if key.code == KeyCode::Enter
+            && key.modifiers.contains(KeyModifiers::CONTROL)
+            && !key.modifiers.contains(KeyModifiers::SHIFT)
+            && !alt_screen
+        {
+            self.enter_command_mode();
+            return Ok(());
+        }
         // Shift+Enter opens the shell's context menu, the way it does in a file
         // pane — the shell cannot type `:menu`, so this is its way in by
         // keyboard (right-click is the other). Passed through to a full-screen

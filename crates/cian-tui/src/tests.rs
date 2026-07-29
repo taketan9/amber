@@ -1196,6 +1196,9 @@
 
     #[test]
     fn reload_reapplies_the_keymap_live() {
+        // reload_config re-applies the theme into the process-wide global, so it
+        // must not race the theme tests.
+        let _g = THEME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let (_d, mut app) = app_with(&["a.rs"]);
         // No user binding yet: `x` is not delete.
         assert!(!app.keymap.contains_key(&'x'));
@@ -1948,6 +1951,23 @@
     }
 
     #[test]
+    fn shell_can_reach_the_command_line() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        app.focus(FocusedPane::Shell);
+        // Ctrl+Enter from the shell opens cian's `:` command line (typing `:`
+        // there would just go to the terminal).
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::CONTROL)).unwrap();
+        assert_eq!(app.mode, Mode::Command);
+        app.handle_key(code(KeyCode::Esc)).unwrap();
+        assert_eq!(app.mode, Mode::Normal);
+
+        // The shell menu also offers it, for terminals that can't report Ctrl+Enter.
+        app.open_context_menu(5, 5);
+        let Popup::ContextMenu { items, .. } = &app.popup else { panic!("no menu") };
+        assert!(items.contains(&MenuItem::CommandInput), "shell menu offers Command…");
+    }
+
+    #[test]
     fn the_shell_menu_has_its_own_reduced_set() {
         let (_d, mut app) = app_with(&["a.txt"]);
         app.focus(FocusedPane::Shell);
@@ -1967,6 +1987,7 @@
         assert_eq!(
             core,
             vec![
+                MenuItem::CommandInput,
                 MenuItem::Paste,
                 MenuItem::SessionMenu,
                 MenuItem::WindowMenu,
