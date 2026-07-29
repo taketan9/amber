@@ -2066,6 +2066,22 @@
     }
 
     #[test]
+    fn surface_follows_light_and_dark_themes() {
+        use crate::theme::{set_theme, surface, ResolvedTheme};
+        let _g = THEME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        // The dark default paints no base, so surfaces fall back to the (dark)
+        // popup background — the menu / viewer stay dark.
+        set_theme(ResolvedTheme::DARK);
+        assert_eq!(surface(), ResolvedTheme::DARK.popup_bg);
+        // A light theme has a light base_bg, so the menu / viewer go light and
+        // their readable_on text turns dark.
+        set_theme(ResolvedTheme::GITHUB_LIGHT);
+        assert_eq!(surface(), ResolvedTheme::GITHUB_LIGHT.base_bg.unwrap());
+        assert_eq!(crate::render::readable_on(surface()), Color::Rgb(30, 32, 40), "dark text on a light menu");
+        set_theme(ResolvedTheme::DARK);
+    }
+
+    #[test]
     fn theme_set_by_name_sticks() {
         let _g = THEME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         // set_theme_by_name persists to state.toml; point the config dir at a

@@ -10,7 +10,9 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use unicode_width::UnicodeWidthStr;
 
+use crate::render::readable_on;
 use crate::theme;
+use crate::theme::surface;
 use crate::util::wrap_str;
 
 /// Column alignment for a pipe-table, from its `:---:` separator row.
@@ -142,7 +144,7 @@ fn render_table(
 
     let border = Style::default().fg(Color::Rgb(90, 90, 110));
     let head_style = Style::default().fg(theme().accent).add_modifier(Modifier::BOLD);
-    let body_style = Style::default().fg(Color::Rgb(210, 210, 224));
+    let body_style = Style::default().fg(readable_on(surface()));
 
     // Border rows: left/mid/right corners joined by `fill` across each column.
     let rule = |left: &str, mid: &str, right: &str, fill: &str| {
@@ -259,9 +261,9 @@ pub(crate) fn render(source: &[String], width: usize) -> Vec<Line<'static>> {
         // Blockquote — a coloured left bar over a subtly raised background band
         // so it reads as a quote against the themed viewer surface.
         if let Some(rest) = trimmed.strip_prefix('>') {
-            let qbg = elevate(theme().popup_bg, 14);
+            let qbg = elevate(surface(), 14);
             let bar = Style::default().fg(theme().accent).bg(qbg).add_modifier(Modifier::BOLD);
-            let body = Style::default().fg(Color::Rgb(200, 210, 225)).bg(qbg).add_modifier(Modifier::ITALIC);
+            let body = Style::default().fg(readable_on(qbg)).bg(qbg).add_modifier(Modifier::ITALIC);
             for chunk in wrap_str(rest.trim_start(), width.saturating_sub(2)) {
                 let mut spans = vec![Span::styled("▎ ".to_string(), bar)];
                 spans.extend(inline(&chunk, body, width));
@@ -319,7 +321,7 @@ pub(crate) fn render(source: &[String], width: usize) -> Vec<Line<'static>> {
                 (marker, text, Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
             };
             let avail = width.saturating_sub(indent + marker.chars().count() + 1);
-            let wrapped = inline(&text, Style::default().fg(Color::Rgb(210, 210, 224)), avail);
+            let wrapped = inline(&text, Style::default().fg(readable_on(surface())), avail);
             let mut spans = vec![
                 Span::styled(pad.clone(), Style::default()),
                 Span::styled(format!("{} ", marker), mstyle),
@@ -338,7 +340,7 @@ pub(crate) fn render(source: &[String], width: usize) -> Vec<Line<'static>> {
         }
 
         // Plain paragraph text, wrapped.
-        let base = Style::default().fg(Color::Rgb(205, 205, 218));
+        let base = Style::default().fg(readable_on(surface()));
         for chunk in wrap_str(trimmed, width) {
             out.push(Line::from(inline(&chunk, base, width)));
         }
@@ -564,9 +566,9 @@ fn mermaid_flow(lines: &[String], width: usize) -> Option<Vec<Line<'static>>> {
         return None;
     }
 
-    let base = theme().popup_bg;
+    let base = surface();
     let bg = elevate(base, 14);
-    let node = Style::default().fg(Color::Rgb(224, 228, 238)).bg(bg).add_modifier(Modifier::BOLD);
+    let node = Style::default().fg(readable_on(bg)).bg(bg).add_modifier(Modifier::BOLD);
     let arrow = Style::default().fg(theme().accent).bg(bg);
     let lbl = Style::default().fg(Color::Rgb(180, 205, 150)).bg(bg).add_modifier(Modifier::ITALIC);
     let fill = Style::default().bg(bg);
@@ -619,8 +621,9 @@ fn code_block(lang: &str, lines: &[String], width: usize) -> Vec<Line<'static>> 
             return flow;
         }
     }
-    let base = theme().popup_bg;
-    let bg = Style::default().bg(elevate(base, 18));
+    let base = surface();
+    let code_bg = elevate(base, 18);
+    let bg = Style::default().bg(code_bg);
     let mut out = Vec::new();
     let label = if lang == "mermaid" {
         " mermaid (source) ".to_string()
@@ -633,7 +636,7 @@ fn code_block(lang: &str, lines: &[String], width: usize) -> Vec<Line<'static>> 
         format!("{:<w$}", label, w = width),
         Style::default().bg(elevate(base, 34)).fg(theme().accent).add_modifier(Modifier::BOLD),
     )));
-    let code_fg = Color::Rgb(210, 214, 224);
+    let code_fg = readable_on(code_bg);
     for l in lines {
         let shown = format!("  {:<w$}", l, w = width.saturating_sub(2));
         out.push(Line::from(Span::styled(shown, bg.fg(code_fg))));

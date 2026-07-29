@@ -259,6 +259,16 @@ pub(crate) fn set_theme(t: ResolvedTheme) {
     *THEME.write().unwrap_or_else(|e| e.into_inner()) = t;
 }
 
+/// A concrete surface colour that follows the theme's light/dark identity —
+/// the theme's own `base_bg` when it paints one (light themes go light), else
+/// the dark popup background. Surfaces that want to honour a light theme (the
+/// right-click menu, the F3 viewer) use this with `readable_on` for their text,
+/// instead of the always-dark `popup_bg`.
+pub(crate) fn surface() -> Color {
+    let t = theme();
+    t.base_bg.unwrap_or(t.popup_bg)
+}
+
 /// Which corner glyphs the borders use. Set once at startup; see
 /// [`resolve_border_type`].
 static BORDERS: OnceLock<BorderType> = OnceLock::new();

@@ -2386,11 +2386,14 @@ fn draw_popup(
         let rect = context_menu_rect(items, *at, area, lang);
 
         f.render_widget(Clear, rect);
+        // Follow the theme's own surface (light on a light theme) with readable
+        // text, rather than the always-dark popup background.
+        let surf = surface();
         let block = Block::default()
             .borders(Borders::ALL)
             .border_type(border_type())
             .border_style(Style::default().fg(theme().accent))
-            .style(Style::default().bg(theme().popup_bg));
+            .style(Style::default().bg(surf));
         let inner = rect.inner(Margin { vertical: 1, horizontal: 1 });
         f.render_widget(block, rect);
 
@@ -2400,9 +2403,9 @@ fn draw_popup(
             .map(|(i, item)| {
                 let sel = i == *cursor;
                 let style = if sel {
-                    Style::default().bg(theme().selected_bg).add_modifier(Modifier::BOLD)
+                    Style::default().bg(theme().selected_bg).fg(readable_on(theme().selected_bg)).add_modifier(Modifier::BOLD)
                 } else {
-                    Style::default().fg(Color::Rgb(210, 210, 225))
+                    Style::default().bg(surf).fg(readable_on(surf))
                 };
                 // "▸ name … (hint)": name left-aligned, hint right-aligned in a
                 // shared column, with even 2-cell gutters on both sides.
@@ -3142,9 +3145,9 @@ fn draw_popup(
             .borders(Borders::ALL)
             .border_type(border_type())
             .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
-            // The viewer takes the theme's popup surface, so it is never plain
-            // black and code blocks / quotes (raised off this) read against it.
-            .style(Style::default().bg(theme().popup_bg))
+            // The viewer takes the theme's own surface (light on a light theme),
+            // so it truly follows the theme; its text uses readable_on below.
+            .style(Style::default().bg(surface()))
             .title(format!(" {}{}  —  {} ", title, dirty_mark, head))
             .title_bottom(format!(" {}:{}{} ", *line + 1, *col + 1, mode));
         let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
@@ -3179,7 +3182,8 @@ fn draw_popup(
         let sel_bg = Style::default().bg(theme().selected_bg);
         let cursor_style = Style::default().add_modifier(Modifier::REVERSED);
         let search_bg = Style::default().bg(Color::Rgb(120, 100, 0)).fg(Color::Rgb(255, 240, 190));
-        let text_fg = if numbered { Color::Rgb(210, 210, 222) } else { Color::Rgb(200, 200, 215) };
+        // Body text adapts to the (themed) surface so it reads on light themes.
+        let text_fg = readable_on(surface());
         // Character columns matched by the active search, per line, for highlight.
         let needle = find_query.as_ref().map(|q| q.to_lowercase()).filter(|q| !q.is_empty());
         let match_cols = |l: &str| -> Vec<(usize, usize)> {
