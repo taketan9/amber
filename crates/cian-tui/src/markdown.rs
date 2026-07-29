@@ -6,9 +6,164 @@
 
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
+use unicode_width::UnicodeWidthStr;
 
 use crate::theme;
 use crate::util::wrap_str;
+
+/// Column alignment for a pipe-table, from its `:---:` separator row.
+#[derive(Clone, Copy, PartialEq)]
+enum Align {
+    Left,
+    Center,
+    Right,
+}
+
+/// Is `line` a table separator row (`|---|:--:|---:|`)? Every cell must be dashes
+/// with optional leading/trailing colons, and there must be at least one dash.
+fn is_table_separator(line: &str) -> bool {
+    let t = line.trim();
+    if !t.contains('-') || !t.contains('|') {
+        return false;
+    }
+    let cells = split_cells(t);
+    !cells.is_empty()
+        && cells.iter().all(|c| {
+            let c = c.trim();
+            !c.is_empty() && c.contains('-') && c.chars().all(|ch| ch == '-' || ch == ':')
+        })
+}
+
+/// Split a table row into trimmed cells, dropping the outer pipes.
+fn split_cells(line: &str) -> Vec<String> {
+    let t = line.trim();
+    let t = t.strip_prefix('|').unwrap_or(t);
+    let t = t.strip_suffix('|').unwrap_or(t);
+    t.split('|').map(|c| c.trim().to_string()).collect()
+}
+
+/// Alignment from a separator cell: `:--` left, `--:` right, `:-:` centre.
+fn cell_align(sep: &str) -> Align {
+    let c = sep.trim();
+    match (c.starts_with(':'), c.ends_with(':')) {
+        (true, true) => Align::Center,
+        (false, true) => Align::Right,
+        _ => Align::Left,
+    }
+}
+
+/// The plain text of an inline-formatted string (markers stripped), for a table
+/// cell — so `**x**` measures and shows as `x`.
+fn plain(text: &str) -> String {
+    inline(text, Style::default(), usize::MAX)
+        .iter()
+        .map(|s| s.content.as_ref())
+        .collect()
+}
+
+/// Truncate `s` to `w` display columns, ending with `…` if it was cut.
+fn clip_width(s: &str, w: usize) -> String {
+    if s.width() <= w {
+        return s.to_string();
+    }
+    if w == 0 {
+        return String::new();
+    }
+    let mut out = String::new();
+    let mut used = 0;
+    for ch in s.chars() {
+        let cw = ch.to_string().width();
+        if used + cw > w.saturating_sub(1) {
+            break;
+        }
+        out.push(ch);
+        used += cw;
+    }
+    out.push('…');
+    out
+}
+
+/// Pad `s` to `w` display columns per `align` (assumes `s.width() <= w`).
+fn pad_align(s: &str, w: usize, align: Align) -> String {
+    let gap = w.saturating_sub(s.width());
+    match align {
+        Align::Left => format!("{s}{}", " ".repeat(gap)),
+        Align::Right => format!("{}{s}", " ".repeat(gap)),
+        Align::Center => {
+            let l = gap / 2;
+            format!("{}{s}{}", " ".repeat(l), " ".repeat(gap - l))
+        }
+    }
+}
+
+/// Render a pipe-table as a bordered, column-aligned box.
+fn render_table(
+    header: &[String],
+    aligns: &[Align],
+    rows: &[Vec<String>],
+    width: usize,
+) -> Vec<Line<'static>> {
+    let ncols = header.len().max(1);
+    let cell = |row: &[String], i: usize| plain(row.get(i).map(String::as_str).unwrap_or(""));
+    let align = |i: usize| aligns.get(i).copied().unwrap_or(Align::Left);
+
+    // Natural column widths from the content.
+    let mut colw = vec![0usize; ncols];
+    for (i, w) in colw.iter_mut().enumerate() {
+        *w = plain(header.get(i).map(String::as_str).unwrap_or("")).width();
+    }
+    for row in rows {
+        for (i, w) in colw.iter_mut().enumerate() {
+            *w = (*w).max(cell(row, i).width());
+        }
+    }
+    // Shrink the widest columns until the whole table fits `width`. Frame cost is
+    // `3*ncols + 1` (a `│`, two padding spaces per column, plus the last `│`).
+    let frame = 3 * ncols + 1;
+    let budget = width.saturating_sub(frame).max(ncols); // ≥ 1 col each
+    while colw.iter().sum::<usize>() > budget {
+        let (idx, _) = colw.iter().enumerate().max_by_key(|(_, w)| **w).unwrap();
+        if colw[idx] <= 1 {
+            break;
+        }
+        colw[idx] -= 1;
+    }
+
+    let border = Style::default().fg(Color::Rgb(90, 90, 110));
+    let head_style = Style::default().fg(theme().accent).add_modifier(Modifier::BOLD);
+    let body_style = Style::default().fg(Color::Rgb(210, 210, 224));
+
+    // Border rows: left/mid/right corners joined by `fill` across each column.
+    let rule = |left: &str, mid: &str, right: &str, fill: &str| {
+        let mut s = String::from(left);
+        for (i, w) in colw.iter().enumerate() {
+            s.push_str(&fill.repeat(w + 2));
+            s.push_str(if i + 1 == ncols { right } else { mid });
+        }
+        Line::from(Span::styled(s, border))
+    };
+    let data_row = |cells: &dyn Fn(usize) -> String, style: Style| {
+        let mut spans = vec![Span::styled("│".to_string(), border)];
+        for (i, w) in colw.iter().enumerate() {
+            let text = clip_width(&cells(i), *w);
+            spans.push(Span::styled(format!(" {} ", pad_align(&text, *w, align(i))), style));
+            spans.push(Span::styled("│".to_string(), border));
+        }
+        Line::from(spans)
+    };
+
+    let mut out = Vec::new();
+    out.push(rule("┌", "┬", "┐", "─"));
+    let hdr: Vec<String> = (0..ncols).map(|i| plain(header.get(i).map(String::as_str).unwrap_or(""))).collect();
+    out.push(data_row(&|i| hdr[i].clone(), head_style));
+    out.push(rule("├", "┼", "┤", "─"));
+    for row in rows {
+        let r: Vec<String> = (0..ncols).map(|i| cell(row, i)).collect();
+        out.push(data_row(&|i| r[i].clone(), body_style));
+    }
+    out.push(rule("└", "┴", "┘", "─"));
+    out
+}
 
 /// Render Markdown to a plain-text grid plus a parallel per-character style
 /// grid. The viewer drives its cursor / selection / search over the plain text
@@ -100,6 +255,27 @@ pub(crate) fn render(source: &[String], width: usize) -> Vec<Line<'static>> {
                 out.push(Line::from(spans));
             }
             i += 1;
+            continue;
+        }
+
+        // Pipe table: a header row, a `|---|:--:|` separator, then body rows.
+        if raw.contains('|')
+            && i + 1 < source.len()
+            && is_table_separator(&source[i + 1])
+        {
+            let header = split_cells(raw);
+            let aligns = split_cells(&source[i + 1]).iter().map(|c| cell_align(c)).collect::<Vec<_>>();
+            i += 2;
+            let mut rows = Vec::new();
+            while i < source.len() {
+                let r = source[i].trim();
+                if r.is_empty() || !r.contains('|') {
+                    break;
+                }
+                rows.push(split_cells(&source[i]));
+                i += 1;
+            }
+            out.extend(render_table(&header, &aligns, &rows, width));
             continue;
         }
 
@@ -314,6 +490,26 @@ mod tests {
         assert!(flat.iter().any(|l| l.contains("mermaid diagram")));
         assert!(flat.iter().any(|l| l.contains("A-->B")));
         assert!(flat.iter().any(|l| l.contains("• one")));
+    }
+
+    #[test]
+    fn a_pipe_table_renders_bordered_and_aligned() {
+        let src = lines("| Name | Qty | Note |\n|:-----|----:|:----:|\n| apple | 3 | ok |\n| pear | 12 | **hi** |\n");
+        let out = render(&src, 60);
+        let flat: Vec<String> = out
+            .iter()
+            .map(|l| l.spans.iter().map(|s| s.content.as_ref()).collect::<String>())
+            .collect();
+        // Box-drawing frame present.
+        assert!(flat.iter().any(|l| l.starts_with('┌') && l.ends_with('┐')), "top border: {flat:?}");
+        assert!(flat.iter().any(|l| l.starts_with('├')), "header separator");
+        assert!(flat.iter().any(|l| l.starts_with('└')), "bottom border");
+        // Header and cells appear; emphasis markers are stripped in a cell.
+        assert!(flat.iter().any(|l| l.contains("Name") && l.contains("Qty")));
+        assert!(flat.iter().any(|l| l.contains("apple")));
+        assert!(flat.iter().any(|l| l.contains("hi") && !l.contains("**hi**")), "markers stripped");
+        // Right-aligned Qty column: "12" hugs the right padding.
+        assert!(flat.iter().any(|l| l.contains("12 │")), "right-aligned qty: {flat:?}");
     }
 
     #[test]
