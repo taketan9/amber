@@ -89,14 +89,6 @@
 -- グリフを出さなくなります（文字化け防止）。フォルダは色で識別できます。
 -- cian.set_option("nerd_fonts", false)
 
--- キーボードの報告方式。未設定/"auto" で十分（Windows コンソールは
--- Shift+Enter / Ctrl+Enter / Ctrl+Shift+Enter をそのまま報告します）。macOS/Linux で
--- kitty プロトコル対応端末（iTerm2, kitty, WezTerm, foot）を使うなら "full" にすると
--- これらの Enter 系コンボも届くようになります（非対応端末では右クリックメニューで代替）。
--- 全キーを報告する都合で IME 入力に影響し得るため既定はオフ。シェルで日本語入力が
--- おかしくなったら "auto" に戻してください。
--- cian.set_option("keyboard", "full")
-
 -- 枠線の角: "rounded"（╭╮╯╰）か "plain"（直角）。未設定なら自動判定 —
 -- 描画できる端末／フォントでは丸角、レガシー Windows コンソールでは直角。
 -- 角がずれて見えるときは "plain" を強制してください。

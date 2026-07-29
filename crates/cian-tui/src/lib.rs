@@ -3344,13 +3344,11 @@ pub fn run(left: Option<PathBuf>, right: Option<PathBuf>, startup: StartupMacro)
     let mut stdout = io::stdout();
     enable_raw_mode()?;
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture, EnableBracketedPaste)?;
-    // Ask the terminal to disambiguate Ctrl-h / Ctrl-i / Ctrl-m from Backspace/Tab/Enter
-    // (and, when `keyboard = "full"`, report every key as an escape code so
-    // Shift/Ctrl+Enter come through). Supported by WezTerm, kitty, foot, iTerm2;
-    // silently ignored elsewhere.
+    // Ask the terminal to disambiguate Ctrl-h / Ctrl-i / Ctrl-m from Backspace/Tab/Enter.
+    // Supported by WezTerm, kitty, foot, etc. Silently ignored elsewhere.
     let kbd_enhanced = execute!(
         stdout,
-        PushKeyboardEnhancementFlags(keyboard_flags(&app.config))
+        PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
     )
     .is_ok();
 
@@ -3376,18 +3374,6 @@ pub fn run(left: Option<PathBuf>, right: Option<PathBuf>, startup: StartupMacro)
 /// Suspend the TUI, run the external editor attached to the real terminal on
 /// the queued file, then restore the alternate screen and reload. cian owns the
 /// terminal here, so this is where the leave/enter dance belongs.
-/// The keyboard-enhancement flags to request. Always disambiguate Ctrl-h/i/m;
-/// with `keyboard = "full"` also report every key as an escape code so
-/// Shift/Ctrl+Enter are distinguishable on kitty-protocol terminals (opt-in
-/// because it can disturb IME composition).
-fn keyboard_flags(config: &cian_lua::Config) -> KeyboardEnhancementFlags {
-    let mut flags = KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES;
-    if config.options.keyboard.as_deref() == Some("full") {
-        flags |= KeyboardEnhancementFlags::REPORT_ALL_KEYS_AS_ESCAPE_CODES;
-    }
-    flags
-}
-
 fn suspend_and_edit<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Result<()> {
     let Some(edit) = app.pending_edit.take() else { return Ok(()) };
     let Some(cmd) = edit::resolve_editor(&app.config) else {
@@ -3410,7 +3396,10 @@ fn suspend_and_edit<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Re
     // Take it back and rebuild the screen.
     enable_raw_mode()?;
     execute!(out, EnterAlternateScreen, EnableMouseCapture, EnableBracketedPaste)?;
-    let _ = execute!(out, PushKeyboardEnhancementFlags(keyboard_flags(&app.config)));
+    let _ = execute!(
+        out,
+        PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
+    );
     terminal.clear()?;
 
     match status {
