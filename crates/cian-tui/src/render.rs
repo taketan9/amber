@@ -20,12 +20,15 @@ use super::*;
 /// themes (#8) let the two columns wear different palettes; the swap is scoped
 /// to that single `draw_file_pane` call so the shell and bars keep the app
 /// theme. `side` is 0 = left, 1 = right.
-fn push_pane_theme(app: &App, side: usize) -> ResolvedTheme {
+/// Returns `Some(previous theme)` only when this pane actually has an override
+/// and the global was swapped — the caller restores it afterward. `None` means
+/// the pane follows the app theme and the global was left untouched (so a frame
+/// with no per-pane themes does no theme writes at all).
+fn push_pane_theme(app: &App, side: usize) -> Option<ResolvedTheme> {
+    let t = app.pane_theme[side].as_deref().and_then(theme_preset)?;
     let prev = theme();
-    if let Some(t) = app.pane_theme[side].as_deref().and_then(theme_preset) {
-        set_theme(t);
-    }
-    prev
+    set_theme(t);
+    Some(prev)
 }
 
 fn draw_split(f: &mut Frame, main_area: Rect, app: &mut App, ov: AnimOverride) {
@@ -72,12 +75,12 @@ fn draw_split(f: &mut Frame, main_area: Rect, app: &mut App, ov: AnimOverride) {
 
     let (bg_l, bg_r) = (app.pane_bg[0], app.pane_bg[1]);
     let (fl_l, fl_r) = (app.flash_level(FocusedPane::Left), app.flash_level(FocusedPane::Right));
-    let prev = push_pane_theme(app, 0);
+    let restore = push_pane_theme(app, 0);
     draw_file_pane(f, panes_split[0], &app.left, app.focused == FocusedPane::Left, visual_for_left, app.mode, bg_l, fl_l, FocusedPane::Left, &mut tab_rects, app.git_for(FocusedPane::Left));
-    set_theme(prev);
-    let prev = push_pane_theme(app, 1);
+    if let Some(prev) = restore { set_theme(prev); }
+    let restore = push_pane_theme(app, 1);
     draw_file_pane(f, panes_split[1], &app.right, app.focused == FocusedPane::Right, visual_for_right, app.mode, bg_r, fl_r, FocusedPane::Right, &mut tab_rects, app.git_for(FocusedPane::Right));
-    set_theme(prev);
+    if let Some(prev) = restore { set_theme(prev); }
     // draw_shell sizes each pane's PTY to its computed sub-rect.
     let log_border = recording_pulse(app.started.elapsed());
     draw_shell(f, shell_area, &mut app.shell, app.focused == FocusedPane::Shell, &mut dividers, &mut leaves, ov, &mut tab_rects, log_border);
@@ -96,16 +99,16 @@ fn draw_zoom_overlay(f: &mut Frame, rect: Rect, app: &mut App, ov: AnimOverride)
         FocusedPane::Left => {
             let (bg, fl) = (app.pane_bg[0], app.flash_level(FocusedPane::Left));
             let va = app.visual_anchor;
-            let prev = push_pane_theme(app, 0);
+            let restore = push_pane_theme(app, 0);
             draw_file_pane(f, rect, &app.left, true, va, app.mode, bg, fl, FocusedPane::Left, &mut Vec::new(), app.git_for(FocusedPane::Left));
-            set_theme(prev);
+            if let Some(prev) = restore { set_theme(prev); }
         }
         FocusedPane::Right => {
             let (bg, fl) = (app.pane_bg[1], app.flash_level(FocusedPane::Right));
             let va = app.visual_anchor;
-            let prev = push_pane_theme(app, 1);
+            let restore = push_pane_theme(app, 1);
             draw_file_pane(f, rect, &app.right, true, va, app.mode, bg, fl, FocusedPane::Right, &mut Vec::new(), app.git_for(FocusedPane::Right));
-            set_theme(prev);
+            if let Some(prev) = restore { set_theme(prev); }
         }
         FocusedPane::Shell => {
             let log_border = recording_pulse(app.started.elapsed());
@@ -161,18 +164,18 @@ fn draw_zoomed(f: &mut Frame, area: Rect, app: &mut App, ov: AnimOverride) {
             app.layout_rects = rects;
             let va = app.visual_anchor;
             let (bg, fl) = (app.pane_bg[0], app.flash_level(FocusedPane::Left));
-            let prev = push_pane_theme(app, 0);
+            let restore = push_pane_theme(app, 0);
             draw_file_pane(f, area, &app.left, true, va, app.mode, bg, fl, FocusedPane::Left, &mut tab_rects, app.git_for(FocusedPane::Left));
-            set_theme(prev);
+            if let Some(prev) = restore { set_theme(prev); }
         }
         FocusedPane::Right => {
             rects.right = area;
             app.layout_rects = rects;
             let va = app.visual_anchor;
             let (bg, fl) = (app.pane_bg[1], app.flash_level(FocusedPane::Right));
-            let prev = push_pane_theme(app, 1);
+            let restore = push_pane_theme(app, 1);
             draw_file_pane(f, area, &app.right, true, va, app.mode, bg, fl, FocusedPane::Right, &mut tab_rects, app.git_for(FocusedPane::Right));
-            set_theme(prev);
+            if let Some(prev) = restore { set_theme(prev); }
         }
         FocusedPane::Shell => {
             rects.shell = area;
