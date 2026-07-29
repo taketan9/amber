@@ -981,6 +981,10 @@ struct FindJob {
     query: String,
     mode: cian_core::search::Mode,
     done: Option<cian_core::search::Outcome>,
+    /// When set, the results are not a browsable popup but a listing destined
+    /// for the active pane — a branch view. The string is the flat-view label;
+    /// on completion the accumulated hits are panelized into the pane.
+    to_pane: Option<String>,
 }
 
 enum FindMsg {
@@ -2957,6 +2961,8 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry("f", Some(Search), "search in this folder", "このフォルダ内を検索"),
                 entry("Shift+F", None, "find by name, whole tree below here", "名前で検索（ここ以下のツリー全体）"),
                 entry("Ctrl+F", None, "grep inside files, whole tree below here", "ファイル内をgrep（ここ以下のツリー全体）"),
+                entry("  p in results", None, "panelize: load the find/grep matches into the pane to mark & operate on", "検索結果を p でペイン化：マーク＆一括操作できる"),
+                entry("b", None, "branch view: flatten this subtree into the pane, one row per file (b/Esc to leave)", "ブランチビュー：この配下を1ファイル1行に平坦化（b/Esc で戻る）"),
                 entry("n", Some(SearchNext), "next match", "次のマッチ"),
                 entry("N", Some(SearchPrev), "previous match", "前のマッチ"),
                 entry("/", None, "filter list as you type", "入力に応じて一覧を絞り込み"),

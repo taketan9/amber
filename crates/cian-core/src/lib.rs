@@ -57,6 +57,21 @@ impl Entry {
             is_parent: true,
         }
     }
+
+    /// An [`Entry`] for a flat listing — branch view or search results — where
+    /// the row shows a path relative to the root (`rel`) instead of a bare name,
+    /// so files from different folders stay distinguishable. Size/mtime are
+    /// stat'd; a stat failure lists it with unknown size/time rather than
+    /// dropping it. Backslashes are shown as `/` so the display is stable across
+    /// platforms.
+    pub fn flat(rel: &std::path::Path, path: PathBuf, is_dir: bool) -> Self {
+        let name = rel.display().to_string().replace('\\', "/");
+        let name_lower = name.to_lowercase();
+        let meta = fs::symlink_metadata(&path).ok();
+        let len = meta.as_ref().map(|m| m.len()).unwrap_or(0);
+        let modified = meta.as_ref().and_then(|m| m.modified().ok());
+        Self { name, name_lower, path, is_dir, len, modified, is_parent: false }
+    }
 }
 
 /// Build an [`Entry`] straight from a `DirEntry` (Windows: its `metadata()` is
@@ -189,9 +204,23 @@ impl Default for Sort {
     }
 }
 
+/// What a pane is showing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PaneView {
+    /// The normal case: `reload` reads `cwd`.
+    Dir,
+    /// A flattened subtree (branch view) or a search-results listing rooted at
+    /// `cwd`. The rows are handed in once — their `name` is a path relative to
+    /// the root — and `reload` keeps them rather than reading a directory. The
+    /// string labels the view in the pane title (e.g. "branch", "grep: todo").
+    Flat(String),
+}
+
 #[derive(Debug, Clone)]
 pub struct Pane {
     pub cwd: PathBuf,
+    /// Whether this is a live directory or a frozen flat/search listing.
+    pub view: PaneView,
     /// The visible list: [`Pane::all_entries`] narrowed by [`Pane::filter`].
     /// Everything else (cursor, marks, file operations, rendering) works off
     /// this, so filtering automatically scopes them all to what is on screen.
@@ -228,6 +257,7 @@ impl Pane {
         let cwd = dunce::canonicalize(cwd.into()).context("invalid initial path")?;
         let mut pane = Self {
             cwd,
+            view: PaneView::Dir,
             entries: Vec::new(),
             all_entries: Vec::new(),
             filter: String::new(),
@@ -258,6 +288,12 @@ impl Pane {
     /// the case where a stale listing actively misleads. Checking one stat is
     /// cheap enough to do on a timer; re-reading the whole directory is not.
     pub fn is_stale(&self) -> bool {
+        // A flat / search listing is not backed by a live directory, so the
+        // auto-refresh timer must leave it alone — re-reading `cwd` would throw
+        // the whole flattened set away.
+        if matches!(self.view, PaneView::Flat(_)) {
+            return false;
+        }
         let now = fs::metadata(&self.cwd).ok().and_then(|m| m.modified().ok());
         match (now, self.stamp) {
             (Some(a), Some(b)) => a != b,
@@ -269,6 +305,14 @@ impl Pane {
     }
 
     pub fn reload(&mut self) -> Result<()> {
+        // A flat / search listing has no directory to re-read: keep the rows we
+        // were given and just re-narrow and re-order them, so `/` filter and the
+        // sort keys still work over the flattened set.
+        if matches!(self.view, PaneView::Flat(_)) {
+            self.apply_sort();
+            self.apply_filter();
+            return Ok(());
+        }
         self.stamp = fs::metadata(&self.cwd).ok().and_then(|m| m.modified().ok());
         let rd = fs::read_dir(&self.cwd)
             .with_context(|| format!("read_dir failed: {}", self.cwd.display()))?;
@@ -367,8 +411,12 @@ impl Pane {
         // root, which has no parent. It always shows, even under a filter —
         // hiding the way out would be surprising — but never when it would not
         // match: it is navigation, not a listed file.
-        if let Some(parent) = self.cwd.parent().map(|p| p.to_path_buf()) {
-            entries.insert(0, Entry::parent_row(parent));
+        // ...but a flat / search listing is not a directory, so there is no
+        // "up" from it — the way out is to leave the view, not to climb a level.
+        if !matches!(self.view, PaneView::Flat(_)) {
+            if let Some(parent) = self.cwd.parent().map(|p| p.to_path_buf()) {
+                entries.insert(0, Entry::parent_row(parent));
+            }
         }
         self.entries = entries;
         if self.cursor >= self.entries.len() {
@@ -402,6 +450,45 @@ impl Pane {
         }
     }
 
+    /// True while showing a flat / search listing rather than a live directory.
+    pub fn is_flat(&self) -> bool {
+        matches!(self.view, PaneView::Flat(_))
+    }
+
+    /// The label of the current flat view, if any (for the pane title).
+    pub fn flat_label(&self) -> Option<&str> {
+        match &self.view {
+            PaneView::Flat(l) => Some(l),
+            PaneView::Dir => None,
+        }
+    }
+
+    /// Replace the listing with a flat set of rows — a flattened subtree (branch
+    /// view) or search results. `cwd` stays the directory the view was launched
+    /// from, so [`Pane::leave_flat`] returns there; each row's own `path` points
+    /// at the real file, so marks and file operations act on it directly.
+    pub fn enter_flat(&mut self, label: impl Into<String>, entries: Vec<Entry>) {
+        self.view = PaneView::Flat(label.into());
+        self.all_entries = entries;
+        self.filter.clear();
+        self.marks.clear();
+        self.cursor = 0;
+        self.apply_sort();
+        self.apply_filter();
+    }
+
+    /// Leave a flat view and read `cwd` again as an ordinary directory.
+    pub fn leave_flat(&mut self) -> Result<()> {
+        if self.is_flat() {
+            self.view = PaneView::Dir;
+            self.marks.clear();
+            self.filter.clear();
+            self.reload()?;
+            self.cursor_to_first_real();
+        }
+        Ok(())
+    }
+
     pub fn move_cursor(&mut self, delta: isize) {
         if self.entries.is_empty() {
             return;
@@ -417,6 +504,9 @@ impl Pane {
                 let prev = self.cwd.clone();
                 self.push_history(prev);
                 self.cwd = e.path;
+                // Stepping into a folder from a flat / search listing leaves the
+                // flat view: the destination is a real directory to read.
+                self.view = PaneView::Dir;
                 self.marks.clear();
                 self.filter.clear();
                 self.reload()?;
@@ -432,6 +522,7 @@ impl Pane {
             let prev = self.cwd.clone();
             self.push_history(prev);
             self.cwd = parent;
+            self.view = PaneView::Dir;
             self.marks.clear();
             self.filter.clear();
             self.reload()?;
@@ -444,6 +535,7 @@ impl Pane {
         let prev = self.cwd.clone();
         self.push_history(prev);
         self.cwd = path;
+        self.view = PaneView::Dir;
         self.marks.clear();
         self.filter.clear();
         self.reload()?;
@@ -672,6 +764,48 @@ mod tests {
     /// Count of real entries (without the `..` row).
     fn real_len(pane: &Pane) -> usize {
         pane.entries.iter().filter(|e| !e.is_parent).count()
+    }
+
+    #[test]
+    fn a_flat_view_shows_relative_paths_has_no_up_row_and_survives_reload() {
+        let (dir, mut pane) = pane_with(&["a.txt"]);
+        let deep = dir.path().join("src/deep");
+        fs::create_dir_all(&deep).unwrap();
+        fs::write(deep.join("main.rs"), b"x").unwrap();
+
+        let rows = vec![
+            Entry::flat(std::path::Path::new("a.txt"), dir.path().join("a.txt"), false),
+            Entry::flat(std::path::Path::new("src/deep/main.rs"), deep.join("main.rs"), false),
+        ];
+        pane.enter_flat("branch", rows);
+
+        assert!(pane.is_flat());
+        assert_eq!(pane.flat_label(), Some("branch"));
+        // Relative paths are the row names, and there is NO `..` row in a flat
+        // view — the whole listing is real files.
+        assert!(pane.entries.iter().all(|e| !e.is_parent), "no up-row in flat view");
+        let mut got = names(&pane);
+        got.sort();
+        assert_eq!(got, vec!["a.txt", "src/deep/main.rs"]);
+
+        // A flat listing is not backed by a directory, so it is never "stale"
+        // and a reload keeps the rows (it only re-sorts / re-filters).
+        assert!(!pane.is_stale());
+        pane.reload().unwrap();
+        assert_eq!(real_len(&pane), 2, "reload must not throw the flat set away");
+
+        // The filter narrows the flattened set by relative path.
+        pane.set_filter("deep");
+        assert_eq!(names(&pane), vec!["src/deep/main.rs"]);
+        pane.clear_filter();
+
+        // Leaving returns to the live directory (with its `..` row back).
+        pane.leave_flat().unwrap();
+        assert!(!pane.is_flat());
+        let back = names(&pane);
+        assert!(back.contains(&"a.txt".to_string()) && back.contains(&"src".to_string()),
+            "back to the real cwd listing: {:?}", back);
+        assert!(pane.entries.iter().any(|e| e.is_parent), "the up-row is back");
     }
 
     #[test]

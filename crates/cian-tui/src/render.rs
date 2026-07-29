@@ -489,6 +489,12 @@ fn tabs_title<'a>(
     offsets: &mut Vec<(usize, u16, u16)>,
 ) -> Line<'a> {
     fn label_for(i: usize, tab: &Pane, is_active: bool) -> String {
+        // A flat / search listing names the view (e.g. "⌥ branch", "⌥ grep: x")
+        // rather than a directory, so it is obvious the pane is not a folder and
+        // that `b` / Esc leaves it.
+        if let Some(lbl) = tab.flat_label() {
+            return format!(" {} ⌥ {} ", i + 1, lbl);
+        }
         let main = if is_active {
             tab.cwd.display().to_string()
         } else {
@@ -1439,6 +1445,17 @@ pub(crate) fn key_hints(app: &App) -> Vec<(&'static str, &'static str)> {
             ("Esc", d("clear", "解除")),
         ],
         Mode::Command => vec![("Enter", d("run", "実行")), ("Esc", d("cancel", "取消"))],
+        // A flat / search listing is a mode of its own: the one thing that must
+        // be obvious is how to get out of it, then that marks and file ops work
+        // on the results just like a normal listing.
+        _ if app.active_pane().map(|p| p.is_flat()).unwrap_or(false) => vec![
+            ("b/Esc", d("leave", "戻る")),
+            ("Space", d("mark", "マーク")),
+            ("/", d("filter", "絞込")),
+            ("Enter", d("open", "開く")),
+            ("F3", d("view", "閲覧")),
+            ("?", d("help", "ヘルプ")),
+        ],
         // Ordered by how often each is reached for: a narrow window drops
         // from the end, and `? help` is reserved separately. Kept short on
         // purpose — a bar listing everything becomes wallpaper, and the
@@ -1453,6 +1470,7 @@ pub(crate) fn key_hints(app: &App) -> Vec<(&'static str, &'static str)> {
             (",", d("sort", "並替")),
             ("S-F", d("find", "検索")),
             ("C-F", d("grep", "grep")),
+            ("b", d("branch", "ブランチ")),
             ("F3", d("view", "閲覧")),
             ("M", d("menu", "メニュー")),
             // The tab F-keys, which are otherwise invisible: F1/F2 step tabs,
@@ -2837,7 +2855,7 @@ fn draw_popup(
             f.render_widget(Paragraph::new(Line::from(spans)), line_area);
         }
         f.render_widget(
-            Paragraph::new(tr(lang, " Enter=go  j/k=move  Esc=close ", " Enter=移動  j/k=カーソル  Esc=閉じる ")).style(
+            Paragraph::new(tr(lang, " Enter=go  p=panelize  j/k=move  Esc=close ", " Enter=移動  p=ペイン化  j/k=カーソル  Esc=閉じる ")).style(
                 Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD),
             ),
             Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1),

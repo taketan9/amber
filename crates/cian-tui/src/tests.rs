@@ -3629,6 +3629,69 @@
         assert!(app.find_job.is_none(), "the worker should be released");
     }
 
+    /// Wait until a branch view / panelize has installed its flat listing.
+    /// `drain_find` cannot be used: routing to a pane releases the job the moment
+    /// it completes, so there is no lingering `done` for it to observe.
+    fn drain_until_flat(app: &mut App) {
+        let start = Instant::now();
+        while start.elapsed() < Duration::from_secs(5) {
+            app.poll_find_job();
+            if app.active_pane().map(|p| p.is_flat()).unwrap_or(false) {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        panic!("branch view did not build");
+    }
+
+    #[test]
+    fn b_flattens_the_subtree_into_the_pane_and_toggles_back() {
+        let d = find_tree();
+        let p = d.path().to_path_buf();
+        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+
+        app.handle_key(key('b')).unwrap();
+        drain_until_flat(&mut app);
+
+        let pane = app.active_pane().unwrap();
+        assert!(pane.is_flat());
+        // Every file in the tree, folders excluded, shown by relative path.
+        let mut names: Vec<String> =
+            pane.entries.iter().filter(|e| !e.is_parent).map(|e| e.name.clone()).collect();
+        names.sort();
+        assert_eq!(
+            names,
+            vec!["build/main.o", "readme.md", "src/deep/main.rs", "src/main.rs"]
+        );
+        assert!(pane.entries.iter().all(|e| !e.is_parent), "no `..` row in a flat view");
+
+        // `b` again leaves the view, back to the real directory listing.
+        app.handle_key(key('b')).unwrap();
+        let pane = app.active_pane().unwrap();
+        assert!(!pane.is_flat());
+        assert!(pane.entries.iter().any(|e| e.name == "src" && e.is_dir), "real dirs are back");
+    }
+
+    #[test]
+    fn p_panelizes_search_results_into_the_pane() {
+        let d = find_tree();
+        let p = d.path().to_path_buf();
+        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+
+        app.start_find("main", cian_core::search::Mode::Name);
+        drain_find(&mut app);
+        // main.rs (×2) + build/main.o = 3 name matches.
+        let Popup::FindResults { hits, .. } = &app.popup else { panic!("no results") };
+        assert_eq!(hits.len(), 3);
+
+        app.handle_key(key('p')).unwrap();
+        assert!(matches!(app.popup, Popup::None), "panelize closes the popup");
+        assert!(app.find_job.is_none(), "and releases the worker");
+        let pane = app.active_pane().unwrap();
+        assert!(pane.is_flat());
+        assert_eq!(pane.entries.iter().filter(|e| !e.is_parent).count(), 3);
+    }
+
     #[test]
     fn a_search_with_no_matches_says_so_rather_than_hanging() {
         let d = find_tree();

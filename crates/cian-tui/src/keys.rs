@@ -499,6 +499,26 @@ impl App {
                 KeyCode::Char('g') | KeyCode::Home => *cursor = 0,
                 KeyCode::Char('G') | KeyCode::End => *cursor = n.saturating_sub(1),
                 KeyCode::Enter => return self.open_find_hit(),
+                // `p` panelizes: load the matches into the pane as a flat listing
+                // so they can be marked and bulk-operated on, not just jumped to.
+                KeyCode::Char('p') => {
+                    let hits = if let Popup::FindResults { hits, .. } = &self.popup {
+                        hits.clone()
+                    } else {
+                        Vec::new()
+                    };
+                    let label = self
+                        .find_job
+                        .as_ref()
+                        .map(|j| match j.mode {
+                            cian_core::search::Mode::Content => format!("grep: {}", j.query),
+                            cian_core::search::Mode::Name => format!("find: {}", j.query),
+                        })
+                        .unwrap_or_else(|| tr(self.lang, "results", "検索結果").to_string());
+                    self.popup = Popup::None;
+                    self.stop_find();
+                    self.panelize_active(label, &hits, false);
+                }
                 _ => {}
             }
             return Ok(());
@@ -1420,7 +1440,14 @@ impl App {
                 self.command_buffer.clear();
             }
             (false, _, KeyCode::Esc) => {
-                if let Some(p) = self.active_pane_mut() {
+                // In a branch / search listing, Esc is the way out of the view
+                // first; only once back in a normal directory does it clear
+                // marks and the filter.
+                if self.active_pane().map(|p| p.is_flat()).unwrap_or(false) {
+                    if let Some(p) = self.active_pane_mut() {
+                        let _ = p.leave_flat();
+                    }
+                } else if let Some(p) = self.active_pane_mut() {
                     p.clear_marks();
                     p.clear_filter();
                 }
@@ -1470,6 +1497,8 @@ impl App {
             (true, _, KeyCode::Char('f')) => self.start_grep_prompt(),
             (false, _, KeyCode::Char(',')) => self.start_sort_picker(),
             (false, false, KeyCode::Char('z')) => self.start_jump_path(),
+            // `b` flattens the subtree into this pane (branch view); again to leave.
+            (false, false, KeyCode::Char('b')) => self.toggle_branch_view(),
             (false, false, KeyCode::F(3)) => self.look_inside(),
             // `=` for "are these equal": free, mnemonic, and next to the
             // keys already used for the two panes.

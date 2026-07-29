@@ -1415,6 +1415,22 @@ impl App {
 
     /// Walk the tree below the focused pane on a worker thread.
     pub(crate) fn start_find(&mut self, needle: &str, mode: cian_core::search::Mode) {
+        self.begin_find(needle, mode, None);
+    }
+
+    /// Flatten the focused pane's whole subtree into that pane — "branch view".
+    /// It reuses the search walker (an empty name query matches everything) and
+    /// routes the result into the pane instead of a popup. Pressing it again on
+    /// a flat pane leaves the view (handled by the caller).
+    pub(crate) fn start_branch_view(&mut self) {
+        let label = tr(self.lang, "branch", "ブランチ").to_string();
+        self.begin_find("", cian_core::search::Mode::Name, Some(label));
+    }
+
+    /// Shared worker spawn for [`start_find`] and [`start_branch_view`]. With
+    /// `to_pane` set, the streamed hits accumulate in the (hidden) results popup
+    /// and are panelized into the active pane when the walk completes.
+    fn begin_find(&mut self, needle: &str, mode: cian_core::search::Mode, to_pane: Option<String>) {
         self.find_return = None; // a fresh search invalidates any stashed list
         let Some(root) = self.active_pane().map(|p| p.cwd.clone()) else { return };
         let mut query = cian_core::search::Query::new(needle);
@@ -1443,8 +1459,53 @@ impl App {
             query: needle.to_string(),
             mode,
             done: None,
+            to_pane,
         });
         self.popup = Popup::FindResults { hits: Vec::new(), cursor: 0, scroll: 0 };
+    }
+
+    /// Load a set of search hits into the active pane as a flat listing so the
+    /// normal cursor, marks and file operations act on them. Shared by branch
+    /// view (all files) and "panelize" from the grep results (`files_only`
+    /// off — keep whatever matched, one row per path).
+    pub(crate) fn panelize_active(
+        &mut self,
+        label: String,
+        hits: &[cian_core::search::Hit],
+        files_only: bool,
+    ) {
+        let mut seen = std::collections::HashSet::new();
+        let mut entries = Vec::new();
+        for h in hits {
+            if files_only && h.is_dir {
+                continue;
+            }
+            // One row per file: a content grep reports every matching line.
+            if !seen.insert(h.path.clone()) {
+                continue;
+            }
+            entries.push(cian_core::Entry::flat(&h.rel, h.path.clone(), h.is_dir));
+        }
+        if entries.is_empty() {
+            self.message = Some(tr(self.lang, "nothing to show", "表示するものがありません").into());
+            return;
+        }
+        let n = entries.len();
+        if let Some(t) = self.active_file_tabs_mut() {
+            t.active_mut().enter_flat(label, entries);
+        }
+        self.message = Some(format!("{} {}", n, tr(self.lang, "entries", "件")));
+    }
+
+    /// `b`: toggle branch view for the focused pane.
+    pub(crate) fn toggle_branch_view(&mut self) {
+        if self.active_pane().map(|p| p.is_flat()).unwrap_or(false) {
+            if let Some(p) = self.active_pane_mut() {
+                let _ = p.leave_flat();
+            }
+            return;
+        }
+        self.start_branch_view();
     }
 
     /// Collect whatever the search has produced. Returns true to repaint.
@@ -1475,6 +1536,28 @@ impl App {
             if let Popup::FindResults { hits, .. } = &mut self.popup {
                 hits.extend(batch);
             }
+        }
+        // A branch view routes its walk into the pane, not the popup: once the
+        // walk finishes, panelize the accumulated hits and drop the popup.
+        let finished_to_pane = self
+            .find_job
+            .as_ref()
+            .map(|j| j.done.is_some() && j.to_pane.is_some())
+            .unwrap_or(false);
+        if finished_to_pane {
+            let label = self.find_job.as_ref().and_then(|j| j.to_pane.clone()).unwrap_or_default();
+            let hits = match std::mem::replace(&mut self.popup, Popup::None) {
+                Popup::FindResults { hits, .. } => hits,
+                other => {
+                    self.popup = other;
+                    Vec::new()
+                }
+            };
+            self.stop_find();
+            // Branch view lists files only — a flat listing of folders is not
+            // what "flatten the tree" means.
+            self.panelize_active(label, &hits, true);
+            changed = true;
         }
         changed
     }
