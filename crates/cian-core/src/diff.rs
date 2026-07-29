@@ -341,6 +341,30 @@ pub fn summary(d: &Diff) -> String {
     s
 }
 
+/// The identical run at the start and end of two changed lines, in **chars**.
+///
+/// A `Changed` row usually rewrites only part of the line. Showing which part —
+/// the way WinMerge underlines the edited span and leaves the rest calm — reads
+/// far better than repainting the whole line one flat color. Returns
+/// `(prefix, suffix)` character counts common to both sides; they never overlap
+/// (their sum never exceeds the shorter line's length).
+pub fn common_affixes(a: &str, b: &str) -> (usize, usize) {
+    let ac: Vec<char> = a.chars().collect();
+    let bc: Vec<char> = b.chars().collect();
+    let mut p = 0;
+    while p < ac.len() && p < bc.len() && ac[p] == bc[p] {
+        p += 1;
+    }
+    // The suffix scan must stop at the shared prefix so the two runs can't
+    // claim the same character on the shorter side.
+    let max_s = ac.len().min(bc.len()) - p;
+    let mut s = 0;
+    while s < max_s && ac[ac.len() - 1 - s] == bc[bc.len() - 1 - s] {
+        s += 1;
+    }
+    (p, s)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -361,6 +385,20 @@ mod tests {
                 Row::Skipped { lines } => format!("... {} lines", lines),
             })
             .collect()
+    }
+
+    #[test]
+    fn common_affixes_isolates_the_edited_middle() {
+        // Shared "let x = " ... ";" wrapping a changed value.
+        assert_eq!(common_affixes("let x = 1;", "let x = 42;"), (8, 1));
+        // No overlap: identical prefix and suffix can't double-count a char.
+        assert_eq!(common_affixes("ab", "aXb"), (1, 1));
+        // One side a prefix of the other — the whole shorter run is common.
+        assert_eq!(common_affixes("foo", "foobar"), (3, 0));
+        // Nothing in common: the entire line is the edit.
+        assert_eq!(common_affixes("abc", "xyz"), (0, 0));
+        // Char-based, so multibyte text splits on character boundaries.
+        assert_eq!(common_affixes("あいう", "あXう"), (1, 1));
     }
 
     #[test]

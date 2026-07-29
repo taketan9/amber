@@ -3477,6 +3477,12 @@ fn draw_popup(
         let del = Style::default().fg(Color::Rgb(255, 140, 145));
         let add = Style::default().fg(Color::Rgb(130, 225, 150));
         let chg = Style::default().fg(Color::Rgb(240, 210, 120));
+        // The exact edited span within a changed line: a solid bar, the way
+        // WinMerge marks the characters that actually differ.
+        let chg_hot = Style::default()
+            .fg(Color::Black)
+            .bg(Color::Rgb(240, 210, 120))
+            .add_modifier(Modifier::BOLD);
 
         let cell = |line: Option<&cian_core::diff::Line>, style: Style| -> Vec<Span<'static>> {
             match line {
@@ -3488,6 +3494,45 @@ fn draw_popup(
                 // itself shows which file the line is missing from.
                 None => vec![Span::raw(" ".repeat(gutter + col))],
             }
+        };
+
+        // A changed line, with its common prefix/suffix left calm and only the
+        // edited middle painted as a bar. `prefix`/`suffix` are the shared char
+        // counts from `common_affixes`; each side clamps `suffix` to its own
+        // length so an insertion (empty middle on one side) stays in bounds.
+        let emph_cell = |line: &cian_core::diff::Line, prefix: usize, suffix: usize| -> Vec<Span<'static>> {
+            let chars: Vec<char> = line.text.chars().collect();
+            let n = chars.len();
+            let suffix = suffix.min(n.saturating_sub(prefix));
+            let mid_end = n - suffix;
+            // Match `cell`'s truncation: keep at most `col` chars, ellipsis when cut.
+            let fits = n <= col;
+            let budget = if fits { col } else { col.saturating_sub(1) };
+            let mut spans = vec![Span::styled(format!("{:>w$} ", line.no, w = gutter - 1), num)];
+            let mut buf = String::new();
+            let mut buf_hot = false;
+            let mut shown = String::new();
+            for (i, &c) in chars.iter().take(budget).enumerate() {
+                let is_hot = i >= prefix && i < mid_end;
+                if !buf.is_empty() && is_hot != buf_hot {
+                    spans.push(Span::styled(std::mem::take(&mut buf), if buf_hot { chg_hot } else { chg }));
+                }
+                buf_hot = is_hot;
+                buf.push(c);
+                shown.push(c);
+            }
+            if !buf.is_empty() {
+                spans.push(Span::styled(buf, if buf_hot { chg_hot } else { chg }));
+            }
+            if !fits {
+                spans.push(Span::styled("…".to_string(), chg));
+                shown.push('…');
+            }
+            let pad = col.saturating_sub(crate::util::width(&shown));
+            if pad > 0 {
+                spans.push(Span::raw(" ".repeat(pad)));
+            }
+            spans
         };
 
         // Rows whose text matches the active search get a highlight bar.
@@ -3520,9 +3565,10 @@ fn draw_popup(
                         Line::from(s)
                     }
                     Row::Changed { left: l, right: rr } => {
-                        let mut s = cell(Some(l), chg);
+                        let (p, sfx) = cian_core::diff::common_affixes(&l.text, &rr.text);
+                        let mut s = emph_cell(l, p, sfx);
                         s.push(Span::styled(" ~ ", chg.add_modifier(Modifier::BOLD)));
-                        s.extend(cell(Some(rr), chg));
+                        s.extend(emph_cell(rr, p, sfx));
                         Line::from(s)
                     }
                     Row::Removed { left: l } => {
