@@ -111,6 +111,7 @@ impl App {
                     v.insert(0, MenuItem::AiSearch);
                     v.insert(0, MenuItem::AiStructure);
                     v.insert(0, MenuItem::AiJunk);
+                    v.insert(0, MenuItem::AiTriageLog);
                 }
                 v.push(MenuItem::Back);
                 Some(v)
@@ -405,6 +406,7 @@ impl App {
             MenuItem::AiExplainError => self.explain_shell_error(),
             MenuItem::AiCommit => self.start_ai_commit_message(),
             MenuItem::AiJunk => self.start_ai_junk(),
+            MenuItem::AiTriageLog => self.triage_log(),
             MenuItem::AiStructure => self.start_ai_structure(),
             MenuItem::AiRename => self.start_ai_rename_prompt(),
             MenuItem::AiSearch => self.start_ai_search_prompt(),

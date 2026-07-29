@@ -945,7 +945,7 @@ impl App {
     }
 
     /// The open diff (file or folder) rendered as plain text, for copy/save.
-    fn diff_as_text(&self) -> Option<String> {
+    pub(crate) fn diff_as_text(&self) -> Option<String> {
         use cian_core::diff::Row;
         match &self.popup {
             Popup::Diff { left, right, result, .. } => {

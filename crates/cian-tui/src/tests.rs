@@ -506,6 +506,76 @@
     }
 
     #[test]
+    fn explain_diff_opens_the_chat_with_the_diff() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().to_path_buf();
+        let mut config = cian_lua::Config::default();
+        config.ai = Some(cian_lua::AiOptions {
+            python: "python3".into(),
+            auth_mode: "mock".into(),
+            ..Default::default()
+        });
+        let mut app = App::new(p.clone(), p, config).unwrap();
+        app.ai_ready = Some(true);
+
+        let result = cian_core::diff::diff_lines(
+            &["let x = 1;".to_string()],
+            &["let x = 2;".to_string()],
+        );
+        let folded = cian_core::diff::fold(&result.rows, cian_core::diff::CONTEXT);
+        app.popup = Popup::Diff {
+            left: "a".into(),
+            right: "b".into(),
+            left_path: "a".into(),
+            right_path: "b".into(),
+            encoding: cian_core::viewer::TextEncoding::Utf8,
+            result,
+            folded,
+            fold: true,
+            scroll: 0,
+            find: None,
+            find_input: None,
+        };
+        app.explain_diff();
+        match &app.popup {
+            Popup::AiChat { log, pending, .. } => {
+                assert!(*pending, "the request is in flight");
+                assert!(log.iter().any(|m| m.user && m.text == "Explain this diff"));
+            }
+            other => panic!("expected the chat, got {:?}", other),
+        }
+        assert!(app.ai_job.is_some(), "a request was fired");
+    }
+
+    #[test]
+    fn triage_log_reads_the_selected_file_and_opens_chat() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("app.log"), "INFO ok\nERROR boom\n").unwrap();
+        let p = dir.path().to_path_buf();
+        let mut config = cian_lua::Config::default();
+        config.ai = Some(cian_lua::AiOptions {
+            python: "python3".into(),
+            auth_mode: "mock".into(),
+            ..Default::default()
+        });
+        let mut app = App::new(p.clone(), p, config).unwrap();
+        app.ai_ready = Some(true);
+        if let Some(t) = app.active_file_tabs_mut() {
+            let pane = t.active_mut();
+            let i = pane.entries.iter().position(|e| e.name == "app.log").unwrap();
+            pane.cursor = i;
+        }
+        app.triage_log();
+        match &app.popup {
+            Popup::AiChat { log, pending, .. } => {
+                assert!(*pending);
+                assert!(log.iter().any(|m| m.user && m.text.contains("app.log")), "names the log: {:?}", log);
+            }
+            other => panic!("expected the chat, got {:?}", other),
+        }
+    }
+
+    #[test]
     fn ai_chat_copy_uses_selection_then_last_reply() {
         let (_d, mut app) = app_with(&["a.txt"]);
         app.popup = Popup::AiChat {

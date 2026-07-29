@@ -694,6 +694,8 @@ impl App {
                 KeyCode::Char('c') | KeyCode::Char('p') => self.copy_diff(),
                 KeyCode::Char('w') => self.start_diff_save_as(),
                 KeyCode::Char('e') => self.open_diff_encoding_picker(),
+                // x asks Carmine to explain what changed and why.
+                KeyCode::Char('x') => self.explain_diff(),
                 // >/< copy one side's file over the other (confirms).
                 KeyCode::Char('>') | KeyCode::Char('.') => self.diff_copy(true),
                 KeyCode::Char('<') | KeyCode::Char(',') => self.diff_copy(false),

@@ -115,6 +115,8 @@ impl App {
                 }
             }
             "aierror" | "explain" | "crmaineerror" => self.explain_shell_error(),
+            "aidiff" | "explaindiff" | "crmainediff" => self.explain_diff(),
+            "ailog" | "logtriage" | "triage" | "crmainelog" => self.triage_log(),
             "dupes" | "dup" | "duplicates" => self.start_dupes(),
             "theme" | "colorscheme" | "colourscheme" => {
                 if rest.is_empty() {

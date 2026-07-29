@@ -629,6 +629,8 @@ enum MenuItem {
     AiCommit,
     /// Detect junk files in the current directory.
     AiJunk,
+    /// Triage the selected file as a log (errors, timeline, likely cause).
+    AiTriageLog,
     /// Find duplicate files by content (not AI).
     FindDupes,
     /// Suggest an organised folder structure for the current directory.
@@ -816,6 +818,7 @@ impl MenuItem {
             MenuItem::AiExplainError => tr(lang, "Explain the last error  (:explain)", "直近のエラーを説明  (:explain)"),
             MenuItem::AiCommit => tr(lang, "Draft commit message  (:aicommit)", "コミットメッセージ生成  (:aicommit)"),
             MenuItem::AiJunk => tr(lang, "Detect junk files  (:aijunk)", "ゴミファイル検出  (:aijunk)"),
+            MenuItem::AiTriageLog => tr(lang, "Triage this log  (:ailog)", "このログを診断  (:ailog)"),
             MenuItem::FindDupes => tr(lang, "Find duplicate files  (:dupes)", "重複ファイルを検出  (:dupes)"),
             MenuItem::AiStructure => tr(lang, "Suggest folder structure  (:organize)", "フォルダ構成を提案  (:organize)"),
             MenuItem::AiRename => tr(lang, "AI rename  (:airename)", "AIリネーム  (:airename)"),
@@ -3052,8 +3055,10 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry(":reload", None, "re-read init.lua (borders need a restart)", "init.luaを再読込（枠線は再起動が必要）"),
                 entry(":where", None, "which config files cian reads/writes (portable vs ~/.config)", "cianが読み書きする設定ファイルの場所（ポータブル/~/.config）"),
                 entry(":mark", None, "mark by wildcard;  :mark *.rs   :unmark *", "ワイルドカードでマーク；  :mark *.rs   :unmark *"),
-                entry(":ai", None, "AI chat  (needs cian.ai in init.lua)", "AIチャット  (init.luaのcian.aiが必要)"),
+                entry(":ai", None, "AI chat (Carmine / カーマイン)  — needs cian.ai in init.lua", "AIチャット（カーマイン）  — init.luaのcian.aiが必要"),
                 entry(":aicmd", None, "AI: shell command from a description", "AI: 説明からシェルコマンド生成"),
+                entry(":aidiff", None, "AI: explain the diff on screen (x in the diff view)", "AI: 表示中の差分を説明（差分画面で x）"),
+                entry(":ailog", None, "AI: triage the selected log file (errors, cause, next check)", "AI: 選択中のログを診断（エラー・原因・次の確認）"),
                 entry(":zip", None, "bundle selection;  :zip -e  for a password", "選択物をまとめる；  :zip -e でパスワード付き"),
                 entry(":tar / :targz", None, "make a .tar / .tar.gz (also right-click ▸ Compress)", ".tar / .tar.gz を作成（右クリック▸圧縮でも）"),
                 entry(":unzip", None, "extract the archive here (also right-click ▸ Extract)", "書庫をここに解凍（右クリック▸解凍でも）"),

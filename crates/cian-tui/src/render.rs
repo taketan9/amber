@@ -1406,6 +1406,12 @@ pub(crate) fn key_hints(app: &App) -> Vec<(&'static str, &'static str)> {
     };
     if app.focused == FocusedPane::Shell {
         let mut v = vec![("Esc", d("files", "ファイル"))];
+        // When the last output looks like an error, nudge toward asking Carmine
+        // to explain it — the action lives at the top of the shell menu
+        // (Shift+Enter), which works everywhere a modifier-combo might not.
+        if app.shell_error_detected() {
+            v.push(("⚠ S-Enter", d("explain error", "エラーを説明")));
+        }
         // Moving between split panes only exists once there is a split, and it
         // is the hint most worth showing then — the key is easy to forget and
         // there is nothing on screen otherwise to suggest it.
@@ -3639,8 +3645,8 @@ fn draw_popup(
                 "{}{}  {}  [{}] {} ",
                 tr(lang, " n/N change  / find  f ", " n/N 変更  / 検索  f "),
                 fold_word,
-                tr(lang, "c copy  w save  e enc  g/G  Esc",
-                      "c コピー  w 保存  e 文字コード  g/G  Esc"),
+                tr(lang, "c copy  w save  e enc  x explain  g/G  Esc",
+                      "c コピー  w 保存  e 文字コード  x 説明  g/G  Esc"),
                 encoding.label(),
                 pos
             )

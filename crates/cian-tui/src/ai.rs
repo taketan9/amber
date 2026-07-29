@@ -6,6 +6,39 @@
 
 use super::*;
 
+/// Who the assistant is, prepended to every conversational (chat) system prompt.
+/// The product is crmaine, read「カーマイン」in Japanese; that is the name it
+/// answers to, and it refers to itself in the first person as「私」.
+/// Read up to the last `max_bytes` of a file as text. Logs grow at the end, so
+/// the tail is the part worth sending; a partial first line (from cutting mid
+/// file) is dropped so the model does not read a fragment as a whole entry.
+fn read_tail(path: &std::path::Path, max_bytes: u64) -> String {
+    use std::io::{Read, Seek, SeekFrom};
+    let Ok(mut f) = std::fs::File::open(path) else { return String::new() };
+    let len = f.metadata().map(|m| m.len()).unwrap_or(0);
+    let start = len.saturating_sub(max_bytes);
+    let _ = f.seek(SeekFrom::Start(start));
+    let mut buf = Vec::new();
+    let _ = f.read_to_end(&mut buf);
+    let s = String::from_utf8_lossy(&buf).into_owned();
+    if start > 0 {
+        if let Some(nl) = s.find('\n') {
+            return s[nl + 1..].to_string();
+        }
+    }
+    s
+}
+
+/// Who the assistant is, prepended to every conversational (chat) system prompt.
+/// The product is crmaine, read「カーマイン」in Japanese; that is the name it
+/// answers to, and it refers to itself in the first person as「私」.
+fn persona() -> &'static str {
+    "あなたはこの二画面ファイラ／ターミナル「cian」に組み込まれた AI アシスタントです。\
+     あなたの名前は「カーマイン」。自分を指すときは常に一人称「私」を使い、\
+     名前を尋ねられたら「私はカーマインです」と名乗ってください。\
+     (Your name is Carmine / カーマイン; always refer to yourself as「私」.)"
+}
+
 impl App {
     /// Is the AI helper configured and working? Returns the cached result of the
     /// background probe (see [`Self::spawn_ai_probe`]); `false` until the probe
@@ -163,6 +196,125 @@ impl App {
         self.ai_request(AiPurpose::Chat, system, body);
     }
 
+    /// Explain the diff currently on screen (a two-file diff or a folder
+    /// compare): what changed and the likely intent, grouped rather than line by
+    /// line. Reuses the same text the copy/save actions produce.
+    pub(crate) fn explain_diff(&mut self) {
+        if self.ai.is_none() {
+            self.message = Some("AI not configured — add cian.ai{...} to init.lua".into());
+            return;
+        }
+        let Some(text) = self.diff_as_text() else {
+            self.message = Some("no diff to explain".into());
+            return;
+        };
+        if !self.ai_ready() {
+            self.message = Some("AI unavailable (python, packages, or sign-in)".into());
+            return;
+        }
+        let body = truncate_diff_for_ai(&text, 8_000);
+        let system = "You explain a diff between two files (or two folders) for a \
+             developer. Summarize WHAT changed and, where you can tell, the \
+             likely intent — grouped by theme, not line by line. Call out \
+             anything risky: a removed check, a changed default, a probable \
+             typo. Be concise; plain text, no markdown headings."
+            .to_string();
+        self.popup = Popup::AiChat {
+            input: String::new(),
+            log: vec![ChatMsg { user: true, text: "Explain this diff".into() }],
+            scroll: usize::MAX,
+            pending: true,
+            sel: None,
+        };
+        self.ai_request(AiPurpose::Chat, system, body);
+    }
+
+    /// Triage the selected file as a log: from its tail, surface the errors that
+    /// matter, a rough timeline, and the most likely cause / next check. Aimed
+    /// at the RHEL/AIX/Oracle logs this is built for.
+    pub(crate) fn triage_log(&mut self) {
+        if self.ai.is_none() {
+            self.message = Some("AI not configured — add cian.ai{...} to init.lua".into());
+            return;
+        }
+        let picked = self
+            .active_pane()
+            .and_then(|p| p.selected())
+            .filter(|e| !e.is_dir && !e.is_parent)
+            .map(|e| (e.path.clone(), e.name.clone()));
+        let Some((path, name)) = picked else {
+            self.message = Some("select a log file to triage".into());
+            return;
+        };
+        if !self.ai_ready() {
+            self.message = Some("AI unavailable (python, packages, or sign-in)".into());
+            return;
+        }
+        // A log's meaning is at its end — read the tail, not the head.
+        let tail = read_tail(&path, 16_000);
+        if tail.trim().is_empty() {
+            self.message = Some("that file is empty".into());
+            return;
+        }
+        let system = "You triage a log file for an operator (often RHEL/AIX or \
+             Oracle). From the tail below: list the errors and warnings that \
+             matter, each with its key line; note a rough timeline if the \
+             timestamps show one; then give the single most likely cause and the \
+             next thing to check. Ignore routine INFO noise. Be concise; plain \
+             text, no markdown headings."
+            .to_string();
+        self.popup = Popup::AiChat {
+            input: String::new(),
+            log: vec![ChatMsg { user: true, text: format!("Triage the log: {}", name) }],
+            scroll: usize::MAX,
+            pending: true,
+            sel: None,
+        };
+        self.ai_request(AiPurpose::Chat, system, tail);
+    }
+
+    /// Does the shell's visible output look like it just ended in an error?
+    ///
+    /// A heuristic — cian has no shell-integration marks, so it cannot read an
+    /// exit code — used only to *offer* an explanation (a hint chip), never to
+    /// act. Kept to strong signatures on the last few non-empty lines so routine
+    /// output does not keep the nudge lit. Off entirely when AI is unconfigured.
+    pub(crate) fn shell_error_detected(&self) -> bool {
+        if self.ai.is_none() {
+            return false;
+        }
+        let Some(screen) = self
+            .shell
+            .active_session()
+            .and_then(|s| s.parser().lock().ok().map(|p| p.screen().contents()))
+        else {
+            return false;
+        };
+        let tail: String = screen
+            .lines()
+            .rev()
+            .filter(|l| !l.trim().is_empty())
+            .take(6)
+            .collect::<Vec<_>>()
+            .join("\n")
+            .to_lowercase();
+        const SIGNS: [&str; 12] = [
+            "command not found",
+            "no such file or directory",
+            "permission denied",
+            "traceback (most recent call last)",
+            "segmentation fault",
+            "fatal:",
+            "ora-0",
+            "ora-1",
+            "is not recognized as",
+            "syntax error",
+            "connection refused",
+            "no such host",
+        ];
+        SIGNS.iter().any(|s| tail.contains(s))
+    }
+
     /// Precondition facts to feed the model: the `cian.ai_context{...}` facts
     /// from init.lua, plus the connected server's `notes` when the active shell
     /// is on a known SSH host. Empty when nothing is configured.
@@ -201,6 +353,14 @@ impl App {
             system
         } else {
             format!("{}\n{}", context, system)
+        };
+        // Give the conversational replies a consistent identity. Only for chat:
+        // the structured purposes (rename / search / organize / commit) must
+        // return parseable output, and a persona instruction would loosen that.
+        let system = if matches!(purpose, AiPurpose::Chat) {
+            format!("{}\n{}", persona(), system)
+        } else {
+            system
         };
         if self.ai_job.is_some() {
             self.message = Some("AI is busy".into());
