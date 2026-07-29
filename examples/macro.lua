@@ -1,55 +1,53 @@
 -- ============================================================================
---  cian — macros (the `@` menu)
+--  cian — マクロ（`@` メニュー）
 -- ============================================================================
 --
---  Press `@` (vim's play-a-macro key) to open the launcher and pick one, or run
---  `:macros`. A macro builds a whole shell layout in one keystroke.
+--  `@`（vim のマクロ再生キー）でランチャーを開いて選ぶか、`:macros` を実行。
+--  マクロは1キーでシェルのレイアウト一式を組み立てます。
 --
---  Where it goes (next to init.lua):
+--  置き場所（init.lua の隣）:
 --    Linux / macOS : ~/.config/cian/macro.lua
 --    Windows       : %USERPROFILE%\.config\cian\macro.lua
---  Portable: a macro.lua sitting next to the cian executable wins over this.
+--  ポータブル: cian 実行ファイルの隣にある macro.lua が優先されます。
 --
---  One macro per file: instead of (or as well as) this list, put a `macro/`
---  directory next to init.lua and give each macro its own file, e.g.
---  macro/Adeploy.lua, macro/Bdbcheck.lua. They load in filename order and each
---  returns a single { name =, panes = } table. See examples/macro/Adeploy.lua.
+--  1ファイル1マクロ: このリストの代わりに（または併用して）、init.lua の隣に
+--  `macro/` ディレクトリを置き、マクロごとに1ファイルにできます。例:
+--  macro/Adeploy.lua、macro/Bdbcheck.lua。ファイル名順に読み込まれ、各ファイルは
+--  単一の { name =, panes = } テーブルを返します。examples/macro/Adeploy.lua 参照。
 --
---  Run one at startup, TeraTerm-.ttl style:  cian --macro path/to/thing.lua
---  (a bare `cian thing.lua` works too, so a .lua file associated with cian.exe
---  runs on double-click), or  cian --macro-name "Two local shells".
+--  起動時に1つ実行（TeraTerm の .ttl 風）:  cian --macro path/to/thing.lua
+--  （素の `cian thing.lua` でも動くので、cian.exe に関連付けた .lua は
+--  ダブルクリックで実行できます）。または  cian --macro-name "Two local shells"。
 --
---  A macro returns { name = ..., panes = { ... }, sync = false }. Set
---  `sync = true` to turn on input broadcast (synchronize) once the layout is
---  built, so the same keystrokes then reach every pane at once. The FIRST pane
---  is the shell
---  pane you are on; each later pane is split off the previous one:
---    dir   = "right" (side by side) or "down" (stacked). Default "right".
---    from  = which earlier pane to split off (1-based; default = the previous
---            one). This is how you build a real grid — see macro/Cgrid4.lua.
---    cmd   = a command line to run (typed, then Enter) — e.g. an ssh line.
---    steps = a scripted sequence run after cmd, played out over time so it can
---            wait for a prompt instead of racing ahead. Each step is:
---              "text"                       -- send a line (Enter)
---              { send = "text" }            -- send a line
---              { wait = 2 }                 -- pause 2 seconds
---              { expect = "SQL>" }          -- wait until text appears
---              { expect = "pw:", timeout=20 } -- ...or give up after 20s
---            See examples/macro/Bmacro.lua for a scripted DB login.
---    bg    = pane background colour ("#rrggbb", a name, or "r,g,b"), so each
---            pane is easy to tell apart.
---    log   = a directory to start a session log in for that pane.
+--  マクロは { name = ..., panes = { ... }, sync = false } を返します。レイアウトを
+--  組んだ後に入力ブロードキャスト（同期）を有効化するには `sync = true`。以降は
+--  同じキー入力が全ペインに同時に届きます。最初のペインは今いるシェルペインで、
+--  以降の各ペインは前のペインから分割されます:
+--    dir   = "right"（横並び）または "down"（縦積み）。既定は "right"。
+--    from  = どの前ペインから分割するか（1始まり。既定は直前）。これが本物の
+--            グリッドを作る鍵です — macro/Cgrid4.lua 参照。
+--    cmd   = 実行するコマンド行（打ち込んで Enter）— 例えば ssh の行。
+--    steps = cmd の後に走る台本。時間をかけて再生されるので、先走らずに
+--            プロンプトを待てます。各ステップは:
+--              "text"                       -- 1行送る（Enter）
+--              { send = "text" }            -- 1行送る
+--              { wait = 2 }                 -- 2秒待つ
+--              { expect = "SQL>" }          -- テキストが現れるまで待つ
+--              { expect = "pw:", timeout=20 } -- …または20秒で諦める
+--            台本による DB ログインは examples/macro/Bmacro.lua 参照。
+--    bg    = ペインの背景色（"#rrggbb"・色名・"r,g,b"）。各ペインを見分けやすく。
+--    log   = そのペインでセッションログを開始するディレクトリ。
 -- ============================================================================
 
 return {
-  -- A three-pane working set: two servers plus a live log tail.
+  -- 3ペインの作業セット: サーバ2台に加えてログのライブ追尾。
   { name = "Prod: db + app + logs", panes = {
     { cmd = "ssh admin@db.example.com",  bg = "40,24,24", log = "~/cian-logs" },
     { dir = "right", cmd = "ssh admin@app.example.com", bg = "24,40,24" },
     { dir = "down",  cmd = "ssh admin@app.example.com", steps = { "tail -f /var/log/app/app.log" } },
   }},
 
-  -- Drop straight into a database session (bash → sqlplus → connect).
+  -- そのままデータベースセッションへ（bash → sqlplus → connect）。
   { name = "Oracle sqlplus login", panes = {
     { cmd = "bash", steps = {
         "sqlplus /nolog",
@@ -58,7 +56,7 @@ return {
       } },
   }},
 
-  -- A quick side-by-side pair of local shells.
+  -- ローカルシェルをさっと横並びで2つ。
   { name = "Two local shells", panes = {
     { bg = "20,28,40" },
     { dir = "right", bg = "40,28,20" },

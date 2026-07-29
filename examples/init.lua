@@ -1,319 +1,325 @@
 -- ============================================================================
---  cian — configuration
+--  cian — 設定ファイル（日本語版）
 -- ============================================================================
 --
---  Everything below is COMMENTED OUT. Delete the leading "-- " on any line to
---  turn that setting on. With nothing uncommented, cian runs on its defaults.
+--  以下はすべてコメントアウトされています。行頭の "-- " を消せば、その設定が
+--  有効になります。何も外さなければ、cian は既定値で動きます。
 --
---  Where this file goes:
+--  このファイルの置き場所:
 --    Linux / macOS : ~/.config/cian/init.lua
 --    Windows       : %USERPROFILE%\.config\cian\init.lua
---                    (e.g. C:\Users\you\.config\cian\init.lua)
---    Or set $CIAN_CONFIG_DIR to point somewhere else; cian reads
---    $CIAN_CONFIG_DIR/init.lua then.
+--                    （例: C:\Users\you\.config\cian\init.lua）
+--    もしくは $CIAN_CONFIG_DIR を設定すれば、cian は
+--    $CIAN_CONFIG_DIR/init.lua を読みます。
 --
---  It is plain Lua 5.4, so you can use variables, functions and `if` around
---  any of this (e.g. a different shell per machine). Mistakes are never fatal:
---  cian collects them and shows a notice on startup instead of refusing to run.
+--  ※ このファイル自体は英語版 examples/init.lua の日本語訳です。中身のコードは
+--     同じなので、好きな方をコピーして使ってください。
 --
---  See the full key list any time with `?` in the app, `:man`, or `cian -man`.
+--  init.lua をすっきり保つ：SSH ホストとキーバインドは、それぞれ隣の別ファイル
+--  （ssh.lua / keymap.lua、examples/ を参照）に分けられます。cian は init.lua の
+--  直後に同じ設定として読み込むので、`cian.ssh{…}` / `cian.set_keymap(…)` は
+--  そこでもここと同じように効きます。これで init.lua を「画面表示・Git/SVN・AI」
+--  に集中させられます。読み込まれているファイルは `:where` で確認できます。
 --
---  日本語版はこのファイルの日本語訳 examples/init.ja.lua にあります。
+--  中身は素の Lua 5.4 です。変数・関数・`if` を自由に使えます（例: マシンごとに
+--  別のシェルを指定するなど）。書き間違えても致命的にはならず、cian は起動時に
+--  まとめて通知するだけで、そのまま動きます。
 --
---  Keeping init.lua tidy: the SSH hosts and the key bindings can each move to
---  their own file next to this one — ssh.lua and keymap.lua (see examples/).
---  cian loads them right after init.lua into the same config, so `cian.ssh{…}`
---  and `cian.set_keymap(…)` work there exactly as they do here. That lets
---  init.lua stay focused on display, Git/SVN and AI. `:where` shows which files
---  are found.
+--  キー一覧はいつでも、アプリ内で `?`、`:man`、または `cian -man` で見られます。
 -- ============================================================================
 
 
 -- ----------------------------------------------------------------------------
---  THEME
+--  テーマ
 -- ----------------------------------------------------------------------------
--- Start from a named preset. Built in:
---   "default" / "dark"        (the built-in dark theme, the default)
---   "solarized-light"         (aka "solarized"),  "solarized-dark"
+-- 名前付きプリセットから始められます。内蔵プリセット:
+--   "default" / "dark"        （内蔵のダークテーマ。既定値）
+--   "solarized-light"         （別名 "solarized"）、"solarized-dark"
 --   "dracula", "nord", "monokai", "one-dark", "tokyo-night"
 --   "gruvbox-dark", "gruvbox-light"
---   "catppuccin-mocha" (aka "catppuccin"), "catppuccin-latte"
+--   "catppuccin-mocha"（別名 "catppuccin"）、"catppuccin-latte"
 --   "github-light"
 -- cian.set_theme "dracula"
 --
--- You can also switch at runtime — no restart needed: `:theme` opens a gallery
--- that previews each preset live (Enter keeps it, Esc cancels), or
--- `:theme <name>` sets one directly. It's also under the right-click menu.
--- A theme chosen this way is remembered (saved to state.toml next to your
--- config — see `:where`) and re-applied on the next launch, taking precedence
--- over the cian.set_theme above. So this line is really just the default.
+-- 実行中にも切り替えられます（再起動不要）。`:theme` でギャラリーが開き、各
+-- プリセットをライブでプレビューできます（Enter で決定、Esc で取消）。
+-- `:theme <名前>` で直接指定も可。右クリックメニューからも開けます。
+-- この方法で選んだテーマは記憶され（設定の隣の state.toml に保存。場所は
+-- `:where` で確認）、次回起動時に再適用されます。上の cian.set_theme より優先
+-- されるので、この行は実質「既定値」の指定になります。
 
--- …or tune individual colors. Values are "#rrggbb" or a color name
--- ("yellow", "cyan", …). Any key you leave out keeps its current value, and a
--- preset can be combined with overrides:
+-- …または個別の色を調整することもできます。値は "#rrggbb" か色名
+-- （"yellow", "cyan" など）。指定しなかったキーは現在値を保ちます。プリセット
+-- と上書きの併用も可能です:
 -- cian.set_theme {
---   preset      = "solarized-light",  -- optional base to start from
---   accent      = "#268bd2",  -- focused borders, highlights, the bar
---   status_bg   = "#eee8d5",  -- background of the bottom status line
---   selected_bg = "#dcd5be",  -- highlight behind the selected row
---   visual_bg   = "#f7e4b0",  -- highlight while marking in visual mode
---   mark_fg     = "#cb4b16",  -- color of the ● on marked files
+--   preset      = "solarized-light",  -- 起点にするプリセット（任意）
+--   accent      = "#268bd2",  -- フォーカス枠・ハイライト・バーの色
+--   status_bg   = "#eee8d5",  -- 下部ステータス行の背景
+--   selected_bg = "#dcd5be",  -- 選択行のハイライト背景
+--   visual_bg   = "#f7e4b0",  -- ビジュアル選択中のハイライト
+--   mark_fg     = "#cb4b16",  -- マーク済みファイルの ● の色
 -- }
 
 
 -- ----------------------------------------------------------------------------
---  OPTIONS  —  cian.set_option(name, value)
+--  オプション  —  cian.set_option(name, value)
 -- ----------------------------------------------------------------------------
 
--- The directory both panes open in when cian is started with no path argument.
--- Defaults to the Desktop, then your home folder. Handy when launched from a
--- shortcut, where the working directory would otherwise be wherever the exe is.
+-- パス引数なしで cian を起動したとき、両ペインが開くディレクトリ。既定では
+-- デスクトップ、次にホームフォルダ。ショートカットから起動する場合など、作業
+-- ディレクトリが exe の場所になってしまうときに便利です。
 -- cian.set_option("home", "C:\\Users\\you\\Desktop")   -- Windows
--- cian.set_option("home", "~/Desktop")                 -- Linux / macOS (~ and $VARS expand)
+-- cian.set_option("home", "~/Desktop")                 -- Linux / macOS（~ と $VAR は展開されます）
 
--- Which shell runs in the embedded shell panel. Defaults to $SHELL / %COMSPEC%.
+-- 埋め込みシェルパネルで動かすシェル。既定は $SHELL / %COMSPEC%。
 -- cian.set_option("shell", "powershell.exe")
 -- cian.set_option("shell", "pwsh.exe")     -- PowerShell 7
 -- cian.set_option("shell", "/bin/zsh")
 
--- Also put files on the SYSTEM clipboard when you copy with `y` (so they paste
--- in Explorer / Finder too). Default: true.
+-- `y` でコピーしたとき、システムのクリップボードにもファイルを載せる（エクス
+-- プローラー / Finder にも貼り付けられる）。既定: true。
 -- cian.set_option("clipboard_on_copy", true)
 
--- Show dotfiles (names starting with ".") on startup. Toggle live with the
--- right-click menu. Default: true.
+-- 起動時にドットファイル（"." で始まる名前）を表示する。右クリックメニューで
+-- ライブに切り替え可能。既定: true。
 -- cian.set_option("show_hidden", true)
 
--- Nerd Font glyphs — the file-type icons and the branch / disk symbols in the
--- status line. Default true. Set false on a terminal WITHOUT a Nerd Font so
--- those glyphs are dropped (no mojibake); folders are still marked by colour.
+-- Nerd Font グリフ — ファイル種別アイコンや、ステータス行のブランチ／ディスク
+-- 記号。既定 true。Nerd Font の入っていない端末では false にすると、それらの
+-- グリフを出さなくなります（文字化け防止）。フォルダは色で識別できます。
 -- cian.set_option("nerd_fonts", false)
 
--- Border corners: "rounded" (╭╮╯╰) or "plain" (square). Unset auto-picks —
--- rounded where the terminal/font can render them, square in the legacy
--- Windows console. Force "plain" if the corners look misaligned.
+-- 枠線の角: "rounded"（╭╮╯╰）か "plain"（直角）。未設定なら自動判定 —
+-- 描画できる端末／フォントでは丸角、レガシー Windows コンソールでは直角。
+-- 角がずれて見えるときは "plain" を強制してください。
 -- cian.set_option("borders", "rounded")
 
--- The contextual key-hint bar above the status line. Default: true. Set false
--- for a cleaner screen once the keys are muscle memory.
+-- ステータス行の上に出る、状況に応じたキーヒントバー。既定: true。キー操作が
+-- 手に馴染んだら false にして画面をすっきりさせられます。
 -- cian.set_option("key_hints", true)
 
--- Interface language (the key manual, status line, menus, dialogs).
--- Default: "en" (English). Uncomment to switch it to Japanese.
--- (You can also toggle live from the right-click menu.)
+-- インターフェースの言語（キー一覧、ステータス行、メニュー、ダイアログ）。
+-- 既定: "en"（英語）。コメントを外すと日本語になります。
+-- （右クリックメニューからライブに切り替えることもできます。）
 -- cian.set_option("lang", "ja")
 
--- Language for JUST the key manual (`?`) and the right-click context menu,
--- overriding `lang` for those two surfaces only. Handy to keep the interface in
--- English but read the menu / manual in Japanese (or vice versa). Unset =
--- follow `lang`.
+-- キー一覧（`?`）と右クリックメニューだけの言語。この 2 か所だけ `lang` を
+-- 上書きします。インターフェースは英語のままメニュー／マニュアルだけ日本語で
+-- 読む（またはその逆）のに便利。未設定なら `lang` に従います。
 -- cian.set_option("menu_lang", "ja")
 
--- Split / zoom / close animation length, in milliseconds. 0 disables all
--- animation. Default is a short, snappy transition.
+-- 分割 / ズーム / クローズのアニメーション時間（ミリ秒）。0 で全アニメーション
+-- を無効化。既定は短くきびきびした遷移です。
 -- cian.set_option("animation_ms", 120)
--- cian.set_option("animation_ms", 0)      -- off
+-- cian.set_option("animation_ms", 0)      -- 無効
 
--- External editor for `E` in the F3 viewer and `:edit`. A command line; the
--- file is appended. Unset falls back to $VISUAL / $EDITOR, then the first of
--- nvim -> vim -> vi found on PATH (and if none is found, cian says so).
+-- F3 ビューアの `E` と `:edit` で使う外部エディタ。コマンドラインを指定し、末尾
+-- にファイルパスが付きます。未設定なら $VISUAL / $EDITOR、次に PATH 上の
+-- nvim → vim → vi の順で最初に見つかったものを使います（どれも無ければその旨
+-- を表示）。
 -- cian.set_option("editor", "nvim")
--- cian.set_option("editor", "code -w")   -- VS Code, waiting for the tab to close
+-- cian.set_option("editor", "code -w")   -- VS Code（タブを閉じるまで待機）
 
 
 -- ----------------------------------------------------------------------------
---  KEY BINDINGS  —  cian.set_keymap("key", "action")
+--  キーバインド  —  cian.set_keymap("key", "action")
 -- ----------------------------------------------------------------------------
--- `key` is one character. Binding a key to an action makes that key trigger it
--- in the file panes. This works two ways:
+-- `key` は 1 文字です。キーにアクションを割り当てると、ファイルペインでその
+-- キーがアクションを起動します。使い方は 3 通り:
 --
---   * ADD a key:      cian.set_keymap("x", "delete")   -- x now deletes too
---   * CHANGE a key:   binding a key that already has a default REPLACES the
---                     default. `cian.set_keymap("d", "rename")` makes `d`
---                     rename instead of delete.
---   * DISABLE a key:  bind it to "none".  cian.set_keymap("d", "none")
+--   * キーを追加:  cian.set_keymap("x", "delete")   -- x でも削除できるように
+--   * キーを変更:  既定のあるキーに割り当てると既定を置き換えます。
+--                  `cian.set_keymap("d", "rename")` で `d` は削除ではなく
+--                  リネームになります。
+--   * キーを無効化: "none" に割り当てます。 cian.set_keymap("d", "none")
 --
--- The DEFAULT bindings are listed below, each as the line that would recreate
--- it. They are commented out because they are already active — uncomment one
--- only to move it (change the "key") or turn it off ("none"). Structural keys
--- (arrows, Enter, Backspace, Tab, the F-keys, and Ctrl-/Shift- combos) are
--- built in and not remappable here; everything below is.
+-- 以下は既定のバインドを、それを再現する行として並べたものです。既に有効なので
+-- コメントアウトしてあります — 移動したい（"key" を変える）か、無効化したい
+-- （"none"）ときだけコメントを外してください。構造キー（矢印、Enter、
+-- Backspace、Tab、F キー、Ctrl-／Shift- の組み合わせ）は組み込みで、ここでは
+-- 再割り当てできません。以下はすべて変更可能です。
 --
---   -- Movement
+--   -- 移動
 --   cian.set_keymap("j", "cursor_down")
 --   cian.set_keymap("k", "cursor_up")
---   cian.set_keymap("g", "cursor_top")      -- (the `gg` chord; see note)
+--   cian.set_keymap("g", "cursor_top")      -- （`gg` コード。下の注記を参照）
 --   cian.set_keymap("G", "cursor_bottom")
 --   cian.set_keymap("D", "page_down")
 --   cian.set_keymap("U", "page_up")
---   cian.set_keymap("l", "enter")           -- enter the highlighted directory
---   cian.set_keymap("-", "parent")          -- go up to the parent directory
+--   cian.set_keymap("l", "enter")           -- 選択中のディレクトリに入る
+--   cian.set_keymap("-", "parent")          -- 親ディレクトリへ上がる
 --
---   -- Marking / selection
---   cian.set_keymap(" ", "mark_down")       -- space: toggle mark, move down
---   cian.set_keymap("v", "visual")          -- visual (range) select mode
+--   -- マーク / 選択
+--   cian.set_keymap(" ", "mark_down")       -- スペース: マーク切替＋下へ
+--   cian.set_keymap("v", "visual")          -- ビジュアル（範囲）選択モード
 --   cian.set_keymap("V", "invert_marks")
 --
---   -- File operations
---   cian.set_keymap("c", "copy")            -- copy to the OTHER pane
---   cian.set_keymap("m", "move")            -- move to the OTHER pane
---   cian.set_keymap("y", "paste")           -- paste the file clipboard (= Ctrl+V)
---   -- Windows-style file clipboard is also on Ctrl+C / Ctrl+X / Ctrl+V.
---   -- (rebindable action names: copy, move, paste, cut, delete, …)
---   cian.set_keymap("d", "delete")          -- to the trash
+--   -- ファイル操作
+--   cian.set_keymap("c", "copy")            -- 反対ペインへコピー
+--   cian.set_keymap("m", "move")            -- 反対ペインへ移動
+--   cian.set_keymap("y", "paste")           -- ファイルクリップボードを貼り付け（= Ctrl+V）
+--   -- Windows流のファイルクリップボードは Ctrl+C / Ctrl+X / Ctrl+V にも割当済み。
+--   -- （再割当できるアクション名: copy, move, paste, cut, delete, …）
+--   cian.set_keymap("d", "delete")          -- ゴミ箱へ
 --   cian.set_keymap("r", "rename")
 --   cian.set_keymap("a", "new_file")
 --   cian.set_keymap("A", "new_dir")
---   cian.set_keymap("o", "sync_from_other") -- this pane → other pane's dir
---   cian.set_keymap("O", "sync_to_other")   -- other pane → this pane's dir
---   -- (open-into-the-opposite-pane lives on Ctrl+Enter; bind it here if you
---   --  prefer a letter: cian.set_keymap("o", "open_other"))
---   cian.set_keymap("e", "open_external")   -- hand the file to the OS opener
+--   cian.set_keymap("o", "sync_from_other") -- このペイン → 反対ペインのディレクトリ
+--   cian.set_keymap("O", "sync_to_other")   -- 反対ペイン → このペインのディレクトリ
+--   -- （反対ペインで開く操作は Ctrl+Enter にあります。文字キーが好みなら
+--   --  ここで割り当ててください: cian.set_keymap("o", "open_other"))
+--   cian.set_keymap("e", "open_external")   -- ファイルを OS の関連付けで開く
 --
---   -- Clipboard
---   cian.set_keymap("p", "copy_path")       -- copy path text
---   cian.set_keymap("P", "copy_file_ref")   -- copy a file reference (Finder/Explorer)
+--   -- クリップボード
+--   cian.set_keymap("p", "copy_path")       -- パス文字列をコピー
+--   cian.set_keymap("P", "copy_file_ref")   -- ファイル参照をコピー（Finder/エクスプローラー）
 --
---   -- Find / filter / sort
---   cian.set_keymap("f", "search")          -- search within this listing
+--   -- 検索 / 絞り込み / 並べ替え
+--   cian.set_keymap("f", "search")          -- この一覧内を検索
 --   cian.set_keymap("n", "search_next")
 --   cian.set_keymap("N", "search_prev")
---   cian.set_keymap("/", "filter")          -- incremental filter
---   cian.set_keymap("F", "find_recursive")  -- find files by name, recursively
---   cian.set_keymap(",", "sort")            -- open the sort-order picker
---   cian.set_keymap("z", "jump_path")       -- jump to a typed path
---   cian.set_keymap("=", "diff")            -- diff the two panes' files
+--   cian.set_keymap("/", "filter")          -- インクリメンタル絞り込み
+--   cian.set_keymap("F", "find_recursive")  -- 名前でファイルを再帰検索
+--   cian.set_keymap(",", "sort")            -- 並べ替え順のピッカーを開く
+--   cian.set_keymap("z", "jump_path")       -- 入力したパスへジャンプ
+--   cian.set_keymap("=", "diff")            -- 両ペインのファイルを比較
 --
---   -- Tabs, panels, tools
+--   -- タブ、パネル、ツール
 --   cian.set_keymap("t", "new_tab")
 --   cian.set_keymap("w", "close_tab")
 --   cian.set_keymap("h", "history")
---   cian.set_keymap("s", "shortcuts")       -- the bookmarks menu
---   cian.set_keymap("M", "menu")            -- the right-click context menu
---                                           -- (Shift+Enter also, where the
---                                           --  terminal can report it)
---   cian.set_keymap(":", "command")         -- the : command line
+--   cian.set_keymap("s", "shortcuts")       -- ブックマークメニュー
+--   cian.set_keymap("M", "menu")            -- 右クリックのコンテキストメニュー
+--                                           -- （端末が報告できる環境では
+--                                           --  Shift+Enter でも開けます）
+--   cian.set_keymap(":", "command")         -- : コマンドライン
 --   cian.set_keymap("q", "quit")
 --
--- The full list of action names (for the second argument):
---   Movement : cursor_down  cursor_up  cursor_top  cursor_bottom
+-- アクション名の一覧（第 2 引数に使えるもの）:
+--   移動     : cursor_down  cursor_up  cursor_top  cursor_bottom
 --              page_down  page_up  parent  enter
---   Marking  : mark_down  mark_up  invert_marks  visual
---   Files    : copy  move  paste  cut  delete  rename  new_file  new_dir
+--   マーク   : mark_down  mark_up  invert_marks  visual
+--   ファイル : copy  move  paste  cut  delete  rename  new_file  new_dir
 --              open_other  open_other_tab  open_external
 --              sync_from_other  sync_to_other
---   Clipboard: copy_path  copy_file_ref
---   Find     : search  search_next  search_prev  filter
+--   クリップ : copy_path  copy_file_ref
+--   検索     : search  search_next  search_prev  filter
 --              find_recursive  grep_recursive  sort  jump_path  diff
---   Panels   : new_tab  close_tab  history  shortcuts  ssh  view  menu
---   Misc     : refresh  manual  command  quit  none  (none disables the key)
+--   パネル   : new_tab  close_tab  history  shortcuts  ssh  view  menu
+--   その他   : refresh  manual  command  quit  none  （none はキーを無効化）
 --
--- Note: `cursor_top` is bound to the `gg` chord (press g twice), a vim-ism
--- that a single key cannot reproduce; naming it here is only so it appears in
--- the manual. `grep_recursive` (search file contents) has no default letter —
--- bind one if you want it, e.g. cian.set_keymap("G", "grep_recursive").
+-- 注記: `cursor_top` は `gg` コード（g を 2 回）に割り当てられています。1 キー
+-- では再現できない vim 由来の操作なので、ここに名前を挙げているのはマニュアルに
+-- 載せるためだけです。`grep_recursive`（ファイル内容の検索）には既定の文字が
+-- ありません。使いたいなら割り当ててください。例:
+-- cian.set_keymap("G", "grep_recursive")。
 
 
 -- ----------------------------------------------------------------------------
---  SSH HOSTS  —  cian.ssh { ... }
+--  SSH ホスト  —  cian.ssh { ... }
 -- ----------------------------------------------------------------------------
--- Populates the SSH picker (right-click → SSH connect, or in the shell) and the
--- file upload/download flow. Transfers use SFTP, falling back to the classic
--- SCP protocol automatically when the server has no SFTP subsystem; the status
--- line shows which one carried it. `users` at the top level is the fleet-wide default;
--- a host can override it. A user is either a bare name, or a table carrying its
--- password so cian can log in for you.
+-- SSH ピッカー（右クリック → SSH 接続、またはシェル内から）と、ファイルの
+-- アップロード／ダウンロードで使うホストを登録します。転送は SFTP を使い、
+-- サーバに SFTP サブシステムが無ければ自動で古典的な SCP プロトコルに
+-- フォールバックします。どちらで転送したかはステータス行に表示されます。
+-- トップレベルの `users` は全ホスト共通の既定で、ホストごとに上書きできます。
+-- user は名前だけの文字列か、パスワードを持たせたテーブル（cian が自動ログイン
+-- するため）のどちらかです。
 --
--- SECURITY NOTE: a plain `password` here is stored in clear text in this file.
--- Prefer `password_cmd`, which runs a command and uses its stdout — so the
--- secret lives in your OS credential store, not on disk.
+-- セキュリティ注意: ここに平文 `password` を書くと、このファイルに平文で保存
+-- されます。可能なら `password_cmd` を使ってください。コマンドを実行してその
+-- 標準出力を使うので、秘密情報は OS の資格情報ストアに置け、ディスクに
+-- 残りません。
 --
 -- cian.ssh {
---   -- Applied to every host that doesn't list its own users:
+--   -- 自前の users を持たない全ホストに適用される既定:
 --   users = { "root", "deploy" },
 --
 --   hosts = {
---     -- Simplest: a name for the picker and an address. Uses the default users.
+--     -- 最小形: ピッカー用の名前とアドレス。既定の users を使う。
 --     { name = "web1", host = "10.0.1.11" },
 --
---     -- A non-standard port:
+--     -- 非標準ポート:
 --     { name = "db1",  host = "10.0.2.31", port = 2222 },
 --
---     -- Per-host users, one with a password typed in for auto-login:
+--     -- ホストごとの users。1 つは自動ログイン用にパスワードを記載:
 --     { name = "stage", host = "stage.example.com",
 --       users = {
---         "readonly",                                    -- prompts, no auto-login
---         { name = "admin", password = "hunter2" },      -- clear text (avoid)
---         { name = "ci",    password_cmd = "pass show ci/stage" },  -- from a store
+--         "readonly",                                    -- 都度入力、自動ログインなし
+--         { name = "admin", password = "hunter2" },      -- 平文（非推奨）
+--         { name = "ci",    password_cmd = "pass show ci/stage" },  -- ストアから取得
 --       },
 --     },
 --
---     -- `notes` records facts about the server (OS, middleware, versions).
---     -- When a shell is connected here, the AI is told them (see ai_context).
+--     -- `notes` はサーバに関する事実（OS、ミドル、バージョン）を記録します。
+--     -- ここにシェル接続すると、その内容が AI に伝わります（ai_context 参照）。
 --     { name = "db1", host = "10.0.2.31",
---       notes = "RHEL 8.9; Oracle 19c; disk is tight on /u01" },
+--       notes = "RHEL 8.9; Oracle 19c; /u01 の空きが少ない" },
 --   },
 -- }
 
 
 -- ----------------------------------------------------------------------------
---  AI  —  cian.ai { ... }   (optional; needs Python + Azure OpenAI access)
+--  AI  —  cian.ai { ... }   （任意。Python + Azure OpenAI アクセスが必要）
 -- ----------------------------------------------------------------------------
--- Enables cian's AI features (`:ai` chat, and later junk detection / structure
--- suggestions). cian talks to Azure OpenAI through a small bundled Python
--- helper using the same Windows broker (WAM) auth as crmaine. If Python, the
--- packages, or sign-in are unavailable, the AI features stay silent — cian runs
--- exactly as before. Without this block, AI is off entirely.
+-- cian の AI 機能（`:ai` チャット、後々のジャンク検出／構成提案など）を有効に
+-- します。cian は同梱の小さな Python ヘルパー経由で Azure OpenAI と通信し、
+-- crmaine と同じ Windows ブローカー（WAM）認証を使います。Python・パッケージ・
+-- サインインのいずれかが使えなければ AI 機能は静かに無効化され、cian はこれまで
+-- どおり動作します。このブロックが無ければ AI は完全にオフです。
 --
--- The helper needs these Python packages: `openai`, and for broker auth
--- `azure-identity-broker` (and `pywin32` for the sign-in dialog's parent
--- window). Data sent to the model is only what a feature needs (file names and
--- sizes; file contents only when a feature explicitly requires it).
+-- ヘルパーには次の Python パッケージが必要です: `openai`、ブローカー認証用に
+-- `azure-identity-broker`（サインインダイアログの親ウィンドウ用に `pywin32`）。
+-- モデルに送るのは各機能が必要とする分だけ（ファイル名とサイズ。ファイル内容は
+-- 機能が明示的に要求する場合のみ）です。
 --
--- The endpoint and model default to the crmaine environment
--- (https://apim-jri-dev-apim1.azure-api.net/llmaoai, model gpt-5-mini) with
--- broker auth, so in that setup `cian.ai {}` on its own is enough to turn AI on.
+-- エンドポイントとモデルは crmaine 環境
+-- （https://apim-jri-dev-apim1.azure-api.net/llmaoai、モデル gpt-5-mini）を既定
+-- とし、ブローカー認証を使います。その構成なら `cian.ai {}` だけで AI が有効に
+-- なります。
 -- cian.ai {}
 --
--- Override any of it:
+-- 個別に上書きも可能:
 -- cian.ai {
 --   endpoint    = "https://your-apim.azure-api.net/llmaoai",  -- Azure OpenAI / APIM
 --   model       = "gpt-5-mini",
---   auth_mode   = "broker",    -- "broker" (Windows AAD), "apikey", or "mock" (offline echo)
---   -- python   = "python",    -- interpreter to use (default: "python")
+--   auth_mode   = "broker",    -- "broker"（Windows AAD）、"apikey"、"mock"（オフラインのエコー）
+--   -- python   = "python",    -- 使うインタプリタ（既定: "python"）
 --   -- api_version  = "2025-04-01-preview",
---   -- api_key      = "...",   -- only for auth_mode = "apikey"
---   -- api_base_url = "http://localhost:11434/v1",  -- Ollama / LM Studio (OpenAI-compatible)
+--   -- api_key      = "...",   -- auth_mode = "apikey" のときだけ
+--   -- api_base_url = "http://localhost:11434/v1",  -- Ollama / LM Studio（OpenAI 互換）
 -- }
 --
--- 404 "Resource not found"? With broker/Azure auth the `model` is the DEPLOYMENT
--- NAME and lands in the request URL (…/openai/deployments/<model>/chat/…), so a
--- wrong one 404s — set `model` (and `api_version`) to match your working client.
--- If instead your gateway is OpenAI-compatible (it wants /chat/completions with
--- the model in the body, not the /openai/deployments/ path), set `api_base_url`
--- to the gateway base and cian will use that route with the broker token:
+-- 404「Resource not found」が出る? ブローカー／Azure 認証では `model` は
+-- デプロイ名であり、リクエスト URL に入ります
+-- （…/openai/deployments/<model>/chat/…）。ここが違うと 404 になります —
+-- 動作しているクライアントに合わせて `model`（と `api_version`）を設定して
+-- ください。もしゲートウェイが OpenAI 互換（model をボディに入れて
+-- /chat/completions を叩く形式で、/openai/deployments/ パスではない）なら、
+-- `api_base_url` にゲートウェイのベースを設定すれば、cian はブローカートークンで
+-- そのルートを使います:
 -- cian.ai {
 --   auth_mode    = "broker",
---   api_base_url = "https://your-apim.azure-api.net/llmaoai",  -- OpenAI-compatible route
---   model        = "<your model>",
+--   api_base_url = "https://your-apim.azure-api.net/llmaoai",  -- OpenAI 互換ルート
+--   model        = "<あなたのモデル>",
 -- }
 --
--- Precondition facts — cian.ai_context(...)
--- Tell the AI what it can assume about YOUR environment, so its answers fit it
--- instead of being generic. Prepended to every AI prompt (chat, "explain the
--- last error", command suggestions, …). Pass a string or a list; additive
--- across calls. Per-server facts are better placed in a host's `notes` above —
--- those are added automatically when the shell is logged into that host.
--- cian.ai_context("The file panes browse a RHEL 8 NFS mount from macOS.")
+-- 前提知識 — cian.ai_context(...)
+-- あなたの環境について AI が前提としてよいことを伝え、回答を一般論ではなく環境に
+-- 即したものにします。すべての AI プロンプト（チャット、「直前のエラーを説明」、
+-- コマンド提案 など）の先頭に付加されます。文字列またはリストを渡せます。呼び
+-- 出すたびに追加されます。サーバ個別の事実は、上のホストの `notes` に書くほうが
+-- 適切です（そのホストにシェル接続したとき自動で追加されます）。
+-- cian.ai_context("ファイルペインは macOS から RHEL 8 の NFS マウントを見ている。")
 -- cian.ai_context{
---   "We deploy to RHEL 8 with Oracle 19c and nginx 1.24.",
---   "Prefer POSIX sh; the servers do not have bash-isms enabled.",
+--   "本番は RHEL 8 + Oracle 19c + nginx 1.24 にデプロイする。",
+--   "POSIX sh を優先。サーバでは bash 固有機能を有効にしていない。",
 -- }
 --
--- A fuller, worked example for an on-prem enterprise shop (Windows terminal →
--- RHEL + AIX, Oracle, WebLogic, HULFT, JP1). Copy what fits and edit freely.
--- The strings can be in any language; writing them in Japanese also nudges the
--- model to answer in Japanese. Uncomment to use:
+-- オンプレのエンタープライズ現場（Windows 端末 → RHEL + AIX、Oracle、WebLogic、
+-- HULFT、JP1）向けの、より充実した実例です。合うものをコピーして自由に編集して
+-- ください。文字列は何語でも構いませんが、日本語で書くとモデルも日本語で答え
+-- やすくなります。使うにはコメントを外してください:
 -- cian.ai_context{
 --   -- 端末・母艦
 --   "cian は Windows 10 + Windows Terminal 上で動かしている。ローカル側のパスやコマンドは Windows 前提（PowerShell / cmd）で考える。",
@@ -343,24 +349,25 @@
 
 
 -- ----------------------------------------------------------------------------
---  COMMAND SNIPPETS  —  cian.snippets { ... }   (optional)
+--  コマンドスニペット  —  cian.snippets { ... }   （任意）
 -- ----------------------------------------------------------------------------
--- A launcher for the shell commands you type again and again — sqlplus logins,
--- log tails, HULFT jobs. Open it with `:snip` (or right-click "Snippets →
--- shell"), type to filter, Enter to send to the active shell pane.
+-- 何度も打つシェルコマンド（sqlplus ログイン、ログ tail、HULFT ジョブなど）の
+-- ランチャーです。`:snip`（または右クリック「Snippets → shell」）で開き、入力で
+-- 絞り込み、Enter でアクティブなシェルペインに送ります。
 --
--- Open it with Ctrl+Shift+Enter (works even while the shell pane is focused),
--- `:snip`, or right-click "Snippets → shell" (top of the menu).
+-- 開き方は Ctrl+Shift+Enter（シェルペインにフォーカスがあっても動きます）、
+-- `:snip`、または右クリック「Snippets → shell」（メニュー上部）です。
 --
--- Each entry: `cmd` (required, the text sent), `name` (label; defaults to cmd),
--- `enter` (default true = run it immediately; false = type it for review), and
--- `confirm` (default false = send at once; true = ask first — use it for
--- anything destructive). Additive across calls.
+-- 各エントリ: `cmd`（必須、送るテキスト）、`name`（ラベル。既定は cmd）、
+-- `enter`（既定 true = 即実行。false = 確認用に入力だけ）、`confirm`（既定
+-- false = すぐ送る。true = 先に確認 — 破壊的なものに使う）。呼び出すたびに追加
+-- されます。
 --
--- `cmd` may hold MULTIPLE commands — put each on its own line (a Lua `[[ ]]`
--- string is the tidiest) and, with enter = true, they run in sequence.
+-- `cmd` には複数コマンドを入れられます — 各行に 1 つずつ書き（Lua の `[[ ]]`
+-- 文字列が最もきれい）、enter = true なら順番に実行されます。
 --
--- A worked set for an on-prem Oracle / HULFT / JP1 shop. Copy what fits.
+-- オンプレの Oracle / HULFT / JP1 現場向けの実例です。合うものをコピーして
+-- ください。
 -- cian.snippets{
 --   -- ── 参照系（安全なので enter=true で即実行）──────────────────────
 --   { name = "df 空き確認",        cmd = "df -g" },            -- AIX は df -g（RHEL は df -h）
@@ -391,18 +398,18 @@
 
 
 -- ----------------------------------------------------------------------------
---  OPEN HANDLERS & HELPERS
+--  オープンハンドラ & ヘルパー
 -- ----------------------------------------------------------------------------
--- What Enter (or `open_external`) does for a given extension. The handler gets
--- the full path. Use cian.spawn to launch a program detached, or cian.open to
--- hand the path to the OS default opener.
+-- 指定した拡張子に対して Enter（または `open_external`）が何をするかを決めます。
+-- ハンドラにはフルパスが渡されます。プログラムをデタッチして起動するには
+-- cian.spawn を、OS の既定の関連付けに渡すには cian.open を使います。
 --
 -- cian.on_open("md", function(path)
---   cian.spawn { "code", path }          -- open Markdown in VS Code
+--   cian.spawn { "code", path }          -- Markdown を VS Code で開く
 -- end)
 --
 -- cian.on_open("png", function(path)
---   cian.open(path)                      -- let the OS pick the image viewer
+--   cian.open(path)                      -- 画像ビューアは OS に選ばせる
 -- end)
 --
 -- cian.on_open("csv", function(path)
@@ -411,13 +418,13 @@
 
 
 -- ----------------------------------------------------------------------------
---  A note on shortcuts
+--  ショートカット（ブックマーク）について
 -- ----------------------------------------------------------------------------
--- Bookmarks (the `s` menu) are managed inside the app — press `a` there, or `a`
--- on a path in the history list — and saved to shortcuts.lua next to this file.
--- There is nothing to configure here for them.
+-- ブックマーク（`s` メニュー）はアプリ内で管理します — そこで `a` を押すか、
+-- 履歴一覧でパスの上で `a` を押します — そしてこのファイルの隣の shortcuts.lua
+-- に保存されます。ここで設定することは何もありません。
 --
--- The menu is hierarchical: `A` (Shift+a) makes a FOLDER at the level you are
--- currently in, Enter / → steps into a folder, and Esc / ← steps back out. See
--- examples/shortcuts.lua for a nested example (targets can be paths, URLs or
--- apps; folders can nest as deep as you like).
+-- メニューは階層式です: `A`（Shift+a）で今いる階層にフォルダを作り、Enter / →
+-- でフォルダに入り、Esc / ← で戻ります。入れ子の例は
+-- examples/shortcuts.lua を参照してください（ターゲットはパス、URL、アプリの
+-- いずれでもよく、フォルダは好きなだけ深くできます）。

@@ -1,20 +1,20 @@
--- keymap.lua — key bindings, split out of init.lua.
+-- keymap.lua — キーバインド（init.lua から分離したもの）。
 --
--- OPTIONAL. Put this file next to init.lua (same directory). cian loads it right
--- after init.lua into the SAME config, so `cian.set_keymap(…)` here works exactly
--- as it would in init.lua — it just keeps init.lua focused on display / Git-SVN /
--- AI.
+-- 任意。init.lua と同じディレクトリに置いてください。cian は init.lua の直後に
+-- このファイルを「同じ設定」として読み込むので、ここに書いた
+-- `cian.set_keymap(…)` は init.lua に書いたのと全く同じに効きます — init.lua を
+-- 表示 / Git・SVN / AI まわりに集中させておくための分割です。
 --
--- `key` is one character; bind it to an action name (see the full list in
--- examples/init.lua, or `?` / `:man` in the app). Binding a key that already has
--- a default REPLACES it; bind to "none" to disable a key.
+-- `key` は1文字。それをアクション名に割り当てます（一覧は examples/init.lua、
+-- またはアプリ内で `?` / `:man`）。既に既定のあるキーに割り当てると、その既定を
+-- 「置き換え」ます。"none" に割り当てるとそのキーを無効化します。
 --
---   cian.set_keymap("x", "delete")       -- x now deletes too
---   cian.set_keymap("d", "rename")       -- make d rename instead of delete
---   cian.set_keymap("d", "none")         -- disable d
---   cian.set_keymap("G", "grep_recursive")  -- grep has no default letter
+--   cian.set_keymap("x", "delete")          -- x でも削除できるように
+--   cian.set_keymap("d", "rename")          -- d を削除ではなくリネームに
+--   cian.set_keymap("d", "none")            -- d を無効化
+--   cian.set_keymap("G", "grep_recursive")  -- grep には既定の文字がない
 --
--- The defaults (each shown as the line that would recreate it) are listed in
--- examples/init.lua under KEY BINDINGS — copy one here only to move or disable
--- it. Structural keys (arrows, Enter, Tab, the F-keys, Ctrl/Shift combos) are
--- built in and not remappable.
+-- 既定のバインド（それを再現する1行として掲載）は examples/init.lua の
+-- KEY BINDINGS にあります — 移動または無効化したいときだけ、そこから1行を
+-- ここへコピーしてください。構造キー（矢印・Enter・Tab・Fキー・Ctrl/Shift の
+-- 組み合わせ）は組み込みで、再割り当てはできません。

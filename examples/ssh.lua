@@ -1,19 +1,21 @@
--- ssh.lua — SSH hosts, split out of init.lua.
+-- ssh.lua — SSH ホスト（init.lua から分離したもの）。
 --
--- OPTIONAL. Put this file next to init.lua (same directory: ~/.config/cian/, or
--- beside the .exe in a portable set). cian loads it right after init.lua into
--- the SAME config, so `cian.ssh{…}` here is exactly as if it were in init.lua —
--- it just keeps init.lua focused on display / Git-SVN / AI.
+-- 任意。init.lua と同じディレクトリ（~/.config/cian/、またはポータブル構成なら
+-- .exe の隣）に置いてください。cian は init.lua の直後にこのファイルを「同じ
+-- 設定」として読み込むので、ここに書いた `cian.ssh{…}` は init.lua に書いたのと
+-- 全く同じです — init.lua を表示 / Git・SVN / AI まわりに集中させておくための
+-- 分割です。
 --
--- SECURITY NOTE: a plain `password` here sits in clear text on disk, same as in
--- init.lua. Prefer `password_cmd` (its stdout is used, so the secret can live in
--- your OS credential store), or key auth. cian warns at startup if this file
--- holds a password and is world-readable — `chmod 600 ssh.lua` to silence it.
+-- セキュリティ注意: ここに素の `password` を書くと、init.lua と同じくディスク上に
+-- 平文で残ります。可能なら `password_cmd`（その標準出力が使われるので、秘密は
+-- OS の資格情報ストアに置けます）か、鍵認証を使ってください。このファイルが
+-- パスワードを含み、かつ誰でも読める権限だと、cian は起動時に警告します —
+-- `chmod 600 ssh.lua` で黙らせられます。
 --
--- See examples/init.lua for the full explanation of every field.
+-- 各フィールドの詳しい説明は examples/init.lua を参照。
 
 -- cian.ssh {
---   -- Applied to every host that doesn't list its own users:
+--   -- 自分の users を持たない全ホストに適用される既定:
 --   users = { "root", "deploy" },
 --
 --   hosts = {
@@ -22,14 +24,14 @@
 --
 --     { name = "stage", host = "stage.example.com",
 --       users = {
---         "readonly",                                   -- prompts, no auto-login
---         { name = "admin", password = "hunter2" },     -- clear text (avoid)
---         { name = "ci",    password_cmd = "pass show ci/stage" }, -- from a store
+--         "readonly",                                   -- 入力を促す（自動ログインなし）
+--         { name = "admin", password = "hunter2" },     -- 平文（避けたい）
+--         { name = "ci",    password_cmd = "pass show ci/stage" }, -- ストアから取得
 --       },
 --     },
 --
---     -- `notes` are handed to the AI when a shell is logged into this host.
+--     -- `notes` は、このホストにログイン中のシェルで AI に渡されます。
 --     { name = "db1", host = "10.0.2.31",
---       notes = "RHEL 8.9; Oracle 19c; disk is tight on /u01" },
+--       notes = "RHEL 8.9; Oracle 19c; /u01 の空きが少ない" },
 --   },
 -- }

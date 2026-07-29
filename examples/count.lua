@@ -1,30 +1,31 @@
 -- ============================================================================
---  cian — file / step counter  (the `:count` command)
+--  cian — ファイル / ステップ カウンタ（`:count` コマンド）
 -- ============================================================================
 --
---  `:count` tallies files, lines and "steps" (source lines) under the target:
---  the marked entries if any, otherwise the active pane's whole directory tree.
---  This file tunes what gets counted. It is optional — without it, cian counts
---  every text file and reports steps as non-blank, non-comment lines.
+--  `:count` は、対象配下のファイル数・行数・「ステップ数」（ソース行数）を
+--  集計します。対象はマーク中のエントリがあればそれ、無ければアクティブペインの
+--  ディレクトリツリー全体です。このファイルは何を数えるかを調整します。任意で、
+--  無くても cian は全テキストファイルを数え、空行でもコメントでもない行を
+--  ステップ数として報告します。
 --
---  Where it goes (next to init.lua):
+--  置き場所（init.lua の隣）:
 --    Linux / macOS : ~/.config/cian/count.lua
 --    Windows       : %USERPROFILE%\.config\cian\count.lua
---  Portable: a count.lua next to the cian executable wins over this.
+--  ポータブル: cian 実行ファイルの隣にある count.lua が優先されます。
 -- ============================================================================
 
 return {
-  -- Only count these extensions. Omit (or leave empty) to count every text
-  -- file. Case- and dot-insensitive: "rs", ".RS" and "Rs" are the same.
+  -- これらの拡張子だけを数えます。省略（または空）にすると全テキストファイルを
+  -- 数えます。大文字小文字・先頭ドットは無視: "rs"・".RS"・"Rs" は同じ。
   extensions = { "rs", "lua", "py", "js", "ts", "go", "c", "h", "cpp" },
 
-  -- Should blank lines count as steps? Off = kazoechao-style SLOC.
+  -- 空行もステップに数える？ オフ = 数え茶帳（kazoechao）流の SLOC。
   count_blank = false,
 
-  -- Should comment lines count as steps?
+  -- コメント行もステップに数える？
   count_comments = false,
 
-  -- What starts a line comment. A line whose first non-space text begins with
-  -- one of these is a comment. (Block comments are not tracked.)
+  -- 行コメントの始まり。最初の非空白文字がこのいずれかで始まる行はコメント
+  -- 扱いです。（ブロックコメントは追跡しません。）
   comment_prefixes = { "//", "#", "--", ";", "*" },
 }

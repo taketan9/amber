@@ -1,0 +1,423 @@
+-- ============================================================================
+--  cian — configuration
+-- ============================================================================
+--
+--  Everything below is COMMENTED OUT. Delete the leading "-- " on any line to
+--  turn that setting on. With nothing uncommented, cian runs on its defaults.
+--
+--  Where this file goes:
+--    Linux / macOS : ~/.config/cian/init.lua
+--    Windows       : %USERPROFILE%\.config\cian\init.lua
+--                    (e.g. C:\Users\you\.config\cian\init.lua)
+--    Or set $CIAN_CONFIG_DIR to point somewhere else; cian reads
+--    $CIAN_CONFIG_DIR/init.lua then.
+--
+--  It is plain Lua 5.4, so you can use variables, functions and `if` around
+--  any of this (e.g. a different shell per machine). Mistakes are never fatal:
+--  cian collects them and shows a notice on startup instead of refusing to run.
+--
+--  See the full key list any time with `?` in the app, `:man`, or `cian -man`.
+--
+--  日本語版はこのファイルの日本語訳 examples/init.ja.lua にあります。
+--
+--  Keeping init.lua tidy: the SSH hosts and the key bindings can each move to
+--  their own file next to this one — ssh.lua and keymap.lua (see examples/).
+--  cian loads them right after init.lua into the same config, so `cian.ssh{…}`
+--  and `cian.set_keymap(…)` work there exactly as they do here. That lets
+--  init.lua stay focused on display, Git/SVN and AI. `:where` shows which files
+--  are found.
+-- ============================================================================
+
+
+-- ----------------------------------------------------------------------------
+--  THEME
+-- ----------------------------------------------------------------------------
+-- Start from a named preset. Built in:
+--   "default" / "dark"        (the built-in dark theme, the default)
+--   "solarized-light"         (aka "solarized"),  "solarized-dark"
+--   "dracula", "nord", "monokai", "one-dark", "tokyo-night"
+--   "gruvbox-dark", "gruvbox-light"
+--   "catppuccin-mocha" (aka "catppuccin"), "catppuccin-latte"
+--   "github-light"
+-- cian.set_theme "dracula"
+--
+-- You can also switch at runtime — no restart needed: `:theme` opens a gallery
+-- that previews each preset live (Enter keeps it, Esc cancels), or
+-- `:theme <name>` sets one directly. It's also under the right-click menu.
+-- A theme chosen this way is remembered (saved to state.toml next to your
+-- config — see `:where`) and re-applied on the next launch, taking precedence
+-- over the cian.set_theme above. So this line is really just the default.
+
+-- …or tune individual colors. Values are "#rrggbb" or a color name
+-- ("yellow", "cyan", …). Any key you leave out keeps its current value, and a
+-- preset can be combined with overrides:
+-- cian.set_theme {
+--   preset      = "solarized-light",  -- optional base to start from
+--   accent      = "#268bd2",  -- focused borders, highlights, the bar
+--   status_bg   = "#eee8d5",  -- background of the bottom status line
+--   selected_bg = "#dcd5be",  -- highlight behind the selected row
+--   visual_bg   = "#f7e4b0",  -- highlight while marking in visual mode
+--   mark_fg     = "#cb4b16",  -- color of the ● on marked files
+-- }
+
+
+-- ----------------------------------------------------------------------------
+--  OPTIONS  —  cian.set_option(name, value)
+-- ----------------------------------------------------------------------------
+
+-- The directory both panes open in when cian is started with no path argument.
+-- Defaults to the Desktop, then your home folder. Handy when launched from a
+-- shortcut, where the working directory would otherwise be wherever the exe is.
+-- cian.set_option("home", "C:\\Users\\you\\Desktop")   -- Windows
+-- cian.set_option("home", "~/Desktop")                 -- Linux / macOS (~ and $VARS expand)
+
+-- Which shell runs in the embedded shell panel. Defaults to $SHELL / %COMSPEC%.
+-- cian.set_option("shell", "powershell.exe")
+-- cian.set_option("shell", "pwsh.exe")     -- PowerShell 7
+-- cian.set_option("shell", "/bin/zsh")
+
+-- Also put files on the SYSTEM clipboard when you copy with `y` (so they paste
+-- in Explorer / Finder too). Default: true.
+-- cian.set_option("clipboard_on_copy", true)
+
+-- Show dotfiles (names starting with ".") on startup. Toggle live with the
+-- right-click menu. Default: true.
+-- cian.set_option("show_hidden", true)
+
+-- Nerd Font glyphs — the file-type icons and the branch / disk symbols in the
+-- status line. Default true. Set false on a terminal WITHOUT a Nerd Font so
+-- those glyphs are dropped (no mojibake); folders are still marked by colour.
+-- cian.set_option("nerd_fonts", false)
+
+-- Border corners: "rounded" (╭╮╯╰) or "plain" (square). Unset auto-picks —
+-- rounded where the terminal/font can render them, square in the legacy
+-- Windows console. Force "plain" if the corners look misaligned.
+-- cian.set_option("borders", "rounded")
+
+-- The contextual key-hint bar above the status line. Default: true. Set false
+-- for a cleaner screen once the keys are muscle memory.
+-- cian.set_option("key_hints", true)
+
+-- Interface language (the key manual, status line, menus, dialogs).
+-- Default: "en" (English). Uncomment to switch it to Japanese.
+-- (You can also toggle live from the right-click menu.)
+-- cian.set_option("lang", "ja")
+
+-- Language for JUST the key manual (`?`) and the right-click context menu,
+-- overriding `lang` for those two surfaces only. Handy to keep the interface in
+-- English but read the menu / manual in Japanese (or vice versa). Unset =
+-- follow `lang`.
+-- cian.set_option("menu_lang", "ja")
+
+-- Split / zoom / close animation length, in milliseconds. 0 disables all
+-- animation. Default is a short, snappy transition.
+-- cian.set_option("animation_ms", 120)
+-- cian.set_option("animation_ms", 0)      -- off
+
+-- External editor for `E` in the F3 viewer and `:edit`. A command line; the
+-- file is appended. Unset falls back to $VISUAL / $EDITOR, then the first of
+-- nvim -> vim -> vi found on PATH (and if none is found, cian says so).
+-- cian.set_option("editor", "nvim")
+-- cian.set_option("editor", "code -w")   -- VS Code, waiting for the tab to close
+
+
+-- ----------------------------------------------------------------------------
+--  KEY BINDINGS  —  cian.set_keymap("key", "action")
+-- ----------------------------------------------------------------------------
+-- `key` is one character. Binding a key to an action makes that key trigger it
+-- in the file panes. This works two ways:
+--
+--   * ADD a key:      cian.set_keymap("x", "delete")   -- x now deletes too
+--   * CHANGE a key:   binding a key that already has a default REPLACES the
+--                     default. `cian.set_keymap("d", "rename")` makes `d`
+--                     rename instead of delete.
+--   * DISABLE a key:  bind it to "none".  cian.set_keymap("d", "none")
+--
+-- The DEFAULT bindings are listed below, each as the line that would recreate
+-- it. They are commented out because they are already active — uncomment one
+-- only to move it (change the "key") or turn it off ("none"). Structural keys
+-- (arrows, Enter, Backspace, Tab, the F-keys, and Ctrl-/Shift- combos) are
+-- built in and not remappable here; everything below is.
+--
+--   -- Movement
+--   cian.set_keymap("j", "cursor_down")
+--   cian.set_keymap("k", "cursor_up")
+--   cian.set_keymap("g", "cursor_top")      -- (the `gg` chord; see note)
+--   cian.set_keymap("G", "cursor_bottom")
+--   cian.set_keymap("D", "page_down")
+--   cian.set_keymap("U", "page_up")
+--   cian.set_keymap("l", "enter")           -- enter the highlighted directory
+--   cian.set_keymap("-", "parent")          -- go up to the parent directory
+--
+--   -- Marking / selection
+--   cian.set_keymap(" ", "mark_down")       -- space: toggle mark, move down
+--   cian.set_keymap("v", "visual")          -- visual (range) select mode
+--   cian.set_keymap("V", "invert_marks")
+--
+--   -- File operations
+--   cian.set_keymap("c", "copy")            -- copy to the OTHER pane
+--   cian.set_keymap("m", "move")            -- move to the OTHER pane
+--   cian.set_keymap("y", "paste")           -- paste the file clipboard (= Ctrl+V)
+--   -- Windows-style file clipboard is also on Ctrl+C / Ctrl+X / Ctrl+V.
+--   -- (rebindable action names: copy, move, paste, cut, delete, …)
+--   cian.set_keymap("d", "delete")          -- to the trash
+--   cian.set_keymap("r", "rename")
+--   cian.set_keymap("a", "new_file")
+--   cian.set_keymap("A", "new_dir")
+--   cian.set_keymap("o", "sync_from_other") -- this pane → other pane's dir
+--   cian.set_keymap("O", "sync_to_other")   -- other pane → this pane's dir
+--   -- (open-into-the-opposite-pane lives on Ctrl+Enter; bind it here if you
+--   --  prefer a letter: cian.set_keymap("o", "open_other"))
+--   cian.set_keymap("e", "open_external")   -- hand the file to the OS opener
+--
+--   -- Clipboard
+--   cian.set_keymap("p", "copy_path")       -- copy path text
+--   cian.set_keymap("P", "copy_file_ref")   -- copy a file reference (Finder/Explorer)
+--
+--   -- Find / filter / sort
+--   cian.set_keymap("f", "search")          -- search within this listing
+--   cian.set_keymap("n", "search_next")
+--   cian.set_keymap("N", "search_prev")
+--   cian.set_keymap("/", "filter")          -- incremental filter
+--   cian.set_keymap("F", "find_recursive")  -- find files by name, recursively
+--   cian.set_keymap(",", "sort")            -- open the sort-order picker
+--   cian.set_keymap("z", "jump_path")       -- jump to a typed path
+--   cian.set_keymap("=", "diff")            -- diff the two panes' files
+--
+--   -- Tabs, panels, tools
+--   cian.set_keymap("t", "new_tab")
+--   cian.set_keymap("w", "close_tab")
+--   cian.set_keymap("h", "history")
+--   cian.set_keymap("s", "shortcuts")       -- the bookmarks menu
+--   cian.set_keymap("M", "menu")            -- the right-click context menu
+--                                           -- (Shift+Enter also, where the
+--                                           --  terminal can report it)
+--   cian.set_keymap(":", "command")         -- the : command line
+--   cian.set_keymap("q", "quit")
+--
+-- The full list of action names (for the second argument):
+--   Movement : cursor_down  cursor_up  cursor_top  cursor_bottom
+--              page_down  page_up  parent  enter
+--   Marking  : mark_down  mark_up  invert_marks  visual
+--   Files    : copy  move  paste  cut  delete  rename  new_file  new_dir
+--              open_other  open_other_tab  open_external
+--              sync_from_other  sync_to_other
+--   Clipboard: copy_path  copy_file_ref
+--   Find     : search  search_next  search_prev  filter
+--              find_recursive  grep_recursive  sort  jump_path  diff
+--   Panels   : new_tab  close_tab  history  shortcuts  ssh  view  menu
+--   Misc     : refresh  manual  command  quit  none  (none disables the key)
+--
+-- Note: `cursor_top` is bound to the `gg` chord (press g twice), a vim-ism
+-- that a single key cannot reproduce; naming it here is only so it appears in
+-- the manual. `grep_recursive` (search file contents) has no default letter —
+-- bind one if you want it, e.g. cian.set_keymap("G", "grep_recursive").
+
+
+-- ----------------------------------------------------------------------------
+--  SSH HOSTS  —  cian.ssh { ... }
+-- ----------------------------------------------------------------------------
+-- Populates the SSH picker (right-click → SSH connect, or in the shell) and the
+-- file upload/download flow. Transfers use SFTP, falling back to the classic
+-- SCP protocol automatically when the server has no SFTP subsystem; the status
+-- line shows which one carried it. `users` at the top level is the fleet-wide default;
+-- a host can override it. A user is either a bare name, or a table carrying its
+-- password so cian can log in for you.
+--
+-- SECURITY NOTE: a plain `password` here is stored in clear text in this file.
+-- Prefer `password_cmd`, which runs a command and uses its stdout — so the
+-- secret lives in your OS credential store, not on disk.
+--
+-- cian.ssh {
+--   -- Applied to every host that doesn't list its own users:
+--   users = { "root", "deploy" },
+--
+--   hosts = {
+--     -- Simplest: a name for the picker and an address. Uses the default users.
+--     { name = "web1", host = "10.0.1.11" },
+--
+--     -- A non-standard port:
+--     { name = "db1",  host = "10.0.2.31", port = 2222 },
+--
+--     -- Per-host users, one with a password typed in for auto-login:
+--     { name = "stage", host = "stage.example.com",
+--       users = {
+--         "readonly",                                    -- prompts, no auto-login
+--         { name = "admin", password = "hunter2" },      -- clear text (avoid)
+--         { name = "ci",    password_cmd = "pass show ci/stage" },  -- from a store
+--       },
+--     },
+--
+--     -- `notes` records facts about the server (OS, middleware, versions).
+--     -- When a shell is connected here, the AI is told them (see ai_context).
+--     { name = "db1", host = "10.0.2.31",
+--       notes = "RHEL 8.9; Oracle 19c; disk is tight on /u01" },
+--   },
+-- }
+
+
+-- ----------------------------------------------------------------------------
+--  AI  —  cian.ai { ... }   (optional; needs Python + Azure OpenAI access)
+-- ----------------------------------------------------------------------------
+-- Enables cian's AI features (`:ai` chat, and later junk detection / structure
+-- suggestions). cian talks to Azure OpenAI through a small bundled Python
+-- helper using the same Windows broker (WAM) auth as crmaine. If Python, the
+-- packages, or sign-in are unavailable, the AI features stay silent — cian runs
+-- exactly as before. Without this block, AI is off entirely.
+--
+-- The helper needs these Python packages: `openai`, and for broker auth
+-- `azure-identity-broker` (and `pywin32` for the sign-in dialog's parent
+-- window). Data sent to the model is only what a feature needs (file names and
+-- sizes; file contents only when a feature explicitly requires it).
+--
+-- The endpoint and model default to the crmaine environment
+-- (https://apim-jri-dev-apim1.azure-api.net/llmaoai, model gpt-5-mini) with
+-- broker auth, so in that setup `cian.ai {}` on its own is enough to turn AI on.
+-- cian.ai {}
+--
+-- Override any of it:
+-- cian.ai {
+--   endpoint    = "https://your-apim.azure-api.net/llmaoai",  -- Azure OpenAI / APIM
+--   model       = "gpt-5-mini",
+--   auth_mode   = "broker",    -- "broker" (Windows AAD), "apikey", or "mock" (offline echo)
+--   -- python   = "python",    -- interpreter to use (default: "python")
+--   -- api_version  = "2025-04-01-preview",
+--   -- api_key      = "...",   -- only for auth_mode = "apikey"
+--   -- api_base_url = "http://localhost:11434/v1",  -- Ollama / LM Studio (OpenAI-compatible)
+-- }
+--
+-- 404 "Resource not found"? With broker/Azure auth the `model` is the DEPLOYMENT
+-- NAME and lands in the request URL (…/openai/deployments/<model>/chat/…), so a
+-- wrong one 404s — set `model` (and `api_version`) to match your working client.
+-- If instead your gateway is OpenAI-compatible (it wants /chat/completions with
+-- the model in the body, not the /openai/deployments/ path), set `api_base_url`
+-- to the gateway base and cian will use that route with the broker token:
+-- cian.ai {
+--   auth_mode    = "broker",
+--   api_base_url = "https://your-apim.azure-api.net/llmaoai",  -- OpenAI-compatible route
+--   model        = "<your model>",
+-- }
+--
+-- Precondition facts — cian.ai_context(...)
+-- Tell the AI what it can assume about YOUR environment, so its answers fit it
+-- instead of being generic. Prepended to every AI prompt (chat, "explain the
+-- last error", command suggestions, …). Pass a string or a list; additive
+-- across calls. Per-server facts are better placed in a host's `notes` above —
+-- those are added automatically when the shell is logged into that host.
+-- cian.ai_context("The file panes browse a RHEL 8 NFS mount from macOS.")
+-- cian.ai_context{
+--   "We deploy to RHEL 8 with Oracle 19c and nginx 1.24.",
+--   "Prefer POSIX sh; the servers do not have bash-isms enabled.",
+-- }
+--
+-- A fuller, worked example for an on-prem enterprise shop (Windows terminal →
+-- RHEL + AIX, Oracle, WebLogic, HULFT, JP1). Copy what fits and edit freely.
+-- The strings can be in any language; writing them in Japanese also nudges the
+-- model to answer in Japanese. Uncomment to use:
+-- cian.ai_context{
+--   -- 端末・母艦
+--   "cian は Windows 10 + Windows Terminal 上で動かしている。ローカル側のパスやコマンドは Windows 前提（PowerShell / cmd）で考える。",
+--   "回答は日本語でお願いします。",
+--
+--   -- 接続先サーバ
+--   "シェルからは SSH で社内サーバに入る。AP サーバは RHEL、それ以外（バッチ／DB／運用管理）はすべて AIX。",
+--   "AIX では GNU 拡張が使えないことが多い。ps / df / awk / sed 等は AIX(POSIX) の書式で提案し、GNU 固有オプション（--long-opts, sed -i など）は避けるか代替を併記する。",
+--   "主要ミドルは Oracle 19c（移行途上で 11g も稼働）、WebLogic、Java 1.8、HULFT、JP1。",
+--
+--   -- 環境構成
+--   "開発 / 検証 / 本番の 3 面構成。検証・本番は Act/Stb の冗長構成（AP サーバのみ両稼働）。",
+--   "本番および待機系(Stb)での操作は特に慎重に。系切替やクラスタ・レプリケーションに影響し得る操作は、必ず確認を取ってから。",
+--
+--   -- サーバの役割
+--   "AP サーバ(RHEL) = API / Web 画面の提供。バッチサーバ(AIX) = バッチ処理と HULFT でのデータ授受。DB サーバ(AIX) = Oracle（現行 11g、19c へ移行計画中）。運用管理サーバ(AIX) = JP1 でバッチをスケジューリング。",
+--
+--   -- シェルの流儀
+--   "接続先では bash 拡張を使ってよい。Oracle 操作は sqlplus を多用する。",
+--
+--   -- 守ってほしいこと
+--   "破壊的・不可逆なコマンド（rm, truncate, DROP / DELETE, 上書きリダイレクト, HULFT 送信, JP1 ジョブの強制終了など）は、実行を勧める前に必ず確認する。",
+--   "推測で断定しない。確証がなければ「未確認」と明示し、確かめる手順を先に示す。",
+--   "DB もファイルも巨大なことがある。まずサイズ・行数・容量と空きを確認し、余裕があることを確かめてから重い操作を勧める（巨大ファイルの cat、巨大ディレクトリの ls -R、SELECT * の全件取得、索引を使わないフルスキャン等を避ける）。パフォーマンスを意識した手順にする。",
+--   "オフライン環境。AI 用の API 以外はインターネットに出られない。ダウンロード、パッケージ導入（pip / yum / dnf / wget / curl 取得）、外部リポジトリ参照を伴う手順は提案しない。すでにサーバにあるものだけで完結させる。",
+-- }
+
+
+-- ----------------------------------------------------------------------------
+--  COMMAND SNIPPETS  —  cian.snippets { ... }   (optional)
+-- ----------------------------------------------------------------------------
+-- A launcher for the shell commands you type again and again — sqlplus logins,
+-- log tails, HULFT jobs. Open it with `:snip` (or right-click "Snippets →
+-- shell"), type to filter, Enter to send to the active shell pane.
+--
+-- Open it with Ctrl+Shift+Enter (works even while the shell pane is focused),
+-- `:snip`, or right-click "Snippets → shell" (top of the menu).
+--
+-- Each entry: `cmd` (required, the text sent), `name` (label; defaults to cmd),
+-- `enter` (default true = run it immediately; false = type it for review), and
+-- `confirm` (default false = send at once; true = ask first — use it for
+-- anything destructive). Additive across calls.
+--
+-- `cmd` may hold MULTIPLE commands — put each on its own line (a Lua `[[ ]]`
+-- string is the tidiest) and, with enter = true, they run in sequence.
+--
+-- A worked set for an on-prem Oracle / HULFT / JP1 shop. Copy what fits.
+-- cian.snippets{
+--   -- ── 参照系（安全なので enter=true で即実行）──────────────────────
+--   { name = "df 空き確認",        cmd = "df -g" },            -- AIX は df -g（RHEL は df -h）
+--   { name = "ディスク使用 top",   cmd = "du -sh * | sort -rh | head" },
+--   { name = "アプリログ tail",    cmd = "tail -f /var/log/app/app.log" },
+--   { name = "プロセス確認 (java)", cmd = "ps -ef | grep -i java | grep -v grep" },
+--   { name = "自分のジョブ",        cmd = "ps -fu $LOGNAME" },
+--
+--   -- ── まとめて流す（複数行。cd してから中身を確認）────────────────
+--   { name = "配置先を確認", cmd = [[
+-- cd /app/deploy/current
+-- pwd
+-- ls -ltr *]] },
+--
+--   -- ── 接続系（enter=false で接続先を目視してから Enter）───────────
+--   { name = "sqlplus 開発19c",  cmd = "sqlplus app@DEV19C",  enter = false },
+--   { name = "sqlplus 検証11g",  cmd = "sqlplus app@STG11G",  enter = false },
+--   { name = "WebLogic 環境",     cmd = ". /app/wls/setDomainEnv.sh", enter = false },
+--
+--   -- ── 状態照会（HULFT / JP1）──────────────────────────────────────
+--   { name = "HULFT 配信状況",   cmd = "utllist -o d" },
+--   { name = "JP1 ジョブ状態",   cmd = "jpqjobget -F AJSROOT1 -l" },
+--
+--   -- ── 副作用あり（confirm=true で送信前に確認）───────────────────
+--   { name = "HULFT 送信 定型",  cmd = "utlsend -f SENDID -sync", confirm = true },
+--   { name = "AP 再起動",         cmd = "/app/bin/restart.sh", confirm = true },
+-- }
+
+
+-- ----------------------------------------------------------------------------
+--  OPEN HANDLERS & HELPERS
+-- ----------------------------------------------------------------------------
+-- What Enter (or `open_external`) does for a given extension. The handler gets
+-- the full path. Use cian.spawn to launch a program detached, or cian.open to
+-- hand the path to the OS default opener.
+--
+-- cian.on_open("md", function(path)
+--   cian.spawn { "code", path }          -- open Markdown in VS Code
+-- end)
+--
+-- cian.on_open("png", function(path)
+--   cian.open(path)                      -- let the OS pick the image viewer
+-- end)
+--
+-- cian.on_open("csv", function(path)
+--   cian.spawn { "nvim", path }
+-- end)
+
+
+-- ----------------------------------------------------------------------------
+--  A note on shortcuts
+-- ----------------------------------------------------------------------------
+-- Bookmarks (the `s` menu) are managed inside the app — press `a` there, or `a`
+-- on a path in the history list — and saved to shortcuts.lua next to this file.
+-- There is nothing to configure here for them.
+--
+-- The menu is hierarchical: `A` (Shift+a) makes a FOLDER at the level you are
+-- currently in, Enter / → steps into a folder, and Esc / ← steps back out. See
+-- examples/shortcuts.lua for a nested example (targets can be paths, URLs or
+-- apps; folders can nest as deep as you like).

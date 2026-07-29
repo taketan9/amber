@@ -1,15 +1,15 @@
--- A scripted-login macro — the "wait for the prompt, then type" kind.
+-- 台本ログインのマクロ — 「プロンプトを待ってから打つ」タイプ。
 --
--- `steps` are played out over time, one per tick, so a step can pause or wait
--- for a prompt instead of dumping every line at once:
---   "text"                          -- send a line (shorthand for { send = })
---   { send = "text" }               -- send a line
---   { wait = 2 }                    -- pause 2 seconds
---   { expect = "text" }             -- wait until "text" appears (case-insensitive)
---   { expect = "text", timeout = 20 } -- ...but give up after 20s and move on
+-- `steps` は時間をかけて1ティックに1つずつ再生されるので、全行を一度に吐き出さず
+-- 一時停止したりプロンプトを待ったりできます:
+--   "text"                          -- 1行送る（{ send = } の短縮形）
+--   { send = "text" }               -- 1行送る
+--   { wait = 2 }                    -- 2秒待つ
+--   { expect = "text" }             -- "text" が現れるまで待つ（大文字小文字無視）
+--   { expect = "text", timeout = 20 } -- …ただし20秒で諦めて次へ
 --
--- This one logs into a DB box and drops straight into a SQL session, waiting
--- for each prompt so it works over a slow link instead of racing ahead.
+-- これは DB サーバにログインしてそのまま SQL セッションに入ります。プロンプトを
+-- 1つずつ待つので、先走らず遅い回線でも動きます。
 
 return {
   name = "DB login (scripted)",
@@ -19,9 +19,9 @@ return {
       bg = "36,24,28",
       log = "~/cian-logs",
       steps = {
-        { expect = "password:", timeout = 20 },  -- wait for the ssh prompt
-        { send = "hunter2" },                     -- (better: use key auth!)
-        { expect = "$", timeout = 15 },           -- wait for the shell prompt
+        { expect = "password:", timeout = 20 },  -- ssh のプロンプトを待つ
+        { send = "hunter2" },                     -- （鍵認証の方が良い！）
+        { expect = "$", timeout = 15 },           -- シェルのプロンプトを待つ
         { send = "sqlplus /nolog" },
         { expect = "SQL>" },
         { send = "connect app/secret@orclpdb" },

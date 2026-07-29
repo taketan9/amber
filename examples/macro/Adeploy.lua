@@ -1,8 +1,9 @@
--- One macro per file: drop these in ~/.config/cian/macro/ (or next to the
--- executable in portable mode). They load in filename order — the leading
--- letter is a handy way to order them — alongside anything in macro.lua.
+-- 1ファイル1マクロ: これらを ~/.config/cian/macro/（ポータブルモードなら実行
+-- ファイルの隣）に置きます。ファイル名順に読み込まれ — 先頭の文字は並び順を
+-- 決める手軽な手段です — macro.lua の内容と一緒に扱われます。
 --
--- A per-file macro returns a single { name =, panes = } table (not a list).
+-- ファイル別マクロは、単一の { name =, panes = } テーブルを返します（リストでは
+-- ありません）。
 
 return {
   name = "Deploy check",

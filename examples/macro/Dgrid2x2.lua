@@ -1,5 +1,5 @@
--- The smallest possible 2×2 grid — layout only, no SSH — for checking that a
--- macro builds a real grid rather than four side-by-side columns.
+-- 最小の 2×2 グリッド — レイアウトのみ、SSH なし — マクロが4列横並びではなく
+-- 本物のグリッドを組めるかを確認するためのもの。
 --
 --   ┌──────────────┬──────────────┐
 --   │   pane 1     │   pane 2     │
@@ -7,23 +7,22 @@
 --   │   pane 3     │   pane 4     │
 --   └──────────────┴──────────────┘
 --
--- The trick that makes a grid (instead of a 4-column row) is two things on
--- panes 3 and 4:
---   * dir = "down"  — split downward, not to the right
---   * from = N      — split off an *earlier* pane (1-based), not the previous one
+-- （4列の1行ではなく）グリッドを作る鍵は、ペイン3と4に付けた2つの指定です:
+--   * dir = "down"  — 右ではなく下方向に分割
+--   * from = N      — 直前ではなく「もっと前の」ペイン（1始まり）から分割
 --
--- pane 2 splits pane 1 to the right; pane 3 splits pane 1 downward; pane 4
--- splits pane 2 downward. If every pane came out in one row, check that panes 3
--- and 4 really say dir = "down" (and have their `from`).
+-- ペイン2はペイン1を右に、ペイン3はペイン1を下に、ペイン4はペイン2を下に分割
+-- します。もし全ペインが1行に並んでしまったら、ペイン3と4が本当に dir = "down"
+-- （かつ `from` 付き）になっているか確認してください。
 
 return {
   name = "2×2 grid (layout test)",
-  zoom = true,   -- maximize the shell panel first, so the grid has the whole window
-  sync = false,  -- each pane is independent
+  zoom = true,   -- まずシェルパネルを最大化し、グリッドがウィンドウ全体を使えるように
+  sync = false,  -- 各ペインは独立
   panes = {
-    { },                          -- pane 1: the shell you are on
-    { from = 1, dir = "right" },  -- pane 2: right of pane 1
-    { from = 1, dir = "down"  },  -- pane 3: below pane 1
-    { from = 2, dir = "down"  },  -- pane 4: below pane 2
+    { },                          -- ペイン1: 今いるシェル
+    { from = 1, dir = "right" },  -- ペイン2: ペイン1の右
+    { from = 1, dir = "down"  },  -- ペイン3: ペイン1の下
+    { from = 2, dir = "down"  },  -- ペイン4: ペイン2の下
   },
 }

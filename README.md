@@ -535,7 +535,7 @@ cian.set_keymap("d", "rename")   -- change: d renames instead of deleting
 cian.set_keymap("d", "none")     -- disable: d does nothing
 ```
 
-[`examples/init.lua`](examples/init.lua) lists every default binding as the
+[`examples/init.en.lua`](examples/init.en.lua) lists every default binding as the
 `set_keymap` line that would recreate it, so you can uncomment-and-edit to move
 or disable any of them, along with the full list of action names. Structural
 keys (arrows, Enter, Backspace, Tab, the F-keys, and Ctrl-/Shift- combinations)
@@ -611,7 +611,7 @@ conventions — and cian prepends them to every AI prompt above. Per-server
 facts belong on the SSH host instead: a host's `notes = "RHEL 8; Oracle 19c; …"`
 is handed to the model automatically whenever the active shell is logged into
 that host, so "explain the last error" already knows what it is looking at.
-[`examples/init.lua`](examples/init.lua) has a fuller worked block for an
+[`examples/init.en.lua`](examples/init.en.lua) has a fuller worked block for an
 on-prem enterprise shop (RHEL + AIX, Oracle, WebLogic, HULFT, JP1) to copy from,
 including the kind of guardrails worth stating — confirm destructive commands,
 don't guess, mind file/DB size, and assume no internet beyond the AI API.
@@ -619,7 +619,7 @@ don't guess, mind file/DB size, and assume no internet beyond the AI API.
 The AI part is the one place cian is not a single self-contained binary — it
 opts into an external interpreter and network — which is why it is strictly
 optional and off unless configured. See
-[`examples/init.lua`](examples/init.lua) for the settings.
+[`examples/init.en.lua`](examples/init.en.lua) for the settings.
 
 ## Architecture
 
@@ -692,7 +692,7 @@ cian.set_option("shell", "powershell.exe")
 
 cian adds this hint to the startup notice whenever it sees an invalid escape.
 
-See [`examples/init.lua`](examples/init.lua) for a fully-commented template and
+See [`examples/init.en.lua`](examples/init.en.lua) for a fully-commented template and
 the complete list of bindable actions.
 
 ## Shell panel
@@ -776,7 +776,7 @@ What a "step" is comes from `count.lua`: which `extensions` to include (omit for
 every text file), whether `count_blank` / `count_comments` fold those lines into
 the step total (both off = SLOC), and the `comment_prefixes` that mark a comment
 line. It is portable-aware like the rest of the config; see
-[`examples/count.lua`](examples/count.lua).
+[`examples/count.en.lua`](examples/count.en.lua).
 
 ## Macros
 
@@ -824,7 +824,7 @@ Per pane: `dir` (`"right"` | `"down"`), `cmd` (a line to run), `steps` (a
 scripted sequence run after it), `bg` (a colour so panes are easy to tell
 apart), and `log` (a directory to record the session to). Because each split
 spawns asynchronously, cian builds the layout pane-by-pane as the shells come up.
-See [`examples/macro.lua`](examples/macro.lua).
+See [`examples/macro.en.lua`](examples/macro.en.lua).
 
 **Scripted steps** are played out over time, so a login can wait for its prompt
 instead of racing ahead. Each `steps` entry is a line to send (`"text"` or
@@ -833,13 +833,13 @@ instead of racing ahead. Each `steps` entry is a line to send (`"text"` or
 `expect` matches case-insensitively and gives up after the timeout). That turns
 "ssh in, wait for the password prompt, log in, wait for the shell, launch
 sqlplus, connect" into a macro that survives a slow link — see
-[`examples/macro/Bmacro.lua`](examples/macro/Bmacro.lua).
+[`examples/macro/Bmacro.en.lua`](examples/macro/Bmacro.en.lua).
 
 By default a pane splits off the previous one, which cascades. To build a real
 **grid**, a pane can say `from = N` — split off pane *N* (1-based) instead — plus
 `zoom = true` to maximize the shell panel first and `sync = true` to synchronize
 input once it's built. A 2×2 of servers is
-[`examples/macro/Cgrid4.lua`](examples/macro/Cgrid4.lua): pane 1 top-left, pane 2
+[`examples/macro/Cgrid4.en.lua`](examples/macro/Cgrid4.en.lua): pane 1 top-left, pane 2
 = `from 1` right, pane 3 = `from 1` down, pane 4 = `from 2` down — each one
 **`ssh`-ing in and logging in with a password** via an `expect` / `send` pair
 (`sync` off there, so the four are driven independently). A pane's `bg` also
@@ -849,7 +849,7 @@ trade-off as an SSH password in init.lua.
 
 A pane can also set **`ratio`** — the percentage the pane it splits off *keeps*
 (default 50). That is how a taller grid stays even:
-[`examples/macro/Cgrid6.lua`](examples/macro/Cgrid6.lua) builds a 2×3 of six
+[`examples/macro/Cgrid6.en.lua`](examples/macro/Cgrid6.en.lua) builds a 2×3 of six
 panes with `ratio = 33` on the first row split (then 50 on the second), so the
 three rows come out even thirds instead of 1/2, 1/4, 1/4.
 
@@ -857,7 +857,7 @@ three rows come out even thirds instead of 1/2, 1/4, 1/4.
 directory next to `init.lua` with one file each — `macro/Adeploy.lua`,
 `macro/Bdbcheck.lua` — where each returns a single `{ name =, panes = }` table.
 They load in filename order alongside `macro.lua`. See
-[`examples/macro/Adeploy.lua`](examples/macro/Adeploy.lua).
+[`examples/macro/Adeploy.en.lua`](examples/macro/Adeploy.en.lua).
 
 **Run one at startup** (TeraTerm-`.ttl` style). `cian --macro path/to/thing.lua`
 builds that macro's layout the moment cian comes up; a bare `cian thing.lua`
