@@ -78,6 +78,12 @@ pub struct Options {
     /// "nvim" or "code -w". Unset falls back to $VISUAL/$EDITOR, then nvim →
     /// vim → vi on PATH.
     pub editor: Option<String>,
+    /// Keyboard reporting level. Unset / "auto" disambiguates Ctrl-h/i/m only.
+    /// "full" additionally asks the terminal to report EVERY key as an escape
+    /// code, which is what makes Shift+Enter / Ctrl+Enter / Ctrl+Shift+Enter
+    /// distinguishable on terminals that support the kitty protocol (iTerm2,
+    /// kitty, WezTerm, foot). Opt-in because it can affect IME composition.
+    pub keyboard: Option<String>,
 }
 
 /// A login on a host.
@@ -629,6 +635,15 @@ fn install_api(lua: &Lua, builder: &Rc<RefCell<Builder>>) -> mlua::Result<()> {
                         Err(_) => {
                             bm.errors.push("set_option: editor expects a command string".into())
                         }
+                    },
+                    "keyboard" => match String::from_lua(val, lua) {
+                        Ok(v) if v == "auto" || v == "full" => bm.options.keyboard = Some(v),
+                        Ok(_) => bm
+                            .errors
+                            .push("set_option: keyboard expects \"auto\" or \"full\"".into()),
+                        Err(_) => bm
+                            .errors
+                            .push("set_option: keyboard expects \"auto\" or \"full\"".into()),
                     },
                     "key_hints" => match bool::from_lua(val, lua) {
                         Ok(v) => bm.options.key_hints = Some(v),

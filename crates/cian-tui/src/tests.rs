@@ -1951,6 +1951,19 @@
     }
 
     #[test]
+    fn keyboard_full_is_opt_in() {
+        use crossterm::event::KeyboardEnhancementFlags as F;
+        let mut cfg = cian_lua::Config::default();
+        // Default always disambiguates, but does not force every key to escapes.
+        let base = crate::keyboard_flags(&cfg);
+        assert!(base.contains(F::DISAMBIGUATE_ESCAPE_CODES));
+        assert!(!base.contains(F::REPORT_ALL_KEYS_AS_ESCAPE_CODES));
+        // "full" opts into report-all (so Shift/Ctrl+Enter come through on iTerm2).
+        cfg.options.keyboard = Some("full".into());
+        assert!(crate::keyboard_flags(&cfg).contains(F::REPORT_ALL_KEYS_AS_ESCAPE_CODES));
+    }
+
+    #[test]
     fn shell_can_reach_the_command_line() {
         let (_d, mut app) = app_with(&["a.txt"]);
         app.focus(FocusedPane::Shell);

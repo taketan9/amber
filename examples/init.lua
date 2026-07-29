@@ -89,6 +89,14 @@
 -- those glyphs are dropped (no mojibake); folders are still marked by colour.
 -- cian.set_option("nerd_fonts", false)
 
+-- Keyboard reporting. Unset / "auto" is enough on Windows (its console reports
+-- Shift+Enter / Ctrl+Enter / Ctrl+Shift+Enter natively). On macOS/Linux
+-- terminals that speak the kitty protocol (iTerm2, kitty, WezTerm, foot), set
+-- "full" so those Enter-combos come through too — otherwise use the right-click
+-- menu items there. Opt-in because reporting every key can disturb IME input;
+-- if Japanese input misbehaves in the shell, drop back to "auto".
+-- cian.set_option("keyboard", "full")
+
 -- Border corners: "rounded" (╭╮╯╰) or "plain" (square). Unset auto-picks —
 -- rounded where the terminal/font can render them, square in the legacy
 -- Windows console. Force "plain" if the corners look misaligned.
