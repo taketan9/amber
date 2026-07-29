@@ -610,6 +610,49 @@ Cargoワークスペースで、7つのクレートに分かれています：
 | `cian-lua`  | Lua設定ホスト（mlua）：キーマップ、テーマ、ext-open DSL |
 | `cian-bin`  | エントリポイント — `cian` バイナリを生成 |
 
+おおまかな実行時の流れ。1本のメインループが UI の状態と描画をすべて持ち、
+ブロックしうる処理（検索・差分・転送・AI）はワーカースレッドに渡して、その結果を
+毎フレーム、ループ側にポーリングで取り込みます。だから UI は固まりません。
+
+```mermaid
+flowchart TD
+    user([ユーザー])
+    term([端末])
+
+    user -- "キー / マウス<br/>(crossterm)" --> disp
+
+    subgraph mainloop["cian-tui — メインループ（単一スレッド）"]
+        direction TB
+        disp["ディスパッチ<br/>keys · mouse · commands"]
+        state["App の状態<br/>2×Pane · ポップアップ · シェル · フォーカス"]
+        draw["描画 → ratatui"]
+        poll["ワーカのチャネルをポーリング"]
+        disp --> state --> draw
+        poll --> state
+    end
+
+    draw --> term --> user
+
+    cfg["cian-lua<br/>init.lua · ssh.lua · keymap.lua → Config"]
+    cfg -- "起動時 / :reload" --> state
+
+    core["cian-core（純粋ドメイン）<br/>Pane · Entry · ソート/絞込/マーク · ファイル操作 · git"]
+    state <--> core
+
+    disp -- "キー入力" --> pty["cian-pty<br/>portable-pty 子プロセス + vt100"]
+    pty -- "画面" --> draw
+
+    subgraph work["ワーカースレッド — mpsc チャネル、毎フレーム取り込み"]
+        direction TB
+        heavy["検索 · 差分 · ディレクトリ比較 · 重複検出"]
+        scp["cian-scp<br/>russh SFTP / SCP"]
+        ai["cian-ai<br/>Python ブローカ → Azure OpenAI"]
+    end
+
+    disp -- "重い / リモート / AI" --> work
+    work -- "結果" --> poll
+```
+
 ## 設定
 
 cianは `~/.config/cian/init.lua` を読みます（ディレクトリは `$CIAN_CONFIG_DIR`

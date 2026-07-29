@@ -635,6 +635,50 @@ Cargo workspace, split into seven crates:
 | `cian-lua`  | Lua configuration host (mlua): keymaps, themes, ext-open DSL |
 | `cian-bin`  | Entry point — produces the `cian` binary |
 
+The rough runtime flow. A single main loop owns all UI state and drawing;
+anything that could block (search, diff, transfer, AI) is handed to a worker
+thread and its result is polled back into the loop each frame, so the UI never
+freezes.
+
+```mermaid
+flowchart TD
+    user([User])
+    term([Terminal])
+
+    user -- "keys / mouse<br/>(crossterm)" --> disp
+
+    subgraph mainloop["cian-tui — main loop (single thread)"]
+        direction TB
+        disp["dispatch<br/>keys · mouse · commands"]
+        state["App state<br/>2× Pane · popups · shell · focus"]
+        draw["render → ratatui"]
+        poll["poll worker channels"]
+        disp --> state --> draw
+        poll --> state
+    end
+
+    draw --> term --> user
+
+    cfg["cian-lua<br/>init.lua · ssh.lua · keymap.lua → Config"]
+    cfg -- "startup / :reload" --> state
+
+    core["cian-core (pure domain)<br/>Pane · Entry · sort/filter/marks · file ops · git"]
+    state <--> core
+
+    disp -- "keystrokes" --> pty["cian-pty<br/>portable-pty child + vt100"]
+    pty -- "screen" --> draw
+
+    subgraph work["worker threads — mpsc channels, polled each frame"]
+        direction TB
+        heavy["search · diff · dir-compare · dedup"]
+        scp["cian-scp<br/>russh SFTP / SCP"]
+        ai["cian-ai<br/>Python broker → Azure OpenAI"]
+    end
+
+    disp -- "heavy / remote / AI" --> work
+    work -- "results" --> poll
+```
+
 ## Configuration
 
 cian reads `~/.config/cian/init.lua` (override the directory with
