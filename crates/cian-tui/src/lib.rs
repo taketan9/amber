@@ -574,7 +574,10 @@ enum ZoneKind {
 enum MenuItem {
     Copy,
     Cut,
+    /// Shell paste (send the clipboard to the PTY).
     Paste,
+    /// File-clipboard paste into the focused pane (Ctrl+V).
+    PasteHere,
     CopyToOther,
     MoveToOther,
     CopyToPath,
@@ -748,10 +751,13 @@ impl MenuItem {
 impl MenuItem {
     fn label(self, lang: Lang) -> &'static str {
         match self {
-            MenuItem::Copy => tr(lang, "Copy", "コピー"),
-            MenuItem::Cut => tr(lang, "Cut", "カット"),
+            MenuItem::Copy => tr(lang, "Copy  (Ctrl+C)", "コピー  (Ctrl+C)"),
+            MenuItem::Cut => tr(lang, "Cut  (Ctrl+X)", "切り取り  (Ctrl+X)"),
+            // File clipboard paste (Ctrl+V); the shell's Paste is a different
+            // action (send to the PTY) and keeps its own :paste hint below.
+            MenuItem::PasteHere => tr(lang, "Paste  (Ctrl+V)", "貼り付け  (Ctrl+V)"),
             MenuItem::Paste => tr(lang, "Paste  (:paste)", "貼り付け  (:paste)"),
-            MenuItem::CopyToOther => tr(lang, "Copy to other pane  (y)", "反対ペインへコピー  (y)"),
+            MenuItem::CopyToOther => tr(lang, "Copy to other pane  (c)", "反対ペインへコピー  (c)"),
             MenuItem::MoveToOther => tr(lang, "Move to other pane  (m)", "反対ペインへ移動  (m)"),
             MenuItem::CopyToPath => tr(lang, "Copy to…  (:copyto)", "指定先へコピー  (:copyto)"),
             MenuItem::Delete => tr(lang, "Delete  (d)", "削除  (d)"),
@@ -2965,8 +2971,11 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry("  gg / G", None, "  in visual: extend to top / bottom", "  ビジュアル中：先頭／末尾まで伸ばす"),
                 entry("V", Some(InvertMarks), "invert all marks", "全マークを反転"),
                 entry("u", None, "undo the last rename / create / move (also :undo)", "直前のリネーム／作成／移動を取り消し（:undo でも）"),
-                entry("y, c", Some(Copy), "copy to opposite pane", "反対ペインへコピー"),
+                entry("c", Some(Copy), "copy to opposite pane", "反対ペインへコピー"),
                 entry("m", Some(Move), "move to opposite pane", "反対ペインへ移動"),
+                entry("Ctrl+C", None, "copy to the file clipboard (Windows-style)", "ファイルクリップボードへコピー（Windows流）"),
+                entry("Ctrl+X", Some(Cut), "cut to the file clipboard", "ファイルクリップボードへ切り取り"),
+                entry("Ctrl+V, y", Some(Paste), "paste the file clipboard here", "ファイルクリップボードをここに貼り付け"),
                 entry("d", Some(Delete), "delete (to trash)", "削除（ゴミ箱へ）"),
                 entry("r", Some(Rename), "rename", "リネーム"),
                 entry(":brename", None, "bulk rename by pattern: {name}_{n3}.{ext} or s/re/rep/gi (preview first)", "パターン一括リネーム：{name}_{n3}.{ext} / s/re/rep/gi（先にプレビュー）"),

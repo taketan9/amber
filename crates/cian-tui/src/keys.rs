@@ -1516,10 +1516,18 @@ impl App {
                     for i in 0..p.entries.len() { p.toggle_mark_at(i); }
                 }
             }
-            (false, false, KeyCode::Char('y')) | (false, false, KeyCode::Char('c')) => {
-                self.start_transfer(PendingOp::Copy);
-            }
+            // `c` copies the selection to the other pane; `m` moves it. `y`
+            // pastes (an alias for Ctrl+V), so the vim-style transfer keys and
+            // the Windows-style clipboard keys coexist.
+            (false, false, KeyCode::Char('c')) => self.start_transfer(PendingOp::Copy),
             (false, false, KeyCode::Char('m')) => self.start_transfer(PendingOp::Move),
+            (false, false, KeyCode::Char('y')) => { let _ = self.paste_clip(); }
+            // Windows-style file clipboard (file panes only — in the shell these
+            // keys keep their terminal meaning: Ctrl+C is interrupt, Ctrl+V is
+            // handled by the terminal emulator).
+            (true, false, KeyCode::Char('c')) => self.clip_targets(ClipOp::Copy),
+            (true, false, KeyCode::Char('x')) => self.clip_targets(ClipOp::Cut),
+            (true, false, KeyCode::Char('v')) => { let _ = self.paste_clip(); }
             (false, false, KeyCode::Char('d')) => self.start_delete(),
             // Undo the last rename / create / move (also `:undo`).
             (false, false, KeyCode::Char('u')) => self.undo_last(),
@@ -1617,6 +1625,8 @@ impl App {
             Action::Shortcuts => self.start_shortcuts(),
             Action::Copy => self.start_transfer(PendingOp::Copy),
             Action::Move => self.start_transfer(PendingOp::Move),
+            Action::Paste => { let _ = self.paste_clip(); }
+            Action::Cut => self.clip_targets(ClipOp::Cut),
             Action::Delete => self.start_delete(),
             Action::Rename => self.start_rename(),
             Action::NewFile => self.start_new_file(),

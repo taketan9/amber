@@ -388,6 +388,10 @@ pub enum Action {
     Shortcuts,
     Copy,
     Move,
+    /// Paste the file clipboard (Windows-style; also on Ctrl+V).
+    Paste,
+    /// Cut the selection to the file clipboard (also on Ctrl+X).
+    Cut,
     Delete,
     Rename,
     NewFile,
@@ -444,6 +448,8 @@ pub(crate) fn action_from_name(name: &str) -> Option<Action> {
         "shortcuts" => Action::Shortcuts,
         "copy" => Action::Copy,
         "move" => Action::Move,
+        "paste" => Action::Paste,
+        "cut" => Action::Cut,
         "delete" => Action::Delete,
         "rename" => Action::Rename,
         "new_file" => Action::NewFile,

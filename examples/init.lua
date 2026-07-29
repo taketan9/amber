@@ -155,8 +155,11 @@
 --   cian.set_keymap("V", "invert_marks")
 --
 --   -- File operations
---   cian.set_keymap("y", "copy")            -- (c is a second default for copy)
---   cian.set_keymap("m", "move")
+--   cian.set_keymap("c", "copy")            -- copy to the OTHER pane
+--   cian.set_keymap("m", "move")            -- move to the OTHER pane
+--   cian.set_keymap("y", "paste")           -- paste the file clipboard (= Ctrl+V)
+--   -- Windows-style file clipboard is also on Ctrl+C / Ctrl+X / Ctrl+V.
+--   -- (rebindable action names: copy, move, paste, cut, delete, …)
 --   cian.set_keymap("d", "delete")          -- to the trash
 --   cian.set_keymap("r", "rename")
 --   cian.set_keymap("a", "new_file")
@@ -196,7 +199,7 @@
 --   Movement : cursor_down  cursor_up  cursor_top  cursor_bottom
 --              page_down  page_up  parent  enter
 --   Marking  : mark_down  mark_up  invert_marks  visual
---   Files    : copy  move  delete  rename  new_file  new_dir
+--   Files    : copy  move  paste  cut  delete  rename  new_file  new_dir
 --              open_other  open_other_tab  open_external
 --              sync_from_other  sync_to_other
 --   Clipboard: copy_path  copy_file_ref

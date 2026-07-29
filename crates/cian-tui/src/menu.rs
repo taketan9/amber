@@ -50,7 +50,7 @@ impl App {
             items.push(MenuItem::Copy);
             items.push(MenuItem::CopyPathText); // directly under Copy
             items.push(MenuItem::Cut);
-            items.push(MenuItem::Paste);
+            items.push(MenuItem::PasteHere); // file clipboard paste (Ctrl+V)
             items.push(MenuItem::Rename);
             items.push(MenuItem::Delete);
             items.push(MenuItem::EditTab); // open in the editor in a new shell tab
@@ -77,7 +77,8 @@ impl App {
             items.push(MenuItem::Shortcuts);
             items.push(MenuItem::Ssh);
             items.push(MenuItem::Background);
-            items.push(MenuItem::ViewMenu); // show hidden / language / copy path
+            items.push(MenuItem::Lang); // language toggle sits at the top level
+            items.push(MenuItem::ViewMenu); // show hidden / theme
             // The OS-native group sits last, just above Quit / the manual, so
             // "Show in Explorer / Finder" is always in the same easy-to-reach
             // spot (third from the bottom).
@@ -198,7 +199,6 @@ impl App {
                 MenuItem::HiddenToggle,
                 MenuItem::ThemePick,
                 MenuItem::ThemePickPane,
-                MenuItem::Lang,
                 MenuItem::Back,
             ]),
             MenuItem::SessionMenu => {
@@ -386,6 +386,7 @@ impl App {
             // pane does it mean the file clipboard.
             MenuItem::Paste if self.focused == FocusedPane::Shell => self.paste_text_to_shell(),
             MenuItem::Paste => return self.paste_clip(),
+            MenuItem::PasteHere => return self.paste_clip(),
             MenuItem::CopyToOther => self.start_transfer(PendingOp::Copy),
             MenuItem::MoveToOther => self.start_transfer(PendingOp::Move),
             MenuItem::CopyToPath => self.start_dest_picker(PendingOp::Copy),

@@ -1744,19 +1744,54 @@
     /// clipboard. Hiding it until cian's own register was filled made a file
     /// just copied in Explorer look unpasteable.
     #[test]
+    fn clipboard_keys_follow_windows_and_c_is_copy_to_other_pane() {
+        let ctrl = |c: char| KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL);
+        let (_l, _r, mut app) = app_two_dirs(&["a.txt"], &[]);
+        app.focus(FocusedPane::Left);
+        app.active_pane_mut().unwrap().cursor = 1; // a.txt (0 is `..`)
+
+        // Ctrl+C → Windows-style file-clipboard copy.
+        app.handle_key(ctrl('c')).unwrap();
+        assert!(matches!(app.file_clip, Some(FileClipboard { op: ClipOp::Copy, .. })), "Ctrl+C copies");
+
+        // Ctrl+X → cut.
+        app.handle_key(ctrl('x')).unwrap();
+        assert!(matches!(app.file_clip, Some(FileClipboard { op: ClipOp::Cut, .. })), "Ctrl+X cuts");
+
+        // `c` is now "copy to the other pane" (a transfer), not the clipboard.
+        app.file_clip = None;
+        app.handle_key(key('c')).unwrap();
+        assert!(matches!(app.popup, Popup::ConfirmTransfer { op: PendingOp::Copy, .. }), "c copies to the other pane");
+        assert!(app.file_clip.is_none(), "c does not touch the file clipboard");
+    }
+
+    #[test]
+    fn y_and_ctrl_v_both_paste() {
+        let ctrl_v = KeyEvent::new(KeyCode::Char('v'), KeyModifiers::CONTROL);
+        for trigger in [key('y'), ctrl_v] {
+            let (_l, _r, mut app) = app_two_dirs(&["a.txt"], &[]);
+            app.focus(FocusedPane::Right); // paste into the (empty) right pane
+            // Nothing on the clipboard yet → paste reports it (proves it routed
+            // to paste_clip rather than a copy/transfer).
+            app.handle_key(trigger).unwrap();
+            assert_eq!(app.message.as_deref(), Some("clipboard has no files"), "paste ran for {trigger:?}");
+        }
+    }
+
+    #[test]
     fn paste_is_always_offered() {
         let (_l, _r, mut app) = app_two_dirs(&["a.txt"], &[]);
         let _ = render(&mut app, 100, 40);
 
         app.open_context_menu(5, 5);
         let Popup::ContextMenu { items, .. } = &app.popup else { panic!("no menu") };
-        assert!(items.contains(&MenuItem::Paste), "offered with nothing held");
+        assert!(items.contains(&MenuItem::PasteHere), "offered with nothing held");
         app.popup = Popup::None;
 
         app.clip_targets(ClipOp::Copy);
         app.open_context_menu(5, 5);
         let Popup::ContextMenu { items, .. } = &app.popup else { panic!("no menu") };
-        assert!(items.contains(&MenuItem::Paste), "and still offered once held");
+        assert!(items.contains(&MenuItem::PasteHere), "and still offered once held");
     }
 
     /// Plain text on the clipboard must never be treated as a path: the
