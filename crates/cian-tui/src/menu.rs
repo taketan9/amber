@@ -420,7 +420,7 @@ impl App {
             MenuItem::BulkRename => self.start_bulk_rename(),
             MenuItem::Snippets => self.start_snippets(),
             MenuItem::Macros => self.start_macros(),
-            MenuItem::EditTab => self.edit_in_new_tab(),
+            MenuItem::EditTab => self.edit_in_new_tab(None),
             MenuItem::ThemePick => self.start_theme_picker(),
             MenuItem::ThemePickPane => {
                 let side = matches!(self.focused, FocusedPane::Right) as usize;

@@ -47,11 +47,11 @@ impl App {
         }
     }
 
-    /// `:edittab` / right-click "Edit in new tab": open the file under the cursor
-    /// in the editor (the configured one, else nvim → vim → vi if installed) in a
-    /// fresh shell tab, so cian keeps running. Does nothing but explain if no
-    /// editor is on PATH.
-    pub(crate) fn edit_in_new_tab(&mut self) {
+    /// Open the file under the cursor in a fresh shell tab, so cian keeps
+    /// running. `forced` names a specific editor (`:vi` / `:vim` / `:nvim`),
+    /// which must be on PATH; `None` (the menu) resolves the configured editor,
+    /// else nvim → vim → vi. Explains and does nothing if the editor is missing.
+    pub(crate) fn edit_in_new_tab(&mut self, forced: Option<&str>) {
         let path = match self.active_pane().and_then(|p| p.selected()) {
             Some(e) if e.is_parent => None,
             Some(e) if e.is_dir => {
@@ -65,13 +65,24 @@ impl App {
             self.message = Some(tr(self.lang, "nothing to edit", "編集対象がありません").into());
             return;
         };
-        let Some(words) = crate::edit::resolve_editor(&self.config) else {
-            self.message = Some(tr(
-                self.lang,
-                "no editor found — install nvim/vim/vi, or set cian.set_option(\"editor\", …)",
-                "エディタが見つかりません — nvim/vim/vi を入れるか cian.set_option(\"editor\", …) を設定",
-            ).into());
-            return;
+        let words = match forced {
+            // A named editor: use it only if it is actually on PATH.
+            Some(name) if crate::edit::on_path(name) => vec![name.to_string()],
+            Some(name) => {
+                self.message = Some(format!("{name} not found on PATH"));
+                return;
+            }
+            None => match crate::edit::resolve_editor(&self.config) {
+                Some(w) => w,
+                None => {
+                    self.message = Some(tr(
+                        self.lang,
+                        "no editor found — install nvim/vim/vi, or set cian.set_option(\"editor\", …)",
+                        "エディタが見つかりません — nvim/vim/vi を入れるか cian.set_option(\"editor\", …) を設定",
+                    ).into());
+                    return;
+                }
+            },
         };
         // Quote the path so a name with spaces survives the shell.
         let cmd = format!("{} \"{}\"", words.join(" "), path.display());
@@ -110,7 +121,7 @@ fn pick_editor(
 
 /// Is `name` an executable on `PATH`? On Windows the usual executable
 /// extensions are tried too.
-fn on_path(name: &str) -> bool {
+pub(crate) fn on_path(name: &str) -> bool {
     let Some(path) = std::env::var_os("PATH") else { return false };
     let exts: &[&str] = if cfg!(windows) { &["", ".exe", ".cmd", ".bat"] } else { &[""] };
     std::env::split_paths(&path).any(|dir| {

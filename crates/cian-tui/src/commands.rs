@@ -52,7 +52,8 @@ impl App {
             "count" | "steps" => self.start_count(),
             "undo" => self.undo_last(),
             "edit" | "e" => self.edit_selected_file(),
-            "edittab" | "tabedit" | "et" => self.edit_in_new_tab(),
+            // Open the file in a specific vi-family editor in a new shell tab.
+            "vi" | "vim" | "nvim" => self.edit_in_new_tab(Some(verb)),
             "macro" | "macros" => self.start_macros(),
             "ssh" => self.start_ssh(),
             "ai" | "chat" | "crmaine" => self.open_ai_chat(),
