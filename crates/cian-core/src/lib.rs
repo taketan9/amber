@@ -29,6 +29,9 @@ pub mod viewer;
 #[derive(Debug, Clone)]
 pub struct Entry {
     pub name: String,
+    /// `name` lowercased once at read time, so sorting/filtering never has to
+    /// re-lowercase inside the O(n log n) comparator.
+    pub name_lower: String,
     pub path: PathBuf,
     pub is_dir: bool,
     /// Size in bytes. Meaningless for directories, which report `0`.
@@ -42,25 +45,11 @@ pub struct Entry {
 }
 
 impl Entry {
-    fn from_dir_entry(de: fs::DirEntry) -> Result<Self> {
-        let path = de.path();
-        let name = de
-            .file_name()
-            .into_string()
-            .map_err(|raw| anyhow::anyhow!("non-utf8 filename: {:?}", raw))?;
-        let is_dir = de.file_type()?.is_dir();
-        // Metadata can fail on broken symlinks and races; the entry is still
-        // worth listing, so fall back to unknown size/time rather than drop it.
-        let meta = de.metadata().ok();
-        let len = meta.as_ref().map(|m| m.len()).unwrap_or(0);
-        let modified = meta.as_ref().and_then(|m| m.modified().ok());
-        Ok(Self { name, path, is_dir, len, modified, is_parent: false })
-    }
-
     /// The synthetic `..` entry pointing at `parent`.
     fn parent_row(parent: PathBuf) -> Self {
         Self {
             name: "..".to_string(),
+            name_lower: "..".to_string(),
             path: parent,
             is_dir: true,
             len: 0,
@@ -68,6 +57,63 @@ impl Entry {
             is_parent: true,
         }
     }
+}
+
+/// Build an [`Entry`] straight from a `DirEntry` (Windows: its `metadata()` is
+/// cached from the directory enumeration, so this is essentially free).
+#[cfg(windows)]
+fn entry_from_de(de: fs::DirEntry) -> Option<Entry> {
+    let name = de.file_name().into_string().ok()?;
+    let is_dir = de.file_type().ok()?.is_dir();
+    let meta = de.metadata().ok();
+    let len = meta.as_ref().map(|m| m.len()).unwrap_or(0);
+    let modified = meta.as_ref().and_then(|m| m.modified().ok());
+    let name_lower = name.to_lowercase();
+    Some(Entry { name, name_lower, path: de.path(), is_dir, len, modified, is_parent: false })
+}
+
+/// Stat one raw `(name, path, is_dir)` into an [`Entry`]. `symlink_metadata`
+/// (not `metadata`) matches `DirEntry::metadata`'s no-follow behaviour; a stat
+/// failure (broken symlink, race) still lists the entry with unknown size/time.
+#[cfg(not(windows))]
+fn mk_entry((name, path, is_dir): (String, PathBuf, bool)) -> Entry {
+    let meta = fs::symlink_metadata(&path).ok();
+    let len = meta.as_ref().map(|m| m.len()).unwrap_or(0);
+    let modified = meta.as_ref().and_then(|m| m.modified().ok());
+    let name_lower = name.to_lowercase();
+    Entry { name, name_lower, path, is_dir, len, modified, is_parent: false }
+}
+
+/// Stat every raw entry into an [`Entry`], fanning the per-file `stat` calls out
+/// across threads. `stat` is latency-bound (especially on network filesystems),
+/// so overlapping the calls is a big win; small directories skip the threads.
+#[cfg(not(windows))]
+fn stat_entries(raws: Vec<(String, PathBuf, bool)>) -> Vec<Entry> {
+    let n = raws.len();
+    let threads = std::thread::available_parallelism().map(|p| p.get()).unwrap_or(1).min(8);
+    if n < 256 || threads <= 1 {
+        return raws.into_iter().map(mk_entry).collect();
+    }
+    // Contiguous chunks so concatenating the results preserves readdir order
+    // (apply_sort re-orders anyway, but a stable input keeps ties predictable).
+    let chunk = n.div_ceil(threads);
+    let mut buckets: Vec<Vec<(String, PathBuf, bool)>> = (0..threads).map(|_| Vec::new()).collect();
+    for (i, r) in raws.into_iter().enumerate() {
+        buckets[i / chunk].push(r);
+    }
+    let mut out: Vec<Entry> = Vec::with_capacity(n);
+    std::thread::scope(|s| {
+        let handles: Vec<_> = buckets
+            .into_iter()
+            .map(|b| s.spawn(move || b.into_iter().map(mk_entry).collect::<Vec<Entry>>()))
+            .collect();
+        for h in handles {
+            if let Ok(part) = h.join() {
+                out.extend(part);
+            }
+        }
+    });
+    out
 }
 
 /// Format a byte count the way a file manager should: short, aligned, and
@@ -224,12 +270,29 @@ impl Pane {
 
     pub fn reload(&mut self) -> Result<()> {
         self.stamp = fs::metadata(&self.cwd).ok().and_then(|m| m.modified().ok());
-        let entries: Vec<Entry> = fs::read_dir(&self.cwd)
-            .with_context(|| format!("read_dir failed: {}", self.cwd.display()))?
-            .filter_map(|res| res.ok())
-            .filter_map(|de| Entry::from_dir_entry(de).ok())
-            .collect();
-        self.all_entries = entries;
+        let rd = fs::read_dir(&self.cwd)
+            .with_context(|| format!("read_dir failed: {}", self.cwd.display()))?;
+        // On Windows `DirEntry::metadata()` is free — size/mtime come from the
+        // directory enumeration itself — so there is nothing to parallelise; the
+        // straight read wins. On Unix each entry needs a `stat`, which is the
+        // slow bit (worse on network mounts), so the size/mtime pass is fanned
+        // out across threads (name/path/is_dir come cheaply from readdir).
+        #[cfg(windows)]
+        {
+            self.all_entries = rd.filter_map(|r| r.ok()).filter_map(entry_from_de).collect();
+        }
+        #[cfg(not(windows))]
+        {
+            let raws: Vec<(String, PathBuf, bool)> = rd
+                .filter_map(|res| res.ok())
+                .filter_map(|de| {
+                    let name = de.file_name().into_string().ok()?;
+                    let is_dir = de.file_type().ok()?.is_dir();
+                    Some((name, de.path(), is_dir))
+                })
+                .collect();
+            self.all_entries = stat_entries(raws);
+        }
         self.apply_sort();
         self.apply_filter();
         // Forget marks whose path no longer exists in this directory. This
@@ -253,7 +316,8 @@ impl Pane {
                 (false, true) => return std::cmp::Ordering::Greater,
                 _ => {}
             }
-            let by_name = |x: &Entry, y: &Entry| x.name.to_lowercase().cmp(&y.name.to_lowercase());
+            // Compares the pre-lowercased names (no per-comparison allocation).
+            let by_name = |x: &Entry, y: &Entry| x.name_lower.cmp(&y.name_lower);
             let ord = match sort.key {
                 SortKey::Name => by_name(a, b),
                 // Ties fall back to name so the order is stable and predictable
@@ -261,14 +325,14 @@ impl Pane {
                 SortKey::Size => a.len.cmp(&b.len).then_with(|| by_name(a, b)),
                 SortKey::Modified => a.modified.cmp(&b.modified).then_with(|| by_name(a, b)),
                 SortKey::Extension => {
-                    let ext = |e: &Entry| {
-                        std::path::Path::new(&e.name)
+                    // Extension off the already-lowercased name.
+                    fn ext(e: &Entry) -> &str {
+                        std::path::Path::new(&e.name_lower)
                             .extension()
                             .and_then(|x| x.to_str())
                             .unwrap_or("")
-                            .to_lowercase()
-                    };
-                    ext(a).cmp(&ext(b)).then_with(|| by_name(a, b))
+                    }
+                    ext(a).cmp(ext(b)).then_with(|| by_name(a, b))
                 }
             };
             if sort.reverse {
@@ -295,7 +359,7 @@ impl Pane {
             .all_entries
             .iter()
             .filter(|e| show_hidden || !e.name.starts_with('.'))
-            .filter(|e| needle.is_empty() || e.name.to_lowercase().contains(&needle))
+            .filter(|e| needle.is_empty() || e.name_lower.contains(&needle))
             .cloned()
             .collect();
         // A `..` row at the very top, so stepping up a level is a visible,
@@ -758,5 +822,26 @@ mod format_tests {
         assert_eq!(bytes[7], b'-');
         assert_eq!(bytes[10], b' ');
         assert_eq!(bytes[13], b':');
+    }
+}
+
+#[cfg(test)]
+mod perf_bench {
+    use super::*;
+    #[test]
+    #[ignore]
+    fn bench_reload_and_sort_big_dir() {
+        let d = tempfile::tempdir().unwrap();
+        for i in 0..5000 { std::fs::write(d.path().join(format!("file_{i:05}.rs")), b"x").unwrap(); }
+        let mut p = Pane::new(d.path()).unwrap();
+        // warm
+        p.reload().unwrap();
+        let n = 50;
+        let t = std::time::Instant::now();
+        for _ in 0..n { p.reload().unwrap(); }
+        println!("reload: {:?}/call (5000 files)", t.elapsed()/n);
+        let t = std::time::Instant::now();
+        for i in 0..n { p.set_sort(Sort{ key: if i%2==0 {SortKey::Name} else {SortKey::Size}, reverse:false }); }
+        println!("set_sort: {:?}/call", t.elapsed()/n);
     }
 }

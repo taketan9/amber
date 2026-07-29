@@ -2874,6 +2874,7 @@ fn shortcut_icon(target: &str) -> &'static str {
             .unwrap_or_default();
         // Only the name matters here: this is used to pick an icon by extension.
         let entry = cian_core::Entry {
+            name_lower: name.to_lowercase(),
             name,
             path: path.clone(),
             is_dir: false,
