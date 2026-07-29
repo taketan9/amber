@@ -1927,6 +1927,27 @@
     /// Right-clicking the shell with an empty clipboard used to open nothing
     /// at all; the manual entry means there is always something to show.
     #[test]
+    fn file_menu_zone_order_is_consistent() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        app.focus(FocusedPane::Left);
+        app.open_context_menu(5, 5);
+        let Popup::ContextMenu { items, .. } = &app.popup else { panic!("no menu") };
+        let pos = |m: MenuItem| items.iter().position(|i| *i == m).expect("item present");
+        // Shortcuts joins the launcher cluster at the top, above the file ops.
+        assert!(pos(MenuItem::Shortcuts) < pos(MenuItem::Copy));
+        // Copy / paste cluster, then the connect block, then appearance.
+        assert!(pos(MenuItem::Copy) < pos(MenuItem::PasteHere));
+        assert!(pos(MenuItem::PasteHere) < pos(MenuItem::Ssh));
+        assert!(pos(MenuItem::Ssh) < pos(MenuItem::Background));
+        // Appearance block in the shared order: background, theme, language.
+        assert!(pos(MenuItem::Background) < pos(MenuItem::ThemePick));
+        assert!(pos(MenuItem::ThemePick) < pos(MenuItem::Lang));
+        // OS group stays last before the footer.
+        assert!(pos(MenuItem::Lang) < pos(MenuItem::OsMenu));
+        assert!(pos(MenuItem::OsMenu) < pos(MenuItem::Quit));
+    }
+
+    #[test]
     fn the_shell_menu_has_its_own_reduced_set() {
         let (_d, mut app) = app_with(&["a.txt"]);
         app.focus(FocusedPane::Shell);
@@ -1940,15 +1961,16 @@
             .cloned()
             .filter(|i| !matches!(i, MenuItem::Snippets | MenuItem::AiMenu | MenuItem::Macros))
             .collect();
-        // No SSH hosts configured here, so Transfer ▸ is omitted; logging and
-        // encoding fold into Session ▸.
+        // No SSH hosts configured here, so Transfer ▸ is omitted. The zones:
+        // pane action (Paste), shell groups (Session / Window), the shared
+        // connect + appearance blocks, then the footer.
         assert_eq!(
             core,
             vec![
                 MenuItem::Paste,
-                MenuItem::Ssh,
                 MenuItem::SessionMenu,
                 MenuItem::WindowMenu,
+                MenuItem::Ssh,
                 MenuItem::Background,
                 MenuItem::ThemePick,
                 MenuItem::Lang,

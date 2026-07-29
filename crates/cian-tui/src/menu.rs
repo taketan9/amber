@@ -21,16 +21,15 @@ impl App {
             items.push(MenuItem::Macros);
         }
         let has_hosts = !self.config.ssh_hosts.is_empty();
+        // Both menus follow the same zones so common items line up: launchers,
+        // pane-specific actions, pane-specific groups, then the shared blocks
+        // (connect/transfer, appearance, footer).
         if self.focused == FocusedPane::Shell {
-            // A PTY owns its own screen, so file operations make no sense here.
+            // Pane action: only "paste" (send to the PTY) makes sense here.
             items.push(MenuItem::Paste);
-            if has_hosts {
-                items.push(MenuItem::SendMenu); // Transfer ▸
-            }
-            // SSH leads: keys never reach the picker while the shell has focus,
-            // so this menu is the only way to open it without leaving the shell.
-            items.push(MenuItem::Ssh);
+            // Shell-specific groups.
             items.push(MenuItem::SessionMenu); // log ▸ / encoding
+            items.push(MenuItem::WindowMenu);
             // Synchronize input — only when there's more than one pane.
             if self.shell.active_pane_count() > 1 {
                 if self.shell.is_broadcasting() {
@@ -41,12 +40,11 @@ impl App {
                     items.push(MenuItem::SyncStart);
                 }
             }
-            items.push(MenuItem::WindowMenu);
-            items.push(MenuItem::Background);
-            items.push(MenuItem::ThemePick);
-            items.push(MenuItem::Lang);
         } else {
-            // Frequent file ops sit at the top level; the rest fold into groups.
+            // Shortcuts is a bookmark launcher, so it joins the launcher cluster
+            // at the top rather than sitting among the connect/transfer items.
+            items.push(MenuItem::Shortcuts);
+            // Frequent file ops at the top level; the rest fold into groups.
             items.push(MenuItem::Copy);
             items.push(MenuItem::CopyPathText); // directly under Copy
             items.push(MenuItem::Cut);
@@ -66,22 +64,24 @@ impl App {
                 items.push(MenuItem::ArchiveMenu);
             }
             items.push(MenuItem::InspectMenu); // attributes / hash / compare / count / dupes
-            if has_hosts {
-                items.push(MenuItem::SendMenu); // Transfer ▸
-            }
             match self.vcs_kind() {
                 Some(Vcs::Git) => items.push(MenuItem::GitMenu),
                 Some(Vcs::Svn) => items.push(MenuItem::SvnMenu),
                 None => {}
             }
-            items.push(MenuItem::Shortcuts);
-            items.push(MenuItem::Ssh);
-            items.push(MenuItem::Background);
-            items.push(MenuItem::Lang); // language toggle sits at the top level
-            items.push(MenuItem::ViewMenu); // show hidden / theme
-            // The OS-native group sits last, just above Quit / the manual, so
-            // "Show in Explorer / Finder" is always in the same easy-to-reach
-            // spot (third from the bottom).
+        }
+        // ── Shared: connect / transfer ──────────────────────────────────────
+        items.push(MenuItem::Ssh);
+        if has_hosts {
+            items.push(MenuItem::SendMenu); // Transfer ▸
+        }
+        // ── Shared: appearance ──────────────────────────────────────────────
+        items.push(MenuItem::Background);
+        items.push(MenuItem::ThemePick);
+        items.push(MenuItem::Lang);
+        if self.focused != FocusedPane::Shell {
+            items.push(MenuItem::ViewMenu); // show hidden / pane theme
+            // The OS-native group sits last, just above Quit / the manual.
             items.push(MenuItem::OsMenu); // open / open-with / reveal / properties
         }
         // Quit and the manual close every menu — reachable by mouse alone
@@ -197,7 +197,6 @@ impl App {
             ]),
             MenuItem::ViewMenu => Some(vec![
                 MenuItem::HiddenToggle,
-                MenuItem::ThemePick,
                 MenuItem::ThemePickPane,
                 MenuItem::Back,
             ]),
