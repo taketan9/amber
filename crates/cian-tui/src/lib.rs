@@ -2354,10 +2354,18 @@ fn os_reveal(path: &Path) -> Result<()> {
     };
     #[cfg(target_os = "windows")]
     let mut cmd = {
-        // `/select,<path>` is one argument (comma-joined). Explorer exits 1 even
+        use std::os::windows::process::CommandExt;
+        // Explorer wants the PATH quoted, and its own (non-standard) parser
+        // rejects the whole `/select,PATH` token being quoted — which is exactly
+        // what `Command::arg` does when the path contains a space. An
+        // OneDrive-redirected Desktop is `C:\Users\name\OneDrive - Corp\Desktop`,
+        // so from there `/select` was handed a wrongly-quoted argument and
+        // Explorer silently fell back to opening the Documents folder. Emit the
+        // command line verbatim with `raw_arg`, quoting only the path (a Windows
+        // path can never contain a `"`, so this is safe). Explorer exits 1 even
         // on success, so we only spawn — never wait on or check its status.
         let mut c = Command::new("explorer");
-        c.arg(format!("/select,{}", path.display()));
+        c.raw_arg(format!("/select,\"{}\"", path.display()));
         c
     };
     #[cfg(target_os = "linux")]

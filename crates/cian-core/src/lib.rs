@@ -283,10 +283,19 @@ impl Pane {
 
     /// Whether `cwd` has changed since it was last read.
     ///
-    /// A directory's own mtime moves when an entry is added, removed or
-    /// renamed, which covers "a file appeared while I was looking at this" —
-    /// the case where a stale listing actively misleads. Checking one stat is
-    /// cheap enough to do on a timer; re-reading the whole directory is not.
+    /// A directory's own mtime moves when an entry is added, removed or renamed,
+    /// which covers "a file appeared while I was looking at this" — the case
+    /// where a stale listing actively misleads. Checking one stat is cheap
+    /// enough to do on a timer; re-reading the whole directory is not.
+    ///
+    /// But mtime is not reliable everywhere: **Windows/NTFS (and network shares)
+    /// often do not update a directory's mtime promptly** when a file is added or
+    /// removed, so a file dropped in from Explorer could sit invisible until
+    /// something else moved the timestamp. So when mtime says "unchanged", fall
+    /// back to comparing the entry count, which a fresh `read_dir` reports
+    /// directly regardless of any timestamp caching. That extra read is cheap for
+    /// ordinary directories (it never stats the entries) and is skipped for very
+    /// large ones, where the single-stat mtime path is the right trade-off.
     pub fn is_stale(&self) -> bool {
         // A flat / search listing is not backed by a live directory, so the
         // auto-refresh timer must leave it alone — re-reading `cwd` would throw
@@ -295,13 +304,29 @@ impl Pane {
             return false;
         }
         let now = fs::metadata(&self.cwd).ok().and_then(|m| m.modified().ok());
-        match (now, self.stamp) {
+        let mtime_changed = match (now, self.stamp) {
             (Some(a), Some(b)) => a != b,
             // No timestamp either time: nothing to compare, assume unchanged
             // rather than reloading forever.
             (None, None) => false,
             _ => true,
+        };
+        if mtime_changed {
+            return true;
         }
+        const COUNT_CHECK_MAX: usize = 20_000;
+        if self.all_entries.len() <= COUNT_CHECK_MAX {
+            if let Ok(rd) = fs::read_dir(&self.cwd) {
+                // `read_dir` never yields `.`/`..`, and `all_entries` holds every
+                // real entry (pre-filter, hidden included) — so the two counts
+                // match exactly while the directory is unchanged.
+                let count = rd.filter(|e| e.is_ok()).count();
+                if count != self.all_entries.len() {
+                    return true;
+                }
+            }
+        }
+        false
     }
 
     pub fn reload(&mut self) -> Result<()> {
@@ -727,6 +752,33 @@ mod tests {
         assert!(pane.is_stale(), "a removed entry counts too");
         pane.reload().unwrap();
         assert!(!names(&pane).contains(&"appeared.txt".to_string()));
+    }
+
+    /// Windows/NTFS (and network shares) often do not bump a directory's mtime
+    /// when a file is added, so a file dropped in from Explorer would stay
+    /// invisible until F5. The entry-count fallback must catch it even with the
+    /// timestamp pinned to its old value.
+    #[test]
+    fn a_new_entry_is_noticed_even_when_the_directory_mtime_does_not_move() {
+        let (dir, mut pane) = pane_with(&["a.txt"]);
+        assert!(!pane.is_stale());
+        // The mtime the pane recorded at load time.
+        let pinned = fs::metadata(dir.path()).unwrap().modified().unwrap();
+
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        fs::write(dir.path().join("b.txt"), b"x").unwrap();
+        // Simulate the OS not moving the directory timestamp on the add.
+        filetime::set_file_mtime(dir.path(), filetime::FileTime::from_system_time(pinned)).unwrap();
+
+        assert!(
+            pane.is_stale(),
+            "the new entry must be noticed via the count fallback, not just mtime"
+        );
+        pane.reload().unwrap();
+        assert!(names(&pane).contains(&"b.txt".to_string()));
+        // And with the mtime still pinned and the count now matching, it settles.
+        filetime::set_file_mtime(dir.path(), filetime::FileTime::from_system_time(pinned)).unwrap();
+        assert!(!pane.is_stale(), "no phantom change once the count agrees again");
     }
 
     #[test]

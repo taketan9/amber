@@ -391,6 +391,7 @@ dependencies = [
  "chrono",
  "dunce",
  "encoding_rs",
+ "filetime",
  "flate2",
  "fs2",
  "fs4",
