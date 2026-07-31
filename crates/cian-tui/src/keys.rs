@@ -78,6 +78,16 @@ impl App {
 
     // ------- Key dispatch -------
     pub(crate) fn handle_key(&mut self, key: KeyEvent) -> Result<()> {
+        // A copy/move/delete or a directory-compare runs on a worker thread and
+        // stays flagged in-flight until its result is polled in. Those polls
+        // otherwise run only *after* this key is handled, and `event::poll`
+        // blocks for up to a tick — so a job can finish in that window and the
+        // "Esc is the only key" gates just below would silently swallow the very
+        // next keypress (a second copy right after the first appeared to need two
+        // presses). Land any finished job here first, so a gate is closed only
+        // while its op is genuinely still running. Both polls no-op when idle.
+        self.poll_op_job();
+        self.poll_diff_job();
         // A running operation owns Esc: stopping it is the only thing anyone
         // wants from the keyboard while it is on screen.
         if self.op_job.is_some() {

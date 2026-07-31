@@ -230,6 +230,30 @@
         panic!("op job did not finish");
     }
 
+    /// Regression: a keypress arriving in the tiny window after a background op
+    /// finished but before its result was polled used to be swallowed by the
+    /// "Esc only while an op runs" gate — so a second copy right after the first
+    /// appeared to need two presses. handle_key must land a finished op first.
+    #[test]
+    fn a_key_right_after_an_op_finishes_is_not_swallowed() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        // Start a trivial op and let its worker report Done — but do NOT poll it,
+        // exactly as the event loop leaves it while blocked on the next input.
+        app.start_op("copying", |_ctl| cian_core::ops::OpReport::default());
+        std::thread::sleep(std::time::Duration::from_millis(30));
+        assert!(app.op_job.is_some(), "job still flagged in-flight (unpolled)");
+
+        // The next keypress must be acted on, not eaten: `c` opens the copy
+        // confirmation, and the finished op is landed in the same step.
+        app.handle_key(key('c')).unwrap();
+        assert!(app.op_job.is_none(), "the finished op was landed, not left blocking");
+        assert!(
+            matches!(app.popup, Popup::ConfirmTransfer { .. }),
+            "the copy key was handled: {:?}",
+            app.popup
+        );
+    }
+
     #[test]
     fn unzip_extracts_into_a_named_subfolder() {
         let (d, mut app) = app_with(&[]);
