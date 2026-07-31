@@ -988,6 +988,33 @@ impl App {
         }
     }
 
+    /// The comparison on screen as a WinMerge-style HTML report (side by side),
+    /// or `None` if no comparison is open.
+    pub(crate) fn diff_as_html(&self) -> Option<String> {
+        match &self.popup {
+            Popup::Diff { left, right, result, .. } => {
+                Some(cian_core::diff::to_html(result, left, right))
+            }
+            Popup::DirCompare { left, right, entries, truncated, .. } => {
+                Some(cian_core::dirdiff::to_html(entries, left, right, *truncated))
+            }
+            _ => None,
+        }
+    }
+
+    /// The comparison on screen as a side-by-side Markdown table, or `None`.
+    pub(crate) fn diff_as_markdown(&self) -> Option<String> {
+        match &self.popup {
+            Popup::Diff { left, right, result, .. } => {
+                Some(cian_core::diff::to_markdown(result, left, right))
+            }
+            Popup::DirCompare { left, right, entries, truncated, .. } => {
+                Some(cian_core::dirdiff::to_markdown(entries, left, right, *truncated))
+            }
+            _ => None,
+        }
+    }
+
     /// Move the diff view to the next/previous row whose text matches the
     /// active search (case-insensitive). `from_here` includes the current row
     /// (used right after confirming a search).
@@ -1038,11 +1065,15 @@ impl App {
     /// pane's directory.
     pub(crate) fn start_diff_save_as(&mut self) {
         let Some(text) = self.diff_as_text() else { return };
+        let html = self.diff_as_html().unwrap_or_default();
+        let md = self.diff_as_markdown().unwrap_or_default();
         self.popup = text_input(
-            "save diff as",
-            "filename (in the active pane's directory):",
-            "diff.txt".to_string(),
-            InputKind::DiffSaveAs { text },
+            tr(self.lang, "save comparison as", "比較結果を保存"),
+            tr(self.lang,
+                ".html / .md = side by side; .txt = plain  (in the active pane):",
+                ".html / .md = 左右並び、.txt = プレーン（アクティブペインに保存）:"),
+            "diff.html".to_string(),
+            InputKind::DiffSaveAs { text, html, md },
         );
     }
 
@@ -2300,13 +2331,25 @@ impl App {
                 self.start_ai_search(&name);
                 return Ok(());
             }
-            InputKind::DiffSaveAs { text } => {
+            InputKind::DiffSaveAs { text, html, md } => {
                 let dir = self.active_pane().map(|p| p.cwd.clone());
                 if let Some(dir) = dir {
                     let path = dir.join(&name);
-                    match std::fs::write(&path, text) {
+                    // The extension chooses the rendering: side-by-side HTML or
+                    // Markdown, else the plain-text form.
+                    let ext = path
+                        .extension()
+                        .and_then(|e| e.to_str())
+                        .map(|e| e.to_ascii_lowercase())
+                        .unwrap_or_default();
+                    let body = match ext.as_str() {
+                        "html" | "htm" => html,
+                        "md" | "markdown" => md,
+                        _ => text,
+                    };
+                    match std::fs::write(&path, body) {
                         Ok(()) => {
-                            self.message = Some(format!("saved diff → {}", path.display()));
+                            self.message = Some(format!("saved comparison → {}", path.display()));
                             self.reload_active();
                         }
                         Err(e) => self.message = Some(format!("save failed: {}", e)),

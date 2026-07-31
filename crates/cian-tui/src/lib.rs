@@ -1143,9 +1143,11 @@ enum InputKind {
     AiRename,
     /// A natural-language query for semantic search over the tree.
     AiSearch,
-    /// A filename to save the diff/compare result into (the text is carried
-    /// here because the source popup is replaced by the prompt).
-    DiffSaveAs { text: String },
+    /// A filename to save the diff/compare result into. All three renderings are
+    /// carried here (the source popup is replaced by the prompt); the format is
+    /// picked from the extension the user types — `.html`/`.htm`, `.md`, else
+    /// the plain-text form.
+    DiffSaveAs { text: String, html: String, md: String },
     /// A name for an archive about to be created from `sources`, in the given
     /// format. The extension is appended if missing.
     CompressName { kind: CompressKind, sources: Vec<PathBuf> },
@@ -2955,7 +2957,7 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry("  from a grep hit", None, "Ctrl+n/N next/prev hit, Shift+Enter reveal in pane, e encoding", "grepヒットから：Ctrl+n/N 次/前, Shift+Enter 場所へ, e 文字コード"),
                 entry("=", None, "compare left ↔ right: two files (line diff), or two folders (recursive)", "左右を比較：ファイル同士（行差分）／フォルダ同士（再帰）"),
                 entry("  > / <", None, "  in a comparison: copy the entry across to the other side (confirms overwrite)", "  比較画面：エントリを反対側へコピー（上書きは確認）"),
-                entry("  c / w", None, "  in a comparison: copy result to clipboard / save it to the active pane", "  比較画面：結果をクリップボードへ／アクティブペインに保存"),
+                entry("  c / w", None, "  in a comparison: copy to clipboard / save side-by-side (.html or .md, else .txt)", "  比較画面：クリップボードへ／左右並びで保存（.html か .md、他は .txt）"),
                 entry("-, Bksp", Some(Parent), "parent folder", "親フォルダへ"),
                 entry("Left / Right", None, "focus the left / right pane", "左／右のペインにフォーカス"),
                 entry("h", Some(History), "history popup", "履歴ポップアップ"),

@@ -3431,6 +3431,11 @@ fn draw_popup(
         let add = Color::Rgb(130, 225, 150);
         let del = Color::Rgb(255, 140, 145);
         let chg = Color::Rgb(240, 210, 120);
+        // Two columns with a marker between them, mirroring the file diff: a
+        // path sits on the side(s) it exists, so which tree has (or differs on)
+        // an entry is read straight down either column.
+        let mid = 3usize;
+        let col = (inner.width as usize).saturating_sub(mid) / 2;
         for (row, (i, e)) in entries.iter().enumerate().skip(first).take(body_h).enumerate() {
             let sel = i == *cursor;
             let y = inner.y + row as u16;
@@ -3440,27 +3445,30 @@ fn draw_popup(
                 f.render_widget(Block::default().style(Style::default().bg(theme().selected_bg)), line);
             }
             let base = if sel { Style::default().bg(theme().selected_bg) } else { Style::default() };
-            let (mark, col) = match e.status {
-                Status::OnlyRight => ("+ ", add),
-                Status::OnlyLeft => ("- ", del),
-                Status::Differ => ("~ ", chg),
-            };
             let mut name = e.rel.display().to_string().replace('\\', "/");
             if e.is_dir {
                 name.push('/');
             }
+            let shown = truncate_middle(&name, col);
+            let blank = " ".repeat(col);
+            let (mark, mcol, left_txt, right_txt) = match e.status {
+                Status::OnlyLeft => ("◀", del, shown.clone(), blank.clone()),
+                Status::OnlyRight => ("▶", add, blank.clone(), shown.clone()),
+                Status::Differ => ("≠", chg, shown.clone(), shown.clone()),
+            };
             f.render_widget(
                 Paragraph::new(Line::from(vec![
-                    Span::styled(format!(" {}", mark), base.fg(col).add_modifier(Modifier::BOLD)),
-                    Span::styled(truncate_middle(&name, inner.width as usize - 4), base.fg(col)),
+                    Span::styled(pad_to(&left_txt, col), base.fg(mcol)),
+                    Span::styled(format!(" {} ", mark), base.fg(mcol).add_modifier(Modifier::BOLD)),
+                    Span::styled(pad_to(&right_txt, col), base.fg(mcol)),
                 ])),
                 line,
             );
         }
         f.render_widget(
             Paragraph::new(tr(lang,
-                " + right-only   - left-only   ~ differ    Enter=go to   j/k  Esc close ",
-                " + 右のみ   - 左のみ   ~ 相違    Enter=移動   j/k  Esc 閉じる ",
+                " ◀ left-only  ▶ right-only  ≠ differ   Enter=go  w save(.html/.md)  j/k  Esc ",
+                " ◀ 左のみ  ▶ 右のみ  ≠ 相違   Enter=移動  w 保存(.html/.md)  j/k  Esc ",
             ))
             .style(Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD)),
             Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1),
@@ -3645,8 +3653,8 @@ fn draw_popup(
                 "{}{}  {}  [{}] {} ",
                 tr(lang, " n/N change  / find  f ", " n/N 変更  / 検索  f "),
                 fold_word,
-                tr(lang, "c copy  w save  e enc  x explain  g/G  Esc",
-                      "c コピー  w 保存  e 文字コード  x 説明  g/G  Esc"),
+                tr(lang, "c copy  w save(.html/.md)  e enc  x explain  g/G  Esc",
+                      "c コピー  w 保存(.html/.md)  e 文字コード  x 説明  g/G  Esc"),
                 encoding.label(),
                 pos
             )

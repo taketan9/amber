@@ -240,6 +240,96 @@ pub fn set_mtime(path: &Path, t: SystemTime) -> std::io::Result<()> {
     fs::OpenOptions::new().write(true).open(path)?.set_modified(t)
 }
 
+// ── Exporting a folder comparison to a readable report ───────────────────────
+
+fn counts(entries: &[Entry]) -> (usize, usize, usize) {
+    let (mut m, mut a, mut d) = (0, 0, 0);
+    for e in entries {
+        match e.status {
+            Status::Differ => m += 1,
+            Status::OnlyRight => a += 1,
+            Status::OnlyLeft => d += 1,
+        }
+    }
+    (m, a, d)
+}
+
+fn rel_name(e: &Entry) -> String {
+    let mut n = e.rel.display().to_string().replace('\\', "/");
+    if e.is_dir {
+        n.push('/');
+    }
+    n
+}
+
+/// Render the folder comparison as a self-contained HTML page: a left column
+/// and a right column, so it is obvious which side each path is on — present on
+/// the left only, the right only, or on both but differing.
+pub fn to_html(entries: &[Entry], left: &str, right: &str, truncated: bool) -> String {
+    use crate::diff::{html_escape, REPORT_STYLE};
+    let (m, a, d) = counts(entries);
+    let mut s = String::new();
+    s.push_str("<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n");
+    s.push_str(&format!("<title>compare: {} \u{2194} {}</title>\n", html_escape(left), html_escape(right)));
+    s.push_str(REPORT_STYLE);
+    s.push_str("</head>\n<body>\n");
+    s.push_str(&format!(
+        "<h1>{} <span class=\"arrow\">\u{2194}</span> {}</h1>\n",
+        html_escape(left),
+        html_escape(right)
+    ));
+    let cut = if truncated { "  (stopped at 5000)" } else { "" };
+    s.push_str(&format!("<p class=\"summary\">~{} differ · +{} right-only · -{} left-only{}</p>\n", m, a, d, cut));
+    s.push_str("<table>\n<thead><tr><th>");
+    s.push_str(&html_escape(left));
+    s.push_str("</th><th class=\"num\">\u{0394}</th><th>");
+    s.push_str(&html_escape(right));
+    s.push_str("</th></tr></thead>\n<tbody>\n");
+    for e in entries {
+        let name = html_escape(&rel_name(e));
+        let (cls, l, mid, r) = match e.status {
+            Status::OnlyLeft => ("del", name.as_str(), "\u{25c0}", ""),
+            Status::OnlyRight => ("add", "", "\u{25b6}", name.as_str()),
+            Status::Differ => ("chg", name.as_str(), "\u{2260}", name.as_str()),
+        };
+        let cell = |t: &str| if t.is_empty() {
+            "<td class=\"empty\"></td>".to_string()
+        } else {
+            format!("<td class=\"code\">{}</td>", t)
+        };
+        s.push_str(&format!(
+            "<tr class=\"{}\">{}<td class=\"num\">{}</td>{}</tr>\n",
+            cls, cell(l), mid, cell(r)
+        ));
+    }
+    s.push_str("</tbody>\n</table>\n</body>\n</html>\n");
+    s
+}
+
+/// Render the folder comparison as a Markdown table: a left column and a right
+/// column, the middle marking `-` left-only, `+` right-only, `~` differ.
+pub fn to_markdown(entries: &[Entry], left: &str, right: &str, truncated: bool) -> String {
+    use crate::diff::md_code;
+    let (m, a, d) = counts(entries);
+    let mut s = String::new();
+    s.push_str(&format!("# compare: {} \u{2194} {}\n\n", left, right));
+    let cut = if truncated { "  (stopped at 5000)" } else { "" };
+    s.push_str(&format!("`~{} differ  +{} right-only  -{} left-only{}`\n\n", m, a, d, cut));
+    let h = |x: &str| x.replace('|', "\\|");
+    s.push_str(&format!("| {} |   | {} |\n", h(left), h(right)));
+    s.push_str("|---|:-:|---|\n");
+    for e in entries {
+        let name = rel_name(e);
+        let (st, l, r) = match e.status {
+            Status::OnlyLeft => ("-", md_code(&name), " ".to_string()),
+            Status::OnlyRight => ("+", " ".to_string(), md_code(&name)),
+            Status::Differ => ("~", md_code(&name), md_code(&name)),
+        };
+        s.push_str(&format!("| {} | {} | {} |\n", l, st, r));
+    }
+    s
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -252,6 +342,34 @@ mod tests {
             .into_iter()
             .map(|e| (e.rel.display().to_string().replace('\\', "/"), e.status))
             .collect()
+    }
+
+    fn sample_entries() -> Vec<Entry> {
+        vec![
+            Entry { rel: PathBuf::from("only_left.txt"), status: Status::OnlyLeft, is_dir: false },
+            Entry { rel: PathBuf::from("only_right.txt"), status: Status::OnlyRight, is_dir: false },
+            Entry { rel: PathBuf::from("changed.txt"), status: Status::Differ, is_dir: false },
+        ]
+    }
+
+    #[test]
+    fn html_export_puts_each_path_on_its_side() {
+        let html = to_html(&sample_entries(), "LEFT", "RIGHT", false);
+        assert!(html.contains("<table"));
+        assert!(html.contains("only_left.txt") && html.contains("only_right.txt"));
+        // A left-only row is styled as a deletion, a right-only as an addition,
+        // a differing one as a change — and the changed path appears twice
+        // (once per side).
+        assert!(html.contains("class=\"del\"") && html.contains("class=\"add\"") && html.contains("class=\"chg\""));
+        assert_eq!(html.matches("changed.txt").count(), 2, "differing path on both sides");
+    }
+
+    #[test]
+    fn markdown_export_is_a_left_right_table() {
+        let md = to_markdown(&sample_entries(), "LEFT", "RIGHT", false);
+        assert!(md.starts_with("# compare: LEFT \u{2194} RIGHT"));
+        assert!(md.contains("| LEFT |   | RIGHT |"), "header names both sides: {}", md);
+        assert!(md.contains("only_left.txt") && md.contains("only_right.txt"));
     }
 
     #[test]

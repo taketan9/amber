@@ -365,6 +365,186 @@ pub fn common_affixes(a: &str, b: &str) -> (usize, usize) {
     (p, s)
 }
 
+// ── Exporting a diff to a readable report ────────────────────────────────────
+//
+// The on-screen view is side-by-side, but the saved-to-disk form used to be a
+// unified `-`/`+` dump that is hard to read after the fact. These render the
+// same two-column view WinMerge shows, as a self-contained HTML page (colored,
+// with the edited span within a changed line marked) or a Markdown table (which
+// renders on GitHub and in cian's own viewer).
+
+pub(crate) fn html_escape(s: &str) -> String {
+    let mut o = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '&' => o.push_str("&amp;"),
+            '<' => o.push_str("&lt;"),
+            '>' => o.push_str("&gt;"),
+            '"' => o.push_str("&quot;"),
+            _ => o.push(c),
+        }
+    }
+    o
+}
+
+/// A changed line as HTML with only the edited middle wrapped in `<mark>`.
+fn changed_html(text: &str, prefix: usize, suffix: usize) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    let n = chars.len();
+    let suffix = suffix.min(n.saturating_sub(prefix));
+    let mid_end = n - suffix;
+    if prefix >= mid_end {
+        // Nothing distinct on this side (a pure insertion on the other) —
+        // still mark an empty point so the eye lands on where it changed.
+        return html_escape(text);
+    }
+    let seg = |a: usize, b: usize| chars[a..b].iter().collect::<String>();
+    format!(
+        "{}<mark>{}</mark>{}",
+        html_escape(&seg(0, prefix)),
+        html_escape(&seg(prefix, mid_end)),
+        html_escape(&seg(mid_end, n)),
+    )
+}
+
+fn html_row(cls: &str, ln: Option<usize>, lt: &str, rn: Option<usize>, rt: &str) -> String {
+    let cell = |no: Option<usize>, text: &str| -> String {
+        match no {
+            None => "<td class=\"num\"></td><td class=\"empty\"></td>".to_string(),
+            Some(n) => format!(
+                "<td class=\"num\">{}</td><td class=\"code\">{}</td>",
+                n,
+                if text.is_empty() { "&nbsp;" } else { text }
+            ),
+        }
+    };
+    format!("<tr class=\"{}\">{}{}</tr>\n", cls, cell(ln, lt), cell(rn, rt))
+}
+
+pub(crate) const REPORT_STYLE: &str = r#"<style>
+  :root { color-scheme: light dark; }
+  body { font: 13px/1.5 -apple-system, Segoe UI, Roboto, sans-serif; margin: 1.5rem; }
+  h1 { font-size: 1.1rem; font-weight: 600; }
+  h1 .arrow { color: #888; margin: 0 .4rem; }
+  .summary { color: #666; margin: .2rem 0 1rem; }
+  table { border-collapse: collapse; width: 100%; table-layout: fixed; }
+  th { text-align: left; font-weight: 600; padding: .2rem .5rem;
+       border-bottom: 2px solid #ccc; }
+  td { padding: 0 .5rem; vertical-align: top; }
+  td.code, td.empty { font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+       white-space: pre-wrap; word-break: break-word; }
+  td.num { width: 3.5em; text-align: right; color: #999; user-select: none;
+       font-family: ui-monospace, monospace; }
+  td.empty { background: repeating-linear-gradient(45deg,
+       transparent, transparent 6px, rgba(128,128,128,.08) 6px, rgba(128,128,128,.08) 12px); }
+  tr.add td.code { background: #e6ffed; }
+  tr.del td.code { background: #ffeef0; }
+  tr.chg td.code { background: #fff8e5; }
+  tr.chg mark { background: #ffd966; color: inherit; padding: 0 1px; border-radius: 2px; }
+  @media (prefers-color-scheme: dark) {
+    th { border-color: #444; }
+    tr.add td.code { background: #123a1c; }
+    tr.del td.code { background: #3a1417; }
+    tr.chg td.code { background: #3a3313; }
+    tr.chg mark { background: #7a5c12; color: #ffe9a8; }
+  }
+</style>
+"#;
+
+/// Render the two-file comparison as a self-contained WinMerge-style HTML page.
+/// Shows every line (full context, not folded); the changed span within a line
+/// is highlighted.
+pub fn to_html(diff: &Diff, left: &str, right: &str) -> String {
+    let mut s = String::new();
+    s.push_str("<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n");
+    s.push_str(&format!("<title>diff: {} \u{2194} {}</title>\n", html_escape(left), html_escape(right)));
+    s.push_str(REPORT_STYLE);
+    s.push_str("</head>\n<body>\n");
+    s.push_str(&format!(
+        "<h1>{} <span class=\"arrow\">\u{2194}</span> {}</h1>\n",
+        html_escape(left),
+        html_escape(right)
+    ));
+    s.push_str(&format!("<p class=\"summary\">{}</p>\n", html_escape(&summary(diff))));
+    if diff.binary {
+        s.push_str(&format!(
+            "<p>{}</p>\n</body>\n</html>\n",
+            if diff.identical { "Binary files, identical." } else { "Binary files differ." }
+        ));
+        return s;
+    }
+    s.push_str("<table>\n<thead><tr><th class=\"num\">#</th><th>");
+    s.push_str(&html_escape(left));
+    s.push_str("</th><th class=\"num\">#</th><th>");
+    s.push_str(&html_escape(right));
+    s.push_str("</th></tr></thead>\n<tbody>\n");
+    for r in &diff.rows {
+        match r {
+            Row::Same { left: l, right: rr } => {
+                s.push_str(&html_row("same", Some(l.no), &html_escape(&l.text), Some(rr.no), &html_escape(&rr.text)));
+            }
+            Row::Changed { left: l, right: rr } => {
+                let (p, sfx) = common_affixes(&l.text, &rr.text);
+                s.push_str(&html_row(
+                    "chg",
+                    Some(l.no),
+                    &changed_html(&l.text, p, sfx),
+                    Some(rr.no),
+                    &changed_html(&rr.text, p, sfx),
+                ));
+            }
+            Row::Removed { left: l } => {
+                s.push_str(&html_row("del", Some(l.no), &html_escape(&l.text), None, ""));
+            }
+            Row::Added { right: rr } => {
+                s.push_str(&html_row("add", None, "", Some(rr.no), &html_escape(&rr.text)));
+            }
+            Row::Skipped { .. } => {}
+        }
+    }
+    s.push_str("</tbody>\n</table>\n</body>\n</html>\n");
+    s
+}
+
+/// One cell's text for a Markdown table: pipes escaped, wrapped in code so
+/// leading spaces survive, blank rendered as a space so the column stays.
+pub(crate) fn md_code(text: &str) -> String {
+    if text.is_empty() {
+        return " ".to_string();
+    }
+    // Backticks inside inline code would end it early; swap for a look-alike.
+    let t = text.replace('|', "\\|").replace('`', "\u{02bc}");
+    format!("`{}`", t)
+}
+
+/// Render the two-file comparison as a side-by-side Markdown table. Renders on
+/// GitHub and in cian's own viewer; the leading column marks each row
+/// `~`/`+`/`-`/(blank) so a changed / added / removed / same line is obvious.
+pub fn to_markdown(diff: &Diff, left: &str, right: &str) -> String {
+    let mut s = String::new();
+    s.push_str(&format!("# diff: {} \u{2194} {}\n\n", left, right));
+    s.push_str(&format!("`{}`\n\n", summary(diff)));
+    if diff.binary {
+        s.push_str(if diff.identical { "Binary files, identical.\n" } else { "Binary files differ.\n" });
+        return s;
+    }
+    let h = |x: &str| x.replace('|', "\\|");
+    s.push_str(&format!("|   | # | {} | # | {} |\n", h(left), h(right)));
+    s.push_str("|:-:|--:|---|--:|---|\n");
+    let num = |n: usize| n.to_string();
+    for r in &diff.rows {
+        let (st, ln, lt, rn, rt) = match r {
+            Row::Same { left: l, right: rr } => (" ", num(l.no), md_code(&l.text), num(rr.no), md_code(&rr.text)),
+            Row::Changed { left: l, right: rr } => ("~", num(l.no), md_code(&l.text), num(rr.no), md_code(&rr.text)),
+            Row::Removed { left: l } => ("-", num(l.no), md_code(&l.text), String::new(), " ".to_string()),
+            Row::Added { right: rr } => ("+", String::new(), " ".to_string(), num(rr.no), md_code(&rr.text)),
+            Row::Skipped { .. } => continue,
+        };
+        s.push_str(&format!("| {} | {} | {} | {} | {} |\n", st, ln, lt, rn, rt));
+    }
+    s
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -399,6 +579,37 @@ mod tests {
         assert_eq!(common_affixes("abc", "xyz"), (0, 0));
         // Char-based, so multibyte text splits on character boundaries.
         assert_eq!(common_affixes("あいう", "あXう"), (1, 1));
+    }
+
+    #[test]
+    fn html_export_is_side_by_side_marks_the_edit_and_escapes() {
+        let d = diff_lines(&["let x = 1;".to_string()], &["let x = 2;".to_string()]);
+        let html = to_html(&d, "a.rs", "b.rs");
+        assert!(html.contains("<table"), "has a table");
+        // Only the edited character is wrapped, not the whole line.
+        assert!(html.contains("<mark>1</mark>"), "left edit marked: {}", html);
+        assert!(html.contains("<mark>2</mark>"), "right edit marked");
+        assert!(html.contains("let x = "), "the common prefix stays plain");
+
+        let d2 = diff_lines(&["a<b".to_string()], &["a>b".to_string()]);
+        let html2 = to_html(&d2, "l", "r");
+        assert!(html2.contains("&lt;") && html2.contains("&gt;"), "angle brackets escaped");
+        assert!(!html2.contains("a<b"), "raw content is not emitted");
+    }
+
+    #[test]
+    fn markdown_export_is_a_side_by_side_table() {
+        let d = diff_lines(
+            &["same".to_string(), "gone".to_string()],
+            &["same".to_string(), "new".to_string(), "extra".to_string()],
+        );
+        let md = to_markdown(&d, "a", "b");
+        assert!(md.starts_with("# diff: a \u{2194} b"), "titled: {}", md);
+        assert!(md.contains("| # | a | # | b |"), "two numbered columns");
+        // A pipe in content must be escaped so it cannot break the table.
+        let dp = diff_lines(&["a|b".to_string()], &["a|c".to_string()]);
+        let mdp = to_markdown(&dp, "l", "r");
+        assert!(mdp.contains("a\\|b"), "pipe escaped: {}", mdp);
     }
 
     #[test]
