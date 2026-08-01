@@ -68,6 +68,13 @@ pub(crate) fn load_macros() -> (Vec<Macro>, Option<String>) {
             .flatten()
             .map(|e| e.path())
             .filter(|p| p.extension().and_then(|x| x.to_str()) == Some("lua"))
+            // Skip language reference copies (`Foo.en.lua`, `Foo.ja.lua`): the
+            // primary `Foo.lua` is the one to load. Otherwise dropping a shipped
+            // example set into the config dir would load each macro twice.
+            .filter(|p| {
+                let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                !name.ends_with(".en.lua") && !name.ends_with(".ja.lua")
+            })
             .collect();
         files.sort();
         for f in files {
@@ -121,6 +128,12 @@ impl App {
 
     /// Kick off building `m`'s layout, focusing the shell it builds into.
     pub(crate) fn begin_macro(&mut self, m: &Macro) {
+        // A script macro is not a layout — it automates file operations and runs
+        // synchronously right here, then the panes are refreshed.
+        if m.is_script() {
+            self.run_script_macro(m);
+            return;
+        }
         self.macro_run = Some(MacroRun {
             name: m.name.clone(),
             queue: m.panes.iter().cloned().collect(),
@@ -138,6 +151,51 @@ impl App {
             self.toggle_zoom();
         }
         self.message = Some(tr(self.lang, "running macro: ", "マクロ実行中: ").to_string() + &m.name);
+    }
+
+    /// Run a script macro synchronously: snapshot the panes, invoke its `run`
+    /// function via `cian_lua::macro_script`, then apply the result — refresh the
+    /// listings the ops touched and surface any messages or error.
+    pub(crate) fn run_script_macro(&mut self, m: &Macro) {
+        let Some(src) = m.script.clone() else { return };
+        let (Some(dir), Some(other)) =
+            (self.active_pane().map(|p| p.cwd.clone()), self.opposite_pane_cwd())
+        else {
+            self.message = Some(
+                tr(self.lang, "no active pane for the macro", "マクロ対象のペインがありません").into(),
+            );
+            return;
+        };
+        let (marked, cursor) = match self.active_pane() {
+            Some(p) => (
+                p.target_paths(),
+                p.selected().filter(|e| !e.is_parent).map(|e| e.path.clone()),
+            ),
+            None => (Vec::new(), None),
+        };
+        let ctx = cian_lua::macro_script::Ctx { dir, other, marked, cursor };
+        let outcome = cian_lua::macro_script::run(&src, &m.name, ctx);
+
+        if outcome.touched {
+            self.reload_both();
+            self.invalidate_git();
+        }
+        self.popup = Popup::None;
+        if let Some(err) = outcome.error {
+            let mut lines = vec![format!("{}: {}", m.name, err)];
+            if !outcome.messages.is_empty() {
+                lines.push(String::new());
+                lines.extend(outcome.messages);
+            }
+            self.popup = Popup::Notice { lines };
+        } else if outcome.messages.len() > 1 {
+            self.popup = Popup::Notice { lines: outcome.messages };
+        } else if let Some(one) = outcome.messages.into_iter().next() {
+            self.message = Some(one);
+        } else {
+            self.message =
+                Some(tr(self.lang, "macro done: ", "マクロ完了: ").to_string() + &m.name);
+        }
     }
 
     /// Advance a running macro. Returns true if anything changed (so the caller
@@ -307,7 +365,13 @@ impl App {
 
     /// The macros' names, for the launcher list.
     pub(crate) fn macro_names(&self) -> Vec<String> {
-        self.macros.iter().map(|m| m.name.clone()).collect()
+        // A small tag tells the two kinds apart in the launcher: ⚙ automates
+        // file operations, ▦ builds a shell layout. Display only — selection is
+        // by index and `--macro-name` matches the bare name.
+        self.macros
+            .iter()
+            .map(|m| format!("{} {}", if m.is_script() { "⚙" } else { "▦" }, m.name))
+            .collect()
     }
 }
 

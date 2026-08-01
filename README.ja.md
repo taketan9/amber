@@ -878,6 +878,46 @@ return {
 `cian --macro-name "Two local shells"` なら通常設定内の名前付きマクロを実行。
 いずれの場合もcianはそのまま開いたまま — マクロは初期状態を用意するだけです。
 
+### スクリプトマクロ（ファイル操作の自動化）
+
+レイアウトマクロが「画面」を組むのに対し、**スクリプトマクロ**は「ファイル操作」を
+自動化します — "マクロ"という語の AFXW 的な側面です。`panes` の代わりに `run`
+関数を与え、コピー・移動・リネーム・zip 化・コマンド実行を Lua の `for` / `if`
+で駆動します：
+
+```lua
+return {
+  name = "*.log をzip化して掃除",
+  run = function(cx)
+    local logs = cx.glob("*.log")
+    if #logs == 0 then cx.message("ログはありません") return end
+    cx.zip(logs, "logs.zip")
+    cx.delete(logs)                     -- `d` と同じくゴミ箱へ
+    cx.message(#logs .. " 件をまとめました")
+  end,
+}
+```
+
+起動（`@` / `:macros` / 右クリック。▦ のレイアウトマクロの隣に ⚙ で表示）すると
+**同期的**に実行され、文は順番に走り、結果で分岐できます。起動時にペインを
+スナップショットし、`cx` が次を公開します：
+
+- **取得** — `cx.dir()`・`cx.other()`（両ペインのディレクトリ）・`cx.marked()`
+  （マーク、無ければカーソル）・`cx.cursor()`・`cx.list(dir?)`・`cx.glob("*.log")`
+- **操作**（各操作後にパネル自動更新）— `cx.copy(paths, dest)`・`cx.move`・
+  `cx.delete`・`cx.rename(path, name)`・`cx.mkdir(name)`・`cx.zip(paths, out)`・
+  `cx.read`/`cx.write`
+- **サブプロセス** — `cx.sh("cmd")` は作業ディレクトリでコマンドを実行し
+  `{ code, out, err }` を返す
+- **パス補助** — `cx.basename/stem/ext/join/exists/isdir/size`
+- **表示** — `cx.message("…")`
+
+拡張子ごとの仕分け、日付フォルダへのバックアップ、改行コード統一、空ファイル掃除、
+選択ファイルのチェックサム、`index.md` 生成…といった**12個の実例**を
+[`examples/macro/Escript.lua`](examples/macro/Escript.lua) に同梱しています。マクロは
+自分で書いた設定なので `init.lua` 同様に信頼前提です：`cx.sh` は本物のコマンドを
+実行します（ただし `cx.delete` はゴミ箱行き）。
+
 ## ビルド
 
 ```sh

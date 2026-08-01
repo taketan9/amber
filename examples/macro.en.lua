@@ -5,6 +5,10 @@
 --  Press `@` (vim's play-a-macro key) to open the launcher and pick one, or run
 --  `:macros`. A macro builds a whole shell layout in one keystroke.
 --
+--  Note: there are also "script macros" (run = function(cx) …) that automate
+--  file operations; they appear in the launcher tagged ⚙. See
+--  examples/macro/Escript.en.lua.
+--
 --  Where it goes (next to init.lua):
 --    Linux / macOS : ~/.config/cian/macro.lua
 --    Windows       : %USERPROFILE%\.config\cian\macro.lua

@@ -5,6 +5,9 @@
 --  `@`（vim のマクロ再生キー）でランチャーを開いて選ぶか、`:macros` を実行。
 --  マクロは1キーでシェルのレイアウト一式を組み立てます。
 --
+--  ※ ファイル操作を自動化する「スクリプトマクロ」（run = function(cx) …）も
+--     あります。ランチャーに ⚙ 印で並びます。例は examples/macro/Escript.lua。
+--
 --  置き場所（init.lua の隣）:
 --    Linux / macOS : ~/.config/cian/macro.lua
 --    Windows       : %USERPROFILE%\.config\cian\macro.lua

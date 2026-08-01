@@ -177,7 +177,8 @@
         app.handle_key(key('@')).unwrap();
         match &app.popup {
             Popup::Macros { names, cursor } => {
-                assert_eq!(names, &["First".to_string(), "Second".to_string()]);
+                // Layout macros are tagged ▦ in the launcher (⚙ marks scripts).
+                assert_eq!(names, &["▦ First".to_string(), "▦ Second".to_string()]);
                 assert_eq!(*cursor, 0);
             }
             _ => panic!("launcher did not open"),
@@ -2827,6 +2828,7 @@
             name: "grid".into(),
             sync: false,
             zoom: false,
+            script: None,
             panes: vec![
                 pane(None, Split::Right),    // pane 1 (the shell you're on)
                 pane(Some(1), Split::Right), // pane 2: split pane 1 → right

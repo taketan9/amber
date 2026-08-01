@@ -22,7 +22,10 @@ use std::path::Path;
 
 use mlua::{Lua, Table, Value};
 
-/// One macro: a name and the panes it builds.
+/// One macro. Usually a **layout** — a name and the shell panes it builds — but
+/// a macro whose table carries a `run` function is a **script macro** instead
+/// (see [`crate::macro_script`]): `panes` is then empty and `script` holds the
+/// macro file's source, to be re-evaluated and run on demand.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Macro {
     pub name: String,
@@ -33,6 +36,16 @@ pub struct Macro {
     /// Maximize the shell panel (as F12 does) before building the layout, so a
     /// multi-pane grid has the whole window.
     pub zoom: bool,
+    /// Set for a **script macro**: the source of the file it was defined in, so
+    /// the caller can re-evaluate it and invoke this macro's `run` function.
+    pub script: Option<String>,
+}
+
+impl Macro {
+    /// True when this is a file-operation script macro rather than a layout.
+    pub fn is_script(&self) -> bool {
+        self.script.is_some()
+    }
 }
 
 /// One pane in a layout macro.
@@ -109,27 +122,44 @@ pub fn parse(src: &str) -> Result<Vec<Macro>, String> {
         .set_name("macro.lua")
         .eval()
         .map_err(|e| e.to_string())?;
-    match val {
+    let mut out = match val {
         // Either a single macro ({ name =, panes = }) — the natural shape for a
         // per-macro file in macro/ — or a list of them (macro.lua).
         Value::Table(t) => {
             if t.contains_key("name").map_err(|e| e.to_string())? {
-                Ok(vec![macro_from(&t)?])
+                vec![macro_from(&t)?]
             } else {
-                let mut out = Vec::new();
+                let mut v = Vec::new();
                 for m in t.sequence_values::<Table>() {
-                    out.push(macro_from(&m.map_err(|e| e.to_string())?)?);
+                    v.push(macro_from(&m.map_err(|e| e.to_string())?)?);
                 }
-                Ok(out)
+                v
             }
         }
-        Value::Nil => Ok(Vec::new()),
-        other => Err(format!("a macro file must return a table, got {}", other.type_name())),
+        Value::Nil => Vec::new(),
+        other => return Err(format!("a macro file must return a table, got {}", other.type_name())),
+    };
+    // A script macro is re-run by re-evaluating its file, so each one carries the
+    // source it came from (the `run` closure itself cannot outlive this `Lua`).
+    for m in &mut out {
+        if m.is_script() {
+            m.script = Some(src.to_string());
+        }
     }
+    Ok(out)
 }
 
 fn macro_from(t: &Table) -> Result<Macro, String> {
     let name: String = t.get("name").map_err(|_| "a macro is missing its name".to_string())?;
+    // A `run` function makes this a script macro — it automates file operations
+    // instead of building panes, so `panes` is not required (or read) for it.
+    // `parse` fills in `script` with the file source afterward.
+    let is_script = matches!(t.get::<Value>("run"), Ok(Value::Function(_)));
+    let sync = t.get::<Option<bool>>("sync").unwrap_or(None).unwrap_or(false);
+    let zoom = t.get::<Option<bool>>("zoom").unwrap_or(None).unwrap_or(false);
+    if is_script {
+        return Ok(Macro { name, panes: Vec::new(), sync, zoom, script: Some(String::new()) });
+    }
     let mut panes = Vec::new();
     if let Ok(Value::Table(pt)) = t.get::<Value>("panes") {
         for p in pt.clone().sequence_values::<Table>() {
@@ -137,11 +167,9 @@ fn macro_from(t: &Table) -> Result<Macro, String> {
         }
     }
     if panes.is_empty() {
-        return Err(format!("macro {:?} has no panes", name));
+        return Err(format!("macro {:?} has no panes (and no `run` function)", name));
     }
-    let sync = t.get::<Option<bool>>("sync").unwrap_or(None).unwrap_or(false);
-    let zoom = t.get::<Option<bool>>("zoom").unwrap_or(None).unwrap_or(false);
-    Ok(Macro { name, panes, sync, zoom })
+    Ok(Macro { name, panes, sync, zoom, script: None })
 }
 
 fn pane_from(t: &Table) -> Result<PaneStep, String> {

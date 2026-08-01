@@ -910,6 +910,48 @@ double-click. `cian --macro-name "Two local shells"` runs a named macro from
 your normal config instead. Either way cian stays open afterwards — the macro
 just seeds the session.
 
+### Script macros (automating file operations)
+
+A layout macro builds the *screen*; a **script macro** automates *file
+operations* — the AFXW side of the word "macro". Instead of `panes`, give a
+macro a `run` function and drive copies, moves, renames, zipping and shelling
+out with Lua's own `for` / `if`:
+
+```lua
+return {
+  name = "Archive *.log, then bin them",
+  run = function(cx)
+    local logs = cx.glob("*.log")
+    if #logs == 0 then cx.message("no logs here") return end
+    cx.zip(logs, "logs.zip")
+    cx.delete(logs)                     -- to the trash, like `d`
+    cx.message("archived " .. #logs .. " logs")
+  end,
+}
+```
+
+It runs **synchronously** when you launch it (from `@` / `:macros` / right-click,
+tagged ⚙ next to the ▦ layout macros), so statements happen in order and can
+branch on their results. At launch it snapshots the panes; `cx` then exposes:
+
+- **query** — `cx.dir()`, `cx.other()` (the two pane directories), `cx.marked()`
+  (marked entries, or the cursor), `cx.cursor()`, `cx.list(dir?)`,
+  `cx.glob("*.log")`;
+- **operations** (each refreshes the panes) — `cx.copy(paths, dest)`,
+  `cx.move`, `cx.delete`, `cx.rename(path, name)`, `cx.mkdir(name)`,
+  `cx.zip(paths, out)`, `cx.read`/`cx.write`;
+- **subprocess** — `cx.sh("cmd")` runs a command in the working directory and
+  returns `{ code, out, err }`;
+- **path helpers** — `cx.basename/stem/ext/join/exists/isdir/size`;
+- **feedback** — `cx.message("…")`.
+
+A dozen worked samples — sort by extension, back up the selection to a dated
+folder, normalise line endings, clean up empty files, checksum each marked file,
+generate an `index.md` — ship in
+[`examples/macro/Escript.en.lua`](examples/macro/Escript.en.lua). Since a macro
+is config you wrote, it is trusted like `init.lua`: `cx.sh` runs real commands,
+though `cx.delete` still goes to the trash.
+
 ## Build
 
 ```sh

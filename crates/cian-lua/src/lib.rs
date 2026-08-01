@@ -27,6 +27,7 @@ use std::rc::Rc;
 use mlua::{Function, FromLua, Lua, Table, Value};
 
 pub mod count;
+pub mod macro_script;
 pub mod macros;
 pub mod shortcuts;
 
