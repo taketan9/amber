@@ -2,253 +2,188 @@
 
 **English** · [日本語](README.ja.md)
 
-**C**omfortable **I**nterface for **A**gile File e**X**plorer **N**avigation —
-a modern two-pane terminal file manager inspired by [AFXW (あふｗ)](https://akt.d.dooo.jp/akt_afxw.htm).
+**C**omfortable **I**nterface for **A**gile File e**X**plorer **N**avigation — a
+two-pane terminal file manager, with a real shell built in. Inspired by
+[AFXW (あふｗ)](https://akt.d.dooo.jp/akt_afxw.htm).
 
-Runs in any terminal (designed to be used as WezTerm's `default_prog`).
-Cross-platform: macOS / Windows / Linux.
+One binary. Runs in any terminal, on macOS, Windows and Linux. No runtime, no
+DLLs, nothing to install alongside it.
 
-## Status
+---
 
-Early development, but broadly usable. Working: two-pane navigation,
-marks/visual selection, file operations (copy/move/delete/rename/create) with a
-progress bar, incremental filtering, history, shortcuts, in-listing and
-recursive search/grep, sorting, file and directory diff, a text/hex/zip viewer,
-checksums and attributes, clipboard integration, an embedded PTY shell panel
-with tabs and splits, built-in SFTP/SCP transfer, Lua configuration, a fully
-remappable keymap, and a mouse-operable UI (including clickable dialogs).
+## Try it
 
-## Help
-
-Press **`?`** (or `Ctrl+.`, `:man`, or **right-click → Key manual**) inside
-cian for the full key manual — it is generated from the live keymap, so it also
-lists any keys you bound in `init.lua`. From a shell, `cian -man` prints the
-same thing and `cian -h` prints the command-line usage.
-
-The interface is **English by default**; switch it to Japanese with
-`cian.set_option("lang", "ja")`, or toggle live from the right-click menu.
-
-## Mouse
-
-Almost everything is reachable with the mouse.
-
-**Left** and **Right** move focus between the two file panes — the thing a
-two-pane layout makes you reach for. `l` / `Enter` enter a directory and `-` /
-`Backspace` go up, as before. Each pane also lists a **`..`** row at the top:
-`Enter` it, or single-click it, to step up a level — handy for mouse-first
-navigation. A **double-click** activates any other entry: a directory is
-entered, a file is opened with its OS default program (or an `init.lua`
-`on_open` handler).
-
-A single left-click just moves the cursor to a row — it never marks. To mark a
-range with the mouse, **drag** across the rows (a rubber-band selection);
-marking individual files is `Space`. The `..` row is navigation only: it can be
-neither marked nor used as the target of an operation.
-
-Drag any border to re-proportion the split it divides — the two file panes, the
-file/shell divider, and every split inside the shell panel. Neither side can be
-dragged below 15% of its parent.
-
-Drag an entry onto the other pane to copy it there, or Shift-drag to move —
-the usual confirmation follows, so a slip of the mouse is not destructive.
-Dropping onto the shell panel types the paths at the prompt instead, which is
-as close as a console application gets to dragging a file into a terminal.
-
-cian cannot take part in the *system's* drag and drop: a console application
-has no window to be a drag source or target, so dragging to or from Explorer
-is not possible and will not be. Dropping a file onto the terminal window makes
-the terminal paste its path, which is the terminal's doing, not cian's.
-
-**Dialogs and pickers are clickable too.** A confirmation dialog shows real
-`[ Yes ]` / `[ No ]` (and `[ Overwrite ]` / `[ Rename ]`) buttons; every list —
-the sort and encoding pickers, SSH host/user, find results, copy-to, history,
-shortcuts, the directory comparison, an archive's members — selects a row on
-click, and the mouse wheel scrolls whatever popup is open. The keyboard
-shortcuts still work; the clicks just stand in for them.
-
-`:copyto` and `:moveto` (and **Copy to…** in the menu) send the selection
-somewhere other than the opposite pane, offering the directories used recently
-— the ones that are not the other pane tend to be the same few, and retyping
-them is the tedious part. `n` in that picker types a fresh path.
-
-Right-click a pane for a context menu: copy, cut, paste, copy/move to the other
-pane, rename, delete, a per-pane background color, and the key manual (the
-last two are offered in the shell's menu too).
-
-Background colors apply to whichever pane you right-clicked — including a
-single split inside the shell, not the whole panel. In the shell the tint only
-fills cells the shell left uncolored, so `ls` colors and editor themes come
-through untouched. Copy and cut fill a file clipboard that persists while you
-navigate, so you can copy here, move somewhere else, and paste there.
-
-**Paste** takes cian's own clipboard when it holds something, and otherwise
-falls back to the *system* clipboard — so a file copied in Explorer or Finder
-pastes into the focused pane. The status line says which of the two it used.
-`:paste` does the same from the command line. Clipboard entries that are not
-real paths are ignored, since the platform queries return plain clipboard text
-coerced into one.
-
-`p` and `Shift+P` go the other way, putting paths or file references onto the
-system clipboard. Background colors are session-only.
-
-## Animation
-
-Splitting, maximizing (`F12`) and closing a pane animate over 150ms. PTYs are
-resized once, when the transition lands, so the shell never reflows mid-flight.
-Any keypress lands the transition immediately — input is never held up by it.
-Tune or disable it:
-
-```lua
-cian.set_option("animation_ms", 250)   -- slower
-cian.set_option("animation_ms", 0)     -- off
+```sh
+cargo build --release
+./target/release/cian
 ```
 
-## Keeping up with the filesystem
+On Windows, use it inside **Windows Terminal** or **WezTerm** with a Nerd Font —
+that's where the icons and rounded corners look right. (Offline install is at the
+bottom.)
 
-A file created by something else — a build, a download, a sync — used to never
-appear: cian only reloaded after its own actions. Each pane's directory is now
-checked about once a second and re-read when it has changed, so entries
-appearing and disappearing show up on their own. Measured: a file created
-externally shows within a second.
+Press **`?`** any time for the full key list. It's generated from your live
+keymap, so keys you rebind show up too. `cian -man` prints it from a shell,
+`cian -h` prints the command-line usage.
 
-The check is one `stat` of the directory, not a re-read of it, so it costs
-nothing on a large listing. That does mean a change to a file's *contents*
-without any entry being added or removed is not noticed; `Ctrl+R` (or `F5`)
-forces a full refresh.
+The UI is English by default. Want Japanese? `cian.set_option("lang", "ja")`, or
+flip it from the right-click menu.
 
-## File operations
+---
 
-Copies, moves and deletes run on a worker thread with a progress bar: how far
-along, how many files, how much data, and how long it has been going. **Esc**
-stops it. Previously these ran inline — copying a 700 MB file locked the whole
-UI for fourteen seconds with nothing on screen to explain why.
+## The basics
 
-Files are copied in chunks, so the bar advances *within* a large file and a
-cancel is acted on in a fraction of a second rather than at the next file
-boundary. A cancelled copy removes its half-written destination instead of
-leaving something that looks complete. Moves try a rename first, which is
-instant within a volume, and only fall back to copy-then-delete across one.
+Two panes side by side. You copy and move between them — that's the whole idea.
 
-### When the destination needs administrator rights (Windows)
+| Do this | And… |
+|---|---|
+| **← / →** | move focus between the two panes |
+| **`l` / Enter** | enter a folder — or open a file with its default app |
+| **`-` / Backspace** | go up a level (or click the `..` row at the top) |
+| **`j` / `k`**, arrows | move the cursor |
+| **`Space`** | mark the file under the cursor |
+| **`c`** | copy the marked files to the other pane |
+| **`m`** | move them to the other pane |
+| **`d`** | delete (to the Recycle Bin / Trash) |
+| **`r`** | rename |
+| **`a` / `A`** | new file / new folder |
+| **`u`** | undo the last rename / create / move |
+| **`F3`** | look inside the file under the cursor |
+| **`?`** | the full key list |
 
-Writing into a protected directory (`C:\Program Files`, `C:\Windows`) fails for
-an ordinary process with "Access is denied", and nothing cian does gets past the
-ACL. When a copy or move hits that specific error, cian says so plainly and, on
-Windows, offers to **retry as administrator**: a UAC prompt appears, then the
-transfer is redone elevated (robocopy for trees, Copy-Item for single files).
-That elevated copy runs in its own process, so it has no in-app progress bar —
-cian waits for it and reports the outcome ("as administrator"). The simpler
-alternative is to launch cian itself elevated, after which every destination is
-writable. On other platforms the notice just names the cause and suggests a
-writable folder.
+Copy, move and delete always **ask first**, and delete goes to the trash — so a
+slip never costs you anything. `u` (or `:undo`) walks back the last few renames,
+creates and moves too.
 
-## Deleting
+Big copies run in the background with a progress bar; **Esc** stops one.
 
-`d` moves items to the OS trash (Finder's Trash / the Windows Recycle Bin), so
-a mistake is recoverable. The confirmation popup offers `a` to delete
-permanently instead.
+**Mouse works everywhere.** Click to move the cursor, drag across rows to
+select, double-click to open. Drag a file onto the other pane to copy it there
+(Shift-drag to move). Every dialog has real clickable buttons, and the wheel
+scrolls any popup. Drag a border to resize the split it divides.
 
-**`u`** (or `:undo`) reverses the last rename, file/folder creation, or move
-between panes — the common "oops" that isn't already covered by the trash. It
-walks a small stack back, so a few of them undo in turn; a move only undoes if
-it completed cleanly (a partial one with conflicts is left as-is).
+---
 
-## Comparing files and directories
+## Look inside anything — `F3`
 
-`=` (or `:diff`) compares the left pane's file against the right pane's, side by
-side, with differing lines highlighted; `n` / `N` jump between changes and `f`
-folds the identical runs away.
+Press `F3` on a file and cian shows you what's in it, without leaving:
 
-Point the two panes at two **directories** and `=` compares them recursively
-instead, listing every path that differs — added on one side, missing on the
-other, or present in both but not identical. Files are compared byte-for-byte
-(not just size and timestamp), on a worker thread with a progress bar and Esc,
-so a "same" verdict really means the same. Enter on a result moves both panes to
-that path.
+- **Text** — a scrollable viewer with line numbers and syntax highlighting
+  (Rust, Python, JS/TS, Java, HTML, CSS, SQL, shell, Lua, YAML, JSON, …).
+- **Markdown** — rendered right there. `p` toggles preview ↔ source.
+- **Images** (`.png/.jpg/.gif/.bmp/.webp`) — drawn in the terminal. Coarse, but
+  enough to see what it is.
+- **Office & PDF** (`.docx/.xlsx/.pptx/.pdf`, plus legacy `.doc/.xls/.ppt`) —
+  their text, no converter needed.
+- **Archives** (`.zip/.jar/.tar/.tar.gz/…`) — the file list. `Enter` extracts
+  the highlighted member to the other pane, `a` extracts all.
 
-From either comparison you can **reconcile the two sides**, WinMerge-style,
-without leaving it: **`>`** copies the highlighted entry left→right, **`<`**
-copies it right→left — a single file or a whole subtree, creating any missing
-parent folders, and asking before it overwrites an existing target. In the
-folder compare a reconciled entry drops off the list; in the file diff the two
-files become identical and it closes. **`c`** copies the diff/compare text to the
-clipboard, **`w`** writes it to a file in the active pane, and (file diff only)
-**`e`** re-decodes both sides in another encoding.
+The viewer is vim-flavoured: `h j k l`, `w b`, `0 $`, `gg G`, `Ctrl-d/u` move;
+`/` searches, `42G` jumps to a line, `%` to the matching bracket. `v` / `V` /
+`Ctrl-v` select, `y` copies. `e` switches text encoding (UTF-8 / Shift_JIS /
+UTF-16) if a file decoded wrong.
 
-`:dupes` (or right-click **Find duplicate files**) finds byte-identical files
-anywhere under the current pane, on a worker thread. It groups by size first and
-only hashes the size-collisions, so most files are never read. The results are a
-grouped checklist — one file per group is left as the keeper, the rest
-pre-checked — and approving hands the checked copies to the ordinary delete
-confirmation, so nothing is removed without the usual trash/permanent choice.
+**Edit in place:** press `i` to edit the file right there (`Ctrl+S` saves in its
+own encoding, `Esc` leaves). Prefer your own editor? **`E`** (or `:edit`) opens
+it in `$VISUAL` / `$EDITOR` — or nvim → vim → vi — and reloads when you're back.
 
-## Bulk rename
+**Archives, more:** `:zip` / `:tar` / `:targz` bundle the marked files;
+`:zip -e` makes an encrypted one. `:unzip` (or right-click **▸ Extract here**)
+unpacks the file under the cursor into a fresh sub-folder. Locked zips still list
+their members on F3, and extracting one asks for the password first.
 
-`:brename` (or right-click **Bulk rename…**) renames the marked files — or the
-one under the cursor — by a pattern, no AI and no network. Two forms:
+---
 
-- **Template**: the pattern *is* the new name, with `{name}` (the original stem),
-  `{ext}` (its extension), and `{n}` a counter — `{n3}` zero-pads to width 3.
-  `report_{n3}.{ext}` → `report_001.log`, `report_002.csv`, … Since the template
-  is the whole name, include `.{ext}` yourself.
-- **Substitution**: `s/regex/replacement/flags` — a regular-expression search and
-  replace over the whole filename. `${1}` references a capture (use the braces so
-  `${1}_` is not read as a group name); flags are `g` (every match) and `i`
-  (case-insensitive). `s/ (\d+) /_${1}/` , `s/IMG/photo/i`, …
+## Find things
 
-Either way the proposed names open in the same review checklist as the AI rename
-— `old → new` rows, Space/`a` to toggle — and only the checked ones are applied.
-Names that do not change, that end up empty, or that contain a path separator are
-dropped from the list, and an existing target is skipped rather than clobbered.
+| Do this | And… |
+|---|---|
+| **`/`** | filter the listing as you type (Enter keeps it, Esc clears) |
+| **`f`** | jump between matches in the current folder |
+| **`Shift+F`** | find by name, anywhere below this folder |
+| **`Ctrl+F`** | grep inside files — Enter opens the hit right on its line |
+| **`b`** | branch view — flatten this whole subtree into one flat list |
+| **`,`** | sort by name / size / date / extension (`n` `s` `d` `e`) |
 
-## File transfer (SFTP / SCP)
+Search runs in the background and streams results as it finds them — **Esc**
+stops it, `Enter` jumps to a result. In the find/grep results, **`p`**
+"panelizes" the matches into the pane, so you can mark and operate on them like
+any other listing.
 
-With SSH hosts configured (see below), the right-click menu's **Transfer ▸**
-holds **Upload → server** and **Download ← server** (in a file pane or the
-shell).
+`:hidden` shows or hides dotfiles (shown by default).
 
-**Upload** sends the marked files — or the one under the cursor — after you pick
-a host/user and type the remote destination folder, then a **chmod** field
-(seeded `777`, the common case; blank keeps the server default) sets the
-uploaded files' mode.
+---
 
-**Download** opens a **remote file browser**: after connecting you navigate the
-server's directories (Enter/`l` to open a folder, `-` to go up), **`Space` to
-mark files** (or Enter/`d` on a single one), then choose where they land — the
-**left pane**, the **right pane**, the **Desktop**, or a **typed path** — and an
-optional **chmod** for the downloaded files (blank keeps them; Unix only). Each
-listing is fetched over SFTP on a worker thread.
+## Compare & clean up
 
-**From the shell**, if the pane is already logged into a configured host (its
-title reads `user@host` and that login has a password in init.lua), Transfer
-goes straight to that server; otherwise it shows the host picker like a file
-pane does.
+**Compare — `=`** (or `:diff`). Point the two panes at two files and `=` shows
+them **side by side**, differences highlighted; `n`/`N` jump between changes.
+Point them at two **folders** and `=` compares the trees byte-for-byte and lists
+what differs. From either:
 
-Transfers run on the usual worker thread with the progress bar and Esc.
+- **`>` / `<`** — copy the highlighted entry to the other side (a file or a whole
+  subtree). WinMerge-style reconcile.
+- **`w`** — save the comparison as a **side-by-side HTML or Markdown** report
+  (the extension picks the format).
+- **`x`** — ask the AI to explain what changed.
 
-It is pure-Rust — no external `scp` binary — and picks the wire protocol
-automatically over one authenticated connection: **SFTP** first (what modern
-`scp` uses), falling back to the classic **SCP** protocol when the server has no
-SFTP subsystem, which is the case on some appliances and locked-down sshd
-configs. The status line reports which one carried it ("via SFTP" / "via SCP").
-Single files and whole directories are supported; the host key is currently
-accepted without a known-hosts check (a documented gap).
+**Duplicates — `:dupes`** (or right-click **Find duplicate files**) finds
+byte-identical files under the current pane and shows them as a checklist; one
+per group is kept, the rest go through the normal delete confirmation.
 
-## SSH
+**Bulk rename — `:brename`** renames the marked files by a pattern — no AI, no
+network. Either a template (`report_{n3}.{ext}` → `report_001.log`, …) or a
+substitution (`s/IMG/photo/i`). You review `old → new` and tick which to apply.
 
-`Shift+S`, `:ssh`, or **right-click → SSH connect…** opens a two-stage picker:
-choose a host, then a user on it.
+---
 
-Right-click is the one that works while the shell pane has focus: keys go
-straight to the shell there, so `Shift+S` would just type an `S`. SSH leads the
-shell pane's context menu for that reason. Typing in the host stage filters.
-Hosts with a single user connect straight away. The command is typed into the
-shell panel, so your own shell config and agent apply, and the tab drops back to
-a local prompt when the session ends.
+## Files, attributes, space
+
+| Command | Does |
+|---|---|
+| `:attr` | permissions & owner of the selection |
+| `:chmod 644` | change the mode (octal; Windows → use `:readonly`) |
+| `:readonly on\|off` | toggle the read-only bit |
+| `:hash md5` / `:hash sha256` | checksum the selected files |
+| `:count` | count files, lines and source "steps" under the target |
+
+The status line always shows **free space** on the active pane's drive
+(`12.3G free / 100G`) — amber past 80% used, red past 95%.
+
+**Version control just works.** In a **git** or **svn** working copy, each entry
+gets a status badge (`●` staged, `✚` modified, `?` untracked, `‼` conflict), the
+status line shows the branch (or `svn r123`), and F3 marks changed lines against
+HEAD. Act on the selection with `:stage`, `:unstage`, `:discard`, `:gitlog`,
+`:gitdiff`, and `B` in the viewer for a blame gutter — all under right-click
+**Git ▸** / **SVN ▸**. cian shells out to your `git`/`svn`.
+
+---
+
+## Transfer files over SSH
+
+Configure your hosts once (below), and the right-click **Transfer ▸** menu gives
+you **Upload → server** and **Download ← server**, in a file pane or the shell.
+
+- **Upload** — pick a host/user, type the remote folder, optionally set the mode
+  (chmod), and the marked files go up.
+- **Download** — browse the remote folder (Enter to open, `Space` to mark), then
+  choose where they land: left pane, right pane, Desktop, or a typed path.
+
+It's pure-Rust — no external `scp`. It uses **SFTP**, falling back to classic
+**SCP** on servers without an SFTP subsystem, and the status line says which. Turn
+on **verify** to re-read each transferred file and checksum both ends:
+
+```lua
+cian.set_option("verify_transfers", true)   -- off by default
+```
+
+**Connect — `Shift+S`** (or `:ssh`, or right-click) opens a two-stage picker:
+host, then user. The command is typed into the shell, so your own shell config
+and agent apply. Set your hosts in `init.lua`:
 
 ```lua
 cian.ssh({
-  users = { "root", "deploy", "app", "taketan" },   -- offered for every host
+  users = { "root", "deploy", "app" },          -- offered for every host
   hosts = {
     { name = "web1", host = "10.0.1.11" },
     { name = "db1",  host = "10.0.2.31", users = { "postgres", "root" } },
@@ -257,388 +192,223 @@ cian.ssh({
 })
 ```
 
-Eight hosts times four users is a dozen lines here instead of 32 aliases to
-remember — the picker does the remembering. The same host list feeds the SFTP/SCP
-transfer flow above.
-
-### Passwords
-
-A login can carry a password, which cian types when ssh asks for one (and which
-SFTP/SCP uses to authenticate):
+**Passwords** are optional. cian types one when ssh asks for it (and uses it for
+SFTP/SCP). Three ways:
 
 ```lua
 users = {
-  { name = "postgres", password = "..." },        -- stored in this file
-  { name = "deploy", password_cmd = "pass srv/deploy" },  -- from a credential store
-  "root",                                          -- key auth; nothing stored
+  { name = "postgres", password = "..." },                -- in this file
+  { name = "deploy",   password_cmd = "pass srv/deploy" }, -- from a credential store
+  "root",                                                  -- key auth; nothing stored
 }
 ```
 
-ssh reads the password from its controlling terminal rather than stdin, so it
-cannot be piped in — but cian owns that terminal, so it writes to the PTY when
-the prompt appears. This is what TeraTerm's `.ttl` macros do, and expect(1)
-before them. cian waits for the prompt rather than sending blindly, so a host
-on key auth simply never receives anything and the attempt expires after 20
-seconds. A host-key confirmation is never answered automatically.
+A plaintext `password` is convenient but it's a secret in a file — cian warns on
+Unix if that file is world-readable. `password_cmd` keeps it in your credential
+manager; key auth avoids the question entirely. The password is never logged,
+shown, or answered for a host-key prompt.
 
-The password is never logged (including under `CIAN_LOG`), never shown in the
-status bar, and redacted from debug output.
+---
 
-**Understand the trade.** `password` puts a plaintext secret in a file that
-gets backed up, copied between machines, and shared more readily than its
-contents deserve. On Unix, cian warns at startup if such a file is readable by
-anyone else. `password_cmd` avoids storing anything by taking the value from a
-credential manager. Key authentication avoids the question entirely and is
-usually less work to set up than a credential list is to maintain.
+## The shell panel
 
-## Looking inside things
+The bottom panel is a real shell (your `$SHELL`). Focus it with **`Shift+J`**, a
+click, or `:shell`; **Esc** returns to the files. Full-screen programs (vim,
+less, htop) keep Esc and the function keys for themselves.
 
-**`F3`** answers "what is in here" without leaving cian. On a text file it
-opens a scrollable viewer with line numbers; on a binary one, a hex dump,
-since showing a compiled file as text is a screenful of mojibake that answers
-nothing. Only the first 4 MB is read, so opening a huge log is instant.
+Drag inside a shell pane to select — it copies on release, no modifier needed.
+**Right-click** for its menu: SSH connect, paste, session log, SFTP/SCP, and a
+text-encoding picker.
 
-A **Markdown** file (`.md`) opens straight into a rendered preview — headings,
-emphasis, lists, blockquotes, rules, links and code blocks styled for the
-terminal, with `mermaid` blocks shown as a clearly-labelled source box (a
-terminal cannot draw the diagram itself). Press **`p`** to toggle between the
-preview and the raw source.
+**Tabs & splits** are on the function keys:
 
-**Images** (`.png`, `.jpg`, `.gif`, `.bmp`, `.webp`) preview right in the
-terminal. cian draws them with half-block characters — each cell is two stacked
-pixels coloured independently — so it needs nothing but 24-bit colour and works
-the same in Windows Terminal, iTerm2 and the rest, no graphics protocol or
-particular version required. It's a coarse preview, not a photo viewer, but
-enough to tell what a file is; `E` opens it in your editor, `Shift+Enter` jumps
-to it in the pane, `Esc` closes.
+| Key | Action |
+|---|---|
+| `F1`–`F8` | switch to shell tab 1–8 |
+| `F9` / `F10` | new tab / close tab |
+| `Shift+F1` / `Shift+F2` | focus next / previous split pane |
+| `Shift+F8` / `Shift+F9` | split the active pane — side by side / stacked |
+| `Shift+F10` | close the active split (asks first) |
+| `F12` / `Shift+F12` | zoom the whole surface / just the split (toggle) |
 
-**Office and PDF documents** preview as text, with nothing else installed.
-`.docx`, `.xlsx` and `.pptx` are ZIP-of-XML and are read directly; a PDF's text
-is pulled from its content streams; the legacy binary `.doc`/`.xls`/`.ppt` fall
-back to a best-effort readable-text scan (clearly labelled as approximate — a
-scanned-image PDF or a document with non-embedded font encodings may have no
-text to extract). It reproduces no layout — it answers "what does this say" —
-but because it lands in the same viewer, search, selection and copy all work
-over it. This keeps cian's offline, single-binary promise: no converter, no
-network, just the one executable.
+**Synchronize input** across a tab's panes with right-click **▸ Synchronize
+input** (or `:sync`) — type once, it goes to every pane at once. The panes wear a
+bright **⇄ SYNC** border while it's on, so you can't miss it.
 
-Recognised source files are **syntax-highlighted** — keywords, types, strings,
-comments, numbers, and markup tags/attributes get their own colours. It's a
-small built-in lexer (no external grammar library, so the single binary stays
-lean), covering Rust, Python, JavaScript/TypeScript, Java, HTML/XML/JSP, CSS,
-SQL, shell, Lua, YAML and JSON. Unknown types are shown plain.
-
-The viewer is vim-flavoured: a cursor moves with `h`/`j`/`k`/`l`, `w`/`b`,
-`0`/`$`, `gg`/`G` and `Ctrl-d`/`Ctrl-u`; `/` searches (all matches highlighted,
-`n`/`N` step through them), `42G` jumps to a line, `%` to the matching bracket,
-`{`/`}` between paragraphs. `v` / `V` / `Ctrl-v` start character-, line- and
-block-wise visual selection; **Shift+arrow** selects character-wise and
-**Alt+arrow** block-wise like an editor; a left-click **drag** selects (hold
-**Alt** for a rectangle). `y` (or `c`), or right-click, copies it. `e` switches the text
-encoding (UTF-8 / Shift_JIS / UTF-16) when a file was decoded wrong, and
-`Shift+Enter` reveals the file in the pane (jump to its folder, cursor on it).
-
-**Editing.** Press **`i`** in the viewer to edit the file right there — a plain,
-modeless text editor (arrows/Home/End/PageUp-Dn move, typing inserts, Enter/
-Backspace/Delete/Tab as expected). **`Ctrl+S`** saves in the file's own encoding,
-`Esc` leaves edit mode, and closing with unsaved changes is refused (`Ctrl+S` to
-save, `Shift+Q` to discard). It's a simple editor, not vim — but it needs no
-separate window and nothing bundled. On a Markdown file `i` drops the preview to
-the source first.
-
-Prefer your own editor? **`E`** (or `:edit` / `:e` on a file in a pane) shells
-out to it instead — the `editor` option from `init.lua` if set, else `$VISUAL` /
-`$EDITOR`, else the first of **nvim → vim → vi** on `PATH`. cian steps aside for
-it and takes the screen back when it exits, reloading the file.
-
-When the viewer was opened from a grep hit (below), `Ctrl+n` / `Ctrl+N` step to
-the next / previous hit's preview without going back to the list.
-
-On an archive — **zip** (also `.jar`, `.whl`, `.epub`) or a **tarball**
-(`.tar`, `.tar.gz`, `.tgz`) — it lists the members instead, with their unpacked
-sizes. `Enter` extracts the highlighted one into the opposite pane, `a` extracts
-all — on the worker thread, with the usual progress bar and Esc.
-
-Member paths are checked before anything is written: an archive can name
-`../../etc/passwd` or an absolute path, and a naive extractor obliges. Those
-are refused individually and the rest of the archive still comes out.
-
-**Extract without opening it:** `:unzip` (or right-click **▸ Extract here**) on
-the archive under the cursor unpacks the whole thing into a fresh sub-folder
-named after it — no member list, no clobbering. **Compress:** `:zip [-e]`,
-`:tar` and `:targz` bundle the marked files (or the cursor's) into the pane,
-and right-click **▸ Compress** offers `.zip`, `.zip (password)` and `.tar.gz`
-with a name prompt. Reading and writing both cover zip and gzipped/plain tar.
-
-**Encrypted zips** are handled throughout. F3 still lists the members (the names
-and sizes live in the central directory, not behind the password), so a locked
-zip no longer shows as garbled bytes; extracting one — from `:unzip`, the
-right-click menu, or the member list — asks for the password first, and a wrong
-one is reported rather than writing junk. AES-256 zips (`:zip -e` or the
-password compress item) are strong, but need 7-Zip to open, not Explorer's
-built-in unzip.
-
-## Searching
-
-`f` jumps between matches in the current listing. **`Shift+F`** searches the
-whole tree below the pane's directory, on a worker thread — results appear as
-they are found rather than after the walk finishes, `Esc` stops it, and Enter
-on a result moves the pane into that directory with the cursor on the entry.
-
-**`Ctrl+F`** greps *inside* the files instead, listing each matching line with
-its number. `Enter` on a grep hit opens the F3 viewer right on that line — the
-whole point of grepping. Binary files are skipped (a match inside a compiled
-object is unreadable and answers nothing) and so are files over 8 MB, so a
-stray database dump cannot stall the search.
-
-The walk is breadth-first, so shallow matches — usually the wanted ones —
-arrive first and a search abandoned early has still produced something useful.
-Hidden directories are skipped, symlinked directories are not followed (a link
-back up the tree would loop), and the search stops at 5000 hits.
-
-## Attributes, checksums, dotfiles
-
-`:attr` shows permissions and owner for the selection; `:chmod 644` and
-`:readonly on|off` change them. `:hash` checksums the selected files —
-`:hash md5` or `:hash sha256` — on a worker thread with the same progress bar
-and Esc as any other long operation, since the files worth checksumming are the
-big ones.
-
-`:hidden` shows or hides dotfiles for the focused pane. All three are also in
-the right-click menu. Dotfiles are shown by default, which is what cian has
-always done; `cian.set_option("show_hidden", false)` changes that.
-
-Note that `:chmod` is octal only. Symbolic forms like `u+x` are a small
-language of their own, and half-implementing them would be worse than saying
-no. On Windows there are no mode bits at all, so `:chmod` refuses and points at
-`:readonly`.
-
-## Free space
-
-The status line always shows the **free space** on the active pane's mount
-(` 12.3G free / 100G`), so a copy or an extract of a huge tree is a glance away
-from "will this fit". It turns amber past 80% used and red past 95%. The figure
-refreshes when you change directory and after any file operation.
-
-## Git
-
-When a pane sits inside a git repository, each entry carries a status badge:
-`●` staged, `✚` modified, `?` untracked, `‼` conflict, and `~` on a folder that
-contains changes below it. The status line shows a **branch bar** — the current
-branch, ahead/behind counts, and how many files have changed (green when clean,
-amber when not). Open a tracked file with F3 and a **change gutter** marks each
-line against HEAD: green for added, amber for modified, a red underline where
-lines were deleted.
-
-You can act on the selection without leaving cian:
-
-- `:stage` (`:add`) — `git add` the marked files, or the one under the cursor.
-- `:unstage` (`:reset`) — `git reset HEAD`, keeping the worktree changes.
-- `:discard` (`:revert`) — `git checkout --` to throw away worktree changes to
-  tracked files; it confirms first, since that cannot be undone.
-- `:gitlog` — the commit log in a scrollable popup (the selected file's *history*
-  when the cursor is on a tracked file, otherwise the whole repo). `Enter` on a
-  commit shows its diff in the viewer.
-- `:gitdiff` — the selected file's working-tree changes versus HEAD, in the
-  viewer (scrollable, searchable, copyable).
-- In the F3 viewer, **`B`** toggles a **blame** gutter — the short hash, author
-  and date of the commit that last touched each line, so "who changed this, and
-  when" is right there.
-
-All of these are under right-click **Git ▸** (shown only in a repo), and the AI
-can draft a commit message from the staged diff (see below). cian shells out to
-the `git` on your PATH — there is no library dependency to keep the binary
-self-contained.
-
-## Subversion (SVN)
-
-Many shops manage code in Subversion. cian treats an svn working copy exactly
-like a git repo: the **same status badges** (`●` add/delete/replace, `✚`
-modified, `?` unversioned, `‼` conflict, `~` on a folder with changes below), the
-**same change gutter** in the F3 viewer (working file versus `BASE`), and the
-status line shows `svn r<rev>` where git shows its branch. It is detected
-automatically — a directory is at most one of git or svn — so the commands and
-the right-click menu just do the right thing.
-
-- `:stage` (`:add`) — `svn add` the selection.
-- `:discard` (`:revert`) — `svn revert` (confirms first).
-- `:gitdiff` — the file's changes versus `BASE`, in the viewer.
-- `:gitlog` — the log (a file's history, or the whole working copy); `Enter` on a
-  revision shows it as a diff.
-- `B` in the viewer toggles a **blame** gutter (`svn blame`).
-- `:svnupdate` — `svn update` the working copy.
-- `:svncommit` — `svn commit` the selection; it prompts for a message.
-- `:svnresolve` — `svn resolve --accept working` to clear a conflict.
-
-The same actions live under right-click **SVN ▸** (shown only in a working copy).
-`svn update` and `svn commit` touch the network. cian shells out to the `svn` on
-your PATH; if it is not installed, working copies simply show no VCS decorations.
-
-## Going to a path
-
-`z` (or `:cd`) prompts for a path, seeded with the current directory. A
-directory is entered; a file is opened with whatever `Enter` would use,
-including any `on_open` handler from `init.lua`. `~`, `$VAR`, `${VAR}` and
-`%VAR%` are expanded, and a surrounding pair of quotes is stripped — so a path
-copied out of a shell or an Explorer address bar can be pasted in as-is.
-
-## Context menu from the keyboard
-
-`Shift+Enter` opens the same menu the right mouse button does, next to the
-highlighted entry. It needs a terminal that tells Shift+Enter apart from plain
-Enter: the Windows console does, and on Unix it wants the kitty keyboard
-protocol (WezTerm, kitty, foot). `:menu` works everywhere.
-
-## Selecting
-
-`v` starts a visual selection; `Enter` marks it. Inside visual mode `a` selects
-the whole listing, and `gg` / `G` extend to the top or bottom — so both `v a`
-and `gg v G` select everything.
-
-Text fields (rename, new file, shortcut name and target) take **Ctrl+V** to
-paste and **Ctrl+U** to clear. A new shortcut's target starts filled in with
-the entry under the cursor, since that is usually what is being bookmarked.
-
-## Sorting
-
-`,` opens the sort picker: name, size, date or extension, with `n`/`s`/`d`/`e`
-as direct shortcuts. Choosing the key that is already active reverses it, the
-way a column header does. Directories always stay at the top regardless — a
-size sort that scattered folders through the listing would make the pane much
-harder to navigate. The order is per-pane and shown in the status bar
-(`size ▼`).
-
-## Key hints
-
-A bar above the status line lists the keys that apply right now, and changes
-with the mode. Turn it off with `cian.set_option("key_hints", false)`; it also
-yields automatically on a short window.
-
-## Filtering
-
-`/` narrows the listing as you type (case-insensitive substring). **Enter**
-keeps the filter applied so you can mark and operate on just the matches;
-**Esc** clears it. The status bar shows the active filter and how many of the
-directory's entries it matches, so a narrowed pane never looks like a full one.
-Changing directory always clears the filter.
-
-## Remapping keys
-
-Every file-pane action has a name and can be bound to a key in `init.lua`.
-Because a user binding is consulted before the built-in keys, binding a key
-**replaces** its default rather than only adding an alias, and `"none"` turns a
-key off entirely:
+**Snippets** — the lines you type over and over. Declare them once:
 
 ```lua
-cian.set_keymap("x", "delete")   -- add: x now deletes too
-cian.set_keymap("d", "rename")   -- change: d renames instead of deleting
-cian.set_keymap("d", "none")     -- disable: d does nothing
+cian.snippets{
+  { name = "sqlplus dev", cmd = "sqlplus user@DEVDB", enter = false },
+  { name = "tail app log", cmd = "tail -f /var/log/app/app.log" },
+  { name = "hulft send",  cmd = "utlsend -f SENDID -sync", confirm = true },
+}
 ```
 
-[`examples/init.en.lua`](examples/init.en.lua) lists every default binding as the
-`set_keymap` line that would recreate it, so you can uncomment-and-edit to move
-or disable any of them, along with the full list of action names. Structural
-keys (arrows, Enter, Backspace, Tab, the F-keys, and Ctrl-/Shift- combinations)
-are built in and not remapped here.
+**Ctrl+Shift+Enter** (or `:snip`, or right-click) opens the picker; type to
+filter, Enter sends the line to the shell. `enter = false` types it for you to
+review, `confirm = true` asks first.
+
+---
+
+## Macros
+
+A macro sets up your session in one keystroke. Press **`@`** (or `:macros`, or
+right-click) to pick one. Two kinds:
+
+**Layout macros** build the *screen*: split the panel, SSH each pane somewhere,
+tint them apart, start logging.
+
+```lua
+return {
+  { name = "Prod: db + app + logs", panes = {
+    { cmd = "ssh admin@db",  bg = "40,24,24", log = "~/cian-logs" },
+    { dir = "right", cmd = "ssh admin@app", bg = "24,40,24" },
+    { dir = "down",  cmd = "ssh admin@app", steps = { "tail -f /var/log/app.log" } },
+  }},
+}
+```
+
+Per pane: `dir` (`right`/`down`), `cmd`, `steps` (a scripted login that can
+`{ wait = 2 }` and `{ expect = "SQL>" }` for a prompt), `bg`, `log`. Add
+`from = N` to build a grid, `zoom = true` to maximize first, `sync = true` to
+synchronize input once it's up. Full examples in
+[`examples/macro.en.lua`](examples/macro.en.lua) and
+[`examples/macro/`](examples/macro/).
+
+**Script macros** automate *file operations* — the AFXW side of the word. Give a
+macro a `run` function and drive it with Lua's own `for` / `if`:
+
+```lua
+return {
+  name = "Archive *.log, then bin them",
+  run = function(cx)
+    local logs = cx.glob("*.log")
+    if #logs == 0 then cx.message("no logs here") return end
+    cx.zip(logs, "logs.zip")
+    cx.delete(logs)                     -- to the trash
+    cx.message("archived " .. #logs .. " logs")
+  end,
+}
+```
+
+`cx` gives you: **query** (`dir`, `other`, `marked`, `cursor`, `list`, `glob`),
+**operations** (`copy`, `move`, `delete`, `rename`, `mkdir`, `zip`, `read`,
+`write`), **subprocess** (`sh("cmd")` → `{ code, out, err }`), **path helpers**
+(`basename`, `stem`, `ext`, `join`, `exists`, `isdir`, `size`), and `message`.
+A dozen ready samples — sort by extension, dated backup, normalise line endings,
+clean empty files, checksum each file, generate an `index.md` — are in
+[`examples/macro/Escript.en.lua`](examples/macro/Escript.en.lua).
+
+**Snippet or macro?** One shell, a command or two → snippet. Several panes wired
+up, or a file-op job → macro.
+
+**At startup:** `cian --macro thing.lua` runs a macro as cian comes up (so a
+`.lua` associated with `cian.exe` runs on double-click), or `--macro-name "..."`
+runs one from your config.
+
+---
 
 ## AI (optional)
 
-With `cian.ai{...}` configured, `:ai` opens a chat backed by Azure OpenAI. cian
-reaches it through a small bundled Python helper that uses the same Windows
-broker (WAM) sign-in as the crmaine extension — there is nothing to install
-beyond Python and a couple of `azure`/`openai` packages, and the helper is
-embedded in the binary and written out on first use. If Python, the packages, or
-sign-in are unavailable the whole feature stays silent and cian runs exactly as
-before; `auth_mode = "mock"` gives an offline echo for wiring it up, and an
-`api_base_url` points it at a local OpenAI-compatible server (Ollama, LM Studio).
+With `cian.ai{...}` set, cian gets an assistant (it calls itself **Carmine /
+カーマイン**). It's off unless configured, and always keeps you in the loop —
+nothing runs or deletes without your say-so.
 
-Beyond chat, the AI can act on what you have open, always with a human in the
-loop:
+| Do this | You get |
+|---|---|
+| `:ai` | a chat, backed by Azure OpenAI |
+| `:aicmd <what you want>` | a shell command drafted for you to review (never run for you) |
+| `:aicommit` | a commit message drafted from the staged diff |
+| `:aijunk` | a checklist of likely-disposable files → normal delete confirm |
+| `:aiorganize` | a proposed folder layout → you approve the moves |
+| `:airename` | AI-suggested new names → you review `old → new` |
+| `:aisearch <…>` | files most relevant to a description, as a results list |
+| `:aierror` | explain the last shell error |
+| `:aidiff` | explain the diff on screen (also `x` in the diff view) |
+| `:ailog` | triage the selected log — errors, timeline, likely cause |
+| `S` in F3 | summarise the file you're viewing |
 
-- **Command from a description** (shell pane): `:aicmd <what you want>`, or the
-  right-click **crmaine - Ajent ▸** menu. The generated command is shown for review and only
-  inserted at the prompt — never run for you.
-- **Commit message** (file pane): `:aicommit`, or right-click **crmaine - Ajent ▸ → Draft
-  commit message**. cian reads the staged diff (`git diff --cached`) and drafts
-  a Conventional-Commits-style message; you get an editable preview (`e` to
-  edit, `Enter`/`c` to commit, `Esc` to cancel) before anything is committed.
-  With nothing staged it says so rather than committing an empty change.
-- **Detect junk** (file pane): `:aijunk`, or right-click **crmaine - Ajent ▸ → Detect junk
-  files**. cian sends only the listing's metadata (names, sizes, dir flags —
-  never contents) and the model flags likely-disposable entries (build output,
-  caches, temp and editor-backup files, OS cruft). You get a checklist —
-  Space/click toggles, `a` toggles all — and approving hands the checked paths
-  to the *normal* delete confirmation, so nothing is removed without the usual
-  trash/permanent choice. A name the model invents matches nothing, so it can
-  only ever target files that were actually shown.
-- **Suggest structure** (file pane): `:aiorganize`, or right-click **crmaine - Ajent ▸ →
-  Suggest folder structure**. From the same metadata the model proposes a set
-  of moves that group loose files into sub-folders (`images/`, `docs/`, …). You
-  review the plan as `name → folder/` rows — Space/click toggles, `a` toggles
-  all — and approving (Enter/`m`) creates the folders and moves the checked
-  files. It can only ever move files *into* new sub-folders of the current
-  directory: destinations are validated to reject `..`, absolute paths and
-  drives, and a name the model invents matches nothing.
-- **Explain an error** (shell pane): `:aierror`, or right-click **crmaine - Ajent ▸ →
-  Explain the last error**. cian sends the shell pane's visible text and the
-  model explains what went wrong and the likely fix, in the AI chat. Like the
-  summary below, this sends terminal *text*, so it is an explicit action.
-- **Summarise a file** (F3 viewer): press **`S`** while viewing a file. Unlike
-  the metadata-only features above, this sends the file's **text** to the model
-  (bounded to keep the request small), so it is a deliberate keystroke rather
-  than automatic. The summary opens in the AI chat, where it can be scrolled,
-  selected and copied.
-- **Semantic search** (file pane): `:aisearch <what you're looking for>`, or
-  right-click **crmaine - Ajent ▸ → Semantic search**. cian walks the tree, collects up to a
-  few hundred file **paths** (names only — no contents), and asks the model
-  which are most relevant to your description. The matches open in the same
-  results list as `find`/`grep`: Enter previews the file in F3, `Ctrl+n`/`Ctrl+N`
-  step between them, Esc returns to the list. A path the model invents matches
-  nothing.
-- **AI rename** (file pane): `:airename`, or right-click **crmaine - Ajent ▸ → AI rename**.
-  It asks how to rename ("snake_case", "add a date prefix", …), then proposes new
-  names for the marked files — or the whole listing when nothing is marked. You
-  review the plan as `old → new` rows (Space/click toggles, `a` toggles all) and
-  approving (Enter/`r`) renames the checked files in place. A proposed name is
-  validated to a bare filename (no path, no `..`), a target that already exists
-  is skipped, and a name the model invents matches nothing. For a rename you can
-  spell out as a pattern, the offline **`:brename`** below needs no AI.
+**Give it context.** `cian.ai_context("…")` records facts about *your* setup
+(the OS, the deployment target, house rules) and cian prepends them to every
+prompt. Per-server facts go on the host: a `notes = "RHEL 8; Oracle 19c; …"` is
+handed over automatically when the shell is logged into that host.
 
-**Give the AI your context.** Generic answers assume a generic machine.
-`cian.ai_context("…")` (a string or a list) records facts about *your*
-environment — the OS the panes browse, the deployment target, house
-conventions — and cian prepends them to every AI prompt above. Per-server
-facts belong on the SSH host instead: a host's `notes = "RHEL 8; Oracle 19c; …"`
-is handed to the model automatically whenever the active shell is logged into
-that host, so "explain the last error" already knows what it is looking at.
-[`examples/init.en.lua`](examples/init.en.lua) has a fuller worked block for an
-on-prem enterprise shop (RHEL + AIX, Oracle, WebLogic, HULFT, JP1) to copy from,
-including the kind of guardrails worth stating — confirm destructive commands,
-don't guess, mind file/DB size, and assume no internet beyond the AI API.
+cian reaches the model through a small bundled Python helper (Windows broker
+sign-in, like the crmaine extension) — nothing to install beyond Python and a
+couple of packages. `auth_mode = "mock"` gives an offline echo for wiring it up,
+and `api_base_url` points it at a local server (Ollama, LM Studio). This is the
+one place cian isn't fully self-contained, which is why it's opt-in. See
+[`examples/init.en.lua`](examples/init.en.lua).
 
-The AI part is the one place cian is not a single self-contained binary — it
-opts into an external interpreter and network — which is why it is strictly
-optional and off unless configured. See
-[`examples/init.en.lua`](examples/init.en.lua) for the settings.
+---
 
-## Architecture
+## Configuration
 
-Cargo workspace, split into seven crates:
+cian reads `~/.config/cian/init.lua` (override with `$CIAN_CONFIG_DIR`). It's
+Lua, on a small `cian` table — no init.lua needed to start:
+
+```lua
+cian.set_theme({ accent = "#00d7d7", mark_fg = "yellow" })
+cian.set_option("clipboard_on_copy", false)
+cian.set_keymap("x", "delete")           -- binding a key replaces its default; "none" disables
+cian.on_open("md", function(path)        -- open .md files your way
+  cian.spawn({ "open", "-a", "Typora", path })
+end)
+```
+
+A broken config never blocks startup — cian shows the error and falls back to
+defaults for whatever didn't apply. `:reload` re-reads it live (keymaps,
+options, SSH hosts, open handlers; theme and borders need a restart).
+
+**Themes.** 13 presets, live-previewed: `:theme` opens a gallery, `:theme <name>`
+sets one, and you can theme each pane separately. The choice sticks across
+restarts.
+
+**Portable.** Put `init.lua` (and `shortcuts.lua` / `macro.lua`) next to the
+`cian` executable and that folder wins over `~/.config/cian`, for reading *and*
+writing. Drop the binary and its `.lua` on a USB stick and the whole setup
+travels with it, leaving nothing on the host.
+
+**Session.** Launched with no path, cian reopens the two folders you had last
+time. Pass a folder on the command line to override it.
+
+**Remapping keys.** Every file-pane action has a name you can bind:
+
+```lua
+cian.set_keymap("x", "delete")   -- x now deletes too
+cian.set_keymap("d", "rename")   -- d renames instead
+cian.set_keymap("d", "none")     -- d does nothing
+```
+
+[`examples/init.en.lua`](examples/init.en.lua) is a fully-commented template with
+every default binding and the complete action list. **Windows paths need long
+brackets** — a backslash is an escape in Lua:
+
+```lua
+cian.set_option("shell", [[C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe]])
+cian.set_option("shell", "powershell.exe")   -- or a bare name, looked up on PATH
+```
+
+---
+
+## How it fits together
+
+A cargo workspace, seven crates:
 
 | Crate | Role |
 |---|---|
-| `cian-core` | Pure domain logic: file ops, marks, history, sorting, filtering, search, diff, dedup, elevation, git |
+| `cian-core` | Pure logic: file ops, marks, sorting, search, diff, dedup, git |
 | `cian-tui`  | Rendering & input (ratatui + crossterm), layout, popups, mouse |
-| `cian-pty`  | Embedded shell pane (portable-pty + vt100 + tui-term) |
-| `cian-scp`  | Built-in SFTP/SCP file transfer (pure-Rust russh, no C deps) |
-| `cian-ai`   | Optional AI helper (Azure OpenAI via a bundled Python broker-auth script) |
-| `cian-lua`  | Lua configuration host (mlua): keymaps, themes, ext-open DSL |
-| `cian-bin`  | Entry point — produces the `cian` binary |
+| `cian-pty`  | The embedded shell (portable-pty + vt100) |
+| `cian-scp`  | Built-in SFTP/SCP transfer (pure-Rust russh) |
+| `cian-ai`   | Optional AI helper (Azure OpenAI via a bundled Python script) |
+| `cian-lua`  | Lua config host (mlua): keymaps, themes, macros |
+| `cian-bin`  | The entry point — produces the `cian` binary |
 
-The rough runtime flow. A single main loop owns all UI state and drawing;
-anything that could block (search, diff, transfer, AI) is handed to a worker
-thread and its result is polled back into the loop each frame, so the UI never
-freezes.
+One main loop owns all the UI and drawing. Anything that could block — search,
+diff, transfer, AI — runs on a worker thread and its result is polled back each
+frame, so the UI never freezes.
 
 ```mermaid
 flowchart TD
@@ -679,362 +449,43 @@ flowchart TD
     work -- "results" --> poll
 ```
 
-## Configuration
-
-cian reads `~/.config/cian/init.lua` (override the directory with
-`$CIAN_CONFIG_DIR`). Configuration is written in Lua via a small WezTerm-style
-API on the global `cian` table:
-
-```lua
-cian.set_theme({ accent = "#00d7d7", mark_fg = "yellow" })
-cian.set_option("clipboard_on_copy", false)
-cian.set_keymap("x", "delete")           -- binding a key replaces its default; "none" disables
-cian.on_open("md", function(path)        -- extension-dispatch execution
-  cian.spawn({ "open", "-a", "Typora", path })
-end)
-```
-
-The file is optional — cian runs with defaults if it is absent. Any syntax or
-runtime error is shown in a startup notice and cian falls back to defaults for
-whatever could not be applied, so a broken config never blocks startup.
-
-**Portable mode.** If `init.lua`, `shortcuts.lua` or `macro.lua` sits in the
-same directory as the cian executable, that directory wins over
-`~/.config/cian` — for reading *and* for the files cian writes back
-(bookmarks, macros). Drop the binary and its `*.lua` on a USB stick and the
-whole setup travels together, leaving no trace on the host. With nothing beside
-the executable, cian behaves exactly as before, from `~/.config/cian`.
-
-**Session.** Started with no path argument, cian reopens the two directories it
-was showing last time (and which pane had focus). This is remembered per user in
-`session.json` next to `init.lua` — portable-aware, so it travels on the stick
-too — and holds nothing but the two paths. Passing a directory on the command
-line overrides it; a remembered directory that no longer exists is quietly
-dropped.
-
-`:reload` re-reads `init.lua` without restarting — keymaps, options, SSH hosts
-and open handlers apply immediately. The color theme and border style are
-installed once at startup, so a change to those still needs a restart; `:reload`
-says so when it sees one.
-
-### Windows paths need `[[...]]`
-
-A backslash starts an escape sequence in Lua, so pasting a path into `"..."` is
-a syntax error — and it takes the *whole* config file down with it, leaving you
-on the default shell wondering why none of your settings applied:
-
-```lua
--- BAD: \W is not a valid escape, and this kills the entire file
-cian.set_option("shell", "C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe")
-
--- GOOD: backslashes are literal inside long brackets
-cian.set_option("shell", [[C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe]])
-
--- Also fine: a bare name is looked up on PATH
-cian.set_option("shell", "powershell.exe")
-```
-
-cian adds this hint to the startup notice whenever it sees an invalid escape.
-
-See [`examples/init.en.lua`](examples/init.en.lua) for a fully-commented template and
-the complete list of bindable actions.
-
-## Shell panel
-
-The bottom panel is a real PTY running your `$SHELL`, started on first focus.
-Focus it with `Shift+J` (from a file pane), a mouse click, or `:shell`. While
-the shell is focused, keys go straight to it; press **Esc** to return to the
-files. Esc is passed through to full-screen programs (vim, less, htop, …) so
-they keep working — it only leaves the shell at a normal prompt.
-
-**Selecting text:** because cian owns the mouse, the terminal's own selection
-does not reach the shell. Instead, plain-drag inside a shell pane to select, and
-the selection is copied to the clipboard on release — no modifier needed.
-
-**Right-click** in a shell pane for its menu: SSH connect, paste, start/stop a
-**session log** (a scrubbed transcript written to a file), SFTP/SCP
-upload/download, and a **text-encoding** picker (UTF-8 / Shift_JIS / UTF-16LE /
-UTF-16BE) for shells that speak a non-UTF-8 codepage.
-
-Shell tabs are driven by function keys (Ctrl-based shortcuts are unreliable
-because some setups swallow the Ctrl modifier before it reaches the app):
-
-| Key | Action |
-|---|---|
-| `F1`–`F8` | switch to shell tab 1–8 |
-| `F9` | new shell tab |
-| `F10` | close shell tab |
-| `Shift+F1` / `Shift+F2` | focus next / previous split pane |
-| `Shift+F8` | **v-split** — divide the active pane into two side by side |
-| `Shift+F9` | **h-split** — divide the active pane into two stacked |
-| `Shift+F10` | close the active split pane (asks first) |
-| `F12` | zoom the focused surface to fill the window (toggle) |
-| `Shift+F12` | zoom just the active split pane (toggle) |
-
-Splits nest: splitting always divides the active pane, so you can build
-arbitrary layouts (e.g. one pane on the left, two stacked on the right). These
-keys are only active at a normal prompt; full-screen apps (vim, htop, …)
-receive the function keys unchanged.
-
-**Synchronize input** across a tab's panes with right-click **▸ Synchronize
-input** (or `:sync`): what you type then goes to *every* pane at once — run the
-same command on a row of servers in one shot (tmux's `synchronize-panes`). While
-it's on, the panes wear a bright **amber ⇄ SYNC** border so it's unmistakable,
-and it turns itself off when a tab drops back to a single pane. Because a keypress
-hits every pane, be deliberate — a destructive command runs everywhere, and a
-password typed while synced is sent to all of them. A layout macro can turn it on
-automatically once it finishes building (`sync = true`).
-
-The file panes use the parallel controls: `Shift+F1` / `Shift+F2` switch to the
-next / previous tab, and `Shift+F10` closes the active tab (asking first).
-
-**Command snippets.** For the lines you type again and again — a sqlplus login, a
-log tail, a HULFT job — declare them once in init.lua and fire them from a picker:
-
-```lua
-cian.snippets{
-  { name = "sqlplus dev", cmd = "sqlplus user@DEVDB", enter = false },
-  { name = "tail app log", cmd = "tail -f /var/log/app/app.log" },
-  { name = "hulft send",  cmd = "utlsend -f SENDID -sync", confirm = true },
-}
-```
-
-**Ctrl+Shift+Enter** (it works even while the shell pane is focused, since cian
-sees the key before the terminal does), `:snip`, or right-click **Snippets →
-shell** (the top entry) opens the launcher; type to filter, Enter sends the
-chosen line to the active shell. A `cmd` may hold several lines (a Lua `[[ ]]`
-string is tidiest) — with `enter = true` they run in sequence. `enter`
-(default true) runs it
-immediately, or `false` types it at the prompt for you to review and run;
-`confirm = true` asks first, for anything destructive. A tag in the list shows
-which each is — `↵` run, `…` type-only, `?` confirm-first.
-
-## Counting files and steps
-
-`:count` is cian's built-in kazoechao: it tallies files, lines and **steps**
-(source lines) under the target — the marked entries if any, otherwise the
-active pane's whole directory tree — on a worker thread, and shows the total
-plus a per-extension breakdown. `.git`/`.svn`/`.hg` and binary files are skipped.
-
-What a "step" is comes from `count.lua`: which `extensions` to include (omit for
-every text file), whether `count_blank` / `count_comments` fold those lines into
-the step total (both off = SLOC), and the `comment_prefixes` that mark a comment
-line. It is portable-aware like the rest of the config; see
-[`examples/count.en.lua`](examples/count.en.lua).
-
-## Macros
-
-A **layout macro** builds a whole shell working-set in one keystroke: split the
-panel, connect each pane somewhere, tint them apart, start logging — done. Press
-**`@`** (vim's play-a-macro key) to pick one, run `:macros`, or use the
-right-click menu (shown when any macro is defined).
-
-### Snippets vs macros — which do I use?
-
-They overlap, so here is the line between them:
-
-| | **Snippet** | **Macro** |
-|---|---|---|
-| What it does | sends a command (or a few lines) to **one** shell | builds a **multi-pane layout**: splits, connects, tints, logs |
-| Scope | the active shell pane | the whole shell panel |
-| Defined in | `cian.snippets{}` in init.lua | `macro.lua` / `macro/*.lua` |
-| Run with | Ctrl+Shift+Enter · `:snip` · right-click (top) | `@` · `:macros` · right-click |
-| Timing | fires at once | a tick-driven build (panes spawn asynchronously), with `wait` / `expect` |
-| Think of it as | a clipboard of commands | tmux layout + a TeraTerm login script |
-
-A snippet's `cmd` can hold several lines that run in sequence, so **"could I just
-use a snippet?" is often yes** — for anything that stays in one shell. Reach for a
-macro when the *shape of the screen* is the work: several panes, each SSH'd to a
-different server, waiting on prompts before logging in, colour-coded, recording
-to a log. That "open everything the right way" step is what a snippet can't do —
-it never splits panes or waits for a prompt. Rule of thumb: **one shell → snippet;
-several panes wired up → macro.**
-
-Macros live in `macro.lua` (portable-aware, like the rest of the config). Each
-returns a name and a list of panes; the first pane is the shell you are on, and
-each later pane is split off the previous one:
-
-```lua
-return {
-  { name = "Prod: db + app + logs", panes = {
-    { cmd = "ssh admin@db",  bg = "40,24,24", log = "~/cian-logs" },
-    { dir = "right", cmd = "ssh admin@app", bg = "24,40,24" },
-    { dir = "down",  cmd = "ssh admin@app", steps = { "tail -f /var/log/app.log" } },
-  }},
-}
-```
-
-Per pane: `dir` (`"right"` | `"down"`), `cmd` (a line to run), `steps` (a
-scripted sequence run after it), `bg` (a colour so panes are easy to tell
-apart), and `log` (a directory to record the session to). Because each split
-spawns asynchronously, cian builds the layout pane-by-pane as the shells come up.
-See [`examples/macro.en.lua`](examples/macro.en.lua).
-
-**Scripted steps** are played out over time, so a login can wait for its prompt
-instead of racing ahead. Each `steps` entry is a line to send (`"text"` or
-`{ send = "text" }`), a pause (`{ wait = 2 }`), or a prompt-wait
-(`{ expect = "SQL>" }`, optionally `{ expect = "password:", timeout = 20 }` —
-`expect` matches case-insensitively and gives up after the timeout). That turns
-"ssh in, wait for the password prompt, log in, wait for the shell, launch
-sqlplus, connect" into a macro that survives a slow link — see
-[`examples/macro/Bmacro.en.lua`](examples/macro/Bmacro.en.lua).
-
-By default a pane splits off the previous one, which cascades. To build a real
-**grid**, a pane can say `from = N` — split off pane *N* (1-based) instead — plus
-`zoom = true` to maximize the shell panel first and `sync = true` to synchronize
-input once it's built. A 2×2 of servers is
-[`examples/macro/Cgrid4.en.lua`](examples/macro/Cgrid4.en.lua): pane 1 top-left, pane 2
-= `from 1` right, pane 3 = `from 1` down, pane 4 = `from 2` down — each one
-**`ssh`-ing in and logging in with a password** via an `expect` / `send` pair
-(`sync` off there, so the four are driven independently). A pane's `bg` also
-accepts a background-preset name (`"navy"`, `"crmaine"`, …), not just a colour
-spec. The password sits in the macro file in plain text — the same opt-in
-trade-off as an SSH password in init.lua.
-
-A pane can also set **`ratio`** — the percentage the pane it splits off *keeps*
-(default 50). That is how a taller grid stays even:
-[`examples/macro/Cgrid6.en.lua`](examples/macro/Cgrid6.en.lua) builds a 2×3 of six
-panes with `ratio = 33` on the first row split (then 50 on the second), so the
-three rows come out even thirds instead of 1/2, 1/4, 1/4.
-
-**One macro per file.** As an alternative to the single list, put a `macro/`
-directory next to `init.lua` with one file each — `macro/Adeploy.lua`,
-`macro/Bdbcheck.lua` — where each returns a single `{ name =, panes = }` table.
-They load in filename order alongside `macro.lua`. See
-[`examples/macro/Adeploy.en.lua`](examples/macro/Adeploy.en.lua).
-
-**Run one at startup** (TeraTerm-`.ttl` style). `cian --macro path/to/thing.lua`
-builds that macro's layout the moment cian comes up; a bare `cian thing.lua`
-does the same, so associating `.lua` with `cian.exe` makes a macro file run on
-double-click. `cian --macro-name "Two local shells"` runs a named macro from
-your normal config instead. Either way cian stays open afterwards — the macro
-just seeds the session.
-
-### Script macros (automating file operations)
-
-A layout macro builds the *screen*; a **script macro** automates *file
-operations* — the AFXW side of the word "macro". Instead of `panes`, give a
-macro a `run` function and drive copies, moves, renames, zipping and shelling
-out with Lua's own `for` / `if`:
-
-```lua
-return {
-  name = "Archive *.log, then bin them",
-  run = function(cx)
-    local logs = cx.glob("*.log")
-    if #logs == 0 then cx.message("no logs here") return end
-    cx.zip(logs, "logs.zip")
-    cx.delete(logs)                     -- to the trash, like `d`
-    cx.message("archived " .. #logs .. " logs")
-  end,
-}
-```
-
-It runs **synchronously** when you launch it (from `@` / `:macros` / right-click,
-tagged ⚙ next to the ▦ layout macros), so statements happen in order and can
-branch on their results. At launch it snapshots the panes; `cx` then exposes:
-
-- **query** — `cx.dir()`, `cx.other()` (the two pane directories), `cx.marked()`
-  (marked entries, or the cursor), `cx.cursor()`, `cx.list(dir?)`,
-  `cx.glob("*.log")`;
-- **operations** (each refreshes the panes) — `cx.copy(paths, dest)`,
-  `cx.move`, `cx.delete`, `cx.rename(path, name)`, `cx.mkdir(name)`,
-  `cx.zip(paths, out)`, `cx.read`/`cx.write`;
-- **subprocess** — `cx.sh("cmd")` runs a command in the working directory and
-  returns `{ code, out, err }`;
-- **path helpers** — `cx.basename/stem/ext/join/exists/isdir/size`;
-- **feedback** — `cx.message("…")`.
-
-A dozen worked samples — sort by extension, back up the selection to a dated
-folder, normalise line endings, clean up empty files, checksum each marked file,
-generate an `index.md` — ship in
-[`examples/macro/Escript.en.lua`](examples/macro/Escript.en.lua). Since a macro
-is config you wrote, it is trusted like `init.lua`: `cx.sh` runs real commands,
-though `cx.delete` still goes to the trash.
-
-## Build
-
-```sh
-cargo build --release
-./target/release/cian
-```
-
-## Which build am I running?
-
-```sh
-cian --version     # cian 0.1.0 (7f92bae)
-```
-
-The commit is baked in at build time. Worth checking first when a feature
-seems missing: an older `cian.exe` left on PATH looks exactly like a bug.
-
-## Border corners
-
-Rounded corners (`╭╮╯╰`, U+256D–U+2570) are missing from several stock console
-fonts — Consolas and Lucida Console among them — while the straight `─│` are in
-almost all of them. Windows then font-links only the corners to another face,
-whose metrics differ, so the frame looks a few pixels out at each corner while
-its sides stay put.
-
-cian therefore uses square corners in the legacy Windows console and rounded
-ones elsewhere. Force it either way:
-
-```lua
-cian.set_option("borders", "rounded")   -- or "plain"
-```
-
-## Running it standalone
-
-cian cannot restyle the console it is launched into; the font and colors belong
-to the host terminal. Double-clicking `cian.exe`, or running it from `cmd`,
-lands in the legacy Windows console, where the Nerd Font icons come out as
-boxes. It says so once at startup when it detects that.
-
-For the intended look, launch it from Windows Terminal or WezTerm:
-
-```powershell
-wt cian
-```
-
-## Troubleshooting
-
-If cian misbehaves, set `CIAN_LOG` to capture diagnostics — shell spawns,
-panics, and PTY errors are appended there, and the variable being unset (the
-default) makes logging a no-op:
-
-```sh
-CIAN_LOG=/tmp/cian.log cian
-```
-
-A panic restores the terminal before it unwinds, so you should never be left
-in raw mode needing `reset`.
+---
 
 ## Install on Windows (offline)
 
-cian compiles to a single self-contained `cian.exe` — no runtime, no DLLs, no
-network access needed at runtime. To get a Windows x64 build without a Windows
-dev machine, use the bundled GitHub Actions workflow, which builds on a real
-Windows runner and packages a ready-to-carry zip:
+cian is a single self-contained `cian.exe` — no runtime, no DLLs, no network at
+runtime. To get a Windows x64 build without a Windows dev machine, use the
+bundled GitHub Actions workflow (it builds on a real Windows runner and packages
+a ready-to-carry zip):
 
-1. Trigger a build — either push a tag (`git tag v0.1.0 && git push --tags`) or
-   open the repo's **Actions** tab → **release** → **Run workflow**.
-2. Download `cian-windows-x64.zip` from that run's artifacts (tagged builds are
-   also attached to a GitHub Release).
-3. Carry the zip into the offline machine and unzip it. Then either just run
-   `cian.exe`, or run `install.ps1` to put `cian` on your PATH:
+1. Push a tag (`git tag v0.1.0 && git push --tags`), or open **Actions →
+   release → Run workflow**.
+2. Download `cian-windows-x64.zip` from that run.
+3. Carry it to the offline machine, unzip, and either run `cian.exe` or install
+   it on your PATH:
 
    ```powershell
    powershell -ExecutionPolicy Bypass -File .\install.ps1
    ```
 
-   The default installs for the current user (no admin) under
-   `%LOCALAPPDATA%\Programs\cian`. To install into Program Files for all users,
-   run an **elevated** PowerShell and pass a destination:
+   That installs for the current user under `%LOCALAPPDATA%\Programs\cian` (no
+   admin). For all users, run an elevated PowerShell:
 
    ```powershell
    powershell -ExecutionPolicy Bypass -File .\install.ps1 -Dest "C:\Program Files\cian" -AllUsers
    ```
 
-   The installer unblocks the exe (so a terminal launch isn't "Access denied")
-   and adds the folder to PATH. Open a new terminal and type `cian`. Use a Nerd
-   Font terminal (Windows Terminal / WezTerm) for the file-type icons.
+Open a new terminal and type `cian`. Use a Nerd Font terminal (Windows Terminal
+/ WezTerm) for the file-type icons.
+
+---
+
+## Good to know
+
+- **Which build?** `cian --version` prints the commit baked in at build time.
+  An old `cian.exe` left on PATH looks exactly like a missing feature.
+- **Border corners** default to square in the legacy Windows console (rounded
+  ones are missing from some console fonts) and rounded elsewhere. Force it:
+  `cian.set_option("borders", "rounded")` (or `"plain"`).
+- **Trouble?** Set `CIAN_LOG=/tmp/cian.log` to capture diagnostics. A panic
+  restores the terminal on the way out, so you're never left needing `reset`.
