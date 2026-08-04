@@ -618,6 +618,11 @@ impl App {
     /// and the answer's shape follows from the file: an archive lists its
     /// members, anything else is read.
     pub(crate) fn look_inside(&mut self) {
+        // On a remote pane, fetch the file first and view the local copy.
+        if self.active_pane().map(|p| p.is_remote()).unwrap_or(false) {
+            self.remote_pane_view();
+            return;
+        }
         let Some(entry) = self.active_pane().and_then(|p| p.selected().cloned()) else {
             self.message = Some("nothing selected".into());
             return;

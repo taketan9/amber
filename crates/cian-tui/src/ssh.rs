@@ -486,6 +486,65 @@ impl App {
         true
     }
 
+    /// F3 on a remote pane: fetch the file under the cursor to a temp path on a
+    /// worker thread, then open it in the viewer when it lands. Returns true if
+    /// it started a fetch (so the caller skips the local viewer).
+    pub(crate) fn remote_pane_view(&mut self) -> bool {
+        let side = self.remote_side();
+        let (remote_path, name) = {
+            let Some(e) = self.side_pane(side).selected() else { return false };
+            if e.is_dir || e.is_parent {
+                return false;
+            }
+            (e.path.to_string_lossy().into_owned(), e.name.clone())
+        };
+        let Some((target, _)) = self.remote_targets[Self::side_idx(side)].clone() else { return false };
+        // A stable temp name per remote file (its basename), overwritten each view.
+        let base = std::path::Path::new(&name).file_name().map(|s| s.to_os_string()).unwrap_or_default();
+        let temp = std::env::temp_dir().join("cian-remote").join(base);
+        if let Some(dir) = temp.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        let (tx, rx) = std::sync::mpsc::channel();
+        let temp_worker = temp.clone();
+        std::thread::spawn(move || {
+            let cancel = std::sync::atomic::AtomicBool::new(false);
+            let mut prog = |_: u64, _: u64| {};
+            let mut ctl = cian_scp::Ctl { cancel: &cancel, on_progress: &mut prog };
+            let r = cian_scp::download(&target, &remote_path, &temp_worker, &mut ctl)
+                .map(|_| ())
+                .map_err(|e| e.to_string());
+            let _ = tx.send(r);
+        });
+        self.remote_view = Some(RemoteView { rx, temp, name: name.clone() });
+        self.message = Some(format!("⇅ fetching {name} …"));
+        true
+    }
+
+    /// Install a finished remote-file fetch: open it in the viewer. Returns true
+    /// to repaint.
+    pub(crate) fn poll_remote_view(&mut self) -> bool {
+        let Some(rv) = &self.remote_view else { return false };
+        match rv.rx.try_recv() {
+            Ok(result) => {
+                let RemoteView { temp, name, .. } = self.remote_view.take().unwrap();
+                match result {
+                    Ok(()) => {
+                        self.message = None;
+                        self.open_viewer_at(&temp, &name, 0);
+                    }
+                    Err(e) => self.message = Some(format!("remote view failed: {e}")),
+                }
+                true
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => false,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                self.remote_view = None;
+                true
+            }
+        }
+    }
+
     /// Leave the remote pane, returning it to its local directory.
     pub(crate) fn leave_remote_pane(&mut self) {
         let side = self.remote_side();

@@ -224,6 +224,13 @@ struct ScpPending {
     locals: Vec<PathBuf>,
 }
 
+/// A remote file being fetched to a temp path so the F3 viewer can open it.
+struct RemoteView {
+    rx: std::sync::mpsc::Receiver<Result<(), String>>,
+    temp: PathBuf,
+    name: String,
+}
+
 #[derive(Debug, Clone)]
 enum Popup {
     None,
@@ -1579,6 +1586,8 @@ pub struct App {
     remote_targets: [Option<(cian_scp::Target, String)>; 2],
     /// A remote-pane directory listing in flight, tagged with the side it fills.
     remote_pane_ls: Option<(FocusedPane, RemoteLsRx)>,
+    /// A remote file being downloaded to a temp path so `F3` can view it.
+    remote_view: Option<RemoteView>,
     /// An SFTP transfer whose remote path is being entered, if any.
     scp_pending: Option<ScpPending>,
     /// Per-file chmod modes collected while prompting an upload one file at a
@@ -1784,6 +1793,7 @@ impl App {
             scp_dir: None,
             remote_targets: [None, None],
             remote_pane_ls: None,
+            remote_view: None,
             scp_pending: None,
             scp_upload_modes: Vec::new(),
             scp_target: None,
@@ -3515,6 +3525,9 @@ fn run_loop<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Result<()>
         }
         // Install a finished remote directory listing into the download browser.
         if app.remote_pane_ls.is_some() && app.poll_remote_pane_ls() {
+            needs_redraw = true;
+        }
+        if app.remote_view.is_some() && app.poll_remote_view() {
             needs_redraw = true;
         }
         if app.remote_ls.is_some() && app.poll_remote_ls() {
