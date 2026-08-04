@@ -310,6 +310,20 @@
 --   model        = "<あなたのモデル>",
 -- }
 --
+-- crmaine 連携 — cian.crmaine{}   （任意。VS Code の crmaine 拡張が必要）
+-- VS Code で crmaine を起動するとローカルサーバが立ち、RAG インデックスが構築
+-- されます。cian はその「起動済みサーバ」にアタッチして、同じインデックスに質問
+-- できます（`:rag <質問>`）。使い方：まず VS Code で crmaine を起動 → 次に cian。
+-- ポートはログインユーザ名から自動計算、cacheDir/endpoint/model は VS Code の
+-- settings.json（crmaine.*）から都度読み込むので、通常は空の {} だけで動きます。
+-- cian.crmaine{}
+-- 上書きしたいときだけ指定:
+-- cian.crmaine{
+--   settings_path = [[C:\Users\<you>\AppData\Roaming\Code\User\settings.json]],
+--   cache_dir     = [[<crmaine.cacheDir と同じ>]],  -- 通常は自動
+--   port          = 6800,                            -- 通常は自動計算
+-- }
+--
 -- 前提知識 — cian.ai_context(...)
 -- あなたの環境について AI が前提としてよいことを伝え、回答を一般論ではなく環境に
 -- 即したものにします。すべての AI プロンプト（チャット、「直前のエラーを説明」、

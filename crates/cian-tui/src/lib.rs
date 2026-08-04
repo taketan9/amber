@@ -38,6 +38,7 @@ use util::{
 };
 
 mod ai;
+mod crmaine;
 mod markdown;
 mod viewer;
 mod ssh;
@@ -1661,6 +1662,8 @@ pub struct App {
     startup_at: Instant,
     /// A pending AI request running on a worker thread.
     ai_job: Option<AiJob>,
+    /// A pending crmaine RAG call (the rendered answer, or an error).
+    crmaine_rx: Option<std::sync::mpsc::Receiver<Result<String, String>>>,
     /// The chat transcript's on-screen body rect, the effective scroll offset,
     /// and the flat wrapped lines — rebuilt each frame so a mouse drag can map
     /// to a line range and copy it.
@@ -1801,6 +1804,7 @@ impl App {
             ai_probe: None,
             startup_at: Instant::now(),
             ai_job: None,
+            crmaine_rx: None,
             ai_rect: Rect::new(0, 0, 0, 0),
             junk_rect: Rect::new(0, 0, 0, 0),
             struct_rect: Rect::new(0, 0, 0, 0),
@@ -3069,6 +3073,7 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry(":aicmd", None, "AI: shell command from a description", "AI: 説明からシェルコマンド生成"),
                 entry(":aidiff", None, "AI: explain the diff on screen (x in the diff view)", "AI: 表示中の差分を説明（差分画面で x）"),
                 entry(":ailog", None, "AI: triage the selected log file (errors, cause, next check)", "AI: 選択中のログを診断（エラー・原因・次の確認）"),
+                entry(":rag <q>", None, "crmaine RAG: ask the running crmaine server (start it in VS Code first)", "crmaine RAG: 起動中の crmaine に質問（先に VS Code で crmaine 起動）"),
                 entry(":zip", None, "bundle selection;  :zip -e  for a password", "選択物をまとめる；  :zip -e でパスワード付き"),
                 entry(":tar / :targz", None, "make a .tar / .tar.gz (also right-click ▸ Compress)", ".tar / .tar.gz を作成（右クリック▸圧縮でも）"),
                 entry(":unzip", None, "extract the archive here (also right-click ▸ Extract)", "書庫をここに解凍（右クリック▸解凍でも）"),
@@ -3562,6 +3567,10 @@ fn run_loop<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Result<()>
         // A pending AI reply lands over its own channel.
         if app.ai_job.is_some() {
             needs_redraw |= app.poll_ai_job();
+        }
+        // A pending crmaine RAG answer, likewise.
+        if app.crmaine_rx.is_some() {
+            needs_redraw |= app.poll_crmaine();
         }
         // A running duplicate scan reports its groups when done.
         if app.dupes_job.is_some() {

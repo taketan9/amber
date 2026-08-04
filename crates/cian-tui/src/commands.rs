@@ -115,6 +115,7 @@ impl App {
                 }
             }
             "aierror" | "explain" | "crmaineerror" => self.explain_shell_error(),
+            "rag" | "crmainerag" | "ask_rag" => self.start_rag(rest),
             "aidiff" | "explaindiff" | "crmainediff" => self.explain_diff(),
             "ailog" | "logtriage" | "triage" | "crmainelog" => self.triage_log(),
             "dupes" | "dup" | "duplicates" => self.start_dupes(),

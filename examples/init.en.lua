@@ -304,6 +304,20 @@
 --   model        = "<your model>",
 -- }
 --
+-- crmaine bridge — cian.crmaine{}   (optional; needs the VS Code crmaine extension)
+-- Starting crmaine in VS Code launches its local server and builds the RAG index.
+-- cian ATTACHES to that running server and can query the same index (`:rag <q>`).
+-- Order of use: start crmaine in VS Code, then start cian. The port is computed
+-- from your login name, and cacheDir/endpoint/model are read from VS Code's
+-- settings.json (crmaine.*) each launch — so an empty {} usually just works.
+-- cian.crmaine{}
+-- Override only if you need to:
+-- cian.crmaine{
+--   settings_path = [[C:\Users\<you>\AppData\Roaming\Code\User\settings.json]],
+--   cache_dir     = [[<same as crmaine.cacheDir>]],  -- usually auto
+--   port          = 6800,                             -- usually auto-computed
+-- }
+--
 -- Precondition facts — cian.ai_context(...)
 -- Tell the AI what it can assume about YOUR environment, so its answers fit it
 -- instead of being generic. Prepended to every AI prompt (chat, "explain the
