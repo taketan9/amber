@@ -177,6 +177,35 @@ impl App {
     }
 
     pub(crate) fn handle_popup_key(&mut self, key: KeyEvent) -> Result<()> {
+        // The fuzzy picker (command palette / jump): type to filter, move with
+        // arrows or Ctrl+n/p, Enter runs/jumps, Esc closes.
+        if matches!(self.popup, Popup::Palette { .. }) {
+            let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+            match key.code {
+                KeyCode::Esc => self.popup = Popup::None,
+                KeyCode::Enter => self.palette_accept(),
+                KeyCode::Down => self.palette_move(1),
+                KeyCode::Up => self.palette_move(-1),
+                KeyCode::Char('n') if ctrl => self.palette_move(1),
+                KeyCode::Char('p') if ctrl => self.palette_move(-1),
+                KeyCode::PageDown => self.palette_move(10),
+                KeyCode::PageUp => self.palette_move(-10),
+                KeyCode::Backspace => {
+                    if let Popup::Palette { query, .. } = &mut self.popup {
+                        query.pop();
+                    }
+                    self.palette_refilter();
+                }
+                KeyCode::Char(c) if !ctrl => {
+                    if let Popup::Palette { query, .. } = &mut self.popup {
+                        query.push(c);
+                    }
+                    self.palette_refilter();
+                }
+                _ => {}
+            }
+            return Ok(());
+        }
         if matches!(self.popup, Popup::TextInput { .. }) {
             let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
             // Ctrl+V pastes. Handled before the buffer is borrowed because it
@@ -1560,6 +1589,9 @@ impl App {
             (false, _, KeyCode::Char('/')) => self.start_filter(),
             (false, true, KeyCode::Char('F')) => self.start_find_prompt(),
             (true, _, KeyCode::Char('f')) => self.start_grep_prompt(),
+            // Ctrl+P = command palette, Ctrl+O = fuzzy-jump to a recent dir.
+            (true, _, KeyCode::Char('p')) => self.start_command_palette(),
+            (true, _, KeyCode::Char('o')) => self.start_fuzzy_jump(),
             (false, _, KeyCode::Char(',')) => self.start_sort_picker(),
             (false, false, KeyCode::Char('z')) => self.start_jump_path(),
             // `b` flattens the subtree into this pane (branch view); again to leave.

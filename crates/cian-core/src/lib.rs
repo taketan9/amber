@@ -13,6 +13,7 @@ pub mod diff;
 pub mod disk;
 pub mod dirdiff;
 pub mod du;
+pub mod fuzzy;
 pub mod elevate;
 pub mod git;
 pub mod highlight;

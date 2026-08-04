@@ -3740,6 +3740,77 @@ fn draw_popup(
         return;
     }
 
+    if let Popup::Palette { kind, query, items, shown, cursor, scroll } = popup {
+        let w = 84u16.min(area.width.saturating_sub(2));
+        let h = (area.height.saturating_sub(4)).clamp(6, 22);
+        let rect = centered_rect(w, h, area);
+        f.render_widget(Clear, rect);
+        let title = match kind {
+            PaletteKind::Commands => tr(lang, " command palette ", " コマンドパレット "),
+            PaletteKind::Jump => tr(lang, " jump to ", " ジャンプ "),
+        };
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_type(border_type())
+            .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
+            .title(title);
+        let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
+        f.render_widget(block, rect);
+
+        // Row 0 is the live query; the list fills the rest above the footer.
+        f.render_widget(
+            Paragraph::new(Line::from(vec![
+                Span::styled("› ", Style::default().fg(theme().accent).add_modifier(Modifier::BOLD)),
+                Span::styled(format!("{}_", query), Style::default().fg(Color::Rgb(230, 230, 245))),
+            ])),
+            Rect::new(inner.x, inner.y, inner.width, 1),
+        );
+        let list_top = inner.y + 1;
+        let body_h = inner.height.saturating_sub(2) as usize;
+        if *cursor < *scroll {
+            *scroll = *cursor;
+        } else if body_h > 0 && *cursor >= *scroll + body_h {
+            *scroll = *cursor + 1 - body_h;
+        }
+        for (row, si) in (*scroll..shown.len().min(*scroll + body_h)).enumerate() {
+            let idx = shown[si];
+            let it = &items[idx];
+            let sel = si == *cursor;
+            let y = list_top + row as u16;
+            let line = Rect::new(inner.x, y, inner.width, 1);
+            if sel {
+                f.render_widget(Block::default().style(Style::default().bg(theme().selected_bg)), line);
+            }
+            let base = if sel { Style::default().bg(theme().selected_bg) } else { Style::default() };
+            let label_w = (inner.width as usize * 2 / 5).max(10);
+            let detail_w = (inner.width as usize).saturating_sub(label_w + 4);
+            f.render_widget(
+                Paragraph::new(Line::from(vec![
+                    Span::styled(if sel { " ▸ " } else { "   " }, base),
+                    Span::styled(
+                        format!("{:<w$}", truncate(&it.label, label_w), w = label_w),
+                        base.fg(if sel { Color::Rgb(235, 235, 250) } else { Color::Rgb(210, 210, 225) })
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(truncate_middle(&it.detail, detail_w), base.fg(Color::Rgb(140, 140, 165))),
+                ])),
+                line,
+            );
+        }
+        if shown.is_empty() {
+            f.render_widget(
+                Paragraph::new(tr(lang, "  (no matches)", "  （一致なし）")).style(Style::default().fg(Color::Rgb(150, 150, 170))),
+                Rect::new(inner.x, list_top, inner.width, 1),
+            );
+        }
+        f.render_widget(
+            Paragraph::new(tr(lang, " type to filter   ↑/↓ move   Enter run   Esc close ", " 入力で絞込   ↑/↓ 移動   Enter 実行   Esc 閉じる "))
+                .style(Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD)),
+            Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1),
+        );
+        return;
+    }
+
     if let Popup::DiskUsage { dir, entries, total, cursor, scroll } = popup {
         let w = 96u16.min(area.width.saturating_sub(2));
         let h = area.height.saturating_sub(4).max(8);
@@ -4269,6 +4340,7 @@ fn draw_popup(
         | Popup::DirCompare { .. }
         | Popup::Archive { .. }
         | Popup::DiskUsage { .. }
+        | Popup::Palette { .. }
         | Popup::AiChat { .. }
         | Popup::ImageView { .. }
         | Popup::CommitMessage { .. }

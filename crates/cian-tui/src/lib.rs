@@ -47,6 +47,7 @@ mod commands;
 mod actions;
 mod count;
 mod du;
+mod palette;
 mod edit;
 mod macro_run;
 mod session;
@@ -232,6 +233,29 @@ struct RemoteView {
     name: String,
 }
 
+/// What a fuzzy picker is choosing between.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PaletteKind {
+    /// A command to run (or, if it takes an argument, to prefill in command mode).
+    Commands,
+    /// A directory to jump to.
+    Jump,
+}
+
+/// One row in the fuzzy picker.
+#[derive(Debug, Clone)]
+struct PaletteItem {
+    /// The text shown and fuzzy-matched against.
+    label: String,
+    /// A dimmer note on the right (a description, or the full path).
+    detail: String,
+    /// What to do on Enter: a command verb (Commands) or a path (Jump).
+    value: String,
+    /// Commands only: the command takes an argument, so Enter prefills command
+    /// mode (`:verb `) instead of running it.
+    takes_arg: bool,
+}
+
 #[derive(Debug, Clone)]
 enum Popup {
     None,
@@ -251,6 +275,17 @@ enum Popup {
         cursor: usize,
     },
     Notice { lines: Vec<String> },
+    /// A fuzzy picker over commands or directories: type to filter, Enter runs
+    /// or jumps. `shown` holds the indices of `items` currently matching `query`,
+    /// best first; `cursor` indexes into `shown`.
+    Palette {
+        kind: PaletteKind,
+        query: String,
+        items: Vec<PaletteItem>,
+        shown: Vec<usize>,
+        cursor: usize,
+        scroll: usize,
+    },
     /// Disk-usage breakdown of a directory: each immediate child with its total
     /// size, biggest first, drill-downable with Enter.
     DiskUsage {
@@ -3010,6 +3045,8 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry("Left / Right", None, "focus the left / right pane", "左／右のペインにフォーカス"),
                 entry("h", Some(History), "history popup", "履歴ポップアップ"),
                 entry("z", None, "go to a typed path (also :cd)", "入力したパスへ移動（:cd でも）"),
+                entry("Ctrl+P", None, "command palette: fuzzy-find any command (also :palette)", "コマンドパレット：全コマンドをあいまい検索（:palette でも）"),
+                entry("Ctrl+O", None, "fuzzy-jump to a recent / bookmarked directory (also :jump)", "最近/ブックマークのディレクトリへあいまいジャンプ（:jump でも）"),
                 entry("Ctrl+R, F5", None, "refresh now", "今すぐ再読み込み"),
                 entry("f", Some(Search), "search in this folder", "このフォルダ内を検索"),
                 entry("Shift+F", None, "find by name, whole tree below here", "名前で検索（ここ以下のツリー全体）"),

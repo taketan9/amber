@@ -558,6 +558,7 @@ impl App {
             | Popup::DirCompare { cursor, .. }
             | Popup::Archive { cursor, .. }
             | Popup::DiskUsage { cursor, .. }
+            | Popup::Palette { cursor, .. }
             | Popup::DestPicker { cursor, .. }
             | Popup::FindResults { cursor, .. }
             | Popup::SshHosts { cursor, .. }
