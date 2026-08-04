@@ -210,11 +210,24 @@ impl App {
         Ok(CrmaineResolved { port, cache_dir, endpoint, model, api_version, auth_mode })
     }
 
-    /// `:rag <question>` — ask crmaine's RAG, over the running server.
+    /// `:rag <question>` — ask crmaine's RAG (`/query`) over the running server.
     pub(crate) fn start_rag(&mut self, question: &str) {
+        self.start_crmaine("/query", "RAG", question);
+    }
+
+    /// `:agent <task>` — crmaine's Ajent (`/agent`): an LLM answer with the
+    /// configured persona (lite-RAG / tools), over the running server.
+    pub(crate) fn start_agent(&mut self, question: &str) {
+        self.start_crmaine("/agent", "Agent", question);
+    }
+
+    /// Shared driver for the crmaine chat endpoints (`/query`, `/agent`): resolve
+    /// config, fire the blocking HTTP call on a worker, and open the chat popup.
+    fn start_crmaine(&mut self, path: &'static str, label: &str, question: &str) {
         let question = question.trim().to_string();
         if question.is_empty() {
-            self.message = Some(tr(self.lang, "usage: :rag <question>", "使い方: :rag <質問>").into());
+            self.message =
+                Some(tr(self.lang, "type a question after the command", "コマンドの後に質問を入力").into());
             return;
         }
         let cfg = match self.crmaine_resolved() {
@@ -229,16 +242,16 @@ impl App {
             return;
         }
 
-        let body = build_query_body(&question, &cfg);
+        let body = build_body(&question, &cfg);
         let port = cfg.port;
         let (tx, rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
-            let _ = tx.send(crmaine_rag_call(port, &body));
+            let _ = tx.send(crmaine_call(port, path, &body));
         });
         self.crmaine_rx = Some(rx);
         self.popup = Popup::AiChat {
             input: String::new(),
-            log: vec![ChatMsg { user: true, text: format!("RAG: {}", question) }],
+            log: vec![ChatMsg { user: true, text: format!("{}: {}", label, question) }],
             scroll: usize::MAX,
             pending: true,
             sel: None,
@@ -271,8 +284,9 @@ impl App {
     }
 }
 
-/// The JSON request body for `/query`, matching what the extension sends.
-pub(crate) fn build_query_body(question: &str, cfg: &CrmaineResolved) -> String {
+/// The JSON request body for `/query` and `/agent`. Both read the same core
+/// fields; `/agent` simply ignores `cache_dir` / `query_expansion` / `rerank`.
+pub(crate) fn build_body(question: &str, cfg: &CrmaineResolved) -> String {
     serde_json::json!({
         "question": question,
         "cache_dir": cfg.cache_dir,
@@ -286,9 +300,9 @@ pub(crate) fn build_query_body(question: &str, cfg: &CrmaineResolved) -> String 
     .to_string()
 }
 
-/// Do the whole blocking call: health-check, POST `/query`, parse the SSE
-/// answer. Returns the rendered answer (with sources appended) or an error.
-fn crmaine_rag_call(port: u16, body: &str) -> Result<String, String> {
+/// Do the whole blocking call: health-check, POST `path`, parse the SSE answer.
+/// Returns the rendered answer (with sources appended) or an error.
+fn crmaine_call(port: u16, path: &str, body: &str) -> Result<String, String> {
     // A quick health check gives a clear "start it in VS Code" message rather
     // than a raw connection error.
     if http_get(port, "/health").is_err() {
@@ -297,7 +311,7 @@ fn crmaine_rag_call(port: u16, body: &str) -> Result<String, String> {
             port
         ));
     }
-    let raw = http_post_sse(port, "/query", body)?;
+    let raw = http_post_sse(port, path, body)?;
     let (answer, sources, error) = parse_sse_answer(&raw);
     if let Some(e) = error {
         return Err(e);
@@ -373,8 +387,9 @@ pub(crate) fn parse_sse_answer(body: &str) -> (String, Vec<String>, Option<Strin
                     answer.push_str(t);
                 }
             }
-            Some("sources") => {
-                if let Some(arr) = v.get("sources").and_then(|s| s.as_array()) {
+            Some("sources") | Some("agent_sources") => {
+                let key = if v.get("sources").is_some() { "sources" } else { "agent_sources" };
+                if let Some(arr) = v.get(key).and_then(|s| s.as_array()) {
                     for item in arr {
                         // A source may be a bare filename string or an object.
                         if let Some(s) = item.as_str() {

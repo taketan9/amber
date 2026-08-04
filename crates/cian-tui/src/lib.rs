@@ -3074,6 +3074,7 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry(":aidiff", None, "AI: explain the diff on screen (x in the diff view)", "AI: 表示中の差分を説明（差分画面で x）"),
                 entry(":ailog", None, "AI: triage the selected log file (errors, cause, next check)", "AI: 選択中のログを診断（エラー・原因・次の確認）"),
                 entry(":rag <q>", None, "crmaine RAG: ask the running crmaine server (start it in VS Code first)", "crmaine RAG: 起動中の crmaine に質問（先に VS Code で crmaine 起動）"),
+                entry(":agent <q>", None, "crmaine Ajent: an agent answer via the running crmaine server", "crmaine エージェント: 起動中の crmaine でエージェント回答"),
                 entry(":zip", None, "bundle selection;  :zip -e  for a password", "選択物をまとめる；  :zip -e でパスワード付き"),
                 entry(":tar / :targz", None, "make a .tar / .tar.gz (also right-click ▸ Compress)", ".tar / .tar.gz を作成（右クリック▸圧縮でも）"),
                 entry(":unzip", None, "extract the archive here (also right-click ▸ Extract)", "書庫をここに解凍（右クリック▸解凍でも）"),
