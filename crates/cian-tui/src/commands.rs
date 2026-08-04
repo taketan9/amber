@@ -61,6 +61,7 @@ impl App {
             "du" | "diskusage" | "usage" => self.start_du_here(),
             "palette" | "commands" | "p" => self.start_command_palette(),
             "jump" | "j" => self.start_fuzzy_jump(),
+            "each" | "foreach" => self.run_each(rest),
             "undo" => self.undo_last(),
             "edit" | "e" => self.edit_selected_file(),
             // Open the file in a specific vi-family editor in a new shell tab.

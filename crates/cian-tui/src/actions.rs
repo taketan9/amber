@@ -491,6 +491,44 @@ impl App {
         }
     }
 
+    /// `:each <template>` — run a shell command once per marked file (or the
+    /// file under the cursor when nothing is marked). `{}` in the template is
+    /// replaced by each file's path, double-quoted; with no `{}` the quoted path
+    /// is appended. The commands are sent to the active shell in order, so they
+    /// run in the user's own environment and are visible as they go.
+    pub(crate) fn run_each(&mut self, template: &str) {
+        let template = template.trim();
+        if template.is_empty() {
+            self.message = Some(tr(
+                self.lang,
+                "usage: :each <command with {} for each file>",
+                "使い方: :each <コマンド（{} が各ファイルに展開）>",
+            ).into());
+            return;
+        }
+        let paths = self.active_pane().map(|p| p.target_paths()).unwrap_or_default();
+        if paths.is_empty() {
+            self.message = Some(tr(self.lang, "nothing selected", "選択なし").into());
+            return;
+        }
+        let (lines, skipped) = each_lines(template, &paths);
+        if lines.is_empty() {
+            self.message = Some(tr(
+                self.lang,
+                "no usable paths (a double quote in the name)",
+                "使えるパスがありません（名前に \" が含まれています）",
+            ).into());
+            return;
+        }
+        let n = lines.len();
+        self.run_in_shell(lines.join("\n"));
+        self.message = Some(if skipped > 0 {
+            format!("each: sent {n} command(s), skipped {skipped}")
+        } else {
+            format!("each: sent {n} command(s)")
+        });
+    }
+
     // ------- Snippets -------
 
     /// `:snip` / right-click: open the command-snippet launcher.
@@ -2784,4 +2822,52 @@ fn unique_dir(parent: &Path, stem: &str) -> PathBuf {
         }
     }
     base
+}
+
+/// Build the per-file command lines for `:each`. `{}` in `template` expands to
+/// each path double-quoted; with no `{}` the quoted path is appended. Paths
+/// containing a double quote can't be quoted safely and are skipped — the
+/// second element counts them.
+fn each_lines(template: &str, paths: &[PathBuf]) -> (Vec<String>, usize) {
+    let mut lines = Vec::new();
+    let mut skipped = 0usize;
+    for p in paths {
+        let s = p.display().to_string();
+        if s.contains('"') {
+            skipped += 1;
+            continue;
+        }
+        let quoted = format!("\"{s}\"");
+        lines.push(if template.contains("{}") {
+            template.replace("{}", &quoted)
+        } else {
+            format!("{template} {quoted}")
+        });
+    }
+    (lines, skipped)
+}
+
+#[cfg(test)]
+mod each_tests {
+    use super::each_lines;
+    use std::path::PathBuf;
+
+    #[test]
+    fn expands_placeholder_and_appends_when_absent() {
+        let paths = vec![PathBuf::from("/a/one.txt"), PathBuf::from("/a/two.txt")];
+        let (lines, skipped) = each_lines("gzip {}", &paths);
+        assert_eq!(skipped, 0);
+        assert_eq!(lines, vec!["gzip \"/a/one.txt\"", "gzip \"/a/two.txt\""]);
+
+        let (lines, _) = each_lines("md5sum", &paths);
+        assert_eq!(lines[0], "md5sum \"/a/one.txt\"");
+    }
+
+    #[test]
+    fn skips_paths_that_would_break_quoting() {
+        let paths = vec![PathBuf::from("/a/ok.txt"), PathBuf::from("/a/we\"ird.txt")];
+        let (lines, skipped) = each_lines("rm {}", &paths);
+        assert_eq!(skipped, 1);
+        assert_eq!(lines, vec!["rm \"/a/ok.txt\""]);
+    }
 }

@@ -28,6 +28,7 @@ fn command_list() -> &'static [(&'static str, (&'static str, &'static str), bool
         ("diff",       ("compare the two panes", "左右を比較"), false),
         ("dupes",      ("find duplicate files", "重複ファイル検出"), false),
         ("brename",    ("bulk rename by a pattern", "パターン一括リネーム"), false),
+        ("each",       ("run a command per marked file ({} = path)", "マーク各ファイルにコマンド実行（{} = パス）"), true),
         ("sftp",       ("open a server in this pane (remote pane)", "サーバをペインで開く"), false),
         ("ssh",        ("ssh connect picker", "SSH 接続ピッカー"), false),
         ("zip",        ("zip the selection (-e for a password)", "選択を zip（-e で暗号化）"), false),

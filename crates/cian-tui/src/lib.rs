@@ -3058,6 +3058,7 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry("z", None, "go to a typed path (also :cd)", "入力したパスへ移動（:cd でも）"),
                 entry(";", None, "command palette: fuzzy-find any command (also :palette)", "コマンドパレット：全コマンドをあいまい検索（:palette でも）"),
                 entry("Z", None, "fuzzy-jump to a recent / bookmarked directory (also :jump)", "最近/ブックマークのディレクトリへあいまいジャンプ（:jump でも）"),
+                entry(":each", None, "run a shell command per marked file — {} = path (:each grep -l foo {})", "マーク各ファイルにコマンド実行 — {} = パス（:each grep -l foo {}）"),
                 entry("Ctrl+R, F5", None, "refresh now", "今すぐ再読み込み"),
                 entry("f", Some(Search), "search in this folder", "このフォルダ内を検索"),
                 entry("Shift+F", None, "find by name, whole tree below here", "名前で検索（ここ以下のツリー全体）"),
