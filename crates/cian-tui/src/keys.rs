@@ -713,6 +713,25 @@ impl App {
             }
             return Ok(());
         }
+        if let Popup::DiskUsage { entries, cursor, scroll, .. } = &mut self.popup {
+            let n = entries.len();
+            match key.code {
+                KeyCode::Esc | KeyCode::Char('q') => self.popup = Popup::None,
+                KeyCode::Char('j') | KeyCode::Down => {
+                    if n > 0 { *cursor = (*cursor + 1).min(n - 1); }
+                }
+                KeyCode::Char('k') | KeyCode::Up => *cursor = cursor.saturating_sub(1),
+                KeyCode::Char('d') | KeyCode::PageDown => *cursor = (*cursor + 15).min(n.saturating_sub(1)),
+                KeyCode::Char('u') | KeyCode::PageUp => *cursor = cursor.saturating_sub(15),
+                KeyCode::Char('g') | KeyCode::Home => *cursor = 0,
+                KeyCode::Char('G') | KeyCode::End => *cursor = n.saturating_sub(1),
+                // Enter/l/→ drill into a folder; -/←/Backspace climb up.
+                KeyCode::Enter | KeyCode::Char('l') | KeyCode::Right => self.du_enter(),
+                KeyCode::Char('-') | KeyCode::Backspace | KeyCode::Left => self.du_parent(),
+                _ => { let _ = scroll; }
+            }
+            return Ok(());
+        }
         if let Popup::Archive { members, cursor, .. } = &mut self.popup {
             let n = members.len();
             match key.code {

@@ -3740,6 +3740,83 @@ fn draw_popup(
         return;
     }
 
+    if let Popup::DiskUsage { dir, entries, total, cursor, scroll } = popup {
+        let w = 96u16.min(area.width.saturating_sub(2));
+        let h = area.height.saturating_sub(4).max(8);
+        let rect = centered_rect(w, h, area);
+        f.render_widget(Clear, rect);
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_type(border_type())
+            .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
+            .title(format!(
+                " {}  —  {}  ({} items) ",
+                truncate_middle(&dir.display().to_string(), 60),
+                cian_core::human_size(*total),
+                entries.len()
+            ));
+        let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
+        f.render_widget(block, rect);
+
+        let body_h = inner.height.saturating_sub(1) as usize;
+        if *cursor < *scroll {
+            *scroll = *cursor;
+        } else if body_h > 0 && *cursor >= *scroll + body_h {
+            *scroll = *cursor + 1 - body_h;
+        }
+        // Bars scale to the biggest child, so the space hog fills the bar.
+        let max = entries.first().map(|e| e.size).unwrap_or(0).max(1);
+        let bar_w = 18usize;
+        for (row, (i, e)) in entries.iter().enumerate().skip(*scroll).take(body_h).enumerate() {
+            let sel = i == *cursor;
+            let y = inner.y + row as u16;
+            let line = Rect::new(inner.x, y, inner.width, 1);
+            push_row_zone(zones, inner, y, i);
+            if sel {
+                f.render_widget(Block::default().style(Style::default().bg(theme().selected_bg)), line);
+            }
+            let base = if sel { Style::default().bg(theme().selected_bg) } else { Style::default() };
+            let filled = ((e.size as u128 * bar_w as u128) / max as u128) as usize;
+            let bar: String = "█".repeat(filled) + &"░".repeat(bar_w.saturating_sub(filled));
+            let pct = if *total > 0 { e.size as f64 * 100.0 / *total as f64 } else { 0.0 };
+            let mut name = e.name.clone();
+            if e.is_dir {
+                name.push('/');
+            }
+            let name_w = (inner.width as usize).saturating_sub(bar_w + 24);
+            let name_style = if e.is_dir {
+                base.fg(FileKind::Directory.color()).add_modifier(Modifier::BOLD)
+            } else {
+                base.fg(Color::Rgb(225, 225, 240))
+            };
+            f.render_widget(
+                Paragraph::new(Line::from(vec![
+                    Span::styled(if sel { " ▸ " } else { "   " }, base),
+                    Span::styled(format!("{:<w$}", truncate_middle(&name, name_w), w = name_w), name_style),
+                    Span::styled(bar, base.fg(theme().accent)),
+                    Span::styled(format!(" {:>8}", cian_core::human_size(e.size)), base.fg(Color::Rgb(210, 210, 225))),
+                    Span::styled(format!(" {:>4.0}%", pct), base.fg(Color::Rgb(140, 140, 165))),
+                ])),
+                line,
+            );
+        }
+        if entries.is_empty() {
+            f.render_widget(
+                Paragraph::new(tr(lang, "  (empty)", "  （空）")).style(Style::default().fg(Color::Rgb(150, 150, 170))),
+                Rect::new(inner.x, inner.y, inner.width, 1),
+            );
+        }
+        f.render_widget(
+            Paragraph::new(tr(lang,
+                " Enter=into folder   -=up   j/k move   Esc=close ",
+                " Enter=フォルダへ   -=上へ   j/k 移動   Esc=閉じる ",
+            ))
+            .style(Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD)),
+            Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1),
+        );
+        return;
+    }
+
     if let Popup::GitLog { title, commits, cursor, scroll, .. } = popup {
         let rect = centered_rect(area.width.saturating_sub(4), area.height.saturating_sub(4), area);
         f.render_widget(Clear, rect);
@@ -4191,6 +4268,7 @@ fn draw_popup(
         | Popup::Diff { .. }
         | Popup::DirCompare { .. }
         | Popup::Archive { .. }
+        | Popup::DiskUsage { .. }
         | Popup::AiChat { .. }
         | Popup::ImageView { .. }
         | Popup::CommitMessage { .. }

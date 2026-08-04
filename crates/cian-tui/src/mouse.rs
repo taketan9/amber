@@ -557,6 +557,7 @@ impl App {
             | Popup::EncodingPicker { cursor, .. }
             | Popup::DirCompare { cursor, .. }
             | Popup::Archive { cursor, .. }
+            | Popup::DiskUsage { cursor, .. }
             | Popup::DestPicker { cursor, .. }
             | Popup::FindResults { cursor, .. }
             | Popup::SshHosts { cursor, .. }

@@ -46,6 +46,7 @@ mod gitui;
 mod commands;
 mod actions;
 mod count;
+mod du;
 mod edit;
 mod macro_run;
 mod session;
@@ -250,6 +251,15 @@ enum Popup {
         cursor: usize,
     },
     Notice { lines: Vec<String> },
+    /// Disk-usage breakdown of a directory: each immediate child with its total
+    /// size, biggest first, drill-downable with Enter.
+    DiskUsage {
+        dir: PathBuf,
+        entries: Vec<cian_core::du::DuEntry>,
+        total: u64,
+        cursor: usize,
+        scroll: usize,
+    },
     /// The key manual. Unlike `Notice` it is far taller than any terminal, so
     /// it carries a scroll offset (in lines from the top).
     Manual { lines: Vec<String>, scroll: usize },
@@ -1720,6 +1730,8 @@ pub struct App {
     count_opts: cian_core::count::Options,
     /// A running count, delivering its report when finished.
     count_job: Option<std::sync::mpsc::Receiver<cian_core::count::Report>>,
+    /// A disk-usage analysis in flight (its directory + the sized children).
+    du_job: Option<std::sync::mpsc::Receiver<(PathBuf, Vec<cian_core::du::DuEntry>)>>,
     /// A file the user asked to edit; the main loop suspends the TUI, runs the
     /// external editor, and restores. See [`crate::edit`].
     pending_edit: Option<edit::PendingEdit>,
@@ -1854,6 +1866,7 @@ impl App {
             macro_run: None,
             count_opts,
             count_job: None,
+            du_job: None,
             pending_edit: None,
             undo_stack: Vec::new(),
             pending_g: false,
@@ -3040,6 +3053,7 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry("s", Some(Shortcuts), "shortcuts menu", "ショートカットメニュー"),
                 entry("@", None, "run a macro (layout builder; also :macros / right-click)", "マクロを実行（レイアウト構築；:macros／右クリックでも）"),
                 entry(":count", None, "count files & steps (marked, or the whole tree)", "ファイル・ステップ数を数える（マーク or ツリー全体）"),
+                entry(":du", None, "disk usage: what's biggest here (Enter into a folder, - up)", "容量分析: 何が大きいか（Enter でフォルダへ、- で上へ）"),
                 entry(":hidden", None, "show / hide dotfiles (also right-click)", "ドットファイルの表示切替（右クリックでも）"),
                 entry(":attr", None, "attributes;  :chmod 644,  :readonly on|off", "属性；  :chmod 644,  :readonly on|off"),
                 entry(":hash", None, "checksum;  :hash md5  /  :hash sha256", "チェックサム；  :hash md5  /  :hash sha256"),
@@ -3546,6 +3560,9 @@ fn run_loop<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Result<()>
             needs_redraw = true;
         }
         // A finished file/step count shows its report.
+        if app.du_job.is_some() && app.poll_du() {
+            needs_redraw = true;
+        }
         if app.count_job.is_some() && app.poll_count() {
             needs_redraw = true;
         }
