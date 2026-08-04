@@ -339,7 +339,7 @@ impl App {
 
     /// List remote directory `path` for the remote pane on `side`, on a worker
     /// thread; the result lands in [`App::poll_remote_pane_ls`].
-    fn remote_pane_ls_spawn(&mut self, side: FocusedPane, path: String) {
+    pub(crate) fn remote_pane_ls_spawn(&mut self, side: FocusedPane, path: String) {
         let Some((target, _)) = self.remote_targets[Self::side_idx(side)].clone() else { return };
         let (tx, rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
@@ -423,7 +423,7 @@ impl App {
     }
 
     /// The active pane on a given side (read-only).
-    fn side_pane(&self, side: FocusedPane) -> &Pane {
+    pub(crate) fn side_pane(&self, side: FocusedPane) -> &Pane {
         if matches!(side, FocusedPane::Right) { self.right.active_ref() } else { self.left.active_ref() }
     }
 
@@ -475,6 +475,8 @@ impl App {
             {
                 self.scp_pending = Some(ScpPending { target, label, locals });
                 self.run_scp_upload(rcwd);
+                // Re-list the remote pane once the upload lands so the new files show.
+                self.remote_refresh = Some(opp);
             }
             return true;
         }

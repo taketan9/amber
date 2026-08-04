@@ -1588,6 +1588,9 @@ pub struct App {
     remote_pane_ls: Option<(FocusedPane, RemoteLsRx)>,
     /// A remote file being downloaded to a temp path so `F3` can view it.
     remote_view: Option<RemoteView>,
+    /// A remote pane side to re-list once the running op finishes (e.g. after an
+    /// upload landed files on it), since a synthetic listing does not auto-refresh.
+    remote_refresh: Option<FocusedPane>,
     /// An SFTP transfer whose remote path is being entered, if any.
     scp_pending: Option<ScpPending>,
     /// Per-file chmod modes collected while prompting an upload one file at a
@@ -1794,6 +1797,7 @@ impl App {
             remote_targets: [None, None],
             remote_pane_ls: None,
             remote_view: None,
+            remote_refresh: None,
             scp_pending: None,
             scp_upload_modes: Vec::new(),
             scp_target: None,

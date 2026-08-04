@@ -2040,6 +2040,13 @@ impl App {
                 }
             }
             self.reload_both();
+            // A remote pane isn't touched by reload_both (its listing is
+            // synthetic); re-fetch it if an upload just landed files on it.
+            if let Some(side) = self.remote_refresh.take() {
+                if let Some(cwd) = self.side_pane(side).remote_view().map(|(_, p)| p.to_string()) {
+                    self.remote_pane_ls_spawn(side, cwd);
+                }
+            }
             if let Some(p) = self.active_pane_mut() {
                 p.clear_marks();
             }
