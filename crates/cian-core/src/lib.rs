@@ -214,6 +214,20 @@ pub enum PaneView {
     /// the root — and `reload` keeps them rather than reading a directory. The
     /// string labels the view in the pane title (e.g. "branch", "grep: todo").
     Flat(String),
+    /// A directory on a remote host, browsed over SFTP. The rows are the ones
+    /// the TUI fetched (it drives the SFTP calls and re-fetches on navigation);
+    /// `reload` keeps them, like [`PaneView::Flat`]. `host` labels the title
+    /// (e.g. `user@host`) and `path` is the remote working directory.
+    Remote { host: String, path: String },
+}
+
+impl PaneView {
+    /// A synthetic listing — not a live local directory — so `reload` must keep
+    /// its rows instead of reading `cwd`, and the auto-refresh timer must leave
+    /// it alone. True for both the flat/search view and a remote pane.
+    fn is_synthetic(&self) -> bool {
+        !matches!(self, PaneView::Dir)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -297,10 +311,10 @@ impl Pane {
     /// ordinary directories (it never stats the entries) and is skipped for very
     /// large ones, where the single-stat mtime path is the right trade-off.
     pub fn is_stale(&self) -> bool {
-        // A flat / search listing is not backed by a live directory, so the
-        // auto-refresh timer must leave it alone — re-reading `cwd` would throw
-        // the whole flattened set away.
-        if matches!(self.view, PaneView::Flat(_)) {
+        // A flat / search / remote listing is not backed by a live local
+        // directory, so the auto-refresh timer must leave it alone — re-reading
+        // `cwd` would throw the whole fetched set away.
+        if self.view.is_synthetic() {
             return false;
         }
         let now = fs::metadata(&self.cwd).ok().and_then(|m| m.modified().ok());
@@ -330,10 +344,10 @@ impl Pane {
     }
 
     pub fn reload(&mut self) -> Result<()> {
-        // A flat / search listing has no directory to re-read: keep the rows we
-        // were given and just re-narrow and re-order them, so `/` filter and the
-        // sort keys still work over the flattened set.
-        if matches!(self.view, PaneView::Flat(_)) {
+        // A flat / search / remote listing has no local directory to re-read:
+        // keep the rows we were given and just re-narrow and re-order them, so
+        // `/` filter and the sort keys still work over the fetched set.
+        if self.view.is_synthetic() {
             self.apply_sort();
             self.apply_filter();
             return Ok(());
@@ -436,9 +450,10 @@ impl Pane {
         // root, which has no parent. It always shows, even under a filter —
         // hiding the way out would be surprising — but never when it would not
         // match: it is navigation, not a listed file.
-        // ...but a flat / search listing is not a directory, so there is no
-        // "up" from it — the way out is to leave the view, not to climb a level.
-        if !matches!(self.view, PaneView::Flat(_)) {
+        // ...but a synthetic listing (flat / search / remote) is not a local
+        // directory, so the local "up" row does not belong — the way out is to
+        // leave the view (or, for a remote pane, the TUI drives the up-nav).
+        if !self.view.is_synthetic() {
             if let Some(parent) = self.cwd.parent().map(|p| p.to_path_buf()) {
                 entries.insert(0, Entry::parent_row(parent));
             }
@@ -484,8 +499,41 @@ impl Pane {
     pub fn flat_label(&self) -> Option<&str> {
         match &self.view {
             PaneView::Flat(l) => Some(l),
-            PaneView::Dir => None,
+            _ => None,
         }
+    }
+
+    /// True while this pane is browsing a remote host over SFTP.
+    pub fn is_remote(&self) -> bool {
+        matches!(self.view, PaneView::Remote { .. })
+    }
+
+    /// The `(host, path)` of the remote pane, if this is one — for the title and
+    /// for the TUI to know where to fetch/navigate.
+    pub fn remote_view(&self) -> Option<(&str, &str)> {
+        match &self.view {
+            PaneView::Remote { host, path } => Some((host, path)),
+            _ => None,
+        }
+    }
+
+    /// Show a remote directory `path` on `host`, with the rows the TUI fetched
+    /// over SFTP. Each row's `path` holds the remote absolute path (as an
+    /// [`Entry`]), so the TUI can navigate/transfer from it. Marks and the filter
+    /// are cleared — a new directory starts fresh.
+    pub fn enter_remote(
+        &mut self,
+        host: impl Into<String>,
+        path: impl Into<String>,
+        entries: Vec<Entry>,
+    ) {
+        self.view = PaneView::Remote { host: host.into(), path: path.into() };
+        self.all_entries = entries;
+        self.filter.clear();
+        self.marks.clear();
+        self.cursor = 0;
+        self.apply_sort();
+        self.apply_filter();
     }
 
     /// Replace the listing with a flat set of rows — a flattened subtree (branch
@@ -502,9 +550,10 @@ impl Pane {
         self.apply_filter();
     }
 
-    /// Leave a flat view and read `cwd` again as an ordinary directory.
+    /// Leave a synthetic view (flat / search / remote) and read the local `cwd`
+    /// again as an ordinary directory.
     pub fn leave_flat(&mut self) -> Result<()> {
-        if self.is_flat() {
+        if self.view.is_synthetic() {
             self.view = PaneView::Dir;
             self.marks.clear();
             self.filter.clear();
@@ -816,6 +865,33 @@ mod tests {
     /// Count of real entries (without the `..` row).
     fn real_len(pane: &Pane) -> usize {
         pane.entries.iter().filter(|e| !e.is_parent).count()
+    }
+
+    #[test]
+    fn a_remote_view_holds_fetched_rows_and_leaves_back_to_the_local_dir() {
+        let (dir, mut pane) = pane_with(&["local.txt"]);
+        // Rows as the TUI would build them from an SFTP listing (remote paths).
+        let rows = vec![
+            Entry::flat(std::path::Path::new("etc"), "/etc".into(), true),
+            Entry::flat(std::path::Path::new("motd"), "/motd".into(), false),
+        ];
+        pane.enter_remote("root@web1", "/", rows);
+
+        assert!(pane.is_remote());
+        assert_eq!(pane.remote_view(), Some(("root@web1", "/")));
+        // No local `..` row, and a remote pane never auto-refreshes off cwd.
+        assert!(pane.entries.iter().all(|e| !e.is_parent), "no local up-row remotely");
+        assert!(!pane.is_stale());
+        // reload keeps the fetched rows (the TUI owns the SFTP calls).
+        pane.reload().unwrap();
+        assert_eq!(pane.entries.iter().filter(|e| !e.is_parent).count(), 2);
+
+        // Leaving returns to the real local directory.
+        pane.leave_flat().unwrap();
+        assert!(!pane.is_remote());
+        assert!(names(&pane).contains(&"local.txt".to_string()));
+        assert!(pane.entries.iter().any(|e| e.is_parent), "the local up-row is back");
+        let _ = dir;
     }
 
     #[test]
