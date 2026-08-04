@@ -54,6 +54,7 @@ fn default_vscode_settings_path() -> Option<PathBuf> {
     }
 }
 
+#[cfg(not(target_os = "windows"))]
 fn dirs_home() -> Option<PathBuf> {
     std::env::var_os("HOME").map(PathBuf::from)
 }
