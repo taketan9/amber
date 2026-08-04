@@ -68,7 +68,9 @@ impl App {
             "vi" | "vim" | "nvim" => self.edit_in_new_tab(Some(verb)),
             "macro" | "macros" => self.start_macros(),
             "ssh" => self.start_ssh(),
-            "sftp" | "browse" | "remotepane" => self.start_scp(ScpDir::BrowsePane),
+            "sftp" | "remote" | "scp" | "browse" | "remotepane" => {
+                self.start_scp(ScpDir::BrowsePane)
+            }
             "ai" | "chat" | "crmaine" => self.open_ai_chat(),
             "aicmd" | "crmainecmd" => {
                 if rest.is_empty() {
