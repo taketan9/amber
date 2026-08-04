@@ -58,6 +58,10 @@ impl App {
 
     // ------- Confirmation flows -------
     pub(crate) fn start_transfer(&mut self, op: PendingOp) {
+        // Copying to/from a remote pane is an SFTP transfer, not a local copy.
+        if self.try_remote_pane_transfer(matches!(op, PendingOp::Move)) {
+            return;
+        }
         let Some(dest) = self.opposite_pane_cwd() else { return };
         let targets = match self.active_pane() {
             Some(p) => p.target_paths(),

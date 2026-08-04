@@ -422,6 +422,70 @@ impl App {
         self.remote_pane_ls_spawn(side, parent_remote(&cwd));
     }
 
+    /// The active pane on a given side (read-only).
+    fn side_pane(&self, side: FocusedPane) -> &Pane {
+        if matches!(side, FocusedPane::Right) { self.right.active_ref() } else { self.left.active_ref() }
+    }
+
+    /// If a copy (`c`) crosses the local/remote boundary, run it as an SFTP
+    /// transfer and return true. Local→remote uploads the marked files to the
+    /// remote pane's directory; remote→local downloads them. `move` and
+    /// remote↔remote are declined with a message (still "handled").
+    pub(crate) fn try_remote_pane_transfer(&mut self, is_move: bool) -> bool {
+        let active = self.remote_side();
+        let opp = if matches!(active, FocusedPane::Right) { FocusedPane::Left } else { FocusedPane::Right };
+        let a_remote = self.side_pane(active).is_remote();
+        let o_remote = self.side_pane(opp).is_remote();
+        if !a_remote && !o_remote {
+            return false; // purely local — let the normal copy handle it
+        }
+        if is_move {
+            self.message = Some(tr(self.lang,
+                "move across hosts isn't supported — use c to copy",
+                "ホスト間の移動は未対応 — コピーは c",
+            ).into());
+            return true;
+        }
+        if a_remote && !o_remote {
+            // Download: the remote pane's marked entries → the local pane's dir.
+            let files: Vec<String> =
+                self.side_pane(active).target_paths().iter().map(|p| p.to_string_lossy().into_owned()).collect();
+            if files.is_empty() {
+                self.message = Some(tr(self.lang, "nothing to copy", "コピー対象なし").into());
+                return true;
+            }
+            let local_dir = self.side_pane(opp).cwd.clone();
+            if let Some((target, label)) = self.remote_targets[Self::side_idx(active)].clone() {
+                self.scp_target = Some((target, label));
+                self.start_remote_download(files, local_dir, None);
+            }
+            return true;
+        }
+        if !a_remote && o_remote {
+            // Upload: the local pane's marked files → the remote pane's dir.
+            let locals: Vec<PathBuf> =
+                self.side_pane(active).target_paths().into_iter().filter(|p| p.is_file()).collect();
+            if locals.is_empty() {
+                self.message = Some(tr(self.lang, "select a file to upload", "アップロードするファイルを選択").into());
+                return true;
+            }
+            let rcwd = self.side_pane(opp).remote_view().map(|(_, p)| p.to_string());
+            if let (Some(rcwd), Some((target, label))) =
+                (rcwd, self.remote_targets[Self::side_idx(opp)].clone())
+            {
+                self.scp_pending = Some(ScpPending { target, label, locals });
+                self.run_scp_upload(rcwd);
+            }
+            return true;
+        }
+        // Both remote.
+        self.message = Some(tr(self.lang,
+            "remote → remote copy isn't supported yet",
+            "リモート→リモートのコピーは未対応",
+        ).into());
+        true
+    }
+
     /// Leave the remote pane, returning it to its local directory.
     pub(crate) fn leave_remote_pane(&mut self) {
         let side = self.remote_side();

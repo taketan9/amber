@@ -1455,13 +1455,17 @@ impl App {
                     self.leave_remote_pane();
                     return Ok(());
                 }
-                // Mutating a remote file isn't wired yet — say so rather than
-                // failing a local operation on a path that isn't local.
-                KeyCode::Char('c' | 'm' | 'd' | 'r' | 'a' | 'A' | 'x' | 'b' | '=') if !ctrl => {
+                // `c` from a remote pane copies across the boundary (download to
+                // the local pane); `m` and the rest aren't wired for remote yet.
+                KeyCode::Char('c') if !ctrl => {
+                    self.try_remote_pane_transfer(false);
+                    return Ok(());
+                }
+                KeyCode::Char('m' | 'd' | 'r' | 'a' | 'A' | 'x' | 'b' | '=') if !ctrl => {
                     self.message = Some(tr(
                         self.lang,
-                        "remote pane is browse-only for now",
-                        "リモートペインは今は閲覧専用",
+                        "remote pane: only c (copy to the local pane) is wired so far",
+                        "リモートペイン: 今は c（ローカルペインへコピー）のみ対応",
                     ).into());
                     return Ok(());
                 }
