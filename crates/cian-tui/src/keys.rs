@@ -1589,9 +1589,11 @@ impl App {
             (false, _, KeyCode::Char('/')) => self.start_filter(),
             (false, true, KeyCode::Char('F')) => self.start_find_prompt(),
             (true, _, KeyCode::Char('f')) => self.start_grep_prompt(),
-            // Ctrl+P = command palette, Ctrl+O = fuzzy-jump to a recent dir.
-            (true, _, KeyCode::Char('p')) => self.start_command_palette(),
-            (true, _, KeyCode::Char('o')) => self.start_fuzzy_jump(),
+            // `;` = command palette (next to `:`), `Z` = fuzzy-jump to a recent
+            // dir (complements `z`, jump-to-typed-path). Plain/shift keys, so no
+            // terminal steals them the way it does Ctrl+P / Ctrl+O on macOS.
+            (false, _, KeyCode::Char(';')) => self.start_command_palette(),
+            (false, true, KeyCode::Char('Z')) => self.start_fuzzy_jump(),
             (false, _, KeyCode::Char(',')) => self.start_sort_picker(),
             (false, false, KeyCode::Char('z')) => self.start_jump_path(),
             // `b` flattens the subtree into this pane (branch view); again to leave.

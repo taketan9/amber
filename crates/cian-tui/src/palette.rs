@@ -1,5 +1,5 @@
-//! The fuzzy pickers: a **command palette** (`Ctrl+P` / `:palette`) over the
-//! commands, and a **fuzzy jump** (`Ctrl+O` / `:jump`) over recently-visited
+//! The fuzzy pickers: a **command palette** (`;` / `:palette`) over the
+//! commands, and a **fuzzy jump** (`Z` / `:jump`) over recently-visited
 //! directories and bookmarks. Both share [`cian_core::fuzzy`] for ranking.
 
 use std::path::PathBuf;
@@ -57,7 +57,7 @@ fn command_list() -> &'static [(&'static str, (&'static str, &'static str), bool
 }
 
 impl App {
-    /// Open the command palette (`Ctrl+P` / `:palette`).
+    /// Open the command palette (`;` / `:palette`).
     pub(crate) fn start_command_palette(&mut self) {
         let ja = self.lang == Lang::Ja;
         let items: Vec<PaletteItem> = command_list()
@@ -72,7 +72,7 @@ impl App {
         self.open_palette(PaletteKind::Commands, items);
     }
 
-    /// Open the fuzzy jump picker (`Ctrl+O` / `:jump`): recent directories from
+    /// Open the fuzzy jump picker (`Z` / `:jump`): recent directories from
     /// both panes' history, plus bookmarked folders, deduped.
     pub(crate) fn start_fuzzy_jump(&mut self) {
         let mut seen = std::collections::HashSet::new();
