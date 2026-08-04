@@ -489,6 +489,10 @@ fn tabs_title<'a>(
     offsets: &mut Vec<(usize, u16, u16)>,
 ) -> Line<'a> {
     fn label_for(i: usize, tab: &Pane, is_active: bool) -> String {
+        // A remote pane shows "⇅ user@host:/path" so it reads as a server.
+        if let Some((host, path)) = tab.remote_view() {
+            return format!(" {} ⇅ {}:{} ", i + 1, host, path);
+        }
         // A flat / search listing names the view (e.g. "⌥ branch", "⌥ grep: x")
         // rather than a directory, so it is obvious the pane is not a folder and
         // that `b` / Esc leaves it.
@@ -810,6 +814,11 @@ fn draw_file_pane(
     // An operation that just landed here lights the border, fading out.
     if flash > 0.0 {
         border_style = Style::default().fg(fade(th.accent, flash)).add_modifier(Modifier::BOLD);
+    }
+    // A remote (SFTP) pane wears a carmine frame, so "this is a server, not the
+    // local disk" is unmistakable regardless of focus.
+    if tabs.active_ref().is_remote() {
+        border_style = Style::default().fg(Color::Rgb(214, 45, 70)).add_modifier(Modifier::BOLD);
     }
     let max_title_w = area.width.saturating_sub(2);
     let mut offsets = Vec::new();

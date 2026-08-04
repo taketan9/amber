@@ -1439,6 +1439,36 @@ impl App {
             }
         }
 
+        // A remote (SFTP) pane drives navigation over the network and does not
+        // (yet) do local file operations. Handle its keys before the local ones.
+        if self.active_pane().map(|p| p.is_remote()).unwrap_or(false) {
+            match key.code {
+                KeyCode::Enter | KeyCode::Char('l') | KeyCode::Right => {
+                    self.remote_pane_enter();
+                    return Ok(());
+                }
+                KeyCode::Char('-') | KeyCode::Backspace | KeyCode::Left => {
+                    self.remote_pane_parent();
+                    return Ok(());
+                }
+                KeyCode::Esc | KeyCode::Char('q') => {
+                    self.leave_remote_pane();
+                    return Ok(());
+                }
+                // Mutating a remote file isn't wired yet — say so rather than
+                // failing a local operation on a path that isn't local.
+                KeyCode::Char('c' | 'm' | 'd' | 'r' | 'a' | 'A' | 'x' | 'b' | '=') if !ctrl => {
+                    self.message = Some(tr(
+                        self.lang,
+                        "remote pane is browse-only for now",
+                        "リモートペインは今は閲覧専用",
+                    ).into());
+                    return Ok(());
+                }
+                _ => {} // j/k, marks, filter, sort still work on the fetched list
+            }
+        }
+
         match (ctrl, shift, key.code) {
             (false, _, KeyCode::Char('q')) => self.start_quit_confirm(),
             // `_` for shift, not `false`: `:` is Shift+; on most layouts, and a

@@ -209,6 +209,8 @@ enum ScpDir {
     Upload,
     /// A remote file → local directory.
     Download,
+    /// Open the server in the active file pane (a persistent remote pane).
+    BrowsePane,
 }
 
 /// A transfer waiting on the remote path being typed. Held on `App` rather than
@@ -1572,6 +1574,11 @@ pub struct App {
     /// The local side of an SFTP transfer being set up, carried through the SSH
     /// host/user picker: `(direction, files to upload, local save dir)`.
     scp_dir: Option<(ScpDir, Vec<PathBuf>, PathBuf)>,
+    /// SFTP connection backing a remote pane, per file-pane side (Left=0,
+    /// Right=1). Set while that pane is browsing a host; cleared on leave.
+    remote_targets: [Option<(cian_scp::Target, String)>; 2],
+    /// A remote-pane directory listing in flight, tagged with the side it fills.
+    remote_pane_ls: Option<(FocusedPane, RemoteLsRx)>,
     /// An SFTP transfer whose remote path is being entered, if any.
     scp_pending: Option<ScpPending>,
     /// Per-file chmod modes collected while prompting an upload one file at a
@@ -1775,6 +1782,8 @@ impl App {
             pane_zoom_return: None,
             started: Instant::now(),
             scp_dir: None,
+            remote_targets: [None, None],
+            remote_pane_ls: None,
             scp_pending: None,
             scp_upload_modes: Vec::new(),
             scp_target: None,
@@ -2985,6 +2994,7 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry("/", None, "filter list as you type", "入力に応じて一覧を絞り込み"),
                 entry(",", None, "sort by name / size / date / ext", "ソート：名前／サイズ／日付／拡張子"),
                 entry("Shift+S", None, "ssh picker (also :ssh, or right-click)", "SSHピッカー（:ssh・右クリックでも）"),
+                entry(":sftp", None, "open a server IN this pane (a remote pane; carmine frame). Enter/l/- navigate, Esc leaves", "サーバをこのペインで開く（リモートペイン・カーマイン枠）。Enter/l/- で移動、Esc で戻る"),
                 entry("Enter, Esc", None, "while filtering: keep / clear it", "フィルタ中：適用したまま／解除"),
             ],
         ),
@@ -3504,6 +3514,9 @@ fn run_loop<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Result<()>
             needs_redraw = true;
         }
         // Install a finished remote directory listing into the download browser.
+        if app.remote_pane_ls.is_some() && app.poll_remote_pane_ls() {
+            needs_redraw = true;
+        }
         if app.remote_ls.is_some() && app.poll_remote_ls() {
             needs_redraw = true;
         }

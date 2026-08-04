@@ -45,7 +45,7 @@ impl App {
                 }
                 (files, PathBuf::new())
             }
-            ScpDir::Download => (Vec::new(), pane.cwd.clone()),
+            ScpDir::Download | ScpDir::BrowsePane => (Vec::new(), pane.cwd.clone()),
         };
         self.scp_dir = Some((dir, locals, local_dir));
         // Nothing configured: type the server by hand (#2).
@@ -120,6 +120,9 @@ impl App {
                 // pick where they land locally.
                 self.scp_target = Some((target, label.clone()));
                 self.open_remote_browser(label, ".", BrowsePurpose::Download);
+            }
+            ScpDir::BrowsePane => {
+                self.open_remote_pane(target, label);
             }
         }
     }
@@ -303,6 +306,129 @@ impl App {
             }
             *cursor = (*cursor + 1).min(entries.len().saturating_sub(1));
         }
+    }
+
+    // ── remote pane (a persistent SFTP-backed file pane) ──────────────────────
+
+    /// The file-pane side to open a remote pane on (the focused one, or the last
+    /// file pane when the shell is focused).
+    fn remote_side(&self) -> FocusedPane {
+        match self.focused {
+            FocusedPane::Left | FocusedPane::Right => self.focused,
+            _ => self.last_file_pane,
+        }
+    }
+
+    fn side_idx(side: FocusedPane) -> usize {
+        usize::from(matches!(side, FocusedPane::Right))
+    }
+
+    fn side_tabs_mut(&mut self, side: FocusedPane) -> &mut PaneTabs {
+        if matches!(side, FocusedPane::Right) { &mut self.right } else { &mut self.left }
+    }
+
+    /// Open `target` as a **remote pane** on the active file side: browse the
+    /// server like a local pane, starting at the login directory.
+    pub(crate) fn open_remote_pane(&mut self, target: cian_scp::Target, label: String) {
+        let side = self.remote_side();
+        self.remote_targets[Self::side_idx(side)] = Some((target, label.clone()));
+        self.focus(side);
+        self.message = Some(format!("⇅ connecting to {label} …"));
+        self.remote_pane_ls_spawn(side, ".".to_string());
+    }
+
+    /// List remote directory `path` for the remote pane on `side`, on a worker
+    /// thread; the result lands in [`App::poll_remote_pane_ls`].
+    fn remote_pane_ls_spawn(&mut self, side: FocusedPane, path: String) {
+        let Some((target, _)) = self.remote_targets[Self::side_idx(side)].clone() else { return };
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(cian_scp::list_dir(&target, &path).map_err(|e| e.to_string()));
+        });
+        self.remote_pane_ls = Some((side, rx));
+    }
+
+    /// Install a finished remote-pane listing into its pane. Returns true to
+    /// repaint.
+    pub(crate) fn poll_remote_pane_ls(&mut self) -> bool {
+        let Some((side, rx)) = &self.remote_pane_ls else { return false };
+        let side = *side;
+        match rx.try_recv() {
+            Ok(result) => {
+                self.remote_pane_ls = None;
+                match result {
+                    Ok((cwd, remotes)) => {
+                        let label = self.remote_targets[Self::side_idx(side)]
+                            .as_ref()
+                            .map(|(_, l)| l.clone())
+                            .unwrap_or_default();
+                        // A ".." up-row (except at the filesystem root), then the
+                        // entries — each carrying its remote absolute path.
+                        let mut entries = Vec::with_capacity(remotes.len() + 1);
+                        if cwd != "/" {
+                            entries.push(cian_core::Entry::remote("..", parent_remote(&cwd), true, 0, true));
+                        }
+                        for e in remotes {
+                            let full = join_remote(&cwd, &e.name);
+                            entries.push(cian_core::Entry::remote(e.name, full, e.is_dir, e.size, false));
+                        }
+                        self.side_tabs_mut(side).active_mut().enter_remote(label, cwd, entries);
+                        self.message = None;
+                    }
+                    Err(e) => {
+                        self.message = Some(format!("remote listing failed: {e}"));
+                        self.remote_targets[Self::side_idx(side)] = None;
+                    }
+                }
+                true
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => false,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                self.remote_pane_ls = None;
+                true
+            }
+        }
+    }
+
+    /// Enter the highlighted remote entry: descend a directory, climb via `..`.
+    /// (A file does nothing yet — remote open/transfer comes next.)
+    pub(crate) fn remote_pane_enter(&mut self) {
+        let side = self.remote_side();
+        let path = {
+            let Some(pane) = self.active_pane() else { return };
+            let Some((_, cwd)) = pane.remote_view() else { return };
+            let cwd = cwd.to_string();
+            let Some(e) = pane.selected() else { return };
+            if e.is_parent {
+                parent_remote(&cwd)
+            } else if e.is_dir {
+                // `path` holds the remote absolute path built at listing time.
+                e.path.to_string_lossy().into_owned()
+            } else {
+                return;
+            }
+        };
+        self.message = Some(format!("⇅ {path} …"));
+        self.remote_pane_ls_spawn(side, path);
+    }
+
+    /// Go to the parent of the remote pane's current directory.
+    pub(crate) fn remote_pane_parent(&mut self) {
+        let side = self.remote_side();
+        let Some(cwd) = self.active_pane().and_then(|p| p.remote_view()).map(|(_, c)| c.to_string())
+        else {
+            return;
+        };
+        self.remote_pane_ls_spawn(side, parent_remote(&cwd));
+    }
+
+    /// Leave the remote pane, returning it to its local directory.
+    pub(crate) fn leave_remote_pane(&mut self) {
+        let side = self.remote_side();
+        if let Some(p) = self.active_pane_mut() {
+            let _ = p.leave_flat();
+        }
+        self.remote_targets[Self::side_idx(side)] = None;
     }
 
     /// Confirm the remote selection (marked files, else the file under the

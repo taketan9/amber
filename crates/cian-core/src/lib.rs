@@ -72,6 +72,22 @@ impl Entry {
         let modified = meta.as_ref().and_then(|m| m.modified().ok());
         Self { name, name_lower, path, is_dir, len, modified, is_parent: false }
     }
+
+    /// An [`Entry`] for a **remote** listing (SFTP): built from the values the
+    /// server returned, with no local `stat` — the `path` holds the remote
+    /// absolute path as a string. `is_up` marks the synthetic `..` row.
+    pub fn remote(name: impl Into<String>, remote_path: impl Into<String>, is_dir: bool, size: u64, is_up: bool) -> Self {
+        let name = name.into();
+        Self {
+            name_lower: name.to_lowercase(),
+            name,
+            path: PathBuf::from(remote_path.into()),
+            is_dir,
+            len: size,
+            modified: None,
+            is_parent: is_up,
+        }
+    }
 }
 
 /// Build an [`Entry`] straight from a `DirEntry` (Windows: its `metadata()` is
@@ -506,6 +522,12 @@ impl Pane {
     /// True while this pane is browsing a remote host over SFTP.
     pub fn is_remote(&self) -> bool {
         matches!(self.view, PaneView::Remote { .. })
+    }
+
+    /// True for any non-directory view (flat / search / remote) — where reload
+    /// keeps the given rows and navigation is driven by the caller.
+    pub fn is_synthetic(&self) -> bool {
+        self.view.is_synthetic()
     }
 
     /// The `(host, path)` of the remote pane, if this is one — for the title and
