@@ -2003,6 +2003,29 @@ impl App {
     }
 
     /// Drain worker updates. Returns true if the UI should repaint.
+    /// Ring the terminal bell and post a desktop notification when a job that
+    /// ran at least `notify_min_secs` finishes — the "I started a big copy and
+    /// walked away" case. Silent for quick jobs and when `notify` is off.
+    ///
+    /// OSC 9 (`ESC ] 9 ; text BEL`) is the notification escape both Windows
+    /// Terminal and iTerm2 understand; terminals that don't just ignore it. The
+    /// sequences are out-of-band, so they don't disturb the drawn UI.
+    pub(crate) fn notify_task_done(&self, elapsed: Duration, summary: &str) {
+        if !self.config.options.notify.unwrap_or(true) {
+            return;
+        }
+        let min = self.config.options.notify_min_secs.unwrap_or(5);
+        if elapsed.as_secs() < min {
+            return;
+        }
+        use std::io::Write;
+        // Drop control chars so the summary can't break out of the sequence.
+        let clean: String = summary.chars().filter(|c| !c.is_control()).collect();
+        let mut out = std::io::stdout();
+        let _ = write!(out, "\x07\x1b]9;cian — {clean}\x07");
+        let _ = out.flush();
+    }
+
     pub(crate) fn poll_op_job(&mut self) -> bool {
         let Some(job) = &mut self.op_job else { return false };
         let mut changed = false;
@@ -2030,6 +2053,7 @@ impl App {
         if let Some(report) = finished {
             let cancelled = self.op_job.as_ref().map(|j| j.cancel.load(Ordering::Relaxed));
             let label = self.op_job.as_ref().map(|j| j.label).unwrap_or("");
+            let elapsed = self.op_job.as_ref().map(|j| j.started.elapsed()).unwrap_or_default();
             let undo = self.op_job.as_mut().and_then(|j| j.undo.take());
             self.op_job = None;
             // Record the undo only when the op finished cleanly (a partial move
@@ -2059,6 +2083,20 @@ impl App {
                 && self.pending_elevation.is_some();
             if !report.permission_denied {
                 self.pending_elevation = None;
+            }
+            // A long job that finished while you were reading mail elsewhere is
+            // exactly what the bell/desktop notification is for. Not for a
+            // cancel, and not while we still need an elevation confirm.
+            if cancelled == Some(false) && !elevate {
+                let n = report.ok;
+                // `hashing` repurposes `errors` to carry the digests, so it is
+                // never a failure count there.
+                let summary = if label == "hashing" || report.errors.is_empty() {
+                    format!("{label} finished — {n} item(s)")
+                } else {
+                    format!("{label} finished with {} problem(s)", report.errors.len())
+                };
+                self.notify_task_done(elapsed, &summary);
             }
             if cancelled == Some(true) {
                 self.pending_elevation = None;

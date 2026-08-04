@@ -86,6 +86,14 @@
 -- は読み直せない）。
 -- cian.set_option("verify_transfers", true)
 
+-- 長い処理（コピー／移動／削除・圧縮・転送）が終わったら、端末のベルを鳴らし
+-- デスクトップ通知（OSC 9）を出す。大きなコピーを走らせて席を外したときのため。
+-- 既定: true。対応端末は Windows Terminal と iTerm2（非対応端末は無視します）。
+-- cian.set_option("notify", false)
+-- 通知が出るまでに処理が最低何秒かかっている必要があるか。既定: 5（短い処理は
+-- 鳴りません）。
+-- cian.set_option("notify_min_secs", 10)
+
 -- 起動時にドットファイル（"." で始まる名前）を表示する。右クリックメニューで
 -- ライブに切り替え可能。既定: true。
 -- cian.set_option("show_hidden", true)

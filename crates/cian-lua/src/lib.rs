@@ -84,6 +84,14 @@ pub struct Options {
     /// "nvim" or "code -w". Unset falls back to $VISUAL/$EDITOR, then nvim →
     /// vim → vi on PATH.
     pub editor: Option<String>,
+    /// Ring the terminal bell and post a desktop notification (OSC 9) when a
+    /// long-running job — a copy/move/delete, an archive, a transfer — finishes
+    /// while cian isn't in the foreground's attention. Defaults to true. The
+    /// job has to have run at least `notify_min_secs` for it to fire.
+    pub notify: Option<bool>,
+    /// How many seconds a job must run before a finish notification fires.
+    /// Defaults to 5, so quick operations stay silent.
+    pub notify_min_secs: Option<u64>,
 }
 
 /// A login on a host.
@@ -681,6 +689,18 @@ fn install_api(lua: &Lua, builder: &Rc<RefCell<Builder>>) -> mlua::Result<()> {
                         Err(_) => bm
                             .errors
                             .push("set_option: animation_ms expects a number".into()),
+                    },
+                    "notify" => match bool::from_lua(val, lua) {
+                        Ok(v) => bm.options.notify = Some(v),
+                        Err(_) => bm
+                            .errors
+                            .push("set_option: notify expects a boolean".into()),
+                    },
+                    "notify_min_secs" => match u64::from_lua(val, lua) {
+                        Ok(v) => bm.options.notify_min_secs = Some(v),
+                        Err(_) => bm
+                            .errors
+                            .push("set_option: notify_min_secs expects a number".into()),
                     },
                     "lang" => match String::from_lua(val, lua) {
                         Ok(v) if v == "ja" || v == "en" => bm.options.lang = Some(v),

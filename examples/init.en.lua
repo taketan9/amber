@@ -86,6 +86,15 @@
 -- bandwidth). Needs SFTP — the SCP fallback cannot be re-read.
 -- cian.set_option("verify_transfers", true)
 
+-- When a long job (copy/move/delete, archive, transfer) finishes, ring the
+-- terminal bell and post a desktop notification (OSC 9) — for when you start a
+-- big copy and walk away. Default: true. Windows Terminal and iTerm2 support
+-- it; other terminals ignore it.
+-- cian.set_option("notify", false)
+-- How many seconds a job must run before the finish notification fires.
+-- Default: 5, so quick operations stay silent.
+-- cian.set_option("notify_min_secs", 10)
+
 -- Show dotfiles (names starting with ".") on startup. Toggle live with the
 -- right-click menu. Default: true.
 -- cian.set_option("show_hidden", true)
