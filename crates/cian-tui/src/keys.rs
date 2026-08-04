@@ -671,6 +671,9 @@ impl App {
                 // >/< copy the highlighted entry across to the other tree.
                 KeyCode::Char('>') | KeyCode::Char('.') => self.dir_compare_copy(true),
                 KeyCode::Char('<') | KeyCode::Char(',') => self.dir_compare_copy(false),
+                // ]/[ sync the whole tree one way (make the other side match).
+                KeyCode::Char(']') => self.dir_compare_sync(true),
+                KeyCode::Char('[') => self.dir_compare_sync(false),
                 _ => { let _ = scroll; }
             }
             return Ok(());
@@ -1168,6 +1171,8 @@ impl App {
                 // everything else just closes.
                 if matches!(self.popup, Popup::ConfirmDiffCopy { .. }) {
                     self.cancel_diff_copy();
+                } else if matches!(self.popup, Popup::ConfirmDirSync { .. }) {
+                    self.cancel_dir_sync();
                 } else {
                     self.popup = Popup::None;
                 }
@@ -1181,6 +1186,7 @@ impl App {
                 Popup::ConfirmTransfer { .. } => self.finish_transfer(Conflict::Skip),
                 Popup::ConfirmDiscard { .. } => { self.git_discard(); Ok(()) }
                 Popup::ConfirmDiffCopy { .. } => { self.confirm_diff_copy(); Ok(()) }
+                Popup::ConfirmDirSync { .. } => { self.confirm_dir_sync(); Ok(()) }
                 Popup::ConfirmSnippet { cmd, enter, .. } => {
                     let (cmd, enter) = (cmd.clone(), *enter);
                     self.popup = Popup::None;

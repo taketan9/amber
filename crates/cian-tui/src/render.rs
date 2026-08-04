@@ -3476,8 +3476,8 @@ fn draw_popup(
         }
         f.render_widget(
             Paragraph::new(tr(lang,
-                " ◀ left-only  ▶ right-only  ≠ differ   Enter=go  w save(.html/.md)  j/k  Esc ",
-                " ◀ 左のみ  ▶ 右のみ  ≠ 相違   Enter=移動  w 保存(.html/.md)  j/k  Esc ",
+                " ◀ left  ▶ right  ≠ differ   Enter=go  </> copy one  [/] sync all  w save  Esc ",
+                " ◀ 左  ▶ 右  ≠ 相違   Enter=移動  </> 1件コピー  [/] 一括同期  w 保存  Esc ",
             ))
             .style(Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD)),
             Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1),
@@ -4275,6 +4275,42 @@ fn draw_popup(
                 tr(lang, " copy across ", " 反対側へコピー ").to_string(),
                 lines,
                 tr(lang, " y/Enter = overwrite   n/Esc = cancel ", " y/Enter = 上書き   n/Esc = 取消 ").to_string(),
+            )
+        }
+        Popup::ConfirmDirSync { to_right, ops, extra, .. } => {
+            let arrow = if *to_right { "left → right" } else { "right → left" };
+            let arrow_ja = if *to_right { "左 → 右" } else { "右 → 左" };
+            let n = ops.len();
+            let head = if lang == Lang::Ja {
+                format!("フォルダを一方向に同期（{}）", arrow_ja)
+            } else {
+                format!("one-way folder sync ({})", arrow)
+            };
+            let mut lines = vec![
+                head,
+                String::new(),
+                format!("  {} {}", tr(lang, "copy / overwrite:", "コピー／上書き:"), n),
+            ];
+            if *extra > 0 {
+                lines.push(format!(
+                    "  {} {}",
+                    tr(lang, "destination-only, kept:", "コピー先のみ・保持:"),
+                    extra
+                ));
+            }
+            lines.push(String::new());
+            lines.push(
+                tr(
+                    lang,
+                    "Nothing is deleted; the source's files are copied over.",
+                    "削除は行いません。コピー元のファイルで置き換えます。",
+                )
+                .to_string(),
+            );
+            (
+                tr(lang, " synchronize ", " 同期 ").to_string(),
+                lines,
+                tr(lang, " y/Enter = sync   n/Esc = cancel ", " y/Enter = 同期   n/Esc = 取消 ").to_string(),
             )
         }
         Popup::ConfirmSnippet { name, cmd, .. } => {

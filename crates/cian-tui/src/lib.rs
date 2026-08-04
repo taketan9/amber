@@ -265,6 +265,17 @@ enum Popup {
     /// in the file diff or the folder compare). `back` is the comparison popup
     /// to restore whether the copy is confirmed or cancelled.
     ConfirmDiffCopy { src: PathBuf, dst: PathBuf, is_dir: bool, back: Box<Popup> },
+    /// One-way "make that side match this one" from the folder compare (`]` =
+    /// left→right, `[` = right→left). Copies everything the source has that the
+    /// destination lacks or differs on; it never deletes, so `extra` counts the
+    /// destination-only entries left untouched. `back` restores the comparison
+    /// if cancelled. Each op is `(src, dest_dir, is_dir)`.
+    ConfirmDirSync {
+        to_right: bool,
+        ops: Vec<(PathBuf, PathBuf, bool)>,
+        extra: usize,
+        back: Box<Popup>,
+    },
     TextInput {
         title: String,
         prompt: String,

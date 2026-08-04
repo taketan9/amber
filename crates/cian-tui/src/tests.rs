@@ -5245,6 +5245,65 @@
     }
 
     #[test]
+    fn folder_sync_one_way_copies_source_and_keeps_dest_only() {
+        use std::sync::Arc;
+        let l = tempfile::tempdir().unwrap();
+        let r = tempfile::tempdir().unwrap();
+        std::fs::write(l.path().join("only_left.txt"), b"L").unwrap();
+        std::fs::write(l.path().join("both.txt"), b"AAA").unwrap();
+        std::fs::write(r.path().join("both.txt"), b"BBB").unwrap();
+        std::fs::write(r.path().join("only_right.txt"), b"R").unwrap();
+        // A whole subtree present only on the left copies as one entry.
+        std::fs::create_dir(l.path().join("newdir")).unwrap();
+        std::fs::write(l.path().join("newdir").join("deep.txt"), b"D").unwrap();
+
+        let mut app = App::new(
+            l.path().to_path_buf(),
+            r.path().to_path_buf(),
+            cian_lua::Config::default(),
+        )
+        .unwrap();
+
+        let cancel = Arc::new(AtomicBool::new(false));
+        let diff = cian_core::dirdiff::compare(l.path(), r.path(), &cancel, &mut |_| {});
+        app.popup = Popup::DirCompare {
+            left: "L".into(), right: "R".into(),
+            left_root: l.path().to_path_buf(), right_root: r.path().to_path_buf(),
+            entries: diff.entries, cursor: 0, scroll: 0, truncated: false,
+        };
+
+        // Sync left → right: everything the left has, none of it deleted.
+        app.dir_compare_sync(true);
+        let Popup::ConfirmDirSync { ops, extra, to_right, .. } = &app.popup else {
+            panic!("expected a sync confirmation, got {:?}", app.popup);
+        };
+        assert!(*to_right);
+        assert_eq!(*extra, 1, "only_right.txt is destination-only");
+        assert_eq!(ops.len(), 3, "only_left.txt + both.txt + newdir/");
+        app.confirm_dir_sync();
+        assert!(app.op_job.is_some(), "sync runs on the worker");
+        let start = Instant::now();
+        while app.op_job.is_some() && start.elapsed() < Duration::from_secs(5) {
+            app.poll_op_job();
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(r.path().join("only_left.txt").exists(), "source-only copied");
+        assert_eq!(std::fs::read(r.path().join("both.txt")).unwrap(), b"AAA", "differing overwritten");
+        assert_eq!(std::fs::read(r.path().join("newdir").join("deep.txt")).unwrap(), b"D", "subtree copied");
+        assert!(r.path().join("only_right.txt").exists(), "destination-only kept, never deleted");
+
+        // Running it again finds nothing to do.
+        let diff2 = cian_core::dirdiff::compare(l.path(), r.path(), &cancel, &mut |_| {});
+        app.popup = Popup::DirCompare {
+            left: "L".into(), right: "R".into(),
+            left_root: l.path().to_path_buf(), right_root: r.path().to_path_buf(),
+            entries: diff2.entries, cursor: 0, scroll: 0, truncated: false,
+        };
+        app.dir_compare_sync(true);
+        assert!(matches!(app.popup, Popup::DirCompare { .. }), "nothing to sync leaves the compare up");
+    }
+
+    #[test]
     fn git_log_diff_and_blame() {
         use std::process::Command;
         let d = tempfile::tempdir().unwrap();

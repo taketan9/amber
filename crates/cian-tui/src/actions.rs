@@ -1113,6 +1113,95 @@ impl App {
         self.begin_diff_copy(src, dst, is_dir);
     }
 
+    /// `]` / `[` in the folder compare: one-way sync the whole tree. `to_right`
+    /// makes the right match the left — copying every path the left has that the
+    /// right lacks or differs on. It never deletes, so anything that exists only
+    /// on the destination is reported but left in place. Confirms first, listing
+    /// the counts; the copy then runs on the worker (progress + done bell).
+    pub(crate) fn dir_compare_sync(&mut self, to_right: bool) {
+        use cian_core::dirdiff::Status;
+        let Popup::DirCompare { entries, left_root, right_root, .. } = &self.popup else {
+            return;
+        };
+        let (from_root, into_root) =
+            if to_right { (left_root, right_root) } else { (right_root, left_root) };
+        // The status that means "source-only" for this direction.
+        let source_only = if to_right { Status::OnlyLeft } else { Status::OnlyRight };
+        let dest_only = if to_right { Status::OnlyRight } else { Status::OnlyLeft };
+        let mut ops = Vec::new();
+        let mut extra = 0usize;
+        for e in entries {
+            match e.status {
+                s if s == source_only => {}
+                Status::Differ => {}
+                s if s == dest_only => {
+                    extra += 1;
+                    continue;
+                }
+                _ => continue,
+            }
+            let src = from_root.join(&e.rel);
+            // copy_one places the source under a destination *directory* at the
+            // same relative parent, matching the per-entry copy.
+            let dst_parent = into_root.join(&e.rel);
+            let Some(dest_dir) = dst_parent.parent().map(Path::to_path_buf) else { continue };
+            ops.push((src, dest_dir, e.is_dir));
+        }
+        if ops.is_empty() {
+            self.message = Some(tr(
+                self.lang,
+                "already in sync in that direction",
+                "その向きでは既に同期済みです",
+            ).into());
+            return;
+        }
+        let back = std::mem::replace(&mut self.popup, Popup::None);
+        self.popup = Popup::ConfirmDirSync { to_right, ops, extra, back: Box::new(back) };
+    }
+
+    /// Confirmed folder sync: run every queued copy on the worker thread.
+    pub(crate) fn confirm_dir_sync(&mut self) {
+        let Popup::ConfirmDirSync { ops, .. } =
+            std::mem::replace(&mut self.popup, Popup::None)
+        else {
+            return;
+        };
+        let total = ops.len();
+        self.start_op("syncing", move |ctl| {
+            let mut report = OpReport::default();
+            let mut p = cian_core::progress::Progress {
+                files_total: total,
+                ..Default::default()
+            };
+            for (src, dest_dir, _is_dir) in ops {
+                if ctl.cancel.load(Ordering::Relaxed) {
+                    break;
+                }
+                p.current = src.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+                (ctl.on_progress)(&p);
+                if let Err(e) = std::fs::create_dir_all(&dest_dir) {
+                    report.note_error(format!("{}: {}", dest_dir.display(), e));
+                } else {
+                    match cian_core::ops::copy_one(&src, &dest_dir, Conflict::Overwrite) {
+                        Ok(_) => report.ok += 1,
+                        Err(e) => report.note_error(format!("{}: {}", src.display(), e)),
+                    }
+                }
+                p.files_done += 1;
+            }
+            report
+        });
+    }
+
+    /// Cancelled folder sync: put the comparison back.
+    pub(crate) fn cancel_dir_sync(&mut self) {
+        if let Popup::ConfirmDirSync { back, .. } =
+            std::mem::replace(&mut self.popup, Popup::None)
+        {
+            self.popup = *back;
+        }
+    }
+
     /// `>` / `<` in the file diff: copy one side's file over the other. Always an
     /// overwrite (both files exist), so it always confirms.
     pub(crate) fn diff_copy(&mut self, to_right: bool) {
