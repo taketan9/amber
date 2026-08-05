@@ -373,7 +373,11 @@ impl App {
                             entries.push(cian_core::Entry::remote(e.name, full, e.is_dir, e.size, false));
                         }
                         self.side_tabs_mut(side).active_mut().enter_remote(label, cwd, entries);
-                        self.message = None;
+                        self.message = Some(tr(
+                            self.lang,
+                            "remote pane — Enter/l open, - up, c download, Esc to close",
+                            "リモートペイン — Enter/l で開く, - で上, c でDL, Esc で閉じる",
+                        ).into());
                     }
                     Err(e) => {
                         self.message = Some(format!("remote listing failed: {e}"));

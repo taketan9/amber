@@ -1,4 +1,4 @@
-//! The fuzzy pickers: a **command palette** (`;` / `:palette`) over the
+//! The fuzzy pickers: a **command palette** (`C` / `:palette`) over the
 //! commands, and a **fuzzy jump** (`Z` / `:jump`) over recently-visited
 //! directories and bookmarks. Both share [`cian_core::fuzzy`] for ranking.
 
@@ -13,6 +13,7 @@ fn command_list() -> &'static [(&'static str, (&'static str, &'static str), bool
     &[
         ("rag",        ("crmaine RAG: ask the running crmaine server", "crmaine RAG に質問"), true),
         ("agent",      ("crmaine Ajent: an agent answer", "crmaine エージェント回答"), true),
+        ("raginfo",    ("crmaine diagnostics: port, server, config", "crmaine 診断: ポート・接続・設定"), false),
         ("ai",         ("AI chat (Carmine)", "AI チャット（カーマイン）"), false),
         ("aicmd",      ("AI: shell command from a description", "AI: 説明からコマンド"), true),
         ("aicommit",   ("AI: draft a commit message", "AI: コミットメッセージ下書き"), false),
@@ -58,7 +59,7 @@ fn command_list() -> &'static [(&'static str, (&'static str, &'static str), bool
 }
 
 impl App {
-    /// Open the command palette (`;` / `:palette`).
+    /// Open the command palette (`C` / `:palette`).
     pub(crate) fn start_command_palette(&mut self) {
         let ja = self.lang == Lang::Ja;
         let items: Vec<PaletteItem> = command_list()

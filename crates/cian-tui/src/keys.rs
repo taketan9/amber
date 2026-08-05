@@ -1497,11 +1497,15 @@ impl App {
         // (yet) do local file operations. Handle its keys before the local ones.
         if self.active_pane().map(|p| p.is_remote()).unwrap_or(false) {
             match key.code {
-                KeyCode::Enter | KeyCode::Char('l') | KeyCode::Right => {
+                // Match the local panes exactly: Enter / `l` go into a folder,
+                // `-` / Backspace go up. The ←/→ arrows are NOT navigation here —
+                // they switch panes, so they fall through to the shared handler
+                // below (using them to go up/into was reported as confusing).
+                KeyCode::Enter | KeyCode::Char('l') => {
                     self.remote_pane_enter();
                     return Ok(());
                 }
-                KeyCode::Char('-') | KeyCode::Backspace | KeyCode::Left => {
+                KeyCode::Char('-') | KeyCode::Backspace => {
                     self.remote_pane_parent();
                     return Ok(());
                 }
@@ -1595,11 +1599,13 @@ impl App {
             (false, _, KeyCode::Char('/')) => self.start_filter(),
             (false, true, KeyCode::Char('F')) => self.start_find_prompt(),
             (true, _, KeyCode::Char('f')) => self.start_grep_prompt(),
-            // `;` = command palette (next to `:`), `Z` = fuzzy-jump to a recent
-            // dir (complements `z`, jump-to-typed-path). Plain/shift keys, so no
-            // terminal steals them the way it does Ctrl+P / Ctrl+O on macOS.
-            (false, _, KeyCode::Char(';')) => self.start_command_palette(),
-            (false, true, KeyCode::Char('Z')) => self.start_fuzzy_jump(),
+            // `C` = command palette (mnemonic: Commands), `Z` = fuzzy-jump to a
+            // recent dir (complements `z`, jump-to-typed-path). Letter keys, not
+            // Ctrl (macOS terminals steal Ctrl+P/O) nor `;` (too easily confused
+            // with `:` command mode on a US keyboard). The char already encodes
+            // the shift, so `_` matches whether or not the modifier is reported.
+            (false, _, KeyCode::Char('C')) => self.start_command_palette(),
+            (false, _, KeyCode::Char('Z')) => self.start_fuzzy_jump(),
             (false, _, KeyCode::Char(',')) => self.start_sort_picker(),
             (false, false, KeyCode::Char('z')) => self.start_jump_path(),
             // `b` flattens the subtree into this pane (branch view); again to leave.
