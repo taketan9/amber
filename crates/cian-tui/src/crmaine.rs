@@ -391,6 +391,105 @@ impl App {
         }
     }
 
+    /// `:impact <change>` — crmaine impact analysis: which docs a change touches.
+    pub(crate) fn start_impact(&mut self, change: &str) {
+        let change = change.trim();
+        if change.is_empty() {
+            self.message = Some(tr(self.lang, "usage: :impact <what changes>", "使い方: :impact <変更内容>").into());
+            return;
+        }
+        self.start_crmaine_tool(
+            "/impact",
+            tr(self.lang, "impact", "影響分析"),
+            change,
+            serde_json::json!({ "change_description": change }),
+        );
+    }
+
+    /// `:contradiction <topic>` — find statements across the corpus that conflict.
+    pub(crate) fn start_contradiction(&mut self, topic: &str) {
+        let topic = topic.trim();
+        if topic.is_empty() {
+            self.message = Some(tr(self.lang, "usage: :contradiction <topic>", "使い方: :contradiction <トピック>").into());
+            return;
+        }
+        self.start_crmaine_tool(
+            "/contradiction",
+            tr(self.lang, "contradiction", "矛盾検出"),
+            topic,
+            serde_json::json!({ "topic": topic }),
+        );
+    }
+
+    /// `:glossary` — generate a glossary of the indexed corpus.
+    pub(crate) fn start_glossary(&mut self) {
+        self.start_crmaine_tool(
+            "/glossary",
+            tr(self.lang, "glossary", "用語集"),
+            tr(self.lang, "generating…", "生成中…"),
+            serde_json::json!({ "synonyms_file": "" }),
+        );
+    }
+
+    /// Shared runner for crmaine's SSE analysis tools: build the request from the
+    /// resolved config plus `extra`, stream the result into a chat popup.
+    pub(crate) fn start_crmaine_tool(
+        &mut self,
+        path: &'static str,
+        label: &str,
+        shown: &str,
+        extra: serde_json::Value,
+    ) {
+        if self.crmaine_rx.is_some() {
+            self.message = Some(tr(self.lang, "crmaine is busy", "crmaine 実行中").into());
+            return;
+        }
+        let cfg = match self.crmaine_resolved() {
+            Ok(c) => c,
+            Err(e) => {
+                self.message = Some(e);
+                return;
+            }
+        };
+        let mut body = serde_json::json!({
+            "cache_dir": cfg.cache_dir,
+            "model": cfg.model,
+            "endpoint": cfg.endpoint,
+            "api_version": cfg.api_version,
+            "auth_mode": cfg.auth_mode,
+        });
+        if let Some(obj) = extra.as_object() {
+            for (k, v) in obj {
+                body[k.as_str()] = v.clone();
+            }
+        }
+        let body = body.to_string();
+        let port = cfg.port;
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            if http_get(port, "/health").is_err() {
+                let _ = tx.send(CrmaineEvent::Error(format!(
+                    "server not reachable on 127.0.0.1:{port} — start crmaine in VS Code first"
+                )));
+                return;
+            }
+            if let Err(e) = stream_sse(port, path, &body, parse_tool_line, |ev| {
+                let _ = tx.send(ev);
+            }) {
+                let _ = tx.send(CrmaineEvent::Error(e));
+            }
+        });
+        self.crmaine_rx = Some(rx);
+        self.crmaine_stage = Some(tr(self.lang, "working…", "実行中…").into());
+        self.crmaine_sources.clear();
+        // A tool result is a one-shot; a typed follow-up is just a plain chat.
+        self.start_ai_chat(
+            ChatMode::Ai,
+            vec![ChatMsg { user: true, text: format!("{label}: {shown}") }],
+            true,
+        );
+    }
+
     /// Open a fresh crmaine chat (`/query` = RAG, `/agent` = Ajent) with the
     /// first question. Follow-ups typed into the chat reuse the same endpoint via
     /// [`Self::send_ai_message`] → [`Self::fire_crmaine`].
@@ -669,6 +768,31 @@ fn parse_index_line(line: &str) -> Vec<CrmaineEvent> {
     }
 }
 
+/// Parse an SSE line for the analysis tools (`/impact`, `/contradiction`,
+/// `/glossary`). They stream both `chunk` (answer tokens) and `progress`
+/// (status lines) as body text, closing on `done` / `error`.
+fn parse_tool_line(line: &str) -> Vec<CrmaineEvent> {
+    let Some(rest) = line.trim_start().strip_prefix("data:") else { return Vec::new() };
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(rest.trim()) else { return Vec::new() };
+    match v.get("type").and_then(|t| t.as_str()) {
+        Some("chunk") => v
+            .get("text")
+            .and_then(|t| t.as_str())
+            .map(|t| vec![CrmaineEvent::Chunk(t.to_string())])
+            .unwrap_or_default(),
+        Some("progress") => v
+            .get("message")
+            .and_then(|m| m.as_str())
+            .map(|m| vec![CrmaineEvent::Chunk(format!("{m}\n"))])
+            .unwrap_or_default(),
+        Some("done") => vec![CrmaineEvent::Done],
+        Some("error") => vec![CrmaineEvent::Error(
+            v.get("message").and_then(|m| m.as_str()).unwrap_or("crmaine error").to_string(),
+        )],
+        _ => Vec::new(),
+    }
+}
+
 /// Cian's own RAG index directory — where `:index` writes, kept apart from
 /// crmaine's so building one never disturbs the other.
 fn crmaine_index_dir() -> PathBuf {
@@ -800,6 +924,27 @@ mod tests {
         }
         assert!(matches!(parse_sse_line("data: {\"type\":\"done\"}"), Some(CrmaineEvent::Done)));
         assert!(matches!(parse_sse_line("data: {\"type\":\"cancelled\"}"), Some(CrmaineEvent::Done)));
+    }
+
+    #[test]
+    fn parse_tool_line_streams_progress_and_chunks_as_body() {
+        // The analysis tools stream both status and answer as body text.
+        match parse_tool_line("data: {\"type\":\"progress\",\"message\":\"scanning\"}").as_slice() {
+            [CrmaineEvent::Chunk(t)] => assert_eq!(t, "scanning\n"),
+            _ => panic!("progress should become a body line"),
+        }
+        match parse_tool_line("data: {\"type\":\"chunk\",\"text\":\"found\"}").as_slice() {
+            [CrmaineEvent::Chunk(t)] => assert_eq!(t, "found"),
+            _ => panic!("chunk should stream verbatim"),
+        }
+        assert!(matches!(
+            parse_tool_line("data: {\"type\":\"done\"}").as_slice(),
+            [CrmaineEvent::Done]
+        ));
+        assert!(matches!(
+            parse_tool_line("data: {\"type\":\"error\",\"message\":\"x\"}").as_slice(),
+            [CrmaineEvent::Error(_)]
+        ));
     }
 
     #[test]
