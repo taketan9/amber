@@ -2088,6 +2088,7 @@
                 MenuItem::SessionMenu,
                 MenuItem::WindowMenu,
                 MenuItem::Ssh,
+                MenuItem::RemotePane,
                 MenuItem::Background,
                 MenuItem::ThemePick,
                 MenuItem::Lang,

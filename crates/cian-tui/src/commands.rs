@@ -12,6 +12,13 @@ impl App {
         self.mode = Mode::Command;
     }
 
+    /// Enter command mode with `prefix` already typed (e.g. `"rag "`), so a menu
+    /// item that needs an argument drops the user straight onto the `:` line.
+    pub(crate) fn prefill_command(&mut self, prefix: &str) {
+        self.command_buffer = prefix.to_string();
+        self.mode = Mode::Command;
+    }
+
     pub(crate) fn run_command(&mut self) {
         let raw = self.command_buffer.trim().to_string();
         self.command_buffer.clear();

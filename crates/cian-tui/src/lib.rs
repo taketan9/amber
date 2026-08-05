@@ -710,6 +710,30 @@ enum MenuItem {
     AiRename,
     /// Semantic search over the tree from a natural-language query.
     AiSearch,
+    /// crmaine RAG — opens the `:rag ` prompt.
+    CrmaineRag,
+    /// crmaine Ajent — opens the `:agent ` prompt.
+    CrmaineAgent,
+    /// crmaine Coding — ask the Ajent about the current file's code.
+    CrmaineCoding,
+    /// A submenu of crmaine's corpus tools (index, analysis, diagnostics).
+    CrmaineKnowledge,
+    /// crmaine impact analysis — opens the `:impact ` prompt.
+    CrmaineImpact,
+    /// crmaine contradiction detection — opens the `:contradiction ` prompt.
+    CrmaineContradiction,
+    /// crmaine glossary generation.
+    CrmaineGlossary,
+    /// Index the current folder into cian's own RAG index (`:index`).
+    CrmaineIndex,
+    /// Switch queries back to crmaine's own index (`:ragshared`).
+    CrmaineShared,
+    /// crmaine diagnostics (`:raginfo`).
+    CrmaineInfo,
+    /// Open a server in this pane over SFTP (`:sftp` / remote pane).
+    RemotePane,
+    /// Disk-usage breakdown of the current folder (`:du`).
+    DiskUsage,
     /// A submenu grouping the git actions (stage / unstage / discard).
     GitMenu,
     /// `git add` the selection.
@@ -819,6 +843,7 @@ impl MenuItem {
                 | MenuItem::SvnMenu
                 | MenuItem::CompressMenu
                 | MenuItem::OsMenu
+                | MenuItem::CrmaineKnowledge
         )
     }
 }
@@ -884,7 +909,19 @@ impl MenuItem {
                 Lang::En => "日本語に切替",
                 Lang::Ja => "Switch to English",
             },
-            MenuItem::AiChat => tr(lang, "Chat  (:crmaine)", "チャット  (:crmaine)"),
+            MenuItem::AiChat => tr(lang, "Chat — simple  (:ai)", "チャット — simple  (:ai)"),
+            MenuItem::CrmaineRag => tr(lang, "RAG…  (:rag)", "RAG…  (:rag)"),
+            MenuItem::CrmaineAgent => tr(lang, "Agent…  (:agent)", "エージェント…  (:agent)"),
+            MenuItem::CrmaineCoding => tr(lang, "Coding — this file  (:coding)", "コーディング — このファイル  (:coding)"),
+            MenuItem::CrmaineKnowledge => tr(lang, "Corpus tools ▸", "コーパスツール ▸"),
+            MenuItem::CrmaineImpact => tr(lang, "Impact analysis…  (:impact)", "影響分析…  (:impact)"),
+            MenuItem::CrmaineContradiction => tr(lang, "Find contradictions…  (:contradiction)", "矛盾検出…  (:contradiction)"),
+            MenuItem::CrmaineGlossary => tr(lang, "Generate glossary  (:glossary)", "用語集を生成  (:glossary)"),
+            MenuItem::CrmaineIndex => tr(lang, "Index this folder  (:index)", "このフォルダをインデックス  (:index)"),
+            MenuItem::CrmaineShared => tr(lang, "Use crmaine's index  (:ragshared)", "crmaine のインデックスを使う  (:ragshared)"),
+            MenuItem::CrmaineInfo => tr(lang, "Diagnostics  (:raginfo)", "診断  (:raginfo)"),
+            MenuItem::RemotePane => tr(lang, "Open server in pane  (:sftp)", "サーバをペインで開く  (:sftp)"),
+            MenuItem::DiskUsage => tr(lang, "Disk usage  (:du)", "容量分析  (:du)"),
             MenuItem::AiShellCmd => tr(lang, "Command from description  (:aicmd)", "説明からコマンド生成  (:aicmd)"),
             MenuItem::AiExplainError => tr(lang, "Explain the last error  (:explain)", "直近のエラーを説明  (:explain)"),
             MenuItem::AiCommit => tr(lang, "Draft commit message  (:aicommit)", "コミットメッセージ生成  (:aicommit)"),
