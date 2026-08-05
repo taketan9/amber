@@ -1004,7 +1004,7 @@ impl App {
         }
         let ScpPending { target, label, locals, .. } = p;
         let modes = std::mem::take(&mut self.scp_upload_modes);
-        let verify = self.config.options.verify_transfers.unwrap_or(false);
+        let verify = self.verify_runtime.or(self.config.options.verify_transfers).unwrap_or(false);
         self.popup = Popup::None;
         self.message = Some(format!("uploading {} …", label));
         self.start_op("uploading", move |ctl| {
@@ -1107,7 +1107,7 @@ impl App {
     /// apply `mode` to each (Unix; a no-op elsewhere).
     pub(crate) fn start_remote_download(&mut self, files: Vec<String>, local_dir: PathBuf, mode: Option<u32>) {
         let Some((target, label)) = self.scp_target.take() else { return };
-        let verify = self.config.options.verify_transfers.unwrap_or(false);
+        let verify = self.verify_runtime.or(self.config.options.verify_transfers).unwrap_or(false);
         self.popup = Popup::None;
         if let Err(e) = std::fs::create_dir_all(&local_dir) {
             self.message = Some(format!("cannot create {}: {}", local_dir.display(), e));

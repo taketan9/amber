@@ -358,6 +358,17 @@ impl App {
             }
             return Ok(());
         }
+        if let Popup::Toggles { .. } = &self.popup {
+            match key.code {
+                KeyCode::Esc | KeyCode::Char('q') => self.popup = Popup::None,
+                KeyCode::Char('j') | KeyCode::Down => self.toggles_move(1),
+                KeyCode::Char('k') | KeyCode::Up => self.toggles_move(-1),
+                // Enter / Space flip the highlighted switch, keeping the menu up.
+                KeyCode::Enter | KeyCode::Char(' ') => self.toggles_apply(),
+                _ => {}
+            }
+            return Ok(());
+        }
         if let Popup::Search { buffer } = &mut self.popup {
             match key.code {
                 KeyCode::Esc => {
@@ -1691,6 +1702,8 @@ impl App {
             // the shift, so `_` matches whether or not the modifier is reported.
             (false, _, KeyCode::Char('C')) => self.start_command_palette(),
             (false, _, KeyCode::Char('Z')) => self.start_fuzzy_jump(),
+            // `T` = the UI-toggles menu (dotfiles, input sync, notifications…).
+            (false, _, KeyCode::Char('T')) => self.start_toggles(),
             (false, _, KeyCode::Char(',')) => self.start_sort_picker(),
             (false, false, KeyCode::Char('z')) => self.start_jump_path(),
             // `b` flattens the subtree into this pane (branch view); again to leave.

@@ -2138,7 +2138,7 @@ impl App {
     /// Terminal and iTerm2 understand; terminals that don't just ignore it. The
     /// sequences are out-of-band, so they don't disturb the drawn UI.
     pub(crate) fn notify_task_done(&self, elapsed: Duration, summary: &str) {
-        if !self.config.options.notify.unwrap_or(true) {
+        if !self.notify_runtime.or(self.config.options.notify).unwrap_or(true) {
             return;
         }
         let min = self.config.options.notify_min_secs.unwrap_or(5);

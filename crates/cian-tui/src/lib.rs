@@ -48,6 +48,7 @@ mod actions;
 mod count;
 mod du;
 mod palette;
+mod toggles;
 mod edit;
 mod macro_run;
 mod session;
@@ -536,6 +537,8 @@ enum Popup {
     /// The chat history picker (`Ctrl+R` in the chat): past conversations this
     /// session, newest first. Enter reopens one, `d` forgets it.
     AiHistory { cursor: usize },
+    /// The UI-toggles menu (`T`): a list of on/off settings flipped in place.
+    Toggles { cursor: usize },
     /// A copy/move failed because the destination needs administrator rights.
     /// Offers to redo it elevated (Windows only).
     ConfirmElevate { op: PendingOp, targets: Vec<PathBuf>, dest: PathBuf },
@@ -1765,6 +1768,10 @@ pub struct App {
     remote_pane_ls: Option<(FocusedPane, RemoteLsRx)>,
     /// A remote file being downloaded to a temp path so `F3` can view it.
     remote_view: Option<RemoteView>,
+    /// Runtime overrides for two config options, flipped from the toggles menu
+    /// (`T`). `None` = follow init.lua; `Some(v)` = the user's live choice.
+    notify_runtime: Option<bool>,
+    verify_runtime: Option<bool>,
     /// Local temp files opened from a remote pane (F3), mapped to where they came
     /// from, so saving one uploads it back. `(target, remote absolute path)`.
     remote_edits: std::collections::HashMap<PathBuf, (cian_scp::Target, String)>,
@@ -2006,6 +2013,8 @@ impl App {
             remote_mut: None,
             remote_pane_ls: None,
             remote_view: None,
+            notify_runtime: None,
+            verify_runtime: None,
             remote_edits: std::collections::HashMap::new(),
             remote_refresh: None,
             scp_pending: None,
@@ -3218,6 +3227,7 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry("z", None, "go to a typed path (also :cd)", "入力したパスへ移動（:cd でも）"),
                 entry("C", None, "command palette: fuzzy-find any command (also :palette)", "コマンドパレット：全コマンドをあいまい検索（:palette でも）"),
                 entry("Z", None, "fuzzy-jump to a recent / bookmarked directory (also :jump)", "最近/ブックマークのディレクトリへあいまいジャンプ（:jump でも）"),
+                entry("T", None, "UI toggles menu — dotfiles, input sync, notifications… (also :toggles)", "UIトグルメニュー — 隠しファイル/入力同期/通知…（:toggles でも）"),
                 entry(":each", None, "run a shell command per marked file — {} = path (:each grep -l foo {})", "マーク各ファイルにコマンド実行 — {} = パス（:each grep -l foo {}）"),
                 entry("Ctrl+R, F5", None, "refresh now", "今すぐ再読み込み"),
                 entry("f", Some(Search), "search in this folder", "このフォルダ内を検索"),

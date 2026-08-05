@@ -297,6 +297,10 @@ pub(crate) fn draw(f: &mut Frame, app: &mut App) {
         draw_ai_history(f, area, app);
         return;
     }
+    if matches!(app.popup, Popup::Toggles { .. }) {
+        draw_toggles(f, area, app);
+        return;
+    }
     // The image preview decodes to fit its box and caches by size, so it takes
     // `&mut app` too.
     if matches!(app.popup, Popup::ImageView { .. }) {
@@ -2182,6 +2186,56 @@ fn draw_ai_chat(f: &mut Frame, area: Rect, app: &mut App) {
         Paragraph::new(in_lines).style(Style::default().bg(theme().selected_bg)),
         Rect::new(inner.x, inner.y + view_h as u16, inner.width, input_rows as u16),
     );
+}
+
+/// The UI-toggles menu: each switch with its current state, cursor-highlighted.
+fn draw_toggles(f: &mut Frame, area: Rect, app: &App) {
+    let lang = app.lang;
+    let Popup::Toggles { cursor } = &app.popup else { return };
+    let cursor = *cursor;
+    let rows = app.toggle_rows();
+    let width: u16 = 42u16.min(area.width.saturating_sub(2));
+    let height = (rows.len() as u16 + 3).clamp(5, area.height.saturating_sub(2));
+    let rect = centered_rect(width, height, area);
+    f.render_widget(Clear, rect);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(border_type())
+        .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
+        .style(Style::default().bg(theme().popup_bg))
+        .title(tr(lang, " toggles ", " トグル "))
+        .title_bottom(tr(lang, " Enter/Space=flip  ↑↓  Esc ", " Enter/Space=切替  ↑↓  Esc "));
+    let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
+    f.render_widget(block, rect);
+
+    let body_c = readable_on(theme().popup_bg);
+    let dim_c = Color::Rgb(150, 150, 170);
+    let on_c = Color::Rgb(130, 205, 150);
+    let w = inner.width as usize;
+    let mut lines: Vec<Line> = Vec::new();
+    for (i, (_, label, state, on)) in rows.iter().enumerate() {
+        let sel = i == cursor;
+        let marker = if sel { "▶ " } else { "  " };
+        // Right-align the state text on the row.
+        let pad = w.saturating_sub(2 + label.chars().count() + state.chars().count()).max(1);
+        let label_style = if sel {
+            Style::default().fg(readable_on(theme().selected_bg)).bg(theme().selected_bg).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(body_c)
+        };
+        let state_style = if *on {
+            Style::default().fg(on_c).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(dim_c)
+        };
+        lines.push(Line::from(vec![
+            Span::styled(marker, Style::default().fg(theme().accent)),
+            Span::styled(label.clone(), label_style),
+            Span::raw(" ".repeat(pad)),
+            Span::styled(state.clone(), state_style),
+        ]));
+    }
+    f.render_widget(Paragraph::new(lines), inner);
 }
 
 /// The chat history picker: past conversations this session, newest first.
@@ -4671,6 +4725,7 @@ fn draw_popup(
         | Popup::Palette { .. }
         | Popup::AiChat { .. }
         | Popup::AiHistory { .. }
+        | Popup::Toggles { .. }
         | Popup::ImageView { .. }
         | Popup::CommitMessage { .. }
         | Popup::JunkReview { .. }
