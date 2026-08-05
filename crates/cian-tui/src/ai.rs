@@ -453,6 +453,28 @@ impl App {
         }
     }
 
+    /// First-Esc behaviour in the chat: stop a running answer (crmaine over the
+    /// server, or a local request) and leave the chat open. Returns true if it
+    /// cancelled something; false means nothing was in flight (so Esc closes).
+    pub(crate) fn cancel_ai_pending(&mut self) -> bool {
+        if self.crmaine_rx.is_some() {
+            self.cancel_crmaine();
+            return true;
+        }
+        if self.ai_job.is_some() {
+            // The python worker may keep running, but stop waiting on it.
+            self.ai_job = None;
+            self.crmaine_stage = None;
+            self.append_crmaine_answer(&format!("\n⚠ {}", tr(self.lang, "cancelled", "中断しました")));
+            if let Popup::AiChat { pending, scroll, .. } = &mut self.popup {
+                *pending = false;
+                *scroll = usize::MAX;
+            }
+            return true;
+        }
+        false
+    }
+
     /// Send the typed chat line, routing a follow-up to the same backend the
     /// conversation started on — the local `:ai` model, or crmaine `/query` /
     /// `/agent` — so a RAG/agent thread stays a RAG/agent thread.

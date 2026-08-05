@@ -590,6 +590,8 @@ impl App {
             self.message = Some(tr(self.lang, "crmaine is busy", "crmaine 実行中").into());
             return;
         }
+        let port = cfg.port;
+        let rid = self.arm_crmaine_request(port);
         let mut body = serde_json::json!({
             "question": question,
             "cache_dir": cfg.cache_dir,
@@ -599,12 +601,12 @@ impl App {
             "auth_mode": cfg.auth_mode,
             "query_expansion": true,
             "rerank": true,
+            "request_id": rid,
         });
         if path == "/agent" {
             body["history"] = history;
         }
         let body = body.to_string();
-        let port = cfg.port;
         let (tx, rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
             if http_get(port, "/health").is_err() {
@@ -646,6 +648,37 @@ impl App {
         self.message = Some(msg);
         if let Popup::AiChat { pending, .. } = &mut self.popup {
             *pending = false;
+        }
+    }
+
+    /// Take the next `request_id` and remember it (with the port) as in-flight,
+    /// so [`Self::cancel_crmaine`] can stop exactly this call.
+    fn arm_crmaine_request(&mut self, port: u16) -> String {
+        self.crmaine_req_seq = self.crmaine_req_seq.wrapping_add(1);
+        let id = format!("cian-{}", self.crmaine_req_seq);
+        self.crmaine_inflight = Some((id.clone(), port));
+        id
+    }
+
+    /// Stop the crmaine answer that is streaming: tell the server to cancel this
+    /// `request_id` (fire-and-forget) and drop the local stream. Used by Esc.
+    pub(crate) fn cancel_crmaine(&mut self) {
+        if self.crmaine_rx.is_none() {
+            return;
+        }
+        if let Some((rid, port)) = self.crmaine_inflight.take() {
+            std::thread::spawn(move || {
+                let body = serde_json::json!({ "request_id": rid }).to_string();
+                let _ = http_post(port, "/cancel", &body);
+            });
+        }
+        self.crmaine_rx = None;
+        self.crmaine_stage = None;
+        self.crmaine_sources.clear();
+        self.append_crmaine_answer(&format!("\n⚠ {}", tr(self.lang, "cancelled", "中断しました")));
+        if let Popup::AiChat { pending, scroll, .. } = &mut self.popup {
+            *pending = false;
+            *scroll = usize::MAX;
         }
     }
 
@@ -706,6 +739,9 @@ impl App {
         if let Some(err) = finished {
             self.crmaine_rx = None;
             self.crmaine_stage = None;
+            self.crmaine_inflight = None;
+            // Remember this answer's citations so feedback can name them.
+            self.crmaine_last_sources = self.crmaine_sources.clone();
             // Append citations, then close out the turn.
             if err.is_none() && !self.crmaine_sources.is_empty() {
                 let mut block = String::from("\n\n— sources —\n");
@@ -734,7 +770,7 @@ impl App {
 
     /// Append streamed text to the assistant's turn, starting a new assistant
     /// message if the last entry is the user's question.
-    fn append_crmaine_answer(&mut self, text: &str) {
+    pub(crate) fn append_crmaine_answer(&mut self, text: &str) {
         if let Popup::AiChat { log, scroll, .. } = &mut self.popup {
             match log.last_mut() {
                 Some(m) if !m.user => m.text.push_str(text),
@@ -885,6 +921,22 @@ fn http_get(port: u16, path: &str) -> Result<String, String> {
     let mut s = connect(port)?;
     let req = format!("GET {} HTTP/1.0\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n", path);
     s.write_all(req.as_bytes()).map_err(|e| e.to_string())?;
+    read_response_body(s)
+}
+
+/// POST a JSON body and return the (non-streamed) response body. For the small
+/// request/reply endpoints: `/cancel`, `/feedback`, `/search_files`.
+pub(crate) fn http_post(port: u16, path: &str, body: &str) -> Result<String, String> {
+    let mut s = connect(port)?;
+    let req = format!(
+        "POST {} HTTP/1.0\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\n\
+         Content-Length: {}\r\nConnection: close\r\n\r\n{}",
+        path,
+        body.len(),
+        body
+    );
+    s.write_all(req.as_bytes()).map_err(|e| e.to_string())?;
+    let _ = s.shutdown(Shutdown::Write);
     read_response_body(s)
 }
 

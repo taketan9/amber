@@ -257,9 +257,13 @@ impl App {
             let shift = key.modifiers.contains(KeyModifiers::SHIFT);
             match key.code {
                 KeyCode::Esc => {
-                    // Keep the conversation recoverable from the history picker.
-                    self.archive_current_ai_chat();
-                    self.popup = Popup::None;
+                    // A streaming answer: first Esc stops it (and leaves the chat
+                    // open); a second Esc then closes. Otherwise close, keeping the
+                    // conversation recoverable from the history picker.
+                    if !self.cancel_ai_pending() {
+                        self.archive_current_ai_chat();
+                        self.popup = Popup::None;
+                    }
                 }
                 // Ctrl+R opens the conversation history; Ctrl+N starts a fresh
                 // one (tucking the current away first).

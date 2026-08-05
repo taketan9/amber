@@ -1827,6 +1827,14 @@ pub struct App {
     /// crmaine/VS Code one — the isolated index built by `:index`. Cleared by
     /// `:ragshared` to go back to crmaine's own index.
     crmaine_cache_override: Option<String>,
+    /// Monotonic counter for crmaine `request_id`s, and the id of the call
+    /// currently in flight (so Esc can cancel exactly that one) with the port to
+    /// reach it on.
+    crmaine_req_seq: u64,
+    crmaine_inflight: Option<(String, u16)>,
+    /// The citations from the last finished answer, kept so feedback can name
+    /// the files it should boost / demote.
+    crmaine_last_sources: Vec<String>,
     /// Past AI/crmaine conversations this session, newest first, for the history
     /// picker (`Ctrl+R` in the chat). Each is a transcript plus the backend it
     /// spoke to, so reopening one still routes follow-ups correctly.
@@ -1981,6 +1989,9 @@ impl App {
             crmaine_stage: None,
             crmaine_sources: Vec::new(),
             crmaine_cache_override: None,
+            crmaine_req_seq: 0,
+            crmaine_inflight: None,
+            crmaine_last_sources: Vec::new(),
             ai_history: Vec::new(),
             ai_rect: Rect::new(0, 0, 0, 0),
             junk_rect: Rect::new(0, 0, 0, 0),
