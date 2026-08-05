@@ -360,7 +360,10 @@ impl App {
         self.crmaine_rx = Some(rx);
         self.crmaine_stage = Some(tr(self.lang, "indexing…", "インデックス構築中…").into());
         self.crmaine_sources.clear();
+        // After indexing, a typed follow-up should query the freshly-built
+        // index (RAG), so the console chat is a RAG conversation.
         self.start_ai_chat(
+            ChatMode::Rag,
             vec![ChatMsg {
                 user: true,
                 text: format!("{}: {}", tr(self.lang, "index", "インデックス"), folder.display()),
@@ -382,8 +385,9 @@ impl App {
         }
     }
 
-    /// Shared driver for the crmaine chat endpoints (`/query`, `/agent`): resolve
-    /// config, fire the blocking HTTP call on a worker, and open the chat popup.
+    /// Open a fresh crmaine chat (`/query` = RAG, `/agent` = Ajent) with the
+    /// first question. Follow-ups typed into the chat reuse the same endpoint via
+    /// [`Self::send_ai_message`] → [`Self::fire_crmaine`].
     fn start_crmaine(&mut self, path: &'static str, label: &str, question: &str) {
         let question = question.trim().to_string();
         if question.is_empty() {
@@ -391,10 +395,30 @@ impl App {
                 Some(tr(self.lang, "type a question after the command", "コマンドの後に質問を入力").into());
             return;
         }
+        if self.crmaine_rx.is_some() {
+            self.message = Some(tr(self.lang, "crmaine is busy", "crmaine 実行中").into());
+            return;
+        }
+        // Fail before opening a popup if crmaine isn't configured/reachable-config.
+        if let Err(e) = self.crmaine_resolved() {
+            self.message = Some(e);
+            return;
+        }
+        let mode = if path == "/agent" { ChatMode::Agent } else { ChatMode::Rag };
+        self.start_ai_chat(mode, vec![ChatMsg { user: true, text: format!("{label}: {question}") }], true);
+        // First turn — no prior history.
+        self.fire_crmaine(path, &question, serde_json::Value::Null);
+    }
+
+    /// Send `question` to a crmaine endpoint (`/query` or `/agent`), streaming
+    /// the answer into the already-open chat. `history` (prior turns as
+    /// `[{role,content}]`) is used by `/agent`; `/query` ignores it. Assumes the
+    /// user turn is already in the log and `pending` is set.
+    pub(crate) fn fire_crmaine(&mut self, path: &'static str, question: &str, history: serde_json::Value) {
         let cfg = match self.crmaine_resolved() {
             Ok(c) => c,
             Err(e) => {
-                self.message = Some(e);
+                self.fail_pending_chat(e);
                 return;
             }
         };
@@ -402,14 +426,23 @@ impl App {
             self.message = Some(tr(self.lang, "crmaine is busy", "crmaine 実行中").into());
             return;
         }
-
-        let body = build_body(&question, &cfg);
+        let mut body = serde_json::json!({
+            "question": question,
+            "cache_dir": cfg.cache_dir,
+            "model": cfg.model,
+            "endpoint": cfg.endpoint,
+            "api_version": cfg.api_version,
+            "auth_mode": cfg.auth_mode,
+            "query_expansion": true,
+            "rerank": true,
+        });
+        if path == "/agent" {
+            body["history"] = history;
+        }
+        let body = body.to_string();
         let port = cfg.port;
-        let path = path.to_string();
         let (tx, rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
-            // A health check first, so an unstarted server gives a clear message
-            // rather than a raw connection error mid-stream.
             if http_get(port, "/health").is_err() {
                 let _ = tx.send(CrmaineEvent::Error(format!(
                     "server not reachable on 127.0.0.1:{port} — start crmaine in VS Code first"
@@ -417,7 +450,7 @@ impl App {
                 return;
             }
             let parse = |l: &str| parse_sse_line(l).into_iter().collect::<Vec<_>>();
-            if let Err(e) = stream_sse(port, &path, &body, parse, |ev| {
+            if let Err(e) = stream_sse(port, path, &body, parse, |ev| {
                 let _ = tx.send(ev);
             }) {
                 let _ = tx.send(CrmaineEvent::Error(e));
@@ -426,10 +459,30 @@ impl App {
         self.crmaine_rx = Some(rx);
         self.crmaine_stage = Some(tr(self.lang, "connecting…", "接続中…").into());
         self.crmaine_sources.clear();
-        self.start_ai_chat(
-            vec![ChatMsg { user: true, text: format!("{}: {}", label, question) }],
-            true,
-        );
+    }
+
+    /// Prior chat turns as `[{role,content}]` for `/agent`, excluding the final
+    /// user turn (the question being sent now).
+    pub(crate) fn crmaine_history_json(&self) -> serde_json::Value {
+        let mut arr = Vec::new();
+        if let Popup::AiChat { log, .. } = &self.popup {
+            let upto = log.len().saturating_sub(1);
+            for m in &log[..upto] {
+                arr.push(serde_json::json!({
+                    "role": if m.user { "user" } else { "assistant" },
+                    "content": m.text,
+                }));
+            }
+        }
+        serde_json::Value::Array(arr)
+    }
+
+    /// Report an error and stop the chat spinner (a request that never launched).
+    pub(crate) fn fail_pending_chat(&mut self, msg: String) {
+        self.message = Some(msg);
+        if let Popup::AiChat { pending, .. } = &mut self.popup {
+            *pending = false;
+        }
     }
 
     /// Drain streamed crmaine events into the chat: append answer chunks live,
@@ -526,22 +579,6 @@ impl App {
             *scroll = usize::MAX;
         }
     }
-}
-
-/// The JSON request body for `/query` and `/agent`. Both read the same core
-/// fields; `/agent` simply ignores `cache_dir` / `query_expansion` / `rerank`.
-pub(crate) fn build_body(question: &str, cfg: &CrmaineResolved) -> String {
-    serde_json::json!({
-        "question": question,
-        "cache_dir": cfg.cache_dir,
-        "model": cfg.model,
-        "endpoint": cfg.endpoint,
-        "api_version": cfg.api_version,
-        "auth_mode": cfg.auth_mode,
-        "query_expansion": true,
-        "rerank": true,
-    })
-    .to_string()
 }
 
 /// POST `path` and stream its SSE body, handing each parsed event to

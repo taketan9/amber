@@ -501,6 +501,8 @@ enum Popup {
         scroll: usize,
         pending: bool,
         sel: Option<(usize, usize)>,
+        /// Which backend a typed follow-up goes to.
+        mode: ChatMode,
     },
     /// The chat history picker (`Ctrl+R` in the chat): past conversations this
     /// session, newest first. Enter reopens one, `d` forgets it.
@@ -1095,6 +1097,18 @@ enum AiPurpose {
 struct AiJob {
     rx: std::sync::mpsc::Receiver<Result<String, String>>,
     purpose: AiPurpose,
+}
+
+/// Which backend a chat talks to, so a typed follow-up goes back to the same
+/// place the conversation started (not always the local `:ai` model).
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum ChatMode {
+    /// The local python `:ai` assistant.
+    Ai,
+    /// crmaine RAG (`/query`).
+    Rag,
+    /// crmaine Ajent (`/agent`).
+    Agent,
 }
 
 /// One line of an AI chat transcript.
@@ -1753,8 +1767,9 @@ pub struct App {
     /// `:ragshared` to go back to crmaine's own index.
     crmaine_cache_override: Option<String>,
     /// Past AI/crmaine conversations this session, newest first, for the history
-    /// picker (`Ctrl+R` in the chat). Each is a snapshot of a transcript.
-    ai_history: Vec<Vec<ChatMsg>>,
+    /// picker (`Ctrl+R` in the chat). Each is a transcript plus the backend it
+    /// spoke to, so reopening one still routes follow-ups correctly.
+    ai_history: Vec<(ChatMode, Vec<ChatMsg>)>,
     /// The chat transcript's on-screen body rect, the effective scroll offset,
     /// and the flat wrapped lines — rebuilt each frame so a mouse drag can map
     /// to a line range and copy it.

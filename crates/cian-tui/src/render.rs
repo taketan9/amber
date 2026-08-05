@@ -2067,7 +2067,7 @@ fn draw_ai_chat(f: &mut Frame, area: Rect, app: &mut App) {
     let mut shown: Vec<Line> = Vec::new();
     let mut input_str = String::new();
     let mut off = 0usize;
-    if let Popup::AiChat { input, log, scroll, pending, sel } = &mut app.popup {
+    if let Popup::AiChat { input, log, scroll, pending, sel, .. } = &mut app.popup {
         // Flat plain-text lines (for copying) and their styled counterparts.
         // Each turn is a speaker header line followed by the wrapped body,
         // indented — the "crmaine - Ajent" name is too long to sit inline.
@@ -2211,11 +2211,16 @@ fn draw_ai_history(f: &mut Frame, area: Rect, app: &App) {
     let view_h = inner.height as usize;
     let first = if cursor >= view_h { cursor + 1 - view_h } else { 0 };
     let mut lines: Vec<Line> = Vec::new();
-    for (i, log) in app.ai_history.iter().enumerate().skip(first).take(view_h) {
+    for (i, (mode, log)) in app.ai_history.iter().enumerate().skip(first).take(view_h) {
         let sel = i == cursor;
         let title = App::ai_history_title(log);
         let turns = log.iter().filter(|m| m.user).count();
         let marker = if sel { "▶ " } else { "  " };
+        let badge = match mode {
+            ChatMode::Rag => "rag ",
+            ChatMode::Agent => "agent ",
+            ChatMode::Ai => "ai ",
+        };
         let title_style = if sel {
             Style::default()
                 .fg(readable_on(theme().selected_bg))
@@ -2226,6 +2231,7 @@ fn draw_ai_history(f: &mut Frame, area: Rect, app: &App) {
         };
         lines.push(Line::from(vec![
             Span::styled(marker, Style::default().fg(carmine)),
+            Span::styled(badge, Style::default().fg(dim_c)),
             Span::styled(title, title_style),
             Span::styled(format!("  ({turns})"), Style::default().fg(dim_c)),
         ]));

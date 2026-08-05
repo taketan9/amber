@@ -263,7 +263,7 @@ impl App {
                 // Ctrl+R opens the conversation history; Ctrl+N starts a fresh
                 // one (tucking the current away first).
                 KeyCode::Char('r') if ctrl => self.open_ai_history(),
-                KeyCode::Char('n') if ctrl => self.start_ai_chat(Vec::new(), false),
+                KeyCode::Char('n') if ctrl => self.start_ai_chat(ChatMode::Ai, Vec::new(), false),
                 // Alt+Enter inserts a newline (multi-line questions); plain
                 // Enter sends. Ctrl+J is the same as Alt+Enter for terminals
                 // that can't report the modifier on Enter.

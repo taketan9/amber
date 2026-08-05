@@ -612,6 +612,7 @@
             scroll: 0,
             pending: false,
             sel: Some((0, 1)),
+            mode: ChatMode::Ai,
         };
         // A selection copies those flat lines (as the draw would have populated).
         app.ai_lines = vec!["one".into(), "two".into(), "three".into()];
@@ -5250,7 +5251,7 @@
         let p = d.path().to_path_buf();
         let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
 
-        // A chat with an answer in it.
+        // A RAG chat with an answer in it.
         app.popup = Popup::AiChat {
             input: String::new(),
             log: vec![
@@ -5260,14 +5261,17 @@
             scroll: 0,
             pending: false,
             sel: None,
+            mode: ChatMode::Rag,
         };
         app.open_ai_history();
         assert!(matches!(app.popup, Popup::AiHistory { .. }), "history picker opens");
         assert_eq!(app.ai_history.len(), 1, "current conversation archived");
-        assert_eq!(App::ai_history_title(&app.ai_history[0]), "first question");
+        assert_eq!(app.ai_history[0].0, ChatMode::Rag, "backend remembered");
+        assert_eq!(App::ai_history_title(&app.ai_history[0].1), "first question");
 
-        // Opening it again does not duplicate the identical snapshot.
+        // Reopening restores the backend, so a follow-up still goes to RAG.
         app.load_ai_conversation(0);
+        assert!(matches!(app.popup, Popup::AiChat { mode: ChatMode::Rag, .. }), "mode restored");
         app.open_ai_history();
         assert_eq!(app.ai_history.len(), 1, "identical snapshot deduped");
 
@@ -5278,6 +5282,7 @@
             scroll: 0,
             pending: true,
             sel: None,
+            mode: ChatMode::Ai,
         };
         app.archive_current_ai_chat();
         assert_eq!(app.ai_history.len(), 1, "answerless chat not archived");

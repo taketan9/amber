@@ -101,7 +101,7 @@ impl App {
                 Some("AI unavailable (python, packages, or sign-in) — feature hidden".into());
             return;
         }
-        self.start_ai_chat(Vec::new(), false);
+        self.start_ai_chat(ChatMode::Ai, Vec::new(), false);
     }
 
     /// Summarise the file open in the F3 viewer. Unlike the metadata-only
@@ -136,7 +136,7 @@ impl App {
             .to_string();
         // Open the chat with the request shown, so the reply lands in a place
         // that can be scrolled, selected and copied — and followed up in.
-        self.start_ai_chat(vec![ChatMsg { user: true, text: format!("Summarise {}", name) }], true);
+        self.start_ai_chat(ChatMode::Ai, vec![ChatMsg { user: true, text: format!("Summarise {}", name) }], true);
         self.ai_request(AiPurpose::Chat, system, body);
     }
 
@@ -174,7 +174,7 @@ impl App {
              likely fix (a command or a change). If there is no error, say the \
              output looks fine. Be concise; plain text, no markdown headings.",
         );
-        self.start_ai_chat(vec![ChatMsg { user: true, text: "Explain the last error".into() }], true);
+        self.start_ai_chat(ChatMode::Ai, vec![ChatMsg { user: true, text: "Explain the last error".into() }], true);
         self.ai_request(AiPurpose::Chat, system, body);
     }
 
@@ -201,7 +201,7 @@ impl App {
              anything risky: a removed check, a changed default, a probable \
              typo. Be concise; plain text, no markdown headings."
             .to_string();
-        self.start_ai_chat(vec![ChatMsg { user: true, text: "Explain this diff".into() }], true);
+        self.start_ai_chat(ChatMode::Ai, vec![ChatMsg { user: true, text: "Explain this diff".into() }], true);
         self.ai_request(AiPurpose::Chat, system, body);
     }
 
@@ -239,7 +239,7 @@ impl App {
              next thing to check. Ignore routine INFO noise. Be concise; plain \
              text, no markdown headings."
             .to_string();
-        self.start_ai_chat(vec![ChatMsg { user: true, text: format!("Triage the log: {}", name) }], true);
+        self.start_ai_chat(ChatMode::Ai, vec![ChatMsg { user: true, text: format!("Triage the log: {}", name) }], true);
         self.ai_request(AiPurpose::Chat, system, tail);
     }
 
@@ -346,17 +346,18 @@ impl App {
 
     /// Open a chat popup, first tucking the current conversation (if it has an
     /// answer in it) into the history so switching or restarting never loses it.
-    pub(crate) fn start_ai_chat(&mut self, log: Vec<ChatMsg>, pending: bool) {
+    pub(crate) fn start_ai_chat(&mut self, mode: ChatMode, log: Vec<ChatMsg>, pending: bool) {
         self.archive_current_ai_chat();
-        self.popup = Popup::AiChat { input: String::new(), log, scroll: usize::MAX, pending, sel: None };
+        self.popup =
+            Popup::AiChat { input: String::new(), log, scroll: usize::MAX, pending, sel: None, mode };
     }
 
     /// Snapshot the open chat into `ai_history` (newest first, deduped) if it
     /// holds at least one answer. A no-op otherwise.
     pub(crate) fn archive_current_ai_chat(&mut self) {
-        if let Popup::AiChat { log, .. } = &self.popup {
+        if let Popup::AiChat { log, mode, .. } = &self.popup {
             if log.iter().any(|m| !m.user) {
-                let snap = log.clone();
+                let snap = (*mode, log.clone());
                 if self.ai_history.first() != Some(&snap) {
                     self.ai_history.insert(0, snap);
                     self.ai_history.truncate(30);
@@ -388,9 +389,15 @@ impl App {
 
     /// Reopen the conversation at `i` as the live chat.
     pub(crate) fn load_ai_conversation(&mut self, i: usize) {
-        if let Some(log) = self.ai_history.get(i).cloned() {
-            self.popup =
-                Popup::AiChat { input: String::new(), log, scroll: usize::MAX, pending: false, sel: None };
+        if let Some((mode, log)) = self.ai_history.get(i).cloned() {
+            self.popup = Popup::AiChat {
+                input: String::new(),
+                log,
+                scroll: usize::MAX,
+                pending: false,
+                sel: None,
+                mode,
+            };
         }
     }
 
@@ -404,25 +411,37 @@ impl App {
         }
     }
 
-    /// Send the typed chat line to the model.
+    /// Send the typed chat line, routing a follow-up to the same backend the
+    /// conversation started on — the local `:ai` model, or crmaine `/query` /
+    /// `/agent` — so a RAG/agent thread stays a RAG/agent thread.
     pub(crate) fn send_ai_message(&mut self) {
-        let question = if let Popup::AiChat { input, log, pending, scroll, .. } = &mut self.popup {
-            let q = input.trim().to_string();
-            if q.is_empty() || *pending {
+        let (question, mode) =
+            if let Popup::AiChat { input, log, pending, scroll, mode, .. } = &mut self.popup {
+                let q = input.trim().to_string();
+                if q.is_empty() || *pending {
+                    return;
+                }
+                input.clear();
+                log.push(ChatMsg { user: true, text: q.clone() });
+                *pending = true;
+                *scroll = usize::MAX;
+                (q, *mode)
+            } else {
                 return;
+            };
+        match mode {
+            ChatMode::Ai => {
+                let system = "You are a concise assistant embedded in a terminal file \
+                              manager. Answer briefly in plain text."
+                    .to_string();
+                self.ai_request(AiPurpose::Chat, system, question);
             }
-            input.clear();
-            log.push(ChatMsg { user: true, text: q.clone() });
-            *pending = true;
-            *scroll = usize::MAX;
-            q
-        } else {
-            return;
-        };
-        let system = "You are a concise assistant embedded in a terminal file \
-                      manager. Answer briefly in plain text."
-            .to_string();
-        self.ai_request(AiPurpose::Chat, system, question);
+            ChatMode::Rag => self.fire_crmaine("/query", &question, serde_json::Value::Null),
+            ChatMode::Agent => {
+                let history = self.crmaine_history_json();
+                self.fire_crmaine("/agent", &question, history);
+            }
+        }
     }
 
     /// Open the "describe a command" prompt (if AI is available).
