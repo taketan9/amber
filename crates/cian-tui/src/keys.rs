@@ -1248,6 +1248,7 @@ impl App {
                 Popup::ConfirmDiffCopy { .. } => { self.confirm_diff_copy(); Ok(()) }
                 Popup::ConfirmDirSync { .. } => { self.confirm_dir_sync(); Ok(()) }
                 Popup::ConfirmRemoteDelete { .. } => { self.confirm_remote_delete(); Ok(()) }
+                Popup::ConfirmRemoteMove { .. } => { self.confirm_remote_move(); Ok(()) }
                 Popup::ConfirmSnippet { cmd, enter, .. } => {
                     let (cmd, enter) = (cmd.clone(), *enter);
                     self.popup = Popup::None;
@@ -1574,9 +1575,14 @@ impl App {
                     self.leave_remote_pane();
                     return Ok(());
                 }
-                // `c` copies across the boundary (download to the local pane).
+                // `c` copies across the boundary, `m` moves (copy then delete the
+                // source, after a confirm).
                 KeyCode::Char('c') if !ctrl => {
                     self.try_remote_pane_transfer(false);
+                    return Ok(());
+                }
+                KeyCode::Char('m') if !ctrl => {
+                    self.try_remote_pane_transfer(true);
                     return Ok(());
                 }
                 // Write ops on the server, same keys as the local pane:
@@ -1597,12 +1603,12 @@ impl App {
                     self.remote_pane_delete();
                     return Ok(());
                 }
-                // Not wired for remote yet: move, checksum, branch, compare.
-                KeyCode::Char('m' | 'x' | 'b' | '=') if !ctrl => {
+                // Not wired for remote yet: checksum, branch, compare.
+                KeyCode::Char('x' | 'b' | '=') if !ctrl => {
                     self.message = Some(tr(
                         self.lang,
-                        "remote pane: not available (c copy, A/a/r/d write)",
-                        "リモートペイン: 未対応（c コピー, A/a/r/d 書込）",
+                        "remote pane: not available (c copy, m move, A/a/r/d write)",
+                        "リモートペイン: 未対応（c コピー, m 移動, A/a/r/d 書込）",
                     ).into());
                     return Ok(());
                 }

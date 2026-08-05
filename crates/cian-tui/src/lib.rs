@@ -233,6 +233,29 @@ struct RemoteView {
     name: String,
 }
 
+/// A queued host-crossing move: copy each source file to the destination, then
+/// delete the source. A `None` target means that end is the local machine; the
+/// source paths are absolute (local paths or remote absolute paths as strings).
+#[derive(Clone)]
+struct RemoteMovePlan {
+    files: Vec<String>,
+    src_target: Option<cian_scp::Target>,
+    dst_target: Option<cian_scp::Target>,
+    dst_dir: String,
+}
+
+// Manual Debug so the connection targets (which hold secrets) are never printed.
+impl std::fmt::Debug for RemoteMovePlan {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RemoteMovePlan")
+            .field("files", &self.files.len())
+            .field("src_remote", &self.src_target.is_some())
+            .field("dst_remote", &self.dst_target.is_some())
+            .field("dst_dir", &self.dst_dir)
+            .finish()
+    }
+}
+
 /// What a fuzzy picker is choosing between.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PaletteKind {
@@ -279,6 +302,9 @@ enum Popup {
     /// Confirm deleting a remote entry (`d` in the remote pane). `path` is its
     /// absolute remote path; `side` is which remote pane to re-list after.
     ConfirmRemoteDelete { side: FocusedPane, path: String, name: String, is_dir: bool },
+    /// Confirm a host-crossing move (`m`): copy each file across, then delete the
+    /// source. `from`/`to` label the ends for the prompt.
+    ConfirmRemoteMove { plan: RemoteMovePlan, from: String, to: String },
     TextInput {
         title: String,
         prompt: String,

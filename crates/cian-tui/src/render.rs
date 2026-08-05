@@ -4585,6 +4585,26 @@ fn draw_popup(
                 tr(lang, " y/Enter = delete   n/Esc = cancel ", " y/Enter = 削除   n/Esc = 取消 ").to_string(),
             )
         }
+        Popup::ConfirmRemoteMove { plan, from, to } => {
+            let n = plan.files.len();
+            let head = if lang == Lang::Ja {
+                format!("{} 個をホスト間で移動します:", n)
+            } else {
+                format!("move {} item(s) across hosts:", n)
+            };
+            let lines = vec![
+                head,
+                String::new(),
+                format!("  {}  →  {}", from, to),
+                String::new(),
+                tr(lang, "Each file is copied, then deleted from the source.", "各ファイルをコピー後、コピー元から削除します。").to_string(),
+            ];
+            (
+                tr(lang, " move across hosts ", " ホスト間の移動 ").to_string(),
+                lines,
+                tr(lang, " y/Enter = move   n/Esc = cancel ", " y/Enter = 移動   n/Esc = 取消 ").to_string(),
+            )
+        }
         Popup::ConfirmSnippet { name, cmd, .. } => {
             let head = if lang == Lang::Ja {
                 format!("スニペットを送信しますか？  「{}」", name)

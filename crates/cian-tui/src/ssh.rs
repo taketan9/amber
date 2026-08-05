@@ -383,8 +383,8 @@ impl App {
                         self.side_tabs_mut(side).active_mut().enter_remote(label, cwd, entries);
                         self.message = Some(tr(
                             self.lang,
-                            "remote pane — Enter/l open, - up, c download, A/a/r/d write, Esc close",
-                            "リモートペイン — Enter/l 開く, - 上, c DL, A/a/r/d 書込, Esc 閉じる",
+                            "remote pane — Enter/l open, - up, c copy, m move, A/a/r/d write, Esc close",
+                            "リモートペイン — Enter/l 開く, - 上, c コピー, m 移動, A/a/r/d 書込, Esc 閉じる",
                         ).into());
                     }
                     Err(e) => {
@@ -572,10 +572,38 @@ impl App {
             return false; // purely local — let the normal copy handle it
         }
         if is_move {
-            self.message = Some(tr(self.lang,
-                "move across hosts isn't supported — use c to copy",
-                "ホスト間の移動は未対応 — コピーは c",
-            ).into());
+            // A host-crossing move: copy across, then delete the source. Build a
+            // plan for whichever direction and confirm before touching anything.
+            let files: Vec<String> = self
+                .side_pane(active)
+                .target_paths()
+                .iter()
+                .map(|p| p.to_string_lossy().into_owned())
+                .collect();
+            if files.is_empty() {
+                self.message = Some(tr(self.lang, "nothing to move", "移動対象なし").into());
+                return true;
+            }
+            let dst_dir = if o_remote {
+                self.side_pane(opp).remote_view().map(|(_, p)| p.to_string())
+            } else {
+                Some(self.side_pane(opp).cwd.display().to_string())
+            };
+            let Some(dst_dir) = dst_dir else { return true };
+            let src_target = self.remote_targets[Self::side_idx(active)].clone();
+            let dst_target = self.remote_targets[Self::side_idx(opp)].clone();
+            let from = src_target.as_ref().map(|(_, l)| l.clone()).unwrap_or_else(|| "local".into());
+            let to = dst_target.as_ref().map(|(_, l)| l.clone()).unwrap_or_else(|| "local".into());
+            self.popup = Popup::ConfirmRemoteMove {
+                plan: RemoteMovePlan {
+                    files,
+                    src_target: src_target.map(|(t, _)| t),
+                    dst_target: dst_target.map(|(t, _)| t),
+                    dst_dir,
+                },
+                from,
+                to,
+            };
             return true;
         }
         if a_remote && !o_remote {
@@ -708,6 +736,98 @@ impl App {
             }
             let _ = std::fs::remove_dir_all(&tmp_dir);
             report.note = Some("relayed via this machine".to_string());
+            report
+        });
+    }
+
+    /// Confirmed host-crossing move: copy each file across (upload / download /
+    /// relay, depending on which end is local), then delete the source. Runs on
+    /// the op worker; the remote panes re-list when it lands.
+    pub(crate) fn confirm_remote_move(&mut self) {
+        let Popup::ConfirmRemoteMove { plan, .. } =
+            std::mem::replace(&mut self.popup, Popup::None)
+        else {
+            return;
+        };
+        // Refresh whichever remote pane loses files (the source), else the dest.
+        self.remote_refresh = Some(if plan.src_target.is_some() {
+            self.remote_side()
+        } else if matches!(self.focused, FocusedPane::Right) {
+            FocusedPane::Left
+        } else {
+            FocusedPane::Right
+        });
+        let RemoteMovePlan { files, src_target, dst_target, dst_dir } = plan;
+        self.start_op("moving", move |ctl| {
+            let mut report = OpReport::default();
+            let cancel = ctl.cancel;
+            let total = files.len();
+            let tmp_dir = std::env::temp_dir().join("cian-relay");
+            let _ = std::fs::create_dir_all(&tmp_dir);
+            for (i, src) in files.iter().enumerate() {
+                if cancel.load(Ordering::Relaxed) {
+                    break;
+                }
+                let fname = src.trim_end_matches('/').rsplit(['/', '\\']).next().unwrap_or("file").to_string();
+                // Transfer the file across, by direction.
+                let moved: Result<(), String> = match (&src_target, &dst_target) {
+                    (Some(s), Some(d)) => {
+                        // remote → remote: relay through a local temp.
+                        let tmp = tmp_dir.join(&fname);
+                        let dl = {
+                            let mut fwd = |done: u64, tot: u64| {
+                                (ctl.on_progress)(&cian_core::progress::Progress { bytes_done: done, bytes_total: tot, files_done: i, files_total: total, current: format!("↓ {fname}") });
+                            };
+                            let mut sctl = cian_scp::Ctl { cancel, on_progress: &mut fwd };
+                            cian_scp::download(s, src, &tmp, &mut sctl)
+                        };
+                        let r = dl.map_err(|e| format!("download: {e}")).and_then(|_| {
+                            let dst_path = join_remote(&dst_dir, &fname);
+                            let mut fwd = |done: u64, tot: u64| {
+                                (ctl.on_progress)(&cian_core::progress::Progress { bytes_done: done, bytes_total: tot, files_done: i, files_total: total, current: format!("↑ {fname}") });
+                            };
+                            let mut sctl = cian_scp::Ctl { cancel, on_progress: &mut fwd };
+                            cian_scp::upload(d, &tmp, &dst_path, None, &mut sctl).map(|_| ()).map_err(|e| format!("upload: {e}"))
+                        });
+                        let _ = std::fs::remove_file(&tmp);
+                        r
+                    }
+                    (Some(s), None) => {
+                        // remote → local: download into the local dir.
+                        let dst = std::path::Path::new(&dst_dir).join(&fname);
+                        let mut fwd = |done: u64, tot: u64| {
+                            (ctl.on_progress)(&cian_core::progress::Progress { bytes_done: done, bytes_total: tot, files_done: i, files_total: total, current: format!("↓ {fname}") });
+                        };
+                        let mut sctl = cian_scp::Ctl { cancel, on_progress: &mut fwd };
+                        cian_scp::download(s, src, &dst, &mut sctl).map(|_| ()).map_err(|e| e.to_string())
+                    }
+                    (None, Some(d)) => {
+                        // local → remote: upload to the remote dir.
+                        let dst_path = join_remote(&dst_dir, &fname);
+                        let mut fwd = |done: u64, tot: u64| {
+                            (ctl.on_progress)(&cian_core::progress::Progress { bytes_done: done, bytes_total: tot, files_done: i, files_total: total, current: format!("↑ {fname}") });
+                        };
+                        let mut sctl = cian_scp::Ctl { cancel, on_progress: &mut fwd };
+                        cian_scp::upload(d, std::path::Path::new(src), &dst_path, None, &mut sctl).map(|_| ()).map_err(|e| e.to_string())
+                    }
+                    (None, None) => Err("both ends local".into()),
+                };
+                // Delete the source only if the copy succeeded.
+                match moved {
+                    Ok(()) => {
+                        let del = match &src_target {
+                            Some(s) => cian_scp::remove(s, src, false).map_err(|e| e.to_string()),
+                            None => std::fs::remove_file(src).map_err(|e| e.to_string()),
+                        };
+                        match del {
+                            Ok(()) => report.ok += 1,
+                            Err(e) => report.note_error(format!("{fname}: copied but source not removed: {e}")),
+                        }
+                    }
+                    Err(e) => report.note_error(format!("{fname}: {e}")),
+                }
+            }
+            let _ = std::fs::remove_dir_all(&tmp_dir);
             report
         });
     }
