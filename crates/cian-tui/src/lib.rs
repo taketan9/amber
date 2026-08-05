@@ -1101,7 +1101,7 @@ struct AiJob {
 
 /// Which backend a chat talks to, so a typed follow-up goes back to the same
 /// place the conversation started (not always the local `:ai` model).
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 enum ChatMode {
     /// The local python `:ai` assistant.
     Ai,
@@ -1112,7 +1112,7 @@ enum ChatMode {
 }
 
 /// One line of an AI chat transcript.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 struct ChatMsg {
     /// True for the user's turn, false for the assistant's.
     user: bool,
@@ -3451,6 +3451,8 @@ pub fn run(left: Option<PathBuf>, right: Option<PathBuf>, startup: StartupMacro)
     startup_errors.extend(terminal_advice());
 
     let mut app = App::new(left, right, config)?;
+    // Bring back past chat conversations so `Ctrl+R` in the chat spans restarts.
+    app.ai_history = ai::restore_ai_history();
     // Probe AI availability off-thread so the first right-click never blocks on
     // python starting up.
     app.spawn_ai_probe();

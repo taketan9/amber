@@ -6,6 +6,27 @@
 
 use super::*;
 
+/// A stored chat conversation for `ai_history.json` — a transcript and the
+/// backend it spoke to (so a reopened conversation still routes follow-ups).
+#[derive(serde::Serialize, serde::Deserialize)]
+pub(crate) struct StoredChat {
+    mode: ChatMode,
+    log: Vec<ChatMsg>,
+}
+
+/// Load the saved chat history (portable-aware), newest first. Empty if there
+/// is none or it is unreadable.
+pub(crate) fn restore_ai_history() -> Vec<(ChatMode, Vec<ChatMsg>)> {
+    let Some(path) = cian_lua::config_read_path("ai_history.json").filter(|p| p.exists()) else {
+        return Vec::new();
+    };
+    let Ok(text) = std::fs::read_to_string(path) else { return Vec::new() };
+    match serde_json::from_str::<Vec<StoredChat>>(&text) {
+        Ok(v) => v.into_iter().map(|c| (c.mode, c.log)).collect(),
+        Err(_) => Vec::new(),
+    }
+}
+
 /// Who the assistant is, prepended to every conversational (chat) system prompt.
 /// The product is crmaine, read「カーマイン」in Japanese; that is the name it
 /// answers to, and it refers to itself in the first person as「私」.
@@ -361,8 +382,28 @@ impl App {
                 if self.ai_history.first() != Some(&snap) {
                     self.ai_history.insert(0, snap);
                     self.ai_history.truncate(30);
+                    self.save_ai_history();
                 }
             }
+        }
+    }
+
+    /// Persist the chat history so it survives a restart. Portable-aware (beside
+    /// `init.lua`, or next to the executable). NOTE: this writes the full
+    /// conversation text — including RAG answers — to `ai_history.json` in
+    /// plaintext; failures are silent.
+    pub(crate) fn save_ai_history(&self) {
+        let Some(path) = cian_lua::config_write_path("ai_history.json") else { return };
+        let stored: Vec<StoredChat> = self
+            .ai_history
+            .iter()
+            .map(|(mode, log)| StoredChat { mode: *mode, log: log.clone() })
+            .collect();
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        if let Ok(json) = serde_json::to_string(&stored) {
+            let _ = std::fs::write(path, json);
         }
     }
 
@@ -405,6 +446,7 @@ impl App {
     pub(crate) fn delete_ai_conversation(&mut self, i: usize) {
         if i < self.ai_history.len() {
             self.ai_history.remove(i);
+            self.save_ai_history();
         }
         if self.ai_history.is_empty() {
             self.popup = Popup::None;
@@ -1079,5 +1121,34 @@ impl App {
             },
         }
         true
+    }
+}
+
+#[cfg(test)]
+mod ai_history_tests {
+    use super::*;
+
+    #[test]
+    fn stored_chats_round_trip_mode_and_log() {
+        let history: Vec<(ChatMode, Vec<ChatMsg>)> = vec![
+            (
+                ChatMode::Rag,
+                vec![
+                    ChatMsg { user: true, text: "q1".into() },
+                    ChatMsg { user: false, text: "a1\nline".into() },
+                ],
+            ),
+            (ChatMode::Agent, vec![ChatMsg { user: true, text: "q2".into() }]),
+        ];
+        // Serialize exactly as save_ai_history does, then read back as restore does.
+        let stored: Vec<StoredChat> =
+            history.iter().map(|(m, l)| StoredChat { mode: *m, log: l.clone() }).collect();
+        let json = serde_json::to_string(&stored).unwrap();
+        let back: Vec<(ChatMode, Vec<ChatMsg>)> = serde_json::from_str::<Vec<StoredChat>>(&json)
+            .unwrap()
+            .into_iter()
+            .map(|c| (c.mode, c.log))
+            .collect();
+        assert_eq!(back, history, "mode and transcript survive a round trip");
     }
 }
