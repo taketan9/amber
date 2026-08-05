@@ -502,6 +502,9 @@ enum Popup {
         pending: bool,
         sel: Option<(usize, usize)>,
     },
+    /// The chat history picker (`Ctrl+R` in the chat): past conversations this
+    /// session, newest first. Enter reopens one, `d` forgets it.
+    AiHistory { cursor: usize },
     /// A copy/move failed because the destination needs administrator rights.
     /// Offers to redo it elevated (Windows only).
     ConfirmElevate { op: PendingOp, targets: Vec<PathBuf>, dest: PathBuf },
@@ -1095,7 +1098,7 @@ struct AiJob {
 }
 
 /// One line of an AI chat transcript.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 struct ChatMsg {
     /// True for the user's turn, false for the assistant's.
     user: bool,
@@ -1749,6 +1752,9 @@ pub struct App {
     /// crmaine/VS Code one — the isolated index built by `:index`. Cleared by
     /// `:ragshared` to go back to crmaine's own index.
     crmaine_cache_override: Option<String>,
+    /// Past AI/crmaine conversations this session, newest first, for the history
+    /// picker (`Ctrl+R` in the chat). Each is a snapshot of a transcript.
+    ai_history: Vec<Vec<ChatMsg>>,
     /// The chat transcript's on-screen body rect, the effective scroll offset,
     /// and the flat wrapped lines — rebuilt each frame so a mouse drag can map
     /// to a line range and copy it.
@@ -1899,6 +1905,7 @@ impl App {
             crmaine_stage: None,
             crmaine_sources: Vec::new(),
             crmaine_cache_override: None,
+            ai_history: Vec::new(),
             ai_rect: Rect::new(0, 0, 0, 0),
             junk_rect: Rect::new(0, 0, 0, 0),
             struct_rect: Rect::new(0, 0, 0, 0),

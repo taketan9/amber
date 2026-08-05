@@ -101,13 +101,7 @@ impl App {
                 Some("AI unavailable (python, packages, or sign-in) — feature hidden".into());
             return;
         }
-        self.popup = Popup::AiChat {
-            input: String::new(),
-            log: Vec::new(),
-            scroll: usize::MAX,
-            pending: false,
-            sel: None,
-        };
+        self.start_ai_chat(Vec::new(), false);
     }
 
     /// Summarise the file open in the F3 viewer. Unlike the metadata-only
@@ -142,13 +136,7 @@ impl App {
             .to_string();
         // Open the chat with the request shown, so the reply lands in a place
         // that can be scrolled, selected and copied — and followed up in.
-        self.popup = Popup::AiChat {
-            input: String::new(),
-            log: vec![ChatMsg { user: true, text: format!("Summarise {}", name) }],
-            scroll: usize::MAX,
-            pending: true,
-            sel: None,
-        };
+        self.start_ai_chat(vec![ChatMsg { user: true, text: format!("Summarise {}", name) }], true);
         self.ai_request(AiPurpose::Chat, system, body);
     }
 
@@ -186,13 +174,7 @@ impl App {
              likely fix (a command or a change). If there is no error, say the \
              output looks fine. Be concise; plain text, no markdown headings.",
         );
-        self.popup = Popup::AiChat {
-            input: String::new(),
-            log: vec![ChatMsg { user: true, text: "Explain the last error".into() }],
-            scroll: usize::MAX,
-            pending: true,
-            sel: None,
-        };
+        self.start_ai_chat(vec![ChatMsg { user: true, text: "Explain the last error".into() }], true);
         self.ai_request(AiPurpose::Chat, system, body);
     }
 
@@ -219,13 +201,7 @@ impl App {
              anything risky: a removed check, a changed default, a probable \
              typo. Be concise; plain text, no markdown headings."
             .to_string();
-        self.popup = Popup::AiChat {
-            input: String::new(),
-            log: vec![ChatMsg { user: true, text: "Explain this diff".into() }],
-            scroll: usize::MAX,
-            pending: true,
-            sel: None,
-        };
+        self.start_ai_chat(vec![ChatMsg { user: true, text: "Explain this diff".into() }], true);
         self.ai_request(AiPurpose::Chat, system, body);
     }
 
@@ -263,13 +239,7 @@ impl App {
              next thing to check. Ignore routine INFO noise. Be concise; plain \
              text, no markdown headings."
             .to_string();
-        self.popup = Popup::AiChat {
-            input: String::new(),
-            log: vec![ChatMsg { user: true, text: format!("Triage the log: {}", name) }],
-            scroll: usize::MAX,
-            pending: true,
-            sel: None,
-        };
+        self.start_ai_chat(vec![ChatMsg { user: true, text: format!("Triage the log: {}", name) }], true);
         self.ai_request(AiPurpose::Chat, system, tail);
     }
 
@@ -372,6 +342,66 @@ impl App {
             let _ = tx.send(r);
         });
         self.ai_job = Some(AiJob { rx, purpose });
+    }
+
+    /// Open a chat popup, first tucking the current conversation (if it has an
+    /// answer in it) into the history so switching or restarting never loses it.
+    pub(crate) fn start_ai_chat(&mut self, log: Vec<ChatMsg>, pending: bool) {
+        self.archive_current_ai_chat();
+        self.popup = Popup::AiChat { input: String::new(), log, scroll: usize::MAX, pending, sel: None };
+    }
+
+    /// Snapshot the open chat into `ai_history` (newest first, deduped) if it
+    /// holds at least one answer. A no-op otherwise.
+    pub(crate) fn archive_current_ai_chat(&mut self) {
+        if let Popup::AiChat { log, .. } = &self.popup {
+            if log.iter().any(|m| !m.user) {
+                let snap = log.clone();
+                if self.ai_history.first() != Some(&snap) {
+                    self.ai_history.insert(0, snap);
+                    self.ai_history.truncate(30);
+                }
+            }
+        }
+    }
+
+    /// A one-line title for a stored conversation — its first question.
+    pub(crate) fn ai_history_title(log: &[ChatMsg]) -> String {
+        log.iter()
+            .find(|m| m.user)
+            .map(|m| m.text.replace('\n', " "))
+            .map(|t| if t.chars().count() > 60 { format!("{}…", t.chars().take(60).collect::<String>()) } else { t })
+            .unwrap_or_else(|| "(empty)".to_string())
+    }
+
+    /// `Ctrl+R` in the chat: archive the current conversation, then show the
+    /// history picker. With nothing to show, say so instead of an empty box.
+    pub(crate) fn open_ai_history(&mut self) {
+        self.archive_current_ai_chat();
+        if self.ai_history.is_empty() {
+            self.message =
+                Some(tr(self.lang, "no past conversations yet", "過去の会話はまだありません").into());
+            return;
+        }
+        self.popup = Popup::AiHistory { cursor: 0 };
+    }
+
+    /// Reopen the conversation at `i` as the live chat.
+    pub(crate) fn load_ai_conversation(&mut self, i: usize) {
+        if let Some(log) = self.ai_history.get(i).cloned() {
+            self.popup =
+                Popup::AiChat { input: String::new(), log, scroll: usize::MAX, pending: false, sel: None };
+        }
+    }
+
+    /// Forget the stored conversation at `i`.
+    pub(crate) fn delete_ai_conversation(&mut self, i: usize) {
+        if i < self.ai_history.len() {
+            self.ai_history.remove(i);
+        }
+        if self.ai_history.is_empty() {
+            self.popup = Popup::None;
+        }
     }
 
     /// Send the typed chat line to the model.

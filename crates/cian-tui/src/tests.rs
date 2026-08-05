@@ -5245,6 +5245,52 @@
     }
 
     #[test]
+    fn ai_history_archives_reopens_and_forgets() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().to_path_buf();
+        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+
+        // A chat with an answer in it.
+        app.popup = Popup::AiChat {
+            input: String::new(),
+            log: vec![
+                ChatMsg { user: true, text: "first question".into() },
+                ChatMsg { user: false, text: "an answer".into() },
+            ],
+            scroll: 0,
+            pending: false,
+            sel: None,
+        };
+        app.open_ai_history();
+        assert!(matches!(app.popup, Popup::AiHistory { .. }), "history picker opens");
+        assert_eq!(app.ai_history.len(), 1, "current conversation archived");
+        assert_eq!(App::ai_history_title(&app.ai_history[0]), "first question");
+
+        // Opening it again does not duplicate the identical snapshot.
+        app.load_ai_conversation(0);
+        app.open_ai_history();
+        assert_eq!(app.ai_history.len(), 1, "identical snapshot deduped");
+
+        // A chat with no answer is not worth archiving.
+        app.popup = Popup::AiChat {
+            input: String::new(),
+            log: vec![ChatMsg { user: true, text: "unanswered".into() }],
+            scroll: 0,
+            pending: true,
+            sel: None,
+        };
+        app.archive_current_ai_chat();
+        assert_eq!(app.ai_history.len(), 1, "answerless chat not archived");
+
+        // Reopen, then forget it.
+        app.load_ai_conversation(0);
+        assert!(matches!(app.popup, Popup::AiChat { .. }), "conversation reopened");
+        app.popup = Popup::AiHistory { cursor: 0 };
+        app.delete_ai_conversation(0);
+        assert!(app.ai_history.is_empty(), "conversation forgotten");
+    }
+
+    #[test]
     fn folder_sync_one_way_copies_source_and_keeps_dest_only() {
         use std::sync::Arc;
         let l = tempfile::tempdir().unwrap();

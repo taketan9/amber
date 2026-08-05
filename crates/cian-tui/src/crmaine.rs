@@ -360,16 +360,13 @@ impl App {
         self.crmaine_rx = Some(rx);
         self.crmaine_stage = Some(tr(self.lang, "indexing…", "インデックス構築中…").into());
         self.crmaine_sources.clear();
-        self.popup = Popup::AiChat {
-            input: String::new(),
-            log: vec![ChatMsg {
+        self.start_ai_chat(
+            vec![ChatMsg {
                 user: true,
                 text: format!("{}: {}", tr(self.lang, "index", "インデックス"), folder.display()),
             }],
-            scroll: usize::MAX,
-            pending: true,
-            sel: None,
-        };
+            true,
+        );
     }
 
     /// `:ragshared` — stop using the `:index`-built index and go back to
@@ -429,13 +426,10 @@ impl App {
         self.crmaine_rx = Some(rx);
         self.crmaine_stage = Some(tr(self.lang, "connecting…", "接続中…").into());
         self.crmaine_sources.clear();
-        self.popup = Popup::AiChat {
-            input: String::new(),
-            log: vec![ChatMsg { user: true, text: format!("{}: {}", label, question) }],
-            scroll: usize::MAX,
-            pending: true,
-            sel: None,
-        };
+        self.start_ai_chat(
+            vec![ChatMsg { user: true, text: format!("{}: {}", label, question) }],
+            true,
+        );
     }
 
     /// Drain streamed crmaine events into the chat: append answer chunks live,

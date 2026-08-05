@@ -293,6 +293,10 @@ pub(crate) fn draw(f: &mut Frame, app: &mut App) {
         draw_ai_chat(f, area, app);
         return;
     }
+    if matches!(app.popup, Popup::AiHistory { .. }) {
+        draw_ai_history(f, area, app);
+        return;
+    }
     // The image preview decodes to fit its box and caches by size, so it takes
     // `&mut app` too.
     if matches!(app.popup, Popup::ImageView { .. }) {
@@ -2041,8 +2045,8 @@ fn draw_ai_chat(f: &mut Frame, area: Rect, app: &mut App) {
         ]))
         .title_bottom(tr(
             lang,
-            " Enter=send  Alt+Enter=newline  Ctrl+Y=copy  Ctrl+V=paste  ↑↓  Esc ",
-            " Enter=送信  Alt+Enter=改行  Ctrl+Y=コピー  Ctrl+V=貼付  ↑↓  Esc ",
+            " Enter=send  Alt+Enter=newline  Ctrl+R=history  Ctrl+N=new  Ctrl+Y=copy  Esc ",
+            " Enter=送信  Alt+Enter=改行  Ctrl+R=履歴  Ctrl+N=新規  Ctrl+Y=コピー  Esc ",
         ));
     let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
     f.render_widget(block, rect);
@@ -2180,6 +2184,53 @@ fn draw_ai_chat(f: &mut Frame, area: Rect, app: &mut App) {
         Paragraph::new(in_lines).style(Style::default().bg(theme().selected_bg)),
         Rect::new(inner.x, inner.y + view_h as u16, inner.width, input_rows as u16),
     );
+}
+
+/// The chat history picker: past conversations this session, newest first.
+fn draw_ai_history(f: &mut Frame, area: Rect, app: &App) {
+    let lang = app.lang;
+    let Popup::AiHistory { cursor } = &app.popup else { return };
+    let cursor = *cursor;
+    let carmine = Color::Rgb(214, 45, 70);
+    let dim_c = Color::Rgb(150, 150, 170);
+    let width: u16 = 72u16.min(area.width.saturating_sub(2));
+    let height = (app.ai_history.len() as u16 + 3).clamp(6, area.height.saturating_sub(2));
+    let rect = centered_rect(width, height, area);
+    f.render_widget(Clear, rect);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(border_type())
+        .border_style(Style::default().fg(carmine).add_modifier(Modifier::BOLD))
+        .style(Style::default().bg(theme().popup_bg))
+        .title(tr(lang, " chat history ", " チャット履歴 "))
+        .title_bottom(tr(lang, " Enter=open  d=delete  ↑↓  Esc ", " Enter=開く  d=削除  ↑↓  Esc "));
+    let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
+    f.render_widget(block, rect);
+
+    let body_c = readable_on(theme().popup_bg);
+    let view_h = inner.height as usize;
+    let first = if cursor >= view_h { cursor + 1 - view_h } else { 0 };
+    let mut lines: Vec<Line> = Vec::new();
+    for (i, log) in app.ai_history.iter().enumerate().skip(first).take(view_h) {
+        let sel = i == cursor;
+        let title = App::ai_history_title(log);
+        let turns = log.iter().filter(|m| m.user).count();
+        let marker = if sel { "▶ " } else { "  " };
+        let title_style = if sel {
+            Style::default()
+                .fg(readable_on(theme().selected_bg))
+                .bg(theme().selected_bg)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(body_c)
+        };
+        lines.push(Line::from(vec![
+            Span::styled(marker, Style::default().fg(carmine)),
+            Span::styled(title, title_style),
+            Span::styled(format!("  ({turns})"), Style::default().fg(dim_c)),
+        ]));
+    }
+    f.render_widget(Paragraph::new(lines), inner);
 }
 
 /// The editable commit-message preview. `editing` shows a caret and a different
@@ -4579,6 +4630,7 @@ fn draw_popup(
         | Popup::DiskUsage { .. }
         | Popup::Palette { .. }
         | Popup::AiChat { .. }
+        | Popup::AiHistory { .. }
         | Popup::ImageView { .. }
         | Popup::CommitMessage { .. }
         | Popup::JunkReview { .. }

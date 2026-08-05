@@ -255,7 +255,15 @@ impl App {
             let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
             let alt = key.modifiers.contains(KeyModifiers::ALT);
             match key.code {
-                KeyCode::Esc => self.popup = Popup::None,
+                KeyCode::Esc => {
+                    // Keep the conversation recoverable from the history picker.
+                    self.archive_current_ai_chat();
+                    self.popup = Popup::None;
+                }
+                // Ctrl+R opens the conversation history; Ctrl+N starts a fresh
+                // one (tucking the current away first).
+                KeyCode::Char('r') if ctrl => self.open_ai_history(),
+                KeyCode::Char('n') if ctrl => self.start_ai_chat(Vec::new(), false),
                 // Alt+Enter inserts a newline (multi-line questions); plain
                 // Enter sends. Ctrl+J is the same as Alt+Enter for terminals
                 // that can't report the modifier on Enter.
@@ -308,6 +316,33 @@ impl App {
                     if let Popup::AiChat { input, sel, .. } = &mut self.popup {
                         input.push(c);
                         *sel = None; // typing dismisses a selection
+                    }
+                }
+                _ => {}
+            }
+            return Ok(());
+        }
+        if let Popup::AiHistory { cursor } = &mut self.popup {
+            let n = self.ai_history.len();
+            match key.code {
+                KeyCode::Esc | KeyCode::Char('q') => self.popup = Popup::None,
+                KeyCode::Char('j') | KeyCode::Down => {
+                    if n > 0 { *cursor = (*cursor + 1).min(n - 1); }
+                }
+                KeyCode::Char('k') | KeyCode::Up => *cursor = cursor.saturating_sub(1),
+                KeyCode::Char('g') | KeyCode::Home => *cursor = 0,
+                KeyCode::Char('G') | KeyCode::End => *cursor = n.saturating_sub(1),
+                KeyCode::Enter | KeyCode::Char('l') => {
+                    let i = *cursor;
+                    self.load_ai_conversation(i);
+                }
+                KeyCode::Char('d') | KeyCode::Char('x') => {
+                    let i = *cursor;
+                    self.delete_ai_conversation(i);
+                    // Keep the cursor in range after a removal.
+                    if let Popup::AiHistory { cursor } = &mut self.popup {
+                        let len = self.ai_history.len();
+                        *cursor = (*cursor).min(len.saturating_sub(1));
                     }
                 }
                 _ => {}
