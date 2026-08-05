@@ -140,6 +140,7 @@ impl App {
                 if self.crmaine_cache_override.is_some() {
                     v.push(MenuItem::CrmaineShared);
                 }
+                v.push(MenuItem::CrmaineSearchFiles);
                 v.push(MenuItem::CrmaineImpact);
                 v.push(MenuItem::CrmaineContradiction);
                 v.push(MenuItem::CrmaineGlossary);
@@ -452,6 +453,7 @@ impl App {
             MenuItem::CrmaineIndex => self.start_index(""),
             MenuItem::CrmaineShared => self.crmaine_use_shared_index(),
             MenuItem::CrmaineInfo => self.crmaine_doctor(),
+            MenuItem::CrmaineSearchFiles => self.prefill_command("searchfiles "),
             MenuItem::RemotePane => self.start_scp(ScpDir::BrowsePane),
             MenuItem::DiskUsage => self.start_du_here(),
             MenuItem::GitStage => self.git_stage(),

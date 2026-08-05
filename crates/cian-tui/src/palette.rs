@@ -20,6 +20,7 @@ fn command_list() -> &'static [(&'static str, (&'static str, &'static str), bool
         ("impact",     ("crmaine: which docs a change would touch", "crmaine: 変更の影響を受ける文書"), true),
         ("contradiction", ("crmaine: find conflicting statements on a topic", "crmaine: トピックの矛盾を検出"), true),
         ("glossary",   ("crmaine: generate a glossary of the corpus", "crmaine: コーパスの用語集を生成"), false),
+        ("searchfiles", ("crmaine: keyword-search the corpus into the pane", "crmaine: コーパスをキーワード検索してペイン表示"), true),
         ("ai",         ("AI chat (Carmine)", "AI チャット（カーマイン）"), false),
         ("aicmd",      ("AI: shell command from a description", "AI: 説明からコマンド"), true),
         ("aicommit",   ("AI: draft a commit message", "AI: コミットメッセージ下書き"), false),

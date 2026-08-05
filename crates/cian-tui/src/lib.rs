@@ -730,6 +730,8 @@ enum MenuItem {
     CrmaineShared,
     /// crmaine diagnostics (`:raginfo`).
     CrmaineInfo,
+    /// Keyword-search the corpus into the pane (`:searchfiles`).
+    CrmaineSearchFiles,
     /// Open a server in this pane over SFTP (`:sftp` / remote pane).
     RemotePane,
     /// Disk-usage breakdown of the current folder (`:du`).
@@ -920,6 +922,7 @@ impl MenuItem {
             MenuItem::CrmaineIndex => tr(lang, "Index this folder  (:index)", "このフォルダをインデックス  (:index)"),
             MenuItem::CrmaineShared => tr(lang, "Use crmaine's index  (:ragshared)", "crmaine のインデックスを使う  (:ragshared)"),
             MenuItem::CrmaineInfo => tr(lang, "Diagnostics  (:raginfo)", "診断  (:raginfo)"),
+            MenuItem::CrmaineSearchFiles => tr(lang, "Search corpus…  (:searchfiles)", "コーパス検索…  (:searchfiles)"),
             MenuItem::RemotePane => tr(lang, "Open server in pane  (:sftp)", "サーバをペインで開く  (:sftp)"),
             MenuItem::DiskUsage => tr(lang, "Disk usage  (:du)", "容量分析  (:du)"),
             MenuItem::AiShellCmd => tr(lang, "Command from description  (:aicmd)", "説明からコマンド生成  (:aicmd)"),
@@ -1835,6 +1838,10 @@ pub struct App {
     /// The citations from the last finished answer, kept so feedback can name
     /// the files it should boost / demote.
     crmaine_last_sources: Vec<String>,
+    /// A pending `:searchfiles` corpus search — its (name, path) hits, or an
+    /// error — to panelize into the active pane when it lands.
+    #[allow(clippy::type_complexity)]
+    searchfiles_rx: Option<std::sync::mpsc::Receiver<Result<Vec<(String, String)>, String>>>,
     /// Past AI/crmaine conversations this session, newest first, for the history
     /// picker (`Ctrl+R` in the chat). Each is a transcript plus the backend it
     /// spoke to, so reopening one still routes follow-ups correctly.
@@ -1992,6 +1999,7 @@ impl App {
             crmaine_req_seq: 0,
             crmaine_inflight: None,
             crmaine_last_sources: Vec::new(),
+            searchfiles_rx: None,
             ai_history: Vec::new(),
             ai_rect: Rect::new(0, 0, 0, 0),
             junk_rect: Rect::new(0, 0, 0, 0),
@@ -3785,6 +3793,10 @@ fn run_loop<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Result<()>
         // A pending crmaine RAG answer, likewise.
         if app.crmaine_rx.is_some() {
             needs_redraw |= app.poll_crmaine();
+        }
+        // A finished `:searchfiles` corpus search panelizes into the pane.
+        if app.searchfiles_rx.is_some() {
+            needs_redraw |= app.poll_searchfiles();
         }
         // While an AI / crmaine reply is still in flight, keep repainting so the
         // "thinking" spinner actually spins (the poll above returns false until

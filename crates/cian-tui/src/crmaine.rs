@@ -480,6 +480,95 @@ impl App {
         Some((e.name.clone(), truncate_text_for_ai(&text, 24_000)))
     }
 
+    /// `:searchfiles <words>` — keyword-search crmaine's currently-loaded corpus
+    /// and panelize the matching files into the active pane (like a grep result).
+    /// Searches whatever index crmaine has loaded (follows the last `:rag`/`:index`).
+    pub(crate) fn start_searchfiles(&mut self, query: &str) {
+        let keywords: Vec<String> = query.split_whitespace().map(str::to_string).collect();
+        if keywords.is_empty() {
+            self.message = Some(tr(self.lang, "usage: :searchfiles <words>", "使い方: :searchfiles <語>").into());
+            return;
+        }
+        let port = match self.crmaine_resolved() {
+            Ok(c) => c.port,
+            Err(e) => {
+                self.message = Some(e);
+                return;
+            }
+        };
+        let body = serde_json::json!({ "keywords": keywords, "mode": "and" }).to_string();
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let res: Result<Vec<(String, String)>, String> = (|| {
+                if http_get(port, "/health").is_err() {
+                    return Err(format!("server not reachable on 127.0.0.1:{port}"));
+                }
+                let raw = http_post(port, "/search_files", &body)?;
+                let v: serde_json::Value = serde_json::from_str(&raw).map_err(|e| e.to_string())?;
+                if let Some(e) = v.get("error").and_then(|x| x.as_str()) {
+                    if !e.is_empty() {
+                        return Err(e.to_string());
+                    }
+                }
+                let mut out = Vec::new();
+                if let Some(arr) = v.get("files").and_then(|f| f.as_array()) {
+                    for it in arr {
+                        let name = it.get("file").and_then(|x| x.as_str()).unwrap_or("").to_string();
+                        let path = it.get("path").and_then(|x| x.as_str()).unwrap_or("").to_string();
+                        if !path.is_empty() {
+                            out.push((name, path));
+                        }
+                    }
+                }
+                Ok(out)
+            })();
+            let _ = tx.send(res);
+        });
+        self.searchfiles_rx = Some(rx);
+        self.message = Some(tr(self.lang, "searching crmaine's corpus…", "crmaine のコーパスを検索中…").into());
+    }
+
+    /// Panelize a finished `:searchfiles` result into the active pane. Returns
+    /// true to repaint.
+    pub(crate) fn poll_searchfiles(&mut self) -> bool {
+        let Some(rx) = &self.searchfiles_rx else { return false };
+        match rx.try_recv() {
+            Ok(res) => {
+                self.searchfiles_rx = None;
+                match res {
+                    Ok(files) if !files.is_empty() => {
+                        let entries: Vec<cian_core::Entry> = files
+                            .iter()
+                            .map(|(name, path)| {
+                                cian_core::Entry::flat(
+                                    std::path::Path::new(name),
+                                    std::path::PathBuf::from(path),
+                                    false,
+                                )
+                            })
+                            .collect();
+                        let n = entries.len();
+                        let label = tr(self.lang, "crmaine search", "crmaine 検索").to_string();
+                        if let Some(t) = self.active_file_tabs_mut() {
+                            t.active_mut().enter_flat(label, entries);
+                        }
+                        self.message = Some(format!("{} {}", n, tr(self.lang, "files", "件")));
+                    }
+                    Ok(_) => {
+                        self.message = Some(tr(self.lang, "no matching files", "一致するファイルなし").into())
+                    }
+                    Err(e) => self.message = Some(format!("crmaine search: {e}")),
+                }
+                true
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => false,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                self.searchfiles_rx = None;
+                true
+            }
+        }
+    }
+
     /// `:glossary` — generate a glossary of the indexed corpus.
     pub(crate) fn start_glossary(&mut self) {
         self.start_crmaine_tool(

@@ -138,6 +138,7 @@ impl App {
             "impact" => self.start_impact(rest),
             "contradiction" | "contra" => self.start_contradiction(rest),
             "glossary" | "glossagen" => self.start_glossary(),
+            "searchfiles" | "sf" | "corpussearch" => self.start_searchfiles(rest),
             "aidiff" | "explaindiff" | "crmainediff" => self.explain_diff(),
             "ailog" | "logtriage" | "triage" | "crmainelog" => self.triage_log(),
             "dupes" | "dup" | "duplicates" => self.start_dupes(),
