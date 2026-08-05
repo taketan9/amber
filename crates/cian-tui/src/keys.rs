@@ -1247,6 +1247,7 @@ impl App {
                 Popup::ConfirmDiscard { .. } => { self.git_discard(); Ok(()) }
                 Popup::ConfirmDiffCopy { .. } => { self.confirm_diff_copy(); Ok(()) }
                 Popup::ConfirmDirSync { .. } => { self.confirm_dir_sync(); Ok(()) }
+                Popup::ConfirmRemoteDelete { .. } => { self.confirm_remote_delete(); Ok(()) }
                 Popup::ConfirmSnippet { cmd, enter, .. } => {
                     let (cmd, enter) = (cmd.clone(), *enter);
                     self.popup = Popup::None;
@@ -1573,17 +1574,35 @@ impl App {
                     self.leave_remote_pane();
                     return Ok(());
                 }
-                // `c` from a remote pane copies across the boundary (download to
-                // the local pane); `m` and the rest aren't wired for remote yet.
+                // `c` copies across the boundary (download to the local pane).
                 KeyCode::Char('c') if !ctrl => {
                     self.try_remote_pane_transfer(false);
                     return Ok(());
                 }
-                KeyCode::Char('m' | 'd' | 'r' | 'a' | 'A' | 'x' | 'b' | '=') if !ctrl => {
+                // Write ops on the server, same keys as the local pane:
+                // A = new folder, a = new file, r = rename, d = delete.
+                KeyCode::Char('A') if !ctrl => {
+                    self.remote_pane_mkdir();
+                    return Ok(());
+                }
+                KeyCode::Char('a') if !ctrl => {
+                    self.remote_pane_touch();
+                    return Ok(());
+                }
+                KeyCode::Char('r') if !ctrl => {
+                    self.remote_pane_rename();
+                    return Ok(());
+                }
+                KeyCode::Char('d') if !ctrl => {
+                    self.remote_pane_delete();
+                    return Ok(());
+                }
+                // Not wired for remote yet: move, checksum, branch, compare.
+                KeyCode::Char('m' | 'x' | 'b' | '=') if !ctrl => {
                     self.message = Some(tr(
                         self.lang,
-                        "remote pane: only c (copy to the local pane) is wired so far",
-                        "リモートペイン: 今は c（ローカルペインへコピー）のみ対応",
+                        "remote pane: not available (c copy, A/a/r/d write)",
+                        "リモートペイン: 未対応（c コピー, A/a/r/d 書込）",
                     ).into());
                     return Ok(());
                 }

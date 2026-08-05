@@ -3,6 +3,14 @@
 //! the password prompt. Split out of lib.rs as an `impl App` block.
 use super::*;
 
+/// A single remote-side mutation, run on a worker via [`App::remote_mut_spawn`].
+pub(crate) enum RemoteMut {
+    Mkdir(String),
+    Touch(String),
+    Rename { from: String, to: String },
+    Remove { path: String, is_dir: bool },
+}
+
 impl App {
     /// Hosts matching the picker's current filter, as `(index, host)`.
     pub(crate) fn ssh_matches(&self, filter: &str) -> Vec<(usize, &cian_lua::SshHost)> {
@@ -375,8 +383,8 @@ impl App {
                         self.side_tabs_mut(side).active_mut().enter_remote(label, cwd, entries);
                         self.message = Some(tr(
                             self.lang,
-                            "remote pane — Enter/l open, - up, c download, Esc to close",
-                            "リモートペイン — Enter/l で開く, - で上, c でDL, Esc で閉じる",
+                            "remote pane — Enter/l open, - up, c download, A/a/r/d write, Esc close",
+                            "リモートペイン — Enter/l 開く, - 上, c DL, A/a/r/d 書込, Esc 閉じる",
                         ).into());
                     }
                     Err(e) => {
@@ -429,6 +437,126 @@ impl App {
     /// The active pane on a given side (read-only).
     pub(crate) fn side_pane(&self, side: FocusedPane) -> &Pane {
         if matches!(side, FocusedPane::Right) { self.right.active_ref() } else { self.left.active_ref() }
+    }
+
+    /// The absolute remote cwd of the remote pane on `side` (if it is one).
+    fn remote_cwd(&self, side: FocusedPane) -> Option<String> {
+        self.side_pane(side).remote_view().map(|(_, p)| p.to_string())
+    }
+
+    /// `A` in a remote pane: prompt for a new directory name (matches the local
+    /// pane's mkdir key).
+    pub(crate) fn remote_pane_mkdir(&mut self) {
+        let side = self.focused;
+        if self.remote_cwd(side).is_none() {
+            return;
+        }
+        self.popup = text_input(
+            tr(self.lang, "New remote folder", "リモート: 新規フォルダ"),
+            tr(self.lang, "name:", "名前:"),
+            String::new(),
+            InputKind::RemoteMkdir { side },
+        );
+    }
+
+    /// `a` in a remote pane: prompt for a new (empty) file name.
+    pub(crate) fn remote_pane_touch(&mut self) {
+        let side = self.focused;
+        if self.remote_cwd(side).is_none() {
+            return;
+        }
+        self.popup = text_input(
+            tr(self.lang, "New remote file", "リモート: 新規ファイル"),
+            tr(self.lang, "name:", "名前:"),
+            String::new(),
+            InputKind::RemoteTouch { side },
+        );
+    }
+
+    /// `r` in a remote pane: prompt to rename the entry under the cursor.
+    pub(crate) fn remote_pane_rename(&mut self) {
+        let side = self.focused;
+        let Some(e) = self.active_pane().and_then(|p| p.selected()) else { return };
+        if e.is_parent {
+            return;
+        }
+        let from = e.path.to_string_lossy().into_owned();
+        let name = e.name.clone();
+        self.popup = text_input(
+            tr(self.lang, "Rename remote", "リモート: リネーム"),
+            tr(self.lang, "new name:", "新しい名前:"),
+            name,
+            InputKind::RemoteRename { side, from },
+        );
+    }
+
+    /// `d` in a remote pane: confirm, then delete the entry under the cursor.
+    pub(crate) fn remote_pane_delete(&mut self) {
+        let side = self.focused;
+        let Some(e) = self.active_pane().and_then(|p| p.selected()) else { return };
+        if e.is_parent {
+            return;
+        }
+        self.popup = Popup::ConfirmRemoteDelete {
+            side,
+            path: e.path.to_string_lossy().into_owned(),
+            name: e.name.clone(),
+            is_dir: e.is_dir,
+        };
+    }
+
+    /// Confirmed remote delete: run it on the worker.
+    pub(crate) fn confirm_remote_delete(&mut self) {
+        if let Popup::ConfirmRemoteDelete { side, path, is_dir, .. } =
+            std::mem::replace(&mut self.popup, Popup::None)
+        {
+            self.remote_mut_spawn(side, RemoteMut::Remove { path, is_dir });
+        }
+    }
+
+    /// Run a remote mutation on a worker thread; [`App::poll_remote_mut`] installs
+    /// the result and re-lists the pane.
+    pub(crate) fn remote_mut_spawn(&mut self, side: FocusedPane, op: RemoteMut) {
+        let Some((target, _)) = self.remote_targets[Self::side_idx(side)].clone() else { return };
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let res: Result<&str, String> = match op {
+                RemoteMut::Mkdir(p) => cian_scp::make_dir(&target, &p).map(|_| "created folder").map_err(|e| e.to_string()),
+                RemoteMut::Touch(p) => cian_scp::make_file(&target, &p).map(|_| "created file").map_err(|e| e.to_string()),
+                RemoteMut::Rename { from, to } => cian_scp::rename(&target, &from, &to).map(|_| "renamed").map_err(|e| e.to_string()),
+                RemoteMut::Remove { path, is_dir } => cian_scp::remove(&target, &path, is_dir).map(|_| "deleted").map_err(|e| e.to_string()),
+            };
+            let _ = tx.send(res.map(str::to_string));
+        });
+        self.remote_mut = Some((side, rx));
+        self.message = Some(tr(self.lang, "remote: working…", "リモート: 実行中…").into());
+    }
+
+    /// Install a finished remote mutation and re-list the pane. Returns true to
+    /// repaint.
+    pub(crate) fn poll_remote_mut(&mut self) -> bool {
+        let Some((side, rx)) = &self.remote_mut else { return false };
+        let side = *side;
+        match rx.try_recv() {
+            Ok(res) => {
+                self.remote_mut = None;
+                match res {
+                    Ok(what) => {
+                        self.message = Some(format!("remote: {what}"));
+                        if let Some(cwd) = self.remote_cwd(side) {
+                            self.remote_pane_ls_spawn(side, cwd);
+                        }
+                    }
+                    Err(e) => self.message = Some(format!("remote failed: {e}")),
+                }
+                true
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => false,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                self.remote_mut = None;
+                true
+            }
+        }
     }
 
     /// If a copy (`c`) crosses the local/remote boundary, run it as an SFTP
@@ -860,7 +988,7 @@ impl App {
 }
 
 /// Join a remote directory and a child name into a remote path (POSIX `/`).
-fn join_remote(cwd: &str, name: &str) -> String {
+pub(crate) fn join_remote(cwd: &str, name: &str) -> String {
     match cwd {
         "." | "" => name.to_string(),
         "/" => format!("/{}", name),

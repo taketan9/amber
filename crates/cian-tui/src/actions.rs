@@ -2491,6 +2491,30 @@ impl App {
                 }
                 Err(e) => Err(e),
             },
+            InputKind::RemoteMkdir { side } => {
+                let side = *side;
+                if let Some(cwd) = self.side_pane(side).remote_view().map(|(_, p)| p.to_string()) {
+                    self.remote_mut_spawn(side, crate::ssh::RemoteMut::Mkdir(crate::ssh::join_remote(&cwd, &name)));
+                }
+                return Ok(());
+            }
+            InputKind::RemoteTouch { side } => {
+                let side = *side;
+                if let Some(cwd) = self.side_pane(side).remote_view().map(|(_, p)| p.to_string()) {
+                    self.remote_mut_spawn(side, crate::ssh::RemoteMut::Touch(crate::ssh::join_remote(&cwd, &name)));
+                }
+                return Ok(());
+            }
+            InputKind::RemoteRename { side, from } => {
+                let (side, from) = (*side, from.clone());
+                if let Some(cwd) = self.side_pane(side).remote_view().map(|(_, p)| p.to_string()) {
+                    self.remote_mut_spawn(
+                        side,
+                        crate::ssh::RemoteMut::Rename { from, to: crate::ssh::join_remote(&cwd, &name) },
+                    );
+                }
+                return Ok(());
+            }
             InputKind::JumpPath => return self.finish_jump_path(&name),
             InputKind::FindRecursive => {
                 self.start_find(&name, cian_core::search::Mode::Name);

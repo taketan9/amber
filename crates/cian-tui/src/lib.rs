@@ -276,6 +276,9 @@ enum Popup {
         extra: usize,
         back: Box<Popup>,
     },
+    /// Confirm deleting a remote entry (`d` in the remote pane). `path` is its
+    /// absolute remote path; `side` is which remote pane to re-list after.
+    ConfirmRemoteDelete { side: FocusedPane, path: String, name: String, is_dir: bool },
     TextInput {
         title: String,
         prompt: String,
@@ -1318,6 +1321,13 @@ enum InputKind {
     /// Manual connection, step 2: the password for the typed server. Rendered
     /// masked.
     ManualSshPass { user: String, host: String, port: u16, for_scp: bool },
+    /// A name for a new remote directory (`A`) in the remote pane on `side`.
+    RemoteMkdir { side: FocusedPane },
+    /// A name for a new empty remote file (`a`) in the remote pane on `side`.
+    RemoteTouch { side: FocusedPane },
+    /// A new name for the remote entry at `from` (its absolute remote path) in
+    /// the remote pane on `side`.
+    RemoteRename { side: FocusedPane, from: String },
 }
 
 /// The archive format chosen from the right-click "Compress" submenu.
@@ -1721,6 +1731,10 @@ pub struct App {
     /// SFTP connection backing a remote pane, per file-pane side (Left=0,
     /// Right=1). Set while that pane is browsing a host; cleared on leave.
     remote_targets: [Option<(cian_scp::Target, String)>; 2],
+    /// A pending remote mutation (mkdir/touch/rename/delete): which side to
+    /// re-list, and the result message channel.
+    #[allow(clippy::type_complexity)]
+    remote_mut: Option<(FocusedPane, std::sync::mpsc::Receiver<Result<String, String>>)>,
     /// A remote-pane directory listing in flight, tagged with the side it fills.
     remote_pane_ls: Option<(FocusedPane, RemoteLsRx)>,
     /// A remote file being downloaded to a temp path so `F3` can view it.
@@ -1960,6 +1974,7 @@ impl App {
             started: Instant::now(),
             scp_dir: None,
             remote_targets: [None, None],
+            remote_mut: None,
             remote_pane_ls: None,
             remote_view: None,
             remote_refresh: None,
@@ -3720,6 +3735,9 @@ fn run_loop<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Result<()>
             needs_redraw = true;
         }
         if app.remote_view.is_some() && app.poll_remote_view() {
+            needs_redraw = true;
+        }
+        if app.remote_mut.is_some() && app.poll_remote_mut() {
             needs_redraw = true;
         }
         if app.remote_ls.is_some() && app.poll_remote_ls() {

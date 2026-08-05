@@ -216,6 +216,64 @@ pub fn list_dir(target: &Target, remote_path: &str) -> Result<(String, Vec<Remot
     })
 }
 
+/// Create a directory on the server (single level; the parent must exist).
+pub fn make_dir(target: &Target, path: &str) -> Result<()> {
+    on_runtime(|| async {
+        let handle = connect(target).await?;
+        let sftp = open_sftp(&handle).await.context("SFTP subsystem unavailable")?;
+        let r = sftp.create_dir(path).await.with_context(|| format!("mkdir {path}"));
+        let _ = sftp.close().await;
+        r
+    })
+}
+
+/// Create an empty file on the server (touch). Refuses to clobber an existing
+/// path.
+pub fn make_file(target: &Target, path: &str) -> Result<()> {
+    on_runtime(|| async {
+        let handle = connect(target).await?;
+        let sftp = open_sftp(&handle).await.context("SFTP subsystem unavailable")?;
+        let r = async {
+            if sftp.metadata(path).await.is_ok() {
+                anyhow::bail!("{path} already exists");
+            }
+            sftp.create(path).await.with_context(|| format!("touch {path}"))?;
+            Ok(())
+        }
+        .await;
+        let _ = sftp.close().await;
+        r
+    })
+}
+
+/// Rename / move a remote entry within the server.
+pub fn rename(target: &Target, from: &str, to: &str) -> Result<()> {
+    on_runtime(|| async {
+        let handle = connect(target).await?;
+        let sftp = open_sftp(&handle).await.context("SFTP subsystem unavailable")?;
+        let r = sftp.rename(from, to).await.with_context(|| format!("rename {from} → {to}"));
+        let _ = sftp.close().await;
+        r
+    })
+}
+
+/// Remove a remote file, or an (empty) remote directory.
+pub fn remove(target: &Target, path: &str, is_dir: bool) -> Result<()> {
+    on_runtime(|| async {
+        let handle = connect(target).await?;
+        let sftp = open_sftp(&handle).await.context("SFTP subsystem unavailable")?;
+        let r = if is_dir {
+            sftp.remove_dir(path).await.with_context(|| {
+                format!("remove {path} (a remote directory must be empty first)")
+            })
+        } else {
+            sftp.remove_file(path).await.with_context(|| format!("remove {path}"))
+        };
+        let _ = sftp.close().await;
+        r
+    })
+}
+
 // ── SFTP ────────────────────────────────────────────────────────────────────
 
 async fn sftp_upload(

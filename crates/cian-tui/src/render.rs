@@ -4565,6 +4565,30 @@ fn draw_popup(
                 tr(lang, " y/Enter = sync   n/Esc = cancel ", " y/Enter = 同期   n/Esc = 取消 ").to_string(),
             )
         }
+        Popup::ConfirmRemoteDelete { name, is_dir, .. } => {
+            let what = if *is_dir {
+                tr(lang, "directory", "ディレクトリ")
+            } else {
+                tr(lang, "file", "ファイル")
+            };
+            let head = if lang == Lang::Ja {
+                format!("サーバ上の{}を削除します:", what)
+            } else {
+                format!("delete this {} on the server:", what)
+            };
+            let lines = vec![
+                head,
+                String::new(),
+                format!("  {}", name),
+                String::new(),
+                tr(lang, "This is permanent — the server has no trash.", "取り消せません（サーバにゴミ箱はありません）。").to_string(),
+            ];
+            (
+                tr(lang, " remote delete ", " リモート削除 ").to_string(),
+                lines,
+                tr(lang, " y/Enter = delete   n/Esc = cancel ", " y/Enter = 削除   n/Esc = 取消 ").to_string(),
+            )
+        }
         Popup::ConfirmSnippet { name, cmd, .. } => {
             let head = if lang == Lang::Ja {
                 format!("スニペットを送信しますか？  「{}」", name)
