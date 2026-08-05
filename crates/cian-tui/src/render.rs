@@ -4566,15 +4566,11 @@ fn draw_popup(
             )
         }
         Popup::ConfirmRemoteDelete { name, is_dir, .. } => {
-            let what = if *is_dir {
-                tr(lang, "directory", "ディレクトリ")
+            let head = if *is_dir {
+                tr(lang, "delete this folder and everything inside it, on the server:",
+                      "このフォルダを中身ごとサーバ上で削除します:").to_string()
             } else {
-                tr(lang, "file", "ファイル")
-            };
-            let head = if lang == Lang::Ja {
-                format!("サーバ上の{}を削除します:", what)
-            } else {
-                format!("delete this {} on the server:", what)
+                tr(lang, "delete this file on the server:", "このファイルをサーバ上で削除します:").to_string()
             };
             let lines = vec![
                 head,

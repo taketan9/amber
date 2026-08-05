@@ -731,6 +731,8 @@ impl App {
         if let Some(dir) = temp.parent() {
             let _ = std::fs::create_dir_all(dir);
         }
+        // Remember where this temp came from, so saving it uploads back.
+        self.remote_edits.insert(temp.clone(), (target.clone(), remote_path.clone()));
         let (tx, rx) = std::sync::mpsc::channel();
         let temp_worker = temp.clone();
         std::thread::spawn(move || {
@@ -769,6 +771,32 @@ impl App {
                 true
             }
         }
+    }
+
+    /// If `local` is a temp file that was opened from a remote pane (F3), upload
+    /// it back to where it came from. Called after a save (built-in editor) or
+    /// after the external editor exits. Reuses the `remote_mut` channel so it
+    /// doesn't disturb the open viewer.
+    pub(crate) fn reupload_remote(&mut self, local: &std::path::Path) {
+        let Some((target, remote)) = self.remote_edits.get(local).cloned() else { return };
+        if self.remote_mut.is_some() {
+            return; // one remote op at a time
+        }
+        let local = local.to_path_buf();
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let cancel = std::sync::atomic::AtomicBool::new(false);
+            let mut prog = |_: u64, _: u64| {};
+            let mut sctl = cian_scp::Ctl { cancel: &cancel, on_progress: &mut prog };
+            let r = cian_scp::upload(&target, &local, &remote, None, &mut sctl)
+                .map(|_| "uploaded your edit to the server")
+                .map_err(|e| e.to_string());
+            let _ = tx.send(r.map(str::to_string));
+        });
+        // side = the focused pane; poll_remote_mut re-lists it if it's remote.
+        self.remote_mut = Some((self.focused, rx));
+        self.message =
+            Some(tr(self.lang, "remote: uploading your edit…", "リモート: 編集をアップロード中…").into());
     }
 
     /// Leave the remote pane, returning it to its local directory.

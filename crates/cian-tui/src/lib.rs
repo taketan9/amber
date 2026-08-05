@@ -1739,6 +1739,9 @@ pub struct App {
     remote_pane_ls: Option<(FocusedPane, RemoteLsRx)>,
     /// A remote file being downloaded to a temp path so `F3` can view it.
     remote_view: Option<RemoteView>,
+    /// Local temp files opened from a remote pane (F3), mapped to where they came
+    /// from, so saving one uploads it back. `(target, remote absolute path)`.
+    remote_edits: std::collections::HashMap<PathBuf, (cian_scp::Target, String)>,
     /// A remote pane side to re-list once the running op finishes (e.g. after an
     /// upload landed files on it), since a synthetic listing does not auto-refresh.
     remote_refresh: Option<FocusedPane>,
@@ -1977,6 +1980,7 @@ impl App {
             remote_mut: None,
             remote_pane_ls: None,
             remote_view: None,
+            remote_edits: std::collections::HashMap::new(),
             remote_refresh: None,
             scp_pending: None,
             scp_upload_modes: Vec::new(),
@@ -3658,6 +3662,8 @@ fn suspend_and_edit<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Re
     // The file may have changed on disk; refresh the panes and, if the edit came
     // from the viewer, re-open it on the (possibly changed) file.
     app.reload_both();
+    // If it was a file fetched from a remote pane, push the edit back up.
+    app.reupload_remote(&edit.path);
     if edit.reopen_viewer {
         app.open_viewer_at(&edit.path, &edit.title, 0);
     }

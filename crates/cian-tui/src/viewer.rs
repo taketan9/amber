@@ -625,6 +625,8 @@ impl App {
                 if let Some(t) = self.active_file_tabs_mut() {
                     let _ = t.active_mut().reload();
                 }
+                // If this file was opened from a remote pane, push the edit back.
+                self.reupload_remote(&path);
             }
             Err(e) => self.message = Some(format!("save failed: {}", e)),
         }

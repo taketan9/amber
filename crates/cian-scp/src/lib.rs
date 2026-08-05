@@ -257,21 +257,51 @@ pub fn rename(target: &Target, from: &str, to: &str) -> Result<()> {
     })
 }
 
-/// Remove a remote file, or an (empty) remote directory.
+/// Remove a remote file, or a remote directory **and everything inside it**
+/// (recursively — SFTP `rmdir` only removes an empty directory, so the tree is
+/// walked and emptied first). All within one SFTP session.
 pub fn remove(target: &Target, path: &str, is_dir: bool) -> Result<()> {
     on_runtime(|| async {
         let handle = connect(target).await?;
         let sftp = open_sftp(&handle).await.context("SFTP subsystem unavailable")?;
         let r = if is_dir {
-            sftp.remove_dir(path).await.with_context(|| {
-                format!("remove {path} (a remote directory must be empty first)")
-            })
+            remove_tree(&sftp, path).await.with_context(|| format!("remove {path}"))
         } else {
             sftp.remove_file(path).await.with_context(|| format!("remove {path}"))
         };
         let _ = sftp.close().await;
         r
     })
+}
+
+/// Delete a remote directory tree: gather it depth-first, unlinking files as we
+/// go, then remove the now-empty directories deepest-first. Iterative (no async
+/// recursion), reusing the one session.
+async fn remove_tree(sftp: &SftpSession, root: &str) -> Result<()> {
+    let mut to_scan = vec![root.to_string()];
+    let mut dirs: Vec<String> = Vec::new(); // parents before children
+    while let Some(dir) = to_scan.pop() {
+        let entries = sftp.read_dir(&dir).await.with_context(|| format!("read {dir}"))?;
+        dirs.push(dir.clone());
+        for entry in entries {
+            let name = entry.file_name();
+            if name == "." || name == ".." {
+                continue;
+            }
+            let child = format!("{}/{}", dir.trim_end_matches('/'), name);
+            if entry.metadata().is_dir() {
+                to_scan.push(child);
+            } else {
+                sftp.remove_file(&child).await.with_context(|| format!("remove {child}"))?;
+            }
+        }
+    }
+    // Children appear after their parent, so removing in reverse empties the
+    // deepest directories first.
+    for dir in dirs.iter().rev() {
+        sftp.remove_dir(dir).await.with_context(|| format!("rmdir {dir}"))?;
+    }
+    Ok(())
 }
 
 // ── SFTP ────────────────────────────────────────────────────────────────────
