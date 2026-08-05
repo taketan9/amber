@@ -49,20 +49,23 @@ fn current_username() -> String {
         .unwrap_or_else(|_| "default".into())
 }
 
-/// VS Code's user `settings.json`, per platform. (Cursor and others live
-/// elsewhere; a config `settings_path` overrides this.)
-fn default_vscode_settings_path() -> Option<PathBuf> {
+/// Candidate user `settings.json` paths, in preference order: VS Code first,
+/// then Cursor (a VS Code fork some sites use for crmaine). A config
+/// `settings_path` overrides this list entirely. The first one that exists and
+/// parses wins.
+fn editor_settings_candidates() -> Vec<PathBuf> {
+    // Per editor, the "<app>/User/settings.json" leaf under the OS config root.
+    let editors = ["Code", "Cursor"];
     #[cfg(target_os = "macos")]
-    {
-        dirs_home().map(|h| h.join("Library/Application Support/Code/User/settings.json"))
-    }
+    let root = dirs_home().map(|h| h.join("Library/Application Support"));
     #[cfg(target_os = "windows")]
-    {
-        std::env::var_os("APPDATA").map(|a| PathBuf::from(a).join("Code/User/settings.json"))
-    }
+    let root = std::env::var_os("APPDATA").map(PathBuf::from);
     #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
-    {
-        dirs_home().map(|h| h.join(".config/Code/User/settings.json"))
+    let root = dirs_home().map(|h| h.join(".config"));
+
+    match root {
+        Some(r) => editors.iter().map(|e| r.join(e).join("User/settings.json")).collect(),
+        None => Vec::new(),
     }
 }
 
@@ -166,16 +169,19 @@ impl App {
             .as_ref()
             .ok_or_else(|| "crmaine not configured — add cian.crmaine{} to init.lua".to_string())?;
 
-        // Read VS Code settings (best-effort — overrides can stand in for it).
-        let settings_path = cfg
-            .settings_path
-            .as_ref()
-            .map(PathBuf::from)
-            .or_else(default_vscode_settings_path);
-        let settings: serde_json::Value = settings_path
-            .as_ref()
-            .and_then(|p| std::fs::read_to_string(p).ok())
-            .and_then(|s| serde_json::from_str(&strip_jsonc(&s)).ok())
+        // Read the editor's settings (best-effort — overrides can stand in for
+        // it). An explicit `settings_path` wins; otherwise try VS Code, then
+        // Cursor, taking the first that exists and parses.
+        let candidates: Vec<PathBuf> = match &cfg.settings_path {
+            Some(p) => vec![PathBuf::from(p)],
+            None => editor_settings_candidates(),
+        };
+        let settings: serde_json::Value = candidates
+            .iter()
+            .find_map(|p| {
+                let s = std::fs::read_to_string(p).ok()?;
+                serde_json::from_str(&strip_jsonc(&s)).ok()
+            })
             .unwrap_or(serde_json::Value::Null);
 
         // models is an array; take the first.
