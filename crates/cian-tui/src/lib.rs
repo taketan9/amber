@@ -1737,8 +1737,18 @@ pub struct App {
     startup_at: Instant,
     /// A pending AI request running on a worker thread.
     ai_job: Option<AiJob>,
-    /// A pending crmaine RAG call (the rendered answer, or an error).
-    crmaine_rx: Option<std::sync::mpsc::Receiver<Result<String, String>>>,
+    /// A pending crmaine call, streaming its answer over the channel event by
+    /// event (see [`crmaine::CrmaineEvent`]).
+    crmaine_rx: Option<std::sync::mpsc::Receiver<crmaine::CrmaineEvent>>,
+    /// The latest crmaine pipeline stage (query expansion, rerank, a tool call)
+    /// shown next to the spinner while the answer streams in.
+    crmaine_stage: Option<String>,
+    /// Citations collected during a stream, appended to the answer when it ends.
+    crmaine_sources: Vec<String>,
+    /// When set, `:rag`/`:agent` query this index directory instead of the
+    /// crmaine/VS Code one — the isolated index built by `:index`. Cleared by
+    /// `:ragshared` to go back to crmaine's own index.
+    crmaine_cache_override: Option<String>,
     /// The chat transcript's on-screen body rect, the effective scroll offset,
     /// and the flat wrapped lines — rebuilt each frame so a mouse drag can map
     /// to a line range and copy it.
@@ -1886,6 +1896,9 @@ impl App {
             startup_at: Instant::now(),
             ai_job: None,
             crmaine_rx: None,
+            crmaine_stage: None,
+            crmaine_sources: Vec::new(),
+            crmaine_cache_override: None,
             ai_rect: Rect::new(0, 0, 0, 0),
             junk_rect: Rect::new(0, 0, 0, 0),
             struct_rect: Rect::new(0, 0, 0, 0),

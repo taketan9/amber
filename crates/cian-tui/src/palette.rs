@@ -14,6 +14,8 @@ fn command_list() -> &'static [(&'static str, (&'static str, &'static str), bool
         ("rag",        ("crmaine RAG: ask the running crmaine server", "crmaine RAG に質問"), true),
         ("agent",      ("crmaine Ajent: an agent answer", "crmaine エージェント回答"), true),
         ("raginfo",    ("crmaine diagnostics: port, server, config", "crmaine 診断: ポート・接続・設定"), false),
+        ("index",      ("index a folder into cian's own RAG index", "フォルダを cian の RAG にインデックス"), true),
+        ("ragshared",  ("go back to crmaine's own index for :rag", ":rag を crmaine 本体のインデックスに戻す"), false),
         ("ai",         ("AI chat (Carmine)", "AI チャット（カーマイン）"), false),
         ("aicmd",      ("AI: shell command from a description", "AI: 説明からコマンド"), true),
         ("aicommit",   ("AI: draft a commit message", "AI: コミットメッセージ下書き"), false),

@@ -1924,6 +1924,9 @@ fn draw_ai_chat(f: &mut Frame, area: Rect, app: &mut App) {
     let body_w = inner.width.max(1) as usize;
     let view_h = inner.height.saturating_sub(1) as usize;
 
+    // The current pipeline stage (if any), read before the popup is borrowed.
+    let stage = app.crmaine_stage.clone();
+
     let mut flat: Vec<String> = Vec::new();
     let mut shown: Vec<Line> = Vec::new();
     let mut input_str = String::new();
@@ -1983,15 +1986,15 @@ fn draw_ai_chat(f: &mut Frame, area: Rect, app: &mut App) {
             // while the answer is in flight (the loop force-repaints meanwhile).
             const FRAMES: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
             let fi = (app.startup_at.elapsed().as_millis() / 90) as usize % FRAMES.len();
+            let label = stage.clone().unwrap_or_else(|| {
+                tr(lang, "crmaine is thinking…", "カーマイン が考えています…").to_string()
+            });
             styled.push(Line::from(vec![
                 Span::styled(
                     format!("{} ", FRAMES[fi]),
                     Style::default().fg(carmine).add_modifier(Modifier::BOLD),
                 ),
-                Span::styled(
-                    tr(lang, "crmaine is thinking…", "カーマイン が考えています…"),
-                    Style::default().fg(dim_c).add_modifier(Modifier::ITALIC),
-                ),
+                Span::styled(label, Style::default().fg(dim_c).add_modifier(Modifier::ITALIC)),
             ]));
             flat.push(String::new());
         }

@@ -125,6 +125,8 @@ impl App {
             "rag" | "crmainerag" | "ask_rag" => self.start_rag(rest),
             "agent" | "ajent" | "crmaineagent" => self.start_agent(rest),
             "raginfo" | "crmaineinfo" | "crmainedoctor" | "ragstatus" => self.crmaine_doctor(),
+            "index" | "ragindex" | "reindex" => self.start_index(rest),
+            "ragshared" | "ragdefault" | "unindex" => self.crmaine_use_shared_index(),
             "aidiff" | "explaindiff" | "crmainediff" => self.explain_diff(),
             "ailog" | "logtriage" | "triage" | "crmainelog" => self.triage_log(),
             "dupes" | "dup" | "duplicates" => self.start_dupes(),
