@@ -254,6 +254,7 @@ impl App {
         if matches!(self.popup, Popup::AiChat { .. }) {
             let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
             let alt = key.modifiers.contains(KeyModifiers::ALT);
+            let shift = key.modifiers.contains(KeyModifiers::SHIFT);
             match key.code {
                 KeyCode::Esc => {
                     // Keep the conversation recoverable from the history picker.
@@ -264,10 +265,11 @@ impl App {
                 // one (tucking the current away first).
                 KeyCode::Char('r') if ctrl => self.open_ai_history(),
                 KeyCode::Char('n') if ctrl => self.start_ai_chat(ChatMode::Ai, Vec::new(), false),
-                // Alt+Enter inserts a newline (multi-line questions); plain
-                // Enter sends. Ctrl+J is the same as Alt+Enter for terminals
-                // that can't report the modifier on Enter.
-                KeyCode::Enter if alt => {
+                // Shift+Enter inserts a newline (multi-line questions); plain
+                // Enter sends. Alt+Enter and Ctrl+J do the same, as fallbacks for
+                // terminals that don't report Shift with Enter (macOS Terminal;
+                // iTerm2 needs the kitty protocol, Windows console reports it).
+                KeyCode::Enter if shift || alt => {
                     if let Popup::AiChat { input, sel, .. } = &mut self.popup {
                         input.push('\n');
                         *sel = None;

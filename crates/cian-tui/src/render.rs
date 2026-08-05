@@ -2020,6 +2020,8 @@ fn md_body_line(
 
 fn draw_ai_chat(f: &mut Frame, area: Rect, app: &mut App) {
     let lang = app.lang;
+    // Which backend this chat talks to, named for the title (e.g. "crmaine - RAG").
+    let mode = if let Popup::AiChat { mode, .. } = &app.popup { *mode } else { ChatMode::Ai };
     let width: u16 = 76u16.min(area.width.saturating_sub(2));
     let height = area.height.saturating_sub(2).max(8);
     let rect = centered_rect(width, height, area);
@@ -2035,18 +2037,14 @@ fn draw_ai_chat(f: &mut Frame, area: Rect, app: &mut App) {
         .title(Line::from(vec![
             Span::styled(" ✦ ", Style::default().fg(carmine).add_modifier(Modifier::BOLD)),
             Span::styled(
-                tr(lang, "crmaine", "カーマイン"),
+                format!("{} ", mode.title()),
                 Style::default().fg(carmine).add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                tr(lang, "  AI ", "  AI "),
-                Style::default().fg(readable_on(theme().popup_bg)).add_modifier(Modifier::DIM),
             ),
         ]))
         .title_bottom(tr(
             lang,
-            " Enter=send  Alt+Enter=newline  Ctrl+R=history  Ctrl+N=new  Ctrl+Y=copy  Esc ",
-            " Enter=送信  Alt+Enter=改行  Ctrl+R=履歴  Ctrl+N=新規  Ctrl+Y=コピー  Esc ",
+            " Enter=send  Shift+Enter=newline  Ctrl+R=history  Ctrl+N=new  Ctrl+Y=copy  Esc ",
+            " Enter=送信  Shift+Enter=改行  Ctrl+R=履歴  Ctrl+N=新規  Ctrl+Y=コピー  Esc ",
         ));
     let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
     f.render_widget(block, rect);
@@ -2216,11 +2214,7 @@ fn draw_ai_history(f: &mut Frame, area: Rect, app: &App) {
         let title = App::ai_history_title(log);
         let turns = log.iter().filter(|m| m.user).count();
         let marker = if sel { "▶ " } else { "  " };
-        let badge = match mode {
-            ChatMode::Rag => "rag ",
-            ChatMode::Agent => "agent ",
-            ChatMode::Ai => "ai ",
-        };
+        let badge = format!("{:<6} ", mode.badge());
         let title_style = if sel {
             Style::default()
                 .fg(readable_on(theme().selected_bg))

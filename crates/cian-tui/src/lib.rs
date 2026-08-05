@@ -1111,6 +1111,26 @@ enum ChatMode {
     Agent,
 }
 
+impl ChatMode {
+    /// The full name shown in the chat title — the same wording VS Code's
+    /// crmaine uses, with the local model marked "simple".
+    fn title(self) -> &'static str {
+        match self {
+            ChatMode::Ai => "crmaine - simple",
+            ChatMode::Rag => "crmaine - RAG",
+            ChatMode::Agent => "crmaine - Agent",
+        }
+    }
+    /// A short badge for the history list.
+    fn badge(self) -> &'static str {
+        match self {
+            ChatMode::Ai => "simple",
+            ChatMode::Rag => "RAG",
+            ChatMode::Agent => "Agent",
+        }
+    }
+}
+
 /// One line of an AI chat transcript.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 struct ChatMsg {
