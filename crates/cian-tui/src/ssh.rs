@@ -612,12 +612,104 @@ impl App {
             }
             return true;
         }
-        // Both remote.
-        self.message = Some(tr(self.lang,
-            "remote → remote copy isn't supported yet",
-            "リモート→リモートのコピーは未対応",
-        ).into());
+        // Both remote — relay each file through this machine (there is no
+        // server-to-server SFTP; a segmented enterprise network often can't do
+        // direct A→B anyway).
+        let files: Vec<String> = self
+            .side_pane(active)
+            .target_paths()
+            .iter()
+            .map(|p| p.to_string_lossy().into_owned())
+            .collect();
+        if files.is_empty() {
+            self.message = Some(tr(self.lang, "nothing to copy", "コピー対象なし").into());
+            return true;
+        }
+        let dst_dir = self.side_pane(opp).remote_view().map(|(_, p)| p.to_string());
+        let src = self.remote_targets[Self::side_idx(active)].clone();
+        let dst = self.remote_targets[Self::side_idx(opp)].clone();
+        if let (Some(dst_dir), Some((s_target, _)), Some((d_target, d_label))) = (dst_dir, src, dst) {
+            self.message = Some(format!(
+                "{} → {} …",
+                tr(self.lang, "copying via this machine", "この端末を経由してコピー"),
+                d_label
+            ));
+            // Re-list the destination pane once the relay finishes.
+            self.remote_refresh = Some(opp);
+            self.start_remote_to_remote(files, s_target, d_target, dst_dir);
+        }
         true
+    }
+
+    /// Copy files from one server to another by relaying each through a local
+    /// temp file: download from the source, upload to the destination, delete
+    /// the temp. Runs on the file-op worker so it shows progress and the
+    /// done-notification, and honours cancel between files.
+    pub(crate) fn start_remote_to_remote(
+        &mut self,
+        files: Vec<String>,
+        src: cian_scp::Target,
+        dst: cian_scp::Target,
+        dst_dir: String,
+    ) {
+        self.start_op("copying", move |ctl| {
+            let mut report = OpReport::default();
+            let cancel = ctl.cancel;
+            let total = files.len();
+            let tmp_dir = std::env::temp_dir().join("cian-relay");
+            let _ = std::fs::create_dir_all(&tmp_dir);
+            for (i, remote) in files.iter().enumerate() {
+                if cancel.load(Ordering::Relaxed) {
+                    break;
+                }
+                let fname = remote.rsplit('/').next().unwrap_or("file").to_string();
+                let tmp = tmp_dir.join(&fname);
+                // Stage 1: download source → local temp.
+                let dl = {
+                    let cur = format!("↓ {fname}");
+                    let mut fwd = |done: u64, tot: u64| {
+                        (ctl.on_progress)(&cian_core::progress::Progress {
+                            bytes_done: done,
+                            bytes_total: tot,
+                            files_done: i,
+                            files_total: total,
+                            current: cur.clone(),
+                        });
+                    };
+                    let mut sctl = cian_scp::Ctl { cancel, on_progress: &mut fwd };
+                    cian_scp::download(&src, remote, &tmp, &mut sctl)
+                };
+                if let Err(e) = dl {
+                    report.note_error(format!("{fname}: download: {e}"));
+                    let _ = std::fs::remove_file(&tmp);
+                    continue;
+                }
+                // Stage 2: upload local temp → destination dir.
+                let dst_path = join_remote(&dst_dir, &fname);
+                let up = {
+                    let cur = format!("↑ {fname}");
+                    let mut fwd = |done: u64, tot: u64| {
+                        (ctl.on_progress)(&cian_core::progress::Progress {
+                            bytes_done: done,
+                            bytes_total: tot,
+                            files_done: i,
+                            files_total: total,
+                            current: cur.clone(),
+                        });
+                    };
+                    let mut sctl = cian_scp::Ctl { cancel, on_progress: &mut fwd };
+                    cian_scp::upload(&dst, &tmp, &dst_path, None, &mut sctl)
+                };
+                match up {
+                    Ok(_) => report.ok += 1,
+                    Err(e) => report.note_error(format!("{fname}: upload: {e}")),
+                }
+                let _ = std::fs::remove_file(&tmp);
+            }
+            let _ = std::fs::remove_dir_all(&tmp_dir);
+            report.note = Some("relayed via this machine".to_string());
+            report
+        });
     }
 
     /// F3 on a remote pane: fetch the file under the cursor to a temp path on a
