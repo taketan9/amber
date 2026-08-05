@@ -57,6 +57,9 @@ fn command_list() -> &'static [(&'static str, (&'static str, &'static str), bool
         ("gitlog",     ("commit log", "コミットログ"), false),
         ("gitdiff",    ("working-tree diff vs HEAD", "作業ツリーの差分"), false),
         ("jump",       ("fuzzy-jump to a recent directory", "最近のディレクトリへ移動"), false),
+        ("files",      ("live fuzzy file finder (this tree)", "ライブ・ファイル検索（このツリー）"), false),
+        ("recent",     ("recently-opened files", "最近開いたファイル"), false),
+        ("toggles",    ("UI toggles menu (T)", "UIトグルメニュー（T）"), false),
         ("cd",         ("go to a typed path", "パス入力で移動"), true),
         ("edit",       ("open in the external editor", "外部エディタで開く"), false),
         ("reload",     ("reload init.lua", "init.lua を再読込"), false),
@@ -113,6 +116,62 @@ impl App {
         self.open_palette(PaletteKind::Jump, items);
     }
 
+    /// Record a file just opened in the viewer for the recent-files list. Skips
+    /// the temp copies of remote files (they aren't real local files to reopen).
+    pub(crate) fn note_recent_file(&mut self, path: &std::path::Path) {
+        if path.components().any(|c| c.as_os_str() == "cian-remote") {
+            return;
+        }
+        let p = path.to_path_buf();
+        self.recent_files.retain(|x| x != &p);
+        self.recent_files.insert(0, p);
+        self.recent_files.truncate(50);
+    }
+
+    /// `:files` — a live fuzzy finder over the files under the active pane. The
+    /// empty-query list leads with the recently-opened files, then the tree.
+    pub(crate) fn start_file_finder(&mut self) {
+        let Some(root) = self.active_pane().map(|p| p.cwd.clone()) else { return };
+        let mut items = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        // Recently-opened files first (still on disk).
+        for p in &self.recent_files {
+            if p.is_file() && seen.insert(p.clone()) {
+                items.push(file_item(p, &root, "recent"));
+            }
+        }
+        // Then the tree, bounded so a giant directory can't hang the picker.
+        let mut count = 0usize;
+        gather_files(&root, &mut |p| {
+            if seen.insert(p.to_path_buf()) {
+                items.push(file_item(p, &root, ""));
+            }
+            count += 1;
+            count < 10_000
+        });
+        if items.is_empty() {
+            self.message = Some(tr(self.lang, "no files here", "ファイルがありません").into());
+            return;
+        }
+        self.open_palette(PaletteKind::File, items);
+    }
+
+    /// `:recent` — just the recently-opened files.
+    pub(crate) fn start_recent_files(&mut self) {
+        let root = self.active_pane().map(|p| p.cwd.clone()).unwrap_or_default();
+        let items: Vec<PaletteItem> = self
+            .recent_files
+            .iter()
+            .filter(|p| p.is_file())
+            .map(|p| file_item(p, &root, "recent"))
+            .collect();
+        if items.is_empty() {
+            self.message = Some(tr(self.lang, "no recent files yet", "最近開いたファイルはありません").into());
+            return;
+        }
+        self.open_palette(PaletteKind::File, items);
+    }
+
     fn open_palette(&mut self, kind: PaletteKind, items: Vec<PaletteItem>) {
         let shown = (0..items.len()).collect();
         self.popup = Popup::Palette { kind, query: String::new(), items, shown, cursor: 0, scroll: 0 };
@@ -154,6 +213,10 @@ impl App {
                     let _ = p.jump_to(PathBuf::from(value));
                 }
             }
+            PaletteKind::File => {
+                // Reveal the file: jump the pane to its folder, cursor on it.
+                self.reveal_path_in_pane(&PathBuf::from(value));
+            }
             PaletteKind::Commands if takes_arg => {
                 // Prefill command mode so the argument can be typed.
                 self.command_buffer = format!("{} ", value);
@@ -184,4 +247,33 @@ fn bookmark_dirs(entries: &[Shortcut]) -> Vec<PathBuf> {
     }
     walk(entries, &mut out);
     out
+}
+
+/// Build a picker row for a file, labelled by its path relative to `root` (so
+/// the fuzzy match sees the folders too) with the full path as the value.
+fn file_item(path: &std::path::Path, root: &std::path::Path, tag: &str) -> PaletteItem {
+    let rel = path.strip_prefix(root).unwrap_or(path);
+    let full = path.display().to_string();
+    let detail = if tag.is_empty() { full.clone() } else { format!("{tag}  {full}") };
+    PaletteItem { label: rel.display().to_string(), detail, value: full, takes_arg: false }
+}
+
+/// Walk `dir` recursively, calling `cb` for each file. `cb` returns false to
+/// stop the whole walk (used to cap the count). Skips VCS metadata directories.
+fn gather_files(dir: &std::path::Path, cb: &mut dyn FnMut(&std::path::Path) -> bool) -> bool {
+    let Ok(rd) = std::fs::read_dir(dir) else { return true };
+    for entry in rd.flatten() {
+        let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
+        if is_dir {
+            if matches!(entry.file_name().to_str(), Some(".git" | ".svn" | ".hg")) {
+                continue;
+            }
+            if !gather_files(&entry.path(), cb) {
+                return false;
+            }
+        } else if !cb(&entry.path()) {
+            return false;
+        }
+    }
+    true
 }

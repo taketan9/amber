@@ -691,6 +691,8 @@ impl App {
     /// Open the F3 viewer on `path`, with the cursor on `line0` (0-based). Used
     /// by F3 (line 0) and by "open a grep hit at its line".
     pub(crate) fn open_viewer_at(&mut self, path: &Path, title: &str, line0: usize) {
+        // Remember it for the recent-files finder (skip the remote temp copies).
+        self.note_recent_file(path);
         // Images preview as half-block cells rather than a hex dump.
         if cian_core::image::is_image(path) {
             self.popup = Popup::ImageView {

@@ -69,6 +69,8 @@ impl App {
             "palette" | "commands" | "p" => self.start_command_palette(),
             "jump" | "j" => self.start_fuzzy_jump(),
             "toggles" | "ui" | "toggle" => self.start_toggles(),
+            "files" | "ff" | "findfile" => self.start_file_finder(),
+            "recent" | "oldfiles" | "fo" => self.start_recent_files(),
             "each" | "foreach" => self.run_each(rest),
             "undo" => self.undo_last(),
             "edit" | "e" => self.edit_selected_file(),

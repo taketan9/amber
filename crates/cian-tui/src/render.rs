@@ -4054,6 +4054,7 @@ fn draw_popup(
         let title = match kind {
             PaletteKind::Commands => tr(lang, " command palette ", " コマンドパレット "),
             PaletteKind::Jump => tr(lang, " jump to ", " ジャンプ "),
+            PaletteKind::File => tr(lang, " find file ", " ファイル検索 "),
         };
         let block = Block::default()
             .borders(Borders::ALL)

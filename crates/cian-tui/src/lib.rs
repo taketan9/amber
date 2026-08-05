@@ -264,6 +264,8 @@ enum PaletteKind {
     Commands,
     /// A directory to jump to.
     Jump,
+    /// A file to reveal in the active pane (live file finder / recent files).
+    File,
 }
 
 /// One row in the fuzzy picker.
@@ -1772,6 +1774,9 @@ pub struct App {
     /// (`T`). `None` = follow init.lua; `Some(v)` = the user's live choice.
     notify_runtime: Option<bool>,
     verify_runtime: Option<bool>,
+    /// Files opened in the viewer this session, most-recent first, for the recent
+    /// entries in the file finder (`:files` / `:recent`).
+    recent_files: Vec<PathBuf>,
     /// Local temp files opened from a remote pane (F3), mapped to where they came
     /// from, so saving one uploads it back. `(target, remote absolute path)`.
     remote_edits: std::collections::HashMap<PathBuf, (cian_scp::Target, String)>,
@@ -2015,6 +2020,7 @@ impl App {
             remote_view: None,
             notify_runtime: None,
             verify_runtime: None,
+            recent_files: Vec::new(),
             remote_edits: std::collections::HashMap::new(),
             remote_refresh: None,
             scp_pending: None,

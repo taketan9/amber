@@ -5247,6 +5247,23 @@
     }
 
     #[test]
+    fn recent_files_dedupe_and_skip_remote_temp() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().to_path_buf();
+        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+
+        app.note_recent_file(std::path::Path::new("/proj/a.rs"));
+        app.note_recent_file(std::path::Path::new("/proj/b.rs"));
+        app.note_recent_file(std::path::Path::new("/proj/a.rs")); // re-open moves to front
+        assert_eq!(app.recent_files.len(), 2, "duplicate collapsed");
+        assert_eq!(app.recent_files[0], std::path::PathBuf::from("/proj/a.rs"), "most recent first");
+
+        // A downloaded remote temp is not a reopenable local file.
+        app.note_recent_file(std::path::Path::new("/tmp/cian-remote/x.log"));
+        assert_eq!(app.recent_files.len(), 2, "remote temp not recorded");
+    }
+
+    #[test]
     fn ai_history_archives_reopens_and_forgets() {
         let d = tempfile::tempdir().unwrap();
         let p = d.path().to_path_buf();
