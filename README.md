@@ -62,6 +62,28 @@ select, double-click to open. Drag a file onto the other pane to copy it there
 (Shift-drag to move). Every dialog has real clickable buttons, and the wheel
 scrolls any popup. Drag a border to resize the split it divides.
 
+**Long jobs tell you when they're done** — a copy or transfer that runs more
+than a few seconds rings the bell and posts a desktop notification, so you can
+walk away. Turn it off in the toggles (`T`) or `cian.set_option("notify", false)`.
+
+---
+
+## Get around fast
+
+A handful of fuzzy pickers — type a few letters, hit Enter:
+
+| Do this | And… |
+|---|---|
+| **`C`** (or `:palette`) | command palette — fuzzy-find *any* command |
+| **`Z`** (or `:jump`) | jump to a recent or bookmarked folder |
+| **`:files`** | live file finder over this whole tree — Enter reveals the pick |
+| **`:recent`** | the files you opened this session |
+| **`T`** (or `:toggles`) | flip live settings in one place — dotfiles, input sync, notifications, verify-transfers, language |
+| **`:du`** | disk usage — biggest first, `Enter` drills into a folder |
+
+Marked a few files? **`:each <cmd>`** runs a command on each — `:each gzip {}`
+(`{}` is the file), or `:each md5sum` with the path appended.
+
 ---
 
 ## Look inside anything — `F3`
@@ -123,6 +145,8 @@ what differs. From either:
 
 - **`>` / `<`** — copy the highlighted entry to the other side (a file or a whole
   subtree). WinMerge-style reconcile.
+- **`]` / `[`** — sync the *whole* tree one way: copy everything one side has
+  that the other lacks or differs on. It never deletes, and confirms first.
 - **`w`** — save the comparison as a **side-by-side HTML or Markdown** report
   (the extension picks the format).
 - **`x`** — ask the AI to explain what changed.
@@ -168,6 +192,20 @@ you **Upload → server** and **Download ← server**, in a file pane or the she
   (chmod), and the marked files go up.
 - **Download** — browse the remote folder (Enter to open, `Space` to mark), then
   choose where they land: left pane, right pane, Desktop, or a typed path.
+
+**Or browse the server *in* a pane — `:sftp`** (also `:remote` / `:scp`). One
+pane becomes the remote host, framed in **carmine** so you never mistake it for
+local. Move around like any pane (`Enter`/`l` in, `-` up, arrows switch panes),
+then:
+
+- **`c` copy / `m` move** across the boundary — local↔server, or even
+  server↔server (relayed through this machine). A move confirms first.
+- **`A` / `a` / `r` / `d`** — new folder / new file / rename / delete on the
+  server. Deleting a folder removes it recursively; the server has no trash, so
+  it always confirms.
+- **`F3`** opens a remote file; edit it (in place or with `E`) and saving
+  uploads it straight back.
+- **`Esc`** leaves and the pane returns to your local disk.
 
 It's pure-Rust — no external `scp`. It uses **SFTP**, falling back to classic
 **SCP** on servers without an SFTP subsystem, and the status line says which. Turn
@@ -309,16 +347,16 @@ runs one from your config.
 
 ---
 
-## AI (optional)
+## AI & crmaine (optional)
 
-With `cian.ai{...}` set, cian gets an assistant (it calls itself **Carmine /
-カーマイン**). It's off unless configured, and always keeps you in the loop —
+With `cian.ai{...}` set, cian gets a local assistant (it calls itself **Carmine
+/ カーマイン**). It's off unless configured, and always keeps you in the loop —
 nothing runs or deletes without your say-so.
 
 | Do this | You get |
 |---|---|
 | `:ai` | a chat, backed by Azure OpenAI |
-| `:aicmd <what you want>` | a shell command drafted for you to review (never run for you) |
+| `:aicmd <what you want>` | a shell command for the shell you're in (local, or the server you're SSH'd into) — drafted for you to review, never run for you |
 | `:aicommit` | a commit message drafted from the staged diff |
 | `:aijunk` | a checklist of likely-disposable files → normal delete confirm |
 | `:aiorganize` | a proposed folder layout → you approve the moves |
@@ -340,6 +378,33 @@ couple of packages. `auth_mode = "mock"` gives an offline echo for wiring it up,
 and `api_base_url` points it at a local server (Ollama, LM Studio). This is the
 one place cian isn't fully self-contained, which is why it's opt-in. See
 [`examples/init.en.lua`](examples/init.en.lua).
+
+### crmaine — your team's RAG, from cian
+
+If your team runs the **crmaine** VS Code extension, cian attaches to its
+already-running local server — same index, same endpoint, nothing extra to
+install. Start crmaine in VS Code, then add one line to init.lua (it reads the
+port and cache dir from VS Code's own settings each time):
+
+```lua
+cian.crmaine{}
+```
+
+| Command | You get |
+|---|---|
+| `:rag <question>` | ask the RAG over crmaine's index — the answer streams in |
+| `:agent <question>` | an agent answer (shows each tool call as it runs) |
+| `:coding [question]` | ask about the current file's code (`A` in F3 too) |
+| `:impact` / `:contradiction` / `:glossary` | corpus analysis over the index |
+| `:searchfiles <words>` | keyword-search the corpus into the pane |
+| `:index [dir]` | build cian's *own* index of a folder; `:ragshared` switches back to crmaine's |
+| `:raginfo` | diagnostics — the port, whether the server's up, which index is active |
+
+The chat wears crmaine's carmine and reads as one identity: **Shift+Enter** for a
+newline, **Ctrl+R** for past conversations (they survive a restart), **Ctrl+↑ /
+Ctrl+↓** to rate the last answer, **Esc** to stop one mid-stream. Answers render
+as Markdown and list their **sources**. Every crmaine action is on the right-click
+**Ⓒ crmaine ▸** menu too.
 
 ---
 
