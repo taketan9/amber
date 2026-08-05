@@ -513,11 +513,52 @@ impl App {
         if description.is_empty() {
             return;
         }
-        let shell = self.shell_cmd_name();
-        let os = if cfg!(windows) { "Windows" } else if cfg!(target_os = "macos") { "macOS" } else { "Linux" };
+        // Where will this command actually run? The active shell may be local, or
+        // already logged into a server over SSH — the command must suit THAT
+        // system (AIX `ls` vs Windows `dir`, and never an ssh-wrapped command).
+        // A `user@host` title means a Unix-style shell either way; a matched SSH
+        // host also hands over its recorded OS/middleware via `notes`.
+        let host = self.shell.active_title().and_then(|t| host_from_title(&t));
+        let target = match &host {
+            Some(h) => {
+                let known = self
+                    .config
+                    .ssh_hosts
+                    .iter()
+                    .find(|x| x.host == *h || x.name == *h)
+                    .and_then(|x| x.notes.as_deref());
+                match known {
+                    Some(notes) => format!(
+                        "a shell already logged in over SSH to the server '{h}'. \
+                         That system: {notes}. Use that system's own commands and flags \
+                         (AIX / Solaris / HP-UX differ from GNU/Linux)."
+                    ),
+                    None => format!(
+                        "a Unix-like shell on '{h}' (it may be a remote server reached over \
+                         SSH). Use POSIX / Unix commands, not Windows ones."
+                    ),
+                }
+            }
+            None => {
+                let os = if cfg!(windows) {
+                    "Windows"
+                } else if cfg!(target_os = "macos") {
+                    "macOS"
+                } else {
+                    "Linux"
+                };
+                format!("your local {os} {} shell", self.shell_cmd_name())
+            }
+        };
+        let ctx = self.ai_context_block();
         let system = format!(
-            "You translate a request into ONE shell command for {shell} on {os}. \
-             Output ONLY the command — no explanation, no markdown, no code fences.",
+            "Translate the user's request into ONE shell command to run in {target}.\n\
+             The command is pasted into that shell exactly as written and run there, so:\n\
+             - Do NOT wrap it in `ssh` and do NOT add a hostname or any login/connection \
+               step — the shell is already at the right place.\n\
+             - Use the command style and flags native to that system.\n\
+             - Output ONLY the command — no explanation, no markdown, no code fences.\n\
+             {ctx}"
         );
         self.message = Some("asking AI for a command…".into());
         self.ai_request(AiPurpose::ShellCommand, system, description);
