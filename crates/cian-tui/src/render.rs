@@ -1889,6 +1889,131 @@ pub(crate) fn readable_on(bg: Color) -> Color {
     }
 }
 
+/// Inline Markdown within one text run: `**bold**` and `` `code` ``. Anything
+/// that would cross a wrap boundary is simply left as plain text.
+fn md_inline(text: &str, base: Style, code_c: Color) -> Vec<Span<'static>> {
+    let chars: Vec<char> = text.chars().collect();
+    let mut spans: Vec<Span> = Vec::new();
+    let mut buf = String::new();
+    let mut i = 0;
+    while i < chars.len() {
+        // Inline code: `...`
+        if chars[i] == '`' {
+            if let Some(rel) = chars[i + 1..].iter().position(|&c| c == '`') {
+                if !buf.is_empty() {
+                    spans.push(Span::styled(std::mem::take(&mut buf), base));
+                }
+                let code: String = chars[i + 1..i + 1 + rel].iter().collect();
+                spans.push(Span::styled(code, Style::default().fg(code_c)));
+                i = i + rel + 2;
+                continue;
+            }
+        }
+        // Bold: **...**
+        if chars[i] == '*' && chars.get(i + 1) == Some(&'*') {
+            if let Some(rel) = chars[i + 2..].windows(2).position(|w| w == ['*', '*']) {
+                let end = i + 2 + rel;
+                if !buf.is_empty() {
+                    spans.push(Span::styled(std::mem::take(&mut buf), base));
+                }
+                let b: String = chars[i + 2..end].iter().collect();
+                spans.push(Span::styled(b, base.add_modifier(Modifier::BOLD)));
+                i = end + 2;
+                continue;
+            }
+        }
+        buf.push(chars[i]);
+        i += 1;
+    }
+    if !buf.is_empty() {
+        spans.push(Span::styled(buf, base));
+    }
+    if spans.is_empty() {
+        spans.push(Span::styled(String::new(), base));
+    }
+    spans
+}
+
+/// Render one raw line of an assistant answer as Markdown into wrapped, styled
+/// lines paired with their plain text (for copy / scroll mapping). `in_code`
+/// carries fenced-code-block state between lines; `gutter` is the speaker bar.
+fn md_body_line(
+    raw: &str,
+    width: usize,
+    gutter: Color,
+    body_c: Color,
+    in_code: &mut bool,
+) -> Vec<(String, Line<'static>)> {
+    let code_c = Color::Rgb(206, 145, 120);
+    let head_c = Color::Rgb(120, 190, 255);
+    let quote_c = Color::Rgb(150, 150, 170);
+    let w = width.saturating_sub(2).max(1);
+    let bar = || Span::styled("▏ ", Style::default().fg(gutter));
+    let mut out: Vec<(String, Line)> = Vec::new();
+    let trimmed = raw.trim_start();
+
+    // A ``` fence toggles code mode and draws a faint rule.
+    if trimmed.starts_with("```") {
+        *in_code = !*in_code;
+        out.push((
+            raw.to_string(),
+            Line::from(vec![bar(), Span::styled("─".repeat(w.min(40)), Style::default().fg(quote_c))]),
+        ));
+        return out;
+    }
+    if *in_code {
+        for chunk in wrap_str(raw, w) {
+            let line = Line::from(vec![bar(), Span::styled(chunk.clone(), Style::default().fg(code_c))]);
+            out.push((chunk, line));
+        }
+        return out;
+    }
+    // Heading: one-to-three leading '#'.
+    let hashes = trimmed.chars().take_while(|&c| c == '#').count();
+    if (1..=3).contains(&hashes) && trimmed.chars().nth(hashes) == Some(' ') {
+        let text = trimmed[hashes + 1..].trim();
+        for chunk in wrap_str(text, w) {
+            let line = Line::from(vec![
+                bar(),
+                Span::styled(chunk.clone(), Style::default().fg(head_c).add_modifier(Modifier::BOLD)),
+            ]);
+            out.push((chunk, line));
+        }
+        return out;
+    }
+    // Bullet: "- " / "* " → "• "
+    if let Some(rest) = trimmed.strip_prefix("- ").or_else(|| trimmed.strip_prefix("* ")) {
+        let mut first = true;
+        for chunk in wrap_str(rest, w.saturating_sub(2)) {
+            let marker = if first { "• " } else { "  " };
+            let mut spans = vec![bar(), Span::styled(marker, Style::default().fg(gutter))];
+            spans.extend(md_inline(&chunk, Style::default().fg(body_c), code_c));
+            out.push((format!("{marker}{chunk}"), Line::from(spans)));
+            first = false;
+        }
+        return out;
+    }
+    // Blockquote: "> "
+    if let Some(rest) = trimmed.strip_prefix("> ") {
+        for chunk in wrap_str(rest, w.saturating_sub(2)) {
+            let line = Line::from(vec![
+                bar(),
+                Span::styled("│ ", Style::default().fg(quote_c)),
+                Span::styled(chunk.clone(), Style::default().fg(quote_c).add_modifier(Modifier::ITALIC)),
+            ]);
+            out.push((chunk, line));
+        }
+        return out;
+    }
+    // Plain paragraph with inline styling.
+    for chunk in wrap_str(raw, w) {
+        let mut spans = vec![bar()];
+        spans.extend(md_inline(&chunk, Style::default().fg(body_c), code_c));
+        out.push((chunk, Line::from(spans)));
+    }
+    out
+}
+
 fn draw_ai_chat(f: &mut Frame, area: Rect, app: &mut App) {
     let lang = app.lang;
     let width: u16 = 76u16.min(area.width.saturating_sub(2));
@@ -1916,16 +2041,23 @@ fn draw_ai_chat(f: &mut Frame, area: Rect, app: &mut App) {
         ]))
         .title_bottom(tr(
             lang,
-            " Enter=send  drag/Ctrl+Y=copy  Ctrl+V=paste  ↑↓  Esc ",
-            " Enter=送信  ドラッグ/Ctrl+Y=コピー  Ctrl+V=貼付  ↑↓  Esc ",
+            " Enter=send  Alt+Enter=newline  Ctrl+Y=copy  Ctrl+V=paste  ↑↓  Esc ",
+            " Enter=送信  Alt+Enter=改行  Ctrl+Y=コピー  Ctrl+V=貼付  ↑↓  Esc ",
         ));
     let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
     f.render_widget(block, rect);
     let body_w = inner.width.max(1) as usize;
-    let view_h = inner.height.saturating_sub(1) as usize;
 
     // The current pipeline stage (if any), read before the popup is borrowed.
     let stage = app.crmaine_stage.clone();
+    // The input can be several lines (Alt+Enter); the transcript gives up a row
+    // per extra input line, capped so a huge paste can't swallow the answer.
+    let input_rows = if let Popup::AiChat { input, .. } = &app.popup {
+        input.split('\n').count().clamp(1, 6)
+    } else {
+        1
+    };
+    let view_h = inner.height.saturating_sub(input_rows as u16) as usize;
 
     let mut flat: Vec<String> = Vec::new();
     let mut shown: Vec<Line> = Vec::new();
@@ -1954,6 +2086,7 @@ fn draw_ai_chat(f: &mut Frame, area: Rect, app: &mut App) {
             // Once crmaine's "— sources —" rule appears, the rest of the turn is
             // its citation list; render those quietly and in a link-ish blue.
             let mut in_sources = false;
+            let mut in_code = false;
             for raw in m.text.split('\n') {
                 if raw.trim() == "— sources —" {
                     in_sources = true;
@@ -1965,6 +2098,15 @@ fn draw_ai_chat(f: &mut Frame, area: Rect, app: &mut App) {
                         ),
                     ]));
                     flat.push(raw.to_string());
+                    continue;
+                }
+                // The assistant's prose is Markdown; the user's text and the
+                // citation list stay literal.
+                if !m.user && !in_sources {
+                    for (plain, line) in md_body_line(raw, body_w, name_c, body_c, &mut in_code) {
+                        styled.push(line);
+                        flat.push(plain);
+                    }
                     continue;
                 }
                 let text_c = if in_sources { source_c } else { body_c };
@@ -2020,10 +2162,23 @@ fn draw_ai_chat(f: &mut Frame, area: Rect, app: &mut App) {
     app.ai_lines = flat;
 
     f.render_widget(Paragraph::new(shown), app.ai_rect);
+    // The input, possibly several lines. A "> " prompt on the first row, aligned
+    // continuation on the rest, and a block caret at the very end.
+    let in_style = Style::default()
+        .fg(readable_on(theme().selected_bg))
+        .add_modifier(Modifier::BOLD)
+        .bg(theme().selected_bg);
+    let raw_lines: Vec<&str> = input_str.split('\n').collect();
+    let last = raw_lines.len().saturating_sub(1);
+    let mut in_lines: Vec<Line> = Vec::with_capacity(input_rows);
+    for (i, seg) in raw_lines.iter().enumerate().take(input_rows) {
+        let prefix = if i == 0 { "> " } else { "  " };
+        let caret = if i == last { "\u{2588}" } else { "" };
+        in_lines.push(Line::from(Span::styled(format!("{prefix}{seg}{caret}"), in_style)));
+    }
     f.render_widget(
-        Paragraph::new(format!("> {}", input_str))
-            .style(Style::default().fg(readable_on(theme().selected_bg)).add_modifier(Modifier::BOLD).bg(theme().selected_bg)),
-        Rect::new(inner.x, inner.y + view_h as u16, inner.width, 1),
+        Paragraph::new(in_lines).style(Style::default().bg(theme().selected_bg)),
+        Rect::new(inner.x, inner.y + view_h as u16, inner.width, input_rows as u16),
     );
 }
 
@@ -4542,4 +4697,52 @@ fn draw_popup(
         Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD),
     );
     f.render_widget(footer_p, footer_area);
+}
+
+#[cfg(test)]
+mod md_tests {
+    use super::*;
+
+    /// Concatenate a styled run's text back to a plain string.
+    fn plain(spans: &[Span]) -> String {
+        spans.iter().map(|s| s.content.as_ref()).collect()
+    }
+
+    #[test]
+    fn inline_splits_bold_and_code_but_keeps_text() {
+        let base = Style::default();
+        let spans = md_inline("run `ls -l` then **stop**", base, Color::Rgb(1, 2, 3));
+        assert_eq!(plain(&spans), "run ls -l then stop");
+        // The code span carries the code colour; the bold span the bold modifier.
+        assert!(spans.iter().any(|s| s.style.fg == Some(Color::Rgb(1, 2, 3)) && s.content == "ls -l"));
+        assert!(spans.iter().any(|s| s.style.add_modifier.contains(Modifier::BOLD) && s.content == "stop"));
+    }
+
+    #[test]
+    fn unterminated_markers_stay_literal() {
+        let spans = md_inline("a `b and **c", Style::default(), Color::Rgb(0, 0, 0));
+        assert_eq!(plain(&spans), "a `b and **c");
+    }
+
+    #[test]
+    fn body_line_handles_headings_bullets_and_code_fences() {
+        let g = Color::Rgb(9, 9, 9);
+        let b = Color::Rgb(8, 8, 8);
+        let mut in_code = false;
+
+        let head = md_body_line("## Title", 40, g, b, &mut in_code);
+        assert_eq!(head.len(), 1);
+        assert_eq!(head[0].0, "Title"); // hashes stripped
+
+        let bullet = md_body_line("- item", 40, g, b, &mut in_code);
+        assert!(bullet[0].0.starts_with("• "));
+
+        // A fence flips code mode; the line inside is verbatim.
+        let _fence = md_body_line("```", 40, g, b, &mut in_code);
+        assert!(in_code, "opening fence enters code mode");
+        let code = md_body_line("x = **not bold** here", 40, g, b, &mut in_code);
+        assert_eq!(code[0].0, "x = **not bold** here");
+        let _close = md_body_line("```", 40, g, b, &mut in_code);
+        assert!(!in_code, "closing fence leaves code mode");
+    }
 }
