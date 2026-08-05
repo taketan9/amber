@@ -286,6 +286,9 @@ impl App {
                     }
                 }
                 KeyCode::Enter => self.send_ai_message(),
+                // Ctrl+↑ / Ctrl+↓ rate the last RAG answer (thumbs up / down).
+                KeyCode::Up if ctrl => self.send_crmaine_feedback(true),
+                KeyCode::Down if ctrl => self.send_crmaine_feedback(false),
                 KeyCode::PageUp | KeyCode::Up => {
                     if let Popup::AiChat { scroll, .. } = &mut self.popup {
                         *scroll = scroll.saturating_sub(3);

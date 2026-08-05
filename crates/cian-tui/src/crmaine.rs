@@ -651,6 +651,56 @@ impl App {
         }
     }
 
+    /// `Ctrl+↑` / `Ctrl+↓` in the chat: tell crmaine the last answer was good or
+    /// bad, so it boosts / demotes the files it cited. Only meaningful for a RAG
+    /// answer (one with sources); a plain chat has nothing to rate.
+    pub(crate) fn send_crmaine_feedback(&mut self, up: bool) {
+        if self.crmaine_last_sources.is_empty() {
+            self.message = Some(
+                tr(self.lang, "no RAG answer to rate", "評価できる RAG 回答がありません").into(),
+            );
+            return;
+        }
+        let cfg = match self.crmaine_resolved() {
+            Ok(c) => c,
+            Err(e) => {
+                self.message = Some(e);
+                return;
+            }
+        };
+        // The last question and a short preview of the answer, from the log.
+        let (mut question, mut response) = (String::new(), String::new());
+        if let Popup::AiChat { log, .. } = &self.popup {
+            for m in log.iter().rev() {
+                if response.is_empty() && !m.user {
+                    response = m.text.chars().take(200).collect();
+                } else if question.is_empty() && m.user {
+                    question = m.text.chars().take(200).collect();
+                }
+                if !question.is_empty() && !response.is_empty() {
+                    break;
+                }
+            }
+        }
+        let body = serde_json::json!({
+            "cache_dir": cfg.cache_dir,
+            "rating": if up { "up" } else { "down" },
+            "sources": self.crmaine_last_sources.clone(),
+            "question": question,
+            "response_preview": response,
+        })
+        .to_string();
+        let port = cfg.port;
+        std::thread::spawn(move || {
+            let _ = http_post(port, "/feedback", &body);
+        });
+        self.message = Some(if up {
+            tr(self.lang, "👍 feedback sent to crmaine", "👍 フィードバックを送信").into()
+        } else {
+            tr(self.lang, "👎 feedback sent to crmaine", "👎 フィードバックを送信").into()
+        });
+    }
+
     /// Take the next `request_id` and remember it (with the port) as in-flight,
     /// so [`Self::cancel_crmaine`] can stop exactly this call.
     fn arm_crmaine_request(&mut self, port: u16) -> String {
