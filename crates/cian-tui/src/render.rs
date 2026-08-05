@@ -1895,12 +1895,25 @@ fn draw_ai_chat(f: &mut Frame, area: Rect, app: &mut App) {
     let height = area.height.saturating_sub(2).max(8);
     let rect = centered_rect(width, height, area);
     f.render_widget(Clear, rect);
+    // crmaine's signature carmine — the same frame the remote pane wears — so
+    // the assistant reads as one identity across the app.
+    let carmine = Color::Rgb(214, 45, 70);
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(border_type())
-        .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
+        .border_style(Style::default().fg(carmine).add_modifier(Modifier::BOLD))
         .style(Style::default().bg(theme().popup_bg))
-        .title(tr(lang, " AI chat ", " AI チャット "))
+        .title(Line::from(vec![
+            Span::styled(" ✦ ", Style::default().fg(carmine).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                tr(lang, "crmaine", "カーマイン"),
+                Style::default().fg(carmine).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                tr(lang, "  AI ", "  AI "),
+                Style::default().fg(readable_on(theme().popup_bg)).add_modifier(Modifier::DIM),
+            ),
+        ]))
         .title_bottom(tr(
             lang,
             " Enter=send  drag/Ctrl+Y=copy  Ctrl+V=paste  ↑↓  Esc ",
@@ -1922,22 +1935,42 @@ fn draw_ai_chat(f: &mut Frame, area: Rect, app: &mut App) {
         let mut styled: Vec<Line> = Vec::new();
         // Message text must contrast with the popup ground under any theme.
         let body_c = readable_on(theme().popup_bg);
+        let source_c = Color::Rgb(150, 175, 205);
+        let dim_c = Color::Rgb(150, 150, 170);
         for m in log.iter() {
-            let (name, name_c) = if m.user {
-                ("you", theme().accent)
+            let (glyph, name, name_c) = if m.user {
+                ("▍", tr(lang, "you", "あなた"), theme().accent)
             } else {
-                ("crmaine - Ajent", Color::Rgb(130, 205, 150))
+                ("◆", tr(lang, "crmaine", "カーマイン"), carmine)
             };
-            styled.push(Line::from(Span::styled(
-                name.to_string(),
-                Style::default().fg(name_c).add_modifier(Modifier::BOLD),
-            )));
+            styled.push(Line::from(vec![
+                Span::styled(format!("{glyph} "), Style::default().fg(name_c).add_modifier(Modifier::BOLD)),
+                Span::styled(name.to_string(), Style::default().fg(name_c).add_modifier(Modifier::BOLD)),
+            ]));
             flat.push(name.to_string());
+            // Once crmaine's "— sources —" rule appears, the rest of the turn is
+            // its citation list; render those quietly and in a link-ish blue.
+            let mut in_sources = false;
             for raw in m.text.split('\n') {
+                if raw.trim() == "— sources —" {
+                    in_sources = true;
+                    styled.push(Line::from(vec![
+                        Span::styled("  ", Style::default()),
+                        Span::styled(
+                            tr(lang, "sources", "参照元"),
+                            Style::default().fg(dim_c).add_modifier(Modifier::BOLD),
+                        ),
+                    ]));
+                    flat.push(raw.to_string());
+                    continue;
+                }
+                let text_c = if in_sources { source_c } else { body_c };
                 for chunk in wrap_str(raw, body_w.saturating_sub(2)) {
                     styled.push(Line::from(vec![
-                        Span::raw("  "),
-                        Span::styled(chunk.clone(), Style::default().fg(body_c)),
+                        // A thin gutter in the speaker's colour gives the thread
+                        // a chat feel without boxing every message.
+                        Span::styled("▏ ", Style::default().fg(name_c)),
+                        Span::styled(chunk.clone(), Style::default().fg(text_c)),
                     ]));
                     flat.push(chunk);
                 }
@@ -1946,10 +1979,20 @@ fn draw_ai_chat(f: &mut Frame, area: Rect, app: &mut App) {
             flat.push(String::new());
         }
         if *pending {
-            styled.push(Line::from(Span::styled(
-                tr(lang, "crmaine - Ajent …thinking", "crmaine - Ajent …考え中"),
-                Style::default().fg(Color::Rgb(150, 150, 170)).add_modifier(Modifier::ITALIC),
-            )));
+            // A carmine braille spinner, driven off the wall clock so it turns
+            // while the answer is in flight (the loop force-repaints meanwhile).
+            const FRAMES: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+            let fi = (app.startup_at.elapsed().as_millis() / 90) as usize % FRAMES.len();
+            styled.push(Line::from(vec![
+                Span::styled(
+                    format!("{} ", FRAMES[fi]),
+                    Style::default().fg(carmine).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    tr(lang, "crmaine is thinking…", "カーマイン が考えています…"),
+                    Style::default().fg(dim_c).add_modifier(Modifier::ITALIC),
+                ),
+            ]));
             flat.push(String::new());
         }
         let max_scroll = flat.len().saturating_sub(view_h);

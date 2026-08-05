@@ -3544,8 +3544,16 @@ fn run_loop<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Result<()>
         // actually repaint when something changed (input, resize, or new
         // shell output), so the loop stays cheap when idle. While a transition
         // or flash is running we tick faster so the motion stays smooth.
-        let tick =
-            if app.anim.is_some() || app.flash.is_some() || app.op_job.is_some() { 16 } else { 33 };
+        let tick = if app.anim.is_some()
+            || app.flash.is_some()
+            || app.op_job.is_some()
+            || app.ai_job.is_some()
+            || app.crmaine_rx.is_some()
+        {
+            16
+        } else {
+            33
+        };
         if event::poll(Duration::from_millis(tick))? {
             match event::read()? {
                 Event::Key(key) if key.kind == KeyEventKind::Press => {
@@ -3668,6 +3676,12 @@ fn run_loop<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Result<()>
         // A pending crmaine RAG answer, likewise.
         if app.crmaine_rx.is_some() {
             needs_redraw |= app.poll_crmaine();
+        }
+        // While an AI / crmaine reply is still in flight, keep repainting so the
+        // "thinking" spinner actually spins (the poll above returns false until
+        // the answer lands, which would otherwise let the loop go idle).
+        if app.ai_job.is_some() || app.crmaine_rx.is_some() {
+            needs_redraw = true;
         }
         // A running duplicate scan reports its groups when done.
         if app.dupes_job.is_some() {
