@@ -210,6 +210,50 @@ impl App {
         Ok(CrmaineResolved { port, cache_dir, endpoint, model, api_version, auth_mode })
     }
 
+    /// `:raginfo` / `:crmaine?` — a diagnostic that shows exactly what cian
+    /// resolved (port, cache dir, endpoint, model) and whether the local server
+    /// answers. This is the first thing to run when `:rag` "does nothing": it
+    /// tells you the port it's dialling and whether crmaine is actually up.
+    pub(crate) fn crmaine_doctor(&mut self) {
+        let cfg = match self.crmaine_resolved() {
+            Ok(c) => c,
+            Err(e) => {
+                self.popup = Popup::Notice {
+                    lines: vec!["crmaine — not ready".to_string(), String::new(), e],
+                };
+                return;
+            }
+        };
+        // A short probe: does anything answer on the derived port? http_get
+        // succeeds as long as the server is listening (even a 404 means "up").
+        let reachable = http_get(cfg.port, "/health").is_ok();
+        let status = if reachable {
+            tr(self.lang, "reachable — server is up", "接続OK — サーバ稼働中")
+        } else {
+            tr(self.lang, "NOT reachable — start crmaine in VS Code first", "未接続 — 先に VS Code で crmaine を起動")
+        };
+        let lines = vec![
+            tr(self.lang, "crmaine — diagnostics", "crmaine — 診断").to_string(),
+            String::new(),
+            format!("{:<12}: {} ({})", "user", current_username(), tr(self.lang, "port derives from this", "この名前からポート算出")),
+            format!("{:<12}: 127.0.0.1:{}", "port", cfg.port),
+            format!("{:<12}: {}", "server", status),
+            String::new(),
+            format!("{:<12}: {}", "cache_dir", cfg.cache_dir),
+            format!("{:<12}: {}", "endpoint", cfg.endpoint),
+            format!("{:<12}: {}", "model", cfg.model),
+            format!("{:<12}: {}", "api_version", cfg.api_version),
+            format!("{:<12}: {}", "auth_mode", cfg.auth_mode),
+            String::new(),
+            tr(
+                self.lang,
+                "If reachable but :rag hangs, the index is likely still loading in VS Code — wait for it to finish.",
+                "接続OKでも :rag が返らない場合は、VS Code 側でインデックス読込中の可能性大 — 完了を待ってください。",
+            ).to_string(),
+        ];
+        self.popup = Popup::Notice { lines };
+    }
+
     /// `:rag <question>` — ask crmaine's RAG (`/query`) over the running server.
     pub(crate) fn start_rag(&mut self, question: &str) {
         self.start_crmaine("/query", "RAG", question);

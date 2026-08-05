@@ -124,6 +124,7 @@ impl App {
             "aierror" | "explain" | "crmaineerror" => self.explain_shell_error(),
             "rag" | "crmainerag" | "ask_rag" => self.start_rag(rest),
             "agent" | "ajent" | "crmaineagent" => self.start_agent(rest),
+            "raginfo" | "crmaineinfo" | "crmainedoctor" | "ragstatus" => self.crmaine_doctor(),
             "aidiff" | "explaindiff" | "crmainediff" => self.explain_diff(),
             "ailog" | "logtriage" | "triage" | "crmainelog" => self.triage_log(),
             "dupes" | "dup" | "duplicates" => self.start_dupes(),
