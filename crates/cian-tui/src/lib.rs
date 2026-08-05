@@ -1109,6 +1109,8 @@ enum ChatMode {
     Rag,
     /// crmaine Ajent (`/agent`).
     Agent,
+    /// crmaine Coding — the Ajent (`/agent`) seeded with the current file's code.
+    Coding,
 }
 
 impl ChatMode {
@@ -1119,6 +1121,7 @@ impl ChatMode {
             ChatMode::Ai => "crmaine - simple",
             ChatMode::Rag => "crmaine - RAG",
             ChatMode::Agent => "crmaine - Agent",
+            ChatMode::Coding => "crmaine - Coding",
         }
     }
     /// A short badge for the history list.
@@ -1127,6 +1130,7 @@ impl ChatMode {
             ChatMode::Ai => "simple",
             ChatMode::Rag => "RAG",
             ChatMode::Agent => "Agent",
+            ChatMode::Coding => "Coding",
         }
     }
 }

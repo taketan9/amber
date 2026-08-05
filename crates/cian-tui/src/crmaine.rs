@@ -421,6 +421,65 @@ impl App {
         );
     }
 
+    /// `:coding [question]` / `:code` — crmaine Coding: an Ajent chat seeded with
+    /// the current file's code. Uses the file open in the F3 viewer if there is
+    /// one, else the file under the cursor. With no question, asks for a review.
+    pub(crate) fn start_coding(&mut self, arg: &str) {
+        if self.crmaine_rx.is_some() {
+            self.message = Some(tr(self.lang, "crmaine is busy", "crmaine 実行中").into());
+            return;
+        }
+        if let Err(e) = self.crmaine_resolved() {
+            self.message = Some(e);
+            return;
+        }
+        let Some((name, code)) = self.coding_context() else {
+            self.message = Some(
+                tr(
+                    self.lang,
+                    "no file — put the cursor on a file, or open one with F3",
+                    "ファイルがありません — カーソルをファイルに合わせるか F3 で開いてください",
+                )
+                .into(),
+            );
+            return;
+        };
+        let ask = arg.trim();
+        let ask: String = if ask.is_empty() {
+            tr(
+                self.lang,
+                "Review this code and point out issues and improvements.",
+                "このコードをレビューして、問題点と改善案を挙げてください。",
+            )
+            .into()
+        } else {
+            ask.to_string()
+        };
+        // The visible turn stays short; the full code goes in the request only.
+        let shown = format!("{}: {} — {}", tr(self.lang, "Coding", "コーディング"), name, ask);
+        let question = format!("File: {name}\n\n```\n{code}\n```\n\n{ask}");
+        self.start_ai_chat(ChatMode::Coding, vec![ChatMsg { user: true, text: shown }], true);
+        self.fire_crmaine("/agent", &question, serde_json::Value::Null);
+    }
+
+    /// The code to hand crmaine Coding: the F3 viewer's file if open, else the
+    /// file under the cursor. `None` when there is no readable file. Bounded so a
+    /// huge file can't blow the token budget.
+    fn coding_context(&self) -> Option<(String, String)> {
+        if let Popup::Viewer { title, view, .. } = &self.popup {
+            let text = view.lines.join("\n");
+            if !text.trim().is_empty() {
+                return Some((title.clone(), truncate_text_for_ai(&text, 24_000)));
+            }
+        }
+        let e = self.active_pane()?.selected()?;
+        if e.is_dir {
+            return None;
+        }
+        let text = std::fs::read_to_string(&e.path).ok()?;
+        Some((e.name.clone(), truncate_text_for_ai(&text, 24_000)))
+    }
+
     /// `:glossary` — generate a glossary of the indexed corpus.
     pub(crate) fn start_glossary(&mut self) {
         self.start_crmaine_tool(

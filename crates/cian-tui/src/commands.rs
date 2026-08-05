@@ -127,6 +127,7 @@ impl App {
             "raginfo" | "crmaineinfo" | "crmainedoctor" | "ragstatus" => self.crmaine_doctor(),
             "index" | "ragindex" | "reindex" => self.start_index(rest),
             "ragshared" | "ragdefault" | "unindex" => self.crmaine_use_shared_index(),
+            "coding" | "code" | "crmainecoding" => self.start_coding(rest),
             "impact" => self.start_impact(rest),
             "contradiction" | "contra" => self.start_contradiction(rest),
             "glossary" | "glossagen" => self.start_glossary(),

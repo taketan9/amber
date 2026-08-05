@@ -479,7 +479,9 @@ impl App {
                 self.ai_request(AiPurpose::Chat, system, question);
             }
             ChatMode::Rag => self.fire_crmaine("/query", &question, serde_json::Value::Null),
-            ChatMode::Agent => {
+            // Coding follow-ups are just agent follow-ups (the code went in the
+            // first turn; the conversation history carries it from there).
+            ChatMode::Agent | ChatMode::Coding => {
                 let history = self.crmaine_history_json();
                 self.fire_crmaine("/agent", &question, history);
             }

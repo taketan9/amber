@@ -182,6 +182,7 @@ impl App {
         let half = (body_h / 2).max(1);
         let mut close = false;
         let mut summarize = false;
+        let mut coding = false;
         let mut warn_unsaved = false;
         if let Popup::Viewer { view, scroll, line, col, goal, visual, anchor, count, find_query, dirty, .. } = &mut self.popup {
             let cnt = count.take();
@@ -256,6 +257,8 @@ impl App {
                 // `S` summarises the file with the AI (sends its text). Handled
                 // after the borrow ends, below.
                 (false, KeyCode::Char('S')) => summarize = true,
+                // `A` hands this code to crmaine Coding (Ajent). Also below.
+                (false, KeyCode::Char('A')) => coding = true,
                 (false, KeyCode::Char('o')) if visual.is_some() => {
                     // Swap the cursor and the anchor.
                     let a = *anchor;
@@ -356,6 +359,10 @@ impl App {
         }
         if summarize {
             self.summarize_viewer();
+            return Ok(());
+        }
+        if coding {
+            self.start_coding("");
             return Ok(());
         }
         if close {
