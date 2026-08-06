@@ -4736,8 +4736,19 @@ fn draw_popup(
         | Popup::None => return,
     };
 
-    let height = (body.len() as u16 + 4).max(6).min(area.height.saturating_sub(2));
-    let width: u16 = 70u16.min(area.width.saturating_sub(2));
+    // A text-input box is wider (long descriptions and pasted paths need room)
+    // and grows taller as the value wraps, so nothing you type is cut off.
+    let width: u16 = match popup {
+        Popup::TextInput { .. } => 96u16.min(area.width.saturating_sub(2)),
+        _ => 70u16.min(area.width.saturating_sub(2)),
+    };
+    let extra_rows = if let Popup::TextInput { buffer, .. } = popup {
+        let inner_w = width.saturating_sub(4).max(1) as usize;
+        (buffer.chars().count() / inner_w) as u16
+    } else {
+        0
+    };
+    let height = (body.len() as u16 + 4 + extra_rows).max(6).min(area.height.saturating_sub(2));
     let rect = centered_rect(width, height, area);
 
     f.render_widget(Clear, rect);
