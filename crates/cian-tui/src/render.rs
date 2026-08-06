@@ -2201,99 +2201,99 @@ fn draw_ai_chat(f: &mut Frame, area: Rect, app: &mut App) {
 fn draw_toggles(f: &mut Frame, area: Rect, app: &App) {
     let lang = app.lang;
     let Popup::Toggles { cursor } = &app.popup else { return };
-    let cursor = *cursor;
-    let rows = app.toggle_rows();
-    let width: u16 = 42u16.min(area.width.saturating_sub(2));
-    let height = (rows.len() as u16 + 3).clamp(5, area.height.saturating_sub(2));
-    let rect = centered_rect(width, height, area);
-    f.render_widget(Clear, rect);
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_type(border_type())
-        .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
-        .style(Style::default().bg(theme().popup_bg))
-        .title(tr(lang, " toggles ", " トグル "))
-        .title_bottom(tr(lang, " Enter/Space=flip  ↑↓  Esc ", " Enter/Space=切替  ↑↓  Esc "));
-    let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
-    f.render_widget(block, rect);
+let cursor = *cursor;
+let rows = app.toggle_rows();
+let width: u16 = 42u16.min(area.width.saturating_sub(2));
+let height = (rows.len() as u16 + 3).clamp(5, area.height.saturating_sub(2));
+let rect = centered_rect(width, height, area);
+f.render_widget(Clear, rect);
+let block = Block::default()
+    .borders(Borders::ALL)
+    .border_type(border_type())
+    .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
+    .style(Style::default().bg(theme().popup_bg))
+    .title(tr(lang, " toggles ", " トグル "))
+    .title_bottom(tr(lang, " Enter/Space=flip  ↑↓  Esc ", " Enter/Space=切替  ↑↓  Esc "));
+let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
+f.render_widget(block, rect);
 
-    let body_c = readable_on(theme().popup_bg);
-    let dim_c = Color::Rgb(150, 150, 170);
-    let on_c = Color::Rgb(130, 205, 150);
-    let w = inner.width as usize;
-    let mut lines: Vec<Line> = Vec::new();
-    for (i, (_, label, state, on)) in rows.iter().enumerate() {
-        let sel = i == cursor;
-        let marker = if sel { "▶ " } else { "  " };
-        // Right-align the state text on the row.
-        let pad = w.saturating_sub(2 + label.chars().count() + state.chars().count()).max(1);
-        let label_style = if sel {
-            Style::default().fg(readable_on(theme().selected_bg)).bg(theme().selected_bg).add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().fg(body_c)
-        };
-        let state_style = if *on {
-            Style::default().fg(on_c).add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().fg(dim_c)
-        };
-        lines.push(Line::from(vec![
-            Span::styled(marker, Style::default().fg(theme().accent)),
-            Span::styled(label.clone(), label_style),
-            Span::raw(" ".repeat(pad)),
-            Span::styled(state.clone(), state_style),
-        ]));
-    }
-    f.render_widget(Paragraph::new(lines), inner);
+let body_c = readable_on(theme().popup_bg);
+let dim_c = Color::Rgb(150, 150, 170);
+let on_c = Color::Rgb(130, 205, 150);
+let w = inner.width as usize;
+let mut lines: Vec<Line> = Vec::new();
+for (i, (_, label, state, on)) in rows.iter().enumerate() {
+    let sel = i == cursor;
+    let marker = if sel { "▶ " } else { "  " };
+    // Right-align the state text on the row.
+    let pad = w.saturating_sub(2 + label.chars().count() + state.chars().count()).max(1);
+    let label_style = if sel {
+        Style::default().fg(readable_on(theme().selected_bg)).bg(theme().selected_bg).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(body_c)
+    };
+    let state_style = if *on {
+        Style::default().fg(on_c).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(dim_c)
+    };
+    lines.push(Line::from(vec![
+        Span::styled(marker, Style::default().fg(theme().accent)),
+        Span::styled(label.clone(), label_style),
+        Span::raw(" ".repeat(pad)),
+        Span::styled(state.clone(), state_style),
+    ]));
+}
+f.render_widget(Paragraph::new(lines), inner);
 }
 
 /// The chat history picker: past conversations this session, newest first.
 fn draw_ai_history(f: &mut Frame, area: Rect, app: &App) {
     let lang = app.lang;
     let Popup::AiHistory { cursor } = &app.popup else { return };
-    let cursor = *cursor;
-    let carmine = Color::Rgb(214, 45, 70);
-    let dim_c = Color::Rgb(150, 150, 170);
-    let width: u16 = 72u16.min(area.width.saturating_sub(2));
-    let height = (app.ai_history.len() as u16 + 3).clamp(6, area.height.saturating_sub(2));
-    let rect = centered_rect(width, height, area);
-    f.render_widget(Clear, rect);
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_type(border_type())
-        .border_style(Style::default().fg(carmine).add_modifier(Modifier::BOLD))
-        .style(Style::default().bg(theme().popup_bg))
-        .title(tr(lang, " chat history ", " チャット履歴 "))
-        .title_bottom(tr(lang, " Enter=open  d=delete  ↑↓  Esc ", " Enter=開く  d=削除  ↑↓  Esc "));
-    let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
-    f.render_widget(block, rect);
+let cursor = *cursor;
+let carmine = Color::Rgb(214, 45, 70);
+let dim_c = Color::Rgb(150, 150, 170);
+let width: u16 = 72u16.min(area.width.saturating_sub(2));
+let height = (app.ai_history.len() as u16 + 3).clamp(6, area.height.saturating_sub(2));
+let rect = centered_rect(width, height, area);
+f.render_widget(Clear, rect);
+let block = Block::default()
+    .borders(Borders::ALL)
+    .border_type(border_type())
+    .border_style(Style::default().fg(carmine).add_modifier(Modifier::BOLD))
+    .style(Style::default().bg(theme().popup_bg))
+    .title(tr(lang, " chat history ", " チャット履歴 "))
+    .title_bottom(tr(lang, " Enter=open  d=delete  ↑↓  Esc ", " Enter=開く  d=削除  ↑↓  Esc "));
+let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
+f.render_widget(block, rect);
 
-    let body_c = readable_on(theme().popup_bg);
-    let view_h = inner.height as usize;
-    let first = if cursor >= view_h { cursor + 1 - view_h } else { 0 };
-    let mut lines: Vec<Line> = Vec::new();
-    for (i, (mode, log)) in app.ai_history.iter().enumerate().skip(first).take(view_h) {
-        let sel = i == cursor;
-        let title = App::ai_history_title(log);
-        let turns = log.iter().filter(|m| m.user).count();
-        let marker = if sel { "▶ " } else { "  " };
-        let badge = format!("{:<6} ", mode.badge());
-        let title_style = if sel {
-            Style::default()
-                .fg(readable_on(theme().selected_bg))
-                .bg(theme().selected_bg)
-                .add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().fg(body_c)
-        };
-        lines.push(Line::from(vec![
-            Span::styled(marker, Style::default().fg(carmine)),
-            Span::styled(badge, Style::default().fg(dim_c)),
-            Span::styled(title, title_style),
-            Span::styled(format!("  ({turns})"), Style::default().fg(dim_c)),
-        ]));
-    }
-    f.render_widget(Paragraph::new(lines), inner);
+let body_c = readable_on(theme().popup_bg);
+let view_h = inner.height as usize;
+let first = if cursor >= view_h { cursor + 1 - view_h } else { 0 };
+let mut lines: Vec<Line> = Vec::new();
+for (i, (mode, log)) in app.ai_history.iter().enumerate().skip(first).take(view_h) {
+    let sel = i == cursor;
+    let title = App::ai_history_title(log);
+    let turns = log.iter().filter(|m| m.user).count();
+    let marker = if sel { "▶ " } else { "  " };
+    let badge = format!("{:<6} ", mode.badge());
+    let title_style = if sel {
+        Style::default()
+            .fg(readable_on(theme().selected_bg))
+            .bg(theme().selected_bg)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(body_c)
+    };
+    lines.push(Line::from(vec![
+        Span::styled(marker, Style::default().fg(carmine)),
+        Span::styled(badge, Style::default().fg(dim_c)),
+        Span::styled(title, title_style),
+        Span::styled(format!("  ({turns})"), Style::default().fg(dim_c)),
+    ]));
+}
+f.render_widget(Paragraph::new(lines), inner);
 }
 
 /// The editable commit-message preview. `editing` shows a caret and a different
@@ -2301,66 +2301,66 @@ fn draw_ai_history(f: &mut Frame, area: Rect, app: &App) {
 fn draw_commit_message(f: &mut Frame, area: Rect, app: &mut App) {
     let lang = app.lang;
     let Popup::CommitMessage { buffer, stat, editing, .. } = &app.popup else { return };
-    let editing = *editing;
-    let width: u16 = 80u16.min(area.width.saturating_sub(2));
-    let height = area.height.saturating_sub(2).clamp(10, 30);
-    let rect = centered_rect(width, height, area);
-    f.render_widget(Clear, rect);
-    let title = if editing {
-        tr(lang, " commit message — editing ", " コミットメッセージ — 編集中 ")
-    } else {
-        tr(lang, " commit message ", " コミットメッセージ ")
-    };
-    let footer = if editing {
-        tr(lang, " type to edit   Enter=newline   Esc=done editing ",
-              " 入力で編集   Enter=改行   Esc=編集終了 ")
-    } else {
-        tr(lang, " Enter/c=commit   e=edit   Esc=cancel ",
-              " Enter/c=コミット   e=編集   Esc=取消 ")
-    };
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_type(border_type())
-        .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
-        .style(Style::default().bg(theme().popup_bg))
-        .title(title)
-        .title_bottom(footer);
-    let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
-    f.render_widget(block, rect);
+let editing = *editing;
+let width: u16 = 80u16.min(area.width.saturating_sub(2));
+let height = area.height.saturating_sub(2).clamp(10, 30);
+let rect = centered_rect(width, height, area);
+f.render_widget(Clear, rect);
+let title = if editing {
+    tr(lang, " commit message — editing ", " コミットメッセージ — 編集中 ")
+} else {
+    tr(lang, " commit message ", " コミットメッセージ ")
+};
+let footer = if editing {
+    tr(lang, " type to edit   Enter=newline   Esc=done editing ",
+          " 入力で編集   Enter=改行   Esc=編集終了 ")
+} else {
+    tr(lang, " Enter/c=commit   e=edit   Esc=cancel ",
+          " Enter/c=コミット   e=編集   Esc=取消 ")
+};
+let block = Block::default()
+    .borders(Borders::ALL)
+    .border_type(border_type())
+    .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
+    .style(Style::default().bg(theme().popup_bg))
+    .title(title)
+    .title_bottom(footer);
+let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
+f.render_widget(block, rect);
 
-    let body_w = inner.width.max(1) as usize;
-    let mut lines: Vec<Line> = Vec::new();
-    // The staged-files summary, quietly, so the reviewer sees what it covers.
-    if !stat.is_empty() {
-        for raw in stat.lines() {
-            for chunk in wrap_str(raw, body_w) {
-                lines.push(Line::from(Span::styled(
-                    chunk,
-                    Style::default().fg(Color::Rgb(140, 140, 165)),
-                )));
-            }
-        }
-        lines.push(Line::from(Span::styled(
-            "─".repeat(body_w.min(60)),
-            Style::default().fg(Color::Rgb(90, 90, 110)),
-        )));
-    }
-    // The message itself. A trailing block marks the edit point when editing.
-    let subject_c = Color::Rgb(235, 235, 245);
-    let body_c = Color::Rgb(205, 210, 220);
-    let shown = if editing { format!("{}\u{2588}", buffer) } else { buffer.clone() };
-    for (i, raw) in shown.split('\n').enumerate() {
-        let c = if i == 0 { subject_c } else { body_c };
-        let modifier = if i == 0 { Modifier::BOLD } else { Modifier::empty() };
-        let wrapped = wrap_str(raw, body_w);
-        if wrapped.is_empty() {
-            lines.push(Line::from(""));
-        }
-        for chunk in wrapped {
-            lines.push(Line::from(Span::styled(chunk, Style::default().fg(c).add_modifier(modifier))));
+let body_w = inner.width.max(1) as usize;
+let mut lines: Vec<Line> = Vec::new();
+// The staged-files summary, quietly, so the reviewer sees what it covers.
+if !stat.is_empty() {
+    for raw in stat.lines() {
+        for chunk in wrap_str(raw, body_w) {
+            lines.push(Line::from(Span::styled(
+                chunk,
+                Style::default().fg(Color::Rgb(140, 140, 165)),
+            )));
         }
     }
-    f.render_widget(Paragraph::new(lines), inner);
+    lines.push(Line::from(Span::styled(
+        "─".repeat(body_w.min(60)),
+        Style::default().fg(Color::Rgb(90, 90, 110)),
+    )));
+}
+// The message itself. A trailing block marks the edit point when editing.
+let subject_c = Color::Rgb(235, 235, 245);
+let body_c = Color::Rgb(205, 210, 220);
+let shown = if editing { format!("{}\u{2588}", buffer) } else { buffer.clone() };
+for (i, raw) in shown.split('\n').enumerate() {
+    let c = if i == 0 { subject_c } else { body_c };
+    let modifier = if i == 0 { Modifier::BOLD } else { Modifier::empty() };
+    let wrapped = wrap_str(raw, body_w);
+    if wrapped.is_empty() {
+        lines.push(Line::from(""));
+    }
+    for chunk in wrapped {
+        lines.push(Line::from(Span::styled(chunk, Style::default().fg(c).add_modifier(modifier))));
+    }
+}
+f.render_widget(Paragraph::new(lines), inner);
 }
 
 /// The junk-review list: a checkbox per candidate, its name, size and the
@@ -2649,1684 +2649,47 @@ fn draw_popup(
     lang: Lang,
     menu_lang: Lang,
 ) {
-    // The theme gallery. The active theme is already applied live (the global
-    // was swapped as the cursor moved), so the popup itself renders in the
-    // previewed palette; a swatch row lets palettes be compared at a glance.
-    if let Popup::ThemePicker { cursor, scope } = popup {
-        let names = crate::theme::THEME_NAMES;
-        let pane_scope = matches!(scope, ThemeScope::Pane { .. });
-        let w = 46u16.min(area.width);
-        let h = (names.len() as u16 + 4).min(area.height.saturating_sub(2)).max(8);
-        let rect = centered_rect(w, h, area);
-        f.render_widget(Clear, rect);
-        f.render_widget(Block::default().style(Style::default().bg(theme().popup_bg)), rect);
-        let title = match scope {
-            ThemeScope::App { .. } => tr(lang, " theme — whole app ", " テーマ — 全体 "),
-            ThemeScope::Pane { side, .. } if *side == 0 => tr(lang, " theme — left pane ", " テーマ — 左ペイン "),
-            ThemeScope::Pane { .. } => tr(lang, " theme — right pane ", " テーマ — 右ペイン "),
-        };
-        let footer = if pane_scope {
-            tr(lang, " j/k=preview  Enter=keep  x=follow app  Esc=cancel ",
-                     " j/k=プレビュー  Enter=決定  x=全体に従う  Esc=取消 ")
-        } else {
-            tr(lang, " j/k=preview  Enter=keep  Esc=cancel ",
-                     " j/k=プレビュー  Enter=決定  Esc=取消 ")
-        };
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .border_type(border_type())
-            .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
-            .title(title)
-            .title_bottom(footer);
-        let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
-        f.render_widget(block, rect);
-        let view_h = inner.height as usize;
-        let scroll = cursor.saturating_sub(view_h.saturating_sub(1)).min(*cursor);
-        let mut lines: Vec<Line> = Vec::new();
-        for (i, name) in names.iter().enumerate().skip(scroll).take(view_h) {
-            let sel = i == *cursor;
-            let pal = crate::theme::theme_preset(name).unwrap_or_default();
-            // A compact swatch: directory / code / archive / executable accents.
-            let sw = |c: Color| Span::styled("█", Style::default().fg(c));
-            let name_style = if sel {
-                Style::default().fg(theme().accent).add_modifier(Modifier::BOLD)
-            } else {
-                Style::default().fg(theme().file.plain)
-            };
-            lines.push(Line::from(vec![
-                Span::styled(if sel { "▸ " } else { "  " }, name_style),
-                Span::styled(format!("{:<20}", name), name_style),
-                sw(pal.file.directory), sw(pal.file.code), sw(pal.file.archive),
-                sw(pal.file.executable), sw(pal.accent),
-            ]));
-        }
-        f.render_widget(Paragraph::new(lines), inner);
-        return;
+    // Every popup with a shape of its own draws itself. The rest — the
+    // confirm/notice dialogs, which differ only in their wording — fall through
+    // to the one renderer they share.
+    match popup {
+        Popup::ThemePicker { .. } => draw_theme_picker(f, area, popup, lang),
+        Popup::Manual { .. } => draw_manual(f, area, popup, lang),
+        Popup::ContextMenu { .. } => draw_context_menu(f, area, popup, menu_lang),
+        Popup::SshHosts { .. } => draw_ssh_hosts(f, area, popup, hosts, zones, lang),
+        Popup::Snippets { .. } => draw_snippets(f, area, popup, snippets, zones, lang),
+        Popup::RemoteBrowser { .. } => draw_remote_browser(f, area, popup, zones, lang),
+        Popup::LocalDest { .. } => draw_local_dest(f, area, popup, zones, lang),
+        Popup::SshUsers { .. } => draw_ssh_users(f, area, popup, hosts, zones, lang),
+        Popup::FindResults { .. } => draw_find_results(f, area, popup, find, zones, lang),
+        Popup::Shortcuts { .. } => draw_shortcuts(f, area, popup, zones, lang),
+        Popup::History { .. } => draw_history(f, area, popup, zones, lang),
+        Popup::DestPicker { .. } => draw_dest_picker(f, area, popup, dests, zones, lang),
+        Popup::Viewer { .. } => draw_viewer(f, area, popup, lang),
+        Popup::DirCompare { .. } => draw_dir_compare(f, area, popup, zones, lang),
+        Popup::Diff { .. } => draw_diff(f, area, popup, lang),
+        Popup::Archive { .. } => draw_archive(f, area, popup, zones, lang),
+        Popup::Palette { .. } => draw_palette(f, area, popup, lang),
+        Popup::DiskUsage { .. } => draw_disk_usage(f, area, popup, zones, lang),
+        Popup::GitLog { .. } => draw_git_log(f, area, popup, zones, lang),
+        Popup::Macros { .. } => draw_macros(f, area, popup, zones, lang),
+        Popup::SortPicker { .. } => draw_sort_picker(f, area, popup, zones, lang),
+        Popup::EncodingPicker { .. } => draw_encoding_picker(f, area, popup, zones, lang),
+        Popup::ColorPicker { .. } => draw_color_picker(f, area, popup, zones, lang),
+        _ => draw_simple_dialog(f, area, popup, zones, lang),
     }
-    // The manual is taller than any terminal, so it renders as a scrolling
-    // viewport rather than the fixed block the other popups use.
-    if let Popup::Manual { lines, scroll } = popup {
-        let height = area.height.saturating_sub(2).max(6);
-        let width: u16 = 70u16.min(area.width.saturating_sub(2));
-        let rect = centered_rect(width, height, area);
-        let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
-        let view_h = inner.height.saturating_sub(1) as usize;
+}
 
-        // Clamp so the last page sits flush with the bottom; this also
-        // normalises an over-scrolled offset from the key handler.
-        let max_scroll = lines.len().saturating_sub(view_h);
-        *scroll = (*scroll).min(max_scroll);
-        let offset = *scroll;
-
-        f.render_widget(Clear, rect);
-        let pos = match (offset * 100).checked_div(max_scroll) {
-            Some(pct) => format!(" {}% ", pct),
-            // Everything fits; there is nothing to scroll.
-            None => " all ".to_string(),
-        };
-        let block = Block::default()
-            .borders(Borders::ALL)
-        .border_type(border_type())
-            .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
-            .title(tr(lang, " manual ", " キー一覧 "))
-            .title_bottom(pos);
-        f.render_widget(block, rect);
-
-        let body: Vec<Line> = lines
-            .iter()
-            .skip(offset)
-            .take(view_h)
-            .map(|l| Line::from(l.clone()))
-            .collect();
-        let body_area = Rect::new(inner.x, inner.y, inner.width, view_h as u16);
-        f.render_widget(Paragraph::new(body), body_area);
-
-        let footer_area =
-            Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1);
-        let footer_text = match lang {
-            Lang::En => " j/k scroll  u/d page  g/G  Esc close ",
-            Lang::Ja => " j/k スクロール  u/d ページ  g/G  Esc 閉じる ",
-        };
-        let footer = Paragraph::new(footer_text).style(
-            Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD),
-        );
-        f.render_widget(footer, footer_area);
-        return;
-    }
-    // The context menu is anchored at the pointer rather than centred, so it
-    // sizes and positions itself.
-    if let Popup::ContextMenu { items, cursor, at } = popup {
-        // The context menu follows `menu_lang` (which may differ from the rest
-        // of the UI) so it can be pinned to Japanese on an English interface.
-        let lang = menu_lang;
-        let (name_w, hint_w) = menu_dims(items, lang);
-        let rect = context_menu_rect(items, *at, area, lang);
-
-        f.render_widget(Clear, rect);
-        // Follow the theme's own surface (light on a light theme) with readable
-        // text, rather than the always-dark popup background.
-        let surf = surface();
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .border_type(border_type())
-            .border_style(Style::default().fg(theme().accent))
-            .style(Style::default().bg(surf));
-        let inner = rect.inner(Margin { vertical: 1, horizontal: 1 });
-        f.render_widget(block, rect);
-
-        let rows: Vec<Line> = items
-            .iter()
-            .enumerate()
-            .map(|(i, item)| {
-                let sel = i == *cursor;
-                let style = if sel {
-                    Style::default().bg(theme().selected_bg).fg(readable_on(theme().selected_bg)).add_modifier(Modifier::BOLD)
-                } else {
-                    Style::default().bg(surf).fg(readable_on(surf))
-                };
-                // "▸ name … (hint)": name left-aligned, hint right-aligned in a
-                // shared column, with even 2-cell gutters on both sides.
-                let (name, hint) = menu_label_parts(item.label(lang));
-                let marker = if sel { "▸ " } else { "  " };
-                let body = if hint_w > 0 {
-                    format!("{}{}  {}  ", marker, pad_to(name, name_w), pad_left(hint, hint_w))
-                } else {
-                    format!("{}{}  ", marker, pad_to(name, name_w))
-                };
-                Line::from(Span::styled(body, style))
-            })
-            .collect();
-        f.render_widget(Paragraph::new(rows), inner);
-        return;
-    }
-
-    if let Popup::SshHosts { cursor, filter } = popup {
-        let needle = filter.to_lowercase();
-        let matches: Vec<&cian_lua::SshHost> = hosts
-            .iter()
-            .filter(|h| {
-                needle.is_empty()
-                    || h.name.to_lowercase().contains(&needle)
-                    || h.host.to_lowercase().contains(&needle)
-            })
-            .collect();
-        let w = 56u16.min(area.width);
-        let h = (matches.len() as u16 + 5).min(area.height.saturating_sub(2)).max(6);
-        let footer = tr(lang, " Enter=select  F2=type by hand  Esc ", " Enter=選択  F2=手入力  Esc ");
-        let inner = popup_frame(f, area, w, h, tr(lang, " ssh — host ", " SSH — ホスト "), footer);
-
-        let mut lines = vec![Line::from(Span::styled(
-            format!("/{}_", filter),
-            Style::default().fg(theme().accent).add_modifier(Modifier::BOLD),
-        ))];
-        if matches.is_empty() {
-            lines.push(Line::from(Span::styled(
-                "  (no match)",
-                Style::default().fg(Color::Rgb(150, 150, 170)),
-            )));
-        }
-        for (i, hst) in matches.iter().enumerate() {
-            let sel = i == *cursor;
-            let style = if sel {
-                Style::default().fg(theme().accent).add_modifier(Modifier::BOLD)
-            } else {
-                Style::default().fg(Color::Rgb(205, 205, 218))
-            };
-            let users = if hst.users.len() == 1 {
-                hst.users[0].name.clone()
-            } else {
-                format!("{} users", hst.users.len())
-            };
-            lines.push(Line::from(vec![
-                Span::styled(format!("{}{:<16}", if sel { "▸ " } else { "  " }, hst.name), style),
-                Span::styled(
-                    format!("{:<22} {}", hst.host, users),
-                    Style::default().fg(Color::Rgb(140, 140, 165)),
-                ),
-            ]));
-            // Row 0 is the filter line, so host `i` sits one below it.
-            push_row_zone(zones, inner, inner.y + 1 + i as u16, i);
-        }
-        let body_area = Rect::new(inner.x, inner.y, inner.width, inner.height.saturating_sub(1));
-        f.render_widget(Paragraph::new(lines), body_area);
-        let footer_area =
-            Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1);
-        f.render_widget(
-            Paragraph::new(tr(lang, " type to filter  ↑↓ select  Enter next  Esc cancel ", " 入力で絞込  ↑↓ 選択  Enter 次へ  Esc 取消 ")).style(
-                Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD),
-            ),
-            footer_area,
-        );
-        return;
-    }
-
-    if let Popup::Snippets { cursor, filter } = popup {
-        let needle = filter.to_lowercase();
-        let matches: Vec<&cian_lua::Snippet> = snippets
-            .iter()
-            .filter(|s| {
-                needle.is_empty()
-                    || s.name.to_lowercase().contains(&needle)
-                    || s.cmd.to_lowercase().contains(&needle)
-            })
-            .collect();
-        let w = 64u16.min(area.width);
-        let h = (matches.len() as u16 + 5).min(area.height.saturating_sub(2)).max(6);
-        let inner = popup_frame(f, area, w, h, tr(lang, " snippets → shell ", " スニペット → シェル "), "");
-
-        let mut lines = vec![Line::from(Span::styled(
-            format!("/{}_", filter),
-            Style::default().fg(theme().accent).add_modifier(Modifier::BOLD),
-        ))];
-        if matches.is_empty() {
-            lines.push(Line::from(Span::styled(
-                "  (no match)",
-                Style::default().fg(Color::Rgb(150, 150, 170)),
-            )));
-        }
-        for (i, s) in matches.iter().enumerate() {
-            let sel = i == *cursor;
-            let style = if sel {
-                Style::default().fg(theme().accent).add_modifier(Modifier::BOLD)
-            } else {
-                Style::default().fg(Color::Rgb(205, 205, 218))
-            };
-            // A tag shows what will happen: run, type-only, or confirm-first.
-            let tag = if s.confirm { "?" } else if s.enter { "↵" } else { "…" };
-            lines.push(Line::from(vec![
-                Span::styled(format!("{}{} ", if sel { "▸ " } else { "  " }, tag), style),
-                Span::styled(format!("{:<20}", truncate(&s.name, 20)), style),
-                Span::styled(
-                    format!("  {}", truncate(&s.cmd, (inner.width as usize).saturating_sub(26))),
-                    Style::default().fg(Color::Rgb(140, 140, 165)),
-                ),
-            ]));
-            push_row_zone(zones, inner, inner.y + 1 + i as u16, i);
-        }
-        let body_area = Rect::new(inner.x, inner.y, inner.width, inner.height.saturating_sub(1));
-        f.render_widget(Paragraph::new(lines), body_area);
-        let footer_area =
-            Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1);
-        f.render_widget(
-            Paragraph::new(tr(lang, " type to filter  ↑↓ select  Enter send  Esc cancel ", " 入力で絞込  ↑↓ 選択  Enter 送信  Esc 取消 ")).style(
-                Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD),
-            ),
-            footer_area,
-        );
-        return;
-    }
-
-    if let Popup::RemoteBrowser { label, cwd, entries, cursor, scroll, marked, loading, purpose } = popup {
-        let uploading = *purpose == BrowsePurpose::Upload;
-        let th = theme();
-        let w = 70u16.min(area.width);
-        let h = area.height.saturating_sub(4).clamp(8, 30);
-        let title = if uploading {
-            format!(" upload → {}  :  {} ", label, cwd)
-        } else {
-            format!(" download ← {}  :  {} ", label, cwd)
-        };
-        let footer = if uploading {
-            tr(
-                lang,
-                " Enter=open  -=up  u=upload here  Esc ",
-                " Enter=開く  -=上  u=ここへアップロード  Esc ",
-            )
-        } else {
-            tr(
-                lang,
-                " Enter=open/mark  Space=mark  -=up  d=download  Esc ",
-                " Enter=開く/選択  Space=選択  -=上  d=ダウンロード  Esc ",
-            )
-        };
-        let inner = popup_frame(f, area, w, h, title, footer);
-        let view_h = inner.height as usize;
-        if *loading {
-            f.render_widget(
-                Paragraph::new(tr(lang, "  …listing", "  …取得中"))
-                    .style(Style::default().fg(Color::Rgb(150, 150, 170)).add_modifier(Modifier::ITALIC)),
-                inner,
-            );
-            return;
-        }
-        *scroll = (*scroll).min(cursor.saturating_sub(view_h.saturating_sub(1)));
-        if *cursor < *scroll {
-            *scroll = *cursor;
-        }
-        let mut lines: Vec<Line> = Vec::new();
-        if entries.is_empty() {
-            lines.push(Line::from(Span::styled("  (empty)", Style::default().fg(Color::Rgb(150, 150, 170)))));
-        }
-        for (i, e) in entries.iter().enumerate().skip(*scroll).take(view_h) {
-            let sel = i == *cursor;
-            let checked = marked.contains(&e.name);
-            let mark = if checked { "◉ " } else if sel { "▸ " } else { "  " };
-            let (icon, name_c) = if e.is_dir {
-                ("▸ ", th.file.directory)
-            } else {
-                ("  ", th.file.plain)
-            };
-            let size = if e.is_dir { String::new() } else { cian_core::disk::human_size(e.size) };
-            // Base fg per row; the selected row also gets a full-width background
-            // below so it reads as the focused row, like the file panes.
-            let base = if sel {
-                Style::default().fg(th.accent).add_modifier(Modifier::BOLD)
-            } else if checked {
-                Style::default().fg(Color::Rgb(130, 205, 150))
-            } else {
-                Style::default().fg(name_c)
-            };
-            let mut line = Line::from(vec![
-                Span::styled(format!("{}{}", mark, icon), base),
-                Span::styled(format!("{:<40}", truncate(&e.name, 40)), base),
-                Span::styled(format!("{:>10}", size), Style::default().fg(th.dim)),
-            ]);
-            if sel {
-                line = line.style(Style::default().bg(th.selected_bg));
-            }
-            lines.push(line);
-            push_row_zone(zones, inner, inner.y + (i - *scroll) as u16, i);
-        }
-        // Paint the selected row's background across the full inner width first,
-        // then the text on top (the spans carry no bg, so it shows through).
-        if !entries.is_empty() && *cursor >= *scroll {
-            let sel_y = inner.y + (*cursor - *scroll) as u16;
-            if sel_y < inner.y + inner.height {
-                f.render_widget(
-                    Block::default().style(Style::default().bg(th.selected_bg)),
-                    Rect::new(inner.x, sel_y, inner.width, 1),
-                );
-            }
-        }
-        f.render_widget(Paragraph::new(lines), inner);
-        return;
-    }
-
-    if let Popup::LocalDest { files, cursor } = popup {
-        let opts_len = 4usize;
-        let w = 56u16.min(area.width);
-        let h = (opts_len as u16 + 4).min(area.height);
-        let inner = popup_frame(f, area, w, h, format!(" download {} file(s) to… ", files.len()), "");
-        // Labels only; the actual dirs are resolved when a row is chosen.
-        let labels = [
-            tr(lang, "Left pane", "左ペイン"),
-            tr(lang, "Right pane", "右ペイン"),
-            tr(lang, "Desktop", "デスクトップ"),
-            tr(lang, "Type a path…", "パスを入力…"),
-        ];
-        let rows: Vec<Line> = labels
-            .iter()
-            .enumerate()
-            .map(|(i, l)| {
-                let sel = i == *cursor;
-                let style = if sel {
-                    Style::default().fg(theme().accent).add_modifier(Modifier::BOLD)
-                } else {
-                    Style::default().fg(Color::Rgb(205, 205, 218))
-                };
-                push_row_zone(zones, inner, inner.y + i as u16, i);
-                Line::from(Span::styled(format!("{}{}", if sel { "▸ " } else { "  " }, l), style))
-            })
-            .collect();
-        f.render_widget(Paragraph::new(rows), inner);
-        return;
-    }
-
-    if let Popup::SshUsers { host, cursor } = popup {
-        let Some(hst) = hosts.get(*host) else { return };
-        let w = 40u16.min(area.width);
-        let h = (hst.users.len() as u16 + 4).min(area.height.saturating_sub(2)).max(6);
-        let inner = popup_frame(f, area, w, h, format!(" {} — {} ", tr(lang, "ssh", "SSH"), hst.name), "");
-
-        let lines: Vec<Line> = hst
-            .users
-            .iter()
-            .enumerate()
-            .map(|(i, u)| {
-                let sel = i == *cursor;
-                let style = if sel {
-                    Style::default().fg(theme().accent).add_modifier(Modifier::BOLD)
-                } else {
-                    Style::default().fg(Color::Rgb(205, 205, 218))
-                };
-                // A key marks logins that will authenticate without typing.
-                let mark = if u.has_secret() { "  🔑" } else { "" };
-                Line::from(Span::styled(
-                    format!("{}{}@{}{}", if sel { "▸ " } else { "  " }, u.name, hst.host, mark),
-                    style,
-                ))
-            })
-            .collect();
-        for i in 0..hst.users.len() {
-            push_row_zone(zones, inner, inner.y + i as u16, i);
-        }
-        let body_area = Rect::new(inner.x, inner.y, inner.width, inner.height.saturating_sub(1));
-        f.render_widget(Paragraph::new(lines), body_area);
-        let footer_area =
-            Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1);
-        f.render_widget(
-            Paragraph::new(tr(lang, " Enter connect   Esc back ", " Enter 接続   Esc 戻る ")).style(
-                Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD),
-            ),
-            footer_area,
-        );
-        return;
-    }
-
-    if let Popup::FindResults { hits, cursor, scroll } = popup {
-        let w = 96u16.min(area.width.saturating_sub(2));
-        let h = area.height.saturating_sub(4).max(8);
-        let title = match find {
-            Some((query, root, done, mode)) => {
-                let verb = match mode {
-                    cian_core::search::Mode::Name => "find",
-                    cian_core::search::Mode::Content => "grep",
-                };
-                let state = match done {
-                    None => "searching…".to_string(),
-                    Some(cian_core::search::Outcome::Complete) => format!("{} found", hits.len()),
-                    Some(cian_core::search::Outcome::Cancelled) => {
-                        format!("{} found (stopped)", hits.len())
-                    }
-                    Some(cian_core::search::Outcome::Truncated) => {
-                        format!("{} found (too many, stopped)", hits.len())
-                    }
-                };
-                format!(" {} \"{}\" in {} — {} ", verb, query, root, state)
-            }
-            None => " find ".to_string(),
-        };
-        let inner = popup_frame(f, area, w, h, truncate_middle(&title, w.saturating_sub(4) as usize), "");
-
-        let body_h = inner.height.saturating_sub(1) as usize;
-        // Keep the cursor on screen as results stream in beneath it.
-        if *cursor < *scroll {
-            *scroll = *cursor;
-        } else if body_h > 0 && *cursor >= *scroll + body_h {
-            *scroll = *cursor + 1 - body_h;
-        }
-
-        if hits.is_empty() {
-            f.render_widget(
-                Paragraph::new("(nothing yet)").style(Style::default().fg(Color::Rgb(150, 150, 170))),
-                Rect::new(inner.x, inner.y, inner.width, 1),
-            );
-        }
-        for (row, (i, hit)) in hits.iter().enumerate().skip(*scroll).take(body_h).enumerate() {
-            let sel = i == *cursor;
-            let y = inner.y + row as u16;
-            let line_area = Rect::new(inner.x, y, inner.width, 1);
-            push_row_zone(zones, inner, y, i);
-            if sel {
-                f.render_widget(
-                    Block::default().style(Style::default().bg(theme().selected_bg)),
-                    line_area,
-                );
-            }
-            let base = if sel { Style::default().bg(theme().selected_bg) } else { Style::default() };
-            // The directory part is context; the name is the answer.
-            let rel = hit.rel.display().to_string();
-            let (dir, name) = match rel.rfind(std::path::MAIN_SEPARATOR) {
-                Some(i) => (rel[..=i].to_string(), rel[i + 1..].to_string()),
-                None => (String::new(), rel.clone()),
-            };
-            let avail = inner.width.saturating_sub(4) as usize;
-            let mut spans = vec![Span::styled(if sel { " ▸ " } else { "   " }, base)];
-            match &hit.line {
-                // A content match: the location is a prefix, the matched text
-                // is the answer, so give the text the room and the emphasis.
-                Some((n, text)) => {
-                    let loc = format!("{}:{}  ", rel, n);
-                    let loc_w = width(&loc).min(avail / 2);
-                    spans.push(Span::styled(
-                        truncate_middle(&loc, loc_w),
-                        base.fg(Color::Rgb(135, 135, 160)),
-                    ));
-                    spans.push(Span::styled(
-                        truncate(text, avail.saturating_sub(loc_w)),
-                        base.fg(Color::Rgb(225, 225, 240)),
-                    ));
-                }
-                None => {
-                    spans.push(Span::styled(
-                        truncate_middle(&dir, avail.saturating_sub(width(&name))),
-                        base.fg(Color::Rgb(135, 135, 160)),
-                    ));
-                    spans.push(Span::styled(
-                        name.clone(),
-                        if hit.is_dir {
-                            base.fg(FileKind::Directory.color()).add_modifier(Modifier::BOLD)
-                        } else {
-                            base.fg(Color::Rgb(225, 225, 240))
-                        },
-                    ));
-                }
-            }
-            f.render_widget(Paragraph::new(Line::from(spans)), line_area);
-        }
-        f.render_widget(
-            Paragraph::new(tr(lang, " Enter=go  p=panelize  j/k=move  Esc=close ", " Enter=移動  p=ペイン化  j/k=カーソル  Esc=閉じる ")).style(
-                Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD),
-            ),
-            Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1),
-        );
-        return;
-    }
-
-    if let Popup::Shortcuts { entries, cursor, path } = popup {
-        let level = sc_level(entries, path);
-        // Wide, because these are paths and URLs; the generic 70-column popup
-        // wrapped them across lines, which made the list unreadable.
-        let w = 96u16.min(area.width.saturating_sub(2));
-        let h = (level.len() as u16 + 5).max(8).min(area.height.saturating_sub(2));
-        // Breadcrumb of the current group path in the title.
-        let mut crumb = String::new();
-        let mut walk: &[Shortcut] = entries;
-        for &i in path.iter() {
-            if let Some(s) = walk.get(i) {
-                crumb.push_str(&format!(" / {}", s.name));
-                walk = s.children.as_deref().unwrap_or(&[]);
-            }
-        }
-        let title = format!("{}{} ", tr(lang, " shortcuts", " ショートカット"), crumb);
-        let inner = popup_frame(f, area, w, h, title, "");
-
-        let body_h = inner.height.saturating_sub(1);
-        let footer_area =
-            Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1);
-
-        if level.is_empty() {
-            let hint = vec![
-                Line::from(Span::styled(
-                    tr(lang, "(empty)", "（空）"),
-                    Style::default().fg(Color::Rgb(150, 150, 170)),
-                )),
-                Line::from(""),
-                Line::from(tr(lang, "a = add a shortcut,  A = add a folder.", "a = ショートカット追加,  A = フォルダ追加。")),
-            ];
-            f.render_widget(
-                Paragraph::new(hint),
-                Rect::new(inner.x, inner.y, inner.width, body_h),
-            );
-        } else {
-            // Name column sized to the longest name, within reason, so the
-            // targets line up in a column of their own.
-            let name_w = level
-                .iter()
-                .map(|s| width(&s.name))
-                .max()
-                .unwrap_or(8)
-                .clamp(8, 24);
-            let target_w = (inner.width as usize).saturating_sub(name_w + 8);
-
-            // Keep the selected row visible once the list outgrows the popup.
-            let view = body_h as usize;
-            let first = cursor.saturating_sub(view.saturating_sub(1));
-            for (row, (i, sc)) in level.iter().enumerate().skip(first).take(view).enumerate() {
-                let sel = i == *cursor;
-                let y = inner.y + row as u16;
-                let line_area = Rect::new(inner.x, y, inner.width, 1);
-                push_row_zone(zones, inner, y, i);
-                if sel {
-                    // A full-width bar, not just a marker: which row is active
-                    // has to be obvious at a glance.
-                    f.render_widget(
-                        Block::default().style(Style::default().bg(theme().selected_bg)),
-                        line_area,
-                    );
-                }
-                let base = if sel {
-                    Style::default().bg(theme().selected_bg)
-                } else {
-                    Style::default()
-                };
-                let name_style = if sel {
-                    base.fg(theme().accent).add_modifier(Modifier::BOLD)
-                } else {
-                    base.fg(Color::Rgb(225, 225, 240)).add_modifier(Modifier::BOLD)
-                };
-                // The target is reference material: same row, quieter, so the
-                // name is what the eye lands on.
-                let target_style = base.fg(Color::Rgb(140, 140, 165));
-                // A folder shows a ▸ and its child count instead of a target.
-                let (icon, tail) = if sc.is_group() {
-                    ("▸".to_string(), format!("{} items", sc.children.as_ref().map(|c| c.len()).unwrap_or(0)))
-                } else {
-                    (shortcut_icon(sc.target_str()).to_string(), truncate_middle(sc.target_str(), target_w))
-                };
-                f.render_widget(
-                    Paragraph::new(Line::from(vec![
-                        Span::styled(if sel { " ▸ " } else { "   " }, name_style),
-                        Span::styled(format!("{}  ", icon), base),
-                        Span::styled(
-                            format!("{}  ", pad_to(&truncate_middle(&sc.name, name_w), name_w)),
-                            name_style,
-                        ),
-                        Span::styled(tail, target_style),
-                    ])),
-                    line_area,
-                );
-            }
-        }
-        f.render_widget(
-            Paragraph::new(tr(lang, " Enter=open/into  a=add  A=folder  d=del  r=edit  ←=back  Esc ", " Enter=開く/入る  a=追加  A=フォルダ  d=削除  r=編集  ←=戻る  Esc "))
-                .style(
-                    Style::default()
-                        .fg(Color::Black)
-                        .bg(theme().accent)
-                        .add_modifier(Modifier::BOLD),
-                ),
-            footer_area,
-        );
-        return;
-    }
-
-    if let Popup::History { entries, cursor } = popup {
-        // Its own renderer rather than the plain-text popup, so the selected
-        // row gets the same highlight bar the shortcuts list has.
-        let w = 96u16.min(area.width.saturating_sub(2));
-        let h = (entries.len() as u16 + 5).max(6).min(area.height.saturating_sub(2));
-        let inner = popup_frame(f, area, w, h, format!(" {} ({}) ", tr(lang, "history", "履歴"), entries.len()), "");
-
-        let body_h = inner.height.saturating_sub(1) as usize;
-        let first = cursor.saturating_sub(body_h.saturating_sub(1));
-        for (row, (i, p)) in entries.iter().enumerate().skip(first).take(body_h).enumerate() {
-            let sel = i == *cursor;
-            let line_area = Rect::new(inner.x, inner.y + row as u16, inner.width, 1);
-            push_row_zone(zones, inner, inner.y + row as u16, i);
-            if sel {
-                f.render_widget(
-                    Block::default().style(Style::default().bg(theme().selected_bg)),
-                    line_area,
-                );
-            }
-            let base =
-                if sel { Style::default().bg(theme().selected_bg) } else { Style::default() };
-            let text_style = if sel {
-                base.fg(theme().accent).add_modifier(Modifier::BOLD)
-            } else {
-                base.fg(Color::Rgb(215, 215, 230))
-            };
-            f.render_widget(
-                Paragraph::new(Line::from(vec![
-                    Span::styled(if sel { " ▸ " } else { "   " }, text_style),
-                    Span::styled(
-                        truncate_middle(&p.display().to_string(), inner.width as usize - 4),
-                        text_style,
-                    ),
-                ])),
-                line_area,
-            );
-        }
-        f.render_widget(
-            Paragraph::new(tr(lang, " ↑↓/jk select  Enter jump  a add shortcut  Esc cancel ", " ↑↓/jk 選択  Enter 移動  a ショートカット追加  Esc 取消 ")).style(
-                Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD),
-            ),
-            Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1),
-        );
-        return;
-    }
-
-    if let Popup::DestPicker { op, targets, cursor } = popup {
-        let rows = dests.len();
-        let w = 84u16.min(area.width.saturating_sub(2));
-        let h = (rows as u16 + 6).min(area.height.saturating_sub(2));
-        let verb = match (op, lang) {
-            (PendingOp::Copy, Lang::En) => "copy",
-            (PendingOp::Move, Lang::En) => "move",
-            (PendingOp::Copy, Lang::Ja) => "コピー",
-            (PendingOp::Move, Lang::Ja) => "移動",
-        };
-        let dp_title = if lang == Lang::Ja {
-            format!(" {} 件を{} ", targets.len(), verb)
-        } else {
-            format!(" {} {} item(s) to ", verb, targets.len())
-        };
-        let inner = popup_frame(f, area, w, h, dp_title, "");
-
-        for (i, (kind, path)) in dests.iter().enumerate().take(inner.height.saturating_sub(2) as usize) {
-            let sel = i == *cursor;
-            let y = inner.y + i as u16;
-            let line = Rect::new(inner.x, y, inner.width, 1);
-            push_row_zone(zones, inner, y, i);
-            if sel {
-                f.render_widget(
-                    Block::default().style(Style::default().bg(theme().selected_bg)),
-                    line,
-                );
-            }
-            let base = if sel { Style::default().bg(theme().selected_bg) } else { Style::default() };
-            f.render_widget(
-                Paragraph::new(Line::from(vec![
-                    Span::styled(if sel { " ▸ " } else { "   " }, base),
-                    Span::styled(
-                        format!("{:<11}", kind),
-                        base.fg(Color::Rgb(135, 135, 160)),
-                    ),
-                    Span::styled(
-                        truncate_middle(&path.display().to_string(), inner.width as usize - 16),
-                        base.fg(Color::Rgb(225, 225, 240)),
-                    ),
-                ])),
-                line,
-            );
-        }
-        f.render_widget(
-            Paragraph::new(tr(lang, " Enter=send here   n=type a path   Esc=cancel ", " Enter=ここへ   n=パス入力   Esc=取消 ")).style(
-                Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD),
-            ),
-            Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1),
-        );
-        return;
-    }
-
-    if let Popup::Viewer { title, view, scroll, line, col, visual, anchor, find_input, find_query, git_lines, markdown, preview, source, md_styles, md_width, editing, dirty, editable, hl, hl_lang, blame, .. } = popup {
-        let w = area.width.saturating_sub(4);
-        let h = area.height.saturating_sub(2);
-        let rect = centered_rect(w, h, area);
-        f.render_widget(Clear, rect);
-
-        // The preview owns `view.lines`: render the source to plain text plus a
-        // parallel per-character style grid at the current width and swap it in;
-        // leaving preview (or a width change) restores/re-wraps. Everything below
-        // — cursor, visual selection, `/` search, the mouse — then works over
-        // whichever text is on screen.
-        let inner_w = rect.width.saturating_sub(4).max(1);
-        if *preview {
-            if md_styles.is_empty() || *md_width != inner_w {
-                let (plain, styles) = crate::markdown::render_styled(source, inner_w as usize);
-                view.lines = plain;
-                *md_styles = styles;
-                *md_width = inner_w;
-            }
-        } else if !md_styles.is_empty() {
-            view.lines = source.clone();
-            md_styles.clear();
-            *md_width = 0;
-        }
-        *line = (*line).min(view.lines.len().saturating_sub(1));
-        *col = (*col).min(view.lines.get(*line).map(|l| l.chars().count()).unwrap_or(0));
-
-        // Syntax highlight source code (not the Markdown preview, not while
-        // editing). Computed once and cached; the cache is cleared on an edit
-        // or re-decode so it refreshes. Colours come from the per-char category.
-        if !*preview && !*editing {
-            if let Some(lang) = hl_lang {
-                if hl.is_empty() {
-                    *hl = cian_core::highlight::highlight(&view.lines, *lang)
-                        .into_iter()
-                        .map(|cats| cats.into_iter().map(hl_style).collect())
-                        .collect();
-                }
-            }
-        }
-
-        let kind = match view.kind {
-            cian_core::viewer::ViewKind::Text => view.encoding.label(),
-            cian_core::viewer::ViewKind::Binary => "binary",
-        };
-        let size = cian_core::human_size(view.total_bytes);
-        let cut = if view.truncated { "  (first 4M shown)" } else { "" };
-        // A little mode badge in the title, so which visual mode is active — and
-        // where the cursor sits — is never a guess.
-        let mode = if *editing {
-            "  [EDIT]".to_string()
-        } else {
-            match visual {
-                None => String::new(),
-                Some(ViewVisual::Char) => "  [VISUAL]".into(),
-                Some(ViewVisual::Line) => "  [V-LINE]".into(),
-                Some(ViewVisual::Block) => "  [V-BLOCK]".into(),
-            }
-        };
-        let dirty_mark = if *dirty { " ●" } else { "" };
-        let head = if *preview {
-            tr(lang, "Markdown preview", "Markdown プレビュー").to_string()
-        } else {
-            format!("{}, {}{}", kind, size, cut)
-        };
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .border_type(border_type())
-            .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
-            // The viewer takes the theme's own surface (light on a light theme),
-            // so it truly follows the theme; its text uses readable_on below.
-            .style(Style::default().bg(surface()))
-            .title(format!(" {}{}  —  {} ", title, dirty_mark, head))
-            .title_bottom(format!(" {}:{}{} ", *line + 1, *col + 1, mode));
-        let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
-        f.render_widget(block, rect);
-
-        let body_h = inner.height.saturating_sub(1) as usize;
-        let max_scroll = view.lines.len().saturating_sub(body_h);
-        *scroll = (*scroll).min(max_scroll);
-        // Keep the cursor on screen (preview scrolls by moving the cursor too).
-        if *line < *scroll {
-            *scroll = *line;
-        } else if *line >= *scroll + body_h.max(1) {
-            *scroll = *line + 1 - body_h.max(1);
-        }
-
-        // Line numbers and the git change bar belong to the source only; the
-        // rendered preview is a document, not a file listing. The blame gutter,
-        // when on, takes the left column instead of line numbers.
-        let show_blame = !blame.is_empty() && !*preview && !*editing;
-        let numbered = !*preview && !show_blame && view.kind == cian_core::viewer::ViewKind::Text;
-        let gutter = if show_blame {
-            BLAME_W
-        } else if numbered {
-            format!("{}", view.lines.len()).len().max(3) + 1
-        } else {
-            0
-        };
-        let avail = (inner.width as usize).saturating_sub(gutter);
-
-        // Ordered selection endpoints, for the highlight geometry.
-        let (s0, e0) = order_pos(*anchor, (*line, *col));
-        let sel_bg = Style::default().bg(theme().selected_bg);
-        let cursor_style = Style::default().add_modifier(Modifier::REVERSED);
-        let search_bg = Style::default().bg(Color::Rgb(120, 100, 0)).fg(Color::Rgb(255, 240, 190));
-        // Body text adapts to the (themed) surface so it reads on light themes.
-        let text_fg = readable_on(surface());
-        // Character columns matched by the active search, per line, for highlight.
-        let needle = find_query.as_ref().map(|q| q.to_lowercase()).filter(|q| !q.is_empty());
-        let match_cols = |l: &str| -> Vec<(usize, usize)> {
-            let Some(nd) = needle.as_ref() else { return Vec::new() };
-            let hay = l.to_lowercase();
-            let nlen = nd.chars().count();
-            let mut out = Vec::new();
-            let mut from = 0usize;
-            while let Some(rel) = hay[from..].find(nd.as_str()) {
-                let byte = from + rel;
-                let start = hay[..byte].chars().count();
-                out.push((start, start + nlen.saturating_sub(1)));
-                from = byte + nd.len().max(1);
-            }
-            out
-        };
-
-        // The inclusive selected column range on absolute line `i`, if any.
-        let sel_cols = |i: usize, len: usize| -> Option<(usize, usize)> {
-            match visual {
-                None => None,
-                Some(ViewVisual::Line) => {
-                    if i >= s0.0 && i <= e0.0 { Some((0, len)) } else { None }
-                }
-                Some(ViewVisual::Block) => {
-                    if i >= s0.0 && i <= e0.0 {
-                        Some((anchor.1.min(*col), anchor.1.max(*col)))
-                    } else {
-                        None
-                    }
-                }
-                Some(ViewVisual::Char) => {
-                    if i < s0.0 || i > e0.0 {
-                        None
-                    } else if s0.0 == e0.0 {
-                        Some((s0.1, e0.1))
-                    } else if i == s0.0 {
-                        Some((s0.1, len))
-                    } else if i == e0.0 {
-                        Some((0, e0.1))
-                    } else {
-                        Some((0, len))
-                    }
-                }
-            }
-        };
-
-        let rows: Vec<Line> = view
-            .lines
-            .iter()
-            .enumerate()
-            .skip(*scroll)
-            .take(body_h)
-            .map(|(i, l)| {
-                let chars: Vec<char> = l.chars().take(avail).collect();
-                let len = chars.len();
-                let sel = sel_cols(i, len);
-                let cur = if i == *line { Some(*col) } else { None };
-                let matches = match_cols(l);
-                let cell_style = |j: usize| -> Style {
-                    // Priority: cursor over selection over a search match; the
-                    // resting style is the Markdown colour in preview, else plain.
-                    if cur == Some(j) {
-                        cursor_style.fg(text_fg)
-                    } else if sel.map(|(a, b)| j >= a && j <= b).unwrap_or(false) {
-                        sel_bg.fg(text_fg)
-                    } else if matches.iter().any(|(a, b)| j >= *a && j <= *b) {
-                        search_bg
-                    } else if *preview {
-                        md_styles.get(i).and_then(|s| s.get(j)).copied().unwrap_or_default()
-                    } else if !*editing && !hl.is_empty() {
-                        hl.get(i).and_then(|s| s.get(j)).copied().unwrap_or(Style::default().fg(text_fg))
-                    } else {
-                        Style::default().fg(text_fg)
-                    }
-                };
-                // Build the body char-by-char, merging same-styled runs.
-                let mut spans: Vec<Span> = Vec::new();
-                if show_blame {
-                    // "hash author……" per line, dimmed; a run of the same commit
-                    // reads as one block.
-                    let (hash, who) = blame
-                        .get(i)
-                        .map(|b| (b.hash.as_str(), b.author.as_str()))
-                        .unwrap_or(("", ""));
-                    let who: String = who.chars().take(11).collect();
-                    let same_as_prev = i > 0 && blame.get(i - 1).map(|p| p.hash.as_str()) == Some(hash);
-                    let (shown_hash, shown_who) = if same_as_prev {
-                        (String::new(), String::new()) // repeat block: leave blank
-                    } else {
-                        (hash.to_string(), who)
-                    };
-                    spans.push(Span::styled(
-                        format!("{:<7} {:<11} ", shown_hash, shown_who),
-                        Style::default().fg(Color::Rgb(120, 120, 145)),
-                    ));
-                }
-                if numbered {
-                    // The line number, then a 1-column separator that doubles as
-                    // the git change bar (green added / amber modified / red for
-                    // a deletion just above). Keeping the width fixed means the
-                    // mouse column mapping is unaffected.
-                    spans.push(Span::styled(
-                        format!("{:>w$}", i + 1, w = gutter.saturating_sub(1)),
-                        Style::default().fg(Color::Rgb(110, 110, 135)),
-                    ));
-                    // The 1-column separator (previously a plain space) is the
-                    // change bar.
-                    let (bar, bar_c) = match git_lines.get(&i) {
-                        Some(cian_core::git::LineChange::Added) => ("▏", Color::Rgb(130, 205, 150)),
-                        Some(cian_core::git::LineChange::Modified) => ("▏", Color::Rgb(240, 210, 120)),
-                        Some(cian_core::git::LineChange::DeletedBefore) => ("▁", Color::Rgb(230, 120, 120)),
-                        None => (" ", Color::Reset),
-                    };
-                    spans.push(Span::styled(bar.to_string(), Style::default().fg(bar_c)));
-                }
-                let mut run = String::new();
-                let mut run_style = cell_style(0);
-                for (j, ch) in chars.iter().enumerate() {
-                    let st = cell_style(j);
-                    if st != run_style && !run.is_empty() {
-                        spans.push(Span::styled(std::mem::take(&mut run), run_style));
-                    }
-                    run_style = st;
-                    run.push(*ch);
-                }
-                if !run.is_empty() {
-                    spans.push(Span::styled(run, run_style));
-                }
-                // The cursor can sit just past the last char (empty line, or end
-                // of line): show it as a reversed space so it stays visible.
-                if cur == Some(len) {
-                    spans.push(Span::styled(" ".to_string(), cursor_style));
-                }
-                Line::from(spans)
-            })
-            .collect();
-        let body_area = Rect::new(inner.x, inner.y, inner.width, body_h as u16);
-        f.render_widget(Paragraph::new(rows), body_area);
-        let pos = match max_scroll {
-            0 => "all".to_string(),
-            m => format!("{}%", *scroll * 100 / m),
-        };
-        // While editing, the footer shows the editor keys; while typing a
-        // search, the `/` prompt; otherwise the usual hints.
-        let ed = if *editable { tr(lang, " i edit ", " i 編集 ") } else { " " };
-        let footer = if *editing {
-            tr(lang,
-                " EDIT — type to insert   Ctrl+S save   Esc leave   Shift+Q discard ",
-                " 編集中 — 入力で挿入   Ctrl+S 保存   Esc 終了   Shift+Q 破棄 ").to_string()
-        } else {
-            match find_input {
-                Some(q) => format!("/{}_", q),
-                None => {
-                    let mmd = source.iter().any(|l| {
-                        let t = l.trim_start();
-                        (t.starts_with("```") || t.starts_with("~~~"))
-                            && t.trim_start_matches(['`', '~']).trim().eq_ignore_ascii_case("mermaid")
-                    });
-                    let hints = if *preview {
-                        format!("{}{}{}{}",
-                            tr(lang, " / f search  n/N  v/V select  y copy ", " / f 検索  n/N  v/V 選択  y コピー "),
-                            ed,
-                            if mmd { tr(lang, " m diagram ", " m 図 ") } else { "" },
-                            tr(lang, " E ext-edit  p source  ", " E 外部編集  p ソース  "))
-                    } else if *markdown {
-                        format!("{}{}{}",
-                            tr(lang, " / f search  n/N  v/V select  y copy ", " / f 検索  n/N  v/V 選択  y コピー "),
-                            ed,
-                            tr(lang, " e enc  p preview  ", " e 文字コード  p プレビュー  "))
-                    } else {
-                        format!("{}{}{}",
-                            tr(lang, " / f search  n/N  v/V select  y copy ", " / f 検索  n/N  v/V 選択  y コピー "),
-                            ed,
-                            tr(lang, " E ext-edit  S-Enter reveal  e enc  ", " E 外部編集  S-Enter 場所へ  e 文字コード  "))
-                    };
-                    format!("{}{} ", hints, pos)
-                }
-            }
-        };
-        f.render_widget(
-            Paragraph::new(footer)
-                .style(Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD)),
-            Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1),
-        );
-        return;
-    }
-
-    if let Popup::DirCompare { left, right, entries, cursor, scroll, truncated, .. } = popup {
-        use cian_core::dirdiff::Status;
-        let counts = {
-            let (mut a, mut d, mut m) = (0, 0, 0);
-            for e in entries.iter() {
-                match e.status {
-                    Status::OnlyRight => a += 1,
-                    Status::OnlyLeft => d += 1,
-                    Status::Differ => m += 1,
-                }
-            }
-            let cut = if *truncated { "  (stopped at 5000)" } else { "" };
-            format!("~{} +{} -{}{}", m, a, d, cut)
-        };
-        let title = format!(" {}  ↔  {}   —   {} ", left, right, counts);
-        let (w, h) = (area.width.saturating_sub(2), area.height.saturating_sub(2));
-        let inner = popup_frame(f, area, w, h, title, "");
-
-        let body_h = (inner.height.saturating_sub(1) as usize).max(1);
-        // Keep the cursor on screen.
-        if *cursor < *scroll {
-            *scroll = *cursor;
-        } else if *cursor >= *scroll + body_h {
-            *scroll = *cursor + 1 - body_h;
-        }
-        let first = *scroll;
-        let add = Color::Rgb(130, 225, 150);
-        let del = Color::Rgb(255, 140, 145);
-        let chg = Color::Rgb(240, 210, 120);
-        // Two columns with a marker between them, mirroring the file diff: a
-        // path sits on the side(s) it exists, so which tree has (or differs on)
-        // an entry is read straight down either column.
-        let mid = 3usize;
-        let col = (inner.width as usize).saturating_sub(mid) / 2;
-        for (row, (i, e)) in entries.iter().enumerate().skip(first).take(body_h).enumerate() {
-            let sel = i == *cursor;
-            let y = inner.y + row as u16;
-            let line = Rect::new(inner.x, y, inner.width, 1);
-            push_row_zone(zones, inner, y, i);
-            if sel {
-                f.render_widget(Block::default().style(Style::default().bg(theme().selected_bg)), line);
-            }
-            let base = if sel { Style::default().bg(theme().selected_bg) } else { Style::default() };
-            let mut name = e.rel.display().to_string().replace('\\', "/");
-            if e.is_dir {
-                name.push('/');
-            }
-            let shown = truncate_middle(&name, col);
-            let blank = " ".repeat(col);
-            let (mark, mcol, left_txt, right_txt) = match e.status {
-                Status::OnlyLeft => ("◀", del, shown.clone(), blank.clone()),
-                Status::OnlyRight => ("▶", add, blank.clone(), shown.clone()),
-                Status::Differ => ("≠", chg, shown.clone(), shown.clone()),
-            };
-            f.render_widget(
-                Paragraph::new(Line::from(vec![
-                    Span::styled(pad_to(&left_txt, col), base.fg(mcol)),
-                    Span::styled(format!(" {} ", mark), base.fg(mcol).add_modifier(Modifier::BOLD)),
-                    Span::styled(pad_to(&right_txt, col), base.fg(mcol)),
-                ])),
-                line,
-            );
-        }
-        f.render_widget(
-            Paragraph::new(tr(lang,
-                " ◀ left  ▶ right  ≠ differ   Enter=go  </> copy one  [/] sync all  w save  Esc ",
-                " ◀ 左  ▶ 右  ≠ 相違   Enter=移動  </> 1件コピー  [/] 一括同期  w 保存  Esc ",
-            ))
-            .style(Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD)),
-            Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1),
-        );
-        return;
-    }
-
-    if let Popup::Diff { left, right, result, folded, fold, scroll, encoding, find, find_input, .. } = popup {
-        use cian_core::diff::Row;
-
-        let title = format!(" {} ↔ {}  —  {} ", left, right, cian_core::diff::summary(result));
-        let (w, h) = (area.width.saturating_sub(2), area.height.saturating_sub(2));
-        let inner = popup_frame(f, area, w, h, title, "");
-
-        let body_h = inner.height.saturating_sub(1) as usize;
-        let rows: &[Row] = if *fold { folded } else { &result.rows };
-        let max_scroll = rows.len().saturating_sub(body_h);
-        *scroll = (*scroll).min(max_scroll);
-
-        // Two equal columns with a marker between them, so the eye can run
-        // straight down either file.
-        let gutter = 5usize;
-        let col = (inner.width as usize).saturating_sub(3 + gutter * 2) / 2;
-
-        let dim = Style::default().fg(Color::Rgb(150, 150, 168));
-        let num = Style::default().fg(Color::Rgb(105, 105, 130));
-        let del = Style::default().fg(Color::Rgb(255, 140, 145));
-        let add = Style::default().fg(Color::Rgb(130, 225, 150));
-        let chg = Style::default().fg(Color::Rgb(240, 210, 120));
-        // The exact edited span within a changed line: a solid bar, the way
-        // WinMerge marks the characters that actually differ.
-        let chg_hot = Style::default()
-            .fg(Color::Black)
-            .bg(Color::Rgb(240, 210, 120))
-            .add_modifier(Modifier::BOLD);
-
-        let cell = |line: Option<&cian_core::diff::Line>, style: Style| -> Vec<Span<'static>> {
-            match line {
-                Some(l) => vec![
-                    Span::styled(format!("{:>w$} ", l.no, w = gutter - 1), num),
-                    Span::styled(pad_to(&truncate(&l.text, col), col), style),
-                ],
-                // An absent side is left blank rather than filled, so the gap
-                // itself shows which file the line is missing from.
-                None => vec![Span::raw(" ".repeat(gutter + col))],
-            }
-        };
-
-        // A changed line, with its common prefix/suffix left calm and only the
-        // edited middle painted as a bar. `prefix`/`suffix` are the shared char
-        // counts from `common_affixes`; each side clamps `suffix` to its own
-        // length so an insertion (empty middle on one side) stays in bounds.
-        let emph_cell = |line: &cian_core::diff::Line, prefix: usize, suffix: usize| -> Vec<Span<'static>> {
-            let chars: Vec<char> = line.text.chars().collect();
-            let n = chars.len();
-            let suffix = suffix.min(n.saturating_sub(prefix));
-            let mid_end = n - suffix;
-            // Match `cell`'s truncation: keep at most `col` chars, ellipsis when cut.
-            let fits = n <= col;
-            let budget = if fits { col } else { col.saturating_sub(1) };
-            let mut spans = vec![Span::styled(format!("{:>w$} ", line.no, w = gutter - 1), num)];
-            let mut buf = String::new();
-            let mut buf_hot = false;
-            let mut shown = String::new();
-            for (i, &c) in chars.iter().take(budget).enumerate() {
-                let is_hot = i >= prefix && i < mid_end;
-                if !buf.is_empty() && is_hot != buf_hot {
-                    spans.push(Span::styled(std::mem::take(&mut buf), if buf_hot { chg_hot } else { chg }));
-                }
-                buf_hot = is_hot;
-                buf.push(c);
-                shown.push(c);
-            }
-            if !buf.is_empty() {
-                spans.push(Span::styled(buf, if buf_hot { chg_hot } else { chg }));
-            }
-            if !fits {
-                spans.push(Span::styled("…".to_string(), chg));
-                shown.push('…');
-            }
-            let pad = col.saturating_sub(crate::util::width(&shown));
-            if pad > 0 {
-                spans.push(Span::raw(" ".repeat(pad)));
-            }
-            spans
-        };
-
-        // Rows whose text matches the active search get a highlight bar.
-        let needle = find.as_ref().map(|s| s.to_lowercase());
-        let row_matches = |r: &Row| -> bool {
-            let Some(q) = &needle else { return false };
-            let has = |o: Option<&cian_core::diff::Line>| o.map(|l| l.text.to_lowercase().contains(q)).unwrap_or(false);
-            match r {
-                Row::Same { left, right } | Row::Changed { left, right } => has(Some(left)) || has(Some(right)),
-                Row::Removed { left } => has(Some(left)),
-                Row::Added { right } => has(Some(right)),
-                Row::Skipped { .. } => false,
-            }
-        };
-        let search_bg = Style::default().bg(Color::Rgb(80, 70, 20));
-        let body: Vec<Line> = rows
-            .iter()
-            .skip(*scroll)
-            .take(body_h)
-            .map(|r| {
-                let line = match r {
-                    Row::Skipped { lines } => Line::from(Span::styled(
-                        format!("{:^w$}", format!("⋯ {} identical lines", lines), w = inner.width as usize),
-                        Style::default().fg(Color::Rgb(95, 95, 120)),
-                    )),
-                    Row::Same { left: l, right: rr } => {
-                        let mut s = cell(Some(l), dim);
-                        s.push(Span::styled(" │ ", num));
-                        s.extend(cell(Some(rr), dim));
-                        Line::from(s)
-                    }
-                    Row::Changed { left: l, right: rr } => {
-                        let (p, sfx) = cian_core::diff::common_affixes(&l.text, &rr.text);
-                        let mut s = emph_cell(l, p, sfx);
-                        s.push(Span::styled(" ~ ", chg.add_modifier(Modifier::BOLD)));
-                        s.extend(emph_cell(rr, p, sfx));
-                        Line::from(s)
-                    }
-                    Row::Removed { left: l } => {
-                        let mut s = cell(Some(l), del);
-                        s.push(Span::styled(" - ", del.add_modifier(Modifier::BOLD)));
-                        s.extend(cell(None, del));
-                        Line::from(s)
-                    }
-                    Row::Added { right: rr } => {
-                        let mut s = cell(None, add);
-                        s.push(Span::styled(" + ", add.add_modifier(Modifier::BOLD)));
-                        s.extend(cell(Some(rr), add));
-                        Line::from(s)
-                    }
-                };
-                if row_matches(r) { line.style(search_bg) } else { line }
-            })
-            .collect();
-
-        // A binary comparison has no rows; say why rather than showing a void.
-        let body = if result.binary {
-            vec![Line::from(Span::styled(
-                if result.identical {
-                    "  These are binary files, and they are byte-for-byte the same."
-                } else {
-                    "  These are binary files, and their contents differ."
-                },
-                dim,
-            ))]
-        } else if result.identical {
-            vec![Line::from(Span::styled("  The two files are identical.", add))]
-        } else {
-            body
-        };
-
-        f.render_widget(
-            Paragraph::new(body),
-            Rect::new(inner.x, inner.y, inner.width, body_h as u16),
-        );
-        let pos = match max_scroll {
-            0 => "all".to_string(),
-            m => format!("{}%", *scroll * 100 / m),
-        };
-        let fold_word = if *fold { tr(lang, "show all", "全表示") } else { tr(lang, "fold", "畳む") };
-        // A live `/` search prompt takes over the footer while typing.
-        let footer = if let Some(q) = find_input {
-            format!(" /{}_ ", q)
-        } else {
-            format!(
-                "{}{}  {}  [{}] {} ",
-                tr(lang, " n/N change  / find  f ", " n/N 変更  / 検索  f "),
-                fold_word,
-                tr(lang, "c copy  w save(.html/.md)  e enc  x explain  g/G  Esc",
-                      "c コピー  w 保存(.html/.md)  e 文字コード  x 説明  g/G  Esc"),
-                encoding.label(),
-                pos
-            )
-        };
-        f.render_widget(
-            Paragraph::new(footer)
-            .style(Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD)),
-            Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1),
-        );
-        return;
-    }
-
-    if let Popup::Archive { path, members, cursor, scroll } = popup {
-        let w = 96u16.min(area.width.saturating_sub(2));
-        let h = area.height.saturating_sub(4).max(8);
-        let name = path.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
-        let total: u64 = members.iter().map(|m| m.size).sum();
-        let title =
-            format!(" {}  —  {} entries, {} unpacked ", name, members.len(), cian_core::human_size(total));
-        let inner = popup_frame(f, area, w, h, title, "");
-
-        let body_h = inner.height.saturating_sub(1) as usize;
-        if *cursor < *scroll {
-            *scroll = *cursor;
-        } else if body_h > 0 && *cursor >= *scroll + body_h {
-            *scroll = *cursor + 1 - body_h;
-        }
-        for (row, (i, m)) in members.iter().enumerate().skip(*scroll).take(body_h).enumerate() {
-            let sel = i == *cursor;
-            let line = Rect::new(inner.x, inner.y + row as u16, inner.width, 1);
-            push_row_zone(zones, inner, inner.y + row as u16, i);
-            if sel {
-                f.render_widget(
-                    Block::default().style(Style::default().bg(theme().selected_bg)),
-                    line,
-                );
-            }
-            let base = if sel { Style::default().bg(theme().selected_bg) } else { Style::default() };
-            let size = if m.is_dir { "—".to_string() } else { cian_core::human_size(m.size) };
-            let name_w = inner.width as usize - 14;
-            f.render_widget(
-                Paragraph::new(Line::from(vec![
-                    Span::styled(if sel { " ▸ " } else { "   " }, base),
-                    Span::styled(
-                        format!("{:<w$}", truncate_middle(&m.name, name_w), w = name_w),
-                        if m.is_dir {
-                            base.fg(FileKind::Directory.color()).add_modifier(Modifier::BOLD)
-                        } else {
-                            base.fg(Color::Rgb(225, 225, 240))
-                        },
-                    ),
-                    Span::styled(format!("{:>6}", size), base.fg(Color::Rgb(140, 140, 165))),
-                ])),
-                line,
-            );
-        }
-        f.render_widget(
-            Paragraph::new(tr(lang, " Enter=extract this   a=extract all   Esc=close ", " Enter=これを展開   a=全展開   Esc=閉じる ")).style(
-                Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD),
-            ),
-            Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1),
-        );
-        return;
-    }
-
-    if let Popup::Palette { kind, query, items, shown, cursor, scroll } = popup {
-        let w = 84u16.min(area.width.saturating_sub(2));
-        let h = (area.height.saturating_sub(4)).clamp(6, 22);
-        let title = match kind {
-            PaletteKind::Commands => tr(lang, " command palette ", " コマンドパレット "),
-            PaletteKind::Jump => tr(lang, " jump to ", " ジャンプ "),
-            PaletteKind::File => tr(lang, " find file ", " ファイル検索 "),
-        };
-        let inner = popup_frame(f, area, w, h, title, "");
-
-        // Row 0 is the live query; the list fills the rest above the footer.
-        f.render_widget(
-            Paragraph::new(Line::from(vec![
-                Span::styled("› ", Style::default().fg(theme().accent).add_modifier(Modifier::BOLD)),
-                Span::styled(format!("{}_", query), Style::default().fg(Color::Rgb(230, 230, 245))),
-            ])),
-            Rect::new(inner.x, inner.y, inner.width, 1),
-        );
-        let list_top = inner.y + 1;
-        let body_h = inner.height.saturating_sub(2) as usize;
-        if *cursor < *scroll {
-            *scroll = *cursor;
-        } else if body_h > 0 && *cursor >= *scroll + body_h {
-            *scroll = *cursor + 1 - body_h;
-        }
-        for (row, si) in (*scroll..shown.len().min(*scroll + body_h)).enumerate() {
-            let idx = shown[si];
-            let it = &items[idx];
-            let sel = si == *cursor;
-            let y = list_top + row as u16;
-            let line = Rect::new(inner.x, y, inner.width, 1);
-            if sel {
-                f.render_widget(Block::default().style(Style::default().bg(theme().selected_bg)), line);
-            }
-            let base = if sel { Style::default().bg(theme().selected_bg) } else { Style::default() };
-            let label_w = (inner.width as usize * 2 / 5).max(10);
-            let detail_w = (inner.width as usize).saturating_sub(label_w + 4);
-            f.render_widget(
-                Paragraph::new(Line::from(vec![
-                    Span::styled(if sel { " ▸ " } else { "   " }, base),
-                    Span::styled(
-                        format!("{:<w$}", truncate(&it.label, label_w), w = label_w),
-                        base.fg(if sel { Color::Rgb(235, 235, 250) } else { Color::Rgb(210, 210, 225) })
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                    Span::styled(truncate_middle(&it.detail, detail_w), base.fg(Color::Rgb(140, 140, 165))),
-                ])),
-                line,
-            );
-        }
-        if shown.is_empty() {
-            f.render_widget(
-                Paragraph::new(tr(lang, "  (no matches)", "  （一致なし）")).style(Style::default().fg(Color::Rgb(150, 150, 170))),
-                Rect::new(inner.x, list_top, inner.width, 1),
-            );
-        }
-        f.render_widget(
-            Paragraph::new(tr(lang, " type to filter   ↑/↓ move   Enter run   Esc close ", " 入力で絞込   ↑/↓ 移動   Enter 実行   Esc 閉じる "))
-                .style(Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD)),
-            Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1),
-        );
-        return;
-    }
-
-    if let Popup::DiskUsage { dir, entries, total, cursor, scroll } = popup {
-        let w = 96u16.min(area.width.saturating_sub(2));
-        let h = area.height.saturating_sub(4).max(8);
-        let title = format!(
-            " {}  —  {}  ({} items) ",
-            truncate_middle(&dir.display().to_string(), 60),
-            cian_core::human_size(*total),
-            entries.len()
-        );
-        let inner = popup_frame(f, area, w, h, title, "");
-
-        let body_h = inner.height.saturating_sub(1) as usize;
-        if *cursor < *scroll {
-            *scroll = *cursor;
-        } else if body_h > 0 && *cursor >= *scroll + body_h {
-            *scroll = *cursor + 1 - body_h;
-        }
-        // Bars scale to the biggest child, so the space hog fills the bar.
-        let max = entries.first().map(|e| e.size).unwrap_or(0).max(1);
-        let bar_w = 18usize;
-        for (row, (i, e)) in entries.iter().enumerate().skip(*scroll).take(body_h).enumerate() {
-            let sel = i == *cursor;
-            let y = inner.y + row as u16;
-            let line = Rect::new(inner.x, y, inner.width, 1);
-            push_row_zone(zones, inner, y, i);
-            if sel {
-                f.render_widget(Block::default().style(Style::default().bg(theme().selected_bg)), line);
-            }
-            let base = if sel { Style::default().bg(theme().selected_bg) } else { Style::default() };
-            let filled = ((e.size as u128 * bar_w as u128) / max as u128) as usize;
-            let bar: String = "█".repeat(filled) + &"░".repeat(bar_w.saturating_sub(filled));
-            let pct = if *total > 0 { e.size as f64 * 100.0 / *total as f64 } else { 0.0 };
-            let mut name = e.name.clone();
-            if e.is_dir {
-                name.push('/');
-            }
-            let name_w = (inner.width as usize).saturating_sub(bar_w + 24);
-            let name_style = if e.is_dir {
-                base.fg(FileKind::Directory.color()).add_modifier(Modifier::BOLD)
-            } else {
-                base.fg(Color::Rgb(225, 225, 240))
-            };
-            f.render_widget(
-                Paragraph::new(Line::from(vec![
-                    Span::styled(if sel { " ▸ " } else { "   " }, base),
-                    Span::styled(format!("{:<w$}", truncate_middle(&name, name_w), w = name_w), name_style),
-                    Span::styled(bar, base.fg(theme().accent)),
-                    Span::styled(format!(" {:>8}", cian_core::human_size(e.size)), base.fg(Color::Rgb(210, 210, 225))),
-                    Span::styled(format!(" {:>4.0}%", pct), base.fg(Color::Rgb(140, 140, 165))),
-                ])),
-                line,
-            );
-        }
-        if entries.is_empty() {
-            f.render_widget(
-                Paragraph::new(tr(lang, "  (empty)", "  （空）")).style(Style::default().fg(Color::Rgb(150, 150, 170))),
-                Rect::new(inner.x, inner.y, inner.width, 1),
-            );
-        }
-        f.render_widget(
-            Paragraph::new(tr(lang,
-                " Enter=into folder   -=up   j/k move   Esc=close ",
-                " Enter=フォルダへ   -=上へ   j/k 移動   Esc=閉じる ",
-            ))
-            .style(Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD)),
-            Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1),
-        );
-        return;
-    }
-
-    if let Popup::GitLog { title, commits, cursor, scroll, .. } = popup {
-        let rect = centered_rect(area.width.saturating_sub(4), area.height.saturating_sub(4), area);
-        f.render_widget(Clear, rect);
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .border_type(border_type())
-            .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
-            .title(format!(" {} ", title))
-            .title_bottom(tr(lang, " Enter=show diff  j/k  g/G  Esc ", " Enter=差分表示  j/k  g/G  Esc "));
-        let inner = rect.inner(Margin { vertical: 1, horizontal: 1 });
-        f.render_widget(block, rect);
-        let body_h = inner.height as usize;
-        if *cursor < *scroll {
-            *scroll = *cursor;
-        } else if *cursor >= *scroll + body_h {
-            *scroll = *cursor + 1 - body_h;
-        }
-        let hash_w = 8usize;
-        let date_w = 10usize;
-        let author_w = 14usize;
-        let subj_w = (inner.width as usize).saturating_sub(hash_w + date_w + author_w + 3);
-        let rows: Vec<Line> = commits
-            .iter()
-            .enumerate()
-            .skip(*scroll)
-            .take(body_h)
-            .map(|(i, c)| {
-                let sel = i == *cursor;
-                let author: String = c.author.chars().take(author_w).collect();
-                let subject: String = c.subject.chars().take(subj_w).collect();
-                let line = format!(
-                    "{:<hw$} {:<dw$} {:<aw$} {}",
-                    c.hash, c.date, author, subject,
-                    hw = hash_w, dw = date_w, aw = author_w,
-                );
-                let style = if sel {
-                    Style::default().fg(Color::Black).bg(theme().accent)
-                } else {
-                    Style::default().fg(Color::Rgb(200, 200, 215))
-                };
-                Line::from(Span::styled(line, style))
-            })
-            .collect();
-        for i in 0..commits.len().min(body_h) {
-            push_row_zone(zones, inner, inner.y + i as u16, *scroll + i);
-        }
-        f.render_widget(Paragraph::new(rows), inner);
-        return;
-    }
-
-    if let Popup::Macros { cursor, names } = popup {
-        let widest = names.iter().map(|n| n.chars().count()).max().unwrap_or(10);
-        let w = (widest as u16 + 8).clamp(28, area.width);
-        let h = (names.len() as u16 + 3).min(area.height);
-        let inner = popup_frame(f, area, w, h, tr(lang, " run a macro ", " マクロを実行 "), "");
-
-        let rows: Vec<Line> = names
-            .iter()
-            .enumerate()
-            .map(|(i, name)| {
-                let sel = i == *cursor;
-                let style = if sel {
-                    Style::default().fg(theme().accent).add_modifier(Modifier::BOLD)
-                } else {
-                    Style::default().fg(Color::Rgb(200, 200, 215))
-                };
-                Line::from(Span::styled(
-                    format!("{}{}", if sel { "▸ " } else { "  " }, name),
-                    style,
-                ))
-            })
-            .collect();
-        let body_area = Rect::new(inner.x, inner.y, inner.width, inner.height.saturating_sub(1));
-        f.render_widget(Paragraph::new(rows), body_area);
-        for i in 0..names.len() {
-            push_row_zone(zones, inner, inner.y + i as u16, i);
-        }
-        let footer_area = Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1);
-        f.render_widget(
-            Paragraph::new(tr(lang, " Enter=run  j/k  Esc ", " Enter=実行  j/k  Esc ")).style(
-                Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD),
-            ),
-            footer_area,
-        );
-        return;
-    }
-
-    if let Popup::SortPicker { cursor } = popup {
-        let w = 34u16.min(area.width);
-        let h = SortKey::ALL.len() as u16 + 3;
-        let inner = popup_frame(f, area, w, h.min(area.height), tr(lang, " sort by ", " 並び替え "), "");
-
-        let rows: Vec<Line> = SortKey::ALL
-            .iter()
-            .enumerate()
-            .map(|(i, k)| {
-                let sel = i == *cursor;
-                let style = if sel {
-                    Style::default().fg(theme().accent).add_modifier(Modifier::BOLD)
-                } else {
-                    Style::default().fg(Color::Rgb(200, 200, 215))
-                };
-                // The shortcut letter doubles as the mnemonic.
-                let hint = match k {
-                    SortKey::Name => "n",
-                    SortKey::Size => "s",
-                    SortKey::Modified => "d",
-                    SortKey::Extension => "e",
-                };
-                Line::from(Span::styled(
-                    format!("{}{}  ({})", if sel { "▸ " } else { "  " }, k.label(), hint),
-                    style,
-                ))
-            })
-            .collect();
-        let body_area = Rect::new(inner.x, inner.y, inner.width, inner.height.saturating_sub(1));
-        f.render_widget(Paragraph::new(rows), body_area);
-        for i in 0..SortKey::ALL.len() {
-            push_row_zone(zones, inner, inner.y + i as u16, i);
-        }
-        let footer_area =
-            Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1);
-        f.render_widget(
-            Paragraph::new(tr(lang, " Enter=apply (again = reverse)  Esc ", " Enter=適用（再度で逆順）  Esc ")).style(
-                Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD),
-            ),
-            footer_area,
-        );
-        return;
-    }
-
-    if let Popup::EncodingPicker { cursor, .. } = popup {
-        use cian_core::viewer::TextEncoding;
-        let w = 34u16.min(area.width);
-        let h = TextEncoding::ALL.len() as u16 + 3;
-        let inner = popup_frame(f, area, w, h.min(area.height), tr(lang, " text encoding ", " 文字コード "), "");
-        let rows: Vec<Line> = TextEncoding::ALL
-            .iter()
-            .enumerate()
-            .map(|(i, e)| {
-                let sel = i == *cursor;
-                let style = if sel {
-                    Style::default().fg(theme().accent).add_modifier(Modifier::BOLD)
-                } else {
-                    Style::default().fg(Color::Rgb(200, 200, 215))
-                };
-                Line::from(Span::styled(
-                    format!("{}{}", if sel { "▸ " } else { "  " }, e.label()),
-                    style,
-                ))
-            })
-            .collect();
-        f.render_widget(
-            Paragraph::new(rows),
-            Rect::new(inner.x, inner.y, inner.width, inner.height.saturating_sub(1)),
-        );
-        for i in 0..TextEncoding::ALL.len() {
-            push_row_zone(zones, inner, inner.y + i as u16, i);
-        }
-        f.render_widget(
-            Paragraph::new(tr(lang, " Enter=apply  Esc=cancel ", " Enter=適用  Esc=取消 ")).style(
-                Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD),
-            ),
-            Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1),
-        );
-        return;
-    }
-
-    if let Popup::ColorPicker { cursor, .. } = popup {
-        let w = 26u16.min(area.width);
-        let h = PANE_BG_PRESETS.len() as u16 + 3;
-        let inner = popup_frame(f, area, w, h.min(area.height), tr(lang, " background ", " 背景色 "), "");
-
-        let rows: Vec<Line> = PANE_BG_PRESETS
-            .iter()
-            .enumerate()
-            .map(|(i, (name, color))| {
-                let sel = i == *cursor;
-                // A swatch of the actual color, so the name is not the only cue.
-                let swatch = Span::styled(
-                    "  ",
-                    Style::default().bg(color.unwrap_or(Color::Rgb(16, 16, 20))),
-                );
-                let label = Span::styled(
-                    format!(" {}{}", if sel { "▸ " } else { "  " }, name),
-                    if sel {
-                        Style::default().add_modifier(Modifier::BOLD).fg(theme().accent)
-                    } else {
-                        Style::default().fg(Color::Rgb(200, 200, 215))
-                    },
-                );
-                Line::from(vec![swatch, label])
-            })
-            .collect();
-        let body_area = Rect::new(inner.x, inner.y, inner.width, inner.height.saturating_sub(1));
-        f.render_widget(Paragraph::new(rows), body_area);
-        for i in 0..PANE_BG_PRESETS.len() {
-            push_row_zone(zones, inner, inner.y + i as u16, i);
-        }
-        let footer_area =
-            Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1);
-        f.render_widget(
-            Paragraph::new(tr(lang, " Enter=apply  Esc=cancel ", " Enter=適用  Esc=取消 ")).style(
-                Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD),
-            ),
-            footer_area,
-        );
-        return;
-    }
-
+/// The confirm/notice dialogs, which differ only in their text: each supplies
+/// a title, body lines and a footer hint, and they share one frame, one body
+/// paragraph and one button row.
+fn draw_simple_dialog(
+    f: &mut Frame,
+    area: Rect,
+    popup: &mut Popup,
+    zones: &mut Vec<PopupZone>,
+    lang: Lang,
+) {
     let popup: &Popup = popup;
     let (title, body, footer) = match popup {
         Popup::ConfirmDelete { targets } => {
@@ -4704,6 +3067,8 @@ fn draw_popup(
     let mut body_text: Vec<Line> = body.into_iter().map(Line::from).collect();
     // The text-input field renders the cursor as a highlighted character so
     // moving it never shifts the surrounding text (was inserting a caret glyph).
+    // Not a popup renderer of its own: it rewrites the line the shared body
+    // above already laid out.
     if let Popup::TextInput { buffer, cursor, kind, .. } = popup {
         if body_text.len() >= 2 {
             body_text[1] = caret_line(buffer, *cursor, kind.is_secret());
@@ -4746,6 +3111,1808 @@ fn draw_popup(
         Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD),
     );
     f.render_widget(footer_p, footer_area);
+}
+
+/// The theme gallery. The active theme is already applied live (the global
+/// was swapped as the cursor moved), so the popup itself renders in the
+/// previewed palette; a swatch row lets palettes be compared at a glance.
+fn draw_theme_picker(f: &mut Frame, area: Rect, popup: &mut Popup, lang: Lang) {
+    let Popup::ThemePicker { cursor, scope } = popup else { return };
+    let names = crate::theme::THEME_NAMES;
+    let pane_scope = matches!(scope, ThemeScope::Pane { .. });
+    let w = 46u16.min(area.width);
+    let h = (names.len() as u16 + 4).min(area.height.saturating_sub(2)).max(8);
+    let rect = centered_rect(w, h, area);
+    f.render_widget(Clear, rect);
+    f.render_widget(Block::default().style(Style::default().bg(theme().popup_bg)), rect);
+    let title = match scope {
+        ThemeScope::App { .. } => tr(lang, " theme — whole app ", " テーマ — 全体 "),
+        ThemeScope::Pane { side, .. } if *side == 0 => tr(lang, " theme — left pane ", " テーマ — 左ペイン "),
+        ThemeScope::Pane { .. } => tr(lang, " theme — right pane ", " テーマ — 右ペイン "),
+    };
+    let footer = if pane_scope {
+        tr(lang, " j/k=preview  Enter=keep  x=follow app  Esc=cancel ",
+                 " j/k=プレビュー  Enter=決定  x=全体に従う  Esc=取消 ")
+    } else {
+        tr(lang, " j/k=preview  Enter=keep  Esc=cancel ",
+                 " j/k=プレビュー  Enter=決定  Esc=取消 ")
+    };
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(border_type())
+        .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
+        .title(title)
+        .title_bottom(footer);
+    let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
+    f.render_widget(block, rect);
+    let view_h = inner.height as usize;
+    let scroll = cursor.saturating_sub(view_h.saturating_sub(1)).min(*cursor);
+    let mut lines: Vec<Line> = Vec::new();
+    for (i, name) in names.iter().enumerate().skip(scroll).take(view_h) {
+        let sel = i == *cursor;
+        let pal = crate::theme::theme_preset(name).unwrap_or_default();
+        // A compact swatch: directory / code / archive / executable accents.
+        let sw = |c: Color| Span::styled("█", Style::default().fg(c));
+        let name_style = if sel {
+            Style::default().fg(theme().accent).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(theme().file.plain)
+        };
+        lines.push(Line::from(vec![
+            Span::styled(if sel { "▸ " } else { "  " }, name_style),
+            Span::styled(format!("{:<20}", name), name_style),
+            sw(pal.file.directory), sw(pal.file.code), sw(pal.file.archive),
+            sw(pal.file.executable), sw(pal.accent),
+        ]));
+    }
+    f.render_widget(Paragraph::new(lines), inner);
+}
+
+/// The manual is taller than any terminal, so it renders as a scrolling
+/// viewport rather than the fixed block the other popups use.
+fn draw_manual(f: &mut Frame, area: Rect, popup: &mut Popup, lang: Lang) {
+    let Popup::Manual { lines, scroll } = popup else { return };
+    let height = area.height.saturating_sub(2).max(6);
+    let width: u16 = 70u16.min(area.width.saturating_sub(2));
+    let rect = centered_rect(width, height, area);
+    let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
+    let view_h = inner.height.saturating_sub(1) as usize;
+
+    // Clamp so the last page sits flush with the bottom; this also
+    // normalises an over-scrolled offset from the key handler.
+    let max_scroll = lines.len().saturating_sub(view_h);
+    *scroll = (*scroll).min(max_scroll);
+    let offset = *scroll;
+
+    f.render_widget(Clear, rect);
+    let pos = match (offset * 100).checked_div(max_scroll) {
+        Some(pct) => format!(" {}% ", pct),
+        // Everything fits; there is nothing to scroll.
+        None => " all ".to_string(),
+    };
+    let block = Block::default()
+        .borders(Borders::ALL)
+    .border_type(border_type())
+        .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
+        .title(tr(lang, " manual ", " キー一覧 "))
+        .title_bottom(pos);
+    f.render_widget(block, rect);
+
+    let body: Vec<Line> = lines
+        .iter()
+        .skip(offset)
+        .take(view_h)
+        .map(|l| Line::from(l.clone()))
+        .collect();
+    let body_area = Rect::new(inner.x, inner.y, inner.width, view_h as u16);
+    f.render_widget(Paragraph::new(body), body_area);
+
+    let footer_area =
+        Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1);
+    let footer_text = match lang {
+        Lang::En => " j/k scroll  u/d page  g/G  Esc close ",
+        Lang::Ja => " j/k スクロール  u/d ページ  g/G  Esc 閉じる ",
+    };
+    let footer = Paragraph::new(footer_text).style(
+        Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD),
+    );
+    f.render_widget(footer, footer_area);
+}
+
+/// The context menu is anchored at the pointer rather than centred, so it
+/// sizes and positions itself.
+fn draw_context_menu(f: &mut Frame, area: Rect, popup: &mut Popup, menu_lang: Lang) {
+    let Popup::ContextMenu { items, cursor, at } = popup else { return };
+    // The context menu follows `menu_lang` (which may differ from the rest
+    // of the UI) so it can be pinned to Japanese on an English interface.
+    let lang = menu_lang;
+    let (name_w, hint_w) = menu_dims(items, lang);
+    let rect = context_menu_rect(items, *at, area, lang);
+
+    f.render_widget(Clear, rect);
+    // Follow the theme's own surface (light on a light theme) with readable
+    // text, rather than the always-dark popup background.
+    let surf = surface();
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(border_type())
+        .border_style(Style::default().fg(theme().accent))
+        .style(Style::default().bg(surf));
+    let inner = rect.inner(Margin { vertical: 1, horizontal: 1 });
+    f.render_widget(block, rect);
+
+    let rows: Vec<Line> = items
+        .iter()
+        .enumerate()
+        .map(|(i, item)| {
+            let sel = i == *cursor;
+            let style = if sel {
+                Style::default().bg(theme().selected_bg).fg(readable_on(theme().selected_bg)).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().bg(surf).fg(readable_on(surf))
+            };
+            // "▸ name … (hint)": name left-aligned, hint right-aligned in a
+            // shared column, with even 2-cell gutters on both sides.
+            let (name, hint) = menu_label_parts(item.label(lang));
+            let marker = if sel { "▸ " } else { "  " };
+            let body = if hint_w > 0 {
+                format!("{}{}  {}  ", marker, pad_to(name, name_w), pad_left(hint, hint_w))
+            } else {
+                format!("{}{}  ", marker, pad_to(name, name_w))
+            };
+            Line::from(Span::styled(body, style))
+        })
+        .collect();
+    f.render_widget(Paragraph::new(rows), inner);
+}
+
+fn draw_ssh_hosts(
+    f: &mut Frame,
+    area: Rect,
+    popup: &mut Popup,
+    hosts: &[cian_lua::SshHost],
+    zones: &mut Vec<PopupZone>,
+    lang: Lang,
+) {
+    let Popup::SshHosts { cursor, filter } = popup else { return };
+    let needle = filter.to_lowercase();
+    let matches: Vec<&cian_lua::SshHost> = hosts
+        .iter()
+        .filter(|h| {
+            needle.is_empty()
+                || h.name.to_lowercase().contains(&needle)
+                || h.host.to_lowercase().contains(&needle)
+        })
+        .collect();
+    let w = 56u16.min(area.width);
+    let h = (matches.len() as u16 + 5).min(area.height.saturating_sub(2)).max(6);
+    let footer = tr(lang, " Enter=select  F2=type by hand  Esc ", " Enter=選択  F2=手入力  Esc ");
+    let inner = popup_frame(f, area, w, h, tr(lang, " ssh — host ", " SSH — ホスト "), footer);
+
+    let mut lines = vec![Line::from(Span::styled(
+        format!("/{}_", filter),
+        Style::default().fg(theme().accent).add_modifier(Modifier::BOLD),
+    ))];
+    if matches.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "  (no match)",
+            Style::default().fg(Color::Rgb(150, 150, 170)),
+        )));
+    }
+    for (i, hst) in matches.iter().enumerate() {
+        let sel = i == *cursor;
+        let style = if sel {
+            Style::default().fg(theme().accent).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::Rgb(205, 205, 218))
+        };
+        let users = if hst.users.len() == 1 {
+            hst.users[0].name.clone()
+        } else {
+            format!("{} users", hst.users.len())
+        };
+        lines.push(Line::from(vec![
+            Span::styled(format!("{}{:<16}", if sel { "▸ " } else { "  " }, hst.name), style),
+            Span::styled(
+                format!("{:<22} {}", hst.host, users),
+                Style::default().fg(Color::Rgb(140, 140, 165)),
+            ),
+        ]));
+        // Row 0 is the filter line, so host `i` sits one below it.
+        push_row_zone(zones, inner, inner.y + 1 + i as u16, i);
+    }
+    let body_area = Rect::new(inner.x, inner.y, inner.width, inner.height.saturating_sub(1));
+    f.render_widget(Paragraph::new(lines), body_area);
+    let footer_area =
+        Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1);
+    f.render_widget(
+        Paragraph::new(tr(lang, " type to filter  ↑↓ select  Enter next  Esc cancel ", " 入力で絞込  ↑↓ 選択  Enter 次へ  Esc 取消 ")).style(
+            Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD),
+        ),
+        footer_area,
+    );
+}
+
+fn draw_snippets(
+    f: &mut Frame,
+    area: Rect,
+    popup: &mut Popup,
+    snippets: &[cian_lua::Snippet],
+    zones: &mut Vec<PopupZone>,
+    lang: Lang,
+) {
+    let Popup::Snippets { cursor, filter } = popup else { return };
+    let needle = filter.to_lowercase();
+    let matches: Vec<&cian_lua::Snippet> = snippets
+        .iter()
+        .filter(|s| {
+            needle.is_empty()
+                || s.name.to_lowercase().contains(&needle)
+                || s.cmd.to_lowercase().contains(&needle)
+        })
+        .collect();
+    let w = 64u16.min(area.width);
+    let h = (matches.len() as u16 + 5).min(area.height.saturating_sub(2)).max(6);
+    let inner = popup_frame(f, area, w, h, tr(lang, " snippets → shell ", " スニペット → シェル "), "");
+
+    let mut lines = vec![Line::from(Span::styled(
+        format!("/{}_", filter),
+        Style::default().fg(theme().accent).add_modifier(Modifier::BOLD),
+    ))];
+    if matches.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "  (no match)",
+            Style::default().fg(Color::Rgb(150, 150, 170)),
+        )));
+    }
+    for (i, s) in matches.iter().enumerate() {
+        let sel = i == *cursor;
+        let style = if sel {
+            Style::default().fg(theme().accent).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::Rgb(205, 205, 218))
+        };
+        // A tag shows what will happen: run, type-only, or confirm-first.
+        let tag = if s.confirm { "?" } else if s.enter { "↵" } else { "…" };
+        lines.push(Line::from(vec![
+            Span::styled(format!("{}{} ", if sel { "▸ " } else { "  " }, tag), style),
+            Span::styled(format!("{:<20}", truncate(&s.name, 20)), style),
+            Span::styled(
+                format!("  {}", truncate(&s.cmd, (inner.width as usize).saturating_sub(26))),
+                Style::default().fg(Color::Rgb(140, 140, 165)),
+            ),
+        ]));
+        push_row_zone(zones, inner, inner.y + 1 + i as u16, i);
+    }
+    let body_area = Rect::new(inner.x, inner.y, inner.width, inner.height.saturating_sub(1));
+    f.render_widget(Paragraph::new(lines), body_area);
+    let footer_area =
+        Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1);
+    f.render_widget(
+        Paragraph::new(tr(lang, " type to filter  ↑↓ select  Enter send  Esc cancel ", " 入力で絞込  ↑↓ 選択  Enter 送信  Esc 取消 ")).style(
+            Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD),
+        ),
+        footer_area,
+    );
+}
+
+fn draw_remote_browser(
+    f: &mut Frame,
+    area: Rect,
+    popup: &mut Popup,
+    zones: &mut Vec<PopupZone>,
+    lang: Lang,
+) {
+    let Popup::RemoteBrowser { label, cwd, entries, cursor, scroll, marked, loading, purpose } = popup else { return };
+    let uploading = *purpose == BrowsePurpose::Upload;
+    let th = theme();
+    let w = 70u16.min(area.width);
+    let h = area.height.saturating_sub(4).clamp(8, 30);
+    let title = if uploading {
+        format!(" upload → {}  :  {} ", label, cwd)
+    } else {
+        format!(" download ← {}  :  {} ", label, cwd)
+    };
+    let footer = if uploading {
+        tr(
+            lang,
+            " Enter=open  -=up  u=upload here  Esc ",
+            " Enter=開く  -=上  u=ここへアップロード  Esc ",
+        )
+    } else {
+        tr(
+            lang,
+            " Enter=open/mark  Space=mark  -=up  d=download  Esc ",
+            " Enter=開く/選択  Space=選択  -=上  d=ダウンロード  Esc ",
+        )
+    };
+    let inner = popup_frame(f, area, w, h, title, footer);
+    let view_h = inner.height as usize;
+    if *loading {
+        f.render_widget(
+            Paragraph::new(tr(lang, "  …listing", "  …取得中"))
+                .style(Style::default().fg(Color::Rgb(150, 150, 170)).add_modifier(Modifier::ITALIC)),
+            inner,
+        );
+        return;
+    }
+    *scroll = (*scroll).min(cursor.saturating_sub(view_h.saturating_sub(1)));
+    if *cursor < *scroll {
+        *scroll = *cursor;
+    }
+    let mut lines: Vec<Line> = Vec::new();
+    if entries.is_empty() {
+        lines.push(Line::from(Span::styled("  (empty)", Style::default().fg(Color::Rgb(150, 150, 170)))));
+    }
+    for (i, e) in entries.iter().enumerate().skip(*scroll).take(view_h) {
+        let sel = i == *cursor;
+        let checked = marked.contains(&e.name);
+        let mark = if checked { "◉ " } else if sel { "▸ " } else { "  " };
+        let (icon, name_c) = if e.is_dir {
+            ("▸ ", th.file.directory)
+        } else {
+            ("  ", th.file.plain)
+        };
+        let size = if e.is_dir { String::new() } else { cian_core::disk::human_size(e.size) };
+        // Base fg per row; the selected row also gets a full-width background
+        // below so it reads as the focused row, like the file panes.
+        let base = if sel {
+            Style::default().fg(th.accent).add_modifier(Modifier::BOLD)
+        } else if checked {
+            Style::default().fg(Color::Rgb(130, 205, 150))
+        } else {
+            Style::default().fg(name_c)
+        };
+        let mut line = Line::from(vec![
+            Span::styled(format!("{}{}", mark, icon), base),
+            Span::styled(format!("{:<40}", truncate(&e.name, 40)), base),
+            Span::styled(format!("{:>10}", size), Style::default().fg(th.dim)),
+        ]);
+        if sel {
+            line = line.style(Style::default().bg(th.selected_bg));
+        }
+        lines.push(line);
+        push_row_zone(zones, inner, inner.y + (i - *scroll) as u16, i);
+    }
+    // Paint the selected row's background across the full inner width first,
+    // then the text on top (the spans carry no bg, so it shows through).
+    if !entries.is_empty() && *cursor >= *scroll {
+        let sel_y = inner.y + (*cursor - *scroll) as u16;
+        if sel_y < inner.y + inner.height {
+            f.render_widget(
+                Block::default().style(Style::default().bg(th.selected_bg)),
+                Rect::new(inner.x, sel_y, inner.width, 1),
+            );
+        }
+    }
+    f.render_widget(Paragraph::new(lines), inner);
+}
+
+fn draw_local_dest(
+    f: &mut Frame,
+    area: Rect,
+    popup: &mut Popup,
+    zones: &mut Vec<PopupZone>,
+    lang: Lang,
+) {
+    let Popup::LocalDest { files, cursor } = popup else { return };
+    let opts_len = 4usize;
+    let w = 56u16.min(area.width);
+    let h = (opts_len as u16 + 4).min(area.height);
+    let inner = popup_frame(f, area, w, h, format!(" download {} file(s) to… ", files.len()), "");
+    // Labels only; the actual dirs are resolved when a row is chosen.
+    let labels = [
+        tr(lang, "Left pane", "左ペイン"),
+        tr(lang, "Right pane", "右ペイン"),
+        tr(lang, "Desktop", "デスクトップ"),
+        tr(lang, "Type a path…", "パスを入力…"),
+    ];
+    let rows: Vec<Line> = labels
+        .iter()
+        .enumerate()
+        .map(|(i, l)| {
+            let sel = i == *cursor;
+            let style = if sel {
+                Style::default().fg(theme().accent).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::Rgb(205, 205, 218))
+            };
+            push_row_zone(zones, inner, inner.y + i as u16, i);
+            Line::from(Span::styled(format!("{}{}", if sel { "▸ " } else { "  " }, l), style))
+        })
+        .collect();
+    f.render_widget(Paragraph::new(rows), inner);
+}
+
+fn draw_ssh_users(
+    f: &mut Frame,
+    area: Rect,
+    popup: &mut Popup,
+    hosts: &[cian_lua::SshHost],
+    zones: &mut Vec<PopupZone>,
+    lang: Lang,
+) {
+    let Popup::SshUsers { host, cursor } = popup else { return };
+    let Some(hst) = hosts.get(*host) else { return };
+    let w = 40u16.min(area.width);
+    let h = (hst.users.len() as u16 + 4).min(area.height.saturating_sub(2)).max(6);
+    let inner = popup_frame(f, area, w, h, format!(" {} — {} ", tr(lang, "ssh", "SSH"), hst.name), "");
+
+    let lines: Vec<Line> = hst
+        .users
+        .iter()
+        .enumerate()
+        .map(|(i, u)| {
+            let sel = i == *cursor;
+            let style = if sel {
+                Style::default().fg(theme().accent).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::Rgb(205, 205, 218))
+            };
+            // A key marks logins that will authenticate without typing.
+            let mark = if u.has_secret() { "  🔑" } else { "" };
+            Line::from(Span::styled(
+                format!("{}{}@{}{}", if sel { "▸ " } else { "  " }, u.name, hst.host, mark),
+                style,
+            ))
+        })
+        .collect();
+    for i in 0..hst.users.len() {
+        push_row_zone(zones, inner, inner.y + i as u16, i);
+    }
+    let body_area = Rect::new(inner.x, inner.y, inner.width, inner.height.saturating_sub(1));
+    f.render_widget(Paragraph::new(lines), body_area);
+    let footer_area =
+        Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1);
+    f.render_widget(
+        Paragraph::new(tr(lang, " Enter connect   Esc back ", " Enter 接続   Esc 戻る ")).style(
+            Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD),
+        ),
+        footer_area,
+    );
+}
+
+fn draw_find_results(
+    f: &mut Frame,
+    area: Rect,
+    popup: &mut Popup,
+    find: Option<(&str, &str, Option<cian_core::search::Outcome>, cian_core::search::Mode)>,
+    zones: &mut Vec<PopupZone>,
+    lang: Lang,
+) {
+    let Popup::FindResults { hits, cursor, scroll } = popup else { return };
+    let w = 96u16.min(area.width.saturating_sub(2));
+    let h = area.height.saturating_sub(4).max(8);
+    let title = match find {
+        Some((query, root, done, mode)) => {
+            let verb = match mode {
+                cian_core::search::Mode::Name => "find",
+                cian_core::search::Mode::Content => "grep",
+            };
+            let state = match done {
+                None => "searching…".to_string(),
+                Some(cian_core::search::Outcome::Complete) => format!("{} found", hits.len()),
+                Some(cian_core::search::Outcome::Cancelled) => {
+                    format!("{} found (stopped)", hits.len())
+                }
+                Some(cian_core::search::Outcome::Truncated) => {
+                    format!("{} found (too many, stopped)", hits.len())
+                }
+            };
+            format!(" {} \"{}\" in {} — {} ", verb, query, root, state)
+        }
+        None => " find ".to_string(),
+    };
+    let inner = popup_frame(f, area, w, h, truncate_middle(&title, w.saturating_sub(4) as usize), "");
+
+    let body_h = inner.height.saturating_sub(1) as usize;
+    // Keep the cursor on screen as results stream in beneath it.
+    if *cursor < *scroll {
+        *scroll = *cursor;
+    } else if body_h > 0 && *cursor >= *scroll + body_h {
+        *scroll = *cursor + 1 - body_h;
+    }
+
+    if hits.is_empty() {
+        f.render_widget(
+            Paragraph::new("(nothing yet)").style(Style::default().fg(Color::Rgb(150, 150, 170))),
+            Rect::new(inner.x, inner.y, inner.width, 1),
+        );
+    }
+    for (row, (i, hit)) in hits.iter().enumerate().skip(*scroll).take(body_h).enumerate() {
+        let sel = i == *cursor;
+        let y = inner.y + row as u16;
+        let line_area = Rect::new(inner.x, y, inner.width, 1);
+        push_row_zone(zones, inner, y, i);
+        if sel {
+            f.render_widget(
+                Block::default().style(Style::default().bg(theme().selected_bg)),
+                line_area,
+            );
+        }
+        let base = if sel { Style::default().bg(theme().selected_bg) } else { Style::default() };
+        // The directory part is context; the name is the answer.
+        let rel = hit.rel.display().to_string();
+        let (dir, name) = match rel.rfind(std::path::MAIN_SEPARATOR) {
+            Some(i) => (rel[..=i].to_string(), rel[i + 1..].to_string()),
+            None => (String::new(), rel.clone()),
+        };
+        let avail = inner.width.saturating_sub(4) as usize;
+        let mut spans = vec![Span::styled(if sel { " ▸ " } else { "   " }, base)];
+        match &hit.line {
+            // A content match: the location is a prefix, the matched text
+            // is the answer, so give the text the room and the emphasis.
+            Some((n, text)) => {
+                let loc = format!("{}:{}  ", rel, n);
+                let loc_w = width(&loc).min(avail / 2);
+                spans.push(Span::styled(
+                    truncate_middle(&loc, loc_w),
+                    base.fg(Color::Rgb(135, 135, 160)),
+                ));
+                spans.push(Span::styled(
+                    truncate(text, avail.saturating_sub(loc_w)),
+                    base.fg(Color::Rgb(225, 225, 240)),
+                ));
+            }
+            None => {
+                spans.push(Span::styled(
+                    truncate_middle(&dir, avail.saturating_sub(width(&name))),
+                    base.fg(Color::Rgb(135, 135, 160)),
+                ));
+                spans.push(Span::styled(
+                    name.clone(),
+                    if hit.is_dir {
+                        base.fg(FileKind::Directory.color()).add_modifier(Modifier::BOLD)
+                    } else {
+                        base.fg(Color::Rgb(225, 225, 240))
+                    },
+                ));
+            }
+        }
+        f.render_widget(Paragraph::new(Line::from(spans)), line_area);
+    }
+    f.render_widget(
+        Paragraph::new(tr(lang, " Enter=go  p=panelize  j/k=move  Esc=close ", " Enter=移動  p=ペイン化  j/k=カーソル  Esc=閉じる ")).style(
+            Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD),
+        ),
+        Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1),
+    );
+}
+
+fn draw_shortcuts(
+    f: &mut Frame,
+    area: Rect,
+    popup: &mut Popup,
+    zones: &mut Vec<PopupZone>,
+    lang: Lang,
+) {
+    let Popup::Shortcuts { entries, cursor, path } = popup else { return };
+    let level = sc_level(entries, path);
+    // Wide, because these are paths and URLs; the generic 70-column popup
+    // wrapped them across lines, which made the list unreadable.
+    let w = 96u16.min(area.width.saturating_sub(2));
+    let h = (level.len() as u16 + 5).max(8).min(area.height.saturating_sub(2));
+    // Breadcrumb of the current group path in the title.
+    let mut crumb = String::new();
+    let mut walk: &[Shortcut] = entries;
+    for &i in path.iter() {
+        if let Some(s) = walk.get(i) {
+            crumb.push_str(&format!(" / {}", s.name));
+            walk = s.children.as_deref().unwrap_or(&[]);
+        }
+    }
+    let title = format!("{}{} ", tr(lang, " shortcuts", " ショートカット"), crumb);
+    let inner = popup_frame(f, area, w, h, title, "");
+
+    let body_h = inner.height.saturating_sub(1);
+    let footer_area =
+        Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1);
+
+    if level.is_empty() {
+        let hint = vec![
+            Line::from(Span::styled(
+                tr(lang, "(empty)", "（空）"),
+                Style::default().fg(Color::Rgb(150, 150, 170)),
+            )),
+            Line::from(""),
+            Line::from(tr(lang, "a = add a shortcut,  A = add a folder.", "a = ショートカット追加,  A = フォルダ追加。")),
+        ];
+        f.render_widget(
+            Paragraph::new(hint),
+            Rect::new(inner.x, inner.y, inner.width, body_h),
+        );
+    } else {
+        // Name column sized to the longest name, within reason, so the
+        // targets line up in a column of their own.
+        let name_w = level
+            .iter()
+            .map(|s| width(&s.name))
+            .max()
+            .unwrap_or(8)
+            .clamp(8, 24);
+        let target_w = (inner.width as usize).saturating_sub(name_w + 8);
+
+        // Keep the selected row visible once the list outgrows the popup.
+        let view = body_h as usize;
+        let first = cursor.saturating_sub(view.saturating_sub(1));
+        for (row, (i, sc)) in level.iter().enumerate().skip(first).take(view).enumerate() {
+            let sel = i == *cursor;
+            let y = inner.y + row as u16;
+            let line_area = Rect::new(inner.x, y, inner.width, 1);
+            push_row_zone(zones, inner, y, i);
+            if sel {
+                // A full-width bar, not just a marker: which row is active
+                // has to be obvious at a glance.
+                f.render_widget(
+                    Block::default().style(Style::default().bg(theme().selected_bg)),
+                    line_area,
+                );
+            }
+            let base = if sel {
+                Style::default().bg(theme().selected_bg)
+            } else {
+                Style::default()
+            };
+            let name_style = if sel {
+                base.fg(theme().accent).add_modifier(Modifier::BOLD)
+            } else {
+                base.fg(Color::Rgb(225, 225, 240)).add_modifier(Modifier::BOLD)
+            };
+            // The target is reference material: same row, quieter, so the
+            // name is what the eye lands on.
+            let target_style = base.fg(Color::Rgb(140, 140, 165));
+            // A folder shows a ▸ and its child count instead of a target.
+            let (icon, tail) = if sc.is_group() {
+                ("▸".to_string(), format!("{} items", sc.children.as_ref().map(|c| c.len()).unwrap_or(0)))
+            } else {
+                (shortcut_icon(sc.target_str()).to_string(), truncate_middle(sc.target_str(), target_w))
+            };
+            f.render_widget(
+                Paragraph::new(Line::from(vec![
+                    Span::styled(if sel { " ▸ " } else { "   " }, name_style),
+                    Span::styled(format!("{}  ", icon), base),
+                    Span::styled(
+                        format!("{}  ", pad_to(&truncate_middle(&sc.name, name_w), name_w)),
+                        name_style,
+                    ),
+                    Span::styled(tail, target_style),
+                ])),
+                line_area,
+            );
+        }
+    }
+    f.render_widget(
+        Paragraph::new(tr(lang, " Enter=open/into  a=add  A=folder  d=del  r=edit  ←=back  Esc ", " Enter=開く/入る  a=追加  A=フォルダ  d=削除  r=編集  ←=戻る  Esc "))
+            .style(
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(theme().accent)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        footer_area,
+    );
+}
+
+fn draw_history(
+    f: &mut Frame,
+    area: Rect,
+    popup: &mut Popup,
+    zones: &mut Vec<PopupZone>,
+    lang: Lang,
+) {
+    let Popup::History { entries, cursor } = popup else { return };
+    // Its own renderer rather than the plain-text popup, so the selected
+    // row gets the same highlight bar the shortcuts list has.
+    let w = 96u16.min(area.width.saturating_sub(2));
+    let h = (entries.len() as u16 + 5).max(6).min(area.height.saturating_sub(2));
+    let inner = popup_frame(f, area, w, h, format!(" {} ({}) ", tr(lang, "history", "履歴"), entries.len()), "");
+
+    let body_h = inner.height.saturating_sub(1) as usize;
+    let first = cursor.saturating_sub(body_h.saturating_sub(1));
+    for (row, (i, p)) in entries.iter().enumerate().skip(first).take(body_h).enumerate() {
+        let sel = i == *cursor;
+        let line_area = Rect::new(inner.x, inner.y + row as u16, inner.width, 1);
+        push_row_zone(zones, inner, inner.y + row as u16, i);
+        if sel {
+            f.render_widget(
+                Block::default().style(Style::default().bg(theme().selected_bg)),
+                line_area,
+            );
+        }
+        let base =
+            if sel { Style::default().bg(theme().selected_bg) } else { Style::default() };
+        let text_style = if sel {
+            base.fg(theme().accent).add_modifier(Modifier::BOLD)
+        } else {
+            base.fg(Color::Rgb(215, 215, 230))
+        };
+        f.render_widget(
+            Paragraph::new(Line::from(vec![
+                Span::styled(if sel { " ▸ " } else { "   " }, text_style),
+                Span::styled(
+                    truncate_middle(&p.display().to_string(), inner.width as usize - 4),
+                    text_style,
+                ),
+            ])),
+            line_area,
+        );
+    }
+    f.render_widget(
+        Paragraph::new(tr(lang, " ↑↓/jk select  Enter jump  a add shortcut  Esc cancel ", " ↑↓/jk 選択  Enter 移動  a ショートカット追加  Esc 取消 ")).style(
+            Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD),
+        ),
+        Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1),
+    );
+}
+
+fn draw_dest_picker(
+    f: &mut Frame,
+    area: Rect,
+    popup: &mut Popup,
+    dests: &[(String, PathBuf)],
+    zones: &mut Vec<PopupZone>,
+    lang: Lang,
+) {
+    let Popup::DestPicker { op, targets, cursor } = popup else { return };
+    let rows = dests.len();
+    let w = 84u16.min(area.width.saturating_sub(2));
+    let h = (rows as u16 + 6).min(area.height.saturating_sub(2));
+    let verb = match (op, lang) {
+        (PendingOp::Copy, Lang::En) => "copy",
+        (PendingOp::Move, Lang::En) => "move",
+        (PendingOp::Copy, Lang::Ja) => "コピー",
+        (PendingOp::Move, Lang::Ja) => "移動",
+    };
+    let dp_title = if lang == Lang::Ja {
+        format!(" {} 件を{} ", targets.len(), verb)
+    } else {
+        format!(" {} {} item(s) to ", verb, targets.len())
+    };
+    let inner = popup_frame(f, area, w, h, dp_title, "");
+
+    for (i, (kind, path)) in dests.iter().enumerate().take(inner.height.saturating_sub(2) as usize) {
+        let sel = i == *cursor;
+        let y = inner.y + i as u16;
+        let line = Rect::new(inner.x, y, inner.width, 1);
+        push_row_zone(zones, inner, y, i);
+        if sel {
+            f.render_widget(
+                Block::default().style(Style::default().bg(theme().selected_bg)),
+                line,
+            );
+        }
+        let base = if sel { Style::default().bg(theme().selected_bg) } else { Style::default() };
+        f.render_widget(
+            Paragraph::new(Line::from(vec![
+                Span::styled(if sel { " ▸ " } else { "   " }, base),
+                Span::styled(
+                    format!("{:<11}", kind),
+                    base.fg(Color::Rgb(135, 135, 160)),
+                ),
+                Span::styled(
+                    truncate_middle(&path.display().to_string(), inner.width as usize - 16),
+                    base.fg(Color::Rgb(225, 225, 240)),
+                ),
+            ])),
+            line,
+        );
+    }
+    f.render_widget(
+        Paragraph::new(tr(lang, " Enter=send here   n=type a path   Esc=cancel ", " Enter=ここへ   n=パス入力   Esc=取消 ")).style(
+            Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD),
+        ),
+        Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1),
+    );
+}
+
+fn draw_viewer(
+    f: &mut Frame,
+    area: Rect,
+    popup: &mut Popup,
+    lang: Lang,
+) {
+    let Popup::Viewer { title, view, scroll, line, col, visual, anchor, find_input, find_query, git_lines, markdown, preview, source, md_styles, md_width, editing, dirty, editable, hl, hl_lang, blame, .. } = popup else { return };
+    let w = area.width.saturating_sub(4);
+    let h = area.height.saturating_sub(2);
+    let rect = centered_rect(w, h, area);
+    f.render_widget(Clear, rect);
+
+    // The preview owns `view.lines`: render the source to plain text plus a
+    // parallel per-character style grid at the current width and swap it in;
+    // leaving preview (or a width change) restores/re-wraps. Everything below
+    // — cursor, visual selection, `/` search, the mouse — then works over
+    // whichever text is on screen.
+    let inner_w = rect.width.saturating_sub(4).max(1);
+    if *preview {
+        if md_styles.is_empty() || *md_width != inner_w {
+            let (plain, styles) = crate::markdown::render_styled(source, inner_w as usize);
+            view.lines = plain;
+            *md_styles = styles;
+            *md_width = inner_w;
+        }
+    } else if !md_styles.is_empty() {
+        view.lines = source.clone();
+        md_styles.clear();
+        *md_width = 0;
+    }
+    *line = (*line).min(view.lines.len().saturating_sub(1));
+    *col = (*col).min(view.lines.get(*line).map(|l| l.chars().count()).unwrap_or(0));
+
+    // Syntax highlight source code (not the Markdown preview, not while
+    // editing). Computed once and cached; the cache is cleared on an edit
+    // or re-decode so it refreshes. Colours come from the per-char category.
+    if !*preview && !*editing {
+        if let Some(lang) = hl_lang {
+            if hl.is_empty() {
+                *hl = cian_core::highlight::highlight(&view.lines, *lang)
+                    .into_iter()
+                    .map(|cats| cats.into_iter().map(hl_style).collect())
+                    .collect();
+            }
+        }
+    }
+
+    let kind = match view.kind {
+        cian_core::viewer::ViewKind::Text => view.encoding.label(),
+        cian_core::viewer::ViewKind::Binary => "binary",
+    };
+    let size = cian_core::human_size(view.total_bytes);
+    let cut = if view.truncated { "  (first 4M shown)" } else { "" };
+    // A little mode badge in the title, so which visual mode is active — and
+    // where the cursor sits — is never a guess.
+    let mode = if *editing {
+        "  [EDIT]".to_string()
+    } else {
+        match visual {
+            None => String::new(),
+            Some(ViewVisual::Char) => "  [VISUAL]".into(),
+            Some(ViewVisual::Line) => "  [V-LINE]".into(),
+            Some(ViewVisual::Block) => "  [V-BLOCK]".into(),
+        }
+    };
+    let dirty_mark = if *dirty { " ●" } else { "" };
+    let head = if *preview {
+        tr(lang, "Markdown preview", "Markdown プレビュー").to_string()
+    } else {
+        format!("{}, {}{}", kind, size, cut)
+    };
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(border_type())
+        .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
+        // The viewer takes the theme's own surface (light on a light theme),
+        // so it truly follows the theme; its text uses readable_on below.
+        .style(Style::default().bg(surface()))
+        .title(format!(" {}{}  —  {} ", title, dirty_mark, head))
+        .title_bottom(format!(" {}:{}{} ", *line + 1, *col + 1, mode));
+    let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
+    f.render_widget(block, rect);
+
+    let body_h = inner.height.saturating_sub(1) as usize;
+    let max_scroll = view.lines.len().saturating_sub(body_h);
+    *scroll = (*scroll).min(max_scroll);
+    // Keep the cursor on screen (preview scrolls by moving the cursor too).
+    if *line < *scroll {
+        *scroll = *line;
+    } else if *line >= *scroll + body_h.max(1) {
+        *scroll = *line + 1 - body_h.max(1);
+    }
+
+    // Line numbers and the git change bar belong to the source only; the
+    // rendered preview is a document, not a file listing. The blame gutter,
+    // when on, takes the left column instead of line numbers.
+    let show_blame = !blame.is_empty() && !*preview && !*editing;
+    let numbered = !*preview && !show_blame && view.kind == cian_core::viewer::ViewKind::Text;
+    let gutter = if show_blame {
+        BLAME_W
+    } else if numbered {
+        format!("{}", view.lines.len()).len().max(3) + 1
+    } else {
+        0
+    };
+    let avail = (inner.width as usize).saturating_sub(gutter);
+
+    // Ordered selection endpoints, for the highlight geometry.
+    let (s0, e0) = order_pos(*anchor, (*line, *col));
+    let sel_bg = Style::default().bg(theme().selected_bg);
+    let cursor_style = Style::default().add_modifier(Modifier::REVERSED);
+    let search_bg = Style::default().bg(Color::Rgb(120, 100, 0)).fg(Color::Rgb(255, 240, 190));
+    // Body text adapts to the (themed) surface so it reads on light themes.
+    let text_fg = readable_on(surface());
+    // Character columns matched by the active search, per line, for highlight.
+    let needle = find_query.as_ref().map(|q| q.to_lowercase()).filter(|q| !q.is_empty());
+    let match_cols = |l: &str| -> Vec<(usize, usize)> {
+        let Some(nd) = needle.as_ref() else { return Vec::new() };
+        let hay = l.to_lowercase();
+        let nlen = nd.chars().count();
+        let mut out = Vec::new();
+        let mut from = 0usize;
+        while let Some(rel) = hay[from..].find(nd.as_str()) {
+            let byte = from + rel;
+            let start = hay[..byte].chars().count();
+            out.push((start, start + nlen.saturating_sub(1)));
+            from = byte + nd.len().max(1);
+        }
+        out
+    };
+
+    // The inclusive selected column range on absolute line `i`, if any.
+    let sel_cols = |i: usize, len: usize| -> Option<(usize, usize)> {
+        match visual {
+            None => None,
+            Some(ViewVisual::Line) => {
+                if i >= s0.0 && i <= e0.0 { Some((0, len)) } else { None }
+            }
+            Some(ViewVisual::Block) => {
+                if i >= s0.0 && i <= e0.0 {
+                    Some((anchor.1.min(*col), anchor.1.max(*col)))
+                } else {
+                    None
+                }
+            }
+            Some(ViewVisual::Char) => {
+                if i < s0.0 || i > e0.0 {
+                    None
+                } else if s0.0 == e0.0 {
+                    Some((s0.1, e0.1))
+                } else if i == s0.0 {
+                    Some((s0.1, len))
+                } else if i == e0.0 {
+                    Some((0, e0.1))
+                } else {
+                    Some((0, len))
+                }
+            }
+        }
+    };
+
+    let rows: Vec<Line> = view
+        .lines
+        .iter()
+        .enumerate()
+        .skip(*scroll)
+        .take(body_h)
+        .map(|(i, l)| {
+            let chars: Vec<char> = l.chars().take(avail).collect();
+            let len = chars.len();
+            let sel = sel_cols(i, len);
+            let cur = if i == *line { Some(*col) } else { None };
+            let matches = match_cols(l);
+            let cell_style = |j: usize| -> Style {
+                // Priority: cursor over selection over a search match; the
+                // resting style is the Markdown colour in preview, else plain.
+                if cur == Some(j) {
+                    cursor_style.fg(text_fg)
+                } else if sel.map(|(a, b)| j >= a && j <= b).unwrap_or(false) {
+                    sel_bg.fg(text_fg)
+                } else if matches.iter().any(|(a, b)| j >= *a && j <= *b) {
+                    search_bg
+                } else if *preview {
+                    md_styles.get(i).and_then(|s| s.get(j)).copied().unwrap_or_default()
+                } else if !*editing && !hl.is_empty() {
+                    hl.get(i).and_then(|s| s.get(j)).copied().unwrap_or(Style::default().fg(text_fg))
+                } else {
+                    Style::default().fg(text_fg)
+                }
+            };
+            // Build the body char-by-char, merging same-styled runs.
+            let mut spans: Vec<Span> = Vec::new();
+            if show_blame {
+                // "hash author……" per line, dimmed; a run of the same commit
+                // reads as one block.
+                let (hash, who) = blame
+                    .get(i)
+                    .map(|b| (b.hash.as_str(), b.author.as_str()))
+                    .unwrap_or(("", ""));
+                let who: String = who.chars().take(11).collect();
+                let same_as_prev = i > 0 && blame.get(i - 1).map(|p| p.hash.as_str()) == Some(hash);
+                let (shown_hash, shown_who) = if same_as_prev {
+                    (String::new(), String::new()) // repeat block: leave blank
+                } else {
+                    (hash.to_string(), who)
+                };
+                spans.push(Span::styled(
+                    format!("{:<7} {:<11} ", shown_hash, shown_who),
+                    Style::default().fg(Color::Rgb(120, 120, 145)),
+                ));
+            }
+            if numbered {
+                // The line number, then a 1-column separator that doubles as
+                // the git change bar (green added / amber modified / red for
+                // a deletion just above). Keeping the width fixed means the
+                // mouse column mapping is unaffected.
+                spans.push(Span::styled(
+                    format!("{:>w$}", i + 1, w = gutter.saturating_sub(1)),
+                    Style::default().fg(Color::Rgb(110, 110, 135)),
+                ));
+                // The 1-column separator (previously a plain space) is the
+                // change bar.
+                let (bar, bar_c) = match git_lines.get(&i) {
+                    Some(cian_core::git::LineChange::Added) => ("▏", Color::Rgb(130, 205, 150)),
+                    Some(cian_core::git::LineChange::Modified) => ("▏", Color::Rgb(240, 210, 120)),
+                    Some(cian_core::git::LineChange::DeletedBefore) => ("▁", Color::Rgb(230, 120, 120)),
+                    None => (" ", Color::Reset),
+                };
+                spans.push(Span::styled(bar.to_string(), Style::default().fg(bar_c)));
+            }
+            let mut run = String::new();
+            let mut run_style = cell_style(0);
+            for (j, ch) in chars.iter().enumerate() {
+                let st = cell_style(j);
+                if st != run_style && !run.is_empty() {
+                    spans.push(Span::styled(std::mem::take(&mut run), run_style));
+                }
+                run_style = st;
+                run.push(*ch);
+            }
+            if !run.is_empty() {
+                spans.push(Span::styled(run, run_style));
+            }
+            // The cursor can sit just past the last char (empty line, or end
+            // of line): show it as a reversed space so it stays visible.
+            if cur == Some(len) {
+                spans.push(Span::styled(" ".to_string(), cursor_style));
+            }
+            Line::from(spans)
+        })
+        .collect();
+    let body_area = Rect::new(inner.x, inner.y, inner.width, body_h as u16);
+    f.render_widget(Paragraph::new(rows), body_area);
+    let pos = match max_scroll {
+        0 => "all".to_string(),
+        m => format!("{}%", *scroll * 100 / m),
+    };
+    // While editing, the footer shows the editor keys; while typing a
+    // search, the `/` prompt; otherwise the usual hints.
+    let ed = if *editable { tr(lang, " i edit ", " i 編集 ") } else { " " };
+    let footer = if *editing {
+        tr(lang,
+            " EDIT — type to insert   Ctrl+S save   Esc leave   Shift+Q discard ",
+            " 編集中 — 入力で挿入   Ctrl+S 保存   Esc 終了   Shift+Q 破棄 ").to_string()
+    } else {
+        match find_input {
+            Some(q) => format!("/{}_", q),
+            None => {
+                let mmd = source.iter().any(|l| {
+                    let t = l.trim_start();
+                    (t.starts_with("```") || t.starts_with("~~~"))
+                        && t.trim_start_matches(['`', '~']).trim().eq_ignore_ascii_case("mermaid")
+                });
+                let hints = if *preview {
+                    format!("{}{}{}{}",
+                        tr(lang, " / f search  n/N  v/V select  y copy ", " / f 検索  n/N  v/V 選択  y コピー "),
+                        ed,
+                        if mmd { tr(lang, " m diagram ", " m 図 ") } else { "" },
+                        tr(lang, " E ext-edit  p source  ", " E 外部編集  p ソース  "))
+                } else if *markdown {
+                    format!("{}{}{}",
+                        tr(lang, " / f search  n/N  v/V select  y copy ", " / f 検索  n/N  v/V 選択  y コピー "),
+                        ed,
+                        tr(lang, " e enc  p preview  ", " e 文字コード  p プレビュー  "))
+                } else {
+                    format!("{}{}{}",
+                        tr(lang, " / f search  n/N  v/V select  y copy ", " / f 検索  n/N  v/V 選択  y コピー "),
+                        ed,
+                        tr(lang, " E ext-edit  S-Enter reveal  e enc  ", " E 外部編集  S-Enter 場所へ  e 文字コード  "))
+                };
+                format!("{}{} ", hints, pos)
+            }
+        }
+    };
+    f.render_widget(
+        Paragraph::new(footer)
+            .style(Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD)),
+        Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1),
+    );
+}
+
+fn draw_dir_compare(
+    f: &mut Frame,
+    area: Rect,
+    popup: &mut Popup,
+    zones: &mut Vec<PopupZone>,
+    lang: Lang,
+) {
+    let Popup::DirCompare { left, right, entries, cursor, scroll, truncated, .. } = popup else { return };
+    use cian_core::dirdiff::Status;
+    let counts = {
+        let (mut a, mut d, mut m) = (0, 0, 0);
+        for e in entries.iter() {
+            match e.status {
+                Status::OnlyRight => a += 1,
+                Status::OnlyLeft => d += 1,
+                Status::Differ => m += 1,
+            }
+        }
+        let cut = if *truncated { "  (stopped at 5000)" } else { "" };
+        format!("~{} +{} -{}{}", m, a, d, cut)
+    };
+    let title = format!(" {}  ↔  {}   —   {} ", left, right, counts);
+    let (w, h) = (area.width.saturating_sub(2), area.height.saturating_sub(2));
+    let inner = popup_frame(f, area, w, h, title, "");
+
+    let body_h = (inner.height.saturating_sub(1) as usize).max(1);
+    // Keep the cursor on screen.
+    if *cursor < *scroll {
+        *scroll = *cursor;
+    } else if *cursor >= *scroll + body_h {
+        *scroll = *cursor + 1 - body_h;
+    }
+    let first = *scroll;
+    let add = Color::Rgb(130, 225, 150);
+    let del = Color::Rgb(255, 140, 145);
+    let chg = Color::Rgb(240, 210, 120);
+    // Two columns with a marker between them, mirroring the file diff: a
+    // path sits on the side(s) it exists, so which tree has (or differs on)
+    // an entry is read straight down either column.
+    let mid = 3usize;
+    let col = (inner.width as usize).saturating_sub(mid) / 2;
+    for (row, (i, e)) in entries.iter().enumerate().skip(first).take(body_h).enumerate() {
+        let sel = i == *cursor;
+        let y = inner.y + row as u16;
+        let line = Rect::new(inner.x, y, inner.width, 1);
+        push_row_zone(zones, inner, y, i);
+        if sel {
+            f.render_widget(Block::default().style(Style::default().bg(theme().selected_bg)), line);
+        }
+        let base = if sel { Style::default().bg(theme().selected_bg) } else { Style::default() };
+        let mut name = e.rel.display().to_string().replace('\\', "/");
+        if e.is_dir {
+            name.push('/');
+        }
+        let shown = truncate_middle(&name, col);
+        let blank = " ".repeat(col);
+        let (mark, mcol, left_txt, right_txt) = match e.status {
+            Status::OnlyLeft => ("◀", del, shown.clone(), blank.clone()),
+            Status::OnlyRight => ("▶", add, blank.clone(), shown.clone()),
+            Status::Differ => ("≠", chg, shown.clone(), shown.clone()),
+        };
+        f.render_widget(
+            Paragraph::new(Line::from(vec![
+                Span::styled(pad_to(&left_txt, col), base.fg(mcol)),
+                Span::styled(format!(" {} ", mark), base.fg(mcol).add_modifier(Modifier::BOLD)),
+                Span::styled(pad_to(&right_txt, col), base.fg(mcol)),
+            ])),
+            line,
+        );
+    }
+    f.render_widget(
+        Paragraph::new(tr(lang,
+            " ◀ left  ▶ right  ≠ differ   Enter=go  </> copy one  [/] sync all  w save  Esc ",
+            " ◀ 左  ▶ 右  ≠ 相違   Enter=移動  </> 1件コピー  [/] 一括同期  w 保存  Esc ",
+        ))
+        .style(Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD)),
+        Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1),
+    );
+}
+
+fn draw_diff(
+    f: &mut Frame,
+    area: Rect,
+    popup: &mut Popup,
+    lang: Lang,
+) {
+    let Popup::Diff { left, right, result, folded, fold, scroll, encoding, find, find_input, .. } = popup else { return };
+    use cian_core::diff::Row;
+
+    let title = format!(" {} ↔ {}  —  {} ", left, right, cian_core::diff::summary(result));
+    let (w, h) = (area.width.saturating_sub(2), area.height.saturating_sub(2));
+    let inner = popup_frame(f, area, w, h, title, "");
+
+    let body_h = inner.height.saturating_sub(1) as usize;
+    let rows: &[Row] = if *fold { folded } else { &result.rows };
+    let max_scroll = rows.len().saturating_sub(body_h);
+    *scroll = (*scroll).min(max_scroll);
+
+    // Two equal columns with a marker between them, so the eye can run
+    // straight down either file.
+    let gutter = 5usize;
+    let col = (inner.width as usize).saturating_sub(3 + gutter * 2) / 2;
+
+    let dim = Style::default().fg(Color::Rgb(150, 150, 168));
+    let num = Style::default().fg(Color::Rgb(105, 105, 130));
+    let del = Style::default().fg(Color::Rgb(255, 140, 145));
+    let add = Style::default().fg(Color::Rgb(130, 225, 150));
+    let chg = Style::default().fg(Color::Rgb(240, 210, 120));
+    // The exact edited span within a changed line: a solid bar, the way
+    // WinMerge marks the characters that actually differ.
+    let chg_hot = Style::default()
+        .fg(Color::Black)
+        .bg(Color::Rgb(240, 210, 120))
+        .add_modifier(Modifier::BOLD);
+
+    let cell = |line: Option<&cian_core::diff::Line>, style: Style| -> Vec<Span<'static>> {
+        match line {
+            Some(l) => vec![
+                Span::styled(format!("{:>w$} ", l.no, w = gutter - 1), num),
+                Span::styled(pad_to(&truncate(&l.text, col), col), style),
+            ],
+            // An absent side is left blank rather than filled, so the gap
+            // itself shows which file the line is missing from.
+            None => vec![Span::raw(" ".repeat(gutter + col))],
+        }
+    };
+
+    // A changed line, with its common prefix/suffix left calm and only the
+    // edited middle painted as a bar. `prefix`/`suffix` are the shared char
+    // counts from `common_affixes`; each side clamps `suffix` to its own
+    // length so an insertion (empty middle on one side) stays in bounds.
+    let emph_cell = |line: &cian_core::diff::Line, prefix: usize, suffix: usize| -> Vec<Span<'static>> {
+        let chars: Vec<char> = line.text.chars().collect();
+        let n = chars.len();
+        let suffix = suffix.min(n.saturating_sub(prefix));
+        let mid_end = n - suffix;
+        // Match `cell`'s truncation: keep at most `col` chars, ellipsis when cut.
+        let fits = n <= col;
+        let budget = if fits { col } else { col.saturating_sub(1) };
+        let mut spans = vec![Span::styled(format!("{:>w$} ", line.no, w = gutter - 1), num)];
+        let mut buf = String::new();
+        let mut buf_hot = false;
+        let mut shown = String::new();
+        for (i, &c) in chars.iter().take(budget).enumerate() {
+            let is_hot = i >= prefix && i < mid_end;
+            if !buf.is_empty() && is_hot != buf_hot {
+                spans.push(Span::styled(std::mem::take(&mut buf), if buf_hot { chg_hot } else { chg }));
+            }
+            buf_hot = is_hot;
+            buf.push(c);
+            shown.push(c);
+        }
+        if !buf.is_empty() {
+            spans.push(Span::styled(buf, if buf_hot { chg_hot } else { chg }));
+        }
+        if !fits {
+            spans.push(Span::styled("…".to_string(), chg));
+            shown.push('…');
+        }
+        let pad = col.saturating_sub(crate::util::width(&shown));
+        if pad > 0 {
+            spans.push(Span::raw(" ".repeat(pad)));
+        }
+        spans
+    };
+
+    // Rows whose text matches the active search get a highlight bar.
+    let needle = find.as_ref().map(|s| s.to_lowercase());
+    let row_matches = |r: &Row| -> bool {
+        let Some(q) = &needle else { return false };
+        let has = |o: Option<&cian_core::diff::Line>| o.map(|l| l.text.to_lowercase().contains(q)).unwrap_or(false);
+        match r {
+            Row::Same { left, right } | Row::Changed { left, right } => has(Some(left)) || has(Some(right)),
+            Row::Removed { left } => has(Some(left)),
+            Row::Added { right } => has(Some(right)),
+            Row::Skipped { .. } => false,
+        }
+    };
+    let search_bg = Style::default().bg(Color::Rgb(80, 70, 20));
+    let body: Vec<Line> = rows
+        .iter()
+        .skip(*scroll)
+        .take(body_h)
+        .map(|r| {
+            let line = match r {
+                Row::Skipped { lines } => Line::from(Span::styled(
+                    format!("{:^w$}", format!("⋯ {} identical lines", lines), w = inner.width as usize),
+                    Style::default().fg(Color::Rgb(95, 95, 120)),
+                )),
+                Row::Same { left: l, right: rr } => {
+                    let mut s = cell(Some(l), dim);
+                    s.push(Span::styled(" │ ", num));
+                    s.extend(cell(Some(rr), dim));
+                    Line::from(s)
+                }
+                Row::Changed { left: l, right: rr } => {
+                    let (p, sfx) = cian_core::diff::common_affixes(&l.text, &rr.text);
+                    let mut s = emph_cell(l, p, sfx);
+                    s.push(Span::styled(" ~ ", chg.add_modifier(Modifier::BOLD)));
+                    s.extend(emph_cell(rr, p, sfx));
+                    Line::from(s)
+                }
+                Row::Removed { left: l } => {
+                    let mut s = cell(Some(l), del);
+                    s.push(Span::styled(" - ", del.add_modifier(Modifier::BOLD)));
+                    s.extend(cell(None, del));
+                    Line::from(s)
+                }
+                Row::Added { right: rr } => {
+                    let mut s = cell(None, add);
+                    s.push(Span::styled(" + ", add.add_modifier(Modifier::BOLD)));
+                    s.extend(cell(Some(rr), add));
+                    Line::from(s)
+                }
+            };
+            if row_matches(r) { line.style(search_bg) } else { line }
+        })
+        .collect();
+
+    // A binary comparison has no rows; say why rather than showing a void.
+    let body = if result.binary {
+        vec![Line::from(Span::styled(
+            if result.identical {
+                "  These are binary files, and they are byte-for-byte the same."
+            } else {
+                "  These are binary files, and their contents differ."
+            },
+            dim,
+        ))]
+    } else if result.identical {
+        vec![Line::from(Span::styled("  The two files are identical.", add))]
+    } else {
+        body
+    };
+
+    f.render_widget(
+        Paragraph::new(body),
+        Rect::new(inner.x, inner.y, inner.width, body_h as u16),
+    );
+    let pos = match max_scroll {
+        0 => "all".to_string(),
+        m => format!("{}%", *scroll * 100 / m),
+    };
+    let fold_word = if *fold { tr(lang, "show all", "全表示") } else { tr(lang, "fold", "畳む") };
+    // A live `/` search prompt takes over the footer while typing.
+    let footer = if let Some(q) = find_input {
+        format!(" /{}_ ", q)
+    } else {
+        format!(
+            "{}{}  {}  [{}] {} ",
+            tr(lang, " n/N change  / find  f ", " n/N 変更  / 検索  f "),
+            fold_word,
+            tr(lang, "c copy  w save(.html/.md)  e enc  x explain  g/G  Esc",
+                  "c コピー  w 保存(.html/.md)  e 文字コード  x 説明  g/G  Esc"),
+            encoding.label(),
+            pos
+        )
+    };
+    f.render_widget(
+        Paragraph::new(footer)
+        .style(Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD)),
+        Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1),
+    );
+}
+
+fn draw_archive(
+    f: &mut Frame,
+    area: Rect,
+    popup: &mut Popup,
+    zones: &mut Vec<PopupZone>,
+    lang: Lang,
+) {
+    let Popup::Archive { path, members, cursor, scroll } = popup else { return };
+    let w = 96u16.min(area.width.saturating_sub(2));
+    let h = area.height.saturating_sub(4).max(8);
+    let name = path.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+    let total: u64 = members.iter().map(|m| m.size).sum();
+    let title =
+        format!(" {}  —  {} entries, {} unpacked ", name, members.len(), cian_core::human_size(total));
+    let inner = popup_frame(f, area, w, h, title, "");
+
+    let body_h = inner.height.saturating_sub(1) as usize;
+    if *cursor < *scroll {
+        *scroll = *cursor;
+    } else if body_h > 0 && *cursor >= *scroll + body_h {
+        *scroll = *cursor + 1 - body_h;
+    }
+    for (row, (i, m)) in members.iter().enumerate().skip(*scroll).take(body_h).enumerate() {
+        let sel = i == *cursor;
+        let line = Rect::new(inner.x, inner.y + row as u16, inner.width, 1);
+        push_row_zone(zones, inner, inner.y + row as u16, i);
+        if sel {
+            f.render_widget(
+                Block::default().style(Style::default().bg(theme().selected_bg)),
+                line,
+            );
+        }
+        let base = if sel { Style::default().bg(theme().selected_bg) } else { Style::default() };
+        let size = if m.is_dir { "—".to_string() } else { cian_core::human_size(m.size) };
+        let name_w = inner.width as usize - 14;
+        f.render_widget(
+            Paragraph::new(Line::from(vec![
+                Span::styled(if sel { " ▸ " } else { "   " }, base),
+                Span::styled(
+                    format!("{:<w$}", truncate_middle(&m.name, name_w), w = name_w),
+                    if m.is_dir {
+                        base.fg(FileKind::Directory.color()).add_modifier(Modifier::BOLD)
+                    } else {
+                        base.fg(Color::Rgb(225, 225, 240))
+                    },
+                ),
+                Span::styled(format!("{:>6}", size), base.fg(Color::Rgb(140, 140, 165))),
+            ])),
+            line,
+        );
+    }
+    f.render_widget(
+        Paragraph::new(tr(lang, " Enter=extract this   a=extract all   Esc=close ", " Enter=これを展開   a=全展開   Esc=閉じる ")).style(
+            Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD),
+        ),
+        Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1),
+    );
+}
+
+fn draw_palette(
+    f: &mut Frame,
+    area: Rect,
+    popup: &mut Popup,
+    lang: Lang,
+) {
+    let Popup::Palette { kind, query, items, shown, cursor, scroll } = popup else { return };
+    let w = 84u16.min(area.width.saturating_sub(2));
+    let h = (area.height.saturating_sub(4)).clamp(6, 22);
+    let title = match kind {
+        PaletteKind::Commands => tr(lang, " command palette ", " コマンドパレット "),
+        PaletteKind::Jump => tr(lang, " jump to ", " ジャンプ "),
+        PaletteKind::File => tr(lang, " find file ", " ファイル検索 "),
+    };
+    let inner = popup_frame(f, area, w, h, title, "");
+
+    // Row 0 is the live query; the list fills the rest above the footer.
+    f.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled("› ", Style::default().fg(theme().accent).add_modifier(Modifier::BOLD)),
+            Span::styled(format!("{}_", query), Style::default().fg(Color::Rgb(230, 230, 245))),
+        ])),
+        Rect::new(inner.x, inner.y, inner.width, 1),
+    );
+    let list_top = inner.y + 1;
+    let body_h = inner.height.saturating_sub(2) as usize;
+    if *cursor < *scroll {
+        *scroll = *cursor;
+    } else if body_h > 0 && *cursor >= *scroll + body_h {
+        *scroll = *cursor + 1 - body_h;
+    }
+    for (row, si) in (*scroll..shown.len().min(*scroll + body_h)).enumerate() {
+        let idx = shown[si];
+        let it = &items[idx];
+        let sel = si == *cursor;
+        let y = list_top + row as u16;
+        let line = Rect::new(inner.x, y, inner.width, 1);
+        if sel {
+            f.render_widget(Block::default().style(Style::default().bg(theme().selected_bg)), line);
+        }
+        let base = if sel { Style::default().bg(theme().selected_bg) } else { Style::default() };
+        let label_w = (inner.width as usize * 2 / 5).max(10);
+        let detail_w = (inner.width as usize).saturating_sub(label_w + 4);
+        f.render_widget(
+            Paragraph::new(Line::from(vec![
+                Span::styled(if sel { " ▸ " } else { "   " }, base),
+                Span::styled(
+                    format!("{:<w$}", truncate(&it.label, label_w), w = label_w),
+                    base.fg(if sel { Color::Rgb(235, 235, 250) } else { Color::Rgb(210, 210, 225) })
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(truncate_middle(&it.detail, detail_w), base.fg(Color::Rgb(140, 140, 165))),
+            ])),
+            line,
+        );
+    }
+    if shown.is_empty() {
+        f.render_widget(
+            Paragraph::new(tr(lang, "  (no matches)", "  （一致なし）")).style(Style::default().fg(Color::Rgb(150, 150, 170))),
+            Rect::new(inner.x, list_top, inner.width, 1),
+        );
+    }
+    f.render_widget(
+        Paragraph::new(tr(lang, " type to filter   ↑/↓ move   Enter run   Esc close ", " 入力で絞込   ↑/↓ 移動   Enter 実行   Esc 閉じる "))
+            .style(Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD)),
+        Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1),
+    );
+}
+
+fn draw_disk_usage(
+    f: &mut Frame,
+    area: Rect,
+    popup: &mut Popup,
+    zones: &mut Vec<PopupZone>,
+    lang: Lang,
+) {
+    let Popup::DiskUsage { dir, entries, total, cursor, scroll } = popup else { return };
+    let w = 96u16.min(area.width.saturating_sub(2));
+    let h = area.height.saturating_sub(4).max(8);
+    let title = format!(
+        " {}  —  {}  ({} items) ",
+        truncate_middle(&dir.display().to_string(), 60),
+        cian_core::human_size(*total),
+        entries.len()
+    );
+    let inner = popup_frame(f, area, w, h, title, "");
+
+    let body_h = inner.height.saturating_sub(1) as usize;
+    if *cursor < *scroll {
+        *scroll = *cursor;
+    } else if body_h > 0 && *cursor >= *scroll + body_h {
+        *scroll = *cursor + 1 - body_h;
+    }
+    // Bars scale to the biggest child, so the space hog fills the bar.
+    let max = entries.first().map(|e| e.size).unwrap_or(0).max(1);
+    let bar_w = 18usize;
+    for (row, (i, e)) in entries.iter().enumerate().skip(*scroll).take(body_h).enumerate() {
+        let sel = i == *cursor;
+        let y = inner.y + row as u16;
+        let line = Rect::new(inner.x, y, inner.width, 1);
+        push_row_zone(zones, inner, y, i);
+        if sel {
+            f.render_widget(Block::default().style(Style::default().bg(theme().selected_bg)), line);
+        }
+        let base = if sel { Style::default().bg(theme().selected_bg) } else { Style::default() };
+        let filled = ((e.size as u128 * bar_w as u128) / max as u128) as usize;
+        let bar: String = "█".repeat(filled) + &"░".repeat(bar_w.saturating_sub(filled));
+        let pct = if *total > 0 { e.size as f64 * 100.0 / *total as f64 } else { 0.0 };
+        let mut name = e.name.clone();
+        if e.is_dir {
+            name.push('/');
+        }
+        let name_w = (inner.width as usize).saturating_sub(bar_w + 24);
+        let name_style = if e.is_dir {
+            base.fg(FileKind::Directory.color()).add_modifier(Modifier::BOLD)
+        } else {
+            base.fg(Color::Rgb(225, 225, 240))
+        };
+        f.render_widget(
+            Paragraph::new(Line::from(vec![
+                Span::styled(if sel { " ▸ " } else { "   " }, base),
+                Span::styled(format!("{:<w$}", truncate_middle(&name, name_w), w = name_w), name_style),
+                Span::styled(bar, base.fg(theme().accent)),
+                Span::styled(format!(" {:>8}", cian_core::human_size(e.size)), base.fg(Color::Rgb(210, 210, 225))),
+                Span::styled(format!(" {:>4.0}%", pct), base.fg(Color::Rgb(140, 140, 165))),
+            ])),
+            line,
+        );
+    }
+    if entries.is_empty() {
+        f.render_widget(
+            Paragraph::new(tr(lang, "  (empty)", "  （空）")).style(Style::default().fg(Color::Rgb(150, 150, 170))),
+            Rect::new(inner.x, inner.y, inner.width, 1),
+        );
+    }
+    f.render_widget(
+        Paragraph::new(tr(lang,
+            " Enter=into folder   -=up   j/k move   Esc=close ",
+            " Enter=フォルダへ   -=上へ   j/k 移動   Esc=閉じる ",
+        ))
+        .style(Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD)),
+        Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1),
+    );
+}
+
+fn draw_git_log(
+    f: &mut Frame,
+    area: Rect,
+    popup: &mut Popup,
+    zones: &mut Vec<PopupZone>,
+    lang: Lang,
+) {
+    let Popup::GitLog { title, commits, cursor, scroll, .. } = popup else { return };
+    let rect = centered_rect(area.width.saturating_sub(4), area.height.saturating_sub(4), area);
+    f.render_widget(Clear, rect);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(border_type())
+        .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
+        .title(format!(" {} ", title))
+        .title_bottom(tr(lang, " Enter=show diff  j/k  g/G  Esc ", " Enter=差分表示  j/k  g/G  Esc "));
+    let inner = rect.inner(Margin { vertical: 1, horizontal: 1 });
+    f.render_widget(block, rect);
+    let body_h = inner.height as usize;
+    if *cursor < *scroll {
+        *scroll = *cursor;
+    } else if *cursor >= *scroll + body_h {
+        *scroll = *cursor + 1 - body_h;
+    }
+    let hash_w = 8usize;
+    let date_w = 10usize;
+    let author_w = 14usize;
+    let subj_w = (inner.width as usize).saturating_sub(hash_w + date_w + author_w + 3);
+    let rows: Vec<Line> = commits
+        .iter()
+        .enumerate()
+        .skip(*scroll)
+        .take(body_h)
+        .map(|(i, c)| {
+            let sel = i == *cursor;
+            let author: String = c.author.chars().take(author_w).collect();
+            let subject: String = c.subject.chars().take(subj_w).collect();
+            let line = format!(
+                "{:<hw$} {:<dw$} {:<aw$} {}",
+                c.hash, c.date, author, subject,
+                hw = hash_w, dw = date_w, aw = author_w,
+            );
+            let style = if sel {
+                Style::default().fg(Color::Black).bg(theme().accent)
+            } else {
+                Style::default().fg(Color::Rgb(200, 200, 215))
+            };
+            Line::from(Span::styled(line, style))
+        })
+        .collect();
+    for i in 0..commits.len().min(body_h) {
+        push_row_zone(zones, inner, inner.y + i as u16, *scroll + i);
+    }
+    f.render_widget(Paragraph::new(rows), inner);
+}
+
+fn draw_macros(
+    f: &mut Frame,
+    area: Rect,
+    popup: &mut Popup,
+    zones: &mut Vec<PopupZone>,
+    lang: Lang,
+) {
+    let Popup::Macros { cursor, names } = popup else { return };
+    let widest = names.iter().map(|n| n.chars().count()).max().unwrap_or(10);
+    let w = (widest as u16 + 8).clamp(28, area.width);
+    let h = (names.len() as u16 + 3).min(area.height);
+    let inner = popup_frame(f, area, w, h, tr(lang, " run a macro ", " マクロを実行 "), "");
+
+    let rows: Vec<Line> = names
+        .iter()
+        .enumerate()
+        .map(|(i, name)| {
+            let sel = i == *cursor;
+            let style = if sel {
+                Style::default().fg(theme().accent).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::Rgb(200, 200, 215))
+            };
+            Line::from(Span::styled(
+                format!("{}{}", if sel { "▸ " } else { "  " }, name),
+                style,
+            ))
+        })
+        .collect();
+    let body_area = Rect::new(inner.x, inner.y, inner.width, inner.height.saturating_sub(1));
+    f.render_widget(Paragraph::new(rows), body_area);
+    for i in 0..names.len() {
+        push_row_zone(zones, inner, inner.y + i as u16, i);
+    }
+    let footer_area = Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1);
+    f.render_widget(
+        Paragraph::new(tr(lang, " Enter=run  j/k  Esc ", " Enter=実行  j/k  Esc ")).style(
+            Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD),
+        ),
+        footer_area,
+    );
+}
+
+fn draw_sort_picker(
+    f: &mut Frame,
+    area: Rect,
+    popup: &mut Popup,
+    zones: &mut Vec<PopupZone>,
+    lang: Lang,
+) {
+    let Popup::SortPicker { cursor } = popup else { return };
+    let w = 34u16.min(area.width);
+    let h = SortKey::ALL.len() as u16 + 3;
+    let inner = popup_frame(f, area, w, h.min(area.height), tr(lang, " sort by ", " 並び替え "), "");
+
+    let rows: Vec<Line> = SortKey::ALL
+        .iter()
+        .enumerate()
+        .map(|(i, k)| {
+            let sel = i == *cursor;
+            let style = if sel {
+                Style::default().fg(theme().accent).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::Rgb(200, 200, 215))
+            };
+            // The shortcut letter doubles as the mnemonic.
+            let hint = match k {
+                SortKey::Name => "n",
+                SortKey::Size => "s",
+                SortKey::Modified => "d",
+                SortKey::Extension => "e",
+            };
+            Line::from(Span::styled(
+                format!("{}{}  ({})", if sel { "▸ " } else { "  " }, k.label(), hint),
+                style,
+            ))
+        })
+        .collect();
+    let body_area = Rect::new(inner.x, inner.y, inner.width, inner.height.saturating_sub(1));
+    f.render_widget(Paragraph::new(rows), body_area);
+    for i in 0..SortKey::ALL.len() {
+        push_row_zone(zones, inner, inner.y + i as u16, i);
+    }
+    let footer_area =
+        Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1);
+    f.render_widget(
+        Paragraph::new(tr(lang, " Enter=apply (again = reverse)  Esc ", " Enter=適用（再度で逆順）  Esc ")).style(
+            Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD),
+        ),
+        footer_area,
+    );
+}
+
+fn draw_encoding_picker(
+    f: &mut Frame,
+    area: Rect,
+    popup: &mut Popup,
+    zones: &mut Vec<PopupZone>,
+    lang: Lang,
+) {
+    let Popup::EncodingPicker { cursor, .. } = popup else { return };
+    use cian_core::viewer::TextEncoding;
+    let w = 34u16.min(area.width);
+    let h = TextEncoding::ALL.len() as u16 + 3;
+    let inner = popup_frame(f, area, w, h.min(area.height), tr(lang, " text encoding ", " 文字コード "), "");
+    let rows: Vec<Line> = TextEncoding::ALL
+        .iter()
+        .enumerate()
+        .map(|(i, e)| {
+            let sel = i == *cursor;
+            let style = if sel {
+                Style::default().fg(theme().accent).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::Rgb(200, 200, 215))
+            };
+            Line::from(Span::styled(
+                format!("{}{}", if sel { "▸ " } else { "  " }, e.label()),
+                style,
+            ))
+        })
+        .collect();
+    f.render_widget(
+        Paragraph::new(rows),
+        Rect::new(inner.x, inner.y, inner.width, inner.height.saturating_sub(1)),
+    );
+    for i in 0..TextEncoding::ALL.len() {
+        push_row_zone(zones, inner, inner.y + i as u16, i);
+    }
+    f.render_widget(
+        Paragraph::new(tr(lang, " Enter=apply  Esc=cancel ", " Enter=適用  Esc=取消 ")).style(
+            Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD),
+        ),
+        Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1),
+    );
+}
+
+fn draw_color_picker(
+    f: &mut Frame,
+    area: Rect,
+    popup: &mut Popup,
+    zones: &mut Vec<PopupZone>,
+    lang: Lang,
+) {
+    let Popup::ColorPicker { cursor, .. } = popup else { return };
+    let w = 26u16.min(area.width);
+    let h = PANE_BG_PRESETS.len() as u16 + 3;
+    let inner = popup_frame(f, area, w, h.min(area.height), tr(lang, " background ", " 背景色 "), "");
+
+    let rows: Vec<Line> = PANE_BG_PRESETS
+        .iter()
+        .enumerate()
+        .map(|(i, (name, color))| {
+            let sel = i == *cursor;
+            // A swatch of the actual color, so the name is not the only cue.
+            let swatch = Span::styled(
+                "  ",
+                Style::default().bg(color.unwrap_or(Color::Rgb(16, 16, 20))),
+            );
+            let label = Span::styled(
+                format!(" {}{}", if sel { "▸ " } else { "  " }, name),
+                if sel {
+                    Style::default().add_modifier(Modifier::BOLD).fg(theme().accent)
+                } else {
+                    Style::default().fg(Color::Rgb(200, 200, 215))
+                },
+            );
+            Line::from(vec![swatch, label])
+        })
+        .collect();
+    let body_area = Rect::new(inner.x, inner.y, inner.width, inner.height.saturating_sub(1));
+    f.render_widget(Paragraph::new(rows), body_area);
+    for i in 0..PANE_BG_PRESETS.len() {
+        push_row_zone(zones, inner, inner.y + i as u16, i);
+    }
+    let footer_area =
+        Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1);
+    f.render_widget(
+        Paragraph::new(tr(lang, " Enter=apply  Esc=cancel ", " Enter=適用  Esc=取消 ")).style(
+            Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD),
+        ),
+        footer_area,
+    );
 }
 
 #[cfg(test)]
