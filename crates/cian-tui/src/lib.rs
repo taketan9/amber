@@ -818,8 +818,10 @@ enum MenuItem {
     Extract,
     /// Count files/steps under the selection (`:count`).
     Count,
-    /// A submenu grouping the AI actions (drills down when chosen).
+    /// A submenu grouping the local (non-crmaine) AI actions.
     AiMenu,
+    /// A submenu grouping the crmaine actions (RAG / Agent / Coding / tools).
+    CrmaineMenu,
     /// A submenu grouping the file-transfer actions.
     SendMenu,
     /// A submenu grouping the shell window actions (splits, tabs, zoom).
@@ -868,6 +870,7 @@ impl MenuItem {
         matches!(
             self,
             MenuItem::AiMenu
+                | MenuItem::CrmaineMenu
                 | MenuItem::SendMenu
                 | MenuItem::WindowMenu
                 | MenuItem::FileMenu
@@ -893,19 +896,19 @@ impl MenuItem {
             // action (send to the PTY) and keeps its own :paste hint below.
             MenuItem::PasteHere => tr(lang, "Paste  (Ctrl+V)", "貼り付け  (Ctrl+V)"),
             MenuItem::Paste => tr(lang, "Paste  (:paste)", "貼り付け  (:paste)"),
-            MenuItem::CommandInput => tr(lang, "Command…  (Ctrl+Enter)", "コマンド入力…  (Ctrl+Enter)"),
+            MenuItem::CommandInput => tr(lang, "Command  (Ctrl+Enter)", "コマンド入力  (Ctrl+Enter)"),
             MenuItem::CopyToOther => tr(lang, "Copy to other pane  (c)", "反対ペインへコピー  (c)"),
             MenuItem::MoveToOther => tr(lang, "Move to other pane  (m)", "反対ペインへ移動  (m)"),
-            MenuItem::CopyToPath => tr(lang, "Copy to…  (:copyto)", "指定先へコピー  (:copyto)"),
+            MenuItem::CopyToPath => tr(lang, "Copy to  (:copyto)", "指定先へコピー  (:copyto)"),
             MenuItem::Delete => tr(lang, "Delete  (d)", "削除  (d)"),
             MenuItem::Rename => tr(lang, "Rename  (r)", "リネーム  (r)"),
             MenuItem::EditTab => tr(lang, "Edit in new tab  (:vim)", "新規タブで編集  (:vim)"),
             MenuItem::Background => tr(lang, "Background color", "背景色"),
-            MenuItem::ThemePick => tr(lang, "Theme (whole app)…  (:theme)", "テーマ（全体）…  (:theme)"),
-            MenuItem::ThemePickPane => tr(lang, "Theme (this pane)…", "テーマ（このペイン）…"),
+            MenuItem::ThemePick => tr(lang, "Theme (whole app)  (:theme)", "テーマ（全体）  (:theme)"),
+            MenuItem::ThemePickPane => tr(lang, "Theme (this pane)", "テーマ（このペイン）"),
             MenuItem::OsMenu => tr(lang, "Open / reveal  ▸", "開く / 場所  ▸"),
             MenuItem::OpenDefault => tr(lang, "Open", "開く"),
-            MenuItem::OpenWithOs => tr(lang, "Open with…", "プログラムから開く…"),
+            MenuItem::OpenWithOs => tr(lang, "Open with", "プログラムから開く"),
             MenuItem::RevealInOs => {
                 if cfg!(target_os = "windows") {
                     tr(lang, "Show in Explorer", "エクスプローラーで表示")
@@ -946,17 +949,17 @@ impl MenuItem {
                 Lang::Ja => "Switch to English",
             },
             MenuItem::AiChat => tr(lang, "Chat — simple  (:ai)", "チャット — simple  (:ai)"),
-            MenuItem::CrmaineRag => tr(lang, "RAG…  (:rag)", "RAG…  (:rag)"),
-            MenuItem::CrmaineAgent => tr(lang, "Agent…  (:agent)", "エージェント…  (:agent)"),
+            MenuItem::CrmaineRag => tr(lang, "RAG  (:rag)", "RAG  (:rag)"),
+            MenuItem::CrmaineAgent => tr(lang, "Agent  (:agent)", "エージェント  (:agent)"),
             MenuItem::CrmaineCoding => tr(lang, "Coding — this file  (:coding)", "コーディング — このファイル  (:coding)"),
             MenuItem::CrmaineKnowledge => tr(lang, "Corpus tools ▸", "コーパスツール ▸"),
-            MenuItem::CrmaineImpact => tr(lang, "Impact analysis…  (:impact)", "影響分析…  (:impact)"),
-            MenuItem::CrmaineContradiction => tr(lang, "Find contradictions…  (:contradiction)", "矛盾検出…  (:contradiction)"),
+            MenuItem::CrmaineImpact => tr(lang, "Impact analysis  (:impact)", "影響分析  (:impact)"),
+            MenuItem::CrmaineContradiction => tr(lang, "Find contradictions  (:contradiction)", "矛盾検出  (:contradiction)"),
             MenuItem::CrmaineGlossary => tr(lang, "Generate glossary  (:glossary)", "用語集を生成  (:glossary)"),
             MenuItem::CrmaineIndex => tr(lang, "Index this folder  (:index)", "このフォルダをインデックス  (:index)"),
             MenuItem::CrmaineShared => tr(lang, "Use crmaine's index  (:ragshared)", "crmaine のインデックスを使う  (:ragshared)"),
             MenuItem::CrmaineInfo => tr(lang, "Diagnostics  (:raginfo)", "診断  (:raginfo)"),
-            MenuItem::CrmaineSearchFiles => tr(lang, "Search corpus…  (:searchfiles)", "コーパス検索…  (:searchfiles)"),
+            MenuItem::CrmaineSearchFiles => tr(lang, "Search corpus  (:searchfiles)", "コーパス検索  (:searchfiles)"),
             MenuItem::RemotePane => tr(lang, "Open server in pane  (:sftp)", "サーバをペインで開く  (:sftp)"),
             MenuItem::DiskUsage => tr(lang, "Disk usage  (:du)", "容量分析  (:du)"),
             MenuItem::AiShellCmd => tr(lang, "Command from description  (:aicmd)", "説明からコマンド生成  (:aicmd)"),
@@ -981,15 +984,16 @@ impl MenuItem {
             MenuItem::SvnDiff => tr(lang, "Diff vs BASE  (svn diff)", "BASEとの差分  (svn diff)"),
             MenuItem::SvnLog => tr(lang, "History / log  (svn log)", "履歴 / ログ  (svn log)"),
             MenuItem::SvnUpdate => tr(lang, "Update  (svn update)", "更新  (svn update)"),
-            MenuItem::SvnCommit => tr(lang, "Commit…  (svn commit)", "コミット…  (svn commit)"),
-            MenuItem::BulkRename => tr(lang, "Bulk rename…  (:brename)", "一括リネーム…  (:brename)"),
+            MenuItem::SvnCommit => tr(lang, "Commit  (svn commit)", "コミット  (svn commit)"),
+            MenuItem::BulkRename => tr(lang, "Bulk rename  (:brename)", "一括リネーム  (:brename)"),
             MenuItem::Snippets => tr(lang, "Snippets  (:snip)", "スニペット  (:snip)"),
             MenuItem::Macros => tr(lang, "Macros  (@)", "マクロ  (@)"),
             MenuItem::Shortcuts => tr(lang, "Shortcuts  (s)", "ショートカット  (s)"),
             // Ⓒ stands in for crmaine's icon — a terminal menu cannot embed the
             // PNG/SVG, which is itself just the "CRMAINE" wordmark as text, so a
             // circled C echoes it most closely.
-            MenuItem::AiMenu => tr(lang, "Ⓒ crmaine ▸", "Ⓒ crmaine ▸"),
+            MenuItem::AiMenu => tr(lang, "Simple AI ▸", "Simple AI ▸"),
+            MenuItem::CrmaineMenu => tr(lang, "Ⓒ crmaine ▸", "Ⓒ crmaine ▸"),
             MenuItem::SendMenu => tr(lang, "Transfer ▸", "転送 ▸"),
             MenuItem::WindowMenu => tr(lang, "Window ▸", "ウィンドウ ▸"),
             MenuItem::FileMenu => tr(lang, "File ▸", "ファイル操作 ▸"),

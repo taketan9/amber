@@ -132,8 +132,21 @@ impl App {
                 }
             }
             "aierror" | "explain" | "crmaineerror" => self.explain_shell_error(),
-            "rag" | "crmainerag" | "ask_rag" => self.start_rag(rest),
-            "agent" | "ajent" | "crmaineagent" => self.start_agent(rest),
+            // With a question, fire it; bare, just open the window to type in.
+            "rag" | "crmainerag" | "ask_rag" => {
+                if rest.is_empty() {
+                    self.open_crmaine_chat(ChatMode::Rag);
+                } else {
+                    self.start_rag(rest);
+                }
+            }
+            "agent" | "ajent" | "crmaineagent" => {
+                if rest.is_empty() {
+                    self.open_crmaine_chat(ChatMode::Agent);
+                } else {
+                    self.start_agent(rest);
+                }
+            }
             "raginfo" | "crmaineinfo" | "crmainedoctor" | "ragstatus" => self.crmaine_doctor(),
             "index" | "ragindex" | "reindex" => self.start_index(rest),
             "ragshared" | "ragdefault" | "unindex" => self.crmaine_use_shared_index(),

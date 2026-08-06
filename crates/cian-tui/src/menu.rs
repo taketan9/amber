@@ -10,11 +10,14 @@ impl App {
         let ai = self.ai.is_some() && self.ai_ready();
         let crmaine = self.config.crmaine.is_some();
         let mut items = Vec::new();
-        // Launchers lead both menus, in the agreed order: crmaine ▸, snippets,
-        // macros. Each appears only when it has something to offer. The crmaine
-        // group shows when EITHER the local model or the crmaine bridge is on.
-        if ai || crmaine {
+        // Launchers lead both menus: the local "Simple AI ▸" (when the local
+        // model is on), then "Ⓒ crmaine ▸" (when the bridge is on), then
+        // snippets, macros. Each appears only when it has something to offer.
+        if ai {
             items.push(MenuItem::AiMenu);
+        }
+        if crmaine {
+            items.push(MenuItem::CrmaineMenu);
         }
         if !self.config.snippets.is_empty() {
             items.push(MenuItem::Snippets);
@@ -102,36 +105,30 @@ impl App {
     pub(crate) fn submenu_children(&self, item: MenuItem) -> Option<Vec<MenuItem>> {
         match item {
             MenuItem::AiMenu => {
-                let ai = self.ai.is_some() && self.ai_ready.unwrap_or(false);
-                let crmaine = self.config.crmaine.is_some();
-                let mut v = Vec::new();
-                // The crmaine chat modes lead (VS Code wording): simple (local
-                // model), then RAG / Agent / Coding over the bridge.
-                if ai {
-                    v.push(MenuItem::AiChat); // "simple"
+                // The local (non-crmaine) assistant: a plain chat plus the
+                // pane-specific helpers.
+                let mut v = vec![MenuItem::AiChat];
+                if self.focused == FocusedPane::Shell {
+                    v.push(MenuItem::AiShellCmd);
+                    v.push(MenuItem::AiExplainError);
+                } else {
+                    v.push(MenuItem::AiTriageLog);
+                    v.push(MenuItem::AiJunk);
+                    v.push(MenuItem::AiStructure);
+                    v.push(MenuItem::AiSearch);
+                    v.push(MenuItem::AiRename);
+                    v.push(MenuItem::AiCommit);
                 }
-                if crmaine {
-                    v.push(MenuItem::CrmaineRag);
-                    v.push(MenuItem::CrmaineAgent);
-                    if self.focused != FocusedPane::Shell {
-                        v.push(MenuItem::CrmaineCoding); // needs a file to read
-                    }
-                    v.push(MenuItem::CrmaineKnowledge); // index / analysis / diag ▸
+                v.push(MenuItem::Back);
+                Some(v)
+            }
+            MenuItem::CrmaineMenu => {
+                // The crmaine bridge: RAG / Agent / Coding, then the corpus tools.
+                let mut v = vec![MenuItem::CrmaineRag, MenuItem::CrmaineAgent];
+                if self.focused != FocusedPane::Shell {
+                    v.push(MenuItem::CrmaineCoding); // needs a file to read
                 }
-                // Then the pane-specific local-AI helpers.
-                if ai {
-                    if self.focused == FocusedPane::Shell {
-                        v.push(MenuItem::AiShellCmd);
-                        v.push(MenuItem::AiExplainError);
-                    } else {
-                        v.push(MenuItem::AiTriageLog);
-                        v.push(MenuItem::AiJunk);
-                        v.push(MenuItem::AiStructure);
-                        v.push(MenuItem::AiSearch);
-                        v.push(MenuItem::AiRename);
-                        v.push(MenuItem::AiCommit);
-                    }
-                }
+                v.push(MenuItem::CrmaineKnowledge); // index / analysis / diag ▸
                 v.push(MenuItem::Back);
                 Some(v)
             }
@@ -359,7 +356,7 @@ impl App {
         self.menu_stack.clear();
         self.popup = Popup::None;
         match item {
-            MenuItem::AiMenu | MenuItem::SendMenu | MenuItem::WindowMenu | MenuItem::GitMenu | MenuItem::SvnMenu | MenuItem::CompressMenu | MenuItem::FileMenu | MenuItem::ArchiveMenu | MenuItem::InspectMenu | MenuItem::OsMenu | MenuItem::ViewMenu | MenuItem::SessionMenu | MenuItem::CrmaineKnowledge | MenuItem::Back => {} // handled above
+            MenuItem::AiMenu | MenuItem::CrmaineMenu | MenuItem::SendMenu | MenuItem::WindowMenu | MenuItem::GitMenu | MenuItem::SvnMenu | MenuItem::CompressMenu | MenuItem::FileMenu | MenuItem::ArchiveMenu | MenuItem::InspectMenu | MenuItem::OsMenu | MenuItem::ViewMenu | MenuItem::SessionMenu | MenuItem::CrmaineKnowledge | MenuItem::Back => {} // handled above
             MenuItem::OpenDefault => self.open_externally(),
             MenuItem::OpenWithOs => self.open_with_os(),
             MenuItem::RevealInOs => self.reveal_in_os(),
@@ -444,8 +441,9 @@ impl App {
             MenuItem::AiRename => self.start_ai_rename_prompt(),
             MenuItem::AiSearch => self.start_ai_search_prompt(),
             // crmaine — the ones needing a question drop onto the `:` line.
-            MenuItem::CrmaineRag => self.prefill_command("rag "),
-            MenuItem::CrmaineAgent => self.prefill_command("agent "),
+            // Open the crmaine window straight away; the question is typed in it.
+            MenuItem::CrmaineRag => self.open_crmaine_chat(ChatMode::Rag),
+            MenuItem::CrmaineAgent => self.open_crmaine_chat(ChatMode::Agent),
             MenuItem::CrmaineCoding => self.start_coding(""),
             MenuItem::CrmaineImpact => self.prefill_command("impact "),
             MenuItem::CrmaineContradiction => self.prefill_command("contradiction "),

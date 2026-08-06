@@ -285,6 +285,17 @@ impl App {
         self.popup = Popup::Notice { lines };
     }
 
+    /// Open an empty crmaine chat window in `mode` (RAG / Agent), ready for the
+    /// question to be typed in the window. Used by the right-click menu and by a
+    /// bare `:rag` / `:agent` with no argument.
+    pub(crate) fn open_crmaine_chat(&mut self, mode: ChatMode) {
+        if self.config.crmaine.is_none() {
+            self.message = Some("crmaine not configured — add cian.crmaine{} to init.lua".into());
+            return;
+        }
+        self.start_ai_chat(mode, Vec::new(), false);
+    }
+
     /// `:rag <question>` — ask crmaine's RAG (`/query`) over the running server.
     pub(crate) fn start_rag(&mut self, question: &str) {
         self.start_crmaine("/query", "RAG", question);
