@@ -55,6 +55,8 @@ fn draw_split(f: &mut Frame, main_area: Rect, app: &mut App, ov: AnimOverride) {
 
     let mut leaves = Vec::new();
     let mut tab_rects = Vec::new();
+    let mut sort_rects = Vec::new();
+    let mut crumb_rects = Vec::new();
     let mut dividers = vec![
         Divider {
             zone: seam_zone(Direction::Vertical, panes_area, shell_area),
@@ -76,10 +78,10 @@ fn draw_split(f: &mut Frame, main_area: Rect, app: &mut App, ov: AnimOverride) {
     let (bg_l, bg_r) = (app.pane_bg[0], app.pane_bg[1]);
     let (fl_l, fl_r) = (app.flash_level(FocusedPane::Left), app.flash_level(FocusedPane::Right));
     let restore = push_pane_theme(app, 0);
-    draw_file_pane(f, panes_split[0], &app.left, app.focused == FocusedPane::Left, visual_for_left, app.mode, bg_l, fl_l, FocusedPane::Left, &mut tab_rects, app.git_for(FocusedPane::Left));
+    draw_file_pane(f, panes_split[0], &app.left, app.focused == FocusedPane::Left, visual_for_left, app.mode, bg_l, fl_l, FocusedPane::Left, &mut tab_rects, app.git_for(FocusedPane::Left), app.lang, &mut sort_rects, &mut crumb_rects);
     if let Some(prev) = restore { set_theme(prev); }
     let restore = push_pane_theme(app, 1);
-    draw_file_pane(f, panes_split[1], &app.right, app.focused == FocusedPane::Right, visual_for_right, app.mode, bg_r, fl_r, FocusedPane::Right, &mut tab_rects, app.git_for(FocusedPane::Right));
+    draw_file_pane(f, panes_split[1], &app.right, app.focused == FocusedPane::Right, visual_for_right, app.mode, bg_r, fl_r, FocusedPane::Right, &mut tab_rects, app.git_for(FocusedPane::Right), app.lang, &mut sort_rects, &mut crumb_rects);
     if let Some(prev) = restore { set_theme(prev); }
     // draw_shell sizes each pane's PTY to its computed sub-rect.
     let log_border = recording_pulse(app.started.elapsed());
@@ -87,6 +89,8 @@ fn draw_split(f: &mut Frame, main_area: Rect, app: &mut App, ov: AnimOverride) {
     app.dividers = dividers;
     app.shell_leaves = leaves;
     app.tab_rects = tab_rects;
+    app.sort_rects = sort_rects;
+    app.crumb_rects = crumb_rects;
 }
 
 /// The focused surface drawn at an arbitrary rect, used as the floating layer
@@ -100,14 +104,14 @@ fn draw_zoom_overlay(f: &mut Frame, rect: Rect, app: &mut App, ov: AnimOverride)
             let (bg, fl) = (app.pane_bg[0], app.flash_level(FocusedPane::Left));
             let va = app.visual_anchor;
             let restore = push_pane_theme(app, 0);
-            draw_file_pane(f, rect, &app.left, true, va, app.mode, bg, fl, FocusedPane::Left, &mut Vec::new(), app.git_for(FocusedPane::Left));
+            draw_file_pane(f, rect, &app.left, true, va, app.mode, bg, fl, FocusedPane::Left, &mut Vec::new(), app.git_for(FocusedPane::Left), app.lang, &mut Vec::new(), &mut Vec::new());
             if let Some(prev) = restore { set_theme(prev); }
         }
         FocusedPane::Right => {
             let (bg, fl) = (app.pane_bg[1], app.flash_level(FocusedPane::Right));
             let va = app.visual_anchor;
             let restore = push_pane_theme(app, 1);
-            draw_file_pane(f, rect, &app.right, true, va, app.mode, bg, fl, FocusedPane::Right, &mut Vec::new(), app.git_for(FocusedPane::Right));
+            draw_file_pane(f, rect, &app.right, true, va, app.mode, bg, fl, FocusedPane::Right, &mut Vec::new(), app.git_for(FocusedPane::Right), app.lang, &mut Vec::new(), &mut Vec::new());
             if let Some(prev) = restore { set_theme(prev); }
         }
         FocusedPane::Shell => {
@@ -158,6 +162,8 @@ fn draw_zoomed(f: &mut Frame, area: Rect, app: &mut App, ov: AnimOverride) {
     let mut dividers = Vec::new();
     let mut leaves = Vec::new();
     let mut tab_rects = Vec::new();
+    let mut sort_rects = Vec::new();
+    let mut crumb_rects = Vec::new();
     match app.focused {
         FocusedPane::Left => {
             rects.left = area;
@@ -165,7 +171,7 @@ fn draw_zoomed(f: &mut Frame, area: Rect, app: &mut App, ov: AnimOverride) {
             let va = app.visual_anchor;
             let (bg, fl) = (app.pane_bg[0], app.flash_level(FocusedPane::Left));
             let restore = push_pane_theme(app, 0);
-            draw_file_pane(f, area, &app.left, true, va, app.mode, bg, fl, FocusedPane::Left, &mut tab_rects, app.git_for(FocusedPane::Left));
+            draw_file_pane(f, area, &app.left, true, va, app.mode, bg, fl, FocusedPane::Left, &mut tab_rects, app.git_for(FocusedPane::Left), app.lang, &mut sort_rects, &mut crumb_rects);
             if let Some(prev) = restore { set_theme(prev); }
         }
         FocusedPane::Right => {
@@ -174,7 +180,7 @@ fn draw_zoomed(f: &mut Frame, area: Rect, app: &mut App, ov: AnimOverride) {
             let va = app.visual_anchor;
             let (bg, fl) = (app.pane_bg[1], app.flash_level(FocusedPane::Right));
             let restore = push_pane_theme(app, 1);
-            draw_file_pane(f, area, &app.right, true, va, app.mode, bg, fl, FocusedPane::Right, &mut tab_rects, app.git_for(FocusedPane::Right));
+            draw_file_pane(f, area, &app.right, true, va, app.mode, bg, fl, FocusedPane::Right, &mut tab_rects, app.git_for(FocusedPane::Right), app.lang, &mut sort_rects, &mut crumb_rects);
             if let Some(prev) = restore { set_theme(prev); }
         }
         FocusedPane::Shell => {
@@ -187,6 +193,8 @@ fn draw_zoomed(f: &mut Frame, area: Rect, app: &mut App, ov: AnimOverride) {
     app.dividers = dividers;
     app.shell_leaves = leaves;
     app.tab_rects = tab_rects;
+    app.sort_rects = sort_rects;
+    app.crumb_rects = crumb_rects;
 }
 
 pub(crate) fn draw(f: &mut Frame, app: &mut App) {
@@ -486,7 +494,7 @@ fn tabs_title<'a>(
     // Filled with (tab index, column offset from the title's start, width) for
     // each visible tab, so a click can be mapped back to a tab.
     offsets: &mut Vec<(usize, u16, u16)>,
-) -> Line<'a> {
+) -> (Line<'a>, String) {
     fn label_for(i: usize, tab: &Pane, is_active: bool) -> String {
         // A remote pane shows "⇅ user@host:/path" so it reads as a server.
         if let Some((host, path)) = tab.remote_view() {
@@ -606,7 +614,7 @@ fn tabs_title<'a>(
         ));
     }
     spans.push(Span::raw(" "));
-    Line::from(spans)
+    (Line::from(spans), active_label)
 }
 
 /// Pick a Nerd Font glyph based on the entry name/extension.
@@ -812,6 +820,9 @@ fn draw_file_pane(
     pane_id: FocusedPane,
     tab_rects: &mut Vec<(FocusedPane, usize, Rect)>,
     git: Option<&cian_core::git::RepoStatus>,
+    lang: Lang,
+    sort_rects: &mut Vec<(FocusedPane, cian_core::SortKey, Rect)>,
+    crumb_rects: &mut Vec<(FocusedPane, usize, Rect)>,
 ) {
     // Read the active theme once — `theme()` now takes a lock, and the row loop
     // below would otherwise hit it thousands of times per frame.
@@ -834,10 +845,10 @@ fn draw_file_pane(
     }
     let max_title_w = area.width.saturating_sub(2);
     let mut offsets = Vec::new();
-    let title = tabs_title(tabs, focused, focus_bg, max_title_w, &mut offsets);
+    let (title, active_title) = tabs_title(tabs, focused, focus_bg, max_title_w, &mut offsets);
     // The title is drawn on the top border row, one cell in from the corner.
-    for (i, off, w) in offsets {
-        tab_rects.push((pane_id, i, Rect::new(area.x + 1 + off, area.y, w, 1)));
+    for (i, off, w) in &offsets {
+        tab_rects.push((pane_id, *i, Rect::new(area.x + 1 + off, area.y, *w, 1)));
     }
     let mut block = Block::default()
         .borders(Borders::ALL)
@@ -871,7 +882,8 @@ fn draw_file_pane(
     // from O(entries) into O(visible) — the difference between a snappy and a
     // sluggish pane on a directory with thousands of files.
     let total = pane.entries.len();
-    let list_h = area.height.saturating_sub(2) as usize; // top + bottom border rows
+    // Borders top+bottom, plus the column-header row under the top border.
+    let list_h = area.height.saturating_sub(3) as usize;
     let start = if list_h == 0 { pane.cursor } else { pane.cursor.saturating_sub(list_h - 1) };
     let end = start.saturating_add(list_h).min(total);
     let mark_style = Style::default().fg(th.mark_fg).add_modifier(Modifier::BOLD);
@@ -945,8 +957,21 @@ fn draw_file_pane(
     if let Some(c) = bg {
         list_style = list_style.bg(c);
     }
+    // The frame and the rows render separately so the column-header row can
+    // sit between them: block on the full area, header on the first inner
+    // row, the list below it.
+    f.render_widget(block, area);
+    let inner = area.inner(Margin { vertical: 1, horizontal: 1 });
+    if inner.height > 0 {
+        let header = Rect::new(inner.x, inner.y, inner.width, 1);
+        draw_pane_header(
+            f, header, pane, git_w, name_w, show_size, show_time, list_style, pane_id, lang,
+            sort_rects,
+        );
+    }
+    let list_area =
+        Rect::new(inner.x, inner.y + 1, inner.width, inner.height.saturating_sub(1));
     let list = List::new(items)
-        .block(block)
         .style(list_style)
         .highlight_style(
             Style::default().bg(th.selected_bg).add_modifier(Modifier::BOLD),
@@ -956,9 +981,140 @@ fn draw_file_pane(
     // relative to `start` and the state's own offset stays at 0.
     let mut state = ListState::default();
     if !pane.entries.is_empty() { state.select(Some(pane.cursor - start)); }
-    f.render_stateful_widget(list, area, &mut state);
+    f.render_stateful_widget(list, list_area, &mut state);
 
     draw_list_scrollbar(f, area, pane.entries.len(), pane.cursor, focused, border_style);
+
+    // The active tab's path segments are click targets (a breadcrumb): the
+    // rects live on the title row and are resolved before tab selection.
+    if let Some((ix, tab_col, _)) =
+        offsets.iter().copied().find(|(i, _, _)| *i == tabs.active)
+    {
+        // Labels start one cell in from the corner, like the tab rects above.
+        push_breadcrumb_rects(&active_title, ix, area, tab_col + 1, pane, pane_id, crumb_rects);
+    }
+}
+
+/// The column-header row: `Name`, `Size`, `Date` over their columns, the
+/// active sort key carrying a direction arrow. Each label's rect is pushed to
+/// `sort_rects` so a click sorts by that column (repeat flips the direction,
+/// as column headers behave everywhere else — `apply_sort_key` does the flip).
+#[allow(clippy::too_many_arguments)]
+fn draw_pane_header(
+    f: &mut Frame,
+    header: Rect,
+    pane: &Pane,
+    git_w: u16,
+    name_w: usize,
+    show_size: bool,
+    show_time: bool,
+    base: Style,
+    pane_id: FocusedPane,
+    lang: Lang,
+    sort_rects: &mut Vec<(FocusedPane, cian_core::SortKey, Rect)>,
+) {
+    use cian_core::SortKey;
+    let style = base.fg(theme().dim);
+    let label = |key: SortKey| -> String {
+        let name = match key {
+            SortKey::Name => tr(lang, "Name", "名前"),
+            SortKey::Size => tr(lang, "Size", "サイズ"),
+            SortKey::Modified => tr(lang, "Date", "日時"),
+            SortKey::Extension => "",
+        };
+        if pane.sort.key == key {
+            format!("{} {}", name, if pane.sort.reverse { "▼" } else { "▲" })
+        } else {
+            name.to_string()
+        }
+    };
+    // Mirror the row layout: git badge, mark, icon columns, then the fields.
+    // The icon column exists only with Nerd Fonts on (one cell + two spaces;
+    // two spaces alone otherwise).
+    let prefix = 4 + usize::from(nerd_fonts()) + git_w as usize;
+    let name_lbl = label(SortKey::Name);
+    let size_lbl = label(SortKey::Size);
+    let time_lbl = label(SortKey::Modified);
+    let mut text = format!("{}{}", " ".repeat(prefix), pad_to(&name_lbl, name_w));
+    if show_size {
+        text.push_str(&pad_left(&size_lbl, SIZE_COL_W as usize + 1));
+    }
+    if show_time {
+        text.push_str(&format!(" {}", time_lbl));
+    }
+    f.render_widget(Paragraph::new(text).style(style), header);
+
+    // Click zones, in the same geometry the text was laid out in.
+    let x = header.x + prefix as u16;
+    sort_rects.push((pane_id, SortKey::Name, Rect::new(x, header.y, width(&name_lbl) as u16, 1)));
+    if show_size {
+        let sx = header.x + (prefix + name_w) as u16;
+        sort_rects.push((pane_id, SortKey::Size, Rect::new(sx, header.y, SIZE_COL_W + 1, 1)));
+    }
+    if show_time {
+        let tx = header.x + (prefix + name_w + SIZE_COL_W as usize + 2) as u16;
+        sort_rects.push((
+            pane_id,
+            SortKey::Modified,
+            Rect::new(tx, header.y, width(&time_lbl) as u16, 1),
+        ));
+    }
+}
+
+/// Map the displayed path segments of the active tab to click rects, counted
+/// from the path's end. Counting from the end keeps the mapping exact even
+/// when the head was middle-truncated: the tail of `truncate_middle` is
+/// verbatim, so everything right of the `…` is trustworthy — and the segment
+/// holding the `…` itself is ambiguous, so it gets no rect.
+fn push_breadcrumb_rects(
+    label: &str,
+    active_ix: usize,
+    area: Rect,
+    tab_col: u16,
+    pane: &Pane,
+    pane_id: FocusedPane,
+    crumb_rects: &mut Vec<(FocusedPane, usize, Rect)>,
+) {
+    // Only a plain directory listing has a browsable path.
+    if pane.remote_view().is_some() || pane.flat_label().is_some() {
+        return;
+    }
+    // The label opens with " N " (the tab number) — that part is a tab click,
+    // not a path segment, so parsing starts after it.
+    let prefix = format!(" {} ", active_ix + 1);
+    let Some(path_part) = label.strip_prefix(&prefix) else { return };
+    let mut col = width(&prefix); // display cells from the label start
+    let mut seg_start = col;
+    let mut segs: Vec<(usize, usize, bool)> = Vec::new(); // (start, end, clean)
+    let mut clean = true; // no `…` seen inside this segment
+    for ch in path_part.chars() {
+        let w = width(&ch.to_string());
+        if ch == '/' || ch == '\\' {
+            if col > seg_start {
+                segs.push((seg_start, col, clean));
+            }
+            clean = true;
+            seg_start = col + w;
+        } else if ch == '…' {
+            clean = false;
+        }
+        col += w;
+    }
+    if col > seg_start {
+        segs.push((seg_start, col, clean));
+    }
+    // The label's trailing " " rides along in the last segment; harmless.
+    let n = segs.len();
+    for (i, (s, e, clean)) in segs.into_iter().enumerate() {
+        if !clean {
+            continue;
+        }
+        // Segments count up from the end: the last is the cwd itself (0 to
+        // strip), the one before it 1, and so on.
+        let strip = n - 1 - i;
+        let x = area.x + tab_col + s as u16;
+        crumb_rects.push((pane_id, strip, Rect::new(x, area.y, (e - s) as u16, 1)));
+    }
 }
 
 /// The colour of a git status badge.
@@ -986,11 +1142,12 @@ fn draw_list_scrollbar(
     focused: bool,
     border: Style,
 ) {
-    let view_h = area.height.saturating_sub(2);
+    // Two rows in: the top border and the column-header row.
+    let view_h = area.height.saturating_sub(3);
     if view_h == 0 || total <= view_h as usize {
         return;
     }
-    let track = Rect::new(area.x + area.width.saturating_sub(1), area.y + 1, 1, view_h);
+    let track = Rect::new(area.x + area.width.saturating_sub(1), area.y + 2, 1, view_h);
     let mut state = ScrollbarState::new(total).position(cursor);
     // The bar sits *on* the pane's right border, so the track has to be the
     // border: same glyph, same style. Drawing it in its own dimmer color made

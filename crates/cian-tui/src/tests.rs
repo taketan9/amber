@@ -1552,9 +1552,9 @@
         let left = app.layout_rects.left;
         // Row 1 is the `..` row; the files start on row 2. Press on the first
         // file, drag down two more, release inside the pane.
-        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), left.x + 3, left.y + 2));
-        app.handle_mouse(mouse(MouseEventKind::Drag(MouseButton::Left), left.x + 3, left.y + 4));
-        app.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), left.x + 3, left.y + 4));
+        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), left.x + 3, left.y + 3));
+        app.handle_mouse(mouse(MouseEventKind::Drag(MouseButton::Left), left.x + 3, left.y + 5));
+        app.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), left.x + 3, left.y + 5));
         // The dragged-over range is now marked (3 files), not a copy to elsewhere.
         assert_eq!(app.active_pane().unwrap().mark_count(), 3, "range is marked");
         assert!(app.file_drag.is_none(), "drag released");
@@ -2752,7 +2752,7 @@
                     p.cursor = cursor;
                 }
                 let before = render(&mut app, 100, 40);
-                let row = rect.y + 1 + off;
+                let row = rect.y + 2 + off;
                 let lo = rect.x as usize;
                 let hi = (rect.x + rect.width) as usize;
                 let drawn: String =
@@ -2784,11 +2784,11 @@
         let rect = app.layout_rects.left;
         // Clicking past the last entry must leave the cursor where it was
         // rather than jumping somewhere arbitrary.
-        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Right), rect.x + 3, rect.y + 1));
+        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Right), rect.x + 3, rect.y + 2));
         assert_eq!(app.active_pane().unwrap().cursor, 0);
         app.popup = Popup::None;
 
-        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Right), rect.x + 3, rect.y + 2));
+        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Right), rect.x + 3, rect.y + 3));
         assert_eq!(app.active_pane().unwrap().cursor, 1);
         app.popup = Popup::None;
 
@@ -4036,15 +4036,15 @@
         let (left, right) = (app.layout_rects.left, app.layout_rects.right);
 
         // Row 1 is `..`; press on the file on row 2.
-        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), left.x + 5, left.y + 2));
+        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), left.x + 5, left.y + 3));
         assert!(app.file_drag.is_some(), "pressing on an entry arms a drag");
 
         app.handle_mouse(mouse(
             MouseEventKind::Drag(MouseButton::Left),
             right.x + 5,
-            right.y + 2,
+            right.y + 3,
         ));
-        app.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), right.x + 5, right.y + 2));
+        app.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), right.x + 5, right.y + 3));
 
         let Popup::ConfirmTransfer { op, targets, dest } = &app.popup else {
             panic!("expected a transfer confirmation, got {:?}", app.popup)
@@ -4061,9 +4061,9 @@
         let _ = render(&mut app, 100, 40);
         let (left, right) = (app.layout_rects.left, app.layout_rects.right);
 
-        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), left.x + 5, left.y + 2));
-        app.handle_mouse(mouse(MouseEventKind::Drag(MouseButton::Left), right.x + 5, right.y + 2));
-        let mut up = mouse(MouseEventKind::Up(MouseButton::Left), right.x + 5, right.y + 2);
+        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), left.x + 5, left.y + 3));
+        app.handle_mouse(mouse(MouseEventKind::Drag(MouseButton::Left), right.x + 5, right.y + 3));
+        let mut up = mouse(MouseEventKind::Up(MouseButton::Left), right.x + 5, right.y + 3);
         up.modifiers = KeyModifiers::SHIFT;
         app.handle_mouse(up);
 
@@ -4100,7 +4100,7 @@
         let _ = render(&mut app, 100, 40);
         let left = app.layout_rects.left;
         // The first row is `..`; a single click steps up to the parent.
-        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), left.x + 3, left.y + 1));
+        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), left.x + 3, left.y + 2));
         assert!(!app.left.active_ref().cwd.ends_with("sub"), "left sub via ..");
         // Marking the `..` row (e.g. via Space on it) is a no-op.
         if let Some(p) = app.active_pane_mut() {
@@ -4143,7 +4143,7 @@
         let _ = render(&mut app, 100, 40);
         let (left, shell) = (app.layout_rects.left, app.layout_rects.shell);
 
-        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), left.x + 5, left.y + 2));
+        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), left.x + 5, left.y + 3));
         app.handle_mouse(mouse(MouseEventKind::Drag(MouseButton::Left), shell.x + 5, shell.y + 2));
         app.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), shell.x + 5, shell.y + 2));
 
@@ -4746,7 +4746,7 @@
         let _ = render(&mut app, 100, 40);
         let r = app.layout_rects.left;
         // Row 1 is the `..` row; "sub" (dirs first) is on row 2.
-        let (cx, cy) = (r.x + 3, r.y + 2);
+        let (cx, cy) = (r.x + 3, r.y + 3);
         app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), cx, cy));
         app.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), cx, cy));
         app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), cx, cy));
@@ -4770,7 +4770,7 @@
         let root = app.left.active_ref().cwd.clone();
         let r = app.layout_rects.left;
         // Row 2 is "sub"; row 1 is the `..` row (which would navigate up).
-        let (cx, cy) = (r.x + 3, r.y + 2);
+        let (cx, cy) = (r.x + 3, r.y + 3);
         app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), cx, cy));
         app.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), cx, cy));
         // Age the first click past the double-click window.
@@ -4778,6 +4778,61 @@
         app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), cx, cy));
         assert_eq!(app.left.active_ref().cwd, root,
             "a slow second click just selects, does not enter");
+    }
+
+    /// Clicking a column header sorts by it; clicking it again flips the
+    /// direction — how column headers behave everywhere else.
+    #[test]
+    fn clicking_a_column_header_sorts_and_flips() {
+        let (_d, mut app) = app_with(&["small.txt", "big.txt"]);
+        std::fs::write(_d.path().join("big.txt"), "x".repeat(5000)).unwrap();
+        if let Some(p) = app.active_pane_mut() {
+            let _ = p.reload();
+        }
+        let _ = render(&mut app, 100, 40);
+        let (pane, key, r) = app
+            .sort_rects
+            .iter()
+            .copied()
+            .find(|(p, k, _)| *p == FocusedPane::Left && *k == cian_core::SortKey::Size)
+            .expect("the Size header is clickable");
+        assert_eq!(pane, FocusedPane::Left);
+        assert_eq!(key, cian_core::SortKey::Size);
+        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), r.x, r.y));
+        assert_eq!(app.active_pane().unwrap().sort.key, cian_core::SortKey::Size);
+        assert!(!app.active_pane().unwrap().sort.reverse, "first click: ascending");
+        let _ = render(&mut app, 100, 40); // rects rebuilt with the new sort glyph
+        let (_, _, r) = app
+            .sort_rects
+            .iter()
+            .copied()
+            .find(|(p, k, _)| *p == FocusedPane::Left && *k == cian_core::SortKey::Size)
+            .unwrap();
+        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), r.x, r.y));
+        assert!(app.active_pane().unwrap().sort.reverse, "second click flips");
+    }
+
+    /// Clicking a path segment in the title jumps to that ancestor directory.
+    #[test]
+    fn clicking_a_breadcrumb_segment_navigates_up() {
+        let d = tempfile::tempdir().unwrap();
+        let deep = d.path().join("alpha").join("beta");
+        std::fs::create_dir_all(&deep).unwrap();
+        let mut app = App::new(deep.clone(), deep.clone(), cian_lua::Config::default()).unwrap();
+        let _ = render(&mut app, 120, 40);
+        // strip=1 is the parent of the cwd ("alpha").
+        let (_, _, r) = app
+            .crumb_rects
+            .iter()
+            .copied()
+            .find(|(p, strip, _)| *p == FocusedPane::Left && *strip == 1)
+            .expect("the parent segment is clickable");
+        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), r.x, r.y));
+        assert!(
+            app.left.active_ref().cwd.ends_with("alpha"),
+            "clicked one level up: {:?}",
+            app.left.active_ref().cwd
+        );
     }
 
     #[test]

@@ -1761,6 +1761,12 @@ pub struct App {
     /// Clickable tab-label rects, rebuilt each frame: which pane's strip, the
     /// tab index, and where it sits, so a tab can be switched with the mouse.
     tab_rects: Vec<(FocusedPane, usize, Rect)>,
+    /// Clickable column-header rects (`Name`/`Size`/`Date`), rebuilt each
+    /// frame; a click sorts by that column, a repeat flips the direction.
+    sort_rects: Vec<(FocusedPane, cian_core::SortKey, Rect)>,
+    /// Clickable path-segment rects on the active tab's title (a breadcrumb).
+    /// The `usize` is how many trailing components to strip from the cwd.
+    crumb_rects: Vec<(FocusedPane, usize, Rect)>,
     /// The context menu's on-screen rect (inner area), for clicking its items.
     menu_rect: Rect,
     /// Parent context menus stashed while a submenu is open, so Esc/← drills
@@ -2098,6 +2104,8 @@ impl App {
             ai_scroll: 0,
             ai_lines: Vec::new(),
             chat_attachments: Vec::new(),
+            sort_rects: Vec::new(),
+            crumb_rects: Vec::new(),
             zoom_return: None,
             pending_shell_input: None,
             pending_shortcut_target: None,

@@ -434,6 +434,37 @@ impl App {
             return;
         }
 
+        // A breadcrumb click navigates to that ancestor of the pane's cwd.
+        // Checked before tab selection: these rects sit inside the active
+        // tab's label, and the tab click would otherwise swallow them.
+        if let Some((pane, strip, _)) =
+            self.crumb_rects.iter().copied().find(|(_, _, r)| in_rect(*r))
+        {
+            self.focus(pane);
+            let target = self.active_pane().map(|p| {
+                let mut t = p.cwd.clone();
+                for _ in 0..strip {
+                    if let Some(parent) = t.parent() {
+                        t = parent.to_path_buf();
+                    }
+                }
+                t
+            });
+            if let (Some(t), Some(p)) = (target, self.active_pane_mut()) {
+                if t != p.cwd {
+                    let _ = p.jump_to(t);
+                }
+            }
+            return;
+        }
+        // A column-header click sorts by that column (repeat = flip).
+        if let Some((pane, key, _)) =
+            self.sort_rects.iter().copied().find(|(_, _, r)| in_rect(*r))
+        {
+            self.focus(pane);
+            self.apply_sort_key(key);
+            return;
+        }
         // Clicking a tab label switches to that tab. Checked before the border
         // drag, because the shell's tab bar sits on the files|shell seam row —
         // divider-first would swallow every shell-tab click as a drag.
@@ -948,14 +979,14 @@ impl App {
             FocusedPane::Right => self.layout_rects.right,
             FocusedPane::Shell => return,
         };
-        // The list starts one row in, past the top border.
-        let Some(offset) = row.checked_sub(rect.y + 1) else { return };
-        if offset >= rect.height.saturating_sub(2) {
+        // The list starts two rows in: the top border, then the column header.
+        let Some(offset) = row.checked_sub(rect.y + 2) else { return };
+        if offset >= rect.height.saturating_sub(3) {
             return;
         }
         let Some(p) = self.active_pane_mut() else { return };
         // The list scrolls, so the first visible row is not always entry 0.
-        let view_h = rect.height.saturating_sub(2) as usize;
+        let view_h = rect.height.saturating_sub(3) as usize;
         let first = p.cursor.saturating_sub(view_h.saturating_sub(1)).min(
             p.entries.len().saturating_sub(view_h.min(p.entries.len())),
         );

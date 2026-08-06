@@ -87,7 +87,12 @@ impl App {
             self.message = Some(tr(self.lang, "nothing to rename", "リネーム対象がありません").into());
             return;
         }
-        let list = std::env::temp_dir().join(format!("cian-rename-{}.txt", std::process::id()));
+        // pid alone is not unique enough: two panes (or two tests) in one
+        // process must not share a list file, so a counter joins it.
+        static SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let list = std::env::temp_dir()
+            .join(format!("cian-rename-{}-{}.txt", std::process::id(), seq));
         let body = names.join("\n") + "\n";
         if std::fs::write(&list, body).is_err() {
             self.message = Some(tr(self.lang, "cannot write temp file", "一時ファイルを作れません").into());
