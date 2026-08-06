@@ -1767,6 +1767,15 @@ pub struct App {
     /// Clickable path-segment rects on the active tab's title (a breadcrumb).
     /// The `usize` is how many trailing components to strip from the cwd.
     crumb_rects: Vec<(FocusedPane, usize, Rect)>,
+    /// Terminal-graphics capability, when the terminal answered the startup
+    /// query with a real protocol (kitty / iTerm2 / sixel). `None` falls back
+    /// to the half-block cell renderer — including always in tests, which
+    /// never query a terminal.
+    gfx_picker: Option<ratatui_image::picker::Picker>,
+    /// The decoded image + protocol state for the open image preview, keyed by
+    /// path so a new image re-decodes. Lives outside `Popup` because the
+    /// protocol state is neither `Debug` nor comparable.
+    img_proto: Option<(PathBuf, ratatui_image::protocol::StatefulProtocol)>,
     /// The context menu's on-screen rect (inner area), for clicking its items.
     menu_rect: Rect,
     /// Parent context menus stashed while a submenu is open, so Esc/← drills
@@ -2106,6 +2115,8 @@ impl App {
             chat_attachments: Vec::new(),
             sort_rects: Vec::new(),
             crumb_rects: Vec::new(),
+            gfx_picker: None,
+            img_proto: None,
             zoom_return: None,
             pending_shell_input: None,
             pending_shortcut_target: None,
@@ -3688,6 +3699,15 @@ pub fn run(left: Option<PathBuf>, right: Option<PathBuf>, startup: StartupMacro)
         PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
     )
     .is_ok();
+
+    // Ask the terminal whether it can draw real images (kitty / iTerm2 /
+    // sixel). Queried here — after the alternate screen, before any events are
+    // read — per ratatui-image's contract. Halfblocks (the answer everywhere
+    // else) means "no": cian's own cell renderer already does that, with
+    // caching, so the picker is only kept when it buys actual pixels.
+    app.gfx_picker = ratatui_image::picker::Picker::from_query_stdio()
+        .ok()
+        .filter(|p| p.protocol_type() != ratatui_image::picker::ProtocolType::Halfblocks);
 
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;

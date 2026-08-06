@@ -315,6 +315,8 @@ pub(crate) fn draw(f: &mut Frame, app: &mut App) {
         draw_image(f, area, app);
         return;
     }
+    // The preview closed: drop its decoded image + protocol state.
+    app.img_proto = None;
     if matches!(app.popup, Popup::CommitMessage { .. }) {
         draw_commit_message(f, area, app);
         return;
@@ -1987,9 +1989,11 @@ fn push_row_zone(zones: &mut Vec<PopupZone>, inner: Rect, y: u16, idx: usize) {
 
 /// The AI chat, rendered with `&mut App` so it can stash the transcript's rect,
 /// scroll and flat lines for mouse selection.
-/// The image preview: the picture as half-block (`▀`) cells — top pixel is the
-/// glyph's foreground, bottom pixel its background — so it renders in any 24-bit
-/// terminal without a graphics protocol. Decoded to fit and cached by size.
+/// The image preview. On a terminal that answered the startup graphics query
+/// (kitty / iTerm2 / sixel), the picture renders as real pixels; everywhere
+/// else it falls back to half-block (`▀`) cells — top pixel the glyph's
+/// foreground, bottom pixel its background — which any 24-bit terminal can
+/// show. Both paths decode to fit and cache.
 fn draw_image(f: &mut Frame, area: Rect, app: &mut App) {
     let lang = app.lang;
     let rect = centered_rect(area.width.saturating_sub(2), area.height.saturating_sub(2), area);
@@ -1997,6 +2001,11 @@ fn draw_image(f: &mut Frame, area: Rect, app: &mut App) {
     let inner = rect.inner(Margin { vertical: 1, horizontal: 1 });
     let body_w = inner.width;
     let body_h = inner.height.saturating_sub(1); // leave a row for the footer
+
+    if app.gfx_picker.is_some() {
+        draw_image_gfx(f, rect, inner, app);
+        return;
+    }
 
     // (Re)decode when first shown or after a resize.
     let (title, caption, rows, err) = if let Popup::ImageView { path, title, shown, error } = &mut app.popup {
@@ -2050,6 +2059,61 @@ fn draw_image(f: &mut Frame, area: Rect, app: &mut App) {
         let left = inner.x + (body_w.saturating_sub(img_w)) / 2;
         let pic = Rect::new(left, top, img_w.min(body_w), img_h.min(body_h));
         f.render_widget(Paragraph::new(rows), pic);
+    }
+
+    let footer_area = Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1);
+    f.render_widget(
+        Paragraph::new(tr(lang, " S-Enter reveal   E edit   Esc close ", " S-Enter 場所へ   E 編集   Esc 閉じる "))
+            .style(Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD)),
+        footer_area,
+    );
+}
+
+/// The terminal-graphics image path: decode once per file (cached on `App`,
+/// keyed by path), then let ratatui-image resize/encode for the box each
+/// frame in whatever protocol the terminal offered at startup.
+fn draw_image_gfx(f: &mut Frame, rect: Rect, inner: Rect, app: &mut App) {
+    let lang = app.lang;
+    let body_h = inner.height.saturating_sub(1); // the footer keeps its row
+    let (path, title) = if let Popup::ImageView { path, title, .. } = &app.popup {
+        (path.clone(), title.clone())
+    } else {
+        return;
+    };
+    // (Re)decode when a different image opens.
+    if app.img_proto.as_ref().map(|(p, _)| p != &path).unwrap_or(true) {
+        app.img_proto = None;
+        if let (Ok(img), Some(picker)) = (image::open(&path), app.gfx_picker.as_ref()) {
+            app.img_proto = Some((path.clone(), picker.new_resize_protocol(img)));
+        }
+    }
+    let caption = image::image_dimensions(&path)
+        .map(|(w, h)| format!("{}×{}px", w, h))
+        .unwrap_or_default();
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(border_type())
+        .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
+        .style(Style::default().bg(theme().popup_bg))
+        .title(format!(" {}  —  {} ", title, caption));
+    f.render_widget(block, rect);
+
+    let pic = Rect::new(inner.x, inner.y, inner.width, body_h);
+    match app.img_proto.as_mut() {
+        Some((_, proto)) => {
+            f.render_stateful_widget(
+                ratatui_image::StatefulImage::default(),
+                pic,
+                proto,
+            );
+        }
+        None => {
+            f.render_widget(
+                Paragraph::new(tr(lang, "cannot show image", "画像を表示できません"))
+                    .style(Style::default().fg(Color::Rgb(230, 120, 120))),
+                pic,
+            );
+        }
     }
 
     let footer_area = Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1);

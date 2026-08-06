@@ -23,6 +23,10 @@ serde_json = { workspace = true }
 tui-term  = { workspace = true }
 image     = { workspace = true }
 unicode-width = "0.1"
+# Terminal-graphics image preview (kitty / iTerm2 / sixel). Pinned to the 8.x
+# line: it targets ratatui 0.29 and is pure Rust (9.x adds a chafa C build
+# dependency, which would break the self-contained Windows binary).
+ratatui-image = { version = "8.1", default-features = false, features = ["crossterm"] }
 
 [dev-dependencies]
 tempfile = "3.27.0"

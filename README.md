@@ -76,7 +76,7 @@ Press `F3` on a file and cian shows you what's in it, without leaving:
 
 - **Text** — a scrollable viewer with line numbers and syntax highlighting (Rust, Python, JS/TS, Java, HTML, CSS, SQL, shell, Lua, YAML, JSON, …).
 - **Markdown** — rendered right there. `p` toggles preview ↔ source.
-- **Images** (`.png/.jpg/.gif/.bmp/.webp`) — drawn in the terminal. Coarse, but enough to see what it is.
+- **Images** (`.png/.jpg/.gif/.bmp/.webp`) — drawn in the terminal. On a terminal with a graphics protocol (kitty, iTerm2, WezTerm, sixel — cian asks at startup) they render as real pixels; anywhere else as colored half-block cells, coarse but recognisable.
 - **Office & PDF** (`.docx/.xlsx/.pptx/.pdf`, plus legacy `.doc/.xls/.ppt`) — their text, no converter needed.
 - **Archives** (`.zip/.jar/.tar/.tar.gz/…`) — the file list. `Enter` extracts the highlighted member to the other pane, `a` extracts all.
 

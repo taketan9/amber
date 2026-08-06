@@ -76,7 +76,7 @@ Windows では **Windows Terminal** か **WezTerm** で、Nerd Font を使って
 
 - **テキスト** — 行番号付きのスクロールビューア。シンタックスハイライト対応（Rust, Python, JS/TS, Java, HTML, CSS, SQL, shell, Lua, YAML, JSON …）。
 - **Markdown** — その場でレンダリング表示。`p` でプレビュー↔ソース切替。
-- **画像**（`.png/.jpg/.gif/.bmp/.webp`）— ターミナルに描画。粗いけど「何のファイルか」は分かります。
+- **画像**（`.png/.jpg/.gif/.bmp/.webp`）— ターミナルに描画。グラフィックプロトコル対応ターミナル（kitty・iTerm2・WezTerm・sixel — 起動時に自動判定）なら実ピクセルで鮮明に、それ以外はハーフブロックセルで粗く表示します。
 - **Office / PDF**（`.docx/.xlsx/.pptx/.pdf`、旧 `.doc/.xls/.ppt` も）— テキストを抽出。変換ソフトは要りません。
 - **書庫**（`.zip/.jar/.tar/.tar.gz/…`）— 中身の一覧。`Enter` でカーソルの1件を反対ペインへ、`a` で全部を展開。
 
