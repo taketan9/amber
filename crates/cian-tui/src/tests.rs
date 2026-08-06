@@ -3462,6 +3462,28 @@
         assert_eq!(pad_to("work", 2), "work");
     }
 
+    /// The same lesson, for the other half of a column. `truncate` counted
+    /// characters while `pad_to` counted cells, so a Japanese filename in the
+    /// file pane was cut to 28 characters — 56 columns — and shoved the size
+    /// and date columns off the right edge.
+    #[test]
+    fn truncation_counts_cells_too_so_columns_line_up() {
+        assert_eq!(truncate("report.txt", 20), "report.txt", "shorter than the budget: untouched");
+        // A wide character cannot always land exactly on the budget (five of
+        // them plus the ellipsis is 11 of 12), so the guarantee is "no wider" —
+        // which is why `fit` pads afterwards rather than trusting the cut.
+        assert!(width(&truncate("第四四半期の報告書.txt", 12)) <= 12, "never wider than asked");
+        assert!(truncate("第四四半期の報告書.txt", 12).ends_with('…'), "marked as cut");
+        // A budget that cannot fit even one wide character still holds the line.
+        assert_eq!(truncate("日本語", 1), "…");
+
+        // What the file pane actually does: every name occupies the same width,
+        // whatever script it is written in.
+        for name in ["report_final.txt", "第四四半期の報告書.txt", "設計メモ.md", "a"] {
+            assert_eq!(width(&fit(name, 12)), 12, "column width for {name}");
+        }
+    }
+
     /// Paths identify themselves at the end, URLs at the start. Cutting either
     /// end loses what tells them apart, so the middle goes.
     #[test]

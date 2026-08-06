@@ -253,8 +253,7 @@ impl App {
         let Some(p) = self.active_pane_mut() else { return };
         let mut n = 0usize;
         for i in 0..p.entries.len() {
-            let name = p.entries[i].name.to_lowercase();
-            if pat.is_empty() || glob_match(&pat.to_lowercase(), &name) {
+            if pat.is_empty() || glob_match(pat, &p.entries[i].name) {
                 let was = p.is_marked(i);
                 if mark && !was {
                     p.set_mark_at(i);
@@ -432,7 +431,7 @@ impl App {
         for path in paths.iter().take(30) {
             let name = path.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
             let desc = cian_core::inspect::classify(path).unwrap_or_else(|e| e.to_string());
-            lines.push(format!("{:<28} {}", truncate(&name, 28), desc));
+            lines.push(format!("{} {}", fit(&name, 28), desc));
         }
         if paths.len() > 30 {
             lines.push(format!("... and {} more", paths.len() - 30));

@@ -463,15 +463,6 @@ fn caret_line(buffer: &str, cursor: usize, secret: bool) -> Line<'static> {
     ])
 }
 
-/// Right-align `s` within `w` cells (pad on the left).
-fn pad_left(s: &str, w: usize) -> String {
-    let sw = width(s);
-    if sw >= w {
-        s.to_string()
-    } else {
-        format!("{}{}", " ".repeat(w - sw), s)
-    }
-}
 
 fn context_menu_rect(items: &[MenuItem], at: (u16, u16), area: Rect, lang: Lang) -> Rect {
     // marker(2) + name + gap(2, if any hint) + hint + right gutter(2) + borders(2).
@@ -887,7 +878,7 @@ fn draw_file_pane(
         // The icon carries the same color so the row reads as one unit.
         let icon_style = Style::default().fg(kind_color);
 
-        let name = truncate(&e.name, name_w);
+        let name = fit(&e.name, name_w);
         let mut spans = Vec::new();
         if git.is_some() {
             let (badge, color) = git
@@ -902,7 +893,7 @@ fn draw_file_pane(
         spans.extend([
             Span::styled(mark_symbol, mark_style),
             Span::styled(format!("{}  ", icon_for(e)), icon_style),
-            Span::styled(format!("{:<w$}", name, w = name_w), name_style),
+            Span::styled(name, name_style),
         ]);
         if show_size {
             // Directories have no meaningful byte count; the `..` row shows none.

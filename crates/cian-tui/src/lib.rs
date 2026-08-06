@@ -31,8 +31,9 @@ mod theme;
 use theme::*;
 
 mod util;
+use cian_lua::glob_match;
 use util::{
-    centered_rect, glob_match, order_pos, pad_to, truncate, truncate_middle, union_rect,
+    centered_rect, fit, order_pos, pad_left, pad_to, truncate, truncate_middle, union_rect,
     viewer_charwise, viewer_find, viewer_match_bracket, viewer_paragraph, viewer_word_back,
     viewer_word_forward, vlen, width, wrap_str,
 };
@@ -2801,6 +2802,11 @@ fn grid_pos(inner: Rect, col: u16, row: u16) -> (u16, u16) {
 /// escape). On Windows the shell is usually PowerShell or cmd, whose quoting
 /// differs, but a path with no odd characters passes through either way and
 /// this at least keeps spaces together.
+///
+/// Deliberately not `cian_scp::shell_quote`, which quotes unconditionally. The
+/// result here is spliced into a command line the user reads and edits (`%f`,
+/// `%d`), so an ordinary path is left bare rather than dressed in quotes it
+/// does not need.
 fn shell_quote(s: &str) -> String {
     if s.is_empty() {
         return String::new();

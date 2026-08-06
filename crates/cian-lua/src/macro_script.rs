@@ -24,6 +24,7 @@
 //! `std`), so it never needs to reach back into the TUI while running; the caller
 //! just applies the [`Outcome`] (reload the panes, show the messages) afterward.
 
+use crate::{glob_match, home_dir};
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -134,12 +135,6 @@ fn resolve(base: &Path, raw: &str) -> PathBuf {
     }
 }
 
-fn home_dir() -> Option<PathBuf> {
-    std::env::var_os("HOME")
-        .or_else(|| std::env::var_os("USERPROFILE"))
-        .map(PathBuf::from)
-}
-
 /// Read a path argument as one or many paths (a string, or an array of strings).
 fn paths_arg(base: &Path, v: &Value) -> mlua::Result<Vec<PathBuf>> {
     match v {
@@ -159,33 +154,6 @@ fn paths_arg(base: &Path, v: &Value) -> mlua::Result<Vec<PathBuf>> {
     }
 }
 
-/// Case-insensitive `*`/`?` glob of a single filename component.
-fn glob_match(pat: &str, name: &str) -> bool {
-    let (p, n): (Vec<char>, Vec<char>) =
-        (pat.to_lowercase().chars().collect(), name.to_lowercase().chars().collect());
-    // Classic iterative wildcard match with backtracking on `*`.
-    let (mut pi, mut ni, mut star, mut mark) = (0usize, 0usize, None, 0usize);
-    while ni < n.len() {
-        if pi < p.len() && (p[pi] == '?' || p[pi] == n[ni]) {
-            pi += 1;
-            ni += 1;
-        } else if pi < p.len() && p[pi] == '*' {
-            star = Some(pi);
-            mark = ni;
-            pi += 1;
-        } else if let Some(sp) = star {
-            pi = sp + 1;
-            mark += 1;
-            ni = mark;
-        } else {
-            return false;
-        }
-    }
-    while pi < p.len() && p[pi] == '*' {
-        pi += 1;
-    }
-    pi == p.len()
-}
 
 fn build_cx(lua: &Lua, shared: &Rc<RefCell<Shared>>) -> mlua::Result<Table> {
     let cx = lua.create_table()?;

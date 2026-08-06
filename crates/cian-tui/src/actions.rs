@@ -1458,9 +1458,9 @@ impl App {
                         format!("{:>10}", cian_core::human_size(a.size.unwrap_or(0)))
                     };
                     let owner = a.owner.as_ref().map(|o| format!("  owner {}", o)).unwrap_or_default();
-                    lines.push(format!("{:<28} {}  {}{}", truncate(&name, 28), a.describe(), size, owner));
+                    lines.push(format!("{} {}  {}{}", fit(&name, 28), a.describe(), size, owner));
                 }
-                Err(e) => lines.push(format!("{:<28} {}", truncate(&name, 28), e)),
+                Err(e) => lines.push(format!("{} {}", fit(&name, 28), e)),
             }
         }
         if paths.len() > limit {

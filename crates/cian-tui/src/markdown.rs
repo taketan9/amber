@@ -13,7 +13,7 @@ use unicode_width::UnicodeWidthStr;
 use crate::render::readable_on;
 use crate::theme;
 use crate::theme::surface;
-use crate::util::wrap_str;
+use crate::util::{pad_left, pad_to, truncate, wrap_str};
 
 /// Column alignment for a pipe-table, from its `:---:` separator row.
 #[derive(Clone, Copy, PartialEq)]
@@ -74,35 +74,13 @@ fn elevate(c: Color, n: u8) -> Color {
     }
 }
 
-/// Truncate `s` to `w` display columns, ending with `…` if it was cut.
-fn clip_width(s: &str, w: usize) -> String {
-    if s.width() <= w {
-        return s.to_string();
-    }
-    if w == 0 {
-        return String::new();
-    }
-    let mut out = String::new();
-    let mut used = 0;
-    for ch in s.chars() {
-        let cw = ch.to_string().width();
-        if used + cw > w.saturating_sub(1) {
-            break;
-        }
-        out.push(ch);
-        used += cw;
-    }
-    out.push('…');
-    out
-}
-
 /// Pad `s` to `w` display columns per `align` (assumes `s.width() <= w`).
 fn pad_align(s: &str, w: usize, align: Align) -> String {
-    let gap = w.saturating_sub(s.width());
     match align {
-        Align::Left => format!("{s}{}", " ".repeat(gap)),
-        Align::Right => format!("{}{s}", " ".repeat(gap)),
+        Align::Left => pad_to(s, w),
+        Align::Right => pad_left(s, w),
         Align::Center => {
+            let gap = w.saturating_sub(s.width());
             let l = gap / 2;
             format!("{}{s}{}", " ".repeat(l), " ".repeat(gap - l))
         }
@@ -158,7 +136,7 @@ fn render_table(
     let data_row = |cells: &dyn Fn(usize) -> String, style: Style| {
         let mut spans = vec![Span::styled("│".to_string(), border)];
         for (i, w) in colw.iter().enumerate() {
-            let text = clip_width(&cells(i), *w);
+            let text = truncate(&cells(i), *w);
             spans.push(Span::styled(format!(" {} ", pad_align(&text, *w, align(i))), style));
             spans.push(Span::styled("│".to_string(), border));
         }

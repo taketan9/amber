@@ -1,39 +1,9 @@
-//! Pure, self-contained helpers shared across the TUI: glob matching, display
-//! wrapping, and the F3 viewer's cursor/selection geometry. Nothing here touches
+//! Pure, self-contained helpers shared across the TUI: display wrapping and
+//! padding, and the F3 viewer's cursor/selection geometry. Nothing here touches
 //! `App` state, so it lives apart from the main file for readability.
 
 use unicode_width::UnicodeWidthStr;
 use ratatui::layout::Rect;
-
-/// Shell-style wildcard match: `*` matches any run, `?` any one char.
-/// Both `pat` and `name` should already be case folded to compare.
-pub(crate) fn glob_match(pat: &str, name: &str) -> bool {
-    let p: Vec<char> = pat.chars().collect();
-    let s: Vec<char> = name.chars().collect();
-    // Classic two-pointer glob with backtracking on the last `*`.
-    let (mut pi, mut si) = (0usize, 0usize);
-    let (mut star, mut mark) = (None, 0usize);
-    while si < s.len() {
-        if pi < p.len() && (p[pi] == '?' || p[pi] == s[si]) {
-            pi += 1;
-            si += 1;
-        } else if pi < p.len() && p[pi] == '*' {
-            star = Some(pi);
-            mark = si;
-            pi += 1;
-        } else if let Some(sp) = star {
-            pi = sp + 1;
-            mark += 1;
-            si = mark;
-        } else {
-            return false;
-        }
-    }
-    while pi < p.len() && p[pi] == '*' {
-        pi += 1;
-    }
-    pi == p.len()
-}
 
 /// Break `s` into chunks no wider than `width` display columns, on the char
 /// boundary (no hyphenation). A blank string yields one empty chunk so the line
@@ -308,13 +278,39 @@ pub(crate) fn viewer_charwise(lines: &[String], s: (usize, usize), e: (usize, us
     out.join("\n")
 }
 
+/// Shorten to `max` display cells, ending with `…` if anything was cut.
+///
+/// Cells, not characters, for the reason [`width`] gives: a 28-character
+/// Japanese name is 56 columns wide, so cutting by `chars().count()` leaves
+/// whatever follows it in the row misaligned and pushed off the right edge.
 pub(crate) fn truncate(s: &str, max: usize) -> String {
-    if s.chars().count() <= max {
-        s.to_string()
-    } else {
-        let cut: String = s.chars().take(max.saturating_sub(1)).collect();
-        format!("{}…", cut)
+    if width(s) <= max {
+        return s.to_string();
     }
+    if max == 0 {
+        return String::new();
+    }
+    // One cell goes to the ellipsis.
+    let (mut out, mut used) = (String::new(), 0usize);
+    for c in s.chars() {
+        let cw = width(c.to_string().as_str());
+        if used + cw > max - 1 {
+            break;
+        }
+        used += cw;
+        out.push(c);
+    }
+    out.push('…');
+    out
+}
+
+/// Truncate to `w` display cells and pad back out to exactly `w`.
+///
+/// The column idiom. `format!("{:<w$}", …)` pads by character count, so pairing
+/// it with a width-aware truncate still misaligns wide text — the two halves
+/// must agree on the unit, and this keeps them together.
+pub(crate) fn fit(s: &str, w: usize) -> String {
+    pad_to(&truncate(s, w), w)
 }
 
 /// Display width of a string in terminal cells.
@@ -333,6 +329,11 @@ pub(crate) fn pad_to(s: &str, w: usize) -> String {
         out.push(' ');
     }
     out
+}
+
+/// Right-align within `w` display cells (pad on the left).
+pub(crate) fn pad_left(s: &str, w: usize) -> String {
+    format!("{}{}", " ".repeat(w.saturating_sub(width(s))), s)
 }
 
 /// Shorten from the middle, keeping both ends.

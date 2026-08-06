@@ -296,7 +296,40 @@ impl Config {
 }
 
 /// The user's home directory: `$HOME`, or `$USERPROFILE` on Windows.
-fn home_dir() -> Option<PathBuf> {
+/// Case-insensitive `*`/`?` glob of a single filename component.
+///
+/// Case-insensitive because both callers want it that way: macro scripts match
+/// `*.log` against `app.LOG`, and `:mark` is typed in a hurry.
+pub fn glob_match(pat: &str, name: &str) -> bool {
+    let (p, n): (Vec<char>, Vec<char>) =
+        (pat.to_lowercase().chars().collect(), name.to_lowercase().chars().collect());
+    // Classic iterative wildcard match with backtracking on `*`.
+    let (mut pi, mut ni, mut star, mut mark) = (0usize, 0usize, None, 0usize);
+    while ni < n.len() {
+        if pi < p.len() && (p[pi] == '?' || p[pi] == n[ni]) {
+            pi += 1;
+            ni += 1;
+        } else if pi < p.len() && p[pi] == '*' {
+            star = Some(pi);
+            mark = ni;
+            pi += 1;
+        } else if let Some(sp) = star {
+            pi = sp + 1;
+            mark += 1;
+            ni = mark;
+        } else {
+            return false;
+        }
+    }
+    while pi < p.len() && p[pi] == '*' {
+        pi += 1;
+    }
+    pi == p.len()
+}
+
+/// The user's home directory. `HOME` everywhere but Windows, which sets
+/// `USERPROFILE` instead.
+pub(crate) fn home_dir() -> Option<PathBuf> {
     std::env::var_os("HOME")
         .or_else(|| std::env::var_os("USERPROFILE"))
         .map(PathBuf::from)
