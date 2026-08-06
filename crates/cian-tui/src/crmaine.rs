@@ -706,6 +706,16 @@ impl App {
         if path == "/agent" {
             body["history"] = history;
         }
+        // Images pasted into the chat (Alt+V). crmaine runs on this machine, so
+        // it reads the files itself and does the base64/Vision part server-side
+        // — cian only hands over the paths. Cleared once they're on their way.
+        if !self.chat_attachments.is_empty() {
+            let files: Vec<String> = std::mem::take(&mut self.chat_attachments)
+                .iter()
+                .map(|p| p.to_string_lossy().into_owned())
+                .collect();
+            body["attached_files"] = serde_json::json!(files);
+        }
         let body = body.to_string();
         let (tx, rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || {

@@ -60,6 +60,10 @@ struct ChatRequest<'a> {
     api_key: &'a str,
     api_base_url: &'a str,
     max_tokens: u32,
+    /// Local image file paths to attach to the last user turn (Vision). The
+    /// helper reads and base64-encodes them; empty when there are none.
+    #[serde(skip_serializing_if = "<[String]>::is_empty")]
+    images: &'a [String],
 }
 
 #[derive(Serialize)]
@@ -130,7 +134,7 @@ pub fn available(cfg: &AiConfig) -> bool {
 
 /// Send a chat turn and return the assistant's reply. Blocks on the network, so
 /// callers run it on a worker thread.
-pub fn chat(cfg: &AiConfig, system: &str, user: &str) -> Result<String> {
+pub fn chat(cfg: &AiConfig, system: &str, user: &str, images: &[String]) -> Result<String> {
     let script = script_path()?;
     let mut messages = Vec::new();
     if !system.is_empty() {
@@ -146,6 +150,7 @@ pub fn chat(cfg: &AiConfig, system: &str, user: &str) -> Result<String> {
         api_key: &cfg.api_key,
         api_base_url: &cfg.api_base_url,
         max_tokens: 1024,
+        images,
     };
     let body = serde_json::to_vec(&req)?;
 
@@ -185,7 +190,7 @@ mod tests {
         }
         let cfg = AiConfig { python: "python3".into(), auth_mode: "mock".into(), ..Default::default() };
         assert!(available(&cfg), "mock check passes");
-        let reply = chat(&cfg, "you are terse", "hello there").unwrap();
+        let reply = chat(&cfg, "you are terse", "hello there", &[]).unwrap();
         assert_eq!(reply, "[mock] hello there", "the helper echoed the last message");
     }
 }

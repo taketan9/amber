@@ -432,9 +432,19 @@ impl App {
             self.message = Some("AI is busy".into());
             return;
         }
+        // Pasted images ride along with a chat turn only: the structured
+        // purposes parse the reply and have no user-visible place to attach one.
+        let images: Vec<String> = if matches!(purpose, AiPurpose::Chat) {
+            std::mem::take(&mut self.chat_attachments)
+                .iter()
+                .map(|p| p.to_string_lossy().into_owned())
+                .collect()
+        } else {
+            Vec::new()
+        };
         let (tx, rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
-            let r = cian_ai::chat(&cfg, &system, &user).map_err(|e| e.to_string());
+            let r = cian_ai::chat(&cfg, &system, &user, &images).map_err(|e| e.to_string());
             let _ = tx.send(r);
         });
         self.ai_job = Some(AiJob { rx, purpose });
@@ -444,6 +454,9 @@ impl App {
     /// answer in it) into the history so switching or restarting never loses it.
     pub(crate) fn start_ai_chat(&mut self, mode: ChatMode, log: Vec<ChatMsg>, pending: bool) {
         self.archive_current_ai_chat();
+        // A fresh conversation starts with no attachments: an image pasted for
+        // the old one must not leak into the new one.
+        self.chat_attachments.clear();
         self.popup =
             Popup::AiChat { input: String::new(), log, scroll: usize::MAX, pending, sel: None, mode };
     }
@@ -1186,6 +1199,46 @@ impl App {
         if let Popup::AiChat { sel, .. } = &mut self.popup {
             *sel = None;
         }
+    }
+
+    /// Attach the image on the system clipboard to the open chat (Alt+V), so a
+    /// screenshot can be asked about. Written out as a PNG under the temp dir
+    /// because both backends want a file path: crmaine reads it server-side,
+    /// and the Simple AI helper base64s it into the request. Alt rather than
+    /// Ctrl/Cmd+V — the terminal claims those for pasting text.
+    pub(crate) fn attach_clipboard_image(&mut self) {
+        let Some(cb) = self.clipboard.as_mut() else {
+            self.message = Some(tr(self.lang, "no clipboard", "クリップボードなし").into());
+            return;
+        };
+        let img = match cb.get_image() {
+            Ok(i) => i,
+            Err(_) => {
+                self.message =
+                    Some(tr(self.lang, "clipboard has no image", "クリップボードに画像なし").into());
+                return;
+            }
+        };
+        let (w, h) = (img.width as u32, img.height as u32);
+        let Some(buf) = image::RgbaImage::from_raw(w, h, img.bytes.into_owned()) else {
+            self.message = Some(tr(self.lang, "unreadable image", "画像を読めません").into());
+            return;
+        };
+        let dir = std::env::temp_dir().join("cian-paste");
+        if std::fs::create_dir_all(&dir).is_err() {
+            self.message = Some(tr(self.lang, "cannot write temp file", "一時ファイルを作れません").into());
+            return;
+        }
+        // Named off the monotonic clock rather than a per-question index: the
+        // list is emptied on send, so an index would reuse the name of a file
+        // crmaine may still be reading out of the temp dir.
+        let path = dir.join(format!("paste-{}.png", self.startup_at.elapsed().as_nanos()));
+        if buf.save(&path).is_err() {
+            self.message = Some(tr(self.lang, "cannot write temp file", "一時ファイルを作れません").into());
+            return;
+        }
+        self.chat_attachments.push(path);
+        self.message = Some(format!("📎 image attached ({w}×{h})"));
     }
 
     /// Drain the AI worker and route the reply by its purpose.

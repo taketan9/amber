@@ -2047,8 +2047,8 @@ fn draw_ai_chat(f: &mut Frame, area: Rect, app: &mut App) {
         ]))
         .title_bottom(tr(
             lang,
-            " Enter=send  Shift+Enter=newline  Ctrl+R=history  Ctrl+↑↓=rate  Esc=stop/close ",
-            " Enter=送信  Shift+Enter=改行  Ctrl+R=履歴  Ctrl+↑↓=評価  Esc=中断/閉じる ",
+            " Enter=send  Shift+Enter=newline  Alt+V=image  Ctrl+R=history  Ctrl+↑↓=rate  Esc=stop/close ",
+            " Enter=送信  Shift+Enter=改行  Alt+V=画像  Ctrl+R=履歴  Ctrl+↑↓=評価  Esc=中断/閉じる ",
         ));
     let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
     f.render_widget(block, rect);
@@ -2063,7 +2063,11 @@ fn draw_ai_chat(f: &mut Frame, area: Rect, app: &mut App) {
     } else {
         1
     };
-    let view_h = inner.height.saturating_sub(input_rows as u16) as usize;
+    // Pasted images get their own row above the input, so the count is visible
+    // before sending rather than only in the transient status message.
+    let attach_n = app.chat_attachments.len();
+    let attach_rows = u16::from(attach_n > 0);
+    let view_h = inner.height.saturating_sub(input_rows as u16 + attach_rows) as usize;
 
     let mut flat: Vec<String> = Vec::new();
     let mut shown: Vec<Line> = Vec::new();
@@ -2168,6 +2172,20 @@ fn draw_ai_chat(f: &mut Frame, area: Rect, app: &mut App) {
     app.ai_lines = flat;
 
     f.render_widget(Paragraph::new(shown), app.ai_rect);
+    if attach_rows > 0 {
+        let label = match lang {
+            Lang::Ja => format!("画像 {attach_n} 枚"),
+            Lang::En if attach_n == 1 => "1 image".to_string(),
+            Lang::En => format!("{attach_n} images"),
+        };
+        f.render_widget(
+            Paragraph::new(Line::from(Span::styled(
+                format!("📎 {label}"),
+                Style::default().fg(carmine).add_modifier(Modifier::BOLD),
+            ))),
+            Rect::new(inner.x, inner.y + view_h as u16, inner.width, 1),
+        );
+    }
     // The input, possibly several lines. A "> " prompt on the first row, aligned
     // continuation on the rest, and a block caret at the very end.
     let in_style = Style::default()
@@ -2184,7 +2202,7 @@ fn draw_ai_chat(f: &mut Frame, area: Rect, app: &mut App) {
     }
     f.render_widget(
         Paragraph::new(in_lines).style(Style::default().bg(theme().selected_bg)),
-        Rect::new(inner.x, inner.y + view_h as u16, inner.width, input_rows as u16),
+        Rect::new(inner.x, inner.y + view_h as u16 + attach_rows, inner.width, input_rows as u16),
     );
 }
 

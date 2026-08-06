@@ -311,6 +311,9 @@ impl App {
                         input.push_str(t.trim_end_matches(['\r', '\n']));
                     }
                 }
+                // Alt+V attaches the clipboard's image to the question. Ctrl/Cmd+V
+                // can't do it: the terminal intercepts those to paste text.
+                KeyCode::Char('v') if alt => self.attach_clipboard_image(),
                 // Ctrl+Y copies the current selection, or the last reply if none.
                 KeyCode::Char('y') if ctrl => self.copy_ai_text(),
                 KeyCode::Char('c') if ctrl => self.copy_ai_text(),

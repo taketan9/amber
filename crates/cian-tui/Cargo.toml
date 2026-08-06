@@ -21,10 +21,9 @@ serde_yml  = { workspace = true }
 serde     = { workspace = true }
 serde_json = { workspace = true }
 tui-term  = { workspace = true }
+image     = { workspace = true }
 unicode-width = "0.1"
 
 [dev-dependencies]
 tempfile = "3.27.0"
 zip = { version = "4.2.0", default-features = false, features = ["deflate"] }
-# Used only by tests, to synthesise a PNG for the image-preview test.
-image = { version = "0.25", default-features = false, features = ["png"] }

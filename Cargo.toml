@@ -36,6 +36,8 @@ toml       = "0.8"
 serde_yml  = "0.0.12"
 serde     = { version = "1", features = ["derive"] }
 serde_json = "1"
+# Only the PNG encoder: pasted clipboard images are written out as PNG.
+image = { version = "0.25", default-features = false, features = ["png"] }
 # Embedded shell pane. tui-term 0.2.x targets ratatui 0.29 / vt100 0.15 /
 # portable-pty 0.8 (the 0.3.x line jumps to the ratatui 0.30 split crates).
 # vt100 must stay 0.15 so its Screen type matches the one tui-term renders.

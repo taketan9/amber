@@ -24,7 +24,9 @@ Everything is one process per call; cian runs it on a worker thread. Azure
 packages are imported lazily so `--check` for apikey/mock does not need them and
 so a broken azure install cannot hang plain apikey use.
 """
+import base64
 import json
+import os
 import sys
 
 
@@ -121,6 +123,8 @@ def main():
             last = messages[-1]["content"] if messages else ""
             emit({"ok": True, "content": f"[mock] {last}"})
             return
+        # Attach any pasted images to the last user turn (Vision).
+        messages = attach_images(messages, req.get("images", []))
         client = build_client(req)
         model = req.get("model", "gpt-5-mini")
         resp = create_chat(client, model, messages, req.get("max_tokens") or 0)
@@ -129,6 +133,37 @@ def main():
     except Exception as e:  # noqa: BLE001
         emit({"ok": False, "error": describe_error(e, req)})
         sys.exit(1)
+
+
+def attach_images(messages, image_paths):
+    """Fold local image files into the last user message as multimodal content
+    (`[{type:text},{type:image_url, image_url:{url:data-uri}}]`), so a vision
+    model can see them. A no-op when there are no images. Needs a vision-capable
+    model (GPT-4o / GPT-5 class)."""
+    if not image_paths:
+        return messages
+    mimes = {
+        ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+        ".gif": "image/gif", ".webp": "image/webp", ".bmp": "image/bmp",
+    }
+    for m in reversed(messages):
+        if m.get("role") != "user":
+            continue
+        text = m.get("content", "")
+        content = [{"type": "text", "text": text if isinstance(text, str) else ""}]
+        for p in image_paths:
+            try:
+                with open(p, "rb") as fh:
+                    data = fh.read()
+                ext = os.path.splitext(p)[1].lower()
+                mime = mimes.get(ext, "image/png")
+                uri = "data:%s;base64,%s" % (mime, base64.b64encode(data).decode("ascii"))
+                content.append({"type": "image_url", "image_url": {"url": uri}})
+            except Exception:  # noqa: BLE001
+                pass
+        m["content"] = content
+        break
+    return messages
 
 
 def create_chat(client, model, messages, max_out):

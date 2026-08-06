@@ -601,6 +601,36 @@
     }
 
     #[test]
+    fn pasted_images_ride_along_with_a_chat_turn_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().to_path_buf();
+        let mut config = cian_lua::Config::default();
+        config.ai = Some(cian_lua::AiOptions {
+            python: "python3".into(),
+            auth_mode: "mock".into(),
+            ..Default::default()
+        });
+        let mut app = App::new(p.clone(), p, config).unwrap();
+        app.ai_ready = Some(true);
+
+        // A structured purpose parses its reply and has no attachment UI, so it
+        // must leave a pending image alone rather than consuming it.
+        app.chat_attachments.push(std::path::PathBuf::from("/tmp/shot.png"));
+        app.ai_request(AiPurpose::ShellCommand, "sys".into(), "usr".into());
+        assert_eq!(app.chat_attachments.len(), 1, "a shell-command request keeps the image");
+
+        // A chat turn takes them, so the same image isn't sent twice.
+        app.ai_job = None;
+        app.ai_request(AiPurpose::Chat, "sys".into(), "usr".into());
+        assert!(app.chat_attachments.is_empty(), "the chat turn took the image");
+
+        // Starting a fresh conversation drops anything pasted for the old one.
+        app.chat_attachments.push(std::path::PathBuf::from("/tmp/shot.png"));
+        app.start_ai_chat(ChatMode::Ai, Vec::new(), false);
+        assert!(app.chat_attachments.is_empty(), "a new chat starts empty");
+    }
+
+    #[test]
     fn ai_chat_copy_uses_selection_then_last_reply() {
         let (_d, mut app) = app_with(&["a.txt"]);
         app.popup = Popup::AiChat {
