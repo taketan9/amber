@@ -82,7 +82,7 @@ Press `F3` on a file and cian shows you what's in it, without leaving:
 
 The viewer is vim-flavoured: `h j k l`, `w b`, `0 $`, `gg G`, `Ctrl-d/u` move; `/` searches, `42G` jumps to a line, `%` to the matching bracket. `v` / `V` / `Ctrl-v` select, `y` copies. `e` switches text encoding (UTF-8 / Shift_JIS / UTF-16) if a file decoded wrong.
 
-**Edit in place:** press `i` to edit the file right there (`Ctrl+S` saves in its own encoding, `Esc` leaves). Prefer your own editor? **`E`** (or `:edit`) opens it in `$VISUAL` / `$EDITOR` — or nvim → vim → vi — and reloads when you're back.
+**Edit in place:** the viewer's normal mode carries vim's small change set — `x` `dd` `D` `J` delete and join, `d` cuts a `v`/`V` selection, `u` undoes, and `i` `a` `o` `O` `I` drop into insert (`Ctrl+S` saves in the file's own encoding, `Esc` leaves). Quick config surgery never needs an editor round-trip. Prefer your own editor? **`E`** (or `:edit`) opens it in `$VISUAL` / `$EDITOR` — or nvim → vim → vi — and reloads when you're back.
 
 **Archives, more:** `:zip` / `:tar` / `:targz` bundle the marked files; `:zip -e` makes an encrypted one. `:unzip` (or right-click **▸ Extract here**) unpacks the file under the cursor into a fresh sub-folder. Locked zips still list their members on F3, and extracting one asks for the password first.
 
@@ -117,6 +117,8 @@ Search runs in the background and streams results as it finds them — **Esc** s
 **Duplicates — `:dupes`** (or right-click **Find duplicate files**) finds byte-identical files under the current pane and shows them as a checklist; one per group is kept, the rest go through the normal delete confirmation.
 
 **Bulk rename — `:brename`** renames the marked files by a pattern — no AI, no network. Either a template (`report_{n3}.{ext}` → `report_001.log`, …) or a substitution (`s/IMG/photo/i`). You review `old → new` and tick which to apply.
+
+**Rename in your editor — `:bulkrename`** (or `:vidir`) opens the marked names — or the whole listing — as a text file in your editor, one per line. Edit any of them, save and quit, and each changed line renames that file (swaps included). The batch is all-or-nothing: a duplicate name, a lost line, or a collision cancels the whole thing rather than half-applying. `:cq` cancels.
 
 ---
 
