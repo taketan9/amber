@@ -730,7 +730,11 @@ impl App {
                     Some("md") | Some("markdown") | Some("mkd") | Some("mdown")
                 );
                 let source = view.lines.clone();
-                let editable = matches!(view.kind, cian_core::viewer::ViewKind::Text);
+                // A truncated view (file over VIEW_LIMIT) must never be
+                // editable: saving would write back only the visible 4MB and
+                // silently destroy the rest of the file.
+                let editable =
+                    matches!(view.kind, cian_core::viewer::ViewKind::Text) && !view.truncated;
                 // Highlight recognised code (Markdown keeps its rendered preview).
                 let hl_lang = (!markdown && editable)
                     .then(|| cian_core::highlight::detect(path))
@@ -748,6 +752,7 @@ impl App {
                     find_input: None,
                     find_query: None,
                     count: None,
+                    pending: None,
                     git_lines,
                     markdown,
                     preview: markdown,
@@ -761,6 +766,7 @@ impl App {
                     editable,
                     editing: false,
                     dirty: false,
+                    undo: Vec::new(),
                 }
             }
             Err(e) => self.message = Some(format!("cannot view: {}", e)),
@@ -803,6 +809,7 @@ impl App {
                     find_input: None,
                     find_query: None,
                     count: None,
+                    pending: None,
                     git_lines: std::collections::HashMap::new(),
                     markdown: false,
                     preview: false,
@@ -816,6 +823,7 @@ impl App {
                     editable: false,
                     editing: false,
                     dirty: false,
+                    undo: Vec::new(),
                 };
             }
             Err(e) => self.message = Some(format!("cannot read document: {}", e)),

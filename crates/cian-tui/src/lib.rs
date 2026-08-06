@@ -400,6 +400,8 @@ enum Popup {
         find_query: Option<String>,
         /// A pending numeric count typed before a motion (vim's `42G`).
         count: Option<usize>,
+        /// A pending operator key awaiting its second half (`d` of `dd`).
+        pending: Option<char>,
         /// Per-line git change status vs HEAD (the change gutter), keyed by
         /// 0-based line index. Empty when not tracked or unchanged.
         git_lines: std::collections::HashMap<usize, cian_core::git::LineChange>,
@@ -439,6 +441,10 @@ enum Popup {
         editing: bool,
         /// Unsaved edits are present.
         dirty: bool,
+        /// Undo stack for the built-in editor: whole-buffer snapshots, one per
+        /// normal-mode edit or insert session (vim's coarse units, so `u` after
+        /// typing a paragraph removes the paragraph, not one character).
+        undo: Vec<ViewerSnap>,
     },
     /// The recursive comparison of two directories: a list of differing paths.
     DirCompare {
@@ -639,6 +645,17 @@ enum EncTarget {
     Viewer(Box<Popup>),
     /// A stashed file diff to re-run under the chosen encoding.
     Diff(Box<Popup>),
+}
+
+/// One undo step for the viewer's built-in editor: the buffer and cursor as
+/// they were before an edit. Whole-buffer snapshots are deliberate — the
+/// files edited here are configs and notes, not gigabyte logs (those aren't
+/// `editable`), so simplicity beats a delta encoding.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ViewerSnap {
+    lines: Vec<String>,
+    line: usize,
+    col: usize,
 }
 
 /// The F3 viewer's visual-selection mode, matching vim's three flavours.
@@ -3235,7 +3252,8 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry("G", Some(CursorBottom), "jump to bottom", "末尾へジャンプ"),
                 entry("l, Enter", Some(EnterDir), "enter folder / open file", "フォルダに入る／ファイルを開く"),
                 entry("F3", None, "look inside: text/hex, an image, or an archive's list", "中身を見る：テキスト/16進・画像・書庫の一覧"),
-                entry("  edit in viewer", None, "i = built-in editor (Ctrl+S save, Esc/Q leave), E = external", "ビューア内編集：i 内蔵（Ctrl+S 保存, Esc/Q 終了）／ E 外部エディタ"),
+                entry("  edit in viewer", None, "i/a/o/O/I = insert (Ctrl+S save, Esc leave), E = external editor", "ビューア内編集：i/a/o/O/I 挿入（Ctrl+S 保存, Esc 終了）／ E 外部エディタ"),
+                entry("  normal mode", None, "x/dd/D/J delete·join, u undo, v+d cut selection (d/u scroll via Ctrl)", "ノーマルモード：x/dd/D/J 削除·結合, u 取消, v+d 選択削除（スクロールは Ctrl+d/u）"),
                 entry(":edit", None, "edit the file in your external editor (E in the viewer)", "外部エディタで編集（ビューア内は E）"),
                 entry(":vi / :vim / :nvim", None, "open the file in that editor in a new shell tab", "新規シェルタブでそのエディタでファイルを開く"),
                 entry(":bulkrename", None, "rename marked (or all) files by editing the list in your editor (:brn, :vidir)", "マーク（無ければ全部）の名前一覧をエディタで編集してリネーム（:brn, :vidir）"),

@@ -61,18 +61,23 @@ impl App {
         if !ctrl && !alt && key.code == KeyCode::Char('i')
             && matches!(self.popup, Popup::Viewer { editable: true, .. })
         {
-            if let Popup::Viewer { preview, editing, line, col, scroll, visual, .. } = &mut self.popup {
+            if let Popup::Viewer { preview, editing, line, col, scroll, visual, view, undo, .. } =
+                &mut self.popup
+            {
                 if *preview {
                     *preview = false;
                     (*line, *col, *scroll, *visual) = (0, 0, 0, None);
                 }
+                // One insert session = one undo unit (vim's coarse model).
+                push_viewer_undo(undo, &view.lines, *line, *col);
                 *editing = true;
             }
-            self.message = Some(tr(
-                self.lang,
-                "editing — type to insert, Ctrl+S save, Esc leave",
-                "編集中 — 入力で挿入, Ctrl+S 保存, Esc 終了",
-            ).into());
+            self.entered_editing_message();
+            return Ok(());
+        }
+        // The vim change set (x, dd, o, u, …) works from normal mode on an
+        // editable file; a consumed key stops here.
+        if self.viewer_edit_operator(key) {
             return Ok(());
         }
 
@@ -473,6 +478,247 @@ impl App {
         self.reveal_path_in_pane(&path);
     }
 
+    /// The "editing — …" status line, shared by every way into the editor.
+    fn entered_editing_message(&mut self) {
+        self.message = Some(tr(
+            self.lang,
+            "editing — type to insert, Ctrl+S save, Esc leave",
+            "編集中 — 入力で挿入, Ctrl+S 保存, Esc 終了",
+        ).into());
+    }
+
+    /// vim's small change set from the viewer's normal mode: `x`, `dd`, `D`,
+    /// `J`, `o`/`O`, `a`, `I` and `u` (undo), on an editable non-preview file.
+    /// Returns true when the key was consumed.
+    ///
+    /// Two deliberate deviations, because existing bindings win: `A` stays
+    /// crmaine Coding (append-at-end is `$` then `a`), and on non-editable
+    /// views `d`/`u` keep their pager scrolling — here they are operator and
+    /// undo, with Ctrl+d/Ctrl+u still scrolling as in vim.
+    fn viewer_edit_operator(&mut self, key: KeyEvent) -> bool {
+        if key.modifiers.contains(KeyModifiers::CONTROL) || key.modifiers.contains(KeyModifiers::ALT)
+        {
+            return false;
+        }
+        let body_h = (self.viewer_rect.height as usize).max(1);
+        let mut entered_editing = false;
+        let mut consumed = false;
+        if let Popup::Viewer {
+            view,
+            line,
+            col,
+            goal,
+            scroll,
+            visual,
+            anchor,
+            count,
+            pending,
+            dirty,
+            editing,
+            undo,
+            hl,
+            editable: true,
+            preview: false,
+            ..
+        } = &mut self.popup
+        {
+            let lines = &mut view.lines;
+            if lines.is_empty() {
+                lines.push(String::new());
+            }
+            // An interrupted `dd` cancels the operator; the key then acts
+            // normally (vim's behaviour for an abandoned operator).
+            let was_pending = pending.take();
+            let cnt = |count: &mut Option<usize>| count.take().unwrap_or(1).max(1);
+
+            match key.code {
+                // dd — delete N whole lines. First d only arms the operator.
+                KeyCode::Char('d') if visual.is_none() => {
+                    if was_pending != Some('d') {
+                        *pending = Some('d');
+                        return true;
+                    }
+                    push_viewer_undo(undo, lines, *line, *col);
+                    let n = cnt(count).min(lines.len() - *line);
+                    lines.drain(*line..*line + n);
+                    if lines.is_empty() {
+                        lines.push(String::new());
+                    }
+                    *line = (*line).min(lines.len() - 1);
+                    *col = 0;
+                    *goal = 0;
+                    *dirty = true;
+                    consumed = true;
+                }
+                // d / x in visual mode — delete the selection.
+                KeyCode::Char('d') | KeyCode::Char('x') if visual.is_some() => {
+                    let mode = visual.take().unwrap();
+                    push_viewer_undo(undo, lines, *line, *col);
+                    let (s, e) = crate::util::order_pos(*anchor, (*line, *col));
+                    match mode {
+                        ViewVisual::Line => {
+                            lines.drain(s.0..=e.0.min(lines.len() - 1));
+                            if lines.is_empty() {
+                                lines.push(String::new());
+                            }
+                            *line = s.0.min(lines.len() - 1);
+                            *col = 0;
+                        }
+                        ViewVisual::Char => {
+                            let head: String =
+                                lines[s.0].chars().take(s.1).collect();
+                            let tail: String =
+                                lines[e.0.min(lines.len() - 1)].chars().skip(e.1 + 1).collect();
+                            lines.drain(s.0..=e.0.min(lines.len() - 1));
+                            lines.insert(s.0, head + &tail);
+                            *line = s.0;
+                            *col = s.1.min(lines[s.0].chars().count());
+                        }
+                        // A block delete would need per-line column splicing;
+                        // not worth the code until someone misses it.
+                        ViewVisual::Block => {
+                            *visual = Some(mode);
+                            self.message = Some(tr(
+                                self.lang,
+                                "block delete is not supported",
+                                "矩形削除は未対応",
+                            ).into());
+                            return true;
+                        }
+                    }
+                    *goal = *col;
+                    *dirty = true;
+                    consumed = true;
+                }
+                // x — delete N characters under the cursor.
+                KeyCode::Char('x') => {
+                    let len = lines[*line].chars().count();
+                    if *col < len {
+                        push_viewer_undo(undo, lines, *line, *col);
+                        let n = cnt(count).min(len - *col);
+                        let chs: Vec<char> = lines[*line].chars().collect();
+                        lines[*line] =
+                            chs[..*col].iter().chain(chs[*col + n..].iter()).collect();
+                        let new_len = len - n;
+                        *col = (*col).min(new_len.saturating_sub(1));
+                        *goal = *col;
+                        *dirty = true;
+                    }
+                    consumed = true;
+                }
+                // D — delete to the end of the line.
+                KeyCode::Char('D') => {
+                    push_viewer_undo(undo, lines, *line, *col);
+                    let head: String = lines[*line].chars().take(*col).collect();
+                    lines[*line] = head;
+                    *col = (*col).min(lines[*line].chars().count().saturating_sub(1));
+                    *goal = *col;
+                    *dirty = true;
+                    consumed = true;
+                }
+                // J — join the next line onto this one with a single space.
+                KeyCode::Char('J') => {
+                    if *line + 1 < lines.len() {
+                        push_viewer_undo(undo, lines, *line, *col);
+                        let next = lines.remove(*line + 1);
+                        let cur = lines[*line].trim_end().to_string();
+                        *col = cur.chars().count();
+                        let joined = if cur.is_empty() {
+                            next.trim_start().to_string()
+                        } else if next.trim_start().is_empty() {
+                            cur
+                        } else {
+                            format!("{} {}", cur, next.trim_start())
+                        };
+                        lines[*line] = joined;
+                        *goal = *col;
+                        *dirty = true;
+                    }
+                    consumed = true;
+                }
+                // o / O — open a line below/above and start typing.
+                KeyCode::Char('o') if visual.is_none() => {
+                    push_viewer_undo(undo, lines, *line, *col);
+                    lines.insert(*line + 1, String::new());
+                    *line += 1;
+                    (*col, *goal) = (0, 0);
+                    (*editing, *dirty) = (true, true);
+                    entered_editing = true;
+                    consumed = true;
+                }
+                KeyCode::Char('O') => {
+                    push_viewer_undo(undo, lines, *line, *col);
+                    lines.insert(*line, String::new());
+                    (*col, *goal) = (0, 0);
+                    (*editing, *dirty) = (true, true);
+                    entered_editing = true;
+                    consumed = true;
+                }
+                // a — insert after the cursor (i's sibling; A stays Coding).
+                KeyCode::Char('a') if visual.is_none() => {
+                    push_viewer_undo(undo, lines, *line, *col);
+                    *col = (*col + 1).min(lines[*line].chars().count());
+                    *goal = *col;
+                    *editing = true;
+                    entered_editing = true;
+                    consumed = true;
+                }
+                // I — insert at the first non-blank of the line.
+                KeyCode::Char('I') => {
+                    push_viewer_undo(undo, lines, *line, *col);
+                    *col = lines[*line]
+                        .chars()
+                        .position(|c| !c.is_whitespace())
+                        .unwrap_or(0);
+                    *goal = *col;
+                    *editing = true;
+                    entered_editing = true;
+                    consumed = true;
+                }
+                // u — undo the last change (Ctrl+u still scrolls).
+                KeyCode::Char('u') => {
+                    match undo.pop() {
+                        Some(snap) => {
+                            view.lines = snap.lines;
+                            *line = snap.line.min(view.lines.len().saturating_sub(1));
+                            *col = snap.col;
+                            *goal = *col;
+                            // The stack bottom is the buffer as loaded, so an
+                            // emptied stack means we are back at the original.
+                            *dirty = !undo.is_empty();
+                        }
+                        None => {
+                            self.message = Some(tr(
+                                self.lang,
+                                "already at oldest change",
+                                "これ以上戻れません",
+                            ).into());
+                            return true;
+                        }
+                    }
+                    consumed = true;
+                }
+                _ => return false,
+            }
+            if consumed {
+                // The buffer changed shape: stale highlight, cursor may be
+                // off-screen.
+                hl.clear();
+                let last = view.lines.len().saturating_sub(1);
+                *line = (*line).min(last);
+                if *line < *scroll {
+                    *scroll = *line;
+                } else if *line >= *scroll + body_h {
+                    *scroll = *line + 1 - body_h;
+                }
+            }
+        }
+        if entered_editing {
+            self.entered_editing_message();
+        }
+        consumed
+    }
+
     /// The built-in plain-text editor: modeless while `editing` — printable keys
     /// insert, the usual editing/motion keys apply, Ctrl+S saves, Esc leaves.
     fn handle_editor_key(&mut self, key: KeyEvent) -> Result<()> {
@@ -792,6 +1038,19 @@ impl App {
 }
 
 /// Pull the contents of each ```mermaid ...``` fenced block out of `source`.
+/// Push an undo snapshot, bounding what the stack can hold: 100 steps, and
+/// oldest-first eviction once the retained buffers pass ~32MB (a viewer file
+/// is capped at 4MB, so a burst of whole-file edits cannot pile up memory).
+fn push_viewer_undo(undo: &mut Vec<ViewerSnap>, lines: &[String], line: usize, col: usize) {
+    undo.push(ViewerSnap { lines: lines.to_vec(), line, col });
+    let bytes = |s: &ViewerSnap| s.lines.iter().map(|l| l.len() + 1).sum::<usize>();
+    let mut total: usize = undo.iter().map(bytes).sum();
+    while undo.len() > 100 || (total > 32 * 1024 * 1024 && undo.len() > 1) {
+        total -= bytes(&undo[0]);
+        undo.remove(0);
+    }
+}
+
 fn extract_mermaid_blocks(source: &[String]) -> Vec<String> {
     let mut blocks = Vec::new();
     let mut i = 0;

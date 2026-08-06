@@ -5674,6 +5674,128 @@
         assert!(matches!(app.popup, Popup::None));
     }
 
+    /// Open note.txt ("alpha…delta") in the viewer, cursor on line 0.
+    fn viewer_on(lines: &str) -> (tempfile::TempDir, App) {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::write(d.path().join("note.txt"), lines).unwrap();
+        let p = d.path().to_path_buf();
+        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        app.active_pane_mut().unwrap().cursor =
+            app.active_pane().unwrap().entries.iter().position(|e| e.name == "note.txt").unwrap();
+        app.handle_key(code(KeyCode::F(3))).unwrap();
+        let _ = render(&mut app, 100, 30);
+        (d, app)
+    }
+
+    fn viewer_lines(app: &App) -> Vec<String> {
+        match &app.popup {
+            Popup::Viewer { view, .. } => view.lines.clone(),
+            other => panic!("not a viewer: {other:?}"),
+        }
+    }
+
+    /// The normal-mode change set: dd/x/J/D mutate in place, o opens a line
+    /// and drops into insert, and `u` walks it all back — one unit per change,
+    /// with `dirty` clearing once the stack drains to the original.
+    #[test]
+    fn viewer_normal_mode_operators_edit_and_undo() {
+        let (_d, mut app) = viewer_on("alpha\nbravo\ncharlie\n");
+
+        // dd deletes the line under the cursor.
+        app.handle_key(key('d')).unwrap();
+        app.handle_key(key('d')).unwrap();
+        assert_eq!(viewer_lines(&app), ["bravo", "charlie"], "dd removed line 0");
+
+        // x deletes the character under the cursor.
+        app.handle_key(key('x')).unwrap();
+        assert_eq!(viewer_lines(&app)[0], "ravo", "x ate the b");
+
+        // J joins the next line up with a space.
+        app.handle_key(key('J')).unwrap();
+        assert_eq!(viewer_lines(&app), ["ravo charlie"], "J joined");
+
+        // o opens a line below and enters insert mode; typing lands there.
+        app.handle_key(key('o')).unwrap();
+        assert!(matches!(app.popup, Popup::Viewer { editing: true, .. }), "o → insert mode");
+        app.handle_key(key('z')).unwrap();
+        app.handle_key(code(KeyCode::Esc)).unwrap();
+        assert_eq!(viewer_lines(&app), ["ravo charlie", "z"]);
+
+        // u, u, u, u: each change was one unit (the whole o-session is one).
+        for expect in [
+            vec!["ravo charlie".to_string()],
+            vec!["ravo".into(), "charlie".into()],
+            vec!["bravo".into(), "charlie".into()],
+            vec!["alpha".into(), "bravo".into(), "charlie".into()],
+        ] {
+            app.handle_key(key('u')).unwrap();
+            assert_eq!(viewer_lines(&app), expect);
+        }
+        assert!(
+            matches!(app.popup, Popup::Viewer { dirty: false, .. }),
+            "undone to the original → clean, so Esc closes without a warning"
+        );
+
+        // One more u: nothing left, and it says so rather than scrolling.
+        app.handle_key(key('u')).unwrap();
+        let msg = app.message.clone().unwrap_or_default();
+        assert!(msg.contains("oldest") || msg.contains("戻れません"), "says so: {msg}");
+    }
+
+    /// V + d deletes the selected lines; v + d splices within lines.
+    #[test]
+    fn viewer_visual_delete() {
+        let (_d, mut app) = viewer_on("one\ntwo\nthree\nfour\n");
+        // V j d: delete lines 0-1.
+        app.handle_key(key('V')).unwrap();
+        app.handle_key(key('j')).unwrap();
+        app.handle_key(key('d')).unwrap();
+        assert_eq!(viewer_lines(&app), ["three", "four"]);
+
+        // v l l d on "three": delete chars 0..=2 → "ee".
+        app.handle_key(key('v')).unwrap();
+        app.handle_key(key('l')).unwrap();
+        app.handle_key(key('l')).unwrap();
+        app.handle_key(key('d')).unwrap();
+        assert_eq!(viewer_lines(&app), ["ee", "four"]);
+
+        // u twice restores everything.
+        app.handle_key(key('u')).unwrap();
+        app.handle_key(key('u')).unwrap();
+        assert_eq!(viewer_lines(&app), ["one", "two", "three", "four"]);
+    }
+
+    /// d and u still scroll on a non-editable view (here: the hex dump), so
+    /// the pager reflexes survive where there is nothing to edit.
+    #[test]
+    fn viewer_d_and_u_still_scroll_where_not_editable() {
+        let d = tempfile::tempdir().unwrap();
+        // A binary file (NUL bytes) opens as a hex dump, which is not editable.
+        let mut bytes = vec![0u8; 4096];
+        bytes[1] = 1;
+        std::fs::write(d.path().join("blob.bin"), &bytes).unwrap();
+        let p = d.path().to_path_buf();
+        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        app.active_pane_mut().unwrap().cursor =
+            app.active_pane().unwrap().entries.iter().position(|e| e.name == "blob.bin").unwrap();
+        app.handle_key(code(KeyCode::F(3))).unwrap();
+        let _ = render(&mut app, 100, 30);
+        assert!(
+            matches!(app.popup, Popup::Viewer { editable: false, .. }),
+            "hex dump is not editable"
+        );
+        let before = match &app.popup {
+            Popup::Viewer { line, .. } => *line,
+            _ => unreachable!(),
+        };
+        app.handle_key(key('d')).unwrap();
+        let after = match &app.popup {
+            Popup::Viewer { line, .. } => *line,
+            _ => unreachable!(),
+        };
+        assert!(after > before, "d scrolled half a page, as before");
+    }
+
     #[test]
     fn the_viewer_refuses_to_drop_unsaved_edits() {
         let d = tempfile::tempdir().unwrap();

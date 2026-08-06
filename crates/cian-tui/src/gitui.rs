@@ -285,6 +285,7 @@ impl App {
             find_input: None,
             find_query: None,
             count: None,
+            pending: None,
             git_lines: std::collections::HashMap::new(),
             markdown: false,
             preview: false,
@@ -297,6 +298,7 @@ impl App {
             editable: false,
             editing: false,
             dirty: false,
+            undo: Vec::new(),
         };
     }
 
