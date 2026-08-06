@@ -2607,6 +2607,35 @@ fn draw_rename_review(f: &mut Frame, area: Rect, app: &mut App) {
     f.render_widget(Paragraph::new(rows), inner);
 }
 
+/// The frame nearly every popup wears: a centred `w`×`h` box, cleared, bordered
+/// in the accent colour, with `title` along the top and `footer` along the
+/// bottom. Returns the inner area to draw into.
+///
+/// Pass `""` for a title or footer the popup does not want — an empty one draws
+/// nothing. The handful of popups that need something else (their own anchor
+/// rect, a filled background, a tighter margin) still build their own block;
+/// this is the common case, not a mandate.
+fn popup_frame<'a>(
+    f: &mut Frame,
+    area: Rect,
+    w: u16,
+    h: u16,
+    title: impl Into<Line<'a>>,
+    footer: impl Into<Line<'a>>,
+) -> Rect {
+    let rect = centered_rect(w, h, area);
+    f.render_widget(Clear, rect);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(border_type())
+        .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
+        .title(title)
+        .title_bottom(footer);
+    let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
+    f.render_widget(block, rect);
+    inner
+}
+
 #[allow(clippy::too_many_arguments)]
 fn draw_popup(
     f: &mut Frame,
@@ -2783,16 +2812,8 @@ fn draw_popup(
             .collect();
         let w = 56u16.min(area.width);
         let h = (matches.len() as u16 + 5).min(area.height.saturating_sub(2)).max(6);
-        let rect = centered_rect(w, h, area);
-        f.render_widget(Clear, rect);
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .border_type(border_type())
-            .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
-            .title(tr(lang, " ssh — host ", " SSH — ホスト "))
-            .title_bottom(tr(lang, " Enter=select  F2=type by hand  Esc ", " Enter=選択  F2=手入力  Esc "));
-        let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
-        f.render_widget(block, rect);
+        let footer = tr(lang, " Enter=select  F2=type by hand  Esc ", " Enter=選択  F2=手入力  Esc ");
+        let inner = popup_frame(f, area, w, h, tr(lang, " ssh — host ", " SSH — ホスト "), footer);
 
         let mut lines = vec![Line::from(Span::styled(
             format!("/{}_", filter),
@@ -2851,15 +2872,7 @@ fn draw_popup(
             .collect();
         let w = 64u16.min(area.width);
         let h = (matches.len() as u16 + 5).min(area.height.saturating_sub(2)).max(6);
-        let rect = centered_rect(w, h, area);
-        f.render_widget(Clear, rect);
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .border_type(border_type())
-            .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
-            .title(tr(lang, " snippets → shell ", " スニペット → シェル "));
-        let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
-        f.render_widget(block, rect);
+        let inner = popup_frame(f, area, w, h, tr(lang, " snippets → shell ", " スニペット → シェル "), "");
 
         let mut lines = vec![Line::from(Span::styled(
             format!("/{}_", filter),
@@ -2908,8 +2921,6 @@ fn draw_popup(
         let th = theme();
         let w = 70u16.min(area.width);
         let h = area.height.saturating_sub(4).clamp(8, 30);
-        let rect = centered_rect(w, h, area);
-        f.render_widget(Clear, rect);
         let title = if uploading {
             format!(" upload → {}  :  {} ", label, cwd)
         } else {
@@ -2928,14 +2939,7 @@ fn draw_popup(
                 " Enter=開く/選択  Space=選択  -=上  d=ダウンロード  Esc ",
             )
         };
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .border_type(border_type())
-            .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
-            .title(title)
-            .title_bottom(footer);
-        let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
-        f.render_widget(block, rect);
+        let inner = popup_frame(f, area, w, h, title, footer);
         let view_h = inner.height as usize;
         if *loading {
             f.render_widget(
@@ -3002,15 +3006,7 @@ fn draw_popup(
         let opts_len = 4usize;
         let w = 56u16.min(area.width);
         let h = (opts_len as u16 + 4).min(area.height);
-        let rect = centered_rect(w, h, area);
-        f.render_widget(Clear, rect);
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .border_type(border_type())
-            .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
-            .title(format!(" download {} file(s) to… ", files.len()));
-        let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
-        f.render_widget(block, rect);
+        let inner = popup_frame(f, area, w, h, format!(" download {} file(s) to… ", files.len()), "");
         // Labels only; the actual dirs are resolved when a row is chosen.
         let labels = [
             tr(lang, "Left pane", "左ペイン"),
@@ -3040,15 +3036,7 @@ fn draw_popup(
         let Some(hst) = hosts.get(*host) else { return };
         let w = 40u16.min(area.width);
         let h = (hst.users.len() as u16 + 4).min(area.height.saturating_sub(2)).max(6);
-        let rect = centered_rect(w, h, area);
-        f.render_widget(Clear, rect);
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .border_type(border_type())
-            .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
-            .title(format!(" {} — {} ", tr(lang, "ssh", "SSH"), hst.name));
-        let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
-        f.render_widget(block, rect);
+        let inner = popup_frame(f, area, w, h, format!(" {} — {} ", tr(lang, "ssh", "SSH"), hst.name), "");
 
         let lines: Vec<Line> = hst
             .users
@@ -3088,8 +3076,6 @@ fn draw_popup(
     if let Popup::FindResults { hits, cursor, scroll } = popup {
         let w = 96u16.min(area.width.saturating_sub(2));
         let h = area.height.saturating_sub(4).max(8);
-        let rect = centered_rect(w, h, area);
-        f.render_widget(Clear, rect);
         let title = match find {
             Some((query, root, done, mode)) => {
                 let verb = match mode {
@@ -3110,13 +3096,7 @@ fn draw_popup(
             }
             None => " find ".to_string(),
         };
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .border_type(border_type())
-            .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
-            .title(truncate_middle(&title, w.saturating_sub(4) as usize));
-        let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
-        f.render_widget(block, rect);
+        let inner = popup_frame(f, area, w, h, truncate_middle(&title, w.saturating_sub(4) as usize), "");
 
         let body_h = inner.height.saturating_sub(1) as usize;
         // Keep the cursor on screen as results stream in beneath it.
@@ -3199,8 +3179,6 @@ fn draw_popup(
         // wrapped them across lines, which made the list unreadable.
         let w = 96u16.min(area.width.saturating_sub(2));
         let h = (level.len() as u16 + 5).max(8).min(area.height.saturating_sub(2));
-        let rect = centered_rect(w, h, area);
-        f.render_widget(Clear, rect);
         // Breadcrumb of the current group path in the title.
         let mut crumb = String::new();
         let mut walk: &[Shortcut] = entries;
@@ -3211,13 +3189,7 @@ fn draw_popup(
             }
         }
         let title = format!("{}{} ", tr(lang, " shortcuts", " ショートカット"), crumb);
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .border_type(border_type())
-            .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
-            .title(title);
-        let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
-        f.render_widget(block, rect);
+        let inner = popup_frame(f, area, w, h, title, "");
 
         let body_h = inner.height.saturating_sub(1);
         let footer_area =
@@ -3314,15 +3286,7 @@ fn draw_popup(
         // row gets the same highlight bar the shortcuts list has.
         let w = 96u16.min(area.width.saturating_sub(2));
         let h = (entries.len() as u16 + 5).max(6).min(area.height.saturating_sub(2));
-        let rect = centered_rect(w, h, area);
-        f.render_widget(Clear, rect);
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .border_type(border_type())
-            .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
-            .title(format!(" {} ({}) ", tr(lang, "history", "履歴"), entries.len()));
-        let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
-        f.render_widget(block, rect);
+        let inner = popup_frame(f, area, w, h, format!(" {} ({}) ", tr(lang, "history", "履歴"), entries.len()), "");
 
         let body_h = inner.height.saturating_sub(1) as usize;
         let first = cursor.saturating_sub(body_h.saturating_sub(1));
@@ -3367,8 +3331,6 @@ fn draw_popup(
         let rows = dests.len();
         let w = 84u16.min(area.width.saturating_sub(2));
         let h = (rows as u16 + 6).min(area.height.saturating_sub(2));
-        let rect = centered_rect(w, h, area);
-        f.render_widget(Clear, rect);
         let verb = match (op, lang) {
             (PendingOp::Copy, Lang::En) => "copy",
             (PendingOp::Move, Lang::En) => "move",
@@ -3380,13 +3342,7 @@ fn draw_popup(
         } else {
             format!(" {} {} item(s) to ", verb, targets.len())
         };
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .border_type(border_type())
-            .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
-            .title(dp_title);
-        let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
-        f.render_widget(block, rect);
+        let inner = popup_frame(f, area, w, h, dp_title, "");
 
         for (i, (kind, path)) in dests.iter().enumerate().take(inner.height.saturating_sub(2) as usize) {
             let sel = i == *cursor;
@@ -3722,8 +3678,6 @@ fn draw_popup(
 
     if let Popup::DirCompare { left, right, entries, cursor, scroll, truncated, .. } = popup {
         use cian_core::dirdiff::Status;
-        let rect = centered_rect(area.width.saturating_sub(2), area.height.saturating_sub(2), area);
-        f.render_widget(Clear, rect);
         let counts = {
             let (mut a, mut d, mut m) = (0, 0, 0);
             for e in entries.iter() {
@@ -3736,13 +3690,9 @@ fn draw_popup(
             let cut = if *truncated { "  (stopped at 5000)" } else { "" };
             format!("~{} +{} -{}{}", m, a, d, cut)
         };
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .border_type(border_type())
-            .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
-            .title(format!(" {}  ↔  {}   —   {} ", left, right, counts));
-        let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
-        f.render_widget(block, rect);
+        let title = format!(" {}  ↔  {}   —   {} ", left, right, counts);
+        let (w, h) = (area.width.saturating_sub(2), area.height.saturating_sub(2));
+        let inner = popup_frame(f, area, w, h, title, "");
 
         let body_h = (inner.height.saturating_sub(1) as usize).max(1);
         // Keep the cursor on screen.
@@ -3803,20 +3753,9 @@ fn draw_popup(
     if let Popup::Diff { left, right, result, folded, fold, scroll, encoding, find, find_input, .. } = popup {
         use cian_core::diff::Row;
 
-        let rect = centered_rect(area.width.saturating_sub(2), area.height.saturating_sub(2), area);
-        f.render_widget(Clear, rect);
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .border_type(border_type())
-            .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
-            .title(format!(
-                " {} ↔ {}  —  {} ",
-                left,
-                right,
-                cian_core::diff::summary(result)
-            ));
-        let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
-        f.render_widget(block, rect);
+        let title = format!(" {} ↔ {}  —  {} ", left, right, cian_core::diff::summary(result));
+        let (w, h) = (area.width.saturating_sub(2), area.height.saturating_sub(2));
+        let inner = popup_frame(f, area, w, h, title, "");
 
         let body_h = inner.height.saturating_sub(1) as usize;
         let rows: &[Row] = if *fold { folded } else { &result.rows };
@@ -3994,22 +3933,11 @@ fn draw_popup(
     if let Popup::Archive { path, members, cursor, scroll } = popup {
         let w = 96u16.min(area.width.saturating_sub(2));
         let h = area.height.saturating_sub(4).max(8);
-        let rect = centered_rect(w, h, area);
-        f.render_widget(Clear, rect);
         let name = path.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
         let total: u64 = members.iter().map(|m| m.size).sum();
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .border_type(border_type())
-            .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
-            .title(format!(
-                " {}  —  {} entries, {} unpacked ",
-                name,
-                members.len(),
-                cian_core::human_size(total)
-            ));
-        let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
-        f.render_widget(block, rect);
+        let title =
+            format!(" {}  —  {} entries, {} unpacked ", name, members.len(), cian_core::human_size(total));
+        let inner = popup_frame(f, area, w, h, title, "");
 
         let body_h = inner.height.saturating_sub(1) as usize;
         if *cursor < *scroll {
@@ -4058,20 +3986,12 @@ fn draw_popup(
     if let Popup::Palette { kind, query, items, shown, cursor, scroll } = popup {
         let w = 84u16.min(area.width.saturating_sub(2));
         let h = (area.height.saturating_sub(4)).clamp(6, 22);
-        let rect = centered_rect(w, h, area);
-        f.render_widget(Clear, rect);
         let title = match kind {
             PaletteKind::Commands => tr(lang, " command palette ", " コマンドパレット "),
             PaletteKind::Jump => tr(lang, " jump to ", " ジャンプ "),
             PaletteKind::File => tr(lang, " find file ", " ファイル検索 "),
         };
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .border_type(border_type())
-            .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
-            .title(title);
-        let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
-        f.render_widget(block, rect);
+        let inner = popup_frame(f, area, w, h, title, "");
 
         // Row 0 is the live query; the list fills the rest above the footer.
         f.render_widget(
@@ -4130,20 +4050,13 @@ fn draw_popup(
     if let Popup::DiskUsage { dir, entries, total, cursor, scroll } = popup {
         let w = 96u16.min(area.width.saturating_sub(2));
         let h = area.height.saturating_sub(4).max(8);
-        let rect = centered_rect(w, h, area);
-        f.render_widget(Clear, rect);
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .border_type(border_type())
-            .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
-            .title(format!(
-                " {}  —  {}  ({} items) ",
-                truncate_middle(&dir.display().to_string(), 60),
-                cian_core::human_size(*total),
-                entries.len()
-            ));
-        let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
-        f.render_widget(block, rect);
+        let title = format!(
+            " {}  —  {}  ({} items) ",
+            truncate_middle(&dir.display().to_string(), 60),
+            cian_core::human_size(*total),
+            entries.len()
+        );
+        let inner = popup_frame(f, area, w, h, title, "");
 
         let body_h = inner.height.saturating_sub(1) as usize;
         if *cursor < *scroll {
@@ -4258,15 +4171,7 @@ fn draw_popup(
         let widest = names.iter().map(|n| n.chars().count()).max().unwrap_or(10);
         let w = (widest as u16 + 8).clamp(28, area.width);
         let h = (names.len() as u16 + 3).min(area.height);
-        let rect = centered_rect(w, h, area);
-        f.render_widget(Clear, rect);
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .border_type(border_type())
-            .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
-            .title(tr(lang, " run a macro ", " マクロを実行 "));
-        let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
-        f.render_widget(block, rect);
+        let inner = popup_frame(f, area, w, h, tr(lang, " run a macro ", " マクロを実行 "), "");
 
         let rows: Vec<Line> = names
             .iter()
@@ -4302,15 +4207,7 @@ fn draw_popup(
     if let Popup::SortPicker { cursor } = popup {
         let w = 34u16.min(area.width);
         let h = SortKey::ALL.len() as u16 + 3;
-        let rect = centered_rect(w, h.min(area.height), area);
-        f.render_widget(Clear, rect);
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .border_type(border_type())
-            .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
-            .title(tr(lang, " sort by ", " 並び替え "));
-        let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
-        f.render_widget(block, rect);
+        let inner = popup_frame(f, area, w, h.min(area.height), tr(lang, " sort by ", " 並び替え "), "");
 
         let rows: Vec<Line> = SortKey::ALL
             .iter()
@@ -4355,15 +4252,7 @@ fn draw_popup(
         use cian_core::viewer::TextEncoding;
         let w = 34u16.min(area.width);
         let h = TextEncoding::ALL.len() as u16 + 3;
-        let rect = centered_rect(w, h.min(area.height), area);
-        f.render_widget(Clear, rect);
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .border_type(border_type())
-            .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
-            .title(tr(lang, " text encoding ", " 文字コード "));
-        let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
-        f.render_widget(block, rect);
+        let inner = popup_frame(f, area, w, h.min(area.height), tr(lang, " text encoding ", " 文字コード "), "");
         let rows: Vec<Line> = TextEncoding::ALL
             .iter()
             .enumerate()
@@ -4399,15 +4288,7 @@ fn draw_popup(
     if let Popup::ColorPicker { cursor, .. } = popup {
         let w = 26u16.min(area.width);
         let h = PANE_BG_PRESETS.len() as u16 + 3;
-        let rect = centered_rect(w, h.min(area.height), area);
-        f.render_widget(Clear, rect);
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .border_type(border_type())
-            .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
-            .title(tr(lang, " background ", " 背景色 "));
-        let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
-        f.render_widget(block, rect);
+        let inner = popup_frame(f, area, w, h.min(area.height), tr(lang, " background ", " 背景色 "), "");
 
         let rows: Vec<Line> = PANE_BG_PRESETS
             .iter()
