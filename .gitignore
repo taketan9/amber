@@ -2,6 +2,12 @@
 **/*.rs.bk
 .DS_Store
 
+# Byte-cache for cian_ai.py, written whenever the helper is imported (running
+# it, or a test that pokes at it). Only cian_ai.py itself is embedded, via
+# include_str!, so this is pure local churn — and version-specific besides.
+__pycache__/
+*.py[cod]
+
 # あふ本体（リファレンス資料）はリポジトリ管理対象外。手元のみで参照。
 /あふ/
 
