@@ -177,9 +177,284 @@ impl App {
     }
 
     pub(crate) fn handle_popup_key(&mut self, key: KeyEvent) -> Result<()> {
-        // The fuzzy picker (command palette / jump): type to filter, move with
-        // arrows or Ctrl+n/p, Enter runs/jumps, Esc closes.
-        if matches!(self.popup, Popup::Palette { .. }) {
+        // Every popup with a keymap of its own handles the key. The rest — the
+        // confirm and notice dialogs — fall through to the one keymap they
+        // share. Mirrors how `draw_popup` dispatches the same set.
+        match self.popup {
+            Popup::Palette { .. } => self.palette_key(key),
+            Popup::AiChat { .. } => self.ai_chat_key(key),
+            Popup::AiHistory { .. } => self.ai_history_key(key),
+            Popup::Toggles { .. } => self.toggles_key(key),
+            Popup::ContextMenu { .. } => self.context_menu_key(key),
+            Popup::SshHosts { .. } => self.ssh_hosts_key(key),
+            Popup::SshUsers { .. } => self.ssh_users_key(key),
+            Popup::Snippets { .. } => self.snippets_key(key),
+            Popup::RemoteBrowser { .. } => self.remote_browser_key(key),
+            Popup::LocalDest { .. } => self.local_dest_key(key),
+            Popup::ThemePicker { .. } => self.theme_picker_key(key),
+            Popup::FindResults { .. } => self.find_results_key(key),
+            Popup::DestPicker { .. } => self.dest_picker_key(key),
+            Popup::ImageView { .. } => self.image_view_key(key),
+            Popup::DirCompare { .. } => self.dir_compare_key(key),
+            Popup::Diff { .. } => self.diff_key(key),
+            Popup::DiskUsage { .. } => self.disk_usage_key(key),
+            Popup::Archive { .. } => self.archive_key(key),
+            Popup::GitLog { .. } => self.git_log_key(key),
+            Popup::Macros { .. } => self.macros_key(key),
+            Popup::SortPicker { .. } => self.sort_picker_key(key),
+            Popup::ColorPicker { .. } => self.color_picker_key(key),
+            Popup::Manual { .. } => self.manual_key(key),
+            Popup::Shortcuts { .. } => self.shortcuts_key(key),
+            Popup::ConfirmClose { .. } => self.confirm_close_key(key),
+            Popup::ConfirmElevate { .. } => self.confirm_elevate_key(key),
+            Popup::AiShellConfirm { .. } => self.ai_shell_confirm_key(key),
+            Popup::CommitMessage { .. } => self.commit_message_key(key),
+            Popup::JunkReview { .. } => self.junk_review_key(key),
+            Popup::DupeReview { .. } => self.dupe_review_key(key),
+            Popup::StructureReview { .. } => self.structure_review_key(key),
+            Popup::RenameReview { .. } => self.rename_review_key(key),
+            Popup::TextInput { .. } => self.text_input_key(key),
+            Popup::Search { .. } => self.search_key(key),
+            Popup::Viewer { .. } => self.handle_viewer_key(key),
+            Popup::Notice { .. } => self.notice_key(key),
+            Popup::EncodingPicker { .. } => self.encoding_picker_key(key),
+            Popup::History { .. } => self.history_key(key),
+            _ => self.confirm_dialog_key(key),
+        }
+    }
+
+    /// The confirm and notice dialogs: they differ only in their wording,
+    /// so they share one y / n / Enter keymap rather than each repeating it.
+    fn confirm_dialog_key(&mut self, key: KeyEvent) -> Result<()> {
+        if matches!(self.popup, Popup::ConfirmQuit) {
+            match key.code {
+                KeyCode::Char('y') | KeyCode::Enter => {
+                    self.popup = Popup::None;
+                    self.should_quit = true;
+                }
+                KeyCode::Char('n') | KeyCode::Esc => { self.popup = Popup::None; }
+                _ => {}
+            }
+            return Ok(());
+        }
+        match key.code {
+            KeyCode::Esc | KeyCode::Char('n') => {
+                // A cancelled copy-across restores the comparison it came from;
+                // everything else just closes.
+                if matches!(self.popup, Popup::ConfirmDiffCopy { .. }) {
+                    self.cancel_diff_copy();
+                } else if matches!(self.popup, Popup::ConfirmDirSync { .. }) {
+                    self.cancel_dir_sync();
+                } else {
+                    self.popup = Popup::None;
+                }
+                Ok(())
+            }
+            // Enter is the same as `y` here: the plain "yes" everyone reaches
+            // for. (Overwrite/permanent stays on its own key so it is never
+            // the accidental default.)
+            KeyCode::Char('y') | KeyCode::Enter => match &self.popup {
+                Popup::ConfirmDelete { .. } => self.finish_delete(DeleteMode::Trash),
+                Popup::ConfirmTransfer { .. } => self.finish_transfer(Conflict::Skip),
+                Popup::ConfirmDiscard { .. } => { self.git_discard(); Ok(()) }
+                Popup::ConfirmDiffCopy { .. } => { self.confirm_diff_copy(); Ok(()) }
+                Popup::ConfirmDirSync { .. } => { self.confirm_dir_sync(); Ok(()) }
+                Popup::ConfirmRemoteDelete { .. } => { self.confirm_remote_delete(); Ok(()) }
+                Popup::ConfirmRemoteMove { .. } => { self.confirm_remote_move(); Ok(()) }
+                Popup::ConfirmSnippet { cmd, enter, .. } => {
+                    let (cmd, enter) = (cmd.clone(), *enter);
+                    self.popup = Popup::None;
+                    self.deliver_snippet(&cmd, enter);
+                    Ok(())
+                }
+                Popup::Notice { .. } => { self.popup = Popup::None; Ok(()) }
+                _ => Ok(()),
+            },
+            // `a` is the "I really mean it" variant: overwrite for transfers,
+            // unrecoverable delete instead of a trip through the trash.
+            KeyCode::Char('a') => match &self.popup {
+                Popup::ConfirmDelete { .. } => self.finish_delete(DeleteMode::Permanent),
+                Popup::ConfirmTransfer { .. } => self.finish_transfer(Conflict::Overwrite),
+                _ => Ok(()),
+            },
+            // A single-item move/copy can be renamed on the way: `r` opens an
+            // editable name seeded with the destination filename.
+            KeyCode::Char('r') => {
+                if let Popup::ConfirmTransfer { op, targets, dest } = &self.popup {
+                    if targets.len() == 1 {
+                        let op = *op;
+                        let src = targets[0].clone();
+                        let dest = dest.clone();
+                        let name =
+                            src.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+                        self.popup = text_input(
+                            match op { PendingOp::Move => "move as", PendingOp::Copy => "copy as" },
+                            "new name in the destination:",
+                            name,
+                            InputKind::TransferAs { op, src, dest_dir: dest },
+                        );
+                    } else {
+                        self.message = Some("rename applies to a single item".into());
+                    }
+                }
+                Ok(())
+            }
+            _ => Ok(()),
+        }
+    }
+
+    fn text_input_key(&mut self, key: KeyEvent) -> Result<()> {
+            let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+            // Ctrl+V pastes. Handled before the buffer is borrowed because it
+            // needs the clipboard, which lives on `self`.
+            if ctrl && matches!(key.code, KeyCode::Char('v') | KeyCode::Char('V')) {
+                let text = self.clipboard_text();
+                if let Popup::TextInput { buffer, cursor, .. } = &mut self.popup {
+                    match text {
+                        // Paths and URLs are what get pasted here, and a
+                        // trailing newline from `pwd` or a browser would
+                        // otherwise end up inside the value. Inserted at the
+                        // caret, not always the end.
+                        Some(t) => insert_str_at(buffer, cursor, t.trim_end_matches(['\r', '\n'])),
+                        None => self.message = Some("clipboard has no text".into()),
+                    }
+                }
+                return Ok(());
+            }
+            let Popup::TextInput { buffer, cursor, .. } = &mut self.popup else { return Ok(()) };
+            let len = buffer.chars().count();
+            match key.code {
+                KeyCode::Esc => { self.popup = Popup::None; Ok(())}
+                KeyCode::Enter => { self.finish_text_input()}
+                // Caret movement, so the middle of a name can be reached.
+                KeyCode::Left => { *cursor = cursor.saturating_sub(1); Ok(())}
+                KeyCode::Right => { *cursor = (*cursor + 1).min(len); Ok(())}
+                KeyCode::Home => { *cursor = 0; Ok(())}
+                KeyCode::End => { *cursor = len; Ok(())}
+                KeyCode::Char('a') if ctrl => { *cursor = 0; Ok(())}
+                KeyCode::Char('e') if ctrl => { *cursor = len; Ok(())}
+                KeyCode::Backspace => { backspace_at(buffer, cursor); Ok(())}
+                KeyCode::Delete => { delete_at(buffer, cursor); Ok(())}
+                // Clear the line, as in any readline prompt.
+                KeyCode::Char('u') | KeyCode::Char('U') if ctrl => {
+                    buffer.clear();
+                    *cursor = 0;
+                    Ok(())
+                }
+                // Without this guard every Ctrl+<key> inserted its bare letter,
+                // so Ctrl+V typed a "v" instead of pasting.
+                KeyCode::Char(_) if ctrl => Ok(()),
+                KeyCode::Char(c) => { insert_char_at(buffer, cursor, c); Ok(())}
+                _ => Ok(()),
+            }
+    }
+
+    fn search_key(&mut self, key: KeyEvent) -> Result<()> {
+        let Popup::Search { buffer } = &mut self.popup else { return Ok(()) };
+            match key.code {
+                KeyCode::Esc => {
+                    self.popup = Popup::None;
+                    self.mode = Mode::Normal;
+                    Ok(())
+                }
+                KeyCode::Enter => { self.finish_search(); Ok(())}
+                KeyCode::Backspace => { buffer.pop(); Ok(())}
+                // Up/Down walk the matches while the box is still open, so
+                // several files with the same substring can be visited without
+                // closing and reopening the search.
+                KeyCode::Down | KeyCode::Up => {
+                    let forward = key.code == KeyCode::Down;
+                    let q = buffer.trim().to_string();
+                    if !q.is_empty() {
+                        self.last_search_query = Some(q);
+                        self.jump_to_next_match(forward);
+                    }
+                    Ok(())
+                }
+                KeyCode::Char(c) => { buffer.push(c); Ok(())}
+                _ => Ok(()),
+            }
+    }
+
+        /// A notice (op results, attributes, checksums, wc…) can be copied
+        /// whole with `y`, so a hash or a path can be lifted out of it.
+    fn notice_key(&mut self, key: KeyEvent) -> Result<()> {
+        let Popup::Notice { lines } = &self.popup else { return Ok(()) };
+            match key.code {
+                KeyCode::Char('y') | KeyCode::Char('c') => {
+                    let text = lines.join("\n");
+                    if let Some(cb) = self.clipboard.as_mut() {
+                        let _ = cb.set_text(text);
+                    }
+                    self.message = Some("copied".into());
+                    self.popup = Popup::None;
+                    Ok(())
+                }
+                KeyCode::Enter | KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('q') => {
+                    self.popup = Popup::None;
+                    Ok(())
+                }
+                _ => Ok(()),
+            }
+    }
+
+    fn encoding_picker_key(&mut self, key: KeyEvent) -> Result<()> {
+        let Popup::EncodingPicker { cursor, .. } = &mut self.popup else { return Ok(()) };
+            let n = cian_core::viewer::TextEncoding::ALL.len();
+            match key.code {
+                KeyCode::Char('j') | KeyCode::Down => {
+                    *cursor = (*cursor + 1) % n;
+                    Ok(())
+                }
+                KeyCode::Char('k') | KeyCode::Up => {
+                    *cursor = (*cursor + n - 1) % n;
+                    Ok(())
+                }
+                KeyCode::Esc | KeyCode::Char('q') => {
+                    // Cancel: restore a stashed viewer unchanged, else just close.
+                    self.finish_encoding_pick(None);
+                    Ok(())
+                }
+                KeyCode::Enter => {
+                    let enc = cian_core::viewer::TextEncoding::ALL[*cursor];
+                    self.finish_encoding_pick(Some(enc));
+                    Ok(())
+                }
+                _ => Ok(()),
+            }
+    }
+
+    fn history_key(&mut self, key: KeyEvent) -> Result<()> {
+        let Popup::History { cursor, entries } = &mut self.popup else { return Ok(()) };
+            match key.code {
+                KeyCode::Esc => { self.popup = Popup::None; Ok(())}
+                KeyCode::Enter => { self.finish_history()}
+                KeyCode::Char('j') | KeyCode::Down => {
+                    if *cursor + 1 < entries.len() { *cursor += 1; }
+                    Ok(())
+                }
+                KeyCode::Char('k') | KeyCode::Up => {
+                    if *cursor > 0 { *cursor -= 1; }
+                    Ok(())
+                }
+                // `a` bookmarks the highlighted path as a shortcut: the target
+                // is filled in for you, and you just type a name.
+                KeyCode::Char('a') => {
+                    let target = entries.get(*cursor).map(|p| p.display().to_string());
+                    self.popup = Popup::None;
+                    if let Some(t) = target {
+                        self.pending_shortcut_target = Some(t);
+                        self.start_shortcut_add(Vec::new(), false);
+                    }
+                    Ok(())
+                }
+                _ => Ok(()),
+            }
+    }
+
+        /// The fuzzy picker (command palette / jump): type to filter, move with
+        /// arrows or Ctrl+n/p, Enter runs/jumps, Esc closes.
+    fn palette_key(&mut self, key: KeyEvent) -> Result<()> {
             let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
             match key.code {
                 KeyCode::Esc => self.popup = Popup::None,
@@ -204,54 +479,10 @@ impl App {
                 }
                 _ => {}
             }
-            return Ok(());
-        }
-        if matches!(self.popup, Popup::TextInput { .. }) {
-            let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
-            // Ctrl+V pastes. Handled before the buffer is borrowed because it
-            // needs the clipboard, which lives on `self`.
-            if ctrl && matches!(key.code, KeyCode::Char('v') | KeyCode::Char('V')) {
-                let text = self.clipboard_text();
-                if let Popup::TextInput { buffer, cursor, .. } = &mut self.popup {
-                    match text {
-                        // Paths and URLs are what get pasted here, and a
-                        // trailing newline from `pwd` or a browser would
-                        // otherwise end up inside the value. Inserted at the
-                        // caret, not always the end.
-                        Some(t) => insert_str_at(buffer, cursor, t.trim_end_matches(['\r', '\n'])),
-                        None => self.message = Some("clipboard has no text".into()),
-                    }
-                }
-                return Ok(());
-            }
-            let Popup::TextInput { buffer, cursor, .. } = &mut self.popup else { return Ok(()) };
-            let len = buffer.chars().count();
-            match key.code {
-                KeyCode::Esc => { self.popup = Popup::None; return Ok(()); }
-                KeyCode::Enter => { return self.finish_text_input(); }
-                // Caret movement, so the middle of a name can be reached.
-                KeyCode::Left => { *cursor = cursor.saturating_sub(1); return Ok(()); }
-                KeyCode::Right => { *cursor = (*cursor + 1).min(len); return Ok(()); }
-                KeyCode::Home => { *cursor = 0; return Ok(()); }
-                KeyCode::End => { *cursor = len; return Ok(()); }
-                KeyCode::Char('a') if ctrl => { *cursor = 0; return Ok(()); }
-                KeyCode::Char('e') if ctrl => { *cursor = len; return Ok(()); }
-                KeyCode::Backspace => { backspace_at(buffer, cursor); return Ok(()); }
-                KeyCode::Delete => { delete_at(buffer, cursor); return Ok(()); }
-                // Clear the line, as in any readline prompt.
-                KeyCode::Char('u') | KeyCode::Char('U') if ctrl => {
-                    buffer.clear();
-                    *cursor = 0;
-                    return Ok(());
-                }
-                // Without this guard every Ctrl+<key> inserted its bare letter,
-                // so Ctrl+V typed a "v" instead of pasting.
-                KeyCode::Char(_) if ctrl => return Ok(()),
-                KeyCode::Char(c) => { insert_char_at(buffer, cursor, c); return Ok(()); }
-                _ => return Ok(()),
-            }
-        }
-        if matches!(self.popup, Popup::AiChat { .. }) {
+        Ok(())
+    }
+
+    fn ai_chat_key(&mut self, key: KeyEvent) -> Result<()> {
             let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
             let alt = key.modifiers.contains(KeyModifiers::ALT);
             let shift = key.modifiers.contains(KeyModifiers::SHIFT);
@@ -332,9 +563,11 @@ impl App {
                 }
                 _ => {}
             }
-            return Ok(());
-        }
-        if let Popup::AiHistory { cursor } = &mut self.popup {
+        Ok(())
+    }
+
+    fn ai_history_key(&mut self, key: KeyEvent) -> Result<()> {
+        let Popup::AiHistory { cursor } = &mut self.popup else { return Ok(()) };
             let n = self.ai_history.len();
             match key.code {
                 KeyCode::Esc | KeyCode::Char('q') => self.popup = Popup::None,
@@ -359,9 +592,11 @@ impl App {
                 }
                 _ => {}
             }
-            return Ok(());
-        }
-        if let Popup::Toggles { .. } = &self.popup {
+        Ok(())
+    }
+
+    fn toggles_key(&mut self, key: KeyEvent) -> Result<()> {
+        let Popup::Toggles { .. } = &self.popup else { return Ok(()) };
             match key.code {
                 KeyCode::Esc | KeyCode::Char('q') => self.popup = Popup::None,
                 KeyCode::Char('j') | KeyCode::Down => self.toggles_move(1),
@@ -370,34 +605,11 @@ impl App {
                 KeyCode::Enter | KeyCode::Char(' ') => self.toggles_apply(),
                 _ => {}
             }
-            return Ok(());
-        }
-        if let Popup::Search { buffer } = &mut self.popup {
-            match key.code {
-                KeyCode::Esc => {
-                    self.popup = Popup::None;
-                    self.mode = Mode::Normal;
-                    return Ok(());
-                }
-                KeyCode::Enter => { self.finish_search(); return Ok(()); }
-                KeyCode::Backspace => { buffer.pop(); return Ok(()); }
-                // Up/Down walk the matches while the box is still open, so
-                // several files with the same substring can be visited without
-                // closing and reopening the search.
-                KeyCode::Down | KeyCode::Up => {
-                    let forward = key.code == KeyCode::Down;
-                    let q = buffer.trim().to_string();
-                    if !q.is_empty() {
-                        self.last_search_query = Some(q);
-                        self.jump_to_next_match(forward);
-                    }
-                    return Ok(());
-                }
-                KeyCode::Char(c) => { buffer.push(c); return Ok(()); }
-                _ => return Ok(()),
-            }
-        }
-        if let Popup::ContextMenu { items, cursor, .. } = &mut self.popup {
+        Ok(())
+    }
+
+    fn context_menu_key(&mut self, key: KeyEvent) -> Result<()> {
+        let Popup::ContextMenu { items, cursor, .. } = &mut self.popup else { return Ok(()) };
             let n = items.len();
             match key.code {
                 // Esc / q / ← climb out of a submenu, or close at the top.
@@ -416,9 +628,11 @@ impl App {
                 }
                 _ => {}
             }
-            return Ok(());
-        }
-        if let Popup::SshHosts { cursor, filter } = &mut self.popup {
+        Ok(())
+    }
+
+    fn ssh_hosts_key(&mut self, key: KeyEvent) -> Result<()> {
+        let Popup::SshHosts { cursor, filter } = &mut self.popup else { return Ok(()) };
             match key.code {
                 // Cancelling the picker abandons any transfer being set up, so
                 // a later plain :ssh does not get routed into SFTP.
@@ -475,9 +689,11 @@ impl App {
                 }).count();
                 *cursor = (*cursor).min(n.saturating_sub(1));
             }
-            return Ok(());
-        }
-        if let Popup::SshUsers { host, cursor } = &mut self.popup {
+        Ok(())
+    }
+
+    fn ssh_users_key(&mut self, key: KeyEvent) -> Result<()> {
+        let Popup::SshUsers { host, cursor } = &mut self.popup else { return Ok(()) };
             let n = self.config.ssh_hosts.get(*host).map(|h| h.users.len()).unwrap_or(0);
             if n == 0 {
                 self.popup = Popup::None;
@@ -500,9 +716,11 @@ impl App {
                 }
                 _ => {}
             }
-            return Ok(());
-        }
-        if let Popup::Snippets { cursor, filter } = &mut self.popup {
+        Ok(())
+    }
+
+    fn snippets_key(&mut self, key: KeyEvent) -> Result<()> {
+        let Popup::Snippets { cursor, filter } = &mut self.popup else { return Ok(()) };
             match key.code {
                 KeyCode::Esc => self.popup = Popup::None,
                 KeyCode::Down => *cursor += 1,
@@ -534,9 +752,11 @@ impl App {
                 }).count();
                 *cursor = (*cursor).min(n.saturating_sub(1));
             }
-            return Ok(());
-        }
-        if let Popup::RemoteBrowser { entries, cursor, purpose, .. } = &mut self.popup {
+        Ok(())
+    }
+
+    fn remote_browser_key(&mut self, key: KeyEvent) -> Result<()> {
+        let Popup::RemoteBrowser { entries, cursor, purpose, .. } = &mut self.popup else { return Ok(()) };
             let n = entries.len();
             let uploading = *purpose == BrowsePurpose::Upload;
             match key.code {
@@ -561,9 +781,11 @@ impl App {
                 KeyCode::Char('u') if uploading => self.remote_browser_upload_here(),
                 _ => {}
             }
-            return Ok(());
-        }
-        if let Popup::LocalDest { cursor, .. } = &mut self.popup {
+        Ok(())
+    }
+
+    fn local_dest_key(&mut self, key: KeyEvent) -> Result<()> {
+        let Popup::LocalDest { cursor, .. } = &mut self.popup else { return Ok(()) };
             match key.code {
                 KeyCode::Esc | KeyCode::Char('q') => { self.popup = Popup::None; self.scp_target = None; }
                 KeyCode::Char('j') | KeyCode::Down => *cursor = (*cursor + 1).min(3),
@@ -574,9 +796,10 @@ impl App {
                 }
                 _ => {}
             }
-            return Ok(());
-        }
-        if matches!(self.popup, Popup::ThemePicker { .. }) {
+        Ok(())
+    }
+
+    fn theme_picker_key(&mut self, key: KeyEvent) -> Result<()> {
             match key.code {
                 // Esc / q restore the theme we opened with; Enter keeps the
                 // previewed one. j/k (and arrows) move and preview live.
@@ -588,9 +811,11 @@ impl App {
                 KeyCode::Char('x') => self.theme_picker_clear_pane(),
                 _ => {}
             }
-            return Ok(());
-        }
-        if let Popup::FindResults { hits, cursor, .. } = &mut self.popup {
+        Ok(())
+    }
+
+    fn find_results_key(&mut self, key: KeyEvent) -> Result<()> {
+        let Popup::FindResults { hits, cursor, .. } = &mut self.popup else { return Ok(()) };
             let n = hits.len();
             match key.code {
                 KeyCode::Esc | KeyCode::Char('q') => {
@@ -634,9 +859,10 @@ impl App {
                 }
                 _ => {}
             }
-            return Ok(());
-        }
-        if matches!(self.popup, Popup::DestPicker { .. }) {
+        Ok(())
+    }
+
+    fn dest_picker_key(&mut self, key: KeyEvent) -> Result<()> {
             let n = self.dest_choices().len();
             let Popup::DestPicker { cursor, .. } = &mut self.popup else { return Ok(()) };
             match key.code {
@@ -677,14 +903,13 @@ impl App {
                 }
                 _ => {}
             }
-            return Ok(());
-        }
-        if matches!(self.popup, Popup::Viewer { .. }) {
-            return self.handle_viewer_key(key);
-        }
-        // The image preview: Esc/q close, Shift+Enter reveals it in the pane,
-        // `E` opens it in the external editor.
-        if let Popup::ImageView { path, title, .. } = &self.popup {
+        Ok(())
+    }
+
+        /// The image preview: Esc/q close, Shift+Enter reveals it in the pane,
+        /// `E` opens it in the external editor.
+    fn image_view_key(&mut self, key: KeyEvent) -> Result<()> {
+        let Popup::ImageView { path, title, .. } = &self.popup else { return Ok(()) };
             let shift = key.modifiers.contains(KeyModifiers::SHIFT);
             match key.code {
                 KeyCode::Esc | KeyCode::Char('q') => self.popup = Popup::None,
@@ -703,29 +928,11 @@ impl App {
                 }
                 _ => {}
             }
-            return Ok(());
-        }
-        // A notice (op results, attributes, checksums, wc…) can be copied
-        // whole with `y`, so a hash or a path can be lifted out of it.
-        if let Popup::Notice { lines } = &self.popup {
-            match key.code {
-                KeyCode::Char('y') | KeyCode::Char('c') => {
-                    let text = lines.join("\n");
-                    if let Some(cb) = self.clipboard.as_mut() {
-                        let _ = cb.set_text(text);
-                    }
-                    self.message = Some("copied".into());
-                    self.popup = Popup::None;
-                    return Ok(());
-                }
-                KeyCode::Enter | KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('q') => {
-                    self.popup = Popup::None;
-                    return Ok(());
-                }
-                _ => return Ok(()),
-            }
-        }
-        if let Popup::DirCompare { entries, cursor, scroll, .. } = &mut self.popup {
+        Ok(())
+    }
+
+    fn dir_compare_key(&mut self, key: KeyEvent) -> Result<()> {
+        let Popup::DirCompare { entries, cursor, scroll, .. } = &mut self.popup else { return Ok(()) };
             let n = entries.len();
             match key.code {
                 KeyCode::Esc | KeyCode::Char('q') => self.popup = Popup::None,
@@ -750,9 +957,11 @@ impl App {
                 KeyCode::Char('[') => self.dir_compare_sync(false),
                 _ => { let _ = scroll; }
             }
-            return Ok(());
-        }
-        if let Popup::Diff { result, folded, fold, scroll, find, find_input, .. } = &mut self.popup {
+        Ok(())
+    }
+
+    fn diff_key(&mut self, key: KeyEvent) -> Result<()> {
+        let Popup::Diff { result, folded, fold, scroll, find, find_input, .. } = &mut self.popup else { return Ok(()) };
             // While typing a `/` search, keys build the query.
             if let Some(buf) = find_input {
                 match key.code {
@@ -817,9 +1026,11 @@ impl App {
                 KeyCode::Char('<') | KeyCode::Char(',') => self.diff_copy(false),
                 _ => {}
             }
-            return Ok(());
-        }
-        if let Popup::DiskUsage { entries, cursor, scroll, .. } = &mut self.popup {
+        Ok(())
+    }
+
+    fn disk_usage_key(&mut self, key: KeyEvent) -> Result<()> {
+        let Popup::DiskUsage { entries, cursor, scroll, .. } = &mut self.popup else { return Ok(()) };
             let n = entries.len();
             match key.code {
                 KeyCode::Esc | KeyCode::Char('q') => self.popup = Popup::None,
@@ -836,9 +1047,11 @@ impl App {
                 KeyCode::Char('-') | KeyCode::Backspace | KeyCode::Left => self.du_parent(),
                 _ => { let _ = scroll; }
             }
-            return Ok(());
-        }
-        if let Popup::Archive { members, cursor, .. } = &mut self.popup {
+        Ok(())
+    }
+
+    fn archive_key(&mut self, key: KeyEvent) -> Result<()> {
+        let Popup::Archive { members, cursor, .. } = &mut self.popup else { return Ok(()) };
             let n = members.len();
             match key.code {
                 KeyCode::Esc | KeyCode::Char('q') => self.popup = Popup::None,
@@ -854,9 +1067,11 @@ impl App {
                 KeyCode::Enter => self.extract_from_archive(false),
                 _ => {}
             }
-            return Ok(());
-        }
-        if let Popup::GitLog { commits, cursor, scroll, dir, vcs, .. } = &mut self.popup {
+        Ok(())
+    }
+
+    fn git_log_key(&mut self, key: KeyEvent) -> Result<()> {
+        let Popup::GitLog { commits, cursor, scroll, dir, vcs, .. } = &mut self.popup else { return Ok(()) };
             let n = commits.len().max(1);
             match key.code {
                 KeyCode::Esc | KeyCode::Char('q') => self.popup = Popup::None,
@@ -876,9 +1091,11 @@ impl App {
                     let _ = scroll;
                 }
             }
-            return Ok(());
-        }
-        if let Popup::Macros { cursor, names } = &mut self.popup {
+        Ok(())
+    }
+
+    fn macros_key(&mut self, key: KeyEvent) -> Result<()> {
+        let Popup::Macros { cursor, names } = &mut self.popup else { return Ok(()) };
             let n = names.len().max(1);
             match key.code {
                 KeyCode::Esc | KeyCode::Char('q') => self.popup = Popup::None,
@@ -890,9 +1107,11 @@ impl App {
                 }
                 _ => {}
             }
-            return Ok(());
-        }
-        if let Popup::SortPicker { cursor } = &mut self.popup {
+        Ok(())
+    }
+
+    fn sort_picker_key(&mut self, key: KeyEvent) -> Result<()> {
+        let Popup::SortPicker { cursor } = &mut self.popup else { return Ok(()) };
             let n = SortKey::ALL.len();
             match key.code {
                 KeyCode::Esc | KeyCode::Char('q') => self.popup = Popup::None,
@@ -910,33 +1129,11 @@ impl App {
                 KeyCode::Char('e') => { self.popup = Popup::None; self.apply_sort_key(SortKey::Extension); }
                 _ => {}
             }
-            return Ok(());
-        }
-        if let Popup::EncodingPicker { cursor, .. } = &mut self.popup {
-            let n = cian_core::viewer::TextEncoding::ALL.len();
-            match key.code {
-                KeyCode::Char('j') | KeyCode::Down => {
-                    *cursor = (*cursor + 1) % n;
-                    return Ok(());
-                }
-                KeyCode::Char('k') | KeyCode::Up => {
-                    *cursor = (*cursor + n - 1) % n;
-                    return Ok(());
-                }
-                KeyCode::Esc | KeyCode::Char('q') => {
-                    // Cancel: restore a stashed viewer unchanged, else just close.
-                    self.finish_encoding_pick(None);
-                    return Ok(());
-                }
-                KeyCode::Enter => {
-                    let enc = cian_core::viewer::TextEncoding::ALL[*cursor];
-                    self.finish_encoding_pick(Some(enc));
-                    return Ok(());
-                }
-                _ => return Ok(()),
-            }
-        }
-        if let Popup::ColorPicker { pane, cursor } = &mut self.popup {
+        Ok(())
+    }
+
+    fn color_picker_key(&mut self, key: KeyEvent) -> Result<()> {
+        let Popup::ColorPicker { pane, cursor } = &mut self.popup else { return Ok(()) };
             let n = PANE_BG_PRESETS.len();
             match key.code {
                 KeyCode::Esc | KeyCode::Char('q') => self.popup = Popup::None,
@@ -958,9 +1155,11 @@ impl App {
                 }
                 _ => {}
             }
-            return Ok(());
-        }
-        if let Popup::Manual { lines, scroll } = &mut self.popup {
+        Ok(())
+    }
+
+    fn manual_key(&mut self, key: KeyEvent) -> Result<()> {
+        let Popup::Manual { lines, scroll } = &mut self.popup else { return Ok(()) };
             // The renderer clamps `scroll` to the last full page each frame, so
             // saturating at the line count here is safe.
             let last = lines.len().saturating_sub(1);
@@ -974,35 +1173,11 @@ impl App {
                 KeyCode::Char('G') | KeyCode::End => *scroll = last,
                 _ => {}
             }
-            return Ok(());
-        }
-        if let Popup::History { cursor, entries } = &mut self.popup {
-            match key.code {
-                KeyCode::Esc => { self.popup = Popup::None; return Ok(()); }
-                KeyCode::Enter => { return self.finish_history(); }
-                KeyCode::Char('j') | KeyCode::Down => {
-                    if *cursor + 1 < entries.len() { *cursor += 1; }
-                    return Ok(());
-                }
-                KeyCode::Char('k') | KeyCode::Up => {
-                    if *cursor > 0 { *cursor -= 1; }
-                    return Ok(());
-                }
-                // `a` bookmarks the highlighted path as a shortcut: the target
-                // is filled in for you, and you just type a name.
-                KeyCode::Char('a') => {
-                    let target = entries.get(*cursor).map(|p| p.display().to_string());
-                    self.popup = Popup::None;
-                    if let Some(t) = target {
-                        self.pending_shortcut_target = Some(t);
-                        self.start_shortcut_add(Vec::new(), false);
-                    }
-                    return Ok(());
-                }
-                _ => return Ok(()),
-            }
-        }
-        if let Popup::Shortcuts { cursor, entries, path } = &mut self.popup {
+        Ok(())
+    }
+
+    fn shortcuts_key(&mut self, key: KeyEvent) -> Result<()> {
+        let Popup::Shortcuts { cursor, entries, path } = &mut self.popup else { return Ok(()) };
             let level = sc_level(entries, path);
             let n = level.len();
             let cur_is_group = level.get(*cursor).map(|s| s.is_group()).unwrap_or(false);
@@ -1075,20 +1250,11 @@ impl App {
                 }
                 _ => {}
             }
-            return Ok(());
-        }
-        if matches!(self.popup, Popup::ConfirmQuit) {
-            match key.code {
-                KeyCode::Char('y') | KeyCode::Enter => {
-                    self.popup = Popup::None;
-                    self.should_quit = true;
-                }
-                KeyCode::Char('n') | KeyCode::Esc => { self.popup = Popup::None; }
-                _ => {}
-            }
-            return Ok(());
-        }
-        if let Popup::ConfirmClose { target } = &self.popup {
+        Ok(())
+    }
+
+    fn confirm_close_key(&mut self, key: KeyEvent) -> Result<()> {
+        let Popup::ConfirmClose { target } = &self.popup else { return Ok(()) };
             let target = *target;
             match key.code {
                 KeyCode::Char('y') | KeyCode::Enter => {
@@ -1098,17 +1264,20 @@ impl App {
                 KeyCode::Char('n') | KeyCode::Esc => { self.popup = Popup::None; }
                 _ => {}
             }
-            return Ok(());
-        }
-        if matches!(self.popup, Popup::ConfirmElevate { .. }) {
+        Ok(())
+    }
+
+    fn confirm_elevate_key(&mut self, key: KeyEvent) -> Result<()> {
             match key.code {
                 KeyCode::Char('y') | KeyCode::Enter => self.run_elevated_transfer(),
                 KeyCode::Char('n') | KeyCode::Esc => { self.popup = Popup::None; }
                 _ => {}
             }
-            return Ok(());
-        }
-        if let Popup::AiShellConfirm { command } = &self.popup {
+        Ok(())
+    }
+
+    fn ai_shell_confirm_key(&mut self, key: KeyEvent) -> Result<()> {
+        let Popup::AiShellConfirm { command } = &self.popup else { return Ok(()) };
             match key.code {
                 KeyCode::Char('y') | KeyCode::Enter => {
                     let cmd = command.clone();
@@ -1118,9 +1287,11 @@ impl App {
                 KeyCode::Char('n') | KeyCode::Esc => self.popup = Popup::None,
                 _ => {}
             }
-            return Ok(());
-        }
-        if let Popup::CommitMessage { buffer, editing, .. } = &mut self.popup {
+        Ok(())
+    }
+
+    fn commit_message_key(&mut self, key: KeyEvent) -> Result<()> {
+        let Popup::CommitMessage { buffer, editing, .. } = &mut self.popup else { return Ok(()) };
             if *editing {
                 // Typing mode: edit the message freely; Esc returns to preview.
                 match key.code {
@@ -1145,9 +1316,11 @@ impl App {
                 KeyCode::Esc | KeyCode::Char('n') => self.popup = Popup::None,
                 _ => {}
             }
-            return Ok(());
-        }
-        if let Popup::JunkReview { items, cursor, .. } = &mut self.popup {
+        Ok(())
+    }
+
+    fn junk_review_key(&mut self, key: KeyEvent) -> Result<()> {
+        let Popup::JunkReview { items, cursor, .. } = &mut self.popup else { return Ok(()) };
             let n = items.len();
             match key.code {
                 KeyCode::Esc | KeyCode::Char('q') => self.popup = Popup::None,
@@ -1169,9 +1342,11 @@ impl App {
                 KeyCode::Enter | KeyCode::Char('d') => self.confirm_junk_deletion(),
                 _ => {}
             }
-            return Ok(());
-        }
-        if let Popup::DupeReview { items, cursor, .. } = &mut self.popup {
+        Ok(())
+    }
+
+    fn dupe_review_key(&mut self, key: KeyEvent) -> Result<()> {
+        let Popup::DupeReview { items, cursor, .. } = &mut self.popup else { return Ok(()) };
             let n = items.len();
             match key.code {
                 KeyCode::Esc | KeyCode::Char('q') => self.popup = Popup::None,
@@ -1191,9 +1366,11 @@ impl App {
                 KeyCode::Enter | KeyCode::Char('d') => self.confirm_dupe_deletion(),
                 _ => {}
             }
-            return Ok(());
-        }
-        if let Popup::StructureReview { items, cursor, .. } = &mut self.popup {
+        Ok(())
+    }
+
+    fn structure_review_key(&mut self, key: KeyEvent) -> Result<()> {
+        let Popup::StructureReview { items, cursor, .. } = &mut self.popup else { return Ok(()) };
             let n = items.len();
             match key.code {
                 KeyCode::Esc | KeyCode::Char('q') => self.popup = Popup::None,
@@ -1214,9 +1391,11 @@ impl App {
                 KeyCode::Enter | KeyCode::Char('m') => self.apply_structure_plan(),
                 _ => {}
             }
-            return Ok(());
-        }
-        if let Popup::RenameReview { items, cursor, .. } = &mut self.popup {
+        Ok(())
+    }
+
+    fn rename_review_key(&mut self, key: KeyEvent) -> Result<()> {
+        let Popup::RenameReview { items, cursor, .. } = &mut self.popup else { return Ok(()) };
             let n = items.len();
             match key.code {
                 KeyCode::Esc | KeyCode::Char('q') => self.popup = Popup::None,
@@ -1237,72 +1416,7 @@ impl App {
                 KeyCode::Enter | KeyCode::Char('r') => self.apply_rename_plan(),
                 _ => {}
             }
-            return Ok(());
-        }
-        match key.code {
-            KeyCode::Esc | KeyCode::Char('n') => {
-                // A cancelled copy-across restores the comparison it came from;
-                // everything else just closes.
-                if matches!(self.popup, Popup::ConfirmDiffCopy { .. }) {
-                    self.cancel_diff_copy();
-                } else if matches!(self.popup, Popup::ConfirmDirSync { .. }) {
-                    self.cancel_dir_sync();
-                } else {
-                    self.popup = Popup::None;
-                }
-                Ok(())
-            }
-            // Enter is the same as `y` here: the plain "yes" everyone reaches
-            // for. (Overwrite/permanent stays on its own key so it is never
-            // the accidental default.)
-            KeyCode::Char('y') | KeyCode::Enter => match &self.popup {
-                Popup::ConfirmDelete { .. } => self.finish_delete(DeleteMode::Trash),
-                Popup::ConfirmTransfer { .. } => self.finish_transfer(Conflict::Skip),
-                Popup::ConfirmDiscard { .. } => { self.git_discard(); Ok(()) }
-                Popup::ConfirmDiffCopy { .. } => { self.confirm_diff_copy(); Ok(()) }
-                Popup::ConfirmDirSync { .. } => { self.confirm_dir_sync(); Ok(()) }
-                Popup::ConfirmRemoteDelete { .. } => { self.confirm_remote_delete(); Ok(()) }
-                Popup::ConfirmRemoteMove { .. } => { self.confirm_remote_move(); Ok(()) }
-                Popup::ConfirmSnippet { cmd, enter, .. } => {
-                    let (cmd, enter) = (cmd.clone(), *enter);
-                    self.popup = Popup::None;
-                    self.deliver_snippet(&cmd, enter);
-                    Ok(())
-                }
-                Popup::Notice { .. } => { self.popup = Popup::None; Ok(()) }
-                _ => Ok(()),
-            },
-            // `a` is the "I really mean it" variant: overwrite for transfers,
-            // unrecoverable delete instead of a trip through the trash.
-            KeyCode::Char('a') => match &self.popup {
-                Popup::ConfirmDelete { .. } => self.finish_delete(DeleteMode::Permanent),
-                Popup::ConfirmTransfer { .. } => self.finish_transfer(Conflict::Overwrite),
-                _ => Ok(()),
-            },
-            // A single-item move/copy can be renamed on the way: `r` opens an
-            // editable name seeded with the destination filename.
-            KeyCode::Char('r') => {
-                if let Popup::ConfirmTransfer { op, targets, dest } = &self.popup {
-                    if targets.len() == 1 {
-                        let op = *op;
-                        let src = targets[0].clone();
-                        let dest = dest.clone();
-                        let name =
-                            src.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
-                        self.popup = text_input(
-                            match op { PendingOp::Move => "move as", PendingOp::Copy => "copy as" },
-                            "new name in the destination:",
-                            name,
-                            InputKind::TransferAs { op, src, dest_dir: dest },
-                        );
-                    } else {
-                        self.message = Some("rename applies to a single item".into());
-                    }
-                }
-                Ok(())
-            }
-            _ => Ok(()),
-        }
+        Ok(())
     }
 
     pub(crate) fn handle_command_key(&mut self, key: KeyEvent) -> Result<()> {
