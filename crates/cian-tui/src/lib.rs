@@ -801,6 +801,8 @@ enum MenuItem {
     SvnCommit,
     /// Pattern-based bulk rename of the marked files (`:brename`).
     BulkRename,
+    /// Rename by editing a list of names in the editor (`:bulkrename`).
+    EditorRename,
     /// Open the command-snippet launcher (`:snip`).
     Snippets,
     /// Open the layout-macro launcher (`@` / `:macros`).
@@ -987,6 +989,7 @@ impl MenuItem {
             MenuItem::SvnUpdate => tr(lang, "Update  (svn update)", "更新  (svn update)"),
             MenuItem::SvnCommit => tr(lang, "Commit  (svn commit)", "コミット  (svn commit)"),
             MenuItem::BulkRename => tr(lang, "Bulk rename  (:brename)", "一括リネーム  (:brename)"),
+            MenuItem::EditorRename => tr(lang, "Rename in editor  (:bulkrename)", "エディタでリネーム  (:bulkrename)"),
             MenuItem::Snippets => tr(lang, "Snippets  (:snip)", "スニペット  (:snip)"),
             MenuItem::Macros => tr(lang, "Macros  (@)", "マクロ  (@)"),
             MenuItem::Shortcuts => tr(lang, "Shortcuts  (s)", "ショートカット  (s)"),
@@ -3235,6 +3238,7 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry("  edit in viewer", None, "i = built-in editor (Ctrl+S save, Esc/Q leave), E = external", "ビューア内編集：i 内蔵（Ctrl+S 保存, Esc/Q 終了）／ E 外部エディタ"),
                 entry(":edit", None, "edit the file in your external editor (E in the viewer)", "外部エディタで編集（ビューア内は E）"),
                 entry(":vi / :vim / :nvim", None, "open the file in that editor in a new shell tab", "新規シェルタブでそのエディタでファイルを開く"),
+                entry(":bulkrename", None, "rename marked (or all) files by editing the list in your editor (:brn, :vidir)", "マーク（無ければ全部）の名前一覧をエディタで編集してリネーム（:brn, :vidir）"),
                 entry("  in viewer", None, "hjkl move, /n/N search, %/{/}/NG jump, v/V/C-v select y copy", "ビューア内：hjkl移動, /n/N検索, %/{/}/NG移動, v/V/C-v選択 yコピー"),
                 entry("  B in viewer", None, "toggle the git blame gutter (who last changed each line)", "ビューア内：git blame ガター切替（各行の最終変更者）"),
                 entry("  from a grep hit", None, "Ctrl+n/N next/prev hit, Shift+Enter reveal in pane, e encoding", "grepヒットから：Ctrl+n/N 次/前, Shift+Enter 場所へ, e 文字コード"),
@@ -3709,19 +3713,34 @@ fn suspend_and_edit<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Re
     );
     terminal.clear()?;
 
-    match status {
+    match &status {
         Ok(s) if s.success() || s.code().is_some() => {}
         Ok(_) => app.message = Some("editor exited abnormally".into()),
         Err(e) => app.message = Some(format!("could not launch editor: {}", e)),
     }
 
-    // The file may have changed on disk; refresh the panes and, if the edit came
-    // from the viewer, re-open it on the (possibly changed) file.
-    app.reload_both();
-    // If it was a file fetched from a remote pane, push the edit back up.
-    app.reupload_remote(&edit.path);
-    if edit.reopen_viewer {
-        app.open_viewer_at(&edit.path, &edit.title, 0);
+    match &edit.kind {
+        edit::EditKind::File { title, reopen_viewer } => {
+            // The file may have changed on disk; refresh the panes and, if the
+            // edit came from the viewer, re-open it on the (changed) file.
+            app.reload_both();
+            // If it was fetched from a remote pane, push the edit back up.
+            app.reupload_remote(&edit.path);
+            if *reopen_viewer {
+                app.open_viewer_at(&edit.path, title, 0);
+            }
+        }
+        edit::EditKind::BulkRename { dir, names } => {
+            // Only apply a list the editor saved and exited zero from; `:cq`
+            // (non-zero) is the escape hatch and cancels the whole batch.
+            if matches!(&status, Ok(s) if s.success()) {
+                app.finish_editor_rename(&edit.path, dir, names);
+            } else {
+                let _ = std::fs::remove_file(&edit.path);
+                app.message =
+                    Some(tr(app.lang, "bulk rename cancelled", "一括リネームを中止しました").into());
+            }
+        }
     }
     Ok(())
 }

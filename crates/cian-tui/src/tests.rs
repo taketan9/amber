@@ -205,7 +205,10 @@
         match &app.pending_edit {
             Some(e) => {
                 assert!(e.path.ends_with("note.txt"));
-                assert!(!e.reopen_viewer, ":edit does not re-open the viewer");
+                assert!(
+                    matches!(e.kind, crate::edit::EditKind::File { reopen_viewer: false, .. }),
+                    ":edit does not re-open the viewer"
+                );
             }
             None => panic!("edit was not queued"),
         }
@@ -215,8 +218,71 @@
         app.handle_key(code(KeyCode::F(3))).unwrap();
         app.handle_key(KeyEvent::new(KeyCode::Char('E'), KeyModifiers::SHIFT)).unwrap();
         let e = app.pending_edit.as_ref().expect("viewer edit queued");
-        assert!(e.reopen_viewer, "viewer edit re-opens the viewer");
+        assert!(
+            matches!(e.kind, crate::edit::EditKind::File { reopen_viewer: true, .. }),
+            "viewer edit re-opens the viewer"
+        );
         assert!(matches!(app.popup, Popup::None), "viewer stepped aside");
+    }
+
+    /// The editor-rename round trip against a real directory: `:bulkrename`
+    /// writes the list, an "edit" rewrites it, and applying renames the files —
+    /// including an a↔b swap, the case a naive one-pass rename cannot do.
+    #[test]
+    fn editor_rename_applies_the_edited_list_even_swaps() {
+        let (d, mut app) = app_with(&["a.txt", "b.txt", "keep.txt"]);
+        app.start_editor_rename();
+        let edit = app.pending_edit.take().expect("list queued for the editor");
+        let (dir, names) = match &edit.kind {
+            crate::edit::EditKind::BulkRename { dir, names } => (dir.clone(), names.clone()),
+            _ => panic!("queued as a plain edit"),
+        };
+        assert_eq!(names, vec!["a.txt", "b.txt", "keep.txt"], "the pane's listing, in order");
+
+        // The "editor session": swap a and b, leave keep alone.
+        std::fs::write(&edit.path, "b.txt\na.txt\nkeep.txt\n").unwrap();
+        app.finish_editor_rename(&edit.path, &dir, &names);
+
+        assert!(d.path().join("a.txt").exists() && d.path().join("b.txt").exists());
+        assert!(d.path().join("keep.txt").exists());
+        assert!(!edit.path.exists(), "the temp list is cleaned up");
+        // No half-moved temp names left behind.
+        let leftovers: Vec<_> = std::fs::read_dir(d.path())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().starts_with(".cian-rename-"))
+            .collect();
+        assert!(leftovers.is_empty(), "no staging temp files remain");
+    }
+
+    /// Marks narrow the list — and a rename onto a file *outside* the list (the
+    /// case the in-list duplicate check cannot see) is refused by the on-disk
+    /// collision check, cancelling the batch before anything moves.
+    #[test]
+    fn editor_rename_refuses_to_clobber_a_bystander() {
+        let (d, mut app) = app_with(&["a.txt", "keep.txt"]);
+        {
+            let p = app.active_pane_mut().unwrap();
+            let i = p.entries.iter().position(|e| e.name == "a.txt").unwrap();
+            p.set_mark_at(i);
+        }
+        app.start_editor_rename();
+        let edit = app.pending_edit.take().unwrap();
+        let (dir, names) = match &edit.kind {
+            crate::edit::EditKind::BulkRename { dir, names } => (dir.clone(), names.clone()),
+            _ => panic!(),
+        };
+        assert_eq!(names, vec!["a.txt"], "marks narrow the list");
+
+        // The "editor session" renames a.txt onto the unmarked keep.txt.
+        std::fs::write(&edit.path, "keep.txt\n").unwrap();
+        app.finish_editor_rename(&edit.path, &dir, &names);
+        assert!(
+            d.path().join("a.txt").exists() && d.path().join("keep.txt").exists(),
+            "clobber rejected, both files untouched"
+        );
+        let msg = app.message.clone().unwrap_or_default();
+        assert!(msg.contains("exists") || msg.contains("存在"), "says why: {msg}");
     }
 
     /// Spin the op-job worker to completion (bulk copy/zip/extract run threaded).

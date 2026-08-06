@@ -921,8 +921,10 @@ impl App {
                 KeyCode::Char('E') => {
                     self.pending_edit = Some(crate::edit::PendingEdit {
                         path: path.clone(),
-                        title: title.clone(),
-                        reopen_viewer: false,
+                        kind: crate::edit::EditKind::File {
+                            title: title.clone(),
+                            reopen_viewer: false,
+                        },
                     });
                     self.popup = Popup::None;
                 }

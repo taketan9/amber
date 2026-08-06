@@ -194,6 +194,7 @@ impl App {
                 MenuItem::MoveToOther,
                 MenuItem::CopyToPath,
                 MenuItem::BulkRename,
+                MenuItem::EditorRename,
                 MenuItem::Back,
             ]),
             MenuItem::ArchiveMenu => {
@@ -467,6 +468,7 @@ impl App {
             MenuItem::SvnUpdate => self.svn_update(),
             MenuItem::SvnCommit => self.svn_commit_prompt(),
             MenuItem::BulkRename => self.start_bulk_rename(),
+            MenuItem::EditorRename => self.start_editor_rename(),
             MenuItem::Snippets => self.start_snippets(),
             MenuItem::Macros => self.start_macros(),
             MenuItem::EditTab => self.edit_in_new_tab(None),
