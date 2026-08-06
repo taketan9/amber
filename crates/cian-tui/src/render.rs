@@ -1399,6 +1399,34 @@ fn fade(c: Color, t: f32) -> Color {
     Color::Rgb(mix(r), mix(g), mix(b))
 }
 
+/// Colour a status message by what kind of news it carries, so a failure never
+/// wears the same clothes as a success. Classified from the text itself —
+/// messages come from a hundred call sites and most already start with a glyph
+/// (✔/⚠) or contain an unambiguous failure word; the rest stay accent-neutral.
+pub(crate) fn message_color(msg: &str) -> Color {
+    const GOOD: Color = Color::Rgb(110, 200, 130);
+    const WARN: Color = Color::Rgb(235, 200, 100);
+    const BAD: Color = Color::Rgb(235, 110, 110);
+    if msg.starts_with('✔') || msg.starts_with("saved") || msg.starts_with("copied")
+        || msg.starts_with("renamed") || msg.starts_with("created")
+    {
+        return GOOD;
+    }
+    if msg.starts_with('⚠') || msg.contains("cancelled") || msg.contains("中止")
+        || msg.contains("unsaved") || msg.contains("未保存")
+    {
+        return WARN;
+    }
+    let lower = msg.to_lowercase();
+    if lower.contains("fail") || lower.contains("error") || lower.contains("cannot")
+        || lower.contains("not found") || lower.contains("denied")
+        || msg.contains("できません") || msg.contains("失敗") || msg.contains("ありません")
+    {
+        return BAD;
+    }
+    theme().accent
+}
+
 fn focus_badge_color(mode: Mode) -> Color {
     match mode {
         Mode::Normal => theme().accent,
@@ -1590,9 +1618,18 @@ fn draw_status(f: &mut Frame, area: Rect, app: &App) {
     } else {
         format!("marks {}", mark_count)
     };
+    // The badge names the mode once it leaves Normal (helix-style): the pane
+    // letter alone said *where* keys go but not *what* they currently mean.
+    let mode_word = match app.mode {
+        Mode::Normal | Mode::Shell => "",
+        Mode::Visual => " VISUAL",
+        Mode::Search => " SEARCH",
+        Mode::Command => " CMD",
+        Mode::Filter => " FILTER",
+    };
     let mut spans: Vec<Span> = vec![
         Span::styled(
-            format!(" {} ", focus_label),
+            format!(" {}{} ", focus_label, mode_word),
             Style::default().fg(Color::Black).bg(badge_bg).add_modifier(Modifier::BOLD),
         ),
         pad.clone(),
@@ -1671,7 +1708,7 @@ fn draw_status(f: &mut Frame, area: Rect, app: &App) {
             spans.push(Span::styled(
                 format!("◂ {}", msg),
                 Style::default()
-                    .fg(theme().accent)
+                    .fg(message_color(msg))
                     .bg(theme().status_bg)
                     .add_modifier(Modifier::ITALIC | Modifier::BOLD),
             ));
