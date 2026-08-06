@@ -1441,6 +1441,23 @@
             .collect()
     }
 
+    /// A long cwd in the pane title is shortened from the middle: the tail is
+    /// what identifies a path, and clipping at the border lost exactly that.
+    #[test]
+    fn title_keeps_the_tail_of_a_long_path() {
+        let d = tempfile::tempdir().unwrap();
+        let mut deep = d.path().to_path_buf();
+        for part in ["very-long-segment-one", "very-long-segment-two", "very-long-segment-three", "destination"] {
+            deep.push(part);
+        }
+        std::fs::create_dir_all(&deep).unwrap();
+        let mut app = App::new(deep.clone(), deep, cian_lua::Config::default()).unwrap();
+        let out = render(&mut app, 80, 20);
+        let title = &out[0];
+        assert!(title.contains('…'), "long path was middle-truncated: {title}");
+        assert!(title.contains("destination"), "the identifying tail survives: {title}");
+    }
+
     /// The visible-window optimization must render the same rows ratatui would:
     /// the cursor stays on screen and far-away rows are excluded.
     #[test]

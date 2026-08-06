@@ -509,13 +509,22 @@ fn tabs_title<'a>(
         };
         format!(" {} {} ", i + 1, main)
     }
-    let width_of = |s: &str| s.chars().count() as u16;
+    // Display cells, not characters: a Japanese directory name is two cells a
+    // character, and the char count both overflowed the layout budget and
+    // misplaced the click map.
+    let width_of = |s: &str| width(s) as u16;
 
     // First, lay out tabs starting from the active one outward so it never gets cut.
     let active = tabs.active.min(tabs.tabs.len().saturating_sub(1));
     let total = tabs.tabs.len();
     let mut shown: Vec<usize> = vec![active];
-    let mut used: u16 = width_of(&label_for(active, &tabs.tabs[active], true));
+    // A long path is shortened from the middle — its tail is the part that
+    // identifies it, and clipping at the border loses exactly that end.
+    let active_label = truncate_middle(
+        &label_for(active, &tabs.tabs[active], true),
+        max_width.saturating_sub(2) as usize,
+    );
+    let mut used: u16 = width_of(&active_label);
     let sep_w: u16 = 1;
     let reserve: u16 = 5; // for " +N "
 
@@ -558,7 +567,7 @@ fn tabs_title<'a>(
     spans.push(Span::raw(" "));
     if hidden_left > 0 {
         let s = format!("+{} ", hidden_left);
-        col += s.chars().count() as u16;
+        col += width_of(&s);
         spans.push(Span::styled(s, Style::default().fg(Color::DarkGray)));
     }
     for (pos, &i) in shown.iter().enumerate() {
@@ -576,8 +585,12 @@ fn tabs_title<'a>(
             // which was the same tone as some backgrounds.
             Style::default().fg(theme().dim).add_modifier(Modifier::BOLD)
         };
-        let label = label_for(i, &tabs.tabs[i], is_active);
-        let w = label.chars().count() as u16;
+        let label = if is_active {
+            active_label.clone()
+        } else {
+            label_for(i, &tabs.tabs[i], is_active)
+        };
+        let w = width_of(&label);
         offsets.push((i, col, w));
         col += w;
         spans.push(Span::styled(label, style));
