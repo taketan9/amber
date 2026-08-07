@@ -74,6 +74,31 @@ impl App {
             }
             return;
         }
+        // Copying toward a pane that is browsing a zip adds the files to it.
+        if let Some((archive, sub)) = self
+            .opposite_pane_ref()
+            .and_then(|p| p.archive_view())
+            .map(|(a, s)| (a.to_path_buf(), s.to_string()))
+        {
+            if matches!(op, PendingOp::Move) {
+                self.message = Some(tr(
+                    self.lang,
+                    "copy adds to the zip; move is not supported",
+                    "zipへはコピー（追加）のみ — 移動は未対応",
+                ).into());
+                return;
+            }
+            if !self.require_zip_writable(&archive) {
+                return;
+            }
+            let sources = self.active_pane().map(|p| p.target_paths()).unwrap_or_default();
+            if sources.is_empty() {
+                self.message = Some("nothing to operate on".into());
+                return;
+            }
+            self.popup = Popup::ConfirmZipAdd { archive, sub, sources };
+            return;
+        }
         // Copying to/from a remote pane is an SFTP transfer, not a local copy.
         if self.try_remote_pane_transfer(matches!(op, PendingOp::Move)) {
             return;
@@ -88,11 +113,7 @@ impl App {
     }
     pub(crate) fn start_delete(&mut self) {
         if self.active_pane().map(|p| p.archive_view().is_some()).unwrap_or(false) {
-            self.message = Some(tr(
-                self.lang,
-                "archives are read-only for now",
-                "アーカイブ内は今は読み取り専用です",
-            ).into());
+            self.archive_delete();
             return;
         }
         let targets = match self.active_pane() {
@@ -104,11 +125,7 @@ impl App {
     }
     pub(crate) fn start_rename(&mut self) {
         if self.active_pane().map(|p| p.archive_view().is_some()).unwrap_or(false) {
-            self.message = Some(tr(
-                self.lang,
-                "archives are read-only for now",
-                "アーカイブ内は今は読み取り専用です",
-            ).into());
+            self.archive_rename_start();
             return;
         }
         let Some(p) = self.active_pane() else { return };
@@ -2271,6 +2288,9 @@ impl App {
                 }
             }
             self.reload_both();
+            // An archive pane's listing is synthetic too: re-list it so a zip
+            // op (add/delete/rename) shows its result.
+            self.refresh_archive_panes();
             // A remote pane isn't touched by reload_both (its listing is
             // synthetic); re-fetch it if an upload just landed files on it.
             if let Some(side) = self.remote_refresh.take() {
@@ -2706,6 +2726,12 @@ impl App {
                     return Ok(());
                 }
                 self.run_extract(archive.clone(), members.clone(), dest.clone(), Some(name), strip.clone());
+                return Ok(());
+            }
+            InputKind::RenameZipMember { archive, sub, from, is_dir } => {
+                let (archive, sub, from, is_dir) =
+                    (archive.clone(), sub.clone(), from.clone(), *is_dir);
+                self.finish_zip_rename(archive, sub, from, is_dir, name);
                 return Ok(());
             }
             InputKind::SvnCommit { paths } => {

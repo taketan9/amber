@@ -289,6 +289,11 @@ struct PaletteItem {
 enum Popup {
     None,
     ConfirmDelete { targets: Vec<PathBuf> },
+    /// Files about to be added into the zip the opposite pane is browsing.
+    ConfirmZipAdd { archive: PathBuf, sub: String, sources: Vec<PathBuf> },
+    /// Members about to be deleted from the zip being browsed. `members` is
+    /// the expanded list the op works on; `shown` the rows the user picked.
+    ConfirmZipDelete { archive: PathBuf, members: Vec<String>, shown: Vec<String> },
     ConfirmTransfer { op: PendingOp, targets: Vec<PathBuf>, dest: PathBuf },
     /// Overwrite confirmation for a copy-across from a comparison view (`<`/`>`
     /// in the file diff or the folder compare). `back` is the comparison popup
@@ -1361,6 +1366,8 @@ enum InputKind {
     CompressName { kind: CompressKind, sources: Vec<PathBuf> },
     /// The password for an encrypted zip about to be extracted. Rendered masked.
     ExtractPassword { archive: PathBuf, members: Vec<String>, dest: PathBuf, strip: String },
+    /// Renaming a member (or a whole directory) inside the zip being browsed.
+    RenameZipMember { archive: PathBuf, sub: String, from: String, is_dir: bool },
     /// The log message for an `svn commit` of the given paths.
     SvnCommit { paths: Vec<PathBuf> },
     /// A typed local directory to download the given remote files into.
@@ -2191,12 +2198,17 @@ impl App {
     }
 
     fn opposite_pane_cwd(&self) -> Option<PathBuf> {
+        self.opposite_pane_ref().map(|p| p.cwd.clone())
+    }
+
+    /// The pane opposite the focused one (None when the shell has focus).
+    fn opposite_pane_ref(&self) -> Option<&Pane> {
         let other = match self.focused {
             FocusedPane::Left => &self.right,
             FocusedPane::Right => &self.left,
             FocusedPane::Shell => return None,
         };
-        Some(other.active_ref().cwd.clone())
+        Some(other.active_ref())
     }
 
     fn focus(&mut self, target: FocusedPane) {
@@ -3288,7 +3300,7 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry("G", Some(CursorBottom), "jump to bottom", "末尾へジャンプ"),
                 entry("l, Enter", Some(EnterDir), "enter folder / open file", "フォルダに入る／ファイルを開く"),
                 entry("F3", None, "look inside: text/hex, an image, or an archive's list", "中身を見る：テキスト/16進・画像・書庫の一覧"),
-                entry("  Enter on a zip", None, "browse INSIDE the archive like a folder; copy out = extract; .. leaves", "zipにEnterで書庫の中へ（フォルダ同様に移動、コピー=展開、.. で外へ）"),
+                entry("  Enter on a zip", None, "browse INSIDE the archive; copy out=extract, copy in=add, r/d rename/delete (zip)", "zipにEnterで書庫の中へ（コピー=展開／逆コピー=追加、r/d でリネーム・削除）"),
                 entry(":preview", None, "cursor-follow preview in the shell panel (Shift+J shows the shell)", "シェル枠にカーソル追従プレビュー（Shift+J でシェル表示）"),
                 entry("  edit in viewer", None, "i/a/o/O/I = insert (Ctrl+S save, Esc leave), E = external editor", "ビューア内編集：i/a/o/O/I 挿入（Ctrl+S 保存, Esc 終了）／ E 外部エディタ"),
                 entry("  normal mode", None, "x/dd/D/J delete·join, u undo, v+d cut selection (d/u scroll via Ctrl)", "ノーマルモード：x/dd/D/J 削除·結合, u 取消, v+d 選択削除（スクロールは Ctrl+d/u）"),

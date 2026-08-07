@@ -6119,6 +6119,93 @@
         assert!(msg.contains("read-only") || msg.contains("読み取り専用"), "{msg}");
     }
 
+    /// The write side, end to end: copy INTO the zip from the other pane,
+    /// rename a member, delete a member — each confirmed, run on the worker,
+    /// and reflected in the refreshed listing.
+    #[test]
+    fn zip_add_rename_delete_from_the_panes() {
+        let (l, r, mut app) = app_two_dirs(&[], &["fresh.txt"]);
+        let zip = make_browse_zip(l.path());
+        std::fs::write(r.path().join("fresh.txt"), "fresh body").unwrap();
+        // Left pane: into the zip's docs/ directory.
+        if let Some(pane) = app.active_pane_mut() {
+            let _ = pane.reload();
+            pane.cursor = pane.entries.iter().position(|e| e.name == "bundle.zip").unwrap();
+        }
+        app.activate_selected().unwrap();
+        {
+            let pane = app.active_pane_mut().unwrap();
+            pane.cursor = pane.entries.iter().position(|e| e.name == "docs").unwrap();
+        }
+        app.activate_selected().unwrap();
+
+        // Right pane copies fresh.txt toward the left → confirm → into docs/.
+        app.focus(FocusedPane::Right);
+        if let Some(pane) = app.active_pane_mut() {
+            let _ = pane.reload();
+            pane.cursor = pane.entries.iter().position(|e| e.name == "fresh.txt").unwrap();
+        }
+        app.start_transfer(PendingOp::Copy);
+        assert!(
+            matches!(app.popup, Popup::ConfirmZipAdd { .. }),
+            "asks before writing into the zip: {:?}",
+            app.popup
+        );
+        app.handle_key(key('y')).unwrap();
+        drain_op_job(&mut app);
+        let names: Vec<String> = cian_core::archive::list(&zip)
+            .unwrap()
+            .into_iter()
+            .map(|m| m.name)
+            .collect();
+        assert!(names.contains(&"docs/fresh.txt".to_string()), "added under docs/: {names:?}");
+
+        // The left pane (still inside docs/) sees the new member.
+        app.focus(FocusedPane::Left);
+        let listed: Vec<String> =
+            app.active_pane().unwrap().entries.iter().map(|e| e.name.clone()).collect();
+        assert!(listed.contains(&"fresh.txt".to_string()), "listing refreshed: {listed:?}");
+
+        // Rename it (F2 path) …
+        {
+            let pane = app.active_pane_mut().unwrap();
+            pane.cursor = pane.entries.iter().position(|e| e.name == "fresh.txt").unwrap();
+        }
+        app.start_rename();
+        assert!(
+            matches!(&app.popup, Popup::TextInput { kind: InputKind::RenameZipMember { .. }, .. }),
+            "member rename prompt: {:?}",
+            app.popup
+        );
+        // Clear the seeded name, type the new one, Enter.
+        app.handle_key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL)).unwrap();
+        for c in "renamed.txt".chars() {
+            app.handle_key(key(c)).unwrap();
+        }
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+        drain_op_job(&mut app);
+        let names: Vec<String> =
+            cian_core::archive::list(&zip).unwrap().into_iter().map(|m| m.name).collect();
+        assert!(names.contains(&"docs/renamed.txt".to_string()), "renamed: {names:?}");
+        assert!(!names.contains(&"docs/fresh.txt".to_string()));
+
+        // …and delete it.
+        {
+            let pane = app.active_pane_mut().unwrap();
+            pane.cursor = pane.entries.iter().position(|e| e.name == "renamed.txt").unwrap();
+        }
+        app.start_delete();
+        assert!(matches!(app.popup, Popup::ConfirmZipDelete { .. }), "{:?}", app.popup);
+        app.handle_key(key('y')).unwrap();
+        drain_op_job(&mut app);
+        let names: Vec<String> =
+            cian_core::archive::list(&zip).unwrap().into_iter().map(|m| m.name).collect();
+        assert!(!names.contains(&"docs/renamed.txt".to_string()), "deleted: {names:?}");
+        // Untouched members survived all three rewrites.
+        assert!(names.contains(&"docs/deep/note.txt".to_string()));
+        assert!(names.contains(&"top.txt".to_string()));
+    }
+
     #[test]
     fn a_docx_previews_as_searchable_text() {
         use std::io::Write;

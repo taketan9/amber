@@ -283,6 +283,216 @@ impl App {
     }
 }
 
+
+impl App {
+    /// Queue the zip mutation on the op worker; the archive panes refresh
+    /// when it lands (see [`App::refresh_archive_panes`]).
+    pub(crate) fn run_zip_modify(
+        &mut self,
+        archive: PathBuf,
+        drop_members: Vec<String>,
+        rename_members: Vec<(String, String)>,
+        add_sources: Vec<PathBuf>,
+        add_prefix: String,
+    ) {
+        self.start_op("zip", move |ctl| {
+            cian_core::archive::zip_modify(
+                &archive,
+                &drop_members,
+                &rename_members,
+                &add_sources,
+                &add_prefix,
+                ctl,
+            )
+        });
+    }
+
+    /// The other pane wants these files inside the zip this pane browses:
+    /// show what is about to happen, then do it on `y`.
+    pub(crate) fn confirm_zip_add(&mut self) -> anyhow::Result<()> {
+        if let crate::Popup::ConfirmZipAdd { archive, sub, sources } = &self.popup {
+            let (archive, sub, sources) = (archive.clone(), sub.clone(), sources.clone());
+            self.popup = crate::Popup::None;
+            self.run_zip_modify(archive, Vec::new(), Vec::new(), sources, sub);
+        }
+        Ok(())
+    }
+
+    pub(crate) fn confirm_zip_delete(&mut self) -> anyhow::Result<()> {
+        if let crate::Popup::ConfirmZipDelete { archive, members, .. } = &self.popup {
+            let (archive, members) = (archive.clone(), members.clone());
+            self.popup = crate::Popup::None;
+            self.run_zip_modify(archive, members, Vec::new(), Vec::new(), String::new());
+        }
+        Ok(())
+    }
+
+    /// Delete inside the archive: expand the picked rows to their members and
+    /// confirm. Deletion rewrites the zip, so it always asks.
+    pub(crate) fn archive_delete(&mut self) {
+        let Some((archive, sub)) = self
+            .active_pane()
+            .and_then(|p| p.archive_view())
+            .map(|(a, s)| (a.to_path_buf(), s.to_string()))
+        else {
+            return;
+        };
+        if !self.require_zip_writable(&archive) {
+            return;
+        }
+        let Some(pane) = self.active_pane() else { return };
+        let picked: Vec<(String, bool)> = if pane.mark_count() > 0 {
+            pane.entries
+                .iter()
+                .filter(|e| !e.is_parent && pane.marks.contains(&e.path))
+                .map(|e| (format!("{}{}", sub, e.name), e.is_dir))
+                .collect()
+        } else {
+            match pane.selected().filter(|e| !e.is_parent) {
+                Some(e) => vec![(format!("{}{}", sub, e.name), e.is_dir)],
+                None => Vec::new(),
+            }
+        };
+        if picked.is_empty() {
+            self.message = Some(tr(self.lang, "nothing selected", "選択がありません").into());
+            return;
+        }
+        let shown: Vec<String> = picked.iter().map(|(n, _)| n.clone()).collect();
+        let members: Vec<String> = match self.archive_members(&archive) {
+            Ok(all) => picked
+                .iter()
+                .flat_map(|(prefix, is_dir)| {
+                    if *is_dir {
+                        members_under(&all, prefix).into_iter().map(|m| m.name.clone()).collect()
+                    } else {
+                        vec![prefix.clone()]
+                    }
+                })
+                .collect(),
+            Err(e) => {
+                self.message = Some(e);
+                return;
+            }
+        };
+        self.popup = crate::Popup::ConfirmZipDelete { archive, members, shown };
+    }
+
+    /// Modifying only works for zip-family archives; tar would need a full
+    /// re-pack and stays read-only. Encrypted zips are refused by the core.
+    pub(crate) fn require_zip_writable(&mut self, archive: &Path) -> bool {
+        let name = archive.to_string_lossy().to_lowercase();
+        let zip_like = [".zip", ".jar", ".xpi", ".whl", ".epub"].iter().any(|e| name.ends_with(e));
+        if !zip_like {
+            self.message = Some(tr(
+                self.lang,
+                "only zip archives can be modified (tar is read-only)",
+                "変更できるのは zip のみです（tar は読み取り専用）",
+            ).into());
+        }
+        zip_like
+    }
+
+    /// F2 inside the archive: rename the member (or directory) under the
+    /// cursor. A directory rename rewrites every member beneath it.
+    pub(crate) fn archive_rename_start(&mut self) {
+        let Some((archive, sub)) = self
+            .active_pane()
+            .and_then(|p| p.archive_view())
+            .map(|(a, s)| (a.to_path_buf(), s.to_string()))
+        else {
+            return;
+        };
+        if !self.require_zip_writable(&archive) {
+            return;
+        }
+        let Some(e) = self.active_pane().and_then(|p| p.selected()).cloned() else { return };
+        if e.is_parent {
+            return;
+        }
+        self.popup = crate::text_input(
+            "rename in zip",
+            "new name:",
+            e.name.clone(),
+            crate::InputKind::RenameZipMember {
+                archive,
+                sub,
+                from: e.name.clone(),
+                is_dir: e.is_dir,
+            },
+        );
+    }
+
+    /// Apply a member rename typed into the F2 prompt.
+    pub(crate) fn finish_zip_rename(
+        &mut self,
+        archive: PathBuf,
+        sub: String,
+        from: String,
+        is_dir: bool,
+        to: String,
+    ) {
+        if to.is_empty() || to == from || to.contains('/') || to.contains('\\') {
+            self.message = Some(tr(self.lang, "invalid name", "無効な名前です").into());
+            return;
+        }
+        let old_prefix = format!("{}{}", sub, from);
+        let new_prefix = format!("{}{}", sub, to);
+        let pairs: Vec<(String, String)> = if is_dir {
+            match self.archive_members(&archive) {
+                Ok(all) => members_under(&all, &old_prefix)
+                    .into_iter()
+                    .map(|m| {
+                        let tail = m.name[old_prefix.len()..].to_string();
+                        (m.name.clone(), format!("{}{}", new_prefix, tail))
+                    })
+                    .collect(),
+                Err(e) => {
+                    self.message = Some(e);
+                    return;
+                }
+            }
+        } else {
+            vec![(old_prefix, new_prefix)]
+        };
+        self.run_zip_modify(archive, Vec::new(), pairs, Vec::new(), String::new());
+    }
+
+    /// After a zip op lands: re-list and rebuild any pane still browsing the
+    /// archive, clamping to the nearest directory that still exists.
+    pub(crate) fn refresh_archive_panes(&mut self) {
+        use crate::FocusedPane;
+        self.archive_cache = None;
+        for side in [FocusedPane::Left, FocusedPane::Right] {
+            let Some((archive, mut sub)) = self
+                .side_pane(side)
+                .archive_view()
+                .map(|(a, s)| (a.to_path_buf(), s.to_string()))
+            else {
+                continue;
+            };
+            let members = match self.archive_members(&archive) {
+                Ok(m) => m,
+                Err(_) => {
+                    // The archive itself is gone: fall back to its directory.
+                    if let Some(dir) = archive.parent().map(|p| p.to_path_buf()) {
+                        let _ = self.side_pane_mut(side).jump_to(dir);
+                    }
+                    continue;
+                }
+            };
+            while !sub.is_empty() && !members.iter().any(|m| m.name.starts_with(sub.as_str())) {
+                sub = sub
+                    .trim_end_matches('/')
+                    .rsplit_once('/')
+                    .map(|(h, _)| format!("{h}/"))
+                    .unwrap_or_default();
+            }
+            let rows = archive_rows(&archive, &members, &sub);
+            self.side_pane_mut(side).enter_archive(archive, sub, rows);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

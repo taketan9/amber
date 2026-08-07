@@ -439,6 +439,11 @@ impl App {
         if matches!(side, FocusedPane::Right) { self.right.active_ref() } else { self.left.active_ref() }
     }
 
+    /// The active pane on a given side, mutably.
+    pub(crate) fn side_pane_mut(&mut self, side: FocusedPane) -> &mut Pane {
+        if matches!(side, FocusedPane::Right) { self.right.active_mut() } else { self.left.active_mut() }
+    }
+
     /// The absolute remote cwd of the remote pane on `side` (if it is one).
     fn remote_cwd(&self, side: FocusedPane) -> Option<String> {
         self.side_pane(side).remote_view().map(|(_, p)| p.to_string())

@@ -3136,6 +3136,64 @@ fn draw_simple_dialog(
                 " y/Enter=ゴミ箱  a=完全削除  n/Esc=取消 ");
             (title, lines, foot.to_string())
         }
+        Popup::ConfirmZipAdd { archive, sub, sources } => {
+            let title = tr(lang, " add to zip ", " zipへ追加 ").to_string();
+            let where_ = format!(
+                "{}{}{}",
+                archive.file_name().map(|s| s.to_string_lossy()).unwrap_or_default(),
+                if sub.is_empty() { "" } else { "/" },
+                sub
+            );
+            let head = if lang == Lang::Ja {
+                format!("{} 件 → {}:", sources.len(), where_)
+            } else {
+                format!("{} item(s) → {}:", sources.len(), where_)
+            };
+            let mut lines = vec![head, String::new()];
+            for p in sources.iter().take(8) {
+                lines.push(format!("  {}", p.file_name().map(|s| s.to_string_lossy()).unwrap_or_default()));
+            }
+            if sources.len() > 8 {
+                lines.push(tr_count(lang, sources.len() - 8));
+            }
+            lines.push(String::new());
+            lines.push(tr(lang, "same names inside the zip are replaced", "zip内の同名メンバーは置き換えられます").to_string());
+            let foot = tr(lang, " y/Enter=add  n/Esc=cancel ", " y/Enter=追加  n/Esc=取消 ");
+            (title, lines, foot.to_string())
+        }
+        Popup::ConfirmZipDelete { archive, members, shown } => {
+            let title = tr(lang, " delete from zip ", " zipから削除 ").to_string();
+            let head = if lang == Lang::Ja {
+                format!(
+                    "{} 件（メンバー {} 個）を {} から削除:",
+                    shown.len(),
+                    members.len(),
+                    archive.file_name().map(|s| s.to_string_lossy()).unwrap_or_default()
+                )
+            } else {
+                format!(
+                    "{} item(s) ({} member(s)) from {}:",
+                    shown.len(),
+                    members.len(),
+                    archive.file_name().map(|s| s.to_string_lossy()).unwrap_or_default()
+                )
+            };
+            let mut lines = vec![head, String::new()];
+            for m in shown.iter().take(8) {
+                lines.push(format!("  {}", m));
+            }
+            if shown.len() > 8 {
+                lines.push(tr_count(lang, shown.len() - 8));
+            }
+            lines.push(String::new());
+            lines.push(tr(
+                lang,
+                "the zip is rewritten — there is no trash for this",
+                "zipを書き直します — ゴミ箱には行きません",
+            ).to_string());
+            let foot = tr(lang, " y/Enter=delete  n/Esc=cancel ", " y/Enter=削除  n/Esc=取消 ");
+            (title, lines, foot.to_string())
+        }
         Popup::ConfirmTransfer { op, targets, dest } => {
             let title = match (op, lang) {
                 (PendingOp::Copy, Lang::Ja) => " コピー ",

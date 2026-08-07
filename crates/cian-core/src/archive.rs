@@ -432,6 +432,209 @@ fn extract_zip(
     report
 }
 
+/// Modify a zip in place: drop members, rename members, and/or add local
+/// files under `add_prefix` (directories recurse). One entry point for every
+/// mutation the archive browser makes.
+///
+/// Always works on a sibling temp file and renames it over the original only
+/// on success, so a cancel or crash never leaves a half-written archive —
+/// the fast path (nothing dropped/renamed, no name collisions) copies the
+/// file and appends to the copy; the general path raw-copies the kept
+/// members (no recompression) into a fresh zip.
+///
+/// Password-protected zips are refused: mixing cleartext additions into an
+/// AES archive produces a file that *looks* protected but is not.
+pub fn zip_modify(
+    archive: &Path,
+    drop_members: &[String],
+    rename_members: &[(String, String)],
+    add_sources: &[PathBuf],
+    add_prefix: &str,
+    ctl: &mut Ctl,
+) -> OpReport {
+    use std::io::Write as _;
+
+    let mut report = OpReport::default();
+    if zip_needs_password(archive) {
+        report.note_error("password-protected zip — modifying is not supported".to_string());
+        return report;
+    }
+
+    // The additions, flattened (dirs recurse), members named under the prefix.
+    let mut jobs: Vec<(PathBuf, String)> = Vec::new();
+    for src in add_sources {
+        let base = match src.file_name().and_then(|n| n.to_str()) {
+            Some(n) => format!("{}{}", add_prefix, n),
+            None => {
+                report.note_error(format!("{}: unusable name", src.display()));
+                continue;
+            }
+        };
+        if src.is_dir() {
+            collect_tree(src, &base, &mut jobs, &mut report);
+        } else {
+            jobs.push((src.clone(), base));
+        }
+    }
+
+    let existing: std::collections::HashSet<String> = match list(archive) {
+        Ok(m) => m.into_iter().map(|m| m.name).collect(),
+        Err(e) => {
+            report.note_error(format!("{}: {}", archive.display(), e));
+            return report;
+        }
+    };
+    let collides = jobs.iter().any(|(_, name)| existing.contains(name));
+    let append_only = drop_members.is_empty() && rename_members.is_empty() && !collides;
+
+    let tmp = archive.with_extension("cian-zip-tmp");
+    let fail = |report: &mut OpReport, tmp: &Path, msg: String| {
+        report.note_error(msg);
+        let _ = fs::remove_file(tmp);
+    };
+
+    let mut p = Progress {
+        files_total: jobs.len(),
+        bytes_total: jobs.iter().filter_map(|(pth, _)| fs::metadata(pth).ok().map(|m| m.len())).sum(),
+        ..Default::default()
+    };
+
+    let mut zip = if append_only {
+        // Fast path: copy, then append to the copy. The original is untouched
+        // until the final rename, so cancelling can simply delete the temp.
+        if let Err(e) = fs::copy(archive, &tmp) {
+            report.note_error(format!("{}: {}", archive.display(), e));
+            return report;
+        }
+        let f = match fs::OpenOptions::new().read(true).write(true).open(&tmp) {
+            Ok(f) => f,
+            Err(e) => return { fail(&mut report, &tmp, e.to_string()); report },
+        };
+        match zip::ZipWriter::new_append(f) {
+            Ok(z) => z,
+            Err(e) => return { fail(&mut report, &tmp, e.to_string()); report },
+        }
+    } else {
+        // General path: raw-copy the kept members into a fresh zip — the
+        // stored bytes move as-is, so nothing is recompressed.
+        let src_f = match fs::File::open(archive) {
+            Ok(f) => f,
+            Err(e) => {
+                report.note_error(format!("{}: {}", archive.display(), e));
+                return report;
+            }
+        };
+        let mut src = match zip::ZipArchive::new(src_f) {
+            Ok(z) => z,
+            Err(e) => {
+                report.note_error(format!("{}: {}", archive.display(), e));
+                return report;
+            }
+        };
+        let out = match fs::File::create(&tmp) {
+            Ok(f) => f,
+            Err(e) => {
+                report.note_error(e.to_string());
+                return report;
+            }
+        };
+        let mut zip = zip::ZipWriter::new(out);
+        let dropped: std::collections::HashSet<&str> =
+            drop_members.iter().map(|s| s.as_str()).collect();
+        let added: std::collections::HashSet<&str> =
+            jobs.iter().map(|(_, n)| n.as_str()).collect();
+        for i in 0..src.len() {
+            if ctl.cancel.load(Ordering::Relaxed) {
+                drop(zip);
+                let _ = fs::remove_file(&tmp);
+                return report;
+            }
+            let entry = match src.by_index_raw(i) {
+                Ok(e) => e,
+                Err(e) => {
+                    report.note_error(format!("entry {}: {}", i, e));
+                    continue;
+                }
+            };
+            let name = entry.name().to_string();
+            // Dropped, or about to be replaced by an addition of the same name.
+            if dropped.contains(name.as_str()) || added.contains(name.as_str()) {
+                continue;
+            }
+            let renamed = rename_members.iter().find(|(from, _)| *from == name);
+            let res = match renamed {
+                Some((_, to)) => zip.raw_copy_file_rename(entry, to.as_str()),
+                None => zip.raw_copy_file(entry),
+            };
+            if let Err(e) = res {
+                fail(&mut report, &tmp, format!("{}: {}", name, e));
+                return report;
+            }
+        }
+        zip
+    };
+
+    // Append the additions (both paths end here).
+    let base_opts: zip::write::FileOptions<()> =
+        zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+    for (path, name) in &jobs {
+        if ctl.cancel.load(Ordering::Relaxed) {
+            drop(zip);
+            let _ = fs::remove_file(&tmp);
+            return report;
+        }
+        p.current = name.clone();
+        (ctl.on_progress)(&p);
+        if let Err(e) = zip.start_file(name, base_opts) {
+            report.note_error(format!("{}: {}", name, e));
+            continue;
+        }
+        let mut src_f = match fs::File::open(path) {
+            Ok(f) => f,
+            Err(e) => {
+                report.note_error(format!("{}: {}", name, e));
+                continue;
+            }
+        };
+        let mut buf = vec![0u8; 256 * 1024];
+        let mut failed = false;
+        loop {
+            match src_f.read(&mut buf) {
+                Ok(0) => break,
+                Ok(n) => {
+                    if let Err(e) = zip.write_all(&buf[..n]) {
+                        report.note_error(format!("{}: {}", name, e));
+                        failed = true;
+                        break;
+                    }
+                    p.bytes_done += n as u64;
+                    (ctl.on_progress)(&p);
+                }
+                Err(e) => {
+                    report.note_error(format!("{}: {}", name, e));
+                    failed = true;
+                    break;
+                }
+            }
+        }
+        if !failed {
+            report.ok += 1;
+        }
+        p.files_done += 1;
+    }
+    // Deletions and renames count as completed work too.
+    report.ok += drop_members.len() + rename_members.len();
+
+    if let Err(e) = zip.finish() {
+        fail(&mut report, &tmp, format!("{}: {}", archive.display(), e));
+        return report;
+    }
+    if let Err(e) = fs::rename(&tmp, archive) {
+        fail(&mut report, &tmp, format!("{}: {}", archive.display(), e));
+    }
+    report
+}
+
 /// Build a zip at `dest` from `sources`, optionally encrypted with `password`.
 ///
 /// Directories are added recursively, with their tree preserved relative to
@@ -949,5 +1152,97 @@ mod tests {
         let mut n = |_: &Progress| {};
         create_zip(&[d.path().join("a.txt")], &out, None, &mut ctl(&cancel, &mut n));
         assert!(!out.exists(), "a cancelled zip is cleaned up");
+    }
+
+    /// zip_modify's whole contract, one scenario per concern: add (with a
+    /// directory), delete, rename, replace-on-collision — and the original
+    /// survives an error or cancel untouched.
+    #[test]
+    fn zip_modify_adds_deletes_renames_and_replaces() {
+        let d = tempfile::tempdir().unwrap();
+        let z = make_zip(d.path());
+        let names = |z: &Path| -> Vec<String> {
+            let mut v: Vec<String> =
+                list(z).unwrap().into_iter().map(|m| m.name).collect();
+            v.sort();
+            v
+        };
+
+        // Add a file and a directory under a prefix.
+        fs::write(d.path().join("new.txt"), b"fresh").unwrap();
+        fs::create_dir(d.path().join("pack")).unwrap();
+        fs::write(d.path().join("pack/one.log"), b"1").unwrap();
+        let cancel = AtomicBool::new(false);
+        let mut n = |_: &Progress| {};
+        let r = zip_modify(
+            &z,
+            &[],
+            &[],
+            &[d.path().join("new.txt"), d.path().join("pack")],
+            "sub/",
+            &mut ctl(&cancel, &mut n),
+        );
+        assert!(r.errors.is_empty(), "{:?}", r.errors);
+        assert!(names(&z).contains(&"sub/new.txt".to_string()), "{:?}", names(&z));
+        assert!(names(&z).contains(&"sub/pack/one.log".to_string()));
+
+        // Delete one member; rename another.
+        let mut n = |_: &Progress| {};
+        let r = zip_modify(
+            &z,
+            &["sub/inner.txt".to_string()],
+            &[("readme.txt".to_string(), "README.txt".to_string())],
+            &[],
+            "",
+            &mut ctl(&cancel, &mut n),
+        );
+        assert!(r.errors.is_empty(), "{:?}", r.errors);
+        let ns = names(&z);
+        assert!(!ns.contains(&"sub/inner.txt".to_string()), "deleted: {ns:?}");
+        assert!(ns.contains(&"README.txt".to_string()), "renamed: {ns:?}");
+        assert!(!ns.contains(&"readme.txt".to_string()));
+
+        // Adding an existing name replaces it (rewrite path, not a duplicate).
+        fs::write(d.path().join("README.txt"), b"replaced body").unwrap();
+        let mut n = |_: &Progress| {};
+        let r = zip_modify(&z, &[], &[], &[d.path().join("README.txt")], "", &mut ctl(&cancel, &mut n));
+        assert!(r.errors.is_empty(), "{:?}", r.errors);
+        let count = names(&z).iter().filter(|s| s.as_str() == "README.txt").count();
+        assert_eq!(count, 1, "replaced, not duplicated");
+        let out = tempfile::tempdir().unwrap();
+        let mut n = |_: &Progress| {};
+        extract(&z, &["README.txt".to_string()], out.path(), None, "", &mut ctl(&cancel, &mut n));
+        assert_eq!(fs::read(out.path().join("README.txt")).unwrap(), b"replaced body");
+
+        // A cancelled modify leaves the archive exactly as it was.
+        let before = fs::read(&z).unwrap();
+        let cancelled = AtomicBool::new(true);
+        let mut n = |_: &Progress| {};
+        let _ = zip_modify(
+            &z,
+            &["README.txt".to_string()],
+            &[],
+            &[],
+            "",
+            &mut ctl(&cancelled, &mut n),
+        );
+        assert_eq!(fs::read(&z).unwrap(), before, "cancel never half-writes");
+        assert!(!z.with_extension("cian-zip-tmp").exists(), "temp cleaned up");
+    }
+
+    /// A password-protected zip is refused outright: appending cleartext into
+    /// an AES archive would look protected while not being so.
+    #[test]
+    fn zip_modify_refuses_encrypted_archives() {
+        let d = tempfile::tempdir().unwrap();
+        fs::write(d.path().join("s.txt"), b"x").unwrap();
+        let z = d.path().join("locked.zip");
+        let cancel = AtomicBool::new(false);
+        let mut n = |_: &Progress| {};
+        create_zip(&[d.path().join("s.txt")], &z, Some("pw"), &mut ctl(&cancel, &mut n));
+        let mut n = |_: &Progress| {};
+        let r = zip_modify(&z, &[], &[], &[d.path().join("s.txt")], "", &mut ctl(&cancel, &mut n));
+        assert!(!r.errors.is_empty());
+        assert!(r.errors[0].contains("password"), "{:?}", r.errors);
     }
 }
