@@ -40,6 +40,7 @@ use util::{
 
 mod ai;
 mod crmaine;
+mod preview;
 mod markdown;
 mod viewer;
 mod ssh;
@@ -1767,6 +1768,14 @@ pub struct App {
     /// Clickable path-segment rects on the active tab's title (a breadcrumb).
     /// The `usize` is how many trailing components to strip from the cwd.
     crumb_rects: Vec<(FocusedPane, usize, Rect)>,
+    /// Cursor-follow preview (`:preview`): while on, the shell panel's area
+    /// previews the file under the cursor whenever a file pane has focus.
+    preview_on: bool,
+    /// The loaded preview, cached by path (see [`preview::PreviewState`]).
+    preview: Option<preview::PreviewState>,
+    /// Protocol state for a previewed image, separate from the F3 popup's
+    /// `img_proto` (which is cleared whenever that popup is closed).
+    preview_gfx: Option<(PathBuf, ratatui_image::protocol::StatefulProtocol)>,
     /// Terminal-graphics capability, when the terminal answered the startup
     /// query with a real protocol (kitty / iTerm2 / sixel). `None` falls back
     /// to the half-block cell renderer — including always in tests, which
@@ -2117,6 +2126,9 @@ impl App {
             crumb_rects: Vec::new(),
             gfx_picker: None,
             img_proto: None,
+            preview_on: false,
+            preview: None,
+            preview_gfx: None,
             zoom_return: None,
             pending_shell_input: None,
             pending_shortcut_target: None,
@@ -3271,6 +3283,7 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry("G", Some(CursorBottom), "jump to bottom", "末尾へジャンプ"),
                 entry("l, Enter", Some(EnterDir), "enter folder / open file", "フォルダに入る／ファイルを開く"),
                 entry("F3", None, "look inside: text/hex, an image, or an archive's list", "中身を見る：テキスト/16進・画像・書庫の一覧"),
+                entry(":preview", None, "cursor-follow preview in the shell panel (Shift+J shows the shell)", "シェル枠にカーソル追従プレビュー（Shift+J でシェル表示）"),
                 entry("  edit in viewer", None, "i/a/o/O/I = insert (Ctrl+S save, Esc leave), E = external editor", "ビューア内編集：i/a/o/O/I 挿入（Ctrl+S 保存, Esc 終了）／ E 外部エディタ"),
                 entry("  normal mode", None, "x/dd/D/J delete·join, u undo, v+d cut selection (d/u scroll via Ctrl)", "ノーマルモード：x/dd/D/J 削除·結合, u 取消, v+d 選択削除（スクロールは Ctrl+d/u）"),
                 entry(":edit", None, "edit the file in your external editor (E in the viewer)", "外部エディタで編集（ビューア内は E）"),

@@ -83,9 +83,16 @@ fn draw_split(f: &mut Frame, main_area: Rect, app: &mut App, ov: AnimOverride) {
     let restore = push_pane_theme(app, 1);
     draw_file_pane(f, panes_split[1], &app.right, app.focused == FocusedPane::Right, visual_for_right, app.mode, bg_r, fl_r, FocusedPane::Right, &mut tab_rects, app.git_for(FocusedPane::Right), app.lang, &mut sort_rects, &mut crumb_rects);
     if let Some(prev) = restore { set_theme(prev); }
-    // draw_shell sizes each pane's PTY to its computed sub-rect.
+    // With preview on and a file pane focused, the shell panel's area shows
+    // the file under the cursor instead; the PTY runs on underneath, and
+    // focusing the shell (Shift+J / click) gets its pixels back.
     let log_border = recording_pulse(app.started.elapsed());
-    draw_shell(f, shell_area, &mut app.shell, app.focused == FocusedPane::Shell, &mut dividers, &mut leaves, ov, &mut tab_rects, log_border);
+    if app.preview_on && app.focused != FocusedPane::Shell {
+        draw_preview_panel(f, shell_area, app);
+    } else {
+        // draw_shell sizes each pane's PTY to its computed sub-rect.
+        draw_shell(f, shell_area, &mut app.shell, app.focused == FocusedPane::Shell, &mut dividers, &mut leaves, ov, &mut tab_rects, log_border);
+    }
     app.dividers = dividers;
     app.shell_leaves = leaves;
     app.tab_rects = tab_rects;
@@ -2067,6 +2074,150 @@ fn draw_image(f: &mut Frame, area: Rect, app: &mut App) {
             .style(Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD)),
         footer_area,
     );
+}
+
+/// The `:preview` panel, borrowing the shell's area: what the cursor is on,
+/// rendered with the F3 assets — syntax colour for code, pixels for images
+/// where the terminal can, listings for folders and archives.
+fn draw_preview_panel(f: &mut Frame, area: Rect, app: &mut App) {
+    let lang = app.lang;
+    // Resolve what to show; a reason-not-to is shown as a note.
+    let target = crate::preview::preview_target(app);
+    let (title_name, note) = match &target {
+        Ok(p) => {
+            app.ensure_preview(p);
+            (p.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default(), None)
+        }
+        Err(e) => (String::new(), Some(e.clone())),
+    };
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(border_type())
+        .border_style(Style::default().fg(theme().border))
+        .title(Line::from(vec![
+            Span::styled(
+                " ⌥ preview ",
+                Style::default().fg(theme().accent).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(truncate_middle(&title_name, 48), Style::default().fg(theme().dim)),
+            Span::raw(" "),
+        ]))
+        .title_bottom(tr(
+            lang,
+            " :preview off   Shift+J = shell ",
+            " :preview で解除   シェルは Shift+J ",
+        ));
+    let inner = area.inner(Margin { vertical: 1, horizontal: 1 });
+    f.render_widget(block, area);
+    if inner.width == 0 || inner.height == 0 {
+        return;
+    }
+
+    if let Some(msg) = note {
+        f.render_widget(
+            Paragraph::new(msg).style(Style::default().fg(theme().dim)),
+            inner,
+        );
+        return;
+    }
+
+    // Image: pixels when the terminal can, half-blocks otherwise. Cached like
+    // the F3 popup, but in preview-owned state.
+    if matches!(app.preview.as_ref().map(|p| &p.body), Some(crate::preview::PreviewBody::Image)) {
+        let path = app.preview.as_ref().map(|p| p.path.clone()).unwrap_or_default();
+        if app.gfx_picker.is_some() {
+            if app.preview_gfx.as_ref().map(|(p, _)| p != &path).unwrap_or(true) {
+                app.preview_gfx = None;
+                if let (Ok(img), Some(picker)) = (image::open(&path), app.gfx_picker.as_ref()) {
+                    app.preview_gfx = Some((path.clone(), picker.new_resize_protocol(img)));
+                }
+            }
+            if let Some((_, proto)) = app.preview_gfx.as_mut() {
+                f.render_stateful_widget(ratatui_image::StatefulImage::default(), inner, proto);
+                return;
+            }
+        }
+        if let Some(state) = app.preview.as_mut() {
+            if state.thumb.as_ref().map(|(c, r, _)| (*c, *r)) != Some((inner.width, inner.height)) {
+                state.thumb = cian_core::image::thumbnail(&path, inner.width, inner.height)
+                    .ok()
+                    .map(|t| (inner.width, inner.height, t));
+            }
+            if let Some((_, _, t)) = &state.thumb {
+                let mut rows: Vec<Line> = Vec::new();
+                for ry in 0..t.rows as usize {
+                    let mut spans = Vec::with_capacity(t.cols as usize);
+                    for cx in 0..t.cols as usize {
+                        let (top, bot) = t.cells[ry * t.cols as usize + cx];
+                        spans.push(Span::styled(
+                            "▀",
+                            Style::default()
+                                .fg(Color::Rgb(top.0, top.1, top.2))
+                                .bg(Color::Rgb(bot.0, bot.1, bot.2)),
+                        ));
+                    }
+                    rows.push(Line::from(spans));
+                }
+                let left = inner.x + (inner.width.saturating_sub(t.cols)) / 2;
+                let pic = Rect::new(left, inner.y, t.cols.min(inner.width), (t.rows).min(inner.height));
+                f.render_widget(Paragraph::new(rows), pic);
+            }
+        }
+        return;
+    }
+
+    let Some(state) = app.preview.as_ref() else { return };
+    let body_fg = readable_on(theme().base_bg.unwrap_or(Color::Black));
+    match &state.body {
+        crate::preview::PreviewBody::Text { lines, hl } => {
+            let mut shown: Vec<Line> = Vec::with_capacity(inner.height as usize);
+            for (i, l) in lines.iter().take(inner.height as usize).enumerate() {
+                let clipped = truncate(l, inner.width as usize);
+                match hl.get(i) {
+                    Some(cats) if !cats.is_empty() => {
+                        let spans: Vec<Span> = clipped
+                            .chars()
+                            .enumerate()
+                            .map(|(ci, ch)| {
+                                let style = cats
+                                    .get(ci)
+                                    .map(|c| hl_style(*c))
+                                    .unwrap_or(Style::default().fg(body_fg));
+                                Span::styled(ch.to_string(), style)
+                            })
+                            .collect();
+                        shown.push(Line::from(spans));
+                    }
+                    _ => shown.push(Line::from(Span::styled(
+                        clipped,
+                        Style::default().fg(body_fg),
+                    ))),
+                }
+            }
+            f.render_widget(Paragraph::new(shown), inner);
+        }
+        crate::preview::PreviewBody::List { rows, truncated } => {
+            let mut shown: Vec<Line> = rows
+                .iter()
+                .take(inner.height as usize)
+                .map(|r| Line::from(Span::styled(truncate(r, inner.width as usize), Style::default().fg(body_fg))))
+                .collect();
+            if *truncated && shown.len() == inner.height as usize {
+                if let Some(last) = shown.last_mut() {
+                    *last = Line::from(Span::styled("…", Style::default().fg(theme().dim)));
+                }
+            }
+            f.render_widget(Paragraph::new(shown), inner);
+        }
+        crate::preview::PreviewBody::Note(msg) => {
+            f.render_widget(
+                Paragraph::new(msg.clone()).style(Style::default().fg(theme().dim)),
+                inner,
+            );
+        }
+        crate::preview::PreviewBody::Image => unreachable!("handled above"),
+    }
 }
 
 /// The terminal-graphics image path: decode once per file (cached on `App`,

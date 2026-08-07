@@ -4780,6 +4780,63 @@
             "a slow second click just selects, does not enter");
     }
 
+    /// `:preview` borrows the shell panel for a cursor-follow preview: file
+    /// contents while a file pane has focus, the real shell as soon as the
+    /// shell takes focus — and the preview cache follows the cursor.
+    #[test]
+    fn preview_borrows_the_shell_panel_and_follows_the_cursor() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::write(d.path().join("hello.txt"), "alpha bravo preview-me\n").unwrap();
+        std::fs::write(d.path().join("other.txt"), "charlie delta other-one\n").unwrap();
+        let p = d.path().to_path_buf();
+        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        {
+            let pane = app.active_pane_mut().unwrap();
+            pane.cursor = pane.entries.iter().position(|e| e.name == "hello.txt").unwrap();
+        }
+        app.toggle_preview();
+        let out = render(&mut app, 110, 36).join("\n");
+        assert!(out.contains("⌥ preview"), "panel is labelled: {out}");
+        assert!(out.contains("preview-me"), "shows the cursor file's text");
+        assert!(!out.contains("other-one"), "not the other file");
+
+        // Cursor moves → the preview follows.
+        {
+            let pane = app.active_pane_mut().unwrap();
+            pane.cursor = pane.entries.iter().position(|e| e.name == "other.txt").unwrap();
+        }
+        let out = render(&mut app, 110, 36).join("\n");
+        assert!(out.contains("other-one"), "follows the cursor: {out}");
+
+        // Shell focus gets the real shell back.
+        app.focus(FocusedPane::Shell);
+        let out = render(&mut app, 110, 36).join("\n");
+        assert!(!out.contains("⌥ preview"), "shell focus shows the shell");
+
+        // And off means off, whatever has focus.
+        app.focus(FocusedPane::Left);
+        app.toggle_preview();
+        let out = render(&mut app, 110, 36).join("\n");
+        assert!(!out.contains("⌥ preview"));
+    }
+
+    /// A directory under the cursor previews as its listing.
+    #[test]
+    fn preview_lists_a_directory() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::create_dir(d.path().join("sub")).unwrap();
+        std::fs::write(d.path().join("sub/inside.txt"), "x").unwrap();
+        let p = d.path().to_path_buf();
+        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        {
+            let pane = app.active_pane_mut().unwrap();
+            pane.cursor = pane.entries.iter().position(|e| e.name == "sub").unwrap();
+        }
+        app.toggle_preview();
+        let out = render(&mut app, 110, 36).join("\n");
+        assert!(out.contains("inside.txt"), "directory listing shown: {out}");
+    }
+
     /// Clicking a column header sorts by it; clicking it again flips the
     /// direction — how column headers behave everywhere else.
     #[test]

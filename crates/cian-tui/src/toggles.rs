@@ -15,6 +15,8 @@ pub(crate) enum ToggleId {
     Notify,
     /// Re-read and checksum-verify files after an SFTP transfer.
     Verify,
+    /// Cursor-follow preview in the shell panel's area.
+    Preview,
     /// Interface language (English ↔ Japanese).
     Lang,
 }
@@ -45,6 +47,12 @@ impl App {
             (ToggleId::Sync, tr(self.lang, "Input sync (all shells)", "入力同期（全シェル）").into(), onoff(sync), sync),
             (ToggleId::Notify, tr(self.lang, "Task-done notification", "完了通知").into(), onoff(notify), notify),
             (ToggleId::Verify, tr(self.lang, "Verify transfers", "転送後ベリファイ").into(), onoff(verify), verify),
+            (
+                ToggleId::Preview,
+                tr(self.lang, "Cursor preview (shell panel)", "カーソル追従プレビュー").into(),
+                onoff(self.preview_on),
+                self.preview_on,
+            ),
             (
                 ToggleId::Lang,
                 tr(self.lang, "Language", "言語").into(),
@@ -90,6 +98,7 @@ impl App {
                     self.verify_runtime.or(self.config.options.verify_transfers).unwrap_or(false);
                 self.verify_runtime = Some(!cur);
             }
+            ToggleId::Preview => self.toggle_preview(),
             ToggleId::Lang => self.lang = self.lang.toggled(),
         }
     }

@@ -82,6 +82,8 @@ Press `F3` on a file and cian shows you what's in it, without leaving:
 
 The viewer is vim-flavoured: `h j k l`, `w b`, `0 $`, `gg G`, `Ctrl-d/u` move; `/` searches, `42G` jumps to a line, `%` to the matching bracket. `v` / `V` / `Ctrl-v` select, `y` copies. `e` switches text encoding (UTF-8 / Shift_JIS / UTF-16) if a file decoded wrong.
 
+**Cursor-follow preview — `:preview`.** Flip it on and the shell panel's area previews whatever the cursor is on, as you move: code with syntax colour, images (real pixels on capable terminals), folder and archive listings, Office/PDF text. The shell keeps running underneath — only its pixels are borrowed. `Shift+J` (or a click) focuses the shell and shows it again; move back to a file pane and the preview returns. Both file panes stay visible the whole time. Remote (SFTP) panes deliberately show no preview — it would download every file the cursor touches.
+
 **Edit in place:** the viewer's normal mode carries vim's small change set — `x` `dd` `D` `J` delete and join, `d` cuts a `v`/`V` selection, `u` undoes, and `i` `a` `o` `O` `I` drop into insert (`Ctrl+S` saves in the file's own encoding, `Esc` leaves). Quick config surgery never needs an editor round-trip. Prefer your own editor? **`E`** (or `:edit`) opens it in `$VISUAL` / `$EDITOR` — or nvim → vim → vi — and reloads when you're back.
 
 **Archives, more:** `:zip` / `:tar` / `:targz` bundle the marked files; `:zip -e` makes an encrypted one. `:unzip` (or right-click **▸ Extract here**) unpacks the file under the cursor into a fresh sub-folder. Locked zips still list their members on F3, and extracting one asks for the password first.

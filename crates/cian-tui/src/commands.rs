@@ -76,6 +76,8 @@ impl App {
             "edit" | "e" => self.edit_selected_file(),
             // Rename by editing a list of names (vidir's interface).
             "bulkrename" | "brn" | "vidir" => self.start_editor_rename(),
+            // Cursor-follow preview in the shell panel's area.
+            "preview" | "pv" => self.toggle_preview(),
             // Open the file in a specific vi-family editor in a new shell tab.
             "vi" | "vim" | "nvim" => self.edit_in_new_tab(Some(verb)),
             "macro" | "macros" => self.start_macros(),
