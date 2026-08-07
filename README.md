@@ -101,6 +101,20 @@ The viewer is vim-flavoured: `h j k l`, `w b`, `0 $`, `gg G`, `Ctrl-d/u` move; `
 
 Search runs in the background and streams results as it finds them — **Esc** stops it, `Enter` jumps to a result. In the find/grep results, **`p`** "panelizes" the matches into the pane, so you can mark and operate on them like any other listing.
 
+**Patterns.** Everywhere you type a search — find, grep, and `/` in the viewer — the same little language applies:
+
+| You type | It means |
+|---|---|
+| `error` | plain text, case-insensitive — matches `Error`, `ERROR`, … |
+| `/ORA-\d+/` | a regular expression (case-sensitive, as regexes usually are) |
+| `/ora-\d+/i` | the same, case-insensitive — the only flag is `i` |
+| `/^ERROR/` | lines *starting* with ERROR (grep) |
+| `/\.(log\|trc)$/` | names ending `.log` or `.trc` (find) |
+
+Wrap a pattern in slashes to make it a regex; leave it bare and it's the literal text you typed, no escaping to think about. A typo'd regex is rejected with its reason on the spot — it never falls back to matching something you didn't mean. The full syntax is Rust's [`regex`](https://docs.rs/regex) (Perl-like; no backreferences/lookaround).
+
+**Encodings.** Grep isn't UTF-8-only: a file that doesn't decode as UTF-8 is retried as **Shift_JIS**, so the Japanese enterprise logs that are still SJIS (Oracle alert logs, AIX batch output…) actually match — searching `エラー` finds it whichever encoding the file is in.
+
 `:hidden` shows or hides dotfiles (shown by default).
 
 ---

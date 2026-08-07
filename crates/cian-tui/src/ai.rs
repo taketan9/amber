@@ -974,7 +974,7 @@ impl App {
         const CATALOG_CAP: usize = 600;
         let cancel = std::sync::Arc::new(AtomicBool::new(false));
         let mut catalog: Vec<cian_core::search::Hit> = Vec::new();
-        let q = cian_core::search::Query { needle: String::new(), include_hidden: false, mode: cian_core::search::Mode::Name };
+        let q = cian_core::search::Query::new("");
         {
             let cancel = &cancel;
             let catalog = &mut catalog;
@@ -1046,7 +1046,7 @@ impl App {
         const CAP: usize = 20_000;
         let cancel = std::sync::Arc::new(AtomicBool::new(false));
         let mut files: Vec<PathBuf> = Vec::new();
-        let q = cian_core::search::Query { needle: String::new(), include_hidden: false, mode: cian_core::search::Mode::Name };
+        let q = cian_core::search::Query::new("");
         {
             let cancel = &cancel;
             let files = &mut files;

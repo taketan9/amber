@@ -208,39 +208,35 @@ pub(crate) fn viewer_find(
     if query.is_empty() || view.lines.is_empty() {
         return None;
     }
-    let needle = query.to_lowercase();
+    // Same pattern language as `:find`/`:grep`: `/re/` is a regex, anything
+    // else a case-insensitive substring. A pattern that no longer parses
+    // (should not happen — the prompt rejects it) simply matches nothing.
+    let matcher = cian_core::search::Matcher::parse(query).ok()?;
     let n = view.lines.len();
-    // Character-column of a byte match within a line.
-    let col_of = |line: &str, byte: usize| line[..byte].chars().count();
 
     if forward {
         // Current line after the cursor, then following lines, then wrap.
         for step in 0..=n {
             let l = (from.0 + step) % n;
-            let hay = view.lines[l].to_lowercase();
-            let start_char = if step == 0 { from.1 + 1 } else { 0 };
-            let start_byte = view.lines[l]
-                .char_indices()
-                .nth(start_char)
-                .map(|(b, _)| b)
-                .unwrap_or(view.lines[l].len());
-            if let Some(rel) = hay[start_byte.min(hay.len())..].find(&needle) {
-                return Some((l, col_of(&view.lines[l], start_byte + rel)));
+            let first = if step == 0 { from.1 + 1 } else { 0 };
+            if let Some((s, _)) =
+                matcher.find_ranges(&view.lines[l]).into_iter().find(|(s, _)| *s >= first)
+            {
+                return Some((l, s));
             }
         }
     } else {
         for step in 0..=n {
             let l = (from.0 + n - (step % n)) % n;
-            let hay = view.lines[l].to_lowercase();
             // On the cursor line, only matches strictly before the cursor.
-            let limit_char = if step == 0 { from.1 } else { view.lines[l].chars().count() };
-            let limit_byte = view.lines[l]
-                .char_indices()
-                .nth(limit_char)
-                .map(|(b, _)| b)
-                .unwrap_or(view.lines[l].len());
-            if let Some(rel) = hay[..limit_byte.min(hay.len())].rfind(&needle) {
-                return Some((l, col_of(&view.lines[l], rel)));
+            let limit = if step == 0 { from.1 } else { usize::MAX };
+            if let Some((s, _)) = matcher
+                .find_ranges(&view.lines[l])
+                .into_iter()
+                .rev()
+                .find(|(s, _)| *s < limit)
+            {
+                return Some((l, s));
             }
         }
     }

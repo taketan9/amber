@@ -4291,20 +4291,17 @@ fn draw_viewer(
     // Body text adapts to the (themed) surface so it reads on light themes.
     let text_fg = readable_on(surface());
     // Character columns matched by the active search, per line, for highlight.
-    let needle = find_query.as_ref().map(|q| q.to_lowercase()).filter(|q| !q.is_empty());
+    // Compiled once per frame; the same `/re/`-or-literal language as n/N uses
+    // (util::viewer_find), so what glows is exactly what n lands on.
+    let matcher = find_query
+        .as_ref()
+        .filter(|q| !q.is_empty())
+        .and_then(|q| cian_core::search::Matcher::parse(q).ok());
     let match_cols = |l: &str| -> Vec<(usize, usize)> {
-        let Some(nd) = needle.as_ref() else { return Vec::new() };
-        let hay = l.to_lowercase();
-        let nlen = nd.chars().count();
-        let mut out = Vec::new();
-        let mut from = 0usize;
-        while let Some(rel) = hay[from..].find(nd.as_str()) {
-            let byte = from + rel;
-            let start = hay[..byte].chars().count();
-            out.push((start, start + nlen.saturating_sub(1)));
-            from = byte + nd.len().max(1);
-        }
-        out
+        let Some(m) = matcher.as_ref() else { return Vec::new() };
+        // find_ranges is end-exclusive; the highlight loop below wants
+        // inclusive ends.
+        m.find_ranges(l).into_iter().map(|(s, e)| (s, e.saturating_sub(1).max(s))).collect()
     };
 
     // The inclusive selected column range on absolute line `i`, if any.

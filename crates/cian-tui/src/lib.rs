@@ -3294,6 +3294,7 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry("f", Some(Search), "search in this folder", "このフォルダ内を検索"),
                 entry("Shift+F", None, "find by name, whole tree below here", "名前で検索（ここ以下のツリー全体）"),
                 entry("Ctrl+F", None, "grep inside files, whole tree below here", "ファイル内をgrep（ここ以下のツリー全体）"),
+                entry("  patterns", None, "  bare text = literal; /re/ = regex, /re/i ignores case; grep also reads SJIS", "  裸の文字列=そのまま、/re/=正規表現（/re/i で大小無視）、grep は SJIS も読む"),
                 entry("  p in results", None, "panelize: load the find/grep matches into the pane to mark & operate on", "検索結果を p でペイン化：マーク＆一括操作できる"),
                 entry("b", None, "branch view: flatten this subtree into the pane, one row per file (b/Esc to leave)", "ブランチビュー：この配下を1ファイル1行に平坦化（b/Esc で戻る）"),
                 entry("n", Some(SearchNext), "next match", "次のマッチ"),

@@ -31,27 +31,157 @@ pub enum Mode {
     Content,
 }
 
+/// How the needle matches: the pattern language of a query.
+///
+/// A plain needle is a case-insensitive substring — what every filer user
+/// types without thinking. A `/pattern/` form (the same delimiters cian's
+/// `:brename s/…/…/` already taught) compiles to a regex; `/pattern/i` makes
+/// it case-insensitive. Regexes follow regex convention (case-sensitive by
+/// default) rather than the literal path's insensitivity, because anyone
+/// writing `/ORA-\d+/` is being precise on purpose.
+#[derive(Debug, Clone)]
+pub enum Matcher {
+    /// Case-insensitive substring; stored lowercased.
+    Literal(String),
+    Regex(regex::Regex),
+}
+
+impl Matcher {
+    /// Parse user input into a matcher. `/re/` and `/re/i` become regexes —
+    /// with a real error for a bad pattern, never a silent fall-back to
+    /// literal (matching the wrong thing quietly is worse than refusing).
+    pub fn parse(input: &str) -> Result<Matcher, String> {
+        let Some(body) = input.strip_prefix('/') else {
+            return Ok(Matcher::Literal(input.to_lowercase()));
+        };
+        // The last `/` closes the pattern (so a path-ish `/a/b/` still works);
+        // whatever follows it is flags.
+        let Some(end) = body.rfind('/') else {
+            return Err("unterminated pattern — close it with / (e.g. /ORA-\\d+/)".to_string());
+        };
+        let (pat, flags) = (&body[..end], &body[end + 1..]);
+        if !flags.is_empty() && flags != "i" {
+            return Err(format!("unknown regex flag {flags:?} — only /…/i is supported"));
+        }
+        let re = regex::RegexBuilder::new(pat)
+            .case_insensitive(flags == "i")
+            .build()
+            .map_err(|e| shorten_regex_error(&e))?;
+        Ok(Matcher::Regex(re))
+    }
+
+    pub fn is_empty(&self) -> bool {
+        match self {
+            Matcher::Literal(s) => s.is_empty(),
+            Matcher::Regex(re) => re.as_str().is_empty(),
+        }
+    }
+
+    fn matches(&self, hay: &str) -> bool {
+        match self {
+            Matcher::Literal(s) => hay.to_lowercase().contains(s),
+            Matcher::Regex(re) => re.is_match(hay),
+        }
+    }
+
+    /// Every match in `hay` as char-index `(start, end)` ranges, end-exclusive,
+    /// in order. What a viewer needs for highlighting and n/N jumps, where
+    /// [`Self::matches`] only answers yes/no. Zero-width regex matches are
+    /// dropped — there is nothing to highlight or land on.
+    pub fn find_ranges(&self, hay: &str) -> Vec<(usize, usize)> {
+        let char_at = |byte: usize| hay[..byte].chars().count();
+        match self {
+            Matcher::Literal(s) => {
+                if s.is_empty() {
+                    return Vec::new();
+                }
+                // Byte offsets found in the lowercased text are only valid in
+                // the original when lowercasing preserved byte lengths; for
+                // the rare title-cased characters that grow, fall back to a
+                // char-by-char scan.
+                let lower = hay.to_lowercase();
+                if lower.len() == hay.len() {
+                    let mut out = Vec::new();
+                    let mut from = 0;
+                    while let Some(rel) = lower[from..].find(s.as_str()) {
+                        let b = from + rel;
+                        out.push((char_at(b), char_at(b + s.len())));
+                        from = b + s.len().max(1);
+                    }
+                    out
+                } else {
+                    let hay_chars: Vec<char> = hay.chars().collect();
+                    let needle: Vec<char> = s.chars().collect();
+                    let mut out = Vec::new();
+                    let mut i = 0;
+                    while i + needle.len() <= hay_chars.len() {
+                        let window = &hay_chars[i..i + needle.len()];
+                        let matched = window
+                            .iter()
+                            .flat_map(|c| c.to_lowercase())
+                            .eq(needle.iter().copied());
+                        if matched {
+                            out.push((i, i + needle.len()));
+                            i += needle.len();
+                        } else {
+                            i += 1;
+                        }
+                    }
+                    out
+                }
+            }
+            Matcher::Regex(re) => re
+                .find_iter(hay)
+                .filter(|m| m.start() < m.end())
+                .map(|m| (char_at(m.start()), char_at(m.end())))
+                .collect(),
+        }
+    }
+}
+
+/// One line, fit for a status bar: regex errors are multi-line diagnostics
+/// with a caret drawing, which a TUI message line cannot show.
+fn shorten_regex_error(e: &regex::Error) -> String {
+    let s = e.to_string();
+    let mut lines = s.lines().filter(|l| !l.trim().is_empty());
+    let head = lines.next().unwrap_or("bad regex").trim().to_string();
+    match lines.next_back() {
+        Some(reason) => format!("{}: {}", head, reason.trim()),
+        None => head,
+    }
+}
+
 /// What to look for.
 #[derive(Debug, Clone)]
 pub struct Query {
-    /// Matched case-insensitively.
-    pub needle: String,
+    pub matcher: Matcher,
     /// Descend into directories whose name starts with a dot.
     pub include_hidden: bool,
     pub mode: Mode,
 }
 
 impl Query {
+    /// A literal (substring) name query, for callers building queries in code.
     pub fn new(needle: impl Into<String>) -> Self {
-        Self { needle: needle.into().to_lowercase(), include_hidden: false, mode: Mode::Name }
+        Self {
+            matcher: Matcher::Literal(needle.into().to_lowercase()),
+            include_hidden: false,
+            mode: Mode::Name,
+        }
     }
 
     pub fn content(needle: impl Into<String>) -> Self {
         Self { mode: Mode::Content, ..Self::new(needle) }
     }
 
+    /// A query from user input: `/re/`-form compiles, anything else is a
+    /// literal. `mode` picks names or file contents.
+    pub fn parse(input: &str, mode: Mode) -> Result<Self, String> {
+        Ok(Self { matcher: Matcher::parse(input)?, include_hidden: false, mode })
+    }
+
     fn matches(&self, name: &str) -> bool {
-        self.needle.is_empty() || name.to_lowercase().contains(&self.needle)
+        self.matcher.is_empty() || self.matcher.matches(name)
     }
 }
 
@@ -62,13 +192,18 @@ pub const MAX_GREP_BYTES: u64 = 8 * 1024 * 1024;
 /// How much of a file to sniff for NUL bytes before deciding it is binary.
 const SNIFF: usize = 8000;
 
-/// Report every line of `path` containing the needle.
+/// Report every line of `path` matching the query.
 ///
 /// Skips files that are too big, and files that look binary — matching inside
 /// a compiled object produces unreadable "lines" and no useful answer.
+///
+/// Not UTF-8-only: a file that fails UTF-8 is retried as Shift_JIS before
+/// being given up on. Enterprise Japanese logs (Oracle, AIX, old batch
+/// output) are routinely SJIS, and a grep that silently skips them answers
+/// "no matches" when the truth is "didn't look".
 fn grep_file(
     path: &Path,
-    needle: &str,
+    matcher: &Matcher,
     cancel: &AtomicBool,
     mut on_line: impl FnMut(usize, String),
 ) {
@@ -80,12 +215,22 @@ fn grep_file(
     if bytes[..bytes.len().min(SNIFF)].contains(&0) {
         return;
     }
-    let Ok(text) = String::from_utf8(bytes) else { return };
+    let text = match String::from_utf8(bytes) {
+        Ok(t) => t,
+        Err(e) => {
+            let bytes = e.into_bytes();
+            let (decoded, _, had_errors) = encoding_rs::SHIFT_JIS.decode(&bytes);
+            if had_errors {
+                return; // neither UTF-8 nor SJIS: treat as binary
+            }
+            decoded.into_owned()
+        }
+    };
     for (i, line) in text.lines().enumerate() {
         if cancel.load(Ordering::Relaxed) {
             return;
         }
-        if line.to_lowercase().contains(needle) {
+        if matcher.matches(line) {
             // Long lines are useless in a result list and expensive to carry.
             let shown: String = line.trim().chars().take(300).collect();
             on_line(i + 1, shown);
@@ -148,10 +293,10 @@ pub fn search(
                     }
                 }
                 Mode::Content => {
-                    if visible && !is_dir && !query.needle.is_empty() {
+                    if visible && !is_dir && !query.matcher.is_empty() {
                         let rel = path.strip_prefix(root).unwrap_or(&path).to_path_buf();
                         let mut stop = false;
-                        grep_file(&path, &query.needle, cancel, |n, text| {
+                        grep_file(&path, &query.matcher, cancel, |n, text| {
                             if found < MAX_HITS {
                                 on_hit(Hit {
                                     path: path.clone(),
@@ -343,6 +488,88 @@ mod grep_tests {
     fn an_empty_needle_matches_nothing_rather_than_every_line() {
         let d = tree();
         assert!(run(d.path(), "").is_empty());
+    }
+
+    fn run_q(root: &Path, q: Query) -> Vec<(String, usize, String)> {
+        let cancel = AtomicBool::new(false);
+        let mut out = Vec::new();
+        search(root, &q, &cancel, &mut |h| {
+            let (n, text) = h.line.clone().unwrap();
+            out.push((h.rel.display().to_string().replace('\\', "/"), n, text));
+        });
+        out.sort();
+        out
+    }
+
+    /// A Shift_JIS log is greppable — with a Japanese needle, typed in UTF-8.
+    /// Before, any non-UTF-8 file was silently skipped, which reads as "no
+    /// matches" when the truth is "didn't look".
+    #[test]
+    fn grep_reads_shift_jis_files() {
+        let d = tempfile::tempdir().unwrap();
+        let (sjis, _, _) = encoding_rs::SHIFT_JIS.encode("1行目は正常\n2行目でエラーが発生\n");
+        fs::write(d.path().join("batch.log"), &sjis).unwrap();
+        let hits = run_q(d.path(), Query::content("エラー"));
+        assert_eq!(hits, vec![("batch.log".to_string(), 2, "2行目でエラーが発生".to_string())]);
+    }
+
+    /// The `/re/` form greps by regex — the ORA-code case this exists for.
+    #[test]
+    fn grep_accepts_a_regex() {
+        let d = tempfile::tempdir().unwrap();
+        fs::write(
+            d.path().join("alert.log"),
+            "ok so far\nORA-01555: snapshot too old\nORA-00600: internal\nnot ora-1 here\n",
+        )
+        .unwrap();
+        let q = Query::parse(r"/^ORA-\d+/", Mode::Content).unwrap();
+        let hits = run_q(d.path(), q);
+        assert_eq!(hits.len(), 2, "{hits:?}");
+        assert!(hits.iter().all(|(_, _, l)| l.starts_with("ORA-")));
+    }
+
+    /// `/re/` opts into regex; bare input stays a literal — and the two are
+    /// told apart at parse time, with real errors instead of silent fallback.
+    #[test]
+    fn pattern_language_parses_literals_regexes_and_rejects_junk() {
+        assert!(matches!(Matcher::parse("ORA-").unwrap(), Matcher::Literal(s) if s == "ora-"));
+        // A regex, case-sensitive by default…
+        let re = Matcher::parse(r"/ORA-\d+/").unwrap();
+        assert!(re.matches("ORA-01555: snapshot too old"));
+        assert!(!re.matches("ora-01555"), "regex is case-sensitive without /i");
+        // …and insensitive with the `i` flag.
+        assert!(Matcher::parse(r"/ora-\d+/i").unwrap().matches("ORA-600"));
+        // The last slash closes the pattern, so inner slashes are fine.
+        assert!(Matcher::parse("/a/b/").unwrap().matches("path a/b here"));
+
+        assert!(Matcher::parse("/oops").is_err(), "unterminated pattern");
+        assert!(Matcher::parse("/re/x").is_err(), "unknown flag");
+        let msg = Matcher::parse(r"/(/").unwrap_err();
+        assert!(msg.lines().count() == 1, "one line, fit for a status bar: {msg:?}");
+    }
+
+    /// Ranges come back in char columns (what a viewer highlights), not bytes —
+    /// the difference matters exactly when the line holds Japanese text.
+    #[test]
+    fn find_ranges_reports_char_columns() {
+        let lit = Matcher::parse("エラー").unwrap();
+        assert_eq!(lit.find_ranges("処理でエラー発生、エラー継続"), vec![(3, 6), (9, 12)]);
+        let re = Matcher::parse(r"/\d+件/").unwrap();
+        assert_eq!(re.find_ranges("成功12件、失敗3件"), vec![(2, 5), (8, 10)]);
+        assert!(Matcher::parse("").unwrap().find_ranges("anything").is_empty());
+    }
+
+    #[test]
+    fn name_search_accepts_a_regex() {
+        let d = tree();
+        let q = Query::parse(r"/\.rs$/", Mode::Name).unwrap();
+        let cancel = AtomicBool::new(false);
+        let mut names = Vec::new();
+        search(d.path(), &q, &cancel, &mut |h| {
+            names.push(h.rel.display().to_string().replace('\\', "/"));
+        });
+        names.sort();
+        assert_eq!(names, vec!["src/b.rs"]);
     }
 
     #[test]

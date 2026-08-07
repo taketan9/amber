@@ -31,6 +31,12 @@ impl App {
                         String::new()
                     };
                     if !q.is_empty() {
+                        // Validate a `/re/` pattern now, at the prompt, where
+                        // the error can point at what was typed.
+                        if let Err(e) = cian_core::search::Matcher::parse(&q) {
+                            self.message = Some(e);
+                            return Ok(());
+                        }
                         if let Popup::Viewer { find_query, .. } = &mut self.popup {
                             *find_query = Some(q);
                         }

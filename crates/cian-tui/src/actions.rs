@@ -1610,8 +1610,16 @@ impl App {
     fn begin_find(&mut self, needle: &str, mode: cian_core::search::Mode, to_pane: Option<String>) {
         self.find_return = None; // a fresh search invalidates any stashed list
         let Some(root) = self.active_pane().map(|p| p.cwd.clone()) else { return };
-        let mut query = cian_core::search::Query::new(needle);
-        query.mode = mode;
+        // `/re/` compiles to a regex; anything else is a literal substring. A
+        // bad pattern stops here with its reason — searching for the wrong
+        // thing silently would be worse.
+        let mut query = match cian_core::search::Query::parse(needle, mode) {
+            Ok(q) => q,
+            Err(e) => {
+                self.message = Some(e);
+                return;
+            }
+        };
         query.include_hidden =
             self.active_pane().map(|p| p.show_hidden).unwrap_or(false);
         let cancel = Arc::new(AtomicBool::new(false));
