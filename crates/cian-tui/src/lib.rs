@@ -39,6 +39,7 @@ use util::{
 };
 
 mod ai;
+mod arcview;
 mod crmaine;
 mod preview;
 mod markdown;
@@ -1359,7 +1360,7 @@ enum InputKind {
     /// format. The extension is appended if missing.
     CompressName { kind: CompressKind, sources: Vec<PathBuf> },
     /// The password for an encrypted zip about to be extracted. Rendered masked.
-    ExtractPassword { archive: PathBuf, members: Vec<String>, dest: PathBuf },
+    ExtractPassword { archive: PathBuf, members: Vec<String>, dest: PathBuf, strip: String },
     /// The log message for an `svn commit` of the given paths.
     SvnCommit { paths: Vec<PathBuf> },
     /// A typed local directory to download the given remote files into.
@@ -1768,6 +1769,9 @@ pub struct App {
     /// Clickable path-segment rects on the active tab's title (a breadcrumb).
     /// The `usize` is how many trailing components to strip from the cwd.
     crumb_rects: Vec<(FocusedPane, usize, Rect)>,
+    /// Member list of the archive being browsed (`Enter` on a zip/tar),
+    /// cached so navigation inside it does not re-scan — see [`arcview`].
+    archive_cache: Option<arcview::ArchiveCache>,
     /// Cursor-follow preview (`:preview`): while on, the shell panel's area
     /// previews the file under the cursor whenever a file pane has focus.
     preview_on: bool,
@@ -2129,6 +2133,7 @@ impl App {
             preview_on: false,
             preview: None,
             preview_gfx: None,
+            archive_cache: None,
             zoom_return: None,
             pending_shell_input: None,
             pending_shortcut_target: None,
@@ -3283,6 +3288,7 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry("G", Some(CursorBottom), "jump to bottom", "末尾へジャンプ"),
                 entry("l, Enter", Some(EnterDir), "enter folder / open file", "フォルダに入る／ファイルを開く"),
                 entry("F3", None, "look inside: text/hex, an image, or an archive's list", "中身を見る：テキスト/16進・画像・書庫の一覧"),
+                entry("  Enter on a zip", None, "browse INSIDE the archive like a folder; copy out = extract; .. leaves", "zipにEnterで書庫の中へ（フォルダ同様に移動、コピー=展開、.. で外へ）"),
                 entry(":preview", None, "cursor-follow preview in the shell panel (Shift+J shows the shell)", "シェル枠にカーソル追従プレビュー（Shift+J でシェル表示）"),
                 entry("  edit in viewer", None, "i/a/o/O/I = insert (Ctrl+S save, Esc leave), E = external editor", "ビューア内編集：i/a/o/O/I 挿入（Ctrl+S 保存, Esc 終了）／ E 外部エディタ"),
                 entry("  normal mode", None, "x/dd/D/J delete·join, u undo, v+d cut selection (d/u scroll via Ctrl)", "ノーマルモード：x/dd/D/J 削除·結合, u 取消, v+d 選択削除（スクロールは Ctrl+d/u）"),

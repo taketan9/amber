@@ -237,6 +237,11 @@ pub enum PaneView {
     /// `reload` keeps them, like [`PaneView::Flat`]. `host` labels the title
     /// (e.g. `user@host`) and `path` is the remote working directory.
     Remote { host: String, path: String },
+    /// Inside an archive, browsed as a folder. `archive` is the file on disk;
+    /// `sub` the directory within it (`""` at the root, else `"a/b/"` with a
+    /// trailing slash). The rows are synthesized by the TUI from the member
+    /// list; `reload` keeps them, like the other synthetic views.
+    Archive { archive: PathBuf, sub: String },
 }
 
 impl PaneView {
@@ -539,6 +544,29 @@ impl Pane {
             PaneView::Remote { host, path } => Some((host, path)),
             _ => None,
         }
+    }
+
+    /// While browsing inside an archive: the archive file and the directory
+    /// within it (`""` at the root, else with a trailing `/`).
+    pub fn archive_view(&self) -> Option<(&std::path::Path, &str)> {
+        match &self.view {
+            PaneView::Archive { archive, sub } => Some((archive, sub)),
+            _ => None,
+        }
+    }
+
+    /// Show a directory inside an archive, with rows the TUI synthesized from
+    /// the member list. Mirrors [`Pane::enter_remote`]: `cwd` stays the local
+    /// directory holding the archive, so leaving the view lands back there.
+    pub fn enter_archive(&mut self, archive: PathBuf, sub: String, entries: Vec<Entry>) {
+        self.view = PaneView::Archive { archive, sub };
+        self.all_entries = entries;
+        self.filter.clear();
+        self.marks.clear();
+        self.cursor = 0;
+        self.apply_sort();
+        self.apply_filter();
+        self.cursor_to_first_real();
     }
 
     /// Show a remote directory `path` on `host`, with the rows the TUI fetched

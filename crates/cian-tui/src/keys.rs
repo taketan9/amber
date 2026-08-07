@@ -1914,7 +1914,9 @@ impl App {
             // them for up/into a directory was reported as confusing.
             (false, false, KeyCode::Char('-'))
             | (_, _, KeyCode::Backspace) => {
-                if let Some(p) = self.active_pane_mut() { p.go_parent()?; }
+                if self.active_pane().map(|p| p.archive_view().is_some()).unwrap_or(false) {
+                    self.archive_go_up();
+                } else if let Some(p) = self.active_pane_mut() { p.go_parent()?; }
             }
             (_, _, KeyCode::Left) => self.focus(FocusedPane::Left),
             (_, _, KeyCode::Right) => self.focus(FocusedPane::Right),
@@ -1978,10 +1980,22 @@ impl App {
                 if let Some(p) = self.active_pane_mut() { p.move_cursor(10); }
             }
             Action::Parent => {
-                if let Some(p) = self.active_pane_mut() { p.go_parent()?; }
+                if self.active_pane().map(|p| p.archive_view().is_some()).unwrap_or(false) {
+                    self.archive_go_up();
+                } else if let Some(p) = self.active_pane_mut() { p.go_parent()?; }
             }
             Action::EnterDir => {
-                if let Some(p) = self.active_pane_mut() {
+                if self.active_pane().map(|p| p.archive_view().is_some()).unwrap_or(false) {
+                    // Inside an archive `l` behaves like Enter on directories.
+                    let on_dir = self
+                        .active_pane()
+                        .and_then(|p| p.selected())
+                        .map(|e| e.is_dir)
+                        .unwrap_or(false);
+                    if on_dir {
+                        self.archive_activate();
+                    }
+                } else if let Some(p) = self.active_pane_mut() {
                     let is_dir = p.selected().map(|e| e.is_dir).unwrap_or(false);
                     if is_dir { p.enter_selected()?; }
                 }

@@ -155,6 +155,14 @@ pub(crate) fn preview_target(app: &App) -> Result<PathBuf, String> {
         FocusedPane::Right => app.right.active_ref(),
         FocusedPane::Shell => return Err(String::new()), // caller never asks
     };
+    if pane.archive_view().is_some() {
+        return Err(tr(
+            app.lang,
+            "inside an archive — F3 views a member",
+            "アーカイブ内 — メンバーは F3 で閲覧",
+        )
+        .into());
+    }
     if pane.is_remote() {
         return Err(tr(
             app.lang,

@@ -80,6 +80,8 @@ Press `F3` on a file and cian shows you what's in it, without leaving:
 - **Office & PDF** (`.docx/.xlsx/.pptx/.pdf`, plus legacy `.doc/.xls/.ppt`) — their text, no converter needed.
 - **Archives** (`.zip/.jar/.tar/.tar.gz/…`) — the file list. `Enter` extracts the highlighted member to the other pane, `a` extracts all.
 
+**Walk into archives.** `Enter` on a zip or tarball doesn't just list it — the pane goes *inside*, and the archive browses like a folder: descend into member directories, `..` (or `h`) climbs back out, and past the root you're standing on the archive file again. `F3` on a member opens the real viewer on it (code with colour, images, Office text — everything F3 does). Copying to the other pane extracts, relative to where you're standing — copy `c/` from inside `a/b/` and you get `c/`, not the archive's whole tree. Read-only for now; writing into zips is coming.
+
 The viewer is vim-flavoured: `h j k l`, `w b`, `0 $`, `gg G`, `Ctrl-d/u` move; `/` searches, `42G` jumps to a line, `%` to the matching bracket. `v` / `V` / `Ctrl-v` select, `y` copies. `e` switches text encoding (UTF-8 / Shift_JIS / UTF-16) if a file decoded wrong.
 
 **Cursor-follow preview — `:preview`.** Flip it on and the shell panel's area previews whatever the cursor is on, as you move: code with syntax colour, images (real pixels on capable terminals), folder and archive listings, Office/PDF text. The shell keeps running underneath — only its pixels are borrowed. `Shift+J` (or a click) focuses the shell and shows it again; move back to a file pane and the preview returns. Both file panes stay visible the whole time. Remote (SFTP) panes deliberately show no preview — it would download every file the cursor touches.

@@ -5969,6 +5969,156 @@
         assert!(matches!(app.popup, Popup::None), "Esc then closes");
     }
 
+    /// A zip with a small tree, for the archive-browse tests.
+    fn make_browse_zip(dir: &std::path::Path) -> PathBuf {
+        use std::io::Write;
+        let path = dir.join("bundle.zip");
+        let f = std::fs::File::create(&path).unwrap();
+        let mut w = zip::ZipWriter::new(f);
+        let opts: zip::write::FileOptions<'_, ()> =
+            zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+        w.start_file("top.txt", opts).unwrap();
+        w.write_all(b"top level\n").unwrap();
+        w.start_file("docs/readme.md", opts).unwrap();
+        w.write_all(b"# hello from inside\n").unwrap();
+        w.start_file("docs/deep/note.txt", opts).unwrap();
+        w.write_all(b"deep note\n").unwrap();
+        w.finish().unwrap();
+        path
+    }
+
+    /// Enter on a zip browses into it like a folder: members list, subdirs
+    /// descend, `..` climbs, and past the root you are back on the archive.
+    #[test]
+    fn enter_browses_into_an_archive_and_out_again() {
+        let d = tempfile::tempdir().unwrap();
+        make_browse_zip(d.path());
+        let p = d.path().to_path_buf();
+        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        {
+            let pane = app.active_pane_mut().unwrap();
+            pane.cursor = pane.entries.iter().position(|e| e.name == "bundle.zip").unwrap();
+        }
+        app.activate_selected().unwrap();
+        {
+            let pane = app.active_pane().unwrap();
+            assert!(pane.archive_view().is_some(), "entered the archive");
+            let names: Vec<&str> = pane.entries.iter().map(|e| e.name.as_str()).collect();
+            assert_eq!(names, vec!["..", "docs", "top.txt"], "root listing");
+        }
+        // Descend into docs/, then docs/deep/.
+        {
+            let pane = app.active_pane_mut().unwrap();
+            pane.cursor = pane.entries.iter().position(|e| e.name == "docs").unwrap();
+        }
+        app.activate_selected().unwrap();
+        {
+            let pane = app.active_pane().unwrap();
+            assert_eq!(pane.archive_view().unwrap().1, "docs/");
+            let names: Vec<&str> = pane.entries.iter().map(|e| e.name.as_str()).collect();
+            assert_eq!(names, vec!["..", "deep", "readme.md"]);
+        }
+        // `..` climbs back to the root; cursor lands on the dir we left.
+        {
+            let pane = app.active_pane_mut().unwrap();
+            pane.cursor = 0;
+        }
+        app.activate_selected().unwrap();
+        {
+            let pane = app.active_pane().unwrap();
+            assert_eq!(pane.archive_view().unwrap().1, "");
+            assert_eq!(pane.selected().unwrap().name, "docs", "cursor on the dir we left");
+        }
+        // `..` at the root leaves the archive, cursor on the zip itself.
+        {
+            let pane = app.active_pane_mut().unwrap();
+            pane.cursor = 0;
+        }
+        app.activate_selected().unwrap();
+        {
+            let pane = app.active_pane().unwrap();
+            assert!(pane.archive_view().is_none(), "left the archive");
+            assert_eq!(pane.selected().unwrap().name, "bundle.zip");
+        }
+    }
+
+    /// F3 on a member extracts to a temp file and opens the normal viewer;
+    /// markdown members even get their preview.
+    #[test]
+    fn f3_views_an_archive_member() {
+        let d = tempfile::tempdir().unwrap();
+        make_browse_zip(d.path());
+        let p = d.path().to_path_buf();
+        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        {
+            let pane = app.active_pane_mut().unwrap();
+            pane.cursor = pane.entries.iter().position(|e| e.name == "bundle.zip").unwrap();
+        }
+        app.activate_selected().unwrap();
+        {
+            let pane = app.active_pane_mut().unwrap();
+            pane.cursor = pane.entries.iter().position(|e| e.name == "top.txt").unwrap();
+        }
+        app.handle_key(code(KeyCode::F(3))).unwrap();
+        match &app.popup {
+            Popup::Viewer { view, title, .. } => {
+                assert!(view.lines.join("\n").contains("top level"), "member content shown");
+                assert!(title.contains("bundle.zip"), "title names the archive: {title}");
+            }
+            other => panic!("expected the viewer, got {other:?}"),
+        }
+    }
+
+    /// Copying from inside an archive extracts to the other pane, relative to
+    /// the directory being browsed.
+    #[test]
+    fn copy_out_of_an_archive_extracts_to_the_other_pane() {
+        let (l, r, mut app) = app_two_dirs(&[], &[]);
+        let zip = make_browse_zip(l.path());
+        let _ = zip;
+        if let Some(pane) = app.active_pane_mut() {
+            let _ = pane.reload();
+            pane.cursor = pane.entries.iter().position(|e| e.name == "bundle.zip").unwrap();
+        }
+        app.activate_selected().unwrap();
+        // Into docs/, then copy readme.md across.
+        {
+            let pane = app.active_pane_mut().unwrap();
+            pane.cursor = pane.entries.iter().position(|e| e.name == "docs").unwrap();
+        }
+        app.activate_selected().unwrap();
+        {
+            let pane = app.active_pane_mut().unwrap();
+            pane.cursor = pane.entries.iter().position(|e| e.name == "readme.md").unwrap();
+        }
+        app.start_transfer(PendingOp::Copy);
+        drain_op_job(&mut app);
+        assert!(
+            r.path().join("readme.md").exists(),
+            "extracted relative to docs/, not the whole tree"
+        );
+        assert!(!r.path().join("docs").exists(), "no rebuilt docs/ directory");
+
+        // A directory row extracts everything under it, keeping its own name.
+        {
+            let pane = app.active_pane_mut().unwrap();
+            pane.cursor = 0; // `..` → back to root
+        }
+        app.activate_selected().unwrap();
+        {
+            let pane = app.active_pane_mut().unwrap();
+            pane.cursor = pane.entries.iter().position(|e| e.name == "docs").unwrap();
+        }
+        app.start_transfer(PendingOp::Copy);
+        drain_op_job(&mut app);
+        assert!(r.path().join("docs/deep/note.txt").exists(), "subtree extracted");
+
+        // Move is refused while archives are read-only.
+        app.start_transfer(PendingOp::Move);
+        let msg = app.message.clone().unwrap_or_default();
+        assert!(msg.contains("read-only") || msg.contains("読み取り専用"), "{msg}");
+    }
+
     #[test]
     fn a_docx_previews_as_searchable_text() {
         use std::io::Write;

@@ -509,6 +509,12 @@ fn tabs_title<'a>(
         if let Some((host, path)) = tab.remote_view() {
             return format!(" {} ⇅ {}:{} ", i + 1, host, path);
         }
+        // Inside an archive: "⊞ report.zip/sub/" so the pane reads as a
+        // place inside a file, not a directory.
+        if let Some((arc, sub)) = tab.archive_view() {
+            let name = arc.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+            return format!(" {} ⊞ {}/{} ", i + 1, name, sub);
+        }
         // A flat / search listing names the view (e.g. "⌥ branch", "⌥ grep: x")
         // rather than a directory, so it is obvious the pane is not a folder and
         // that `b` / Esc leaves it.
@@ -1085,7 +1091,7 @@ fn push_breadcrumb_rects(
     crumb_rects: &mut Vec<(FocusedPane, usize, Rect)>,
 ) {
     // Only a plain directory listing has a browsable path.
-    if pane.remote_view().is_some() || pane.flat_label().is_some() {
+    if pane.remote_view().is_some() || pane.flat_label().is_some() || pane.archive_view().is_some() {
         return;
     }
     // The label opens with " N " (the tab number) — that part is a tab click,

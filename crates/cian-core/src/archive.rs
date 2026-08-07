@@ -163,17 +163,22 @@ fn safe_join(dest: &Path, name: &str) -> Option<PathBuf> {
 
 /// Extract `members` — or all of them, if empty — into `dest`. `password` is
 /// used for encrypted zip members (ignored for tar, which has no encryption).
+/// `strip` is a member-path prefix removed before writing (`""` keeps full
+/// paths): extracting `a/b/c.txt` with `strip = "a/b/"` lands `dest/c.txt`.
+/// This is what "copy out of the folder I am in inside the archive" means —
+/// without it every copy-out would rebuild the archive's whole tree.
 pub fn extract(
     archive: &Path,
     members: &[String],
     dest: &Path,
     password: Option<&str>,
+    strip: &str,
     ctl: &mut Ctl,
 ) -> OpReport {
     match kind(archive) {
-        Some(Kind::Tar) => extract_tar(archive, false, members, dest, ctl),
-        Some(Kind::TarGz) => extract_tar(archive, true, members, dest, ctl),
-        _ => extract_zip(archive, members, dest, password, ctl),
+        Some(Kind::Tar) => extract_tar(archive, false, members, dest, strip, ctl),
+        Some(Kind::TarGz) => extract_tar(archive, true, members, dest, strip, ctl),
+        _ => extract_zip(archive, members, dest, password, strip, ctl),
     }
 }
 
@@ -185,6 +190,7 @@ fn extract_tar(
     gz: bool,
     members: &[String],
     dest: &Path,
+    strip: &str,
     ctl: &mut Ctl,
 ) -> OpReport {
     use std::io::Write as _;
@@ -235,7 +241,8 @@ fn extract_tar(
         if name.is_empty() || !wants(&name) {
             continue;
         }
-        let Some(target) = safe_join(dest, &name) else {
+        let rel = name.strip_prefix(strip).unwrap_or(&name);
+        let Some(target) = safe_join(dest, rel) else {
             report.note_error(format!("{}: refused, escapes the destination", name));
             continue;
         };
@@ -299,6 +306,7 @@ fn extract_zip(
     members: &[String],
     dest: &Path,
     password: Option<&str>,
+    strip: &str,
     ctl: &mut Ctl,
 ) -> OpReport {
     let mut report = OpReport::default();
@@ -360,7 +368,8 @@ fn extract_zip(
             }
         };
         let name = e.name().to_string();
-        let Some(target) = safe_join(dest, &name) else {
+        let rel = name.strip_prefix(strip).unwrap_or(&name);
+        let Some(target) = safe_join(dest, rel) else {
             report.note_error(format!("{}: refused, escapes the destination", name));
             continue;
         };
@@ -722,7 +731,7 @@ mod tests {
             let cancel = AtomicBool::new(false);
             let mut prog = |_: &Progress| {};
             let mut c = ctl(&cancel, &mut prog);
-            let report = extract(&t, &[], &out, None, &mut c);
+            let report = extract(&t, &[], &out, None, "", &mut c);
             assert!(report.errors.is_empty(), "gz={gz}: {:?}", report.errors);
             assert_eq!(
                 fs::read_to_string(out.join("readme.txt")).unwrap(),
@@ -758,7 +767,7 @@ mod tests {
 
             let out = d.path().join("out");
             let mut c2 = ctl(&cancel, &mut prog);
-            extract(&dest, &[], &out, None, &mut c2);
+            extract(&dest, &[], &out, None, "", &mut c2);
             assert_eq!(fs::read_to_string(out.join("proj/main.rs")).unwrap(), "fn main() {}");
         }
     }
@@ -782,7 +791,7 @@ mod tests {
         let out = tempfile::tempdir().unwrap();
         let cancel = AtomicBool::new(false);
         let mut n = |_: &Progress| {};
-        let report = extract(&z, &[], out.path(), None, &mut ctl(&cancel, &mut n));
+        let report = extract(&z, &[], out.path(), None, "", &mut ctl(&cancel, &mut n));
 
         assert!(report.errors.is_empty(), "{:?}", report.errors);
         assert_eq!(fs::read_to_string(out.path().join("readme.txt")).unwrap(), "hello from the archive");
@@ -796,7 +805,7 @@ mod tests {
         let out = tempfile::tempdir().unwrap();
         let cancel = AtomicBool::new(false);
         let mut n = |_: &Progress| {};
-        extract(&z, &["readme.txt".to_string()], out.path(), None, &mut ctl(&cancel, &mut n));
+        extract(&z, &["readme.txt".to_string()], out.path(), None, "", &mut ctl(&cancel, &mut n));
 
         assert!(out.path().join("readme.txt").exists());
         assert!(!out.path().join("sub/inner.txt").exists(), "only what was asked for");
@@ -833,7 +842,7 @@ mod tests {
         let out = tempfile::tempdir().unwrap();
         let cancel = AtomicBool::new(false);
         let mut n = |_: &Progress| {};
-        let report = extract(&path, &[], out.path(), None, &mut ctl(&cancel, &mut n));
+        let report = extract(&path, &[], out.path(), None, "", &mut ctl(&cancel, &mut n));
 
         assert_eq!(report.ok, 1, "the safe member still came out");
         assert!(report.errors.iter().any(|e| e.contains("escapes")), "{:?}", report.errors);
@@ -916,17 +925,17 @@ mod tests {
 
         // No / wrong password → a reported error, nothing written.
         let none = d.path().join("none");
-        let r = extract(&out, &[], &none, None, &mut ctl(&cancel, &mut n));
+        let r = extract(&out, &[], &none, None, "", &mut ctl(&cancel, &mut n));
         assert!(!r.errors.is_empty(), "no password is refused");
         assert!(!none.join("secret.txt").exists());
 
         let wrong = d.path().join("wrong");
-        let r = extract(&out, &[], &wrong, Some("nope"), &mut ctl(&cancel, &mut n));
+        let r = extract(&out, &[], &wrong, Some("nope"), "", &mut ctl(&cancel, &mut n));
         assert!(!r.errors.is_empty(), "wrong password is refused");
 
         // Right password extracts the plaintext.
         let ok = d.path().join("ok");
-        let r = extract(&out, &[], &ok, Some("hunter2"), &mut ctl(&cancel, &mut n));
+        let r = extract(&out, &[], &ok, Some("hunter2"), "", &mut ctl(&cancel, &mut n));
         assert!(r.errors.is_empty(), "{:?}", r.errors);
         assert_eq!(fs::read_to_string(ok.join("secret.txt")).unwrap(), "classified");
     }

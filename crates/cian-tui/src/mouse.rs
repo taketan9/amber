@@ -640,15 +640,24 @@ impl App {
 
     /// Act on the selected entry as Enter would: enter a directory, or open a
     /// file with its OS default program (or an init.lua `on_open` handler).
+    /// Inside an archive the rows are members, and Enter navigates or views
+    /// them; on an archive file, Enter goes in.
     pub(crate) fn activate_selected(&mut self) -> Result<()> {
-        let is_dir = self.active_pane().and_then(|p| p.selected()).map(|e| e.is_dir);
-        match is_dir {
-            Some(true) => {
+        if self.active_pane().map(|p| p.archive_view().is_some()).unwrap_or(false) {
+            self.archive_activate();
+            return Ok(());
+        }
+        let sel = self.active_pane().and_then(|p| p.selected()).map(|e| (e.is_dir, e.path.clone()));
+        match sel {
+            Some((true, _)) => {
                 if let Some(p) = self.active_pane_mut() {
                     p.enter_selected()?;
                 }
             }
-            Some(false) => self.open_externally(),
+            Some((false, path)) if cian_core::archive::is_archive(&path) => {
+                self.enter_archive(path, String::new());
+            }
+            Some((false, _)) => self.open_externally(),
             None => {}
         }
         Ok(())

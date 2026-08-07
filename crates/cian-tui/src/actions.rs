@@ -58,6 +58,22 @@ impl App {
 
     // ------- Confirmation flows -------
     pub(crate) fn start_transfer(&mut self, op: PendingOp) {
+        // Copying out of an archive is an extraction; moving would mean
+        // deleting members, which waits for the zip-write phase.
+        if self.active_pane().map(|p| p.archive_view().is_some()).unwrap_or(false) {
+            if matches!(op, PendingOp::Move) {
+                self.message = Some(tr(
+                    self.lang,
+                    "archives are read-only for now — copy extracts",
+                    "アーカイブ内は今は読み取り専用 — コピー（展開）は可能",
+                ).into());
+                return;
+            }
+            if let Some(dest) = self.opposite_pane_cwd() {
+                self.archive_copy_out(dest);
+            }
+            return;
+        }
         // Copying to/from a remote pane is an SFTP transfer, not a local copy.
         if self.try_remote_pane_transfer(matches!(op, PendingOp::Move)) {
             return;
@@ -71,6 +87,14 @@ impl App {
         self.popup = Popup::ConfirmTransfer { op, targets, dest };
     }
     pub(crate) fn start_delete(&mut self) {
+        if self.active_pane().map(|p| p.archive_view().is_some()).unwrap_or(false) {
+            self.message = Some(tr(
+                self.lang,
+                "archives are read-only for now",
+                "アーカイブ内は今は読み取り専用です",
+            ).into());
+            return;
+        }
         let targets = match self.active_pane() {
             Some(p) => p.target_paths(),
             None => return,
@@ -79,6 +103,14 @@ impl App {
         self.popup = Popup::ConfirmDelete { targets };
     }
     pub(crate) fn start_rename(&mut self) {
+        if self.active_pane().map(|p| p.archive_view().is_some()).unwrap_or(false) {
+            self.message = Some(tr(
+                self.lang,
+                "archives are read-only for now",
+                "アーカイブ内は今は読み取り専用です",
+            ).into());
+            return;
+        }
         let Some(p) = self.active_pane() else { return };
         let Some(e) = p.selected() else { return };
         self.popup = text_input(
@@ -659,6 +691,22 @@ impl App {
         // On a remote pane, fetch the file first and view the local copy.
         if self.active_pane().map(|p| p.is_remote()).unwrap_or(false) {
             self.remote_pane_view();
+            return;
+        }
+        // Inside an archive, F3 on a member extracts it to a temp file and
+        // opens the normal viewer on that.
+        if let Some((archive, sub)) = self
+            .active_pane()
+            .and_then(|p| p.archive_view())
+            .map(|(a, s)| (a.to_path_buf(), s.to_string()))
+        {
+            match self.active_pane().and_then(|p| p.selected()).cloned() {
+                Some(e) if e.is_parent || e.is_dir => {
+                    self.message = Some(tr(self.lang, "that is a directory — Enter to go in", "ディレクトリです — Enter で入る").into());
+                }
+                Some(e) => self.archive_view_member(&archive, &format!("{}{}", sub, e.name)),
+                None => self.message = Some("nothing selected".into()),
+            }
             return;
         }
         let Some(entry) = self.active_pane().and_then(|p| p.selected().cloned()) else {
@@ -1405,15 +1453,28 @@ impl App {
     /// Extract `members` (empty = all) of `archive` into `dest`, asking for a
     /// password first when the zip is encrypted.
     pub(crate) fn start_extract(&mut self, archive: PathBuf, members: Vec<String>, dest: PathBuf) {
+        self.start_extract_stripped(archive, members, dest, String::new());
+    }
+
+    /// Like [`Self::start_extract`], with a member-path prefix stripped on
+    /// write — the copy-out path for browsing inside an archive, where "copy
+    /// c/ to the other pane" must not rebuild the archive's whole tree.
+    pub(crate) fn start_extract_stripped(
+        &mut self,
+        archive: PathBuf,
+        members: Vec<String>,
+        dest: PathBuf,
+        strip: String,
+    ) {
         if cian_core::archive::zip_needs_password(&archive) {
             self.popup = text_input(
                 "encrypted zip",
                 "password:",
                 String::new(),
-                InputKind::ExtractPassword { archive, members, dest },
+                InputKind::ExtractPassword { archive, members, dest, strip },
             );
         } else {
-            self.run_extract(archive, members, dest, None);
+            self.run_extract(archive, members, dest, None, strip);
         }
     }
 
@@ -1424,10 +1485,11 @@ impl App {
         members: Vec<String>,
         dest: PathBuf,
         password: Option<String>,
+        strip: String,
     ) {
         self.start_op("extracting", move |ctl| {
             let _ = std::fs::create_dir_all(&dest);
-            cian_core::archive::extract(&archive, &members, &dest, password.as_deref(), ctl)
+            cian_core::archive::extract(&archive, &members, &dest, password.as_deref(), &strip, ctl)
         });
     }
 
@@ -2638,12 +2700,12 @@ impl App {
                 }
                 return Ok(());
             }
-            InputKind::ExtractPassword { archive, members, dest } => {
+            InputKind::ExtractPassword { archive, members, dest, strip } => {
                 if name.is_empty() {
                     self.message = Some("extract cancelled".into());
                     return Ok(());
                 }
-                self.run_extract(archive.clone(), members.clone(), dest.clone(), Some(name));
+                self.run_extract(archive.clone(), members.clone(), dest.clone(), Some(name), strip.clone());
                 return Ok(());
             }
             InputKind::SvnCommit { paths } => {
