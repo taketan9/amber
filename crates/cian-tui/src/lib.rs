@@ -291,6 +291,8 @@ enum Popup {
     ConfirmDelete { targets: Vec<PathBuf> },
     /// The operation queue (`:queue`): the running op and everything waiting.
     OpQueue { cursor: usize },
+    /// Files about to lose their UTF-8 BOM (`:nobom`).
+    ConfirmNoBom { targets: Vec<PathBuf> },
     /// Files about to be added into the zip the opposite pane is browsing.
     ConfirmZipAdd { archive: PathBuf, sub: String, sources: Vec<PathBuf> },
     /// Members about to be deleted from the zip being browsed. `members` is
@@ -661,10 +663,13 @@ enum EncTarget {
 /// files edited here are configs and notes, not gigabyte logs (those aren't
 /// `editable`), so simplicity beats a delta encoding.
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct ViewerSnap {
-    lines: Vec<String>,
-    line: usize,
-    col: usize,
+pub(crate) struct ViewerSnap {
+    pub(crate) lines: Vec<String>,
+    pub(crate) line: usize,
+    pub(crate) col: usize,
+    /// Set for a hex-edit snapshot: the raw bytes to restore (the text editor
+    /// restores `lines` instead and leaves this `None`).
+    pub(crate) bytes: Option<Vec<u8>>,
 }
 
 /// The F3 viewer's visual-selection mode, matching vim's three flavours.
@@ -3338,6 +3343,8 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry("  Enter on a zip", None, "browse INSIDE the archive; copy out=extract, copy in=add, r/d rename/delete (zip)", "zipにEnterで書庫の中へ（コピー=展開／逆コピー=追加、r/d でリネーム・削除）"),
                 entry(":preview", None, "cursor-follow preview in the shell panel (Shift+J shows the shell)", "シェル枠にカーソル追従プレビュー（Shift+J でシェル表示）"),
                 entry(":queue", None, "operations queue: b backgrounds the bar, x stops/removes, x again abandons", "操作キュー：b でバー格納、x で停止/削除（再度x=見捨て）"),
+                entry(":nobom", None, "strip UTF-8 BOMs from marked files (UTF-16 kept; viewer badges BOMs)", "マークから UTF-8 BOM 除去（UTF-16 は保持・ビューアにバッジ表示）"),
+                entry("  i on a binary", None, "hex edit: 0-9a-f overwrites bytes, Ctrl+S saves with a .bak", "バイナリで i：hex編集（0-9a-f 上書き、Ctrl+S で .bak を残して保存）"),
                 entry("  edit in viewer", None, "i/a/o/O/I = insert (Ctrl+S save, Esc leave), E = external editor", "ビューア内編集：i/a/o/O/I 挿入（Ctrl+S 保存, Esc 終了）／ E 外部エディタ"),
                 entry("  normal mode", None, "x/dd/D/J delete·join, u undo, v+d cut selection (d/u scroll via Ctrl)", "ノーマルモード：x/dd/D/J 削除·結合, u 取消, v+d 選択削除（スクロールは Ctrl+d/u）"),
                 entry(":edit", None, "edit the file in your external editor (E in the viewer)", "外部エディタで編集（ビューア内は E）"),

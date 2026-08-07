@@ -297,6 +297,106 @@
         panic!("op job did not finish");
     }
 
+    /// The hex editor: `i` on a binary view, hex digits overwrite the byte
+    /// under the cursor, Ctrl+S saves — with a `.bak` of the original — and
+    /// `u` walks the whole session back.
+    #[test]
+    fn hex_edit_overwrites_a_byte_and_saves_with_backup() {
+        let d = tempfile::tempdir().unwrap();
+        let file = d.path().join("blob.bin");
+        // NULs make the sniffer call it binary; first byte is 0x41 ('A').
+        let mut bytes = vec![0x41u8, 0x42, 0x00, 0x00, 0x43];
+        std::fs::write(&file, &bytes).unwrap();
+        let p = d.path().to_path_buf();
+        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        app.active_pane_mut().unwrap().cursor =
+            app.active_pane().unwrap().entries.iter().position(|e| e.name == "blob.bin").unwrap();
+        app.handle_key(code(KeyCode::F(3))).unwrap();
+        let _ = render(&mut app, 100, 30);
+        assert!(
+            matches!(&app.popup, Popup::Viewer { view, editable: true, .. }
+                if view.kind == cian_core::viewer::ViewKind::Binary),
+            "binary views are hex-editable"
+        );
+
+        // i → editing; "ff" overwrites byte 0 nibble by nibble.
+        app.handle_key(key('i')).unwrap();
+        assert!(matches!(app.popup, Popup::Viewer { editing: true, .. }));
+        app.handle_key(key('f')).unwrap();
+        app.handle_key(key('f')).unwrap();
+        match &app.popup {
+            Popup::Viewer { view, dirty, .. } => {
+                assert_eq!(view.raw_bytes()[0], 0xFF, "byte overwritten");
+                assert!(view.lines[0].contains("ff"), "dump line re-rendered");
+                assert!(*dirty);
+            }
+            _ => unreachable!(),
+        }
+
+        // u restores the original buffer.
+        app.handle_key(key('u')).unwrap();
+        match &app.popup {
+            Popup::Viewer { view, dirty, .. } => {
+                assert_eq!(view.raw_bytes()[0], 0x41, "undo restored the bytes");
+                assert!(!dirty, "back to the original → clean");
+            }
+            _ => unreachable!(),
+        }
+
+        // Edit again and save: the file changes, a .bak keeps the original.
+        app.handle_key(key('f')).unwrap();
+        app.handle_key(key('f')).unwrap();
+        app.handle_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL)).unwrap();
+        bytes[0] = 0xFF;
+        assert_eq!(std::fs::read(&file).unwrap(), bytes, "patched in place, same size");
+        assert_eq!(
+            std::fs::read(d.path().join("blob.bin.bak")).unwrap()[0],
+            0x41,
+            "the .bak holds the original"
+        );
+    }
+
+    /// A BOM'd file wears a badge in the viewer, and `:nobom` strips UTF-8
+    /// BOMs while refusing to touch UTF-16 ones.
+    #[test]
+    fn bom_badge_and_nobom_strip() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::write(d.path().join("bommed.txt"), b"\xEF\xBB\xBFhello\n").unwrap();
+        std::fs::write(d.path().join("plain.txt"), b"hello\n").unwrap();
+        // UTF-16LE with BOM: FF FE + "hi" in LE code units.
+        std::fs::write(d.path().join("wide.txt"), b"\xFF\xFEh\x00i\x00").unwrap();
+        let p = d.path().to_path_buf();
+        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        {
+            let pane = app.active_pane_mut().unwrap();
+            pane.cursor = pane.entries.iter().position(|e| e.name == "bommed.txt").unwrap();
+        }
+        app.handle_key(code(KeyCode::F(3))).unwrap();
+        let out = render(&mut app, 100, 30).join("\n");
+        assert!(out.contains("UTF-8 BOM"), "the badge shows: {out}");
+        app.handle_key(code(KeyCode::Esc)).unwrap();
+
+        // Mark all three and strip.
+        {
+            let pane = app.active_pane_mut().unwrap();
+            for i in 0..pane.entries.len() {
+                pane.set_mark_at(i);
+            }
+        }
+        app.start_nobom();
+        assert!(matches!(app.popup, Popup::ConfirmNoBom { .. }), "asks first");
+        app.handle_key(key('y')).unwrap();
+        assert_eq!(std::fs::read(d.path().join("bommed.txt")).unwrap(), b"hello\n", "BOM gone");
+        assert_eq!(std::fs::read(d.path().join("plain.txt")).unwrap(), b"hello\n", "untouched");
+        assert_eq!(
+            std::fs::read(d.path().join("wide.txt")).unwrap(),
+            b"\xFF\xFEh\x00i\x00",
+            "UTF-16 BOM kept — it is load-bearing"
+        );
+        let msg = app.message.clone().unwrap_or_default();
+        assert!(msg.contains('1') && (msg.contains("UTF-16") || msg.contains("stripped")), "{msg}");
+    }
+
     /// Ops queue instead of refusing: a second start_op while one runs waits
     /// its turn and starts automatically when the runner finishes.
     #[test]
@@ -6028,8 +6128,9 @@
         app.handle_key(code(KeyCode::F(3))).unwrap();
         let _ = render(&mut app, 100, 30);
         assert!(
-            matches!(app.popup, Popup::Viewer { editable: false, .. }),
-            "hex dump is not editable"
+            matches!(&app.popup, Popup::Viewer { view, editable: true, .. }
+                if view.kind == cian_core::viewer::ViewKind::Binary),
+            "a hex dump is editable — but as hex (i), not with the text operators"
         );
         let before = match &app.popup {
             Popup::Viewer { line, .. } => *line,

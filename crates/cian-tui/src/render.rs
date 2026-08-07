@@ -3233,6 +3233,30 @@ fn draw_simple_dialog(
                 " y/Enter=ゴミ箱  a=完全削除  n/Esc=取消 ");
             (title, lines, foot.to_string())
         }
+        Popup::ConfirmNoBom { targets } => {
+            let title = tr(lang, " strip BOM ", " BOM除去 ").to_string();
+            let head = if lang == Lang::Ja {
+                format!("{} 件から UTF-8 BOM を除去します:", targets.len())
+            } else {
+                format!("strip the UTF-8 BOM from {} file(s):", targets.len())
+            };
+            let mut lines = vec![head, String::new()];
+            for p in targets.iter().take(8) {
+                lines.push(format!("  {}", p.display()));
+            }
+            if targets.len() > 8 {
+                lines.push(tr_count(lang, targets.len() - 8));
+            }
+            lines.push(String::new());
+            lines.push(
+                tr(lang,
+                   "UTF-16 files are detected and left alone (their BOM is load-bearing).",
+                   "UTF-16 のファイルは検出してスキップします（BOM が必須のため）。")
+                .to_string(),
+            );
+            let foot = tr(lang, " y/Enter=strip  n/Esc=cancel ", " y/Enter=除去  n/Esc=取消 ");
+            (title, lines, foot.to_string())
+        }
         Popup::ConfirmZipAdd { archive, sub, sources } => {
             let title = tr(lang, " add to zip ", " zipへ追加 ").to_string();
             let where_ = format!(
@@ -4555,10 +4579,20 @@ fn draw_viewer(
         }
     };
     let dirty_mark = if *dirty { " ●" } else { "" };
+    // The BOM is invisible in the text, which is exactly why it gets a badge:
+    // three unseen bytes at the top of a script are a classic breakage.
+    let bom_mark = if view.bom {
+        match view.encoding {
+            cian_core::viewer::TextEncoding::Utf8 => " · UTF-8 BOM",
+            _ => " · BOM",
+        }
+    } else {
+        ""
+    };
     let head = if *preview {
         tr(lang, "Markdown preview", "Markdown プレビュー").to_string()
     } else {
-        format!("{}, {}{}", kind, size, cut)
+        format!("{}, {}{}{}", kind, size, cut, bom_mark)
     };
     let block = Block::default()
         .borders(Borders::ALL)
@@ -4657,7 +4691,20 @@ fn draw_viewer(
             let chars: Vec<char> = l.chars().take(avail).collect();
             let len = chars.len();
             let sel = sel_cols(i, len);
-            let cur = if i == *line { Some(*col) } else { None };
+            // While hex-editing, `col` holds a nibble index (0..32); map it to
+            // the dump's on-screen column: offset(8) + 2 spaces, 3 cells per
+            // byte, one extra gap after byte 8.
+            let cur = if i == *line {
+                if *editing && view.kind == cian_core::viewer::ViewKind::Binary {
+                    let nib = (*col).min(31);
+                    let byte = nib / 2;
+                    Some(10 + byte * 3 + usize::from(byte >= 8) + nib % 2)
+                } else {
+                    Some(*col)
+                }
+            } else {
+                None
+            };
             let matches = match_cols(l);
             let cell_style = |j: usize| -> Style {
                 // Priority: cursor over selection over a search match; the

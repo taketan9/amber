@@ -80,6 +80,8 @@ impl App {
             "preview" | "pv" => self.toggle_preview(),
             // The operation queue: running + waiting file operations.
             "queue" | "ops" | "jobs" => self.start_op_queue(),
+            // Strip UTF-8 BOMs from the selection (UTF-16 left alone).
+            "nobom" | "stripbom" => self.start_nobom(),
             // Open the file in a specific vi-family editor in a new shell tab.
             "vi" | "vim" | "nvim" => self.edit_in_new_tab(Some(verb)),
             "macro" | "macros" => self.start_macros(),

@@ -797,9 +797,12 @@ impl App {
                 let source = view.lines.clone();
                 // A truncated view (file over VIEW_LIMIT) must never be
                 // editable: saving would write back only the visible 4MB and
-                // silently destroy the rest of the file.
-                let editable =
-                    matches!(view.kind, cian_core::viewer::ViewKind::Text) && !view.truncated;
+                // silently destroy the rest of the file. Binary files edit as
+                // hex (overwrite-only), under the same truncation rule.
+                let editable = matches!(
+                    view.kind,
+                    cian_core::viewer::ViewKind::Text | cian_core::viewer::ViewKind::Binary
+                ) && !view.truncated;
                 // Highlight recognised code (Markdown keeps its rendered preview).
                 let hl_lang = (!markdown && editable)
                     .then(|| cian_core::highlight::detect(path))
@@ -2284,6 +2287,64 @@ impl App {
                 false
             }
         }
+    }
+
+    /// `:nobom` — strip the UTF-8 byte-order mark from the marked files (or
+    /// the cursor's), after a confirm. UTF-16 BOMs are left alone: without
+    /// one, a UTF-16 file's byte order is guesswork.
+    pub(crate) fn start_nobom(&mut self) {
+        let targets: Vec<PathBuf> = self
+            .active_pane()
+            .map(|p| p.target_paths())
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|p| p.is_file())
+            .collect();
+        if targets.is_empty() {
+            self.message = Some("nothing selected".into());
+            return;
+        }
+        self.popup = Popup::ConfirmNoBom { targets };
+    }
+
+    pub(crate) fn confirm_nobom(&mut self) -> Result<()> {
+        let Popup::ConfirmNoBom { targets } = std::mem::replace(&mut self.popup, Popup::None)
+        else {
+            return Ok(());
+        };
+        let (mut stripped, mut none, mut utf16, mut failed) = (0usize, 0usize, 0usize, 0usize);
+        for t in &targets {
+            match cian_core::ops::strip_utf8_bom(t) {
+                Ok(Some(true)) => stripped += 1,
+                Ok(Some(false)) => none += 1,
+                Ok(None) => utf16 += 1,
+                Err(_) => failed += 1,
+            }
+        }
+        let mut parts = if self.lang == Lang::Ja {
+            vec![format!("BOM除去 {} 件", stripped)]
+        } else {
+            vec![format!("stripped {} BOM(s)", stripped)]
+        };
+        if none > 0 {
+            parts.push(if self.lang == Lang::Ja { format!("BOMなし {}", none) } else { format!("{} had none", none) });
+        }
+        if utf16 > 0 {
+            parts.push(if self.lang == Lang::Ja {
+                format!("UTF-16 のためスキップ {}", utf16)
+            } else {
+                format!("{} UTF-16 (kept — load-bearing)", utf16)
+            });
+        }
+        if failed > 0 {
+            parts.push(if self.lang == Lang::Ja { format!("失敗 {}", failed) } else { format!("{} failed", failed) });
+        }
+        self.message = Some(parts.join(" — "));
+        self.reload_both();
+        if let Some(p) = self.active_pane_mut() {
+            p.clear_marks();
+        }
+        Ok(())
     }
 
     /// `:queue` — the running operation and the line behind it.

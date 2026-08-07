@@ -108,6 +108,9 @@ pub struct View {
     pub truncated: bool,
     /// The encoding `lines` were decoded with.
     pub encoding: TextEncoding,
+    /// The file opened with a byte-order mark. Worth a badge: an invisible
+    /// three bytes at the start of a script is a classic way to break it.
+    pub bom: bool,
     /// The raw prefix that was read, kept so [`View::redecode`] can rebuild
     /// `lines` in a different encoding.
     bytes: Vec<u8>,
@@ -121,7 +124,7 @@ impl View {
     pub fn from_text(text: String, total_bytes: u64, truncated: bool) -> View {
         let bytes = text.into_bytes();
         let lines = to_lines(&String::from_utf8_lossy(&bytes));
-        View { kind: ViewKind::Text, lines, total_bytes, truncated, encoding: TextEncoding::Utf8, bytes }
+        View { kind: ViewKind::Text, lines, total_bytes, truncated, encoding: TextEncoding::Utf8, bom: false, bytes }
     }
 
     /// Re-decode the kept bytes as `enc`, switching to text if it was showing
@@ -172,7 +175,7 @@ pub fn view_file(path: &Path) -> Result<View> {
     // before the NUL sniff writes the file off as binary.
     if let Some(enc) = bom_encoding(&buf) {
         let lines = to_lines(&enc.decode(&buf));
-        return Ok(View { kind: ViewKind::Text, lines, total_bytes, truncated, encoding: enc, bytes: buf });
+        return Ok(View { kind: ViewKind::Text, lines, total_bytes, truncated, encoding: enc, bom: true, bytes: buf });
     }
 
     // A NUL in the first few KB is the usual signal; UTF-8 text does not
@@ -186,34 +189,64 @@ pub fn view_file(path: &Path) -> Result<View> {
             total_bytes,
             truncated,
             encoding: TextEncoding::Utf8,
-            bytes: buf,
+            bom: false, bytes: buf,
         });
     }
 
     let lines = to_lines(&TextEncoding::Utf8.decode(&buf));
-    Ok(View { kind: ViewKind::Text, lines, total_bytes, truncated, encoding: TextEncoding::Utf8, bytes: buf })
+    Ok(View { kind: ViewKind::Text, lines, total_bytes, truncated, encoding: TextEncoding::Utf8, bom: false, bytes: buf })
+}
+
+impl View {
+    /// The raw bytes backing the view (the read prefix of the file).
+    pub fn raw_bytes(&self) -> &[u8] {
+        &self.bytes
+    }
+
+    /// Overwrite one byte and regenerate just its hex-dump line. The unit of
+    /// the hex editor: overwrite-only, so offsets never shift and the file
+    /// size cannot change out from under anyone.
+    pub fn hex_set_byte(&mut self, idx: usize, val: u8) {
+        if idx >= self.bytes.len() || self.kind != ViewKind::Binary {
+            return;
+        }
+        self.bytes[idx] = val;
+        let line = idx / 16;
+        let start = line * 16;
+        let chunk = &self.bytes[start..(start + 16).min(self.bytes.len())];
+        if line < self.lines.len() {
+            self.lines[line] = hex_dump_line(line, chunk);
+        }
+    }
+
+    /// Replace the whole buffer (the hex editor's undo) and re-render.
+    pub fn set_raw_bytes(&mut self, bytes: Vec<u8>) {
+        self.bytes = bytes;
+        if self.kind == ViewKind::Binary {
+            self.lines = hex_dump(&self.bytes);
+        }
+    }
+}
+
+/// One `offset  hex bytes  |ascii|` line of the dump (16 bytes).
+fn hex_dump_line(index: usize, chunk: &[u8]) -> String {
+    let mut hex = String::with_capacity(48);
+    for (j, b) in chunk.iter().enumerate() {
+        if j == 8 {
+            hex.push(' ');
+        }
+        hex.push_str(&format!("{:02x} ", b));
+    }
+    let ascii: String = chunk
+        .iter()
+        .map(|b| if b.is_ascii_graphic() || *b == b' ' { *b as char } else { '.' })
+        .collect();
+    format!("{:08x}  {:<49}|{}|", index * 16, hex, ascii)
 }
 
 /// `offset  hex bytes  |ascii|`, sixteen bytes to a line.
 fn hex_dump(bytes: &[u8]) -> Vec<String> {
-    bytes
-        .chunks(16)
-        .enumerate()
-        .map(|(i, chunk)| {
-            let mut hex = String::with_capacity(48);
-            for (j, b) in chunk.iter().enumerate() {
-                if j == 8 {
-                    hex.push(' ');
-                }
-                hex.push_str(&format!("{:02x} ", b));
-            }
-            let ascii: String = chunk
-                .iter()
-                .map(|b| if b.is_ascii_graphic() || *b == b' ' { *b as char } else { '.' })
-                .collect();
-            format!("{:08x}  {:<49}|{}|", i * 16, hex, ascii)
-        })
-        .collect()
+    bytes.chunks(16).enumerate().map(|(i, chunk)| hex_dump_line(i, chunk)).collect()
 }
 
 #[cfg(test)]

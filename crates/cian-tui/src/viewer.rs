@@ -67,6 +67,7 @@ impl App {
         if !ctrl && !alt && key.code == KeyCode::Char('i')
             && matches!(self.popup, Popup::Viewer { editable: true, .. })
         {
+            let mut binary = false;
             if let Popup::Viewer { preview, editing, line, col, scroll, visual, view, undo, .. } =
                 &mut self.popup
             {
@@ -74,11 +75,25 @@ impl App {
                     *preview = false;
                     (*line, *col, *scroll, *visual) = (0, 0, 0, None);
                 }
-                // One insert session = one undo unit (vim's coarse model).
-                push_viewer_undo(undo, &view.lines, *line, *col);
+                binary = view.kind == cian_core::viewer::ViewKind::Binary;
+                if binary {
+                    // The hex editor stores the nibble index in `col`.
+                    *col = 0;
+                } else {
+                    // One insert session = one undo unit (vim's coarse model).
+                    push_viewer_undo(undo, &view.lines, *line, *col);
+                }
                 *editing = true;
             }
-            self.entered_editing_message();
+            if binary {
+                self.message = Some(tr(
+                    self.lang,
+                    "hex edit — 0-9a-f overwrites, Ctrl+S saves (.bak kept), Esc leaves",
+                    "hex編集 — 0-9a-f で上書き、Ctrl+S 保存（.bak を残す）、Esc で終了",
+                ).into());
+            } else {
+                self.entered_editing_message();
+            }
             return Ok(());
         }
         // The vim change set (x, dd, o, u, …) works from normal mode on an
@@ -528,6 +543,12 @@ impl App {
             ..
         } = &mut self.popup
         {
+            // The change set edits text. A binary view's "lines" are its hex
+            // dump — text operators there would edit the rendering, not the
+            // file. Hex editing has its own mode behind `i`.
+            if view.kind != cian_core::viewer::ViewKind::Text {
+                return false;
+            }
             let lines = &mut view.lines;
             if lines.is_empty() {
                 lines.push(String::new());
@@ -728,6 +749,12 @@ impl App {
     /// The built-in plain-text editor: modeless while `editing` — printable keys
     /// insert, the usual editing/motion keys apply, Ctrl+S saves, Esc leaves.
     fn handle_editor_key(&mut self, key: KeyEvent) -> Result<()> {
+        if matches!(
+            &self.popup,
+            Popup::Viewer { view, .. } if view.kind == cian_core::viewer::ViewKind::Binary
+        ) {
+            return self.handle_hex_editor_key(key);
+        }
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         if ctrl && matches!(key.code, KeyCode::Char('s') | KeyCode::Char('S')) {
             self.save_viewer_file();
@@ -858,11 +885,140 @@ impl App {
         Ok(())
     }
 
+    /// The hex editor: overwrite-only byte edits on a binary view. Hex digits
+    /// rewrite the nibble under the cursor and advance; arrows/hjkl move by
+    /// nibble and row; Ctrl+S saves (a `.bak` of the original is written
+    /// first); u undoes; Esc leaves. No insert, no delete — offsets never
+    /// shift, the file size cannot change, and that is what makes patching a
+    /// binary safe enough to offer.
+    fn handle_hex_editor_key(&mut self, key: KeyEvent) -> Result<()> {
+        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        if ctrl && matches!(key.code, KeyCode::Char('s') | KeyCode::Char('S')) {
+            self.save_viewer_file();
+            return Ok(());
+        }
+        if key.code == KeyCode::Esc {
+            if let Popup::Viewer { editing, .. } = &mut self.popup {
+                *editing = false;
+            }
+            self.message = Some(tr(self.lang, "left hex edit", "hex編集終了").into());
+            return Ok(());
+        }
+        let body_h = (self.viewer_rect.height as usize).max(1).saturating_sub(1).max(1);
+        if let Popup::Viewer { view, line, col, scroll, dirty, undo, .. } = &mut self.popup {
+            let total = view.raw_bytes().len();
+            if total == 0 {
+                return Ok(());
+            }
+            // The cursor walks nibbles: 2 per byte, 16 bytes per dump line.
+            let last_byte = total - 1;
+            let byte_of = |line: usize, nib: usize| (line * 16 + nib / 2).min(last_byte);
+            // Recover the nibble index from the stored (line, col) pair; col
+            // holds the nibble index directly (0..32) while hex-editing.
+            let mut nib = (*col).min(31);
+            let mut cur_byte = byte_of(*line, nib);
+
+            match key.code {
+                KeyCode::Char(c @ ('0'..='9' | 'a'..='f' | 'A'..='F')) if !ctrl => {
+                    let val = c.to_digit(16).unwrap() as u8;
+                    // One undo unit per visit; whole-buffer snapshots would be
+                    // heavy here, so the hex path snapshots bytes on demand.
+                    if undo.is_empty() {
+                        undo.push(crate::ViewerSnap {
+                            lines: Vec::new(),
+                            line: *line,
+                            col: *col,
+                            bytes: Some(view.raw_bytes().to_vec()),
+                        });
+                    }
+                    let old = view.raw_bytes()[cur_byte];
+                    let new = if nib % 2 == 0 { (old & 0x0F) | (val << 4) } else { (old & 0xF0) | val };
+                    view.hex_set_byte(cur_byte, new);
+                    *dirty = true;
+                    // Advance to the next nibble, wrapping to the next row.
+                    if nib < 31 && byte_of(*line, nib + 1) == *line * 16 + nib.div_ceil(2) {
+                        nib += 1;
+                    } else if cur_byte < last_byte {
+                        *line += 1;
+                        nib = 0;
+                    }
+                }
+                KeyCode::Char('l') | KeyCode::Right => {
+                    if nib < 31 && byte_of(*line, nib + 1) == *line * 16 + nib.div_ceil(2) {
+                        nib += 1;
+                    } else if cur_byte < last_byte {
+                        *line += 1;
+                        nib = 0;
+                    }
+                }
+                KeyCode::Char('h') | KeyCode::Left => {
+                    if nib > 0 {
+                        nib -= 1;
+                    } else if *line > 0 {
+                        *line -= 1;
+                        nib = 31;
+                    }
+                }
+                KeyCode::Char('j') | KeyCode::Down => {
+                    if (*line + 1) * 16 < total {
+                        *line += 1;
+                    }
+                }
+                KeyCode::Char('k') | KeyCode::Up => *line = line.saturating_sub(1),
+                KeyCode::PageDown => *line = (*line + body_h).min(total.saturating_sub(1) / 16),
+                KeyCode::PageUp => *line = line.saturating_sub(body_h),
+                KeyCode::Char('u') => {
+                    if let Some(snap) = undo.pop() {
+                        if let Some(bytes) = snap.bytes {
+                            view.set_raw_bytes(bytes);
+                            *line = snap.line;
+                            nib = snap.col.min(31);
+                            *dirty = false;
+                        }
+                    } else {
+                        self.message = Some(tr(
+                            self.lang,
+                            "already at oldest change",
+                            "これ以上戻れません",
+                        ).into());
+                        return Ok(());
+                    }
+                }
+                _ => {}
+            }
+            // Clamp the line to the data and stash the nibble back in `col`.
+            *line = (*line).min(total.saturating_sub(1) / 16);
+            cur_byte = byte_of(*line, nib);
+            let _ = cur_byte;
+            *col = nib;
+            if *line < *scroll {
+                *scroll = *line;
+            } else if *line >= *scroll + body_h {
+                *scroll = *line + 1 - body_h;
+            }
+        }
+        Ok(())
+    }
+
     /// Write the edited buffer back to disk in the file's own encoding.
     fn save_viewer_file(&mut self) {
         let (path, bytes) = if let Popup::Viewer { path, view, .. } = &self.popup {
-            let text = view.lines.join("\n") + "\n";
-            (path.clone(), view.encoding.encode(&text))
+            if view.kind == cian_core::viewer::ViewKind::Binary {
+                // Hex edits write the raw bytes back — after keeping a `.bak`
+                // of the original, because a binary has no undo once written.
+                let bak = path.with_extension(format!(
+                    "{}bak",
+                    path.extension().map(|e| format!("{}.", e.to_string_lossy())).unwrap_or_default()
+                ));
+                if let Err(e) = std::fs::copy(path, &bak) {
+                    self.message = Some(format!("backup failed, not saving: {e}"));
+                    return;
+                }
+                (path.clone(), view.raw_bytes().to_vec())
+            } else {
+                let text = view.lines.join("\n") + "\n";
+                (path.clone(), view.encoding.encode(&text))
+            }
         } else {
             return;
         };
@@ -1048,7 +1204,7 @@ impl App {
 /// oldest-first eviction once the retained buffers pass ~32MB (a viewer file
 /// is capped at 4MB, so a burst of whole-file edits cannot pile up memory).
 fn push_viewer_undo(undo: &mut Vec<ViewerSnap>, lines: &[String], line: usize, col: usize) {
-    undo.push(ViewerSnap { lines: lines.to_vec(), line, col });
+    undo.push(ViewerSnap { lines: lines.to_vec(), line, col, bytes: None });
     let bytes = |s: &ViewerSnap| s.lines.iter().map(|l| l.len() + 1).sum::<usize>();
     let mut total: usize = undo.iter().map(bytes).sum();
     while undo.len() > 100 || (total > 32 * 1024 * 1024 && undo.len() > 1) {

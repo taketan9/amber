@@ -130,6 +130,25 @@ pub fn rename_in_place(src: &Path, new_name: &str) -> Result<PathBuf> {
     Ok(dest)
 }
 
+/// Strip a UTF-8 byte-order mark from the head of `path`, in place (via a
+/// sibling temp + rename, so a crash never half-writes). Returns what
+/// happened: `Some(true)` stripped, `Some(false)` no UTF-8 BOM to strip, and
+/// `None` for a UTF-16 BOM — which is left alone on purpose: without it a
+/// UTF-16 file's byte order is anyone's guess, so there it is load-bearing.
+pub fn strip_utf8_bom(path: &Path) -> Result<Option<bool>> {
+    let bytes = fs::read(path).with_context(|| format!("read {}", path.display()))?;
+    if bytes.starts_with(&[0xFF, 0xFE]) || bytes.starts_with(&[0xFE, 0xFF]) {
+        return Ok(None);
+    }
+    if !bytes.starts_with(&[0xEF, 0xBB, 0xBF]) {
+        return Ok(Some(false));
+    }
+    let tmp = path.with_extension("cian-bom-tmp");
+    fs::write(&tmp, &bytes[3..]).with_context(|| format!("write {}", tmp.display()))?;
+    fs::rename(&tmp, path).with_context(|| format!("replace {}", path.display()))?;
+    Ok(Some(true))
+}
+
 pub fn create_file(parent: &Path, name: &str) -> Result<PathBuf> {
     let p = parent.join(name);
     if p.exists() {

@@ -269,6 +269,7 @@ impl App {
                 Popup::ConfirmDelete { .. } => self.finish_delete(DeleteMode::Trash),
                 Popup::ConfirmZipAdd { .. } => self.confirm_zip_add(),
                 Popup::ConfirmZipDelete { .. } => self.confirm_zip_delete(),
+                Popup::ConfirmNoBom { .. } => self.confirm_nobom(),
                 Popup::ConfirmTransfer { .. } => self.finish_transfer(Conflict::Skip),
                 Popup::ConfirmDiscard { .. } => { self.git_discard(); Ok(()) }
                 Popup::ConfirmDiffCopy { .. } => { self.confirm_diff_copy(); Ok(()) }
