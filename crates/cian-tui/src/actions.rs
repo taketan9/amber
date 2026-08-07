@@ -1286,16 +1286,19 @@ impl App {
                 files_total: total,
                 ..Default::default()
             };
-            for (src, dest_dir, _is_dir) in ops {
+            // Borrowed, not consumed: op closures are FnMut so a retryable
+            // transfer can run twice (this one has no retries, but the bound
+            // is shared).
+            for (src, dest_dir, _is_dir) in ops.iter() {
                 if ctl.cancel.load(Ordering::Relaxed) {
                     break;
                 }
                 p.current = src.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
                 (ctl.on_progress)(&p);
-                if let Err(e) = std::fs::create_dir_all(&dest_dir) {
+                if let Err(e) = std::fs::create_dir_all(dest_dir) {
                     report.note_error(format!("{}: {}", dest_dir.display(), e));
                 } else {
-                    match cian_core::ops::copy_one(&src, &dest_dir, Conflict::Overwrite) {
+                    match cian_core::ops::copy_one(src, dest_dir, Conflict::Overwrite) {
                         Ok(_) => report.ok += 1,
                         Err(e) => report.note_error(format!("{}: {}", src.display(), e)),
                     }
@@ -2188,15 +2191,39 @@ impl App {
         self.message = Some(format!("pattern not found: {}", query));
     }
 
-    /// Run a file operation on a worker thread, showing a progress popup.
+    /// Run a file operation on a worker thread, showing a progress popup —
+    /// or, when one is already running, queue it to start automatically when
+    /// the runner finishes (`:queue` lists and manages the line).
     pub(crate) fn start_op<F>(&mut self, label: &'static str, work: F)
     where
-        F: FnOnce(&mut cian_core::progress::Ctl) -> OpReport + Send + 'static,
+        F: FnMut(&mut cian_core::progress::Ctl) -> OpReport + Send + 'static,
     {
+        // Transfers are the ops whose failures a retry can actually fix (a
+        // network blip); local failures (permissions, missing files) are not
+        // improved by trying again.
+        let retries = if matches!(label, "uploading" | "downloading") { 2 } else { 0 };
+        let queued = QueuedOp { label, work: Box::new(work), retries };
+        if self.op_job.is_some() {
+            self.op_queue.push_back(queued);
+            self.message = Some(if self.lang == Lang::Ja {
+                format!("キューに追加 — {} 件待ち（:queue で一覧）", self.op_queue.len())
+            } else {
+                format!("queued — {} waiting (:queue to manage)", self.op_queue.len())
+            });
+            self.popup = Popup::None;
+            return;
+        }
+        self.spawn_op(queued);
+        self.popup = Popup::None;
+    }
+
+    /// Actually put a (possibly queued) op on its worker thread.
+    fn spawn_op(&mut self, mut op: QueuedOp) {
         let cancel = Arc::new(AtomicBool::new(false));
         let (tx, rx) = std::sync::mpsc::channel();
         let worker_cancel = Arc::clone(&cancel);
         let worker_tx = tx.clone();
+        let retries = op.retries;
         std::thread::spawn(move || {
             // Rate-limit the updates: a chunked copy calls back on every
             // megabyte, and forwarding all of that would flood the channel
@@ -2212,18 +2239,110 @@ impl App {
                 cancel: &worker_cancel,
                 on_progress: &mut on_progress,
             };
-            let report = work(&mut ctl);
+            let mut report = (op.work)(&mut ctl);
+            // Auto-retry inside the worker: transfers re-run whole (uploads
+            // overwrite, so a re-run converges), with a growing pause first.
+            let mut attempt = 0u8;
+            while attempt < retries
+                && !report.errors.is_empty()
+                && !worker_cancel.load(Ordering::Relaxed)
+            {
+                attempt += 1;
+                std::thread::sleep(Duration::from_secs(2 * attempt as u64));
+                if worker_cancel.load(Ordering::Relaxed) {
+                    break;
+                }
+                report = (op.work)(&mut ctl);
+            }
             let _ = tx.send(OpMsg::Done(report));
         });
         self.op_job = Some(OpJob {
             rx,
             cancel,
-            label,
+            label: op.label,
             latest: cian_core::progress::Progress::default(),
             started: Instant::now(),
             undo: None,
+            last_progress: Instant::now(),
+            cancel_requested: None,
         });
-        self.popup = Popup::None;
+    }
+
+    /// Start the next queued op, if the runner seat is free. Returns true if
+    /// one was started.
+    pub(crate) fn start_next_op(&mut self) -> bool {
+        if self.op_job.is_some() {
+            return false;
+        }
+        match self.op_queue.pop_front() {
+            Some(op) => {
+                self.spawn_op(op);
+                true
+            }
+            None => {
+                self.op_bar_hidden = false;
+                false
+            }
+        }
+    }
+
+    /// `:queue` — the running operation and the line behind it.
+    pub(crate) fn start_op_queue(&mut self) {
+        if self.op_job.is_none() && self.op_queue.is_empty() {
+            self.message = Some(tr(
+                self.lang,
+                "no operations running or queued",
+                "実行中・待機中の操作はありません",
+            ).into());
+            return;
+        }
+        self.popup = Popup::OpQueue { cursor: 0 };
+    }
+
+    /// `x` in the queue popup. Row 0 = the running op: first press asks it to
+    /// stop; once the grace period passes with the worker still deaf, the
+    /// same key abandons it. Other rows just leave the line.
+    pub(crate) fn op_queue_kill(&mut self, row: usize) {
+        if row == 0 {
+            let stuck_for = self
+                .op_job
+                .as_ref()
+                .and_then(|j| j.cancel_requested)
+                .map(|t| t.elapsed().as_secs());
+            match stuck_for {
+                None => self.cancel_op_job(),
+                Some(s) if s >= OP_ABANDON_GRACE_SECS => self.abandon_op(),
+                Some(_) => {
+                    self.message = Some(tr(
+                        self.lang,
+                        "stop already requested — press x again shortly to abandon",
+                        "停止要求済み — 少し待ってもう一度 x で見捨てます",
+                    ).into());
+                }
+            }
+            return;
+        }
+        let i = row - 1;
+        if i < self.op_queue.len() {
+            self.op_queue.remove(i);
+            self.message = Some(tr(self.lang, "removed from the queue", "キューから外しました").into());
+        }
+    }
+
+    /// Give up on a worker that is ignoring its cancel flag (wedged in a
+    /// syscall): orphan the thread and let the queue move on. The thread may
+    /// linger until the process exits — said out loud rather than hidden.
+    pub(crate) fn abandon_op(&mut self) {
+        if let Some(job) = self.op_job.take() {
+            job.cancel.store(true, Ordering::Relaxed);
+            drop(job);
+            self.message = Some(tr(
+                self.lang,
+                "⚠ abandoned — the stuck worker may linger until cian exits; continuing with the queue",
+                "⚠ 見捨てました — 固まったワーカーは終了まで残る場合があります。キューを続行します",
+            ).into());
+        }
+        self.start_next_op();
     }
 
     /// Drain worker updates. Returns true if the UI should repaint.
@@ -2257,6 +2376,11 @@ impl App {
         loop {
             match job.rx.try_recv() {
                 Ok(OpMsg::Tick(p)) => {
+                    // Bytes moving is the liveness signal; a tick with the
+                    // same count keeps the stall clock running.
+                    if p.bytes_done != job.latest.bytes_done || p.files_done != job.latest.files_done {
+                        job.last_progress = Instant::now();
+                    }
                     job.latest = p;
                     changed = true;
                 }
@@ -2355,6 +2479,8 @@ impl App {
                     }
                 }
             }
+            // The runner seat is free: pull the next queued op in.
+            self.start_next_op();
         }
         changed
     }
@@ -2386,10 +2512,22 @@ impl App {
     }
 
     pub(crate) fn cancel_op_job(&mut self) {
-        if let Some(job) = &self.op_job {
+        if let Some(job) = &mut self.op_job {
             job.cancel.store(true, Ordering::Relaxed);
+            if job.cancel_requested.is_none() {
+                job.cancel_requested = Some(Instant::now());
+            }
             self.message = Some("stopping…".into());
         }
+    }
+
+    /// True when the running op has made no byte progress for a while — the
+    /// "is it stuck?" light. Slow-but-moving transfers never trip it.
+    pub(crate) fn op_stalled(&self) -> bool {
+        self.op_job
+            .as_ref()
+            .map(|j| j.last_progress.elapsed().as_secs() >= OP_STALL_SECS)
+            .unwrap_or(false)
     }
 
     /// Remember a reversible operation for `u`. The stack is capped so a long

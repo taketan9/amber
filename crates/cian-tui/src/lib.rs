@@ -289,6 +289,8 @@ struct PaletteItem {
 enum Popup {
     None,
     ConfirmDelete { targets: Vec<PathBuf> },
+    /// The operation queue (`:queue`): the running op and everything waiting.
+    OpQueue { cursor: usize },
     /// Files about to be added into the zip the opposite pane is browsing.
     ConfirmZipAdd { archive: PathBuf, sub: String, sources: Vec<PathBuf> },
     /// Members about to be deleted from the zip being browsed. `members` is
@@ -1108,7 +1110,32 @@ struct OpJob {
     started: Instant,
     /// Pushed onto the undo stack if the op finishes cleanly (set for moves).
     undo: Option<UndoAction>,
+    /// When byte progress last moved — the difference between "slow" and
+    /// "stuck". A transfer with no new bytes for [`OP_STALL_SECS`] shows a
+    /// stall warning; one that is merely slow keeps its progress moving.
+    last_progress: Instant,
+    /// When the cancel flag was set, so a worker that ignores it (wedged in a
+    /// syscall) can be offered the harder exit after a grace period.
+    cancel_requested: Option<Instant>,
 }
+
+/// A queued file operation, waiting for the running one to finish.
+struct QueuedOp {
+    label: &'static str,
+    /// Callable more than once so a failed transfer can be retried without
+    /// rebuilding the closure. Every op closure only borrows its captures.
+    work: Box<dyn FnMut(&mut cian_core::progress::Ctl) -> OpReport + Send>,
+    /// Automatic re-runs left when the op fails (transfers get these;
+    /// local operations fail for reasons a retry never fixes).
+    retries: u8,
+}
+
+/// No byte progress for this long counts as a stall (shown, never auto-killed:
+/// a tape drive or a saturated link is slow on purpose).
+const OP_STALL_SECS: u64 = 30;
+/// After a cancel that the worker has not honoured for this long, offer to
+/// abandon it: orphan the thread and let the queue move on.
+const OP_ABANDON_GRACE_SECS: u64 = 5;
 
 /// A reversible file operation, for the `u` undo stack. Deletes are excluded —
 /// they go to the OS trash, which has its own restore.
@@ -1914,6 +1941,12 @@ pub struct App {
     pending_auth: Option<PendingAuth>,
     /// A copy/move/delete running on a worker thread.
     op_job: Option<OpJob>,
+    /// Operations waiting for the running one to finish, oldest first.
+    op_queue: std::collections::VecDeque<QueuedOp>,
+    /// The progress popup was dismissed (`b`/Enter) to keep working while the
+    /// op runs; the status line carries a chip instead. Reset when the queue
+    /// drains.
+    op_bar_hidden: bool,
     /// A recursive search running on a worker thread.
     find_job: Option<FindJob>,
     /// The grep-results popup stashed while viewing one hit in F3, so Esc from
@@ -2146,6 +2179,8 @@ impl App {
             pending_shortcut_target: None,
             pending_auth: None,
             op_job: None,
+            op_queue: std::collections::VecDeque::new(),
+            op_bar_hidden: false,
             find_job: None,
             find_return: None,
             diff_job: None,
@@ -3302,6 +3337,7 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry("F3", None, "look inside: text/hex, an image, or an archive's list", "中身を見る：テキスト/16進・画像・書庫の一覧"),
                 entry("  Enter on a zip", None, "browse INSIDE the archive; copy out=extract, copy in=add, r/d rename/delete (zip)", "zipにEnterで書庫の中へ（コピー=展開／逆コピー=追加、r/d でリネーム・削除）"),
                 entry(":preview", None, "cursor-follow preview in the shell panel (Shift+J shows the shell)", "シェル枠にカーソル追従プレビュー（Shift+J でシェル表示）"),
+                entry(":queue", None, "operations queue: b backgrounds the bar, x stops/removes, x again abandons", "操作キュー：b でバー格納、x で停止/削除（再度x=見捨て）"),
                 entry("  edit in viewer", None, "i/a/o/O/I = insert (Ctrl+S save, Esc leave), E = external editor", "ビューア内編集：i/a/o/O/I 挿入（Ctrl+S 保存, Esc 終了）／ E 外部エディタ"),
                 entry("  normal mode", None, "x/dd/D/J delete·join, u undo, v+d cut selection (d/u scroll via Ctrl)", "ノーマルモード：x/dd/D/J 削除·結合, u 取消, v+d 選択削除（スクロールは Ctrl+d/u）"),
                 entry(":edit", None, "edit the file in your external editor (E in the viewer)", "外部エディタで編集（ビューア内は E）"),

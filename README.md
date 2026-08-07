@@ -49,6 +49,8 @@ Big copies run in the background with a progress bar; **Esc** stops one.
 
 **Mouse works everywhere.** Click to move the cursor, drag across rows to select, double-click to open. Drag a file onto the other pane to copy it there (Shift-drag to move). Every dialog has real clickable buttons, and the wheel scrolls any popup. Drag a border to resize the split it divides.
 
+**Operations queue.** Start a copy while another runs and it waits its turn — nothing is refused, nothing overlaps. The progress popup's `b` tucks it away so you keep working (a status chip tracks it: `⏳ copying 45% +2`); `:queue` lists the runner and the line, `x` stops the runner or removes a waiting item. Failed uploads/downloads retry themselves twice before giving up. And if a transfer wedges — no bytes for 30 s — the chip turns to `⚠ stalled`, and in `:queue` a second `x` *abandons* the deaf worker so the rest of the line keeps moving.
+
 **Long jobs tell you when they're done** — a copy or transfer that runs more than a few seconds rings the bell and posts a desktop notification, so you can walk away. Turn it off in the toggles (`T`) or `cian.set_option("notify", false)`.
 
 ---

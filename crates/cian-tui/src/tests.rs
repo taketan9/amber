@@ -297,6 +297,124 @@
         panic!("op job did not finish");
     }
 
+    /// Ops queue instead of refusing: a second start_op while one runs waits
+    /// its turn and starts automatically when the runner finishes.
+    #[test]
+    fn a_second_op_queues_and_runs_after_the_first() {
+        use std::sync::atomic::AtomicUsize;
+        let (_d, mut app) = app_with(&[]);
+        let order = Arc::new(std::sync::Mutex::new(Vec::<u8>::new()));
+        let (o1, o2) = (Arc::clone(&order), Arc::clone(&order));
+        let _ = AtomicUsize::new(0);
+        app.start_op("copying", move |_ctl| {
+            std::thread::sleep(Duration::from_millis(80));
+            o1.lock().unwrap().push(1);
+            OpReport { ok: 1, ..Default::default() }
+        });
+        app.start_op("copying", move |_ctl| {
+            o2.lock().unwrap().push(2);
+            OpReport { ok: 1, ..Default::default() }
+        });
+        assert_eq!(app.op_queue.len(), 1, "second op waits in line");
+        let msg = app.message.clone().unwrap_or_default();
+        assert!(msg.contains("queued") || msg.contains("キュー"), "{msg}");
+        // Drain the runner; the queued op must start on its own and finish.
+        for _ in 0..600 {
+            app.poll_op_job();
+            if app.op_job.is_none() && app.op_queue.is_empty() && order.lock().unwrap().len() == 2 {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert_eq!(*order.lock().unwrap(), vec![1, 2], "ran in order, automatically");
+    }
+
+    /// A failed transfer re-runs by itself; local ops never do.
+    #[test]
+    fn transfers_auto_retry_on_failure() {
+        use std::sync::atomic::AtomicUsize;
+        let (_d, mut app) = app_with(&[]);
+        let runs = Arc::new(AtomicUsize::new(0));
+        let r = Arc::clone(&runs);
+        app.start_op("uploading", move |_ctl| {
+            let n = r.fetch_add(1, Ordering::SeqCst);
+            if n == 0 {
+                let mut rep = OpReport::default();
+                rep.note_error("connection reset".to_string());
+                rep
+            } else {
+                OpReport { ok: 1, ..Default::default() }
+            }
+        });
+        drain_op_job(&mut app);
+        assert_eq!(runs.load(Ordering::SeqCst), 2, "one failure, one successful retry");
+
+        // A local op with the same failure shape runs exactly once.
+        let runs = Arc::new(AtomicUsize::new(0));
+        let r = Arc::clone(&runs);
+        app.start_op("copying", move |_ctl| {
+            r.fetch_add(1, Ordering::SeqCst);
+            let mut rep = OpReport::default();
+            rep.note_error("nope".to_string());
+            rep
+        });
+        drain_op_job(&mut app);
+        assert_eq!(runs.load(Ordering::SeqCst), 1, "local failures are not retried");
+    }
+
+    /// A worker deaf to its cancel flag can be abandoned: the queue moves on
+    /// even though the thread is still wedged.
+    #[test]
+    fn an_abandoned_op_frees_the_queue() {
+        let (_d, mut app) = app_with(&[]);
+        // A worker that blocks forever (a stand-in for a wedged syscall).
+        let (_hold_tx, hold_rx) = std::sync::mpsc::channel::<()>();
+        let hold = std::sync::Mutex::new(Some(hold_rx));
+        app.start_op("uploading", move |_ctl| {
+            if let Some(rx) = hold.lock().unwrap().take() {
+                let _ = rx.recv(); // never resolves; _hold_tx lives in the test
+            }
+            OpReport::default()
+        });
+        let ran = Arc::new(std::sync::Mutex::new(false));
+        let flag = Arc::clone(&ran);
+        app.start_op("copying", move |_ctl| {
+            *flag.lock().unwrap() = true;
+            OpReport { ok: 1, ..Default::default() }
+        });
+        assert_eq!(app.op_queue.len(), 1);
+        // Ask it to stop (it will not), then abandon.
+        app.cancel_op_job();
+        assert!(app.op_job.as_ref().unwrap().cancel_requested.is_some());
+        app.abandon_op();
+        assert!(app.message.clone().unwrap_or_default().contains("abandon")
+            || app.message.clone().unwrap_or_default().contains("見捨て"));
+        drain_op_job(&mut app);
+        assert!(*ran.lock().unwrap(), "the queued op ran despite the wedged one");
+    }
+
+    /// `b` tucks the progress popup away and the keyboard works again while
+    /// the op runs in the background.
+    #[test]
+    fn the_progress_popup_can_be_backgrounded() {
+        let (_d, mut app) = app_with(&["a.txt", "b.txt"]);
+        app.start_op("copying", move |_ctl| {
+            std::thread::sleep(Duration::from_millis(150));
+            OpReport { ok: 1, ..Default::default() }
+        });
+        // While the bar shows, ordinary keys are owned by it…
+        let before = app.active_pane().unwrap().cursor;
+        app.handle_key(key('j')).unwrap();
+        assert_eq!(app.active_pane().unwrap().cursor, before, "modal while the bar shows");
+        // …`b` backgrounds it, and the same key now moves the cursor.
+        app.handle_key(key('b')).unwrap();
+        assert!(app.op_bar_hidden);
+        app.handle_key(key('j')).unwrap();
+        assert_ne!(app.active_pane().unwrap().cursor, before, "keyboard is live again");
+        drain_op_job(&mut app);
+        assert!(!app.op_bar_hidden, "reset once the queue drains");
+    }
+
     /// Regression: a keypress arriving in the tiny window after a background op
     /// finished but before its result was polled used to be swallowed by the
     /// "Esc only while an op runs" gate — so a second copy right after the first

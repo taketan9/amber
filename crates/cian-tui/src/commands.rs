@@ -78,6 +78,8 @@ impl App {
             "bulkrename" | "brn" | "vidir" => self.start_editor_rename(),
             // Cursor-follow preview in the shell panel's area.
             "preview" | "pv" => self.toggle_preview(),
+            // The operation queue: running + waiting file operations.
+            "queue" | "ops" | "jobs" => self.start_op_queue(),
             // Open the file in a specific vi-family editor in a new shell tab.
             "vi" | "vim" | "nvim" => self.edit_in_new_tab(Some(verb)),
             "macro" | "macros" => self.start_macros(),

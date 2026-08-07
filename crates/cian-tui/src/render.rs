@@ -295,7 +295,7 @@ pub(crate) fn draw(f: &mut Frame, app: &mut App) {
         draw_status(f, r, app);
     }
 
-    if app.op_job.is_some() {
+    if app.op_job.is_some() && !app.op_bar_hidden {
         draw_op_progress(f, area, app);
     }
     // The directory comparison shows the same bar while it runs.
@@ -314,6 +314,10 @@ pub(crate) fn draw(f: &mut Frame, app: &mut App) {
     }
     if matches!(app.popup, Popup::Toggles { .. }) {
         draw_toggles(f, area, app);
+        return;
+    }
+    if matches!(app.popup, Popup::OpQueue { .. }) {
+        draw_op_queue(f, area, app);
         return;
     }
     // The image preview decodes to fit its box and caches by size, so it takes
@@ -1874,6 +1878,34 @@ fn draw_status(f: &mut Frame, area: Rect, app: &App) {
         spans.push(chip("[zoom]".to_string(), theme().accent));
     }
 
+    // A running operation keeps a chip here — the whole story once the
+    // progress popup is tucked away, a heartbeat even while it shows.
+    if let Some(job) = &app.op_job {
+        spans.push(dim_sep.clone());
+        let p = &job.latest;
+        let pct = if let Some(f) = (p.bytes_done * 100).checked_div(p.bytes_total) {
+            format!(" {}%", f.min(100))
+        } else if p.files_total > 0 {
+            format!(" {}/{}", p.files_done, p.files_total)
+        } else {
+            String::new()
+        };
+        let queued = if app.op_queue.is_empty() {
+            String::new()
+        } else {
+            format!(" +{}", app.op_queue.len())
+        };
+        if app.op_stalled() {
+            let secs = job.last_progress.elapsed().as_secs();
+            spans.push(chip(
+                format!("⚠ {}{} — stalled {}s{}", job.label, pct, secs, queued),
+                Color::Rgb(235, 200, 100),
+            ));
+        } else {
+            spans.push(chip(format!("⏳ {}{}{}", job.label, pct, queued), theme().accent));
+        }
+    }
+
     if let Some(msg) = app.message.as_ref() {
         if !msg.is_empty() {
             spans.push(dim_sep.clone());
@@ -1983,7 +2015,7 @@ fn draw_progress_bar(
         Rect::new(inner.x, bar_y + 2, inner.width, 1),
     );
     f.render_widget(
-        Paragraph::new(tr(lang, " Esc = stop ", " Esc = 中止 ")).style(
+        Paragraph::new(tr(lang, " Esc = stop   b = background ", " Esc = 中止   b = バックグラウンドへ ")).style(
             Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD),
         ),
         Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1),
@@ -2623,6 +2655,71 @@ fn draw_ai_chat(f: &mut Frame, area: Rect, app: &mut App) {
         Paragraph::new(in_lines).style(Style::default().bg(theme().selected_bg)),
         Rect::new(inner.x, inner.y + view_h as u16 + attach_rows, inner.width, input_rows as u16),
     );
+}
+
+/// The operation queue (`:queue`): the running op with its progress and
+/// stall age, then everything waiting its turn.
+fn draw_op_queue(f: &mut Frame, area: Rect, app: &mut App) {
+    let lang = app.lang;
+    let cursor = match &app.popup {
+        Popup::OpQueue { cursor } => *cursor,
+        _ => return,
+    };
+    let w = 60u16.min(area.width.saturating_sub(2));
+    let n_rows = 1 + app.op_queue.len();
+    let h = (n_rows as u16 + 4).clamp(6, area.height.saturating_sub(2));
+    let inner = popup_frame(
+        f,
+        area,
+        w,
+        h,
+        tr(lang, " operation queue ", " 操作キュー "),
+        tr(lang, " x=stop/remove (x again=abandon)  Esc ", " x=停止/削除（再度x=見捨て）  Esc "),
+    );
+    let body_c = readable_on(theme().popup_bg);
+    let mut lines: Vec<Line> = Vec::new();
+    // Row 0: the runner.
+    match &app.op_job {
+        Some(job) => {
+            let p = &job.latest;
+            let pct = if let Some(f) = (p.bytes_done * 100).checked_div(p.bytes_total) {
+                format!("{}%", f.min(100))
+            } else {
+                format!("{}/{}", p.files_done, p.files_total)
+            };
+            let stalled = app.op_stalled();
+            let state = if job.cancel_requested.is_some() {
+                tr(lang, "stopping…", "停止中…").to_string()
+            } else if stalled {
+                let s = job.last_progress.elapsed().as_secs();
+                if lang == Lang::Ja { format!("⚠ 停滞 {}秒", s) } else { format!("⚠ stalled {}s", s) }
+            } else {
+                tr(lang, "running", "実行中").to_string()
+            };
+            let c = if stalled { Color::Rgb(235, 200, 100) } else { Color::Rgb(130, 205, 150) };
+            lines.push(Line::from(vec![
+                Span::styled(if cursor == 0 { "▶ " } else { "  " }, Style::default().fg(theme().accent)),
+                Span::styled(format!("{} {} ", job.label, pct), Style::default().fg(body_c).add_modifier(Modifier::BOLD)),
+                Span::styled(state, Style::default().fg(c)),
+            ]));
+        }
+        None => lines.push(Line::from(Span::styled(
+            tr(lang, "  (nothing running)", "  （実行中なし）"),
+            Style::default().fg(theme().dim),
+        ))),
+    }
+    // The waiting line.
+    for (i, q) in app.op_queue.iter().enumerate() {
+        let sel = cursor == i + 1;
+        lines.push(Line::from(vec![
+            Span::styled(if sel { "▶ " } else { "  " }, Style::default().fg(theme().accent)),
+            Span::styled(
+                format!("{}. {}", i + 1, q.label),
+                Style::default().fg(if sel { body_c } else { theme().dim }),
+            ),
+        ]));
+    }
+    f.render_widget(Paragraph::new(lines), inner);
 }
 
 /// The UI-toggles menu: each switch with its current state, cursor-highlighted.
@@ -3472,6 +3569,7 @@ fn draw_simple_dialog(
         | Popup::StructureReview { .. }
         | Popup::RenameReview { .. }
         | Popup::DupeReview { .. }
+        | Popup::OpQueue { .. }
         | Popup::None => return,
     };
 

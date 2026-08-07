@@ -88,11 +88,22 @@ impl App {
         // while its op is genuinely still running. Both polls no-op when idle.
         self.poll_op_job();
         self.poll_diff_job();
-        // A running operation owns Esc: stopping it is the only thing anyone
-        // wants from the keyboard while it is on screen.
-        if self.op_job.is_some() {
-            if key.code == KeyCode::Esc {
-                self.cancel_op_job();
+        // While the progress popup is up, it owns the keyboard: Esc stops the
+        // op, and `b`/Enter tucks the popup away so work can continue while
+        // the op runs (a status-line chip keeps showing it; `:queue` manages
+        // the line). Once tucked away, every key means what it always does.
+        if self.op_job.is_some() && !self.op_bar_hidden {
+            match key.code {
+                KeyCode::Esc => self.cancel_op_job(),
+                KeyCode::Char('b') | KeyCode::Enter => {
+                    self.op_bar_hidden = true;
+                    self.message = Some(tr(
+                        self.lang,
+                        "running in the background — :queue to manage",
+                        "バックグラウンドで実行中 — :queue で管理",
+                    ).into());
+                }
+                _ => {}
             }
             return Ok(());
         }
@@ -185,6 +196,7 @@ impl App {
             Popup::AiChat { .. } => self.ai_chat_key(key),
             Popup::AiHistory { .. } => self.ai_history_key(key),
             Popup::Toggles { .. } => self.toggles_key(key),
+            Popup::OpQueue { .. } => self.op_queue_key(key),
             Popup::ContextMenu { .. } => self.context_menu_key(key),
             Popup::SshHosts { .. } => self.ssh_hosts_key(key),
             Popup::SshUsers { .. } => self.ssh_users_key(key),
@@ -594,6 +606,25 @@ impl App {
                 }
                 _ => {}
             }
+        Ok(())
+    }
+
+    /// The `:queue` popup: j/k move, x stops/removes (x again abandons a
+    /// deaf worker), Esc closes. Rows shift under it as ops finish; the
+    /// cursor is clamped at render time by the row count.
+    fn op_queue_key(&mut self, key: KeyEvent) -> Result<()> {
+        let rows = 1 + self.op_queue.len();
+        let Popup::OpQueue { cursor } = &mut self.popup else { return Ok(()) };
+        match key.code {
+            KeyCode::Esc | KeyCode::Char('q') => self.popup = Popup::None,
+            KeyCode::Char('j') | KeyCode::Down => *cursor = (*cursor + 1).min(rows.saturating_sub(1)),
+            KeyCode::Char('k') | KeyCode::Up => *cursor = cursor.saturating_sub(1),
+            KeyCode::Char('x') | KeyCode::Delete => {
+                let row = *cursor;
+                self.op_queue_kill(row);
+            }
+            _ => {}
+        }
         Ok(())
     }
 

@@ -33,6 +33,7 @@ fn command_list() -> &'static [(&'static str, (&'static str, &'static str), bool
         ("ailog",      ("AI: triage the selected log", "AI: ログを診断"), false),
         ("du",         ("disk usage: what's biggest here", "容量分析"), false),
         ("preview",    ("cursor preview in the shell panel", "カーソル追従プレビュー"), false),
+        ("queue",      ("operation queue: running + waiting", "操作キュー（実行中と待機）"), false),
         ("count",      ("count files, lines and steps", "ファイル/行/ステップ数"), false),
         ("diff",       ("compare the two panes", "左右を比較"), false),
         ("dupes",      ("find duplicate files", "重複ファイル検出"), false),
