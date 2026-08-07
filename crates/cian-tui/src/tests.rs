@@ -297,6 +297,61 @@
         panic!("op job did not finish");
     }
 
+    /// The ☁ column appears only where a sync client left placeholders, and
+    /// the badge lands on the placeholder rows. A real placeholder needs a
+    /// sync client, so the flag is set directly — the detection itself is
+    /// covered in `cian_core::cloud`.
+    #[test]
+    fn the_cloud_column_shows_only_where_placeholders_are() {
+        let (_d, mut app) = app_with(&["local.txt", "onedrive.txt"]);
+        // An ordinary folder pays nothing for the feature.
+        let plain = render(&mut app, 100, 20).join("\n");
+        assert!(!plain.contains('☁'), "no cloud column in a plain folder");
+
+        {
+            // Set on the visible listing: a reload would re-stat and clear it.
+            let pane = app.active_pane_mut().unwrap();
+            for e in pane.entries.iter_mut() {
+                if e.name == "onedrive.txt" {
+                    e.cloud = true;
+                }
+            }
+        }
+        assert!(app.active_pane().unwrap().has_cloud());
+        let out = render(&mut app, 100, 20);
+        let cloud_row = out.iter().find(|l| l.contains("onedrive.txt")).expect("row shown");
+        let local_row = out.iter().find(|l| l.contains("local.txt")).expect("row shown");
+        assert!(cloud_row.contains('☁'), "placeholder badged: {cloud_row}");
+        assert!(!local_row.contains('☁'), "local file not badged: {local_row}");
+    }
+
+    /// The preview refuses a placeholder rather than downloading it just
+    /// because the cursor came to rest there — unless the toggle says otherwise.
+    #[test]
+    fn preview_refuses_a_cloud_placeholder() {
+        let (_d, mut app) = app_with(&["cloudy.txt"]);
+        std::fs::write(_d.path().join("cloudy.txt"), "secret contents here\n").unwrap();
+        {
+            let pane = app.active_pane_mut().unwrap();
+            let _ = pane.reload();
+            pane.cursor = pane.entries.iter().position(|e| e.name == "cloudy.txt").unwrap();
+            for e in pane.entries.iter_mut() {
+                e.cloud = true;
+            }
+        }
+        app.toggle_preview();
+        let out = render(&mut app, 110, 30).join("\n");
+        assert!(out.contains("cloud-only") || out.contains("クラウド上"), "explains why: {out}");
+        assert!(!out.contains("secret contents"), "the file was not read");
+
+        // Opting in makes the preview read it like any other file.
+        cian_core::cloud::set_include(true);
+        app.preview = None;
+        let out = render(&mut app, 110, 30).join("\n");
+        cian_core::cloud::set_include(false);
+        assert!(out.contains("secret contents"), "opt-in reads it: {out}");
+    }
+
     /// The hex editor: `i` on a binary view, hex digits overwrite the byte
     /// under the cursor, Ctrl+S saves — with a `.bak` of the original — and
     /// `u` walks the whole session back.

@@ -3280,6 +3280,7 @@ fn shortcut_icon(target: &str) -> &'static str {
             is_dir: false,
             len: 0,
             modified: None,
+            cloud: false,
             is_parent: false,
         };
         return icon_for(&entry);
@@ -3343,6 +3344,7 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry("  Enter on a zip", None, "browse INSIDE the archive; copy out=extract, copy in=add, r/d rename/delete (zip)", "zipにEnterで書庫の中へ（コピー=展開／逆コピー=追加、r/d でリネーム・削除）"),
                 entry(":preview", None, "cursor-follow preview in the shell panel (Shift+J shows the shell)", "シェル枠にカーソル追従プレビュー（Shift+J でシェル表示）"),
                 entry(":queue", None, "operations queue: b backgrounds the bar, x stops/removes, x again abandons", "操作キュー：b でバー格納、x で停止/削除（再度x=見捨て）"),
+                entry("  ☁ column", None, "cloud-only (not downloaded) files; sweeps skip them — T to include", "☁ 列：未ダウンロードのクラウドファイル。一括処理は飛ばす（T で読ませる）"),
                 entry(":nobom", None, "strip UTF-8 BOMs from marked files (UTF-16 kept; viewer badges BOMs)", "マークから UTF-8 BOM 除去（UTF-16 は保持・ビューアにバッジ表示）"),
                 entry("  i on a binary", None, "hex edit: 0-9a-f overwrites bytes, Ctrl+S saves with a .bak", "バイナリで i：hex編集（0-9a-f 上書き、Ctrl+S で .bak を残して保存）"),
                 entry("  edit in viewer", None, "i/a/o/O/I = insert (Ctrl+S save, Esc leave), E = external editor", "ビューア内編集：i/a/o/O/I 挿入（Ctrl+S 保存, Esc 終了）／ E 外部エディタ"),
@@ -3723,6 +3725,8 @@ pub fn run(left: Option<PathBuf>, right: Option<PathBuf>, startup: StartupMacro)
 
     let mut app = App::new(left, right, config)?;
     // Bring back past chat conversations so `Ctrl+R` in the chat spans restarts.
+    // Install the cloud-sweep policy before anything can sweep.
+    cian_core::cloud::set_include(app.config.options.read_cloud_files.unwrap_or(false));
     app.ai_history = ai::restore_ai_history();
     // Probe AI availability off-thread so the first right-click never blocks on
     // python starting up.

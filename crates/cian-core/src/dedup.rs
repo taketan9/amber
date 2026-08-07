@@ -26,7 +26,9 @@ pub fn find_duplicates(paths: &[PathBuf], cancel: &AtomicBool) -> Vec<Vec<PathBu
             return Vec::new();
         }
         if let Ok(m) = std::fs::metadata(p) {
-            if m.is_file() && m.len() > 0 {
+            // Placeholders are grouped out before hashing: proving two cloud
+            // files identical would mean downloading both.
+            if m.is_file() && m.len() > 0 && !crate::cloud::skip_meta(&m) {
                 by_size.entry(m.len()).or_default().push(p.clone());
             }
         }

@@ -173,6 +173,14 @@ pub(crate) fn preview_target(app: &App) -> Result<PathBuf, String> {
     }
     match pane.selected() {
         Some(e) if e.is_parent => Ok(e.path.clone()), // `..` previews the parent dir
+        // A placeholder would be downloaded just by the cursor resting on it —
+        // the one case where following the cursor is actively expensive.
+        Some(e) if e.cloud && !cian_core::cloud::include() => Err(tr(
+            app.lang,
+            "☁ cloud-only — F3 opens it (and downloads it)",
+            "☁ クラウド上のみ — F3 で開けます（ダウンロードされます）",
+        )
+        .into()),
         Some(e) => Ok(e.path.clone()),
         None => Err(tr(app.lang, "empty folder", "空のフォルダ").into()),
     }

@@ -211,6 +211,10 @@ fn grep_file(
     if meta.len() > MAX_GREP_BYTES {
         return;
     }
+    // A cloud placeholder is not worth downloading a library to grep.
+    if crate::cloud::skip_meta(&meta) {
+        return;
+    }
     let Ok(bytes) = fs::read(path) else { return };
     if bytes[..bytes.len().min(SNIFF)].contains(&0) {
         return;

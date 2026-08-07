@@ -7,6 +7,7 @@ use anyhow::{Context, Result};
 
 pub mod archive;
 pub mod attrs;
+pub mod cloud;
 pub mod count;
 pub mod dedup;
 pub mod diff;
@@ -40,6 +41,10 @@ pub struct Entry {
     pub len: u64,
     /// Last modification time, if the filesystem reports one.
     pub modified: Option<SystemTime>,
+    /// A cloud placeholder: listed, but not downloaded (see [`crate::cloud`]).
+    /// Reading it would pull it over the network, so sweeps skip it and the
+    /// pane badges it.
+    pub cloud: bool,
     /// True for the synthetic `..` row that steps up to the parent directory.
     /// It is navigable but never a target: it cannot be marked, copied, moved,
     /// renamed or deleted, and file operations skip it.
@@ -56,6 +61,7 @@ impl Entry {
             is_dir: true,
             len: 0,
             modified: None,
+            cloud: false,
             is_parent: true,
         }
     }
@@ -72,7 +78,8 @@ impl Entry {
         let meta = fs::symlink_metadata(&path).ok();
         let len = meta.as_ref().map(|m| m.len()).unwrap_or(0);
         let modified = meta.as_ref().and_then(|m| m.modified().ok());
-        Self { name, name_lower, path, is_dir, len, modified, is_parent: false }
+        let cloud = meta.as_ref().map(cloud::is_placeholder).unwrap_or(false);
+        Self { name, name_lower, path, is_dir, len, modified, cloud, is_parent: false }
     }
 
     /// An [`Entry`] for a **remote** listing (SFTP): built from the values the
@@ -87,6 +94,7 @@ impl Entry {
             is_dir,
             len: size,
             modified: None,
+            cloud: false,
             is_parent: is_up,
         }
     }
@@ -101,8 +109,9 @@ fn entry_from_de(de: fs::DirEntry) -> Option<Entry> {
     let meta = de.metadata().ok();
     let len = meta.as_ref().map(|m| m.len()).unwrap_or(0);
     let modified = meta.as_ref().and_then(|m| m.modified().ok());
+    let cloud = meta.as_ref().map(cloud::is_placeholder).unwrap_or(false);
     let name_lower = name.to_lowercase();
-    Some(Entry { name, name_lower, path: de.path(), is_dir, len, modified, is_parent: false })
+    Some(Entry { name, name_lower, path: de.path(), is_dir, len, modified, cloud, is_parent: false })
 }
 
 /// Stat one raw `(name, path, is_dir)` into an [`Entry`]. `symlink_metadata`
@@ -113,8 +122,9 @@ fn mk_entry((name, path, is_dir): (String, PathBuf, bool)) -> Entry {
     let meta = fs::symlink_metadata(&path).ok();
     let len = meta.as_ref().map(|m| m.len()).unwrap_or(0);
     let modified = meta.as_ref().and_then(|m| m.modified().ok());
+    let cloud = meta.as_ref().map(cloud::is_placeholder).unwrap_or(false);
     let name_lower = name.to_lowercase();
-    Entry { name, name_lower, path, is_dir, len, modified, is_parent: false }
+    Entry { name, name_lower, path, is_dir, len, modified, cloud, is_parent: false }
 }
 
 /// Stat every raw entry into an [`Entry`], fanning the per-file `stat` calls out
@@ -544,6 +554,12 @@ impl Pane {
             PaneView::Remote { host, path } => Some((host, path)),
             _ => None,
         }
+    }
+
+    /// Does this listing hold any cloud placeholder? Drives the ☁ column, so
+    /// an ordinary folder never pays for it.
+    pub fn has_cloud(&self) -> bool {
+        self.entries.iter().any(|e| e.cloud)
     }
 
     /// While browsing inside an archive: the archive file and the directory

@@ -89,6 +89,10 @@ pub struct Options {
     /// while cian isn't in the foreground's attention. Defaults to true. The
     /// job has to have run at least `notify_min_secs` for it to fire.
     pub notify: Option<bool>,
+    /// Let sweeps (grep, :count, :hash, :dupes, :preview) read cloud
+    /// placeholder files, downloading them. Off by default — see
+    /// `cian_core::cloud`.
+    pub read_cloud_files: Option<bool>,
     /// How many seconds a job must run before a finish notification fires.
     /// Defaults to 5, so quick operations stay silent.
     pub notify_min_secs: Option<u64>,
@@ -722,6 +726,12 @@ fn install_api(lua: &Lua, builder: &Rc<RefCell<Builder>>) -> mlua::Result<()> {
                         Err(_) => bm
                             .errors
                             .push("set_option: animation_ms expects a number".into()),
+                    },
+                    "read_cloud_files" => match bool::from_lua(val, lua) {
+                        Ok(v) => bm.options.read_cloud_files = Some(v),
+                        Err(_) => bm
+                            .errors
+                            .push("set_option: read_cloud_files expects a boolean".into()),
                     },
                     "notify" => match bool::from_lua(val, lua) {
                         Ok(v) => bm.options.notify = Some(v),

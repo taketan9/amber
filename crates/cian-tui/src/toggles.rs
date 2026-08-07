@@ -17,6 +17,8 @@ pub(crate) enum ToggleId {
     Verify,
     /// Cursor-follow preview in the shell panel's area.
     Preview,
+    /// Let sweeps read cloud placeholders (and so download them).
+    ReadCloud,
     /// Interface language (English ↔ Japanese).
     Lang,
 }
@@ -52,6 +54,12 @@ impl App {
                 tr(self.lang, "Cursor preview (shell panel)", "カーソル追従プレビュー").into(),
                 onoff(self.preview_on),
                 self.preview_on,
+            ),
+            (
+                ToggleId::ReadCloud,
+                tr(self.lang, "Read ☁ cloud-only files", "☁ クラウド上のファイルも読む").into(),
+                onoff(cian_core::cloud::include()),
+                cian_core::cloud::include(),
             ),
             (
                 ToggleId::Lang,
@@ -99,6 +107,17 @@ impl App {
                 self.verify_runtime = Some(!cur);
             }
             ToggleId::Preview => self.toggle_preview(),
+            ToggleId::ReadCloud => {
+                let on = !cian_core::cloud::include();
+                cian_core::cloud::set_include(on);
+                self.message = Some(if on {
+                    tr(self.lang,
+                       "⚠ sweeps will now download cloud-only files",
+                       "⚠ 一括処理がクラウド上のファイルをダウンロードします").into()
+                } else {
+                    tr(self.lang, "sweeps skip cloud-only files", "一括処理はクラウド上のファイルを飛ばします").into()
+                });
+            }
             ToggleId::Lang => self.lang = self.lang.toggled(),
         }
     }

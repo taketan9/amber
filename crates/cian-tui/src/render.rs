@@ -890,9 +890,12 @@ fn draw_file_pane(
     let show_size = inner_w >= 34;
     // A git badge column (badge + space) only when the pane sits in a repo.
     let git_w: u16 = if git.is_some() { 2 } else { 0 };
+    // Likewise a ☁ column, only where a sync client actually put placeholders:
+    // an ordinary folder never pays a cell for it.
+    let cloud_w: u16 = if pane.has_cloud() { 2 } else { 0 };
     let meta_w = if show_time { SIZE_COL_W + TIME_COL_W + 2 } else if show_size { SIZE_COL_W + 1 } else { 0 };
     // 2 mark + icon + 2 spaces
-    let name_w = inner_w.saturating_sub(meta_w + 5 + git_w) as usize;
+    let name_w = inner_w.saturating_sub(meta_w + 5 + git_w + cloud_w) as usize;
 
     // Build ListItems only for the rows the viewport can actually show. ratatui
     // renders a fresh `ListState` (offset 0) by scrolling just enough to keep the
@@ -932,6 +935,13 @@ fn draw_file_pane(
             spans.push(Span::styled(
                 format!("{:<1} ", badge),
                 Style::default().fg(color).add_modifier(Modifier::BOLD),
+            ));
+        }
+        if cloud_w > 0 {
+            // ☁ = listed but not downloaded; a space keeps local files aligned.
+            spans.push(Span::styled(
+                if e.cloud { "☁ " } else { "  " },
+                Style::default().fg(Color::Rgb(130, 175, 210)),
             ));
         }
         spans.extend([
@@ -984,8 +994,8 @@ fn draw_file_pane(
     if inner.height > 0 {
         let header = Rect::new(inner.x, inner.y, inner.width, 1);
         draw_pane_header(
-            f, header, pane, git_w, name_w, show_size, show_time, list_style, pane_id, lang,
-            sort_rects,
+            f, header, pane, git_w, cloud_w, name_w, show_size, show_time, list_style, pane_id,
+            lang, sort_rects,
         );
     }
     let list_area =
@@ -1024,6 +1034,7 @@ fn draw_pane_header(
     header: Rect,
     pane: &Pane,
     git_w: u16,
+    cloud_w: u16,
     name_w: usize,
     show_size: bool,
     show_time: bool,
@@ -1050,7 +1061,7 @@ fn draw_pane_header(
     // Mirror the row layout: git badge, mark, icon columns, then the fields.
     // The icon column exists only with Nerd Fonts on (one cell + two spaces;
     // two spaces alone otherwise).
-    let prefix = 4 + usize::from(nerd_fonts()) + git_w as usize;
+    let prefix = 4 + usize::from(nerd_fonts()) + git_w as usize + cloud_w as usize;
     let name_lbl = label(SortKey::Name);
     let size_lbl = label(SortKey::Size);
     let time_lbl = label(SortKey::Modified);

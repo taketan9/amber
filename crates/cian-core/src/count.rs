@@ -145,6 +145,9 @@ fn ext_matches(p: &Path, o: &Options) -> bool {
 /// Count one file's lines. `None` if it can't be read or looks binary.
 fn count_file(p: &Path, o: &Options) -> Option<Counts> {
     use std::io::Read;
+    if crate::cloud::skip_read(p) {
+        return None;
+    }
     let f = std::fs::File::open(p).ok()?;
     let mut buf = Vec::new();
     f.take(READ_LIMIT).read_to_end(&mut buf).ok()?;
