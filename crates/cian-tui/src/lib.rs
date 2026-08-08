@@ -2073,6 +2073,12 @@ pub struct App {
     /// its folds and its unsaved edits while another is on screen.
     viewer_tabs: Vec<Popup>,
     viewer_tab_idx: usize,
+    /// The other half of a split viewer: a whole second `Popup::Viewer`, drawn
+    /// beside the first. `viewer_split_lr` says which way they are stacked and
+    /// `viewer_split_focus` which one the keyboard is pointed at.
+    viewer_split: Option<Box<Popup>>,
+    viewer_split_lr: bool,
+    viewer_split_focus: bool,
     key_probe: bool,
     /// The message was raised by the last keystroke, rather than left over
     /// from an earlier one. Only a fresh message may take a footer.
@@ -2360,6 +2366,9 @@ impl App {
             menu_stack: Vec::new(),
             viewer_tabs: Vec::new(),
             viewer_tab_idx: 0,
+            viewer_split: None,
+            viewer_split_lr: true,
+            viewer_split_focus: false,
             key_probe: false,
             message_fresh: false,
             kbd_enhanced: false,
@@ -3619,6 +3628,8 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry("    :expand :unexpand :reindent", None, "leading tabs ↔ spaces, and re-indent to a consistent step", "先頭のTAB⇔空白、インデントを一定幅に整形"),
                 entry("    :ws", None, "show trailing spaces, tabs and ideographic spaces", "行末空白・TAB・全角スペースを表示"),
                 entry("    :lf :crlf", None, "convert line endings (shown in the title)", "改行コードを変換（タイトルに表示）"),
+                entry("  Shift+F8/F9/F10", None, "split left-right / top-bottom / close it — Shift+H,L crosses over", "左右分割 / 上下分割 / 解除 — Shift+H,L で行き来"),
+                entry("  P", None, "paste what was copied (p toggles the Markdown preview)", "コピーしたものを貼り付け（p は Markdown プレビュー切替）"),
                 entry("  F2 / Shift+F2", None, "the next / previous open file — F3 on marked files opens them all as tabs", "次/前の開いているファイル — マークして F3 で全部タブで開く"),
                 entry("  r after /", None, "replace what the search found — the prompt arrives with the pattern in it", "検索したものを置換 — パターンは入力済みで開く"),
                 entry("  :ws", None, "the invisible characters — tab, trailing space, ideographic space, line ending. On by default", "見えない文字の表示 — TAB・行末の空白・全角空白・改行。既定でオン"),

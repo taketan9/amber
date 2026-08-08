@@ -804,6 +804,55 @@
         assert_eq!(app.viewer_tab_count(), 0);
     }
 
+    /// Two files side by side, on the keys the shell panel already uses.
+    #[test]
+    fn the_viewer_splits_and_puts_itself_back_together() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::write(d.path().join("a.txt"), "AAA\n").unwrap();
+        std::fs::write(d.path().join("b.txt"), "BBB\n").unwrap();
+        let p = d.path().to_path_buf();
+        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        for n in ["a.txt", "b.txt"] {
+            let path = app.active_pane().unwrap().entries.iter().find(|e| e.name == n).unwrap().path.clone();
+            app.active_pane_mut().unwrap().marks.insert(path);
+        }
+        app.handle_key(code(KeyCode::F(3))).unwrap();
+        let shown = |app: &App| match &app.popup {
+            Popup::Viewer { view, .. } => view.lines.join("\n"),
+            other => panic!("not a viewer: {other:?}"),
+        };
+        let other = |app: &App| match app.viewer_split.as_deref() {
+            Some(Popup::Viewer { view, .. }) => view.lines.join("\n"),
+            _ => panic!("not split"),
+        };
+
+        // Shift+F8 puts the next open file beside this one.
+        app.handle_key(KeyEvent::new(KeyCode::F(8), KeyModifiers::SHIFT)).unwrap();
+        assert!(app.viewer_split.is_some(), "split");
+        assert_eq!(shown(&app), "AAA");
+        assert_eq!(other(&app), "BBB");
+        // …and the strip no longer holds it, since it is on screen.
+        assert!(app.viewer_tabs.is_empty(), "both halves are on screen");
+
+        // Shift+L crosses over, Shift+H comes back.
+        app.handle_key(KeyEvent::new(KeyCode::Char('L'), KeyModifiers::SHIFT)).unwrap();
+        assert_eq!(shown(&app), "BBB", "the keyboard is on the other half");
+        app.handle_key(KeyEvent::new(KeyCode::Char('H'), KeyModifiers::SHIFT)).unwrap();
+        assert_eq!(shown(&app), "AAA");
+
+        // Both halves are drawn, side by side.
+        let screen = render(&mut app, 160, 30).join("\n");
+        assert!(screen.contains("AAA") && screen.contains("BBB"), "{screen}");
+
+        // Shift+F10 keeps the one being read and returns the other to the strip.
+        app.handle_key(KeyEvent::new(KeyCode::F(10), KeyModifiers::SHIFT)).unwrap();
+        assert!(app.viewer_split.is_none(), "one file again");
+        assert_eq!(shown(&app), "AAA", "the half in focus stayed");
+        assert_eq!(app.viewer_tab_count(), 2, "the other went back to the tabs");
+        app.handle_key(code(KeyCode::F(2))).unwrap();
+        assert_eq!(shown(&app), "BBB", "and is still reachable");
+    }
+
     /// Backspace in a search listing means the same as Esc. A set of results
     /// has no parent directory to climb to, so climbing to one is a surprise.
     #[test]

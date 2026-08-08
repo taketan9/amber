@@ -234,6 +234,27 @@ impl App {
                 return Ok(());
             }
         }
+        // Splits, on the keys the shell panel already uses for its own: the
+        // reflex is the same and so should be the reach.
+        if shift && matches!(key.code, KeyCode::F(8) | KeyCode::F(9) | KeyCode::F(10)) {
+            match key.code {
+                KeyCode::F(8) => self.split_viewer(true),
+                KeyCode::F(9) => self.split_viewer(false),
+                _ => self.close_viewer_split(),
+            }
+            return Ok(());
+        }
+        // Shift+H / Shift+L cross between the two halves — the same keys that
+        // cross between the file panes.
+        if self.viewer_split.is_some()
+            && matches!(key.code, KeyCode::Char('H') | KeyCode::Char('L'))
+        {
+            let want = key.code == KeyCode::Char('L');
+            if self.viewer_split_focus != want {
+                self.swap_viewer_split();
+            }
+            return Ok(());
+        }
         // F2 / Shift+F2 walk the open files, as they do in the shell panel.
         if matches!(key.code, KeyCode::F(2)) {
             self.viewer_switch_tab(!shift);
@@ -344,6 +365,15 @@ impl App {
         // `B` toggles the git blame gutter.
         if !ctrl && key.code == KeyCode::Char('B') {
             self.toggle_viewer_blame();
+            return Ok(());
+        }
+        // `P` pastes what was copied. Not `p`, which toggles the Markdown
+        // preview and is worn into the fingers by now — say the word and the
+        // two can swap, since vi puts paste on the lower-case one.
+        if !ctrl && !alt && key.code == KeyCode::Char('P')
+            && matches!(self.popup, Popup::Viewer { editable: true, editing: false, .. })
+        {
+            self.paste_into_viewer();
             return Ok(());
         }
         // `m` opens any mermaid blocks as a real diagram in the browser (the
@@ -636,6 +666,69 @@ impl App {
             }
         }
         Ok(())
+    }
+
+    /// Shift+F8 / Shift+F9: read two files at once, side by side or stacked.
+    ///
+    /// The other half shows the next open file, or a second view of this one
+    /// when it is the only file open — which is the case for a long
+    /// configuration file whose top and bottom have to be read together.
+    pub(crate) fn split_viewer(&mut self, left_right: bool) {
+        if !matches!(self.popup, Popup::Viewer { .. }) {
+            return;
+        }
+        if self.viewer_split.is_some() {
+            // Already split: this just changes which way round.
+            self.viewer_split_lr = left_right;
+            return;
+        }
+        let other = if self.viewer_tabs.is_empty() {
+            self.popup.clone()
+        } else {
+            // The next tab along, taken out of the strip: it is on screen now,
+            // so it is not one of the ones waiting behind.
+            let n = self.viewer_tab_count();
+            let cur = self.viewer_tab_idx.min(n - 1);
+            let mut all = self.viewer_all_tabs();
+            let next = (cur + 1) % all.len();
+            let other = all.remove(next);
+            let back = if next < cur { cur - 1 } else { cur };
+            self.viewer_make_active(&mut all, back);
+            other
+        };
+        self.viewer_split = Some(Box::new(other));
+        self.viewer_split_lr = left_right;
+        self.viewer_split_focus = false;
+        self.full_clear = true;
+        self.message = Some(tr(self.lang,
+            "split — Shift+H/L crosses over, Shift+F10 closes it",
+            "分割 — Shift+H/L で行き来、Shift+F10 で解除").into());
+    }
+
+    /// Shift+F10: back to one file, keeping the one being read.
+    pub(crate) fn close_viewer_split(&mut self) {
+        let Some(other) = self.viewer_split.take() else { return };
+        // The half not in focus goes back to the tab strip rather than being
+        // thrown away — it may hold unsaved edits.
+        let keep_other = self.viewer_split_focus;
+        let (shown, stashed) = if keep_other {
+            (*other, std::mem::replace(&mut self.popup, Popup::None))
+        } else {
+            (std::mem::replace(&mut self.popup, Popup::None), *other)
+        };
+        self.popup = shown;
+        let at = self.viewer_tab_idx.min(self.viewer_tabs.len());
+        self.viewer_tabs.insert(at, stashed);
+        self.viewer_split_focus = false;
+        self.full_clear = true;
+        self.message = Some(tr(self.lang, "one file again", "分割を解除しました").into());
+    }
+
+    /// Point the keyboard at the other half.
+    pub(crate) fn swap_viewer_split(&mut self) {
+        let Some(other) = self.viewer_split.as_mut() else { return };
+        std::mem::swap(&mut self.popup, other.as_mut());
+        self.viewer_split_focus = !self.viewer_split_focus;
     }
 
     /// How many files the viewer has open, the active one included.
@@ -1964,21 +2057,12 @@ impl App {
                         let (s, e) = order_pos((anchor.0, anchor.1), (*line, *col));
                         viewer_charwise(lines, s, e)
                     }
+                    // Through the block itself, so a copy takes exactly what
+                    // the highlight showed and `d` would have cut — this used
+                    // to count characters while they counted columns.
                     Some(ViewVisual::Block) => {
-                        let (l0, l1) = (anchor.0.min(*line), anchor.0.max(*line).min(n - 1));
-                        let (c0, c1) = (anchor.1.min(*col), anchor.1.max(*col));
-                        (l0..=l1)
-                            .map(|l| {
-                                let chars: Vec<char> = lines[l].chars().collect();
-                                let hi = (c1 + 1).min(chars.len());
-                                if c0 >= hi {
-                                    String::new()
-                                } else {
-                                    chars[c0..hi].iter().collect()
-                                }
-                            })
-                            .collect::<Vec<_>>()
-                            .join("\n")
+                        let b = cian_core::textops::Block::between(lines, *anchor, (*line, *col));
+                        cian_core::textops::block_text(lines, b).join("\n")
                     }
                 }
             }
@@ -1997,6 +2081,67 @@ impl App {
         if let Popup::Viewer { visual, .. } = &mut self.popup {
             *visual = None;
         }
+    }
+
+    /// `P`: put the clipboard into the buffer at the cursor.
+    ///
+    /// Text that ends in a newline came from whole lines, so it goes back as
+    /// whole lines, below the cursor — vi's distinction, and the one that
+    /// makes "copy these three lines, paste them there" land where meant
+    /// rather than in the middle of a word.
+    pub(crate) fn paste_into_viewer(&mut self) {
+        let Some(text) = self.clipboard_text().filter(|t| !t.is_empty()) else {
+            self.message = Some(tr(self.lang, "the clipboard is empty", "クリップボードが空です").into());
+            return;
+        };
+        let text = text.replace("\r\n", "\n");
+        let linewise = text.ends_with('\n');
+        let parts: Vec<String> =
+            text.trim_end_matches('\n').split('\n').map(str::to_string).collect();
+        let mut n = 0usize;
+        if let Popup::Viewer { view, undo, dirty, hl, line, col, goal, .. } = &mut self.popup {
+            push_viewer_undo(undo, &view.lines, *line, *col);
+            if view.lines.is_empty() {
+                view.lines.push(String::new());
+            }
+            let at = (*line).min(view.lines.len() - 1);
+            if linewise {
+                for (i, p) in parts.iter().enumerate() {
+                    view.lines.insert(at + 1 + i, p.clone());
+                }
+                *line = at + 1;
+                *col = 0;
+                *goal = 0;
+            } else {
+                let chars: Vec<char> = view.lines[at].chars().collect();
+                let cut = (*col).min(chars.len());
+                let head: String = chars[..cut].iter().collect();
+                let tail: String = chars[cut..].iter().collect();
+                if parts.len() == 1 {
+                    view.lines[at] = format!("{head}{}{tail}", parts[0]);
+                    *col = cut + parts[0].chars().count();
+                } else {
+                    view.lines[at] = format!("{head}{}", parts[0]);
+                    for (i, p) in parts[1..].iter().enumerate() {
+                        view.lines.insert(at + 1 + i, p.clone());
+                    }
+                    let last = at + parts.len() - 1;
+                    let end = view.lines[last].chars().count();
+                    view.lines[last].push_str(&tail);
+                    *line = last;
+                    *col = end;
+                }
+                *goal = *col;
+            }
+            n = parts.len();
+            *dirty = true;
+            hl.clear();
+        }
+        self.message = Some(if self.lang == Lang::Ja {
+            format!("{n} 行を貼り付けました")
+        } else {
+            format!("pasted {n} line(s)")
+        });
     }
 
     /// `m` in the viewer: write the document's mermaid blocks into a self-

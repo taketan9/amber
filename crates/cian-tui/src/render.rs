@@ -437,6 +437,30 @@ pub(crate) fn draw(f: &mut Frame, app: &mut App) {
         // message raised by the viewer itself — "saved", "nothing to fold
         // here" — is shown on its own footer instead.
         let msg_for_viewer = app.message.clone().filter(|_| app.message_fresh);
+        // A split viewer is two viewers. The half not in focus is drawn first
+        // and dimmed, exactly as the unfocused file pane is, so which one the
+        // keyboard is pointed at is never a guess.
+        if let Some(other) = app.viewer_split.take() {
+            let (a, b) = split_viewer_areas(area, app.viewer_split_lr);
+            let mut other = other;
+            draw_viewer(f, b, &mut other, lang, show_ws, None, (0, 1));
+            f.render_widget(
+                Block::default().style(Style::default().fg(Color::Rgb(90, 90, 105))),
+                b,
+            );
+            draw_viewer(
+                f,
+                a,
+                &mut app.popup,
+                lang,
+                show_ws,
+                msg_for_viewer.as_deref(),
+                (app.viewer_tab_idx, app.viewer_tabs.len() + 2),
+            );
+            app.viewer_split = Some(other);
+            app.popup_zones.clear();
+            return;
+        }
         draw_popup(
             f,
             area,
@@ -5029,6 +5053,23 @@ fn dim_of(c: Color) -> Color {
 }
 
 
+/// The two halves of a split viewer. The focused one comes first.
+fn split_viewer_areas(area: Rect, left_right: bool) -> (Rect, Rect) {
+    if left_right {
+        let w = area.width / 2;
+        (
+            Rect::new(area.x, area.y, w, area.height),
+            Rect::new(area.x + w, area.y, area.width - w, area.height),
+        )
+    } else {
+        let h = area.height / 2;
+        (
+            Rect::new(area.x, area.y, area.width, h),
+            Rect::new(area.x, area.y + h, area.width, area.height - h),
+        )
+    }
+}
+
 fn draw_viewer(
     f: &mut Frame,
     area: Rect,
@@ -5554,6 +5595,16 @@ fn draw_viewer(
                    "s/old/new/[gci] · w wq q q! · block outline ws sort uniq han zen expand[ all] unexpand reindent lf crlf",
                    "s/old/new/[gci] · w wq q q! · block outline ws sort uniq han zen expand[ all] unexpand reindent lf crlf"),
             )
+        } else if cmd.starts_with('s') {
+            // Mid-replace, the flags are the part still to be decided — and
+            // the whole reason `r` seeded the prompt was so they would be.
+            format!(
+                ":{}_   {}",
+                cmd,
+                tr(lang,
+                   "flags: g all on a line · c confirm each · i ignore case",
+                   "フラグ: g 行内すべて · c 1件ずつ確認 · i 大小無視"),
+            )
         } else {
             format!(":{}_", cmd)
         }
@@ -5575,22 +5626,31 @@ fn draw_viewer(
                     (true, true) => tr(lang, " ]] [[ section ", " ]] [[ 見出し "),
                     (true, false) => tr(lang, " ]] [[ section  Space fold  zA all ", " ]] [[ 見出し  Space 折りたたみ  zA 全部 "),
                 };
+                // `r` only means something once there is something to replace.
+                let after_find = if find_query.is_some() {
+                    tr(lang, " r replace ", " r 置換 ")
+                } else {
+                    ""
+                };
                 let hints = if *preview {
-                    format!("{}{}{}{}{}",
+                    format!("{}{}{}{}{}{}",
                         tr(lang, " / f search  n/N  v/V select  y copy ", " / f 検索  n/N  v/V 選択  y コピー "),
+                        after_find,
                         ed,
                         shape_hint,
                         if mmd { tr(lang, " m diagram ", " m 図 ") } else { "" },
                         tr(lang, " p source  ", " p ソース  "))
                 } else if *markdown {
-                    format!("{}{}{}{}",
+                    format!("{}{}{}{}{}",
                         tr(lang, " / f search  n/N  v/V select  y copy ", " / f 検索  n/N  v/V 選択  y コピー "),
+                        after_find,
                         ed,
                         shape_hint,
                         tr(lang, " p preview  ", " p プレビュー  "))
                 } else {
-                    format!("{}{}{}{}",
-                        tr(lang, " / f search  n/N  v/V select  y copy ", " / f 検索  n/N  v/V 選択  y コピー "),
+                    format!("{}{}{}{}{}",
+                        tr(lang, " / f search  n/N  v/V select  y copy  P paste ", " / f 検索  n/N  v/V 選択  y コピー  P 貼付 "),
+                        after_find,
                         ed,
                         shape_hint,
                         tr(lang, " e enc  ", " e 文字コード  "))
