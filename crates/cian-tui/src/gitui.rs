@@ -275,7 +275,7 @@ impl App {
         self.popup = Popup::Viewer {
             title: title.to_string(),
             path: PathBuf::new(),
-            view,
+            view: Box::new(view),
             scroll: 0,
             line: 0,
             col: 0,

@@ -637,6 +637,98 @@
         assert!(app.message.as_deref().unwrap_or("").contains("outline"));
     }
 
+    /// Folding: za closes the section the cursor is in, the lines under it
+    /// stop being drawn, the cursor comes out with them, and zR/zM work on the
+    /// lot. The outline and the folds are the same information read two ways.
+    #[test]
+    fn folds_hide_a_section_and_take_the_cursor_with_them() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::write(
+            d.path().join("doc.md"),
+            "# One\nunder one\nstill one\n# Two\nunder two\n# Three\nunder three\n",
+        )
+        .unwrap();
+        let p = d.path().to_path_buf();
+        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        app.active_pane_mut().unwrap().cursor =
+            app.active_pane().unwrap().entries.iter().position(|e| e.name == "doc.md").unwrap();
+        app.handle_key(code(KeyCode::F(3))).unwrap();
+        // Markdown opens in preview; folding belongs to the source.
+        app.handle_key(key('p')).unwrap();
+        let _ = render(&mut app, 120, 30);
+
+        let folds = |app: &App| match &app.popup {
+            Popup::Viewer { shape, .. } => shape.as_deref().unwrap().folds.iter().copied().collect::<Vec<_>>(),
+            other => panic!("not a viewer: {other:?}"),
+        };
+        let at = |app: &App| match &app.popup {
+            Popup::Viewer { line, .. } => *line,
+            other => panic!("not a viewer: {other:?}"),
+        };
+        let put = |app: &mut App, l: usize| {
+            if let Popup::Viewer { line, .. } = &mut app.popup {
+                *line = l;
+            }
+        };
+        let za = |app: &mut App| {
+            app.handle_key(key('z')).unwrap();
+            app.handle_key(key('a')).unwrap();
+        };
+
+        // From inside the first section, za closes the section — not the line.
+        put(&mut app, 1);
+        za(&mut app);
+        assert_eq!(folds(&app), [0]);
+        assert_eq!(at(&app), 0, "the cursor came out onto the heading");
+        let _ = render(&mut app, 120, 30);
+
+        // The hidden lines are no longer drawn.
+        let screen = |app: &mut App| render(app, 120, 30).join("\n");
+        let shown = screen(&mut app);
+        assert!(shown.contains("# One") && shown.contains("# Two"));
+        assert!(!shown.contains("under one"), "the folded lines are gone from the screen");
+
+        // Pressing it again opens it.
+        za(&mut app);
+        assert!(folds(&app).is_empty());
+        assert!(screen(&mut app).contains("under one"));
+
+        // Clicking the marker in the gutter is the same as za on that line.
+        let g = app.viewer_gutter;
+        let b = app.viewer_rect;
+        app.handle_mouse(crossterm::event::MouseEvent {
+            kind: crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+            column: b.x + g - 2,
+            row: b.y + 3, // the "# Two" heading, with everything open
+            modifiers: KeyModifiers::NONE,
+        });
+        assert_eq!(folds(&app), [3], "clicking the marker closed that section");
+        let _ = render(&mut app, 120, 30);
+        app.handle_key(key('z')).unwrap();
+        app.handle_key(KeyEvent::new(KeyCode::Char('R'), KeyModifiers::SHIFT)).unwrap();
+
+        // zM closes everything with something in it, zR opens the lot.
+        app.handle_key(key('z')).unwrap();
+        app.handle_key(KeyEvent::new(KeyCode::Char('M'), KeyModifiers::SHIFT)).unwrap();
+        assert_eq!(folds(&app), [0, 3, 5]);
+        let shut = screen(&mut app);
+        assert!(!shut.contains("under two") && !shut.contains("under three"));
+        assert!(shut.contains("# Three"), "every heading is still there to open");
+        app.handle_key(key('z')).unwrap();
+        app.handle_key(KeyEvent::new(KeyCode::Char('R'), KeyModifiers::SHIFT)).unwrap();
+        assert!(folds(&app).is_empty());
+
+        // A file with nothing to fold says so instead of doing nothing.
+        app.handle_key(code(KeyCode::Esc)).unwrap();
+        std::fs::write(d.path().join("flat.txt"), "a\nb\n").unwrap();
+        let _ = app.active_file_tabs_mut().map(|t| t.active_mut().reload());
+        app.active_pane_mut().unwrap().cursor =
+            app.active_pane().unwrap().entries.iter().position(|e| e.name == "flat.txt").unwrap();
+        app.handle_key(code(KeyCode::F(3))).unwrap();
+        za(&mut app);
+        assert!(app.message.as_deref().unwrap_or("").contains("fold"));
+    }
+
     /// Rectangular editing: Ctrl+V marks a block, then `d` cuts it, and
     /// `I` / `A` / `c` type once and land on every line.
     #[test]

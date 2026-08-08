@@ -57,10 +57,44 @@ impl App {
             // lands on the character under the pointer (not just its line).
             let text_x = body.x + self.viewer_gutter;
             let ecol = col;
+            // Closed folds mean screen rows and line numbers are not the same
+            // thing: the rows drawn from `scroll` down, resolved once, so a
+            // click over folded text lands on what is under the pointer.
+            let rows: Vec<usize> = if let Popup::Viewer { view, scroll, shape, preview, .. } = &self.popup {
+                let hid = shape
+                    .as_deref()
+                    .filter(|_| !*preview)
+                    .map(|sh| sh.hidden(view.lines.len()))
+                    .unwrap_or_default();
+                (*scroll..view.lines.len())
+                    .filter(|i| hid.is_empty() || !hid[*i])
+                    .take(body_h)
+                    .collect()
+            } else {
+                Vec::new()
+            };
             let line_at = |row: u16, scroll: usize, n: usize| -> usize {
                 let rel = row.saturating_sub(body.y) as usize;
-                (scroll + rel).min(n.saturating_sub(1))
+                match rows.get(rel) {
+                    Some(l) => *l,
+                    None => rows.last().copied().unwrap_or((scroll + rel).min(n.saturating_sub(1))),
+                }
             };
+            // A click on the fold marker in the gutter opens or closes it,
+            // rather than moving the cursor there — the marker is drawn to be
+            // clicked, and a cursor move is what the text itself is for.
+            // The gutter is [line number][fold marker][git change bar], so the
+            // marker is two columns left of where the text starts.
+            if matches!(ev.kind, MouseEventKind::Down(MouseButton::Left))
+                && self.viewer_gutter > 1
+                && col + 2 == text_x
+                && row >= body.y
+                && ((row - body.y) as usize) < rows.len()
+            {
+                let l = line_at(row, 0, 0);
+                self.toggle_viewer_fold(Some(l));
+                return;
+            }
             let col_at = |view: &cian_core::viewer::View, l: usize| -> usize {
                 let rel = ecol.saturating_sub(text_x) as usize;
                 rel.min(vlen(view, l))

@@ -834,13 +834,11 @@ impl App {
                 // Read the file's shape from the source, not from `view.lines`
                 // — for Markdown those are about to become the rendered
                 // preview, whose headings have had their `#` marks taken off.
-                let items = cian_core::outline::outline(path, &source);
-                let shape = (!items.is_empty())
-                    .then(|| Box::new(crate::Shape { items, shown: true }));
+                let shape = crate::Shape::read(path, &source, None);
                 self.popup = Popup::Viewer {
                     title: title.to_string(),
                     path: path.to_path_buf(),
-                    view,
+                    view: Box::new(view),
                     scroll: line.saturating_sub(4), // show a little context above
                     line,
                     col: 0,
@@ -901,7 +899,7 @@ impl App {
                 self.popup = Popup::Viewer {
                     title: format!("{}  ·  {}", title, doc.label()),
                     path: path.to_path_buf(),
-                    view,
+                    view: Box::new(view),
                     scroll: line.saturating_sub(4),
                     line,
                     col: 0,

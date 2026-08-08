@@ -378,7 +378,8 @@ pub(crate) fn draw(f: &mut Frame, app: &mut App) {
             app.viewer_gutter = if !blame.is_empty() && !*preview && !*editing {
                 BLAME_W as u16
             } else if !*preview && view.kind == cian_core::viewer::ViewKind::Text {
-                (format!("{}", view.lines.len()).len().max(3) + 1) as u16
+                let fold_col = u16::from(shape.as_deref().is_some_and(|s| !s.items.is_empty()));
+                (format!("{}", view.lines.len()).len().max(3) + 1) as u16 + fold_col
             } else {
                 0
             };
@@ -4851,7 +4852,7 @@ fn draw_viewer(
     lang: Lang,
     show_ws: bool,
 ) {
-    let Popup::Viewer { title, view, scroll, line, col, visual, anchor, find_input, find_query, sub_input, sub_walk, block_input, git_lines, markdown, preview, source, md_styles, md_width, editing, dirty, editable, hl, hl_lang, blame, shape, .. } = popup else { return };
+    let Popup::Viewer { title, view, scroll, line, col, visual, anchor, find_input, find_query, sub_input, sub_walk, block_input, git_lines, markdown, preview, source, md_styles, md_width, editing, dirty, editable, hl, hl_lang, blame, shape, path, .. } = popup else { return };
     let w = area.width.saturating_sub(4);
     let h = area.height.saturating_sub(2);
     let rect = centered_rect(w, h, area);
@@ -4889,6 +4890,16 @@ fn draw_viewer(
                     .map(|cats| cats.into_iter().map(hl_style).collect())
                     .collect();
             }
+        }
+    }
+
+    // An edit changes the file's shape. Re-read it when the buffer has moved
+    // on — but not while typing, where the outline would flicker on every
+    // keystroke and the fold under the cursor could vanish mid-word.
+    if !*editing && !*preview {
+        let now = crate::fingerprint(&view.lines);
+        if shape.as_deref().is_some_and(|s| s.fp != now) {
+            *shape = crate::Shape::read(path, &view.lines, shape.as_deref());
         }
     }
 
@@ -4953,24 +4964,61 @@ fn draw_viewer(
     let inner = Rect::new(whole.x + outline_w, whole.y, whole.width - outline_w, whole.height);
 
     let body_h = inner.height.saturating_sub(1) as usize;
-    let max_scroll = view.lines.len().saturating_sub(body_h);
-    *scroll = (*scroll).min(max_scroll);
-    // Keep the cursor on screen (preview scrolls by moving the cursor too).
-    if *line < *scroll {
-        *scroll = *line;
-    } else if *line >= *scroll + body_h.max(1) {
-        *scroll = *line + 1 - body_h.max(1);
+    // Closed folds take their lines out of the picture entirely: `visible` is
+    // the buffer as it is actually shown, and everything below — scrolling,
+    // the cursor, the mouse — works over that rather than over raw line
+    // numbers, so a fold cannot leave a gap or a cursor stranded off screen.
+    // Not while editing: folding is a reading aid, and hiding lines from
+    // someone who is typing into the file is a good way to lose an edit into
+    // a region they cannot see.
+    let folded = shape
+        .as_deref()
+        .filter(|_| !*preview && !*editing)
+        .map(|s| s.hidden(view.lines.len()))
+        .unwrap_or_default();
+    // The cursor never sits inside a closed fold; it sits on the heading that
+    // closed. Doing it here catches every way the cursor can move — a search
+    // hit, a `G`, a grep jump — instead of one arm at a time.
+    if !folded.is_empty() && folded.get(*line).copied().unwrap_or(false) {
+        if let Some(h) = shape.as_deref().and_then(|s| s.enclosing_fold(*line, view.lines.len())) {
+            *line = h;
+            *col = 0;
+        }
     }
+    let visible: Vec<usize> = if folded.is_empty() {
+        (0..view.lines.len()).collect()
+    } else {
+        (0..view.lines.len()).filter(|i| !folded[*i]).collect()
+    };
+    // `scroll` stays a real line number — it is the file's position, and the
+    // percentage in the corner would otherwise lie — so it is converted to and
+    // from an index into `visible` around the clamping.
+    let vpos = |l: usize| visible.partition_point(|v| *v < l);
+    let cur_v = vpos(*line);
+    let mut top_v = vpos(*scroll);
+    let max_top = visible.len().saturating_sub(body_h);
+    top_v = top_v.min(max_top);
+    if cur_v < top_v {
+        top_v = cur_v;
+    } else if cur_v >= top_v + body_h.max(1) {
+        top_v = cur_v + 1 - body_h.max(1);
+    }
+    *scroll = visible.get(top_v).copied().unwrap_or(0);
+    let max_scroll = max_top;
 
     // Line numbers and the git change bar belong to the source only; the
     // rendered preview is a document, not a file listing. The blame gutter,
     // when on, takes the left column instead of line numbers.
     let show_blame = !blame.is_empty() && !*preview && !*editing;
     let numbered = !*preview && !show_blame && view.kind == cian_core::viewer::ViewKind::Text;
+    // One column for the fold markers, present on every numbered line whether
+    // or not that line folds: a gutter that changes width per line would
+    // stagger the text and break the mouse's column mapping.
+    let fold_col = usize::from(numbered && shape.as_deref().is_some_and(|s| !s.items.is_empty()));
     let gutter = if show_blame {
         BLAME_W
     } else if numbered {
-        format!("{}", view.lines.len()).len().max(3) + 1
+        format!("{}", view.lines.len()).len().max(3) + 1 + fold_col
     } else {
         0
     };
@@ -5027,12 +5075,11 @@ fn draw_viewer(
         }
     };
 
-    let rows: Vec<Line> = view
-        .lines
+    let rows: Vec<Line> = visible
         .iter()
-        .enumerate()
-        .skip(*scroll)
+        .skip(top_v)
         .take(body_h)
+        .map(|i| (*i, &view.lines[*i]))
         .map(|(i, l)| {
             // With `:ws` on, the characters you cannot see get a visible
             // stand-in — a trailing space, an ideographic space, a tab. Only
@@ -5112,9 +5159,20 @@ fn draw_viewer(
                 // a deletion just above). Keeping the width fixed means the
                 // mouse column mapping is unaffected.
                 spans.push(Span::styled(
-                    format!("{:>w$}", i + 1, w = gutter.saturating_sub(1)),
+                    format!("{:>w$}", i + 1, w = gutter.saturating_sub(1 + fold_col)),
                     Style::default().fg(Color::Rgb(110, 110, 135)),
                 ));
+                // A heading with something under it says so, and says whether
+                // it is open. The marker is also the click target.
+                if fold_col == 1 {
+                    let sh = shape.as_deref();
+                    let foldable = sh.is_some_and(|s| s.extent_at(i, view.lines.len()).is_some());
+                    let shut = foldable && sh.is_some_and(|s| s.folds.contains(&i));
+                    spans.push(Span::styled(
+                        if !foldable { " " } else if shut { "▸" } else { "▾" },
+                        Style::default().fg(if shut { theme().accent } else { Color::Rgb(110, 110, 135) }),
+                    ));
+                }
                 // The 1-column separator (previously a plain space) is the
                 // change bar.
                 let (bar, bar_c) = match git_lines.get(&i) {

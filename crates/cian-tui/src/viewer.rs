@@ -171,6 +171,35 @@ impl App {
             }
             return Ok(());
         }
+        // `z` folds: `za` toggles the one at the cursor, `zR` opens every fold,
+        // `zM` closes them all. Same prefix trick as the brackets, and for the
+        // same reason it has to come before the edit operators — which
+        // claim `a` and would otherwise swallow both halves.
+        if !ctrl && matches!(key.code, KeyCode::Char('z' | 'a' | 'R' | 'M')) {
+            let c = match key.code {
+                KeyCode::Char(c) => c,
+                _ => unreachable!(),
+            };
+            let armed = matches!(self.popup, Popup::Viewer { pending: Some('z'), .. });
+            if c == 'z' && !armed {
+                if let Popup::Viewer { pending, .. } = &mut self.popup {
+                    *pending = Some('z');
+                }
+                return Ok(());
+            }
+            if armed {
+                if let Popup::Viewer { pending, .. } = &mut self.popup {
+                    *pending = None;
+                }
+                match c {
+                    'a' => self.toggle_viewer_fold(None),
+                    'R' => self.fold_all(false),
+                    'M' => self.fold_all(true),
+                    _ => {}
+                }
+                return Ok(());
+            }
+        }
         // `]]` / `[[` step to the next / previous outline entry — vim's section
         // motion, over the shape the outline column is showing. Doubled, like
         // vim, so a single bracket stays free.
@@ -609,6 +638,70 @@ impl App {
         self.reveal_path_in_pane(&path);
     }
 
+    /// Open or close a fold. `at` names the heading line; `None` means the one
+    /// the cursor is on or, failing that, the heading it sits under — so `za`
+    /// in the middle of a function closes that function.
+    pub(crate) fn toggle_viewer_fold(&mut self, at: Option<usize>) {
+        let mut nothing = true;
+        if let Popup::Viewer { shape, view, line, col, goal, visual, .. } = &mut self.popup {
+            let total = view.lines.len();
+            if let Some(sh) = shape.as_deref_mut() {
+                let head = at
+                    .or_else(|| sh.items.iter().rev().find(|i| i.line <= *line).map(|i| i.line))
+                    .filter(|h| sh.extent_at(*h, total).is_some());
+                if let Some(head) = head {
+                    nothing = false;
+                    if !sh.folds.remove(&head) {
+                        sh.folds.insert(head);
+                        // The cursor cannot stay inside something it can no
+                        // longer see; it lands on the heading that closed.
+                        if *line > head {
+                            *line = head;
+                            *col = 0;
+                            *goal = 0;
+                            *visual = None;
+                        }
+                    }
+                }
+            }
+        }
+        if nothing {
+            self.message = Some(tr(self.lang, "nothing to fold here", "ここには折りたためるものがない").into());
+        }
+    }
+
+    /// `zR` / `zM`: open every fold, or close every one that has anything in it.
+    pub(crate) fn fold_all(&mut self, close: bool) {
+        let mut n = 0usize;
+        if let Popup::Viewer { shape, view, line, col, goal, visual, .. } = &mut self.popup {
+            let total = view.lines.len();
+            let Some(sh) = shape.as_deref_mut() else { return };
+            sh.folds.clear();
+            if close {
+                let heads: Vec<usize> = sh
+                    .items
+                    .iter()
+                    .map(|i| i.line)
+                    .filter(|l| sh.extent_at(*l, total).is_some())
+                    .collect();
+                n = heads.len();
+                sh.folds.extend(heads);
+                if let Some(h) = sh.enclosing_fold(*line, total) {
+                    *line = h;
+                    *col = 0;
+                    *goal = 0;
+                    *visual = None;
+                }
+            }
+        }
+        self.message = Some(if close {
+            format!("{n} fold(s) closed")
+        } else {
+            tr(self.lang, "all folds open", "折りたたみを全部展開").into()
+        });
+    }
+
+    /// Run a `:s/old/new/flags` typed at the viewer's replace prompt.
     /// Run a `:s/old/new/flags` typed at the viewer's replace prompt.
     ///
     /// Without `c` every replacement lands at once, as one undo step. With

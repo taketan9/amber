@@ -392,7 +392,9 @@ enum Popup {
         title: String,
         /// The file on disk, so `Shift+Enter` can reveal it in the pane.
         path: PathBuf,
-        view: cian_core::viewer::View,
+        /// Boxed: `Popup` is one enum and every variant pays for the widest,
+        /// so the viewer's biggest single field lives behind a pointer.
+        view: Box<cian_core::viewer::View>,
         /// First visible line.
         scroll: usize,
         /// Cursor line (absolute).
@@ -1249,7 +1251,8 @@ enum DiffMsg {
 
 /// A grep-replace waiting for approval: what it would change, what it could
 /// not read, and where the cursor is in the list.
-/// What the viewer knows about a file's structure.
+/// What the viewer knows about a file's structure: the outline column and the
+/// folds, which are the same information read two ways.
 #[derive(Debug, Clone)]
 pub(crate) struct Shape {
     /// The entries, in file order.
@@ -1258,6 +1261,81 @@ pub(crate) struct Shape {
     /// an outline to show: a jump list you have to remember to ask for is a
     /// jump list nobody uses.
     pub(crate) shown: bool,
+    /// The lines that head a closed fold. Indices into the buffer, not into
+    /// `items`, so a fold survives the outline being recomputed as long as the
+    /// heading itself is still there.
+    pub(crate) folds: std::collections::BTreeSet<usize>,
+    /// A cheap fingerprint of the buffer the outline was read from, so an edit
+    /// can be noticed without re-running the patterns every frame.
+    pub(crate) fp: (usize, usize),
+}
+
+impl Shape {
+    /// Read the shape of `lines`, or `None` when this kind of file has no
+    /// rules. `shown` and any folds are carried over from `prev`.
+    pub(crate) fn read(
+        path: &std::path::Path,
+        lines: &[String],
+        prev: Option<&Shape>,
+    ) -> Option<Box<Shape>> {
+        let items = cian_core::outline::outline(path, lines);
+        if items.is_empty() {
+            return None;
+        }
+        // Folds are kept only where a heading still starts that line: after an
+        // edit, a fold anchored to a line that is no longer a heading would
+        // hide a region nobody can see the top of.
+        let folds = prev
+            .map(|p| p.folds.iter().copied().filter(|l| items.iter().any(|i| i.line == *l)).collect())
+            .unwrap_or_default();
+        Some(Box::new(Shape {
+            items,
+            shown: prev.map(|p| p.shown).unwrap_or(true),
+            folds,
+            fp: fingerprint(lines),
+        }))
+    }
+
+    /// The extent of the fold headed at buffer line `line`, if there is one
+    /// with anything under it.
+    pub(crate) fn extent_at(&self, line: usize, total: usize) -> Option<(usize, usize)> {
+        let idx = self.items.iter().position(|i| i.line == line)?;
+        cian_core::outline::extent(&self.items, idx, total)
+    }
+
+    /// One flag per line: is it hidden inside a closed fold?
+    ///
+    /// A fold hides what is under its heading, never the heading itself — so
+    /// a closed fold is always visible as the thing you closed, and closing
+    /// everything cannot make the file disappear.
+    pub(crate) fn hidden(&self, total: usize) -> Vec<bool> {
+        let mut out = vec![false; total];
+        for line in &self.folds {
+            if let Some((start, end)) = self.extent_at(*line, total) {
+                for h in out.iter_mut().take(end.min(total.saturating_sub(1)) + 1).skip(start + 1) {
+                    *h = true;
+                }
+            }
+        }
+        out
+    }
+
+    /// The heading of the outermost closed fold covering `line`, for pulling a
+    /// cursor back out of a region it can no longer see.
+    pub(crate) fn enclosing_fold(&self, line: usize, total: usize) -> Option<usize> {
+        self.folds
+            .iter()
+            .copied()
+            .filter(|f| {
+                self.extent_at(*f, total).is_some_and(|(s, e)| line > s && line <= e)
+            })
+            .min()
+    }
+}
+
+/// Enough of a buffer to notice it changed, without hashing it.
+pub(crate) fn fingerprint(lines: &[String]) -> (usize, usize) {
+    (lines.len(), lines.iter().map(|l| l.len()).sum())
 }
 
 #[derive(Debug, Clone)]
@@ -3470,6 +3548,7 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry("    :ws", None, "show trailing spaces, tabs and ideographic spaces", "行末空白・TAB・全角スペースを表示"),
                 entry("    :lf :crlf", None, "convert line endings (shown in the title)", "改行コードを変換（タイトルに表示）"),
                 entry("  outline", None, "]] / [[ next/prev section, click an entry to jump, :outline hides the column", "]] / [[ 次/前の見出し、項目クリックで移動、:outline で列を隠す"),
+                entry("  folding", None, "za fold/unfold here, zR open all, zM close all, or click the ▾ in the gutter", "za 折りたたみ切替、zR 全展開、zM 全折りたたみ、余白の ▾ クリックでも可"),
                 entry("  Ctrl+V block", None, "rectangle: d cuts it, I/A insert at the left/right edge, c replaces", "矩形選択：d で切り取り、I/A で左端/右端に挿入、c で置換"),
                 entry("  normal mode", None, "x/dd/D/J delete·join, u undo, v+d cut selection (d/u scroll via Ctrl)", "ノーマルモード：x/dd/D/J 削除·結合, u 取消, v+d 選択削除（スクロールは Ctrl+d/u）"),
                 entry(":edit", None, "edit the file in your external editor (E in the viewer)", "外部エディタで編集（ビューア内は E）"),
