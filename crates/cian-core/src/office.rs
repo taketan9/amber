@@ -14,7 +14,7 @@
 //! selection and copy on top for free.
 
 use std::io::Read;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
@@ -68,6 +68,78 @@ pub fn classify(path: &Path) -> Option<Doc> {
         "ppt" => Doc::LegacyPpt,
         _ => return None,
     })
+}
+
+/// One synced folder, and the address the same files have in the cloud.
+///
+/// The mapping cannot be discovered reliably — a synced library looks like an
+/// ordinary directory, and the registry key that records it exists only on
+/// Windows and only sometimes — so it is stated in `init.lua` instead of
+/// guessed at. Being told is better than being nearly right.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SyncMap {
+    /// The local folder the library syncs into.
+    pub local: PathBuf,
+    /// Its address in SharePoint / OneDrive, without a trailing slash.
+    pub url: String,
+}
+
+/// The cloud address of `path`, if it lives under one of the mapped folders.
+///
+/// The longest match wins, so a library synced inside another library resolves
+/// to the inner one — which is the one the file actually belongs to.
+pub fn cloud_url(path: &Path, maps: &[SyncMap]) -> Option<String> {
+    let best = maps
+        .iter()
+        .filter(|m| path.starts_with(&m.local))
+        .max_by_key(|m| m.local.as_os_str().len())?;
+    let rest = path.strip_prefix(&best.local).ok()?;
+    let mut url = best.url.trim_end_matches('/').to_string();
+    for part in rest.components() {
+        url.push('/');
+        url.push_str(&percent_encode(&part.as_os_str().to_string_lossy()));
+    }
+    Some(url)
+}
+
+/// Percent-encode one path segment. Deliberately small: the characters that
+/// actually turn up in a document name and would break a URL, and no attempt
+/// at a general encoder.
+fn percent_encode(seg: &str) -> String {
+    let mut out = String::with_capacity(seg.len());
+    for b in seg.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char)
+            }
+            _ => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    out
+}
+
+/// The URI that opens `url` in the desktop application for `doc`.
+///
+/// `ofe|u|` is Office's "open for edit" verb: it hands the *cloud* copy to the
+/// installed application, which is what makes co-authoring and check-out work.
+/// Opening the synced local file instead gets a copy that has to be
+/// reconciled later.
+pub fn app_uri(doc: Doc, url: &str) -> Option<String> {
+    let scheme = match doc {
+        Doc::Docx | Doc::LegacyWord => "ms-word",
+        Doc::Xlsx | Doc::LegacyExcel => "ms-excel",
+        Doc::Pptx | Doc::LegacyPpt => "ms-powerpoint",
+        Doc::Pdf => return None,
+    };
+    Some(format!("{scheme}:ofe|u|{url}"))
+}
+
+/// The contents of a Windows `.url` shortcut pointing at `url`.
+///
+/// Plain text by design: a `.url` file is an INI, it works on every Windows
+/// without anything installed, and it survives being mailed to someone.
+pub fn url_shortcut(url: &str) -> String {
+    format!("[InternetShortcut]\r\nURL={url}\r\n")
 }
 
 /// Cap on how much of a PDF we read (they can be enormous, and the preview only
@@ -649,7 +721,51 @@ fn window_contains(hay: &[u8], needle: &[u8]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Write;
+
+    fn map(local: &str, url: &str) -> SyncMap {
+        SyncMap { local: PathBuf::from(local), url: url.to_string() }
+    }
+
+    #[test]
+    fn a_synced_file_resolves_to_its_address_in_the_library() {
+        let maps = vec![
+            map("/Users/t/OneDrive - Corp", "https://corp.sharepoint.com/Shared%20Documents"),
+            // A library synced inside another one: the inner mapping is the
+            // one the file belongs to, so the longest match has to win.
+            map("/Users/t/OneDrive - Corp/Team", "https://corp.sharepoint.com/sites/Team/Docs"),
+        ];
+        assert_eq!(
+            cloud_url(&PathBuf::from("/Users/t/OneDrive - Corp/plan.docx"), &maps).as_deref(),
+            Some("https://corp.sharepoint.com/Shared%20Documents/plan.docx"),
+        );
+        assert_eq!(
+            cloud_url(&PathBuf::from("/Users/t/OneDrive - Corp/Team/q3 report.xlsx"), &maps).as_deref(),
+            Some("https://corp.sharepoint.com/sites/Team/Docs/q3%20report.xlsx"),
+            "the inner library, and the space encoded",
+        );
+        // Somewhere else entirely: no address to give.
+        assert_eq!(cloud_url(&PathBuf::from("/tmp/plan.docx"), &maps), None);
+    }
+
+    #[test]
+    fn the_uri_names_the_application_and_asks_to_edit() {
+        let u = "https://corp.sharepoint.com/Shared%20Documents/plan.docx";
+        assert_eq!(app_uri(Doc::Docx, u).as_deref(), Some("ms-word:ofe|u|https://corp.sharepoint.com/Shared%20Documents/plan.docx"));
+        assert!(app_uri(Doc::Xlsx, u).unwrap().starts_with("ms-excel:ofe|u|"));
+        assert!(app_uri(Doc::LegacyPpt, u).unwrap().starts_with("ms-powerpoint:ofe|u|"));
+        // A PDF has no Office application to hand it to.
+        assert_eq!(app_uri(Doc::Pdf, u), None);
+    }
+
+    #[test]
+    fn a_url_shortcut_is_an_ini_file() {
+        let s = url_shortcut("https://example.invalid/x.docx");
+        assert!(s.starts_with("[InternetShortcut]"));
+        assert!(s.contains("URL=https://example.invalid/x.docx"));
+        assert!(s.ends_with("\r\n"), "CRLF, as Windows writes them");
+    }
+
+        use std::io::Write;
 
     /// Write a minimal zip with the given (name, contents) members.
     fn make_zip(path: &Path, members: &[(&str, &str)]) {

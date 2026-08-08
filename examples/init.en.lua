@@ -449,3 +449,14 @@
 -- currently in, Enter / → steps into a folder, and Esc / ← steps back out. See
 -- examples/shortcuts.lua for a nested example (targets can be paths, URLs or
 -- apps; folders can nest as deep as you like).
+
+-- Synced SharePoint / OneDrive libraries: which local folder is which address
+-- in the cloud. A synced library looks like an ordinary directory and the
+-- registry key that records the mapping exists only on Windows and only
+-- sometimes, so it is stated here rather than guessed at. With this set,
+-- :office opens the cloud copy in the desktop app and :officelink writes a
+-- .url shortcut to it.
+-- cian.sharepoint {
+--   { local = "C:/Users/you/OneDrive - Corp", url = "https://corp.sharepoint.com/Shared%20Documents" },
+--   { local = "C:/Users/you/Corp/Team - Docs", url = "https://corp.sharepoint.com/sites/Team/Docs" },
+-- }

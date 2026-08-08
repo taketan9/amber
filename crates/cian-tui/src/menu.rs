@@ -270,13 +270,20 @@ impl App {
             ]),
             // The OS-native actions (#9): hand the selected file to the shell's
             // own verbs rather than reimplementing them.
-            MenuItem::OsMenu => Some(vec![
-                MenuItem::OpenDefault,
-                MenuItem::OpenWithOs,
-                MenuItem::RevealInOs,
-                MenuItem::PropertiesOs,
-                MenuItem::Back,
-            ]),
+            MenuItem::OsMenu => {
+                let mut v = vec![MenuItem::OpenDefault, MenuItem::OpenWithOs];
+                // The two Office entries only when there are libraries to
+                // resolve against and the file is one of theirs — an item that
+                // can only ever refuse is not worth the row.
+                if !self.config.sharepoint.is_empty() && self.office_target_ok() {
+                    v.push(MenuItem::OfficeOpen);
+                    v.push(MenuItem::OfficeLink);
+                }
+                v.push(MenuItem::RevealInOs);
+                v.push(MenuItem::PropertiesOs);
+                v.push(MenuItem::Back);
+                Some(v)
+            }
             MenuItem::ViewMenu => Some(vec![
                 MenuItem::HiddenToggle,
                 MenuItem::ThemePickPane,
@@ -414,6 +421,8 @@ impl App {
             MenuItem::AiMenu | MenuItem::CrmaineMenu | MenuItem::SendMenu | MenuItem::WindowMenu | MenuItem::GitMenu | MenuItem::SvnMenu | MenuItem::CompressMenu | MenuItem::FileMenu | MenuItem::ArchiveMenu | MenuItem::InspectMenu | MenuItem::OsMenu | MenuItem::ViewMenu | MenuItem::SessionMenu | MenuItem::CrmaineKnowledge | MenuItem::Back => {} // handled above
             MenuItem::OpenDefault => self.open_externally(),
             MenuItem::OpenWithOs => self.open_with_os(),
+            MenuItem::OfficeOpen => self.open_in_office(),
+            MenuItem::OfficeLink => self.write_office_link(),
             MenuItem::RevealInOs => self.reveal_in_os(),
             MenuItem::PropertiesOs => self.properties_os(),
             MenuItem::CopyPathText => self.copy_paths_to_clipboard(),

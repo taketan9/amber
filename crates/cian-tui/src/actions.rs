@@ -1730,6 +1730,101 @@ impl App {
             );
     }
 
+    /// The synced libraries from `init.lua`, as the core wants them.
+    fn sync_maps(&self) -> Vec<cian_core::office::SyncMap> {
+        self.config
+            .sharepoint
+            .iter()
+            .map(|(l, u)| cian_core::office::SyncMap {
+                local: crate::expand_path(l),
+                url: u.clone(),
+            })
+            .collect()
+    }
+
+    /// The file under the cursor, its document kind, and its address in the
+    /// cloud — everything the two Office commands need, or a reason why not.
+    fn office_target(&self) -> Result<(std::path::PathBuf, cian_core::office::Doc, String), String> {
+        let path = self
+            .active_pane()
+            .and_then(|p| p.selected())
+            .filter(|e| !e.is_dir && !e.is_parent)
+            .map(|e| e.path.clone())
+            .ok_or_else(|| tr(self.lang, "select a document first", "先にドキュメントを選んでください").to_string())?;
+        let doc = cian_core::office::classify(&path).ok_or_else(|| {
+            tr(self.lang, "not an Office document", "Office のドキュメントではありません").to_string()
+        })?;
+        let maps = self.sync_maps();
+        if maps.is_empty() {
+            return Err(tr(self.lang,
+                "no synced libraries configured — see cian.sharepoint{} in init.lua",
+                "同期ライブラリが未設定です — init.lua の cian.sharepoint{} を参照").to_string());
+        }
+        let url = cian_core::office::cloud_url(&path, &maps).ok_or_else(|| {
+            tr(self.lang,
+               "that file is not inside a configured library",
+               "そのファイルは設定済みライブラリの中にありません").to_string()
+        })?;
+        Ok((path, doc, url))
+    }
+
+    /// Whether the two Office entries would do anything here.
+    pub(crate) fn office_target_ok(&self) -> bool {
+        self.office_target().is_ok()
+    }
+
+    /// `:office` — hand the *cloud* copy to the desktop application.
+    ///
+    /// Not the synced local file: opening that gets a copy to reconcile later,
+    /// while the `ofe|u|` URI is what makes check-out and co-authoring work.
+    pub(crate) fn open_in_office(&mut self) {
+        let (_, doc, url) = match self.office_target() {
+            Ok(t) => t,
+            Err(e) => {
+                self.message = Some(e);
+                return;
+            }
+        };
+        let Some(uri) = cian_core::office::app_uri(doc, &url) else {
+            self.message = Some(tr(self.lang,
+                "a PDF has no Office application to hand it to",
+                "PDF に渡せる Office アプリはありません").into());
+            return;
+        };
+        match crate::os_open(std::path::Path::new(&uri)) {
+            Ok(()) => self.message = Some(format!("{}: {}", doc.label(), url)),
+            Err(e) => self.message = Some(format!("could not open: {e}")),
+        }
+    }
+
+    /// `:officelink` — write a `.url` shortcut to the cloud copy.
+    ///
+    /// The thing to paste into a mail or a ticket: it points at the library
+    /// rather than at one machine's sync folder, so it still works for whoever
+    /// receives it.
+    pub(crate) fn write_office_link(&mut self) {
+        let (path, _, url) = match self.office_target() {
+            Ok(t) => t,
+            Err(e) => {
+                self.message = Some(e);
+                return;
+            }
+        };
+        let stem = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+        let dest = self
+            .opposite_pane_cwd()
+            .or_else(|| path.parent().map(|p| p.to_path_buf()))
+            .unwrap_or_default()
+            .join(format!("{stem}.url"));
+        match std::fs::write(&dest, cian_core::office::url_shortcut(&url)) {
+            Ok(()) => {
+                self.message = Some(format!("{}", dest.display()));
+                self.reload_both();
+            }
+            Err(e) => self.message = Some(format!("could not write the shortcut: {e}")),
+        }
+    }
+
     /// Mark everything here — or, in the viewer, select the whole file.
     ///
     /// One action for both, because "select all" is one idea and which of the

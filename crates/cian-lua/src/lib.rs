@@ -248,6 +248,7 @@ struct Builder {
     theme: Theme,
     options: Options,
     keymaps: Vec<(String, String)>,
+    sharepoint: Vec<(String, String)>,
     ext_open: HashMap<String, Function>,
     ssh_hosts: Vec<SshHost>,
     ai: Option<AiOptions>,
@@ -271,6 +272,10 @@ pub struct Config {
     /// `(key, action-name)` pairs the user explicitly bound. The UI validates
     /// the action names and reports any it does not recognise.
     pub keymaps: Vec<(String, String)>,
+    /// Synced SharePoint / OneDrive libraries: which local folder is which
+    /// address in the cloud. Stated rather than guessed — see
+    /// `cian_core::office::SyncMap`.
+    pub sharepoint: Vec<(String, String)>,
     /// SSH targets declared with `cian.ssh{...}`.
     pub ssh_hosts: Vec<SshHost>,
     /// AI settings declared with `cian.ai{...}`, if any.
@@ -530,12 +535,13 @@ fn load_from(path: &Path) -> Config {
 
     // Pull the accumulated config out by cloning; the Lua handles stay valid
     // because we move `lua` into the returned Config below.
-    let (theme, options, keymaps, ext_open, ssh_hosts, ai, crmaine, ai_context, snippets, builder_errors) = {
+    let (theme, options, keymaps, sharepoint, ext_open, ssh_hosts, ai, crmaine, ai_context, snippets, builder_errors) = {
         let b = builder.borrow();
         (
             b.theme.clone(),
             b.options.clone(),
             b.keymaps.clone(),
+            b.sharepoint.clone(),
             b.ext_open.clone(),
             b.ssh_hosts.clone(),
             b.ai.clone(),
@@ -551,6 +557,7 @@ fn load_from(path: &Path) -> Config {
         theme,
         options,
         keymaps,
+        sharepoint,
         ext_open,
         ssh_hosts,
         ai,
@@ -658,6 +665,34 @@ fn install_api(lua: &Lua, builder: &Rc<RefCell<Builder>>) -> mlua::Result<()> {
                         "set_keymap: expected a key like \"x\" or \"alt+g\", got {:?}",
                         key
                     ));
+                }
+                Ok(())
+            })?,
+        )?;
+    }
+
+    // cian.sharepoint { { local = "/path", url = "https://…" }, … }
+    {
+        let b = builder.clone();
+        cian.set(
+            "sharepoint",
+            lua.create_function(move |_, list: Table| {
+                let mut bm = b.borrow_mut();
+                for pair in list.sequence_values::<Table>() {
+                    let Ok(t) = pair else {
+                        bm.errors.push("sharepoint: each entry must be a table".into());
+                        continue;
+                    };
+                    let local: Option<String> = t.get("local").ok();
+                    let url: Option<String> = t.get("url").ok();
+                    match (local, url) {
+                        (Some(l), Some(u)) if !l.is_empty() && !u.is_empty() => {
+                            bm.sharepoint.push((l, u))
+                        }
+                        _ => bm.errors.push(
+                            "sharepoint: each entry needs local = \"…\" and url = \"…\"".into(),
+                        ),
+                    }
                 }
                 Ok(())
             })?,

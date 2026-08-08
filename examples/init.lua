@@ -468,3 +468,14 @@
 -- でフォルダに入り、Esc / ← で戻ります。入れ子の例は
 -- examples/shortcuts.lua を参照してください（ターゲットはパス、URL、アプリの
 -- いずれでもよく、フォルダは好きなだけ深くできます）。
+
+-- 同期された SharePoint / OneDrive ライブラリ。
+-- どのローカルフォルダがクラウドのどの住所か、を対応づけます。同期中のライブラリ
+-- は見た目がただのディレクトリで、対応を記録したレジストリキーは Windows にしか
+-- 無く、しかも常にあるとは限らないので、推測せず設定で受け取ります。
+-- 設定すると :office（クラウド側をアプリで開く）と :officelink（.url を作る）
+-- が使えるようになります。
+-- cian.sharepoint {
+--   { local = "C:/Users/you/OneDrive - Corp", url = "https://corp.sharepoint.com/Shared%20Documents" },
+--   { local = "C:/Users/you/Corp/Team - Docs", url = "https://corp.sharepoint.com/sites/Team/Docs" },
+-- }

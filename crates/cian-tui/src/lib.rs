@@ -814,6 +814,10 @@ enum MenuItem {
     OpenDefault,
     /// Show the OS "Open with…" application picker.
     OpenWithOs,
+    /// Hand the cloud copy of a synced Office document to the desktop app.
+    OfficeOpen,
+    /// Write a `.url` shortcut pointing at the cloud copy.
+    OfficeLink,
     /// Reveal the selection in the OS file manager.
     RevealInOs,
     /// Open the OS properties / Get-Info panel.
@@ -1033,6 +1037,8 @@ impl MenuItem {
             MenuItem::OsMenu => tr(lang, "Open / reveal  ▸", "開く / 場所  ▸"),
             MenuItem::OpenDefault => tr(lang, "Open", "開く"),
             MenuItem::OpenWithOs => tr(lang, "Open with", "プログラムから開く"),
+            MenuItem::OfficeOpen => tr(lang, "Open in Office (the cloud copy)  (:office)", "Office で開く（クラウド側）  (:office)"),
+            MenuItem::OfficeLink => tr(lang, "Shortcut to the cloud copy  (:officelink)", "クラウド側へのショートカットを作成  (:officelink)"),
             MenuItem::RevealInOs => {
                 if cfg!(target_os = "windows") {
                     tr(lang, "Show in Explorer", "エクスプローラーで表示")
@@ -3832,6 +3838,8 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry(":theme", None, "theme gallery;  :theme dracula  sets one directly", "テーマ一覧；  :theme dracula で直接指定"),
                 entry(":reload", None, "re-read init.lua (borders need a restart)", "init.luaを再読込（枠線は再起動が必要）"),
                 entry(":redraw", None, "repaint the screen from nothing, after a stray control character scrambles it", "画面を一から描き直す（制御文字で表示が乱れたとき）"),
+                entry(":office", None, "open a synced Office file's cloud copy in the desktop app (also right-click ▸ OS)", "同期された Office 文書のクラウド側をアプリで開く（右クリック ▸ OS からも）"),
+                entry(":officelink", None, "write a .url shortcut to the cloud copy — the thing to paste into a mail", "クラウド側への .url ショートカットを作成（メールに貼るのはこれ）"),
                 entry("Ctrl+A, :markall", None, "mark everything here — in the viewer, select the whole file", "ここにある全部をマーク — ビューアではファイル全体を選択"),
                 entry(":keys", None, "report every keystroke as cian receives it, and which keyboard mode is in use", "受け取ったキーをそのまま表示（キーボードのモードも表示）"),
                 entry("  set_keymap", None, "init.lua: cian.set_keymap(\"alt+g\", \"grep_recursive\") — modifiers allowed", "init.lua: cian.set_keymap(\"alt+g\", \"grep_recursive\") — 修飾キーも書ける"),
