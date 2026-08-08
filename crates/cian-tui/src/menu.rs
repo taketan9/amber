@@ -10,9 +10,9 @@ impl App {
         let ai = self.ai.is_some() && self.ai_ready();
         let crmaine = self.config.crmaine.is_some();
         let mut items = Vec::new();
-        // Launchers lead both menus: the local "Simple AI ▸" (when the local
-        // model is on), then "Ⓒ crmaine ▸" (when the bridge is on), then
-        // snippets, macros. Each appears only when it has something to offer.
+        // Launchers lead both menus: "AI - simple ▸" (when the local model is
+        // on), then "AI - crmaine ▸" (when the bridge is on), then snippets,
+        // macros. Each appears only when it has something to offer.
         if ai {
             items.push(MenuItem::AiMenu);
         }

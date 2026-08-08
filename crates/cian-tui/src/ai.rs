@@ -27,9 +27,6 @@ pub(crate) fn restore_ai_history() -> Vec<(ChatMode, Vec<ChatMsg>)> {
     }
 }
 
-/// Who the assistant is, prepended to every conversational (chat) system prompt.
-/// The product is crmaine, read「カーマイン」in Japanese; that is the name it
-/// answers to, and it refers to itself in the first person as「私」.
 /// Read up to the last `max_bytes` of a file as text. Logs grow at the end, so
 /// the tail is the part worth sending; a partial first line (from cutting mid
 /// file) is dropped so the model does not read a fragment as a whole entry.
@@ -51,13 +48,15 @@ fn read_tail(path: &std::path::Path, max_bytes: u64) -> String {
 }
 
 /// Who the assistant is, prepended to every conversational (chat) system prompt.
-/// The product is crmaine, read「カーマイン」in Japanese; that is the name it
-/// answers to, and it refers to itself in the first person as「私」.
+/// This is the local model configured in `cian.ai`, not crmaine, so it answers
+/// to "AI - simple" — the same name the menu and the transcript use. It refers
+/// to itself in the first person as「私」.
 fn persona() -> &'static str {
     "あなたはこの二画面ファイラ／ターミナル「cian」に組み込まれた AI アシスタントです。\
-     あなたの名前は「カーマイン」。自分を指すときは常に一人称「私」を使い、\
-     名前を尋ねられたら「私はカーマインです」と名乗ってください。\
-     (Your name is Carmine / カーマイン; always refer to yourself as「私」.)"
+     あなたの名前は「AI - simple」。自分を指すときは常に一人称「私」を使い、\
+     名前を尋ねられたら「私は cian の AI - simple です」と名乗ってください。\
+     (Your name is \"AI - simple\", the local model built into cian; \
+     always refer to yourself as「私」.)"
 }
 
 /// The host from the most recent `ssh …` command visible on a shell's screen —
@@ -197,7 +196,14 @@ impl App {
                 Some("AI unavailable (python, packages, or sign-in) — feature hidden".into());
             return;
         }
-        self.start_ai_chat(ChatMode::Ai, Vec::new(), false);
+        self.new_ai_chat();
+    }
+
+    /// A fresh, empty AI - simple chat — the menu's "Chat", and `Ctrl+N` from
+    /// inside a chat.
+    pub(crate) fn new_ai_chat(&mut self) {
+        let skin = ChatSkin::simple(tr(self.lang, "Chat", "チャット"));
+        self.start_ai_chat_as(ChatMode::Ai, skin, Vec::new(), false);
     }
 
     /// Summarise the file open in the F3 viewer. Unlike the metadata-only
@@ -232,7 +238,12 @@ impl App {
             .to_string();
         // Open the chat with the request shown, so the reply lands in a place
         // that can be scrolled, selected and copied — and followed up in.
-        self.start_ai_chat(ChatMode::Ai, vec![ChatMsg { user: true, text: format!("Summarise {}", name) }], true);
+        self.start_ai_chat_as(
+            ChatMode::Ai,
+            ChatSkin::simple(tr(self.lang, "Summarize this file", "このファイルを要約")),
+            vec![ChatMsg { user: true, text: format!("Summarise {}", name) }],
+            true,
+        );
         self.ai_request(AiPurpose::Chat, system, body);
     }
 
@@ -270,7 +281,12 @@ impl App {
              likely fix (a command or a change). If there is no error, say the \
              output looks fine. Be concise; plain text, no markdown headings.",
         );
-        self.start_ai_chat(ChatMode::Ai, vec![ChatMsg { user: true, text: "Explain the last error".into() }], true);
+        self.start_ai_chat_as(
+            ChatMode::Ai,
+            ChatSkin::simple(tr(self.lang, "Explain the last error", "直近のエラーを説明")),
+            vec![ChatMsg { user: true, text: "Explain the last error".into() }],
+            true,
+        );
         self.ai_request(AiPurpose::Chat, system, body);
     }
 
@@ -297,7 +313,12 @@ impl App {
              anything risky: a removed check, a changed default, a probable \
              typo. Be concise; plain text, no markdown headings."
             .to_string();
-        self.start_ai_chat(ChatMode::Ai, vec![ChatMsg { user: true, text: "Explain this diff".into() }], true);
+        self.start_ai_chat_as(
+            ChatMode::Ai,
+            ChatSkin::simple(tr(self.lang, "Explain this diff", "この差分を説明")),
+            vec![ChatMsg { user: true, text: "Explain this diff".into() }],
+            true,
+        );
         self.ai_request(AiPurpose::Chat, system, body);
     }
 
@@ -335,7 +356,12 @@ impl App {
              next thing to check. Ignore routine INFO noise. Be concise; plain \
              text, no markdown headings."
             .to_string();
-        self.start_ai_chat(ChatMode::Ai, vec![ChatMsg { user: true, text: format!("Triage the log: {}", name) }], true);
+        self.start_ai_chat_as(
+            ChatMode::Ai,
+            ChatSkin::simple(tr(self.lang, "Triage this log", "このログを診断")),
+            vec![ChatMsg { user: true, text: format!("Triage the log: {}", name) }],
+            true,
+        );
         self.ai_request(AiPurpose::Chat, system, tail);
     }
 
@@ -450,15 +476,34 @@ impl App {
         self.ai_job = Some(AiJob { rx, purpose });
     }
 
+    /// Open a chat popup wearing the default look for its backend.
+    pub(crate) fn start_ai_chat(&mut self, mode: ChatMode, log: Vec<ChatMsg>, pending: bool) {
+        self.start_ai_chat_as(mode, ChatSkin::of(mode), log, pending);
+    }
+
     /// Open a chat popup, first tucking the current conversation (if it has an
     /// answer in it) into the history so switching or restarting never loses it.
-    pub(crate) fn start_ai_chat(&mut self, mode: ChatMode, log: Vec<ChatMsg>, pending: bool) {
+    /// `skin` names the window and says who is answering — see [`ChatSkin`].
+    pub(crate) fn start_ai_chat_as(
+        &mut self,
+        mode: ChatMode,
+        skin: ChatSkin,
+        log: Vec<ChatMsg>,
+        pending: bool,
+    ) {
         self.archive_current_ai_chat();
         // A fresh conversation starts with no attachments: an image pasted for
         // the old one must not leak into the new one.
         self.chat_attachments.clear();
-        self.popup =
-            Popup::AiChat { input: String::new(), log, scroll: usize::MAX, pending, sel: None, mode };
+        self.popup = Popup::AiChat {
+            input: String::new(),
+            log,
+            scroll: usize::MAX,
+            pending,
+            sel: None,
+            mode,
+            skin,
+        };
     }
 
     /// Snapshot the open chat into `ai_history` (newest first, deduped) if it
@@ -519,6 +564,8 @@ impl App {
     /// Reopen the conversation at `i` as the live chat.
     pub(crate) fn load_ai_conversation(&mut self, i: usize) {
         if let Some((mode, log)) = self.ai_history.get(i).cloned() {
+            // Only the mode is stored, so a reopened conversation gets its
+            // backend's default look rather than the action title it had.
             self.popup = Popup::AiChat {
                 input: String::new(),
                 log,
@@ -526,6 +573,7 @@ impl App {
                 pending: false,
                 sel: None,
                 mode,
+                skin: ChatSkin::of(mode),
             };
         }
     }
@@ -609,8 +657,8 @@ impl App {
             return;
         }
         self.popup = text_input(
-            "AI shell command",
-            "describe what you want to do:",
+            tr(self.lang, " Command from description ", " 説明からコマンド生成 "),
+            tr(self.lang, "describe what you want to do:", "やりたいことを説明してください:"),
             String::new(),
             InputKind::AiShellCmd,
         );
@@ -895,8 +943,12 @@ impl App {
             return;
         }
         self.popup = text_input(
-            "AI bulk rename",
-            "how should these be renamed? (e.g. snake_case, add a date prefix):",
+            tr(self.lang, " AI rename ", " AIリネーム "),
+            tr(
+                self.lang,
+                "how should these be renamed? (e.g. snake_case, add a date prefix):",
+                "どうリネームしますか？（例: snake_case、日付を先頭に）:",
+            ),
             String::new(),
             InputKind::AiRename,
         );
@@ -952,8 +1004,8 @@ impl App {
             return;
         }
         self.popup = text_input(
-            "AI semantic search",
-            "describe what you're looking for:",
+            tr(self.lang, " Semantic search ", " セマンティック検索 "),
+            tr(self.lang, "describe what you're looking for:", "探しているものを説明してください:"),
             String::new(),
             InputKind::AiSearch,
         );
@@ -1326,7 +1378,7 @@ impl App {
                     if items.is_empty() {
                         self.message = Some("AI proposed no renames".into());
                     } else {
-                        self.popup = Popup::RenameReview { items, cursor: 0, scroll: 0 };
+                        self.popup = Popup::RenameReview { items, cursor: 0, scroll: 0, by_ai: true };
                     }
                 }
                 Err(e) => self.message = Some(format!("AI: {}", e)),
@@ -1340,7 +1392,8 @@ impl App {
                         // Reuse the find-results list: F3 preview, Ctrl+n/N, Esc.
                         self.find_return = None;
                         self.message = Some(format!("{} relevant file(s) — Enter previews", matched.len()));
-                        self.popup = Popup::FindResults { hits: matched, cursor: 0, scroll: 0 };
+                        self.popup =
+                            Popup::FindResults { hits: matched, cursor: 0, scroll: 0, by_ai: true };
                     }
                 }
                 Err(e) => self.message = Some(format!("AI: {}", e)),

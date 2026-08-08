@@ -525,8 +525,16 @@ enum Popup {
     /// Where to send a copy or move: recent destinations plus a way to type
     /// somewhere new.
     DestPicker { op: PendingOp, targets: Vec<PathBuf>, cursor: usize },
-    /// Results of a recursive search, filling in as they are found.
-    FindResults { hits: Vec<cian_core::search::Hit>, cursor: usize, scroll: usize },
+    /// Results of a recursive search, filling in as they are found. `by_ai` is
+    /// set when the list came from the AI's semantic search (`:ask`) rather than
+    /// a `:find` / `:grep` sweep — the same list, named and coloured for its
+    /// source.
+    FindResults {
+        hits: Vec<cian_core::search::Hit>,
+        cursor: usize,
+        scroll: usize,
+        by_ai: bool,
+    },
     /// Everything a grep-replace would change, before any of it is written.
     /// Boxed because it is only on screen while the user is reading it, and an
     /// unboxed plan would widen every `Popup` in the program.
@@ -580,6 +588,8 @@ enum Popup {
         sel: Option<(usize, usize)>,
         /// Which backend a typed follow-up goes to.
         mode: ChatMode,
+        /// How the window presents itself — see [`ChatSkin`].
+        skin: ChatSkin,
     },
     /// The chat history picker (`Ctrl+R` in the chat): past conversations this
     /// session, newest first. Enter reopens one, `d` forgets it.
@@ -601,9 +611,11 @@ enum Popup {
     /// each toggleable. Approving runs the checked moves, creating folders as
     /// needed. `dir` is the folder the moves are relative to.
     StructureReview { items: Vec<MoveItem>, cursor: usize, scroll: usize, dir: PathBuf },
-    /// The AI's proposed renames (old → new), each toggleable. Approving renames
-    /// the checked files in place.
-    RenameReview { items: Vec<RenameItem>, cursor: usize, scroll: usize },
+    /// Proposed renames (old → new), each toggleable. Approving renames the
+    /// checked files in place. `by_ai` says which side proposed them — the AI
+    /// (`:airename`) or the `:brename` pattern — which is what the window is
+    /// named and coloured for.
+    RenameReview { items: Vec<RenameItem>, cursor: usize, scroll: usize, by_ai: bool },
     /// Confirm discarding (reverting) worktree changes to tracked files. This
     /// throws away uncommitted work, so it is gated behind its own dialog.
     ConfirmDiscard { targets: Vec<PathBuf>, dir: PathBuf },
@@ -1048,7 +1060,7 @@ impl MenuItem {
                 Lang::En => "日本語に切替",
                 Lang::Ja => "Switch to English",
             },
-            MenuItem::AiChat => tr(lang, "Chat — simple  (:ai)", "チャット — simple  (:ai)"),
+            MenuItem::AiChat => tr(lang, "Chat  (:ai)", "チャット  (:ai)"),
             MenuItem::CrmaineRag => tr(lang, "RAG  (:rag)", "RAG  (:rag)"),
             MenuItem::CrmaineAgent => tr(lang, "Agent  (:agent)", "エージェント  (:agent)"),
             MenuItem::CrmaineCoding => tr(lang, "Coding — this file  (:coding)", "コーディング — このファイル  (:coding)"),
@@ -1090,11 +1102,11 @@ impl MenuItem {
             MenuItem::Snippets => tr(lang, "Snippets  (:snip)", "スニペット  (:snip)"),
             MenuItem::Macros => tr(lang, "Macros  (@)", "マクロ  (@)"),
             MenuItem::Shortcuts => tr(lang, "Shortcuts  (s)", "ショートカット  (s)"),
-            // Ⓒ stands in for crmaine's icon — a terminal menu cannot embed the
-            // PNG/SVG, which is itself just the "CRMAINE" wordmark as text, so a
-            // circled C echoes it most closely.
-            MenuItem::AiMenu => tr(lang, "Simple AI ▸", "Simple AI ▸"),
-            MenuItem::CrmaineMenu => tr(lang, "Ⓒ crmaine ▸", "Ⓒ crmaine ▸"),
+            // The two AI backends read as one family, named for the model behind
+            // each: "simple" is the local model configured in cian.ai, "crmaine"
+            // is the bridge to the VS Code server.
+            MenuItem::AiMenu => tr(lang, "AI - simple ▸", "AI - simple ▸"),
+            MenuItem::CrmaineMenu => tr(lang, "AI - crmaine ▸", "AI - crmaine ▸"),
             MenuItem::SendMenu => tr(lang, "Transfer ▸", "転送 ▸"),
             MenuItem::WindowMenu => tr(lang, "Window ▸", "ウィンドウ ▸"),
             MenuItem::FileMenu => tr(lang, "File ▸", "ファイル操作 ▸"),
@@ -1423,12 +1435,41 @@ enum ChatMode {
     Coding,
 }
 
+/// How a chat window presents itself: the name in its frame, and whether it
+/// wears the local model's cyan and signs its answers "AI - simple".
+///
+/// Deliberately separate from [`ChatMode`], which only says where a typed
+/// follow-up goes: every AI-simple action opens the same chat, so the title has
+/// to name the action that opened it ("Triage this log", not just "Chat"), and
+/// crmaine's corpus tools stream a *crmaine* answer into a chat whose
+/// follow-ups are local.
+#[derive(Debug, Clone, PartialEq)]
+struct ChatSkin {
+    /// Shown at the top of the window — the menu item that opened it.
+    title: String,
+    /// True when the local `cian.ai` model is the one answering.
+    simple: bool,
+}
+
+impl ChatSkin {
+    /// The default look for a mode, used when nothing more specific applies.
+    fn of(mode: ChatMode) -> Self {
+        ChatSkin { title: mode.title().to_string(), simple: mode == ChatMode::Ai }
+    }
+    /// A named AI-simple window: the local model, titled for the action that
+    /// opened it.
+    fn simple(title: impl Into<String>) -> Self {
+        ChatSkin { title: title.into(), simple: true }
+    }
+}
+
 impl ChatMode {
-    /// The full name shown in the chat title — the same wording VS Code's
-    /// crmaine uses, with the local model marked "simple".
+    /// The full name shown in the chat title — the crmaine-backed modes carry
+    /// crmaine's own wording; the local model is just "Chat", so nothing in the
+    /// window credits crmaine for an answer it never gave.
     fn title(self) -> &'static str {
         match self {
-            ChatMode::Ai => "crmaine - simple",
+            ChatMode::Ai => "Chat",
             ChatMode::Rag => "crmaine - RAG",
             ChatMode::Agent => "crmaine - Agent",
             ChatMode::Coding => "crmaine - Coding",
@@ -2023,6 +2064,9 @@ pub struct App {
     /// `:keys` — report every keystroke as cian received it, for finding out
     /// whether a binding is broken or the terminal simply never sent the key.
     key_probe: bool,
+    /// The message was raised by the last keystroke, rather than left over
+    /// from an earlier one. Only a fresh message may take a footer.
+    message_fresh: bool,
     /// Whether the terminal accepted the enhanced-keyboard request at startup.
     /// Reported by `:keys`, because it is the first thing to suspect when every
     /// Ctrl combination goes quiet at once.
@@ -2305,6 +2349,7 @@ impl App {
             menu_rect: Rect::new(0, 0, 0, 0),
             menu_stack: Vec::new(),
             key_probe: false,
+            message_fresh: false,
             kbd_enhanced: false,
             viewer_rect: Rect::new(0, 0, 0, 0),
             outline_rect: Rect::new(0, 0, 0, 0),
@@ -3687,7 +3732,7 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry("  CIAN_LEGACY_KEYS=1", None, "start without the enhanced-keyboard request — try it if every Ctrl shortcut is dead", "拡張キーボード要求なしで起動 — Ctrl 系が全滅するときに試す"),
                 entry(":where", None, "which config files cian reads/writes (portable vs ~/.config)", "cianが読み書きする設定ファイルの場所（ポータブル/~/.config）"),
                 entry(":mark", None, "mark by wildcard;  :mark *.rs   :unmark *", "ワイルドカードでマーク；  :mark *.rs   :unmark *"),
-                entry(":ai", None, "AI chat (Carmine / カーマイン)  — needs cian.ai in init.lua", "AIチャット（カーマイン）  — init.luaのcian.aiが必要"),
+                entry(":ai", None, "AI - simple: chat with the local model  — needs cian.ai in init.lua", "AI - simple: ローカルモデルとチャット  — init.luaのcian.aiが必要"),
                 entry(":aicmd", None, "AI: shell command from a description", "AI: 説明からシェルコマンド生成"),
                 entry(":aidiff", None, "AI: explain the diff on screen (x in the diff view)", "AI: 表示中の差分を説明（差分画面で x）"),
                 entry(":ailog", None, "AI: triage the selected log file (errors, cause, next check)", "AI: 選択中のログを診断（エラー・原因・次の確認）"),

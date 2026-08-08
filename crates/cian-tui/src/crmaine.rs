@@ -642,8 +642,12 @@ impl App {
         self.crmaine_stage = Some(tr(self.lang, "working…", "実行中…").into());
         self.crmaine_sources.clear();
         // A tool result is a one-shot; a typed follow-up is just a plain chat.
-        self.start_ai_chat(
+        // The answer streaming in is crmaine's, so the window keeps crmaine's
+        // name and colour even though `mode` routes follow-ups to the local
+        // model.
+        self.start_ai_chat_as(
             ChatMode::Ai,
+            ChatSkin { title: format!("crmaine - {label}"), simple: false },
             vec![ChatMsg { user: true, text: format!("{label}: {shown}") }],
             true,
         );

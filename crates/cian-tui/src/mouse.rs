@@ -308,7 +308,7 @@ impl App {
                 let idx = scroll + (row - body.y) as usize;
                 if idx < n { Some(idx) } else { None }
             };
-            if let Popup::RenameReview { items, cursor, scroll } = &mut self.popup {
+            if let Popup::RenameReview { items, cursor, scroll, .. } = &mut self.popup {
                 let n = items.len();
                 match ev.kind {
                     MouseEventKind::Down(MouseButton::Left) => {

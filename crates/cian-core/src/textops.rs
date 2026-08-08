@@ -238,9 +238,43 @@ mod tests {
     /// includes the cell the anchor sits on.
     #[test]
     fn a_block_spans_both_cursors_inclusively() {
-        assert_eq!(Block::between((3, 5), (1, 2)), blk(1, 3, 2, 6));
-        assert_eq!(Block::between((1, 2), (3, 5)), blk(1, 3, 2, 6));
-        assert_eq!(block_text(&v(&["abcdef"]), Block::between((0, 1), (0, 3))), v(&["bcd"]));
+        let ascii = v(&["abcdefgh", "abcdefgh", "abcdefgh", "abcdefgh"]);
+        assert_eq!(Block::between(&ascii, (3, 5), (1, 2)), blk(1, 3, 2, 6));
+        assert_eq!(Block::between(&ascii, (1, 2), (3, 5)), blk(1, 3, 2, 6));
+        assert_eq!(
+            block_text(&v(&["abcdef"]), Block::between(&v(&["abcdef"]), (0, 1), (0, 3))),
+            v(&["bcd"]),
+        );
+    }
+
+    /// The point of counting columns: a rectangle drawn over mixed-width text
+    /// is a rectangle on screen, and every line loses the same columns.
+    #[test]
+    fn a_block_is_rectangular_on_screen_not_in_characters() {
+        // "あい" is four columns wide; "abcd" is four columns of one each.
+        let src = v(&["あいうえ", "abcdefgh", "あbcう"]);
+        // Columns 2..6 — the second full-width character, and the characters
+        // under it on the other lines.
+        let b = Block { top: 0, bottom: 2, left: 2, right: 6 };
+        assert_eq!(block_text(&src, b), v(&["いう", "cdef", "bcう"]));
+        assert_eq!(block_delete(&src, b), v(&["あえ", "abgh", "あ"]));
+
+        // Dragged from a full-width character on one line to an ASCII one
+        // below, the block still covers whole columns.
+        let b2 = Block::between(&src, (0, 1), (1, 4));
+        assert_eq!((b2.left, b2.right), (2, 5), "columns, not character indices");
+
+        // An edge falling inside a wide character takes it whole — half a
+        // character is not something a file can hold.
+        let one = v(&["あい"]);
+        let cut = Block { top: 0, bottom: 0, left: 1, right: 3 };
+        assert_eq!(block_text(&one, cut), v(&["あい"]), "both are taken");
+
+        // Padding to a column pads in columns, so an inserted marker lines up
+        // under the same place on every line.
+        let ragged = v(&["あい", "ab", ""]);
+        let at6 = Block { top: 0, bottom: 2, left: 6, right: 6 };
+        assert_eq!(block_insert(&ragged, at6, "|"), v(&["あい  |", "ab    |", "      |"]));
     }
 
     fn v(s: &[&str]) -> Vec<String> {
@@ -305,104 +339,181 @@ mod tests {
 /// answer. cian's answer: a delete leaves them alone (there is nothing inside
 /// the rectangle to remove) and an insert pads them out with spaces to reach
 /// the column, because the point of inserting down a column is that the
-/// column lines up afterwards.
+/// A rectangular selection, in **display columns** rather than characters.
+///
+/// This is the difference between a rectangle and a ragged edge. A full-width
+/// character takes two columns, so counting characters puts the right-hand
+/// edge somewhere different on every line that mixes kana with ASCII — which
+/// is most of the lines this exists for. Sakura Editor reckons in columns, and
+/// so does this.
+///
+/// A character an edge falls inside is taken whole: half a character is not
+/// something a text file can hold, so the rectangle widens to the nearest
+/// character boundary rather than pretending otherwise.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Block {
     pub top: usize,
     pub bottom: usize,
+    /// First display column inside the block.
     pub left: usize,
+    /// One past the last display column inside the block.
     pub right: usize,
+}
+
+/// How wide a character is drawn, with a tab reaching the next stop from `at`.
+/// A zero-width mark counts as nothing, which keeps a combining accent
+/// attached to the character it belongs to.
+fn char_cols(c: char, at: usize) -> usize {
+    if c == '\t' {
+        return crate::viewer::TAB_W - (at % crate::viewer::TAB_W);
+    }
+    unicode_width::UnicodeWidthChar::width(c).unwrap_or(0)
+}
+
+/// Where each character of `line` starts, and how wide it is, plus the width
+/// of the whole line. One left-to-right pass, because a tab's width depends on
+/// where it begins.
+fn columns(line: &str) -> (Vec<(usize, usize)>, usize) {
+    let mut out = Vec::new();
+    let mut at = 0usize;
+    for c in line.chars() {
+        let w = char_cols(c, at);
+        out.push((at, w));
+        at += w;
+    }
+    (out, at)
 }
 
 impl Block {
     /// The rectangle between two cursor positions, in any order.
-    pub fn between(a: (usize, usize), b: (usize, usize)) -> Block {
+    ///
+    /// The positions arrive as `(line, character)` — where the cursor actually
+    /// is — and are converted to columns here, because only the text knows how
+    /// wide its own characters are.
+    pub fn between(lines: &[String], a: (usize, usize), b: (usize, usize)) -> Block {
+        // `past` asks for the column *after* the character, so the one the
+        // cursor sits on is inside the block rather than just outside it.
+        let col_of = |(l, c): (usize, usize), past: bool| -> usize {
+            let Some(text) = lines.get(l) else { return 0 };
+            let (cols, total) = columns(text);
+            match cols.get(c) {
+                Some((start, w)) => start + if past { *w } else { 0 },
+                None => total + usize::from(past),
+            }
+        };
         Block {
             top: a.0.min(b.0),
             bottom: a.0.max(b.0),
-            left: a.1.min(b.1),
-            right: a.1.max(b.1) + 1, // the anchor cell is inside the block
+            left: col_of(a, false).min(col_of(b, false)),
+            right: col_of(a, true).max(col_of(b, true)),
         }
+    }
+
+    /// Where this block starts and ends in `line`, as character indices.
+    pub fn char_range(&self, line: &str) -> (usize, usize) {
+        let (cols, _) = columns(line);
+        let from = cols.iter().position(|(s, w)| s + w > self.left).unwrap_or(cols.len());
+        let to = cols.iter().position(|(s, _)| *s >= self.right).unwrap_or(cols.len());
+        (from, to.max(from))
+    }
+}
+
+/// Grow `chars` with spaces until it is `col` display columns wide.
+fn pad_to(chars: &mut Vec<char>, col: usize) {
+    let mut at = chars.iter().fold(0usize, |a, c| a + char_cols(*c, a));
+    while at < col {
+        chars.push(' ');
+        at += 1;
     }
 }
 
 /// Cut the rectangle out of each line. Short lines keep what they have.
 pub fn block_delete(lines: &[String], b: Block) -> Vec<String> {
-    edit_block(lines, b, |chars, left, right| {
-        if left >= chars.len() {
+    edit_block(lines, b, |chars, from, to| {
+        if from >= chars.len() {
             return; // nothing of this line lies inside the rectangle
         }
-        chars.drain(left..right.min(chars.len()));
+        chars.drain(from..to.min(chars.len()));
     })
 }
 
 /// Insert `text` at the rectangle's left edge on every line, padding short
 /// lines with spaces so the inserted column actually lines up.
 pub fn block_insert(lines: &[String], b: Block, text: &str) -> Vec<String> {
-    edit_block(lines, b, |chars, left, _| {
-        while chars.len() < left {
-            chars.push(' ');
-        }
+    edit_block_at(lines, b, b.left, |chars, from, _| {
         for (i, c) in text.chars().enumerate() {
-            chars.insert(left + i, c);
+            chars.insert(from + i, c);
         }
     })
 }
 
-/// Append `text` at the rectangle's right edge on every line, padding to
-/// reach it. The block equivalent of vim's `A`, for adding a trailing column.
+/// Append `text` at the rectangle's right edge on every line, padding to reach
+/// it. The block equivalent of vim's `A`, for adding a trailing column.
 pub fn block_append(lines: &[String], b: Block, text: &str) -> Vec<String> {
-    edit_block(lines, b, |chars, _, right| {
-        while chars.len() < right {
-            chars.push(' ');
-        }
+    edit_block_at(lines, b, b.right, |chars, _, to| {
         for (i, c) in text.chars().enumerate() {
-            chars.insert(right + i, c);
+            chars.insert(to + i, c);
         }
     })
 }
 
-/// Replace the rectangle's contents with `text` on every line: a delete and
-/// an insert in one step, which is how a column of values gets rewritten.
+/// Replace the rectangle's contents with `text` on every line: a delete and an
+/// insert in one step, which is how a column of values gets rewritten.
 pub fn block_replace(lines: &[String], b: Block, text: &str) -> Vec<String> {
-    edit_block(lines, b, |chars, left, right| {
-        if left < chars.len() {
-            chars.drain(left..right.min(chars.len()));
-        }
-        while chars.len() < left {
-            chars.push(' ');
+    edit_block_at(lines, b, b.left, |chars, from, to| {
+        if from < chars.len() {
+            chars.drain(from..to.min(chars.len()));
         }
         for (i, c) in text.chars().enumerate() {
-            chars.insert(left + i, c);
+            chars.insert(from + i, c);
         }
     })
 }
 
-/// The rectangle's contents, one line per row — what a block yank copies.
+/// The rectangle's contents, one string per line, for the clipboard.
 pub fn block_text(lines: &[String], b: Block) -> Vec<String> {
     (b.top..=b.bottom)
         .filter_map(|i| lines.get(i))
         .map(|l| {
+            let (from, to) = b.char_range(l);
             let chars: Vec<char> = l.chars().collect();
-            if b.left >= chars.len() {
+            if from >= chars.len() {
                 String::new()
             } else {
-                chars[b.left..b.right.min(chars.len())].iter().collect()
+                chars[from..to.min(chars.len())].iter().collect()
             }
         })
         .collect()
 }
 
 /// Run `f` over each line the block covers, as chars, and rebuild.
-fn edit_block(
+fn edit_block(lines: &[String], b: Block, f: impl Fn(&mut Vec<char>, usize, usize)) -> Vec<String> {
+    let mut out = lines.to_vec();
+    for i in b.top..=b.bottom.min(out.len().saturating_sub(1)) {
+        let (from, to) = b.char_range(&out[i]);
+        let mut chars: Vec<char> = out[i].chars().collect();
+        f(&mut chars, from, to);
+        out[i] = chars.into_iter().collect();
+    }
+    out
+}
+
+/// The same, but padding each line out to `col` display columns first — for
+/// the edits that put text *at* a column, where a line too short to reach it
+/// has to be filled or the column will not line up.
+fn edit_block_at(
     lines: &[String],
     b: Block,
+    col: usize,
     f: impl Fn(&mut Vec<char>, usize, usize),
 ) -> Vec<String> {
     let mut out = lines.to_vec();
     for i in b.top..=b.bottom.min(out.len().saturating_sub(1)) {
         let mut chars: Vec<char> = out[i].chars().collect();
-        f(&mut chars, b.left, b.right);
+        pad_to(&mut chars, col);
+        let padded: String = chars.iter().collect();
+        let (from, to) = b.char_range(&padded);
+        f(&mut chars, from, to);
         out[i] = chars.into_iter().collect();
     }
     out

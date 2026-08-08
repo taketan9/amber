@@ -87,10 +87,17 @@ impl App {
     /// has been handled, so it is the last word rather than the first thing
     /// overwritten.
     pub(crate) fn handle_key(&mut self, key: KeyEvent) -> Result<()> {
-        if !self.key_probe {
-            return self.handle_key_inner(key);
-        }
+        // Whether the message on screen is an answer to *this* keystroke.
+        // Messages have no expiry — they sit there until something replaces
+        // them — so anywhere that gives a message the floor has to know the
+        // difference between news and a leftover, or it keeps the floor
+        // forever. The viewer's footer does exactly that.
+        let before = self.message.clone();
         let r = self.handle_key_inner(key);
+        self.message_fresh = self.message.is_some() && self.message != before;
+        if !self.key_probe {
+            return r;
+        }
         if self.key_probe {
             let mut mods: Vec<&str> = Vec::new();
             for (m, name) in [
@@ -551,7 +558,7 @@ impl App {
                 // Ctrl+R opens the conversation history; Ctrl+N starts a fresh
                 // one (tucking the current away first).
                 KeyCode::Char('r') if ctrl => self.open_ai_history(),
-                KeyCode::Char('n') if ctrl => self.start_ai_chat(ChatMode::Ai, Vec::new(), false),
+                KeyCode::Char('n') if ctrl => self.new_ai_chat(),
                 // Shift+Enter inserts a newline (multi-line questions); plain
                 // Enter sends. Alt+Enter and Ctrl+J do the same, as fallbacks for
                 // terminals that don't report Shift with Enter (macOS Terminal;

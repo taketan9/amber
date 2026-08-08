@@ -1188,7 +1188,7 @@ impl App {
                             *col = s.1.min(lines[s.0].chars().count());
                         }
                         ViewVisual::Block => {
-                            let b = cian_core::textops::Block::between(*anchor, (*line, *col));
+                            let b = cian_core::textops::Block::between(lines, *anchor, (*line, *col));
                             *lines = cian_core::textops::block_delete(lines, b);
                             *line = b.top;
                             *col = b.left;
@@ -1202,7 +1202,7 @@ impl App {
                 KeyCode::Char(k @ ('I' | 'A' | 'c'))
                     if *visual == Some(ViewVisual::Block) =>
                 {
-                    let b = cian_core::textops::Block::between(*anchor, (*line, *col));
+                    let b = cian_core::textops::Block::between(lines, *anchor, (*line, *col));
                     let kind = match k {
                         'I' => crate::BlockEdit::Insert,
                         'A' => crate::BlockEdit::Append,

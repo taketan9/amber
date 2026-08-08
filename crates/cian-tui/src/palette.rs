@@ -21,7 +21,7 @@ fn command_list() -> &'static [(&'static str, (&'static str, &'static str), bool
         ("contradiction", ("crmaine: find conflicting statements on a topic", "crmaine: トピックの矛盾を検出"), true),
         ("glossary",   ("crmaine: generate a glossary of the corpus", "crmaine: コーパスの用語集を生成"), false),
         ("searchfiles", ("crmaine: keyword-search the corpus into the pane", "crmaine: コーパスをキーワード検索してペイン表示"), true),
-        ("ai",         ("AI chat (Carmine)", "AI チャット（カーマイン）"), false),
+        ("ai",         ("AI - simple: chat with the local model", "AI - simple: ローカルモデルとチャット"), false),
         ("aicmd",      ("AI: shell command from a description", "AI: 説明からコマンド"), true),
         ("aicommit",   ("AI: draft a commit message", "AI: コミットメッセージ下書き"), false),
         ("aijunk",     ("AI: detect junk files", "AI: 不要ファイル検出"), false),

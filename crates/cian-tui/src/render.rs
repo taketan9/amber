@@ -14,6 +14,45 @@ use tui_term::widget::PseudoTerminal;
 
 use super::*;
 
+/// The local model's colour. Every "AI - simple" window — the chat, the prompts
+/// it asks first, and the review lists its answers become — wears this cyan, so
+/// a glance says the answer came from the model configured in `cian.ai`.
+const AI_SIMPLE: Color = Color::Rgb(0, 190, 205);
+/// crmaine's signature carmine, worn by the crmaine-backed chats (and by the
+/// remote pane), so the two assistants never look like one.
+const CRMAINE: Color = Color::Rgb(214, 45, 70);
+
+/// True when this popup belongs to the AI - simple family, and so wears
+/// [`AI_SIMPLE`] rather than the theme accent.
+fn is_ai_simple(popup: &Popup) -> bool {
+    match popup {
+        Popup::AiChat { skin, .. } => skin.simple,
+        Popup::AiShellConfirm { .. }
+        | Popup::CommitMessage { .. }
+        | Popup::JunkReview { .. }
+        | Popup::StructureReview { .. } => true,
+        // `:brename` and `:find` share their result lists with the AI; only the
+        // AI side of each belongs to the family.
+        Popup::RenameReview { by_ai, .. } | Popup::FindResults { by_ai, .. } => *by_ai,
+        // The AI prompts; every other text input is a plain file operation.
+        Popup::TextInput { kind, .. } => matches!(
+            kind,
+            InputKind::AiShellCmd | InputKind::AiRename | InputKind::AiSearch
+        ),
+        _ => false,
+    }
+}
+
+/// The frame colour for a popup: cyan for the AI - simple family, the theme's
+/// own accent for everything else.
+fn popup_accent(popup: &Popup) -> Color {
+    if is_ai_simple(popup) {
+        AI_SIMPLE
+    } else {
+        theme().accent
+    }
+}
+
 /// Normal three-surface layout: left/right file panes on top, shell below.
 /// Apply a file pane's theme override (if any) to the active-theme global
 /// before it draws, returning the palette to restore once it has. Per-pane
@@ -397,7 +436,7 @@ pub(crate) fn draw(f: &mut Frame, app: &mut App) {
         // row, which is not where anyone is looking while reading a file. A
         // message raised by the viewer itself — "saved", "nothing to fold
         // here" — is shown on its own footer instead.
-        let msg_for_viewer = app.message.clone();
+        let msg_for_viewer = app.message.clone().filter(|_| app.message_fresh);
         draw_popup(
             f,
             area,
@@ -959,7 +998,7 @@ fn draw_file_pane(
     // A remote (SFTP) pane wears a carmine frame, so "this is a server, not the
     // local disk" is unmistakable regardless of focus.
     if tabs.active_ref().is_remote() {
-        border_style = Style::default().fg(Color::Rgb(214, 45, 70)).add_modifier(Modifier::BOLD);
+        border_style = Style::default().fg(CRMAINE).add_modifier(Modifier::BOLD);
     }
     let max_title_w = area.width.saturating_sub(2);
     let mut offsets = Vec::new();
@@ -2311,6 +2350,17 @@ fn draw_preview_panel(f: &mut Frame, area: Rect, app: &mut App) {
             " :preview で解除   シェルは Shift+J ",
         ));
     let inner = area.inner(Margin { vertical: 1, horizontal: 1 });
+    // Wipe the panel before drawing into it. A `Paragraph` writes only the
+    // characters it has, and a `Block`'s style recolours cells without
+    // replacing them — so the tail of a longer previous file stayed on screen
+    // underneath the shorter new one, and the two read as one garbled
+    // document. The preview changes contents on every cursor move, which is
+    // the worst case for leaving anything behind.
+    f.render_widget(Clear, area);
+    f.render_widget(
+        Block::default().style(Style::default().bg(surface())),
+        area,
+    );
     f.render_widget(block, area);
     if inner.width == 0 || inner.height == 0 {
         return;
@@ -2671,25 +2721,31 @@ fn md_body_line(
 
 fn draw_ai_chat(f: &mut Frame, area: Rect, app: &mut App) {
     let lang = app.lang;
-    // Which backend this chat talks to, named for the title (e.g. "crmaine - RAG").
-    let mode = if let Popup::AiChat { mode, .. } = &app.popup { *mode } else { ChatMode::Ai };
+    // How this window presents itself: the action that opened it, and whether
+    // the local model or crmaine is answering.
+    let skin = if let Popup::AiChat { skin, .. } = &app.popup {
+        skin.clone()
+    } else {
+        ChatSkin::of(ChatMode::Ai)
+    };
     let width: u16 = 76u16.min(area.width.saturating_sub(2));
     let height = area.height.saturating_sub(2).max(8);
     let rect = centered_rect(width, height, area);
     f.render_widget(Clear, rect);
-    // crmaine's signature carmine — the same frame the remote pane wears — so
-    // the assistant reads as one identity across the app.
-    let carmine = Color::Rgb(214, 45, 70);
+    // Each backend wears its own colour, so the frame alone says who is
+    // answering: crmaine's signature carmine (the same frame the remote pane
+    // wears), and cyan for the local model.
+    let accent = if skin.simple { AI_SIMPLE } else { CRMAINE };
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(border_type())
-        .border_style(Style::default().fg(carmine).add_modifier(Modifier::BOLD))
+        .border_style(Style::default().fg(accent).add_modifier(Modifier::BOLD))
         .style(Style::default().bg(theme().popup_bg))
         .title(Line::from(vec![
-            Span::styled(" ✦ ", Style::default().fg(carmine).add_modifier(Modifier::BOLD)),
+            Span::styled(" ✦ ", Style::default().fg(accent).add_modifier(Modifier::BOLD)),
             Span::styled(
-                format!("{} ", mode.title()),
-                Style::default().fg(carmine).add_modifier(Modifier::BOLD),
+                format!("{} ", skin.title),
+                Style::default().fg(accent).add_modifier(Modifier::BOLD),
             ),
         ]))
         .title_bottom(tr(
@@ -2730,10 +2786,14 @@ fn draw_ai_chat(f: &mut Frame, area: Rect, app: &mut App) {
         let source_c = Color::Rgb(150, 175, 205);
         let dim_c = Color::Rgb(150, 150, 170);
         for m in log.iter() {
+            // The assistant signs with the backend that actually answered — a
+            // reply from the local model must not read as crmaine's work.
             let (glyph, name, name_c) = if m.user {
                 ("▍", tr(lang, "you", "あなた"), theme().accent)
+            } else if skin.simple {
+                ("◆", "AI - simple", accent)
             } else {
-                ("◆", tr(lang, "crmaine", "カーマイン"), carmine)
+                ("◆", tr(lang, "crmaine", "カーマイン"), accent)
             };
             styled.push(Line::from(vec![
                 Span::styled(format!("{glyph} "), Style::default().fg(name_c).add_modifier(Modifier::BOLD)),
@@ -2781,17 +2841,22 @@ fn draw_ai_chat(f: &mut Frame, area: Rect, app: &mut App) {
             flat.push(String::new());
         }
         if *pending {
-            // A carmine braille spinner, driven off the wall clock so it turns
-            // while the answer is in flight (the loop force-repaints meanwhile).
+            // A braille spinner in the backend's colour, driven off the wall clock
+            // so it turns while the answer is in flight (the loop force-repaints
+            // meanwhile).
             const FRAMES: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
             let fi = (app.startup_at.elapsed().as_millis() / 90) as usize % FRAMES.len();
             let label = stage.clone().unwrap_or_else(|| {
-                tr(lang, "crmaine is thinking…", "カーマイン が考えています…").to_string()
+                if skin.simple {
+                    tr(lang, "AI - simple is thinking…", "AI - simple が考えています…").to_string()
+                } else {
+                    tr(lang, "crmaine is thinking…", "カーマイン が考えています…").to_string()
+                }
             });
             styled.push(Line::from(vec![
                 Span::styled(
                     format!("{} ", FRAMES[fi]),
-                    Style::default().fg(carmine).add_modifier(Modifier::BOLD),
+                    Style::default().fg(accent).add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(label, Style::default().fg(dim_c).add_modifier(Modifier::ITALIC)),
             ]));
@@ -2828,7 +2893,7 @@ fn draw_ai_chat(f: &mut Frame, area: Rect, app: &mut App) {
         f.render_widget(
             Paragraph::new(Line::from(Span::styled(
                 format!("📎 {label}"),
-                Style::default().fg(carmine).add_modifier(Modifier::BOLD),
+                Style::default().fg(accent).add_modifier(Modifier::BOLD),
             ))),
             Rect::new(inner.x, inner.y + view_h as u16, inner.width, 1),
         );
@@ -2973,7 +3038,9 @@ fn draw_ai_history(f: &mut Frame, area: Rect, app: &App) {
     let lang = app.lang;
     let Popup::AiHistory { cursor } = &app.popup else { return };
 let cursor = *cursor;
-let carmine = Color::Rgb(214, 45, 70);
+// This list mixes both backends' conversations, so it wears neither one's
+// colour — each row carries its own badge instead.
+let frame_c = theme().accent;
 let dim_c = Color::Rgb(150, 150, 170);
 let width: u16 = 72u16.min(area.width.saturating_sub(2));
 let height = (app.ai_history.len() as u16 + 3).clamp(6, area.height.saturating_sub(2));
@@ -2982,7 +3049,7 @@ f.render_widget(Clear, rect);
 let block = Block::default()
     .borders(Borders::ALL)
     .border_type(border_type())
-    .border_style(Style::default().fg(carmine).add_modifier(Modifier::BOLD))
+    .border_style(Style::default().fg(frame_c).add_modifier(Modifier::BOLD))
     .style(Style::default().bg(theme().popup_bg))
     .title(tr(lang, " chat history ", " チャット履歴 "))
     .title_bottom(tr(lang, " Enter=open  d=delete  ↑↓  Esc ", " Enter=開く  d=削除  ↑↓  Esc "));
@@ -3008,7 +3075,7 @@ for (i, (mode, log)) in app.ai_history.iter().enumerate().skip(first).take(view_
         Style::default().fg(body_c)
     };
     lines.push(Line::from(vec![
-        Span::styled(marker, Style::default().fg(carmine)),
+        Span::styled(marker, Style::default().fg(frame_c)),
         Span::styled(badge, Style::default().fg(dim_c)),
         Span::styled(title, title_style),
         Span::styled(format!("  ({turns})"), Style::default().fg(dim_c)),
@@ -3028,9 +3095,9 @@ let height = area.height.saturating_sub(2).clamp(10, 30);
 let rect = centered_rect(width, height, area);
 f.render_widget(Clear, rect);
 let title = if editing {
-    tr(lang, " commit message — editing ", " コミットメッセージ — 編集中 ")
+    tr(lang, " Draft commit message — editing ", " コミットメッセージ生成 — 編集中 ")
 } else {
-    tr(lang, " commit message ", " コミットメッセージ ")
+    tr(lang, " Draft commit message ", " コミットメッセージ生成 ")
 };
 let footer = if editing {
     tr(lang, " type to edit   Enter=newline   Esc=done editing ",
@@ -3042,7 +3109,7 @@ let footer = if editing {
 let block = Block::default()
     .borders(Borders::ALL)
     .border_type(border_type())
-    .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
+    .border_style(Style::default().fg(AI_SIMPLE).add_modifier(Modifier::BOLD))
     .style(Style::default().bg(theme().popup_bg))
     .title(title)
     .title_bottom(footer);
@@ -3099,14 +3166,14 @@ fn draw_junk_review(f: &mut Frame, area: Rect, app: &mut App) {
         (0, 0)
     };
     let title = if lang == Lang::Ja {
-        format!(" ゴミ候補  {}/{} 選択 ", checked, n)
+        format!(" ゴミファイル検出  {}/{} 選択 ", checked, n)
     } else {
-        format!(" junk candidates  {}/{} checked ", checked, n)
+        format!(" Detect junk files  {}/{} checked ", checked, n)
     };
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(border_type())
-        .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
+        .border_style(Style::default().fg(AI_SIMPLE).add_modifier(Modifier::BOLD))
         .style(Style::default().bg(theme().popup_bg))
         .title(title)
         .title_bottom(tr(lang,
@@ -3222,14 +3289,14 @@ fn draw_structure_review(f: &mut Frame, area: Rect, app: &mut App) {
         (0, 0)
     };
     let title = if lang == Lang::Ja {
-        format!(" 構成の提案  {}/{} 選択 ", checked, n)
+        format!(" フォルダ構成を提案  {}/{} 選択 ", checked, n)
     } else {
-        format!(" suggested structure  {}/{} checked ", checked, n)
+        format!(" Suggest folder structure  {}/{} checked ", checked, n)
     };
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(border_type())
-        .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
+        .border_style(Style::default().fg(AI_SIMPLE).add_modifier(Modifier::BOLD))
         .style(Style::default().bg(theme().popup_bg))
         .title(title)
         .title_bottom(tr(lang,
@@ -3277,20 +3344,29 @@ fn draw_rename_review(f: &mut Frame, area: Rect, app: &mut App) {
     let height = area.height.saturating_sub(2).clamp(8, 30);
     let rect = centered_rect(width, height, area);
     f.render_widget(Clear, rect);
-    let (n, checked) = if let Popup::RenameReview { items, .. } = &app.popup {
-        (items.len(), items.iter().filter(|i| i.selected).count())
+    let (n, checked, by_ai) = if let Popup::RenameReview { items, by_ai, .. } = &app.popup {
+        (items.len(), items.iter().filter(|i| i.selected).count(), *by_ai)
     } else {
-        (0, 0)
+        (0, 0, false)
+    };
+    // Named for whichever side proposed the renames: the AI menu item, or the
+    // `:brename` pattern.
+    let head = match (by_ai, lang) {
+        (true, Lang::Ja) => "AIリネーム",
+        (true, Lang::En) => "AI rename",
+        (false, Lang::Ja) => "リネーム候補",
+        (false, Lang::En) => "proposed renames",
     };
     let title = if lang == Lang::Ja {
-        format!(" リネーム候補  {}/{} 選択 ", checked, n)
+        format!(" {}  {}/{} 選択 ", head, checked, n)
     } else {
-        format!(" proposed renames  {}/{} checked ", checked, n)
+        format!(" {}  {}/{} checked ", head, checked, n)
     };
+    let accent = if by_ai { AI_SIMPLE } else { theme().accent };
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(border_type())
-        .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
+        .border_style(Style::default().fg(accent).add_modifier(Modifier::BOLD))
         .style(Style::default().bg(theme().popup_bg))
         .title(title)
         .title_bottom(tr(lang,
@@ -3303,7 +3379,7 @@ fn draw_rename_review(f: &mut Frame, area: Rect, app: &mut App) {
     let body_w = inner.width as usize;
     let half = body_w.saturating_sub(8) / 2;
     let mut rows: Vec<Line> = Vec::new();
-    if let Popup::RenameReview { items, cursor, scroll } = &mut app.popup {
+    if let Popup::RenameReview { items, cursor, scroll, .. } = &mut app.popup {
         if *cursor < *scroll {
             *scroll = *cursor;
         } else if *cursor >= *scroll + body_h {
@@ -3344,12 +3420,27 @@ fn popup_frame<'a>(
     title: impl Into<Line<'a>>,
     footer: impl Into<Line<'a>>,
 ) -> Rect {
+    popup_frame_in(f, area, w, h, title, footer, theme().accent)
+}
+
+/// The same frame in a chosen colour — for the AI - simple windows, which wear
+/// [`AI_SIMPLE`] instead of the theme accent.
+#[allow(clippy::too_many_arguments)]
+fn popup_frame_in<'a>(
+    f: &mut Frame,
+    area: Rect,
+    w: u16,
+    h: u16,
+    title: impl Into<Line<'a>>,
+    footer: impl Into<Line<'a>>,
+    accent: Color,
+) -> Rect {
     let rect = centered_rect(w, h, area);
     f.render_widget(Clear, rect);
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(border_type())
-        .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
+        .border_style(Style::default().fg(accent).add_modifier(Modifier::BOLD))
         .title(title)
         .title_bottom(footer);
     let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
@@ -3583,7 +3674,7 @@ fn draw_simple_dialog(
         }
         Popup::AiShellConfirm { command } => {
             (
-                tr(lang, " AI command ", " AI コマンド ").to_string(),
+                tr(lang, " Command from description ", " 説明からコマンド生成 ").to_string(),
                 vec![
                     tr(lang, "Insert this command at the shell prompt?", "このコマンドをシェルのプロンプトに入力しますか？").to_string(),
                     String::new(),
@@ -3816,7 +3907,9 @@ fn draw_simple_dialog(
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(border_type())
-        .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
+        // The AI - simple dialogs (the command confirm, the rename/search
+        // prompts) wear the local model's cyan; the rest keep the theme accent.
+        .border_style(Style::default().fg(popup_accent(popup)).add_modifier(Modifier::BOLD))
         .style(Style::default().bg(theme().popup_bg))
         .title(title);
     let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
@@ -4525,30 +4618,51 @@ fn draw_find_results(
     zones: &mut Vec<PopupZone>,
     lang: Lang,
 ) {
-    let Popup::FindResults { hits, cursor, scroll } = popup else { return };
+    let accent = popup_accent(popup);
+    let Popup::FindResults { hits, cursor, scroll, by_ai } = popup else { return };
+    let by_ai = *by_ai;
     let w = 96u16.min(area.width.saturating_sub(2));
     let h = area.height.saturating_sub(4).max(8);
-    let title = match find {
-        Some((query, root, done, mode)) => {
-            let verb = match mode {
-                cian_core::search::Mode::Name => "find",
-                cian_core::search::Mode::Content => "grep",
-            };
-            let state = match done {
-                None => "searching…".to_string(),
-                Some(cian_core::search::Outcome::Complete) => format!("{} found", hits.len()),
-                Some(cian_core::search::Outcome::Cancelled) => {
-                    format!("{} found (stopped)", hits.len())
-                }
-                Some(cian_core::search::Outcome::Truncated) => {
-                    format!("{} found (too many, stopped)", hits.len())
-                }
-            };
-            format!(" {} \"{}\" in {} — {} ", verb, query, root, state)
+    // The AI's semantic search lands in this same list; name it for the menu
+    // item that produced it rather than for the `:find` state, which belongs to
+    // whatever sweep ran last.
+    let title = if by_ai {
+        if lang == Lang::Ja {
+            format!(" セマンティック検索 — {} 件 ", hits.len())
+        } else {
+            format!(" Semantic search — {} found ", hits.len())
         }
-        None => " find ".to_string(),
+    } else {
+        match find {
+            Some((query, root, done, mode)) => {
+                let verb = match mode {
+                    cian_core::search::Mode::Name => "find",
+                    cian_core::search::Mode::Content => "grep",
+                };
+                let state = match done {
+                    None => "searching…".to_string(),
+                    Some(cian_core::search::Outcome::Complete) => format!("{} found", hits.len()),
+                    Some(cian_core::search::Outcome::Cancelled) => {
+                        format!("{} found (stopped)", hits.len())
+                    }
+                    Some(cian_core::search::Outcome::Truncated) => {
+                        format!("{} found (too many, stopped)", hits.len())
+                    }
+                };
+                format!(" {} \"{}\" in {} — {} ", verb, query, root, state)
+            }
+            None => " find ".to_string(),
+        }
     };
-    let inner = popup_frame(f, area, w, h, truncate_middle(&title, w.saturating_sub(4) as usize), "");
+    let inner = popup_frame_in(
+        f,
+        area,
+        w,
+        h,
+        truncate_middle(&title, w.saturating_sub(4) as usize),
+        "",
+        accent,
+    );
 
     let body_h = inner.height.saturating_sub(1) as usize;
     // Keep the cursor on screen as results stream in beneath it.
@@ -5119,9 +5233,15 @@ fn draw_viewer(
             Some(ViewVisual::Line) => {
                 if i >= s0.0 && i <= e0.0 { Some((0, len)) } else { None }
             }
+            // The block is a rectangle in *columns*, so which characters of
+            // this line it covers depends on how wide this line's characters
+            // are. Asking the block itself keeps the highlight and the edit
+            // agreeing about where the rectangle is.
             Some(ViewVisual::Block) => {
                 if i >= s0.0 && i <= e0.0 {
-                    Some((anchor.1.min(*col), anchor.1.max(*col)))
+                    let b = cian_core::textops::Block::between(&view.lines, *anchor, (*line, *col));
+                    let (from, to) = b.char_range(view.lines.get(i).map(|s| s.as_str()).unwrap_or(""));
+                    (to > from).then(|| (from, to - 1))
                 } else {
                     None
                 }
@@ -5399,7 +5519,8 @@ fn draw_viewer(
     // A message the viewer itself raised takes the footer while it lasts. The
     // hints are always one keystroke away; "nothing to fold here" answers a
     // key that was just pressed, and belongs where that key was aimed.
-    let (footer, footer_style) = match msg.filter(|_| !*editing && sub_walk.is_none()) {
+    let prompt_up = sub_input.is_some() || find_input.is_some() || block_input.is_some();
+    let (footer, footer_style) = match msg.filter(|_| !*editing && sub_walk.is_none() && !prompt_up) {
         Some(m) => (
             format!(" {m} "),
             Style::default().fg(Color::Black).bg(Color::Rgb(240, 210, 120)).add_modifier(Modifier::BOLD),

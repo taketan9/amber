@@ -715,6 +715,74 @@
         );
     }
 
+    /// The preview panel changes contents on every cursor move, so anything
+    /// it fails to wipe reads as part of the next file.
+    #[test]
+    fn the_preview_panel_does_not_keep_the_last_file_underneath() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::write(
+            d.path().join("a-long.txt"),
+            (1..=40).map(|i| format!("LONGFILE line {i}\n")).collect::<String>(),
+        )
+        .unwrap();
+        std::fs::write(d.path().join("b-short.txt"), "SHORTFILE only line\n").unwrap();
+        let p = d.path().to_path_buf();
+        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        assert!(app.preview_on, "the preview is on by default");
+        // Past the startup splash, which would otherwise cover the panel.
+        app.startup_at = std::time::Instant::now() - std::time::Duration::from_secs(5);
+
+        let show = |app: &mut App, name: &str| {
+            app.active_pane_mut().unwrap().cursor =
+                app.active_pane().unwrap().entries.iter().position(|e| e.name == name).unwrap();
+            render(app, 120, 40).join("\n")
+        };
+
+        let long = show(&mut app, "a-long.txt");
+        assert!(long.contains("LONGFILE line 10"), "the long file previews");
+        let short = show(&mut app, "b-short.txt");
+        assert!(short.contains("SHORTFILE"), "the short file previews");
+        assert!(
+            !short.contains("LONGFILE"),
+            "the previous file is still on screen underneath:\n{short}",
+        );
+    }
+
+    /// A message may borrow the viewer's footer, never keep it. Messages do
+    /// not expire, so one that took the footer permanently hid the key hints,
+    /// hid the `:` prompt — making the command line look like it was refusing
+    /// input — and hid the "unsaved changes" reply to Esc, which is what made
+    /// the viewer look frozen.
+    #[test]
+    fn a_message_borrows_the_viewer_footer_it_does_not_keep_it() {
+        let (_d, mut app) = viewer_on("one\ntwo\n");
+        let footer = |app: &mut App| {
+            let rows = render(app, 100, 30);
+            // The footer is the last row inside the viewer's border.
+            rows.iter().rev().nth(2).cloned().unwrap_or_default()
+        };
+
+        // A message raised by this keystroke is shown…
+        app.handle_key(key(']')).unwrap();
+        app.handle_key(key(']')).unwrap();
+        assert!(app.message.is_some());
+        assert!(footer(&mut app).contains("utline") || footer(&mut app).contains("アウトライン"));
+
+        // …and stands down on the next key, which gets the hints back.
+        app.handle_key(key('j')).unwrap();
+        let f = footer(&mut app);
+        assert!(f.contains("search") || f.contains("検索"), "hints are back: {f:?}");
+        assert!(app.message.is_some(), "the status line still has it");
+
+        // The `:` prompt always wins over a message, however fresh.
+        app.handle_key(key('/')).unwrap();
+        app.handle_key(code(KeyCode::Esc)).unwrap();
+        app.handle_key(key(':')).unwrap();
+        assert!(matches!(&app.popup, Popup::Viewer { sub_input: Some(_), .. }));
+        let f = footer(&mut app);
+        assert!(f.contains("s/old/new/"), "the command line is visible: {f:?}");
+    }
+
     /// A binding can name its modifiers, so a shortcut whose Ctrl key the
     /// terminal keeps can be moved somewhere the terminal will deliver.
     #[test]
@@ -1076,6 +1144,15 @@
         app.handle_key(key('|')).unwrap();
         app.handle_key(code(KeyCode::Enter)).unwrap();
         assert_eq!(viewer_lines(&app), ["ab |", "abc|d"], "padded to the column");
+
+        // Mixed widths: the rectangle is rectangular on screen, so the same
+        // columns come out of every line whatever it is made of.
+        let (_dw, mut app) = viewer_on("あいうえ\nabcdefgh\nあbcう\n");
+        // From the second character of line 1 (columns 2-3) down to the `う`
+        // on line 3 (columns 4-5): columns 2..6 on every line between.
+        block(&mut app, (0, 1), (2, 3));
+        app.handle_key(key('d')).unwrap();
+        assert_eq!(viewer_lines(&app), ["あえ", "abgh", "あ"]);
 
         // c replaces what the rectangle covers.
         let (_d4, mut app) = viewer_on("id=001\nid=002\n");
@@ -1675,9 +1752,37 @@
         }
         app.triage_log();
         match &app.popup {
-            Popup::AiChat { log, pending, .. } => {
+            Popup::AiChat { log, pending, skin, .. } => {
                 assert!(*pending);
                 assert!(log.iter().any(|m| m.user && m.text.contains("app.log")), "names the log: {:?}", log);
+                // The window is named for the action that opened it, and says
+                // the local model is answering — not crmaine.
+                assert_eq!(skin.title, "Triage this log");
+                assert!(skin.simple, "the local model answers, so the window wears AI - simple");
+            }
+            other => panic!("expected the chat, got {:?}", other),
+        }
+    }
+
+    /// A crmaine corpus tool streams *crmaine's* answer into a chat whose typed
+    /// follow-ups go to the local model. The window must keep crmaine's name,
+    /// so the reply is never credited to AI - simple.
+    #[test]
+    fn a_crmaine_tool_chat_keeps_crmaines_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().to_path_buf();
+        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        app.start_ai_chat_as(
+            ChatMode::Ai,
+            ChatSkin { title: "crmaine - Impact".into(), simple: false },
+            vec![ChatMsg { user: true, text: "Impact: x".into() }],
+            true,
+        );
+        match &app.popup {
+            Popup::AiChat { skin, mode, .. } => {
+                assert_eq!(skin.title, "crmaine - Impact");
+                assert!(!skin.simple, "crmaine answered it");
+                assert_eq!(*mode, ChatMode::Ai, "follow-ups still route to the local model");
             }
             other => panic!("expected the chat, got {:?}", other),
         }
@@ -1726,6 +1831,7 @@
             pending: false,
             sel: Some((0, 1)),
             mode: ChatMode::Ai,
+            skin: ChatSkin::of(ChatMode::Ai),
         };
         // A selection copies those flat lines (as the draw would have populated).
         app.ai_lines = vec!["one".into(), "two".into(), "three".into()];
@@ -2048,6 +2154,7 @@
             ],
             cursor: 0,
             scroll: 0,
+            by_ai: true,
         };
         app.handle_key(code(KeyCode::Enter)).unwrap();
         assert!(d.path().join("photo_01.jpg").is_file(), "renamed");
@@ -6469,7 +6576,7 @@
         use crate::render::menu_label_parts;
         assert_eq!(menu_label_parts("Bulk rename…  (:brename)"), ("Bulk rename…", "(:brename)"));
         assert_eq!(menu_label_parts("Copy"), ("Copy", ""));
-        assert_eq!(menu_label_parts("Ⓒ crmaine ▸"), ("Ⓒ crmaine ▸", ""));
+        assert_eq!(menu_label_parts("AI - crmaine ▸"), ("AI - crmaine ▸", ""));
     }
 
     #[test]
@@ -6684,6 +6791,7 @@
             pending: false,
             sel: None,
             mode: ChatMode::Rag,
+            skin: ChatSkin::of(ChatMode::Rag),
         };
         app.open_ai_history();
         assert!(matches!(app.popup, Popup::AiHistory { .. }), "history picker opens");
@@ -6705,6 +6813,7 @@
             pending: true,
             sel: None,
             mode: ChatMode::Ai,
+            skin: ChatSkin::of(ChatMode::Ai),
         };
         app.archive_current_ai_chat();
         assert_eq!(app.ai_history.len(), 1, "answerless chat not archived");

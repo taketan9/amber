@@ -186,7 +186,7 @@ impl App {
             self.message = Some(tr(self.lang, "the pattern changed no names", "パターンで変わる名前がありません").into());
             return;
         }
-        self.popup = Popup::RenameReview { items, cursor: 0, scroll: 0 };
+        self.popup = Popup::RenameReview { items, cursor: 0, scroll: 0, by_ai: false };
     }
 
     pub(crate) fn start_new_file(&mut self) {
@@ -1875,7 +1875,7 @@ impl App {
             done: None,
             to_pane,
         });
-        self.popup = Popup::FindResults { hits: Vec::new(), cursor: 0, scroll: 0 };
+        self.popup = Popup::FindResults { hits: Vec::new(), cursor: 0, scroll: 0, by_ai: false };
     }
 
     /// Load a set of search hits into the active pane as a flat listing so the
