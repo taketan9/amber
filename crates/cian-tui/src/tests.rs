@@ -5415,7 +5415,7 @@
         // Seed some history and open it.
         app.active_pane_mut().unwrap().history =
             vec![PathBuf::from("/tmp/one"), PathBuf::from("/tmp/two")];
-        app.handle_key(code(KeyCode::Char('h'))).unwrap();
+        app.start_history();
         assert!(matches!(app.popup, Popup::History { .. }));
         app.handle_key(code(KeyCode::Down)).unwrap(); // select /tmp/two
         app.handle_key(code(KeyCode::Char('a'))).unwrap(); // add shortcut
@@ -5440,7 +5440,7 @@
         let (_d, mut app) = app_with(&["a.txt"]);
         app.active_pane_mut().unwrap().history =
             vec![PathBuf::from("/tmp/alpha"), PathBuf::from("/tmp/beta")];
-        app.handle_key(code(KeyCode::Char('h'))).unwrap();
+        app.start_history();
         let shown = render(&mut app, 100, 20).join("\n");
         assert!(shown.contains("▸"), "the selected row has a marker:\n{}", shown);
         assert!(shown.contains("/tmp/alpha") && shown.contains("/tmp/beta"), "{}", shown);
@@ -6307,6 +6307,63 @@
         w.write_all(b"deep note\n").unwrap();
         w.finish().unwrap();
         path
+    }
+
+    /// No keystroke may end the session. `l` inside an archive used to reach
+    /// the local-directory navigation and hand it a member path, whose
+    /// read_dir failure propagated all the way out of the event loop and
+    /// killed cian — with an unsaved-work-shaped hole where a message belonged.
+    #[test]
+    fn keys_inside_an_archive_never_kill_the_session() {
+        let d = tempfile::tempdir().unwrap();
+        make_browse_zip(d.path());
+        let p = d.path().to_path_buf();
+        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        {
+            let pane = app.active_pane_mut().unwrap();
+            pane.cursor = pane.entries.iter().position(|e| e.name == "bundle.zip").unwrap();
+        }
+        app.activate_selected().unwrap();
+        assert!(app.active_pane().unwrap().archive_view().is_some());
+        // Every plain letter, on every row, including the ones that used to
+        // walk into the filesystem with a path that only exists in the zip.
+        for row in 0..app.active_pane().unwrap().entries.len() {
+            app.active_pane_mut().unwrap().cursor = row;
+            for c in "abcdefghijklmnopqrstuvwxyz-".chars() {
+                assert!(app.handle_key(key(c)).is_ok(), "key {c:?} on row {row} returned an error");
+                if app.active_pane().map(|p| p.archive_view().is_none()).unwrap_or(true) {
+                    // A key legitimately left the archive; go back in and carry on.
+                    app.popup = Popup::None;
+                    let pane = app.active_pane_mut().unwrap();
+                    if let Some(i) = pane.entries.iter().position(|e| e.name == "bundle.zip") {
+                        pane.cursor = i;
+                    }
+                    app.activate_selected().unwrap();
+                }
+                app.popup = Popup::None;
+            }
+        }
+    }
+
+    /// h and l move between panes; `-` is deliberately unbound, so a stray
+    /// dash never navigates.
+    #[test]
+    fn h_and_l_move_between_panes_and_dash_does_nothing() {
+        let (_l, _r, mut app) = app_two_dirs(&["a.txt"], &["b.txt"]);
+        app.focus(FocusedPane::Right);
+        app.handle_key(key('h')).unwrap();
+        assert_eq!(app.focused, FocusedPane::Left, "h focuses the left pane");
+        app.handle_key(key('l')).unwrap();
+        assert_eq!(app.focused, FocusedPane::Right, "l focuses the right pane");
+
+        // `-` must not move anywhere.
+        app.focus(FocusedPane::Left);
+        let before = app.active_pane().unwrap().cwd.clone();
+        app.handle_key(key('-')).unwrap();
+        assert_eq!(app.active_pane().unwrap().cwd, before, "`-` is unbound");
+        // Backspace still goes up.
+        app.handle_key(code(KeyCode::Backspace)).unwrap();
+        assert_ne!(app.active_pane().unwrap().cwd, before, "Backspace still goes up");
     }
 
     /// Inside an archive the hint bar names archive keys — and says outright

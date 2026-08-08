@@ -80,6 +80,9 @@ impl App {
             "preview" | "pv" => self.toggle_preview(),
             // The operation queue: running + waiting file operations.
             "queue" | "ops" | "jobs" => self.start_op_queue(),
+            // The pane's directory history. It lost its `h` key to pane
+            // movement, so it needs a name you can reach.
+            "back" | "dirhistory" | "visited" => self.start_history(),
             // Strip UTF-8 BOMs from the selection (UTF-16 left alone).
             "nobom" | "stripbom" => self.start_nobom(),
             // Open the file in a specific vi-family editor in a new shell tab.

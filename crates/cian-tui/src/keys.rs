@@ -1883,7 +1883,11 @@ impl App {
             (false, true, KeyCode::Char('S')) => self.start_ssh(),
             (false, _, KeyCode::Char('n')) => self.jump_to_next_match(true),
             (false, _, KeyCode::Char('N')) => self.jump_to_next_match(false),
-            (false, false, KeyCode::Char('h')) => self.start_history(),
+            // h / l move between the panes, like the arrows beside them — the
+            // Explorer-shaped reading of a two-pane window. Directory
+            // navigation is Enter (in) and Backspace (up); `-` is unbound on
+            // purpose, so a stray dash never moves you.
+            (false, false, KeyCode::Char('h')) => self.focus(FocusedPane::Left),
             (false, false, KeyCode::Char('s')) => self.start_shortcuts(),
             // `@` — vim's play-a-macro key — opens the macro launcher.
             (false, _, KeyCode::Char('@')) => self.start_macros(),
@@ -1946,21 +1950,14 @@ impl App {
             // Parent: `-` or Backspace. The arrows move between panes instead,
             // which is what a two-pane layout makes people reach for — using
             // them for up/into a directory was reported as confusing.
-            (false, false, KeyCode::Char('-'))
-            | (_, _, KeyCode::Backspace) => {
+            (_, _, KeyCode::Backspace) => {
                 if self.active_pane().map(|p| p.archive_view().is_some()).unwrap_or(false) {
                     self.archive_go_up();
                 } else if let Some(p) = self.active_pane_mut() { p.go_parent()?; }
             }
             (_, _, KeyCode::Left) => self.focus(FocusedPane::Left),
             (_, _, KeyCode::Right) => self.focus(FocusedPane::Right),
-            // `l` only enters directories; never opens files.
-            (false, false, KeyCode::Char('l')) => {
-                if let Some(p) = self.active_pane_mut() {
-                    let is_dir = p.selected().map(|e| e.is_dir).unwrap_or(false);
-                    if is_dir { p.enter_selected()?; }
-                }
-            }
+            (false, false, KeyCode::Char('l')) => self.focus(FocusedPane::Right),
             // Ctrl+Enter opens the selected dir (else this cwd) in the other
             // pane, same tab. (Ctrl+Shift+Enter is the global snippet launcher;
             // `O` pushes this pane's directory to the other one.) Needs a

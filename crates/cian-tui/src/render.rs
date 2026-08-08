@@ -1740,7 +1740,7 @@ pub(crate) fn key_hints(app: &App) -> Vec<(&'static str, &'static str)> {
         _ => vec![
             // Switching focus between the two file panes and the shell is the
             // core two-pane move, so it leads the bar.
-            ("←→", d("panes", "ペイン")),
+            ("←→ h/l", d("panes", "ペイン")),
             ("S-J", d("shell", "シェル")),
             ("Space", d("mark", "マーク")),
             ("/", d("filter", "絞込")),

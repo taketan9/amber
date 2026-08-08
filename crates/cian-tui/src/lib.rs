@@ -3348,7 +3348,10 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry("Shift+U", Some(PageUp), "move 10 lines up", "10行上へ"),
                 entry("gg", None, "jump to top", "先頭へジャンプ"),
                 entry("G", Some(CursorBottom), "jump to bottom", "末尾へジャンプ"),
-                entry("l, Enter", Some(EnterDir), "enter folder / open file", "フォルダに入る／ファイルを開く"),
+                entry("Enter", Some(EnterDir), "enter folder / open file / go into an archive", "フォルダに入る／ファイルを開く／書庫の中へ"),
+                entry("h / l", None, "focus the left / right pane (same as ← →)", "左／右ペインへフォーカス（← → と同じ）"),
+                entry("Backspace", Some(Parent), "up one level", "1階層上へ"),
+                entry(":back", None, "this pane's directory history", "このペインの移動履歴"),
                 entry("F3", None, "look inside: text/hex, an image, or an archive's list", "中身を見る：テキスト/16進・画像・書庫の一覧"),
                 entry("  Enter on a zip", None, "browse INSIDE the archive; copy out=extract, copy in=add, r/d rename/delete (zip)", "zipにEnterで書庫の中へ（コピー=展開／逆コピー=追加、r/d でリネーム・削除）"),
                 entry(":preview", None, "cursor-follow preview in the shell panel (Shift+J shows the shell)", "シェル枠にカーソル追従プレビュー（Shift+J でシェル表示）"),
@@ -3879,6 +3882,12 @@ fn suspend_and_edit<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Re
     Ok(())
 }
 
+/// The first line of an error chain — the status line has one row, and the
+/// `Caused by:` tail belongs in the log.
+fn first_line(e: &anyhow::Error) -> String {
+    e.to_string().lines().next().unwrap_or_default().to_string()
+}
+
 fn run_loop<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Result<()> {
     let mut needs_redraw = true;
     let mut last_pulse = Instant::now();
@@ -3912,7 +3921,14 @@ fn run_loop<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Result<()>
                     // Input always wins over eye candy: land any transition
                     // immediately rather than making the user wait for it.
                     app.finish_anim();
-                    app.handle_key(key)?;
+                    // A key must never be able to end the session. Navigation
+                    // can fail for ordinary reasons — a directory vanished, a
+                    // path turned out not to be one — and the answer to that
+                    // is a message, not an exit.
+                    if let Err(e) = app.handle_key(key) {
+                        app.message = Some(format!("✖ {}", first_line(&e)));
+                        cian_core::log::log(&format!("key error: {e:#}"));
+                    }
                     needs_redraw = true;
                 }
                 Event::Mouse(m) => {

@@ -59,6 +59,7 @@ fn command_list() -> &'static [(&'static str, (&'static str, &'static str), bool
         ("discard",    ("discard worktree changes", "変更を破棄"), false),
         ("gitlog",     ("commit log", "コミットログ"), false),
         ("gitdiff",    ("working-tree diff vs HEAD", "作業ツリーの差分"), false),
+        ("back",       ("this pane's directory history", "このペインの移動履歴"), false),
         ("jump",       ("fuzzy-jump to a recent directory", "最近のディレクトリへ移動"), false),
         ("files",      ("live fuzzy file finder (this tree)", "ライブ・ファイル検索（このツリー）"), false),
         ("recent",     ("recently-opened files", "最近開いたファイル"), false),

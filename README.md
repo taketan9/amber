@@ -29,9 +29,9 @@ Two panes side by side. You copy and move between them — that's the whole idea
 
 | Do this | And… |
 |---|---|
-| **← / →** | move focus between the two panes |
-| **`l` / Enter** | enter a folder — or open a file with its default app |
-| **`-` / Backspace** | go up a level (or click the `..` row at the top) |
+| **← / →**, **`h` / `l`** | move focus between the two panes |
+| **Enter** | enter a folder, go inside an archive, or open a file with its default app |
+| **Backspace** | go up a level (or click the `..` row at the top) |
 | **`j` / `k`**, arrows | move the cursor |
 | **`Space`** | mark the file under the cursor |
 | **`c`** | copy the marked files to the other pane |
