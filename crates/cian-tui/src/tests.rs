@@ -72,14 +72,14 @@
     }
 
     /// Like `app_with`, but with `cian.set_keymap` overrides applied.
-    fn app_with_keymaps(names: &[&str], keymaps: Vec<(char, String)>) -> (tempfile::TempDir, App) {
+    fn app_with_keymaps(names: &[&str], keymaps: Vec<(&str, String)>) -> (tempfile::TempDir, App) {
         let dir = tempfile::tempdir().unwrap();
         for n in names {
             std::fs::write(dir.path().join(n), b"").unwrap();
         }
         let p = dir.path().to_path_buf();
         let mut config = cian_lua::Config::default();
-        config.keymaps = keymaps;
+        config.keymaps = keymaps.into_iter().map(|(k, a)| (k.to_string(), a)).collect();
         let app = App::new(p.clone(), p, config).unwrap();
         (dir, app)
     }
@@ -713,6 +713,36 @@
             &[0xEF, 0xBB, 0xBF],
             "the byte-order mark came back",
         );
+    }
+
+    /// A binding can name its modifiers, so a shortcut whose Ctrl key the
+    /// terminal keeps can be moved somewhere the terminal will deliver.
+    #[test]
+    fn a_keymap_entry_can_carry_a_modifier() {
+        use crate::theme::parse_key_spec;
+        assert_eq!(parse_key_spec("x"), Some(('x', KeyModifiers::NONE)));
+        assert_eq!(parse_key_spec("alt+g"), Some(('g', KeyModifiers::ALT)));
+        assert_eq!(parse_key_spec("ctrl+f"), Some(('f', KeyModifiers::CONTROL)));
+        assert_eq!(parse_key_spec(" Option+G "), Some(('G', KeyModifiers::ALT)));
+        // Shift folds into the character: terminals disagree about reporting
+        // both, and the uppercase letter already says it.
+        assert_eq!(parse_key_spec("shift+s"), Some(('S', KeyModifiers::NONE)));
+        for bad in ["", "alt+", "hyper+g", "alt+gg", "+"] {
+            assert!(parse_key_spec(bad).is_none(), "{bad:?} should be refused");
+        }
+
+        // …and it drives the real key handling.
+        let (_d, mut app) = app_with_keymaps(&["a.txt"], vec![("alt+g", "grep_recursive".into())]);
+        app.handle_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::ALT)).unwrap();
+        assert!(
+            matches!(&app.popup, Popup::TextInput { kind: InputKind::GrepRecursive, .. }),
+            "Alt+g opened the grep prompt, got {:?}",
+            app.popup,
+        );
+        // The unmodified key is untouched.
+        app.handle_key(code(KeyCode::Esc)).unwrap();
+        app.handle_key(key('g')).unwrap();
+        assert!(!matches!(&app.popup, Popup::TextInput { kind: InputKind::GrepRecursive, .. }));
     }
 
     /// Every Ctrl shortcut in the viewer needs a route that a terminal cannot
@@ -2328,8 +2358,8 @@
         let (_d, mut app) = app_with_keymaps(
             &["a.rs", "b.rs"],
             vec![
-                ('x', "delete".into()), // bind a new key to an action
-                ('d', "none".into()),   // and turn the default off
+                ("x", "delete".into()), // bind a new key to an action
+                ("d", "none".into()),   // and turn the default off
             ],
         );
         // `x` now opens the delete confirm…
@@ -2380,7 +2410,7 @@
         let _g = THEME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let (_d, mut app) = app_with(&["a.rs"]);
         // No user binding yet: `x` is not delete.
-        assert!(!app.keymap.contains_key(&'x'));
+        assert!(!app.keymap.contains_key(&('x', KeyModifiers::NONE)));
         // Point CIAN_CONFIG_DIR at a temp config that binds x -> delete, then
         // reload — the running app should pick it up without a restart.
         let cfgdir = tempfile::tempdir().unwrap();
@@ -2393,14 +2423,14 @@
         app.command_buffer = "reload".into();
         app.run_command();
         std::env::remove_var("CIAN_CONFIG_DIR");
-        assert_eq!(app.keymap.get(&'x'), Some(&Action::Delete), "reload bound x live");
+        assert_eq!(app.keymap.get(&('x', KeyModifiers::NONE)), Some(&Action::Delete), "reload bound x live");
     }
 
     #[test]
     fn a_newly_named_action_is_bindable() {
         // `sort` had no bindable name before; confirm it now resolves and works.
         assert_eq!(action_from_name("sort"), Some(Action::Sort));
-        let (_d, mut app) = app_with_keymaps(&["a.rs"], vec![('S', "sort".into())]);
+        let (_d, mut app) = app_with_keymaps(&["a.rs"], vec![("S", "sort".into())]);
         app.handle_key(KeyEvent::new(KeyCode::Char('S'), KeyModifiers::SHIFT)).unwrap();
         assert!(matches!(app.popup, Popup::SortPicker { .. }), "S opens the sort picker");
     }
@@ -2704,9 +2734,11 @@
     #[test]
     fn manual_lists_user_bound_keys() {
         let mut keymap = HashMap::new();
-        keymap.insert('x', Action::Delete);
+        keymap.insert(('x', KeyModifiers::NONE), Action::Delete);
+        keymap.insert(('g', KeyModifiers::ALT), Action::GrepRecursive);
         let text = manual_lines(&keymap, Lang::En).join("\n");
         assert!(text.contains("d, x"), "user-bound key missing from manual:\n{}", text);
+        assert!(text.contains("Alt+g"), "a modified binding is named in full:\n{}", text);
     }
 
     #[test]

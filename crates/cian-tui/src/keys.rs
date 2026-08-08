@@ -1807,14 +1807,14 @@ impl App {
             // anything else: fall through to normal handling
         }
 
-        // User keymap overrides: plain character keys (no Ctrl). Only keys the
-        // user explicitly bound appear here, so default behaviour is untouched
-        // for everything else.
-        if !ctrl {
-            if let KeyCode::Char(c) = key.code {
-                if let Some(action) = self.keymap.get(&c).copied() {
-                    return self.execute_action(action);
-                }
+        // User keymap overrides. Only keys the user explicitly bound appear
+        // here, so default behaviour is untouched for everything else. Shift
+        // is not part of the lookup — the uppercase character already carries
+        // it, and terminals disagree about whether to report both.
+        if let KeyCode::Char(c) = key.code {
+            let mods = key.modifiers & (KeyModifiers::CONTROL | KeyModifiers::ALT);
+            if let Some(action) = self.keymap.get(&(c, mods)).copied() {
+                return self.execute_action(action);
             }
         }
 

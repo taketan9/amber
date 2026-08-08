@@ -53,6 +53,14 @@ impl App {
             "copyto" => self.start_dest_picker(PendingOp::Copy),
             "moveto" => self.start_dest_picker(PendingOp::Move),
             "grep" => self.start_grep_prompt(),
+            // Repaint from nothing. A stray control character — one the
+            // terminal acted on rather than passing along — can leave the
+            // screen holding text cian never drew, and there is otherwise no
+            // way back short of restarting.
+            "redraw" | "refresh!" => {
+                self.full_clear = true;
+                self.message = Some(tr(self.lang, "redrawn", "画面を描き直しました").into());
+            }
             // Which key did the terminal actually send? The answer to every
             // "that shortcut does nothing on my machine".
             "keys" => {

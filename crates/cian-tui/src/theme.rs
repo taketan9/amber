@@ -494,6 +494,34 @@ pub(crate) fn action_from_name(name: &str) -> Option<Action> {
     })
 }
 
+/// Parse a key spec from `cian.set_keymap` — `"x"`, `"alt+g"`, `"ctrl+f"`,
+/// `"shift+s"` — into the character and the modifiers to match on.
+///
+/// Shift is folded into the character rather than kept as a modifier: a
+/// terminal may or may not report Shift alongside an uppercase letter, and the
+/// uppercase letter already says everything the binding needs. Only Ctrl and
+/// Alt survive as modifiers, which are the two a terminal reports reliably.
+pub(crate) fn parse_key_spec(spec: &str) -> Option<(char, crossterm::event::KeyModifiers)> {
+    use crossterm::event::KeyModifiers;
+    let spec = spec.trim();
+    let mut parts: Vec<&str> = spec.split('+').collect();
+    let key = parts.pop()?;
+    let mut c = key.chars().next()?;
+    if key.chars().count() != 1 {
+        return None;
+    }
+    let mut mods = KeyModifiers::NONE;
+    for m in parts {
+        match m.trim().to_lowercase().as_str() {
+            "ctrl" | "control" | "c" => mods |= KeyModifiers::CONTROL,
+            "alt" | "opt" | "option" | "meta" | "m" => mods |= KeyModifiers::ALT,
+            "shift" | "s" => c = c.to_ascii_uppercase(),
+            _ => return None,
+        }
+    }
+    Some((c, mods))
+}
+
 /// Parse a user color spec: `#rrggbb`, `r,g,b`, or a named color.
 pub(crate) fn parse_color(s: &str) -> Option<Color> {
     let s = s.trim();

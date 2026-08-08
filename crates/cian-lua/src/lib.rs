@@ -7,6 +7,9 @@
 //! cian.set_theme "solarized-light"   -- a named preset, or
 //! cian.set_theme({ accent = "#00d7d7", mark_fg = "yellow" })
 //! cian.set_keymap("x", "delete")          -- bind key `x` to the delete action
+//! cian.set_keymap("alt+g", "grep_recursive") -- …with a modifier, for the
+//!                                            -- Ctrl combinations a terminal
+//!                                            -- may keep to itself
 //! cian.set_option("clipboard_on_copy", false)
 //! cian.on_open("md", function(path)        -- extension-dispatch execution
 //!   cian.spawn({ "open", "-a", "Typora", path })
@@ -242,7 +245,7 @@ pub struct CrmaineOptions {
 struct Builder {
     theme: Theme,
     options: Options,
-    keymaps: Vec<(char, String)>,
+    keymaps: Vec<(String, String)>,
     ext_open: HashMap<String, Function>,
     ssh_hosts: Vec<SshHost>,
     ai: Option<AiOptions>,
@@ -265,7 +268,7 @@ pub struct Config {
     pub options: Options,
     /// `(key, action-name)` pairs the user explicitly bound. The UI validates
     /// the action names and reports any it does not recognise.
-    pub keymaps: Vec<(char, String)>,
+    pub keymaps: Vec<(String, String)>,
     /// SSH targets declared with `cian.ssh{...}`.
     pub ssh_hosts: Vec<SshHost>,
     /// AI settings declared with `cian.ai{...}`, if any.
@@ -641,13 +644,18 @@ fn install_api(lua: &Lua, builder: &Rc<RefCell<Builder>>) -> mlua::Result<()> {
             "set_keymap",
             lua.create_function(move |_, (key, action): (String, String)| {
                 let mut bm = b.borrow_mut();
-                let mut chars = key.chars();
-                match (chars.next(), chars.next()) {
-                    (Some(c), None) => bm.keymaps.push((c, action)),
-                    _ => bm.errors.push(format!(
-                        "set_keymap: key must be a single character, got {:?}",
+                // A bare character, or one with modifiers in front of it:
+                // "x", "alt+g", "ctrl+f", "shift+s". Validated here only far
+                // enough to catch a typo; cian-tui turns it into a real key.
+                let spec = key.trim().to_string();
+                let last = spec.rsplit('+').next().unwrap_or("");
+                if last.chars().count() == 1 && !spec.ends_with('+') {
+                    bm.keymaps.push((spec, action));
+                } else {
+                    bm.errors.push(format!(
+                        "set_keymap: expected a key like \"x\" or \"alt+g\", got {:?}",
                         key
-                    )),
+                    ));
                 }
                 Ok(())
             })?,
@@ -1044,7 +1052,7 @@ mod tests {
         assert_eq!(cfg.ssh_hosts.len(), 1, "ssh.lua contributed a host");
         assert_eq!(cfg.ssh_hosts[0].name, "db");
         assert!(
-            cfg.keymaps.iter().any(|(k, a)| *k == 'x' && a == "delete"),
+            cfg.keymaps.iter().any(|(k, a)| k == "x" && a == "delete"),
             "keymap.lua bound x → delete: {:?}",
             cfg.keymaps
         );

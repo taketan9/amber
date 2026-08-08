@@ -2251,17 +2251,17 @@ pub struct App {
     /// User keymap overrides: plain character keys (no Ctrl) the user bound via
     /// `cian.set_keymap`. Only contains entries the user set; everything else
     /// falls through to the built-in defaults.
-    keymap: HashMap<char, Action>,
+    keymap: HashMap<(char, KeyModifiers), Action>,
 }
 
 impl App {
     pub fn new(left: PathBuf, right: PathBuf, config: Config) -> Result<Self> {
         // Build the keymap from user overrides (invalid action names are
         // validated and reported separately in `run`).
-        let mut keymap: HashMap<char, Action> = HashMap::new();
-        for (c, name) in &config.keymaps {
-            if let Some(a) = action_from_name(name) {
-                keymap.insert(*c, a);
+        let mut keymap: HashMap<(char, KeyModifiers), Action> = HashMap::new();
+        for (spec, name) in &config.keymaps {
+            if let (Some(k), Some(a)) = (crate::theme::parse_key_spec(spec), action_from_name(name)) {
+                keymap.insert(k, a);
             }
         }
         let clipboard_on_copy = config.options.clipboard_on_copy.unwrap_or(true);
@@ -3587,7 +3587,7 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry("Ctrl+R, F5", None, "refresh now", "今すぐ再読み込み"),
                 entry("f", Some(Search), "search in this folder", "このフォルダ内を検索"),
                 entry("Shift+F", None, "find by name, whole tree below here", "名前で検索（ここ以下のツリー全体）"),
-                entry("Ctrl+F", None, "grep inside files, whole tree below here", "ファイル内をgrep（ここ以下のツリー全体）"),
+                entry("Ctrl+F", Some(Action::GrepRecursive), "grep inside files, whole tree below here (:grep too)", "ファイル内をgrep（ここ以下のツリー全体）— :grep でも可"),
                 entry("  patterns", None, "  bare text = literal; /re/ = regex, /re/i ignores case; grep also reads SJIS", "  裸の文字列=そのまま、/re/=正規表現（/re/i で大小無視）、grep は SJIS も読む"),
                 entry("  p in results", None, "panelize: load the find/grep matches into the pane to mark & operate on", "検索結果を p でペイン化：マーク＆一括操作できる"),
                 entry("  r in results", None, "replace across every file the grep matched: preview each line, Space unchecks", "grep 結果の全ファイルを一括置換：1行ずつ確認、Space で除外"),
@@ -3681,7 +3681,9 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry(":df", None, "free disk space;  :df -h -k -m -g", "ディスク空き容量；  :df -h -k -m -g"),
                 entry(":theme", None, "theme gallery;  :theme dracula  sets one directly", "テーマ一覧；  :theme dracula で直接指定"),
                 entry(":reload", None, "re-read init.lua (borders need a restart)", "init.luaを再読込（枠線は再起動が必要）"),
+                entry(":redraw", None, "repaint the screen from nothing, after a stray control character scrambles it", "画面を一から描き直す（制御文字で表示が乱れたとき）"),
                 entry(":keys", None, "report every keystroke as cian receives it, and which keyboard mode is in use", "受け取ったキーをそのまま表示（キーボードのモードも表示）"),
+                entry("  set_keymap", None, "init.lua: cian.set_keymap(\"alt+g\", \"grep_recursive\") — modifiers allowed", "init.lua: cian.set_keymap(\"alt+g\", \"grep_recursive\") — 修飾キーも書ける"),
                 entry("  CIAN_LEGACY_KEYS=1", None, "start without the enhanced-keyboard request — try it if every Ctrl shortcut is dead", "拡張キーボード要求なしで起動 — Ctrl 系が全滅するときに試す"),
                 entry(":where", None, "which config files cian reads/writes (portable vs ~/.config)", "cianが読み書きする設定ファイルの場所（ポータブル/~/.config）"),
                 entry(":mark", None, "mark by wildcard;  :mark *.rs   :unmark *", "ワイルドカードでマーク；  :mark *.rs   :unmark *"),
@@ -3724,7 +3726,7 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
 /// A user-bound key is appended to the action's built-in keys, matching what
 /// the running app does (a binding replaces its default; extra aliases show up
 /// here so the manual and the keyboard agree).
-pub fn manual_lines(keymap: &HashMap<char, Action>, lang: Lang) -> Vec<String> {
+pub fn manual_lines(keymap: &HashMap<(char, KeyModifiers), Action>, lang: Lang) -> Vec<String> {
     let header = match lang {
         Lang::En => "cian — key manual",
         Lang::Ja => "cian — キー一覧",
@@ -3741,12 +3743,22 @@ pub fn manual_lines(keymap: &HashMap<char, Action>, lang: Lang) -> Vec<String> {
             let mut keys = e.keys.to_string();
             if let Some(action) = e.action {
                 // Extra keys the user bound to this action, sorted for stability.
-                let mut extra: Vec<char> = keymap
+                let mut extra: Vec<String> = keymap
                     .iter()
                     .filter(|(_, a)| **a == action)
-                    .map(|(c, _)| *c)
+                    .map(|((c, m), _)| {
+                        let mut s = String::new();
+                        if m.contains(KeyModifiers::CONTROL) {
+                            s.push_str("Ctrl+");
+                        }
+                        if m.contains(KeyModifiers::ALT) {
+                            s.push_str("Alt+");
+                        }
+                        s.push(*c);
+                        s
+                    })
                     .collect();
-                extra.sort_unstable();
+                extra.sort();
                 for c in extra {
                     keys.push_str(&format!(", {}", c));
                 }
@@ -3761,10 +3773,10 @@ pub fn manual_lines(keymap: &HashMap<char, Action>, lang: Lang) -> Vec<String> {
 /// it lists match the keys that will actually work — and its `lang` option.
 pub fn manual_text() -> String {
     let config = cian_lua::load();
-    let mut keymap: HashMap<char, Action> = HashMap::new();
-    for (c, name) in &config.keymaps {
-        if let Some(a) = action_from_name(name) {
-            keymap.insert(*c, a);
+    let mut keymap: HashMap<(char, KeyModifiers), Action> = HashMap::new();
+    for (spec, name) in &config.keymaps {
+        if let (Some(k), Some(a)) = (crate::theme::parse_key_spec(spec), action_from_name(name)) {
+            keymap.insert(k, a);
         }
     }
     let lang = Lang::from_opt(config.options.lang.as_deref());

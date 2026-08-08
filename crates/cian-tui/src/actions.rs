@@ -2114,14 +2114,18 @@ impl App {
         let config = cian_lua::load();
 
         // Rebuild the user keymap, validating action names as at startup.
-        let mut keymap: HashMap<char, Action> = HashMap::new();
+        let mut keymap: HashMap<(char, KeyModifiers), Action> = HashMap::new();
         let mut problems: Vec<String> = config.errors.clone();
-        for (c, name) in &config.keymaps {
+        for (spec, name) in &config.keymaps {
+            let Some(k) = crate::theme::parse_key_spec(spec) else {
+                problems.push(format!("keymap: cannot read the key {spec:?}"));
+                continue;
+            };
             match action_from_name(name) {
                 Some(a) => {
-                    keymap.insert(*c, a);
+                    keymap.insert(k, a);
                 }
-                None => problems.push(format!("keymap: unknown action {:?} (key '{}')", name, c)),
+                None => problems.push(format!("keymap: unknown action {name:?} (key {spec:?})")),
             }
         }
         self.keymap = keymap;
