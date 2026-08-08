@@ -925,19 +925,16 @@
             "one mark per real line — nothing inserted to line the two up",
         );
 
-        // `]c` steps to the next difference; `[c` back.
+        // Tab steps to the next difference; Shift+Tab back.
         let at = |app: &App| match &app.popup {
             Popup::Viewer { line, .. } => *line,
             other => panic!("not a viewer: {other:?}"),
         };
-        app.handle_key(key(']')).unwrap();
-        app.handle_key(key('c')).unwrap();
+        app.handle_key(code(KeyCode::Tab)).unwrap();
         assert_eq!(at(&app), 1, "the changed line");
-        app.handle_key(key(']')).unwrap();
-        app.handle_key(key('c')).unwrap();
+        app.handle_key(code(KeyCode::Tab)).unwrap();
         assert_eq!(at(&app), 2, "the one only this side has");
-        app.handle_key(key('[')).unwrap();
-        app.handle_key(key('c')).unwrap();
+        app.handle_key(code(KeyCode::BackTab)).unwrap();
         assert_eq!(at(&app), 1, "and back");
 
         // Editing one half is allowed, and the comparison follows it: making
@@ -954,6 +951,17 @@
         // `=` again stops.
         app.handle_key(key('=')).unwrap();
         assert!(app.viewer_diff.is_none());
+
+        // A key that refuses has to refuse every time, not only the first —
+        // the reply is about the keystroke, not about the words changing.
+        app.handle_key(KeyEvent::new(KeyCode::F(10), KeyModifiers::SHIFT)).unwrap();
+        for _ in 0..3 {
+            app.handle_key(key('=')).unwrap();
+            assert!(app.message_fresh, "said so again");
+            assert!(app.message.as_deref().unwrap_or("").contains("F8"));
+            app.handle_key(code(KeyCode::Down)).unwrap();
+            assert!(!app.message_fresh, "and stood down for the next key");
+        }
     }
 
     /// `?` in the viewer answers "what can I do here", not "what can cian do".

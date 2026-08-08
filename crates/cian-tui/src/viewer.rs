@@ -178,22 +178,19 @@ impl App {
             }
             return Ok(());
         }
-        // `]c` / `[c`: the bracket armed the pair, and `c` completes it — the
-        // next or previous difference, as in vim's diff mode. Only when a
-        // comparison is running; otherwise `c` is the change operator.
-        if !ctrl && !alt && key.code == KeyCode::Char('c') && self.viewer_diff.is_some() {
-            let armed = if let Popup::Viewer { pending, .. } = &self.popup {
-                *pending
-            } else {
-                None
-            };
-            if matches!(armed, Some(']') | Some('[')) {
-                if let Popup::Viewer { pending, .. } = &mut self.popup {
-                    *pending = None;
-                }
-                self.viewer_diff_step(armed == Some(']'));
-                return Ok(());
-            }
+        // Tab / Shift+Tab step between the differences while a comparison is
+        // running. vim spells this `]c`, which costs two keys and takes `c`
+        // away from the change operator for as long as the comparison lasts;
+        // Tab is one key, is already "the next one" everywhere else, and takes
+        // nothing away — it only types a tab while editing, and a comparison
+        // is not an editing mode.
+        if !ctrl && !alt
+            && matches!(key.code, KeyCode::Tab | KeyCode::BackTab)
+            && self.viewer_diff.is_some()
+            && matches!(self.popup, Popup::Viewer { editing: false, .. })
+        {
+            self.viewer_diff_step(key.code == KeyCode::Tab);
+            return Ok(());
         }
         // `z` folds: `za` toggles the one at the cursor, `zR` opens every fold,
         // `zM` closes them all. Same prefix trick as the brackets, and for the
@@ -817,9 +814,9 @@ impl App {
             .map(|d| d.mine.iter().filter(|m| **m != cian_core::diff::Mark::Same).count())
             .unwrap_or(0);
         self.message = Some(if self.lang == Lang::Ja {
-            format!("差分 {n} 行（]c / [c で移動、= で解除）")
+            format!("差分 {n} 行（Tab / Shift+Tab で移動、= で解除）")
         } else {
-            format!("{n} line(s) differ — ]c / [c to step, = to stop")
+            format!("{n} line(s) differ — Tab / Shift+Tab to step, = to stop")
         });
     }
 

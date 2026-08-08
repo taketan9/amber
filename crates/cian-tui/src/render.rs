@@ -4039,6 +4039,13 @@ fn draw_simple_dialog(
     // and grows taller as the value wraps, so nothing you type is cut off.
     let width: u16 = match popup {
         Popup::TextInput { .. } => 96u16.min(area.width.saturating_sub(2)),
+        // A notice can be a key list, whose lines are a key and a sentence; at
+        // seventy columns every one of them wrapped, which turns a list into a
+        // wall. It takes what the longest line asks for, within reason.
+        Popup::Notice { lines } => {
+            let longest = lines.iter().map(|l| width(l)).max().unwrap_or(0) as u16;
+            longest.saturating_add(6).clamp(40, 110).min(area.width.saturating_sub(2))
+        }
         _ => 70u16.min(area.width.saturating_sub(2)),
     };
     let extra_rows = if let Popup::TextInput { buffer, .. } = popup {

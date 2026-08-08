@@ -3702,7 +3702,7 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry("    :ws", None, "show trailing spaces, tabs and ideographic spaces", "行末空白・TAB・全角スペースを表示"),
                 entry("    :lf :crlf", None, "convert line endings (shown in the title)", "改行コードを変換（タイトルに表示）"),
                 entry("  Shift+F8/F9/F10", None, "split left-right / top-bottom / close it — Shift+H,L or a click crosses over", "左右分割 / 上下分割 / 解除 — Shift+H,L かクリックで行き来"),
-                entry("  = in a split", None, "compare the two halves in place — ]c / [c step, both stay editable", "分割中の = で両側を比較 — ]c / [c で移動、どちらも編集可能なまま"),
+                entry("  = in a split", None, "compare the two halves in place — Tab / Shift+Tab step, both stay editable", "分割中の = で両側を比較 — Tab / Shift+Tab で移動、どちらも編集可能なまま"),
                 entry("  ? in viewer", None, "the keys this window has, rather than all of cian's", "ビューアで ?：この画面で使えるキーだけを表示"),
                 entry("  right-click / S-Enter", None, "the viewer's menu: ask the AI about the selection, copy, reveal, theme", "ビューアのメニュー：選択範囲をAIに聞く・コピー・場所を開く・テーマ"),
                 entry("  p / P", None, "paste after / before the cursor — whole lines when whole lines were copied", "カーソルの後/前に貼り付け — 行単位でコピーしたものは行単位で"),

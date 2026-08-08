@@ -92,9 +92,16 @@ impl App {
         // them — so anywhere that gives a message the floor has to know the
         // difference between news and a leftover, or it keeps the floor
         // forever. The viewer's footer does exactly that.
-        let before = self.message.clone();
+        // Cleared first, so "did this key raise a message" is a question about
+        // whether one was *set* rather than whether the words changed. Pressing
+        // a key that refuses twice has to say so twice; comparing the text made
+        // the second refusal silent.
+        let before = self.message.take();
         let r = self.handle_key_inner(key);
-        self.message_fresh = self.message.is_some() && self.message != before;
+        self.message_fresh = self.message.is_some();
+        if self.message.is_none() {
+            self.message = before;
+        }
         if !self.key_probe {
             return r;
         }
