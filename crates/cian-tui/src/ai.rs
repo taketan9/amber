@@ -1201,6 +1201,21 @@ impl App {
         }
     }
 
+    /// Paste into the chat: an image on the clipboard becomes an attachment,
+    /// anything else becomes text. Splitting those onto two keys made the user
+    /// classify their own clipboard before pressing anything.
+    pub(crate) fn paste_into_chat(&mut self) {
+        let has_image = self.clipboard.as_mut().map(|cb| cb.get_image().is_ok()).unwrap_or(false);
+        if has_image {
+            self.attach_clipboard_image();
+            return;
+        }
+        let text = self.clipboard_text();
+        if let (Some(t), Popup::AiChat { input, .. }) = (text, &mut self.popup) {
+            input.push_str(t.trim_end_matches(['\r', '\n']));
+        }
+    }
+
     /// Attach the image on the system clipboard to the open chat (Alt+V), so a
     /// screenshot can be asked about. Written out as a PNG under the temp dir
     /// because both backends want a file path: crmaine reads it server-side,

@@ -550,16 +550,15 @@ impl App {
                         input.clear();
                     }
                 }
-                // Ctrl+V pastes the clipboard into the input.
-                KeyCode::Char('v') if ctrl => {
-                    let text = self.clipboard_text();
-                    if let (Some(t), Popup::AiChat { input, .. }) = (text, &mut self.popup) {
-                        input.push_str(t.trim_end_matches(['\r', '\n']));
-                    }
-                }
-                // Alt+V attaches the clipboard's image to the question. Ctrl/Cmd+V
-                // can't do it: the terminal intercepts those to paste text.
-                KeyCode::Char('v') if alt => self.attach_clipboard_image(),
+                // Ctrl+V pastes whatever is on the clipboard: a screenshot
+                // becomes an attachment, text becomes text. One key, because
+                // "paste" is one idea — the user should not have to know which
+                // kind of thing they copied.
+                KeyCode::Char('v') if ctrl => self.paste_into_chat(),
+                // Alt+V is the same paste, for terminals that swallow Ctrl+V
+                // to do their own (Windows Terminal binds it by default, and
+                // then the key never reaches us).
+                KeyCode::Char('v') if alt => self.paste_into_chat(),
                 // Ctrl+Y copies the current selection, or the last reply if none.
                 KeyCode::Char('y') if ctrl => self.copy_ai_text(),
                 KeyCode::Char('c') if ctrl => self.copy_ai_text(),

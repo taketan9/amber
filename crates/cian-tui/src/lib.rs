@@ -2020,7 +2020,7 @@ pub struct App {
     ai_rect: Rect,
     ai_scroll: usize,
     ai_lines: Vec<String>,
-    /// Images pasted into the open chat (Alt+V), as paths to temp PNGs. Sent
+    /// Images pasted into the open chat (Ctrl+V), as paths to temp PNGs. Sent
     /// with the next question and cleared then; also cleared on a new chat.
     chat_attachments: Vec<std::path::PathBuf>,
     /// The junk-review list body rect, stashed so a click can map to a row.

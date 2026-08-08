@@ -2607,8 +2607,8 @@ fn draw_ai_chat(f: &mut Frame, area: Rect, app: &mut App) {
         ]))
         .title_bottom(tr(
             lang,
-            " Enter=send  Shift+Enter=newline  Alt+V=image  Ctrl+R=history  Ctrl+↑↓=rate  Esc=stop/close ",
-            " Enter=送信  Shift+Enter=改行  Alt+V=画像  Ctrl+R=履歴  Ctrl+↑↓=評価  Esc=中断/閉じる ",
+            " Enter=send  Shift+Enter=newline  Ctrl+V=paste (image too)  Ctrl+R=history  Esc=stop/close ",
+            " Enter=送信  Shift+Enter=改行  Ctrl+V=貼付（画像も）  Ctrl+R=履歴  Esc=中断/閉じる ",
         ));
     let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
     f.render_widget(block, rect);
