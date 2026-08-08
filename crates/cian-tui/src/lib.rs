@@ -1819,6 +1819,14 @@ pub struct App {
     /// Protocol state for a previewed image, separate from the F3 popup's
     /// `img_proto` (which is cleared whenever that popup is closed).
     preview_gfx: Option<(PathBuf, ratatui_image::protocol::StatefulProtocol)>,
+    /// Ask the main loop to wipe the terminal before the next frame.
+    ///
+    /// Terminal graphics (kitty / iTerm2 / sixel) paint into a layer the cell
+    /// buffer does not model, so ratatui's damage tracking has no reason to
+    /// repaint over a picture — leaving it stuck on screen above whatever came
+    /// next. Every place an image stops being shown sets this, and the loop
+    /// pays for one full clear exactly then.
+    full_clear: bool,
     /// Terminal-graphics capability, when the terminal answered the startup
     /// query with a real protocol (kitty / iTerm2 / sixel). `None` falls back
     /// to the half-block cell renderer — including always in tests, which
@@ -2178,6 +2186,7 @@ impl App {
             preview_on: config.options.preview.unwrap_or(true),
             preview: None,
             preview_gfx: None,
+            full_clear: false,
             archive_cache: None,
             zoom_return: None,
             pending_shell_input: None,
@@ -3875,6 +3884,11 @@ fn run_loop<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Result<()>
     let mut last_pulse = Instant::now();
     loop {
         if needs_redraw {
+            // A picture just stopped being shown: terminal graphics live
+            // outside the cell buffer, so only a real clear removes them.
+            if std::mem::take(&mut app.full_clear) {
+                terminal.clear()?;
+            }
             terminal.draw(|f| draw(f, app))?;
             needs_redraw = false;
         }

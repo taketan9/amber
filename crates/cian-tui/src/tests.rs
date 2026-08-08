@@ -5093,6 +5093,50 @@
         assert!(!out.contains("⌥ preview"));
     }
 
+    /// Moving off an image asks the main loop for a full terminal clear.
+    /// Terminal graphics are painted outside the cell buffer, so without it
+    /// the picture stays on screen over the next file — which looked exactly
+    /// like "the file after a png has no preview".
+    #[test]
+    fn leaving_an_image_preview_asks_for_a_clear() {
+        let d = tempfile::tempdir().unwrap();
+        // A real 2x2 PNG, plus a text file to move onto.
+        let png: &[u8] = &[0x89,0x50,0x4E,0x47,0x0D,0x0A,0x1A,0x0A,0,0,0,0x0D,0x49,0x48,0x44,0x52,
+            0,0,0,2,0,0,0,2,8,2,0,0,0,0xFD,0xD4,0x9A,0x73,0,0,0,0x16,0x49,0x44,0x41,0x54,
+            0x78,0x9C,0x62,0xF8,0xCF,0xC0,0,0,0x03,0x01,0x01,0,0x18,0xDD,0x8D,0xB0,
+            0,0,0,0,0x49,0x45,0x4E,0x44,0xAE,0x42,0x60,0x82];
+        std::fs::write(d.path().join("pic.png"), png).unwrap();
+        std::fs::write(d.path().join("after.txt"), "plain text after the picture\n").unwrap();
+        let p = d.path().to_path_buf();
+        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+
+        let go = |app: &mut App, name: &str| {
+            let pane = app.active_pane_mut().unwrap();
+            pane.cursor = pane.entries.iter().position(|e| e.name == name).unwrap();
+        };
+        go(&mut app, "pic.png");
+        let _ = render(&mut app, 100, 30);
+        app.full_clear = false; // ignore anything the first frame asked for
+
+        // Onto the text file: the loop must be told to wipe first.
+        go(&mut app, "after.txt");
+        let out = render(&mut app, 100, 30).join("\n");
+        assert!(app.full_clear, "leaving an image requests a clear");
+        assert!(out.contains("plain text after"), "and the text is drawn: {out}");
+
+        // Text to text costs nothing.
+        app.full_clear = false;
+        go(&mut app, "pic.png");
+        let _ = render(&mut app, 100, 30);
+        app.full_clear = false;
+        go(&mut app, "after.txt");
+        let _ = render(&mut app, 100, 30);
+        assert!(app.full_clear);
+        app.full_clear = false;
+        let _ = render(&mut app, 100, 30);
+        assert!(!app.full_clear, "a steady text preview asks for no clears");
+    }
+
     /// A directory under the cursor previews as its listing.
     #[test]
     fn preview_lists_a_directory() {

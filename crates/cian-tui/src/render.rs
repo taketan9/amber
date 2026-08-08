@@ -326,8 +326,12 @@ pub(crate) fn draw(f: &mut Frame, app: &mut App) {
         draw_image(f, area, app);
         return;
     }
-    // The preview closed: drop its decoded image + protocol state.
-    app.img_proto = None;
+    // The F3 image popup closed: drop its protocol state, and wipe the
+    // terminal once so the picture does not linger over whatever is now
+    // underneath (see `App::full_clear`).
+    if app.img_proto.take().is_some() {
+        app.full_clear = true;
+    }
     if matches!(app.popup, Popup::CommitMessage { .. }) {
         draw_commit_message(f, area, app);
         return;

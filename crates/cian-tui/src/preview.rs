@@ -41,6 +41,9 @@ impl App {
     pub(crate) fn toggle_preview(&mut self) {
         self.preview_on = !self.preview_on;
         if !self.preview_on {
+            if self.preview_gfx.is_some() {
+                self.full_clear = true;
+            }
             self.preview = None;
             self.preview_gfx = None;
         }
@@ -61,6 +64,13 @@ impl App {
     pub(crate) fn ensure_preview(&mut self, path: &Path) {
         if self.preview.as_ref().map(|p| p.path == *path).unwrap_or(false) {
             return;
+        }
+        // Moving off an image leaves its pixels stuck on screen unless the
+        // terminal is wiped: the graphics layer is not part of the cell buffer
+        // ratatui diffs against. This is why the file *after* a picture looked
+        // like it had no preview at all.
+        if matches!(self.preview.as_ref().map(|p| &p.body), Some(PreviewBody::Image)) {
+            self.full_clear = true;
         }
         // A different image invalidates the protocol state too.
         if self.preview_gfx.as_ref().map(|(p, _)| p != path).unwrap_or(false) {
