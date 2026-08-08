@@ -326,7 +326,11 @@ impl App {
                     self.deliver_snippet(&cmd, enter);
                     Ok(())
                 }
-                Popup::Notice { .. } => { self.popup = Popup::None; Ok(()) }
+                Popup::Notice { .. } => {
+                    self.popup = Popup::None;
+                    self.restore_viewer();
+                    Ok(())
+                }
                 _ => Ok(()),
             },
             // `a` is the "I really mean it" variant: overwrite for transfers,
@@ -447,10 +451,14 @@ impl App {
                     }
                     self.message = Some("copied".into());
                     self.popup = Popup::None;
+                    self.restore_viewer();
                     Ok(())
                 }
                 KeyCode::Enter | KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('q') => {
                     self.popup = Popup::None;
+                    // Back to the file, when the notice was raised over one —
+                    // `?` in the viewer being the case that matters.
+                    self.restore_viewer();
                     Ok(())
                 }
                 _ => Ok(()),

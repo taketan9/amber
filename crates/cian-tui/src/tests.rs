@@ -893,6 +893,23 @@
         );
     }
 
+    /// `?` in the viewer answers "what can I do here", not "what can cian do".
+    #[test]
+    fn question_mark_in_the_viewer_lists_only_the_viewer() {
+        let (_d, mut app) = viewer_on("hello\n");
+        app.handle_key(key('?')).unwrap();
+        let Popup::Notice { lines } = &app.popup else { panic!("no help: {:?}", app.popup) };
+        let text = lines.join("\n");
+        assert!(text.contains("F3") || text.contains("viewer"), "it is about the viewer:\n{text}");
+        // Things the viewer cannot do are not in it.
+        for absent in ["Rename", "SSH", "trash"] {
+            assert!(!text.contains(absent), "{absent:?} does not belong here:\n{text}");
+        }
+        // …and it goes back to the file.
+        app.handle_key(code(KeyCode::Esc)).unwrap();
+        assert!(matches!(app.popup, Popup::Viewer { .. }), "back to the file");
+    }
+
     /// The mouse reaches both halves of a split and both tab arrows. All of
     /// this is geometry, and the geometry used to be measured against a
     /// viewer that filled the screen even when it had half of it.

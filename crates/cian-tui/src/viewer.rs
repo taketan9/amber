@@ -374,6 +374,14 @@ impl App {
             self.open_mermaid_in_browser();
             return Ok(());
         }
+        // `?` here answers "what can I do in this window", not "what can cian
+        // do" — the whole manual buries the one in the other.
+        if !ctrl && !alt && key.code == KeyCode::Char('?') {
+            let lines = crate::viewer_manual_lines(self.lang);
+            self.viewer_return = Some(Box::new(std::mem::replace(&mut self.popup, Popup::None)));
+            self.popup = Popup::Notice { lines };
+            return Ok(());
+        }
         // `r` after a search: replace what was found, without typing the
         // pattern a second time. The prompt arrives as `s/<what you searched
         // for>/`, so all that is left is the replacement — and the `c` flag,

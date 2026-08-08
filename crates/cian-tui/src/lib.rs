@@ -3671,6 +3671,7 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry("    :ws", None, "show trailing spaces, tabs and ideographic spaces", "行末空白・TAB・全角スペースを表示"),
                 entry("    :lf :crlf", None, "convert line endings (shown in the title)", "改行コードを変換（タイトルに表示）"),
                 entry("  Shift+F8/F9/F10", None, "split left-right / top-bottom / close it — Shift+H,L or a click crosses over", "左右分割 / 上下分割 / 解除 — Shift+H,L かクリックで行き来"),
+                entry("  ? in viewer", None, "the keys this window has, rather than all of cian's", "ビューアで ?：この画面で使えるキーだけを表示"),
                 entry("  right-click / S-Enter", None, "the viewer's menu: ask the AI about the selection, copy, reveal, theme", "ビューアのメニュー：選択範囲をAIに聞く・コピー・場所を開く・テーマ"),
                 entry("  p / P", None, "paste after / before the cursor — whole lines when whole lines were copied", "カーソルの後/前に貼り付け — 行単位でコピーしたものは行単位で"),
                 entry("  :preview", None, "the rendered Markdown, and back to the source (Ctrl+E where the terminal allows it)", "Markdown の描画表示とソースの切替（端末が許せば Ctrl+E でも）"),
@@ -3843,6 +3844,49 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
 /// A user-bound key is appended to the action's built-in keys, matching what
 /// the running app does (a binding replaces its default; extra aliases show up
 /// here so the manual and the keyboard agree).
+/// The manual, keeping only the lines that mention the viewer.
+///
+/// `?` inside a file should answer "what can I do *here*", and the whole
+/// manual — every file operation, every transfer, every SSH key — buries that
+/// answer among four screens of things this window cannot do.
+pub(crate) fn viewer_manual_lines(lang: Lang) -> Vec<String> {
+    let header = match lang {
+        Lang::En => "cian — the viewer (F3)",
+        Lang::Ja => "cian — ビューア（F3）",
+    };
+    let mut out = vec![header.to_string()];
+    for ((en_title, ja_title), entries) in manual_sections() {
+        // A section counts when something in it is about the viewer — either
+        // its own heading says so, or one of its lines does.
+        let about = |s: &str| {
+            let s = s.to_lowercase();
+            s.contains("viewer") || s.contains("ビューア") || s.contains("f3")
+        };
+        let heading = about(en_title) || about(ja_title);
+        let kept: Vec<&ManualEntry> = entries
+            .iter()
+            .filter(|e| heading || about(e.keys) || about(e.en) || about(e.ja))
+            .collect();
+        if kept.is_empty() {
+            continue;
+        }
+        out.push(String::new());
+        out.push(match lang {
+            Lang::En => en_title.to_string(),
+            Lang::Ja => ja_title.to_string(),
+        });
+        for e in kept {
+            out.push(format!("  {:<17} {}", e.keys, e.desc(lang)));
+        }
+    }
+    out.push(String::new());
+    out.push(match lang {
+        Lang::En => "  (? here, Ctrl+. or :man for everything)".to_string(),
+        Lang::Ja => "  （ここでは ? / 全体は Ctrl+. か :man）".to_string(),
+    });
+    out
+}
+
 pub fn manual_lines(keymap: &HashMap<(char, KeyModifiers), Action>, lang: Lang) -> Vec<String> {
     let header = match lang {
         Lang::En => "cian — key manual",
