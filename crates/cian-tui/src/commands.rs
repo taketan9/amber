@@ -57,11 +57,15 @@ impl App {
             // "that shortcut does nothing on my machine".
             "keys" => {
                 self.key_probe = !self.key_probe;
+                let mode = if self.kbd_enhanced { "enhanced" } else { "legacy" };
                 self.message = Some(if self.key_probe {
-                    tr(self.lang, "showing every key as cian receives it — :keys again to stop",
-                                  "受け取ったキーをそのまま表示します — 止めるには もう一度 :keys").into()
+                    format!(
+                        "{} [keyboard: {mode}]",
+                        tr(self.lang, "showing every key as cian receives it — :keys again to stop",
+                                      "受け取ったキーをそのまま表示します — 止めるには もう一度 :keys"),
+                    )
                 } else {
-                    tr(self.lang, "key report off", "キー表示をやめました").into()
+                    tr(self.lang, "key report off", "キー表示をやめました").to_string()
                 });
             }
             "find" => self.start_find_prompt(),

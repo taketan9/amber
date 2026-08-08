@@ -2023,6 +2023,10 @@ pub struct App {
     /// `:keys` — report every keystroke as cian received it, for finding out
     /// whether a binding is broken or the terminal simply never sent the key.
     key_probe: bool,
+    /// Whether the terminal accepted the enhanced-keyboard request at startup.
+    /// Reported by `:keys`, because it is the first thing to suspect when every
+    /// Ctrl combination goes quiet at once.
+    kbd_enhanced: bool,
     viewer_rect: Rect,
     /// Where the viewer's outline column was drawn, so a click on an entry can
     /// jump to it. Zero-width when the column is not showing.
@@ -2301,6 +2305,7 @@ impl App {
             menu_rect: Rect::new(0, 0, 0, 0),
             menu_stack: Vec::new(),
             key_probe: false,
+            kbd_enhanced: false,
             viewer_rect: Rect::new(0, 0, 0, 0),
             outline_rect: Rect::new(0, 0, 0, 0),
             viewer_gutter: 0,
@@ -3675,7 +3680,8 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry(":df", None, "free disk space;  :df -h -k -m -g", "ディスク空き容量；  :df -h -k -m -g"),
                 entry(":theme", None, "theme gallery;  :theme dracula  sets one directly", "テーマ一覧；  :theme dracula で直接指定"),
                 entry(":reload", None, "re-read init.lua (borders need a restart)", "init.luaを再読込（枠線は再起動が必要）"),
-                entry(":keys", None, "report every keystroke as cian receives it — for when a shortcut seems dead", "受け取ったキーをそのまま表示 — ショートカットが効かないときに"),
+                entry(":keys", None, "report every keystroke as cian receives it, and which keyboard mode is in use", "受け取ったキーをそのまま表示（キーボードのモードも表示）"),
+                entry("  CIAN_LEGACY_KEYS=1", None, "start without the enhanced-keyboard request — try it if every Ctrl shortcut is dead", "拡張キーボード要求なしで起動 — Ctrl 系が全滅するときに試す"),
                 entry(":where", None, "which config files cian reads/writes (portable vs ~/.config)", "cianが読み書きする設定ファイルの場所（ポータブル/~/.config）"),
                 entry(":mark", None, "mark by wildcard;  :mark *.rs   :unmark *", "ワイルドカードでマーク；  :mark *.rs   :unmark *"),
                 entry(":ai", None, "AI chat (Carmine / カーマイン)  — needs cian.ai in init.lua", "AIチャット（カーマイン）  — init.luaのcian.aiが必要"),
@@ -3987,11 +3993,21 @@ pub fn run(left: Option<PathBuf>, right: Option<PathBuf>, startup: StartupMacro)
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture, EnableBracketedPaste)?;
     // Ask the terminal to disambiguate Ctrl-h / Ctrl-i / Ctrl-m from Backspace/Tab/Enter.
     // Supported by WezTerm, kitty, foot, etc. Silently ignored elsewhere.
-    let kbd_enhanced = execute!(
-        stdout,
-        PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
-    )
-    .is_ok();
+    //
+    // A terminal that takes the request but reports the result in a form this
+    // build cannot read loses every Ctrl combination while plain keys keep
+    // working — the whole shortcut set goes quiet at once, which is not a
+    // symptom anyone would connect back to a startup handshake. `CIAN_LEGACY_KEYS=1`
+    // skips the request, both as the way to confirm that is what happened and
+    // as the way to keep working while it is true.
+    let legacy_keys = std::env::var("CIAN_LEGACY_KEYS").is_ok_and(|v| v != "0" && !v.is_empty());
+    let kbd_enhanced = !legacy_keys
+        && execute!(
+            stdout,
+            PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
+        )
+        .is_ok();
+    app.kbd_enhanced = kbd_enhanced;
 
     // Ask the terminal whether it can draw real images (kitty / iTerm2 /
     // sixel). Queried here — after the alternate screen, before any events are
