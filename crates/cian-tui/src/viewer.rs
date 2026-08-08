@@ -454,6 +454,13 @@ impl App {
                 }
                 // Discard unsaved edits and close.
                 (false, KeyCode::Char('Q')) => close = true,
+                // Alt+v too, since a terminal that keeps Ctrl+V usually keeps
+                // Ctrl+Q as well. Ahead of plain `v`, which this match would
+                // otherwise claim first. `:block` is the one route nothing can
+                // intercept.
+                (false, KeyCode::Char('v')) if alt => {
+                    start_visual(ViewVisual::Block, visual, anchor, *line, *col)
+                }
                 (false, KeyCode::Char('v')) => start_visual(ViewVisual::Char, visual, anchor, *line, *col),
                 (false, KeyCode::Char('V')) => start_visual(ViewVisual::Line, visual, anchor, *line, *col),
                 // Ctrl+Q is vim's own synonym for Ctrl+V, and exists for this
@@ -797,6 +804,49 @@ impl App {
         if let Some(f) = transform {
             self.apply_line_transform(&f, words[0]);
             return;
+        }
+        // vi's own file commands. They exist here because Ctrl+S is not a key
+        // every terminal is willing to hand over — iTerm2 keeps Ctrl+F for its
+        // find bar and macOS takes Ctrl+Q for zoom — and a viewer you can edit
+        // but cannot save is worse than one you cannot edit.
+        match cmd {
+            "w" | "write" => {
+                self.save_viewer_file();
+                return;
+            }
+            "wq" | "x" => {
+                self.save_viewer_file();
+                // Only close if the save actually took: a failed write that
+                // silently shut the file would lose the edit.
+                if matches!(self.popup, Popup::Viewer { dirty: false, .. }) {
+                    self.popup = Popup::None;
+                }
+                return;
+            }
+            "q" => {
+                if matches!(self.popup, Popup::Viewer { dirty: true, .. }) {
+                    self.message = Some(tr(self.lang,
+                        "unsaved changes — :w to save, :q! to discard",
+                        "未保存の変更があります — :w で保存、:q! で破棄").into());
+                } else {
+                    self.popup = Popup::None;
+                }
+                return;
+            }
+            "q!" => {
+                self.popup = Popup::None;
+                return;
+            }
+            // The block selection, for terminals that keep Ctrl+V and Ctrl+Q
+            // to themselves.
+            "block" => {
+                if let Popup::Viewer { visual, anchor, line, col, .. } = &mut self.popup {
+                    *anchor = (*line, *col);
+                    *visual = Some(ViewVisual::Block);
+                }
+                return;
+            }
+            _ => {}
         }
         // `outline` flips the shape column. Like `ws` it only changes what is
         // drawn, so it is not an undo step.

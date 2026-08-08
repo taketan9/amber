@@ -715,6 +715,60 @@
         );
     }
 
+    /// Every Ctrl shortcut in the viewer needs a route that a terminal cannot
+    /// intercept: iTerm2 keeps Ctrl+F for its own find bar and macOS takes
+    /// Ctrl+Q for zoom, so a file that can be edited but not saved is a real
+    /// possibility on a stock Mac.
+    #[test]
+    fn the_viewer_can_be_driven_without_a_single_ctrl_key() {
+        let d = tempfile::tempdir().unwrap();
+        let f = d.path().join("note.txt");
+        std::fs::write(&f, "one\ntwo\n").unwrap();
+        let p = d.path().to_path_buf();
+        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        let open = |app: &mut App| {
+            app.active_pane_mut().unwrap().cursor =
+                app.active_pane().unwrap().entries.iter().position(|e| e.name == "note.txt").unwrap();
+            app.handle_key(code(KeyCode::F(3))).unwrap();
+        };
+        let cmd = |app: &mut App, c: &str| {
+            app.handle_key(key(':')).unwrap();
+            if let Popup::Viewer { sub_input, .. } = &mut app.popup {
+                *sub_input = Some(c.into());
+            }
+            app.handle_key(code(KeyCode::Enter)).unwrap();
+        };
+
+        // `:block` reaches the rectangle without Ctrl+V or Ctrl+Q.
+        open(&mut app);
+        cmd(&mut app, "block");
+        assert!(matches!(app.popup, Popup::Viewer { visual: Some(ViewVisual::Block), .. }));
+        app.handle_key(code(KeyCode::Esc)).unwrap();
+
+        // `:w` saves without Ctrl+S.
+        app.handle_key(key('x')).unwrap(); // delete a character
+        assert!(matches!(app.popup, Popup::Viewer { dirty: true, .. }));
+        cmd(&mut app, "w");
+        assert_eq!(std::fs::read_to_string(&f).unwrap(), "ne\ntwo\n");
+        assert!(matches!(app.popup, Popup::Viewer { dirty: false, .. }));
+
+        // `:q` refuses to drop unsaved work; `:q!` says to anyway.
+        app.handle_key(key('x')).unwrap();
+        cmd(&mut app, "q");
+        assert!(matches!(app.popup, Popup::Viewer { .. }), "still open");
+        assert!(app.message.as_deref().unwrap_or("").contains(":q!"));
+        cmd(&mut app, "q!");
+        assert!(matches!(app.popup, Popup::None));
+        assert_eq!(std::fs::read_to_string(&f).unwrap(), "ne\ntwo\n", "discarded, not written");
+
+        // `:wq` writes and then closes.
+        open(&mut app);
+        app.handle_key(key('x')).unwrap();
+        cmd(&mut app, "wq");
+        assert!(matches!(app.popup, Popup::None));
+        assert_eq!(std::fs::read_to_string(&f).unwrap(), "e\ntwo\n");
+    }
+
     /// A message must be readable on a narrow terminal, where the status
     /// chips it shares a row with would otherwise push it off the edge — the
     /// reason `:keys`, "unknown command" and every other answer appeared to

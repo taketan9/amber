@@ -5351,8 +5351,8 @@ fn draw_viewer(
             ":{}_   {}",
             cmd,
             tr(lang,
-               "s/old/new/[gci]  ·  outline ws sort rsort uniq han zen expand unexpand reindent lf crlf cr",
-               "s/old/new/[gci]  ·  outline ws sort rsort uniq han zen expand unexpand reindent lf crlf cr")
+               "s/old/new/[gci]  ·  w wq q q!  block outline ws sort uniq han zen expand unexpand reindent lf crlf",
+               "s/old/new/[gci]  ·  w wq q q!  block outline ws sort uniq han zen expand unexpand reindent lf crlf")
         )
     } else {
         match find_input {
