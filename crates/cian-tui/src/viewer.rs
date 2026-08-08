@@ -2101,12 +2101,24 @@ impl App {
         };
         match std::fs::write(&path, bytes) {
             Ok(()) => {
+                // A member opened from inside an archive is a temp file; the
+                // save the user asked for is into the archive.
+                if let Some(err) = self.write_back_to_archive(&path) {
+                    self.message = Some(err);
+                    return;
+                }
                 if let Popup::Viewer { dirty, source, view, .. } = &mut self.popup {
                     *dirty = false;
                     // Keep the preview's source copy in step with what's on disk.
                     *source = view.lines.clone();
                 }
-                self.message = Some(format!("saved: {}", path.display()));
+                self.message = Some(match self.arc_edits.get(&path) {
+                    Some((a, m)) => format!(
+                        "saved into {}: {m}",
+                        a.file_name().map(|s| s.to_string_lossy()).unwrap_or_default()
+                    ),
+                    None => format!("saved: {}", path.display()),
+                });
                 if let Some(t) = self.active_file_tabs_mut() {
                     let _ = t.active_mut().reload();
                 }

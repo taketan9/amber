@@ -2149,6 +2149,11 @@ pub struct App {
     /// service at all, and copy-and-paste within one file should not depend on
     /// one being there.
     yank: Option<String>,
+    /// Temp files that came out of an archive, and where they came from.
+    /// Keyed by the temp path so a tab keeps its origin across a switch —
+    /// saving one writes it back into the zip rather than leaving the edit in
+    /// a temporary file nobody will look at again.
+    arc_edits: std::collections::HashMap<PathBuf, (PathBuf, String)>,
     key_probe: bool,
     /// The message was raised by the last keystroke, rather than left over
     /// from an earlier one. Only a fresh message may take a footer.
@@ -2450,6 +2455,7 @@ impl App {
             viewer_return: None,
             viewer_diff: None,
             yank: None,
+            arc_edits: std::collections::HashMap::new(),
             key_probe: false,
             message_fresh: false,
             kbd_enhanced: false,
@@ -3845,6 +3851,7 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry(":theme", None, "theme gallery;  :theme dracula  sets one directly", "テーマ一覧；  :theme dracula で直接指定"),
                 entry(":reload", None, "re-read init.lua (borders need a restart)", "init.luaを再読込（枠線は再起動が必要）"),
                 entry(":redraw", None, "repaint the screen from nothing, after a stray control character scrambles it", "画面を一から描き直す（制御文字で表示が乱れたとき）"),
+                entry("  editing a member", None, "F3 inside a zip, edit, Ctrl+S or :w — it goes back into the zip", "zip 内で F3 → 編集 → Ctrl+S か :w で zip に書き戻す"),
                 entry(":office", None, "open a synced Office file's cloud copy in the desktop app (also right-click ▸ OS)", "同期された Office 文書のクラウド側をアプリで開く（右クリック ▸ OS からも）"),
                 entry(":officelink", None, "write a .url shortcut to the cloud copy — the thing to paste into a mail", "クラウド側への .url ショートカットを作成（メールに貼るのはこれ）"),
                 entry("Ctrl+A, :markall", None, "mark everything here — in the viewer, select the whole file", "ここにある全部をマーク — ビューアではファイル全体を選択"),

@@ -893,6 +893,74 @@
         );
     }
 
+    /// F3 inside a zip opens the member; saving puts it back into the zip
+    /// rather than leaving the work in a temp file nobody will look at again.
+    #[test]
+    fn editing_a_zip_member_writes_it_back_into_the_zip() {
+        let d = tempfile::tempdir().unwrap();
+        let src = d.path().join("stage");
+        std::fs::create_dir_all(src.join("conf")).unwrap();
+        std::fs::write(src.join("conf").join("app.ini"), "[main]\nlevel=INFO\n").unwrap();
+        let zip = d.path().join("bundle.zip");
+        let cancel = std::sync::atomic::AtomicBool::new(false);
+        let mut sink = |_: &cian_core::progress::Progress| {};
+        let mut ctl = cian_core::progress::Ctl { cancel: &cancel, on_progress: &mut sink };
+        let r = cian_core::archive::create_zip(
+            &[src.join("conf")],
+            &zip,
+            None,
+            &mut ctl,
+        );
+        assert!(r.errors.is_empty(), "{:?}", r.errors);
+
+        let p = d.path().to_path_buf();
+        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        app.enter_archive(zip.clone(), String::new());
+        // Into conf/, then onto the member.
+        app.active_pane_mut().unwrap().cursor =
+            app.active_pane().unwrap().entries.iter().position(|e| e.name.starts_with("conf")).unwrap();
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+        app.active_pane_mut().unwrap().cursor =
+            app.active_pane().unwrap().entries.iter().position(|e| e.name == "app.ini").unwrap();
+        app.handle_key(code(KeyCode::F(3))).unwrap();
+        assert!(matches!(app.popup, Popup::Viewer { .. }), "the member opened: {:?}", app.popup);
+
+        // Edit it and save.
+        app.handle_key(key(':')).unwrap();
+        if let Popup::Viewer { sub_input, .. } = &mut app.popup {
+            *sub_input = Some("s/INFO/DEBUG/".into());
+        }
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+        app.handle_key(key(':')).unwrap();
+        if let Popup::Viewer { sub_input, .. } = &mut app.popup {
+            *sub_input = Some("w".into());
+        }
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+        assert!(
+            app.message.as_deref().unwrap_or("").contains("bundle.zip"),
+            "it says where it went: {:?}",
+            app.message,
+        );
+
+        // The archive itself now holds the edit.
+        let out = d.path().join("out");
+        std::fs::create_dir_all(&out).unwrap();
+        let mut sink = |_: &cian_core::progress::Progress| {};
+        let mut ctl = cian_core::progress::Ctl { cancel: &cancel, on_progress: &mut sink };
+        let r = cian_core::archive::extract(
+            &zip,
+            &["conf/app.ini".to_string()],
+            &out,
+            None,
+            "",
+            &mut ctl,
+        );
+        assert!(r.errors.is_empty(), "{:?}", r.errors);
+        let back = std::fs::read_to_string(out.join("conf").join("app.ini")).unwrap();
+        assert!(back.contains("level=DEBUG"), "the zip has the edit: {back:?}");
+        assert!(back.contains("[main]"), "and the rest of the file");
+    }
+
     /// The ruler and the crosshair, and Enter reading rather than launching.
     #[test]
     fn the_viewer_shows_a_column_scale_and_where_the_cursor_is() {

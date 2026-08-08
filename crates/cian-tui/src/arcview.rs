@@ -226,7 +226,45 @@ impl App {
             archive.file_name().map(|s| s.to_string_lossy()).unwrap_or_default(),
             member
         );
+        // Remember where this came from, so saving puts it back rather than
+        // leaving the edit in a temp file.
+        self.arc_edits
+            .insert(path.clone(), (archive.to_path_buf(), member.to_string()));
         self.open_viewer_at(&path, &title, 0);
+    }
+
+    /// Put an edited member back into its archive.
+    ///
+    /// The member is dropped and the edited file added under the same name —
+    /// which is what `zip_modify` already does safely, writing a whole new
+    /// archive beside the old one and swapping it in only on success. An edit
+    /// that cannot be written back has to say so loudly: the temp file still
+    /// holds the work, and the archive is what the user thinks they saved.
+    pub(crate) fn write_back_to_archive(&mut self, temp: &Path) -> Option<String> {
+        let (archive, member) = self.arc_edits.get(temp)?.clone();
+        let prefix = member.rsplit_once('/').map(|(h, _)| format!("{h}/")).unwrap_or_default();
+        let cancel = std::sync::atomic::AtomicBool::new(false);
+        let mut sink = |_: &cian_core::progress::Progress| {};
+        let mut ctl = cian_core::progress::Ctl { cancel: &cancel, on_progress: &mut sink };
+        let report = cian_core::archive::zip_modify(
+            &archive,
+            std::slice::from_ref(&member),
+            &[],
+            std::slice::from_ref(&temp.to_path_buf()),
+            &prefix,
+            &mut ctl,
+        );
+        match report.errors.first() {
+            Some(e) => Some(format!(
+                "{}: not written back — {e} (the edit is still in {})",
+                archive.file_name().map(|s| s.to_string_lossy()).unwrap_or_default(),
+                temp.display(),
+            )),
+            None => {
+                self.archive_cache = None; // the listing has a new size and time
+                None
+            }
+        }
     }
 
     /// Copy the marked members (or the cursor's) out to `dest`, extracting
