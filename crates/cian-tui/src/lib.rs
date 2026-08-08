@@ -515,6 +515,10 @@ enum Popup {
     DestPicker { op: PendingOp, targets: Vec<PathBuf>, cursor: usize },
     /// Results of a recursive search, filling in as they are found.
     FindResults { hits: Vec<cian_core::search::Hit>, cursor: usize, scroll: usize },
+    /// Everything a grep-replace would change, before any of it is written.
+    /// Boxed because it is only on screen while the user is reading it, and an
+    /// unboxed plan would widen every `Popup` in the program.
+    GrepReplace(Box<ReplacePlan>),
     /// SSH: pick a host, then a user on it.
     SshHosts { cursor: usize, filter: String },
     SshUsers { host: usize, cursor: usize },
@@ -1239,6 +1243,20 @@ enum DiffMsg {
     Done(cian_core::dirdiff::DirDiff),
 }
 
+/// A grep-replace waiting for approval: what it would change, what it could
+/// not read, and where the cursor is in the list.
+#[derive(Debug, Clone)]
+pub(crate) struct ReplacePlan {
+    /// One row per changed line, in the order [`cian_core::grepedit::plan`]
+    /// found them (grouped by file, then by line).
+    pub(crate) changes: Vec<cian_core::grepedit::Change>,
+    pub(crate) skipped: Vec<cian_core::grepedit::Skipped>,
+    pub(crate) cursor: usize,
+    pub(crate) scroll: usize,
+    /// `old → new`, for the title — the prompt is gone by the time this shows.
+    pub(crate) what: String,
+}
+
 struct FindJob {
     rx: std::sync::mpsc::Receiver<FindMsg>,
     cancel: Arc<AtomicBool>,
@@ -1429,6 +1447,10 @@ enum InputKind {
     FindRecursive,
     /// Text to look for inside the files below the current directory.
     GrepRecursive,
+    /// The replacement text for a grep-replace. `paths` are the files the grep
+    /// matched and `pattern` the needle it matched them with, so the prompt
+    /// only has to ask for the half the user has not typed yet.
+    GrepReplaceWith { paths: Vec<PathBuf>, pattern: String },
     /// A directory typed as the destination of a pending copy or move.
     DestPath { op: PendingOp, targets: Vec<PathBuf> },
     /// A password for a zip about to be created. Rendered masked.
@@ -3453,6 +3475,7 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry("Ctrl+F", None, "grep inside files, whole tree below here", "ファイル内をgrep（ここ以下のツリー全体）"),
                 entry("  patterns", None, "  bare text = literal; /re/ = regex, /re/i ignores case; grep also reads SJIS", "  裸の文字列=そのまま、/re/=正規表現（/re/i で大小無視）、grep は SJIS も読む"),
                 entry("  p in results", None, "panelize: load the find/grep matches into the pane to mark & operate on", "検索結果を p でペイン化：マーク＆一括操作できる"),
+                entry("  r in results", None, "replace across every file the grep matched: preview each line, Space unchecks", "grep 結果の全ファイルを一括置換：1行ずつ確認、Space で除外"),
                 entry("b", None, "branch view: flatten this subtree into the pane, one row per file (b/Esc to leave)", "ブランチビュー：この配下を1ファイル1行に平坦化（b/Esc で戻る）"),
                 entry("n", Some(SearchNext), "next match", "次のマッチ"),
                 entry("N", Some(SearchPrev), "previous match", "前のマッチ"),

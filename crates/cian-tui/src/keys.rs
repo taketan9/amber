@@ -205,6 +205,7 @@ impl App {
             Popup::LocalDest { .. } => self.local_dest_key(key),
             Popup::ThemePicker { .. } => self.theme_picker_key(key),
             Popup::FindResults { .. } => self.find_results_key(key),
+            Popup::GrepReplace(_) => self.grep_replace_key(key),
             Popup::DestPicker { .. } => self.dest_picker_key(key),
             Popup::ImageView { .. } => self.image_view_key(key),
             Popup::DirCompare { .. } => self.dir_compare_key(key),
@@ -870,6 +871,10 @@ impl App {
                 KeyCode::Char('g') | KeyCode::Home => *cursor = 0,
                 KeyCode::Char('G') | KeyCode::End => *cursor = n.saturating_sub(1),
                 KeyCode::Enter => return self.open_find_hit(),
+                // `r` replaces across everything the grep found — the bulk half
+                // of the viewer's `:s`. Only for a content grep: a name search
+                // matched filenames, and rewriting those is what `R` is for.
+                KeyCode::Char('r') => return self.start_grep_replace(),
                 // `p` panelizes: load the matches into the pane as a flat listing
                 // so they can be marked and bulk-operated on, not just jumped to.
                 KeyCode::Char('p') => {
@@ -892,6 +897,64 @@ impl App {
                 }
                 _ => {}
             }
+        Ok(())
+    }
+
+    /// The grep-replace preview: walk the list, uncheck what the pattern got
+    /// wrong, then Enter to write. Nothing has been written yet at this point,
+    /// so Esc is always free.
+    fn grep_replace_key(&mut self, key: KeyEvent) -> Result<()> {
+        let Popup::GrepReplace(plan) = &mut self.popup else { return Ok(()) };
+        let n = plan.changes.len();
+        match key.code {
+            KeyCode::Esc | KeyCode::Char('q') => {
+                self.popup = Popup::None;
+                self.message = Some(tr(self.lang, "replace cancelled — nothing written", "置換を取り消した（書き込みなし）").into());
+            }
+            KeyCode::Char('j') | KeyCode::Down => {
+                if n > 0 {
+                    plan.cursor = (plan.cursor + 1).min(n - 1);
+                }
+            }
+            KeyCode::Char('k') | KeyCode::Up => plan.cursor = plan.cursor.saturating_sub(1),
+            KeyCode::Char('d') | KeyCode::PageDown => {
+                if n > 0 {
+                    plan.cursor = (plan.cursor + 10).min(n - 1);
+                }
+            }
+            KeyCode::Char('u') | KeyCode::PageUp => plan.cursor = plan.cursor.saturating_sub(10),
+            KeyCode::Char('g') | KeyCode::Home => plan.cursor = 0,
+            KeyCode::Char('G') | KeyCode::End => plan.cursor = n.saturating_sub(1),
+            KeyCode::Char(' ') => {
+                if let Some(c) = plan.changes.get_mut(plan.cursor) {
+                    c.picked = !c.picked;
+                }
+                if n > 0 {
+                    plan.cursor = (plan.cursor + 1).min(n - 1);
+                }
+            }
+            // `a` flips the lot: off when everything is on, on otherwise, so
+            // one key both clears the list and puts it back.
+            KeyCode::Char('a') => {
+                let all_on = plan.changes.iter().all(|c| c.picked);
+                for c in &mut plan.changes {
+                    c.picked = !all_on;
+                }
+            }
+            // `f` unchecks the rest of the file under the cursor — the usual
+            // shape of "not this one, it's generated".
+            KeyCode::Char('f') => {
+                let Some(path) = plan.changes.get(plan.cursor).map(|c| c.path.clone()) else {
+                    return Ok(());
+                };
+                let on = plan.changes.iter().any(|c| c.path == path && c.picked);
+                for c in plan.changes.iter_mut().filter(|c| c.path == path) {
+                    c.picked = !on;
+                }
+            }
+            KeyCode::Enter => return self.commit_grep_replace(),
+            _ => {}
+        }
         Ok(())
     }
 

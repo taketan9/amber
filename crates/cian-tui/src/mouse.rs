@@ -572,6 +572,7 @@ impl App {
     /// no cursor (confirm dialogs, notices).
     pub(crate) fn set_popup_cursor(&mut self, i: usize) {
         match &mut self.popup {
+            Popup::GrepReplace(plan) => plan.cursor = i,
             Popup::ContextMenu { cursor, .. }
             | Popup::ColorPicker { cursor, .. }
             | Popup::SortPicker { cursor, .. }

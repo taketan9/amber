@@ -3299,6 +3299,7 @@ fn draw_popup(
         Popup::LocalDest { .. } => draw_local_dest(f, area, popup, zones, lang),
         Popup::SshUsers { .. } => draw_ssh_users(f, area, popup, hosts, zones, lang),
         Popup::FindResults { .. } => draw_find_results(f, area, popup, find, zones, lang),
+        Popup::GrepReplace(_) => draw_grep_replace(f, area, popup, zones, lang),
         Popup::Shortcuts { .. } => draw_shortcuts(f, area, popup, zones, lang),
         Popup::History { .. } => draw_history(f, area, popup, zones, lang),
         Popup::DestPicker { .. } => draw_dest_picker(f, area, popup, dests, zones, lang),
@@ -3689,6 +3690,7 @@ fn draw_simple_dialog(
         | Popup::Shortcuts { .. }
         | Popup::History { .. }
         | Popup::FindResults { .. }
+        | Popup::GrepReplace(_)
         | Popup::DestPicker { .. }
         | Popup::Viewer { .. }
         | Popup::Diff { .. }
@@ -4289,6 +4291,143 @@ fn draw_ssh_users(
             Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD),
         ),
         footer_area,
+    );
+}
+
+/// The grep-replace preview: every line that would change, before / after,
+/// with a checkbox. Unchecked rows are dimmed rather than hidden — the point
+/// of the list is to see what you decided *not* to do as well as what you did.
+fn draw_grep_replace(
+    f: &mut Frame,
+    area: Rect,
+    popup: &mut Popup,
+    zones: &mut Vec<PopupZone>,
+    lang: Lang,
+) {
+    let Popup::GrepReplace(plan) = popup else { return };
+    let w = 110u16.min(area.width.saturating_sub(2));
+    let h = area.height.saturating_sub(4).max(8);
+    let picked = plan.changes.iter().filter(|c| c.picked).count();
+    let files = {
+        let mut seen: Vec<&std::path::Path> = Vec::new();
+        for c in plan.changes.iter().filter(|c| c.picked) {
+            if !seen.contains(&c.path.as_path()) {
+                seen.push(c.path.as_path());
+            }
+        }
+        seen.len()
+    };
+    let title = format!(
+        " replace  {}  —  {}/{} line(s) in {} file(s) ",
+        plan.what,
+        picked,
+        plan.changes.len(),
+        files
+    );
+    let inner = popup_frame(f, area, w, h, truncate_middle(&title, w.saturating_sub(4) as usize), "");
+
+    // Bottom-up: the hint bar, the "before" text of the line under the cursor,
+    // and — when there is one — a note about files that could not be read,
+    // because a silently ignored file is the thing most likely to be mistaken
+    // for "already correct".
+    let note = (!plan.skipped.is_empty()) as u16;
+    let body_h = inner.height.saturating_sub(2 + note) as usize;
+    if plan.cursor < plan.scroll {
+        plan.scroll = plan.cursor;
+    } else if body_h > 0 && plan.cursor >= plan.scroll + body_h {
+        plan.scroll = plan.cursor + 1 - body_h;
+    }
+
+    let dim = Color::Rgb(120, 120, 140);
+    let mut last_file: Option<&std::path::Path> = None;
+    if plan.scroll > 0 {
+        last_file = plan.changes.get(plan.scroll - 1).map(|c| c.path.as_path());
+    }
+    for (row, (i, c)) in plan.changes.iter().enumerate().skip(plan.scroll).take(body_h).enumerate() {
+        let sel = i == plan.cursor;
+        let y = inner.y + row as u16;
+        let line_area = Rect::new(inner.x, y, inner.width, 1);
+        push_row_zone(zones, inner, y, i);
+        if sel {
+            f.render_widget(
+                Block::default().style(Style::default().bg(theme().selected_bg)),
+                line_area,
+            );
+        }
+        let base = if sel { Style::default().bg(theme().selected_bg) } else { Style::default() };
+        // The file name is printed once per run of lines from that file: with
+        // twenty hits in one file, repeating the path twenty times crowds out
+        // the text that is actually being decided on.
+        let same_file = last_file == Some(c.path.as_path());
+        last_file = Some(c.path.as_path());
+        let loc = if same_file {
+            format!("{:>8}: ", c.line + 1)
+        } else {
+            format!("{}:{}: ", c.path.file_name().map(|n| n.to_string_lossy()).unwrap_or_default(), c.line + 1)
+        };
+        let mark = if c.picked { "[x] " } else { "[ ] " };
+        let loc_w = width(&loc).min(inner.width as usize / 3);
+        let rest = (inner.width as usize).saturating_sub(4 + loc_w);
+        let text_style = if c.picked {
+            base.fg(Color::Rgb(225, 225, 240))
+        } else {
+            base.fg(dim).add_modifier(Modifier::CROSSED_OUT)
+        };
+        f.render_widget(
+            Paragraph::new(Line::from(vec![
+                Span::styled(mark, if c.picked { base.fg(theme().accent) } else { base.fg(dim) }),
+                Span::styled(truncate_middle(&loc, loc_w), base.fg(Color::Rgb(135, 135, 160))),
+                Span::styled(truncate(&c.after.replace('\n', "⏎"), rest), text_style),
+            ])),
+            line_area,
+        );
+    }
+
+    // The rows show what each line becomes. The one under the cursor is the
+    // one being decided, so show what it is now too — a diff of one, exactly
+    // where it is needed and nowhere it is not.
+    if let Some(c) = plan.changes.get(plan.cursor) {
+        f.render_widget(
+            Paragraph::new(Line::from(vec![
+                Span::styled(" now ", Style::default().fg(dim)),
+                Span::styled(
+                    truncate(&c.before, inner.width.saturating_sub(5) as usize),
+                    Style::default().fg(Color::Rgb(200, 160, 160)),
+                ),
+            ])),
+            Rect::new(inner.x, inner.y + inner.height.saturating_sub(2 + note), inner.width, 1),
+        );
+    }
+
+    if note == 1 {
+        let why = plan
+            .skipped
+            .iter()
+            .take(2)
+            .map(|s| {
+                format!("{} ({})", s.path.file_name().map(|n| n.to_string_lossy()).unwrap_or_default(), s.why)
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        let more = if plan.skipped.len() > 2 { format!(" +{}", plan.skipped.len() - 2) } else { String::new() };
+        f.render_widget(
+            Paragraph::new(truncate(
+                &format!(" {} not read: {why}{more}", plan.skipped.len()),
+                inner.width as usize,
+            ))
+            .style(Style::default().fg(Color::Rgb(220, 180, 120))),
+            Rect::new(inner.x, inner.y + inner.height.saturating_sub(2), inner.width, 1),
+        );
+    }
+
+    f.render_widget(
+        Paragraph::new(tr(
+            lang,
+            " Space=toggle  a=all  f=this file  Enter=write  Esc=cancel ",
+            " Space=切替  a=全部  f=このファイル  Enter=書き込み  Esc=取消 ",
+        ))
+        .style(Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD)),
+        Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1),
     );
 }
 

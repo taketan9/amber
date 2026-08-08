@@ -4332,6 +4332,99 @@
         assert_eq!(hits.len(), 3, "got {:?}", hits.iter().map(|h| &h.rel).collect::<Vec<_>>());
     }
 
+    /// Grep, then replace across everything it matched: the preview must show
+    /// what each line becomes, Space must be able to spare one, and nothing may
+    /// reach the disk until Enter.
+    #[test]
+    fn a_grep_can_be_replaced_across_every_file_it_matched() {
+        let d = tempfile::tempdir().unwrap();
+        let a = d.path().join("a.txt");
+        let b = d.path().join("b.log");
+        // CRLF and a tab, so the write path is held to the file it was given.
+        std::fs::write(&a, "ORA-600 first\r\nfine\r\nORA-600 third\r\n").unwrap();
+        std::fs::write(&b, b"col\tORA-600\n").unwrap();
+        let p = d.path().to_path_buf();
+        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+
+        app.start_find("ORA-600", cian_core::search::Mode::Content);
+        drain_find(&mut app);
+        assert!(matches!(&app.popup, Popup::FindResults { hits, .. } if hits.len() == 3));
+
+        // `r` asks only for the replacement — the pattern is the one on screen.
+        app.handle_key(key('r')).unwrap();
+        let Popup::TextInput { kind, .. } = &app.popup else { panic!("no prompt") };
+        assert!(matches!(kind, InputKind::GrepReplaceWith { paths, .. } if paths.len() == 2));
+        for c in "ORA-7445".chars() {
+            app.handle_key(key(c)).unwrap();
+        }
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+
+        let Popup::GrepReplace(plan) = &app.popup else { panic!("no preview: {:?}", app.popup) };
+        assert_eq!(plan.changes.len(), 3, "one row per changed line");
+        assert!(plan.changes.iter().all(|c| c.picked));
+        // The row order follows the walk, which the filesystem decides; find
+        // the rows by what they say instead.
+        let row = |plan: &crate::ReplacePlan, before: &str| {
+            plan.changes.iter().position(|c| c.before == before).expect("row for {before}")
+        };
+        assert_eq!(plan.changes[row(plan, "ORA-600 first")].after, "ORA-7445 first");
+        assert_eq!(plan.changes[row(plan, "col\tORA-600")].after, "col\tORA-7445");
+        assert_eq!(
+            std::fs::read(&a).unwrap(),
+            b"ORA-600 first\r\nfine\r\nORA-600 third\r\n",
+            "the preview must not have written anything",
+        );
+
+        // Space spares one line — and steps on, so a run can be unchecked by
+        // holding it down.
+        let spare = row(plan, "ORA-600 third");
+        if let Popup::GrepReplace(plan) = &mut app.popup {
+            plan.cursor = spare;
+        }
+        app.handle_key(key(' ')).unwrap();
+        let Popup::GrepReplace(plan) = &app.popup else { panic!("preview gone") };
+        assert!(!plan.changes[spare].picked);
+        assert!(plan.cursor > spare || spare == plan.changes.len() - 1);
+
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+        assert!(matches!(app.popup, Popup::None));
+        assert_eq!(
+            std::fs::read(&a).unwrap(),
+            b"ORA-7445 first\r\nfine\r\nORA-600 third\r\n",
+            "CRLF kept, and the unchecked line left alone",
+        );
+        assert_eq!(std::fs::read(&b).unwrap(), b"col\tORA-7445\n", "the tab survived");
+        assert!(app.message.as_deref().unwrap_or("").contains("2 line(s) in 2 file(s)"));
+    }
+
+    /// Esc from the preview is free, and a name search has nothing to replace.
+    #[test]
+    fn a_grep_replace_can_always_be_backed_out_of() {
+        let d = tempfile::tempdir().unwrap();
+        let f = d.path().join("keep.txt");
+        std::fs::write(&f, "TARGET\n").unwrap();
+        let p = d.path().to_path_buf();
+        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+
+        // A name search refuses, rather than replacing filenames by surprise.
+        app.start_find("keep", cian_core::search::Mode::Name);
+        drain_find(&mut app);
+        app.handle_key(key('r')).unwrap();
+        assert!(matches!(app.popup, Popup::FindResults { .. }), "still the results");
+        assert!(app.message.as_deref().unwrap_or("").contains("grep"));
+
+        app.start_find("TARGET", cian_core::search::Mode::Content);
+        drain_find(&mut app);
+        app.handle_key(key('r')).unwrap();
+        for c in "GONE".chars() {
+            app.handle_key(key(c)).unwrap();
+        }
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+        assert!(matches!(app.popup, Popup::GrepReplace(_)));
+        app.handle_key(code(KeyCode::Esc)).unwrap();
+        assert_eq!(std::fs::read_to_string(&f).unwrap(), "TARGET\n", "Esc wrote nothing");
+    }
+
     #[test]
     fn choosing_a_grep_hit_opens_the_viewer_at_that_line() {
         let d = tempfile::tempdir().unwrap();

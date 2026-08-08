@@ -1705,6 +1705,112 @@ impl App {
             );
     }
 
+    /// `r` in the grep results: ask what the matched text should become.
+    ///
+    /// The pattern is not asked for again — it is the one that produced the
+    /// list on screen, and re-typing it is the easiest way to replace
+    /// something other than what you are looking at.
+    pub(crate) fn start_grep_replace(&mut self) -> Result<()> {
+        let Some(job) = self.find_job.as_ref() else { return Ok(()) };
+        if job.mode != cian_core::search::Mode::Content {
+            self.message =
+                Some(tr(self.lang, "replace works on a grep, not a name search", "置換は grep 結果に対して行う（名前検索では不可）").into());
+            return Ok(());
+        }
+        let pattern = job.query.clone();
+        // One entry per file, in the order the grep reached them: a file with
+        // twenty matching lines is still one file to open and rewrite.
+        let mut paths: Vec<PathBuf> = Vec::new();
+        if let Popup::FindResults { hits, .. } = &self.popup {
+            for h in hits {
+                if !h.is_dir && !paths.contains(&h.path) {
+                    paths.push(h.path.clone());
+                }
+            }
+        }
+        if paths.is_empty() {
+            self.message = Some(tr(self.lang, "nothing to replace in", "置換対象がない").into());
+            return Ok(());
+        }
+        self.stop_find();
+        self.popup = text_input(
+            format!("replace in {} file(s)", paths.len()),
+            format!("replace {pattern:?} with   (blank = delete it):"),
+            String::new(),
+            InputKind::GrepReplaceWith { paths, pattern },
+        );
+        Ok(())
+    }
+
+    /// Build the preview: read every matched file and work out the exact lines
+    /// that would change. Still nothing written.
+    pub(crate) fn build_grep_replace(&mut self, paths: Vec<PathBuf>, pattern: &str, with: &str) {
+        // The grep already decided what `pattern` means — a bare needle is a
+        // case-insensitive substring, `/re/` a regex — so reuse its matcher
+        // rather than re-parsing through `s/old/new/` and risking a different
+        // answer to the one the user is looking at.
+        let matcher = match cian_core::search::Matcher::parse(pattern) {
+            Ok(m) => m,
+            Err(e) => {
+                self.message = Some(format!("bad pattern: {e}"));
+                return;
+            }
+        };
+        let sub = cian_core::substitute::Substitution {
+            matcher,
+            replacement: cian_core::substitute::unescape(with),
+            confirm: false,
+            // Every occurrence: a grep hit is a line, and replacing only the
+            // first match on a line that has three is never what was meant.
+            global: true,
+        };
+        let (changes, skipped) = cian_core::grepedit::plan(&paths, &sub);
+        if changes.is_empty() {
+            self.popup = Popup::None;
+            self.message = Some(match skipped.len() {
+                0 => format!("nothing to change: no line becomes different from {pattern:?}"),
+                n => format!("nothing to change ({n} file(s) unreadable)"),
+            });
+            return;
+        }
+        let what = format!("{pattern} → {}", if with.is_empty() { "(nothing)" } else { with });
+        self.popup = Popup::GrepReplace(Box::new(crate::ReplacePlan {
+            changes,
+            skipped,
+            cursor: 0,
+            scroll: 0,
+            what,
+        }));
+    }
+
+    /// Enter on the preview: write the checked lines and report what happened.
+    pub(crate) fn commit_grep_replace(&mut self) -> Result<()> {
+        let Popup::GrepReplace(plan) = std::mem::replace(&mut self.popup, Popup::None) else {
+            return Ok(());
+        };
+        if !plan.changes.iter().any(|c| c.picked) {
+            self.message = Some(tr(self.lang, "nothing checked — nothing written", "チェックが無いので何も書いていない").into());
+            return Ok(());
+        }
+        let report = cian_core::grepedit::apply(&plan.changes);
+        let mut msg = format!("replaced {} line(s) in {} file(s)", report.lines, report.files);
+        if report.stale > 0 {
+            msg.push_str(&format!(
+                " — {} line(s) skipped: the file changed since the preview",
+                report.stale
+            ));
+        }
+        if let Some(first) = report.errors.first() {
+            msg.push_str(&format!(" — {first}"));
+            if report.errors.len() > 1 {
+                msg.push_str(&format!(" (+{} more)", report.errors.len() - 1));
+            }
+        }
+        self.message = Some(msg);
+        self.reload_both();
+        Ok(())
+    }
+
     /// Walk the tree below the focused pane on a worker thread.
     pub(crate) fn start_find(&mut self, needle: &str, mode: cian_core::search::Mode) {
         self.begin_find(needle, mode, None);
@@ -2851,6 +2957,10 @@ impl App {
             }
             InputKind::GrepRecursive => {
                 self.start_find(&name, cian_core::search::Mode::Content);
+                return Ok(());
+            }
+            InputKind::GrepReplaceWith { paths, pattern } => {
+                self.build_grep_replace(paths.clone(), pattern, &name);
                 return Ok(());
             }
             InputKind::AiShellCmd => {

@@ -120,7 +120,7 @@ pub fn parse(input: &str) -> Result<Substitution, String> {
 
 /// Turn the escapes a replacement may carry into real characters. Without this
 /// there is no way to type a newline or a tab into the prompt at all.
-fn unescape(s: &str) -> String {
+pub fn unescape(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let mut chars = s.chars();
     while let Some(c) = chars.next() {
