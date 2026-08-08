@@ -637,7 +637,9 @@ fn tabs_title<'a>(
         // rather than a directory, so it is obvious the pane is not a folder and
         // that `b` / Esc leaves it.
         if let Some(lbl) = tab.flat_label() {
-            return format!(" {} ⌥ {} ", i + 1, lbl);
+            // …and says how, because "the pane is not a folder any more" is
+            // easy to notice and "Esc puts it back" is not.
+            return format!(" {} ⌥ {}  ⏎Esc ", i + 1, lbl);
         }
         let main = if is_active {
             tab.cwd.display().to_string()
@@ -5133,8 +5135,8 @@ fn draw_viewer(
     // the text agree about which is which.
     let eol_mark = if view.kind == cian_core::viewer::ViewKind::Text {
         let arrow = match view.eol {
-            cian_core::viewer::Eol::Crlf => "↵↓",
-            cian_core::viewer::Eol::Cr => "↵",
+            cian_core::viewer::Eol::Crlf => "↵",
+            cian_core::viewer::Eol::Cr => "←",
             cian_core::viewer::Eol::Lf => "↓",
         };
         format!(" · {} {}", view.eol.label(), arrow)
@@ -5304,20 +5306,25 @@ fn draw_viewer(
             // stays in buffer characters. Expanding the string first, as this
             // used to, meant the file was saved back with its tabs already
             // spent.
-            let trail_from = usize::MAX;
-                    let tab_w = cian_core::viewer::tab_width();
             let marks = show_ws && !*preview;
-            let shown = |j: usize, ch: char, at: usize| -> String {
+            let trail_from = if marks {
+                l.chars().count() - l.chars().rev().take_while(|c| *c == ' ').count()
+            } else {
+                usize::MAX
+            };
+            // `w` is how many columns this character will take, worked out by
+            // the same function the block selection and the mouse use.
+            let shown = |j: usize, ch: char, w: usize| -> String {
                 match ch {
-                    '\t' if marks => format!("→{}", " ".repeat(tab_w - 1 - (at % tab_w))),
-                    '\t' => " ".repeat(tab_w - (at % tab_w)),
+                    '\t' if marks => format!("→{}", " ".repeat(w.saturating_sub(1))),
+                    '\t' => " ".repeat(w),
                     // An ideographic space is the one that breaks YAML and
                     // shell scripts while looking exactly like nothing.
                     '\u{3000}' if marks => "□".to_string(),
-                    // Every half-width space, not only the trailing ones —
-                    // Sakura shows them all, and once the marks are asked for
-                    // that is what they are asked for.
-                    ' ' if marks => "·".to_string(),
+                    // Only the *trailing* half-width spaces. Dotting every
+                    // gap between words makes prose unreadable, and the ones
+                    // that matter — the invisible difference between a line
+                    // that ends cleanly and one that does not — are at the end.
                     ' ' if j >= trail_from => "·".to_string(),
                     other => other.to_string(),
                 }
@@ -5326,7 +5333,7 @@ fn draw_viewer(
             let mut chars: Vec<char> = Vec::new();
             let mut drawn = 0usize;
             for ch in l.chars() {
-                let w = if ch == '\t' { tab_w - (drawn % tab_w) } else { 1 };
+                let w = cian_core::textops::char_cols(ch, drawn);
                 if drawn + w > avail {
                     break;
                 }
@@ -5427,8 +5434,9 @@ fn draw_viewer(
                     spans.push(Span::styled(std::mem::take(&mut run), run_style));
                 }
                 run_style = st;
-                let text = shown(j, *ch, at);
-                at += text.chars().count();
+                let w = cian_core::textops::char_cols(*ch, at);
+                let text = shown(j, *ch, w);
+                at += w;
                 run.push_str(&text);
             }
             if !run.is_empty() {
@@ -5446,8 +5454,12 @@ fn draw_viewer(
             if marks && len == l.chars().count() {
                 spans.push(Span::styled(
                     match view.eol {
-                        cian_core::viewer::Eol::Crlf => "↵↓",
-                        cian_core::viewer::Eol::Cr => "↵",
+                        // One glyph each, the way Sakura draws them: a bent
+                        // arrow for a carriage return, a straight one for a
+                        // line feed. Two glyphs for CRLF said the same thing
+                        // twice and cost a column.
+                        cian_core::viewer::Eol::Crlf => "↵",
+                        cian_core::viewer::Eol::Cr => "←",
                         cian_core::viewer::Eol::Lf => "↓",
                     },
                     Style::default().fg(Color::Rgb(110, 140, 175)),
@@ -5518,13 +5530,19 @@ fn draw_viewer(
         // What the prompt takes, shown rather than assumed: the replace form
         // first, then the word commands, because a blank prompt with no menu
         // is a prompt you have to have read the manual to use.
-        format!(
-            ":{}_   {}",
-            cmd,
-            tr(lang,
-               "s/old/new/[gci]  ·  w wq q q!  block outline ws sort uniq han zen expand unexpand reindent lf crlf",
-               "s/old/new/[gci]  ·  w wq q q!  block outline ws sort uniq han zen expand unexpand reindent lf crlf")
-        )
+        // The menu is for someone who has not started yet. Once there is
+        // something typed, it is the typed text that has to be readable, and
+        // a wall of vocabulary beside it is only in the way.
+        if cmd.is_empty() {
+            format!(
+                ":_   {}",
+                tr(lang,
+                   "s/old/new/[gci] · w wq q q! · block outline ws sort uniq han zen expand[ all] unexpand reindent lf crlf",
+                   "s/old/new/[gci] · w wq q q! · block outline ws sort uniq han zen expand[ all] unexpand reindent lf crlf"),
+            )
+        } else {
+            format!(":{}_", cmd)
+        }
     } else {
         match find_input {
             Some(q) => format!("/{}_", q),

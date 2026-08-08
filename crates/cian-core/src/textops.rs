@@ -424,7 +424,12 @@ pub struct Block {
 /// How wide a character is drawn, with a tab reaching the next stop from `at`.
 /// A zero-width mark counts as nothing, which keeps a combining accent
 /// attached to the character it belongs to.
-fn char_cols(c: char, at: usize) -> usize {
+///
+/// Public because the renderer, the mouse and the block selection all have to
+/// agree; when the renderer had its own idea — every character one column —
+/// a tab after a full-width character landed on the wrong stop and a
+/// tab-separated file failed to line up however wide the stops were set.
+pub fn char_cols(c: char, at: usize) -> usize {
     if c == '\t' {
         let w = crate::viewer::tab_width();
         return w - (at % w);

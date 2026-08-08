@@ -347,6 +347,42 @@ impl App {
             self.open_mermaid_in_browser();
             return Ok(());
         }
+        // `r` after a search: replace what was found, without typing the
+        // pattern a second time. The prompt arrives as `s/<what you searched
+        // for>/`, so all that is left is the replacement — and the `c` flag,
+        // which walks the hits one at a time.
+        if !ctrl && !alt && key.code == KeyCode::Char('r')
+            && matches!(self.popup, Popup::Viewer { editable: true, .. })
+        {
+            let q = if let Popup::Viewer { find_query, .. } = &self.popup {
+                find_query.clone().filter(|q| !q.is_empty())
+            } else {
+                None
+            };
+            match q {
+                Some(q) => {
+                    // The delimiter has to be one the pattern does not
+                    // contain, or the prompt would arrive already broken —
+                    // `/re/` patterns are full of slashes by definition.
+                    let d = ['/', '#', '@', '!', '%', ',']
+                        .into_iter()
+                        .find(|c| !q.contains(*c))
+                        .unwrap_or('/');
+                    if let Popup::Viewer { sub_input, .. } = &mut self.popup {
+                        *sub_input = Some(format!("s{d}{q}{d}"));
+                    }
+                    self.message = Some(tr(self.lang,
+                        "type the replacement — add c before Enter to confirm each one",
+                        "置換後の文字を入力 — 末尾に c を足すと1件ずつ確認").into());
+                }
+                None => {
+                    self.message = Some(tr(self.lang,
+                        "search with / first, then r replaces what it found",
+                        "先に / で検索してから r で置換").into());
+                }
+            }
+            return Ok(());
+        }
         // `/`, `f` and `Shift+F` all open the search prompt (the pane's own
         // find keys, so the reflex carries over into the viewer and preview).
         if !ctrl && matches!(key.code, KeyCode::Char('/') | KeyCode::Char('f') | KeyCode::Char('F')) {

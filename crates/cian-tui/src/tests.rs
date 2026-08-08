@@ -678,7 +678,7 @@
         // written, not about how it looks. With the marks on (the default) the
         // first of those columns says what it is.
         let screen = render(&mut app, 100, 30).join("\n");
-        assert!(screen.contains("→   echo·one↓"), "tab, space and line ending all marked");
+        assert!(screen.contains("→   echo one↓"), "the tab and the line ending are marked: {screen}");
         app.show_ws = false;
         let plain = render(&mut app, 100, 30).join("\n");
         assert!(plain.contains("    echo one"), "and plain with the marks off");
@@ -732,6 +732,94 @@
             &[0xEF, 0xBB, 0xBF],
             "the byte-order mark came back",
         );
+    }
+
+    /// `r` after a search takes the pattern with it, so a replace is the
+    /// replacement text and nothing else.
+    #[test]
+    fn r_replaces_what_the_search_just_found() {
+        let (_d, mut app) = viewer_on("alpha bravo\nbravo charlie\n");
+        // Nothing searched for yet: it says so rather than opening a prompt
+        // with nothing in it.
+        app.handle_key(key('r')).unwrap();
+        assert!(matches!(app.popup, Popup::Viewer { sub_input: None, .. }));
+        assert!(app.message.as_deref().unwrap_or("").contains('/'));
+
+        app.handle_key(key('/')).unwrap();
+        for c in "bravo".chars() {
+            app.handle_key(key(c)).unwrap();
+        }
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+        app.handle_key(key('r')).unwrap();
+        assert!(
+            matches!(&app.popup, Popup::Viewer { sub_input: Some(s), .. } if s == "s/bravo/"),
+            "seeded with what was searched for: {:?}",
+            app.popup,
+        );
+        for c in "BRAVO/g".chars() {
+            app.handle_key(key(c)).unwrap();
+        }
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+        assert_eq!(viewer_lines(&app), ["alpha BRAVO", "BRAVO charlie"]);
+
+        // A pattern full of slashes gets a delimiter that is not one.
+        let (_d2, mut app) = viewer_on("/usr/local/bin\n");
+        app.handle_key(key('/')).unwrap();
+        for c in "/usr/".chars() {
+            app.handle_key(key(c)).unwrap();
+        }
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+        app.handle_key(key('r')).unwrap();
+        let Popup::Viewer { sub_input: Some(seed), .. } = &app.popup else { panic!("no prompt") };
+        assert!(!seed.starts_with("s/"), "a slash delimiter would break it: {seed:?}");
+        assert!(seed.contains("/usr/"), "the pattern is intact: {seed:?}");
+    }
+
+    /// Whether a tab-separated file lines up is arithmetic, and the terminal's
+    /// font has no say in it. Checked in the cell buffer so "it looks off" can
+    /// be told apart from "it is off".
+    #[test]
+    fn a_tab_separated_file_lines_up_at_the_right_stop() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::write(d.path().join("t.tsv"), "col1\tcol2\tcol3\nあ\tい\tう\n").unwrap();
+        let p = d.path().to_path_buf();
+        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        app.show_ws = false;
+        app.active_pane_mut().unwrap().cursor =
+            app.active_pane().unwrap().entries.iter().position(|e| e.name == "t.tsv").unwrap();
+        app.handle_key(code(KeyCode::F(3))).unwrap();
+
+        // Where a marker sits on the screen, as a column number.
+        let col_of = |app: &mut App, needle: &str, nth: usize| -> usize {
+            let rows = render(app, 120, 20);
+            let row = rows.iter().filter(|r| r.contains(needle)).nth(nth).expect("row");
+            // Cells, not bytes: the row holds `あ`, which is three bytes and
+            // one cell (the backend writes a wide char's second cell as a
+            // space of its own).
+            let at = row.find(needle).expect("column");
+            row[..at].chars().count()
+        };
+
+        // Stops every four: `col1` fills one exactly, so its tab moves on to
+        // the next — the field after it lands at eight, while a two-column
+        // `あ` in the same place lands at four. They cannot line up.
+        cian_core::viewer::set_tab_width(4);
+        let (a, b) = (col_of(&mut app, "col2", 0), col_of(&mut app, "い", 0));
+        assert_ne!(a, b, "four columns is too narrow for this file, by arithmetic");
+
+        // Eight is wide enough for both, so they do.
+        cian_core::viewer::set_tab_width(8);
+        assert_eq!(
+            col_of(&mut app, "col2", 0),
+            col_of(&mut app, "い", 0),
+            "the second field starts in the same column on both rows",
+        );
+        assert_eq!(
+            col_of(&mut app, "col3", 0),
+            col_of(&mut app, "う", 0),
+            "and so does the third",
+        );
+        cian_core::viewer::set_tab_width(4);
     }
 
     /// The reports from the second pass: a tab drawn outside the viewer moved
