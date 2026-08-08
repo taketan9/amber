@@ -715,6 +715,40 @@
         );
     }
 
+    /// A message must be readable on a narrow terminal, where the status
+    /// chips it shares a row with would otherwise push it off the edge — the
+    /// reason `:keys`, "unknown command" and every other answer appeared to
+    /// do nothing at all.
+    #[test]
+    fn a_message_is_never_the_thing_that_falls_off_the_status_line() {
+        let d = tempfile::tempdir().unwrap();
+        // A long path, so the chips have plenty to say.
+        let deep = d.path().join("a-fairly-long-directory-name").join("and-another-one-here");
+        std::fs::create_dir_all(&deep).unwrap();
+        std::fs::write(deep.join("f.txt"), "x\n").unwrap();
+        let mut app = App::new(deep.clone(), deep, cian_lua::Config::default()).unwrap();
+
+        app.mode = Mode::Command;
+        app.command_buffer = "keys".into();
+        app.run_command();
+        for w in [60u16, 80, 120] {
+            let screen = render(&mut app, w, 24).join("\n");
+            assert!(screen.contains("showing every key"), "at {w} columns the answer is off screen");
+        }
+
+        // …and the report it turns on is readable too.
+        app.handle_key(key('j')).unwrap();
+        let screen = render(&mut app, 60, 24).join("\n");
+        assert!(screen.contains("key: Char('j')"), "the key report is off screen: {screen}");
+
+        // An unknown command says so rather than appearing to do nothing.
+        app.mode = Mode::Command;
+        app.command_buffer = "nosuchcommand".into();
+        app.run_command();
+        let screen = render(&mut app, 60, 24).join("\n");
+        assert!(screen.contains("unknown command"), "{screen}");
+    }
+
     /// The reported problems, each pinned so it cannot come back:
     /// `:` opened with `s/` already typed so no word command was reachable;
     /// `]]` disagreed with the screen in the Markdown preview; Space did not

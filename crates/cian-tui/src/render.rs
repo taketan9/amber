@@ -2050,6 +2050,7 @@ fn draw_status(f: &mut Frame, area: Rect, app: &App) {
         }
     }
 
+    let has_msg = app.message.as_ref().is_some_and(|m| !m.is_empty());
     if let Some(msg) = app.message.as_ref() {
         if !msg.is_empty() {
             spans.push(dim_sep.clone());
@@ -2063,6 +2064,23 @@ fn draw_status(f: &mut Frame, area: Rect, app: &App) {
         }
     }
 
+    // Everything on this row except the message is also on screen somewhere
+    // else — the path is in the pane title, the branch in its header. The
+    // message is the only thing here that is news, and it was last in the
+    // queue for space: on a real terminal with a long path and a git chip it
+    // was pushed off the right-hand edge and simply never seen. So when they
+    // do not all fit, the chips give way, one at a time, from the left —
+    // keeping the mode chip, which is what says whether a keystroke will be
+    // read as a command.
+    if has_msg {
+        let total = |v: &[Span]| v.iter().map(|s| width(&s.content)).sum::<usize>();
+        let room = area.width as usize;
+        // The message is the last two spans (separator + text); never drop it.
+        while total(&spans) > room && spans.len() > 3 {
+            spans.remove(1);
+        }
+    }
+
     let line = Line::from(spans);
     let p = Paragraph::new(line).style(Style::default().bg(theme().status_bg));
     f.render_widget(p, area);
@@ -2071,7 +2089,9 @@ fn draw_status(f: &mut Frame, area: Rect, app: &App) {
     // sits in the bottom-right and tracks whichever split/tab is active —
     // rather than staying on the first pane. Drawn as its own right-aligned
     // paragraph over the same row.
-    if let Some(title) = app.shell.active_title() {
+    // …but not over a message. The title is the same every frame; the message
+    // is the answer to what was just pressed.
+    if let Some(title) = app.shell.active_title().filter(|_| !has_msg) {
         let shown = format!(" {} ", truncate(&title, (area.width / 2).max(8) as usize));
         f.render_widget(
             Paragraph::new(shown)
