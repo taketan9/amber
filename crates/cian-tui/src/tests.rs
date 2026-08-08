@@ -877,9 +877,9 @@
 
         // The arrows step, at their fixed columns.
         let f = app.viewer_frame;
-        click(&mut app, f.x + 1, f.y);
+        click(&mut app, f.x + 2, f.y);
         assert_eq!(shown(&app), "beta.txt", "◂ went back one");
-        click(&mut app, f.x + 3, f.y);
+        click(&mut app, f.x + 4, f.y);
         assert_eq!(shown(&app), "gamma.txt", "▸ went forward one");
 
         // A menu opened from the viewer keeps the file on screen behind it.
@@ -891,6 +891,55 @@
             screen.contains("Theme") || screen.contains("テーマ"),
             "with the menu over it:\n{screen}",
         );
+    }
+
+    /// The mouse reaches both halves of a split and both tab arrows. All of
+    /// this is geometry, and the geometry used to be measured against a
+    /// viewer that filled the screen even when it had half of it.
+    #[test]
+    fn the_mouse_reaches_the_other_half_and_the_tab_arrows() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::write(d.path().join("a.txt"), "AAA\n").unwrap();
+        std::fs::write(d.path().join("b.txt"), "BBB\n").unwrap();
+        std::fs::write(d.path().join("c.txt"), "CCC\n").unwrap();
+        let p = d.path().to_path_buf();
+        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        for n in ["a.txt", "b.txt", "c.txt"] {
+            let path = app.active_pane().unwrap().entries.iter().find(|e| e.name == n).unwrap().path.clone();
+            app.active_pane_mut().unwrap().marks.insert(path);
+        }
+        app.handle_key(code(KeyCode::F(3))).unwrap();
+        let shown = |app: &App| match &app.popup {
+            Popup::Viewer { view, .. } => view.lines.join("\n"),
+            other => panic!("not a viewer: {other:?}"),
+        };
+        let click = |app: &mut App, c: u16, r: u16| {
+            app.handle_mouse(crossterm::event::MouseEvent {
+                kind: crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+                column: c,
+                row: r,
+                modifiers: KeyModifiers::NONE,
+            });
+        };
+
+        // The arrows step through the open files.
+        let _ = render(&mut app, 160, 30);
+        let f = app.viewer_frame;
+        click(&mut app, f.x + 2, f.y);
+        assert_eq!(shown(&app), "CCC", "◂ wrapped back to the last");
+        click(&mut app, f.x + 4, f.y);
+        assert_eq!(shown(&app), "AAA", "▸ came round again");
+
+        // Split, then click the half the keyboard is not on.
+        app.handle_key(KeyEvent::new(KeyCode::F(8), KeyModifiers::SHIFT)).unwrap();
+        let _ = render(&mut app, 160, 30);
+        let theirs = app.viewer_half_rects[1];
+        assert!(theirs.width > 0, "the other half was measured");
+        click(&mut app, theirs.x + 5, theirs.y + 3);
+        assert_eq!(shown(&app), "BBB", "the keyboard crossed to the half that was clicked");
+        let theirs = app.viewer_half_rects[1];
+        click(&mut app, theirs.x + 5, theirs.y + 3);
+        assert_eq!(shown(&app), "AAA", "and back again");
     }
 
     /// A split must not draw anything but the viewer. It used to draw every

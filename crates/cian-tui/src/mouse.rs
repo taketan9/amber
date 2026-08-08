@@ -28,18 +28,19 @@ impl App {
         // whole lines (line-wise visual), the wheel scrolls, and right-click
         // copies. Handled before the blanket popup guard below.
         if matches!(self.popup, Popup::Viewer { .. }) {
-            // The tab arrows sit in the top border, two columns in. The body
-            // starts one row below it and two columns right of the frame.
+            // The tab strip lives in the top border. A title starts one column
+            // inside the frame and opens with " ◂ ▸ ", which puts the arrows
+            // at the third and fifth columns of the box.
             let frame = self.viewer_frame;
             if self.viewer_tab_count() > 1
                 && matches!(ev.kind, MouseEventKind::Down(MouseButton::Left))
                 && row == frame.y
             {
-                if col == frame.x + 1 {
+                if col == frame.x + 2 {
                     self.viewer_switch_tab(false);
                     return;
                 }
-                if col == frame.x + 3 {
+                if col == frame.x + 4 {
                     self.viewer_switch_tab(true);
                     return;
                 }

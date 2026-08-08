@@ -498,6 +498,9 @@ pub(crate) fn draw(f: &mut Frame, app: &mut App) {
             } else {
                 (first, second)
             };
+            // Where each half ended up, so a click in the one the keyboard is
+            // not on can cross to it.
+            app.viewer_half_rects = [mine, theirs];
             let mut other = other;
             draw_viewer(f, theirs, &mut other, lang, show_ws, None, (0, &[]));
             f.render_widget(
@@ -560,6 +563,9 @@ pub(crate) fn draw(f: &mut Frame, app: &mut App) {
     }
     if !matches!(app.popup, Popup::Viewer { .. }) {
         app.viewer_tab_rects.clear();
+    }
+    if app.viewer_split.is_none() {
+        app.viewer_half_rects = [Rect::new(0, 0, 0, 0); 2];
     }
 
     // A brief "starting up" splash while the AI probe runs — non-blocking (it
