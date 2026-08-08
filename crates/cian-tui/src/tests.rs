@@ -339,7 +339,7 @@
                 e.cloud = true;
             }
         }
-        app.toggle_preview();
+        app.preview_on = true;
         let out = render(&mut app, 110, 30).join("\n");
         assert!(out.contains("cloud-only") || out.contains("クラウド上"), "explains why: {out}");
         assert!(!out.contains("secret contents"), "the file was not read");
@@ -5067,7 +5067,7 @@
             let pane = app.active_pane_mut().unwrap();
             pane.cursor = pane.entries.iter().position(|e| e.name == "hello.txt").unwrap();
         }
-        app.toggle_preview();
+        assert!(app.preview_on, "preview is on out of the box");
         let out = render(&mut app, 110, 36).join("\n");
         assert!(out.contains("⌥ preview"), "panel is labelled: {out}");
         assert!(out.contains("preview-me"), "shows the cursor file's text");
@@ -5086,7 +5086,7 @@
         let out = render(&mut app, 110, 36).join("\n");
         assert!(!out.contains("⌥ preview"), "shell focus shows the shell");
 
-        // And off means off, whatever has focus.
+        // And off means off, whatever has focus (the toggle flips on → off).
         app.focus(FocusedPane::Left);
         app.toggle_preview();
         let out = render(&mut app, 110, 36).join("\n");
@@ -5105,7 +5105,7 @@
             let pane = app.active_pane_mut().unwrap();
             pane.cursor = pane.entries.iter().position(|e| e.name == "sub").unwrap();
         }
-        app.toggle_preview();
+        app.preview_on = true;
         let out = render(&mut app, 110, 36).join("\n");
         assert!(out.contains("inside.txt"), "directory listing shown: {out}");
     }

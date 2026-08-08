@@ -2175,7 +2175,7 @@ impl App {
             crumb_rects: Vec::new(),
             gfx_picker: None,
             img_proto: None,
-            preview_on: false,
+            preview_on: config.options.preview.unwrap_or(true),
             preview: None,
             preview_gfx: None,
             archive_cache: None,

@@ -89,6 +89,9 @@ pub struct Options {
     /// while cian isn't in the foreground's attention. Defaults to true. The
     /// job has to have run at least `notify_min_secs` for it to fire.
     pub notify: Option<bool>,
+    /// Start with the cursor-follow preview on (the shell panel shows the
+    /// file under the cursor). Defaults to true; :preview / T toggles live.
+    pub preview: Option<bool>,
     /// Let sweeps (grep, :count, :hash, :dupes, :preview) read cloud
     /// placeholder files, downloading them. Off by default — see
     /// `cian_core::cloud`.
@@ -726,6 +729,12 @@ fn install_api(lua: &Lua, builder: &Rc<RefCell<Builder>>) -> mlua::Result<()> {
                         Err(_) => bm
                             .errors
                             .push("set_option: animation_ms expects a number".into()),
+                    },
+                    "preview" => match bool::from_lua(val, lua) {
+                        Ok(v) => bm.options.preview = Some(v),
+                        Err(_) => bm
+                            .errors
+                            .push("set_option: preview expects a boolean".into()),
                     },
                     "read_cloud_files" => match bool::from_lua(val, lua) {
                         Ok(v) => bm.options.read_cloud_files = Some(v),

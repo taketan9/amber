@@ -1971,18 +1971,13 @@ impl App {
             // on Ctrl+Enter above.)
             (false, false, KeyCode::Char('o')) => { self.sync_active_from_other()?; }
             (false, true, KeyCode::Char('O')) => { self.sync_other_from_active()?; }
-            // Enter alone keeps the OS-open behavior until viewer ships in sprint 5.
-            (false, _, KeyCode::Enter) => {
-                let is_dir = self.active_pane()
-                    .and_then(|p| p.selected())
-                    .map(|e| e.is_dir)
-                    .unwrap_or(false);
-                if is_dir {
-                    if let Some(p) = self.active_pane_mut() { p.enter_selected()?; }
-                } else {
-                    self.open_externally();
-                }
-            }
+            // Enter and a double-click must be the same action, so both go
+            // through activate_selected — which also knows about archives
+            // (browse in, not OS-open) and archive members. The keyboard used
+            // to have its own copy of the logic here, which is exactly how
+            // Enter on a zip kept opening Finder after the mouse learned
+            // better.
+            (false, _, KeyCode::Enter) => self.activate_selected()?,
             _ => {}
         }
         Ok(())

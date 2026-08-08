@@ -193,8 +193,24 @@ pub fn view_file(path: &Path) -> Result<View> {
         });
     }
 
-    let lines = to_lines(&TextEncoding::Utf8.decode(&buf));
-    Ok(View { kind: ViewKind::Text, lines, total_bytes, truncated, encoding: TextEncoding::Utf8, bom: false, bytes: buf })
+    // UTF-8 first; when that trips on invalid sequences, try Shift_JIS — the
+    // same fallback grep uses, because the logs this viewer meets (Oracle
+    // alert logs, AIX batch output) are still written in it. Only a clean
+    // SJIS decode wins; otherwise the U+FFFD-marked UTF-8 stands, which at
+    // least shows *where* the bytes are broken.
+    let (utf8, _, utf8_errors) = encoding_rs::UTF_8.decode(&buf);
+    let (text, encoding) = if utf8_errors {
+        let (sjis, _, sjis_errors) = encoding_rs::SHIFT_JIS.decode(&buf);
+        if sjis_errors {
+            (utf8.into_owned(), TextEncoding::Utf8)
+        } else {
+            (sjis.into_owned(), TextEncoding::ShiftJis)
+        }
+    } else {
+        (utf8.into_owned(), TextEncoding::Utf8)
+    };
+    let lines = to_lines(&text);
+    Ok(View { kind: ViewKind::Text, lines, total_bytes, truncated, encoding, bom: false, bytes: buf })
 }
 
 impl View {
@@ -324,9 +340,11 @@ mod tests {
         assert!(view_file(d.path()).is_err());
     }
 
-    /// A Shift_JIS file is mojibake as UTF-8 but readable once re-decoded.
+    /// A Shift_JIS file opens readable straight away: UTF-8 trips on its
+    /// bytes, so the automatic fallback decodes it — no trip through the
+    /// encoding picker. The picker still works for overriding.
     #[test]
-    fn shift_jis_can_be_re_decoded() {
+    fn shift_jis_auto_decodes_on_open() {
         let d = tempfile::tempdir().unwrap();
         let f = d.path().join("sjis.txt");
         // "日本語" in Shift_JIS.
@@ -334,10 +352,11 @@ mod tests {
         fs::write(&f, sjis).unwrap();
         let mut v = view_file(&f).unwrap();
         assert_eq!(v.kind, ViewKind::Text);
-        assert_ne!(v.lines[0], "日本語", "as UTF-8 it is mojibake");
-        v.redecode(TextEncoding::ShiftJis);
-        assert_eq!(v.lines[0], "日本語", "Shift_JIS decodes correctly");
-        assert_eq!(v.encoding, TextEncoding::ShiftJis);
+        assert_eq!(v.lines[0], "日本語", "auto-detected as Shift_JIS");
+        assert_eq!(v.encoding, TextEncoding::ShiftJis, "so saving writes SJIS back");
+        // The picker can still force another reading of the same bytes.
+        v.redecode(TextEncoding::Utf8);
+        assert_ne!(v.lines[0], "日本語", "an override still overrides");
     }
 
     #[test]
