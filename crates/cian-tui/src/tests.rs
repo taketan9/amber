@@ -362,8 +362,10 @@
     fn viewer_replace_all_is_one_undo_step() {
         let (_d, mut app) = viewer_on("alpha bravo\nbravo charlie\nbravo\n");
         app.handle_key(key(':')).unwrap();
-        assert!(matches!(&app.popup, Popup::Viewer { sub_input: Some(s), .. } if s == "s/"));
-        for c in "bravo/BRAVO/g".chars() {
+        // The prompt opens empty — the word commands share it, and none of
+        // them should start by deleting a seeded `s/`.
+        assert!(matches!(&app.popup, Popup::Viewer { sub_input: Some(s), .. } if s.is_empty()));
+        for c in "s/bravo/BRAVO/g".chars() {
             app.handle_key(key(c)).unwrap();
         }
         app.handle_key(code(KeyCode::Enter)).unwrap();
@@ -385,7 +387,7 @@
     fn viewer_replace_can_confirm_each_one() {
         let (_d, mut app) = viewer_on("x one\nx two\nx three\n");
         app.handle_key(key(':')).unwrap();
-        for c in "x/Y/c".chars() {
+        for c in "s/x/Y/c".chars() {
             app.handle_key(key(c)).unwrap();
         }
         app.handle_key(code(KeyCode::Enter)).unwrap();
@@ -407,7 +409,7 @@
         let (_d, mut app) = viewer_on("x\nx\nx\nx\n");
         let start = |app: &mut App| {
             app.handle_key(key(':')).unwrap();
-            for c in "x/Y/c".chars() {
+            for c in "s/x/Y/c".chars() {
                 app.handle_key(key(c)).unwrap();
             }
             app.handle_key(code(KeyCode::Enter)).unwrap();
@@ -458,7 +460,6 @@
         // `:lf` converts, deliberately.
         app.handle_key(code(KeyCode::Esc)).unwrap(); // leave insert
         app.handle_key(key(':')).unwrap();
-        // The prompt is seeded with "s/", which the verb replaces.
         if let Popup::Viewer { sub_input, .. } = &mut app.popup {
             *sub_input = Some("lf".into());
         }
@@ -475,7 +476,7 @@
         app.handle_key(key('V')).unwrap();
         app.handle_key(key('j')).unwrap();
         app.handle_key(key(':')).unwrap();
-        for c in "a/B/g".chars() {
+        for c in "s/a/B/g".chars() {
             app.handle_key(key(c)).unwrap();
         }
         app.handle_key(code(KeyCode::Enter)).unwrap();
@@ -711,6 +712,114 @@
             &std::fs::read(&bom).unwrap()[..3],
             &[0xEF, 0xBB, 0xBF],
             "the byte-order mark came back",
+        );
+    }
+
+    /// The reported problems, each pinned so it cannot come back:
+    /// `:` opened with `s/` already typed so no word command was reachable;
+    /// `]]` disagreed with the screen in the Markdown preview; Space did not
+    /// fold; and a message the viewer raised was drawn outside its own border.
+    #[test]
+    fn the_viewer_command_line_and_outline_answer_where_you_are_looking() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::write(
+            d.path().join("doc.md"),
+            "# One\n\nsome prose that is long enough to wrap once the width gets small\n\n## Two\n\nmore prose\n\n# Three\n\nlast\n",
+        )
+        .unwrap();
+        std::fs::write(d.path().join("plain.txt"), "nothing here\n").unwrap();
+        let p = d.path().to_path_buf();
+        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        let open = |app: &mut App, name: &str| {
+            app.active_pane_mut().unwrap().cursor =
+                app.active_pane().unwrap().entries.iter().position(|e| e.name == name).unwrap();
+            app.handle_key(code(KeyCode::F(3))).unwrap();
+            let _ = render(app, 100, 30);
+        };
+        let at = |app: &App| match &app.popup {
+            Popup::Viewer { line, .. } => *line,
+            other => panic!("not a viewer: {other:?}"),
+        };
+
+        open(&mut app, "doc.md");
+        // The prompt opens empty, so a word command is typable, and it works
+        // in the preview — where `:outline` is most wanted.
+        app.handle_key(key(':')).unwrap();
+        assert!(matches!(&app.popup, Popup::Viewer { sub_input: Some(s), preview: true, .. } if s.is_empty()));
+        for c in "outline".chars() {
+            app.handle_key(key(c)).unwrap();
+        }
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+        assert!(matches!(&app.popup, Popup::Viewer { shape: Some(sh), .. } if !sh.shown));
+        app.handle_key(key(':')).unwrap();
+        for c in "outline".chars() {
+            app.handle_key(key(c)).unwrap();
+        }
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+
+        // In the preview, `]]` lands on the line that *shows* the next
+        // heading — the rendered document has neither the same count of lines
+        // as the source nor the same order.
+        let _ = render(&mut app, 100, 30);
+        let shown = |app: &mut App| {
+            let l = at(app);
+            match &app.popup {
+                Popup::Viewer { view, .. } => view.lines[l].clone(),
+                other => panic!("not a viewer: {other:?}"),
+            }
+        };
+        for _ in 0..2 {
+            app.handle_key(key(']')).unwrap();
+        }
+        assert!(shown(&mut app).contains("Two"), "got {:?}", shown(&mut app));
+        for _ in 0..2 {
+            app.handle_key(key(']')).unwrap();
+        }
+        assert!(shown(&mut app).contains("Three"), "got {:?}", shown(&mut app));
+        for _ in 0..2 {
+            app.handle_key(key('[')).unwrap();
+        }
+        assert!(shown(&mut app).contains("Two"), "back: got {:?}", shown(&mut app));
+
+        // Space folds, in the source.
+        app.handle_key(key('p')).unwrap();
+        let _ = render(&mut app, 100, 30);
+        if let Popup::Viewer { line, .. } = &mut app.popup {
+            *line = 2; // inside the first section
+        }
+        app.handle_key(key(' ')).unwrap();
+        let folds = |app: &App| match &app.popup {
+            Popup::Viewer { shape, .. } => shape.as_deref().unwrap().folds.iter().copied().collect::<Vec<_>>(),
+            other => panic!("not a viewer: {other:?}"),
+        };
+        assert_eq!(folds(&app), [0], "Space folded the section");
+        app.handle_key(key(' ')).unwrap();
+        assert!(folds(&app).is_empty(), "and unfolded it");
+
+        // zA is the whole file as one switch, either way round.
+        app.handle_key(key('z')).unwrap();
+        app.handle_key(KeyEvent::new(KeyCode::Char('A'), KeyModifiers::SHIFT)).unwrap();
+        let all = folds(&app);
+        assert!(all.len() >= 2, "everything closed: {all:?}");
+        app.handle_key(key('z')).unwrap();
+        app.handle_key(KeyEvent::new(KeyCode::Char('A'), KeyModifiers::SHIFT)).unwrap();
+        assert!(folds(&app).is_empty(), "and everything open again");
+
+        // A file with no outline says so, on the viewer's own footer rather
+        // than on the status line hiding behind it.
+        app.handle_key(code(KeyCode::Esc)).unwrap();
+        open(&mut app, "plain.txt");
+        for _ in 0..2 {
+            app.handle_key(key(']')).unwrap();
+        }
+        let screen = render(&mut app, 100, 30);
+        let msg = app.message.clone().unwrap_or_default();
+        assert!(msg.contains("outline") || msg.contains("アウトライン"), "{msg:?}");
+        // The footer is the second-to-last row of the viewer's box, well
+        // inside its border — not the status line outside it.
+        assert!(
+            screen.iter().rev().skip(1).take(4).any(|r| r.contains(&msg)),
+            "the message is on the viewer's footer",
         );
     }
 

@@ -449,6 +449,12 @@ enum Popup {
         /// Per-character base style parallel to `view.lines` while previewing;
         /// empty in source mode.
         md_styles: Vec<Vec<Style>>,
+        /// Which source line each previewed line came from, parallel to
+        /// `view.lines`. A rendered document has neither the same number of
+        /// lines as its source nor the same order, so the outline (which reads
+        /// the file) and the cursor (which walks the screen) would otherwise
+        /// be counting different things — which is exactly what `]]` did.
+        md_map: Vec<usize>,
         /// The inner width the preview was last wrapped to, so the render can
         /// tell when a resize means it must re-render.
         md_width: u16,
@@ -2014,6 +2020,9 @@ pub struct App {
     /// back up instead of closing everything.
     menu_stack: Vec<Popup>,
     /// The viewer's text body rect, for mapping a mouse click to a line.
+    /// `:keys` — report every keystroke as cian received it, for finding out
+    /// whether a binding is broken or the terminal simply never sent the key.
+    key_probe: bool,
     viewer_rect: Rect,
     /// Where the viewer's outline column was drawn, so a click on an entry can
     /// jump to it. Zero-width when the column is not showing.
@@ -2291,6 +2300,7 @@ impl App {
             tab_rects: Vec::new(),
             menu_rect: Rect::new(0, 0, 0, 0),
             menu_stack: Vec::new(),
+            key_probe: false,
             viewer_rect: Rect::new(0, 0, 0, 0),
             outline_rect: Rect::new(0, 0, 0, 0),
             viewer_gutter: 0,
@@ -3548,8 +3558,8 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry("    :ws", None, "show trailing spaces, tabs and ideographic spaces", "行末空白・TAB・全角スペースを表示"),
                 entry("    :lf :crlf", None, "convert line endings (shown in the title)", "改行コードを変換（タイトルに表示）"),
                 entry("  outline", None, "]] / [[ next/prev section, click an entry to jump, :outline hides the column", "]] / [[ 次/前の見出し、項目クリックで移動、:outline で列を隠す"),
-                entry("  folding", None, "za fold/unfold here, zR open all, zM close all, or click the ▾ in the gutter", "za 折りたたみ切替、zR 全展開、zM 全折りたたみ、余白の ▾ クリックでも可"),
-                entry("  Ctrl+V block", None, "rectangle: d cuts it, I/A insert at the left/right edge, c replaces", "矩形選択：d で切り取り、I/A で左端/右端に挿入、c で置換"),
+                entry("  folding", None, "Space or za fold/unfold here, zA all (either way), or click the ▾ in the gutter", "Space か za で折りたたみ切替、zA で全部（開いていれば閉じ、閉じていれば開く）、余白の ▾ クリックでも可"),
+                entry("  Ctrl+V / Ctrl+Q block", None, "rectangle: d cuts it, I/A insert at the left/right edge, c replaces", "矩形選択：d で切り取り、I/A で左端/右端に挿入、c で置換"),
                 entry("  normal mode", None, "x/dd/D/J delete·join, u undo, v+d cut selection (d/u scroll via Ctrl)", "ノーマルモード：x/dd/D/J 削除·結合, u 取消, v+d 選択削除（スクロールは Ctrl+d/u）"),
                 entry(":edit", None, "edit the file in your external editor (E in the viewer)", "外部エディタで編集（ビューア内は E）"),
                 entry(":vi / :vim / :nvim", None, "open the file in that editor in a new shell tab", "新規シェルタブでそのエディタでファイルを開く"),
@@ -3665,6 +3675,7 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry(":df", None, "free disk space;  :df -h -k -m -g", "ディスク空き容量；  :df -h -k -m -g"),
                 entry(":theme", None, "theme gallery;  :theme dracula  sets one directly", "テーマ一覧；  :theme dracula で直接指定"),
                 entry(":reload", None, "re-read init.lua (borders need a restart)", "init.luaを再読込（枠線は再起動が必要）"),
+                entry(":keys", None, "report every keystroke as cian receives it — for when a shortcut seems dead", "受け取ったキーをそのまま表示 — ショートカットが効かないときに"),
                 entry(":where", None, "which config files cian reads/writes (portable vs ~/.config)", "cianが読み書きする設定ファイルの場所（ポータブル/~/.config）"),
                 entry(":mark", None, "mark by wildcard;  :mark *.rs   :unmark *", "ワイルドカードでマーク；  :mark *.rs   :unmark *"),
                 entry(":ai", None, "AI chat (Carmine / カーマイン)  — needs cian.ai in init.lua", "AIチャット（カーマイン）  — init.luaのcian.aiが必要"),

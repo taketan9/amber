@@ -124,12 +124,19 @@ impl App {
             }
             return Ok(());
         }
-        // `:` opens replace, seeded with `s/` so the shape is on screen.
+        // `:` opens the command line. It used to arrive with `s/` already
+        // typed, to show the shape of a replace — but the same prompt takes a
+        // dozen word commands (`outline`, `ws`, `sort`, `crlf`…) and every one
+        // of them had to begin by deleting two characters nobody asked for.
+        // The shape lives in the hint under the prompt instead.
+        //
+        // It works in the Markdown preview too, so `:outline` is reachable
+        // without dropping to the source first.
         if !ctrl && !alt && key.code == KeyCode::Char(':')
-            && matches!(self.popup, Popup::Viewer { editable: true, preview: false, .. })
+            && matches!(self.popup, Popup::Viewer { editable: true, .. })
         {
             if let Popup::Viewer { sub_input, .. } = &mut self.popup {
-                *sub_input = Some("s/".to_string());
+                *sub_input = Some(String::new());
             }
             return Ok(());
         }
@@ -175,7 +182,15 @@ impl App {
         // `zM` closes them all. Same prefix trick as the brackets, and for the
         // same reason it has to come before the edit operators — which
         // claim `a` and would otherwise swallow both halves.
-        if !ctrl && matches!(key.code, KeyCode::Char('z' | 'a' | 'R' | 'M')) {
+        // Space is the one-handed way to fold: it is what the eye reaches for
+        // over a collapsed outline, and it was doing nothing here.
+        if !ctrl && !alt && key.code == KeyCode::Char(' ')
+            && matches!(self.popup, Popup::Viewer { editing: false, sub_walk: None, .. })
+        {
+            self.toggle_viewer_fold(None);
+            return Ok(());
+        }
+        if !ctrl && matches!(key.code, KeyCode::Char('z' | 'a' | 'A' | 'R' | 'M')) {
             let c = match key.code {
                 KeyCode::Char(c) => c,
                 _ => unreachable!(),
@@ -193,6 +208,25 @@ impl App {
                 }
                 match c {
                     'a' => self.toggle_viewer_fold(None),
+                    // `zA` is the whole file as one switch: anything still
+                    // open means "close it all", everything closed means
+                    // "open it all". One key instead of remembering which of
+                    // zR and zM is which.
+                    'A' => {
+                        let any_open = if let Popup::Viewer { shape, view, .. } = &self.popup {
+                            match shape.as_deref() {
+                                Some(sh) => sh
+                                    .items
+                                    .iter()
+                                    .filter(|i| sh.extent_at(i.line, view.lines.len()).is_some())
+                                    .any(|i| !sh.folds.contains(&i.line)),
+                                None => false,
+                            }
+                        } else {
+                            false
+                        };
+                        self.fold_all(any_open);
+                    }
                     'R' => self.fold_all(false),
                     'M' => self.fold_all(true),
                     _ => {}
@@ -209,18 +243,22 @@ impl App {
         if !ctrl && matches!(key.code, KeyCode::Char(']') | KeyCode::Char('[')) {
             let c = if key.code == KeyCode::Char(']') { ']' } else { '[' };
             let mut empty = false;
-            if let Popup::Viewer { pending, shape, line, col, goal, .. } = &mut self.popup {
+            if let Popup::Viewer { pending, shape, line, col, goal, md_map, view, .. } = &mut self.popup {
                 if *pending == Some(c) {
                     *pending = None;
                     let items = shape.as_deref().map(|s| s.items.as_slice()).unwrap_or(&[]);
+                    // The comparison happens in the file's line numbers and the
+                    // jump lands in the screen's, which are the same thing only
+                    // when the Markdown preview is off.
+                    let here = crate::render::src_line(md_map, *line);
                     if items.is_empty() {
                         empty = true;
                     } else if let Some(t) = if c == ']' {
-                        items.iter().find(|i| i.line > *line).map(|i| i.line)
+                        items.iter().find(|i| i.line > here).map(|i| i.line)
                     } else {
-                        items.iter().rev().find(|i| i.line < *line).map(|i| i.line)
+                        items.iter().rev().find(|i| i.line < here).map(|i| i.line)
                     } {
-                        *line = t;
+                        *line = crate::render::disp_line(md_map, &view.lines, t);
                         *col = 0;
                         *goal = 0;
                     }
@@ -418,7 +456,12 @@ impl App {
                 (false, KeyCode::Char('Q')) => close = true,
                 (false, KeyCode::Char('v')) => start_visual(ViewVisual::Char, visual, anchor, *line, *col),
                 (false, KeyCode::Char('V')) => start_visual(ViewVisual::Line, visual, anchor, *line, *col),
-                (true, KeyCode::Char('v')) => start_visual(ViewVisual::Block, visual, anchor, *line, *col),
+                // Ctrl+Q is vim's own synonym for Ctrl+V, and exists for this
+                // exact reason: plenty of terminals keep Ctrl+V for
+                // themselves and never pass it on.
+                (true, KeyCode::Char('v')) | (true, KeyCode::Char('q')) => {
+                    start_visual(ViewVisual::Block, visual, anchor, *line, *col)
+                }
                 // `S` summarises the file with the AI (sends its text). Handled
                 // after the borrow ends, below.
                 (false, KeyCode::Char('S')) => summarize = true,
@@ -710,7 +753,7 @@ impl App {
     /// is expressed without a separate syntax.
     pub(crate) fn run_substitute(&mut self, cmd: &str) {
         let cmd = cmd.trim();
-        if cmd.is_empty() || cmd == "s/" {
+        if cmd.is_empty() {
             return;
         }
         // The same prompt carries the line-ending conversions: they are the

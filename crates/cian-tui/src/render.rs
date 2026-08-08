@@ -393,6 +393,11 @@ pub(crate) fn draw(f: &mut Frame, app: &mut App) {
         let menu_lang = app.menu_lang;
         let show_ws = app.show_ws;
         app.popup_zones.clear();
+        // The status line lives outside the viewer's border, on the very last
+        // row, which is not where anyone is looking while reading a file. A
+        // message raised by the viewer itself — "saved", "nothing to fold
+        // here" — is shown on its own footer instead.
+        let msg_for_viewer = app.message.clone();
         draw_popup(
             f,
             area,
@@ -405,6 +410,7 @@ pub(crate) fn draw(f: &mut Frame, app: &mut App) {
             lang,
             menu_lang,
             show_ws,
+            msg_for_viewer,
         );
     } else {
         app.popup_zones.clear();
@@ -464,6 +470,37 @@ fn viewer_body_rect(area: Rect, outline_w: u16) -> Rect {
 /// entry that was drawn there, and two copies of this arithmetic would drift.
 pub(crate) fn outline_width(inner_w: u16, show: bool, items: usize) -> u16 {
     if show && items > 0 && inner_w >= 60 { 28u16.min(inner_w / 3) } else { 0 }
+}
+
+/// The source line a viewer line stands for.
+///
+/// In source mode they are the same number. In the Markdown preview they are
+/// not, and everything that reads the *file* (the outline) has to be told
+/// which of the two it is holding before it compares it with anything that
+/// reads the *screen* (the cursor).
+pub(crate) fn src_line(md_map: &[usize], line: usize) -> usize {
+    md_map.get(line).copied().unwrap_or(line)
+}
+
+/// The viewer line showing source line `src` — the trip back.
+///
+/// A rendered block often opens with a blank line for spacing, and that blank
+/// belongs to the same source line as the heading under it. Landing on the
+/// blank is landing one line short of what was asked for, so the first line
+/// with something on it wins.
+pub(crate) fn disp_line(md_map: &[usize], lines: &[String], src: usize) -> usize {
+    if md_map.is_empty() {
+        return src;
+    }
+    let first = md_map.iter().position(|s| *s >= src).unwrap_or(md_map.len().saturating_sub(1));
+    let mut i = first;
+    while i + 1 < md_map.len()
+        && md_map[i + 1] == md_map[first]
+        && lines.get(i).is_some_and(|l| l.trim().is_empty())
+    {
+        i += 1;
+    }
+    i
 }
 
 /// The first outline entry drawn, given where the cursor is and how many rows
@@ -3313,6 +3350,7 @@ fn draw_popup(
     lang: Lang,
     menu_lang: Lang,
     show_ws: bool,
+    msg: Option<String>,
 ) {
     // Every popup with a shape of its own draws itself. The rest — the
     // confirm/notice dialogs, which differ only in their wording — fall through
@@ -3331,7 +3369,7 @@ fn draw_popup(
         Popup::Shortcuts { .. } => draw_shortcuts(f, area, popup, zones, lang),
         Popup::History { .. } => draw_history(f, area, popup, zones, lang),
         Popup::DestPicker { .. } => draw_dest_picker(f, area, popup, dests, zones, lang),
-        Popup::Viewer { .. } => draw_viewer(f, area, popup, lang, show_ws),
+        Popup::Viewer { .. } => draw_viewer(f, area, popup, lang, show_ws, msg.as_deref()),
         Popup::DirCompare { .. } => draw_dir_compare(f, area, popup, zones, lang),
         Popup::Diff { .. } => draw_diff(f, area, popup, lang),
         Popup::Archive { .. } => draw_archive(f, area, popup, zones, lang),
@@ -4807,6 +4845,10 @@ fn draw_outline_column(
     if area.width == 0 || area.height == 0 {
         return;
     }
+    // Paint the column's own background first. A `Paragraph` writes only the
+    // characters it has, so a row that is now short — or empty — would keep
+    // whatever the last frame left in the cells beyond it.
+    f.render_widget(Block::default().style(Style::default().bg(surface())), area);
     let here = items.iter().rposition(|i| i.line <= line);
     // Scroll the list so the current entry stays visible in a long file.
     let h = area.height as usize;
@@ -4853,8 +4895,9 @@ fn draw_viewer(
     popup: &mut Popup,
     lang: Lang,
     show_ws: bool,
+    msg: Option<&str>,
 ) {
-    let Popup::Viewer { title, view, scroll, line, col, visual, anchor, find_input, find_query, sub_input, sub_walk, block_input, git_lines, markdown, preview, source, md_styles, md_width, editing, dirty, editable, hl, hl_lang, blame, shape, path, .. } = popup else { return };
+    let Popup::Viewer { title, view, scroll, line, col, visual, anchor, find_input, find_query, sub_input, sub_walk, block_input, git_lines, markdown, preview, source, md_styles, md_map, md_width, editing, dirty, editable, hl, hl_lang, blame, shape, path, .. } = popup else { return };
     let w = area.width.saturating_sub(4);
     let h = area.height.saturating_sub(2);
     let rect = centered_rect(w, h, area);
@@ -4868,14 +4911,16 @@ fn draw_viewer(
     let inner_w = rect.width.saturating_sub(4).max(1);
     if *preview {
         if md_styles.is_empty() || *md_width != inner_w {
-            let (plain, styles) = crate::markdown::render_styled(source, inner_w as usize);
+            let (plain, styles, map) = crate::markdown::render_styled(source, inner_w as usize);
             view.lines = plain;
             *md_styles = styles;
+            *md_map = map;
             *md_width = inner_w;
         }
     } else if !md_styles.is_empty() {
         view.lines = source.clone();
         md_styles.clear();
+        md_map.clear();
         *md_width = 0;
     }
     *line = (*line).min(view.lines.len().saturating_sub(1));
@@ -5234,7 +5279,7 @@ fn draw_viewer(
                 f,
                 Rect::new(whole.x, whole.y, outline_w.saturating_sub(1), body_h as u16),
                 &sh.items,
-                *line,
+                src_line(md_map, *line),
             );
         }
     }
@@ -5279,11 +5324,15 @@ fn draw_viewer(
             }
         )
     } else if let Some(cmd) = sub_input {
+        // What the prompt takes, shown rather than assumed: the replace form
+        // first, then the word commands, because a blank prompt with no menu
+        // is a prompt you have to have read the manual to use.
         format!(
-            "{}_   {}",
+            ":{}_   {}",
             cmd,
-            tr(lang, "(old/new/  flags: g all on a line, c confirm, i ignore case)",
-                     "(old/new/  フラグ: g 行内全部, c 1件ずつ確認, i 大小無視)")
+            tr(lang,
+               "s/old/new/[gci]  ·  outline ws sort rsort uniq han zen expand unexpand reindent lf crlf cr",
+               "s/old/new/[gci]  ·  outline ws sort rsort uniq han zen expand unexpand reindent lf crlf cr")
         )
     } else {
         match find_input {
@@ -5294,30 +5343,54 @@ fn draw_viewer(
                     (t.starts_with("```") || t.starts_with("~~~"))
                         && t.trim_start_matches(['`', '~']).trim().eq_ignore_ascii_case("mermaid")
                 });
+                // `]]` and `[[` only mean something when the file has a shape,
+                // and folding only in the source; offering either otherwise is
+                // a hint that answers a question nobody can ask.
+                let has_shape = shape.as_deref().is_some_and(|s| !s.items.is_empty());
+                let shape_hint = match (has_shape, *preview) {
+                    (false, _) => "",
+                    (true, true) => tr(lang, " ]] [[ section ", " ]] [[ 見出し "),
+                    (true, false) => tr(lang, " ]] [[ section  Space fold  zA all ", " ]] [[ 見出し  Space 折りたたみ  zA 全部 "),
+                };
                 let hints = if *preview {
+                    format!("{}{}{}{}{}",
+                        tr(lang, " / f search  n/N  v/V select  y copy ", " / f 検索  n/N  v/V 選択  y コピー "),
+                        ed,
+                        shape_hint,
+                        if mmd { tr(lang, " m diagram ", " m 図 ") } else { "" },
+                        tr(lang, " p source  ", " p ソース  "))
+                } else if *markdown {
                     format!("{}{}{}{}",
                         tr(lang, " / f search  n/N  v/V select  y copy ", " / f 検索  n/N  v/V 選択  y コピー "),
                         ed,
-                        if mmd { tr(lang, " m diagram ", " m 図 ") } else { "" },
-                        tr(lang, " E ext-edit  p source  ", " E 外部編集  p ソース  "))
-                } else if *markdown {
-                    format!("{}{}{}",
-                        tr(lang, " / f search  n/N  v/V select  y copy ", " / f 検索  n/N  v/V 選択  y コピー "),
-                        ed,
-                        tr(lang, " e enc  p preview  ", " e 文字コード  p プレビュー  "))
+                        shape_hint,
+                        tr(lang, " p preview  ", " p プレビュー  "))
                 } else {
-                    format!("{}{}{}",
+                    format!("{}{}{}{}",
                         tr(lang, " / f search  n/N  v/V select  y copy ", " / f 検索  n/N  v/V 選択  y コピー "),
                         ed,
-                        tr(lang, " E ext-edit  S-Enter reveal  e enc  ", " E 外部編集  S-Enter 場所へ  e 文字コード  "))
+                        shape_hint,
+                        tr(lang, " e enc  ", " e 文字コード  "))
                 };
                 format!("{}{} ", hints, pos)
             }
         }
     };
+    // A message the viewer itself raised takes the footer while it lasts. The
+    // hints are always one keystroke away; "nothing to fold here" answers a
+    // key that was just pressed, and belongs where that key was aimed.
+    let (footer, footer_style) = match msg.filter(|_| !*editing && sub_walk.is_none()) {
+        Some(m) => (
+            format!(" {m} "),
+            Style::default().fg(Color::Black).bg(Color::Rgb(240, 210, 120)).add_modifier(Modifier::BOLD),
+        ),
+        None => (
+            footer,
+            Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD),
+        ),
+    };
     f.render_widget(
-        Paragraph::new(footer)
-            .style(Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD)),
+        Paragraph::new(truncate(&footer, inner.width as usize)).style(footer_style),
         Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1),
     );
 }

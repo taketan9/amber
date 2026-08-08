@@ -77,7 +77,43 @@ impl App {
     }
 
     // ------- Key dispatch -------
+    /// Handle a key, and — while `:keys` is on — say what the key actually
+    /// was.
+    ///
+    /// A terminal sits between the keyboard and cian and is free to keep,
+    /// rewrite or drop any combination it likes. When a binding "does not
+    /// work", the first question is whether the keystroke arrived at all, and
+    /// there was no way to answer it from inside cian. Reported after the key
+    /// has been handled, so it is the last word rather than the first thing
+    /// overwritten.
     pub(crate) fn handle_key(&mut self, key: KeyEvent) -> Result<()> {
+        if !self.key_probe {
+            return self.handle_key_inner(key);
+        }
+        let r = self.handle_key_inner(key);
+        if self.key_probe {
+            let mut mods: Vec<&str> = Vec::new();
+            for (m, name) in [
+                (KeyModifiers::CONTROL, "Ctrl"),
+                (KeyModifiers::ALT, "Alt"),
+                (KeyModifiers::SHIFT, "Shift"),
+                (KeyModifiers::SUPER, "Super"),
+            ] {
+                if key.modifiers.contains(m) {
+                    mods.push(name);
+                }
+            }
+            let what = match key.code {
+                KeyCode::Char(c) => format!("Char({c:?})"),
+                other => format!("{other:?}"),
+            };
+            let mods = if mods.is_empty() { "no modifier".to_string() } else { mods.join("+") };
+            self.message = Some(format!("key: {what}  {mods}   (:keys to stop)"));
+        }
+        r
+    }
+
+    fn handle_key_inner(&mut self, key: KeyEvent) -> Result<()> {
         // A copy/move/delete or a directory-compare runs on a worker thread and
         // stays flagged in-flight until its result is polled in. Those polls
         // otherwise run only *after* this key is handled, and `event::poll`

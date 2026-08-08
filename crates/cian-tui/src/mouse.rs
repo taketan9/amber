@@ -38,12 +38,13 @@ impl App {
                 && row >= ol.y
                 && row < ol.y + ol.height
             {
-                if let Popup::Viewer { shape, line, col: c, goal, visual, .. } = &mut self.popup {
+                if let Popup::Viewer { shape, line, col: c, goal, visual, md_map, view, .. } = &mut self.popup {
                     let items = shape.as_deref().map(|s| s.items.as_slice()).unwrap_or(&[]);
-                    let top = crate::render::outline_top(items, *line, ol.height as usize);
+                    let here = crate::render::src_line(md_map, *line);
+                    let top = crate::render::outline_top(items, here, ol.height as usize);
                     let idx = top + (row - ol.y) as usize;
                     if let Some(item) = items.get(idx).cloned() {
-                        *line = item.line;
+                        *line = crate::render::disp_line(md_map, &view.lines, item.line);
                         *c = 0;
                         *goal = 0;
                         *visual = None;

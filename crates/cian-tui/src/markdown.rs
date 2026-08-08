@@ -160,8 +160,11 @@ fn render_table(
 /// grid. The viewer drives its cursor / selection / search over the plain text
 /// and paints each character with the matching base style, so all the viewer's
 /// machinery works over the rendered document unchanged.
-pub(crate) fn render_styled(source: &[String], width: usize) -> (Vec<String>, Vec<Vec<Style>>) {
-    let lines = render(source, width);
+pub(crate) fn render_styled(
+    source: &[String],
+    width: usize,
+) -> (Vec<String>, Vec<Vec<Style>>, Vec<usize>) {
+    let (lines, map) = render_mapped(source, width);
     let mut plain = Vec::with_capacity(lines.len());
     let mut styles = Vec::with_capacity(lines.len());
     for line in &lines {
@@ -176,15 +179,46 @@ pub(crate) fn render_styled(source: &[String], width: usize) -> (Vec<String>, Ve
         plain.push(text);
         styles.push(st);
     }
-    (plain, styles)
+    (plain, styles, map)
 }
 
-/// Render Markdown `source` lines into styled, width-wrapped display lines.
-pub(crate) fn render(source: &[String], width: usize) -> Vec<Line<'static>> {
+/// The same render, plus which source line each display line came from.
+///
+/// A rendered document has neither the same number of lines as its source nor
+/// the same order of them — a heading loses its `#`, a paragraph wraps into
+/// four, a code fence swallows its own delimiters. Anything that knows about
+/// the *file* (the outline, and so the `]]` motion and the highlighted entry)
+/// therefore speaks a different set of line numbers from anything that knows
+/// about the *screen*. This is the dictionary between them.
+///
+/// The mark is taken at the top of each iteration, before the body decides how
+/// many lines it will emit, so the several `continue`s below cannot skip it.
+pub(crate) fn render_mapped(source: &[String], width: usize) -> (Vec<Line<'static>>, Vec<usize>) {
+    let mut marks: Vec<(usize, usize)> = Vec::new();
+    let out = render_inner(source, width, &mut marks);
+    // Expand "output from here on belongs to source line N" into one entry per
+    // output line.
+    let mut map = vec![0usize; out.len()];
+    for w in 0..marks.len() {
+        let (from, src) = marks[w];
+        let to = marks.get(w + 1).map(|m| m.0).unwrap_or(out.len());
+        for slot in map.iter_mut().take(to.min(out.len())).skip(from) {
+            *slot = src;
+        }
+    }
+    (out, map)
+}
+
+fn render_inner(
+    source: &[String],
+    width: usize,
+    marks: &mut Vec<(usize, usize)>,
+) -> Vec<Line<'static>> {
     let width = width.max(8);
     let mut out: Vec<Line<'static>> = Vec::new();
     let mut i = 0;
     while i < source.len() {
+        marks.push((out.len(), i));
         let raw = &source[i];
         let trimmed = raw.trim_start();
 
@@ -721,7 +755,7 @@ mod tests {
     #[test]
     fn headings_lists_and_code_render_to_lines() {
         let src = lines("# Title\n\nSome **bold** and `code`.\n\n- one\n- two\n\n```mermaid\ngraph TD; A-->B\n```\n");
-        let out = render(&src, 40);
+        let out = render_mapped(&src, 40).0;
         // The title text survives (styling aside), and the mermaid flow renders
         // the A → B edge with node labels and an arrow.
         let flat: Vec<String> = out.iter().map(|l| l.spans.iter().map(|s| s.content.as_ref()).collect::<String>()).collect();
@@ -734,7 +768,7 @@ mod tests {
     #[test]
     fn a_pipe_table_renders_bordered_and_aligned() {
         let src = lines("| Name | Qty | Note |\n|:-----|----:|:----:|\n| apple | 3 | ok |\n| pear | 12 | **hi** |\n");
-        let out = render(&src, 60);
+        let out = render_mapped(&src, 60).0;
         let flat: Vec<String> = out
             .iter()
             .map(|l| l.spans.iter().map(|s| s.content.as_ref()).collect::<String>())
@@ -754,7 +788,7 @@ mod tests {
     #[test]
     fn mermaid_flow_and_tasklist_render() {
         let src = lines("```mermaid\ngraph TD\n    A[ファイラー] -->|F3| B(ビューア)\n    B --> C{Markdown?}\n    C -->|Yes| D[プレビュー]\n    C -->|No| E[プレーン]\n```\n\n- [ ] todo\n- [x] done\n");
-        let out = render(&src, 60);
+        let out = render_mapped(&src, 60).0;
         let flat: Vec<String> = out
             .iter()
             .map(|l| l.spans.iter().map(|s| s.content.as_ref()).collect::<String>())

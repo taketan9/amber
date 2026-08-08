@@ -53,6 +53,17 @@ impl App {
             "copyto" => self.start_dest_picker(PendingOp::Copy),
             "moveto" => self.start_dest_picker(PendingOp::Move),
             "grep" => self.start_grep_prompt(),
+            // Which key did the terminal actually send? The answer to every
+            // "that shortcut does nothing on my machine".
+            "keys" => {
+                self.key_probe = !self.key_probe;
+                self.message = Some(if self.key_probe {
+                    tr(self.lang, "showing every key as cian receives it — :keys again to stop",
+                                  "受け取ったキーをそのまま表示します — 止めるには もう一度 :keys").into()
+                } else {
+                    tr(self.lang, "key report off", "キー表示をやめました").into()
+                });
+            }
             "find" => self.start_find_prompt(),
             "menu" => self.open_menu_at_cursor(),
             "sync" | "broadcast" => {
