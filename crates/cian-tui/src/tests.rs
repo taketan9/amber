@@ -637,6 +637,83 @@
         assert!(app.message.as_deref().unwrap_or("").contains("outline"));
     }
 
+    /// Editing and saving must hand the file back the way it came: same tabs,
+    /// same byte-order mark. Both were being spent silently — a Makefile came
+    /// out indented with spaces, and a UTF-8-BOM file came out without one,
+    /// which is precisely what `:nobom` is a deliberate command for.
+    #[test]
+    fn saving_keeps_the_tabs_and_the_bom_the_file_arrived_with() {
+        let d = tempfile::tempdir().unwrap();
+        let mk = d.path().join("Makefile");
+        let bom = d.path().join("bom.txt");
+        std::fs::write(&mk, b"all:\n\techo one\n\techo two\n").unwrap();
+        std::fs::write(&bom, [&[0xEF, 0xBB, 0xBF][..], b"alpha\nbeta\n"].concat()).unwrap();
+        let p = d.path().to_path_buf();
+        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        let open = |app: &mut App, name: &str| {
+            app.active_pane_mut().unwrap().cursor =
+                app.active_pane().unwrap().entries.iter().position(|e| e.name == name).unwrap();
+            app.handle_key(code(KeyCode::F(3))).unwrap();
+            let _ = render(app, 100, 30);
+        };
+
+        open(&mut app, "Makefile");
+        assert_eq!(viewer_lines(&app)[1], "\techo one", "the buffer holds the real tab");
+        // A tab is still drawn four columns wide — the fix is about what is
+        // written, not about how it looks.
+        let screen = render(&mut app, 100, 30).join("\n");
+        assert!(screen.contains("    echo one"), "drawn expanded");
+
+        // A tab is one buffer character but four drawn columns, so a click has
+        // to be walked back through the same expansion: anywhere in the tab is
+        // the tab, and the column after it is the first letter.
+        let b = app.viewer_rect;
+        let g = app.viewer_gutter;
+        let click = |app: &mut App, dx: u16| {
+            app.handle_mouse(crossterm::event::MouseEvent {
+                kind: crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+                column: b.x + g + dx,
+                row: b.y + 1,
+                modifiers: KeyModifiers::NONE,
+            });
+            match &app.popup {
+                Popup::Viewer { col, .. } => *col,
+                other => panic!("not a viewer: {other:?}"),
+            }
+        };
+        assert_eq!(click(&mut app, 0), 0, "the start of the tab");
+        assert_eq!(click(&mut app, 3), 0, "still inside the tab");
+        assert_eq!(click(&mut app, 4), 1, "the e of echo");
+        assert_eq!(click(&mut app, 6), 3, "three characters in");
+
+        // Make an edit somewhere else entirely, then save.
+        if let Popup::Viewer { line, .. } = &mut app.popup {
+            *line = 0;
+        }
+        app.handle_key(key('o')).unwrap(); // opens a line, entering insert
+        app.handle_key(code(KeyCode::Esc)).unwrap();
+        app.handle_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL)).unwrap();
+        let out = std::fs::read(&mk).unwrap();
+        assert!(app.message.as_deref().unwrap_or("").starts_with("saved"), "{:?}", app.message);
+        assert!(
+            out.windows(9).any(|w| w == b"\techo one"),
+            "the recipe lines still start with a tab: {:?}",
+            String::from_utf8_lossy(&out),
+        );
+        app.handle_key(code(KeyCode::Esc)).unwrap();
+
+        open(&mut app, "bom.txt");
+        assert_eq!(viewer_lines(&app), ["alpha", "beta"], "the BOM is not part of the text");
+        app.handle_key(key('o')).unwrap();
+        app.handle_key(code(KeyCode::Esc)).unwrap();
+        app.handle_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL)).unwrap();
+        assert_eq!(
+            &std::fs::read(&bom).unwrap()[..3],
+            &[0xEF, 0xBB, 0xBF],
+            "the byte-order mark came back",
+        );
+    }
+
     /// Folding: za closes the section the cursor is in, the lines under it
     /// stop being drawn, the cursor comes out with them, and zR/zM work on the
     /// lot. The outline and the folds are the same information read two ways.

@@ -95,9 +95,25 @@ impl App {
                 self.toggle_viewer_fold(Some(l));
                 return;
             }
+            // A tab is one buffer character but several drawn columns, so the
+            // clicked column has to be walked back through the same expansion
+            // the renderer used rather than taken as a character index.
             let col_at = |view: &cian_core::viewer::View, l: usize| -> usize {
                 let rel = ecol.saturating_sub(text_x) as usize;
-                rel.min(vlen(view, l))
+                let Some(text) = view.lines.get(l) else { return 0 };
+                let mut drawn = 0usize;
+                for (j, ch) in text.chars().enumerate() {
+                    let w = if ch == '\t' {
+                        cian_core::viewer::TAB_W - (drawn % cian_core::viewer::TAB_W)
+                    } else {
+                        1
+                    };
+                    if rel < drawn + w {
+                        return j;
+                    }
+                    drawn += w;
+                }
+                vlen(view, l)
             };
             match ev.kind {
                 MouseEventKind::Down(MouseButton::Left) => {

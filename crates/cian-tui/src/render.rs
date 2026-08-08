@@ -4845,6 +4845,8 @@ fn dim_of(c: Color) -> Color {
     }
 }
 
+use cian_core::viewer::TAB_W;
+
 fn draw_viewer(
     f: &mut Frame,
     area: Rect,
@@ -5081,23 +5083,40 @@ fn draw_viewer(
         .take(body_h)
         .map(|i| (*i, &view.lines[*i]))
         .map(|(i, l)| {
-            // With `:ws` on, the characters you cannot see get a visible
-            // stand-in — a trailing space, an ideographic space, a tab. Only
-            // *trailing* spaces are marked: dotting every gap between words
-            // makes the text unreadable, and the ones that matter are at the
-            // end of the line.
-            let l: std::borrow::Cow<str> = if show_ws && !*preview {
-                let trail = l.len() - l.trim_end_matches(' ').len();
-                let body = &l[..l.len() - trail];
-                std::borrow::Cow::Owned(format!(
-                    "{}{}",
-                    body.replace('\u{3000}', "□").replace('\t', "→"),
-                    "·".repeat(trail)
-                ))
+            // The buffer keeps real tabs; the screen cannot show one. Each
+            // buffer character is drawn as whatever it looks like — a tab as
+            // the spaces up to the next stop — while every column reckoning
+            // below (the cursor, the selection, the highlighter, a search hit)
+            // stays in buffer characters. Expanding the string first, as this
+            // used to, meant the file was saved back with its tabs already
+            // spent.
+            let trail_from = if show_ws && !*preview {
+                l.chars().count() - l.chars().rev().take_while(|c| *c == ' ').count()
             } else {
-                std::borrow::Cow::Borrowed(l.as_str())
+                usize::MAX
             };
-            let chars: Vec<char> = l.chars().take(avail).collect();
+            let shown = |j: usize, ch: char, at: usize| -> String {
+                match ch {
+                    '\t' if show_ws && !*preview => {
+                        format!("→{}", " ".repeat(TAB_W - 1 - (at % TAB_W)))
+                    }
+                    '\t' => " ".repeat(TAB_W - (at % TAB_W)),
+                    '\u{3000}' if show_ws && !*preview => "□".to_string(),
+                    ' ' if j >= trail_from => "·".to_string(),
+                    other => other.to_string(),
+                }
+            };
+            // Take buffer characters until their *drawn* width fills the row.
+            let mut chars: Vec<char> = Vec::new();
+            let mut drawn = 0usize;
+            for ch in l.chars() {
+                let w = if ch == '\t' { TAB_W - (drawn % TAB_W) } else { 1 };
+                if drawn + w > avail {
+                    break;
+                }
+                drawn += w;
+                chars.push(ch);
+            }
             let len = chars.len();
             let sel = sel_cols(i, len);
             // While hex-editing, `col` holds a nibble index (0..32); map it to
@@ -5114,7 +5133,7 @@ fn draw_viewer(
             } else {
                 None
             };
-            let matches = match_cols(&l);
+            let matches = match_cols(l);
             let cell_style = |j: usize| -> Style {
                 // Priority: cursor over selection over a search match; the
                 // resting style is the Markdown colour in preview, else plain.
@@ -5185,13 +5204,16 @@ fn draw_viewer(
             }
             let mut run = String::new();
             let mut run_style = cell_style(0);
+            let mut at = 0usize; // drawn column, so a tab knows its own stop
             for (j, ch) in chars.iter().enumerate() {
                 let st = cell_style(j);
                 if st != run_style && !run.is_empty() {
                     spans.push(Span::styled(std::mem::take(&mut run), run_style));
                 }
                 run_style = st;
-                run.push(*ch);
+                let text = shown(j, *ch, at);
+                at += text.chars().count();
+                run.push_str(&text);
             }
             if !run.is_empty() {
                 spans.push(Span::styled(run, run_style));

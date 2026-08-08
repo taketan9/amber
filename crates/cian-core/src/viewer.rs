@@ -19,6 +19,11 @@ use anyhow::{Context, Result};
 /// whole, small enough that a huge one is still instant.
 pub const VIEW_LIMIT: u64 = 4 * 1024 * 1024;
 
+/// How wide a tab is drawn. One number, so the viewer's rendering, the mouse's
+/// idea of which character was clicked and `:expand`'s default cannot disagree
+/// about where a tab stop is.
+pub const TAB_W: usize = 4;
+
 /// How much of the prefix is inspected when deciding text vs binary.
 const SNIFF: usize = 8000;
 
@@ -188,10 +193,14 @@ impl View {
     }
 }
 
-/// Split decoded text into display lines, expanding tabs so they do not
-/// collapse to one cell and misalign everything after them.
+/// Split decoded text into lines, exactly as they are.
+///
+/// Tabs are deliberately left alone. Expanding them here — which this used to
+/// do, so that columns lined up on screen — made every save write the file
+/// back with its tabs spent, quietly turning a Makefile into one that does not
+/// build. Drawing is the renderer's job; this is the buffer a save writes.
 fn to_lines(text: &str) -> Vec<String> {
-    text.lines().map(|l| l.replace('\t', "    ")).collect()
+    text.lines().map(str::to_string).collect()
 }
 
 /// Guess the encoding from a byte-order mark, if present.
@@ -325,14 +334,17 @@ fn hex_dump(bytes: &[u8]) -> Vec<String> {
 mod tests {
     use super::*;
 
+    /// The buffer is what a save writes back, so it holds the file's own
+    /// characters — tabs included. Drawing them four columns wide is the
+    /// renderer's business; doing it here spent every tab on the first save.
     #[test]
-    fn text_is_split_into_lines_with_tabs_expanded() {
+    fn text_is_split_into_lines_with_its_tabs_intact() {
         let d = tempfile::tempdir().unwrap();
         let f = d.path().join("a.txt");
         fs::write(&f, "one\n\ttwo\nthree\n").unwrap();
         let v = view_file(&f).unwrap();
         assert_eq!(v.kind, ViewKind::Text);
-        assert_eq!(v.lines, vec!["one", "    two", "three"]);
+        assert_eq!(v.lines, vec!["one", "\ttwo", "three"]);
         assert!(!v.truncated);
         assert_eq!(v.encoding, TextEncoding::Utf8);
     }

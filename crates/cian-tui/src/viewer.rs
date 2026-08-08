@@ -1569,7 +1569,21 @@ impl App {
                 // opening a CRLF file to read it must not quietly convert it.
                 let sep = view.eol.as_str();
                 let text = view.lines.join(sep) + sep;
-                (path.clone(), view.encoding.encode(&text))
+                let mut bytes = Vec::new();
+                // …and with the byte-order mark it arrived with. Dropping one
+                // is a real edit to the file — it is exactly what `:nobom`
+                // exists to do on purpose — so a save must not do it by
+                // accident.
+                if view.bom {
+                    bytes.extend_from_slice(match view.encoding {
+                        cian_core::viewer::TextEncoding::Utf8 => &[0xEF, 0xBB, 0xBF][..],
+                        cian_core::viewer::TextEncoding::Utf16Le => &[0xFF, 0xFE][..],
+                        cian_core::viewer::TextEncoding::Utf16Be => &[0xFE, 0xFF][..],
+                        cian_core::viewer::TextEncoding::ShiftJis => &[][..],
+                    });
+                }
+                bytes.extend_from_slice(&view.encoding.encode(&text));
+                (path.clone(), bytes)
             }
         } else {
             return;
