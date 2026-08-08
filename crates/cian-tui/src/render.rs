@@ -639,7 +639,7 @@ fn tabs_title<'a>(
         if let Some(lbl) = tab.flat_label() {
             // …and says how, because "the pane is not a folder any more" is
             // easy to notice and "Esc puts it back" is not.
-            return format!(" {} ⌥ {}  ⏎Esc ", i + 1, lbl);
+            return format!(" {} ⌥ {}  ⏎Esc/⌫ ", i + 1, lbl);
         }
         let main = if is_active {
             tab.cwd.display().to_string()

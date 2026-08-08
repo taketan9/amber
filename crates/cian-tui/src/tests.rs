@@ -734,6 +734,31 @@
         );
     }
 
+    /// Backspace in a search listing means the same as Esc. A set of results
+    /// has no parent directory to climb to, so climbing to one is a surprise.
+    #[test]
+    fn backspace_leaves_a_search_listing_rather_than_wandering_off() {
+        let d = tempfile::tempdir().unwrap();
+        let sub = d.path().join("sub");
+        std::fs::create_dir_all(&sub).unwrap();
+        std::fs::write(sub.join("hit.txt"), "x\n").unwrap();
+        let p = d.path().to_path_buf();
+        let mut app = App::new(p.clone(), p.clone(), cian_lua::Config::default()).unwrap();
+
+        app.start_find("hit", cian_core::search::Mode::Name);
+        drain_find(&mut app);
+        app.handle_key(key('p')).unwrap(); // panelize
+        assert!(app.active_pane().unwrap().is_flat(), "the pane is a result listing");
+
+        app.handle_key(code(KeyCode::Backspace)).unwrap();
+        assert!(!app.active_pane().unwrap().is_flat(), "back to a folder");
+        assert_eq!(
+            app.active_pane().unwrap().cwd.canonicalize().unwrap(),
+            p.canonicalize().unwrap(),
+            "the same folder, not its parent",
+        );
+    }
+
     /// `r` after a search takes the pattern with it, so a replace is the
     /// replacement text and nothing else.
     #[test]

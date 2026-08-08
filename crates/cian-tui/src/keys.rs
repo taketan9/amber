@@ -2062,6 +2062,14 @@ impl App {
             (_, _, KeyCode::Backspace) => {
                 if self.active_pane().map(|p| p.archive_view().is_some()).unwrap_or(false) {
                     self.archive_go_up();
+                } else if self.active_pane().map(|p| p.is_flat()).unwrap_or(false) {
+                    // A search listing has no parent to climb to: "up" from a
+                    // set of results means back to the folder they came from,
+                    // which is what Esc does. Wandering off to a parent
+                    // directory instead is a surprise nobody asked for.
+                    if let Some(p) = self.active_pane_mut() {
+                        let _ = p.leave_flat();
+                    }
                 } else if let Some(p) = self.active_pane_mut() { p.go_parent()?; }
             }
             (_, _, KeyCode::Left) => self.focus(FocusedPane::Left),
