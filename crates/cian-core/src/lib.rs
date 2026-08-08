@@ -287,6 +287,10 @@ pub struct Pane {
     pub marks: HashSet<PathBuf>,
     /// Recently visited paths for this pane (most recent first, deduped, capped).
     pub history: Vec<PathBuf>,
+    /// Places `go_back` stepped away from, newest first — the other half of a
+    /// browser's pair of arrows. Any fresh navigation clears it, because once
+    /// you go somewhere new the branch you came back from is gone.
+    pub forward: Vec<PathBuf>,
     /// `cwd`'s modification time as of the last read, used to notice changes
     /// made by anything other than cian.
     stamp: Option<SystemTime>,
@@ -313,6 +317,7 @@ impl Pane {
             cursor: 0,
             marks: HashSet::new(),
             history: Vec::new(),
+            forward: Vec::new(),
             stamp: None,
         };
         pane.reload()?;
@@ -326,6 +331,49 @@ impl Pane {
         if self.history.len() > HISTORY_CAP {
             self.history.truncate(HISTORY_CAP);
         }
+        // Navigating anywhere new ends the forward branch, exactly as a
+        // browser drops "forward" once you follow a different link.
+        self.forward.clear();
+    }
+
+    /// Step back to the previously visited directory (`Alt+←`). The place we
+    /// leave becomes the forward step, so the two arrows are inverses.
+    pub fn go_back(&mut self) -> Result<bool> {
+        let Some(prev) = self.history.first().cloned() else { return Ok(false) };
+        if !prev.is_dir() {
+            // It vanished while we were away; drop it and say nothing happened.
+            self.history.remove(0);
+            return Ok(false);
+        }
+        let leaving = self.cwd.clone();
+        self.history.remove(0);
+        self.forward.insert(0, leaving);
+        self.cwd = prev;
+        self.view = PaneView::Dir;
+        self.marks.clear();
+        self.filter.clear();
+        self.reload()?;
+        self.cursor_to_first_real();
+        Ok(true)
+    }
+
+    /// Step forward again (`Alt+→`), undoing a [`Pane::go_back`].
+    pub fn go_forward(&mut self) -> Result<bool> {
+        let Some(next) = self.forward.first().cloned() else { return Ok(false) };
+        if !next.is_dir() {
+            self.forward.remove(0);
+            return Ok(false);
+        }
+        let leaving = self.cwd.clone();
+        self.forward.remove(0);
+        self.history.insert(0, leaving);
+        self.cwd = next;
+        self.view = PaneView::Dir;
+        self.marks.clear();
+        self.filter.clear();
+        self.reload()?;
+        self.cursor_to_first_real();
+        Ok(true)
     }
 
     /// Whether `cwd` has changed since it was last read.

@@ -1822,20 +1822,21 @@
         assert!(app.active_pane().unwrap().cursor < after, "wheel up moved it back up");
     }
 
+    /// Dragging inside a pane only moves the cursor. It used to rubber-band
+    /// the marks, which fought the deliberate marking Space and visual mode
+    /// already do — and turned every slightly-shaky click into a reshuffle.
     #[test]
-    fn dragging_inside_a_pane_rubber_band_selects() {
-        let (_d, mut app) = app_with(&["a.txt", "b.txt", "c.txt", "d.txt"]);
+    fn dragging_inside_a_pane_only_moves_the_cursor() {
+        let (_l, _r, mut app) = app_two_dirs(&["a.txt", "b.txt", "c.txt"], &[]);
         let _ = render(&mut app, 100, 40);
         let left = app.layout_rects.left;
-        // Row 1 is the `..` row; the files start on row 2. Press on the first
-        // file, drag down two more, release inside the pane.
         app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), left.x + 3, left.y + 3));
         app.handle_mouse(mouse(MouseEventKind::Drag(MouseButton::Left), left.x + 3, left.y + 5));
         app.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), left.x + 3, left.y + 5));
-        // The dragged-over range is now marked (3 files), not a copy to elsewhere.
-        assert_eq!(app.active_pane().unwrap().mark_count(), 3, "range is marked");
-        assert!(app.file_drag.is_none(), "drag released");
+        assert_eq!(app.active_pane().unwrap().mark_count(), 0, "a drag marks nothing");
+        assert!(matches!(app.popup, Popup::None), "and starts no transfer");
     }
+
 
     #[test]
     fn clicking_a_sort_picker_row_applies_it() {
@@ -6345,26 +6346,54 @@
         }
     }
 
-    /// h and l move between panes; `-` is deliberately unbound, so a stray
-    /// dash never navigates.
+    /// Alt+←/→ (and Alt+h/l) are the browser arrows over this pane's history,
+    /// and `-` stays unbound so a stray dash never navigates.
     #[test]
-    fn h_and_l_move_between_panes_and_dash_does_nothing() {
-        let (_l, _r, mut app) = app_two_dirs(&["a.txt"], &["b.txt"]);
-        app.focus(FocusedPane::Right);
-        app.handle_key(key('h')).unwrap();
-        assert_eq!(app.focused, FocusedPane::Left, "h focuses the left pane");
-        app.handle_key(key('l')).unwrap();
-        assert_eq!(app.focused, FocusedPane::Right, "l focuses the right pane");
+    fn alt_arrows_walk_the_directory_history() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(d.path().join("sub")).unwrap();
+        let p = d.path().to_path_buf();
+        let mut app = App::new(p.clone(), p.clone(), cian_lua::Config::default()).unwrap();
+        let root = app.active_pane().unwrap().cwd.clone();
 
-        // `-` must not move anywhere.
-        app.focus(FocusedPane::Left);
+        // Go into sub/, then back, then forward again.
+        {
+            let pane = app.active_pane_mut().unwrap();
+            pane.cursor = pane.entries.iter().position(|e| e.name == "sub").unwrap();
+        }
+        app.activate_selected().unwrap();
+        assert!(app.active_pane().unwrap().cwd.ends_with("sub"));
+
+        let alt = |c: char| KeyEvent::new(KeyCode::Char(c), KeyModifiers::ALT);
+        app.handle_key(alt('h')).unwrap();
+        assert_eq!(app.active_pane().unwrap().cwd, root, "Alt+h went back");
+        app.handle_key(alt('l')).unwrap();
+        assert!(app.active_pane().unwrap().cwd.ends_with("sub"), "Alt+l went forward");
+
+        // The arrows are the same pair.
+        app.handle_key(KeyEvent::new(KeyCode::Left, KeyModifiers::ALT)).unwrap();
+        assert_eq!(app.active_pane().unwrap().cwd, root);
+        app.handle_key(KeyEvent::new(KeyCode::Right, KeyModifiers::ALT)).unwrap();
+        assert!(app.active_pane().unwrap().cwd.ends_with("sub"));
+
+        // Going somewhere new ends the forward branch.
+        app.handle_key(alt('h')).unwrap();
+        assert!(!app.active_pane().unwrap().forward.is_empty(), "forward is armed");
+        {
+            let pane = app.active_pane_mut().unwrap();
+            pane.cursor = pane.entries.iter().position(|e| e.name == "sub").unwrap();
+        }
+        app.activate_selected().unwrap();
+        assert!(app.active_pane().unwrap().forward.is_empty(), "a new step drops forward");
+
+        // `-` is unbound; Backspace still goes up.
         let before = app.active_pane().unwrap().cwd.clone();
         app.handle_key(key('-')).unwrap();
         assert_eq!(app.active_pane().unwrap().cwd, before, "`-` is unbound");
-        // Backspace still goes up.
         app.handle_key(code(KeyCode::Backspace)).unwrap();
         assert_ne!(app.active_pane().unwrap().cwd, before, "Backspace still goes up");
     }
+
 
     /// Inside an archive the hint bar names archive keys — and says outright
     /// when the format is read-only, since the keys that would write are the

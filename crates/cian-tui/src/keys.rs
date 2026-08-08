@@ -1697,6 +1697,7 @@ impl App {
         normalize_jp_key(&mut key);
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         let shift = key.modifiers.contains(KeyModifiers::SHIFT);
+        let alt = key.modifiers.contains(KeyModifiers::ALT);
 
         // `gg` chord → jump to top
         if self.pending_g {
@@ -1781,6 +1782,13 @@ impl App {
         }
 
         match (ctrl, shift, key.code) {
+            // The browser's arrows over this pane's history. First in the
+            // match on purpose: the unmodified `h`, `l`, ← and → arms below
+            // would otherwise claim these before the Alt guard is reached.
+            (_, _, KeyCode::Left) if alt => self.pane_go_back(),
+            (_, _, KeyCode::Right) if alt => self.pane_go_forward(),
+            (_, _, KeyCode::Char('h')) if alt => self.pane_go_back(),
+            (_, _, KeyCode::Char('l')) if alt => self.pane_go_forward(),
             (false, _, KeyCode::Char('q')) => self.start_quit_confirm(),
             // `_` for shift, not `false`: `:` is Shift+; on most layouts, and a
             // terminal with the kitty keyboard protocol (WezTerm, kitty, foot)
@@ -1883,11 +1891,7 @@ impl App {
             (false, true, KeyCode::Char('S')) => self.start_ssh(),
             (false, _, KeyCode::Char('n')) => self.jump_to_next_match(true),
             (false, _, KeyCode::Char('N')) => self.jump_to_next_match(false),
-            // h / l move between the panes, like the arrows beside them — the
-            // Explorer-shaped reading of a two-pane window. Directory
-            // navigation is Enter (in) and Backspace (up); `-` is unbound on
-            // purpose, so a stray dash never moves you.
-            (false, false, KeyCode::Char('h')) => self.focus(FocusedPane::Left),
+            (false, false, KeyCode::Char('h')) => self.start_history(),
             (false, false, KeyCode::Char('s')) => self.start_shortcuts(),
             // `@` — vim's play-a-macro key — opens the macro launcher.
             (false, _, KeyCode::Char('@')) => self.start_macros(),
@@ -1957,7 +1961,17 @@ impl App {
             }
             (_, _, KeyCode::Left) => self.focus(FocusedPane::Left),
             (_, _, KeyCode::Right) => self.focus(FocusedPane::Right),
-            (false, false, KeyCode::Char('l')) => self.focus(FocusedPane::Right),
+            // `l` only enters directories; never opens files. Inside an
+            // archive it descends into a member directory — going through
+            // activate_selected, because the local navigation it used to call
+            // would be handed a path that exists only inside the zip.
+            (false, false, KeyCode::Char('l')) => {
+                let on_dir =
+                    self.active_pane().and_then(|p| p.selected()).map(|e| e.is_dir).unwrap_or(false);
+                if on_dir {
+                    self.activate_selected()?;
+                }
+            }
             // Ctrl+Enter opens the selected dir (else this cwd) in the other
             // pane, same tab. (Ctrl+Shift+Enter is the global snippet launcher;
             // `O` pushes this pane's directory to the other one.) Needs a

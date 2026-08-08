@@ -57,6 +57,7 @@ fn draw_split(f: &mut Frame, main_area: Rect, app: &mut App, ov: AnimOverride) {
     let mut tab_rects = Vec::new();
     let mut sort_rects = Vec::new();
     let mut crumb_rects = Vec::new();
+    let mut nav_rects = Vec::new();
     let mut dividers = vec![
         Divider {
             zone: seam_zone(Direction::Vertical, panes_area, shell_area),
@@ -78,10 +79,10 @@ fn draw_split(f: &mut Frame, main_area: Rect, app: &mut App, ov: AnimOverride) {
     let (bg_l, bg_r) = (app.pane_bg[0], app.pane_bg[1]);
     let (fl_l, fl_r) = (app.flash_level(FocusedPane::Left), app.flash_level(FocusedPane::Right));
     let restore = push_pane_theme(app, 0);
-    draw_file_pane(f, panes_split[0], &app.left, app.focused == FocusedPane::Left, visual_for_left, app.mode, bg_l, fl_l, FocusedPane::Left, &mut tab_rects, app.git_for(FocusedPane::Left), app.lang, &mut sort_rects, &mut crumb_rects);
+    draw_file_pane(f, panes_split[0], &app.left, app.focused == FocusedPane::Left, visual_for_left, app.mode, bg_l, fl_l, FocusedPane::Left, &mut tab_rects, app.git_for(FocusedPane::Left), app.lang, &mut sort_rects, &mut crumb_rects, &mut nav_rects);
     if let Some(prev) = restore { set_theme(prev); }
     let restore = push_pane_theme(app, 1);
-    draw_file_pane(f, panes_split[1], &app.right, app.focused == FocusedPane::Right, visual_for_right, app.mode, bg_r, fl_r, FocusedPane::Right, &mut tab_rects, app.git_for(FocusedPane::Right), app.lang, &mut sort_rects, &mut crumb_rects);
+    draw_file_pane(f, panes_split[1], &app.right, app.focused == FocusedPane::Right, visual_for_right, app.mode, bg_r, fl_r, FocusedPane::Right, &mut tab_rects, app.git_for(FocusedPane::Right), app.lang, &mut sort_rects, &mut crumb_rects, &mut nav_rects);
     if let Some(prev) = restore { set_theme(prev); }
     // With preview on and a file pane focused, the shell panel's area shows
     // the file under the cursor instead; the PTY runs on underneath, and
@@ -98,6 +99,7 @@ fn draw_split(f: &mut Frame, main_area: Rect, app: &mut App, ov: AnimOverride) {
     app.tab_rects = tab_rects;
     app.sort_rects = sort_rects;
     app.crumb_rects = crumb_rects;
+    app.nav_rects = nav_rects;
 }
 
 /// The focused surface drawn at an arbitrary rect, used as the floating layer
@@ -111,14 +113,14 @@ fn draw_zoom_overlay(f: &mut Frame, rect: Rect, app: &mut App, ov: AnimOverride)
             let (bg, fl) = (app.pane_bg[0], app.flash_level(FocusedPane::Left));
             let va = app.visual_anchor;
             let restore = push_pane_theme(app, 0);
-            draw_file_pane(f, rect, &app.left, true, va, app.mode, bg, fl, FocusedPane::Left, &mut Vec::new(), app.git_for(FocusedPane::Left), app.lang, &mut Vec::new(), &mut Vec::new());
+            draw_file_pane(f, rect, &app.left, true, va, app.mode, bg, fl, FocusedPane::Left, &mut Vec::new(), app.git_for(FocusedPane::Left), app.lang, &mut Vec::new(), &mut Vec::new(), &mut Vec::new());
             if let Some(prev) = restore { set_theme(prev); }
         }
         FocusedPane::Right => {
             let (bg, fl) = (app.pane_bg[1], app.flash_level(FocusedPane::Right));
             let va = app.visual_anchor;
             let restore = push_pane_theme(app, 1);
-            draw_file_pane(f, rect, &app.right, true, va, app.mode, bg, fl, FocusedPane::Right, &mut Vec::new(), app.git_for(FocusedPane::Right), app.lang, &mut Vec::new(), &mut Vec::new());
+            draw_file_pane(f, rect, &app.right, true, va, app.mode, bg, fl, FocusedPane::Right, &mut Vec::new(), app.git_for(FocusedPane::Right), app.lang, &mut Vec::new(), &mut Vec::new(), &mut Vec::new());
             if let Some(prev) = restore { set_theme(prev); }
         }
         FocusedPane::Shell => {
@@ -171,6 +173,7 @@ fn draw_zoomed(f: &mut Frame, area: Rect, app: &mut App, ov: AnimOverride) {
     let mut tab_rects = Vec::new();
     let mut sort_rects = Vec::new();
     let mut crumb_rects = Vec::new();
+    let mut nav_rects = Vec::new();
     match app.focused {
         FocusedPane::Left => {
             rects.left = area;
@@ -178,7 +181,7 @@ fn draw_zoomed(f: &mut Frame, area: Rect, app: &mut App, ov: AnimOverride) {
             let va = app.visual_anchor;
             let (bg, fl) = (app.pane_bg[0], app.flash_level(FocusedPane::Left));
             let restore = push_pane_theme(app, 0);
-            draw_file_pane(f, area, &app.left, true, va, app.mode, bg, fl, FocusedPane::Left, &mut tab_rects, app.git_for(FocusedPane::Left), app.lang, &mut sort_rects, &mut crumb_rects);
+            draw_file_pane(f, area, &app.left, true, va, app.mode, bg, fl, FocusedPane::Left, &mut tab_rects, app.git_for(FocusedPane::Left), app.lang, &mut sort_rects, &mut crumb_rects, &mut nav_rects);
             if let Some(prev) = restore { set_theme(prev); }
         }
         FocusedPane::Right => {
@@ -187,7 +190,7 @@ fn draw_zoomed(f: &mut Frame, area: Rect, app: &mut App, ov: AnimOverride) {
             let va = app.visual_anchor;
             let (bg, fl) = (app.pane_bg[1], app.flash_level(FocusedPane::Right));
             let restore = push_pane_theme(app, 1);
-            draw_file_pane(f, area, &app.right, true, va, app.mode, bg, fl, FocusedPane::Right, &mut tab_rects, app.git_for(FocusedPane::Right), app.lang, &mut sort_rects, &mut crumb_rects);
+            draw_file_pane(f, area, &app.right, true, va, app.mode, bg, fl, FocusedPane::Right, &mut tab_rects, app.git_for(FocusedPane::Right), app.lang, &mut sort_rects, &mut crumb_rects, &mut nav_rects);
             if let Some(prev) = restore { set_theme(prev); }
         }
         FocusedPane::Shell => {
@@ -202,6 +205,7 @@ fn draw_zoomed(f: &mut Frame, area: Rect, app: &mut App, ov: AnimOverride) {
     app.tab_rects = tab_rects;
     app.sort_rects = sort_rects;
     app.crumb_rects = crumb_rects;
+    app.nav_rects = nav_rects;
 }
 
 pub(crate) fn draw(f: &mut Frame, app: &mut App) {
@@ -545,6 +549,11 @@ fn tabs_title<'a>(
     // misplaced the click map.
     let width_of = |s: &str| width(s) as u16;
 
+    // The two history arrows eat four cells at the head of the title, so the
+    // tabs get that much less to lay out in. Forgetting this is how the long
+    // path started being clipped at the right edge again.
+    const NAV_W: u16 = 4;
+    let max_width = max_width.saturating_sub(NAV_W);
     // First, lay out tabs starting from the active one outward so it never gets cut.
     let active = tabs.active.min(tabs.tabs.len().saturating_sub(1));
     let total = tabs.tabs.len();
@@ -596,6 +605,24 @@ fn tabs_title<'a>(
     // Track the running column offset so each tab's on-screen span is known.
     let mut col: u16 = 1; // the leading space below
     spans.push(Span::raw(" "));
+    // Browser arrows, before the tabs: lit when there is somewhere to go.
+    // Their rects are pushed by the caller, which knows the pane's origin.
+    {
+        let active = &tabs.tabs[tabs.active.min(tabs.tabs.len().saturating_sub(1))];
+        let lit = Style::default().fg(theme().accent).add_modifier(Modifier::BOLD);
+        let out = Style::default().fg(theme().dim);
+        spans.push(Span::styled(
+            "◀",
+            if active.history.is_empty() { out } else { lit },
+        ));
+        spans.push(Span::raw(" "));
+        spans.push(Span::styled(
+            "▶",
+            if active.forward.is_empty() { out } else { lit },
+        ));
+        spans.push(Span::raw(" "));
+        col += NAV_W;
+    }
     if hidden_left > 0 {
         let s = format!("+{} ", hidden_left);
         col += width_of(&s);
@@ -846,6 +873,7 @@ fn draw_file_pane(
     lang: Lang,
     sort_rects: &mut Vec<(FocusedPane, cian_core::SortKey, Rect)>,
     crumb_rects: &mut Vec<(FocusedPane, usize, Rect)>,
+    nav_rects: &mut Vec<(FocusedPane, bool, Rect)>,
 ) {
     // Read the active theme once — `theme()` now takes a lock, and the row loop
     // below would otherwise hit it thousands of times per frame.
@@ -869,6 +897,9 @@ fn draw_file_pane(
     let max_title_w = area.width.saturating_sub(2);
     let mut offsets = Vec::new();
     let (title, active_title) = tabs_title(tabs, focused, focus_bg, max_title_w, &mut offsets);
+    // The two history arrows sit at columns 1 and 3 of the title.
+    nav_rects.push((pane_id, false, Rect::new(area.x + 2, area.y, 1, 1)));
+    nav_rects.push((pane_id, true, Rect::new(area.x + 4, area.y, 1, 1)));
     // The title is drawn on the top border row, one cell in from the corner.
     for (i, off, w) in &offsets {
         tab_rects.push((pane_id, *i, Rect::new(area.x + 1 + off, area.y, *w, 1)));
@@ -1740,7 +1771,7 @@ pub(crate) fn key_hints(app: &App) -> Vec<(&'static str, &'static str)> {
         _ => vec![
             // Switching focus between the two file panes and the shell is the
             // core two-pane move, so it leads the bar.
-            ("←→ h/l", d("panes", "ペイン")),
+            ("←→", d("panes", "ペイン")),
             ("S-J", d("shell", "シェル")),
             ("Space", d("mark", "マーク")),
             ("/", d("filter", "絞込")),

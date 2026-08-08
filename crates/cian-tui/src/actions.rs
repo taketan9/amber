@@ -443,6 +443,30 @@ impl App {
     }
 
     // ------- History -------
+    /// `Alt+←` / `Alt+h` — the browser's back arrow, over this pane's
+    /// directory history. Says so when there is nowhere to go, rather than
+    /// swallowing the key.
+    pub(crate) fn pane_go_back(&mut self) {
+        let moved = self.active_pane_mut().map(|p| p.go_back().unwrap_or(false)).unwrap_or(false);
+        self.message = Some(if moved {
+            let cwd = self.active_pane().map(|p| p.cwd.display().to_string()).unwrap_or_default();
+            format!("◀ {cwd}")
+        } else {
+            tr(self.lang, "no earlier directory", "戻れる履歴がありません").into()
+        });
+    }
+
+    /// `Alt+→` / `Alt+l` — forward again, undoing a back step.
+    pub(crate) fn pane_go_forward(&mut self) {
+        let moved = self.active_pane_mut().map(|p| p.go_forward().unwrap_or(false)).unwrap_or(false);
+        self.message = Some(if moved {
+            let cwd = self.active_pane().map(|p| p.cwd.display().to_string()).unwrap_or_default();
+            format!("▶ {cwd}")
+        } else {
+            tr(self.lang, "nothing to go forward to", "進める履歴がありません").into()
+        });
+    }
+
     pub(crate) fn start_history(&mut self) {
         let entries = self.active_pane().map(|p| p.history.clone()).unwrap_or_default();
         if entries.is_empty() {

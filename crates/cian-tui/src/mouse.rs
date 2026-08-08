@@ -358,31 +358,13 @@ impl App {
                         d.moved = true;
                         d.over = over;
                     }
-                    // Dragging inside the origin pane rubber-band-selects rows
-                    // between the anchor and the pointer, like a file manager.
-                    // Dragging onto the other pane stays a copy/move gesture.
+                    // Dragging within the origin pane just moves the cursor.
+                    // It used to rubber-band-select rows, which fought the
+                    // deliberate marking `Space` and visual mode already do,
+                    // and made every slightly-shaky click reshuffle the marks.
+                    let _ = anchor;
                     if over == Some(from) && from != FocusedPane::Shell {
                         self.cursor_to_row(from, row);
-                        // Only start marking once the pointer has actually left
-                        // the anchor row: a click that jitters within one cell
-                        // reports a same-row Drag, and that must not mark. Once a
-                        // real rubber-band has begun, keep updating it (even back
-                        // onto the anchor row).
-                        let cur = self.active_pane().map(|p| p.cursor).unwrap_or(anchor);
-                        let rubber = self.file_drag.as_ref().map(|d| d.rubber).unwrap_or(false)
-                            || cur != anchor;
-                        if let Some(d) = &mut self.file_drag {
-                            d.rubber = rubber;
-                        }
-                        if rubber {
-                            if let Some(p) = self.active_pane_mut() {
-                                let (lo, hi) = (anchor.min(cur), anchor.max(cur));
-                                p.clear_marks();
-                                for i in lo..=hi {
-                                    p.set_mark_at(i);
-                                }
-                            }
-                        }
                     }
                     return;
                 }
@@ -434,6 +416,17 @@ impl App {
             return;
         }
 
+        // The ◀ / ▶ arrows at the head of the title, before anything else on
+        // that row can claim the click.
+        if let Some((pane, fwd, _)) = self.nav_rects.iter().copied().find(|(_, _, r)| in_rect(*r)) {
+            self.focus(pane);
+            if fwd {
+                self.pane_go_forward();
+            } else {
+                self.pane_go_back();
+            }
+            return;
+        }
         // A breadcrumb click navigates to that ancestor of the pane's cwd.
         // Checked before tab selection: these rects sit inside the active
         // tab's label, and the tab click would otherwise swallow them.
@@ -550,7 +543,6 @@ impl App {
                         over: Some(pane),
                         moved: false,
                         anchor,
-                        rubber: false,
                     });
                 }
             }

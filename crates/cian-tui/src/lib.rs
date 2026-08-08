@@ -1761,14 +1761,9 @@ struct FileDrag {
     /// True once the pointer has actually moved; a press and release without
     /// motion is a click, not a drag.
     moved: bool,
-    /// The entry index the drag started on. A drag that stays inside the origin
-    /// pane rubber-band-selects from here to the row under the pointer.
+    /// The entry index the drag started on, kept so a drop can tell where the
+    /// gesture began.
     anchor: usize,
-    /// True once the pointer has reached a row other than the anchor, i.e. a
-    /// real rubber-band selection has begun. A press-and-release on one row —
-    /// even if the terminal reports a stray same-cell Drag — must stay a click
-    /// and never touch the marks.
-    rubber: bool,
 }
 
 pub struct App {
@@ -1808,6 +1803,9 @@ pub struct App {
     /// Clickable path-segment rects on the active tab's title (a breadcrumb).
     /// The `usize` is how many trailing components to strip from the cwd.
     crumb_rects: Vec<(FocusedPane, usize, Rect)>,
+    /// The ◀ / ▶ history arrows at the head of each pane title; the bool is
+    /// true for forward.
+    nav_rects: Vec<(FocusedPane, bool, Rect)>,
     /// Member list of the archive being browsed (`Enter` on a zip/tar),
     /// cached so navigation inside it does not re-scan — see [`arcview`].
     archive_cache: Option<arcview::ArchiveCache>,
@@ -2181,6 +2179,7 @@ impl App {
             chat_attachments: Vec::new(),
             sort_rects: Vec::new(),
             crumb_rects: Vec::new(),
+            nav_rects: Vec::new(),
             gfx_picker: None,
             img_proto: None,
             preview_on: config.options.preview.unwrap_or(true),
@@ -3349,9 +3348,10 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry("gg", None, "jump to top", "先頭へジャンプ"),
                 entry("G", Some(CursorBottom), "jump to bottom", "末尾へジャンプ"),
                 entry("Enter", Some(EnterDir), "enter folder / open file / go into an archive", "フォルダに入る／ファイルを開く／書庫の中へ"),
-                entry("h / l", None, "focus the left / right pane (same as ← →)", "左／右ペインへフォーカス（← → と同じ）"),
                 entry("Backspace", Some(Parent), "up one level", "1階層上へ"),
-                entry(":back", None, "this pane's directory history", "このペインの移動履歴"),
+                entry("Alt+← / Alt+h", None, "back to the previous directory (or click ◀ in the title)", "直前のディレクトリへ戻る（タイトルの ◀ クリックでも）"),
+                entry("Alt+→ / Alt+l", None, "forward again (or click ▶)", "進む（▶ クリックでも）"),
+                entry("h", None, "this pane's directory history (also :back)", "このペインの移動履歴（:back でも）"),
                 entry("F3", None, "look inside: text/hex, an image, or an archive's list", "中身を見る：テキスト/16進・画像・書庫の一覧"),
                 entry("  Enter on a zip", None, "browse INSIDE the archive; copy out=extract, copy in=add, r/d rename/delete (zip)", "zipにEnterで書庫の中へ（コピー=展開／逆コピー=追加、r/d でリネーム・削除）"),
                 entry(":preview", None, "cursor-follow preview in the shell panel (Shift+J shows the shell)", "シェル枠にカーソル追従プレビュー（Shift+J でシェル表示）"),
