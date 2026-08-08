@@ -307,11 +307,12 @@ impl App {
 
 
 
-        // Shift+Enter re-decodes the same bytes under the next text encoding.
-        // Shift+Enter reveals the viewed file in the pane: jump there, cursor
-        // on it, and close the viewer.
+        // Shift+Enter opens the viewer's menu — the keyboard's version of the
+        // right-click, as it is in the file panes. Revealing the file in the
+        // pane, which used to be here, is an item in it.
         if key.code == KeyCode::Enter && shift {
-            self.viewer_reveal_in_pane();
+            let (c, r) = (self.viewer_rect.x + 4, self.viewer_rect.y + 2);
+            self.open_viewer_menu(c, r);
             return Ok(());
         }
         // `e` opens the encoding picker; the choice re-decodes this file. Only

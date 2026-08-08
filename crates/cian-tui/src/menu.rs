@@ -18,6 +18,9 @@ impl App {
             items.push(MenuItem::AiCodeFix);
         }
         items.push(MenuItem::Copy);
+        // Where the file lives, for when reading it raises a question about
+        // the folder it is in. This used to be Shift+Enter's whole job.
+        items.push(MenuItem::RevealInPane);
         items.push(MenuItem::ThemePick);
         // The viewer steps aside rather than closing: the question is about
         // the file, and the file may have unsaved edits in it.
@@ -484,6 +487,10 @@ impl App {
             MenuItem::AiChat => self.open_ai_chat(),
             MenuItem::AiShellCmd => self.start_ai_shell_prompt(),
             MenuItem::AiExplainError => self.explain_shell_error(),
+            MenuItem::RevealInPane => {
+                self.restore_viewer();
+                self.viewer_reveal_in_pane();
+            }
             MenuItem::AiWriting => self.ai_over_viewer(AiOverText::Writing),
             MenuItem::AiCommandHelp => self.ai_over_viewer(AiOverText::Command),
             MenuItem::AiCodeFix => self.ai_over_viewer(AiOverText::Code),

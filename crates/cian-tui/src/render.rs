@@ -441,16 +441,24 @@ pub(crate) fn draw(f: &mut Frame, app: &mut App) {
         // and dimmed, exactly as the unfocused file pane is, so which one the
         // keyboard is pointed at is never a guess.
         if let Some(other) = app.viewer_split.take() {
-            let (a, b) = split_viewer_areas(area, app.viewer_split_lr);
+            let (first, second) = split_viewer_areas(area, app.viewer_split_lr);
+            // Which half each file occupies is fixed; crossing over moves the
+            // focus, not the files. Drawing the focused one always on the left
+            // made the two look as though they had traded places.
+            let (mine, theirs) = if app.viewer_split_focus {
+                (second, first)
+            } else {
+                (first, second)
+            };
             let mut other = other;
-            draw_viewer(f, b, &mut other, lang, show_ws, None, (0, 1));
+            draw_viewer(f, theirs, &mut other, lang, show_ws, None, (0, 1));
             f.render_widget(
                 Block::default().style(Style::default().fg(Color::Rgb(90, 90, 105))),
-                b,
+                theirs,
             );
             draw_viewer(
                 f,
-                a,
+                mine,
                 &mut app.popup,
                 lang,
                 show_ws,

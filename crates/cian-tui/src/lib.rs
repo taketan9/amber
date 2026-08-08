@@ -844,6 +844,8 @@ enum MenuItem {
     /// Over the viewer's selection: tidy the prose, explain the command, or
     /// review the code. The three things a file open in front of you is
     /// usually wanted for.
+    /// Jump the pane to this file's folder, cursor on it.
+    RevealInPane,
     AiWriting,
     AiCommandHelp,
     AiCodeFix,
@@ -1086,6 +1088,7 @@ impl MenuItem {
             MenuItem::DiskUsage => tr(lang, "Disk usage  (:du)", "容量分析  (:du)"),
             MenuItem::AiShellCmd => tr(lang, "Command from description  (:aicmd)", "説明からコマンド生成  (:aicmd)"),
             MenuItem::AiExplainError => tr(lang, "Explain the last error  (:explain)", "直近のエラーを説明  (:explain)"),
+            MenuItem::RevealInPane => tr(lang, "Show where this file is", "このファイルの場所を開く"),
             MenuItem::AiWriting => tr(lang, "Improve this writing", "この文章を推敲"),
             MenuItem::AiCommandHelp => tr(lang, "Explain / write this command", "コマンドを説明・作成"),
             MenuItem::AiCodeFix => tr(lang, "Review and fix this code", "このコードを点検・修正"),
@@ -3657,7 +3660,7 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry("    :ws", None, "show trailing spaces, tabs and ideographic spaces", "行末空白・TAB・全角スペースを表示"),
                 entry("    :lf :crlf", None, "convert line endings (shown in the title)", "改行コードを変換（タイトルに表示）"),
                 entry("  Shift+F8/F9/F10", None, "split left-right / top-bottom / close it — Shift+H,L crosses over", "左右分割 / 上下分割 / 解除 — Shift+H,L で行き来"),
-                entry("  right-click", None, "the viewer's menu: ask the AI about the selection, copy it, change the theme", "ビューアのメニュー：選択範囲をAIに聞く・コピー・テーマ変更"),
+                entry("  right-click / S-Enter", None, "the viewer's menu: ask the AI about the selection, copy, reveal, theme", "ビューアのメニュー：選択範囲をAIに聞く・コピー・場所を開く・テーマ"),
                 entry("  p / P", None, "paste after / before the cursor — whole lines when whole lines were copied", "カーソルの後/前に貼り付け — 行単位でコピーしたものは行単位で"),
                 entry("  :preview", None, "the rendered Markdown, and back to the source (Ctrl+E where the terminal allows it)", "Markdown の描画表示とソースの切替（端末が許せば Ctrl+E でも）"),
                 entry("  F2 / Shift+F2", None, "the next / previous open file — F3 on marked files opens them all as tabs", "次/前の開いているファイル — マークして F3 で全部タブで開く"),
@@ -3675,7 +3678,7 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry(":bulkrename", None, "rename marked (or all) files by editing the list in your editor (:brn, :vidir)", "マーク（無ければ全部）の名前一覧をエディタで編集してリネーム（:brn, :vidir）"),
                 entry("  in viewer", None, "hjkl move, /n/N search, %/{/}/NG jump, v/V/C-v select y copy", "ビューア内：hjkl移動, /n/N検索, %/{/}/NG移動, v/V/C-v選択 yコピー"),
                 entry("  B in viewer", None, "toggle the git blame gutter (who last changed each line)", "ビューア内：git blame ガター切替（各行の最終変更者）"),
-                entry("  from a grep hit", None, "Ctrl+n/N next/prev hit, Shift+Enter reveal in pane, e encoding", "grepヒットから：Ctrl+n/N 次/前, Shift+Enter 場所へ, e 文字コード"),
+                entry("  from a grep hit", None, "Ctrl+n/N next/prev hit, e encoding (reveal is in the menu)", "grepヒットから：Ctrl+n/N 次/前, e 文字コード（場所を開くはメニュー内）"),
                 entry("=", None, "compare left ↔ right: two files (line diff), or two folders (recursive)", "左右を比較：ファイル同士（行差分）／フォルダ同士（再帰）"),
                 entry("  > / <", None, "  in a comparison: copy the entry across to the other side (confirms overwrite)", "  比較画面：エントリを反対側へコピー（上書きは確認）"),
                 entry("  c / w", None, "  in a comparison: copy to clipboard / save side-by-side (.html or .md, else .txt)", "  比較画面：クリップボードへ／左右並びで保存（.html か .md、他は .txt）"),

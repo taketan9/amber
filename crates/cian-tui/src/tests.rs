@@ -871,9 +871,20 @@
         app.handle_key(KeyEvent::new(KeyCode::Char('H'), KeyModifiers::SHIFT)).unwrap();
         assert_eq!(shown(&app), "AAA");
 
-        // Both halves are drawn, side by side.
-        let screen = render(&mut app, 160, 30).join("\n");
-        assert!(screen.contains("AAA") && screen.contains("BBB"), "{screen}");
+        // Both halves are drawn side by side — and crossing over moves the
+        // focus, not the files: each stays on the side it was put.
+        let side_of = |app: &mut App, needle: &str| -> usize {
+            let rows = render(app, 160, 30);
+            let row = rows.iter().find(|r| r.contains(needle)).expect("on screen");
+            usize::from(row.find(needle).expect("column") >= 80)
+        };
+        assert_eq!(side_of(&mut app, "AAA"), 0, "AAA is on the left");
+        assert_eq!(side_of(&mut app, "BBB"), 1, "BBB is on the right");
+        app.handle_key(KeyEvent::new(KeyCode::Char('L'), KeyModifiers::SHIFT)).unwrap();
+        assert_eq!(shown(&app), "BBB", "the keyboard crossed over");
+        assert_eq!(side_of(&mut app, "AAA"), 0, "…and AAA did not move");
+        assert_eq!(side_of(&mut app, "BBB"), 1, "…nor did BBB");
+        app.handle_key(KeyEvent::new(KeyCode::Char('H'), KeyModifiers::SHIFT)).unwrap();
 
         // Shift+F10 keeps the one being read and returns the other to the strip.
         app.handle_key(KeyEvent::new(KeyCode::F(10), KeyModifiers::SHIFT)).unwrap();
@@ -8286,9 +8297,23 @@
         std::fs::write(d.path().join("sub").join("deep.txt"), "content\n").unwrap();
         let p = d.path().to_path_buf();
         let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
-        // Open the file directly in the viewer, then Shift+Enter to reveal it.
+        // Open the file, then Shift+Enter for the viewer's menu, and take the
+        // item that reveals it. (Shift+Enter used to reveal it directly; it is
+        // the keyboard's right-click now, and revealing moved into the menu.)
         app.open_viewer_at(&d.path().join("sub").join("deep.txt"), "deep.txt", 0);
+        let _ = render(&mut app, 100, 30);
         app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::SHIFT)).unwrap();
+        let at = match &app.popup {
+            Popup::ContextMenu { items, .. } => items
+                .iter()
+                .position(|i| matches!(i, MenuItem::RevealInPane))
+                .expect("the menu offers it"),
+            other => panic!("expected the viewer's menu, got {other:?}"),
+        };
+        if let Popup::ContextMenu { cursor, .. } = &mut app.popup {
+            *cursor = at;
+        }
+        app.handle_key(code(KeyCode::Enter)).unwrap();
         assert!(matches!(app.popup, Popup::None), "viewer closed");
         let pane = app.active_pane().unwrap();
         assert!(pane.cwd.ends_with("sub"), "pane moved into the file's dir: {:?}", pane.cwd);
