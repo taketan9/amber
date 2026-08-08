@@ -3060,12 +3060,13 @@ let body_c = readable_on(theme().popup_bg);
 let view_h = inner.height as usize;
 let first = if cursor >= view_h { cursor + 1 - view_h } else { 0 };
 let mut lines: Vec<Line> = Vec::new();
-for (i, (mode, log)) in app.ai_history.iter().enumerate().skip(first).take(view_h) {
+for (i, c) in app.ai_history.iter().enumerate().skip(first).take(view_h) {
     let sel = i == cursor;
+    let log = c.log();
     let title = App::ai_history_title(log);
     let turns = log.iter().filter(|m| m.user).count();
     let marker = if sel { "▶ " } else { "  " };
-    let badge = format!("{:<6} ", mode.badge());
+    let badge = format!("{:<6} ", c.mode().badge());
     let title_style = if sel {
         Style::default()
             .fg(readable_on(theme().selected_bg))
@@ -4556,7 +4557,7 @@ fn draw_grep_replace(
             Paragraph::new(Line::from(vec![
                 Span::styled(mark, if c.picked { base.fg(theme().accent) } else { base.fg(dim) }),
                 Span::styled(truncate_middle(&loc, loc_w), base.fg(Color::Rgb(135, 135, 160))),
-                Span::styled(truncate(&c.after.replace('\n', "⏎"), rest), text_style),
+                Span::styled(truncate(&crate::util::plain(&c.after.replace('\n', "⏎")), rest), text_style),
             ])),
             line_area,
         );
@@ -4570,7 +4571,7 @@ fn draw_grep_replace(
             Paragraph::new(Line::from(vec![
                 Span::styled(" now ", Style::default().fg(dim)),
                 Span::styled(
-                    truncate(&c.before, inner.width.saturating_sub(5) as usize),
+                    truncate(&crate::util::plain(&c.before), inner.width.saturating_sub(5) as usize),
                     Style::default().fg(Color::Rgb(200, 160, 160)),
                 ),
             ])),
@@ -4709,7 +4710,7 @@ fn draw_find_results(
                     base.fg(Color::Rgb(135, 135, 160)),
                 ));
                 spans.push(Span::styled(
-                    truncate(text, avail.saturating_sub(loc_w)),
+                    truncate(&crate::util::plain(text), avail.saturating_sub(loc_w)),
                     base.fg(Color::Rgb(225, 225, 240)),
                 ));
             }
@@ -4731,7 +4732,7 @@ fn draw_find_results(
         f.render_widget(Paragraph::new(Line::from(spans)), line_area);
     }
     f.render_widget(
-        Paragraph::new(tr(lang, " Enter=go  p=panelize  j/k=move  Esc=close ", " Enter=移動  p=ペイン化  j/k=カーソル  Esc=閉じる ")).style(
+        Paragraph::new(tr(lang, " Enter=go  r=replace all  p=panelize  j/k=move  Esc=close ", " Enter=移動  r=一括置換  p=ペイン化  j/k=カーソル  Esc=閉じる ")).style(
             Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD),
         ),
         Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1),
@@ -5092,14 +5093,18 @@ fn draw_viewer(
     let cut = if view.truncated { "  (first 4M shown)" } else { "" };
     // A little mode badge in the title, so which visual mode is active — and
     // where the cursor sits — is never a guess.
-    let mode = if *editing {
-        "  [EDIT]".to_string()
+    // The viewer says what mode it is in the way the file panes do: a word and
+    // a colour, on the border as well as in the chip. Reading, selecting and
+    // editing are three quite different things to have a keyboard pointed at,
+    // and a badge alone is easy to have not looked at.
+    let (mode, mode_color) = if *editing {
+        ("EDIT", Color::Rgb(240, 160, 90))
     } else {
         match visual {
-            None => String::new(),
-            Some(ViewVisual::Char) => "  [VISUAL]".into(),
-            Some(ViewVisual::Line) => "  [V-LINE]".into(),
-            Some(ViewVisual::Block) => "  [V-BLOCK]".into(),
+            None => ("READ", theme().accent),
+            Some(ViewVisual::Char) => ("VISUAL", Color::Rgb(255, 140, 0)),
+            Some(ViewVisual::Line) => ("V-LINE", Color::Rgb(255, 140, 0)),
+            Some(ViewVisual::Block) => ("V-BLOCK", Color::Rgb(255, 175, 60)),
         }
     };
     let dirty_mark = if *dirty { " ●" } else { "" };
@@ -5116,8 +5121,15 @@ fn draw_viewer(
     // The line ending is as invisible as the BOM and just as easy to convert
     // by accident, so it gets the same treatment: shown, and only changed on
     // purpose (`:lf` / `:crlf`).
+    // The line ending, with the arrow the marks would draw, so the badge and
+    // the text agree about which is which.
     let eol_mark = if view.kind == cian_core::viewer::ViewKind::Text {
-        format!(" · {}", view.eol.label())
+        let arrow = match view.eol {
+            cian_core::viewer::Eol::Crlf => "↵↓",
+            cian_core::viewer::Eol::Cr => "↵",
+            cian_core::viewer::Eol::Lf => "↓",
+        };
+        format!(" · {} {}", view.eol.label(), arrow)
     } else {
         String::new()
     };
@@ -5129,12 +5141,21 @@ fn draw_viewer(
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(border_type())
-        .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
+        .border_style(Style::default().fg(mode_color).add_modifier(Modifier::BOLD))
         // The viewer takes the theme's own surface (light on a light theme),
         // so it truly follows the theme; its text uses readable_on below.
         .style(Style::default().bg(surface()))
         .title(format!(" {}{}  —  {} ", title, dirty_mark, head))
-        .title_bottom(format!(" {}:{}{} ", *line + 1, *col + 1, mode));
+        .title_bottom(Line::from(vec![
+            Span::styled(
+                format!(" {} ", mode),
+                Style::default().fg(Color::Black).bg(mode_color).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!(" {}:{} ", *line + 1, *col + 1),
+                Style::default().fg(mode_color),
+            ),
+        ]));
     let whole = rect.inner(Margin { vertical: 1, horizontal: 2 });
     f.render_widget(block, rect);
 
@@ -5275,18 +5296,19 @@ fn draw_viewer(
             // stays in buffer characters. Expanding the string first, as this
             // used to, meant the file was saved back with its tabs already
             // spent.
-            let trail_from = if show_ws && !*preview {
-                l.chars().count() - l.chars().rev().take_while(|c| *c == ' ').count()
-            } else {
-                usize::MAX
-            };
+            let trail_from = usize::MAX;
+            let marks = show_ws && !*preview;
             let shown = |j: usize, ch: char, at: usize| -> String {
                 match ch {
-                    '\t' if show_ws && !*preview => {
-                        format!("→{}", " ".repeat(TAB_W - 1 - (at % TAB_W)))
-                    }
+                    '\t' if marks => format!("→{}", " ".repeat(TAB_W - 1 - (at % TAB_W))),
                     '\t' => " ".repeat(TAB_W - (at % TAB_W)),
-                    '\u{3000}' if show_ws && !*preview => "□".to_string(),
+                    // An ideographic space is the one that breaks YAML and
+                    // shell scripts while looking exactly like nothing.
+                    '\u{3000}' if marks => "□".to_string(),
+                    // Every half-width space, not only the trailing ones —
+                    // Sakura shows them all, and once the marks are asked for
+                    // that is what they are asked for.
+                    ' ' if marks => "·".to_string(),
                     ' ' if j >= trail_from => "·".to_string(),
                     other => other.to_string(),
                 }
@@ -5408,6 +5430,20 @@ fn draw_viewer(
             if cur == Some(len) {
                 spans.push(Span::styled(" ".to_string(), cursor_style));
             }
+            // With the marks on, the line ending is drawn too, and the two
+            // kinds look different — which is the point. A file that is CRLF
+            // except for three lines is not something a badge in the title can
+            // tell you, and it is exactly the file that causes trouble.
+            if marks && len == l.chars().count() {
+                spans.push(Span::styled(
+                    match view.eol {
+                        cian_core::viewer::Eol::Crlf => "↵↓",
+                        cian_core::viewer::Eol::Cr => "↵",
+                        cian_core::viewer::Eol::Lf => "↓",
+                    },
+                    Style::default().fg(Color::Rgb(110, 140, 175)),
+                ));
+            }
             Line::from(spans)
         })
         .collect();
@@ -5452,15 +5488,21 @@ fn draw_viewer(
             crate::BlockEdit::Insert => tr(lang, "insert ▏", "左端に挿入 ▏"),
             crate::BlockEdit::Append => tr(lang, "append ▕", "右端に追記 ▕"),
             crate::BlockEdit::Replace => tr(lang, "replace ▊", "矩形を置換 ▊"),
+            crate::BlockEdit::LineStart => tr(lang, "line start ▏", "各行の先頭 ▏"),
+            crate::BlockEdit::LineEnd => tr(lang, "line end ▕", "各行の末尾 ▕"),
         };
+        // A line selection has no column to report; a rectangle does.
+        let ragged = matches!(b.kind, crate::BlockEdit::LineStart | crate::BlockEdit::LineEnd);
+        let rows = b.block.bottom - b.block.top + 1;
         format!(
             "{} {}_   {}",
             what,
             b.text,
-            if lang == Lang::Ja {
-                format!("({} 行, {} 桁目)", b.block.bottom - b.block.top + 1, b.block.left + 1)
-            } else {
-                format!("({} lines, col {})", b.block.bottom - b.block.top + 1, b.block.left + 1)
+            match (ragged, lang == Lang::Ja) {
+                (true, true) => format!("({rows} 行)"),
+                (true, false) => format!("({rows} lines)"),
+                (false, true) => format!("({rows} 行, {} 桁目)", b.block.left + 1),
+                (false, false) => format!("({rows} lines, col {})", b.block.left + 1),
             }
         )
     } else if let Some(cmd) = sub_input {

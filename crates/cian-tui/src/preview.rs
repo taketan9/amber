@@ -140,7 +140,12 @@ fn load_preview(path: &Path, lang: crate::Lang) -> PreviewBody {
         };
     }
     match cian_core::viewer::view_file(path) {
-        Ok(view) => {
+        Ok(mut view) => {
+            // Draw-safe first, highlight second, so the per-character colours
+            // stay parallel to the characters actually drawn.
+            for l in &mut view.lines {
+                *l = crate::util::plain(l);
+            }
             let hl = if view.kind == cian_core::viewer::ViewKind::Text {
                 cian_core::highlight::detect(path)
                     .map(|lang| cian_core::highlight::highlight(&view.lines, lang))

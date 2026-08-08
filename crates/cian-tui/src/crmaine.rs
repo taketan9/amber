@@ -378,9 +378,17 @@ impl App {
         self.crmaine_stage = Some(tr(self.lang, "indexing…", "インデックス構築中…").into());
         self.crmaine_sources.clear();
         // After indexing, a typed follow-up should query the freshly-built
-        // index (RAG), so the console chat is a RAG conversation.
-        self.start_ai_chat(
+        // index (RAG), so the console chat is a RAG conversation — but the
+        // window is named for the action that opened it, not for the follow-up.
+        self.start_ai_chat_as(
             ChatMode::Rag,
+            ChatSkin {
+                title: format!(
+                    "crmaine - {}",
+                    tr(self.lang, "Index this folder", "このフォルダをインデックス")
+                ),
+                simple: false,
+            },
             vec![ChatMsg {
                 user: true,
                 text: format!("{}: {}", tr(self.lang, "index", "インデックス"), folder.display()),
@@ -411,7 +419,7 @@ impl App {
         }
         self.start_crmaine_tool(
             "/impact",
-            tr(self.lang, "impact", "影響分析"),
+            tr(self.lang, "Impact analysis", "影響分析"),
             change,
             serde_json::json!({ "change_description": change }),
         );
@@ -426,7 +434,7 @@ impl App {
         }
         self.start_crmaine_tool(
             "/contradiction",
-            tr(self.lang, "contradiction", "矛盾検出"),
+            tr(self.lang, "Find contradictions", "矛盾検出"),
             topic,
             serde_json::json!({ "topic": topic }),
         );
@@ -584,7 +592,7 @@ impl App {
     pub(crate) fn start_glossary(&mut self) {
         self.start_crmaine_tool(
             "/glossary",
-            tr(self.lang, "glossary", "用語集"),
+            tr(self.lang, "Generate glossary", "用語集を生成"),
             tr(self.lang, "generating…", "生成中…"),
             serde_json::json!({ "synonyms_file": "" }),
         );

@@ -1212,6 +1212,27 @@ impl App {
                     block_prompt = Some(crate::BlockInput { block: b, kind, text: String::new() });
                     consumed = true;
                 }
+                // …and on a line selection, where they mean the start of each
+                // line and the end of each line. Vim reserves these for the
+                // rectangle, but "put a comma on the end of all of these" is
+                // asked for far more often than a column is, and V is the
+                // easier selection to make.
+                KeyCode::Char(k @ ('I' | 'A')) if *visual == Some(ViewVisual::Line) => {
+                    let b = cian_core::textops::Block {
+                        top: (*line).min(anchor.0),
+                        bottom: (*line).max(anchor.0),
+                        left: 0,
+                        right: 0,
+                    };
+                    let kind = if k == 'I' {
+                        crate::BlockEdit::LineStart
+                    } else {
+                        crate::BlockEdit::LineEnd
+                    };
+                    *visual = None;
+                    block_prompt = Some(crate::BlockInput { block: b, kind, text: String::new() });
+                    consumed = true;
+                }
                 // x — delete N characters under the cursor.
                 KeyCode::Char('x') => {
                     let len = lines[*line].chars().count();
@@ -1347,6 +1368,12 @@ impl App {
                 crate::BlockEdit::Append => tr(self.lang,
                     "type the text to append at the right edge, Enter to apply",
                     "右端に追記する文字を入力、Enter で適用").into(),
+                crate::BlockEdit::LineStart => tr(self.lang,
+                    "type the text to put at the start of every line, Enter to apply",
+                    "各行の先頭に入れる文字を入力、Enter で適用").into(),
+                crate::BlockEdit::LineEnd => tr(self.lang,
+                    "type the text to put at the end of every line, Enter to apply",
+                    "各行の末尾に付ける文字を入力、Enter で適用").into(),
                 crate::BlockEdit::Replace => tr(self.lang,
                     "type what replaces the rectangle, Enter to apply",
                     "矩形を置き換える文字を入力、Enter で適用").into(),
@@ -1375,6 +1402,12 @@ impl App {
                 crate::BlockEdit::Insert => tx::block_insert(&view.lines, b.block, &b.text),
                 crate::BlockEdit::Append => tx::block_append(&view.lines, b.block, &b.text),
                 crate::BlockEdit::Replace => tx::block_replace(&view.lines, b.block, &b.text),
+                crate::BlockEdit::LineStart => {
+                    tx::line_affix(&view.lines, b.block.top, b.block.bottom, &b.text, false)
+                }
+                crate::BlockEdit::LineEnd => {
+                    tx::line_affix(&view.lines, b.block.top, b.block.bottom, &b.text, true)
+                }
             };
             *line = b.block.top;
             *col = b.block.left;

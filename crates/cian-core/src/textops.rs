@@ -249,6 +249,17 @@ mod tests {
 
     /// The point of counting columns: a rectangle drawn over mixed-width text
     /// is a rectangle on screen, and every line loses the same columns.
+    /// The line-selection version: the left edge is column zero, and the
+    /// right edge is wherever each line already stops — no squaring off.
+    #[test]
+    fn a_line_selection_takes_text_at_either_end() {
+        let src = v(&["one", "", "three", "four"]);
+        assert_eq!(line_affix(&src, 0, 2, "# ", false), v(&["# one", "# ", "# three", "four"]));
+        assert_eq!(line_affix(&src, 0, 2, ",", true), v(&["one,", ",", "three,", "four"]));
+        // Past the end is not a panic.
+        assert_eq!(line_affix(&src, 2, 99, "x", true), v(&["one", "", "threex", "fourx"]));
+    }
+
     #[test]
     fn a_block_is_rectangular_on_screen_not_in_characters() {
         // "あい" is four columns wide; "abcd" is four columns of one each.
@@ -264,11 +275,15 @@ mod tests {
         let b2 = Block::between(&src, (0, 1), (1, 4));
         assert_eq!((b2.left, b2.right), (2, 5), "columns, not character indices");
 
-        // An edge falling inside a wide character takes it whole — half a
-        // character is not something a file can hold.
+        // A character the edge cuts through is left out rather than taken
+        // whole: the block must never reach past the rectangle on screen.
+        let heads = v(&["## 事前準備", "- ふたつめ"]);
+        let four = Block { top: 0, bottom: 1, left: 0, right: 4 };
+        assert_eq!(block_text(&heads, four), v(&["## ", "- ふ"]), "事 is only half inside");
+        // Both edges cutting a character leaves nothing on that line.
         let one = v(&["あい"]);
         let cut = Block { top: 0, bottom: 0, left: 1, right: 3 };
-        assert_eq!(block_text(&one, cut), v(&["あい"]), "both are taken");
+        assert_eq!(block_text(&one, cut), v(&[""]), "neither is wholly inside");
 
         // Padding to a column pads in columns, so an inserted marker lines up
         // under the same place on every line.
@@ -347,9 +362,12 @@ mod tests {
 /// is most of the lines this exists for. Sakura Editor reckons in columns, and
 /// so does this.
 ///
-/// A character an edge falls inside is taken whole: half a character is not
-/// something a text file can hold, so the rectangle widens to the nearest
-/// character boundary rather than pretending otherwise.
+/// The block covers exactly the characters that lie *wholly* inside it. A
+/// full-width character the edge cuts through is left out, so a four-column
+/// block over `## 事前準備` gives `## ` and not `## 事`: the selection never
+/// reaches further right than the rectangle drawn on screen. Half a character
+/// is not something a text file can hold, and taking the whole of one would
+/// mean editing a column the user did not select.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Block {
     pub top: usize,
@@ -409,11 +427,14 @@ impl Block {
         }
     }
 
-    /// Where this block starts and ends in `line`, as character indices.
+    /// Where this block starts and ends in `line`, as character indices —
+    /// the characters lying wholly within its columns.
     pub fn char_range(&self, line: &str) -> (usize, usize) {
         let (cols, _) = columns(line);
-        let from = cols.iter().position(|(s, w)| s + w > self.left).unwrap_or(cols.len());
-        let to = cols.iter().position(|(s, _)| *s >= self.right).unwrap_or(cols.len());
+        // The first character that starts at or after the left edge, and the
+        // first one that would run past the right edge.
+        let from = cols.iter().position(|(s, _)| *s >= self.left).unwrap_or(cols.len());
+        let to = cols.iter().position(|(s, w)| s + w > self.right).unwrap_or(cols.len());
         (from, to.max(from))
     }
 }
@@ -468,6 +489,26 @@ pub fn block_replace(lines: &[String], b: Block, text: &str) -> Vec<String> {
             chars.insert(from + i, c);
         }
     })
+}
+
+/// Put `text` at the start of every line in `top..=bottom`, or at each line's
+/// own end.
+///
+/// The line-selection counterpart to [`block_insert`] and [`block_append`].
+/// The difference that matters is the right-hand one: a block appends at a
+/// *column*, padding short lines to reach it, while this appends at whatever
+/// each line's end happens to be. "Put a comma on the end of all of these" is
+/// the request, and it does not want the lines squared off first.
+pub fn line_affix(lines: &[String], top: usize, bottom: usize, text: &str, at_end: bool) -> Vec<String> {
+    let mut out = lines.to_vec();
+    for i in top..=bottom.min(out.len().saturating_sub(1)) {
+        if at_end {
+            out[i].push_str(text);
+        } else {
+            out[i].insert_str(0, text);
+        }
+    }
+    out
 }
 
 /// The rectangle's contents, one string per line, for the clipboard.

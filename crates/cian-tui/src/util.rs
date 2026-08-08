@@ -314,6 +314,31 @@ pub(crate) fn fit(s: &str, w: usize) -> String {
 /// Not `chars().count()`: CJK characters occupy two cells, so a Japanese
 /// shortcut name padded by character count pushes everything after it out of
 /// alignment and off the right edge.
+/// Make a line of a file safe to draw somewhere that is not the viewer.
+///
+/// A tab written into a cell is sent to the terminal as a tab: the cursor
+/// jumps and the cells it skipped keep whatever was in them, which is how the
+/// tail of a Makefile stayed on screen underneath the next file previewed.
+/// Only the viewer expands tabs properly, against its own column arithmetic;
+/// everywhere else — previews, result lists, diff rows — wants this.
+pub(crate) fn plain(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '\t' => {
+                let at = width(&out);
+                let stop = cian_core::viewer::TAB_W;
+                out.push_str(&" ".repeat(stop - (at % stop)));
+            }
+            // Any other control character would move the cursor or change the
+            // colours; a visible stand-in says something is there.
+            c if c.is_control() => out.push('·'),
+            c => out.push(c),
+        }
+    }
+    out
+}
+
 pub(crate) fn width(s: &str) -> usize {
     UnicodeWidthStr::width(s)
 }

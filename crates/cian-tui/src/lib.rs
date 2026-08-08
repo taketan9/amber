@@ -716,6 +716,10 @@ pub(crate) enum BlockEdit {
     Append,
     /// `c` — replacing what the rectangle covers.
     Replace,
+    /// `I` on a line selection — at column zero of every line.
+    LineStart,
+    /// `A` on a line selection — at each line's own end, wherever that is.
+    LineEnd,
 }
 
 /// A whole-line transform (`:sort`, `:han`, `:reindent`, …): lines in, lines
@@ -1443,7 +1447,7 @@ enum ChatMode {
 /// to name the action that opened it ("Triage this log", not just "Chat"), and
 /// crmaine's corpus tools stream a *crmaine* answer into a chat whose
 /// follow-ups are local.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 struct ChatSkin {
     /// Shown at the top of the window — the menu item that opened it.
     title: String,
@@ -2238,7 +2242,7 @@ pub struct App {
     /// Past AI/crmaine conversations this session, newest first, for the history
     /// picker (`Ctrl+R` in the chat). Each is a transcript plus the backend it
     /// spoke to, so reopening one still routes follow-ups correctly.
-    ai_history: Vec<(ChatMode, Vec<ChatMsg>)>,
+    ai_history: Vec<ai::StoredChat>,
     /// The chat transcript's on-screen body rect, the effective scroll offset,
     /// and the flat wrapped lines — rebuilt each frame so a mouse drag can map
     /// to a line range and copy it.
@@ -3610,6 +3614,7 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry("  outline", None, "]] / [[ next/prev section, click an entry to jump, :outline hides the column", "]] / [[ 次/前の見出し、項目クリックで移動、:outline で列を隠す"),
                 entry("  folding", None, "Space or za fold/unfold here, zA all (either way), or click the ▾ in the gutter", "Space か za で折りたたみ切替、zA で全部（開いていれば閉じ、閉じていれば開く）、余白の ▾ クリックでも可"),
                 entry("  :w :wq :q :q!", None, "save / save and close / close / close discarding — when Ctrl+S is taken by the terminal", "保存 / 保存して閉じる / 閉じる / 破棄して閉じる — Ctrl+S が端末に取られている場合に"),
+                entry("  V then I / A", None, "line selection: put text at the start, or at the end, of every line", "行選択：全行の先頭に、または全行の末尾に文字を入れる"),
                 entry("  Ctrl+V / Ctrl+Q / Alt+v / :block", None, "rectangle: d cuts it, I/A insert at the left/right edge, c replaces", "矩形選択：d で切り取り、I/A で左端/右端に挿入、c で置換"),
                 entry("  normal mode", None, "x/dd/D/J delete·join, u undo, v+d cut selection (d/u scroll via Ctrl)", "ノーマルモード：x/dd/D/J 削除·結合, u 取消, v+d 選択削除（スクロールは Ctrl+d/u）"),
                 entry(":edit", None, "edit the file in your external editor (E in the viewer)", "外部エディタで編集（ビューア内は E）"),

@@ -715,6 +715,53 @@
         );
     }
 
+    /// The reports from the second pass: a tab drawn outside the viewer moved
+    /// the terminal's cursor instead of the text (which left the Makefile on
+    /// screen underneath the next preview), a rectangle reached past its own
+    /// right edge into a half-covered character, and `I`/`A` did nothing on a
+    /// line selection.
+    #[test]
+    fn tabs_blocks_and_line_selections_all_stay_inside_their_lines() {
+        // A tab never reaches the screen as a tab outside the viewer.
+        let out = crate::util::plain("a\tb");
+        assert_eq!(out, "a   b", "expanded to the next stop");
+        assert!(!crate::util::plain("x\u{7}y").contains('\u{7}'), "and no other control code");
+
+        // The block stops at the last character wholly inside it.
+        let (_d, mut app) = viewer_on("## 事前準備\n- ふたつめ\n");
+        app.handle_key(KeyEvent::new(KeyCode::Char('v'), KeyModifiers::CONTROL)).unwrap();
+        if let Popup::Viewer { line, col, .. } = &mut app.popup {
+            *line = 1;
+            *col = 2; // the `ふ`, which ends at column 4
+        }
+        app.handle_key(key('d')).unwrap();
+        assert_eq!(viewer_lines(&app), ["事前準備", "たつめ"], "`事` was only half inside");
+
+        // I and A on a line selection: the start of every line, and each
+        // line's own end — no squaring off.
+        let (_d2, mut app) = viewer_on("one\nlonger line\n\n");
+        app.handle_key(KeyEvent::new(KeyCode::Char('V'), KeyModifiers::SHIFT)).unwrap();
+        if let Popup::Viewer { line, .. } = &mut app.popup {
+            *line = 2;
+        }
+        app.handle_key(KeyEvent::new(KeyCode::Char('A'), KeyModifiers::SHIFT)).unwrap();
+        assert!(matches!(app.popup, Popup::Viewer { block_input: Some(_), .. }), "asks for the text");
+        app.handle_key(key(',')).unwrap();
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+        assert_eq!(viewer_lines(&app), ["one,", "longer line,", ","], "each line's own end");
+
+        app.handle_key(KeyEvent::new(KeyCode::Char('V'), KeyModifiers::SHIFT)).unwrap();
+        if let Popup::Viewer { line, .. } = &mut app.popup {
+            *line = 1;
+        }
+        app.handle_key(KeyEvent::new(KeyCode::Char('I'), KeyModifiers::SHIFT)).unwrap();
+        for c in "# ".chars() {
+            app.handle_key(key(c)).unwrap();
+        }
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+        assert_eq!(viewer_lines(&app), ["# one,", "# longer line,", ","]);
+    }
+
     /// The preview panel changes contents on every cursor move, so anything
     /// it fails to wipe reads as part of the next file.
     #[test]
@@ -6796,8 +6843,8 @@
         app.open_ai_history();
         assert!(matches!(app.popup, Popup::AiHistory { .. }), "history picker opens");
         assert_eq!(app.ai_history.len(), 1, "current conversation archived");
-        assert_eq!(app.ai_history[0].0, ChatMode::Rag, "backend remembered");
-        assert_eq!(App::ai_history_title(&app.ai_history[0].1), "first question");
+        assert_eq!(app.ai_history[0].mode(), ChatMode::Rag, "backend remembered");
+        assert_eq!(App::ai_history_title(app.ai_history[0].log()), "first question");
 
         // Reopening restores the backend, so a follow-up still goes to RAG.
         app.load_ai_conversation(0);

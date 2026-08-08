@@ -6,24 +6,51 @@
 
 use super::*;
 
-/// A stored chat conversation for `ai_history.json` — a transcript and the
-/// backend it spoke to (so a reopened conversation still routes follow-ups).
-#[derive(serde::Serialize, serde::Deserialize)]
+/// A stored chat conversation for `ai_history.json` — a transcript, the backend
+/// it spoke to (so a reopened conversation still routes follow-ups) and how the
+/// window looked (so a reopened crmaine answer is not re-signed "AI - simple").
+/// `skin` is absent in files written before it existed; those fall back to the
+/// mode's default look.
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub(crate) struct StoredChat {
     mode: ChatMode,
+    #[serde(default)]
+    skin: Option<ChatSkin>,
     log: Vec<ChatMsg>,
 }
 
 /// Load the saved chat history (portable-aware), newest first. Empty if there
 /// is none or it is unreadable.
-pub(crate) fn restore_ai_history() -> Vec<(ChatMode, Vec<ChatMsg>)> {
+pub(crate) fn restore_ai_history() -> Vec<StoredChat> {
     let Some(path) = cian_lua::config_read_path("ai_history.json").filter(|p| p.exists()) else {
         return Vec::new();
     };
     let Ok(text) = std::fs::read_to_string(path) else { return Vec::new() };
-    match serde_json::from_str::<Vec<StoredChat>>(&text) {
-        Ok(v) => v.into_iter().map(|c| (c.mode, c.log)).collect(),
-        Err(_) => Vec::new(),
+    serde_json::from_str::<Vec<StoredChat>>(&text).unwrap_or_default()
+}
+
+impl StoredChat {
+    pub(crate) fn new(mode: ChatMode, skin: ChatSkin, log: Vec<ChatMsg>) -> Self {
+        StoredChat { mode, skin: Some(skin), log }
+    }
+    pub(crate) fn mode(&self) -> ChatMode {
+        self.mode
+    }
+    pub(crate) fn log(&self) -> &[ChatMsg] {
+        &self.log
+    }
+    /// How the window looked, or the mode's default for entries saved before
+    /// skins existed.
+    pub(crate) fn skin(&self) -> ChatSkin {
+        self.skin.clone().unwrap_or_else(|| ChatSkin::of(self.mode))
+    }
+}
+
+impl PartialEq for StoredChat {
+    /// Two snapshots are the same conversation when the backend and transcript
+    /// match; the window dressing does not make it a different chat.
+    fn eq(&self, other: &Self) -> bool {
+        self.mode == other.mode && self.log == other.log
     }
 }
 
@@ -509,9 +536,9 @@ impl App {
     /// Snapshot the open chat into `ai_history` (newest first, deduped) if it
     /// holds at least one answer. A no-op otherwise.
     pub(crate) fn archive_current_ai_chat(&mut self) {
-        if let Popup::AiChat { log, mode, .. } = &self.popup {
+        if let Popup::AiChat { log, mode, skin, .. } = &self.popup {
             if log.iter().any(|m| !m.user) {
-                let snap = (*mode, log.clone());
+                let snap = StoredChat::new(*mode, skin.clone(), log.clone());
                 if self.ai_history.first() != Some(&snap) {
                     self.ai_history.insert(0, snap);
                     self.ai_history.truncate(30);
@@ -527,15 +554,10 @@ impl App {
     /// plaintext; failures are silent.
     pub(crate) fn save_ai_history(&self) {
         let Some(path) = cian_lua::config_write_path("ai_history.json") else { return };
-        let stored: Vec<StoredChat> = self
-            .ai_history
-            .iter()
-            .map(|(mode, log)| StoredChat { mode: *mode, log: log.clone() })
-            .collect();
         if let Some(parent) = path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
-        if let Ok(json) = serde_json::to_string(&stored) {
+        if let Ok(json) = serde_json::to_string(&self.ai_history) {
             let _ = std::fs::write(path, json);
         }
     }
@@ -563,19 +585,18 @@ impl App {
 
     /// Reopen the conversation at `i` as the live chat.
     pub(crate) fn load_ai_conversation(&mut self, i: usize) {
-        if let Some((mode, log)) = self.ai_history.get(i).cloned() {
-            // Only the mode is stored, so a reopened conversation gets its
-            // backend's default look rather than the action title it had.
-            self.popup = Popup::AiChat {
-                input: String::new(),
-                log,
-                scroll: usize::MAX,
-                pending: false,
-                sel: None,
-                mode,
-                skin: ChatSkin::of(mode),
-            };
-        }
+        let Some(c) = self.ai_history.get(i) else { return };
+        // Reopened as it was: same backend for follow-ups, same name and colour,
+        // so an archived crmaine answer is still shown as crmaine's.
+        self.popup = Popup::AiChat {
+            input: String::new(),
+            log: c.log().to_vec(),
+            scroll: usize::MAX,
+            pending: false,
+            sel: None,
+            mode: c.mode(),
+            skin: c.skin(),
+        };
     }
 
     /// Forget the stored conversation at `i`.
@@ -1408,27 +1429,40 @@ mod ai_history_tests {
     use super::*;
 
     #[test]
-    fn stored_chats_round_trip_mode_and_log() {
-        let history: Vec<(ChatMode, Vec<ChatMsg>)> = vec![
-            (
+    fn stored_chats_round_trip_mode_skin_and_log() {
+        let stored = vec![
+            StoredChat::new(
                 ChatMode::Rag,
+                ChatSkin::of(ChatMode::Rag),
                 vec![
                     ChatMsg { user: true, text: "q1".into() },
                     ChatMsg { user: false, text: "a1\nline".into() },
                 ],
             ),
-            (ChatMode::Agent, vec![ChatMsg { user: true, text: "q2".into() }]),
+            // A crmaine corpus tool: local follow-ups, but crmaine answered.
+            StoredChat::new(
+                ChatMode::Ai,
+                ChatSkin { title: "crmaine - Impact analysis".into(), simple: false },
+                vec![ChatMsg { user: true, text: "q2".into() }],
+            ),
         ];
         // Serialize exactly as save_ai_history does, then read back as restore does.
-        let stored: Vec<StoredChat> =
-            history.iter().map(|(m, l)| StoredChat { mode: *m, log: l.clone() }).collect();
         let json = serde_json::to_string(&stored).unwrap();
-        let back: Vec<(ChatMode, Vec<ChatMsg>)> = serde_json::from_str::<Vec<StoredChat>>(&json)
-            .unwrap()
-            .into_iter()
-            .map(|c| (c.mode, c.log))
-            .collect();
-        assert_eq!(back, history, "mode and transcript survive a round trip");
+        let back: Vec<StoredChat> = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, stored, "mode and transcript survive a round trip");
+        assert_eq!(back[0].skin().title, "crmaine - RAG");
+        assert_eq!(back[1].skin().title, "crmaine - Impact analysis");
+        assert!(!back[1].skin().simple, "the reopened window still credits crmaine");
+    }
+
+    /// History written before skins existed still loads, falling back to the
+    /// backend's default look.
+    #[test]
+    fn a_skinless_stored_chat_falls_back_to_its_mode() {
+        let json = r#"[{"mode":"Agent","log":[{"user":true,"text":"q"}]}]"#;
+        let back: Vec<StoredChat> = serde_json::from_str(json).unwrap();
+        assert_eq!(back[0].skin().title, "crmaine - Agent");
+        assert!(!back[0].skin().simple);
     }
 }
 

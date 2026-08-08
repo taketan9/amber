@@ -109,6 +109,8 @@ Line endings are shown in the title (`· CRLF`) and **preserved on save** — op
 
 **Replacing across a grep.** `Ctrl+F` greps the tree; **`r`** on the results asks what the matched text should become and then shows you every line it would change — file, line number, and what that line ends up as, with the current text of the row under the cursor shown beneath. `Space` spares a line, `f` spares the rest of the file, `a` flips the lot, `Enter` writes. Nothing reaches the disk before `Enter`, and at that point each file is re-read: any line whose text has moved on since the preview is left alone and counted, because a bulk write against a stale line number is how tools like this eat data. Files it could not read — binary, too large, a cloud placeholder — are named rather than passed over in silence.
 
+**Whole lines.** `V` selects them, and then `I` and `A` put text at the start of every one, or at the end of every one — at each line's own end, without squaring them off first, because "put a comma on all of these" does not want padding.
+
 **Rectangles.** `Ctrl+V` (or `Ctrl+Q`, `Alt+v`, or `:block` — terminals differ about which of these they will hand over) selects a block, and now edits one: **`d`** cuts the rectangle out of every line, **`I`** and **`A`** type text once and put it down the left or right edge of all of them, **`c`** replaces what the rectangle covers. The rectangle is reckoned in screen columns, not characters — a full-width character is two of them — so a block drawn over Japanese text is the rectangle you drew rather than a ragged edge, and an edge falling inside a wide character takes it whole. Lines too short to reach the column are padded for an insert (the point of a column edit is that it lines up) and left alone by a delete (there was nothing inside the rectangle to remove). One undo step, whatever it touched.
 
 **Reshaping a document.** The same `:` prompt carries the transforms a text editor is kept around for, each acting on a `v`/`V` selection or the whole file, each one undo step: **`:sort`** / **`:rsort`** / **`:uniq`** for line order and duplicates; **`:han`** / **`:zen`** for width — `:han` makes full-width ASCII normal *and* half-width katakana normal, which are the two directions anyone actually means; **`:expand`** / **`:unexpand`** for leading tabs; **`:reindent`** to put a document indented by three different hands onto one ladder. **`:ws`** shows the characters you cannot see — trailing spaces, tabs, ideographic spaces — for the pass where one of them is the bug.
@@ -344,7 +346,7 @@ cian.crmaine{}
 | `:index [dir]` | build cian's *own* index of a folder; `:ragshared` switches back to crmaine's |
 | `:raginfo` | diagnostics — the port, whether the server's up, which index is active |
 
-The chat wears crmaine's carmine and reads as one identity: **Shift+Enter** for a newline, **Ctrl+R** for past conversations (they survive a restart), **Ctrl+↑ / Ctrl+↓** to rate the last answer, **Esc** to stop one mid-stream. Answers render as Markdown and list their **sources**. Every crmaine action is on the right-click **Ⓒ crmaine ▸** menu too.
+A crmaine chat wears crmaine's carmine (the local `:ai` model's own windows are cyan, titled **AI - simple**), so you always know which one answered: **Shift+Enter** for a newline, **Ctrl+R** for past conversations (they survive a restart), **Ctrl+↑ / Ctrl+↓** to rate the last answer, **Esc** to stop one mid-stream. Answers render as Markdown and list their **sources**. Every crmaine action is on the right-click **AI - crmaine ▸** menu too.
 
 ---
 
