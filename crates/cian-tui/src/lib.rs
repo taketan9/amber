@@ -2120,6 +2120,12 @@ pub struct App {
     /// Where the viewer's outline column was drawn, so a click on an entry can
     /// jump to it. Zero-width when the column is not showing.
     outline_rect: Rect,
+    /// Where each of the viewer's tabs was drawn in its title bar, so one can
+    /// be clicked. Rebuilt every frame.
+    viewer_tab_rects: Vec<(Rect, usize)>,
+    /// The two halves of a split, as drawn: clicking the one not in focus
+    /// crosses to it.
+    viewer_half_rects: [Rect; 2],
     /// The viewer's line-number gutter width, so a click maps to a char column.
     viewer_gutter: u16,
     /// Clickable regions of whatever popup is on screen, rebuilt every frame by
@@ -2405,6 +2411,8 @@ impl App {
             kbd_enhanced: false,
             viewer_rect: Rect::new(0, 0, 0, 0),
             outline_rect: Rect::new(0, 0, 0, 0),
+            viewer_tab_rects: Vec::new(),
+            viewer_half_rects: [Rect::new(0, 0, 0, 0); 2],
             viewer_gutter: 0,
             popup_zones: Vec::new(),
             pending_elevation: None,
@@ -3659,11 +3667,11 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry("    :expand :unexpand :reindent", None, "leading tabs ↔ spaces, and re-indent to a consistent step", "先頭のTAB⇔空白、インデントを一定幅に整形"),
                 entry("    :ws", None, "show trailing spaces, tabs and ideographic spaces", "行末空白・TAB・全角スペースを表示"),
                 entry("    :lf :crlf", None, "convert line endings (shown in the title)", "改行コードを変換（タイトルに表示）"),
-                entry("  Shift+F8/F9/F10", None, "split left-right / top-bottom / close it — Shift+H,L crosses over", "左右分割 / 上下分割 / 解除 — Shift+H,L で行き来"),
+                entry("  Shift+F8/F9/F10", None, "split left-right / top-bottom / close it — Shift+H,L or a click crosses over", "左右分割 / 上下分割 / 解除 — Shift+H,L かクリックで行き来"),
                 entry("  right-click / S-Enter", None, "the viewer's menu: ask the AI about the selection, copy, reveal, theme", "ビューアのメニュー：選択範囲をAIに聞く・コピー・場所を開く・テーマ"),
                 entry("  p / P", None, "paste after / before the cursor — whole lines when whole lines were copied", "カーソルの後/前に貼り付け — 行単位でコピーしたものは行単位で"),
                 entry("  :preview", None, "the rendered Markdown, and back to the source (Ctrl+E where the terminal allows it)", "Markdown の描画表示とソースの切替（端末が許せば Ctrl+E でも）"),
-                entry("  F2 / Shift+F2", None, "the next / previous open file — F3 on marked files opens them all as tabs", "次/前の開いているファイル — マークして F3 で全部タブで開く"),
+                entry("  F2 / Shift+F2", None, "the next / previous open file, or click ◂ ▸ in the title — F3 on marked files opens them all", "次/前の開いているファイル（タイトルの ◂ ▸ クリックでも）— マークして F3 で全部開く"),
                 entry("  r after /", None, "replace what the search found — the prompt arrives with the pattern in it", "検索したものを置換 — パターンは入力済みで開く"),
                 entry("  :ws", None, "the invisible characters — tab, trailing space, ideographic space, line ending. On by default", "見えない文字の表示 — TAB・行末の空白・全角空白・改行。既定でオン"),
                 entry("  :expand all", None, "convert every tab, not only the indent (destroys TSV separators — hence by name)", "行中のタブも全部変換（TSV の区切りも消えるので、明示的に指定）"),

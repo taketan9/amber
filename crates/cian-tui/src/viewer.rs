@@ -644,12 +644,19 @@ impl App {
             return Ok(());
         }
         if close {
-            // With other files open, closing means closing *this* one — the
-            // rest are still being read. Only the last one closes the viewer.
-            if !self.viewer_tabs.is_empty() {
+            // With other files open — in the tabs or in the other half of a
+            // split — closing means closing *this* one; the rest are still
+            // being read, and may hold unsaved edits. Only the last one closes
+            // the viewer.
+            if !self.viewer_tabs.is_empty() || self.viewer_split.is_some() {
                 self.close_viewer_tab();
                 return Ok(());
             }
+            // The last file: the viewer is done, so nothing of it may be left
+            // behind. A stale split half would go on hijacking the screen from
+            // whatever opened next.
+            self.viewer_split = None;
+            self.viewer_split_focus = false;
             // If this viewer was opened from a grep hit, go back to the results
             // list so the next hit is one keystroke away; otherwise just close.
             match self.find_return.take() {
@@ -762,6 +769,14 @@ impl App {
     /// Close the file on screen and show the next one along.
     pub(crate) fn close_viewer_tab(&mut self) {
         if self.viewer_tabs.is_empty() {
+            // Nothing waiting, but the other half of a split is still on
+            // screen: that one becomes the file being read.
+            if let Some(other) = self.viewer_split.take() {
+                self.popup = *other;
+                self.viewer_split_focus = false;
+                self.full_clear = true;
+                return;
+            }
             self.popup = Popup::None;
             return;
         }

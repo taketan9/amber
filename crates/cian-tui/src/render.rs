@@ -440,7 +440,12 @@ pub(crate) fn draw(f: &mut Frame, app: &mut App) {
         // A split viewer is two viewers. The half not in focus is drawn first
         // and dimmed, exactly as the unfocused file pane is, so which one the
         // keyboard is pointed at is never a guess.
-        if let Some(other) = app.viewer_split.take() {
+        // Only while a viewer is what is on screen. A menu, a confirm dialog
+        // or a chat is a different popup entirely, and letting the split
+        // branch draw it meant drawing nothing at all — the dialog was there,
+        // invisible, quietly taking the next Enter.
+        if matches!(app.popup, Popup::Viewer { .. }) && app.viewer_split.is_some() {
+            let other = app.viewer_split.take().expect("just checked");
             let (first, second) = split_viewer_areas(area, app.viewer_split_lr);
             // Which half each file occupies is fixed; crossing over moves the
             // focus, not the files. Drawing the focused one always on the left
@@ -487,6 +492,9 @@ pub(crate) fn draw(f: &mut Frame, app: &mut App) {
         );
     } else {
         app.popup_zones.clear();
+    }
+    if !matches!(app.popup, Popup::Viewer { .. }) {
+        app.viewer_tab_rects.clear();
     }
 
     // A brief "starting up" splash while the AI probe runs — non-blocking (it
@@ -5215,7 +5223,10 @@ fn draw_viewer(
             // With several files open, which one this is matters more than how
             // big it is: the count replaces the size, and the name keeps its
             // dirty mark.
-            format!(" {}{}   [{}/{}]  F2 ▸ ", title, dirty_mark, tab_at + 1, tabs)
+            // The two arrows come first, at a fixed column, so the mouse can
+            // find them without the file name's length coming into it — the
+            // same shape the file panes' history arrows have.
+            format!(" ◂ ▸  {}{}   [{}/{}] ", title, dirty_mark, tab_at + 1, tabs)
         } else {
             format!(" {}{}  —  {} ", title, dirty_mark, head)
         })

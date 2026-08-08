@@ -835,6 +835,51 @@
         assert_eq!(lines(&app), ["aabc"], "before it, same result at column 0");
     }
 
+    /// A split must not draw anything but the viewer. It used to draw every
+    /// popup as though it were one — so the menu, and worse the quit
+    /// confirmation, were on screen and invisible, quietly taking the Enter
+    /// that followed.
+    #[test]
+    fn a_split_does_not_swallow_the_dialogs_that_open_over_it() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::write(d.path().join("a.txt"), "AAA\n").unwrap();
+        std::fs::write(d.path().join("b.txt"), "BBB\n").unwrap();
+        let p = d.path().to_path_buf();
+        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        for n in ["a.txt", "b.txt"] {
+            let path = app.active_pane().unwrap().entries.iter().find(|e| e.name == n).unwrap().path.clone();
+            app.active_pane_mut().unwrap().marks.insert(path);
+        }
+        app.handle_key(code(KeyCode::F(3))).unwrap();
+        let _ = render(&mut app, 160, 30);
+        app.handle_key(KeyEvent::new(KeyCode::F(8), KeyModifiers::SHIFT)).unwrap();
+
+        // Shift+Enter opens the menu, and the menu is drawn.
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::SHIFT)).unwrap();
+        assert!(matches!(app.popup, Popup::ContextMenu { .. }), "the menu opened");
+        let screen = render(&mut app, 160, 30).join("\n");
+        assert!(
+            screen.contains("Theme") || screen.contains("テーマ"),
+            "the menu is actually on screen:\n{screen}",
+        );
+        app.handle_key(code(KeyCode::Esc)).unwrap();
+        assert!(matches!(app.popup, Popup::Viewer { .. }), "and the file came back");
+
+        // Closing every file leaves nothing of the split behind, so the next
+        // dialog to open is visible.
+        app.handle_key(key('q')).unwrap();
+        app.handle_key(key('q')).unwrap();
+        assert!(matches!(app.popup, Popup::None), "viewer gone: {:?}", app.popup);
+        assert!(app.viewer_split.is_none(), "and so is the split");
+        app.handle_key(key('q')).unwrap();
+        let screen = render(&mut app, 160, 30).join("\n");
+        assert!(!matches!(app.popup, Popup::None), "the quit confirmation opened");
+        assert!(
+            screen.contains("uit") || screen.contains("終了"),
+            "and is on screen:\n{screen}",
+        );
+    }
+
     /// Two files side by side, on the keys the shell panel already uses.
     #[test]
     fn the_viewer_splits_and_puts_itself_back_together() {

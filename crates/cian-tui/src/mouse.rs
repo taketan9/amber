@@ -28,6 +28,41 @@ impl App {
         // whole lines (line-wise visual), the wheel scrolls, and right-click
         // copies. Handled before the blanket popup guard below.
         if matches!(self.popup, Popup::Viewer { .. }) {
+            // The tab arrows sit in the top border, two columns in. The body
+            // starts one row below it and two columns right of the frame.
+            let body0 = self.viewer_rect;
+            if self.viewer_tab_count() > 1
+                && matches!(ev.kind, MouseEventKind::Down(MouseButton::Left))
+                && body0.y > 0
+                && row == body0.y - 1
+            {
+                let left = body0.x.saturating_sub(1);
+                if col == left + 1 {
+                    self.viewer_switch_tab(false);
+                    return;
+                }
+                if col == left + 3 {
+                    self.viewer_switch_tab(true);
+                    return;
+                }
+            }
+            // A click in the half that is not in focus crosses to it, rather
+            // than moving a cursor in a file the keyboard is not pointed at.
+            if self.viewer_split.is_some()
+                && matches!(ev.kind, MouseEventKind::Down(MouseButton::Left))
+            {
+                let theirs = self.viewer_half_rects[1];
+                if theirs.width > 0
+                    && col >= theirs.x
+                    && col < theirs.x + theirs.width
+                    && row >= theirs.y
+                    && row < theirs.y + theirs.height
+                {
+                    self.swap_viewer_split();
+                    self.full_clear = true;
+                    return;
+                }
+            }
             // A click in the outline column jumps to that entry — the reason
             // the column is worth its width.
             let ol = self.outline_rect;
