@@ -341,7 +341,11 @@
         }
         app.preview_on = true;
         let out = render(&mut app, 110, 30).join("\n");
-        assert!(out.contains("cloud-only") || out.contains("クラウド上"), "explains why: {out}");
+        assert!(
+            out.contains("not been downloaded") || out.contains("ダウンロードされていません"),
+            "explains why, in full: {out}"
+        );
+        assert!(out.contains("F3"), "and names the way to see it anyway: {out}");
         assert!(!out.contains("secret contents"), "the file was not read");
 
         // Opting in makes the preview read it like any other file.
@@ -6303,6 +6307,30 @@
         w.write_all(b"deep note\n").unwrap();
         w.finish().unwrap();
         path
+    }
+
+    /// Inside an archive the hint bar names archive keys — and says outright
+    /// when the format is read-only, since the keys that would write are the
+    /// ones a filer user reaches for first.
+    #[test]
+    fn the_hint_bar_changes_inside_an_archive() {
+        let d = tempfile::tempdir().unwrap();
+        make_browse_zip(d.path());
+        let p = d.path().to_path_buf();
+        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        let plain: Vec<&str> = crate::render::key_hints(&app).iter().map(|(k, _)| *k).collect();
+        assert!(plain.contains(&"S-J"), "the ordinary bar leads with pane keys");
+
+        {
+            let pane = app.active_pane_mut().unwrap();
+            pane.cursor = pane.entries.iter().position(|e| e.name == "bundle.zip").unwrap();
+        }
+        app.activate_selected().unwrap();
+        let hints = crate::render::key_hints(&app);
+        let keys: Vec<&str> = hints.iter().map(|(k, _)| *k).collect();
+        assert!(keys.contains(&"Enter/l") && keys.contains(&"-/h"), "navigation named: {keys:?}");
+        assert!(keys.contains(&"F3"), "member viewing named");
+        assert!(keys.contains(&"F2") && keys.contains(&"d"), "zip is writable, so say so: {keys:?}");
     }
 
     /// Enter on a zip browses into it like a folder: members list, subdirs

@@ -1694,6 +1694,37 @@ pub(crate) fn key_hints(app: &App) -> Vec<(&'static str, &'static str)> {
         // A flat / search listing is a mode of its own: the one thing that must
         // be obvious is how to get out of it, then that marks and file ops work
         // on the results just like a normal listing.
+        // Inside an archive the keys mean archive things — and there is
+        // nothing else on screen to say so, which is exactly when the bar
+        // earns its row.
+        _ if app.active_pane().map(|p| p.archive_view().is_some()).unwrap_or(false) => {
+            let mut v = vec![
+                ("Enter/l", d("in", "入る")),
+                ("-/h", d("out", "戻る")),
+                ("F3", d("view member", "メンバー閲覧")),
+                ("Space", d("mark", "マーク")),
+                ("c", d("extract →", "展開 →")),
+            ];
+            // The write half exists for zip only; saying so beats a key that
+            // answers "read-only for now".
+            let zip = app
+                .active_pane()
+                .and_then(|p| p.archive_view())
+                .map(|(a, _)| {
+                    a.extension()
+                        .and_then(|e| e.to_str())
+                        .map(|e| e.eq_ignore_ascii_case("zip") || e.eq_ignore_ascii_case("jar"))
+                        .unwrap_or(false)
+                })
+                .unwrap_or(false);
+            if zip {
+                v.extend([("F2", d("rename", "リネーム")), ("d", d("delete", "削除"))]);
+            } else {
+                v.push(("", d("(read-only)", "（読取専用）")));
+            }
+            v.push(("?", d("help", "ヘルプ")));
+            v
+        }
         _ if app.active_pane().map(|p| p.is_flat()).unwrap_or(false) => vec![
             ("b/Esc", d("leave", "戻る")),
             ("Space", d("mark", "マーク")),
@@ -2178,8 +2209,12 @@ fn draw_preview_panel(f: &mut Frame, area: Rect, app: &mut App) {
     }
 
     if let Some(msg) = note {
+        // A note can be several lines (the cloud explanation is), so it wraps
+        // rather than being clipped to the first row.
         f.render_widget(
-            Paragraph::new(msg).style(Style::default().fg(theme().dim)),
+            Paragraph::new(msg)
+                .wrap(Wrap { trim: false })
+                .style(Style::default().fg(theme().dim)),
             inner,
         );
         return;
