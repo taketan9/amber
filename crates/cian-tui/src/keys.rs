@@ -553,6 +553,9 @@ impl App {
                     if !self.cancel_ai_pending() {
                         self.archive_current_ai_chat();
                         self.popup = Popup::None;
+                        // Back to the file the question was about, if it was
+                        // asked from the viewer.
+                        self.restore_viewer();
                     }
                 }
                 // Ctrl+R opens the conversation history; Ctrl+N starts a fresh

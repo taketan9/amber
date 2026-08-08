@@ -165,7 +165,9 @@ impl App {
                         *scroll = (*scroll).min(n.saturating_sub(body_h));
                     }
                 }
-                MouseEventKind::Down(MouseButton::Right) => self.copy_viewer_selection(),
+                // Right-click opens the menu — the same gesture as in the
+                // file panes. Copying moved into it, where it can be seen.
+                MouseEventKind::Down(MouseButton::Right) => self.open_viewer_menu(col, row),
                 _ => {}
             }
             return;

@@ -5592,8 +5592,8 @@ fn draw_viewer(
             format!(
                 ":_   {}",
                 tr(lang,
-                   "s/old/new/[gci] · w wq q q! · block outline ws sort uniq han zen expand[ all] unexpand reindent lf crlf",
-                   "s/old/new/[gci] · w wq q q! · block outline ws sort uniq han zen expand[ all] unexpand reindent lf crlf"),
+                   "s/old/new/[gci] · w wq q q! · preview block outline ws sort uniq han zen expand[ all] unexpand reindent lf crlf",
+                   "s/old/new/[gci] · w wq q q! · preview block outline ws sort uniq han zen expand[ all] unexpand reindent lf crlf"),
             )
         } else if cmd.starts_with('s') {
             // Mid-replace, the flags are the part still to be decided — and
@@ -5639,17 +5639,17 @@ fn draw_viewer(
                         ed,
                         shape_hint,
                         if mmd { tr(lang, " m diagram ", " m 図 ") } else { "" },
-                        tr(lang, " p source  ", " p ソース  "))
+                        tr(lang, " :preview source  ", " :preview ソース  "))
                 } else if *markdown {
                     format!("{}{}{}{}{}",
                         tr(lang, " / f search  n/N  v/V select  y copy ", " / f 検索  n/N  v/V 選択  y コピー "),
                         after_find,
                         ed,
                         shape_hint,
-                        tr(lang, " p preview  ", " p プレビュー  "))
+                        tr(lang, " p paste  :preview  ", " p 貼付  :preview  "))
                 } else {
                     format!("{}{}{}{}{}",
-                        tr(lang, " / f search  n/N  v/V select  y copy  P paste ", " / f 検索  n/N  v/V 選択  y コピー  P 貼付 "),
+                        tr(lang, " / f search  n/N  v/V select  y copy  p paste ", " / f 検索  n/N  v/V 選択  y コピー  p 貼付 "),
                         after_find,
                         ed,
                         shape_hint,

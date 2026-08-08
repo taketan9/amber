@@ -841,6 +841,12 @@ enum MenuItem {
     AiShellCmd,
     /// Explain the error shown in the shell pane.
     AiExplainError,
+    /// Over the viewer's selection: tidy the prose, explain the command, or
+    /// review the code. The three things a file open in front of you is
+    /// usually wanted for.
+    AiWriting,
+    AiCommandHelp,
+    AiCodeFix,
     /// Draft a git commit message from the staged diff.
     AiCommit,
     /// Detect junk files in the current directory.
@@ -1080,6 +1086,9 @@ impl MenuItem {
             MenuItem::DiskUsage => tr(lang, "Disk usage  (:du)", "容量分析  (:du)"),
             MenuItem::AiShellCmd => tr(lang, "Command from description  (:aicmd)", "説明からコマンド生成  (:aicmd)"),
             MenuItem::AiExplainError => tr(lang, "Explain the last error  (:explain)", "直近のエラーを説明  (:explain)"),
+            MenuItem::AiWriting => tr(lang, "Improve this writing", "この文章を推敲"),
+            MenuItem::AiCommandHelp => tr(lang, "Explain / write this command", "コマンドを説明・作成"),
+            MenuItem::AiCodeFix => tr(lang, "Review and fix this code", "このコードを点検・修正"),
             MenuItem::AiCommit => tr(lang, "Draft commit message  (:aicommit)", "コミットメッセージ生成  (:aicommit)"),
             MenuItem::AiJunk => tr(lang, "Detect junk files  (:aijunk)", "ゴミファイル検出  (:aijunk)"),
             MenuItem::AiTriageLog => tr(lang, "Triage this log  (:ailog)", "このログを診断  (:ailog)"),
@@ -1423,6 +1432,14 @@ enum AiPurpose {
 struct AiJob {
     rx: std::sync::mpsc::Receiver<Result<String, String>>,
     purpose: AiPurpose,
+}
+
+/// What the AI is being asked to do with a piece of the open file.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum AiOverText {
+    Writing,
+    Command,
+    Code,
 }
 
 /// Which backend a chat talks to, so a typed follow-up goes back to the same
@@ -2079,6 +2096,10 @@ pub struct App {
     viewer_split: Option<Box<Popup>>,
     viewer_split_lr: bool,
     viewer_split_focus: bool,
+    /// The viewer put aside while a menu — or something the menu opened — is on
+    /// screen, so choosing "ask the AI about this" does not throw away the file
+    /// (and its unsaved edits) that the question was about.
+    viewer_return: Option<Box<Popup>>,
     key_probe: bool,
     /// The message was raised by the last keystroke, rather than left over
     /// from an earlier one. Only a fresh message may take a footer.
@@ -2369,6 +2390,7 @@ impl App {
             viewer_split: None,
             viewer_split_lr: true,
             viewer_split_focus: false,
+            viewer_return: None,
             key_probe: false,
             message_fresh: false,
             kbd_enhanced: false,
@@ -3629,7 +3651,9 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry("    :ws", None, "show trailing spaces, tabs and ideographic spaces", "行末空白・TAB・全角スペースを表示"),
                 entry("    :lf :crlf", None, "convert line endings (shown in the title)", "改行コードを変換（タイトルに表示）"),
                 entry("  Shift+F8/F9/F10", None, "split left-right / top-bottom / close it — Shift+H,L crosses over", "左右分割 / 上下分割 / 解除 — Shift+H,L で行き来"),
-                entry("  P", None, "paste what was copied (p toggles the Markdown preview)", "コピーしたものを貼り付け（p は Markdown プレビュー切替）"),
+                entry("  right-click", None, "the viewer's menu: ask the AI about the selection, copy it, change the theme", "ビューアのメニュー：選択範囲をAIに聞く・コピー・テーマ変更"),
+                entry("  p / P", None, "paste after / before the cursor — whole lines when whole lines were copied", "カーソルの後/前に貼り付け — 行単位でコピーしたものは行単位で"),
+                entry("  :preview", None, "the rendered Markdown, and back to the source (Ctrl+E where the terminal allows it)", "Markdown の描画表示とソースの切替（端末が許せば Ctrl+E でも）"),
                 entry("  F2 / Shift+F2", None, "the next / previous open file — F3 on marked files opens them all as tabs", "次/前の開いているファイル — マークして F3 で全部タブで開く"),
                 entry("  r after /", None, "replace what the search found — the prompt arrives with the pattern in it", "検索したものを置換 — パターンは入力済みで開く"),
                 entry("  :ws", None, "the invisible characters — tab, trailing space, ideographic space, line ending. On by default", "見えない文字の表示 — TAB・行末の空白・全角空白・改行。既定でオン"),

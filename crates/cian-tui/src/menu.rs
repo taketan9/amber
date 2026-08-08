@@ -4,6 +4,39 @@
 use super::*;
 
 impl App {
+    /// The menu for a file open in the viewer: ask the AI about what is
+    /// selected, or change the theme. Deliberately short — it is a reading
+    /// window, not the file manager.
+    pub(crate) fn open_viewer_menu(&mut self, col: u16, row: u16) {
+        if !matches!(self.popup, Popup::Viewer { .. }) {
+            return;
+        }
+        let mut items = Vec::new();
+        if self.ai.is_some() && self.ai_ready() {
+            items.push(MenuItem::AiWriting);
+            items.push(MenuItem::AiCommandHelp);
+            items.push(MenuItem::AiCodeFix);
+        }
+        items.push(MenuItem::Copy);
+        items.push(MenuItem::ThemePick);
+        // The viewer steps aside rather than closing: the question is about
+        // the file, and the file may have unsaved edits in it.
+        self.viewer_return = Some(Box::new(std::mem::replace(&mut self.popup, Popup::None)));
+        self.popup = Popup::ContextMenu { items, cursor: 0, at: (col, row) };
+    }
+
+    /// Put the viewer back after a menu (or what the menu opened) is done.
+    /// A no-op when nothing was put aside.
+    pub(crate) fn restore_viewer(&mut self) -> bool {
+        match self.viewer_return.take() {
+            Some(v) => {
+                self.popup = *v;
+                true
+            }
+            None => false,
+        }
+    }
+
     pub(crate) fn open_context_menu(&mut self, col: u16, row: u16) {
         // Whether the AI helper is usable, checked (and cached) up front so the
         // AI entries only appear when they will work.
@@ -269,7 +302,13 @@ impl App {
     pub(crate) fn menu_back(&mut self) {
         match self.menu_stack.pop() {
             Some(parent) => self.popup = parent,
-            None => self.popup = Popup::None,
+            // Closing the top of the menu goes back to whatever it was opened
+            // over — the viewer, when it was opened over one.
+            None => {
+                if !self.restore_viewer() {
+                    self.popup = Popup::None;
+                }
+            }
         }
     }
 
@@ -416,6 +455,12 @@ impl App {
                     format!("⇄ sync group: {n}/{total}")
                 });
             }
+            // From the viewer's menu, "Copy" means the selection in it; from a
+            // pane's, the files.
+            MenuItem::Copy if self.viewer_return.is_some() => {
+                self.restore_viewer();
+                self.copy_viewer_selection();
+            }
             MenuItem::Copy => self.clip_targets(ClipOp::Copy),
             MenuItem::Cut => self.clip_targets(ClipOp::Cut),
             // In the shell, "Paste" means the text on the clipboard goes to
@@ -439,6 +484,9 @@ impl App {
             MenuItem::AiChat => self.open_ai_chat(),
             MenuItem::AiShellCmd => self.start_ai_shell_prompt(),
             MenuItem::AiExplainError => self.explain_shell_error(),
+            MenuItem::AiWriting => self.ai_over_viewer(AiOverText::Writing),
+            MenuItem::AiCommandHelp => self.ai_over_viewer(AiOverText::Command),
+            MenuItem::AiCodeFix => self.ai_over_viewer(AiOverText::Code),
             MenuItem::AiCommit => self.start_ai_commit_message(),
             MenuItem::AiJunk => self.start_ai_junk(),
             MenuItem::AiTriageLog => self.triage_log(),

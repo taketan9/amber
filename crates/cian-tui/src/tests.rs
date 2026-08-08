@@ -804,6 +804,33 @@
         assert_eq!(app.viewer_tab_count(), 0);
     }
 
+    /// Paste goes where vi puts it: `p` after, `P` before, whole lines when
+    /// whole lines were copied.
+    #[test]
+    fn p_and_shift_p_paste_after_and_before() {
+        let (_d, mut app) = viewer_on("one\ntwo\nthree\n");
+        let lines = |app: &App| viewer_lines(app);
+
+        // Line-wise: `V` then `y` copies a whole line, `p` puts it below.
+        app.handle_key(KeyEvent::new(KeyCode::Char('V'), KeyModifiers::SHIFT)).unwrap();
+        app.handle_key(key('y')).unwrap();
+        app.handle_key(key('p')).unwrap();
+        assert_eq!(lines(&app), ["one", "one", "two", "three"], "below the cursor");
+        app.handle_key(key('u')).unwrap();
+        app.handle_key(KeyEvent::new(KeyCode::Char('P'), KeyModifiers::SHIFT)).unwrap();
+        assert_eq!(lines(&app), ["one", "one", "two", "three"], "above it, same result at line 0");
+
+        // Character-wise: `p` lands after the character under the cursor.
+        let (_d2, mut app) = viewer_on("abc\n");
+        app.handle_key(KeyEvent::new(KeyCode::Char('v'), KeyModifiers::NONE)).unwrap();
+        app.handle_key(key('y')).unwrap(); // copies "a"
+        app.handle_key(key('p')).unwrap();
+        assert_eq!(lines(&app), ["aabc"], "after the cursor");
+        app.handle_key(key('u')).unwrap();
+        app.handle_key(KeyEvent::new(KeyCode::Char('P'), KeyModifiers::SHIFT)).unwrap();
+        assert_eq!(lines(&app), ["aabc"], "before it, same result at column 0");
+    }
+
     /// Two files side by side, on the keys the shell panel already uses.
     #[test]
     fn the_viewer_splits_and_puts_itself_back_together() {
@@ -1266,7 +1293,7 @@
         assert!(shown(&mut app).contains("Two"), "back: got {:?}", shown(&mut app));
 
         // Space folds, in the source.
-        app.handle_key(key('p')).unwrap();
+        app.toggle_markdown_preview();
         let _ = render(&mut app, 100, 30);
         if let Popup::Viewer { line, .. } = &mut app.popup {
             *line = 2; // inside the first section
@@ -1325,7 +1352,7 @@
         app.handle_key(code(KeyCode::F(3))).unwrap();
         // Markdown opens in preview; folding belongs to the source. The
         // whitespace marks are not what this is about.
-        app.handle_key(key('p')).unwrap();
+        app.toggle_markdown_preview();
         app.show_ws = false;
         let _ = render(&mut app, 120, 30);
 
@@ -6753,8 +6780,9 @@
             panic!("not a viewer");
         }
 
-        // p toggles to raw source (view.lines becomes the file text again), p back.
-        app.handle_key(key('p')).unwrap();
+        // Ctrl+E toggles to raw source (view.lines becomes the file text
+        // again); `:preview` does the same where Ctrl is not deliverable.
+        app.handle_key(KeyEvent::new(KeyCode::Char('e'), KeyModifiers::CONTROL)).unwrap();
         let _ = render(&mut app, 100, 30);
         if let Popup::Viewer { view, md_styles, preview, .. } = &app.popup {
             assert!(!*preview, "toggled to source");
@@ -6763,7 +6791,11 @@
         } else {
             panic!("not a viewer");
         }
-        app.handle_key(key('p')).unwrap();
+        app.handle_key(key(':')).unwrap();
+        if let Popup::Viewer { sub_input, .. } = &mut app.popup {
+            *sub_input = Some("preview".into());
+        }
+        app.handle_key(code(KeyCode::Enter)).unwrap();
         assert!(matches!(&app.popup, Popup::Viewer { preview: true, .. }), "back to preview");
         // Esc peels state: the still-active search clears first (viewer stays),
         // then a second Esc closes.
@@ -8085,9 +8117,31 @@
             }
             other => panic!("expected a char selection, got {:?}", other),
         }
-        // Right-click copies the selection.
+        // Right-click opens the menu, with the viewer put aside rather than
+        // closed — the selection is still there behind it.
         app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Right), x0 + 8, body.y));
+        assert!(matches!(app.popup, Popup::ContextMenu { .. }), "the menu opened");
+        assert!(app.viewer_return.is_some(), "the file is waiting behind it");
+
+        // Copy is in it, and means the selection.
+        let at = match &app.popup {
+            Popup::ContextMenu { items, .. } => {
+                items.iter().position(|i| matches!(i, MenuItem::Copy)).expect("Copy is in the menu")
+            }
+            _ => unreachable!(),
+        };
+        if let Popup::ContextMenu { cursor, .. } = &mut app.popup {
+            *cursor = at;
+        }
+        app.handle_key(code(KeyCode::Enter)).unwrap();
         assert_eq!(app.message.as_deref(), Some("copied"));
+        assert!(matches!(app.popup, Popup::Viewer { .. }), "and the file came back");
+
+        // Esc out of the menu puts the file back untouched.
+        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Right), x0 + 8, body.y));
+        app.handle_key(code(KeyCode::Esc)).unwrap();
+        assert!(matches!(app.popup, Popup::Viewer { .. }), "back to the file");
+        assert!(app.viewer_return.is_none(), "and nothing left waiting");
     }
 
     /// Drive the viewer with a sequence of plain-char keys.

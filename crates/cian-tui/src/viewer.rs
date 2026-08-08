@@ -305,23 +305,7 @@ impl App {
             return Ok(());
         }
 
-        // `p` toggles between the raw source and the rendered Markdown preview.
-        // The preview is a full viewer — cursor, visual selection, `/` search and
-        // the mouse all work over the rendered document — so this only flips the
-        // flag and resets the cursor; the render swaps `view.lines` in and out.
-        if !ctrl && key.code == KeyCode::Char('p') {
-            if let Popup::Viewer { preview, markdown: true, line, col, scroll, visual, .. } = &mut self.popup {
-                *preview = !*preview;
-                let on = *preview;
-                (*line, *col, *scroll, *visual) = (0, 0, 0, None);
-                self.message = Some(if on {
-                    tr(self.lang, "markdown: preview", "Markdown: プレビュー").into()
-                } else {
-                    tr(self.lang, "markdown: source", "Markdown: ソース").into()
-                });
-            }
-            return Ok(());
-        }
+
 
         // Shift+Enter re-decodes the same bytes under the next text encoding.
         // Shift+Enter reveals the viewed file in the pane: jump there, cursor
@@ -367,13 +351,20 @@ impl App {
             self.toggle_viewer_blame();
             return Ok(());
         }
-        // `P` pastes what was copied. Not `p`, which toggles the Markdown
-        // preview and is worn into the fingers by now — say the word and the
-        // two can swap, since vi puts paste on the lower-case one.
-        if !ctrl && !alt && key.code == KeyCode::Char('P')
+        // `p` / `P` paste, where vi puts them: after the cursor and before it.
+        // The Markdown preview, which used to hold `p`, moved to Ctrl+E and
+        // `:preview` — paste is the more general key and belongs on the
+        // more general finger.
+        if !ctrl && !alt && matches!(key.code, KeyCode::Char('p') | KeyCode::Char('P'))
             && matches!(self.popup, Popup::Viewer { editable: true, editing: false, .. })
         {
-            self.paste_into_viewer();
+            self.paste_into_viewer(key.code == KeyCode::Char('P'));
+            return Ok(());
+        }
+        // Ctrl+E toggles the Markdown preview. `:preview` does the same, and
+        // is the one that works on a terminal keeping Ctrl for itself.
+        if ctrl && key.code == KeyCode::Char('e') {
+            self.toggle_markdown_preview();
             return Ok(());
         }
         // `m` opens any mermaid blocks as a real diagram in the browser (the
@@ -1079,6 +1070,12 @@ impl App {
                 return;
             }
             _ => {}
+        }
+        // The Markdown preview, by name — the key that used to do it (`p`)
+        // now pastes, and Ctrl+E is not a key every terminal will hand over.
+        if matches!(cmd, "preview" | "source" | "md") {
+            self.toggle_markdown_preview();
+            return;
         }
         // `outline` flips the shape column. Like `ws` it only changes what is
         // drawn, so it is not an undo step.
@@ -2047,9 +2044,13 @@ impl App {
                 match visual {
                     // No selection: copy the whole file, as before.
                     None => lines.join("\n"),
+                    // With the trailing newline, because whole lines were
+                    // taken: it is what tells a paste to put them back as
+                    // whole lines, and what every other program expects of a
+                    // line copied to the clipboard.
                     Some(ViewVisual::Line) => {
                         let (a, b) = (anchor.0.min(*line), anchor.0.max(*line).min(n - 1));
-                        lines[a..=b].join("\n")
+                        lines[a..=b].join("\n") + "\n"
                     }
                     Some(ViewVisual::Char) => {
                         // Order the two endpoints, then take an inclusive
@@ -2083,13 +2084,42 @@ impl App {
         }
     }
 
-    /// `P`: put the clipboard into the buffer at the cursor.
+    /// Toggle the rendered Markdown preview.
+    ///
+    /// The preview is a *full* viewer — cursor, visual selection, `/` search
+    /// and the mouse all work over the rendered document — so this only flips
+    /// the flag and resets the cursor; the render swaps `view.lines` in and
+    /// out around it.
+    pub(crate) fn toggle_markdown_preview(&mut self) {
+        let mut is_md = false;
+        if let Popup::Viewer { preview, markdown: true, line, col, scroll, visual, .. } =
+            &mut self.popup
+        {
+            is_md = true;
+            *preview = !*preview;
+            let on = *preview;
+            (*line, *col, *scroll, *visual) = (0, 0, 0, None);
+            self.message = Some(if on {
+                tr(self.lang, "markdown: preview", "Markdown: プレビュー").into()
+            } else {
+                tr(self.lang, "markdown: source", "Markdown: ソース").into()
+            });
+        }
+        if !is_md {
+            self.message = Some(tr(self.lang,
+                "not a Markdown file — nothing to preview",
+                "Markdown ではないのでプレビューはありません").into());
+        }
+    }
+
+    /// `p` / `P`: put the clipboard into the buffer, after the cursor or
+    /// before it.
     ///
     /// Text that ends in a newline came from whole lines, so it goes back as
-    /// whole lines, below the cursor — vi's distinction, and the one that
-    /// makes "copy these three lines, paste them there" land where meant
-    /// rather than in the middle of a word.
-    pub(crate) fn paste_into_viewer(&mut self) {
+    /// whole lines — below the cursor for `p`, above it for `P`. That is vi's
+    /// distinction, and the one that makes "copy these three lines, paste them
+    /// there" land where meant rather than in the middle of a word.
+    pub(crate) fn paste_into_viewer(&mut self, before: bool) {
         let Some(text) = self.clipboard_text().filter(|t| !t.is_empty()) else {
             self.message = Some(tr(self.lang, "the clipboard is empty", "クリップボードが空です").into());
             return;
@@ -2106,15 +2136,17 @@ impl App {
             }
             let at = (*line).min(view.lines.len() - 1);
             if linewise {
+                let put = if before { at } else { at + 1 };
                 for (i, p) in parts.iter().enumerate() {
-                    view.lines.insert(at + 1 + i, p.clone());
+                    view.lines.insert(put + i, p.clone());
                 }
-                *line = at + 1;
+                *line = put;
                 *col = 0;
                 *goal = 0;
             } else {
                 let chars: Vec<char> = view.lines[at].chars().collect();
-                let cut = (*col).min(chars.len());
+                // `p` goes after the character the cursor is on; `P` at it.
+                let cut = (*col + usize::from(!before && !chars.is_empty())).min(chars.len());
                 let head: String = chars[..cut].iter().collect();
                 let tail: String = chars[cut..].iter().collect();
                 if parts.len() == 1 {

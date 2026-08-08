@@ -2287,6 +2287,8 @@ impl App {
             }
         }
         self.popup = Popup::None;
+        // Back to the file it was picked over, if it was picked from there.
+        self.restore_viewer();
     }
 
     /// Cancel the gallery: restore whatever the target had when it opened.
@@ -2298,6 +2300,7 @@ impl App {
             }
         }
         self.popup = Popup::None;
+        self.restore_viewer();
     }
 
     /// Clear a pane's theme override so it follows the app theme again (the `x`

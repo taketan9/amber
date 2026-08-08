@@ -161,6 +161,32 @@ fn shell_looks_unix(screen: &str) -> Option<bool> {
     None
 }
 
+/// The viewer's selection as text, or the whole file when nothing is selected
+/// — the same rule the copy key follows.
+fn viewer_selection_text(p: &Popup) -> Option<String> {
+    let Popup::Viewer { view, line, col, visual, anchor, .. } = p else { return None };
+    let lines = &view.lines;
+    if lines.is_empty() {
+        return None;
+    }
+    let text = match visual {
+        None => lines.join("\n"),
+        Some(ViewVisual::Line) => {
+            let (a, b) = (anchor.0.min(*line), anchor.0.max(*line).min(lines.len() - 1));
+            lines[a..=b].join("\n")
+        }
+        Some(ViewVisual::Char) => {
+            let (s, e) = order_pos((anchor.0, anchor.1), (*line, *col));
+            viewer_charwise(lines, s, e)
+        }
+        Some(ViewVisual::Block) => {
+            let b = cian_core::textops::Block::between(lines, *anchor, (*line, *col));
+            cian_core::textops::block_text(lines, b).join("\n")
+        }
+    };
+    Some(text).filter(|t| !t.trim().is_empty())
+}
+
 impl App {
     /// Is the AI helper configured and working? Returns the cached result of the
     /// background probe (see [`Self::spawn_ai_probe`]); `false` until the probe
@@ -390,6 +416,62 @@ impl App {
             true,
         );
         self.ai_request(AiPurpose::Chat, system, tail);
+    }
+
+    /// Ask the local model about what is selected in the viewer — or about the
+    /// whole file when nothing is.
+    ///
+    /// Three questions, because they are the three a file open in front of you
+    /// raises: is this written well, what does this command do, and what is
+    /// wrong with this code. The viewer steps aside rather than closing, and
+    /// comes back when the chat does — the question is *about* the file, and
+    /// the file may have unsaved edits in it.
+    pub(crate) fn ai_over_viewer(&mut self, kind: AiOverText) {
+        let Some(text) = self.viewer_return.as_deref().and_then(viewer_selection_text) else {
+            self.message = Some(tr(self.lang, "nothing to ask about", "対象がありません").into());
+            self.restore_viewer();
+            return;
+        };
+        if !self.ai_ready() {
+            self.message = Some("AI unavailable (python, packages, or sign-in)".into());
+            self.restore_viewer();
+            return;
+        }
+        // A model has a limit and a selection may be a whole file; the head is
+        // the part that says what the thing is.
+        let text: String = text.chars().take(16_000).collect();
+        let (system, title) = match kind {
+            AiOverText::Writing => (
+                "You are an editor. Improve the passage below: fix grammar and \
+                 typos, tighten wording, and keep the author's voice and \
+                 language (answer in the language it is written in). Give the \
+                 rewritten text first, then a short list of what you changed \
+                 and why. Do not invent facts.",
+                tr(self.lang, "Improve this writing", "この文章を推敲"),
+            ),
+            AiOverText::Command => (
+                "You help an operator on RHEL/AIX. If the text below is a shell \
+                 command, explain what it does, flag anything destructive, and \
+                 suggest a safer or shorter form. If it is a description of a \
+                 task, write the command that does it and explain each part. \
+                 Plain text, no markdown headings.",
+                tr(self.lang, "Explain / write this command", "コマンドを説明・作成"),
+            ),
+            AiOverText::Code => (
+                "You review code. For the excerpt below: point out bugs, \
+                 error handling that is missing, and anything that will not do \
+                 what it looks like it does — most important first. Then give \
+                 the corrected code. Say so plainly if you find nothing wrong.",
+                tr(self.lang, "Review and fix this code", "このコードを点検・修正"),
+            ),
+        };
+        self.start_ai_chat_as(
+            ChatMode::Ai,
+            ChatSkin::simple(title),
+            vec![ChatMsg { user: true, text: title.to_string() }],
+            true,
+        );
+        self.ai_request(AiPurpose::Chat, system.to_string(), text);
     }
 
     /// Does the shell's visible output look like it just ended in an error?
