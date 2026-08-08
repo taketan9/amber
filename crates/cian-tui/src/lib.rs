@@ -40,6 +40,7 @@ use util::{
 
 mod ai;
 mod arcview;
+mod drop;
 mod crmaine;
 mod preview;
 mod markdown;
@@ -830,6 +831,9 @@ enum MenuItem {
     SvnUpdate,
     /// `svn commit` the selection (prompts for a message).
     SvnCommit,
+    /// Put the selection on the system clipboard as real file references, so
+    /// Finder / Explorer can paste them (`Shift+P`).
+    CopyFileRef,
     /// Pattern-based bulk rename of the marked files (`:brename`).
     BulkRename,
     /// Rename by editing a list of names in the editor (`:bulkrename`).
@@ -1037,6 +1041,11 @@ impl MenuItem {
             MenuItem::ViewMenu => tr(lang, "View ▸", "表示 ▸"),
             MenuItem::SessionMenu => tr(lang, "Session ▸", "セッション ▸"),
             MenuItem::CopyPathText => tr(lang, "Copy path text  (p)", "パスをコピー  (p)"),
+            MenuItem::CopyFileRef => tr(
+                lang,
+                "Copy file(s) — paste into Finder/Explorer  (Shift+P)",
+                "ファイルをコピー — Finder/エクスプローラに貼付  (Shift+P)",
+            ),
             MenuItem::ShellSplitLR => tr(lang, "Split left / right  (S-F8)", "左右に分割  (S-F8)"),
             MenuItem::ShellSplitTB => tr(lang, "Split top / bottom  (S-F9)", "上下に分割  (S-F9)"),
             MenuItem::ShellNewTab => tr(lang, "New tab  (F9)", "新規タブ  (F9)"),
@@ -3349,6 +3358,8 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry("G", Some(CursorBottom), "jump to bottom", "末尾へジャンプ"),
                 entry("Enter", Some(EnterDir), "enter folder / open file / go into an archive", "フォルダに入る／ファイルを開く／書庫の中へ"),
                 entry("Backspace", Some(Parent), "up one level", "1階層上へ"),
+                entry("drag in from Finder", None, "drop files on the window: they MOVE into this pane (asks first)", "Finder等からドロップ：このペインへ移動（先に確認）"),
+                entry("Shift+P", Some(CopyFileRef), "put the selection on the clipboard for Finder/Explorer to paste", "選択をクリップボードへ（Finder/エクスプローラで貼付）"),
                 entry("Alt+← / Alt+h", None, "back to the previous directory (or click ◀ in the title)", "直前のディレクトリへ戻る（タイトルの ◀ クリックでも）"),
                 entry("Alt+→ / Alt+l", None, "forward again (or click ▶)", "進む（▶ クリックでも）"),
                 entry("h", None, "this pane's directory history (also :back)", "このペインの移動履歴（:back でも）"),
@@ -3938,8 +3949,14 @@ fn run_loop<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Result<()>
                 // A terminal paste (Cmd/Ctrl+V, right-click, middle-click)
                 // arrives whole rather than as keystrokes, so it lands in the
                 // active field atomically and its newlines are stripped.
+                // A paste, or a file dropped onto the terminal window — which
+                // arrives the same way, since a terminal answers a drop by
+                // typing the path in. `accept_drop` takes it only when every
+                // item really is a file on disk.
                 Event::Paste(text) => {
-                    app.insert_into_active_text(&text);
+                    if !app.accept_drop(&text) {
+                        app.insert_into_active_text(&text);
+                    }
                     needs_redraw = true;
                 }
                 Event::Resize(_, _) => needs_redraw = true,

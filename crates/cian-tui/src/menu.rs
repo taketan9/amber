@@ -54,6 +54,9 @@ impl App {
             // Frequent file ops at the top level; the rest fold into groups.
             items.push(MenuItem::Copy);
             items.push(MenuItem::CopyPathText); // directly under Copy
+            // The way out of cian into Finder/Explorer: a terminal program
+            // cannot be an OS drag source, so the clipboard is the bridge.
+            items.push(MenuItem::CopyFileRef);
             items.push(MenuItem::Cut);
             items.push(MenuItem::PasteHere); // file clipboard paste (Ctrl+V)
             items.push(MenuItem::Rename);
@@ -363,6 +366,7 @@ impl App {
             MenuItem::RevealInOs => self.reveal_in_os(),
             MenuItem::PropertiesOs => self.properties_os(),
             MenuItem::CopyPathText => self.copy_paths_to_clipboard(),
+            MenuItem::CopyFileRef => self.copy_file_refs_to_clipboard(),
             MenuItem::ShellSplitLR => {
                 let cwd = self.shell_cwd();
                 self.shell.split_active(&cwd, SplitDir::LeftRight);

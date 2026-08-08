@@ -6395,6 +6395,53 @@
     }
 
 
+    /// A file dragged from Finder/Explorer onto the terminal arrives as a
+    /// paste; cian turns it into a move into the focused pane, asking first.
+    #[test]
+    fn a_dropped_file_becomes_a_move_into_this_pane() {
+        let (l, r, mut app) = app_two_dirs(&["victim.txt"], &[]);
+        app.focus(FocusedPane::Right);
+        let src = l.path().join("victim.txt");
+
+        // The shape iTerm2 sends for a drag.
+        let dropped = src.display().to_string().replace(' ', "\\ ");
+        assert!(app.accept_drop(&dropped), "recognised as a drop");
+        match &app.popup {
+            Popup::ConfirmTransfer { op, targets, dest } => {
+                assert!(matches!(op, PendingOp::Move), "a drop moves");
+                assert_eq!(targets, &vec![src.clone()]);
+                // Compare by the final component: the pane canonicalises
+                // (/var → /private/var on macOS) and the tempdir does not.
+                assert_eq!(dest.file_name(), r.path().file_name());
+            }
+            other => panic!("expected the transfer confirm, got {other:?}"),
+        }
+        // Confirming actually moves it.
+        app.handle_key(key('y')).unwrap();
+        drain_op_job(&mut app);
+        assert!(r.path().join("victim.txt").exists(), "landed in the right pane");
+        assert!(!src.exists(), "and left the left pane");
+    }
+
+    /// Ordinary pastes must still be pastes — the drop path only claims text
+    /// that is entirely real files, and never while something is being typed.
+    #[test]
+    fn a_drop_never_steals_an_ordinary_paste() {
+        let (_l, _r, mut app) = app_two_dirs(&["a.txt"], &[]);
+        assert!(!app.accept_drop("just some words"), "prose is a paste");
+
+        // Even a real path, while a text field is open, belongs to the field.
+        let real = _l.path().join("a.txt").display().to_string();
+        app.start_rename();
+        assert!(!app.accept_drop(&real), "a text field keeps its paste");
+        app.popup = Popup::None;
+
+        // And the shell keeps its own — dropping a file on a terminal to get
+        // its path onto the command line predates cian.
+        app.focus(FocusedPane::Shell);
+        assert!(!app.accept_drop(&real), "the shell keeps its paste");
+    }
+
     /// Inside an archive the hint bar names archive keys — and says outright
     /// when the format is read-only, since the keys that would write are the
     /// ones a filer user reaches for first.

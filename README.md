@@ -48,7 +48,9 @@ Copy, move and delete always **ask first**, and delete goes to the trash — so 
 
 Big copies run in the background with a progress bar; **Esc** stops one.
 
-**Mouse works everywhere.** Click to move the cursor, drag across rows to select, double-click to open. Drag a file onto the other pane to copy it there (Shift-drag to move). Every dialog has real clickable buttons, and the wheel scrolls any popup. Drag a border to resize the split it divides.
+**Mouse works everywhere.** Click to move the cursor, double-click to open. Drag a file onto the other pane to copy it there (Shift-drag to move). Every dialog has real clickable buttons, and the wheel scrolls any popup. Drag a border to resize the split it divides.
+
+**Files in and out of the desktop.** Drag files from Finder or Explorer onto the cian window and they **move** into the focused pane — after the usual confirm, so a mistaken drag is caught there. (Any terminal answers a drop by typing the paths in; cian takes that only when every item really is a file, so an ordinary paste stays an ordinary paste.) The other direction cannot be a drag: a terminal program has no window of its own and so can never be an OS drag *source*. **`Shift+P`** is the bridge instead — it puts the selection on the clipboard as real file references, and `Cmd/Ctrl+V` in Finder or Explorer pastes them. For a browser's upload box, use its **Browse** button and paste the path into the file dialog.
 
 **Operations queue.** Start a copy while another runs and it waits its turn — nothing is refused, nothing overlaps. The progress popup's `b` tucks it away so you keep working (a status chip tracks it: `⏳ copying 45% +2`); `:queue` lists the runner and the line, `x` stops the runner or removes a waiting item. Failed uploads/downloads retry themselves twice before giving up. And if a transfer wedges — no bytes for 30 s — the chip turns to `⚠ stalled`, and in `:queue` a second `x` *abandons* the deaf worker so the rest of the line keeps moving.
 
