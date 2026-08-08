@@ -835,6 +835,64 @@
         assert_eq!(lines(&app), ["aabc"], "before it, same result at column 0");
     }
 
+    /// The tab strip: every open file named, and the mouse able to reach both
+    /// the arrows and the names. Also that a menu opened from the viewer is
+    /// drawn *over* it rather than instead of it.
+    #[test]
+    fn the_tab_strip_is_visible_and_clickable() {
+        let d = tempfile::tempdir().unwrap();
+        for n in ["alpha.txt", "beta.txt", "gamma.txt"] {
+            std::fs::write(d.path().join(n), format!("{n}\n")).unwrap();
+        }
+        let p = d.path().to_path_buf();
+        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        for n in ["alpha.txt", "beta.txt", "gamma.txt"] {
+            let path = app.active_pane().unwrap().entries.iter().find(|e| e.name == n).unwrap().path.clone();
+            app.active_pane_mut().unwrap().marks.insert(path);
+        }
+        app.handle_key(code(KeyCode::F(3))).unwrap();
+        let screen = render(&mut app, 160, 30).join("\n");
+        for n in ["alpha.txt", "beta.txt", "gamma.txt"] {
+            assert!(screen.contains(n), "every open file is named in the strip:\n{screen}");
+        }
+        assert!(!app.viewer_tab_rects.is_empty(), "and each has somewhere to click");
+
+        let shown = |app: &App| match &app.popup {
+            Popup::Viewer { view, .. } => view.lines.join("\n"),
+            other => panic!("not a viewer: {other:?}"),
+        };
+        let click = |app: &mut App, c: u16, r: u16| {
+            app.handle_mouse(crossterm::event::MouseEvent {
+                kind: crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+                column: c,
+                row: r,
+                modifiers: KeyModifiers::NONE,
+            });
+        };
+
+        // Click the third tab by name.
+        let (rect, _) = app.viewer_tab_rects[2];
+        click(&mut app, rect.x + 1, rect.y);
+        assert_eq!(shown(&app), "gamma.txt", "clicked straight to the third");
+
+        // The arrows step, at their fixed columns.
+        let f = app.viewer_frame;
+        click(&mut app, f.x + 1, f.y);
+        assert_eq!(shown(&app), "beta.txt", "◂ went back one");
+        click(&mut app, f.x + 3, f.y);
+        assert_eq!(shown(&app), "gamma.txt", "▸ went forward one");
+
+        // A menu opened from the viewer keeps the file on screen behind it.
+        let _ = render(&mut app, 160, 30);
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::SHIFT)).unwrap();
+        let screen = render(&mut app, 160, 30).join("\n");
+        assert!(screen.contains("gamma.txt"), "the file is still there:\n{screen}");
+        assert!(
+            screen.contains("Theme") || screen.contains("テーマ"),
+            "with the menu over it:\n{screen}",
+        );
+    }
+
     /// A split must not draw anything but the viewer. It used to draw every
     /// popup as though it were one — so the menu, and worse the quit
     /// confirmation, were on screen and invisible, quietly taking the Enter

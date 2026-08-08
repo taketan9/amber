@@ -407,6 +407,7 @@ pub(crate) fn draw(f: &mut Frame, app: &mut App) {
                 .inner(Margin { vertical: 1, horizontal: 2 })
                 .width;
             let ow = shape.as_deref().map_or(0, |s| outline_width(inner_w, s.shown, s.items.len()));
+            app.viewer_frame = viewer_frame_rect(area);
             app.viewer_rect = viewer_body_rect(area, ow);
             app.outline_rect = Rect::new(
                 app.viewer_rect.x.saturating_sub(ow),
@@ -437,6 +438,47 @@ pub(crate) fn draw(f: &mut Frame, app: &mut App) {
         // message raised by the viewer itself — "saved", "nothing to fold
         // here" — is shown on its own footer instead.
         let msg_for_viewer = app.message.clone().filter(|_| app.message_fresh);
+        // Every open file's name, in order, with the one on screen back in its
+        // place — the strip has to name them all, and the active one is not in
+        // the list while it is being read.
+        let names: Vec<String> = {
+            let mut v: Vec<String> = app
+                .viewer_tabs
+                .iter()
+                .map(|p| match p {
+                    Popup::Viewer { title, .. } => title.clone(),
+                    _ => String::new(),
+                })
+                .collect();
+            if let Popup::Viewer { title, .. } = &app.popup {
+                let at = app.viewer_tab_idx.min(v.len());
+                v.insert(at, title.clone());
+            }
+            v
+        };
+        let mut tab_rects: Vec<(Rect, usize)> = Vec::new();
+        // A menu — or a chat, or the theme gallery — opened *from* the viewer
+        // is drawn on top of it, not instead of it. The file is what the
+        // question is about; losing sight of it while answering is the wrong
+        // way round.
+        if let Some(behind) = app.viewer_return.take() {
+            let mut behind = behind;
+            if let Some(other) = app.viewer_split.take() {
+                let (first, second) = split_viewer_areas(area, app.viewer_split_lr);
+                let (mine, theirs) = if app.viewer_split_focus {
+                    (second, first)
+                } else {
+                    (first, second)
+                };
+                let mut other = other;
+                draw_viewer(f, theirs, &mut other, lang, show_ws, None, (0, &[]));
+                draw_viewer(f, mine, &mut behind, lang, show_ws, None, (0, &[]));
+                app.viewer_split = Some(other);
+            } else {
+                draw_viewer(f, area, &mut behind, lang, show_ws, None, (0, &[]));
+            }
+            app.viewer_return = Some(behind);
+        }
         // A split viewer is two viewers. The half not in focus is drawn first
         // and dimmed, exactly as the unfocused file pane is, so which one the
         // keyboard is pointed at is never a guess.
@@ -446,6 +488,7 @@ pub(crate) fn draw(f: &mut Frame, app: &mut App) {
         // invisible, quietly taking the next Enter.
         if matches!(app.popup, Popup::Viewer { .. }) && app.viewer_split.is_some() {
             let other = app.viewer_split.take().expect("just checked");
+            let full = area;
             let (first, second) = split_viewer_areas(area, app.viewer_split_lr);
             // Which half each file occupies is fixed; crossing over moves the
             // focus, not the files. Drawing the focused one always on the left
@@ -456,22 +499,42 @@ pub(crate) fn draw(f: &mut Frame, app: &mut App) {
                 (first, second)
             };
             let mut other = other;
-            draw_viewer(f, theirs, &mut other, lang, show_ws, None, (0, 1));
+            draw_viewer(f, theirs, &mut other, lang, show_ws, None, (0, &[]));
             f.render_widget(
                 Block::default().style(Style::default().fg(Color::Rgb(90, 90, 105))),
                 theirs,
             );
-            draw_viewer(
+            app.viewer_tab_rects = draw_viewer(
                 f,
                 mine,
                 &mut app.popup,
                 lang,
                 show_ws,
                 msg_for_viewer.as_deref(),
-                (app.viewer_tab_idx, app.viewer_tabs.len() + 2),
+                (app.viewer_tab_idx, &names),
             );
             app.viewer_split = Some(other);
             app.popup_zones.clear();
+            // Everything the mouse needs, for the half the keyboard is on —
+            // without this the clicks were being measured against a viewer
+            // that filled the whole screen, which is not where anything was.
+            let ow = if let Popup::Viewer { shape, .. } = &app.popup {
+                let inner_w = viewer_frame_rect(mine)
+                    .inner(Margin { vertical: 1, horizontal: 2 })
+                    .width;
+                shape.as_deref().map_or(0, |s| outline_width(inner_w, s.shown, s.items.len()))
+            } else {
+                0
+            };
+            app.viewer_frame = viewer_frame_rect(mine);
+            app.viewer_rect = viewer_body_rect(mine, ow);
+            app.outline_rect = Rect::new(
+                app.viewer_rect.x.saturating_sub(ow),
+                app.viewer_rect.y,
+                ow.saturating_sub(1),
+                app.viewer_rect.height,
+            );
+            let _ = full;
             return;
         }
         draw_popup(
@@ -487,9 +550,11 @@ pub(crate) fn draw(f: &mut Frame, app: &mut App) {
             menu_lang,
             show_ws,
             msg_for_viewer,
-            app.viewer_tabs.len() + 1,
             app.viewer_tab_idx,
+            &names,
+            &mut tab_rects,
         );
+        app.viewer_tab_rects = tab_rects;
     } else {
         app.popup_zones.clear();
     }
@@ -536,10 +601,14 @@ fn draw_startup_splash(f: &mut Frame, area: Rect, elapsed_ms: u128) {
 
 /// The viewer's text body rect, mirroring its renderer's geometry so a mouse
 /// click maps to the right line.
+/// The viewer's frame within `area` — the bordered box, whose top row carries
+/// the title and the tab arrows.
+pub(crate) fn viewer_frame_rect(area: Rect) -> Rect {
+    centered_rect(area.width.saturating_sub(4), area.height.saturating_sub(2), area)
+}
+
 fn viewer_body_rect(area: Rect, outline_w: u16) -> Rect {
-    let w = area.width.saturating_sub(4);
-    let h = area.height.saturating_sub(2);
-    let rect = centered_rect(w, h, area);
+    let rect = viewer_frame_rect(area);
     let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
     let body_h = inner.height.saturating_sub(1);
     Rect::new(inner.x + outline_w, inner.y, inner.width - outline_w, body_h)
@@ -3507,8 +3576,9 @@ fn draw_popup(
     menu_lang: Lang,
     show_ws: bool,
     msg: Option<String>,
-    tabs: usize,
     tab_at: usize,
+    tab_names: &[String],
+    tab_rects: &mut Vec<(Rect, usize)>,
 ) {
     // Every popup with a shape of its own draws itself. The rest — the
     // confirm/notice dialogs, which differ only in their wording — fall through
@@ -3527,7 +3597,9 @@ fn draw_popup(
         Popup::Shortcuts { .. } => draw_shortcuts(f, area, popup, zones, lang),
         Popup::History { .. } => draw_history(f, area, popup, zones, lang),
         Popup::DestPicker { .. } => draw_dest_picker(f, area, popup, dests, zones, lang),
-        Popup::Viewer { .. } => draw_viewer(f, area, popup, lang, show_ws, msg.as_deref(), (tab_at, tabs)),
+        Popup::Viewer { .. } => {
+            *tab_rects = draw_viewer(f, area, popup, lang, show_ws, msg.as_deref(), (tab_at, tab_names));
+        }
         Popup::DirCompare { .. } => draw_dir_compare(f, area, popup, zones, lang),
         Popup::Diff { .. } => draw_diff(f, area, popup, lang),
         Popup::Archive { .. } => draw_archive(f, area, popup, zones, lang),
@@ -5093,14 +5165,14 @@ fn draw_viewer(
     lang: Lang,
     show_ws: bool,
     msg: Option<&str>,
-    // Which of the viewer's open files this is, and how many there are.
-    tab: (usize, usize),
-) {
-    let (tab_at, tabs) = tab;
-    let Popup::Viewer { title, view, scroll, line, col, visual, anchor, find_input, find_query, sub_input, sub_walk, block_input, git_lines, markdown, preview, source, md_styles, md_map, md_width, editing, dirty, editable, hl, hl_lang, blame, shape, path, .. } = popup else { return };
-    let w = area.width.saturating_sub(4);
-    let h = area.height.saturating_sub(2);
-    let rect = centered_rect(w, h, area);
+    // Which of the viewer's open files this is, and what they are all called.
+    tab: (usize, &[String]),
+) -> Vec<(Rect, usize)> {
+    let (tab_at, tab_names) = tab;
+    let tabs = tab_names.len();
+    let mut tab_rects: Vec<(Rect, usize)> = Vec::new();
+    let Popup::Viewer { title, view, scroll, line, col, visual, anchor, find_input, find_query, sub_input, sub_walk, block_input, git_lines, markdown, preview, source, md_styles, md_map, md_width, editing, dirty, editable, hl, hl_lang, blame, shape, path, .. } = popup else { return tab_rects };
+    let rect = viewer_frame_rect(area);
     f.render_widget(Clear, rect);
 
     // The preview owns `view.lines`: render the source to plain text plus a
@@ -5226,9 +5298,34 @@ fn draw_viewer(
             // The two arrows come first, at a fixed column, so the mouse can
             // find them without the file name's length coming into it — the
             // same shape the file panes' history arrows have.
-            format!(" ◂ ▸  {}{}   [{}/{}] ", title, dirty_mark, tab_at + 1, tabs)
+            // A strip, as the shell panel has: every open file named, the one
+            // being read picked out. The two arrows come first at a fixed
+            // column so the mouse can find them whatever the names are.
+            let mut spans = vec![Span::styled(
+                " ◂ ▸ ".to_string(),
+                Style::default().fg(theme().accent).add_modifier(Modifier::BOLD),
+            )];
+            let mut at = rect.x + 1 + 5;
+            for (i, name) in tab_names.iter().enumerate() {
+                let label = format!(" {} {} ", i + 1, truncate(name, 18));
+                let w = width(&label) as u16;
+                tab_rects.push((Rect::new(at, rect.y, w, 1), i));
+                at += w;
+                spans.push(Span::styled(
+                    label,
+                    if i == tab_at {
+                        Style::default().fg(Color::Black).bg(mode_color).add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default().fg(Color::Rgb(150, 150, 170))
+                    },
+                ));
+            }
+            if *dirty {
+                spans.push(Span::styled(" ●".to_string(), Style::default().fg(Color::Rgb(240, 200, 120))));
+            }
+            Line::from(spans)
         } else {
-            format!(" {}{}  —  {} ", title, dirty_mark, head)
+            Line::from(format!(" {}{}  —  {} ", title, dirty_mark, head))
         })
         .title_bottom(Line::from(vec![
             Span::styled(
@@ -5696,6 +5793,7 @@ fn draw_viewer(
         Paragraph::new(truncate(&footer, inner.width as usize)).style(footer_style),
         Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1),
     );
+    tab_rects
 }
 
 fn draw_dir_compare(

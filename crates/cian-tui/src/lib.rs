@@ -2116,6 +2116,8 @@ pub struct App {
     /// Reported by `:keys`, because it is the first thing to suspect when every
     /// Ctrl combination goes quiet at once.
     kbd_enhanced: bool,
+    /// The viewer's bordered frame, whose top row holds the tab arrows.
+    viewer_frame: Rect,
     viewer_rect: Rect,
     /// Where the viewer's outline column was drawn, so a click on an entry can
     /// jump to it. Zero-width when the column is not showing.
@@ -2409,6 +2411,7 @@ impl App {
             key_probe: false,
             message_fresh: false,
             kbd_enhanced: false,
+            viewer_frame: Rect::new(0, 0, 0, 0),
             viewer_rect: Rect::new(0, 0, 0, 0),
             outline_rect: Rect::new(0, 0, 0, 0),
             viewer_tab_rects: Vec::new(),

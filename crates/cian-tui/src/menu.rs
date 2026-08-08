@@ -12,10 +12,10 @@ impl App {
             return;
         }
         let mut items = Vec::new();
+        // The AI actions live under their own heading, as they do in the file
+        // panes: three of them at the top level would be most of the menu.
         if self.ai.is_some() && self.ai_ready() {
-            items.push(MenuItem::AiWriting);
-            items.push(MenuItem::AiCommandHelp);
-            items.push(MenuItem::AiCodeFix);
+            items.push(MenuItem::AiMenu);
         }
         items.push(MenuItem::Copy);
         // Where the file lives, for when reading it raises a question about
@@ -145,8 +145,17 @@ impl App {
         match item {
             MenuItem::AiMenu => {
                 // The local (non-crmaine) assistant: a plain chat plus the
-                // pane-specific helpers.
+                // helpers for whatever it was opened over.
                 let mut v = vec![MenuItem::AiChat];
+                if self.viewer_return.is_some() {
+                    // Over a file being read, the questions are about the text
+                    // in front of you rather than about the folder.
+                    v.push(MenuItem::AiWriting);
+                    v.push(MenuItem::AiCommandHelp);
+                    v.push(MenuItem::AiCodeFix);
+                    v.push(MenuItem::Back);
+                    return Some(v);
+                }
                 if self.focused == FocusedPane::Shell {
                     v.push(MenuItem::AiShellCmd);
                     v.push(MenuItem::AiExplainError);

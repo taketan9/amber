@@ -766,6 +766,17 @@ impl App {
         self.viewer_note_tab();
     }
 
+    /// Show the `i`-th open file — the tab strip's click.
+    pub(crate) fn viewer_goto_tab(&mut self, i: usize) {
+        let n = self.viewer_tab_count();
+        if n < 2 || i >= n || i == self.viewer_tab_idx {
+            return;
+        }
+        let mut all = self.viewer_all_tabs();
+        self.viewer_make_active(&mut all, i);
+        self.viewer_note_tab();
+    }
+
     /// Close the file on screen and show the next one along.
     pub(crate) fn close_viewer_tab(&mut self) {
         if self.viewer_tabs.is_empty() {

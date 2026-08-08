@@ -30,19 +30,28 @@ impl App {
         if matches!(self.popup, Popup::Viewer { .. }) {
             // The tab arrows sit in the top border, two columns in. The body
             // starts one row below it and two columns right of the frame.
-            let body0 = self.viewer_rect;
+            let frame = self.viewer_frame;
             if self.viewer_tab_count() > 1
                 && matches!(ev.kind, MouseEventKind::Down(MouseButton::Left))
-                && body0.y > 0
-                && row == body0.y - 1
+                && row == frame.y
             {
-                let left = body0.x.saturating_sub(1);
-                if col == left + 1 {
+                if col == frame.x + 1 {
                     self.viewer_switch_tab(false);
                     return;
                 }
-                if col == left + 3 {
+                if col == frame.x + 3 {
                     self.viewer_switch_tab(true);
+                    return;
+                }
+                // …or the name of the file itself, which is what a tab strip
+                // is for.
+                if let Some((_, i)) = self
+                    .viewer_tab_rects
+                    .iter()
+                    .copied()
+                    .find(|(r, _)| col >= r.x && col < r.x + r.width)
+                {
+                    self.viewer_goto_tab(i);
                     return;
                 }
             }
