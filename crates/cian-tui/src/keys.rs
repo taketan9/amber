@@ -2098,11 +2098,25 @@ impl App {
             (_, _, KeyCode::Right) => self.focus(FocusedPane::Right),
             // `l` is deliberately unbound. Entering a folder is Enter; the
             // vim-shaped `l` kept firing when a hand rested on the home row.
-            // Ctrl+Enter opens the selected dir (else this cwd) in the other
-            // pane, same tab. (Ctrl+Shift+Enter is the global snippet launcher;
-            // `O` pushes this pane's directory to the other one.) Needs a
-            // terminal that reports the modifier with Enter.
-            (true, false, KeyCode::Enter) => { self.open_in_other_pane(false)?; }
+            // Ctrl+Enter hands the file to its own program — the thing Enter
+            // used to do, moved off the key one presses by reflex. On a
+            // directory it keeps its old job of opening that folder in the
+            // other pane, which is not something a launcher could mean.
+            // (Ctrl+Shift+Enter is the global snippet launcher.) Needs a
+            // terminal that reports the modifier with Enter; `x` does the same
+            // where one does not.
+            (true, false, KeyCode::Enter) => {
+                let on_dir = self
+                    .active_pane()
+                    .and_then(|p| p.selected())
+                    .map(|e| e.is_dir)
+                    .unwrap_or(true);
+                if on_dir {
+                    self.open_in_other_pane(false)?;
+                } else {
+                    self.open_externally();
+                }
+            }
             // `o` pulls the other pane's directory into this one; `O` pushes
             // this pane's directory onto the other. (Open-into-other-pane lives
             // on Ctrl+Enter above.)

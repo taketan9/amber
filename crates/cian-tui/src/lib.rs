@@ -2085,6 +2085,11 @@ pub struct App {
     /// ideographic space, a tab. Off by default (they are noise while reading)
     /// and turned on for the pass where they matter — `:ws`, or the toggles.
     show_ws: bool,
+    /// The column ruler and the crosshair on the cursor's line and column.
+    /// On by default: knowing which column you are in is most of what a fixed
+    /// -width record is about, and counting them by eye is what the ruler
+    /// exists to stop.
+    show_ruler: bool,
     /// Cursor-follow preview (`:preview`): while on, the shell panel's area
     /// previews the file under the cursor whenever a file pane has focus.
     preview_on: bool,
@@ -2521,6 +2526,7 @@ impl App {
             gfx_picker: None,
             img_proto: None,
             show_ws: true,
+            show_ruler: true,
             preview_on: config.options.preview.unwrap_or(true),
             preview: None,
             preview_gfx: None,
@@ -3686,7 +3692,7 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry("Shift+U", Some(PageUp), "move 10 lines up", "10行上へ"),
                 entry("gg", None, "jump to top", "先頭へジャンプ"),
                 entry("G", Some(CursorBottom), "jump to bottom", "末尾へジャンプ"),
-                entry("Enter", Some(EnterDir), "enter folder / open file / go into an archive", "フォルダに入る／ファイルを開く／書庫の中へ"),
+                entry("Enter", Some(EnterDir), "enter folder / read the file / go into an archive (Ctrl+Enter launches it)", "フォルダに入る／ファイルを読む／書庫の中へ（Ctrl+Enter でアプリ起動）"),
                 entry("Backspace", Some(Parent), "up one level", "1階層上へ"),
                 entry("drag in from Finder", None, "drop files on the window: they MOVE into this pane (asks first)", "Finder等からドロップ：このペインへ移動（先に確認）"),
                 entry("Shift+P", Some(CopyFileRef), "put the selection on the clipboard for Finder/Explorer to paste", "選択をクリップボードへ（Finder/エクスプローラで貼付）"),
@@ -3715,6 +3721,7 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry("  :preview", None, "the rendered Markdown, and back to the source (Ctrl+E where the terminal allows it)", "Markdown の描画表示とソースの切替（端末が許せば Ctrl+E でも）"),
                 entry("  F2 / Shift+F2", None, "the next / previous open file, or click ◂ ▸ in the title — F3 on marked files opens them all", "次/前の開いているファイル（タイトルの ◂ ▸ クリックでも）— マークして F3 で全部開く"),
                 entry("  r after /", None, "replace what the search found — the prompt arrives with the pattern in it", "検索したものを置換 — パターンは入力済みで開く"),
+                entry("  :ruler", None, "the column scale and the crosshair on the cursor's line and column. On by default", "列のルーラーとカーソル行・列の十字。既定でオン"),
                 entry("  :ws", None, "the invisible characters — tab, trailing space, ideographic space, line ending. On by default", "見えない文字の表示 — TAB・行末の空白・全角空白・改行。既定でオン"),
                 entry("  :expand all", None, "convert every tab, not only the indent (destroys TSV separators — hence by name)", "行中のタブも全部変換（TSV の区切りも消えるので、明示的に指定）"),
                 entry("  outline", None, "]] / [[ next/prev section, click an entry to jump, :outline hides the column", "]] / [[ 次/前の見出し、項目クリックで移動、:outline で列を隠す"),

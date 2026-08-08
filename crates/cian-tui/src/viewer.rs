@@ -1233,6 +1233,16 @@ impl App {
         }
         // `ws` flips the invisible-character marks. It reads the buffer
         // rather than changing it, so it is not an undo step.
+        // `ruler` flips the column scale and the crosshair.
+        if matches!(cmd, "ruler" | "cross") {
+            self.show_ruler = !self.show_ruler;
+            self.message = Some(if self.show_ruler {
+                tr(self.lang, "ruler and crosshair on", "ルーラーと十字を表示").into()
+            } else {
+                tr(self.lang, "ruler and crosshair off", "ルーラーと十字を非表示").into()
+            });
+            return;
+        }
         if cmd == "ws" {
             self.show_ws = !self.show_ws;
             self.message = Some(if self.show_ws {

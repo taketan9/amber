@@ -893,6 +893,64 @@
         );
     }
 
+    /// The ruler and the crosshair, and Enter reading rather than launching.
+    #[test]
+    fn the_viewer_shows_a_column_scale_and_where_the_cursor_is() {
+        let (_d, mut app) = viewer_on("abcdefghijklmnopqrstuvwxyz\nsecond line\n");
+        app.show_ws = false;
+        let screen = render(&mut app, 120, 20);
+        // Every tenth column numbered, every fifth marked.
+        let scale = screen.iter().find(|r| r.contains("····+····1")).cloned();
+        assert!(scale.is_some(), "a column scale over the text:\n{}", screen.join("\n"));
+
+        // …and it says which column the cursor is in, as the corner does.
+        if let Popup::Viewer { line, col, .. } = &mut app.popup {
+            *line = 0;
+            *col = 4;
+        }
+        let screen = render(&mut app, 120, 20).join("\n");
+        assert!(screen.contains("1:5"), "the corner agrees with the ruler");
+
+        // `:ruler` puts both away and gives the row back to the text.
+        let rows_with = render(&mut app, 120, 20).iter().filter(|r| r.contains("second line")).count();
+        app.handle_key(key(':')).unwrap();
+        if let Popup::Viewer { sub_input, .. } = &mut app.popup {
+            *sub_input = Some("ruler".into());
+        }
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+        let screen = render(&mut app, 120, 20);
+        assert!(!screen.iter().any(|r| r.contains("····+····1")), "the scale is gone");
+        assert_eq!(
+            screen.iter().filter(|r| r.contains("second line")).count(),
+            rows_with,
+            "the text is still all there",
+        );
+    }
+
+    /// Enter reads the file; launching it moved to Ctrl+Enter. Looking at a
+    /// file is the hundred-times-a-day action and can be left with Esc; an
+    /// application opened by accident has to be found and closed.
+    #[test]
+    fn enter_reads_the_file_and_ctrl_enter_launches_it() {
+        let (_d, mut app) = app_with(&["note.txt"]);
+        app.active_pane_mut().unwrap().cursor =
+            app.active_pane().unwrap().entries.iter().position(|e| e.name == "note.txt").unwrap();
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+        assert!(matches!(app.popup, Popup::Viewer { .. }), "Enter opened the viewer");
+        app.handle_key(code(KeyCode::Esc)).unwrap();
+
+        // On a directory Enter still goes in, which is not something a
+        // launcher could have meant.
+        let d2 = tempfile::tempdir().unwrap();
+        std::fs::create_dir(d2.path().join("sub")).unwrap();
+        let p = d2.path().to_path_buf();
+        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        app.active_pane_mut().unwrap().cursor =
+            app.active_pane().unwrap().entries.iter().position(|e| e.name == "sub").unwrap();
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+        assert!(app.active_pane().unwrap().cwd.ends_with("sub"), "went in");
+    }
+
     /// "Select all" means the listing in a pane and the file in the viewer —
     /// one idea, and which of the two is simply which is in front of you.
     #[test]

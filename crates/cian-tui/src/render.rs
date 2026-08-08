@@ -432,6 +432,7 @@ pub(crate) fn draw(f: &mut Frame, app: &mut App) {
         let lang = app.lang;
         let menu_lang = app.menu_lang;
         let show_ws = app.show_ws;
+        let ruler = app.show_ruler;
         app.popup_zones.clear();
         // The status line lives outside the viewer's border, on the very last
         // row, which is not where anyone is looking while reading a file. A
@@ -471,11 +472,11 @@ pub(crate) fn draw(f: &mut Frame, app: &mut App) {
                     (first, second)
                 };
                 let mut other = other;
-                draw_viewer(f, theirs, &mut other, lang, show_ws, None, (0, &[], &[]));
-                draw_viewer(f, mine, &mut behind, lang, show_ws, None, (0, &[], &[]));
+                draw_viewer(f, theirs, &mut other, lang, (show_ws, ruler), None, (0, &[], &[]));
+                draw_viewer(f, mine, &mut behind, lang, (show_ws, ruler), None, (0, &[], &[]));
                 app.viewer_split = Some(other);
             } else {
-                draw_viewer(f, area, &mut behind, lang, show_ws, None, (0, &[], &[]));
+                draw_viewer(f, area, &mut behind, lang, (show_ws, ruler), None, (0, &[], &[]));
             }
             app.viewer_return = Some(behind);
         }
@@ -524,7 +525,7 @@ pub(crate) fn draw(f: &mut Frame, app: &mut App) {
                 Some(d) => (d.mine.as_slice(), d.theirs.as_slice()),
                 None => (&[][..], &[][..]),
             };
-            draw_viewer(f, theirs, &mut other, lang, show_ws, None, (0, &[], dt));
+            draw_viewer(f, theirs, &mut other, lang, (show_ws, ruler), None, (0, &[], dt));
             f.render_widget(
                 Block::default().style(Style::default().fg(Color::Rgb(90, 90, 105))),
                 theirs,
@@ -534,7 +535,7 @@ pub(crate) fn draw(f: &mut Frame, app: &mut App) {
                 mine,
                 &mut app.popup,
                 lang,
-                show_ws,
+                (show_ws, ruler),
                 msg_for_viewer.as_deref(),
                 (app.viewer_tab_idx, &names, dm),
             );
@@ -574,6 +575,7 @@ pub(crate) fn draw(f: &mut Frame, app: &mut App) {
             lang,
             menu_lang,
             show_ws,
+            ruler,
             msg_for_viewer,
             app.viewer_tab_idx,
             &names,
@@ -3603,6 +3605,7 @@ fn draw_popup(
     lang: Lang,
     menu_lang: Lang,
     show_ws: bool,
+    ruler: bool,
     msg: Option<String>,
     tab_at: usize,
     tab_names: &[String],
@@ -3626,7 +3629,7 @@ fn draw_popup(
         Popup::History { .. } => draw_history(f, area, popup, zones, lang),
         Popup::DestPicker { .. } => draw_dest_picker(f, area, popup, dests, zones, lang),
         Popup::Viewer { .. } => {
-            *tab_rects = draw_viewer(f, area, popup, lang, show_ws, msg.as_deref(), (tab_at, tab_names, &[]));
+            *tab_rects = draw_viewer(f, area, popup, lang, (show_ws, ruler), msg.as_deref(), (tab_at, tab_names, &[]));
         }
         Popup::DirCompare { .. } => draw_dir_compare(f, area, popup, zones, lang),
         Popup::Diff { .. } => draw_diff(f, area, popup, lang),
@@ -5176,6 +5179,19 @@ fn dim_of(c: Color) -> Color {
 }
 
 
+/// Tint a cell for the cursor's line or column.
+///
+/// A background rather than a colour change, so it sits under the syntax
+/// highlighting instead of arguing with it — the crosshair says where you are,
+/// and the colours go on saying what the text is.
+fn cross(base: Style, on_line: bool, on_col: bool) -> Style {
+    match (on_line, on_col) {
+        (false, false) => base,
+        (true, true) => base.bg(Color::Rgb(58, 58, 78)),
+        _ => base.bg(Color::Rgb(44, 44, 60)),
+    }
+}
+
 /// The two halves of a split viewer. The focused one comes first.
 fn split_viewer_areas(area: Rect, left_right: bool) -> (Rect, Rect) {
     if left_right {
@@ -5198,12 +5214,15 @@ fn draw_viewer(
     area: Rect,
     popup: &mut Popup,
     lang: Lang,
-    show_ws: bool,
+    // The two things the viewer draws over the text but does not hold itself:
+    // the invisible-character marks and the ruler with its crosshair.
+    marks: (bool, bool),
     msg: Option<&str>,
     // Which of the viewer's open files this is, what they are all called, and
     // — when a comparison is running — what each line of *this* half is.
     tab: (usize, &[String], &[cian_core::diff::Mark]),
 ) -> Vec<(Rect, usize)> {
+    let (show_ws, ruler) = marks;
     let (tab_at, tab_names, diff_marks) = tab;
     let tabs = tab_names.len();
     let mut tab_rects: Vec<(Rect, usize)> = Vec::new();
@@ -5382,7 +5401,10 @@ fn draw_viewer(
     let outline_w = shape.as_deref().map_or(0, |s| outline_width(whole.width, s.shown, s.items.len()));
     let inner = Rect::new(whole.x + outline_w, whole.y, whole.width - outline_w, whole.height);
 
-    let body_h = inner.height.saturating_sub(1) as usize;
+    // The ruler is only for reading a fixed-width record, which the rendered
+    // Markdown is not, and it costs a row.
+    let show_ruler = ruler && !*preview && view.kind == cian_core::viewer::ViewKind::Text;
+    let body_h = inner.height.saturating_sub(1 + u16::from(show_ruler)) as usize;
     // Closed folds take their lines out of the picture entirely: `visible` is
     // the buffer as it is actually shown, and everything below — scrolling,
     // the cursor, the mouse — works over that rather than over raw line
@@ -5564,6 +5586,11 @@ fn draw_viewer(
                 None
             };
             let matches = match_cols(l);
+            // The line the cursor is on, and the column it is in, tinted so
+            // both can be followed across a wide record without a finger on
+            // the screen. Underneath everything that says more than "you are
+            // here" — a selection, a search hit, the cursor itself.
+            let cross_line = ruler && !*preview && i == *line;
             let cell_style = |j: usize| -> Style {
                 // Priority: cursor over selection over a search match; the
                 // resting style is the Markdown colour in preview, else plain.
@@ -5576,9 +5603,14 @@ fn draw_viewer(
                 } else if *preview {
                     md_styles.get(i).and_then(|s| s.get(j)).copied().unwrap_or_default()
                 } else if !*editing && !hl.is_empty() {
-                    hl.get(i).and_then(|s| s.get(j)).copied().unwrap_or(Style::default().fg(text_fg))
+                    let base = hl
+                        .get(i)
+                        .and_then(|s| s.get(j))
+                        .copied()
+                        .unwrap_or(Style::default().fg(text_fg));
+                    cross(base, cross_line, ruler && !*preview && j == *col)
                 } else {
-                    Style::default().fg(text_fg)
+                    cross(Style::default().fg(text_fg), cross_line, ruler && !*preview && j == *col)
                 }
             };
             // Build the body char-by-char, merging same-styled runs.
@@ -5682,8 +5714,37 @@ fn draw_viewer(
             Line::from(spans)
         })
         .collect();
-    let body_area = Rect::new(inner.x, inner.y, inner.width, body_h as u16);
+    let top = inner.y + u16::from(show_ruler);
+    let body_area = Rect::new(inner.x, top, inner.width, body_h as u16);
     f.render_widget(Paragraph::new(rows), body_area);
+    if show_ruler {
+        // A scale over the text, starting where the text starts: every tenth
+        // column numbered, every fifth marked. Counting characters by eye is
+        // exactly what it is here to stop.
+        let mut scale = String::with_capacity(avail);
+        while scale.chars().count() < avail {
+            let c = scale.chars().count() + 1; // 1-based, as the corner reads
+            scale.push(match c {
+                _ if c % 10 == 0 => char::from_digit((c / 10 % 10) as u32, 10).unwrap_or('|'),
+                _ if c % 5 == 0 => '+',
+                _ => '·',
+            });
+        }
+        let cur = (*col).min(avail.saturating_sub(1));
+        let (before, rest) = scale.split_at(cur.min(scale.len()));
+        let (at, after) = rest.split_at(rest.chars().next().map(|c| c.len_utf8()).unwrap_or(0));
+        let dim = Style::default().fg(Color::Rgb(105, 105, 130));
+        f.render_widget(
+            Paragraph::new(Line::from(vec![
+                Span::styled(" ".repeat(gutter), dim),
+                Span::styled(before.to_string(), dim),
+                // Where the cursor is, in the scale as well as in the text.
+                Span::styled(at.to_string(), Style::default().fg(Color::Black).bg(mode_color)),
+                Span::styled(after.to_string(), dim),
+            ])),
+            Rect::new(inner.x, inner.y, inner.width, 1),
+        );
+    }
     if outline_w > 0 {
         if let Some(sh) = shape.as_deref() {
             draw_outline_column(

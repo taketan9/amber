@@ -752,10 +752,15 @@ impl App {
         Ok(())
     }
 
-    /// Act on the selected entry as Enter would: enter a directory, or open a
-    /// file with its OS default program (or an init.lua `on_open` handler).
-    /// Inside an archive the rows are members, and Enter navigates or views
-    /// them; on an archive file, Enter goes in.
+    /// Act on the selected entry as Enter would: enter a directory, or read a
+    /// file in the viewer. Inside an archive the rows are members, and Enter
+    /// navigates or views them; on an archive file, Enter goes in.
+    ///
+    /// Enter reads rather than launching. Looking at a file is what one does
+    /// with it a hundred times a day and handing it to another program is what
+    /// one does occasionally — and the viewer can be left with Esc, while an
+    /// application that opens by accident has to be found and closed.
+    /// Ctrl+Enter is the launch, and `x` where a terminal keeps Ctrl.
     pub(crate) fn activate_selected(&mut self) -> Result<()> {
         if self.active_pane().map(|p| p.archive_view().is_some()).unwrap_or(false) {
             self.archive_activate();
@@ -771,7 +776,7 @@ impl App {
             Some((false, path)) if cian_core::archive::is_archive(&path) => {
                 self.enter_archive(path, String::new());
             }
-            Some((false, _)) => self.open_externally(),
+            Some((false, _)) => self.look_inside(),
             None => {}
         }
         Ok(())
