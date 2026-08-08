@@ -171,6 +171,41 @@ impl App {
             }
             return Ok(());
         }
+        // `]]` / `[[` step to the next / previous outline entry — vim's section
+        // motion, over the shape the outline column is showing. Doubled, like
+        // vim, so a single bracket stays free.
+        //
+        // Ahead of the edit operators: they clear the pending key on every
+        // keystroke, which would eat the first bracket of the pair.
+        if !ctrl && matches!(key.code, KeyCode::Char(']') | KeyCode::Char('[')) {
+            let c = if key.code == KeyCode::Char(']') { ']' } else { '[' };
+            let mut empty = false;
+            if let Popup::Viewer { pending, shape, line, col, goal, .. } = &mut self.popup {
+                if *pending == Some(c) {
+                    *pending = None;
+                    let items = shape.as_deref().map(|s| s.items.as_slice()).unwrap_or(&[]);
+                    if items.is_empty() {
+                        empty = true;
+                    } else if let Some(t) = if c == ']' {
+                        items.iter().find(|i| i.line > *line).map(|i| i.line)
+                    } else {
+                        items.iter().rev().find(|i| i.line < *line).map(|i| i.line)
+                    } {
+                        *line = t;
+                        *col = 0;
+                        *goal = 0;
+                    }
+                } else {
+                    *pending = Some(c);
+                }
+            }
+            if empty {
+                self.message = Some(tr(self.lang,
+                    "no outline for this kind of file",
+                    "この種類のファイルにはアウトラインがない").into());
+            }
+            return Ok(());
+        }
         // The vim change set (x, dd, o, u, …) works from normal mode on an
         // editable file; a consumed key stops here.
         if self.viewer_edit_operator(key) {
@@ -625,6 +660,26 @@ impl App {
         };
         if let Some(f) = transform {
             self.apply_line_transform(&f, words[0]);
+            return;
+        }
+        // `outline` flips the shape column. Like `ws` it only changes what is
+        // drawn, so it is not an undo step.
+        if cmd == "outline" {
+            if let Popup::Viewer { shape, .. } = &mut self.popup {
+                let Some(sh) = shape.as_deref_mut() else {
+                    self.message = Some(tr(self.lang,
+                        "no outline rules for this kind of file",
+                        "この種類のファイルにはアウトラインの規則がない").into());
+                    return;
+                };
+                sh.shown = !sh.shown;
+                let on = sh.shown;
+                self.message = Some(if on {
+                    tr(self.lang, "outline shown", "アウトラインを表示").into()
+                } else {
+                    tr(self.lang, "outline hidden", "アウトラインを非表示").into()
+                });
+            }
             return;
         }
         // `ws` flips the invisible-character marks. It reads the buffer

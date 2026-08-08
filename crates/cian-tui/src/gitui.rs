@@ -285,6 +285,7 @@ impl App {
             find_input: None,
             sub_input: None,
             block_input: None,
+            shape: None,
             sub_walk: None,
             find_query: None,
             count: None,

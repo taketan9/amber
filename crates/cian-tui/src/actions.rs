@@ -831,6 +831,12 @@ impl App {
                 let hl_lang = (!markdown && editable)
                     .then(|| cian_core::highlight::detect(path))
                     .flatten();
+                // Read the file's shape from the source, not from `view.lines`
+                // — for Markdown those are about to become the rendered
+                // preview, whose headings have had their `#` marks taken off.
+                let items = cian_core::outline::outline(path, &source);
+                let shape = (!items.is_empty())
+                    .then(|| Box::new(crate::Shape { items, shown: true }));
                 self.popup = Popup::Viewer {
                     title: title.to_string(),
                     path: path.to_path_buf(),
@@ -844,6 +850,7 @@ impl App {
                     find_input: None,
                     sub_input: None,
                     block_input: None,
+                    shape,
                     sub_walk: None,
                     find_query: None,
                     count: None,
@@ -904,6 +911,7 @@ impl App {
                     find_input: None,
                     sub_input: None,
                     block_input: None,
+                    shape: None,
                     sub_walk: None,
                     find_query: None,
                     count: None,

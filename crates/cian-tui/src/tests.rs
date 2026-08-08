@@ -553,6 +553,90 @@
         assert_eq!(viewer_lines(&app)[0], "trailing   ");
     }
 
+    /// The outline: on by default when the file type has rules, `]]` and `[[`
+    /// step through it, a click jumps, and `:outline` puts the column away.
+    #[test]
+    fn the_outline_shows_a_files_shape_and_jumps_around_it() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::write(
+            d.path().join("code.rs"),
+            "use std::io;\n\nstruct Config {\n    a: u8,\n}\n\npub fn run() {\n    let x = 1;\n}\n\nfn helper() {}\n",
+        )
+        .unwrap();
+        std::fs::write(d.path().join("plain.txt"), "no structure here\n").unwrap();
+        let p = d.path().to_path_buf();
+        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        let open = |app: &mut App, name: &str| {
+            app.active_pane_mut().unwrap().cursor =
+                app.active_pane().unwrap().entries.iter().position(|e| e.name == name).unwrap();
+            app.handle_key(code(KeyCode::F(3))).unwrap();
+            let _ = render(app, 120, 30);
+        };
+        let shape = |app: &App| match &app.popup {
+            Popup::Viewer { shape, .. } => shape.clone(),
+            other => panic!("not a viewer: {other:?}"),
+        };
+        let at = |app: &App| match &app.popup {
+            Popup::Viewer { line, .. } => *line,
+            other => panic!("not a viewer: {other:?}"),
+        };
+
+        open(&mut app, "code.rs");
+        let sh = shape(&app).expect("Rust has outline rules");
+        assert!(sh.shown, "shown without being asked for");
+        assert_eq!(
+            sh.items.iter().map(|i| i.text.as_str()).collect::<Vec<_>>(),
+            ["struct Config {", "pub fn run() {", "fn helper() {}"],
+        );
+
+        // `]]` steps forward, `[[` back. A single bracket does nothing, so it
+        // stays free for something else.
+        app.handle_key(key(']')).unwrap();
+        assert_eq!(at(&app), 0, "one bracket is not a motion");
+        app.handle_key(key(']')).unwrap();
+        assert_eq!(at(&app), 2, "struct Config");
+        for _ in 0..2 {
+            app.handle_key(key(']')).unwrap();
+        }
+        assert_eq!(at(&app), 6, "pub fn run");
+        for _ in 0..2 {
+            app.handle_key(key('[')).unwrap();
+        }
+        assert_eq!(at(&app), 2, "back to the struct");
+
+        // A click in the outline column lands on the entry drawn there.
+        let ol = app.outline_rect;
+        assert!(ol.width > 0, "the column is drawn at this width");
+        app.handle_mouse(crossterm::event::MouseEvent {
+            kind: crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+            column: ol.x,
+            row: ol.y + 2,
+            modifiers: KeyModifiers::NONE,
+        });
+        assert_eq!(at(&app), 10, "the third entry, fn helper");
+
+        // `:outline` puts it away, and the body gets the width back.
+        let narrow = app.viewer_rect.width;
+        app.handle_key(key(':')).unwrap();
+        if let Popup::Viewer { sub_input, .. } = &mut app.popup {
+            *sub_input = Some("outline".into());
+        }
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+        let _ = render(&mut app, 120, 30);
+        assert!(!shape(&app).unwrap().shown);
+        assert!(app.viewer_rect.width > narrow, "the text got the column back");
+        assert_eq!(app.outline_rect.width, 0);
+
+        // A file type with no rules says so rather than showing an empty box.
+        app.handle_key(code(KeyCode::Esc)).unwrap();
+        open(&mut app, "plain.txt");
+        assert!(shape(&app).is_none());
+        for _ in 0..2 {
+            app.handle_key(key(']')).unwrap();
+        }
+        assert!(app.message.as_deref().unwrap_or("").contains("outline"));
+    }
+
     /// Rectangular editing: Ctrl+V marks a block, then `d` cuts it, and
     /// `I` / `A` / `c` type once and land on every line.
     #[test]

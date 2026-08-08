@@ -415,6 +415,10 @@ enum Popup {
         /// for the same reason as `sub_walk` — every `Popup` pays for the
         /// widest variant.
         block_input: Option<Box<BlockInput>>,
+        /// The file's shape — its headings and definitions — or `None` when
+        /// nothing knows how to read this kind of file. Boxed and kept as one
+        /// field so the whole `Popup` does not widen by a Vec for it.
+        shape: Option<Box<Shape>>,
         /// A confirm-each-one replace in progress (the `c` flag). Boxed: the
         /// hit list would otherwise widen every `Popup` in the program.
         sub_walk: Option<Box<SubWalk>>,
@@ -1245,6 +1249,17 @@ enum DiffMsg {
 
 /// A grep-replace waiting for approval: what it would change, what it could
 /// not read, and where the cursor is in the list.
+/// What the viewer knows about a file's structure.
+#[derive(Debug, Clone)]
+pub(crate) struct Shape {
+    /// The entries, in file order.
+    pub(crate) items: Vec<cian_core::outline::Item>,
+    /// Whether the outline column is showing. On by default whenever there is
+    /// an outline to show: a jump list you have to remember to ask for is a
+    /// jump list nobody uses.
+    pub(crate) shown: bool,
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct ReplacePlan {
     /// One row per changed line, in the order [`cian_core::grepedit::plan`]
@@ -1922,6 +1937,9 @@ pub struct App {
     menu_stack: Vec<Popup>,
     /// The viewer's text body rect, for mapping a mouse click to a line.
     viewer_rect: Rect,
+    /// Where the viewer's outline column was drawn, so a click on an entry can
+    /// jump to it. Zero-width when the column is not showing.
+    outline_rect: Rect,
     /// The viewer's line-number gutter width, so a click maps to a char column.
     viewer_gutter: u16,
     /// Clickable regions of whatever popup is on screen, rebuilt every frame by
@@ -2196,6 +2214,7 @@ impl App {
             menu_rect: Rect::new(0, 0, 0, 0),
             menu_stack: Vec::new(),
             viewer_rect: Rect::new(0, 0, 0, 0),
+            outline_rect: Rect::new(0, 0, 0, 0),
             viewer_gutter: 0,
             popup_zones: Vec::new(),
             pending_elevation: None,
@@ -3450,6 +3469,7 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry("    :expand :unexpand :reindent", None, "leading tabs ↔ spaces, and re-indent to a consistent step", "先頭のTAB⇔空白、インデントを一定幅に整形"),
                 entry("    :ws", None, "show trailing spaces, tabs and ideographic spaces", "行末空白・TAB・全角スペースを表示"),
                 entry("    :lf :crlf", None, "convert line endings (shown in the title)", "改行コードを変換（タイトルに表示）"),
+                entry("  outline", None, "]] / [[ next/prev section, click an entry to jump, :outline hides the column", "]] / [[ 次/前の見出し、項目クリックで移動、:outline で列を隠す"),
                 entry("  Ctrl+V block", None, "rectangle: d cuts it, I/A insert at the left/right edge, c replaces", "矩形選択：d で切り取り、I/A で左端/右端に挿入、c で置換"),
                 entry("  normal mode", None, "x/dd/D/J delete·join, u undo, v+d cut selection (d/u scroll via Ctrl)", "ノーマルモード：x/dd/D/J 削除·結合, u 取消, v+d 選択削除（スクロールは Ctrl+d/u）"),
                 entry(":edit", None, "edit the file in your external editor (E in the viewer)", "外部エディタで編集（ビューア内は E）"),

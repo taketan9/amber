@@ -24,6 +24,7 @@ pub mod inspect;
 pub mod log;
 pub mod office;
 pub mod ops;
+pub mod outline;
 pub mod progress;
 pub mod rename;
 pub mod search;

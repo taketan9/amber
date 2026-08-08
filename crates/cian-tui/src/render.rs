@@ -363,8 +363,18 @@ pub(crate) fn draw(f: &mut Frame, app: &mut App) {
         }
         // And the viewer's text body, so a drag maps to a line — plus the
         // line-number gutter width, so it maps to a char column too.
-        if let Popup::Viewer { view, preview, blame, editing, .. } = &app.popup {
-            app.viewer_rect = viewer_body_rect(area);
+        if let Popup::Viewer { view, preview, blame, editing, shape, .. } = &app.popup {
+            let inner_w = centered_rect(area.width.saturating_sub(4), area.height.saturating_sub(2), area)
+                .inner(Margin { vertical: 1, horizontal: 2 })
+                .width;
+            let ow = shape.as_deref().map_or(0, |s| outline_width(inner_w, s.shown, s.items.len()));
+            app.viewer_rect = viewer_body_rect(area, ow);
+            app.outline_rect = Rect::new(
+                app.viewer_rect.x.saturating_sub(ow),
+                app.viewer_rect.y,
+                ow.saturating_sub(1),
+                app.viewer_rect.height,
+            );
             app.viewer_gutter = if !blame.is_empty() && !*preview && !*editing {
                 BLAME_W as u16
             } else if !*preview && view.kind == cian_core::viewer::ViewKind::Text {
@@ -438,13 +448,30 @@ fn draw_startup_splash(f: &mut Frame, area: Rect, elapsed_ms: u128) {
 
 /// The viewer's text body rect, mirroring its renderer's geometry so a mouse
 /// click maps to the right line.
-fn viewer_body_rect(area: Rect) -> Rect {
+fn viewer_body_rect(area: Rect, outline_w: u16) -> Rect {
     let w = area.width.saturating_sub(4);
     let h = area.height.saturating_sub(2);
     let rect = centered_rect(w, h, area);
     let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
     let body_h = inner.height.saturating_sub(1);
-    Rect::new(inner.x, inner.y, inner.width, body_h)
+    Rect::new(inner.x + outline_w, inner.y, inner.width - outline_w, body_h)
+}
+
+/// How wide the outline column is, or 0 when it is not showing.
+///
+/// Shared by the renderer and the mouse handler: a click has to land on the
+/// entry that was drawn there, and two copies of this arithmetic would drift.
+pub(crate) fn outline_width(inner_w: u16, show: bool, items: usize) -> u16 {
+    if show && items > 0 && inner_w >= 60 { 28u16.min(inner_w / 3) } else { 0 }
+}
+
+/// The first outline entry drawn, given where the cursor is and how many rows
+/// there is room for.
+pub(crate) fn outline_top(items: &[cian_core::outline::Item], line: usize, h: usize) -> usize {
+    match items.iter().rposition(|i| i.line <= line) {
+        Some(i) if h > 0 && i >= h => i + 1 - h,
+        _ => 0,
+    }
 }
 
 /// The rect the context menu occupies, from its anchor and item count. Shared
@@ -4764,6 +4791,59 @@ fn draw_dest_picker(
     );
 }
 
+/// The outline column down the left of the viewer.
+///
+/// The highlighted entry is the one the cursor is *inside*, not the one it is
+/// on: scrolling through a function body should keep saying which function
+/// that is, which is the whole reason to give up the screen width.
+fn draw_outline_column(
+    f: &mut Frame,
+    area: Rect,
+    items: &[cian_core::outline::Item],
+    line: usize,
+) {
+    use cian_core::outline::Kind;
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+    let here = items.iter().rposition(|i| i.line <= line);
+    // Scroll the list so the current entry stays visible in a long file.
+    let h = area.height as usize;
+    let top = outline_top(items, line, h);
+    for (row, (i, item)) in items.iter().enumerate().skip(top).take(h).enumerate() {
+        let y = area.y + row as u16;
+        let cur = here == Some(i);
+        let colour = match item.kind {
+            Kind::Heading => Color::Rgb(150, 190, 250),
+            Kind::Type => Color::Rgb(230, 200, 140),
+            Kind::Function => Color::Rgb(170, 220, 175),
+            Kind::Section => Color::Rgb(190, 175, 220),
+        };
+        let indent = "  ".repeat(item.level.min(4));
+        let text = format!("{indent}{}", item.text);
+        let mut style = Style::default().fg(if cur { colour } else { dim_of(colour) });
+        if cur {
+            style = style.add_modifier(Modifier::BOLD);
+        }
+        f.render_widget(
+            Paragraph::new(Line::from(vec![
+                Span::styled(if cur { "▎" } else { " " }, Style::default().fg(colour)),
+                Span::styled(truncate(&text, area.width.saturating_sub(1) as usize), style),
+            ])),
+            Rect::new(area.x, y, area.width, 1),
+        );
+    }
+}
+
+/// Pull a colour back towards the background, for the entries that are not
+/// the current one — the same hue, so the kind is still readable at a glance.
+fn dim_of(c: Color) -> Color {
+    match c {
+        Color::Rgb(r, g, b) => Color::Rgb(r / 2 + 30, g / 2 + 30, b / 2 + 35),
+        other => other,
+    }
+}
+
 fn draw_viewer(
     f: &mut Frame,
     area: Rect,
@@ -4771,7 +4851,7 @@ fn draw_viewer(
     lang: Lang,
     show_ws: bool,
 ) {
-    let Popup::Viewer { title, view, scroll, line, col, visual, anchor, find_input, find_query, sub_input, sub_walk, block_input, git_lines, markdown, preview, source, md_styles, md_width, editing, dirty, editable, hl, hl_lang, blame, .. } = popup else { return };
+    let Popup::Viewer { title, view, scroll, line, col, visual, anchor, find_input, find_query, sub_input, sub_walk, block_input, git_lines, markdown, preview, source, md_styles, md_width, editing, dirty, editable, hl, hl_lang, blame, shape, .. } = popup else { return };
     let w = area.width.saturating_sub(4);
     let h = area.height.saturating_sub(2);
     let rect = centered_rect(w, h, area);
@@ -4863,8 +4943,14 @@ fn draw_viewer(
         .style(Style::default().bg(surface()))
         .title(format!(" {}{}  —  {} ", title, dirty_mark, head))
         .title_bottom(format!(" {}:{}{} ", *line + 1, *col + 1, mode));
-    let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
+    let whole = rect.inner(Margin { vertical: 1, horizontal: 2 });
     f.render_widget(block, rect);
+
+    // The outline takes a column off the left, but only when there is room
+    // for both it and a usable amount of text — on a narrow terminal the file
+    // is what you came for.
+    let outline_w = shape.as_deref().map_or(0, |s| outline_width(whole.width, s.shown, s.items.len()));
+    let inner = Rect::new(whole.x + outline_w, whole.y, whole.width - outline_w, whole.height);
 
     let body_h = inner.height.saturating_sub(1) as usize;
     let max_scroll = view.lines.len().saturating_sub(body_h);
@@ -5062,6 +5148,16 @@ fn draw_viewer(
         .collect();
     let body_area = Rect::new(inner.x, inner.y, inner.width, body_h as u16);
     f.render_widget(Paragraph::new(rows), body_area);
+    if outline_w > 0 {
+        if let Some(sh) = shape.as_deref() {
+            draw_outline_column(
+                f,
+                Rect::new(whole.x, whole.y, outline_w.saturating_sub(1), body_h as u16),
+                &sh.items,
+                *line,
+            );
+        }
+    }
     let pos = match max_scroll {
         0 => "all".to_string(),
         m => format!("{}%", *scroll * 100 / m),

@@ -28,6 +28,29 @@ impl App {
         // whole lines (line-wise visual), the wheel scrolls, and right-click
         // copies. Handled before the blanket popup guard below.
         if matches!(self.popup, Popup::Viewer { .. }) {
+            // A click in the outline column jumps to that entry — the reason
+            // the column is worth its width.
+            let ol = self.outline_rect;
+            if ol.width > 0
+                && matches!(ev.kind, MouseEventKind::Down(MouseButton::Left))
+                && col >= ol.x
+                && col < ol.x + ol.width
+                && row >= ol.y
+                && row < ol.y + ol.height
+            {
+                if let Popup::Viewer { shape, line, col: c, goal, visual, .. } = &mut self.popup {
+                    let items = shape.as_deref().map(|s| s.items.as_slice()).unwrap_or(&[]);
+                    let top = crate::render::outline_top(items, *line, ol.height as usize);
+                    let idx = top + (row - ol.y) as usize;
+                    if let Some(item) = items.get(idx).cloned() {
+                        *line = item.line;
+                        *c = 0;
+                        *goal = 0;
+                        *visual = None;
+                    }
+                }
+                return;
+            }
             let body = self.viewer_rect;
             let body_h = (body.height as usize).max(1);
             // The clicked column, offset past the line-number gutter, so a click
