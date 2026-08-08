@@ -2162,6 +2162,16 @@ fn draw_preview_panel(f: &mut Frame, area: Rect, app: &mut App) {
     if inner.width == 0 || inner.height == 0 {
         return;
     }
+    // Two rows is the floor for anything readable. Below it, say why rather
+    // than drawing a one-line sliver that looks like a failure.
+    if inner.height < 2 {
+        f.render_widget(
+            Paragraph::new(tr(lang, "(drag the border down for a preview)", "（境界線を下げるとプレビューが出ます）"))
+                .style(Style::default().fg(theme().dim)),
+            inner,
+        );
+        return;
+    }
 
     if let Some(msg) = note {
         f.render_widget(
@@ -2187,6 +2197,7 @@ fn draw_preview_panel(f: &mut Frame, area: Rect, app: &mut App) {
                 return;
             }
         }
+        let mut drew = false;
         if let Some(state) = app.preview.as_mut() {
             if state.thumb.as_ref().map(|(c, r, _)| (*c, *r)) != Some((inner.width, inner.height)) {
                 state.thumb = cian_core::image::thumbnail(&path, inner.width, inner.height)
@@ -2194,6 +2205,7 @@ fn draw_preview_panel(f: &mut Frame, area: Rect, app: &mut App) {
                     .map(|t| (inner.width, inner.height, t));
             }
             if let Some((_, _, t)) = &state.thumb {
+                drew = true;
                 let mut rows: Vec<Line> = Vec::new();
                 for ry in 0..t.rows as usize {
                     let mut spans = Vec::with_capacity(t.cols as usize);
@@ -2212,6 +2224,16 @@ fn draw_preview_panel(f: &mut Frame, area: Rect, app: &mut App) {
                 let pic = Rect::new(left, inner.y, t.cols.min(inner.width), (t.rows).min(inner.height));
                 f.render_widget(Paragraph::new(rows), pic);
             }
+        }
+        // Never leave the panel blank: an empty box reads as "the feature is
+        // broken", when the honest answer is that this image could not be
+        // decoded (or the panel has no room for it).
+        if !drew {
+            f.render_widget(
+                Paragraph::new(tr(lang, "(cannot render this image here)", "（この画像はここに描画できません）"))
+                    .style(Style::default().fg(theme().dim)),
+                inner,
+            );
         }
         return;
     }
@@ -2243,6 +2265,12 @@ fn draw_preview_panel(f: &mut Frame, area: Rect, app: &mut App) {
                         Style::default().fg(body_fg),
                     ))),
                 }
+            }
+            if shown.is_empty() {
+                shown.push(Line::from(Span::styled(
+                    tr(lang, "(empty file)", "（空のファイル）"),
+                    Style::default().fg(theme().dim),
+                )));
             }
             f.render_widget(Paragraph::new(shown), inner);
         }
