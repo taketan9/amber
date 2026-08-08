@@ -1285,6 +1285,16 @@ enum DiffMsg {
 
 /// A grep-replace waiting for approval: what it would change, what it could
 /// not read, and where the cursor is in the list.
+/// A live comparison between the two halves of a split viewer.
+#[derive(Debug, Clone)]
+pub(crate) struct ViewerDiff {
+    /// One mark per line of the focused half, and of the other.
+    pub(crate) mine: Vec<cian_core::diff::Mark>,
+    pub(crate) theirs: Vec<cian_core::diff::Mark>,
+    /// What the two buffers hashed to when this was worked out.
+    pub(crate) fp: (u64, u64),
+}
+
 /// What the viewer knows about a file's structure: the outline column and the
 /// folds, which are the same information read two ways.
 #[derive(Debug, Clone)]
@@ -1365,6 +1375,21 @@ impl Shape {
             })
             .min()
     }
+}
+
+/// A real hash of the buffer, for when "probably unchanged" is not good
+/// enough.
+///
+/// [`fingerprint`] counts lines and bytes, which is fast and blind to any edit
+/// that keeps both — `old` → `new` being exactly that. A stale outline costs a
+/// wrong heading; a stale comparison says two files agree when they do not, so
+/// this one reads the text. Only used while a comparison is running, where the
+/// diff itself costs far more than the hash.
+pub(crate) fn content_key(lines: &[String]) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    lines.hash(&mut h);
+    h.finish()
 }
 
 /// Enough of a buffer to notice it changed, without hashing it.
@@ -2103,6 +2128,11 @@ pub struct App {
     /// screen, so choosing "ask the AI about this" does not throw away the file
     /// (and its unsaved edits) that the question was about.
     viewer_return: Option<Box<Popup>>,
+    /// `=` in a split: the two halves compared, one mark per line of each.
+    /// Recomputed whenever either buffer moves on, so it stays true while both
+    /// are being edited — which is the whole point of doing it here rather
+    /// than in a diff window.
+    viewer_diff: Option<Box<ViewerDiff>>,
     /// What was last yanked in the viewer, kept inside cian as well as on the
     /// system clipboard. A machine reached over SSH often has no clipboard
     /// service at all, and copy-and-paste within one file should not depend on
@@ -2407,6 +2437,7 @@ impl App {
             viewer_split_lr: true,
             viewer_split_focus: false,
             viewer_return: None,
+            viewer_diff: None,
             yank: None,
             key_probe: false,
             message_fresh: false,
@@ -3671,6 +3702,7 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry("    :ws", None, "show trailing spaces, tabs and ideographic spaces", "行末空白・TAB・全角スペースを表示"),
                 entry("    :lf :crlf", None, "convert line endings (shown in the title)", "改行コードを変換（タイトルに表示）"),
                 entry("  Shift+F8/F9/F10", None, "split left-right / top-bottom / close it — Shift+H,L or a click crosses over", "左右分割 / 上下分割 / 解除 — Shift+H,L かクリックで行き来"),
+                entry("  = in a split", None, "compare the two halves in place — ]c / [c step, both stay editable", "分割中の = で両側を比較 — ]c / [c で移動、どちらも編集可能なまま"),
                 entry("  ? in viewer", None, "the keys this window has, rather than all of cian's", "ビューアで ?：この画面で使えるキーだけを表示"),
                 entry("  right-click / S-Enter", None, "the viewer's menu: ask the AI about the selection, copy, reveal, theme", "ビューアのメニュー：選択範囲をAIに聞く・コピー・場所を開く・テーマ"),
                 entry("  p / P", None, "paste after / before the cursor — whole lines when whole lines were copied", "カーソルの後/前に貼り付け — 行単位でコピーしたものは行単位で"),

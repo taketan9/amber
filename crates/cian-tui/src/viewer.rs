@@ -178,6 +178,23 @@ impl App {
             }
             return Ok(());
         }
+        // `]c` / `[c`: the bracket armed the pair, and `c` completes it — the
+        // next or previous difference, as in vim's diff mode. Only when a
+        // comparison is running; otherwise `c` is the change operator.
+        if !ctrl && !alt && key.code == KeyCode::Char('c') && self.viewer_diff.is_some() {
+            let armed = if let Popup::Viewer { pending, .. } = &self.popup {
+                *pending
+            } else {
+                None
+            };
+            if matches!(armed, Some(']') | Some('[')) {
+                if let Popup::Viewer { pending, .. } = &mut self.popup {
+                    *pending = None;
+                }
+                self.viewer_diff_step(armed == Some(']'));
+                return Ok(());
+            }
+        }
         // `z` folds: `za` toggles the one at the cursor, `zR` opens every fold,
         // `zM` closes them all. Same prefix trick as the brackets, and for the
         // same reason it has to come before the edit operators — which
@@ -372,6 +389,13 @@ impl App {
         // terminal shows the readable flow; this is the crisp picture).
         if !ctrl && key.code == KeyCode::Char('m') {
             self.open_mermaid_in_browser();
+            return Ok(());
+        }
+        // `=` compares the two halves, in place. Both stay editable and the
+        // marks follow every edit — the difference between reading a diff and
+        // working inside one.
+        if !ctrl && !alt && key.code == KeyCode::Char('=') {
+            self.toggle_viewer_diff();
             return Ok(());
         }
         // `?` here answers "what can I do in this window", not "what can cian
@@ -772,6 +796,77 @@ impl App {
         let mut all = self.viewer_all_tabs();
         self.viewer_make_active(&mut all, next);
         self.viewer_note_tab();
+    }
+
+    /// `=` in a split: mark what differs between the two halves, or stop.
+    pub(crate) fn toggle_viewer_diff(&mut self) {
+        if self.viewer_diff.take().is_some() {
+            self.message = Some(tr(self.lang, "comparison off", "差分表示を解除").into());
+            return;
+        }
+        if self.viewer_split.is_none() {
+            self.message = Some(tr(self.lang,
+                "split first — Shift+F8 puts two files side by side",
+                "先に分割してください — Shift+F8 で2つ並びます").into());
+            return;
+        }
+        self.recompute_viewer_diff();
+        let n = self
+            .viewer_diff
+            .as_deref()
+            .map(|d| d.mine.iter().filter(|m| **m != cian_core::diff::Mark::Same).count())
+            .unwrap_or(0);
+        self.message = Some(if self.lang == Lang::Ja {
+            format!("差分 {n} 行（]c / [c で移動、= で解除）")
+        } else {
+            format!("{n} line(s) differ — ]c / [c to step, = to stop")
+        });
+    }
+
+    /// Work the marks out again. Cheap enough to do whenever either buffer has
+    /// moved on, which is what keeps the comparison honest while editing.
+    pub(crate) fn recompute_viewer_diff(&mut self) {
+        let lines_of = |p: &Popup| match p {
+            Popup::Viewer { view, .. } => Some(view.lines.clone()),
+            _ => None,
+        };
+        let (Some(a), Some(b)) = (
+            lines_of(&self.popup),
+            self.viewer_split.as_deref().and_then(lines_of),
+        ) else {
+            self.viewer_diff = None;
+            return;
+        };
+        let fp = (crate::content_key(&a), crate::content_key(&b));
+        let (mine, theirs) = cian_core::diff::marks(&a, &b);
+        self.viewer_diff = Some(Box::new(crate::ViewerDiff { mine, theirs, fp }));
+    }
+
+    /// `]c` / `[c`: the next or previous line that differs, in this half.
+    pub(crate) fn viewer_diff_step(&mut self, forward: bool) {
+        let Some(d) = self.viewer_diff.as_deref() else {
+            self.message = Some(tr(self.lang, "no comparison — = starts one", "差分表示していません — = で開始").into());
+            return;
+        };
+        let marks = d.mine.clone();
+        let mut moved = None;
+        if let Popup::Viewer { line, col, goal, .. } = &mut self.popup {
+            let here = *line;
+            let found = if forward {
+                (here + 1..marks.len()).find(|i| marks[*i] != cian_core::diff::Mark::Same)
+            } else {
+                (0..here).rev().find(|i| marks[*i] != cian_core::diff::Mark::Same)
+            };
+            if let Some(t) = found {
+                *line = t;
+                *col = 0;
+                *goal = 0;
+                moved = Some(t);
+            }
+        }
+        if moved.is_none() {
+            self.message = Some(tr(self.lang, "no more differences that way", "その方向に差分はありません").into());
+        }
     }
 
     /// Show the `i`-th open file — the tab strip's click.

@@ -471,11 +471,11 @@ pub(crate) fn draw(f: &mut Frame, app: &mut App) {
                     (first, second)
                 };
                 let mut other = other;
-                draw_viewer(f, theirs, &mut other, lang, show_ws, None, (0, &[]));
-                draw_viewer(f, mine, &mut behind, lang, show_ws, None, (0, &[]));
+                draw_viewer(f, theirs, &mut other, lang, show_ws, None, (0, &[], &[]));
+                draw_viewer(f, mine, &mut behind, lang, show_ws, None, (0, &[], &[]));
                 app.viewer_split = Some(other);
             } else {
-                draw_viewer(f, area, &mut behind, lang, show_ws, None, (0, &[]));
+                draw_viewer(f, area, &mut behind, lang, show_ws, None, (0, &[], &[]));
             }
             app.viewer_return = Some(behind);
         }
@@ -502,7 +502,29 @@ pub(crate) fn draw(f: &mut Frame, app: &mut App) {
             // not on can cross to it.
             app.viewer_half_rects = [mine, theirs];
             let mut other = other;
-            draw_viewer(f, theirs, &mut other, lang, show_ws, None, (0, &[]));
+            // Either buffer moved on: work the marks out again, so the
+            // comparison keeps telling the truth while both are edited. This
+            // is the whole reason for doing it in place rather than in a
+            // window that would have gone stale the moment you typed.
+            if app.viewer_diff.is_some() {
+                let now = {
+                    let f = |p: &Popup| match p {
+                        Popup::Viewer { view, .. } => crate::content_key(&view.lines),
+                        _ => 0,
+                    };
+                    (f(&app.popup), f(&other))
+                };
+                if app.viewer_diff.as_deref().is_some_and(|d| d.fp != now) {
+                    app.viewer_split = Some(other);
+                    app.recompute_viewer_diff();
+                    other = app.viewer_split.take().expect("put back just above");
+                }
+            }
+            let (dm, dt) = match app.viewer_diff.as_deref() {
+                Some(d) => (d.mine.as_slice(), d.theirs.as_slice()),
+                None => (&[][..], &[][..]),
+            };
+            draw_viewer(f, theirs, &mut other, lang, show_ws, None, (0, &[], dt));
             f.render_widget(
                 Block::default().style(Style::default().fg(Color::Rgb(90, 90, 105))),
                 theirs,
@@ -514,7 +536,7 @@ pub(crate) fn draw(f: &mut Frame, app: &mut App) {
                 lang,
                 show_ws,
                 msg_for_viewer.as_deref(),
-                (app.viewer_tab_idx, &names),
+                (app.viewer_tab_idx, &names, dm),
             );
             app.viewer_split = Some(other);
             app.popup_zones.clear();
@@ -3604,7 +3626,7 @@ fn draw_popup(
         Popup::History { .. } => draw_history(f, area, popup, zones, lang),
         Popup::DestPicker { .. } => draw_dest_picker(f, area, popup, dests, zones, lang),
         Popup::Viewer { .. } => {
-            *tab_rects = draw_viewer(f, area, popup, lang, show_ws, msg.as_deref(), (tab_at, tab_names));
+            *tab_rects = draw_viewer(f, area, popup, lang, show_ws, msg.as_deref(), (tab_at, tab_names, &[]));
         }
         Popup::DirCompare { .. } => draw_dir_compare(f, area, popup, zones, lang),
         Popup::Diff { .. } => draw_diff(f, area, popup, lang),
@@ -5171,10 +5193,11 @@ fn draw_viewer(
     lang: Lang,
     show_ws: bool,
     msg: Option<&str>,
-    // Which of the viewer's open files this is, and what they are all called.
-    tab: (usize, &[String]),
+    // Which of the viewer's open files this is, what they are all called, and
+    // — when a comparison is running — what each line of *this* half is.
+    tab: (usize, &[String], &[cian_core::diff::Mark]),
 ) -> Vec<(Rect, usize)> {
-    let (tab_at, tab_names) = tab;
+    let (tab_at, tab_names, diff_marks) = tab;
     let tabs = tab_names.len();
     let mut tab_rects: Vec<(Rect, usize)> = Vec::new();
     let Popup::Viewer { title, view, scroll, line, col, visual, anchor, find_input, find_query, sub_input, sub_walk, block_input, git_lines, markdown, preview, source, md_styles, md_map, md_width, editing, dirty, editable, hl, hl_lang, blame, shape, path, .. } = popup else { return tab_rects };
@@ -5594,11 +5617,18 @@ fn draw_viewer(
                 }
                 // The 1-column separator (previously a plain space) is the
                 // change bar.
-                let (bar, bar_c) = match git_lines.get(&i) {
-                    Some(cian_core::git::LineChange::Added) => ("▏", Color::Rgb(130, 205, 150)),
-                    Some(cian_core::git::LineChange::Modified) => ("▏", Color::Rgb(240, 210, 120)),
-                    Some(cian_core::git::LineChange::DeletedBefore) => ("▁", Color::Rgb(230, 120, 120)),
-                    None => (" ", Color::Reset),
+                // A live comparison takes this column while it is running: it
+                // is the more urgent of the two answers, and they are both
+                // "how does this line differ from something".
+                let (bar, bar_c) = match diff_marks.get(i) {
+                    Some(cian_core::diff::Mark::Changed) => ("▌", Color::Rgb(240, 210, 120)),
+                    Some(cian_core::diff::Mark::Only) => ("▌", Color::Rgb(130, 205, 150)),
+                    _ => match git_lines.get(&i) {
+                        Some(cian_core::git::LineChange::Added) => ("▏", Color::Rgb(130, 205, 150)),
+                        Some(cian_core::git::LineChange::Modified) => ("▏", Color::Rgb(240, 210, 120)),
+                        Some(cian_core::git::LineChange::DeletedBefore) => ("▁", Color::Rgb(230, 120, 120)),
+                        None => (" ", Color::Reset),
+                    },
                 };
                 spans.push(Span::styled(bar.to_string(), Style::default().fg(bar_c)));
             }

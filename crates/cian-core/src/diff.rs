@@ -46,6 +46,50 @@ impl Row {
     }
 }
 
+/// What a line is, as far as the other side is concerned. Per line of one
+/// file, for marking it up in place rather than in a separate window.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Mark {
+    /// The other side has this line too, unchanged.
+    Same,
+    /// The other side has a line here, and it differs.
+    Changed,
+    /// The other side has nothing here.
+    Only,
+}
+
+/// One [`Mark`] per line of each side, for showing a comparison inside the two
+/// files rather than beside them.
+///
+/// Deliberately not the side-by-side rendering: that one inserts blank rows to
+/// keep the two aligned, which is right for reading and wrong for editing —
+/// the blanks are not in the file, and anything typed near one has to be
+/// unpicked from them. Marking each real line leaves both files exactly as
+/// they are.
+pub fn marks(a: &[String], b: &[String]) -> (Vec<Mark>, Vec<Mark>) {
+    let d = diff_lines(a, b);
+    let mut left = vec![Mark::Same; a.len()];
+    let mut right = vec![Mark::Same; b.len()];
+    let set = |v: &mut Vec<Mark>, no: usize, m: Mark| {
+        // `Line::no` is 1-based, as an editor shows it.
+        if let Some(slot) = no.checked_sub(1).and_then(|i| v.get_mut(i)) {
+            *slot = m;
+        }
+    };
+    for row in &d.rows {
+        match row {
+            Row::Same { .. } | Row::Skipped { .. } => {}
+            Row::Changed { left: l, right: r } => {
+                set(&mut left, l.no, Mark::Changed);
+                set(&mut right, r.no, Mark::Changed);
+            }
+            Row::Removed { left: l } => set(&mut left, l.no, Mark::Only),
+            Row::Added { right: r } => set(&mut right, r.no, Mark::Only),
+        }
+    }
+    (left, right)
+}
+
 /// The comparison of two files.
 #[derive(Debug, Clone)]
 pub struct Diff {
@@ -547,6 +591,35 @@ pub fn to_markdown(diff: &Diff, left: &str, right: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    fn v(s: &[&str]) -> Vec<String> {
+        s.iter().map(|x| x.to_string()).collect()
+    }
+
+    /// One mark per real line, on both sides, with nothing inserted to keep
+    /// them aligned — the difference between reading a comparison and editing
+    /// inside one.
+    #[test]
+    fn marks_land_on_the_lines_they_describe() {
+        let a = v(&["same", "old", "gone", "tail"]);
+        let b = v(&["same", "new", "tail", "extra"]);
+        let (l, r) = marks(&a, &b);
+        assert_eq!(l.len(), a.len(), "one per line of the left, and no more");
+        assert_eq!(r.len(), b.len(), "likewise the right");
+        assert_eq!(l[0], Mark::Same);
+        assert_eq!(l[1], Mark::Changed, "old → new");
+        assert_eq!(r[1], Mark::Changed);
+        assert_eq!(l[2], Mark::Only, "`gone` is not on the right");
+        assert_eq!(l[3], Mark::Same, "`tail` survives the gap");
+        assert_eq!(r[3], Mark::Only, "`extra` is not on the left");
+
+        // Identical files are all Same; an empty side makes every line Only.
+        let (l, r) = marks(&a, &a);
+        assert!(l.iter().chain(r.iter()).all(|m| *m == Mark::Same));
+        let (l, r) = marks(&a, &[]);
+        assert!(l.iter().all(|m| *m == Mark::Only));
+        assert!(r.is_empty());
+    }
+
     use super::*;
 
     fn lines(s: &[&str]) -> Vec<String> {

@@ -893,6 +893,69 @@
         );
     }
 
+    /// `=` compares the two halves in place: the marks appear on the real
+    /// lines, both files stay editable, and the comparison follows the edit.
+    #[test]
+    fn a_split_can_be_compared_while_both_halves_stay_editable() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::write(d.path().join("a.txt"), "same\nold\ngone\ntail\n").unwrap();
+        std::fs::write(d.path().join("b.txt"), "same\nnew\ntail\n").unwrap();
+        let p = d.path().to_path_buf();
+        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        for n in ["a.txt", "b.txt"] {
+            let path = app.active_pane().unwrap().entries.iter().find(|e| e.name == n).unwrap().path.clone();
+            app.active_pane_mut().unwrap().marks.insert(path);
+        }
+        app.handle_key(code(KeyCode::F(3))).unwrap();
+        let _ = render(&mut app, 160, 30);
+
+        // Without a split it says what to do rather than doing nothing.
+        app.handle_key(key('=')).unwrap();
+        assert!(app.viewer_diff.is_none());
+        assert!(app.message.as_deref().unwrap_or("").contains("F8"));
+
+        app.handle_key(KeyEvent::new(KeyCode::F(8), KeyModifiers::SHIFT)).unwrap();
+        let _ = render(&mut app, 160, 30);
+        app.handle_key(key('=')).unwrap();
+        let marks = |app: &App| app.viewer_diff.as_deref().unwrap().mine.clone();
+        use cian_core::diff::Mark;
+        assert_eq!(
+            marks(&app),
+            vec![Mark::Same, Mark::Changed, Mark::Only, Mark::Same],
+            "one mark per real line — nothing inserted to line the two up",
+        );
+
+        // `]c` steps to the next difference; `[c` back.
+        let at = |app: &App| match &app.popup {
+            Popup::Viewer { line, .. } => *line,
+            other => panic!("not a viewer: {other:?}"),
+        };
+        app.handle_key(key(']')).unwrap();
+        app.handle_key(key('c')).unwrap();
+        assert_eq!(at(&app), 1, "the changed line");
+        app.handle_key(key(']')).unwrap();
+        app.handle_key(key('c')).unwrap();
+        assert_eq!(at(&app), 2, "the one only this side has");
+        app.handle_key(key('[')).unwrap();
+        app.handle_key(key('c')).unwrap();
+        assert_eq!(at(&app), 1, "and back");
+
+        // Editing one half is allowed, and the comparison follows it: making
+        // the changed line match makes the difference go away.
+        app.handle_key(key(':')).unwrap();
+        if let Popup::Viewer { sub_input, .. } = &mut app.popup {
+            *sub_input = Some("s/old/new/".into());
+        }
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+        assert_eq!(viewer_lines(&app), ["same", "new", "gone", "tail"], "edited in place");
+        let _ = render(&mut app, 160, 30);
+        assert_eq!(marks(&app)[1], Mark::Same, "the edit closed the difference");
+
+        // `=` again stops.
+        app.handle_key(key('=')).unwrap();
+        assert!(app.viewer_diff.is_none());
+    }
+
     /// `?` in the viewer answers "what can I do here", not "what can cian do".
     #[test]
     fn question_mark_in_the_viewer_lists_only_the_viewer() {
