@@ -19,10 +19,28 @@ use anyhow::{Context, Result};
 /// whole, small enough that a huge one is still instant.
 pub const VIEW_LIMIT: u64 = 4 * 1024 * 1024;
 
-/// How wide a tab is drawn. One number, so the viewer's rendering, the mouse's
-/// idea of which character was clicked and `:expand`'s default cannot disagree
+/// How wide a tab is drawn, as a process-wide setting.
+///
+/// One number, so the viewer's rendering, the mouse's idea of which character
+/// was clicked, the block selection and `:expand`'s default cannot disagree
 /// about where a tab stop is.
-pub const TAB_W: usize = 4;
+///
+/// Worth changing rather than assuming: a tab-separated file lines up only
+/// when every field is narrower than the stop. With stops every four, `col1`
+/// fills one exactly and its tab moves on to the next — so the column after
+/// it starts at eight, while a two-column `あ` in the same place starts at
+/// four. That is what tabs do, and eight is the width at which such a file
+/// reads as a table.
+static TAB_WIDTH: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(4);
+
+pub fn tab_width() -> usize {
+    TAB_WIDTH.load(std::sync::atomic::Ordering::Relaxed).max(1)
+}
+
+/// Set from `cian.set_option("tab_width", n)` at startup and on reload.
+pub fn set_tab_width(n: usize) {
+    TAB_WIDTH.store(n.clamp(1, 16), std::sync::atomic::Ordering::Relaxed);
+}
 
 /// How much of the prefix is inspected when deciding text vs binary.
 const SNIFF: usize = 8000;

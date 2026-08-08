@@ -2424,7 +2424,7 @@ impl App {
             nav_rects: Vec::new(),
             gfx_picker: None,
             img_proto: None,
-            show_ws: false,
+            show_ws: true,
             preview_on: config.options.preview.unwrap_or(true),
             preview: None,
             preview_gfx: None,
@@ -3611,6 +3611,8 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry("    :expand :unexpand :reindent", None, "leading tabs ↔ spaces, and re-indent to a consistent step", "先頭のTAB⇔空白、インデントを一定幅に整形"),
                 entry("    :ws", None, "show trailing spaces, tabs and ideographic spaces", "行末空白・TAB・全角スペースを表示"),
                 entry("    :lf :crlf", None, "convert line endings (shown in the title)", "改行コードを変換（タイトルに表示）"),
+                entry("  :ws", None, "the invisible characters — tab, space, ideographic space, line ending. On by default", "見えない文字の表示 — TAB・半角/全角空白・改行。既定でオン"),
+                entry("  :expand all", None, "convert every tab, not only the indent (destroys TSV separators — hence by name)", "行中のタブも全部変換（TSV の区切りも消えるので、明示的に指定）"),
                 entry("  outline", None, "]] / [[ next/prev section, click an entry to jump, :outline hides the column", "]] / [[ 次/前の見出し、項目クリックで移動、:outline で列を隠す"),
                 entry("  folding", None, "Space or za fold/unfold here, zA all (either way), or click the ▾ in the gutter", "Space か za で折りたたみ切替、zA で全部（開いていれば閉じ、閉じていれば開く）、余白の ▾ クリックでも可"),
                 entry("  :w :wq :q :q!", None, "save / save and close / close / close discarding — when Ctrl+S is taken by the terminal", "保存 / 保存して閉じる / 閉じる / 破棄して閉じる — Ctrl+S が端末に取られている場合に"),
@@ -3981,6 +3983,10 @@ pub fn run(left: Option<PathBuf>, right: Option<PathBuf>, startup: StartupMacro)
         .or_else(|| session.as_ref().and_then(|s| s.right_dir()))
         .unwrap_or(fallback);
 
+    // How wide a tab reaches, before anything measures one.
+    if let Some(w) = config.options.tab_width {
+        cian_core::viewer::set_tab_width(w);
+    }
     // Resolve and install the color theme before any drawing happens.
     let theme_errors = theme::install(
         &config.theme,

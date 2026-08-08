@@ -539,9 +539,23 @@
                 .collect::<Vec<_>>()
                 .join("\n")
         };
-        let before = body(&mut app);
-        assert!(!before.contains('·') && !before.contains('□'), "off by default: {before}");
+        // On by default now: the invisible characters are the ones that cause
+        // the trouble, so they are shown until asked not to be.
+        let after = body(&mut app);
+        assert!(after.contains('·'), "spaces are marked: {after}");
+        assert!(after.contains('□'), "and the ideographic space: {after}");
+        assert!(after.contains('↓'), "and the line ending: {after}");
 
+        // `:ws` turns them off.
+        app.handle_key(key(':')).unwrap();
+        if let Popup::Viewer { sub_input, .. } = &mut app.popup {
+            *sub_input = Some("ws".into());
+        }
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+        let off = body(&mut app);
+        assert!(!off.contains('·') && !off.contains('□'), "off on request: {off}");
+
+        // …and back on.
         app.handle_key(key(':')).unwrap();
         if let Popup::Viewer { sub_input, .. } = &mut app.popup {
             *sub_input = Some("ws".into());
@@ -661,9 +675,14 @@
         open(&mut app, "Makefile");
         assert_eq!(viewer_lines(&app)[1], "\techo one", "the buffer holds the real tab");
         // A tab is still drawn four columns wide — the fix is about what is
-        // written, not about how it looks.
+        // written, not about how it looks. With the marks on (the default) the
+        // first of those columns says what it is.
         let screen = render(&mut app, 100, 30).join("\n");
-        assert!(screen.contains("    echo one"), "drawn expanded");
+        assert!(screen.contains("→   echo·one↓"), "tab, space and line ending all marked");
+        app.show_ws = false;
+        let plain = render(&mut app, 100, 30).join("\n");
+        assert!(plain.contains("    echo one"), "and plain with the marks off");
+        app.show_ws = true;
 
         // A tab is one buffer character but four drawn columns, so a click has
         // to be walked back through the same expansion: anywhere in the tab is
@@ -1072,8 +1091,10 @@
         app.active_pane_mut().unwrap().cursor =
             app.active_pane().unwrap().entries.iter().position(|e| e.name == "doc.md").unwrap();
         app.handle_key(code(KeyCode::F(3))).unwrap();
-        // Markdown opens in preview; folding belongs to the source.
+        // Markdown opens in preview; folding belongs to the source. The
+        // whitespace marks are not what this is about.
         app.handle_key(key('p')).unwrap();
+        app.show_ws = false;
         let _ = render(&mut app, 120, 30);
 
         let folds = |app: &App| match &app.popup {

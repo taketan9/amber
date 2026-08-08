@@ -134,6 +134,35 @@ pub fn expand_tabs(lines: &[String], width: usize) -> Vec<String> {
         .collect()
 }
 
+/// Every tab in the line, not only the leading ones, expanded to the next
+/// stop.
+///
+/// Kept apart from [`expand_tabs`] on purpose. In a tab-separated file the
+/// tabs in the middle of a line are the data — they are what separates the
+/// fields — so converting them silently as part of "fix the indentation"
+/// would quietly turn a table into prose. This one has to be asked for.
+pub fn expand_all_tabs(lines: &[String], width: usize) -> Vec<String> {
+    let width = width.max(1);
+    lines
+        .iter()
+        .map(|l| {
+            let mut out = String::with_capacity(l.len());
+            let mut at = 0usize;
+            for c in l.chars() {
+                if c == '\t' {
+                    let n = width - (at % width);
+                    out.push_str(&" ".repeat(n));
+                    at += n;
+                } else {
+                    out.push(c);
+                    at += unicode_width::UnicodeWidthChar::width(c).unwrap_or(0);
+                }
+            }
+            out
+        })
+        .collect()
+}
+
 /// Leading runs of `width` spaces → tabs. The inverse of [`expand_tabs`], with
 /// the same "leading only" rule and for the same reason.
 pub fn unexpand_tabs(lines: &[String], width: usize) -> Vec<String> {
@@ -322,6 +351,20 @@ mod tests {
         assert_eq!(to_halfwidth("すでに正しい text"), "すでに正しい text");
     }
 
+    /// `expand all` reaches the separators an indent-only expand protects,
+    /// and lands each one on its stop rather than emitting a fixed run.
+    #[test]
+    fn expand_all_converts_the_separators_too() {
+        let src = v(&["col1\tcol2\tcol3", "あ\tい\tう"]);
+        assert_eq!(
+            expand_all_tabs(&src, 8),
+            v(&["col1    col2    col3", "あ      い      う"]),
+            "each field starts on a stop, whatever came before it",
+        );
+        // The indent-only form leaves them alone, which is why both exist.
+        assert_eq!(expand_tabs(&src, 8), src);
+    }
+
     #[test]
     fn tab_conversion_touches_only_the_indent() {
         // A tab inside the line is a column separator in data; expanding it
@@ -383,7 +426,8 @@ pub struct Block {
 /// attached to the character it belongs to.
 fn char_cols(c: char, at: usize) -> usize {
     if c == '\t' {
-        return crate::viewer::TAB_W - (at % crate::viewer::TAB_W);
+        let w = crate::viewer::tab_width();
+        return w - (at % w);
     }
     unicode_width::UnicodeWidthChar::width(c).unwrap_or(0)
 }

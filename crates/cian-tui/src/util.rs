@@ -327,7 +327,7 @@ pub(crate) fn plain(s: &str) -> String {
         match c {
             '\t' => {
                 let at = width(&out);
-                let stop = cian_core::viewer::TAB_W;
+                let stop = cian_core::viewer::tab_width();
                 out.push_str(&" ".repeat(stop - (at % stop)));
             }
             // Any other control character would move the cursor or change the

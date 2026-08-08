@@ -105,7 +105,7 @@ impl App {
                 let mut drawn = 0usize;
                 for (j, ch) in text.chars().enumerate() {
                     let w = if ch == '\t' {
-                        cian_core::viewer::TAB_W - (drawn % cian_core::viewer::TAB_W)
+                        cian_core::viewer::tab_width() - (drawn % cian_core::viewer::tab_width())
                     } else {
                         1
                     };

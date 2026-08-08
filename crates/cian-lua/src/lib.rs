@@ -74,6 +74,10 @@ pub struct Options {
     /// Use Nerd Font glyphs (file-type icons, the branch/disk symbols). Default
     /// true; set false on a terminal without a Nerd Font so nothing mojibakes.
     pub nerd_fonts: Option<bool>,
+    /// How many columns a tab reaches. Defaults to 4. Worth raising to 8 for
+    /// tab-separated data, which lines up only when every field is narrower
+    /// than the stop.
+    pub tab_width: Option<usize>,
     /// Directory both panes open in when cian is started with no path
     /// argument. Unset falls back to the Desktop, then the working directory.
     pub home: Option<String>,
@@ -707,6 +711,12 @@ fn install_api(lua: &Lua, builder: &Rc<RefCell<Builder>>) -> mlua::Result<()> {
                         Err(_) => bm
                             .errors
                             .push("set_option: show_hidden expects a boolean".into()),
+                    },
+                    "tab_width" => match usize::from_lua(val, lua) {
+                        Ok(v) => bm.options.tab_width = Some(v),
+                        Err(_) => bm
+                            .errors
+                            .push("set_option: tab_width expects a number".into()),
                     },
                     "nerd_fonts" => match bool::from_lua(val, lua) {
                         Ok(v) => bm.options.nerd_fonts = Some(v),

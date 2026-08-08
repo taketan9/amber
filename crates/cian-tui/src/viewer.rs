@@ -787,12 +787,23 @@ impl App {
             Some("zen") => Some(Box::new(|l: &[String]| {
                 l.iter().map(|s| tx::to_fullwidth(s)).collect()
             })),
+            // `expand` converts the indent only, which is what protects the
+            // tabs inside a tab-separated file. `expand all` is the other
+            // thing people want, and has to be asked for by name because it
+            // destroys those separators.
             Some("expand") => {
-                let w = arg_usize(1, 4);
-                Some(Box::new(move |l: &[String]| tx::expand_tabs(l, w)))
+                let all = words.get(1) == Some(&"all");
+                let w = arg_usize(if all { 2 } else { 1 }, cian_core::viewer::tab_width());
+                Some(Box::new(move |l: &[String]| {
+                    if all {
+                        tx::expand_all_tabs(l, w)
+                    } else {
+                        tx::expand_tabs(l, w)
+                    }
+                }))
             }
             Some("unexpand") => {
-                let w = arg_usize(1, 4);
+                let w = arg_usize(1, cian_core::viewer::tab_width());
                 Some(Box::new(move |l: &[String]| tx::unexpand_tabs(l, w)))
             }
             Some("reindent") => {
@@ -948,9 +959,11 @@ impl App {
         };
         let mut before = 0usize;
         let mut after = 0usize;
+        let mut untouched = false;
         if let Popup::Viewer { view, undo, dirty, hl, line, visual, .. } = &mut self.popup {
             push_viewer_undo(undo, &view.lines, *line, 0);
             before = view.lines.len();
+            let was = view.lines.clone();
             view.lines = match range {
                 Some((lo, hi)) => {
                     let hi = hi.min(view.lines.len().saturating_sub(1));
@@ -962,6 +975,10 @@ impl App {
                 None => f(&view.lines),
             };
             after = view.lines.len();
+            // A verb that finds nothing to do looks exactly like a verb that
+            // did not run — `:expand` on a file whose tabs are all mid-line
+            // being the case that prompted this.
+            untouched = was == view.lines;
             *line = (*line).min(after.saturating_sub(1));
             *visual = None;
             *dirty = true;
@@ -971,7 +988,13 @@ impl App {
             Some(_) => tr(self.lang, "selection", "選択範囲"),
             None => tr(self.lang, "whole file", "ファイル全体"),
         };
-        self.message = Some(if before == after {
+        self.message = Some(if untouched {
+            if self.lang == Lang::Ja {
+                format!("{verb}: {scope} — 変わるものがなかった")
+            } else {
+                format!("{verb}: {scope} — nothing to change")
+            }
+        } else if before == after {
             format!("{verb}: {scope}")
         } else if self.lang == Lang::Ja {
             format!("{verb}: {scope} — {} 行 → {} 行", before, after)

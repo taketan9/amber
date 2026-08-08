@@ -2114,6 +2114,9 @@ impl App {
         let config = cian_lua::load();
 
         // Rebuild the user keymap, validating action names as at startup.
+        if let Some(w) = config.options.tab_width {
+            cian_core::viewer::set_tab_width(w);
+        }
         let mut keymap: HashMap<(char, KeyModifiers), Action> = HashMap::new();
         let mut problems: Vec<String> = config.errors.clone();
         for (spec, name) in &config.keymaps {

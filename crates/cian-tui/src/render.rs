@@ -5022,7 +5022,6 @@ fn dim_of(c: Color) -> Color {
     }
 }
 
-use cian_core::viewer::TAB_W;
 
 fn draw_viewer(
     f: &mut Frame,
@@ -5097,8 +5096,17 @@ fn draw_viewer(
     // a colour, on the border as well as in the chip. Reading, selecting and
     // editing are three quite different things to have a keyboard pointed at,
     // and a badge alone is easy to have not looked at.
-    let (mode, mode_color) = if *editing {
-        ("EDIT", Color::Rgb(240, 160, 90))
+    // Typing at a prompt is its own mode and takes the frame, exactly as it
+    // does in the file panes and in the same colours — otherwise `:` and `i`
+    // begin the same way on screen while meaning opposite things.
+    let (mode, mode_color) = if sub_input.is_some() {
+        ("COMMAND", Color::Rgb(200, 100, 200))
+    } else if find_input.is_some() {
+        ("SEARCH", Color::Rgb(80, 200, 120))
+    } else if *editing {
+        // Not orange: the selecting modes are orange, and "the next key goes
+        // into the file" is the one state worth never mistaking.
+        ("EDIT", Color::Rgb(235, 105, 105))
     } else {
         match visual {
             None => ("READ", theme().accent),
@@ -5297,11 +5305,12 @@ fn draw_viewer(
             // used to, meant the file was saved back with its tabs already
             // spent.
             let trail_from = usize::MAX;
+                    let tab_w = cian_core::viewer::tab_width();
             let marks = show_ws && !*preview;
             let shown = |j: usize, ch: char, at: usize| -> String {
                 match ch {
-                    '\t' if marks => format!("→{}", " ".repeat(TAB_W - 1 - (at % TAB_W))),
-                    '\t' => " ".repeat(TAB_W - (at % TAB_W)),
+                    '\t' if marks => format!("→{}", " ".repeat(tab_w - 1 - (at % tab_w))),
+                    '\t' => " ".repeat(tab_w - (at % tab_w)),
                     // An ideographic space is the one that breaks YAML and
                     // shell scripts while looking exactly like nothing.
                     '\u{3000}' if marks => "□".to_string(),
@@ -5317,7 +5326,7 @@ fn draw_viewer(
             let mut chars: Vec<char> = Vec::new();
             let mut drawn = 0usize;
             for ch in l.chars() {
-                let w = if ch == '\t' { TAB_W - (drawn % TAB_W) } else { 1 };
+                let w = if ch == '\t' { tab_w - (drawn % tab_w) } else { 1 };
                 if drawn + w > avail {
                     break;
                 }
@@ -5569,7 +5578,7 @@ fn draw_viewer(
         ),
         None => (
             footer,
-            Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD),
+            Style::default().fg(Color::Black).bg(mode_color).add_modifier(Modifier::BOLD),
         ),
     };
     f.render_widget(
