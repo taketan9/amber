@@ -2100,6 +2100,11 @@ pub struct App {
     /// screen, so choosing "ask the AI about this" does not throw away the file
     /// (and its unsaved edits) that the question was about.
     viewer_return: Option<Box<Popup>>,
+    /// What was last yanked in the viewer, kept inside cian as well as on the
+    /// system clipboard. A machine reached over SSH often has no clipboard
+    /// service at all, and copy-and-paste within one file should not depend on
+    /// one being there.
+    yank: Option<String>,
     key_probe: bool,
     /// The message was raised by the last keystroke, rather than left over
     /// from an earlier one. Only a fresh message may take a footer.
@@ -2391,6 +2396,7 @@ impl App {
             viewer_split_lr: true,
             viewer_split_focus: false,
             viewer_return: None,
+            yank: None,
             key_probe: false,
             message_fresh: false,
             kbd_enhanced: false,

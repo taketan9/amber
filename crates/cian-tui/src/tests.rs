@@ -814,6 +814,10 @@
         // Line-wise: `V` then `y` copies a whole line, `p` puts it below.
         app.handle_key(KeyEvent::new(KeyCode::Char('V'), KeyModifiers::SHIFT)).unwrap();
         app.handle_key(key('y')).unwrap();
+        // Kept inside cian as well as on the system clipboard: a machine
+        // reached over SSH often has neither a clipboard service nor a need
+        // for one, and copy-and-paste within a file must work there.
+        assert_eq!(app.yank.as_deref(), Some("one\n"), "the yank carries its newline");
         app.handle_key(key('p')).unwrap();
         assert_eq!(lines(&app), ["one", "one", "two", "three"], "below the cursor");
         app.handle_key(key('u')).unwrap();

@@ -2075,8 +2075,9 @@ impl App {
             return;
         }
         if let Some(cb) = self.clipboard.as_mut() {
-            let _ = cb.set_text(text);
+            let _ = cb.set_text(text.clone());
         }
+        self.yank = Some(text);
         self.message = Some("copied".into());
         // A copy ends the visual gesture; leave the viewer open.
         if let Popup::Viewer { visual, .. } = &mut self.popup {
@@ -2120,8 +2121,14 @@ impl App {
     /// distinction, and the one that makes "copy these three lines, paste them
     /// there" land where meant rather than in the middle of a word.
     pub(crate) fn paste_into_viewer(&mut self, before: bool) {
-        let Some(text) = self.clipboard_text().filter(|t| !t.is_empty()) else {
-            self.message = Some(tr(self.lang, "the clipboard is empty", "クリップボードが空です").into());
+        // The system clipboard first, so something copied in another program
+        // pastes here; cian's own yank when there is none, so copy-and-paste
+        // within a file still works where no clipboard service exists.
+        let from_os = self.clipboard_text().filter(|t| !t.is_empty());
+        let Some(text) = from_os.or_else(|| self.yank.clone()) else {
+            self.message = Some(tr(self.lang,
+                "nothing has been copied yet",
+                "まだ何もコピーしていません").into());
             return;
         };
         let text = text.replace("\r\n", "\n");
