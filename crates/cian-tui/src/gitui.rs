@@ -283,6 +283,8 @@ impl App {
             visual: None,
             anchor: (0, 0),
             find_input: None,
+            sub_input: None,
+            sub_walk: None,
             find_query: None,
             count: None,
             pending: None,

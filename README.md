@@ -95,6 +95,10 @@ The viewer is vim-flavoured: `h j k l`, `w b`, `0 $`, `gg G`, `Ctrl-d/u` move; `
 
 **Cursor-follow preview — on by default.** The shell panel's area previews whatever the cursor is on, as you move: code with syntax colour, images (real pixels on capable terminals), folder and archive listings, Office/PDF text. The shell keeps running underneath — only its pixels are borrowed. `Shift+J` (or a click) focuses the shell and shows it again; move back to a file pane and the preview returns. Both file panes stay visible the whole time. Remote (SFTP) panes deliberately show no preview — it would download every file the cursor touches. `:preview` (or the toggles menu) turns it off; `cian.set_option("preview", false)` starts it off.
 
+**Replace — `:` in the viewer.** `s/old/new/` with the flags that matter: `g` for every match on a line, `c` to be asked about each one (`y` / `n` / `a` all / `q` stop), `i` to ignore case. The pattern follows the same rule as every search in cian — bare is a literal, `/re/` is a regex, and `${1}` style groups expand in the replacement. `\n` and `\t` in the replacement are real characters, so `s/;/;\n/g` splits a line. A `v`/`V` selection limits the range. The whole replace is one undo step.
+
+Line endings are shown in the title (`· CRLF`) and **preserved on save** — opening a Windows file to read it never quietly rewrites it as LF. `:lf` / `:crlf` convert on purpose.
+
 **Edit in place:** the viewer's normal mode carries vim's small change set — `x` `dd` `D` `J` delete and join, `d` cuts a `v`/`V` selection, `u` undoes, and `i` `a` `o` `O` `I` drop into insert (`Ctrl+S` saves in the file's own encoding, `Esc` leaves). Quick config surgery never needs an editor round-trip. Prefer your own editor? **`E`** (or `:edit`) opens it in `$VISUAL` / `$EDITOR` — or nvim → vim → vi — and reloads when you're back.
 
 **Archives, more:** `:zip` / `:tar` / `:targz` bundle the marked files; `:zip -e` makes an encrypted one. `:unzip` (or right-click **▸ Extract here**) unpacks the file under the cursor into a fresh sub-folder. Locked zips still list their members on F3, and extracting one asks for the password first.

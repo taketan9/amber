@@ -22,6 +22,53 @@ pub const VIEW_LIMIT: u64 = 4 * 1024 * 1024;
 /// How much of the prefix is inspected when deciding text vs binary.
 const SNIFF: usize = 8000;
 
+/// A file's line ending, detected on read and written back unchanged.
+///
+/// `str::lines()` swallows the difference, so without carrying it explicitly
+/// the viewer would silently rewrite every CRLF file as LF the first time it
+/// was saved — a change nobody asked for, invisible until some Windows tool
+/// downstream complained.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Eol {
+    Lf,
+    Crlf,
+    /// Classic Mac. Rare, but cheap to keep once the other two are carried.
+    Cr,
+}
+
+impl Eol {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Eol::Lf => "\n",
+            Eol::Crlf => "\r\n",
+            Eol::Cr => "\r",
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Eol::Lf => "LF",
+            Eol::Crlf => "CRLF",
+            Eol::Cr => "CR",
+        }
+    }
+
+    /// The dominant ending in `text`. Ties and empty files read as LF, which
+    /// is the safer default on every platform cian runs on.
+    pub fn detect(text: &str) -> Eol {
+        let crlf = text.matches("\r\n").count();
+        let lf = text.matches('\n').count() - crlf;
+        let cr = text.matches('\r').count() - crlf;
+        if crlf > lf && crlf >= cr {
+            Eol::Crlf
+        } else if cr > lf && cr > crlf {
+            Eol::Cr
+        } else {
+            Eol::Lf
+        }
+    }
+}
+
 /// What the viewer is showing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ViewKind {
@@ -111,6 +158,8 @@ pub struct View {
     /// The file opened with a byte-order mark. Worth a badge: an invisible
     /// three bytes at the start of a script is a classic way to break it.
     pub bom: bool,
+    /// The line ending the file arrived with, and the one a save writes back.
+    pub eol: Eol,
     /// The raw prefix that was read, kept so [`View::redecode`] can rebuild
     /// `lines` in a different encoding.
     bytes: Vec<u8>,
@@ -122,9 +171,10 @@ impl View {
     /// bytes, so the encoding switch and everything else in the viewer behave
     /// exactly as for a real text file.
     pub fn from_text(text: String, total_bytes: u64, truncated: bool) -> View {
+        let eol = Eol::detect(&text);
         let bytes = text.into_bytes();
         let lines = to_lines(&String::from_utf8_lossy(&bytes));
-        View { kind: ViewKind::Text, lines, total_bytes, truncated, encoding: TextEncoding::Utf8, bom: false, bytes }
+        View { kind: ViewKind::Text, lines, total_bytes, truncated, encoding: TextEncoding::Utf8, bom: false, eol, bytes }
     }
 
     /// Re-decode the kept bytes as `enc`, switching to text if it was showing
@@ -132,7 +182,9 @@ impl View {
     pub fn redecode(&mut self, enc: TextEncoding) {
         self.encoding = enc;
         self.kind = ViewKind::Text;
-        self.lines = to_lines(&enc.decode(&self.bytes));
+        let decoded = enc.decode(&self.bytes);
+        self.eol = Eol::detect(&decoded);
+        self.lines = to_lines(&decoded);
     }
 }
 
@@ -174,8 +226,10 @@ pub fn view_file(path: &Path) -> Result<View> {
     // A UTF-16 BOM means text even though the bytes are full of NULs; honour it
     // before the NUL sniff writes the file off as binary.
     if let Some(enc) = bom_encoding(&buf) {
-        let lines = to_lines(&enc.decode(&buf));
-        return Ok(View { kind: ViewKind::Text, lines, total_bytes, truncated, encoding: enc, bom: true, bytes: buf });
+        let decoded = enc.decode(&buf);
+        let eol = Eol::detect(&decoded);
+        let lines = to_lines(&decoded);
+        return Ok(View { kind: ViewKind::Text, lines, total_bytes, truncated, encoding: enc, bom: true, eol, bytes: buf });
     }
 
     // A NUL in the first few KB is the usual signal; UTF-8 text does not
@@ -183,13 +237,14 @@ pub fn view_file(path: &Path) -> Result<View> {
     let binary = buf[..buf.len().min(SNIFF)].contains(&0);
     if binary {
         let lines = hex_dump(&buf);
+        let eol = Eol::Lf; // a hex dump has no line endings of its own
         return Ok(View {
             kind: ViewKind::Binary,
             lines,
             total_bytes,
             truncated,
             encoding: TextEncoding::Utf8,
-            bom: false, bytes: buf,
+            bom: false, eol, bytes: buf,
         });
     }
 
@@ -209,8 +264,9 @@ pub fn view_file(path: &Path) -> Result<View> {
     } else {
         (utf8.into_owned(), TextEncoding::Utf8)
     };
+    let eol = Eol::detect(&text);
     let lines = to_lines(&text);
-    Ok(View { kind: ViewKind::Text, lines, total_bytes, truncated, encoding, bom: false, bytes: buf })
+    Ok(View { kind: ViewKind::Text, lines, total_bytes, truncated, encoding, bom: false, eol, bytes: buf })
 }
 
 impl View {

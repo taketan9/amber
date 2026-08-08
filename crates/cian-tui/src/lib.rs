@@ -408,6 +408,11 @@ enum Popup {
         anchor: (usize, usize),
         /// While typing a `/` search, the text entered so far; `None` otherwise.
         find_input: Option<String>,
+        /// While typing a `:s/old/new/` replace, the text entered so far.
+        sub_input: Option<String>,
+        /// A confirm-each-one replace in progress (the `c` flag). Boxed: the
+        /// hit list would otherwise widen every `Popup` in the program.
+        sub_walk: Option<Box<SubWalk>>,
         /// The confirmed search pattern, kept for `n`/`N` and match highlight.
         find_query: Option<String>,
         /// A pending numeric count typed before a motion (vim's `42G`).
@@ -657,6 +662,17 @@ enum EncTarget {
     Viewer(Box<Popup>),
     /// A stashed file diff to re-run under the chosen encoding.
     Diff(Box<Popup>),
+}
+
+/// A `:s/old/new/c` walk: the replacements still to be offered, and how the
+/// answers have gone so far. Hits are visited in order; accepting one shifts
+/// the later hits on that same line, which is tracked as it goes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SubWalk {
+    pub(crate) hits: Vec<cian_core::substitute::Hit>,
+    pub(crate) idx: usize,
+    pub(crate) replaced: usize,
+    pub(crate) skipped: usize,
 }
 
 /// One undo step for the viewer's built-in editor: the buffer and cursor as
@@ -3371,6 +3387,7 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry(":nobom", None, "strip UTF-8 BOMs from marked files (UTF-16 kept; viewer badges BOMs)", "マークから UTF-8 BOM 除去（UTF-16 は保持・ビューアにバッジ表示）"),
                 entry("  i on a binary", None, "hex edit: 0-9a-f overwrites bytes, Ctrl+S saves with a .bak", "バイナリで i：hex編集（0-9a-f 上書き、Ctrl+S で .bak を残して保存）"),
                 entry("  edit in viewer", None, "i/a/o/O/I = insert (Ctrl+S save, Esc leave), E = external editor", "ビューア内編集：i/a/o/O/I 挿入（Ctrl+S 保存, Esc 終了）／ E 外部エディタ"),
+                entry("  : in viewer", None, "replace: s/old/new/ (g all, c confirm each, i ignore case); :lf / :crlf convert line endings", "ビューアで : ：置換 s/old/new/（g 行内全部, c 1件ずつ, i 大小無視）／:lf :crlf で改行コード変換"),
                 entry("  normal mode", None, "x/dd/D/J delete·join, u undo, v+d cut selection (d/u scroll via Ctrl)", "ノーマルモード：x/dd/D/J 削除·結合, u 取消, v+d 選択削除（スクロールは Ctrl+d/u）"),
                 entry(":edit", None, "edit the file in your external editor (E in the viewer)", "外部エディタで編集（ビューア内は E）"),
                 entry(":vi / :vim / :nvim", None, "open the file in that editor in a new shell tab", "新規シェルタブでそのエディタでファイルを開く"),

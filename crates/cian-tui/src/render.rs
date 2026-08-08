@@ -4628,7 +4628,7 @@ fn draw_viewer(
     popup: &mut Popup,
     lang: Lang,
 ) {
-    let Popup::Viewer { title, view, scroll, line, col, visual, anchor, find_input, find_query, git_lines, markdown, preview, source, md_styles, md_width, editing, dirty, editable, hl, hl_lang, blame, .. } = popup else { return };
+    let Popup::Viewer { title, view, scroll, line, col, visual, anchor, find_input, find_query, sub_input, sub_walk, git_lines, markdown, preview, source, md_styles, md_width, editing, dirty, editable, hl, hl_lang, blame, .. } = popup else { return };
     let w = area.width.saturating_sub(4);
     let h = area.height.saturating_sub(2);
     let rect = centered_rect(w, h, area);
@@ -4698,10 +4698,18 @@ fn draw_viewer(
     } else {
         ""
     };
+    // The line ending is as invisible as the BOM and just as easy to convert
+    // by accident, so it gets the same treatment: shown, and only changed on
+    // purpose (`:lf` / `:crlf`).
+    let eol_mark = if view.kind == cian_core::viewer::ViewKind::Text {
+        format!(" · {}", view.eol.label())
+    } else {
+        String::new()
+    };
     let head = if *preview {
         tr(lang, "Markdown preview", "Markdown プレビュー").to_string()
     } else {
-        format!("{}, {}{}{}", kind, size, cut, bom_mark)
+        format!("{}, {}{}{}{}", kind, size, cut, bom_mark, eol_mark)
     };
     let block = Block::default()
         .borders(Borders::ALL)
@@ -4906,6 +4914,26 @@ fn draw_viewer(
         tr(lang,
             " EDIT — type to insert   Ctrl+S save   Esc leave   Shift+Q discard ",
             " 編集中 — 入力で挿入   Ctrl+S 保存   Esc 終了   Shift+Q 破棄 ").to_string()
+    } else if let Some(w) = sub_walk {
+        // The decision prompt names the change and the progress, so neither
+        // has to be held in the head while answering.
+        let h = &w.hits[w.idx.min(w.hits.len().saturating_sub(1))];
+        let shorten = |s: &str| truncate(s, 24);
+        format!(
+            "{}  {} → {}   [{}/{}]",
+            tr(lang, " replace?  y yes   n no   a all   q stop ", " 置換?  y はい   n いいえ   a 残り全部   q 中止 "),
+            shorten(&h.from),
+            shorten(&h.to),
+            w.idx + 1,
+            w.hits.len(),
+        )
+    } else if let Some(cmd) = sub_input {
+        format!(
+            "{}_   {}",
+            cmd,
+            tr(lang, "(old/new/  flags: g all on a line, c confirm, i ignore case)",
+                     "(old/new/  フラグ: g 行内全部, c 1件ずつ確認, i 大小無視)")
+        )
     } else {
         match find_input {
             Some(q) => format!("/{}_", q),

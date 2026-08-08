@@ -58,6 +58,58 @@ impl App {
             return Ok(());
         }
 
+        // Ctrl+S saves from normal mode too. It used to live only inside the
+        // insert-mode handler, so a change made with `dd` or `:s` could not be
+        // written without first entering insert mode for no reason.
+        if ctrl && matches!(key.code, KeyCode::Char('s') | KeyCode::Char('S'))
+            && matches!(self.popup, Popup::Viewer { editable: true, .. })
+        {
+            self.save_viewer_file();
+            return Ok(());
+        }
+        // A confirm-each-one replace owns the keyboard while it walks.
+        if matches!(self.popup, Popup::Viewer { sub_walk: Some(_), .. }) {
+            return self.sub_walk_key(key);
+        }
+        // While typing `:s/old/new/`, keys build the command; Enter runs it.
+        if matches!(self.popup, Popup::Viewer { sub_input: Some(_), .. }) {
+            match key.code {
+                KeyCode::Esc => {
+                    if let Popup::Viewer { sub_input, .. } = &mut self.popup {
+                        *sub_input = None;
+                    }
+                }
+                KeyCode::Enter => {
+                    let cmd = if let Popup::Viewer { sub_input, .. } = &mut self.popup {
+                        sub_input.take().unwrap_or_default()
+                    } else {
+                        String::new()
+                    };
+                    self.run_substitute(&cmd);
+                }
+                KeyCode::Backspace => {
+                    if let Popup::Viewer { sub_input: Some(s), .. } = &mut self.popup {
+                        s.pop();
+                    }
+                }
+                KeyCode::Char(c) if !ctrl => {
+                    if let Popup::Viewer { sub_input: Some(s), .. } = &mut self.popup {
+                        s.push(c);
+                    }
+                }
+                _ => {}
+            }
+            return Ok(());
+        }
+        // `:` opens replace, seeded with `s/` so the shape is on screen.
+        if !ctrl && !alt && key.code == KeyCode::Char(':')
+            && matches!(self.popup, Popup::Viewer { editable: true, preview: false, .. })
+        {
+            if let Popup::Viewer { sub_input, .. } = &mut self.popup {
+                *sub_input = Some("s/".to_string());
+            }
+            return Ok(());
+        }
         // While editing, the built-in plain-text editor owns every key.
         if matches!(self.popup, Popup::Viewer { editing: true, .. }) {
             return self.handle_editor_key(key);
@@ -497,6 +549,187 @@ impl App {
             return;
         };
         self.reveal_path_in_pane(&path);
+    }
+
+    /// Run a `:s/old/new/flags` typed at the viewer's replace prompt.
+    ///
+    /// Without `c` every replacement lands at once, as one undo step. With
+    /// `c` the hits are walked one at a time — see [`Self::sub_walk_key`].
+    /// A visual selection limits the range, which is how "just this block"
+    /// is expressed without a separate syntax.
+    pub(crate) fn run_substitute(&mut self, cmd: &str) {
+        let cmd = cmd.trim();
+        if cmd.is_empty() || cmd == "s/" {
+            return;
+        }
+        // The same prompt carries the line-ending conversions: they are the
+        // other thing people open replace for, and `s/\r//` cannot express
+        // them (the viewer's lines never hold the ending).
+        let eol = match cmd {
+            "lf" => Some(cian_core::viewer::Eol::Lf),
+            "crlf" => Some(cian_core::viewer::Eol::Crlf),
+            "cr" => Some(cian_core::viewer::Eol::Cr),
+            _ => None,
+        };
+        if let Some(want) = eol {
+            let changed = if let Popup::Viewer { view, dirty, .. } = &mut self.popup {
+                let was = view.eol;
+                view.eol = want;
+                *dirty = *dirty || was != want;
+                was != want
+            } else {
+                false
+            };
+            self.message = Some(if changed {
+                format!("line endings → {} (Ctrl+S to write)", want.label())
+            } else {
+                format!("already {}", want.label())
+            });
+            return;
+        }
+        let sub = match cian_core::substitute::parse(cmd.trim()) {
+            Ok(s) => s,
+            Err(e) => {
+                self.message = Some(format!("✖ {e}"));
+                return;
+            }
+        };
+        // A visual selection is the range; otherwise the whole file.
+        let range = if let Popup::Viewer { visual: Some(_), anchor, line, .. } = &self.popup {
+            let (a, b) = (anchor.0.min(*line), anchor.0.max(*line));
+            Some((a, b))
+        } else {
+            None
+        };
+        let Popup::Viewer { view, .. } = &self.popup else { return };
+        let hits = cian_core::substitute::find(&sub, &view.lines, range);
+        if hits.is_empty() {
+            self.message = Some(tr(self.lang, "no matches", "該当なし").into());
+            return;
+        }
+        if sub.confirm {
+            // Land on the first hit and hand the keyboard to the walk.
+            let first = hits[0].line;
+            if let Popup::Viewer { sub_walk, line, col, visual, .. } = &mut self.popup {
+                *visual = None;
+                *line = first;
+                *col = hits[0].start;
+                *sub_walk = Some(Box::new(crate::SubWalk { hits, idx: 0, replaced: 0, skipped: 0 }));
+            }
+            self.scroll_viewer_to_cursor();
+            return;
+        }
+        let n = hits.len();
+        self.apply_substitution(&hits);
+        self.message = Some(if self.lang == Lang::Ja {
+            format!("{} 件置換しました", n)
+        } else {
+            format!("replaced {} occurrence(s)", n)
+        });
+    }
+
+    /// Apply `hits` to the buffer as one undo step.
+    fn apply_substitution(&mut self, hits: &[cian_core::substitute::Hit]) {
+        if let Popup::Viewer { view, undo, dirty, hl, line, visual, .. } = &mut self.popup {
+            push_viewer_undo(undo, &view.lines, *line, 0);
+            view.lines = cian_core::substitute::apply(&view.lines, hits);
+            *line = (*line).min(view.lines.len().saturating_sub(1));
+            *visual = None;
+            *dirty = true;
+            hl.clear();
+        }
+    }
+
+    /// The confirm-each-one walk: `y` replaces, `n` skips, `a` takes all that
+    /// remain, `q`/Esc stops. Each acceptance is applied straight away so the
+    /// change is visible while deciding the next one; the later hits on that
+    /// same line shift by the length difference.
+    fn sub_walk_key(&mut self, key: KeyEvent) -> Result<()> {
+        let answer = match key.code {
+            KeyCode::Char('y') | KeyCode::Char('Y') => 'y',
+            KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Char(' ') => 'n',
+            KeyCode::Char('a') | KeyCode::Char('A') => 'a',
+            KeyCode::Char('q') | KeyCode::Esc => 'q',
+            _ => return Ok(()),
+        };
+        let Popup::Viewer { sub_walk: Some(w), .. } = &self.popup else { return Ok(()) };
+        let (hits, idx, replaced, skipped) =
+            (w.hits.clone(), w.idx, w.replaced, w.skipped);
+
+        if answer == 'q' {
+            self.finish_sub_walk(replaced, skipped, true);
+            return Ok(());
+        }
+        if answer == 'a' {
+            // Everything from here on, in one go.
+            let rest: Vec<_> = hits[idx..].to_vec();
+            let n = rest.len();
+            self.apply_substitution(&rest);
+            self.finish_sub_walk(replaced + n, skipped, false);
+            return Ok(());
+        }
+
+        let mut hits = hits;
+        let mut replaced = replaced;
+        let mut skipped = skipped;
+        if answer == 'y' {
+            let hit = hits[idx].clone();
+            self.apply_substitution(std::slice::from_ref(&hit));
+            replaced += 1;
+            // The line just changed length; every later hit on it moves.
+            let delta = hit.to.chars().count() as isize - hit.from.chars().count() as isize;
+            for h in hits.iter_mut().skip(idx + 1).filter(|h| h.line == hit.line) {
+                h.start = (h.start as isize + delta).max(0) as usize;
+                h.end = (h.end as isize + delta).max(0) as usize;
+            }
+        } else {
+            skipped += 1;
+        }
+        let next = idx + 1;
+        if next >= hits.len() {
+            self.finish_sub_walk(replaced, skipped, false);
+            return Ok(());
+        }
+        let (nl, nc) = (hits[next].line, hits[next].start);
+        if let Popup::Viewer { sub_walk, line, col, .. } = &mut self.popup {
+            *line = nl;
+            *col = nc;
+            *sub_walk = Some(Box::new(crate::SubWalk { hits, idx: next, replaced, skipped }));
+        }
+        self.scroll_viewer_to_cursor();
+        Ok(())
+    }
+
+    /// End a confirm walk and report what it did.
+    fn finish_sub_walk(&mut self, replaced: usize, skipped: usize, stopped: bool) {
+        if let Popup::Viewer { sub_walk, .. } = &mut self.popup {
+            *sub_walk = None;
+        }
+        let ja = self.lang == Lang::Ja;
+        let head = if stopped {
+            if ja { "中断 — " } else { "stopped — " }
+        } else {
+            ""
+        };
+        self.message = Some(if ja {
+            format!("{head}{replaced} 件置換, {skipped} 件スキップ")
+        } else {
+            format!("{head}replaced {replaced}, skipped {skipped}")
+        });
+    }
+
+    /// Keep the cursor line on screen after a jump.
+    fn scroll_viewer_to_cursor(&mut self) {
+        let body_h = (self.viewer_rect.height as usize).max(1);
+        if let Popup::Viewer { line, scroll, view, .. } = &mut self.popup {
+            let n = view.lines.len();
+            if *line < *scroll {
+                *scroll = *line;
+            } else if *line >= *scroll + body_h {
+                *scroll = *line + 1 - body_h;
+            }
+            *scroll = (*scroll).min(n.saturating_sub(body_h));
+        }
     }
 
     /// The "editing — …" status line, shared by every way into the editor.
@@ -1016,7 +1249,10 @@ impl App {
                 }
                 (path.clone(), view.raw_bytes().to_vec())
             } else {
-                let text = view.lines.join("\n") + "\n";
+                // Written back with the line ending the file arrived with:
+                // opening a CRLF file to read it must not quietly convert it.
+                let sep = view.eol.as_str();
+                let text = view.lines.join(sep) + sep;
                 (path.clone(), view.encoding.encode(&text))
             }
         } else {

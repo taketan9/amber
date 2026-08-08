@@ -356,6 +356,133 @@
         assert!(out.contains("secret contents"), "opt-in reads it: {out}");
     }
 
+    /// `:` opens replace in the viewer; a plain command replaces everything
+    /// at once, and `u` takes the whole thing back as one step.
+    #[test]
+    fn viewer_replace_all_is_one_undo_step() {
+        let (_d, mut app) = viewer_on("alpha bravo\nbravo charlie\nbravo\n");
+        app.handle_key(key(':')).unwrap();
+        assert!(matches!(&app.popup, Popup::Viewer { sub_input: Some(s), .. } if s == "s/"));
+        for c in "bravo/BRAVO/g".chars() {
+            app.handle_key(key(c)).unwrap();
+        }
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+        assert_eq!(viewer_lines(&app), ["alpha BRAVO", "BRAVO charlie", "BRAVO"]);
+        let msg = app.message.clone().unwrap_or_default();
+        assert!(msg.contains('3'), "reports the count: {msg}");
+
+        app.handle_key(key('u')).unwrap();
+        assert_eq!(
+            viewer_lines(&app),
+            ["alpha bravo", "bravo charlie", "bravo"],
+            "one undo takes back the whole replace"
+        );
+    }
+
+    /// The `c` flag walks the hits: y replaces, n skips, and the walk reports
+    /// both tallies at the end.
+    #[test]
+    fn viewer_replace_can_confirm_each_one() {
+        let (_d, mut app) = viewer_on("x one\nx two\nx three\n");
+        app.handle_key(key(':')).unwrap();
+        for c in "x/Y/c".chars() {
+            app.handle_key(key(c)).unwrap();
+        }
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+        assert!(matches!(app.popup, Popup::Viewer { sub_walk: Some(_), .. }), "walk started");
+
+        app.handle_key(key('y')).unwrap(); // line 0: replace
+        app.handle_key(key('n')).unwrap(); // line 1: skip
+        app.handle_key(key('y')).unwrap(); // line 2: replace → walk ends
+        assert!(matches!(app.popup, Popup::Viewer { sub_walk: None, .. }), "walk finished");
+        assert_eq!(viewer_lines(&app), ["Y one", "x two", "Y three"]);
+        let msg = app.message.clone().unwrap_or_default();
+        assert!(msg.contains('2') && msg.contains('1'), "reports 2 replaced, 1 skipped: {msg}");
+    }
+
+    /// `q` stops a walk partway, keeping what was already done; `a` takes the
+    /// whole remainder in one go.
+    #[test]
+    fn a_confirm_walk_can_be_stopped_or_finished_wholesale() {
+        let (_d, mut app) = viewer_on("x\nx\nx\nx\n");
+        let start = |app: &mut App| {
+            app.handle_key(key(':')).unwrap();
+            for c in "x/Y/c".chars() {
+                app.handle_key(key(c)).unwrap();
+            }
+            app.handle_key(code(KeyCode::Enter)).unwrap();
+        };
+        start(&mut app);
+        app.handle_key(key('y')).unwrap();
+        app.handle_key(key('q')).unwrap();
+        assert_eq!(viewer_lines(&app), ["Y", "x", "x", "x"], "stopped, keeping the first");
+        assert!(app.message.clone().unwrap_or_default().contains("stopped")
+            || app.message.clone().unwrap_or_default().contains("中断"));
+
+        start(&mut app);
+        app.handle_key(key('a')).unwrap();
+        assert_eq!(viewer_lines(&app), ["Y", "Y", "Y", "Y"], "`a` took the rest");
+    }
+
+    /// A CRLF file keeps its line endings through an edit — the viewer's
+    /// lines never hold the ending, so saving used to quietly rewrite every
+    /// Windows file as LF. `:crlf` / `:lf` convert on purpose.
+    #[test]
+    fn line_endings_survive_an_edit_and_convert_on_request() {
+        let d = tempfile::tempdir().unwrap();
+        let f = d.path().join("win.txt");
+        std::fs::write(&f, b"one\r\ntwo\r\n").unwrap();
+        let p = d.path().to_path_buf();
+        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        app.active_pane_mut().unwrap().cursor =
+            app.active_pane().unwrap().entries.iter().position(|e| e.name == "win.txt").unwrap();
+        app.handle_key(code(KeyCode::F(3))).unwrap();
+        let _ = render(&mut app, 100, 30);
+        match &app.popup {
+            Popup::Viewer { view, .. } => {
+                assert_eq!(view.eol, cian_core::viewer::Eol::Crlf, "detected as CRLF");
+            }
+            _ => panic!("not a viewer"),
+        }
+        let shown = render(&mut app, 100, 30).join("\n");
+        assert!(shown.contains("CRLF"), "and says so in the title: {shown}");
+
+        // An edit and a save keep the CRLFs.
+        app.handle_key(key('i')).unwrap();
+        app.handle_key(key('X')).unwrap();
+        app.handle_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL)).unwrap();
+        let raw = std::fs::read(&f).unwrap();
+        assert!(raw.windows(2).any(|w| w == b"\r\n"), "still CRLF after saving");
+        assert_eq!(String::from_utf8_lossy(&raw), "Xone\r\ntwo\r\n");
+
+        // `:lf` converts, deliberately.
+        app.handle_key(code(KeyCode::Esc)).unwrap(); // leave insert
+        app.handle_key(key(':')).unwrap();
+        // The prompt is seeded with "s/", which the verb replaces.
+        if let Popup::Viewer { sub_input, .. } = &mut app.popup {
+            *sub_input = Some("lf".into());
+        }
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+        app.handle_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL)).unwrap();
+        let raw = std::fs::read(&f).unwrap();
+        assert!(!raw.contains(&b'\r'), "converted to LF on request: {:?}", String::from_utf8_lossy(&raw));
+    }
+
+    /// A replace can be limited to a visual selection.
+    #[test]
+    fn replace_honours_a_selection() {
+        let (_d, mut app) = viewer_on("a\na\na\n");
+        app.handle_key(key('V')).unwrap();
+        app.handle_key(key('j')).unwrap();
+        app.handle_key(key(':')).unwrap();
+        for c in "a/B/g".chars() {
+            app.handle_key(key(c)).unwrap();
+        }
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+        assert_eq!(viewer_lines(&app), ["B", "B", "a"], "only the selected lines");
+    }
+
+
     /// The hex editor: `i` on a binary view, hex digits overwrite the byte
     /// under the cursor, Ctrl+S saves — with a `.bak` of the original — and
     /// `u` walks the whole session back.
