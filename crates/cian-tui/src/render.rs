@@ -380,6 +380,7 @@ pub(crate) fn draw(f: &mut Frame, app: &mut App) {
         let dests = app.dest_choices();
         let lang = app.lang;
         let menu_lang = app.menu_lang;
+        let show_ws = app.show_ws;
         app.popup_zones.clear();
         draw_popup(
             f,
@@ -392,6 +393,7 @@ pub(crate) fn draw(f: &mut Frame, app: &mut App) {
             &mut app.popup_zones,
             lang,
             menu_lang,
+            show_ws,
         );
     } else {
         app.popup_zones.clear();
@@ -3282,6 +3284,7 @@ fn draw_popup(
     zones: &mut Vec<PopupZone>,
     lang: Lang,
     menu_lang: Lang,
+    show_ws: bool,
 ) {
     // Every popup with a shape of its own draws itself. The rest — the
     // confirm/notice dialogs, which differ only in their wording — fall through
@@ -3299,7 +3302,7 @@ fn draw_popup(
         Popup::Shortcuts { .. } => draw_shortcuts(f, area, popup, zones, lang),
         Popup::History { .. } => draw_history(f, area, popup, zones, lang),
         Popup::DestPicker { .. } => draw_dest_picker(f, area, popup, dests, zones, lang),
-        Popup::Viewer { .. } => draw_viewer(f, area, popup, lang),
+        Popup::Viewer { .. } => draw_viewer(f, area, popup, lang, show_ws),
         Popup::DirCompare { .. } => draw_dir_compare(f, area, popup, zones, lang),
         Popup::Diff { .. } => draw_diff(f, area, popup, lang),
         Popup::Archive { .. } => draw_archive(f, area, popup, zones, lang),
@@ -4627,6 +4630,7 @@ fn draw_viewer(
     area: Rect,
     popup: &mut Popup,
     lang: Lang,
+    show_ws: bool,
 ) {
     let Popup::Viewer { title, view, scroll, line, col, visual, anchor, find_input, find_query, sub_input, sub_walk, git_lines, markdown, preview, source, md_styles, md_width, editing, dirty, editable, hl, hl_lang, blame, .. } = popup else { return };
     let w = area.width.saturating_sub(4);
@@ -4805,6 +4809,22 @@ fn draw_viewer(
         .skip(*scroll)
         .take(body_h)
         .map(|(i, l)| {
+            // With `:ws` on, the characters you cannot see get a visible
+            // stand-in — a trailing space, an ideographic space, a tab. Only
+            // *trailing* spaces are marked: dotting every gap between words
+            // makes the text unreadable, and the ones that matter are at the
+            // end of the line.
+            let l: std::borrow::Cow<str> = if show_ws && !*preview {
+                let trail = l.len() - l.trim_end_matches(' ').len();
+                let body = &l[..l.len() - trail];
+                std::borrow::Cow::Owned(format!(
+                    "{}{}",
+                    body.replace('\u{3000}', "□").replace('\t', "→"),
+                    "·".repeat(trail)
+                ))
+            } else {
+                std::borrow::Cow::Borrowed(l.as_str())
+            };
             let chars: Vec<char> = l.chars().take(avail).collect();
             let len = chars.len();
             let sel = sel_cols(i, len);
@@ -4822,7 +4842,7 @@ fn draw_viewer(
             } else {
                 None
             };
-            let matches = match_cols(l);
+            let matches = match_cols(&l);
             let cell_style = |j: usize| -> Style {
                 // Priority: cursor over selection over a search match; the
                 // resting style is the Markdown colour in preview, else plain.

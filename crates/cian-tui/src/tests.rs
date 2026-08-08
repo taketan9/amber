@@ -483,6 +483,76 @@
     }
 
 
+    /// The line transforms act on the whole file, or on a v/V selection, and
+    /// each lands as one undo step.
+    #[test]
+    fn viewer_line_transforms_work_on_file_and_selection() {
+        let run = |app: &mut App, cmd: &str| {
+            app.handle_key(key(':')).unwrap();
+            if let Popup::Viewer { sub_input, .. } = &mut app.popup {
+                *sub_input = Some(cmd.into());
+            }
+            app.handle_key(code(KeyCode::Enter)).unwrap();
+        };
+
+        let (_d, mut app) = viewer_on("c\na\nb\na\n");
+        run(&mut app, "sort");
+        assert_eq!(viewer_lines(&app), ["a", "a", "b", "c"]);
+        run(&mut app, "uniq");
+        assert_eq!(viewer_lines(&app), ["a", "b", "c"]);
+        run(&mut app, "rsort");
+        assert_eq!(viewer_lines(&app), ["c", "b", "a"]);
+        // Each transform is one undo step, so this walks back to sorted.
+        app.handle_key(key('u')).unwrap();
+        assert_eq!(viewer_lines(&app), ["a", "b", "c"]);
+
+        // Full-width Latin and half-width kana both come out normal.
+        let (_d2, mut app) = viewer_on("ＡＢＣ１２３\nｶﾞｯｺｳ\n");
+        run(&mut app, "han");
+        assert_eq!(viewer_lines(&app), ["ABC123", "ガッコウ"]);
+
+        // A selection limits it: sort only the middle two lines.
+        let (_d3, mut app) = viewer_on("z\nd\nc\na\n");
+        if let Popup::Viewer { line, .. } = &mut app.popup {
+            *line = 1;
+        }
+        app.handle_key(key('V')).unwrap();
+        app.handle_key(key('j')).unwrap();
+        run(&mut app, "sort");
+        assert_eq!(viewer_lines(&app), ["z", "c", "d", "a"], "only the selected pair moved");
+    }
+
+    /// `:ws` makes the invisible characters visible — the pass where a
+    /// trailing space or an ideographic space is the actual bug.
+    #[test]
+    fn ws_shows_the_invisible_characters() {
+        let (_d, mut app) = viewer_on("trailing   \n全角\u{3000}空白\n");
+        // Body rows only: the title carries its own `·` for the encoding and
+        // line-ending badges. Matched on single characters because the test
+        // backend dumps a wide char's second cell as a space, so "空白" comes
+        // back as "空 白".
+        let body = |app: &mut App| -> String {
+            render(app, 100, 30)
+                .into_iter()
+                .filter(|l| l.contains("trailing") || l.contains('全'))
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+        let before = body(&mut app);
+        assert!(!before.contains('·') && !before.contains('□'), "off by default: {before}");
+
+        app.handle_key(key(':')).unwrap();
+        if let Popup::Viewer { sub_input, .. } = &mut app.popup {
+            *sub_input = Some("ws".into());
+        }
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+        let after = body(&mut app);
+        assert!(after.contains('·'), "trailing spaces are marked: {after}");
+        assert!(after.contains('□'), "ideographic space is marked: {after}");
+        // Marking is display only — the buffer is untouched.
+        assert_eq!(viewer_lines(&app)[0], "trailing   ");
+    }
+
     /// The hex editor: `i` on a binary view, hex digits overwrite the byte
     /// under the cursor, Ctrl+S saves — with a `.bak` of the original — and
     /// `u` walks the whole session back.

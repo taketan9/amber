@@ -27,6 +27,7 @@ pub mod progress;
 pub mod rename;
 pub mod search;
 pub mod substitute;
+pub mod textops;
 pub mod svn;
 pub mod viewer;
 

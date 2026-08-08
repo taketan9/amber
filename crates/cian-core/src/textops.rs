@@ -1,0 +1,253 @@
+//! Whole-buffer text transforms — the "整形" half of an editor: sorting and
+//! de-duplicating lines, converting between full- and half-width forms,
+//! and normalising indentation.
+//!
+//! Every function here takes lines and returns lines, so the viewer can apply
+//! one to a visual selection or to the whole file with the same call, and so
+//! the rules are testable without a screen.
+//!
+//! The width conversions are the reason this module is not just a couple of
+//! `sort()` calls. Japanese documents arrive with ASCII written full-width
+//! (`ＡＢＣ１２３`) because some other tool did it, and with katakana written
+//! half-width (`ｱｲｳ`) because a mainframe did — and the two want converting in
+//! *opposite* directions. So "to half-width" means ASCII only and "to
+//! full-width" means kana only, which is what a person actually wants when
+//! they reach for either.
+
+/// Sort `lines`, optionally descending. Comparison is by the text as written:
+/// a "natural" order that understands embedded numbers is a different feature
+/// and a surprising default.
+pub fn sort(lines: &[String], descending: bool) -> Vec<String> {
+    let mut out = lines.to_vec();
+    out.sort();
+    if descending {
+        out.reverse();
+    }
+    out
+}
+
+/// Drop repeated lines, keeping the first of each. Unlike `uniq(1)` this does
+/// not require the input to be sorted — in a document the duplicates are
+/// scattered, and demanding a sort first would reorder something the user
+/// wanted left alone.
+pub fn uniq(lines: &[String]) -> Vec<String> {
+    let mut seen = std::collections::HashSet::new();
+    lines.iter().filter(|l| seen.insert((*l).clone())).cloned().collect()
+}
+
+/// Full-width ASCII → half-width, and the half-width katakana forms → their
+/// full-width equivalents. In other words: make the Latin text normal, and
+/// make the kana normal. Both are "the half-width one is wrong" in practice.
+pub fn to_halfwidth(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let chars: Vec<char> = s.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        // A half-width kana followed by a (semi-)voiced mark is one character.
+        if let Some(base) = halfwidth_kana_base(c) {
+            let next = chars.get(i + 1).copied();
+            if let Some(comb) = next.and_then(|n| combine_kana(base, n)) {
+                out.push(comb);
+                i += 2;
+                continue;
+            }
+            out.push(base);
+            i += 1;
+            continue;
+        }
+        out.push(match c {
+            // The full-width ASCII block sits exactly 0xFEE0 above ASCII.
+            '\u{FF01}'..='\u{FF5E}' => char::from_u32(c as u32 - 0xFEE0).unwrap_or(c),
+            '\u{3000}' => ' ', // ideographic space
+            other => other,
+        });
+        i += 1;
+    }
+    out
+}
+
+/// Half-width ASCII → full-width. The mirror of [`to_halfwidth`]'s ASCII half,
+/// for the times a form or a fixed-width report wants full-width digits.
+pub fn to_fullwidth(s: &str) -> String {
+    s.chars()
+        .map(|c| match c {
+            '!'..='~' => char::from_u32(c as u32 + 0xFEE0).unwrap_or(c),
+            ' ' => '\u{3000}',
+            other => other,
+        })
+        .collect()
+}
+
+/// The full-width kana a half-width one maps to, ignoring voice marks.
+fn halfwidth_kana_base(c: char) -> Option<char> {
+    const TABLE: &[(char, char)] = &[
+        ('｡', '。'), ('｢', '「'), ('｣', '」'), ('､', '、'), ('･', '・'),
+        ('ｦ', 'ヲ'), ('ｧ', 'ァ'), ('ｨ', 'ィ'), ('ｩ', 'ゥ'), ('ｪ', 'ェ'), ('ｫ', 'ォ'),
+        ('ｬ', 'ャ'), ('ｭ', 'ュ'), ('ｮ', 'ョ'), ('ｯ', 'ッ'), ('ｰ', 'ー'),
+        ('ｱ', 'ア'), ('ｲ', 'イ'), ('ｳ', 'ウ'), ('ｴ', 'エ'), ('ｵ', 'オ'),
+        ('ｶ', 'カ'), ('ｷ', 'キ'), ('ｸ', 'ク'), ('ｹ', 'ケ'), ('ｺ', 'コ'),
+        ('ｻ', 'サ'), ('ｼ', 'シ'), ('ｽ', 'ス'), ('ｾ', 'セ'), ('ｿ', 'ソ'),
+        ('ﾀ', 'タ'), ('ﾁ', 'チ'), ('ﾂ', 'ツ'), ('ﾃ', 'テ'), ('ﾄ', 'ト'),
+        ('ﾅ', 'ナ'), ('ﾆ', 'ニ'), ('ﾇ', 'ヌ'), ('ﾈ', 'ネ'), ('ﾉ', 'ノ'),
+        ('ﾊ', 'ハ'), ('ﾋ', 'ヒ'), ('ﾌ', 'フ'), ('ﾍ', 'ヘ'), ('ﾎ', 'ホ'),
+        ('ﾏ', 'マ'), ('ﾐ', 'ミ'), ('ﾑ', 'ム'), ('ﾒ', 'メ'), ('ﾓ', 'モ'),
+        ('ﾔ', 'ヤ'), ('ﾕ', 'ユ'), ('ﾖ', 'ヨ'),
+        ('ﾗ', 'ラ'), ('ﾘ', 'リ'), ('ﾙ', 'ル'), ('ﾚ', 'レ'), ('ﾛ', 'ロ'),
+        ('ﾜ', 'ワ'), ('ﾝ', 'ン'),
+    ];
+    TABLE.iter().find(|(h, _)| *h == c).map(|(_, f)| *f)
+}
+
+/// Fold a voiced (ﾞ) or semi-voiced (ﾟ) mark into the kana before it.
+fn combine_kana(base: char, mark: char) -> Option<char> {
+    let voiced = "カキクケコサシスセソタチツテトハヒフヘホ";
+    let semi = "ハヒフヘホ";
+    match mark {
+        'ﾞ' | '\u{3099}' | '\u{309B}' => voiced
+            .chars()
+            .position(|c| c == base)
+            .and_then(|_| char::from_u32(base as u32 + 1))
+            .or(if base == 'ウ' { Some('ヴ') } else { None }),
+        'ﾟ' | '\u{309A}' | '\u{309C}' => {
+            semi.chars().position(|c| c == base).and_then(|_| char::from_u32(base as u32 + 2))
+        }
+        _ => None,
+    }
+}
+
+/// Leading tabs → `width` spaces each. Only leading whitespace is touched: a
+/// tab inside a line is usually a column separator in data, and expanding it
+/// would silently change the file's meaning.
+pub fn expand_tabs(lines: &[String], width: usize) -> Vec<String> {
+    lines
+        .iter()
+        .map(|l| {
+            let indent: String = l.chars().take_while(|c| *c == '\t' || *c == ' ').collect();
+            let rest = &l[indent.len()..];
+            let expanded: String = indent
+                .chars()
+                .map(|c| if c == '\t' { " ".repeat(width) } else { " ".to_string() })
+                .collect();
+            format!("{expanded}{rest}")
+        })
+        .collect()
+}
+
+/// Leading runs of `width` spaces → tabs. The inverse of [`expand_tabs`], with
+/// the same "leading only" rule and for the same reason.
+pub fn unexpand_tabs(lines: &[String], width: usize) -> Vec<String> {
+    if width == 0 {
+        return lines.to_vec();
+    }
+    lines
+        .iter()
+        .map(|l| {
+            let spaces = l.chars().take_while(|c| *c == ' ').count();
+            let rest: String = l.chars().skip(spaces).collect();
+            format!("{}{}{}", "\t".repeat(spaces / width), " ".repeat(spaces % width), rest)
+        })
+        .collect()
+}
+
+/// Re-indent to a consistent step — VS Code's "reformat the indentation"
+/// without knowing the language.
+///
+/// The nesting is read from the *existing* indentation: each distinct depth
+/// that appears becomes one level, and levels are re-emitted at `width`
+/// spaces each. That fixes a document indented 3-and-5 and 2 by different
+/// hands without needing to parse it, and leaves blank lines blank.
+pub fn reindent(lines: &[String], width: usize) -> Vec<String> {
+    // The ladder of indent widths actually used, smallest first.
+    let mut steps: Vec<usize> = lines
+        .iter()
+        .filter(|l| !l.trim().is_empty())
+        .map(|l| indent_width(l))
+        .collect();
+    steps.sort_unstable();
+    steps.dedup();
+    lines
+        .iter()
+        .map(|l| {
+            if l.trim().is_empty() {
+                return String::new();
+            }
+            let depth = steps.iter().position(|w| *w == indent_width(l)).unwrap_or(0);
+            format!("{}{}", " ".repeat(depth * width), l.trim_start())
+        })
+        .collect()
+}
+
+/// The visual width of a line's leading whitespace, counting a tab as 8 —
+/// the width every terminal and printer has agreed on for long enough that
+/// mixed-indent files were laid out against it.
+fn indent_width(line: &str) -> usize {
+    let mut w = 0;
+    for c in line.chars() {
+        match c {
+            ' ' => w += 1,
+            '\t' => w = (w / 8 + 1) * 8,
+            _ => break,
+        }
+    }
+    w
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn v(s: &[&str]) -> Vec<String> {
+        s.iter().map(|x| x.to_string()).collect()
+    }
+
+    #[test]
+    fn sort_and_uniq_do_the_obvious_thing() {
+        assert_eq!(sort(&v(&["c", "a", "b"]), false), v(&["a", "b", "c"]));
+        assert_eq!(sort(&v(&["c", "a", "b"]), true), v(&["c", "b", "a"]));
+        // Duplicates need not be adjacent, and the first of each survives in
+        // place — a document's repeats are scattered, and sorting first would
+        // reorder what the user wanted left alone.
+        assert_eq!(uniq(&v(&["b", "a", "b", "c", "a"])), v(&["b", "a", "c"]));
+    }
+
+    /// "To half-width" means the Latin text; "to full-width" means the kana.
+    /// Both directions are what someone means when they reach for either.
+    #[test]
+    fn width_conversion_goes_the_way_people_mean() {
+        assert_eq!(to_halfwidth("ＡＢＣ１２３（ｘ）"), "ABC123(x)");
+        assert_eq!(to_halfwidth("全角\u{3000}空白"), "全角 空白");
+        assert_eq!(to_fullwidth("ABC123"), "ＡＢＣ１２３");
+        // Kana: half-width in, full-width out — including the voice marks,
+        // which are separate characters half-width and joined full-width.
+        assert_eq!(to_halfwidth("ｱｲｳ"), "アイウ");
+        assert_eq!(to_halfwidth("ｶﾞｷﾞﾊﾟﾋﾟ"), "ガギパピ");
+        assert_eq!(to_halfwidth("ｳﾞ"), "ヴ");
+        // Text already in the right form is left exactly as it is.
+        assert_eq!(to_halfwidth("すでに正しい text"), "すでに正しい text");
+    }
+
+    #[test]
+    fn tab_conversion_touches_only_the_indent() {
+        // A tab inside the line is a column separator in data; expanding it
+        // would silently change what the file means.
+        assert_eq!(expand_tabs(&v(&["\ta\tb"]), 4), v(&["    a\tb"]));
+        assert_eq!(unexpand_tabs(&v(&["    a b"]), 4), v(&["\ta b"]));
+        // A partial step keeps its leftover spaces rather than rounding.
+        assert_eq!(unexpand_tabs(&v(&["      x"]), 4), v(&["\t  x"]));
+    }
+
+    /// Re-indent reads the nesting from what is there, so a file indented by
+    /// three different hands comes out on one ladder.
+    #[test]
+    fn reindent_rebuilds_a_consistent_ladder() {
+        let src = v(&["top", "   three", "        eight", "   three again", "", "top again"]);
+        assert_eq!(
+            reindent(&src, 2),
+            v(&["top", "  three", "    eight", "  three again", "", "top again"]),
+        );
+        // A tab counts as eight columns, which is the width the mixed file
+        // was laid out against in the first place.
+        assert_eq!(reindent(&v(&["a", "\tb"]), 4), v(&["a", "    b"]));
+    }
+}

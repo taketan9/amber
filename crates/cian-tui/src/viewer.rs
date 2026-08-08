@@ -571,6 +571,51 @@ impl App {
             "cr" => Some(cian_core::viewer::Eol::Cr),
             _ => None,
         };
+        // The line-transform verbs. Each acts on a v/V selection when there is
+        // one, else the whole buffer, and lands as one undo step.
+        let words: Vec<&str> = cmd.split_whitespace().collect();
+        let arg_usize = |i: usize, d: usize| words.get(i).and_then(|w| w.parse().ok()).unwrap_or(d);
+        use cian_core::textops as tx;
+        let transform: Option<LineTransform> = match words.first().copied() {
+            Some("sort") => Some(Box::new(|l: &[String]| tx::sort(l, false))),
+            Some("rsort") => Some(Box::new(|l: &[String]| tx::sort(l, true))),
+            Some("uniq") => Some(Box::new(tx::uniq)),
+            Some("han") => Some(Box::new(|l: &[String]| {
+                l.iter().map(|s| tx::to_halfwidth(s)).collect()
+            })),
+            Some("zen") => Some(Box::new(|l: &[String]| {
+                l.iter().map(|s| tx::to_fullwidth(s)).collect()
+            })),
+            Some("expand") => {
+                let w = arg_usize(1, 4);
+                Some(Box::new(move |l: &[String]| tx::expand_tabs(l, w)))
+            }
+            Some("unexpand") => {
+                let w = arg_usize(1, 4);
+                Some(Box::new(move |l: &[String]| tx::unexpand_tabs(l, w)))
+            }
+            Some("reindent") => {
+                let w = arg_usize(1, 2);
+                Some(Box::new(move |l: &[String]| tx::reindent(l, w)))
+            }
+            _ => None,
+        };
+        if let Some(f) = transform {
+            self.apply_line_transform(&f, words[0]);
+            return;
+        }
+        // `ws` flips the invisible-character marks. It reads the buffer
+        // rather than changing it, so it is not an undo step.
+        if cmd == "ws" {
+            self.show_ws = !self.show_ws;
+            self.message = Some(if self.show_ws {
+                tr(self.lang, "showing spaces, tabs and ideographic spaces",
+                              "空白・TAB・全角スペースを表示").into()
+            } else {
+                tr(self.lang, "hiding whitespace marks", "空白の表示をやめました").into()
+            });
+            return;
+        }
         if let Some(want) = eol {
             let changed = if let Popup::Viewer { view, dirty, .. } = &mut self.popup {
                 let was = view.eol;
@@ -625,6 +670,49 @@ impl App {
             format!("{} 件置換しました", n)
         } else {
             format!("replaced {} occurrence(s)", n)
+        });
+    }
+
+    /// Run a whole-line transform over the selection (or the whole file) as
+    /// one undo step. Sorting and de-duplicating change the line count, so a
+    /// selection is spliced back rather than assigned in place.
+    fn apply_line_transform(&mut self, f: &dyn Fn(&[String]) -> Vec<String>, verb: &str) {
+        let range = if let Popup::Viewer { visual: Some(_), anchor, line, .. } = &self.popup {
+            Some((anchor.0.min(*line), anchor.0.max(*line)))
+        } else {
+            None
+        };
+        let mut before = 0usize;
+        let mut after = 0usize;
+        if let Popup::Viewer { view, undo, dirty, hl, line, visual, .. } = &mut self.popup {
+            push_viewer_undo(undo, &view.lines, *line, 0);
+            before = view.lines.len();
+            view.lines = match range {
+                Some((lo, hi)) => {
+                    let hi = hi.min(view.lines.len().saturating_sub(1));
+                    let mut out = view.lines[..lo].to_vec();
+                    out.extend(f(&view.lines[lo..=hi]));
+                    out.extend_from_slice(&view.lines[hi + 1..]);
+                    out
+                }
+                None => f(&view.lines),
+            };
+            after = view.lines.len();
+            *line = (*line).min(after.saturating_sub(1));
+            *visual = None;
+            *dirty = true;
+            hl.clear();
+        }
+        let scope = match range {
+            Some(_) => tr(self.lang, "selection", "選択範囲"),
+            None => tr(self.lang, "whole file", "ファイル全体"),
+        };
+        self.message = Some(if before == after {
+            format!("{verb}: {scope}")
+        } else if self.lang == Lang::Ja {
+            format!("{verb}: {scope} — {} 行 → {} 行", before, after)
+        } else {
+            format!("{verb}: {scope} — {before} lines → {after}")
         });
     }
 

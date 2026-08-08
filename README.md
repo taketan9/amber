@@ -99,6 +99,8 @@ The viewer is vim-flavoured: `h j k l`, `w b`, `0 $`, `gg G`, `Ctrl-d/u` move; `
 
 Line endings are shown in the title (`· CRLF`) and **preserved on save** — opening a Windows file to read it never quietly rewrites it as LF. `:lf` / `:crlf` convert on purpose.
 
+**Reshaping a document.** The same `:` prompt carries the transforms a text editor is kept around for, each acting on a `v`/`V` selection or the whole file, each one undo step: **`:sort`** / **`:rsort`** / **`:uniq`** for line order and duplicates; **`:han`** / **`:zen`** for width — `:han` makes full-width ASCII normal *and* half-width katakana normal, which are the two directions anyone actually means; **`:expand`** / **`:unexpand`** for leading tabs; **`:reindent`** to put a document indented by three different hands onto one ladder. **`:ws`** shows the characters you cannot see — trailing spaces, tabs, ideographic spaces — for the pass where one of them is the bug.
+
 **Edit in place:** the viewer's normal mode carries vim's small change set — `x` `dd` `D` `J` delete and join, `d` cuts a `v`/`V` selection, `u` undoes, and `i` `a` `o` `O` `I` drop into insert (`Ctrl+S` saves in the file's own encoding, `Esc` leaves). Quick config surgery never needs an editor round-trip. Prefer your own editor? **`E`** (or `:edit`) opens it in `$VISUAL` / `$EDITOR` — or nvim → vim → vi — and reloads when you're back.
 
 **Archives, more:** `:zip` / `:tar` / `:targz` bundle the marked files; `:zip -e` makes an encrypted one. `:unzip` (or right-click **▸ Extract here**) unpacks the file under the cursor into a fresh sub-folder. Locked zips still list their members on F3, and extracting one asks for the password first.

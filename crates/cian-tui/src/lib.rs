@@ -664,6 +664,10 @@ enum EncTarget {
     Diff(Box<Popup>),
 }
 
+/// A whole-line transform (`:sort`, `:han`, `:reindent`, …): lines in, lines
+/// out, so one call site can run any of them over a selection or a file.
+pub(crate) type LineTransform = Box<dyn Fn(&[String]) -> Vec<String>>;
+
 /// A `:s/old/new/c` walk: the replacements still to be offered, and how the
 /// answers have gone so far. Hits are visited in order; accepting one shifts
 /// the later hits on that same line, which is tracked as it goes.
@@ -1834,6 +1838,10 @@ pub struct App {
     /// Member list of the archive being browsed (`Enter` on a zip/tar),
     /// cached so navigation inside it does not re-scan — see [`arcview`].
     archive_cache: Option<arcview::ArchiveCache>,
+    /// Show the invisible characters in the viewer: a trailing space, an
+    /// ideographic space, a tab. Off by default (they are noise while reading)
+    /// and turned on for the pass where they matter — `:ws`, or the toggles.
+    show_ws: bool,
     /// Cursor-follow preview (`:preview`): while on, the shell panel's area
     /// previews the file under the cursor whenever a file pane has focus.
     preview_on: bool,
@@ -2207,6 +2215,7 @@ impl App {
             nav_rects: Vec::new(),
             gfx_picker: None,
             img_proto: None,
+            show_ws: false,
             preview_on: config.options.preview.unwrap_or(true),
             preview: None,
             preview_gfx: None,
@@ -3387,7 +3396,12 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry(":nobom", None, "strip UTF-8 BOMs from marked files (UTF-16 kept; viewer badges BOMs)", "マークから UTF-8 BOM 除去（UTF-16 は保持・ビューアにバッジ表示）"),
                 entry("  i on a binary", None, "hex edit: 0-9a-f overwrites bytes, Ctrl+S saves with a .bak", "バイナリで i：hex編集（0-9a-f 上書き、Ctrl+S で .bak を残して保存）"),
                 entry("  edit in viewer", None, "i/a/o/O/I = insert (Ctrl+S save, Esc leave), E = external editor", "ビューア内編集：i/a/o/O/I 挿入（Ctrl+S 保存, Esc 終了）／ E 外部エディタ"),
-                entry("  : in viewer", None, "replace: s/old/new/ (g all, c confirm each, i ignore case); :lf / :crlf convert line endings", "ビューアで : ：置換 s/old/new/（g 行内全部, c 1件ずつ, i 大小無視）／:lf :crlf で改行コード変換"),
+                entry("  : in viewer", None, "replace: s/old/new/ (g all, c confirm each, i ignore case)", "ビューアで : ：置換 s/old/new/（g 行内全部, c 1件ずつ, i 大小無視）"),
+                entry("    :sort :rsort :uniq", None, "sort / reverse-sort / drop duplicate lines (selection or whole file)", "行のソート／逆順／重複削除（選択範囲またはファイル全体）"),
+                entry("    :han :zen", None, "full-width ASCII → half, half-width kana → full / and back", "全角英数→半角・半角カナ→全角／その逆"),
+                entry("    :expand :unexpand :reindent", None, "leading tabs ↔ spaces, and re-indent to a consistent step", "先頭のTAB⇔空白、インデントを一定幅に整形"),
+                entry("    :ws", None, "show trailing spaces, tabs and ideographic spaces", "行末空白・TAB・全角スペースを表示"),
+                entry("    :lf :crlf", None, "convert line endings (shown in the title)", "改行コードを変換（タイトルに表示）"),
                 entry("  normal mode", None, "x/dd/D/J delete·join, u undo, v+d cut selection (d/u scroll via Ctrl)", "ノーマルモード：x/dd/D/J 削除·結合, u 取消, v+d 選択削除（スクロールは Ctrl+d/u）"),
                 entry(":edit", None, "edit the file in your external editor (E in the viewer)", "外部エディタで編集（ビューア内は E）"),
                 entry(":vi / :vim / :nvim", None, "open the file in that editor in a new shell tab", "新規シェルタブでそのエディタでファイルを開く"),
