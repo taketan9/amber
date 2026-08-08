@@ -1961,17 +1961,8 @@ impl App {
             }
             (_, _, KeyCode::Left) => self.focus(FocusedPane::Left),
             (_, _, KeyCode::Right) => self.focus(FocusedPane::Right),
-            // `l` only enters directories; never opens files. Inside an
-            // archive it descends into a member directory — going through
-            // activate_selected, because the local navigation it used to call
-            // would be handed a path that exists only inside the zip.
-            (false, false, KeyCode::Char('l')) => {
-                let on_dir =
-                    self.active_pane().and_then(|p| p.selected()).map(|e| e.is_dir).unwrap_or(false);
-                if on_dir {
-                    self.activate_selected()?;
-                }
-            }
+            // `l` is deliberately unbound. Entering a folder is Enter; the
+            // vim-shaped `l` kept firing when a hand rested on the home row.
             // Ctrl+Enter opens the selected dir (else this cwd) in the other
             // pane, same tab. (Ctrl+Shift+Enter is the global snippet launcher;
             // `O` pushes this pane's directory to the other one.) Needs a
