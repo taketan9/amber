@@ -750,6 +750,32 @@ impl App {
             }
             return;
         }
+        // Marked files open together, as tabs. Having marked them is the way
+        // of saying "these ones", and opening the first and forgetting the
+        // rest answers a question that was not asked.
+        let marked: Vec<PathBuf> = self
+            .active_pane()
+            .map(|p| {
+                p.entries
+                    .iter()
+                    .filter(|e| !e.is_dir && !e.is_parent && p.marks.contains(&e.path))
+                    .map(|e| e.path.clone())
+                    .collect()
+            })
+            .unwrap_or_default();
+        if marked.len() > 1 {
+            // A ceiling, because each one is read into memory as it opens.
+            const MAX_TABS: usize = 12;
+            let shown = marked.len().min(MAX_TABS);
+            self.open_viewer_tabs(&marked[..shown]);
+            if marked.len() > shown {
+                self.message = Some(format!(
+                    "{shown} of {} opened — the viewer holds {MAX_TABS}",
+                    marked.len()
+                ));
+            }
+            return;
+        }
         let Some(entry) = self.active_pane().and_then(|p| p.selected().cloned()) else {
             self.message = Some("nothing selected".into());
             return;

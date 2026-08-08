@@ -234,6 +234,11 @@ impl App {
                 return Ok(());
             }
         }
+        // F2 / Shift+F2 walk the open files, as they do in the shell panel.
+        if matches!(key.code, KeyCode::F(2)) {
+            self.viewer_switch_tab(!shift);
+            return Ok(());
+        }
         // `]]` / `[[` step to the next / previous outline entry — vim's section
         // motion, over the shape the outline column is showing. Doubled, like
         // vim, so a single bracket stays free.
@@ -617,6 +622,12 @@ impl App {
             return Ok(());
         }
         if close {
+            // With other files open, closing means closing *this* one — the
+            // rest are still being read. Only the last one closes the viewer.
+            if !self.viewer_tabs.is_empty() {
+                self.close_viewer_tab();
+                return Ok(());
+            }
             // If this viewer was opened from a grep hit, go back to the results
             // list so the next hit is one keystroke away; otherwise just close.
             match self.find_return.take() {
@@ -625,6 +636,87 @@ impl App {
             }
         }
         Ok(())
+    }
+
+    /// How many files the viewer has open, the active one included.
+    pub(crate) fn viewer_tab_count(&self) -> usize {
+        self.viewer_tabs.len() + usize::from(matches!(self.popup, Popup::Viewer { .. }))
+    }
+
+    /// Every open viewer in order, with the active one put back where it
+    /// belongs. Taking `self.popup` out is what makes the ordering work: the
+    /// active tab is not in the list while it is on screen.
+    fn viewer_all_tabs(&mut self) -> Vec<Popup> {
+        let mut all = std::mem::take(&mut self.viewer_tabs);
+        let at = self.viewer_tab_idx.min(all.len());
+        all.insert(at, std::mem::replace(&mut self.popup, Popup::None));
+        all
+    }
+
+    fn viewer_make_active(&mut self, all: &mut Vec<Popup>, idx: usize) {
+        let idx = idx.min(all.len().saturating_sub(1));
+        self.popup = all.remove(idx);
+        self.viewer_tabs = std::mem::take(all);
+        self.viewer_tab_idx = idx;
+    }
+
+    /// F2 / Shift+F2: the next or previous open file, wrapping — the same keys
+    /// the shell panel uses for its tabs.
+    pub(crate) fn viewer_switch_tab(&mut self, forward: bool) {
+        let n = self.viewer_tab_count();
+        if n < 2 {
+            return;
+        }
+        let cur = self.viewer_tab_idx.min(n - 1);
+        let next = if forward { (cur + 1) % n } else { (cur + n - 1) % n };
+        let mut all = self.viewer_all_tabs();
+        self.viewer_make_active(&mut all, next);
+        self.viewer_note_tab();
+    }
+
+    /// Close the file on screen and show the next one along.
+    pub(crate) fn close_viewer_tab(&mut self) {
+        if self.viewer_tabs.is_empty() {
+            self.popup = Popup::None;
+            return;
+        }
+        let mut all = self.viewer_all_tabs();
+        let at = self.viewer_tab_idx.min(all.len().saturating_sub(1));
+        all.remove(at);
+        let next = at.min(all.len().saturating_sub(1));
+        self.viewer_make_active(&mut all, next);
+        self.viewer_note_tab();
+    }
+
+    fn viewer_note_tab(&mut self) {
+        let n = self.viewer_tab_count();
+        let i = self.viewer_tab_idx + 1;
+        let name = if let Popup::Viewer { title, .. } = &self.popup {
+            title.clone()
+        } else {
+            String::new()
+        };
+        self.message = Some(format!("{name}   [{i}/{n}]"));
+    }
+
+    /// Open every marked file at once, as tabs. The first is on screen and the
+    /// rest are a keystroke away, which is the point of having marked them.
+    pub(crate) fn open_viewer_tabs(&mut self, paths: &[std::path::PathBuf]) {
+        let mut all: Vec<Popup> = Vec::new();
+        for p in paths {
+            let title = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            self.open_viewer_at(p, &title, 0);
+            if matches!(self.popup, Popup::Viewer { .. }) {
+                all.push(std::mem::replace(&mut self.popup, Popup::None));
+            }
+        }
+        if all.is_empty() {
+            return;
+        }
+        self.viewer_make_active(&mut all, 0);
+        if self.viewer_tab_count() > 1 {
+            self.viewer_note_tab();
+        }
     }
 
     /// Jump the viewer cursor to the next/previous match of the active search,

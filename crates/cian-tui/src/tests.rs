@@ -734,6 +734,76 @@
         );
     }
 
+    /// F3 with several files marked opens them all: having marked them is how
+    /// you say "these ones", and opening the first while forgetting the rest
+    /// answers a question nobody asked.
+    #[test]
+    fn f3_on_marked_files_opens_them_as_tabs() {
+        let d = tempfile::tempdir().unwrap();
+        for (n, body) in [("a.txt", "AAA\n"), ("b.txt", "BBB\n"), ("c.txt", "CCC\n")] {
+            std::fs::write(d.path().join(n), body).unwrap();
+        }
+        let p = d.path().to_path_buf();
+        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        let mark = |app: &mut App, name: &str| {
+            let path = app
+                .active_pane()
+                .unwrap()
+                .entries
+                .iter()
+                .find(|e| e.name == name)
+                .unwrap()
+                .path
+                .clone();
+            app.active_pane_mut().unwrap().marks.insert(path);
+        };
+        let shown = |app: &App| match &app.popup {
+            Popup::Viewer { view, .. } => view.lines.join("\n"),
+            other => panic!("not a viewer: {other:?}"),
+        };
+
+        for n in ["a.txt", "b.txt", "c.txt"] {
+            mark(&mut app, n);
+        }
+        app.handle_key(code(KeyCode::F(3))).unwrap();
+        assert_eq!(app.viewer_tab_count(), 3, "one tab per marked file");
+        assert_eq!(shown(&app), "AAA", "the first is on screen");
+
+        // F2 walks them, and wraps.
+        app.handle_key(code(KeyCode::F(2))).unwrap();
+        assert_eq!(shown(&app), "BBB");
+        app.handle_key(code(KeyCode::F(2))).unwrap();
+        assert_eq!(shown(&app), "CCC");
+        app.handle_key(code(KeyCode::F(2))).unwrap();
+        assert_eq!(shown(&app), "AAA", "wrapped round");
+        app.handle_key(KeyEvent::new(KeyCode::F(2), KeyModifiers::SHIFT)).unwrap();
+        assert_eq!(shown(&app), "CCC", "and back the other way");
+
+        // Each tab keeps its own place in its own file.
+        if let Popup::Viewer { line, .. } = &mut app.popup {
+            *line = 0;
+        }
+        app.handle_key(code(KeyCode::F(2))).unwrap(); // to a.txt
+        app.handle_key(key('i')).unwrap();
+        app.handle_key(key('X')).unwrap();
+        app.handle_key(code(KeyCode::Esc)).unwrap();
+        assert_eq!(shown(&app), "XAAA", "edited");
+        app.handle_key(code(KeyCode::F(2))).unwrap();
+        assert_eq!(shown(&app), "BBB", "the other tab is untouched");
+        app.handle_key(KeyEvent::new(KeyCode::F(2), KeyModifiers::SHIFT)).unwrap();
+        assert_eq!(shown(&app), "XAAA", "and the edit is still there on return");
+
+        // Esc closes this file; the rest stay open. Only the last one closes
+        // the viewer. (The edited tab needs its discard key.)
+        app.handle_key(KeyEvent::new(KeyCode::Char('Q'), KeyModifiers::SHIFT)).unwrap();
+        assert_eq!(app.viewer_tab_count(), 2, "one closed, two left");
+        assert!(matches!(app.popup, Popup::Viewer { .. }), "still viewing");
+        app.handle_key(code(KeyCode::Esc)).unwrap();
+        app.handle_key(code(KeyCode::Esc)).unwrap();
+        assert!(matches!(app.popup, Popup::None), "the last one closes it");
+        assert_eq!(app.viewer_tab_count(), 0);
+    }
+
     /// Backspace in a search listing means the same as Esc. A set of results
     /// has no parent directory to climb to, so climbing to one is a surprise.
     #[test]

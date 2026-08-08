@@ -450,6 +450,8 @@ pub(crate) fn draw(f: &mut Frame, app: &mut App) {
             menu_lang,
             show_ws,
             msg_for_viewer,
+            app.viewer_tabs.len() + 1,
+            app.viewer_tab_idx,
         );
     } else {
         app.popup_zones.clear();
@@ -3465,6 +3467,8 @@ fn draw_popup(
     menu_lang: Lang,
     show_ws: bool,
     msg: Option<String>,
+    tabs: usize,
+    tab_at: usize,
 ) {
     // Every popup with a shape of its own draws itself. The rest — the
     // confirm/notice dialogs, which differ only in their wording — fall through
@@ -3483,7 +3487,7 @@ fn draw_popup(
         Popup::Shortcuts { .. } => draw_shortcuts(f, area, popup, zones, lang),
         Popup::History { .. } => draw_history(f, area, popup, zones, lang),
         Popup::DestPicker { .. } => draw_dest_picker(f, area, popup, dests, zones, lang),
-        Popup::Viewer { .. } => draw_viewer(f, area, popup, lang, show_ws, msg.as_deref()),
+        Popup::Viewer { .. } => draw_viewer(f, area, popup, lang, show_ws, msg.as_deref(), (tab_at, tabs)),
         Popup::DirCompare { .. } => draw_dir_compare(f, area, popup, zones, lang),
         Popup::Diff { .. } => draw_diff(f, area, popup, lang),
         Popup::Archive { .. } => draw_archive(f, area, popup, zones, lang),
@@ -5032,7 +5036,10 @@ fn draw_viewer(
     lang: Lang,
     show_ws: bool,
     msg: Option<&str>,
+    // Which of the viewer's open files this is, and how many there are.
+    tab: (usize, usize),
 ) {
+    let (tab_at, tabs) = tab;
     let Popup::Viewer { title, view, scroll, line, col, visual, anchor, find_input, find_query, sub_input, sub_walk, block_input, git_lines, markdown, preview, source, md_styles, md_map, md_width, editing, dirty, editable, hl, hl_lang, blame, shape, path, .. } = popup else { return };
     let w = area.width.saturating_sub(4);
     let h = area.height.saturating_sub(2);
@@ -5155,7 +5162,14 @@ fn draw_viewer(
         // The viewer takes the theme's own surface (light on a light theme),
         // so it truly follows the theme; its text uses readable_on below.
         .style(Style::default().bg(surface()))
-        .title(format!(" {}{}  —  {} ", title, dirty_mark, head))
+        .title(if tabs > 1 {
+            // With several files open, which one this is matters more than how
+            // big it is: the count replaces the size, and the name keeps its
+            // dirty mark.
+            format!(" {}{}   [{}/{}]  F2 ▸ ", title, dirty_mark, tab_at + 1, tabs)
+        } else {
+            format!(" {}{}  —  {} ", title, dirty_mark, head)
+        })
         .title_bottom(Line::from(vec![
             Span::styled(
                 format!(" {} ", mode),

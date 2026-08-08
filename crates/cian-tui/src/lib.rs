@@ -2067,6 +2067,12 @@ pub struct App {
     /// The viewer's text body rect, for mapping a mouse click to a line.
     /// `:keys` — report every keystroke as cian received it, for finding out
     /// whether a binding is broken or the terminal simply never sent the key.
+    /// The viewer's other open files. The active one is `popup`; these are the
+    /// rest, in order, with `viewer_tab_idx` saying where the active one sits
+    /// among them. Whole `Popup::Viewer` values, so a tab keeps its cursor,
+    /// its folds and its unsaved edits while another is on screen.
+    viewer_tabs: Vec<Popup>,
+    viewer_tab_idx: usize,
     key_probe: bool,
     /// The message was raised by the last keystroke, rather than left over
     /// from an earlier one. Only a fresh message may take a footer.
@@ -2352,6 +2358,8 @@ impl App {
             tab_rects: Vec::new(),
             menu_rect: Rect::new(0, 0, 0, 0),
             menu_stack: Vec::new(),
+            viewer_tabs: Vec::new(),
+            viewer_tab_idx: 0,
             key_probe: false,
             message_fresh: false,
             kbd_enhanced: false,
@@ -3611,6 +3619,7 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry("    :expand :unexpand :reindent", None, "leading tabs ↔ spaces, and re-indent to a consistent step", "先頭のTAB⇔空白、インデントを一定幅に整形"),
                 entry("    :ws", None, "show trailing spaces, tabs and ideographic spaces", "行末空白・TAB・全角スペースを表示"),
                 entry("    :lf :crlf", None, "convert line endings (shown in the title)", "改行コードを変換（タイトルに表示）"),
+                entry("  F2 / Shift+F2", None, "the next / previous open file — F3 on marked files opens them all as tabs", "次/前の開いているファイル — マークして F3 で全部タブで開く"),
                 entry("  r after /", None, "replace what the search found — the prompt arrives with the pattern in it", "検索したものを置換 — パターンは入力済みで開く"),
                 entry("  :ws", None, "the invisible characters — tab, trailing space, ideographic space, line ending. On by default", "見えない文字の表示 — TAB・行末の空白・全角空白・改行。既定でオン"),
                 entry("  :expand all", None, "convert every tab, not only the indent (destroys TSV separators — hence by name)", "行中のタブも全部変換（TSV の区切りも消えるので、明示的に指定）"),
