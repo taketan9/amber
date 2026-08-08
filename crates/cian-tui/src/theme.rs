@@ -418,6 +418,9 @@ pub enum Action {
     MarkDown,
     MarkUp,
     InvertMarks,
+    /// Mark every file in this listing — or, in the viewer, select the whole
+    /// file. Which of the two is simply which is in front of you.
+    MarkAll,
     Visual,
     Command,
     Filter,
@@ -474,6 +477,7 @@ pub(crate) fn action_from_name(name: &str) -> Option<Action> {
         "mark_down" => Action::MarkDown,
         "mark_up" => Action::MarkUp,
         "invert_marks" => Action::InvertMarks,
+        "mark_all" | "select_all" => Action::MarkAll,
         "visual" => Action::Visual,
         "command" => Action::Command,
         "filter" => Action::Filter,

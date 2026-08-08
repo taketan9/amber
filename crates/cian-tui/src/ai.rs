@@ -193,7 +193,17 @@ impl App {
     /// lands, so this NEVER blocks — the python `--check` can take seconds and
     /// must not freeze the UI (e.g. when building the right-click menu).
     pub(crate) fn ai_ready(&mut self) -> bool {
-        if self.ai.is_none() {
+        let Some(cfg) = self.ai.as_ref() else { return false };
+        // No endpoint, no AI. There is no default for it any more — a site's
+        // gateway address is a site's business — so this is the ordinary case
+        // for anyone who has not set one, and it has to be a plain "not
+        // configured" rather than a connection that fails obscurely later.
+        // …except in mock mode, which answers offline and has nothing to
+        // reach for.
+        if cfg.auth_mode != "mock"
+            && cfg.endpoint.trim().is_empty()
+            && cfg.api_base_url.trim().is_empty()
+        {
             return false;
         }
         self.ai_ready.unwrap_or(false)
@@ -241,7 +251,7 @@ impl App {
 
     pub(crate) fn open_ai_chat(&mut self) {
         if self.ai.is_none() {
-            self.message = Some("AI not configured — add cian.ai{...} to init.lua".into());
+            self.message = Some("AI not configured — add cian.ai{ endpoint = \"…\" } to init.lua".into());
             return;
         }
         if !self.ai_ready() {
@@ -265,7 +275,7 @@ impl App {
     /// opens in the AI chat, where it can be read, selected and copied.
     pub(crate) fn summarize_viewer(&mut self) {
         if self.ai.is_none() {
-            self.message = Some("AI not configured — add cian.ai{...} to init.lua".into());
+            self.message = Some("AI not configured — add cian.ai{ endpoint = \"…\" } to init.lua".into());
             return;
         }
         // Pull the decoded text and a name out of the viewer.
@@ -305,7 +315,7 @@ impl App {
     /// item), and opens the reply in the AI chat.
     pub(crate) fn explain_shell_error(&mut self) {
         if self.ai.is_none() {
-            self.message = Some("AI not configured — add cian.ai{...} to init.lua".into());
+            self.message = Some("AI not configured — add cian.ai{ endpoint = \"…\" } to init.lua".into());
             return;
         }
         // Grab the visible screen of the active shell pane.
@@ -348,7 +358,7 @@ impl App {
     /// line. Reuses the same text the copy/save actions produce.
     pub(crate) fn explain_diff(&mut self) {
         if self.ai.is_none() {
-            self.message = Some("AI not configured — add cian.ai{...} to init.lua".into());
+            self.message = Some("AI not configured — add cian.ai{ endpoint = \"…\" } to init.lua".into());
             return;
         }
         let Some(text) = self.diff_as_text() else {
@@ -380,7 +390,7 @@ impl App {
     /// at the RHEL/AIX/Oracle logs this is built for.
     pub(crate) fn triage_log(&mut self) {
         if self.ai.is_none() {
-            self.message = Some("AI not configured — add cian.ai{...} to init.lua".into());
+            self.message = Some("AI not configured — add cian.ai{ endpoint = \"…\" } to init.lua".into());
             return;
         }
         let picked = self
@@ -752,7 +762,7 @@ impl App {
     /// Open the "describe a command" prompt (if AI is available).
     pub(crate) fn start_ai_shell_prompt(&mut self) {
         if self.ai.is_none() {
-            self.message = Some("AI not configured — add cian.ai{...} to init.lua".into());
+            self.message = Some("AI not configured — add cian.ai{ endpoint = \"…\" } to init.lua".into());
             return;
         }
         if !self.ai_ready() {
@@ -848,7 +858,7 @@ impl App {
     /// helpful when the stage is empty (the common "forgot to `git add`" case).
     pub(crate) fn start_ai_commit_message(&mut self) {
         if self.ai.is_none() {
-            self.message = Some("AI not configured — add cian.ai{...} to init.lua".into());
+            self.message = Some("AI not configured — add cian.ai{ endpoint = \"…\" } to init.lua".into());
             return;
         }
         let Some(dir) = self.active_pane().map(|p| p.cwd.clone()) else { return };
@@ -885,7 +895,7 @@ impl App {
     /// metadata (names, sizes, dir flags) leaves the machine — never contents.
     pub(crate) fn start_ai_junk(&mut self) {
         if self.ai.is_none() {
-            self.message = Some("AI not configured — add cian.ai{...} to init.lua".into());
+            self.message = Some("AI not configured — add cian.ai{ endpoint = \"…\" } to init.lua".into());
             return;
         }
         // Snapshot the listing up front so the immutable pane borrow is dropped
@@ -936,7 +946,7 @@ impl App {
     /// then show the moves for review. Metadata only (names, sizes, dir flags).
     pub(crate) fn start_ai_structure(&mut self) {
         if self.ai.is_none() {
-            self.message = Some("AI not configured — add cian.ai{...} to init.lua".into());
+            self.message = Some("AI not configured — add cian.ai{ endpoint = \"…\" } to init.lua".into());
             return;
         }
         let Some(pane) = self.active_pane() else { return };
@@ -1030,7 +1040,7 @@ impl App {
     /// are the marked ones, or the whole listing when nothing is marked.
     pub(crate) fn start_ai_rename_prompt(&mut self) {
         if self.ai.is_none() {
-            self.message = Some("AI not configured — add cian.ai{...} to init.lua".into());
+            self.message = Some("AI not configured — add cian.ai{ endpoint = \"…\" } to init.lua".into());
             return;
         }
         if !self.ai_ready() {
@@ -1099,7 +1109,7 @@ impl App {
     /// Prompt for a natural-language query, then semantic-search the tree.
     pub(crate) fn start_ai_search_prompt(&mut self) {
         if self.ai.is_none() {
-            self.message = Some("AI not configured — add cian.ai{...} to init.lua".into());
+            self.message = Some("AI not configured — add cian.ai{ endpoint = \"…\" } to init.lua".into());
             return;
         }
         if !self.ai_ready() {

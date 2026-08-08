@@ -1978,6 +1978,10 @@ impl App {
             (false, false, KeyCode::Char('f')) => self.start_search(),
             (false, _, KeyCode::Char('/')) => self.start_filter(),
             (false, true, KeyCode::Char('F')) => self.start_find_prompt(),
+            // Ctrl+A marks the lot. Only where the terminal hands Ctrl over —
+            // bind `mark_all` to something else in keymap.lua where it does
+            // not, or use `:markall`.
+            (true, _, KeyCode::Char('a')) => self.mark_all(),
             (true, _, KeyCode::Char('f')) => self.start_grep_prompt(),
             // `C` = command palette (mnemonic: Commands), `Z` = fuzzy-jump to a
             // recent dir (complements `z`, jump-to-typed-path). Letter keys, not
@@ -2198,6 +2202,7 @@ impl App {
                     for i in 0..p.entries.len() { p.toggle_mark_at(i); }
                 }
             }
+            Action::MarkAll => self.mark_all(),
             Action::Visual => self.visual_start(),
             Action::Command => {
                 self.mode = Mode::Command;

@@ -287,13 +287,11 @@
 -- モデルに送るのは各機能が必要とする分だけ（ファイル名とサイズ。ファイル内容は
 -- 機能が明示的に要求する場合のみ）です。
 --
--- エンドポイントとモデルは crmaine 環境
--- （https://apim-jri-dev-apim1.azure-api.net/llmaoai、モデル gpt-5-mini）を既定
--- とし、ブローカー認証を使います。その構成なら `cian.ai {}` だけで AI が有効に
--- なります。
--- cian.ai {}
+-- エンドポイントは既定では空です。組織の API ゲートウェイのアドレスは、
+-- 公開リポジトリのソースではなく、その組織の init.lua に書くべきものなので。
+-- 未設定のまま AI 機能を使うと、何を設定すればよいかを表示して止まります。
 --
--- 個別に上書きも可能:
+-- 設定例:
 -- cian.ai {
 --   endpoint    = "https://your-apim.azure-api.net/llmaoai",  -- Azure OpenAI / APIM
 --   model       = "gpt-5-mini",

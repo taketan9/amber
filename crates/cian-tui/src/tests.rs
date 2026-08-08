@@ -893,6 +893,39 @@
         );
     }
 
+    /// "Select all" means the listing in a pane and the file in the viewer —
+    /// one idea, and which of the two is simply which is in front of you.
+    #[test]
+    fn select_all_means_this_directory_or_this_file() {
+        let (_d, mut app) = app_with(&["a.txt", "b.txt", "c.txt"]);
+        app.handle_key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL)).unwrap();
+        let p = app.active_pane().unwrap();
+        assert_eq!(p.marks.len(), 3, "everything here");
+        assert!(
+            !p.marks.iter().any(|m| m.ends_with("..")),
+            "but not the parent, which is not a file to operate on",
+        );
+
+        // In the viewer it is a line-wise selection of the whole buffer, so
+        // `y` copies the file and Esc clears it — the ordinary visual keys.
+        let (_d2, mut app) = viewer_on("one\ntwo\nthree\n");
+        app.handle_key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL)).unwrap();
+        match &app.popup {
+            Popup::Viewer { visual: Some(ViewVisual::Line), anchor, line, .. } => {
+                assert_eq!(*anchor, (0, 0));
+                assert_eq!(*line, 2, "down to the last line");
+            }
+            other => panic!("expected a whole-file selection, got {other:?}"),
+        }
+        app.handle_key(key('y')).unwrap();
+        assert_eq!(app.yank.as_deref(), Some("one\ntwo\nthree\n"), "and y takes the lot");
+
+        // Reachable without Ctrl, which this terminal does not deliver.
+        let (_d3, mut app) = app_with_keymaps(&["a.txt"], vec![("alt+a", "mark_all".into())]);
+        app.handle_key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::ALT)).unwrap();
+        assert_eq!(app.active_pane().unwrap().marks.len(), 1);
+    }
+
     /// `=` compares the two halves in place: the marks appear on the real
     /// lines, both files stay editable, and the comparison follows the edit.
     #[test]

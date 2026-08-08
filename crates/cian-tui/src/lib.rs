@@ -3832,6 +3832,7 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry(":theme", None, "theme gallery;  :theme dracula  sets one directly", "テーマ一覧；  :theme dracula で直接指定"),
                 entry(":reload", None, "re-read init.lua (borders need a restart)", "init.luaを再読込（枠線は再起動が必要）"),
                 entry(":redraw", None, "repaint the screen from nothing, after a stray control character scrambles it", "画面を一から描き直す（制御文字で表示が乱れたとき）"),
+                entry("Ctrl+A, :markall", None, "mark everything here — in the viewer, select the whole file", "ここにある全部をマーク — ビューアではファイル全体を選択"),
                 entry(":keys", None, "report every keystroke as cian receives it, and which keyboard mode is in use", "受け取ったキーをそのまま表示（キーボードのモードも表示）"),
                 entry("  set_keymap", None, "init.lua: cian.set_keymap(\"alt+g\", \"grep_recursive\") — modifiers allowed", "init.lua: cian.set_keymap(\"alt+g\", \"grep_recursive\") — 修飾キーも書ける"),
                 entry("  CIAN_LEGACY_KEYS=1", None, "start without the enhanced-keyboard request — try it if every Ctrl shortcut is dead", "拡張キーボード要求なしで起動 — Ctrl 系が全滅するときに試す"),

@@ -285,12 +285,11 @@
 -- window). Data sent to the model is only what a feature needs (file names and
 -- sizes; file contents only when a feature explicitly requires it).
 --
--- The endpoint and model default to the crmaine environment
--- (https://apim-jri-dev-apim1.azure-api.net/llmaoai, model gpt-5-mini) with
--- broker auth, so in that setup `cian.ai {}` on its own is enough to turn AI on.
--- cian.ai {}
+-- There is no default endpoint. A site's own API gateway belongs in that
+-- site's init.lua rather than in the source of a public program, so the AI
+-- features say what to set rather than reaching for someone else's address.
 --
--- Override any of it:
+-- Set it like this:
 -- cian.ai {
 --   endpoint    = "https://your-apim.azure-api.net/llmaoai",  -- Azure OpenAI / APIM
 --   model       = "gpt-5-mini",

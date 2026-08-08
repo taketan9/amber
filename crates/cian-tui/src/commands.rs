@@ -53,6 +53,7 @@ impl App {
             "copyto" => self.start_dest_picker(PendingOp::Copy),
             "moveto" => self.start_dest_picker(PendingOp::Move),
             "grep" => self.start_grep_prompt(),
+            "markall" | "selectall" => self.mark_all(),
             // Repaint from nothing. A stray control character — one the
             // terminal acted on rather than passing along — can leave the
             // screen holding text cian never drew, and there is otherwise no

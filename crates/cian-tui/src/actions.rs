@@ -1730,6 +1730,47 @@ impl App {
             );
     }
 
+    /// Mark everything here — or, in the viewer, select the whole file.
+    ///
+    /// One action for both, because "select all" is one idea and which of the
+    /// two it means is simply which one is in front of you.
+    pub(crate) fn mark_all(&mut self) {
+        if matches!(self.popup, Popup::Viewer { .. }) {
+            let mut n = 0usize;
+            if let Popup::Viewer { view, visual, anchor, line, col, goal, .. } = &mut self.popup {
+                n = view.lines.len();
+                if n == 0 {
+                    return;
+                }
+                *anchor = (0, 0);
+                *line = n - 1;
+                *col = 0;
+                *goal = 0;
+                *visual = Some(ViewVisual::Line);
+            }
+            self.message = Some(if self.lang == Lang::Ja {
+                format!("{n} 行すべて選択（y でコピー、Esc で解除）")
+            } else {
+                format!("all {n} line(s) selected — y copies, Esc clears")
+            });
+            return;
+        }
+        let mut n = 0usize;
+        if let Some(p) = self.active_pane_mut() {
+            // `..` is not a file; marking it would put the parent directory
+            // into every operation the marks are for.
+            for e in p.entries.iter().filter(|e| !e.is_parent) {
+                p.marks.insert(e.path.clone());
+                n += 1;
+            }
+        }
+        self.message = Some(if self.lang == Lang::Ja {
+            format!("{n} 件マーク（Space で個別解除、Esc で全解除）")
+        } else {
+            format!("{n} marked — Space unmarks one, Esc clears them")
+        });
+    }
+
     pub(crate) fn start_grep_prompt(&mut self) {
         self.popup = text_input(
                 "grep (recursive)",

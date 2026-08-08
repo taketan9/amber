@@ -196,7 +196,7 @@ impl App {
             .endpoint
             .clone()
             .or_else(|| from_settings(&settings, "crmaine.azureEndpoint"))
-            .unwrap_or_else(|| "https://apim-jri-dev-apim1.azure-api.net/llmoai".into());
+            .unwrap_or_default();
         let model = cfg
             .model
             .clone()

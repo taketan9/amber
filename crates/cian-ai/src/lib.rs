@@ -36,11 +36,13 @@ impl Default for AiConfig {
     fn default() -> Self {
         Self {
             python: "python".into(),
-            // Same Azure APIM endpoint and model family as crmaine, so an empty
-            // `cian.ai{}` works out of the box in that environment.
-            endpoint: "https://apim-jri-dev-apim1.azure-api.net/llmaoai".into(),
-            // crmaine's own default model; "gpt-5.4" was a guess and is not
-            // deployed in that environment (404 on the deployment path).
+            // Deliberately empty. This used to carry one organisation's
+            // internal API gateway, compiled into a program whose source is
+            // public — a hostname nobody outside that network can use and
+            // everybody outside it can read. Where the AI is meant to be used,
+            // `cian.ai{ endpoint = … }` says so; where it is not, an empty
+            // string is the honest default and the error names what to set.
+            endpoint: String::new(),
             model: "gpt-5-mini".into(),
             api_version: "2025-04-01-preview".into(),
             auth_mode: "broker".into(),

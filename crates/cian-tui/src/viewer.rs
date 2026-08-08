@@ -388,6 +388,13 @@ impl App {
             self.open_mermaid_in_browser();
             return Ok(());
         }
+        // Ctrl+A selects the whole file. The pane's own Ctrl+A never reaches
+        // here — a popup owns the keyboard — so it is bound in both places,
+        // and `mark_all` decides which of the two it means.
+        if ctrl && key.code == KeyCode::Char('a') {
+            self.mark_all();
+            return Ok(());
+        }
         // `=` compares the two halves, in place. Both stay editable and the
         // marks follow every edit — the difference between reading a diff and
         // working inside one.
