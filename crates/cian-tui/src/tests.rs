@@ -553,6 +553,69 @@
         assert_eq!(viewer_lines(&app)[0], "trailing   ");
     }
 
+    /// Rectangular editing: Ctrl+V marks a block, then `d` cuts it, and
+    /// `I` / `A` / `c` type once and land on every line.
+    #[test]
+    fn block_selection_can_be_edited_not_just_copied() {
+        // Move the cursor to (line, col) without relying on key counts.
+        let put = |app: &mut App, l: usize, c: usize| {
+            if let Popup::Viewer { line, col, .. } = &mut app.popup {
+                *line = l;
+                *col = c;
+            }
+        };
+        let block = |app: &mut App, from: (usize, usize), to: (usize, usize)| {
+            put(app, from.0, from.1);
+            app.handle_key(KeyEvent::new(KeyCode::Char('v'), KeyModifiers::CONTROL)).unwrap();
+            put(app, to.0, to.1);
+        };
+
+        // d cuts the rectangle out of every line it covers.
+        let (_d, mut app) = viewer_on("abcdef\nabcdef\nabcdef\n");
+        block(&mut app, (0, 2), (2, 3));
+        app.handle_key(key('d')).unwrap();
+        assert_eq!(viewer_lines(&app), ["abef", "abef", "abef"]);
+        app.handle_key(key('u')).unwrap();
+        assert_eq!(viewer_lines(&app), ["abcdef", "abcdef", "abcdef"], "one undo step");
+
+        // I inserts down the left edge, once typed.
+        let (_d2, mut app) = viewer_on("one\ntwo\nthree\n");
+        block(&mut app, (0, 0), (2, 0));
+        app.handle_key(KeyEvent::new(KeyCode::Char('I'), KeyModifiers::SHIFT)).unwrap();
+        assert!(matches!(app.popup, Popup::Viewer { block_input: Some(_), .. }), "asks for the text");
+        for c in "# ".chars() {
+            app.handle_key(key(c)).unwrap();
+        }
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+        assert_eq!(viewer_lines(&app), ["# one", "# two", "# three"]);
+
+        // A appends at the right edge, padding the short lines so it lines up.
+        let (_d3, mut app) = viewer_on("ab\nabcd\n");
+        block(&mut app, (0, 0), (1, 2));
+        app.handle_key(KeyEvent::new(KeyCode::Char('A'), KeyModifiers::SHIFT)).unwrap();
+        app.handle_key(key('|')).unwrap();
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+        assert_eq!(viewer_lines(&app), ["ab |", "abc|d"], "padded to the column");
+
+        // c replaces what the rectangle covers.
+        let (_d4, mut app) = viewer_on("id=001\nid=002\n");
+        block(&mut app, (0, 3), (1, 5));
+        app.handle_key(key('c')).unwrap();
+        for c in "999".chars() {
+            app.handle_key(key(c)).unwrap();
+        }
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+        assert_eq!(viewer_lines(&app), ["id=999", "id=999"]);
+
+        // Esc abandons a prompt without touching the buffer.
+        let (_d5, mut app) = viewer_on("keep\nkeep\n");
+        block(&mut app, (0, 0), (1, 1));
+        app.handle_key(key('c')).unwrap();
+        app.handle_key(key('X')).unwrap();
+        app.handle_key(code(KeyCode::Esc)).unwrap();
+        assert_eq!(viewer_lines(&app), ["keep", "keep"], "Esc changes nothing");
+    }
+
     /// The hex editor: `i` on a binary view, hex digits overwrite the byte
     /// under the cursor, Ctrl+S saves — with a `.bak` of the original — and
     /// `u` walks the whole session back.

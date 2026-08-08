@@ -4632,7 +4632,7 @@ fn draw_viewer(
     lang: Lang,
     show_ws: bool,
 ) {
-    let Popup::Viewer { title, view, scroll, line, col, visual, anchor, find_input, find_query, sub_input, sub_walk, git_lines, markdown, preview, source, md_styles, md_width, editing, dirty, editable, hl, hl_lang, blame, .. } = popup else { return };
+    let Popup::Viewer { title, view, scroll, line, col, visual, anchor, find_input, find_query, sub_input, sub_walk, block_input, git_lines, markdown, preview, source, md_styles, md_width, editing, dirty, editable, hl, hl_lang, blame, .. } = popup else { return };
     let w = area.width.saturating_sub(4);
     let h = area.height.saturating_sub(2);
     let rect = centered_rect(w, h, area);
@@ -4946,6 +4946,22 @@ fn draw_viewer(
             shorten(&h.to),
             w.idx + 1,
             w.hits.len(),
+        )
+    } else if let Some(b) = block_input {
+        let what = match b.kind {
+            crate::BlockEdit::Insert => tr(lang, "insert ▏", "左端に挿入 ▏"),
+            crate::BlockEdit::Append => tr(lang, "append ▕", "右端に追記 ▕"),
+            crate::BlockEdit::Replace => tr(lang, "replace ▊", "矩形を置換 ▊"),
+        };
+        format!(
+            "{} {}_   {}",
+            what,
+            b.text,
+            if lang == Lang::Ja {
+                format!("({} 行, {} 桁目)", b.block.bottom - b.block.top + 1, b.block.left + 1)
+            } else {
+                format!("({} lines, col {})", b.block.bottom - b.block.top + 1, b.block.left + 1)
+            }
         )
     } else if let Some(cmd) = sub_input {
         format!(

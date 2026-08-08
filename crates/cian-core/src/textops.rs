@@ -197,6 +197,52 @@ fn indent_width(line: &str) -> usize {
 mod tests {
     use super::*;
 
+    fn blk(top: usize, bottom: usize, left: usize, right: usize) -> Block {
+        Block { top, bottom, left, right }
+    }
+
+    /// The rectangle comes out of every line it covers, and a line too short
+    /// to reach into it is left exactly as it was.
+    #[test]
+    fn block_delete_cuts_a_column_and_spares_short_lines() {
+        let src = v(&["abcdef", "abcdef", "ab", "abcdef"]);
+        assert_eq!(
+            block_delete(&src, blk(0, 3, 2, 4)),
+            v(&["abef", "abef", "ab", "abef"]),
+        );
+        assert_eq!(block_text(&src, blk(0, 2, 2, 4)), v(&["cd", "cd", ""]));
+    }
+
+    /// Inserting down a column pads the short lines out, because the whole
+    /// point is that the column lines up afterwards.
+    #[test]
+    fn block_insert_pads_short_lines_so_the_column_aligns() {
+        let src = v(&["abcdef", "ab", ""]);
+        assert_eq!(block_insert(&src, blk(0, 2, 3, 4), "# "), v(&["abc# def", "ab # ", "   # "]));
+        // Appending works at the right edge, padding the same way.
+        assert_eq!(block_append(&v(&["ab", "abcd"]), blk(0, 1, 0, 3), "|"), v(&["ab |", "abc|d"]));
+    }
+
+    /// Replace is a delete and an insert in one step — rewriting a column of
+    /// values without doing it twice.
+    #[test]
+    fn block_replace_swaps_the_rectangle() {
+        let src = v(&["id=001 x", "id=002 y", "id=0"]);
+        assert_eq!(
+            block_replace(&src, blk(0, 2, 3, 6), "999"),
+            v(&["id=999 x", "id=999 y", "id=999"]),
+        );
+    }
+
+    /// The rectangle is built from two cursor positions in any order, and
+    /// includes the cell the anchor sits on.
+    #[test]
+    fn a_block_spans_both_cursors_inclusively() {
+        assert_eq!(Block::between((3, 5), (1, 2)), blk(1, 3, 2, 6));
+        assert_eq!(Block::between((1, 2), (3, 5)), blk(1, 3, 2, 6));
+        assert_eq!(block_text(&v(&["abcdef"]), Block::between((0, 1), (0, 3))), v(&["bcd"]));
+    }
+
     fn v(s: &[&str]) -> Vec<String> {
         s.iter().map(|x| x.to_string()).collect()
     }
@@ -250,4 +296,114 @@ mod tests {
         // was laid out against in the first place.
         assert_eq!(reindent(&v(&["a", "\tb"]), 4), v(&["a", "    b"]));
     }
+}
+
+/// A rectangle over the buffer: whole lines `top..=bottom`, columns
+/// `left..right` (end-exclusive) within each.
+///
+/// Lines shorter than `left` are the awkward case every block editor has to
+/// answer. cian's answer: a delete leaves them alone (there is nothing inside
+/// the rectangle to remove) and an insert pads them out with spaces to reach
+/// the column, because the point of inserting down a column is that the
+/// column lines up afterwards.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Block {
+    pub top: usize,
+    pub bottom: usize,
+    pub left: usize,
+    pub right: usize,
+}
+
+impl Block {
+    /// The rectangle between two cursor positions, in any order.
+    pub fn between(a: (usize, usize), b: (usize, usize)) -> Block {
+        Block {
+            top: a.0.min(b.0),
+            bottom: a.0.max(b.0),
+            left: a.1.min(b.1),
+            right: a.1.max(b.1) + 1, // the anchor cell is inside the block
+        }
+    }
+}
+
+/// Cut the rectangle out of each line. Short lines keep what they have.
+pub fn block_delete(lines: &[String], b: Block) -> Vec<String> {
+    edit_block(lines, b, |chars, left, right| {
+        if left >= chars.len() {
+            return; // nothing of this line lies inside the rectangle
+        }
+        chars.drain(left..right.min(chars.len()));
+    })
+}
+
+/// Insert `text` at the rectangle's left edge on every line, padding short
+/// lines with spaces so the inserted column actually lines up.
+pub fn block_insert(lines: &[String], b: Block, text: &str) -> Vec<String> {
+    edit_block(lines, b, |chars, left, _| {
+        while chars.len() < left {
+            chars.push(' ');
+        }
+        for (i, c) in text.chars().enumerate() {
+            chars.insert(left + i, c);
+        }
+    })
+}
+
+/// Append `text` at the rectangle's right edge on every line, padding to
+/// reach it. The block equivalent of vim's `A`, for adding a trailing column.
+pub fn block_append(lines: &[String], b: Block, text: &str) -> Vec<String> {
+    edit_block(lines, b, |chars, _, right| {
+        while chars.len() < right {
+            chars.push(' ');
+        }
+        for (i, c) in text.chars().enumerate() {
+            chars.insert(right + i, c);
+        }
+    })
+}
+
+/// Replace the rectangle's contents with `text` on every line: a delete and
+/// an insert in one step, which is how a column of values gets rewritten.
+pub fn block_replace(lines: &[String], b: Block, text: &str) -> Vec<String> {
+    edit_block(lines, b, |chars, left, right| {
+        if left < chars.len() {
+            chars.drain(left..right.min(chars.len()));
+        }
+        while chars.len() < left {
+            chars.push(' ');
+        }
+        for (i, c) in text.chars().enumerate() {
+            chars.insert(left + i, c);
+        }
+    })
+}
+
+/// The rectangle's contents, one line per row — what a block yank copies.
+pub fn block_text(lines: &[String], b: Block) -> Vec<String> {
+    (b.top..=b.bottom)
+        .filter_map(|i| lines.get(i))
+        .map(|l| {
+            let chars: Vec<char> = l.chars().collect();
+            if b.left >= chars.len() {
+                String::new()
+            } else {
+                chars[b.left..b.right.min(chars.len())].iter().collect()
+            }
+        })
+        .collect()
+}
+
+/// Run `f` over each line the block covers, as chars, and rebuild.
+fn edit_block(
+    lines: &[String],
+    b: Block,
+    f: impl Fn(&mut Vec<char>, usize, usize),
+) -> Vec<String> {
+    let mut out = lines.to_vec();
+    for i in b.top..=b.bottom.min(out.len().saturating_sub(1)) {
+        let mut chars: Vec<char> = out[i].chars().collect();
+        f(&mut chars, b.left, b.right);
+        out[i] = chars.into_iter().collect();
+    }
+    out
 }

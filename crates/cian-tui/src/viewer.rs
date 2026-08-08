@@ -67,6 +67,29 @@ impl App {
             self.save_viewer_file();
             return Ok(());
         }
+        // Typing the text for a rectangular edit.
+        if matches!(self.popup, Popup::Viewer { block_input: Some(_), .. }) {
+            match key.code {
+                KeyCode::Esc => {
+                    if let Popup::Viewer { block_input, .. } = &mut self.popup {
+                        *block_input = None;
+                    }
+                }
+                KeyCode::Enter => self.finish_block_edit(),
+                KeyCode::Backspace => {
+                    if let Popup::Viewer { block_input: Some(b), .. } = &mut self.popup {
+                        b.text.pop();
+                    }
+                }
+                KeyCode::Char(c) if !ctrl => {
+                    if let Popup::Viewer { block_input: Some(b), .. } = &mut self.popup {
+                        b.text.push(c);
+                    }
+                }
+                _ => {}
+            }
+            return Ok(());
+        }
         // A confirm-each-one replace owns the keyboard while it walks.
         if matches!(self.popup, Popup::Viewer { sub_walk: Some(_), .. }) {
             return self.sub_walk_key(key);
@@ -845,6 +868,7 @@ impl App {
         let body_h = (self.viewer_rect.height as usize).max(1);
         let mut entered_editing = false;
         let mut consumed = false;
+        let mut block_prompt: Option<crate::BlockInput> = None;
         if let Popup::Viewer {
             view,
             line,
@@ -922,20 +946,29 @@ impl App {
                             *line = s.0;
                             *col = s.1.min(lines[s.0].chars().count());
                         }
-                        // A block delete would need per-line column splicing;
-                        // not worth the code until someone misses it.
                         ViewVisual::Block => {
-                            *visual = Some(mode);
-                            self.message = Some(tr(
-                                self.lang,
-                                "block delete is not supported",
-                                "矩形削除は未対応",
-                            ).into());
-                            return true;
+                            let b = cian_core::textops::Block::between(*anchor, (*line, *col));
+                            *lines = cian_core::textops::block_delete(lines, b);
+                            *line = b.top;
+                            *col = b.left;
                         }
                     }
                     *goal = *col;
                     *dirty = true;
+                    consumed = true;
+                }
+                // I / A / c on a rectangle: type once, land on every line.
+                KeyCode::Char(k @ ('I' | 'A' | 'c'))
+                    if *visual == Some(ViewVisual::Block) =>
+                {
+                    let b = cian_core::textops::Block::between(*anchor, (*line, *col));
+                    let kind = match k {
+                        'I' => crate::BlockEdit::Insert,
+                        'A' => crate::BlockEdit::Append,
+                        _ => crate::BlockEdit::Replace,
+                    };
+                    *visual = None;
+                    block_prompt = Some(crate::BlockInput { block: b, kind, text: String::new() });
                     consumed = true;
                 }
                 // x — delete N characters under the cursor.
@@ -1061,10 +1094,57 @@ impl App {
                 }
             }
         }
+        if let Some(b) = block_prompt {
+            let kind = b.kind;
+            if let Popup::Viewer { block_input, .. } = &mut self.popup {
+                *block_input = Some(Box::new(b));
+            }
+            self.message = Some(match kind {
+                crate::BlockEdit::Insert => tr(self.lang,
+                    "type the text to insert down the left edge, Enter to apply",
+                    "左端に差し込む文字を入力、Enter で適用").into(),
+                crate::BlockEdit::Append => tr(self.lang,
+                    "type the text to append at the right edge, Enter to apply",
+                    "右端に追記する文字を入力、Enter で適用").into(),
+                crate::BlockEdit::Replace => tr(self.lang,
+                    "type what replaces the rectangle, Enter to apply",
+                    "矩形を置き換える文字を入力、Enter で適用").into(),
+            });
+        }
         if entered_editing {
             self.entered_editing_message();
         }
         consumed
+    }
+
+    /// Apply the rectangular edit whose text was just typed.
+    fn finish_block_edit(&mut self) {
+        let Some(b) = (if let Popup::Viewer { block_input, .. } = &mut self.popup {
+            block_input.take()
+        } else {
+            None
+        }) else {
+            return;
+        };
+        use cian_core::textops as tx;
+        let rows = b.block.bottom - b.block.top + 1;
+        if let Popup::Viewer { view, undo, dirty, hl, line, col, .. } = &mut self.popup {
+            push_viewer_undo(undo, &view.lines, *line, *col);
+            view.lines = match b.kind {
+                crate::BlockEdit::Insert => tx::block_insert(&view.lines, b.block, &b.text),
+                crate::BlockEdit::Append => tx::block_append(&view.lines, b.block, &b.text),
+                crate::BlockEdit::Replace => tx::block_replace(&view.lines, b.block, &b.text),
+            };
+            *line = b.block.top;
+            *col = b.block.left;
+            *dirty = true;
+            hl.clear();
+        }
+        self.message = Some(if self.lang == Lang::Ja {
+            format!("{} 行に適用しました", rows)
+        } else {
+            format!("applied to {rows} line(s)")
+        });
     }
 
     /// The built-in plain-text editor: modeless while `editing` — printable keys

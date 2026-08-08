@@ -410,6 +410,11 @@ enum Popup {
         find_input: Option<String>,
         /// While typing a `:s/old/new/` replace, the text entered so far.
         sub_input: Option<String>,
+        /// While typing the text for a block insert/append/replace: the
+        /// rectangle it will land in, which edge, and the text so far. Boxed
+        /// for the same reason as `sub_walk` — every `Popup` pays for the
+        /// widest variant.
+        block_input: Option<Box<BlockInput>>,
         /// A confirm-each-one replace in progress (the `c` flag). Boxed: the
         /// hit list would otherwise widen every `Popup` in the program.
         sub_walk: Option<Box<SubWalk>>,
@@ -662,6 +667,27 @@ enum EncTarget {
     Viewer(Box<Popup>),
     /// A stashed file diff to re-run under the chosen encoding.
     Diff(Box<Popup>),
+}
+
+/// Typing the text for a rectangular edit. The rectangle is captured when the
+/// key is pressed, because the selection is cleared as soon as the prompt
+/// opens — leaving it on screen would suggest the cursor still moves it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct BlockInput {
+    pub(crate) block: cian_core::textops::Block,
+    pub(crate) kind: BlockEdit,
+    pub(crate) text: String,
+}
+
+/// Which edge of the rectangle the typed text lands on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum BlockEdit {
+    /// `I` — at the left edge of every line.
+    Insert,
+    /// `A` — at the right edge of every line.
+    Append,
+    /// `c` — replacing what the rectangle covers.
+    Replace,
 }
 
 /// A whole-line transform (`:sort`, `:han`, `:reindent`, …): lines in, lines
@@ -3402,6 +3428,7 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry("    :expand :unexpand :reindent", None, "leading tabs ↔ spaces, and re-indent to a consistent step", "先頭のTAB⇔空白、インデントを一定幅に整形"),
                 entry("    :ws", None, "show trailing spaces, tabs and ideographic spaces", "行末空白・TAB・全角スペースを表示"),
                 entry("    :lf :crlf", None, "convert line endings (shown in the title)", "改行コードを変換（タイトルに表示）"),
+                entry("  Ctrl+V block", None, "rectangle: d cuts it, I/A insert at the left/right edge, c replaces", "矩形選択：d で切り取り、I/A で左端/右端に挿入、c で置換"),
                 entry("  normal mode", None, "x/dd/D/J delete·join, u undo, v+d cut selection (d/u scroll via Ctrl)", "ノーマルモード：x/dd/D/J 削除·結合, u 取消, v+d 選択削除（スクロールは Ctrl+d/u）"),
                 entry(":edit", None, "edit the file in your external editor (E in the viewer)", "外部エディタで編集（ビューア内は E）"),
                 entry(":vi / :vim / :nvim", None, "open the file in that editor in a new shell tab", "新規シェルタブでそのエディタでファイルを開く"),
