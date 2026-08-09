@@ -1326,6 +1326,45 @@
         assert_eq!(shown(&app), "BBB", "and is still reachable");
     }
 
+    /// `:q` closes the file it was typed into, not the viewer. In a split it
+    /// used to take the other half down with it — two files read together,
+    /// one `:q`, and both were gone.
+    #[test]
+    fn q_in_a_split_closes_only_the_half_it_was_typed_into() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::write(d.path().join("a.txt"), "AAA\n").unwrap();
+        std::fs::write(d.path().join("b.txt"), "BBB\n").unwrap();
+        let p = d.path().to_path_buf();
+        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        for n in ["a.txt", "b.txt"] {
+            let path =
+                app.active_pane().unwrap().entries.iter().find(|e| e.name == n).unwrap().path.clone();
+            app.active_pane_mut().unwrap().marks.insert(path);
+        }
+        app.handle_key(code(KeyCode::F(3))).unwrap();
+        app.handle_key(KeyEvent::new(KeyCode::F(8), KeyModifiers::SHIFT)).unwrap();
+        let shown = |app: &App| match &app.popup {
+            Popup::Viewer { view, .. } => view.lines.join("\n"),
+            other => panic!("not a viewer: {other:?}"),
+        };
+        assert_eq!(shown(&app), "AAA");
+
+        // `:q` on the half in focus leaves the other one being read.
+        for k in [':', 'q'] {
+            app.handle_key(key(k)).unwrap();
+        }
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+        assert!(app.viewer_split.is_none(), "the split is over");
+        assert_eq!(shown(&app), "BBB", "the other half is what's left");
+
+        // The second `:q` has nothing else open, so the viewer closes.
+        for k in [':', 'q'] {
+            app.handle_key(key(k)).unwrap();
+        }
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+        assert!(matches!(app.popup, Popup::None), "the last file closes the viewer");
+    }
+
     /// Backspace in a search listing means the same as Esc. A set of results
     /// has no parent directory to climb to, so climbing to one is a surprise.
     #[test]
@@ -1545,13 +1584,42 @@
         assert!(f.contains("search") || f.contains("検索"), "hints are back: {f:?}");
         assert!(app.message.is_some(), "the status line still has it");
 
-        // The `:` prompt always wins over a message, however fresh.
+        // The `:` prompt always wins over a message, however fresh — and it
+        // takes a row of its own above the hints rather than painting over
+        // them, which is what the file panes do.
         app.handle_key(key('/')).unwrap();
         app.handle_key(code(KeyCode::Esc)).unwrap();
         app.handle_key(key(':')).unwrap();
         assert!(matches!(&app.popup, Popup::Viewer { sub_input: Some(_), .. }));
-        let f = footer(&mut app);
-        assert!(f.contains("s/old/new/"), "the command line is visible: {f:?}");
+        let rows = render(&mut app, 100, 30);
+        let hints = rows.iter().rev().nth(2).cloned().unwrap_or_default();
+        let prompt = rows.iter().rev().nth(3).cloned().unwrap_or_default();
+        assert!(prompt.contains("s/old/new/"), "the command line is visible: {prompt:?}");
+        assert!(
+            hints.contains("search") || hints.contains("検索"),
+            "and the hints keep their own row: {hints:?}"
+        );
+    }
+
+    /// `/` gets the same treatment as `:`: a prompt line above the hints, and
+    /// the text gives up the row so nothing of the file is covered by it.
+    #[test]
+    fn the_viewer_search_prompt_sits_above_the_hints() {
+        let (_d, mut app) = viewer_on("alpha\nbeta\ngamma\n");
+        let before = render(&mut app, 100, 30);
+        app.handle_key(key('/')).unwrap();
+        app.handle_key(key('b')).unwrap();
+        let rows = render(&mut app, 100, 30);
+        let hints = rows.iter().rev().nth(2).cloned().unwrap_or_default();
+        let prompt = rows.iter().rev().nth(3).cloned().unwrap_or_default();
+        assert!(prompt.contains("/b_"), "what is being typed: {prompt:?}");
+        assert!(
+            hints.contains("search") || hints.contains("検索"),
+            "the hints are still there: {hints:?}"
+        );
+        // The last line of the file must not be hidden behind the new row.
+        assert!(before.iter().any(|r| r.contains("gamma")));
+        assert!(rows.iter().any(|r| r.contains("gamma")), "the text kept its lines");
     }
 
     /// A binding can name its modifiers, so a shortcut whose Ctrl key the
@@ -4343,6 +4411,97 @@
                 (lum(bg) - lum(shade_of_surface(28))).abs() > 50_000,
                 "…and off the tint of the line it sits on",
             );
+        }
+        set_theme(ResolvedTheme::DARK);
+    }
+
+    /// The viewer's chrome — the mode badge, the tab strip, the hint bar —
+    /// was black text on colours chosen against a dark page. On a light theme
+    /// the badge, the tabs and the hints all came out too close to what they
+    /// were painted on to read. Every cell of them has to stand off its own
+    /// background, whatever the theme.
+    #[test]
+    fn the_viewer_chrome_reads_on_light_themes_too() {
+        use crate::theme::{set_theme, ResolvedTheme};
+        let _g = THEME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let lum = |c: Color| match c {
+            Color::Rgb(r, g, b) => (299 * r as i32 + 587 * g as i32 + 114 * b as i32) / 1000,
+            // A default fg/bg is the terminal's own; nothing to check.
+            _ => -1,
+        };
+
+        for t in
+            [ResolvedTheme::DARK, ResolvedTheme::GITHUB_LIGHT, ResolvedTheme::SOLARIZED_LIGHT]
+        {
+            set_theme(t);
+            let d = tempfile::tempdir().unwrap();
+            std::fs::write(d.path().join("a.txt"), "AAA\n").unwrap();
+            std::fs::write(d.path().join("b.txt"), "BBB\n").unwrap();
+            let p = d.path().to_path_buf();
+            let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+            for n in ["a.txt", "b.txt"] {
+                let path = app
+                    .active_pane()
+                    .unwrap()
+                    .entries
+                    .iter()
+                    .find(|e| e.name == n)
+                    .unwrap()
+                    .path
+                    .clone();
+                app.active_pane_mut().unwrap().marks.insert(path);
+            }
+            // Two files open, so the tab strip is drawn as well as the badge.
+            app.handle_key(code(KeyCode::F(3))).unwrap();
+            let buf = render_buf(&mut app, 100, 30);
+            let row_text = |y: u16| {
+                (0..buf.area.width).map(|x| buf[(x, y)].symbol().to_string()).collect::<String>()
+            };
+
+            // The rows the chrome lives on: the tab strip and badge sit on the
+            // viewer's border rows, the hints on its last inside row.
+            let rows: Vec<u16> = (0..buf.area.height)
+                .filter(|y| {
+                    let r = row_text(*y);
+                    // "1 a.txt" is the tab strip's own label, so the app's
+                    // status bar (which also names the file) is not caught.
+                    r.contains("READ") || r.contains("1 a.txt") || r.contains("search")
+                })
+                .collect();
+            assert!(!rows.is_empty(), "found none of the viewer chrome to check");
+            // Only inside the viewer's own columns: the file panes show at the
+            // edges of the same rows, and they are not what is being checked.
+            let (x0, x1) = (app.viewer_rect.x, app.viewer_rect.x + app.viewer_rect.width);
+            for y in rows {
+                for x in x0..x1 {
+                    let c = &buf[(x, y)];
+                    // Letters and digits only: borders and separators are
+                    // decoration, and are meant to be quieter than text.
+                    if !c.symbol().chars().all(char::is_alphanumeric) {
+                        continue;
+                    }
+                    let (f, b) = (lum(c.fg), lum(c.bg));
+                    if f < 0 || b < 0 {
+                        continue;
+                    }
+                    // WCAG's own measure, not a luminance difference: the
+                    // pairs that failed here — black on a mid-blue badge, a
+                    // dark-theme grey on cream — score respectably by
+                    // luminance and are still hard to read. 4.0 is a shade
+                    // under the 4.5 wanted for body text, which is fair for
+                    // bold chrome a few characters long.
+                    let cr = crate::render::contrast_ratio(c.fg, c.bg);
+                    assert!(
+                        cr >= 4.0,
+                        "{:?}: {:?} at ({x},{y}) — {:?} on {:?} is only {cr:.2}:1",
+                        t.accent,
+                        c.symbol(),
+                        c.fg,
+                        c.bg,
+                    );
+                    let _ = (f, b);
+                }
+            }
         }
         set_theme(ResolvedTheme::DARK);
     }

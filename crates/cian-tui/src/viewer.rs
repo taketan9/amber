@@ -680,27 +680,35 @@ impl App {
             return Ok(());
         }
         if close {
-            // With other files open — in the tabs or in the other half of a
-            // split — closing means closing *this* one; the rest are still
-            // being read, and may hold unsaved edits. Only the last one closes
-            // the viewer.
-            if !self.viewer_tabs.is_empty() || self.viewer_split.is_some() {
-                self.close_viewer_tab();
-                return Ok(());
-            }
-            // The last file: the viewer is done, so nothing of it may be left
-            // behind. A stale split half would go on hijacking the screen from
-            // whatever opened next.
-            self.viewer_split = None;
-            self.viewer_split_focus = false;
-            // If this viewer was opened from a grep hit, go back to the results
-            // list so the next hit is one keystroke away; otherwise just close.
-            match self.find_return.take() {
-                Some(back) => self.popup = *back,
-                None => self.popup = Popup::None,
-            }
+            self.close_viewer_file();
         }
         Ok(())
+    }
+
+    /// Close the file being read — not the viewer.
+    ///
+    /// With other files open, in the tab strip or in the other half of a
+    /// split, this closes *that one*: the rest are still being read and may
+    /// hold unsaved edits. Only the last file closes the viewer itself. Every
+    /// way out goes through here — `q`, Esc, `:q`, `:q!`, `:wq` — because a
+    /// `:q` that closed the whole viewer took the other half of the split
+    /// down with it.
+    pub(crate) fn close_viewer_file(&mut self) {
+        if !self.viewer_tabs.is_empty() || self.viewer_split.is_some() {
+            self.close_viewer_tab();
+            return;
+        }
+        // The last file: the viewer is done, so nothing of it may be left
+        // behind. A stale split half would go on hijacking the screen from
+        // whatever opened next.
+        self.viewer_split = None;
+        self.viewer_split_focus = false;
+        // If this viewer was opened from a grep hit, go back to the results
+        // list so the next hit is one keystroke away; otherwise just close.
+        match self.find_return.take() {
+            Some(back) => self.popup = *back,
+            None => self.popup = Popup::None,
+        }
     }
 
     /// Shift+F8 / Shift+F9: read two files at once, side by side or stacked.
@@ -1176,7 +1184,7 @@ impl App {
                 // Only close if the save actually took: a failed write that
                 // silently shut the file would lose the edit.
                 if matches!(self.popup, Popup::Viewer { dirty: false, .. }) {
-                    self.popup = Popup::None;
+                    self.close_viewer_file();
                 }
                 return;
             }
@@ -1186,12 +1194,12 @@ impl App {
                         "unsaved changes — :w to save, :q! to discard",
                         "未保存の変更があります — :w で保存、:q! で破棄").into());
                 } else {
-                    self.popup = Popup::None;
+                    self.close_viewer_file();
                 }
                 return;
             }
             "q!" => {
-                self.popup = Popup::None;
+                self.close_viewer_file();
                 return;
             }
             // The block selection, for terminals that keep Ctrl+V and Ctrl+Q

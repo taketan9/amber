@@ -2060,7 +2060,9 @@ fn draw_key_hints(f: &mut Frame, area: Rect, app: &App) {
         .fg(theme().accent)
         .bg(theme().status_bg)
         .add_modifier(Modifier::BOLD);
-    let desc_style = Style::default().fg(Color::Rgb(150, 150, 170)).bg(theme().status_bg);
+    // The description is quieter than its key, on whatever the status bar is
+    // painted — the fixed grey it used to be was picked against a dark bar.
+    let desc_style = Style::default().fg(muted_on(theme().status_bg)).bg(theme().status_bg);
     let gap = Span::styled("   ", desc_style);
 
     let hints = key_hints(app);
@@ -2777,17 +2779,90 @@ fn fit_to_surface(c: Color) -> Color {
 /// A text color that reads clearly on `bg`: near-black on a light background,
 /// near-white on a dark one. Keeps popup text legible under any theme — a light
 /// theme (e.g. Solarized Light) would otherwise show pale text on a pale ground.
+///
+/// Which of the two it is, is decided by measuring rather than by a
+/// brightness threshold. A mid-tone chip — a theme accent under the READ
+/// badge, say — sits near enough to the line that the threshold could call it
+/// either way, and calling it wrong puts pale text on a pale blue. Whichever
+/// of the two actually contrasts more, wins.
 pub(crate) fn readable_on(bg: Color) -> Color {
-    let (r, g, b) = match bg {
-        Color::Rgb(r, g, b) => (r as f32, g as f32, b as f32),
-        _ => return Color::Rgb(225, 225, 240), // unknown → assume a dark ground
-    };
-    let lum = 0.299 * r + 0.587 * g + 0.114 * b;
-    if lum > 140.0 {
-        Color::Rgb(30, 32, 40)
-    } else {
-        Color::Rgb(228, 228, 240)
+    const DARK: Color = Color::Rgb(30, 32, 40);
+    const LIGHT: Color = Color::Rgb(228, 228, 240);
+    if !matches!(bg, Color::Rgb(..)) {
+        return Color::Rgb(225, 225, 240); // unknown → assume a dark ground
     }
+    if contrast_ratio(DARK, bg) >= contrast_ratio(LIGHT, bg) {
+        DARK
+    } else {
+        LIGHT
+    }
+}
+
+/// A colour's relative luminance (WCAG): sRGB undone, then weighted for the
+/// eye. Not the quick `0.299r + 0.587g + 0.114b` used elsewhere for "is this
+/// page light or dark" — that one is fine for picking a direction, but it
+/// cannot say whether two colours are far enough apart to read.
+fn rel_luminance(c: Color) -> f32 {
+    let Color::Rgb(r, g, b) = c else { return 0.0 };
+    let lin = |v: u8| {
+        let v = v as f32 / 255.0;
+        if v <= 0.04045 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) }
+    };
+    0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b)
+}
+
+/// How far apart two colours read, as WCAG's contrast ratio: 1.0 is the same
+/// colour, 21.0 is black on white. Around 4.5 is comfortable for body text.
+pub(crate) fn contrast_ratio(a: Color, b: Color) -> f32 {
+    let (x, y) = (rel_luminance(a), rel_luminance(b));
+    let (hi, lo) = if x > y { (x, y) } else { (y, x) };
+    (hi + 0.05) / (lo + 0.05)
+}
+
+/// `c`, kept as itself but moved until it reads as text on `bg`.
+///
+/// For a colour that carries meaning — a mode's colour, a theme's accent —
+/// used as text rather than as a chip. It keeps its hue and only gives up as
+/// much lightness as it must: a theme accent chosen to look right *as* an
+/// accent is often too close to that theme's own page to read a number in.
+pub(crate) fn text_tone(c: Color, bg: Color) -> Color {
+    const WANT: f32 = 4.5;
+    let (Color::Rgb(mut r, mut g, mut b), Color::Rgb(..)) = (c, bg) else { return c };
+    // Away from the page: darker on a light one, lighter on a dark one.
+    let darken = rel_luminance(bg) > 0.18;
+    for _ in 0..24 {
+        if contrast_ratio(Color::Rgb(r, g, b), bg) >= WANT {
+            break;
+        }
+        let step = |v: u8| -> u8 {
+            if darken {
+                (v as i16 - 10).clamp(0, 255) as u8
+            } else {
+                (v as i16 + 10).clamp(0, 255) as u8
+            }
+        };
+        let (nr, ng, nb) = (step(r), step(g), step(b));
+        if (nr, ng, nb) == (r, g, b) {
+            break; // saturated — this is as far as it goes
+        }
+        (r, g, b) = (nr, ng, nb);
+    }
+    Color::Rgb(r, g, b)
+}
+
+/// Text one step quieter than body text, and still readable on `bg`.
+///
+/// For the things that are deliberately secondary — the tabs that are not
+/// being read, a hint's description beside its key. A fixed grey cannot do
+/// this job: the one picked against a dark page sat two shades from a light
+/// one. Mixing the page's own readable colour back toward the page keeps the
+/// *relationship* (quieter than the text beside it) on any theme.
+pub(crate) fn muted_on(bg: Color) -> Color {
+    let (Color::Rgb(tr_, tg, tb), Color::Rgb(br, bg_, bb)) = (readable_on(bg), bg) else {
+        return readable_on(bg);
+    };
+    let mix = |t: u8, b: u8| ((t as u16 * 7 + b as u16 * 3) / 10) as u8;
+    Color::Rgb(mix(tr_, br), mix(tg, bg_), mix(tb, bb))
 }
 
 /// Inline Markdown within one text run: `**bold**` and `` `code` ``. Anything
@@ -5481,14 +5556,27 @@ fn draw_viewer(
                 spans.push(Span::styled(
                     label,
                     if i == tab_at {
-                        Style::default().fg(Color::Black).bg(mode_color).add_modifier(Modifier::BOLD)
+                        // Black on the mode colour is only legible while the
+                        // mode colour is dark; on a light theme the badge and
+                        // its text came out the same shade. What reads on the
+                        // chip is a question about the chip.
+                        Style::default()
+                            .fg(readable_on(mode_color))
+                            .bg(mode_color)
+                            .add_modifier(Modifier::BOLD)
                     } else {
-                        Style::default().fg(Color::Rgb(150, 150, 170))
+                        // The tabs not being read are quieter than the one that
+                        // is, but they still have to be readable on this page —
+                        // a dark-theme grey vanishes into a light one.
+                        Style::default().fg(muted_on(surface()))
                     },
                 ));
             }
             if *dirty {
-                spans.push(Span::styled(" ●".to_string(), Style::default().fg(Color::Rgb(240, 200, 120))));
+                spans.push(Span::styled(
+                    " ●".to_string(),
+                    Style::default().fg(fit_to_surface(Color::Rgb(240, 200, 120))),
+                ));
             }
             Line::from(spans)
         } else {
@@ -5497,7 +5585,10 @@ fn draw_viewer(
         .title_bottom(Line::from(vec![
             Span::styled(
                 format!(" {} ", mode),
-                Style::default().fg(Color::Black).bg(mode_color).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(readable_on(mode_color))
+                    .bg(mode_color)
+                    .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
                 // The column, counted as the screen counts it — the same
@@ -5505,7 +5596,10 @@ fn draw_viewer(
                 // with the ruler on any line with Japanese in it, and the
                 // column is what a fixed-width record is about anyway.
                 format!(" {}:{} ", *line + 1, cur_col + 1),
-                Style::default().fg(mode_color),
+                // The mode's colour, but as text on the page rather than on a
+                // chip — a theme accent alone is not always enough to read a
+                // number in on that theme's own paper.
+                Style::default().fg(text_tone(mode_color, surface())),
             ),
         ]));
     let whole = rect.inner(Margin { vertical: 1, horizontal: 2 });
@@ -5520,7 +5614,11 @@ fn draw_viewer(
     // The ruler is only for reading a fixed-width record, which the rendered
     // Markdown is not, and it costs a row.
     let show_ruler = ruler && !*preview && view.kind == cian_core::viewer::ViewKind::Text;
-    let body_h = inner.height.saturating_sub(1 + u16::from(show_ruler)) as usize;
+    // A prompt being typed takes a row of its own above the hints (see
+    // `prompt` further down), so the text gives one up while it is open.
+    let prompt_row = sub_input.is_some() || find_input.is_some() || block_input.is_some();
+    let body_h =
+        inner.height.saturating_sub(1 + u16::from(show_ruler) + u16::from(prompt_row)) as usize;
     // Closed folds take their lines out of the picture entirely: `visible` is
     // the buffer as it is actually shown, and everything below — scrolling,
     // the cursor, the mouse — works over that rather than over raw line
@@ -5783,12 +5881,12 @@ fn draw_viewer(
                 // is the more urgent of the two answers, and they are both
                 // "how does this line differ from something".
                 let (bar, bar_c) = match diff_marks.get(i) {
-                    Some(cian_core::diff::Mark::Changed) => ("▌", Color::Rgb(240, 210, 120)),
-                    Some(cian_core::diff::Mark::Only) => ("▌", Color::Rgb(130, 205, 150)),
+                    Some(cian_core::diff::Mark::Changed) => ("▌", fit_to_surface(Color::Rgb(240, 210, 120))),
+                    Some(cian_core::diff::Mark::Only) => ("▌", fit_to_surface(Color::Rgb(130, 205, 150))),
                     _ => match git_lines.get(&i) {
-                        Some(cian_core::git::LineChange::Added) => ("▏", Color::Rgb(130, 205, 150)),
-                        Some(cian_core::git::LineChange::Modified) => ("▏", Color::Rgb(240, 210, 120)),
-                        Some(cian_core::git::LineChange::DeletedBefore) => ("▁", Color::Rgb(230, 120, 120)),
+                        Some(cian_core::git::LineChange::Added) => ("▏", fit_to_surface(Color::Rgb(130, 205, 150))),
+                        Some(cian_core::git::LineChange::Modified) => ("▏", fit_to_surface(Color::Rgb(240, 210, 120))),
+                        Some(cian_core::git::LineChange::DeletedBefore) => ("▁", fit_to_surface(Color::Rgb(230, 120, 120))),
                         None => (" ", Color::Reset),
                     },
                 };
@@ -5882,7 +5980,7 @@ fn draw_viewer(
                 Span::styled(" ".repeat(gutter), dim),
                 Span::styled(before, dim),
                 // Where the cursor is, in the scale as well as in the text.
-                Span::styled(at, Style::default().fg(Color::Black).bg(mode_color)),
+                Span::styled(at, Style::default().fg(readable_on(mode_color)).bg(mode_color)),
                 Span::styled(after, dim),
             ])),
             Rect::new(inner.x, inner.y, inner.width, 1),
@@ -5902,26 +6000,16 @@ fn draw_viewer(
         0 => "all".to_string(),
         m => format!("{}%", *scroll * 100 / m),
     };
-    // While editing, the footer shows the editor keys; while typing a
-    // search, the `/` prompt; otherwise the usual hints.
+    // While editing, the footer shows the editor keys; otherwise the usual
+    // hints. What is being *typed* is not a hint and does not take their row —
+    // see `prompt` below.
     let ed = if *editable { tr(lang, " i edit ", " i 編集 ") } else { " " };
-    let footer = if *editing {
-        tr(lang,
-            " EDIT — type to insert   Ctrl+S save   Esc leave   Shift+Q discard ",
-            " 編集中 — 入力で挿入   Ctrl+S 保存   Esc 終了   Shift+Q 破棄 ").to_string()
-    } else if let Some(w) = sub_walk {
-        // The decision prompt names the change and the progress, so neither
-        // has to be held in the head while answering.
-        let h = &w.hits[w.idx.min(w.hits.len().saturating_sub(1))];
-        let shorten = |s: &str| truncate(s, 24);
-        format!(
-            "{}  {} → {}   [{}/{}]",
-            tr(lang, " replace?  y yes   n no   a all   q stop ", " 置換?  y はい   n いいえ   a 残り全部   q 中止 "),
-            shorten(&h.from),
-            shorten(&h.to),
-            w.idx + 1,
-            w.hits.len(),
-        )
+    // The `:` / `/` / block prompt, when one is open. It gets a line of its
+    // own directly above the hints, the way `:` and `/` do in the file panes:
+    // painting over the hints made the two halves of cian behave differently
+    // at the very moment the keyboard has been handed somewhere new.
+    let prompt: Option<String> = if *editing || sub_walk.is_some() {
+        None
     } else if let Some(b) = block_input {
         let what = match b.kind {
             crate::BlockEdit::Insert => tr(lang, "insert ▏", "左端に挿入 ▏"),
@@ -5933,7 +6021,7 @@ fn draw_viewer(
         // A line selection has no column to report; a rectangle does.
         let ragged = matches!(b.kind, crate::BlockEdit::LineStart | crate::BlockEdit::LineEnd);
         let rows = b.block.bottom - b.block.top + 1;
-        format!(
+        Some(format!(
             "{} {}_   {}",
             what,
             b.text,
@@ -5943,7 +6031,7 @@ fn draw_viewer(
                 (false, true) => format!("({rows} 行, {} 桁目)", b.block.left + 1),
                 (false, false) => format!("({rows} lines, col {})", b.block.left + 1),
             }
-        )
+        ))
     } else if let Some(cmd) = sub_input {
         // What the prompt takes, shown rather than assumed: the replace form
         // first, then the word commands, because a blank prompt with no menu
@@ -5951,7 +6039,7 @@ fn draw_viewer(
         // The menu is for someone who has not started yet. Once there is
         // something typed, it is the typed text that has to be readable, and
         // a wall of vocabulary beside it is only in the way.
-        if cmd.is_empty() {
+        Some(if cmd.is_empty() {
             format!(
                 ":_   {}",
                 tr(lang,
@@ -5970,11 +6058,31 @@ fn draw_viewer(
             )
         } else {
             format!(":{}_", cmd)
-        }
+        })
     } else {
-        match find_input {
-            Some(q) => format!("/{}_", q),
-            None => {
+        find_input.as_ref().map(|q| format!("/{}_", q))
+    };
+    let footer = if *editing {
+        tr(lang,
+            " EDIT — type to insert   Ctrl+S save   Esc leave   Shift+Q discard ",
+            " 編集中 — 入力で挿入   Ctrl+S 保存   Esc 終了   Shift+Q 破棄 ").to_string()
+    } else if let Some(w) = sub_walk {
+        // The decision prompt names the change and the progress, so neither
+        // has to be held in the head while answering. This one is answered
+        // with single keys, not typed into, so it stays on the hint row.
+        let h = &w.hits[w.idx.min(w.hits.len().saturating_sub(1))];
+        let shorten = |s: &str| truncate(s, 24);
+        format!(
+            "{}  {} → {}   [{}/{}]",
+            tr(lang, " replace?  y yes   n no   a all   q stop ", " 置換?  y はい   n いいえ   a 残り全部   q 中止 "),
+            shorten(&h.from),
+            shorten(&h.to),
+            w.idx + 1,
+            w.hits.len(),
+        )
+    } else {
+        {
+            {
                 let mmd = source.iter().any(|l| {
                     let t = l.trim_start();
                     (t.starts_with("```") || t.starts_with("~~~"))
@@ -6025,21 +6133,35 @@ fn draw_viewer(
     // A message the viewer itself raised takes the footer while it lasts. The
     // hints are always one keystroke away; "nothing to fold here" answers a
     // key that was just pressed, and belongs where that key was aimed.
-    let prompt_up = sub_input.is_some() || find_input.is_some() || block_input.is_some();
-    let (footer, footer_style) = match msg.filter(|_| !*editing && sub_walk.is_none() && !prompt_up) {
+    let (footer, footer_style) = match msg.filter(|_| !*editing && sub_walk.is_none() && prompt.is_none()) {
         Some(m) => (
             format!(" {m} "),
-            Style::default().fg(Color::Black).bg(Color::Rgb(240, 210, 120)).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(readable_on(Color::Rgb(240, 210, 120)))
+                .bg(Color::Rgb(240, 210, 120))
+                .add_modifier(Modifier::BOLD),
         ),
         None => (
             footer,
             Style::default().fg(Color::Black).bg(mode_color).add_modifier(Modifier::BOLD),
         ),
     };
+    let last_row = inner.y + inner.height.saturating_sub(1);
     f.render_widget(
         Paragraph::new(truncate(&footer, inner.width as usize)).style(footer_style),
-        Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1),
+        Rect::new(inner.x, last_row, inner.width, 1),
     );
+    // The prompt sits on the row above, in the file panes' prompt colours, so
+    // the hints it used to cover stay readable while something is being typed.
+    if let Some(text) = prompt {
+        if inner.height >= 2 {
+            f.render_widget(
+                Paragraph::new(truncate(&text, inner.width as usize))
+                    .style(Style::default().fg(readable_on(surface())).bg(surface())),
+                Rect::new(inner.x, last_row - 1, inner.width, 1),
+            );
+        }
+    }
     tab_rects
 }
 
