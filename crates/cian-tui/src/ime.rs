@@ -63,6 +63,18 @@ impl App {
     /// at every place that opens a prompt.
     pub(crate) fn sync_ime(&mut self) {
         let Some(cfg) = self.config.ime.clone() else { return };
+        // Say so when a switch failed. It happens on a worker thread, so this
+        // is where the news is collected — once per failure.
+        if let Ok(mut slot) = last_switch().lock() {
+            if let Some(log) = slot.as_mut() {
+                if !log.reported {
+                    log.reported = true;
+                    if let Some(e) = &log.error {
+                        self.message = Some(format!("ime: {} — {e}", log.cmd));
+                    }
+                }
+            }
+        }
         let want = self.wants_text_input();
         if self.ime_on == Some(want) {
             return;
@@ -147,6 +159,15 @@ impl App {
             }
             _ => {}
         }
+        // What the last switch actually did — the answer to "it is configured
+        // and nothing happened".
+        let last = match last_switch().lock().ok().and_then(|s| {
+            s.as_ref().map(|l| (l.cmd.clone(), l.error.clone()))
+        }) {
+            Some((cmd, None)) => format!("{cmd}  ✔"),
+            Some((cmd, Some(e))) => format!("{cmd}  ⚠ {e}"),
+            None => tr(self.lang, "(none run yet)", "（まだ実行されていません）").to_string(),
+        };
         let state = match self.ime_on {
             Some(true) => tr(self.lang, "on (cian is taking text)", "オン（入力中）"),
             Some(false) => tr(self.lang, "off (cian is being driven)", "オフ（操作中）"),
@@ -159,6 +180,7 @@ impl App {
             format!("{:<8}: {}", "off", cfg.off.clone().unwrap_or_else(|| "—".into())),
             format!("{:<8}: {}", "on", cfg.on.clone().unwrap_or_else(|| "—".into())),
             format!("{:<8}: {}", "restore", cfg.restore),
+            format!("{:<8}: {}", "last", last),
             String::new(),
             tr(
                 self.lang,
@@ -200,6 +222,26 @@ fn shell_command(cmd: &str) -> Command {
     }
 }
 
+/// What the last switch cian ran did — the command, whether it worked, and
+/// what it said if it did not.
+///
+/// A switch runs on a worker thread, so its failure has nowhere to be seen at
+/// the moment it happens. Without this, a helper that is missing or renamed is
+/// perfectly silent: cian goes on believing the input method is where it asked
+/// for it to be, and the only symptom is that Japanese input is still on. Kept
+/// here rather than on `App` because the thread that learns it has no `App`.
+struct SwitchLog {
+    cmd: String,
+    error: Option<String>,
+    /// Cleared once the failure has been put on screen, so it is said once.
+    reported: bool,
+}
+
+fn last_switch() -> &'static std::sync::Mutex<Option<SwitchLog>> {
+    static L: std::sync::OnceLock<std::sync::Mutex<Option<SwitchLog>>> = std::sync::OnceLock::new();
+    L.get_or_init(|| std::sync::Mutex::new(None))
+}
+
 /// Switches are queued to one worker thread rather than each getting its own.
 ///
 /// Order is the reason. Two switches thrown quickly — off, then on — must land
@@ -218,7 +260,22 @@ fn switch_queue() -> &'static std::sync::mpsc::Sender<Switch> {
         let (tx, rx) = std::sync::mpsc::channel::<Switch>();
         std::thread::spawn(move || {
             for s in rx {
-                let _ = shell_command(&s.cmd).output();
+                let error = match shell_command(&s.cmd).output() {
+                    Ok(o) if o.status.success() => None,
+                    Ok(o) => {
+                        let said = String::from_utf8_lossy(&o.stderr);
+                        let said = said.trim();
+                        Some(if said.is_empty() {
+                            format!("exit {}", o.status.code().unwrap_or(-1))
+                        } else {
+                            said.chars().take(120).collect()
+                        })
+                    }
+                    Err(e) => Some(e.to_string()),
+                };
+                if let Ok(mut slot) = last_switch().lock() {
+                    *slot = Some(SwitchLog { cmd: s.cmd.clone(), error, reported: false });
+                }
                 drop(s.done);
             }
         });
@@ -236,6 +293,10 @@ fn run_switch(cmd: &str, ack: Option<std::sync::mpsc::Sender<()>>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The queue and its last-result slot are process-wide — one keyboard, one
+    /// switch — so the tests that watch them take turns.
+    static SWITCH_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     /// The rule, stated once: a keystroke is either text or a command, and the
     /// input method follows that and nothing else.
@@ -259,6 +320,41 @@ mod tests {
         assert!(!app.wants_text_input(), "a notice is answered with one key");
         app.start_rename();
         assert!(app.wants_text_input(), "a rename is text");
+    }
+
+    /// A helper that is missing, renamed or broken must say so. Before this,
+    /// the only symptom of a bad `cian.ime{}` was that nothing happened — the
+    /// switch failed on a worker thread with no one listening.
+    #[cfg(unix)]
+    #[test]
+    fn a_failed_switch_is_reported_once() {
+        let _g = SWITCH_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().to_path_buf();
+        let mut config = cian_lua::Config::default();
+        config.ime = Some(cian_lua::ImeOptions {
+            off: Some("exit 3".into()),
+            on: None,
+            restore: false,
+        });
+        let mut app = App::new(p.clone(), p, config).unwrap();
+        app.sync_ime(); // queues the failing "off"
+        // The failure lands on the worker thread; the next sync collects it.
+        let mut said = None;
+        for _ in 0..100 {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+            app.sync_ime();
+            if let Some(m) = app.message.clone() {
+                said = Some(m);
+                break;
+            }
+        }
+        let said = said.expect("a failed switch is reported");
+        assert!(said.contains("ime:") && said.contains("exit 3"), "{said}");
+        // …and only once: the next sync does not repeat it.
+        app.message = None;
+        app.sync_ime();
+        assert!(app.message.is_none(), "a failure is said once, not every frame");
     }
 
     /// The switch is thrown on the way into text and on the way out, and not
@@ -293,6 +389,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn the_configured_command_actually_runs() {
+        let _g = SWITCH_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dir = tempfile::tempdir().unwrap();
         let marker = dir.path().join("switched");
         let p = dir.path().to_path_buf();
