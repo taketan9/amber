@@ -22,6 +22,7 @@ fn command_list() -> &'static [(&'static str, (&'static str, &'static str), bool
         ("glossary",   ("crmaine: generate a glossary of the corpus", "crmaine: コーパスの用語集を生成"), false),
         ("searchfiles", ("crmaine: keyword-search the corpus into the pane", "crmaine: コーパスをキーワード検索してペイン表示"), true),
         ("ragdebug",   ("crmaine: what RAG retrieved, with scores", "crmaine: RAG が拾った断片とスコア"), true),
+        ("ime",        ("input-method switching: state and helper", "日本語入力の自動切替: 状態と設定"), false),
         ("ai",         ("AI - simple: chat with the local model", "AI - simple: ローカルモデルとチャット"), false),
         ("aicmd",      ("AI: shell command from a description", "AI: 説明からコマンド"), true),
         ("aicommit",   ("AI: draft a commit message", "AI: コミットメッセージ下書き"), false),

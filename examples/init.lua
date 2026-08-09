@@ -347,6 +347,23 @@
 --   :coding [質問] 現在のファイル（F3で開いたもの、なければカーソル上）のコードを
 --                  コンテキストに crmaine Ajent へ相談。F3ビューアでは A キーでも起動。
 --
+-- cian.ime{ off = ..., on = ... }
+--   日本語入力の自動切替。IME が変換中の英字は cian に届かない（端末が確定まで
+--   握っている）ため、単キーのコマンドは IME を切らないと効きません。cian の
+--   モードに合わせて入力方式そのものを切り替えるのが唯一の解決です。
+--   操作中は off、テキストを受け取る瞬間（`:` `/` リネーム チャット シェル）に
+--   on、終了時に on へ戻します（restore = false で戻さない）。
+--   入力ソースを切り替える小さなヘルパーが必要です:
+--     macOS  : brew install macism
+--       cian.ime{
+--         off = "macism com.apple.keylayout.ABC",
+--         on  = "macism com.apple.inputmethod.Kotoeri.RomajiTyping.Japanese",
+--       }
+--     Windows: zenhan（または im-select）
+--       cian.ime{ off = "zenhan 0", on = "zenhan 1" }
+--   `:ime` で設定と現在の状態、`:ime on` / `:ime off` でその場実行して確認。
+--   なお記号（`：` `／` `？` `・`）は設定なしでもコマンドとして読まれます。
+
 -- 前提知識 — cian.ai_context(...)
 -- あなたの環境について AI が前提としてよいことを伝え、回答を一般論ではなく環境に
 -- 即したものにします。すべての AI プロンプト（チャット、「直前のエラーを説明」、

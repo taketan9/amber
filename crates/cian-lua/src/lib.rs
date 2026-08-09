@@ -242,6 +242,27 @@ pub struct CrmaineOptions {
     pub auth_mode: Option<String>,
 }
 
+/// Settings from `cian.ime{...}`: the commands cian runs to turn the system's
+/// input method off and on again.
+///
+/// cian cannot see a key an IME is still composing — the terminal holds it —
+/// so the only way single-key commands can work with Japanese input on is for
+/// the input method to be off while cian is being *driven*, and on again the
+/// moment it is being *typed into*. Doing that needs a helper that can switch
+/// the input source: `macism` or `im-select` on macOS, `zenhan` or
+/// `im-select` on Windows. cian runs whatever command is given here.
+#[derive(Debug, Clone, Default)]
+pub struct ImeOptions {
+    /// Run when the keyboard is driving cian (normal mode): turn input off.
+    pub off: Option<String>,
+    /// Run when cian starts taking text (`:`, `/`, a rename, the chat, the
+    /// shell): turn input back on.
+    pub on: Option<String>,
+    /// Run `on` when cian exits, so the keyboard is handed back as it was
+    /// found. Defaults to true — someone who set this up types Japanese.
+    pub restore: bool,
+}
+
 /// Mutable accumulator shared with the Lua callbacks during script execution.
 #[derive(Default)]
 struct Builder {
@@ -254,6 +275,8 @@ struct Builder {
     ai: Option<AiOptions>,
     /// crmaine bridge settings, if `cian.crmaine{...}` was called.
     crmaine: Option<CrmaineOptions>,
+    /// Input-method switching, if `cian.ime{...}` was called.
+    ime: Option<ImeOptions>,
     /// Precondition facts about the environment, fed to every AI prompt.
     ai_context: Vec<String>,
     /// Command snippets declared with `cian.snippets{...}`.
@@ -282,6 +305,8 @@ pub struct Config {
     pub ai: Option<AiOptions>,
     /// crmaine bridge settings declared with `cian.crmaine{...}`, if any.
     pub crmaine: Option<CrmaineOptions>,
+    /// Input-method switching declared with `cian.ime{...}`, if any.
+    pub ime: Option<ImeOptions>,
     /// Precondition facts declared with `cian.ai_context{...}`, prepended to
     /// every AI prompt so answers assume the user's actual environment.
     pub ai_context: Vec<String>,
@@ -535,7 +560,8 @@ fn load_from(path: &Path) -> Config {
 
     // Pull the accumulated config out by cloning; the Lua handles stay valid
     // because we move `lua` into the returned Config below.
-    let (theme, options, keymaps, sharepoint, ext_open, ssh_hosts, ai, crmaine, ai_context, snippets, builder_errors) = {
+    #[allow(clippy::type_complexity)]
+    let (theme, options, keymaps, sharepoint, ext_open, ssh_hosts, ai, crmaine, ime, ai_context, snippets, builder_errors) = {
         let b = builder.borrow();
         (
             b.theme.clone(),
@@ -546,6 +572,7 @@ fn load_from(path: &Path) -> Config {
             b.ssh_hosts.clone(),
             b.ai.clone(),
             b.crmaine.clone(),
+            b.ime.clone(),
             b.ai_context.clone(),
             b.snippets.clone(),
             b.errors.clone(),
@@ -562,6 +589,7 @@ fn load_from(path: &Path) -> Config {
         ssh_hosts,
         ai,
         crmaine,
+        ime,
         ai_context,
         snippets,
         errors,
@@ -919,6 +947,28 @@ fn install_api(lua: &Lua, builder: &Rc<RefCell<Builder>>) -> mlua::Result<()> {
                     c.port = t.get::<Option<u16>>("port").ok().flatten();
                 }
                 b.borrow_mut().crmaine = Some(c);
+                Ok(())
+            })?,
+        )?;
+    }
+
+    // cian.ime{ off = "...", on = "..." }  — switch the system input method
+    // with cian's mode, so single-key commands work with Japanese input on.
+    {
+        let b = builder.clone();
+        cian.set(
+            "ime",
+            lua.create_function(move |_, t: Option<Table>| {
+                let mut c = ImeOptions { restore: true, ..Default::default() };
+                if let Some(t) = t {
+                    let s = |k: &str| -> Option<String> { t.get::<Option<String>>(k).ok().flatten() };
+                    c.off = s("off");
+                    c.on = s("on");
+                    if let Ok(Some(v)) = t.get::<Option<bool>>("restore") {
+                        c.restore = v;
+                    }
+                }
+                b.borrow_mut().ime = Some(c);
                 Ok(())
             })?,
         )?;

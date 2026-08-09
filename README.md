@@ -352,6 +352,23 @@ With `cian.ai{...}` set, cian gets a local assistant (it calls itself **Carmine 
 
 cian reaches the model through a small bundled Python helper (Windows broker sign-in, like the crmaine extension) — nothing to install beyond Python and a couple of packages. `auth_mode = "mock"` gives an offline echo for wiring it up, and `api_base_url` points it at a local server (Ollama, LM Studio). This is the one place cian isn't fully self-contained, which is why it's opt-in. See [`examples/init.en.lua`](examples/init.en.lua).
 
+### Japanese input (IME) — commands that work with 日本語入力 on
+
+While an IME is composing, a letter never reaches cian at all: the terminal holds it until it is committed, so `j`, `d`, `y` — every single-key command — do nothing until the IME is switched off by hand. cian cannot see a key it is not sent.
+
+Punctuation is different, and cian now reads it: `：` `／` `？`, and the kana layout's `・`, are the colon / slash / question keys being pressed, so they open what those keys open. A `:` verb typed full-width (`ｍａｎ`) runs too. Text is never folded — a name may hold a full-width colon on purpose, and on Windows it must.
+
+For the letters, the only real answer is to switch the input method with cian's mode, which is what `cian.ime{}` does — off while cian is being driven, on the moment it takes text (`:`, `/`, a rename, the chat, the shell), and back on when cian exits. It needs a helper that can switch the input source:
+
+```lua
+cian.ime{                                    -- macOS, after `brew install macism`
+  off = "macism com.apple.keylayout.ABC",
+  on  = "macism com.apple.inputmethod.Kotoeri.RomajiTyping.Japanese",
+}
+```
+
+On Windows, `zenhan 0` / `zenhan 1` (or `im-select`) do the same job. `:ime` shows what is configured and which way the switch is thrown; `:ime on` / `:ime off` run the command there and then, to check the helper works.
+
 ### crmaine — your team's RAG, from cian
 
 If your team runs the **crmaine** VS Code extension, cian attaches to its already-running local server — same index, same endpoint, nothing extra to install. Start crmaine in VS Code, then add one line to init.lua (it reads the port and cache dir from VS Code's own settings each time):

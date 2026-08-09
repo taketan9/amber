@@ -75,6 +75,9 @@ impl App {
                 self.full_clear = true;
                 self.message = Some(tr(self.lang, "redrawn", "画面を描き直しました").into());
             }
+            // The input-method switch: what is configured, which way it is
+            // thrown, and `:ime on` / `:ime off` to test the helper.
+            "ime" | "inputmethod" => self.ime_report(rest),
             // Which key did the terminal actually send? The answer to every
             // "that shortcut does nothing on my machine".
             "keys" => {

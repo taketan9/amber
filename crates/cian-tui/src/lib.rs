@@ -42,6 +42,7 @@ mod ai;
 mod arcview;
 mod drop;
 mod crmaine;
+mod ime;
 mod preview;
 mod markdown;
 mod viewer;
@@ -2339,6 +2340,9 @@ pub struct App {
     /// The citations from the last finished answer, kept so feedback can name
     /// the files it should boost / demote.
     crmaine_last_sources: Vec<String>,
+    /// Which way the input-method switch is currently thrown (`None` until
+    /// the first sync). See `ime.rs`.
+    ime_on: Option<bool>,
     /// The last question sent to RAG, so `:ragdebug` (and `Ctrl+D` in the chat)
     /// can show what the retriever picked for *that* question without it being
     /// typed again — the whole point is to ask "why this answer?".
@@ -2532,6 +2536,7 @@ impl App {
             crmaine_req_seq: 0,
             crmaine_inflight: None,
             crmaine_last_sources: Vec::new(),
+            ime_on: None,
             crmaine_last_question: None,
             debug_search_rx: None,
             debug_query: String::new(),
@@ -4278,6 +4283,8 @@ pub fn run(left: Option<PathBuf>, right: Option<PathBuf>, startup: StartupMacro)
 
     // Remember where the panes were for next launch.
     app.save_session();
+    // Give the keyboard back the way it was found.
+    app.release_ime();
 
     if kbd_enhanced {
         let _ = execute!(terminal.backend_mut(), PopKeyboardEnhancementFlags);
@@ -4476,6 +4483,10 @@ fn run_loop<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Result<()>
             suspend_and_edit(terminal, app)?;
             needs_redraw = true;
         }
+        // Put the input method where this moment wants it — off while cian is
+        // driven, on the moment it takes text. Compares one bool; only a
+        // change costs anything.
+        app.sync_ime();
         // A connection picked before the shell finished starting.
         if app.pending_shell_input.is_some() {
             app.flush_pending_shell_input();

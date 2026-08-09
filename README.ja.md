@@ -352,6 +352,24 @@ return {
 
 AI へは同梱の小さな Python ヘルパ経由で届きます（crmaine 拡張と同じ Windows ブローカー認証）— Python と少しのパッケージ以外に入れるものはありません。 `auth_mode = "mock"` は配線確認用のオフライン・エコー、`api_base_url` でローカルサーバ（Ollama, LM Studio）を指せます。cian が単一自己完結じゃなくなる唯一の場所なので、ここだけオプトインです。設定は [`examples/init.lua`](examples/init.lua)。
 
+### 日本語入力（IME）— 変換オンでもコマンドを効かせる
+
+IME が変換中の英字は、そもそも cian に届きません。確定するまで端末が握っているためで、`j` `d` `y` などの単キーコマンドは IME を切るまで反応しません。届いていないキーは、どうやっても拾えません。
+
+記号は別です。`：` `／` `？`、かな配列の `・` は「コロン/スラッシュ/？キーが押された」ものとして読むようになりました。`:` のコマンド名が全角（`ｍａｎ`）でも動きます。入力欄の文字は一切変換しません — 全角コロンを含む名前は意図した名前で、Windows では必須だからです。
+
+英字まで効かせる唯一の方法は、cian のモードに合わせて入力方式そのものを切り替えることです。`cian.ime{}` がそれをします — 操作中はオフ、テキストを受け取る瞬間（`:`、`/`、リネーム、チャット、シェル）にオン、終了時に戻します。入力ソースを切り替えるヘルパーが必要です:
+
+```lua
+cian.ime{                                    -- macOS（`brew install macism` 後）
+  off = "macism com.apple.keylayout.ABC",
+  on  = "macism com.apple.inputmethod.Kotoeri.RomajiTyping.Japanese",
+}
+```
+
+Windows なら `zenhan 0` / `zenhan 1`（または `im-select`）で同じことができます。`:ime` で設定内容と現在の状態を確認でき、`:ime on` / `:ime off` はコマンドをその場で実行してヘルパーの動作を確かめます。
+
+
 ### crmaine — チームの RAG を cian から
 
 チームで **crmaine**（VS Code 拡張）を使っているなら、cian はその起動済みローカルサーバにアタッチします — 同じインデックス・同じエンドポイント、追加インストールなし。VS Code で crmaine を起動し、init.lua に1行足すだけ（ポートとキャッシュ先は VS Code の設定から毎回読みます）：
