@@ -972,12 +972,16 @@
         assert!(scale.is_some(), "a column scale over the text:\n{}", screen.join("\n"));
 
         // …and it says which column the cursor is in, as the corner does.
-        if let Popup::Viewer { line, col, .. } = &mut app.popup {
-            *line = 0;
-            *col = 4;
+        //
+        // Walked across rather than set to one number: the scale is built from
+        // `·`, which is two bytes wide, and cutting it at a *column* number
+        // took the program down on the very first press of the right arrow.
+        // A single hand-picked column can sit on a byte boundary by luck.
+        for want in 2..=12 {
+            app.handle_key(code(KeyCode::Right)).unwrap();
+            let screen = render(&mut app, 120, 20).join("\n");
+            assert!(screen.contains(&format!("1:{want}")), "the corner agrees with the ruler");
         }
-        let screen = render(&mut app, 120, 20).join("\n");
-        assert!(screen.contains("1:5"), "the corner agrees with the ruler");
 
         // `:ruler` puts both away and gives the row back to the text.
         let rows_with = render(&mut app, 120, 20).iter().filter(|r| r.contains("second line")).count();

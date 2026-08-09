@@ -5730,17 +5730,22 @@ fn draw_viewer(
                 _ => '·',
             });
         }
-        let cur = (*col).min(avail.saturating_sub(1));
-        let (before, rest) = scale.split_at(cur.min(scale.len()));
-        let (at, after) = rest.split_at(rest.chars().next().map(|c| c.len_utf8()).unwrap_or(0));
+        // Split by characters, not bytes: the scale is made of `·`, which is
+        // two bytes wide, so a column number used as a byte offset lands
+        // inside one and takes the program with it.
+        let marks: Vec<char> = scale.chars().collect();
+        let cur = (*col).min(marks.len().saturating_sub(1));
+        let before: String = marks[..cur.min(marks.len())].iter().collect();
+        let at: String = marks.get(cur).into_iter().collect();
+        let after: String = marks[(cur + 1).min(marks.len())..].iter().collect();
         let dim = Style::default().fg(Color::Rgb(105, 105, 130));
         f.render_widget(
             Paragraph::new(Line::from(vec![
                 Span::styled(" ".repeat(gutter), dim),
-                Span::styled(before.to_string(), dim),
+                Span::styled(before, dim),
                 // Where the cursor is, in the scale as well as in the text.
-                Span::styled(at.to_string(), Style::default().fg(Color::Black).bg(mode_color)),
-                Span::styled(after.to_string(), dim),
+                Span::styled(at, Style::default().fg(Color::Black).bg(mode_color)),
+                Span::styled(after, dim),
             ])),
             Rect::new(inner.x, inner.y, inner.width, 1),
         );
