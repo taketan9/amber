@@ -2946,8 +2946,8 @@ fn draw_ai_chat(f: &mut Frame, area: Rect, app: &mut App) {
         ]))
         .title_bottom(tr(
             lang,
-            " Enter=send  Shift+Enter=newline  Ctrl+V=paste (image too)  Ctrl+R=history  Esc=stop/close ",
-            " Enter=送信  Shift+Enter=改行  Ctrl+V=貼付（画像も）  Ctrl+R=履歴  Esc=中断/閉じる ",
+            " Enter=send  Shift+Enter=newline  Ctrl+V=paste  Ctrl+R=history  Ctrl+D=what it read  Esc=stop/close ",
+            " Enter=送信  Shift+Enter=改行  Ctrl+V=貼付  Ctrl+R=履歴  Ctrl+D=拾った断片  Esc=中断/閉じる ",
         ));
     let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
     f.render_widget(block, rect);
@@ -3670,6 +3670,7 @@ fn draw_popup(
     match popup {
         Popup::ThemePicker { .. } => draw_theme_picker(f, area, popup, lang),
         Popup::Manual { .. } => draw_manual(f, area, popup, lang),
+        Popup::Report { .. } => draw_report(f, area, popup, lang),
         Popup::ContextMenu { .. } => draw_context_menu(f, area, popup, menu_lang),
         Popup::SshHosts { .. } => draw_ssh_hosts(f, area, popup, hosts, zones, lang),
         Popup::Snippets { .. } => draw_snippets(f, area, popup, snippets, zones, lang),
@@ -4055,6 +4056,7 @@ fn draw_simple_dialog(
         }
         // All handled above, before this match.
         Popup::Manual { .. }
+        | Popup::Report { .. }
         | Popup::ContextMenu { .. }
         | Popup::ColorPicker { .. }
         | Popup::SortPicker { .. }
@@ -4283,8 +4285,31 @@ fn draw_theme_picker(f: &mut Frame, area: Rect, popup: &mut Popup, lang: Lang) {
 /// viewport rather than the fixed block the other popups use.
 fn draw_manual(f: &mut Frame, area: Rect, popup: &mut Popup, lang: Lang) {
     let Popup::Manual { lines, scroll } = popup else { return };
+    draw_scrolling_text(f, area, lines, scroll, tr(lang, " manual ", " キー一覧 "), 70, lang);
+}
+
+/// A read-only report (`:ragdebug`) — the manual's viewport with its own title.
+fn draw_report(f: &mut Frame, area: Rect, popup: &mut Popup, lang: Lang) {
+    let Popup::Report { title, lines, scroll, .. } = popup else { return };
+    let title = title.clone();
+    draw_scrolling_text(f, area, lines, scroll, &title, 76, lang);
+}
+
+/// The scrolling viewport both of the above share: a bordered block whose body
+/// is `lines` from `scroll`, with a percentage in the frame and the scroll keys
+/// along the bottom. `scroll` is clamped here, which also normalises an
+/// over-scrolled offset from the key handler.
+fn draw_scrolling_text(
+    f: &mut Frame,
+    area: Rect,
+    lines: &[String],
+    scroll: &mut usize,
+    title: &str,
+    max_w: u16,
+    lang: Lang,
+) {
     let height = area.height.saturating_sub(2).max(6);
-    let width: u16 = 70u16.min(area.width.saturating_sub(2));
+    let width: u16 = max_w.min(area.width.saturating_sub(2));
     let rect = centered_rect(width, height, area);
     let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
     let view_h = inner.height.saturating_sub(1) as usize;
@@ -4305,7 +4330,7 @@ fn draw_manual(f: &mut Frame, area: Rect, popup: &mut Popup, lang: Lang) {
         .borders(Borders::ALL)
     .border_type(border_type())
         .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
-        .title(tr(lang, " manual ", " キー一覧 "))
+        .title(title.to_string())
         .title_bottom(pos);
     f.render_widget(block, rect);
 

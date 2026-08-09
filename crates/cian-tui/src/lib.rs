@@ -331,6 +331,12 @@ enum Popup {
         cursor: usize,
     },
     Notice { lines: Vec<String> },
+    /// A read-only report too tall for a `Notice`, so it scrolls like the
+    /// manual but carries its own title (`:ragdebug`'s retrieval trace).
+    /// `back` is the popup to put back on Esc — a report raised over the chat
+    /// with `Ctrl+D` drops the user straight back into the conversation it
+    /// explains.
+    Report { title: String, lines: Vec<String>, scroll: usize, back: Box<Popup> },
     /// A fuzzy picker over commands or directories: type to filter, Enter runs
     /// or jumps. `shown` holds the indices of `items` currently matching `query`,
     /// best first; `cursor` indexes into `shown`.
@@ -889,6 +895,8 @@ enum MenuItem {
     CrmaineInfo,
     /// Keyword-search the corpus into the pane (`:searchfiles`).
     CrmaineSearchFiles,
+    /// Show what RAG retrieved, with scores (`:ragdebug`).
+    CrmaineDebugSearch,
     /// Open a server in this pane over SFTP (`:sftp` / remote pane).
     RemotePane,
     /// Disk-usage breakdown of the current folder (`:du`).
@@ -1090,6 +1098,7 @@ impl MenuItem {
             MenuItem::CrmaineShared => tr(lang, "Use crmaine's index  (:ragshared)", "crmaine のインデックスを使う  (:ragshared)"),
             MenuItem::CrmaineInfo => tr(lang, "Diagnostics  (:raginfo)", "診断  (:raginfo)"),
             MenuItem::CrmaineSearchFiles => tr(lang, "Search corpus  (:searchfiles)", "コーパス検索  (:searchfiles)"),
+            MenuItem::CrmaineDebugSearch => tr(lang, "What RAG retrieved  (:ragdebug)", "RAG が拾った断片  (:ragdebug)"),
             MenuItem::RemotePane => tr(lang, "Open server in pane  (:sftp)", "サーバをペインで開く  (:sftp)"),
             MenuItem::DiskUsage => tr(lang, "Disk usage  (:du)", "容量分析  (:du)"),
             MenuItem::AiShellCmd => tr(lang, "Command from description  (:aicmd)", "説明からコマンド生成  (:aicmd)"),
@@ -2330,6 +2339,14 @@ pub struct App {
     /// The citations from the last finished answer, kept so feedback can name
     /// the files it should boost / demote.
     crmaine_last_sources: Vec<String>,
+    /// The last question sent to RAG, so `:ragdebug` (and `Ctrl+D` in the chat)
+    /// can show what the retriever picked for *that* question without it being
+    /// typed again — the whole point is to ask "why this answer?".
+    crmaine_last_question: Option<String>,
+    /// A pending `/debug_search` — the retrieval trace, or an error.
+    debug_search_rx: Option<std::sync::mpsc::Receiver<Result<crmaine::DebugSearch, String>>>,
+    /// The question that trace is for, kept to head the report.
+    debug_query: String,
     /// A pending `:searchfiles` corpus search — its (name, path) hits, or an
     /// error — to panelize into the active pane when it lands.
     #[allow(clippy::type_complexity)]
@@ -2515,6 +2532,9 @@ impl App {
             crmaine_req_seq: 0,
             crmaine_inflight: None,
             crmaine_last_sources: Vec::new(),
+            crmaine_last_question: None,
+            debug_search_rx: None,
+            debug_query: String::new(),
             searchfiles_rx: None,
             ai_history: Vec::new(),
             ai_rect: Rect::new(0, 0, 0, 0),
@@ -4508,6 +4528,10 @@ fn run_loop<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Result<()>
         // A finished `:searchfiles` corpus search panelizes into the pane.
         if app.searchfiles_rx.is_some() {
             needs_redraw |= app.poll_searchfiles();
+        }
+        // A finished `:ragdebug` retrieval trace opens as a report.
+        if app.debug_search_rx.is_some() {
+            needs_redraw |= app.poll_debug_search();
         }
         // While an AI / crmaine reply is still in flight, keep repainting so the
         // "thinking" spinner actually spins (the poll above returns false until

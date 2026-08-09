@@ -367,10 +367,11 @@ cian.crmaine{}
 | `:coding [質問]` | 現在のファイルのコードについて相談（F3 の `A` でも） |
 | `:impact` / `:contradiction` / `:glossary` | コーパスの分析 |
 | `:searchfiles <語>` | コーパスをキーワード検索してペインに一覧 |
+| `:ragdebug [質問]` | RAG が実際に拾った断片と生の BM25 スコア — 引数なしで直前の質問について |
 | `:index [dir]` | フォルダを cian *専用*のインデックスに構築；`:ragshared` で crmaine 本体に戻す |
 | `:raginfo` | 診断 — ポート・接続可否・使用中インデックス |
 
-crmaine のチャットはカーマイン色（ローカルの `:ai` は **AI - simple** としてシアン色）で、どちらが答えたか一目で分かります：**Shift+Enter** で改行、**Ctrl+R** で過去の会話（再起動しても残る）、**Ctrl+↑ / Ctrl+↓** で直近回答を評価、**Esc** でストリーム中断。回答は Markdown 表示で、**参照元**も出ます。crmaine の各操作は右クリック **AI - crmaine ▸** メニューからも。
+crmaine のチャットはカーマイン色（ローカルの `:ai` は **AI - simple** としてシアン色）で、どちらが答えたか一目で分かります：**Shift+Enter** で改行、**Ctrl+R** で過去の会話（再起動しても残る）、**Ctrl+↑ / Ctrl+↓** で直近回答を評価、**Ctrl+D** でその回答が何を読んだか確認、**Esc** でストリーム中断。回答は Markdown 表示で、**参照元**も出ます。crmaine の各操作は右クリック **AI - crmaine ▸** メニューからも。
 
 ---
 

@@ -189,6 +189,7 @@ impl App {
                 v.push(MenuItem::CrmaineImpact);
                 v.push(MenuItem::CrmaineContradiction);
                 v.push(MenuItem::CrmaineGlossary);
+                v.push(MenuItem::CrmaineDebugSearch);
                 v.push(MenuItem::CrmaineInfo);
                 v.push(MenuItem::Back);
                 Some(v)
@@ -530,6 +531,15 @@ impl App {
             MenuItem::CrmaineShared => self.crmaine_use_shared_index(),
             MenuItem::CrmaineInfo => self.crmaine_doctor(),
             MenuItem::CrmaineSearchFiles => self.prefill_command("searchfiles "),
+            // With a `:rag` question behind it this needs no argument, so it
+            // runs; otherwise it opens the prompt for one.
+            MenuItem::CrmaineDebugSearch => {
+                if self.crmaine_last_question.is_some() {
+                    self.start_debug_search("")
+                } else {
+                    self.prefill_command("ragdebug ")
+                }
+            }
             MenuItem::RemotePane => self.start_scp(ScpDir::BrowsePane),
             MenuItem::DiskUsage => self.start_du_here(),
             MenuItem::GitStage => self.git_stage(),

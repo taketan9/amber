@@ -192,6 +192,7 @@ impl App {
             "contradiction" | "contra" => self.start_contradiction(rest),
             "glossary" | "glossagen" => self.start_glossary(),
             "searchfiles" | "sf" | "corpussearch" => self.start_searchfiles(rest),
+            "ragdebug" | "debugsearch" | "ragwhy" | "ragtrace" => self.start_debug_search(rest),
             "aidiff" | "explaindiff" | "crmainediff" => self.explain_diff(),
             "ailog" | "logtriage" | "triage" | "crmainelog" => self.triage_log(),
             "dupes" | "dup" | "duplicates" => self.start_dupes(),

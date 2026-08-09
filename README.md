@@ -367,10 +367,11 @@ cian.crmaine{}
 | `:coding [question]` | ask about the current file's code (`A` in F3 too) |
 | `:impact` / `:contradiction` / `:glossary` | corpus analysis over the index |
 | `:searchfiles <words>` | keyword-search the corpus into the pane |
+| `:ragdebug [question]` | what the retriever actually picked, with raw BM25 scores — no argument means the question you just asked |
 | `:index [dir]` | build cian's *own* index of a folder; `:ragshared` switches back to crmaine's |
 | `:raginfo` | diagnostics — the port, whether the server's up, which index is active |
 
-A crmaine chat wears crmaine's carmine (the local `:ai` model's own windows are cyan, titled **AI - simple**), so you always know which one answered: **Shift+Enter** for a newline, **Ctrl+R** for past conversations (they survive a restart), **Ctrl+↑ / Ctrl+↓** to rate the last answer, **Esc** to stop one mid-stream. Answers render as Markdown and list their **sources**. Every crmaine action is on the right-click **AI - crmaine ▸** menu too.
+A crmaine chat wears crmaine's carmine (the local `:ai` model's own windows are cyan, titled **AI - simple**), so you always know which one answered: **Shift+Enter** for a newline, **Ctrl+R** for past conversations (they survive a restart), **Ctrl+↑ / Ctrl+↓** to rate the last answer, **Ctrl+D** to see what the retriever fed it, **Esc** to stop one mid-stream. Answers render as Markdown and list their **sources**. Every crmaine action is on the right-click **AI - crmaine ▸** menu too.
 
 ---
 

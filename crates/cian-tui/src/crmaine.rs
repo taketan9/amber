@@ -588,6 +588,112 @@ impl App {
         }
     }
 
+    /// `:ragdebug [question]` — show what the retriever actually picked for a
+    /// question: the tokens it searched with, and the top chunks with their raw
+    /// BM25 scores. With no argument it re-runs the last `:rag` question, which
+    /// is the case that matters — the answer just came out wrong and the
+    /// question is "did it read the wrong thing, or read the right thing badly?"
+    ///
+    /// `/debug_search` bypasses the cache and the score cutoff, so it shows the
+    /// ranking as the retriever saw it, not as the answer pipeline trimmed it.
+    pub(crate) fn start_debug_search(&mut self, query: &str) {
+        let query = match query.trim() {
+            "" => match self.crmaine_last_question.clone() {
+                Some(q) => q,
+                None => {
+                    self.message = Some(
+                        tr(
+                            self.lang,
+                            "usage: :ragdebug <question>  (or ask :rag first)",
+                            "使い方: :ragdebug <質問>（先に :rag でも可）",
+                        )
+                        .into(),
+                    );
+                    return;
+                }
+            },
+            q => q.to_string(),
+        };
+        if self.debug_search_rx.is_some() {
+            self.message = Some(tr(self.lang, "crmaine is busy", "crmaine 実行中").into());
+            return;
+        }
+        let cfg = match self.crmaine_resolved() {
+            Ok(c) => c,
+            Err(e) => {
+                self.message = Some(e);
+                return;
+            }
+        };
+        let body =
+            serde_json::json!({ "query": query, "cache_dir": cfg.cache_dir }).to_string();
+        let port = cfg.port;
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let res = (|| {
+                if http_get(port, "/health").is_err() {
+                    return Err(format!(
+                        "server not reachable on 127.0.0.1:{port} — start crmaine in VS Code first"
+                    ));
+                }
+                let raw = http_post(port, "/debug_search", &body)?;
+                parse_debug_search(&raw)
+            })();
+            let _ = tx.send(res);
+        });
+        self.debug_search_rx = Some(rx);
+        self.debug_query = query;
+        self.message =
+            Some(tr(self.lang, "asking the retriever…", "検索過程を取得中…").into());
+    }
+
+    /// Open the finished `:ragdebug` trace as a report. Returns true to repaint.
+    pub(crate) fn poll_debug_search(&mut self) -> bool {
+        let Some(rx) = &self.debug_search_rx else { return false };
+        match rx.try_recv() {
+            Ok(res) => {
+                self.debug_search_rx = None;
+                match res {
+                    Ok(d) => {
+                        let index = match self.crmaine_resolved() {
+                            Ok(c) => c.cache_dir,
+                            Err(_) => String::new(),
+                        };
+                        let lines = debug_report_lines(
+                            self.lang,
+                            &self.debug_query,
+                            &index,
+                            self.crmaine_cache_override.is_some(),
+                            &d,
+                            REPORT_W,
+                        );
+                        // Esc should land back in the conversation this explains,
+                        // so a chat underneath is kept rather than dropped.
+                        let back = match std::mem::replace(&mut self.popup, Popup::None) {
+                            p @ Popup::AiChat { .. } => p,
+                            _ => Popup::None,
+                        };
+                        self.message = None;
+                        self.popup = Popup::Report {
+                            title: tr(self.lang, " what RAG retrieved ", " RAG が拾った断片 ")
+                                .to_string(),
+                            lines,
+                            scroll: 0,
+                            back: Box::new(back),
+                        };
+                    }
+                    Err(e) => self.message = Some(format!("crmaine debug: {e}")),
+                }
+                true
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => false,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                self.debug_search_rx = None;
+                true
+            }
+        }
+    }
+
     /// `:glossary` — generate a glossary of the indexed corpus.
     pub(crate) fn start_glossary(&mut self) {
         self.start_crmaine_tool(
@@ -701,6 +807,12 @@ impl App {
         if self.crmaine_rx.is_some() {
             self.message = Some(tr(self.lang, "crmaine is busy", "crmaine 実行中").into());
             return;
+        }
+        // Remember the RAG question so `:ragdebug` / Ctrl+D can ask "what did
+        // you retrieve for *that*?" without it being typed again. Only `/query`
+        // — an `/agent` question may be a whole file of code (`:coding`).
+        if path == "/query" {
+            self.crmaine_last_question = Some(question.to_string());
         }
         let port = cfg.port;
         let rid = self.arm_crmaine_request(port);
@@ -1060,6 +1172,198 @@ fn parse_tool_line(line: &str) -> Vec<CrmaineEvent> {
     }
 }
 
+/// The width the `:ragdebug` report is laid out at. Fixed (like the manual's)
+/// because the lines are built before the popup is drawn; 72 keeps it whole on
+/// an 80-column terminal.
+const REPORT_W: usize = 72;
+
+/// One chunk the retriever scored for a `/debug_search` query.
+pub(crate) struct DebugHit {
+    pub file: String,
+    pub score: f64,
+    pub chunk_id: Option<i64>,
+    pub preview: String,
+}
+
+/// A `/debug_search` reply: the tokens the query became, and the chunks that
+/// scored above zero, best first.
+pub(crate) struct DebugSearch {
+    pub hits: Vec<DebugHit>,
+    /// The query's tokens, as the server tokenized it (it sends the first 30).
+    pub tokens: Vec<String>,
+    /// How many tokens there were in total — more than `tokens.len()` when the
+    /// server truncated the list.
+    pub token_count: usize,
+}
+
+/// Parse a `/debug_search` reply. The server answers with a plain JSON object;
+/// an `error` (typically "index not loaded") comes back as `Err` so the caller
+/// can say so instead of showing an empty ranking.
+pub(crate) fn parse_debug_search(raw: &str) -> Result<DebugSearch, String> {
+    let v: serde_json::Value = serde_json::from_str(raw.trim()).map_err(|e| e.to_string())?;
+    if let Some(e) = v.get("error").and_then(|x| x.as_str()) {
+        if !e.is_empty() {
+            return Err(e.to_string());
+        }
+    }
+    let tokens: Vec<String> = v
+        .get("tokens")
+        .and_then(|t| t.as_array())
+        .map(|a| a.iter().filter_map(|x| x.as_str().map(str::to_string)).collect())
+        .unwrap_or_default();
+    let token_count =
+        v.get("token_count").and_then(|c| c.as_u64()).unwrap_or(tokens.len() as u64) as usize;
+    let mut hits = Vec::new();
+    if let Some(arr) = v.get("results").and_then(|r| r.as_array()) {
+        for it in arr {
+            hits.push(DebugHit {
+                file: it.get("file").and_then(|x| x.as_str()).unwrap_or("?").to_string(),
+                score: it.get("score").and_then(|x| x.as_f64()).unwrap_or(0.0),
+                chunk_id: it.get("chunk_id").and_then(|x| x.as_i64()),
+                preview: it.get("preview").and_then(|x| x.as_str()).unwrap_or("").to_string(),
+            });
+        }
+    }
+    Ok(DebugSearch { hits, tokens, token_count })
+}
+
+/// Lay the retrieval trace out as report lines: what the question was searched
+/// as, which index answered, then each chunk with a bar scaled to the best
+/// score and the opening of its text. The bar is what makes a bad retrieval
+/// obvious at a glance — a flat run of near-equal scores means nothing in the
+/// corpus really matched, while one tall bar on the wrong file means the
+/// tokens went somewhere unexpected.
+pub(crate) fn debug_report_lines(
+    lang: Lang,
+    query: &str,
+    index: &str,
+    isolated: bool,
+    d: &DebugSearch,
+    width: usize,
+) -> Vec<String> {
+    let mut out = Vec::new();
+    const LABEL_W: usize = 10;
+    let label_w = LABEL_W;
+    // A wrapped `label: value` block, with the continuation lines indented
+    // under the value so the labels stay readable down the left edge.
+    fn field(label: &str, value: &str, width: usize) -> Vec<String> {
+        crate::util::wrap_str(value, width.saturating_sub(LABEL_W + 2))
+            .iter()
+            .enumerate()
+            .map(|(i, part)| {
+                let head = if i == 0 {
+                    format!("{:<LABEL_W$}: ", label)
+                } else {
+                    " ".repeat(LABEL_W + 2)
+                };
+                format!("{head}{part}")
+            })
+            .collect()
+    }
+    let field = |label: &str, value: &str| field(label, value, width);
+    out.extend(field(tr(lang, "question", "質問"), query));
+    // A cache path is long and identifies itself at both ends, so it is cut in
+    // the middle rather than wrapped, and which index it is says so underneath.
+    out.extend(field(
+        tr(lang, "index", "インデックス"),
+        &crate::util::truncate_middle(index, width.saturating_sub(label_w + 2)),
+    ));
+    out.push(format!(
+        "{}{}",
+        " ".repeat(label_w + 2),
+        if isolated {
+            tr(lang, "(:index — isolated)", "(:index — 分離)")
+        } else {
+            tr(lang, "(crmaine's own)", "(crmaine 本体)")
+        }
+    ));
+    let tokens = if d.tokens.is_empty() {
+        tr(lang, "(none — nothing to search with)", "（なし — 検索語になっていません）").to_string()
+    } else {
+        let shown = d.tokens.join(" ");
+        if d.token_count > d.tokens.len() {
+            format!("{shown} …(+{})", d.token_count - d.tokens.len())
+        } else {
+            shown
+        }
+    };
+    out.extend(field(&format!("{} ({})", tr(lang, "tokens", "検索語"), d.token_count), &tokens));
+    out.push(String::new());
+
+    if d.hits.is_empty() {
+        for l in [
+            tr(
+                lang,
+                "Nothing scored above zero — no chunk contains these words.",
+                "スコアが 0 を超える断片がありません — どの断片にもこの語がありません。",
+            ),
+            "",
+            tr(
+                lang,
+                ":rag may still have found something through query expansion,",
+                ":rag はクエリ拡張で何か拾っている可能性はありますが、",
+            ),
+            tr(
+                lang,
+                "but the question as typed matches nothing in this index.",
+                "質問そのままではこのインデックスに一致するものがありません。",
+            ),
+            tr(
+                lang,
+                "Check the folder is indexed (:raginfo, :index), or use the",
+                "対象フォルダがインデックス済みか確認（:raginfo / :index）、または",
+            ),
+            tr(lang, "words the documents actually use.", "文書が実際に使っている語で試してください。"),
+        ] {
+            out.push(l.to_string());
+        }
+        return out;
+    }
+
+    // Said plainly, because these numbers are *not* the answer's final ordering:
+    // `/query` expands the question and reranks, `/debug_search` does neither.
+    // What this shows is the lexical ground truth the rest is built on.
+    out.push(
+        tr(
+            lang,
+            "raw BM25 for the question as typed — no cutoff, expansion or rerank",
+            "質問そのままの生 BM25 — 足切り・クエリ拡張・再ランクなし",
+        )
+        .to_string(),
+    );
+    out.push("─".repeat(width));
+    let top = d.hits.first().map(|h| h.score).unwrap_or(0.0).max(f64::MIN_POSITIVE);
+    const BAR_W: usize = 16;
+    for (i, h) in d.hits.iter().enumerate() {
+        let filled = ((h.score / top) * BAR_W as f64).round().clamp(0.0, BAR_W as f64) as usize;
+        let bar = format!("{}{}", "█".repeat(filled), "·".repeat(BAR_W - filled));
+        let chunk = match h.chunk_id {
+            Some(c) => format!(" #{c}"),
+            None => String::new(),
+        };
+        // rank(3) + space + bar(16) + 2 + score(9) + 2 = 33 columns before the name.
+        let name_w = width.saturating_sub(BAR_W + 17 + crate::util::width(&chunk));
+        out.push(format!(
+            "{:>2}. {}  {}  {}{}",
+            i + 1,
+            bar,
+            crate::util::pad_left(&format!("{:.4}", h.score), 9),
+            crate::util::truncate_middle(&h.file, name_w.max(8)),
+            chunk,
+        ));
+        // The opening of the chunk itself — the point of the whole report is
+        // seeing that this text is (or isn't) what the question was about.
+        let preview = h.preview.replace(['\n', '\r', '\t'], " ");
+        for part in crate::util::wrap_str(preview.trim(), width.saturating_sub(6)) {
+            if !part.is_empty() {
+                out.push(format!("      {part}"));
+            }
+        }
+        out.push(String::new());
+    }
+    out
+}
+
 /// Cian's own RAG index directory — where `:index` writes, kept apart from
 /// crmaine's so building one never disturbs the other.
 fn crmaine_index_dir() -> PathBuf {
@@ -1228,6 +1532,71 @@ mod tests {
             parse_tool_line("data: {\"type\":\"error\",\"message\":\"x\"}").as_slice(),
             [CrmaineEvent::Error(_)]
         ));
+    }
+
+    #[test]
+    fn parse_debug_search_reads_the_ranking_and_the_tokens() {
+        let raw = r#"{"results":[
+            {"file":"keihi.md","score":18.4213,"chunk_id":12,"preview":"出張費は帰着日の翌月10日までに"},
+            {"file":"faq.md","score":2.5,"preview":"よくある質問"}
+        ],"token_count":7,"tokens":["出張","費","精算"]}"#;
+        let d = parse_debug_search(raw).expect("parses");
+        assert_eq!(d.token_count, 7, "the total, not the shown list");
+        assert_eq!(d.tokens, vec!["出張", "費", "精算"]);
+        assert_eq!(d.hits.len(), 2);
+        assert_eq!(d.hits[0].file, "keihi.md");
+        assert_eq!(d.hits[0].chunk_id, Some(12));
+        assert!((d.hits[0].score - 18.4213).abs() < 1e-9);
+        // chunk_id is optional in the reply.
+        assert_eq!(d.hits[1].chunk_id, None);
+    }
+
+    #[test]
+    fn parse_debug_search_surfaces_an_index_not_loaded_error() {
+        let raw = r#"{"error":"インデックス未ロード","results":[],"token_count":0,"tokens":[]}"#;
+        assert_eq!(parse_debug_search(raw).err().as_deref(), Some("インデックス未ロード"));
+        // An empty `error` is not an error — the server sends the key regardless.
+        assert!(parse_debug_search(r#"{"error":"","results":[]}"#).is_ok());
+    }
+
+    #[test]
+    fn debug_report_shows_the_question_tokens_and_a_bar_per_hit() {
+        let d = DebugSearch {
+            hits: vec![
+                DebugHit {
+                    file: "keihi.md".into(),
+                    score: 20.0,
+                    chunk_id: Some(12),
+                    preview: "出張費は帰着日の\n翌月10日までに".into(),
+                },
+                DebugHit { file: "faq.md".into(), score: 5.0, chunk_id: None, preview: "".into() },
+            ],
+            tokens: vec!["出張".into(), "費".into()],
+            token_count: 5,
+        };
+        let out = debug_report_lines(Lang::En, "expenses deadline", "C:\\idx", false, &d, 72);
+        let text = out.join("\n");
+        assert!(text.contains("expenses deadline"), "the question heads the report");
+        assert!(text.contains("出張 費"), "the tokens it searched with");
+        assert!(text.contains("…(+3)"), "says how many tokens were not shown");
+        assert!(text.contains("keihi.md #12"), "file and chunk");
+        assert!(text.contains("20.0000") && text.contains("5.0000"), "raw scores");
+        // The bar is scaled to the best score: full for the top hit, a quarter
+        // for a hit scoring a quarter as much.
+        assert!(out.iter().any(|l| l.contains(&"█".repeat(16))), "top hit fills the bar");
+        assert!(out.iter().any(|l| l.contains("████············")), "5/20 is a quarter bar");
+        // The preview is flattened onto one line rather than breaking the layout.
+        assert!(text.contains("出張費は帰着日の 翌月10日までに"));
+        assert!(out.iter().all(|l| crate::util::width(l) <= 72), "fits the report width");
+    }
+
+    #[test]
+    fn debug_report_says_so_when_nothing_matched() {
+        let d = DebugSearch { hits: Vec::new(), tokens: vec!["x".into()], token_count: 1 };
+        let text = debug_report_lines(Lang::En, "q", "/idx", true, &d, 72).join("\n");
+        assert!(text.contains("Nothing scored above zero"));
+        assert!(text.contains("query expansion"), "doesn't overclaim what :rag saw");
+        assert!(text.contains(":index — isolated"), "names the index that was searched");
     }
 
     #[test]

@@ -267,6 +267,7 @@ impl App {
             Popup::SortPicker { .. } => self.sort_picker_key(key),
             Popup::ColorPicker { .. } => self.color_picker_key(key),
             Popup::Manual { .. } => self.manual_key(key),
+            Popup::Report { .. } => self.report_key(key),
             Popup::Shortcuts { .. } => self.shortcuts_key(key),
             Popup::ConfirmClose { .. } => self.confirm_close_key(key),
             Popup::ConfirmElevate { .. } => self.confirm_elevate_key(key),
@@ -594,6 +595,20 @@ impl App {
                     }
                 }
                 KeyCode::Enter => self.send_ai_message(),
+                // Ctrl+D asks the retriever what it handed the model for this
+                // question — the "the answer is wrong, whose fault is it?" key.
+                // Not while an answer streams: the report takes the popup, and
+                // the rest of the answer would have nowhere to land.
+                KeyCode::Char('d') if ctrl => {
+                    if self.crmaine_rx.is_some() {
+                        self.message =
+                            Some(tr(self.lang, "wait for the answer to finish", "回答の完了を待ってください").into());
+                    } else {
+                        // No argument: the last question `/query` was sent —
+                        // which, in a RAG chat, is the one on screen.
+                        self.start_debug_search("");
+                    }
+                }
                 // Ctrl+↑ / Ctrl+↓ rate the last RAG answer (thumbs up / down).
                 KeyCode::Up if ctrl => self.send_crmaine_feedback(true),
                 KeyCode::Down if ctrl => self.send_crmaine_feedback(false),
@@ -1332,6 +1347,30 @@ impl App {
                 KeyCode::Char('G') | KeyCode::End => *scroll = last,
                 _ => {}
             }
+        Ok(())
+    }
+
+    /// A scrolling report reads like the manual, except Esc puts back whatever
+    /// it was raised over (the chat, for a `Ctrl+D` retrieval trace).
+    fn report_key(&mut self, key: KeyEvent) -> Result<()> {
+        if matches!(key.code, KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q')) {
+            if let Popup::Report { back, .. } = &mut self.popup {
+                let back = std::mem::replace(&mut **back, Popup::None);
+                self.popup = back;
+            }
+            return Ok(());
+        }
+        let Popup::Report { lines, scroll, .. } = &mut self.popup else { return Ok(()) };
+        let last = lines.len().saturating_sub(1);
+        match key.code {
+            KeyCode::Char('j') | KeyCode::Down => *scroll = (*scroll + 1).min(last),
+            KeyCode::Char('k') | KeyCode::Up => *scroll = scroll.saturating_sub(1),
+            KeyCode::Char('d') | KeyCode::PageDown => *scroll = (*scroll + 10).min(last),
+            KeyCode::Char('u') | KeyCode::PageUp => *scroll = scroll.saturating_sub(10),
+            KeyCode::Char('g') | KeyCode::Home => *scroll = 0,
+            KeyCode::Char('G') | KeyCode::End => *scroll = last,
+            _ => {}
+        }
         Ok(())
     }
 
