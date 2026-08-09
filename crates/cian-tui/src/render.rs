@@ -629,13 +629,19 @@ fn draw_startup_splash(f: &mut Frame, area: Rect, elapsed_ms: u128) {
     f.render_widget(block, rect);
     let lines = vec![
         Line::from(vec![
-            Span::styled(format!("{}  ", frame), Style::default().fg(theme().accent).add_modifier(Modifier::BOLD)),
-            Span::styled("cian", Style::default().fg(theme().accent).add_modifier(Modifier::BOLD)),
-            Span::styled("  starting up…", Style::default().fg(Color::Rgb(180, 180, 200))),
+            Span::styled(
+                format!("{}  ", frame),
+                Style::default().fg(text_tone(theme().accent, theme().popup_bg)).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "cian",
+                Style::default().fg(text_tone(theme().accent, theme().popup_bg)).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("  starting up…", Style::default().fg(readable_on(theme().popup_bg))),
         ]),
         Line::from(Span::styled(
             "  checking AI helper (crmaine)…",
-            Style::default().fg(Color::Rgb(140, 140, 165)).add_modifier(Modifier::ITALIC),
+            Style::default().fg(muted_on(theme().popup_bg)).add_modifier(Modifier::ITALIC),
         )),
     ];
     f.render_widget(Paragraph::new(lines).alignment(Alignment::Center), inner);
@@ -746,7 +752,7 @@ fn caret_line(buffer: &str, cursor: usize, secret: bool) -> Line<'static> {
     Line::from(vec![
         Span::raw(">"),
         Span::raw(before),
-        Span::styled(at, Style::default().fg(Color::Black).bg(theme().accent)),
+        Span::styled(at, Style::default().fg(readable_on(theme().accent)).bg(theme().accent)),
         Span::raw(after),
     ])
 }
@@ -893,16 +899,16 @@ fn tabs_title<'a>(
         let is_active = i == active;
         let style = if is_active {
             if focused {
-                Style::default().fg(Color::Black).bg(focus_bg).add_modifier(Modifier::BOLD)
+                Style::default().fg(readable_on(focus_bg)).bg(focus_bg).add_modifier(Modifier::BOLD)
             } else {
                 // Active but unfocused: an accent-tinted bar so it stays legible
                 // whatever the pane background is (DarkGray vanished on some).
-                Style::default().fg(Color::Black).bg(theme().border).add_modifier(Modifier::BOLD)
+                Style::default().fg(readable_on(theme().border)).bg(theme().border).add_modifier(Modifier::BOLD)
             }
         } else {
             // Inactive tabs: a readable mid grey from the theme, not DarkGray,
             // which was the same tone as some backgrounds.
-            Style::default().fg(theme().dim).add_modifier(Modifier::BOLD)
+            Style::default().fg(dim_text(surface())).add_modifier(Modifier::BOLD)
         };
         let label = if is_active {
             active_label.clone()
@@ -1097,7 +1103,7 @@ fn shell_tabs_title<'a>(
         let label = format!(" shell {} ", i + 1);
         let style = if i == tabs.active {
             if focused {
-                Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD)
+                Style::default().fg(readable_on(theme().accent)).bg(theme().accent).add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(Color::White).bg(Color::DarkGray)
             }
@@ -1205,7 +1211,7 @@ fn draw_file_pane(
     let start = if list_h == 0 { pane.cursor } else { pane.cursor.saturating_sub(list_h - 1) };
     let end = start.saturating_add(list_h).min(total);
     let mark_style = Style::default().fg(th.mark_fg).add_modifier(Modifier::BOLD);
-    let meta_style = Style::default().fg(th.dim);
+    let meta_style = Style::default().fg(dim_text(surface()));
 
     let items: Vec<ListItem> = pane.entries[start..end].iter().enumerate().map(|(vi, e)| {
         let i = start + vi; // absolute index for marks / visual range / git
@@ -1340,7 +1346,7 @@ fn draw_pane_header(
     sort_rects: &mut Vec<(FocusedPane, cian_core::SortKey, Rect)>,
 ) {
     use cian_core::SortKey;
-    let style = base.fg(theme().dim);
+    let style = base.fg(dim_text(surface()));
     let label = |key: SortKey| -> String {
         let name = match key {
             SortKey::Name => tr(lang, "Name", "名前"),
@@ -1646,7 +1652,7 @@ fn draw_shell_inner(
                 f.render_widget(
                     Paragraph::new(badge).style(
                         Style::default()
-                            .fg(Color::Black)
+                            .fg(readable_on(theme().accent))
                             .bg(theme().accent)
                             .add_modifier(Modifier::BOLD),
                     ),
@@ -1831,11 +1837,16 @@ fn seam_zone(dir: Direction, a: Rect, b: Rect) -> Rect {
 }
 
 /// A prompt line with a right-aligned hint, used by filter mode.
+/// The one style a typed prompt wears, wherever it is typed: a dark bar with
+/// white on it. The file panes' `:` and `/` have always looked like this, and
+/// the viewer's now do too — a prompt that changed colour depending on which
+/// half of cian raised it was the same prompt pretending to be two.
+pub(crate) fn prompt_style() -> Style {
+    Style::default().bg(Color::Rgb(20, 20, 30)).fg(Color::White).add_modifier(Modifier::BOLD)
+}
+
 fn draw_prompt_line(f: &mut Frame, area: Rect, left: &str, right: &str) {
-    let style = Style::default()
-        .bg(Color::Rgb(20, 20, 30))
-        .fg(Color::White)
-        .add_modifier(Modifier::BOLD);
+    let style = prompt_style();
     f.render_widget(Paragraph::new(left).style(style), area);
     let w = right.chars().count() as u16 + 1;
     if area.width > w {
@@ -1849,9 +1860,7 @@ fn draw_prompt_line(f: &mut Frame, area: Rect, left: &str, right: &str) {
 
 fn draw_command_line(f: &mut Frame, area: Rect, buf: &str) {
     let text = format!(":{}", buf);
-    let p = Paragraph::new(text).style(
-        Style::default().bg(Color::Rgb(20, 20, 30)).fg(Color::White).add_modifier(Modifier::BOLD),
-    );
+    let p = Paragraph::new(text).style(prompt_style());
     f.render_widget(p, area);
 }
 
@@ -2057,7 +2066,9 @@ pub(crate) fn key_hints(app: &App) -> Vec<(&'static str, &'static str)> {
 
 fn draw_key_hints(f: &mut Frame, area: Rect, app: &App) {
     let key_style = Style::default()
-        .fg(theme().accent)
+        // The accent, fitted to the bar: on a light theme the accent and the
+        // status bar are two shades of the same idea.
+        .fg(text_tone(theme().accent, theme().status_bg))
         .bg(theme().status_bg)
         .add_modifier(Modifier::BOLD);
     // The description is quieter than its key, on whatever the status bar is
@@ -2113,13 +2124,20 @@ fn draw_status(f: &mut Frame, area: Rect, app: &App) {
     };
     let dim_sep = Span::styled(
         "  ▏  ",
-        Style::default().fg(Color::Rgb(90, 90, 110)).bg(theme().status_bg),
+        Style::default().fg(muted_on(theme().status_bg)).bg(theme().status_bg),
     );
     let pad = Span::styled(" ", Style::default().bg(theme().status_bg));
+    // Every chip's colour is fitted to the bar it is drawn on. The colours
+    // here mean something — amber for a filling disk, green for a clean tree
+    // — and were picked against a dark bar; on a light one they were their
+    // own background with words in it.
     let chip = |label: String, fg: Color| {
         Span::styled(
             label,
-            Style::default().fg(fg).bg(theme().status_bg).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(text_tone(fg, theme().status_bg))
+                .bg(theme().status_bg)
+                .add_modifier(Modifier::BOLD),
         )
     };
 
@@ -2146,14 +2164,14 @@ fn draw_status(f: &mut Frame, area: Rect, app: &App) {
     let mut spans: Vec<Span> = vec![
         Span::styled(
             format!(" {}{} ", focus_label, mode_word),
-            Style::default().fg(Color::Black).bg(badge_bg).add_modifier(Modifier::BOLD),
+            Style::default().fg(readable_on(badge_bg)).bg(badge_bg).add_modifier(Modifier::BOLD),
         ),
         pad.clone(),
-        chip(items_chip, Color::White),
+        chip(items_chip, readable_on(theme().status_bg)),
         dim_sep.clone(),
         chip(
             marks_chip,
-            if mark_count > 0 { theme().mark_fg } else { Color::Rgb(140, 140, 160) },
+            if mark_count > 0 { theme().mark_fg } else { muted_on(theme().status_bg) },
         ),
     ];
 
@@ -2253,7 +2271,7 @@ fn draw_status(f: &mut Frame, area: Rect, app: &App) {
             spans.push(Span::styled(
                 format!("◂ {}", msg),
                 Style::default()
-                    .fg(message_color(msg))
+                    .fg(text_tone(message_color(msg), theme().status_bg))
                     .bg(theme().status_bg)
                     .add_modifier(Modifier::ITALIC | Modifier::BOLD),
             ));
@@ -2376,7 +2394,7 @@ fn draw_progress_bar(
     );
     f.render_widget(
         Paragraph::new(tr(lang, " Esc = stop   b = background ", " Esc = 中止   b = バックグラウンドへ ")).style(
-            Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD),
+            Style::default().fg(readable_on(theme().accent)).bg(theme().accent).add_modifier(Modifier::BOLD),
         ),
         Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1),
     );
@@ -2469,7 +2487,7 @@ fn draw_image(f: &mut Frame, area: Rect, app: &mut App) {
     let footer_area = Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1);
     f.render_widget(
         Paragraph::new(tr(lang, " S-Enter reveal   E edit   Esc close ", " S-Enter 場所へ   E 編集   Esc 閉じる "))
-            .style(Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD)),
+            .style(Style::default().fg(readable_on(theme().accent)).bg(theme().accent).add_modifier(Modifier::BOLD)),
         footer_area,
     );
 }
@@ -2496,15 +2514,22 @@ fn draw_preview_panel(f: &mut Frame, area: Rect, app: &mut App) {
         .title(Line::from(vec![
             Span::styled(
                 " ⌥ preview ",
-                Style::default().fg(theme().accent).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(text_tone(theme().accent, surface()))
+                    .add_modifier(Modifier::BOLD),
             ),
-            Span::styled(truncate_middle(&title_name, 48), Style::default().fg(theme().dim)),
+            Span::styled(truncate_middle(&title_name, 48), Style::default().fg(dim_text(surface()))),
             Span::raw(" "),
         ]))
-        .title_bottom(tr(
-            lang,
-            " :preview off   Shift+J = shell ",
-            " :preview で解除   シェルは Shift+J ",
+        // Explicitly styled: an unstyled title takes the *border's* colour,
+        // and a border colour is chosen to be quiet.
+        .title_bottom(Span::styled(
+            tr(
+                lang,
+                " :preview off   Shift+J = shell ",
+                " :preview で解除   シェルは Shift+J ",
+            ),
+            Style::default().fg(dim_text(surface())),
         ));
     let inner = area.inner(Margin { vertical: 1, horizontal: 1 });
     // Wipe the panel before drawing into it. A `Paragraph` writes only the
@@ -2711,7 +2736,7 @@ fn draw_image_gfx(f: &mut Frame, rect: Rect, inner: Rect, app: &mut App) {
     let footer_area = Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1);
     f.render_widget(
         Paragraph::new(tr(lang, " S-Enter reveal   E edit   Esc close ", " S-Enter 場所へ   E 編集   Esc 閉じる "))
-            .style(Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD)),
+            .style(Style::default().fg(readable_on(theme().accent)).bg(theme().accent).add_modifier(Modifier::BOLD)),
         footer_area,
     );
 }
@@ -2788,6 +2813,7 @@ fn fit_to_surface(c: Color) -> Color {
 pub(crate) fn readable_on(bg: Color) -> Color {
     const DARK: Color = Color::Rgb(30, 32, 40);
     const LIGHT: Color = Color::Rgb(228, 228, 240);
+    let bg = as_rgb(bg);
     if !matches!(bg, Color::Rgb(..)) {
         return Color::Rgb(225, 225, 240); // unknown → assume a dark ground
     }
@@ -2798,12 +2824,43 @@ pub(crate) fn readable_on(bg: Color) -> Color {
     }
 }
 
+/// A named ANSI colour as the RGB a terminal actually paints, so it can be
+/// measured like any other. cian's own default theme is built on `Cyan`, and
+/// leaving it unmeasurable meant "unknown → assume a dark ground", which put
+/// pale text on a bright cyan badge — the one place the default theme has to
+/// be right.
+fn as_rgb(c: Color) -> Color {
+    let (r, g, b) = match c {
+        Color::Rgb(..) => return c,
+        Color::Black => (0, 0, 0),
+        Color::Red => (205, 0, 0),
+        Color::Green => (0, 205, 0),
+        Color::Yellow => (205, 205, 0),
+        Color::Blue => (0, 0, 238),
+        Color::Magenta => (205, 0, 205),
+        Color::Cyan => (0, 205, 205),
+        Color::Gray => (229, 229, 229),
+        Color::DarkGray => (127, 127, 127),
+        Color::LightRed => (255, 0, 0),
+        Color::LightGreen => (0, 255, 0),
+        Color::LightYellow => (255, 255, 0),
+        Color::LightBlue => (92, 92, 255),
+        Color::LightMagenta => (255, 0, 255),
+        Color::LightCyan => (0, 255, 255),
+        Color::White => (255, 255, 255),
+        // Reset is the terminal's own colour and Indexed is its palette:
+        // neither is knowable from here.
+        _ => return c,
+    };
+    Color::Rgb(r, g, b)
+}
+
 /// A colour's relative luminance (WCAG): sRGB undone, then weighted for the
 /// eye. Not the quick `0.299r + 0.587g + 0.114b` used elsewhere for "is this
 /// page light or dark" — that one is fine for picking a direction, but it
 /// cannot say whether two colours are far enough apart to read.
 fn rel_luminance(c: Color) -> f32 {
-    let Color::Rgb(r, g, b) = c else { return 0.0 };
+    let Color::Rgb(r, g, b) = as_rgb(c) else { return 0.0 };
     let lin = |v: u8| {
         let v = v as f32 / 255.0;
         if v <= 0.04045 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) }
@@ -2848,6 +2905,16 @@ pub(crate) fn text_tone(c: Color, bg: Color) -> Color {
         (r, g, b) = (nr, ng, nb);
     }
     Color::Rgb(r, g, b)
+}
+
+/// The theme's own dim colour, kept readable where it is used as *text*.
+///
+/// The presets choose `dim` for borders as much as for words, and a light
+/// theme's border grey is nearly the page itself — which is right for a rule
+/// and wrong for a column heading. Borders keep the colour as chosen; text
+/// asks for this.
+pub(crate) fn dim_text(bg: Color) -> Color {
+    text_tone(theme().dim, bg)
 }
 
 /// Text one step quieter than body text, and still readable on `bg`.
@@ -4296,7 +4363,7 @@ fn draw_simple_dialog(
     }
 
     let footer_p = Paragraph::new(footer).style(
-        Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD),
+        Style::default().fg(readable_on(theme().accent)).bg(theme().accent).add_modifier(Modifier::BOLD),
     );
     f.render_widget(footer_p, footer_area);
 }
@@ -4425,7 +4492,7 @@ fn draw_scrolling_text(
         Lang::Ja => " j/k スクロール  u/d ページ  g/G  Esc 閉じる ",
     };
     let footer = Paragraph::new(footer_text).style(
-        Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD),
+        Style::default().fg(readable_on(theme().accent)).bg(theme().accent).add_modifier(Modifier::BOLD),
     );
     f.render_widget(footer, footer_area);
 }
@@ -4538,7 +4605,7 @@ fn draw_ssh_hosts(
         Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1);
     f.render_widget(
         Paragraph::new(tr(lang, " type to filter  ↑↓ select  Enter next  Esc cancel ", " 入力で絞込  ↑↓ 選択  Enter 次へ  Esc 取消 ")).style(
-            Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD),
+            Style::default().fg(readable_on(theme().accent)).bg(theme().accent).add_modifier(Modifier::BOLD),
         ),
         footer_area,
     );
@@ -4601,7 +4668,7 @@ fn draw_snippets(
         Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1);
     f.render_widget(
         Paragraph::new(tr(lang, " type to filter  ↑↓ select  Enter send  Esc cancel ", " 入力で絞込  ↑↓ 選択  Enter 送信  Esc 取消 ")).style(
-            Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD),
+            Style::default().fg(readable_on(theme().accent)).bg(theme().accent).add_modifier(Modifier::BOLD),
         ),
         footer_area,
     );
@@ -4777,7 +4844,7 @@ fn draw_ssh_users(
         Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1);
     f.render_widget(
         Paragraph::new(tr(lang, " Enter connect   Esc back ", " Enter 接続   Esc 戻る ")).style(
-            Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD),
+            Style::default().fg(readable_on(theme().accent)).bg(theme().accent).add_modifier(Modifier::BOLD),
         ),
         footer_area,
     );
@@ -4915,7 +4982,7 @@ fn draw_grep_replace(
             " Space=toggle  a=all  f=this file  Enter=write  Esc=cancel ",
             " Space=切替  a=全部  f=このファイル  Enter=書き込み  Esc=取消 ",
         ))
-        .style(Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD)),
+        .style(Style::default().fg(readable_on(theme().accent)).bg(theme().accent).add_modifier(Modifier::BOLD)),
         Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1),
     );
 }
@@ -5042,7 +5109,7 @@ fn draw_find_results(
     }
     f.render_widget(
         Paragraph::new(tr(lang, " Enter=go  r=replace all  p=panelize  j/k=move  Esc=close ", " Enter=移動  r=一括置換  p=ペイン化  j/k=カーソル  Esc=閉じる ")).style(
-            Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD),
+            Style::default().fg(readable_on(theme().accent)).bg(theme().accent).add_modifier(Modifier::BOLD),
         ),
         Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1),
     );
@@ -5154,7 +5221,7 @@ fn draw_shortcuts(
         Paragraph::new(tr(lang, " Enter=open/into  a=add  A=folder  d=del  r=edit  ←=back  Esc ", " Enter=開く/入る  a=追加  A=フォルダ  d=削除  r=編集  ←=戻る  Esc "))
             .style(
                 Style::default()
-                    .fg(Color::Black)
+                    .fg(readable_on(theme().accent))
                     .bg(theme().accent)
                     .add_modifier(Modifier::BOLD),
             ),
@@ -5208,7 +5275,7 @@ fn draw_history(
     }
     f.render_widget(
         Paragraph::new(tr(lang, " ↑↓/jk select  Enter jump  a add shortcut  Esc cancel ", " ↑↓/jk 選択  Enter 移動  a ショートカット追加  Esc 取消 ")).style(
-            Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD),
+            Style::default().fg(readable_on(theme().accent)).bg(theme().accent).add_modifier(Modifier::BOLD),
         ),
         Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1),
     );
@@ -5268,7 +5335,7 @@ fn draw_dest_picker(
     }
     f.render_widget(
         Paragraph::new(tr(lang, " Enter=send here   n=type a path   Esc=cancel ", " Enter=ここへ   n=パス入力   Esc=取消 ")).style(
-            Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD),
+            Style::default().fg(readable_on(theme().accent)).bg(theme().accent).add_modifier(Modifier::BOLD),
         ),
         Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1),
     );
@@ -6143,7 +6210,7 @@ fn draw_viewer(
         ),
         None => (
             footer,
-            Style::default().fg(Color::Black).bg(mode_color).add_modifier(Modifier::BOLD),
+            Style::default().fg(readable_on(mode_color)).bg(mode_color).add_modifier(Modifier::BOLD),
         ),
     };
     let last_row = inner.y + inner.height.saturating_sub(1);
@@ -6156,8 +6223,7 @@ fn draw_viewer(
     if let Some(text) = prompt {
         if inner.height >= 2 {
             f.render_widget(
-                Paragraph::new(truncate(&text, inner.width as usize))
-                    .style(Style::default().fg(readable_on(surface())).bg(surface())),
+                Paragraph::new(truncate(&text, inner.width as usize)).style(prompt_style()),
                 Rect::new(inner.x, last_row - 1, inner.width, 1),
             );
         }
@@ -6240,7 +6306,7 @@ fn draw_dir_compare(
             " ◀ left  ▶ right  ≠ differ   Enter=go  </> copy one  [/] sync all  w save  Esc ",
             " ◀ 左  ▶ 右  ≠ 相違   Enter=移動  </> 1件コピー  [/] 一括同期  w 保存  Esc ",
         ))
-        .style(Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD)),
+        .style(Style::default().fg(readable_on(theme().accent)).bg(theme().accent).add_modifier(Modifier::BOLD)),
         Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1),
     );
 }
@@ -6276,7 +6342,7 @@ fn draw_diff(
     // The exact edited span within a changed line: a solid bar, the way
     // WinMerge marks the characters that actually differ.
     let chg_hot = Style::default()
-        .fg(Color::Black)
+        .fg(readable_on(Color::Rgb(240, 210, 120)))
         .bg(Color::Rgb(240, 210, 120))
         .add_modifier(Modifier::BOLD);
 
@@ -6425,7 +6491,7 @@ fn draw_diff(
     };
     f.render_widget(
         Paragraph::new(footer)
-        .style(Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD)),
+        .style(Style::default().fg(readable_on(theme().accent)).bg(theme().accent).add_modifier(Modifier::BOLD)),
         Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1),
     );
 }
@@ -6483,7 +6549,7 @@ fn draw_archive(
     }
     f.render_widget(
         Paragraph::new(tr(lang, " Enter=extract this   a=extract all   Esc=close ", " Enter=これを展開   a=全展開   Esc=閉じる ")).style(
-            Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD),
+            Style::default().fg(readable_on(theme().accent)).bg(theme().accent).add_modifier(Modifier::BOLD),
         ),
         Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1),
     );
@@ -6553,7 +6619,7 @@ fn draw_palette(
     }
     f.render_widget(
         Paragraph::new(tr(lang, " type to filter   ↑/↓ move   Enter run   Esc close ", " 入力で絞込   ↑/↓ 移動   Enter 実行   Esc 閉じる "))
-            .style(Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD)),
+            .style(Style::default().fg(readable_on(theme().accent)).bg(theme().accent).add_modifier(Modifier::BOLD)),
         Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1),
     );
 }
@@ -6629,7 +6695,7 @@ fn draw_disk_usage(
             " Enter=into folder   -=up   j/k move   Esc=close ",
             " Enter=フォルダへ   -=上へ   j/k 移動   Esc=閉じる ",
         ))
-        .style(Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD)),
+        .style(Style::default().fg(readable_on(theme().accent)).bg(theme().accent).add_modifier(Modifier::BOLD)),
         Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1),
     );
 }
@@ -6677,7 +6743,7 @@ fn draw_git_log(
                 hw = hash_w, dw = date_w, aw = author_w,
             );
             let style = if sel {
-                Style::default().fg(Color::Black).bg(theme().accent)
+                Style::default().fg(readable_on(theme().accent)).bg(theme().accent)
             } else {
                 Style::default().fg(Color::Rgb(200, 200, 215))
             };
@@ -6727,7 +6793,7 @@ fn draw_macros(
     let footer_area = Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1);
     f.render_widget(
         Paragraph::new(tr(lang, " Enter=run  j/k  Esc ", " Enter=実行  j/k  Esc ")).style(
-            Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD),
+            Style::default().fg(readable_on(theme().accent)).bg(theme().accent).add_modifier(Modifier::BOLD),
         ),
         footer_area,
     );
@@ -6777,7 +6843,7 @@ fn draw_sort_picker(
         Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1);
     f.render_widget(
         Paragraph::new(tr(lang, " Enter=apply (again = reverse)  Esc ", " Enter=適用（再度で逆順）  Esc ")).style(
-            Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD),
+            Style::default().fg(readable_on(theme().accent)).bg(theme().accent).add_modifier(Modifier::BOLD),
         ),
         footer_area,
     );
@@ -6820,7 +6886,7 @@ fn draw_encoding_picker(
     }
     f.render_widget(
         Paragraph::new(tr(lang, " Enter=apply  Esc=cancel ", " Enter=適用  Esc=取消 ")).style(
-            Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD),
+            Style::default().fg(readable_on(theme().accent)).bg(theme().accent).add_modifier(Modifier::BOLD),
         ),
         Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1),
     );
@@ -6868,7 +6934,7 @@ fn draw_color_picker(
         Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1);
     f.render_widget(
         Paragraph::new(tr(lang, " Enter=apply  Esc=cancel ", " Enter=適用  Esc=取消 ")).style(
-            Style::default().fg(Color::Black).bg(theme().accent).add_modifier(Modifier::BOLD),
+            Style::default().fg(readable_on(theme().accent)).bg(theme().accent).add_modifier(Modifier::BOLD),
         ),
         footer_area,
     );

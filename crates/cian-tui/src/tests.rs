@@ -4484,92 +4484,116 @@
         set_theme(ResolvedTheme::DARK);
     }
 
-    /// The viewer's chrome — the mode badge, the tab strip, the hint bar —
-    /// was black text on colours chosen against a dark page. On a light theme
-    /// the badge, the tabs and the hints all came out too close to what they
-    /// were painted on to read. Every cell of them has to stand off its own
-    /// background, whatever the theme.
+    /// cian's chrome — the status bar, the pane tabs and column headings, the
+    /// viewer's badge / tab strip / hint bar / prompt — was written as fixed
+    /// colours chosen against a dark page: black on a chip, white on the
+    /// status bar, the theme's border grey on a column heading. On a light
+    /// theme those are their own background with words in it (the status bar
+    /// scored 1.06:1 — white on near-white). Every letter of the chrome has
+    /// to stand off what it is painted on, whatever the theme.
     #[test]
-    fn the_viewer_chrome_reads_on_light_themes_too() {
+    fn the_chrome_reads_on_every_theme() {
         use crate::theme::{set_theme, ResolvedTheme};
         let _g = THEME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let lum = |c: Color| match c {
-            Color::Rgb(r, g, b) => (299 * r as i32 + 587 * g as i32 + 114 * b as i32) / 1000,
-            // A default fg/bg is the terminal's own; nothing to check.
-            _ => -1,
-        };
 
         for t in
             [ResolvedTheme::DARK, ResolvedTheme::GITHUB_LIGHT, ResolvedTheme::SOLARIZED_LIGHT]
         {
             set_theme(t);
-            let d = tempfile::tempdir().unwrap();
-            std::fs::write(d.path().join("a.txt"), "AAA\n").unwrap();
-            std::fs::write(d.path().join("b.txt"), "BBB\n").unwrap();
-            let p = d.path().to_path_buf();
-            let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
-            for n in ["a.txt", "b.txt"] {
-                let path = app
-                    .active_pane()
-                    .unwrap()
-                    .entries
-                    .iter()
-                    .find(|e| e.name == n)
-                    .unwrap()
-                    .path
-                    .clone();
-                app.active_pane_mut().unwrap().marks.insert(path);
-            }
-            // Two files open, so the tab strip is drawn as well as the badge.
-            app.handle_key(code(KeyCode::F(3))).unwrap();
-            let buf = render_buf(&mut app, 100, 30);
-            let row_text = |y: u16| {
-                (0..buf.area.width).map(|x| buf[(x, y)].symbol().to_string()).collect::<String>()
-            };
-
-            // The rows the chrome lives on: the tab strip and badge sit on the
-            // viewer's border rows, the hints on its last inside row.
-            let rows: Vec<u16> = (0..buf.area.height)
-                .filter(|y| {
-                    let r = row_text(*y);
-                    // "1 a.txt" is the tab strip's own label, so the app's
-                    // status bar (which also names the file) is not caught.
-                    r.contains("READ") || r.contains("1 a.txt") || r.contains("search")
-                })
-                .collect();
-            assert!(!rows.is_empty(), "found none of the viewer chrome to check");
-            // Only inside the viewer's own columns: the file panes show at the
-            // edges of the same rows, and they are not what is being checked.
-            let (x0, x1) = (app.viewer_rect.x, app.viewer_rect.x + app.viewer_rect.width);
-            for y in rows {
-                for x in x0..x1 {
-                    let c = &buf[(x, y)];
-                    // Letters and digits only: borders and separators are
-                    // decoration, and are meant to be quieter than text.
-                    if !c.symbol().chars().all(char::is_alphanumeric) {
-                        continue;
-                    }
-                    let (f, b) = (lum(c.fg), lum(c.bg));
-                    if f < 0 || b < 0 {
-                        continue;
-                    }
-                    // WCAG's own measure, not a luminance difference: the
-                    // pairs that failed here — black on a mid-blue badge, a
-                    // dark-theme grey on cream — score respectably by
-                    // luminance and are still hard to read. 4.0 is a shade
-                    // under the 4.5 wanted for body text, which is fair for
-                    // bold chrome a few characters long.
-                    let cr = crate::render::contrast_ratio(c.fg, c.bg);
-                    assert!(
-                        cr >= 4.0,
-                        "{:?}: {:?} at ({x},{y}) — {:?} on {:?} is only {cr:.2}:1",
-                        t.accent,
-                        c.symbol(),
-                        c.fg,
-                        c.bg,
-                    );
-                    let _ = (f, b);
+            // stage 0 = the panes and the bars under them; 1 = the viewer over
+            // them (two files, so the tab strip is drawn); 2 = with `:` open.
+            for stage in 0..3 {
+                let d = tempfile::tempdir().unwrap();
+                std::fs::write(d.path().join("a.txt"), "AAA\n").unwrap();
+                std::fs::write(d.path().join("b.txt"), "BBB\n").unwrap();
+                let p = d.path().to_path_buf();
+                let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+                for n in ["a.txt", "b.txt"] {
+                    let path = app
+                        .active_pane()
+                        .unwrap()
+                        .entries
+                        .iter()
+                        .find(|e| e.name == n)
+                        .unwrap()
+                        .path
+                        .clone();
+                    app.active_pane_mut().unwrap().marks.insert(path);
                 }
+                if stage >= 1 {
+                    app.handle_key(code(KeyCode::F(3))).unwrap();
+                }
+                if stage == 2 {
+                    app.handle_key(key(':')).unwrap();
+                }
+                let buf = render_buf(&mut app, 100, 30);
+                let h = buf.area.height;
+                let row_text = |y: u16| {
+                    (0..buf.area.width).map(|x| buf[(x, y)].symbol().to_string()).collect::<String>()
+                };
+
+                // The bars along the bottom and the pane chrome at the top run
+                // the full width; the viewer's own chrome is checked only
+                // within the viewer, since the panes show at the edges of the
+                // same rows and are drawn by someone else.
+                // Rows 0-2 are the panes' own chrome (tabs, column headings)
+                // only while the viewer is not covering them; the bars along
+                // the bottom are there in every stage.
+                let full: Vec<u16> = if stage == 0 {
+                    vec![0, 1, 2, h - 2, h - 1]
+                } else {
+                    vec![h - 2, h - 1]
+                };
+                let viewer_rows: Vec<u16> = (0..h)
+                    .filter(|y| {
+                        let r = row_text(*y);
+                        r.contains("READ") || r.contains("COMMAND") || r.contains("1 a.txt")
+                            || r.contains("search") || r.contains("s/old/new/")
+                    })
+                    .collect();
+                let (vx0, vx1) =
+                    (app.viewer_rect.x, app.viewer_rect.x + app.viewer_rect.width);
+                let mut checked = 0;
+                for y in 0..h {
+                    let (x0, x1) = if full.contains(&y) {
+                        (0, buf.area.width)
+                    } else if viewer_rows.contains(&y) {
+                        (vx0, vx1)
+                    } else {
+                        continue;
+                    };
+                    for x in x0..x1 {
+                        let c = &buf[(x, y)];
+                        // Letters and digits only: borders, separators and
+                        // glyphs are decoration, and are meant to be quieter.
+                        if !c.symbol().chars().all(char::is_alphanumeric)
+                            || c.symbol().trim().is_empty()
+                        {
+                            continue;
+                        }
+                        // A Reset fg/bg is the terminal's own colour and
+                        // cannot be measured from here.
+                        if matches!(c.fg, Color::Reset) || matches!(c.bg, Color::Reset) {
+                            continue;
+                        }
+                        checked += 1;
+                        // WCAG's own measure rather than a luminance
+                        // difference: the pairs that failed here score
+                        // respectably by luminance and are still unreadable.
+                        // 4.0 is a shade under the 4.5 wanted for body text,
+                        // which is fair for bold chrome a few characters long.
+                        let cr = crate::render::contrast_ratio(c.fg, c.bg);
+                        assert!(
+                            cr >= 4.0,
+                            "{:?} stage{stage}: {:?} at ({x},{y}) — {:?} on {:?} is {cr:.2}:1",
+                            t.accent,
+                            c.symbol(),
+                            c.fg,
+                            c.bg,
+                        );
+                    }
+                }
+                assert!(checked > 20, "found almost no chrome to check ({checked} cells)");
             }
         }
         set_theme(ResolvedTheme::DARK);
@@ -5421,6 +5445,13 @@
     /// colors and vim themes would be flattened.
     #[test]
     fn the_tint_leaves_explicitly_colored_cells_alone() {
+        // The theme decides whether an untouched cell is Reset at all (a light
+        // theme paints the whole surface), so this holds the theme still while
+        // it looks — otherwise a theme test running beside it decides the
+        // answer.
+        use crate::theme::{set_theme, ResolvedTheme};
+        let _g = THEME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        set_theme(ResolvedTheme::DARK);
         let (_d, mut app) = app_with(&["a.txt"]);
         // Give a file pane a background so there are non-Reset cells to guard,
         // then tint the whole screen area and check they are preserved.
