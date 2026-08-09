@@ -3727,7 +3727,7 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry("  :preview", None, "the rendered Markdown, and back to the source (Ctrl+E where the terminal allows it)", "Markdown の描画表示とソースの切替（端末が許せば Ctrl+E でも）"),
                 entry("  F2 / Shift+F2", None, "the next / previous open file, or click ◂ ▸ in the title — F3 on marked files opens them all", "次/前の開いているファイル（タイトルの ◂ ▸ クリックでも）— マークして F3 で全部開く"),
                 entry("  r after /", None, "replace what the search found — the prompt arrives with the pattern in it", "検索したものを置換 — パターンは入力済みで開く"),
-                entry("  :ruler", None, "the column scale and the crosshair on the cursor's line and column. On by default", "列のルーラーとカーソル行・列の十字。既定でオン"),
+                entry("  :ruler", None, "the column scale, with the cursor's column marked and its line tinted. On by default", "列のルーラー（カーソルの桁を強調、カーソル行に色）。既定でオン"),
                 entry("  :ws", None, "the invisible characters — tab, trailing space, ideographic space, line ending. On by default", "見えない文字の表示 — TAB・行末の空白・全角空白・改行。既定でオン"),
                 entry("  :expand all", None, "convert every tab, not only the indent (destroys TSV separators — hence by name)", "行中のタブも全部変換（TSV の区切りも消えるので、明示的に指定）"),
                 entry("  outline", None, "]] / [[ next/prev section, click an entry to jump, :outline hides the column", "]] / [[ 次/前の見出し、項目クリックで移動、:outline で列を隠す"),

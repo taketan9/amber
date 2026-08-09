@@ -4191,6 +4191,41 @@
         set_theme(ResolvedTheme::DARK);
     }
 
+    /// The crosshair has to step *away* from the surface, not always darker:
+    /// a fixed dark tint turned a light theme's cursor line into a black bar
+    /// with the text still on it.
+    #[test]
+    fn the_crosshair_shade_follows_the_theme() {
+        use crate::render::shade_of_surface;
+        use crate::theme::{set_theme, surface, ResolvedTheme};
+        let _g = THEME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let lum = |c: Color| match c {
+            Color::Rgb(r, g, b) => 299 * r as i32 + 587 * g as i32 + 114 * b as i32,
+            _ => 0,
+        };
+
+        set_theme(ResolvedTheme::DARK);
+        assert!(lum(shade_of_surface(40)) > lum(surface()), "lighter on a dark theme");
+        set_theme(ResolvedTheme::GITHUB_LIGHT);
+        assert!(lum(shade_of_surface(40)) < lum(surface()), "darker on a light one");
+        // The cursor cell is the page's own two colours swapped, so it stays
+        // legible whatever the line under it is tinted to — the one thing that
+        // must never wash out.
+        for t in [ResolvedTheme::DARK, ResolvedTheme::GITHUB_LIGHT] {
+            set_theme(t);
+            let (fg, bg) = (surface(), crate::render::readable_on(surface()));
+            assert!(
+                (lum(fg) - lum(bg)).abs() > 100_000,
+                "the cursor stands off its own background",
+            );
+            assert!(
+                (lum(bg) - lum(shade_of_surface(28))).abs() > 50_000,
+                "…and off the tint of the line it sits on",
+            );
+        }
+        set_theme(ResolvedTheme::DARK);
+    }
+
     #[test]
     fn theme_set_by_name_sticks() {
         let _g = THEME_LOCK.lock().unwrap_or_else(|e| e.into_inner());

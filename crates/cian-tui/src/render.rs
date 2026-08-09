@@ -5179,16 +5179,37 @@ fn dim_of(c: Color) -> Color {
 }
 
 
-/// Tint a cell for the cursor's line or column.
+/// A shade of the current surface, `amount` steps away from it.
+///
+/// Away, not darker: on a dark theme that means lighter and on a light theme
+/// darker, so a tint meant to be *noticed* stays noticeable and a tint meant
+/// to sit *under* the text never swallows it. Fixed dark values did the second
+/// of those on a light theme, which is where this came from.
+pub(crate) fn shade_of_surface(amount: i16) -> Color {
+    let (r, g, b) = match surface() {
+        Color::Rgb(r, g, b) => (r as i16, g as i16, b as i16),
+        _ => (30, 30, 40),
+    };
+    // In i32: 299 × 255 alone overflows an i16, and a panic here would take
+    // the program down every frame.
+    let lum = (299 * r as i32 + 587 * g as i32 + 114 * b as i32) / 1000;
+    let step = if lum > 140 { -amount } else { amount };
+    let clamp = |v: i16| v.saturating_add(step).clamp(0, 255) as u8;
+    Color::Rgb(clamp(r), clamp(g), clamp(b))
+}
+
+/// Tint the cursor's line.
 ///
 /// A background rather than a colour change, so it sits under the syntax
-/// highlighting instead of arguing with it — the crosshair says where you are,
-/// and the colours go on saying what the text is.
-fn cross(base: Style, on_line: bool, on_col: bool) -> Style {
-    match (on_line, on_col) {
-        (false, false) => base,
-        (true, true) => base.bg(Color::Rgb(78, 78, 104)),
-        _ => base.bg(Color::Rgb(58, 58, 78)),
+/// highlighting instead of arguing with it — the tint says which line you are
+/// on, and the colours go on saying what the text is. There is no matching
+/// stripe down the column: the ruler already marks it, and a full-height bar
+/// through the text costs more reading than it repays.
+fn cross(base: Style, on_line: bool) -> Style {
+    if on_line {
+        base.bg(shade_of_surface(28))
+    } else {
+        base
     }
 }
 
@@ -5485,7 +5506,10 @@ fn draw_viewer(
     // Ordered selection endpoints, for the highlight geometry.
     let (s0, e0) = order_pos(*anchor, (*line, *col));
     let sel_bg = Style::default().bg(theme().selected_bg);
-    let cursor_style = Style::default().add_modifier(Modifier::REVERSED);
+    // The page's own two colours, swapped. Not `REVERSED`, which swaps
+    // whatever is underneath — on a tinted line that is the tint, and the
+    // cursor came out as a smudge the same shade as the line it was on.
+    let cursor_style = Style::default().fg(surface()).bg(readable_on(surface()));
     let search_bg = Style::default().bg(Color::Rgb(120, 100, 0)).fg(Color::Rgb(255, 240, 190));
     // Body text adapts to the (themed) surface so it reads on light themes.
     let text_fg = readable_on(surface());
@@ -5608,19 +5632,6 @@ fn draw_viewer(
             // the screen. Underneath everything that says more than "you are
             // here" — a selection, a search hit, the cursor itself.
             let cross_line = ruler && !*preview && i == *line;
-            // Display columns again: a tint on "the fifth character" and a
-            // ruler on "the fifth column" do not point at the same place.
-            let cross_col = |j: usize| -> bool {
-                if !ruler || *preview || i == *line {
-                    return false;
-                }
-                let start = chars
-                    .iter()
-                    .take(j)
-                    .fold(0usize, |at, c| at + cian_core::textops::char_cols(*c, at));
-                let w = chars.get(j).map(|c| cian_core::textops::char_cols(*c, start)).unwrap_or(1);
-                start < cur_col && cur_col < start + w || start == cur_col
-            };
             let cell_style = |j: usize| -> Style {
                 // Priority: cursor over selection over a search match; the
                 // resting style is the Markdown colour in preview, else plain.
@@ -5638,9 +5649,9 @@ fn draw_viewer(
                         .and_then(|s| s.get(j))
                         .copied()
                         .unwrap_or(Style::default().fg(text_fg));
-                    cross(base, cross_line, cross_col(j))
+                    cross(base, cross_line)
                 } else {
-                    cross(Style::default().fg(text_fg), cross_line, cross_col(j))
+                    cross(Style::default().fg(text_fg), cross_line)
                 }
             };
             // Build the body char-by-char, merging same-styled runs.
@@ -5730,7 +5741,7 @@ fn draw_viewer(
                 if used < avail {
                     spans.push(Span::styled(
                         " ".repeat(avail - used),
-                        cross(Style::default(), true, false),
+                        cross(Style::default(), true),
                     ));
                 }
             }
