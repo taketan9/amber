@@ -3323,6 +3323,24 @@
     }
 
     /// Render `app` onto a `w`x`h` test terminal and return the text of each row.
+    /// Render, and hand back the cell under the viewer's cursor with its
+    /// colours — the only way to catch "the character is there but painted the
+    /// same shade as the block behind it".
+    fn cursor_cell(app: &mut App, w: u16, h: u16) -> (String, Color, Color) {
+        let mut terminal = Terminal::new(TestBackend::new(w, h)).unwrap();
+        terminal.draw(|f| draw(f, app)).unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let (line, col) = match &app.popup {
+            Popup::Viewer { line, col, .. } => (*line, *col),
+            other => panic!("not a viewer: {other:?}"),
+        };
+        let b = app.viewer_rect;
+        let x = b.x + app.viewer_gutter + col as u16;
+        let y = b.y + line as u16;
+        let c = &buf[(x, y)];
+        (c.symbol().to_string(), c.fg, c.bg)
+    }
+
     fn render(app: &mut App, w: u16, h: u16) -> Vec<String> {
         let mut terminal = Terminal::new(TestBackend::new(w, h)).unwrap();
         terminal.draw(|f| draw(f, app)).unwrap();
@@ -4221,6 +4239,67 @@
             assert!(
                 (lum(bg) - lum(shade_of_surface(28))).abs() > 50_000,
                 "…and off the tint of the line it sits on",
+            );
+        }
+        set_theme(ResolvedTheme::DARK);
+    }
+
+    /// Syntax colours were all chosen against a dark page. On a light one the
+    /// pale ones — plain text most of all — were two shades from the paper,
+    /// and the cursor line's tint underneath finished the job.
+    #[test]
+    fn syntax_colours_stay_legible_on_a_light_theme() {
+        use crate::render::{hl_style_for, readable_on};
+        use crate::theme::{set_theme, surface, ResolvedTheme};
+        use cian_core::highlight::Category as C;
+        let _g = THEME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let lum = |c: Color| match c {
+            Color::Rgb(r, g, b) => (299 * r as i32 + 587 * g as i32 + 114 * b as i32) / 1000,
+            _ => 0,
+        };
+
+        for t in [ResolvedTheme::DARK, ResolvedTheme::GITHUB_LIGHT] {
+            set_theme(t);
+            let page = lum(surface());
+            for cat in [C::Plain, C::Keyword, C::Type, C::Str, C::Comment, C::Number, C::Tag, C::Attr] {
+                let fg = hl_style_for(cat);
+                assert!(
+                    (lum(fg) - page).abs() >= 80,
+                    "{cat:?} is only {} from the page",
+                    (lum(fg) - page).abs(),
+                );
+            }
+            // Plain text is not a syntax colour at all — it is whatever reads
+            // on this page.
+            assert_eq!(hl_style_for(C::Plain), readable_on(surface()));
+        }
+        set_theme(ResolvedTheme::DARK);
+    }
+
+    /// The cursor cell has to be readable on every theme. It was built as the
+    /// page's two colours swapped and then had the body colour put back on top
+    /// of it, which made the character the same near-black as its own block —
+    /// a solid square with the letter painted out inside.
+    #[test]
+    fn the_cursor_cell_never_paints_out_its_own_character() {
+        use crate::theme::{set_theme, ResolvedTheme};
+        let _g = THEME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let lum = |c: Color| match c {
+            Color::Rgb(r, g, b) => (299 * r as i32 + 587 * g as i32 + 114 * b as i32) / 1000,
+            _ => 0,
+        };
+        for t in [ResolvedTheme::DARK, ResolvedTheme::GITHUB_LIGHT] {
+            set_theme(t);
+            let (_d, mut app) = viewer_on("    println!();\n");
+            app.show_ws = false;
+            if let Popup::Viewer { col, .. } = &mut app.popup {
+                *col = 4; // the `p`, not the indent
+            }
+            let (sym, fg, bg) = cursor_cell(&mut app, 100, 20);
+            assert_eq!(sym, "p", "the cursor is on the character we think");
+            assert!(
+                (lum(fg) - lum(bg)).abs() > 90,
+                "the character reads against its own block: {fg:?} on {bg:?}",
             );
         }
         set_theme(ResolvedTheme::DARK);

@@ -407,8 +407,13 @@ pub(crate) fn draw(f: &mut Frame, app: &mut App) {
                 .inner(Margin { vertical: 1, horizontal: 2 })
                 .width;
             let ow = shape.as_deref().map_or(0, |s| outline_width(inner_w, s.shown, s.items.len()));
+            // The ruler takes the first row of the body; without counting it
+            // here a click lands one line above what was pointed at.
+            let rr = u16::from(
+                app.show_ruler && !*preview && view.kind == cian_core::viewer::ViewKind::Text,
+            );
             app.viewer_frame = viewer_frame_rect(area);
-            app.viewer_rect = viewer_body_rect(area, ow);
+            app.viewer_rect = viewer_body_rect(area, ow, rr);
             app.outline_rect = Rect::new(
                 app.viewer_rect.x.saturating_sub(ow),
                 app.viewer_rect.y,
@@ -552,8 +557,15 @@ pub(crate) fn draw(f: &mut Frame, app: &mut App) {
             } else {
                 0
             };
+            let rr = if let Popup::Viewer { preview, view, .. } = &app.popup {
+                u16::from(
+                    app.show_ruler && !*preview && view.kind == cian_core::viewer::ViewKind::Text,
+                )
+            } else {
+                0
+            };
             app.viewer_frame = viewer_frame_rect(mine);
-            app.viewer_rect = viewer_body_rect(mine, ow);
+            app.viewer_rect = viewer_body_rect(mine, ow, rr);
             app.outline_rect = Rect::new(
                 app.viewer_rect.x.saturating_sub(ow),
                 app.viewer_rect.y,
@@ -637,11 +649,11 @@ pub(crate) fn viewer_frame_rect(area: Rect) -> Rect {
     centered_rect(area.width.saturating_sub(4), area.height.saturating_sub(2), area)
 }
 
-fn viewer_body_rect(area: Rect, outline_w: u16) -> Rect {
+fn viewer_body_rect(area: Rect, outline_w: u16, ruler_rows: u16) -> Rect {
     let rect = viewer_frame_rect(area);
     let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
-    let body_h = inner.height.saturating_sub(1);
-    Rect::new(inner.x + outline_w, inner.y, inner.width - outline_w, body_h)
+    let body_h = inner.height.saturating_sub(1 + ruler_rows);
+    Rect::new(inner.x + outline_w, inner.y + ruler_rows, inner.width - outline_w, body_h)
 }
 
 /// How wide the outline column is, or 0 when it is not showing.
@@ -2707,9 +2719,20 @@ const BLAME_W: usize = 20;
 
 /// Colour for a syntax-highlight category (a VS Code-dark-ish palette).
 fn hl_style(cat: cian_core::highlight::Category) -> Style {
+    Style::default().fg(hl_style_for(cat))
+}
+
+/// The colour one syntax category is drawn in, on the page it will land on.
+pub(crate) fn hl_style_for(cat: cian_core::highlight::Category) -> Color {
     use cian_core::highlight::Category as C;
+    // Plain text is whatever reads on this page — it is not a syntax colour,
+    // it is the absence of one, and the near-white chosen for a dark theme
+    // vanished on a light one the moment the cursor line was tinted under it.
+    if cat == C::Plain {
+        return readable_on(surface());
+    }
     let c = match cat {
-        C::Plain => Color::Rgb(210, 210, 222),
+        C::Plain => unreachable!("handled above"),
         C::Keyword => Color::Rgb(197, 134, 192), // mauve
         C::Type => Color::Rgb(78, 201, 176),      // teal
         C::Str => Color::Rgb(206, 145, 120),      // salmon
@@ -2718,7 +2741,37 @@ fn hl_style(cat: cian_core::highlight::Category) -> Style {
         C::Tag => Color::Rgb(86, 156, 214),       // blue
         C::Attr => Color::Rgb(156, 220, 254),     // light blue
     };
-    Style::default().fg(c)
+    fit_to_surface(c)
+}
+
+/// Pull a colour into range for the current surface.
+///
+/// The palette above was picked against a dark ground, where a pale green
+/// number and a light-blue attribute read well. On a light theme they are two
+/// shades from the page and disappear — the more so under the cursor line's
+/// own tint. Rather than keep a second palette, each colour is moved along its
+/// own hue until it has room to be seen: darkened on a light page, lightened
+/// on a dark one, and left alone when it already stands clear.
+fn fit_to_surface(c: Color) -> Color {
+    let (Color::Rgb(r, g, b), Color::Rgb(sr, sg, sb)) = (c, surface()) else { return c };
+    let lum = |r: u8, g: u8, b: u8| (299 * r as i32 + 587 * g as i32 + 114 * b as i32) / 1000;
+    let (cl, sl) = (lum(r, g, b), lum(sr, sg, sb));
+    // Enough separation to read comfortably at terminal weights.
+    const WANT: i32 = 90;
+    if (cl - sl).abs() >= WANT {
+        return c;
+    }
+    // Toward black on a light page, toward white on a dark one.
+    let toward_black = sl > 140;
+    let need = WANT - (cl - sl).abs();
+    let shift = |v: u8| -> u8 {
+        if toward_black {
+            ((v as i32) - need).clamp(0, 255) as u8
+        } else {
+            ((v as i32) + need).clamp(0, 255) as u8
+        }
+    };
+    Color::Rgb(shift(r), shift(g), shift(b))
 }
 
 /// A text color that reads clearly on `bg`: near-black on a light background,
@@ -5636,7 +5689,11 @@ fn draw_viewer(
                 // Priority: cursor over selection over a search match; the
                 // resting style is the Markdown colour in preview, else plain.
                 if cur == Some(j) {
-                    cursor_style.fg(text_fg)
+                    // Exactly as built: the page's two colours swapped. Putting
+                    // the body colour back on top of it made the character the
+                    // same near-black as the block behind it — a solid square
+                    // with the letter painted out inside.
+                    cursor_style
                 } else if sel.map(|(a, b)| j >= a && j <= b).unwrap_or(false) {
                     sel_bg.fg(text_fg)
                 } else if matches.iter().any(|(a, b)| j >= *a && j <= *b) {

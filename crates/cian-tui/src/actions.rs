@@ -2399,6 +2399,8 @@ impl App {
                 ThemeScope::Pane { side, .. } => self.pane_theme[*side] = Some(name.to_string()),
             }
         }
+        // The gallery previews live, so the colours behind it are already wrong.
+        self.drop_highlight_cache();
     }
 
     /// Keep the previewed theme and close the gallery.
@@ -2423,8 +2425,32 @@ impl App {
             }
         }
         self.popup = Popup::None;
+        self.drop_highlight_cache();
         // Back to the file it was picked over, if it was picked from there.
         self.restore_viewer();
+    }
+
+    /// Throw away the cached syntax colours.
+    ///
+    /// They are worked out against the page they will be drawn on, so a change
+    /// of theme makes every one of them wrong until they are computed again —
+    /// and the gallery previews live, so this happens on every keypress in it.
+    pub(crate) fn drop_highlight_cache(&mut self) {
+        let clear = |p: &mut Popup| {
+            if let Popup::Viewer { hl, .. } = p {
+                hl.clear();
+            }
+        };
+        clear(&mut self.popup);
+        for t in &mut self.viewer_tabs {
+            clear(t);
+        }
+        if let Some(o) = self.viewer_split.as_deref_mut() {
+            clear(o);
+        }
+        if let Some(v) = self.viewer_return.as_deref_mut() {
+            clear(v);
+        }
     }
 
     /// Cancel the gallery: restore whatever the target had when it opened.
@@ -2436,6 +2462,7 @@ impl App {
             }
         }
         self.popup = Popup::None;
+        self.drop_highlight_cache();
         self.restore_viewer();
     }
 
@@ -2459,6 +2486,7 @@ impl App {
                 self.theme_name = theme_name_of(&t).unwrap_or("custom").to_string();
                 save_theme_pref(&self.theme_name); // persist across restarts
                 self.message = Some(format!("theme: {} (saved)", self.theme_name));
+                self.drop_highlight_cache();
             }
             None => {
                 self.message =
