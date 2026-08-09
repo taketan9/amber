@@ -367,16 +367,18 @@ swiftc -O -o ~/.local/bin/cian-ime examples/cian-ime.swift
 cian-ime                                     # prints the current input source id
 ```
 
-Run it with no arguments to learn the ids on your machine, then name them:
+Run it with no arguments to learn the ids on your machine, then name the helper and the id that means "no IME":
 
 ```lua
 cian.ime{
-  off = "$HOME/.local/bin/cian-ime com.apple.keylayout.ABC",
-  on  = "$HOME/.local/bin/cian-ime com.apple.inputmethod.Kotoeri.RomajiTyping.Japanese",
+  helper = "$HOME/.local/bin/cian-ime",
+  off    = "com.apple.keylayout.ABC",
 }
 ```
 
-`macism` or `im-select` work just as well if you already have one. On Windows, `zenhan 0` / `zenhan 1` (or `im-select`) do the same job. `:ime` shows what is configured and which way the switch is thrown; `:ime on` / `:ime off` run the command there and then, to check the helper works.
+**cian never decides that typing means Japanese.** Commands are always the off source; when you start typing it puts back *whatever you were last typing with*, which it learns by reading the input source every time it takes the keyboard back. Turn the IME off mid-rename and the next prompt opens off; turn it on and the next one opens on. Until it has learnt anything — a fresh install, or a helper it cannot read — text simply opens with the IME off and you turn it on yourself, which is then what it remembers.
+
+`macism` or `im-select` have the same shape if you already have one (`helper = "macism"`); an odd helper can spell out `query` and `set` (`set = "switch --to {}"`). On Windows, `im-select` works the same way. `:ime` shows the configuration, what cian remembers, and what the last switch did — the first thing to look at if nothing happens; `:ime on` / `:ime off` switch there and then, to check the helper works.
 
 ### crmaine — your team's RAG, from cian
 

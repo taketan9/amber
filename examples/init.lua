@@ -351,17 +351,20 @@
 --   日本語入力の自動切替。IME が変換中の英字は cian に届かない（端末が確定まで
 --   握っている）ため、単キーのコマンドは IME を切らないと効きません。cian の
 --   モードに合わせて入力方式そのものを切り替えるのが唯一の解決です。
---   操作中は off、テキストを受け取る瞬間（`:` `/` リネーム チャット シェル）に
---   on、終了時に on へ戻します（restore = false で戻さない）。
+--   操作中は必ず off。テキストを受け取るとき（`:` `/` リネーム チャット シェル）は
+--   「直前に自分が入力に使っていた入力ソース」へ戻します — cian が日本語と決め
+--   打ちするのではなく、コマンドへ戻るたび現在値を読んで覚えます。まだ何も覚えて
+--   いなければ入力時もオフのまま（自分でオンにすれば、それが次から使われます）。
+--   終了時も覚えている入力ソースへ戻します（restore = false で戻さない）。
 --   入力ソースを切り替える小さなヘルパーが必要です:
 --     macOS  : 同梱の examples/cian-ime.swift をビルドするだけ（外部導入不要）
 --       swiftc -O -o ~/.local/bin/cian-ime examples/cian-ime.swift
 --       cian-ime          -- 引数なしで現在の入力ソース ID を表示
 --       cian.ime{
---         off = "$HOME/.local/bin/cian-ime com.apple.keylayout.ABC",
---         on  = "$HOME/.local/bin/cian-ime com.apple.inputmethod.Kotoeri.RomajiTyping.Japanese",
+--         helper = "$HOME/.local/bin/cian-ime",  -- 引数なし=現在値を表示、引数=切替
+--         off    = "com.apple.keylayout.ABC",    -- 「IME オフ」を意味する入力ソース
 --       }
---       （macism / im-select を既に入れているならそれでも可）
+--       （macism / im-select も同じ形。helper = "macism" などで可）
 --     Windows: zenhan（または im-select）
 --       cian.ime{ off = "zenhan 0", on = "zenhan 1" }
 --   `:ime` で設定と現在の状態、`:ime on` / `:ime off` でその場実行して確認。

@@ -253,14 +253,39 @@ pub struct CrmaineOptions {
 /// `im-select` on Windows. cian runs whatever command is given here.
 #[derive(Debug, Clone, Default)]
 pub struct ImeOptions {
-    /// Run when the keyboard is driving cian (normal mode): turn input off.
+    /// A program that prints the current input source when run with no
+    /// argument, and switches to the one named when given it. `macism`,
+    /// `im-select` and cian's own `cian-ime` all have this shape, so this one
+    /// field is usually the whole configuration.
+    pub helper: Option<String>,
+    /// Read the current input source (prints its id). Defaults to `helper`.
+    pub query: Option<String>,
+    /// Switch to an input source; `{}` is replaced by its id. Defaults to
+    /// `helper {}`.
+    pub set: Option<String>,
+    /// The id of the input source that means "no IME" — the one cian switches
+    /// to whenever a keystroke is a command rather than text.
     pub off: Option<String>,
-    /// Run when cian starts taking text (`:`, `/`, a rename, the chat, the
-    /// shell): turn input back on.
-    pub on: Option<String>,
-    /// Run `on` when cian exits, so the keyboard is handed back as it was
-    /// found. Defaults to true — someone who set this up types Japanese.
+    /// Put back the input source the user was last typing with when cian
+    /// exits. Defaults to true.
     pub restore: bool,
+}
+
+impl ImeOptions {
+    /// The command that reads the current input source.
+    pub fn query_cmd(&self) -> Option<String> {
+        self.query.clone().or_else(|| self.helper.clone())
+    }
+
+    /// The command that switches to `id`.
+    pub fn set_cmd(&self, id: &str) -> Option<String> {
+        match (&self.set, &self.helper) {
+            (Some(t), _) if t.contains("{}") => Some(t.replace("{}", id)),
+            (Some(t), _) => Some(format!("{t} {id}")),
+            (None, Some(h)) => Some(format!("{h} {id}")),
+            (None, None) => None,
+        }
+    }
 }
 
 /// Mutable accumulator shared with the Lua callbacks during script execution.
@@ -962,8 +987,10 @@ fn install_api(lua: &Lua, builder: &Rc<RefCell<Builder>>) -> mlua::Result<()> {
                 let mut c = ImeOptions { restore: true, ..Default::default() };
                 if let Some(t) = t {
                     let s = |k: &str| -> Option<String> { t.get::<Option<String>>(k).ok().flatten() };
+                    c.helper = s("helper");
+                    c.query = s("query");
+                    c.set = s("set");
                     c.off = s("off");
-                    c.on = s("on");
                     if let Ok(Some(v)) = t.get::<Option<bool>>("restore") {
                         c.restore = v;
                     }

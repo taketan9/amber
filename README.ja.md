@@ -367,16 +367,18 @@ swiftc -O -o ~/.local/bin/cian-ime examples/cian-ime.swift
 cian-ime                                     # 現在の入力ソース ID を表示
 ```
 
-引数なしで実行して自分の環境の ID を調べ、それを書きます:
+引数なしで実行して自分の環境の ID を調べ、ヘルパーと「IME オフ」を意味する ID を書きます:
 
 ```lua
 cian.ime{
-  off = "$HOME/.local/bin/cian-ime com.apple.keylayout.ABC",
-  on  = "$HOME/.local/bin/cian-ime com.apple.inputmethod.Kotoeri.RomajiTyping.Japanese",
+  helper = "$HOME/.local/bin/cian-ime",
+  off    = "com.apple.keylayout.ABC",
 }
 ```
 
-既に `macism` や `im-select` を入れているならそれでも構いません。Windows なら `zenhan 0` / `zenhan 1`（または `im-select`）で同じことができます。`:ime` で設定内容と現在の状態を確認でき、`:ime on` / `:ime off` はコマンドをその場で実行してヘルパーの動作を確かめます。
+**cian は「入力＝日本語」と決めつけません。** コマンド操作中は常にオフ。入力を始めるときは、**直前に自分が使っていた入力ソース**に戻します — キーボードをコマンド用に取り戻すたび、現在の入力ソースを読んで覚えているからです。リネームの途中で IME をオフにすれば次のプロンプトもオフで開き、オンにすれば次もオンで開きます。まだ何も覚えていないうち（初回、あるいはヘルパーが読めないとき）は、入力時もオフのまま。必要なら自分でオンにしてください — その選択が次から使われます。
+
+既に `macism` や `im-select` があれば同じ形で使えます（`helper = "macism"`）。変わったヘルパーなら `query` と `set` を個別に指定できます（`set = "switch --to {}"`）。Windows では `im-select` が同じ形です。`:ime` は設定・記憶している入力ソース・直前の切替結果を表示します（動かないときはまずここ）。`:ime on` / `:ime off` はその場で切り替えて動作確認できます。
 
 
 ### crmaine — チームの RAG を cian から
