@@ -31,6 +31,41 @@ pub(crate) fn wrap_str(s: &str, width: usize) -> Vec<String> {
     out
 }
 
+/// The ASCII key a Japanese IME sends in place of `c`, if any.
+///
+/// With the IME on, a letter never reaches cian at all — it is held in the
+/// terminal's own composition until it is committed, which is why single-key
+/// commands go dead. Punctuation is different: it commits as it is typed, and
+/// arrives as its full-width or kana form. `：` *is* the colon key being
+/// pressed, so where a keystroke is a command rather than text, it is read as
+/// one. Text fields never go through this — a file may legitimately be named
+/// with a full-width colon, and on Windows it must be.
+pub(crate) fn fold_ime_key(c: char) -> Option<char> {
+    // The full-width block sits exactly 0xFEE0 above its ASCII twin.
+    if ('！'..='～').contains(&c) {
+        return char::from_u32(c as u32 - 0xFEE0);
+    }
+    Some(match c {
+        '　' => ' ',
+        '。' => '.',
+        '、' => ',',
+        // The kana layout's own punctuation: these keys carry no other
+        // meaning in a command context, so reading them as the key that was
+        // pressed costs nothing.
+        '・' => '/',
+        '「' => '[',
+        '」' => ']',
+        'ー' => '-',
+        _ => return None,
+    })
+}
+
+/// Fold a whole word to ASCII the same way. For the `:` command line's verb,
+/// which is ASCII by definition — its arguments are left exactly as typed.
+pub(crate) fn fold_ime_word(s: &str) -> String {
+    s.chars().map(|c| fold_ime_key(c).unwrap_or(c)).collect()
+}
+
 /// The length in characters of viewer line `l` (0 if out of range).
 pub(crate) fn vlen(view: &cian_core::viewer::View, l: usize) -> usize {
     view.lines.get(l).map(|s| s.chars().count()).unwrap_or(0)

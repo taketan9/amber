@@ -38,9 +38,20 @@ impl App {
         // the commands that take a path accept it as the whole remainder, and
         // the ones that take flags take single tokens.
         let mut parts = raw.split_whitespace();
-        let verb = parts.next().unwrap_or("");
+        let raw_verb = parts.next().unwrap_or("");
         let args: Vec<&str> = parts.collect();
-        let rest = raw[verb.len()..].trim(); // the arguments as one string
+        let rest = raw[raw_verb.len()..].trim(); // the arguments as one string
+        // A verb typed with the IME on comes through in full-width — `ｑ` for
+        // `q`. Verbs are ASCII by definition, so folding one costs nothing;
+        // the arguments are left exactly as typed, since a path may genuinely
+        // hold full-width characters.
+        let folded_verb;
+        let verb = if raw_verb.is_ascii() {
+            raw_verb
+        } else {
+            folded_verb = crate::util::fold_ime_word(raw_verb);
+            folded_verb.as_str()
+        };
 
         match verb {
             "q" | "quit" => self.should_quit = true,

@@ -127,7 +127,42 @@ impl App {
         r
     }
 
+    /// Is this keystroke a command rather than text?
+    ///
+    /// Only the file panes in normal mode and the viewer when it is not
+    /// taking input. Everywhere else — the `:` line, a rename, a search box,
+    /// the chat, the shell — what is typed is text and must arrive exactly as
+    /// it was typed, full-width characters included.
+    fn key_is_a_command(&self) -> bool {
+        match &self.popup {
+            Popup::None => {
+                self.mode != Mode::Command
+                    && self.mode != Mode::Filter
+                    && self.focused != FocusedPane::Shell
+            }
+            Popup::Viewer { find_input, sub_input, block_input, editing, .. } => {
+                find_input.is_none()
+                    && sub_input.is_none()
+                    && block_input.is_none()
+                    && !*editing
+            }
+            _ => false,
+        }
+    }
+
     fn handle_key_inner(&mut self, key: KeyEvent) -> Result<()> {
+        // A Japanese IME turns `:` into `：` and `/` into `／` on its way
+        // through. Where a keystroke is a command, that is still the colon key
+        // being pressed — so read it as one rather than ignoring it. (Letters
+        // are a different matter: the IME holds those until they are
+        // committed, and they never arrive at all.)
+        let key = match key.code {
+            KeyCode::Char(c) if self.key_is_a_command() => match crate::util::fold_ime_key(c) {
+                Some(a) => KeyEvent::new(KeyCode::Char(a), key.modifiers),
+                None => key,
+            },
+            _ => key,
+        };
         // A copy/move/delete or a directory-compare runs on a worker thread and
         // stays flagged in-flight until its result is polled in. Those polls
         // otherwise run only *after* this key is handled, and `event::poll`

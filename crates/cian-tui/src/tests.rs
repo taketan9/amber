@@ -1365,6 +1365,75 @@
         assert!(matches!(app.popup, Popup::None), "the last file closes the viewer");
     }
 
+    /// With a Japanese IME on, punctuation arrives full-width: `：` for the
+    /// colon key, `／` for slash. Where a keystroke is a command that is still
+    /// the key being pressed, so it opens what the key opens — but text must
+    /// arrive exactly as typed, because a name may hold those characters on
+    /// purpose (and on Windows, must).
+    #[test]
+    fn ime_punctuation_works_as_a_command_but_never_inside_text() {
+        use crate::util::{fold_ime_key, fold_ime_word};
+        assert_eq!(fold_ime_key('：'), Some(':'));
+        assert_eq!(fold_ime_key('／'), Some('/'));
+        assert_eq!(fold_ime_key('？'), Some('?'));
+        assert_eq!(fold_ime_key('ｑ'), Some('q'));
+        assert_eq!(fold_ime_key('・'), Some('/'), "the kana layout's slash key");
+        assert_eq!(fold_ime_key('あ'), None, "kana is not a key press");
+        assert_eq!(fold_ime_word("ｒａｇ"), "rag");
+
+        // In a pane, `：` opens the command line.
+        let (_d, mut app) = app_with(&["a.txt"]);
+        app.handle_key(key('：')).unwrap();
+        assert_eq!(app.mode, Mode::Command, "the colon key opened the command line");
+        // …and what is typed into it is left alone: this is text.
+        app.handle_key(key('：')).unwrap();
+        assert_eq!(app.command_buffer, "：", "typed text keeps its full-width form");
+        app.handle_key(code(KeyCode::Esc)).unwrap();
+
+        // A verb typed with the IME on still runs, since verbs are ASCII.
+        app.command_buffer = "ｍａｎ".into();
+        app.run_command();
+        assert!(matches!(app.popup, Popup::Manual { .. }), "ｍａｎ ran :man");
+        app.popup = Popup::None;
+
+        // A rename keeps every character exactly as typed — folding a
+        // full-width colon into a real one would be a different file name,
+        // and an illegal one on Windows.
+        app.start_rename();
+        for c in "メモ：一覧".chars() {
+            app.handle_key(key(c)).unwrap();
+        }
+        match &app.popup {
+            Popup::TextInput { buffer, .. } => assert!(
+                buffer.ends_with("メモ：一覧"),
+                "the name is what was typed: {buffer:?}"
+            ),
+            other => panic!("expected the rename prompt, got {other:?}"),
+        }
+    }
+
+    /// In the viewer the same rule applies: `／` searches, but the text of the
+    /// search itself is left as typed — a Japanese file is searched for
+    /// Japanese.
+    #[test]
+    fn ime_punctuation_opens_the_viewer_search_but_not_its_text() {
+        let (_d, mut app) = viewer_on("メモ：一覧\nplain\n");
+        app.handle_key(key('／')).unwrap();
+        assert!(
+            matches!(&app.popup, Popup::Viewer { find_input: Some(_), .. }),
+            "the slash key opened the search"
+        );
+        for c in "：一覧".chars() {
+            app.handle_key(key(c)).unwrap();
+        }
+        match &app.popup {
+            Popup::Viewer { find_input: Some(q), .. } => {
+                assert_eq!(q, "：一覧", "the query is what was typed")
+            }
+            other => panic!("expected a search in progress, got {other:?}"),
+        }
+    }
+
     /// Backspace in a search listing means the same as Esc. A set of results
     /// has no parent directory to climb to, so climbing to one is a surprise.
     #[test]
