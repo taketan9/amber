@@ -980,7 +980,35 @@
         for want in 2..=12 {
             app.handle_key(code(KeyCode::Right)).unwrap();
             let screen = render(&mut app, 120, 20).join("\n");
-            assert!(screen.contains(&format!("1:{want}")), "the corner agrees with the ruler");
+            assert!(screen.contains(&format!("1:{want}")), "the corner agrees with the corner");
+        }
+
+        // The scale starts where the text starts. Measured in cells, because
+        // "roughly above it" is what it looked like and was not.
+        let rows = render(&mut app, 120, 20);
+        let ruler = rows.iter().find(|r| r.contains("····+")).expect("a ruler");
+        let text = rows.iter().find(|r| r.contains("abcdefghij")).expect("the line");
+        assert_eq!(
+            ruler.find('·').unwrap(),
+            text.find('a').unwrap(),
+            "the first column of the scale is over the first column of the text",
+        );
+
+        // …and the column is counted the way the screen counts it. Two
+        // full-width characters take four columns, so the cursor on the third
+        // is in column five — which is what the ruler marks and therefore what
+        // the corner has to say, or the two disagree on every Japanese line.
+        let (_d2, mut app) = viewer_on("あいうえお\n");
+        app.show_ws = false;
+        for (chars_over, want_col) in [(0, 1), (1, 3), (2, 5), (4, 9)] {
+            if let Popup::Viewer { col, .. } = &mut app.popup {
+                *col = chars_over;
+            }
+            let screen = render(&mut app, 120, 20).join("\n");
+            assert!(
+                screen.contains(&format!("1:{want_col}")),
+                "{chars_over} characters in is column {want_col}:\n{screen}",
+            );
         }
 
         // `:ruler` puts both away and gives the row back to the text.

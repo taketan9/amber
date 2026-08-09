@@ -5187,8 +5187,8 @@ fn dim_of(c: Color) -> Color {
 fn cross(base: Style, on_line: bool, on_col: bool) -> Style {
     match (on_line, on_col) {
         (false, false) => base,
-        (true, true) => base.bg(Color::Rgb(58, 58, 78)),
-        _ => base.bg(Color::Rgb(44, 44, 60)),
+        (true, true) => base.bg(Color::Rgb(78, 78, 104)),
+        _ => base.bg(Color::Rgb(58, 58, 78)),
     }
 }
 
@@ -5276,6 +5276,19 @@ fn draw_viewer(
             *shape = crate::Shape::read(path, &view.lines, shape.as_deref());
         }
     }
+
+    // Where the cursor is drawn, in columns — what the ruler measures and what
+    // the crosshair has to agree with. Characters and columns part company the
+    // moment a line has Japanese in it.
+    let cur_col = view
+        .lines
+        .get(*line)
+        .map(|l| {
+            l.chars()
+                .take(*col)
+                .fold(0usize, |at, c| at + cian_core::textops::char_cols(c, at))
+        })
+        .unwrap_or(0);
 
     let kind = match view.kind {
         cian_core::viewer::ViewKind::Text => view.encoding.label(),
@@ -5388,7 +5401,11 @@ fn draw_viewer(
                 Style::default().fg(Color::Black).bg(mode_color).add_modifier(Modifier::BOLD),
             ),
             Span::styled(
-                format!(" {}:{} ", *line + 1, *col + 1),
+                // The column, counted as the screen counts it — the same
+                // number the ruler marks. A character count would disagree
+                // with the ruler on any line with Japanese in it, and the
+                // column is what a fixed-width record is about anyway.
+                format!(" {}:{} ", *line + 1, cur_col + 1),
                 Style::default().fg(mode_color),
             ),
         ]));
@@ -5591,6 +5608,19 @@ fn draw_viewer(
             // the screen. Underneath everything that says more than "you are
             // here" — a selection, a search hit, the cursor itself.
             let cross_line = ruler && !*preview && i == *line;
+            // Display columns again: a tint on "the fifth character" and a
+            // ruler on "the fifth column" do not point at the same place.
+            let cross_col = |j: usize| -> bool {
+                if !ruler || *preview || i == *line {
+                    return false;
+                }
+                let start = chars
+                    .iter()
+                    .take(j)
+                    .fold(0usize, |at, c| at + cian_core::textops::char_cols(*c, at));
+                let w = chars.get(j).map(|c| cian_core::textops::char_cols(*c, start)).unwrap_or(1);
+                start < cur_col && cur_col < start + w || start == cur_col
+            };
             let cell_style = |j: usize| -> Style {
                 // Priority: cursor over selection over a search match; the
                 // resting style is the Markdown colour in preview, else plain.
@@ -5608,9 +5638,9 @@ fn draw_viewer(
                         .and_then(|s| s.get(j))
                         .copied()
                         .unwrap_or(Style::default().fg(text_fg));
-                    cross(base, cross_line, ruler && !*preview && j == *col)
+                    cross(base, cross_line, cross_col(j))
                 } else {
-                    cross(Style::default().fg(text_fg), cross_line, ruler && !*preview && j == *col)
+                    cross(Style::default().fg(text_fg), cross_line, cross_col(j))
                 }
             };
             // Build the body char-by-char, merging same-styled runs.
@@ -5693,6 +5723,17 @@ fn draw_viewer(
             if cur == Some(len) {
                 spans.push(Span::styled(" ".to_string(), cursor_style));
             }
+            // A tint that stops where the text stops is not a line highlight;
+            // it is a highlight on some words. Carry it to the edge.
+            if cross_line {
+                let used = at + usize::from(cur == Some(len));
+                if used < avail {
+                    spans.push(Span::styled(
+                        " ".repeat(avail - used),
+                        cross(Style::default(), true, false),
+                    ));
+                }
+            }
             // With the marks on, the line ending is drawn too, and the two
             // kinds look different — which is the point. A file that is CRLF
             // except for three lines is not something a badge in the title can
@@ -5734,7 +5775,11 @@ fn draw_viewer(
         // two bytes wide, so a column number used as a byte offset lands
         // inside one and takes the program with it.
         let marks: Vec<char> = scale.chars().collect();
-        let cur = (*col).min(marks.len().saturating_sub(1));
+        // The scale counts *display* columns, so the mark has to be where the
+        // cursor is drawn rather than how many characters precede it. On a
+        // line of Japanese those are different numbers, and the ruler was
+        // pointing at neither the right column nor a useful one.
+        let cur = cur_col.min(marks.len().saturating_sub(1));
         let before: String = marks[..cur.min(marks.len())].iter().collect();
         let at: String = marks.get(cur).into_iter().collect();
         let after: String = marks[(cur + 1).min(marks.len())..].iter().collect();
