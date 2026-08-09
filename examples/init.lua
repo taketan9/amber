@@ -354,11 +354,14 @@
 --   操作中は off、テキストを受け取る瞬間（`:` `/` リネーム チャット シェル）に
 --   on、終了時に on へ戻します（restore = false で戻さない）。
 --   入力ソースを切り替える小さなヘルパーが必要です:
---     macOS  : brew install macism
+--     macOS  : 同梱の examples/cian-ime.swift をビルドするだけ（外部導入不要）
+--       swiftc -O -o ~/.local/bin/cian-ime examples/cian-ime.swift
+--       cian-ime          -- 引数なしで現在の入力ソース ID を表示
 --       cian.ime{
---         off = "macism com.apple.keylayout.ABC",
---         on  = "macism com.apple.inputmethod.Kotoeri.RomajiTyping.Japanese",
+--         off = "$HOME/.local/bin/cian-ime com.apple.keylayout.ABC",
+--         on  = "$HOME/.local/bin/cian-ime com.apple.inputmethod.Kotoeri.RomajiTyping.Japanese",
 --       }
+--       （macism / im-select を既に入れているならそれでも可）
 --     Windows: zenhan（または im-select）
 --       cian.ime{ off = "zenhan 0", on = "zenhan 1" }
 --   `:ime` で設定と現在の状態、`:ime on` / `:ime off` でその場実行して確認。

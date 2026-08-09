@@ -360,14 +360,23 @@ IME が変換中の英字は、そもそも cian に届きません。確定す�
 
 英字まで効かせる唯一の方法は、cian のモードに合わせて入力方式そのものを切り替えることです。`cian.ime{}` がそれをします — 操作中はオフ、テキストを受け取る瞬間（`:`、`/`、リネーム、チャット、シェル）にオン、終了時に戻します。入力ソースを切り替えるヘルパーが必要です:
 
+macOS 用のヘルパーは cian に同梱しています — [`examples/cian-ime.swift`](examples/cian-ime.swift)。OS の入力ソース API を叩くだけの30行なので、外部ツールの導入は要りません:
+
+```sh
+swiftc -O -o ~/.local/bin/cian-ime examples/cian-ime.swift
+cian-ime                                     # 現在の入力ソース ID を表示
+```
+
+引数なしで実行して自分の環境の ID を調べ、それを書きます:
+
 ```lua
-cian.ime{                                    -- macOS（`brew install macism` 後）
-  off = "macism com.apple.keylayout.ABC",
-  on  = "macism com.apple.inputmethod.Kotoeri.RomajiTyping.Japanese",
+cian.ime{
+  off = "$HOME/.local/bin/cian-ime com.apple.keylayout.ABC",
+  on  = "$HOME/.local/bin/cian-ime com.apple.inputmethod.Kotoeri.RomajiTyping.Japanese",
 }
 ```
 
-Windows なら `zenhan 0` / `zenhan 1`（または `im-select`）で同じことができます。`:ime` で設定内容と現在の状態を確認でき、`:ime on` / `:ime off` はコマンドをその場で実行してヘルパーの動作を確かめます。
+既に `macism` や `im-select` を入れているならそれでも構いません。Windows なら `zenhan 0` / `zenhan 1`（または `im-select`）で同じことができます。`:ime` で設定内容と現在の状態を確認でき、`:ime on` / `:ime off` はコマンドをその場で実行してヘルパーの動作を確かめます。
 
 
 ### crmaine — チームの RAG を cian から

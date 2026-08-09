@@ -360,14 +360,23 @@ Punctuation is different, and cian now reads it: `：` `／` `？`, and the kana
 
 For the letters, the only real answer is to switch the input method with cian's mode, which is what `cian.ime{}` does — off while cian is being driven, on the moment it takes text (`:`, `/`, a rename, the chat, the shell), and back on when cian exits. It needs a helper that can switch the input source:
 
+On macOS the helper ships with cian — [`examples/cian-ime.swift`](examples/cian-ime.swift), thirty lines around the system's own input-source API, so there is nothing third-party to install:
+
+```sh
+swiftc -O -o ~/.local/bin/cian-ime examples/cian-ime.swift
+cian-ime                                     # prints the current input source id
+```
+
+Run it with no arguments to learn the ids on your machine, then name them:
+
 ```lua
-cian.ime{                                    -- macOS, after `brew install macism`
-  off = "macism com.apple.keylayout.ABC",
-  on  = "macism com.apple.inputmethod.Kotoeri.RomajiTyping.Japanese",
+cian.ime{
+  off = "$HOME/.local/bin/cian-ime com.apple.keylayout.ABC",
+  on  = "$HOME/.local/bin/cian-ime com.apple.inputmethod.Kotoeri.RomajiTyping.Japanese",
 }
 ```
 
-On Windows, `zenhan 0` / `zenhan 1` (or `im-select`) do the same job. `:ime` shows what is configured and which way the switch is thrown; `:ime on` / `:ime off` run the command there and then, to check the helper works.
+`macism` or `im-select` work just as well if you already have one. On Windows, `zenhan 0` / `zenhan 1` (or `im-select`) do the same job. `:ime` shows what is configured and which way the switch is thrown; `:ime on` / `:ime off` run the command there and then, to check the helper works.
 
 ### crmaine — your team's RAG, from cian
 
