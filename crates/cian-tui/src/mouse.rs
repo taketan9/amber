@@ -495,18 +495,6 @@ impl App {
             }
         };
 
-        // The wheel over a pane that is reading a file scrolls the file, not
-        // a listing that is not on screen. `pane_at` borrows `self`, so which
-        // pane it is gets resolved before anything reaches for it mutably.
-        if matches!(ev.kind, MouseEventKind::ScrollDown | MouseEventKind::ScrollUp) {
-            let over = pane_at(col, row);
-            if let Some(p) = over {
-                let down = matches!(ev.kind, MouseEventKind::ScrollDown);
-                if self.pane_file_scroll(p, down, 3) {
-                    return;
-                }
-            }
-        }
         // A file drag in progress owns the mouse until release.
         if self.file_drag.is_some() {
             match ev.kind {
@@ -815,17 +803,14 @@ impl App {
             Some((false, path)) if cian_core::archive::is_archive(&path) => {
                 self.enter_archive(path, String::new());
             }
-            // Enter reads it *here* — the listing gives way to the file and
-            // the other pane stays where it is. F3 and Shift+Tab are the
-            // editor; this is the other half of reading.
-            Some((false, path)) => {
-                if cian_core::image::is_image(&path) || cian_core::office::classify(&path).is_some()
-                {
-                    // A picture and a Word file are not lines of text; they
-                    // have their own windows.
-                    self.look_inside();
-                } else {
-                    self.open_file_in_pane(&path);
+            // Enter reads it *here*: the same viewer, docked in the pane
+            // whose listing it replaces, with everything it can do. F3 and
+            // Shift+Tab open the same file over the whole window instead.
+            Some((false, _)) => {
+                let here = self.focused;
+                self.look_inside();
+                if matches!(self.popup, Popup::Viewer { .. }) {
+                    self.viewer_dock = Some(here);
                 }
             }
             None => {}

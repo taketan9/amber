@@ -729,8 +729,10 @@ impl App {
     /// and the answer's shape follows from the file: an archive lists its
     /// members, anything else is read.
     pub(crate) fn look_inside(&mut self) {
-        // Already reading it in the pane: F3 means "in the editor, then".
-        if self.promote_pane_file() {
+        // Already reading it in the pane: F3 means "over the whole window,
+        // then" — the same file, the same cursor, more room.
+        if self.viewer_dock.take().is_some() && matches!(self.popup, Popup::Viewer { .. }) {
+            self.full_clear = true;
             return;
         }
         // On a remote pane, fetch the file first and view the local copy.

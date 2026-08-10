@@ -1057,9 +1057,12 @@
         app.active_pane_mut().unwrap().cursor =
             app.active_pane().unwrap().entries.iter().position(|e| e.name == "note.txt").unwrap();
         app.handle_key(code(KeyCode::Enter)).unwrap();
-        assert!(matches!(app.popup, Popup::None), "nothing opened over the panes");
-        assert!(app.pane_file(FocusedPane::Left).is_some(), "Enter read it in the pane");
-        app.handle_key(code(KeyCode::Esc)).unwrap();
+        assert!(matches!(app.popup, Popup::Viewer { .. }), "Enter opened the viewer");
+        assert_eq!(app.viewer_dock, Some(FocusedPane::Left), "docked in the pane it came from");
+        for k in [':', 'q'] {
+            app.handle_key(key(k)).unwrap();
+        }
+        app.handle_key(code(KeyCode::Enter)).unwrap();
 
         // On a directory Enter still goes in, which is not something a
         // launcher could have meant.
@@ -1978,60 +1981,86 @@
         assert!(fresh.starts_with("# cian runtime state"), "{fresh}");
     }
 
-    /// `Enter` reads the file where its listing was — the other pane stays
-    /// put, nothing opens over anything, and Esc brings the listing back on
-    /// the row it was left on. `F3` is still the editor, and promotes what is
-    /// being read to it.
+    /// `Enter` reads the file where its listing was — the *same* viewer,
+    /// docked in that pane, with everything it can do. `F3` gives the same
+    /// file the whole window; `:q` closes it and the listing is there again.
     #[test]
-    fn enter_reads_the_file_in_the_pane_and_f3_promotes_it() {
+    fn enter_docks_the_viewer_in_the_pane_and_f3_gives_it_the_window() {
         let d = tempfile::tempdir().unwrap();
         std::fs::write(d.path().join("a.txt"), "alpha\nbeta\n").unwrap();
         let body: String = (1..=200).map(|i| format!("line {i}\n")).collect();
         std::fs::write(d.path().join("b.log"), &body).unwrap();
         let p = d.path().to_path_buf();
         let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
-        let idx = |app: &App, n: &str| {
-            app.active_pane().unwrap().entries.iter().position(|e| e.name == n).unwrap()
-        };
-        app.active_pane_mut().unwrap().cursor = idx(&app, "b.log");
-        let was = app.active_pane().unwrap().cursor;
+        let at = app
+            .active_pane()
+            .unwrap()
+            .entries
+            .iter()
+            .position(|e| e.name == "b.log")
+            .unwrap();
+        app.active_pane_mut().unwrap().cursor = at;
 
         app.handle_key(code(KeyCode::Enter)).unwrap();
-        assert!(matches!(app.popup, Popup::None), "nothing opened over the panes");
-        let f = app.pane_file(FocusedPane::Left).expect("the file is in the pane");
-        assert_eq!(f.title, "b.log");
-        assert_eq!(f.lines.len(), 200);
+        assert!(matches!(app.popup, Popup::Viewer { .. }), "the viewer opened");
+        assert_eq!(app.viewer_dock, Some(FocusedPane::Left), "docked in this pane");
 
-        // It is on screen, where the listing was — and the other pane is not.
+        // It is drawn in the pane, not over the window: the other pane still
+        // lists its files beside it.
         let rows = render(&mut app, 120, 30);
-        assert!(rows.iter().any(|r| r.contains("line 1")), "the file is drawn:\n{rows:?}");
-        assert!(rows.iter().any(|r| r.contains("b.log")), "and named in the frame");
-        assert!(rows.iter().any(|r| r.contains("a.txt")), "the other pane still lists files");
+        let screen = rows.join("\n");
+        assert!(screen.contains("line 1"), "the file is in the pane:\n{screen}");
+        assert!(screen.contains("a.txt"), "and the other pane still lists files");
+        assert!(app.viewer_frame.width < 70, "it takes the pane's width: {:?}", app.viewer_frame);
 
-        // It scrolls.
-        for _ in 0..5 {
-            app.handle_key(key('j')).unwrap();
+        // Everything the viewer can do, it can do here — vi motions and all.
+        for k in ['1', '0', '0', 'G'] {
+            app.handle_key(key(k)).unwrap();
         }
-        assert_eq!(app.pane_file(FocusedPane::Left).unwrap().scroll, 5);
-        app.handle_key(key('G')).unwrap();
-        assert_eq!(app.pane_file(FocusedPane::Left).unwrap().scroll, 199);
+        match &app.popup {
+            Popup::Viewer { line, .. } => assert_eq!(*line, 99, "100G in a docked file"),
+            other => panic!("expected the viewer, got {other:?}"),
+        }
 
-        // F3 takes the same file into the editor.
+        // The bottom bar carries the file's keys while the file has focus —
+        // the docked frame is too narrow for its own hint row.
+        let rows = render(&mut app, 120, 30);
+        let bottom = rows[rows.len().saturating_sub(2)].clone();
+        assert!(
+            bottom.contains("search") || bottom.contains("検索"),
+            "the file's hints are on the bottom bar: {bottom:?}",
+        );
+
+        // Shift+Tab moves the focus to the listing beside it; the file stays.
+        app.handle_key(code(KeyCode::BackTab)).unwrap();
+        assert_eq!(app.focused, FocusedPane::Right);
+        assert!(matches!(app.popup, Popup::Viewer { .. }), "the file is still open");
+        app.handle_key(key('j')).unwrap();
+        assert!(app.right.active_ref().cursor > 0, "j moved the listing's cursor");
+        let rows = render(&mut app, 120, 30);
+        let bottom = rows[rows.len().saturating_sub(2)].clone();
+        assert!(
+            !(bottom.contains("whole window") || bottom.contains("全画面へ")),
+            "the file's hints stepped aside: {bottom:?}",
+        );
+        app.handle_key(code(KeyCode::BackTab)).unwrap();
+        assert_eq!(app.focused, FocusedPane::Left, "and back to the file");
+
+        // F3 gives the same file the whole window.
         app.handle_key(code(KeyCode::F(3))).unwrap();
-        assert!(matches!(app.popup, Popup::Viewer { .. }), "F3 promoted it");
-        assert!(app.pane_file(FocusedPane::Left).is_none(), "and the pane went back");
+        assert!(app.viewer_dock.is_none(), "no longer docked");
+        let full = render(&mut app, 120, 30);
+        assert!(full.iter().any(|r| r.contains("line 100")), "still the same place in it");
+        assert!(app.viewer_frame.width > 100, "and it has the window now");
+
+        // `:q` closes it and the listing is back.
         for k in [':', 'q'] {
             app.handle_key(key(k)).unwrap();
         }
         app.handle_key(code(KeyCode::Enter)).unwrap();
-
-        // Esc puts the listing back where it was.
-        app.active_pane_mut().unwrap().cursor = idx(&app, "b.log");
-        app.handle_key(code(KeyCode::Enter)).unwrap();
-        assert!(app.pane_file(FocusedPane::Left).is_some());
-        app.handle_key(code(KeyCode::Esc)).unwrap();
-        assert!(app.pane_file(FocusedPane::Left).is_none(), "the listing is back");
-        assert_eq!(app.active_pane().unwrap().cursor, was, "on the row it was left on");
+        assert!(matches!(app.popup, Popup::None));
+        let back = render(&mut app, 120, 30);
+        assert!(back.iter().any(|r| r.contains("b.log")), "the listing is there");
     }
 
     /// Backspace in a search listing means the same as Esc. A set of results

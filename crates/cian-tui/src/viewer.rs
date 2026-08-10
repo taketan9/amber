@@ -197,6 +197,13 @@ impl App {
                 return Ok(());
             }
         }
+        // F3 on a file docked in a pane gives it the whole window — the same
+        // file, the same cursor, more room. (From the panes, F3 opens one;
+        // here it is the only thing left for it to mean.)
+        if key.code == KeyCode::F(3) && self.viewer_dock.take().is_some() {
+            self.full_clear = true;
+            return Ok(());
+        }
         // Marks: `ma` here, `'a` back. Ahead of the grammar, which would read
         // the `a` of `ma` as a text object.
         if self.viewer_mark_key(key) {
@@ -800,6 +807,9 @@ impl App {
             self.close_viewer_tab();
             return;
         }
+        // A docked file leaves the pane it was sitting in; the listing under
+        // it never went anywhere.
+        self.viewer_dock = None;
         // The last file: the viewer is done, so nothing of it may be left
         // behind. A stale split half would go on hijacking the screen from
         // whatever opened next.
@@ -3159,6 +3169,7 @@ impl App {
     /// this an editor you can start typing into rather than only a reader.
     pub(crate) fn toggle_viewer_park(&mut self) {
         if matches!(self.popup, Popup::Viewer { .. }) {
+            self.viewer_dock = None;
             let v = std::mem::replace(&mut self.popup, Popup::None);
             self.viewer_parked = Some(Box::new(v));
             self.message = Some(

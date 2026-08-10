@@ -30,7 +30,7 @@ Two panes side by side. You copy and move between them — that is the whole ide
 | Key | Does |
 |---|---|
 | **← / →** | move focus between the panes |
-| **Enter** | enter a folder or archive; **read a file right here** — it replaces the listing, `j`/`k`/`Space`/`G` scroll it, `Esc` puts the listing back, `F3` takes it into the editor |
+| **Enter** | enter a folder or archive; **read a file right here** — the viewer opens *in that pane*, with everything it can do; `F3` gives it the whole window, `Shift+Tab` steps to the listing beside it, `:q` closes it |
 | **Ctrl+Enter** | open the file with its own program (on a folder: open it in the other pane) |
 | **Alt+← / Alt+→** | this pane's history, back / forward (or click **◀ ▶** in the title) |
 | **Backspace** | up a level (or click the `..` row) |
@@ -74,7 +74,7 @@ Fuzzy pickers: type a few letters, press Enter.
 
 ## Look inside a file (`F3`)
 
-`F3` and Shift+Tab open the **editor**, which takes the screen. `Enter` reads a file **in the pane** instead — the listing gives way to the file, the other pane stays where it is, and `Esc` brings the listing back on the row you left. Everything below is the editor.
+`Enter` and `F3` open the same thing — everything below — in two different places. `Enter` **docks it in the pane** the file was listed in: the other pane stays beside it, the keys are the file's while that pane has focus, and its hints move to the bar along the bottom. `F3` (and Shift+Tab) give the same file the **whole window**. `F3` on a docked file promotes it; `Shift+Tab` steps between the file and the listing next to it; `:q` closes it and the listing is back.
 
 ### What it opens
 

@@ -118,10 +118,10 @@ fn draw_split(f: &mut Frame, main_area: Rect, app: &mut App, ov: AnimOverride) {
     let (bg_l, bg_r) = (app.pane_bg[0], app.pane_bg[1]);
     let (fl_l, fl_r) = (app.flash_level(FocusedPane::Left), app.flash_level(FocusedPane::Right));
     let restore = push_pane_theme(app, 0);
-    draw_file_pane(f, panes_split[0], &app.left, app.focused == FocusedPane::Left, visual_for_left, app.mode, bg_l, fl_l, FocusedPane::Left, &mut tab_rects, app.git_for(FocusedPane::Left), app.lang, &mut sort_rects, &mut crumb_rects, &mut nav_rects, app.pane_file(FocusedPane::Left));
+    draw_file_pane(f, panes_split[0], &app.left, app.focused == FocusedPane::Left, visual_for_left, app.mode, bg_l, fl_l, FocusedPane::Left, &mut tab_rects, app.git_for(FocusedPane::Left), app.lang, &mut sort_rects, &mut crumb_rects, &mut nav_rects);
     if let Some(prev) = restore { set_theme(prev); }
     let restore = push_pane_theme(app, 1);
-    draw_file_pane(f, panes_split[1], &app.right, app.focused == FocusedPane::Right, visual_for_right, app.mode, bg_r, fl_r, FocusedPane::Right, &mut tab_rects, app.git_for(FocusedPane::Right), app.lang, &mut sort_rects, &mut crumb_rects, &mut nav_rects, app.pane_file(FocusedPane::Right));
+    draw_file_pane(f, panes_split[1], &app.right, app.focused == FocusedPane::Right, visual_for_right, app.mode, bg_r, fl_r, FocusedPane::Right, &mut tab_rects, app.git_for(FocusedPane::Right), app.lang, &mut sort_rects, &mut crumb_rects, &mut nav_rects);
     if let Some(prev) = restore { set_theme(prev); }
     // With preview on and a file pane focused, the shell panel's area shows
     // the file under the cursor instead; the PTY runs on underneath, and
@@ -152,14 +152,14 @@ fn draw_zoom_overlay(f: &mut Frame, rect: Rect, app: &mut App, ov: AnimOverride)
             let (bg, fl) = (app.pane_bg[0], app.flash_level(FocusedPane::Left));
             let va = app.visual_anchor;
             let restore = push_pane_theme(app, 0);
-            draw_file_pane(f, rect, &app.left, true, va, app.mode, bg, fl, FocusedPane::Left, &mut Vec::new(), app.git_for(FocusedPane::Left), app.lang, &mut Vec::new(), &mut Vec::new(), &mut Vec::new(), app.pane_file(FocusedPane::Left));
+            draw_file_pane(f, rect, &app.left, true, va, app.mode, bg, fl, FocusedPane::Left, &mut Vec::new(), app.git_for(FocusedPane::Left), app.lang, &mut Vec::new(), &mut Vec::new(), &mut Vec::new());
             if let Some(prev) = restore { set_theme(prev); }
         }
         FocusedPane::Right => {
             let (bg, fl) = (app.pane_bg[1], app.flash_level(FocusedPane::Right));
             let va = app.visual_anchor;
             let restore = push_pane_theme(app, 1);
-            draw_file_pane(f, rect, &app.right, true, va, app.mode, bg, fl, FocusedPane::Right, &mut Vec::new(), app.git_for(FocusedPane::Right), app.lang, &mut Vec::new(), &mut Vec::new(), &mut Vec::new(), app.pane_file(FocusedPane::Right));
+            draw_file_pane(f, rect, &app.right, true, va, app.mode, bg, fl, FocusedPane::Right, &mut Vec::new(), app.git_for(FocusedPane::Right), app.lang, &mut Vec::new(), &mut Vec::new(), &mut Vec::new());
             if let Some(prev) = restore { set_theme(prev); }
         }
         FocusedPane::Shell => {
@@ -220,7 +220,7 @@ fn draw_zoomed(f: &mut Frame, area: Rect, app: &mut App, ov: AnimOverride) {
             let va = app.visual_anchor;
             let (bg, fl) = (app.pane_bg[0], app.flash_level(FocusedPane::Left));
             let restore = push_pane_theme(app, 0);
-            draw_file_pane(f, area, &app.left, true, va, app.mode, bg, fl, FocusedPane::Left, &mut tab_rects, app.git_for(FocusedPane::Left), app.lang, &mut sort_rects, &mut crumb_rects, &mut nav_rects, app.pane_file(FocusedPane::Left));
+            draw_file_pane(f, area, &app.left, true, va, app.mode, bg, fl, FocusedPane::Left, &mut tab_rects, app.git_for(FocusedPane::Left), app.lang, &mut sort_rects, &mut crumb_rects, &mut nav_rects);
             if let Some(prev) = restore { set_theme(prev); }
         }
         FocusedPane::Right => {
@@ -229,7 +229,7 @@ fn draw_zoomed(f: &mut Frame, area: Rect, app: &mut App, ov: AnimOverride) {
             let va = app.visual_anchor;
             let (bg, fl) = (app.pane_bg[1], app.flash_level(FocusedPane::Right));
             let restore = push_pane_theme(app, 1);
-            draw_file_pane(f, area, &app.right, true, va, app.mode, bg, fl, FocusedPane::Right, &mut tab_rects, app.git_for(FocusedPane::Right), app.lang, &mut sort_rects, &mut crumb_rects, &mut nav_rects, app.pane_file(FocusedPane::Right));
+            draw_file_pane(f, area, &app.right, true, va, app.mode, bg, fl, FocusedPane::Right, &mut tab_rects, app.git_for(FocusedPane::Right), app.lang, &mut sort_rects, &mut crumb_rects, &mut nav_rects);
             if let Some(prev) = restore { set_theme(prev); }
         }
         FocusedPane::Shell => {
@@ -395,6 +395,14 @@ pub(crate) fn draw(f: &mut Frame, app: &mut App) {
         draw_rename_review(f, area, app);
         return;
     }
+    // Where the viewer goes: over everything when it was opened with F3 or
+    // Shift+Tab, or in the pane whose listing it replaced when Enter opened
+    // it. Everything below — the geometry the mouse is measured against and
+    // the drawing itself — is told the same rectangle.
+    let viewer_area = match app.viewer_dock {
+        Some(p) if matches!(app.popup, Popup::Viewer { .. }) => app.layout_rects.for_pane(p),
+        _ => area,
+    };
     if !matches!(app.popup, Popup::None) {
         // Remember where the context menu landed so a click can hit its rows.
         if let Popup::ContextMenu { items, at, .. } = &app.popup {
@@ -403,17 +411,22 @@ pub(crate) fn draw(f: &mut Frame, app: &mut App) {
         // And the viewer's text body, so a drag maps to a line — plus the
         // line-number gutter width, so it maps to a char column too.
         if let Popup::Viewer { view, preview, blame, editing, shape, .. } = &app.popup {
-            let inner_w = centered_rect(area.width.saturating_sub(4), area.height.saturating_sub(2), area)
-                .inner(Margin { vertical: 1, horizontal: 2 })
-                .width;
+            let inner_w = centered_rect(
+                viewer_area.width.saturating_sub(4),
+                viewer_area.height.saturating_sub(2),
+                viewer_area,
+            )
+            .inner(Margin { vertical: 1, horizontal: 2 })
+            .width;
             let ow = shape.as_deref().map_or(0, |s| outline_width(inner_w, s.shown, s.items.len()));
             // The ruler takes the first row of the body; without counting it
             // here a click lands one line above what was pointed at.
             let rr = u16::from(
                 app.show_ruler && !*preview && view.kind == cian_core::viewer::ViewKind::Text,
             );
-            app.viewer_frame = viewer_frame_rect(area);
-            app.viewer_rect = viewer_body_rect(area, ow, rr);
+            let docked = app.viewer_dock.is_some();
+            app.viewer_frame = viewer_frame_rect_docked(viewer_area, docked);
+            app.viewer_rect = viewer_body_rect_docked(viewer_area, ow, rr, docked);
             app.outline_rect = Rect::new(
                 app.viewer_rect.x.saturating_sub(ow),
                 app.viewer_rect.y,
@@ -478,11 +491,11 @@ pub(crate) fn draw(f: &mut Frame, app: &mut App) {
                     (first, second)
                 };
                 let mut other = other;
-                draw_viewer(f, theirs, &mut other, lang, (show_ws, ruler), None, (0, &[], &[]));
-                draw_viewer(f, mine, &mut behind, lang, (show_ws, ruler), None, (0, &[], &[]));
+                draw_viewer(f, theirs, &mut other, lang, (show_ws, ruler), None, (0, &[], &[]), false);
+                draw_viewer(f, mine, &mut behind, lang, (show_ws, ruler), None, (0, &[], &[]), false);
                 app.viewer_split = Some(other);
             } else {
-                draw_viewer(f, area, &mut behind, lang, (show_ws, ruler), None, (0, &[], &[]));
+                draw_viewer(f, area, &mut behind, lang, (show_ws, ruler), None, (0, &[], &[]), false);
             }
             app.viewer_return = Some(behind);
         }
@@ -531,7 +544,7 @@ pub(crate) fn draw(f: &mut Frame, app: &mut App) {
                 Some(d) => (d.mine.as_slice(), d.theirs.as_slice()),
                 None => (&[][..], &[][..]),
             };
-            draw_viewer(f, theirs, &mut other, lang, (show_ws, ruler), None, (0, &[], dt));
+            draw_viewer(f, theirs, &mut other, lang, (show_ws, ruler), None, (0, &[], dt), false);
             f.render_widget(
                 Block::default().style(Style::default().fg(Color::Rgb(90, 90, 105))),
                 theirs,
@@ -544,6 +557,7 @@ pub(crate) fn draw(f: &mut Frame, app: &mut App) {
                 (show_ws, ruler),
                 msg_for_viewer.as_deref(),
                 (app.viewer_tab_idx, &names, dm),
+                false,
             );
             app.viewer_split = Some(other);
             app.popup_zones.clear();
@@ -578,7 +592,7 @@ pub(crate) fn draw(f: &mut Frame, app: &mut App) {
         }
         draw_popup(
             f,
-            area,
+            viewer_area,
             &mut app.popup,
             &app.config.ssh_hosts,
             &app.config.snippets,
@@ -594,6 +608,7 @@ pub(crate) fn draw(f: &mut Frame, app: &mut App) {
             &names,
             &mut tab_rects,
             &mut close_rect,
+            app.viewer_dock.is_some(),
         );
         app.viewer_tab_rects = tab_rects;
         app.viewer_close_rect = close_rect;
@@ -658,8 +673,24 @@ pub(crate) fn viewer_frame_rect(area: Rect) -> Rect {
     centered_rect(area.width.saturating_sub(4), area.height.saturating_sub(2), area)
 }
 
+/// The frame, given whether the viewer is docked in a pane. A floating
+/// viewer stands off the edges of the window; a docked one *is* the pane, so
+/// it takes the rectangle exactly rather than drawing a second frame inside
+/// the pane's own.
+pub(crate) fn viewer_frame_rect_docked(area: Rect, docked: bool) -> Rect {
+    if docked {
+        area
+    } else {
+        viewer_frame_rect(area)
+    }
+}
+
 fn viewer_body_rect(area: Rect, outline_w: u16, ruler_rows: u16) -> Rect {
-    let rect = viewer_frame_rect(area);
+    viewer_body_rect_docked(area, outline_w, ruler_rows, false)
+}
+
+fn viewer_body_rect_docked(area: Rect, outline_w: u16, ruler_rows: u16, docked: bool) -> Rect {
+    let rect = viewer_frame_rect_docked(area, docked);
     let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
     let body_h = inner.height.saturating_sub(1 + ruler_rows);
     Rect::new(inner.x + outline_w, inner.y + ruler_rows, inner.width - outline_w, body_h)
@@ -670,7 +701,11 @@ fn viewer_body_rect(area: Rect, outline_w: u16, ruler_rows: u16) -> Rect {
 /// Shared by the renderer and the mouse handler: a click has to land on the
 /// entry that was drawn there, and two copies of this arithmetic would drift.
 pub(crate) fn outline_width(inner_w: u16, show: bool, items: usize) -> u16 {
-    if show && items > 0 && inner_w >= 60 { 28u16.min(inner_w / 3) } else { 0 }
+    // 90 rather than 60 since a file can be docked in a pane: half a window
+    // is wide enough to *fit* the column and not wide enough to afford it —
+    // it was taking a third of the text away. `:outline` still asks for it,
+    // and the full-window viewer is past the bar in any ordinary terminal.
+    if show && items > 0 && inner_w >= 90 { 28u16.min(inner_w / 3) } else { 0 }
 }
 
 /// The source line a viewer line stands for.
@@ -1144,8 +1179,6 @@ fn draw_file_pane(
     sort_rects: &mut Vec<(FocusedPane, cian_core::SortKey, Rect)>,
     crumb_rects: &mut Vec<(FocusedPane, usize, Rect)>,
     nav_rects: &mut Vec<(FocusedPane, bool, Rect)>,
-    // The file being read in this pane instead of its listing, if any.
-    reading: Option<&crate::pager::PaneFile>,
 ) {
     // Read the active theme once — `theme()` now takes a lock, and the row loop
     // below would otherwise hit it thousands of times per frame.
@@ -1307,53 +1340,6 @@ fn draw_file_pane(
     }
     let list_area =
         Rect::new(inner.x, inner.y + 1, inner.width, inner.height.saturating_sub(1));
-    // Reading a file here instead of the listing: the same frame, the same
-    // place, the file's own lines in it. Numbered, because the reason to look
-    // at a log in a file manager is usually to say where in it something is.
-    if let Some(file) = reading {
-        let rows = list_area.height as usize;
-        let last = file.lines.len().saturating_sub(1);
-        let top = file.scroll.min(last);
-        let num_w = format!("{}", file.lines.len().max(1)).len();
-        let text_fg = readable_on(bg.unwrap_or(th.popup_bg));
-        let num_fg = muted_on(bg.unwrap_or(th.popup_bg));
-        let body: Vec<Line> = file
-            .lines
-            .iter()
-            .enumerate()
-            .skip(top)
-            .take(rows)
-            .map(|(i, l)| {
-                Line::from(vec![
-                    Span::styled(format!("{:>w$} ", i + 1, w = num_w), Style::default().fg(num_fg)),
-                    Span::styled(l.clone(), Style::default().fg(text_fg)),
-                ])
-            })
-            .collect();
-        f.render_widget(Paragraph::new(body).style(list_style), list_area);
-        // The name and how far down it goes, in the frame's own footer.
-        let pct = match last {
-            0 => "all".to_string(),
-            m => format!("{}%", top * 100 / m),
-        };
-        let foot = format!(
-            " {}  {}   {} ",
-            file.title,
-            pct,
-            tr(lang, "Esc list  F3 edit", "Esc 一覧  F3 編集")
-        );
-        let foot_w = (width(&foot) as u16).min(area.width.saturating_sub(2));
-        f.render_widget(
-            Paragraph::new(truncate(&foot, foot_w as usize)).style(
-                Style::default()
-                    .fg(readable_on(focus_bg))
-                    .bg(focus_bg)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Rect::new(area.x + 1, area.y + area.height.saturating_sub(1), foot_w, 1),
-        );
-        return;
-    }
     let list = List::new(items)
         .style(list_style)
         .highlight_style(
@@ -1997,6 +1983,33 @@ pub(crate) fn key_hints(app: &App) -> Vec<(&'static str, &'static str)> {
             en
         }
     };
+    // A file docked in this pane: the hints are the file's, because the keys
+    // are. The full-screen viewer carries its own bar inside its frame; a
+    // docked one is only as wide as the pane, so its hints go here where
+    // there is room for them.
+    if matches!(app.popup, Popup::Viewer { .. }) && app.viewer_dock == Some(app.focused) {
+        let editing = matches!(app.popup, Popup::Viewer { editing: true, .. });
+        return if editing {
+            vec![
+                ("Ctrl+S", d("save", "保存")),
+                ("Esc", d("leave the editor", "編集終了")),
+                (":q", d("close", "閉じる")),
+                ("?", d("keys", "キー一覧")),
+            ]
+        } else {
+            vec![
+                ("/", d("search", "検索")),
+                ("i", d("edit", "編集")),
+                ("v", d("select", "選択")),
+                ("y", d("copy", "コピー")),
+                ("d c y", d("+ motion", "＋モーション")),
+                ("F3", d("whole window", "全画面へ")),
+                ("S-Tab", d("the other pane", "反対ペインへ")),
+                (":q", d("close", "閉じる")),
+                ("?", d("keys", "キー一覧")),
+            ]
+        };
+    }
     if app.focused == FocusedPane::Shell {
         let mut v = vec![("Esc", d("files", "ファイル"))];
         // When the last output looks like an error, nudge toward asking Carmine
@@ -3858,6 +3871,7 @@ fn draw_popup(
     tab_names: &[String],
     tab_rects: &mut Vec<(Rect, usize)>,
     close_rect: &mut Rect,
+    docked: bool,
 ) {
     // Every popup with a shape of its own draws itself. The rest — the
     // confirm/notice dialogs, which differ only in their wording — fall through
@@ -3878,7 +3892,8 @@ fn draw_popup(
         Popup::History { .. } => draw_history(f, area, popup, zones, lang),
         Popup::DestPicker { .. } => draw_dest_picker(f, area, popup, dests, zones, lang),
         Popup::Viewer { .. } => {
-            let (rects, close) = draw_viewer(f, area, popup, lang, (show_ws, ruler), msg.as_deref(), (tab_at, tab_names, &[]));
+            let (rects, close) =
+                draw_viewer(f, area, popup, lang, (show_ws, ruler), msg.as_deref(), (tab_at, tab_names, &[]), docked);
             *tab_rects = rects;
             *close_rect = close;
         }
@@ -5509,6 +5524,7 @@ fn split_viewer_areas(area: Rect, left_right: bool) -> (Rect, Rect) {
 
 /// Where the viewer's ✕ was drawn, so a click can find it. Set by
 /// `draw_viewer` each frame; zero-sized when the frame is too narrow for one.
+#[allow(clippy::too_many_arguments)]
 fn draw_viewer(
     f: &mut Frame,
     area: Rect,
@@ -5521,6 +5537,8 @@ fn draw_viewer(
     // Which of the viewer's open files this is, what they are all called, and
     // — when a comparison is running — what each line of *this* half is.
     tab: (usize, &[String], &[cian_core::diff::Mark]),
+    // Docked in a pane rather than floating over the window.
+    docked: bool,
 ) -> (Vec<(Rect, usize)>, Rect) {
     let (show_ws, ruler) = marks;
     let (tab_at, tab_names, diff_marks) = tab;
@@ -5528,7 +5546,7 @@ fn draw_viewer(
     let mut tab_rects: Vec<(Rect, usize)> = Vec::new();
     let mut close_rect = Rect::new(0, 0, 0, 0);
     let Popup::Viewer { title, view, scroll, line, col, visual, anchor, find_input, find_query, sub_input, sub_walk, block_input, git_lines, markdown, preview, source, md_styles, md_map, md_width, editing, dirty, editable, hl, hl_lang, blame, shape, path, count, pending, .. } = popup else { return (tab_rects, close_rect) };
-    let rect = viewer_frame_rect(area);
+    let rect = viewer_frame_rect_docked(area, docked);
     f.render_widget(Clear, rect);
 
     // The preview owns `view.lines`: render the source to plain text plus a
@@ -5759,6 +5777,10 @@ fn draw_viewer(
     // The ruler is only for reading a fixed-width record, which the rendered
     // Markdown is not, and it costs a row.
     let show_ruler = ruler && !*preview && view.kind == cian_core::viewer::ViewKind::Text;
+    // Docked, the hints live on the window's own bottom bar — there is no
+    // room for them in a half-width frame, and a truncated hint is worse
+    // than none. The row goes back to the file.
+    let hint_row = u16::from(!docked);
     // A prompt being typed takes a row of its own above the hints (see
     // `prompt` further down), so the text gives one up while it is open.
     let prompt_row = sub_input.is_some()
@@ -5766,8 +5788,10 @@ fn draw_viewer(
         || block_input.is_some()
         || count.is_some()
         || pending.is_some();
-    let body_h =
-        inner.height.saturating_sub(1 + u16::from(show_ruler) + u16::from(prompt_row)) as usize;
+    let body_h = inner
+        .height
+        .saturating_sub(hint_row + u16::from(show_ruler) + u16::from(prompt_row))
+        as usize;
     // Closed folds take their lines out of the picture entirely: `visible` is
     // the buffer as it is actually shown, and everything below — scrolling,
     // the cursor, the mouse — works over that rather than over raw line
@@ -6320,10 +6344,19 @@ fn draw_viewer(
         ),
     };
     let last_row = inner.y + inner.height.saturating_sub(1);
-    f.render_widget(
-        Paragraph::new(truncate(&footer, inner.width as usize)).style(footer_style),
-        Rect::new(inner.x, last_row, inner.width, 1),
-    );
+    if !docked {
+        f.render_widget(
+            Paragraph::new(truncate(&footer, inner.width as usize)).style(footer_style),
+            Rect::new(inner.x, last_row, inner.width, 1),
+        );
+    } else if let Some(m) = msg.filter(|m| !m.is_empty()) {
+        // A message still needs somewhere to be seen — it answers the key
+        // that was just pressed.
+        f.render_widget(
+            Paragraph::new(truncate(&format!(" {m} "), inner.width as usize)).style(footer_style),
+            Rect::new(inner.x, last_row, inner.width, 1),
+        );
+    }
     // The prompt sits on the row above, in the file panes' prompt colours, so
     // the hints it used to cover stay readable while something is being typed.
     if let Some(text) = prompt {

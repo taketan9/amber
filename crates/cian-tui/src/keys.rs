@@ -228,10 +228,28 @@ impl App {
             && self.mode != Mode::Command
             && self.mode != Mode::Filter
         {
+            // A docked file is not parked away — it is beside the listing
+            // already, so Shift+Tab moves the focus between the two.
+            if let Some(dock) = self.viewer_dock.filter(|_| matches!(self.popup, Popup::Viewer { .. }))
+            {
+                let other = match dock {
+                    FocusedPane::Left => FocusedPane::Right,
+                    _ => FocusedPane::Left,
+                };
+                let to = if self.focused == dock { other } else { dock };
+                self.focus(to);
+                return Ok(());
+            }
             self.toggle_viewer_park();
             return Ok(());
         }
-        if !matches!(self.popup, Popup::None) {
+        // A docked viewer owns the keyboard only while the pane it sits in
+        // has the focus. With the focus on the other pane it is still on
+        // screen — a file open beside a listing — and the keys belong to the
+        // listing.
+        let docked_elsewhere = matches!(self.popup, Popup::Viewer { .. })
+            && self.viewer_dock.is_some_and(|p| p != self.focused);
+        if !matches!(self.popup, Popup::None) && !docked_elsewhere {
             return self.handle_popup_key(key);
         }
         // Ctrl+. shows the key manual. `?` does the same without needing the
@@ -295,12 +313,6 @@ impl App {
         }
         if self.focused == FocusedPane::Shell {
             return self.handle_shell_key(key);
-        }
-        // A pane that is reading a file answers the pager's keys first; it
-        // declines everything else, so switching panes, `:` and the menu all
-        // still work while a file is open in one.
-        if self.pane_file_key(key) {
-            return Ok(());
         }
         if self.mode == Mode::Visual {
             return self.handle_visual_key(key);
