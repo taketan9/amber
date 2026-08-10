@@ -26,6 +26,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::{Frame, Terminal};
 use serde::{Deserialize, Serialize};
 
+mod pager;
 mod panes;
 mod theme;
 use theme::*;
@@ -1910,6 +1911,17 @@ struct LayoutRects {
     shell: Rect,
 }
 
+impl LayoutRects {
+    /// The rectangle a pane was drawn in this frame.
+    fn for_pane(&self, pane: FocusedPane) -> Rect {
+        match pane {
+            FocusedPane::Left => self.left,
+            FocusedPane::Right => self.right,
+            FocusedPane::Shell => self.shell,
+        }
+    }
+}
+
 /// Which split a draggable border adjusts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DividerTarget {
@@ -2226,6 +2238,9 @@ pub struct App {
     vim_replaying: bool,
     /// The terminal font size cian last asked for — see `font.rs`.
     font_level: i64,
+    /// A file being read inside a pane instead of its listing — `[left, right]`
+    /// (see `pager.rs`). `Enter` opens one; `F3` promotes it to the editor.
+    pane_files: [Option<pager::PaneFile>; 2],
     vim_recording: Option<Vec<KeyEvent>>,
     vim_obj: Option<char>,
     vim_wait: Option<char>,
@@ -2542,6 +2557,7 @@ impl App {
             vim_mark_wait: None,
             vim_replaying: false,
             font_level: config.font.as_ref().map(|f| f.start).unwrap_or(0),
+            pane_files: [None, None],
             vim_recording: None,
             vim_obj: None,
             vim_wait: None,

@@ -296,6 +296,12 @@ impl App {
         if self.focused == FocusedPane::Shell {
             return self.handle_shell_key(key);
         }
+        // A pane that is reading a file answers the pager's keys first; it
+        // declines everything else, so switching panes, `:` and the menu all
+        // still work while a file is open in one.
+        if self.pane_file_key(key) {
+            return Ok(());
+        }
         if self.mode == Mode::Visual {
             return self.handle_visual_key(key);
         }

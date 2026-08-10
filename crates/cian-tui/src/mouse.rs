@@ -474,23 +474,39 @@ impl App {
             return;
         }
 
-        let pane_at = |col: u16, row: u16| -> Option<FocusedPane> {
+        // Copied out, so the closure below borrows nothing of `self` — the
+        // wheel needs to reach for the pane mutably right after asking which
+        // pane it is over.
+        let rects = self.layout_rects;
+        let pane_at = move |col: u16, row: u16| -> Option<FocusedPane> {
             let hit = |r: Rect| {
                 r.width > 0 && r.height > 0
                     && col >= r.x && col < r.x + r.width
                     && row >= r.y && row < r.y + r.height
             };
-            if hit(self.layout_rects.left) {
+            if hit(rects.left) {
                 Some(FocusedPane::Left)
-            } else if hit(self.layout_rects.right) {
+            } else if hit(rects.right) {
                 Some(FocusedPane::Right)
-            } else if hit(self.layout_rects.shell) {
+            } else if hit(rects.shell) {
                 Some(FocusedPane::Shell)
             } else {
                 None
             }
         };
 
+        // The wheel over a pane that is reading a file scrolls the file, not
+        // a listing that is not on screen. `pane_at` borrows `self`, so which
+        // pane it is gets resolved before anything reaches for it mutably.
+        if matches!(ev.kind, MouseEventKind::ScrollDown | MouseEventKind::ScrollUp) {
+            let over = pane_at(col, row);
+            if let Some(p) = over {
+                let down = matches!(ev.kind, MouseEventKind::ScrollDown);
+                if self.pane_file_scroll(p, down, 3) {
+                    return;
+                }
+            }
+        }
         // A file drag in progress owns the mouse until release.
         if self.file_drag.is_some() {
             match ev.kind {
@@ -799,7 +815,19 @@ impl App {
             Some((false, path)) if cian_core::archive::is_archive(&path) => {
                 self.enter_archive(path, String::new());
             }
-            Some((false, _)) => self.look_inside(),
+            // Enter reads it *here* — the listing gives way to the file and
+            // the other pane stays where it is. F3 and Shift+Tab are the
+            // editor; this is the other half of reading.
+            Some((false, path)) => {
+                if cian_core::image::is_image(&path) || cian_core::office::classify(&path).is_some()
+                {
+                    // A picture and a Word file are not lines of text; they
+                    // have their own windows.
+                    self.look_inside();
+                } else {
+                    self.open_file_in_pane(&path);
+                }
+            }
             None => {}
         }
         Ok(())

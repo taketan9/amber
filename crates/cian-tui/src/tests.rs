@@ -1047,16 +1047,18 @@
         );
     }
 
-    /// Enter reads the file; launching it moved to Ctrl+Enter. Looking at a
-    /// file is the hundred-times-a-day action and can be left with Esc; an
-    /// application opened by accident has to be found and closed.
+    /// Enter reads the file — in the pane, since the editor is `F3` — and
+    /// launching it is Ctrl+Enter. Looking at a file is the hundred-times-a-
+    /// day action and can be left with Esc; an application opened by accident
+    /// has to be found and closed.
     #[test]
     fn enter_reads_the_file_and_ctrl_enter_launches_it() {
         let (_d, mut app) = app_with(&["note.txt"]);
         app.active_pane_mut().unwrap().cursor =
             app.active_pane().unwrap().entries.iter().position(|e| e.name == "note.txt").unwrap();
         app.handle_key(code(KeyCode::Enter)).unwrap();
-        assert!(matches!(app.popup, Popup::Viewer { .. }), "Enter opened the viewer");
+        assert!(matches!(app.popup, Popup::None), "nothing opened over the panes");
+        assert!(app.pane_file(FocusedPane::Left).is_some(), "Enter read it in the pane");
         app.handle_key(code(KeyCode::Esc)).unwrap();
 
         // On a directory Enter still goes in, which is not something a
@@ -1974,6 +1976,62 @@
         // …and a file that never had a header gets one.
         let fresh = crate::state_with("", "theme", "dracula");
         assert!(fresh.starts_with("# cian runtime state"), "{fresh}");
+    }
+
+    /// `Enter` reads the file where its listing was — the other pane stays
+    /// put, nothing opens over anything, and Esc brings the listing back on
+    /// the row it was left on. `F3` is still the editor, and promotes what is
+    /// being read to it.
+    #[test]
+    fn enter_reads_the_file_in_the_pane_and_f3_promotes_it() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::write(d.path().join("a.txt"), "alpha\nbeta\n").unwrap();
+        let body: String = (1..=200).map(|i| format!("line {i}\n")).collect();
+        std::fs::write(d.path().join("b.log"), &body).unwrap();
+        let p = d.path().to_path_buf();
+        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        let idx = |app: &App, n: &str| {
+            app.active_pane().unwrap().entries.iter().position(|e| e.name == n).unwrap()
+        };
+        app.active_pane_mut().unwrap().cursor = idx(&app, "b.log");
+        let was = app.active_pane().unwrap().cursor;
+
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+        assert!(matches!(app.popup, Popup::None), "nothing opened over the panes");
+        let f = app.pane_file(FocusedPane::Left).expect("the file is in the pane");
+        assert_eq!(f.title, "b.log");
+        assert_eq!(f.lines.len(), 200);
+
+        // It is on screen, where the listing was — and the other pane is not.
+        let rows = render(&mut app, 120, 30);
+        assert!(rows.iter().any(|r| r.contains("line 1")), "the file is drawn:\n{rows:?}");
+        assert!(rows.iter().any(|r| r.contains("b.log")), "and named in the frame");
+        assert!(rows.iter().any(|r| r.contains("a.txt")), "the other pane still lists files");
+
+        // It scrolls.
+        for _ in 0..5 {
+            app.handle_key(key('j')).unwrap();
+        }
+        assert_eq!(app.pane_file(FocusedPane::Left).unwrap().scroll, 5);
+        app.handle_key(key('G')).unwrap();
+        assert_eq!(app.pane_file(FocusedPane::Left).unwrap().scroll, 199);
+
+        // F3 takes the same file into the editor.
+        app.handle_key(code(KeyCode::F(3))).unwrap();
+        assert!(matches!(app.popup, Popup::Viewer { .. }), "F3 promoted it");
+        assert!(app.pane_file(FocusedPane::Left).is_none(), "and the pane went back");
+        for k in [':', 'q'] {
+            app.handle_key(key(k)).unwrap();
+        }
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+
+        // Esc puts the listing back where it was.
+        app.active_pane_mut().unwrap().cursor = idx(&app, "b.log");
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+        assert!(app.pane_file(FocusedPane::Left).is_some());
+        app.handle_key(code(KeyCode::Esc)).unwrap();
+        assert!(app.pane_file(FocusedPane::Left).is_none(), "the listing is back");
+        assert_eq!(app.active_pane().unwrap().cursor, was, "on the row it was left on");
     }
 
     /// Backspace in a search listing means the same as Esc. A set of results

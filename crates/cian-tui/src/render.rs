@@ -118,10 +118,10 @@ fn draw_split(f: &mut Frame, main_area: Rect, app: &mut App, ov: AnimOverride) {
     let (bg_l, bg_r) = (app.pane_bg[0], app.pane_bg[1]);
     let (fl_l, fl_r) = (app.flash_level(FocusedPane::Left), app.flash_level(FocusedPane::Right));
     let restore = push_pane_theme(app, 0);
-    draw_file_pane(f, panes_split[0], &app.left, app.focused == FocusedPane::Left, visual_for_left, app.mode, bg_l, fl_l, FocusedPane::Left, &mut tab_rects, app.git_for(FocusedPane::Left), app.lang, &mut sort_rects, &mut crumb_rects, &mut nav_rects);
+    draw_file_pane(f, panes_split[0], &app.left, app.focused == FocusedPane::Left, visual_for_left, app.mode, bg_l, fl_l, FocusedPane::Left, &mut tab_rects, app.git_for(FocusedPane::Left), app.lang, &mut sort_rects, &mut crumb_rects, &mut nav_rects, app.pane_file(FocusedPane::Left));
     if let Some(prev) = restore { set_theme(prev); }
     let restore = push_pane_theme(app, 1);
-    draw_file_pane(f, panes_split[1], &app.right, app.focused == FocusedPane::Right, visual_for_right, app.mode, bg_r, fl_r, FocusedPane::Right, &mut tab_rects, app.git_for(FocusedPane::Right), app.lang, &mut sort_rects, &mut crumb_rects, &mut nav_rects);
+    draw_file_pane(f, panes_split[1], &app.right, app.focused == FocusedPane::Right, visual_for_right, app.mode, bg_r, fl_r, FocusedPane::Right, &mut tab_rects, app.git_for(FocusedPane::Right), app.lang, &mut sort_rects, &mut crumb_rects, &mut nav_rects, app.pane_file(FocusedPane::Right));
     if let Some(prev) = restore { set_theme(prev); }
     // With preview on and a file pane focused, the shell panel's area shows
     // the file under the cursor instead; the PTY runs on underneath, and
@@ -152,14 +152,14 @@ fn draw_zoom_overlay(f: &mut Frame, rect: Rect, app: &mut App, ov: AnimOverride)
             let (bg, fl) = (app.pane_bg[0], app.flash_level(FocusedPane::Left));
             let va = app.visual_anchor;
             let restore = push_pane_theme(app, 0);
-            draw_file_pane(f, rect, &app.left, true, va, app.mode, bg, fl, FocusedPane::Left, &mut Vec::new(), app.git_for(FocusedPane::Left), app.lang, &mut Vec::new(), &mut Vec::new(), &mut Vec::new());
+            draw_file_pane(f, rect, &app.left, true, va, app.mode, bg, fl, FocusedPane::Left, &mut Vec::new(), app.git_for(FocusedPane::Left), app.lang, &mut Vec::new(), &mut Vec::new(), &mut Vec::new(), app.pane_file(FocusedPane::Left));
             if let Some(prev) = restore { set_theme(prev); }
         }
         FocusedPane::Right => {
             let (bg, fl) = (app.pane_bg[1], app.flash_level(FocusedPane::Right));
             let va = app.visual_anchor;
             let restore = push_pane_theme(app, 1);
-            draw_file_pane(f, rect, &app.right, true, va, app.mode, bg, fl, FocusedPane::Right, &mut Vec::new(), app.git_for(FocusedPane::Right), app.lang, &mut Vec::new(), &mut Vec::new(), &mut Vec::new());
+            draw_file_pane(f, rect, &app.right, true, va, app.mode, bg, fl, FocusedPane::Right, &mut Vec::new(), app.git_for(FocusedPane::Right), app.lang, &mut Vec::new(), &mut Vec::new(), &mut Vec::new(), app.pane_file(FocusedPane::Right));
             if let Some(prev) = restore { set_theme(prev); }
         }
         FocusedPane::Shell => {
@@ -220,7 +220,7 @@ fn draw_zoomed(f: &mut Frame, area: Rect, app: &mut App, ov: AnimOverride) {
             let va = app.visual_anchor;
             let (bg, fl) = (app.pane_bg[0], app.flash_level(FocusedPane::Left));
             let restore = push_pane_theme(app, 0);
-            draw_file_pane(f, area, &app.left, true, va, app.mode, bg, fl, FocusedPane::Left, &mut tab_rects, app.git_for(FocusedPane::Left), app.lang, &mut sort_rects, &mut crumb_rects, &mut nav_rects);
+            draw_file_pane(f, area, &app.left, true, va, app.mode, bg, fl, FocusedPane::Left, &mut tab_rects, app.git_for(FocusedPane::Left), app.lang, &mut sort_rects, &mut crumb_rects, &mut nav_rects, app.pane_file(FocusedPane::Left));
             if let Some(prev) = restore { set_theme(prev); }
         }
         FocusedPane::Right => {
@@ -229,7 +229,7 @@ fn draw_zoomed(f: &mut Frame, area: Rect, app: &mut App, ov: AnimOverride) {
             let va = app.visual_anchor;
             let (bg, fl) = (app.pane_bg[1], app.flash_level(FocusedPane::Right));
             let restore = push_pane_theme(app, 1);
-            draw_file_pane(f, area, &app.right, true, va, app.mode, bg, fl, FocusedPane::Right, &mut tab_rects, app.git_for(FocusedPane::Right), app.lang, &mut sort_rects, &mut crumb_rects, &mut nav_rects);
+            draw_file_pane(f, area, &app.right, true, va, app.mode, bg, fl, FocusedPane::Right, &mut tab_rects, app.git_for(FocusedPane::Right), app.lang, &mut sort_rects, &mut crumb_rects, &mut nav_rects, app.pane_file(FocusedPane::Right));
             if let Some(prev) = restore { set_theme(prev); }
         }
         FocusedPane::Shell => {
@@ -1144,6 +1144,8 @@ fn draw_file_pane(
     sort_rects: &mut Vec<(FocusedPane, cian_core::SortKey, Rect)>,
     crumb_rects: &mut Vec<(FocusedPane, usize, Rect)>,
     nav_rects: &mut Vec<(FocusedPane, bool, Rect)>,
+    // The file being read in this pane instead of its listing, if any.
+    reading: Option<&crate::pager::PaneFile>,
 ) {
     // Read the active theme once — `theme()` now takes a lock, and the row loop
     // below would otherwise hit it thousands of times per frame.
@@ -1305,6 +1307,53 @@ fn draw_file_pane(
     }
     let list_area =
         Rect::new(inner.x, inner.y + 1, inner.width, inner.height.saturating_sub(1));
+    // Reading a file here instead of the listing: the same frame, the same
+    // place, the file's own lines in it. Numbered, because the reason to look
+    // at a log in a file manager is usually to say where in it something is.
+    if let Some(file) = reading {
+        let rows = list_area.height as usize;
+        let last = file.lines.len().saturating_sub(1);
+        let top = file.scroll.min(last);
+        let num_w = format!("{}", file.lines.len().max(1)).len();
+        let text_fg = readable_on(bg.unwrap_or(th.popup_bg));
+        let num_fg = muted_on(bg.unwrap_or(th.popup_bg));
+        let body: Vec<Line> = file
+            .lines
+            .iter()
+            .enumerate()
+            .skip(top)
+            .take(rows)
+            .map(|(i, l)| {
+                Line::from(vec![
+                    Span::styled(format!("{:>w$} ", i + 1, w = num_w), Style::default().fg(num_fg)),
+                    Span::styled(l.clone(), Style::default().fg(text_fg)),
+                ])
+            })
+            .collect();
+        f.render_widget(Paragraph::new(body).style(list_style), list_area);
+        // The name and how far down it goes, in the frame's own footer.
+        let pct = match last {
+            0 => "all".to_string(),
+            m => format!("{}%", top * 100 / m),
+        };
+        let foot = format!(
+            " {}  {}   {} ",
+            file.title,
+            pct,
+            tr(lang, "Esc list  F3 edit", "Esc 一覧  F3 編集")
+        );
+        let foot_w = (width(&foot) as u16).min(area.width.saturating_sub(2));
+        f.render_widget(
+            Paragraph::new(truncate(&foot, foot_w as usize)).style(
+                Style::default()
+                    .fg(readable_on(focus_bg))
+                    .bg(focus_bg)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Rect::new(area.x + 1, area.y + area.height.saturating_sub(1), foot_w, 1),
+        );
+        return;
+    }
     let list = List::new(items)
         .style(list_style)
         .highlight_style(
