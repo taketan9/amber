@@ -1686,6 +1686,19 @@ impl App {
     /// pane carries a trailing one, and a bracketed paste of several lines
     /// would otherwise smuggle an Enter into a single-line prompt.
     pub(crate) fn insert_into_active_text(&mut self, text: &str) {
+        // The viewer is the one field where newlines are the point: a paste
+        // into a file is lines. Everywhere else is a one-line field, so they
+        // are stripped below.
+        if matches!(self.popup, Popup::Viewer { .. }) {
+            if text.is_empty() {
+                return;
+            }
+            // Into the editor at the cursor; into a file being read, where `p`
+            // would put it. Either way it is one edit, not one per character.
+            let at_cursor = matches!(self.popup, Popup::Viewer { editing: true, .. });
+            self.put_text_in_viewer(text, at_cursor);
+            return;
+        }
         let clean: String = text.chars().filter(|c| *c != '\n' && *c != '\r').collect();
         if clean.is_empty() {
             return;

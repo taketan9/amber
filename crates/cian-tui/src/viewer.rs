@@ -2295,6 +2295,15 @@ impl App {
                 "まだ何もコピーしていません").into());
             return;
         };
+        self.put_text_in_viewer(&text, before);
+    }
+
+    /// Put `text` into the file at the cursor, as `p` / `P` would.
+    ///
+    /// Also where a terminal paste lands (Cmd/Ctrl+V): it arrives as one event
+    /// carrying the whole text, and going through here means one edit and one
+    /// repaint rather than the text being typed in a character at a time.
+    pub(crate) fn put_text_in_viewer(&mut self, text: &str, before: bool) {
         let text = text.replace("\r\n", "\n");
         let linewise = text.ends_with('\n');
         let parts: Vec<String> =

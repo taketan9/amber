@@ -1434,6 +1434,34 @@
         }
     }
 
+    /// A terminal paste (Cmd/Ctrl+V) arrives as one event carrying the whole
+    /// text. In the viewer it used to arrive nowhere at all — the paste path
+    /// knew about every one-line field and not about the file — so the only
+    /// way to get text in was to have the terminal type it, a frame per
+    /// character. It lands as one edit, undone in one step.
+    #[test]
+    fn a_terminal_paste_lands_in_the_viewer_in_one_edit() {
+        let (_d, mut app) = viewer_on("first\nsecond\n");
+        let before = viewer_lines(&app).join("\n");
+
+        // Reading: it goes in where `p` would put it, newlines and all.
+        app.insert_into_active_text("alpha\nbeta\n");
+        let after = viewer_lines(&app);
+        assert!(after.iter().any(|l| l.contains("alpha")), "the text is in: {after:?}");
+        assert!(after.iter().any(|l| l.contains("beta")));
+        assert!(after.len() > 2, "both lines landed: {after:?}");
+
+        // One edit: one `u` puts the file back.
+        app.handle_key(key('u')).unwrap();
+        assert_eq!(viewer_lines(&app).join("\n"), before, "the paste undoes in one step");
+
+        // Editing: it lands at the caret rather than on the next line.
+        app.handle_key(key('i')).unwrap();
+        app.insert_into_active_text("XY");
+        let l = viewer_lines(&app);
+        assert!(l[0].starts_with("XY"), "at the cursor: {l:?}");
+    }
+
     /// Backspace in a search listing means the same as Esc. A set of results
     /// has no parent directory to climb to, so climbing to one is a surprise.
     #[test]

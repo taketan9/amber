@@ -4394,40 +4394,62 @@ fn run_loop<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Result<()>
             33
         };
         if event::poll(Duration::from_millis(tick))? {
-            match event::read()? {
-                Event::Key(key) if key.kind == KeyEventKind::Press => {
-                    // Input always wins over eye candy: land any transition
-                    // immediately rather than making the user wait for it.
-                    app.finish_anim();
-                    // A key must never be able to end the session. Navigation
-                    // can fail for ordinary reasons — a directory vanished, a
-                    // path turned out not to be one — and the answer to that
-                    // is a message, not an exit.
-                    if let Err(e) = app.handle_key(key) {
-                        app.message = Some(format!("✖ {}", first_line(&e)));
-                        cian_core::log::log(&format!("key error: {e:#}"));
+            // Take everything the terminal already has before painting.
+            //
+            // A frame per keystroke is right when keystrokes arrive at human
+            // speed. They do not always: a terminal that types a paste in
+            // rather than bracketing it delivers thousands of key events at
+            // once, and a repeat key delivers hundreds — and cian was drawing
+            // a full frame for each, so a five-kilobyte paste took as many
+            // renders as it had characters. Every event still runs, in order;
+            // only the painting between them is dropped, because those frames
+            // were never seen.
+            let mut drained = 0usize;
+            loop {
+                match event::read()? {
+                    Event::Key(key) if key.kind == KeyEventKind::Press => {
+                        // Input always wins over eye candy: land any transition
+                        // immediately rather than making the user wait for it.
+                        app.finish_anim();
+                        // A key must never be able to end the session. Navigation
+                        // can fail for ordinary reasons — a directory vanished, a
+                        // path turned out not to be one — and the answer to that
+                        // is a message, not an exit.
+                        if let Err(e) = app.handle_key(key) {
+                            app.message = Some(format!("✖ {}", first_line(&e)));
+                            cian_core::log::log(&format!("key error: {e:#}"));
+                        }
+                        needs_redraw = true;
                     }
-                    needs_redraw = true;
-                }
-                Event::Mouse(m) => {
-                    app.handle_mouse(m);
-                    needs_redraw = true;
-                }
-                // A terminal paste (Cmd/Ctrl+V, right-click, middle-click)
-                // arrives whole rather than as keystrokes, so it lands in the
-                // active field atomically and its newlines are stripped.
-                // A paste, or a file dropped onto the terminal window — which
-                // arrives the same way, since a terminal answers a drop by
-                // typing the path in. `accept_drop` takes it only when every
-                // item really is a file on disk.
-                Event::Paste(text) => {
-                    if !app.accept_drop(&text) {
-                        app.insert_into_active_text(&text);
+                    Event::Mouse(m) => {
+                        app.handle_mouse(m);
+                        needs_redraw = true;
                     }
-                    needs_redraw = true;
+                    // A terminal paste (Cmd/Ctrl+V, right-click, middle-click)
+                    // arrives whole rather than as keystrokes, so it lands in the
+                    // active field atomically and its newlines are stripped.
+                    // A paste, or a file dropped onto the terminal window — which
+                    // arrives the same way, since a terminal answers a drop by
+                    // typing the path in. `accept_drop` takes it only when every
+                    // item really is a file on disk.
+                    Event::Paste(text) => {
+                        if !app.accept_drop(&text) {
+                            app.insert_into_active_text(&text);
+                        }
+                        needs_redraw = true;
+                    }
+                    Event::Resize(_, _) => needs_redraw = true,
+                    _ => {}
                 }
-                Event::Resize(_, _) => needs_redraw = true,
-                _ => {}
+                drained += 1;
+                // Stop for anything that hands the terminal to someone else,
+                // and put a ceiling on one turn so a flood still paints.
+                if app.should_quit || app.pending_edit.is_some() || drained >= 4096 {
+                    break;
+                }
+                if !event::poll(Duration::ZERO)? {
+                    break;
+                }
             }
         }
         // Repaint when any pane in the active shell tab produced new output.
