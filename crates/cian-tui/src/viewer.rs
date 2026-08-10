@@ -2305,20 +2305,51 @@ impl App {
     /// repaint rather than the text being typed in a character at a time.
     pub(crate) fn put_text_in_viewer(&mut self, text: &str, before: bool) {
         let text = text.replace("\r\n", "\n");
-        let linewise = text.ends_with('\n');
-        let parts: Vec<String> =
-            text.trim_end_matches('\n').split('\n').map(str::to_string).collect();
+        // Whole lines or a run of characters? `p` on a copied *line* puts it on
+        // its own line, which is the distinction that makes vi's paste land
+        // where meant. In the editor there is no such question: the caret is
+        // what everything is relative to, and a trailing newline is a line
+        // break to type, not an instruction to push whole lines above.
+        let editing = matches!(self.popup, Popup::Viewer { editing: true, .. });
+        let linewise = !editing && text.ends_with('\n');
+        let parts: Vec<String> = if linewise {
+            text.trim_end_matches('\n').split('\n').map(str::to_string).collect()
+        } else {
+            text.split('\n').map(str::to_string).collect()
+        };
+        // Not into a binary file. What is on screen there is a hex *rendering*
+        // of the bytes, not the bytes; text pushed into it would be saved as
+        // whatever that rendering parses back to. Hex editing is overwrite-
+        // only for the same reason — the size must not change.
+        if matches!(&self.popup, Popup::Viewer { view, .. } if view.kind == cian_core::viewer::ViewKind::Binary)
+        {
+            self.message = Some(
+                tr(
+                    self.lang,
+                    "a binary file takes hex edits, not pasted text",
+                    "バイナリファイルには貼り付けできません（16進で上書き編集）",
+                )
+                .into(),
+            );
+            return;
+        }
         let mut n = 0usize;
         if let Popup::Viewer { view, undo, dirty, hl, line, col, goal, .. } = &mut self.popup {
             push_viewer_undo(undo, &view.lines, *line, *col);
             if view.lines.is_empty() {
                 view.lines.push(String::new());
             }
+            // A file with nothing in it has no line to paste *after*: the text
+            // becomes the file, rather than landing under a blank first line.
+            let blank_file = view.lines.len() == 1 && view.lines[0].is_empty();
             let at = (*line).min(view.lines.len() - 1);
             if linewise {
-                let put = if before { at } else { at + 1 };
+                let put = if before || blank_file { at } else { at + 1 };
                 for (i, p) in parts.iter().enumerate() {
                     view.lines.insert(put + i, p.clone());
+                }
+                if blank_file {
+                    view.lines.pop(); // the line that was standing in for nothing
                 }
                 *line = put;
                 *col = 0;

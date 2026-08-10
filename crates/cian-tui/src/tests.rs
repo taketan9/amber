@@ -1462,6 +1462,68 @@
         assert!(l[0].starts_with("XY"), "at the cursor: {l:?}");
     }
 
+    /// A paste while a prompt is open over the file belongs to the prompt.
+    /// It used to go into the file: typing `/` and pasting the search term
+    /// left the search box empty and the term spliced into the text.
+    #[test]
+    fn a_paste_goes_to_the_prompt_that_is_open_over_the_file() {
+        let (_d, mut app) = viewer_on("alpha\nbeta\n");
+        app.handle_key(key('/')).unwrap();
+        app.insert_into_active_text("bet");
+        match &app.popup {
+            Popup::Viewer { find_input, view, .. } => {
+                assert_eq!(find_input.as_deref(), Some("bet"), "into the search box");
+                assert_eq!(view.lines, vec!["alpha", "beta"], "and not into the file");
+            }
+            other => panic!("expected the viewer, got {other:?}"),
+        }
+
+        // The `:` line likewise.
+        app.handle_key(code(KeyCode::Esc)).unwrap();
+        app.handle_key(key(':')).unwrap();
+        app.insert_into_active_text("w");
+        match &app.popup {
+            Popup::Viewer { sub_input, view, .. } => {
+                assert_eq!(sub_input.as_deref(), Some("w"));
+                assert_eq!(view.lines, vec!["alpha", "beta"]);
+            }
+            other => panic!("expected the viewer, got {other:?}"),
+        }
+    }
+
+    /// Text cannot be pasted into a binary file. What is on screen is a hex
+    /// rendering of the bytes, not the bytes — a pasted line would be saved
+    /// as whatever that rendering parses back to.
+    #[test]
+    fn text_is_refused_for_a_binary_file() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::write(d.path().join("bin.dat"), [0u8, 1, 2, 3, 255, 254]).unwrap();
+        let p = d.path().to_path_buf();
+        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        let i = app
+            .active_pane()
+            .unwrap()
+            .entries
+            .iter()
+            .position(|e| e.name == "bin.dat")
+            .unwrap();
+        app.active_pane_mut().unwrap().cursor = i;
+        app.handle_key(code(KeyCode::F(3))).unwrap();
+        let before = match &app.popup {
+            Popup::Viewer { view, .. } => view.lines.clone(),
+            other => panic!("expected the viewer, got {other:?}"),
+        };
+        app.insert_into_active_text("hello\n");
+        match &app.popup {
+            Popup::Viewer { view, dirty, .. } => {
+                assert_eq!(view.lines, before, "the hex dump is untouched");
+                assert!(!*dirty, "and the file is not marked as edited");
+            }
+            other => panic!("expected the viewer, got {other:?}"),
+        }
+        assert!(app.message.is_some(), "it says why");
+    }
+
     /// Backspace in a search listing means the same as Esc. A set of results
     /// has no parent directory to climb to, so climbing to one is a surprise.
     #[test]

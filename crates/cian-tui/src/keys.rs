@@ -1693,6 +1693,24 @@ impl App {
             if text.is_empty() {
                 return;
             }
+            // …unless a prompt is open over it. Typing a search and pasting
+            // the term is one gesture; it must not land in the file, which is
+            // both a surprise and an edit.
+            let one_line: String = text.chars().filter(|c| *c != '\n' && *c != '\r').collect();
+            if let Popup::Viewer { find_input, sub_input, block_input, .. } = &mut self.popup {
+                if let Some(q) = find_input.as_mut() {
+                    q.push_str(&one_line);
+                    return;
+                }
+                if let Some(c) = sub_input.as_mut() {
+                    c.push_str(&one_line);
+                    return;
+                }
+                if let Some(b) = block_input.as_mut() {
+                    b.text.push_str(&one_line);
+                    return;
+                }
+            }
             // Into the editor at the cursor; into a file being read, where `p`
             // would put it. Either way it is one edit, not one per character.
             let at_cursor = matches!(self.popup, Popup::Viewer { editing: true, .. });
