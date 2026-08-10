@@ -11,7 +11,41 @@ impl App {
     /// h/j/k/l and friends, and v / V / Ctrl-v visual selection with y/c to
     /// copy. The rendered body height (from `viewer_rect`) sizes the page moves
     /// and keeps the cursor on screen.
+    /// Every viewer key goes through here so the keys of a *change* can be
+    /// kept for `.` — which is what makes `.` work for anything, including a
+    /// `cw` and everything typed after it.
     pub(crate) fn handle_viewer_key(&mut self, key: KeyEvent) -> Result<()> {
+        if self.vim_replaying {
+            return self.handle_viewer_key_inner(key);
+        }
+        let dirty_before = matches!(self.popup, Popup::Viewer { dirty: true, .. });
+        let r = self.handle_viewer_key_inner(key);
+        let editing = matches!(self.popup, Popup::Viewer { editing: true, .. });
+        let op_pending = matches!(
+            &self.popup,
+            Popup::Viewer { pending: Some(p), .. } if matches!(p, 'd' | 'c')
+        );
+        let dirty_now = matches!(self.popup, Popup::Viewer { dirty: true, .. });
+        if self.vim_recording.is_some() {
+            self.viewer_record(key, false);
+        } else if editing || op_pending || (dirty_now && !dirty_before) {
+            // This key began a change.
+            self.viewer_record(key, true);
+        }
+        // At rest again — nothing half-typed and not in the editor — so the
+        // command is over and its keys are what `.` will replay.
+        let at_rest = !editing
+            && !op_pending
+            && self.vim_obj.is_none()
+            && self.vim_wait.is_none()
+            && self.vim_mark_wait.is_none();
+        if at_rest {
+            self.viewer_end_record();
+        }
+        r
+    }
+
+    fn handle_viewer_key_inner(&mut self, key: KeyEvent) -> Result<()> {
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         let shift = key.modifiers.contains(KeyModifiers::SHIFT);
         let alt = key.modifiers.contains(KeyModifiers::ALT);
@@ -148,6 +182,39 @@ impl App {
         if matches!(self.popup, Popup::Viewer { editing: true, .. }) {
             return self.handle_editor_key(key);
         }
+        // `]c` / `[c` — the next and previous difference, vimdiff's own keys,
+        // while a comparison is running.
+        if !ctrl && key.code == KeyCode::Char('c') && self.viewer_diff.is_some() {
+            let armed = match &self.popup {
+                Popup::Viewer { pending: Some(p), .. } if matches!(p, ']' | '[') => Some(*p),
+                _ => None,
+            };
+            if let Some(p) = armed {
+                if let Popup::Viewer { pending, .. } = &mut self.popup {
+                    *pending = None;
+                }
+                self.viewer_diff_step(p == ']');
+                return Ok(());
+            }
+        }
+        // Marks: `ma` here, `'a` back. Ahead of the grammar, which would read
+        // the `a` of `ma` as a text object.
+        if self.viewer_mark_key(key) {
+            return Ok(());
+        }
+        // Ctrl+O / Ctrl+I walk back and forward through the places a jump
+        // came from.
+        if ctrl && matches!(key.code, KeyCode::Char('o') | KeyCode::Char('i')) {
+            self.viewer_jump_list(key.code == KeyCode::Char('o'));
+            return Ok(());
+        }
+        // `.` repeats the last change — the keys of it, replayed.
+        if !ctrl && !alt && key.code == KeyCode::Char('.')
+            && matches!(self.popup, Popup::Viewer { editing: false, .. })
+        {
+            self.viewer_repeat_change();
+            return Ok(());
+        }
         // vi's grammar, ahead of the keys it shares letters with: `i` is
         // insert on its own and the start of a text object after an operator,
         // and only the grammar knows which of the two this is.
@@ -188,18 +255,15 @@ impl App {
             }
             return Ok(());
         }
-        // Tab / Shift+Tab step between the differences while a comparison is
-        // running. vim spells this `]c`, which costs two keys and takes `c`
-        // away from the change operator for as long as the comparison lasts;
-        // Tab is one key, is already "the next one" everywhere else, and takes
-        // nothing away — it only types a tab while editing, and a comparison
-        // is not an editing mode.
+        // Tab steps to the next difference while a comparison is running —
+        // and `]c` / `[c` do it either way, which is what vimdiff calls them.
+        // Shift+Tab used to be "the previous one" and is the window's now.
         if !ctrl && !alt
-            && matches!(key.code, KeyCode::Tab | KeyCode::BackTab)
+            && key.code == KeyCode::Tab
             && self.viewer_diff.is_some()
             && matches!(self.popup, Popup::Viewer { editing: false, .. })
         {
-            self.viewer_diff_step(key.code == KeyCode::Tab);
+            self.viewer_diff_step(true);
             return Ok(());
         }
         // `z` folds: `za` toggles the one at the cursor, `zR` opens every fold,
@@ -309,6 +373,7 @@ impl App {
         if !ctrl && matches!(key.code, KeyCode::Char(']') | KeyCode::Char('[')) {
             let c = if key.code == KeyCode::Char(']') { ']' } else { '[' };
             let mut empty = false;
+            // Arm it and wait for the second half — `]` alone means nothing.
             if let Popup::Viewer { pending, shape, line, col, goal, md_map, view, .. } = &mut self.popup {
                 if *pending == Some(c) {
                     *pending = None;
@@ -508,6 +573,14 @@ impl App {
                 }
             }
             return Ok(());
+        }
+        // The places worth being able to come back from: a jump to a line, and
+        // a search landing. Noted before the cursor moves.
+        if !ctrl && !alt
+            && matches!(key.code, KeyCode::Char('G') | KeyCode::Char('n') | KeyCode::Char('N'))
+            && matches!(self.popup, Popup::Viewer { editing: false, .. })
+        {
+            self.viewer_note_jump();
         }
         // A numeric prefix builds a count for the next motion (vim's `42G`).
         if !ctrl {
@@ -1203,8 +1276,26 @@ impl App {
         // every terminal is willing to hand over — iTerm2 keeps Ctrl+F for its
         // find bar and macOS takes Ctrl+Q for zoom — and a viewer you can edit
         // but cannot save is worse than one you cannot edit.
-        match cmd {
-            "w" | "write" => {
+        match words.first().copied().unwrap_or("") {
+            "w" | "write" | "saveas" | "wa" => {
+                // `:w <name>` writes it there and adopts the name — which is
+                // how a file that started empty gets one.
+                let rest = words[1..].join(" ");
+                if !rest.is_empty() {
+                    self.save_viewer_file_as(&rest);
+                    return;
+                }
+                if matches!(&self.popup, Popup::Viewer { path, .. } if path.as_os_str().is_empty()) {
+                    self.message = Some(
+                        tr(
+                            self.lang,
+                            "this file has no name yet — :w <name>",
+                            "まだ名前がありません — :w <名前>",
+                        )
+                        .into(),
+                    );
+                    return;
+                }
                 if matches!(self.popup, Popup::Viewer { editable: false, .. }) {
                     self.message = Some(
                         tr(
@@ -1262,6 +1353,29 @@ impl App {
             }
             // From here `:edit` means *this* file, not the one under the
             // pane's cursor.
+            _ if cmd.starts_with('g') || cmd.starts_with('v') => {
+                // `:g/re/d` deletes every line that matches, `:v/re/d` every
+                // line that does not — the two halves of a log triage, and
+                // one undo step either way.
+                if let Some(rest) = cmd.strip_prefix('g').or_else(|| cmd.strip_prefix('v')) {
+                    let keep_matching = cmd.starts_with('v');
+                    let Some(spec) = rest.strip_prefix('/') else { return };
+                    let Some((pat, action)) = spec.rsplit_once('/') else {
+                        self.message = Some(
+                            tr(self.lang, "usage: :g/pattern/d", "使い方: :g/パターン/d").into(),
+                        );
+                        return;
+                    };
+                    if action.trim() != "d" {
+                        self.message = Some(
+                            tr(self.lang, "only :g/pattern/d for now", "今のところ :g/パターン/d のみ").into(),
+                        );
+                        return;
+                    }
+                    self.viewer_global_delete(pat, keep_matching);
+                    return;
+                }
+            }
             "edit" | "e" => {
                 self.edit_viewer_file_externally();
                 return;
@@ -2683,6 +2797,21 @@ impl App {
         let op = self.viewer_pending_op();
         let n = self.viewer_take_count();
         let (at, lines) = self.viewer_where();
+        // vi's one special case: `cw` on a word changes the word, not the
+        // space after it — it behaves like `ce`. Everyone relies on it
+        // without knowing it is a special case.
+        let key = if op == Some('c')
+            && key == 'w'
+            && lines
+                .get(at.0)
+                .and_then(|l| l.chars().nth(at.1))
+                .map(|c| !c.is_whitespace())
+                .unwrap_or(false)
+        {
+            'e'
+        } else {
+            key
+        };
         let Some(mo) = crate::vim::motion(&lines, at, key, arg, n) else {
             return false;
         };
@@ -2814,6 +2943,338 @@ impl App {
                 }
             }
         }
+    }
+
+    /// `:g/re/d` — drop every line that matches (or, for `:v`, every line
+    /// that does not). One undo step, and it says how many went.
+    pub(crate) fn viewer_global_delete(&mut self, pattern: &str, invert: bool) {
+        if pattern.is_empty() {
+            self.message = Some(tr(self.lang, "no pattern", "パターンがありません").into());
+            return;
+        }
+        let matcher = match cian_core::search::Matcher::parse(pattern) {
+            Ok(m) => m,
+            Err(e) => {
+                self.message = Some(e.to_string());
+                return;
+            }
+        };
+        if !matches!(self.popup, Popup::Viewer { editable: true, .. }) {
+            self.message =
+                Some(tr(self.lang, "this one is read-only", "これは読み取り専用です").into());
+            return;
+        }
+        let mut gone = 0usize;
+        if let Popup::Viewer { view, undo, line, col, goal, dirty, hl, .. } = &mut self.popup {
+            push_viewer_undo(undo, &view.lines, *line, *col);
+            let before = view.lines.len();
+            view.lines.retain(|l| matcher.find_ranges(l).is_empty() != invert);
+            gone = before - view.lines.len();
+            if view.lines.is_empty() {
+                view.lines.push(String::new());
+            }
+            *line = (*line).min(view.lines.len() - 1);
+            *col = 0;
+            *goal = 0;
+            if gone > 0 {
+                *dirty = true;
+                hl.clear();
+            }
+        }
+        self.message = Some(if self.lang == Lang::Ja {
+            format!("{gone} 行削除")
+        } else {
+            format!("{gone} line(s) deleted")
+        });
+    }
+
+    /// `.` — do the last change again.
+    ///
+    /// The keys are replayed rather than the *effect* re-applied: vi's `.`
+    /// means "that command, here", and a command is what was typed — the
+    /// operator, its count, its motion, and for `c` everything typed into the
+    /// editor before Esc. Replaying the keys gets all of that for free and
+    /// cannot drift from what the keys actually do.
+    pub(crate) fn viewer_repeat_change(&mut self) {
+        let Some(keys) = self.vim_last_change.clone() else {
+            self.message = Some(tr(self.lang, "nothing to repeat yet", "繰り返す変更がありません").into());
+            return;
+        };
+        // Not recorded again while it runs, or `.` would rewrite itself with
+        // its own replay.
+        self.vim_replaying = true;
+        for k in keys {
+            let _ = self.handle_viewer_key_inner(k);
+        }
+        self.vim_replaying = false;
+    }
+
+    /// Start (or continue) recording the keys of a change.
+    fn viewer_record(&mut self, key: KeyEvent, start: bool) {
+        if start && self.vim_recording.is_none() {
+            self.vim_recording = Some(Vec::new());
+        }
+        if let Some(rec) = self.vim_recording.as_mut() {
+            rec.push(key);
+        }
+    }
+
+    /// The change is over: keep its keys for `.`.
+    fn viewer_end_record(&mut self) {
+        if let Some(rec) = self.vim_recording.take() {
+            if !rec.is_empty() {
+                self.vim_last_change = Some(rec);
+            }
+        }
+    }
+
+    /// `m{a-z}` sets a mark, `'{a-z}` and `` `{a-z} `` jump to it.
+    ///
+    /// Per file: a mark set in one file is not somewhere to land in another,
+    /// and silently jumping to line 200 of a different document is worse than
+    /// saying there is no such mark here.
+    fn viewer_mark_key(&mut self, key: KeyEvent) -> bool {
+        let KeyCode::Char(c) = key.code else { return false };
+        if key.modifiers.contains(KeyModifiers::CONTROL)
+            || key.modifiers.contains(KeyModifiers::ALT)
+        {
+            return false;
+        }
+        let ready = matches!(
+            &self.popup,
+            Popup::Viewer { editing: false, find_input: None, sub_input: None, .. }
+        );
+        if !ready {
+            return false;
+        }
+        // Waiting for the letter after `m`, `'` or a backtick.
+        if let Some(what) = self.vim_mark_wait.take() {
+            if !c.is_ascii_alphabetic() {
+                return true; // an abandoned mark command, not a stray edit
+            }
+            let path = match &self.popup {
+                Popup::Viewer { path, .. } => path.clone(),
+                _ => return true,
+            };
+            match what {
+                'm' => {
+                    if let Popup::Viewer { line, col, .. } = &self.popup {
+                        self.vim_marks.insert((path, c), (*line, *col));
+                    }
+                    self.message =
+                        Some(if self.lang == Lang::Ja { format!("マーク {c}") } else { format!("mark {c}") });
+                }
+                _ => {
+                    let exact = what == '`';
+                    match self.vim_marks.get(&(path, c)).copied() {
+                        Some((l, col)) => {
+                            self.viewer_note_jump();
+                            if let Popup::Viewer { line, col: cc, goal, view, .. } = &mut self.popup {
+                                *line = l.min(view.lines.len().saturating_sub(1));
+                                let len =
+                                    view.lines.get(*line).map(|s| s.chars().count()).unwrap_or(0);
+                                // `'a` is the line, backtick-a the exact spot.
+                                *cc = if exact { col.min(len) } else { 0 };
+                                *goal = *cc;
+                            }
+                        }
+                        None => {
+                            self.message = Some(if self.lang == Lang::Ja {
+                                format!("マーク {c} はこのファイルにありません")
+                            } else {
+                                format!("no mark {c} in this file")
+                            })
+                        }
+                    }
+                }
+            }
+            return true;
+        }
+        if matches!(c, 'm' | '\'' | '`') {
+            self.vim_mark_wait = Some(c);
+            return true;
+        }
+        false
+    }
+
+    /// Remember where the cursor is, before a jump that could be hard to find
+    /// the way back from. `Ctrl+O` walks back through these, `Ctrl+I` forward.
+    pub(crate) fn viewer_note_jump(&mut self) {
+        let Popup::Viewer { path, line, col, .. } = &self.popup else { return };
+        let here = (path.clone(), *line, *col);
+        // A new jump discards anything Ctrl+O had walked back past, as vi does.
+        self.vim_jumps.truncate(self.vim_jump_at);
+        if self.vim_jumps.last() == Some(&here) {
+            return;
+        }
+        self.vim_jumps.push(here);
+        const KEEP: usize = 100;
+        if self.vim_jumps.len() > KEEP {
+            self.vim_jumps.remove(0);
+        }
+        self.vim_jump_at = self.vim_jumps.len();
+    }
+
+    /// `Ctrl+O` / `Ctrl+I` — back and forward through those places.
+    pub(crate) fn viewer_jump_list(&mut self, back: bool) {
+        let Popup::Viewer { path, line, col, .. } = &self.popup else { return };
+        let (path, here) = (path.clone(), (*line, *col));
+        if back {
+            if self.vim_jump_at == 0 {
+                self.message = Some(tr(self.lang, "no older place", "これ以上戻れません").into());
+                return;
+            }
+            // Stepping back for the first time keeps where we are, so Ctrl+I
+            // has somewhere to return to.
+            if self.vim_jump_at == self.vim_jumps.len() {
+                self.vim_jumps.push((path.clone(), here.0, here.1));
+            }
+            self.vim_jump_at -= 1;
+        } else {
+            if self.vim_jump_at + 1 >= self.vim_jumps.len() {
+                self.message = Some(tr(self.lang, "no newer place", "これ以上進めません").into());
+                return;
+            }
+            self.vim_jump_at += 1;
+        }
+        let Some((p, l, c)) = self.vim_jumps.get(self.vim_jump_at).cloned() else { return };
+        if p != path {
+            self.message = Some(tr(self.lang, "that place is in another file", "別のファイルの位置です").into());
+            return;
+        }
+        if let Popup::Viewer { line, col, goal, view, .. } = &mut self.popup {
+            *line = l.min(view.lines.len().saturating_sub(1));
+            let len = view.lines.get(*line).map(|s| s.chars().count()).unwrap_or(0);
+            *col = c.min(len);
+            *goal = *col;
+        }
+    }
+
+    /// Shift+Tab: step between the file being edited and the panes behind it.
+    ///
+    /// The viewer is not a dialog you finish with — it is the other half of
+    /// the window. So it parks rather than closes, keeping its cursor, its
+    /// folds and its unsaved edits, and the same key brings it back. With
+    /// nothing to come back to it opens an empty file, which is what makes
+    /// this an editor you can start typing into rather than only a reader.
+    pub(crate) fn toggle_viewer_park(&mut self) {
+        if matches!(self.popup, Popup::Viewer { .. }) {
+            let v = std::mem::replace(&mut self.popup, Popup::None);
+            self.viewer_parked = Some(Box::new(v));
+            self.message = Some(
+                tr(self.lang, "Shift+Tab returns to the file", "Shift+Tab で戻ります").into(),
+            );
+            return;
+        }
+        if !matches!(self.popup, Popup::None) {
+            return;
+        }
+        match self.viewer_parked.take() {
+            Some(v) => {
+                self.popup = *v;
+                self.full_clear = true;
+            }
+            None => self.open_scratch_viewer(),
+        }
+    }
+
+    /// An empty file to type into, with no name yet. `:w <name>` gives it one.
+    pub(crate) fn open_scratch_viewer(&mut self) {
+        let mut view = cian_core::viewer::View::from_text(String::new(), 0, false);
+        // One empty line rather than none: the cursor has to be somewhere, and
+        // "a file with nothing in it" is a file with one blank line.
+        if view.lines.is_empty() {
+            view.lines.push(String::new());
+        }
+        self.popup = Popup::Viewer {
+            title: tr(self.lang, "untitled", "無題").to_string(),
+            // No path: `:w` asks for a name rather than writing somewhere it
+            // was never told about.
+            path: PathBuf::new(),
+            view: Box::new(view),
+            scroll: 0,
+            line: 0,
+            col: 0,
+            goal: 0,
+            visual: None,
+            anchor: (0, 0),
+            find_input: None,
+            sub_input: None,
+            block_input: None,
+            shape: None,
+            sub_walk: None,
+            find_query: None,
+            count: None,
+            pending: None,
+            git_lines: Default::default(),
+            markdown: false,
+            preview: false,
+            source: Vec::new(),
+            md_styles: Vec::new(),
+            md_map: Vec::new(),
+            md_width: 0,
+            blame: Vec::new(),
+            hl_lang: None,
+            hl: Vec::new(),
+            editable: true,
+            editing: false,
+            dirty: false,
+            undo: Vec::new(),
+        };
+        self.full_clear = true;
+        self.message = Some(
+            tr(
+                self.lang,
+                "empty file — i to type, :w <name> to save it somewhere",
+                "空のファイル — i で入力、:w <名前> で保存",
+            )
+            .into(),
+        );
+    }
+
+    /// `:w <name>` — write this buffer to `name` and go on editing *it*.
+    ///
+    /// The name is taken relative to the pane you came from, because that is
+    /// the folder you were looking at when you started typing.
+    pub(crate) fn save_viewer_file_as(&mut self, name: &str) {
+        // The folder you were looking at — the active pane's, then the last
+        // file pane's. Never the process's own directory: that is wherever
+        // cian happened to be started from, which is nobody's intention.
+        let base = self
+            .active_pane()
+            .map(|p| p.cwd.clone())
+            .or_else(|| self.last_file_pane_cwd())
+            .unwrap_or_default();
+        let want = crate::expand_path(name);
+        let path = if want.is_absolute() { want } else { base.join(want) };
+        if path.is_dir() {
+            self.message = Some(format!("{} is a folder", path.display()));
+            return;
+        }
+        if let Some(parent) = path.parent() {
+            if !parent.exists() {
+                self.message = Some(format!("no such folder: {}", parent.display()));
+                return;
+            }
+        }
+        // Adopt the name first, then save through the ordinary path so the
+        // encoding, the line ending and the BOM are written the way that one
+        // writes them.
+        let title = path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| name.to_string());
+        if let Popup::Viewer { path: p, title: t, editable, .. } = &mut self.popup {
+            *p = path.clone();
+            *t = title;
+            *editable = true;
+        } else {
+            return;
+        }
+        self.save_viewer_file();
+        // A new file changes what the pane is showing.
+        self.reload_both();
+        self.note_recent_file(&path);
     }
 
     /// `:enc` — pick the encoding this file is decoded with. Only in source

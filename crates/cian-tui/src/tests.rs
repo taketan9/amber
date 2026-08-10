@@ -1145,7 +1145,10 @@
         assert_eq!(at(&app), 1, "the changed line");
         app.handle_key(code(KeyCode::Tab)).unwrap();
         assert_eq!(at(&app), 2, "the one only this side has");
-        app.handle_key(code(KeyCode::BackTab)).unwrap();
+        // vimdiff's own key for the previous difference; Shift+Tab is the
+        // window's now.
+        app.handle_key(key('[')).unwrap();
+        app.handle_key(key('c')).unwrap();
         assert_eq!(at(&app), 1, "and back");
 
         // Editing one half is allowed, and the comparison follows it: making
@@ -1760,7 +1763,9 @@
         let (_d6, mut app6) = viewer_on("alpha beta\n");
         keys(&mut app6, "cw");
         assert!(matches!(app6.popup, Popup::Viewer { editing: true, .. }), "c opens the editor");
-        assert_eq!(viewer_lines(&app6)[0], "beta");
+        // vi's one special case: `cw` changes the word, not the space after
+        // it — it behaves like `ce`.
+        assert_eq!(viewer_lines(&app6)[0], " beta");
         // yy copies a line without changing anything
         let (_d7, mut app7) = viewer_on("one\ntwo\n");
         keys(&mut app7, "yy");
@@ -1824,6 +1829,133 @@
         let (_d5, mut app5) = viewer_on("fn f() {\n    body();\n}\n");
         keys(&mut app5, "jdi{");
         assert_eq!(viewer_lines(&app5), ["fn f() {", "}"], "di{{ emptied the block");
+    }
+
+    /// Marks, the jump list and `.` — the three things that make a vi you can
+    /// live in rather than one you can type in.
+    #[test]
+    fn marks_jumps_and_dot_repeat() {
+        let keys = |app: &mut App, s: &str| {
+            for c in s.chars() {
+                app.handle_key(key(c)).unwrap();
+            }
+        };
+        let at = |app: &App| match &app.popup {
+            Popup::Viewer { line, .. } => *line,
+            other => panic!("expected the viewer, got {other:?}"),
+        };
+        let body: String = (1..=60).map(|i| format!("line {i} alpha beta\n")).collect();
+        let (_d, mut app) = viewer_on(&body);
+
+        // `ma` here, wander off, `'a` back.
+        keys(&mut app, "5jma");
+        assert_eq!(at(&app), 5);
+        keys(&mut app, "20j");
+        assert_eq!(at(&app), 25);
+        keys(&mut app, "'a");
+        assert_eq!(at(&app), 5, "'a came back to the mark");
+        // A mark that was never set says so rather than jumping somewhere.
+        keys(&mut app, "'z");
+        assert_eq!(at(&app), 5);
+        assert!(app.message.as_deref().is_some_and(|m| m.contains('z')), "{:?}", app.message);
+
+        // `G` is a jump: Ctrl+O goes back to where it started, Ctrl+I forward.
+        keys(&mut app, "G");
+        assert_eq!(at(&app), 59);
+        app.handle_key(KeyEvent::new(KeyCode::Char('o'), KeyModifiers::CONTROL)).unwrap();
+        assert_eq!(at(&app), 5, "Ctrl+O went back");
+        app.handle_key(KeyEvent::new(KeyCode::Char('i'), KeyModifiers::CONTROL)).unwrap();
+        assert_eq!(at(&app), 59, "Ctrl+I forward again");
+
+        // `.` repeats a change, including what was typed into the editor.
+        let (_d2, mut app2) = viewer_on("alpha beta\ngamma delta\n");
+        keys(&mut app2, "cwX");
+        app2.handle_key(code(KeyCode::Esc)).unwrap();
+        assert_eq!(viewer_lines(&app2)[0], "X beta", "cw then typing");
+        keys(&mut app2, "j0");
+        keys(&mut app2, ".");
+        assert_eq!(viewer_lines(&app2)[1], "X delta", ". did it again, here");
+
+        // …and a plain `x` repeats too.
+        let (_d3, mut app3) = viewer_on("abcdef\n");
+        keys(&mut app3, "x");
+        keys(&mut app3, "..");
+        assert_eq!(viewer_lines(&app3)[0], "def", "x then two dots");
+    }
+
+    /// `:g/re/d` drops the lines that match, `:v/re/d` the ones that do not —
+    /// the two halves of reading a log.
+    #[test]
+    fn global_delete_keeps_or_drops_matching_lines() {
+        let (_d, mut app) = viewer_on("INFO one\nERROR two\nINFO three\nERROR four\n");
+        for k in ":g/ERROR/d".chars() {
+            app.handle_key(key(k)).unwrap();
+        }
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+        assert_eq!(viewer_lines(&app), ["INFO one", "INFO three"]);
+        assert!(app.message.as_deref().is_some_and(|m| m.contains('2')), "{:?}", app.message);
+
+        // …and one undo puts them all back.
+        app.handle_key(key('u')).unwrap();
+        assert_eq!(viewer_lines(&app).len(), 4, "one undo step");
+
+        // `:v` keeps only what matches.
+        for k in ":v/ERROR/d".chars() {
+            app.handle_key(key(k)).unwrap();
+        }
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+        assert_eq!(viewer_lines(&app), ["ERROR two", "ERROR four"]);
+    }
+
+    /// Shift+Tab steps between the file and the panes, and opens an empty one
+    /// when there is nothing to step back into — which is what makes the
+    /// viewer somewhere to start writing rather than only somewhere to read.
+    #[test]
+    fn shift_tab_parks_the_file_and_opens_an_empty_one() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        // Nothing open: Shift+Tab gives an empty, unnamed file.
+        app.handle_key(code(KeyCode::BackTab)).unwrap();
+        match &app.popup {
+            Popup::Viewer { path, view, editable, .. } => {
+                assert!(path.as_os_str().is_empty(), "no name yet");
+                assert!(*editable, "and it can be typed into");
+                assert_eq!(view.lines.len(), 1);
+            }
+            other => panic!("expected an empty viewer, got {other:?}"),
+        }
+
+        // Type something, park it, come back to it with everything intact.
+        app.handle_key(key('i')).unwrap();
+        for c in "hello".chars() {
+            app.handle_key(key(c)).unwrap();
+        }
+        app.handle_key(code(KeyCode::Esc)).unwrap();
+        app.handle_key(code(KeyCode::BackTab)).unwrap();
+        assert!(matches!(app.popup, Popup::None), "the panes are back");
+        app.handle_key(code(KeyCode::BackTab)).unwrap();
+        assert_eq!(viewer_lines(&app)[0], "hello", "the file came back as it was");
+
+        // `:w` alone will not guess a name; `:w <name>` writes and adopts it.
+        for k in [':', 'w'] {
+            app.handle_key(key(k)).unwrap();
+        }
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+        assert!(app.message.as_deref().is_some_and(|m| m.contains(":w")), "{:?}", app.message);
+        for k in ":w note.md".chars() {
+            app.handle_key(key(k)).unwrap();
+        }
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+        let written = app.active_pane().unwrap().cwd.join("note.md");
+        assert!(written.exists(), "written to the pane's folder: {:?} — {:?}", written, app.message);
+        assert_eq!(std::fs::read_to_string(&written).unwrap(), "hello\n");
+        match &app.popup {
+            Popup::Viewer { path, title, dirty, .. } => {
+                assert_eq!(path, &written, "it adopted the name");
+                assert_eq!(title, "note.md");
+                assert!(!*dirty, "and is saved");
+            }
+            other => panic!("expected the viewer, got {other:?}"),
+        }
     }
 
     /// Backspace in a search listing means the same as Esc. A set of results

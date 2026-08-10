@@ -201,6 +201,21 @@ impl App {
             }
             return Ok(());
         }
+        // Shift+Tab steps between the file being edited and the panes behind
+        // it — the two halves of the window, rather than a dialog you finish
+        // with. It works from the viewer, the panes and the shell, and opens
+        // an empty file when there is nothing to step back into.
+        if key.code == KeyCode::BackTab
+            && !key.modifiers.contains(KeyModifiers::CONTROL)
+            && !key.modifiers.contains(KeyModifiers::ALT)
+            && matches!(self.popup, Popup::None | Popup::Viewer { .. })
+            && !matches!(self.popup, Popup::Viewer { editing: true, .. })
+            && self.mode != Mode::Command
+            && self.mode != Mode::Filter
+        {
+            self.toggle_viewer_park();
+            return Ok(());
+        }
         if !matches!(self.popup, Popup::None) {
             return self.handle_popup_key(key);
         }

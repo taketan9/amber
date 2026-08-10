@@ -106,6 +106,11 @@ Vim-flavoured: `h j k l`, `w b`, `0 $`, `gg G`, `Ctrl-D/U`, `Ctrl-F/B`, `{` `}`,
 | `Space` / `za` / `zA` | fold one section / toggle all |
 | `:summary` / `:coding` | ask the AI to summarise the file / talk about its code (right-click too) |
 | `?` | the viewer's own key list, grouped by what you are doing |
+| **Shift+Tab** | step to the panes and back — the file waits with its cursor, folds and unsaved edits. With nothing open it gives you an **empty file to type into**; `:w <name>` saves it and adopts the name |
+| `m a` / `' a` | set a mark, jump back to it (`` ` a`` for the column too) |
+| `Ctrl+O` / `Ctrl+I` | back and forward through the places you jumped from |
+| `.` | do the last change again — including what you typed |
+| `]c` / `[c` / `Tab` | next / previous difference, while comparing |
 | `:q`  `:q!`  `:wq` | close this file — the last one closes the viewer. **Esc does not close**, and the **✕** in the corner does |
 
 Each open file keeps its own cursor, folds and unsaved edits. Closing a split returns the other file to the tab strip rather than discarding it.
@@ -132,6 +137,7 @@ Each open file keeps its own cursor, folds and unsaved edits. Closing a split re
 | `:expand` / `:unexpand` | tabs ↔ spaces |
 | `:lf` / `:crlf` | convert the line ending |
 | `:nobom` | drop a UTF-8 BOM (from the panes: the marked files) |
+| `:g/re/d` | delete every line that matches — `:v/re/d` keeps only those |
 | `:sort` `:rsort` `:uniq` | line order and duplicates, over the file or the selection |
 | `:han` / `:zen` | width — `:han` normalises full-width ASCII *and* half-width katakana |
 | `:reindent` | put a document indented by three different hands onto one ladder |

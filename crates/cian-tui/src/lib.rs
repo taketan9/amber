@@ -2206,6 +2206,24 @@ pub struct App {
     /// the object character is awaited, `vim_wait` the `f`/`t` family key
     /// while *its* character is, and `vim_last_find` what `;` and `,` repeat.
     /// The operator itself lives in the viewer's `pending`, beside `z`.
+    /// The file put aside with Shift+Tab, waiting to be stepped back into.
+    viewer_parked: Option<Box<Popup>>,
+    /// vi's marks — `ma` here, `'a` back — kept per file, so a mark set in
+    /// one is not jumped to in another.
+    vim_marks: std::collections::HashMap<(PathBuf, char), (usize, usize)>,
+    /// Where the cursor was before each far jump (`G`, a search, a mark), and
+    /// how far back through them `Ctrl+O` has walked.
+    vim_jumps: Vec<(PathBuf, usize, usize)>,
+    vim_jump_at: usize,
+    /// The keys of the last change, replayed by `.`. Recorded while a command
+    /// that alters the file is being typed — including what was typed into
+    /// the editor, which is most of what `.` is for.
+    vim_last_change: Option<Vec<KeyEvent>>,
+    /// `m`, `'` or a backtick, waiting for the letter that names the mark.
+    vim_mark_wait: Option<char>,
+    /// True while `.` is replaying, so the replay is not recorded as itself.
+    vim_replaying: bool,
+    vim_recording: Option<Vec<KeyEvent>>,
     vim_obj: Option<char>,
     vim_wait: Option<char>,
     vim_last_find: Option<(char, char)>,
@@ -2513,6 +2531,14 @@ impl App {
             outline_rect: Rect::new(0, 0, 0, 0),
             viewer_tab_rects: Vec::new(),
             viewer_close_rect: Rect::new(0, 0, 0, 0),
+            viewer_parked: None,
+            vim_marks: std::collections::HashMap::new(),
+            vim_jumps: Vec::new(),
+            vim_jump_at: 0,
+            vim_last_change: None,
+            vim_mark_wait: None,
+            vim_replaying: false,
+            vim_recording: None,
             vim_obj: None,
             vim_wait: None,
             vim_last_find: None,
@@ -3984,6 +4010,8 @@ pub(crate) fn viewer_manual_lines(lang: Lang) -> Vec<String> {
         ("%", "the matching bracket", "対応する括弧へ"),
         ("]]  [[", "next, previous heading or definition", "次・前の見出し／定義"),
         ("zz  zt  zb", "this line to the middle, top, bottom", "この行を中央・上・下へ"),
+        ("m a   ' a", "set a mark here, jump back to it (` a for the column)", "ここにマーク／マークへ戻る（` a は桁も）"),
+        ("Ctrl+O  Ctrl+I", "back and forward through the places you jumped from", "ジャンプ元を戻る・進む"),
     ];
     const FIND: &[Row] = &[
         ("/", "search — bare text is literal, /re/ is a regex", "検索 — 素の文字はリテラル、/re/ は正規表現"),
@@ -4015,6 +4043,7 @@ pub(crate) fn viewer_manual_lines(lang: Lang) -> Vec<String> {
         (">>  <<", "shift lines by a tab stop (> and < on a selection)", "行をタブ幅ずらす（選択中は > と <）"),
         ("~", "swap the case under the cursor", "カーソル位置の大小を反転"),
         ("u", "undo", "取り消し"),
+        (".", "do that change again", "直前の変更をもう一度"),
         ("V then I  A", "insert at the start, end of every selected line", "選択全行の先頭・末尾に挿入"),
         (":edit", "open it in your own editor", "外部エディタで開く"),
     ];
@@ -4026,6 +4055,9 @@ pub(crate) fn viewer_manual_lines(lang: Lang) -> Vec<String> {
         ("=", "mark what differs between the halves", "左右の差分に印"),
         ("Tab  Shift+Tab", "step through those differences", "差分を順に移動"),
         (":w  :q  :wq  :q!", "save, close, save and close, close discarding", "保存・閉じる・保存して閉じる・破棄して閉じる"),
+        (":w <name>", "save it as that, and go on editing it", "その名前で保存し、以後それを編集"),
+        ("Shift+Tab", "step to the panes and back — the file waits as it is", "ペインへ移動／戻る（ファイルはそのまま待機）"),
+        ("]c  [c  Tab", "next / previous difference, while comparing", "比較中：次・前の差分へ"),
         ("✕", "the button in the corner closes it too — Esc does not", "右上の ✕ でも閉じる — Esc では閉じません"),
     ];
     const VIEW: &[Row] = &[
@@ -4048,6 +4080,7 @@ pub(crate) fn viewer_manual_lines(lang: Lang) -> Vec<String> {
         (":expand  :unexpand", "tabs ↔ spaces", "タブ ↔ 空白"),
         (":lf  :crlf  :nobom", "line ending, byte-order mark", "改行コード・BOM"),
         (":reindent", "one indent ladder for the whole file", "インデントを揃える"),
+        (":g/re/d", "delete every line that matches (:v/re/d keeps them)", "一致した行を削除（:v/re/d は一致だけ残す）"),
     ];
     let sections: &[((&str, &str), &[Row])] = &[
         (("Move", "移動"), MOVE),
