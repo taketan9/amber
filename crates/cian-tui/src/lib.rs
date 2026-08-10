@@ -46,6 +46,7 @@ mod ime;
 mod preview;
 mod markdown;
 mod viewer;
+mod vim;
 mod ssh;
 mod gitui;
 mod commands;
@@ -898,6 +899,18 @@ enum MenuItem {
     CrmaineSearchFiles,
     /// Show what RAG retrieved, with scores (`:ragdebug`).
     CrmaineDebugSearch,
+    /// Summarise the file being read (`:summary`).
+    ViewerSummary,
+    /// Ask crmaine about this code (`:coding`).
+    ViewerCoding,
+    /// Blame gutter — who last changed each line (`:blame`).
+    ViewerBlame,
+    /// Force a text encoding (`:enc`).
+    ViewerEncoding,
+    /// Open the file's mermaid diagrams in a browser (`:mermaid`).
+    ViewerMermaid,
+    /// Open the file in the external editor (`:edit`).
+    ViewerEdit,
     /// Open a server in this pane over SFTP (`:sftp` / remote pane).
     RemotePane,
     /// Disk-usage breakdown of the current folder (`:du`).
@@ -1100,6 +1113,12 @@ impl MenuItem {
             MenuItem::CrmaineInfo => tr(lang, "Diagnostics  (:raginfo)", "診断  (:raginfo)"),
             MenuItem::CrmaineSearchFiles => tr(lang, "Search corpus  (:searchfiles)", "コーパス検索  (:searchfiles)"),
             MenuItem::CrmaineDebugSearch => tr(lang, "What RAG retrieved  (:ragdebug)", "RAG が拾った断片  (:ragdebug)"),
+            MenuItem::ViewerSummary => tr(lang, "Summarise this file  (:summary)", "このファイルを要約  (:summary)"),
+            MenuItem::ViewerCoding => tr(lang, "Ask crmaine about this code  (:coding)", "このコードを crmaine に相談  (:coding)"),
+            MenuItem::ViewerBlame => tr(lang, "Who changed each line  (:blame)", "各行の最終変更者  (:blame)"),
+            MenuItem::ViewerEncoding => tr(lang, "Text encoding…  (:enc)", "文字コードを指定…  (:enc)"),
+            MenuItem::ViewerMermaid => tr(lang, "Mermaid diagrams in a browser  (:mermaid)", "mermaid 図をブラウザで開く  (:mermaid)"),
+            MenuItem::ViewerEdit => tr(lang, "Open in my editor  (:edit)", "外部エディタで開く  (:edit)"),
             MenuItem::RemotePane => tr(lang, "Open server in pane  (:sftp)", "サーバをペインで開く  (:sftp)"),
             MenuItem::DiskUsage => tr(lang, "Disk usage  (:du)", "容量分析  (:du)"),
             MenuItem::AiShellCmd => tr(lang, "Command from description  (:aicmd)", "説明からコマンド生成  (:aicmd)"),
@@ -2183,6 +2202,13 @@ pub struct App {
     viewer_tab_rects: Vec<(Rect, usize)>,
     /// Where the viewer's ✕ button was drawn, so a click can find it.
     viewer_close_rect: Rect,
+    /// vi's operator grammar, mid-command. `vim_obj` holds `i` or `a` while
+    /// the object character is awaited, `vim_wait` the `f`/`t` family key
+    /// while *its* character is, and `vim_last_find` what `;` and `,` repeat.
+    /// The operator itself lives in the viewer's `pending`, beside `z`.
+    vim_obj: Option<char>,
+    vim_wait: Option<char>,
+    vim_last_find: Option<(char, char)>,
     /// The two halves of a split, as drawn: clicking the one not in focus
     /// crosses to it.
     viewer_half_rects: [Rect; 2],
@@ -2487,6 +2513,9 @@ impl App {
             outline_rect: Rect::new(0, 0, 0, 0),
             viewer_tab_rects: Vec::new(),
             viewer_close_rect: Rect::new(0, 0, 0, 0),
+            vim_obj: None,
+            vim_wait: None,
+            vim_last_find: None,
             viewer_half_rects: [Rect::new(0, 0, 0, 0); 2],
             viewer_gutter: 0,
             popup_zones: Vec::new(),
@@ -3971,6 +4000,14 @@ pub(crate) fn viewer_manual_lines(lang: Lang) -> Vec<String> {
         ("y", "copy the selection", "選択をコピー"),
         ("p  P", "paste after, at the cursor", "カーソルの後・位置に貼り付け"),
     ];
+    const GRAMMAR: &[Row] = &[
+        ("{op}{motion}", "d c y take any motion — dw d$ d} dfx c2w y%", "d c y はどの移動とも組める — dw d$ d} dfx c2w y%"),
+        ("dd  cc  yy", "…or the whole line, doubled", "…重ねると行単位"),
+        ("{op}i{obj}", "inside a word, quotes, brackets — diw ci\" di( di{", "語・引用符・括弧の内側 — diw ci\" di( di{"),
+        ("{op}a{obj}", "…and the delimiters with it — daw da( da\"", "…区切りごと — daw da( da\""),
+        ("f x  t x", "to the next x, or just before it (F T backwards)", "次の x へ／その手前へ（F T は後方）"),
+        (";  ,", "repeat that, forwards and backwards", "直前の f/t を前方・後方に繰り返し"),
+    ];
     const EDIT: &[Row] = &[
         ("i a o O I", "insert — Ctrl+S saves, Esc leaves, Shift+Q discards", "挿入 — Ctrl+S 保存・Esc 終了・Shift+Q 破棄"),
         ("x  dd  D  J", "delete a character, a line, to end of line, join", "1文字・1行・行末まで削除、行連結"),
@@ -3979,7 +4016,7 @@ pub(crate) fn viewer_manual_lines(lang: Lang) -> Vec<String> {
         ("~", "swap the case under the cursor", "カーソル位置の大小を反転"),
         ("u", "undo", "取り消し"),
         ("V then I  A", "insert at the start, end of every selected line", "選択全行の先頭・末尾に挿入"),
-        ("E", "open it in your own editor", "外部エディタで開く"),
+        (":edit", "open it in your own editor", "外部エディタで開く"),
     ];
     const FILES: &[Row] = &[
         ("F2  Shift+F2", "next, previous open file", "次・前の開いているファイル"),
@@ -3996,13 +4033,13 @@ pub(crate) fn viewer_manual_lines(lang: Lang) -> Vec<String> {
         (":outline  :ruler", "the shape column, the column scale", "アウトライン列・ルーラー"),
         (":ws", "show tabs, trailing spaces, line endings", "タブ・行末空白・改行を表示"),
         (":preview", "rendered Markdown ↔ source", "Markdown 表示 ↔ ソース"),
-        ("e", "force a text encoding", "文字コードを指定"),
-        ("B", "blame gutter — who last changed each line", "blame 表示（各行の最終変更者）"),
-        ("m", "open the mermaid diagrams in a browser", "mermaid 図をブラウザで開く"),
+        (":enc", "force a text encoding", "文字コードを指定"),
+        (":blame", "who last changed each line", "各行の最終変更者"),
+        (":mermaid", "open the mermaid diagrams in a browser", "mermaid 図をブラウザで開く"),
     ];
     const ASK: &[Row] = &[
-        ("S", "summarise this file", "このファイルを要約"),
-        ("A", "ask crmaine about this code", "このコードを crmaine に相談"),
+        (":summary", "summarise this file", "このファイルを要約"),
+        (":coding", "ask crmaine about this code", "このコードを crmaine に相談"),
         ("Shift+Enter", "the menu — ask, copy, theme (right-click too)", "メニュー — 相談・コピー・テーマ（右クリックでも）"),
     ];
     const LINES: &[Row] = &[
@@ -4016,6 +4053,7 @@ pub(crate) fn viewer_manual_lines(lang: Lang) -> Vec<String> {
         (("Move", "移動"), MOVE),
         (("Find and replace", "検索と置換"), FIND),
         (("Select and copy", "選択とコピー"), SELECT),
+        (("Operators and objects", "オペレータとテキストオブジェクト"), GRAMMAR),
         (("Edit", "編集"), EDIT),
         (("Whole lines", "行の加工"), LINES),
         (("Files and splits", "ファイルと分割"), FILES),

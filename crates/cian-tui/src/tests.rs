@@ -233,7 +233,10 @@
         // From the F3 viewer, `E` queues it and asks to re-open the viewer after.
         app.pending_edit = None;
         app.handle_key(code(KeyCode::F(3))).unwrap();
-        app.handle_key(KeyEvent::new(KeyCode::Char('E'), KeyModifiers::SHIFT)).unwrap();
+        for k in [':', 'e', 'd', 'i', 't'] {
+            app.handle_key(key(k)).unwrap();
+        }
+        app.handle_key(code(KeyCode::Enter)).unwrap();
         let e = app.pending_edit.as_ref().expect("viewer edit queued");
         assert!(
             matches!(e.kind, crate::edit::EditKind::File { reopen_viewer: true, .. }),
@@ -1720,6 +1723,107 @@
         assert!(app.message.is_some(), "…and said why it cannot be written");
         quit_viewer(&mut app);
         assert!(matches!(app.popup, Popup::None), ":q closes a read-only file");
+    }
+
+    /// vi's whole point: operators and motions multiply. `dw`, `d2w`, `d$`,
+    /// `cw`, `yy`, `dj` — one grammar rather than a key per combination.
+    #[test]
+    fn operators_take_motions_and_counts() {
+        let keys = |app: &mut App, s: &str| {
+            for c in s.chars() {
+                app.handle_key(key(c)).unwrap();
+            }
+        };
+        // dw
+        let (_d, mut app) = viewer_on("alpha beta gamma\nsecond\n");
+        keys(&mut app, "dw");
+        assert_eq!(viewer_lines(&app)[0], "beta gamma");
+        // d2w from the start takes both words
+        let (_d2, mut app2) = viewer_on("alpha beta gamma\n");
+        keys(&mut app2, "d2w");
+        assert_eq!(viewer_lines(&app2)[0], "gamma");
+        // d$ to the end of the line, including the last character
+        let (_d3, mut app3) = viewer_on("alpha beta\n");
+        keys(&mut app3, "ld$");
+        assert_eq!(viewer_lines(&app3)[0], "a");
+        // dd and 2dd
+        let (_d4, mut app4) = viewer_on("one\ntwo\nthree\nfour\n");
+        keys(&mut app4, "dd");
+        assert_eq!(viewer_lines(&app4), ["two", "three", "four"]);
+        keys(&mut app4, "2dd");
+        assert_eq!(viewer_lines(&app4), ["four"]);
+        // dj takes both lines, whatever the column
+        let (_d5, mut app5) = viewer_on("one\ntwo\nthree\n");
+        keys(&mut app5, "lldj");
+        assert_eq!(viewer_lines(&app5), ["three"]);
+        // cw deletes the word and leaves the editor open to type
+        let (_d6, mut app6) = viewer_on("alpha beta\n");
+        keys(&mut app6, "cw");
+        assert!(matches!(app6.popup, Popup::Viewer { editing: true, .. }), "c opens the editor");
+        assert_eq!(viewer_lines(&app6)[0], "beta");
+        // yy copies a line without changing anything
+        let (_d7, mut app7) = viewer_on("one\ntwo\n");
+        keys(&mut app7, "yy");
+        assert_eq!(viewer_lines(&app7), ["one", "two"], "yank changes nothing");
+        assert_eq!(app7.yank.as_deref(), Some("one\n"));
+    }
+
+    /// `f`, `t` and the pair `;` `,` — and `df,`, which is the operator and
+    /// the motion together.
+    #[test]
+    fn find_char_moves_and_can_be_operated_on() {
+        let (_d, mut app) = viewer_on("one,two,three\n");
+        let col = |app: &App| match &app.popup {
+            Popup::Viewer { col, .. } => *col,
+            other => panic!("expected the viewer, got {other:?}"),
+        };
+        app.handle_key(key('f')).unwrap();
+        app.handle_key(key(',')).unwrap();
+        assert_eq!(col(&app), 3, "f, landed on the comma");
+        app.handle_key(key(';')).unwrap();
+        assert_eq!(col(&app), 7, "; repeated it");
+        app.handle_key(key(',')).unwrap();
+        assert_eq!(col(&app), 3, ", went back");
+        // `t` stops before it.
+        let (_d2, mut app2) = viewer_on("one,two\n");
+        app2.handle_key(key('t')).unwrap();
+        app2.handle_key(key(',')).unwrap();
+        assert_eq!(col(&app2), 2, "t, stopped short");
+        // `df,` deletes up to and including the comma.
+        let (_d3, mut app3) = viewer_on("one,two\n");
+        for c in "df,".chars() {
+            app3.handle_key(key(c)).unwrap();
+        }
+        assert_eq!(viewer_lines(&app3)[0], "two");
+    }
+
+    /// Text objects: `ciw`, `di"`, `da(` — the other half of the grammar.
+    #[test]
+    fn text_objects_are_operated_on() {
+        let keys = |app: &mut App, s: &str| {
+            for c in s.chars() {
+                app.handle_key(key(c)).unwrap();
+            }
+        };
+        let (_d, mut app) = viewer_on("alpha beta gamma\n");
+        keys(&mut app, "wdiw");
+        assert_eq!(viewer_lines(&app)[0], "alpha  gamma", "diw took the word only");
+
+        let (_d2, mut app2) = viewer_on("alpha beta gamma\n");
+        keys(&mut app2, "wdaw");
+        assert_eq!(viewer_lines(&app2)[0], "alpha gamma", "daw took its space too");
+
+        let (_d3, mut app3) = viewer_on("value = \"some text\";\n");
+        keys(&mut app3, "10ldi\"");
+        assert_eq!(viewer_lines(&app3)[0], "value = \"\";", "di\" emptied the quotes");
+
+        let (_d4, mut app4) = viewer_on("call(one, two);\n");
+        keys(&mut app4, "6lda(");
+        assert_eq!(viewer_lines(&app4)[0], "call;", "da( took the brackets with it");
+
+        let (_d5, mut app5) = viewer_on("fn f() {\n    body();\n}\n");
+        keys(&mut app5, "jdi{");
+        assert_eq!(viewer_lines(&app5), ["fn f() {", "}"], "di{{ emptied the block");
     }
 
     /// Backspace in a search listing means the same as Esc. A set of results
@@ -3503,7 +3607,10 @@
         assert!(matches!(app.popup, Popup::Viewer { .. }), "viewer open");
         let _ = render(&mut app, 100, 40);
 
-        app.handle_key(code(KeyCode::Char('S'))).unwrap();
+        for k in [':', 's', 'u', 'm', 'm', 'a', 'r', 'y'] {
+            app.handle_key(key(k)).unwrap();
+        }
+        app.handle_key(code(KeyCode::Enter)).unwrap();
         assert!(matches!(app.popup, Popup::AiChat { .. }), "summarise opened the chat");
         let start = Instant::now();
         while app.ai_job.is_some() && start.elapsed() < Duration::from_secs(10) {
@@ -8475,7 +8582,10 @@
 
         // F3 then B toggles blame.
         app.handle_key(code(KeyCode::F(3))).unwrap();
-        app.handle_key(KeyEvent::new(KeyCode::Char('B'), KeyModifiers::SHIFT)).unwrap();
+        for k in [':', 'b', 'l', 'a', 'm', 'e'] {
+            app.handle_key(key(k)).unwrap();
+        }
+        app.handle_key(code(KeyCode::Enter)).unwrap();
         match &app.popup {
             Popup::Viewer { blame, .. } => assert!(!blame.is_empty(), "blame computed"),
             _ => panic!("not a viewer"),
@@ -8617,6 +8727,11 @@
         std::fs::write(d.path().join("note.txt"), lines).unwrap();
         let p = d.path().to_path_buf();
         let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        // No system clipboard: these tests run in parallel on one machine and
+        // would otherwise yank and paste through the *developer's* clipboard,
+        // reading each other's copies. cian's own yank is the path that has to
+        // work anyway — it is what a machine over SSH has.
+        app.clipboard = None;
         app.active_pane_mut().unwrap().cursor =
             app.active_pane().unwrap().entries.iter().position(|e| e.name == "note.txt").unwrap();
         app.handle_key(code(KeyCode::F(3))).unwrap();
@@ -8726,12 +8841,13 @@
             Popup::Viewer { line, .. } => *line,
             _ => unreachable!(),
         };
-        app.handle_key(key('d')).unwrap();
+        // `d` is vi's operator now, not a scroll key — Ctrl+D scrolls.
+        app.handle_key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL)).unwrap();
         let after = match &app.popup {
             Popup::Viewer { line, .. } => *line,
             _ => unreachable!(),
         };
-        assert!(after > before, "d scrolled half a page, as before");
+        assert!(after > before, "Ctrl+D scrolled half a page");
     }
 
     #[test]
@@ -9465,7 +9581,10 @@
         app.handle_key(code(KeyCode::F(3))).unwrap();
 
         // `e` opens the picker (a list), not an immediate cycle.
-        app.handle_key(key('e')).unwrap();
+        for k in [':', 'e', 'n', 'c'] {
+            app.handle_key(key(k)).unwrap();
+        }
+        app.handle_key(code(KeyCode::Enter)).unwrap();
         assert!(
             matches!(app.popup, Popup::EncodingPicker { target: EncTarget::Viewer(_), .. }),
             "e opens the picker targeting the viewer"

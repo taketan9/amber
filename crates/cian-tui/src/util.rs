@@ -99,6 +99,65 @@ pub(crate) fn vlen(view: &cian_core::viewer::View, l: usize) -> usize {
     view.lines.get(l).map(|s| s.chars().count()).unwrap_or(0)
 }
 
+/// `w` / `b` over a plain buffer, for [`crate::vim`], which works on the
+/// lines rather than on a `View`.
+pub(crate) fn viewer_word_forward_view(
+    lines: &[String],
+    line: usize,
+    col: usize,
+    last: usize,
+) -> (usize, usize) {
+    let chars: Vec<char> = lines.get(line).map(|s| s.chars().collect()).unwrap_or_default();
+    let mut i = col;
+    while i < chars.len() && !chars[i].is_whitespace() {
+        i += 1;
+    }
+    while i < chars.len() && chars[i].is_whitespace() {
+        i += 1;
+    }
+    if i < chars.len() {
+        return (line, i);
+    }
+    let mut l = line + 1;
+    while l <= last {
+        let c: Vec<char> = lines[l].chars().collect();
+        let first = c.iter().position(|ch| !ch.is_whitespace()).unwrap_or(0);
+        if !c.is_empty() {
+            return (l, first);
+        }
+        l += 1;
+    }
+    (line, chars.len())
+}
+
+pub(crate) fn viewer_word_back_view(lines: &[String], line: usize, col: usize) -> (usize, usize) {
+    let chars: Vec<char> = lines.get(line).map(|s| s.chars().collect()).unwrap_or_default();
+    let mut i = col;
+    if i == 0 {
+        if line == 0 {
+            return (0, 0);
+        }
+        let prev = line - 1;
+        let c: Vec<char> = lines[prev].chars().collect();
+        let mut j = c.len();
+        while j > 0 && c[j - 1].is_whitespace() {
+            j -= 1;
+        }
+        while j > 0 && !c[j - 1].is_whitespace() {
+            j -= 1;
+        }
+        return (prev, j);
+    }
+    i -= 1;
+    while i > 0 && chars[i].is_whitespace() {
+        i -= 1;
+    }
+    while i > 0 && !chars[i - 1].is_whitespace() {
+        i -= 1;
+    }
+    (line, i)
+}
+
 /// `w`: the start of the next word, moving onto the next line when the current
 /// one runs out. Words are runs of non-whitespace (a simplification of vim's
 /// word/WORD split that reads naturally for code).

@@ -18,6 +18,19 @@ impl App {
             items.push(MenuItem::AiMenu);
         }
         items.push(MenuItem::Copy);
+        // The viewer's own actions. They used to be single letters — `S`, `A`,
+        // `B`, `e`, `E`, `m` — which are vi's, and vi's keys belong to vi in a
+        // window that behaves like vi. Each still has a `:` command.
+        if self.ai.is_some() && self.ai_ready() {
+            items.push(MenuItem::ViewerSummary);
+        }
+        if self.config.crmaine.is_some() {
+            items.push(MenuItem::ViewerCoding);
+        }
+        items.push(MenuItem::ViewerEdit);
+        items.push(MenuItem::ViewerEncoding);
+        items.push(MenuItem::ViewerBlame);
+        items.push(MenuItem::ViewerMermaid);
         // Where the file lives, for when reading it raises a question about
         // the folder it is in. This used to be Shift+Enter's whole job.
         items.push(MenuItem::RevealInPane);
@@ -533,6 +546,30 @@ impl App {
             MenuItem::CrmaineSearchFiles => self.prefill_command("searchfiles "),
             // With a `:rag` question behind it this needs no argument, so it
             // runs; otherwise it opens the prompt for one.
+            MenuItem::ViewerSummary => {
+                self.restore_viewer();
+                self.summarize_viewer();
+            }
+            MenuItem::ViewerCoding => {
+                self.restore_viewer();
+                self.start_coding("");
+            }
+            MenuItem::ViewerBlame => {
+                self.restore_viewer();
+                self.toggle_viewer_blame();
+            }
+            MenuItem::ViewerEncoding => {
+                self.restore_viewer();
+                self.start_viewer_encoding_pick();
+            }
+            MenuItem::ViewerMermaid => {
+                self.restore_viewer();
+                self.open_mermaid_in_browser();
+            }
+            MenuItem::ViewerEdit => {
+                self.restore_viewer();
+                self.edit_viewer_file_externally();
+            }
             MenuItem::CrmaineDebugSearch => {
                 if self.crmaine_last_question.is_some() {
                     self.start_debug_search("")

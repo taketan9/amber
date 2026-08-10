@@ -91,6 +91,8 @@ Shift_JIS is detected and decoded automatically (UTF-16 by BOM); `e` forces an e
 
 Vim-flavoured: `h j k l`, `w b`, `0 $`, `gg G`, `Ctrl-D/U`, `Ctrl-F/B`, `{` `}`, `%` to the matching bracket. `/` searches and `n`/`N` repeat; `*` and `#` search the word under the cursor. `v` `V` `Ctrl-v` select, `y` copies, `Ctrl+A` selects the whole file. `zz` `zt` `zb` put the cursor's line in the middle, top or bottom of the window.
 
+**Operators take motions.** `d`, `c` and `y` combine with everything above — `dw`, `d$`, `d}`, `d2w`, `dfx`, `c%`, `y}` — and doubled they take the line: `dd`, `cc`, `yy`. **Text objects** are the other half: `diw` / `daw` a word, `ci"` / `da"` a quoted string, `di(` `da(` `di{` `da{` `di[` `di<` a bracketed one, nesting and multi-line included. `f x` jumps to the next `x` and `t x` to just before it (`F` `T` backwards), with `;` and `,` repeating.
+
 **A count goes in front of a motion** and repeats it — `3j`, `5w`, `2}`, `48G` for line 48 — and what you have typed so far shows on the prompt row, so `48G` is not done in the dark. `Esc` abandons it.
 
 | Key | Does |
@@ -102,7 +104,7 @@ Vim-flavoured: `h j k l`, `w b`, `0 $`, `gg G`, `Ctrl-D/U`, `Ctrl-F/B`, `{` `}`,
 | `Tab` / `Shift+Tab` | step through those differences |
 | `]]` / `[[` | next / previous heading or definition |
 | `Space` / `za` / `zA` | fold one section / toggle all |
-| `S` / `A` | ask the AI to summarise the file / talk about its code |
+| `:summary` / `:coding` | ask the AI to summarise the file / talk about its code (right-click too) |
 | `?` | the viewer's own key list, grouped by what you are doing |
 | `:q`  `:q!`  `:wq` | close this file — the last one closes the viewer. **Esc does not close**, and the **✕** in the corner does |
 
@@ -122,7 +124,7 @@ Each open file keeps its own cursor, folds and unsaved edits. Closing a split re
 | `u` | undo |
 | `~` | swap the case under the cursor |
 | `>>` / `<<` | shift lines by a tab stop (`>` / `<` on a selection) |
-| `E` (`:edit`) | open it in `$VISUAL` / `$EDITOR` — or nvim → vim → vi — and reload on return |
+| `:edit` | open it in `$VISUAL` / `$EDITOR` — or nvim → vim → vi — and reload on return |
 | `Ctrl+V` / `Ctrl+Q` / `Alt+v` (`:block`) | rectangular selection — `d` `I` `A` `c`. Terminals differ about which they hand over |
 | `V` then `I` / `A` | insert at the start / end of every selected line |
 | `r` after a search | replace, with the pattern already filled in |

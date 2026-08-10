@@ -148,6 +148,12 @@ impl App {
         if matches!(self.popup, Popup::Viewer { editing: true, .. }) {
             return self.handle_editor_key(key);
         }
+        // vi's grammar, ahead of the keys it shares letters with: `i` is
+        // insert on its own and the start of a text object after an operator,
+        // and only the grammar knows which of the two this is.
+        if self.viewer_vim_key(key) {
+            return Ok(());
+        }
         // `i` enters the editor on an editable text file. A Markdown preview
         // drops to its source first, since edits belong on the raw file.
         if !ctrl && !alt && key.code == KeyCode::Char('i')
@@ -349,41 +355,12 @@ impl App {
             self.open_viewer_menu(c, r);
             return Ok(());
         }
-        // `e` opens the encoding picker; the choice re-decodes this file. Only
-        // in source mode — the rendered preview owns `view.lines`.
-        if !ctrl && key.code == KeyCode::Char('e')
-            && !matches!(self.popup, Popup::Viewer { preview: true, .. })
+        // `y` copies the selection. (`c` used to as well; it is the change
+        // operator now, and copy has never been what `c` means in vi.)
+        if !ctrl && key.code == KeyCode::Char('y')
+            && matches!(self.popup, Popup::Viewer { visual: Some(_), .. })
         {
-            let cur = if let Popup::Viewer { view, .. } = &self.popup {
-                cian_core::viewer::TextEncoding::ALL
-                    .iter()
-                    .position(|enc| *enc == view.encoding)
-                    .unwrap_or(0)
-            } else {
-                0
-            };
-            let viewer = std::mem::replace(&mut self.popup, Popup::None);
-            self.popup = Popup::EncodingPicker {
-                cursor: cur,
-                target: EncTarget::Viewer(Box::new(viewer)),
-            };
-            return Ok(());
-        }
-        // y / c copy the selection (or the whole file when nothing is selected).
-        if !ctrl && matches!(key.code, KeyCode::Char('c') | KeyCode::Char('y')) {
             self.copy_viewer_selection();
-            return Ok(());
-        }
-        // `E` opens the file in the external editor (nvim → vim → vi, or the
-        // configured one); the viewer re-opens on it afterwards.
-        if !ctrl && key.code == KeyCode::Char('E') {
-            self.edit_viewed_file();
-            self.popup = Popup::None;
-            return Ok(());
-        }
-        // `B` toggles the git blame gutter.
-        if !ctrl && key.code == KeyCode::Char('B') {
-            self.toggle_viewer_blame();
             return Ok(());
         }
         // `p` / `P` paste, where vi puts them: after the cursor and before it.
@@ -404,7 +381,7 @@ impl App {
         }
         // `m` opens any mermaid blocks as a real diagram in the browser (the
         // terminal shows the readable flow; this is the crisp picture).
-        if !ctrl && key.code == KeyCode::Char('m') {
+        if false {
             self.open_mermaid_in_browser();
             return Ok(());
         }
@@ -476,7 +453,7 @@ impl App {
         }
         // `/`, `f` and `Shift+F` all open the search prompt (the pane's own
         // find keys, so the reflex carries over into the viewer and preview).
-        if !ctrl && matches!(key.code, KeyCode::Char('/') | KeyCode::Char('f') | KeyCode::Char('F')) {
+        if !ctrl && key.code == KeyCode::Char('/') {
             if let Popup::Viewer { find_input, .. } = &mut self.popup {
                 *find_input = Some(String::new());
             }
@@ -548,8 +525,6 @@ impl App {
         let body_h = (self.viewer_rect.height as usize).max(1);
         let half = (body_h / 2).max(1);
         let mut say_how_to_close = false;
-        let mut summarize = false;
-        let mut coding = false;
         if let Popup::Viewer { view, scroll, line, col, goal, visual, anchor, count, find_query, .. } = &mut self.popup {
             let cnt = count.take();
             // How many times a motion repeats: the count, or once.
@@ -626,11 +601,7 @@ impl App {
                 (true, KeyCode::Char('v')) | (true, KeyCode::Char('q')) => {
                     start_visual(ViewVisual::Block, visual, anchor, *line, *col)
                 }
-                // `S` summarises the file with the AI (sends its text). Handled
-                // after the borrow ends, below.
-                (false, KeyCode::Char('S')) => summarize = true,
-                // `A` hands this code to crmaine Coding (Ajent). Also below.
-                (false, KeyCode::Char('A')) => coding = true,
+
                 (false, KeyCode::Char('o')) if visual.is_some() => {
                     // Swap the cursor and the anchor.
                     let a = *anchor;
@@ -729,15 +700,6 @@ impl App {
                 *scroll = *line + 1 - body_h;
             }
             *scroll = (*scroll).min(n.saturating_sub(body_h));
-        }
-
-        if summarize {
-            self.summarize_viewer();
-            return Ok(());
-        }
-        if coding {
-            self.start_coding("");
-            return Ok(());
         }
         if say_how_to_close {
             self.message = Some(
@@ -1278,6 +1240,30 @@ impl App {
             }
             "q!" => {
                 self.close_viewer_file();
+                return;
+            }
+            // What used to be `S`, `A`, `B`, `e`, `E`, `m` — vi's letters,
+            // handed back. Each is also on the right-click menu.
+            "summary" | "summarise" | "summarize" => {
+                self.summarize_viewer();
+                return;
+            }
+            "blame" => {
+                self.toggle_viewer_blame();
+                return;
+            }
+            "enc" | "encoding" => {
+                self.start_viewer_encoding_pick();
+                return;
+            }
+            "mermaid" | "diagram" => {
+                self.open_mermaid_in_browser();
+                return;
+            }
+            // From here `:edit` means *this* file, not the one under the
+            // pane's cursor.
+            "edit" | "e" => {
+                self.edit_viewer_file_externally();
                 return;
             }
             // The block selection, for terminals that keep Ctrl+V and Ctrl+Q
@@ -2523,6 +2509,344 @@ impl App {
         } else {
             format!("pasted {n} line(s)")
         });
+    }
+
+    /// vi's operator grammar, ahead of every other key in the viewer.
+    ///
+    /// `{count}{d|c|y}{count}{motion}` and `{d|c|y}{i|a}{object}`, plus the
+    /// `f` family and the motions on their own. Returns true when the key was
+    /// part of a command and has been dealt with — everything else falls
+    /// through to the keys the viewer had before.
+    ///
+    /// It lives in front because the operators claim letters the viewer used
+    /// for its own features (`c`, `y`, `e`, `f`); those moved to the `:` line
+    /// and the menu, where a file manager's features belong and a text
+    /// editor's keys do not.
+    pub(crate) fn viewer_vim_key(&mut self, key: KeyEvent) -> bool {
+        let m = key.modifiers;
+        if m.contains(KeyModifiers::CONTROL) || m.contains(KeyModifiers::ALT) {
+            return false;
+        }
+        let KeyCode::Char(c) = key.code else { return false };
+        // Not while something is being typed into, and not over a selection —
+        // there `d`, `c` and `y` act on what is selected, which the viewer
+        // already does.
+        let ready = matches!(
+            &self.popup,
+            Popup::Viewer {
+                editing: false,
+                find_input: None,
+                sub_input: None,
+                block_input: None,
+                sub_walk: None,
+                visual: None,
+                ..
+            }
+        );
+        if !ready {
+            return false;
+        }
+
+        // A `f`/`t` waiting for its character — as a motion on its own, or as
+        // the tail of `df,`.
+        if let Some(fkey) = self.vim_wait.take() {
+            self.vim_last_find = Some((fkey, c));
+            return self.viewer_run_motion(fkey, Some(c));
+        }
+        // `i` / `a` waiting for the object it belongs to.
+        if let Some(around) = self.vim_obj.take() {
+            let op = self.viewer_pending_op();
+            let (at, lines) = self.viewer_where();
+            let span = crate::vim::text_object(&lines, at, around == 'a', c);
+            self.viewer_clear_op();
+            return match (op, span) {
+                (Some(op), Some(span)) => {
+                    self.viewer_apply_op(op, span);
+                    true
+                }
+                // An object with no operator in front of it is not a command;
+                // an operator with no object simply stops.
+                _ => true,
+            };
+        }
+
+        let op = self.viewer_pending_op();
+        // The count between the operator and its motion — the `2` of `d2w`.
+        // `0` is a motion until a count has been started, and a digit after
+        // that — the one ambiguity vi's counts have.
+        if op.is_some() && c.is_ascii_digit() && (c != '0' || self.viewer_count_started()) {
+            if let Popup::Viewer { count, .. } = &mut self.popup {
+                let d = c as usize - '0' as usize;
+                *count = Some(count.unwrap_or(0).saturating_mul(10) + d);
+            }
+            return true;
+        }
+        // Starting an operator. `dd`, `cc`, `yy` are the doubled forms.
+        if matches!(c, 'd' | 'c' | 'y') {
+            if op == Some(c) {
+                let n = self.viewer_take_count().max(1);
+                let (at, lines) = self.viewer_where();
+                let last = (at.0 + n - 1).min(lines.len().saturating_sub(1));
+                self.viewer_clear_op();
+                self.viewer_apply_op(c, crate::vim::Span::Lines { first: at.0, last });
+                return true;
+            }
+            if op.is_none() {
+                if let Popup::Viewer { pending, .. } = &mut self.popup {
+                    *pending = Some(c);
+                }
+                return true;
+            }
+        }
+        // `i` / `a` begin a text object only while an operator waits; on their
+        // own they are insert and append.
+        if op.is_some() && matches!(c, 'i' | 'a') {
+            self.vim_obj = Some(c);
+            return true;
+        }
+        // The `f` family always wants a character next.
+        if matches!(c, 'f' | 'F' | 't' | 'T') {
+            self.vim_wait = Some(c);
+            return true;
+        }
+        // `;` and `,` repeat the last one, forwards and backwards.
+        if matches!(c, ';' | ',') {
+            let Some((fkey, arg)) = self.vim_last_find else { return false };
+            let fkey = if c == ',' {
+                match fkey {
+                    'f' => 'F',
+                    'F' => 'f',
+                    't' => 'T',
+                    _ => 't',
+                }
+            } else {
+                fkey
+            };
+            return self.viewer_run_motion(fkey, Some(arg));
+        }
+        // With an operator waiting, this key has to be a motion or the command
+        // is abandoned — vi's rule, and it stops a stray key from deleting
+        // something.
+        if op.is_some() {
+            let handled = self.viewer_run_motion(c, None);
+            if !handled {
+                self.viewer_clear_op();
+            }
+            return true;
+        }
+        false
+    }
+
+    /// Is a count already being typed? `0` is a motion until then.
+    fn viewer_count_started(&self) -> bool {
+        matches!(&self.popup, Popup::Viewer { count: Some(_), .. })
+    }
+
+    /// The operator waiting for a motion, if any.
+    fn viewer_pending_op(&self) -> Option<char> {
+        match &self.popup {
+            Popup::Viewer { pending: Some(p), .. } if matches!(p, 'd' | 'c' | 'y') => Some(*p),
+            _ => None,
+        }
+    }
+
+    fn viewer_clear_op(&mut self) {
+        self.vim_obj = None;
+        self.vim_wait = None;
+        if let Popup::Viewer { pending, count, .. } = &mut self.popup {
+            if matches!(pending, Some('d') | Some('c') | Some('y')) {
+                *pending = None;
+            }
+            *count = None;
+        }
+    }
+
+    fn viewer_take_count(&mut self) -> usize {
+        if let Popup::Viewer { count, .. } = &mut self.popup {
+            count.take().unwrap_or(1).max(1)
+        } else {
+            1
+        }
+    }
+
+    /// The cursor and the buffer, copied out so the borrow ends here.
+    fn viewer_where(&self) -> ((usize, usize), Vec<String>) {
+        match &self.popup {
+            Popup::Viewer { line, col, view, .. } => ((*line, *col), view.lines.clone()),
+            _ => ((0, 0), Vec::new()),
+        }
+    }
+
+    /// Run `key` as a motion: move the cursor, or hand the span it covers to
+    /// the operator that is waiting. False when it is not a motion at all.
+    fn viewer_run_motion(&mut self, key: char, arg: Option<char>) -> bool {
+        let op = self.viewer_pending_op();
+        let n = self.viewer_take_count();
+        let (at, lines) = self.viewer_where();
+        let Some(mo) = crate::vim::motion(&lines, at, key, arg, n) else {
+            return false;
+        };
+        match op {
+            Some(op) => {
+                self.viewer_clear_op();
+                self.viewer_apply_op(op, crate::vim::span_of(at, mo));
+            }
+            None => {
+                if let Popup::Viewer { line, col, goal, view, .. } = &mut self.popup {
+                    *line = mo.to.0.min(view.lines.len().saturating_sub(1));
+                    let len = view.lines.get(*line).map(|l| l.chars().count()).unwrap_or(0);
+                    *col = mo.to.1.min(len);
+                    *goal = *col;
+                }
+            }
+        }
+        true
+    }
+
+    /// Delete, change or yank what `span` covers. `c` leaves the editor open
+    /// where the text was, which is the whole difference between it and `d`.
+    fn viewer_apply_op(&mut self, op: char, span: crate::vim::Span) {
+        use crate::vim::Span;
+        let text = self.viewer_span_text(span);
+        if op == 'y' {
+            self.yank = Some(text.clone());
+            if let Some(cb) = self.clipboard.as_mut() {
+                let _ = cb.set_text(text);
+            }
+            self.message = Some(match span {
+                Span::Lines { first, last } => {
+                    let n = last - first + 1;
+                    if self.lang == Lang::Ja {
+                        format!("{n} 行コピー")
+                    } else {
+                        format!("yanked {n} line(s)")
+                    }
+                }
+                Span::Chars { .. } => tr(self.lang, "yanked", "コピーしました").into(),
+            });
+            return;
+        }
+        if !matches!(self.popup, Popup::Viewer { editable: true, .. }) {
+            self.message = Some(
+                tr(self.lang, "this one is read-only", "これは読み取り専用です").into(),
+            );
+            return;
+        }
+        self.yank = Some(text);
+        let change = op == 'c';
+        if let Popup::Viewer { view, undo, line, col, goal, dirty, hl, .. } = &mut self.popup {
+            let lines = &mut view.lines;
+            if lines.is_empty() {
+                lines.push(String::new());
+            }
+            push_viewer_undo(undo, lines, *line, *col);
+            match span {
+                Span::Lines { first, last } => {
+                    let last = last.min(lines.len() - 1);
+                    if change {
+                        // `cc` empties the lines rather than removing them:
+                        // the point is to type a replacement where they were.
+                        lines.drain(first..=last);
+                        lines.insert(first, String::new());
+                        *line = first;
+                    } else {
+                        lines.drain(first..=last);
+                        if lines.is_empty() {
+                            lines.push(String::new());
+                        }
+                        *line = first.min(lines.len() - 1);
+                    }
+                    *col = 0;
+                }
+                Span::Chars { start, end } => {
+                    let (sl, sc) = start;
+                    let (el, ec) = end;
+                    let el = el.min(lines.len() - 1);
+                    let head: String = lines[sl].chars().take(sc).collect();
+                    let tail_from = ec.saturating_add(1);
+                    let tail: String = lines[el].chars().skip(tail_from).collect();
+                    lines[sl] = format!("{head}{tail}");
+                    if el > sl {
+                        lines.drain(sl + 1..=el);
+                    }
+                    *line = sl;
+                    *col = sc;
+                }
+            }
+            *goal = *col;
+            *dirty = true;
+            hl.clear();
+        }
+        if change {
+            if let Popup::Viewer { editing, .. } = &mut self.popup {
+                *editing = true;
+            }
+        }
+    }
+
+    /// The text `span` covers, for the yank register.
+    fn viewer_span_text(&self, span: crate::vim::Span) -> String {
+        use crate::vim::Span;
+        let Popup::Viewer { view, .. } = &self.popup else { return String::new() };
+        let lines = &view.lines;
+        match span {
+            Span::Lines { first, last } => {
+                let last = last.min(lines.len().saturating_sub(1));
+                let mut s = lines[first..=last].join("\n");
+                s.push('\n');
+                s
+            }
+            Span::Chars { start, end } => {
+                let (sl, sc) = start;
+                let (el, ec) = end;
+                let el = el.min(lines.len().saturating_sub(1));
+                if sl == el {
+                    lines[sl].chars().skip(sc).take(ec.saturating_sub(sc) + 1).collect()
+                } else {
+                    let mut out: String = lines[sl].chars().skip(sc).collect();
+                    for l in lines.iter().take(el).skip(sl + 1) {
+                        out.push('\n');
+                        out.push_str(l);
+                    }
+                    out.push('\n');
+                    out.extend(lines[el].chars().take(ec + 1));
+                    out
+                }
+            }
+        }
+    }
+
+    /// `:enc` — pick the encoding this file is decoded with. Only in source
+    /// mode; the rendered preview owns `view.lines`.
+    pub(crate) fn start_viewer_encoding_pick(&mut self) {
+        if matches!(self.popup, Popup::Viewer { preview: true, .. }) {
+            self.message =
+                Some(tr(self.lang, ":preview shows the source first", "先に :preview でソース表示に").into());
+            return;
+        }
+        if !matches!(self.popup, Popup::Viewer { .. }) {
+            return;
+        }
+        let cur = if let Popup::Viewer { view, .. } = &self.popup {
+            cian_core::viewer::TextEncoding::ALL
+                .iter()
+                .position(|enc| *enc == view.encoding)
+                .unwrap_or(0)
+        } else {
+            0
+        };
+        let viewer = std::mem::replace(&mut self.popup, Popup::None);
+        self.popup =
+            Popup::EncodingPicker { cursor: cur, target: EncTarget::Viewer(Box::new(viewer)) };
+    }
+
+    /// `:edit` from the viewer — hand the file to `$VISUAL` / `$EDITOR`.
+    pub(crate) fn edit_viewer_file_externally(&mut self) {
+        if !matches!(self.popup, Popup::Viewer { .. }) {
+            return;
+        }
+        self.edit_viewed_file();
+        self.popup = Popup::None;
     }
 
     /// `m` in the viewer: write the document's mermaid blocks into a self-
