@@ -4116,7 +4116,8 @@ pub(crate) fn viewer_manual_lines(lang: Lang) -> Vec<String> {
         ("Tab  Shift+Tab", "step through those differences", "差分を順に移動"),
         (":w  :q  :wq  :q!", "save, close, save and close, close discarding", "保存・閉じる・保存して閉じる・破棄して閉じる"),
         (":w <name>", "save it as that, and go on editing it", "その名前で保存し、以後それを編集"),
-        ("Shift+Tab", "step to the panes and back — the file waits as it is", "ペインへ移動／戻る（ファイルはそのまま待機）"),
+        ("Enter (in a listing)", "open a file in this panel", "一覧で Enter — このパネルで開く"),
+        ("Shift+Tab", "step to the listing beside it, and back", "隣の一覧へ移動／戻る"),
         ("]c  [c  Tab", "next / previous difference, while comparing", "比較中：次・前の差分へ"),
         ("✕", "the button in the corner closes it too — Esc does not", "右上の ✕ でも閉じる — Esc では閉じません"),
     ];
@@ -4154,8 +4155,8 @@ pub(crate) fn viewer_manual_lines(lang: Lang) -> Vec<String> {
         (("Ask", "相談"), ASK),
     ];
     let mut out = vec![match lang {
-        Lang::En => "cian — the viewer (F3)".to_string(),
-        Lang::Ja => "cian — ビューア（F3）".to_string(),
+        Lang::En => "cian — the text editor panel".to_string(),
+        Lang::Ja => "cian — テキストエディタパネル".to_string(),
     }];
     for ((en, ja), rows) in sections {
         out.push(String::new());

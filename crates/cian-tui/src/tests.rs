@@ -1185,12 +1185,16 @@
 
     /// `?` in the viewer answers "what can I do here", not "what can cian do".
     #[test]
-    fn question_mark_in_the_viewer_lists_only_the_viewer() {
+    fn question_mark_lists_only_the_editor_panels_keys() {
         let (_d, mut app) = viewer_on("hello\n");
         app.handle_key(key('?')).unwrap();
         let Popup::Report { lines, .. } = &app.popup else { panic!("no help: {:?}", app.popup) };
         let text = lines.join("\n");
-        assert!(text.contains("F3") || text.contains("viewer"), "it is about the viewer:\n{text}");
+        assert!(
+            text.contains("text editor panel") || text.contains("テキストエディタパネル"),
+            "it names the panel, not the key that used to open it:\n{text}",
+        );
+        assert!(!text.contains("(F3)"), "and does not put F3 in its name:\n{text}");
         // Things the viewer cannot do are not in it.
         for absent in ["Rename", "SSH", "trash"] {
             assert!(!text.contains(absent), "{absent:?} does not belong here:\n{text}");
@@ -2022,14 +2026,32 @@
             other => panic!("expected the viewer, got {other:?}"),
         }
 
-        // The bottom bar carries the file's keys while the file has focus —
-        // the docked frame is too narrow for its own hint row.
+        // Everything the panel has to say is along the foot of the window: its
+        // keys on the hint bar, its mode and position on the status bar.
         let rows = render(&mut app, 120, 30);
         let bottom = rows[rows.len().saturating_sub(2)].clone();
+        let status = rows[rows.len() - 1].clone();
         assert!(
             bottom.contains("search") || bottom.contains("検索"),
             "the file's hints are on the bottom bar: {bottom:?}",
         );
+        assert!(status.contains("READ"), "the mode is on the status bar: {status:?}");
+        assert!(status.contains("100:1"), "…and where the cursor is: {status:?}");
+        // Not in the panel's own frame any more.
+        let framed = rows.iter().take(rows.len() - 3).any(|r| r.contains("READ"));
+        assert!(!framed, "the frame gave the badge up:\n{rows:#?}");
+
+        // The `:` line is cian's own, so it has the width of the window.
+        app.handle_key(key(':')).unwrap();
+        let rows = render(&mut app, 120, 30);
+        let prompt = rows[rows.len().saturating_sub(3)].clone();
+        assert!(prompt.contains(":_"), "the prompt is on cian's prompt row: {prompt:?}");
+        assert!(
+            rows[rows.len() - 1].contains("COMMAND"),
+            "and the mode says so: {:?}",
+            rows[rows.len() - 1],
+        );
+        app.handle_key(code(KeyCode::Esc)).unwrap();
 
         // Shift+Tab moves the focus to the listing beside it; the file stays.
         app.handle_key(code(KeyCode::BackTab)).unwrap();

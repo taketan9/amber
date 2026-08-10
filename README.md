@@ -6,7 +6,7 @@
 
 One binary. macOS, Windows, Linux. No runtime, no DLLs, nothing to install alongside it.
 
-**Contents** — [Try it](#try-it) · [The basics](#the-basics) · [Get around fast](#get-around-fast) · [Look inside a file](#look-inside-a-file-f3) · [Find things](#find-things) · [Compare and clean up](#compare-and-clean-up) · [Files and version control](#files-and-version-control) · [SSH and remote panes](#ssh-and-remote-panes) · [The shell panel](#the-shell-panel) · [Macros](#macros) · [AI](#ai-optional) · [crmaine](#crmaine-optional) · [Japanese input](#japanese-input-ime) · [Configuration](#configuration) · [How it fits together](#how-it-fits-together) · [Windows install](#install-on-windows-offline) · [Good to know](#good-to-know)
+**Contents** — [Try it](#try-it) · [The basics](#the-basics) · [Get around fast](#get-around-fast) · [The text editor panel](#the-text-editor-panel) · [Find things](#find-things) · [Compare and clean up](#compare-and-clean-up) · [Files and version control](#files-and-version-control) · [SSH and remote panes](#ssh-and-remote-panes) · [The shell panel](#the-shell-panel) · [Macros](#macros) · [AI](#ai-optional) · [crmaine](#crmaine-optional) · [Japanese input](#japanese-input-ime) · [Configuration](#configuration) · [How it fits together](#how-it-fits-together) · [Windows install](#install-on-windows-offline) · [Good to know](#good-to-know)
 
 ---
 
@@ -72,9 +72,11 @@ Fuzzy pickers: type a few letters, press Enter.
 
 ---
 
-## Look inside a file (`F3`)
+## The text editor panel
 
 `Enter` and `F3` open the same thing — everything below — in two different places. `Enter` **docks it in the pane** the file was listed in: the other pane stays beside it, the keys are the file's while that pane has focus, and its hints move to the bar along the bottom. `F3` (and Shift+Tab) give the same file the **whole window**. `F3` on a docked file promotes it; `Shift+Tab` steps between the file and the listing next to it; `:q` closes it and the listing is back.
+
+Docked, the panel keeps its name and its **✕** on its frame and puts everything else along the foot of the window: its keys on the hint bar, its mode (`READ` / `EDIT` / `COMMAND` / `VISUAL`) and the cursor's line and column on the status bar, and the `:` and `/` prompts on cian's own prompt line — the same line the file panes type on.
 
 ### What it opens
 

@@ -257,7 +257,14 @@ pub(crate) fn draw(f: &mut Frame, app: &mut App) {
     // Command and filter modes add a prompt line above the status bar; the key
     // hints take another. A very short window drops the hints rather than the
     // listing.
-    let prompt_line = matches!(app.mode, Mode::Command | Mode::Filter);
+    // The editor panel types on cian's own prompt line while it is docked in
+    // a pane, so everything typed at cian is typed in the same place.
+    let docked_prompt = app
+        .viewer_dock
+        .filter(|p| *p == app.focused)
+        .and_then(|_| editor_prompt(&app.popup, app.lang));
+    let prompt_line =
+        matches!(app.mode, Mode::Command | Mode::Filter) || docked_prompt.is_some();
     let hint_line = app.show_key_hints && area.height >= 12;
     let bottom_lines = 1 + u16::from(prompt_line) + u16::from(hint_line);
     let vertical = Layout::default()
@@ -315,7 +322,12 @@ pub(crate) fn draw(f: &mut Frame, app: &mut App) {
     // each branch guards its flag *before* claiming.
     if prompt_line {
         if let Some(cmd_area) = claim(&mut row) {
-            if app.mode == Mode::Filter {
+            if let Some(text) = &docked_prompt {
+                f.render_widget(
+                    Paragraph::new(truncate(text, cmd_area.width as usize)).style(prompt_style()),
+                    cmd_area,
+                );
+            } else if app.mode == Mode::Filter {
                 let matched = app.active_pane().map(|p| p.entries.len()).unwrap_or(0);
                 let total = app.active_pane().map(|p| p.all_entries.len()).unwrap_or(0);
                 draw_prompt_line(
@@ -2226,19 +2238,41 @@ fn draw_status(f: &mut Frame, area: Rect, app: &App) {
         Mode::Command => " CMD",
         Mode::Filter => " FILTER",
     };
+    // With the editor panel in focus, the badge is the *file's* mode — READ,
+    // EDIT, COMMAND, VISUAL — because that is what the next key will mean.
+    // It used to live on the panel's own frame; docked in a pane there is no
+    // room for it there, and this is where the window already reports what is
+    // going on.
+    let docked_editor = app
+        .viewer_dock
+        .filter(|p| *p == app.focused)
+        .and_then(|_| editor_mode_of(&app.popup))
+        .map(editor_mode);
+    let (badge_text, badge_bg) = match docked_editor {
+        Some((word, colour)) => (format!(" {focus_label} {word} "), colour),
+        None => (format!(" {}{} ", focus_label, mode_word), badge_bg),
+    };
     let mut spans: Vec<Span> = vec![
         Span::styled(
-            format!(" {}{} ", focus_label, mode_word),
+            badge_text,
             Style::default().fg(readable_on(badge_bg)).bg(badge_bg).add_modifier(Modifier::BOLD),
         ),
         pad.clone(),
+    ];
+    if let Popup::Viewer { line, col, .. } = &app.popup {
+        if docked_editor.is_some() {
+            spans.push(chip(format!("{}:{}", line + 1, col + 1), readable_on(theme().status_bg)));
+            spans.push(dim_sep.clone());
+        }
+    }
+    spans.extend([
         chip(items_chip, readable_on(theme().status_bg)),
         dim_sep.clone(),
         chip(
             marks_chip,
             if mark_count > 0 { theme().mark_fg } else { muted_on(theme().status_bg) },
         ),
-    ];
+    ]);
 
     // A narrowed listing must never look like a complete one, so the active
     // filter stays visible after leaving filter mode.
@@ -4493,6 +4527,190 @@ fn draw_theme_picker(f: &mut Frame, area: Rect, popup: &mut Popup, lang: Lang) {
     f.render_widget(Paragraph::new(lines), inner);
 }
 
+/// What is half-typed at the editor panel, if anything: the `:` line, the
+/// `/` search, a block insert, or the count and operator of a vi command
+/// still being spelled out.
+///
+/// Its own function because the row it goes on depends on where the panel
+/// is: inside the frame when the panel fills the window, and on cian's own
+/// prompt line when it is docked in a pane — the line `:` and `/` use in the
+/// file panes, so everything typed at cian is typed in the same place.
+pub(crate) fn editor_prompt(popup: &Popup, lang: Lang) -> Option<String> {
+    let Popup::Viewer { editing, sub_walk, block_input, sub_input, find_input, count, pending, .. } =
+        popup
+    else {
+        return None;
+    };
+    editor_prompt_parts(
+        *editing,
+        sub_walk.as_deref(),
+        block_input.as_deref(),
+        sub_input.as_deref(),
+        find_input.as_deref(),
+        *count,
+        *pending,
+        lang,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn editor_prompt_parts(
+    editing: bool,
+    sub_walk: Option<&SubWalk>,
+    block_input: Option<&BlockInput>,
+    sub_input: Option<&str>,
+    find_input: Option<&str>,
+    count: Option<usize>,
+    pending: Option<char>,
+    lang: Lang,
+) -> Option<String> {
+    let editing = &editing;
+    if *editing || sub_walk.is_some() {
+        None
+    } else if let Some(b) = block_input {
+        let what = match b.kind {
+            crate::BlockEdit::Insert => tr(lang, "insert ▏", "左端に挿入 ▏"),
+            crate::BlockEdit::Append => tr(lang, "append ▕", "右端に追記 ▕"),
+            crate::BlockEdit::Replace => tr(lang, "replace ▊", "矩形を置換 ▊"),
+            crate::BlockEdit::LineStart => tr(lang, "line start ▏", "各行の先頭 ▏"),
+            crate::BlockEdit::LineEnd => tr(lang, "line end ▕", "各行の末尾 ▕"),
+        };
+        // A line selection has no column to report; a rectangle does.
+        let ragged = matches!(b.kind, crate::BlockEdit::LineStart | crate::BlockEdit::LineEnd);
+        let rows = b.block.bottom - b.block.top + 1;
+        Some(format!(
+            "{} {}_   {}",
+            what,
+            b.text,
+            match (ragged, lang == Lang::Ja) {
+                (true, true) => format!("({rows} 行)"),
+                (true, false) => format!("({rows} lines)"),
+                (false, true) => format!("({rows} 行, {} 桁目)", b.block.left + 1),
+                (false, false) => format!("({rows} lines, col {})", b.block.left + 1),
+            }
+        ))
+    } else if let Some(cmd) = sub_input {
+        // What the prompt takes, shown rather than assumed: the replace form
+        // first, then the word commands, because a blank prompt with no menu
+        // is a prompt you have to have read the manual to use.
+        // The menu is for someone who has not started yet. Once there is
+        // something typed, it is the typed text that has to be readable, and
+        // a wall of vocabulary beside it is only in the way.
+        Some(if cmd.is_empty() {
+            format!(
+                ":_   {}",
+                tr(lang,
+                   "s/old/new/[gci] · w wq q q! · preview block outline ws sort uniq han zen expand[ all] unexpand reindent lf crlf",
+                   "s/old/new/[gci] · w wq q q! · preview block outline ws sort uniq han zen expand[ all] unexpand reindent lf crlf"),
+            )
+        } else if cmd.starts_with('s') {
+            // Mid-replace, the flags are the part still to be decided — and
+            // the whole reason `r` seeded the prompt was so they would be.
+            format!(
+                ":{}_   {}",
+                cmd,
+                tr(lang,
+                   "flags: g all on a line · c confirm each · i ignore case",
+                   "フラグ: g 行内すべて · c 1件ずつ確認 · i 大小無視"),
+            )
+        } else {
+            format!(":{}_", cmd)
+        })
+    } else if let Some(q) = find_input {
+        Some(format!("/{}_", q))
+    } else if count.is_some() || pending.is_some() {
+        // A half-typed command — the `4` of `48G`, the `d` of `d3d`, the `z`
+        // of `zz`. vi shows nothing here and leaves you to remember what you
+        // have pressed; on a full-screen file that is a guess.
+        let typed = format!(
+            "{}{}",
+            pending.map(String::from).unwrap_or_default(),
+            count.map(|c| c.to_string()).unwrap_or_default(),
+        );
+        Some(format!(
+            "{typed}_   {}",
+            match pending {
+                Some('z') => tr(lang, "z: a fold · zz zt zb the cursor line", "z: 折りたたみ · zz zt zb カーソル行の位置"),
+                Some('d') => tr(lang, "d again deletes the line", "もう一度 d で行削除"),
+                Some(_) => tr(lang, "Esc cancels", "Esc で取消"),
+                None => tr(
+                    lang,
+                    "G line · j k l h · w b · } { · Esc cancels",
+                    "G 行番号へ · j k l h · w b · } { · Esc で取消",
+                ),
+            }
+        ))
+    } else {
+        None
+    }
+}
+
+/// What the editor panel is doing, as a word and a colour.
+///
+/// Read once and used twice: on the panel's own frame when it fills the
+/// window, and on cian's status bar when it is docked in a pane — where the
+/// mode belongs with every other "what is going on" the window reports.
+pub(crate) fn editor_mode(m: EditorMode) -> (&'static str, Color) {
+    match m {
+        EditorMode::Command => ("COMMAND", Color::Rgb(200, 100, 200)),
+        EditorMode::Search => ("SEARCH", Color::Rgb(80, 200, 120)),
+        // Not orange: the selecting modes are orange, and "the next key goes
+        // into the file" is the one state worth never mistaking.
+        EditorMode::Edit => ("EDIT", Color::Rgb(235, 105, 105)),
+        EditorMode::Read => ("READ", theme().accent),
+        EditorMode::Visual => ("VISUAL", Color::Rgb(255, 140, 0)),
+        EditorMode::VisualLine => ("V-LINE", Color::Rgb(255, 140, 0)),
+        EditorMode::VisualBlock => ("V-BLOCK", Color::Rgb(255, 175, 60)),
+    }
+}
+
+/// The modes the editor panel can be in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum EditorMode {
+    Read,
+    Edit,
+    Command,
+    Search,
+    Visual,
+    VisualLine,
+    VisualBlock,
+}
+
+fn popup_mode_of(
+    sub: bool,
+    find: bool,
+    editing: bool,
+    visual: Option<ViewVisual>,
+) -> EditorMode {
+    if sub {
+        EditorMode::Command
+    } else if find {
+        EditorMode::Search
+    } else if editing {
+        EditorMode::Edit
+    } else {
+        match visual {
+            None => EditorMode::Read,
+            Some(ViewVisual::Char) => EditorMode::Visual,
+            Some(ViewVisual::Line) => EditorMode::VisualLine,
+            Some(ViewVisual::Block) => EditorMode::VisualBlock,
+        }
+    }
+}
+
+/// The mode of the file the keyboard is pointed at, if that is a file.
+pub(crate) fn editor_mode_of(popup: &Popup) -> Option<EditorMode> {
+    match popup {
+        Popup::Viewer { sub_input, find_input, editing, visual, .. } => Some(popup_mode_of(
+            sub_input.is_some(),
+            find_input.is_some(),
+            *editing,
+            *visual,
+        )),
+        _ => None,
+    }
+}
+
 /// The manual is taller than any terminal, so it renders as a scrolling
 /// viewport rather than the fixed block the other popups use.
 fn draw_manual(f: &mut Frame, area: Rect, popup: &mut Popup, lang: Lang) {
@@ -5624,22 +5842,12 @@ fn draw_viewer(
     // Typing at a prompt is its own mode and takes the frame, exactly as it
     // does in the file panes and in the same colours — otherwise `:` and `i`
     // begin the same way on screen while meaning opposite things.
-    let (mode, mode_color) = if sub_input.is_some() {
-        ("COMMAND", Color::Rgb(200, 100, 200))
-    } else if find_input.is_some() {
-        ("SEARCH", Color::Rgb(80, 200, 120))
-    } else if *editing {
-        // Not orange: the selecting modes are orange, and "the next key goes
-        // into the file" is the one state worth never mistaking.
-        ("EDIT", Color::Rgb(235, 105, 105))
-    } else {
-        match visual {
-            None => ("READ", theme().accent),
-            Some(ViewVisual::Char) => ("VISUAL", Color::Rgb(255, 140, 0)),
-            Some(ViewVisual::Line) => ("V-LINE", Color::Rgb(255, 140, 0)),
-            Some(ViewVisual::Block) => ("V-BLOCK", Color::Rgb(255, 175, 60)),
-        }
-    };
+    let (mode, mode_color) = editor_mode(popup_mode_of(
+        sub_input.is_some(),
+        find_input.is_some(),
+        *editing,
+        *visual,
+    ));
     let dirty_mark = if *dirty { " ●" } else { "" };
     // The BOM is invisible in the text, which is exactly why it gets a badge:
     // three unseen bytes at the top of a script are a classic breakage.
@@ -5727,7 +5935,10 @@ fn draw_viewer(
         } else {
             Line::from(format!(" {}{}  —  {} ", title, dirty_mark, head))
         })
-        .title_bottom(Line::from(vec![
+        .title_bottom(Line::from(if docked {
+            Vec::new()
+        } else {
+            vec![
             Span::styled(
                 format!(" {} ", mode),
                 Style::default()
@@ -5746,7 +5957,8 @@ fn draw_viewer(
                 // number in on that theme's own paper.
                 Style::default().fg(text_tone(mode_color, surface())),
             ),
-        ]));
+            ]
+        }));
     let whole = rect.inner(Margin { vertical: 1, horizontal: 2 });
     f.render_widget(block, rect);
 
@@ -5783,11 +5995,12 @@ fn draw_viewer(
     let hint_row = u16::from(!docked);
     // A prompt being typed takes a row of its own above the hints (see
     // `prompt` further down), so the text gives one up while it is open.
-    let prompt_row = sub_input.is_some()
-        || find_input.is_some()
-        || block_input.is_some()
-        || count.is_some()
-        || pending.is_some();
+    let prompt_row = !docked
+        && (sub_input.is_some()
+            || find_input.is_some()
+            || block_input.is_some()
+            || count.is_some()
+            || pending.is_some());
     let body_h = inner
         .height
         .saturating_sub(hint_row + u16::from(show_ruler) + u16::from(prompt_row))
@@ -6181,84 +6394,16 @@ fn draw_viewer(
     // own directly above the hints, the way `:` and `/` do in the file panes:
     // painting over the hints made the two halves of cian behave differently
     // at the very moment the keyboard has been handed somewhere new.
-    let prompt: Option<String> = if *editing || sub_walk.is_some() {
-        None
-    } else if let Some(b) = block_input {
-        let what = match b.kind {
-            crate::BlockEdit::Insert => tr(lang, "insert ▏", "左端に挿入 ▏"),
-            crate::BlockEdit::Append => tr(lang, "append ▕", "右端に追記 ▕"),
-            crate::BlockEdit::Replace => tr(lang, "replace ▊", "矩形を置換 ▊"),
-            crate::BlockEdit::LineStart => tr(lang, "line start ▏", "各行の先頭 ▏"),
-            crate::BlockEdit::LineEnd => tr(lang, "line end ▕", "各行の末尾 ▕"),
-        };
-        // A line selection has no column to report; a rectangle does.
-        let ragged = matches!(b.kind, crate::BlockEdit::LineStart | crate::BlockEdit::LineEnd);
-        let rows = b.block.bottom - b.block.top + 1;
-        Some(format!(
-            "{} {}_   {}",
-            what,
-            b.text,
-            match (ragged, lang == Lang::Ja) {
-                (true, true) => format!("({rows} 行)"),
-                (true, false) => format!("({rows} lines)"),
-                (false, true) => format!("({rows} 行, {} 桁目)", b.block.left + 1),
-                (false, false) => format!("({rows} lines, col {})", b.block.left + 1),
-            }
-        ))
-    } else if let Some(cmd) = sub_input {
-        // What the prompt takes, shown rather than assumed: the replace form
-        // first, then the word commands, because a blank prompt with no menu
-        // is a prompt you have to have read the manual to use.
-        // The menu is for someone who has not started yet. Once there is
-        // something typed, it is the typed text that has to be readable, and
-        // a wall of vocabulary beside it is only in the way.
-        Some(if cmd.is_empty() {
-            format!(
-                ":_   {}",
-                tr(lang,
-                   "s/old/new/[gci] · w wq q q! · preview block outline ws sort uniq han zen expand[ all] unexpand reindent lf crlf",
-                   "s/old/new/[gci] · w wq q q! · preview block outline ws sort uniq han zen expand[ all] unexpand reindent lf crlf"),
-            )
-        } else if cmd.starts_with('s') {
-            // Mid-replace, the flags are the part still to be decided — and
-            // the whole reason `r` seeded the prompt was so they would be.
-            format!(
-                ":{}_   {}",
-                cmd,
-                tr(lang,
-                   "flags: g all on a line · c confirm each · i ignore case",
-                   "フラグ: g 行内すべて · c 1件ずつ確認 · i 大小無視"),
-            )
-        } else {
-            format!(":{}_", cmd)
-        })
-    } else if let Some(q) = find_input {
-        Some(format!("/{}_", q))
-    } else if count.is_some() || pending.is_some() {
-        // A half-typed command — the `4` of `48G`, the `d` of `d3d`, the `z`
-        // of `zz`. vi shows nothing here and leaves you to remember what you
-        // have pressed; on a full-screen file that is a guess.
-        let typed = format!(
-            "{}{}",
-            pending.map(String::from).unwrap_or_default(),
-            count.map(|c| c.to_string()).unwrap_or_default(),
-        );
-        Some(format!(
-            "{typed}_   {}",
-            match pending {
-                Some('z') => tr(lang, "z: a fold · zz zt zb the cursor line", "z: 折りたたみ · zz zt zb カーソル行の位置"),
-                Some('d') => tr(lang, "d again deletes the line", "もう一度 d で行削除"),
-                Some(_) => tr(lang, "Esc cancels", "Esc で取消"),
-                None => tr(
-                    lang,
-                    "G line · j k l h · w b · } { · Esc cancels",
-                    "G 行番号へ · j k l h · w b · } { · Esc で取消",
-                ),
-            }
-        ))
-    } else {
-        None
-    };
+    let prompt: Option<String> = editor_prompt_parts(
+        *editing,
+        sub_walk.as_deref(),
+        block_input.as_deref(),
+        sub_input.as_deref(),
+        find_input.as_deref(),
+        *count,
+        *pending,
+        lang,
+    );
     let footer = if *editing {
         tr(lang,
             " EDIT — type to insert   Ctrl+S save   Esc leave   Shift+Q discard ",
@@ -6359,7 +6504,10 @@ fn draw_viewer(
     }
     // The prompt sits on the row above, in the file panes' prompt colours, so
     // the hints it used to cover stay readable while something is being typed.
-    if let Some(text) = prompt {
+    // Docked, it goes to the window's prompt line instead — the one `:` and
+    // `/` already use in the panes — so everything typed at cian is typed in
+    // the same place.
+    if let Some(text) = prompt.filter(|_| !docked) {
         if inner.height >= 2 {
             f.render_widget(
                 Paragraph::new(truncate(&text, inner.width as usize)).style(prompt_style()),
