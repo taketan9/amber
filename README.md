@@ -2,9 +2,11 @@
 
 **English** · [日本語](README.ja.md)
 
-**C**omfortable **I**nterface for **A**gile File e**X**plorer **N**avigation — a two-pane terminal file manager, with a real shell built in. Inspired by [AFXW (あふｗ)](https://akt.d.dooo.jp/akt_afxw.htm).
+**C**omfortable **I**nterface for **A**gile File e**X**plorer **N**avigation — a two-pane terminal file manager with a real shell built in. Inspired by [AFXW (あふｗ)](https://akt.d.dooo.jp/akt_afxw.htm).
 
-One binary. Runs in any terminal, on macOS, Windows and Linux. No runtime, no DLLs, nothing to install alongside it.
+One binary. macOS, Windows, Linux. No runtime, no DLLs, nothing to install alongside it.
+
+**Contents** — [Try it](#try-it) · [The basics](#the-basics) · [Get around fast](#get-around-fast) · [Look inside a file](#look-inside-a-file-f3) · [Find things](#find-things) · [Compare and clean up](#compare-and-clean-up) · [Files and version control](#files-and-version-control) · [SSH and remote panes](#ssh-and-remote-panes) · [The shell panel](#the-shell-panel) · [Macros](#macros) · [AI](#ai-optional) · [crmaine](#crmaine-optional) · [Japanese input](#japanese-input-ime) · [Configuration](#configuration) · [How it fits together](#how-it-fits-together) · [Windows install](#install-on-windows-offline) · [Good to know](#good-to-know)
 
 ---
 
@@ -15,221 +17,222 @@ cargo build --release
 ./target/release/cian
 ```
 
-On Windows, use it inside **Windows Terminal** or **WezTerm** with a Nerd Font — that's where the icons and rounded corners look right. (Offline install is at the bottom.)
-
-Press **`?`** any time for the full key list. It's generated from your live keymap, so keys you rebind show up too. `cian -man` prints it from a shell, `cian -h` prints the command-line usage.
-
-The UI is English by default. Want Japanese? `cian.set_option("lang", "ja")`, or flip it from the right-click menu.
+- On Windows use **Windows Terminal** or **WezTerm** with a Nerd Font — that is where the icons and rounded corners look right. Offline install is [at the bottom](#install-on-windows-offline).
+- **`?`** shows the full key list, generated from your live keymap, so rebound keys show up too. `cian -man` prints it from a shell; `cian -h` prints the command-line usage.
+- The UI is English by default. For Japanese: `cian.set_option("lang", "ja")`, or the right-click menu.
 
 ---
 
 ## The basics
 
-Two panes side by side. You copy and move between them — that's the whole idea.
+Two panes side by side. You copy and move between them — that is the whole idea.
 
-| Do this | And… |
+| Key | Does |
 |---|---|
-| **← / →** | move focus between the two panes |
-| **Enter** | enter a folder, go inside an archive — or open a file with its default app |
-| **Alt+← / Alt+→** | back / forward through this pane's history (or click **◀ ▶** in the title) |
-| **Backspace** | go up a level (or click the `..` row at the top) |
-| **`j` / `k`**, arrows | move the cursor |
+| **← / →** | move focus between the panes |
+| **Enter** | enter a folder or archive; read a file in the viewer |
+| **Ctrl+Enter** | open the file with its own program (on a folder: open it in the other pane) |
+| **Alt+← / Alt+→** | this pane's history, back / forward (or click **◀ ▶** in the title) |
+| **Backspace** | up a level (or click the `..` row) |
+| **`j` `k`**, arrows | move the cursor |
 | **`Space`** | mark the file under the cursor |
-| **`c`** | copy the marked files to the other pane |
-| **`m`** | move them to the other pane |
-| **`d`** | delete (to the Recycle Bin / Trash) |
+| **`Ctrl+A`** | mark everything (`:markall`) |
+| **`c` / `m`** | copy / move the marked files to the other pane |
+| **`d`** | delete, to the Recycle Bin / Trash |
 | **`r`** | rename |
 | **`a` / `A`** | new file / new folder |
-| **`u`** | undo the last rename / create / move |
+| **`u`** | undo the last rename, create or move |
 | **`F3`** | look inside the file under the cursor |
-| **`?`** | the full key list |
 
-Copy, move and delete always **ask first**, and delete goes to the trash — so a slip never costs you anything. `u` (or `:undo`) walks back the last few renames, creates and moves too.
+- **Nothing is lost by a slip.** Copy, move and delete always confirm; delete goes to the trash; `u` (`:undo`) walks back the last few renames, creates and moves.
+- **Big jobs run in the background** with a progress bar. **Esc** stops one, `b` tucks the popup away and a status chip keeps count (`⏳ copying 45% +2`).
+- **Operations queue.** A second copy waits its turn rather than being refused. `:queue` lists the runner and the line; `x` stops or removes one. Failed transfers retry twice; a transfer with no bytes for 30 s is flagged `⚠ stalled`, and a second `x` abandons the dead worker so the rest of the line moves.
+- **Long jobs ring the bell** and post a desktop notification when they finish. Off in the toggles (`T`) or `cian.set_option("notify", false)`.
 
-Big copies run in the background with a progress bar; **Esc** stops one.
+**Mouse.** Click to move the cursor, double-click to open, drag a file onto the other pane to copy it (Shift-drag moves). Dialogs have real buttons, the wheel scrolls any popup, and dragging a border resizes the split.
 
-**Mouse works everywhere.** Click to move the cursor, double-click to open. Drag a file onto the other pane to copy it there (Shift-drag to move). Every dialog has real clickable buttons, and the wheel scrolls any popup. Drag a border to resize the split it divides.
-
-**Files in and out of the desktop.** Drag files from Finder or Explorer onto the cian window and they **move** into the focused pane — after the usual confirm, so a mistaken drag is caught there. (Any terminal answers a drop by typing the paths in; cian takes that only when every item really is a file, so an ordinary paste stays an ordinary paste.) The other direction cannot be a drag: a terminal program has no window of its own and so can never be an OS drag *source*. **`Shift+P`** is the bridge instead — it puts the selection on the clipboard as real file references, and `Cmd/Ctrl+V` in Finder or Explorer pastes them. For a browser's upload box, use its **Browse** button and paste the path into the file dialog.
-
-**Operations queue.** Start a copy while another runs and it waits its turn — nothing is refused, nothing overlaps. The progress popup's `b` tucks it away so you keep working (a status chip tracks it: `⏳ copying 45% +2`); `:queue` lists the runner and the line, `x` stops the runner or removes a waiting item. Failed uploads/downloads retry themselves twice before giving up. And if a transfer wedges — no bytes for 30 s — the chip turns to `⚠ stalled`, and in `:queue` a second `x` *abandons* the deaf worker so the rest of the line keeps moving.
-
-**Long jobs tell you when they're done** — a copy or transfer that runs more than a few seconds rings the bell and posts a desktop notification, so you can walk away. Turn it off in the toggles (`T`) or `cian.set_option("notify", false)`.
+**To and from the desktop.** Files dragged from Finder or Explorer onto the window **move** into the focused pane, after the usual confirm. The other direction cannot be a drag — a terminal program has no window to drag *from* — so **`Shift+P`** puts the selection on the clipboard as real file references, and `Cmd/Ctrl+V` in Finder or Explorer pastes them.
 
 ---
 
 ## Get around fast
 
-A handful of fuzzy pickers — type a few letters, hit Enter:
+Fuzzy pickers: type a few letters, press Enter.
 
-| Do this | And… |
+| Key | Picker |
 |---|---|
-| **`C`** (or `:palette`) | command palette — fuzzy-find *any* command |
-| **`Z`** (or `:jump`) | jump to a recent or bookmarked folder |
-| **`:files`** | live file finder over this whole tree — Enter reveals the pick |
-| **`:recent`** | the files you opened this session |
-| **`T`** (or `:toggles`) | flip live settings in one place — dotfiles, input sync, notifications, verify-transfers, language |
-| **`:du`** | disk usage — biggest first, `Enter` drills into a folder |
+| **`C`** (`:palette`) | every command |
+| **`Z`** (`:jump`) | a recent or bookmarked folder |
+| **`:files`** | live file finder over the whole tree |
+| **`:recent`** | files opened this session |
+| **`T`** (`:toggles`) | live settings — dotfiles, input sync, notifications, verify-transfers, language |
+| **`:du`** | disk usage, biggest first; `Enter` drills in |
 
-Marked a few files? **`:each <cmd>`** runs a command on each — `:each gzip {}` (`{}` is the file), or `:each md5sum` with the path appended.
+**`:each <cmd>`** runs a command on every marked file — `:each gzip {}` (`{}` is the path), or `:each md5sum` with the path appended.
 
 ---
 
-## Look inside anything — `F3`
+## Look inside a file (`F3`)
 
-Press `F3` on a file and cian shows you what's in it, without leaving:
+### What it opens
 
-- **Text** — a scrollable viewer with line numbers and syntax highlighting (Rust, Python, JS/TS, Java, HTML, CSS, SQL, shell, Lua, YAML, JSON, …).
-- **Markdown** — rendered right there. `p` toggles preview ↔ source.
-- **Images** (`.png/.jpg/.gif/.bmp/.webp`) — drawn in the terminal. On a terminal with a graphics protocol (kitty, iTerm2, WezTerm, sixel — cian asks at startup) they render as real pixels; anywhere else as colored half-block cells, coarse but recognisable.
-- **Office & PDF** (`.docx/.xlsx/.pptx/.pdf`, plus legacy `.doc/.xls/.ppt`) — their text, no converter needed.
-- **Archives** (`.zip/.jar/.tar/.tar.gz/…`) — the file list. `Enter` extracts the highlighted member to the other pane, `a` extracts all.
+| Type | Shown as |
+|---|---|
+| Text | scrollable, with line numbers and syntax highlighting (Rust, Python, JS/TS, Java, HTML, CSS, SQL, shell, Lua, YAML, JSON, …) |
+| Markdown | rendered; `:preview` toggles preview ↔ source |
+| Images (`.png .jpg .gif .bmp .webp`) | real pixels on kitty / iTerm2 / WezTerm / sixel, colour half-blocks anywhere else |
+| Office & PDF (`.docx .xlsx .pptx .pdf`, legacy `.doc .xls .ppt`) | their text, no converter needed |
+| Archives (`.zip .jar .tar .tar.gz …`) | the member list — `Enter` extracts one, `a` extracts all |
+| Anything else | a hex dump |
 
-**Walk into archives.** `Enter` on a zip or tarball doesn't just list it — the pane goes *inside*, and the archive browses like a folder: descend into member directories, `..` (or `h`) climbs back out, and past the root you're standing on the archive file again. `F3` on a member opens the real viewer on it (code with colour, images, Office text — everything F3 does). Copying to the other pane extracts, relative to where you're standing — copy `c/` from inside `a/b/` and you get `c/`, not the archive's whole tree. And for **zip**, it works the other way too: copy files *toward* the archive pane and they're added right where you stand (same names replace, after a confirm), `F2` renames a member (directories included), `d` deletes members — the zip is rewritten atomically, kept members raw-copied without recompression. tar/tar.gz stay read-only (their format has no cheap rewrite), and password-protected zips are never modified — mixing cleartext into an AES archive would only look protected.
+Shift_JIS is detected and decoded automatically (UTF-16 by BOM); `e` forces an encoding when the guess is wrong.
 
-The viewer is vim-flavoured: `h j k l`, `w b`, `0 $`, `gg G`, `Ctrl-d/u` move; `/` searches, `42G` jumps to a line, `%` to the matching bracket. `v` / `V` / `Ctrl-v` select, `y` copies. Shift_JIS files are detected and decoded automatically (UTF-16 via BOM); `e` still forces an encoding when the guess is wrong.
+### Reading
 
-**Hex edit & BOM.** `i` on a binary file (F3 shows it as a hex dump) edits it in place: hex digits overwrite the byte under the cursor — overwrite *only*, no insert or delete, so offsets never shift and the size can't change — `u` undoes, and `Ctrl+S` saves after writing a `.bak` of the original. For text files, an invisible byte-order mark gets a visible badge in the viewer title (`· UTF-8 BOM`), and `:nobom` strips it from the marked files after a confirm. UTF-16 BOMs are detected and deliberately kept — without one, a UTF-16 file's byte order is guesswork.
+Vim-flavoured: `h j k l`, `w b`, `0 $`, `gg G`, `Ctrl-d/u`, `%` to the matching bracket, `42G` to a line. `/` searches, `n`/`N` repeat. `v` `V` `Ctrl-v` select, `y` copies, `Ctrl+A` selects the whole file.
 
-**Cloud files stay in the cloud until you say otherwise.** A synced OneDrive / Teams library — or iCloud Drive, or Google Drive — lists files that haven't actually been downloaded. Reading one pulls it over the network, so a single `Ctrl+F` across a team library could quietly drag the whole thing down. cian sees them: a **☁** column appears in panes that hold placeholders (and nowhere else), and the sweeps — grep, `:count`, `:hash`, `:dupes`, `:preview` — skip them and tell you how many they skipped. Deliberate acts still work normally: `F3`, a copy, opening a file are you asking for that file. Flip `Read ☁ cloud-only files` in the toggles (`T`), or `cian.set_option("read_cloud_files", true)`, when you do want a sweep to reach into the cloud.
+| Key | Does |
+|---|---|
+| `F2` / `Shift+F2` | next / previous open file (mark several, press `F3`, they all open) |
+| `Shift+F8` / `Shift+F9` | split left-right / top-bottom; `Shift+F10` closes the split |
+| `Shift+H` / `Shift+L` | cross to the other half (or click it) |
+| `=` | mark what differs between the two halves — live, while you edit both |
+| `Tab` / `Shift+Tab` | step through those differences |
+| `]]` / `[[` | next / previous heading or definition |
+| `Space` / `za` / `zA` | fold one section / toggle all |
+| `S` / `A` | ask the AI to summarise the file / talk about its code |
+| `:q` | close this file; the last one closes the viewer |
 
-**Cursor-follow preview — on by default.** The shell panel's area previews whatever the cursor is on, as you move: code with syntax colour, images (real pixels on capable terminals), folder and archive listings, Office/PDF text. The shell keeps running underneath — only its pixels are borrowed. `Shift+J` (or a click) focuses the shell and shows it again; move back to a file pane and the preview returns. Both file panes stay visible the whole time. Remote (SFTP) panes deliberately show no preview — it would download every file the cursor touches. `:preview` (or the toggles menu) turns it off; `cian.set_option("preview", false)` starts it off.
+Each open file keeps its own cursor, folds and unsaved edits. Closing a split returns the other file to the tab strip rather than discarding it.
 
-**Replace — `:` in the viewer.** `s/old/new/` with the flags that matter: `g` for every match on a line, `c` to be asked about each one (`y` / `n` / `a` all / `q` stop), `i` to ignore case. The pattern follows the same rule as every search in cian — bare is a literal, `/re/` is a regex, and `${1}` style groups expand in the replacement. `\n` and `\t` in the replacement are real characters, so `s/;/;\n/g` splits a line. A `v`/`V` selection limits the range. The whole replace is one undo step.
+**The outline column** names the headings and definitions of Rust, Python, JavaScript, Java, C, shell, SQL, Lua, Go, Ruby, Markdown, YAML, INI, CSS and Makefiles, with the one the cursor is inside highlighted. It is regular expressions, not a language server: nothing to install, and it works on a stored procedure over SSH. `:outline` puts it away.
 
-Line endings are shown in the title (`· CRLF`) and **preserved on save** — opening a Windows file to read it never quietly rewrites it as LF. `:lf` / `:crlf` convert on purpose.
+**A ruler and a crosshair** sit over the text — every fifth column marked, every tenth numbered, the cursor's column picked out and its line tinted. `:ruler` puts them away.
 
-**The invisible characters.** Tabs, trailing spaces, ideographic spaces and the line ending are all drawn — `→`, `·`, `□`, `↓` for a line feed and `↵` for a carriage return — because those are exactly the characters that cause trouble while looking like nothing. `:ws` turns them off. Tab stops are every four columns by default; `cian.set_option("tab_width", 8)` widens them, which is what makes a tab-separated file line up (with stops every four, a four-character field fills one exactly and its tab moves on to the next, so the column after it starts at eight while a two-column `あ` in the same place starts at four — that is what tabs do, not a bug to fix).
+### Editing
 
-**A save gives the file back.** The viewer draws a tab four columns wide, but it keeps the tab: what is written back is the file's own characters, with the byte-order mark it arrived with, the line ending it arrived with, and its tabs. Each of those is invisible on screen and each is a real edit to the file, so none of them happens except on purpose — `:nobom` drops a BOM, `:lf` and `:crlf` change the line ending, `:expand` and `:unexpand` trade tabs for spaces.
+| Key / command | Does |
+|---|---|
+| `i` `a` `o` `O` `I` | insert; `Ctrl+S` saves in the file's own encoding, `Esc` leaves, `Shift+Q` discards |
+| `x` `dd` `D` `J` | delete and join, vim's small change set; `d` cuts a `v`/`V` selection |
+| `p` / `P` | paste after / at the cursor (Cmd/Ctrl+V works too) |
+| `u` | undo |
+| `E` (`:edit`) | open it in `$VISUAL` / `$EDITOR` — or nvim → vim → vi — and reload on return |
+| `Ctrl+V` / `Ctrl+Q` / `Alt+v` (`:block`) | rectangular selection — `d` `I` `A` `c`. Terminals differ about which they hand over |
+| `V` then `I` / `A` | insert at the start / end of every selected line |
+| `r` after a search | replace, with the pattern already filled in |
+| `:s/old/new/[gci]` | replace — `g` every match on a line, `c` confirm each, `i` ignore case |
+| `:expand` / `:unexpand` | tabs ↔ spaces |
+| `:lf` / `:crlf` | convert the line ending |
+| `:nobom` | drop a UTF-8 BOM (from the panes: the marked files) |
+| `:sort` `:rsort` `:uniq` | line order and duplicates, over the file or the selection |
+| `:han` / `:zen` | width — `:han` normalises full-width ASCII *and* half-width katakana |
+| `:reindent` | put a document indented by three different hands onto one ladder |
 
-**Copy and paste without a clipboard.** A yank is kept inside cian as well as on the system clipboard, and a paste takes the clipboard when it has something and the yank otherwise. A machine reached over SSH usually has no clipboard service at all, and copying three lines to somewhere else in the same file should not depend on one.
+**A save gives the file back.** What is written is the file's own characters — the BOM it arrived with, the line ending it arrived with, its tabs. All three are invisible on screen and all three are real edits, so none happens except on purpose (`:nobom`, `:lf` / `:crlf`, `:expand`). The title shows them: `· UTF-8 BOM`, `· CRLF`.
 
-**Asking about what you are reading.** Right-click in the viewer — or `Shift+Enter`, the keyboard's version of the same gesture — for a short menu, drawn over the file rather than instead of it: improve this writing, explain or write this command, review and fix this code — over the selection, or the whole file when nothing is selected — plus copy and the theme gallery. The file steps aside rather than closing while the answer comes back, and returns when the chat does, because the question is about it and it may have unsaved edits in it.
+**The invisible characters** are drawn — tab `→`, trailing space `·`, ideographic space `□`, line feed `↓`, carriage return `↵` — because those are the ones that cause trouble while looking like nothing. `:ws` turns them off. Tab stops are every 4 columns; `cian.set_option("tab_width", 8)` is what makes a tab-separated file line up.
 
-**Office documents that live in SharePoint.** Tell cian which local folders are synced libraries — `cian.sharepoint{ { local = …, url = … } }`, because a synced library looks like an ordinary directory and guessing wrong is worse than being told — and `:office` hands the *cloud* copy to Word or Excel. Not the synced file: opening that gets a copy to reconcile later, while the `ofe|u|` URI is what makes check-out and co-authoring work. `:officelink` writes a `.url` shortcut to the same address, which is the thing to paste into a mail — it points at the library rather than at one machine's sync folder, so it still works for whoever receives it. Both are in the right-click menu under OS, and only appear when they would do something.
+A rectangle is reckoned in **screen columns**, not characters, so a block drawn over Japanese text is the rectangle you drew; short lines are padded for an insert and left alone by a delete. Every one of these is a single undo step.
 
-**Editing inside an archive.** `F3` on a member opens it, and saving puts it back into the zip rather than leaving the work in a temp file nobody will look at again. The archive is rewritten whole beside the old one and swapped in only once it is complete, so an interrupted save cannot leave a half-written zip; if the write-back fails it says so and names the temp file that still holds the edit, because "saved" must never be said about work that went nowhere.
+**Binary files** are edited in hex: `i`, then hex digits overwrite the byte under the cursor. Overwrite only — offsets never shift, the size cannot change — and `Ctrl+S` writes a `.bak` first.
 
-**Reading is what Enter does.** It opens the file in the viewer; `Ctrl+Enter` hands it to its own program. That way round because looking at a file is the hundred-times-a-day action and launching one is occasional — and the viewer closes with Esc, while an application opened by accident has to be found and closed. On a directory Enter still goes in, and `Ctrl+Enter` still opens it in the other pane, neither of which a launcher could have meant.
+### Around the viewer
 
-**A ruler and a crosshair.** A column scale sits over the text — every fifth column marked, every tenth numbered — with the cursor's column picked out in it, and the cursor's line tinted underneath the syntax colours. The tint is a step away from the theme's own surface — lighter on a dark theme, darker on a light one — so it stays visible without swallowing the text, and the cursor cell is the page's two colours swapped so it never washes out against it. No stripe down the column: the ruler already marks it, and a full-height bar through the text costs more reading than it repays. Fixed-width records are most of what gets read on these machines, and counting characters by eye is what both are here to stop. `:ruler` puts them away.
-
-**Select all.** `Ctrl+A` marks every file in the listing — not `..`, which is not a file to operate on — and in the viewer it selects the whole buffer line-wise, so `y` copies the file and Esc clears it. Same idea, and which of the two it means is simply which is in front of you. Where a terminal keeps Ctrl for itself, bind `mark_all` to something it will deliver, or use `:markall`.
-
-**Comparing while editing.** With two files side by side, `=` marks what differs — a bar in the gutter on every line that changed or that only one side has — and `Tab` / `Shift+Tab` step through them. Both files stay fully editable and the marks follow every edit, so closing a difference makes it disappear as you type. Nothing is inserted to keep the two aligned: blank rows would line the files up beautifully and put text in the buffer that is not in the file, which is fine to read and wrong to edit inside. That is the difference between this and `:diff`, which is still there when a report is what you want.
-
-**Two at a time.** `Shift+F8` splits the viewer left and right, `Shift+F9` top and bottom, `Shift+F10` puts it back — the keys the shell panel already uses, because it is the same gesture. The other half shows the next open file, or a second view of this one when it is the only one open, which is how the top and bottom of a long configuration file get read together. `Shift+H` and `Shift+L` cross between them — as does clicking the other half — moving the focus, not the files, which stay on the side they were put; the half you are not in is dimmed. Closing the split keeps the file you were reading and returns the other one to the tabs rather than discarding it — it may have unsaved edits.
-
-**Several files at once.** Mark them and press `F3`: they all open, and `F2` / `Shift+F2` walk between them — or click a name in the strip along the top, which lists them all and picks out the one you are reading. Each keeps its own cursor, its own folds and its own unsaved edits while another is on screen, and `Esc` closes the one you are reading rather than all of them — only the last one closes the viewer.
-
-**The shape of a file.** Open anything the outline knows — Rust, Python, JavaScript, Java, C, shell, SQL, Lua, Go, Ruby, Markdown, YAML, INI, CSS, a Makefile — and a column down the left names its headings and definitions, with the one the cursor is *inside* highlighted. `]]` and `[[` step through them, clicking one jumps there, and `:outline` puts the column away. It is regular expressions rather than a parser: no language server to install, no project to build first, and it works on a stored procedure over SSH on a machine with no toolchain. A missed function costs one scroll, which is the right trade for that. A file type it has no rules for says so instead of showing an empty box.
-
-**Folding.** The same outline says where a section ends, so `Space` (or `za`) folds the one the cursor is in, `zA` takes the whole file either way — anything still open means close it all, everything closed means open it all — or click the `▾` in the gutter. A fold hides what is *under* its heading and never the heading itself, so closing everything collapses the file to its table of contents rather than to nothing. The cursor never sits inside a closed fold: close one from the middle and it comes out onto the heading. Folds step aside while you are editing — hiding lines from someone who is typing is a good way to lose an edit into a region they cannot see — and come back when you leave insert mode, against a freshly-read outline.
-
-**When the terminal keeps a key for itself.** A Mac terminal may take Ctrl+F for its own find bar and Ctrl+Q for the system zoom, and a key that never arrives cannot be handled. `:keys` reports each keystroke as cian received it, and names which keyboard mode is in effect; `CIAN_LEGACY_KEYS=1` starts without the enhanced-keyboard request. Bindings can then be moved somewhere your machine will actually deliver — `cian.set_keymap("alt+g", "grep_recursive")` — and the shortcuts that only had a Ctrl route also answer to a command: `:w`, `:q`, `:grep`, `:block`. `:redraw` repaints from nothing when a stray control character scrambles the screen.
-
-**Replacing what you just searched for.** `/` finds it, and then `r` opens the replace prompt with the pattern already in it — pick a delimiter the pattern does not contain, so a path full of slashes does not arrive broken. Add `c` before Enter to walk the hits one at a time, or leave it off to change them all.
-
-**Replacing across a grep.** `Ctrl+F` greps the tree; **`r`** on the results asks what the matched text should become and then shows you every line it would change — file, line number, and what that line ends up as, with the current text of the row under the cursor shown beneath. `Space` spares a line, `f` spares the rest of the file, `a` flips the lot, `Enter` writes. Nothing reaches the disk before `Enter`, and at that point each file is re-read: any line whose text has moved on since the preview is left alone and counted, because a bulk write against a stale line number is how tools like this eat data. Files it could not read — binary, too large, a cloud placeholder — are named rather than passed over in silence.
-
-**Whole lines.** `V` selects them, and then `I` and `A` put text at the start of every one, or at the end of every one — at each line's own end, without squaring them off first, because "put a comma on all of these" does not want padding.
-
-**Rectangles.** `Ctrl+V` (or `Ctrl+Q`, `Alt+v`, or `:block` — terminals differ about which of these they will hand over) selects a block, and now edits one: **`d`** cuts the rectangle out of every line, **`I`** and **`A`** type text once and put it down the left or right edge of all of them, **`c`** replaces what the rectangle covers. The rectangle is reckoned in screen columns, not characters — a full-width character is two of them — so a block drawn over Japanese text is the rectangle you drew rather than a ragged edge, and an edge falling inside a wide character takes it whole. Lines too short to reach the column are padded for an insert (the point of a column edit is that it lines up) and left alone by a delete (there was nothing inside the rectangle to remove). One undo step, whatever it touched.
-
-**Reshaping a document.** The same `:` prompt carries the transforms a text editor is kept around for, each acting on a `v`/`V` selection or the whole file, each one undo step: **`:sort`** / **`:rsort`** / **`:uniq`** for line order and duplicates; **`:han`** / **`:zen`** for width — `:han` makes full-width ASCII normal *and* half-width katakana normal, which are the two directions anyone actually means; **`:expand`** / **`:unexpand`** for leading tabs; **`:reindent`** to put a document indented by three different hands onto one ladder. **`:ws`** shows the characters you cannot see — trailing spaces, tabs, ideographic spaces — for the pass where one of them is the bug.
-
-**Edit in place:** the viewer's normal mode carries vim's small change set — `x` `dd` `D` `J` delete and join, `d` cuts a `v`/`V` selection, `u` undoes, and `i` `a` `o` `O` `I` drop into insert (`Ctrl+S` saves in the file's own encoding, `Esc` leaves). Quick config surgery never needs an editor round-trip. Prefer your own editor? **`E`** (or `:edit`) opens it in `$VISUAL` / `$EDITOR` — or nvim → vim → vi — and reloads when you're back.
-
-**Archives, more:** `:zip` / `:tar` / `:targz` bundle the marked files; `:zip -e` makes an encrypted one. `:unzip` (or right-click **▸ Extract here**) unpacks the file under the cursor into a fresh sub-folder. Locked zips still list their members on F3, and extracting one asks for the password first.
+- **Cursor-follow preview (on by default).** The shell panel's area previews whatever the cursor is on — code in colour, images, folder and archive listings, Office/PDF text. The shell keeps running underneath; `Shift+J` or a click brings it back. Remote panes deliberately show no preview (it would download every file the cursor touches). `:preview` turns it off.
+- **Walk into archives.** `Enter` on a zip or tarball puts the *pane* inside it, browsing like a folder. Copying out extracts relative to where you stand. For **zip** it works both ways: copy files in, `F2` renames a member, `d` deletes one — rewritten atomically, kept members raw-copied. tar/tar.gz are read-only, and password-protected zips are never modified. `F3` on a member opens the real viewer, and saving puts it back into the zip.
+- **Cloud files stay in the cloud.** A synced OneDrive / Teams / iCloud / Google Drive folder lists files that were never downloaded, and reading one pulls it over the network. Panes holding them get a **☁** column, and the sweeps — grep, `:count`, `:hash`, `:dupes`, `:preview` — skip them and say how many. Deliberate acts (`F3`, a copy, opening a file) still work. `cian.set_option("read_cloud_files", true)` lets the sweeps reach in.
+- **Ask about what you are reading.** Right-click (or `Shift+Enter`) for a short menu over the file: improve this writing, explain or write this command, review this code — over the selection, or the whole file. The file steps aside while the answer comes back and returns with it.
+- **SharePoint documents.** Tell cian which local folders are synced libraries — `cian.sharepoint{ { local = …, url = … } }` — and `:office` hands the *cloud* copy to Word or Excel, so check-out and co-authoring work. `:officelink` writes a `.url` shortcut to the same address, which is the thing to paste into a mail.
+- **Copy and paste without a clipboard.** A yank is kept inside cian as well as on the system clipboard, so copying three lines works on a machine with no clipboard service.
 
 ---
 
 ## Find things
 
-| Do this | And… |
+| Key | Does |
 |---|---|
 | **`/`** | filter the listing as you type (Enter keeps it, Esc clears) |
-| **`f`** | jump between matches in the current folder |
+| **`f`** | jump between matches in this folder |
 | **`Shift+F`** | find by name, anywhere below this folder |
-| **`Ctrl+F`** | grep inside files — Enter opens the hit right on its line |
-| **`b`** | branch view — flatten this whole subtree into one flat list |
+| **`Ctrl+F`** | grep inside files — Enter opens the hit on its line |
+| **`b`** | branch view — flatten the whole subtree into one listing |
 | **`,`** | sort by name / size / date / extension (`n` `s` `d` `e`) |
 
-Search runs in the background and streams results as it finds them — **Esc** stops it, `Enter` jumps to a result. In the find/grep results, **`p`** "panelizes" the matches into the pane, so you can mark and operate on them like any other listing.
+Searches run in the background and stream results as they arrive; **Esc** stops one. In a result list, **`p`** panelizes the matches into the pane so you can mark and operate on them.
 
-**Patterns.** Everywhere you type a search — find, grep, and `/` in the viewer — the same little language applies:
+**`r` on grep results replaces across every file that matched.** It shows every line it would change — file, line, and the result — where `Space` spares a line, `f` spares the rest of that file, `a` flips the lot and `Enter` writes. Nothing reaches disk before `Enter`, and each file is re-read then: any line whose text has moved on since the preview is skipped and counted, because a bulk write against a stale line number is how tools like this eat data.
+
+**Patterns** — the same language everywhere you type a search:
 
 | You type | It means |
 |---|---|
-| `error` | plain text, case-insensitive — matches `Error`, `ERROR`, … |
-| `/ORA-\d+/` | a regular expression (case-sensitive, as regexes usually are) |
-| `/ora-\d+/i` | the same, case-insensitive — the only flag is `i` |
-| `/^ERROR/` | lines *starting* with ERROR (grep) |
+| `error` | plain text, case-insensitive |
+| `/ORA-\d+/` | a regular expression |
+| `/ora-\d+/i` | the same, case-insensitive — `i` is the only flag |
+| `/^ERROR/` | lines starting with ERROR (grep) |
 | `/\.(log\|trc)$/` | names ending `.log` or `.trc` (find) |
 
-Wrap a pattern in slashes to make it a regex; leave it bare and it's the literal text you typed, no escaping to think about. A typo'd regex is rejected with its reason on the spot — it never falls back to matching something you didn't mean. The full syntax is Rust's [`regex`](https://docs.rs/regex) (Perl-like; no backreferences/lookaround).
-
-**Encodings.** Grep isn't UTF-8-only: a file that doesn't decode as UTF-8 is retried as **Shift_JIS**, so the Japanese enterprise logs that are still SJIS (Oracle alert logs, AIX batch output…) actually match — searching `エラー` finds it whichever encoding the file is in.
+Bare text is literal, with nothing to escape; slashes make it a regex ([Rust `regex`](https://docs.rs/regex) — no backreferences or lookaround). A typo'd regex is rejected with its reason rather than quietly matching something else.
 
 `:hidden` shows or hides dotfiles (shown by default).
 
----
-
-## Compare & clean up
-
-**Compare — `=`** (or `:diff`). Point the two panes at two files and `=` shows them **side by side**, differences highlighted; `n`/`N` jump between changes. Point them at two **folders** and `=` compares the trees byte-for-byte and lists what differs. From either:
-
-- **`>` / `<`** — copy the highlighted entry to the other side (a file or a whole subtree). WinMerge-style reconcile.
-- **`]` / `[`** — sync the *whole* tree one way: copy everything one side has that the other lacks or differs on. It never deletes, and confirms first.
-- **`w`** — save the comparison as a **side-by-side HTML or Markdown** report (the extension picks the format).
-- **`x`** — ask the AI to explain what changed.
-
-**Duplicates — `:dupes`** (or right-click **Find duplicate files**) finds byte-identical files under the current pane and shows them as a checklist; one per group is kept, the rest go through the normal delete confirmation.
-
-**Bulk rename — `:brename`** renames the marked files by a pattern — no AI, no network. Either a template (`report_{n3}.{ext}` → `report_001.log`, …) or a substitution (`s/IMG/photo/i`). You review `old → new` and tick which to apply.
-
-**Rename in your editor — `:bulkrename`** (or `:vidir`) opens the marked names — or the whole listing — as a text file in your editor, one per line. Edit any of them, save and quit, and each changed line renames that file (swaps included). The batch is all-or-nothing: a duplicate name, a lost line, or a collision cancels the whole thing rather than half-applying. `:cq` cancels.
+**Encodings.** A file that does not decode as UTF-8 is retried as Shift_JIS, so `エラー` finds it in either — which is what the Oracle alert logs and AIX batch output on these machines need.
 
 ---
 
-## Files, attributes, space
+## Compare and clean up
+
+**`=`** (`:diff`) — two files side by side with the differences highlighted (`n`/`N` between them), or two folders compared byte-for-byte. From either:
+
+| Key | Does |
+|---|---|
+| `>` / `<` | copy the highlighted entry to the other side — a file or a whole subtree |
+| `]` / `[` | sync the whole tree one way; never deletes, confirms first |
+| `w` | save the comparison as an HTML or Markdown report (the extension picks) |
+| `x` | ask the AI what changed |
+
+- **`:dupes`** finds byte-identical files under this pane and offers them as a checklist; one per group is kept, the rest go through the normal delete confirm.
+- **`:brename`** renames the marked files by a template (`report_{n3}.{ext}`) or a substitution (`s/IMG/photo/i`), with an `old → new` review. No AI, no network.
+- **`:bulkrename`** (`:vidir`) opens the names in your editor, one per line. Save and quit and each changed line renames its file, swaps included — all-or-nothing, so a duplicate or a lost line cancels the batch rather than half-applying it. `:cq` cancels.
+
+---
+
+## Files and version control
 
 | Command | Does |
 |---|---|
-| `:attr` | permissions & owner of the selection |
-| `:chmod 644` | change the mode (octal; Windows → use `:readonly`) |
+| `:attr` | permissions and owner |
+| `:chmod 644` | change the mode (Windows: `:readonly`) |
 | `:readonly on\|off` | toggle the read-only bit |
-| `:hash md5` / `:hash sha256` | checksum the selected files |
-| `:count` | count files, lines and source "steps" under the target |
+| `:hash md5` / `:hash sha256` | checksum the selection |
+| `:count` | count files, lines and source steps |
+| `:where` | which config files are being read, and from where |
 
-The status line always shows **free space** on the active pane's drive (`12.3G free / 100G`) — amber past 80% used, red past 95%.
+**Bundling.** `:zip` / `:tar` / `:targz` pack the marked files, `:zip -e` makes an encrypted zip, and `:unzip` (right-click **▸ Extract here**) unpacks the file under the cursor into a fresh sub-folder. A locked zip still lists its members on F3, and asks for the password before extracting.
 
-**Version control just works.** In a **git** or **svn** working copy, each entry gets a status badge (`●` staged, `✚` modified, `?` untracked, `‼` conflict), the status line shows the branch (or `svn r123`), and F3 marks changed lines against HEAD. Act on the selection with `:stage`, `:unstage`, `:discard`, `:gitlog`, `:gitdiff`, and `B` in the viewer for a blame gutter — all under right-click **Git ▸** / **SVN ▸**. cian shells out to your `git`/`svn`.
+The status line always shows free space on the active pane's drive — amber past 80 % used, red past 95 %.
+
+**git and svn just work.** Each entry gets a badge (`●` staged, `✚` modified, `?` untracked, `‼` conflict), the status line shows the branch (or `svn r123`), and F3 marks changed lines against HEAD. `:stage` `:unstage` `:discard` `:gitlog` `:gitdiff`, and `B` in the viewer for blame — all under right-click **Git ▸** / **SVN ▸**. cian shells out to your own `git` / `svn`.
 
 ---
 
-## Transfer files over SSH
+## SSH and remote panes
 
-Configure your hosts once (below), and the right-click **Transfer ▸** menu gives you **Upload → server** and **Download ← server**, in a file pane or the shell.
+**`:sftp`** (`:remote`, `:scp`) turns one pane into the server, framed in **carmine** so it is never mistaken for local. It moves like any pane, and:
 
-- **Upload** — pick a host/user, type the remote folder, optionally set the mode (chmod), and the marked files go up.
-- **Download** — browse the remote folder (Enter to open, `Space` to mark), then choose where they land: left pane, right pane, Desktop, or a typed path.
+| Key | Does |
+|---|---|
+| `c` / `m` | copy / move across the boundary — local↔server, or server↔server relayed through this machine |
+| `A` `a` `r` `d` | new folder, new file, rename, delete on the server (delete is recursive, and always confirms) |
+| `F3` | open a remote file; saving uploads it straight back |
+| `Esc` | leave, and the pane returns to local disk |
 
-**Or browse the server *in* a pane — `:sftp`** (also `:remote` / `:scp`). One pane becomes the remote host, framed in **carmine** so you never mistake it for local. Move around like any pane (`Enter`/`l` in, `-` up, arrows switch panes), then:
+Right-click **Transfer ▸** does the same as a one-shot: **Upload → server** (pick host, user, remote folder, optional mode) or **Download ← server** (browse, mark, choose where they land).
 
-- **`c` copy / `m` move** across the boundary — local↔server, or even server↔server (relayed through this machine). A move confirms first.
-- **`A` / `a` / `r` / `d`** — new folder / new file / rename / delete on the server. Deleting a folder removes it recursively; the server has no trash, so it always confirms.
-- **`F3`** opens a remote file; edit it (in place or with `E`) and saving uploads it straight back.
-- **`Esc`** leaves and the pane returns to your local disk.
+It is pure Rust — no external `scp`. SFTP, falling back to classic SCP where there is no SFTP subsystem; the status line says which. `cian.set_option("verify_transfers", true)` re-reads each file and checksums both ends.
 
-It's pure-Rust — no external `scp`. It uses **SFTP**, falling back to classic **SCP** on servers without an SFTP subsystem, and the status line says which. Turn on **verify** to re-read each transferred file and checksum both ends:
-
-```lua
-cian.set_option("verify_transfers", true)   -- off by default
-```
-
-**Connect — `Shift+S`** (or `:ssh`, or right-click) opens a two-stage picker: host, then user. The command is typed into the shell, so your own shell config and agent apply. Set your hosts in `init.lua`:
+**`Shift+S`** (`:ssh`) opens a host-then-user picker and types the command into the shell, so your own ssh config and agent apply. Hosts live in `init.lua`:
 
 ```lua
 cian.ssh({
@@ -242,40 +245,36 @@ cian.ssh({
 })
 ```
 
-**Passwords** are optional. cian types one when ssh asks for it (and uses it for SFTP/SCP). Three ways:
+Passwords are optional — cian types one when ssh asks, and reuses it for SFTP/SCP:
 
 ```lua
 users = {
-  { name = "postgres", password = "..." },                -- in this file
-  { name = "deploy",   password_cmd = "pass srv/deploy" }, -- from a credential store
-  "root",                                                  -- key auth; nothing stored
+  { name = "postgres", password = "..." },                 -- in this file
+  { name = "deploy",   password_cmd = "pass srv/deploy" },  -- from a credential store
+  "root",                                                   -- key auth; nothing stored
 }
 ```
 
-A plaintext `password` is convenient but it's a secret in a file — cian warns on Unix if that file is world-readable. `password_cmd` keeps it in your credential manager; key auth avoids the question entirely. The password is never logged, shown, or answered for a host-key prompt.
+A plaintext password is a secret in a file, and cian warns on Unix if that file is world-readable. It is never logged, never shown, and never answered to a host-key prompt.
 
 ---
 
 ## The shell panel
 
-The bottom panel is a real shell (your `$SHELL`). Focus it with **`Shift+J`**, a click, or `:shell`; **Esc** returns to the files. Full-screen programs (vim, less, htop) keep Esc and the function keys for themselves.
+The bottom panel is a real shell (your `$SHELL`). **`Shift+J`**, a click or `:shell` focuses it; **Esc** returns to the files. Full-screen programs (vim, less, htop) keep Esc and the function keys for themselves. Drag to select — it copies on release. Right-click for its own menu: SSH connect, paste, session log, SFTP/SCP, text encoding.
 
-Drag inside a shell pane to select — it copies on release, no modifier needed. **Right-click** for its menu: SSH connect, paste, session log, SFTP/SCP, and a text-encoding picker.
-
-**Tabs & splits** are on the function keys:
-
-| Key | Action |
+| Key | Does |
 |---|---|
 | `F1`–`F8` | switch to shell tab 1–8 |
 | `F9` / `F10` | new tab / close tab |
 | `Shift+F1` / `Shift+F2` | focus next / previous split pane |
-| `Shift+F8` / `Shift+F9` | split the active pane — side by side / stacked |
-| `Shift+F10` | close the active split (asks first) |
-| `F12` / `Shift+F12` | zoom the whole surface / just the split (toggle) |
+| `Shift+F8` / `Shift+F9` | split side by side / stacked |
+| `Shift+F10` | close the split (asks first) |
+| `F12` / `Shift+F12` | zoom the whole surface / just the split |
 
-**Synchronize input** across a tab's panes with right-click **▸ Synchronize input** (or `:sync`) — type once, it goes to every pane at once. The panes wear a bright **⇄ SYNC** border while it's on, so you can't miss it.
+**Synchronize input** across a tab's panes with `:sync` or right-click — type once, it reaches every pane, and they wear a bright **⇄ SYNC** border while it is on.
 
-**Snippets** — the lines you type over and over. Declare them once:
+**Snippets** are the lines you type over and over:
 
 ```lua
 cian.snippets{
@@ -285,15 +284,15 @@ cian.snippets{
 }
 ```
 
-**Ctrl+Shift+Enter** (or `:snip`, or right-click) opens the picker; type to filter, Enter sends the line to the shell. `enter = false` types it for you to review, `confirm = true` asks first.
+**Ctrl+Shift+Enter** (`:snip`) opens the picker; type to filter, Enter sends the line. `enter = false` types it for review, `confirm = true` asks first.
 
 ---
 
 ## Macros
 
-A macro sets up your session in one keystroke. Press **`@`** (or `:macros`, or right-click) to pick one. Two kinds:
+**`@`** (`:macros`) picks one. Two kinds.
 
-**Layout macros** build the *screen*: split the panel, SSH each pane somewhere, tint them apart, start logging.
+**Layout macros** build the screen — split the panel, SSH each pane somewhere, tint them apart, start logging:
 
 ```lua
 return {
@@ -305,9 +304,9 @@ return {
 }
 ```
 
-Per pane: `dir` (`right`/`down`), `cmd`, `steps` (a scripted login that can `{ wait = 2 }` and `{ expect = "SQL>" }` for a prompt), `bg`, `log`. Add `from = N` to build a grid, `zoom = true` to maximize first, `sync = true` to synchronize input once it's up. Full examples in [`examples/macro.en.lua`](examples/macro.en.lua) and [`examples/macro/`](examples/macro/).
+Per pane: `dir` (`right`/`down`), `cmd`, `steps` (a scripted login that can `{ wait = 2 }` and `{ expect = "SQL>" }`), `bg`, `log`. Add `from = N` for a grid, `zoom = true`, `sync = true`. Examples: [`examples/macro.en.lua`](examples/macro.en.lua), [`examples/macro/`](examples/macro/).
 
-**Script macros** automate *file operations* — the AFXW side of the word. Give a macro a `run` function and drive it with Lua's own `for` / `if`:
+**Script macros** automate file operations — give the macro a `run` function and use Lua's own `for` and `if`:
 
 ```lua
 return {
@@ -322,52 +321,75 @@ return {
 }
 ```
 
-`cx` gives you: **query** (`dir`, `other`, `marked`, `cursor`, `list`, `glob`), **operations** (`copy`, `move`, `delete`, `rename`, `mkdir`, `zip`, `read`, `write`), **subprocess** (`sh("cmd")` → `{ code, out, err }`), **path helpers** (`basename`, `stem`, `ext`, `join`, `exists`, `isdir`, `size`), and `message`. A dozen ready samples — sort by extension, dated backup, normalise line endings, clean empty files, checksum each file, generate an `index.md` — are in [`examples/macro/Escript.en.lua`](examples/macro/Escript.en.lua).
+`cx` has **query** (`dir`, `other`, `marked`, `cursor`, `list`, `glob`), **operations** (`copy`, `move`, `delete`, `rename`, `mkdir`, `zip`, `read`, `write`), **subprocess** (`sh("cmd")` → `{ code, out, err }`), **paths** (`basename`, `stem`, `ext`, `join`, `exists`, `isdir`, `size`) and `message`. A dozen worked samples are in [`examples/macro/Escript.en.lua`](examples/macro/Escript.en.lua).
 
-**Snippet or macro?** One shell, a command or two → snippet. Several panes wired up, or a file-op job → macro.
+`cian --macro thing.lua` runs one at startup (so a `.lua` associated with `cian.exe` runs on double-click); `--macro-name "…"` runs one from your config.
 
-**At startup:** `cian --macro thing.lua` runs a macro as cian comes up (so a `.lua` associated with `cian.exe` runs on double-click), or `--macro-name "..."` runs one from your config.
+**Snippet or macro?** One shell and a command or two → snippet. Several panes wired up, or a file-op job → macro.
 
 ---
 
-## AI & crmaine (optional)
+## AI (optional)
 
-With `cian.ai{...}` set, cian gets a local assistant (it calls itself **Carmine / カーマイン**). It's off unless configured, and always keeps you in the loop — nothing runs or deletes without your say-so.
+Off unless `cian.ai{…}` is set, and always in the loop — nothing runs or deletes without your say-so.
 
-| Do this | You get |
+| Command | You get |
 |---|---|
-| `:ai` | a chat, backed by Azure OpenAI |
-| `:aicmd <what you want>` | a shell command for the shell you're in (local, or the server you're SSH'd into) — drafted for you to review, never run for you |
-| `:aicommit` | a commit message drafted from the staged diff |
-| `:aijunk` | a checklist of likely-disposable files → normal delete confirm |
+| `:ai` | a chat |
+| `:aicmd <what you want>` | a shell command for the shell you are in, local or the server you are SSH'd into — drafted for review, never run for you |
+| `:aicommit` | a commit message from the staged diff |
+| `:aijunk` | a checklist of likely-disposable files → the normal delete confirm |
 | `:aiorganize` | a proposed folder layout → you approve the moves |
-| `:airename` | AI-suggested new names → you review `old → new` |
-| `:aisearch <…>` | files most relevant to a description, as a results list |
+| `:airename` | suggested names → you review `old → new` |
+| `:aisearch <…>` | files most relevant to a description |
 | `:aierror` | explain the last shell error |
 | `:aidiff` | explain the diff on screen (also `x` in the diff view) |
 | `:ailog` | triage the selected log — errors, timeline, likely cause |
-| `S` in F3 | summarise the file you're viewing |
+| `S` in F3 | summarise the file being read |
 
-**Give it context.** `cian.ai_context("…")` records facts about *your* setup (the OS, the deployment target, house rules) and cian prepends them to every prompt. Per-server facts go on the host: a `notes = "RHEL 8; Oracle 19c; …"` is handed over automatically when the shell is logged into that host.
+**Give it context.** `cian.ai_context("…")` records facts about your setup — the OS, the deployment target, house rules — and cian prepends them to every prompt. Per-server facts go on the host (`notes = "RHEL 8; Oracle 19c; …"`) and are handed over when the shell is logged into it.
 
-cian reaches the model through a small bundled Python helper (Windows broker sign-in, like the crmaine extension) — nothing to install beyond Python and a couple of packages. `auth_mode = "mock"` gives an offline echo for wiring it up, and `api_base_url` points it at a local server (Ollama, LM Studio). This is the one place cian isn't fully self-contained, which is why it's opt-in. See [`examples/init.en.lua`](examples/init.en.lua).
+cian reaches the model through a small bundled Python helper (Windows broker sign-in). `auth_mode = "mock"` is an offline echo for wiring it up; `api_base_url` points at a local server (Ollama, LM Studio). This is the one place cian is not fully self-contained, which is why it is opt-in. See [`examples/init.en.lua`](examples/init.en.lua).
 
-### Japanese input (IME) — commands that work with 日本語入力 on
+---
 
-While an IME is composing, a letter never reaches cian at all: the terminal holds it until it is committed, so `j`, `d`, `y` — every single-key command — do nothing until the IME is switched off by hand. cian cannot see a key it is not sent.
+## crmaine (optional)
 
-Punctuation is different, and cian now reads it: `：` `／` `？`, and the kana layout's `・`, are the colon / slash / question keys being pressed, so they open what those keys open. A `:` verb typed full-width (`ｍａｎ`) runs too. Text is never folded — a name may hold a full-width colon on purpose, and on Windows it must.
+If your team runs the **crmaine** VS Code extension, cian attaches to its already-running local server — same index, same endpoint, nothing extra to install. Start crmaine in VS Code, then:
 
-For the letters, the only real answer is to switch the input method with cian's mode, which is what `cian.ime{}` does — off while cian is being driven, on the moment it takes text (`:`, `/`, a rename, the chat, the shell), and back on when cian exits. It needs a helper that can switch the input source:
+```lua
+cian.crmaine{}   -- reads the port and cache dir from VS Code's own settings each launch
+```
 
-On macOS the helper ships with cian — [`examples/cian-ime.swift`](examples/cian-ime.swift), thirty lines around the system's own input-source API, so there is nothing third-party to install:
+| Command | You get |
+|---|---|
+| `:rag <question>` | ask the RAG over crmaine's index; the answer streams in |
+| `:agent <question>` | an agent answer, showing each tool call as it runs |
+| `:coding [question]` | ask about the current file's code (`A` in F3) |
+| `:impact` / `:contradiction` / `:glossary` | corpus analysis |
+| `:searchfiles <words>` | keyword-search the corpus into the pane |
+| `:ragdebug [question]` | what the retriever actually picked, with raw BM25 scores — no argument means the question you just asked |
+| `:index [dir]` | build cian's *own* index of a folder; `:ragshared` goes back to crmaine's |
+| `:raginfo` | diagnostics — the port, whether the server is up, which index is active |
+
+A crmaine chat wears crmaine's carmine (the local `:ai` model's windows are cyan, titled **AI - simple**), so you always know which answered. **Shift+Enter** newline, **Ctrl+R** past conversations (they survive a restart), **Ctrl+↑ / Ctrl+↓** rate the last answer, **Ctrl+D** see what the retriever fed it, **Esc** stop mid-stream. Answers render as Markdown and list their sources. Everything here is on the right-click **AI - crmaine ▸** menu too.
+
+---
+
+## Japanese input (IME)
+
+While an IME is composing, a letter never reaches cian at all — the terminal holds it until it is committed — so single-key commands do nothing until the IME is off. cian cannot see a key it is not sent.
+
+**Punctuation it can see.** `：` `／` `？`, and the kana layout's `・`, are read as the colon / slash / question keys, so they open what those keys open. A `:` verb typed full-width (`ｍａｎ`) runs too. Text is never folded: a name may hold a full-width colon on purpose, and on Windows it must.
+
+**For the letters, cian switches the input method with its own mode.** Commands are always the off source; when you start typing it puts back *whatever you were last typing with*, learnt by reading the input source each time it takes the keyboard back. Turn the IME off mid-rename and the next prompt opens off. Until it has learnt anything — or if the helper cannot be read — text opens with the IME off and you turn it on yourself, which is then what it remembers.
+
+It needs a helper that prints the current input source and switches to the one it is given. On macOS one ships with cian — thirty lines around the system's own API, nothing third-party:
 
 ```sh
 swiftc -O -o ~/.local/bin/cian-ime examples/cian-ime.swift
 cian-ime                                     # prints the current input source id
 ```
-
-Run it with no arguments to learn the ids on your machine, then name the helper and the id that means "no IME":
 
 ```lua
 cian.ime{
@@ -376,86 +398,45 @@ cian.ime{
 }
 ```
 
-**cian never decides that typing means Japanese.** Commands are always the off source; when you start typing it puts back *whatever you were last typing with*, which it learns by reading the input source every time it takes the keyboard back. Turn the IME off mid-rename and the next prompt opens off; turn it on and the next one opens on. Until it has learnt anything — a fresh install, or a helper it cannot read — text simply opens with the IME off and you turn it on yourself, which is then what it remembers.
-
-`macism` or `im-select` have the same shape if you already have one (`helper = "macism"`); an odd helper can spell out `query` and `set` (`set = "switch --to {}"`). On Windows, `im-select` works the same way. `:ime` shows the configuration, what cian remembers, and what the last switch did — the first thing to look at if nothing happens; `:ime on` / `:ime off` switch there and then, to check the helper works.
-
-### crmaine — your team's RAG, from cian
-
-If your team runs the **crmaine** VS Code extension, cian attaches to its already-running local server — same index, same endpoint, nothing extra to install. Start crmaine in VS Code, then add one line to init.lua (it reads the port and cache dir from VS Code's own settings each time):
-
-```lua
-cian.crmaine{}
-```
-
-| Command | You get |
-|---|---|
-| `:rag <question>` | ask the RAG over crmaine's index — the answer streams in |
-| `:agent <question>` | an agent answer (shows each tool call as it runs) |
-| `:coding [question]` | ask about the current file's code (`A` in F3 too) |
-| `:impact` / `:contradiction` / `:glossary` | corpus analysis over the index |
-| `:searchfiles <words>` | keyword-search the corpus into the pane |
-| `:ragdebug [question]` | what the retriever actually picked, with raw BM25 scores — no argument means the question you just asked |
-| `:index [dir]` | build cian's *own* index of a folder; `:ragshared` switches back to crmaine's |
-| `:raginfo` | diagnostics — the port, whether the server's up, which index is active |
-
-A crmaine chat wears crmaine's carmine (the local `:ai` model's own windows are cyan, titled **AI - simple**), so you always know which one answered: **Shift+Enter** for a newline, **Ctrl+R** for past conversations (they survive a restart), **Ctrl+↑ / Ctrl+↓** to rate the last answer, **Ctrl+D** to see what the retriever fed it, **Esc** to stop one mid-stream. Answers render as Markdown and list their **sources**. Every crmaine action is on the right-click **AI - crmaine ▸** menu too.
+`macism` and `im-select` have the same shape (`helper = "macism"`), on Windows too; an odd helper can spell out `query` and `set` (`set = "switch --to {}"`). **`:ime`** shows the configuration, what cian remembers and what the last switch did — the first thing to look at if nothing happens. `:ime on` / `:ime off` switch there and then.
 
 ---
 
 ## Configuration
 
-cian reads `~/.config/cian/init.lua` (override with `$CIAN_CONFIG_DIR`). It's Lua, on a small `cian` table — no init.lua needed to start:
+cian reads `~/.config/cian/init.lua` (override with `$CIAN_CONFIG_DIR`). It is Lua, on a small `cian` table, and no init.lua is needed to start:
 
 ```lua
 cian.set_theme({ accent = "#00d7d7", mark_fg = "yellow" })
 cian.set_option("clipboard_on_copy", false)
-cian.set_keymap("x", "delete")           -- binding a key replaces its default; "none" disables
+cian.set_keymap("x", "delete")           -- binding a key replaces its default; "none" disables it
 cian.on_open("md", function(path)        -- open .md files your way
   cian.spawn({ "open", "-a", "Typora", path })
 end)
 ```
 
-A broken config never blocks startup — cian shows the error and falls back to defaults for whatever didn't apply. `:reload` re-reads it live (keymaps, options, SSH hosts, open handlers; theme and borders need a restart).
-
-**Themes.** 13 presets, live-previewed: `:theme` opens a gallery, `:theme <name>` sets one, and you can theme each pane separately. The choice sticks across restarts.
-
-**Portable.** Put `init.lua` (and `shortcuts.lua` / `macro.lua`) next to the `cian` executable and that folder wins over `~/.config/cian`, for reading *and* writing. Drop the binary and its `.lua` on a USB stick and the whole setup travels with it, leaving nothing on the host.
-
-**Session.** Launched with no path, cian reopens the two folders you had last time. Pass a folder on the command line to override it.
-
-**Remapping keys.** Every file-pane action has a name you can bind:
-
-```lua
-cian.set_keymap("x", "delete")   -- x now deletes too
-cian.set_keymap("d", "rename")   -- d renames instead
-cian.set_keymap("d", "none")     -- d does nothing
-```
-
-[`examples/init.en.lua`](examples/init.en.lua) is a fully-commented template with every default binding and the complete action list. **Windows paths need long brackets** — a backslash is an escape in Lua:
-
-```lua
-cian.set_option("shell", [[C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe]])
-cian.set_option("shell", "powershell.exe")   -- or a bare name, looked up on PATH
-```
+- **A broken config never blocks startup** — cian reports the error and falls back to defaults for whatever did not apply. `:reload` re-reads it live (keymaps, options, SSH hosts, open handlers; theme and borders need a restart).
+- **Themes.** 13 presets, live-previewed: `:theme` opens the gallery, `:theme <name>` sets one, and panes can be themed separately. The choice survives a restart.
+- **Portable.** Put `init.lua` (and `shortcuts.lua` / `macro.lua`) next to the executable and that folder wins over `~/.config/cian` for reading *and* writing — binary and config travel together on a USB stick, leaving nothing on the host. `:where` says which files are in use.
+- **Session.** With no path on the command line, cian reopens the two folders you had last time.
+- **Every file-pane action has a name you can bind** — [`examples/init.en.lua`](examples/init.en.lua) is a fully-commented template with every default binding and the complete action list.
+- **Windows paths need long brackets**, since a backslash is an escape in Lua: `cian.set_option("shell", [[C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe]])` — or just a bare name looked up on PATH.
 
 ---
 
 ## How it fits together
 
-A cargo workspace, seven crates:
+A cargo workspace of seven crates. One main loop owns all UI and drawing; anything that could block — search, diff, transfer, AI — runs on a worker thread whose result is polled back each frame, so the UI never freezes.
 
 | Crate | Role |
 |---|---|
 | `cian-core` | Pure logic: file ops, marks, sorting, search, diff, dedup, git |
-| `cian-tui`  | Rendering & input (ratatui + crossterm), layout, popups, mouse |
-| `cian-pty`  | The embedded shell (portable-pty + vt100) |
-| `cian-scp`  | Built-in SFTP/SCP transfer (pure-Rust russh) |
-| `cian-ai`   | Optional AI helper (Azure OpenAI via a bundled Python script) |
-| `cian-lua`  | Lua config host (mlua): keymaps, themes, macros |
-| `cian-bin`  | The entry point — produces the `cian` binary |
-
-One main loop owns all the UI and drawing. Anything that could block — search, diff, transfer, AI — runs on a worker thread and its result is polled back each frame, so the UI never freezes.
+| `cian-tui` | Rendering and input (ratatui + crossterm), layout, popups, mouse |
+| `cian-pty` | The embedded shell (portable-pty + vt100) |
+| `cian-scp` | Built-in SFTP/SCP transfer (pure-Rust russh) |
+| `cian-ai` | Optional AI helper (Azure OpenAI via a bundled Python script) |
+| `cian-lua` | Lua config host (mlua): keymaps, themes, macros |
+| `cian-bin` | The entry point — produces the `cian` binary |
 
 ```mermaid
 flowchart TD
@@ -500,28 +481,30 @@ flowchart TD
 
 ## Install on Windows (offline)
 
-cian is a single self-contained `cian.exe` — no runtime, no DLLs, no network at runtime. To get a Windows x64 build without a Windows dev machine, use the bundled GitHub Actions workflow (it builds on a real Windows runner and packages a ready-to-carry zip):
+A single self-contained `cian.exe` — no runtime, no DLLs, no network. To get a Windows x64 build without a Windows dev machine, use the bundled GitHub Actions workflow:
 
-1. Push a tag (`git tag v0.1.0 && git push --tags`), or open **Actions → release → Run workflow**.
+1. Push a tag (`git tag v0.1.0 && git push --tags`), or **Actions → release → Run workflow**.
 2. Download `cian-windows-x64.zip` from that run.
-3. Carry it to the offline machine, unzip, and either run `cian.exe` or install it on your PATH:
+3. Unzip on the offline machine and either run `cian.exe` or install it on PATH:
 
-   ```powershell
-   powershell -ExecutionPolicy Bypass -File .\install.ps1
-   ```
+```powershell
+powershell -ExecutionPolicy Bypass -File .\install.ps1
+```
 
-That installs for the current user under `%LOCALAPPDATA%\Programs\cian` (no admin). For all users, run an elevated PowerShell:
+That installs for the current user under `%LOCALAPPDATA%\Programs\cian`, no admin needed. For all users, from an elevated PowerShell:
 
-   ```powershell
-   powershell -ExecutionPolicy Bypass -File .\install.ps1 -Dest "C:\Program Files\cian" -AllUsers
-   ```
+```powershell
+powershell -ExecutionPolicy Bypass -File .\install.ps1 -Dest "C:\Program Files\cian" -AllUsers
+```
 
-Open a new terminal and type `cian`. Use a Nerd Font terminal (Windows Terminal / WezTerm) for the file-type icons.
+Open a new terminal and type `cian`. Use a Nerd Font terminal for the file-type icons.
 
 ---
 
 ## Good to know
 
-- **Which build?** `cian --version` prints the commit baked in at build time. An old `cian.exe` left on PATH looks exactly like a missing feature.
-- **Border corners** default to square in the legacy Windows console (rounded ones are missing from some console fonts) and rounded elsewhere. Force it: `cian.set_option("borders", "rounded")` (or `"plain"`).
-- **Trouble?** Set `CIAN_LOG=/tmp/cian.log` to capture diagnostics. A panic restores the terminal on the way out, so you're never left needing `reset`.
+- **Which build?** `cian --version` prints the commit baked in at build time. An old `cian.exe` on PATH looks exactly like a missing feature.
+- **Border corners** default to square in the legacy Windows console and rounded elsewhere. Force it with `cian.set_option("borders", "rounded")` (or `"plain"`).
+- **A key that does nothing?** The terminal may be keeping it — a Mac terminal takes Ctrl+F for its find bar, Ctrl+Q for the system zoom — and a key that never arrives cannot be handled. **`:keys`** reports each keystroke as cian received it and names the keyboard mode in effect; `CIAN_LEGACY_KEYS=1` starts without the enhanced-keyboard request. Move the binding somewhere your machine will deliver (`cian.set_keymap("alt+g", "grep_recursive")`), or use the command: the Ctrl-only shortcuts all answer to `:w`, `:q`, `:grep`, `:block`.
+- **Screen scrambled?** `:redraw` repaints from nothing, for when a stray control character leaves text cian never drew.
+- **Trouble?** `CIAN_LOG=/tmp/cian.log` captures diagnostics. A panic restores the terminal on the way out, so you are never left needing `reset`.
