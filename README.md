@@ -30,7 +30,7 @@ Two panes side by side. You copy and move between them — that is the whole ide
 | Key | Does |
 |---|---|
 | **← / →** | move focus between the panes |
-| **Enter** | enter a folder or archive; read a file in the viewer |
+| **Enter** | enter a folder or archive; **read a file right here** — it replaces the listing, `j`/`k`/`Space`/`G` scroll it, `Esc` puts the listing back, `F3` takes it into the editor |
 | **Ctrl+Enter** | open the file with its own program (on a folder: open it in the other pane) |
 | **Alt+← / Alt+→** | this pane's history, back / forward (or click **◀ ▶** in the title) |
 | **Backspace** | up a level (or click the `..` row) |
@@ -73,6 +73,8 @@ Fuzzy pickers: type a few letters, press Enter.
 ---
 
 ## Look inside a file (`F3`)
+
+`F3` and Shift+Tab open the **editor**, which takes the screen. `Enter` reads a file **in the pane** instead — the listing gives way to the file, the other pane stays where it is, and `Esc` brings the listing back on the row you left. Everything below is the editor.
 
 ### What it opens
 
