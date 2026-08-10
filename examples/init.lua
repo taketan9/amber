@@ -347,6 +347,18 @@
 --   :coding [質問] 現在のファイル（F3で開いたもの、なければカーソル上）のコードを
 --                  コンテキストに crmaine Ajent へ相談。F3ビューアでは A キーでも起動。
 --
+-- cian.font{ set = ..., bigger = ..., smaller = ... }
+--   Ctrl+- / Ctrl++ でフォントサイズを1段ずつ。段階は記憶し、次回起動時に戻します。
+--   端末の中のプログラムは端末のフォントを変えられない（フォントはエミュレータのもの、
+--   移植性のあるエスケープシーケンスも無い）ので、実際に効くコマンドを教えてください:
+--     kitty : cian.font{ set = "kitten @ set-font-size {}", start = 13, min = 8, max = 28 }
+--     macOS : cian.font{
+--               bigger  = [[osascript -e 'tell application "System Events" to keystroke "+" using command down']],
+--               smaller = [[osascript -e 'tell application "System Events" to keystroke "-" using command down']],
+--             }
+--   `set`（`{}` にサイズが入る）が本命です。起動時に戻せるのはこの形だけ。
+--   bigger/smaller は「1段ずらす」だけなので、サイズはウィンドウの寿命まで。
+
 -- cian.ime{ off = ..., on = ... }
 --   日本語入力の自動切替。IME が変換中の英字は cian に届かない（端末が確定まで
 --   握っている）ため、単キーのコマンドは IME を切らないと効きません。cian の

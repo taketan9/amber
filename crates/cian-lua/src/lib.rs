@@ -288,6 +288,28 @@ impl ImeOptions {
     }
 }
 
+/// Settings from `cian.font{...}`: how to make the terminal's font bigger and
+/// smaller.
+///
+/// A program inside a terminal cannot resize that terminal's font — the font
+/// belongs to the emulator, and there is no portable escape sequence for it.
+/// What cian can do is run the command *your* terminal offers and remember
+/// the level, so `Ctrl+-` / `Ctrl++` mean the same thing in cian as they do
+/// everywhere else and the size survives a restart.
+#[derive(Debug, Clone, Default)]
+pub struct FontOptions {
+    /// Set an absolute size; `{}` is replaced by the level. Preferred, because
+    /// it is the only form that can be restored on the next launch.
+    pub set: Option<String>,
+    /// Or a step either way, when the terminal only offers relative changes.
+    pub bigger: Option<String>,
+    pub smaller: Option<String>,
+    /// The level to start from, and the range to stay inside.
+    pub start: i64,
+    pub min: i64,
+    pub max: i64,
+}
+
 /// Mutable accumulator shared with the Lua callbacks during script execution.
 #[derive(Default)]
 struct Builder {
@@ -302,6 +324,8 @@ struct Builder {
     crmaine: Option<CrmaineOptions>,
     /// Input-method switching, if `cian.ime{...}` was called.
     ime: Option<ImeOptions>,
+    /// Font-size stepping, if `cian.font{...}` was called.
+    font: Option<FontOptions>,
     /// Precondition facts about the environment, fed to every AI prompt.
     ai_context: Vec<String>,
     /// Command snippets declared with `cian.snippets{...}`.
@@ -332,6 +356,8 @@ pub struct Config {
     pub crmaine: Option<CrmaineOptions>,
     /// Input-method switching declared with `cian.ime{...}`, if any.
     pub ime: Option<ImeOptions>,
+    /// Font-size stepping declared with `cian.font{...}`, if any.
+    pub font: Option<FontOptions>,
     /// Precondition facts declared with `cian.ai_context{...}`, prepended to
     /// every AI prompt so answers assume the user's actual environment.
     pub ai_context: Vec<String>,
@@ -586,7 +612,7 @@ fn load_from(path: &Path) -> Config {
     // Pull the accumulated config out by cloning; the Lua handles stay valid
     // because we move `lua` into the returned Config below.
     #[allow(clippy::type_complexity)]
-    let (theme, options, keymaps, sharepoint, ext_open, ssh_hosts, ai, crmaine, ime, ai_context, snippets, builder_errors) = {
+    let (theme, options, keymaps, sharepoint, ext_open, ssh_hosts, ai, crmaine, ime, font, ai_context, snippets, builder_errors) = {
         let b = builder.borrow();
         (
             b.theme.clone(),
@@ -598,6 +624,7 @@ fn load_from(path: &Path) -> Config {
             b.ai.clone(),
             b.crmaine.clone(),
             b.ime.clone(),
+            b.font.clone(),
             b.ai_context.clone(),
             b.snippets.clone(),
             b.errors.clone(),
@@ -615,6 +642,7 @@ fn load_from(path: &Path) -> Config {
         ai,
         crmaine,
         ime,
+        font,
         ai_context,
         snippets,
         errors,
@@ -996,6 +1024,34 @@ fn install_api(lua: &Lua, builder: &Rc<RefCell<Builder>>) -> mlua::Result<()> {
                     }
                 }
                 b.borrow_mut().ime = Some(c);
+                Ok(())
+            })?,
+        )?;
+    }
+
+    // cian.font{ set = "…{}…" } or { bigger = "…", smaller = "…" }
+    {
+        let b = builder.clone();
+        cian.set(
+            "font",
+            lua.create_function(move |_, t: Option<Table>| {
+                let mut c = FontOptions { start: 13, min: 6, max: 40, ..Default::default() };
+                if let Some(t) = t {
+                    let s = |k: &str| -> Option<String> { t.get::<Option<String>>(k).ok().flatten() };
+                    c.set = s("set");
+                    c.bigger = s("bigger");
+                    c.smaller = s("smaller");
+                    for (k, slot) in [("start", 0), ("min", 1), ("max", 2)] {
+                        if let Ok(Some(v)) = t.get::<Option<i64>>(k) {
+                            match slot {
+                                0 => c.start = v,
+                                1 => c.min = v,
+                                _ => c.max = v,
+                            }
+                        }
+                    }
+                }
+                b.borrow_mut().font = Some(c);
                 Ok(())
             })?,
         )?;

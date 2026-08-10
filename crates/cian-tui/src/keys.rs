@@ -201,6 +201,21 @@ impl App {
             }
             return Ok(());
         }
+        // Ctrl+- / Ctrl++ — the terminal's font, one step at a time, from
+        // wherever you are: the panes, the viewer, the shell. The size is
+        // remembered between sessions (see `font.rs`); what it cannot be is
+        // done by cian alone, because the font belongs to the terminal.
+        if key.modifiers.contains(KeyModifiers::CONTROL)
+            && matches!(
+                key.code,
+                KeyCode::Char('-') | KeyCode::Char('+') | KeyCode::Char('=') | KeyCode::Char('_')
+            )
+            && !matches!(self.popup, Popup::Viewer { editing: true, .. })
+        {
+            let bigger = matches!(key.code, KeyCode::Char('+') | KeyCode::Char('='));
+            self.font_step(if bigger { 1 } else { -1 });
+            return Ok(());
+        }
         // Shift+Tab steps between the file being edited and the panes behind
         // it — the two halves of the window, rather than a dialog you finish
         // with. It works from the viewer, the panes and the shell, and opens

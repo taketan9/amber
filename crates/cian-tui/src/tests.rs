@@ -1958,6 +1958,24 @@
         }
     }
 
+    /// The state file holds more than one thing now, so writing one value must
+    /// not lose the others.
+    #[test]
+    fn the_state_file_keeps_the_values_it_already_had() {
+        let before = "# cian runtime state — managed by cian (see :where)\ntheme = \"nord\"\n";
+        let after = crate::state_with(before, "font_level", "15");
+        assert_eq!(crate::state_get_in(&after, "theme").as_deref(), Some("nord"), "{after}");
+        assert_eq!(crate::state_get_in(&after, "font_level").as_deref(), Some("15"));
+        // Setting it again replaces the line rather than adding a second one.
+        let again = crate::state_with(&after, "font_level", "16");
+        assert_eq!(again.matches("font_level").count(), 1, "{again}");
+        assert_eq!(crate::state_get_in(&again, "font_level").as_deref(), Some("16"));
+        assert_eq!(crate::state_get_in(&again, "theme").as_deref(), Some("nord"));
+        // …and a file that never had a header gets one.
+        let fresh = crate::state_with("", "theme", "dracula");
+        assert!(fresh.starts_with("# cian runtime state"), "{fresh}");
+    }
+
     /// Backspace in a search listing means the same as Esc. A set of results
     /// has no parent directory to climb to, so climbing to one is a surprise.
     #[test]
@@ -4948,16 +4966,16 @@
 
     #[test]
     fn saved_theme_round_trips_through_the_state_format() {
-        use crate::parse_theme_pref;
+        use crate::state_get_in;
         // The exact shape save_theme_pref writes (comment header + quoted value).
         let body = "# cian runtime state — managed by cian (see :where)\ntheme = \"dracula\"\n";
-        assert_eq!(parse_theme_pref(body).as_deref(), Some("dracula"));
+        assert_eq!(state_get_in(body, "theme").as_deref(), Some("dracula"));
         // Tolerant of spacing and missing quotes; comments and blanks ignored.
-        assert_eq!(parse_theme_pref("theme=nord").as_deref(), Some("nord"));
-        assert_eq!(parse_theme_pref("  theme   =   \"one-dark\"  ").as_deref(), Some("one-dark"));
-        assert_eq!(parse_theme_pref("# theme = \"ignored\"\n").as_deref(), None);
-        assert_eq!(parse_theme_pref("theme = \"\"\n").as_deref(), None);
-        assert_eq!(parse_theme_pref("nothing here").as_deref(), None);
+        assert_eq!(state_get_in("theme=nord", "theme").as_deref(), Some("nord"));
+        assert_eq!(state_get_in("  theme   =   \"one-dark\"  ", "theme").as_deref(), Some("one-dark"));
+        assert_eq!(state_get_in("# theme = \"ignored\"\n", "theme").as_deref(), None);
+        assert_eq!(state_get_in("theme = \"\"\n", "theme").as_deref(), None);
+        assert_eq!(state_get_in("nothing here", "theme").as_deref(), None);
     }
 
     #[test]

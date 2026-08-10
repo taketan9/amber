@@ -429,6 +429,18 @@ end)
 ```
 
 - **設定が壊れていても起動は止まりません。** エラーを表示し、適用できなかったものだけ既定値に戻します。`:reload` で再読込（キーマップ・オプション・SSHホスト・open ハンドラ。テーマと枠線は再起動が必要）。
+**フォントサイズ — `Ctrl+-` / `Ctrl++`。** 端末の中のプログラムは、その端末のフォントを変えられません（フォントはエミュレータのもので、移植性のあるエスケープシーケンスも存在しません）。cian がやるのは、キーを引き受け、段階を記憶し、あなたの端末が理解するコマンドを実行することです:
+
+```lua
+cian.font{ set = "kitten @ set-font-size {}", start = 13, min = 8, max = 28 }   -- kitty
+cian.font{                                                                     -- macOS（端末不問）
+  bigger  = [[osascript -e 'tell application "System Events" to keystroke "+" using command down']],
+  smaller = [[osascript -e 'tell application "System Events" to keystroke "-" using command down']],
+}
+```
+
+持つ価値があるのは `set`（`{}` にサイズが入る形）です。**起動時に戻せるのはこの形だけ**だからです。`bigger`/`smaller` は「1段ずらす」しか知らないので、サイズはウィンドウが生きている間だけ保ちます。未設定のときは、キーを押すとその旨を伝えます。
+
 - **テーマ。** 13プリセットをライブプレビュー：`:theme` でギャラリー、`:theme <名前>` で直接指定、ペインごとの指定も可能。選択は再起動後も残ります。
 - **ポータブル。** `init.lua`（と `shortcuts.lua` / `macro.lua`）を実行ファイルの隣に置くと、読み書きとも `~/.config/cian` より優先されます。USB メモリにバイナリと設定を入れて持ち運べば、ホストには何も残りません。`:where` でどのファイルが使われているか分かります。
 - **セッション。** パス引数なしで起動すると、前回の2つのフォルダを開き直します。

@@ -429,6 +429,18 @@ end)
 ```
 
 - **A broken config never blocks startup** — cian reports the error and falls back to defaults for whatever did not apply. `:reload` re-reads it live (keymaps, options, SSH hosts, open handlers; theme and borders need a restart).
+**Font size — `Ctrl+-` / `Ctrl++`.** A program inside a terminal cannot resize that terminal's font: the font belongs to the emulator and there is no portable escape sequence for it. What cian does is own the keys, remember the level between sessions, and run the command your terminal understands:
+
+```lua
+cian.font{ set = "kitten @ set-font-size {}", start = 13, min = 8, max = 28 }   -- kitty
+cian.font{                                                                     -- macOS, any terminal
+  bigger  = [[osascript -e 'tell application "System Events" to keystroke "+" using command down']],
+  smaller = [[osascript -e 'tell application "System Events" to keystroke "-" using command down']],
+}
+```
+
+`set` (with `{}` for the size) is the one worth having: it is the only form cian can put *back* at startup. A `bigger`/`smaller` pair only knows how to step, so the size lasts as long as the window does. With nothing configured the keys say so rather than doing nothing.
+
 - **Themes.** 13 presets, live-previewed: `:theme` opens the gallery, `:theme <name>` sets one, and panes can be themed separately. The choice survives a restart.
 - **Portable.** Put `init.lua` (and `shortcuts.lua` / `macro.lua`) next to the executable and that folder wins over `~/.config/cian` for reading *and* writing — binary and config travel together on a USB stick, leaving nothing on the host. `:where` says which files are in use.
 - **Session.** With no path on the command line, cian reopens the two folders you had last time.

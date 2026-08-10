@@ -42,6 +42,7 @@ mod ai;
 mod arcview;
 mod drop;
 mod crmaine;
+mod font;
 mod ime;
 mod preview;
 mod markdown;
@@ -2223,6 +2224,8 @@ pub struct App {
     vim_mark_wait: Option<char>,
     /// True while `.` is replaying, so the replay is not recorded as itself.
     vim_replaying: bool,
+    /// The terminal font size cian last asked for — see `font.rs`.
+    font_level: i64,
     vim_recording: Option<Vec<KeyEvent>>,
     vim_obj: Option<char>,
     vim_wait: Option<char>,
@@ -2538,6 +2541,7 @@ impl App {
             vim_last_change: None,
             vim_mark_wait: None,
             vim_replaying: false,
+            font_level: config.font.as_ref().map(|f| f.start).unwrap_or(0),
             vim_recording: None,
             vim_obj: None,
             vim_wait: None,
@@ -3125,41 +3129,80 @@ const STATE_FILE: &str = "state.toml";
 /// The theme name saved from a previous session's `:theme`, if any. Applied at
 /// startup on top of init.lua so a chosen theme survives a restart.
 pub(crate) fn load_saved_theme() -> Option<String> {
-    let path = cian_lua::config_read_path(STATE_FILE)?;
-    let text = std::fs::read_to_string(path).ok()?;
-    parse_theme_pref(&text)
+    state_get("theme")
 }
 
-/// Pull the `theme = "name"` value out of the state file's text. Parsed by hand
-/// (no TOML dependency for one value); split out so it can be tested directly.
-pub(crate) fn parse_theme_pref(text: &str) -> Option<String> {
+/// One value out of the state file. Hand-parsed `key = value` — no TOML
+/// dependency for a handful of scalars.
+pub(crate) fn state_get(key: &str) -> Option<String> {
+    let path = cian_lua::config_read_path(STATE_FILE)?;
+    let text = std::fs::read_to_string(path).ok()?;
+    state_get_in(&text, key)
+}
+
+pub(crate) fn state_get_in(text: &str, key: &str) -> Option<String> {
     for line in text.lines() {
         let line = line.trim();
         if line.starts_with('#') {
             continue;
         }
-        if let Some(rest) = line.strip_prefix("theme") {
-            if let Some(val) = rest.trim_start().strip_prefix('=') {
-                let val = val.trim().trim_matches('"').trim();
-                if !val.is_empty() {
-                    return Some(val.to_string());
-                }
-            }
+        let Some(rest) = line.strip_prefix(key) else { continue };
+        let Some(val) = rest.trim_start().strip_prefix('=') else { continue };
+        let val = val.trim().trim_matches('"').trim();
+        if !val.is_empty() {
+            return Some(val.to_string());
         }
     }
     None
+}
+
+/// Set one value, keeping the others. Best-effort: a read-only config dir
+/// just means the choice does not stick, which is not worth interrupting
+/// anyone over.
+pub(crate) fn state_set(key: &str, value: &str) {
+    let Some(path) = cian_lua::config_write_path(STATE_FILE) else { return };
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let old = std::fs::read_to_string(&path).unwrap_or_default();
+    let _ = std::fs::write(path, state_with(&old, key, value));
+}
+
+/// The state file's text with `key` set to `value` — replacing the line it
+/// was on, or added at the end.
+pub(crate) fn state_with(text: &str, key: &str, value: &str) -> String {
+    const HEAD: &str = "# cian runtime state — managed by cian (see :where)";
+    let mut out: Vec<String> = Vec::new();
+    let mut replaced = false;
+    for line in text.lines() {
+        let is_key = line
+            .trim_start()
+            .strip_prefix(key)
+            .map(|r| r.trim_start().starts_with('='))
+            .unwrap_or(false);
+        if is_key {
+            if !replaced {
+                out.push(format!("{key} = \"{value}\""));
+                replaced = true;
+            }
+            continue;
+        }
+        out.push(line.to_string());
+    }
+    if out.first().map(|l| l.trim() != HEAD).unwrap_or(true) {
+        out.insert(0, HEAD.to_string());
+    }
+    if !replaced {
+        out.push(format!("{key} = \"{value}\""));
+    }
+    out.join("\n") + "\n"
 }
 
 /// Persist the chosen whole-app theme so the next launch keeps it. Best-effort:
 /// a read-only config dir just means it does not stick, which is not worth
 /// interrupting the user over.
 pub(crate) fn save_theme_pref(name: &str) {
-    let Some(path) = cian_lua::config_write_path(STATE_FILE) else { return };
-    if let Some(dir) = path.parent() {
-        let _ = std::fs::create_dir_all(dir);
-    }
-    let body = format!("# cian runtime state — managed by cian (see :where)\ntheme = \"{name}\"\n");
-    let _ = std::fs::write(path, body);
+    state_set("theme", name);
 }
 
 /// Reveal `path` in the OS file manager, selecting it where the platform's
@@ -4361,6 +4404,8 @@ pub fn run(left: Option<PathBuf>, right: Option<PathBuf>, startup: StartupMacro)
     // Probe AI availability off-thread so the first right-click never blocks on
     // python starting up.
     app.spawn_ai_probe();
+    // Put back the font size chosen in an earlier session.
+    app.apply_saved_font();
     // Restore which pane had focus, if a session set it.
     if session.as_ref().map(|s| s.focused_right()).unwrap_or(false) {
         app.focus(FocusedPane::Right);
