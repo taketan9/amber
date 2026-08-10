@@ -493,17 +493,15 @@ mod tests {
         let _ = rx.recv_timeout(std::time::Duration::from_secs(10));
     }
 
-    /// Wait for the worker to catch up, syncing as the event loop would.
+    /// Sync, then wait for the worker to have finished what that queued.
+    ///
+    /// Waiting for the *file* to change instead would pass by being early:
+    /// when the job is about to write the value that is already there, there
+    /// is nothing to wait for and the assertion runs before the job does.
     #[cfg(unix)]
-    fn settle(app: &mut App, state: &std::path::Path, want: &str) -> String {
-        for _ in 0..600 {
-            std::thread::sleep(std::time::Duration::from_millis(20));
-            app.sync_ime();
-            let now = std::fs::read_to_string(state).unwrap_or_default();
-            if now == want {
-                return now;
-            }
-        }
+    fn sync_and_settle(app: &mut App, state: &std::path::Path) -> String {
+        app.sync_ime();
+        drain(app);
         std::fs::read_to_string(state).unwrap_or_default()
     }
 
@@ -524,8 +522,7 @@ mod tests {
 
         // Startup: the user had Japanese on, so that is remembered, and the
         // keyboard goes off for commands.
-        app.sync_ime();
-        assert_eq!(settle(&mut app, &state, "ABC"), "ABC", "commands are always off");
+        assert_eq!(sync_and_settle(&mut app, &state), "ABC", "commands are always off");
         assert_eq!(
             remembered_source().as_deref(),
             Some("Japanese"),
@@ -534,22 +531,18 @@ mod tests {
 
         // Typing: back to what the user had.
         app.mode = Mode::Command;
-        app.sync_ime();
-        assert_eq!(settle(&mut app, &state, "Japanese"), "Japanese", "typing restores it");
+        assert_eq!(sync_and_settle(&mut app, &state), "Japanese", "typing restores it");
 
         // The user turns the IME off themselves, mid-prompt…
         std::fs::write(&state, "ABC").unwrap();
         app.mode = Mode::Normal;
-        app.sync_ime();
-        settle(&mut app, &state, "ABC");
+        sync_and_settle(&mut app, &state);
         assert_eq!(remembered_source().as_deref(), Some("ABC"), "cian noticed the choice");
 
         // …so the next prompt opens off, not Japanese.
         app.mode = Mode::Command;
-        app.sync_ime();
-        drain(&mut app);
         assert_eq!(
-            std::fs::read_to_string(&state).unwrap(),
+            sync_and_settle(&mut app, &state),
             "ABC",
             "cian does not decide that text means Japanese",
         );
@@ -557,8 +550,7 @@ mod tests {
         // And the way out hands back what the user was typing with.
         std::fs::write(&state, "Japanese").unwrap();
         app.mode = Mode::Normal;
-        app.sync_ime();
-        settle(&mut app, &state, "ABC");
+        assert_eq!(sync_and_settle(&mut app, &state), "ABC");
         app.release_ime();
         assert_eq!(
             std::fs::read_to_string(&state).unwrap(),
@@ -590,13 +582,10 @@ mod tests {
         let p = dir.path().to_path_buf();
         let mut app = App::new(p.clone(), p, config).unwrap();
 
-        app.sync_ime();
-        settle(&mut app, &state, "ABC");
+        sync_and_settle(&mut app, &state);
         app.mode = Mode::Command;
-        app.sync_ime();
-        drain(&mut app);
         assert_eq!(
-            std::fs::read_to_string(&state).unwrap(),
+            sync_and_settle(&mut app, &state),
             "ABC",
             "nothing to restore, so nothing is restored",
         );
