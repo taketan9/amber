@@ -104,7 +104,7 @@ Vim-flavoured: `h j k l`, `w b`, `0 $`, `gg G`, `Ctrl-D/U`, `Ctrl-F/B`, `{` `}`,
 | `Space` / `za` / `zA` | fold one section / toggle all |
 | `S` / `A` | ask the AI to summarise the file / talk about its code |
 | `?` | the viewer's own key list, grouped by what you are doing |
-| `:q` | close this file; the last one closes the viewer |
+| `:q`  `:q!`  `:wq` | close this file — the last one closes the viewer. **Esc does not close**, and the **✕** in the corner does |
 
 Each open file keeps its own cursor, folds and unsaved edits. Closing a split returns the other file to the tab strip rather than discarding it.
 

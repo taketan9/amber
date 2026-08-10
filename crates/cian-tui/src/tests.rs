@@ -53,6 +53,23 @@
         assert_eq!(c.base_bg, None);
     }
 
+    /// Close the file the viewer is reading, the way it closes: `:q` — Esc
+    /// peels state and stops, as it does in vi.
+    fn quit_viewer(app: &mut App) {
+        for k in [':', 'q'] {
+            app.handle_key(key(k)).unwrap();
+        }
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+    }
+
+    /// Close it and throw away unsaved edits.
+    fn quit_viewer_discarding(app: &mut App) {
+        for k in [':', 'q', '!'] {
+            app.handle_key(key(k)).unwrap();
+        }
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+    }
+
     /// An app rooted at a temp dir containing `names`.
     fn app_with(names: &[&str]) -> (tempfile::TempDir, App) {
         app_with_keymaps(names, Vec::new())
@@ -643,7 +660,7 @@
         assert_eq!(app.outline_rect.width, 0);
 
         // A file type with no rules says so rather than showing an empty box.
-        app.handle_key(code(KeyCode::Esc)).unwrap();
+        quit_viewer(&mut app);
         open(&mut app, "plain.txt");
         assert!(shape(&app).is_none());
         for _ in 0..2 {
@@ -720,7 +737,7 @@
             "the recipe lines still start with a tab: {:?}",
             String::from_utf8_lossy(&out),
         );
-        app.handle_key(code(KeyCode::Esc)).unwrap();
+        quit_viewer(&mut app);
 
         open(&mut app, "bom.txt");
         assert_eq!(viewer_lines(&app), ["alpha", "beta"], "the BOM is not part of the text");
@@ -795,11 +812,11 @@
 
         // Esc closes this file; the rest stay open. Only the last one closes
         // the viewer. (The edited tab needs its discard key.)
-        app.handle_key(KeyEvent::new(KeyCode::Char('Q'), KeyModifiers::SHIFT)).unwrap();
+        quit_viewer_discarding(&mut app);
         assert_eq!(app.viewer_tab_count(), 2, "one closed, two left");
         assert!(matches!(app.popup, Popup::Viewer { .. }), "still viewing");
-        app.handle_key(code(KeyCode::Esc)).unwrap();
-        app.handle_key(code(KeyCode::Esc)).unwrap();
+        quit_viewer(&mut app);
+        quit_viewer(&mut app);
         assert!(matches!(app.popup, Popup::None), "the last one closes it");
         assert_eq!(app.viewer_tab_count(), 0);
     }
@@ -1261,8 +1278,8 @@
 
         // Closing every file leaves nothing of the split behind, so the next
         // dialog to open is visible.
-        app.handle_key(key('q')).unwrap();
-        app.handle_key(key('q')).unwrap();
+        quit_viewer(&mut app);
+        quit_viewer(&mut app);
         assert!(matches!(app.popup, Popup::None), "viewer gone: {:?}", app.popup);
         assert!(app.viewer_split.is_none(), "and so is the split");
         app.handle_key(key('q')).unwrap();
@@ -1645,6 +1662,64 @@
             }
             other => panic!("expected the viewer, got {other:?}"),
         }
+    }
+
+    /// The file closes with `:q`, as it does in vi — never with Esc, which is
+    /// the key you press to mean "never mind" and must not also mean "put
+    /// this away". The ✕ in the corner is the mouse's way out.
+    #[test]
+    fn only_q_and_the_button_close_the_viewer() {
+        let (_d, mut app) = viewer_on("alpha\nbeta\n");
+        let rows = render(&mut app, 100, 30);
+        assert!(rows.iter().any(|r| r.contains('✕')), "the button is drawn:\n{rows:?}");
+
+        // Esc says how to close rather than closing.
+        app.handle_key(code(KeyCode::Esc)).unwrap();
+        assert!(matches!(app.popup, Popup::Viewer { .. }), "Esc kept the file");
+        assert!(app.message.as_deref().is_some_and(|m| m.contains(":q")), "{:?}", app.message);
+
+        // A click on the ✕ closes it.
+        let x = app.viewer_close_rect;
+        assert!(x.width > 0, "the button has a place on screen");
+        app.handle_mouse(crossterm::event::MouseEvent {
+            kind: crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+            column: x.x,
+            row: x.y,
+            modifiers: KeyModifiers::NONE,
+        });
+        assert!(matches!(app.popup, Popup::None), "the button closed it");
+    }
+
+    /// Even a file cian cannot write closes with `:q` — the prompt used to be
+    /// offered only on editable files, which after this change would have left
+    /// a PDF or a docx with no way out at all.
+    #[test]
+    fn a_read_only_file_can_still_be_closed_and_refuses_to_be_written() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::write(d.path().join("bin.dat"), [0u8, 1, 2, 3]).unwrap();
+        let p = d.path().to_path_buf();
+        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        let i = app
+            .active_pane()
+            .unwrap()
+            .entries
+            .iter()
+            .position(|e| e.name == "bin.dat")
+            .unwrap();
+        app.active_pane_mut().unwrap().cursor = i;
+        app.handle_key(code(KeyCode::F(3))).unwrap();
+        // Force the read-only case the document viewers produce.
+        if let Popup::Viewer { editable, .. } = &mut app.popup {
+            *editable = false;
+        }
+        for k in [':', 'w'] {
+            app.handle_key(key(k)).unwrap();
+        }
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+        assert!(matches!(app.popup, Popup::Viewer { .. }), ":w did not close it");
+        assert!(app.message.is_some(), "…and said why it cannot be written");
+        quit_viewer(&mut app);
+        assert!(matches!(app.popup, Popup::None), ":q closes a read-only file");
     }
 
     /// Backspace in a search listing means the same as Esc. A set of results
@@ -2114,7 +2189,7 @@
 
         // A file with no outline says so, on the viewer's own footer rather
         // than on the status line hiding behind it.
-        app.handle_key(code(KeyCode::Esc)).unwrap();
+        quit_viewer(&mut app);
         open(&mut app, "plain.txt");
         for _ in 0..2 {
             app.handle_key(key(']')).unwrap();
@@ -2214,7 +2289,7 @@
         assert!(folds(&app).is_empty());
 
         // A file with nothing to fold says so instead of doing nothing.
-        app.handle_key(code(KeyCode::Esc)).unwrap();
+        quit_viewer(&mut app);
         std::fs::write(d.path().join("flat.txt"), "a\nb\n").unwrap();
         let _ = app.active_file_tabs_mut().map(|t| t.active_mut().reload());
         app.active_pane_mut().unwrap().cursor =
@@ -6502,8 +6577,8 @@
             other => panic!("expected the viewer, got {:?}", other),
         }
 
-        // Esc from the viewer returns to the grep results, not to nothing.
-        app.handle_key(code(KeyCode::Esc)).unwrap();
+        // Closing the viewer returns to the grep results, not to nothing.
+        quit_viewer(&mut app);
         assert!(
             matches!(app.popup, Popup::FindResults { .. }),
             "Esc returns to the results list, got {:?}",
@@ -7939,8 +8014,8 @@
             Popup::Viewer { find_query, .. } => assert!(find_query.is_none(), "search cleared, not closed"),
             _ => panic!("first Esc should have kept the viewer open"),
         }
-        app.handle_key(code(KeyCode::Esc)).unwrap();
-        assert!(matches!(app.popup, Popup::None), "second Esc closes");
+        quit_viewer(&mut app);
+        assert!(matches!(app.popup, Popup::None), ":q closes it");
     }
 
     #[test]
@@ -8384,7 +8459,7 @@
         }
         app.handle_key(code(KeyCode::Enter)).unwrap();
         assert!(matches!(app.popup, Popup::Viewer { .. }), "commit diff opens in the viewer");
-        app.handle_key(code(KeyCode::Esc)).unwrap();
+        quit_viewer(&mut app);
 
         // Diff vs HEAD after an edit.
         std::fs::write(dir.join("f.rs"), "let a = 1;\nlet B = 2;\n").unwrap();
@@ -8396,7 +8471,7 @@
             Popup::Viewer { view, .. } => assert!(view.lines.join("\n").contains("+let B = 2;"), "diff shown"),
             _ => panic!("diff did not open"),
         }
-        app.handle_key(code(KeyCode::Esc)).unwrap();
+        quit_viewer(&mut app);
 
         // F3 then B toggles blame.
         app.handle_key(code(KeyCode::F(3))).unwrap();
@@ -8529,10 +8604,10 @@
         let on_disk = std::fs::read_to_string(&file).unwrap();
         assert_eq!(on_disk, "AB\nhello\nworld\n", "edit persisted: {on_disk:?}");
 
-        // Esc leaves edit mode; another Esc closes (nothing unsaved now).
+        // Esc leaves edit mode; `:q` closes (nothing unsaved now).
         app.handle_key(code(KeyCode::Esc)).unwrap();
         assert!(matches!(app.popup, Popup::Viewer { editing: false, .. }));
-        app.handle_key(code(KeyCode::Esc)).unwrap();
+        quit_viewer_discarding(&mut app);
         assert!(matches!(app.popup, Popup::None));
     }
 
@@ -8672,12 +8747,12 @@
         app.handle_key(key('i')).unwrap();
         app.handle_key(key('z')).unwrap(); // dirty
         app.handle_key(code(KeyCode::Esc)).unwrap(); // leave edit mode
-        // Esc / q won't discard unsaved work…
-        app.handle_key(code(KeyCode::Esc)).unwrap();
+        // `:q` won't discard unsaved work…
+        quit_viewer(&mut app);
         assert!(matches!(app.popup, Popup::Viewer { dirty: true, .. }), "still open, warned");
-        // …but Shift+Q does.
-        app.handle_key(KeyEvent::new(KeyCode::Char('Q'), KeyModifiers::SHIFT)).unwrap();
-        assert!(matches!(app.popup, Popup::None), "Shift+Q discards and closes");
+        // …but `:q!` does.
+        quit_viewer_discarding(&mut app);
+        assert!(matches!(app.popup, Popup::None), ":q! discards and closes");
     }
 
     #[test]
@@ -8691,16 +8766,28 @@
         app.handle_key(code(KeyCode::F(3))).unwrap();
         let _ = render(&mut app, 100, 30);
 
-        // Run a `/` search, then Esc: it clears the search (viewer stays), and a
-        // second Esc closes — never dropping the viewer while a search is active.
+        // Run a `/` search, then Esc: it clears the search and the viewer stays.
         app.handle_key(key('/')).unwrap();
         for c in "beta".chars() { app.handle_key(key(c)).unwrap(); }
         app.handle_key(code(KeyCode::Enter)).unwrap();
         assert!(matches!(&app.popup, Popup::Viewer { find_query: Some(_), .. }), "search active");
         app.handle_key(code(KeyCode::Esc)).unwrap();
         assert!(matches!(&app.popup, Popup::Viewer { find_query: None, .. }), "Esc cleared the search");
+
+        // A second Esc does *not* close it — that is `:q`, as it is in vi —
+        // and it says so rather than doing nothing.
         app.handle_key(code(KeyCode::Esc)).unwrap();
-        assert!(matches!(app.popup, Popup::None), "Esc then closes");
+        assert!(matches!(app.popup, Popup::Viewer { .. }), "Esc does not close the file");
+        assert!(
+            app.message.as_deref().is_some_and(|m| m.contains(":q")),
+            "it says how: {:?}",
+            app.message,
+        );
+        for k in [':', 'q'] {
+            app.handle_key(key(k)).unwrap();
+        }
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+        assert!(matches!(app.popup, Popup::None), ":q closes it");
     }
 
     /// A zip with a small tree, for the archive-browse tests.
@@ -9142,8 +9229,7 @@
         } else {
             panic!("not a viewer");
         }
-        app.handle_key(code(KeyCode::Esc)).unwrap();
-        app.handle_key(code(KeyCode::Esc)).unwrap();
+        quit_viewer(&mut app);
         assert!(matches!(app.popup, Popup::None));
     }
 
@@ -9465,8 +9551,8 @@
             other => panic!("expected viewer, got {:?}", other),
         };
         assert_ne!(first, second, "Ctrl+n moved to the other hit");
-        // Esc still returns to the (stepped) results list.
-        app.handle_key(code(KeyCode::Esc)).unwrap();
+        // Closing still returns to the (stepped) results list.
+        quit_viewer(&mut app);
         assert!(matches!(app.popup, Popup::FindResults { .. }));
     }
 

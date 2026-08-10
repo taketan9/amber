@@ -132,8 +132,12 @@ impl App {
         //
         // It works in the Markdown preview too, so `:outline` is reachable
         // without dropping to the source first.
+        // On every file, not only the ones that can be edited: `:q` is how the
+        // viewer closes now, and a document that cannot be written is exactly
+        // as much in need of being closed as one that can. The commands that
+        // *write* check for themselves.
         if !ctrl && !alt && key.code == KeyCode::Char(':')
-            && matches!(self.popup, Popup::Viewer { editable: true, .. })
+            && matches!(self.popup, Popup::Viewer { .. })
         {
             if let Popup::Viewer { sub_input, .. } = &mut self.popup {
                 *sub_input = Some(String::new());
@@ -543,11 +547,10 @@ impl App {
 
         let body_h = (self.viewer_rect.height as usize).max(1);
         let half = (body_h / 2).max(1);
-        let mut close = false;
+        let mut say_how_to_close = false;
         let mut summarize = false;
         let mut coding = false;
-        let mut warn_unsaved = false;
-        if let Popup::Viewer { view, scroll, line, col, goal, visual, anchor, count, find_query, dirty, .. } = &mut self.popup {
+        if let Popup::Viewer { view, scroll, line, col, goal, visual, anchor, count, find_query, .. } = &mut self.popup {
             let cnt = count.take();
             // How many times a motion repeats: the count, or once.
             let times = cnt.unwrap_or(1).max(1);
@@ -593,30 +596,21 @@ impl App {
 
             match (ctrl, key.code) {
                 (false, KeyCode::Esc) => {
-                    // Esc peels state off one layer at a time: a half-typed
-                    // command first (handled above), then visual selection,
-                    // then an active search and its highlights, then it
-                    // refuses to drop unsaved edits, and only then closes.
-                    // `q` behaves the same; `Q` discards and closes.
+                    // Esc peels state off one layer at a time — a half-typed
+                    // command (handled above), a visual selection, an active
+                    // search and its highlights — and then stops. It does not
+                    // close the file: in vi that is `:q`, and a key that
+                    // sometimes means "never mind" and sometimes means "put
+                    // this away" is a key you cannot press quickly. The ✕ in
+                    // the corner is the mouse's way out.
                     if visual.is_some() {
                         *visual = None;
                     } else if find_query.is_some() {
                         *find_query = None;
-                    } else if *dirty {
-                        warn_unsaved = true;
                     } else {
-                        close = true;
+                        say_how_to_close = true;
                     }
                 }
-                (false, KeyCode::Char('q')) => {
-                    if *dirty {
-                        warn_unsaved = true;
-                    } else {
-                        close = true;
-                    }
-                }
-                // Discard unsaved edits and close.
-                (false, KeyCode::Char('Q')) => close = true,
                 // Alt+v too, since a terminal that keeps Ctrl+V usually keeps
                 // Ctrl+Q as well. Ahead of plain `v`, which this match would
                 // otherwise claim first. `:block` is the one route nothing can
@@ -736,14 +730,7 @@ impl App {
             }
             *scroll = (*scroll).min(n.saturating_sub(body_h));
         }
-        if warn_unsaved {
-            self.message = Some(tr(
-                self.lang,
-                "unsaved edits — Ctrl+S to save, or Shift+Q to discard & close",
-                "未保存の編集 — Ctrl+S で保存、Shift+Q で破棄して閉じる",
-            ).into());
-            return Ok(());
-        }
+
         if summarize {
             self.summarize_viewer();
             return Ok(());
@@ -752,8 +739,15 @@ impl App {
             self.start_coding("");
             return Ok(());
         }
-        if close {
-            self.close_viewer_file();
+        if say_how_to_close {
+            self.message = Some(
+                tr(
+                    self.lang,
+                    ":q closes this file  (:q! discards edits) — or the ✕ in the corner",
+                    ":q で閉じます（:q! で変更を破棄） — 右上の ✕ でも",
+                )
+                .into(),
+            );
         }
         Ok(())
     }
@@ -1249,6 +1243,17 @@ impl App {
         // but cannot save is worse than one you cannot edit.
         match cmd {
             "w" | "write" => {
+                if matches!(self.popup, Popup::Viewer { editable: false, .. }) {
+                    self.message = Some(
+                        tr(
+                            self.lang,
+                            "this one is read-only — it is shown as text, not held as it is",
+                            "これは読み取り専用です（テキストとして表示しているだけ）",
+                        )
+                        .into(),
+                    );
+                    return;
+                }
                 self.save_viewer_file();
                 return;
             }

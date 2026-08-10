@@ -2181,6 +2181,8 @@ pub struct App {
     /// Where each of the viewer's tabs was drawn in its title bar, so one can
     /// be clicked. Rebuilt every frame.
     viewer_tab_rects: Vec<(Rect, usize)>,
+    /// Where the viewer's ✕ button was drawn, so a click can find it.
+    viewer_close_rect: Rect,
     /// The two halves of a split, as drawn: clicking the one not in focus
     /// crosses to it.
     viewer_half_rects: [Rect; 2],
@@ -2484,6 +2486,7 @@ impl App {
             viewer_rect: Rect::new(0, 0, 0, 0),
             outline_rect: Rect::new(0, 0, 0, 0),
             viewer_tab_rects: Vec::new(),
+            viewer_close_rect: Rect::new(0, 0, 0, 0),
             viewer_half_rects: [Rect::new(0, 0, 0, 0); 2],
             viewer_gutter: 0,
             popup_zones: Vec::new(),
@@ -3986,6 +3989,7 @@ pub(crate) fn viewer_manual_lines(lang: Lang) -> Vec<String> {
         ("=", "mark what differs between the halves", "左右の差分に印"),
         ("Tab  Shift+Tab", "step through those differences", "差分を順に移動"),
         (":w  :q  :wq  :q!", "save, close, save and close, close discarding", "保存・閉じる・保存して閉じる・破棄して閉じる"),
+        ("✕", "the button in the corner closes it too — Esc does not", "右上の ✕ でも閉じる — Esc では閉じません"),
     ];
     const VIEW: &[Row] = &[
         ("Space  za  zA", "fold this section, toggle every fold", "この節を折りたたむ・全体を切替"),
@@ -4034,8 +4038,8 @@ pub(crate) fn viewer_manual_lines(lang: Lang) -> Vec<String> {
     }
     out.push(String::new());
     out.push(match lang {
-        Lang::En => "  Esc  leave — or abandon a half-typed command".to_string(),
-        Lang::Ja => "  Esc  閉じる — 入力途中のコマンドは取消".to_string(),
+        Lang::En => "  Esc  drop a selection, a search, a half-typed command".to_string(),
+        Lang::Ja => "  Esc  選択・検索・入力途中のコマンドを取り消す".to_string(),
     });
     out.push(match lang {
         Lang::En => "  Ctrl+.  or  :man   every key cian has".to_string(),

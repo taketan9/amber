@@ -463,6 +463,7 @@ pub(crate) fn draw(f: &mut Frame, app: &mut App) {
             v
         };
         let mut tab_rects: Vec<(Rect, usize)> = Vec::new();
+        let mut close_rect = Rect::new(0, 0, 0, 0);
         // A menu — or a chat, or the theme gallery — opened *from* the viewer
         // is drawn on top of it, not instead of it. The file is what the
         // question is about; losing sight of it while answering is the wrong
@@ -535,7 +536,7 @@ pub(crate) fn draw(f: &mut Frame, app: &mut App) {
                 Block::default().style(Style::default().fg(Color::Rgb(90, 90, 105))),
                 theirs,
             );
-            app.viewer_tab_rects = draw_viewer(
+            (app.viewer_tab_rects, app.viewer_close_rect) = draw_viewer(
                 f,
                 mine,
                 &mut app.popup,
@@ -592,8 +593,10 @@ pub(crate) fn draw(f: &mut Frame, app: &mut App) {
             app.viewer_tab_idx,
             &names,
             &mut tab_rects,
+            &mut close_rect,
         );
         app.viewer_tab_rects = tab_rects;
+        app.viewer_close_rect = close_rect;
     } else {
         app.popup_zones.clear();
     }
@@ -3805,6 +3808,7 @@ fn draw_popup(
     tab_at: usize,
     tab_names: &[String],
     tab_rects: &mut Vec<(Rect, usize)>,
+    close_rect: &mut Rect,
 ) {
     // Every popup with a shape of its own draws itself. The rest — the
     // confirm/notice dialogs, which differ only in their wording — fall through
@@ -3825,7 +3829,9 @@ fn draw_popup(
         Popup::History { .. } => draw_history(f, area, popup, zones, lang),
         Popup::DestPicker { .. } => draw_dest_picker(f, area, popup, dests, zones, lang),
         Popup::Viewer { .. } => {
-            *tab_rects = draw_viewer(f, area, popup, lang, (show_ws, ruler), msg.as_deref(), (tab_at, tab_names, &[]));
+            let (rects, close) = draw_viewer(f, area, popup, lang, (show_ws, ruler), msg.as_deref(), (tab_at, tab_names, &[]));
+            *tab_rects = rects;
+            *close_rect = close;
         }
         Popup::DirCompare { .. } => draw_dir_compare(f, area, popup, zones, lang),
         Popup::Diff { .. } => draw_diff(f, area, popup, lang),
@@ -5452,6 +5458,8 @@ fn split_viewer_areas(area: Rect, left_right: bool) -> (Rect, Rect) {
     }
 }
 
+/// Where the viewer's ✕ was drawn, so a click can find it. Set by
+/// `draw_viewer` each frame; zero-sized when the frame is too narrow for one.
 fn draw_viewer(
     f: &mut Frame,
     area: Rect,
@@ -5464,12 +5472,13 @@ fn draw_viewer(
     // Which of the viewer's open files this is, what they are all called, and
     // — when a comparison is running — what each line of *this* half is.
     tab: (usize, &[String], &[cian_core::diff::Mark]),
-) -> Vec<(Rect, usize)> {
+) -> (Vec<(Rect, usize)>, Rect) {
     let (show_ws, ruler) = marks;
     let (tab_at, tab_names, diff_marks) = tab;
     let tabs = tab_names.len();
     let mut tab_rects: Vec<(Rect, usize)> = Vec::new();
-    let Popup::Viewer { title, view, scroll, line, col, visual, anchor, find_input, find_query, sub_input, sub_walk, block_input, git_lines, markdown, preview, source, md_styles, md_map, md_width, editing, dirty, editable, hl, hl_lang, blame, shape, path, count, pending, .. } = popup else { return tab_rects };
+    let mut close_rect = Rect::new(0, 0, 0, 0);
+    let Popup::Viewer { title, view, scroll, line, col, visual, anchor, find_input, find_query, sub_input, sub_walk, block_input, git_lines, markdown, preview, source, md_styles, md_map, md_width, editing, dirty, editable, hl, hl_lang, blame, shape, path, count, pending, .. } = popup else { return (tab_rects, close_rect) };
     let rect = viewer_frame_rect(area);
     f.render_widget(Clear, rect);
 
@@ -5673,6 +5682,24 @@ fn draw_viewer(
         ]));
     let whole = rect.inner(Margin { vertical: 1, horizontal: 2 });
     f.render_widget(block, rect);
+
+    // A close button where a window keeps one. `:q` is the keyboard's way out
+    // now that Esc no longer closes; this is the mouse's, and it says out loud
+    // that the file *can* be closed — which a bare border does not.
+    let close_w = 3u16;
+    if rect.width > close_w + 4 {
+        let close = Rect::new(rect.x + rect.width - close_w - 1, rect.y, close_w, 1);
+        f.render_widget(
+            Paragraph::new(" ✕ ").style(
+                Style::default()
+                    .fg(readable_on(mode_color))
+                    .bg(mode_color)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            close,
+        );
+        close_rect = close;
+    }
 
     // The outline takes a column off the left, but only when there is room
     // for both it and a usable amount of text — on a narrow terminal the file
@@ -6258,7 +6285,7 @@ fn draw_viewer(
             );
         }
     }
-    tab_rects
+    (tab_rects, close_rect)
 }
 
 fn draw_dir_compare(

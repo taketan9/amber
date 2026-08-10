@@ -32,6 +32,29 @@ impl App {
             // inside the frame and opens with " ◂ ▸ ", which puts the arrows
             // at the third and fifth columns of the box.
             let frame = self.viewer_frame;
+            // The ✕ in the corner. Since Esc no longer closes the file, this
+            // is the way out that does not have to be known about.
+            let x_rect = self.viewer_close_rect;
+            if matches!(ev.kind, MouseEventKind::Down(MouseButton::Left))
+                && x_rect.width > 0
+                && row == x_rect.y
+                && col >= x_rect.x
+                && col < x_rect.x + x_rect.width
+            {
+                if matches!(self.popup, Popup::Viewer { dirty: true, .. }) {
+                    self.message = Some(
+                        tr(
+                            self.lang,
+                            "unsaved changes — :w to save, :q! to discard",
+                            "未保存の変更があります — :w で保存、:q! で破棄",
+                        )
+                        .into(),
+                    );
+                } else {
+                    self.close_viewer_file();
+                }
+                return;
+            }
             if self.viewer_tab_count() > 1
                 && matches!(ev.kind, MouseEventKind::Down(MouseButton::Left))
                 && row == frame.y
