@@ -3929,40 +3929,117 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
 /// `?` inside a file should answer "what can I do *here*", and the whole
 /// manual — every file operation, every transfer, every SSH key — buries that
 /// answer among four screens of things this window cannot do.
+/// `?` in the viewer: the keys of *this* window, grouped the way vi's own
+/// quick reference is — by what you are doing, not by where the code puts
+/// them.
+///
+/// Written out rather than filtered out of the whole manual. That filter
+/// matched on the word "viewer", so it produced whatever happened to mention
+/// it — `:nobom` under a heading called "move" — and missed every key that
+/// did not, which was most of them.
 pub(crate) fn viewer_manual_lines(lang: Lang) -> Vec<String> {
-    let header = match lang {
-        Lang::En => "cian — the viewer (F3)",
-        Lang::Ja => "cian — ビューア（F3）",
-    };
-    let mut out = vec![header.to_string()];
-    for ((en_title, ja_title), entries) in manual_sections() {
-        // A section counts when something in it is about the viewer — either
-        // its own heading says so, or one of its lines does.
-        let about = |s: &str| {
-            let s = s.to_lowercase();
-            s.contains("viewer") || s.contains("ビューア") || s.contains("f3")
-        };
-        let heading = about(en_title) || about(ja_title);
-        let kept: Vec<&ManualEntry> = entries
-            .iter()
-            .filter(|e| heading || about(e.keys) || about(e.en) || about(e.ja))
-            .collect();
-        if kept.is_empty() {
-            continue;
-        }
+    // (keys, english, japanese). An empty key line is a blank separator.
+    type Row = (&'static str, &'static str, &'static str);
+    const MOVE: &[Row] = &[
+        ("h j k l", "left, down, up, right", "左・下・上・右"),
+        ("w  b", "word forward, word back", "次の語・前の語"),
+        ("0  $", "start, end of line", "行頭・行末"),
+        ("gg  G", "top, bottom — 48G is line 48", "先頭・末尾 — 48G で48行目"),
+        ("{count}", "before a motion, repeats it: 3j, 5w, 2}", "動作の前に付けて回数指定: 3j 5w 2}"),
+        ("Ctrl+D  Ctrl+U", "half a page down, up", "半ページ下・上"),
+        ("Ctrl+F  Ctrl+B", "a page down, up", "1ページ下・上"),
+        ("{  }", "previous, next blank line", "前後の空行へ"),
+        ("%", "the matching bracket", "対応する括弧へ"),
+        ("]]  [[", "next, previous heading or definition", "次・前の見出し／定義"),
+        ("zz  zt  zb", "this line to the middle, top, bottom", "この行を中央・上・下へ"),
+    ];
+    const FIND: &[Row] = &[
+        ("/", "search — bare text is literal, /re/ is a regex", "検索 — 素の文字はリテラル、/re/ は正規表現"),
+        ("n  N", "next, previous match", "次・前の一致"),
+        ("*  #", "search the word under the cursor, forward, back", "カーソル位置の語を前方・後方検索"),
+        ("r", "replace what you just searched for", "直前の検索語を置換"),
+        (":s/old/new/", "replace — g all on a line, c confirm, i ignore case", "置換 — g 行内全部・c 確認・i 大小無視"),
+    ];
+    const SELECT: &[Row] = &[
+        ("v  V", "select by character, by line", "文字選択・行選択"),
+        ("Ctrl+V  Alt+v", "rectangular selection (:block if neither arrives)", "矩形選択（どちらも届かなければ :block）"),
+        ("Ctrl+A", "select the whole file", "ファイル全体を選択"),
+        ("o", "swap which end of the selection moves", "選択の伸ばす側を入れ替え"),
+        ("y", "copy the selection", "選択をコピー"),
+        ("p  P", "paste after, at the cursor", "カーソルの後・位置に貼り付け"),
+    ];
+    const EDIT: &[Row] = &[
+        ("i a o O I", "insert — Ctrl+S saves, Esc leaves, Shift+Q discards", "挿入 — Ctrl+S 保存・Esc 終了・Shift+Q 破棄"),
+        ("x  dd  D  J", "delete a character, a line, to end of line, join", "1文字・1行・行末まで削除、行連結"),
+        ("d", "cut the selection", "選択を切り取り"),
+        (">>  <<", "shift lines by a tab stop (> and < on a selection)", "行をタブ幅ずらす（選択中は > と <）"),
+        ("~", "swap the case under the cursor", "カーソル位置の大小を反転"),
+        ("u", "undo", "取り消し"),
+        ("V then I  A", "insert at the start, end of every selected line", "選択全行の先頭・末尾に挿入"),
+        ("E", "open it in your own editor", "外部エディタで開く"),
+    ];
+    const FILES: &[Row] = &[
+        ("F2  Shift+F2", "next, previous open file", "次・前の開いているファイル"),
+        ("Shift+F8  Shift+F9", "split left-right, top-bottom", "左右・上下に分割"),
+        ("Shift+F10", "close the split", "分割を解除"),
+        ("Shift+H  Shift+L", "cross to the other half", "もう片方へ移動"),
+        ("=", "mark what differs between the halves", "左右の差分に印"),
+        ("Tab  Shift+Tab", "step through those differences", "差分を順に移動"),
+        (":w  :q  :wq  :q!", "save, close, save and close, close discarding", "保存・閉じる・保存して閉じる・破棄して閉じる"),
+    ];
+    const VIEW: &[Row] = &[
+        ("Space  za  zA", "fold this section, toggle every fold", "この節を折りたたむ・全体を切替"),
+        (":outline  :ruler", "the shape column, the column scale", "アウトライン列・ルーラー"),
+        (":ws", "show tabs, trailing spaces, line endings", "タブ・行末空白・改行を表示"),
+        (":preview", "rendered Markdown ↔ source", "Markdown 表示 ↔ ソース"),
+        ("e", "force a text encoding", "文字コードを指定"),
+        ("B", "blame gutter — who last changed each line", "blame 表示（各行の最終変更者）"),
+        ("m", "open the mermaid diagrams in a browser", "mermaid 図をブラウザで開く"),
+    ];
+    const ASK: &[Row] = &[
+        ("S", "summarise this file", "このファイルを要約"),
+        ("A", "ask crmaine about this code", "このコードを crmaine に相談"),
+        ("Shift+Enter", "the menu — ask, copy, theme (right-click too)", "メニュー — 相談・コピー・テーマ（右クリックでも）"),
+    ];
+    const LINES: &[Row] = &[
+        (":sort :rsort :uniq", "order and de-duplicate", "並べ替え・重複除去"),
+        (":han  :zen", "full-width ↔ half-width", "全角 ↔ 半角"),
+        (":expand  :unexpand", "tabs ↔ spaces", "タブ ↔ 空白"),
+        (":lf  :crlf  :nobom", "line ending, byte-order mark", "改行コード・BOM"),
+        (":reindent", "one indent ladder for the whole file", "インデントを揃える"),
+    ];
+    let sections: &[((&str, &str), &[Row])] = &[
+        (("Move", "移動"), MOVE),
+        (("Find and replace", "検索と置換"), FIND),
+        (("Select and copy", "選択とコピー"), SELECT),
+        (("Edit", "編集"), EDIT),
+        (("Whole lines", "行の加工"), LINES),
+        (("Files and splits", "ファイルと分割"), FILES),
+        (("What is shown", "表示"), VIEW),
+        (("Ask", "相談"), ASK),
+    ];
+    let mut out = vec![match lang {
+        Lang::En => "cian — the viewer (F3)".to_string(),
+        Lang::Ja => "cian — ビューア（F3）".to_string(),
+    }];
+    for ((en, ja), rows) in sections {
         out.push(String::new());
         out.push(match lang {
-            Lang::En => en_title.to_string(),
-            Lang::Ja => ja_title.to_string(),
+            Lang::En => en.to_string(),
+            Lang::Ja => ja.to_string(),
         });
-        for e in kept {
-            out.push(format!("  {:<17} {}", e.keys, e.desc(lang)));
+        for (keys, e, j) in *rows {
+            out.push(format!("  {:<19} {}", keys, if lang == Lang::Ja { j } else { e }));
         }
     }
     out.push(String::new());
     out.push(match lang {
-        Lang::En => "  (? here, Ctrl+. or :man for everything)".to_string(),
-        Lang::Ja => "  （ここでは ? / 全体は Ctrl+. か :man）".to_string(),
+        Lang::En => "  Esc  leave — or abandon a half-typed command".to_string(),
+        Lang::Ja => "  Esc  閉じる — 入力途中のコマンドは取消".to_string(),
+    });
+    out.push(match lang {
+        Lang::En => "  Ctrl+.  or  :man   every key cian has".to_string(),
+        Lang::Ja => "  Ctrl+.  または  :man   cian の全キー".to_string(),
     });
     out
 }

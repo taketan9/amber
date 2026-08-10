@@ -89,7 +89,9 @@ Shift_JIS is detected and decoded automatically (UTF-16 by BOM); `e` forces an e
 
 ### Reading
 
-Vim-flavoured: `h j k l`, `w b`, `0 $`, `gg G`, `Ctrl-d/u`, `%` to the matching bracket, `42G` to a line. `/` searches, `n`/`N` repeat. `v` `V` `Ctrl-v` select, `y` copies, `Ctrl+A` selects the whole file.
+Vim-flavoured: `h j k l`, `w b`, `0 $`, `gg G`, `Ctrl-D/U`, `Ctrl-F/B`, `{` `}`, `%` to the matching bracket. `/` searches and `n`/`N` repeat; `*` and `#` search the word under the cursor. `v` `V` `Ctrl-v` select, `y` copies, `Ctrl+A` selects the whole file. `zz` `zt` `zb` put the cursor's line in the middle, top or bottom of the window.
+
+**A count goes in front of a motion** and repeats it — `3j`, `5w`, `2}`, `48G` for line 48 — and what you have typed so far shows on the prompt row, so `48G` is not done in the dark. `Esc` abandons it.
 
 | Key | Does |
 |---|---|
@@ -101,6 +103,7 @@ Vim-flavoured: `h j k l`, `w b`, `0 $`, `gg G`, `Ctrl-d/u`, `%` to the matching 
 | `]]` / `[[` | next / previous heading or definition |
 | `Space` / `za` / `zA` | fold one section / toggle all |
 | `S` / `A` | ask the AI to summarise the file / talk about its code |
+| `?` | the viewer's own key list, grouped by what you are doing |
 | `:q` | close this file; the last one closes the viewer |
 
 Each open file keeps its own cursor, folds and unsaved edits. Closing a split returns the other file to the tab strip rather than discarding it.
@@ -117,6 +120,8 @@ Each open file keeps its own cursor, folds and unsaved edits. Closing a split re
 | `x` `dd` `D` `J` | delete and join, vim's small change set; `d` cuts a `v`/`V` selection |
 | `p` / `P` | paste after / at the cursor (Cmd/Ctrl+V works too) |
 | `u` | undo |
+| `~` | swap the case under the cursor |
+| `>>` / `<<` | shift lines by a tab stop (`>` / `<` on a selection) |
 | `E` (`:edit`) | open it in `$VISUAL` / `$EDITOR` — or nvim → vim → vi — and reload on return |
 | `Ctrl+V` / `Ctrl+Q` / `Alt+v` (`:block`) | rectangular selection — `d` `I` `A` `c`. Terminals differ about which they hand over |
 | `V` then `I` / `A` | insert at the start / end of every selected line |

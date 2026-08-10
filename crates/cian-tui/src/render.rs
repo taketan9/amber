@@ -4434,7 +4434,9 @@ fn draw_manual(f: &mut Frame, area: Rect, popup: &mut Popup, lang: Lang) {
 fn draw_report(f: &mut Frame, area: Rect, popup: &mut Popup, lang: Lang) {
     let Popup::Report { title, lines, scroll, .. } = popup else { return };
     let title = title.clone();
-    draw_scrolling_text(f, area, lines, scroll, &title, 76, lang);
+    // Wider than the manual: a report is a table of keys or of scores, and a
+    // truncated row is a row that has to be guessed at.
+    draw_scrolling_text(f, area, lines, scroll, &title, 92, lang);
 }
 
 /// The scrolling viewport both of the above share: a bordered block whose body
@@ -5467,7 +5469,7 @@ fn draw_viewer(
     let (tab_at, tab_names, diff_marks) = tab;
     let tabs = tab_names.len();
     let mut tab_rects: Vec<(Rect, usize)> = Vec::new();
-    let Popup::Viewer { title, view, scroll, line, col, visual, anchor, find_input, find_query, sub_input, sub_walk, block_input, git_lines, markdown, preview, source, md_styles, md_map, md_width, editing, dirty, editable, hl, hl_lang, blame, shape, path, .. } = popup else { return tab_rects };
+    let Popup::Viewer { title, view, scroll, line, col, visual, anchor, find_input, find_query, sub_input, sub_walk, block_input, git_lines, markdown, preview, source, md_styles, md_map, md_width, editing, dirty, editable, hl, hl_lang, blame, shape, path, count, pending, .. } = popup else { return tab_rects };
     let rect = viewer_frame_rect(area);
     f.render_widget(Clear, rect);
 
@@ -5683,7 +5685,11 @@ fn draw_viewer(
     let show_ruler = ruler && !*preview && view.kind == cian_core::viewer::ViewKind::Text;
     // A prompt being typed takes a row of its own above the hints (see
     // `prompt` further down), so the text gives one up while it is open.
-    let prompt_row = sub_input.is_some() || find_input.is_some() || block_input.is_some();
+    let prompt_row = sub_input.is_some()
+        || find_input.is_some()
+        || block_input.is_some()
+        || count.is_some()
+        || pending.is_some();
     let body_h =
         inner.height.saturating_sub(1 + u16::from(show_ruler) + u16::from(prompt_row)) as usize;
     // Closed folds take their lines out of the picture entirely: `visible` is
@@ -6126,8 +6132,32 @@ fn draw_viewer(
         } else {
             format!(":{}_", cmd)
         })
+    } else if let Some(q) = find_input {
+        Some(format!("/{}_", q))
+    } else if count.is_some() || pending.is_some() {
+        // A half-typed command — the `4` of `48G`, the `d` of `d3d`, the `z`
+        // of `zz`. vi shows nothing here and leaves you to remember what you
+        // have pressed; on a full-screen file that is a guess.
+        let typed = format!(
+            "{}{}",
+            pending.map(String::from).unwrap_or_default(),
+            count.map(|c| c.to_string()).unwrap_or_default(),
+        );
+        Some(format!(
+            "{typed}_   {}",
+            match pending {
+                Some('z') => tr(lang, "z: a fold · zz zt zb the cursor line", "z: 折りたたみ · zz zt zb カーソル行の位置"),
+                Some('d') => tr(lang, "d again deletes the line", "もう一度 d で行削除"),
+                Some(_) => tr(lang, "Esc cancels", "Esc で取消"),
+                None => tr(
+                    lang,
+                    "G line · j k l h · w b · } { · Esc cancels",
+                    "G 行番号へ · j k l h · w b · } { · Esc で取消",
+                ),
+            }
+        ))
     } else {
-        find_input.as_ref().map(|q| format!("/{}_", q))
+        None
     };
     let footer = if *editing {
         tr(lang,

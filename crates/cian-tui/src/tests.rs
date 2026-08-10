@@ -1160,13 +1160,21 @@
     fn question_mark_in_the_viewer_lists_only_the_viewer() {
         let (_d, mut app) = viewer_on("hello\n");
         app.handle_key(key('?')).unwrap();
-        let Popup::Notice { lines } = &app.popup else { panic!("no help: {:?}", app.popup) };
+        let Popup::Report { lines, .. } = &app.popup else { panic!("no help: {:?}", app.popup) };
         let text = lines.join("\n");
         assert!(text.contains("F3") || text.contains("viewer"), "it is about the viewer:\n{text}");
         // Things the viewer cannot do are not in it.
         for absent in ["Rename", "SSH", "trash"] {
             assert!(!text.contains(absent), "{absent:?} does not belong here:\n{text}");
         }
+        // The keys it *does* have are, grouped by what you are doing.
+        for present in ["Move", "Edit", "gg", "zz", "*", ">>", ":wq"] {
+            assert!(text.contains(present), "{present:?} is missing:\n{text}");
+        }
+        // It scrolls — it is far taller than a dialog.
+        app.handle_key(key('j')).unwrap();
+        let Popup::Report { scroll, .. } = &app.popup else { panic!("gone") };
+        assert_eq!(*scroll, 1);
         // …and it goes back to the file.
         app.handle_key(code(KeyCode::Esc)).unwrap();
         assert!(matches!(app.popup, Popup::Viewer { .. }), "back to the file");
@@ -1522,6 +1530,121 @@
             other => panic!("expected the viewer, got {other:?}"),
         }
         assert!(app.message.is_some(), "it says why");
+    }
+
+    /// Typing `48G` used to happen in the dark: the count built up invisibly,
+    /// so there was no way to tell what had been pressed. It now shows on the
+    /// prompt row, where `:` and `/` show theirs, and Esc abandons it.
+    #[test]
+    fn a_half_typed_command_is_visible_and_cancellable() {
+        let (_d, mut app) = viewer_on(&(1..=80).map(|i| format!("line {i}\n")).collect::<String>());
+        app.handle_key(key('4')).unwrap();
+        app.handle_key(key('8')).unwrap();
+        match &app.popup {
+            Popup::Viewer { count, .. } => assert_eq!(*count, Some(48)),
+            other => panic!("expected the viewer, got {other:?}"),
+        }
+        let rows = render(&mut app, 100, 30);
+        assert!(rows.iter().any(|r| r.contains("48_")), "what is typed is on screen:\n{rows:?}");
+
+        // Esc abandons it rather than closing the file.
+        app.handle_key(code(KeyCode::Esc)).unwrap();
+        match &app.popup {
+            Popup::Viewer { count, .. } => assert_eq!(*count, None, "the count is gone"),
+            other => panic!("Esc closed the viewer instead: {other:?}"),
+        }
+
+        // And it still jumps.
+        for k in ['4', '8', 'G'] {
+            app.handle_key(key(k)).unwrap();
+        }
+        match &app.popup {
+            Popup::Viewer { line, .. } => assert_eq!(*line, 47, "48G is line 48"),
+            other => panic!("expected the viewer, got {other:?}"),
+        }
+    }
+
+    /// A count repeats the motion it precedes, as it does in vi. Only `G`
+    /// used to take one.
+    #[test]
+    fn a_count_repeats_the_motion_it_precedes() {
+        let (_d, mut app) =
+            viewer_on(&(1..=80).map(|i| format!("line {i} word word\n")).collect::<String>());
+        let line = |app: &App| match &app.popup {
+            Popup::Viewer { line, .. } => *line,
+            other => panic!("expected the viewer, got {other:?}"),
+        };
+        let col = |app: &App| match &app.popup {
+            Popup::Viewer { col, .. } => *col,
+            other => panic!("expected the viewer, got {other:?}"),
+        };
+        for k in ['3', 'j'] {
+            app.handle_key(key(k)).unwrap();
+        }
+        assert_eq!(line(&app), 3, "3j");
+        for k in ['2', 'k'] {
+            app.handle_key(key(k)).unwrap();
+        }
+        assert_eq!(line(&app), 1, "2k");
+        for k in ['5', 'l'] {
+            app.handle_key(key(k)).unwrap();
+        }
+        assert_eq!(col(&app), 5, "5l");
+        for k in ['2', 'w'] {
+            app.handle_key(key(k)).unwrap();
+        }
+        assert!(col(&app) > 5, "2w moved on: {}", col(&app));
+        for k in ['5', 'g'] {
+            app.handle_key(key(k)).unwrap();
+        }
+        assert_eq!(line(&app), 4, "5gg is line 5");
+    }
+
+    /// The vim keys the viewer was missing: `*` searches the word under the
+    /// cursor, `~` swaps its case, `>>` shifts a line by a tab stop, and `zz`
+    /// puts the cursor's line in the middle of the window without moving it.
+    #[test]
+    fn star_tilde_shift_and_zz() {
+        let (_d, mut app) = viewer_on("alpha beta\ngamma\nbeta again\n");
+        app.handle_key(key('w')).unwrap(); // onto "beta"
+        app.handle_key(key('*')).unwrap();
+        match &app.popup {
+            Popup::Viewer { find_query, line, .. } => {
+                assert_eq!(find_query.as_deref(), Some("beta"), "the word under the cursor");
+                assert_eq!(*line, 2, "and it jumped to the next one");
+            }
+            other => panic!("expected the viewer, got {other:?}"),
+        }
+
+        let (_d2, mut app2) = viewer_on("abc\n");
+        app2.handle_key(key('~')).unwrap();
+        assert_eq!(viewer_lines(&app2)[0], "Abc");
+        app2.handle_key(key('~')).unwrap();
+        assert_eq!(viewer_lines(&app2)[0], "ABc", "it walks along");
+
+        app2.handle_key(key('>')).unwrap();
+        app2.handle_key(key('>')).unwrap();
+        assert!(viewer_lines(&app2)[0].starts_with("    "), "{:?}", viewer_lines(&app2));
+        app2.handle_key(key('<')).unwrap();
+        app2.handle_key(key('<')).unwrap();
+        assert_eq!(viewer_lines(&app2)[0], "ABc", "and back");
+
+        let (_d3, mut app3) =
+            viewer_on(&(1..=200).map(|i| format!("l{i}\n")).collect::<String>());
+        let _ = render(&mut app3, 100, 30);
+        for k in ['1', '0', '0', 'G'] {
+            app3.handle_key(key(k)).unwrap();
+        }
+        let _ = render(&mut app3, 100, 30);
+        app3.handle_key(key('z')).unwrap();
+        app3.handle_key(key('z')).unwrap();
+        match &app3.popup {
+            Popup::Viewer { line, scroll, .. } => {
+                assert_eq!(*line, 99, "the cursor stayed");
+                assert!(*scroll > 0 && *scroll < 99, "the line moved to the middle: {scroll}");
+            }
+            other => panic!("expected the viewer, got {other:?}"),
+        }
     }
 
     /// Backspace in a search listing means the same as Esc. A set of results

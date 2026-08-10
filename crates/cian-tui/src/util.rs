@@ -66,6 +66,34 @@ pub(crate) fn fold_ime_word(s: &str) -> String {
     s.chars().map(|c| fold_ime_key(c).unwrap_or(c)).collect()
 }
 
+/// The word under `col` in `line`, as `*` and `#` take it: a run of letters,
+/// digits and underscores. `None` when the cursor is not on one — searching
+/// for the space you are standing in has no meaning.
+pub(crate) fn word_under_cursor(line: &str, col: usize) -> Option<String> {
+    let chars: Vec<char> = line.chars().collect();
+    let is_word = |c: char| c.is_alphanumeric() || c == '_';
+    if chars.is_empty() {
+        return None;
+    }
+    // On a non-word character, vi looks forward to the next word on the line.
+    let mut i = col.min(chars.len() - 1);
+    while i < chars.len() && !is_word(chars[i]) {
+        i += 1;
+    }
+    if i >= chars.len() {
+        return None;
+    }
+    let mut s = i;
+    while s > 0 && is_word(chars[s - 1]) {
+        s -= 1;
+    }
+    let mut e = i;
+    while e + 1 < chars.len() && is_word(chars[e + 1]) {
+        e += 1;
+    }
+    Some(chars[s..=e].iter().collect())
+}
+
 /// The length in characters of viewer line `l` (0 if out of range).
 pub(crate) fn vlen(view: &cian_core::viewer::View, l: usize) -> usize {
     view.lines.get(l).map(|s| s.chars().count()).unwrap_or(0)

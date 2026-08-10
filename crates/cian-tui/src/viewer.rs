@@ -204,13 +204,17 @@ impl App {
             self.toggle_viewer_fold(None);
             return Ok(());
         }
-        if !ctrl && matches!(key.code, KeyCode::Char('z' | 'a' | 'A' | 'R' | 'M')) {
+        if !ctrl && matches!(key.code, KeyCode::Char('z' | 'a' | 'A' | 'R' | 'M' | 't' | 'b')) {
             let c = match key.code {
                 KeyCode::Char(c) => c,
                 _ => unreachable!(),
             };
             let armed = matches!(self.popup, Popup::Viewer { pending: Some('z'), .. });
-            if c == 'z' && !armed {
+            // `b` and `t` only mean anything here after `z`; on their own they
+            // are the word motion and (for now) nothing.
+            if !armed && matches!(c, 'b' | 't') {
+                // fall through to the motion handler
+            } else if c == 'z' && !armed {
                 if let Popup::Viewer { pending, .. } = &mut self.popup {
                     *pending = Some('z');
                 }
@@ -221,6 +225,18 @@ impl App {
                     *pending = None;
                 }
                 match c {
+                    // zz / zt / zb — the cursor line to the middle, the top or
+                    // the bottom of the window, without moving the cursor.
+                    'z' | 't' | 'b' => {
+                        let body = (self.viewer_rect.height as usize).max(1);
+                        if let Popup::Viewer { scroll, line, .. } = &mut self.popup {
+                            *scroll = match c {
+                                't' => *line,
+                                'b' => line.saturating_sub(body.saturating_sub(1)),
+                                _ => line.saturating_sub(body / 2),
+                            };
+                        }
+                    }
                     'a' => self.toggle_viewer_fold(None),
                     // `zA` is the whole file as one switch: anything still
                     // open means "close it all", everything closed means
@@ -405,9 +421,17 @@ impl App {
         // `?` here answers "what can I do in this window", not "what can cian
         // do" — the whole manual buries the one in the other.
         if !ctrl && !alt && key.code == KeyCode::Char('?') {
+            // As a scrolling report, not a notice: the viewer's keys do not
+            // fit a fixed block, and half a key list is worse than none. The
+            // file itself waits behind it and comes back on Esc.
             let lines = crate::viewer_manual_lines(self.lang);
-            self.viewer_return = Some(Box::new(std::mem::replace(&mut self.popup, Popup::None)));
-            self.popup = Popup::Notice { lines };
+            let back = std::mem::replace(&mut self.popup, Popup::None);
+            self.popup = Popup::Report {
+                title: tr(self.lang, " the viewer ", " ビューア ").to_string(),
+                lines,
+                scroll: 0,
+                back: Box::new(back),
+            };
             return Ok(());
         }
         // `r` after a search: replace what was found, without typing the
@@ -467,6 +491,43 @@ impl App {
             self.viewer_search_jump(forward);
             return Ok(());
         }
+        // Esc abandons a half-typed command — the `48` of `48G`, the `d` of
+        // `dd` — before it means anything else. vi does the same, and it is
+        // the way out of "what have I pressed?" now that the prompt row shows
+        // what that is.
+        if key.code == KeyCode::Esc {
+            if let Popup::Viewer { count, pending, .. } = &mut self.popup {
+                if count.is_some() || pending.is_some() {
+                    *count = None;
+                    *pending = None;
+                    return Ok(());
+                }
+            }
+        }
+        // `*` / `#` — search for the word under the cursor, forward or back.
+        // The word is taken literally, so a name full of `.` or `(` is not
+        // read as a pattern.
+        if !ctrl && !alt && matches!(key.code, KeyCode::Char('*') | KeyCode::Char('#')) {
+            let forward = key.code == KeyCode::Char('*');
+            let word = if let Popup::Viewer { view, line, col, .. } = &self.popup {
+                crate::util::word_under_cursor(view.lines.get(*line).map(String::as_str).unwrap_or(""), *col)
+            } else {
+                None
+            };
+            match word {
+                Some(w) => {
+                    if let Popup::Viewer { find_query, .. } = &mut self.popup {
+                        *find_query = Some(w);
+                    }
+                    self.viewer_search_jump(forward);
+                }
+                None => {
+                    self.message =
+                        Some(tr(self.lang, "no word under the cursor", "カーソル位置に語がありません").into())
+                }
+            }
+            return Ok(());
+        }
         // A numeric prefix builds a count for the next motion (vim's `42G`).
         if !ctrl {
             if let KeyCode::Char(c @ '0'..='9') = key.code {
@@ -488,6 +549,8 @@ impl App {
         let mut warn_unsaved = false;
         if let Popup::Viewer { view, scroll, line, col, goal, visual, anchor, count, find_query, dirty, .. } = &mut self.popup {
             let cnt = count.take();
+            // How many times a motion repeats: the count, or once.
+            let times = cnt.unwrap_or(1).max(1);
             let n = view.lines.len();
             let last = n.saturating_sub(1);
             // Move the cursor to a line, landing at the goal column (clamped).
@@ -530,9 +593,10 @@ impl App {
 
             match (ctrl, key.code) {
                 (false, KeyCode::Esc) => {
-                    // Esc peels state off one layer at a time: leave visual
-                    // selection, then clear an active search (its highlights),
-                    // then refuse to drop unsaved edits, and only then close.
+                    // Esc peels state off one layer at a time: a half-typed
+                    // command first (handled above), then visual selection,
+                    // then an active search and its highlights, then it
+                    // refuses to drop unsaved edits, and only then closes.
                     // `q` behaves the same; `Q` discards and closes.
                     if visual.is_some() {
                         *visual = None;
@@ -582,18 +646,22 @@ impl App {
                     *goal = *col;
                 }
 
-                // Vertical motion keeps the goal column.
-                (false, KeyCode::Char('j')) | (_, KeyCode::Down) => to_line(*line + 1, line, col, *goal),
-                (false, KeyCode::Char('k')) | (_, KeyCode::Up) => to_line(line.saturating_sub(1), line, col, *goal),
+                // Vertical motion keeps the goal column. A count repeats the
+                // motion, as it does in vi: `3j`, `5}`, `2Ctrl-d`.
+                (false, KeyCode::Char('j')) | (_, KeyCode::Down) => to_line(*line + times, line, col, *goal),
+                (false, KeyCode::Char('k')) | (_, KeyCode::Up) => to_line(line.saturating_sub(times), line, col, *goal),
                 (false, KeyCode::Char('d')) | (true, KeyCode::Char('d')) | (_, KeyCode::PageDown) => {
-                    to_line(*line + half, line, col, *goal)
+                    to_line(*line + half * times, line, col, *goal)
                 }
                 (false, KeyCode::Char('u')) | (true, KeyCode::Char('u')) | (_, KeyCode::PageUp) => {
-                    to_line(line.saturating_sub(half), line, col, *goal)
+                    to_line(line.saturating_sub(half * times), line, col, *goal)
                 }
-                (true, KeyCode::Char('f')) => to_line(*line + body_h, line, col, *goal),
-                (true, KeyCode::Char('b')) => to_line(line.saturating_sub(body_h), line, col, *goal),
-                (false, KeyCode::Char('g')) => to_line(0, line, col, *goal),
+                (true, KeyCode::Char('f')) => to_line(*line + body_h * times, line, col, *goal),
+                (true, KeyCode::Char('b')) => to_line(line.saturating_sub(body_h * times), line, col, *goal),
+                // `gg` is the top, `5gg` is line 5 — the other half of `G`.
+                (false, KeyCode::Char('g')) => {
+                    to_line(cnt.map(|c| c.saturating_sub(1)).unwrap_or(0), line, col, *goal)
+                }
                 // `G` goes to the bottom, or to line N when a count was typed.
                 (false, KeyCode::Char('G')) => {
                     let target = cnt.map(|c| c.saturating_sub(1)).unwrap_or(last);
@@ -609,26 +677,27 @@ impl App {
                 }
                 // `{` / `}` jump between paragraph (blank-line) boundaries.
                 (false, KeyCode::Char('{')) => {
-                    *line = viewer_paragraph(view, *line, false);
+                    for _ in 0..times {
+                        *line = viewer_paragraph(view, *line, false);
+                    }
                     *col = 0;
                     *goal = 0;
                 }
                 (false, KeyCode::Char('}')) => {
-                    *line = viewer_paragraph(view, *line, true);
+                    for _ in 0..times {
+                        *line = viewer_paragraph(view, *line, true);
+                    }
                     *col = 0;
                     *goal = 0;
                 }
 
                 // Horizontal motion resets the goal to the real column.
                 (false, KeyCode::Char('h')) | (_, KeyCode::Left) => {
-                    *col = col.saturating_sub(1);
+                    *col = col.saturating_sub(times);
                     *goal = *col;
                 }
                 (false, KeyCode::Char('l')) | (_, KeyCode::Right) => {
-                    let len = vlen(view, *line);
-                    if *col < len {
-                        *col += 1;
-                    }
+                    *col = (*col + times).min(vlen(view, *line));
                     *goal = *col;
                 }
                 (false, KeyCode::Char('0')) | (_, KeyCode::Home) => {
@@ -640,15 +709,19 @@ impl App {
                     *goal = usize::MAX;
                 }
                 (false, KeyCode::Char('w')) => {
-                    let (nl, nc) = viewer_word_forward(view, *line, *col, last);
-                    *line = nl;
-                    *col = nc;
+                    for _ in 0..times {
+                        let (nl, nc) = viewer_word_forward(view, *line, *col, last);
+                        *line = nl;
+                        *col = nc;
+                    }
                     *goal = *col;
                 }
                 (false, KeyCode::Char('b')) => {
-                    let (nl, nc) = viewer_word_back(view, *line, *col);
-                    *line = nl;
-                    *col = nc;
+                    for _ in 0..times {
+                        let (nl, nc) = viewer_word_back(view, *line, *col);
+                        *line = nl;
+                        *col = nc;
+                    }
                     *goal = *col;
                 }
                 _ => {}
@@ -1538,6 +1611,66 @@ impl App {
             let cnt = |count: &mut Option<usize>| count.take().unwrap_or(1).max(1);
 
             match key.code {
+                // `~` — swap the case of the character under the cursor and
+                // step over it, so holding it walks a word.
+                KeyCode::Char('~') if visual.is_none() => {
+                    push_viewer_undo(undo, lines, *line, *col);
+                    let n = cnt(count);
+                    let mut chars: Vec<char> = lines[*line].chars().collect();
+                    for _ in 0..n {
+                        let Some(c) = chars.get(*col).copied() else { break };
+                        let swapped: String = if c.is_uppercase() {
+                            c.to_lowercase().collect()
+                        } else {
+                            c.to_uppercase().collect()
+                        };
+                        // A case change can be more than one character (ß), so
+                        // splice rather than assign.
+                        chars.splice(*col..=*col, swapped.chars());
+                        *col = (*col + swapped.chars().count()).min(chars.len());
+                    }
+                    lines[*line] = chars.into_iter().collect();
+                    *goal = *col;
+                    *dirty = true;
+                    consumed = true;
+                }
+                // `>>` / `<<` — shift lines by one tab stop. In a `v`/`V`
+                // selection a single `>` or `<` does the whole range, which is
+                // the shape everyone actually uses it in.
+                KeyCode::Char('>') | KeyCode::Char('<') => {
+                    let out = key.code == KeyCode::Char('>');
+                    let (from, to) = match visual.take() {
+                        Some(_) => {
+                            let (s, e) = crate::util::order_pos(*anchor, (*line, *col));
+                            (s.0, e.0.min(lines.len() - 1))
+                        }
+                        None => {
+                            let n = cnt(count);
+                            (*line, (*line + n - 1).min(lines.len() - 1))
+                        }
+                    };
+                    push_viewer_undo(undo, lines, *line, *col);
+                    let width = cian_core::viewer::tab_width().max(1);
+                    let pad = " ".repeat(width);
+                    for l in lines[from..=to].iter_mut() {
+                        if out {
+                            if !l.is_empty() {
+                                l.insert_str(0, &pad);
+                            }
+                        } else if l.starts_with('\t') {
+                            // Take back one stop, whether it is a tab or spaces.
+                            l.remove(0);
+                        } else {
+                            let take = l.chars().take(width).take_while(|c| *c == ' ').count();
+                            l.drain(..take);
+                        }
+                    }
+                    *line = from;
+                    *col = 0;
+                    *goal = 0;
+                    *dirty = true;
+                    consumed = true;
+                }
                 // dd — delete N whole lines. First d only arms the operator.
                 KeyCode::Char('d') if visual.is_none() => {
                     if was_pending != Some('d') {
