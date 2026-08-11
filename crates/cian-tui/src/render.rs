@@ -2259,9 +2259,9 @@ fn draw_status(f: &mut Frame, area: Rect, app: &App) {
         ),
         pad.clone(),
     ];
-    if let Popup::Viewer { line, col, .. } = &app.popup {
-        if docked_editor.is_some() {
-            spans.push(chip(format!("{}:{}", line + 1, col + 1), readable_on(theme().status_bg)));
+    if docked_editor.is_some() {
+        if let Some((line, col)) = editor_position(&app.popup) {
+            spans.push(chip(format!("{line}:{col}"), readable_on(theme().status_bg)));
             spans.push(dim_sep.clone());
         }
     }
@@ -4643,6 +4643,24 @@ fn editor_prompt_parts(
     } else {
         None
     }
+}
+
+/// Where the cursor is in the editor panel, as a human counts it: the line,
+/// and the column *the screen* is showing — two full-width characters are
+/// four columns, and the ruler marks them that way. Counting characters
+/// instead would disagree with the ruler on every Japanese line.
+pub(crate) fn editor_position(popup: &Popup) -> Option<(usize, usize)> {
+    let Popup::Viewer { view, line, col, .. } = popup else { return None };
+    let shown = view
+        .lines
+        .get(*line)
+        .map(|l| {
+            l.chars()
+                .take(*col)
+                .fold(0usize, |at, c| at + cian_core::textops::char_cols(c, at))
+        })
+        .unwrap_or(0);
+    Some((line + 1, shown + 1))
 }
 
 /// What the editor panel is doing, as a word and a colour.

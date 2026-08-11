@@ -604,7 +604,10 @@
         let open = |app: &mut App, name: &str| {
             app.active_pane_mut().unwrap().cursor =
                 app.active_pane().unwrap().entries.iter().position(|e| e.name == name).unwrap();
-            app.handle_key(code(KeyCode::F(3))).unwrap();
+            app.handle_key(code(KeyCode::Enter)).unwrap();
+            if !app.zoomed {
+                app.handle_key(code(KeyCode::F(12))).unwrap();
+            }
             let _ = render(app, 120, 30);
         };
         let shape = |app: &App| match &app.popup {
@@ -1989,7 +1992,7 @@
     /// docked in that pane, with everything it can do. `F3` gives the same
     /// file the whole window; `:q` closes it and the listing is there again.
     #[test]
-    fn enter_docks_the_viewer_in_the_pane_and_f3_gives_it_the_window() {
+    fn enter_docks_the_panel_in_the_pane_and_f12_zooms_it() {
         let d = tempfile::tempdir().unwrap();
         std::fs::write(d.path().join("a.txt"), "alpha\nbeta\n").unwrap();
         let body: String = (1..=200).map(|i| format!("line {i}\n")).collect();
@@ -2068,12 +2071,16 @@
         app.handle_key(code(KeyCode::BackTab)).unwrap();
         assert_eq!(app.focused, FocusedPane::Left, "and back to the file");
 
-        // F3 gives the same file the whole window.
-        app.handle_key(code(KeyCode::F(3))).unwrap();
-        assert!(app.viewer_dock.is_none(), "no longer docked");
+        // F12 (and F3, which used to mean this) zooms the pane it is docked
+        // in, so the panel fills the window without being a second mode.
+        app.handle_key(code(KeyCode::F(12))).unwrap();
+        assert!(app.zoomed, "the pane zoomed");
+        assert_eq!(app.viewer_dock, Some(FocusedPane::Left), "still the same docked panel");
         let full = render(&mut app, 120, 30);
         assert!(full.iter().any(|r| r.contains("line 100")), "still the same place in it");
         assert!(app.viewer_frame.width > 100, "and it has the window now");
+        app.handle_key(code(KeyCode::F(12))).unwrap();
+        assert!(!app.zoomed, "and back to the pane");
 
         // `:q` closes it and the listing is back.
         for k in [':', 'q'] {
@@ -2083,6 +2090,69 @@
         assert!(matches!(app.popup, Popup::None));
         let back = render(&mut app, 120, 30);
         assert!(back.iter().any(|r| r.contains("b.log")), "the listing is there");
+    }
+
+    /// The panel is one surface among the window's, not a dialog over them:
+    /// a click on the listing beside it moves the focus there, `Shift+H` /
+    /// `Shift+L` / `Shift+J` move it while reading, and `F3` reads a file in
+    /// the *other* pane rather than opening a second kind of window.
+    #[test]
+    fn the_panel_gives_the_focus_up_to_a_click_and_to_shift_hjl() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::write(d.path().join("a.txt"), "alpha\nbeta\n").unwrap();
+        std::fs::write(d.path().join("b.txt"), "gamma\n").unwrap();
+        let p = d.path().to_path_buf();
+        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+        let _ = render(&mut app, 120, 30);
+        assert_eq!(app.viewer_dock, Some(FocusedPane::Left));
+
+        // A click on the listing beside it takes the focus.
+        let r = app.layout_rects.right;
+        app.handle_mouse(crossterm::event::MouseEvent {
+            kind: crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+            column: r.x + 3,
+            row: r.y + 3,
+            modifiers: KeyModifiers::NONE,
+        });
+        assert_eq!(app.focused, FocusedPane::Right, "the click moved the focus");
+        assert!(matches!(app.popup, Popup::Viewer { .. }), "the file is still open");
+
+        // Shift+H comes back to it, Shift+J goes down to the shell.
+        app.handle_key(KeyEvent::new(KeyCode::Char('H'), KeyModifiers::SHIFT)).unwrap();
+        assert_eq!(app.focused, FocusedPane::Left);
+        app.handle_key(KeyEvent::new(KeyCode::Char('J'), KeyModifiers::SHIFT)).unwrap();
+        assert_eq!(app.focused, FocusedPane::Shell, "Shift+J while reading");
+        app.handle_key(code(KeyCode::Esc)).unwrap();
+
+        // …but not while editing: there `H` is a character.
+        app.focus(FocusedPane::Left);
+        app.handle_key(key('i')).unwrap();
+        app.handle_key(KeyEvent::new(KeyCode::Char('L'), KeyModifiers::SHIFT)).unwrap();
+        assert_eq!(app.focused, FocusedPane::Left, "the editor kept the key");
+        assert!(viewer_lines(&app)[0].contains('L'), "…and typed it: {:?}", viewer_lines(&app));
+        app.handle_key(code(KeyCode::Esc)).unwrap();
+        quit_viewer_discarding(&mut app);
+
+        // `F3` reads the file under the cursor in the *other* pane.
+        app.focus(FocusedPane::Left);
+        let at = app
+            .active_pane()
+            .unwrap()
+            .entries
+            .iter()
+            .position(|e| e.name == "b.txt")
+            .unwrap();
+        app.active_pane_mut().unwrap().cursor = at;
+        app.handle_key(code(KeyCode::F(3))).unwrap();
+        assert_eq!(app.viewer_dock, Some(FocusedPane::Right), "opened over there");
+        assert_eq!(app.focused, FocusedPane::Right, "and the focus followed it");
+        assert_eq!(viewer_lines(&app), ["gamma"], "the file the cursor was on");
+        let rows = render(&mut app, 120, 30);
+        assert!(
+            rows.iter().any(|r| r.contains("a.txt")),
+            "the listing is still there, on the left:\n{rows:#?}",
+        );
     }
 
     /// Backspace in a search listing means the same as Esc. A set of results
@@ -2286,34 +2356,42 @@
     #[test]
     fn a_message_borrows_the_viewer_footer_it_does_not_keep_it() {
         let (_d, mut app) = viewer_on("one\ntwo\n");
-        let footer = |app: &mut App| {
+        // The panel's own last row carries a message it raised; the window's
+        // hint bar carries its keys; its prompt line carries what is typed.
+        let panel_last = |app: &mut App| {
             let rows = render(app, 100, 30);
-            // The footer is the last row inside the viewer's border.
-            rows.iter().rev().nth(2).cloned().unwrap_or_default()
+            // Three rows of window furniture below the panel: prompt (when
+            // one is open), hints, status. Without a prompt that is two.
+            let n = rows.len();
+            rows[n - 4].clone()
+        };
+        let hint_bar = |app: &mut App| {
+            let rows = render(app, 100, 30);
+            rows[rows.len() - 2].clone()
         };
 
         // A message raised by this keystroke is shown…
         app.handle_key(key(']')).unwrap();
         app.handle_key(key(']')).unwrap();
         assert!(app.message.is_some());
-        assert!(footer(&mut app).contains("utline") || footer(&mut app).contains("アウトライン"));
+        let m = panel_last(&mut app);
+        assert!(m.contains("utline") || m.contains("アウトライン"), "{m:?}");
 
         // …and stands down on the next key, which gets the hints back.
         app.handle_key(key('j')).unwrap();
-        let f = footer(&mut app);
+        let f = hint_bar(&mut app);
         assert!(f.contains("search") || f.contains("検索"), "hints are back: {f:?}");
         assert!(app.message.is_some(), "the status line still has it");
 
-        // The `:` prompt always wins over a message, however fresh — and it
-        // takes a row of its own above the hints rather than painting over
-        // them, which is what the file panes do.
+        // The `:` prompt goes on cian's own prompt line, above the hints, and
+        // the hints stay readable beside it.
         app.handle_key(key('/')).unwrap();
         app.handle_key(code(KeyCode::Esc)).unwrap();
         app.handle_key(key(':')).unwrap();
         assert!(matches!(&app.popup, Popup::Viewer { sub_input: Some(_), .. }));
         let rows = render(&mut app, 100, 30);
-        let hints = rows.iter().rev().nth(2).cloned().unwrap_or_default();
-        let prompt = rows.iter().rev().nth(3).cloned().unwrap_or_default();
+        let hints = rows[rows.len() - 2].clone();
+        let prompt = rows[rows.len() - 3].clone();
         assert!(prompt.contains("s/old/new/"), "the command line is visible: {prompt:?}");
         assert!(
             hints.contains("search") || hints.contains("検索"),
@@ -2330,8 +2408,8 @@
         app.handle_key(key('/')).unwrap();
         app.handle_key(key('b')).unwrap();
         let rows = render(&mut app, 100, 30);
-        let hints = rows.iter().rev().nth(2).cloned().unwrap_or_default();
-        let prompt = rows.iter().rev().nth(3).cloned().unwrap_or_default();
+        let hints = rows[rows.len() - 2].clone();
+        let prompt = rows[rows.len() - 3].clone();
         assert!(prompt.contains("/b_"), "what is being typed: {prompt:?}");
         assert!(
             hints.contains("search") || hints.contains("検索"),
@@ -2560,11 +2638,13 @@
         let screen = render(&mut app, 100, 30);
         let msg = app.message.clone().unwrap_or_default();
         assert!(msg.contains("outline") || msg.contains("アウトライン"), "{msg:?}");
-        // The footer is the second-to-last row of the viewer's box, well
-        // inside its border — not the status line outside it.
+        // The message is on the panel itself — it answers the key that was
+        // just pressed, so it belongs with the file and not only on the
+        // status line among everything else.
+        let last = screen.len() - 1;
         assert!(
-            screen.iter().rev().skip(1).take(4).any(|r| r.contains(&msg)),
-            "the message is on the viewer's footer",
+            screen.iter().take(last).any(|r| r.contains(&msg)),
+            "the message is on the panel, not only on the status line:\n{screen:#?}",
         );
     }
 
@@ -2615,11 +2695,22 @@
         assert_eq!(at(&app), 0, "the cursor came out onto the heading");
         let _ = render(&mut app, 120, 30);
 
-        // The hidden lines are no longer drawn.
-        let screen = |app: &mut App| render(app, 120, 30).join("\n");
+        // The hidden lines are no longer drawn *in the panel*. (The cursor
+        // preview under it is a different surface showing the same file, and
+        // it does not fold.)
+        let screen = |app: &mut App| -> String {
+            let rows = render(app, 120, 30);
+            let f = app.viewer_frame;
+            rows.iter()
+                .skip(f.y as usize)
+                .take(f.height as usize)
+                .cloned()
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
         let shown = screen(&mut app);
         assert!(shown.contains("# One") && shown.contains("# Two"));
-        assert!(!shown.contains("under one"), "the folded lines are gone from the screen");
+        assert!(!shown.contains("under one"), "the folded lines are gone from the panel");
 
         // Pressing it again opens it.
         za(&mut app);
@@ -8993,7 +9084,10 @@
         app.clipboard = None;
         app.active_pane_mut().unwrap().cursor =
             app.active_pane().unwrap().entries.iter().position(|e| e.name == "note.txt").unwrap();
-        app.handle_key(code(KeyCode::F(3))).unwrap();
+        // Enter opens the panel where the file was listed; F12 gives it the
+        // window, which is the shape most of these tests are about.
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+        app.handle_key(code(KeyCode::F(12))).unwrap();
         let _ = render(&mut app, 100, 30);
         (d, app)
     }

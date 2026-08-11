@@ -2149,7 +2149,8 @@ impl App {
             (false, false, KeyCode::Char('z')) => self.start_jump_path(),
             // `b` flattens the subtree into this pane (branch view); again to leave.
             (false, false, KeyCode::Char('b')) => self.toggle_branch_view(),
-            (false, false, KeyCode::F(3)) => self.look_inside(),
+            // F3 reads it in the *other* pane; Enter reads it here.
+            (false, false, KeyCode::F(3)) => self.look_inside_other(),
             // `=` for "are these equal": free, mnemonic, and next to the
             // keys already used for the two panes.
             (false, _, KeyCode::Char('=')) => self.open_diff(),

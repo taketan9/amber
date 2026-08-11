@@ -24,10 +24,44 @@ impl App {
             }
         }
 
+        // A docked panel only owns the mouse inside its own frame. A click on
+        // the listing beside it, or on the shell below, moves the focus there
+        // — the panel is one surface among the window's, not a dialog over
+        // them.
+        if matches!(self.popup, Popup::Viewer { .. }) && self.viewer_dock.is_some() {
+            let f = self.viewer_frame;
+            let inside = col >= f.x && col < f.x + f.width && row >= f.y && row < f.y + f.height;
+            if !inside && matches!(ev.kind, MouseEventKind::Down(_)) {
+                let hit = |r: Rect| {
+                    r.width > 0
+                        && r.height > 0
+                        && col >= r.x
+                        && col < r.x + r.width
+                        && row >= r.y
+                        && row < r.y + r.height
+                };
+                let to = if hit(self.layout_rects.left) {
+                    Some(FocusedPane::Left)
+                } else if hit(self.layout_rects.right) {
+                    Some(FocusedPane::Right)
+                } else if hit(self.layout_rects.shell) {
+                    Some(FocusedPane::Shell)
+                } else {
+                    None
+                };
+                if let Some(to) = to {
+                    if to != self.focused {
+                        self.focus(to);
+                        return;
+                    }
+                }
+            }
+        }
         // In the viewer: a click places the cursor on that line, a drag selects
         // whole lines (line-wise visual), the wheel scrolls, and right-click
         // copies. Handled before the blanket popup guard below.
-        if matches!(self.popup, Popup::Viewer { .. }) {
+        if matches!(self.popup, Popup::Viewer { .. }) && self.viewer_dock.map(|d| d == self.focused).unwrap_or(true)
+        {
             // The tab strip lives in the top border. A title starts one column
             // inside the frame and opens with " ◂ ▸ ", which puts the arrows
             // at the third and fifth columns of the box.
@@ -811,6 +845,7 @@ impl App {
                 self.look_inside();
                 if matches!(self.popup, Popup::Viewer { .. }) {
                     self.viewer_dock = Some(here);
+                    self.full_clear = true;
                 }
             }
             None => {}

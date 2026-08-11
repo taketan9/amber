@@ -197,12 +197,47 @@ impl App {
                 return Ok(());
             }
         }
-        // F3 on a file docked in a pane gives it the whole window — the same
-        // file, the same cursor, more room. (From the panes, F3 opens one;
-        // here it is the only thing left for it to mean.)
-        if key.code == KeyCode::F(3) && self.viewer_dock.take().is_some() {
+        // F12 — and F3, which used to mean "give it the whole window" — zoom
+        // the pane the panel is docked in. It is the same zoom the listings
+        // and the shell have, applied to the surface the panel is drawn on,
+        // so there is one way to make something fill the window rather than
+        // two.
+        if matches!(key.code, KeyCode::F(12) | KeyCode::F(3)) && self.viewer_dock.is_some() {
+            self.toggle_zoom();
+            // Landed at once rather than eased: the zoom animation grows an
+            // empty rectangle while the panel is still drawn at its old size,
+            // which reads as a flicker rather than as motion.
+            self.finish_anim();
             self.full_clear = true;
             return Ok(());
+        }
+        // Shift+H / Shift+L / Shift+J move the focus, as they do between the
+        // listings — but only while reading. In the editor, and while a
+        // selection is up, `H` and `L` belong to the file.
+        if shift
+            && self.viewer_dock.is_some()
+            && self.viewer_split.is_none()
+            && matches!(
+                self.popup,
+                Popup::Viewer {
+                    editing: false,
+                    visual: None,
+                    find_input: None,
+                    sub_input: None,
+                    ..
+                }
+            )
+        {
+            let to = match key.code {
+                KeyCode::Char('H') => Some(FocusedPane::Left),
+                KeyCode::Char('L') => Some(FocusedPane::Right),
+                KeyCode::Char('J') => Some(FocusedPane::Shell),
+                _ => None,
+            };
+            if let Some(to) = to {
+                self.focus(to);
+                return Ok(());
+            }
         }
         // Marks: `ma` here, `'a` back. Ahead of the grammar, which would read
         // the `a` of `ma` as a text object.

@@ -42,7 +42,7 @@ Two panes side by side. You copy and move between them — that is the whole ide
 | **`r`** | rename |
 | **`a` / `A`** | new file / new folder |
 | **`u`** | undo the last rename, create or move |
-| **`F3`** | look inside the file under the cursor |
+| **`F3`** | read the file under the cursor **in the other pane** |
 
 - **Nothing is lost by a slip.** Copy, move and delete always confirm; delete goes to the trash; `u` (`:undo`) walks back the last few renames, creates and moves.
 - **Big jobs run in the background** with a progress bar. **Esc** stops one, `b` tucks the popup away and a status chip keeps count (`⏳ copying 45% +2`).
@@ -74,7 +74,7 @@ Fuzzy pickers: type a few letters, press Enter.
 
 ## The text editor panel
 
-`Enter` and `F3` open the same thing — everything below — in two different places. `Enter` **docks it in the pane** the file was listed in: the other pane stays beside it, the keys are the file's while that pane has focus, and its hints move to the bar along the bottom. `F3` (and Shift+Tab) give the same file the **whole window**. `F3` on a docked file promotes it; `Shift+Tab` steps between the file and the listing next to it; `:q` closes it and the listing is back.
+`Enter` and `F3` open the same thing — everything below — in two different places. `Enter` **docks it in the pane** the file was listed in: the other pane stays beside it, the keys are the file's while that pane has focus, and its hints move to the bar along the bottom. `F3` opens it **in the other pane** instead — the listing stays where it is and the file is read beside it, the same sentence `Ctrl+Enter` says about a folder. **F12** makes the panel fill the window and puts it back, which is the same zoom the listings and the shell have. `Shift+Tab` steps between the file and the listing next to it, `Shift+H` / `Shift+L` / `Shift+J` move the focus to the left pane, the right pane or the shell while you are reading, a click anywhere else moves it there too, and `:q` closes the file.
 
 Docked, the panel keeps its name and its **✕** on its frame and puts everything else along the foot of the window: its keys on the hint bar, its mode (`READ` / `EDIT` / `COMMAND` / `VISUAL`) and the cursor's line and column on the status bar, and the `:` and `/` prompts on cian's own prompt line — the same line the file panes type on.
 

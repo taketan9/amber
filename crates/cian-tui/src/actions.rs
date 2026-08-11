@@ -728,6 +728,34 @@ impl App {
     /// One key for both because the question is the same — "what is in here" —
     /// and the answer's shape follows from the file: an archive lists its
     /// members, anything else is read.
+    /// `F3` — read the file in the *other* pane.
+    ///
+    /// It used to mean "the same file, but over the whole window", which F12
+    /// now does to any surface, panel included. Rather than leave the key
+    /// meaning nothing, it takes the shape the two panes are for: the listing
+    /// stays where it is and the file opens beside it. `Ctrl+Enter` on a
+    /// folder already means "in the other pane"; this is the same sentence
+    /// about a file.
+    pub(crate) fn look_inside_other(&mut self) {
+        let here = match self.focused {
+            FocusedPane::Shell => self.last_file_pane,
+            p => p,
+        };
+        let there = match here {
+            FocusedPane::Left => FocusedPane::Right,
+            _ => FocusedPane::Left,
+        };
+        // The file is the one under *this* pane's cursor; it is read over
+        // there.
+        self.focus(here);
+        self.look_inside();
+        if matches!(self.popup, Popup::Viewer { .. }) {
+            self.viewer_dock = Some(there);
+            self.focus(there);
+            self.full_clear = true;
+        }
+    }
+
     pub(crate) fn look_inside(&mut self) {
         // Already reading it in the pane: F3 means "over the whole window,
         // then" — the same file, the same cursor, more room.
