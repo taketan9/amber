@@ -216,31 +216,47 @@ impl App {
             self.font_step(if bigger { 1 } else { -1 });
             return Ok(());
         }
-        // Shift+Tab steps between the file being edited and the panes behind
-        // it — the two halves of the window, rather than a dialog you finish
-        // with. It works from the viewer, the panes and the shell, and opens
-        // an empty file when there is nothing to step back into.
-        if key.code == KeyCode::BackTab
+        // Tab crosses to the other side of the window, whatever is drawn
+        // there: a listing, or a file open in the editor panel. It is the one
+        // key for "the other one", so the pair a listing and an editor make
+        // is stepped through the same way as two listings.
+        //
+        // Not the shell: Tab is a character there, and the shell is reached
+        // with Shift+J or a click. Not while editing either, for the same
+        // reason — Tab is four spaces in a file.
+        if key.code == KeyCode::Tab
             && !key.modifiers.contains(KeyModifiers::CONTROL)
             && !key.modifiers.contains(KeyModifiers::ALT)
             && matches!(self.popup, Popup::None | Popup::Viewer { .. })
             && !matches!(self.popup, Popup::Viewer { editing: true, .. })
+            && self.focused != FocusedPane::Shell
             && self.mode != Mode::Command
             && self.mode != Mode::Filter
         {
-            // A docked file is not parked away — it is beside the listing
-            // already, so Shift+Tab moves the focus between the two.
-            if let Some(dock) = self.viewer_dock.filter(|_| matches!(self.popup, Popup::Viewer { .. }))
-            {
-                let other = match dock {
+            // A floating panel covers the window; there is no other side of
+            // it to cross to.
+            let floating =
+                matches!(self.popup, Popup::Viewer { .. }) && self.viewer_dock.is_none();
+            if !floating {
+                self.focus(match self.focused {
                     FocusedPane::Left => FocusedPane::Right,
                     _ => FocusedPane::Left,
-                };
-                let to = if self.focused == dock { other } else { dock };
-                self.focus(to);
+                });
                 return Ok(());
             }
-            self.toggle_viewer_park();
+        }
+        // Shift+Tab is the tab strip of whatever has the focus — the pane's
+        // directories, or the panel's open files. It used to park the panel
+        // away, which the panel outgrew when it moved into a pane: it is
+        // beside the listing now, and Tab crosses to it.
+        if key.code == KeyCode::BackTab
+            && !key.modifiers.contains(KeyModifiers::CONTROL)
+            && !key.modifiers.contains(KeyModifiers::ALT)
+            && matches!(self.popup, Popup::Viewer { .. })
+            && !matches!(self.popup, Popup::Viewer { editing: true, .. })
+            && self.viewer_dock == Some(self.focused)
+        {
+            self.viewer_switch_tab(true);
             return Ok(());
         }
         // Ctrl+Shift+Arrow resizes panes from the keyboard, the counterpart to
@@ -2099,11 +2115,11 @@ impl App {
             (true, _, KeyCode::Char('j')) => self.focus_direction('j'),
             (true, _, KeyCode::Char('k')) => self.focus_direction('k'),
             (true, _, KeyCode::Char('l')) => self.focus_direction('l'),
-            (false, false, KeyCode::Tab) => {
-                if let Some(t) = self.active_file_tabs_mut() { t.next_tab(); }
-            }
+            // Tab crosses to the other pane (handled before this table);
+            // Shift+Tab is this pane's own tab strip. F1 / F2 are still the
+            // pair that steps it in either direction.
             (_, _, KeyCode::BackTab) => {
-                if let Some(t) = self.active_file_tabs_mut() { t.prev_tab(); }
+                if let Some(t) = self.active_file_tabs_mut() { t.next_tab(); }
             }
             // Tab management: t = new tab, w = close active tab.
             (false, false, KeyCode::Char('t')) => {

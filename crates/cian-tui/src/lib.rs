@@ -2218,12 +2218,6 @@ pub struct App {
     viewer_tab_rects: Vec<(Rect, usize)>,
     /// Where the viewer's ✕ button was drawn, so a click can find it.
     viewer_close_rect: Rect,
-    /// vi's operator grammar, mid-command. `vim_obj` holds `i` or `a` while
-    /// the object character is awaited, `vim_wait` the `f`/`t` family key
-    /// while *its* character is, and `vim_last_find` what `;` and `,` repeat.
-    /// The operator itself lives in the viewer's `pending`, beside `z`.
-    /// The file put aside with Shift+Tab, waiting to be stepped back into.
-    viewer_parked: Option<Box<Popup>>,
     /// vi's marks — `ma` here, `'a` back — kept per file, so a mark set in
     /// one is not jumped to in another.
     vim_marks: std::collections::HashMap<(PathBuf, char), (usize, usize)>,
@@ -2554,7 +2548,6 @@ impl App {
             outline_rect: Rect::new(0, 0, 0, 0),
             viewer_tab_rects: Vec::new(),
             viewer_close_rect: Rect::new(0, 0, 0, 0),
-            viewer_parked: None,
             vim_marks: std::collections::HashMap::new(),
             vim_jumps: Vec::new(),
             vim_jump_at: 0,
@@ -3867,7 +3860,7 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry("    :ws", None, "show trailing spaces, tabs and ideographic spaces", "行末空白・TAB・全角スペースを表示"),
                 entry("    :lf :crlf", None, "convert line endings (shown in the title)", "改行コードを変換（タイトルに表示）"),
                 entry("  Shift+F8/F9/F10", None, "split left-right / top-bottom / close it — Shift+H,L or a click crosses over", "左右分割 / 上下分割 / 解除 — Shift+H,L かクリックで行き来"),
-                entry("  = in a split", None, "compare the two halves in place — Tab / Shift+Tab step, both stay editable", "分割中の = で両側を比較 — Tab / Shift+Tab で移動、どちらも編集可能なまま"),
+                entry("  = in a split", None, "compare the two halves in place — ]c / [c step, both stay editable", "分割中の = で両側を比較 — ]c / [c で移動、どちらも編集可能なまま"),
                 entry("  ? in viewer", None, "the keys this window has, rather than all of cian's", "ビューアで ?：この画面で使えるキーだけを表示"),
                 entry("  right-click / S-Enter", None, "the viewer's menu: ask the AI about the selection, copy, reveal, theme", "ビューアのメニュー：選択範囲をAIに聞く・コピー・場所を開く・テーマ"),
                 entry("  p / P", None, "paste after / before the cursor — whole lines when whole lines were copied", "カーソルの後/前に貼り付け — 行単位でコピーしたものは行単位で"),
@@ -3975,7 +3968,8 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry("t, F9", None, "new tab", "新規タブ"),
                 entry("w", None, "close tab", "タブを閉じる"),
                 entry("F1 / F2", None, "previous / next tab", "前／次のタブ"),
-                entry("Tab, Shift+Tab", None, "next / previous tab", "次／前のタブ"),
+                entry("Tab", None, "cross to the other pane — a listing or a file, whichever is there", "反対のペインへ — 一覧でもファイルでも"),
+                entry("Shift+Tab", None, "the next tab of whatever has the focus (F1 / F2 step either way)", "フォーカス中のパネルの次のタブへ（F1 / F2 は前後）"),
                 entry("click a tab", None, "switch to it (mouse)", "クリックで切替（マウス）"),
                 entry("F10", None, "close tab (confirms)", "タブを閉じる（確認あり）"),
             ],
@@ -4129,14 +4123,16 @@ pub(crate) fn viewer_manual_lines(lang: Lang) -> Vec<String> {
         ("Shift+F10", "close the split", "分割を解除"),
         ("Shift+H  Shift+L", "cross to the other half", "もう片方へ移動"),
         ("=", "mark what differs between the halves", "左右の差分に印"),
-        ("Tab  Shift+Tab", "step through those differences", "差分を順に移動"),
+        ("]c  [c", "step through those differences", "差分を順に移動"),
         (":w  :q  :wq  :q!", "save, close, save and close, close discarding", "保存・閉じる・保存して閉じる・破棄して閉じる"),
         (":w <name>", "save it as that, and go on editing it", "その名前で保存し、以後それを編集"),
         ("Enter (in a listing)", "open a file in this panel", "一覧で Enter — このパネルで開く"),
         ("F3 (in a listing)", "open it in the *other* pane instead", "一覧で F3 — 反対のペインで開く"),
         ("F12", "this panel fills the window, and back", "このパネルを全画面に／戻す"),
         ("Shift+H  L  J", "focus the left pane, the right, the shell", "左ペイン／右ペイン／シェルへ移動"),
-        ("Shift+Tab", "step to the listing beside it, and back", "隣の一覧へ移動／戻る"),
+        ("Tab", "cross to the pane beside it, and back", "隣のペインへ移動／戻る"),
+        ("Shift+Tab", "the next open file in this panel (F2 / Shift+F2 too)", "このパネルの次のファイルへ（F2 / Shift+F2 でも）"),
+        (":new", "a blank file to type into, docked here", "空のファイルをここに開く"),
         ("]c  [c  Tab", "next / previous difference, while comparing", "比較中：次・前の差分へ"),
         ("✕", "the button in the corner closes it too — Esc does not", "右上の ✕ でも閉じる — Esc では閉じません"),
     ];

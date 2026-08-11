@@ -354,17 +354,10 @@ impl App {
             }
             return Ok(());
         }
-        // Tab steps to the next difference while a comparison is running —
-        // and `]c` / `[c` do it either way, which is what vimdiff calls them.
-        // Shift+Tab used to be "the previous one" and is the window's now.
-        if !ctrl && !alt
-            && key.code == KeyCode::Tab
-            && self.viewer_diff.is_some()
-            && matches!(self.popup, Popup::Viewer { editing: false, .. })
-        {
-            self.viewer_diff_step(true);
-            return Ok(());
-        }
+        // Tab used to step to the next difference while comparing. It crosses
+        // to the other pane now, like everywhere else in the window; `]c` and
+        // `[c` step the differences either way, which is what vimdiff calls
+        // them and what the `?` list has always shown first.
         // `z` folds: `za` toggles the one at the cursor, `zR` opens every fold,
         // `zM` closes them all. Same prefix trick as the brackets, and for the
         // same reason it has to come before the edit operators — which
@@ -3337,36 +3330,12 @@ impl App {
         }
     }
 
-    /// Shift+Tab: step between the file being edited and the panes behind it.
+    /// `:new` — an empty file to type into, with no name yet, docked in the
+    /// pane you were looking at. `:w <name>` gives it one.
     ///
-    /// The viewer is not a dialog you finish with — it is the other half of
-    /// the window. So it parks rather than closes, keeping its cursor, its
-    /// folds and its unsaved edits, and the same key brings it back. With
-    /// nothing to come back to it opens an empty file, which is what makes
-    /// this an editor you can start typing into rather than only a reader.
-    pub(crate) fn toggle_viewer_park(&mut self) {
-        if matches!(self.popup, Popup::Viewer { .. }) {
-            self.viewer_dock = None;
-            let v = std::mem::replace(&mut self.popup, Popup::None);
-            self.viewer_parked = Some(Box::new(v));
-            self.message = Some(
-                tr(self.lang, "Shift+Tab returns to the file", "Shift+Tab で戻ります").into(),
-            );
-            return;
-        }
-        if !matches!(self.popup, Popup::None) {
-            return;
-        }
-        match self.viewer_parked.take() {
-            Some(v) => {
-                self.popup = *v;
-                self.full_clear = true;
-            }
-            None => self.open_scratch_viewer(),
-        }
-    }
-
-    /// An empty file to type into, with no name yet. `:w <name>` gives it one.
+    /// It used to be what Shift+Tab did with nothing to step back into.
+    /// Shift+Tab is the tab strip now, and a new file is a thing you ask for
+    /// rather than something you arrive at by pressing a key twice.
     pub(crate) fn open_scratch_viewer(&mut self) {
         let mut view = cian_core::viewer::View::from_text(String::new(), 0, false);
         // One empty line rather than none: the cursor has to be somewhere, and
@@ -3419,6 +3388,10 @@ impl App {
             )
             .into(),
         );
+        // Docked where you were, like anything else opened from a listing.
+        if self.focused != FocusedPane::Shell {
+            self.viewer_dock = Some(self.focused);
+        }
     }
 
     /// `:w <name>` — write this buffer to `name` and go on editing *it*.

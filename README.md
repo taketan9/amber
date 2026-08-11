@@ -30,7 +30,7 @@ Two panes side by side. You copy and move between them — that is the whole ide
 | Key | Does |
 |---|---|
 | **← / →** | move focus between the panes |
-| **Enter** | enter a folder or archive; **read a file right here** — the viewer opens *in that pane*, with everything it can do; `F3` gives it the whole window, `Shift+Tab` steps to the listing beside it, `:q` closes it |
+| **Enter** | enter a folder or archive; **read a file right here** — the viewer opens *in that pane*, with everything it can do; `F12` gives it the whole window, `Tab` crosses to the listing beside it, `:q` closes it |
 | **Ctrl+Enter** | open the file with its own program (on a folder: open it in the other pane) |
 | **Alt+← / Alt+→** | this pane's history, back / forward (or click **◀ ▶** in the title) |
 | **Backspace** | up a level (or click the `..` row) |
@@ -74,7 +74,7 @@ Fuzzy pickers: type a few letters, press Enter.
 
 ## The text editor panel
 
-`Enter` and `F3` open the same thing — everything below — in two different places. `Enter` **docks it in the pane** the file was listed in: the other pane stays beside it, the keys are the file's while that pane has focus, and its hints move to the bar along the bottom. `F3` opens it **in the other pane** instead — the listing stays where it is and the file is read beside it, which is what `o` and `Shift+O` already say about a directory. A second `F3` there opens **another tab** rather than replacing what is being read. **F12** makes the panel fill the window and puts it back, which is the same zoom the listings and the shell have. `Shift+Tab` steps between the file and the listing next to it, `Shift+H` / `Shift+L` / `Shift+J` move the focus to the left pane, the right pane or the shell while you are reading, a click anywhere else moves it there too, and `:q` closes the file.
+`Enter` and `F3` open the same thing — everything below — in two different places. `Enter` **docks it in the pane** the file was listed in: the other pane stays beside it, the keys are the file's while that pane has focus, and its hints move to the bar along the bottom. `F3` opens it **in the other pane** instead — the listing stays where it is and the file is read beside it, which is what `o` and `Shift+O` already say about a directory. A second `F3` there opens **another tab** rather than replacing what is being read. **F12** makes the panel fill the window and puts it back, which is the same zoom the listings and the shell have. `Tab` crosses between the file and the listing next to it — and between two open files, when both panes hold one — `Shift+Tab` steps this panel's own tabs, `Shift+H` / `Shift+L` / `Shift+J` move the focus to the left pane, the right pane or the shell while you are reading, a click anywhere else moves it there too, and `:q` closes the file.
 
 Docked, the panel keeps its name and its **✕** on its frame and puts everything else along the foot of the window: its keys on the hint bar, its mode (`READ` / `EDIT` / `COMMAND` / `VISUAL`) and the cursor's line and column on the status bar, and the `:` and `/` prompts on cian's own prompt line — the same line the file panes type on.
 
@@ -105,12 +105,14 @@ Vim-flavoured: `h j k l`, `w b`, `0 $`, `gg G`, `Ctrl-D/U`, `Ctrl-F/B`, `{` `}`,
 | `Shift+F8` / `Shift+F9` | split left-right / top-bottom; `Shift+F10` closes the split |
 | `Shift+H` / `Shift+L` | cross to the other half (or click it) |
 | `=` | mark what differs between the two halves — live, while you edit both |
-| `Tab` / `Shift+Tab` | step through those differences |
+| `]c` / `[c` | step through those differences |
 | `]]` / `[[` | next / previous heading or definition |
 | `Space` / `za` / `zA` | fold one section / toggle all |
 | `:summary` / `:coding` | ask the AI to summarise the file / talk about its code (right-click too) |
 | `?` | the viewer's own key list, grouped by what you are doing |
-| **Shift+Tab** | step to the panes and back — the file waits with its cursor, folds and unsaved edits. With nothing open it gives you an **empty file to type into**; `:w <name>` saves it and adopts the name |
+| **Tab** | cross to the pane beside it and back — a listing or another open file, whichever is there. Never the shell: that is `Shift+J` |
+| **Shift+Tab** | the next open file **in this panel** (`F2` / `Shift+F2` step either way) |
+| `:new` | a blank file to type into, docked in this pane; `:w <name>` saves it and adopts the name |
 | `m a` / `' a` | set a mark, jump back to it (`` ` a`` for the column too) |
 | `Ctrl+O` / `Ctrl+I` | back and forward through the places you jumped from |
 | `.` | do the last change again — including what you typed |

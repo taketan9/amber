@@ -2043,7 +2043,7 @@ pub(crate) fn key_hints(app: &App) -> Vec<(&'static str, &'static str)> {
                 ("v", d("select", "選択")),
                 ("y", d("copy", "コピー")),
                 ("d c y", d("+ motion", "＋モーション")),
-                ("S-Tab", d("the other pane", "反対ペインへ")),
+                ("Tab", d("the other pane", "反対ペインへ")),
                 (":q", d("close", "閉じる")),
                 ("?", d("keys", "キー一覧")),
             ]

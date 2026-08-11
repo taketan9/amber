@@ -1153,17 +1153,18 @@
             "one mark per real line — nothing inserted to line the two up",
         );
 
-        // Tab steps to the next difference; Shift+Tab back.
+        // `]c` / `[c` step the differences — vimdiff's own keys. Tab used to
+        // do the forward half and belongs to the window now.
         let at = |app: &App| match &app.popup {
             Popup::Viewer { line, .. } => *line,
             other => panic!("not a viewer: {other:?}"),
         };
-        app.handle_key(code(KeyCode::Tab)).unwrap();
+        app.handle_key(key(']')).unwrap();
+        app.handle_key(key('c')).unwrap();
         assert_eq!(at(&app), 1, "the changed line");
-        app.handle_key(code(KeyCode::Tab)).unwrap();
+        app.handle_key(key(']')).unwrap();
+        app.handle_key(key('c')).unwrap();
         assert_eq!(at(&app), 2, "the one only this side has");
-        // vimdiff's own key for the previous difference; Shift+Tab is the
-        // window's now.
         app.handle_key(key('[')).unwrap();
         app.handle_key(key('c')).unwrap();
         assert_eq!(at(&app), 1, "and back");
@@ -1948,10 +1949,13 @@
     /// when there is nothing to step back into — which is what makes the
     /// viewer somewhere to start writing rather than only somewhere to read.
     #[test]
-    fn shift_tab_parks_the_file_and_opens_an_empty_one() {
+    fn a_new_file_starts_empty_and_takes_a_name_when_saved() {
         let (_d, mut app) = app_with(&["a.txt"]);
-        // Nothing open: Shift+Tab gives an empty, unnamed file.
-        app.handle_key(code(KeyCode::BackTab)).unwrap();
+        // `:new` gives an empty, unnamed file, docked where you were. It used
+        // to be what Shift+Tab did with nothing to step back into; Shift+Tab
+        // is the tab strip now.
+        app.command_buffer = "new".into();
+        app.run_command();
         match &app.popup {
             Popup::Viewer { path, view, editable, .. } => {
                 assert!(path.as_os_str().is_empty(), "no name yet");
@@ -1960,17 +1964,14 @@
             }
             other => panic!("expected an empty viewer, got {other:?}"),
         }
+        assert_eq!(app.viewer_dock, Some(FocusedPane::Left), "in the pane you were in");
 
-        // Type something, park it, come back to it with everything intact.
         app.handle_key(key('i')).unwrap();
         for c in "hello".chars() {
             app.handle_key(key(c)).unwrap();
         }
         app.handle_key(code(KeyCode::Esc)).unwrap();
-        app.handle_key(code(KeyCode::BackTab)).unwrap();
-        assert!(matches!(app.popup, Popup::None), "the panes are back");
-        app.handle_key(code(KeyCode::BackTab)).unwrap();
-        assert_eq!(viewer_lines(&app)[0], "hello", "the file came back as it was");
+        assert_eq!(viewer_lines(&app)[0], "hello");
 
         // `:w` alone will not guess a name; `:w <name>` writes and adopts it.
         for k in [':', 'w'] {
@@ -2081,8 +2082,8 @@
         );
         app.handle_key(code(KeyCode::Esc)).unwrap();
 
-        // Shift+Tab moves the focus to the listing beside it; the file stays.
-        app.handle_key(code(KeyCode::BackTab)).unwrap();
+        // Tab crosses to the listing beside it; the file stays.
+        app.handle_key(code(KeyCode::Tab)).unwrap();
         assert_eq!(app.focused, FocusedPane::Right);
         assert!(matches!(app.popup, Popup::Viewer { .. }), "the file is still open");
         app.handle_key(key('j')).unwrap();
@@ -2093,7 +2094,7 @@
             !(bottom.contains("whole window") || bottom.contains("全画面へ")),
             "the file's hints stepped aside: {bottom:?}",
         );
-        app.handle_key(code(KeyCode::BackTab)).unwrap();
+        app.handle_key(code(KeyCode::Tab)).unwrap();
         assert_eq!(app.focused, FocusedPane::Left, "and back to the file");
 
         // F12 (and F3, which used to mean this) zooms the pane it is docked
@@ -2224,7 +2225,7 @@
         let buf = render_buf(&mut app, 120, 30);
         let f = app.viewer_frame;
         let border = buf[(f.x, f.y)].fg;
-        app.handle_key(code(KeyCode::BackTab)).unwrap(); // focus the listing
+        app.handle_key(code(KeyCode::Tab)).unwrap(); // focus the listing beside it
         let buf = render_buf(&mut app, 120, 30);
         let quiet = buf[(f.x, f.y)].fg;
         assert_ne!(border, quiet, "the frame changed colour when it lost the keyboard");
@@ -2277,6 +2278,53 @@
         });
         let _ = render(&mut app, 120, 30);
         assert!(app.layout_rects.left.width > narrowed, "and dragging moved it");
+    }
+
+    /// Tab crosses the window; Shift+Tab steps the tab strip of whatever has
+    /// the focus. Between two listings, between a listing and a file open in
+    /// the editor panel, and between two of those panels — one key, because
+    /// they are all just "the other side".
+    #[test]
+    fn tab_crosses_the_window_and_shift_tab_walks_the_tabs() {
+        let (_l, _r, mut app) = app_two_dirs(&["a.txt", "b.txt"], &["c.txt"]);
+        let _ = render(&mut app, 120, 30);
+
+        // Listing ↔ listing.
+        assert_eq!(app.focused, FocusedPane::Left);
+        app.handle_key(code(KeyCode::Tab)).unwrap();
+        assert_eq!(app.focused, FocusedPane::Right);
+        app.handle_key(code(KeyCode::Tab)).unwrap();
+        assert_eq!(app.focused, FocusedPane::Left);
+
+        // Shift+Tab is this pane's own tabs, not the other pane.
+        app.handle_key(key('t')).unwrap(); // a second tab here
+        assert_eq!(app.left.tabs.len(), 2, "two tabs open");
+        let before = app.left.active;
+        app.handle_key(code(KeyCode::BackTab)).unwrap();
+        assert_ne!(app.left.active, before, "Shift+Tab stepped the tab strip");
+        assert_eq!(app.focused, FocusedPane::Left, "and left the focus where it was");
+
+        // Listing ↔ editor panel.
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+        assert_eq!(app.viewer_dock, Some(FocusedPane::Left), "a file open on the left");
+        app.handle_key(code(KeyCode::Tab)).unwrap();
+        assert_eq!(app.focused, FocusedPane::Right, "crossed to the listing");
+        assert!(matches!(app.popup, Popup::Viewer { .. }), "the file stayed open");
+        app.handle_key(code(KeyCode::Tab)).unwrap();
+        assert_eq!(app.focused, FocusedPane::Left, "and back into the panel");
+
+        // Panel ↔ panel: open one on the other side too.
+        app.handle_key(code(KeyCode::Tab)).unwrap();
+        assert_eq!(app.focused, FocusedPane::Right);
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+        assert_eq!(app.viewer_dock, Some(FocusedPane::Right), "and one open here");
+        app.handle_key(code(KeyCode::Tab)).unwrap();
+        assert_eq!(app.focused, FocusedPane::Left, "Tab crosses between two panels too");
+
+        // The shell is not on the Tab circuit: Shift+J is how you get there.
+        app.handle_key(code(KeyCode::Tab)).unwrap();
+        app.handle_key(code(KeyCode::Tab)).unwrap();
+        assert_ne!(app.focused, FocusedPane::Shell, "Tab never lands on the shell");
     }
 
     /// Ctrl+G opens the grep, as it does in Sakura. Ctrl+F was already the

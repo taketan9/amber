@@ -64,6 +64,8 @@ impl App {
             "copyto" => self.start_dest_picker(PendingOp::Copy),
             "moveto" => self.start_dest_picker(PendingOp::Move),
             "grep" => self.start_grep_prompt(),
+            // A blank file in this pane, with no name until `:w <name>`.
+            "new" | "scratch" => self.open_scratch_viewer(),
             "markall" | "selectall" => self.mark_all(),
             "office" => self.open_in_office(),
             "officelink" => self.write_office_link(),
