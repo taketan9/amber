@@ -24,11 +24,17 @@ impl App {
             }
         }
 
+        // A border is a border whatever is drawn beside it: a click on one is
+        // a resize, not a click on a pane or on the panel.
+        let on_divider = self.dividers.iter().any(|d| {
+            let r = d.zone;
+            col >= r.x && col < r.x + r.width && row >= r.y && row < r.y + r.height
+        });
         // A docked panel only owns the mouse inside its own frame. A click on
         // the listing beside it, or on the shell below, moves the focus there
         // — the panel is one surface among the window's, not a dialog over
         // them.
-        if matches!(self.popup, Popup::Viewer { .. }) && self.viewer_dock.is_some() {
+        if !on_divider && matches!(self.popup, Popup::Viewer { .. }) && self.viewer_dock.is_some() {
             let f = self.viewer_frame;
             let inside = col >= f.x && col < f.x + f.width && row >= f.y && row < f.y + f.height;
             if !inside && matches!(ev.kind, MouseEventKind::Down(_)) {
@@ -60,7 +66,29 @@ impl App {
         // In the viewer: a click places the cursor on that line, a drag selects
         // whole lines (line-wise visual), the wheel scrolls, and right-click
         // copies. Handled before the blanket popup guard below.
-        if matches!(self.popup, Popup::Viewer { .. }) && self.viewer_dock.map(|d| d == self.focused).unwrap_or(true)
+        // …and it only handles the mouse *inside its own frame* when it is
+        // docked: outside it, the click belongs to the window — a border to
+        // drag, a pane to focus.
+        let inside_panel = {
+            let hit = |r: Rect| {
+                r.width > 0
+                    && r.height > 0
+                    && col >= r.x
+                    && col < r.x + r.width
+                    && row >= r.y
+                    && row < r.y + r.height
+            };
+            // Split in two, the panel is both halves — `viewer_frame` only
+            // describes the one the keyboard is on.
+            hit(self.viewer_frame)
+                || (self.viewer_split.is_some()
+                    && (hit(self.viewer_half_rects[0]) || hit(self.viewer_half_rects[1])))
+        };
+        // The seam between two panes runs along the panel's own border, so a
+        // click there is a resize even though it is "inside" the frame.
+        if matches!(self.popup, Popup::Viewer { .. })
+            && (self.viewer_dock.is_none()
+                || (inside_panel && !on_divider && self.viewer_dock == Some(self.focused)))
         {
             // The tab strip lives in the top border. A title starts one column
             // inside the frame and opens with " ◂ ▸ ", which puts the arrows
@@ -469,7 +497,14 @@ impl App {
         // Every other popup — confirm dialogs and list pickers — is driven
         // through the hit zones the renderer registered, so it is fully
         // clickable. The wheel scrolls whatever is on screen.
-        if !matches!(self.popup, Popup::None) {
+        // A border drag belongs to the window, not to whatever is drawn in
+        // it. With the panel docked in a pane, dragging the seam between the
+        // panes — or the one above the shell — resizes them as ever.
+        let panel_docked = matches!(self.popup, Popup::Viewer { .. }) && self.viewer_dock.is_some();
+        let border_gesture = panel_docked
+            && (self.drag.is_some()
+                || (on_divider && matches!(ev.kind, MouseEventKind::Down(MouseButton::Left))));
+        if !matches!(self.popup, Popup::None) && !border_gesture {
             let _ = self.handle_popup_mouse(ev);
             return;
         }

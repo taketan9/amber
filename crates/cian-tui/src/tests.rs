@@ -1230,7 +1230,10 @@
             let path = app.active_pane().unwrap().entries.iter().find(|e| e.name == n).unwrap().path.clone();
             app.active_pane_mut().unwrap().marks.insert(path);
         }
-        app.handle_key(code(KeyCode::F(3))).unwrap();
+        // Marked files open together; F12 gives the panel the window, which
+        // is the geometry a split is measured against here.
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+        app.handle_key(code(KeyCode::F(12))).unwrap();
         let shown = |app: &App| match &app.popup {
             Popup::Viewer { view, .. } => view.lines.join("\n"),
             other => panic!("not a viewer: {other:?}"),
@@ -1257,8 +1260,18 @@
         let _ = render(&mut app, 160, 30);
         let theirs = app.viewer_half_rects[1];
         assert!(theirs.width > 0, "the other half was measured");
-        click(&mut app, theirs.x + 5, theirs.y + 3);
-        assert_eq!(shown(&app), "BBB", "the keyboard crossed to the half that was clicked");
+        // Well inside it: its own left edge is the seam with the first half,
+        // and a click on a seam is a resize.
+        click(&mut app, theirs.x + 8, theirs.y + 3);
+        assert_eq!(
+            shown(&app),
+            "BBB",
+            "the keyboard crossed to the half that was clicked (halves {:?}, frame {:?}, dock {:?}, zoomed {})",
+            app.viewer_half_rects,
+            app.viewer_frame,
+            app.viewer_dock,
+            app.zoomed,
+        );
         let theirs = app.viewer_half_rects[1];
         click(&mut app, theirs.x + 5, theirs.y + 3);
         assert_eq!(shown(&app), "AAA", "and back again");
@@ -1321,7 +1334,10 @@
             let path = app.active_pane().unwrap().entries.iter().find(|e| e.name == n).unwrap().path.clone();
             app.active_pane_mut().unwrap().marks.insert(path);
         }
-        app.handle_key(code(KeyCode::F(3))).unwrap();
+        // Open them, then give the panel the window: this is about how a
+        // split is laid out across it.
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+        app.handle_key(code(KeyCode::F(12))).unwrap();
         let shown = |app: &App| match &app.popup {
             Popup::Viewer { view, .. } => view.lines.join("\n"),
             other => panic!("not a viewer: {other:?}"),
@@ -2153,6 +2169,105 @@
             rows.iter().any(|r| r.contains("a.txt")),
             "the listing is still there, on the left:\n{rows:#?}",
         );
+    }
+
+    /// `F3` into a pane that is already reading something adds a tab there
+    /// rather than replacing what is open — and it used to do nothing at all,
+    /// because a leftover "F3 means full window" branch cleared the dock and
+    /// returned before opening anything.
+    #[test]
+    fn f3_into_a_busy_pane_opens_another_tab() {
+        let d = tempfile::tempdir().unwrap();
+        for (n, b) in [("a.txt", "AAA\n"), ("b.txt", "BBB\n")] {
+            std::fs::write(d.path().join(n), b).unwrap();
+        }
+        let p = d.path().to_path_buf();
+        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        let go = |app: &mut App, n: &str| {
+            app.focus(FocusedPane::Left);
+            let at =
+                app.active_pane().unwrap().entries.iter().position(|e| e.name == n).unwrap();
+            app.active_pane_mut().unwrap().cursor = at;
+            app.handle_key(code(KeyCode::F(3))).unwrap();
+        };
+
+        go(&mut app, "a.txt");
+        assert_eq!(app.viewer_dock, Some(FocusedPane::Right));
+        assert_eq!(viewer_lines(&app), ["AAA"]);
+
+        go(&mut app, "b.txt");
+        assert_eq!(viewer_lines(&app), ["BBB"], "the second one is what is being read");
+        assert_eq!(app.viewer_tab_count(), 2, "and the first is still open, as a tab");
+        assert_eq!(app.viewer_dock, Some(FocusedPane::Right), "in the same pane");
+
+        // Shift+F2 steps back to the one that was there.
+        app.handle_key(KeyEvent::new(KeyCode::F(2), KeyModifiers::SHIFT)).unwrap();
+        assert_eq!(viewer_lines(&app), ["AAA"], "the tab strip has both");
+    }
+
+    /// The panel's frame goes quiet when the keyboard is somewhere else — a
+    /// panel that keeps its mode colour while the keys go elsewhere looks
+    /// live and is not.
+    #[test]
+    fn the_panels_frame_says_whether_it_has_the_keyboard() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+        let buf = render_buf(&mut app, 120, 30);
+        let f = app.viewer_frame;
+        let border = buf[(f.x, f.y)].fg;
+        app.handle_key(code(KeyCode::BackTab)).unwrap(); // focus the listing
+        let buf = render_buf(&mut app, 120, 30);
+        let quiet = buf[(f.x, f.y)].fg;
+        assert_ne!(border, quiet, "the frame changed colour when it lost the keyboard");
+        assert_eq!(quiet, crate::theme::theme().border, "…to the colour an unfocused pane wears");
+    }
+
+    /// The borders resize while the panel is docked — with the mouse and
+    /// with Ctrl+Shift+arrows. Both belong to the window's layout, so neither
+    /// is the panel's to swallow.
+    #[test]
+    fn the_panes_still_resize_while_the_panel_is_open() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+        let _ = render(&mut app, 120, 30);
+        assert!(matches!(app.popup, Popup::Viewer { .. }), "the panel is open");
+        let before = app.layout_rects.left.width;
+
+        // Ctrl+Shift+Left narrows the left pane.
+        app.handle_key(KeyEvent::new(KeyCode::Left, KeyModifiers::CONTROL | KeyModifiers::SHIFT))
+            .unwrap();
+        let _ = render(&mut app, 120, 30);
+        assert!(app.layout_rects.left.width < before, "the keyboard resized it");
+
+        // And the seam between the panes can still be grabbed and dragged.
+        // The seam between the two panes: tall and narrow. (The other one is
+        // the horizontal seam above the shell.)
+        let seam = app
+            .dividers
+            .iter()
+            .find(|d| d.zone.width <= 2 && d.zone.height > 2)
+            .map(|d| d.zone)
+            .expect("a vertical seam to grab");
+        let narrowed = app.layout_rects.left.width;
+        app.handle_mouse(crossterm::event::MouseEvent {
+            kind: crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+            column: seam.x,
+            row: seam.y + 1,
+            modifiers: KeyModifiers::NONE,
+        });
+        assert!(
+            app.drag.is_some(),
+            "the border was grabbed rather than the panel (seam {seam:?}, dividers {:?})",
+            app.dividers.iter().map(|d| d.zone).collect::<Vec<_>>(),
+        );
+        app.handle_mouse(crossterm::event::MouseEvent {
+            kind: crossterm::event::MouseEventKind::Drag(crossterm::event::MouseButton::Left),
+            column: seam.x + 12,
+            row: seam.y + 1,
+            modifiers: KeyModifiers::NONE,
+        });
+        let _ = render(&mut app, 120, 30);
+        assert!(app.layout_rects.left.width > narrowed, "and dragging moved it");
     }
 
     /// Backspace in a search listing means the same as Esc. A set of results

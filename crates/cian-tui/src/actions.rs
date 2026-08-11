@@ -733,9 +733,8 @@ impl App {
     /// It used to mean "the same file, but over the whole window", which F12
     /// now does to any surface, panel included. Rather than leave the key
     /// meaning nothing, it takes the shape the two panes are for: the listing
-    /// stays where it is and the file opens beside it. `Ctrl+Enter` on a
-    /// folder already means "in the other pane"; this is the same sentence
-    /// about a file.
+    /// stays where it is and the file opens beside it — what `o` and
+    /// `Shift+O` already say about a directory, said about a file.
     pub(crate) fn look_inside_other(&mut self) {
         let here = match self.focused {
             FocusedPane::Shell => self.last_file_pane,
@@ -746,23 +745,31 @@ impl App {
             _ => FocusedPane::Left,
         };
         // The file is the one under *this* pane's cursor; it is read over
-        // there.
+        // there. If a file is already open over there, this one joins it as
+        // another tab — replacing what someone is reading, unasked, is the
+        // one thing this key must not do.
         self.focus(here);
+        let joining = matches!(self.popup, Popup::Viewer { .. }) && self.viewer_dock == Some(there);
+        let stashed = joining.then(|| std::mem::replace(&mut self.popup, Popup::None));
         self.look_inside();
         if matches!(self.popup, Popup::Viewer { .. }) {
+            if let Some(old) = stashed {
+                // The one that was there goes into the strip in front of the
+                // new one, which is the one now being read.
+                let at = self.viewer_tab_idx.min(self.viewer_tabs.len());
+                self.viewer_tabs.insert(at, old);
+                self.viewer_tab_idx = at + 1;
+            }
             self.viewer_dock = Some(there);
             self.focus(there);
             self.full_clear = true;
+        } else if let Some(old) = stashed {
+            // Nothing opened — put back what was being read.
+            self.popup = old;
         }
     }
 
     pub(crate) fn look_inside(&mut self) {
-        // Already reading it in the pane: F3 means "over the whole window,
-        // then" — the same file, the same cursor, more room.
-        if self.viewer_dock.take().is_some() && matches!(self.popup, Popup::Viewer { .. }) {
-            self.full_clear = true;
-            return;
-        }
         // On a remote pane, fetch the file first and view the local copy.
         if self.active_pane().map(|p| p.is_remote()).unwrap_or(false) {
             self.remote_pane_view();

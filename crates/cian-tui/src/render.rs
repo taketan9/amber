@@ -496,18 +496,18 @@ pub(crate) fn draw(f: &mut Frame, app: &mut App) {
         if let Some(behind) = app.viewer_return.take() {
             let mut behind = behind;
             if let Some(other) = app.viewer_split.take() {
-                let (first, second) = split_viewer_areas(area, app.viewer_split_lr);
+                let (first, second) = split_viewer_areas(viewer_area, app.viewer_split_lr);
                 let (mine, theirs) = if app.viewer_split_focus {
                     (second, first)
                 } else {
                     (first, second)
                 };
                 let mut other = other;
-                draw_viewer(f, theirs, &mut other, lang, (show_ws, ruler), None, (0, &[], &[]), false);
-                draw_viewer(f, mine, &mut behind, lang, (show_ws, ruler), None, (0, &[], &[]), false);
+                draw_viewer(f, theirs, &mut other, lang, (show_ws, ruler), None, (0, &[], &[]), false, true);
+                draw_viewer(f, mine, &mut behind, lang, (show_ws, ruler), None, (0, &[], &[]), false, true);
                 app.viewer_split = Some(other);
             } else {
-                draw_viewer(f, area, &mut behind, lang, (show_ws, ruler), None, (0, &[], &[]), false);
+                draw_viewer(f, area, &mut behind, lang, (show_ws, ruler), None, (0, &[], &[]), false, true);
             }
             app.viewer_return = Some(behind);
         }
@@ -521,7 +521,9 @@ pub(crate) fn draw(f: &mut Frame, app: &mut App) {
         if matches!(app.popup, Popup::Viewer { .. }) && app.viewer_split.is_some() {
             let other = app.viewer_split.take().expect("just checked");
             let full = area;
-            let (first, second) = split_viewer_areas(area, app.viewer_split_lr);
+            // Within the panel: a docked panel splits inside the pane it is
+            // docked in, not across the window it happens to sit on.
+            let (first, second) = split_viewer_areas(viewer_area, app.viewer_split_lr);
             // Which half each file occupies is fixed; crossing over moves the
             // focus, not the files. Drawing the focused one always on the left
             // made the two look as though they had traded places.
@@ -556,7 +558,7 @@ pub(crate) fn draw(f: &mut Frame, app: &mut App) {
                 Some(d) => (d.mine.as_slice(), d.theirs.as_slice()),
                 None => (&[][..], &[][..]),
             };
-            draw_viewer(f, theirs, &mut other, lang, (show_ws, ruler), None, (0, &[], dt), false);
+            draw_viewer(f, theirs, &mut other, lang, (show_ws, ruler), None, (0, &[], dt), false, true);
             f.render_widget(
                 Block::default().style(Style::default().fg(Color::Rgb(90, 90, 105))),
                 theirs,
@@ -570,6 +572,7 @@ pub(crate) fn draw(f: &mut Frame, app: &mut App) {
                 msg_for_viewer.as_deref(),
                 (app.viewer_tab_idx, &names, dm),
                 false,
+                true,
             );
             app.viewer_split = Some(other);
             app.popup_zones.clear();
@@ -621,6 +624,7 @@ pub(crate) fn draw(f: &mut Frame, app: &mut App) {
             &mut tab_rects,
             &mut close_rect,
             app.viewer_dock.is_some(),
+            app.viewer_dock.map(|d| d == app.focused).unwrap_or(true),
         );
         app.viewer_tab_rects = tab_rects;
         app.viewer_close_rect = close_rect;
@@ -3906,6 +3910,7 @@ fn draw_popup(
     tab_rects: &mut Vec<(Rect, usize)>,
     close_rect: &mut Rect,
     docked: bool,
+    active: bool,
 ) {
     // Every popup with a shape of its own draws itself. The rest — the
     // confirm/notice dialogs, which differ only in their wording — fall through
@@ -3927,7 +3932,7 @@ fn draw_popup(
         Popup::DestPicker { .. } => draw_dest_picker(f, area, popup, dests, zones, lang),
         Popup::Viewer { .. } => {
             let (rects, close) =
-                draw_viewer(f, area, popup, lang, (show_ws, ruler), msg.as_deref(), (tab_at, tab_names, &[]), docked);
+                draw_viewer(f, area, popup, lang, (show_ws, ruler), msg.as_deref(), (tab_at, tab_names, &[]), docked, active);
             *tab_rects = rects;
             *close_rect = close;
         }
@@ -5773,8 +5778,10 @@ fn draw_viewer(
     // Which of the viewer's open files this is, what they are all called, and
     // — when a comparison is running — what each line of *this* half is.
     tab: (usize, &[String], &[cian_core::diff::Mark]),
-    // Docked in a pane rather than floating over the window.
+    // Docked in a pane rather than floating over the window, and whether the
+    // keyboard is pointed at it.
     docked: bool,
+    active: bool,
 ) -> (Vec<(Rect, usize)>, Rect) {
     let (show_ws, ruler) = marks;
     let (tab_at, tab_names, diff_marks) = tab;
@@ -5900,7 +5907,15 @@ fn draw_viewer(
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(border_type())
-        .border_style(Style::default().fg(mode_color).add_modifier(Modifier::BOLD))
+        // Unfocused, the frame goes quiet — the same border colour an
+        // unfocused pane wears. A panel that keeps its mode colour while the
+        // keys are going somewhere else is a panel that looks live and is
+        // not.
+        .border_style(if active {
+            Style::default().fg(mode_color).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(theme().border)
+        })
         // The viewer takes the theme's own surface (light on a light theme),
         // so it truly follows the theme; its text uses readable_on below.
         .style(Style::default().bg(surface()))
@@ -5986,12 +6001,10 @@ fn draw_viewer(
     let close_w = 3u16;
     if rect.width > close_w + 4 {
         let close = Rect::new(rect.x + rect.width - close_w - 1, rect.y, close_w, 1);
+        let x_bg = if active { mode_color } else { theme().border };
         f.render_widget(
             Paragraph::new(" ✕ ").style(
-                Style::default()
-                    .fg(readable_on(mode_color))
-                    .bg(mode_color)
-                    .add_modifier(Modifier::BOLD),
+                Style::default().fg(readable_on(x_bg)).bg(x_bg).add_modifier(Modifier::BOLD),
             ),
             close,
         );

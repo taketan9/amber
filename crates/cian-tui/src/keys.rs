@@ -243,6 +243,18 @@ impl App {
             self.toggle_viewer_park();
             return Ok(());
         }
+        // Ctrl+Shift+Arrow resizes panes from the keyboard, the counterpart to
+        // dragging a border. Ahead of everything that owns the keyboard —
+        // including the editor panel — because it is about the window's
+        // layout rather than about what is in it. The modifier combination is
+        // not one a shell program or an editor expects on an arrow key.
+        if key.modifiers.contains(KeyModifiers::CONTROL)
+            && key.modifiers.contains(KeyModifiers::SHIFT)
+            && matches!(key.code, KeyCode::Left | KeyCode::Right | KeyCode::Up | KeyCode::Down)
+        {
+            self.resize_split(key.code);
+            return Ok(());
+        }
         // A docked viewer owns the keyboard only while the pane it sits in
         // has the focus. With the focus on the other pane it is still on
         // screen — a file open beside a listing — and the keys belong to the
@@ -262,19 +274,7 @@ impl App {
             self.open_manual();
             return Ok(());
         }
-        // Ctrl+Shift+Arrow resizes panes from the keyboard, the counterpart to
-        // dragging a border. Global (works from the shell too); the modifier
-        // combination is not one a shell program expects on an arrow key.
-        if key.modifiers.contains(KeyModifiers::CONTROL)
-            && key.modifiers.contains(KeyModifiers::SHIFT)
-            && matches!(
-                key.code,
-                KeyCode::Left | KeyCode::Right | KeyCode::Up | KeyCode::Down
-            )
-        {
-            self.resize_split(key.code);
-            return Ok(());
-        }
+
         // Ctrl+Shift+Enter opens the snippet launcher from anywhere — crucially
         // while the SHELL pane is focused, where a plain key would just be typed
         // into the terminal. cian sees the keystroke before the PTY does, so
