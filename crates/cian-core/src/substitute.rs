@@ -118,6 +118,47 @@ pub fn parse(input: &str) -> Result<Substitution, String> {
     Ok(Substitution { matcher, replacement: unescape(&replacement), confirm, global })
 }
 
+/// The one regex mistake worth naming: `*` repeats the character before it,
+/// and everyone who has typed a shell glob expects it to mean "anything".
+/// `crm*ne` compiles, matches nothing in a file full of `crmaine`, and looks
+/// like it should have worked.
+///
+/// Returns the suggested pattern when the `*` follows a plain character —
+/// not when it follows `.`, a class or a group, where the repeat is what was
+/// meant. Advice, never a silent rewrite: matching something other than what
+/// was typed is worse than finding nothing.
+pub fn star_hint(pattern: &str) -> Option<String> {
+    let chars: Vec<char> = pattern.chars().collect();
+    let mut out = String::new();
+    let mut found = false;
+    let mut escaped = false;
+    for (i, &c) in chars.iter().enumerate() {
+        if escaped {
+            escaped = false;
+            out.push(c);
+            continue;
+        }
+        if c == '\\' {
+            escaped = true;
+            out.push(c);
+            continue;
+        }
+        if c == '*' && i > 0 {
+            let before = chars[i - 1];
+            // `.` is already the wildcard; `]` and `)` close something the
+            // author built on purpose; an escaped character was spelled out.
+            let deliberate = matches!(before, '.' | ']' | ')' | '?' | '+' | '*')
+                || (i >= 2 && chars[i - 2] == '\\');
+            if !deliberate {
+                found = true;
+                out.push('.');
+            }
+        }
+        out.push(c);
+    }
+    found.then_some(out)
+}
+
 /// The same substitution, said with fields instead of with `s/old/new/`.
 ///
 /// This is what the replace bar hands in: a pattern, a replacement, and the
@@ -301,6 +342,29 @@ mod tests {
         assert!(from_fields("", "x", false, false, false).is_err());
         // A broken regex is reported rather than quietly matched literally.
         assert!(from_fields("(", "x", true, false, false).is_err());
+    }
+
+    /// `*` means "the character before it, repeated" — it is not a wildcard.
+    /// `crm*ne` therefore does not match `crmaine`, and reporting that as a
+    /// find is the only honest answer; `crm.*ne` is the pattern that means
+    /// what people reach for `*` to say.
+    #[test]
+    fn a_star_repeats_the_thing_before_it() {
+        let lines = vec!["crmaine".to_string()];
+        let hit = |pat: &str| {
+            let sub = from_fields(pat, "x", true, false, false).unwrap();
+            !find(&sub, &lines, None).is_empty()
+        };
+        assert!(!hit("crm*ne"), "zero-or-more m, then ne — crmaine has aine");
+        assert!(hit("crm.*ne"));
+        assert!(hit("crm.+ne"));
+        assert!(hit("crmm*aine"), "and the star does what it says on the tin");
+        // The hint that says so, offered only where it would help.
+        assert!(star_hint("crm*ne").is_some());
+        assert!(star_hint("crm.*ne").is_none(), "already a wildcard");
+        assert!(star_hint(r"crm\w*ne").is_none(), "a class, repeated on purpose");
+        assert!(star_hint("(ab)*c").is_none(), "a group, repeated on purpose");
+        assert!(star_hint("plain").is_none());
     }
 
     use super::*;

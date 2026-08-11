@@ -3446,6 +3446,28 @@ impl App {
         }
     }
 
+    /// "no matches", plus the one thing that is usually wrong when a regex
+    /// finds nothing: `*` repeats the character before it. Someone who typed
+    /// `crm*ne` looking for `crmaine` gets told what to type instead, rather
+    /// than being left to conclude that replace is broken.
+    fn say_no_matches(&mut self) {
+        let hint = match &self.popup {
+            Popup::Viewer { replace: Some(r), .. } if r.regex => {
+                cian_core::substitute::star_hint(&r.find)
+            }
+            _ => None,
+        };
+        self.message = Some(match hint {
+            Some(fixed) if self.lang == Lang::Ja => format!(
+                "該当なし — 正規表現の * は「直前の文字の繰り返し」です。任意の文字列なら {fixed}"
+            ),
+            Some(fixed) => format!(
+                "no matches — in a regex `*` repeats the character before it; for any text, {fixed}"
+            ),
+            None => tr(self.lang, "no matches", "該当なし").into(),
+        });
+    }
+
     /// Alt+n — land on the next match without changing it.
     fn replace_bar_find_next(&mut self) {
         let Some(sub) = self.replace_bar_sub() else { return };
@@ -3466,7 +3488,7 @@ impl App {
                 }
                 self.scroll_viewer_to_cursor();
             }
-            None => self.message = Some(tr(self.lang, "no matches", "該当なし").into()),
+            None => self.say_no_matches(),
         }
     }
 
@@ -3476,7 +3498,7 @@ impl App {
         let Popup::Viewer { view, line, col, .. } = &self.popup else { return };
         let hits = cian_core::substitute::find(&sub, &view.lines, None);
         if hits.is_empty() {
-            self.message = Some(tr(self.lang, "no matches", "該当なし").into());
+            self.say_no_matches();
             return;
         }
         if all {

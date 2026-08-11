@@ -4130,6 +4130,7 @@ pub(crate) fn viewer_manual_lines(lang: Lang) -> Vec<String> {
         ("Alt+n", "the next match, without replacing it", "置換せずに次の一致へ"),
         ("Alt+r  Alt+c  Alt+w", "regex, match case, whole words", "正規表現・大小区別・単語単位"),
         (r"\n \t \r", r"in either field — \r is a CR inside a line; :lf converts the file's endings", r"どちらの欄でも使える — \r は行内の CR。ファイル全体の改行は :lf / :crlf"),
+        ("*  .*", "`*` repeats the character before it — any text is `.*`", "`*` は直前の文字の繰り返し。任意の文字列は `.*`"),
         (":s/old/new/gci", "the same thing said vi's way", "同じことを vi 流に書く場合"),
     ];
     const GRAMMAR: &[Row] = &[

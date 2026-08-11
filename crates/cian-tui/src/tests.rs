@@ -2366,6 +2366,43 @@
         assert_eq!(lines(&app), vec!["E here"]);
     }
 
+    /// A regex that finds nothing says why, when the reason is the usual one.
+    /// `crm*ne` is "cr, any number of m, then ne" — it does not match
+    /// `crmaine`, and looks like it should.
+    #[test]
+    fn a_regex_that_finds_nothing_says_what_the_star_means() {
+        let ctrl = |c: char| KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL);
+        let (_d, mut app) = viewer_on("crmaine\ncrmaine\n");
+        app.handle_key(ctrl('h')).unwrap();
+        for c in "crm*ne".chars() {
+            app.handle_key(key(c)).unwrap();
+        }
+        app.handle_key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::ALT)).unwrap();
+        app.handle_key(code(KeyCode::Tab)).unwrap();
+        for c in "x".chars() {
+            app.handle_key(key(c)).unwrap();
+        }
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::SHIFT)).unwrap();
+        let msg = app.message.clone().unwrap_or_default();
+        assert!(msg.contains("no matches"), "it did not match: {msg}");
+        assert!(msg.contains("crm.*ne"), "and it says what to type: {msg}");
+        assert_eq!(viewer_lines(&app), vec!["crmaine", "crmaine"], "nothing changed");
+
+        // The pattern it suggests does match.
+        app.handle_key(code(KeyCode::Backspace)).unwrap(); // the replacement
+        app.handle_key(code(KeyCode::Tab)).unwrap();
+        for _ in 0..6 {
+            app.handle_key(code(KeyCode::Backspace)).unwrap();
+        }
+        for c in "crm.*ne".chars() {
+            app.handle_key(key(c)).unwrap();
+        }
+        app.handle_key(code(KeyCode::Tab)).unwrap();
+        app.handle_key(key('x')).unwrap();
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::SHIFT)).unwrap();
+        assert_eq!(viewer_lines(&app), vec!["x", "x"]);
+    }
+
     /// `:replace` is the same bar, for the terminal that keeps Ctrl.
     #[test]
     fn replace_is_reachable_without_ctrl() {

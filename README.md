@@ -141,7 +141,7 @@ Each open file keeps its own cursor, folds and unsaved edits. Closing a split re
 | `Ctrl+Q` / `Alt+v` (`:block`) | rectangular selection — `d` `I` `A` `c`. Terminals differ about which they hand over |
 | `V` then `I` / `A` | insert at the start / end of every selected line |
 | `r` after a search | replace, with the pattern already filled in |
-| **`Ctrl+H`** (or `:replace`) | **the replace bar** — `find` and `with` on the line along the bottom, the file still in view. `Tab` moves between the fields; `Enter` replaces this one and stops on it, `Shift+Enter` replaces all of them, `Alt+n` steps to the next without replacing. `Alt+r` regex, `Alt+c` match case, `Alt+w` whole words. `\n` `\t` `\r` work in either field |
+| **`Ctrl+H`** (or `:replace`) | **the replace bar** — `find` and `with` on the line along the bottom, the file still in view. `Tab` moves between the fields; `Enter` replaces this one and stops on it, `Shift+Enter` replaces all of them, `Alt+n` steps to the next without replacing. `Alt+r` regex, `Alt+c` match case, `Alt+w` whole words. `\n` `\t` `\r` work in either field. It is a real regex, so `*` repeats the character before it — `crm.*ne`, not `crm*ne`; a search that finds nothing says so |
 | `:s/old/new/[gci]` | the same thing said vi's way — `g` every match on a line, `c` confirm each, `i` ignore case |
 | `:expand` / `:unexpand` | tabs ↔ spaces |
 | `:lf` / `:crlf` | convert the line ending |
