@@ -101,6 +101,63 @@ impl App {
             self.save_viewer_file();
             return Ok(());
         }
+        // The keys every editor made from the same seven: save, copy, cut,
+        // paste, undo, redo, select all. Ahead of the mode dispatch below, so
+        // they mean the same thing while reading, while editing and over a
+        // selection — a key you have to change modes to use is a key you do
+        // not reach for.
+        //
+        // Ctrl+V used to start a rectangular selection here, as it does in
+        // vim. It keeps Ctrl+Q — which vim provides for exactly this reason,
+        // terminals having taken Ctrl+V long before cian did — plus Alt+v and
+        // `:block`, so nothing was lost by handing the key to paste.
+        //
+        // The hex editor keeps its own: a paste of text into a hex dump would
+        // edit the rendering rather than the file.
+        if ctrl
+            && matches!(
+                &self.popup,
+                Popup::Viewer { view, .. } if view.kind == cian_core::viewer::ViewKind::Text
+            )
+        {
+            match key.code {
+                KeyCode::Char('c') | KeyCode::Char('C') => {
+                    self.viewer_clip_copy(false);
+                    return Ok(());
+                }
+                KeyCode::Char('x') | KeyCode::Char('X') => {
+                    self.viewer_clip_copy(true);
+                    return Ok(());
+                }
+                KeyCode::Char('v') | KeyCode::Char('V') => {
+                    if matches!(self.popup, Popup::Viewer { editable: true, .. }) {
+                        self.paste_into_viewer(false);
+                    } else {
+                        self.message = Some(
+                            tr(self.lang, "this file cannot be edited", "このファイルは編集できません")
+                                .into(),
+                        );
+                    }
+                    return Ok(());
+                }
+                KeyCode::Char('z') | KeyCode::Char('Z') => {
+                    self.viewer_undo();
+                    return Ok(());
+                }
+                // Ctrl+R is vim's own redo; Ctrl+Y is the one the rest of the
+                // world uses. In vim Ctrl+Y scrolls a line, which cian's
+                // viewer has never done — nothing is displaced by taking it.
+                KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Char('r') | KeyCode::Char('R') => {
+                    self.viewer_redo();
+                    return Ok(());
+                }
+                KeyCode::Char('a') | KeyCode::Char('A') => {
+                    self.mark_all();
+                    return Ok(());
+                }
+                _ => {}
+            }
+        }
         // Typing the text for a rectangular edit.
         if matches!(self.popup, Popup::Viewer { block_input: Some(_), .. }) {
             match key.code {
@@ -269,7 +326,7 @@ impl App {
             && matches!(self.popup, Popup::Viewer { editable: true, .. })
         {
             let mut binary = false;
-            if let Popup::Viewer { preview, editing, line, col, scroll, visual, view, undo, .. } =
+            if let Popup::Viewer { preview, editing, line, col, scroll, visual, view, undo, redo, .. } =
                 &mut self.popup
             {
                 if *preview {
@@ -282,7 +339,7 @@ impl App {
                     *col = 0;
                 } else {
                     // One insert session = one undo unit (vim's coarse model).
-                    push_viewer_undo(undo, &view.lines, *line, *col);
+                    push_viewer_undo(undo, redo, &view.lines, *line, *col);
                 }
                 *editing = true;
             }
@@ -490,13 +547,6 @@ impl App {
         // terminal shows the readable flow; this is the crisp picture).
         if false {
             self.open_mermaid_in_browser();
-            return Ok(());
-        }
-        // Ctrl+A selects the whole file. The pane's own Ctrl+A never reaches
-        // here — a popup owns the keyboard — so it is bound in both places,
-        // and `mark_all` decides which of the two it means.
-        if ctrl && key.code == KeyCode::Char('a') {
-            self.mark_all();
             return Ok(());
         }
         // `=` compares the two halves, in place. Both stay editable and the
@@ -710,10 +760,11 @@ impl App {
                 }
                 (false, KeyCode::Char('v')) => start_visual(ViewVisual::Char, visual, anchor, *line, *col),
                 (false, KeyCode::Char('V')) => start_visual(ViewVisual::Line, visual, anchor, *line, *col),
-                // Ctrl+Q is vim's own synonym for Ctrl+V, and exists for this
-                // exact reason: plenty of terminals keep Ctrl+V for
-                // themselves and never pass it on.
-                (true, KeyCode::Char('v')) | (true, KeyCode::Char('q')) => {
+                // Ctrl+Q is vim's own synonym for Ctrl+V, and is the key here
+                // now: Ctrl+V pastes, as it does everywhere else. vim provides
+                // Ctrl+Q for exactly this situation — terminals have been
+                // taking Ctrl+V for far longer than cian has.
+                (true, KeyCode::Char('q')) => {
                     start_visual(ViewVisual::Block, visual, anchor, *line, *col)
                 }
 
@@ -1425,8 +1476,19 @@ impl App {
                 self.edit_viewer_file_externally();
                 return;
             }
-            // The block selection, for terminals that keep Ctrl+V and Ctrl+Q
-            // to themselves.
+            // Undo and redo by name, for the terminal that hands over no
+            // Ctrl combination at all — which is more of them than one would
+            // think, and the reason every Ctrl key here has a `:` twin.
+            "undo" | "u" => {
+                self.viewer_undo();
+                return;
+            }
+            "redo" => {
+                self.viewer_redo();
+                return;
+            }
+            // The block selection, for terminals that keep Ctrl+Q to
+            // themselves.
             "block" => {
                 if let Popup::Viewer { visual, anchor, line, col, .. } = &mut self.popup {
                     *anchor = (*line, *col);
@@ -1553,8 +1615,8 @@ impl App {
         let mut before = 0usize;
         let mut after = 0usize;
         let mut untouched = false;
-        if let Popup::Viewer { view, undo, dirty, hl, line, visual, .. } = &mut self.popup {
-            push_viewer_undo(undo, &view.lines, *line, 0);
+        if let Popup::Viewer { view, undo, redo, dirty, hl, line, visual, .. } = &mut self.popup {
+            push_viewer_undo(undo, redo, &view.lines, *line, 0);
             before = view.lines.len();
             let was = view.lines.clone();
             view.lines = match range {
@@ -1598,8 +1660,8 @@ impl App {
 
     /// Apply `hits` to the buffer as one undo step.
     fn apply_substitution(&mut self, hits: &[cian_core::substitute::Hit]) {
-        if let Popup::Viewer { view, undo, dirty, hl, line, visual, .. } = &mut self.popup {
-            push_viewer_undo(undo, &view.lines, *line, 0);
+        if let Popup::Viewer { view, undo, redo, dirty, hl, line, visual, .. } = &mut self.popup {
+            push_viewer_undo(undo, redo, &view.lines, *line, 0);
             view.lines = cian_core::substitute::apply(&view.lines, hits);
             *line = (*line).min(view.lines.len().saturating_sub(1));
             *visual = None;
@@ -1739,6 +1801,7 @@ impl App {
             dirty,
             editing,
             undo,
+            redo,
             hl,
             editable: true,
             preview: false,
@@ -1764,7 +1827,7 @@ impl App {
                 // `~` — swap the case of the character under the cursor and
                 // step over it, so holding it walks a word.
                 KeyCode::Char('~') if visual.is_none() => {
-                    push_viewer_undo(undo, lines, *line, *col);
+                    push_viewer_undo(undo, redo, lines, *line, *col);
                     let n = cnt(count);
                     let mut chars: Vec<char> = lines[*line].chars().collect();
                     for _ in 0..n {
@@ -1799,7 +1862,7 @@ impl App {
                             (*line, (*line + n - 1).min(lines.len() - 1))
                         }
                     };
-                    push_viewer_undo(undo, lines, *line, *col);
+                    push_viewer_undo(undo, redo, lines, *line, *col);
                     let width = cian_core::viewer::tab_width().max(1);
                     let pad = " ".repeat(width);
                     for l in lines[from..=to].iter_mut() {
@@ -1827,7 +1890,7 @@ impl App {
                         *pending = Some('d');
                         return true;
                     }
-                    push_viewer_undo(undo, lines, *line, *col);
+                    push_viewer_undo(undo, redo, lines, *line, *col);
                     let n = cnt(count).min(lines.len() - *line);
                     lines.drain(*line..*line + n);
                     if lines.is_empty() {
@@ -1842,7 +1905,7 @@ impl App {
                 // d / x in visual mode — delete the selection.
                 KeyCode::Char('d') | KeyCode::Char('x') if visual.is_some() => {
                     let mode = visual.take().unwrap();
-                    push_viewer_undo(undo, lines, *line, *col);
+                    push_viewer_undo(undo, redo, lines, *line, *col);
                     let (s, e) = crate::util::order_pos(*anchor, (*line, *col));
                     match mode {
                         ViewVisual::Line => {
@@ -1913,7 +1976,7 @@ impl App {
                 KeyCode::Char('x') => {
                     let len = lines[*line].chars().count();
                     if *col < len {
-                        push_viewer_undo(undo, lines, *line, *col);
+                        push_viewer_undo(undo, redo, lines, *line, *col);
                         let n = cnt(count).min(len - *col);
                         let chs: Vec<char> = lines[*line].chars().collect();
                         lines[*line] =
@@ -1927,7 +1990,7 @@ impl App {
                 }
                 // D — delete to the end of the line.
                 KeyCode::Char('D') => {
-                    push_viewer_undo(undo, lines, *line, *col);
+                    push_viewer_undo(undo, redo, lines, *line, *col);
                     let head: String = lines[*line].chars().take(*col).collect();
                     lines[*line] = head;
                     *col = (*col).min(lines[*line].chars().count().saturating_sub(1));
@@ -1938,7 +2001,7 @@ impl App {
                 // J — join the next line onto this one with a single space.
                 KeyCode::Char('J') => {
                     if *line + 1 < lines.len() {
-                        push_viewer_undo(undo, lines, *line, *col);
+                        push_viewer_undo(undo, redo, lines, *line, *col);
                         let next = lines.remove(*line + 1);
                         let cur = lines[*line].trim_end().to_string();
                         *col = cur.chars().count();
@@ -1957,7 +2020,7 @@ impl App {
                 }
                 // o / O — open a line below/above and start typing.
                 KeyCode::Char('o') if visual.is_none() => {
-                    push_viewer_undo(undo, lines, *line, *col);
+                    push_viewer_undo(undo, redo, lines, *line, *col);
                     lines.insert(*line + 1, String::new());
                     *line += 1;
                     (*col, *goal) = (0, 0);
@@ -1966,7 +2029,7 @@ impl App {
                     consumed = true;
                 }
                 KeyCode::Char('O') => {
-                    push_viewer_undo(undo, lines, *line, *col);
+                    push_viewer_undo(undo, redo, lines, *line, *col);
                     lines.insert(*line, String::new());
                     (*col, *goal) = (0, 0);
                     (*editing, *dirty) = (true, true);
@@ -1975,7 +2038,7 @@ impl App {
                 }
                 // a — insert after the cursor (i's sibling; A stays Coding).
                 KeyCode::Char('a') if visual.is_none() => {
-                    push_viewer_undo(undo, lines, *line, *col);
+                    push_viewer_undo(undo, redo, lines, *line, *col);
                     *col = (*col + 1).min(lines[*line].chars().count());
                     *goal = *col;
                     *editing = true;
@@ -1984,7 +2047,7 @@ impl App {
                 }
                 // I — insert at the first non-blank of the line.
                 KeyCode::Char('I') => {
-                    push_viewer_undo(undo, lines, *line, *col);
+                    push_viewer_undo(undo, redo, lines, *line, *col);
                     *col = lines[*line]
                         .chars()
                         .position(|c| !c.is_whitespace())
@@ -1994,26 +2057,17 @@ impl App {
                     entered_editing = true;
                     consumed = true;
                 }
-                // u — undo the last change (Ctrl+u still scrolls).
+                // u — undo the last change (Ctrl+u still scrolls). Ctrl+Z is
+                // the same step under the name the rest of the world gives
+                // it, and goes through the same function.
                 KeyCode::Char('u') => {
-                    match undo.pop() {
-                        Some(snap) => {
-                            view.lines = snap.lines;
-                            *line = snap.line.min(view.lines.len().saturating_sub(1));
-                            *col = snap.col;
-                            *goal = *col;
-                            // The stack bottom is the buffer as loaded, so an
-                            // emptied stack means we are back at the original.
-                            *dirty = !undo.is_empty();
-                        }
-                        None => {
-                            self.message = Some(tr(
-                                self.lang,
-                                "already at oldest change",
-                                "これ以上戻れません",
-                            ).into());
-                            return true;
-                        }
+                    if !undo_step(undo, redo, lines, line, col, goal, dirty) {
+                        self.message = Some(tr(
+                            self.lang,
+                            "already at oldest change",
+                            "これ以上戻れません",
+                        ).into());
+                        return true;
                     }
                     consumed = true;
                 }
@@ -2072,8 +2126,8 @@ impl App {
         };
         use cian_core::textops as tx;
         let rows = b.block.bottom - b.block.top + 1;
-        if let Popup::Viewer { view, undo, dirty, hl, line, col, .. } = &mut self.popup {
-            push_viewer_undo(undo, &view.lines, *line, *col);
+        if let Popup::Viewer { view, undo, redo, dirty, hl, line, col, .. } = &mut self.popup {
+            push_viewer_undo(undo, redo, &view.lines, *line, *col);
             view.lines = match b.kind {
                 crate::BlockEdit::Insert => tx::block_insert(&view.lines, b.block, &b.text),
                 crate::BlockEdit::Append => tx::block_append(&view.lines, b.block, &b.text),
@@ -2481,6 +2535,102 @@ impl App {
         }
     }
 
+    /// Ctrl+Z / Ctrl+Y — the same two steps `u` and `Ctrl+R` take, under the
+    /// names the rest of the world uses for them. Both work while reading,
+    /// while editing and over a selection, because "put that back" is not a
+    /// thing anyone wants to change modes for.
+    pub(crate) fn viewer_undo(&mut self) {
+        self.viewer_history_step(true);
+    }
+
+    pub(crate) fn viewer_redo(&mut self) {
+        self.viewer_history_step(false);
+    }
+
+    fn viewer_history_step(&mut self, back: bool) {
+        let mut moved = false;
+        if let Popup::Viewer {
+            view, undo, redo, line, col, goal, dirty, hl, visual, editable: true, ..
+        } = &mut self.popup
+        {
+            if view.kind == cian_core::viewer::ViewKind::Text {
+                let step = if back { undo_step } else { redo_step };
+                moved = step(undo, redo, &mut view.lines, line, col, goal, dirty);
+                if moved {
+                    // The buffer changed shape under it: the highlight is
+                    // stale and a selection describes lines that may be gone.
+                    hl.clear();
+                    *visual = None;
+                }
+            }
+        }
+        // Bring the cursor back into view, the same clamp the edit keys do.
+        let body_h = (self.viewer_rect.height as usize).max(1);
+        if let Popup::Viewer { line, scroll, .. } = &mut self.popup {
+            if *line < *scroll {
+                *scroll = *line;
+            } else if *line >= *scroll + body_h {
+                *scroll = *line + 1 - body_h;
+            }
+        }
+        if !moved {
+            self.message = Some(if back {
+                tr(self.lang, "already at oldest change", "これ以上戻れません")
+            } else {
+                tr(self.lang, "already at newest change", "これ以上進めません")
+            }
+            .into());
+        }
+    }
+
+    /// Ctrl+C / Ctrl+X over the file. With a selection they take it; without
+    /// one they take the line the cursor is on, which is what every editor
+    /// with these keys does and what makes them usable without first
+    /// selecting anything.
+    pub(crate) fn viewer_clip_copy(&mut self, cut: bool) {
+        if cut && !matches!(self.popup, Popup::Viewer { editable: true, .. }) {
+            self.message =
+                Some(tr(self.lang, "this file cannot be edited", "このファイルは編集できません").into());
+            return;
+        }
+        // No selection: make one over this line, so copy and cut both have
+        // something to act on and the highlight shows what was taken.
+        let made = if matches!(self.popup, Popup::Viewer { visual: None, .. }) {
+            if let Popup::Viewer { visual, anchor, line, .. } = &mut self.popup {
+                *anchor = (*line, 0);
+                *visual = Some(ViewVisual::Line);
+            }
+            true
+        } else {
+            false
+        };
+        // A copy ends the visual gesture, which for a cut is one step too
+        // early: the delete that follows is the half that needs it.
+        let held = match &self.popup {
+            Popup::Viewer { visual, .. } => *visual,
+            _ => None,
+        };
+        self.copy_viewer_selection();
+        if cut {
+            if let Popup::Viewer { visual, .. } = &mut self.popup {
+                *visual = held;
+            }
+            // `d` over the selection, through the same path the key takes:
+            // that delete knows about line-, char- and block-wise selections,
+            // and about the undo step each of them owes.
+            let _ = self.handle_viewer_key_inner(KeyEvent::new(
+                KeyCode::Char('d'),
+                KeyModifiers::NONE,
+            ));
+        } else if made {
+            // A copy leaves the file as it was, so the selection it borrowed
+            // goes away again.
+            if let Popup::Viewer { visual, .. } = &mut self.popup {
+                *visual = None;
+            }
+        }
+    }
+
     pub(crate) fn copy_viewer_selection(&mut self) {
         let text = if let Popup::Viewer { view, line, col, visual, anchor, .. } = &self.popup {
             let lines = &view.lines;
@@ -2617,8 +2767,8 @@ impl App {
             return;
         }
         let mut n = 0usize;
-        if let Popup::Viewer { view, undo, dirty, hl, line, col, goal, .. } = &mut self.popup {
-            push_viewer_undo(undo, &view.lines, *line, *col);
+        if let Popup::Viewer { view, undo, redo, dirty, hl, line, col, goal, .. } = &mut self.popup {
+            push_viewer_undo(undo, redo, &view.lines, *line, *col);
             if view.lines.is_empty() {
                 view.lines.push(String::new());
             }
@@ -2908,12 +3058,12 @@ impl App {
         }
         self.yank = Some(text);
         let change = op == 'c';
-        if let Popup::Viewer { view, undo, line, col, goal, dirty, hl, .. } = &mut self.popup {
+        if let Popup::Viewer { view, undo, redo, line, col, goal, dirty, hl, .. } = &mut self.popup {
             let lines = &mut view.lines;
             if lines.is_empty() {
                 lines.push(String::new());
             }
-            push_viewer_undo(undo, lines, *line, *col);
+            push_viewer_undo(undo, redo, lines, *line, *col);
             match span {
                 Span::Lines { first, last } => {
                     let last = last.min(lines.len() - 1);
@@ -3010,8 +3160,8 @@ impl App {
             return;
         }
         let mut gone = 0usize;
-        if let Popup::Viewer { view, undo, line, col, goal, dirty, hl, .. } = &mut self.popup {
-            push_viewer_undo(undo, &view.lines, *line, *col);
+        if let Popup::Viewer { view, undo, redo, line, col, goal, dirty, hl, .. } = &mut self.popup {
+            push_viewer_undo(undo, redo, &view.lines, *line, *col);
             let before = view.lines.len();
             view.lines.retain(|l| matcher.find_ranges(l).is_empty() != invert);
             gone = before - view.lines.len();
@@ -3266,6 +3416,7 @@ impl App {
             editing: false,
             dirty: false,
             undo: Vec::new(),
+            redo: Vec::new(),
         };
         self.full_clear = true;
         self.message = Some(
@@ -3403,7 +3554,64 @@ impl App {
 /// Push an undo snapshot, bounding what the stack can hold: 100 steps, and
 /// oldest-first eviction once the retained buffers pass ~32MB (a viewer file
 /// is capped at 4MB, so a burst of whole-file edits cannot pile up memory).
-fn push_viewer_undo(undo: &mut Vec<ViewerSnap>, lines: &[String], line: usize, col: usize) {
+/// One step back through the buffer's history, and the same step forward.
+///
+/// They are one pair of functions rather than two bodies because they are the
+/// same move in opposite directions: pop from one stack, push what was there
+/// onto the other, and the cursor follows the snapshot. `false` means the
+/// stack was empty and nothing moved — the caller says so.
+fn undo_step(
+    undo: &mut Vec<ViewerSnap>,
+    redo: &mut Vec<ViewerSnap>,
+    lines: &mut Vec<String>,
+    line: &mut usize,
+    col: &mut usize,
+    goal: &mut usize,
+    dirty: &mut bool,
+) -> bool {
+    let Some(snap) = undo.pop() else { return false };
+    redo.push(ViewerSnap { lines: lines.clone(), line: *line, col: *col, bytes: None });
+    *lines = snap.lines;
+    *line = snap.line.min(lines.len().saturating_sub(1));
+    *col = snap.col;
+    *goal = *col;
+    // The stack bottom is the buffer as loaded, so an emptied stack means we
+    // are back at the original.
+    *dirty = !undo.is_empty();
+    true
+}
+
+fn redo_step(
+    undo: &mut Vec<ViewerSnap>,
+    redo: &mut Vec<ViewerSnap>,
+    lines: &mut Vec<String>,
+    line: &mut usize,
+    col: &mut usize,
+    goal: &mut usize,
+    dirty: &mut bool,
+) -> bool {
+    let Some(snap) = redo.pop() else { return false };
+    undo.push(ViewerSnap { lines: lines.clone(), line: *line, col: *col, bytes: None });
+    *lines = snap.lines;
+    *line = snap.line.min(lines.len().saturating_sub(1));
+    *col = snap.col;
+    *goal = *col;
+    *dirty = true;
+    true
+}
+
+/// Record the buffer before an edit. Taking `redo` as well is the point: an
+/// edit made after an undo forks the history, and vim throws the branch that
+/// was undone away rather than leaving a "forward" that no longer leads
+/// anywhere.
+fn push_viewer_undo(
+    undo: &mut Vec<ViewerSnap>,
+    redo: &mut Vec<ViewerSnap>,
+    lines: &[String],
+    line: usize,
+    col: usize,
+) {
+    redo.clear();
     undo.push(ViewerSnap { lines: lines.to_vec(), line, col, bytes: None });
     let bytes = |s: &ViewerSnap| s.lines.iter().map(|l| l.len() + 1).sum::<usize>();
     let mut total: usize = undo.iter().map(bytes).sum();

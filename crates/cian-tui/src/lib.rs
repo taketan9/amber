@@ -488,6 +488,10 @@ enum Popup {
         /// normal-mode edit or insert session (vim's coarse units, so `u` after
         /// typing a paragraph removes the paragraph, not one character).
         undo: Vec<ViewerSnap>,
+        /// What `u` took away, waiting to be put back by `Ctrl+R` / `Ctrl+Y`.
+        /// Emptied by the next real edit, as vim empties its own: once the
+        /// history forks, the branch that was undone is gone.
+        redo: Vec<ViewerSnap>,
     },
     /// The recursive comparison of two directories: a list of differing paths.
     DirCompare {
@@ -3877,7 +3881,7 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry("  folding", None, "Space or za fold/unfold here, zA all (either way), or click the ▾ in the gutter", "Space か za で折りたたみ切替、zA で全部（開いていれば閉じ、閉じていれば開く）、余白の ▾ クリックでも可"),
                 entry("  :w :wq :q :q!", None, "save / save and close / close / close discarding — when Ctrl+S is taken by the terminal", "保存 / 保存して閉じる / 閉じる / 破棄して閉じる — Ctrl+S が端末に取られている場合に"),
                 entry("  V then I / A", None, "line selection: put text at the start, or at the end, of every line", "行選択：全行の先頭に、または全行の末尾に文字を入れる"),
-                entry("  Ctrl+V / Ctrl+Q / Alt+v / :block", None, "rectangle: d cuts it, I/A insert at the left/right edge, c replaces", "矩形選択：d で切り取り、I/A で左端/右端に挿入、c で置換"),
+                entry("  Ctrl+Q / Alt+v / :block", None, "rectangle: d cuts it, I/A insert at the left/right edge, c replaces", "矩形選択：d で切り取り、I/A で左端/右端に挿入、c で置換"),
                 entry("  normal mode", None, "x/dd/D/J delete·join, u undo, v+d cut selection (d/u scroll via Ctrl)", "ノーマルモード：x/dd/D/J 削除·結合, u 取消, v+d 選択削除（スクロールは Ctrl+d/u）"),
                 entry(":edit", None, "edit the file in your external editor (E in the viewer)", "外部エディタで編集（ビューア内は E）"),
                 entry(":vi / :vim / :nvim", None, "open the file in that editor in a new shell tab", "新規シェルタブでそのエディタでファイルを開く"),
@@ -4082,11 +4086,22 @@ pub(crate) fn viewer_manual_lines(lang: Lang) -> Vec<String> {
     ];
     const SELECT: &[Row] = &[
         ("v  V", "select by character, by line", "文字選択・行選択"),
-        ("Ctrl+V  Alt+v", "rectangular selection (:block if neither arrives)", "矩形選択（どちらも届かなければ :block）"),
+        ("Ctrl+Q  Alt+v", "rectangular selection (:block if neither arrives)", "矩形選択（どちらも届かなければ :block）"),
         ("Ctrl+A", "select the whole file", "ファイル全体を選択"),
         ("o", "swap which end of the selection moves", "選択の伸ばす側を入れ替え"),
         ("y", "copy the selection", "選択をコピー"),
         ("p  P", "paste after, at the cursor", "カーソルの後・位置に貼り付け"),
+    ];
+    // The keys everything else in the world uses for the same seven things.
+    // They work while reading, while editing and over a selection, and each
+    // has a `:` twin for the terminal that keeps Ctrl to itself.
+    const SHORTCUTS: &[Row] = &[
+        ("Ctrl+S", "save (:w)", "保存（:w）"),
+        ("Ctrl+C  Ctrl+X", "copy, cut — the selection, or this line", "コピー・切り取り — 選択、なければこの行"),
+        ("Ctrl+V", "paste (p and P place it vi's way)", "貼り付け（p・P は vi 流の位置）"),
+        ("Ctrl+Z", "undo (u, :undo)", "取り消し（u・:undo）"),
+        ("Ctrl+Y  Ctrl+R", "redo (:redo)", "やり直し（:redo）"),
+        ("Ctrl+A", "select the whole file", "ファイル全体を選択"),
     ];
     const GRAMMAR: &[Row] = &[
         ("{op}{motion}", "d c y take any motion — dw d$ d} dfx c2w y%", "d c y はどの移動とも組める — dw d$ d} dfx c2w y%"),
@@ -4102,7 +4117,8 @@ pub(crate) fn viewer_manual_lines(lang: Lang) -> Vec<String> {
         ("d", "cut the selection", "選択を切り取り"),
         (">>  <<", "shift lines by a tab stop (> and < on a selection)", "行をタブ幅ずらす（選択中は > と <）"),
         ("~", "swap the case under the cursor", "カーソル位置の大小を反転"),
-        ("u", "undo", "取り消し"),
+        ("u", "undo (Ctrl+Z)", "取り消し（Ctrl+Z）"),
+        ("Ctrl+R", "redo (Ctrl+Y, :redo)", "やり直し（Ctrl+Y・:redo）"),
         (".", "do that change again", "直前の変更をもう一度"),
         ("V then I  A", "insert at the start, end of every selected line", "選択全行の先頭・末尾に挿入"),
         (":edit", "open it in your own editor", "外部エディタで開く"),
@@ -4147,6 +4163,7 @@ pub(crate) fn viewer_manual_lines(lang: Lang) -> Vec<String> {
         (":g/re/d", "delete every line that matches (:v/re/d keeps them)", "一致した行を削除（:v/re/d は一致だけ残す）"),
     ];
     let sections: &[((&str, &str), &[Row])] = &[
+        (("The usual shortcuts", "おなじみのショートカット"), SHORTCUTS),
         (("Move", "移動"), MOVE),
         (("Find and replace", "検索と置換"), FIND),
         (("Select and copy", "選択とコピー"), SELECT),

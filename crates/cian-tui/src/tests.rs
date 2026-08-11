@@ -2279,6 +2279,107 @@
         assert!(app.layout_rects.left.width > narrowed, "and dragging moved it");
     }
 
+    /// The seven keys every editor shares — save, copy, cut, paste, undo,
+    /// redo, select all — mean the same thing in all three of the panel's
+    /// modes. A key you have to change modes to use is a key nobody reaches
+    /// for, so they are handled ahead of the mode dispatch.
+    #[test]
+    fn the_editor_shortcuts_work_in_every_mode() {
+        let ctrl = |c: char| KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL);
+        let text = |app: &App| match &app.popup {
+            Popup::Viewer { view, .. } => view.lines.join("\n"),
+            other => panic!("expected the panel, got {other:?}"),
+        };
+
+        // READ mode. Ctrl+X with no selection takes the line the cursor is
+        // on, as an editor with these keys does.
+        let (_d, mut app) = viewer_on("one\ntwo\nthree\n");
+        app.handle_key(ctrl('x')).unwrap();
+        assert_eq!(text(&app), "two\nthree", "Ctrl+X cut the cursor's line");
+        assert_eq!(app.yank.as_deref(), Some("one\n"), "and it is on the clipboard");
+
+        app.handle_key(ctrl('z')).unwrap();
+        assert_eq!(text(&app), "one\ntwo\nthree", "Ctrl+Z put it back");
+        app.handle_key(ctrl('y')).unwrap();
+        assert_eq!(text(&app), "two\nthree", "Ctrl+Y took it away again");
+        // vim's own name for the same step.
+        app.handle_key(ctrl('z')).unwrap();
+        app.handle_key(ctrl('r')).unwrap();
+        assert_eq!(text(&app), "two\nthree", "Ctrl+R is redo too");
+
+        app.handle_key(ctrl('v')).unwrap();
+        assert_eq!(text(&app), "two\none\nthree", "Ctrl+V pasted it back");
+
+        // VISUAL mode: Ctrl+C takes exactly what is selected.
+        app.handle_key(key('g')).unwrap();
+        app.handle_key(key('V')).unwrap();
+        app.handle_key(key('j')).unwrap();
+        app.handle_key(ctrl('c')).unwrap();
+        assert_eq!(app.yank.as_deref(), Some("two\none\n"), "the selection, not the file");
+
+        // Ctrl+A selects all of it, whatever the mode.
+        app.handle_key(code(KeyCode::Esc)).unwrap();
+        app.handle_key(ctrl('a')).unwrap();
+        assert!(
+            matches!(app.popup, Popup::Viewer { visual: Some(ViewVisual::Line), .. }),
+            "Ctrl+A selected the file",
+        );
+        app.handle_key(code(KeyCode::Esc)).unwrap();
+
+        // EDIT mode. The same keys, without leaving it.
+        app.handle_key(key('g')).unwrap();
+        app.handle_key(key('i')).unwrap();
+        assert!(matches!(app.popup, Popup::Viewer { editing: true, .. }), "in the editor");
+        for c in "hello".chars() {
+            app.handle_key(key(c)).unwrap();
+        }
+        assert!(text(&app).starts_with("hello"), "typed: {:?}", text(&app));
+        app.handle_key(ctrl('z')).unwrap();
+        assert!(!text(&app).starts_with("hello"), "Ctrl+Z undid the insert while editing");
+        app.handle_key(ctrl('y')).unwrap();
+        assert!(text(&app).starts_with("hello"), "and Ctrl+Y redid it");
+        assert!(matches!(app.popup, Popup::Viewer { editing: true, .. }), "still editing");
+        app.handle_key(ctrl('s')).unwrap();
+        assert!(matches!(app.popup, Popup::Viewer { dirty: false, .. }), "Ctrl+S saved");
+        app.handle_key(code(KeyCode::Esc)).unwrap();
+
+        // A new edit throws the undone branch away, as vim does.
+        app.handle_key(ctrl('z')).unwrap();
+        let before = text(&app);
+        app.handle_key(key('x')).unwrap();
+        app.handle_key(ctrl('y')).unwrap();
+        assert_ne!(text(&app), before, "the forked branch did not come back");
+        assert_eq!(
+            app.message.as_deref(),
+            Some("already at newest change"),
+            "and it says so",
+        );
+    }
+
+    /// Ctrl+V pastes now, so the rectangle it used to start is on vim's own
+    /// synonym for it — plus Alt+v and `:block`, which no terminal can take.
+    #[test]
+    fn the_rectangle_kept_the_keys_that_are_not_ctrl_v() {
+        for start in [
+            KeyEvent::new(KeyCode::Char('q'), KeyModifiers::CONTROL),
+            KeyEvent::new(KeyCode::Char('v'), KeyModifiers::ALT),
+        ] {
+            let (_d, mut app) = viewer_on("abcd\nefgh\n");
+            app.handle_key(start).unwrap();
+            assert!(
+                matches!(app.popup, Popup::Viewer { visual: Some(ViewVisual::Block), .. }),
+                "{start:?} starts a rectangle",
+            );
+        }
+        let (_d, mut app) = viewer_on("abcd\nefgh\n");
+        app.handle_key(key(':')).unwrap();
+        for c in "block".chars() {
+            app.handle_key(key(c)).unwrap();
+        }
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+        assert!(matches!(app.popup, Popup::Viewer { visual: Some(ViewVisual::Block), .. }));
+    }
+
     /// Focus follows the mouse to the panel as well as away from it. Clicking
     /// the panel from another pane used to do nothing at all: the panel's own
     /// mouse handling only runs for the focused pane, so the click was
@@ -2831,7 +2932,9 @@
 
         // The block stops at the last character wholly inside it.
         let (_d, mut app) = viewer_on("## 事前準備\n- ふたつめ\n");
-        app.handle_key(KeyEvent::new(KeyCode::Char('v'), KeyModifiers::CONTROL)).unwrap();
+        // Ctrl+Q, not Ctrl+V: the latter pastes now, as it does everywhere
+        // else, and vim's own synonym is what starts a rectangle.
+        app.handle_key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::CONTROL)).unwrap();
         if let Popup::Viewer { line, col, .. } = &mut app.popup {
             *line = 1;
             *col = 2; // the `ふ`, which ends at column 4
@@ -3315,7 +3418,9 @@
         };
         let block = |app: &mut App, from: (usize, usize), to: (usize, usize)| {
             put(app, from.0, from.1);
-            app.handle_key(KeyEvent::new(KeyCode::Char('v'), KeyModifiers::CONTROL)).unwrap();
+            // Ctrl+Q, not Ctrl+V: the latter pastes now, as it does everywhere
+        // else, and vim's own synonym is what starts a rectangle.
+        app.handle_key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::CONTROL)).unwrap();
             put(app, to.0, to.1);
         };
 

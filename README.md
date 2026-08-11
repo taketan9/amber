@@ -129,12 +129,14 @@ Each open file keeps its own cursor, folds and unsaved edits. Closing a split re
 |---|---|
 | `i` `a` `o` `O` `I` | insert; `Ctrl+S` saves in the file's own encoding, `Esc` leaves, `Shift+Q` discards |
 | `x` `dd` `D` `J` | delete and join, vim's small change set; `d` cuts a `v`/`V` selection |
-| `p` / `P` | paste after / at the cursor (Cmd/Ctrl+V works too) |
+| `p` / `P` | paste after / at the cursor, vi's way |
 | `u` | undo |
+| `Ctrl+R` | redo |
+| `Ctrl+S` `Ctrl+C` `Ctrl+X` `Ctrl+V` `Ctrl+Z` `Ctrl+Y` `Ctrl+A` | save, copy, cut, paste, undo, redo, select all — in **all three modes**, reading, editing and over a selection. `Ctrl+C` / `Ctrl+X` take the selection, or the cursor's line when there is none. Each has a command for the terminal that keeps Ctrl: `:w` `:undo` `:redo` |
 | `~` | swap the case under the cursor |
 | `>>` / `<<` | shift lines by a tab stop (`>` / `<` on a selection) |
 | `:edit` | open it in `$VISUAL` / `$EDITOR` — or nvim → vim → vi — and reload on return |
-| `Ctrl+V` / `Ctrl+Q` / `Alt+v` (`:block`) | rectangular selection — `d` `I` `A` `c`. Terminals differ about which they hand over |
+| `Ctrl+Q` / `Alt+v` (`:block`) | rectangular selection — `d` `I` `A` `c`. Terminals differ about which they hand over |
 | `V` then `I` / `A` | insert at the start / end of every selected line |
 | `r` after a search | replace, with the pattern already filled in |
 | `:s/old/new/[gci]` | replace — `g` every match on a line, `c` confirm each, `i` ignore case |

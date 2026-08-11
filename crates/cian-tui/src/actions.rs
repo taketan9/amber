@@ -935,6 +935,7 @@ impl App {
                     editing: false,
                     dirty: false,
                     undo: Vec::new(),
+                    redo: Vec::new(),
                 }
             }
             Err(e) => self.message = Some(format!("cannot view: {}", e)),
@@ -997,6 +998,7 @@ impl App {
                     editing: false,
                     dirty: false,
                     undo: Vec::new(),
+                    redo: Vec::new(),
                 };
             }
             Err(e) => self.message = Some(format!("cannot read document: {}", e)),
