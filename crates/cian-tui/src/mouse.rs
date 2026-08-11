@@ -35,18 +35,26 @@ impl App {
         // — the panel is one surface among the window's, not a dialog over
         // them.
         if !on_divider && matches!(self.popup, Popup::Viewer { .. }) && self.viewer_dock.is_some() {
-            let f = self.viewer_frame;
-            let inside = col >= f.x && col < f.x + f.width && row >= f.y && row < f.y + f.height;
-            if !inside && matches!(ev.kind, MouseEventKind::Down(_)) {
-                let hit = |r: Rect| {
-                    r.width > 0
-                        && r.height > 0
-                        && col >= r.x
-                        && col < r.x + r.width
-                        && row >= r.y
-                        && row < r.y + r.height
-                };
-                let to = if hit(self.layout_rects.left) {
+            let hit = |r: Rect| {
+                r.width > 0
+                    && r.height > 0
+                    && col >= r.x
+                    && col < r.x + r.width
+                    && row >= r.y
+                    && row < r.y + r.height
+            };
+            let inside = hit(self.viewer_frame)
+                || (self.viewer_split.is_some()
+                    && (hit(self.viewer_half_rects[0]) || hit(self.viewer_half_rects[1])));
+            if matches!(ev.kind, MouseEventKind::Down(_)) {
+                let to = if inside {
+                    // Clicking the panel focuses it, the same way clicking a
+                    // listing focuses that pane. Without this the click was
+                    // swallowed by the panel's own handling, which only runs
+                    // for the focused pane — so the panel could be clicked
+                    // *away from* but never *to*.
+                    self.viewer_dock
+                } else if hit(self.layout_rects.left) {
                     Some(FocusedPane::Left)
                 } else if hit(self.layout_rects.right) {
                     Some(FocusedPane::Right)
@@ -58,7 +66,12 @@ impl App {
                 if let Some(to) = to {
                     if to != self.focused {
                         self.focus(to);
-                        return;
+                        // A click on the panel goes on to do what it came for
+                        // — place the caret, hit a tab, hit the ✕ — now that
+                        // the panel is the focused surface.
+                        if !inside {
+                            return;
+                        }
                     }
                 }
             }

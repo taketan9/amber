@@ -378,12 +378,14 @@ pub enum Lang {
 }
 
 impl Lang {
-    /// From the `lang` option; anything but an explicit "ja" is English (the
-    /// Lua layer already rejects values other than "ja"/"en").
+    /// From the `lang` option. Japanese unless English is asked for: cian is
+    /// written in Japanese first, and an unset `lang` should give the people
+    /// it was written for their own language without a config file. (The Lua
+    /// layer already rejects values other than "ja"/"en".)
     pub(crate) fn from_opt(opt: Option<&str>) -> Lang {
         match opt {
-            Some("ja") => Lang::Ja,
-            _ => Lang::En,
+            Some("en") => Lang::En,
+            _ => Lang::Ja,
         }
     }
 

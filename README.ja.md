@@ -19,7 +19,7 @@ cargo build --release
 
 - Windows では **Windows Terminal** か **WezTerm** ＋ Nerd Font を。アイコンと角丸が正しく出るのはそこです。オフライン導入は[一番下](#windows-へオフライン導入)。
 - **`?`** で全キー一覧。現在のキーマップから生成するので、自分で割り当てたキーも載ります。シェルからは `cian -man`、コマンドラインの使い方は `cian -h`。
-- 画面は既定で英語です。日本語にするなら `cian.set_option("lang", "ja")`、または右クリックメニューから。
+- 画面は既定で日本語です。英語にするなら `cian.set_option("lang", "en")`、または右クリックメニューから。
 
 ---
 

@@ -197,12 +197,12 @@ impl App {
                 return Ok(());
             }
         }
-        // F12 — and F3, which used to mean "give it the whole window" — zoom
-        // the pane the panel is docked in. It is the same zoom the listings
-        // and the shell have, applied to the surface the panel is drawn on,
-        // so there is one way to make something fill the window rather than
-        // two.
-        if matches!(key.code, KeyCode::F(12) | KeyCode::F(3)) && self.viewer_dock.is_some() {
+        // F12 zooms the pane the panel is docked in — the same zoom the
+        // listings and the shell have, applied to the surface the panel is
+        // drawn on. F3 used to do it too, and no longer does: one key for
+        // "fill the window" is enough, and F3 belongs to the listings, where
+        // it opens a file in the *other* pane.
+        if matches!(key.code, KeyCode::F(12)) && self.viewer_dock.is_some() {
             self.toggle_zoom();
             // Landed at once rather than eased: the zoom animation grows an
             // empty rectangle while the panel is still drawn at its old size,

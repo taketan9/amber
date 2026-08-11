@@ -19,7 +19,7 @@ cargo build --release
 
 - On Windows use **Windows Terminal** or **WezTerm** with a Nerd Font — that is where the icons and rounded corners look right. Offline install is [at the bottom](#install-on-windows-offline).
 - **`?`** shows the full key list, generated from your live keymap, so rebound keys show up too. `cian -man` prints it from a shell; `cian -h` prints the command-line usage.
-- The UI is English by default. For Japanese: `cian.set_option("lang", "ja")`, or the right-click menu.
+- The UI is Japanese by default — cian is written in Japanese first. For English: `cian.set_option("lang", "en")`, or the right-click menu.
 
 ---
 

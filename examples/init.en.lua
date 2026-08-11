@@ -115,9 +115,10 @@
 -- cian.set_option("key_hints", true)
 
 -- Interface language (the key manual, status line, menus, dialogs).
--- Default: "en" (English). Uncomment to switch it to Japanese.
+-- Default: "ja" (Japanese) — cian is written in Japanese first. Uncomment to
+-- switch it to English.
 -- (You can also toggle live from the right-click menu.)
--- cian.set_option("lang", "ja")
+-- cian.set_option("lang", "en")
 
 -- Language for JUST the key manual (`?`) and the right-click context menu,
 -- overriding `lang` for those two surfaces only. Handy to keep the interface in

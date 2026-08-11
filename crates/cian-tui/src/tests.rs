@@ -71,6 +71,15 @@
     }
 
     /// An app rooted at a temp dir containing `names`.
+    /// A default config that asks for English, which is what the assertions
+    /// in this file read. cian's own default is Japanese — see
+    /// `the_interface_is_japanese_unless_asked`.
+    fn en_config() -> cian_lua::Config {
+        let mut c = cian_lua::Config::default();
+        c.options.lang = Some("en".into());
+        c
+    }
+
     fn app_with(names: &[&str]) -> (tempfile::TempDir, App) {
         app_with_keymaps(names, Vec::new())
     }
@@ -82,7 +91,7 @@
             std::fs::write(dir.path().join(n), b"").unwrap();
         }
         let p = dir.path().to_path_buf();
-        let mut config = cian_lua::Config::default();
+        let mut config = en_config();
         config.options.lang = Some(lang.to_string());
         let app = App::new(p.clone(), p, config).unwrap();
         (dir, app)
@@ -95,7 +104,7 @@
             std::fs::write(dir.path().join(n), b"").unwrap();
         }
         let p = dir.path().to_path_buf();
-        let mut config = cian_lua::Config::default();
+        let mut config = en_config();
         config.keymaps = keymaps.into_iter().map(|(k, a)| (k.to_string(), a)).collect();
         let app = App::new(p.clone(), p, config).unwrap();
         (dir, app)
@@ -455,7 +464,7 @@
         let f = d.path().join("win.txt");
         std::fs::write(&f, b"one\r\ntwo\r\n").unwrap();
         let p = d.path().to_path_buf();
-        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        let mut app = App::new(p.clone(), p, en_config()).unwrap();
         app.active_pane_mut().unwrap().cursor =
             app.active_pane().unwrap().entries.iter().position(|e| e.name == "win.txt").unwrap();
         app.handle_key(code(KeyCode::F(3))).unwrap();
@@ -600,7 +609,7 @@
         .unwrap();
         std::fs::write(d.path().join("plain.txt"), "no structure here\n").unwrap();
         let p = d.path().to_path_buf();
-        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        let mut app = App::new(p.clone(), p, en_config()).unwrap();
         let open = |app: &mut App, name: &str| {
             app.active_pane_mut().unwrap().cursor =
                 app.active_pane().unwrap().entries.iter().position(|e| e.name == name).unwrap();
@@ -687,7 +696,7 @@
         std::fs::write(&mk, b"all:\n\techo one\n\techo two\n").unwrap();
         std::fs::write(&bom, [&[0xEF, 0xBB, 0xBF][..], b"alpha\nbeta\n"].concat()).unwrap();
         let p = d.path().to_path_buf();
-        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        let mut app = App::new(p.clone(), p, en_config()).unwrap();
         let open = |app: &mut App, name: &str| {
             app.active_pane_mut().unwrap().cursor =
                 app.active_pane().unwrap().entries.iter().position(|e| e.name == name).unwrap();
@@ -767,7 +776,7 @@
             std::fs::write(d.path().join(n), body).unwrap();
         }
         let p = d.path().to_path_buf();
-        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        let mut app = App::new(p.clone(), p, en_config()).unwrap();
         let mark = |app: &mut App, name: &str| {
             let path = app
                 .active_pane()
@@ -868,7 +877,7 @@
             std::fs::write(d.path().join(n), format!("{n}\n")).unwrap();
         }
         let p = d.path().to_path_buf();
-        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        let mut app = App::new(p.clone(), p, en_config()).unwrap();
         for n in ["alpha.txt", "beta.txt", "gamma.txt"] {
             let path = app.active_pane().unwrap().entries.iter().find(|e| e.name == n).unwrap().path.clone();
             app.active_pane_mut().unwrap().marks.insert(path);
@@ -937,7 +946,7 @@
         assert!(r.errors.is_empty(), "{:?}", r.errors);
 
         let p = d.path().to_path_buf();
-        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        let mut app = App::new(p.clone(), p, en_config()).unwrap();
         app.enter_archive(zip.clone(), String::new());
         // Into conf/, then onto the member.
         app.active_pane_mut().unwrap().cursor =
@@ -1072,7 +1081,7 @@
         let d2 = tempfile::tempdir().unwrap();
         std::fs::create_dir(d2.path().join("sub")).unwrap();
         let p = d2.path().to_path_buf();
-        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        let mut app = App::new(p.clone(), p, en_config()).unwrap();
         app.active_pane_mut().unwrap().cursor =
             app.active_pane().unwrap().entries.iter().position(|e| e.name == "sub").unwrap();
         app.handle_key(code(KeyCode::Enter)).unwrap();
@@ -1120,7 +1129,7 @@
         std::fs::write(d.path().join("a.txt"), "same\nold\ngone\ntail\n").unwrap();
         std::fs::write(d.path().join("b.txt"), "same\nnew\ntail\n").unwrap();
         let p = d.path().to_path_buf();
-        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        let mut app = App::new(p.clone(), p, en_config()).unwrap();
         for n in ["a.txt", "b.txt"] {
             let path = app.active_pane().unwrap().entries.iter().find(|e| e.name == n).unwrap().path.clone();
             app.active_pane_mut().unwrap().marks.insert(path);
@@ -1225,7 +1234,7 @@
         std::fs::write(d.path().join("b.txt"), "BBB\n").unwrap();
         std::fs::write(d.path().join("c.txt"), "CCC\n").unwrap();
         let p = d.path().to_path_buf();
-        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        let mut app = App::new(p.clone(), p, en_config()).unwrap();
         for n in ["a.txt", "b.txt", "c.txt"] {
             let path = app.active_pane().unwrap().entries.iter().find(|e| e.name == n).unwrap().path.clone();
             app.active_pane_mut().unwrap().marks.insert(path);
@@ -1287,7 +1296,7 @@
         std::fs::write(d.path().join("a.txt"), "AAA\n").unwrap();
         std::fs::write(d.path().join("b.txt"), "BBB\n").unwrap();
         let p = d.path().to_path_buf();
-        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        let mut app = App::new(p.clone(), p, en_config()).unwrap();
         for n in ["a.txt", "b.txt"] {
             let path = app.active_pane().unwrap().entries.iter().find(|e| e.name == n).unwrap().path.clone();
             app.active_pane_mut().unwrap().marks.insert(path);
@@ -1329,7 +1338,7 @@
         std::fs::write(d.path().join("a.txt"), "AAA\n").unwrap();
         std::fs::write(d.path().join("b.txt"), "BBB\n").unwrap();
         let p = d.path().to_path_buf();
-        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        let mut app = App::new(p.clone(), p, en_config()).unwrap();
         for n in ["a.txt", "b.txt"] {
             let path = app.active_pane().unwrap().entries.iter().find(|e| e.name == n).unwrap().path.clone();
             app.active_pane_mut().unwrap().marks.insert(path);
@@ -1394,7 +1403,7 @@
         std::fs::write(d.path().join("a.txt"), "AAA\n").unwrap();
         std::fs::write(d.path().join("b.txt"), "BBB\n").unwrap();
         let p = d.path().to_path_buf();
-        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        let mut app = App::new(p.clone(), p, en_config()).unwrap();
         for n in ["a.txt", "b.txt"] {
             let path =
                 app.active_pane().unwrap().entries.iter().find(|e| e.name == n).unwrap().path.clone();
@@ -1558,7 +1567,7 @@
         let d = tempfile::tempdir().unwrap();
         std::fs::write(d.path().join("bin.dat"), [0u8, 1, 2, 3, 255, 254]).unwrap();
         let p = d.path().to_path_buf();
-        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        let mut app = App::new(p.clone(), p, en_config()).unwrap();
         let i = app
             .active_pane()
             .unwrap()
@@ -1732,7 +1741,7 @@
         let d = tempfile::tempdir().unwrap();
         std::fs::write(d.path().join("bin.dat"), [0u8, 1, 2, 3]).unwrap();
         let p = d.path().to_path_buf();
-        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        let mut app = App::new(p.clone(), p, en_config()).unwrap();
         let i = app
             .active_pane()
             .unwrap()
@@ -2014,7 +2023,7 @@
         let body: String = (1..=200).map(|i| format!("line {i}\n")).collect();
         std::fs::write(d.path().join("b.log"), &body).unwrap();
         let p = d.path().to_path_buf();
-        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        let mut app = App::new(p.clone(), p, en_config()).unwrap();
         let at = app
             .active_pane()
             .unwrap()
@@ -2118,7 +2127,7 @@
         std::fs::write(d.path().join("a.txt"), "alpha\nbeta\n").unwrap();
         std::fs::write(d.path().join("b.txt"), "gamma\n").unwrap();
         let p = d.path().to_path_buf();
-        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        let mut app = App::new(p.clone(), p, en_config()).unwrap();
         app.handle_key(code(KeyCode::Enter)).unwrap();
         let _ = render(&mut app, 120, 30);
         assert_eq!(app.viewer_dock, Some(FocusedPane::Left));
@@ -2182,7 +2191,7 @@
             std::fs::write(d.path().join(n), b).unwrap();
         }
         let p = d.path().to_path_buf();
-        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        let mut app = App::new(p.clone(), p, en_config()).unwrap();
         let go = |app: &mut App, n: &str| {
             app.focus(FocusedPane::Left);
             let at =
@@ -2268,6 +2277,115 @@
         });
         let _ = render(&mut app, 120, 30);
         assert!(app.layout_rects.left.width > narrowed, "and dragging moved it");
+    }
+
+    /// Focus follows the mouse to the panel as well as away from it. Clicking
+    /// the panel from another pane used to do nothing at all: the panel's own
+    /// mouse handling only runs for the focused pane, so the click was
+    /// swallowed on the way in.
+    #[test]
+    fn clicking_the_docked_panel_focuses_it() {
+        let (_d, mut app) = app_with(&["a.txt", "b.log"]);
+        let at = app
+            .active_pane()
+            .unwrap()
+            .entries
+            .iter()
+            .position(|e| e.name == "b.log")
+            .unwrap();
+        app.active_pane_mut().unwrap().cursor = at;
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+        assert_eq!(app.viewer_dock, Some(FocusedPane::Left), "docked on the left");
+        let _ = render(&mut app, 120, 30);
+        let frame = app.viewer_frame;
+
+        let click = |app: &mut App, column: u16, row: u16| {
+            app.handle_mouse(crossterm::event::MouseEvent {
+                kind: crossterm::event::MouseEventKind::Down(
+                    crossterm::event::MouseButton::Left,
+                ),
+                column,
+                row,
+                modifiers: KeyModifiers::NONE,
+            });
+        };
+
+        // Away: the listing beside it takes the focus.
+        let (right, shell) = (app.layout_rects.right, app.layout_rects.shell);
+        click(&mut app, right.x + 4, right.y + 3);
+        assert_eq!(app.focused, FocusedPane::Right, "the listing took it");
+
+        // …and back. This is the direction that did not work.
+        click(&mut app, frame.x + 4, frame.y + 3);
+        assert_eq!(app.focused, FocusedPane::Left, "the panel took it back");
+
+        // From the shell, too.
+        click(&mut app, shell.x + 4, shell.y + 1);
+        assert_eq!(app.focused, FocusedPane::Shell);
+        click(&mut app, frame.x + 4, frame.y + 3);
+        assert_eq!(app.focused, FocusedPane::Left, "and back from the shell");
+        assert!(matches!(app.popup, Popup::Viewer { .. }), "the file is still open");
+    }
+
+    /// F3 gave the panel the whole window, which is what F12 does. One key for
+    /// that is enough, and F3 is the listings' — it opens a file in the other
+    /// pane.
+    #[test]
+    fn f3_is_not_a_second_way_to_fill_the_window() {
+        let (_d, mut app) = app_with(&["a.txt", "b.log"]);
+        let at = app
+            .active_pane()
+            .unwrap()
+            .entries
+            .iter()
+            .position(|e| e.name == "b.log")
+            .unwrap();
+        app.active_pane_mut().unwrap().cursor = at;
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+        app.handle_key(code(KeyCode::F(3))).unwrap();
+        assert!(!app.zoomed, "F3 does not zoom the panel");
+
+        // F12 still does.
+        app.handle_key(code(KeyCode::F(12))).unwrap();
+        assert!(app.zoomed, "F12 does");
+
+        // And it is not offered along the bottom any more.
+        app.handle_key(code(KeyCode::F(12))).unwrap();
+        let rows = render(&mut app, 120, 30);
+        let bottom = rows[rows.len().saturating_sub(2)].clone();
+        assert!(
+            !bottom.contains("whole window") && !bottom.contains("全画面へ"),
+            "the hint went with it: {bottom:?}",
+        );
+    }
+
+    /// cian is written in Japanese first: with no `lang` in the config the
+    /// interface is Japanese, and `lang = "en"` is what asks for English.
+    /// (It was the other way round, which meant the people it was written
+    /// for had to configure their own language.)
+    #[test]
+    fn the_interface_is_japanese_unless_asked() {
+        let (_d, app) = app_with_lang(&["a.txt"], "ja");
+        assert_eq!(app.lang, Lang::Ja);
+        assert_eq!(app.menu_lang, Lang::Ja, "and the menus follow it");
+
+        // The real default: nothing set at all.
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.txt"), b"").unwrap();
+        let p = dir.path().to_path_buf();
+        let mut app =
+            App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        assert_eq!(app.lang, Lang::Ja, "no config, Japanese");
+        assert_eq!(app.menu_lang, Lang::Ja);
+        // Wide characters take two cells, so the rendered rows read "名 前";
+        // the spacing is the terminal's, not the string's.
+        let screen: String =
+            render(&mut app, 120, 30).join("\n").chars().filter(|c| *c != ' ').collect();
+        assert!(screen.contains("名前"), "the listing is in Japanese:\n{screen}");
+
+        // And English is one option away.
+        let (_d, app) = app_with_lang(&["a.txt"], "en");
+        assert_eq!(app.lang, Lang::En);
     }
 
     /// A menu opened from the docked panel leaves the file stashed behind it,
@@ -2560,7 +2678,7 @@
         std::fs::create_dir_all(&sub).unwrap();
         std::fs::write(sub.join("hit.txt"), "x\n").unwrap();
         let p = d.path().to_path_buf();
-        let mut app = App::new(p.clone(), p.clone(), cian_lua::Config::default()).unwrap();
+        let mut app = App::new(p.clone(), p.clone(), en_config()).unwrap();
 
         app.start_find("hit", cian_core::search::Mode::Name);
         drain_find(&mut app);
@@ -2625,7 +2743,7 @@
         let d = tempfile::tempdir().unwrap();
         std::fs::write(d.path().join("t.tsv"), "col1\tcol2\tcol3\nあ\tい\tう\n").unwrap();
         let p = d.path().to_path_buf();
-        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        let mut app = App::new(p.clone(), p, en_config()).unwrap();
         app.show_ws = false;
         app.active_pane_mut().unwrap().cursor =
             app.active_pane().unwrap().entries.iter().position(|e| e.name == "t.tsv").unwrap();
@@ -2723,7 +2841,7 @@
         .unwrap();
         std::fs::write(d.path().join("b-short.txt"), "SHORTFILE only line\n").unwrap();
         let p = d.path().to_path_buf();
-        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        let mut app = App::new(p.clone(), p, en_config()).unwrap();
         assert!(app.preview_on, "the preview is on by default");
         // Past the startup splash, which would otherwise cover the panel.
         app.startup_at = std::time::Instant::now() - std::time::Duration::from_secs(5);
@@ -2856,7 +2974,7 @@
         let f = d.path().join("note.txt");
         std::fs::write(&f, "one\ntwo\n").unwrap();
         let p = d.path().to_path_buf();
-        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        let mut app = App::new(p.clone(), p, en_config()).unwrap();
         let open = |app: &mut App| {
             app.active_pane_mut().unwrap().cursor =
                 app.active_pane().unwrap().entries.iter().position(|e| e.name == "note.txt").unwrap();
@@ -2911,7 +3029,7 @@
         let deep = d.path().join("a-fairly-long-directory-name").join("and-another-one-here");
         std::fs::create_dir_all(&deep).unwrap();
         std::fs::write(deep.join("f.txt"), "x\n").unwrap();
-        let mut app = App::new(deep.clone(), deep, cian_lua::Config::default()).unwrap();
+        let mut app = App::new(deep.clone(), deep, en_config()).unwrap();
 
         app.mode = Mode::Command;
         app.command_buffer = "keys".into();
@@ -2948,7 +3066,7 @@
         .unwrap();
         std::fs::write(d.path().join("plain.txt"), "nothing here\n").unwrap();
         let p = d.path().to_path_buf();
-        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        let mut app = App::new(p.clone(), p, en_config()).unwrap();
         let open = |app: &mut App, name: &str| {
             app.active_pane_mut().unwrap().cursor =
                 app.active_pane().unwrap().entries.iter().position(|e| e.name == name).unwrap();
@@ -3056,7 +3174,7 @@
         )
         .unwrap();
         let p = d.path().to_path_buf();
-        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        let mut app = App::new(p.clone(), p, en_config()).unwrap();
         app.active_pane_mut().unwrap().cursor =
             app.active_pane().unwrap().entries.iter().position(|e| e.name == "doc.md").unwrap();
         app.handle_key(code(KeyCode::F(3))).unwrap();
@@ -3232,7 +3350,7 @@
         let mut bytes = vec![0x41u8, 0x42, 0x00, 0x00, 0x43];
         std::fs::write(&file, &bytes).unwrap();
         let p = d.path().to_path_buf();
-        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        let mut app = App::new(p.clone(), p, en_config()).unwrap();
         app.active_pane_mut().unwrap().cursor =
             app.active_pane().unwrap().entries.iter().position(|e| e.name == "blob.bin").unwrap();
         app.handle_key(code(KeyCode::F(3))).unwrap();
@@ -3290,7 +3408,7 @@
         // UTF-16LE with BOM: FF FE + "hi" in LE code units.
         std::fs::write(d.path().join("wide.txt"), b"\xFF\xFEh\x00i\x00").unwrap();
         let p = d.path().to_path_buf();
-        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        let mut app = App::new(p.clone(), p, en_config()).unwrap();
         {
             let pane = app.active_pane_mut().unwrap();
             pane.cursor = pane.entries.iter().position(|e| e.name == "bommed.txt").unwrap();
@@ -3703,7 +3821,7 @@
         }
         let dir = tempfile::tempdir().unwrap();
         let p = dir.path().to_path_buf();
-        let mut config = cian_lua::Config::default();
+        let mut config = en_config();
         config.ai = Some(cian_lua::AiOptions {
             python: "python3".into(),
             auth_mode: "mock".into(),
@@ -3742,7 +3860,7 @@
     fn explain_diff_opens_the_chat_with_the_diff() {
         let dir = tempfile::tempdir().unwrap();
         let p = dir.path().to_path_buf();
-        let mut config = cian_lua::Config::default();
+        let mut config = en_config();
         config.ai = Some(cian_lua::AiOptions {
             python: "python3".into(),
             auth_mode: "mock".into(),
@@ -3785,7 +3903,7 @@
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("app.log"), "INFO ok\nERROR boom\n").unwrap();
         let p = dir.path().to_path_buf();
-        let mut config = cian_lua::Config::default();
+        let mut config = en_config();
         config.ai = Some(cian_lua::AiOptions {
             python: "python3".into(),
             auth_mode: "mock".into(),
@@ -3819,7 +3937,7 @@
     fn a_crmaine_tool_chat_keeps_crmaines_name() {
         let dir = tempfile::tempdir().unwrap();
         let p = dir.path().to_path_buf();
-        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        let mut app = App::new(p.clone(), p, en_config()).unwrap();
         app.start_ai_chat_as(
             ChatMode::Ai,
             ChatSkin { title: "crmaine - Impact".into(), simple: false },
@@ -3943,7 +4061,7 @@
     fn pasted_images_ride_along_with_a_chat_turn_only() {
         let dir = tempfile::tempdir().unwrap();
         let p = dir.path().to_path_buf();
-        let mut config = cian_lua::Config::default();
+        let mut config = en_config();
         config.ai = Some(cian_lua::AiOptions {
             python: "python3".into(),
             auth_mode: "mock".into(),
@@ -4024,7 +4142,7 @@
         std::process::Command::new("git").arg("-C").arg(&dir).args(["commit", "-qm", "init"]).status().unwrap();
         std::fs::write(&f, "keep\nNEW\nkeep2\n").unwrap();
 
-        let mut app = App::new(dir.clone(), dir.clone(), cian_lua::Config::default()).unwrap();
+        let mut app = App::new(dir.clone(), dir.clone(), en_config()).unwrap();
         app.open_viewer_at(&f, "code.txt", 0);
         // The map was computed for the modified file.
         let Popup::Viewer { git_lines, .. } = &app.popup else { panic!("no viewer") };
@@ -4047,7 +4165,7 @@
             return;
         }
         std::fs::write(dir.join("a.txt"), "x").unwrap();
-        let mut app = App::new(dir.clone(), dir, cian_lua::Config::default()).unwrap();
+        let mut app = App::new(dir.clone(), dir, en_config()).unwrap();
         let screen = render(&mut app, 120, 30).join("\n");
         assert!(screen.contains("trunk"), "branch shown in the status line:\n{screen}");
     }
@@ -4073,7 +4191,7 @@
         std::process::Command::new("git").arg("-C").arg(&dir).args(["commit", "-qm", "init"]).status().unwrap();
         std::fs::write(dir.join("tracked.txt"), "one\ntwo\n").unwrap();
 
-        let mut app = App::new(dir.clone(), dir.clone(), cian_lua::Config::default()).unwrap();
+        let mut app = App::new(dir.clone(), dir.clone(), en_config()).unwrap();
         let _ = render(&mut app, 100, 40); // computes git status
         // Cursor onto tracked.txt (index 0 is `..`).
         let idx = app.active_pane().unwrap().entries.iter()
@@ -4242,7 +4360,7 @@
         std::fs::write(d.path().join("src/db.rs"), b"x").unwrap();
         std::fs::write(d.path().join("README.md"), b"x").unwrap();
         let p = d.path().to_path_buf();
-        let mut config = cian_lua::Config::default();
+        let mut config = en_config();
         config.ai = Some(cian_lua::AiOptions {
             python: "python3".into(), auth_mode: "mock".into(), ..Default::default()
         });
@@ -4341,7 +4459,7 @@
         let d = tempfile::tempdir().unwrap();
         std::fs::write(d.path().join("readme.txt"), "hello world\nsecond line\n").unwrap();
         let p = d.path().to_path_buf();
-        let mut config = cian_lua::Config::default();
+        let mut config = en_config();
         config.ai = Some(cian_lua::AiOptions {
             python: "python3".into(), auth_mode: "mock".into(), ..Default::default()
         });
@@ -4471,7 +4589,7 @@
         std::fs::write(dir.join("a.txt"), "hello\n").unwrap();
         cian_core::git::stage(&dir, &[dir.join("a.txt")]).unwrap();
 
-        let mut config = cian_lua::Config::default();
+        let mut config = en_config();
         config.ai = Some(cian_lua::AiOptions {
             python: "python3".into(),
             auth_mode: "mock".into(),
@@ -4518,7 +4636,7 @@
         }
         let dir = tempfile::tempdir().unwrap();
         let p = dir.path().to_path_buf();
-        let mut config = cian_lua::Config::default();
+        let mut config = en_config();
         config.ai = Some(cian_lua::AiOptions {
             python: "python3".into(),
             auth_mode: "mock".into(),
@@ -4747,7 +4865,7 @@
             deep.push(part);
         }
         std::fs::create_dir_all(&deep).unwrap();
-        let mut app = App::new(deep.clone(), deep, cian_lua::Config::default()).unwrap();
+        let mut app = App::new(deep.clone(), deep, en_config()).unwrap();
         let out = render(&mut app, 80, 20);
         let title = &out[0];
         assert!(title.contains('…'), "long path was middle-truncated: {title}");
@@ -4764,7 +4882,7 @@
         }
         // The right pane opens an empty dir so only the left column shows file_*.
         let empty = tempfile::tempdir().unwrap();
-        let config = cian_lua::Config::default();
+        let config = en_config();
         let mut app = App::new(d.path().to_path_buf(), empty.path().to_path_buf(), config).unwrap();
         app.focus(FocusedPane::Left);
         let idx = app
@@ -4792,7 +4910,7 @@
         for i in 0..5000 {
             std::fs::write(d.path().join(format!("file_{i:05}.rs")), b"x").unwrap();
         }
-        let mut config = cian_lua::Config::default();
+        let mut config = en_config();
         config.options.home = Some(d.path().display().to_string());
         let mut app = App::new(d.path().to_path_buf(), d.path().to_path_buf(), config).unwrap();
         // Park the cursor deep so the visible window is far from the top.
@@ -5180,7 +5298,7 @@
         let app = App::new(
             l.path().to_path_buf(),
             r.path().to_path_buf(),
-            cian_lua::Config::default(),
+            en_config(),
         )
         .unwrap();
         (l, r, app)
@@ -5648,7 +5766,7 @@
                 std::fs::write(d.path().join("a.txt"), "AAA\n").unwrap();
                 std::fs::write(d.path().join("b.txt"), "BBB\n").unwrap();
                 let p = d.path().to_path_buf();
-                let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+                let mut app = App::new(p.clone(), p, en_config()).unwrap();
                 for n in ["a.txt", "b.txt"] {
                     let path = app
                         .active_pane()
@@ -5977,7 +6095,7 @@
     fn scp_upload_without_a_selected_file_is_refused() {
         let d = tempfile::tempdir().unwrap();
         std::fs::create_dir(d.path().join("onlydir")).unwrap();
-        let mut config = cian_lua::Config::default();
+        let mut config = en_config();
         config.ssh_hosts = vec![cian_lua::SshHost {
             name: "web1".into(),
             host: "10.0.1.11".into(),
@@ -6181,7 +6299,7 @@
     fn animation_can_be_switched_off_by_config() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("a.txt"), b"x").unwrap();
-        let mut config = cian_lua::Config::default();
+        let mut config = en_config();
         config.options.animation_ms = Some(0);
         let p = dir.path().to_path_buf();
         let mut app = App::new(p.clone(), p, config).unwrap();
@@ -6686,7 +6804,7 @@
     fn the_key_hint_bar_can_be_switched_off() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("a.txt"), b"x").unwrap();
-        let mut config = cian_lua::Config::default();
+        let mut config = en_config();
         config.options.key_hints = Some(false);
         let p = dir.path().to_path_buf();
         let mut app = App::new(p.clone(), p, config).unwrap();
@@ -6741,7 +6859,7 @@
     fn app_with_ssh() -> (tempfile::TempDir, App) {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("a.txt"), b"x").unwrap();
-        let mut config = cian_lua::Config::default();
+        let mut config = en_config();
         config.ssh_hosts = vec![
             cian_lua::SshHost {
                 name: "web1".into(),
@@ -6935,7 +7053,7 @@
         std::fs::create_dir(dir.path().join("sub")).unwrap();
         std::fs::write(dir.path().join("sub").join("inner.txt"), b"x").unwrap();
         let p = dir.path().to_path_buf();
-        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        let mut app = App::new(p.clone(), p, en_config()).unwrap();
 
         let target = dir.path().join("sub");
         app.finish_jump_path(&target.display().to_string()).unwrap();
@@ -6954,7 +7072,7 @@
             std::fs::write(dir.path().join(n), b"x").unwrap();
         }
         let p = dir.path().to_path_buf();
-        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        let mut app = App::new(p.clone(), p, en_config()).unwrap();
 
         let target = dir.path().join("c.txt");
         app.finish_jump_path(&target.display().to_string()).unwrap();
@@ -7295,7 +7413,7 @@
     fn shift_f_searches_the_tree_below_the_pane() {
         let d = find_tree();
         let p = d.path().to_path_buf();
-        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        let mut app = App::new(p.clone(), p, en_config()).unwrap();
 
         app.handle_key(KeyEvent::new(KeyCode::Char('F'), KeyModifiers::SHIFT)).unwrap();
         let Popup::TextInput { kind, .. } = &app.popup else { panic!("no prompt") };
@@ -7323,7 +7441,7 @@
         std::fs::write(&a, "ORA-600 first\r\nfine\r\nORA-600 third\r\n").unwrap();
         std::fs::write(&b, b"col\tORA-600\n").unwrap();
         let p = d.path().to_path_buf();
-        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        let mut app = App::new(p.clone(), p, en_config()).unwrap();
 
         app.start_find("ORA-600", cian_core::search::Mode::Content);
         drain_find(&mut app);
@@ -7383,7 +7501,7 @@
         let f = d.path().join("keep.txt");
         std::fs::write(&f, "TARGET\n").unwrap();
         let p = d.path().to_path_buf();
-        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        let mut app = App::new(p.clone(), p, en_config()).unwrap();
 
         // A name search refuses, rather than replacing filenames by surprise.
         app.start_find("keep", cian_core::search::Mode::Name);
@@ -7413,7 +7531,7 @@
         )
         .unwrap();
         let p = d.path().to_path_buf();
-        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        let mut app = App::new(p.clone(), p, en_config()).unwrap();
 
         app.start_find("TARGET", cian_core::search::Mode::Content);
         drain_find(&mut app);
@@ -7448,7 +7566,7 @@
     fn choosing_a_result_navigates_to_it() {
         let d = find_tree();
         let p = d.path().to_path_buf();
-        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        let mut app = App::new(p.clone(), p, en_config()).unwrap();
 
         app.start_find("main.rs", cian_core::search::Mode::Name);
         drain_find(&mut app);
@@ -7491,7 +7609,7 @@
     fn b_flattens_the_subtree_into_the_pane_and_toggles_back() {
         let d = find_tree();
         let p = d.path().to_path_buf();
-        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        let mut app = App::new(p.clone(), p, en_config()).unwrap();
 
         app.handle_key(key('b')).unwrap();
         drain_until_flat(&mut app);
@@ -7519,7 +7637,7 @@
     fn p_panelizes_search_results_into_the_pane() {
         let d = find_tree();
         let p = d.path().to_path_buf();
-        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        let mut app = App::new(p.clone(), p, en_config()).unwrap();
 
         app.start_find("main", cian_core::search::Mode::Name);
         drain_find(&mut app);
@@ -7539,7 +7657,7 @@
     fn a_search_with_no_matches_says_so_rather_than_hanging() {
         let d = find_tree();
         let p = d.path().to_path_buf();
-        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        let mut app = App::new(p.clone(), p, en_config()).unwrap();
         app.start_find("nothing-matches-this", cian_core::search::Mode::Name);
         drain_find(&mut app);
         let Popup::FindResults { hits, .. } = &app.popup else { panic!("no results popup") };
@@ -7551,7 +7669,7 @@
     fn closing_the_results_stops_the_worker() {
         let d = find_tree();
         let p = d.path().to_path_buf();
-        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        let mut app = App::new(p.clone(), p, en_config()).unwrap();
         app.start_find("main", cian_core::search::Mode::Name);
         assert!(app.find_job.is_some());
         app.handle_key(code(KeyCode::Esc)).unwrap();
@@ -7565,7 +7683,7 @@
         std::fs::write(d.path().join("a.txt"), "one\nTODO: fix\nthree\n").unwrap();
         std::fs::write(d.path().join("b.txt"), "nothing\n").unwrap();
         let p = d.path().to_path_buf();
-        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        let mut app = App::new(p.clone(), p, en_config()).unwrap();
 
         app.handle_key(KeyEvent::new(KeyCode::Char('f'), KeyModifiers::CONTROL)).unwrap();
         let Popup::TextInput { kind, .. } = &app.popup else { panic!("no prompt") };
@@ -7706,7 +7824,7 @@
         std::fs::create_dir(d.path().join("sub")).unwrap();
         std::fs::write(d.path().join("sub/inner.txt"), b"x").unwrap();
         let start = d.path().join("sub");
-        let mut app = App::new(start.clone(), start, cian_lua::Config::default()).unwrap();
+        let mut app = App::new(start.clone(), start, en_config()).unwrap();
         let _ = render(&mut app, 100, 40);
         let left = app.layout_rects.left;
         // The first row is `..`; a single click steps up to the parent.
@@ -7804,7 +7922,7 @@
         let r = tempfile::tempdir().unwrap();
         std::fs::write(l.path().join("a.txt"), a).unwrap();
         std::fs::write(r.path().join("b.txt"), b).unwrap();
-        let app = App::new(l.path().to_path_buf(), r.path().to_path_buf(), cian_lua::Config::default())
+        let app = App::new(l.path().to_path_buf(), r.path().to_path_buf(), en_config())
             .unwrap();
         (l, r, app)
     }
@@ -7904,7 +8022,7 @@
         std::fs::create_dir(l.path().join("adir")).unwrap();
         std::fs::write(r.path().join("b.txt"), "x").unwrap();
         let mut app =
-            App::new(l.path().to_path_buf(), r.path().to_path_buf(), cian_lua::Config::default())
+            App::new(l.path().to_path_buf(), r.path().to_path_buf(), en_config())
                 .unwrap();
 
         app.handle_key(code(KeyCode::Char('='))).unwrap();
@@ -7928,7 +8046,7 @@
         std::fs::write(r.path().join("proj/changed.txt"), b"aaaa").unwrap();
         std::fs::write(l.path().join("proj/changed.txt"), b"a").unwrap();
         let mut app =
-            App::new(l.path().to_path_buf(), r.path().to_path_buf(), cian_lua::Config::default())
+            App::new(l.path().to_path_buf(), r.path().to_path_buf(), en_config())
                 .unwrap();
         // Cursor on "proj" in each pane (index 0 is the `..` row).
         app.left.active_mut().cursor = 1;
@@ -7959,7 +8077,7 @@
         let r = tempfile::tempdir().unwrap();
         std::fs::write(r.path().join("b.txt"), "x").unwrap();
         let mut app =
-            App::new(l.path().to_path_buf(), r.path().to_path_buf(), cian_lua::Config::default())
+            App::new(l.path().to_path_buf(), r.path().to_path_buf(), en_config())
                 .unwrap();
 
         app.handle_key(code(KeyCode::Char('='))).unwrap();
@@ -8114,7 +8232,7 @@
         let r = tempfile::tempdir().unwrap();
         std::fs::write(l.path().join("doc.txt"), b"hi").unwrap();
         let mut app =
-            App::new(l.path().to_path_buf(), r.path().to_path_buf(), cian_lua::Config::default())
+            App::new(l.path().to_path_buf(), r.path().to_path_buf(), en_config())
                 .unwrap();
         // The pane canonicalises its cwd (differently per platform), so compare
         // against the pane's own path rather than the raw tempdir.
@@ -8286,7 +8404,7 @@
         std::fs::write(l.path().join("doc.txt"), b"x").unwrap();
         std::fs::create_dir(r.path().join("elsewhere")).unwrap();
         let mut app =
-            App::new(l.path().to_path_buf(), r.path().to_path_buf(), cian_lua::Config::default())
+            App::new(l.path().to_path_buf(), r.path().to_path_buf(), en_config())
                 .unwrap();
         app.focus(FocusedPane::Left);
         app.active_pane_mut().unwrap().cursor = 1; // doc.txt (a file; index 0 is `..`)
@@ -8326,12 +8444,12 @@
     fn the_default_home_prefers_config_then_desktop() {
         // A configured home directory wins when it exists.
         let d = tempfile::tempdir().unwrap();
-        let mut config = cian_lua::Config::default();
+        let mut config = en_config();
         config.options.home = Some(d.path().display().to_string());
         assert_eq!(default_home(&config), d.path());
 
         // A configured but missing directory falls through (to Desktop/home/.).
-        let mut config = cian_lua::Config::default();
+        let mut config = en_config();
         config.options.home = Some("/definitely/not/here".into());
         let fallback = default_home(&config);
         assert_ne!(fallback, PathBuf::from("/definitely/not/here"));
@@ -8352,7 +8470,7 @@
         std::fs::create_dir(d.path().join("sub")).unwrap();
         std::fs::write(d.path().join("sub/inner.txt"), b"x").unwrap();
         let p = d.path().to_path_buf();
-        let mut app = App::new(p.clone(), p.clone(), cian_lua::Config::default()).unwrap();
+        let mut app = App::new(p.clone(), p.clone(), en_config()).unwrap();
         let _ = render(&mut app, 100, 40);
         let r = app.layout_rects.left;
         // Row 1 is the `..` row; "sub" (dirs first) is on row 2.
@@ -8375,7 +8493,7 @@
         let d = tempfile::tempdir().unwrap();
         std::fs::create_dir(d.path().join("sub")).unwrap();
         let p = d.path().to_path_buf();
-        let mut app = App::new(p.clone(), p.clone(), cian_lua::Config::default()).unwrap();
+        let mut app = App::new(p.clone(), p.clone(), en_config()).unwrap();
         let _ = render(&mut app, 100, 40);
         let root = app.left.active_ref().cwd.clone();
         let r = app.layout_rects.left;
@@ -8399,7 +8517,7 @@
         std::fs::write(d.path().join("hello.txt"), "alpha bravo preview-me\n").unwrap();
         std::fs::write(d.path().join("other.txt"), "charlie delta other-one\n").unwrap();
         let p = d.path().to_path_buf();
-        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        let mut app = App::new(p.clone(), p, en_config()).unwrap();
         {
             let pane = app.active_pane_mut().unwrap();
             pane.cursor = pane.entries.iter().position(|e| e.name == "hello.txt").unwrap();
@@ -8445,7 +8563,7 @@
         std::fs::write(d.path().join("pic.png"), png).unwrap();
         std::fs::write(d.path().join("after.txt"), "plain text after the picture\n").unwrap();
         let p = d.path().to_path_buf();
-        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        let mut app = App::new(p.clone(), p, en_config()).unwrap();
 
         let go = |app: &mut App, name: &str| {
             let pane = app.active_pane_mut().unwrap();
@@ -8481,7 +8599,7 @@
         std::fs::create_dir(d.path().join("sub")).unwrap();
         std::fs::write(d.path().join("sub/inside.txt"), "x").unwrap();
         let p = d.path().to_path_buf();
-        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        let mut app = App::new(p.clone(), p, en_config()).unwrap();
         {
             let pane = app.active_pane_mut().unwrap();
             pane.cursor = pane.entries.iter().position(|e| e.name == "sub").unwrap();
@@ -8529,7 +8647,7 @@
         let d = tempfile::tempdir().unwrap();
         let deep = d.path().join("alpha").join("beta");
         std::fs::create_dir_all(&deep).unwrap();
-        let mut app = App::new(deep.clone(), deep.clone(), cian_lua::Config::default()).unwrap();
+        let mut app = App::new(deep.clone(), deep.clone(), en_config()).unwrap();
         let _ = render(&mut app, 120, 40);
         // strip=1 is the parent of the cwd ("alpha").
         let (_, _, r) = app
@@ -8696,7 +8814,7 @@
         let r = tempfile::tempdir().unwrap();
         std::fs::write(l.path().join("doc.txt"), b"hi").unwrap();
         let mut app =
-            App::new(l.path().to_path_buf(), r.path().to_path_buf(), cian_lua::Config::default())
+            App::new(l.path().to_path_buf(), r.path().to_path_buf(), en_config())
                 .unwrap();
         run_cmd(&mut app, "cp"); // ConfirmTransfer to the right pane
         app.handle_key(code(KeyCode::Enter)).unwrap();
@@ -8710,7 +8828,7 @@
         let r = tempfile::tempdir().unwrap();
         std::fs::write(l.path().join("old.txt"), b"data").unwrap();
         let mut app =
-            App::new(l.path().to_path_buf(), r.path().to_path_buf(), cian_lua::Config::default())
+            App::new(l.path().to_path_buf(), r.path().to_path_buf(), en_config())
                 .unwrap();
         app.active_pane_mut().unwrap().cursor = 1; // old.txt (index 0 is `..`)
         app.handle_key(code(KeyCode::Char('m'))).unwrap(); // move confirm
@@ -8798,7 +8916,7 @@
         let d = tempfile::tempdir().unwrap();
         std::fs::write(d.path().join("a.rs"), "fn main() {}\nsecond\n").unwrap();
         let p = d.path().to_path_buf();
-        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        let mut app = App::new(p.clone(), p, en_config()).unwrap();
 
         app.handle_key(code(KeyCode::F(3))).unwrap();
         let Popup::Viewer { view, title, .. } = &app.popup else {
@@ -8814,7 +8932,7 @@
         let d = tempfile::tempdir().unwrap();
         std::fs::write(d.path().join("readme.md"), "# Title\n\n- item\n\n```mermaid\ngraph TD; A-->B\n```\n").unwrap();
         let p = d.path().to_path_buf();
-        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        let mut app = App::new(p.clone(), p, en_config()).unwrap();
 
         app.handle_key(code(KeyCode::F(3))).unwrap();
         // A .md file opens straight into rendered preview.
@@ -8902,7 +9020,7 @@
         let mut app = App::new(
             src.path().to_path_buf(),
             dst.path().to_path_buf(),
-            cian_lua::Config::default(),
+            en_config(),
         )
         .unwrap();
         app.active_pane_mut().unwrap().cursor =
@@ -8923,7 +9041,7 @@
     fn menu_lang_overrides_lang_for_menu_and_manual() {
         let d = tempfile::tempdir().unwrap();
         let p = d.path().to_path_buf();
-        let mut cfg = cian_lua::Config::default();
+        let mut cfg = en_config();
         cfg.options.lang = Some("en".into());
         cfg.options.menu_lang = Some("ja".into());
         let app = App::new(p.clone(), p, cfg).unwrap();
@@ -8933,7 +9051,7 @@
         // Unset menu_lang follows lang.
         let d2 = tempfile::tempdir().unwrap();
         let p2 = d2.path().to_path_buf();
-        let mut cfg2 = cian_lua::Config::default();
+        let mut cfg2 = en_config();
         cfg2.options.lang = Some("ja".into());
         let app2 = App::new(p2.clone(), p2, cfg2).unwrap();
         assert_eq!(app2.menu_lang, Lang::Ja, "falls back to lang when unset");
@@ -8943,7 +9061,7 @@
     fn where_shows_config_paths() {
         let d = tempfile::tempdir().unwrap();
         let p = d.path().to_path_buf();
-        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        let mut app = App::new(p.clone(), p, en_config()).unwrap();
         app.show_config_paths();
         match &app.popup {
             Popup::Notice { lines } => {
@@ -9000,7 +9118,7 @@
     fn snippet_launcher_filters_and_confirms() {
         let d = tempfile::tempdir().unwrap();
         let p = d.path().to_path_buf();
-        let mut cfg = cian_lua::Config::default();
+        let mut cfg = en_config();
         cfg.snippets = vec![
             cian_lua::Snippet { name: "list".into(), cmd: "ls -la".into(), enter: true, confirm: false },
             cian_lua::Snippet { name: "danger".into(), cmd: "rm -rf x".into(), enter: true, confirm: true },
@@ -9050,7 +9168,7 @@
             std::fs::write(d.path().join(n), b"x").unwrap();
         }
         let p = d.path().to_path_buf();
-        let mut app = App::new(p.clone(), p.clone(), cian_lua::Config::default()).unwrap();
+        let mut app = App::new(p.clone(), p.clone(), en_config()).unwrap();
         let targets = vec![p.join("a.txt"), p.join("b.txt")];
 
         // Template with a padded counter → a review checklist, nothing on disk yet.
@@ -9100,7 +9218,7 @@
         let mut app = App::new(
             l.path().to_path_buf(),
             r.path().to_path_buf(),
-            cian_lua::Config::default(),
+            en_config(),
         )
         .unwrap();
 
@@ -9156,7 +9274,7 @@
     fn recent_files_dedupe_and_skip_remote_temp() {
         let d = tempfile::tempdir().unwrap();
         let p = d.path().to_path_buf();
-        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        let mut app = App::new(p.clone(), p, en_config()).unwrap();
 
         app.note_recent_file(std::path::Path::new("/proj/a.rs"));
         app.note_recent_file(std::path::Path::new("/proj/b.rs"));
@@ -9173,7 +9291,7 @@
     fn ai_history_archives_reopens_and_forgets() {
         let d = tempfile::tempdir().unwrap();
         let p = d.path().to_path_buf();
-        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        let mut app = App::new(p.clone(), p, en_config()).unwrap();
 
         // A RAG chat with an answer in it.
         app.popup = Popup::AiChat {
@@ -9237,7 +9355,7 @@
         let mut app = App::new(
             l.path().to_path_buf(),
             r.path().to_path_buf(),
-            cian_lua::Config::default(),
+            en_config(),
         )
         .unwrap();
 
@@ -9298,7 +9416,7 @@
         Command::new("git").arg("-C").arg(&dir).args(["add", "."]).status().unwrap();
         Command::new("git").arg("-C").arg(&dir).args(["commit", "-qm", "seed"]).status().unwrap();
 
-        let mut app = App::new(dir.clone(), dir.clone(), cian_lua::Config::default()).unwrap();
+        let mut app = App::new(dir.clone(), dir.clone(), en_config()).unwrap();
         // Give the pane's git status a moment (ensure_git runs in the loop; call it).
         app.ensure_git();
         app.active_pane_mut().unwrap().cursor =
@@ -9342,7 +9460,7 @@
     fn disk_usage_cache_populates_for_the_active_pane() {
         let d = tempfile::tempdir().unwrap();
         let p = std::fs::canonicalize(d.path()).unwrap();
-        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        let mut app = App::new(p.clone(), p, en_config()).unwrap();
         assert!(app.disk_for(app.focused).is_none(), "cold before the first refresh");
         app.ensure_git();
         let u = app.disk_for(app.focused).expect("mount is queryable");
@@ -9371,7 +9489,7 @@
         svn(&["add", "f.rs"]);
         svn(&["commit", "-m", "seed"]);
 
-        let mut app = App::new(wc.clone(), wc.clone(), cian_lua::Config::default()).unwrap();
+        let mut app = App::new(wc.clone(), wc.clone(), en_config()).unwrap();
         app.ensure_git();
         // The status bar label comes from RepoStatus.branch → "svn r1".
         assert_eq!(app.vcs_kind(), Some(Vcs::Svn), "detected as svn");
@@ -9410,7 +9528,7 @@
         let d = tempfile::tempdir().unwrap();
         std::fs::write(d.path().join("a.rs"), "fn main() {\n    let x = 1; // hi\n}\n").unwrap();
         let p = d.path().to_path_buf();
-        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        let mut app = App::new(p.clone(), p, en_config()).unwrap();
         app.active_pane_mut().unwrap().cursor =
             app.active_pane().unwrap().entries.iter().position(|e| e.name == "a.rs").unwrap();
         app.handle_key(code(KeyCode::F(3))).unwrap();
@@ -9438,7 +9556,7 @@
         let file = d.path().join("note.txt");
         std::fs::write(&file, "hello\nworld\n").unwrap();
         let p = d.path().to_path_buf();
-        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        let mut app = App::new(p.clone(), p, en_config()).unwrap();
         app.active_pane_mut().unwrap().cursor =
             app.active_pane().unwrap().entries.iter().position(|e| e.name == "note.txt").unwrap();
         app.handle_key(code(KeyCode::F(3))).unwrap();
@@ -9472,7 +9590,7 @@
         let d = tempfile::tempdir().unwrap();
         std::fs::write(d.path().join("note.txt"), lines).unwrap();
         let p = d.path().to_path_buf();
-        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        let mut app = App::new(p.clone(), p, en_config()).unwrap();
         // No system clipboard: these tests run in parallel on one machine and
         // would otherwise yank and paste through the *developer's* clipboard,
         // reading each other's copies. cian's own yank is the path that has to
@@ -9576,7 +9694,7 @@
         bytes[1] = 1;
         std::fs::write(d.path().join("blob.bin"), &bytes).unwrap();
         let p = d.path().to_path_buf();
-        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        let mut app = App::new(p.clone(), p, en_config()).unwrap();
         app.active_pane_mut().unwrap().cursor =
             app.active_pane().unwrap().entries.iter().position(|e| e.name == "blob.bin").unwrap();
         app.handle_key(code(KeyCode::F(3))).unwrap();
@@ -9604,7 +9722,7 @@
         let d = tempfile::tempdir().unwrap();
         std::fs::write(d.path().join("a.txt"), "x\n").unwrap();
         let p = d.path().to_path_buf();
-        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        let mut app = App::new(p.clone(), p, en_config()).unwrap();
         app.active_pane_mut().unwrap().cursor =
             app.active_pane().unwrap().entries.iter().position(|e| e.name == "a.txt").unwrap();
         app.handle_key(code(KeyCode::F(3))).unwrap();
@@ -9625,7 +9743,7 @@
         let d = tempfile::tempdir().unwrap();
         std::fs::write(d.path().join("a.txt"), "alpha\nbeta\ngamma\n").unwrap();
         let p = d.path().to_path_buf();
-        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        let mut app = App::new(p.clone(), p, en_config()).unwrap();
         app.active_pane_mut().unwrap().cursor =
             app.active_pane().unwrap().entries.iter().position(|e| e.name == "a.txt").unwrap();
         app.handle_key(code(KeyCode::F(3))).unwrap();
@@ -9682,7 +9800,7 @@
         let d = tempfile::tempdir().unwrap();
         make_browse_zip(d.path());
         let p = d.path().to_path_buf();
-        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        let mut app = App::new(p.clone(), p, en_config()).unwrap();
         {
             let pane = app.active_pane_mut().unwrap();
             pane.cursor = pane.entries.iter().position(|e| e.name == "bundle.zip").unwrap();
@@ -9716,7 +9834,7 @@
         let d = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(d.path().join("sub")).unwrap();
         let p = d.path().to_path_buf();
-        let mut app = App::new(p.clone(), p.clone(), cian_lua::Config::default()).unwrap();
+        let mut app = App::new(p.clone(), p.clone(), en_config()).unwrap();
         let root = app.active_pane().unwrap().cwd.clone();
 
         // Go into sub/, then back, then forward again.
@@ -9813,7 +9931,7 @@
         let d = tempfile::tempdir().unwrap();
         make_browse_zip(d.path());
         let p = d.path().to_path_buf();
-        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        let mut app = App::new(p.clone(), p, en_config()).unwrap();
         let plain: Vec<&str> = crate::render::key_hints(&app).iter().map(|(k, _)| *k).collect();
         assert!(plain.contains(&"S-J"), "the ordinary bar leads with pane keys");
 
@@ -9836,7 +9954,7 @@
         let d = tempfile::tempdir().unwrap();
         make_browse_zip(d.path());
         let p = d.path().to_path_buf();
-        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        let mut app = App::new(p.clone(), p, en_config()).unwrap();
         {
             let pane = app.active_pane_mut().unwrap();
             pane.cursor = pane.entries.iter().position(|e| e.name == "bundle.zip").unwrap();
@@ -9891,7 +10009,7 @@
         let d = tempfile::tempdir().unwrap();
         make_browse_zip(d.path());
         let p = d.path().to_path_buf();
-        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        let mut app = App::new(p.clone(), p, en_config()).unwrap();
         {
             let pane = app.active_pane_mut().unwrap();
             pane.cursor = pane.entries.iter().position(|e| e.name == "bundle.zip").unwrap();
@@ -10070,7 +10188,7 @@
             zw.finish().unwrap();
         }
         let p = d.path().to_path_buf();
-        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        let mut app = App::new(p.clone(), p, en_config()).unwrap();
 
         // F3 opens the extracted document in the ordinary viewer (not markdown).
         app.handle_key(code(KeyCode::F(3))).unwrap();
@@ -10103,7 +10221,7 @@
         let d = tempfile::tempdir().unwrap();
         std::fs::write(d.path().join("a.txt"), "one\ntwo\nthree\nfour\n").unwrap();
         let p = d.path().to_path_buf();
-        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        let mut app = App::new(p.clone(), p, en_config()).unwrap();
         app.handle_key(code(KeyCode::F(3))).unwrap();
         let _ = render(&mut app, 100, 30); // size viewer_rect so motion works
 
@@ -10126,7 +10244,7 @@
         let d = tempfile::tempdir().unwrap();
         std::fs::write(d.path().join("a.txt"), "hello world\nsecond\n").unwrap();
         let p = d.path().to_path_buf();
-        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        let mut app = App::new(p.clone(), p, en_config()).unwrap();
         app.handle_key(code(KeyCode::F(3))).unwrap();
         let _ = render(&mut app, 100, 30);
 
@@ -10153,7 +10271,7 @@
         let d = tempfile::tempdir().unwrap();
         std::fs::write(d.path().join("a.txt"), "hello world\nsecond line\nthird row!!\n").unwrap();
         let p = d.path().to_path_buf();
-        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        let mut app = App::new(p.clone(), p, en_config()).unwrap();
         app.handle_key(code(KeyCode::F(3))).unwrap();
         let _ = render(&mut app, 100, 30);
 
@@ -10188,7 +10306,7 @@
         let d = tempfile::tempdir().unwrap();
         std::fs::write(d.path().join("a.txt"), "hello world\nsecond line\n").unwrap();
         let p = d.path().to_path_buf();
-        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        let mut app = App::new(p.clone(), p, en_config()).unwrap();
         app.handle_key(code(KeyCode::F(3))).unwrap();
         let _ = render(&mut app, 100, 30);
         let body = app.viewer_rect;
@@ -10242,7 +10360,7 @@
         let d = tempfile::tempdir().unwrap();
         std::fs::write(d.path().join("a.txt"), "alpha\nbeta needle\ngamma\nneedle again\n").unwrap();
         let p = d.path().to_path_buf();
-        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        let mut app = App::new(p.clone(), p, en_config()).unwrap();
         app.handle_key(code(KeyCode::F(3))).unwrap();
         let _ = render(&mut app, 100, 30);
 
@@ -10269,7 +10387,7 @@
         let d = tempfile::tempdir().unwrap();
         std::fs::write(d.path().join("a.txt"), "fn f() {\n    body\n}\nfour\nfive\n").unwrap();
         let p = d.path().to_path_buf();
-        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        let mut app = App::new(p.clone(), p, en_config()).unwrap();
         app.handle_key(code(KeyCode::F(3))).unwrap();
         let _ = render(&mut app, 100, 30);
 
@@ -10301,7 +10419,7 @@
         let d = tempfile::tempdir().unwrap();
         std::fs::write(d.path().join("a.txt"), "abcd\nefgh\n").unwrap();
         let p = d.path().to_path_buf();
-        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        let mut app = App::new(p.clone(), p, en_config()).unwrap();
         app.handle_key(code(KeyCode::F(3))).unwrap();
         let _ = render(&mut app, 100, 30);
         // From (0,1)=b, char-visual to (1,1)=f → "bcd\nef".
@@ -10326,7 +10444,7 @@
         // "日本語" in Shift_JIS: mojibake as UTF-8 until switched.
         std::fs::write(d.path().join("s.txt"), [0x93u8, 0xfa, 0x96, 0x7b, 0x8c, 0xea, b'\n']).unwrap();
         let p = d.path().to_path_buf();
-        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        let mut app = App::new(p.clone(), p, en_config()).unwrap();
         app.handle_key(code(KeyCode::F(3))).unwrap();
 
         // `e` opens the picker (a list), not an immediate cycle.
@@ -10357,7 +10475,7 @@
         let d = tempfile::tempdir().unwrap();
         std::fs::write(d.path().join("s.txt"), b"plain\n").unwrap();
         let p = d.path().to_path_buf();
-        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        let mut app = App::new(p.clone(), p, en_config()).unwrap();
         app.handle_key(code(KeyCode::F(3))).unwrap();
         app.handle_key(key('e')).unwrap();
         app.handle_key(code(KeyCode::Esc)).unwrap();
@@ -10370,7 +10488,7 @@
         std::fs::create_dir(d.path().join("sub")).unwrap();
         std::fs::write(d.path().join("sub").join("deep.txt"), "content\n").unwrap();
         let p = d.path().to_path_buf();
-        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        let mut app = App::new(p.clone(), p, en_config()).unwrap();
         // Open the file, then Shift+Enter for the viewer's menu, and take the
         // item that reveals it. (Shift+Enter used to reveal it directly; it is
         // the keyboard's right-click now, and revealing moved into the menu.)
@@ -10400,7 +10518,7 @@
         std::fs::write(d.path().join("a.txt"), "NEEDLE one\n").unwrap();
         std::fs::write(d.path().join("b.txt"), "two NEEDLE\n").unwrap();
         let p = d.path().to_path_buf();
-        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        let mut app = App::new(p.clone(), p, en_config()).unwrap();
         app.start_find("NEEDLE", cian_core::search::Mode::Content);
         drain_find(&mut app);
         // Sort of results is by rel path, so a.txt is first. Open it.
@@ -10437,7 +10555,7 @@
             w.finish().unwrap();
         }
         let p = d.path().to_path_buf();
-        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        let mut app = App::new(p.clone(), p, en_config()).unwrap();
 
         app.handle_key(code(KeyCode::F(3))).unwrap();
         let Popup::Archive { members, .. } = &app.popup else {
@@ -10463,7 +10581,7 @@
         let mut app = App::new(
             src.path().to_path_buf(),
             out.path().to_path_buf(),
-            cian_lua::Config::default(),
+            en_config(),
         )
         .unwrap();
 
@@ -10486,7 +10604,7 @@
         let d = tempfile::tempdir().unwrap();
         std::fs::create_dir(d.path().join("sub")).unwrap();
         let p = d.path().to_path_buf();
-        let mut app = App::new(p.clone(), p, cian_lua::Config::default()).unwrap();
+        let mut app = App::new(p.clone(), p, en_config()).unwrap();
         app.handle_key(code(KeyCode::F(3))).unwrap();
         assert!(matches!(app.popup, Popup::None));
         assert!(app.message.as_deref().unwrap_or("").contains("directory"));
