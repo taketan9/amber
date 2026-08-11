@@ -2430,21 +2430,26 @@
     /// everything drawn on them has to read on them. They were painted for a
     /// dark surface: fixed greys, the theme accent used as body text, the
     /// chat's own cyan. On a light dialog those ran from 1.0:1 to 3.2:1.
+    ///
+    /// Two things are checked, on every preset in the gallery. That the text
+    /// reads — 4.0:1, measured against the cell it actually sits on, which
+    /// for a row under the cursor is the selection and not the dialog. And
+    /// that the cell was painted at all: `Clear` empties cells without
+    /// colouring them, so a dialog with no surface of its own showed the
+    /// terminal's background — the `?` manual and Z's jump list did exactly
+    /// that, and no contrast check would ever have caught it.
     #[test]
     fn every_popup_reads_on_the_theme_it_is_drawn_on() {
         use crate::theme::{set_theme, ResolvedTheme};
         let _g = THEME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let mut bad: Vec<String> = Vec::new();
-        for t in [
-            ResolvedTheme::SOLARIZED_LIGHT,
-            ResolvedTheme::GITHUB_LIGHT,
-            ResolvedTheme::AYU_LIGHT,
-            ResolvedTheme::BLULOCO_LIGHT,
-            ResolvedTheme::MONOKAI_PRO,
-            ResolvedTheme::DARK,
-        ] {
+        // Every preset in the gallery, not a sample of them: the light ones
+        // are where this goes wrong, and "which light ones" is not something
+        // to keep in step by hand.
+        for name in crate::theme::THEME_NAMES {
+            let t = crate::theme::theme_preset(name).unwrap();
             set_theme(t);
-            for what in ["manual", "panel-help", "palette", "chat", "notice", "toggles", "gallery",
+            for what in ["manual", "panel-help", "palette", "chat", "notice", "toggles", "gallery", "jump",
                 "listings", "ssh-users", "snippets", "local-dest", "find", "history",
                 "bookmarks", "macros", "sort", "encoding", "op-queue", "ai-history",
                 "commit", "input", "quit", "menu", "pane-bg", "report", "archive",
@@ -2465,6 +2470,10 @@
                     "palette" => {
                         app.handle_key(key('C')).unwrap();
                     }
+                    // Z's directory jump is the same popup with other items
+                    // in it; it is listed separately because it is the one
+                    // the missing surface was noticed on.
+                    "jump" => app.start_fuzzy_jump(),
                     "chat" => app.start_ai_chat(
                         ChatMode::Ai,
                         vec![
@@ -2612,9 +2621,35 @@
                 for y in 0..buf.area.height {
                     for x in 0..buf.area.width {
                         let c = &buf[(x, y)];
-                        if !c.symbol().chars().all(char::is_alphanumeric)
-                            || c.symbol().trim().is_empty()
+                        // An unpainted cell is the bug this sweep missed the
+                        // first time: `Clear` empties cells without colouring
+                        // them, so the dialog showed the terminal's own
+                        // background — which passes any contrast check and
+                        // follows no theme at all. A theme that paints a
+                        // background paints every cell of the window, and
+                        // every glyph on it has a colour of its own.
+                        let written = !c.symbol().trim().is_empty();
+                        // The right half of a wide glyph is left blank and
+                        // unstyled by ratatui; the terminal paints it from
+                        // the left half, so it is not a gap.
+                        let wide_tail = !written
+                            && x > 0
+                            && crate::util::width(buf[(x - 1, y)].symbol()) == 2;
+                        if t.base_bg.is_some()
+                            && !wide_tail
+                            && (matches!(c.bg, Color::Reset)
+                                || (written && matches!(c.fg, Color::Reset)))
                         {
+                            bad.push(format!(
+                                "{:?} {what}: {:?} at ({x},{y}) is unpainted — {:?} on {:?}",
+                                t.accent,
+                                c.symbol(),
+                                c.fg,
+                                c.bg,
+                            ));
+                            continue;
+                        }
+                        if !c.symbol().chars().all(char::is_alphanumeric) || !written {
                             continue;
                         }
                         if matches!(c.fg, Color::Reset) || matches!(c.bg, Color::Reset) {
@@ -2637,7 +2672,7 @@
         set_theme(ResolvedTheme::DARK);
         let n = bad.len();
         bad.dedup();
-        bad.truncate(400);
+        bad.truncate(40);
         assert!(bad.is_empty(), "{n} unreadable cells:\n{}", bad.join("\n"));
     }
 

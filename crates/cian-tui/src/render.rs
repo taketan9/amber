@@ -2943,10 +2943,22 @@ pub(crate) fn readable_on(bg: Color) -> Color {
     if !matches!(bg, Color::Rgb(..)) {
         return Color::Rgb(225, 225, 240); // unknown → assume a dark ground
     }
-    if contrast_ratio(DARK, bg) >= contrast_ratio(LIGHT, bg) {
-        DARK
+    let soft = if contrast_ratio(DARK, bg) >= contrast_ratio(LIGHT, bg) { DARK } else { LIGHT };
+    if contrast_ratio(soft, bg) >= 4.5 {
+        return soft;
+    }
+    // A mid-tone ground — Catppuccin Latte's blue, Dracula's selection — is
+    // far enough from both of the soft tones that neither clears the bar.
+    // Only then is it worth the harsher pure black or white: the softer pair
+    // is what the rest of the interface is drawn in, and the eye notices the
+    // difference long before it notices the extra contrast.
+    const BLACK: Color = Color::Rgb(0, 0, 0);
+    const WHITE: Color = Color::Rgb(255, 255, 255);
+    let hard = if contrast_ratio(BLACK, bg) >= contrast_ratio(WHITE, bg) { BLACK } else { WHITE };
+    if contrast_ratio(hard, bg) > contrast_ratio(soft, bg) {
+        hard
     } else {
-        LIGHT
+        soft
     }
 }
 
@@ -3066,8 +3078,17 @@ pub(crate) fn muted_on(bg: Color) -> Color {
     let (Color::Rgb(tr_, tg, tb), Color::Rgb(br, bg_, bb)) = (readable_on(bg), bg) else {
         return readable_on(bg);
     };
-    let mix = |t: u8, b: u8| ((t as u16 * 7 + b as u16 * 3) / 10) as u8;
-    Color::Rgb(mix(tr_, br), mix(tg, bg_), mix(tb, bb))
+    // Seven parts text to three parts page, backed off toward the text if
+    // that lands too close to the page to read — on a mid-tone ground like
+    // Dracula's selection there is not three parts of room to give away.
+    for parts in [7u16, 8, 9] {
+        let mix = |t: u8, b: u8| ((t as u16 * parts + b as u16 * (10 - parts)) / 10) as u8;
+        let c = Color::Rgb(mix(tr_, br), mix(tg, bg_), mix(tb, bb));
+        if contrast_ratio(c, bg) >= 4.5 {
+            return c;
+        }
+    }
+    readable_on(bg)
 }
 
 /// Inline Markdown within one text run: `**bold**` and `` `code` ``. Anything
@@ -3442,7 +3463,7 @@ fn draw_op_queue(f: &mut Frame, area: Rect, app: &mut App) {
         }
         None => lines.push(Line::from(Span::styled(
             tr(lang, "  (nothing running)", "  （実行中なし）"),
-            Style::default().fg(theme().dim),
+            Style::default().fg(dim_text(theme().popup_bg)),
         ))),
     }
     // The waiting line.
@@ -3452,7 +3473,7 @@ fn draw_op_queue(f: &mut Frame, area: Rect, app: &mut App) {
             Span::styled(if sel { "▶ " } else { "  " }, Style::default().fg(text_tone(theme().accent, theme().popup_bg))),
             Span::styled(
                 format!("{}. {}", i + 1, q.label),
-                Style::default().fg(if sel { body_c } else { theme().dim }),
+                Style::default().fg(if sel { body_c } else { dim_text(theme().popup_bg) }),
             ),
         ]));
     }
@@ -3926,10 +3947,14 @@ fn popup_frame_in<'a>(
 ) -> Rect {
     let rect = centered_rect(w, h, area);
     f.render_widget(Clear, rect);
+    // `Clear` empties the cells; it does not colour them. Without a surface
+    // of its own a dialog shows the terminal's background, which is no
+    // theme's — the one place the palette never reached.
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(border_type())
         .border_style(Style::default().fg(accent).add_modifier(Modifier::BOLD))
+        .style(Style::default().bg(theme().popup_bg).fg(readable_on(theme().popup_bg)))
         .title(title)
         .title_bottom(footer);
     let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
@@ -4492,7 +4517,12 @@ fn draw_simple_dialog(
     let body_area = Rect::new(inner.x, inner.y, inner.width, body_h);
     let footer_area = Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1);
 
-    let p = Paragraph::new(body_text).wrap(Wrap { trim: false });
+    // Spelled out rather than inherited: a `Block`'s style does not reach a
+    // paragraph rendered into it, so without this the text kept the
+    // terminal's own foreground — invisible on a light dialog.
+    let p = Paragraph::new(body_text)
+        .style(Style::default().fg(readable_on(theme().popup_bg)))
+        .wrap(Wrap { trim: false });
     f.render_widget(p, body_area);
 
     if button_row {
@@ -4828,10 +4858,15 @@ fn draw_scrolling_text(
         // Everything fits; there is nothing to scroll.
         None => " all ".to_string(),
     };
+    // The dialog's own surface. Without this the manual and the reports were
+    // the one thing on screen the theme did not reach: `Clear` leaves the
+    // cells at the terminal's own colours, which is a dark box on a light
+    // theme and a stranger's colours on any of them.
     let block = Block::default()
         .borders(Borders::ALL)
-    .border_type(border_type())
+        .border_type(border_type())
         .border_style(Style::default().fg(text_tone(theme().accent, theme().popup_bg)).add_modifier(Modifier::BOLD))
+        .style(Style::default().bg(theme().popup_bg).fg(readable_on(theme().popup_bg)))
         .title(title.to_string())
         .title_bottom(pos);
     f.render_widget(block, rect);
@@ -4843,7 +4878,11 @@ fn draw_scrolling_text(
         .map(|l| Line::from(l.clone()))
         .collect();
     let body_area = Rect::new(inner.x, inner.y, inner.width, view_h as u16);
-    f.render_widget(Paragraph::new(body), body_area);
+    f.render_widget(
+        Paragraph::new(body)
+            .style(Style::default().bg(theme().popup_bg).fg(readable_on(theme().popup_bg))),
+        body_area,
+    );
 
     let footer_area =
         Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1);
@@ -6904,10 +6943,10 @@ fn draw_archive(
                     if m.is_dir {
                         base.fg(text_tone(FileKind::Directory.color(), row_bg(sel))).add_modifier(Modifier::BOLD)
                     } else {
-                        base.fg(readable_on(theme().popup_bg))
+                        base.fg(readable_on(row_bg(sel)))
                     },
                 ),
-                Span::styled(format!("{:>6}", size), base.fg(muted_on(theme().popup_bg))),
+                Span::styled(format!("{:>6}", size), base.fg(muted_on(row_bg(sel)))),
             ])),
             line,
         );
@@ -6975,7 +7014,7 @@ fn draw_palette(
                     })
                         .add_modifier(Modifier::BOLD),
                 ),
-                Span::styled(truncate_middle(&it.detail, detail_w), base.fg(muted_on(theme().popup_bg))),
+                Span::styled(truncate_middle(&it.detail, detail_w), base.fg(muted_on(row_bg(sel)))),
             ])),
             line,
         );
@@ -7083,6 +7122,7 @@ fn draw_git_log(
         .borders(Borders::ALL)
         .border_type(border_type())
         .border_style(Style::default().fg(text_tone(theme().accent, theme().popup_bg)).add_modifier(Modifier::BOLD))
+        .style(Style::default().bg(theme().popup_bg).fg(readable_on(theme().popup_bg)))
         .title(format!(" {} ", title))
         .title_bottom(tr(lang, " Enter=show diff  j/k  g/G  Esc ", " Enter=差分表示  j/k  g/G  Esc "));
     let inner = rect.inner(Margin { vertical: 1, horizontal: 1 });
