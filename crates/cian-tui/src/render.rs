@@ -46,11 +46,11 @@ fn is_ai_simple(popup: &Popup) -> bool {
 /// The frame colour for a popup: cyan for the AI - simple family, the theme's
 /// own accent for everything else.
 fn popup_accent(popup: &Popup) -> Color {
-    if is_ai_simple(popup) {
-        AI_SIMPLE
-    } else {
-        theme().accent
-    }
+    // Fitted to the dialog it frames: the accent is chosen to *be* an accent
+    // on the theme's page, and a dialog is a different surface — one that is
+    // light on a light theme, since dialogs follow the theme now.
+    let c = if is_ai_simple(popup) { AI_SIMPLE } else { theme().accent };
+    text_tone(c, theme().popup_bg)
 }
 
 /// Normal three-surface layout: left/right file panes on top, shell below.
@@ -179,7 +179,7 @@ fn draw_pane_zoom_overlay(f: &mut Frame, rect: Rect, app: &mut App) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(border_type())
-        .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD));
+        .border_style(Style::default().fg(text_tone(theme().accent, theme().popup_bg)).add_modifier(Modifier::BOLD));
     let inner = rect.inner(Margin { vertical: 1, horizontal: 1 });
     f.render_widget(block, rect);
 
@@ -657,7 +657,7 @@ fn draw_startup_splash(f: &mut Frame, area: Rect, elapsed_ms: u128) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(border_type())
-        .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
+        .border_style(Style::default().fg(text_tone(theme().accent, theme().popup_bg)).add_modifier(Modifier::BOLD))
         .style(Style::default().bg(theme().popup_bg));
     let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
     f.render_widget(block, rect);
@@ -930,7 +930,7 @@ fn tabs_title<'a>(
     // Their rects are pushed by the caller, which knows the pane's origin.
     {
         let active = &tabs.tabs[tabs.active.min(tabs.tabs.len().saturating_sub(1))];
-        let lit = Style::default().fg(theme().accent).add_modifier(Modifier::BOLD);
+        let lit = Style::default().fg(text_tone(theme().accent, theme().popup_bg)).add_modifier(Modifier::BOLD);
         let out = Style::default().fg(theme().dim);
         spans.push(Span::styled(
             "◀",
@@ -1265,15 +1265,23 @@ fn draw_file_pane(
     let start = if list_h == 0 { pane.cursor } else { pane.cursor.saturating_sub(list_h - 1) };
     let end = start.saturating_add(list_h).min(total);
     let mark_style = Style::default().fg(th.mark_fg).add_modifier(Modifier::BOLD);
-    let meta_style = Style::default().fg(dim_text(surface()));
+    // Per row, because the cursor's row has a tint of its own and a dim grey
+    // that reads on the page can vanish on it.
+    let meta_on = |selected: bool| {
+        Style::default().fg(dim_text(if selected { th.selected_bg } else { bg.unwrap_or(th.popup_bg) }))
+    };
 
     let items: Vec<ListItem> = pane.entries[start..end].iter().enumerate().map(|(vi, e)| {
         let i = start + vi; // absolute index for marks / visual range / git
+        let selected_row = i == pane.cursor;
         let marked = pane.is_marked(i);
         let in_visual = visual_range.map(|(a, b)| i >= a && i <= b).unwrap_or(false);
         let mark_symbol = if marked { "● " } else { "  " };
         let kind = kind_for(e);
-        let kind_color = kind.color();
+        // Fitted to the row it lands on: the same colour reads differently on
+        // the page and on the selection, and a light theme's palette is close
+        // enough to its own selection tint to disappear into it.
+        let kind_color = text_tone(kind.color(), if selected_row { th.selected_bg } else { bg.unwrap_or(th.popup_bg) });
         let mut name_style = Style::default().fg(kind_color);
         if kind.bold() {
             name_style = name_style.add_modifier(Modifier::BOLD);
@@ -1316,7 +1324,7 @@ fn draw_file_pane(
             };
             spans.push(Span::styled(
                 format!(" {:>w$}", s, w = SIZE_COL_W as usize),
-                meta_style,
+                meta_on(selected_row),
             ));
         }
         if show_time {
@@ -1325,7 +1333,7 @@ fn draw_file_pane(
             } else {
                 e.modified.map(cian_core::format_time).unwrap_or_else(|| "-".into())
             };
-            spans.push(Span::styled(format!(" {}", t), meta_style));
+            spans.push(Span::styled(format!(" {}", t), meta_on(selected_row)));
         }
 
         let mut item = ListItem::new(Line::from(spans));
@@ -1641,7 +1649,7 @@ fn draw_shell_inner(
     let border_style = if panel_logs {
         Style::default().fg(log_border).add_modifier(Modifier::BOLD)
     } else if focused {
-        Style::default().fg(theme().accent).add_modifier(Modifier::BOLD)
+        Style::default().fg(text_tone(theme().accent, theme().popup_bg)).add_modifier(Modifier::BOLD)
     } else {
         Style::default().fg(theme().border)
     };
@@ -1801,7 +1809,7 @@ fn render_node(
                 } else if session.is_logging() {
                     Style::default().fg(log_border).add_modifier(Modifier::BOLD)
                 } else if is_active {
-                    Style::default().fg(theme().accent).add_modifier(Modifier::BOLD)
+                    Style::default().fg(text_tone(theme().accent, theme().popup_bg)).add_modifier(Modifier::BOLD)
                 } else {
                     Style::default().fg(Color::DarkGray)
                 };
@@ -2446,7 +2454,7 @@ fn draw_progress_bar(
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(border_type())
-        .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
+        .border_style(Style::default().fg(text_tone(theme().accent, theme().popup_bg)).add_modifier(Modifier::BOLD))
         .title(format!(" {} ", tr_op_label(lang, label)));
     let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
     f.render_widget(block, rect);
@@ -2567,14 +2575,14 @@ fn draw_image(f: &mut Frame, area: Rect, app: &mut App) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(border_type())
-        .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
+        .border_style(Style::default().fg(text_tone(theme().accent, theme().popup_bg)).add_modifier(Modifier::BOLD))
         .style(Style::default().bg(theme().popup_bg))
         .title(format!(" {}  —  {} ", title, caption));
     f.render_widget(block, rect);
 
     if let Some(e) = err {
         f.render_widget(
-            Paragraph::new(format!("cannot show image: {}", e)).style(Style::default().fg(Color::Rgb(230, 120, 120))),
+            Paragraph::new(format!("cannot show image: {}", e)).style(Style::default().fg(text_tone(theme().file.archive, surface()))),
             inner,
         );
     } else {
@@ -2761,7 +2769,7 @@ fn draw_preview_panel(f: &mut Frame, area: Rect, app: &mut App) {
             if shown.is_empty() {
                 shown.push(Line::from(Span::styled(
                     tr(lang, "(empty file)", "（空のファイル）"),
-                    Style::default().fg(theme().dim),
+                    Style::default().fg(dim_text(surface())),
                 )));
             }
             f.render_widget(Paragraph::new(shown), inner);
@@ -2813,7 +2821,7 @@ fn draw_image_gfx(f: &mut Frame, rect: Rect, inner: Rect, app: &mut App) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(border_type())
-        .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
+        .border_style(Style::default().fg(text_tone(theme().accent, theme().popup_bg)).add_modifier(Modifier::BOLD))
         .style(Style::default().bg(theme().popup_bg))
         .title(format!(" {}  —  {} ", title, caption));
     f.render_widget(block, rect);
@@ -2830,7 +2838,7 @@ fn draw_image_gfx(f: &mut Frame, rect: Rect, inner: Rect, app: &mut App) {
         None => {
             f.render_widget(
                 Paragraph::new(tr(lang, "cannot show image", "画像を表示できません"))
-                    .style(Style::default().fg(Color::Rgb(230, 120, 120))),
+                    .style(Style::default().fg(text_tone(theme().file.archive, surface()))),
                 pic,
             );
         }
@@ -3010,6 +3018,18 @@ pub(crate) fn text_tone(c: Color, bg: Color) -> Color {
     Color::Rgb(r, g, b)
 }
 
+/// What a dialog row is drawn on: the dialog itself, or — for the row under
+/// the cursor — the selection colour. Text on a row has to be measured
+/// against whichever it actually lands on, and the two can be far apart: on
+/// Solarized Light a grey that reads on the dialog is 3.6:1 on the selection.
+pub(crate) fn row_bg(selected: bool) -> Color {
+    if selected {
+        theme().selected_bg
+    } else {
+        theme().popup_bg
+    }
+}
+
 /// The theme's own dim colour, kept readable where it is used as *text*.
 ///
 /// The presets choose `dim` for borders as much as for words, and a light
@@ -3092,7 +3112,7 @@ fn md_body_line(
 ) -> Vec<(String, Line<'static>)> {
     let code_c = Color::Rgb(206, 145, 120);
     let head_c = Color::Rgb(120, 190, 255);
-    let quote_c = Color::Rgb(150, 150, 170);
+    let quote_c = muted_on(theme().popup_bg);
     let w = width.saturating_sub(2).max(1);
     let bar = || Span::styled("▏ ", Style::default().fg(gutter));
     let mut out: Vec<(String, Line)> = Vec::new();
@@ -3176,7 +3196,7 @@ fn draw_ai_chat(f: &mut Frame, area: Rect, app: &mut App) {
     // Each backend wears its own colour, so the frame alone says who is
     // answering: crmaine's signature carmine (the same frame the remote pane
     // wears), and cyan for the local model.
-    let accent = if skin.simple { AI_SIMPLE } else { CRMAINE };
+    let accent = text_tone(if skin.simple { AI_SIMPLE } else { CRMAINE }, theme().popup_bg);
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(border_type())
@@ -3225,12 +3245,12 @@ fn draw_ai_chat(f: &mut Frame, area: Rect, app: &mut App) {
         // Message text must contrast with the popup ground under any theme.
         let body_c = readable_on(theme().popup_bg);
         let source_c = Color::Rgb(150, 175, 205);
-        let dim_c = Color::Rgb(150, 150, 170);
+        let dim_c = muted_on(theme().popup_bg);
         for m in log.iter() {
             // The assistant signs with the backend that actually answered — a
             // reply from the local model must not read as crmaine's work.
             let (glyph, name, name_c) = if m.user {
-                ("▍", tr(lang, "you", "あなた"), theme().accent)
+                ("▍", tr(lang, "you", "あなた"), text_tone(theme().accent, theme().popup_bg))
             } else if skin.simple {
                 ("◆", "AI - simple", accent)
             } else {
@@ -3400,7 +3420,7 @@ fn draw_op_queue(f: &mut Frame, area: Rect, app: &mut App) {
             };
             let c = if stalled { Color::Rgb(235, 200, 100) } else { Color::Rgb(130, 205, 150) };
             lines.push(Line::from(vec![
-                Span::styled(if cursor == 0 { "▶ " } else { "  " }, Style::default().fg(theme().accent)),
+                Span::styled(if cursor == 0 { "▶ " } else { "  " }, Style::default().fg(text_tone(theme().accent, theme().popup_bg))),
                 Span::styled(format!("{} {} ", job.label, pct), Style::default().fg(body_c).add_modifier(Modifier::BOLD)),
                 Span::styled(state, Style::default().fg(c)),
             ]));
@@ -3414,7 +3434,7 @@ fn draw_op_queue(f: &mut Frame, area: Rect, app: &mut App) {
     for (i, q) in app.op_queue.iter().enumerate() {
         let sel = cursor == i + 1;
         lines.push(Line::from(vec![
-            Span::styled(if sel { "▶ " } else { "  " }, Style::default().fg(theme().accent)),
+            Span::styled(if sel { "▶ " } else { "  " }, Style::default().fg(text_tone(theme().accent, theme().popup_bg))),
             Span::styled(
                 format!("{}. {}", i + 1, q.label),
                 Style::default().fg(if sel { body_c } else { theme().dim }),
@@ -3437,7 +3457,7 @@ f.render_widget(Clear, rect);
 let block = Block::default()
     .borders(Borders::ALL)
     .border_type(border_type())
-    .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
+    .border_style(Style::default().fg(text_tone(theme().accent, theme().popup_bg)).add_modifier(Modifier::BOLD))
     .style(Style::default().bg(theme().popup_bg))
     .title(tr(lang, " toggles ", " トグル "))
     .title_bottom(tr(lang, " Enter/Space=flip  ↑↓  Esc ", " Enter/Space=切替  ↑↓  Esc "));
@@ -3445,8 +3465,8 @@ let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
 f.render_widget(block, rect);
 
 let body_c = readable_on(theme().popup_bg);
-let dim_c = Color::Rgb(150, 150, 170);
-let on_c = Color::Rgb(130, 205, 150);
+let dim_c = muted_on(theme().popup_bg);
+let on_c = text_tone(Color::Rgb(130, 205, 150), theme().popup_bg);
 let w = inner.width as usize;
 let mut lines: Vec<Line> = Vec::new();
 for (i, (_, label, state, on)) in rows.iter().enumerate() {
@@ -3465,7 +3485,7 @@ for (i, (_, label, state, on)) in rows.iter().enumerate() {
         Style::default().fg(dim_c)
     };
     lines.push(Line::from(vec![
-        Span::styled(marker, Style::default().fg(theme().accent)),
+        Span::styled(marker, Style::default().fg(text_tone(theme().accent, theme().popup_bg))),
         Span::styled(label.clone(), label_style),
         Span::raw(" ".repeat(pad)),
         Span::styled(state.clone(), state_style),
@@ -3481,8 +3501,8 @@ fn draw_ai_history(f: &mut Frame, area: Rect, app: &App) {
 let cursor = *cursor;
 // This list mixes both backends' conversations, so it wears neither one's
 // colour — each row carries its own badge instead.
-let frame_c = theme().accent;
-let dim_c = Color::Rgb(150, 150, 170);
+let frame_c = text_tone(theme().accent, theme().popup_bg);
+let dim_c = muted_on(theme().popup_bg);
 let width: u16 = 72u16.min(area.width.saturating_sub(2));
 let height = (app.ai_history.len() as u16 + 3).clamp(6, area.height.saturating_sub(2));
 let rect = centered_rect(width, height, area);
@@ -3551,7 +3571,7 @@ let footer = if editing {
 let block = Block::default()
     .borders(Borders::ALL)
     .border_type(border_type())
-    .border_style(Style::default().fg(AI_SIMPLE).add_modifier(Modifier::BOLD))
+    .border_style(Style::default().fg(text_tone(AI_SIMPLE, theme().popup_bg)).add_modifier(Modifier::BOLD))
     .style(Style::default().bg(theme().popup_bg))
     .title(title)
     .title_bottom(footer);
@@ -3566,18 +3586,18 @@ if !stat.is_empty() {
         for chunk in wrap_str(raw, body_w) {
             lines.push(Line::from(Span::styled(
                 chunk,
-                Style::default().fg(Color::Rgb(140, 140, 165)),
+                Style::default().fg(muted_on(theme().popup_bg)),
             )));
         }
     }
     lines.push(Line::from(Span::styled(
         "─".repeat(body_w.min(60)),
-        Style::default().fg(Color::Rgb(90, 90, 110)),
+        Style::default().fg(dim_text(theme().popup_bg)),
     )));
 }
 // The message itself. A trailing block marks the edit point when editing.
-let subject_c = Color::Rgb(235, 235, 245);
-let body_c = Color::Rgb(205, 210, 220);
+let subject_c = readable_on(theme().popup_bg);
+let body_c = muted_on(theme().popup_bg);
 let shown = if editing { format!("{}\u{2588}", buffer) } else { buffer.clone() };
 for (i, raw) in shown.split('\n').enumerate() {
     let c = if i == 0 { subject_c } else { body_c };
@@ -3615,7 +3635,7 @@ fn draw_junk_review(f: &mut Frame, area: Rect, app: &mut App) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(border_type())
-        .border_style(Style::default().fg(AI_SIMPLE).add_modifier(Modifier::BOLD))
+        .border_style(Style::default().fg(text_tone(AI_SIMPLE, theme().popup_bg)).add_modifier(Modifier::BOLD))
         .style(Style::default().bg(theme().popup_bg))
         .title(title)
         .title_bottom(tr(lang,
@@ -3639,7 +3659,11 @@ fn draw_junk_review(f: &mut Frame, area: Rect, app: &mut App) {
             let checkbox = if it.selected { "[x] " } else { "[ ] " };
             let box_c = if it.selected { theme().mark_fg } else { Color::Rgb(120, 120, 140) };
             let name = it.path.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
-            let name_c = if sel { theme().accent } else { Color::Rgb(230, 230, 245) };
+            let name_c = if sel {
+                text_tone(theme().accent, row_bg(sel))
+            } else {
+                readable_on(row_bg(sel))
+            };
             let reason = if it.reason.is_empty() { String::new() } else { format!("— {}", it.reason) };
             let base = if sel { Style::default().bg(theme().selected_bg) } else { Style::default() };
             rows.push(Line::from(vec![
@@ -3647,7 +3671,7 @@ fn draw_junk_review(f: &mut Frame, area: Rect, app: &mut App) {
                 Span::styled(format!("{}  ", pad_to(&truncate_middle(&name, 28), 28)),
                     base.fg(name_c).add_modifier(Modifier::BOLD)),
                 Span::styled(truncate(&reason, body_w.saturating_sub(36)),
-                    base.fg(Color::Rgb(150, 150, 170))),
+                    base.fg(muted_on(row_bg(sel)))),
             ]));
         }
         app.junk_rect = Rect::new(inner.x, inner.y, inner.width, body_h.min(items.len().saturating_sub(*scroll)) as u16);
@@ -3676,7 +3700,7 @@ fn draw_dupe_review(f: &mut Frame, area: Rect, app: &mut App) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(border_type())
-        .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
+        .border_style(Style::default().fg(text_tone(theme().accent, theme().popup_bg)).add_modifier(Modifier::BOLD))
         .style(Style::default().bg(theme().popup_bg))
         .title(title)
         .title_bottom(tr(lang,
@@ -3702,14 +3726,18 @@ fn draw_dupe_review(f: &mut Frame, area: Rect, app: &mut App) {
             let box_c = if it.selected { theme().mark_fg } else { Color::Rgb(120, 120, 140) };
             let base = if sel { Style::default().bg(theme().selected_bg) } else { Style::default() };
             let tag = if group_start { format!("#{} ", it.group + 1) } else { "   ".to_string() };
-            let path_c = if it.keeper { Color::Rgb(130, 205, 150) } else { Color::Rgb(220, 220, 235) };
+            let path_c = if it.keeper {
+                text_tone(Color::Rgb(130, 205, 150), theme().popup_bg)
+            } else {
+                readable_on(theme().popup_bg)
+            };
             let suffix = if it.keeper { tr(lang, "  (keep)", "  (残す)") } else { "" };
             let shown = it.path.display().to_string();
             rows.push(Line::from(vec![
                 Span::styled(checkbox, base.fg(box_c).add_modifier(Modifier::BOLD)),
-                Span::styled(tag, base.fg(Color::Rgb(150, 150, 170))),
+                Span::styled(tag, base.fg(muted_on(row_bg(sel)))),
                 Span::styled(truncate_middle(&shown, body_w.saturating_sub(14)), base.fg(path_c)),
-                Span::styled(suffix, base.fg(Color::Rgb(130, 205, 150))),
+                Span::styled(suffix, base.fg(text_tone(Color::Rgb(130, 205, 150), row_bg(sel)))),
             ]));
         }
         app.dupe_rect = Rect::new(inner.x, inner.y, inner.width, body_h.min(items.len().saturating_sub(*scroll)) as u16);
@@ -3738,7 +3766,7 @@ fn draw_structure_review(f: &mut Frame, area: Rect, app: &mut App) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(border_type())
-        .border_style(Style::default().fg(AI_SIMPLE).add_modifier(Modifier::BOLD))
+        .border_style(Style::default().fg(text_tone(AI_SIMPLE, theme().popup_bg)).add_modifier(Modifier::BOLD))
         .style(Style::default().bg(theme().popup_bg))
         .title(title)
         .title_bottom(tr(lang,
@@ -3760,7 +3788,11 @@ fn draw_structure_review(f: &mut Frame, area: Rect, app: &mut App) {
             let sel = i == *cursor;
             let checkbox = if it.selected { "[x] " } else { "[ ] " };
             let box_c = if it.selected { theme().mark_fg } else { Color::Rgb(120, 120, 140) };
-            let name_c = if sel { theme().accent } else { Color::Rgb(230, 230, 245) };
+            let name_c = if sel {
+                text_tone(theme().accent, row_bg(sel))
+            } else {
+                readable_on(row_bg(sel))
+            };
             let base = if sel { Style::default().bg(theme().selected_bg) } else { Style::default() };
             // `name  →  folder/`, then the reason quietly at the end.
             let arrow = format!("{}  →  {}/", pad_to(&truncate_middle(&it.name, 26), 26), it.dest);
@@ -3770,7 +3802,7 @@ fn draw_structure_review(f: &mut Frame, area: Rect, app: &mut App) {
                 Span::styled(truncate(&arrow, body_w.saturating_sub(6)),
                     base.fg(name_c).add_modifier(Modifier::BOLD)),
                 Span::styled(truncate(&reason, body_w.saturating_sub(4)),
-                    base.fg(Color::Rgb(150, 150, 170))),
+                    base.fg(muted_on(row_bg(sel)))),
             ]));
         }
         app.struct_rect = Rect::new(inner.x, inner.y, inner.width, body_h.min(items.len().saturating_sub(*scroll)) as u16);
@@ -3804,7 +3836,7 @@ fn draw_rename_review(f: &mut Frame, area: Rect, app: &mut App) {
     } else {
         format!(" {}  {}/{} checked ", head, checked, n)
     };
-    let accent = if by_ai { AI_SIMPLE } else { theme().accent };
+    let accent = text_tone(if by_ai { AI_SIMPLE } else { theme().accent }, theme().popup_bg);
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(border_type())
@@ -3832,7 +3864,7 @@ fn draw_rename_review(f: &mut Frame, area: Rect, app: &mut App) {
             let checkbox = if it.selected { "[x] " } else { "[ ] " };
             let box_c = if it.selected { theme().mark_fg } else { Color::Rgb(120, 120, 140) };
             let base = if sel { Style::default().bg(theme().selected_bg) } else { Style::default() };
-            let old_c = if sel { Color::Rgb(230, 230, 245) } else { Color::Rgb(200, 200, 215) };
+            let old_c = if sel { readable_on(theme().popup_bg) } else { Color::Rgb(200, 200, 215) };
             rows.push(Line::from(vec![
                 Span::styled(checkbox, base.fg(box_c).add_modifier(Modifier::BOLD)),
                 Span::styled(format!("{}  →  ", pad_to(&truncate_middle(&it.old, half), half)),
@@ -3862,7 +3894,7 @@ fn popup_frame<'a>(
     title: impl Into<Line<'a>>,
     footer: impl Into<Line<'a>>,
 ) -> Rect {
-    popup_frame_in(f, area, w, h, title, footer, theme().accent)
+    popup_frame_in(f, area, w, h, title, footer, text_tone(theme().accent, theme().popup_bg))
 }
 
 /// The same frame in a chosen colour — for the AI - simple windows, which wear
@@ -4461,7 +4493,7 @@ fn draw_simple_dialog(
             f.render_widget(
                 Paragraph::new(text).style(
                     Style::default()
-                        .fg(theme().accent)
+                        .fg(text_tone(theme().accent, theme().popup_bg))
                         .add_modifier(Modifier::BOLD),
                 ),
                 r,
@@ -4504,7 +4536,7 @@ fn draw_theme_picker(f: &mut Frame, area: Rect, popup: &mut Popup, lang: Lang) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(border_type())
-        .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
+        .border_style(Style::default().fg(text_tone(theme().accent, theme().popup_bg)).add_modifier(Modifier::BOLD))
         .title(title)
         .title_bottom(footer);
     let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
@@ -4518,9 +4550,9 @@ fn draw_theme_picker(f: &mut Frame, area: Rect, popup: &mut Popup, lang: Lang) {
         // A compact swatch: directory / code / archive / executable accents.
         let sw = |c: Color| Span::styled("█", Style::default().fg(c));
         let name_style = if sel {
-            Style::default().fg(theme().accent).add_modifier(Modifier::BOLD)
+            Style::default().fg(text_tone(theme().accent, theme().popup_bg)).add_modifier(Modifier::BOLD)
         } else {
-            Style::default().fg(theme().file.plain)
+            Style::default().fg(text_tone(theme().file.plain, theme().popup_bg))
         };
         lines.push(Line::from(vec![
             Span::styled(if sel { "▸ " } else { "  " }, name_style),
@@ -4784,7 +4816,7 @@ fn draw_scrolling_text(
     let block = Block::default()
         .borders(Borders::ALL)
     .border_type(border_type())
-        .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
+        .border_style(Style::default().fg(text_tone(theme().accent, theme().popup_bg)).add_modifier(Modifier::BOLD))
         .title(title.to_string())
         .title_bottom(pos);
     f.render_widget(block, rect);
@@ -4827,7 +4859,7 @@ fn draw_context_menu(f: &mut Frame, area: Rect, popup: &mut Popup, menu_lang: La
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(border_type())
-        .border_style(Style::default().fg(theme().accent))
+        .border_style(Style::default().fg(text_tone(theme().accent, theme().popup_bg)))
         .style(Style::default().bg(surf));
     let inner = rect.inner(Margin { vertical: 1, horizontal: 1 });
     f.render_widget(block, rect);
@@ -4882,20 +4914,20 @@ fn draw_ssh_hosts(
 
     let mut lines = vec![Line::from(Span::styled(
         format!("/{}_", filter),
-        Style::default().fg(theme().accent).add_modifier(Modifier::BOLD),
+        Style::default().fg(text_tone(theme().accent, theme().popup_bg)).add_modifier(Modifier::BOLD),
     ))];
     if matches.is_empty() {
         lines.push(Line::from(Span::styled(
             "  (no match)",
-            Style::default().fg(Color::Rgb(150, 150, 170)),
+            Style::default().fg(muted_on(theme().popup_bg)),
         )));
     }
     for (i, hst) in matches.iter().enumerate() {
         let sel = i == *cursor;
         let style = if sel {
-            Style::default().fg(theme().accent).add_modifier(Modifier::BOLD)
+            Style::default().fg(text_tone(theme().accent, theme().popup_bg)).add_modifier(Modifier::BOLD)
         } else {
-            Style::default().fg(Color::Rgb(205, 205, 218))
+            Style::default().fg(readable_on(theme().popup_bg))
         };
         let users = if hst.users.len() == 1 {
             hst.users[0].name.clone()
@@ -4906,7 +4938,7 @@ fn draw_ssh_hosts(
             Span::styled(format!("{}{:<16}", if sel { "▸ " } else { "  " }, hst.name), style),
             Span::styled(
                 format!("{:<22} {}", hst.host, users),
-                Style::default().fg(Color::Rgb(140, 140, 165)),
+                Style::default().fg(muted_on(theme().popup_bg)),
             ),
         ]));
         // Row 0 is the filter line, so host `i` sits one below it.
@@ -4948,20 +4980,20 @@ fn draw_snippets(
 
     let mut lines = vec![Line::from(Span::styled(
         format!("/{}_", filter),
-        Style::default().fg(theme().accent).add_modifier(Modifier::BOLD),
+        Style::default().fg(text_tone(theme().accent, theme().popup_bg)).add_modifier(Modifier::BOLD),
     ))];
     if matches.is_empty() {
         lines.push(Line::from(Span::styled(
             "  (no match)",
-            Style::default().fg(Color::Rgb(150, 150, 170)),
+            Style::default().fg(muted_on(theme().popup_bg)),
         )));
     }
     for (i, s) in matches.iter().enumerate() {
         let sel = i == *cursor;
         let style = if sel {
-            Style::default().fg(theme().accent).add_modifier(Modifier::BOLD)
+            Style::default().fg(text_tone(theme().accent, theme().popup_bg)).add_modifier(Modifier::BOLD)
         } else {
-            Style::default().fg(Color::Rgb(205, 205, 218))
+            Style::default().fg(readable_on(theme().popup_bg))
         };
         // A tag shows what will happen: run, type-only, or confirm-first.
         let tag = if s.confirm { "?" } else if s.enter { "↵" } else { "…" };
@@ -4970,7 +5002,7 @@ fn draw_snippets(
             Span::styled(format!("{:<20}", truncate(&s.name, 20)), style),
             Span::styled(
                 format!("  {}", truncate(&s.cmd, (inner.width as usize).saturating_sub(26))),
-                Style::default().fg(Color::Rgb(140, 140, 165)),
+                Style::default().fg(muted_on(theme().popup_bg)),
             ),
         ]));
         push_row_zone(zones, inner, inner.y + 1 + i as u16, i);
@@ -5022,7 +5054,7 @@ fn draw_remote_browser(
     if *loading {
         f.render_widget(
             Paragraph::new(tr(lang, "  …listing", "  …取得中"))
-                .style(Style::default().fg(Color::Rgb(150, 150, 170)).add_modifier(Modifier::ITALIC)),
+                .style(Style::default().fg(muted_on(theme().popup_bg)).add_modifier(Modifier::ITALIC)),
             inner,
         );
         return;
@@ -5033,7 +5065,7 @@ fn draw_remote_browser(
     }
     let mut lines: Vec<Line> = Vec::new();
     if entries.is_empty() {
-        lines.push(Line::from(Span::styled("  (empty)", Style::default().fg(Color::Rgb(150, 150, 170)))));
+        lines.push(Line::from(Span::styled("  (empty)", Style::default().fg(muted_on(theme().popup_bg)))));
     }
     for (i, e) in entries.iter().enumerate().skip(*scroll).take(view_h) {
         let sel = i == *cursor;
@@ -5050,7 +5082,7 @@ fn draw_remote_browser(
         let base = if sel {
             Style::default().fg(th.accent).add_modifier(Modifier::BOLD)
         } else if checked {
-            Style::default().fg(Color::Rgb(130, 205, 150))
+            Style::default().fg(text_tone(Color::Rgb(130, 205, 150), theme().popup_bg))
         } else {
             Style::default().fg(name_c)
         };
@@ -5104,9 +5136,9 @@ fn draw_local_dest(
         .map(|(i, l)| {
             let sel = i == *cursor;
             let style = if sel {
-                Style::default().fg(theme().accent).add_modifier(Modifier::BOLD)
+                Style::default().fg(text_tone(theme().accent, theme().popup_bg)).add_modifier(Modifier::BOLD)
             } else {
-                Style::default().fg(Color::Rgb(205, 205, 218))
+                Style::default().fg(readable_on(theme().popup_bg))
             };
             push_row_zone(zones, inner, inner.y + i as u16, i);
             Line::from(Span::styled(format!("{}{}", if sel { "▸ " } else { "  " }, l), style))
@@ -5136,9 +5168,9 @@ fn draw_ssh_users(
         .map(|(i, u)| {
             let sel = i == *cursor;
             let style = if sel {
-                Style::default().fg(theme().accent).add_modifier(Modifier::BOLD)
+                Style::default().fg(text_tone(theme().accent, theme().popup_bg)).add_modifier(Modifier::BOLD)
             } else {
-                Style::default().fg(Color::Rgb(205, 205, 218))
+                Style::default().fg(readable_on(theme().popup_bg))
             };
             // A key marks logins that will authenticate without typing.
             let mark = if u.has_secret() { "  🔑" } else { "" };
@@ -5238,14 +5270,14 @@ fn draw_grep_replace(
         let loc_w = width(&loc).min(inner.width as usize / 3);
         let rest = (inner.width as usize).saturating_sub(4 + loc_w);
         let text_style = if c.picked {
-            base.fg(Color::Rgb(225, 225, 240))
+            base.fg(readable_on(row_bg(sel)))
         } else {
             base.fg(dim).add_modifier(Modifier::CROSSED_OUT)
         };
         f.render_widget(
             Paragraph::new(Line::from(vec![
-                Span::styled(mark, if c.picked { base.fg(theme().accent) } else { base.fg(dim) }),
-                Span::styled(truncate_middle(&loc, loc_w), base.fg(Color::Rgb(135, 135, 160))),
+                Span::styled(mark, if c.picked { base.fg(text_tone(theme().accent, row_bg(sel))) } else { base.fg(dim) }),
+                Span::styled(truncate_middle(&loc, loc_w), base.fg(dim_text(row_bg(sel)))),
                 Span::styled(truncate(&crate::util::plain(&c.after.replace('\n', "⏎")), rest), text_style),
             ])),
             line_area,
@@ -5261,7 +5293,7 @@ fn draw_grep_replace(
                 Span::styled(" now ", Style::default().fg(dim)),
                 Span::styled(
                     truncate(&crate::util::plain(&c.before), inner.width.saturating_sub(5) as usize),
-                    Style::default().fg(Color::Rgb(200, 160, 160)),
+                    Style::default().fg(text_tone(theme().file.archive, theme().popup_bg)),
                 ),
             ])),
             Rect::new(inner.x, inner.y + inner.height.saturating_sub(2 + note), inner.width, 1),
@@ -5284,7 +5316,7 @@ fn draw_grep_replace(
                 &format!(" {} not read: {why}{more}", plan.skipped.len()),
                 inner.width as usize,
             ))
-            .style(Style::default().fg(Color::Rgb(220, 180, 120))),
+            .style(Style::default().fg(text_tone(theme().file.code, theme().popup_bg))),
             Rect::new(inner.x, inner.y + inner.height.saturating_sub(2), inner.width, 1),
         );
     }
@@ -5364,7 +5396,7 @@ fn draw_find_results(
 
     if hits.is_empty() {
         f.render_widget(
-            Paragraph::new("(nothing yet)").style(Style::default().fg(Color::Rgb(150, 150, 170))),
+            Paragraph::new("(nothing yet)").style(Style::default().fg(muted_on(theme().popup_bg))),
             Rect::new(inner.x, inner.y, inner.width, 1),
         );
     }
@@ -5396,24 +5428,24 @@ fn draw_find_results(
                 let loc_w = width(&loc).min(avail / 2);
                 spans.push(Span::styled(
                     truncate_middle(&loc, loc_w),
-                    base.fg(Color::Rgb(135, 135, 160)),
+                    base.fg(dim_text(row_bg(sel))),
                 ));
                 spans.push(Span::styled(
                     truncate(&crate::util::plain(text), avail.saturating_sub(loc_w)),
-                    base.fg(Color::Rgb(225, 225, 240)),
+                    base.fg(readable_on(row_bg(sel))),
                 ));
             }
             None => {
                 spans.push(Span::styled(
                     truncate_middle(&dir, avail.saturating_sub(width(&name))),
-                    base.fg(Color::Rgb(135, 135, 160)),
+                    base.fg(dim_text(row_bg(sel))),
                 ));
                 spans.push(Span::styled(
                     name.clone(),
                     if hit.is_dir {
-                        base.fg(FileKind::Directory.color()).add_modifier(Modifier::BOLD)
+                        base.fg(text_tone(FileKind::Directory.color(), row_bg(sel))).add_modifier(Modifier::BOLD)
                     } else {
-                        base.fg(Color::Rgb(225, 225, 240))
+                        base.fg(readable_on(row_bg(sel)))
                     },
                 ));
             }
@@ -5461,7 +5493,7 @@ fn draw_shortcuts(
         let hint = vec![
             Line::from(Span::styled(
                 tr(lang, "(empty)", "（空）"),
-                Style::default().fg(Color::Rgb(150, 150, 170)),
+                Style::default().fg(muted_on(theme().popup_bg)),
             )),
             Line::from(""),
             Line::from(tr(lang, "a = add a shortcut,  A = add a folder.", "a = ショートカット追加,  A = フォルダ追加。")),
@@ -5503,13 +5535,13 @@ fn draw_shortcuts(
                 Style::default()
             };
             let name_style = if sel {
-                base.fg(theme().accent).add_modifier(Modifier::BOLD)
+                base.fg(text_tone(theme().accent, row_bg(sel))).add_modifier(Modifier::BOLD)
             } else {
-                base.fg(Color::Rgb(225, 225, 240)).add_modifier(Modifier::BOLD)
+                base.fg(readable_on(row_bg(sel))).add_modifier(Modifier::BOLD)
             };
             // The target is reference material: same row, quieter, so the
             // name is what the eye lands on.
-            let target_style = base.fg(Color::Rgb(140, 140, 165));
+            let target_style = base.fg(muted_on(row_bg(sel)));
             // A folder shows a ▸ and its child count instead of a target.
             let (icon, tail) = if sc.is_group() {
                 ("▸".to_string(), format!("{} items", sc.children.as_ref().map(|c| c.len()).unwrap_or(0)))
@@ -5571,9 +5603,9 @@ fn draw_history(
         let base =
             if sel { Style::default().bg(theme().selected_bg) } else { Style::default() };
         let text_style = if sel {
-            base.fg(theme().accent).add_modifier(Modifier::BOLD)
+            base.fg(text_tone(theme().accent, row_bg(sel))).add_modifier(Modifier::BOLD)
         } else {
-            base.fg(Color::Rgb(215, 215, 230))
+            base.fg(readable_on(row_bg(sel)))
         };
         f.render_widget(
             Paragraph::new(Line::from(vec![
@@ -5636,11 +5668,11 @@ fn draw_dest_picker(
                 Span::styled(if sel { " ▸ " } else { "   " }, base),
                 Span::styled(
                     format!("{:<11}", kind),
-                    base.fg(Color::Rgb(135, 135, 160)),
+                    base.fg(dim_text(row_bg(sel))),
                 ),
                 Span::styled(
                     truncate_middle(&path.display().to_string(), inner.width as usize - 16),
-                    base.fg(Color::Rgb(225, 225, 240)),
+                    base.fg(readable_on(row_bg(sel))),
                 ),
             ])),
             line,
@@ -5931,7 +5963,7 @@ fn draw_viewer(
             // column so the mouse can find them whatever the names are.
             let mut spans = vec![Span::styled(
                 " ◂ ▸ ".to_string(),
-                Style::default().fg(theme().accent).add_modifier(Modifier::BOLD),
+                Style::default().fg(text_tone(theme().accent, theme().popup_bg)).add_modifier(Modifier::BOLD),
             )];
             let mut at = rect.x + 1 + 5;
             for (i, name) in tab_names.iter().enumerate() {
@@ -6269,7 +6301,7 @@ fn draw_viewer(
                 };
                 spans.push(Span::styled(
                     format!("{:<7} {:<11} ", shown_hash, shown_who),
-                    Style::default().fg(Color::Rgb(120, 120, 145)),
+                    Style::default().fg(dim_text(surface())),
                 ));
             }
             if numbered {
@@ -6279,7 +6311,7 @@ fn draw_viewer(
                 // mouse column mapping is unaffected.
                 spans.push(Span::styled(
                     format!("{:>w$}", i + 1, w = gutter.saturating_sub(1 + fold_col)),
-                    Style::default().fg(Color::Rgb(110, 110, 135)),
+                    Style::default().fg(dim_text(surface())),
                 ));
                 // A heading with something under it says so, and says whether
                 // it is open. The marker is also the click target.
@@ -6357,7 +6389,7 @@ fn draw_viewer(
                         cian_core::viewer::Eol::Cr => "←",
                         cian_core::viewer::Eol::Lf => "↓",
                     },
-                    Style::default().fg(Color::Rgb(110, 140, 175)),
+                    Style::default().fg(text_tone(theme().file.directory, surface())),
                 ));
             }
             Line::from(spans)
@@ -6391,7 +6423,7 @@ fn draw_viewer(
         let before: String = marks[..cur.min(marks.len())].iter().collect();
         let at: String = marks.get(cur).into_iter().collect();
         let after: String = marks[(cur + 1).min(marks.len())..].iter().collect();
-        let dim = Style::default().fg(Color::Rgb(105, 105, 130));
+        let dim = Style::default().fg(dim_text(surface()));
         f.render_widget(
             Paragraph::new(Line::from(vec![
                 Span::styled(" ".repeat(gutter), dim),
@@ -6652,11 +6684,11 @@ fn draw_diff(
     let gutter = 5usize;
     let col = (inner.width as usize).saturating_sub(3 + gutter * 2) / 2;
 
-    let dim = Style::default().fg(Color::Rgb(150, 150, 168));
-    let num = Style::default().fg(Color::Rgb(105, 105, 130));
-    let del = Style::default().fg(Color::Rgb(255, 140, 145));
-    let add = Style::default().fg(Color::Rgb(130, 225, 150));
-    let chg = Style::default().fg(Color::Rgb(240, 210, 120));
+    let dim = Style::default().fg(dim_text(theme().popup_bg));
+    let num = Style::default().fg(dim_text(theme().popup_bg));
+    let del = Style::default().fg(text_tone(theme().file.archive, theme().popup_bg));
+    let add = Style::default().fg(text_tone(theme().file.executable, theme().popup_bg));
+    let chg = Style::default().fg(text_tone(theme().file.code, theme().popup_bg));
     // The exact edited span within a changed line: a solid bar, the way
     // WinMerge marks the characters that actually differ.
     let chg_hot = Style::default()
@@ -6736,7 +6768,7 @@ fn draw_diff(
             let line = match r {
                 Row::Skipped { lines } => Line::from(Span::styled(
                     format!("{:^w$}", format!("⋯ {} identical lines", lines), w = inner.width as usize),
-                    Style::default().fg(Color::Rgb(95, 95, 120)),
+                    Style::default().fg(dim_text(theme().popup_bg)),
                 )),
                 Row::Same { left: l, right: rr } => {
                     let mut s = cell(Some(l), dim);
@@ -6855,12 +6887,12 @@ fn draw_archive(
                 Span::styled(
                     format!("{:<w$}", truncate_middle(&m.name, name_w), w = name_w),
                     if m.is_dir {
-                        base.fg(FileKind::Directory.color()).add_modifier(Modifier::BOLD)
+                        base.fg(text_tone(FileKind::Directory.color(), row_bg(sel))).add_modifier(Modifier::BOLD)
                     } else {
-                        base.fg(Color::Rgb(225, 225, 240))
+                        base.fg(readable_on(theme().popup_bg))
                     },
                 ),
-                Span::styled(format!("{:>6}", size), base.fg(Color::Rgb(140, 140, 165))),
+                Span::styled(format!("{:>6}", size), base.fg(muted_on(theme().popup_bg))),
             ])),
             line,
         );
@@ -6892,8 +6924,8 @@ fn draw_palette(
     // Row 0 is the live query; the list fills the rest above the footer.
     f.render_widget(
         Paragraph::new(Line::from(vec![
-            Span::styled("› ", Style::default().fg(theme().accent).add_modifier(Modifier::BOLD)),
-            Span::styled(format!("{}_", query), Style::default().fg(Color::Rgb(230, 230, 245))),
+            Span::styled("› ", Style::default().fg(text_tone(theme().accent, theme().popup_bg)).add_modifier(Modifier::BOLD)),
+            Span::styled(format!("{}_", query), Style::default().fg(readable_on(theme().popup_bg))),
         ])),
         Rect::new(inner.x, inner.y, inner.width, 1),
     );
@@ -6921,17 +6953,21 @@ fn draw_palette(
                 Span::styled(if sel { " ▸ " } else { "   " }, base),
                 Span::styled(
                     format!("{:<w$}", truncate(&it.label, label_w), w = label_w),
-                    base.fg(if sel { Color::Rgb(235, 235, 250) } else { Color::Rgb(210, 210, 225) })
+                    base.fg(if sel {
+                        readable_on(theme().selected_bg)
+                    } else {
+                        readable_on(theme().popup_bg)
+                    })
                         .add_modifier(Modifier::BOLD),
                 ),
-                Span::styled(truncate_middle(&it.detail, detail_w), base.fg(Color::Rgb(140, 140, 165))),
+                Span::styled(truncate_middle(&it.detail, detail_w), base.fg(muted_on(theme().popup_bg))),
             ])),
             line,
         );
     }
     if shown.is_empty() {
         f.render_widget(
-            Paragraph::new(tr(lang, "  (no matches)", "  （一致なし）")).style(Style::default().fg(Color::Rgb(150, 150, 170))),
+            Paragraph::new(tr(lang, "  (no matches)", "  （一致なし）")).style(Style::default().fg(muted_on(theme().popup_bg))),
             Rect::new(inner.x, list_top, inner.width, 1),
         );
     }
@@ -6987,24 +7023,24 @@ fn draw_disk_usage(
         }
         let name_w = (inner.width as usize).saturating_sub(bar_w + 24);
         let name_style = if e.is_dir {
-            base.fg(FileKind::Directory.color()).add_modifier(Modifier::BOLD)
+            base.fg(text_tone(FileKind::Directory.color(), row_bg(sel))).add_modifier(Modifier::BOLD)
         } else {
-            base.fg(Color::Rgb(225, 225, 240))
+            base.fg(readable_on(row_bg(sel)))
         };
         f.render_widget(
             Paragraph::new(Line::from(vec![
                 Span::styled(if sel { " ▸ " } else { "   " }, base),
                 Span::styled(format!("{:<w$}", truncate_middle(&name, name_w), w = name_w), name_style),
-                Span::styled(bar, base.fg(theme().accent)),
-                Span::styled(format!(" {:>8}", cian_core::human_size(e.size)), base.fg(Color::Rgb(210, 210, 225))),
-                Span::styled(format!(" {:>4.0}%", pct), base.fg(Color::Rgb(140, 140, 165))),
+                Span::styled(bar, base.fg(text_tone(theme().accent, row_bg(sel)))),
+                Span::styled(format!(" {:>8}", cian_core::human_size(e.size)), base.fg(readable_on(row_bg(sel)))),
+                Span::styled(format!(" {:>4.0}%", pct), base.fg(muted_on(row_bg(sel)))),
             ])),
             line,
         );
     }
     if entries.is_empty() {
         f.render_widget(
-            Paragraph::new(tr(lang, "  (empty)", "  （空）")).style(Style::default().fg(Color::Rgb(150, 150, 170))),
+            Paragraph::new(tr(lang, "  (empty)", "  （空）")).style(Style::default().fg(muted_on(theme().popup_bg))),
             Rect::new(inner.x, inner.y, inner.width, 1),
         );
     }
@@ -7031,7 +7067,7 @@ fn draw_git_log(
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(border_type())
-        .border_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
+        .border_style(Style::default().fg(text_tone(theme().accent, theme().popup_bg)).add_modifier(Modifier::BOLD))
         .title(format!(" {} ", title))
         .title_bottom(tr(lang, " Enter=show diff  j/k  g/G  Esc ", " Enter=差分表示  j/k  g/G  Esc "));
     let inner = rect.inner(Margin { vertical: 1, horizontal: 1 });
@@ -7063,7 +7099,7 @@ fn draw_git_log(
             let style = if sel {
                 Style::default().fg(readable_on(theme().accent)).bg(theme().accent)
             } else {
-                Style::default().fg(Color::Rgb(200, 200, 215))
+                Style::default().fg(readable_on(theme().popup_bg))
             };
             Line::from(Span::styled(line, style))
         })
@@ -7093,9 +7129,9 @@ fn draw_macros(
         .map(|(i, name)| {
             let sel = i == *cursor;
             let style = if sel {
-                Style::default().fg(theme().accent).add_modifier(Modifier::BOLD)
+                Style::default().fg(text_tone(theme().accent, theme().popup_bg)).add_modifier(Modifier::BOLD)
             } else {
-                Style::default().fg(Color::Rgb(200, 200, 215))
+                Style::default().fg(readable_on(theme().popup_bg))
             };
             Line::from(Span::styled(
                 format!("{}{}", if sel { "▸ " } else { "  " }, name),
@@ -7135,9 +7171,9 @@ fn draw_sort_picker(
         .map(|(i, k)| {
             let sel = i == *cursor;
             let style = if sel {
-                Style::default().fg(theme().accent).add_modifier(Modifier::BOLD)
+                Style::default().fg(text_tone(theme().accent, theme().popup_bg)).add_modifier(Modifier::BOLD)
             } else {
-                Style::default().fg(Color::Rgb(200, 200, 215))
+                Style::default().fg(readable_on(theme().popup_bg))
             };
             // The shortcut letter doubles as the mnemonic.
             let hint = match k {
@@ -7185,9 +7221,9 @@ fn draw_encoding_picker(
         .map(|(i, e)| {
             let sel = i == *cursor;
             let style = if sel {
-                Style::default().fg(theme().accent).add_modifier(Modifier::BOLD)
+                Style::default().fg(text_tone(theme().accent, theme().popup_bg)).add_modifier(Modifier::BOLD)
             } else {
-                Style::default().fg(Color::Rgb(200, 200, 215))
+                Style::default().fg(readable_on(theme().popup_bg))
             };
             Line::from(Span::styled(
                 format!("{}{}", if sel { "▸ " } else { "  " }, e.label()),
@@ -7235,9 +7271,11 @@ fn draw_color_picker(
             let label = Span::styled(
                 format!(" {}{}", if sel { "▸ " } else { "  " }, name),
                 if sel {
-                    Style::default().add_modifier(Modifier::BOLD).fg(theme().accent)
+                    Style::default()
+                        .add_modifier(Modifier::BOLD)
+                        .fg(text_tone(theme().accent, theme().popup_bg))
                 } else {
-                    Style::default().fg(Color::Rgb(200, 200, 215))
+                    Style::default().fg(readable_on(theme().popup_bg))
                 },
             );
             Line::from(vec![swatch, label])

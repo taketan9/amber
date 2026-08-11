@@ -2270,6 +2270,249 @@
         assert!(app.layout_rects.left.width > narrowed, "and dragging moved it");
     }
 
+    /// Dialogs follow the theme now — a light theme's menus are light — so
+    /// everything drawn on them has to read on them. They were painted for a
+    /// dark surface: fixed greys, the theme accent used as body text, the
+    /// chat's own cyan. On a light dialog those ran from 1.0:1 to 3.2:1.
+    #[test]
+    fn every_popup_reads_on_the_theme_it_is_drawn_on() {
+        use crate::theme::{set_theme, ResolvedTheme};
+        let _g = THEME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let mut bad: Vec<String> = Vec::new();
+        for t in [
+            ResolvedTheme::SOLARIZED_LIGHT,
+            ResolvedTheme::GITHUB_LIGHT,
+            ResolvedTheme::AYU_LIGHT,
+            ResolvedTheme::BLULOCO_LIGHT,
+            ResolvedTheme::MONOKAI_PRO,
+            ResolvedTheme::DARK,
+        ] {
+            set_theme(t);
+            for what in ["manual", "panel-help", "palette", "chat", "notice", "toggles", "gallery",
+                "listings", "ssh-users", "snippets", "local-dest", "find", "history",
+                "bookmarks", "macros", "sort", "encoding", "op-queue", "ai-history",
+                "commit", "input", "quit", "menu", "pane-bg", "report", "archive",
+                "git-log", "disk-usage"]
+            {
+                let (_d, mut app) = app_with(&["a.txt", "b.rs"]);
+                match what {
+                    // `?` in the panes.
+                    "manual" => {
+                        app.handle_key(key('?')).unwrap();
+                    }
+                    // `?` in the text editor panel.
+                    "panel-help" => {
+                        app.handle_key(code(KeyCode::Enter)).unwrap();
+                        app.handle_key(code(KeyCode::F(12))).unwrap();
+                        app.handle_key(key('?')).unwrap();
+                    }
+                    "palette" => {
+                        app.handle_key(key('C')).unwrap();
+                    }
+                    "chat" => app.start_ai_chat(
+                        ChatMode::Ai,
+                        vec![
+                            ChatMsg { user: true, text: "hello".into() },
+                            ChatMsg { user: false, text: "a reply".into() },
+                        ],
+                        false,
+                    ),
+                    "notice" => {
+                        app.command_buffer = "ls".into();
+                        app.run_command();
+                    }
+                    "gallery" => app.start_theme_picker(),
+                    // The rest are built straight from their variants: they
+                    // need remote hosts, a git repo or a finished search to
+                    // reach by key, and what is under test is only the paint.
+                    "listings" => {
+                        app.popup = Popup::SshHosts { cursor: 0, filter: String::new() }
+                    }
+                    "ssh-users" => app.popup = Popup::SshUsers { host: 0, cursor: 0 },
+                    "snippets" => {
+                        app.popup = Popup::Snippets { cursor: 0, filter: String::new() }
+                    }
+                    "local-dest" => {
+                        app.popup =
+                            Popup::LocalDest { files: vec!["one.txt".into()], cursor: 0 }
+                    }
+                    "find" => {
+                        app.popup = Popup::FindResults {
+                            hits: vec![cian_core::search::Hit {
+                                path: "/tmp/a.txt".into(),
+                                rel: "a.txt".into(),
+                                is_dir: false,
+                                line: Some((3, "a matching line".into())),
+                            }],
+                            cursor: 0,
+                            scroll: 0,
+                            by_ai: false,
+                        }
+                    }
+                    "history" => {
+                        app.popup =
+                            Popup::History { entries: vec!["/tmp".into()], cursor: 0 }
+                    }
+                    "bookmarks" => {
+                        app.popup = Popup::Shortcuts {
+                            entries: vec![Shortcut {
+                                name: "home".into(),
+                                target: Some("/tmp".into()),
+                                children: None,
+                            }],
+                            cursor: 0,
+                            path: vec![],
+                        }
+                    }
+                    "macros" => {
+                        app.popup =
+                            Popup::Macros { cursor: 0, names: vec!["build".into()] }
+                    }
+                    "sort" => app.popup = Popup::SortPicker { cursor: 0 },
+                    "encoding" => {
+                        app.popup =
+                            Popup::EncodingPicker { cursor: 0, target: EncTarget::Shell }
+                    }
+                    "op-queue" => app.popup = Popup::OpQueue { cursor: 0 },
+                    "ai-history" => app.popup = Popup::AiHistory { cursor: 0 },
+                    "commit" => {
+                        app.popup = Popup::CommitMessage {
+                            buffer: "fix the thing".into(),
+                            stat: " 1 file changed".into(),
+                            dir: "/tmp".into(),
+                            editing: false,
+                        }
+                    }
+                    "input" => {
+                        app.popup = Popup::TextInput {
+                            title: " rename ".into(),
+                            prompt: "new name".into(),
+                            buffer: "a.txt".into(),
+                            kind: InputKind::Rename { original: "a.txt".into() },
+                            cursor: 5,
+                        }
+                    }
+                    "quit" => app.popup = Popup::ConfirmQuit,
+                    "menu" => app.open_context_menu(4, 4),
+                    "pane-bg" => {
+                        app.popup =
+                            Popup::ColorPicker { pane: FocusedPane::Left, cursor: 0 }
+                    }
+                    "report" => {
+                        app.popup = Popup::Report {
+                            title: " report ".into(),
+                            lines: vec!["one line of it".into(), "and another".into()],
+                            scroll: 0,
+                            back: Box::new(Popup::None),
+                        }
+                    }
+                    "archive" => {
+                        app.popup = Popup::Archive {
+                            path: "/tmp/a.zip".into(),
+                            members: vec![cian_core::archive::Member {
+                                name: "inside.txt".into(),
+                                is_dir: false,
+                                size: 100,
+                                compressed: 40,
+                            }],
+                            cursor: 0,
+                            scroll: 0,
+                        }
+                    }
+                    "git-log" => {
+                        app.popup = Popup::GitLog {
+                            title: " log ".into(),
+                            dir: "/tmp".into(),
+                            commits: vec![cian_core::git::Commit {
+                                hash: "abc1234".into(),
+                                date: "2026-08-11".into(),
+                                author: "someone".into(),
+                                subject: "a commit subject".into(),
+                            }],
+                            cursor: 0,
+                            scroll: 0,
+                            vcs: Vcs::Git,
+                        }
+                    }
+                    "disk-usage" => {
+                        app.popup = Popup::DiskUsage {
+                            dir: "/tmp".into(),
+                            entries: vec![cian_core::du::DuEntry {
+                                name: "big".into(),
+                                path: "/tmp/big".into(),
+                                size: 4096,
+                                is_dir: true,
+                            }],
+                            total: 4096,
+                            cursor: 0,
+                            scroll: 0,
+                        }
+                    }
+                    _ => {
+                        app.handle_key(key('T')).unwrap();
+                    }
+                }
+                let buf = render_buf(&mut app, 110, 30);
+                for y in 0..buf.area.height {
+                    for x in 0..buf.area.width {
+                        let c = &buf[(x, y)];
+                        if !c.symbol().chars().all(char::is_alphanumeric)
+                            || c.symbol().trim().is_empty()
+                        {
+                            continue;
+                        }
+                        if matches!(c.fg, Color::Reset) || matches!(c.bg, Color::Reset) {
+                            continue;
+                        }
+                        let cr = crate::render::contrast_ratio(c.fg, c.bg);
+                        if cr < 4.0 {
+                            bad.push(format!(
+                                "{:?} {what}: {:?} at ({x},{y}) — {:?} on {:?} is {cr:.2}:1",
+                                t.accent,
+                                c.symbol(),
+                                c.fg,
+                                c.bg,
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+        set_theme(ResolvedTheme::DARK);
+        let n = bad.len();
+        bad.dedup();
+        bad.truncate(400);
+        assert!(bad.is_empty(), "{n} unreadable cells:\n{}", bad.join("\n"));
+    }
+
+    /// Every preset in the gallery resolves, and every one of them paints a
+    /// dialog surface on the same side of the line as its page — a light
+    /// theme with a dark menu is the thing this replaced.
+    #[test]
+    fn every_preset_resolves_and_its_dialogs_match_its_page() {
+        use crate::theme::{theme_preset, THEME_NAMES};
+        let lum = |c: Color| match c {
+            Color::Rgb(r, g, b) => (299 * r as i32 + 587 * g as i32 + 114 * b as i32) / 1000,
+            _ => -1,
+        };
+        for name in THEME_NAMES {
+            let t = theme_preset(name).unwrap_or_else(|| panic!("{name} does not resolve"));
+            let Some(base) = t.base_bg else { continue }; // `default` keeps the terminal's
+            let (page, dialog) = (lum(base), lum(t.popup_bg));
+            assert!(
+                (page > 140) == (dialog > 140),
+                "{name}: a {} page with a {} dialog",
+                if page > 140 { "light" } else { "dark" },
+                if dialog > 140 { "light" } else { "dark" },
+            );
+        }
+        // …and the five that were asked for are among them.
+        for name in ["monokai-pro", "ayu-dark", "ayu-light", "bluloco-light", "bearded", "nord"] {
+            assert!(THEME_NAMES.contains(&name), "{name} is in the gallery");
+            assert!(theme_preset(name).is_some(), "{name} resolves");
+        }
+    }
+
     /// Backspace in a search listing means the same as Esc. A set of results
     /// has no parent directory to climb to, so climbing to one is a surprise.
     #[test]

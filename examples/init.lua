@@ -38,7 +38,8 @@
 --   "dracula", "nord", "monokai", "one-dark", "tokyo-night"
 --   "gruvbox-dark", "gruvbox-light"
 --   "catppuccin-mocha"（別名 "catppuccin"）、"catppuccin-latte"
---   "github-light"
+--   "github-light", "bluloco-light"
+--   "monokai-pro", "ayu-dark", "ayu-light", "bearded"
 -- cian.set_theme "dracula"
 --
 -- 実行中にも切り替えられます（再起動不要）。`:theme` でギャラリーが開き、各

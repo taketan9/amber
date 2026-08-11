@@ -445,7 +445,7 @@ cian.font{                                                                     -
 
 `set` (with `{}` for the size) is the one worth having: it is the only form cian can put *back* at startup. A `bigger`/`smaller` pair only knows how to step, so the size lasts as long as the window does. With nothing configured the keys say so rather than doing nothing.
 
-- **Themes.** 13 presets, live-previewed: `:theme` opens the gallery, `:theme <name>` sets one, and panes can be themed separately. The choice survives a restart.
+- **Themes.** 18 presets, live-previewed: `:theme` opens the gallery, `:theme <name>` sets one, and panes can be themed separately. The choice survives a restart.
 - **Portable.** Put `init.lua` (and `shortcuts.lua` / `macro.lua`) next to the executable and that folder wins over `~/.config/cian` for reading *and* writing — binary and config travel together on a USB stick, leaving nothing on the host. `:where` says which files are in use.
 - **Session.** With no path on the command line, cian reopens the two folders you had last time.
 - **Every file-pane action has a name you can bind** — [`examples/init.en.lua`](examples/init.en.lua) is a fully-commented template with every default binding and the complete action list.

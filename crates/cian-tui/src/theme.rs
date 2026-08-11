@@ -69,8 +69,11 @@ struct Spec {
     sel: u32,
     visual: u32,
     mark: u32,
-    /// Dialogs/menus keep dark surfaces (their body text is light), so light
-    /// themes still pass this a dark color.
+    /// The surface dialogs and menus are drawn on. A shade off `bg`, in the
+    /// same direction the theme itself goes: a light theme's dialogs are
+    /// light. (They were all dark once, whatever the theme, which made every
+    /// popup look like a different program had opened it.) Text on them is
+    /// `readable_on`, so either way round reads.
     popup: u32,
     status: u32,
     // File-type accents.
@@ -143,7 +146,7 @@ impl ResolvedTheme {
     pub(crate) const SOLARIZED_LIGHT: ResolvedTheme = from_spec(Spec {
         bg: 0xfdf6e3, fg: 0x657b83, dim: 0x93a1a1, border: 0x93a1a1,
         accent: 0x268bd2, sel: 0xdcd5be, visual: 0xf7e4b0, mark: 0xcb4b16,
-        popup: 0x073642, status: 0xeee8d5,
+        popup: 0xf5efdc, status: 0xeee8d5,
         blue: 0x268bd2, yellow: 0xb58900, cyan: 0x2aa198, magenta: 0xd33682,
         red: 0xdc322f, green: 0x859900, doc: 0x586e75,
     });
@@ -178,7 +181,7 @@ impl ResolvedTheme {
     pub(crate) const GRUVBOX_LIGHT: ResolvedTheme = from_spec(Spec {
         bg: 0xfbf1c7, fg: 0x3c3836, dim: 0x7c6f64, border: 0xd5c4a1,
         accent: 0xaf3a03, sel: 0xebdbb2, visual: 0xd5c4a1, mark: 0xb57614,
-        popup: 0x282828, status: 0xebdbb2,
+        popup: 0xf2e5bc, status: 0xebdbb2,
         blue: 0x076678, yellow: 0xb57614, cyan: 0x427b58, magenta: 0x8f3f71,
         red: 0x9d0006, green: 0x79740e, doc: 0x3c3836,
     });
@@ -199,7 +202,7 @@ impl ResolvedTheme {
     pub(crate) const CATPPUCCIN_LATTE: ResolvedTheme = from_spec(Spec {
         bg: 0xeff1f5, fg: 0x4c4f69, dim: 0x6c6f85, border: 0xccd0da,
         accent: 0x1e66f5, sel: 0xccd0da, visual: 0xdce0e8, mark: 0xdf8e1d,
-        popup: 0x1e1e2e, status: 0xccd0da,
+        popup: 0xe6e9ef, status: 0xccd0da,
         blue: 0x1e66f5, yellow: 0xdf8e1d, cyan: 0x179299, magenta: 0xea76cb,
         red: 0xd20f39, green: 0x40a02b, doc: 0x4c4f69,
     });
@@ -220,9 +223,54 @@ impl ResolvedTheme {
     pub(crate) const GITHUB_LIGHT: ResolvedTheme = from_spec(Spec {
         bg: 0xffffff, fg: 0x24292e, dim: 0x6a737d, border: 0xd1d5da,
         accent: 0x0366d6, sel: 0xeef2f5, visual: 0xdbe9ff, mark: 0xe36209,
-        popup: 0x24292e, status: 0xf6f8fa,
+        popup: 0xf6f8fa, status: 0xeaeef2,
         blue: 0x0366d6, yellow: 0xb08800, cyan: 0x1b7c83, magenta: 0x6f42c1,
         red: 0xd73a49, green: 0x22863a, doc: 0x24292e,
+    });
+    /// Monokai Pro — the paid Monokai's own palette, not the classic one
+    /// above: warmer greys, and the amber that everything is keyed to.
+    pub(crate) const MONOKAI_PRO: ResolvedTheme = from_spec(Spec {
+        bg: 0x2d2a2e, fg: 0xfcfcfa, dim: 0x727072, border: 0x5b595c,
+        accent: 0xffd866, sel: 0x423f42, visual: 0x5b595c, mark: 0xfc9867,
+        popup: 0x221f22, status: 0x221f22,
+        blue: 0x78dce8, yellow: 0xffd866, cyan: 0x78dce8, magenta: 0xab9df2,
+        red: 0xff6188, green: 0xa9dc76, doc: 0xc1c0c0,
+    });
+    /// Ayu Dark — near-black with one amber accent, which is the whole idea.
+    pub(crate) const AYU_DARK: ResolvedTheme = from_spec(Spec {
+        bg: 0x0d1017, fg: 0xbfbdb6, dim: 0x565b66, border: 0x1d2229,
+        accent: 0xe6b450, sel: 0x1d2733, visual: 0x2d3640, mark: 0xff8f40,
+        popup: 0x131721, status: 0x11151c,
+        blue: 0x59c2ff, yellow: 0xe6b450, cyan: 0x95e6cb, magenta: 0xd2a6ff,
+        red: 0xf26d78, green: 0xaad94c, doc: 0xacb6bf,
+    });
+    /// Ayu Light — the same palette on paper.
+    pub(crate) const AYU_LIGHT: ResolvedTheme = from_spec(Spec {
+        bg: 0xfcfcfc, fg: 0x5c6166, dim: 0x8a9199, border: 0xe7e8e9,
+        accent: 0xf2ae49, sel: 0xeaeaeb, visual: 0xffe9b3, mark: 0xfa8d3e,
+        popup: 0xf3f3f3, status: 0xf0f0f0,
+        blue: 0x399ee6, yellow: 0xf2ae49, cyan: 0x4cbf99, magenta: 0xa37acc,
+        red: 0xf07171, green: 0x86b300, doc: 0x787b80,
+    });
+    /// Bluloco Light — a light theme with saturated syntax rather than pastel.
+    pub(crate) const BLULOCO_LIGHT: ResolvedTheme = from_spec(Spec {
+        bg: 0xf9f9f9, fg: 0x383a42, dim: 0xa0a1a7, border: 0xd4d4d4,
+        accent: 0x275fe4, sel: 0xe5e5e6, visual: 0xd7e0f5, mark: 0xd52753,
+        popup: 0xf0f0f0, status: 0xefefef,
+        blue: 0x275fe4, yellow: 0xc18401, cyan: 0x0098dd, magenta: 0x823ff1,
+        red: 0xd52753, green: 0x23974a, doc: 0x7a82da,
+    });
+    /// Bearded — the family's dark, vivid look: a near-black violet ground
+    /// with pink, amethyst and teal on it. Approximated from the family's
+    /// signature colours rather than copied from one variant, since Bearded
+    /// ships dozens; `cian.set_theme{...}` takes exact values if you have a
+    /// particular one in mind.
+    pub(crate) const BEARDED: ResolvedTheme = from_spec(Spec {
+        bg: 0x16161d, fg: 0xebebf0, dim: 0x6c6f93, border: 0x2a2a3c,
+        accent: 0xa45fff, sel: 0x2c2c3f, visual: 0x3a2f55, mark: 0xff3e7b,
+        popup: 0x1d1d28, status: 0x1d1d28,
+        blue: 0x50b0f0, yellow: 0xffb86c, cyan: 0x21c7a8, magenta: 0xff3e7b,
+        red: 0xff5f87, green: 0x7ddb8a, doc: 0xb9bacb,
     });
 }
 
@@ -242,6 +290,11 @@ pub(crate) const THEME_NAMES: &[&str] = &[
     "monokai",
     "one-dark",
     "github-light",
+    "monokai-pro",
+    "ayu-dark",
+    "ayu-light",
+    "bluloco-light",
+    "bearded",
 ];
 
 /// Process-wide active theme. Unlike the old set-once global this is swappable
@@ -587,6 +640,11 @@ pub(crate) fn theme_preset(name: &str) -> Option<ResolvedTheme> {
         "monokai" => ResolvedTheme::MONOKAI,
         "one-dark" | "onedark" => ResolvedTheme::ONE_DARK,
         "github-light" | "github" => ResolvedTheme::GITHUB_LIGHT,
+        "monokai-pro" | "monokaipro" => ResolvedTheme::MONOKAI_PRO,
+        "ayu-dark" | "ayu" => ResolvedTheme::AYU_DARK,
+        "ayu-light" => ResolvedTheme::AYU_LIGHT,
+        "bluloco-light" | "bluloco" => ResolvedTheme::BLULOCO_LIGHT,
+        "bearded" | "bearded-theme" => ResolvedTheme::BEARDED,
         _ => return None,
     })
 }

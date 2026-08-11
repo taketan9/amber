@@ -38,7 +38,8 @@
 --   "dracula", "nord", "monokai", "one-dark", "tokyo-night"
 --   "gruvbox-dark", "gruvbox-light"
 --   "catppuccin-mocha" (aka "catppuccin"), "catppuccin-latte"
---   "github-light"
+--   "github-light", "bluloco-light"
+--   "monokai-pro", "ayu-dark", "ayu-light", "bearded"
 -- cian.set_theme "dracula"
 --
 -- You can also switch at runtime — no restart needed: `:theme` opens a gallery
