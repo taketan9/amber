@@ -239,19 +239,19 @@ impl App {
                 self.toggle_viewer_fold(Some(l));
                 return;
             }
-            // A tab is one buffer character but several drawn columns, so the
-            // clicked column has to be walked back through the same expansion
-            // the renderer used rather than taken as a character index.
+            // A clicked column is not a character index: a tab is one buffer
+            // character but several drawn columns, and a Japanese character is
+            // one buffer character but two. Both have to be walked back
+            // through the same widths the renderer used — counting every
+            // character as one column put the cursor a character further left
+            // for every wide one before it, which is most of a line of
+            // Japanese.
             let col_at = |view: &cian_core::viewer::View, l: usize| -> usize {
                 let rel = ecol.saturating_sub(text_x) as usize;
                 let Some(text) = view.lines.get(l) else { return 0 };
                 let mut drawn = 0usize;
                 for (j, ch) in text.chars().enumerate() {
-                    let w = if ch == '\t' {
-                        cian_core::viewer::tab_width() - (drawn % cian_core::viewer::tab_width())
-                    } else {
-                        1
-                    };
+                    let w = cian_core::textops::char_cols(ch, drawn);
                     if rel < drawn + w {
                         return j;
                     }

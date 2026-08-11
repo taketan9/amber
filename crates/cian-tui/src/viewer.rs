@@ -1796,6 +1796,8 @@ impl App {
         let mut entered_editing = false;
         let mut consumed = false;
         let mut block_prompt: Option<crate::BlockInput> = None;
+        // What a visual `d` / `x` took, set once the buffer borrow is over.
+        let mut cut_text: Option<String> = None;
         if let Popup::Viewer {
             view,
             line,
@@ -1910,9 +1912,29 @@ impl App {
                     *dirty = true;
                     consumed = true;
                 }
-                // d / x in visual mode — delete the selection.
+                // d / x in visual mode — cut the selection. Cut, not just
+                // delete: what was taken goes to the clipboard, so `p` puts it
+                // back. It used to vanish, which made `x` then `p` paste
+                // whatever had been copied before it.
                 KeyCode::Char('d') | KeyCode::Char('x') if visual.is_some() => {
                     let mode = visual.take().unwrap();
+                    cut_text = Some(match mode {
+                        ViewVisual::Line => {
+                            let (a, b) = (
+                                anchor.0.min(*line),
+                                anchor.0.max(*line).min(lines.len() - 1),
+                            );
+                            lines[a..=b].join("\n") + "\n"
+                        }
+                        ViewVisual::Char => {
+                            let (s, e) = crate::util::order_pos(*anchor, (*line, *col));
+                            crate::util::viewer_charwise(lines, s, e)
+                        }
+                        ViewVisual::Block => {
+                            let b = cian_core::textops::Block::between(lines, *anchor, (*line, *col));
+                            cian_core::textops::block_text(lines, b).join("\n")
+                        }
+                    });
                     push_viewer_undo(undo, redo, lines, *line, *col);
                     let (s, e) = crate::util::order_pos(*anchor, (*line, *col));
                     match mode {
@@ -2093,6 +2115,14 @@ impl App {
                     *scroll = *line + 1 - body_h;
                 }
             }
+        }
+        // A cut is a copy that also removes: `p` has to find it, and so does
+        // every other program, which is what `y` and Ctrl+X already promise.
+        if let Some(text) = cut_text.filter(|t| !t.is_empty()) {
+            if let Some(cb) = self.clipboard.as_mut() {
+                let _ = cb.set_text(text.clone());
+            }
+            self.yank = Some(text);
         }
         if let Some(b) = block_prompt {
             let kind = b.kind;
@@ -3055,6 +3085,11 @@ impl App {
                 tr(self.lang, "this one is read-only", "これは読み取り専用です").into(),
             );
             return;
+        }
+        // The clipboard too, so `p` finds what `dw` just took rather than
+        // whatever was copied before it.
+        if let Some(cb) = self.clipboard.as_mut() {
+            let _ = cb.set_text(text.clone());
         }
         self.yank = Some(text);
         let change = op == 'c';

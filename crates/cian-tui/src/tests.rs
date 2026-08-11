@@ -2366,6 +2366,128 @@
         assert_eq!(lines(&app), vec!["E here"]);
     }
 
+    /// Clicking into a line of Japanese lands on the character that was
+    /// clicked. A full-width character is one buffer character but two drawn
+    /// columns; counting every character as one column put the cursor a
+    /// character further left for every wide one before it, so a drag over a
+    /// Japanese line selected somewhere else entirely.
+    #[test]
+    fn a_click_lands_where_it_was_aimed_on_a_wide_line() {
+        let (_d, mut app) = viewer_on("あいうえお\nabcde\n");
+        let _ = render(&mut app, 100, 30);
+        let body = app.viewer_rect;
+        let text_x = body.x + app.viewer_gutter;
+        let click = |app: &mut App, cells: u16, kind| {
+            app.handle_mouse(crossterm::event::MouseEvent {
+                kind,
+                column: text_x + cells,
+                row: body.y,
+                modifiers: KeyModifiers::NONE,
+            });
+        };
+        use crossterm::event::{MouseButton, MouseEventKind};
+        let at = |app: &App| match &app.popup {
+            Popup::Viewer { col, .. } => *col,
+            other => panic!("expected the panel, got {other:?}"),
+        };
+
+        // Cell 0 and 1 are both あ; cells 2 and 3 are い; 8 and 9 are お.
+        for (cell, want) in [(0u16, 0usize), (1, 0), (2, 1), (3, 1), (8, 4), (9, 4)] {
+            click(&mut app, cell, MouseEventKind::Down(MouseButton::Left));
+            assert_eq!(at(&app), want, "cell {cell} is character {want}");
+        }
+
+        // And a drag from あ to う selects those three characters, not one.
+        click(&mut app, 0, MouseEventKind::Down(MouseButton::Left));
+        click(&mut app, 5, MouseEventKind::Drag(MouseButton::Left));
+        match &app.popup {
+            Popup::Viewer { anchor, line, col, visual: Some(ViewVisual::Char), .. } => {
+                assert_eq!((*anchor, (*line, *col)), ((0, 0), (0, 2)), "あ through う");
+            }
+            other => panic!("expected a character selection, got {other:?}"),
+        }
+    }
+
+    /// `x` over a selection cuts: what it took goes where `p` looks for it.
+    /// It used to simply vanish, so `x` then `p` pasted whatever had been
+    /// copied before — the last thing anyone means by cut and paste.
+    #[test]
+    fn what_x_cuts_is_what_p_puts_back() {
+        for (start, expect) in [
+            ('V', vec!["two", "one", "three"]),
+            // `p` puts it after the cursor, which is where vi puts it: the
+            // line is "e", the cut was "on", and it lands after the e.
+            ('v', vec!["eon", "two", "three"]),
+        ] {
+            let (_d, mut app) = viewer_on("one\ntwo\nthree\n");
+            app.handle_key(key(start)).unwrap();
+            if start == 'v' {
+                // `v` then `l` selects "on"; the linewise case takes the line.
+                app.handle_key(key('l')).unwrap();
+            }
+            app.handle_key(key('x')).unwrap();
+            assert!(app.yank.is_some(), "the cut text is on the clipboard");
+            app.handle_key(key('p')).unwrap();
+            assert_eq!(viewer_lines(&app), expect, "started with {start}");
+        }
+
+        // The operator form too: `dd` then `p` puts the line back below.
+        let (_d, mut app) = viewer_on("one\ntwo\n");
+        app.handle_key(key('d')).unwrap();
+        app.handle_key(key('d')).unwrap();
+        assert_eq!(viewer_lines(&app), vec!["two"]);
+        app.handle_key(key('p')).unwrap();
+        assert_eq!(viewer_lines(&app), vec!["two", "one"]);
+    }
+
+    /// The line-transform verbs act on a selection when there is one, and on
+    /// the whole file when there is not. `:lf` and `:crlf` are the exception,
+    /// and have to be: a line ending is a property of the file, not of a run
+    /// of lines inside it.
+    #[test]
+    fn the_transforms_follow_the_selection_and_the_endings_do_not() {
+        // `:han` on two selected lines of three.
+        let (_d, mut app) = viewer_on("ＡＢＣ\nＤＥＦ\nＧＨＩ\n");
+        app.handle_key(key('V')).unwrap();
+        app.handle_key(key('j')).unwrap();
+        app.command_buffer.clear();
+        app.handle_key(key(':')).unwrap();
+        for c in "han".chars() {
+            app.handle_key(key(c)).unwrap();
+        }
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+        assert_eq!(viewer_lines(&app), vec!["ABC", "DEF", "ＧＨＩ"], "only the selection");
+        assert!(
+            app.message.as_deref().is_some_and(|m| m.contains("selection")),
+            "and it says so: {:?}",
+            app.message,
+        );
+
+        // With nothing selected it is the whole file.
+        let (_d, mut app) = viewer_on("ＡＢＣ\nＤＥＦ\n");
+        app.handle_key(key(':')).unwrap();
+        for c in "han".chars() {
+            app.handle_key(key(c)).unwrap();
+        }
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+        assert_eq!(viewer_lines(&app), vec!["ABC", "DEF"], "the whole file");
+
+        // `:crlf` is the file's, selection or no selection.
+        let (_d, mut app) = viewer_on("one\ntwo\nthree\n");
+        app.handle_key(key('V')).unwrap();
+        app.handle_key(key(':')).unwrap();
+        for c in "crlf".chars() {
+            app.handle_key(key(c)).unwrap();
+        }
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+        match &app.popup {
+            Popup::Viewer { view, .. } => {
+                assert_eq!(view.eol, cian_core::viewer::Eol::Crlf, "every line of it");
+            }
+            other => panic!("expected the panel, got {other:?}"),
+        }
+    }
+
     /// A regex that finds nothing says why, when the reason is the usual one.
     /// `crm*ne` is "cr, any number of m, then ne" — it does not match
     /// `crmaine`, and looks like it should.
