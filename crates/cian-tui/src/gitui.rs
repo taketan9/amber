@@ -304,6 +304,8 @@ impl App {
             editing: false,
             dirty: false,
             undo: Vec::new(),
+            block_eol: false,
+            replacing: false,
             replace: None,
             redo: Vec::new(),
         };

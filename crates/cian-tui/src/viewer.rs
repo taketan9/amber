@@ -51,6 +51,30 @@ impl App {
         let shift = key.modifiers.contains(KeyModifiers::SHIFT);
         let alt = key.modifiers.contains(KeyModifiers::ALT);
 
+        // `r` waiting for the character to stamp in. First, because that
+        // character is whatever was typed — `rd` must not be read as a delete.
+        if let Some(n) = self.vim_replace.take() {
+            let KeyCode::Char(c) = key.code else { return Ok(()) };
+            if ctrl || alt {
+                return Ok(());
+            }
+            if let Popup::Viewer { view, undo, redo, line, col, dirty, hl, .. } = &mut self.popup {
+                let mut chs: Vec<char> = view.lines[*line].chars().collect();
+                // vi refuses rather than half-doing it when the run would run
+                // off the end of the line.
+                if *col + n <= chs.len() {
+                    push_viewer_undo(undo, redo, &view.lines, *line, *col);
+                    for ch in chs.iter_mut().skip(*col).take(n) {
+                        *ch = c;
+                    }
+                    view.lines[*line] = chs.into_iter().collect();
+                    *col += n - 1;
+                    *dirty = true;
+                    hl.clear();
+                }
+            }
+            return Ok(());
+        }
         // The replace bar owns the keyboard while it is open: the letters are
         // the pattern, and the actions are on keys that letters cannot be.
         if matches!(self.popup, Popup::Viewer { replace: Some(_), .. }) {
@@ -297,10 +321,15 @@ impl App {
                 }
             )
         {
+            // `J` is vi's join, so the shell is on `K` — the one letter of
+            // the four that vi's normal mode leaves alone here. `H` and `L`
+            // stay: vi's "top / bottom of the window" are not implemented in
+            // this panel, and crossing to the listing beside it is what the
+            // hand reaches for.
             let to = match key.code {
                 KeyCode::Char('H') => Some(FocusedPane::Left),
                 KeyCode::Char('L') => Some(FocusedPane::Right),
-                KeyCode::Char('J') => Some(FocusedPane::Shell),
+                KeyCode::Char('K') => Some(FocusedPane::Shell),
                 _ => None,
             };
             if let Some(to) = to {
@@ -381,6 +410,48 @@ impl App {
         {
             self.toggle_viewer_fold(None);
             return Ok(());
+        }
+        // `g` is a prefix, not a jump: `gg` is the top of the file (vi's own
+        // spelling — a bare `g` used to do it, which meant every `gJ` and
+        // `gg` typed by habit landed somewhere unexpected), and `gJ` joins
+        // without the space `J` adds.
+        if !ctrl && !alt && matches!(self.popup, Popup::Viewer { editing: false, sub_walk: None, .. })
+        {
+            let armed_g = matches!(self.popup, Popup::Viewer { pending: Some('g'), .. });
+            if armed_g {
+                if let Popup::Viewer { pending, .. } = &mut self.popup {
+                    *pending = None;
+                }
+                match key.code {
+                    KeyCode::Char('g') => {
+                        // `gg` is the top; `5gg` is line 5.
+                        let n = match &mut self.popup {
+                            Popup::Viewer { count, .. } => count.take(),
+                            _ => None,
+                        };
+                        if let Popup::Viewer { line, col, goal, view, .. } = &mut self.popup {
+                            *line = n
+                                .map(|c| c.saturating_sub(1))
+                                .unwrap_or(0)
+                                .min(view.lines.len().saturating_sub(1));
+                            (*col, *goal) = (0, 0);
+                        }
+                        self.scroll_viewer_to_cursor();
+                    }
+                    KeyCode::Char('J') => self.viewer_join(false),
+                    // Anything else after `g` is not a command; vi drops it.
+                    _ => {}
+                }
+                return Ok(());
+            }
+            if key.code == KeyCode::Char('g')
+                && !matches!(self.popup, Popup::Viewer { pending: Some(_), .. })
+            {
+                if let Popup::Viewer { pending, .. } = &mut self.popup {
+                    *pending = Some('g');
+                }
+                return Ok(());
+            }
         }
         if !ctrl && matches!(key.code, KeyCode::Char('z' | 'a' | 'A' | 'R' | 'M' | 't' | 'b')) {
             let c = match key.code {
@@ -577,42 +648,6 @@ impl App {
             };
             return Ok(());
         }
-        // `r` after a search: replace what was found, without typing the
-        // pattern a second time. The prompt arrives as `s/<what you searched
-        // for>/`, so all that is left is the replacement — and the `c` flag,
-        // which walks the hits one at a time.
-        if !ctrl && !alt && key.code == KeyCode::Char('r')
-            && matches!(self.popup, Popup::Viewer { editable: true, .. })
-        {
-            let q = if let Popup::Viewer { find_query, .. } = &self.popup {
-                find_query.clone().filter(|q| !q.is_empty())
-            } else {
-                None
-            };
-            match q {
-                Some(q) => {
-                    // The delimiter has to be one the pattern does not
-                    // contain, or the prompt would arrive already broken —
-                    // `/re/` patterns are full of slashes by definition.
-                    let d = ['/', '#', '@', '!', '%', ',']
-                        .into_iter()
-                        .find(|c| !q.contains(*c))
-                        .unwrap_or('/');
-                    if let Popup::Viewer { sub_input, .. } = &mut self.popup {
-                        *sub_input = Some(format!("s{d}{q}{d}"));
-                    }
-                    self.message = Some(tr(self.lang,
-                        "type the replacement — add c before Enter to confirm each one",
-                        "置換後の文字を入力 — 末尾に c を足すと1件ずつ確認").into());
-                }
-                None => {
-                    self.message = Some(tr(self.lang,
-                        "search with / first, then r replaces what it found",
-                        "先に / で検索してから r で置換").into());
-                }
-            }
-            return Ok(());
-        }
         // `/`, `f` and `Shift+F` all open the search prompt (the pane's own
         // find keys, so the reflex carries over into the viewer and preview).
         if !ctrl && key.code == KeyCode::Char('/') {
@@ -695,7 +730,10 @@ impl App {
         let body_h = (self.viewer_rect.height as usize).max(1);
         let half = (body_h / 2).max(1);
         let mut say_how_to_close = false;
-        if let Popup::Viewer { view, scroll, line, col, goal, visual, anchor, count, find_query, .. } = &mut self.popup {
+        if let Popup::Viewer {
+            view, scroll, line, col, goal, visual, anchor, count, find_query, block_eol, ..
+        } = &mut self.popup
+        {
             let cnt = count.take();
             // How many times a motion repeats: the count, or once.
             let times = cnt.unwrap_or(1).max(1);
@@ -707,6 +745,8 @@ impl App {
                 let len = vlen(view, *line);
                 *col = if goal == usize::MAX { len } else { goal.min(len) };
             };
+            // A fresh rectangle is a column one until `$` says otherwise.
+            *block_eol = false;
             let start_visual = |mode: ViewVisual, visual: &mut Option<ViewVisual>, anchor: &mut (usize, usize), line: usize, col: usize| {
                 if *visual == Some(mode) {
                     *visual = None; // pressing the same key again leaves visual
@@ -843,6 +883,11 @@ impl App {
                 (false, KeyCode::Char('$')) | (_, KeyCode::End) => {
                     *col = vlen(view, *line);
                     *goal = usize::MAX;
+                    // In a rectangle, `$` means "to the end of every line",
+                    // not "to this column" — which is what makes `$A` able to
+                    // put the same text on the end of lines of different
+                    // lengths. Any other motion takes it back to a column.
+                    *block_eol = matches!(visual, Some(ViewVisual::Block));
                 }
                 (false, KeyCode::Char('w')) => {
                     for _ in 0..times {
@@ -1484,6 +1529,10 @@ impl App {
             // Undo and redo by name, for the terminal that hands over no
             // Ctrl combination at all — which is more of them than one would
             // think, and the reason every Ctrl key here has a `:` twin.
+            "r" => {
+                self.start_search_replace();
+                return;
+            }
             "replace" | "rep" => {
                 self.start_replace_bar();
                 return;
@@ -1799,6 +1848,9 @@ impl App {
         let mut block_prompt: Option<crate::BlockInput> = None;
         // What a visual `d` / `x` took, set once the buffer borrow is over.
         let mut cut_text: Option<String> = None;
+        let mut start_replacing = false;
+        let mut arm_replace: Option<usize> = None;
+        let mut join: Option<bool> = None;
         if let Popup::Viewer {
             view,
             line,
@@ -1814,6 +1866,7 @@ impl App {
             undo,
             redo,
             hl,
+            block_eol,
             editable: true,
             preview: false,
             ..
@@ -1973,9 +2026,14 @@ impl App {
                     if *visual == Some(ViewVisual::Block) =>
                 {
                     let b = cian_core::textops::Block::between(lines, *anchor, (*line, *col));
-                    let kind = match k {
-                        'I' => crate::BlockEdit::Insert,
-                        'A' => crate::BlockEdit::Append,
+                    // After `$` the rectangle is ragged: `A` appends to the
+                    // end of each line rather than at a shared column, which
+                    // is how the same text lands on the end of lines that are
+                    // not the same length.
+                    let kind = match (k, *block_eol) {
+                        ('A', true) => crate::BlockEdit::LineEnd,
+                        ('I', _) => crate::BlockEdit::Insert,
+                        ('A', _) => crate::BlockEdit::Append,
                         _ => crate::BlockEdit::Replace,
                     };
                     *visual = None;
@@ -2030,23 +2088,10 @@ impl App {
                     consumed = true;
                 }
                 // J — join the next line onto this one with a single space.
+                // `gJ` joins without it, and is handled with the other `g`
+                // commands; both land here.
                 KeyCode::Char('J') => {
-                    if *line + 1 < lines.len() {
-                        push_viewer_undo(undo, redo, lines, *line, *col);
-                        let next = lines.remove(*line + 1);
-                        let cur = lines[*line].trim_end().to_string();
-                        *col = cur.chars().count();
-                        let joined = if cur.is_empty() {
-                            next.trim_start().to_string()
-                        } else if next.trim_start().is_empty() {
-                            cur
-                        } else {
-                            format!("{} {}", cur, next.trim_start())
-                        };
-                        lines[*line] = joined;
-                        *goal = *col;
-                        *dirty = true;
-                    }
+                    join = Some(true);
                     consumed = true;
                 }
                 // o / O — open a line below/above and start typing.
@@ -2073,6 +2118,74 @@ impl App {
                     *col = (*col + 1).min(lines[*line].chars().count());
                     *goal = *col;
                     *editing = true;
+                    entered_editing = true;
+                    consumed = true;
+                }
+                // A — append at the end of the line. It used to be the AI's
+                // "explain this code", which moved to the menu; the key it
+                // was borrowing goes back to vi.
+                KeyCode::Char('A') if visual.is_none() => {
+                    push_viewer_undo(undo, redo, lines, *line, *col);
+                    *col = lines[*line].chars().count();
+                    *goal = *col;
+                    *editing = true;
+                    entered_editing = true;
+                    consumed = true;
+                }
+                // C — change to the end of the line, which is `c$` with one
+                // key. What it takes goes to the clipboard, as `d` and `x` do.
+                KeyCode::Char('C') if visual.is_none() => {
+                    push_viewer_undo(undo, redo, lines, *line, *col);
+                    let chs: Vec<char> = lines[*line].chars().collect();
+                    cut_text = Some(chs[(*col).min(chs.len())..].iter().collect());
+                    lines[*line] = chs[..(*col).min(chs.len())].iter().collect();
+                    *editing = true;
+                    entered_editing = true;
+                    (*dirty, consumed) = (true, true);
+                }
+                // s — substitute: take the character under the cursor (or
+                // `3s`, three of them) and type in its place.
+                KeyCode::Char('s') if visual.is_none() => {
+                    push_viewer_undo(undo, redo, lines, *line, *col);
+                    let n = cnt(count);
+                    let mut chs: Vec<char> = lines[*line].chars().collect();
+                    let end = (*col + n).min(chs.len());
+                    if *col < chs.len() {
+                        cut_text = Some(chs[*col..end].iter().collect());
+                        chs.drain(*col..end);
+                        lines[*line] = chs.into_iter().collect();
+                    }
+                    *editing = true;
+                    entered_editing = true;
+                    (*dirty, consumed) = (true, true);
+                }
+                // S — the line's contents, replaced. `cc` in one key.
+                KeyCode::Char('S') if visual.is_none() => {
+                    push_viewer_undo(undo, redo, lines, *line, *col);
+                    cut_text = Some(lines[*line].clone() + "\n");
+                    // The indent stays: vi keeps it, and a line being retyped
+                    // in code is nearly always retyped at the same depth.
+                    let indent: String =
+                        lines[*line].chars().take_while(|c| c.is_whitespace()).collect();
+                    *col = indent.chars().count();
+                    lines[*line] = indent;
+                    *goal = *col;
+                    *editing = true;
+                    entered_editing = true;
+                    (*dirty, consumed) = (true, true);
+                }
+                // r — stamp one character (or `3rx`, three) over what is
+                // there. `r` used to open cian's own replace prompt; that is
+                // `:r`, and the replace bar has taken the job besides.
+                KeyCode::Char('r') if visual.is_none() => {
+                    arm_replace = Some(cnt(count));
+                    consumed = true;
+                }
+                // R — overwrite from here until Esc.
+                KeyCode::Char('R') if visual.is_none() => {
+                    push_viewer_undo(undo, redo, lines, *line, *col);
+                    *editing = true;
+                    start_replacing = true;
                     entered_editing = true;
                     consumed = true;
                 }
@@ -2119,6 +2232,17 @@ impl App {
         }
         // A cut is a copy that also removes: `p` has to find it, and so does
         // every other program, which is what `y` and Ctrl+X already promise.
+        if let Some(space) = join {
+            self.viewer_join(space);
+        }
+        if let Some(n) = arm_replace {
+            self.vim_replace = Some(n);
+        }
+        if start_replacing {
+            if let Popup::Viewer { replacing, .. } = &mut self.popup {
+                *replacing = true;
+            }
+        }
         if let Some(text) = cut_text.filter(|t| !t.is_empty()) {
             if let Some(cb) = self.clipboard.as_mut() {
                 let _ = cb.set_text(text.clone());
@@ -2205,12 +2329,14 @@ impl App {
             return Ok(());
         }
         if key.code == KeyCode::Esc {
-            if let Popup::Viewer { editing, .. } = &mut self.popup {
+            if let Popup::Viewer { editing, replacing, .. } = &mut self.popup {
                 *editing = false;
+                *replacing = false;
             }
             self.message = Some(tr(self.lang, "left edit mode", "編集モード終了").into());
             return Ok(());
         }
+        let overwrite = matches!(self.popup, Popup::Viewer { replacing: true, .. });
         let body_h = (self.viewer_rect.height as usize).max(1).saturating_sub(1).max(1);
         if let Popup::Viewer { view, line, col, scroll, goal, dirty, hl, .. } = &mut self.popup {
             // Any edit invalidates the cached highlight; it recomputes on exit.
@@ -2227,7 +2353,14 @@ impl App {
             match key.code {
                 KeyCode::Char(c) if !ctrl => {
                     let mut chs = line_chars(lines, *line);
-                    chs.insert(*col, c);
+                    // `R` overwrites; `i` pushes what is there to the right.
+                    // Past the end of the line the two are the same thing,
+                    // which is what vi does too.
+                    if overwrite && *col < chs.len() {
+                        chs[*col] = c;
+                    } else {
+                        chs.insert(*col, c);
+                    }
                     lines[*line] = chs.into_iter().collect();
                     *col += 1;
                     *dirty = true;
@@ -2868,6 +3001,12 @@ impl App {
             return false;
         }
         let KeyCode::Char(c) = key.code else { return false };
+        // A `z` waiting for its second key owns it. Without this, `zt` never
+        // scrolled: `t` is the start of a find-till motion, this ran first,
+        // and the fold prefix below never saw it.
+        if matches!(self.popup, Popup::Viewer { pending: Some('z' | 'g'), .. }) {
+            return false;
+        }
         // Not while something is being typed into, and not over a selection —
         // there `d`, `c` and `y` act on what is selected, which the viewer
         // already does.
@@ -3278,6 +3417,13 @@ impl App {
         if !ready {
             return false;
         }
+        // …and not when the quote is a text object rather than a mark: `ci'`
+        // ends in the same character `'a` begins with, and the operator
+        // waiting for an object is what tells the two apart. This ran first,
+        // so every `ca'` and `di\`` was read as a half-typed mark jump.
+        if self.vim_obj.is_some() || self.vim_wait.is_some() {
+            return false;
+        }
         // Waiting for the letter after `m`, `'` or a backtick.
         if let Some(what) = self.vim_mark_wait.take() {
             if !c.is_ascii_alphabetic() {
@@ -3378,6 +3524,93 @@ impl App {
             let len = view.lines.get(*line).map(|s| s.chars().count()).unwrap_or(0);
             *col = c.min(len);
             *goal = *col;
+        }
+    }
+
+    /// `J` and `gJ` — the next line pulled up onto this one, with a single
+    /// space between them or with nothing at all. A count joins that many
+    /// lines, and a `V` selection joins all of them, as vi does.
+    pub(crate) fn viewer_join(&mut self, space: bool) {
+        let n = self.viewer_take_count().max(2);
+        if let Popup::Viewer { view, undo, redo, line, col, goal, dirty, hl, visual, anchor, .. } =
+            &mut self.popup
+        {
+            let lines = &mut view.lines;
+            // Over a selection it is every line of it; otherwise this line
+            // and the next (or the next `n`).
+            let (first, last) = match visual {
+                Some(_) => (anchor.0.min(*line), anchor.0.max(*line)),
+                None => (*line, (*line + n - 1).min(lines.len().saturating_sub(1))),
+            };
+            if last <= first || first >= lines.len() {
+                *visual = None;
+                return;
+            }
+            push_viewer_undo(undo, redo, lines, *line, *col);
+            let last = last.min(lines.len() - 1);
+            let mut out = lines[first].trim_end().to_string();
+            for l in lines[first + 1..=last].iter() {
+                let tail = l.trim_start();
+                *col = out.chars().count();
+                if out.is_empty() {
+                    out = tail.to_string();
+                } else if tail.is_empty() {
+                    // Nothing to add, and nothing to separate it from.
+                } else if space {
+                    out.push(' ');
+                    out.push_str(tail);
+                } else {
+                    out.push_str(tail);
+                }
+            }
+            lines.drain(first + 1..=last);
+            lines[first] = out;
+            *line = first;
+            *goal = *col;
+            *visual = None;
+            *dirty = true;
+            hl.clear();
+        }
+    }
+
+    /// `:r` — replace what the last search found, without typing the pattern
+    /// a second time. The prompt arrives as `s/<what you searched for>/`, so
+    /// all that is left is the replacement, and the `c` flag that walks the
+    /// hits one at a time.
+    ///
+    /// It used to be the bare `r`, which is vi's replace-one-character. The
+    /// replace bar seeds itself from the last search as well, so the key went
+    /// back to vi without taking anything with it.
+    pub(crate) fn start_search_replace(&mut self) {
+        if !matches!(self.popup, Popup::Viewer { editable: true, .. }) {
+            return;
+        }
+        let q = if let Popup::Viewer { find_query, .. } = &self.popup {
+            find_query.clone().filter(|q| !q.is_empty())
+        } else {
+            None
+        };
+        match q {
+            Some(q) => {
+                // The delimiter has to be one the pattern does not contain,
+                // or the prompt would arrive already broken — `/re/` patterns
+                // are full of slashes by definition.
+                let d = ['/', '#', '@', '!', '%', ',']
+                    .into_iter()
+                    .find(|c| !q.contains(*c))
+                    .unwrap_or('/');
+                if let Popup::Viewer { sub_input, .. } = &mut self.popup {
+                    *sub_input = Some(format!("s{d}{q}{d}"));
+                }
+                self.message = Some(tr(self.lang,
+                    "type the replacement — add c before Enter to confirm each one",
+                    "置換後の文字を入力 — 末尾に c を足すと1件ずつ確認").into());
+            }
+            None => {
+                self.message = Some(tr(self.lang,
+                    "search with / first, then :r replaces what it found",
+                    "先に / で検索してから :r で置換").into());
+            }
         }
     }
 
@@ -3630,6 +3863,8 @@ impl App {
             editing: false,
             dirty: false,
             undo: Vec::new(),
+            block_eol: false,
+            replacing: false,
             replace: None,
             redo: Vec::new(),
         };

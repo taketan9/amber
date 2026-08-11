@@ -1655,7 +1655,8 @@
             app.handle_key(key(k)).unwrap();
         }
         assert!(col(&app) > 5, "2w moved on: {}", col(&app));
-        for k in ['5', 'g'] {
+        // `gg`, not a bare `g`: the prefix is vi's, and it leaves `gJ` room.
+        for k in ['5', 'g', 'g'] {
             app.handle_key(key(k)).unwrap();
         }
         assert_eq!(line(&app), 4, "5gg is line 5");
@@ -2144,11 +2145,12 @@
         assert_eq!(app.focused, FocusedPane::Right, "the click moved the focus");
         assert!(matches!(app.popup, Popup::Viewer { .. }), "the file is still open");
 
-        // Shift+H comes back to it, Shift+J goes down to the shell.
+        // Shift+H comes back to it, Shift+K goes down to the shell — `J` is
+        // vi's join, so the shell moved to the letter vi leaves alone.
         app.handle_key(KeyEvent::new(KeyCode::Char('H'), KeyModifiers::SHIFT)).unwrap();
         assert_eq!(app.focused, FocusedPane::Left);
-        app.handle_key(KeyEvent::new(KeyCode::Char('J'), KeyModifiers::SHIFT)).unwrap();
-        assert_eq!(app.focused, FocusedPane::Shell, "Shift+J while reading");
+        app.handle_key(KeyEvent::new(KeyCode::Char('K'), KeyModifiers::SHIFT)).unwrap();
+        assert_eq!(app.focused, FocusedPane::Shell, "Shift+K while reading");
         app.handle_key(code(KeyCode::Esc)).unwrap();
 
         // …but not while editing: there `H` is a character.
@@ -2489,6 +2491,105 @@
         }
     }
 
+    /// The vi keys the panel was missing, and the two it had but could not
+    /// reach. Everything here was reported by using it.
+    #[test]
+    fn the_vi_keys_that_were_missing_or_unreachable() {
+        let at = |app: &App| match &app.popup {
+            Popup::Viewer { line, col, editing, scroll, .. } => (*line, *col, *editing, *scroll),
+            other => panic!("expected the panel, got {other:?}"),
+        };
+        let press = |app: &mut App, keys: &str| {
+            for c in keys.chars() {
+                app.handle_key(key(c)).unwrap();
+            }
+        };
+
+        // `zt` — the `t` was being read as the start of a find-till motion,
+        // so the fold prefix never saw it and nothing scrolled.
+        let body = format!("{}{}", "alpha beta gamma\nsecond line\nthird\n", "x\n".repeat(40));
+        let (_d, mut app) = viewer_on(&body);
+        press(&mut app, "jjzt");
+        assert_eq!(at(&app).3, 2, "zt put the cursor's line at the top");
+        press(&mut app, "zz");
+        assert!(at(&app).3 < 2, "zz centred it again");
+
+        // `s` and `S` — substitute a character, and a line.
+        let (_d, mut app) = viewer_on("alpha beta\nsecond\n");
+        press(&mut app, "s");
+        assert_eq!(viewer_lines(&app)[0], "lpha beta");
+        assert!(at(&app).2, "and it is typing");
+        app.handle_key(code(KeyCode::Esc)).unwrap();
+        press(&mut app, "S");
+        assert_eq!(viewer_lines(&app)[0], "", "S emptied the line");
+        assert!(at(&app).2);
+        app.handle_key(code(KeyCode::Esc)).unwrap();
+
+        // `A` — the end of the line. It was the AI's key once and never came
+        // back. `C` changes to the end of the line.
+        let (_d, mut app) = viewer_on("alpha beta\n");
+        press(&mut app, "A");
+        assert_eq!(at(&app).1, 10, "A went to the end");
+        assert!(at(&app).2);
+        app.handle_key(code(KeyCode::Esc)).unwrap();
+        press(&mut app, "0llC");
+        assert_eq!(viewer_lines(&app)[0], "al", "C took the rest of the line");
+        assert_eq!(app.yank.as_deref(), Some("pha beta"), "and kept it");
+
+        // `r` stamps one character, `3r` three; `R` overwrites until Esc.
+        let (_d, mut app) = viewer_on("abcdef\n");
+        press(&mut app, "rZ");
+        assert_eq!(viewer_lines(&app)[0], "Zbcdef");
+        press(&mut app, "0");
+        press(&mut app, "3rY");
+        assert_eq!(viewer_lines(&app)[0], "YYYdef", "3rY overwrote three");
+        press(&mut app, "0Rxy");
+        assert_eq!(viewer_lines(&app)[0], "xyYdef", "R overwrote rather than pushed");
+        app.handle_key(code(KeyCode::Esc)).unwrap();
+        press(&mut app, "0ix");
+        assert_eq!(viewer_lines(&app)[0], "xxyYdef", "and insert inserts again");
+        app.handle_key(code(KeyCode::Esc)).unwrap();
+
+        // `J` joins with a space, `gJ` without, and a count takes more lines.
+        let (_d, mut app) = viewer_on("one\ntwo\nthree\nfour\n");
+        press(&mut app, "J");
+        assert_eq!(viewer_lines(&app)[0], "one two");
+        press(&mut app, "gJ");
+        assert_eq!(viewer_lines(&app)[0], "one twothree");
+        let (_d, mut app) = viewer_on("one\ntwo\nthree\nfour\n");
+        press(&mut app, "3J");
+        assert_eq!(viewer_lines(&app), vec!["one two three", "four"], "3J took three lines");
+
+        // `gg` is the top; a bare `g` is a prefix now and jumps nowhere.
+        let (_d, mut app) = viewer_on("one\ntwo\nthree\n");
+        press(&mut app, "jjg");
+        assert_eq!(at(&app).0, 2, "g on its own waits");
+        press(&mut app, "g");
+        assert_eq!(at(&app).0, 0, "gg is the top");
+
+        // `ca'` and friends — the quote was being eaten by the mark handler,
+        // which reads `'a` as a jump.
+        for (setup, keys, want) in [
+            ("x 'abc' y\n", "faca'", "x  y"),
+            ("x 'abc' y\n", "faci'", "x '' y"),
+            ("say `x` now\n", "fxci`", "say `` now"),
+            ("call(one, two)\n", "fodi(", "call()"),
+        ] {
+            let (_d, mut app) = viewer_on(setup);
+            press(&mut app, keys);
+            assert_eq!(viewer_lines(&app)[0], want, "{keys} on {setup:?}");
+        }
+
+        // A rectangle, `$`, then `A`: the same text on the end of lines that
+        // are not the same length.
+        let (_d, mut app) = viewer_on("one\nthirteen\nfive\n");
+        app.handle_key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::CONTROL)).unwrap();
+        press(&mut app, "jj$A");
+        press(&mut app, ";");
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+        assert_eq!(viewer_lines(&app), vec!["one;", "thirteen;", "five;"], "ragged right");
+    }
+
     /// The wildcard mode: `crm*ne` finds `crmaine`, which is what a `*` in a
     /// search box is nearly always meant to say. It is its own mode rather
     /// than a change to the regex one — Alt+r cycles as typed → wildcard →
@@ -2690,6 +2791,7 @@
 
         // VISUAL mode: Ctrl+C takes exactly what is selected.
         app.handle_key(key('g')).unwrap();
+        app.handle_key(key('g')).unwrap();
         app.handle_key(key('V')).unwrap();
         app.handle_key(key('j')).unwrap();
         app.handle_key(ctrl('c')).unwrap();
@@ -2705,6 +2807,7 @@
         app.handle_key(code(KeyCode::Esc)).unwrap();
 
         // EDIT mode. The same keys, without leaving it.
+        app.handle_key(key('g')).unwrap();
         app.handle_key(key('g')).unwrap();
         app.handle_key(key('i')).unwrap();
         assert!(matches!(app.popup, Popup::Viewer { editing: true, .. }), "in the editor");
@@ -3208,14 +3311,20 @@
         );
     }
 
-    /// `r` after a search takes the pattern with it, so a replace is the
-    /// replacement text and nothing else.
+    /// `:r` after a search takes the pattern with it, so a replace is the
+    /// replacement text and nothing else. (It was the bare `r`, which is vi's
+    /// replace-one-character.)
     #[test]
     fn r_replaces_what_the_search_just_found() {
         let (_d, mut app) = viewer_on("alpha bravo\nbravo charlie\n");
+        let colon_r = |app: &mut App| {
+            app.handle_key(key(':')).unwrap();
+            app.handle_key(key('r')).unwrap();
+            app.handle_key(code(KeyCode::Enter)).unwrap();
+        };
         // Nothing searched for yet: it says so rather than opening a prompt
         // with nothing in it.
-        app.handle_key(key('r')).unwrap();
+        colon_r(&mut app);
         assert!(matches!(app.popup, Popup::Viewer { sub_input: None, .. }));
         assert!(app.message.as_deref().unwrap_or("").contains('/'));
 
@@ -3224,7 +3333,7 @@
             app.handle_key(key(c)).unwrap();
         }
         app.handle_key(code(KeyCode::Enter)).unwrap();
-        app.handle_key(key('r')).unwrap();
+        colon_r(&mut app);
         assert!(
             matches!(&app.popup, Popup::Viewer { sub_input: Some(s), .. } if s == "s/bravo/"),
             "seeded with what was searched for: {:?}",
@@ -3243,7 +3352,7 @@
             app.handle_key(key(c)).unwrap();
         }
         app.handle_key(code(KeyCode::Enter)).unwrap();
-        app.handle_key(key('r')).unwrap();
+        colon_r(&mut app);
         let Popup::Viewer { sub_input: Some(seed), .. } = &app.popup else { panic!("no prompt") };
         assert!(!seed.starts_with("s/"), "a slash delimiter would break it: {seed:?}");
         assert!(seed.contains("/usr/"), "the pattern is intact: {seed:?}");
@@ -10919,6 +11028,7 @@
         }
         // Back to the top, move onto the `{` (col 7 of "fn f() {"), then % to
         // its matching `}` on line 2.
+        app.handle_key(key('g')).unwrap();
         app.handle_key(key('g')).unwrap();
         vkeys(&mut app, "lllllll"); // 7 × l → col 7 = '{'
         if let Popup::Viewer { col, .. } = &app.popup {

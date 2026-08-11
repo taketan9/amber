@@ -488,6 +488,14 @@ enum Popup {
         /// normal-mode edit or insert session (vim's coarse units, so `u` after
         /// typing a paragraph removes the paragraph, not one character).
         undo: Vec<ViewerSnap>,
+        /// `$` in a rectangular selection: the block runs to the end of each
+        /// line, however ragged they are. `A` then appends to every one of
+        /// them, which is the way to put the same text on the end of lines
+        /// that are not the same length.
+        block_eol: bool,
+        /// `R` — typing overwrites what is there instead of pushing it right.
+        /// Left with Esc, like insert; it is the same editor in another gear.
+        replacing: bool,
         /// The replace bar, while it is open (Ctrl+H, `:replace`).
         replace: Option<Box<ReplaceBar>>,
         /// What `u` took away, waiting to be put back by `Ctrl+R` / `Ctrl+Y`.
@@ -2271,6 +2279,9 @@ pub struct App {
     vim_obj: Option<char>,
     vim_wait: Option<char>,
     vim_last_find: Option<(char, char)>,
+    /// `r` waiting for the character to stamp in, with the count it was given
+    /// (`3rx` overwrites three).
+    vim_replace: Option<usize>,
     /// The two halves of a split, as drawn: clicking the one not in focus
     /// crosses to it.
     viewer_half_rects: [Rect; 2],
@@ -2587,6 +2598,7 @@ impl App {
             vim_obj: None,
             vim_wait: None,
             vim_last_find: None,
+            vim_replace: None,
             viewer_half_rects: [Rect::new(0, 0, 0, 0); 2],
             viewer_gutter: 0,
             popup_zones: Vec::new(),
@@ -4093,6 +4105,7 @@ pub(crate) fn viewer_manual_lines(lang: Lang) -> Vec<String> {
         ("Ctrl+F  Ctrl+B", "a page down, up", "1ページ下・上"),
         ("{  }", "previous, next blank line", "前後の空行へ"),
         ("%", "the matching bracket", "対応する括弧へ"),
+        ("gg  G  5gg", "the top, the bottom, line 5", "先頭・末尾・5行目"),
         ("]]  [[", "next, previous heading or definition", "次・前の見出し／定義"),
         ("zz  zt  zb", "this line to the middle, top, bottom", "この行を中央・上・下へ"),
         ("m a   ' a", "set a mark here, jump back to it (` a for the column)", "ここにマーク／マークへ戻る（` a は桁も）"),
@@ -4102,12 +4115,13 @@ pub(crate) fn viewer_manual_lines(lang: Lang) -> Vec<String> {
         ("/", "search — bare text is literal, /re/ is a regex", "検索 — 素の文字はリテラル、/re/ は正規表現"),
         ("n  N", "next, previous match", "次・前の一致"),
         ("*  #", "search the word under the cursor, forward, back", "カーソル位置の語を前方・後方検索"),
-        ("r", "replace what you just searched for", "直前の検索語を置換"),
+        (":r", "replace what you just searched for", "直前の検索語を置換"),
         (":s/old/new/", "replace — g all on a line, c confirm, i ignore case", "置換 — g 行内全部・c 確認・i 大小無視"),
     ];
     const SELECT: &[Row] = &[
         ("v  V", "select by character, by line", "文字選択・行選択"),
         ("Ctrl+Q  Alt+v", "rectangular selection (:block if neither arrives)", "矩形選択（どちらも届かなければ :block）"),
+        ("in one: $ then A", "…to the end of every line, however ragged", "矩形で $ のあと A — 長さの違う各行の末尾に追記"),
         ("Ctrl+A", "select the whole file", "ファイル全体を選択"),
         ("o", "swap which end of the selection moves", "選択の伸ばす側を入れ替え"),
         ("y", "copy the selection", "選択をコピー"),
@@ -4146,8 +4160,11 @@ pub(crate) fn viewer_manual_lines(lang: Lang) -> Vec<String> {
         (";  ,", "repeat that, forwards and backwards", "直前の f/t を前方・後方に繰り返し"),
     ];
     const EDIT: &[Row] = &[
-        ("i a o O I", "insert — Ctrl+S saves, Esc leaves, Shift+Q discards", "挿入 — Ctrl+S 保存・Esc 終了・Shift+Q 破棄"),
-        ("x  dd  D  J", "delete a character, a line, to end of line, join", "1文字・1行・行末まで削除、行連結"),
+        ("i a A o O I", "insert — before, after, at the end of the line, on a new one", "挿入 — 前・後・行末・新しい行"),
+        ("s  S  C", "substitute a character, a line, to the end of the line", "1文字・1行・行末までを打ち直す"),
+        ("r x  R", "stamp one character over this one (3rx three), or overwrite until Esc", "1文字を上書き（3rx で3文字）・R は Esc まで上書き"),
+        ("x  dd  D", "delete a character, a line, to end of line", "1文字・1行・行末まで削除"),
+        ("J  gJ  3J", "join the next line with a space, without one, or three of them", "次行を連結（空白あり／なし／3行）"),
         ("d", "cut the selection", "選択を切り取り"),
         (">>  <<", "shift lines by a tab stop (> and < on a selection)", "行をタブ幅ずらす（選択中は > と <）"),
         ("~", "swap the case under the cursor", "カーソル位置の大小を反転"),
@@ -4169,7 +4186,7 @@ pub(crate) fn viewer_manual_lines(lang: Lang) -> Vec<String> {
         ("Enter (in a listing)", "open a file in this panel", "一覧で Enter — このパネルで開く"),
         ("F3 (in a listing)", "open it in the *other* pane instead", "一覧で F3 — 反対のペインで開く"),
         ("F12", "this panel fills the window, and back", "このパネルを全画面に／戻す"),
-        ("Shift+H  L  J", "focus the left pane, the right, the shell", "左ペイン／右ペイン／シェルへ移動"),
+        ("Shift+H  L  K", "focus the left pane, the right, the shell (J is vi's join)", "左ペイン／右ペイン／シェルへ移動（J は連結なので K）"),
         ("Tab", "cross to the pane beside it, and back", "隣のペインへ移動／戻る"),
         ("Shift+Tab", "the next open file in this panel (F2 / Shift+F2 too)", "このパネルの次のファイルへ（F2 / Shift+F2 でも）"),
         (":new", "a blank file to type into, docked here", "空のファイルをここに開く"),
