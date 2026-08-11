@@ -229,6 +229,9 @@ impl App {
             && !key.modifiers.contains(KeyModifiers::ALT)
             && matches!(self.popup, Popup::None | Popup::Viewer { .. })
             && !matches!(self.popup, Popup::Viewer { editing: true, .. })
+            // …nor while the replace bar is up, where Tab moves between its
+            // two fields and there is nothing else it could mean.
+            && !matches!(self.popup, Popup::Viewer { replace: Some(_), .. })
             && self.focused != FocusedPane::Shell
             && self.mode != Mode::Command
             && self.mode != Mode::Filter
@@ -254,6 +257,7 @@ impl App {
             && !key.modifiers.contains(KeyModifiers::ALT)
             && matches!(self.popup, Popup::Viewer { .. })
             && !matches!(self.popup, Popup::Viewer { editing: true, .. })
+            && !matches!(self.popup, Popup::Viewer { replace: Some(_), .. })
             && self.viewer_dock == Some(self.focused)
         {
             self.viewer_switch_tab(true);

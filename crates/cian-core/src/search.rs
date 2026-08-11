@@ -141,7 +141,7 @@ impl Matcher {
 
 /// One line, fit for a status bar: regex errors are multi-line diagnostics
 /// with a caret drawing, which a TUI message line cannot show.
-fn shorten_regex_error(e: &regex::Error) -> String {
+pub(crate) fn shorten_regex_error(e: &regex::Error) -> String {
     let s = e.to_string();
     let mut lines = s.lines().filter(|l| !l.trim().is_empty());
     let head = lines.next().unwrap_or("bad regex").trim().to_string();

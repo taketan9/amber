@@ -50,6 +50,11 @@ impl App {
         let shift = key.modifiers.contains(KeyModifiers::SHIFT);
         let alt = key.modifiers.contains(KeyModifiers::ALT);
 
+        // The replace bar owns the keyboard while it is open: the letters are
+        // the pattern, and the actions are on keys that letters cannot be.
+        if matches!(self.popup, Popup::Viewer { replace: Some(_), .. }) {
+            return self.replace_bar_key(key);
+        }
         // While typing a `/` search, keys build the query; Enter runs it.
         if matches!(self.popup, Popup::Viewer { find_input: Some(_), .. }) {
             match key.code {
@@ -153,6 +158,12 @@ impl App {
                 }
                 KeyCode::Char('a') | KeyCode::Char('A') => {
                     self.mark_all();
+                    return Ok(());
+                }
+                // Ctrl+H is replace everywhere outside vi; `:replace` is the
+                // same thing for a terminal that keeps Ctrl to itself.
+                KeyCode::Char('h') | KeyCode::Char('H') => {
+                    self.start_replace_bar();
                     return Ok(());
                 }
                 _ => {}
@@ -1472,6 +1483,10 @@ impl App {
             // Undo and redo by name, for the terminal that hands over no
             // Ctrl combination at all — which is more of them than one would
             // think, and the reason every Ctrl key here has a `:` twin.
+            "replace" | "rep" => {
+                self.start_replace_bar();
+                return;
+            }
             "undo" | "u" => {
                 self.viewer_undo();
                 return;
@@ -3330,6 +3345,177 @@ impl App {
         }
     }
 
+    /// Ctrl+H / `:replace` — the replace bar. Two fields and three switches,
+    /// on the line `:` and `/` already use, with the file still in view: what
+    /// makes replace usable is watching each match land, which a dialog over
+    /// the text cannot do.
+    pub(crate) fn start_replace_bar(&mut self) {
+        if !matches!(self.popup, Popup::Viewer { editable: true, .. }) {
+            self.message = Some(
+                tr(self.lang, "this file cannot be edited", "このファイルは編集できません").into(),
+            );
+            return;
+        }
+        // Carry the last search over as the thing to replace: it is nearly
+        // always what was just looked for.
+        let seed = match &self.popup {
+            Popup::Viewer { find_query: Some(q), .. } => q.clone(),
+            _ => String::new(),
+        };
+        if let Popup::Viewer { replace, editing, visual, .. } = &mut self.popup {
+            *editing = false;
+            *visual = None;
+            *replace = Some(Box::new(crate::ReplaceBar { find: seed, ..Default::default() }));
+        }
+    }
+
+    fn replace_bar_key(&mut self, key: KeyEvent) -> Result<()> {
+        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        let alt = key.modifiers.contains(KeyModifiers::ALT);
+        let shift = key.modifiers.contains(KeyModifiers::SHIFT);
+        match key.code {
+            KeyCode::Esc => {
+                if let Popup::Viewer { replace, .. } = &mut self.popup {
+                    *replace = None;
+                }
+            }
+            // Tab moves between the two fields. It cannot cross to the other
+            // pane from here, and there is nothing else it could sensibly do
+            // with two boxes on screen.
+            KeyCode::Tab | KeyCode::BackTab | KeyCode::Down | KeyCode::Up => {
+                if let Popup::Viewer { replace: Some(r), .. } = &mut self.popup {
+                    r.in_with = !r.in_with;
+                }
+            }
+            // Enter replaces the next match and stops on it; Shift+Enter does
+            // the lot. Both are asked for often enough that neither could be
+            // the only one.
+            KeyCode::Enter if shift => self.replace_bar_run(true),
+            KeyCode::Enter => self.replace_bar_run(false),
+            // Alt, not Ctrl: a letter has to stay a letter in a text field,
+            // and Alt is the modifier that reaches cian on the terminals Ctrl
+            // does not. Alt+n steps to the next match without replacing it.
+            KeyCode::Char(c) if alt => {
+                let mut find_only = false;
+                if let Popup::Viewer { replace: Some(r), .. } = &mut self.popup {
+                    match c.to_ascii_lowercase() {
+                        'r' => r.regex = !r.regex,
+                        'c' => r.case_sensitive = !r.case_sensitive,
+                        'w' => r.word = !r.word,
+                        'n' => find_only = true,
+                        _ => {}
+                    }
+                }
+                if find_only {
+                    self.replace_bar_find_next();
+                }
+            }
+            KeyCode::Backspace => {
+                if let Popup::Viewer { replace: Some(r), .. } = &mut self.popup {
+                    let f = if r.in_with { &mut r.with } else { &mut r.find };
+                    f.pop();
+                }
+            }
+            KeyCode::Char(c) if !ctrl => {
+                if let Popup::Viewer { replace: Some(r), .. } = &mut self.popup {
+                    let f = if r.in_with { &mut r.with } else { &mut r.find };
+                    f.push(c);
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    /// The substitution the bar currently describes, or the reason it is not
+    /// one yet — reported where it was typed rather than swallowed.
+    fn replace_bar_sub(&mut self) -> Option<cian_core::substitute::Substitution> {
+        let Popup::Viewer { replace: Some(r), .. } = &self.popup else { return None };
+        match cian_core::substitute::from_fields(
+            &r.find,
+            &r.with,
+            r.regex,
+            r.case_sensitive,
+            r.word,
+        ) {
+            Ok(s) => Some(s),
+            Err(e) => {
+                self.message = Some(e);
+                None
+            }
+        }
+    }
+
+    /// Alt+n — land on the next match without changing it.
+    fn replace_bar_find_next(&mut self) {
+        let Some(sub) = self.replace_bar_sub() else { return };
+        let Popup::Viewer { view, line, col, .. } = &self.popup else { return };
+        let hits = cian_core::substitute::find(&sub, &view.lines, None);
+        let (l, c) = (*line, *col);
+        let next = hits
+            .iter()
+            .find(|h| h.line > l || (h.line == l && h.start > c))
+            .or_else(|| hits.first())
+            .cloned();
+        match next {
+            Some(h) => {
+                if let Popup::Viewer { line, col, goal, .. } = &mut self.popup {
+                    *line = h.line;
+                    *col = h.start;
+                    *goal = h.start;
+                }
+                self.scroll_viewer_to_cursor();
+            }
+            None => self.message = Some(tr(self.lang, "no matches", "該当なし").into()),
+        }
+    }
+
+    /// Enter (this one, then the next) and Shift+Enter (all of them).
+    fn replace_bar_run(&mut self, all: bool) {
+        let Some(sub) = self.replace_bar_sub() else { return };
+        let Popup::Viewer { view, line, col, .. } = &self.popup else { return };
+        let hits = cian_core::substitute::find(&sub, &view.lines, None);
+        if hits.is_empty() {
+            self.message = Some(tr(self.lang, "no matches", "該当なし").into());
+            return;
+        }
+        if all {
+            let n = hits.len();
+            self.apply_substitution(&hits);
+            self.message = Some(if self.lang == Lang::Ja {
+                format!("{n} 件置換しました")
+            } else {
+                format!("replaced {n} occurrence(s)")
+            });
+            return;
+        }
+        // One at a time: the match at or after the cursor, then leave the
+        // cursor on what replaced it so the next Enter carries on down the
+        // file rather than starting over.
+        let (l, c) = (*line, *col);
+        let hit = hits
+            .iter()
+            .find(|h| h.line > l || (h.line == l && h.start >= c))
+            .or_else(|| hits.first())
+            .cloned();
+        let Some(hit) = hit else { return };
+        let to_len = hit.to.chars().count();
+        let (hl, hs) = (hit.line, hit.start);
+        self.apply_substitution(std::slice::from_ref(&hit));
+        if let Popup::Viewer { line, col, goal, .. } = &mut self.popup {
+            *line = hl;
+            *col = hs + to_len;
+            *goal = *col;
+        }
+        self.scroll_viewer_to_cursor();
+        let left = hits.len() - 1;
+        self.message = Some(if self.lang == Lang::Ja {
+            format!("1 件置換（残り {left} 件、Enter で次へ）")
+        } else {
+            format!("replaced one — {left} left, Enter for the next")
+        });
+    }
+
     /// `:new` — an empty file to type into, with no name yet, docked in the
     /// pane you were looking at. `:w <name>` gives it one.
     ///
@@ -3377,6 +3563,7 @@ impl App {
             editing: false,
             dirty: false,
             undo: Vec::new(),
+            replace: None,
             redo: Vec::new(),
         };
         self.full_clear = true;

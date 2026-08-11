@@ -118,6 +118,46 @@ pub fn parse(input: &str) -> Result<Substitution, String> {
     Ok(Substitution { matcher, replacement: unescape(&replacement), confirm, global })
 }
 
+/// The same substitution, said with fields instead of with `s/old/new/`.
+///
+/// This is what the replace bar hands in: a pattern, a replacement, and the
+/// three switches every editor's replace dialog has. It always builds a regex,
+/// even for a plain needle, because the switches are exactly the things a
+/// literal cannot express — `Matcher::Literal` is case-insensitive by
+/// definition and knows nothing about word boundaries.
+///
+/// `word` wraps the pattern in `\b…\b`, which is what "whole word only"
+/// means; wrapping a user's own regex is deliberate, since someone who asks
+/// for both wants their pattern matched at word boundaries.
+pub fn from_fields(
+    find: &str,
+    with: &str,
+    regex: bool,
+    case_sensitive: bool,
+    word: bool,
+) -> Result<Substitution, String> {
+    if find.is_empty() {
+        return Err("nothing to search for".to_string());
+    }
+    // A plain needle carries the same escapes the replacement does, so `\r`
+    // means a carriage return here too — then it is escaped, so that the
+    // characters a regex would read as syntax are matched as themselves.
+    let body = if regex { find.to_string() } else { regex::escape(&unescape(find)) };
+    let body = if word { format!(r"\b(?:{body})\b") } else { body };
+    let re = regex::RegexBuilder::new(&body)
+        .case_insensitive(!case_sensitive)
+        .build()
+        .map_err(|e| crate::search::shorten_regex_error(&e))?;
+    Ok(Substitution {
+        matcher: Matcher::Regex(re),
+        replacement: unescape(with),
+        confirm: false,
+        // Every occurrence on a line: a replace dialog that stopped at the
+        // first one per line would be a surprise nobody asked for.
+        global: true,
+    })
+}
+
 /// Turn the escapes a replacement may carry into real characters. Without this
 /// there is no way to type a newline or a tab into the prompt at all.
 pub fn unescape(s: &str) -> String {
@@ -234,6 +274,35 @@ pub fn apply(lines: &[String], hits: &[Hit]) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
+    /// The replace bar's three switches, which are the things `s/old/new/`
+    /// cannot say: a literal is case-insensitive by definition and knows
+    /// nothing about word boundaries.
+    #[test]
+    fn from_fields_says_what_the_switches_mean() {
+        let run = |pat: &str, with: &str, re: bool, cs: bool, w: bool, lines: &[&str]| {
+            let lines: Vec<String> = lines.iter().map(|s| s.to_string()).collect();
+            let sub = from_fields(pat, with, re, cs, w).unwrap();
+            let hits = find(&sub, &lines, None);
+            apply(&lines, &hits)
+        };
+        // Case-insensitive unless asked, every occurrence on a line.
+        assert_eq!(run("cat", "dog", false, false, false, &["cat CAT"]), vec!["dog dog"]);
+        assert_eq!(run("cat", "dog", false, true, false, &["cat CAT"]), vec!["dog CAT"]);
+        // Whole words only.
+        assert_eq!(run("cat", "dog", false, false, true, &["cat cattle"]), vec!["dog cattle"]);
+        // A plain needle is matched as itself, syntax and all.
+        assert_eq!(run("a.c", "x", false, false, false, &["a.c abc"]), vec!["x abc"]);
+        // …and a regex is a regex.
+        assert_eq!(run(r"a.c", "x", true, false, false, &["a.c abc"]), vec!["x x"]);
+        // The escapes, in both halves.
+        assert_eq!(run(r"\t", " ", false, false, false, &["a\tb"]), vec!["a b"]);
+        assert_eq!(run("b", r"\tb", false, false, false, &["ab"]), vec!["a\tb"]);
+        // An empty pattern is a mistake, not a match on everything.
+        assert!(from_fields("", "x", false, false, false).is_err());
+        // A broken regex is reported rather than quietly matched literally.
+        assert!(from_fields("(", "x", true, false, false).is_err());
+    }
+
     use super::*;
 
     fn lines(v: &[&str]) -> Vec<String> {

@@ -4618,11 +4618,17 @@ fn draw_theme_picker(f: &mut Frame, area: Rect, popup: &mut Popup, lang: Lang) {
 /// prompt line when it is docked in a pane — the line `:` and `/` use in the
 /// file panes, so everything typed at cian is typed in the same place.
 pub(crate) fn editor_prompt(popup: &Popup, lang: Lang) -> Option<String> {
-    let Popup::Viewer { editing, sub_walk, block_input, sub_input, find_input, count, pending, .. } =
-        popup
+    let Popup::Viewer {
+        editing, sub_walk, block_input, sub_input, find_input, count, pending, replace, ..
+    } = popup
     else {
         return None;
     };
+    // The replace bar comes first: while it is open it is what is being typed
+    // into, and everything below describes something else.
+    if let Some(r) = replace {
+        return Some(replace_bar_line(r, lang));
+    }
     editor_prompt_parts(
         *editing,
         sub_walk.as_deref(),
@@ -4632,6 +4638,30 @@ pub(crate) fn editor_prompt(popup: &Popup, lang: Lang) -> Option<String> {
         *count,
         *pending,
         lang,
+    )
+}
+
+/// The replace bar as one line: the two fields with the caret in the one being
+/// typed into, the three switches with the ones that are on filled in, and the
+/// keys that act. It has to fit a narrow window, so the switches are two
+/// characters each and the key list is the shortest form that still names
+/// them.
+fn replace_bar_line(r: &crate::ReplaceBar, lang: Lang) -> String {
+    let caret = |s: &str, here: bool| if here { format!("{s}▏") } else { s.to_string() };
+    let sw = |on: bool, label: &str| format!("{}{}", if on { "☑" } else { "☐" }, label);
+    let (find, with) = (tr(lang, "find", "置換前"), tr(lang, "with", "置換後"));
+    format!(
+        "{find} {}   {with} {}   {} {} {}   {}",
+        caret(&r.find, !r.in_with),
+        caret(&r.with, r.in_with),
+        sw(r.regex, tr(lang, "re(M-r)", "正規表現(M-r)")),
+        sw(r.case_sensitive, tr(lang, "Aa(M-c)", "大小区別(M-c)")),
+        sw(r.word, tr(lang, "word(M-w)", "単語(M-w)")),
+        tr(
+            lang,
+            "Enter=this one  S-Enter=all  M-n=next  Tab=field  Esc",
+            "Enter=1件ずつ  S-Enter=すべて  M-n=次へ  Tab=欄移動  Esc=閉じる",
+        ),
     )
 }
 

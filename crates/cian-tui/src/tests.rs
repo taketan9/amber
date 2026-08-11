@@ -2280,6 +2280,104 @@
         assert!(app.layout_rects.left.width > narrowed, "and dragging moved it");
     }
 
+    /// The replace bar: two fields, three switches, and both ways of running
+    /// it. A bar rather than a dialog so the file stays in view — watching
+    /// each match land is what makes replace usable.
+    #[test]
+    fn the_replace_bar_replaces_one_at_a_time_and_all_at_once() {
+        let ctrl = |c: char| KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL);
+        let alt = |c: char| KeyEvent::new(KeyCode::Char(c), KeyModifiers::ALT);
+        let lines = |app: &App| match &app.popup {
+            Popup::Viewer { view, .. } => view.lines.clone(),
+            other => panic!("expected the panel, got {other:?}"),
+        };
+
+        let (_d, mut app) = viewer_on("cat CAT\ncattle\ncat\n");
+        app.handle_key(ctrl('h')).unwrap();
+        assert!(matches!(app.popup, Popup::Viewer { replace: Some(_), .. }), "the bar opened");
+
+        for c in "cat".chars() {
+            app.handle_key(key(c)).unwrap();
+        }
+        app.handle_key(code(KeyCode::Tab)).unwrap();
+        for c in "dog".chars() {
+            app.handle_key(key(c)).unwrap();
+        }
+        // It is on the line `:` and `/` use, with what was typed in it.
+        let bar = crate::render::editor_prompt(&app.popup, app.lang).unwrap();
+        assert!(bar.contains("cat") && bar.contains("dog"), "the bar shows both: {bar}");
+
+        // Enter takes the first match and stops on it.
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+        assert_eq!(lines(&app)[0], "dog CAT", "one replaced, the rest untouched");
+
+        // Shift+Enter takes the rest. Case-insensitive by default, so CAT goes
+        // too — and `cattle` with it, since nothing said whole words.
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::SHIFT)).unwrap();
+        assert_eq!(lines(&app), vec!["dog dog", "dogtle", "dog"]);
+
+        // Whole words only leaves `dogtle` alone. (Alt, not Ctrl: a letter has
+        // to stay a letter in a text field.)
+        let (_d, mut app) = viewer_on("cat cattle\n");
+        app.handle_key(ctrl('h')).unwrap();
+        for c in "cat".chars() {
+            app.handle_key(key(c)).unwrap();
+        }
+        app.handle_key(code(KeyCode::Tab)).unwrap();
+        for c in "dog".chars() {
+            app.handle_key(key(c)).unwrap();
+        }
+        app.handle_key(alt('w')).unwrap();
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::SHIFT)).unwrap();
+        assert_eq!(lines(&app), vec!["dog cattle"], "whole words only");
+
+        // Case sensitivity, and the switch showing in the bar.
+        let (_d, mut app) = viewer_on("cat CAT\n");
+        app.handle_key(ctrl('h')).unwrap();
+        for c in "cat".chars() {
+            app.handle_key(key(c)).unwrap();
+        }
+        app.handle_key(alt('c')).unwrap();
+        app.handle_key(code(KeyCode::Tab)).unwrap();
+        for c in "dog".chars() {
+            app.handle_key(key(c)).unwrap();
+        }
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::SHIFT)).unwrap();
+        assert_eq!(lines(&app), vec!["dog CAT"], "CAT is a different word now");
+
+        // A regex, and a replacement carrying an escape.
+        let (_d, mut app) = viewer_on("ORA-1234 here\n");
+        app.handle_key(ctrl('h')).unwrap();
+        for c in r"ORA-\d+".chars() {
+            app.handle_key(key(c)).unwrap();
+        }
+        app.handle_key(alt('r')).unwrap();
+        app.handle_key(code(KeyCode::Tab)).unwrap();
+        for c in "E".chars() {
+            app.handle_key(key(c)).unwrap();
+        }
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::SHIFT)).unwrap();
+        assert_eq!(lines(&app), vec!["E here"], "the regex matched");
+
+        // Esc closes it and changes nothing.
+        app.handle_key(ctrl('h')).unwrap();
+        app.handle_key(code(KeyCode::Esc)).unwrap();
+        assert!(matches!(app.popup, Popup::Viewer { replace: None, .. }), "the bar closed");
+        assert_eq!(lines(&app), vec!["E here"]);
+    }
+
+    /// `:replace` is the same bar, for the terminal that keeps Ctrl.
+    #[test]
+    fn replace_is_reachable_without_ctrl() {
+        let (_d, mut app) = viewer_on("one\n");
+        app.handle_key(key(':')).unwrap();
+        for c in "replace".chars() {
+            app.handle_key(key(c)).unwrap();
+        }
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+        assert!(matches!(app.popup, Popup::Viewer { replace: Some(_), .. }));
+    }
+
     /// Tab crosses the window; Shift+Tab steps the tab strip of whatever has
     /// the focus. Between two listings, between a listing and a file open in
     /// the editor panel, and between two of those panels — one key, because

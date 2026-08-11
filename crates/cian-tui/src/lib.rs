@@ -488,6 +488,8 @@ enum Popup {
         /// normal-mode edit or insert session (vim's coarse units, so `u` after
         /// typing a paragraph removes the paragraph, not one character).
         undo: Vec<ViewerSnap>,
+        /// The replace bar, while it is open (Ctrl+H, `:replace`).
+        replace: Option<Box<ReplaceBar>>,
         /// What `u` took away, waiting to be put back by `Ctrl+R` / `Ctrl+Y`.
         /// Emptied by the next real edit, as vim empties its own: once the
         /// history forks, the branch that was undone is gone.
@@ -708,6 +710,28 @@ enum EncTarget {
     Viewer(Box<Popup>),
     /// A stashed file diff to re-run under the chosen encoding.
     Diff(Box<Popup>),
+}
+
+/// The replace bar: two fields and the three switches every editor's replace
+/// has, on the line `:` and `/` already use.
+///
+/// It is a bar rather than a dialog on purpose — a dialog over the file hides
+/// the thing being replaced, and what makes replace usable is watching each
+/// match land. `:s/old/new/` is still there for the vi hand; this is the same
+/// engine with the parts named.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct ReplaceBar {
+    pub(crate) find: String,
+    pub(crate) with: String,
+    /// Which field the typing goes into: false = find, true = replacement.
+    pub(crate) in_with: bool,
+    /// `/re/`-style pattern rather than plain text.
+    pub(crate) regex: bool,
+    /// Off means the search is case-insensitive, which is cian's default
+    /// everywhere else and what people expect of a fresh dialog.
+    pub(crate) case_sensitive: bool,
+    /// Whole words only.
+    pub(crate) word: bool,
 }
 
 /// Typing the text for a rectangular edit. The rectangle is captured when the
@@ -4096,6 +4120,17 @@ pub(crate) fn viewer_manual_lines(lang: Lang) -> Vec<String> {
         ("Ctrl+Z", "undo (u, :undo)", "取り消し（u・:undo）"),
         ("Ctrl+Y  Ctrl+R", "redo (:redo)", "やり直し（:redo）"),
         ("Ctrl+A", "select the whole file", "ファイル全体を選択"),
+        ("Ctrl+H", "replace (:replace) — see below", "置換（:replace）— 下記参照"),
+    ];
+    const REPLACE: &[Row] = &[
+        ("Ctrl+H  :replace", "the replace bar — two fields, on the line below", "置換バーを開く — 2欄、下部の入力行に出ます"),
+        ("Tab", "move between find and replacement", "置換前 ↔ 置換後"),
+        ("Enter", "replace this one and stop on it", "1件だけ置換して、そこで止まる"),
+        ("Shift+Enter", "replace all of them", "すべて置換"),
+        ("Alt+n", "the next match, without replacing it", "置換せずに次の一致へ"),
+        ("Alt+r  Alt+c  Alt+w", "regex, match case, whole words", "正規表現・大小区別・単語単位"),
+        (r"\n \t \r", r"in either field — \r is a CR inside a line; :lf converts the file's endings", r"どちらの欄でも使える — \r は行内の CR。ファイル全体の改行は :lf / :crlf"),
+        (":s/old/new/gci", "the same thing said vi's way", "同じことを vi 流に書く場合"),
     ];
     const GRAMMAR: &[Row] = &[
         ("{op}{motion}", "d c y take any motion — dw d$ d} dfx c2w y%", "d c y はどの移動とも組める — dw d$ d} dfx c2w y%"),
@@ -4160,6 +4195,7 @@ pub(crate) fn viewer_manual_lines(lang: Lang) -> Vec<String> {
     ];
     let sections: &[((&str, &str), &[Row])] = &[
         (("The usual shortcuts", "おなじみのショートカット"), SHORTCUTS),
+        (("Replace", "置換"), REPLACE),
         (("Move", "移動"), MOVE),
         (("Find and replace", "検索と置換"), FIND),
         (("Select and copy", "選択とコピー"), SELECT),

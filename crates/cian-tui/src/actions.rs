@@ -935,6 +935,7 @@ impl App {
                     editing: false,
                     dirty: false,
                     undo: Vec::new(),
+                    replace: None,
                     redo: Vec::new(),
                 }
             }
@@ -998,6 +999,7 @@ impl App {
                     editing: false,
                     dirty: false,
                     undo: Vec::new(),
+                    replace: None,
                     redo: Vec::new(),
                 };
             }
