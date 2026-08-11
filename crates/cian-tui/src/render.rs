@@ -4650,11 +4650,20 @@ fn replace_bar_line(r: &crate::ReplaceBar, lang: Lang) -> String {
     let caret = |s: &str, here: bool| if here { format!("{s}▏") } else { s.to_string() };
     let sw = |on: bool, label: &str| format!("{}{}", if on { "☑" } else { "☐" }, label);
     let (find, with) = (tr(lang, "find", "置換前"), tr(lang, "with", "置換後"));
+    use cian_core::substitute::Pattern;
+    // Named rather than ticked: it is one question with three answers, and a
+    // box that is sometimes "wildcard" cannot be a box.
+    let how = match r.pattern {
+        Pattern::Plain => tr(lang, "as typed", "文字通り"),
+        Pattern::Wildcard => tr(lang, "* ? wildcard", "ワイルドカード(*?)"),
+        Pattern::Regex => tr(lang, "regex", "正規表現"),
+    };
     format!(
-        "{find} {}   {with} {}   {} {} {}   {}",
+        "{find} {}   {with} {}   {}{} {} {}   {}",
         caret(&r.find, !r.in_with),
         caret(&r.with, r.in_with),
-        sw(r.regex, tr(lang, "re(M-r)", "正規表現(M-r)")),
+        how,
+        tr(lang, "(M-r)", "(M-r)"),
         sw(r.case_sensitive, tr(lang, "Aa(M-c)", "大小区別(M-c)")),
         sw(r.word, tr(lang, "word(M-w)", "単語(M-w)")),
         tr(

@@ -141,14 +141,14 @@ Each open file keeps its own cursor, folds and unsaved edits. Closing a split re
 | `Ctrl+Q` / `Alt+v` (`:block`) | rectangular selection — `d` `I` `A` `c`. Terminals differ about which they hand over |
 | `V` then `I` / `A` | insert at the start / end of every selected line |
 | `r` after a search | replace, with the pattern already filled in |
-| **`Ctrl+H`** (or `:replace`) | **the replace bar** — `find` and `with` on the line along the bottom, the file still in view. `Tab` moves between the fields; `Enter` replaces this one and stops on it, `Shift+Enter` replaces all of them, `Alt+n` steps to the next without replacing. `Alt+r` regex, `Alt+c` match case, `Alt+w` whole words. `\n` `\t` `\r` work in either field. It is a real regex, so `*` repeats the character before it — `crm.*ne`, not `crm*ne`; a search that finds nothing says so |
+| **`Ctrl+H`** (or `:replace`) | **the replace bar** — `find` and `with` on the line along the bottom, the file still in view. `Tab` moves between the fields; `Enter` replaces this one and stops on it, `Shift+Enter` replaces all of them, `Alt+n` steps to the next without replacing. `Alt+r` cycles **as typed → `*` `?` wildcard → regex**, `Alt+c` match case, `Alt+w` whole words. `\n` `\t` `\r` work in either field. In wildcard mode `crm*ne` finds `crmaine`; in regex mode `*` repeats the character before it, so that pattern is `crm.*ne` — and a regex that finds nothing says so |
 | `:s/old/new/[gci]` | the same thing said vi's way — `g` every match on a line, `c` confirm each, `i` ignore case |
 | `:expand` / `:unexpand` | tabs ↔ spaces |
 | `:lf` / `:crlf` | convert the line ending |
 | `:nobom` | drop a UTF-8 BOM (from the panes: the marked files) |
 | `:g/re/d` | delete every line that matches — `:v/re/d` keeps only those |
 | `:sort` `:rsort` `:uniq` | line order and duplicates, over the file or the selection |
-| `:han` / `:zen` | width — `:han` normalises full-width ASCII *and* half-width katakana |
+| `:han` / `:zen` | width — `:han` normalises full-width ASCII *and* half-width katakana. Like every verb in this table it acts on a `v` / `V` selection when there is one, and on the whole file when there is not |
 | `:reindent` | put a document indented by three different hands onto one ladder |
 
 **A save gives the file back.** What is written is the file's own characters — the BOM it arrived with, the line ending it arrived with, its tabs. All three are invisible on screen and all three are real edits, so none happens except on purpose (`:nobom`, `:lf` / `:crlf`, `:expand`). The title shows them: `· UTF-8 BOM`, `· CRLF`.

@@ -2351,7 +2351,8 @@
         for c in r"ORA-\d+".chars() {
             app.handle_key(key(c)).unwrap();
         }
-        app.handle_key(alt('r')).unwrap();
+        app.handle_key(alt('r')).unwrap(); // wildcard
+        app.handle_key(alt('r')).unwrap(); // regex
         app.handle_key(code(KeyCode::Tab)).unwrap();
         for c in "E".chars() {
             app.handle_key(key(c)).unwrap();
@@ -2488,6 +2489,57 @@
         }
     }
 
+    /// The wildcard mode: `crm*ne` finds `crmaine`, which is what a `*` in a
+    /// search box is nearly always meant to say. It is its own mode rather
+    /// than a change to the regex one — Alt+r cycles as typed → wildcard →
+    /// regex — because `\d*` has to keep meaning what it says.
+    #[test]
+    fn the_wildcard_mode_reads_a_star_the_way_a_search_box_does() {
+        let ctrl = |c: char| KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL);
+        let alt = |c: char| KeyEvent::new(KeyCode::Char(c), KeyModifiers::ALT);
+        let (_d, mut app) = viewer_on("crmaine\ncrmne\n");
+        app.handle_key(ctrl('h')).unwrap();
+        for c in "crm*ne".chars() {
+            app.handle_key(key(c)).unwrap();
+        }
+        app.handle_key(alt('r')).unwrap(); // as typed → wildcard
+        let bar = crate::render::editor_prompt(&app.popup, app.lang).unwrap();
+        assert!(bar.contains("wildcard"), "the bar names the mode: {bar}");
+        app.handle_key(code(KeyCode::Tab)).unwrap();
+        for c in "X".chars() {
+            app.handle_key(key(c)).unwrap();
+        }
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::SHIFT)).unwrap();
+        assert_eq!(viewer_lines(&app), vec!["X", "X"], "both, empty run included");
+
+        // One more press is a real regex, where the same text means something
+        // else and says so.
+        let (_d, mut app) = viewer_on("crmaine\n");
+        app.handle_key(ctrl('h')).unwrap();
+        for c in "crm*ne".chars() {
+            app.handle_key(key(c)).unwrap();
+        }
+        app.handle_key(alt('r')).unwrap();
+        app.handle_key(alt('r')).unwrap();
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::SHIFT)).unwrap();
+        assert!(
+            app.message.as_deref().is_some_and(|m| m.contains("crm.*ne")),
+            "{:?}",
+            app.message,
+        );
+
+        // And a third press is back to as-typed, where `*` is a star.
+        let (_d, mut app) = viewer_on("a*b\naxb\n");
+        app.handle_key(ctrl('h')).unwrap();
+        for c in "a*b".chars() {
+            app.handle_key(key(c)).unwrap();
+        }
+        app.handle_key(code(KeyCode::Tab)).unwrap();
+        app.handle_key(key('Z')).unwrap();
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::SHIFT)).unwrap();
+        assert_eq!(viewer_lines(&app), vec!["Z", "axb"], "the literal star only");
+    }
+
     /// A regex that finds nothing says why, when the reason is the usual one.
     /// `crm*ne` is "cr, any number of m, then ne" — it does not match
     /// `crmaine`, and looks like it should.
@@ -2499,7 +2551,9 @@
         for c in "crm*ne".chars() {
             app.handle_key(key(c)).unwrap();
         }
-        app.handle_key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::ALT)).unwrap();
+        let alt_r = KeyEvent::new(KeyCode::Char('r'), KeyModifiers::ALT);
+        app.handle_key(alt_r).unwrap(); // wildcard
+        app.handle_key(alt_r).unwrap(); // regex
         app.handle_key(code(KeyCode::Tab)).unwrap();
         for c in "x".chars() {
             app.handle_key(key(c)).unwrap();

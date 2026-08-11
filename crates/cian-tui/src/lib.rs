@@ -725,8 +725,11 @@ pub(crate) struct ReplaceBar {
     pub(crate) with: String,
     /// Which field the typing goes into: false = find, true = replacement.
     pub(crate) in_with: bool,
-    /// `/re/`-style pattern rather than plain text.
-    pub(crate) regex: bool,
+    /// How the find field is read: as typed, as a shell-style wildcard, or as
+    /// a regular expression. Three states rather than a regex switch, because
+    /// what a `*` in a search box is nearly always meant to say — "anything,
+    /// here" — is neither of the other two.
+    pub(crate) pattern: cian_core::substitute::Pattern,
     /// Off means the search is case-insensitive, which is cian's default
     /// everywhere else and what people expect of a fresh dialog.
     pub(crate) case_sensitive: bool,
@@ -4128,9 +4131,10 @@ pub(crate) fn viewer_manual_lines(lang: Lang) -> Vec<String> {
         ("Enter", "replace this one and stop on it", "1件だけ置換して、そこで止まる"),
         ("Shift+Enter", "replace all of them", "すべて置換"),
         ("Alt+n", "the next match, without replacing it", "置換せずに次の一致へ"),
-        ("Alt+r  Alt+c  Alt+w", "regex, match case, whole words", "正規表現・大小区別・単語単位"),
+        ("Alt+r", "as typed → * ? wildcard → regex, in that order", "文字通り → ワイルドカード(*?) → 正規表現 の順に切替"),
+        ("Alt+c  Alt+w", "match case, whole words", "大小区別・単語単位"),
         (r"\n \t \r", r"in either field — \r is a CR inside a line; :lf converts the file's endings", r"どちらの欄でも使える — \r は行内の CR。ファイル全体の改行は :lf / :crlf"),
-        ("*  .*", "`*` repeats the character before it — any text is `.*`", "`*` は直前の文字の繰り返し。任意の文字列は `.*`"),
+        ("*", "wildcard: any text. In regex it repeats the character before it — there, any text is `.*`", "ワイルドカードでは任意の文字列。正規表現では直前の文字の繰り返しなので、任意の文字列は `.*`"),
         (":s/old/new/gci", "the same thing said vi's way", "同じことを vi 流に書く場合"),
     ];
     const GRAMMAR: &[Row] = &[
@@ -4188,7 +4192,7 @@ pub(crate) fn viewer_manual_lines(lang: Lang) -> Vec<String> {
     ];
     const LINES: &[Row] = &[
         (":sort :rsort :uniq", "order and de-duplicate", "並べ替え・重複除去"),
-        (":han  :zen", "full-width ↔ half-width", "全角 ↔ 半角"),
+        (":han  :zen", "full-width ↔ half-width — the selection, or the file", "全角 ↔ 半角 — 選択範囲、なければファイル全体"),
         (":expand  :unexpand", "tabs ↔ spaces", "タブ ↔ 空白"),
         (":lf  :crlf  :nobom", "line ending, byte-order mark", "改行コード・BOM"),
         (":reindent", "one indent ladder for the whole file", "インデントを揃える"),

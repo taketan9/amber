@@ -118,6 +118,42 @@ pub fn parse(input: &str) -> Result<Substitution, String> {
     Ok(Substitution { matcher, replacement: unescape(&replacement), confirm, global })
 }
 
+/// How the pattern half of a replace is read.
+///
+/// Three states rather than a regex on/off switch, because the thing people
+/// actually reach for `*` to say — "anything at all, here" — is neither. In a
+/// regex `*` repeats the character before it; `crm*ne` is a perfectly good
+/// pattern that does not match `crmaine`. Redefining it there would break
+/// every honest `\d*`, `[a-z]*` and `(ab)*` in the same stroke, so the glob
+/// reading gets a mode of its own instead.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Pattern {
+    /// Matched as typed, syntax and all.
+    #[default]
+    Plain,
+    /// `*` is any run of characters, `?` is any one. Everything else is
+    /// itself — the shell's reading, and the one a `*` in a search box is
+    /// nearly always meant to have.
+    Wildcard,
+    /// A real regular expression.
+    Regex,
+}
+
+/// `a*b?c` → `a.*b.c`, with everything else escaped. `*` and `?` are the only
+/// two: adding `[...]` would be halfway to a regex without being one, and the
+/// mode next door is a regex already.
+fn wildcard_to_regex(pattern: &str) -> String {
+    let mut out = String::with_capacity(pattern.len() * 2);
+    for c in pattern.chars() {
+        match c {
+            '*' => out.push_str(".*"),
+            '?' => out.push('.'),
+            other => out.push_str(&regex::escape(&other.to_string())),
+        }
+    }
+    out
+}
+
 /// The one regex mistake worth naming: `*` repeats the character before it,
 /// and everyone who has typed a shell glob expects it to mean "anything".
 /// `crm*ne` compiles, matches nothing in a file full of `crmaine`, and looks
@@ -173,7 +209,7 @@ pub fn star_hint(pattern: &str) -> Option<String> {
 pub fn from_fields(
     find: &str,
     with: &str,
-    regex: bool,
+    pattern: Pattern,
     case_sensitive: bool,
     word: bool,
 ) -> Result<Substitution, String> {
@@ -183,7 +219,11 @@ pub fn from_fields(
     // A plain needle carries the same escapes the replacement does, so `\r`
     // means a carriage return here too — then it is escaped, so that the
     // characters a regex would read as syntax are matched as themselves.
-    let body = if regex { find.to_string() } else { regex::escape(&unescape(find)) };
+    let body = match pattern {
+        Pattern::Regex => find.to_string(),
+        Pattern::Plain => regex::escape(&unescape(find)),
+        Pattern::Wildcard => wildcard_to_regex(&unescape(find)),
+    };
     let body = if word { format!(r"\b(?:{body})\b") } else { body };
     let re = regex::RegexBuilder::new(&body)
         .case_insensitive(!case_sensitive)
@@ -320,28 +360,28 @@ mod tests {
     /// nothing about word boundaries.
     #[test]
     fn from_fields_says_what_the_switches_mean() {
-        let run = |pat: &str, with: &str, re: bool, cs: bool, w: bool, lines: &[&str]| {
+        let run = |pat: &str, with: &str, re: Pattern, cs: bool, w: bool, lines: &[&str]| {
             let lines: Vec<String> = lines.iter().map(|s| s.to_string()).collect();
             let sub = from_fields(pat, with, re, cs, w).unwrap();
             let hits = find(&sub, &lines, None);
             apply(&lines, &hits)
         };
         // Case-insensitive unless asked, every occurrence on a line.
-        assert_eq!(run("cat", "dog", false, false, false, &["cat CAT"]), vec!["dog dog"]);
-        assert_eq!(run("cat", "dog", false, true, false, &["cat CAT"]), vec!["dog CAT"]);
+        assert_eq!(run("cat", "dog", Pattern::Plain, false, false, &["cat CAT"]), vec!["dog dog"]);
+        assert_eq!(run("cat", "dog", Pattern::Plain, true, false, &["cat CAT"]), vec!["dog CAT"]);
         // Whole words only.
-        assert_eq!(run("cat", "dog", false, false, true, &["cat cattle"]), vec!["dog cattle"]);
+        assert_eq!(run("cat", "dog", Pattern::Plain, false, true, &["cat cattle"]), vec!["dog cattle"]);
         // A plain needle is matched as itself, syntax and all.
-        assert_eq!(run("a.c", "x", false, false, false, &["a.c abc"]), vec!["x abc"]);
+        assert_eq!(run("a.c", "x", Pattern::Plain, false, false, &["a.c abc"]), vec!["x abc"]);
         // …and a regex is a regex.
-        assert_eq!(run(r"a.c", "x", true, false, false, &["a.c abc"]), vec!["x x"]);
+        assert_eq!(run(r"a.c", "x", Pattern::Regex, false, false, &["a.c abc"]), vec!["x x"]);
         // The escapes, in both halves.
-        assert_eq!(run(r"\t", " ", false, false, false, &["a\tb"]), vec!["a b"]);
-        assert_eq!(run("b", r"\tb", false, false, false, &["ab"]), vec!["a\tb"]);
+        assert_eq!(run(r"\t", " ", Pattern::Plain, false, false, &["a\tb"]), vec!["a b"]);
+        assert_eq!(run("b", r"\tb", Pattern::Plain, false, false, &["ab"]), vec!["a\tb"]);
         // An empty pattern is a mistake, not a match on everything.
-        assert!(from_fields("", "x", false, false, false).is_err());
+        assert!(from_fields("", "x", Pattern::Plain, false, false).is_err());
         // A broken regex is reported rather than quietly matched literally.
-        assert!(from_fields("(", "x", true, false, false).is_err());
+        assert!(from_fields("(", "x", Pattern::Regex, false, false).is_err());
     }
 
     /// `*` means "the character before it, repeated" — it is not a wildcard.
@@ -352,7 +392,7 @@ mod tests {
     fn a_star_repeats_the_thing_before_it() {
         let lines = vec!["crmaine".to_string()];
         let hit = |pat: &str| {
-            let sub = from_fields(pat, "x", true, false, false).unwrap();
+            let sub = from_fields(pat, "x", Pattern::Regex, false, false).unwrap();
             !find(&sub, &lines, None).is_empty()
         };
         assert!(!hit("crm*ne"), "zero-or-more m, then ne — crmaine has aine");
@@ -365,6 +405,30 @@ mod tests {
         assert!(star_hint(r"crm\w*ne").is_none(), "a class, repeated on purpose");
         assert!(star_hint("(ab)*c").is_none(), "a group, repeated on purpose");
         assert!(star_hint("plain").is_none());
+    }
+
+    /// The wildcard mode is where `*` means what a search box makes people
+    /// expect it to mean. It is a separate mode rather than a change to the
+    /// regex one, because `\d*` and `(ab)*` have to keep meaning what they
+    /// say.
+    #[test]
+    fn wildcards_mean_what_a_shell_means_by_them() {
+        let lines: Vec<String> =
+            ["crmaine", "crmne", "crmXne", "crm*ne"].iter().map(|s| s.to_string()).collect();
+        let hit = |pat: &str, mode: Pattern| {
+            let sub = from_fields(pat, "x", mode, false, false).unwrap();
+            find(&sub, &lines, None).iter().map(|h| h.line).collect::<Vec<_>>()
+        };
+        // `*` is any run, including an empty one.
+        assert_eq!(hit("crm*ne", Pattern::Wildcard), vec![0, 1, 2, 3]);
+        // `?` is exactly one.
+        assert_eq!(hit("crm?ne", Pattern::Wildcard), vec![2, 3]);
+        // Regex reads the same text quite differently, and still does.
+        assert_eq!(hit("crm*ne", Pattern::Regex), vec![1]);
+        // Everything else is itself: a dot is a dot here.
+        let dots: Vec<String> = vec!["a.c".to_string(), "abc".to_string()];
+        let sub = from_fields("a.c", "x", Pattern::Wildcard, false, false).unwrap();
+        assert_eq!(find(&sub, &dots, None).len(), 1, "the literal a.c only");
     }
 
     use super::*;

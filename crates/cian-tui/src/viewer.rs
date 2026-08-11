@@ -3,6 +3,7 @@
 //! grep-hit stepping, and copying the selection. Split out of lib.rs as an
 //! `impl App` block.
 use super::*;
+use cian_core::substitute::Pattern as Pat;
 
 impl App {
     /// Copy the viewer's selected lines (or the whole file when nothing is
@@ -3434,7 +3435,16 @@ impl App {
                 let mut find_only = false;
                 if let Popup::Viewer { replace: Some(r), .. } = &mut self.popup {
                     match c.to_ascii_lowercase() {
-                        'r' => r.regex = !r.regex,
+                        // One key cycling three states: as typed →
+                        // wildcard → regex. Two switches for one question
+                        // would let both be on at once, which means nothing.
+                        'r' => {
+                            r.pattern = match r.pattern {
+                                Pat::Plain => Pat::Wildcard,
+                                Pat::Wildcard => Pat::Regex,
+                                Pat::Regex => Pat::Plain,
+                            }
+                        }
                         'c' => r.case_sensitive = !r.case_sensitive,
                         'w' => r.word = !r.word,
                         'n' => find_only = true,
@@ -3469,7 +3479,7 @@ impl App {
         match cian_core::substitute::from_fields(
             &r.find,
             &r.with,
-            r.regex,
+            r.pattern,
             r.case_sensitive,
             r.word,
         ) {
@@ -3487,7 +3497,7 @@ impl App {
     /// than being left to conclude that replace is broken.
     fn say_no_matches(&mut self) {
         let hint = match &self.popup {
-            Popup::Viewer { replace: Some(r), .. } if r.regex => {
+            Popup::Viewer { replace: Some(r), .. } if r.pattern == Pat::Regex => {
                 cian_core::substitute::star_hint(&r.find)
             }
             _ => None,
