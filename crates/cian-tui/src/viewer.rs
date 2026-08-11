@@ -2564,15 +2564,7 @@ impl App {
                 }
             }
         }
-        // Bring the cursor back into view, the same clamp the edit keys do.
-        let body_h = (self.viewer_rect.height as usize).max(1);
-        if let Popup::Viewer { line, scroll, .. } = &mut self.popup {
-            if *line < *scroll {
-                *scroll = *line;
-            } else if *line >= *scroll + body_h {
-                *scroll = *line + 1 - body_h;
-            }
-        }
+        self.scroll_viewer_to_cursor();
         if !moved {
             self.message = Some(if back {
                 tr(self.lang, "already at oldest change", "これ以上戻れません")

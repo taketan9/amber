@@ -2135,7 +2135,13 @@ impl App {
             // bind `mark_all` to something else in keymap.lua where it does
             // not, or use `:markall`.
             (true, _, KeyCode::Char('a')) => self.mark_all(),
-            (true, _, KeyCode::Char('f')) => self.start_grep_prompt(),
+            // Ctrl+F is the grep; Ctrl+G is the same thing under the name
+            // Sakura gives it, which is the name a lot of people here reach
+            // for first. `:grep` is the third route, for the terminal that
+            // keeps Ctrl to itself.
+            (true, _, KeyCode::Char('f')) | (true, _, KeyCode::Char('g')) => {
+                self.start_grep_prompt()
+            }
             // `C` = command palette (mnemonic: Commands), `Z` = fuzzy-jump to a
             // recent dir (complements `z`, jump-to-typed-path). Letter keys, not
             // Ctrl (macOS terminals steal Ctrl+P/O) nor `;` (too easily confused

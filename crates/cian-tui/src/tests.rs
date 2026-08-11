@@ -2279,6 +2279,25 @@
         assert!(app.layout_rects.left.width > narrowed, "and dragging moved it");
     }
 
+    /// Ctrl+G opens the grep, as it does in Sakura. Ctrl+F was already the
+    /// key here; the two are the same prompt, so neither has to be the one
+    /// remembered.
+    #[test]
+    fn ctrl_g_greps_the_way_ctrl_f_does() {
+        for k in ['f', 'g'] {
+            let (_d, mut app) = app_with(&["a.txt"]);
+            app.handle_key(KeyEvent::new(KeyCode::Char(k), KeyModifiers::CONTROL)).unwrap();
+            assert!(
+                matches!(
+                    app.popup,
+                    Popup::TextInput { kind: InputKind::GrepRecursive, .. }
+                ),
+                "Ctrl+{k} opened the grep, got {:?}",
+                app.popup,
+            );
+        }
+    }
+
     /// The seven keys every editor shares — save, copy, cut, paste, undo,
     /// redo, select all — mean the same thing in all three of the panel's
     /// modes. A key you have to change modes to use is a key nobody reaches

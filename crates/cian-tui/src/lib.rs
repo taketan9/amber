@@ -3903,7 +3903,7 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry("Ctrl+R, F5", None, "refresh now", "今すぐ再読み込み"),
                 entry("f", Some(Search), "search in this folder", "このフォルダ内を検索"),
                 entry("Shift+F", None, "find by name, whole tree below here", "名前で検索（ここ以下のツリー全体）"),
-                entry("Ctrl+F", Some(Action::GrepRecursive), "grep inside files, whole tree below here (:grep too)", "ファイル内をgrep（ここ以下のツリー全体）— :grep でも可"),
+                entry("Ctrl+F / Ctrl+G", Some(Action::GrepRecursive), "grep inside files, whole tree below here (:grep too)", "ファイル内をgrep（ここ以下のツリー全体）— Ctrl+G（サクラと同じ）や :grep でも可"),
                 entry("  patterns", None, "  bare text = literal; /re/ = regex, /re/i ignores case; grep also reads SJIS", "  裸の文字列=そのまま、/re/=正規表現（/re/i で大小無視）、grep は SJIS も読む"),
                 entry("  p in results", None, "panelize: load the find/grep matches into the pane to mark & operate on", "検索結果を p でペイン化：マーク＆一括操作できる"),
                 entry("  r in results", None, "replace across every file the grep matched: preview each line, Space unchecks", "grep 結果の全ファイルを一括置換：1行ずつ確認、Space で除外"),

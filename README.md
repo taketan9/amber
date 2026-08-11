@@ -174,7 +174,7 @@ A rectangle is reckoned in **screen columns**, not characters, so a block drawn 
 | **`/`** | filter the listing as you type (Enter keeps it, Esc clears) |
 | **`f`** | jump between matches in this folder |
 | **`Shift+F`** | find by name, anywhere below this folder |
-| **`Ctrl+F`** | grep inside files — Enter opens the hit on its line |
+| **`Ctrl+F`** (or `Ctrl+G`, `:grep`) | grep inside files — Enter opens the hit on its line |
 | **`b`** | branch view — flatten the whole subtree into one listing |
 | **`,`** | sort by name / size / date / extension (`n` `s` `d` `e`) |
 
