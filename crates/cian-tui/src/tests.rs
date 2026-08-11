@@ -2270,6 +2270,44 @@
         assert!(app.layout_rects.left.width > narrowed, "and dragging moved it");
     }
 
+    /// A menu opened from the docked panel leaves the file stashed behind it,
+    /// and the stash was drawn over the whole window: opening the menu looked
+    /// like the panel had maximised itself, and Esc "restored" it.
+    #[test]
+    fn the_menu_does_not_move_the_docked_panel() {
+        let (_d, mut app) = app_with(&["a.txt", "b.log"]);
+        let at = app
+            .active_pane()
+            .unwrap()
+            .entries
+            .iter()
+            .position(|e| e.name == "b.log")
+            .unwrap();
+        app.active_pane_mut().unwrap().cursor = at;
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+        assert_eq!(app.viewer_dock, Some(FocusedPane::Left), "docked in this pane");
+        let _ = render(&mut app, 120, 30);
+        let docked_frame = app.viewer_frame;
+
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::SHIFT)).unwrap();
+        assert!(matches!(app.popup, Popup::ContextMenu { .. }), "the menu opened");
+        assert!(app.viewer_return.is_some(), "with the file waiting behind it");
+
+        // The panel stays where it was: the pane beside it still lists files,
+        // which it cannot do if the panel has taken the window.
+        let rows = render(&mut app, 120, 30);
+        let screen = rows.join("\n");
+        assert!(screen.contains("b.log"), "the file is still shown:\n{screen}");
+        assert!(screen.contains("Name"), "the other pane's listing is intact:\n{screen}");
+        assert!(screen.contains("a.txt"), "with its files on it:\n{screen}");
+
+        // Esc puts the menu away and changes nothing else.
+        app.handle_key(code(KeyCode::Esc)).unwrap();
+        assert!(matches!(app.popup, Popup::Viewer { .. }), "the file is back");
+        let _ = render(&mut app, 120, 30);
+        assert_eq!(app.viewer_frame, docked_frame, "in the same place it was");
+    }
+
     /// Dialogs follow the theme now — a light theme's menus are light — so
     /// everything drawn on them has to read on them. They were painted for a
     /// dark surface: fixed greys, the theme accent used as body text, the

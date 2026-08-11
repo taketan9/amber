@@ -411,8 +411,13 @@ pub(crate) fn draw(f: &mut Frame, app: &mut App) {
     // Shift+Tab, or in the pane whose listing it replaced when Enter opened
     // it. Everything below — the geometry the mouse is measured against and
     // the drawing itself — is told the same rectangle.
+    // `viewer_return` counts too: a menu opened from the panel leaves the
+    // file stashed behind it, and it is still docked in its pane — drawing it
+    // over the whole window instead looked like the panel had maximised.
     let viewer_area = match app.viewer_dock {
-        Some(p) if matches!(app.popup, Popup::Viewer { .. }) => app.layout_rects.for_pane(p),
+        Some(p) if matches!(app.popup, Popup::Viewer { .. }) || app.viewer_return.is_some() => {
+            app.layout_rects.for_pane(p)
+        }
         _ => area,
     };
     if !matches!(app.popup, Popup::None) {
@@ -503,11 +508,22 @@ pub(crate) fn draw(f: &mut Frame, app: &mut App) {
                     (first, second)
                 };
                 let mut other = other;
-                draw_viewer(f, theirs, &mut other, lang, (show_ws, ruler), None, (0, &[], &[]), false, true);
-                draw_viewer(f, mine, &mut behind, lang, (show_ws, ruler), None, (0, &[], &[]), false, true);
+                let docked = app.viewer_dock.is_some();
+                draw_viewer(f, theirs, &mut other, lang, (show_ws, ruler), None, (0, &[], &[]), docked, true);
+                draw_viewer(f, mine, &mut behind, lang, (show_ws, ruler), None, (0, &[], &[]), docked, true);
                 app.viewer_split = Some(other);
             } else {
-                draw_viewer(f, area, &mut behind, lang, (show_ws, ruler), None, (0, &[], &[]), false, true);
+                draw_viewer(
+                    f,
+                    viewer_area,
+                    &mut behind,
+                    lang,
+                    (show_ws, ruler),
+                    None,
+                    (0, &[], &[]),
+                    app.viewer_dock.is_some(),
+                    true,
+                );
             }
             app.viewer_return = Some(behind);
         }
