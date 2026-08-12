@@ -289,6 +289,14 @@ struct PaletteItem {
 }
 
 #[derive(Debug, Clone)]
+// `Viewer` is far wider than the rest, and deliberately so: it is the one
+// variant that is on screen most of the time, and putting it behind a pointer
+// would buy a smaller enum with an indirection on the hot path. Everything
+// here that *can* be boxed already is — the view itself, the replace bar, the
+// block prompt, the substitute walk, the grep plan — and what is left is a
+// long tail of small fields rather than one big one. (Windows' clippy is the
+// one that notices; the variant is a shade wider there.)
+#[allow(clippy::large_enum_variant)]
 enum Popup {
     None,
     ConfirmDelete { targets: Vec<PathBuf> },
