@@ -2546,6 +2546,90 @@
         assert_eq!(viewer_lines(&app)[0], "All doneAll", "p pasted what was copied");
     }
 
+    /// The whole operator/object grid, since `viw` turned out to be broken
+    /// and the only way to know the rest are not is to press them. Each row
+    /// is: the keys, the buffer they leave, what went to the clipboard, and
+    /// whether it ended up typing.
+    #[test]
+    fn every_operator_and_object_pairing() {
+        let run = |setup: &str, keys: &str| -> (String, String, bool) {
+            let (_d, mut app) = viewer_on(&format!("{setup}\n"));
+            for c in keys.chars() {
+                app.handle_key(key(c)).unwrap();
+            }
+            let editing = matches!(app.popup, Popup::Viewer { editing: true, .. });
+            (viewer_lines(&app).join("|"), app.yank.clone().unwrap_or_default(), editing)
+        };
+        // (buffer, keys) -> (buffer after, yanked, left typing)
+        let cases: &[(&str, &str, &str, &str, bool)] = &[
+            // Quotes and brackets, inside and around.
+            ("say \"hi there\" now", "fhci\"", "say \"\" now", "hi there", true),
+            ("say \"hi there\" now", "fhdi\"", "say \"\" now", "hi there", false),
+            ("say \"hi there\" now", "fhyi\"", "say \"hi there\" now", "hi there", false),
+            ("say \"hi there\" now", "fhda\"", "say  now", "\"hi there\"", false),
+            ("x 'abc' y", "faci'", "x '' y", "abc", true),
+            ("x 'abc' y", "fada'", "x  y", "'abc'", false),
+            ("say `x` now", "fxci`", "say `` now", "x", true),
+            ("call(one, two) end", "foci(", "call() end", "one, two", true),
+            // The closing half of a pair names the same object.
+            ("call(one, two) end", "fodi)", "call() end", "one, two", false),
+            ("call(one, two) end", "foya(", "call(one, two) end", "(one, two)", false),
+            ("arr[1] end", "f1di[", "arr[] end", "1", false),
+            ("map{a: 1} end", "f1di{", "map{} end", "a: 1", false),
+            ("map{a: 1} end", "f1ca{", "map end", "{a: 1}", true),
+            ("tag<b> end", "fbdi<", "tag<> end", "b", false),
+            // Words, inside and around.
+            ("All done here", "ciw", " done here", "All", true),
+            ("All done here", "diw", " done here", "All", false),
+            ("All done here", "yiw", "All done here", "All", false),
+            ("All done here", "caw", "done here", "All ", true),
+            ("All done here", "daw", "done here", "All ", false),
+            // Operator plus motion, with and without a count.
+            ("All done here", "cw", " done here", "All", true),
+            ("All done here", "dw", "done here", "All ", false),
+            ("All done here", "d2w", "here", "All done ", false),
+            ("All done here", "2dw", "here", "All done ", false),
+            ("All done here", "c2w", " here", "All done", true),
+            ("All done here", "de", " done here", "All", false),
+            ("All done here", "d$", "", "All done here", false),
+            ("All done here", "dtd", "done here", "All ", false),
+            // Line-wise.
+            ("one\ntwo\nthree", "dd", "two|three", "one\n", false),
+            ("one\ntwo\nthree", "2dd", "three", "one\ntwo\n", false),
+            ("one\ntwo\nthree", "dj", "three", "one\ntwo\n", false),
+            ("one\ntwo\nthree", "cc", "|two|three", "one\n", true),
+            ("one\ntwo\nthree", "yy", "one|two|three", "one\n", false),
+            // An object spanning lines is line-wise, as it is in vi: the
+            // brackets stay where they are rather than meeting on one line.
+            ("call(\n  one,\n)", "jdi(", "call(|)", "  one,\n", false),
+            // Over a selection the object is what to select — the case that
+            // was typing a `w` into the file.
+            ("say \"hi\" now", "fhvi\"y", "say \"hi\" now", "hi", false),
+            ("x 'abc' y", "fava'y", "x 'abc' y", "'abc'", false),
+            ("All done here", "vawy", "All done here", "All ", false),
+        ];
+        for (setup, keys, buffer, yanked, typing) in cases {
+            let got = run(setup, keys);
+            assert_eq!(
+                (got.0.as_str(), got.1.as_str(), got.2),
+                (*buffer, *yanked, *typing),
+                "{keys} on {setup:?}",
+            );
+        }
+
+        // An operator followed by another operator is not a command. vi drops
+        // it; what must not happen is the machine staying armed, so that the
+        // next key is read as the tail of something abandoned.
+        let (_d, mut app) = viewer_on("All done here\n");
+        for c in "dc".chars() {
+            app.handle_key(key(c)).unwrap();
+        }
+        assert!(matches!(app.popup, Popup::Viewer { pending: None, .. }), "nothing left armed");
+        assert!(app.vim_obj.is_none() && app.vim_wait.is_none());
+        app.handle_key(key('x')).unwrap();
+        assert_eq!(viewer_lines(&app)[0], "ll done here", "and x is x again");
+    }
+
     /// The vi keys the panel was missing, and the two it had but could not
     /// reach. Everything here was reported by using it.
     #[test]
