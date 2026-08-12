@@ -34,8 +34,7 @@ mod util;
 use cian_lua::glob_match;
 use util::{
     centered_rect, fit, order_pos, pad_left, pad_to, truncate, truncate_middle, union_rect,
-    viewer_charwise, viewer_find, viewer_match_bracket, viewer_paragraph, viewer_word_back,
-    viewer_word_forward, vlen, width, wrap_str,
+    viewer_charwise, viewer_find, viewer_match_bracket, viewer_paragraph, vlen, width, wrap_str,
 };
 
 mod ai;
@@ -4106,6 +4105,8 @@ pub(crate) fn viewer_manual_lines(lang: Lang) -> Vec<String> {
         ("{  }", "previous, next blank line", "前後の空行へ"),
         ("%", "the matching bracket", "対応する括弧へ"),
         ("gg  G  5gg", "the top, the bottom, line 5", "先頭・末尾・5行目"),
+        ("w b e", "word by word — a word stops at punctuation", "単語単位 — 記号で区切られます"),
+        ("W B E  ge gE", "…and WORD by WORD, which runs to the next space", "…WORD 単位（空白まで一続き）・ge は前の語の末尾へ"),
         ("]]  [[", "next, previous heading or definition", "次・前の見出し／定義"),
         ("zz  zt  zb", "this line to the middle, top, bottom", "この行を中央・上・下へ"),
         ("m a   ' a", "set a mark here, jump back to it (` a for the column)", "ここにマーク／マークへ戻る（` a は桁も）"),
@@ -4164,7 +4165,8 @@ pub(crate) fn viewer_manual_lines(lang: Lang) -> Vec<String> {
         ("s  S  C", "substitute a character, a line, to the end of the line", "1文字・1行・行末までを打ち直す"),
         ("r x  R", "stamp one character over this one (3rx three), or overwrite until Esc", "1文字を上書き（3rx で3文字）・R は Esc まで上書き"),
         ("x  dd  D", "delete a character, a line, to end of line", "1文字・1行・行末まで削除"),
-        ("J  gJ  3J", "join the next line with a space, without one, or three of them", "次行を連結（空白あり／なし／3行）"),
+        ("gJ  :combine", "join the next line up — gJ without a space, :combine with one", "次行を連結 — gJ は空白なし、:combine は空白あり"),
+        (":combine 3  :combine!", "three lines, or without the space", ":combine 3 で3行、:combine! は空白なし"),
         ("d", "cut the selection", "選択を切り取り"),
         (">>  <<", "shift lines by a tab stop (> and < on a selection)", "行をタブ幅ずらす（選択中は > と <）"),
         ("~", "swap the case under the cursor", "カーソル位置の大小を反転"),
@@ -4186,7 +4188,7 @@ pub(crate) fn viewer_manual_lines(lang: Lang) -> Vec<String> {
         ("Enter (in a listing)", "open a file in this panel", "一覧で Enter — このパネルで開く"),
         ("F3 (in a listing)", "open it in the *other* pane instead", "一覧で F3 — 反対のペインで開く"),
         ("F12", "this panel fills the window, and back", "このパネルを全画面に／戻す"),
-        ("Shift+H  L  K", "focus the left pane, the right, the shell (J is vi's join)", "左ペイン／右ペイン／シェルへ移動（J は連結なので K）"),
+        ("Shift+H  L  J", "focus the left pane, the right, the shell", "左ペイン／右ペイン／シェルへ移動"),
         ("Tab", "cross to the pane beside it, and back", "隣のペインへ移動／戻る"),
         ("Shift+Tab", "the next open file in this panel (F2 / Shift+F2 too)", "このパネルの次のファイルへ（F2 / Shift+F2 でも）"),
         (":new", "a blank file to type into, docked here", "空のファイルをここに開く"),

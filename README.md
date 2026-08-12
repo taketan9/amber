@@ -74,7 +74,7 @@ Fuzzy pickers: type a few letters, press Enter.
 
 ## The text editor panel
 
-`Enter` and `F3` open the same thing — everything below — in two different places. `Enter` **docks it in the pane** the file was listed in: the other pane stays beside it, the keys are the file's while that pane has focus, and its hints move to the bar along the bottom. `F3` opens it **in the other pane** instead — the listing stays where it is and the file is read beside it, which is what `o` and `Shift+O` already say about a directory. A second `F3` there opens **another tab** rather than replacing what is being read. **F12** makes the panel fill the window and puts it back, which is the same zoom the listings and the shell have. `Tab` crosses between the file and the listing next to it — and between two open files, when both panes hold one — `Shift+Tab` steps this panel's own tabs, `Shift+H` / `Shift+L` / `Shift+K` move the focus to the left pane, the right pane or the shell while you are reading (`J` is vi's join, so the shell is on `K` here), a click anywhere else moves it there too, and `:q` closes the file.
+`Enter` and `F3` open the same thing — everything below — in two different places. `Enter` **docks it in the pane** the file was listed in: the other pane stays beside it, the keys are the file's while that pane has focus, and its hints move to the bar along the bottom. `F3` opens it **in the other pane** instead — the listing stays where it is and the file is read beside it, which is what `o` and `Shift+O` already say about a directory. A second `F3` there opens **another tab** rather than replacing what is being read. **F12** makes the panel fill the window and puts it back, which is the same zoom the listings and the shell have. `Tab` crosses between the file and the listing next to it — and between two open files, when both panes hold one — `Shift+Tab` steps this panel's own tabs, `Shift+H` / `Shift+L` / `Shift+J` move the focus to the left pane, the right pane or the shell while you are reading, a click anywhere else moves it there too, and `:q` closes the file.
 
 Docked, the panel keeps its name and its **✕** on its frame and puts everything else along the foot of the window: its keys on the hint bar, its mode (`READ` / `EDIT` / `COMMAND` / `VISUAL`) and the cursor's line and column on the status bar, and the `:` and `/` prompts on cian's own prompt line — the same line the file panes type on.
 
@@ -110,7 +110,7 @@ Vim-flavoured: `h j k l`, `w b`, `0 $`, `gg G`, `Ctrl-D/U`, `Ctrl-F/B`, `{` `}`,
 | `Space` / `za` / `zA` | fold one section / toggle all |
 | `:summary` / `:coding` | ask the AI to summarise the file / talk about its code (right-click too) |
 | `?` | the viewer's own key list, grouped by what you are doing |
-| **Tab** | cross to the pane beside it and back — a listing or another open file, whichever is there. Never the shell: that is `Shift+K` from the panel, `Shift+J` from a listing |
+| **Tab** | cross to the pane beside it and back — a listing or another open file, whichever is there. Never the shell: that is `Shift+J` |
 | **Shift+Tab** | the next open file **in this panel** (`F2` / `Shift+F2` step either way) |
 | `:new` | a blank file to type into, docked in this pane; `:w <name>` saves it and adopts the name |
 | `m a` / `' a` | set a mark, jump back to it (`` ` a`` for the column too) |
@@ -132,11 +132,13 @@ Each open file keeps its own cursor, folds and unsaved edits. Closing a split re
 | `i` `a` `A` `o` `O` `I` | insert — before, after, at the end of the line, on a new one; `Ctrl+S` saves in the file's own encoding, `Esc` leaves, `Shift+Q` discards |
 | `s` `S` `C` | substitute a character, a line, the rest of the line |
 | `r`*x* / `R` | stamp one character over this one (`3rx` for three); `R` overwrites until `Esc` |
-| `J` / `gJ` / `3J` | join the next line with a space, without one, or three of them |
+
 | `x` `dd` `D` `J` | delete and join, vim's small change set; `d` cuts a `v`/`V` selection |
 | `p` / `P` | paste after / at the cursor, vi's way |
 | `u` | undo |
 | `gg` / `G` / `5gg` | the top, the bottom, line 5 |
+| `w` `b` `e` / `W` `B` `E` / `ge` | word by word (stopping at punctuation) and WORD by WORD (running to the next space); `ge` is the end of the word behind you |
+| `gJ` / `:combine` / `:combine!` / `:combine 3` | join the next line up — without a space, with one, or three lines. (`Shift+J` is the shell.) |
 | `Ctrl+R` | redo |
 | `Ctrl+S` `Ctrl+C` `Ctrl+X` `Ctrl+V` `Ctrl+Z` `Ctrl+Y` `Ctrl+A` | save, copy, cut, paste, undo, redo, select all — in **all three modes**, reading, editing and over a selection. `Ctrl+C` / `Ctrl+X` take the selection, or the cursor's line when there is none. Each has a command for the terminal that keeps Ctrl: `:w` `:undo` `:redo` |
 | `~` | swap the case under the cursor |

@@ -101,16 +101,40 @@ pub(crate) fn vlen(view: &cian_core::viewer::View, l: usize) -> usize {
 
 /// `w` / `b` over a plain buffer, for [`crate::vim`], which works on the
 /// lines rather than on a `View`.
-pub(crate) fn viewer_word_forward_view(
+/// What counts as "the same kind of character" for a word motion.
+///
+/// vi has two: a *word* stops at punctuation (`foo.bar` is three of them) and
+/// a *WORD* runs to the next space (`foo.bar` is one). Every motion below
+/// takes the flag rather than duplicating itself, which is also how `w` and
+/// `W` stay in step when one of them is fixed.
+pub(crate) fn same_class(a: char, b: char, big: bool) -> bool {
+    if big {
+        a.is_whitespace() == b.is_whitespace()
+    } else {
+        a.is_whitespace() == b.is_whitespace()
+            && (a.is_whitespace() || is_word_char(a) == is_word_char(b))
+    }
+}
+
+pub(crate) fn is_word_char(c: char) -> bool {
+    c.is_alphanumeric() || c == '_'
+}
+
+pub(crate) fn viewer_word_forward_big(
     lines: &[String],
     line: usize,
     col: usize,
     last: usize,
+    big: bool,
 ) -> (usize, usize) {
     let chars: Vec<char> = lines.get(line).map(|s| s.chars().collect()).unwrap_or_default();
     let mut i = col;
-    while i < chars.len() && !chars[i].is_whitespace() {
-        i += 1;
+    // Off the run the cursor is standing in — one run of word characters, or
+    // one run of punctuation, unless this is a WORD.
+    if let Some(&here) = chars.get(i) {
+        while i < chars.len() && !chars[i].is_whitespace() && same_class(chars[i], here, big) {
+            i += 1;
+        }
     }
     while i < chars.len() && chars[i].is_whitespace() {
         i += 1;
@@ -130,7 +154,13 @@ pub(crate) fn viewer_word_forward_view(
     (line, chars.len())
 }
 
-pub(crate) fn viewer_word_back_view(lines: &[String], line: usize, col: usize) -> (usize, usize) {
+/// `b` / `B`: the start of this word, or of the one before it.
+pub(crate) fn viewer_word_back_big(
+    lines: &[String],
+    line: usize,
+    col: usize,
+    big: bool,
+) -> (usize, usize) {
     let chars: Vec<char> = lines.get(line).map(|s| s.chars().collect()).unwrap_or_default();
     let mut i = col;
     if i == 0 {
@@ -143,8 +173,10 @@ pub(crate) fn viewer_word_back_view(lines: &[String], line: usize, col: usize) -
         while j > 0 && c[j - 1].is_whitespace() {
             j -= 1;
         }
-        while j > 0 && !c[j - 1].is_whitespace() {
-            j -= 1;
+        if let Some(&here) = c.get(j.saturating_sub(1)) {
+            while j > 0 && !c[j - 1].is_whitespace() && same_class(c[j - 1], here, big) {
+                j -= 1;
+            }
         }
         return (prev, j);
     }
@@ -152,74 +184,32 @@ pub(crate) fn viewer_word_back_view(lines: &[String], line: usize, col: usize) -
     while i > 0 && chars[i].is_whitespace() {
         i -= 1;
     }
-    while i > 0 && !chars[i - 1].is_whitespace() {
-        i -= 1;
+    if let Some(&here) = chars.get(i) {
+        while i > 0 && !chars[i - 1].is_whitespace() && same_class(chars[i - 1], here, big) {
+            i -= 1;
+        }
     }
     (line, i)
 }
 
-/// `w`: the start of the next word, moving onto the next line when the current
-/// one runs out. Words are runs of non-whitespace (a simplification of vim's
-/// word/WORD split that reads naturally for code).
-pub(crate) fn viewer_word_forward(
-    view: &cian_core::viewer::View,
+/// `e` / `E`: the end of this word, or of the next one when already on it.
+pub(crate) fn viewer_word_end_big(
+    lines: &[String],
     line: usize,
     col: usize,
-    last: usize,
+    big: bool,
 ) -> (usize, usize) {
-    let chars: Vec<char> = view.lines.get(line).map(|s| s.chars().collect()).unwrap_or_default();
-    let mut i = col;
-    // Skip the rest of the current word, then any whitespace.
-    while i < chars.len() && !chars[i].is_whitespace() {
-        i += 1;
-    }
+    let chars: Vec<char> = lines.get(line).map(|s| s.chars().collect()).unwrap_or_default();
+    let mut i = col + 1;
     while i < chars.len() && chars[i].is_whitespace() {
         i += 1;
     }
-    if i < chars.len() {
-        return (line, i);
-    }
-    // Fell off the end: first non-blank of the next non-empty line.
-    let mut l = line + 1;
-    while l <= last {
-        let c: Vec<char> = view.lines[l].chars().collect();
-        let first = c.iter().position(|ch| !ch.is_whitespace()).unwrap_or(0);
-        if !c.is_empty() {
-            return (l, first);
+    if let Some(&here) = chars.get(i) {
+        while i + 1 < chars.len() && !chars[i + 1].is_whitespace() && same_class(chars[i + 1], here, big) {
+            i += 1;
         }
-        l += 1;
     }
-    (line, chars.len())
-}
-
-/// `b`: the start of the current or previous word.
-pub(crate) fn viewer_word_back(view: &cian_core::viewer::View, line: usize, col: usize) -> (usize, usize) {
-    let chars: Vec<char> = view.lines.get(line).map(|s| s.chars().collect()).unwrap_or_default();
-    let mut i = col;
-    if i == 0 {
-        // At the line start: end of the previous line's last word.
-        if line == 0 {
-            return (0, 0);
-        }
-        let prev = line - 1;
-        let c: Vec<char> = view.lines[prev].chars().collect();
-        let mut j = c.len();
-        while j > 0 && c[j - 1].is_whitespace() {
-            j -= 1;
-        }
-        while j > 0 && !c[j - 1].is_whitespace() {
-            j -= 1;
-        }
-        return (prev, j);
-    }
-    i -= 1;
-    while i > 0 && chars[i].is_whitespace() {
-        i -= 1;
-    }
-    while i > 0 && !chars[i - 1].is_whitespace() {
-        i -= 1;
-    }
-    (line, i)
+    (line, i.min(chars.len().saturating_sub(1)))
 }
 
 /// `%`: from the bracket at or after the cursor on its line, the matching

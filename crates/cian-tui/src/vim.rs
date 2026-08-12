@@ -82,34 +82,35 @@ pub(crate) fn motion(
         // `$` is inclusive: `d$` takes the last character with it.
         '$' => m((l, len_of(lines, l).saturating_sub(1)), Sweep::Inclusive),
         'G' => m((last_line, 0), Sweep::Linewise),
-        'w' => {
+        // The capitals are the WORD forms: a word stops at punctuation, a
+        // WORD runs to the next space. One pair of functions, one flag.
+        'w' | 'W' => {
+            let big = key == 'W';
             for _ in 0..n {
-                let (nl, nc) = crate::util::viewer_word_forward_view(lines, l, c, last_line);
+                let (nl, nc) =
+                    crate::util::viewer_word_forward_big(lines, l, c, last_line, big);
                 l = nl;
                 c = nc;
             }
             m((l, c), Sweep::Exclusive)
         }
-        'b' => {
+        'b' | 'B' => {
+            let big = key == 'B';
             for _ in 0..n {
-                let (nl, nc) = crate::util::viewer_word_back_view(lines, l, c);
+                let (nl, nc) = crate::util::viewer_word_back_big(lines, l, c, big);
                 l = nl;
                 c = nc;
             }
             m((l, c), Sweep::Exclusive)
         }
-        // `e` — the end of this word, or of the next one when already there.
-        'e' => {
+        // `e` / `E` — the end of this word, or of the next one when already
+        // sitting on it.
+        'e' | 'E' => {
+            let big = key == 'E';
             for _ in 0..n {
-                let cs = chars_of(lines, l);
-                let mut i = c + 1;
-                while i < cs.len() && cs[i].is_whitespace() {
-                    i += 1;
-                }
-                while i + 1 < cs.len() && !cs[i + 1].is_whitespace() {
-                    i += 1;
-                }
-                c = i.min(cs.len().saturating_sub(1));
+                let (nl, nc) = crate::util::viewer_word_end_big(lines, l, c, big);
+                l = nl;
+                c = nc;
             }
             m((l, c), Sweep::Inclusive)
         }

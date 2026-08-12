@@ -2145,12 +2145,11 @@
         assert_eq!(app.focused, FocusedPane::Right, "the click moved the focus");
         assert!(matches!(app.popup, Popup::Viewer { .. }), "the file is still open");
 
-        // Shift+H comes back to it, Shift+K goes down to the shell — `J` is
-        // vi's join, so the shell moved to the letter vi leaves alone.
+        // Shift+H comes back to it, Shift+J goes down to the shell.
         app.handle_key(KeyEvent::new(KeyCode::Char('H'), KeyModifiers::SHIFT)).unwrap();
         assert_eq!(app.focused, FocusedPane::Left);
-        app.handle_key(KeyEvent::new(KeyCode::Char('K'), KeyModifiers::SHIFT)).unwrap();
-        assert_eq!(app.focused, FocusedPane::Shell, "Shift+K while reading");
+        app.handle_key(KeyEvent::new(KeyCode::Char('J'), KeyModifiers::SHIFT)).unwrap();
+        assert_eq!(app.focused, FocusedPane::Shell, "Shift+J while reading");
         app.handle_key(code(KeyCode::Esc)).unwrap();
 
         // …but not while editing: there `H` is a character.
@@ -2550,15 +2549,55 @@
         assert_eq!(viewer_lines(&app)[0], "xxyYdef", "and insert inserts again");
         app.handle_key(code(KeyCode::Esc)).unwrap();
 
-        // `J` joins with a space, `gJ` without, and a count takes more lines.
+        // `:combine` joins with a space, `gJ` without, and a count takes
+        // more lines. `J` is the window's key for the shell below.
+        let combine = |app: &mut App, cmd: &str| {
+            app.handle_key(key(':')).unwrap();
+            for c in cmd.chars() {
+                app.handle_key(key(c)).unwrap();
+            }
+            app.handle_key(code(KeyCode::Enter)).unwrap();
+        };
         let (_d, mut app) = viewer_on("one\ntwo\nthree\nfour\n");
-        press(&mut app, "J");
+        combine(&mut app, "combine");
         assert_eq!(viewer_lines(&app)[0], "one two");
         press(&mut app, "gJ");
         assert_eq!(viewer_lines(&app)[0], "one twothree");
         let (_d, mut app) = viewer_on("one\ntwo\nthree\nfour\n");
-        press(&mut app, "3J");
-        assert_eq!(viewer_lines(&app), vec!["one two three", "four"], "3J took three lines");
+        combine(&mut app, "combine 3");
+        assert_eq!(viewer_lines(&app), vec!["one two three", "four"], "three lines");
+        let (_d, mut app) = viewer_on("one\ntwo\n");
+        combine(&mut app, "combine!");
+        assert_eq!(viewer_lines(&app), vec!["onetwo"], "the ! form adds no space");
+
+        // W / E / B are the WORD forms: a word stops at punctuation, a WORD
+        // runs to the next space.
+        let (_d, mut app) = viewer_on("one two.three four\n");
+        press(&mut app, "w");
+        assert_eq!(at(&app).1, 4, "w to `two`");
+        press(&mut app, "w");
+        assert_eq!(at(&app).1, 7, "…and w stops at the dot");
+        press(&mut app, "0W");
+        assert_eq!(at(&app).1, 4, "W to `two.three`");
+        press(&mut app, "W");
+        assert_eq!(at(&app).1, 14, "…and W skips over the dot to `four`");
+        press(&mut app, "0E");
+        assert_eq!(at(&app).1, 2, "E to the end of `one`");
+        press(&mut app, "E");
+        assert_eq!(at(&app).1, 12, "…then the end of `two.three`");
+        press(&mut app, "$B");
+        assert_eq!(at(&app).1, 14, "B to the start of `four`");
+        press(&mut app, "B");
+        assert_eq!(at(&app).1, 4, "…then over the whole of `two.three`");
+        press(&mut app, "$ge");
+        assert_eq!(at(&app).1, 12, "ge back to the end of the previous word");
+        // …and they take an operator: `dW` eats the punctuation with it.
+        let (_d, mut app) = viewer_on("one two.three four\n");
+        press(&mut app, "wdW");
+        assert_eq!(viewer_lines(&app)[0], "one four");
+        let (_d, mut app) = viewer_on("one two.three four\n");
+        press(&mut app, "wdw");
+        assert_eq!(viewer_lines(&app)[0], "one .three four", "dw stops at the dot");
 
         // `gg` is the top; a bare `g` is a prefix now and jumps nowhere.
         let (_d, mut app) = viewer_on("one\ntwo\nthree\n");
@@ -10256,20 +10295,22 @@
         app.handle_key(key('x')).unwrap();
         assert_eq!(viewer_lines(&app)[0], "ravo", "x ate the b");
 
-        // J joins the next line up with a space.
+        // `gJ` joins the next line up. (`J` is the window's key for the
+        // shell below; `:combine` is the one that adds a space.)
+        app.handle_key(key('g')).unwrap();
         app.handle_key(key('J')).unwrap();
-        assert_eq!(viewer_lines(&app), ["ravo charlie"], "J joined");
+        assert_eq!(viewer_lines(&app), ["ravocharlie"], "gJ joined");
 
         // o opens a line below and enters insert mode; typing lands there.
         app.handle_key(key('o')).unwrap();
         assert!(matches!(app.popup, Popup::Viewer { editing: true, .. }), "o → insert mode");
         app.handle_key(key('z')).unwrap();
         app.handle_key(code(KeyCode::Esc)).unwrap();
-        assert_eq!(viewer_lines(&app), ["ravo charlie", "z"]);
+        assert_eq!(viewer_lines(&app), ["ravocharlie", "z"]);
 
         // u, u, u, u: each change was one unit (the whole o-session is one).
         for expect in [
-            vec!["ravo charlie".to_string()],
+            vec!["ravocharlie".to_string()],
             vec!["ravo".into(), "charlie".into()],
             vec!["bravo".into(), "charlie".into()],
             vec!["alpha".into(), "bravo".into(), "charlie".into()],

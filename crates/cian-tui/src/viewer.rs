@@ -321,15 +321,15 @@ impl App {
                 }
             )
         {
-            // `J` is vi's join, so the shell is on `K` — the one letter of
-            // the four that vi's normal mode leaves alone here. `H` and `L`
-            // stay: vi's "top / bottom of the window" are not implemented in
-            // this panel, and crossing to the listing beside it is what the
-            // hand reaches for.
+            // H / L / J are the window's, as they are from a listing: left
+            // pane, right pane, the shell below. vi's `J` — join — is `gJ`
+            // (which is vi's own spelling for the no-space form) and
+            // `:combine`, since a two-key sequence and a command are things
+            // no terminal and no other binding can take away.
             let to = match key.code {
                 KeyCode::Char('H') => Some(FocusedPane::Left),
                 KeyCode::Char('L') => Some(FocusedPane::Right),
-                KeyCode::Char('K') => Some(FocusedPane::Shell),
+                KeyCode::Char('J') => Some(FocusedPane::Shell),
                 _ => None,
             };
             if let Some(to) = to {
@@ -439,6 +439,28 @@ impl App {
                         self.scroll_viewer_to_cursor();
                     }
                     KeyCode::Char('J') => self.viewer_join(false),
+                    // `ge` / `gE` — back to the end of the previous word.
+                    KeyCode::Char(k @ ('e' | 'E')) => {
+                        let big = k == 'E';
+                        if let Popup::Viewer { view, line, col, goal, .. } = &mut self.popup {
+                            let (bl, bc) =
+                                crate::util::viewer_word_back_big(&view.lines, *line, *col, big);
+                            let (el, ec) = if (bl, bc) == (*line, *col) {
+                                (*line, *col)
+                            } else {
+                                // The start of the previous word, then its end
+                                // — which is the character before this word.
+                                crate::util::viewer_word_back_big(&view.lines, bl, bc, big)
+                            };
+                            let (nl, nc) =
+                                crate::util::viewer_word_end_big(&view.lines, el, ec, big);
+                            if (nl, nc) < (*line, *col) {
+                                (*line, *col, *goal) = (nl, nc, nc);
+                            } else {
+                                (*line, *col, *goal) = (bl, bc, bc);
+                            }
+                        }
+                    }
                     // Anything else after `g` is not a command; vi drops it.
                     _ => {}
                 }
@@ -889,17 +911,33 @@ impl App {
                     // lengths. Any other motion takes it back to a column.
                     *block_eol = matches!(visual, Some(ViewVisual::Block));
                 }
-                (false, KeyCode::Char('w')) => {
+                // A word stops at punctuation; a WORD runs to the next space.
+                (false, KeyCode::Char(k @ ('w' | 'W'))) => {
+                    let big = k == 'W';
                     for _ in 0..times {
-                        let (nl, nc) = viewer_word_forward(view, *line, *col, last);
+                        let (nl, nc) = crate::util::viewer_word_forward_big(
+                            &view.lines, *line, *col, last, big,
+                        );
                         *line = nl;
                         *col = nc;
                     }
                     *goal = *col;
                 }
-                (false, KeyCode::Char('b')) => {
+                (false, KeyCode::Char(k @ ('e' | 'E'))) => {
+                    let big = k == 'E';
                     for _ in 0..times {
-                        let (nl, nc) = viewer_word_back(view, *line, *col);
+                        let (nl, nc) =
+                            crate::util::viewer_word_end_big(&view.lines, *line, *col, big);
+                        *line = nl;
+                        *col = nc;
+                    }
+                    *goal = *col;
+                }
+                (false, KeyCode::Char(k @ ('b' | 'B'))) => {
+                    let big = k == 'B';
+                    for _ in 0..times {
+                        let (nl, nc) =
+                            crate::util::viewer_word_back_big(&view.lines, *line, *col, big);
                         *line = nl;
                         *col = nc;
                     }
@@ -1533,6 +1571,21 @@ impl App {
                 self.start_search_replace();
                 return;
             }
+            // `:combine` joins the next line onto this one with a space;
+            // `:combine!` without one, as vi's own `:join!` does. A count
+            // takes that many lines, a selection takes all of it. It is a
+            // command rather than `J`, which is the window's key for the
+            // shell below.
+            "combine" | "combine!" | "join" | "join!" => {
+                let space = !words[0].ends_with('!');
+                if let Some(n) = words.get(1).and_then(|w| w.parse::<usize>().ok()) {
+                    if let Popup::Viewer { count, .. } = &mut self.popup {
+                        *count = Some(n);
+                    }
+                }
+                self.viewer_join(space);
+                return;
+            }
             "replace" | "rep" => {
                 self.start_replace_bar();
                 return;
@@ -1850,7 +1903,6 @@ impl App {
         let mut cut_text: Option<String> = None;
         let mut start_replacing = false;
         let mut arm_replace: Option<usize> = None;
-        let mut join: Option<bool> = None;
         if let Popup::Viewer {
             view,
             line,
@@ -2087,13 +2139,7 @@ impl App {
                     *dirty = true;
                     consumed = true;
                 }
-                // J — join the next line onto this one with a single space.
-                // `gJ` joins without it, and is handled with the other `g`
-                // commands; both land here.
-                KeyCode::Char('J') => {
-                    join = Some(true);
-                    consumed = true;
-                }
+
                 // o / O — open a line below/above and start typing.
                 KeyCode::Char('o') if visual.is_none() => {
                     push_viewer_undo(undo, redo, lines, *line, *col);
@@ -2232,9 +2278,6 @@ impl App {
         }
         // A cut is a copy that also removes: `p` has to find it, and so does
         // every other program, which is what `y` and Ctrl+X already promise.
-        if let Some(space) = join {
-            self.viewer_join(space);
-        }
         if let Some(n) = arm_replace {
             self.vim_replace = Some(n);
         }
