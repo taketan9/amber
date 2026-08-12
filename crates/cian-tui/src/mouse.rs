@@ -296,22 +296,72 @@ impl App {
                         *visual = Some(mode);
                     }
                 }
+                // The wheel moves the *view*, and takes the cursor only when
+                // it would otherwise be left off screen — which is what a
+                // wheel does everywhere else. It used to move the cursor and
+                // let the view follow, so a flick past the end of the file
+                // moved the insertion point without being asked to.
                 MouseEventKind::ScrollDown | MouseEventKind::ScrollUp => {
                     if let Popup::Viewer { view, scroll, line, col, goal, .. } = &mut self.popup {
                         let n = view.lines.len();
-                        let last = n.saturating_sub(1);
-                        if matches!(ev.kind, MouseEventKind::ScrollDown) {
-                            *line = (*line + 3).min(last);
+                        let max_scroll = n.saturating_sub(body_h);
+                        *scroll = if matches!(ev.kind, MouseEventKind::ScrollDown) {
+                            (*scroll + 3).min(max_scroll)
                         } else {
-                            *line = line.saturating_sub(3);
-                        }
+                            scroll.saturating_sub(3)
+                        };
+                        *line = (*line).clamp(*scroll, (*scroll + body_h - 1).min(n.saturating_sub(1)));
                         *col = (*goal).min(vlen(view, *line));
-                        if *line < *scroll {
-                            *scroll = *line;
-                        } else if *line >= *scroll + body_h {
-                            *scroll = *line + 1 - body_h;
+                    }
+                }
+                // Sideways, for the terminals that report it — a shift-wheel
+                // or a trackpad's second axis. The same three columns, and
+                // the cursor comes along only if the view would leave it
+                // behind.
+                MouseEventKind::ScrollLeft | MouseEventKind::ScrollRight => {
+                    let body_w = (self.viewer_rect.width as usize)
+                        .saturating_sub(self.viewer_gutter as usize)
+                        .max(1);
+                    if let Popup::Viewer { view, hscroll, scroll, line, col, goal, .. } =
+                        &mut self.popup
+                    {
+                        // Bounded by the widest line *in view*, which is what
+                        // the bar along the bottom describes. Bounding it by
+                        // the cursor's own line would make the wheel dead
+                        // whenever the cursor happened to be on a short one.
+                        let widest = view
+                            .lines
+                            .iter()
+                            .skip(*scroll)
+                            .take(body_h)
+                            .map(|l| cian_core::textops::col_span(l, usize::MAX).1)
+                            .max()
+                            .unwrap_or(0);
+                        *hscroll = if matches!(ev.kind, MouseEventKind::ScrollRight) {
+                            (*hscroll + 3).min(widest.saturating_sub(body_w))
+                        } else {
+                            hscroll.saturating_sub(3)
+                        };
+                        // Back to a character index, so the cursor lands on
+                        // the character at that column rather than near it.
+                        if let Some(l) = view.lines.get(*line) {
+                            let (at, _) = cian_core::textops::col_span(l, *col);
+                            if at < *hscroll || at >= *hscroll + body_w {
+                                let want = *hscroll;
+                                let mut c = 0usize;
+                                let mut drawn = 0usize;
+                                for (j, ch) in l.chars().enumerate() {
+                                    if drawn >= want {
+                                        c = j;
+                                        break;
+                                    }
+                                    drawn += cian_core::textops::char_cols(ch, drawn);
+                                    c = j;
+                                }
+                                *col = c;
+                                *goal = c;
+                            }
                         }
-                        *scroll = (*scroll).min(n.saturating_sub(body_h));
                     }
                 }
                 // Right-click opens the menu — the same gesture as in the

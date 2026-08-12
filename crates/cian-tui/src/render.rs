@@ -469,11 +469,6 @@ pub(crate) fn draw(f: &mut Frame, app: &mut App) {
         let show_ws = app.show_ws;
         let ruler = app.show_ruler;
         app.popup_zones.clear();
-        // The status line lives outside the viewer's border, on the very last
-        // row, which is not where anyone is looking while reading a file. A
-        // message raised by the viewer itself — "saved", "nothing to fold
-        // here" — is shown on its own footer instead.
-        let msg_for_viewer = app.message.clone().filter(|_| app.message_fresh);
         // Every open file's name, in order, with the one on screen back in its
         // place — the strip has to name them all, and the active one is not in
         // the list while it is being read.
@@ -509,8 +504,8 @@ pub(crate) fn draw(f: &mut Frame, app: &mut App) {
                 };
                 let mut other = other;
                 let docked = app.viewer_dock.is_some();
-                draw_viewer(f, theirs, &mut other, lang, (show_ws, ruler), None, (0, &[], &[]), docked, true);
-                draw_viewer(f, mine, &mut behind, lang, (show_ws, ruler), None, (0, &[], &[]), docked, true);
+                draw_viewer(f, theirs, &mut other, lang, (show_ws, ruler), (0, &[], &[]), docked, true);
+                draw_viewer(f, mine, &mut behind, lang, (show_ws, ruler), (0, &[], &[]), docked, true);
                 app.viewer_split = Some(other);
             } else {
                 draw_viewer(
@@ -519,7 +514,6 @@ pub(crate) fn draw(f: &mut Frame, app: &mut App) {
                     &mut behind,
                     lang,
                     (show_ws, ruler),
-                    None,
                     (0, &[], &[]),
                     app.viewer_dock.is_some(),
                     true,
@@ -574,7 +568,7 @@ pub(crate) fn draw(f: &mut Frame, app: &mut App) {
                 Some(d) => (d.mine.as_slice(), d.theirs.as_slice()),
                 None => (&[][..], &[][..]),
             };
-            draw_viewer(f, theirs, &mut other, lang, (show_ws, ruler), None, (0, &[], dt), false, true);
+            draw_viewer(f, theirs, &mut other, lang, (show_ws, ruler), (0, &[], dt), false, true);
             f.render_widget(
                 Block::default().style(Style::default().fg(Color::Rgb(90, 90, 105))),
                 theirs,
@@ -585,7 +579,6 @@ pub(crate) fn draw(f: &mut Frame, app: &mut App) {
                 &mut app.popup,
                 lang,
                 (show_ws, ruler),
-                msg_for_viewer.as_deref(),
                 (app.viewer_tab_idx, &names, dm),
                 false,
                 true,
@@ -634,7 +627,6 @@ pub(crate) fn draw(f: &mut Frame, app: &mut App) {
             menu_lang,
             show_ws,
             ruler,
-            msg_for_viewer,
             app.viewer_tab_idx,
             &names,
             &mut tab_rects,
@@ -3976,7 +3968,6 @@ fn draw_popup(
     menu_lang: Lang,
     show_ws: bool,
     ruler: bool,
-    msg: Option<String>,
     tab_at: usize,
     tab_names: &[String],
     tab_rects: &mut Vec<(Rect, usize)>,
@@ -4004,7 +3995,7 @@ fn draw_popup(
         Popup::DestPicker { .. } => draw_dest_picker(f, area, popup, dests, zones, lang),
         Popup::Viewer { .. } => {
             let (rects, close) =
-                draw_viewer(f, area, popup, lang, (show_ws, ruler), msg.as_deref(), (tab_at, tab_names, &[]), docked, active);
+                draw_viewer(f, area, popup, lang, (show_ws, ruler), (tab_at, tab_names, &[]), docked, active);
             *tab_rects = rects;
             *close_rect = close;
         }
@@ -5899,7 +5890,6 @@ fn draw_viewer(
     // The two things the viewer draws over the text but does not hold itself:
     // the invisible-character marks and the ruler with its crosshair.
     marks: (bool, bool),
-    msg: Option<&str>,
     // Which of the viewer's open files this is, what they are all called, and
     // — when a comparison is running — what each line of *this* half is.
     tab: (usize, &[String], &[cian_core::diff::Mark]),
@@ -6694,33 +6684,18 @@ fn draw_viewer(
             }
         }
     };
-    // A message the viewer itself raised takes the footer while it lasts. The
-    // hints are always one keystroke away; "nothing to fold here" answers a
-    // key that was just pressed, and belongs where that key was aimed.
-    let (footer, footer_style) = match msg.filter(|_| !*editing && sub_walk.is_none() && prompt.is_none()) {
-        Some(m) => (
-            format!(" {m} "),
-            Style::default()
-                .fg(readable_on(Color::Rgb(240, 210, 120)))
-                .bg(Color::Rgb(240, 210, 120))
-                .add_modifier(Modifier::BOLD),
-        ),
-        None => (
-            footer,
-            Style::default().fg(readable_on(mode_color)).bg(mode_color).add_modifier(Modifier::BOLD),
-        ),
-    };
+    // Messages the panel raises — "copied", "saved", "nothing to fold here" —
+    // go to cian's own status line along the bottom of the window, where
+    // every other message in the program appears. They used to take this
+    // footer, and docked there is no footer to take: the line was drawn over
+    // the *text*, without clearing it, so "copied" appeared with a couple of
+    // the file's own characters trailing after it.
+    let footer_style =
+        Style::default().fg(readable_on(mode_color)).bg(mode_color).add_modifier(Modifier::BOLD);
     let last_row = inner.y + inner.height.saturating_sub(1);
     if !docked {
         f.render_widget(
             Paragraph::new(truncate(&footer, inner.width as usize)).style(footer_style),
-            Rect::new(inner.x, last_row, inner.width, 1),
-        );
-    } else if let Some(m) = msg.filter(|m| !m.is_empty()) {
-        // A message still needs somewhere to be seen — it answers the key
-        // that was just pressed.
-        f.render_widget(
-            Paragraph::new(truncate(&format!(" {m} "), inner.width as usize)).style(footer_style),
             Rect::new(inner.x, last_row, inner.width, 1),
         );
     }

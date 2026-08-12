@@ -2583,6 +2583,59 @@
         assert!(screen.lines().any(|l| l.contains(" 1 ")), "gutter kept:\n{screen}");
     }
 
+    /// The wheel moves the view, both ways, and takes the cursor only when it
+    /// would otherwise be left off screen.
+    #[test]
+    fn the_wheel_scrolls_the_panel_in_both_directions() {
+        use crossterm::event::{MouseButton, MouseEventKind};
+        let long: String = (0..40).map(|i| format!("word{i:02} ")).collect();
+        let body = format!("{long}\n{}", "filler\n".repeat(60));
+        let (_d, mut app) = viewer_on(&body);
+        let _ = render(&mut app, 100, 30);
+        let wheel = |app: &mut App, kind| {
+            let r = app.viewer_rect;
+            app.handle_mouse(crossterm::event::MouseEvent {
+                kind,
+                column: r.x + 4,
+                row: r.y + 2,
+                modifiers: KeyModifiers::NONE,
+            });
+        };
+        let at = |app: &App| match &app.popup {
+            Popup::Viewer { scroll, hscroll, line, .. } => (*scroll, *hscroll, *line),
+            other => panic!("expected the panel, got {other:?}"),
+        };
+
+        // Down and back up.
+        wheel(&mut app, MouseEventKind::ScrollDown);
+        assert_eq!(at(&app).0, 3, "the view moved, three lines");
+        assert!(at(&app).2 >= 3, "and the cursor came along rather than scrolling away");
+        wheel(&mut app, MouseEventKind::ScrollUp);
+        assert_eq!(at(&app).0, 0);
+
+        // Sideways, for the terminals that report it.
+        wheel(&mut app, MouseEventKind::ScrollRight);
+        assert_eq!(at(&app).1, 3, "three columns right");
+        wheel(&mut app, MouseEventKind::ScrollLeft);
+        assert_eq!(at(&app).1, 0);
+
+        // The wheel does not move the cursor while it stays in view: a flick
+        // over a file should not change where typing would land.
+        let before = at(&app).2;
+        wheel(&mut app, MouseEventKind::ScrollDown);
+        wheel(&mut app, MouseEventKind::ScrollUp);
+        assert_eq!(at(&app).2, before, "the cursor stayed put");
+
+        // A click still places it.
+        app.handle_mouse(crossterm::event::MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: app.viewer_rect.x + app.viewer_gutter + 2,
+            row: app.viewer_rect.y + 1,
+            modifiers: KeyModifiers::NONE,
+        });
+        assert_eq!(at(&app).2, at(&app).0 + 1, "the row that was clicked");
+    }
+
     /// Both bars are drawn on the frame, and only when there is something off
     /// screen to report.
     #[test]
@@ -3737,13 +3790,16 @@
         );
     }
 
-    /// A message may borrow the viewer's footer, never keep it. Messages do
-    /// not expire, so one that took the footer permanently hid the key hints,
-    /// hid the `:` prompt — making the command line look like it was refusing
-    /// input — and hid the "unsaved changes" reply to Esc, which is what made
-    /// the viewer look frozen.
+    /// A message the panel raises goes to cian's own status line, along the
+    /// bottom of the window, where every other message in the program
+    /// appears — never into the panel.
+    ///
+    /// It used to take the panel's footer, and docked there is no footer to
+    /// take: the line was drawn over the *text*, without clearing it, so
+    /// "copied" appeared with a couple of the file's own characters trailing
+    /// after it.
     #[test]
-    fn a_message_borrows_the_viewer_footer_it_does_not_keep_it() {
+    fn a_message_goes_to_the_status_line_and_not_into_the_file() {
         let (_d, mut app) = viewer_on("one\ntwo\n");
         // The panel's own last row carries a message it raised; the window's
         // hint bar carries its keys; its prompt line carries what is typed.
@@ -3759,17 +3815,32 @@
             rows[rows.len() - 2].clone()
         };
 
-        // A message raised by this keystroke is shown…
+        // A message raised by this keystroke is on the status line…
         app.handle_key(key(']')).unwrap();
         app.handle_key(key(']')).unwrap();
-        assert!(app.message.is_some());
+        let msg = app.message.clone().unwrap_or_default();
+        assert!(msg.contains("utline") || msg.contains("アウトライン"), "{msg:?}");
+        let rows = render(&mut app, 100, 30);
+        assert!(
+            rows[rows.len() - 1].contains(&msg),
+            "on cian's status line: {:?}",
+            rows[rows.len() - 1],
+        );
+        // …and nowhere inside the panel, where it would be painted over the
+        // file with whatever was already on that row left beside it.
+        let last = rows.len() - 1;
+        assert!(
+            !rows.iter().take(last).any(|r| r.contains(&msg)),
+            "not in the panel:\n{rows:#?}",
+        );
+        // The panel's own last row is still the panel's.
         let m = panel_last(&mut app);
-        assert!(m.contains("utline") || m.contains("アウトライン"), "{m:?}");
+        assert!(!m.contains(&msg), "the footer kept its own text: {m:?}");
 
-        // …and stands down on the next key, which gets the hints back.
+        // The hints are untouched by any of it.
         app.handle_key(key('j')).unwrap();
         let f = hint_bar(&mut app);
-        assert!(f.contains("search") || f.contains("検索"), "hints are back: {f:?}");
+        assert!(f.contains("search") || f.contains("検索"), "hints are there: {f:?}");
         assert!(app.message.is_some(), "the status line still has it");
 
         // The `:` prompt goes on cian's own prompt line, above the hints, and
@@ -4027,13 +4098,12 @@
         let screen = render(&mut app, 100, 30);
         let msg = app.message.clone().unwrap_or_default();
         assert!(msg.contains("outline") || msg.contains("アウトライン"), "{msg:?}");
-        // The message is on the panel itself — it answers the key that was
-        // just pressed, so it belongs with the file and not only on the
-        // status line among everything else.
+        // On cian's status line, and only there.
         let last = screen.len() - 1;
+        assert!(screen[last].contains(&msg), "on the status line: {:?}", screen[last]);
         assert!(
-            screen.iter().take(last).any(|r| r.contains(&msg)),
-            "the message is on the panel, not only on the status line:\n{screen:#?}",
+            !screen.iter().take(last).any(|r| r.contains(&msg)),
+            "and not painted over the file:\n{screen:#?}",
         );
     }
 
