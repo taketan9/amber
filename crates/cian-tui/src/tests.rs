@@ -2538,11 +2538,9 @@
         }
         assert_eq!(app.yank.as_deref(), Some("All"));
         assert!(!app.yank_on_clipboard, "the clipboard did not take it");
-        assert!(
-            app.message.as_deref().is_some_and(|m| m.contains("copied")),
-            "{:?}",
-            app.message,
-        );
+        // No clipboard service at all is not a problem worth a sentence: `p`
+        // pastes from cian's own copy there and always has.
+        assert_eq!(app.message.as_deref(), Some("copied"));
         app.handle_key(key('$')).unwrap();
         app.handle_key(key('p')).unwrap();
         assert_eq!(viewer_lines(&app)[0], "All doneAll", "p pasted what was copied");

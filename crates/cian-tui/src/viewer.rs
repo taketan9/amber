@@ -2879,16 +2879,7 @@ impl App {
             return;
         }
         self.set_yank(text);
-        self.message = Some(if self.yank_on_clipboard {
-            tr(self.lang, "copied", "コピーしました").into()
-        } else {
-            tr(
-                self.lang,
-                "copied — the system clipboard refused it, so p pastes it from here",
-                "コピーしました — システムのクリップボードには入りませんでしたが p で貼れます",
-            )
-            .into()
-        });
+        self.message = Some(self.copied_message());
         // A copy ends the visual gesture; leave the viewer open.
         if let Popup::Viewer { visual, .. } = &mut self.popup {
             *visual = None;
@@ -2930,6 +2921,22 @@ impl App {
     /// whole lines — below the cursor for `p`, above it for `P`. That is vi's
     /// distinction, and the one that makes "copy these three lines, paste them
     /// there" land where meant rather than in the middle of a word.
+    /// "copied", and — only when there is a clipboard that *refused* it — what
+    /// that means. A machine with no clipboard service at all (a headless
+    /// box, a bare SSH session) is not having a problem: `p` pastes from
+    /// cian's own copy there and always has.
+    fn copied_message(&self) -> String {
+        if self.yank_on_clipboard || self.clipboard.is_none() {
+            return tr(self.lang, "copied", "コピーしました").into();
+        }
+        tr(
+            self.lang,
+            "copied — the system clipboard refused it, so p pastes it from here",
+            "コピーしました — システムのクリップボードには入りませんでしたが p で貼れます",
+        )
+        .into()
+    }
+
     /// Remember `text` as what was last copied, and offer it to the system
     /// clipboard. Whether the clipboard took it is remembered too — see
     /// `yank_on_clipboard`.
