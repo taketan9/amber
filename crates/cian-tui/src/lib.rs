@@ -2289,6 +2289,14 @@ pub struct App {
     /// `r` waiting for the character to stamp in, with the count it was given
     /// (`3rx` overwrites three).
     vim_replace: Option<usize>,
+    /// Whether the system clipboard actually took the last thing yanked.
+    ///
+    /// Writing it can fail — another program holding the pasteboard, a
+    /// machine with no clipboard service at all — and the failure used to be
+    /// discarded, which left `p` preferring a *stale* clipboard over the text
+    /// just copied. The copy looked like it had worked and the paste produced
+    /// something else entirely.
+    yank_on_clipboard: bool,
     /// The two halves of a split, as drawn: clicking the one not in focus
     /// crosses to it.
     viewer_half_rects: [Rect; 2],
@@ -2606,6 +2614,7 @@ impl App {
             vim_wait: None,
             vim_last_find: None,
             vim_replace: None,
+            yank_on_clipboard: false,
             viewer_half_rects: [Rect::new(0, 0, 0, 0); 2],
             viewer_gutter: 0,
             popup_zones: Vec::new(),

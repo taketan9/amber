@@ -2878,11 +2878,17 @@ impl App {
             self.message = Some("nothing to copy".into());
             return;
         }
-        if let Some(cb) = self.clipboard.as_mut() {
-            let _ = cb.set_text(text.clone());
-        }
-        self.yank = Some(text);
-        self.message = Some("copied".into());
+        self.set_yank(text);
+        self.message = Some(if self.yank_on_clipboard {
+            tr(self.lang, "copied", "コピーしました").into()
+        } else {
+            tr(
+                self.lang,
+                "copied — the system clipboard refused it, so p pastes it from here",
+                "コピーしました — システムのクリップボードには入りませんでしたが p で貼れます",
+            )
+            .into()
+        });
         // A copy ends the visual gesture; leave the viewer open.
         if let Popup::Viewer { visual, .. } = &mut self.popup {
             *visual = None;
@@ -2924,11 +2930,29 @@ impl App {
     /// whole lines — below the cursor for `p`, above it for `P`. That is vi's
     /// distinction, and the one that makes "copy these three lines, paste them
     /// there" land where meant rather than in the middle of a word.
+    /// Remember `text` as what was last copied, and offer it to the system
+    /// clipboard. Whether the clipboard took it is remembered too — see
+    /// `yank_on_clipboard`.
+    pub(crate) fn set_yank(&mut self, text: String) {
+        self.yank_on_clipboard = match self.clipboard.as_mut() {
+            Some(cb) => cb.set_text(text.clone()).is_ok(),
+            None => false,
+        };
+        self.yank = Some(text);
+    }
+
     pub(crate) fn paste_into_viewer(&mut self, before: bool) {
         // The system clipboard first, so something copied in another program
         // pastes here; cian's own yank when there is none, so copy-and-paste
         // within a file still works where no clipboard service exists.
-        let from_os = self.clipboard_text().filter(|t| !t.is_empty());
+        //
+        // …unless the clipboard refused what was last copied here, in which
+        // case it is holding something older and cian's own copy is the one
+        // that was asked for.
+        let from_os = self
+            .clipboard_text()
+            .filter(|t| !t.is_empty())
+            .filter(|_| self.yank_on_clipboard || self.yank.is_none());
         let Some(text) = from_os.or_else(|| self.yank.clone()) else {
             self.message = Some(tr(self.lang,
                 "nothing has been copied yet",
@@ -3050,9 +3074,12 @@ impl App {
         if matches!(self.popup, Popup::Viewer { pending: Some('z' | 'g'), .. }) {
             return false;
         }
-        // Not while something is being typed into, and not over a selection —
-        // there `d`, `c` and `y` act on what is selected, which the viewer
-        // already does.
+        // Not while something is being typed into. A selection is different:
+        // `d`, `c` and `y` over one act on what is selected, which the viewer
+        // handles — but `viw` and `va"` are the selection being *made*, and
+        // this is the only place that knows what an object is. Without the
+        // exception, `v` `i` `w` was read as "select, enter insert, type a
+        // w", which put a `w` in the file.
         let ready = matches!(
             &self.popup,
             Popup::Viewer {
@@ -3061,11 +3088,11 @@ impl App {
                 sub_input: None,
                 block_input: None,
                 sub_walk: None,
-                visual: None,
                 ..
             }
         );
-        if !ready {
+        let selecting = matches!(&self.popup, Popup::Viewer { visual: Some(_), .. });
+        if !ready || (selecting && self.vim_obj.is_none() && !matches!(c, 'i' | 'a')) {
             return false;
         }
 
@@ -3084,6 +3111,27 @@ impl App {
             return match (op, span) {
                 (Some(op), Some(span)) => {
                     self.viewer_apply_op(op, span);
+                    true
+                }
+                // Over a selection with no operator — `viw` — the object is
+                // what to select, not what to act on.
+                (None, Some(span)) if selecting => {
+                    if let Popup::Viewer { visual, anchor, line, col, goal, .. } = &mut self.popup {
+                        match span {
+                            crate::vim::Span::Lines { first, last } => {
+                                *visual = Some(ViewVisual::Line);
+                                *anchor = (first, 0);
+                                *line = last;
+                                *col = 0;
+                            }
+                            crate::vim::Span::Chars { start, end } => {
+                                *visual = Some(ViewVisual::Char);
+                                *anchor = start;
+                                (*line, *col) = end;
+                            }
+                        }
+                        *goal = *col;
+                    }
                     true
                 }
                 // An object with no operator in front of it is not a command;
@@ -3122,7 +3170,7 @@ impl App {
         }
         // `i` / `a` begin a text object only while an operator waits; on their
         // own they are insert and append.
-        if op.is_some() && matches!(c, 'i' | 'a') {
+        if (op.is_some() || selecting) && matches!(c, 'i' | 'a') {
             self.vim_obj = Some(c);
             return true;
         }

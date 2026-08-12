@@ -1189,8 +1189,17 @@ impl App {
         // Order the two ends so start is before end in reading order.
         let (a, b) = (sel.anchor, sel.end);
         let (start, endp) = if (a.0, a.1) <= (b.0, b.1) { (a, b) } else { (b, a) };
+        // `contents_between` stops *before* its end column, while the
+        // highlight covers the cell the pointer is on — so the last character
+        // of a selection was shown as taken and then not copied. One past it
+        // is what the eye was promised.
         let text = match session.parser().lock() {
-            Ok(p) => p.screen().contents_between(start.0, start.1, endp.0, endp.1),
+            Ok(p) => p.screen().contents_between(
+                start.0,
+                start.1,
+                endp.0,
+                endp.1.saturating_add(1),
+            ),
             Err(_) => return,
         };
         let text = text.trim_end_matches(['\n', ' ']).to_string();

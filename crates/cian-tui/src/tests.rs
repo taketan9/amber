@@ -2490,6 +2490,64 @@
         }
     }
 
+    /// `viw` and its family select the object rather than typing it. Text
+    /// objects only ran after an operator, so over a selection `v` `i` `w`
+    /// was read as "enter insert, type a w" — and put a `w` in the file.
+    #[test]
+    fn a_text_object_over_a_selection_selects_it() {
+        let press = |app: &mut App, keys: &str| {
+            for c in keys.chars() {
+                app.handle_key(key(c)).unwrap();
+            }
+        };
+        for (setup, keys, want) in [
+            ("All done\n", "viwy", "All"),
+            ("All done\n", "wviwy", "done"),
+            ("say \"hi there\" now\n", "fhvi\"y", "hi there"),
+            ("call(one, two)\n", "fovi(y", "one, two"),
+            ("x 'abc' y\n", "fava'y", "'abc'"),
+        ] {
+            let (_d, mut app) = viewer_on(setup);
+            press(&mut app, keys);
+            assert_eq!(app.yank.as_deref(), Some(want), "{keys} on {setup:?}");
+            assert_eq!(
+                viewer_lines(&app)[0],
+                setup.trim_end_matches('\n'),
+                "and nothing was typed into the file",
+            );
+        }
+
+        // …and an operator over the selection still acts on it.
+        let (_d, mut app) = viewer_on("All done\n");
+        press(&mut app, "viwd");
+        assert_eq!(viewer_lines(&app)[0], " done");
+    }
+
+    /// A copy the system clipboard refused is still cian's copy: `p` pastes
+    /// what was just taken rather than whatever the clipboard was holding
+    /// from before. The failure used to be discarded, which made a copy look
+    /// like it had worked and the paste produce something else entirely.
+    #[test]
+    fn a_refused_clipboard_does_not_paste_something_older() {
+        let (_d, mut app) = viewer_on("All done\n");
+        // `viewer_on` runs without a system clipboard, which is exactly the
+        // "it would not take it" case.
+        assert!(app.clipboard.is_none());
+        for c in "viwy".chars() {
+            app.handle_key(key(c)).unwrap();
+        }
+        assert_eq!(app.yank.as_deref(), Some("All"));
+        assert!(!app.yank_on_clipboard, "the clipboard did not take it");
+        assert!(
+            app.message.as_deref().is_some_and(|m| m.contains("copied")),
+            "{:?}",
+            app.message,
+        );
+        app.handle_key(key('$')).unwrap();
+        app.handle_key(key('p')).unwrap();
+        assert_eq!(viewer_lines(&app)[0], "All doneAll", "p pasted what was copied");
+    }
+
     /// The vi keys the panel was missing, and the two it had but could not
     /// reach. Everything here was reported by using it.
     #[test]
