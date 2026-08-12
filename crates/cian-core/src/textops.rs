@@ -437,6 +437,22 @@ pub fn char_cols(c: char, at: usize) -> usize {
     unicode_width::UnicodeWidthChar::width(c).unwrap_or(0)
 }
 
+/// The screen column character `at` starts in, and the width of the whole
+/// line. Both in drawn columns, because that is what "how far right is the
+/// cursor" and "how wide is this file" are asking about — a tab is one
+/// character and up to eight columns, a Japanese character one and two.
+pub fn col_span(line: &str, at: usize) -> (usize, usize) {
+    let mut col = 0usize;
+    let mut start = None;
+    for (i, ch) in line.chars().enumerate() {
+        if i == at {
+            start = Some(col);
+        }
+        col += char_cols(ch, col);
+    }
+    (start.unwrap_or(col), col)
+}
+
 /// Where each character of `line` starts, and how wide it is, plus the width
 /// of the whole line. One left-to-right pass, because a tab's width depends on
 /// where it begins.

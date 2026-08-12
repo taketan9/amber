@@ -43,7 +43,38 @@ impl App {
         if at_rest {
             self.viewer_end_record();
         }
+        // Wherever the cursor ended up, follow it sideways. Every key comes
+        // through here, which is the one place that is true — the vertical
+        // clamp is written out at each of the half-dozen places that move the
+        // cursor, and adding a seventh copy of it is how the seventh drifts.
+        self.clamp_viewer_hscroll();
         r
+    }
+
+    /// Keep the cursor's column in view. Vertical scrolling is bounded by the
+    /// buffer; this is bounded by the line the cursor is on, so it is worked
+    /// out fresh rather than remembered.
+    pub(crate) fn clamp_viewer_hscroll(&mut self) {
+        let body_w = (self.viewer_rect.width as usize)
+            .saturating_sub(self.viewer_gutter as usize)
+            .max(1);
+        if let Popup::Viewer { line, col, hscroll, view, editing, .. } = &mut self.popup {
+            // The hex dump is drawn from the byte offset, not from the line's
+            // characters; its columns are its own business.
+            if view.kind == cian_core::viewer::ViewKind::Binary && *editing {
+                return;
+            }
+            let (at, _) = view
+                .lines
+                .get(*line)
+                .map(|l| cian_core::textops::col_span(l, *col))
+                .unwrap_or((0, 0));
+            if at < *hscroll {
+                *hscroll = at;
+            } else if at >= *hscroll + body_w {
+                *hscroll = at + 1 - body_w;
+            }
+        }
     }
 
     fn handle_viewer_key_inner(&mut self, key: KeyEvent) -> Result<()> {
@@ -1871,6 +1902,7 @@ impl App {
             }
             *scroll = (*scroll).min(n.saturating_sub(body_h));
         }
+        self.clamp_viewer_hscroll();
     }
 
     /// The "editing — …" status line, shared by every way into the editor.
@@ -3961,6 +3993,7 @@ impl App {
             editing: false,
             dirty: false,
             undo: Vec::new(),
+            hscroll: 0,
             block_eol: false,
             replacing: false,
             replace: None,

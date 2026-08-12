@@ -137,6 +137,7 @@ Each open file keeps its own cursor, folds and unsaved edits. Closing a split re
 | `p` / `P` | paste after / at the cursor, vi's way |
 | `u` | undo |
 | `gg` / `G` / `5gg` | the top, the bottom, line 5 |
+| a line wider than the panel | the view follows the cursor sideways rather than wrapping — a record keeps its shape. Bars on the right and bottom borders say how much is off screen, and appear only when some is |
 | `w` `b` `e` / `W` `B` `E` / `ge` | word by word (stopping at punctuation) and WORD by WORD (running to the next space); `ge` is the end of the word behind you |
 | `gJ` / `:combine` / `:combine!` / `:combine 3` | join the next line up — without a space, with one, or three lines. (`Shift+J` is the shell.) |
 | `Ctrl+R` | redo |

@@ -246,8 +246,14 @@ impl App {
             // character as one column put the cursor a character further left
             // for every wide one before it, which is most of a line of
             // Japanese.
+            let hscroll = match &self.popup {
+                Popup::Viewer { hscroll, .. } => *hscroll,
+                _ => 0,
+            };
             let col_at = |view: &cian_core::viewer::View, l: usize| -> usize {
-                let rel = ecol.saturating_sub(text_x) as usize;
+                // The clicked cell is relative to the body; the line may have
+                // been scrolled sideways underneath it.
+                let rel = ecol.saturating_sub(text_x) as usize + hscroll;
                 let Some(text) = view.lines.get(l) else { return 0 };
                 let mut drawn = 0usize;
                 for (j, ch) in text.chars().enumerate() {

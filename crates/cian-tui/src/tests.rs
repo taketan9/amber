@@ -2546,6 +2546,77 @@
         assert_eq!(viewer_lines(&app)[0], "All doneAll", "p pasted what was copied");
     }
 
+    /// A line wider than the panel scrolls sideways under the cursor, and
+    /// says how much is off screen. It used to simply run off the edge: the
+    /// cursor kept moving and the text stopped.
+    #[test]
+    fn a_long_line_follows_the_cursor_sideways() {
+        // 200 columns of it, in a panel about 90 wide.
+        let long: String = (0..40).map(|i| format!("word{i:02} ")).collect();
+        let (_d, mut app) = viewer_on(&format!("{long}\nshort\n"));
+        let seen = |app: &mut App| render(app, 100, 30).join("\n");
+        let hscroll = |app: &App| match &app.popup {
+            Popup::Viewer { hscroll, .. } => *hscroll,
+            other => panic!("expected the panel, got {other:?}"),
+        };
+
+        let screen = seen(&mut app);
+        assert_eq!(hscroll(&app), 0, "starts at the left");
+        assert!(screen.contains("word00"), "the head of the line is shown");
+        assert!(!screen.contains("word39"), "and the tail is not");
+
+        // `$` goes to the end of it; the view has to follow.
+        app.handle_key(key('$')).unwrap();
+        let screen = seen(&mut app);
+        assert!(hscroll(&app) > 0, "scrolled sideways");
+        assert!(screen.contains("word39"), "the tail is shown now:\n{screen}");
+        assert!(!screen.contains("word00"), "and the head has gone by");
+
+        // …and back again.
+        app.handle_key(key('0')).unwrap();
+        let screen = seen(&mut app);
+        assert_eq!(hscroll(&app), 0, "back to the left");
+        assert!(screen.contains("word00"));
+
+        // The line number is still there — the gutter does not scroll with
+        // the text.
+        assert!(screen.lines().any(|l| l.contains(" 1 ")), "gutter kept:\n{screen}");
+    }
+
+    /// Both bars are drawn on the frame, and only when there is something off
+    /// screen to report.
+    #[test]
+    fn the_panel_says_how_much_is_off_screen() {
+        let bars = |app: &mut App| {
+            let buf = render_buf(app, 100, 20);
+            let f = app.viewer_frame;
+            let right: String = (f.y..f.y + f.height)
+                .map(|y| buf[(f.x + f.width - 1, y)].symbol().to_string())
+                .collect();
+            let bottom: String = (f.x..f.x + f.width)
+                .map(|x| buf[(x, f.y + f.height - 1)].symbol().to_string())
+                .collect();
+            (right, bottom)
+        };
+
+        // A short, narrow file: nothing to say, so nothing is drawn.
+        let (_d, mut app) = viewer_on("one\ntwo\n");
+        let (right, bottom) = bars(&mut app);
+        assert!(!right.contains('┃'), "no vertical bar: {right:?}");
+        assert!(!bottom.contains('━'), "no horizontal bar: {bottom:?}");
+
+        // Taller than the panel: a bar down the right border.
+        let (_d, mut app) = viewer_on(&"line\n".repeat(200));
+        let (right, _) = bars(&mut app);
+        assert!(right.contains('┃'), "a vertical bar: {right:?}");
+
+        // Wider than the panel: a bar along the bottom border.
+        let long: String = (0..40).map(|i| format!("word{i:02} ")).collect();
+        let (_d, mut app) = viewer_on(&format!("{long}\n"));
+        let (_, bottom) = bars(&mut app);
+        assert!(bottom.contains('━'), "a horizontal bar: {bottom:?}");
+    }
+
     /// The whole operator/object grid, since `viw` turned out to be broken
     /// and the only way to know the rest are not is to press them. Each row
     /// is: the keys, the buffer they leave, what went to the clipboard, and

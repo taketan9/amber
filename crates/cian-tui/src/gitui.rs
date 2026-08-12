@@ -304,6 +304,7 @@ impl App {
             editing: false,
             dirty: false,
             undo: Vec::new(),
+            hscroll: 0,
             block_eol: false,
             replacing: false,
             replace: None,

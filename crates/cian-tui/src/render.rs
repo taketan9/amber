@@ -5913,7 +5913,7 @@ fn draw_viewer(
     let tabs = tab_names.len();
     let mut tab_rects: Vec<(Rect, usize)> = Vec::new();
     let mut close_rect = Rect::new(0, 0, 0, 0);
-    let Popup::Viewer { title, view, scroll, line, col, visual, anchor, find_input, find_query, sub_input, sub_walk, block_input, git_lines, markdown, preview, source, md_styles, md_map, md_width, editing, dirty, editable, hl, hl_lang, blame, shape, path, count, pending, .. } = popup else { return (tab_rects, close_rect) };
+    let Popup::Viewer { title, view, scroll, hscroll, line, col, visual, anchor, find_input, find_query, sub_input, sub_walk, block_input, git_lines, markdown, preview, source, md_styles, md_map, md_width, editing, dirty, editable, hl, hl_lang, blame, shape, path, count, pending, .. } = popup else { return (tab_rects, close_rect) };
     let rect = viewer_frame_rect_docked(area, docked);
     f.render_widget(Clear, rect);
 
@@ -6220,6 +6220,7 @@ fn draw_viewer(
         0
     };
     let avail = (inner.width as usize).saturating_sub(gutter);
+    let hscroll = *hscroll;
 
     // Ordered selection endpoints, for the highlight geometry.
     let (s0, e0) = order_pos(*anchor, (*line, *col));
@@ -6317,18 +6318,31 @@ fn draw_viewer(
                     other => other.to_string(),
                 }
             };
-            // Take buffer characters until their *drawn* width fills the row.
+            // Take buffer characters until their *drawn* width fills the row,
+            // starting from the first one past the columns scrolled off to
+            // the left. `first` is kept because everything below indexes by
+            // buffer character — the cursor, the selection, the highlighter —
+            // and those indices do not move when the view does.
             let mut chars: Vec<char> = Vec::new();
+            let mut first = 0usize;
             let mut drawn = 0usize;
-            for ch in l.chars() {
+            for (j, ch) in l.chars().enumerate() {
                 let w = cian_core::textops::char_cols(ch, drawn);
-                if drawn + w > avail {
+                // Off to the left: counted for the tab stops, not drawn. A
+                // character straddling the edge is left out rather than
+                // sliced, since half of a wide one is not a character.
+                if drawn + w <= hscroll {
+                    drawn += w;
+                    first = j + 1;
+                    continue;
+                }
+                if drawn + w > hscroll + avail {
                     break;
                 }
                 drawn += w;
                 chars.push(ch);
             }
-            let len = chars.len();
+            let len = l.chars().count();
             let sel = sel_cols(i, len);
             // While hex-editing, `col` holds a nibble index (0..32); map it to
             // the dump's on-screen column: offset(8) + 2 spaces, 3 cells per
@@ -6435,9 +6449,12 @@ fn draw_viewer(
                 spans.push(Span::styled(bar.to_string(), Style::default().fg(bar_c)));
             }
             let mut run = String::new();
-            let mut run_style = cell_style(0);
-            let mut at = 0usize; // drawn column, so a tab knows its own stop
-            for (j, ch) in chars.iter().enumerate() {
+            let mut run_style = cell_style(first);
+            // The *absolute* drawn column, so a tab lands on its own stop
+            // whatever has scrolled past.
+            let mut at = hscroll;
+            for (k, ch) in chars.iter().enumerate() {
+                let j = first + k;
                 let st = cell_style(j);
                 if st != run_style && !run.is_empty() {
                     spans.push(Span::styled(std::mem::take(&mut run), run_style));
@@ -6453,13 +6470,13 @@ fn draw_viewer(
             }
             // The cursor can sit just past the last char (empty line, or end
             // of line): show it as a reversed space so it stays visible.
-            if cur == Some(len) {
+            if cur == Some(len) && at >= hscroll {
                 spans.push(Span::styled(" ".to_string(), cursor_style));
             }
             // A tint that stops where the text stops is not a line highlight;
             // it is a highlight on some words. Carry it to the edge.
             if cross_line {
-                let used = at + usize::from(cur == Some(len));
+                let used = (at - hscroll) + usize::from(cur == Some(len));
                 if used < avail {
                     spans.push(Span::styled(
                         " ".repeat(avail - used),
@@ -6491,6 +6508,55 @@ fn draw_viewer(
     let top = inner.y + u16::from(show_ruler);
     let body_area = Rect::new(inner.x, top, inner.width, body_h as u16);
     f.render_widget(Paragraph::new(rows), body_area);
+    // How much of the file this is: down the right border, and — when a line
+    // runs past the edge — along the bottom one. Both sit *on* the frame, so
+    // they cost no text, and both are only drawn when there is something off
+    // screen to report.
+    let bar = Style::default().fg(if active { theme().accent } else { theme().border });
+    let track = Style::default().fg(theme().border);
+    if visible.len() > body_h {
+        f.render_stateful_widget(
+            Scrollbar::new(ScrollbarOrientation::VerticalRight)
+                .thumb_symbol("┃")
+                .thumb_style(bar)
+                .track_symbol(Some("│"))
+                .track_style(track)
+                .begin_symbol(None)
+                .end_symbol(None),
+            Rect::new(area.x + area.width.saturating_sub(1), top, 1, body_h as u16),
+            &mut ScrollbarState::new(visible.len()).position(top_v),
+        );
+    }
+    // The widest line in view, which is what the bar has to describe: the
+    // whole file's widest would jump about as the view moves through it, and
+    // measuring every line of a large file on every frame is not free.
+    let widest = visible
+        .iter()
+        .skip(top_v)
+        .take(body_h)
+        .filter_map(|i| view.lines.get(*i))
+        .map(|l| cian_core::textops::col_span(l, usize::MAX).1)
+        .max()
+        .unwrap_or(0);
+    if widest > avail && avail > 0 {
+        let w = avail.min(u16::MAX as usize) as u16;
+        f.render_stateful_widget(
+            Scrollbar::new(ScrollbarOrientation::HorizontalBottom)
+                .thumb_symbol("━")
+                .thumb_style(bar)
+                .track_symbol(Some("─"))
+                .track_style(track)
+                .begin_symbol(None)
+                .end_symbol(None),
+            Rect::new(
+                inner.x + gutter as u16,
+                area.y + area.height.saturating_sub(1),
+                w,
+                1,
+            ),
+            &mut ScrollbarState::new(widest).position(hscroll),
+        );
+    }
     if show_ruler {
         // A scale over the text, starting where the text starts: every tenth
         // column numbered, every fifth marked. Counting characters by eye is
