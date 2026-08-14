@@ -290,7 +290,7 @@ A plaintext password is a secret in a file, and cian warns on Unix if that file 
 
 ## The shell panel
 
-The bottom panel is a real shell (your `$SHELL`). **`Shift+J`**, a click or `:shell` focuses it; **Esc** returns to the files. Full-screen programs (vim, less, htop) keep Esc and the function keys for themselves. Drag to select — it copies on release. Right-click for its own menu: SSH connect, paste, session log, SFTP/SCP, text encoding.
+The bottom panel is a real shell (your `$SHELL`). **`Shift+J`**, a click or `:shell` focuses it; **Esc** returns to the files. **Output that has scrolled past is kept** — 10,000 lines of it: the wheel over the panel scrolls back through it, `Shift+PageUp` / `Shift+PageDown` a page at a time, `Shift+↑` / `Shift+↓` a line, `Shift+Home` / `Shift+End` the two ends. A badge and a bar say how far back you are, and typing anything returns to live output. Each half of a split scrolls on its own. Full-screen programs (vim, less, htop) keep Esc and the function keys for themselves. Drag to select — it copies on release. Right-click for its own menu: SSH connect, paste, session log, SFTP/SCP, text encoding.
 
 | Key | Does |
 |---|---|

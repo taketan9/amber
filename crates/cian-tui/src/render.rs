@@ -1573,6 +1573,73 @@ fn draw_list_scrollbar(
     );
 }
 
+/// What has already gone past, when the pane is scrolled up into it. Returns
+/// false — draw the live screen instead — when it is at the end.
+///
+/// Plain text, without the colours the live screen has: cian keeps its own
+/// scrollback rather than vt100's, whose offset cannot go further back than
+/// the height of the screen in the version tui-term pins. Losing the colour
+/// of something that has already scrolled away is a fair price for being able
+/// to read it at all.
+fn draw_shell_history(f: &mut Frame, area: Rect, s: &PtySession) -> bool {
+    if s.scrollback_pos() == 0 || area.height == 0 {
+        return false;
+    }
+    let rows = s.history_rows(area.height as usize, area.width as usize);
+    f.render_widget(
+        Paragraph::new(rows.join("\n")).style(Style::default().fg(readable_on(surface()))),
+        area,
+    );
+    true
+}
+
+/// How far back through the scrollback this pane is looking: a bar down its
+/// right border, and a badge saying so.
+///
+/// The badge matters more than the bar. Output scrolling past is the normal
+/// state of a shell, and a panel that has quietly stopped following it —
+/// while a build carries on underneath — is a panel that looks hung.
+fn draw_shell_scrollback(
+    f: &mut Frame,
+    area: Rect,
+    inner: Rect,
+    s: &PtySession,
+    focused: bool,
+) {
+    let at = s.scrollback_pos();
+    if at == 0 || inner.height == 0 {
+        return;
+    }
+    let view = inner.height as usize;
+    let total = at + view;
+    f.render_stateful_widget(
+        Scrollbar::new(ScrollbarOrientation::VerticalRight)
+            .thumb_symbol("┃")
+            .thumb_style(Style::default().fg(if focused { theme().accent } else { theme().border }))
+            .track_symbol(Some("│"))
+            .track_style(Style::default().fg(theme().border))
+            .begin_symbol(None)
+            .end_symbol(None),
+        Rect::new(area.x + area.width.saturating_sub(1), inner.y, 1, inner.height),
+        // Counting from the bottom, so the thumb is where the eye expects it:
+        // at the foot of the track while looking at live output.
+        &mut ScrollbarState::new(total).position(total.saturating_sub(at + view / 2)),
+    );
+    let badge = format!(" ↑ {at} ");
+    let bw = badge.chars().count() as u16;
+    if bw < inner.width {
+        f.render_widget(
+            Paragraph::new(badge).style(
+                Style::default()
+                    .fg(readable_on(theme().accent))
+                    .bg(theme().accent)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Rect::new(inner.x + inner.width - bw, inner.y + inner.height - 1, bw, 1),
+        );
+    }
+}
+
 /// Draw the shell panel, then apply its background tint.
 ///
 /// The tint has to be a post-pass. The PTY widget writes an explicit `Reset`
@@ -1704,12 +1771,15 @@ fn draw_shell_inner(
             }
         }
         if let Some(Node::Leaf { session: s, bg }) = shell.tabs[active].nodes.get(leaf).and_then(|n| n.as_ref()) {
-            if let Ok(parser) = s.parser().lock() {
-                f.render_widget(PseudoTerminal::new(parser.screen()), inner);
+            if !draw_shell_history(f, inner, s) {
+                if let Ok(parser) = s.parser().lock() {
+                    f.render_widget(PseudoTerminal::new(parser.screen()), inner);
+                }
             }
             if let Some(c) = bg {
                 tint_default_cells(f, inner, *c);
             }
+            draw_shell_scrollback(f, area, inner, s, focused);
         }
         // A maximized pane hides its siblings; say how many, so it is clear
         // this is one of several and not the whole tab.
@@ -1842,8 +1912,10 @@ fn render_node(
             };
             // (tab, leaf, outer area for focus, inner PTY area for selection).
             leaves.push((tab_idx, i, area, target));
-            if let Ok(parser) = session.parser().lock() {
-                f.render_widget(PseudoTerminal::new(parser.screen()), target);
+            if !draw_shell_history(f, target, session) {
+                if let Ok(parser) = session.parser().lock() {
+                    f.render_widget(PseudoTerminal::new(parser.screen()), target);
+                }
             }
             // Tint after the PTY has drawn: it writes an explicit Reset
             // background into every cell the shell left uncolored, which would
@@ -1851,6 +1923,10 @@ fn render_node(
             if let Some(c) = bg {
                 tint_default_cells(f, area, *c);
             }
+            // Each half of a split says where it is looking, independently:
+            // the wheel scrolls the one under the pointer, so two of them can
+            // be at different places in their own output.
+            draw_shell_scrollback(f, area, target, session, focused);
         }
         Some(Node::Split { dir, first, second, ratio }) => {
             let target = DividerTarget::ShellSplit { tab: tab_idx, node: i };

@@ -663,14 +663,28 @@ impl App {
             }
         }
 
-        // The mouse wheel scrolls the file pane under the pointer.
+        // The mouse wheel scrolls whatever is under the pointer: a listing's
+        // cursor, or the shell's output back through its scrollback.
         if matches!(ev.kind, MouseEventKind::ScrollDown | MouseEventKind::ScrollUp) {
-            if let Some(pane @ (FocusedPane::Left | FocusedPane::Right)) = pane_at(col, row) {
-                self.focus(pane);
-                let delta: isize = if matches!(ev.kind, MouseEventKind::ScrollDown) { 3 } else { -3 };
-                if let Some(p) = self.active_pane_mut() {
-                    p.move_cursor(delta);
+            let up = matches!(ev.kind, MouseEventKind::ScrollUp);
+            match pane_at(col, row) {
+                Some(pane @ (FocusedPane::Left | FocusedPane::Right)) => {
+                    self.focus(pane);
+                    if let Some(p) = self.active_pane_mut() {
+                        p.move_cursor(if up { -3 } else { 3 });
+                    }
                 }
+                Some(FocusedPane::Shell) => {
+                    // The pane under the pointer, not the active one — the
+                    // shell can be split, and the wheel belongs to what it is
+                    // over. Focus is left alone: scrolling to read something
+                    // is not the same as choosing where to type.
+                    self.select_shell_leaf_at(col, row);
+                    if let Some(s) = self.shell.active_session() {
+                        s.scroll_back(if up { 3 } else { -3 });
+                    }
+                }
+                None => {}
             }
             return;
         }

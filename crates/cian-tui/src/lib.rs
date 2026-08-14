@@ -4082,6 +4082,7 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry("Shift+F8", None, "v-split (panes side by side)", "左右分割（ペインを横に並べる）"),
                 entry("Shift+F9", None, "h-split (panes stacked)", "上下分割（ペインを縦に積む）"),
                 entry("Shift+F10", None, "close split pane (confirms)", "分割ペインを閉じる（確認あり）"),
+                entry("wheel / Shift+PgUp / Shift+↑", None, "scroll back through output that has gone past (Shift+Home / End for the two ends; typing returns to live)", "流れた出力をさかのぼる（Shift+Home / End で両端、入力すれば最新へ）"),
                 entry("F12", None, "zoom focused surface (toggle)", "フォーカス中の面をズーム（トグル）"),
                 entry("Shift+F12", None, "zoom active split pane (toggle)", "アクティブな分割ペインをズーム（トグル）"),
                 entry(":sync", None, "synchronize: type into all panes at once (also right-click)", "同時入力：全ペインへ一括入力（右クリックでも）"),

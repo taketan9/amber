@@ -1843,6 +1843,42 @@ impl App {
                 key.code, key.modifiers, alt_screen
             ));
         }
+        // Scrolling back through what has already gone past. Shift+PageUp /
+        // Shift+PageDown are what a terminal emulator uses, and Shift+Home /
+        // Shift+End are the two ends of it. Not while a full-screen app runs:
+        // there the shell's own scrollback is not what is on screen, and the
+        // app wants those keys.
+        if !alt_screen && key.modifiers.contains(KeyModifiers::SHIFT) {
+            let page = (self.layout_rects.shell.height as isize - 2).max(1);
+            let by = match key.code {
+                KeyCode::PageUp => Some(page),
+                KeyCode::PageDown => Some(-page),
+                KeyCode::Up => Some(1),
+                KeyCode::Down => Some(-1),
+                KeyCode::Home => Some(isize::MAX / 2),
+                KeyCode::End => Some(isize::MIN / 2),
+                _ => None,
+            };
+            if let Some(by) = by {
+                let at = self.shell.active_session().map(|s| s.scroll_back(by)).unwrap_or(0);
+                self.message = Some(if at == 0 {
+                    tr(self.lang, "live output", "最新の出力").into()
+                } else if self.lang == Lang::Ja {
+                    format!("{at} 行さかのぼり中 — 何か入力すると戻ります")
+                } else {
+                    format!("{at} lines back — typing returns to the end")
+                });
+                return Ok(());
+            }
+        }
+        // Anything else typed goes back to live output first, as it does in a
+        // terminal: typing into a screen that is not the current one is how
+        // commands end up somewhere nobody was looking.
+        if let Some(s) = self.shell.active_session() {
+            if s.scrollback_pos() != 0 {
+                s.scroll_to_bottom();
+            }
+        }
         // Esc returns to the file pane — unless a full-screen app (alternate
         // screen) is running, in which case Esc belongs to that app (e.g. vim).
         if key.code == KeyCode::Esc && !alt_screen {

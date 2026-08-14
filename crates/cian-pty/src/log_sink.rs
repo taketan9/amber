@@ -17,9 +17,10 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 
 /// Where in an escape sequence the filter currently is.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 enum State {
     /// Ordinary text.
+    #[default]
     Text,
     /// Just saw ESC; the next byte decides the kind of sequence.
     Escape,
@@ -31,18 +32,74 @@ enum State {
     OscEsc,
 }
 
+/// The filter itself, without anywhere to put the result: feed it bytes and it
+/// calls back with the readable ones.
+///
+/// Separated from the log because the scrollback wants exactly the same thing
+/// — the text of what went past, with the cursor-moving and colour-setting
+/// noise taken out — and two copies of an escape-sequence parser is two
+/// chances to get it wrong.
+#[derive(Debug, Default)]
+pub struct Scrub {
+    state: State,
+}
+
+impl Scrub {
+    /// Feed a chunk; `out` receives each byte of readable text.
+    pub fn feed(&mut self, bytes: &[u8], mut out: impl FnMut(u8)) {
+        for &b in bytes {
+            match self.state {
+                State::Text => match b {
+                    0x1b => self.state = State::Escape,
+                    b'\n' => out(b'\n'),
+                    b'\t' => out(b'\t'),
+                    // Drop CR so CRLF becomes LF; drop other C0 controls (BEL,
+                    // backspace and friends produce noise, not text).
+                    b'\r' => {}
+                    0x00..=0x1f => {}
+                    other => out(other),
+                },
+                State::Escape => match b {
+                    b'[' => self.state = State::Csi,
+                    b']' => self.state = State::Osc,
+                    // A two-byte escape (charset selection and the like): the
+                    // byte after ESC is the whole thing, so we are done.
+                    _ => self.state = State::Text,
+                },
+                State::Csi => {
+                    // Parameter and intermediate bytes continue the sequence;
+                    // a final byte (0x40..=0x7e) ends it.
+                    if (0x40..=0x7e).contains(&b) {
+                        self.state = State::Text;
+                    }
+                }
+                State::Osc => match b {
+                    0x07 => self.state = State::Text,   // BEL terminates
+                    0x1b => self.state = State::OscEsc, // maybe ESC \ (ST)
+                    _ => {}
+                },
+                State::OscEsc => {
+                    // `ESC \` is the string terminator; anything else was a
+                    // stray ESC, and we resume scanning the OSC.
+                    self.state = if b == b'\\' { State::Text } else { State::Osc };
+                }
+            }
+        }
+    }
+}
+
 /// An open log that scrubs escape sequences as bytes arrive.
 pub struct LogSink {
     path: PathBuf,
     out: BufWriter<File>,
-    state: State,
+    scrub: Scrub,
 }
 
 impl LogSink {
     /// Create (or truncate) the log file at `path`.
     pub fn create(path: &Path) -> Result<Self> {
         let file = File::create(path).with_context(|| format!("open log {}", path.display()))?;
-        Ok(Self { path: path.to_path_buf(), out: BufWriter::new(file), state: State::Text })
+        Ok(Self { path: path.to_path_buf(), out: BufWriter::new(file), scrub: Scrub::default() })
     }
 
     pub fn path(&self) -> &Path {
@@ -51,57 +108,16 @@ impl LogSink {
 
     /// Feed a chunk of raw PTY output, appending its readable text.
     pub fn write_bytes(&mut self, bytes: &[u8]) {
-        for &b in bytes {
-            self.step(b);
-        }
+        let out = &mut self.out;
+        self.scrub.feed(bytes, |b| {
+            let _ = out.write_all(&[b]);
+        });
         // Flush per chunk: a session log wants to survive a crash of the very
         // process it is recording, and terminal output is not high-volume
         // enough for the syscalls to matter.
         let _ = self.out.flush();
     }
 
-    fn step(&mut self, b: u8) {
-        match self.state {
-            State::Text => match b {
-                0x1b => self.state = State::Escape,
-                b'\n' => self.emit(b'\n'),
-                b'\t' => self.emit(b'\t'),
-                // Drop CR so CRLF becomes LF; drop other C0 controls (BEL,
-                // backspace and friends produce noise, not text).
-                b'\r' => {}
-                0x00..=0x1f => {}
-                other => self.emit(other),
-            },
-            State::Escape => match b {
-                b'[' => self.state = State::Csi,
-                b']' => self.state = State::Osc,
-                // A two-byte escape (charset selection and the like): the byte
-                // after ESC is the whole thing, so we are done with it.
-                _ => self.state = State::Text,
-            },
-            State::Csi => {
-                // Parameter and intermediate bytes continue the sequence; a
-                // final byte (0x40..=0x7e) ends it.
-                if (0x40..=0x7e).contains(&b) {
-                    self.state = State::Text;
-                }
-            }
-            State::Osc => match b {
-                0x07 => self.state = State::Text,      // BEL terminates
-                0x1b => self.state = State::OscEsc,    // maybe ESC \ (ST)
-                _ => {}
-            },
-            State::OscEsc => {
-                // `ESC \` is the string terminator; anything else was a stray
-                // ESC, and we resume scanning the OSC.
-                self.state = if b == b'\\' { State::Text } else { State::Osc };
-            }
-        }
-    }
-
-    fn emit(&mut self, b: u8) {
-        let _ = self.out.write_all(&[b]);
-    }
 }
 
 #[cfg(test)]

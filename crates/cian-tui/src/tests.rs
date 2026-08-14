@@ -2583,6 +2583,63 @@
         assert!(screen.lines().any(|l| l.contains(" 1 ")), "gutter kept:\n{screen}");
     }
 
+    /// The offset arithmetic: it stops at both ends, and the wheel and the
+    /// keys drive it. What the scrollback *holds* is tested in cian-pty,
+    /// where the reader thread that fills it lives.
+    #[test]
+    fn the_shell_scrollback_stops_at_both_ends() {
+        let dir = tempfile::tempdir().unwrap();
+        let sh = cian_pty::default_shell();
+        let s = cian_pty::PtySession::new(dir.path(), &sh, 10, 80).unwrap();
+        assert_eq!(s.scrollback_pos(), 0, "a fresh shell is at the end");
+        assert_eq!(s.scroll_back(50), 0, "and has nothing to go back through");
+        assert_eq!(s.scroll_back(-50), 0, "nor forward past the end");
+        s.scroll_to_bottom();
+        assert_eq!(s.scrollback_pos(), 0);
+    }
+
+    /// The wheel over the shell scrolls it, and typing comes back to the end
+    /// — typing into a screen that is not the current one is how commands end
+    /// up somewhere nobody was looking.
+    #[test]
+    fn the_wheel_scrolls_the_shell_and_typing_returns_to_it() {
+        use crossterm::event::MouseEventKind;
+        let (_d, mut app) = app_with(&["a.txt"]);
+        let _ = render(&mut app, 100, 30);
+        let Some(s) = app.shell.active_session() else {
+            return; // no shell on this machine; the unit test above covers it
+        };
+        s.parser().lock().unwrap().process(
+            (1..=200).map(|i| format!("line {i}\r\n")).collect::<String>().as_bytes(),
+        );
+        let shell = app.layout_rects.shell;
+        let wheel = |app: &mut App, kind| {
+            app.handle_mouse(crossterm::event::MouseEvent {
+                kind,
+                column: shell.x + 4,
+                row: shell.y + 2,
+                modifiers: KeyModifiers::NONE,
+            });
+        };
+        wheel(&mut app, MouseEventKind::ScrollUp);
+        wheel(&mut app, MouseEventKind::ScrollUp);
+        let at = app.shell.active_session().map(|s| s.scrollback_pos()).unwrap_or(0);
+        assert_eq!(at, 6, "six rows back, three to a notch");
+
+        // …and the wheel does not steal the focus: reading is not choosing
+        // where to type.
+        assert_ne!(app.focused, FocusedPane::Shell, "focus stayed on the listing");
+
+        // Typing into the shell brings it back to live output.
+        app.focus(FocusedPane::Shell);
+        app.handle_key(key('x')).unwrap();
+        assert_eq!(
+            app.shell.active_session().map(|s| s.scrollback_pos()),
+            Some(0),
+            "typing returned to the end",
+        );
+    }
+
     /// The wheel moves the view, both ways, and takes the cursor only when it
     /// would otherwise be left off screen.
     #[test]
