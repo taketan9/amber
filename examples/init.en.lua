@@ -120,6 +120,12 @@
 -- (You can also toggle live from the right-click menu.)
 -- cian.set_option("lang", "en")
 
+-- Extensions the cursor-follow preview leaves alone (with or without the dot,
+-- case-insensitive) — for the kinds that have to be unpacked to be shown, and
+-- stall the panel for a file nobody wanted to look inside. F3 still opens
+-- them: this is about what happens *without* being asked.
+-- cian.set_option("preview_skip", { "vsix", "iso", "7z" })
+
 -- Language for JUST the key manual (`?`) and the right-click context menu,
 -- overriding `lang` for those two surfaces only. Handy to keep the interface in
 -- English but read the menu / manual in Japanese (or vice versa). Unset =

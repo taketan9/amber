@@ -2583,6 +2583,48 @@
         assert!(screen.lines().any(|l| l.contains(" 1 ")), "gutter kept:\n{screen}");
     }
 
+    /// `preview_skip` names the kinds the cursor-follow preview leaves alone.
+    /// A `.vsix` is a zip of an editor extension: listing one means unpacking
+    /// it, which stalls the panel for a file nobody wanted to look inside.
+    #[test]
+    fn preview_skip_leaves_those_kinds_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        for n in ["ext.vsix", "disc.ISO", "notes.txt"] {
+            std::fs::write(dir.path().join(n), b"x").unwrap();
+        }
+        let p = dir.path().to_path_buf();
+        let mut config = en_config();
+        // Written any of the three ways someone would write it.
+        config.options.preview_skip =
+            vec!["vsix".into(), ".iso".into(), "TAR.GZ".into()];
+        let mut app = App::new(p.clone(), p, config).unwrap();
+
+        let at = |app: &mut App, name: &str| {
+            let i = app
+                .active_pane()
+                .unwrap()
+                .entries
+                .iter()
+                .position(|e| e.name == name)
+                .unwrap();
+            app.active_pane_mut().unwrap().cursor = i;
+            crate::preview::preview_target(app)
+        };
+
+        assert!(at(&mut app, "notes.txt").is_ok(), "an ordinary file still previews");
+        let e = at(&mut app, "ext.vsix").unwrap_err();
+        assert!(e.contains("preview_skip"), "and says why: {e:?}");
+        // Case does not matter, on the file or in the config.
+        assert!(at(&mut app, "disc.ISO").is_err(), "matched whatever the case");
+
+        // With nothing configured, nothing is skipped.
+        let dir2 = tempfile::tempdir().unwrap();
+        std::fs::write(dir2.path().join("ext.vsix"), b"x").unwrap();
+        let p2 = dir2.path().to_path_buf();
+        let mut plain = App::new(p2.clone(), p2, en_config()).unwrap();
+        assert!(at(&mut plain, "ext.vsix").is_ok(), "off by default");
+    }
+
     /// The offset arithmetic: it stops at both ends, and the wheel and the
     /// keys drive it. What the scrollback *holds* is tested in cian-pty,
     /// where the reader thread that fills it lives.

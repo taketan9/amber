@@ -106,6 +106,14 @@ pub struct Options {
     /// How many seconds a job must run before a finish notification fires.
     /// Defaults to 5, so quick operations stay silent.
     pub notify_min_secs: Option<u64>,
+    /// Extensions the cursor-follow preview leaves alone, without the dot and
+    /// case-insensitively: `{ "vsix", "iso" }`.
+    ///
+    /// For the kinds where showing it costs more than it is worth — a `.vsix`
+    /// is a zip of an editor extension, and unpacking one to list it stalls
+    /// the panel for a file nobody wanted to look inside. `F3` still opens
+    /// them: this is about what happens *without* being asked.
+    pub preview_skip: Vec<String>,
 }
 
 /// A login on a host.
@@ -867,6 +875,29 @@ fn install_api(lua: &Lua, builder: &Rc<RefCell<Builder>>) -> mlua::Result<()> {
                         Err(_) => bm
                             .errors
                             .push("set_option: preview expects a boolean".into()),
+                    },
+                    "preview_skip" => match &val {
+                        Value::String(one) => match one.to_str() {
+                            Ok(v) => bm.options.preview_skip.push(v.trim().to_string()),
+                            Err(_) => bm
+                                .errors
+                                .push("set_option: preview_skip expects text".into()),
+                        },
+                        Value::Table(t) => {
+                            for item in t.clone().sequence_values::<String>() {
+                                match item {
+                                    Ok(v) => bm.options.preview_skip.push(v.trim().to_string()),
+                                    Err(_) => bm.errors.push(
+                                        "set_option: preview_skip expects a list of extensions"
+                                            .into(),
+                                    ),
+                                }
+                            }
+                        }
+                        _ => bm.errors.push(
+                            "set_option: preview_skip expects an extension or a list of them"
+                                .into(),
+                        ),
                     },
                     "read_cloud_files" => match bool::from_lua(val, lua) {
                         Ok(v) => bm.options.read_cloud_files = Some(v),

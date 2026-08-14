@@ -164,6 +164,27 @@ fn load_preview(path: &Path, lang: crate::Lang) -> PreviewBody {
 /// The path the preview should follow: the cursor entry of the focused file
 /// pane — unless there is a reason not to look (remote pane: reading a file
 /// would download it; nothing selected). `Err` carries the note to show.
+/// Is this one of the extensions `preview_skip` names?
+///
+/// Compared lowercased and without the dot, so the config can say `vsix`,
+/// `.vsix` or `VSIX` and mean the same thing.
+pub(crate) fn skip_preview(app: &App, path: &std::path::Path) -> bool {
+    if app.config.options.preview_skip.is_empty() {
+        return false;
+    }
+    let Some(ext) = path.extension().map(|e| e.to_string_lossy().to_lowercase()) else {
+        return false;
+    };
+    // Normalised here rather than only where it was read, so it does not
+    // matter how the value arrived: `vsix`, `.vsix` and `VSIX` are the same
+    // answer to the same question.
+    app.config
+        .options
+        .preview_skip
+        .iter()
+        .any(|s| s.trim().trim_start_matches('.').eq_ignore_ascii_case(&ext))
+}
+
 pub(crate) fn preview_target(app: &App) -> Result<PathBuf, String> {
     let pane = match app.focused {
         FocusedPane::Left => app.left.active_ref(),
@@ -194,6 +215,15 @@ pub(crate) fn preview_target(app: &App) -> Result<PathBuf, String> {
             app.lang,
             "☁ This file has not been downloaded yet.\n\n             Showing it here would fetch it over the network, and holding a\n             cursor down a folder would fetch every file in it.\n\n             F3 opens this one (and downloads it).\n             T → \"Read ☁ cloud-only files\" previews them from now on.",
             "☁ このファイルはまだダウンロードされていません。\n\n             ここに表示するとネットワーク越しに取得することになり、\n             カーソルを押しっぱなしにするとフォルダ内が全部落ちてきます。\n\n             F3 でこの1つを開けます（ダウンロードされます）。\n             T →「☁ クラウド上のファイルも読む」で以後プレビューします。",
+        )
+        .into()),
+        // Kinds the config says not to open unasked. A `.vsix` is a zip of an
+        // editor extension: listing one means unpacking it, which stalls the
+        // panel for a file nobody wanted to look inside.
+        Some(e) if skip_preview(app, &e.path) => Err(tr(
+            app.lang,
+            "preview off for this kind (preview_skip) — F3 opens it",
+            "この拡張子はプレビュー対象外です（preview_skip）— F3 で開けます",
         )
         .into()),
         Some(e) => Ok(e.path.clone()),
