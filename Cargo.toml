@@ -27,7 +27,7 @@ cian-lua  = { path = "crates/cian-lua"  }
 
 # External crates (pinned at workspace level so all crates use the same version)
 ratatui   = "0.30"
-crossterm = "0.28"
+crossterm = "0.29"
 anyhow    = "1"
 arboard   = "3"
 fs_extra  = "1.3"
@@ -41,7 +41,7 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 # Embedded shell pane. tui-term, ratatui and vt100 move together: tui-term
 # renders vt100's `Screen` into ratatui's buffer, so all three have to agree
 # on those two types. Bump them as a set.
-portable-pty = "0.8"
+portable-pty = "0.9"
 vt100        = "0.16"
 tui-term     = { version = "0.3", features = ["vt100"] }
 

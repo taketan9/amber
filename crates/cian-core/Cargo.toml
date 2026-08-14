@@ -17,8 +17,8 @@ encoding_rs = "0.8"
 # directly (statvfs / GetDiskFreeSpaceEx) rather than shelling out.
 fs2 = "0.4.3"
 fs_extra = { workspace = true }
-md-5 = { version = "0.10.6", default-features = false, features = ["std"] }
-sha2 = { version = "0.10.9", default-features = false, features = ["std"] }
+md-5 = { version = "0.11", default-features = false, features = ["alloc"] }
+sha2 = { version = "0.11", default-features = false, features = ["alloc"] }
 # `coinit_apartmentthreaded` is not optional on Windows: trash fails to compile
 # without one of its coinit_* features, and the Shell file APIs it calls want an
 # apartment-threaded COM runtime. Default features are otherwise off because the
@@ -28,7 +28,7 @@ trash = { version = "5.2.3", default-features = false, features = ["coinit_apart
 # ZipCrypto cipher would be openable by Explorer's built-in unzip but is
 # cryptographically broken and not exposed by the crate's public API, so AES
 # is the only real choice; the UI warns that Explorer cannot open the result.
-zip = { version = "4.2.0", default-features = false, features = ["deflate", "aes-crypto"] }
+zip = { version = "4.6", default-features = false, features = ["deflate", "aes-crypto"] }
 # tar + gzip reading, for looking inside .tar / .tar.gz / .tgz. flate2's
 # rust_backend (miniz_oxide) keeps this pure-Rust — no C, so the single Windows
 # binary still builds without a toolchain.
@@ -40,7 +40,7 @@ flate2 = { version = "1", default-features = false, features = ["rust_backend"] 
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif", "bmp", "webp"] }
 fs4 = "1.1.0"
 regex = "1.13.1"
-unicode-width = "0.1"
+unicode-width = "0.2"
 
 [dev-dependencies]
 tempfile = "3.27.0"

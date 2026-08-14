@@ -62,9 +62,19 @@ impl Hasher {
 
     pub fn finish(self) -> String {
         use md5::Digest as _;
+        // Spelled out rather than `{:x}`: RustCrypto 0.11 stopped
+        // implementing `LowerHex` on the digest it hands back.
+        let hex = |bytes: &[u8]| -> String {
+            let mut out = String::with_capacity(bytes.len() * 2);
+            for b in bytes {
+                use std::fmt::Write as _;
+                let _ = write!(out, "{b:02x}");
+            }
+            out
+        };
         match self.kind {
-            HashKind::Md5 => format!("{:x}", self.md5.finalize()),
-            HashKind::Sha256 => format!("{:x}", self.sha.finalize()),
+            HashKind::Md5 => hex(&self.md5.finalize()),
+            HashKind::Sha256 => hex(&self.sha.finalize()),
         }
     }
 }
