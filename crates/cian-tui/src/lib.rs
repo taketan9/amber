@@ -474,6 +474,11 @@ enum Popup {
         /// The inner width the preview was last wrapped to, so the render can
         /// tell when a resize means it must re-render.
         md_width: u16,
+        /// A source line the view should be showing once the preview has been
+        /// built. Toggling between source and preview keeps your place, and
+        /// the two are not the same lines — the map that relates them only
+        /// exists after the render, so the wish is left here for it.
+        md_seek: Option<usize>,
         /// Per-line git blame, shown as a left gutter when non-empty. Toggled
         /// with `B`; empty means off.
         blame: Vec<cian_core::git::BlameLine>,
@@ -1937,6 +1942,30 @@ impl ShortcutStore {
     }
 }
 
+/// A scrollbar the mouse can take hold of, recorded by the renderer each
+/// frame with the geometry the pointer will be measured against.
+///
+/// The bars were drawn but not remembered, so there was nothing to hit: they
+/// reported where you were and could not be used to go anywhere.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct ScrollTrack {
+    pub(crate) rect: Rect,
+    pub(crate) what: ScrollWhat,
+    /// Rows (or columns) of content the track stands for.
+    pub(crate) total: usize,
+    /// How much of it is on screen — the thumb's share of the track.
+    pub(crate) shown: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ScrollWhat {
+    /// A file listing's cursor.
+    Pane(FocusedPane),
+    /// The editor panel, down and across.
+    ViewerRows,
+    ViewerCols,
+}
+
 /// Which version-control system a pane's directory belongs to. Both report the
 /// same [`cian_core::git::RepoStatus`] display type, so the UI is identical.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2297,6 +2326,14 @@ pub struct App {
     /// `r` waiting for the character to stamp in, with the count it was given
     /// (`3rx` overwrites three).
     vim_replace: Option<usize>,
+    /// The scrollbars on screen, for the mouse to grab.
+    scroll_tracks: Vec<ScrollTrack>,
+    /// The bar being dragged, so the pointer keeps it after leaving the track.
+    scroll_drag: Option<ScrollWhat>,
+    /// Consecutive Escs pressed in the panel with nothing left to peel off.
+    /// One is a mistake, three in a row is a decision — and `:q!` is a lot to
+    /// type when the answer is "get me out of here".
+    viewer_escapes: u8,
     /// Whether the system clipboard actually took the last thing yanked.
     ///
     /// Writing it can fail — another program holding the pasteboard, a
@@ -2622,6 +2659,9 @@ impl App {
             vim_wait: None,
             vim_last_find: None,
             vim_replace: None,
+            scroll_tracks: Vec::new(),
+            scroll_drag: None,
+            viewer_escapes: 0,
             yank_on_clipboard: false,
             viewer_half_rects: [Rect::new(0, 0, 0, 0); 2],
             viewer_gutter: 0,

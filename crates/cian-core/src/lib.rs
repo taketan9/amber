@@ -287,6 +287,11 @@ pub struct Pane {
     /// Ordering of the listing.
     pub sort: Sort,
     pub cursor: usize,
+    /// The first entry on screen. The view follows the cursor only when the
+    /// cursor would leave it — it used to be derived from the cursor, with a
+    /// formula that put the cursor on the *last* visible row, so clicking a
+    /// file or jumping to one scrolled it to the bottom of the pane.
+    pub scroll: usize,
     /// Marked entries keyed by full path (survives reload).
     pub marks: HashSet<PathBuf>,
     /// Recently visited paths for this pane (most recent first, deduped, capped).
@@ -319,6 +324,7 @@ impl Pane {
             show_hidden: true,
             sort: Sort::default(),
             cursor: 0,
+            scroll: 0,
             marks: HashSet::new(),
             history: Vec::new(),
             forward: Vec::new(),

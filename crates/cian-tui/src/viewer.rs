@@ -983,14 +983,25 @@ impl App {
             *scroll = (*scroll).min(n.saturating_sub(body_h));
         }
         if say_how_to_close {
-            self.message = Some(
-                tr(
-                    self.lang,
-                    ":q closes this file  (:q! discards edits) — or the ✕ in the corner",
-                    ":q で閉じます（:q! で変更を破棄） — 右上の ✕ でも",
-                )
-                .into(),
-            );
+            // Three in a row is `:q!`. One Esc must not close a file with
+            // unsaved edits in it — that is why it stopped closing at all —
+            // but three deliberate presses are not a slip, and "get me out of
+            // here" should not need a colon and two more keys.
+            self.viewer_escapes = self.viewer_escapes.saturating_add(1);
+            if self.viewer_escapes >= 3 {
+                self.viewer_escapes = 0;
+                self.close_viewer_file();
+                return Ok(());
+            }
+            let left = 3 - self.viewer_escapes;
+            self.message = Some(if self.lang == Lang::Ja {
+                format!(":q で閉じます（:q! で変更を破棄）— Esc あと {left} 回でも閉じます")
+            } else {
+                format!(":q closes this file (:q! discards edits) — or Esc {left} more times")
+            });
+        } else if key.code != KeyCode::Esc {
+            // Any other key means the run of Escs was not going anywhere.
+            self.viewer_escapes = 0;
         }
         Ok(())
     }
@@ -2902,13 +2913,25 @@ impl App {
     /// out around it.
     pub(crate) fn toggle_markdown_preview(&mut self) {
         let mut is_md = false;
-        if let Popup::Viewer { preview, markdown: true, line, col, scroll, visual, .. } =
-            &mut self.popup
+        if let Popup::Viewer {
+            preview, markdown: true, line, col, scroll, visual, md_map, md_seek, ..
+        } = &mut self.popup
         {
             is_md = true;
+            // Where you were, in the file's own line numbers — the one thing
+            // both sides agree on. Going back to the source that is the
+            // answer; going into the preview it is a wish, granted by the
+            // render once it has built the map between the two.
+            let src = crate::render::src_line(md_map, *line);
             *preview = !*preview;
             let on = *preview;
-            (*line, *col, *scroll, *visual) = (0, 0, 0, None);
+            (*col, *visual) = (0, None);
+            if on {
+                *md_seek = Some(src);
+            } else {
+                *line = src;
+                *scroll = src.saturating_sub(scroll_margin(*scroll, src));
+            }
             self.message = Some(if on {
                 tr(self.lang, "markdown: preview", "Markdown: プレビュー").into()
             } else {
@@ -3962,6 +3985,7 @@ impl App {
             md_styles: Vec::new(),
             md_map: Vec::new(),
             md_width: 0,
+            md_seek: None,
             blame: Vec::new(),
             hl_lang: None,
             hl: Vec::new(),
@@ -4171,6 +4195,12 @@ fn redo_step(
 /// caller is already inside the `&mut self.popup` borrow and cannot call one.
 /// It was written out at each of the six of them, which is how the seventh
 /// would have drifted from the rest.
+/// Keep the cursor roughly where it sat on screen when the view changes
+/// under it: a third of the way down, rather than snapping to the top.
+fn scroll_margin(_old_scroll: usize, line: usize) -> usize {
+    line.min(6)
+}
+
 fn clamp_scroll(line: usize, scroll: &mut usize, body_h: usize) {
     if line < *scroll {
         *scroll = line;

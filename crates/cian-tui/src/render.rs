@@ -116,16 +116,37 @@ fn draw_split(f: &mut Frame, main_area: Rect, app: &mut App, ov: AnimOverride) {
     let visual_for_right = if app.focused == FocusedPane::Right { app.visual_anchor } else { None };
 
     let (bg_l, bg_r) = (app.pane_bg[0], app.pane_bg[1]);
+    let mut tracks: Vec<crate::ScrollTrack> = Vec::new();
+    // The listings' scroll, settled once a frame from the geometry the last
+    // one measured — the same arrangement the editor panel uses. Doing it
+    // inside the pane renderer would mean borrowing the pane mutably while
+    // its own title is still borrowed from it.
+    for (id, tabs) in [(FocusedPane::Left, &mut app.left), (FocusedPane::Right, &mut app.right)] {
+        let h = match id {
+            FocusedPane::Left => panes_split[0].height,
+            _ => panes_split[1].height,
+        };
+        let list_h = h.saturating_sub(3) as usize;
+        let p = tabs.active_mut();
+        p.scroll = clamp_list_scroll(p.scroll, p.cursor, list_h, p.entries.len());
+    }
     let (fl_l, fl_r) = (app.flash_level(FocusedPane::Left), app.flash_level(FocusedPane::Right));
     let restore = push_pane_theme(app, 0);
-    draw_file_pane(f, panes_split[0], &app.left, app.focused == FocusedPane::Left, visual_for_left, app.mode, bg_l, fl_l, FocusedPane::Left, &mut tab_rects, app.git_for(FocusedPane::Left), app.lang, &mut sort_rects, &mut crumb_rects, &mut nav_rects);
+    // Cloned rather than borrowed: the panes are drawn with `&mut`, and a
+    // borrow of `app.git` would keep the whole `app` borrowed alongside it.
+    let (git_l, git_r) = (
+        app.git_for(FocusedPane::Left).cloned(),
+        app.git_for(FocusedPane::Right).cloned(),
+    );
+    draw_file_pane(f, panes_split[0], &mut app.left, &mut tracks, app.focused == FocusedPane::Left, visual_for_left, app.mode, bg_l, fl_l, FocusedPane::Left, &mut tab_rects, git_l.as_ref(), app.lang, &mut sort_rects, &mut crumb_rects, &mut nav_rects);
     if let Some(prev) = restore { set_theme(prev); }
     let restore = push_pane_theme(app, 1);
-    draw_file_pane(f, panes_split[1], &app.right, app.focused == FocusedPane::Right, visual_for_right, app.mode, bg_r, fl_r, FocusedPane::Right, &mut tab_rects, app.git_for(FocusedPane::Right), app.lang, &mut sort_rects, &mut crumb_rects, &mut nav_rects);
+    draw_file_pane(f, panes_split[1], &mut app.right, &mut tracks, app.focused == FocusedPane::Right, visual_for_right, app.mode, bg_r, fl_r, FocusedPane::Right, &mut tab_rects, git_r.as_ref(), app.lang, &mut sort_rects, &mut crumb_rects, &mut nav_rects);
     if let Some(prev) = restore { set_theme(prev); }
     // With preview on and a file pane focused, the shell panel's area shows
     // the file under the cursor instead; the PTY runs on underneath, and
     // focusing the shell (Shift+J / click) gets its pixels back.
+    app.scroll_tracks = std::mem::take(&mut tracks);
     let log_border = recording_pulse(app.started.elapsed());
     if app.preview_on && app.focused != FocusedPane::Shell {
         draw_preview_panel(f, shell_area, app);
@@ -147,19 +168,24 @@ fn draw_split(f: &mut Frame, main_area: Rect, app: &mut App, ov: AnimOverride) {
 /// layout rather than a rect that is still moving.
 fn draw_zoom_overlay(f: &mut Frame, rect: Rect, app: &mut App, ov: AnimOverride) {
     let mut sink = Vec::new();
+    // A zoomed pane draws over the resting layout; its bar is the one the
+    // mouse should find, so these replace what the backdrop recorded.
+    let mut tracks: Vec<crate::ScrollTrack> = Vec::new();
     match app.focused {
         FocusedPane::Left => {
             let (bg, fl) = (app.pane_bg[0], app.flash_level(FocusedPane::Left));
             let va = app.visual_anchor;
             let restore = push_pane_theme(app, 0);
-            draw_file_pane(f, rect, &app.left, true, va, app.mode, bg, fl, FocusedPane::Left, &mut Vec::new(), app.git_for(FocusedPane::Left), app.lang, &mut Vec::new(), &mut Vec::new(), &mut Vec::new());
+            let g = app.git_for(FocusedPane::Left).cloned();
+            draw_file_pane(f, rect, &mut app.left, &mut tracks, true, va, app.mode, bg, fl, FocusedPane::Left, &mut Vec::new(), g.as_ref(), app.lang, &mut Vec::new(), &mut Vec::new(), &mut Vec::new());
             if let Some(prev) = restore { set_theme(prev); }
         }
         FocusedPane::Right => {
             let (bg, fl) = (app.pane_bg[1], app.flash_level(FocusedPane::Right));
             let va = app.visual_anchor;
             let restore = push_pane_theme(app, 1);
-            draw_file_pane(f, rect, &app.right, true, va, app.mode, bg, fl, FocusedPane::Right, &mut Vec::new(), app.git_for(FocusedPane::Right), app.lang, &mut Vec::new(), &mut Vec::new(), &mut Vec::new());
+            let g = app.git_for(FocusedPane::Right).cloned();
+            draw_file_pane(f, rect, &mut app.right, &mut tracks, true, va, app.mode, bg, fl, FocusedPane::Right, &mut Vec::new(), g.as_ref(), app.lang, &mut Vec::new(), &mut Vec::new(), &mut Vec::new());
             if let Some(prev) = restore { set_theme(prev); }
         }
         FocusedPane::Shell => {
@@ -213,6 +239,7 @@ fn draw_zoomed(f: &mut Frame, area: Rect, app: &mut App, ov: AnimOverride) {
     let mut sort_rects = Vec::new();
     let mut crumb_rects = Vec::new();
     let mut nav_rects = Vec::new();
+    let mut tracks: Vec<crate::ScrollTrack> = Vec::new();
     match app.focused {
         FocusedPane::Left => {
             rects.left = area;
@@ -220,7 +247,8 @@ fn draw_zoomed(f: &mut Frame, area: Rect, app: &mut App, ov: AnimOverride) {
             let va = app.visual_anchor;
             let (bg, fl) = (app.pane_bg[0], app.flash_level(FocusedPane::Left));
             let restore = push_pane_theme(app, 0);
-            draw_file_pane(f, area, &app.left, true, va, app.mode, bg, fl, FocusedPane::Left, &mut tab_rects, app.git_for(FocusedPane::Left), app.lang, &mut sort_rects, &mut crumb_rects, &mut nav_rects);
+            let g = app.git_for(FocusedPane::Left).cloned();
+            draw_file_pane(f, area, &mut app.left, &mut tracks, true, va, app.mode, bg, fl, FocusedPane::Left, &mut tab_rects, g.as_ref(), app.lang, &mut sort_rects, &mut crumb_rects, &mut nav_rects);
             if let Some(prev) = restore { set_theme(prev); }
         }
         FocusedPane::Right => {
@@ -229,7 +257,8 @@ fn draw_zoomed(f: &mut Frame, area: Rect, app: &mut App, ov: AnimOverride) {
             let va = app.visual_anchor;
             let (bg, fl) = (app.pane_bg[1], app.flash_level(FocusedPane::Right));
             let restore = push_pane_theme(app, 1);
-            draw_file_pane(f, area, &app.right, true, va, app.mode, bg, fl, FocusedPane::Right, &mut tab_rects, app.git_for(FocusedPane::Right), app.lang, &mut sort_rects, &mut crumb_rects, &mut nav_rects);
+            let g = app.git_for(FocusedPane::Right).cloned();
+            draw_file_pane(f, area, &mut app.right, &mut tracks, true, va, app.mode, bg, fl, FocusedPane::Right, &mut tab_rects, g.as_ref(), app.lang, &mut sort_rects, &mut crumb_rects, &mut nav_rects);
             if let Some(prev) = restore { set_theme(prev); }
         }
         FocusedPane::Shell => {
@@ -489,6 +518,7 @@ pub(crate) fn draw(f: &mut Frame, app: &mut App) {
         };
         let mut tab_rects: Vec<(Rect, usize)> = Vec::new();
         let mut close_rect = Rect::new(0, 0, 0, 0);
+        let mut vtracks: Vec<crate::ScrollTrack> = Vec::new();
         // A menu — or a chat, or the theme gallery — opened *from* the viewer
         // is drawn on top of it, not instead of it. The file is what the
         // question is about; losing sight of it while answering is the wrong
@@ -504,8 +534,8 @@ pub(crate) fn draw(f: &mut Frame, app: &mut App) {
                 };
                 let mut other = other;
                 let docked = app.viewer_dock.is_some();
-                draw_viewer(f, theirs, &mut other, lang, (show_ws, ruler), (0, &[], &[]), docked, true);
-                draw_viewer(f, mine, &mut behind, lang, (show_ws, ruler), (0, &[], &[]), docked, true);
+                draw_viewer(f, theirs, &mut other, lang, (show_ws, ruler), (0, &[], &[]), docked, true, &mut Vec::new());
+                draw_viewer(f, mine, &mut behind, lang, (show_ws, ruler), (0, &[], &[]), docked, true, &mut Vec::new());
                 app.viewer_split = Some(other);
             } else {
                 draw_viewer(
@@ -517,6 +547,7 @@ pub(crate) fn draw(f: &mut Frame, app: &mut App) {
                     (0, &[], &[]),
                     app.viewer_dock.is_some(),
                     true,
+                    &mut Vec::new(),
                 );
             }
             app.viewer_return = Some(behind);
@@ -568,7 +599,7 @@ pub(crate) fn draw(f: &mut Frame, app: &mut App) {
                 Some(d) => (d.mine.as_slice(), d.theirs.as_slice()),
                 None => (&[][..], &[][..]),
             };
-            draw_viewer(f, theirs, &mut other, lang, (show_ws, ruler), (0, &[], dt), false, true);
+            draw_viewer(f, theirs, &mut other, lang, (show_ws, ruler), (0, &[], dt), false, true, &mut Vec::new());
             f.render_widget(
                 Block::default().style(Style::default().fg(Color::Rgb(90, 90, 105))),
                 theirs,
@@ -582,6 +613,7 @@ pub(crate) fn draw(f: &mut Frame, app: &mut App) {
                 (app.viewer_tab_idx, &names, dm),
                 false,
                 true,
+                &mut app.scroll_tracks,
             );
             app.viewer_split = Some(other);
             app.popup_zones.clear();
@@ -633,7 +665,9 @@ pub(crate) fn draw(f: &mut Frame, app: &mut App) {
             &mut close_rect,
             app.viewer_dock.is_some(),
             app.viewer_dock.map(|d| d == app.focused).unwrap_or(true),
+            &mut vtracks,
         );
+        app.scroll_tracks.append(&mut vtracks);
         app.viewer_tab_rects = tab_rects;
         app.viewer_close_rect = close_rect;
     } else {
@@ -1195,7 +1229,8 @@ fn shell_tabs_title<'a>(
 fn draw_file_pane(
     f: &mut Frame,
     area: Rect,
-    tabs: &PaneTabs,
+    tabs: &mut PaneTabs,
+    tracks: &mut Vec<crate::ScrollTrack>,
     focused: bool,
     visual_anchor: Option<usize>,
     mode: Mode,
@@ -1275,7 +1310,11 @@ fn draw_file_pane(
     let total = pane.entries.len();
     // Borders top+bottom, plus the column-header row under the top border.
     let list_h = area.height.saturating_sub(3) as usize;
-    let start = if list_h == 0 { pane.cursor } else { pane.cursor.saturating_sub(list_h - 1) };
+    // The window follows the cursor only when the cursor would leave it. It
+    // used to be derived from the cursor with a formula that put the cursor
+    // on the *last* visible row, so clicking a file — or jumping to one —
+    // scrolled it to the bottom of the pane.
+    let start = clamp_list_scroll(pane.scroll, pane.cursor, list_h, total);
     let end = start.saturating_add(list_h).min(total);
     let mark_style = Style::default().fg(th.mark_fg).add_modifier(Modifier::BOLD);
     // Per row, because the cursor's row has a tint of its own and a dim grey
@@ -1389,7 +1428,7 @@ fn draw_file_pane(
     if !pane.entries.is_empty() { state.select(Some(pane.cursor - start)); }
     f.render_stateful_widget(list, list_area, &mut state);
 
-    draw_list_scrollbar(f, area, pane.entries.len(), pane.cursor, focused, border_style);
+    draw_list_scrollbar(f, area, pane.entries.len(), pane.cursor, focused, border_style, pane_id, tracks);
 
     // The active tab's path segments are click targets (a breadcrumb): the
     // rects live on the title row and are resolved before tab selection.
@@ -1541,6 +1580,28 @@ const SIZE_COL_W: u16 = 5;
 const TIME_COL_W: u16 = 16;
 
 /// Draw a scrollbar on a pane's right border when the listing overflows.
+/// Where the listing's window starts: `scroll`, moved the least amount that
+/// puts `cursor` inside it.
+pub(crate) fn clamp_list_scroll(
+    scroll: usize,
+    cursor: usize,
+    list_h: usize,
+    total: usize,
+) -> usize {
+    if list_h == 0 {
+        return cursor;
+    }
+    let max = total.saturating_sub(list_h);
+    let mut s = scroll.min(max);
+    if cursor < s {
+        s = cursor;
+    } else if cursor >= s + list_h {
+        s = cursor + 1 - list_h;
+    }
+    s.min(max)
+}
+
+#[allow(clippy::too_many_arguments)]
 fn draw_list_scrollbar(
     f: &mut Frame,
     area: Rect,
@@ -1548,6 +1609,8 @@ fn draw_list_scrollbar(
     cursor: usize,
     focused: bool,
     border: Style,
+    pane_id: FocusedPane,
+    tracks: &mut Vec<crate::ScrollTrack>,
 ) {
     // Two rows in: the top border and the column-header row.
     let view_h = area.height.saturating_sub(3);
@@ -1555,6 +1618,12 @@ fn draw_list_scrollbar(
         return;
     }
     let track = Rect::new(area.x + area.width.saturating_sub(1), area.y + 2, 1, view_h);
+    tracks.push(crate::ScrollTrack {
+        rect: track,
+        what: crate::ScrollWhat::Pane(pane_id),
+        total,
+        shown: view_h as usize,
+    });
     let mut state = ScrollbarState::new(total).position(cursor);
     // The bar sits *on* the pane's right border, so the track has to be the
     // border: same glyph, same style. Drawing it in its own dimmer color made
@@ -3047,7 +3116,7 @@ pub(crate) fn readable_on(bg: Color) -> Color {
 /// leaving it unmeasurable meant "unknown → assume a dark ground", which put
 /// pale text on a bright cyan badge — the one place the default theme has to
 /// be right.
-fn as_rgb(c: Color) -> Color {
+pub(crate) fn as_rgb(c: Color) -> Color {
     let (r, g, b) = match c {
         Color::Rgb(..) => return c,
         Color::Black => (0, 0, 0),
@@ -3077,7 +3146,7 @@ fn as_rgb(c: Color) -> Color {
 /// eye. Not the quick `0.299r + 0.587g + 0.114b` used elsewhere for "is this
 /// page light or dark" — that one is fine for picking a direction, but it
 /// cannot say whether two colours are far enough apart to read.
-fn rel_luminance(c: Color) -> f32 {
+pub(crate) fn rel_luminance(c: Color) -> f32 {
     let Color::Rgb(r, g, b) = as_rgb(c) else { return 0.0 };
     let lin = |v: u8| {
         let v = v as f32 / 255.0;
@@ -4095,6 +4164,7 @@ fn draw_popup(
     close_rect: &mut Rect,
     docked: bool,
     active: bool,
+    tracks: &mut Vec<crate::ScrollTrack>,
 ) {
     // Every popup with a shape of its own draws itself. The rest — the
     // confirm/notice dialogs, which differ only in their wording — fall through
@@ -4116,7 +4186,7 @@ fn draw_popup(
         Popup::DestPicker { .. } => draw_dest_picker(f, area, popup, dests, zones, lang),
         Popup::Viewer { .. } => {
             let (rects, close) =
-                draw_viewer(f, area, popup, lang, (show_ws, ruler), (tab_at, tab_names, &[]), docked, active);
+                draw_viewer(f, area, popup, lang, (show_ws, ruler), (tab_at, tab_names, &[]), docked, active, tracks);
             *tab_rects = rects;
             *close_rect = close;
         }
@@ -6018,13 +6088,14 @@ fn draw_viewer(
     // keyboard is pointed at it.
     docked: bool,
     active: bool,
+    vtracks: &mut Vec<crate::ScrollTrack>,
 ) -> (Vec<(Rect, usize)>, Rect) {
     let (show_ws, ruler) = marks;
     let (tab_at, tab_names, diff_marks) = tab;
     let tabs = tab_names.len();
     let mut tab_rects: Vec<(Rect, usize)> = Vec::new();
     let mut close_rect = Rect::new(0, 0, 0, 0);
-    let Popup::Viewer { title, view, scroll, hscroll, line, col, visual, anchor, find_input, find_query, sub_input, sub_walk, block_input, git_lines, markdown, preview, source, md_styles, md_map, md_width, editing, dirty, editable, hl, hl_lang, blame, shape, path, count, pending, .. } = popup else { return (tab_rects, close_rect) };
+    let Popup::Viewer { title, view, scroll, hscroll, line, col, visual, anchor, find_input, find_query, sub_input, sub_walk, block_input, git_lines, markdown, preview, source, md_styles, md_map, md_width, md_seek, editing, dirty, editable, hl, hl_lang, blame, shape, path, count, pending, .. } = popup else { return (tab_rects, close_rect) };
     let rect = viewer_frame_rect_docked(area, docked);
     f.render_widget(Clear, rect);
 
@@ -6047,6 +6118,13 @@ fn draw_viewer(
         md_styles.clear();
         md_map.clear();
         *md_width = 0;
+    }
+    // The place asked for before the preview existed, now that the map does.
+    if let Some(src) = md_seek.take() {
+        if *preview {
+            *line = disp_line(md_map, &view.lines, src);
+            *scroll = line.saturating_sub(6);
+        }
     }
     *line = (*line).min(view.lines.len().saturating_sub(1));
     *col = (*col).min(view.lines.get(*line).map(|l| l.chars().count()).unwrap_or(0));
@@ -6626,6 +6704,12 @@ fn draw_viewer(
     let bar = Style::default().fg(if active { theme().accent } else { theme().border });
     let track = Style::default().fg(theme().border);
     if visible.len() > body_h {
+        vtracks.push(crate::ScrollTrack {
+            rect: Rect::new(area.x + area.width.saturating_sub(1), top, 1, body_h as u16),
+            what: crate::ScrollWhat::ViewerRows,
+            total: visible.len(),
+            shown: body_h,
+        });
         f.render_stateful_widget(
             Scrollbar::new(ScrollbarOrientation::VerticalRight)
                 .thumb_symbol("┃")
@@ -6651,6 +6735,12 @@ fn draw_viewer(
         .unwrap_or(0);
     if widest > avail && avail > 0 {
         let w = avail.min(u16::MAX as usize) as u16;
+        vtracks.push(crate::ScrollTrack {
+            rect: Rect::new(inner.x + gutter as u16, area.y + area.height.saturating_sub(1), w, 1),
+            what: crate::ScrollWhat::ViewerCols,
+            total: widest,
+            shown: avail,
+        });
         f.render_stateful_widget(
             Scrollbar::new(ScrollbarOrientation::HorizontalBottom)
                 .thumb_symbol("━")

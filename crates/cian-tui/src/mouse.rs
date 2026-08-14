@@ -24,6 +24,37 @@ impl App {
             }
         }
 
+        // A scrollbar being dragged keeps the pointer until it is let go —
+        // the hand wanders off the one-column track constantly, and a bar
+        // that only worked while exactly on it would be a bar that does not
+        // work.
+        if let Some(what) = self.scroll_drag {
+            match ev.kind {
+                MouseEventKind::Drag(MouseButton::Left) => {
+                    self.scroll_to_fraction(what, col, row);
+                    return;
+                }
+                MouseEventKind::Up(MouseButton::Left) => {
+                    self.scroll_drag = None;
+                    return;
+                }
+                _ => {}
+            }
+        }
+        if matches!(ev.kind, MouseEventKind::Down(MouseButton::Left)) {
+            if let Some(t) = self.scroll_tracks.iter().copied().find(|t| {
+                t.rect.width > 0
+                    && t.rect.height > 0
+                    && col >= t.rect.x
+                    && col < t.rect.x + t.rect.width
+                    && row >= t.rect.y
+                    && row < t.rect.y + t.rect.height
+            }) {
+                self.scroll_drag = Some(t.what);
+                self.scroll_to_fraction(t.what, col, row);
+                return;
+            }
+        }
         // A border is a border whatever is drawn beside it: a click on one is
         // a resize, not a click on a pane or on the panel.
         let on_divider = self.dividers.iter().any(|d| {
@@ -99,7 +130,20 @@ impl App {
         };
         // The seam between two panes runs along the panel's own border, so a
         // click there is a resize even though it is "inside" the frame.
+        // The wheel belongs to whatever the pointer is over, never to whatever
+        // has the focus: scrolling to read something is not the same as
+        // choosing where to type. Without this the panel took every wheel
+        // event in the window, so a flick over the listing beside it moved
+        // the *file's* cursor.
+        let wheel = matches!(
+            ev.kind,
+            MouseEventKind::ScrollUp
+                | MouseEventKind::ScrollDown
+                | MouseEventKind::ScrollLeft
+                | MouseEventKind::ScrollRight
+        );
         if matches!(self.popup, Popup::Viewer { .. })
+            && (!wheel || inside_panel)
             && (self.viewer_dock.is_none()
                 || (inside_panel && !on_divider && self.viewer_dock == Some(self.focused)))
         {
@@ -809,14 +853,6 @@ impl App {
                 self.focus(pane);
                 // Put the cursor on the row that was clicked.
                 self.cursor_to_row(pane, row);
-                // The `..` row has no other purpose, so a single click on it
-                // steps up a level immediately rather than waiting for a
-                // double-click — it can be neither marked nor dragged.
-                if self.active_pane().and_then(|p| p.selected()).map(|e| e.is_parent).unwrap_or(false) {
-                    self.last_click = None;
-                    let _ = self.activate_selected();
-                    return;
-                }
                 // A second click on the same row in quick succession is a
                 // double-click: enter a directory, or open a file with its OS
                 // default program — the same as Enter / the open key.
@@ -1241,6 +1277,46 @@ impl App {
     /// half of a split.
     /// Copy the current shell selection's text to the clipboard, reading it
     /// from the pane's terminal grid.
+    /// Put the surface a scrollbar belongs to at the point on it that was
+    /// grabbed. The thumb's own height is taken off the track first, so
+    /// dragging it to the bottom lands on the last page rather than a page
+    /// past it.
+    pub(crate) fn scroll_to_fraction(&mut self, what: crate::ScrollWhat, col: u16, row: u16) {
+        let Some(t) = self.scroll_tracks.iter().copied().find(|t| t.what == what) else { return };
+        let vertical = t.rect.height > 1;
+        let (at, span) = if vertical {
+            (row.saturating_sub(t.rect.y) as usize, t.rect.height as usize)
+        } else {
+            (col.saturating_sub(t.rect.x) as usize, t.rect.width as usize)
+        };
+        let max = t.total.saturating_sub(t.shown);
+        let pos = if span <= 1 { 0 } else { at.min(span - 1) * max / (span - 1) };
+        match what {
+            crate::ScrollWhat::Pane(id) => {
+                self.focus(id);
+                if let Some(p) = self.active_pane_mut() {
+                    p.scroll = pos.min(max);
+                    // The cursor comes with it: a listing whose cursor is off
+                    // screen answers the next keypress somewhere invisible.
+                    p.cursor = p.cursor.clamp(p.scroll, (p.scroll + t.shown).saturating_sub(1));
+                    p.cursor = p.cursor.min(p.entries.len().saturating_sub(1));
+                }
+            }
+            crate::ScrollWhat::ViewerRows => {
+                if let Popup::Viewer { scroll, line, .. } = &mut self.popup {
+                    *scroll = pos;
+                    *line = (*line).clamp(*scroll, (*scroll + t.shown).saturating_sub(1));
+                }
+                self.clamp_viewer_hscroll();
+            }
+            crate::ScrollWhat::ViewerCols => {
+                if let Popup::Viewer { hscroll, .. } = &mut self.popup {
+                    *hscroll = pos;
+                }
+            }
+        }
+    }
+
     pub(crate) fn copy_shell_selection(&mut self) {
         let Some(sel) = self.shell_sel else { return };
         let Some(session) = self
@@ -1311,12 +1387,12 @@ impl App {
             return;
         }
         let Some(p) = self.active_pane_mut() else { return };
-        // The list scrolls, so the first visible row is not always entry 0.
-        let view_h = rect.height.saturating_sub(3) as usize;
-        let first = p.cursor.saturating_sub(view_h.saturating_sub(1)).min(
-            p.entries.len().saturating_sub(view_h.min(p.entries.len())),
-        );
-        let idx = first + offset as usize;
+        // The window the listing is actually showing — the pane keeps it, so
+        // this is a lookup rather than a guess. It used to be derived from
+        // the cursor with a formula that assumed the cursor was on the last
+        // visible row, which is what made a click land somewhere else and
+        // then scroll the file to the bottom of the pane.
+        let idx = p.scroll + offset as usize;
         if idx < p.entries.len() {
             p.cursor = idx;
         }

@@ -2670,6 +2670,62 @@
         assert!(painted > 20, "the picture is drawn: {painted} cells");
     }
 
+    /// A click puts the cursor on the row that was clicked and leaves the
+    /// view where it is. The window used to be derived from the cursor with a
+    /// formula that put the cursor on the *last* visible row, so clicking a
+    /// file scrolled it to the bottom of the pane.
+    #[test]
+    fn a_click_lands_on_the_row_and_does_not_scroll() {
+        let names: Vec<String> = (0..80).map(|i| format!("f{i:03}.txt")).collect();
+        let refs: Vec<&str> = names.iter().map(|s| s.as_str()).collect();
+        let (_d, mut app) = app_with(&refs);
+        app.startup_at = std::time::Instant::now() - std::time::Duration::from_secs(30);
+        let _ = render(&mut app, 100, 40);
+        let left = app.layout_rects.left;
+
+        assert_eq!(app.left.active_ref().scroll, 0, "the top of the list");
+        // The fifth row of the listing.
+        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), left.x + 4, left.y + 6));
+        let p = app.left.active_ref();
+        assert_eq!(p.scroll, 0, "the view did not move");
+        assert_eq!(p.cursor, 4, "and the cursor is on the row that was clicked");
+
+        // Scrolling down and clicking again still lands where it was aimed.
+        for _ in 0..30 {
+            app.handle_key(key('j')).unwrap();
+        }
+        let _ = render(&mut app, 100, 40);
+        let before = app.left.active_ref().scroll;
+        assert!(before > 0, "the view followed the cursor down");
+        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), left.x + 4, left.y + 3));
+        let p = app.left.active_ref();
+        assert_eq!(p.scroll, before, "still did not move");
+        assert_eq!(p.cursor, before + 1, "the second visible row");
+    }
+
+    /// The wheel belongs to whatever the pointer is over. With the editor
+    /// panel open it took every wheel event in the window, so a flick over
+    /// the listing beside it moved the file's cursor instead.
+    #[test]
+    fn the_wheel_follows_the_pointer_not_the_focus() {
+        let names: Vec<String> = (0..60).map(|i| format!("f{i:03}.txt")).collect();
+        let refs: Vec<&str> = names.iter().map(|s| s.as_str()).collect();
+        let (_d, mut app) = app_with(&refs);
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+        assert_eq!(app.viewer_dock, Some(FocusedPane::Left), "the panel is on the left");
+        let _ = render(&mut app, 100, 40);
+
+        let line_of = |app: &App| match &app.popup {
+            Popup::Viewer { line, .. } => *line,
+            other => panic!("expected the panel, got {other:?}"),
+        };
+        let before = line_of(&app);
+        let right = app.layout_rects.right;
+        app.handle_mouse(mouse(MouseEventKind::ScrollDown, right.x + 4, right.y + 4));
+        assert_eq!(line_of(&app), before, "the file did not move");
+        assert!(app.right.active_ref().cursor > 0, "the listing under the pointer did");
+    }
+
     /// A long prompt stays readable. The chat's input drew one row per typed
     /// line and let a long one run off the right-hand edge; the AI-command
     /// dialog sized its box from the unwrapped text and cut the rest off the
@@ -9060,9 +9116,13 @@
         let mut app = App::new(start.clone(), start, en_config()).unwrap();
         let _ = render(&mut app, 100, 40);
         let left = app.layout_rects.left;
-        // The first row is `..`; a single click steps up to the parent.
+        // The first row is `..`. It takes a double-click, like every other
+        // row — a single one used to step up on its own, which meant a click
+        // meant to put the cursor there navigated instead.
         app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), left.x + 3, left.y + 2));
-        assert!(!app.left.active_ref().cwd.ends_with("sub"), "left sub via ..");
+        assert!(app.left.active_ref().cwd.ends_with("sub"), "one click only selects it");
+        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), left.x + 3, left.y + 2));
+        assert!(!app.left.active_ref().cwd.ends_with("sub"), "the second click steps up");
         // Marking the `..` row (e.g. via Space on it) is a no-op.
         if let Some(p) = app.active_pane_mut() {
             p.cursor = 0; // back onto `..`

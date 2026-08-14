@@ -297,6 +297,7 @@ impl App {
             md_styles: Vec::new(),
             md_map: Vec::new(),
             md_width: 0,
+            md_seek: None,
             blame: Vec::new(),
             hl_lang: None,
             hl: Vec::new(),

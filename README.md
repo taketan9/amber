@@ -111,6 +111,7 @@ Vim-flavoured: `h j k l`, `w b`, `0 $`, `gg G`, `Ctrl-D/U`, `Ctrl-F/B`, `{` `}`,
 | `:summary` / `:coding` | ask the AI to summarise the file / talk about its code (right-click too) |
 | `?` | the viewer's own key list, grouped by what you are doing |
 | **Tab** | cross to the pane beside it and back — a listing or another open file, whichever is there. Never the shell: that is `Shift+J` |
+| **Esc ×3** | leave the file the way `:q!` does — one Esc must not close a file with unsaved edits in it, three deliberate presses are not a slip |
 | **Shift+Tab** | the next open file **in this panel** (`F2` / `Shift+F2` step either way) |
 | `:new` | a blank file to type into, docked in this pane; `:w <name>` saves it and adopts the name |
 | `m a` / `' a` | set a mark, jump back to it (`` ` a`` for the column too) |

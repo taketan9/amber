@@ -10,7 +10,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use unicode_width::UnicodeWidthStr;
 
-use crate::render::readable_on;
+use crate::render::{dim_text, readable_on, text_tone};
 use crate::theme;
 use crate::theme::surface;
 use crate::util::{pad_left, pad_to, truncate, wrap_str};
@@ -65,12 +65,22 @@ fn plain(text: &str) -> String {
         .collect()
 }
 
-/// Lighten an RGB colour by `n` per channel — used to lift code blocks and
-/// blockquotes off the viewer's (themed) background so they stand out.
+/// Lift a code block or a blockquote off the page it sits on.
+///
+/// *Away* from the page, not simply lighter: adding to every channel of a
+/// light background walks it toward white, which is the page again. A dark
+/// page gets lighter, a light page gets darker, and either way the block is
+/// visibly a block.
 fn elevate(c: Color, n: u8) -> Color {
-    match c {
-        Color::Rgb(r, g, b) => Color::Rgb(r.saturating_add(n), g.saturating_add(n), b.saturating_add(n)),
-        _ => Color::Rgb(45, 45, 62),
+    let Color::Rgb(r, g, b) = crate::render::as_rgb(c) else {
+        // A colour that cannot be measured (a named ANSI one): leave the page
+        // as it is rather than guess a direction and get it backwards.
+        return c;
+    };
+    if crate::render::rel_luminance(Color::Rgb(r, g, b)) > 0.5 {
+        Color::Rgb(r.saturating_sub(n), g.saturating_sub(n), b.saturating_sub(n))
+    } else {
+        Color::Rgb(r.saturating_add(n), g.saturating_add(n), b.saturating_add(n))
     }
 }
 
@@ -120,7 +130,7 @@ fn render_table(
         colw[idx] -= 1;
     }
 
-    let border = Style::default().fg(Color::Rgb(90, 90, 110));
+    let border = Style::default().fg(dim_text(surface()));
     let head_style = Style::default().fg(theme().accent).add_modifier(Modifier::BOLD);
     let body_style = Style::default().fg(readable_on(surface()));
 
@@ -239,7 +249,7 @@ fn render_inner(
         if is_rule(trimmed) {
             out.push(Line::from(Span::styled(
                 "─".repeat(width),
-                Style::default().fg(Color::Rgb(90, 90, 110)),
+                Style::default().fg(dim_text(surface())),
             )));
             i += 1;
             continue;
@@ -263,7 +273,7 @@ fn render_inner(
             if level <= 2 {
                 out.push(Line::from(Span::styled(
                     "─".repeat(width),
-                    Style::default().fg(Color::Rgb(70, 70, 90)),
+                    Style::default().fg(dim_text(surface())),
                 )));
             }
             i += 1;
@@ -321,7 +331,9 @@ fn render_inner(
                     (true, rest) => (
                         "☑".to_string(),
                         rest,
-                        Style::default().fg(Color::Rgb(126, 211, 133)).add_modifier(Modifier::BOLD),
+                        Style::default()
+                            .fg(text_tone(theme().file.executable, surface()))
+                            .add_modifier(Modifier::BOLD),
                     ),
                     (false, rest) => (
                         "☐".to_string(),
@@ -582,7 +594,10 @@ fn mermaid_flow(lines: &[String], width: usize) -> Option<Vec<Line<'static>>> {
     let bg = elevate(base, 14);
     let node = Style::default().fg(readable_on(bg)).bg(bg).add_modifier(Modifier::BOLD);
     let arrow = Style::default().fg(theme().accent).bg(bg);
-    let lbl = Style::default().fg(Color::Rgb(180, 205, 150)).bg(bg).add_modifier(Modifier::ITALIC);
+    let lbl = Style::default()
+        .fg(text_tone(theme().file.executable, bg))
+        .bg(bg)
+        .add_modifier(Modifier::ITALIC);
     let fill = Style::default().bg(bg);
 
     let mut out = Vec::new();
@@ -659,7 +674,11 @@ fn code_block(lang: &str, lines: &[String], width: usize) -> Vec<Line<'static>> 
 /// Parse inline emphasis / code / links in `text` into styled spans, on top of
 /// `base`. Wrapping is left to the caller (the text is already a chunk).
 fn inline(text: &str, base: Style, _width: usize) -> Vec<Span<'static>> {
-    let code_style = Style::default().bg(Color::Rgb(45, 45, 62)).fg(Color::Rgb(240, 210, 150));
+    // Inline code sits on a block of its own, lifted off the page in
+    // whichever direction the page is not — it was a fixed dark box with
+    // yellow text, which on a light theme is a black hole in the paragraph.
+    let code_bg = elevate(surface(), 18);
+    let code_style = Style::default().bg(code_bg).fg(text_tone(theme().file.code, code_bg));
     let link_style = base.fg(theme().accent).add_modifier(Modifier::UNDERLINED);
     let mut spans: Vec<Span<'static>> = Vec::new();
     let mut buf = String::new();
