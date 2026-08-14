@@ -1573,26 +1573,6 @@ fn draw_list_scrollbar(
     );
 }
 
-/// What has already gone past, when the pane is scrolled up into it. Returns
-/// false — draw the live screen instead — when it is at the end.
-///
-/// Plain text, without the colours the live screen has: cian keeps its own
-/// scrollback rather than vt100's, whose offset cannot go further back than
-/// the height of the screen in the version tui-term pins. Losing the colour
-/// of something that has already scrolled away is a fair price for being able
-/// to read it at all.
-fn draw_shell_history(f: &mut Frame, area: Rect, s: &PtySession) -> bool {
-    if s.scrollback_pos() == 0 || area.height == 0 {
-        return false;
-    }
-    let rows = s.history_rows(area.height as usize, area.width as usize);
-    f.render_widget(
-        Paragraph::new(rows.join("\n")).style(Style::default().fg(readable_on(surface()))),
-        area,
-    );
-    true
-}
-
 /// How far back through the scrollback this pane is looking: a bar down its
 /// right border, and a badge saying so.
 ///
@@ -1771,10 +1751,8 @@ fn draw_shell_inner(
             }
         }
         if let Some(Node::Leaf { session: s, bg }) = shell.tabs[active].nodes.get(leaf).and_then(|n| n.as_ref()) {
-            if !draw_shell_history(f, inner, s) {
-                if let Ok(parser) = s.parser().lock() {
-                    f.render_widget(PseudoTerminal::new(parser.screen()), inner);
-                }
+            if let Ok(parser) = s.parser().lock() {
+                f.render_widget(PseudoTerminal::new(parser.screen()), inner);
             }
             if let Some(c) = bg {
                 tint_default_cells(f, inner, *c);
@@ -1912,10 +1890,8 @@ fn render_node(
             };
             // (tab, leaf, outer area for focus, inner PTY area for selection).
             leaves.push((tab_idx, i, area, target));
-            if !draw_shell_history(f, target, session) {
-                if let Ok(parser) = session.parser().lock() {
-                    f.render_widget(PseudoTerminal::new(parser.screen()), target);
-                }
+            if let Ok(parser) = session.parser().lock() {
+                f.render_widget(PseudoTerminal::new(parser.screen()), target);
             }
             // Tint after the PTY has drawn: it writes an explicit Reset
             // background into every cell the shell left uncolored, which would

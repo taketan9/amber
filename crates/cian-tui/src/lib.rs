@@ -4640,7 +4640,7 @@ fn suspend_and_edit<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Re
         out,
         PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
     );
-    terminal.clear()?;
+    terminal.clear().map_err(|e| anyhow::anyhow!("{e}"))?;
 
     match &status {
         Ok(s) if s.success() || s.code().is_some() => {}
@@ -4687,10 +4687,12 @@ fn run_loop<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Result<()>
         if needs_redraw {
             // A picture just stopped being shown: terminal graphics live
             // outside the cell buffer, so only a real clear removes them.
+            // ratatui 0.30's backend error is an associated type with no
+            // Send + Sync bound, so `?` into anyhow needs it flattened.
             if std::mem::take(&mut app.full_clear) {
-                terminal.clear()?;
+                terminal.clear().map_err(|e| anyhow::anyhow!("{e}"))?;
             }
-            terminal.draw(|f| draw(f, app))?;
+            terminal.draw(|f| draw(f, app)).map_err(|e| anyhow::anyhow!("{e}"))?;
             needs_redraw = false;
         }
         // Short timeout so live shell output is picked up promptly; we only

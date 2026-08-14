@@ -2625,19 +2625,40 @@
         assert!(at(&mut plain, "ext.vsix").is_ok(), "off by default");
     }
 
-    /// The offset arithmetic: it stops at both ends, and the wheel and the
-    /// keys drive it. What the scrollback *holds* is tested in cian-pty,
-    /// where the reader thread that fills it lives.
+    /// The shell keeps what has gone past, with its colours, and can be
+    /// scrolled back through it. The parser was built with a scrollback of
+    /// zero, so a line leaving the top of the panel was simply gone.
     #[test]
-    fn the_shell_scrollback_stops_at_both_ends() {
+    fn the_shell_can_be_scrolled_back_through_what_went_past() {
         let dir = tempfile::tempdir().unwrap();
         let sh = cian_pty::default_shell();
         let s = cian_pty::PtySession::new(dir.path(), &sh, 10, 80).unwrap();
-        assert_eq!(s.scrollback_pos(), 0, "a fresh shell is at the end");
-        assert_eq!(s.scroll_back(50), 0, "and has nothing to go back through");
-        assert_eq!(s.scroll_back(-50), 0, "nor forward past the end");
+        s.parser().lock().unwrap().process(
+            (1..=200).map(|i| format!("line {i}\r\n")).collect::<String>().as_bytes(),
+        );
+        let seen = |s: &cian_pty::PtySession| s.parser().lock().unwrap().screen().contents();
+        assert!(seen(&s).contains("line 200"), "the end is on screen");
+        assert!(!seen(&s).contains("line 100"), "the middle is not");
+        assert_eq!(s.scrollback_pos(), 0, "and it is live");
+
+        // Back past the height of the screen — which used to panic, and is
+        // why cian briefly kept a plain-text history of its own.
+        assert_eq!(s.scroll_back(120), 120, "120 rows back");
+        assert!(seen(&s).contains("line 72"), "which is up there:\n{}", seen(&s));
+        assert!(!seen(&s).contains("line 200"), "the end has gone off the bottom");
+
+        // Forward again, and to the end.
+        s.scroll_back(-60);
+        assert_eq!(s.scrollback_pos(), 60);
         s.scroll_to_bottom();
         assert_eq!(s.scrollback_pos(), 0);
+        assert!(seen(&s).contains("line 200"), "back to live output");
+
+        // It stops at both ends rather than running off them.
+        s.scroll_back(-10);
+        assert_eq!(s.scrollback_pos(), 0, "cannot scroll past the end");
+        let far = s.scroll_back(isize::MAX / 2);
+        assert!(far > 100 && far < 10_000, "clamped to what there is: {far}");
     }
 
     /// The wheel over the shell scrolls it, and typing comes back to the end

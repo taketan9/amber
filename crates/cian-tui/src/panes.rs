@@ -335,7 +335,7 @@ impl ShellPane {
             Some(Node::Leaf { session, .. }) => session,
             _ => return None,
         };
-        let title = s.parser().lock().ok()?.screen().title().trim().to_string();
+        let title = s.window_title().trim().to_string();
         if title.is_empty() { None } else { Some(title) }
     }
 

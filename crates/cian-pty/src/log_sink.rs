@@ -34,19 +34,14 @@ enum State {
 
 /// The filter itself, without anywhere to put the result: feed it bytes and it
 /// calls back with the readable ones.
-///
-/// Separated from the log because the scrollback wants exactly the same thing
-/// — the text of what went past, with the cursor-moving and colour-setting
-/// noise taken out — and two copies of an escape-sequence parser is two
-/// chances to get it wrong.
 #[derive(Debug, Default)]
-pub struct Scrub {
+pub(crate) struct Scrub {
     state: State,
 }
 
 impl Scrub {
     /// Feed a chunk; `out` receives each byte of readable text.
-    pub fn feed(&mut self, bytes: &[u8], mut out: impl FnMut(u8)) {
+    pub(crate) fn feed(&mut self, bytes: &[u8], mut out: impl FnMut(u8)) {
         for &b in bytes {
             match self.state {
                 State::Text => match b {

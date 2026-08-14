@@ -21,74 +21,37 @@ use anyhow::Result;
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 use vt100::Parser;
 
+/// The window title the shell sets, kept for the tab label.
+///
+/// vt100 0.16 stopped storing it on the screen and started handing it to a
+/// callback instead, so cian keeps it. Shared rather than owned by the
+/// parser, because the reader thread owns the parser and the UI thread is
+/// what asks for the title.
+#[derive(Clone, Default)]
+pub struct TitleSink(Arc<Mutex<String>>);
+
+impl vt100::Callbacks for TitleSink {
+    fn set_window_title(&mut self, _: &mut vt100::Screen, title: &[u8]) {
+        if let Ok(mut t) = self.0.lock() {
+            *t = String::from_utf8_lossy(title).into_owned();
+        }
+    }
+}
+
+/// The parser, with cian's callbacks attached.
+pub type ShellParser = Parser<TitleSink>;
+
 mod log_sink;
 use log_sink::LogSink;
 
-/// Lines of output kept above the top of the panel, to scroll back through.
+/// Rows of output kept above the top of the panel, to scroll back through.
 ///
-/// cian keeps this itself rather than using vt100's own scrollback, which in
-/// the version tui-term pins cannot be scrolled further back than the height
-/// of the screen without panicking. Text only: the colours are lost, and what
-/// was being asked for is "what did that say", not "what colour was it".
+/// vt100 keeps them, with their colours, exactly as they were on screen. It
+/// could not before 0.16 — an offset past the height of the screen panicked
+/// inside `visible_rows` — which is why cian briefly kept a plain-text ring
+/// of its own instead.
 const SCROLLBACK: usize = 10_000;
 
-/// The last `rows` display rows of `lines`, each wrapped at `cols`.
-///
-/// A terminal wraps a long line when it writes it, so it occupied several
-/// rows; a scrollback that put it back together as one would show a different
-/// screen from the one that scrolled past.
-pub(crate) fn wrap_rows<'a>(
-    lines: impl Iterator<Item = &'a String>,
-    rows: usize,
-    cols: usize,
-) -> Vec<String> {
-    let mut out: Vec<String> = Vec::new();
-    for l in lines {
-        if l.is_empty() || cols == 0 {
-            out.push(String::new());
-            continue;
-        }
-        let mut cur = String::new();
-        let mut w = 0usize;
-        for ch in l.chars() {
-            let cw = cian_core::textops::char_cols(ch, w);
-            if w + cw > cols {
-                out.push(std::mem::take(&mut cur));
-                w = 0;
-            }
-            cur.push(ch);
-            w += cw;
-        }
-        out.push(cur);
-    }
-    let keep = out.len().saturating_sub(rows);
-    out.split_off(keep)
-}
-
-/// What has scrolled off the top, as plain lines.
-#[derive(Default)]
-pub(crate) struct History {
-    lines: std::collections::VecDeque<String>,
-    /// The line still being written, up to the next newline.
-    partial: String,
-    scrub: log_sink::Scrub,
-}
-
-impl History {
-    fn feed(&mut self, bytes: &[u8]) {
-        let (lines, partial) = (&mut self.lines, &mut self.partial);
-        self.scrub.feed(bytes, |b| {
-            if b == b'\n' {
-                lines.push_back(std::mem::take(partial));
-                while lines.len() > SCROLLBACK {
-                    lines.pop_front();
-                }
-            } else {
-                partial.push(b as char);
-            }
-        });
-    }
-}
 
 /// A per-session output log, shared with the reader thread. `None` when not
 /// logging.
@@ -111,7 +74,7 @@ pub fn default_shell() -> String {
 
 /// A live shell running inside a pseudo-terminal.
 pub struct PtySession {
-    parser: Arc<Mutex<Parser>>,
+    parser: Arc<Mutex<ShellParser>>,
     dirty: Arc<AtomicBool>,
     writer: Box<dyn Write + Send>,
     master: Box<dyn MasterPty + Send>,
@@ -120,9 +83,7 @@ pub struct PtySession {
     cols: u16,
     /// Optional session log, shared with the reader thread.
     log: LogSlot,
-    history: Arc<Mutex<History>>,
-    /// Lines the view is above the live output. Zero is the end.
-    scrollback: Arc<std::sync::atomic::AtomicUsize>,
+    title: TitleSink,
     /// Input encoding, shared with the reader thread.
     encoding: EncSlot,
     // Kept so the reader thread is owned by the session; it exits on EOF when
@@ -157,7 +118,13 @@ impl PtySession {
         let mut reader = pair.master.try_clone_reader()?;
         let writer = pair.master.take_writer()?;
 
-        let parser = Arc::new(Mutex::new(Parser::new(rows, cols, 0)));
+        let title = TitleSink::default();
+        let parser = Arc::new(Mutex::new(ShellParser::new_with_callbacks(
+            rows,
+            cols,
+            SCROLLBACK,
+            title.clone(),
+        )));
         let dirty = Arc::new(AtomicBool::new(true));
 
         let log: LogSlot = Arc::new(Mutex::new(None));
@@ -165,8 +132,6 @@ impl PtySession {
         let reader_parser = Arc::clone(&parser);
         let reader_dirty = Arc::clone(&dirty);
         let reader_log = Arc::clone(&log);
-        let history: Arc<Mutex<History>> = Arc::new(Mutex::new(History::default()));
-        let reader_hist = Arc::clone(&history);
         let reader_enc = Arc::clone(&encoding);
         let reader = std::thread::spawn(move || {
             let mut buf = [0u8; 8192];
@@ -192,11 +157,6 @@ impl PtySession {
                             if let Some(sink) = slot.as_mut() {
                                 sink.write_bytes(bytes);
                             }
-                        }
-                        // …and to the scrollback, which is the same text kept
-                        // in memory rather than written to a file.
-                        if let Ok(mut h) = reader_hist.lock() {
-                            h.feed(bytes);
                         }
                         match reader_parser.lock() {
                             Ok(mut p) => p.process(bytes),
@@ -233,8 +193,7 @@ impl PtySession {
             rows,
             cols,
             log,
-            history,
-            scrollback: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            title,
             encoding,
             _reader: reader,
         })
@@ -284,40 +243,43 @@ impl PtySession {
     /// Shared parser handle. Lock it and call `.screen()` to render.
     /// Move the view `lines` back through the scrollback (negative goes
     /// forward again) and report where it ended up. Zero is live output.
+    ///
+    /// The offset is measured from the bottom, so while a command is still
+    /// producing output the view drifts with it, as it would in a terminal
+    /// that scrolls under you. Reading back over something that has finished
+    /// — what this is for — holds still.
     pub fn scroll_back(&self, lines: isize) -> usize {
-        let have = self.history.lock().map(|h| h.lines.len()).unwrap_or(0);
-        let at = self.scrollback.load(Ordering::Relaxed) as isize;
-        let to = at.saturating_add(lines).clamp(0, have as isize) as usize;
-        self.scrollback.store(to, Ordering::Relaxed);
+        let Ok(mut p) = self.parser.lock() else { return 0 };
+        let at = p.screen().scrollback() as isize;
+        let to = at.saturating_add(lines).clamp(0, SCROLLBACK as isize) as usize;
+        p.screen_mut().set_scrollback(to);
         self.dirty.store(true, Ordering::Relaxed);
-        to
+        // It clamps to what there actually is, so ask rather than assume: a
+        // fresh shell has nothing to go back through.
+        p.screen().scrollback()
     }
 
     /// Back to live output. Every keystroke does this, as a terminal does.
     pub fn scroll_to_bottom(&self) {
-        if self.scrollback.swap(0, Ordering::Relaxed) != 0 {
-            self.dirty.store(true, Ordering::Relaxed);
+        if let Ok(mut p) = self.parser.lock() {
+            if p.screen().scrollback() != 0 {
+                p.screen_mut().set_scrollback(0);
+                self.dirty.store(true, Ordering::Relaxed);
+            }
         }
     }
 
-    /// How far back the view is, in lines. Zero while at live output.
+    /// How far back the view is, in rows. Zero while at live output.
     pub fn scrollback_pos(&self) -> usize {
-        self.scrollback.load(Ordering::Relaxed)
+        self.parser.lock().map(|p| p.screen().scrollback()).unwrap_or(0)
     }
 
-    /// The `rows` lines to draw at the current offset, wrapped to `cols` —
-    /// a terminal wrapped them when it wrote them, so a scrollback that did
-    /// not would put a long line back together and change what was on screen.
-    pub fn history_rows(&self, rows: usize, cols: usize) -> Vec<String> {
-        let at = self.scrollback.load(Ordering::Relaxed);
-        let Ok(h) = self.history.lock() else { return Vec::new() };
-        let end = h.lines.len().saturating_sub(at);
-        // Walk back far enough that wrapping cannot leave the page short.
-        let start = end.saturating_sub(rows);
-        wrap_rows(h.lines.iter().take(end).skip(start), rows, cols)
+    /// The window title the shell last set, if any.
+    pub fn window_title(&self) -> String {
+        self.title.0.lock().map(|t| t.clone()).unwrap_or_default()
     }
 
-    pub fn parser(&self) -> &Arc<Mutex<Parser>> {
+    pub fn parser(&self) -> &Arc<Mutex<ShellParser>> {
         &self.parser
     }
 
@@ -349,7 +311,7 @@ impl PtySession {
             pixel_height: 0,
         });
         if let Ok(mut p) = self.parser.lock() {
-            p.set_size(rows, cols);
+            p.screen_mut().set_size(rows, cols);
         }
         self.dirty.store(true, Ordering::Relaxed);
     }
@@ -374,49 +336,4 @@ impl Drop for PtySession {
 }
 
 
-#[cfg(test)]
-mod history_tests {
-    use super::*;
 
-    /// The scrollback is the output with the escape sequences taken out —
-    /// the same filter the session log uses, so a colourful `ls` reads as
-    /// names rather than as a wall of `[0m`.
-    #[test]
-    fn the_history_keeps_the_text_and_drops_the_noise() {
-        let mut h = History::default();
-        h.feed(b"plain\r\n");
-        h.feed(b"\x1b[31mred\x1b[0m and \x1b[1mbold\x1b[0m\r\n");
-        h.feed(b"\x1b]0;a title\x07titled\r\n");
-        h.feed(b"half a li");
-        assert_eq!(
-            h.lines.iter().cloned().collect::<Vec<_>>(),
-            vec!["plain", "red and bold", "titled"],
-        );
-        assert_eq!(h.partial, "half a li", "the unfinished line is not a line yet");
-
-        // It is a ring: the oldest goes when it is full.
-        let mut h = History::default();
-        for i in 0..SCROLLBACK + 50 {
-            h.feed(format!("line {i}\n").as_bytes());
-        }
-        assert_eq!(h.lines.len(), SCROLLBACK);
-        assert_eq!(h.lines.front().unwrap(), "line 50", "the oldest 50 have gone");
-    }
-
-    /// A long line takes the rows it took when it was written.
-    #[test]
-    fn a_page_of_history_is_wrapped_to_the_width() {
-        let lines = ["x".repeat(25), "short".to_string(), "y".repeat(10)];
-        let page = wrap_rows(lines.iter(), 10, 10);
-        assert_eq!(
-            page,
-            vec!["xxxxxxxxxx", "xxxxxxxxxx", "xxxxx", "short", "yyyyyyyyyy"],
-        );
-        // …and a page is a page: the tail of it, never more.
-        let page = wrap_rows(lines.iter(), 2, 10);
-        assert_eq!(page, vec!["short", "yyyyyyyyyy"]);
-        // A full-width character counts as two columns, as it is drawn.
-        let wide = ["あいうえお".to_string()];
-        assert_eq!(wrap_rows(wide.iter(), 10, 4), vec!["あい", "うえ", "お"]);
-    }
-}
