@@ -2726,6 +2726,42 @@
         assert!(app.right.active_ref().cursor > 0, "the listing under the pointer did");
     }
 
+    /// Everything the Markdown preview draws reads on the page it is drawn
+    /// on, under every preset. It carried colours from before the themes
+    /// existed — inline code was a fixed dark box with yellow text, which on
+    /// a light theme is a black hole in the paragraph.
+    #[test]
+    fn the_markdown_preview_reads_on_every_theme() {
+        use crate::theme::{set_theme, surface, theme_preset, ResolvedTheme, THEME_NAMES};
+        let _g = THEME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let md = "# Heading\n\nText with `code` and **bold** and a [link](x).\n\n                  ```\nfn main() {}\n```\n\n> a quote\n\n- a list item\n\n| a | b |\n|---|---|\n| 1 | 2 |\n";
+        let src: Vec<String> = md.lines().map(|s| s.to_string()).collect();
+        let mut bad: Vec<String> = Vec::new();
+        for name in THEME_NAMES {
+            let t = theme_preset(name).unwrap();
+            set_theme(t);
+            let (lines, styles, _) = crate::markdown::render_styled(&src, 60);
+            for (i, l) in lines.iter().enumerate() {
+                for (j, ch) in l.chars().enumerate() {
+                    if ch.is_whitespace() {
+                        continue;
+                    }
+                    let st = styles.get(i).and_then(|r| r.get(j)).copied().unwrap_or_default();
+                    let fg = st.fg.unwrap_or_else(|| crate::render::readable_on(surface()));
+                    let bg = st.bg.unwrap_or_else(surface);
+                    let cr = crate::render::contrast_ratio(fg, bg);
+                    if cr < 3.0 {
+                        bad.push(format!("{name}: {ch:?} {fg:?} on {bg:?} = {cr:.2}"));
+                    }
+                }
+            }
+        }
+        set_theme(ResolvedTheme::DARK);
+        bad.dedup();
+        bad.truncate(10);
+        assert!(bad.is_empty(), "{} unreadable:\n{}", bad.len(), bad.join("\n"));
+    }
+
     /// A long prompt stays readable. The chat's input drew one row per typed
     /// line and let a long one run off the right-hand edge; the AI-command
     /// dialog sized its box from the unwrapped text and cut the rest off the

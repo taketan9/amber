@@ -131,7 +131,9 @@ fn render_table(
     }
 
     let border = Style::default().fg(dim_text(surface()));
-    let head_style = Style::default().fg(theme().accent).add_modifier(Modifier::BOLD);
+    let head_style = Style::default()
+        .fg(text_tone(theme().accent, surface()))
+        .add_modifier(Modifier::BOLD);
     let body_style = Style::default().fg(readable_on(surface()));
 
     // Border rows: left/mid/right corners joined by `fill` across each column.
@@ -260,7 +262,10 @@ fn render_inner(
             if !out.is_empty() {
                 out.push(Line::from(""));
             }
-            let color = theme().accent;
+            // Measured against the page: a heading is the one line that has
+            // to be seen from across the room, and some palettes put their
+            // accent two shades from their own paper.
+            let color = text_tone(theme().accent, surface());
             let prefix = match level {
                 1 => "█ ",
                 2 => "▊ ",
@@ -284,7 +289,7 @@ fn render_inner(
         // so it reads as a quote against the themed viewer surface.
         if let Some(rest) = trimmed.strip_prefix('>') {
             let qbg = elevate(surface(), 14);
-            let bar = Style::default().fg(theme().accent).bg(qbg).add_modifier(Modifier::BOLD);
+            let bar = Style::default().fg(text_tone(theme().accent, qbg)).bg(qbg).add_modifier(Modifier::BOLD);
             let body = Style::default().fg(readable_on(qbg)).bg(qbg).add_modifier(Modifier::ITALIC);
             for chunk in wrap_str(rest.trim_start(), width.saturating_sub(2)) {
                 let mut spans = vec![Span::styled("▎ ".to_string(), bar)];
@@ -342,7 +347,13 @@ fn render_inner(
                     ),
                 }
             } else {
-                (marker, text, Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
+                (
+                    marker,
+                    text,
+                    Style::default()
+                        .fg(text_tone(theme().accent, surface()))
+                        .add_modifier(Modifier::BOLD),
+                )
             };
             let avail = width.saturating_sub(indent + marker.chars().count() + 1);
             let wrapped = inline(&text, Style::default().fg(readable_on(surface())), avail);
@@ -593,7 +604,7 @@ fn mermaid_flow(lines: &[String], width: usize) -> Option<Vec<Line<'static>>> {
     let base = surface();
     let bg = elevate(base, 14);
     let node = Style::default().fg(readable_on(bg)).bg(bg).add_modifier(Modifier::BOLD);
-    let arrow = Style::default().fg(theme().accent).bg(bg);
+    let arrow = Style::default().fg(text_tone(theme().accent, bg)).bg(bg);
     let lbl = Style::default()
         .fg(text_tone(theme().file.executable, bg))
         .bg(bg)
@@ -603,7 +614,10 @@ fn mermaid_flow(lines: &[String], width: usize) -> Option<Vec<Line<'static>>> {
     let mut out = Vec::new();
     out.push(Line::from(Span::styled(
         format!("{:<w$}", " mermaid flow ", w = width),
-        Style::default().bg(elevate(base, 30)).fg(theme().accent).add_modifier(Modifier::BOLD),
+        Style::default()
+            .bg(elevate(base, 30))
+            .fg(text_tone(theme().accent, elevate(base, 30)))
+            .add_modifier(Modifier::BOLD),
     )));
     for (from, elabel, to) in &edges {
         let mut spans = vec![Span::styled("  ".to_string(), fill), Span::styled(from.clone(), node)];
@@ -661,7 +675,10 @@ fn code_block(lang: &str, lines: &[String], width: usize) -> Vec<Line<'static>> 
     };
     out.push(Line::from(Span::styled(
         format!("{:<w$}", label, w = width),
-        Style::default().bg(elevate(base, 34)).fg(theme().accent).add_modifier(Modifier::BOLD),
+        Style::default()
+            .bg(elevate(base, 34))
+            .fg(text_tone(theme().accent, elevate(base, 34)))
+            .add_modifier(Modifier::BOLD),
     )));
     let code_fg = readable_on(code_bg);
     for l in lines {
@@ -678,8 +695,18 @@ fn inline(text: &str, base: Style, _width: usize) -> Vec<Span<'static>> {
     // whichever direction the page is not — it was a fixed dark box with
     // yellow text, which on a light theme is a black hole in the paragraph.
     let code_bg = elevate(surface(), 18);
-    let code_style = Style::default().bg(code_bg).fg(text_tone(theme().file.code, code_bg));
-    let link_style = base.fg(theme().accent).add_modifier(Modifier::UNDERLINED);
+    // The theme's code colour, pulled far enough off the block behind it to
+    // read — some palettes put it two shades from their own paper.
+    let mut code_fg = text_tone(theme().file.code, code_bg);
+    if crate::render::contrast_ratio(code_fg, code_bg) < 4.0 {
+        code_fg = readable_on(code_bg);
+    }
+    let code_style = Style::default().bg(code_bg).fg(code_fg);
+    // The accent is chosen to be an accent on the theme's own page; a link
+    // sits on that page and has to be read, not just noticed.
+    let link_style = base
+        .fg(text_tone(theme().accent, surface()))
+        .add_modifier(Modifier::UNDERLINED);
     let mut spans: Vec<Span<'static>> = Vec::new();
     let mut buf = String::new();
     let chars: Vec<char> = text.chars().collect();

@@ -1428,7 +1428,7 @@ fn draw_file_pane(
     if !pane.entries.is_empty() { state.select(Some(pane.cursor - start)); }
     f.render_stateful_widget(list, list_area, &mut state);
 
-    draw_list_scrollbar(f, area, pane.entries.len(), pane.cursor, focused, border_style, pane_id, tracks);
+    draw_list_scrollbar(f, area, pane.entries.len(), pane.cursor, pane.scroll, focused, border_style, pane_id, tracks);
 
     // The active tab's path segments are click targets (a breadcrumb): the
     // rects live on the title row and are resolved before tab selection.
@@ -1607,6 +1607,7 @@ fn draw_list_scrollbar(
     area: Rect,
     total: usize,
     cursor: usize,
+    scroll: usize,
     focused: bool,
     border: Style,
     pane_id: FocusedPane,
@@ -1624,7 +1625,13 @@ fn draw_list_scrollbar(
         total,
         shown: view_h as usize,
     });
-    let mut state = ScrollbarState::new(total).position(cursor);
+    // The bar's range is what can actually scroll — the content less the
+    // window showing it. Given the whole content instead, the thumb stops
+    // short of the end by exactly one window: on a file twice the height of
+    // the pane it reached the middle and no further.
+    let max = total.saturating_sub(view_h as usize);
+    let at = clamp_list_scroll(scroll, cursor, view_h as usize, total);
+    let mut state = ScrollbarState::new(max).position(at);
     // The bar sits *on* the pane's right border, so the track has to be the
     // border: same glyph, same style. Drawing it in its own dimmer color made
     // the right edge look broken — bright where the thumb was, faded
@@ -6719,7 +6726,7 @@ fn draw_viewer(
                 .begin_symbol(None)
                 .end_symbol(None),
             Rect::new(area.x + area.width.saturating_sub(1), top, 1, body_h as u16),
-            &mut ScrollbarState::new(visible.len()).position(top_v),
+            &mut ScrollbarState::new(visible.len().saturating_sub(body_h)).position(top_v),
         );
     }
     // The widest line in view, which is what the bar has to describe: the
@@ -6755,7 +6762,7 @@ fn draw_viewer(
                 w,
                 1,
             ),
-            &mut ScrollbarState::new(widest).position(hscroll),
+            &mut ScrollbarState::new(widest.saturating_sub(avail)).position(hscroll),
         );
     }
     if show_ruler {

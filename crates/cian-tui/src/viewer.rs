@@ -20,6 +20,17 @@ impl App {
             return self.handle_viewer_key_inner(key);
         }
         let dirty_before = matches!(self.popup, Popup::Viewer { dirty: true, .. });
+        // A run of the same "get me out" key only counts while it is
+        // unbroken. Settled here, before the handler, because this is the one
+        // place every key passes through exactly once — counting inside the
+        // handler counted some of them twice, which is why the countdown read
+        // 1, 2, 1.
+        let way_out = !matches!(self.popup, Popup::Viewer { editing: true, .. })
+            && matches!(key.code, KeyCode::Esc | KeyCode::Backspace);
+        if !way_out || self.viewer_escape_key != Some(key.code) {
+            self.viewer_escapes = 0;
+            self.viewer_escape_key = way_out.then_some(key.code);
+        }
         let r = self.handle_viewer_key_inner(key);
         let editing = matches!(self.popup, Popup::Viewer { editing: true, .. });
         let op_pending = matches!(
@@ -849,6 +860,9 @@ impl App {
                         say_how_to_close = true;
                     }
                 }
+                // Backspace is the other key a hand reaches for to back out
+                // of something, and it has nothing else to do while reading.
+                (false, KeyCode::Backspace) => say_how_to_close = true,
                 // Alt+v too, since a terminal that keeps Ctrl+V usually keeps
                 // Ctrl+Q as well. Ahead of plain `v`, which this match would
                 // otherwise claim first. `:block` is the one route nothing can
@@ -983,27 +997,33 @@ impl App {
             *scroll = (*scroll).min(n.saturating_sub(body_h));
         }
         if say_how_to_close {
-            // Three in a row is `:q!`. One Esc must not close a file with
-            // unsaved edits in it — that is why it stopped closing at all —
-            // but three deliberate presses are not a slip, and "get me out of
-            // here" should not need a colon and two more keys.
-            self.viewer_escapes = self.viewer_escapes.saturating_add(1);
-            if self.viewer_escapes >= 3 {
-                self.viewer_escapes = 0;
-                self.close_viewer_file();
-                return Ok(());
-            }
-            let left = 3 - self.viewer_escapes;
-            self.message = Some(if self.lang == Lang::Ja {
-                format!(":q で閉じます（:q! で変更を破棄）— Esc あと {left} 回でも閉じます")
-            } else {
-                format!(":q closes this file (:q! discards edits) — or Esc {left} more times")
-            });
-        } else if key.code != KeyCode::Esc {
-            // Any other key means the run of Escs was not going anywhere.
-            self.viewer_escapes = 0;
+            self.viewer_way_out(3);
         }
         Ok(())
+    }
+
+    /// The way out for a hand that just wants the file gone: `n` presses of
+    /// the same key in a row does what `:q!` does.
+    ///
+    /// One press must not — that is why Esc stopped closing at all, and why
+    /// a file with unsaved edits in it is worth protecting from a stray
+    /// keystroke. Three in a row is not a stray keystroke.
+    pub(crate) fn viewer_way_out(&mut self, n: u8) {
+        self.viewer_escapes = self.viewer_escapes.saturating_add(1);
+        if self.viewer_escapes >= n {
+            self.viewer_escapes = 0;
+            self.close_viewer_file();
+            return;
+        }
+        // Counted down from the total, so the first message says how many it
+        // takes rather than how many are left after the one already pressed —
+        // "3, 2, 1" reads as a countdown, "2, 1" reads as a puzzle.
+        let left = n - self.viewer_escapes + 1;
+        self.message = Some(if self.lang == Lang::Ja {
+            format!(":q で閉じます（:q! で変更を破棄）— 同じキーをあと {left} 回でも閉じます")
+        } else {
+            format!(":q closes this file (:q! discards edits) — or the same key {left} more times")
+        });
     }
 
     /// Close the file being read — not the viewer.

@@ -617,7 +617,13 @@ impl App {
         let border_gesture = panel_docked
             && (self.drag.is_some()
                 || (on_divider && matches!(ev.kind, MouseEventKind::Down(MouseButton::Left))));
-        if !matches!(self.popup, Popup::None) && !border_gesture {
+        // A docked panel is one surface among the window's, not a dialog over
+        // it: outside its own frame the mouse belongs to whatever is there.
+        // This guard was swallowing every event that reached it — so with the
+        // panel open and the focus on the listing beside it, the listing
+        // could be neither clicked nor scrolled.
+        let outside_panel = panel_docked && !inside_panel;
+        if !matches!(self.popup, Popup::None) && !border_gesture && !outside_panel {
             let _ = self.handle_popup_mouse(ev);
             return;
         }

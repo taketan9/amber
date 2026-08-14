@@ -2334,6 +2334,8 @@ pub struct App {
     /// One is a mistake, three in a row is a decision — and `:q!` is a lot to
     /// type when the answer is "get me out of here".
     viewer_escapes: u8,
+    /// Which key that run is made of, so Esc and Backspace count separately.
+    viewer_escape_key: Option<crossterm::event::KeyCode>,
     /// Whether the system clipboard actually took the last thing yanked.
     ///
     /// Writing it can fail — another program holding the pasteboard, a
@@ -2662,6 +2664,7 @@ impl App {
             scroll_tracks: Vec::new(),
             scroll_drag: None,
             viewer_escapes: 0,
+            viewer_escape_key: None,
             yank_on_clipboard: false,
             viewer_half_rects: [Rect::new(0, 0, 0, 0); 2],
             viewer_gutter: 0,
