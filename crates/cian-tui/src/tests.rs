@@ -2583,6 +2583,41 @@
         assert!(screen.lines().any(|l| l.contains(" 1 ")), "gutter kept:\n{screen}");
     }
 
+    /// A bookmark that could not be written says so. Adding one reported a
+    /// failed save; deleting one and making a group did not — the list on
+    /// screen changed, the file did not, and the next launch had the old
+    /// bookmarks back with no hint why.
+    #[test]
+    fn a_bookmark_that_cannot_be_saved_says_so() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        // A path that cannot be written to: the "directory" is a file.
+        let blocked = app.active_pane().unwrap().cwd.join("a.txt").join("shortcuts.lua");
+        app.shortcuts.path = blocked;
+        app.shortcuts.entries = vec![
+            Shortcut { name: "one".into(), target: Some("/tmp".into()), children: None },
+            Shortcut { name: "two".into(), target: Some("/tmp".into()), children: None },
+        ];
+
+        // Delete the first — the path that used to swallow it.
+        app.popup = Popup::Shortcuts {
+            entries: app.shortcuts.entries.clone(),
+            cursor: 0,
+            path: vec![],
+        };
+        app.handle_key(key('d')).unwrap();
+        match &app.popup {
+            Popup::Notice { lines } => {
+                let text = lines.join(" ");
+                assert!(
+                    text.contains("could not be saved") || text.contains("保存できませんでした"),
+                    "it says so: {text}",
+                );
+                assert!(text.contains(":where"), "and where it would have gone: {text}");
+            }
+            other => panic!("expected a notice, got {other:?}"),
+        }
+    }
+
     /// `preview_skip` names the kinds the cursor-follow preview leaves alone.
     /// A `.vsix` is a zip of an editor extension: listing one means unpacking
     /// it, which stalls the panel for a file nobody wanted to look inside.

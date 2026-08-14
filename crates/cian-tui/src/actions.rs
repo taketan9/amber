@@ -303,6 +303,41 @@ impl App {
 
     /// Re-open the shortcuts popup at `path`/`cursor` from the saved store (used
     /// after an add/edit/delete so the view reflects the change).
+    /// Write the bookmarks out and put the list back on screen — or say why
+    /// it could not be written.
+    ///
+    /// One function because there were three copies of this and only one of
+    /// them reported a failure: adding a bookmark said "save failed", while
+    /// deleting one and making a group silently did not persist. A bookmark
+    /// is something the user made, not a preference — losing one quietly is
+    /// worse than an interruption.
+    pub(crate) fn save_shortcuts(&mut self, path: Vec<usize>, cursor: usize, said: &str) {
+        match self.shortcuts.save() {
+            Ok(()) => {
+                if !said.is_empty() {
+                    self.message = Some(said.to_string());
+                }
+                self.reopen_shortcuts(path, cursor);
+            }
+            Err(e) => {
+                self.popup = Popup::Notice {
+                    lines: vec![
+                        tr(self.lang, "the bookmarks could not be saved:", "ブックマークを保存できませんでした:")
+                            .to_string(),
+                        e.to_string(),
+                        String::new(),
+                        tr(
+                            self.lang,
+                            "The change is in this session only. `:where` says which file it would go to.",
+                            "変更はこのセッション限りです。保存先は `:where` で確認できます。",
+                        )
+                        .to_string(),
+                    ],
+                }
+            }
+        }
+    }
+
     pub(crate) fn reopen_shortcuts(&mut self, path: Vec<usize>, cursor: usize) {
         let n = sc_level(&self.shortcuts.entries, &path).len();
         self.popup = Popup::Shortcuts {
@@ -3454,8 +3489,7 @@ impl App {
                         }
                     }
                     let cursor = edit_idx.unwrap_or(sc_level(&self.shortcuts.entries, &p).len().saturating_sub(1));
-                    let _ = self.shortcuts.save();
-                    self.reopen_shortcuts(p, cursor);
+                    self.save_shortcuts(p, cursor, "");
                     return Ok(());
                 }
                 // A leaf chains into the target step. New shortcuts default to a
@@ -3502,13 +3536,7 @@ impl App {
                 } else {
                     0
                 };
-                match self.shortcuts.save() {
-                    Ok(()) => {
-                        self.message = Some("shortcut saved".into());
-                        self.reopen_shortcuts(p, cursor);
-                    }
-                    Err(e) => self.popup = Popup::Notice { lines: vec![format!("save failed: {}", e)] },
-                }
+                self.save_shortcuts(p, cursor, tr(self.lang, "shortcut saved", "ショートカットを保存しました"));
                 return Ok(());
             }
         };

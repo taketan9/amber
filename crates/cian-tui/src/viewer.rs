@@ -979,11 +979,7 @@ impl App {
 
             // Keep the cursor on screen.
             *line = (*line).min(last);
-            if *line < *scroll {
-                *scroll = *line;
-            } else if *line >= *scroll + body_h {
-                *scroll = *line + 1 - body_h;
-            }
+            clamp_scroll(*line, scroll, body_h);
             *scroll = (*scroll).min(n.saturating_sub(body_h));
         }
         if say_how_to_close {
@@ -1277,11 +1273,7 @@ impl App {
                         *col = nc;
                         *goal = nc;
                         let n = view.lines.len();
-                        if *line < *scroll {
-                            *scroll = *line;
-                        } else if *line >= *scroll + body_h {
-                            *scroll = *line + 1 - body_h;
-                        }
+                        clamp_scroll(*line, scroll, body_h);
                         *scroll = (*scroll).min(n.saturating_sub(body_h));
                     }
                     None => not_found = true,
@@ -1895,11 +1887,7 @@ impl App {
         let body_h = (self.viewer_rect.height as usize).max(1);
         if let Popup::Viewer { line, scroll, view, .. } = &mut self.popup {
             let n = view.lines.len();
-            if *line < *scroll {
-                *scroll = *line;
-            } else if *line >= *scroll + body_h {
-                *scroll = *line + 1 - body_h;
-            }
+            clamp_scroll(*line, scroll, body_h);
             *scroll = (*scroll).min(n.saturating_sub(body_h));
         }
         self.clamp_viewer_hscroll();
@@ -2301,11 +2289,7 @@ impl App {
                 hl.clear();
                 let last = view.lines.len().saturating_sub(1);
                 *line = (*line).min(last);
-                if *line < *scroll {
-                    *scroll = *line;
-                } else if *line >= *scroll + body_h {
-                    *scroll = *line + 1 - body_h;
-                }
+                clamp_scroll(*line, scroll, body_h);
             }
         }
         // A cut is a copy that also removes: `p` has to find it, and so does
@@ -2528,11 +2512,7 @@ impl App {
             }
             *goal = *col;
             // Keep the cursor on screen (the render also follows it).
-            if *line < *scroll {
-                *scroll = *line;
-            } else if *line >= *scroll + body_h {
-                *scroll = *line + 1 - body_h;
-            }
+            clamp_scroll(*line, scroll, body_h);
         }
         Ok(())
     }
@@ -2643,11 +2623,7 @@ impl App {
             cur_byte = byte_of(*line, nib);
             let _ = cur_byte;
             *col = nib;
-            if *line < *scroll {
-                *scroll = *line;
-            } else if *line >= *scroll + body_h {
-                *scroll = *line + 1 - body_h;
-            }
+            clamp_scroll(*line, scroll, body_h);
         }
         Ok(())
     }
@@ -4189,6 +4165,20 @@ fn redo_step(
 /// edit made after an undo forks the history, and vim throws the branch that
 /// was undone away rather than leaving a "forward" that no longer leads
 /// anywhere.
+/// Keep the cursor's line on screen.
+///
+/// A free function taking the two fields rather than a method, because every
+/// caller is already inside the `&mut self.popup` borrow and cannot call one.
+/// It was written out at each of the six of them, which is how the seventh
+/// would have drifted from the rest.
+fn clamp_scroll(line: usize, scroll: &mut usize, body_h: usize) {
+    if line < *scroll {
+        *scroll = line;
+    } else if line >= *scroll + body_h {
+        *scroll = line + 1 - body_h;
+    }
+}
+
 fn push_viewer_undo(
     undo: &mut Vec<ViewerSnap>,
     redo: &mut Vec<ViewerSnap>,

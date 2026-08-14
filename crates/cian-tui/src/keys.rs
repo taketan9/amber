@@ -1534,8 +1534,7 @@ impl App {
                                 lvl.remove(idx);
                             }
                         }
-                        let _ = self.shortcuts.save();
-                        self.reopen_shortcuts(p, idx);
+                        self.save_shortcuts(p, idx, "");
                     }
                 }
                 KeyCode::Char('r') => {
