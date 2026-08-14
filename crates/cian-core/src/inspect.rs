@@ -72,9 +72,9 @@ impl Unit {
 
 /// Space on the filesystem holding `path`.
 pub fn disk_space(path: &Path) -> Result<DiskSpace> {
-    let total = fs2::total_space(path).with_context(|| format!("df {}", path.display()))?;
+    let total = fs4::total_space(path).with_context(|| format!("df {}", path.display()))?;
     let available =
-        fs2::available_space(path).with_context(|| format!("df {}", path.display()))?;
+        fs4::available_space(path).with_context(|| format!("df {}", path.display()))?;
     Ok(DiskSpace { total, available })
 }
 

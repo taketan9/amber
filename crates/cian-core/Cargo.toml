@@ -13,9 +13,6 @@ dunce = "1.0.5"
 # Text decoding for the viewer (Shift_JIS / UTF-16 …). Pure Rust, the same
 # engine Firefox uses; no C dependency, so the Windows build stays clean.
 encoding_rs = "0.8"
-# Cross-platform free/total disk space for `:df`. Tiny, uses the OS call
-# directly (statvfs / GetDiskFreeSpaceEx) rather than shelling out.
-fs2 = "0.4.3"
 fs_extra = { workspace = true }
 md-5 = { version = "0.11", default-features = false, features = ["alloc"] }
 sha2 = { version = "0.11", default-features = false, features = ["alloc"] }
@@ -38,6 +35,8 @@ flate2 = { version = "1", default-features = false, features = ["rust_backend"] 
 # all Rust decoders), so the single-binary/no-C story holds; only the common
 # raster formats are enabled to keep the build lean.
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif", "bmp", "webp"] }
+# Free/total space, for the disk-usage column and `:df`. One crate for it,
+# not two: `fs2` did the same job here and has not been released since 2019.
 fs4 = "1.1.0"
 regex = "1.13.1"
 unicode-width = "0.2"
