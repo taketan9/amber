@@ -182,6 +182,9 @@ pub(crate) const PREVIEW_SKIP_DEFAULT: &[&str] = &[
     "iso", "dmg", "vmdk", "vdi", "vhd", "vhdx", "wim", "img", "qcow2",
     // Installers and packages.
     "msi", "pkg", "deb", "rpm", "cab",
+    // A PDF's text is extracted by scanning the whole file, and what comes
+    // back is not the page anyone is looking at. `F3` still opens it.
+    "pdf",
     // Databases and their logs: large, and meaningless as text.
     "mdf", "ldf", "ndf", "sqlite", "db3", "pdb", "ost", "pst",
 ];

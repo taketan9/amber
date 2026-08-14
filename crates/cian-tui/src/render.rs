@@ -2605,7 +2605,12 @@ fn draw_image(f: &mut Frame, area: Rect, app: &mut App) {
     let body_w = inner.width;
     let body_h = inner.height.saturating_sub(1); // leave a row for the footer
 
-    if app.gfx_picker.is_some() {
+    // Real pixels when the terminal offers them — but only while that path is
+    // actually producing a picture. When it fails (a protocol the terminal
+    // advertised and then would not take, a format the decoder does not
+    // know), the half-block renderer below is a worse picture rather than no
+    // picture, which is the difference between "grainy" and "broken".
+    if app.gfx_picker.is_some() && !app.gfx_failed {
         draw_image_gfx(f, rect, inner, app);
         return;
     }
@@ -2754,7 +2759,7 @@ fn draw_preview_panel(f: &mut Frame, area: Rect, app: &mut App) {
     // the F3 popup, but in preview-owned state.
     if matches!(app.preview.as_ref().map(|p| &p.body), Some(crate::preview::PreviewBody::Image)) {
         let path = app.preview.as_ref().map(|p| p.path.clone()).unwrap_or_default();
-        if app.gfx_picker.is_some() {
+        if app.gfx_picker.is_some() && !app.gfx_failed {
             if app.preview_gfx.as_ref().map(|(p, _)| p != &path).unwrap_or(true) {
                 app.preview_gfx = None;
                 if let (Ok(img), Some(picker)) = (image::open(&path), app.gfx_picker.as_ref()) {
@@ -2763,7 +2768,18 @@ fn draw_preview_panel(f: &mut Frame, area: Rect, app: &mut App) {
             }
             if let Some((_, proto)) = app.preview_gfx.as_mut() {
                 f.render_stateful_widget(ratatui_image::StatefulImage::default(), inner, proto);
-                return;
+                // If the terminal's own image protocol did not produce
+                // anything, fall through to the half-block renderer rather
+                // than leaving an empty box: an unreadable picture is still
+                // better than none, and the failure is silent otherwise.
+                match proto.last_encoding_result() {
+                    Some(Err(_)) => {
+                        app.gfx_failed = true;
+                        app.preview_gfx = None;
+                        app.full_clear = true;
+                    }
+                    _ => return,
+                }
             }
         }
         let mut drew = false;
@@ -2903,8 +2919,18 @@ fn draw_image_gfx(f: &mut Frame, rect: Rect, inner: Rect, app: &mut App) {
                 pic,
                 proto,
             );
+            if matches!(proto.last_encoding_result(), Some(Err(_))) {
+                // Remembered rather than retried: a protocol that failed once
+                // fails every frame, and the half-block renderer is right
+                // there.
+                app.gfx_failed = true;
+                app.img_proto = None;
+                app.full_clear = true;
+            }
         }
         None => {
+            // Nothing decoded it: say so here, since the half-block path
+            // would have nothing to draw either.
             f.render_widget(
                 Paragraph::new(tr(lang, "cannot show image", "画像を表示できません"))
                     .style(Style::default().fg(text_tone(theme().file.archive, surface()))),

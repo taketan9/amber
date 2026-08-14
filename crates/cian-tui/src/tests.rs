@@ -2641,6 +2641,35 @@
         }
     }
 
+    /// A picture still draws when the terminal has no image protocol — the
+    /// half-block renderer is the fallback, and it has to actually run.
+    #[test]
+    fn an_image_previews_without_a_terminal_protocol() {
+        let dir = tempfile::tempdir().unwrap();
+        image::RgbImage::from_pixel(8, 8, image::Rgb([200, 40, 40]))
+            .save(dir.path().join("shot.png"))
+            .unwrap();
+        let p = dir.path().to_path_buf();
+        let mut app = App::new(p.clone(), p, en_config()).unwrap();
+        let i = app
+            .active_pane()
+            .unwrap()
+            .entries
+            .iter()
+            .position(|e| e.name == "shot.png")
+            .unwrap();
+        app.active_pane_mut().unwrap().cursor = i;
+        assert!(crate::preview::preview_target(&app).is_ok(), "an image is previewable");
+
+        let buf = render_buf(&mut app, 100, 30);
+        let sh = app.layout_rects.shell;
+        let painted = (sh.y + 1..sh.y + sh.height - 1)
+            .flat_map(|y| (sh.x + 1..sh.x + sh.width - 1).map(move |x| (x, y)))
+            .filter(|(x, y)| !buf[(*x, *y)].symbol().trim().is_empty())
+            .count();
+        assert!(painted > 20, "the picture is drawn: {painted} cells");
+    }
+
     /// A long prompt stays readable. The chat's input drew one row per typed
     /// line and let a long one run off the right-hand edge; the AI-command
     /// dialog sized its box from the unwrapped text and cut the rest off the
@@ -2747,17 +2776,19 @@
         // is an editor extension, and unpacking one to list it stalls the
         // panel for something nobody is looking at the folder for.
         let dir2 = tempfile::tempdir().unwrap();
-        for n in ["ext.vsix", "disc.iso", "lib.whl", "archive.zip", "notes.txt"] {
+        for n in ["ext.vsix", "disc.iso", "lib.whl", "paper.pdf", "archive.zip", "notes.txt", "shot.png"] {
             std::fs::write(dir2.path().join(n), b"x").unwrap();
         }
         let p2 = dir2.path().to_path_buf();
         let mut plain = App::new(p2.clone(), p2, en_config()).unwrap();
-        for skipped in ["ext.vsix", "disc.iso", "lib.whl"] {
+        for skipped in ["ext.vsix", "disc.iso", "lib.whl", "paper.pdf"] {
             assert!(at(&mut plain, skipped).is_err(), "{skipped} is skipped by default");
         }
         // …but a plain archive is one someone is browsing on purpose.
         assert!(at(&mut plain, "archive.zip").is_ok(), "a zip still previews");
         assert!(at(&mut plain, "notes.txt").is_ok());
+        // …and so does an image, which is the whole point of a preview.
+        assert!(at(&mut plain, "shot.png").is_ok(), "a picture still previews");
     }
 
     /// The shell keeps what has gone past, with its colours, and can be

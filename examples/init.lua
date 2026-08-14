@@ -122,7 +122,7 @@
 -- 大文字小文字は問いません）。ここに書いたものは**既定の一覧に追加**されます。
 -- 既定で対象外：vsix jar war whl apk ipa nupkg crx xpi msix などの
 -- 「中を見るためのものではない zip」、iso dmg vmdk vhd wim などのイメージ、
--- msi deb rpm cab などのインストーラ、mdf ldf sqlite pst などの DB。
+-- msi deb rpm cab などのインストーラ、pdf、mdf ldf sqlite pst などの DB。
 -- zip / tar / 7z は**対象外にしていません** — こちらは中を見るために開くので。
 -- F3 ではどれも開けます — これは「頼んでいないのに開く」のを止める設定です。
 -- cian.set_option("preview_skip", { "bak", "dmp" })

@@ -124,7 +124,7 @@
 -- case-insensitive). What you put here is *added* to the built-in list.
 -- Skipped by default: zip-based packages nobody browses as archives (vsix,
 -- jar, war, whl, apk, ipa, nupkg, crx, xpi, msix…), disc and disk images
--- (iso, dmg, vmdk, vhd, wim…), installers (msi, deb, rpm, cab) and databases
+-- (iso, dmg, vmdk, vhd, wim…), installers (msi, deb, rpm, cab), PDFs and databases
 -- (mdf, ldf, sqlite, pst). Plain archives — zip, tar, 7z — are *not* skipped:
 -- listing one is the point of opening it. F3 opens any of them; this is about
 -- what happens *without* being asked.

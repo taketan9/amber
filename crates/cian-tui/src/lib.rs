@@ -2206,6 +2206,10 @@ pub struct App {
     /// path so a new image re-decodes. Lives outside `Popup` because the
     /// protocol state is neither `Debug` nor comparable.
     img_proto: Option<(PathBuf, ratatui_image::protocol::StatefulProtocol)>,
+    /// The terminal advertised an image protocol and then would not draw with
+    /// it. Set once and kept: it fails every frame, and half-blocks are a
+    /// worse picture rather than no picture.
+    gfx_failed: bool,
     /// The context menu's on-screen rect (inner area), for clicking its items.
     menu_rect: Rect,
     /// Parent context menus stashed while a submenu is open, so Esc/← drills
@@ -2691,6 +2695,7 @@ impl App {
             nav_rects: Vec::new(),
             gfx_picker: None,
             img_proto: None,
+            gfx_failed: false,
             show_ws: true,
             show_ruler: true,
             preview_on: config.options.preview.unwrap_or(true),
