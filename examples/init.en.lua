@@ -121,10 +121,14 @@
 -- cian.set_option("lang", "en")
 
 -- Extensions the cursor-follow preview leaves alone (with or without the dot,
--- case-insensitive) — for the kinds that have to be unpacked to be shown, and
--- stall the panel for a file nobody wanted to look inside. F3 still opens
--- them: this is about what happens *without* being asked.
--- cian.set_option("preview_skip", { "vsix", "iso", "7z" })
+-- case-insensitive). What you put here is *added* to the built-in list.
+-- Skipped by default: zip-based packages nobody browses as archives (vsix,
+-- jar, war, whl, apk, ipa, nupkg, crx, xpi, msix…), disc and disk images
+-- (iso, dmg, vmdk, vhd, wim…), installers (msi, deb, rpm, cab) and databases
+-- (mdf, ldf, sqlite, pst). Plain archives — zip, tar, 7z — are *not* skipped:
+-- listing one is the point of opening it. F3 opens any of them; this is about
+-- what happens *without* being asked.
+-- cian.set_option("preview_skip", { "bak", "dmp" })
 
 -- Language for JUST the key manual (`?`) and the right-click context menu,
 -- overriding `lang` for those two surfaces only. Handy to keep the interface in

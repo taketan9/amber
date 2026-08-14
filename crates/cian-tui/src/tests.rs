@@ -2583,6 +2583,97 @@
         assert!(screen.lines().any(|l| l.contains(" 1 ")), "gutter kept:\n{screen}");
     }
 
+    /// Nothing is ever drawn over a frame, whatever is in it. A wide
+    /// character that will not fit before the border is left out — the border
+    /// is the thing that has to be right, and half a character is not one.
+    #[test]
+    fn a_wide_character_never_eats_the_border() {
+        // Names of every length around the pane's right edge, so one of them
+        // lands with a full-width character straddling it.
+        let names: Vec<String> = (1..=30).map(|n| format!("{}.txt", "あ".repeat(n))).collect();
+        let refs: Vec<&str> = names.iter().map(|s| s.as_str()).collect();
+        let (_d, mut app) = app_with(&refs);
+        // Past the "starting up" splash, which is drawn over both panes.
+        app.startup_at = std::time::Instant::now() - std::time::Duration::from_secs(30);
+        let buf = render_buf(&mut app, 100, 40);
+        for (name, r) in
+            [("left", app.layout_rects.left), ("right", app.layout_rects.right)]
+        {
+            for y in r.y + 1..r.y + r.height - 1 {
+                for (edge, x) in [("left", r.x), ("right", r.x + r.width - 1)] {
+                    let sym = buf[(x, y)].symbol();
+                    assert!(
+                        sym == "│" || sym == "┃" || sym == "║",
+                        "{name} pane's {edge} border at row {y} is {sym:?}",
+                    );
+                }
+            }
+        }
+
+        // …and the shell panel, drawn by the terminal widget rather than by
+        // cian, with wide characters running exactly to its edge and past it.
+        let dir = tempfile::tempdir().unwrap();
+        let sh = cian_pty::default_shell();
+        let session = cian_pty::PtySession::new(dir.path(), &sh, 24, 80).unwrap();
+        app.shell.tabs.push(ShellTab::new(session));
+        app.shell.active = 0;
+        app.preview_on = false;
+        app.focus(FocusedPane::Shell);
+        let _ = render(&mut app, 100, 40);
+        let cols = app.shell.cols as usize;
+        if let Some(s) = app.shell.active_session() {
+            // Exactly to the edge, then one narrow character shifting the next
+            // line so a wide one straddles it.
+            let text =
+                format!("{}\r\nx{}Z\r\n", "あ".repeat(cols / 2), "あ".repeat(cols / 2));
+            s.parser().lock().unwrap().process(text.as_bytes());
+        }
+        let buf = render_buf(&mut app, 100, 40);
+        let r = app.layout_rects.shell;
+        for y in r.y + 1..r.y + r.height - 1 {
+            for (edge, x) in [("left", r.x), ("right", r.x + r.width - 1)] {
+                let sym = buf[(x, y)].symbol();
+                assert!(
+                    sym == "│" || sym == "┃" || sym == "║",
+                    "shell's {edge} border at row {y} is {sym:?}",
+                );
+            }
+        }
+    }
+
+    /// A long prompt stays readable. The chat's input drew one row per typed
+    /// line and let a long one run off the right-hand edge; the AI-command
+    /// dialog sized its box from the unwrapped text and cut the rest off the
+    /// bottom. A prompt you cannot read back is one you cannot correct.
+    #[test]
+    fn a_long_prompt_is_visible_in_full() {
+        let long: String = (0..24).map(|i| format!("word{i:02} ")).collect();
+        assert!(long.len() > 150, "longer than any dialog is wide");
+
+        // The chat.
+        let (_d, mut app) = app_with(&["a.txt"]);
+        app.start_ai_chat(ChatMode::Ai, vec![], false);
+        for c in long.chars() {
+            app.handle_key(key(c)).unwrap();
+        }
+        let screen = render(&mut app, 100, 30).join("\n");
+        assert!(screen.contains("word00"), "the start is there:\n{screen}");
+        assert!(screen.contains("word23"), "and so is the end — where the caret is");
+
+        // The AI-command dialog.
+        let (_d, mut app) = app_with(&["a.txt"]);
+        app.popup = Popup::TextInput {
+            title: " command from a description ".into(),
+            prompt: "what should it do?".into(),
+            buffer: long.clone(),
+            kind: InputKind::AiShellCmd,
+            cursor: long.chars().count(),
+        };
+        let screen = render(&mut app, 100, 30).join("\n");
+        assert!(screen.contains("word00"), "the start is there:\n{screen}");
+        assert!(screen.contains("word23"), "and the end:\n{screen}");
+    }
+
     /// A bookmark that could not be written says so. Adding one reported a
     /// failed save; deleting one and making a group did not — the list on
     /// screen changed, the file did not, and the next launch had the old
@@ -2652,12 +2743,21 @@
         // Case does not matter, on the file or in the config.
         assert!(at(&mut app, "disc.ISO").is_err(), "matched whatever the case");
 
-        // With nothing configured, nothing is skipped.
+        // Some kinds are skipped without being configured at all: a `.vsix`
+        // is an editor extension, and unpacking one to list it stalls the
+        // panel for something nobody is looking at the folder for.
         let dir2 = tempfile::tempdir().unwrap();
-        std::fs::write(dir2.path().join("ext.vsix"), b"x").unwrap();
+        for n in ["ext.vsix", "disc.iso", "lib.whl", "archive.zip", "notes.txt"] {
+            std::fs::write(dir2.path().join(n), b"x").unwrap();
+        }
         let p2 = dir2.path().to_path_buf();
         let mut plain = App::new(p2.clone(), p2, en_config()).unwrap();
-        assert!(at(&mut plain, "ext.vsix").is_ok(), "off by default");
+        for skipped in ["ext.vsix", "disc.iso", "lib.whl"] {
+            assert!(at(&mut plain, skipped).is_err(), "{skipped} is skipped by default");
+        }
+        // …but a plain archive is one someone is browsing on purpose.
+        assert!(at(&mut plain, "archive.zip").is_ok(), "a zip still previews");
+        assert!(at(&mut plain, "notes.txt").is_ok());
     }
 
     /// The shell keeps what has gone past, with its colours, and can be

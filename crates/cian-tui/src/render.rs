@@ -955,7 +955,7 @@ fn tabs_title<'a>(
     if hidden_left > 0 {
         let s = format!("+{} ", hidden_left);
         col += width_of(&s);
-        spans.push(Span::styled(s, Style::default().fg(Color::DarkGray)));
+        spans.push(Span::styled(s, Style::default().fg(dim_text(surface()))));
     }
     for (pos, &i) in shown.iter().enumerate() {
         let is_active = i == active;
@@ -989,7 +989,7 @@ fn tabs_title<'a>(
     if hidden_right > 0 {
         spans.push(Span::styled(
             format!(" +{}", hidden_right),
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(dim_text(surface())),
         ));
     }
     spans.push(Span::raw(" "));
@@ -1167,18 +1167,23 @@ fn shell_tabs_title<'a>(
             if focused {
                 Style::default().fg(readable_on(theme().accent)).bg(theme().accent).add_modifier(Modifier::BOLD)
             } else {
-                Style::default().fg(Color::White).bg(Color::DarkGray)
+                Style::default()
+                    .fg(readable_on(theme().selected_bg))
+                    .bg(theme().selected_bg)
             }
         } else {
-            // Readable medium grey for inactive tabs (DarkGray was too dim).
-            Style::default().fg(Color::Gray)
+            // Measured against the surface it sits on, like everything else.
+            // `Color::Gray` is the terminal's palette entry 8, which a
+            // Solarized profile maps to the *background* — the label was
+            // drawn, clickable, and invisible.
+            Style::default().fg(muted_on(surface()))
         };
         let w = label.chars().count() as u16;
         offsets.push((i, col, w));
         col += w;
         spans.push(Span::styled(label, style));
         if i + 1 < tabs.count() {
-            spans.push(Span::styled("│", Style::default().fg(Color::Gray)));
+            spans.push(Span::styled("│", Style::default().fg(theme().border)));
             col += 1;
         }
     }
@@ -1867,7 +1872,7 @@ fn render_node(
                 } else if is_active {
                     Style::default().fg(text_tone(theme().accent, theme().popup_bg)).add_modifier(Modifier::BOLD)
                 } else {
-                    Style::default().fg(Color::DarkGray)
+                    Style::default().fg(dim_text(surface()))
                 };
                 let mut blk = Block::default().borders(Borders::ALL)
         .border_type(border_type()).border_style(bs);
@@ -1964,7 +1969,10 @@ fn seam_zone(dir: Direction, a: Rect, b: Rect) -> Rect {
 /// the viewer's now do too — a prompt that changed colour depending on which
 /// half of cian raised it was the same prompt pretending to be two.
 pub(crate) fn prompt_style() -> Style {
-    Style::default().bg(Color::Rgb(20, 20, 30)).fg(Color::White).add_modifier(Modifier::BOLD)
+    Style::default()
+        .bg(theme().popup_bg)
+        .fg(readable_on(theme().popup_bg))
+        .add_modifier(Modifier::BOLD)
 }
 
 fn draw_prompt_line(f: &mut Frame, area: Rect, left: &str, right: &str) {
@@ -1974,7 +1982,9 @@ fn draw_prompt_line(f: &mut Frame, area: Rect, left: &str, right: &str) {
     if area.width > w {
         let hint = Rect::new(area.x + area.width - w, area.y, w, 1);
         f.render_widget(
-            Paragraph::new(right).style(style.fg(Color::DarkGray).remove_modifier(Modifier::BOLD)),
+            Paragraph::new(right).style(
+                style.fg(muted_on(theme().popup_bg)).remove_modifier(Modifier::BOLD),
+            ),
             hint,
         );
     }
@@ -3302,11 +3312,16 @@ fn draw_ai_chat(f: &mut Frame, area: Rect, app: &mut App) {
     let stage = app.crmaine_stage.clone();
     // The input can be several lines (Alt+Enter); the transcript gives up a row
     // per extra input line, capped so a huge paste can't swallow the answer.
-    let input_rows = if let Popup::AiChat { input, .. } = &app.popup {
-        input.split('\n').count().clamp(1, 6)
+    // Wrapped, not just split: a long line typed or pasted in one piece used
+    // to run off the right-hand edge, so what had been typed could not be
+    // read back. Capped, so a huge paste still leaves the answer on screen —
+    // and it is the *end* that is kept, which is where the caret is.
+    let input_wrapped: Vec<String> = if let Popup::AiChat { input, .. } = &app.popup {
+        wrap_input(input, inner.width.saturating_sub(2) as usize)
     } else {
-        1
+        Vec::new()
     };
+    let input_rows = input_wrapped.len().clamp(1, 8);
     // Pasted images get their own row above the input, so the count is visible
     // before sending rather than only in the transient status message.
     let attach_n = app.chat_attachments.len();
@@ -3315,9 +3330,8 @@ fn draw_ai_chat(f: &mut Frame, area: Rect, app: &mut App) {
 
     let mut flat: Vec<String> = Vec::new();
     let mut shown: Vec<Line> = Vec::new();
-    let mut input_str = String::new();
     let mut off = 0usize;
-    if let Popup::AiChat { input, log, scroll, pending, sel, .. } = &mut app.popup {
+    if let Popup::AiChat { log, scroll, pending, sel, .. } = &mut app.popup {
         // Flat plain-text lines (for copying) and their styled counterparts.
         // Each turn is a speaker header line followed by the wrapped body,
         // indented — the "crmaine - Ajent" name is too long to sit inline.
@@ -3406,7 +3420,6 @@ fn draw_ai_chat(f: &mut Frame, area: Rect, app: &mut App) {
         let max_scroll = flat.len().saturating_sub(view_h);
         off = (*scroll).min(max_scroll);
         *scroll = off; // usize::MAX means "stick to bottom"; clamp it here
-        input_str = input.clone();
 
         let sel_range = sel.map(|(a, b)| (a.min(b), a.max(b)));
         for (i, line) in styled.into_iter().enumerate().skip(off).take(view_h) {
@@ -3445,10 +3458,11 @@ fn draw_ai_chat(f: &mut Frame, area: Rect, app: &mut App) {
         .fg(readable_on(theme().selected_bg))
         .add_modifier(Modifier::BOLD)
         .bg(theme().selected_bg);
-    let raw_lines: Vec<&str> = input_str.split('\n').collect();
-    let last = raw_lines.len().saturating_sub(1);
+    // The tail of it: with more than fits, the end is what is being typed.
+    let first = input_wrapped.len().saturating_sub(input_rows);
+    let last = input_wrapped.len().saturating_sub(1);
     let mut in_lines: Vec<Line> = Vec::with_capacity(input_rows);
-    for (i, seg) in raw_lines.iter().enumerate().take(input_rows) {
+    for (i, seg) in input_wrapped.iter().enumerate().skip(first) {
         let prefix = if i == 0 { "> " } else { "  " };
         let caret = if i == last { "\u{2588}" } else { "" };
         in_lines.push(Line::from(Span::styled(format!("{prefix}{seg}{caret}"), in_style)));
@@ -3457,6 +3471,35 @@ fn draw_ai_chat(f: &mut Frame, area: Rect, app: &mut App) {
         Paragraph::new(in_lines).style(Style::default().bg(theme().selected_bg)),
         Rect::new(inner.x, inner.y + view_h as u16 + attach_rows, inner.width, input_rows as u16),
     );
+}
+
+/// What is being typed, laid out in rows of `cols` columns.
+///
+/// Explicit line breaks split; anything longer than the width wraps, because
+/// a prompt you cannot read back is a prompt you cannot correct. Measured in
+/// columns rather than characters, so a line of Japanese wraps where it looks
+/// like it should.
+fn wrap_input(text: &str, cols: usize) -> Vec<String> {
+    let mut out = Vec::new();
+    for seg in text.split('\n') {
+        if seg.is_empty() || cols == 0 {
+            out.push(String::new());
+            continue;
+        }
+        let mut cur = String::new();
+        let mut w = 0usize;
+        for ch in seg.chars() {
+            let cw = cian_core::textops::char_cols(ch, w);
+            if w + cw > cols {
+                out.push(std::mem::take(&mut cur));
+                w = 0;
+            }
+            cur.push(ch);
+            w += cw;
+        }
+        out.push(cur);
+    }
+    out
 }
 
 /// The operation queue (`:queue`): the running op with its progress and

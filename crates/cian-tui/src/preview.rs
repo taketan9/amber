@@ -164,17 +164,40 @@ fn load_preview(path: &Path, lang: crate::Lang) -> PreviewBody {
 /// The path the preview should follow: the cursor entry of the focused file
 /// pane — unless there is a reason not to look (remote pane: reading a file
 /// would download it; nothing selected). `Err` carries the note to show.
+/// Kinds the preview never opens by itself, whatever the config says.
+///
+/// All of these are containers or images that would have to be unpacked or
+/// scanned to show anything, and what is inside is not what anyone is looking
+/// at the folder for. A `.vsix` is an editor extension, a `.whl` is a Python
+/// package, an `.iso` is a disc — the panel stalls, and the listing that comes
+/// back answers a question nobody asked. `F3` opens any of them.
+///
+/// Deliberately *not* here: `.zip`, `.tar`, `.7z` and friends. Those are
+/// archives someone is browsing on purpose, and listing one is the point.
+pub(crate) const PREVIEW_SKIP_DEFAULT: &[&str] = &[
+    // Zip-based packages that are not meant to be browsed as archives.
+    "vsix", "jar", "war", "ear", "aar", "whl", "egg", "apk", "aab", "ipa", "nupkg", "crx", "xpi",
+    "appx", "msix", "docm", "xlsm", // macro-bearing Office: opened, not listed
+    // Disc and disk images.
+    "iso", "dmg", "vmdk", "vdi", "vhd", "vhdx", "wim", "img", "qcow2",
+    // Installers and packages.
+    "msi", "pkg", "deb", "rpm", "cab",
+    // Databases and their logs: large, and meaningless as text.
+    "mdf", "ldf", "ndf", "sqlite", "db3", "pdb", "ost", "pst",
+];
+
 /// Is this one of the extensions `preview_skip` names?
 ///
 /// Compared lowercased and without the dot, so the config can say `vsix`,
-/// `.vsix` or `VSIX` and mean the same thing.
+/// `.vsix` or `VSIX` and mean the same thing. The config *adds* to
+/// [`PREVIEW_SKIP_DEFAULT`] rather than replacing it.
 pub(crate) fn skip_preview(app: &App, path: &std::path::Path) -> bool {
-    if app.config.options.preview_skip.is_empty() {
-        return false;
-    }
     let Some(ext) = path.extension().map(|e| e.to_string_lossy().to_lowercase()) else {
         return false;
     };
+    if PREVIEW_SKIP_DEFAULT.contains(&ext.as_str()) {
+        return true;
+    }
     // Normalised here rather than only where it was read, so it does not
     // matter how the value arrived: `vsix`, `.vsix` and `VSIX` are the same
     // answer to the same question.
