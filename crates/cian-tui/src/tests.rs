@@ -2924,10 +2924,14 @@
             let (w, at) = worst(&mut app);
             assert!(w >= 4.0, "{from}: {at} is {w:.2}:1");
 
-            // …and now the theme changes under it, which is the case.
-            set_theme(theme_preset(to).unwrap());
+            // …and now the theme changes under it, through the command a
+            // person would actually type. Calling `set_theme` here would be
+            // testing the fix rather than the path to it.
+            app.command_buffer = format!("theme {to}");
+            app.run_command();
+
             let (w, at) = worst(&mut app);
-            assert!(w >= 4.0, "{from} → {to}: {at} is {w:.2}:1");
+            assert!(w >= 4.0, "{from} → :theme {to}: {at} is {w:.2}:1");
         }
         set_theme(ResolvedTheme::DARK);
     }
