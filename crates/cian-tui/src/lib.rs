@@ -474,6 +474,10 @@ enum Popup {
         /// The inner width the preview was last wrapped to, so the render can
         /// tell when a resize means it must re-render.
         md_width: u16,
+        /// The theme the preview's colours were computed under. A cache of
+        /// styles is a cache of *colours*, and they stop being right the
+        /// moment `:theme` changes.
+        md_gen: u64,
         /// A source line the view should be showing once the preview has been
         /// built. Toggling between source and preview keeps your place, and
         /// the two are not the same lines — the map that relates them only

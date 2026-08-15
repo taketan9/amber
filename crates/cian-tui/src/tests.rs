@@ -2874,6 +2874,64 @@
         set_theme(ResolvedTheme::DARK);
     }
 
+    /// Switching the theme while a preview is open recolours it. The style
+    /// grid is a cache of *colours*: opened on a light theme and switched to
+    /// a dark one, it kept its near-black text and the page went black on
+    /// black — with only the headings and the code blocks, which carry a
+    /// background of their own, still visible.
+    #[test]
+    fn changing_the_theme_recolours_what_is_already_open() {
+        use crate::theme::{set_theme, theme_preset, ResolvedTheme};
+        let _g = THEME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let worst = |app: &mut App| {
+            let buf = render_buf(app, 100, 30);
+            let f = app.viewer_frame;
+            let mut w = f32::MAX;
+            let mut at = String::new();
+            for y in f.y + 1..f.y + f.height - 1 {
+                for x in f.x + 1..f.x + f.width - 1 {
+                    let c = &buf[(x, y)];
+                    if c.symbol().trim().is_empty() {
+                        continue;
+                    }
+                    let cr = crate::render::contrast_ratio(c.fg, c.bg);
+                    if cr < w {
+                        w = cr;
+                        at = format!("{:?} {:?} on {:?}", c.symbol(), c.fg, c.bg);
+                    }
+                }
+            }
+            (w, at)
+        };
+
+        for (from, to) in [("solarized-light", "solarized-dark"), ("dracula", "github-light")] {
+            set_theme(theme_preset(from).unwrap());
+            let d = tempfile::tempdir().unwrap();
+            std::fs::write(d.path().join("a.md"), "# Head\n\nPlain body text here.\n\n- listed\n")
+                .unwrap();
+            let p = d.path().to_path_buf();
+            let mut app = App::new(p.clone(), p, en_config()).unwrap();
+            let i = app
+                .active_pane()
+                .unwrap()
+                .entries
+                .iter()
+                .position(|e| e.name == "a.md")
+                .unwrap();
+            app.active_pane_mut().unwrap().cursor = i;
+            app.handle_key(code(KeyCode::Enter)).unwrap();
+            app.handle_key(code(KeyCode::F(12))).unwrap();
+            let (w, at) = worst(&mut app);
+            assert!(w >= 4.0, "{from}: {at} is {w:.2}:1");
+
+            // …and now the theme changes under it, which is the case.
+            set_theme(theme_preset(to).unwrap());
+            let (w, at) = worst(&mut app);
+            assert!(w >= 4.0, "{from} → {to}: {at} is {w:.2}:1");
+        }
+        set_theme(ResolvedTheme::DARK);
+    }
+
     /// A long prompt stays readable. The chat's input drew one row per typed
     /// line and let a long one run off the right-hand edge; the AI-command
     /// dialog sized its box from the unwrapped text and cut the rest off the

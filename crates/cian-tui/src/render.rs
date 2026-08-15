@@ -6116,7 +6116,7 @@ fn draw_viewer(
     let tabs = tab_names.len();
     let mut tab_rects: Vec<(Rect, usize)> = Vec::new();
     let mut close_rect = Rect::new(0, 0, 0, 0);
-    let Popup::Viewer { title, view, scroll, hscroll, line, col, visual, anchor, find_input, find_query, sub_input, sub_walk, block_input, git_lines, markdown, preview, source, md_styles, md_map, md_width, md_seek, editing, dirty, editable, hl, hl_lang, blame, shape, path, count, pending, .. } = popup else { return (tab_rects, close_rect) };
+    let Popup::Viewer { title, view, scroll, hscroll, line, col, visual, anchor, find_input, find_query, sub_input, sub_walk, block_input, git_lines, markdown, preview, source, md_styles, md_map, md_width, md_gen, md_seek, editing, dirty, editable, hl, hl_lang, blame, shape, path, count, pending, .. } = popup else { return (tab_rects, close_rect) };
     let rect = viewer_frame_rect_docked(area, docked);
     f.render_widget(Clear, rect);
 
@@ -6126,13 +6126,20 @@ fn draw_viewer(
     // — cursor, visual selection, `/` search, the mouse — then works over
     // whichever text is on screen.
     let inner_w = rect.width.saturating_sub(4).max(1);
+    let gen = crate::theme::theme_generation();
     if *preview {
-        if md_styles.is_empty() || *md_width != inner_w {
+        // Rebuilt when the width changes — and when the *theme* does. The
+        // grid holds colours, and a preview opened on a light theme kept its
+        // near-black text after `:theme` switched to a dark one: black on
+        // black, with only the headings and the code blocks (which carry a
+        // background of their own) still visible.
+        if md_styles.is_empty() || *md_width != inner_w || *md_gen != gen {
             let (plain, styles, map) = crate::markdown::render_styled(source, inner_w as usize);
             view.lines = plain;
             *md_styles = styles;
             *md_map = map;
             *md_width = inner_w;
+            *md_gen = gen;
         }
     } else if !md_styles.is_empty() {
         view.lines = source.clone();
@@ -6155,11 +6162,14 @@ fn draw_viewer(
     // or re-decode so it refreshes. Colours come from the per-char category.
     if !*preview && !*editing {
         if let Some(lang) = hl_lang {
-            if hl.is_empty() {
+            // Same as the preview's grid: these are colours, so a theme
+            // change makes them wrong rather than merely stale.
+            if hl.is_empty() || *md_gen != gen {
                 *hl = cian_core::highlight::highlight(&view.lines, *lang)
                     .into_iter()
                     .map(|cats| cats.into_iter().map(hl_style).collect())
                     .collect();
+                *md_gen = gen;
             }
         }
     }

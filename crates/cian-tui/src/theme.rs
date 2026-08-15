@@ -309,7 +309,24 @@ pub(crate) fn theme() -> ResolvedTheme {
 
 /// Swap the active theme (from `:theme`, the picker preview, or `:reload`).
 pub(crate) fn set_theme(t: ResolvedTheme) {
-    *THEME.write().unwrap_or_else(|e| e.into_inner()) = t;
+    let mut w = THEME.write().unwrap_or_else(|e| e.into_inner());
+    if *w != t {
+        THEME_GEN.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
+    *w = t;
+}
+
+/// Bumped whenever the theme actually changes.
+///
+/// Anything that caches *styles* rather than recomputing them each frame — the
+/// Markdown preview's grid, the syntax highlighter — has to know when the
+/// colours underneath it moved. Without this, a preview opened on a light
+/// theme kept its near-black text after `:theme` switched to a dark one, and
+/// the page went black on black.
+static THEME_GEN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+pub(crate) fn theme_generation() -> u64 {
+    THEME_GEN.load(std::sync::atomic::Ordering::Relaxed)
 }
 
 /// A concrete surface colour that follows the theme's light/dark identity —
