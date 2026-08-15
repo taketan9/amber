@@ -2840,6 +2840,12 @@ fn draw_preview_panel(f: &mut Frame, area: Rect, app: &mut App) {
                 app.preview_gfx = None;
                 if let (Ok(img), Some(picker)) = (image::open(&path), app.gfx_picker.as_ref()) {
                     app.preview_gfx = Some((path.clone(), picker.new_resize_protocol(img)));
+                    // Terminal graphics live outside the cell buffer, so the
+                    // frame that introduces one starts from a real clear —
+                    // the same reason taking a picture away needs one. It
+                    // also guarantees a second frame, which is what a
+                    // protocol that encodes on first sight needs to appear.
+                    app.full_clear = true;
                 }
             }
             if let Some((_, proto)) = app.preview_gfx.as_mut() {
@@ -2974,6 +2980,7 @@ fn draw_image_gfx(f: &mut Frame, rect: Rect, inner: Rect, app: &mut App) {
         app.img_proto = None;
         if let (Ok(img), Some(picker)) = (image::open(&path), app.gfx_picker.as_ref()) {
             app.img_proto = Some((path.clone(), picker.new_resize_protocol(img)));
+            app.full_clear = true;
         }
     }
     let caption = image::image_dimensions(&path)

@@ -343,9 +343,19 @@ impl App {
     /// Unanswerable from inside a session until it existed, and a cian left
     /// open across a rebuild looks exactly like a fix that did not work.
     pub(crate) fn show_version(&mut self) {
+        // What the terminal said it can do, because "images do not show" has
+        // two very different causes — a terminal that offered no picture
+        // protocol (half-blocks, and they should still appear) and one that
+        // offered a protocol that then draws nothing.
+        let gfx = match self.gfx_picker.as_ref() {
+            Some(p) => format!("{:?}", p.protocol_type()),
+            None => tr(self.lang, "half-blocks (no protocol offered)", "半角ブロック（プロトコルなし）")
+                .to_string(),
+        };
         self.popup = Popup::Notice {
             lines: vec![
                 crate::version_text(),
+                format!("{}: {}", tr(self.lang, "images", "画像"), gfx),
                 String::new(),
                 tr(
                     self.lang,
