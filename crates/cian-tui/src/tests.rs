@@ -1718,10 +1718,12 @@
         let rows = render(&mut app, 100, 30);
         assert!(rows.iter().any(|r| r.contains('✕')), "the button is drawn:\n{rows:?}");
 
-        // Esc says how to close rather than closing.
+        // Esc keeps the file, and says nothing: a count along the bottom of
+        // the window, raised by a key pressed in error, is noise on the one
+        // occasion it is least wanted.
         app.handle_key(code(KeyCode::Esc)).unwrap();
         assert!(matches!(app.popup, Popup::Viewer { .. }), "Esc kept the file");
-        assert!(app.message.as_deref().is_some_and(|m| m.contains(":q")), "{:?}", app.message);
+        assert!(app.message.is_none(), "and quietly: {:?}", app.message);
 
         // A click on the ✕ closes it.
         let x = app.viewer_close_rect;
@@ -11420,13 +11422,13 @@
         app.handle_key(code(KeyCode::Esc)).unwrap();
         assert!(matches!(&app.popup, Popup::Viewer { find_query: None, .. }), "Esc cleared the search");
 
-        // A second Esc does *not* close it — that is `:q`, as it is in vi —
-        // and it says so rather than doing nothing.
+        // A second Esc does *not* close it — that is `:q`, as it is in vi.
+        // A third does, for a hand that just wants it gone.
         app.handle_key(code(KeyCode::Esc)).unwrap();
         assert!(matches!(app.popup, Popup::Viewer { .. }), "Esc does not close the file");
         assert!(
-            app.message.as_deref().is_some_and(|m| m.contains(":q")),
-            "it says how: {:?}",
+            app.message.is_none(),
+            "and does not count out loud: {:?}",
             app.message,
         );
         for k in [':', 'q'] {

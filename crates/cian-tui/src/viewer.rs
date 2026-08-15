@@ -1009,21 +1009,15 @@ impl App {
     /// a file with unsaved edits in it is worth protecting from a stray
     /// keystroke. Three in a row is not a stray keystroke.
     pub(crate) fn viewer_way_out(&mut self, n: u8) {
+        // Silently: the presses in between say nothing. A running count along
+        // the bottom of the window, raised by a key pressed in error, is noise
+        // on the one occasion it is least wanted — and the ways out are in `?`
+        // and on the ✕ in the corner.
         self.viewer_escapes = self.viewer_escapes.saturating_add(1);
         if self.viewer_escapes >= n {
             self.viewer_escapes = 0;
             self.close_viewer_file();
-            return;
         }
-        // Counted down from the total, so the first message says how many it
-        // takes rather than how many are left after the one already pressed —
-        // "3, 2, 1" reads as a countdown, "2, 1" reads as a puzzle.
-        let left = n - self.viewer_escapes + 1;
-        self.message = Some(if self.lang == Lang::Ja {
-            format!(":q で閉じます（:q! で変更を破棄）— 同じキーをあと {left} 回でも閉じます")
-        } else {
-            format!(":q closes this file (:q! discards edits) — or the same key {left} more times")
-        });
     }
 
     /// Close the file being read — not the viewer.
