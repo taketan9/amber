@@ -4272,7 +4272,8 @@ pub(crate) fn viewer_manual_lines(lang: Lang) -> Vec<String> {
     const VIEW: &[Row] = &[
         ("Space  za  zA", "fold this section, toggle every fold", "この節を折りたたむ・全体を切替"),
         (":outline  :ruler", "the shape column, the column scale", "アウトライン列・ルーラー"),
-        (":version", "which build this is", "このビルドが何か"),
+        (":version", "which build this is, and what pictures use", "このビルドと画像の描画方式"),
+        (":gfx", "pictures: the terminal's protocol ↔ half-blocks", "画像: 端末のプロトコル ↔ 半角ブロック"),
         ("a long line", "the view follows the cursor sideways; the bars on the frame say how much is off screen", "長い行は横スクロールで追従。枠のバーが画面外の量を示します"),
         (":ws", "show tabs, trailing spaces, line endings", "タブ・行末空白・改行を表示"),
         (":preview", "rendered Markdown ↔ source", "Markdown 表示 ↔ ソース"),
@@ -4641,7 +4642,13 @@ pub fn run(left: Option<PathBuf>, right: Option<PathBuf>, startup: StartupMacro)
     // caching, so the picker is only kept when it buys actual pixels.
     app.gfx_picker = ratatui_image::picker::Picker::from_query_stdio()
         .ok()
-        .filter(|p| p.protocol_type() != ratatui_image::picker::ProtocolType::Halfblocks);
+        .filter(|p| p.protocol_type() != ratatui_image::picker::ProtocolType::Halfblocks)
+        // A terminal can advertise a protocol and then draw nothing with it —
+        // the escape sequences leave through the same pipe as everything
+        // else, and anything in the way is invisible from in here. `:gfx`
+        // turns the offer down and takes the half-block renderer, which is a
+        // worse picture and always a picture.
+        .filter(|_| state_get("images") .as_deref() != Some("blocks"));
 
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;

@@ -64,6 +64,9 @@ impl App {
             "copyto" => self.start_dest_picker(PendingOp::Copy),
             "moveto" => self.start_dest_picker(PendingOp::Move),
             "version" | "about" => self.show_version(),
+            // Pixels or half-blocks, for a terminal that offers a picture
+            // protocol and then does not draw with it.
+            "gfx" | "images" => self.toggle_image_protocol(),
             "grep" => self.start_grep_prompt(),
             // A blank file in this pane, with no name until `:w <name>`.
             "new" | "scratch" => self.open_scratch_viewer(),

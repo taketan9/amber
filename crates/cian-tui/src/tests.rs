@@ -2936,6 +2936,48 @@
         set_theme(ResolvedTheme::DARK);
     }
 
+    /// `:gfx` turns the terminal's picture protocol down and takes the
+    /// half-block renderer — the way out when a terminal advertises a
+    /// protocol and then draws nothing with it.
+    #[test]
+    fn gfx_falls_back_to_half_blocks_and_is_remembered() {
+        let dir = tempfile::tempdir().unwrap();
+        image::RgbImage::from_pixel(8, 8, image::Rgb([200, 40, 40]))
+            .save(dir.path().join("shot.png"))
+            .unwrap();
+        let p = dir.path().to_path_buf();
+        let mut app = App::new(p.clone(), p, en_config()).unwrap();
+        let i = app
+            .active_pane()
+            .unwrap()
+            .entries
+            .iter()
+            .position(|e| e.name == "shot.png")
+            .unwrap();
+        app.active_pane_mut().unwrap().cursor = i;
+
+        // Whatever the terminal offered, the picture draws.
+        let painted = |app: &mut App| {
+            let buf = render_buf(app, 100, 30);
+            let sh = app.layout_rects.shell;
+            (sh.y + 1..sh.y + sh.height - 1)
+                .flat_map(|y| (sh.x + 1..sh.x + sh.width - 1).map(move |x| (x, y)))
+                .filter(|(x, y)| !buf[(*x, *y)].symbol().trim().is_empty())
+                .count()
+        };
+        assert!(painted(&mut app) > 20, "a picture to begin with");
+
+        app.command_buffer = "gfx".into();
+        app.run_command();
+        assert!(app.gfx_picker.is_none(), "the offer was turned down");
+        assert!(
+            app.message.as_deref().is_some_and(|m| m.contains("half-block") || m.contains("半角")),
+            "and it says so: {:?}",
+            app.message,
+        );
+        assert!(painted(&mut app) > 20, "and there is still a picture");
+    }
+
     /// A long prompt stays readable. The chat's input drew one row per typed
     /// line and let a long one run off the right-hand edge; the AI-command
     /// dialog sized its box from the unwrapped text and cut the rest off the

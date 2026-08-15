@@ -338,6 +338,40 @@ impl App {
         }
     }
 
+    /// `:gfx` — draw pictures with the terminal's own protocol, or with
+    /// half-blocks.
+    ///
+    /// A terminal can advertise a protocol and then show nothing: the escape
+    /// sequences go out through the same pipe as the rest of the drawing, and
+    /// whatever swallowed them is invisible from in here. Rather than leave
+    /// someone with no pictures at all, this turns the offer down. Remembered
+    /// between sessions, since a terminal that did it once will do it again.
+    pub(crate) fn toggle_image_protocol(&mut self) {
+        let blocks = self.gfx_picker.is_some();
+        state_set("images", if blocks { "blocks" } else { "auto" });
+        if blocks {
+            self.gfx_picker = None;
+        } else {
+            self.gfx_picker = ratatui_image::picker::Picker::from_query_stdio()
+                .ok()
+                .filter(|p| {
+                    p.protocol_type() != ratatui_image::picker::ProtocolType::Halfblocks
+                });
+        }
+        self.gfx_failed = false;
+        self.preview_gfx = None;
+        self.img_proto = None;
+        self.full_clear = true;
+        self.message = Some(match self.gfx_picker.as_ref() {
+            Some(p) => format!(
+                "{} — {:?}",
+                tr(self.lang, "pictures: the terminal's protocol", "画像: 端末のプロトコル"),
+                p.protocol_type()
+            ),
+            None => tr(self.lang, "pictures: half-blocks", "画像: 半角ブロック").into(),
+        });
+    }
+
     /// `:version` — which build is running.
     ///
     /// Unanswerable from inside a session until it existed, and a cian left
