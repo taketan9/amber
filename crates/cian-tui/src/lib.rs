@@ -4390,6 +4390,37 @@ pub fn manual_text() -> String {
     manual_lines(&keymap, lang).join("\n")
 }
 
+/// The picture renderer for `how`: the terminal's answer (`auto`), a named
+/// protocol, or none at all (`blocks`).
+///
+/// A terminal can be wrong about itself — iTerm2 answering the kitty query
+/// and then drawing nothing — so naming one is a step away rather than a
+/// config file away. `None` means the half-block renderer, which is a worse
+/// picture and always a picture.
+pub(crate) fn image_picker(how: &str) -> Option<ratatui_image::picker::Picker> {
+    use ratatui_image::picker::{Picker, ProtocolType as P};
+    if how == "blocks" {
+        return None;
+    }
+    let named = match how {
+        "iterm2" => Some(P::Iterm2),
+        "kitty" => Some(P::Kitty),
+        "sixel" => Some(P::Sixel),
+        _ => None,
+    };
+    // The query is what knows the font size, which every protocol needs to
+    // size a picture in cells — so it runs even when the protocol is named.
+    let mut picker = Picker::from_query_stdio().ok()?;
+    match named {
+        Some(p) => picker.set_protocol_type(p),
+        // Half-blocks as the terminal's answer means "no": cian's own cell
+        // renderer already does that, with caching.
+        None if picker.protocol_type() == P::Halfblocks => return None,
+        None => {}
+    }
+    Some(picker)
+}
+
 /// Version line for `cian --version`.
 ///
 /// Includes the commit because "which build am I running?" is otherwise
@@ -4640,15 +4671,7 @@ pub fn run(left: Option<PathBuf>, right: Option<PathBuf>, startup: StartupMacro)
     // read — per ratatui-image's contract. Halfblocks (the answer everywhere
     // else) means "no": cian's own cell renderer already does that, with
     // caching, so the picker is only kept when it buys actual pixels.
-    app.gfx_picker = ratatui_image::picker::Picker::from_query_stdio()
-        .ok()
-        .filter(|p| p.protocol_type() != ratatui_image::picker::ProtocolType::Halfblocks)
-        // A terminal can advertise a protocol and then draw nothing with it —
-        // the escape sequences leave through the same pipe as everything
-        // else, and anything in the way is invisible from in here. `:gfx`
-        // turns the offer down and takes the half-block renderer, which is a
-        // worse picture and always a picture.
-        .filter(|_| state_get("images") .as_deref() != Some("blocks"));
+    app.gfx_picker = image_picker(state_get("images").as_deref().unwrap_or("auto"));
 
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;

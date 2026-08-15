@@ -2936,11 +2936,10 @@
         set_theme(ResolvedTheme::DARK);
     }
 
-    /// `:gfx` turns the terminal's picture protocol down and takes the
-    /// half-block renderer — the way out when a terminal advertises a
-    /// protocol and then draws nothing with it.
+    /// `:gfx` steps through the ways of drawing a picture — the way out when
+    /// a terminal advertises a protocol and then draws nothing with it.
     #[test]
-    fn gfx_falls_back_to_half_blocks_and_is_remembered() {
+    fn gfx_walks_the_ways_of_drawing_a_picture() {
         let dir = tempfile::tempdir().unwrap();
         image::RgbImage::from_pixel(8, 8, image::Rgb([200, 40, 40]))
             .save(dir.path().join("shot.png"))
@@ -2967,15 +2966,28 @@
         };
         assert!(painted(&mut app) > 20, "a picture to begin with");
 
-        app.command_buffer = "gfx".into();
-        app.run_command();
-        assert!(app.gfx_picker.is_none(), "the offer was turned down");
+        // `:gfx` walks the ways of drawing one: auto → iterm2 → kitty →
+        // sixel → half-blocks → auto. A terminal can be wrong about itself,
+        // so naming a protocol is one keystroke away.
+        //
+        // The choice is remembered in the real state file, which belongs to
+        // whoever is running the tests — so it is put back afterwards.
+        let before = crate::state_get("images");
+        let mut seen = Vec::new();
+        for _ in 0..5 {
+            app.command_buffer = "gfx".into();
+            app.run_command();
+            seen.push(app.message.clone().unwrap_or_default());
+            // Whichever it lands on, a picture is drawn: with no terminal
+            // protocol here, every step falls back to half-blocks.
+            assert!(painted(&mut app) > 20, "still a picture: {:?}", app.message);
+        }
+        crate::state_set("images", before.as_deref().unwrap_or("auto"));
+        assert_eq!(seen.len(), 5);
         assert!(
-            app.message.as_deref().is_some_and(|m| m.contains("half-block") || m.contains("半角")),
-            "and it says so: {:?}",
-            app.message,
+            seen.iter().any(|m| m.contains("half-block") || m.contains("半角")),
+            "half-blocks are one of the stops: {seen:?}",
         );
-        assert!(painted(&mut app) > 20, "and there is still a picture");
     }
 
     /// A long prompt stays readable. The chat's input drew one row per typed
@@ -10098,7 +10110,7 @@
     /// the picture stays on screen over the next file — which looked exactly
     /// like "the file after a png has no preview".
     #[test]
-    fn leaving_an_image_preview_asks_for_a_clear() {
+    fn leaving_an_image_preview_clears_only_when_it_drew_pixels() {
         let d = tempfile::tempdir().unwrap();
         // A real 2x2 PNG, plus a text file to move onto.
         let png: &[u8] = &[0x89,0x50,0x4E,0x47,0x0D,0x0A,0x1A,0x0A,0,0,0,0x0D,0x49,0x48,0x44,0x52,
@@ -10118,20 +10130,21 @@
         let _ = render(&mut app, 100, 30);
         app.full_clear = false; // ignore anything the first frame asked for
 
-        // Onto the text file: the loop must be told to wipe first.
+        // Onto the text file. A wipe is only owed when the picture was drawn
+        // with the terminal's own protocol — those pixels are not in the cell
+        // buffer ratatui diffs against. Half-blocks are ordinary cells, and
+        // wiping for them costs a full repaint of the window on every step
+        // through a folder of images, which showed as a black flash.
         go(&mut app, "after.txt");
         let out = render(&mut app, 100, 30).join("\n");
-        assert!(app.full_clear, "leaving an image requests a clear");
+        assert_eq!(
+            app.full_clear,
+            app.gfx_picker.is_some(),
+            "a wipe only when pixels were drawn",
+        );
         assert!(out.contains("plain text after"), "and the text is drawn: {out}");
 
-        // Text to text costs nothing.
-        app.full_clear = false;
-        go(&mut app, "pic.png");
-        let _ = render(&mut app, 100, 30);
-        app.full_clear = false;
-        go(&mut app, "after.txt");
-        let _ = render(&mut app, 100, 30);
-        assert!(app.full_clear);
+        // A steady text preview asks for nothing at all.
         app.full_clear = false;
         let _ = render(&mut app, 100, 30);
         assert!(!app.full_clear, "a steady text preview asks for no clears");

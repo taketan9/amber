@@ -69,7 +69,14 @@ impl App {
         // terminal is wiped: the graphics layer is not part of the cell buffer
         // ratatui diffs against. This is why the file *after* a picture looked
         // like it had no preview at all.
-        if matches!(self.preview.as_ref().map(|p| &p.body), Some(PreviewBody::Image)) {
+        //
+        // Only when a picture was actually drawn that way. Half-blocks are
+        // ordinary cells and ratatui's diff clears them like any other — the
+        // wipe there costs a full repaint of the whole window, on every step
+        // through a folder of images, and shows as a black flash.
+        if self.preview_gfx.is_some()
+            && matches!(self.preview.as_ref().map(|p| &p.body), Some(PreviewBody::Image))
+        {
             self.full_clear = true;
         }
         // A different image invalidates the protocol state too.

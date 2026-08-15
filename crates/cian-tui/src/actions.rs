@@ -347,28 +347,35 @@ impl App {
     /// someone with no pictures at all, this turns the offer down. Remembered
     /// between sessions, since a terminal that did it once will do it again.
     pub(crate) fn toggle_image_protocol(&mut self) {
-        let blocks = self.gfx_picker.is_some();
-        state_set("images", if blocks { "blocks" } else { "auto" });
-        if blocks {
-            self.gfx_picker = None;
-        } else {
-            self.gfx_picker = ratatui_image::picker::Picker::from_query_stdio()
-                .ok()
-                .filter(|p| {
-                    p.protocol_type() != ratatui_image::picker::ProtocolType::Halfblocks
-                });
-        }
+        // auto → iterm2 → kitty → sixel → half-blocks → auto. A terminal can
+        // be wrong about itself: iTerm2 answering the kitty query and then
+        // drawing nothing is what this is for, and its own protocol is one
+        // step away rather than a config file away.
+        let next = match state_get("images").as_deref() {
+            None | Some("auto") => "iterm2",
+            Some("iterm2") => "kitty",
+            Some("kitty") => "sixel",
+            Some("sixel") => "blocks",
+            _ => "auto",
+        };
+        state_set("images", next);
+        self.gfx_picker = image_picker(next);
         self.gfx_failed = false;
         self.preview_gfx = None;
         self.img_proto = None;
         self.full_clear = true;
         self.message = Some(match self.gfx_picker.as_ref() {
             Some(p) => format!(
-                "{} — {:?}",
-                tr(self.lang, "pictures: the terminal's protocol", "画像: 端末のプロトコル"),
-                p.protocol_type()
+                "{} {:?} ({})",
+                tr(self.lang, "pictures:", "画像:"),
+                p.protocol_type(),
+                tr(self.lang, ":gfx for the next one", ":gfx で次の方式へ"),
             ),
-            None => tr(self.lang, "pictures: half-blocks", "画像: 半角ブロック").into(),
+            None => format!(
+                "{} ({})",
+                tr(self.lang, "pictures: half-blocks", "画像: 半角ブロック"),
+                tr(self.lang, ":gfx for the next one", ":gfx で次の方式へ"),
+            ),
         });
     }
 
