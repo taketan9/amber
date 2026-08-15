@@ -2813,6 +2813,55 @@
         set_theme(ResolvedTheme::DARK);
     }
 
+    /// Every dark preset draws a readable Markdown preview — measured off the
+    /// screen, with the content that raised it: Japanese paragraphs, headings
+    /// with rules under them, inline code, links and a list.
+    #[test]
+    fn the_preview_reads_on_the_dark_presets_too() {
+        use crate::theme::{set_theme, theme_preset, ResolvedTheme};
+        let _g = THEME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let md = "# Change Log\n\nAll notable changes to the \"crmaine\" extension will be documented.\n\n                  ## [Unreleased]\n\n## 0.6.5 — 外部システム参照\n\n                  RAG・Agent が「社内資料を読む」だけでなく、サーバ・実DB を見に行けるようにした版。\n\n                  ### 新機能: 外部システムの参照\n\n- サーバ参照（SSH）: `crmaine.servers` を設定すると\n\n> 引用\n";
+        for name in ["solarized-dark", "nord", "tokyo-night", "dracula", "gruvbox-dark", "monokai-pro"] {
+            set_theme(theme_preset(name).unwrap());
+            let d = tempfile::tempdir().unwrap();
+            std::fs::write(d.path().join("a.md"), md).unwrap();
+            let p = d.path().to_path_buf();
+            let mut app = App::new(p.clone(), p, en_config()).unwrap();
+            let i = app
+                .active_pane()
+                .unwrap()
+                .entries
+                .iter()
+                .position(|e| e.name == "a.md")
+                .unwrap();
+            app.active_pane_mut().unwrap().cursor = i;
+            app.handle_key(code(KeyCode::Enter)).unwrap();
+            app.handle_key(code(KeyCode::F(12))).unwrap();
+            let buf = render_buf(&mut app, 110, 34);
+            let f = app.viewer_frame;
+            // The style grid has to cover every character; one that falls off
+            // the end is drawn with no colour at all, which on some terminals
+            // is indistinguishable from the background.
+            if let Popup::Viewer { view, md_styles, .. } = &app.popup {
+                for (i, l) in view.lines.iter().enumerate() {
+                    let got = md_styles.get(i).map(|r| r.len()).unwrap_or(0);
+                    assert!(got >= l.chars().count(), "{name}: row {i} has {got} styles for {} chars", l.chars().count());
+                }
+            }
+            for y in f.y + 1..f.y + f.height - 1 {
+                for x in f.x + 1..f.x + f.width - 1 {
+                    let c = &buf[(x, y)];
+                    if c.symbol().trim().is_empty() {
+                        continue;
+                    }
+                    let cr = crate::render::contrast_ratio(c.fg, c.bg);
+                    assert!(cr >= 3.0, "{name}: {:?} {:?} on {:?} is {cr:.2}:1", c.symbol(), c.fg, c.bg);
+                }
+            }
+        }
+        set_theme(ResolvedTheme::DARK);
+    }
+
     /// A long prompt stays readable. The chat's input drew one row per typed
     /// line and let a long one run off the right-hand edge; the AI-command
     /// dialog sized its box from the unwrapped text and cut the rest off the

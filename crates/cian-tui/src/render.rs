@@ -6024,11 +6024,19 @@ fn draw_outline_column(
 
 /// Pull a colour back towards the background, for the entries that are not
 /// the current one — the same hue, so the kind is still readable at a glance.
+/// The quieter form of an outline colour: the same hue, mixed toward the page
+/// it is written on, then pulled back if that took it too close to read.
+///
+/// It used to halve each channel toward a fixed mid-grey, which is a dark
+/// theme's answer — on Nord it landed at 3.0:1 and on a light theme it went
+/// the wrong way entirely.
 fn dim_of(c: Color) -> Color {
-    match c {
-        Color::Rgb(r, g, b) => Color::Rgb(r / 2 + 30, g / 2 + 30, b / 2 + 35),
-        other => other,
-    }
+    let bg = surface();
+    let (Color::Rgb(r, g, b), Color::Rgb(br, bg_, bb)) = (as_rgb(c), as_rgb(bg)) else {
+        return c;
+    };
+    let mix = |a: u8, b: u8| ((a as u16 * 11 + b as u16 * 9) / 20) as u8;
+    text_tone(Color::Rgb(mix(r, br), mix(g, bg_), mix(b, bb)), bg)
 }
 
 

@@ -4268,6 +4268,7 @@ pub(crate) fn viewer_manual_lines(lang: Lang) -> Vec<String> {
     const VIEW: &[Row] = &[
         ("Space  za  zA", "fold this section, toggle every fold", "この節を折りたたむ・全体を切替"),
         (":outline  :ruler", "the shape column, the column scale", "アウトライン列・ルーラー"),
+        (":version", "which build this is", "このビルドが何か"),
         ("a long line", "the view follows the cursor sideways; the bars on the frame say how much is off screen", "長い行は横スクロールで追従。枠のバーが画面外の量を示します"),
         (":ws", "show tabs, trailing spaces, line endings", "タブ・行末空白・改行を表示"),
         (":preview", "rendered Markdown ↔ source", "Markdown 表示 ↔ ソース"),
