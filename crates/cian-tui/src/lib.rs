@@ -2330,6 +2330,9 @@ pub struct App {
     /// `r` waiting for the character to stamp in, with the count it was given
     /// (`3rx` overwrites three).
     vim_replace: Option<usize>,
+    /// A heavy preview waiting for the cursor to settle: what it is for, and
+    /// when it was first asked for.
+    preview_wanted: Option<(PathBuf, std::time::Instant)>,
     /// The scrollbars on screen, for the mouse to grab.
     scroll_tracks: Vec<ScrollTrack>,
     /// The bar being dragged, so the pointer keeps it after leaving the track.
@@ -2665,6 +2668,7 @@ impl App {
             vim_wait: None,
             vim_last_find: None,
             vim_replace: None,
+            preview_wanted: None,
             scroll_tracks: Vec::new(),
             scroll_drag: None,
             viewer_escapes: 0,
@@ -4853,6 +4857,12 @@ fn run_loop<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Result<()>
         }
         // Repaint when any pane in the active shell tab produced new output.
         if app.shell.take_active_tab_dirty() {
+            needs_redraw = true;
+        }
+        // A heavy preview waiting for the cursor to settle needs a frame to
+        // arrive once it has — otherwise it waits for the next keystroke,
+        // which is exactly the one that moves off it again.
+        if app.preview_wanted.is_some() {
             needs_redraw = true;
         }
         // While a pane is recording, keep the frame alive so its carmine

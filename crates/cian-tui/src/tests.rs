@@ -2661,7 +2661,7 @@
         app.active_pane_mut().unwrap().cursor = i;
         assert!(crate::preview::preview_target(&app).is_ok(), "an image is previewable");
 
-        let buf = render_buf(&mut app, 100, 30);
+        let buf = settled(&mut app, 100, 30);
         let sh = app.layout_rects.shell;
         let painted = (sh.y + 1..sh.y + sh.height - 1)
             .flat_map(|y| (sh.x + 1..sh.x + sh.width - 1).map(move |x| (x, y)))
@@ -2936,6 +2936,58 @@
         set_theme(ResolvedTheme::DARK);
     }
 
+    /// Draw, wait out the settle a heavy preview asks for, and draw again —
+    /// what holding still in front of one actually does.
+    fn settled(app: &mut App, w: u16, h: u16) -> ratatui::buffer::Buffer {
+        let _ = render_buf(app, w, h);
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        render_buf(app, w, h)
+    }
+
+    /// A heavy file is read once the cursor stops on it, not on the way past.
+    /// Reading happens mid-frame, so a slow decode is time taken out of the
+    /// interface — holding an arrow key down a folder of photographs used to
+    /// decode every one of them in turn.
+    #[test]
+    fn a_heavy_preview_waits_for_the_cursor_to_settle() {
+        let dir = tempfile::tempdir().unwrap();
+        // Big enough to count as heavy, and a picture besides.
+        image::RgbImage::from_pixel(400, 400, image::Rgb([90, 140, 200]))
+            .save(dir.path().join("big.png"))
+            .unwrap();
+        std::fs::write(dir.path().join("small.txt"), b"plain and quick\n").unwrap();
+        let p = dir.path().to_path_buf();
+        let mut app = App::new(p.clone(), p, en_config()).unwrap();
+        let go = |app: &mut App, name: &str| {
+            let pane = app.active_pane_mut().unwrap();
+            pane.cursor = pane.entries.iter().position(|e| e.name == name).unwrap();
+        };
+
+        // A small text file is read at once, as it always was.
+        go(&mut app, "small.txt");
+        let out = render(&mut app, 100, 30).join("\n");
+        assert!(out.contains("plain and quick"), "read straight away:\n{out}");
+
+        // The picture is not — the first frame after moving onto it leaves it
+        // alone, and asks for another frame so it is not waiting on a key.
+        go(&mut app, "big.png");
+        let _ = render(&mut app, 100, 30);
+        assert!(app.preview_wanted.is_some(), "waiting for the cursor to settle");
+        assert!(
+            app.preview.as_ref().map(|p| p.path.ends_with("big.png")) != Some(true),
+            "and has not read it yet",
+        );
+
+        // …and once it has settled, it is read.
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        let _ = render(&mut app, 100, 30);
+        assert!(app.preview_wanted.is_none(), "the wait is over");
+        assert!(
+            app.preview.as_ref().map(|p| p.path.ends_with("big.png")) == Some(true),
+            "and the picture is the preview now",
+        );
+    }
+
     /// `:gfx` steps through the ways of drawing a picture — the way out when
     /// a terminal advertises a protocol and then draws nothing with it.
     #[test]
@@ -2957,7 +3009,7 @@
 
         // Whatever the terminal offered, the picture draws.
         let painted = |app: &mut App| {
-            let buf = render_buf(app, 100, 30);
+            let buf = settled(app, 100, 30);
             let sh = app.layout_rects.shell;
             (sh.y + 1..sh.y + sh.height - 1)
                 .flat_map(|y| (sh.x + 1..sh.x + sh.width - 1).map(move |x| (x, y)))

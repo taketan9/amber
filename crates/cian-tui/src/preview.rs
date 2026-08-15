@@ -29,6 +29,23 @@ pub(crate) enum PreviewBody {
     Note(String),
 }
 
+/// How long the cursor rests on a heavy file before it is read.
+///
+/// Short enough not to be felt when landing on one deliberately, long enough
+/// that holding a key down a folder never reads any of them.
+const PREVIEW_SETTLE: std::time::Duration = std::time::Duration::from_millis(140);
+
+/// Is reading this worth waiting for the cursor to settle?
+///
+/// By what it costs, not what it is: a picture is decoded whole before a
+/// thumbnail of it exists, and anything of a few megabytes is read the same
+/// way. A small text file is neither.
+fn heavy(path: &Path) -> bool {
+    const BIG: u64 = 1 << 20;
+    let big = std::fs::metadata(path).map(|m| m.len() >= BIG).unwrap_or(false);
+    big || cian_core::image::is_image(path)
+}
+
 pub(crate) struct PreviewState {
     pub path: PathBuf,
     pub body: PreviewBody,
@@ -76,8 +93,32 @@ impl App {
     /// Called from the render pass, so it must stay cheap on the cached path.
     pub(crate) fn ensure_preview(&mut self, path: &Path) {
         if self.preview.as_ref().map(|p| p.path == *path).unwrap_or(false) {
+            self.preview_wanted = None;
             return;
         }
+        // Reading it happens here, in the middle of drawing a frame — so a
+        // file that takes a moment to decode takes that moment out of the
+        // interface. Holding an arrow key down a folder of photographs meant
+        // decoding every one of them on the way past.
+        //
+        // Only the heavy ones wait: an ordinary file is read and shown at
+        // once, as it always was, and something big enough to be felt is read
+        // when the cursor has stopped on it.
+        if heavy(path) {
+            let now = std::time::Instant::now();
+            match &self.preview_wanted {
+                Some((p, since)) if p == path => {
+                    if now.duration_since(*since) < PREVIEW_SETTLE {
+                        return;
+                    }
+                }
+                _ => {
+                    self.preview_wanted = Some((path.to_path_buf(), now));
+                    return;
+                }
+            }
+        }
+        self.preview_wanted = None;
         // Moving off an image leaves its pixels stuck on screen unless the
         // terminal is wiped: the graphics layer is not part of the cell buffer
         // ratatui diffs against. This is why the file *after* a picture looked
