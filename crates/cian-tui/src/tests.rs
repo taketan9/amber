@@ -2762,6 +2762,57 @@
         assert!(bad.is_empty(), "{} unreadable:\n{}", bad.len(), bad.join("\n"));
     }
 
+    /// The preview as it is actually painted, not as its style grid describes
+    /// itself: body text against the surface it lands on, under a light theme
+    /// and a dark one. The grid was measured before and passed while the
+    /// screen was still wrong, because nothing checked the two together.
+    #[test]
+    fn the_painted_markdown_reads_on_light_and_dark() {
+        use crate::theme::{set_theme, theme_preset, ResolvedTheme};
+        let _g = THEME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        for name in ["solarized-light", "dracula", "github-light", "tokyo-night"] {
+            set_theme(theme_preset(name).unwrap());
+            let d = tempfile::tempdir().unwrap();
+            std::fs::write(
+                d.path().join("a.md"),
+                "# Heading\n\nSome plain body text here.\n\n> quoted\n\n- listed\n",
+            )
+            .unwrap();
+            let p = d.path().to_path_buf();
+            let mut app = App::new(p.clone(), p, en_config()).unwrap();
+            let i = app
+                .active_pane()
+                .unwrap()
+                .entries
+                .iter()
+                .position(|e| e.name == "a.md")
+                .unwrap();
+            app.active_pane_mut().unwrap().cursor = i;
+            app.handle_key(code(KeyCode::Enter)).unwrap();
+            app.handle_key(code(KeyCode::F(12))).unwrap();
+            let buf = render_buf(&mut app, 100, 30);
+            let f = app.viewer_frame;
+            let mut worst = f32::MAX;
+            let mut worst_at = String::new();
+            for y in f.y + 1..f.y + f.height - 1 {
+                for x in f.x + 1..f.x + f.width - 1 {
+                    let c = &buf[(x, y)];
+                    if !c.symbol().chars().all(char::is_alphanumeric) || c.symbol().trim().is_empty()
+                    {
+                        continue;
+                    }
+                    let cr = crate::render::contrast_ratio(c.fg, c.bg);
+                    if cr < worst {
+                        worst = cr;
+                        worst_at = format!("{:?} {:?} on {:?}", c.symbol(), c.fg, c.bg);
+                    }
+                }
+            }
+            assert!(worst >= 4.0, "{name}: {worst_at} is {worst:.2}:1");
+        }
+        set_theme(ResolvedTheme::DARK);
+    }
+
     /// A long prompt stays readable. The chat's input drew one row per typed
     /// line and let a long one run off the right-hand edge; the AI-command
     /// dialog sized its box from the unwrapped text and cut the rest off the

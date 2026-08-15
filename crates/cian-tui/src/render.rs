@@ -5994,12 +5994,18 @@ fn draw_outline_column(
     for (row, (i, item)) in items.iter().enumerate().skip(top).take(h).enumerate() {
         let y = area.y + row as u16;
         let cur = here == Some(i);
-        let colour = match item.kind {
-            Kind::Heading => Color::Rgb(150, 190, 250),
-            Kind::Type => Color::Rgb(230, 200, 140),
-            Kind::Function => Color::Rgb(170, 220, 175),
-            Kind::Section => Color::Rgb(190, 175, 220),
-        };
+        // Four colours that say what a thing is, each pulled onto the page
+        // it is written on — they were picked against a dark ground, where a
+        // pale blue heading reads and on cream is barely there.
+        let colour = text_tone(
+            match item.kind {
+                Kind::Heading => Color::Rgb(150, 190, 250),
+                Kind::Type => Color::Rgb(230, 200, 140),
+                Kind::Function => Color::Rgb(170, 220, 175),
+                Kind::Section => Color::Rgb(190, 175, 220),
+            },
+            surface(),
+        );
         let indent = "  ".repeat(item.level.min(4));
         let text = format!("{indent}{}", item.text);
         let mut style = Style::default().fg(if cur { colour } else { dim_of(colour) });
