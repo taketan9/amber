@@ -410,10 +410,10 @@ pub(crate) fn draw(f: &mut Frame, app: &mut App) {
         draw_image(f, area, app);
         return;
     }
-    // The F3 image popup closed: drop its protocol state, and wipe the
-    // terminal once so the picture does not linger over whatever is now
-    // underneath (see `App::full_clear`).
-    if app.img_proto.take().is_some() {
+    // The F3 image popup closed: drop its protocol state, and — for a
+    // protocol whose pictures outlive the cells under them — wipe the
+    // terminal once so it does not linger over what is now underneath.
+    if app.img_proto.take().is_some() && app.needs_clear_after_image() {
         app.full_clear = true;
     }
     if matches!(app.popup, Popup::CommitMessage { .. }) {

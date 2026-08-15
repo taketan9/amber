@@ -37,11 +37,24 @@ pub(crate) struct PreviewState {
 }
 
 impl App {
+    /// Does a picture drawn by the current protocol survive the cells under
+    /// it being redrawn?
+    ///
+    /// Kitty places graphics over the grid and keeps them until told
+    /// otherwise; iTerm2 writes them as cell content, and half-blocks *are*
+    /// cells. Only the first needs the screen wiped when a picture goes away.
+    pub(crate) fn needs_clear_after_image(&self) -> bool {
+        use ratatui_image::picker::ProtocolType as P;
+        self.gfx_picker
+            .as_ref()
+            .is_some_and(|p| matches!(p.protocol_type(), P::Kitty | P::Sixel))
+    }
+
     /// `:preview` — flip the cursor-follow preview.
     pub(crate) fn toggle_preview(&mut self) {
         self.preview_on = !self.preview_on;
         if !self.preview_on {
-            if self.preview_gfx.is_some() {
+            if self.preview_gfx.is_some() && self.needs_clear_after_image() {
                 self.full_clear = true;
             }
             self.preview = None;
@@ -70,11 +83,16 @@ impl App {
         // ratatui diffs against. This is why the file *after* a picture looked
         // like it had no preview at all.
         //
-        // Only when a picture was actually drawn that way. Half-blocks are
-        // ordinary cells and ratatui's diff clears them like any other — the
-        // wipe there costs a full repaint of the whole window, on every step
-        // through a folder of images, and shows as a black flash.
-        if self.preview_gfx.is_some()
+        // Only when the protocol in use actually leaves something behind.
+        // Half-blocks are ordinary cells, and iTerm2's inline images are cell
+        // content too — both are cleared by redrawing those cells, which
+        // ratatui's diff already does. Kitty's are placed *over* the grid and
+        // stay until they are deleted, so those need the wipe.
+        //
+        // Wiping regardless cost a full repaint of the whole window on every
+        // step through a folder of images: the black flash, and most of the
+        // wait before the next picture appeared.
+        if self.needs_clear_after_image()
             && matches!(self.preview.as_ref().map(|p| &p.body), Some(PreviewBody::Image))
         {
             self.full_clear = true;
