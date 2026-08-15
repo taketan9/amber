@@ -2813,15 +2813,19 @@
         set_theme(ResolvedTheme::DARK);
     }
 
-    /// Every dark preset draws a readable Markdown preview — measured off the
+    /// Every preset draws a readable Markdown preview — measured off the
     /// screen, with the content that raised it: Japanese paragraphs, headings
     /// with rules under them, inline code, links and a list.
     #[test]
-    fn the_preview_reads_on_the_dark_presets_too() {
+    fn the_preview_reads_on_every_preset() {
         use crate::theme::{set_theme, theme_preset, ResolvedTheme};
         let _g = THEME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let md = "# Change Log\n\nAll notable changes to the \"crmaine\" extension will be documented.\n\n                  ## [Unreleased]\n\n## 0.6.5 — 外部システム参照\n\n                  RAG・Agent が「社内資料を読む」だけでなく、サーバ・実DB を見に行けるようにした版。\n\n                  ### 新機能: 外部システムの参照\n\n- サーバ参照（SSH）: `crmaine.servers` を設定すると\n\n> 引用\n";
-        for name in ["solarized-dark", "nord", "tokyo-night", "dracula", "gruvbox-dark", "monokai-pro"] {
+        for name in [
+            "solarized-dark", "nord", "tokyo-night", "dracula", "gruvbox-dark", "monokai-pro",
+            "solarized-light", "github-light", "ayu-light", "bluloco-light", "gruvbox-light",
+            "catppuccin-latte",
+        ] {
             set_theme(theme_preset(name).unwrap());
             let d = tempfile::tempdir().unwrap();
             std::fs::write(d.path().join("a.md"), md).unwrap();
@@ -2848,6 +2852,8 @@
                     assert!(got >= l.chars().count(), "{name}: row {i} has {got} styles for {} chars", l.chars().count());
                 }
             }
+            let mut worst = f32::MAX;
+            let mut at = String::new();
             for y in f.y + 1..f.y + f.height - 1 {
                 for x in f.x + 1..f.x + f.width - 1 {
                     let c = &buf[(x, y)];
@@ -2855,9 +2861,15 @@
                         continue;
                     }
                     let cr = crate::render::contrast_ratio(c.fg, c.bg);
-                    assert!(cr >= 3.0, "{name}: {:?} {:?} on {:?} is {cr:.2}:1", c.symbol(), c.fg, c.bg);
+                    if cr < worst {
+                        worst = cr;
+                        at = format!("{:?} {:?} on {:?}", c.symbol(), c.fg, c.bg);
+                    }
                 }
             }
+            // 4.0 rather than 3.0: body text at 3:1 passes a checklist and
+            // is still hard to read, which is what "見にくい" meant.
+            assert!(worst >= 4.0, "{name}: {at} is {worst:.2}:1");
         }
         set_theme(ResolvedTheme::DARK);
     }

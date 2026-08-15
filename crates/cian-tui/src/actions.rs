@@ -338,6 +338,25 @@ impl App {
         }
     }
 
+    /// `:version` — which build is running.
+    ///
+    /// Unanswerable from inside a session until it existed, and a cian left
+    /// open across a rebuild looks exactly like a fix that did not work.
+    pub(crate) fn show_version(&mut self) {
+        self.popup = Popup::Notice {
+            lines: vec![
+                crate::version_text(),
+                String::new(),
+                tr(
+                    self.lang,
+                    "If a fix seems missing, check this against the build you expect.",
+                    "修正が入っていないように見えるときは、期待しているビルドと突き合わせてください。",
+                )
+                .to_string(),
+            ],
+        };
+    }
+
     pub(crate) fn reopen_shortcuts(&mut self, path: Vec<usize>, cursor: usize) {
         let n = sc_level(&self.shortcuts.entries, &path).len();
         self.popup = Popup::Shortcuts {

@@ -63,23 +63,7 @@ impl App {
             "diff" | "compare" => self.open_diff(),
             "copyto" => self.start_dest_picker(PendingOp::Copy),
             "moveto" => self.start_dest_picker(PendingOp::Move),
-            // Which build is this? Unanswerable from inside a running cian
-            // until now, and a session left open across a rebuild looks
-            // exactly like a fix that did not work.
-            "version" | "about" => {
-                self.popup = Popup::Notice {
-                    lines: vec![
-                        crate::version_text(),
-                        String::new(),
-                        tr(
-                            self.lang,
-                            "If a fix seems missing, check this against the build you expect.",
-                            "修正が入っていないように見えるときは、期待しているビルドと突き合わせてください。",
-                        )
-                        .to_string(),
-                    ],
-                }
-            }
+            "version" | "about" => self.show_version(),
             "grep" => self.start_grep_prompt(),
             // A blank file in this pane, with no name until `:w <name>`.
             "new" | "scratch" => self.open_scratch_viewer(),

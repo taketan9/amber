@@ -1644,6 +1644,13 @@ impl App {
                 self.start_replace_bar();
                 return;
             }
+            // Which build is this? The panel has its own `:` line, so a
+            // command that only existed on the panes' one simply did nothing
+            // here — which is the worst answer to "am I running the fix".
+            "version" | "about" => {
+                self.show_version();
+                return;
+            }
             "undo" | "u" => {
                 self.viewer_undo();
                 return;
