@@ -2333,6 +2333,13 @@ pub struct App {
     /// A heavy preview waiting for the cursor to settle: what it is for, and
     /// when it was first asked for.
     preview_wanted: Option<(PathBuf, std::time::Instant)>,
+    /// A picture being decoded on another thread, and the file it is for.
+    ///
+    /// Decoding is nearly all of the cost of showing one — several megabytes
+    /// of PNG unpacked whole before anything can be scaled — and doing it
+    /// while drawing a frame takes that time out of the interface. The cursor
+    /// stopped dead on every large image.
+    preview_decode: Option<(PathBuf, std::sync::mpsc::Receiver<Option<image::DynamicImage>>)>,
     /// The scrollbars on screen, for the mouse to grab.
     scroll_tracks: Vec<ScrollTrack>,
     /// The bar being dragged, so the pointer keeps it after leaving the track.
@@ -2669,6 +2676,7 @@ impl App {
             vim_last_find: None,
             vim_replace: None,
             preview_wanted: None,
+            preview_decode: None,
             scroll_tracks: Vec::new(),
             scroll_drag: None,
             viewer_escapes: 0,
@@ -4862,7 +4870,7 @@ fn run_loop<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Result<()>
         // A heavy preview waiting for the cursor to settle needs a frame to
         // arrive once it has — otherwise it waits for the next keystroke,
         // which is exactly the one that moves off it again.
-        if app.preview_wanted.is_some() {
+        if app.preview_wanted.is_some() || app.preview_decode.is_some() {
             needs_redraw = true;
         }
         // While a pane is recording, keep the frame alive so its carmine

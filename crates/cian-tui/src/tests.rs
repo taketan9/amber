@@ -2939,8 +2939,18 @@
     /// Draw, wait out the settle a heavy preview asks for, and draw again —
     /// what holding still in front of one actually does.
     fn settled(app: &mut App, w: u16, h: u16) -> ratatui::buffer::Buffer {
-        let _ = render_buf(app, w, h);
-        std::thread::sleep(std::time::Duration::from_millis(200));
+        // Two waits, and they are different: the first is the cursor resting
+        // long enough for a heavy file to be read at all, the second is the
+        // decoder thread finishing. Frames in between draw "reading…".
+        for _ in 0..40 {
+            let buf = render_buf(app, w, h);
+            if app.preview_wanted.is_none() && app.preview_decode.is_none() {
+                // One more, now that whatever arrived can be drawn.
+                return render_buf(app, w, h);
+            }
+            drop(buf);
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
         render_buf(app, w, h)
     }
 
@@ -2986,6 +2996,47 @@
             app.preview.as_ref().map(|p| p.path.ends_with("big.png")) == Some(true),
             "and the picture is the preview now",
         );
+    }
+
+    /// Decoding a picture happens off the drawing thread. Several megabytes of
+    /// PNG is unpacked whole before anything can be scaled, and doing that
+    /// mid-frame stopped the cursor dead on every large image.
+    #[test]
+    fn a_picture_is_decoded_off_the_drawing_thread() {
+        let dir = tempfile::tempdir().unwrap();
+        image::RgbImage::from_pixel(600, 600, image::Rgb([40, 160, 90]))
+            .save(dir.path().join("big.png"))
+            .unwrap();
+        let p = dir.path().to_path_buf();
+        let mut app = App::new(p.clone(), p, en_config()).unwrap();
+        let pane = app.active_pane_mut().unwrap();
+        pane.cursor = pane.entries.iter().position(|e| e.name == "big.png").unwrap();
+
+        // Past the settle, the frame that starts the read hands the work to a
+        // thread rather than doing it. A picture this small may land before
+        // the next frame, so what is pinned is that the frame *while* it is
+        // being read says so rather than sitting blank.
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        let _ = render(&mut app, 100, 30);
+        if app.preview_decode.is_some() {
+            let out = render(&mut app, 100, 30).join("\n");
+            assert!(
+                out.contains("reading") || out.contains("読み込み"),
+                "the panel says what it is doing:\n{out}",
+            );
+        }
+
+        // When it lands, the picture is drawn — and nothing decodes again for
+        // the same file.
+        let buf = settled(&mut app, 100, 30);
+        let sh = app.layout_rects.shell;
+        let painted = (sh.y + 1..sh.y + sh.height - 1)
+            .flat_map(|y| (sh.x + 1..sh.x + sh.width - 1).map(move |x| (x, y)))
+            .filter(|(x, y)| !buf[(*x, *y)].symbol().trim().is_empty())
+            .count();
+        assert!(painted > 20, "the picture is drawn: {painted} cells");
+        let _ = render(&mut app, 100, 30);
+        assert!(app.preview_decode.is_none(), "and it is not read a second time");
     }
 
     /// `:gfx` steps through the ways of drawing a picture — the way out when

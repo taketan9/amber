@@ -43,6 +43,15 @@ pub fn is_image(path: &Path) -> bool {
 /// `max_cols` × `2*max_rows`.
 pub fn thumbnail(path: &Path, max_cols: u16, max_rows: u16) -> Result<Thumb> {
     let img = image::open(path).with_context(|| format!("decode {}", path.display()))?;
+    thumbnail_of(&img, max_cols, max_rows)
+}
+
+/// The same, from an image that has already been decoded.
+///
+/// Decoding is nearly all of the cost — a few megabytes of PNG has to be
+/// unpacked whole before anything can be scaled — so a caller that has done
+/// it once (off the drawing thread, say) does not do it again per resize.
+pub fn thumbnail_of(img: &image::DynamicImage, max_cols: u16, max_rows: u16) -> Result<Thumb> {
     let rgb = img.to_rgb8();
     let (sw, sh) = rgb.dimensions();
     if sw == 0 || sh == 0 {

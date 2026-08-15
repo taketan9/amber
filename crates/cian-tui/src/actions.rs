@@ -397,13 +397,6 @@ impl App {
             lines: vec![
                 crate::version_text(),
                 format!("{}: {}", tr(self.lang, "images", "画像"), gfx),
-                String::new(),
-                tr(
-                    self.lang,
-                    "If a fix seems missing, check this against the build you expect.",
-                    "修正が入っていないように見えるときは、期待しているビルドと突き合わせてください。",
-                )
-                .to_string(),
             ],
         };
     }

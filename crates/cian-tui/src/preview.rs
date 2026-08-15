@@ -51,9 +51,53 @@ pub(crate) struct PreviewState {
     pub body: PreviewBody,
     /// Half-block fallback thumbnail, cached by the box it was rendered for.
     pub thumb: Option<(u16, u16, cian_core::image::Thumb)>,
+    /// The decoded picture, kept so a resize scales rather than decodes.
+    pub decoded: Option<image::DynamicImage>,
 }
 
 impl App {
+    /// The picture for `path` if the decoder thread has finished with it —
+    /// and, if nothing is decoding it yet, start.
+    ///
+    /// Returns `None` while it is still going, which is a frame that draws
+    /// "reading…" rather than a frame that waits.
+    pub(crate) fn take_decoded(&mut self, path: &Path) -> Option<image::DynamicImage> {
+        // A job for some other file is stale the moment the cursor moves on.
+        if self.preview_decode.as_ref().is_some_and(|(p, _)| p != path) {
+            self.preview_decode = None;
+        }
+        if let Some((_, rx)) = self.preview_decode.as_ref() {
+            match rx.try_recv() {
+                Ok(img) => {
+                    self.preview_decode = None;
+                    return img;
+                }
+                // Still working; the sender is alive because the thread is.
+                Err(std::sync::mpsc::TryRecvError::Empty) => return None,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    self.preview_decode = None;
+                    return None;
+                }
+            }
+        }
+        // Already have it, in one form or the other.
+        if self.preview_gfx.as_ref().is_some_and(|(p, _)| p == path)
+            || self.preview.as_ref().is_some_and(|s| s.path == *path && s.decoded.is_some())
+        {
+            return None;
+        }
+        let (tx, rx) = std::sync::mpsc::channel();
+        let owned = path.to_path_buf();
+        std::thread::Builder::new()
+            .name("cian-decode".into())
+            .spawn(move || {
+                let _ = tx.send(image::open(&owned).ok());
+            })
+            .ok()?;
+        self.preview_decode = Some((path.to_path_buf(), rx));
+        None
+    }
+
     /// Does a picture drawn by the current protocol survive the cells under
     /// it being redrawn?
     ///
@@ -143,7 +187,8 @@ impl App {
             self.preview_gfx = None;
         }
         let body = load_preview(path, self.lang);
-        self.preview = Some(PreviewState { path: path.to_path_buf(), body, thumb: None });
+        self.preview =
+            Some(PreviewState { path: path.to_path_buf(), body, thumb: None, decoded: None });
     }
 }
 

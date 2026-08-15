@@ -2835,10 +2835,16 @@ fn draw_preview_panel(f: &mut Frame, area: Rect, app: &mut App) {
     // the F3 popup, but in preview-owned state.
     if matches!(app.preview.as_ref().map(|p| &p.body), Some(crate::preview::PreviewBody::Image)) {
         let path = app.preview.as_ref().map(|p| p.path.clone()).unwrap_or_default();
+        // Decoding happens on another thread: several megabytes of PNG has to
+        // be unpacked whole before anything can be scaled, and doing that here
+        // takes the time out of the interface — the cursor stopped dead on
+        // every large picture. `decoded` is what has arrived, if it has.
+        let decoded = app.take_decoded(&path);
+        let waiting = app.preview_decode.is_some();
         if app.gfx_picker.is_some() && !app.gfx_failed {
             if app.preview_gfx.as_ref().map(|(p, _)| p != &path).unwrap_or(true) {
                 app.preview_gfx = None;
-                if let (Ok(img), Some(picker)) = (image::open(&path), app.gfx_picker.as_ref()) {
+                if let (Some(img), Some(picker)) = (decoded.clone(), app.gfx_picker.as_ref()) {
                     app.preview_gfx = Some((path.clone(), picker.new_resize_protocol(img)));
                 }
             }
@@ -2859,11 +2865,30 @@ fn draw_preview_panel(f: &mut Frame, area: Rect, app: &mut App) {
             }
         }
         let mut drew = false;
+        // The half-block renderer scales from the image the decoder thread
+        // handed over, rather than decoding it again for every box size.
+        if let Some(img) = decoded {
+            if let Some(state) = app.preview.as_mut() {
+                state.decoded = Some(img);
+            }
+        }
         if let Some(state) = app.preview.as_mut() {
             if state.thumb.as_ref().map(|(c, r, _)| (*c, *r)) != Some((inner.width, inner.height)) {
-                state.thumb = cian_core::image::thumbnail(&path, inner.width, inner.height)
-                    .ok()
+                state.thumb = state
+                    .decoded
+                    .as_ref()
+                    .and_then(|i| {
+                        cian_core::image::thumbnail_of(i, inner.width, inner.height).ok()
+                    })
                     .map(|t| (inner.width, inner.height, t));
+            }
+            if state.thumb.is_none() && waiting {
+                f.render_widget(
+                    Paragraph::new(tr(lang, "reading the picture…", "画像を読み込み中…"))
+                        .style(Style::default().fg(muted_on(surface()))),
+                    inner,
+                );
+                return;
             }
             if let Some((_, _, t)) = &state.thumb {
                 drew = true;
