@@ -290,7 +290,7 @@ impl App {
     /// bare `:rag` / `:agent` with no argument.
     pub(crate) fn open_crmaine_chat(&mut self, mode: ChatMode) {
         if self.config.crmaine.is_none() {
-            self.message = Some("crmaine not configured — add cian.crmaine{} to init.lua".into());
+            self.message = Some(tr(self.lang, "crmaine not configured — add cian.crmaine{} to init.lua", "crmaine が未設定です — init.lua に cian.crmaine{} を追加してください").into());
             return;
         }
         self.start_ai_chat(mode, Vec::new(), false);
@@ -313,7 +313,7 @@ impl App {
     /// I indexed here" flow; `:ragshared` switches back to crmaine's index.
     pub(crate) fn start_index(&mut self, path_arg: &str) {
         if self.config.crmaine.is_none() {
-            self.message = Some("crmaine not configured — add cian.crmaine{} to init.lua".into());
+            self.message = Some(tr(self.lang, "crmaine not configured — add cian.crmaine{} to init.lua", "crmaine が未設定です — init.lua に cian.crmaine{} を追加してください").into());
             return;
         }
         if self.crmaine_rx.is_some() {
@@ -327,7 +327,7 @@ impl App {
                 match self.active_pane().map(|p| p.cwd.clone()) {
                     Some(d) => d,
                     None => {
-                        self.message = Some("no directory to index".into());
+                        self.message = Some(tr(self.lang, "no directory to index", "インデックス対象のディレクトリがありません").into());
                         return;
                     }
                 }
@@ -336,7 +336,11 @@ impl App {
             }
         };
         if !folder.is_dir() {
-            self.message = Some(format!("not a directory: {}", folder.display()));
+            self.message = Some(if self.lang == crate::theme::Lang::Ja {
+            format!("ディレクトリではありません: {}", folder.display())
+        } else {
+            format!("not a directory: {}", folder.display())
+        });
             return;
         }
         let cache = crmaine_index_dir();

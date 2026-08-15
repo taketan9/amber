@@ -251,7 +251,12 @@ impl App {
 
     pub(crate) fn open_ai_chat(&mut self) {
         if self.ai.is_none() {
-            self.message = Some("AI not configured — add cian.ai{ endpoint = \"…\" } to init.lua".into());
+            self.message = Some(tr(
+                self.lang,
+                "AI not configured — add cian.ai{ endpoint = \"…\" } to init.lua",
+                "AI が未設定です — init.lua に cian.ai{ endpoint = \"…\" } を追加してください",
+            )
+            .into());
             return;
         }
         if !self.ai_ready() {
@@ -275,7 +280,12 @@ impl App {
     /// opens in the AI chat, where it can be read, selected and copied.
     pub(crate) fn summarize_viewer(&mut self) {
         if self.ai.is_none() {
-            self.message = Some("AI not configured — add cian.ai{ endpoint = \"…\" } to init.lua".into());
+            self.message = Some(tr(
+                self.lang,
+                "AI not configured — add cian.ai{ endpoint = \"…\" } to init.lua",
+                "AI が未設定です — init.lua に cian.ai{ endpoint = \"…\" } を追加してください",
+            )
+            .into());
             return;
         }
         // Pull the decoded text and a name out of the viewer.
@@ -285,11 +295,11 @@ impl App {
             return;
         };
         if content.trim().is_empty() {
-            self.message = Some("nothing to summarise".into());
+            self.message = Some(tr(self.lang, "nothing to summarise", "要約する対象がありません").into());
             return;
         }
         if !self.ai_ready() {
-            self.message = Some("AI unavailable (python, packages, or sign-in)".into());
+            self.message = Some(tr(self.lang, "AI unavailable (python, packages, or sign-in)", "AI を利用できません（python・パッケージ・サインインのいずれか）").into());
             return;
         }
         // Bound the payload: a summary rarely needs the whole of a large file,
@@ -315,7 +325,12 @@ impl App {
     /// item), and opens the reply in the AI chat.
     pub(crate) fn explain_shell_error(&mut self) {
         if self.ai.is_none() {
-            self.message = Some("AI not configured — add cian.ai{ endpoint = \"…\" } to init.lua".into());
+            self.message = Some(tr(
+                self.lang,
+                "AI not configured — add cian.ai{ endpoint = \"…\" } to init.lua",
+                "AI が未設定です — init.lua に cian.ai{ endpoint = \"…\" } を追加してください",
+            )
+            .into());
             return;
         }
         // Grab the visible screen of the active shell pane.
@@ -323,17 +338,17 @@ impl App {
             s.parser().lock().ok().map(|p| p.screen().contents())
         });
         let Some(screen) = screen else {
-            self.message = Some("no shell here".into());
+            self.message = Some(tr(self.lang, "no shell here", "ここにシェルがありません").into());
             return;
         };
         // Collapse the trailing blank rows a terminal screen is padded with.
         let text = screen.trim_end().to_string();
         if text.is_empty() {
-            self.message = Some("nothing on the shell to explain".into());
+            self.message = Some(tr(self.lang, "nothing on the shell to explain", "シェルに説明する内容がありません").into());
             return;
         }
         if !self.ai_ready() {
-            self.message = Some("AI unavailable (python, packages, or sign-in)".into());
+            self.message = Some(tr(self.lang, "AI unavailable (python, packages, or sign-in)", "AI を利用できません（python・パッケージ・サインインのいずれか）").into());
             return;
         }
         let body = truncate_text_for_ai(&text, 8_000);
@@ -358,15 +373,20 @@ impl App {
     /// line. Reuses the same text the copy/save actions produce.
     pub(crate) fn explain_diff(&mut self) {
         if self.ai.is_none() {
-            self.message = Some("AI not configured — add cian.ai{ endpoint = \"…\" } to init.lua".into());
+            self.message = Some(tr(
+                self.lang,
+                "AI not configured — add cian.ai{ endpoint = \"…\" } to init.lua",
+                "AI が未設定です — init.lua に cian.ai{ endpoint = \"…\" } を追加してください",
+            )
+            .into());
             return;
         }
         let Some(text) = self.diff_as_text() else {
-            self.message = Some("no diff to explain".into());
+            self.message = Some(tr(self.lang, "no diff to explain", "説明する差分がありません").into());
             return;
         };
         if !self.ai_ready() {
-            self.message = Some("AI unavailable (python, packages, or sign-in)".into());
+            self.message = Some(tr(self.lang, "AI unavailable (python, packages, or sign-in)", "AI を利用できません（python・パッケージ・サインインのいずれか）").into());
             return;
         }
         let body = truncate_diff_for_ai(&text, 8_000);
@@ -390,7 +410,12 @@ impl App {
     /// at the RHEL/AIX/Oracle logs this is built for.
     pub(crate) fn triage_log(&mut self) {
         if self.ai.is_none() {
-            self.message = Some("AI not configured — add cian.ai{ endpoint = \"…\" } to init.lua".into());
+            self.message = Some(tr(
+                self.lang,
+                "AI not configured — add cian.ai{ endpoint = \"…\" } to init.lua",
+                "AI が未設定です — init.lua に cian.ai{ endpoint = \"…\" } を追加してください",
+            )
+            .into());
             return;
         }
         let picked = self
@@ -399,17 +424,17 @@ impl App {
             .filter(|e| !e.is_dir && !e.is_parent)
             .map(|e| (e.path.clone(), e.name.clone()));
         let Some((path, name)) = picked else {
-            self.message = Some("select a log file to triage".into());
+            self.message = Some(tr(self.lang, "select a log file to triage", "調査するログファイルを選んでください").into());
             return;
         };
         if !self.ai_ready() {
-            self.message = Some("AI unavailable (python, packages, or sign-in)".into());
+            self.message = Some(tr(self.lang, "AI unavailable (python, packages, or sign-in)", "AI を利用できません（python・パッケージ・サインインのいずれか）").into());
             return;
         }
         // A log's meaning is at its end — read the tail, not the head.
         let tail = read_tail(&path, 16_000);
         if tail.trim().is_empty() {
-            self.message = Some("that file is empty".into());
+            self.message = Some(tr(self.lang, "that file is empty", "そのファイルは空です").into());
             return;
         }
         let system = "You triage a log file for an operator (often RHEL/AIX or \
@@ -443,7 +468,7 @@ impl App {
             return;
         };
         if !self.ai_ready() {
-            self.message = Some("AI unavailable (python, packages, or sign-in)".into());
+            self.message = Some(tr(self.lang, "AI unavailable (python, packages, or sign-in)", "AI を利用できません（python・パッケージ・サインインのいずれか）").into());
             self.restore_viewer();
             return;
         }
@@ -574,7 +599,7 @@ impl App {
             system
         };
         if self.ai_job.is_some() {
-            self.message = Some("AI is busy".into());
+            self.message = Some(tr(self.lang, "AI is busy", "AI は処理中です").into());
             return;
         }
         // Pasted images ride along with a chat turn only: the structured
@@ -762,11 +787,16 @@ impl App {
     /// Open the "describe a command" prompt (if AI is available).
     pub(crate) fn start_ai_shell_prompt(&mut self) {
         if self.ai.is_none() {
-            self.message = Some("AI not configured — add cian.ai{ endpoint = \"…\" } to init.lua".into());
+            self.message = Some(tr(
+                self.lang,
+                "AI not configured — add cian.ai{ endpoint = \"…\" } to init.lua",
+                "AI が未設定です — init.lua に cian.ai{ endpoint = \"…\" } を追加してください",
+            )
+            .into());
             return;
         }
         if !self.ai_ready() {
-            self.message = Some("AI unavailable (python, packages, or sign-in)".into());
+            self.message = Some(tr(self.lang, "AI unavailable (python, packages, or sign-in)", "AI を利用できません（python・パッケージ・サインインのいずれか）").into());
             return;
         }
         self.popup = text_input(
@@ -849,7 +879,7 @@ impl App {
              - Output ONLY the command — no explanation, no markdown, no code fences.\n\
              {ctx}"
         );
-        self.message = Some("asking AI for a command…".into());
+        self.message = Some(tr(self.lang, "asking AI for a command…", "AI にコマンドを問い合わせ中…").into());
         self.ai_request(AiPurpose::ShellCommand, system, description);
     }
 
@@ -858,21 +888,26 @@ impl App {
     /// helpful when the stage is empty (the common "forgot to `git add`" case).
     pub(crate) fn start_ai_commit_message(&mut self) {
         if self.ai.is_none() {
-            self.message = Some("AI not configured — add cian.ai{ endpoint = \"…\" } to init.lua".into());
+            self.message = Some(tr(
+                self.lang,
+                "AI not configured — add cian.ai{ endpoint = \"…\" } to init.lua",
+                "AI が未設定です — init.lua に cian.ai{ endpoint = \"…\" } を追加してください",
+            )
+            .into());
             return;
         }
         let Some(dir) = self.active_pane().map(|p| p.cwd.clone()) else { return };
         // Not in a repo at all?
         let Some(diff) = cian_core::git::staged_diff(&dir) else {
-            self.message = Some("not a git repository".into());
+            self.message = Some(tr(self.lang, "not a git repository", "git リポジトリではありません").into());
             return;
         };
         if diff.trim().is_empty() {
-            self.message = Some("nothing staged — `git add` first (or stage from the pane)".into());
+            self.message = Some(tr(self.lang, "nothing staged — `git add` first (or stage from the pane)", "ステージされていません — 先に `git add`（ペインからでも可）").into());
             return;
         }
         if !self.ai_ready() {
-            self.message = Some("AI unavailable (python, packages, or sign-in)".into());
+            self.message = Some(tr(self.lang, "AI unavailable (python, packages, or sign-in)", "AI を利用できません（python・パッケージ・サインインのいずれか）").into());
             return;
         }
         let stat = cian_core::git::staged_stat(&dir).unwrap_or_default();
@@ -886,7 +921,7 @@ impl App {
              only if it adds something. Output ONLY the commit message — no code \
              fences, no preamble."
             .to_string();
-        self.message = Some("asking AI to draft a commit message…".into());
+        self.message = Some(tr(self.lang, "asking AI to draft a commit message…", "AI にコミットメッセージを作成させています…").into());
         self.ai_request(AiPurpose::CommitMessage { dir, stat }, system, diff);
     }
 
@@ -895,7 +930,12 @@ impl App {
     /// metadata (names, sizes, dir flags) leaves the machine — never contents.
     pub(crate) fn start_ai_junk(&mut self) {
         if self.ai.is_none() {
-            self.message = Some("AI not configured — add cian.ai{ endpoint = \"…\" } to init.lua".into());
+            self.message = Some(tr(
+                self.lang,
+                "AI not configured — add cian.ai{ endpoint = \"…\" } to init.lua",
+                "AI が未設定です — init.lua に cian.ai{ endpoint = \"…\" } を追加してください",
+            )
+            .into());
             return;
         }
         // Snapshot the listing up front so the immutable pane borrow is dropped
@@ -910,11 +950,11 @@ impl App {
             .map(|e| (e.name.clone(), e.path.clone(), e.is_dir, e.len))
             .collect();
         if rows.is_empty() {
-            self.message = Some("nothing here to scan".into());
+            self.message = Some(tr(self.lang, "nothing here to scan", "スキャンする対象がありません").into());
             return;
         }
         if !self.ai_ready() {
-            self.message = Some("AI unavailable (python, packages, or sign-in)".into());
+            self.message = Some(tr(self.lang, "AI unavailable (python, packages, or sign-in)", "AI を利用できません（python・パッケージ・サインインのいずれか）").into());
             return;
         }
         // The name→path map used both to build the prompt and to validate the
@@ -938,7 +978,7 @@ impl App {
              if nothing is clearly junk. No prose, no code fences."
             .to_string();
         let user = format!("Directory: {}\n\nEntries (kind, size, name):\n{}", dir.display(), listing);
-        self.message = Some("asking AI to find junk…".into());
+        self.message = Some(tr(self.lang, "asking AI to find junk…", "AI に不要ファイルを探させています…").into());
         self.ai_request(AiPurpose::Junk { names }, system, user);
     }
 
@@ -946,7 +986,12 @@ impl App {
     /// then show the moves for review. Metadata only (names, sizes, dir flags).
     pub(crate) fn start_ai_structure(&mut self) {
         if self.ai.is_none() {
-            self.message = Some("AI not configured — add cian.ai{ endpoint = \"…\" } to init.lua".into());
+            self.message = Some(tr(
+                self.lang,
+                "AI not configured — add cian.ai{ endpoint = \"…\" } to init.lua",
+                "AI が未設定です — init.lua に cian.ai{ endpoint = \"…\" } を追加してください",
+            )
+            .into());
             return;
         }
         let Some(pane) = self.active_pane() else { return };
@@ -958,11 +1003,11 @@ impl App {
             .map(|e| (e.name.clone(), e.path.clone(), e.is_dir, e.len))
             .collect();
         if rows.is_empty() {
-            self.message = Some("nothing here to organise".into());
+            self.message = Some(tr(self.lang, "nothing here to organise", "整理する対象がありません").into());
             return;
         }
         if !self.ai_ready() {
-            self.message = Some("AI unavailable (python, packages, or sign-in)".into());
+            self.message = Some(tr(self.lang, "AI unavailable (python, packages, or sign-in)", "AI を利用できません（python・パッケージ・サインインのいずれか）").into());
             return;
         }
         let names: Vec<(String, PathBuf)> =
@@ -985,7 +1030,7 @@ impl App {
              if the directory is already well organised. No prose, no code fences."
             .to_string();
         let user = format!("Directory: {}\n\nEntries (kind, size, name):\n{}", dir.display(), listing);
-        self.message = Some("asking AI to suggest a structure…".into());
+        self.message = Some(tr(self.lang, "asking AI to suggest a structure…", "AI に構成を提案させています…").into());
         self.ai_request(AiPurpose::Structure { names, dir }, system, user);
     }
 
@@ -1004,7 +1049,7 @@ impl App {
             return;
         };
         if moves.is_empty() {
-            self.message = Some("nothing checked".into());
+            self.message = Some(tr(self.lang, "nothing checked", "チェックされていません").into());
             return;
         }
         self.popup = Popup::None;
@@ -1040,11 +1085,16 @@ impl App {
     /// are the marked ones, or the whole listing when nothing is marked.
     pub(crate) fn start_ai_rename_prompt(&mut self) {
         if self.ai.is_none() {
-            self.message = Some("AI not configured — add cian.ai{ endpoint = \"…\" } to init.lua".into());
+            self.message = Some(tr(
+                self.lang,
+                "AI not configured — add cian.ai{ endpoint = \"…\" } to init.lua",
+                "AI が未設定です — init.lua に cian.ai{ endpoint = \"…\" } を追加してください",
+            )
+            .into());
             return;
         }
         if !self.ai_ready() {
-            self.message = Some("AI unavailable (python, packages, or sign-in)".into());
+            self.message = Some(tr(self.lang, "AI unavailable (python, packages, or sign-in)", "AI を利用できません（python・パッケージ・サインインのいずれか）").into());
             return;
         }
         // Which files: marks if any, else every real entry in the listing.
@@ -1052,7 +1102,7 @@ impl App {
             p.mark_count() > 0 || p.entries.iter().any(|e| !e.is_parent)
         }).unwrap_or(false);
         if !any {
-            self.message = Some("nothing here to rename".into());
+            self.message = Some(tr(self.lang, "nothing here to rename", "リネームする対象がありません").into());
             return;
         }
         self.popup = text_input(
@@ -1072,7 +1122,7 @@ impl App {
     pub(crate) fn start_ai_rename(&mut self, instruction: &str) {
         let instruction = instruction.trim().to_string();
         if instruction.is_empty() {
-            self.message = Some("cancelled (no instruction)".into());
+            self.message = Some(tr(self.lang, "cancelled (no instruction)", "中止しました（指示なし）").into());
             return;
         }
         let Some(pane) = self.active_pane() else { return };
@@ -1089,7 +1139,7 @@ impl App {
                 .collect()
         };
         if chosen.is_empty() {
-            self.message = Some("nothing to rename".into());
+            self.message = Some(tr(self.lang, "nothing to rename", "リネームする対象がありません").into());
             return;
         }
         let listing: String = chosen.iter().take(400).map(|(n, _)| format!("{}\n", n)).collect();
@@ -1102,18 +1152,23 @@ impl App {
             .to_string();
         let user = format!("Instruction: {}\n\nFiles:\n{}", instruction, listing);
         let names = chosen;
-        self.message = Some("asking AI for new names…".into());
+        self.message = Some(tr(self.lang, "asking AI for new names…", "AI に新しい名前を問い合わせ中…").into());
         self.ai_request(AiPurpose::Rename { names }, system, user);
     }
 
     /// Prompt for a natural-language query, then semantic-search the tree.
     pub(crate) fn start_ai_search_prompt(&mut self) {
         if self.ai.is_none() {
-            self.message = Some("AI not configured — add cian.ai{ endpoint = \"…\" } to init.lua".into());
+            self.message = Some(tr(
+                self.lang,
+                "AI not configured — add cian.ai{ endpoint = \"…\" } to init.lua",
+                "AI が未設定です — init.lua に cian.ai{ endpoint = \"…\" } を追加してください",
+            )
+            .into());
             return;
         }
         if !self.ai_ready() {
-            self.message = Some("AI unavailable (python, packages, or sign-in)".into());
+            self.message = Some(tr(self.lang, "AI unavailable (python, packages, or sign-in)", "AI を利用できません（python・パッケージ・サインインのいずれか）").into());
             return;
         }
         self.popup = text_input(
@@ -1129,7 +1184,7 @@ impl App {
     pub(crate) fn start_ai_search(&mut self, query: &str) {
         let query = query.trim().to_string();
         if query.is_empty() {
-            self.message = Some("cancelled (no query)".into());
+            self.message = Some(tr(self.lang, "cancelled (no query)", "中止しました（検索語なし）").into());
             return;
         }
         let Some(root) = self.active_pane().map(|p| p.cwd.clone()) else { return };
@@ -1153,7 +1208,7 @@ impl App {
             });
         }
         if catalog.is_empty() {
-            self.message = Some("no files here to search".into());
+            self.message = Some(tr(self.lang, "no files here to search", "ここに検索対象のファイルがありません").into());
             return;
         }
         let listing: String = catalog.iter()
@@ -1167,7 +1222,7 @@ impl App {
              if none are a good match. No prose, no code fences."
             .to_string();
         let user = format!("Query: {}\n\nPaths:\n{}", query, listing);
-        self.message = Some("asking AI to find relevant files…".into());
+        self.message = Some(tr(self.lang, "asking AI to find relevant files…", "AI に関連ファイルを探させています…").into());
         self.ai_request(AiPurpose::SemSearch { hits: catalog }, system, user);
     }
 
@@ -1179,7 +1234,7 @@ impl App {
             return;
         };
         if renames.is_empty() {
-            self.message = Some("nothing checked".into());
+            self.message = Some(tr(self.lang, "nothing checked", "チェックされていません").into());
             return;
         }
         self.popup = Popup::None;
@@ -1203,7 +1258,7 @@ impl App {
     /// Scan the active pane's tree for byte-identical files on a worker thread.
     pub(crate) fn start_dupes(&mut self) {
         if self.dupes_job.is_some() {
-            self.message = Some("a duplicate scan is already running".into());
+            self.message = Some(tr(self.lang, "a duplicate scan is already running", "重複スキャンは既に実行中です").into());
             return;
         }
         let Some(root) = self.active_pane().map(|p| p.cwd.clone()) else { return };
@@ -1225,10 +1280,14 @@ impl App {
             });
         }
         if files.len() < 2 {
-            self.message = Some("nothing to compare".into());
+            self.message = Some(tr(self.lang, "nothing to compare", "比較する対象がありません").into());
             return;
         }
-        self.message = Some(format!("scanning {} files for duplicates…", files.len()));
+        self.message = Some(if self.lang == crate::theme::Lang::Ja {
+            format!("{} 件のファイルを重複検査中…", files.len())
+        } else {
+            format!("scanning {} files for duplicates…", files.len())
+        });
         let (tx, rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
             let cancel = AtomicBool::new(false);
@@ -1251,7 +1310,7 @@ impl App {
         };
         self.dupes_job = None;
         if groups.is_empty() {
-            self.message = Some("no duplicate files found".into());
+            self.message = Some(tr(self.lang, "no duplicate files found", "重複ファイルは見つかりませんでした").into());
             return true;
         }
         // Flatten into rows: the first file of each group is the keeper (left
@@ -1277,7 +1336,7 @@ impl App {
             return;
         };
         if targets.is_empty() {
-            self.message = Some("nothing checked".into());
+            self.message = Some(tr(self.lang, "nothing checked", "チェックされていません").into());
             return;
         }
         self.popup = Popup::ConfirmDelete { targets };
@@ -1293,7 +1352,7 @@ impl App {
             return;
         };
         if targets.is_empty() {
-            self.message = Some("nothing checked".into());
+            self.message = Some(tr(self.lang, "nothing checked", "チェックされていません").into());
             return;
         }
         self.popup = Popup::ConfirmDelete { targets };
@@ -1307,7 +1366,7 @@ impl App {
             return;
         };
         if message.is_empty() {
-            self.message = Some("empty message — nothing committed".into());
+            self.message = Some(tr(self.lang, "empty message — nothing committed", "メッセージが空です — コミットしていません").into());
             return;
         }
         self.popup = Popup::None;
@@ -1354,13 +1413,13 @@ impl App {
             return;
         };
         if text.trim().is_empty() {
-            self.message = Some("nothing to copy".into());
+            self.message = Some(tr(self.lang, "nothing to copy", "コピーする対象がありません").into());
             return;
         }
         if let Some(cb) = self.clipboard.as_mut() {
             let _ = cb.set_text(text);
         }
-        self.message = Some("copied".into());
+        self.message = Some(tr(self.lang, "copied", "コピーしました").into());
         if let Popup::AiChat { sel, .. } = &mut self.popup {
             *sel = None;
         }
@@ -1445,7 +1504,7 @@ impl App {
                 Ok(text) => {
                     let command = clean_ai_command(&text);
                     if command.is_empty() {
-                        self.message = Some("AI returned no command".into());
+                        self.message = Some(tr(self.lang, "AI returned no command", "AI からコマンドが返りませんでした").into());
                     } else {
                         self.popup = Popup::AiShellConfirm { command };
                     }
@@ -1456,7 +1515,7 @@ impl App {
                 Ok(text) => {
                     let msg = clean_ai_commit_message(&text);
                     if msg.is_empty() {
-                        self.message = Some("AI returned no message".into());
+                        self.message = Some(tr(self.lang, "AI returned no message", "AI からメッセージが返りませんでした").into());
                     } else {
                         self.popup = Popup::CommitMessage { buffer: msg, stat, dir, editing: false };
                     }
@@ -1467,7 +1526,7 @@ impl App {
                 Ok(text) => {
                     let items = parse_junk_reply(&text, &names);
                     if items.is_empty() {
-                        self.message = Some("AI found no obvious junk".into());
+                        self.message = Some(tr(self.lang, "AI found no obvious junk", "AI は不要そうなファイルを見つけませんでした").into());
                     } else {
                         self.popup = Popup::JunkReview { items, cursor: 0, scroll: 0 };
                     }
@@ -1478,7 +1537,7 @@ impl App {
                 Ok(text) => {
                     let items = parse_structure_reply(&text, &names);
                     if items.is_empty() {
-                        self.message = Some("AI had no structure changes to suggest".into());
+                        self.message = Some(tr(self.lang, "AI had no structure changes to suggest", "AI から構成変更の提案はありません").into());
                     } else {
                         self.popup = Popup::StructureReview { items, cursor: 0, scroll: 0, dir };
                     }
@@ -1489,7 +1548,7 @@ impl App {
                 Ok(text) => {
                     let items = parse_rename_reply(&text, &names);
                     if items.is_empty() {
-                        self.message = Some("AI proposed no renames".into());
+                        self.message = Some(tr(self.lang, "AI proposed no renames", "AI からリネームの提案はありません").into());
                     } else {
                         self.popup = Popup::RenameReview { items, cursor: 0, scroll: 0, by_ai: true };
                     }
@@ -1500,7 +1559,7 @@ impl App {
                 Ok(text) => {
                     let matched = parse_sem_search_reply(&text, &hits);
                     if matched.is_empty() {
-                        self.message = Some("AI found no relevant files".into());
+                        self.message = Some(tr(self.lang, "AI found no relevant files", "AI は該当するファイルを見つけませんでした").into());
                     } else {
                         // Reuse the find-results list: F3 preview, Ctrl+n/N, Esc.
                         self.find_return = None;

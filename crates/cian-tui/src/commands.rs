@@ -263,7 +263,7 @@ impl App {
             "readonly" => match rest {
                 "on" | "true" | "1" => self.set_readonly_command(true),
                 "off" | "false" | "0" => self.set_readonly_command(false),
-                _ => self.message = Some("usage: :readonly on|off".into()),
+                _ => self.message = Some(tr(self.lang, "usage: :readonly on|off", "使い方: :readonly on|off").into()),
             },
             "hash" | "sha256" | "md5" => {
                 // `:hash md5` or `:md5` both work.
@@ -292,7 +292,7 @@ impl App {
     /// since the usual reason to ask is to paste it somewhere.
     pub(crate) fn cmd_pwd(&mut self) {
         let Some(p) = self.active_pane() else {
-            self.message = Some("no active pane".into());
+            self.message = Some(tr(self.lang, "no active pane", "アクティブなペインがありません").into());
             return;
         };
         let path = p.cwd.display().to_string();
@@ -338,11 +338,15 @@ impl App {
             _ => Some(expand_path(arg)),
         };
         let Some(target) = target else {
-            self.message = Some("no previous directory".into());
+            self.message = Some(tr(self.lang, "no previous directory", "直前のディレクトリがありません").into());
             return Ok(());
         };
         if !target.is_dir() {
-            self.message = Some(format!("not a directory: {}", target.display()));
+            self.message = Some(if self.lang == crate::theme::Lang::Ja {
+            format!("ディレクトリではありません: {}", target.display())
+        } else {
+            format!("not a directory: {}", target.display())
+        });
             return Ok(());
         }
         if let Some(p) = self.active_pane_mut() {
@@ -357,7 +361,7 @@ impl App {
         let parents = args.contains(&"-p");
         let names: Vec<&str> = args.iter().copied().filter(|a| !a.starts_with('-')).collect();
         if names.is_empty() {
-            self.message = Some("usage: :mkdir [-p] <name>".into());
+            self.message = Some(tr(self.lang, "usage: :mkdir [-p] <name>", "使い方: :mkdir [-p] <名前>").into());
             return;
         }
         let Some(cwd) = self.active_pane().map(|p| p.cwd.clone()) else { return };
@@ -374,7 +378,11 @@ impl App {
         if made > 0 {
             self.reload_active();
             if self.message.is_none() {
-                self.message = Some(format!("mkdir: created {}", made));
+                self.message = Some(if self.lang == crate::theme::Lang::Ja {
+            format!("mkdir: {} を作成しました", made)
+        } else {
+            format!("mkdir: created {}", made)
+        });
             }
         }
     }
@@ -383,7 +391,7 @@ impl App {
     pub(crate) fn cmd_touch(&mut self, args: &[&str]) {
         let names: Vec<&str> = args.iter().copied().filter(|a| !a.starts_with('-')).collect();
         if names.is_empty() {
-            self.message = Some("usage: :touch <name>".into());
+            self.message = Some(tr(self.lang, "usage: :touch <name>", "使い方: :touch <名前>").into());
             return;
         }
         let Some(cwd) = self.active_pane().map(|p| p.cwd.clone()) else { return };
@@ -415,7 +423,7 @@ impl App {
         }
         let targets = self.active_pane().map(|p| p.target_paths()).unwrap_or_default();
         if targets.is_empty() {
-            self.message = Some("nothing to operate on".into());
+            self.message = Some(tr(self.lang, "nothing to operate on", "操作する対象がありません").into());
             return;
         }
         let dest = expand_path(arg);
@@ -426,12 +434,20 @@ impl App {
         // Not an existing directory: only meaningful as a rename/copy of a
         // single item to that exact path, and only if its parent exists.
         if targets.len() != 1 {
-            self.message = Some(format!("not a directory: {}", dest.display()));
+            self.message = Some(if self.lang == crate::theme::Lang::Ja {
+            format!("ディレクトリではありません: {}", dest.display())
+        } else {
+            format!("not a directory: {}", dest.display())
+        });
             return;
         }
         let parent_ok = dest.parent().map(|p| p.as_os_str().is_empty() || p.is_dir()).unwrap_or(false);
         if !parent_ok {
-            self.message = Some(format!("no such directory: {}", dest.display()));
+            self.message = Some(if self.lang == crate::theme::Lang::Ja {
+            format!("そのようなディレクトリはありません: {}", dest.display())
+        } else {
+            format!("no such directory: {}", dest.display())
+        });
             return;
         }
         let src = &targets[0];
@@ -470,7 +486,7 @@ impl App {
             None => Vec::new(),
         };
         if paths.is_empty() {
-            self.message = Some("empty directory".into());
+            self.message = Some(tr(self.lang, "empty directory", "空のディレクトリです").into());
             return;
         }
         // Same cap as the Attributes window — the popup is not scrollable, and a
@@ -482,7 +498,7 @@ impl App {
     pub(crate) fn cmd_file(&mut self) {
         let paths = self.active_pane().map(|p| p.target_paths()).unwrap_or_default();
         if paths.is_empty() {
-            self.message = Some("nothing selected".into());
+            self.message = Some(tr(self.lang, "nothing selected", "選択されていません").into());
             return;
         }
         let mut lines = Vec::new();
@@ -501,7 +517,7 @@ impl App {
     pub(crate) fn cmd_wc(&mut self) {
         let paths = self.active_pane().map(|p| p.target_paths()).unwrap_or_default();
         if paths.is_empty() {
-            self.message = Some("nothing selected".into());
+            self.message = Some(tr(self.lang, "nothing selected", "選択されていません").into());
             return;
         }
         let mut lines = vec![format!("{:>9} {:>9} {:>11}  name", "lines", "words", "bytes"), String::new()];
@@ -531,7 +547,7 @@ impl App {
     pub(crate) fn cmd_peek(&mut self, end: cian_core::inspect::End, args: &[&str]) {
         let n = parse_dash_n(args).unwrap_or(10);
         let Some(path) = self.active_pane().and_then(|p| p.selected().map(|e| e.path.clone())) else {
-            self.message = Some("nothing selected".into());
+            self.message = Some(tr(self.lang, "nothing selected", "選択されていません").into());
             return;
         };
         match cian_core::inspect::peek(&path, end, n) {
@@ -580,12 +596,12 @@ impl App {
         let encrypt = args.contains(&"-e") || args.contains(&"-p");
         let name = args.iter().copied().find(|a| !a.starts_with('-'));
         let Some(name) = name else {
-            self.message = Some("usage: :zip [-e] <name.zip>".into());
+            self.message = Some(tr(self.lang, "usage: :zip [-e] <name.zip>", "使い方: :zip [-e] <名前.zip>").into());
             return;
         };
         let sources = self.active_pane().map(|p| p.target_paths()).unwrap_or_default();
         if sources.is_empty() {
-            self.message = Some("nothing selected to zip".into());
+            self.message = Some(tr(self.lang, "nothing selected to zip", "zip にする対象が選択されていません").into());
             return;
         }
         let Some(cwd) = self.active_pane().map(|p| p.cwd.clone()) else { return };
@@ -595,7 +611,11 @@ impl App {
         }
         let dest = cwd.join(&fname);
         if dest.exists() {
-            self.message = Some(format!("already exists: {}", fname));
+            self.message = Some(if self.lang == crate::theme::Lang::Ja {
+            format!("既に存在します: {}", fname)
+        } else {
+            format!("already exists: {}", fname)
+        });
             return;
         }
         if encrypt {
@@ -629,7 +649,7 @@ impl App {
         };
         let sources = self.active_pane().map(|p| p.target_paths()).unwrap_or_default();
         if sources.is_empty() {
-            self.message = Some("nothing selected to archive".into());
+            self.message = Some(tr(self.lang, "nothing selected to archive", "書庫にする対象が選択されていません").into());
             return;
         }
         let Some(cwd) = self.active_pane().map(|p| p.cwd.clone()) else { return };
@@ -644,7 +664,11 @@ impl App {
         }
         let dest = cwd.join(&fname);
         if dest.exists() {
-            self.message = Some(format!("already exists: {}", fname));
+            self.message = Some(if self.lang == crate::theme::Lang::Ja {
+            format!("既に存在します: {}", fname)
+        } else {
+            format!("already exists: {}", fname)
+        });
             return;
         }
         self.start_tar(dest, sources, gz);
@@ -688,7 +712,7 @@ impl App {
     pub(crate) fn run_bang(&mut self, cmd: &str) {
         let cmd = cmd.trim();
         if cmd.is_empty() {
-            self.message = Some("usage: :!<command>   (% = selection, %f = file, %d = dir)".into());
+            self.message = Some(tr(self.lang, "usage: :!<command>   (% = selection, %f = file, %d = dir)", "使い方: :!<コマンド>   (% = 選択, %f = ファイル, %d = ディレクトリ)").into());
             return;
         }
         let pane = self.active_pane();

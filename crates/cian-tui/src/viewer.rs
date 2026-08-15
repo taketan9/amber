@@ -1306,9 +1306,9 @@ impl App {
             }
         }
         if no_query {
-            self.message = Some("no search — press / first".into());
+            self.message = Some(tr(self.lang, "no search — press / first", "検索していません — 先に / を押してください").into());
         } else if not_found {
-            self.message = Some("no match".into());
+            self.message = Some(tr(self.lang, "no match", "一致しません").into());
         }
     }
 
@@ -1327,7 +1327,11 @@ impl App {
                 if let Some(enc) = chosen {
                     if let Some(s) = self.shell.active_session() {
                         s.set_encoding(enc);
-                        self.message = Some(format!("shell encoding: {}", enc.label()));
+                        self.message = Some(if self.lang == crate::theme::Lang::Ja {
+            format!("シェルの文字コード: {}", enc.label())
+        } else {
+            format!("shell encoding: {}", enc.label())
+        });
                     }
                 }
             }
@@ -1340,7 +1344,11 @@ impl App {
                         *source = view.lines.clone();
                         hl.clear();
                         *visual = None;
-                        self.message = Some(format!("encoding: {}", enc.label()));
+                        self.message = Some(if self.lang == crate::theme::Lang::Ja {
+            format!("文字コード: {}", enc.label())
+        } else {
+            format!("encoding: {}", enc.label())
+        });
                     }
                 }
                 self.popup = *viewer;
@@ -1355,7 +1363,11 @@ impl App {
                             *result = d;
                             *encoding = enc;
                             *scroll = 0;
-                            self.message = Some(format!("encoding: {}", enc.label()));
+                            self.message = Some(if self.lang == crate::theme::Lang::Ja {
+            format!("文字コード: {}", enc.label())
+        } else {
+            format!("encoding: {}", enc.label())
+        });
                         }
                         Err(e) => self.message = Some(format!("re-diff failed: {}", e)),
                     }
@@ -2752,7 +2764,7 @@ impl App {
     pub(crate) fn viewer_grep_step(&mut self, forward: bool) {
         let hit = {
             let Some(back) = self.find_return.as_mut() else {
-                self.message = Some("not viewing a grep hit".into());
+                self.message = Some(tr(self.lang, "not viewing a grep hit", "grep の該当箇所を表示していません").into());
                 return;
             };
             let Popup::FindResults { hits, cursor, .. } = back.as_mut() else { return };
@@ -2915,7 +2927,7 @@ impl App {
             return;
         };
         if text.is_empty() {
-            self.message = Some("nothing to copy".into());
+            self.message = Some(tr(self.lang, "nothing to copy", "コピーする対象がありません").into());
             return;
         }
         self.set_yank(text);
@@ -4057,7 +4069,11 @@ impl App {
         }
         if let Some(parent) = path.parent() {
             if !parent.exists() {
-                self.message = Some(format!("no such folder: {}", parent.display()));
+                self.message = Some(if self.lang == crate::theme::Lang::Ja {
+            format!("そのようなフォルダはありません: {}", parent.display())
+        } else {
+            format!("no such folder: {}", parent.display())
+        });
                 return;
             }
         }
@@ -4150,7 +4166,11 @@ impl App {
         match os_open(&page) {
             Ok(()) => {
                 let how = if local.is_some() { "offline" } else { "via CDN" };
-                self.message = Some(format!("opened {} mermaid block(s) in the browser ({how})", blocks.len()));
+                self.message = Some(if self.lang == crate::theme::Lang::Ja {
+            format!("mermaid を {} 件ブラウザで開きました（{how}）", blocks.len())
+        } else {
+            format!("opened {} mermaid block(s) in the browser ({how})", blocks.len())
+        });
             }
             Err(e) => self.message = Some(format!("open failed: {e}")),
         }

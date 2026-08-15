@@ -1361,7 +1361,7 @@ impl App {
         if let Some(cb) = self.clipboard.as_mut() {
             let _ = cb.set_text(text);
         }
-        self.message = Some("copied".into());
+        self.message = Some(tr(self.lang, "copied", "コピーしました").into());
     }
 
     pub(crate) fn select_shell_leaf_at(&mut self, col: u16, row: u16) {

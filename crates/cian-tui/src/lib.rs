@@ -2917,7 +2917,7 @@ impl App {
         };
         if let Some(p) = self.active_pane_mut() {
             if p.cwd == other_cwd {
-                self.message = Some("panes already in the same directory".into());
+                self.message = Some(tr(self.lang, "panes already in the same directory", "両ペインは既に同じディレクトリです").into());
                 return Ok(());
             }
             p.jump_to(other_cwd.clone())?;
@@ -2939,7 +2939,7 @@ impl App {
             FocusedPane::Shell => return Ok(()),
         };
         if other.active_ref().cwd == cwd {
-            self.message = Some("panes already in the same directory".into());
+            self.message = Some(tr(self.lang, "panes already in the same directory", "両ペインは既に同じディレクトリです").into());
             return Ok(());
         }
         other.active_mut().jump_to(cwd.clone())?;
@@ -2987,7 +2987,7 @@ impl App {
     /// Reveal the selected file in the OS file manager (#9).
     fn reveal_in_os(&mut self) {
         let Some(path) = self.selected_os_path() else {
-            self.message = Some("nothing selected".into());
+            self.message = Some(tr(self.lang, "nothing selected", "選択されていません").into());
             return;
         };
         match os_reveal(&path) {
@@ -2999,7 +2999,7 @@ impl App {
     /// Show the OS "Open with…" picker for the selected file (#9).
     fn open_with_os(&mut self) {
         let Some(path) = self.selected_os_path() else {
-            self.message = Some("nothing selected".into());
+            self.message = Some(tr(self.lang, "nothing selected", "選択されていません").into());
             return;
         };
         match os_open_with(&path) {
@@ -3011,7 +3011,7 @@ impl App {
     /// Open the OS properties / Get-Info panel for the selected file (#9).
     fn properties_os(&mut self) {
         let Some(path) = self.selected_os_path() else {
-            self.message = Some("nothing selected".into());
+            self.message = Some(tr(self.lang, "nothing selected", "選択されていません").into());
             return;
         };
         match os_properties(&path) {
@@ -3029,7 +3029,7 @@ impl App {
     /// generated on submit from the time and the pane's host.
     fn start_log_prompt(&mut self) {
         if self.shell.active_session().is_none() {
-            self.message = Some("no shell here to log".into());
+            self.message = Some(tr(self.lang, "no shell here to log", "記録するシェルがここにありません").into());
             return;
         }
         // Seed with a sensible directory: the focused file pane's, else home.
@@ -3069,7 +3069,7 @@ impl App {
                 Ok(()) => self.message = Some(format!("● logging to {}", path.display())),
                 Err(e) => self.message = Some(format!("log failed: {}", e)),
             },
-            None => self.message = Some("no shell here to log".into()),
+            None => self.message = Some(tr(self.lang, "no shell here to log", "記録するシェルがここにありません").into()),
         }
     }
 
@@ -3080,7 +3080,7 @@ impl App {
                 s.stop_log();
                 self.message = Some(format!("log saved: {}", where_));
             }
-            _ => self.message = Some("this pane is not logging".into()),
+            _ => self.message = Some(tr(self.lang, "this pane is not logging", "このペインは記録していません").into()),
         }
     }
 

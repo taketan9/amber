@@ -349,7 +349,7 @@ impl App {
     pub(crate) fn clip_targets(&mut self, op: ClipOp) {
         let paths = self.active_pane().map(|p| p.target_paths()).unwrap_or_default();
         if paths.is_empty() {
-            self.message = Some("nothing selected".into());
+            self.message = Some(tr(self.lang, "nothing selected", "選択されていません").into());
             return;
         }
         let verb = match op {
@@ -370,7 +370,7 @@ impl App {
             None => {
                 let paths = os_clipboard_files();
                 if paths.is_empty() {
-                    self.message = Some("clipboard has no files".into());
+                    self.message = Some(tr(self.lang, "clipboard has no files", "クリップボードにファイルがありません").into());
                     return Ok(());
                 }
                 (FileClipboard { paths, op: ClipOp::Copy }, true)
@@ -386,7 +386,7 @@ impl App {
         // Pasting into the directory the files already live in would be a
         // no-op at best and a self-overwrite at worst.
         if clip.paths.iter().any(|p| p.parent() == Some(dest.as_path())) {
-            self.message = Some("already in this directory".into());
+            self.message = Some(tr(self.lang, "already in this directory", "既にこのディレクトリです").into());
             return Ok(());
         }
         let report = match clip.op {
@@ -622,7 +622,7 @@ impl App {
                         self.popup =
                             Popup::EncodingPicker { cursor: cur, target: EncTarget::Shell };
                     }
-                    None => self.message = Some("no shell here".into()),
+                    None => self.message = Some(tr(self.lang, "no shell here", "ここにシェルがありません").into()),
                 }
             }
             MenuItem::Quit => self.start_quit_confirm(),

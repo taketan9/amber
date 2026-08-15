@@ -48,7 +48,7 @@ impl App {
                 let files: Vec<PathBuf> =
                     pane.target_paths().into_iter().filter(|p| p.is_file()).collect();
                 if files.is_empty() {
-                    self.message = Some("select a file to upload".into());
+                    self.message = Some(tr(self.lang, "select a file to upload", "アップロードするファイルを選んでください").into());
                     return;
                 }
                 (files, PathBuf::new())
@@ -164,7 +164,7 @@ impl App {
         let label = format!("{user}@{host}");
         if for_scp {
             if password.is_empty() {
-                self.message = Some("a transfer needs a password".into());
+                self.message = Some(tr(self.lang, "a transfer needs a password", "転送にはパスワードが必要です").into());
                 self.scp_dir = None;
                 return;
             }
@@ -949,7 +949,7 @@ impl App {
             return;
         };
         if files.is_empty() {
-            self.message = Some("mark a file (Space) or put the cursor on one".into());
+            self.message = Some(tr(self.lang, "mark a file (Space) or put the cursor on one", "ファイルをマーク（Space）するか、カーソルを合わせてください").into());
             return;
         }
         self.popup = Popup::LocalDest { files, cursor: 0 };
@@ -1004,7 +1004,7 @@ impl App {
         let Some(p) = self.scp_pending.take() else { return };
         let remote = remote.trim().to_string();
         if remote.is_empty() {
-            self.message = Some("cancelled (no remote path)".into());
+            self.message = Some(tr(self.lang, "cancelled (no remote path)", "中止しました（リモートパスなし）").into());
             return;
         }
         let ScpPending { target, label, locals, .. } = p;
@@ -1118,7 +1118,11 @@ impl App {
             self.message = Some(format!("cannot create {}: {}", local_dir.display(), e));
             return;
         }
-        self.message = Some(format!("downloading {} file(s) from {} …", files.len(), label));
+        self.message = Some(if self.lang == crate::theme::Lang::Ja {
+            format!("{} 件のファイルを {} から取得中…", files.len(), label)
+        } else {
+            format!("downloading {} file(s) from {} …", files.len(), label)
+        });
         self.start_op("downloading", move |ctl| {
             let mut report = OpReport::default();
             let cancel = ctl.cancel;

@@ -17,10 +17,10 @@ impl App {
                 if let Some(s) = self.shell.active_session_mut() {
                     s.write_input(t.as_bytes());
                 } else {
-                    self.message = Some("no shell to paste into".into());
+                    self.message = Some(tr(self.lang, "no shell to paste into", "貼り付け先のシェルがありません").into());
                 }
             }
-            None => self.message = Some("clipboard has no text".into()),
+            None => self.message = Some(tr(self.lang, "clipboard has no text", "クリップボードにテキストがありません").into()),
         }
     }
 
@@ -93,7 +93,7 @@ impl App {
             }
             let sources = self.active_pane().map(|p| p.target_paths()).unwrap_or_default();
             if sources.is_empty() {
-                self.message = Some("nothing to operate on".into());
+                self.message = Some(tr(self.lang, "nothing to operate on", "操作する対象がありません").into());
                 return;
             }
             self.popup = Popup::ConfirmZipAdd { archive, sub, sources };
@@ -108,7 +108,7 @@ impl App {
             Some(p) => p.target_paths(),
             None => return,
         };
-        if targets.is_empty() { self.message = Some("nothing to operate on".into()); return; }
+        if targets.is_empty() { self.message = Some(tr(self.lang, "nothing to operate on", "操作する対象がありません").into()); return; }
         self.popup = Popup::ConfirmTransfer { op, targets, dest };
     }
     pub(crate) fn start_delete(&mut self) {
@@ -120,7 +120,7 @@ impl App {
             Some(p) => p.target_paths(),
             None => return,
         };
-        if targets.is_empty() { self.message = Some("nothing to delete".into()); return; }
+        if targets.is_empty() { self.message = Some(tr(self.lang, "nothing to delete", "削除する対象がありません").into()); return; }
         self.popup = Popup::ConfirmDelete { targets };
     }
     pub(crate) fn start_rename(&mut self) {
@@ -226,7 +226,11 @@ impl App {
             if let Some(i) = p.entries.iter().position(|e| e.name.to_lowercase().contains(&ql)) {
                 p.cursor = i;
             } else {
-                self.message = Some(format!("pattern not found: {}", q));
+                self.message = Some(if self.lang == crate::theme::Lang::Ja {
+            format!("パターンが見つかりません: {}", q)
+        } else {
+            format!("pattern not found: {}", q)
+        });
             }
         }
     }
@@ -439,11 +443,11 @@ impl App {
             None => return,
         };
         if paths.is_empty() {
-            self.message = Some("nothing to copy".into());
+            self.message = Some(tr(self.lang, "nothing to copy", "コピーする対象がありません").into());
             return;
         }
         let Some(cb) = self.clipboard.as_mut() else {
-            self.message = Some("clipboard unavailable".into());
+            self.message = Some(tr(self.lang, "clipboard unavailable", "クリップボードを利用できません").into());
             return;
         };
         let text = paths.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join("\n");
@@ -459,7 +463,7 @@ impl App {
             None => return,
         };
         if paths.is_empty() {
-            self.message = Some("nothing to copy".into());
+            self.message = Some(tr(self.lang, "nothing to copy", "コピーする対象がありません").into());
             return;
         }
         match os_clipboard_file_refs(&paths) {
@@ -472,7 +476,7 @@ impl App {
         let Some(entry) = sc_level(&self.shortcuts.entries, path).get(idx).cloned() else { return };
         let target = entry.target_str().to_string();
         let Some(cb) = self.clipboard.as_mut() else {
-            self.message = Some("clipboard unavailable".into());
+            self.message = Some(tr(self.lang, "clipboard unavailable", "クリップボードを利用できません").into());
             return;
         };
         match cb.set_text(target.clone()) {
@@ -568,7 +572,7 @@ impl App {
     pub(crate) fn start_history(&mut self) {
         let entries = self.active_pane().map(|p| p.history.clone()).unwrap_or_default();
         if entries.is_empty() {
-            self.message = Some("no history yet".into());
+            self.message = Some(tr(self.lang, "no history yet", "履歴がまだありません").into());
             return;
         }
         self.popup = Popup::History { entries, cursor: 0 };
@@ -646,7 +650,7 @@ impl App {
             Some(s) => s.write_input(cmd.as_bytes()),
             None => self.pending_shell_input = Some(cmd.to_string()),
         }
-        self.message = Some("command at prompt — review and press Enter".into());
+        self.message = Some(tr(self.lang, "command at prompt — review and press Enter", "プロンプトに入れました — 確認して Enter").into());
     }
 
     /// Send a command line to the shell panel, starting the shell if needed.
@@ -798,7 +802,7 @@ impl App {
     pub(crate) fn start_dest_picker(&mut self, op: PendingOp) {
         let targets = self.active_pane().map(|p| p.target_paths()).unwrap_or_default();
         if targets.is_empty() {
-            self.message = Some("nothing selected".into());
+            self.message = Some(tr(self.lang, "nothing selected", "選択されていません").into());
             return;
         }
         self.popup = Popup::DestPicker { op, targets, cursor: 0 };
@@ -885,7 +889,7 @@ impl App {
                     self.message = Some(tr(self.lang, "that is a directory — Enter to go in", "ディレクトリです — Enter で入る").into());
                 }
                 Some(e) => self.archive_view_member(&archive, &format!("{}{}", sub, e.name)),
-                None => self.message = Some("nothing selected".into()),
+                None => self.message = Some(tr(self.lang, "nothing selected", "選択されていません").into()),
             }
             return;
         }
@@ -916,11 +920,11 @@ impl App {
             return;
         }
         let Some(entry) = self.active_pane().and_then(|p| p.selected().cloned()) else {
-            self.message = Some("nothing selected".into());
+            self.message = Some(tr(self.lang, "nothing selected", "選択されていません").into());
             return;
         };
         if entry.is_dir {
-            self.message = Some("that is a directory — Enter to go in".into());
+            self.message = Some(tr(self.lang, "that is a directory — Enter to go in", "ディレクトリです — Enter で入れます").into());
             return;
         }
         if cian_core::archive::is_archive(&entry.path) {
@@ -1125,7 +1129,7 @@ impl App {
         // The `..` row is never a comparison subject; treat it as no selection.
         let pick = |t: &PaneTabs| t.active_ref().selected().filter(|e| !e.is_parent).cloned();
         let (Some(a), Some(b)) = (pick(&self.left), pick(&self.right)) else {
-            self.message = Some("select a file (or a folder) in each pane to compare".into());
+            self.message = Some(tr(self.lang, "select a file (or a folder) in each pane to compare", "比較するには各ペインでファイル（またはフォルダ）を選んでください").into());
             return;
         };
         // Two directories: a recursive tree comparison. Two files: a line diff.
@@ -1134,7 +1138,7 @@ impl App {
             return;
         }
         if a.is_dir || b.is_dir {
-            self.message = Some("compare two files, or two folders — not one of each".into());
+            self.message = Some(tr(self.lang, "compare two files, or two folders — not one of each", "ファイル同士かフォルダ同士で比較してください（混在は不可）").into());
             return;
         }
         match cian_core::diff::diff_files(&a.path, &b.path) {
@@ -1228,7 +1232,7 @@ impl App {
         let Some(diff) = done else { return changed };
         let job = self.diff_job.take().unwrap();
         if diff.cancelled {
-            self.message = Some("comparison cancelled".into());
+            self.message = Some(tr(self.lang, "comparison cancelled", "比較を中止しました").into());
             return true;
         }
         if diff.is_identical() {
@@ -1397,9 +1401,9 @@ impl App {
         match self.clipboard.as_mut() {
             Some(cb) => {
                 let _ = cb.set_text(text);
-                self.message = Some("◂ diff copied".into());
+                self.message = Some(tr(self.lang, "◂ diff copied", "◂ 差分をコピーしました").into());
             }
-            None => self.message = Some("clipboard unavailable".into()),
+            None => self.message = Some(tr(self.lang, "clipboard unavailable", "クリップボードを利用できません").into()),
         }
     }
 
@@ -1589,7 +1593,7 @@ impl App {
     /// parent directories first so a deep only-on-one-side path lands.
     fn perform_diff_copy(&mut self, src: &Path, dst: &Path, _is_dir: bool) {
         let Some(dest_dir) = dst.parent() else {
-            self.message = Some("bad destination".into());
+            self.message = Some(tr(self.lang, "bad destination", "宛先が不正です").into());
             return;
         };
         if let Err(e) = std::fs::create_dir_all(dest_dir) {
@@ -1664,7 +1668,7 @@ impl App {
             },
         );
         let Some(dest) = self.opposite_pane_cwd() else {
-            self.message = Some("no destination pane".into());
+            self.message = Some(tr(self.lang, "no destination pane", "宛先のペインがありません").into());
             return;
         };
         self.popup = Popup::None;
@@ -1745,7 +1749,7 @@ impl App {
     pub(crate) fn show_attributes(&mut self) {
         let paths = self.active_pane().map(|p| p.target_paths()).unwrap_or_default();
         if paths.is_empty() {
-            self.message = Some("nothing selected".into());
+            self.message = Some(tr(self.lang, "nothing selected", "選択されていません").into());
             return;
         }
         self.popup = Popup::Notice { lines: self.attributes_lines(&paths, 40) };
@@ -1798,7 +1802,7 @@ impl App {
             .filter(|p| p.is_file())
             .collect();
         if paths.is_empty() {
-            self.message = Some("no files selected".into());
+            self.message = Some(tr(self.lang, "no files selected", "ファイルが選択されていません").into());
             return;
         }
         self.start_op("hashing", move |ctl| {
@@ -1836,7 +1840,7 @@ impl App {
     pub(crate) fn set_attr_command(&mut self, arg: &str) {
         let paths = self.active_pane().map(|p| p.target_paths()).unwrap_or_default();
         if paths.is_empty() {
-            self.message = Some("nothing selected".into());
+            self.message = Some(tr(self.lang, "nothing selected", "選択されていません").into());
             return;
         }
         let mut ok = 0;
@@ -1860,7 +1864,7 @@ impl App {
     pub(crate) fn set_readonly_command(&mut self, on: bool) {
         let paths = self.active_pane().map(|p| p.target_paths()).unwrap_or_default();
         if paths.is_empty() {
-            self.message = Some("nothing selected".into());
+            self.message = Some(tr(self.lang, "nothing selected", "選択されていません").into());
             return;
         }
         let mut ok = 0;
@@ -1870,7 +1874,11 @@ impl App {
             }
         }
         self.reload_both();
-        self.message = Some(format!("read-only {} on {} item(s)", if on { "set" } else { "cleared" }, ok));
+        self.message = Some(if self.lang == crate::theme::Lang::Ja {
+            format!("読み取り専用を {} に設定（{} 件）", if on { "set" } else { "cleared" }, ok)
+        } else {
+            format!("read-only {} on {} item(s)", if on { "set" } else { "cleared" }, ok)
+        });
     }
 
     // ------- Recursive search -------
@@ -2310,7 +2318,7 @@ impl App {
                 .map(|s| s.to_string_lossy().into_owned())
                 .unwrap_or_else(|| hit.rel.display().to_string());
             self.open_viewer_at(&hit.path, &name, lineno.saturating_sub(1));
-            self.message = Some("Esc → back to results".into());
+            self.message = Some(tr(self.lang, "Esc → back to results", "Esc で結果一覧へ戻ります").into());
             return Ok(());
         }
         self.popup = Popup::None;
@@ -2359,12 +2367,16 @@ impl App {
     pub(crate) fn finish_jump_path(&mut self, raw: &str) -> Result<()> {
         let raw = raw.trim();
         if raw.is_empty() {
-            self.message = Some("cancelled".into());
+            self.message = Some(tr(self.lang, "cancelled", "中止しました").into());
             return Ok(());
         }
         let path = expand_path(raw);
         if !path.exists() {
-            self.message = Some(format!("no such path: {}", path.display()));
+            self.message = Some(if self.lang == crate::theme::Lang::Ja {
+            format!("そのようなパスはありません: {}", path.display())
+        } else {
+            format!("no such path: {}", path.display())
+        });
             return Ok(());
         }
         if path.is_dir() {
@@ -2506,9 +2518,9 @@ impl App {
             }
             self.popup = Popup::Notice { lines };
         } else if borders_changed {
-            self.message = Some("config reloaded — restart to apply the border change".into());
+            self.message = Some(tr(self.lang, "config reloaded — restart to apply the border change", "設定を再読み込みしました — 枠線の変更は再起動後に反映されます").into());
         } else {
-            self.message = Some("config reloaded".into());
+            self.message = Some(tr(self.lang, "config reloaded", "設定を再読み込みしました").into());
         }
     }
 
@@ -2672,7 +2684,7 @@ impl App {
 
     pub(crate) fn jump_to_next_match(&mut self, forward: bool) {
         let Some(query) = self.last_search_query.clone() else {
-            self.message = Some("no previous search".into());
+            self.message = Some(tr(self.lang, "no previous search", "直前の検索がありません").into());
             return;
         };
         let ql = query.to_lowercase();
@@ -2688,7 +2700,11 @@ impl App {
             }
             i = if forward { (i + 1) % n } else { (i + n - 1) % n };
         }
-        self.message = Some(format!("pattern not found: {}", query));
+        self.message = Some(if self.lang == crate::theme::Lang::Ja {
+            format!("パターンが見つかりません: {}", query)
+        } else {
+            format!("pattern not found: {}", query)
+        });
     }
 
     /// Run a file operation on a worker thread, showing a progress popup —
@@ -2798,7 +2814,7 @@ impl App {
             .filter(|p| p.is_file())
             .collect();
         if targets.is_empty() {
-            self.message = Some("nothing selected".into());
+            self.message = Some(tr(self.lang, "nothing selected", "選択されていません").into());
             return;
         }
         self.popup = Popup::ConfirmNoBom { targets };
@@ -3075,7 +3091,7 @@ impl App {
             if job.cancel_requested.is_none() {
                 job.cancel_requested = Some(Instant::now());
             }
-            self.message = Some("stopping…".into());
+            self.message = Some(tr(self.lang, "stopping…", "停止中…").into());
         }
     }
 
@@ -3197,7 +3213,7 @@ impl App {
             .into_iter()
             .map(|src| cian_core::elevate::CopyItem { src, dest_dir: dest.clone() })
             .collect();
-        self.message = Some("waiting for the administrator prompt…".into());
+        self.message = Some(tr(self.lang, "waiting for the administrator prompt…", "管理者の確認を待っています…").into());
         self.start_op("elevating", move |_ctl| {
             let mut report = OpReport::default();
             match cian_core::elevate::elevated_copy(&items, move_after) {
@@ -3262,7 +3278,7 @@ impl App {
         // other field still treats empty as a cancel.
         let chmod_field = matches!(kind, InputKind::UploadChmod { .. } | InputKind::DownloadChmod { .. });
         if name.is_empty() && !chmod_field {
-            self.message = Some("cancelled (empty name)".into());
+            self.message = Some(tr(self.lang, "cancelled (empty name)", "中止しました（名前が空）").into());
             return Ok(());
         }
         let result = match &kind {
@@ -3354,7 +3370,11 @@ impl App {
                     };
                     match std::fs::write(&path, body) {
                         Ok(()) => {
-                            self.message = Some(format!("saved comparison → {}", path.display()));
+                            self.message = Some(if self.lang == crate::theme::Lang::Ja {
+            format!("比較結果を保存しました → {}", path.display())
+        } else {
+            format!("saved comparison → {}", path.display())
+        });
                             self.reload_active();
                         }
                         Err(e) => self.message = Some(format!("save failed: {}", e)),
@@ -3365,7 +3385,11 @@ impl App {
             InputKind::DestPath { op, targets } => {
                 let dest = expand_path(&name);
                 if !dest.is_dir() {
-                    self.message = Some(format!("not a directory: {}", dest.display()));
+                    self.message = Some(if self.lang == crate::theme::Lang::Ja {
+            format!("ディレクトリではありません: {}", dest.display())
+        } else {
+            format!("not a directory: {}", dest.display())
+        });
                     return Ok(());
                 }
                 self.popup =
@@ -3375,7 +3399,7 @@ impl App {
             InputKind::ZipPassword { dest, sources } => {
                 // An empty password here means "never mind the encryption".
                 if name.is_empty() {
-                    self.message = Some("zip cancelled".into());
+                    self.message = Some(tr(self.lang, "zip cancelled", "zip を中止しました").into());
                     return Ok(());
                 }
                 self.start_zip(dest.clone(), sources.clone(), Some(name));
@@ -3383,7 +3407,7 @@ impl App {
             }
             InputKind::CompressName { kind, sources } => {
                 if name.is_empty() {
-                    self.message = Some("compress cancelled".into());
+                    self.message = Some(tr(self.lang, "compress cancelled", "圧縮を中止しました").into());
                     return Ok(());
                 }
                 let Some(cwd) = self.active_pane().map(|p| p.cwd.clone()) else { return Ok(()) };
@@ -3402,7 +3426,11 @@ impl App {
                 }
                 let dest = cwd.join(&fname);
                 if dest.exists() {
-                    self.message = Some(format!("already exists: {}", fname));
+                    self.message = Some(if self.lang == crate::theme::Lang::Ja {
+            format!("既に存在します: {}", fname)
+        } else {
+            format!("already exists: {}", fname)
+        });
                     return Ok(());
                 }
                 match kind {
@@ -3422,7 +3450,7 @@ impl App {
             }
             InputKind::ExtractPassword { archive, members, dest, strip } => {
                 if name.is_empty() {
-                    self.message = Some("extract cancelled".into());
+                    self.message = Some(tr(self.lang, "extract cancelled", "展開を中止しました").into());
                     return Ok(());
                 }
                 self.run_extract(archive.clone(), members.clone(), dest.clone(), Some(name), strip.clone());
@@ -3436,7 +3464,7 @@ impl App {
             }
             InputKind::SvnCommit { paths } => {
                 if name.is_empty() {
-                    self.message = Some("commit cancelled (empty message)".into());
+                    self.message = Some(tr(self.lang, "commit cancelled (empty message)", "コミットを中止しました（メッセージが空）").into());
                     return Ok(());
                 }
                 let paths = paths.clone();
@@ -3445,7 +3473,7 @@ impl App {
             }
             InputKind::BulkRenamePattern { targets } => {
                 if name.trim().is_empty() {
-                    self.message = Some("rename cancelled".into());
+                    self.message = Some(tr(self.lang, "rename cancelled", "リネームを中止しました").into());
                     return Ok(());
                 }
                 let targets = targets.clone();
@@ -3454,7 +3482,7 @@ impl App {
             }
             InputKind::LocalDestPath { files } => {
                 if name.trim().is_empty() {
-                    self.message = Some("download cancelled".into());
+                    self.message = Some(tr(self.lang, "download cancelled", "ダウンロードを中止しました").into());
                     return Ok(());
                 }
                 let files = files.clone();
@@ -3470,7 +3498,7 @@ impl App {
                 let for_scp = *for_scp;
                 let raw = name.trim();
                 if raw.is_empty() {
-                    self.message = Some("cancelled".into());
+                    self.message = Some(tr(self.lang, "cancelled", "中止しました").into());
                     self.scp_dir = None;
                     return Ok(());
                 }
@@ -3487,7 +3515,7 @@ impl App {
                     None => (rest.to_string(), 22),
                 };
                 if host.is_empty() {
-                    self.message = Some("need a host (user@host)".into());
+                    self.message = Some(tr(self.lang, "need a host (user@host)", "ホストが必要です（user@host）").into());
                     self.scp_dir = None;
                     return Ok(());
                 }
@@ -3584,7 +3612,7 @@ impl App {
             InputKind::ShortcutTarget { path, edit_idx, name: stored_name } => {
                 let target = name; // `name` here is actually the trimmed buffer
                 if target.is_empty() {
-                    self.message = Some("cancelled (empty target)".into());
+                    self.message = Some(tr(self.lang, "cancelled (empty target)", "中止しました（対象が空）").into());
                     return Ok(());
                 }
                 let entry = Shortcut::leaf(stored_name.clone(), target);

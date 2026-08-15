@@ -240,7 +240,11 @@ impl App {
                 run.expect = None;
             } else if Instant::now() >= deadline {
                 run.expect = None;
-                self.message = Some(format!("macro: gave up waiting for {:?}", needle));
+                self.message = Some(if self.lang == crate::theme::Lang::Ja {
+                    format!("マクロ: 「{needle}」を待ちましたが現れませんでした")
+                } else {
+                    format!("macro: gave up waiting for “{needle}”")
+                });
             } else {
                 self.macro_run = Some(run);
                 return true;

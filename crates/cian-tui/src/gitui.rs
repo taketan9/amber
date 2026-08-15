@@ -89,12 +89,12 @@ impl App {
     /// Stage the selection: `git add` in git, `svn add` in an svn working copy.
     pub(crate) fn git_stage(&mut self) {
         let Some((dir, kind)) = self.vcs_dir() else {
-            self.message = Some("not a version-controlled directory".into());
+            self.message = Some(tr(self.lang, "not a version-controlled directory", "バージョン管理下のディレクトリではありません").into());
             return;
         };
         let paths = self.git_targets();
         if paths.is_empty() {
-            self.message = Some("nothing selected".into());
+            self.message = Some(tr(self.lang, "nothing selected", "選択されていません").into());
             return;
         }
         let (res, verb) = match kind {
@@ -114,16 +114,16 @@ impl App {
     /// `git reset HEAD` the selection (unstage). Git-only — svn has no index.
     pub(crate) fn git_unstage(&mut self) {
         let Some((dir, kind)) = self.vcs_dir() else {
-            self.message = Some("not a version-controlled directory".into());
+            self.message = Some(tr(self.lang, "not a version-controlled directory", "バージョン管理下のディレクトリではありません").into());
             return;
         };
         if kind != Vcs::Git {
-            self.message = Some("svn has no staging area to unstage".into());
+            self.message = Some(tr(self.lang, "svn has no staging area to unstage", "svn にはステージング領域がありません").into());
             return;
         }
         let paths = self.git_targets();
         if paths.is_empty() {
-            self.message = Some("nothing selected".into());
+            self.message = Some(tr(self.lang, "nothing selected", "選択されていません").into());
             return;
         }
         match cian_core::git::unstage(&dir, &paths) {
@@ -139,12 +139,12 @@ impl App {
     /// Open the confirm dialog for discarding worktree changes to the selection.
     pub(crate) fn git_discard_prompt(&mut self) {
         let Some((dir, _kind)) = self.vcs_dir() else {
-            self.message = Some("not a version-controlled directory".into());
+            self.message = Some(tr(self.lang, "not a version-controlled directory", "バージョン管理下のディレクトリではありません").into());
             return;
         };
         let paths = self.git_targets();
         if paths.is_empty() {
-            self.message = Some("nothing selected".into());
+            self.message = Some(tr(self.lang, "nothing selected", "選択されていません").into());
             return;
         }
         self.popup = Popup::ConfirmDiscard { targets: paths, dir };
@@ -162,7 +162,11 @@ impl App {
         };
         match res {
             Ok(()) => {
-                self.message = Some(format!("reverted changes to {} path(s)", targets.len()));
+                self.message = Some(if self.lang == crate::theme::Lang::Ja {
+            format!("{} 件の変更を取り消しました", targets.len())
+        } else {
+            format!("reverted changes to {} path(s)", targets.len())
+        });
                 self.invalidate_git();
                 self.reload_active();
             }
@@ -173,21 +177,25 @@ impl App {
     /// `svn resolve --accept working` the selection (svn only).
     pub(crate) fn svn_resolve(&mut self) {
         let Some((dir, kind)) = self.vcs_dir() else {
-            self.message = Some("not a version-controlled directory".into());
+            self.message = Some(tr(self.lang, "not a version-controlled directory", "バージョン管理下のディレクトリではありません").into());
             return;
         };
         if kind != Vcs::Svn {
-            self.message = Some("resolve is svn-only".into());
+            self.message = Some(tr(self.lang, "resolve is svn-only", "resolve は svn 専用です").into());
             return;
         }
         let paths = self.git_targets();
         if paths.is_empty() {
-            self.message = Some("nothing selected".into());
+            self.message = Some(tr(self.lang, "nothing selected", "選択されていません").into());
             return;
         }
         match cian_core::svn::resolve(&dir, &paths) {
             Ok(()) => {
-                self.message = Some(format!("resolved {} path(s)", paths.len()));
+                self.message = Some(if self.lang == crate::theme::Lang::Ja {
+            format!("{} 件を解決しました", paths.len())
+        } else {
+            format!("resolved {} path(s)", paths.len())
+        });
                 self.invalidate_git();
                 self.reload_active();
             }
@@ -198,16 +206,16 @@ impl App {
     /// `svn update` the working copy (svn only; touches the network).
     pub(crate) fn svn_update(&mut self) {
         let Some((dir, kind)) = self.vcs_dir() else {
-            self.message = Some("not a version-controlled directory".into());
+            self.message = Some(tr(self.lang, "not a version-controlled directory", "バージョン管理下のディレクトリではありません").into());
             return;
         };
         if kind != Vcs::Svn {
-            self.message = Some("update is svn-only".into());
+            self.message = Some(tr(self.lang, "update is svn-only", "update は svn 専用です").into());
             return;
         }
         match cian_core::svn::update(&dir) {
             Ok(()) => {
-                self.message = Some("● svn update complete".into());
+                self.message = Some(tr(self.lang, "● svn update complete", "● svn update が完了しました").into());
                 self.invalidate_git();
                 self.reload_active();
             }
@@ -218,16 +226,16 @@ impl App {
     /// Open a text prompt for the commit message, then `svn commit` (svn only).
     pub(crate) fn svn_commit_prompt(&mut self) {
         let Some((_dir, kind)) = self.vcs_dir() else {
-            self.message = Some("not a version-controlled directory".into());
+            self.message = Some(tr(self.lang, "not a version-controlled directory", "バージョン管理下のディレクトリではありません").into());
             return;
         };
         if kind != Vcs::Svn {
-            self.message = Some("commit is svn-only here".into());
+            self.message = Some(tr(self.lang, "commit is svn-only here", "ここでのコミットは svn 専用です").into());
             return;
         }
         let paths = self.git_targets();
         if paths.is_empty() {
-            self.message = Some("nothing selected to commit".into());
+            self.message = Some(tr(self.lang, "nothing selected to commit", "コミットする対象が選択されていません").into());
             return;
         }
         self.popup = text_input(
@@ -243,7 +251,7 @@ impl App {
     pub(crate) fn svn_commit(&mut self, paths: &[PathBuf], message: &str) {
         let Some((dir, _kind)) = self.vcs_dir() else { return };
         if paths.is_empty() {
-            self.message = Some("nothing selected to commit".into());
+            self.message = Some(tr(self.lang, "nothing selected to commit", "コミットする対象が選択されていません").into());
             return;
         }
         match cian_core::svn::commit(&dir, paths, message) {
@@ -318,11 +326,11 @@ impl App {
     /// versus HEAD, in the viewer.
     pub(crate) fn git_diff_file(&mut self) {
         let Some((dir, kind)) = self.vcs_dir() else {
-            self.message = Some("not a version-controlled directory".into());
+            self.message = Some(tr(self.lang, "not a version-controlled directory", "バージョン管理下のディレクトリではありません").into());
             return;
         };
         let Some(entry) = self.active_pane().and_then(|p| p.selected()).filter(|e| !e.is_parent) else {
-            self.message = Some("select a file to diff".into());
+            self.message = Some(tr(self.lang, "select a file to diff", "差分を取るファイルを選んでください").into());
             return;
         };
         let (path, name) = (entry.path.clone(), entry.name.clone());
@@ -333,7 +341,7 @@ impl App {
         match diff {
             Some(d) if !d.trim().is_empty() => self.open_text_viewer(&format!("diff {} — {}", base, name), d),
             Some(_) => self.message = Some(format!("{}: no changes vs {}", name, base)),
-            None => self.message = Some("diff failed".into()),
+            None => self.message = Some(tr(self.lang, "diff failed", "差分の取得に失敗しました").into()),
         }
     }
 
@@ -341,7 +349,7 @@ impl App {
     /// cursor is on a tracked file, otherwise the whole repository/working copy.
     pub(crate) fn start_git_log(&mut self) {
         let Some((dir, kind)) = self.vcs_dir() else {
-            self.message = Some("not a version-controlled directory".into());
+            self.message = Some(tr(self.lang, "not a version-controlled directory", "バージョン管理下のディレクトリではありません").into());
             return;
         };
         let file = self
@@ -355,7 +363,7 @@ impl App {
             Vcs::Svn => cian_core::svn::log(&dir, path_arg, 300),
         };
         if commits.is_empty() {
-            self.message = Some("no commits".into());
+            self.message = Some(tr(self.lang, "no commits", "コミットがありません").into());
             return;
         }
         let vcs_name = match kind {
@@ -377,7 +385,7 @@ impl App {
         };
         match diff {
             Some(s) => self.open_text_viewer(&format!("commit {}", hash), s),
-            None => self.message = Some("show failed".into()),
+            None => self.message = Some(tr(self.lang, "show failed", "表示に失敗しました").into()),
         }
     }
 

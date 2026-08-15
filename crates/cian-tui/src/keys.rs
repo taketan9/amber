@@ -468,7 +468,7 @@ impl App {
                             InputKind::TransferAs { op, src, dest_dir: dest },
                         );
                     } else {
-                        self.message = Some("rename applies to a single item".into());
+                        self.message = Some(tr(self.lang, "rename applies to a single item", "リネームは1件ずつです").into());
                     }
                 }
                 Ok(())
@@ -490,7 +490,7 @@ impl App {
                         // otherwise end up inside the value. Inserted at the
                         // caret, not always the end.
                         Some(t) => insert_str_at(buffer, cursor, t.trim_end_matches(['\r', '\n'])),
-                        None => self.message = Some("clipboard has no text".into()),
+                        None => self.message = Some(tr(self.lang, "clipboard has no text", "クリップボードにテキストがありません").into()),
                     }
                 }
                 return Ok(());
@@ -560,7 +560,7 @@ impl App {
                     if let Some(cb) = self.clipboard.as_mut() {
                         let _ = cb.set_text(text);
                     }
-                    self.message = Some("copied".into());
+                    self.message = Some(tr(self.lang, "copied", "コピーしました").into());
                     self.popup = Popup::None;
                     self.restore_viewer();
                     Ok(())
@@ -1727,7 +1727,7 @@ impl App {
             if let Some(t) = self.clipboard_text() {
                 self.insert_into_active_text(&t);
             } else {
-                self.message = Some("clipboard has no text".into());
+                self.message = Some(tr(self.lang, "clipboard has no text", "クリップボードにテキストがありません").into());
             }
             return Ok(());
         }
@@ -2219,7 +2219,7 @@ impl App {
             // whose contents changed without the directory being touched.
             (true, _, KeyCode::Char('r')) | (false, false, KeyCode::F(5)) => {
                 self.reload_both();
-                self.message = Some("refreshed".into());
+                self.message = Some(tr(self.lang, "refreshed", "更新しました").into());
             }
             // `M` (and Shift+Enter, where the terminal can report it) opens the
             // same menu the right mouse button does, for the entry under the
@@ -2446,7 +2446,7 @@ impl App {
             Action::Diff => self.open_diff(),
             Action::Refresh => {
                 self.reload_both();
-                self.message = Some("refreshed".into());
+                self.message = Some(tr(self.lang, "refreshed", "更新しました").into());
             }
             Action::Menu => self.open_menu_at_cursor(),
             Action::Ssh => self.start_ssh(),

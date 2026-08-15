@@ -227,7 +227,11 @@ impl App {
         let cwd = self.shell_cwd();
         self.shell.new_tab_running(&cwd, cmd);
         self.focus(crate::FocusedPane::Shell);
-        self.message = Some(format!("editing {} in a new tab", path.display()));
+        self.message = Some(if self.lang == crate::theme::Lang::Ja {
+            format!("{} を新しいタブで編集します", path.display())
+        } else {
+            format!("editing {} in a new tab", path.display())
+        });
     }
 }
 
