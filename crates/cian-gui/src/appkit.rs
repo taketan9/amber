@@ -10,12 +10,15 @@
 //! lives in the bundle's resources, not in the running process, and no call
 //! from inside can change it.
 
+#[cfg(target_os = "macos")]
 /// cian's own icon, compiled in so the window has it wherever it runs from.
 const ICON: &[u8] = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../cian.ico"));
 
+#[cfg(target_os = "macos")]
 /// The name the desktop should use, rather than the executable's filename.
 const NAME: &str = "cian";
 
+#[cfg(target_os = "macos")]
 /// How much of the canvas a macOS app icon's artwork is supposed to fill.
 ///
 /// Every icon in the Dock sits on the same invisible grid, and the artwork
@@ -24,6 +27,7 @@ const NAME: &str = "cian";
 /// and makes it a size larger than everything beside it on a Mac.
 const ARTWORK: f32 = 0.80;
 
+#[cfg(target_os = "macos")]
 /// Put the artwork back inside the margin macOS expects.
 fn inset(src: &image::DynamicImage) -> image::DynamicImage {
     use image::GenericImageView;

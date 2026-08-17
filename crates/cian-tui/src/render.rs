@@ -744,7 +744,7 @@ fn draw_desktop_chrome(
     // into two columns — which is what Finder does when you drag it small.
     if inner.width >= SIDEBAR_W + min_w * 2 {
         let side = Rect::new(inner.x, inner.y, SIDEBAR_W, inner.height);
-        draw_sidebar(f, side, app, &th, bg);
+        draw_sidebar(f, side, app, th, bg);
         inner = Rect::new(
             inner.x + SIDEBAR_W,
             inner.y,
@@ -1108,7 +1108,7 @@ fn draw_icon_grid(f: &mut Frame, area: Rect, app: &mut App) {
     let total = pane.entries.len();
     // Scroll a page at a time, so the cursor's tile is always on screen and the
     // grid does not shuffle under the eye on every step.
-    let page = if per_page == 0 { 0 } else { pane.cursor / per_page };
+    let page = pane.cursor.checked_div(per_page).unwrap_or(0);
     let start = page * per_page;
     let end = (start + per_page).min(total);
 
@@ -8251,6 +8251,16 @@ fn draw_color_picker(
     );
 }
 
+/// A ratatui colour as plain bytes, for handing to a renderer that knows
+/// nothing about themes. Anything but a truecolor value falls back to the
+/// theme's plain text tone, which is what those variants resolve to anyway.
+fn rgb_of(c: Color) -> (u8, u8, u8) {
+    match c {
+        Color::Rgb(r, g, b) => (r, g, b),
+        _ => (0xcd, 0xcd, 0xda),
+    }
+}
+
 #[cfg(test)]
 mod md_tests {
     use super::*;
@@ -8296,15 +8306,5 @@ mod md_tests {
         assert_eq!(code[0].0, "x = **not bold** here");
         let _close = md_body_line("```", 40, g, b, &mut in_code);
         assert!(!in_code, "closing fence leaves code mode");
-    }
-}
-
-/// A ratatui colour as plain bytes, for handing to a renderer that knows
-/// nothing about themes. Anything but a truecolor value falls back to the
-/// theme's plain text tone, which is what those variants resolve to anyway.
-fn rgb_of(c: Color) -> (u8, u8, u8) {
-    match c {
-        Color::Rgb(r, g, b) => (r, g, b),
-        _ => (0xcd, 0xcd, 0xda),
     }
 }

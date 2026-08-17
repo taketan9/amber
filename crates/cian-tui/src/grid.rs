@@ -155,7 +155,7 @@ impl App {
         }
         let pane = self.active_pane()?;
         let per_page = cols * (area.height / crate::render::TILE_H).max(1) as usize;
-        let start = if per_page == 0 { 0 } else { pane.cursor / per_page * per_page };
+        let start = pane.cursor.checked_div(per_page).map_or(0, |page| page * per_page);
         let i = start + cy * cols + cx;
         (i < pane.entries.len()).then_some(i)
     }

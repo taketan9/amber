@@ -735,12 +735,16 @@ impl ApplicationHandler<Tick> for Gui {
 
                 if state == ElementState::Pressed && button == MouseButton::Left {
                     let paths = self.cian.drag_targets_at(self.at.column, self.at.row);
-                    self.drag = (!paths.is_empty()).then(|| Drag {
-                        paths,
-                        from: (self.at.column, self.at.row),
-                        moved: false,
-                        handed_over: false,
-                    });
+                    self.drag = if paths.is_empty() {
+                        None
+                    } else {
+                        Some(Drag {
+                            paths,
+                            from: (self.at.column, self.at.row),
+                            moved: false,
+                            handed_over: false,
+                        })
+                    };
                 }
                 // ...and let go on release, onto whatever is under the pointer.
                 if state == ElementState::Released && button == MouseButton::Left {
