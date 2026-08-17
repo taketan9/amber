@@ -248,6 +248,7 @@ impl ShellPane {
             cols: 80,
             shell_cmd,
             error: None,
+            note: None,
             pending: Vec::new(),
             just_split: None,
             pending_tab_cmd: None,
@@ -399,10 +400,11 @@ impl ShellPane {
             if cian_core::log::enabled() {
                 cian_core::log::log(&format!("spawning shell {:?} in {}", shell_cmd, cwd.display()));
             }
-            let result = PtySession::new(&cwd, &shell_cmd, rows, cols).map_err(|e| e.to_string());
+            let result = PtySession::start(&cwd, &shell_cmd, rows, cols).map_err(|e| e.to_string());
             if cian_core::log::enabled() {
                 match &result {
-                    Ok(_) => cian_core::log::log("shell spawned"),
+                    Ok((_, None)) => cian_core::log::log("shell spawned"),
+                    Ok((_, Some(note))) => cian_core::log::log(&format!("shell: {note}")),
                     Err(e) => cian_core::log::log(&format!("shell spawn failed: {}", e)),
                 }
             }
@@ -453,7 +455,13 @@ impl ShellPane {
         let mut still_pending = Vec::with_capacity(self.pending.len());
         for p in std::mem::take(&mut self.pending) {
             match p.rx.try_recv() {
-                Ok(Ok(session)) => {
+                Ok(Ok((session, note))) => {
+                    // A shell that is not the one that was asked for says so,
+                    // rather than leaving "why is this cmd.exe" to be worked
+                    // out from the prompt.
+                    if let Some(note) = note {
+                        self.note = Some(note);
+                    }
                     self.install(session, p.kind);
                     changed = true;
                 }

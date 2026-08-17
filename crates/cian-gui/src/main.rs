@@ -1035,6 +1035,11 @@ impl ApplicationHandler<Tick> for Gui {
             self.set_view(View::Classic);
         }
         self.needs_redraw |= self.cian.tick();
+        // Profiling paints continuously, on purpose: the question it answers is
+        // what a frame costs, and frames only happen when something changes.
+        if self.prof {
+            self.needs_redraw = true;
+        }
 
         if self.cian.should_quit() {
             event_loop.exit();

@@ -198,6 +198,43 @@ pub fn format_time(t: SystemTime) -> String {
     dt.format("%Y-%m-%d %H:%M").to_string()
 }
 
+/// [`format_time`], remembered.
+///
+/// Formatting one costs about a microsecond — chrono resolves the local zone
+/// for every call — and a file listing asks for the same eighty timestamps on
+/// every frame it is on screen, which is eighty microseconds a frame to
+/// recompute an answer that cannot have changed. A file's mtime is a fact
+/// about the past.
+///
+/// Thread-local, so no lock; bounded, so a session that walks a million files
+/// does not keep a string for each of them.
+pub fn format_time_cached(t: SystemTime) -> String {
+    use std::cell::RefCell;
+    use std::collections::HashMap;
+    /// Enough for any listing on any screen, several times over.
+    const CAP: usize = 4096;
+    thread_local! {
+        static SEEN: RefCell<HashMap<u64, String>> = RefCell::new(HashMap::new());
+    }
+    let key = match t.duration_since(std::time::UNIX_EPOCH) {
+        // Displayed to the minute, so that is what is keyed on.
+        Ok(d) => d.as_secs() / 60,
+        Err(_) => return format_time(t),
+    };
+    SEEN.with(|seen| {
+        let mut seen = seen.borrow_mut();
+        if let Some(s) = seen.get(&key) {
+            return s.clone();
+        }
+        let s = format_time(t);
+        if seen.len() >= CAP {
+            seen.clear();
+        }
+        seen.insert(key, s.clone());
+        s
+    })
+}
+
 /// What the listing is ordered by.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SortKey {
@@ -1232,4 +1269,27 @@ mod perf_bench {
         for i in 0..n { p.set_sort(Sort{ key: if i%2==0 {SortKey::Name} else {SortKey::Size}, reverse:false }); }
         println!("set_sort: {:?}/call", t.elapsed()/n);
     }
+}
+#[test]
+#[ignore]
+fn bench_formatters() {
+    use std::time::{Instant, SystemTime, Duration, UNIX_EPOCH};
+    let times: Vec<SystemTime> =
+        (0..80).map(|i| UNIX_EPOCH + Duration::from_secs(1_700_000_000 + i * 3600)).collect();
+    let t = Instant::now();
+    let mut n = 0usize;
+    for _ in 0..1000 {
+        for &ts in &times {
+            n += crate::format_time(ts).len();
+        }
+    }
+    eprintln!("format_time: {:?} per call ({n})", t.elapsed() / 80_000);
+    let t = Instant::now();
+    let mut n = 0usize;
+    for _ in 0..1000 {
+        for i in 0..80u64 {
+            n += crate::human_size(i * 12345).len();
+        }
+    }
+    eprintln!("human_size: {:?} per call ({n})", t.elapsed() / 80_000);
 }

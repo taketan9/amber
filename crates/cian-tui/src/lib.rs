@@ -231,6 +231,9 @@ pub struct ShellPane {
     cols: u16,
     shell_cmd: String,
     error: Option<String>,
+    /// Set when a shell started, but not the one that was asked for. Shown once
+    /// on the status line and then taken.
+    note: Option<String>,
     /// Spawns currently in flight on background threads; polled each tick by
     /// [`ShellPane::poll_pending`]. See [`ShellPane::spawn_async`].
     pending: Vec<PendingSpawn>,
@@ -256,7 +259,9 @@ pub struct ShellPane {
 type RemoteLsRx = std::sync::mpsc::Receiver<Result<(String, Vec<cian_scp::RemoteEntry>), String>>;
 
 struct PendingSpawn {
-    rx: std::sync::mpsc::Receiver<std::result::Result<PtySession, String>>,
+    /// The session, and a note when it is not the shell that was asked for —
+    /// see [`cian_pty::PtySession::start`].
+    rx: std::sync::mpsc::Receiver<std::result::Result<(PtySession, Option<String>), String>>,
     kind: PendingKind,
 }
 
@@ -3005,6 +3010,26 @@ impl App {
         self.visual_anchor = None;
     }
 
+    /// Is there a shell panel on screen at all?
+    ///
+    /// The single-pane views — details and the icon grid — are the filer and
+    /// nothing else, deliberately: they are what someone who did not want a
+    /// terminal picked. So there is no shell panel in them, and moving the
+    /// focus into one would be moving it somewhere nothing is drawn.
+    pub(crate) fn has_shell_panel(&self) -> bool {
+        !self.icon_view && self.skin != Skin::Finder
+    }
+
+    /// Say why the shell is not here, rather than moving the focus to a panel
+    /// that is not on screen.
+    fn no_shell_panel_here(&mut self) {
+        self.message = Some(tr(
+            self.lang,
+            "the shell lives in the classic view — Ctrl+Shift+G",
+            "シェルはクラシック表示にあります — Ctrl+Shift+G",
+        ).into());
+    }
+
     fn focus_direction(&mut self, dir: char) {
         let next = match (self.focused, dir) {
             (FocusedPane::Left, 'l') => FocusedPane::Right,
@@ -3015,6 +3040,10 @@ impl App {
             (FocusedPane::Shell, 'l') => FocusedPane::Right,
             _ => self.focused,
         };
+        if next == FocusedPane::Shell && !self.has_shell_panel() {
+            self.no_shell_panel_here();
+            return;
+        }
         if next != self.focused {
             self.focus(next);
         }
@@ -5052,6 +5081,10 @@ impl App {
         }
         // Install the shell tab once its background spawn (see `ensure`) lands.
         if self.shell.poll_pending() {
+            // ...and say so if what started was not what was asked for.
+            if let Some(note) = self.shell.note.take() {
+                self.message = Some(note);
+            }
             redraw = true;
         }
         // Advance a running layout macro (splits, colours, commands) once the

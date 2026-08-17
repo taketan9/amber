@@ -274,6 +274,40 @@ impl App {
         self.git[idx].as_ref().and_then(|g| g.status.as_ref())
     }
 
+    /// Lift a pane's git status out of `app` for the length of a frame.
+    ///
+    /// The drawing code needs the status *and* a mutable borrow of the pane
+    /// next to it, which the borrow checker will not allow — so it used to take
+    /// a clone. A `RepoStatus` holds a map of every changed path and a set of
+    /// every directory above them, and that was being copied twice per frame,
+    /// for a screen that shows forty rows. In a tree with a lot of untracked
+    /// files under it the copy is larger than everything else the frame does.
+    ///
+    /// Taken and put back instead: two moves, no allocation. Always paired with
+    /// [`App::put_git`] — a frame that returns in between leaves the pane
+    /// looking like it is not in a repository until the next reload.
+    pub(crate) fn take_git(&mut self, pane: FocusedPane) -> Option<cian_core::git::RepoStatus> {
+        let idx = match pane {
+            FocusedPane::Left => 0,
+            FocusedPane::Right => 1,
+            FocusedPane::Shell => return None,
+        };
+        self.git[idx].as_mut().and_then(|g| g.status.take())
+    }
+
+    /// Put back what [`App::take_git`] lifted out.
+    pub(crate) fn put_git(&mut self, pane: FocusedPane, status: Option<cian_core::git::RepoStatus>) {
+        let Some(status) = status else { return };
+        let idx = match pane {
+            FocusedPane::Left => 0,
+            FocusedPane::Right => 1,
+            FocusedPane::Shell => return,
+        };
+        if let Some(g) = self.git[idx].as_mut() {
+            g.status = Some(status);
+        }
+    }
+
     /// Show read-only `text` in the viewer (used for git diffs / commit views).
     /// A synthetic view: no file on disk, not editable.
     pub(crate) fn open_text_viewer(&mut self, title: &str, text: String) {

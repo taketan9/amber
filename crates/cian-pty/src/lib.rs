@@ -72,6 +72,66 @@ pub fn default_shell() -> String {
     }
 }
 
+/// Split a configured shell into the program and its arguments.
+///
+/// `cian.set_option("shell", …)` is written the way one would type it, and
+/// "powershell.exe -NoLogo" is a perfectly ordinary way to type it. Handed
+/// whole to the spawner it becomes the *filename* `powershell.exe -NoLogo`,
+/// which does not exist — and the shell panel then stays empty for a reason
+/// nothing on screen could explain.
+///
+/// Double quotes group, because a Windows path with a space in it has to be
+/// writable: `"C:\Program Files\PowerShell\7\pwsh.exe" -NoLogo`.
+pub fn split_command(spec: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut current = String::new();
+    let mut quoted = false;
+    let mut any = false;
+    for c in spec.chars() {
+        match c {
+            '"' => {
+                quoted = !quoted;
+                any = true;
+            }
+            c if c.is_whitespace() && !quoted => {
+                if any {
+                    out.push(std::mem::take(&mut current));
+                    any = false;
+                }
+            }
+            c => {
+                current.push(c);
+                any = true;
+            }
+        }
+    }
+    if any {
+        out.push(current);
+    }
+    out
+}
+
+/// The shells to try, in order, when the configured one cannot be started.
+///
+/// A shell panel that stays empty is the least useful thing cian can do. If
+/// what was asked for will not start — a PowerShell that is not installed, a
+/// path that moved, a name with a typo in it — the next best thing is a shell,
+/// plus a note saying which one and why.
+pub fn fallback_shells() -> Vec<String> {
+    if cfg!(windows) {
+        let mut out = vec!["powershell.exe".to_string(), "cmd.exe".to_string()];
+        if let Ok(comspec) = std::env::var("COMSPEC") {
+            out.insert(0, comspec);
+        }
+        if let Ok(root) = std::env::var("SystemRoot") {
+            out.push(format!("{root}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"));
+        }
+        out
+    } else {
+        vec!["/bin/sh".to_string()]
+    }
+}
+
 /// A live shell running inside a pseudo-terminal.
 pub struct PtySession {
     parser: Arc<Mutex<ShellParser>>,
@@ -92,6 +152,36 @@ pub struct PtySession {
 }
 
 impl PtySession {
+    /// Spawn `shell` in a PTY, falling back to something that will start.
+    ///
+    /// Returns the session and, when the configured shell was not the one that
+    /// started, a note for the caller to show. A panel with `cmd.exe` in it and
+    /// a line saying why beats an empty panel every time.
+    pub fn start(
+        cwd: &Path,
+        shell: &str,
+        rows: u16,
+        cols: u16,
+    ) -> Result<(Self, Option<String>)> {
+        let first = match Self::new(cwd, shell, rows, cols) {
+            Ok(s) => return Ok((s, None)),
+            Err(e) => e,
+        };
+        let asked = split_command(shell).first().cloned().unwrap_or_default();
+        for candidate in fallback_shells() {
+            if candidate == shell || candidate == asked {
+                continue;
+            }
+            if let Ok(s) = Self::new(cwd, &candidate, rows, cols) {
+                return Ok((
+                    s,
+                    Some(format!("{shell} が起動できないので {candidate} を使います（{first}）")),
+                ));
+            }
+        }
+        Err(first)
+    }
+
     /// Spawn `shell` inside a fresh PTY of `rows`×`cols`, starting in `cwd`.
     pub fn new(cwd: &Path, shell: &str, rows: u16, cols: u16) -> Result<Self> {
         let rows = rows.max(1);
@@ -105,7 +195,15 @@ impl PtySession {
             pixel_height: 0,
         })?;
 
-        let mut cmd = CommandBuilder::new(shell);
+        // Split rather than handed over whole: see [`split_command`].
+        let argv = split_command(shell);
+        let (program, args) = argv
+            .split_first()
+            .ok_or_else(|| anyhow::anyhow!("no shell configured"))?;
+        let mut cmd = CommandBuilder::new(program);
+        for arg in args {
+            cmd.arg(arg);
+        }
         cmd.cwd(cwd);
         // Advertise a capable terminal so programs emit color/cursor sequences
         // that vt100 understands.
@@ -337,3 +435,47 @@ impl Drop for PtySession {
 
 
 
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `cian.set_option("shell", …)` is written the way one would type it.
+    /// Handed to the spawner whole, "powershell.exe -NoLogo" is the *name of a
+    /// file* — one that does not exist — and the panel stays empty.
+    #[test]
+    fn a_shell_with_arguments_is_split_into_program_and_arguments() {
+        assert_eq!(split_command("powershell.exe -NoLogo"), ["powershell.exe", "-NoLogo"]);
+        assert_eq!(split_command("pwsh"), ["pwsh"]);
+        assert_eq!(split_command("  /bin/zsh   -l  "), ["/bin/zsh", "-l"]);
+    }
+
+    /// A Windows path has spaces in it, and has to be writable.
+    #[test]
+    fn quotes_group_a_path_with_spaces() {
+        assert_eq!(
+            split_command("\"C:\\Program Files\\PowerShell\\7\\pwsh.exe\" -NoLogo"),
+            ["C:\\Program Files\\PowerShell\\7\\pwsh.exe", "-NoLogo"]
+        );
+    }
+
+    #[test]
+    fn nothing_configured_is_no_arguments_rather_than_one_empty_one() {
+        assert!(split_command("").is_empty());
+        assert!(split_command("   ").is_empty());
+    }
+
+    /// Something has to start. The ladder ends somewhere that exists on a bare
+    /// install of the platform.
+    #[test]
+    fn the_fallbacks_end_somewhere_that_exists() {
+        let last = fallback_shells();
+        assert!(!last.is_empty());
+        if cfg!(windows) {
+            assert!(last.iter().any(|s| s.to_lowercase().contains("cmd.exe")));
+            assert!(last.iter().any(|s| s.to_lowercase().contains("powershell")));
+        } else {
+            assert!(last.iter().any(|s| s == "/bin/sh"));
+        }
+    }
+}

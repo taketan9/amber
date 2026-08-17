@@ -55,6 +55,7 @@ impl App {
 
         match verb {
             "q" | "quit" => self.should_quit = true,
+            "shell" if !self.has_shell_panel() => self.no_shell_panel_here(),
             "shell" => self.focus(FocusedPane::Shell),
             "man" | "help" | "h" => self.open_manual(),
             "paste" => { let _ = self.paste_clip(); }

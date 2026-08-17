@@ -5831,6 +5831,12 @@
         let mut app = App::new(dir.clone(), dir, en_config()).unwrap();
         let screen = render(&mut app, 120, 30).join("\n");
         assert!(screen.contains("trunk"), "branch shown in the status line:\n{screen}");
+        // And on the frame after that. The status is lifted out of `app` for
+        // the length of a frame rather than copied (see `App::take_git`), so a
+        // path that forgets to put it back would show the branch once and then
+        // look like a directory that is not in a repository at all.
+        let again = render(&mut app, 120, 30).join("\n");
+        assert!(again.contains("trunk"), "still there on the next frame:\n{again}");
     }
 
     /// Stage / unstage / discard through the app on a real throwaway repo.
@@ -13040,11 +13046,12 @@ mod a_chosen_theme_survives_the_view {
     }
 }
 
-/// The single-pane views had nowhere to put a shell. Focusing the panel in the
-/// view the window opens in therefore did everything except appear: the shell
-/// started, the keys went to it, and the screen carried on showing the file
-/// listing — which reads as a shell that will not start.
-mod the_shell_has_somewhere_to_go {
+/// The single-pane views are the filer and nothing else — that is what someone
+/// who did not want a terminal picked. So there is no shell panel in them, and
+/// asking for one says where it lives rather than moving the focus somewhere
+/// nothing is drawn (which is what made the shell look like it would not
+/// start).
+mod the_filer_views_have_no_shell {
     use super::*;
 
     fn detail_view(names: &[&str]) -> (tempfile::TempDir, App) {
@@ -13054,45 +13061,29 @@ mod the_shell_has_somewhere_to_go {
         (d, app)
     }
 
-    /// The rectangle the shell panel was given by the last frame. Empty when
-    /// the layout drew no panel at all — which is what these views did.
-    fn panel(app: &mut App) -> Rect {
-        let _ = render(app, 140, 40);
-        app.layout_rects.shell
-    }
-
     #[test]
-    fn the_detail_view_makes_room_once_the_shell_is_focused() {
+    fn the_detail_view_keeps_the_focus_on_the_files() {
         let (_d, mut app) = detail_view(&["a.txt"]);
-        assert_eq!(panel(&mut app).height, 0, "no panel while nobody has asked for one");
-        app.focus(FocusedPane::Shell);
-        let rect = panel(&mut app);
-        assert!(rect.height > 0, "the panel is on screen once the focus is in it");
-        assert!(rect.y > 0 && rect.y + rect.height <= 40, "under the listing: {rect:?}");
+        app.handle_key(KeyEvent::new(KeyCode::Char('J'), KeyModifiers::SHIFT)).unwrap();
+        assert_eq!(app.focused, FocusedPane::Left, "the focus never left the listing");
+        assert!(app.message.is_some(), "and it says where the shell is");
+        let _ = render(&mut app, 140, 40);
+        assert_eq!(app.layout_rects.shell.height, 0, "no panel is drawn for it");
     }
 
     #[test]
-    fn the_icon_grid_makes_room_too() {
+    fn the_icon_grid_answers_the_same_way() {
         let (_d, mut app) = detail_view(&["a.txt"]);
         app.icon_view = true;
-        assert_eq!(panel(&mut app).height, 0);
-        app.focus(FocusedPane::Shell);
-        assert!(panel(&mut app).height > 0);
+        app.handle_key(KeyEvent::new(KeyCode::Char('J'), KeyModifiers::SHIFT)).unwrap();
+        assert_ne!(app.focused, FocusedPane::Shell);
     }
 
-    /// And it stays while a shell lives there, so leaving the panel does not
-    /// throw away the shell you were in the middle of.
     #[test]
-    fn it_stays_while_a_shell_is_running() {
-        let (_d, mut app) = detail_view(&["a.txt"]);
-        app.focus(FocusedPane::Shell);
-        assert!(panel(&mut app).height > 0);
-        app.focus(FocusedPane::Left);
-        assert!(
-            app.shell.in_use(),
-            "the shell that was started is still there (or still starting)"
-        );
-        assert!(panel(&mut app).height > 0, "so its panel is too");
+    fn the_classic_view_still_goes_to_the_shell() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        app.handle_key(KeyEvent::new(KeyCode::Char('J'), KeyModifiers::SHIFT)).unwrap();
+        assert_eq!(app.focused, FocusedPane::Shell, "classic has a panel, so J reaches it");
     }
 }
 
@@ -13106,5 +13097,44 @@ mod the_cloud_mark_fits_its_cell {
             "↓ ",
             "the window rasterises per cell, and ☁ is a two-cell glyph there"
         );
+    }
+}
+
+/// What a frame costs, on this machine, in a directory big enough to fill the
+/// pane. Not an assertion — "fast enough" is not something a test can decide —
+/// but a number that can be taken before and after a change to the drawing
+/// path, which is the only way to tell tuning from fiddling.
+///
+///     cargo test --release -p cian-tui -- --ignored frame_cost --nocapture
+mod frame_cost {
+    use super::*;
+
+    #[test]
+    #[ignore = "a measurement, not a test"]
+    fn a_full_pane_of_files() {
+        let d = tempfile::tempdir().unwrap();
+        for i in 0..2000 {
+            std::fs::write(d.path().join(format!("file_{i:04}.txt")), b"x").unwrap();
+        }
+        let p = d.path().to_path_buf();
+        let mut app = App::new(p.clone(), p, en_config()).unwrap();
+        app.native_icons = true;
+
+        // Warm: the first frame pays for whatever is lazily built.
+        for _ in 0..20 {
+            let _ = render(&mut app, 200, 60);
+        }
+        // The minimum of many runs, not the mean: a laptop's scheduler adds
+        // time and never removes it, so the fastest run is the closest thing to
+        // what the code actually costs.
+        let mut best = std::time::Duration::MAX;
+        for _ in 0..30 {
+            let t = std::time::Instant::now();
+            for _ in 0..10 {
+                let _ = render(&mut app, 200, 60);
+            }
+            best = best.min(t.elapsed() / 10);
+        }
+        eprintln!("frame_cost: {best:?} per frame, 200x60, two panes of 2000 files");
     }
 }

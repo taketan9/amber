@@ -133,17 +133,20 @@ fn draw_split(f: &mut Frame, main_area: Rect, app: &mut App, ov: AnimOverride) {
     }
     let (fl_l, fl_r) = (app.flash_level(FocusedPane::Left), app.flash_level(FocusedPane::Right));
     let restore = push_pane_theme(app, 0);
-    // Cloned rather than borrowed: the panes are drawn with `&mut`, and a
-    // borrow of `app.git` would keep the whole `app` borrowed alongside it.
+    // Taken rather than borrowed: the panes are drawn with `&mut`, and a borrow
+    // of `app.git` would keep the whole `app` borrowed alongside it. Put back a
+    // few lines down — see [`App::take_git`].
     let (git_l, git_r) = (
-        app.git_for(FocusedPane::Left).cloned(),
-        app.git_for(FocusedPane::Right).cloned(),
+        app.take_git(FocusedPane::Left),
+        app.take_git(FocusedPane::Right),
     );
     draw_file_pane(f, panes_split[0], &mut app.left, &mut tracks, app.focused == FocusedPane::Left, visual_for_left, app.mode, bg_l, fl_l, FocusedPane::Left, &mut tab_rects, git_l.as_ref(), app.lang, &mut sort_rects, &mut crumb_rects, &mut nav_rects, app.skin, app.native_icons, &mut icon_slots);
     if let Some(prev) = restore { set_theme(prev); }
     let restore = push_pane_theme(app, 1);
     draw_file_pane(f, panes_split[1], &mut app.right, &mut tracks, app.focused == FocusedPane::Right, visual_for_right, app.mode, bg_r, fl_r, FocusedPane::Right, &mut tab_rects, git_r.as_ref(), app.lang, &mut sort_rects, &mut crumb_rects, &mut nav_rects, app.skin, app.native_icons, &mut icon_slots);
     if let Some(prev) = restore { set_theme(prev); }
+    app.put_git(FocusedPane::Left, git_l);
+    app.put_git(FocusedPane::Right, git_r);
     // With preview on and a file pane focused, the shell panel's area shows
     // the file under the cursor instead; the PTY runs on underneath, and
     // focusing the shell (Shift+J / click) gets its pixels back.
@@ -178,16 +181,18 @@ fn draw_zoom_overlay(f: &mut Frame, rect: Rect, app: &mut App, ov: AnimOverride)
             let (bg, fl) = (app.pane_bg[0], app.flash_level(FocusedPane::Left));
             let va = app.visual_anchor;
             let restore = push_pane_theme(app, 0);
-            let g = app.git_for(FocusedPane::Left).cloned();
+            let g = app.take_git(FocusedPane::Left);
             draw_file_pane(f, rect, &mut app.left, &mut tracks, true, va, app.mode, bg, fl, FocusedPane::Left, &mut Vec::new(), g.as_ref(), app.lang, &mut Vec::new(), &mut Vec::new(), &mut Vec::new(), app.skin, app.native_icons, &mut Vec::new());
+            app.put_git(FocusedPane::Left, g);
             if let Some(prev) = restore { set_theme(prev); }
         }
         FocusedPane::Right => {
             let (bg, fl) = (app.pane_bg[1], app.flash_level(FocusedPane::Right));
             let va = app.visual_anchor;
             let restore = push_pane_theme(app, 1);
-            let g = app.git_for(FocusedPane::Right).cloned();
+            let g = app.take_git(FocusedPane::Right);
             draw_file_pane(f, rect, &mut app.right, &mut tracks, true, va, app.mode, bg, fl, FocusedPane::Right, &mut Vec::new(), g.as_ref(), app.lang, &mut Vec::new(), &mut Vec::new(), &mut Vec::new(), app.skin, app.native_icons, &mut Vec::new());
+            app.put_git(FocusedPane::Right, g);
             if let Some(prev) = restore { set_theme(prev); }
         }
         FocusedPane::Shell => {
@@ -250,8 +255,9 @@ fn draw_zoomed(f: &mut Frame, area: Rect, app: &mut App, ov: AnimOverride) {
             let va = app.visual_anchor;
             let (bg, fl) = (app.pane_bg[0], app.flash_level(FocusedPane::Left));
             let restore = push_pane_theme(app, 0);
-            let g = app.git_for(FocusedPane::Left).cloned();
+            let g = app.take_git(FocusedPane::Left);
             draw_file_pane(f, area, &mut app.left, &mut tracks, true, va, app.mode, bg, fl, FocusedPane::Left, &mut tab_rects, g.as_ref(), app.lang, &mut sort_rects, &mut crumb_rects, &mut nav_rects, app.skin, app.native_icons, &mut icon_slots);
+            app.put_git(FocusedPane::Left, g);
             if let Some(prev) = restore { set_theme(prev); }
         }
         FocusedPane::Right => {
@@ -260,8 +266,9 @@ fn draw_zoomed(f: &mut Frame, area: Rect, app: &mut App, ov: AnimOverride) {
             let va = app.visual_anchor;
             let (bg, fl) = (app.pane_bg[1], app.flash_level(FocusedPane::Right));
             let restore = push_pane_theme(app, 1);
-            let g = app.git_for(FocusedPane::Right).cloned();
+            let g = app.take_git(FocusedPane::Right);
             draw_file_pane(f, area, &mut app.right, &mut tracks, true, va, app.mode, bg, fl, FocusedPane::Right, &mut tab_rects, g.as_ref(), app.lang, &mut sort_rects, &mut crumb_rects, &mut nav_rects, app.skin, app.native_icons, &mut icon_slots);
+            app.put_git(FocusedPane::Right, g);
             if let Some(prev) = restore { set_theme(prev); }
         }
         FocusedPane::Shell => {
@@ -342,7 +349,7 @@ pub(crate) fn draw(f: &mut Frame, app: &mut App) {
         // of pictures wants width more than anything else, and two of them side
         // by side leave each too narrow to be worth looking at — which is why
         // no desktop file manager offers a two-pane icon view either.
-        draw_icon_grid(f, main_area, app, ov);
+        draw_icon_grid(f, main_area, app);
     } else if app.skin == Skin::Finder && !app.zoomed {
         draw_detail_view(f, main_area, app, ov);
     } else if app.zoomed {
@@ -1034,7 +1041,6 @@ fn draw_detail_view(f: &mut Frame, area: Rect, app: &mut App, ov: AnimOverride) 
     let th = theme();
     let bg = th.base_bg;
 
-    let (area, shell_area) = room_for_shell(area, app, ov);
     let Some(inner) = draw_desktop_chrome(f, area, app, &th, bg, 24) else {
         // Too narrow to dress: fall back to the layout that needs no room.
         draw_split(f, area, app, ov);
@@ -1062,7 +1068,7 @@ fn draw_detail_view(f: &mut Frame, area: Rect, app: &mut App, ov: AnimOverride) 
     app.layout_rects = rects;
     let (pane_bg, fl) = (app.pane_bg[side], app.flash_level(app.focused));
     let restore = push_pane_theme(app, side);
-    let g = app.git_for(app.focused).cloned();
+    let g = app.take_git(app.focused);
     let which = if side == 1 { FocusedPane::Right } else { FocusedPane::Left };
     let tabs = if side == 1 { &mut app.right } else { &mut app.left };
     draw_file_pane(
@@ -1070,6 +1076,7 @@ fn draw_detail_view(f: &mut Frame, area: Rect, app: &mut App, ov: AnimOverride) 
         &mut tab_rects, g.as_ref(), app.lang, &mut sort_rects, &mut crumb_rects,
         &mut nav_rects, app.skin, app.native_icons, &mut icon_slots,
     );
+    app.put_git(which, g);
     if let Some(prev) = restore {
         set_theme(prev);
     }
@@ -1082,72 +1089,6 @@ fn draw_detail_view(f: &mut Frame, area: Rect, app: &mut App, ov: AnimOverride) 
     // The listing owns this rectangle, so a click in it is a click on a row —
     // the same question the grid answers with `grid_area`.
     app.grid_area = None;
-
-    draw_shell_below(f, area, shell_area, app, ov);
-}
-
-/// Split `area` into a listing and, when there is a shell to show, a panel for
-/// it underneath.
-///
-/// The single-pane views — details and the icon grid — had no shell panel at
-/// all, and the detail view is what the window opens in. Going to the shell
-/// there focused something that was never drawn: the shell really did start and
-/// keys really did reach it, and the screen never said so, which from the
-/// outside is a shell that will not start.
-///
-/// Only when there is one. An empty panel under an Explorer-shaped view is
-/// furniture nobody asked for; the moment a shell exists, or the focus moves to
-/// where one would be, it appears — on the same seam, with the same ratio, as
-/// the split layout's.
-fn room_for_shell(area: Rect, app: &App, ov: AnimOverride) -> (Rect, Option<Rect>) {
-    if app.focused != FocusedPane::Shell && !app.shell.in_use() {
-        return (area, None);
-    }
-    let pct = ov.ratio_for(DividerTarget::Main, app.main_pct);
-    let split = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Percentage(pct), Constraint::Percentage(100 - pct)])
-        .split(area);
-    (split[0], Some(split[1]))
-}
-
-/// Draw the shell panel [`room_for_shell`] made room for, if it did.
-fn draw_shell_below(
-    f: &mut Frame,
-    listing: Rect,
-    shell_area: Option<Rect>,
-    app: &mut App,
-    ov: AnimOverride,
-) {
-    let Some(shell_area) = shell_area else {
-        app.dividers = Vec::new();
-        app.shell_leaves = Vec::new();
-        return;
-    };
-    // The seam is draggable, as it is in the split layout — the same target, so
-    // a ratio set in one view holds in the other.
-    app.layout_rects.shell = shell_area;
-    let mut dividers = vec![Divider {
-        zone: seam_zone(Direction::Vertical, listing, shell_area),
-        parent: Rect::new(
-            listing.x,
-            listing.y,
-            listing.width,
-            listing.height + shell_area.height,
-        ),
-        dir: Direction::Vertical,
-        target: DividerTarget::Main,
-    }];
-    let mut leaves = Vec::new();
-    let mut shell_tabs = Vec::new();
-    let log_border = recording_pulse(app.started.elapsed());
-    draw_shell(
-        f, shell_area, &mut app.shell, app.focused == FocusedPane::Shell, &mut dividers,
-        &mut leaves, ov, &mut shell_tabs, log_border,
-    );
-    app.tab_rects.extend(shell_tabs);
-    app.dividers = dividers;
-    app.shell_leaves = leaves;
 }
 
 /// The left pane as a grid of pictures.
@@ -1156,8 +1097,7 @@ fn draw_shell_below(
 /// are drawn by whoever owns the surface, from the [`crate::IconSlot`]s pushed
 /// here. Without a front end that can do that, this view is an empty grid —
 /// which is why it is offered only in the window.
-fn draw_icon_grid(f: &mut Frame, area: Rect, app: &mut App, ov: AnimOverride) {
-    let (area, shell_area) = room_for_shell(area, app, ov);
+fn draw_icon_grid(f: &mut Frame, area: Rect, app: &mut App) {
     let th = theme();
     let bg = th.base_bg;
     let focus_bg = focus_badge_color(app.mode);
@@ -1258,7 +1198,6 @@ fn draw_icon_grid(f: &mut Frame, area: Rect, app: &mut App, ov: AnimOverride) {
         );
     }
     app.icon_slots.extend(slots);
-    draw_shell_below(f, area, shell_area, app, ov);
 }
 
 fn draw_startup_splash(f: &mut Frame, area: Rect, elapsed_ms: u128) {
@@ -1952,8 +1891,21 @@ fn draw_file_pane(
                 .and_then(|g| g.mark_for(&e.path))
                 .map(|m| (m.badge(), git_mark_color(m)))
                 .unwrap_or(("", Color::Reset));
+            // Padded without formatting: the badge is one character or none,
+            // and a `format!` per row per frame for that is a page of
+            // allocation to write two cells.
+            let badge: &str = match badge {
+                "" => "  ",
+                "M" => "M ",
+                "A" => "A ",
+                "D" => "D ",
+                "R" => "R ",
+                "?" => "? ",
+                "!" => "! ",
+                _ => "* ",
+            };
             spans.push(Span::styled(
-                format!("{:<1} ", badge),
+                badge,
                 Style::default().fg(color).add_modifier(Modifier::BOLD),
             ));
         }
@@ -1990,9 +1942,9 @@ fn draw_file_pane(
                 glyph,
                 prefer_glyph: skin != Skin::Finder,
             });
-            "   ".to_string()
+            std::borrow::Cow::Borrowed("   ")
         } else {
-            format!("{}  ", icon_for(e))
+            std::borrow::Cow::Owned(format!("{}  ", icon_for(e)))
         };
         spans.extend([
             Span::styled(mark_symbol, mark_style),
@@ -2001,12 +1953,12 @@ fn draw_file_pane(
         ]);
         if show_size {
             // Directories have no meaningful byte count; the `..` row shows none.
-            let s = if e.is_parent {
-                String::new()
+            let s: std::borrow::Cow<str> = if e.is_parent {
+                std::borrow::Cow::Borrowed("")
             } else if e.is_dir {
-                "—".to_string()
+                std::borrow::Cow::Borrowed("—")
             } else {
-                cian_core::human_size(e.len)
+                std::borrow::Cow::Owned(cian_core::human_size(e.len))
             };
             spans.push(Span::styled(
                 format!(" {:>w$}", s, w = SIZE_COL_W as usize),
@@ -2014,12 +1966,18 @@ fn draw_file_pane(
             ));
         }
         if show_time {
+            // Formatting a date costs about a microsecond — chrono resolves the
+            // local zone for each one — and a listing shows the same handful of
+            // timestamps on every frame it is on screen. Memoised, it costs a
+            // hash lookup. See [`cian_core::format_time_cached`].
             let t = if e.is_parent {
-                String::new()
+                std::borrow::Cow::Borrowed("")
             } else {
-                e.modified.map(cian_core::format_time).unwrap_or_else(|| "-".into())
+                e.modified
+                    .map(|m| std::borrow::Cow::Owned(cian_core::format_time_cached(m)))
+                    .unwrap_or(std::borrow::Cow::Borrowed("-"))
             };
-            spans.push(Span::styled(format!(" {}", t), meta_on(selected_row)));
+            spans.push(Span::styled(format!(" {t}"), meta_on(selected_row)));
         }
 
         let mut item = ListItem::new(Line::from(spans));
