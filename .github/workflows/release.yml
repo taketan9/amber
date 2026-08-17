@@ -17,6 +17,58 @@ permissions:
   contents: write
 
 jobs:
+  # The window build for a Mac, as a double-clickable .app. This is the one to
+  # download to try `cian` on a real machine; `cian-tui` rides along in the same
+  # zip for the terminal.
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Fetch the bundled font
+        run: |
+          mkdir -p crates/cian-gui/fonts
+          curl -sL -o font.zip "$FONT_URL"
+          unzip -q font.zip -d font
+          cp "$(find font -name 'HackGenConsoleNF-Regular.ttf' | head -1)" crates/cian-gui/fonts/cian.ttf
+        env:
+          FONT_URL: https://github.com/yuru7/HackGen/releases/download/v2.10.0/HackGen_NF_v2.10.0.zip
+
+      - name: Build (release)
+        run: |
+          cargo build --release --bin cian-tui
+          cargo build --release --bin cian --features cian-gui/bundled-font
+
+      - name: Bundle and stage
+        run: |
+          ./packaging/macos/bundle.sh
+          stage=cian-macos
+          mkdir -p "$stage/examples"
+          cp -R target/cian.app "$stage/"
+          cp target/release/cian-tui "$stage/"
+          cp examples/init.lua "$stage/examples/"
+          # Zipped with ditto so the .app keeps its permissions and the
+          # ad-hoc signature survives the round trip.
+          ditto -c -k --sequesterRsrc --keepParent "$stage" cian-macos.zip
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: cian-macos
+          path: cian-macos.zip
+
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: cian-macos.zip
+
   windows-x64:
     runs-on: windows-latest
     steps:
@@ -28,8 +80,23 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
 
+      # The window build embeds a font so the download needs nothing
+      # installed to run. Fetched here rather than committed: it is twelve
+      # megabytes that would sit in every clone forever.
+      - name: Fetch the bundled font
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path crates/cian-gui/fonts | Out-Null
+          Invoke-WebRequest -Uri "$env:FONT_URL" -OutFile font.zip
+          Expand-Archive font.zip -DestinationPath font
+          Copy-Item (Get-ChildItem -Recurse -Filter "HackGenConsoleNF-Regular.ttf" font)[0].FullName crates/cian-gui/fonts/cian.ttf
+        env:
+          FONT_URL: https://github.com/yuru7/HackGen/releases/download/v2.10.0/HackGen_NF_v2.10.0.zip
+
       - name: Build (release)
-        run: cargo build --release --bin cian
+        run: |
+          cargo build --release --bin cian-tui
+          cargo build --release --bin cian --features cian-gui/bundled-font
 
       - name: Stage package
         shell: pwsh
@@ -37,6 +104,7 @@ jobs:
           $stage = "cian-windows-x64"
           New-Item -ItemType Directory -Force -Path $stage | Out-Null
           Copy-Item target/release/cian.exe $stage/
+          Copy-Item target/release/cian-tui.exe $stage/
           Copy-Item packaging/windows/install.ps1 $stage/
           Copy-Item packaging/windows/README.txt $stage/
           New-Item -ItemType Directory -Force -Path "$stage/examples" | Out-Null
