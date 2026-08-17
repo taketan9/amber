@@ -13132,14 +13132,41 @@ mod frame_cost {
         // The minimum of many runs, not the mean: a laptop's scheduler adds
         // time and never removes it, so the fastest run is the closest thing to
         // what the code actually costs.
-        let mut best = std::time::Duration::MAX;
-        for _ in 0..30 {
-            let t = std::time::Instant::now();
-            for _ in 0..10 {
-                let _ = render(&mut app, 200, 60);
+        let cost = |app: &mut App, w: u16, h: u16| {
+            let mut best = std::time::Duration::MAX;
+            for _ in 0..30 {
+                let t = std::time::Instant::now();
+                for _ in 0..10 {
+                    let _ = render(app, w, h);
+                }
+                best = best.min(t.elapsed() / 10);
             }
-            best = best.min(t.elapsed() / 10);
+            best
+        };
+        // Two heights, so the fixed cost of a frame can be told apart from what
+        // each row of the listing costs.
+        let tall = cost(&mut app, 200, 60);
+        let short = cost(&mut app, 200, 14);
+        eprintln!("frame_cost: {tall:?} per frame, 200x60, two panes of 2000 files");
+        eprintln!("frame_cost: {short:?} per frame, 200x14 (same panes, 46 fewer rows each)");
+        app.preview_on = false;
+        let tall_np = cost(&mut app, 200, 60);
+        eprintln!("frame_cost: {tall_np:?} 200x60 with no preview panel");
+
+        // The same window, the same everything, with almost nothing to list:
+        // the difference is what the rows themselves cost.
+        let e = tempfile::tempdir().unwrap();
+        for i in 0..3 {
+            std::fs::write(e.path().join(format!("f{i}.txt")), b"x").unwrap();
         }
-        eprintln!("frame_cost: {best:?} per frame, 200x60, two panes of 2000 files");
+        let q = e.path().to_path_buf();
+        let mut empty = App::new(q.clone(), q, en_config()).unwrap();
+        empty.native_icons = true;
+        empty.preview_on = false;
+        for _ in 0..20 {
+            let _ = render(&mut empty, 200, 60);
+        }
+        let bare = cost(&mut empty, 200, 60);
+        eprintln!("frame_cost: {bare:?} 200x60 with three files (no preview)");
     }
 }

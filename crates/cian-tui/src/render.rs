@@ -6,7 +6,7 @@ use ratatui::layout::{Alignment, Constraint, Direction, Layout, Margin, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{
-    Block, Borders, Clear, List, ListItem, ListState, Paragraph, Scrollbar,
+    Block, Borders, Clear, Paragraph, Scrollbar,
     ScrollbarOrientation, ScrollbarState, Wrap,
 };
 use ratatui::Frame;
@@ -1839,12 +1839,9 @@ fn draw_file_pane(
     // 2 mark + icon + 2 spaces
     let name_w = inner_w.saturating_sub(meta_w + 5 + git_w + cloud_w) as usize;
 
-    // Build ListItems only for the rows the viewport can actually show. ratatui
-    // renders a fresh `ListState` (offset 0) by scrolling just enough to keep the
-    // selected row visible, which for uniform 1-row items lands the window at
-    // `[cursor+1-height, cursor+1)`. Replicating that here turns per-frame work
-    // from O(entries) into O(visible) — the difference between a snappy and a
-    // sluggish pane on a directory with thousands of files.
+    // Only the rows the viewport can actually show are touched: per-frame work
+    // is O(visible), not O(entries), which is the difference between a snappy
+    // and a sluggish pane on a directory with thousands of files.
     let total = pane.entries.len();
     // Borders top+bottom, plus the column-header row under the top border.
     let list_h = area.height.saturating_sub(3) as usize;
@@ -1861,137 +1858,9 @@ fn draw_file_pane(
         Style::default().fg(dim_text(if selected { th.selected_bg } else { bg.unwrap_or(th.popup_bg) }))
     };
 
-    // Where the listing starts, in absolute cells: one in for the border,
-    // one down for the border and one more for the column headings.
+    // Where the listing starts, in absolute cells: one in for the border. The
+    // row is `y`, which the painter below already has.
     let list_x = area.x + 1;
-    let list_y = area.y + 2;
-
-    let items: Vec<ListItem> = pane.entries[start..end].iter().enumerate().map(|(vi, e)| {
-        let i = start + vi; // absolute index for marks / visual range / git
-        let selected_row = i == pane.cursor;
-        let marked = pane.is_marked(i);
-        let in_visual = visual_range.map(|(a, b)| i >= a && i <= b).unwrap_or(false);
-        let mark_symbol = if marked { "● " } else { "  " };
-        let kind = kind_for(e);
-        // Fitted to the row it lands on: the same colour reads differently on
-        // the page and on the selection, and a light theme's palette is close
-        // enough to its own selection tint to disappear into it.
-        let kind_color = text_tone(kind.color(), if selected_row { th.selected_bg } else { bg.unwrap_or(th.popup_bg) });
-        let mut name_style = Style::default().fg(kind_color);
-        if kind.bold() {
-            name_style = name_style.add_modifier(Modifier::BOLD);
-        }
-        // The icon carries the same color so the row reads as one unit.
-        let icon_style = Style::default().fg(kind_color);
-
-        let name = fit(&e.name, name_w);
-        let mut spans = Vec::new();
-        if git.is_some() {
-            let (badge, color) = git
-                .and_then(|g| g.mark_for(&e.path))
-                .map(|m| (m.badge(), git_mark_color(m)))
-                .unwrap_or(("", Color::Reset));
-            // Padded without formatting: the badge is one character or none,
-            // and a `format!` per row per frame for that is a page of
-            // allocation to write two cells.
-            let badge: &str = match badge {
-                "" => "  ",
-                "M" => "M ",
-                "A" => "A ",
-                "D" => "D ",
-                "R" => "R ",
-                "?" => "? ",
-                "!" => "! ",
-                _ => "* ",
-            };
-            spans.push(Span::styled(
-                badge,
-                Style::default().fg(color).add_modifier(Modifier::BOLD),
-            ));
-        }
-        if cloud_w > 0 {
-            // Listed but not downloaded; a space keeps local files aligned.
-            spans.push(Span::styled(
-                if e.cloud { cloud_mark() } else { "  " },
-                Style::default().fg(Color::Rgb(130, 175, 210)),
-            ));
-        }
-        // The icon is either a glyph cian draws, or two blank cells and a note
-        // saying "a picture goes here" — see [`crate::IconSlot`]. Two cells
-        // rather than one because a cell is about twice as tall as it is wide,
-        // so two of them are roughly the square an icon wants.
-        // Classic keeps the font's glyph: it is the look cian was built
-        // around, and a window that quietly replaced it would be a different
-        // program wearing the name. It is *drawn* as a picture all the same —
-        // in a cell the ink runs past the advance and the right of every icon
-        // is sliced off.
-        let icon_cell = if native_icons {
-            // Carried whatever the skin. In the classic view it *is* the icon;
-            // in the detail view it is what gets drawn when the system has no
-            // icon of its own to offer, which is every row of every listing on
-            // a platform whose icons cian cannot ask for yet.
-            let glyph = icon_for(e).chars().next().map(|c| (c, rgb_of(kind_color)));
-            icon_slots.push(crate::IconSlot {
-                x: list_x + git_w + cloud_w + 2,
-                y: list_y + vi as u16,
-                w: 2,
-                h: 1,
-                path: e.path.clone(),
-                is_dir: e.is_dir,
-                local: !synthetic,
-                glyph,
-                prefer_glyph: skin != Skin::Finder,
-            });
-            std::borrow::Cow::Borrowed("   ")
-        } else {
-            std::borrow::Cow::Owned(format!("{}  ", icon_for(e)))
-        };
-        spans.extend([
-            Span::styled(mark_symbol, mark_style),
-            Span::styled(icon_cell, icon_style),
-            Span::styled(name, name_style),
-        ]);
-        if show_size {
-            // Directories have no meaningful byte count; the `..` row shows none.
-            let s: std::borrow::Cow<str> = if e.is_parent {
-                std::borrow::Cow::Borrowed("")
-            } else if e.is_dir {
-                std::borrow::Cow::Borrowed("—")
-            } else {
-                std::borrow::Cow::Owned(cian_core::human_size(e.len))
-            };
-            spans.push(Span::styled(
-                format!(" {:>w$}", s, w = SIZE_COL_W as usize),
-                meta_on(selected_row),
-            ));
-        }
-        if show_time {
-            // Formatting a date costs about a microsecond — chrono resolves the
-            // local zone for each one — and a listing shows the same handful of
-            // timestamps on every frame it is on screen. Memoised, it costs a
-            // hash lookup. See [`cian_core::format_time_cached`].
-            let t = if e.is_parent {
-                std::borrow::Cow::Borrowed("")
-            } else {
-                e.modified
-                    .map(|m| std::borrow::Cow::Owned(cian_core::format_time_cached(m)))
-                    .unwrap_or(std::borrow::Cow::Borrowed("-"))
-            };
-            spans.push(Span::styled(format!(" {t}"), meta_on(selected_row)));
-        }
-
-        let mut item = ListItem::new(Line::from(spans));
-        // Banded rows, once the borders are gone. With a box around them the
-        // rows were told apart by the frame; without one they need something,
-        // and a band a shade off the background is the quietest thing that
-        // works. Absolute index, not the visible one, so the stripes stay put
-        // while the list scrolls under them.
-        if finder && !selected_row && i % 2 == 1 {
-            item = item.style(Style::default().bg(th.popup_bg));
-        }
-        if in_visual { item = item.style(Style::default().bg(th.visual_bg)); }
-        item
-    }).collect();
 
     // An unfocused pane recedes so the focused one reads as the active surface.
     let mut list_style = if focused {
@@ -2016,17 +1885,159 @@ fn draw_file_pane(
     }
     let list_area =
         Rect::new(inner.x, inner.y + 1, inner.width, inner.height.saturating_sub(1));
-    let list = List::new(items)
-        .style(list_style)
-        .highlight_style(
-            Style::default().bg(th.selected_bg).add_modifier(Modifier::BOLD),
-        );
 
-    // The items are already the visible slice, so the selection is addressed
-    // relative to `start` and the state's own offset stays at 0.
-    let mut state = ListState::default();
-    if !pane.entries.is_empty() { state.select(Some(pane.cursor - start)); }
-    f.render_stateful_widget(list, list_area, &mut state);
+    // The rows are painted straight into the buffer, rather than built as
+    // widgets and handed to `List`.
+    //
+    // This is the innermost loop cian has, and the widget road to it is paved
+    // with allocation: a `String` per column, a `Span` per string, a `Vec` of
+    // them per `Line`, a `ListItem` around that, and a `Vec` of those — then
+    // every one of those strings segmented into graphemes on the way to the
+    // cells. Measured at 200x60 with two full panes, that was about two thirds
+    // of a frame. Painting cells directly keeps every one of the decisions
+    // above — the same columns, colours, banding and selection — and does none
+    // of the packaging. See [`put`] for the one that matters: a file listing is
+    // overwhelmingly ASCII, and ASCII needs no segmenter.
+    let selected_style = Style::default().bg(th.selected_bg).add_modifier(Modifier::BOLD);
+    let buf = f.buffer_mut();
+    // The whole area first, so the rows below the last file carry the pane's
+    // background rather than whatever was behind it.
+    buf.set_style(list_area, list_style);
+    for (vi, e) in pane.entries[start..end].iter().enumerate() {
+        let y = list_area.y + vi as u16;
+        if y >= list_area.bottom() {
+            break;
+        }
+        let i = start + vi; // absolute index for marks / visual range / git
+        let selected_row = i == pane.cursor;
+        let marked = pane.is_marked(i);
+        let in_visual = visual_range.map(|(a, b)| i >= a && i <= b).unwrap_or(false);
+
+        // The row's own background: banded, in visual range, or selected.
+        // Banding uses the absolute index so the stripes stay put while the
+        // list scrolls under them.
+        let row = Rect::new(list_area.x, y, list_area.width, 1);
+        if selected_row {
+            buf.set_style(row, selected_style);
+        } else if in_visual {
+            buf.set_style(row, Style::default().bg(th.visual_bg));
+        } else if finder && i % 2 == 1 {
+            buf.set_style(row, Style::default().bg(th.popup_bg));
+        }
+
+        let kind = kind_for(e);
+        // Fitted to the row it lands on: the same colour reads differently on
+        // the page and on the selection, and a light theme's palette is close
+        // enough to its own selection tint to disappear into it.
+        let kind_color = text_tone(kind.color(), if selected_row { th.selected_bg } else { bg.unwrap_or(th.popup_bg) });
+        let mut name_style = Style::default().fg(kind_color);
+        if kind.bold() {
+            name_style = name_style.add_modifier(Modifier::BOLD);
+        }
+        // The icon carries the same color so the row reads as one unit.
+        let icon_style = Style::default().fg(kind_color);
+        let meta_style = meta_on(selected_row);
+
+        let end_x = row.right();
+        let mut x = row.x;
+        if git.is_some() {
+            let (badge, color) = git
+                .and_then(|g| g.mark_for(&e.path))
+                .map(|m| (m.badge(), git_mark_color(m)))
+                .unwrap_or(("", Color::Reset));
+            // Padded without formatting: the badge is one character or none.
+            let badge: &str = match badge {
+                "" => "  ",
+                "M" => "M ",
+                "A" => "A ",
+                "D" => "D ",
+                "R" => "R ",
+                "?" => "? ",
+                "!" => "! ",
+                _ => "* ",
+            };
+            put(buf, x, y, end_x, badge, Style::default().fg(color).add_modifier(Modifier::BOLD));
+            x = (x + git_w).min(end_x);
+        }
+        if cloud_w > 0 {
+            // Listed but not downloaded; a space keeps local files aligned.
+            put(
+                buf,
+                x,
+                y,
+                end_x,
+                if e.cloud { cloud_mark() } else { "  " },
+                Style::default().fg(Color::Rgb(130, 175, 210)),
+            );
+            x = (x + cloud_w).min(end_x);
+        }
+        put(buf, x, y, end_x, if marked { "● " } else { "  " }, mark_style);
+        x = (x + 2).min(end_x);
+
+        // The icon is either a glyph cian draws, or two blank cells and a note
+        // saying "a picture goes here" — see [`crate::IconSlot`]. Two cells
+        // rather than one because a cell is about twice as tall as it is wide,
+        // so two of them are roughly the square an icon wants.
+        if native_icons {
+            // Carried whatever the skin. In the classic view it *is* the icon;
+            // in the detail view it is what gets drawn when the system has no
+            // icon of its own to offer.
+            let glyph = icon_for(e).chars().next().map(|c| (c, rgb_of(kind_color)));
+            icon_slots.push(crate::IconSlot {
+                x: list_x + git_w + cloud_w + 2,
+                y,
+                w: 2,
+                h: 1,
+                path: e.path.clone(),
+                is_dir: e.is_dir,
+                local: !synthetic,
+                glyph,
+                prefer_glyph: skin != Skin::Finder,
+            });
+        } else {
+            put(buf, x, y, end_x, icon_for(e), icon_style);
+        }
+        x = (x + 3).min(end_x);
+
+        // The name is written where it starts and the column is stepped over
+        // whole, so a short name needs no padding written after it — the row's
+        // background is already there.
+        let name_end = (x + name_w as u16).min(end_x);
+        put(buf, x, y, name_end, truncate_to(&e.name, name_w).as_ref(), name_style);
+        x = name_end;
+
+        if show_size {
+            // Directories have no meaningful byte count; the `..` row shows none.
+            let s: std::borrow::Cow<str> = if e.is_parent {
+                std::borrow::Cow::Borrowed("")
+            } else if e.is_dir {
+                std::borrow::Cow::Borrowed("—")
+            } else {
+                std::borrow::Cow::Owned(cian_core::human_size(e.len))
+            };
+            // Right-aligned by starting it where it should end, rather than by
+            // building a padded string to write.
+            let w = crate::util::width(&s) as u16;
+            let col = SIZE_COL_W;
+            let at = x + 1 + col.saturating_sub(w);
+            put(buf, at, y, (x + 1 + col).min(end_x), &s, meta_style);
+            x = (x + 1 + col).min(end_x);
+        }
+        if show_time {
+            // Formatting a date costs about a microsecond — chrono resolves the
+            // local zone for each one — and a listing shows the same handful of
+            // timestamps on every frame it is on screen. Memoised, it costs a
+            // hash lookup. See [`cian_core::format_time_cached`].
+            let t: std::borrow::Cow<str> = if e.is_parent {
+                std::borrow::Cow::Borrowed("")
+            } else {
+                e.modified
+                    .map(|m| std::borrow::Cow::Owned(cian_core::format_time_cached(m)))
+                    .unwrap_or(std::borrow::Cow::Borrowed("-"))
+            };
+            put(buf, x + 1, y, end_x, &t, meta_style);
+        }
+    }
 
     // The scrollbar sits on the pane's right border and takes its style from
     // it, which is right when there is a border. Without one it would be
@@ -2044,6 +2055,49 @@ fn draw_file_pane(
     {
         // Labels start one cell in from the corner, like the tab rects above.
         push_breadcrumb_rects(&active_title, ix, area, tab_col + 1, pane, pane_id, crumb_rects);
+    }
+}
+
+/// Write one run of text into the buffer at `(x, y)`, clipped at `end_x`.
+///
+/// The fast path is the whole point. A file listing is overwhelmingly ASCII,
+/// and for ASCII every byte is one character in one cell — no grapheme
+/// clusters to find, no widths to look up, no combining marks to join to what
+/// came before. `Buffer::set_stringn` cannot know that and segments every
+/// string it is given; here it is asked only about the rows that need it.
+///
+/// Control characters are drawn as a space rather than sent to the cell: a
+/// filename may contain one, and a terminal handed a `\t` moves the cursor.
+fn put(buf: &mut ratatui::buffer::Buffer, x: u16, y: u16, end_x: u16, text: &str, style: Style) -> u16 {
+    if x >= end_x || text.is_empty() {
+        return x;
+    }
+    if text.is_ascii() {
+        let mut x = x;
+        for &b in text.as_bytes() {
+            if x >= end_x {
+                break;
+            }
+            let c = if (0x20..0x7f).contains(&b) { b as char } else { ' ' };
+            let cell = &mut buf[(x, y)];
+            cell.set_char(c);
+            cell.set_style(style);
+            x += 1;
+        }
+        return x;
+    }
+    buf.set_stringn(x, y, text, (end_x - x) as usize, style).0
+}
+
+/// [`crate::util::truncate`], without the allocation when nothing is cut.
+///
+/// Most names fit the column they are given, and the old shape copied every one
+/// of them into a fresh `String` to say so.
+fn truncate_to(s: &str, w: usize) -> std::borrow::Cow<'_, str> {
+    if crate::util::width(s) <= w {
+        std::borrow::Cow::Borrowed(s)
+    } else {
+        std::borrow::Cow::Owned(crate::util::truncate(s, w))
     }
 }
 
