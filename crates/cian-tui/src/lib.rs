@@ -99,14 +99,23 @@ pub struct IconSlot {
     /// path is real to cian and means nothing to the disk. The front end then
     /// asks for an icon by file *type* instead of by path.
     pub local: bool,
-    /// Draw *this glyph* rather than the system's icon, in this colour.
+    /// cian's own Nerd Font icon for this row, in this colour.
     ///
-    /// The classic view keeps cian's Nerd Font icons — it is the look the
-    /// program was built around. A window cannot draw them in a cell without
-    /// clipping them, because their ink is wider than the advance they were
-    /// given, so it draws them as pictures instead: same glyph, same colour,
-    /// rasterised at whatever size the row is.
+    /// A window cannot draw those glyphs in a cell without clipping them —
+    /// their ink is wider than the advance they were given — so it rasterises
+    /// them as pictures instead: same glyph, same colour, at whatever size the
+    /// row is.
+    ///
+    /// Always offered, and used whenever the system has no icon to give. That
+    /// is not a rare corner: on Windows and on Linux there is no answer at all
+    /// yet, and the details view and the grid were drawing *nothing* there —
+    /// rows of names with a blank square where the icon belongs.
     pub glyph: Option<(char, (u8, u8, u8))>,
+    /// The glyph is the intent, not the fallback: draw it and do not ask the
+    /// system. True in the classic view, which is the look cian was built
+    /// around and which a window quietly replacing would be a different program
+    /// wearing the name.
+    pub prefer_glyph: bool,
 }
 
 /// How the file panes are drawn.

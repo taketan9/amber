@@ -75,6 +75,9 @@ pub struct PixelLayer {
     /// this frame's list has anything new to say.
     drawn: Vec<Draw>,
     surface: (f32, f32),
+    /// Read once, at build time. Asking the environment is a syscall on
+    /// Windows, and this is the innermost loop the program has.
+    keylog: bool,
 }
 
 impl PartialEq for Draw {
@@ -336,6 +339,7 @@ impl PostProcessor for PixelLayer {
             frame: Vec::new(),
             drawn: Vec::new(),
             surface: (surface_config.width as f32, surface_config.height as f32),
+            keylog: std::env::var_os("CIAN_GUI_KEYLOG").is_some(),
         }
     }
 
@@ -381,7 +385,7 @@ impl PostProcessor for PixelLayer {
         let draws: Vec<Draw> =
             self.frame.iter().copied().filter(|d| self.cache.contains_key(&d.id)).collect();
         self.drawn = self.frame.clone();
-        if std::env::var_os("CIAN_GUI_KEYLOG").is_some() {
+        if self.keylog {
             eprintln!(
                 "layer {:p}: {} asked, {} drawn, {} textures",
                 self as *const _,

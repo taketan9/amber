@@ -31,6 +31,19 @@ raw-window-handle = "0.6"
 ab_glyph     = "0.2"
 pollster     = "0.4"
 
+# The system's own file icons, and the console this build does not open. The
+# shell's icons come back as an `HICON`, so the pixels behind one have to be
+# fetched with GDI — hence the graphics features next to the shell ones.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.60", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Console",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
 # The system's own file icons. Both crates are already in the tree — winit
 # is built on them — so this adds nothing but the call.
 [target.'cfg(target_os = "macos")'.dependencies]

@@ -563,7 +563,7 @@ dependencies = [
 
 [[package]]
 name = "cian"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "anyhow",
  "cian-core",
@@ -574,7 +574,7 @@ dependencies = [
 
 [[package]]
 name = "cian-ai"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "anyhow",
  "serde",
@@ -584,7 +584,7 @@ dependencies = [
 
 [[package]]
 name = "cian-core"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "anyhow",
  "chrono",
@@ -607,7 +607,7 @@ dependencies = [
 
 [[package]]
 name = "cian-gui"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "ab_glyph",
  "anyhow",
@@ -620,12 +620,13 @@ dependencies = [
  "pollster",
  "ratatui-wgpu",
  "raw-window-handle",
+ "windows-sys 0.60.2",
  "winit",
 ]
 
 [[package]]
 name = "cian-lua"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "cian-core",
  "mlua",
@@ -634,7 +635,7 @@ dependencies = [
 
 [[package]]
 name = "cian-pty"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "anyhow",
  "cian-core",
@@ -645,7 +646,7 @@ dependencies = [
 
 [[package]]
 name = "cian-scp"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "anyhow",
  "russh",
@@ -655,7 +656,7 @@ dependencies = [
 
 [[package]]
 name = "cian-tui"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "anyhow",
  "arboard",

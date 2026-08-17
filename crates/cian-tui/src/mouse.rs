@@ -1036,6 +1036,14 @@ impl App {
             self.archive_activate();
             return Ok(());
         }
+        // A remote pane navigates over the network. Without this, a double
+        // click on a remote directory fell through to `Pane::enter_selected`,
+        // which reads the row's path *on this disk* — and a server's
+        // `/var/log` is not a directory here, so the click did nothing.
+        if self.active_pane().map(|p| p.is_remote()).unwrap_or(false) {
+            self.remote_pane_enter();
+            return Ok(());
+        }
         let sel = self.active_pane().and_then(|p| p.selected()).map(|e| (e.is_dir, e.path.clone()));
         match sel {
             Some((true, _)) => {

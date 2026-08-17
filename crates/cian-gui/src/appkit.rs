@@ -10,7 +10,6 @@
 //! lives in the bundle's resources, not in the running process, and no call
 //! from inside can change it.
 
-#[cfg(target_os = "macos")]
 /// cian's own icon, compiled in so the window has it wherever it runs from.
 const ICON: &[u8] = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../cian.ico"));
 
@@ -50,6 +49,25 @@ fn inset(src: &image::DynamicImage) -> image::DynamicImage {
 /// the platform has no such notion.
 pub fn announce() {
     platform::announce();
+}
+
+/// cian's icon in the shape winit wants, for the platforms that hang one on the
+/// window itself.
+///
+/// Windows draws this in the title bar, in the taskbar and in Alt+Tab, and
+/// without it every one of those shows the blank default — which is what the
+/// Windows build has been doing. macOS has no per-window icon at all (the Dock
+/// icon is the application's, set in `announce`), so it is not asked there.
+#[cfg(not(target_os = "macos"))]
+pub fn window_icon() -> Option<winit::window::Icon> {
+    let decoded = image::load_from_memory(ICON).ok()?.to_rgba8();
+    let (w, h) = (decoded.width(), decoded.height());
+    winit::window::Icon::from_rgba(decoded.into_raw(), w, h).ok()
+}
+
+#[cfg(target_os = "macos")]
+pub fn window_icon() -> Option<winit::window::Icon> {
+    None
 }
 
 #[cfg(target_os = "macos")]

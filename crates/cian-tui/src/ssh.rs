@@ -229,7 +229,7 @@ impl App {
                         // A ".." row to step up one level, like the file panes —
                         // except at the filesystem root, where there is no up.
                         if cwd_new != "/" {
-                            entries.insert(0, cian_scp::RemoteEntry { name: "..".into(), is_dir: true, size: 0 });
+                            entries.insert(0, cian_scp::RemoteEntry { name: "..".into(), is_dir: true, size: 0, link: false });
                         }
                         if let Popup::RemoteBrowser { cwd, entries: es, cursor, scroll, loading, marked, .. } =
                             &mut self.popup
@@ -388,8 +388,14 @@ impl App {
                         ).into());
                     }
                     Err(e) => {
-                        self.message = Some(format!("remote listing failed: {e}"));
-                        self.remote_targets[Self::side_idx(side)] = None;
+                        // The pane keeps its connection. One directory that
+                        // cannot be read — no permission, or it went away — is
+                        // not a reason to forget where the whole pane is
+                        // connected to: dropping the target left a remote pane
+                        // on screen whose every key silently did nothing, which
+                        // looks exactly like cian ignoring the keyboard.
+                        let first = e.lines().next().unwrap_or_default().to_string();
+                        self.message = Some(format!("✖ {first}"));
                     }
                 }
                 true
@@ -402,8 +408,15 @@ impl App {
         }
     }
 
-    /// Enter the highlighted remote entry: descend a directory, climb via `..`.
-    /// (A file does nothing yet — remote open/transfer comes next.)
+    /// Enter the highlighted remote entry: descend a directory, climb via `..`,
+    /// read a file.
+    ///
+    /// Enter means the same thing on both sides of the network. On a local pane
+    /// it opens a directory or reads a file in the docked viewer; here it did
+    /// the first and silently ignored the second, so a remote file could only be
+    /// opened by double-clicking it — a keyboard-first program answering only to
+    /// the mouse. The file is fetched to a temp copy and read there, which is
+    /// what F3 on a remote pane has always done.
     pub(crate) fn remote_pane_enter(&mut self) {
         let side = self.remote_side();
         let path = {
@@ -417,6 +430,7 @@ impl App {
                 // `path` holds the remote absolute path built at listing time.
                 e.path.to_string_lossy().into_owned()
             } else {
+                self.look_inside();
                 return;
             }
         };

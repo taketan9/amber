@@ -157,7 +157,7 @@ fn draw_split(f: &mut Frame, main_area: Rect, app: &mut App, ov: AnimOverride) {
     }
     app.dividers = dividers;
     app.shell_leaves = leaves;
-    app.icon_slots = icon_slots;
+    app.icon_slots.extend(icon_slots);
     app.tab_rects = tab_rects;
     app.sort_rects = sort_rects;
     app.crumb_rects = crumb_rects;
@@ -273,7 +273,7 @@ fn draw_zoomed(f: &mut Frame, area: Rect, app: &mut App, ov: AnimOverride) {
     }
     app.dividers = dividers;
     app.shell_leaves = leaves;
-    app.icon_slots = icon_slots;
+    app.icon_slots.extend(icon_slots);
     app.tab_rects = tab_rects;
     app.sort_rects = sort_rects;
     app.crumb_rects = crumb_rects;
@@ -282,6 +282,18 @@ fn draw_zoomed(f: &mut Frame, area: Rect, app: &mut App, ov: AnimOverride) {
 
 pub(crate) fn draw(f: &mut Frame, app: &mut App) {
     let area = f.area();
+    // Where the pictures go is decided afresh every frame, so the list starts
+    // empty every frame.
+    //
+    // It did not, and the cost was the whole windowed build feeling slow. The
+    // split and zoomed layouts *replace* the list at the end of the frame, but
+    // the detail view, the sidebar and the icon grid each `extend` it — so in
+    // exactly the views the window opens in, thirty-odd slots were added per
+    // frame and none ever removed. After ten seconds of sitting still the layer
+    // was being handed six thousand quads to draw, each with its own bind group
+    // and draw call, for a screen holding thirty icons. Half a core, gone, and
+    // growing; the memory went the same way.
+    app.icon_slots.clear();
     // A light theme paints the whole surface so gaps, the shell panel and the
     // bottom bars share one background rather than showing the terminal's own.
     if let Some(bg) = theme().base_bg {
@@ -914,7 +926,8 @@ fn draw_sidebar(
                 // A bookmark pointing somewhere that has gone still reads as a
                 // place; asking the disk about it would answer "blank document".
                 local: path.is_dir(),
-                glyph: None,
+                glyph: icon.chars().next().map(|c| (c, rgb_of(th.file.directory))),
+                prefer_glyph: false,
             });
             "   ".to_string()
         } else {
@@ -1130,7 +1143,10 @@ fn draw_icon_grid(f: &mut Frame, area: Rect, app: &mut App) {
             path: e.path.clone(),
             is_dir: e.is_dir,
             local: !synthetic,
-            glyph: None,
+            // Only if the system has nothing — a grid of pictures is the point
+            // of this view, and a tile with an empty square in it is not one.
+            glyph: icon_for(e).chars().next().map(|c| (c, rgb_of(kind_for(e).color()))),
+            prefer_glyph: false,
         });
 
         // The name, on the row under it, centred and cut to the tile.
@@ -1880,10 +1896,11 @@ fn draw_file_pane(
         // in a cell the ink runs past the advance and the right of every icon
         // is sliced off.
         let icon_cell = if native_icons {
-            let glyph = (skin != Skin::Finder)
-                .then(|| icon_for(e).chars().next())
-                .flatten()
-                .map(|c| (c, rgb_of(kind_color)));
+            // Carried whatever the skin. In the classic view it *is* the icon;
+            // in the detail view it is what gets drawn when the system has no
+            // icon of its own to offer, which is every row of every listing on
+            // a platform whose icons cian cannot ask for yet.
+            let glyph = icon_for(e).chars().next().map(|c| (c, rgb_of(kind_color)));
             icon_slots.push(crate::IconSlot {
                 x: list_x + git_w + cloud_w + 2,
                 y: list_y + vi as u16,
@@ -1893,6 +1910,7 @@ fn draw_file_pane(
                 is_dir: e.is_dir,
                 local: !synthetic,
                 glyph,
+                prefer_glyph: skin != Skin::Finder,
             });
             "   ".to_string()
         } else {

@@ -23,6 +23,16 @@
 //! * Pictures still draw as half-blocks. Drawing them as pixels is the next
 //!   thing the window makes possible.
 
+// A windowed program, and Windows should be told so. Left unsaid, the linker
+// builds a console application: double-clicking cian opened a black console
+// window *and* the cian window, and closing the black one killed the program.
+// The console is not a fallback either — nothing is ever printed to it.
+//
+// What is lost is `cian --version` from a terminal, because a windowed program
+// starts with no streams at all. `attach_console` below takes the terminal's
+// own back, so the answer lands where it was asked for.
+#![cfg_attr(windows, windows_subsystem = "windows")]
+
 mod appkit;
 mod dragout;
 mod font;
@@ -325,6 +335,11 @@ impl Gui {
             t.backend_mut().post_processor_mut().set_frame(Vec::new());
         }
         self.last_draws = 0;
+        // What a path's picture *is* changes with the view — the classic list
+        // draws cian's own glyph where the detail view asks the system — so a
+        // cache keyed on the path alone is stale the moment the view changes.
+        // Left in place, switching to the detail view kept every glyph.
+        self.icon_ids.clear();
         self.cian.show_message(match view {
             View::Finder => "表示: 詳細（Ctrl+Shift+G でアイコン）",
             View::Icons => "表示: アイコン（Ctrl+Shift+G でクラシック）",
@@ -431,23 +446,15 @@ impl Gui {
                     // folder look like a blown-up thumbnail.
                     let want = (slot.h as f32 * ch).ceil() as u32;
                     let px = (want * 2).clamp(32, 256);
-                    if let Some((c, rgb)) = slot.glyph {
-                        let Some(font) = self.glyphs.as_ref() else { continue };
-                        let Some(rgba) = glyph::render(font, c, px, rgb) else {
-                            self.icon_ids.insert(slot.path.clone(), NO_ICON);
-                            continue;
-                        };
-                        let id = self.next_icon_id;
-                        self.next_icon_id += 1;
-                        self.icon_ids.insert(slot.path.clone(), id);
-                        t.backend_mut().post_processor_mut().upload(id, px, px, rgba);
-                        id
-                    } else {
+                    // The system's icon, unless the view asked for cian's own.
+                    //
                     // A file on a server has a path this disk knows nothing
                     // about, so it is asked for by type instead. Cached under
                     // the same path key, which is what makes a directory of a
                     // hundred `.log` files cost one lookup.
-                    let icon = if slot.local {
+                    let icon = if slot.prefer_glyph {
+                        None
+                    } else if slot.local {
                         sysicon::icon_for(&slot.path, px)
                     } else {
                         let ext = slot
@@ -457,7 +464,21 @@ impl Gui {
                             .unwrap_or_default();
                         sysicon::icon_for_type(&ext, slot.is_dir, px)
                     };
-                    let Some(icon) = icon else {
+                    // Nothing from the system — a platform whose icons cian
+                    // cannot ask for, or a file it has no opinion about. cian's
+                    // own Nerd Font icon goes there instead, which is what the
+                    // terminal build has always drawn. Leaving the square empty
+                    // was the other option, and it is how the Windows build
+                    // ended up with a listing of names and no icons at all.
+                    let uploaded = match icon {
+                        Some(icon) => Some((icon.width, icon.height, icon.rgba)),
+                        None => slot
+                            .glyph
+                            .zip(self.glyphs.as_ref())
+                            .and_then(|((c, rgb), font)| glyph::render(font, c, px, rgb))
+                            .map(|rgba| (px, px, rgba)),
+                    };
+                    let Some((w, h, rgba)) = uploaded else {
                         if self.keylog {
                             eprintln!("icon: none for {}", slot.path.display());
                         }
@@ -469,14 +490,8 @@ impl Gui {
                     let id = self.next_icon_id;
                     self.next_icon_id += 1;
                     self.icon_ids.insert(slot.path.clone(), id);
-                    t.backend_mut().post_processor_mut().upload(
-                        id,
-                        icon.width,
-                        icon.height,
-                        icon.rgba,
-                    );
+                    t.backend_mut().post_processor_mut().upload(id, w, h, rgba);
                     id
-                    }
                 }
             };
             // Square, centred in the cells cian set aside, and inset a little
@@ -560,6 +575,7 @@ impl ApplicationHandler<Tick> for Gui {
         // fight with whatever else is on screen.
         let mut attrs = WindowAttributes::default()
             .with_title("cian")
+            .with_window_icon(appkit::window_icon())
             .with_inner_size(winit::dpi::LogicalSize::new(1200.0, 800.0));
         if std::env::var_os("CIAN_GUI_PIN").is_some() {
             attrs = attrs
@@ -878,7 +894,32 @@ impl ApplicationHandler<Tick> for Gui {
     }
 }
 
+/// Take back the console cian was started from, if it was started from one.
+///
+/// A windowed Windows program is given no standard streams. That is right for
+/// the double-click case — the whole point of the subsystem line above — and
+/// wrong for `cian --version` typed at a prompt, where the answer would go
+/// nowhere. Attaching to the parent's console puts it back; when there is no
+/// parent console (the double-click case) the call simply fails and nothing
+/// changes.
+#[cfg(windows)]
+fn attach_console() {
+    // SAFETY: no arguments but a constant, and the only failure mode is "there
+    // was no console", which is reported by the return value.
+    unsafe {
+        windows_sys::Win32::System::Console::AttachConsole(
+            windows_sys::Win32::System::Console::ATTACH_PARENT_PROCESS,
+        );
+    }
+}
+
+#[cfg(not(windows))]
+fn attach_console() {}
+
 fn main() -> anyhow::Result<()> {
+    // Before anything can be printed, and whatever the arguments: a startup
+    // that fails says why, and "why" belongs in the terminal it was typed in.
+    attach_console();
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.iter().any(|a| matches!(a.as_str(), "-v" | "-V" | "--version")) {
         println!("{}", cian_tui::version_text());

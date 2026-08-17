@@ -173,6 +173,20 @@ pub struct RemoteEntry {
     pub name: String,
     pub is_dir: bool,
     pub size: u64,
+    /// The name was a symlink, and `is_dir` describes what it points at.
+    ///
+    /// Kept so the listing can say so; navigation only cares about `is_dir`.
+    pub link: bool,
+}
+
+/// Join a remote directory and a name, POSIX-style — the only separator SFTP
+/// knows, whatever the local platform uses.
+fn join(dir: &str, name: &str) -> String {
+    if dir.ends_with('/') {
+        format!("{dir}{name}")
+    } else {
+        format!("{dir}/{name}")
+    }
 }
 
 /// List a remote directory over SFTP (browsing needs the SFTP subsystem; the
@@ -202,11 +216,22 @@ pub fn list_dir(target: &Target, remote_path: &str) -> Result<(String, Vec<Remot
                 continue;
             }
             let meta = entry.metadata();
-            out.push(RemoteEntry {
-                is_dir: meta.is_dir(),
-                size: meta.size.unwrap_or(0),
-                name,
-            });
+            let mut is_dir = meta.is_dir();
+            let mut size = meta.size.unwrap_or(0);
+            // READDIR reports what `lstat` would: a symlink is a symlink, even
+            // when it points at a directory. Left at that, `/var/www` and every
+            // other linked directory on a server listed as a file — the row
+            // could not be entered, and Enter on it did nothing at all. So each
+            // link is followed once, with `stat`, and described by what it
+            // actually is. A dangling one keeps the answer readdir gave.
+            let link = entry.file_type().is_symlink();
+            if link {
+                if let Ok(target) = sftp.metadata(join(&canon, &name)).await {
+                    is_dir = target.is_dir();
+                    size = target.size.unwrap_or(size);
+                }
+            }
+            out.push(RemoteEntry { is_dir, size, name, link });
         }
         out.sort_by(|a, b| {
             b.is_dir.cmp(&a.is_dir).then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))

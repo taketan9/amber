@@ -30,4 +30,18 @@ fn main() {
     // Only the commit matters here; rerunning on every source change would be
     // wasteful, but HEAD moving must be picked up.
     println!("cargo:rerun-if-changed=../../.git/HEAD");
+    // ...and HEAD does not move when a commit lands on the branch that is
+    // already checked out. It holds `ref: refs/heads/main` and goes on holding
+    // it; the file that changes is the one it names. Watching only HEAD baked a
+    // commit from several commits ago into every build until the next branch
+    // switch — a binary that misreports which build it is, which is the one
+    // thing this file exists to prevent.
+    if let Ok(head) = std::fs::read_to_string("../../.git/HEAD") {
+        if let Some(git_ref) = head.strip_prefix("ref: ") {
+            // A packed ref has no file of its own. Naming one that does not
+            // exist makes cargo rerun this script every time, which is the
+            // right answer when the alternative is a wrong commit.
+            println!("cargo:rerun-if-changed=../../.git/{}", git_ref.trim());
+        }
+    }
 }

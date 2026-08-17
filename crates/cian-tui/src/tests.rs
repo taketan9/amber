@@ -12843,3 +12843,116 @@ mod shortcut_delete_asks {
         );
     }
 }
+
+/// The windowed build hands the front end a list of "a picture goes here"
+/// slots, rebuilt every frame. It has to *be* rebuilt: the list only ever grew,
+/// and a window sitting still with thirty icons on it was asking the renderer
+/// for thousands of quads a few seconds later.
+mod pictures_do_not_pile_up {
+    use super::*;
+
+    fn frames(app: &mut App, n: usize) -> Vec<usize> {
+        (0..n)
+            .map(|_| {
+                let _ = render(app, 140, 40);
+                app.icon_slots.len()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn the_detail_view_asks_for_the_same_pictures_every_frame() {
+        let (_d, mut app) = app_with(&["a.txt", "b.txt", "c.txt"]);
+        app.native_icons = true;
+        app.skin = Skin::Finder;
+        let counts = frames(&mut app, 4);
+        assert!(counts[0] > 0, "the detail view asks for pictures at all");
+        assert!(
+            counts.iter().all(|n| *n == counts[0]),
+            "a still screen asks for the same slots each time, got {counts:?}"
+        );
+    }
+
+    #[test]
+    fn the_icon_grid_asks_for_the_same_pictures_every_frame() {
+        let (_d, mut app) = app_with(&["a.txt", "b.txt", "c.txt"]);
+        app.native_icons = true;
+        app.skin = Skin::Finder;
+        app.icon_view = true;
+        let counts = frames(&mut app, 4);
+        assert!(counts[0] > 0, "the grid is made of pictures");
+        assert!(
+            counts.iter().all(|n| *n == counts[0]),
+            "a still grid asks for the same slots each time, got {counts:?}"
+        );
+    }
+}
+
+/// Opening things in a pane that is a server. The rows carry paths that mean
+/// nothing to this disk, so every "open it" route has to go over the network.
+mod remote_pane_opens {
+    use super::*;
+
+    /// A pane showing `/var` on a server: `..`, a directory, a file.
+    fn remote(app: &mut App) {
+        let entries = vec![
+            cian_core::Entry::remote("..", "/", true, 0, true),
+            cian_core::Entry::remote("log", "/var/log", true, 0, false),
+            cian_core::Entry::remote("hosts", "/var/hosts", false, 12, false),
+        ];
+        app.left.active_mut().enter_remote("srv", "/var", entries);
+    }
+
+    /// A connection that will refuse — enough for the pane to count as
+    /// connected, without a server being involved.
+    fn connected(app: &mut App) {
+        app.remote_targets[0] = Some((
+            cian_scp::Target {
+                host: "127.0.0.1".into(),
+                port: 1,
+                user: "nobody".into(),
+                password: String::new(),
+            },
+            "srv".into(),
+        ));
+    }
+
+    #[test]
+    fn a_double_click_on_a_remote_directory_never_looks_on_this_disk() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        remote(&mut app);
+        connected(&mut app);
+        app.left.active_mut().cursor = 1;
+        let here = app.active_pane().unwrap().cwd.clone();
+        app.activate_selected().unwrap();
+        assert!(
+            app.active_pane().unwrap().remote_view().is_some(),
+            "the pane is still the server's"
+        );
+        assert_eq!(app.active_pane().unwrap().cwd, here, "the local cwd never moved");
+    }
+
+    #[test]
+    fn enter_on_a_remote_file_fetches_it() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        remote(&mut app);
+        connected(&mut app);
+        app.left.active_mut().cursor = 2;
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+        assert!(
+            app.remote_view.is_some(),
+            "Enter on a remote file starts the fetch the viewer reads from"
+        );
+    }
+
+    #[test]
+    fn enter_on_a_remote_directory_lists_it() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        remote(&mut app);
+        connected(&mut app);
+        app.left.active_mut().cursor = 1;
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+        assert!(app.remote_pane_ls.is_some(), "Enter on a remote directory asks for its listing");
+        assert!(app.remote_view.is_none(), "and does not try to read it as a file");
+    }
+}

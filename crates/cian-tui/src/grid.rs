@@ -278,6 +278,13 @@ impl App {
         if let Some(p) = self.active_pane_mut() {
             p.cursor = i;
         }
+        // Over SFTP the row's path belongs to the server, so neither entering it
+        // as a local directory nor handing it to the desktop can work. The
+        // remote pane's own Enter does both jobs — descend, or fetch and read.
+        if self.active_pane().map(|p| p.is_remote()).unwrap_or(false) {
+            self.remote_pane_enter();
+            return true;
+        }
         let is_dir = self.active_pane().and_then(|p| p.selected()).map(|e| e.is_dir);
         match is_dir {
             Some(true) => {
