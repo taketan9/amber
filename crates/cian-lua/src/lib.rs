@@ -65,6 +65,13 @@ pub struct Options {
     /// Duration of split/zoom/close transitions in milliseconds. `0` disables
     /// animation entirely.
     pub animation_ms: Option<u64>,
+    /// Which view the window opens in: `"classic"`, `"details"` or `"icons"`.
+    ///
+    /// Only the windowed build has views to choose between; the terminal build
+    /// ignores it. Defaults to `"details"` — the one that looks least like a
+    /// terminal, for the person meeting cian for the first time. Anyone who
+    /// wants the two panes back says so once here.
+    pub view: Option<String>,
     /// Show the contextual key-hint bar above the status line.
     pub key_hints: Option<bool>,
     /// Border corners: "rounded", "plain", or unset for per-terminal defaults.
@@ -863,6 +870,17 @@ fn install_api(lua: &Lua, builder: &Rc<RefCell<Builder>>) -> mlua::Result<()> {
                         Err(_) => bm
                             .errors
                             .push("set_option: key_hints expects a boolean".into()),
+                    },
+                    "view" => match String::from_lua(val, lua) {
+                        Ok(v) if matches!(v.as_str(), "classic" | "details" | "icons") => {
+                            bm.options.view = Some(v)
+                        }
+                        Ok(v) => bm.errors.push(format!(
+                            "set_option: view expects \"classic\", \"details\" or \"icons\" (got {v:?})"
+                        )),
+                        Err(_) => bm
+                            .errors
+                            .push("set_option: view expects a string".into()),
                     },
                     "animation_ms" => match u64::from_lua(val, lua) {
                         Ok(v) => bm.options.animation_ms = Some(v),

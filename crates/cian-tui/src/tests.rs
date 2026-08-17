@@ -3122,6 +3122,7 @@
             buffer: long.clone(),
             kind: InputKind::AiShellCmd,
             cursor: long.chars().count(),
+            select_all: false,
         };
         let screen = render(&mut app, 100, 30).join("\n");
         assert!(screen.contains("word00"), "the start is there:\n{screen}");
@@ -4151,6 +4152,7 @@
                             buffer: "a.txt".into(),
                             kind: InputKind::Rename { original: "a.txt".into() },
                             cursor: 5,
+                            select_all: false,
                         }
                     }
                     "quit" => app.popup = Popup::ConfirmQuit,
@@ -8938,32 +8940,23 @@
     /// Ctrl+<key> used to fall through to the plain-character arm, so every
     /// Ctrl combination typed its bare letter into the field.
     ///
-    /// Checked with a binding that does nothing rather than Ctrl+V: that one
-    /// really does paste, and asserting on the result would depend on whatever
-    /// happened to be on the machine's clipboard.
+    /// Checked with combinations that do nothing. The ones that do something
+    /// are excluded on purpose: Ctrl+V pastes (and the result would depend on
+    /// whatever is on the machine's clipboard), Ctrl+X cuts, Ctrl+A selects,
+    /// Ctrl+U clears. What is left is the case this is about — a key with no
+    /// meaning here must not fall through and type its letter.
     #[test]
     fn unbound_ctrl_keys_do_not_type_their_letter_into_a_text_field() {
         let (_d, mut app) = app_with(&["a.txt"]);
         app.start_shortcut_add(Vec::new(), false);
         app.handle_key(key('w')).unwrap();
-        for c in ['x', 'a', 'k'] {
+        for c in ['k', 'q', 'z'] {
             app.handle_key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL)).unwrap();
         }
         let Popup::TextInput { buffer, .. } = &app.popup else { panic!("no field") };
         assert_eq!(buffer, "w", "a Ctrl combination leaked its letter");
     }
 
-    #[test]
-    fn ctrl_u_clears_the_field() {
-        let (_d, mut app) = app_with(&["a.txt"]);
-        app.start_shortcut_add(Vec::new(), false);
-        for c in "typo".chars() {
-            app.handle_key(key(c)).unwrap();
-        }
-        app.handle_key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL)).unwrap();
-        let Popup::TextInput { buffer, .. } = &app.popup else { panic!("no field") };
-        assert!(buffer.is_empty());
-    }
 
     /// A new shortcut is nearly always for the thing under the cursor, so the
     /// target starts filled in rather than blank.
@@ -9018,7 +9011,7 @@
         }
         app.handle_key(code(KeyCode::Enter)).unwrap(); // name -> target step
         // Clear the auto-filled target and type our own.
-        app.handle_key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL)).unwrap();
+        app.handle_key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL)).unwrap();
         for c in "~/workspace/cian".chars() {
             app.handle_key(key(c)).unwrap();
         }
@@ -9629,7 +9622,7 @@
         app.handle_key(code(KeyCode::Char('w'))).unwrap();
         assert!(matches!(&app.popup, Popup::TextInput { kind: InputKind::DiffSaveAs { .. }, .. }));
         // Clear the default and type a name.
-        app.handle_key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL)).unwrap();
+        app.handle_key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL)).unwrap();
         for c in "out.diff".chars() { app.handle_key(key(c)).unwrap(); }
         app.handle_key(code(KeyCode::Enter)).unwrap();
         let saved = std::fs::read_to_string(l.path().join("out.diff")).unwrap();
@@ -10500,7 +10493,7 @@
         let Popup::TextInput { kind: InputKind::TransferAs { .. }, .. } = &app.popup else {
             panic!("expected the rename prompt, got {:?}", app.popup)
         };
-        app.handle_key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL)).unwrap();
+        app.handle_key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL)).unwrap();
         for c in "new.txt".chars() { app.handle_key(code(KeyCode::Char(c))).unwrap(); }
         app.handle_key(code(KeyCode::Enter)).unwrap();
 
@@ -11803,7 +11796,7 @@
             app.popup
         );
         // Clear the seeded name, type the new one, Enter.
-        app.handle_key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL)).unwrap();
+        app.handle_key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL)).unwrap();
         for c in "renamed.txt".chars() {
             app.handle_key(key(c)).unwrap();
         }
@@ -12290,3 +12283,481 @@
         let out = render(&mut app, 100, 24).join("\n");
         assert!(out.contains("starting shell"), "expected placeholder; got:\n{}", out);
     }
+
+/// The icon grid gives the letters up: in that view a key names a file rather
+/// than running a command. See [`crate::grid`].
+mod grid_type_ahead {
+    use super::*;
+
+    /// A grid over these files, cursor at the top.
+    fn grid(names: &[&str]) -> (tempfile::TempDir, App) {
+        let (dir, mut app) = app_with(names);
+        app.icon_view = true;
+        app.icon_cols = 3;
+        (dir, app)
+    }
+
+    fn press(app: &mut App, c: char) {
+        app.handle_key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE)).unwrap();
+    }
+
+    fn under_cursor(app: &App) -> String {
+        app.active_pane().and_then(|p| p.selected()).map(|e| e.name.clone()).unwrap_or_default()
+    }
+
+    #[test]
+    fn a_letter_goes_to_the_first_file_starting_with_it() {
+        let (_d, mut app) = grid(&["apple.txt", "jam.txt", "juice.txt", "kiwi.txt"]);
+        press(&mut app, 'j');
+        assert_eq!(under_cursor(&app), "jam.txt");
+    }
+
+    #[test]
+    fn the_same_letter_again_walks_to_the_next_one() {
+        let (_d, mut app) = grid(&["apple.txt", "jam.txt", "juice.txt", "kiwi.txt"]);
+        press(&mut app, 'j');
+        press(&mut app, 'j');
+        assert_eq!(under_cursor(&app), "juice.txt");
+    }
+
+    #[test]
+    fn repeating_past_the_last_one_wraps_to_the_first() {
+        let (_d, mut app) = grid(&["jam.txt", "juice.txt"]);
+        press(&mut app, 'j');
+        press(&mut app, 'j');
+        press(&mut app, 'j');
+        assert_eq!(under_cursor(&app), "jam.txt");
+    }
+
+    #[test]
+    fn different_letters_build_a_prefix() {
+        let (_d, mut app) = grid(&["read.txt", "readme.md", "report.pdf"]);
+        press(&mut app, 'r');
+        assert_eq!(under_cursor(&app), "read.txt");
+        // `e` extends rather than jumping to something starting with `e`, so
+        // this stays inside the `re…` names instead of leaving them.
+        press(&mut app, 'e');
+        assert_eq!(under_cursor(&app), "read.txt");
+        press(&mut app, 'p');
+        assert_eq!(under_cursor(&app), "report.pdf");
+    }
+
+    #[test]
+    fn case_does_not_matter() {
+        let (_d, mut app) = grid(&["Report.pdf", "apple.txt"]);
+        press(&mut app, 'r');
+        assert_eq!(under_cursor(&app), "Report.pdf");
+    }
+
+    #[test]
+    fn a_prefix_that_matches_nothing_falls_back_to_the_last_letter() {
+        let (_d, mut app) = grid(&["apple.txt", "jam.txt"]);
+        press(&mut app, 'a');
+        // `q` cannot extend `a…`, so it is taken as a fresh search — which also
+        // matches nothing, and the cursor is left where it was rather than
+        // wandering off.
+        press(&mut app, 'q');
+        assert_eq!(under_cursor(&app), "apple.txt");
+        // ...and the next real letter still works, rather than being stuck
+        // behind a dead prefix.
+        press(&mut app, 'j');
+        assert_eq!(under_cursor(&app), "jam.txt");
+    }
+
+    #[test]
+    fn the_arrows_walk_the_grid_by_row_and_by_one() {
+        let (_d, mut app) = grid(&["a.txt", "b.txt", "c.txt", "d.txt", "e.txt", "f.txt"]);
+        let first = under_cursor(&app);
+        app.handle_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE)).unwrap();
+        assert_ne!(under_cursor(&app), first);
+        // Down moves a whole row — three, because the grid is three wide.
+        let before = app.active_pane().unwrap().cursor;
+        app.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE)).unwrap();
+        assert_eq!(app.active_pane().unwrap().cursor, before + 3);
+    }
+
+    #[test]
+    fn the_lists_are_unaffected() {
+        // The same keys outside the grid keep every meaning they had.
+        let (_d, mut app) = app_with(&["jam.txt", "juice.txt"]);
+        let before = app.active_pane().unwrap().cursor;
+        press(&mut app, 'j');
+        assert_eq!(
+            app.active_pane().unwrap().cursor,
+            before + 1,
+            "`j` outside the grid still moves down one"
+        );
+    }
+}
+
+/// The grid's mouse. Clicking a tile has to move the cursor of the pane the
+/// grid is actually *drawing* — they were two different panes once, which made
+/// a click move a cursor nobody could see and a double click walk into a
+/// directory that was not on screen.
+mod grid_mouse {
+    use super::*;
+    use ratatui::layout::Rect;
+
+    /// A grid three tiles wide, laid out at the origin, as a draw would leave
+    /// it. `TILE_W` and `TILE_H` are the renderer's own.
+    fn grid(names: &[&str]) -> (tempfile::TempDir, App) {
+        let (dir, mut app) = app_with(names);
+        app.icon_view = true;
+        app.icon_cols = 3;
+        app.grid_area = Some(Rect::new(0, 0, 3 * 14, 4 * 6));
+        (dir, app)
+    }
+
+    /// The middle of tile `n`, in cells.
+    fn tile(n: usize, cols: usize) -> (u16, u16) {
+        let (cx, cy) = ((n % cols) as u16 * 14, (n / cols) as u16 * 6);
+        (cx + 7, cy + 2)
+    }
+
+    fn under_cursor(app: &App) -> String {
+        app.active_pane().and_then(|p| p.selected()).map(|e| e.name.clone()).unwrap_or_default()
+    }
+
+    #[test]
+    fn clicking_a_tile_moves_the_cursor_to_it() {
+        let (_d, mut app) = grid(&["a.txt", "b.txt", "c.txt", "d.txt"]);
+        let (col, row) = tile(2, 3);
+        assert!(app.grid_click(col, row), "the grid should take the click");
+        assert_eq!(app.active_pane().unwrap().cursor, 2);
+    }
+
+    #[test]
+    fn clicking_the_second_row_lands_on_the_right_entry() {
+        let (_d, mut app) = grid(&["a.txt", "b.txt", "c.txt", "d.txt", "e.txt"]);
+        // Index 4 is the second row, first column, on a three-wide grid.
+        let (col, row) = tile(4, 3);
+        assert!(app.grid_click(col, row));
+        assert_eq!(app.active_pane().unwrap().cursor, 4);
+    }
+
+    #[test]
+    fn clicking_past_the_last_entry_changes_nothing() {
+        let (_d, mut app) = grid(&["a.txt", "b.txt"]);
+        let before = app.active_pane().unwrap().cursor;
+        let (col, row) = tile(8, 3);
+        // Swallowed — the grid owns its rectangle — but the cursor stays put
+        // rather than jumping to the end.
+        app.grid_click(col, row);
+        assert_eq!(app.active_pane().unwrap().cursor, before);
+    }
+
+    #[test]
+    fn it_acts_on_the_pane_the_grid_is_drawing() {
+        // With the focus on the right pane, a click still has to move the
+        // cursor the user can see. Both panes open on the same directory here,
+        // so the test is about *which* pane changed, not about the contents.
+        let (_d, mut app) = grid(&["a.txt", "b.txt", "c.txt"]);
+        app.focus(FocusedPane::Right);
+        let left_before = app.left.active_ref().cursor;
+        let (col, row) = tile(2, 3);
+        assert!(app.grid_click(col, row));
+        assert_eq!(
+            app.active_pane().unwrap().cursor,
+            2,
+            "the focused pane — which is the one the grid draws — moved"
+        );
+        assert_eq!(
+            app.left.active_ref().cursor,
+            left_before,
+            "and the pane that is not on screen was left alone"
+        );
+    }
+
+    #[test]
+    fn double_clicking_a_directory_enters_it() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("sub")).unwrap();
+        std::fs::write(dir.path().join("sub").join("inside.txt"), b"").unwrap();
+        let p = dir.path().to_path_buf();
+        let mut app = App::new(p.clone(), p.clone(), en_config()).unwrap();
+        app.icon_view = true;
+        app.icon_cols = 3;
+        app.grid_area = Some(Rect::new(0, 0, 3 * 14, 4 * 6));
+
+        let n = app
+            .active_pane()
+            .unwrap()
+            .entries
+            .iter()
+            .position(|e| e.name == "sub")
+            .expect("the directory is listed");
+        let (col, row) = tile(n, 3);
+        assert!(app.grid_double_click(col, row));
+        // By name, not by path: cian canonicalises, and on macOS a temp
+        // directory comes back with a `/private` in front of it.
+        assert_eq!(
+            app.active_pane().unwrap().cwd.file_name().unwrap(),
+            "sub",
+            "the pane on screen is the one that moved"
+        );
+        assert!(
+            app.active_pane().unwrap().entries.iter().any(|e| e.name == "inside.txt"),
+            "and it is listing what is in there"
+        );
+        let _ = under_cursor(&app);
+    }
+
+    #[test]
+    fn holding_the_modifier_adds_to_the_selection() {
+        // Entry 0 is `..`, which is navigation and never a selection — so the
+        // files start at 1.
+        let (_d, mut app) = grid(&["a.txt", "b.txt", "c.txt"]);
+        let (c1, r1) = tile(1, 3);
+        let (c3, r3) = tile(3, 3);
+        assert!(app.grid_click_mods(c1, r1, true));
+        assert!(app.grid_click_mods(c3, r3, true));
+        let pane = app.active_pane().unwrap();
+        assert!(pane.is_marked(1) && pane.is_marked(3), "both are marked");
+        assert!(!pane.is_marked(2), "and the one in between is not");
+    }
+
+    #[test]
+    fn a_plain_click_leaves_the_marks_alone() {
+        // cian's marks are built with `Space` and operated on by every file
+        // command; a click that quietly emptied them would lose work.
+        let (_d, mut app) = grid(&["a.txt", "b.txt", "c.txt"]);
+        let (c1, r1) = tile(1, 3);
+        app.grid_click_mods(c1, r1, true);
+        let (c2, r2) = tile(2, 3);
+        app.grid_click_mods(c2, r2, false);
+        assert!(app.active_pane().unwrap().is_marked(1), "the earlier mark survives");
+        assert_eq!(app.active_pane().unwrap().cursor, 2, "and the cursor moved");
+    }
+
+    #[test]
+    fn the_lists_are_unaffected() {
+        let (_d, mut app) = app_with(&["a.txt", "b.txt"]);
+        assert!(!app.grid_click(7, 2), "outside the grid, the grid takes nothing");
+    }
+
+    #[test]
+    fn right_clicking_points_at_the_file_first() {
+        // A menu about "the selected file" has to be about the one that was
+        // right-clicked, not about wherever the cursor happened to be.
+        use crossterm::event::{KeyModifiers, MouseEvent, MouseEventKind};
+        let (_d, mut app) = grid(&["a.txt", "b.txt", "c.txt"]);
+        let (col, row) = tile(2, 3);
+        app.handle_mouse(MouseEvent {
+            kind: MouseEventKind::Down(crossterm::event::MouseButton::Right),
+            column: col,
+            row,
+            modifiers: KeyModifiers::NONE,
+        });
+        assert_eq!(app.active_pane().unwrap().cursor, 2, "the cursor moved to it");
+        assert!(matches!(app.popup, Popup::ContextMenu { .. }), "and the menu opened");
+    }
+
+    #[test]
+    fn the_parent_row_is_never_marked() {
+        // `..` is a way out, not a file. Ctrl-clicking it moves the cursor
+        // and marks nothing.
+        let (_d, mut app) = grid(&["a.txt"]);
+        let (c, r) = tile(0, 3);
+        app.grid_click_mods(c, r, true);
+        assert!(!app.active_pane().unwrap().is_marked(0));
+    }
+}
+
+/// `Ctrl+A` in a text field selects the line, and the clipboard keys act on it.
+/// The address bar is the reason — an address is copied, pasted and replaced
+/// far more often than it is edited in the middle.
+mod input_select_all {
+    use super::*;
+
+    fn open(app: &mut App) {
+        app.start_jump_path();
+    }
+
+    fn press(app: &mut App, c: char, ctrl: bool) {
+        let m = if ctrl { KeyModifiers::CONTROL } else { KeyModifiers::NONE };
+        app.handle_key(KeyEvent::new(KeyCode::Char(c), m)).unwrap();
+    }
+
+    fn text(app: &App) -> String {
+        match &app.popup {
+            Popup::TextInput { buffer, .. } => buffer.clone(),
+            _ => String::new(),
+        }
+    }
+
+    fn is_selected(app: &App) -> bool {
+        matches!(&app.popup, Popup::TextInput { select_all: true, .. })
+    }
+
+    #[test]
+    fn ctrl_a_selects_the_whole_line() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        open(&mut app);
+        assert!(!text(&app).is_empty(), "the prompt opens seeded with the path");
+        press(&mut app, 'a', true);
+        assert!(is_selected(&app));
+    }
+
+    #[test]
+    fn typing_over_a_selection_replaces_it() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        open(&mut app);
+        press(&mut app, 'a', true);
+        press(&mut app, '/', false);
+        assert_eq!(text(&app), "/", "the seeded path is gone, not appended to");
+        assert!(!is_selected(&app), "and the selection is spent");
+    }
+
+    #[test]
+    fn backspace_over_a_selection_empties_it() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        open(&mut app);
+        press(&mut app, 'a', true);
+        app.handle_key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE)).unwrap();
+        assert_eq!(text(&app), "");
+    }
+
+    #[test]
+    fn an_arrow_key_collapses_the_selection() {
+        // As it does in every other text field: the caret moves, and the next
+        // keystroke inserts rather than replacing.
+        let (_d, mut app) = app_with(&["a.txt"]);
+        open(&mut app);
+        press(&mut app, 'a', true);
+        app.handle_key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE)).unwrap();
+        assert!(!is_selected(&app));
+    }
+
+    #[test]
+    fn ctrl_x_takes_the_line_away() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        open(&mut app);
+        press(&mut app, 'a', true);
+        press(&mut app, 'x', true);
+        assert_eq!(text(&app), "", "cut leaves the field empty");
+    }
+
+    #[test]
+    fn ctrl_c_leaves_the_line_alone() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        open(&mut app);
+        let before = text(&app);
+        press(&mut app, 'a', true);
+        press(&mut app, 'c', true);
+        assert_eq!(text(&app), before, "copy is not cut");
+    }
+
+}
+
+/// Dragging files with the mouse: what gets picked up, and where letting go
+/// would put it. The drawing is the window's; these are the decisions.
+mod drag_and_drop {
+    use super::*;
+    use ratatui::layout::Rect;
+
+    fn grid(names: &[&str]) -> (tempfile::TempDir, App) {
+        let (dir, mut app) = app_with(names);
+        app.icon_view = true;
+        app.icon_cols = 3;
+        app.grid_area = Some(Rect::new(0, 0, 3 * 14, 4 * 6));
+        (dir, app)
+    }
+
+    fn tile(n: usize, cols: usize) -> (u16, u16) {
+        let (cx, cy) = ((n % cols) as u16 * 14, (n / cols) as u16 * 6);
+        (cx + 7, cy + 2)
+    }
+
+    #[test]
+    fn a_press_on_a_file_picks_up_that_file() {
+        let (_d, app) = grid(&["a.txt", "b.txt"]);
+        let (c, r) = tile(1, 3);
+        let got = app.drag_targets_at(c, r);
+        assert_eq!(got.len(), 1);
+        assert!(got[0].ends_with("a.txt"));
+    }
+
+    #[test]
+    fn a_press_on_a_marked_file_picks_up_the_whole_selection() {
+        // A selection built with Ctrl-click or Space drags as a group; that is
+        // the point of having made it.
+        let (_d, mut app) = grid(&["a.txt", "b.txt", "c.txt"]);
+        if let Some(p) = app.active_pane_mut() {
+            p.toggle_mark_at(1);
+            p.toggle_mark_at(3);
+        }
+        let (c, r) = tile(1, 3);
+        assert_eq!(app.drag_targets_at(c, r).len(), 2);
+    }
+
+    #[test]
+    fn the_parent_row_is_not_a_thing_to_drag() {
+        let (_d, app) = grid(&["a.txt"]);
+        let (c, r) = tile(0, 3);
+        assert!(app.drag_targets_at(c, r).is_empty(), "`..` is a way out, not a file");
+    }
+
+    #[test]
+    fn a_folder_under_the_pointer_is_a_destination() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("into")).unwrap();
+        std::fs::write(dir.path().join("a.txt"), b"").unwrap();
+        let p = dir.path().to_path_buf();
+        let mut app = App::new(p.clone(), p, en_config()).unwrap();
+        app.icon_view = true;
+        app.icon_cols = 3;
+        app.grid_area = Some(Rect::new(0, 0, 3 * 14, 4 * 6));
+        let n = app
+            .active_pane()
+            .unwrap()
+            .entries
+            .iter()
+            .position(|e| e.name == "into")
+            .unwrap();
+        let (c, r) = tile(n, 3);
+        assert!(app.drop_target_at(c, r).is_some_and(|d| d.ends_with("into")));
+    }
+
+    #[test]
+    fn a_plain_file_is_not_a_destination() {
+        let (_d, app) = grid(&["a.txt", "b.txt"]);
+        let (c, r) = tile(1, 3);
+        assert!(app.drop_target_at(c, r).is_none());
+    }
+
+    #[test]
+    fn dropping_asks_before_it_does_anything() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("into")).unwrap();
+        std::fs::write(dir.path().join("a.txt"), b"x").unwrap();
+        let p = dir.path().to_path_buf();
+        let mut app = App::new(p.clone(), p.clone(), en_config()).unwrap();
+        app.drop_onto(vec![p.join("a.txt")], p.join("into"), false);
+        assert!(
+            matches!(app.popup, Popup::ConfirmTransfer { .. }),
+            "a drag says what to do; the confirmation is still what does it"
+        );
+        assert!(p.join("a.txt").exists(), "and nothing has moved yet");
+    }
+
+    #[test]
+    fn dropping_something_where_it_already_is_does_nothing() {
+        // The commonest miss: picking a file up and putting it back down.
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.txt"), b"").unwrap();
+        let p = dir.path().to_path_buf();
+        let mut app = App::new(p.clone(), p.clone(), en_config()).unwrap();
+        app.drop_onto(vec![p.join("a.txt")], p.clone(), false);
+        assert!(matches!(app.popup, Popup::None), "no question worth asking");
+    }
+
+    #[test]
+    fn a_folder_cannot_be_dropped_into_itself() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("d")).unwrap();
+        let p = dir.path().to_path_buf();
+        let mut app = App::new(p.clone(), p.clone(), en_config()).unwrap();
+        app.drop_onto(vec![p.join("d")], p.join("d"), true);
+        assert!(matches!(app.popup, Popup::None));
+    }
+}

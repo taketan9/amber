@@ -8,6 +8,55 @@ impl App {
     pub(crate) fn handle_mouse(&mut self, ev: MouseEvent) {
         let (col, row) = (ev.column, ev.row);
 
+        // The grid covers the window and answers for all of it. First, because
+        // everything below tests against rectangles the *list* layout left
+        // behind — dividers, scrollbar tracks, tab labels — and those are not
+        // erased when the grid takes over. A click on a tile was being eaten by
+        // the ghost of a scrollbar.
+        if self.icon_view {
+            if matches!(ev.kind, MouseEventKind::Down(MouseButton::Left)) {
+                // Either modifier means "add to the selection". A terminal
+                // never sees Super at all; a window does, and on a Mac whose
+                // Control and Command are swapped it is the one under the
+                // finger of anyone reaching for Ctrl.
+                let adding = ev.modifiers.intersects(
+                    crossterm::event::KeyModifiers::CONTROL
+                        | crossterm::event::KeyModifiers::SUPER,
+                );
+                if self.grid_click_mods(col, row, adding) {
+                    return;
+                }
+            }
+            // Right-click puts the cursor on what was pointed at and opens
+            // cian's own menu — which already carries the OS actions (open,
+            // open-with, reveal, properties) alongside cian's file commands.
+            // Pointing first is what makes it a menu *about that file*: every
+            // desktop moves the selection to whatever was right-clicked.
+            // Right-clicking a bookmark opens the list they are managed in —
+            // renamed, grouped, reordered, removed. Growing a second and smaller
+            // way to do the same would only be a place for the two to disagree.
+            if matches!(ev.kind, MouseEventKind::Down(MouseButton::Right))
+                && col < crate::render::SIDEBAR_W + 1
+                && self.sidebar_at(row).is_some()
+            {
+                self.start_shortcuts();
+                return;
+            }
+            if matches!(ev.kind, MouseEventKind::Down(MouseButton::Right)) {
+                if let Some(i) = self.grid_entry_at(col, row) {
+                    if let Some(p) = self.active_pane_mut() {
+                        p.cursor = i;
+                    }
+                    self.type_ahead.clear();
+                }
+                self.open_context_menu(col, row);
+                return;
+            }
+            // Scrolling and dragging mean nothing here yet; swallow them rather
+            // than letting them reach a layout that is not on screen.
+            return;
+        }
+
         // A drag in progress owns the mouse until the button comes back up,
         // even if the pointer strays outside the border's grab zone.
         if let Some(d) = self.drag {

@@ -150,6 +150,17 @@ impl ResolvedTheme {
         blue: 0x268bd2, yellow: 0xb58900, cyan: 0x2aa198, magenta: 0xd33682,
         red: 0xdc322f, green: 0x859900, doc: 0x586e75,
     });
+    /// The palette a desktop file manager is drawn in: near-white, one strong
+    /// blue for the selection, and greys quiet enough that the eye goes to the
+    /// names. Paired with [`crate::Skin::Finder`], which is what takes the
+    /// borders away — the colours alone are just another light theme.
+    pub(crate) const FINDER: ResolvedTheme = from_spec(Spec {
+        bg: 0xffffff, fg: 0x1d1d1f, dim: 0x86868b, border: 0xd8d8dc,
+        accent: 0x0a84ff, sel: 0x0a84ff, visual: 0xd6e9ff, mark: 0xff9500,
+        popup: 0xf7f7f9, status: 0xececee,
+        blue: 0x2f7de0, yellow: 0x9a6b00, cyan: 0x0a7f8c, magenta: 0xa63aa6,
+        red: 0xc0392b, green: 0x2f8a3e, doc: 0x3a3a3c,
+    });
     pub(crate) const SOLARIZED_DARK: ResolvedTheme = from_spec(Spec {
         bg: 0x002b36, fg: 0x839496, dim: 0x586e75, border: 0x586e75,
         accent: 0x268bd2, sel: 0x073642, visual: 0x0a4a5a, mark: 0xcb4b16,
@@ -664,6 +675,7 @@ pub(crate) fn theme_preset(name: &str) -> Option<ResolvedTheme> {
         "ayu-light" => ResolvedTheme::AYU_LIGHT,
         "bluloco-light" | "bluloco" => ResolvedTheme::BLULOCO_LIGHT,
         "bearded" | "bearded-theme" => ResolvedTheme::BEARDED,
+        "finder" => ResolvedTheme::FINDER,
         _ => return None,
     })
 }

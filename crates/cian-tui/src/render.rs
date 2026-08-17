@@ -93,6 +93,7 @@ fn draw_split(f: &mut Frame, main_area: Rect, app: &mut App, ov: AnimOverride) {
     };
 
     let mut leaves = Vec::new();
+    let mut icon_slots = Vec::new();
     let mut tab_rects = Vec::new();
     let mut sort_rects = Vec::new();
     let mut crumb_rects = Vec::new();
@@ -138,10 +139,10 @@ fn draw_split(f: &mut Frame, main_area: Rect, app: &mut App, ov: AnimOverride) {
         app.git_for(FocusedPane::Left).cloned(),
         app.git_for(FocusedPane::Right).cloned(),
     );
-    draw_file_pane(f, panes_split[0], &mut app.left, &mut tracks, app.focused == FocusedPane::Left, visual_for_left, app.mode, bg_l, fl_l, FocusedPane::Left, &mut tab_rects, git_l.as_ref(), app.lang, &mut sort_rects, &mut crumb_rects, &mut nav_rects);
+    draw_file_pane(f, panes_split[0], &mut app.left, &mut tracks, app.focused == FocusedPane::Left, visual_for_left, app.mode, bg_l, fl_l, FocusedPane::Left, &mut tab_rects, git_l.as_ref(), app.lang, &mut sort_rects, &mut crumb_rects, &mut nav_rects, app.skin, app.native_icons, &mut icon_slots);
     if let Some(prev) = restore { set_theme(prev); }
     let restore = push_pane_theme(app, 1);
-    draw_file_pane(f, panes_split[1], &mut app.right, &mut tracks, app.focused == FocusedPane::Right, visual_for_right, app.mode, bg_r, fl_r, FocusedPane::Right, &mut tab_rects, git_r.as_ref(), app.lang, &mut sort_rects, &mut crumb_rects, &mut nav_rects);
+    draw_file_pane(f, panes_split[1], &mut app.right, &mut tracks, app.focused == FocusedPane::Right, visual_for_right, app.mode, bg_r, fl_r, FocusedPane::Right, &mut tab_rects, git_r.as_ref(), app.lang, &mut sort_rects, &mut crumb_rects, &mut nav_rects, app.skin, app.native_icons, &mut icon_slots);
     if let Some(prev) = restore { set_theme(prev); }
     // With preview on and a file pane focused, the shell panel's area shows
     // the file under the cursor instead; the PTY runs on underneath, and
@@ -156,6 +157,7 @@ fn draw_split(f: &mut Frame, main_area: Rect, app: &mut App, ov: AnimOverride) {
     }
     app.dividers = dividers;
     app.shell_leaves = leaves;
+    app.icon_slots = icon_slots;
     app.tab_rects = tab_rects;
     app.sort_rects = sort_rects;
     app.crumb_rects = crumb_rects;
@@ -177,7 +179,7 @@ fn draw_zoom_overlay(f: &mut Frame, rect: Rect, app: &mut App, ov: AnimOverride)
             let va = app.visual_anchor;
             let restore = push_pane_theme(app, 0);
             let g = app.git_for(FocusedPane::Left).cloned();
-            draw_file_pane(f, rect, &mut app.left, &mut tracks, true, va, app.mode, bg, fl, FocusedPane::Left, &mut Vec::new(), g.as_ref(), app.lang, &mut Vec::new(), &mut Vec::new(), &mut Vec::new());
+            draw_file_pane(f, rect, &mut app.left, &mut tracks, true, va, app.mode, bg, fl, FocusedPane::Left, &mut Vec::new(), g.as_ref(), app.lang, &mut Vec::new(), &mut Vec::new(), &mut Vec::new(), app.skin, app.native_icons, &mut Vec::new());
             if let Some(prev) = restore { set_theme(prev); }
         }
         FocusedPane::Right => {
@@ -185,7 +187,7 @@ fn draw_zoom_overlay(f: &mut Frame, rect: Rect, app: &mut App, ov: AnimOverride)
             let va = app.visual_anchor;
             let restore = push_pane_theme(app, 1);
             let g = app.git_for(FocusedPane::Right).cloned();
-            draw_file_pane(f, rect, &mut app.right, &mut tracks, true, va, app.mode, bg, fl, FocusedPane::Right, &mut Vec::new(), g.as_ref(), app.lang, &mut Vec::new(), &mut Vec::new(), &mut Vec::new());
+            draw_file_pane(f, rect, &mut app.right, &mut tracks, true, va, app.mode, bg, fl, FocusedPane::Right, &mut Vec::new(), g.as_ref(), app.lang, &mut Vec::new(), &mut Vec::new(), &mut Vec::new(), app.skin, app.native_icons, &mut Vec::new());
             if let Some(prev) = restore { set_theme(prev); }
         }
         FocusedPane::Shell => {
@@ -235,6 +237,7 @@ fn draw_zoomed(f: &mut Frame, area: Rect, app: &mut App, ov: AnimOverride) {
     // main/panes borders are not on screen.
     let mut dividers = Vec::new();
     let mut leaves = Vec::new();
+    let mut icon_slots = Vec::new();
     let mut tab_rects = Vec::new();
     let mut sort_rects = Vec::new();
     let mut crumb_rects = Vec::new();
@@ -248,7 +251,7 @@ fn draw_zoomed(f: &mut Frame, area: Rect, app: &mut App, ov: AnimOverride) {
             let (bg, fl) = (app.pane_bg[0], app.flash_level(FocusedPane::Left));
             let restore = push_pane_theme(app, 0);
             let g = app.git_for(FocusedPane::Left).cloned();
-            draw_file_pane(f, area, &mut app.left, &mut tracks, true, va, app.mode, bg, fl, FocusedPane::Left, &mut tab_rects, g.as_ref(), app.lang, &mut sort_rects, &mut crumb_rects, &mut nav_rects);
+            draw_file_pane(f, area, &mut app.left, &mut tracks, true, va, app.mode, bg, fl, FocusedPane::Left, &mut tab_rects, g.as_ref(), app.lang, &mut sort_rects, &mut crumb_rects, &mut nav_rects, app.skin, app.native_icons, &mut icon_slots);
             if let Some(prev) = restore { set_theme(prev); }
         }
         FocusedPane::Right => {
@@ -258,7 +261,7 @@ fn draw_zoomed(f: &mut Frame, area: Rect, app: &mut App, ov: AnimOverride) {
             let (bg, fl) = (app.pane_bg[1], app.flash_level(FocusedPane::Right));
             let restore = push_pane_theme(app, 1);
             let g = app.git_for(FocusedPane::Right).cloned();
-            draw_file_pane(f, area, &mut app.right, &mut tracks, true, va, app.mode, bg, fl, FocusedPane::Right, &mut tab_rects, g.as_ref(), app.lang, &mut sort_rects, &mut crumb_rects, &mut nav_rects);
+            draw_file_pane(f, area, &mut app.right, &mut tracks, true, va, app.mode, bg, fl, FocusedPane::Right, &mut tab_rects, g.as_ref(), app.lang, &mut sort_rects, &mut crumb_rects, &mut nav_rects, app.skin, app.native_icons, &mut icon_slots);
             if let Some(prev) = restore { set_theme(prev); }
         }
         FocusedPane::Shell => {
@@ -270,6 +273,7 @@ fn draw_zoomed(f: &mut Frame, area: Rect, app: &mut App, ov: AnimOverride) {
     }
     app.dividers = dividers;
     app.shell_leaves = leaves;
+    app.icon_slots = icon_slots;
     app.tab_rects = tab_rects;
     app.sort_rects = sort_rects;
     app.crumb_rects = crumb_rects;
@@ -321,10 +325,26 @@ pub(crate) fn draw(f: &mut Frame, app: &mut App) {
         let rect = lerp_rect(from, to, t);
         f.render_widget(Clear, rect);
         draw_pane_zoom_overlay(f, rect, app);
+    } else if app.icon_view {
+        // The icon view is one pane over the whole window, deliberately. A grid
+        // of pictures wants width more than anything else, and two of them side
+        // by side leave each too narrow to be worth looking at — which is why
+        // no desktop file manager offers a two-pane icon view either.
+        draw_icon_grid(f, main_area, app);
+    } else if app.skin == Skin::Finder && !app.zoomed {
+        draw_detail_view(f, main_area, app, ov);
     } else if app.zoomed {
         draw_zoomed(f, main_area, app, ov);
     } else {
         draw_split(f, main_area, app, ov);
+    }
+
+    // Nothing is drawn over a popup. The picture layer composites on top of
+    // every cell, so an icon recorded for a row underneath would sit on the
+    // dialog rather than behind it — and a file listing's worth of them looks
+    // like the listing is still there.
+    if !matches!(app.popup, Popup::None) {
+        app.icon_slots.clear();
     }
 
     // Reverse the cells of a shell text selection, over whatever was drawn.
@@ -689,6 +709,464 @@ pub(crate) fn draw(f: &mut Frame, app: &mut App) {
 }
 
 /// A centered, animated "starting up" card. Drawn over the UI; purely cosmetic.
+/// One tile of the icon grid, in cells.
+///
+/// A cell is about twice as tall as it is wide, so a square picture four rows
+/// high needs roughly eight columns. Fourteen leaves room for a name under it
+/// without the names of neighbouring tiles running together.
+pub(crate) const TILE_W: u16 = 14;
+pub(crate) const TILE_H: u16 = 6;
+/// Rows of the tile the picture occupies; the rest is the name.
+const TILE_ICON_H: u16 = 4;
+
+/// The chrome a desktop file manager wears: places down the left, buttons and
+/// an address bar across the top. Returns the area left for the listing, or
+/// `None` when the window is too small to be worth dressing.
+///
+/// Shared by both single-pane views. They differ only in what fills the space
+/// underneath — tiles or rows — and a sidebar that appeared in one and not the
+/// other would make switching between them feel like changing programs.
+fn draw_desktop_chrome(
+    f: &mut Frame,
+    area: Rect,
+    app: &mut App,
+    th: &ResolvedTheme,
+    bg: Option<Color>,
+    min_w: u16,
+) -> Option<Rect> {
+    let mut inner = area.inner(Margin { vertical: 1, horizontal: 1 });
+    if inner.width < min_w || inner.height < 5 {
+        return None;
+    }
+
+    // The sidebar, if there is room for one beside a usable grid. A window too
+    // narrow to hold both loses the sidebar rather than squeezing the files
+    // into two columns — which is what Finder does when you drag it small.
+    if inner.width >= SIDEBAR_W + min_w * 2 {
+        let side = Rect::new(inner.x, inner.y, SIDEBAR_W, inner.height);
+        draw_sidebar(f, side, app, &th, bg);
+        inner = Rect::new(
+            inner.x + SIDEBAR_W,
+            inner.y,
+            inner.width - SIDEBAR_W,
+            inner.height,
+        );
+    } else {
+        app.sidebar_rows.clear();
+    }
+
+    // A toolbar, because the grid has no title row to hang the arrows on and
+    // because someone who came for an icon view did not come to learn that
+    // Backspace goes up. Each label's rect is remembered so a click can find it.
+    let bar = Rect::new(inner.x, inner.y, inner.width, 1);
+    let addr = Rect::new(inner.x, inner.y + 1, inner.width, 1);
+    inner = Rect::new(inner.x, inner.y + 3, inner.width, inner.height.saturating_sub(3));
+
+    let dim = Style::default().fg(th.dim);
+    let lit = Style::default().fg(text_tone(th.accent, bg.unwrap_or(th.popup_bg)));
+    let mut spans = Vec::new();
+    let mut x = bar.x;
+    app.grid_buttons.clear();
+    // The view button says where you *are*, and pressing it moves on. A
+    // button labelled with its destination is fine when there are two; with
+    // three it just raises the question of which one it means.
+    let view_label = if app.icon_view {
+        "  ▦ アイコン表示  "
+    } else {
+        "  ▤ 詳細表示  "
+    };
+    for (label, what) in [
+        ("  ‹ 戻る  ", GridButton::Back),
+        ("  › 進む  ", GridButton::Forward),
+        ("  ↑ 上へ  ", GridButton::Up),
+        (view_label, GridButton::Close),
+    ] {
+        let w = crate::util::width(label) as u16;
+        app.grid_buttons.push((what, Rect::new(x, bar.y, w, 1)));
+        x += w;
+        spans.push(Span::styled(label, if what == GridButton::Close { dim } else { lit }));
+    }
+    f.render_widget(Paragraph::new(Line::from(spans)), bar);
+
+    // The address bar. Clicking it opens the same "go to path" prompt `:` has
+    // always had, seeded with where you are — so a typed path and Enter get you
+    // there, which is the one thing everyone expects of the strip at the top.
+    //
+    // Drawn as a field rather than as a line of text. The first version was the
+    // path in the theme's ordinary colours on the ordinary background, and it
+    // read as a caption: correct, present, and impossible to recognise as
+    // something you could click. A box, a folder in front of it and a hint at
+    // the end is what makes it look like it takes typing.
+    // Drawn as a breadcrumb, the way Explorer's is: the path broken into its
+    // parts with chevrons between them, and every part a place you can click.
+    // A path is a route rather than a string, and the bar that shows it should
+    // let you step back along it — reading the whole line and retyping it to
+    // go up two directories is what an address bar is supposed to save you.
+    let cwd = app.active_pane().map(|p| p.cwd.clone()).unwrap_or_default();
+    let field = Style::default().fg(text_tone(th.file.plain, th.status_bg)).bg(th.status_bg);
+    let quiet = Style::default().fg(th.dim).bg(th.status_bg);
+    let lead = Style::default().fg(th.file.directory).bg(th.status_bg);
+
+    // Every ancestor, root first, with the name to show for each.
+    let mut parts: Vec<(String, PathBuf)> = Vec::new();
+    let mut acc = PathBuf::new();
+    for c in cwd.components() {
+        acc.push(c.as_os_str());
+        let name = match c {
+            std::path::Component::RootDir => "/".to_string(),
+            other => other.as_os_str().to_string_lossy().into_owned(),
+        };
+        parts.push((name, acc.clone()));
+    }
+
+    let mut spans = vec![Span::raw(" "), Span::styled(" \u{f07b}  ", lead)];
+    let mut x = addr.x + 4;
+    let limit = addr.x + addr.width.saturating_sub(2);
+    app.grid_crumbs.clear();
+    // From the end backwards would be better on a very deep path; for now the
+    // tail is simply cut, which is what the window's width forces anyway.
+    for (i, (name, path)) in parts.iter().enumerate() {
+        if i > 0 {
+            spans.push(Span::styled(" › ", quiet));
+            x += 3;
+        }
+        let w = crate::util::width(name) as u16;
+        if x + w >= limit {
+            spans.push(Span::styled("…", quiet));
+            break;
+        }
+        let last = i + 1 == parts.len();
+        let style = if last { field.add_modifier(Modifier::BOLD) } else { field };
+        spans.push(Span::styled(name.clone(), style));
+        app.grid_crumbs.push((path.clone(), Rect::new(x, addr.y, w, 1)));
+        x += w;
+    }
+    // The rest of the strip is the field itself: click it to type a path.
+    if x < limit {
+        spans.push(Span::styled(pad_to("", (limit - x) as usize), field));
+    }
+    app.grid_address = Some(addr);
+    f.render_widget(Paragraph::new(Line::from(spans)), addr);
+
+    Some(inner)
+}
+
+/// How wide the grid's sidebar is, in cells.
+pub(crate) const SIDEBAR_W: u16 = 22;
+
+/// The places worth one click, down the left-hand side.
+///
+/// Two lists, the way every desktop file manager has them: the places the
+/// system gives everyone, and the ones this user kept. cian has kept
+/// bookmarks since long before it had a window — `shortcuts.lua`, the same
+/// list `b` opens — so the sidebar shows those rather than inventing a second
+/// set of favourites that would immediately disagree with the first.
+fn draw_sidebar(
+    f: &mut Frame,
+    area: Rect,
+    app: &mut App,
+    th: &ResolvedTheme,
+    bg: Option<Color>,
+) {
+    let surface = bg.unwrap_or(th.popup_bg);
+    f.render_widget(
+        Block::default().style(Style::default().bg(th.status_bg)),
+        area,
+    );
+
+    let head = Style::default().fg(th.dim).add_modifier(Modifier::BOLD);
+    let item = Style::default().fg(text_tone(th.file.plain, th.status_bg));
+    let here = Style::default().fg(th.file.directory).add_modifier(Modifier::BOLD);
+    let cwd = app.active_pane().map(|p| p.cwd.clone()).unwrap_or_default();
+
+    let mut lines: Vec<Line> = Vec::new();
+    let mut rows: Vec<(PathBuf, u16)> = Vec::new();
+    let mut y = area.y;
+
+    let section = |lines: &mut Vec<Line>, y: &mut u16, title: &str| {
+        lines.push(Line::from(Span::styled(format!(" {title}"), head)));
+        *y += 1;
+    };
+    let native = app.native_icons;
+    let mut slots: Vec<crate::IconSlot> = Vec::new();
+    let place = |lines: &mut Vec<Line>,
+                 rows: &mut Vec<(PathBuf, u16)>,
+                 slots: &mut Vec<crate::IconSlot>,
+                 y: &mut u16,
+                 icon: &str,
+                 name: &str,
+                 path: PathBuf| {
+        if *y >= area.y + area.height {
+            return;
+        }
+        let style = if path == cwd { here } else { item };
+        // A picture where the front end can draw one, a glyph otherwise. The
+        // glyphs are clipped in a window — their ink is wider than the cell —
+        // and a sidebar of half-drawn symbols is worse than no symbols at all.
+        let head = if native {
+            slots.push(crate::IconSlot {
+                x: area.x + 1,
+                y: *y,
+                w: 2,
+                h: 1,
+                path: path.clone(),
+                is_dir: true,
+                // A bookmark pointing somewhere that has gone still reads as a
+                // place; asking the disk about it would answer "blank document".
+                local: path.is_dir(),
+                glyph: None,
+            });
+            "   ".to_string()
+        } else {
+            format!("  {icon} ")
+        };
+        let label = fit(&format!("{head}{name}"), area.width as usize - 1);
+        lines.push(Line::from(Span::styled(pad_to(&label, area.width as usize), style)));
+        rows.push((path, *y));
+        *y += 1;
+    };
+
+    app.sidebar_add = None;
+    section(&mut lines, &mut y, "よく使う項目");
+    for (icon, name, dir) in standard_places() {
+        place(&mut lines, &mut rows, &mut slots, &mut y, icon, &name, dir);
+    }
+
+    // The user's own bookmarks. Groups are flattened to their leaves: a
+    // sidebar is a list of places, and a place you have to open to reach is
+    // not one.
+    let mut saved: Vec<(String, PathBuf)> = Vec::new();
+    collect_shortcuts(&app.shortcuts.entries, &mut saved);
+    if !saved.is_empty() {
+        lines.push(Line::from(""));
+        y += 1;
+        app.sidebar_add = Some(Rect::new(area.x, y, area.width, 1));
+        lines.push(Line::from(vec![
+            Span::styled(" お気に入り", head),
+            Span::styled("        ＋ 追加", Style::default().fg(th.dim)),
+        ]));
+        y += 1;
+        for (name, path) in saved {
+            place(&mut lines, &mut rows, &mut slots, &mut y, "\u{f07b}", &name, path);
+        }
+    }
+
+    f.render_widget(
+        Paragraph::new(lines).style(Style::default().bg(th.status_bg)),
+        area,
+    );
+    let _ = surface;
+    app.sidebar_rows = rows;
+    // Handed back so the caller can add them to the frame's slots rather than
+    // replacing them: the listing has its own.
+    app.icon_slots.extend(slots);
+}
+
+/// `~/x` as an absolute path.
+fn expand_home(raw: &str) -> PathBuf {
+    let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"));
+    match (raw.strip_prefix("~/"), home) {
+        (Some(rest), Some(h)) => PathBuf::from(h).join(rest),
+        _ if raw == "~" => std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default(),
+        _ => PathBuf::from(raw),
+    }
+}
+
+/// The places the system gives everyone, in the order Finder lists them.
+fn standard_places() -> Vec<(&'static str, String, PathBuf)> {
+    let home = std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(PathBuf::from);
+    let Some(home) = home else { return Vec::new() };
+    let mut out = vec![("\u{f015}", "ホーム".to_string(), home.clone())];
+    for (icon, label, dir) in [
+        ("\u{f0c7}", "デスクトップ", "Desktop"),
+        ("\u{f019}", "ダウンロード", "Downloads"),
+        ("\u{f02d}", "書類", "Documents"),
+        ("\u{f03e}", "ピクチャ", "Pictures"),
+    ] {
+        let p = home.join(dir);
+        // Only what is actually there: a sidebar entry that goes nowhere is
+        // worse than one that is missing.
+        if p.is_dir() {
+            out.push((icon, label.to_string(), p));
+        }
+    }
+    out
+}
+
+/// Flatten the bookmark tree to the places in it.
+///
+/// Targets are expanded on the way out. A bookmark is written the way a person
+/// writes a path — `~/Downloads` — and asking the system about a directory
+/// literally called `~` gets the answer for a file that is not there.
+fn collect_shortcuts(entries: &[crate::Shortcut], out: &mut Vec<(String, PathBuf)>) {
+    for s in entries {
+        if let Some(t) = &s.target {
+            out.push((s.name.clone(), expand_home(t)));
+        }
+        if let Some(kids) = &s.children {
+            collect_shortcuts(kids, out);
+        }
+    }
+}
+
+/// One pane as a detailed list, wearing the same chrome as the grid.
+///
+/// The two-pane layout is cian's whole shape, and this is the one place it is
+/// set aside: a sidebar and an address bar want the width, and a person who
+/// picked "details" from a view menu picked the thing Explorer calls details —
+/// one folder, listed, with places down the side. Classic is one keystroke
+/// away and still has both panes.
+fn draw_detail_view(f: &mut Frame, area: Rect, app: &mut App, ov: AnimOverride) {
+    let th = theme();
+    let bg = th.base_bg;
+    let Some(inner) = draw_desktop_chrome(f, area, app, &th, bg, 24) else {
+        // Too narrow to dress: fall back to the layout that needs no room.
+        draw_split(f, area, app, ov);
+        return;
+    };
+
+    let mut tab_rects = Vec::new();
+    let mut sort_rects = Vec::new();
+    let mut crumb_rects = Vec::new();
+    let mut nav_rects = Vec::new();
+    let mut icon_slots = Vec::new();
+    let mut tracks: Vec<crate::ScrollTrack> = Vec::new();
+    let va = app.visual_anchor;
+    let side = usize::from(app.focused == FocusedPane::Right);
+
+    // Where the listing ended up, so a click can be turned back into a row.
+    // Without this the rects still describe the two-pane layout and every click
+    // lands on whatever row that geometry put under the pointer.
+    let mut rects = crate::LayoutRects::default();
+    if side == 1 {
+        rects.right = inner;
+    } else {
+        rects.left = inner;
+    }
+    app.layout_rects = rects;
+    let (pane_bg, fl) = (app.pane_bg[side], app.flash_level(app.focused));
+    let restore = push_pane_theme(app, side);
+    let g = app.git_for(app.focused).cloned();
+    let which = if side == 1 { FocusedPane::Right } else { FocusedPane::Left };
+    let tabs = if side == 1 { &mut app.right } else { &mut app.left };
+    draw_file_pane(
+        f, inner, tabs, &mut tracks, true, va, app.mode, pane_bg, fl, which,
+        &mut tab_rects, g.as_ref(), app.lang, &mut sort_rects, &mut crumb_rects,
+        &mut nav_rects, app.skin, app.native_icons, &mut icon_slots,
+    );
+    if let Some(prev) = restore {
+        set_theme(prev);
+    }
+    app.icon_slots.extend(icon_slots);
+    app.tab_rects = tab_rects;
+    app.sort_rects = sort_rects;
+    app.crumb_rects = crumb_rects;
+    app.nav_rects = nav_rects;
+    app.scroll_tracks = tracks;
+    // The listing owns this rectangle, so a click in it is a click on a row —
+    // the same question the grid answers with `grid_area`.
+    app.grid_area = None;
+}
+
+/// The left pane as a grid of pictures.
+///
+/// The cells carry only the names and the selection; the pictures themselves
+/// are drawn by whoever owns the surface, from the [`crate::IconSlot`]s pushed
+/// here. Without a front end that can do that, this view is an empty grid —
+/// which is why it is offered only in the window.
+fn draw_icon_grid(f: &mut Frame, area: Rect, app: &mut App) {
+    let th = theme();
+    let bg = th.base_bg;
+    let focus_bg = focus_badge_color(app.mode);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(border_type())
+        .border_style(Style::default().fg(focus_bg).add_modifier(Modifier::BOLD))
+        .title(format!(
+            " {} ",
+            app.active_pane().map(|p| p.cwd.display().to_string()).unwrap_or_default()
+        ));
+    let block = match bg {
+        Some(c) => block.style(Style::default().bg(c)),
+        None => block,
+    };
+    f.render_widget(block, area);
+
+    let Some(inner) = draw_desktop_chrome(f, area, app, &th, bg, TILE_W) else { return };
+
+    let cols = (inner.width / TILE_W).max(1) as usize;
+    app.icon_cols = cols;
+    app.grid_area = Some(inner);
+    let rows = (inner.height / TILE_H).max(1) as usize;
+    let per_page = cols * rows;
+
+    let Some(pane) = app.active_pane() else { return };
+    let synthetic = pane.is_synthetic();
+    let total = pane.entries.len();
+    // Scroll a page at a time, so the cursor's tile is always on screen and the
+    // grid does not shuffle under the eye on every step.
+    let page = if per_page == 0 { 0 } else { pane.cursor / per_page };
+    let start = page * per_page;
+    let end = (start + per_page).min(total);
+
+    let mut slots = Vec::new();
+    for (n, e) in pane.entries[start..end].iter().enumerate() {
+        let cx = inner.x + (n % cols) as u16 * TILE_W;
+        let cy = inner.y + (n / cols) as u16 * TILE_H;
+        let i = start + n;
+        let selected = i == pane.cursor;
+        let marked = pane.is_marked(i);
+
+        // The picture sits centred in the tile's upper rows.
+        let icon_w = TILE_ICON_H * 2;
+        slots.push(crate::IconSlot {
+            x: cx + (TILE_W - icon_w) / 2,
+            y: cy,
+            w: icon_w,
+            h: TILE_ICON_H,
+            path: e.path.clone(),
+            is_dir: e.is_dir,
+            local: !synthetic,
+            glyph: None,
+        });
+
+        // The name, on the row under it, centred and cut to the tile.
+        //
+        // The highlight covers the name and not the tile. Painting the whole
+        // tile width made a selected file's block run into its neighbour's
+        // label, so two names looked like one — and it is not what a desktop
+        // does either: there, the selection is the shape of the word.
+        let name = fit(&e.name, TILE_W as usize - 2);
+        let used = Span::raw(&name).width();
+        let left = (TILE_W as usize - used) / 2;
+        let right = TILE_W as usize - used - left;
+        let mut style = Style::default().fg(text_tone(
+            kind_for(e).color(),
+            if selected { th.selected_bg } else { bg.unwrap_or(th.popup_bg) },
+        ));
+        if selected || marked {
+            style = style.bg(th.selected_bg).add_modifier(Modifier::BOLD);
+            // The colour that says "chosen" is one colour. A marked tile shown
+            // in a paler tint reads as a third state nobody asked about.
+            style = style.fg(text_tone(kind_for(e).color(), th.selected_bg));
+        }
+        let plain = Style::default().bg(bg.unwrap_or(th.popup_bg));
+        let label_rect = Rect::new(cx, cy + TILE_ICON_H, TILE_W, 1);
+        f.render_widget(
+            Paragraph::new(Line::from(vec![
+                Span::styled(" ".repeat(left), plain),
+                Span::styled(name, style),
+                Span::styled(" ".repeat(right), plain),
+            ])),
+            label_rect,
+        );
+    }
+    app.icon_slots.extend(slots);
+}
+
 fn draw_startup_splash(f: &mut Frame, area: Rect, elapsed_ms: u128) {
     const SPIN: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
     let frame = SPIN[((elapsed_ms / 90) % SPIN.len() as u128) as usize];
@@ -838,8 +1316,14 @@ fn menu_dims(items: &[MenuItem], lang: Lang) -> (usize, usize) {
 /// A text-input field line with the cursor shown as a highlighted character
 /// (reverse video), so moving the cursor never shifts the text. A password is
 /// masked; a cursor at the end highlights a trailing space (a block cursor).
-fn caret_line(buffer: &str, cursor: usize, secret: bool) -> Line<'static> {
+fn caret_line(buffer: &str, cursor: usize, secret: bool, selected: bool) -> Line<'static> {
     let shown: String = if secret { "•".repeat(buffer.chars().count()) } else { buffer.to_string() };
+    // Select-all: the whole line reversed out, so "the next key replaces this"
+    // is visible rather than something you have to remember having pressed.
+    if selected && !shown.is_empty() {
+        let hl = Style::default().fg(readable_on(theme().accent)).bg(theme().accent);
+        return Line::from(vec![Span::raw(">"), Span::styled(shown, hl)]);
+    }
     let chars: Vec<char> = shown.chars().collect();
     let cur = cursor.min(chars.len());
     let before: String = chars[..cur].iter().collect();
@@ -1243,11 +1727,20 @@ fn draw_file_pane(
     sort_rects: &mut Vec<(FocusedPane, cian_core::SortKey, Rect)>,
     crumb_rects: &mut Vec<(FocusedPane, usize, Rect)>,
     nav_rects: &mut Vec<(FocusedPane, bool, Rect)>,
+    skin: Skin,
+    native_icons: bool,
+    icon_slots: &mut Vec<crate::IconSlot>,
 ) {
     // Read the active theme once — `theme()` now takes a lock, and the row loop
     // below would otherwise hit it thousands of times per frame.
     let th = theme();
-    let focus_bg = focus_badge_color(mode);
+    let finder = skin == Skin::Finder;
+    // The focused pane announces itself with a coloured tab. In the desktop
+    // look that colour is the loudest thing on a near-white screen, and it is
+    // announcing the wrong thing — the path matters, the fact that this pane
+    // has the focus is already said by the selection. So it becomes chrome, and
+    // the tab reads as a breadcrumb: dark text on a light chip.
+    let focus_bg = if finder { th.status_bg } else { focus_badge_color(mode) };
     let bg = bg.or(th.base_bg);
     let mut border_style = if focused {
         Style::default().fg(focus_bg).add_modifier(Modifier::BOLD)
@@ -1273,16 +1766,28 @@ fn draw_file_pane(
     for (i, off, w) in &offsets {
         tab_rects.push((pane_id, *i, Rect::new(area.x + 1 + off, area.y, *w, 1)));
     }
+    // Finder draws no box. The pane still needs its title row and its one-cell
+    // side gutters — the layout below is written in terms of them — so it keeps
+    // the top and the sides and loses the strokes: a border whose colour is the
+    // background it sits on is a border nobody can see. What separates the two
+    // panes is then the gutter itself, which is how a desktop file manager does
+    // it too.
     let mut block = Block::default()
         .borders(Borders::ALL)
         .border_type(border_type())
-        .border_style(border_style)
+        .border_style(if finder {
+            Style::default().fg(bg.unwrap_or(th.popup_bg))
+        } else {
+            border_style
+        })
         .title(title);
     if let Some(c) = bg {
         block = block.style(Style::default().bg(c));
     }
 
     let pane = tabs.active_ref();
+    // A remote or in-archive listing has paths that mean nothing to this disk.
+    let synthetic = pane.is_synthetic();
     let visual_range = visual_anchor.map(|a| {
         if a <= pane.cursor { (a, pane.cursor) } else { (pane.cursor, a) }
     });
@@ -1323,6 +1828,11 @@ fn draw_file_pane(
         Style::default().fg(dim_text(if selected { th.selected_bg } else { bg.unwrap_or(th.popup_bg) }))
     };
 
+    // Where the listing starts, in absolute cells: one in for the border,
+    // one down for the border and one more for the column headings.
+    let list_x = area.x + 1;
+    let list_y = area.y + 2;
+
     let items: Vec<ListItem> = pane.entries[start..end].iter().enumerate().map(|(vi, e)| {
         let i = start + vi; // absolute index for marks / visual range / git
         let selected_row = i == pane.cursor;
@@ -1360,9 +1870,37 @@ fn draw_file_pane(
                 Style::default().fg(Color::Rgb(130, 175, 210)),
             ));
         }
+        // The icon is either a glyph cian draws, or two blank cells and a note
+        // saying "a picture goes here" — see [`crate::IconSlot`]. Two cells
+        // rather than one because a cell is about twice as tall as it is wide,
+        // so two of them are roughly the square an icon wants.
+        // Classic keeps the font's glyph: it is the look cian was built
+        // around, and a window that quietly replaced it would be a different
+        // program wearing the name. It is *drawn* as a picture all the same —
+        // in a cell the ink runs past the advance and the right of every icon
+        // is sliced off.
+        let icon_cell = if native_icons {
+            let glyph = (skin != Skin::Finder)
+                .then(|| icon_for(e).chars().next())
+                .flatten()
+                .map(|c| (c, rgb_of(kind_color)));
+            icon_slots.push(crate::IconSlot {
+                x: list_x + git_w + cloud_w + 2,
+                y: list_y + vi as u16,
+                w: 2,
+                h: 1,
+                path: e.path.clone(),
+                is_dir: e.is_dir,
+                local: !synthetic,
+                glyph,
+            });
+            "   ".to_string()
+        } else {
+            format!("{}  ", icon_for(e))
+        };
         spans.extend([
             Span::styled(mark_symbol, mark_style),
-            Span::styled(format!("{}  ", icon_for(e)), icon_style),
+            Span::styled(icon_cell, icon_style),
             Span::styled(name, name_style),
         ]);
         if show_size {
@@ -1389,6 +1927,14 @@ fn draw_file_pane(
         }
 
         let mut item = ListItem::new(Line::from(spans));
+        // Banded rows, once the borders are gone. With a box around them the
+        // rows were told apart by the frame; without one they need something,
+        // and a band a shade off the background is the quietest thing that
+        // works. Absolute index, not the visible one, so the stripes stay put
+        // while the list scrolls under them.
+        if finder && !selected_row && i % 2 == 1 {
+            item = item.style(Style::default().bg(th.popup_bg));
+        }
         if in_visual { item = item.style(Style::default().bg(th.visual_bg)); }
         item
     }).collect();
@@ -1428,7 +1974,14 @@ fn draw_file_pane(
     if !pane.entries.is_empty() { state.select(Some(pane.cursor - start)); }
     f.render_stateful_widget(list, list_area, &mut state);
 
-    draw_list_scrollbar(f, area, pane.entries.len(), pane.cursor, pane.scroll, focused, border_style, pane_id, tracks);
+    // The scrollbar sits on the pane's right border and takes its style from
+    // it, which is right when there is a border. Without one it would be
+    // reversed-out of the focus colour — a solid bar of accent down the side of
+    // a white pane, louder than anything it is next to. Grey, like every
+    // desktop scrollbar.
+    let scroll_style =
+        if finder { Style::default().fg(th.border) } else { border_style };
+    draw_list_scrollbar(f, area, pane.entries.len(), pane.cursor, pane.scroll, focused && !finder, scroll_style, pane_id, tracks);
 
     // The active tab's path segments are click targets (a breadcrumb): the
     // rects live on the title row and are resolved before tab selection.
@@ -4719,9 +5272,9 @@ fn draw_simple_dialog(
     // moving it never shifts the surrounding text (was inserting a caret glyph).
     // Not a popup renderer of its own: it rewrites the line the shared body
     // above already laid out.
-    if let Popup::TextInput { buffer, cursor, kind, .. } = popup {
+    if let Popup::TextInput { buffer, cursor, kind, select_all, .. } = popup {
         if body_text.len() >= 2 {
-            body_text[1] = caret_line(buffer, *cursor, kind.is_secret());
+            body_text[1] = caret_line(buffer, *cursor, kind.is_secret(), *select_all);
         }
     }
     // A dialog gets a dedicated button row above the hint footer; everything
@@ -7743,5 +8296,15 @@ mod md_tests {
         assert_eq!(code[0].0, "x = **not bold** here");
         let _close = md_body_line("```", 40, g, b, &mut in_code);
         assert!(!in_code, "closing fence leaves code mode");
+    }
+}
+
+/// A ratatui colour as plain bytes, for handing to a renderer that knows
+/// nothing about themes. Anything but a truecolor value falls back to the
+/// theme's plain text tone, which is what those variants resolve to anyway.
+fn rgb_of(c: Color) -> (u8, u8, u8) {
+    match c {
+        Color::Rgb(r, g, b) => (r, g, b),
+        _ => (0xcd, 0xcd, 0xda),
     }
 }

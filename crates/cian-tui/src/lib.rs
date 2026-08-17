@@ -58,6 +58,82 @@ mod toggles;
 mod edit;
 mod macro_run;
 mod session;
+mod grid;
+mod host;
+/// The seam a windowed front end sits on. See [`host`].
+pub use host::Session;
+
+/// A button on the icon grid's toolbar.
+///
+/// The grid has no title row to hang cian's usual arrows on, and someone who
+/// came for an icon view did not come to find out that Backspace goes up.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GridButton {
+    Back,
+    Forward,
+    Up,
+    /// Leave the grid for the lists.
+    Close,
+}
+
+/// Where a file's icon belongs on screen, in cells, and which file it is.
+///
+/// A glyph can never be wider than its cell, which is why cian's file-type
+/// icons are clipped in a window: the ink of a Nerd Font icon runs well past
+/// the advance it was given. So a windowed front end draws them itself, as
+/// pixels, and this is how it is told where. The renderer leaves the cells
+/// blank and records the rectangle; whoever owns the surface fills it.
+#[derive(Debug, Clone)]
+pub struct IconSlot {
+    pub x: u16,
+    pub y: u16,
+    pub w: u16,
+    pub h: u16,
+    pub path: PathBuf,
+    /// Directories and applications are worth telling apart from files when
+    /// deciding how hard to work for an icon.
+    pub is_dir: bool,
+    /// Whether the file is somewhere the system can be asked about it.
+    ///
+    /// False for a pane over SFTP, or a listing from inside an archive: the
+    /// path is real to cian and means nothing to the disk. The front end then
+    /// asks for an icon by file *type* instead of by path.
+    pub local: bool,
+    /// Draw *this glyph* rather than the system's icon, in this colour.
+    ///
+    /// The classic view keeps cian's Nerd Font icons — it is the look the
+    /// program was built around. A window cannot draw them in a cell without
+    /// clipping them, because their ink is wider than the advance they were
+    /// given, so it draws them as pictures instead: same glyph, same colour,
+    /// rasterised at whatever size the row is.
+    pub glyph: Option<(char, (u8, u8, u8))>,
+}
+
+/// How the file panes are drawn.
+///
+/// Not a theme — a theme changes the colours, and this changes the furniture.
+/// [`Skin::Finder`] takes the box-drawing away entirely and lets colour do the
+/// work a border was doing: banded rows to separate them, a full-width block
+/// for the selection, whitespace and a hairline between the panes. It is what
+/// a desktop file manager looks like, drawn in cells.
+///
+/// Only the windowed build offers it, on purpose. A window is where someone
+/// meets cian without having chosen a terminal first, and that is the person
+/// the dense bordered look turns away.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Skin {
+    /// Bordered panes, dense rows — cian as it has always looked.
+    #[default]
+    Classic,
+    /// Borderless, banded, desktop-shaped.
+    Finder,
+}
+/// Re-exported so a front end speaks the *same* crossterm cian was built
+/// against. Two copies of it in one binary would be two unrelated `KeyCode`
+/// types that happen to share a name.
+pub use crossterm;
+/// Likewise: the `Frame` handed to [`Session::draw`] must be ratatui's own.
+pub use ratatui;
 mod mouse;
 mod menu;
 mod keys;
@@ -339,6 +415,14 @@ enum Popup {
         /// Caret position, as a char index into `buffer`, so the middle of a
         /// name can be edited rather than only its end.
         cursor: usize,
+        /// Whether the whole line is selected — what `Ctrl+A` leaves behind.
+        ///
+        /// A flag rather than an anchor and a range: everything people actually
+        /// do to an address bar is to the whole of it. Select all, then type
+        /// over it, or copy it, or cut it. A partial selection would need a
+        /// second caret drawn, dragged and shift-extended, and none of that is
+        /// what the field is for.
+        select_all: bool,
     },
     Notice { lines: Vec<String> },
     /// A read-only report too tall for a `Notice`, so it scrolls like the
@@ -2434,6 +2518,45 @@ pub struct App {
     /// Work to run when the current transition finishes (e.g. actually closing
     /// the pane that just finished shrinking away).
     anim_then: Option<PendingClose>,
+    /// When the recording border last pulsed. State rather than a loop-local
+    /// because both event loops — the terminal one and the windowed one — run
+    /// the same `tick_background`, and the throttle has to survive between
+    /// their turns.
+    last_pulse: Instant,
+    /// How the file panes are drawn. Only a windowed front end ever changes it.
+    skin: Skin,
+    /// Leave the icon cells blank and report where they were, for a front end
+    /// that can draw a real one. Off unless something says it can.
+    native_icons: bool,
+    /// Filled every frame while `native_icons` is on.
+    icon_slots: Vec<IconSlot>,
+    /// What the user has typed to jump by name in the grid, and when.
+    ///
+    /// Cleared once a pause makes it obvious the next letter starts a new
+    /// search rather than continuing this one.
+    type_ahead: String,
+    type_ahead_at: Instant,
+    /// Columns in the last grid drawn, so Up and Down can move by a row.
+    icon_cols: usize,
+    /// The grid's toolbar buttons and where they were drawn, for hit-testing.
+    grid_buttons: Vec<(GridButton, Rect)>,
+    /// The rectangle the tiles were laid out in, likewise.
+    grid_area: Option<Rect>,
+    /// The sidebar's places and the row each was drawn on, for hit-testing.
+    sidebar_rows: Vec<(PathBuf, u16)>,
+    /// The sidebar's "＋ 追加" row, when the favourites section is showing.
+    sidebar_add: Option<Rect>,
+    /// Where the grid's address bar was drawn, likewise.
+    grid_address: Option<Rect>,
+    /// Each breadcrumb segment in that bar and the place it leads to.
+    grid_crumbs: Vec<(PathBuf, Rect)>,
+    /// Set by the grid's ✕ button; the front end reads it and leaves.
+    icon_view_close: bool,
+    /// Draw the left pane as a grid of pictures instead of two lists.
+    ///
+    /// Only a front end that can draw a picture offers this; in a terminal it
+    /// would be a grid of empty boxes.
+    icon_view: bool,
     /// Transition length; zero disables animation.
     anim_dur: Duration,
     /// The focused surface's rect from before it was zoomed.
@@ -2709,6 +2832,21 @@ impl App {
             flash: None,
             anim: None,
             anim_then: None,
+            last_pulse: Instant::now(),
+            skin: Skin::Classic,
+            native_icons: false,
+            icon_slots: Vec::new(),
+            type_ahead: String::new(),
+            type_ahead_at: Instant::now(),
+            icon_cols: 1,
+            grid_buttons: Vec::new(),
+            grid_area: None,
+            sidebar_rows: Vec::new(),
+            sidebar_add: None,
+            grid_address: None,
+            grid_crumbs: Vec::new(),
+            icon_view_close: false,
+            icon_view: false,
             anim_dur: Duration::from_millis(
                 config.options.animation_ms.unwrap_or(DEFAULT_ANIM_MS),
             ),
@@ -3556,7 +3694,14 @@ fn text_input(
     kind: InputKind,
 ) -> Popup {
     let cursor = buffer.chars().count();
-    Popup::TextInput { title: title.into(), prompt: prompt.into(), buffer, kind, cursor }
+    Popup::TextInput {
+        title: title.into(),
+        prompt: prompt.into(),
+        buffer,
+        kind,
+        cursor,
+        select_all: false,
+    }
 }
 
 /// Byte offset of the `n`-th char, or the string's length past the end. Used to
@@ -4562,7 +4707,16 @@ pub enum StartupMacro {
     Named(String),
 }
 
-pub fn run(left: Option<PathBuf>, right: Option<PathBuf>, startup: StartupMacro) -> Result<()> {
+/// Build the application state: config, theme, session, startup macro.
+///
+/// Everything both front ends do before anyone owns a screen. The terminal
+/// build follows it with raw mode and an alternate screen; the windowed one
+/// follows it with a window. Neither belongs in here.
+fn prepare_app(
+    left: Option<PathBuf>,
+    right: Option<PathBuf>,
+    startup: StartupMacro,
+) -> Result<App> {
     // Load user config (never fails; problems are reported below).
     let config = cian_lua::load();
 
@@ -4649,6 +4803,12 @@ pub fn run(left: Option<PathBuf>, right: Option<PathBuf>, startup: StartupMacro)
             Err(e) => app.message = Some(format!("macro {}: {}", path.display(), e)),
         },
     }
+
+    Ok(app)
+}
+
+pub fn run(left: Option<PathBuf>, right: Option<PathBuf>, startup: StartupMacro) -> Result<()> {
+    let mut app = prepare_app(left, right, startup)?;
 
     install_panic_hook();
     cian_core::log::log("cian starting");
@@ -4775,9 +4935,179 @@ fn first_line(e: &anyhow::Error) -> String {
     e.to_string().lines().next().unwrap_or_default().to_string()
 }
 
+impl App {
+    /// Advance everything that runs between keystrokes: background jobs
+    /// landing their results, animations, the shell's own output, the input
+    /// method following the mode. Returns whether any of it changed the
+    /// screen.
+    ///
+    /// Split out of the event loop so the windowed front end can share it —
+    /// there are two loops now (a terminal one that blocks on `event::poll`
+    /// and a windowed one driven by winit's callbacks), and only the driving
+    /// is different. Everything that happens per turn lives here.
+    ///
+    /// The one thing left behind is the pending edit: handing a real terminal
+    /// to vim is something only the terminal build can do.
+    pub(crate) fn tick_background(&mut self) -> bool {
+        let mut redraw = false;
+        // Repaint when any pane in the active shell tab produced new output.
+        if self.shell.take_active_tab_dirty() {
+            redraw = true;
+        }
+        // A heavy preview waiting for the cursor to settle needs a frame to
+        // arrive once it has — otherwise it waits for the next keystroke,
+        // which is exactly the one that moves off it again.
+        if self.preview_wanted.is_some() || self.preview_decode.is_some() {
+            redraw = true;
+        }
+        // While a pane is recording, keep the frame alive so its carmine
+        // border can pulse — throttled to ~8 fps, which is plenty for a
+        // 10-second cycle and stays cheap.
+        if self.any_logging() && self.last_pulse.elapsed() >= Duration::from_millis(125) {
+            self.last_pulse = Instant::now();
+            redraw = true;
+        }
+        // Install the shell tab once its background spawn (see `ensure`) lands.
+        if self.shell.poll_pending() {
+            redraw = true;
+        }
+        // Advance a running layout macro (splits, colours, commands) once the
+        // shell is idle between spawns.
+        if self.macro_run.is_some() && self.tick_macro() {
+            redraw = true;
+        }
+        // Install a finished remote directory listing into the download browser.
+        if self.remote_pane_ls.is_some() && self.poll_remote_pane_ls() {
+            redraw = true;
+        }
+        if self.remote_view.is_some() && self.poll_remote_view() {
+            redraw = true;
+        }
+        if self.remote_mut.is_some() && self.poll_remote_mut() {
+            redraw = true;
+        }
+        if self.remote_ls.is_some() && self.poll_remote_ls() {
+            redraw = true;
+        }
+        // Install the AI availability probe's result (unblocks the AI menu).
+        if self.ai_probe.is_some() && self.poll_ai_probe() {
+            redraw = true;
+        }
+        // Keep repainting while the startup splash spins.
+        if self.is_starting_up() {
+            redraw = true;
+        }
+        // A finished file/step count shows its report.
+        if self.du_job.is_some() && self.poll_du() {
+            redraw = true;
+        }
+        if self.count_job.is_some() && self.poll_count() {
+            redraw = true;
+        }
+        // Put the input method where this moment wants it — off while cian is
+        // driven, on the moment it takes text. Compares one bool; only a
+        // change costs anything.
+        self.sync_ime();
+        // A connection picked before the shell finished starting.
+        if self.pending_shell_input.is_some() {
+            self.flush_pending_shell_input();
+            redraw = true;
+        }
+        // ssh asks for a password on its own schedule, so watch for the prompt
+        // rather than sending blindly.
+        if self.pending_auth.is_some() {
+            redraw |= self.poll_pending_auth();
+        }
+        // A freshly-created split grows in from nothing.
+        if let Some((tab, node)) = self.shell.just_split.take() {
+            self.start_anim(AnimKind::Ratio {
+                target: DividerTarget::ShellSplit { tab, node },
+                from: 100,
+                to: 50,
+            });
+        }
+        // Drive any transition in flight, landing it when its time is up.
+        if let Some(a) = self.anim {
+            redraw = true;
+            if a.done() {
+                self.finish_anim();
+            }
+        }
+        // Search results stream in while the walk continues.
+        if self.find_job.is_some() {
+            redraw |= self.poll_find_job();
+        }
+        // A directory comparison lands its whole result at once.
+        if self.diff_job.is_some() {
+            redraw |= self.poll_diff_job();
+        }
+        // Catch changes made by anything other than cian.
+        if self.poll_external_changes() {
+            redraw = true;
+        }
+        // A running file operation reports in over a channel.
+        if self.op_job.is_some() {
+            redraw |= self.poll_op_job();
+        }
+        // A pending AI reply lands over its own channel.
+        if self.ai_job.is_some() {
+            redraw |= self.poll_ai_job();
+        }
+        // A pending crmaine RAG answer, likewise.
+        if self.crmaine_rx.is_some() {
+            redraw |= self.poll_crmaine();
+        }
+        // A finished `:searchfiles` corpus search panelizes into the pane.
+        if self.searchfiles_rx.is_some() {
+            redraw |= self.poll_searchfiles();
+        }
+        // A finished `:ragdebug` retrieval trace opens as a report.
+        if self.debug_search_rx.is_some() {
+            redraw |= self.poll_debug_search();
+        }
+        // While an AI / crmaine reply is still in flight, keep repainting so the
+        // "thinking" spinner actually spins (the poll above returns false until
+        // the answer lands, which would otherwise let the loop go idle).
+        if self.ai_job.is_some() || self.crmaine_rx.is_some() {
+            redraw = true;
+        }
+        // A running duplicate scan reports its groups when done.
+        if self.dupes_job.is_some() {
+            redraw |= self.poll_dupes_job();
+        }
+        // A fading flash needs frames of its own; clear it once it expires so
+        // the loop can go back to sleep.
+        if self.flash.is_some() {
+            redraw = true;
+            if !self.flash_active() {
+                self.flash = None;
+            }
+        }
+        // If the focused pane's shell has exited (e.g. the user typed `exit`),
+        // close that pane; if its tab (and the whole panel) empties, return to
+        // the files so we never strand the user typing into a dead shell.
+        if self.focused == FocusedPane::Shell {
+            let exited = self
+                .shell
+                .active_session_mut()
+                .map(|s| !s.is_alive())
+                .unwrap_or(false);
+            // `anim_then.is_none()` guards against re-firing every tick while
+            // the closing animation runs (the dead pane is still active until
+            // it lands). The animated close shrinks the pane away and merges
+            // its sibling back in, the same as Shift+F10 does.
+            if exited && self.anim_then.is_none() {
+                self.close_shell_pane_animated();
+                self.message = Some("shell exited".into());
+                redraw = true;
+            }
+        }
+        redraw
+    }
+}
+
 fn run_loop<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Result<()> {
     let mut needs_redraw = true;
-    let mut last_pulse = Instant::now();
     loop {
         if needs_redraw {
             // A picture just stopped being shown: terminal graphics live
@@ -4863,163 +5193,15 @@ fn run_loop<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Result<()>
                 }
             }
         }
-        // Repaint when any pane in the active shell tab produced new output.
-        if app.shell.take_active_tab_dirty() {
-            needs_redraw = true;
-        }
-        // A heavy preview waiting for the cursor to settle needs a frame to
-        // arrive once it has — otherwise it waits for the next keystroke,
-        // which is exactly the one that moves off it again.
-        if app.preview_wanted.is_some() || app.preview_decode.is_some() {
-            needs_redraw = true;
-        }
-        // While a pane is recording, keep the frame alive so its carmine
-        // border can pulse — throttled to ~8 fps, which is plenty for a
-        // 10-second cycle and stays cheap.
-        if app.any_logging() && last_pulse.elapsed() >= Duration::from_millis(125) {
-            last_pulse = Instant::now();
-            needs_redraw = true;
-        }
-        // Install the shell tab once its background spawn (see `ensure`) lands.
-        if app.shell.poll_pending() {
-            needs_redraw = true;
-        }
-        // Advance a running layout macro (splits, colours, commands) once the
-        // shell is idle between spawns.
-        if app.macro_run.is_some() && app.tick_macro() {
-            needs_redraw = true;
-        }
-        // Install a finished remote directory listing into the download browser.
-        if app.remote_pane_ls.is_some() && app.poll_remote_pane_ls() {
-            needs_redraw = true;
-        }
-        if app.remote_view.is_some() && app.poll_remote_view() {
-            needs_redraw = true;
-        }
-        if app.remote_mut.is_some() && app.poll_remote_mut() {
-            needs_redraw = true;
-        }
-        if app.remote_ls.is_some() && app.poll_remote_ls() {
-            needs_redraw = true;
-        }
-        // Install the AI availability probe's result (unblocks the AI menu).
-        if app.ai_probe.is_some() && app.poll_ai_probe() {
-            needs_redraw = true;
-        }
-        // Keep repainting while the startup splash spins.
-        if app.is_starting_up() {
-            needs_redraw = true;
-        }
-        // A finished file/step count shows its report.
-        if app.du_job.is_some() && app.poll_du() {
-            needs_redraw = true;
-        }
-        if app.count_job.is_some() && app.poll_count() {
-            needs_redraw = true;
-        }
         // An edit request suspends the TUI, runs the editor, and restores.
+        // Ahead of `tick_background` rather than in the middle of it: it is
+        // the one step that needs the terminal, and the background pollers
+        // it displaced only read channels, so their order does not matter.
         if app.pending_edit.is_some() {
             suspend_and_edit(terminal, app)?;
             needs_redraw = true;
         }
-        // Put the input method where this moment wants it — off while cian is
-        // driven, on the moment it takes text. Compares one bool; only a
-        // change costs anything.
-        app.sync_ime();
-        // A connection picked before the shell finished starting.
-        if app.pending_shell_input.is_some() {
-            app.flush_pending_shell_input();
-            needs_redraw = true;
-        }
-        // ssh asks for a password on its own schedule, so watch for the prompt
-        // rather than sending blindly.
-        if app.pending_auth.is_some() {
-            needs_redraw |= app.poll_pending_auth();
-        }
-        // A freshly-created split grows in from nothing.
-        if let Some((tab, node)) = app.shell.just_split.take() {
-            app.start_anim(AnimKind::Ratio {
-                target: DividerTarget::ShellSplit { tab, node },
-                from: 100,
-                to: 50,
-            });
-        }
-        // Drive any transition in flight, landing it when its time is up.
-        if let Some(a) = app.anim {
-            needs_redraw = true;
-            if a.done() {
-                app.finish_anim();
-            }
-        }
-        // Search results stream in while the walk continues.
-        if app.find_job.is_some() {
-            needs_redraw |= app.poll_find_job();
-        }
-        // A directory comparison lands its whole result at once.
-        if app.diff_job.is_some() {
-            needs_redraw |= app.poll_diff_job();
-        }
-        // Catch changes made by anything other than cian.
-        if app.poll_external_changes() {
-            needs_redraw = true;
-        }
-        // A running file operation reports in over a channel.
-        if app.op_job.is_some() {
-            needs_redraw |= app.poll_op_job();
-        }
-        // A pending AI reply lands over its own channel.
-        if app.ai_job.is_some() {
-            needs_redraw |= app.poll_ai_job();
-        }
-        // A pending crmaine RAG answer, likewise.
-        if app.crmaine_rx.is_some() {
-            needs_redraw |= app.poll_crmaine();
-        }
-        // A finished `:searchfiles` corpus search panelizes into the pane.
-        if app.searchfiles_rx.is_some() {
-            needs_redraw |= app.poll_searchfiles();
-        }
-        // A finished `:ragdebug` retrieval trace opens as a report.
-        if app.debug_search_rx.is_some() {
-            needs_redraw |= app.poll_debug_search();
-        }
-        // While an AI / crmaine reply is still in flight, keep repainting so the
-        // "thinking" spinner actually spins (the poll above returns false until
-        // the answer lands, which would otherwise let the loop go idle).
-        if app.ai_job.is_some() || app.crmaine_rx.is_some() {
-            needs_redraw = true;
-        }
-        // A running duplicate scan reports its groups when done.
-        if app.dupes_job.is_some() {
-            needs_redraw |= app.poll_dupes_job();
-        }
-        // A fading flash needs frames of its own; clear it once it expires so
-        // the loop can go back to sleep.
-        if app.flash.is_some() {
-            needs_redraw = true;
-            if !app.flash_active() {
-                app.flash = None;
-            }
-        }
-        // If the focused pane's shell has exited (e.g. the user typed `exit`),
-        // close that pane; if its tab (and the whole panel) empties, return to
-        // the files so we never strand the user typing into a dead shell.
-        if app.focused == FocusedPane::Shell {
-            let exited = app
-                .shell
-                .active_session_mut()
-                .map(|s| !s.is_alive())
-                .unwrap_or(false);
-            // `anim_then.is_none()` guards against re-firing every tick while
-            // the closing animation runs (the dead pane is still active until
-            // it lands). The animated close shrinks the pane away and merges
-            // its sibling back in, the same as Shift+F10 does.
-            if exited && app.anim_then.is_none() {
-                app.close_shell_pane_animated();
-                app.message = Some("shell exited".into());
-                needs_redraw = true;
-            }
-        }
+        needs_redraw |= app.tick_background();
         if app.should_quit {
             return Ok(());
         }

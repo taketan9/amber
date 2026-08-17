@@ -173,6 +173,12 @@ impl App {
         // while its op is genuinely still running. Both polls no-op when idle.
         self.poll_op_job();
         self.poll_diff_job();
+        // The icon grid claims the letters and the arrows for itself — see
+        // [`crate::grid`]. Ahead of everything else because the whole point is
+        // that in that view a letter is a name, not a command.
+        if self.grid_key(key) {
+            return Ok(());
+        }
         // While the progress popup is up, it owns the keyboard: Esc stops the
         // op, and `b`/Enter tucks the popup away so work can continue while
         // the op runs (a status-line chip keeps showing it; `:queue` manages
@@ -495,8 +501,23 @@ impl App {
                 }
                 return Ok(());
             }
-            let Popup::TextInput { buffer, cursor, .. } = &mut self.popup else { return Ok(()) };
+            // Clipboard first: it needs the whole `App`, and the borrow of the
+            // popup below would rule that out.
+            if ctrl {
+                match key.code {
+                    KeyCode::Char('c') | KeyCode::Char('C') => return self.input_copy(false),
+                    KeyCode::Char('x') | KeyCode::Char('X') => return self.input_copy(true),
+                    KeyCode::Char('v') | KeyCode::Char('V') => return self.input_paste(),
+                    _ => {}
+                }
+            }
+            let Popup::TextInput { buffer, cursor, select_all, .. } = &mut self.popup else {
+                return Ok(());
+            };
             let len = buffer.chars().count();
+            // Anything that is not a movement or a copy replaces the selection,
+            // which is what "select all and type" means.
+            let selected = std::mem::take(select_all);
             match key.code {
                 KeyCode::Esc => { self.popup = Popup::None; Ok(())}
                 KeyCode::Enter => { self.finish_text_input()}
@@ -505,22 +526,83 @@ impl App {
                 KeyCode::Right => { *cursor = (*cursor + 1).min(len); Ok(())}
                 KeyCode::Home => { *cursor = 0; Ok(())}
                 KeyCode::End => { *cursor = len; Ok(())}
-                KeyCode::Char('a') if ctrl => { *cursor = 0; Ok(())}
-                KeyCode::Char('e') if ctrl => { *cursor = len; Ok(())}
-                KeyCode::Backspace => { backspace_at(buffer, cursor); Ok(())}
-                KeyCode::Delete => { delete_at(buffer, cursor); Ok(())}
-                // Clear the line, as in any readline prompt.
-                KeyCode::Char('u') | KeyCode::Char('U') if ctrl => {
+                // `Ctrl+A` is select-all, as it is in every address bar and
+                // every text field on a desktop. The readline reading — start
+                // of line — is what `Home` is for, and `End` is the other end.
+                // The rest of the emacs set (`Ctrl+E`, `Ctrl+U`) is gone: cian
+                // is a vim-shaped program and half a line-editor's muscle
+                // memory is worse than none of it.
+                KeyCode::Char('a') | KeyCode::Char('A') if ctrl => {
+                    *select_all = len > 0;
+                    *cursor = len;
+                    Ok(())
+                }
+                KeyCode::Backspace if selected => {
                     buffer.clear();
                     *cursor = 0;
                     Ok(())
                 }
+                KeyCode::Delete if selected => {
+                    buffer.clear();
+                    *cursor = 0;
+                    Ok(())
+                }
+                KeyCode::Backspace => { backspace_at(buffer, cursor); Ok(())}
+                KeyCode::Delete => { delete_at(buffer, cursor); Ok(())}
                 // Without this guard every Ctrl+<key> inserted its bare letter,
                 // so Ctrl+V typed a "v" instead of pasting.
                 KeyCode::Char(_) if ctrl => Ok(()),
-                KeyCode::Char(c) => { insert_char_at(buffer, cursor, c); Ok(())}
+                KeyCode::Char(c) => {
+                    if selected {
+                        buffer.clear();
+                        *cursor = 0;
+                    }
+                    insert_char_at(buffer, cursor, c);
+                    Ok(())
+                }
                 _ => Ok(()),
             }
+    }
+
+    /// `Ctrl+C` / `Ctrl+X` in a text field. Copies the selection, or the whole
+    /// line when nothing is selected — an address bar people mean to copy is
+    /// almost never half an address.
+    fn input_copy(&mut self, cut: bool) -> Result<()> {
+        let Popup::TextInput { buffer, cursor, select_all, .. } = &mut self.popup else {
+            return Ok(());
+        };
+        if buffer.is_empty() {
+            return Ok(());
+        }
+        let text = buffer.clone();
+        if cut {
+            buffer.clear();
+            *cursor = 0;
+            *select_all = false;
+        }
+        if let Some(cb) = self.clipboard.as_mut() {
+            let _ = cb.set_text(text);
+        }
+        Ok(())
+    }
+
+    /// `Ctrl+V`. Replaces the selection, or inserts at the caret.
+    fn input_paste(&mut self) -> Result<()> {
+        let Some(text) = self.clipboard_text() else { return Ok(()) };
+        // One line: a field is one line, and a pasted newline would otherwise
+        // arrive as an invisible character that breaks the path silently.
+        let text: String = text.lines().next().unwrap_or_default().to_string();
+        let Popup::TextInput { buffer, cursor, select_all, .. } = &mut self.popup else {
+            return Ok(());
+        };
+        if std::mem::take(select_all) {
+            buffer.clear();
+            *cursor = 0;
+        }
+        for c in text.chars() {
+            insert_char_at(buffer, cursor, c);
+        }
+        Ok(())
     }
 
     fn search_key(&mut self, key: KeyEvent) -> Result<()> {

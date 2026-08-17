@@ -1885,7 +1885,7 @@ impl App {
     pub(crate) fn start_find_prompt(&mut self) {
         self.popup = text_input(
                 "find (recursive)",
-                "name contains   (Ctrl+V paste, Ctrl+U clear):",
+                "name contains   (Ctrl+V paste, Ctrl+A select all):",
                 String::new(),
                 InputKind::FindRecursive,
             );
@@ -2030,7 +2030,7 @@ impl App {
     pub(crate) fn start_grep_prompt(&mut self) {
         self.popup = text_input(
                 "grep (recursive)",
-                "text inside files   (Ctrl+V paste, Ctrl+U clear):",
+                "text inside files   (Ctrl+V paste, Ctrl+A select all):",
                 String::new(),
                 InputKind::GrepRecursive,
             );
@@ -3603,7 +3603,7 @@ impl App {
                     .unwrap_or(here);
                 self.popup = text_input(
                     "shortcut — target",
-                    "URL / path / app   (Ctrl+V paste, Ctrl+U clear):",
+                    "URL / path / app   (Ctrl+V paste, Ctrl+A select all):",
                     prev_target,
                     InputKind::ShortcutTarget { path: path.clone(), edit_idx: *edit_idx, name },
                 );
