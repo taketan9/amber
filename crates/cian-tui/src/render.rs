@@ -5003,6 +5003,30 @@ fn draw_simple_dialog(
                 tr(lang, " y/Enter = discard   n/Esc = cancel ", " y/Enter = 破棄   n/Esc = 取消 ").to_string(),
             )
         }
+        Popup::ConfirmShortcutDelete { name, .. } => {
+            let lines = vec![
+                tr(lang, "remove this bookmark?", "このお気に入りを削除しますか？").to_string(),
+                String::new(),
+                format!("  {name}"),
+                String::new(),
+                tr(
+                    lang,
+                    "The place itself is untouched — only the bookmark goes.",
+                    "場所そのものは消えません。お気に入りの登録だけを消します。",
+                )
+                .to_string(),
+            ];
+            (
+                tr(lang, " remove bookmark ", " お気に入りの削除 ").to_string(),
+                lines,
+                tr(
+                    lang,
+                    " y/Enter = remove   n/Esc = keep ",
+                    " y/Enter = 削除   n/Esc = やめる ",
+                )
+                .to_string(),
+            )
+        }
         Popup::ConfirmDiffCopy { src, dst, is_dir, .. } => {
             let what = if *is_dir {
                 tr(lang, "directory", "ディレクトリ")

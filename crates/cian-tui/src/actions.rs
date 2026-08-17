@@ -3698,6 +3698,42 @@ fn each_lines(template: &str, paths: &[PathBuf]) -> (Vec<String>, usize) {
     (lines, skipped)
 }
 
+impl App {
+    /// Remove the bookmark the confirmation was about, and go back to the list.
+    ///
+    /// The list is restored rather than closed: removing one of several is a
+    /// tidying-up job, and being thrown out of the list after each one would
+    /// make it four keystrokes per bookmark instead of two.
+    pub(crate) fn confirm_shortcut_delete(&mut self) {
+        let Popup::ConfirmShortcutDelete { path, idx, back, .. } =
+            std::mem::replace(&mut self.popup, Popup::None)
+        else {
+            return;
+        };
+        if let Some(lvl) = crate::sc_level_mut(&mut self.shortcuts.entries, &path) {
+            if idx < lvl.len() {
+                lvl.remove(idx);
+            }
+        }
+        self.save_shortcuts(path, idx, "");
+        // `save_shortcuts` reopens the list at the right place; if it did not,
+        // fall back to whatever was showing before.
+        if matches!(self.popup, Popup::None) {
+            self.popup = *back;
+        }
+    }
+
+    /// Leave the bookmark alone and go back to the list.
+    pub(crate) fn cancel_shortcut_delete(&mut self) {
+        let Popup::ConfirmShortcutDelete { back, .. } =
+            std::mem::replace(&mut self.popup, Popup::None)
+        else {
+            return;
+        };
+        self.popup = *back;
+    }
+}
+
 #[cfg(test)]
 mod each_tests {
     use super::each_lines;

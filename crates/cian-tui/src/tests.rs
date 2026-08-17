@@ -3150,7 +3150,10 @@
             cursor: 0,
             path: vec![],
         };
+        // `d` asks first now — see `shortcut_delete_asks`. The save it cannot
+        // do happens after the yes.
         app.handle_key(key('d')).unwrap();
+        app.handle_key(key('y')).unwrap();
         match &app.popup {
             Popup::Notice { lines } => {
                 let text = lines.join(" ");
@@ -12759,5 +12762,84 @@ mod drag_and_drop {
         let mut app = App::new(p.clone(), p.clone(), en_config()).unwrap();
         app.drop_onto(vec![p.join("d")], p.join("d"), true);
         assert!(matches!(app.popup, Popup::None));
+    }
+}
+
+/// `d` in the bookmark list asks first. It used to remove and save in one
+/// keystroke, one key away from `j` and `k`, and a bookmark removed by accident
+/// is gone — there is no undo for a file that only ever held a name and a path.
+mod shortcut_delete_asks {
+    use super::*;
+
+    fn with_bookmarks(app: &mut App) {
+        app.shortcuts.entries = vec![
+            crate::Shortcut { name: "home".into(), target: Some("~".into()), children: None },
+            crate::Shortcut { name: "work".into(), target: Some("/tmp".into()), children: None },
+        ];
+        app.start_shortcuts();
+    }
+
+    fn press(app: &mut App, c: char) {
+        app.handle_key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE)).unwrap();
+    }
+
+    fn names(app: &App) -> Vec<String> {
+        app.shortcuts.entries.iter().map(|s| s.name.clone()).collect()
+    }
+
+    #[test]
+    fn d_asks_rather_than_removing() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        with_bookmarks(&mut app);
+        press(&mut app, 'd');
+        assert!(
+            matches!(app.popup, Popup::ConfirmShortcutDelete { .. }),
+            "it asks"
+        );
+        assert_eq!(names(&app).len(), 2, "and nothing has gone yet");
+    }
+
+    #[test]
+    fn saying_no_keeps_it_and_returns_to_the_list() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        with_bookmarks(&mut app);
+        press(&mut app, 'd');
+        press(&mut app, 'n');
+        assert_eq!(names(&app), ["home", "work"], "both bookmarks survive");
+        assert!(
+            matches!(app.popup, Popup::Shortcuts { .. }),
+            "and the list is back, so the next one is two keys away"
+        );
+    }
+
+    #[test]
+    fn escape_also_keeps_it() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        with_bookmarks(&mut app);
+        press(&mut app, 'd');
+        app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)).unwrap();
+        assert_eq!(names(&app).len(), 2);
+        assert!(matches!(app.popup, Popup::Shortcuts { .. }));
+    }
+
+    #[test]
+    fn saying_yes_removes_the_one_under_the_cursor() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        with_bookmarks(&mut app);
+        press(&mut app, 'd');
+        press(&mut app, 'y');
+        assert_eq!(names(&app), ["work"], "the first one, and only it");
+    }
+
+    #[test]
+    fn the_list_comes_back_after_removing() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        with_bookmarks(&mut app);
+        press(&mut app, 'd');
+        press(&mut app, 'y');
+        assert!(
+            matches!(app.popup, Popup::Shortcuts { .. }),
+            "tidying up several should not mean reopening the list each time"
+        );
     }
 }

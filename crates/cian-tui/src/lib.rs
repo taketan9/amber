@@ -390,6 +390,10 @@ enum Popup {
     /// in the file diff or the folder compare). `back` is the comparison popup
     /// to restore whether the copy is confirmed or cancelled.
     ConfirmDiffCopy { src: PathBuf, dst: PathBuf, is_dir: bool, back: Box<Popup> },
+    /// Removing a bookmark. It asks first because a bookmark is a thing
+    /// somebody made — a path they went to the trouble of naming — and `d` in
+    /// the list sits one key away from `j` and `k`.
+    ConfirmShortcutDelete { path: Vec<usize>, idx: usize, name: String, back: Box<Popup> },
     /// One-way "make that side match this one" from the folder compare (`]` =
     /// left→right, `[` = right→left). Copies everything the source has that the
     /// destination lacks or differs on; it never deletes, so `extra` counts the

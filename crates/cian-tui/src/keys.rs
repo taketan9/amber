@@ -416,6 +416,8 @@ impl App {
                 // everything else just closes.
                 if matches!(self.popup, Popup::ConfirmDiffCopy { .. }) {
                     self.cancel_diff_copy();
+                } else if matches!(self.popup, Popup::ConfirmShortcutDelete { .. }) {
+                    self.cancel_shortcut_delete();
                 } else if matches!(self.popup, Popup::ConfirmDirSync { .. }) {
                     self.cancel_dir_sync();
                 } else {
@@ -434,6 +436,7 @@ impl App {
                 Popup::ConfirmTransfer { .. } => self.finish_transfer(Conflict::Skip),
                 Popup::ConfirmDiscard { .. } => { self.git_discard(); Ok(()) }
                 Popup::ConfirmDiffCopy { .. } => { self.confirm_diff_copy(); Ok(()) }
+                Popup::ConfirmShortcutDelete { .. } => { self.confirm_shortcut_delete(); Ok(()) }
                 Popup::ConfirmDirSync { .. } => { self.confirm_dir_sync(); Ok(()) }
                 Popup::ConfirmRemoteDelete { .. } => { self.confirm_remote_delete(); Ok(()) }
                 Popup::ConfirmRemoteMove { .. } => { self.confirm_remote_move(); Ok(()) }
@@ -1611,12 +1614,17 @@ impl App {
                 KeyCode::Char('d') => {
                     if n > 0 {
                         let (p, idx) = (path.clone(), *cursor);
-                        if let Some(lvl) = sc_level_mut(&mut self.shortcuts.entries, &p) {
-                            if idx < lvl.len() {
-                                lvl.remove(idx);
-                            }
-                        }
-                        self.save_shortcuts(p, idx, "");
+                        let name = crate::sc_level(&self.shortcuts.entries, &p)
+                            .get(idx)
+                            .map(|s| s.name.clone())
+                            .unwrap_or_default();
+                        let back = std::mem::replace(&mut self.popup, Popup::None);
+                        self.popup = Popup::ConfirmShortcutDelete {
+                            path: p,
+                            idx,
+                            name,
+                            back: Box::new(back),
+                        };
                     }
                 }
                 KeyCode::Char('r') => {
