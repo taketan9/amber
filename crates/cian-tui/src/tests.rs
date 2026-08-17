@@ -12956,3 +12956,30 @@ mod remote_pane_opens {
         assert!(app.remote_view.is_none(), "and does not try to read it as a file");
     }
 }
+
+/// Who the advice about terminals is for. Not the window: it has no terminal,
+/// and it sets none of the variables a good terminal sets — so it looked like
+/// the worst one, and said so on every start.
+mod advice_is_for_terminals {
+    use super::*;
+
+    #[test]
+    fn only_the_legacy_windows_console_is_told_about_itself() {
+        // (host, on Windows, host says it is a modern terminal)
+        assert!(wants_terminal_advice(Host::Terminal, true, false), "the case it exists for");
+        assert!(!wants_terminal_advice(Host::Terminal, true, true), "Windows Terminal is fine");
+        assert!(!wants_terminal_advice(Host::Terminal, false, false), "not a Windows problem");
+    }
+
+    #[test]
+    fn a_window_is_never_told_to_go_and_find_a_terminal() {
+        for windows in [true, false] {
+            for modern in [true, false] {
+                assert!(
+                    !wants_terminal_advice(Host::Window, windows, modern),
+                    "windows={windows} modern={modern}"
+                );
+            }
+        }
+    }
+}

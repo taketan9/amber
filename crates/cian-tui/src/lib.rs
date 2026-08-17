@@ -4653,27 +4653,34 @@ pub fn usage_text() -> String {
     .join("\n")
 }
 
+/// Is the notice below worth showing?
+///
+/// Split out from the text so all four answers can be checked on any platform,
+/// which matters because the one that was wrong could only be seen on Windows:
+/// the windowed build was showing terminal advice. It has no terminal. It also
+/// sets none of the environment variables a modern one sets, so it looked to
+/// this test exactly like the legacy console — and after the window stopped
+/// opening a console at all, the notice appeared on *every* start.
+fn wants_terminal_advice(host: Host, windows: bool, modern: bool) -> bool {
+    host == Host::Terminal && windows && !modern
+}
+
 /// Note when the host terminal will not do cian justice.
 ///
 /// cian cannot restyle the console it was launched into — the font and colors
-/// belong to the host. Running `cian.exe` straight from Explorer or cmd lands
-/// in the legacy console, where Nerd Font icons become boxes. Saying so once
-/// at startup beats leaving it looking broken.
+/// belong to the host. Running `cian-tui.exe` straight from Explorer or cmd
+/// lands in the legacy console, where Nerd Font icons become boxes. Saying so
+/// once at startup beats leaving it looking broken.
 fn terminal_advice() -> Vec<String> {
-    if !cfg!(windows) {
-        return Vec::new();
-    }
-    if modern_terminal() {
-        return Vec::new();
-    }
     vec![
         "This looks like the legacy Windows console.".to_string(),
         "cian works, but file-type icons need a Nerd Font, which that console".to_string(),
         "cannot use. For the intended look, start it from Windows Terminal:".to_string(),
         String::new(),
-        "    wt cian".to_string(),
+        "    wt cian-tui".to_string(),
         String::new(),
-        "or from WezTerm. (This notice only appears in the legacy console.)".to_string(),
+        "or from WezTerm — or run cian.exe, which brings its own font and its".to_string(),
+        "own window. (This notice only appears in the legacy console.)".to_string(),
     ]
 }
 
@@ -4731,6 +4738,21 @@ pub enum StartupMacro {
     Named(String),
 }
 
+/// Which kind of front end this is being built for.
+///
+/// cian is deliberately incurious about its front end — the panes do not know
+/// whether they are cells in a terminal or pixels in a window. Two decisions
+/// genuinely need to know, and both are about what the *host* can draw rather
+/// than about what cian does: whether to warn about the terminal, and whether
+/// its font has the rounded corners cian would like to use.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Host {
+    /// Someone else's terminal, with someone else's font in it.
+    Terminal,
+    /// A window of cian's own, with a font it chose.
+    Window,
+}
+
 /// Build the application state: config, theme, session, startup macro.
 ///
 /// Everything both front ends do before anyone owns a screen. The terminal
@@ -4740,7 +4762,13 @@ fn prepare_app(
     left: Option<PathBuf>,
     right: Option<PathBuf>,
     startup: StartupMacro,
+    host: Host,
 ) -> Result<App> {
+    // Before the theme is resolved: the corner glyphs are chosen by what the
+    // host's font is likely to have, and a window's font is cian's own.
+    if host == Host::Window {
+        theme::host_is_a_window();
+    }
     // Load user config (never fails; problems are reported below).
     let config = cian_lua::load();
 
@@ -4786,7 +4814,9 @@ fn prepare_app(
         }
     }
 
-    startup_errors.extend(terminal_advice());
+    if wants_terminal_advice(host, cfg!(windows), theme::modern_terminal()) {
+        startup_errors.extend(terminal_advice());
+    }
 
     let mut app = App::new(left, right, config)?;
     // Bring back past chat conversations so `Ctrl+R` in the chat spans restarts.
@@ -4832,7 +4862,7 @@ fn prepare_app(
 }
 
 pub fn run(left: Option<PathBuf>, right: Option<PathBuf>, startup: StartupMacro) -> Result<()> {
-    let mut app = prepare_app(left, right, startup)?;
+    let mut app = prepare_app(left, right, startup, Host::Terminal)?;
 
     install_panic_hook();
     cian_core::log::log("cian starting");

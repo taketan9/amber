@@ -389,10 +389,26 @@ pub(crate) fn resolve_border_type(configured: Option<&str>) -> BorderType {
     }
 }
 
-/// Whether the host terminal advertises itself as a modern one. The legacy
-/// Windows console sets none of these.
+/// Set once by the windowed front end, before the theme is resolved.
+///
+/// There is no terminal in that build at all, and no environment variable says
+/// so — a window started from Explorer looks to every test below exactly like
+/// the legacy console, and was being treated as one.
+static WINDOWED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Say that cian owns its own window, and with it its own font.
+pub(crate) fn host_is_a_window() {
+    WINDOWED.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Whether the host can be trusted with the glyphs cian would rather use.
+///
+/// A window can, always: the font is cian's own and it is a Nerd Font. A
+/// terminal can if it says which one it is — the legacy Windows console sets
+/// none of these.
 pub(crate) fn modern_terminal() -> bool {
-    std::env::var_os("WT_SESSION").is_some()
+    WINDOWED.load(std::sync::atomic::Ordering::Relaxed)
+        || std::env::var_os("WT_SESSION").is_some()
         || std::env::var_os("WEZTERM_PANE").is_some()
         || std::env::var_os("TERM_PROGRAM").is_some()
 }

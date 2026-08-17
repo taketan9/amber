@@ -34,7 +34,7 @@ use anyhow::Result;
 use crossterm::event::{Event, KeyEventKind};
 use ratatui::Frame;
 
-use crate::{prepare_app, App, Skin, StartupMacro};
+use crate::{prepare_app, App, Host, Skin, StartupMacro};
 
 /// A running cian, minus the screen and the keyboard.
 pub struct Session {
@@ -52,12 +52,20 @@ impl Session {
     ///
     /// Does not touch a terminal, a window, or a screen — the caller owns all
     /// three by the time this returns.
+    ///
+    /// This is the *windowed* entry point, and says so: cian then keeps to
+    /// itself the two things it would otherwise say about a terminal — advice
+    /// about which one to use, and the plainer corners a console font needs.
     pub fn start(
         left: Option<PathBuf>,
         right: Option<PathBuf>,
         startup: StartupMacro,
     ) -> Result<Self> {
-        Ok(Self { app: prepare_app(left, right, startup)?, saved_theme: None, native_icons: false })
+        Ok(Self {
+            app: prepare_app(left, right, startup, Host::Window)?,
+            saved_theme: None,
+            native_icons: false,
+        })
     }
 
     /// Tell cian that every key arrives distinguishable — that Ctrl+H is not
