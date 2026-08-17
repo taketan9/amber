@@ -4560,7 +4560,18 @@ pub fn manual_text() -> String {
 /// picture and always a picture.
 pub(crate) fn image_picker(how: &str) -> Option<ratatui_image::picker::Picker> {
     use ratatui_image::picker::{Picker, ProtocolType as P};
+    use std::io::IsTerminal;
     if how == "blocks" {
+        return None;
+    }
+    // The query below asks the terminal a question and waits for the answer.
+    // With no terminal on either end there is nobody to answer it, and the wait
+    // is forever — which is exactly what happened: cian's Windows CI job sat on
+    // this for six hours, every push, until the runner killed it. macOS and
+    // Linux happen to fail the read quickly; Windows does not.
+    //
+    // Nothing is lost by declining. Half-blocks are what a pipe gets anyway.
+    if !std::io::stdout().is_terminal() || !std::io::stdin().is_terminal() {
         return None;
     }
     let named = match how {
