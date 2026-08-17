@@ -430,14 +430,6 @@ impl ShellPane {
         self.tabs.is_empty() && !self.pending.is_empty()
     }
 
-    /// Is there a shell here — running, starting, or failed to start?
-    ///
-    /// Asked by the layouts that only make room for the panel when it has
-    /// something to show.
-    pub(crate) fn in_use(&self) -> bool {
-        !self.tabs.is_empty() || !self.pending.is_empty() || self.error.is_some()
-    }
-
     /// Spawn the first tab if none exists yet (lazy start on first focus).
     pub(crate) fn ensure(&mut self, cwd: &Path) {
         if self.tabs.is_empty() && !self.is_pending(PendingKind::FirstTab) {
