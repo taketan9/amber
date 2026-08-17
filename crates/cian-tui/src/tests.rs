@@ -2223,6 +2223,11 @@
     /// live and is not.
     #[test]
     fn the_panels_frame_says_whether_it_has_the_keyboard() {
+        // Reads the active theme, which lives in a process-wide global that
+        // other tests swap. Without the lock this passes until the machine is
+        // parallel enough to run one of them at the same moment — which is
+        // what a CI runner with more cores than a laptop is.
+        let _g = THEME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let (_d, mut app) = app_with(&["a.txt"]);
         app.handle_key(code(KeyCode::Enter)).unwrap();
         let buf = render_buf(&mut app, 120, 30);
