@@ -318,6 +318,34 @@ pub(crate) fn theme() -> ResolvedTheme {
     *THEME.read().unwrap_or_else(|e| e.into_inner())
 }
 
+/// Whether these colours were chosen by the user rather than by cian.
+///
+/// The detail and icon views bring the Finder palette with them, because the
+/// borderless shape they use only reads on a light surface — a borderless dark
+/// pane is not a Finder, it is a pane with its edges missing. That is the right
+/// default and the wrong override: someone who set `solarized-light` in
+/// init.lua, or picked a theme with `:theme`, watched it apply in the classic
+/// view and be replaced the moment they pressed Ctrl+Shift+G. A choice made out
+/// loud holds in every view.
+static ASKED_FOR: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Note that a theme was named — in init.lua, by `:theme`, or in the gallery.
+pub(crate) fn theme_was_asked_for() {
+    ASKED_FOR.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+
+pub(crate) fn theme_is_the_users() -> bool {
+    ASKED_FOR.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// May a change of skin replace the colours in force?
+///
+/// Split from the flag so the rule can be asserted without a process-wide
+/// switch that, once flipped, stays flipped for every other test in the run.
+pub(crate) fn skin_may_swap_theme(theme_is_the_users: bool) -> bool {
+    !theme_is_the_users
+}
+
 /// Swap the active theme (from `:theme`, the picker preview, or `:reload`).
 pub(crate) fn set_theme(t: ResolvedTheme) {
     let mut w = THEME.write().unwrap_or_else(|e| e.into_inner());
@@ -399,6 +427,14 @@ static WINDOWED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::
 /// Say that cian owns its own window, and with it its own font.
 pub(crate) fn host_is_a_window() {
     WINDOWED.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Is cian drawing into a window of its own?
+///
+/// Asked by the few things that are decided by how the host draws a cell rather
+/// than by anything cian means — see [`crate::render::cloud_mark_for`].
+pub(crate) fn in_a_window() -> bool {
+    WINDOWED.load(std::sync::atomic::Ordering::Relaxed)
 }
 
 /// Whether the host can be trusted with the glyphs cian would rather use.
@@ -734,6 +770,17 @@ pub(crate) fn resolve_theme(t: &cian_lua::Theme) -> (ResolvedTheme, Vec<String>)
 /// Resolve and install the theme + border style into the process-wide statics
 /// (call once, before drawing). Returns the non-fatal theme errors to report.
 pub(crate) fn install(theme: &cian_lua::Theme, borders: Option<&str>, nerd: bool) -> Vec<String> {
+    // Did anyone actually ask for these colours, or are they the ones cian
+    // picked? Only the asked-for kind survives a change of view.
+    if theme.preset.is_some()
+        || theme.accent.is_some()
+        || theme.status_bg.is_some()
+        || theme.selected_bg.is_some()
+        || theme.visual_bg.is_some()
+        || theme.mark_fg.is_some()
+    {
+        theme_was_asked_for();
+    }
     let (resolved, errs) = resolve_theme(theme);
     set_theme(resolved);
     let _ = BORDERS.set(resolve_border_type(borders));

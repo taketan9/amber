@@ -3490,6 +3490,9 @@ pub(crate) fn state_with(text: &str, key: &str, value: &str) -> String {
 /// a read-only config dir just means it does not stick, which is not worth
 /// interrupting the user over.
 pub(crate) fn save_theme_pref(name: &str) {
+    // Naming a theme is asking for it, and an asked-for theme is not replaced
+    // by the one the detail view would otherwise bring with it.
+    theme::theme_was_asked_for();
     state_set("theme", name);
 }
 
@@ -4704,6 +4707,32 @@ fn install_panic_hook() {
     }));
 }
 
+/// Where a well-known folder actually is.
+///
+/// `~/Desktop` is the whole answer on macOS and on Linux. It is only sometimes
+/// the answer on Windows: OneDrive moves the Desktop, Documents and Pictures
+/// folders inside itself when "back up your folders" is on — which is what a
+/// personal account gets by default — and the Japanese client names them
+/// デスクトップ, ドキュメント, ピクチャ. `~/Desktop` then does not exist, cian
+/// left the entry out of よく使う項目, and it looked as though it had simply
+/// forgotten the desktop.
+///
+/// Checked in the order they should win: the plain path, then whatever OneDrive
+/// says about itself, then the OneDrive folder in the home directory.
+pub(crate) fn known_dir(home: &Path, english: &str, japanese: &str) -> Option<PathBuf> {
+    let mut roots = vec![home.to_path_buf()];
+    for var in ["OneDrive", "OneDriveConsumer", "OneDriveCommercial"] {
+        if let Some(v) = std::env::var_os(var) {
+            roots.push(PathBuf::from(v));
+        }
+    }
+    roots.push(home.join("OneDrive"));
+    roots
+        .iter()
+        .flat_map(|root| [root.join(english), root.join(japanese)])
+        .find(|p| p.is_dir())
+}
+
 /// The directory to open when no path was given on the command line: the
 /// configured `home`, else the Desktop, else the home directory, else `.`.
 fn default_home(config: &cian_lua::Config) -> PathBuf {
@@ -4714,8 +4743,7 @@ fn default_home(config: &cian_lua::Config) -> PathBuf {
         }
     }
     if let Some(home) = home_dir() {
-        let desktop = home.join("Desktop");
-        if desktop.is_dir() {
+        if let Some(desktop) = known_dir(&home, "Desktop", "デスクトップ") {
             return desktop;
         }
         if home.is_dir() {
@@ -4801,6 +4829,7 @@ fn prepare_app(
     // the choice survives a restart. Unknown names are ignored (init.lua wins).
     if let Some(name) = load_saved_theme() {
         if let Some(t) = theme_preset(&name) {
+            theme::theme_was_asked_for();
             set_theme(t);
         }
     }

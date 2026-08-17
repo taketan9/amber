@@ -12983,3 +12983,128 @@ mod advice_is_for_terminals {
         }
     }
 }
+
+/// Where the desktop is. Not always `~/Desktop`: OneDrive takes the folder
+/// away, renames it in the user's own language, and the sidebar entry for it
+/// vanished — the report was "please add the desktop", to a cian that thought
+/// it had.
+mod where_the_desktop_is {
+
+    #[test]
+    fn the_plain_path_wins_when_it_is_there() {
+        let d = tempfile::tempdir().unwrap();
+        let home = d.path();
+        std::fs::create_dir_all(home.join("Desktop")).unwrap();
+        std::fs::create_dir_all(home.join("OneDrive/デスクトップ")).unwrap();
+        assert_eq!(
+            crate::known_dir(home, "Desktop", "デスクトップ"),
+            Some(home.join("Desktop"))
+        );
+    }
+
+    #[test]
+    fn onedrive_is_found_when_it_took_the_folder() {
+        let d = tempfile::tempdir().unwrap();
+        let home = d.path();
+        std::fs::create_dir_all(home.join("OneDrive/デスクトップ")).unwrap();
+        assert_eq!(
+            crate::known_dir(home, "Desktop", "デスクトップ"),
+            Some(home.join("OneDrive/デスクトップ")),
+            "the Japanese client's name for it, inside OneDrive"
+        );
+    }
+
+    #[test]
+    fn nothing_is_invented_when_there_is_nothing() {
+        let d = tempfile::tempdir().unwrap();
+        assert_eq!(crate::known_dir(d.path(), "Desktop", "デスクトップ"), None);
+    }
+}
+
+/// A theme the user asked for holds in every view. The detail and icon views
+/// bring the Finder palette with them, and were bringing it over the top of a
+/// theme chosen in init.lua — the same cian looked like two programs depending
+/// on which view was showing.
+mod a_chosen_theme_survives_the_view {
+
+    #[test]
+    fn only_a_theme_nobody_asked_for_may_be_replaced() {
+        assert!(
+            crate::theme::skin_may_swap_theme(false),
+            "nobody chose these colours, so the detail view brings its own"
+        );
+        assert!(
+            !crate::theme::skin_may_swap_theme(true),
+            "these are the user's colours, and they hold in every view"
+        );
+    }
+}
+
+/// The single-pane views had nowhere to put a shell. Focusing the panel in the
+/// view the window opens in therefore did everything except appear: the shell
+/// started, the keys went to it, and the screen carried on showing the file
+/// listing — which reads as a shell that will not start.
+mod the_shell_has_somewhere_to_go {
+    use super::*;
+
+    fn detail_view(names: &[&str]) -> (tempfile::TempDir, App) {
+        let (d, mut app) = app_with(names);
+        app.skin = Skin::Finder;
+        app.native_icons = true;
+        (d, app)
+    }
+
+    /// The rectangle the shell panel was given by the last frame. Empty when
+    /// the layout drew no panel at all — which is what these views did.
+    fn panel(app: &mut App) -> Rect {
+        let _ = render(app, 140, 40);
+        app.layout_rects.shell
+    }
+
+    #[test]
+    fn the_detail_view_makes_room_once_the_shell_is_focused() {
+        let (_d, mut app) = detail_view(&["a.txt"]);
+        assert_eq!(panel(&mut app).height, 0, "no panel while nobody has asked for one");
+        app.focus(FocusedPane::Shell);
+        let rect = panel(&mut app);
+        assert!(rect.height > 0, "the panel is on screen once the focus is in it");
+        assert!(rect.y > 0 && rect.y + rect.height <= 40, "under the listing: {rect:?}");
+    }
+
+    #[test]
+    fn the_icon_grid_makes_room_too() {
+        let (_d, mut app) = detail_view(&["a.txt"]);
+        app.icon_view = true;
+        assert_eq!(panel(&mut app).height, 0);
+        app.focus(FocusedPane::Shell);
+        assert!(panel(&mut app).height > 0);
+    }
+
+    /// And it stays while a shell lives there, so leaving the panel does not
+    /// throw away the shell you were in the middle of.
+    #[test]
+    fn it_stays_while_a_shell_is_running() {
+        let (_d, mut app) = detail_view(&["a.txt"]);
+        app.focus(FocusedPane::Shell);
+        assert!(panel(&mut app).height > 0);
+        app.focus(FocusedPane::Left);
+        assert!(
+            app.shell.in_use(),
+            "the shell that was started is still there (or still starting)"
+        );
+        assert!(panel(&mut app).height > 0, "so its panel is too");
+    }
+}
+
+/// The mark for a cloud placeholder, and why the window does not get the cloud.
+mod the_cloud_mark_fits_its_cell {
+    #[test]
+    fn a_terminal_keeps_the_cloud_and_the_window_does_not() {
+        assert_eq!(crate::render::cloud_mark_for(false), "☁ ", "a terminal draws it fine");
+        assert_eq!(
+            crate::render::cloud_mark_for(true),
+            "↓ ",
+            "the window rasterises per cell, and ☁ is a two-cell glyph there"
+        );
+    }
+}

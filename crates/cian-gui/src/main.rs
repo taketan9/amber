@@ -104,6 +104,29 @@ struct Tick;
 /// both front ends give cian a turn at the same rate.
 const HEARTBEAT: std::time::Duration = std::time::Duration::from_millis(16);
 
+/// The shortest gap between two frames.
+///
+/// The terminal build gets this for free and it is easy to miss why. It blocks
+/// on `event::poll`, and when it wakes it *drains* everything waiting — every
+/// key of a repeat, every notch of a wheel spin — runs them all, and paints
+/// once. The window is handed one event at a time, and painted once per event:
+/// a trackpad reports scrolling a hundred times a second, and a hundred full
+/// frames a second is a hundred times cian building its entire screen.
+///
+/// Measured here, one frame is about two and a half milliseconds — most of it
+/// cian composing the frame, which the terminal build pays too. Paying it 120
+/// times a second instead of 30 is the whole difference between the two front
+/// ends feeling the same and the window feeling like treacle.
+///
+/// So: events are always handled the moment they arrive, and the *painting*
+/// waits its turn. The first keystroke after a quiet moment still paints
+/// immediately — `last_frame` is old by then — and only a burst is throttled,
+/// which is exactly when nobody can see the frames being dropped anyway.
+const MIN_FRAME: std::time::Duration = std::time::Duration::from_millis(8);
+
+/// How many frames `CIAN_GUI_PROF` averages over before it says anything.
+const PROF_EVERY: u32 = 120;
+
 struct Gui {
     cian: Session,
     window: Option<Arc<Window>>,
@@ -137,9 +160,10 @@ struct Gui {
     title: String,
     /// Print every key to stderr — see `CIAN_GUI_KEYLOG`.
     keylog: bool,
-    /// Which texture holds which file's icon. Never emptied: an icon costs a
-    /// few kilobytes and the same files are looked at again and again.
-    icon_ids: std::collections::HashMap<std::path::PathBuf, u64>,
+    /// Which texture holds which icon, under the key it is shared by. Never
+    /// emptied: an icon costs a few kilobytes and the same kinds of file are
+    /// looked at again and again.
+    icon_ids: std::collections::HashMap<IconKey, u64>,
     next_icon_id: u64,
     /// How many pictures the layer was last told to draw, so a change can
     /// be noticed and repainted. See `place_icons`.
@@ -151,12 +175,66 @@ struct Gui {
     last_click: Option<(Instant, (u16, u16))>,
     /// Sub-step wheel left over while zooming, so a trackpad still adds up.
     zoom_rest: f64,
+    /// A font size asked for but not yet built. See `apply_font_size`.
+    want_size: Option<u32>,
+    /// When the last frame was painted, for [`MIN_FRAME`].
+    last_frame: Instant,
+    /// `CIAN_GUI_PROF=1`: report what a frame costs, to stderr and the log.
+    ///
+    /// Here rather than in a profiler because the machine that feels slow is
+    /// not this one — it is a Windows machine on the other side of a report,
+    /// and "it is sluggish" and "a frame takes 9ms, 7 of them in cian" are
+    /// different conversations.
+    prof: bool,
+    prof_total: std::time::Duration,
+    prof_build: std::time::Duration,
+    prof_icons: std::time::Duration,
+    prof_frames: u32,
     /// A drag in progress: what was picked up, and where it started.
     ///
     /// Held from the press, but not a drag until the pointer has moved a cell
     /// away — otherwise every click would be a one-pixel drag and the ghost
     /// would flicker on each one.
     drag: Option<Drag>,
+}
+
+/// What an icon is looked up by.
+///
+/// Almost every file's icon is its *kind's* icon: a folder of two thousand
+/// `.log` files has one icon in it, not two thousand. Asking the system per
+/// path meant two thousand shell calls and two thousand textures for one
+/// picture — invisible on a Mac, and on Windows a per-file trip through the
+/// shell (and whatever a virus scanner has hooked into it) on the thread that
+/// draws.
+///
+/// The exceptions are the files that really do carry their own picture:
+/// directories (a folder can be given one), programs and shortcuts, and the
+/// icon formats themselves.
+#[derive(Clone, PartialEq, Eq, Hash)]
+enum IconKey {
+    /// This file, and only this file.
+    Path(std::path::PathBuf),
+    /// Everything with this extension, lowercased. Empty for "no extension".
+    Kind(String),
+}
+
+/// Extensions whose icon belongs to the file rather than to its kind.
+const OWN_ICON: &[&str] =
+    &["exe", "lnk", "app", "ico", "icns", "url", "msi", "scr", "cpl", "cur", "ani"];
+
+impl IconKey {
+    fn of(slot: &cian_tui::IconSlot) -> Self {
+        let ext = slot
+            .path
+            .extension()
+            .map(|e| e.to_string_lossy().to_lowercase())
+            .unwrap_or_default();
+        if slot.is_dir || OWN_ICON.contains(&ext.as_str()) {
+            Self::Path(slot.path.clone())
+        } else {
+            Self::Kind(ext)
+        }
+    }
 }
 
 /// Files being dragged with the mouse.
@@ -200,6 +278,13 @@ impl Gui {
             pending_view_change: false,
             last_click: None,
             zoom_rest: 0.0,
+            want_size: None,
+            last_frame: Instant::now(),
+            prof: std::env::var_os("CIAN_GUI_PROF").is_some(),
+            prof_total: std::time::Duration::ZERO,
+            prof_build: std::time::Duration::ZERO,
+            prof_icons: std::time::Duration::ZERO,
+            prof_frames: 0,
             drag: None,
         }
     }
@@ -225,6 +310,12 @@ impl Gui {
     /// not up to a tick later. Everything else waits its turn.
     fn redraw_now(&mut self) {
         self.needs_redraw = true;
+        // Not if the last frame is still warm: the heartbeat will ask, within
+        // sixteen milliseconds, and a burst of input gets one frame instead of
+        // one frame each. See [`MIN_FRAME`].
+        if self.last_frame.elapsed() < MIN_FRAME {
+            return;
+        }
         if let Some(w) = self.window.as_ref() {
             w.request_redraw();
         }
@@ -259,30 +350,67 @@ impl Gui {
     /// is known to work, and the cost — a new surface and a lost icon cache —
     /// is paid only when someone asks for a different size.
     fn step_font(&mut self, by: i32) {
-        let want = (self.size_px as i32 + by).clamp(SIZE_MIN as i32, SIZE_MAX as i32) as u32;
+        let from = self.want_size.unwrap_or(self.size_px);
+        let want = (from as i32 + by).clamp(SIZE_MIN as i32, SIZE_MAX as i32) as u32;
+        if want == from {
+            return;
+        }
+        // Only the number changes here. The renderer is rebuilt once, on the
+        // next frame — see `apply_font_size`.
+        self.want_size = Some(want);
+        self.cian.show_message(&format!("文字サイズ {want}px"));
+        self.redraw_now();
+    }
+
+    /// Rebuild the renderer around a newly asked-for font size, at most once
+    /// per frame.
+    ///
+    /// Both halves of that matter, and both were crashes waiting to happen.
+    ///
+    /// **Once per frame.** A wheel notch with Ctrl held used to rebuild the
+    /// whole renderer inside the wheel event — and one flick of a trackpad is
+    /// not one notch, it is dozens. Dozens of devices, queues and surfaces
+    /// created in a single event, each one costing a tenth of a second.
+    ///
+    /// **The old one goes first.** The new renderer was built while the old was
+    /// still held, which means two wgpu surfaces existing at once for one
+    /// window. Metal tolerates it; DX12 has one swap chain per window and does
+    /// not, which is why resizing the font killed the Windows build and not
+    /// this one.
+    fn apply_font_size(&mut self) {
+        let Some(want) = self.want_size.take() else { return };
         if want == self.size_px {
             return;
         }
         let Some(window) = self.window.clone() else { return };
-        self.size_px = want;
+        let was = self.size_px;
 
-        match Self::build_terminal(&window, &self.face, self.size_px) {
+        // Dropped, not replaced: the surface it owns has to be gone before
+        // another can be made for the same window.
+        self.terminal = None;
+        // Nothing may claim to have uploaded a texture into a renderer that no
+        // longer exists — every icon would be a draw call against nothing.
+        self.icon_ids.clear();
+        self.next_icon_id = 100;
+        self.last_draws = 0;
+
+        match Self::build_terminal(&window, &self.face, want) {
             Some(t) => {
+                self.size_px = want;
                 self.terminal = Some(t);
-                // The new renderer has no textures in it, so nothing may claim
-                // to have uploaded one. Left behind, every icon would be a
-                // draw call against a texture that does not exist.
-                self.icon_ids.clear();
-                self.next_icon_id = 100;
-                self.last_draws = 0;
-                self.cian.show_message(&format!("文字サイズ {}px", self.size_px));
             }
             None => {
-                self.size_px = (self.size_px as i32 - by) as u32;
+                // Put back the size that was working. If even that cannot be
+                // built the window has no renderer at all, and saying so beats
+                // a window that stays black for the rest of the session.
+                self.terminal = Self::build_terminal(&window, &self.face, was);
+                if self.terminal.is_none() {
+                    cian_core::log::log("cian-gui: lost the renderer while resizing the font");
+                }
                 self.cian.show_message("文字サイズを変更できませんでした");
             }
         }
-        self.redraw_now();
+        self.needs_redraw = true;
     }
 
     /// Build a renderer for this window at this size. Shared by startup and by
@@ -427,7 +555,8 @@ impl Gui {
         let mut draws = Vec::new();
         let mut fetched = 0;
         for slot in self.cian.icon_slots() {
-            let id = match self.icon_ids.get(slot.path.as_path()) {
+            let key = IconKey::of(slot);
+            let id = match self.icon_ids.get(&key) {
                 Some(&NO_ICON) => continue,
                 Some(id) => *id,
                 None => {
@@ -448,21 +577,16 @@ impl Gui {
                     let px = (want * 2).clamp(32, 256);
                     // The system's icon, unless the view asked for cian's own.
                     //
-                    // A file on a server has a path this disk knows nothing
-                    // about, so it is asked for by type instead. Cached under
-                    // the same path key, which is what makes a directory of a
-                    // hundred `.log` files cost one lookup.
-                    let icon = if slot.prefer_glyph {
-                        None
-                    } else if slot.local {
-                        sysicon::icon_for(&slot.path, px)
-                    } else {
-                        let ext = slot
-                            .path
-                            .extension()
-                            .map(|e| e.to_string_lossy().into_owned())
-                            .unwrap_or_default();
-                        sysicon::icon_for_type(&ext, slot.is_dir, px)
+                    // Asked for by path only where the answer could differ per
+                    // file — see [`IconKey`]. Everything else is asked for by
+                    // type, which is also the only question that can be asked
+                    // about a file on a server: its path is real to cian and
+                    // means nothing to this disk.
+                    let icon = match (&key, slot.prefer_glyph) {
+                        (_, true) => None,
+                        (IconKey::Path(p), _) if slot.local => sysicon::icon_for(p, px),
+                        (IconKey::Path(_), _) => sysicon::icon_for_type("", slot.is_dir, px),
+                        (IconKey::Kind(ext), _) => sysicon::icon_for_type(ext, false, px),
                     };
                     // Nothing from the system — a platform whose icons cian
                     // cannot ask for, or a file it has no opinion about. cian's
@@ -484,12 +608,12 @@ impl Gui {
                         }
                         // Remembered as "no icon" so it is not asked for again
                         // every frame for the rest of the session.
-                        self.icon_ids.insert(slot.path.clone(), NO_ICON);
+                        self.icon_ids.insert(key, NO_ICON);
                         continue;
                     };
                     let id = self.next_icon_id;
                     self.next_icon_id += 1;
-                    self.icon_ids.insert(slot.path.clone(), id);
+                    self.icon_ids.insert(key, id);
                     t.backend_mut().post_processor_mut().upload(id, w, h, rgba);
                     id
                 }
@@ -512,7 +636,11 @@ impl Gui {
         // pointer is — which is what a desktop shows, and what makes a drag
         // feel like carrying something rather than like nothing happening.
         if let Some(d) = self.drag.as_ref().filter(|d| d.moved && !d.handed_over) {
-            if let Some(&id) = d.paths.first().and_then(|p| self.icon_ids.get(p.as_path())) {
+            let ghost = d.paths.first().and_then(|p| {
+                let slot = self.cian.icon_slots().iter().find(|s| s.path == *p)?;
+                self.icon_ids.get(&IconKey::of(slot)).copied()
+            });
+            if let Some(id) = ghost {
                 if id != NO_ICON {
                     let side = ch * 1.6;
                     draws.push(pixels::Draw {
@@ -824,16 +952,51 @@ impl ApplicationHandler<Tick> for Gui {
             // Rendering stays inside the callback: on macOS the window server
             // expects the frame to be finished before this returns.
             WindowEvent::RedrawRequested => {
+                // Before the frame, never during one: rebuilding the renderer
+                // in the middle of drawing with it is the one order that
+                // cannot work.
+                self.apply_font_size();
+                let t0 = Instant::now();
                 let Some(t) = self.terminal.as_mut() else { return };
                 if self.cian.take_full_clear() {
                     let _ = t.clear();
                 }
                 let cian = &mut self.cian;
-                if let Err(e) = t.draw(|f| cian.draw(f)) {
+                let mut build = std::time::Duration::ZERO;
+                if let Err(e) = t.draw(|f| {
+                    let b0 = Instant::now();
+                    cian.draw(f);
+                    build = b0.elapsed();
+                }) {
                     cian_core::log::log(&format!("cian-gui draw failed: {e}"));
                 }
+                let t1 = Instant::now();
+                self.last_frame = t1;
                 self.needs_redraw = false;
                 self.place_icons();
+                if self.prof {
+                    let t2 = Instant::now();
+                    self.prof_total += t1 - t0;
+                    self.prof_build += build;
+                    self.prof_icons += t2 - t1;
+                    self.prof_frames += 1;
+                    if self.prof_frames == PROF_EVERY {
+                        let n = PROF_EVERY;
+                        let line = format!(
+                            "frame x{n}: {:?} total = cian {:?} + renderer {:?}, icons {:?}",
+                            self.prof_total / n,
+                            self.prof_build / n,
+                            (self.prof_total - self.prof_build) / n,
+                            self.prof_icons / n,
+                        );
+                        eprintln!("{line}");
+                        cian_core::log::log(&line);
+                        self.prof_frames = 0;
+                        self.prof_total = std::time::Duration::ZERO;
+                        self.prof_build = std::time::Duration::ZERO;
+                        self.prof_icons = std::time::Duration::ZERO;
+                    }
+                }
             }
 
             _ => {}
@@ -845,6 +1008,14 @@ impl ApplicationHandler<Tick> for Gui {
     /// in — and repaint if any of it changed the screen.
     fn user_event(&mut self, event_loop: &ActiveEventLoop, _tick: Tick) {
         let now = Instant::now();
+        // A frame that input asked for and [`MIN_FRAME`] held back. Ahead of
+        // the tick throttle below, which is three times slower when idle — a
+        // keystroke must not wait on the background's schedule.
+        if self.needs_redraw && now.duration_since(self.last_frame) >= MIN_FRAME {
+            if let Some(w) = self.window.as_ref() {
+                w.request_redraw();
+            }
+        }
         if now < self.next_tick {
             // The thread pokes faster than cian always needs; when it is idle
             // it asks for a longer gap and the extra pokes are dropped here.
@@ -920,6 +1091,14 @@ fn main() -> anyhow::Result<()> {
     // Before anything can be printed, and whatever the arguments: a startup
     // that fails says why, and "why" belongs in the terminal it was typed in.
     attach_console();
+    // A window with no console swallows a panic whole: the process simply
+    // vanishes, and the report is "it closed". `CIAN_LOG` is the only place a
+    // crash can leave a note, so it leaves one there.
+    let previous = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        cian_core::log::log(&format!("PANIC: {info}"));
+        previous(info);
+    }));
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.iter().any(|a| matches!(a.as_str(), "-v" | "-V" | "--version")) {
         println!("{}", cian_tui::version_text());

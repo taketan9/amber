@@ -90,15 +90,23 @@ impl Session {
     /// borderless shape only reads on a light surface — a borderless dark pane
     /// is not a Finder, it is a pane with its edges missing. Switching back
     /// restores whatever theme was in force before.
+    ///
+    /// Not over a theme the user asked for, though. See
+    /// [`crate::theme::theme_is_the_users`].
     pub fn set_skin(&mut self, skin: Skin) {
         if self.app.skin == skin {
             return;
         }
+        // The colours in force: cian's, or ones somebody chose. A theme named in
+        // init.lua or picked with `:theme` was being thrown away the moment the
+        // view changed, so the same cian looked like two programs.
+        let mine = crate::theme::theme_is_the_users();
         match skin {
-            Skin::Finder => {
+            Skin::Finder if crate::theme::skin_may_swap_theme(mine) => {
                 self.saved_theme = Some(crate::theme::theme());
                 crate::set_theme(crate::theme::ResolvedTheme::FINDER);
             }
+            Skin::Finder => {}
             Skin::Classic => {
                 if let Some(t) = self.saved_theme.take() {
                     crate::set_theme(t);

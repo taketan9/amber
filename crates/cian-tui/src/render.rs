@@ -342,7 +342,7 @@ pub(crate) fn draw(f: &mut Frame, app: &mut App) {
         // of pictures wants width more than anything else, and two of them side
         // by side leave each too narrow to be worth looking at — which is why
         // no desktop file manager offers a two-pane icon view either.
-        draw_icon_grid(f, main_area, app);
+        draw_icon_grid(f, main_area, app, ov);
     } else if app.skin == Skin::Finder && !app.zoomed {
         draw_detail_view(f, main_area, app, ov);
     } else if app.zoomed {
@@ -992,16 +992,15 @@ fn standard_places() -> Vec<(&'static str, String, PathBuf)> {
         .map(PathBuf::from);
     let Some(home) = home else { return Vec::new() };
     let mut out = vec![("\u{f015}", "ホーム".to_string(), home.clone())];
-    for (icon, label, dir) in [
-        ("\u{f0c7}", "デスクトップ", "Desktop"),
-        ("\u{f019}", "ダウンロード", "Downloads"),
-        ("\u{f02d}", "書類", "Documents"),
-        ("\u{f03e}", "ピクチャ", "Pictures"),
+    for (icon, label, english, japanese) in [
+        ("\u{f0c7}", "デスクトップ", "Desktop", "デスクトップ"),
+        ("\u{f019}", "ダウンロード", "Downloads", "ダウンロード"),
+        ("\u{f02d}", "書類", "Documents", "ドキュメント"),
+        ("\u{f03e}", "ピクチャ", "Pictures", "ピクチャ"),
     ] {
-        let p = home.join(dir);
         // Only what is actually there: a sidebar entry that goes nowhere is
         // worse than one that is missing.
-        if p.is_dir() {
+        if let Some(p) = crate::known_dir(&home, english, japanese) {
             out.push((icon, label.to_string(), p));
         }
     }
@@ -1034,6 +1033,8 @@ fn collect_shortcuts(entries: &[crate::Shortcut], out: &mut Vec<(String, PathBuf
 fn draw_detail_view(f: &mut Frame, area: Rect, app: &mut App, ov: AnimOverride) {
     let th = theme();
     let bg = th.base_bg;
+
+    let (area, shell_area) = room_for_shell(area, app, ov);
     let Some(inner) = draw_desktop_chrome(f, area, app, &th, bg, 24) else {
         // Too narrow to dress: fall back to the layout that needs no room.
         draw_split(f, area, app, ov);
@@ -1081,6 +1082,72 @@ fn draw_detail_view(f: &mut Frame, area: Rect, app: &mut App, ov: AnimOverride) 
     // The listing owns this rectangle, so a click in it is a click on a row —
     // the same question the grid answers with `grid_area`.
     app.grid_area = None;
+
+    draw_shell_below(f, area, shell_area, app, ov);
+}
+
+/// Split `area` into a listing and, when there is a shell to show, a panel for
+/// it underneath.
+///
+/// The single-pane views — details and the icon grid — had no shell panel at
+/// all, and the detail view is what the window opens in. Going to the shell
+/// there focused something that was never drawn: the shell really did start and
+/// keys really did reach it, and the screen never said so, which from the
+/// outside is a shell that will not start.
+///
+/// Only when there is one. An empty panel under an Explorer-shaped view is
+/// furniture nobody asked for; the moment a shell exists, or the focus moves to
+/// where one would be, it appears — on the same seam, with the same ratio, as
+/// the split layout's.
+fn room_for_shell(area: Rect, app: &App, ov: AnimOverride) -> (Rect, Option<Rect>) {
+    if app.focused != FocusedPane::Shell && !app.shell.in_use() {
+        return (area, None);
+    }
+    let pct = ov.ratio_for(DividerTarget::Main, app.main_pct);
+    let split = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Percentage(pct), Constraint::Percentage(100 - pct)])
+        .split(area);
+    (split[0], Some(split[1]))
+}
+
+/// Draw the shell panel [`room_for_shell`] made room for, if it did.
+fn draw_shell_below(
+    f: &mut Frame,
+    listing: Rect,
+    shell_area: Option<Rect>,
+    app: &mut App,
+    ov: AnimOverride,
+) {
+    let Some(shell_area) = shell_area else {
+        app.dividers = Vec::new();
+        app.shell_leaves = Vec::new();
+        return;
+    };
+    // The seam is draggable, as it is in the split layout — the same target, so
+    // a ratio set in one view holds in the other.
+    app.layout_rects.shell = shell_area;
+    let mut dividers = vec![Divider {
+        zone: seam_zone(Direction::Vertical, listing, shell_area),
+        parent: Rect::new(
+            listing.x,
+            listing.y,
+            listing.width,
+            listing.height + shell_area.height,
+        ),
+        dir: Direction::Vertical,
+        target: DividerTarget::Main,
+    }];
+    let mut leaves = Vec::new();
+    let mut shell_tabs = Vec::new();
+    let log_border = recording_pulse(app.started.elapsed());
+    draw_shell(
+        f, shell_area, &mut app.shell, app.focused == FocusedPane::Shell, &mut dividers,
+        &mut leaves, ov, &mut shell_tabs, log_border,
+    );
+    app.tab_rects.extend(shell_tabs);
+    app.dividers = dividers;
+    app.shell_leaves = leaves;
 }
 
 /// The left pane as a grid of pictures.
@@ -1089,7 +1156,8 @@ fn draw_detail_view(f: &mut Frame, area: Rect, app: &mut App, ov: AnimOverride) 
 /// are drawn by whoever owns the surface, from the [`crate::IconSlot`]s pushed
 /// here. Without a front end that can do that, this view is an empty grid —
 /// which is why it is offered only in the window.
-fn draw_icon_grid(f: &mut Frame, area: Rect, app: &mut App) {
+fn draw_icon_grid(f: &mut Frame, area: Rect, app: &mut App, ov: AnimOverride) {
+    let (area, shell_area) = room_for_shell(area, app, ov);
     let th = theme();
     let bg = th.base_bg;
     let focus_bg = focus_badge_color(app.mode);
@@ -1116,7 +1184,16 @@ fn draw_icon_grid(f: &mut Frame, area: Rect, app: &mut App) {
     let rows = (inner.height / TILE_H).max(1) as usize;
     let per_page = cols * rows;
 
-    let Some(pane) = app.active_pane() else { return };
+    // The grid keeps showing the last file pane while the focus is in the shell
+    // panel below it — otherwise going to the shell emptied the whole window.
+    let side = if app.focused == FocusedPane::Right
+        || (app.focused == FocusedPane::Shell && app.last_file_pane == FocusedPane::Right)
+    {
+        &app.right
+    } else {
+        &app.left
+    };
+    let pane = side.active_ref();
     let synthetic = pane.is_synthetic();
     let total = pane.entries.len();
     // Scroll a page at a time, so the cursor's tile is always on screen and the
@@ -1181,6 +1258,7 @@ fn draw_icon_grid(f: &mut Frame, area: Rect, app: &mut App) {
         );
     }
     app.icon_slots.extend(slots);
+    draw_shell_below(f, area, shell_area, app, ov);
 }
 
 fn draw_startup_splash(f: &mut Frame, area: Rect, elapsed_ms: u128) {
@@ -1880,9 +1958,9 @@ fn draw_file_pane(
             ));
         }
         if cloud_w > 0 {
-            // ☁ = listed but not downloaded; a space keeps local files aligned.
+            // Listed but not downloaded; a space keeps local files aligned.
             spans.push(Span::styled(
-                if e.cloud { "☁ " } else { "  " },
+                if e.cloud { cloud_mark() } else { "  " },
                 Style::default().fg(Color::Rgb(130, 175, 210)),
             ));
         }
@@ -8291,6 +8369,32 @@ fn draw_color_picker(
         ),
         footer_area,
     );
+}
+
+/// The mark for a file that is listed but not downloaded.
+///
+/// `☁` says it best and the window cannot draw it. A cell renderer gives a
+/// glyph as much room as `unicode-width` says the *character* needs — one cell
+/// for `☁`, which is "ambiguous" — and rasterises into exactly that. The fonts
+/// cian ships with draw `☁` at two cells wide (measured: 1080 units against a
+/// 540-unit cell), so what appeared on screen was the left half of a cloud.
+///
+/// A terminal has no such rule — the ink spills into the next cell and the
+/// cloud survives — so the terminal keeps it. The window gets an arrow, which
+/// is what the placeholder means anyway: not here yet, and reaching for it
+/// fetches it.
+fn cloud_mark() -> &'static str {
+    cloud_mark_for(crate::theme::in_a_window())
+}
+
+/// The decision on its own, so it can be asserted without flipping a
+/// process-wide switch that every other test would then see.
+pub(crate) fn cloud_mark_for(in_a_window: bool) -> &'static str {
+    if in_a_window {
+        "↓ "
+    } else {
+        "☁ "
+    }
 }
 
 /// A ratatui colour as plain bytes, for handing to a renderer that knows
