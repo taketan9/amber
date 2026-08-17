@@ -6,8 +6,11 @@ rust-version.workspace = true
 license.workspace = true
 description = "cian: a modern two-pane file manager for the terminal"
 
+# `cian` is the window build (crates/cian-gui). This one says what it is:
+# the same file manager with a terminal under it, for ssh, tmux, and every
+# other place a window cannot go.
 [[bin]]
-name = "cian"
+name = "cian-tui"
 path = "src/main.rs"
 
 [dependencies]

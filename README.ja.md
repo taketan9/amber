@@ -14,11 +14,17 @@
 
 ```sh
 cargo build --release
-./target/release/cian
+./target/release/cian-tui   # 今使っている端末の中で
+./target/release/cian       # 自前のウィンドウで
 ```
 
+**ファイラは1つ、ビルドは2つ。** `cian` はウィンドウを開き、動かすのに何も
+入れる必要がありません。`cian-tui` は今ある端末の中で動きます — ssh 先や
+tmux の中はこちらでないと届きません。以下の説明は、断りがなければ
+`cian-tui` のものです。ウィンドウ版は同じプログラムから端末を抜いただけです。
+
 - Windows では **Windows Terminal** か **WezTerm** ＋ Nerd Font を。アイコンと角丸が正しく出るのはそこです。オフライン導入は[一番下](#windows-へオフライン導入)。
-- **`?`** で全キー一覧。現在のキーマップから生成するので、自分で割り当てたキーも載ります。シェルからは `cian -man`、コマンドラインの使い方は `cian -h`。
+- **`?`** で全キー一覧。現在のキーマップから生成するので、自分で割り当てたキーも載ります。シェルからは `cian-tui -man`、コマンドラインの使い方は `cian-tui -h`。
 - 画面は既定で日本語です。英語にするなら `cian.set_option("lang", "en")`、または右クリックメニューから。
 
 ---
@@ -353,7 +359,7 @@ return {
 
 `cx` には **問い合わせ**（`dir`, `other`, `marked`, `cursor`, `list`, `glob`）、**操作**（`copy`, `move`, `delete`, `rename`, `mkdir`, `zip`, `read`, `write`）、**サブプロセス**（`sh("cmd")` → `{ code, out, err }`）、**パス補助**（`basename`, `stem`, `ext`, `join`, `exists`, `isdir`, `size`）、`message` があります。すぐ使える12例が [`examples/macro/Escript.lua`](examples/macro/Escript.lua) に。
 
-`cian --macro thing.lua` で起動時に実行（`.lua` を `cian.exe` に関連付ければダブルクリックで走ります）、`--macro-name "…"` は設定内のマクロを名前で実行します。
+`cian-tui --macro thing.lua` で起動時に実行（`.lua` を `cian-tui.exe` に関連付ければダブルクリックで走ります）、`--macro-name "…"` は設定内のマクロを名前で実行します。
 
 **スニペットとマクロの使い分け。** シェル1つにコマンド1〜2行ならスニペット。複数ペインを組み上げる、あるいはファイル操作の仕事ならマクロ。
 
@@ -478,7 +484,8 @@ cian.font{                                                                     -
 | `cian-scp` | SFTP/SCP 転送（純 Rust の russh） |
 | `cian-ai` | 任意の AI ヘルパー（同梱 Python 経由で Azure OpenAI） |
 | `cian-lua` | Lua 設定ホスト（mlua）：キーマップ・テーマ・マクロ |
-| `cian-bin` | エントリポイント（`cian` バイナリを生成） |
+| `cian-bin` | 端末版のエントリポイント（`cian-tui` バイナリを生成） |
+| `cian-gui` | ウィンドウ版のエントリポイント（`cian` バイナリを生成。winit + wgpu） |
 
 ```mermaid
 flowchart TD
@@ -523,11 +530,11 @@ flowchart TD
 
 ## Windows へオフライン導入
 
-自己完結した `cian.exe` 1つです（ランタイム・DLL・実行時ネットワークなし）。Windows の開発機なしで x64 ビルドを得るには、同梱の GitHub Actions を使います：
+自己完結した `cian-tui.exe` 1つです（ランタイム・DLL・実行時ネットワークなし）。Windows の開発機なしで x64 ビルドを得るには、同梱の GitHub Actions を使います：
 
 1. タグを push（`git tag v0.1.0 && git push --tags`）、または **Actions → release → Run workflow**。
 2. その実行結果から `cian-windows-x64.zip` をダウンロード。
-3. オフライン機で展開し、`cian.exe` を直接動かすか、PATH に導入：
+3. オフライン機で展開し、`cian-tui.exe` を直接動かすか、PATH に導入：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\install.ps1
@@ -539,13 +546,13 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1
 powershell -ExecutionPolicy Bypass -File .\install.ps1 -Dest "C:\Program Files\cian" -AllUsers
 ```
 
-新しいターミナルを開いて `cian`。ファイル種別アイコンには Nerd Font 対応の端末を。
+新しいターミナルを開いて `cian-tui`。ファイル種別アイコンには Nerd Font 対応の端末を。
 
 ---
 
 ## 知っておくと良いこと
 
-- **どのビルド？** `cian --version` がビルド時のコミットを表示します。PATH に残った古い `cian.exe` は、機能が無いのと見分けがつきません。
+- **どのビルド？** `cian-tui --version` がビルド時のコミットを表示します。PATH に残った古い `cian-tui.exe` は、機能が無いのと見分けがつきません。
 - **枠線の角**は旧 Windows コンソールでは直角、それ以外では丸角が既定です。`cian.set_option("borders", "rounded")`（または `"plain"`）で強制できます。
 - **キーが効かない？** 端末が握っている可能性があります（Mac の端末は Ctrl+F を検索バー、Ctrl+Q をズームに使います）。届いていないキーは処理できません。**`:keys`** が受け取ったキーをそのまま表示し、現在のキーボードモードも言います。`CIAN_LEGACY_KEYS=1` で拡張キーボード要求なしで起動。届くキーへ割り当て直す（`cian.set_keymap("alt+g", "grep_recursive")`）か、コマンドを使ってください — Ctrl 専用だったものは `:w`・`:q`・`:grep`・`:block` でも呼べます。
 - **画面が乱れた？** `:redraw` が何もない状態から描き直します（制御文字で cian が描いていない文字が残ったとき用）。

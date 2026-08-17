@@ -14,11 +14,18 @@ One binary. macOS, Windows, Linux. No runtime, no DLLs, nothing to install along
 
 ```sh
 cargo build --release
-./target/release/cian
+./target/release/cian-tui   # in your terminal
+./target/release/cian       # in a window of its own
 ```
 
+**Two builds, one file manager.** `cian` opens a window and needs nothing
+installed to run in; `cian-tui` runs inside the terminal you already have,
+which is where ssh and tmux need it. Everything below describes `cian-tui`
+unless it says otherwise — the window build is the same program with the
+terminal taken out from under it.
+
 - On Windows use **Windows Terminal** or **WezTerm** with a Nerd Font — that is where the icons and rounded corners look right. Offline install is [at the bottom](#install-on-windows-offline).
-- **`?`** shows the full key list, generated from your live keymap, so rebound keys show up too. `cian -man` prints it from a shell; `cian -h` prints the command-line usage.
+- **`?`** shows the full key list, generated from your live keymap, so rebound keys show up too. `cian-tui -man` prints it from a shell; `cian-tui -h` prints the command-line usage.
 - The UI is Japanese by default — cian is written in Japanese first. For English: `cian.set_option("lang", "en")`, or the right-click menu.
 
 ---
@@ -353,7 +360,7 @@ return {
 
 `cx` has **query** (`dir`, `other`, `marked`, `cursor`, `list`, `glob`), **operations** (`copy`, `move`, `delete`, `rename`, `mkdir`, `zip`, `read`, `write`), **subprocess** (`sh("cmd")` → `{ code, out, err }`), **paths** (`basename`, `stem`, `ext`, `join`, `exists`, `isdir`, `size`) and `message`. A dozen worked samples are in [`examples/macro/Escript.en.lua`](examples/macro/Escript.en.lua).
 
-`cian --macro thing.lua` runs one at startup (so a `.lua` associated with `cian.exe` runs on double-click); `--macro-name "…"` runs one from your config.
+`cian-tui --macro thing.lua` runs one at startup (so a `.lua` associated with `cian-tui.exe` runs on double-click); `--macro-name "…"` runs one from your config.
 
 **Snippet or macro?** One shell and a command or two → snippet. Several panes wired up, or a file-op job → macro.
 
@@ -478,7 +485,8 @@ A cargo workspace of seven crates. One main loop owns all UI and drawing; anythi
 | `cian-scp` | Built-in SFTP/SCP transfer (pure-Rust russh) |
 | `cian-ai` | Optional AI helper (Azure OpenAI via a bundled Python script) |
 | `cian-lua` | Lua config host (mlua): keymaps, themes, macros |
-| `cian-bin` | The entry point — produces the `cian` binary |
+| `cian-bin` | The terminal entry point — produces the `cian-tui` binary |
+| `cian-gui` | The window entry point — produces the `cian` binary (winit + wgpu) |
 
 ```mermaid
 flowchart TD
@@ -523,11 +531,11 @@ flowchart TD
 
 ## Install on Windows (offline)
 
-A single self-contained `cian.exe` — no runtime, no DLLs, no network. To get a Windows x64 build without a Windows dev machine, use the bundled GitHub Actions workflow:
+A single self-contained `cian-tui.exe` — no runtime, no DLLs, no network. To get a Windows x64 build without a Windows dev machine, use the bundled GitHub Actions workflow:
 
 1. Push a tag (`git tag v0.1.0 && git push --tags`), or **Actions → release → Run workflow**.
 2. Download `cian-windows-x64.zip` from that run.
-3. Unzip on the offline machine and either run `cian.exe` or install it on PATH:
+3. Unzip on the offline machine and either run `cian-tui.exe` or install it on PATH:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\install.ps1
@@ -539,13 +547,13 @@ That installs for the current user under `%LOCALAPPDATA%\Programs\cian`, no admi
 powershell -ExecutionPolicy Bypass -File .\install.ps1 -Dest "C:\Program Files\cian" -AllUsers
 ```
 
-Open a new terminal and type `cian`. Use a Nerd Font terminal for the file-type icons.
+Open a new terminal and type `cian-tui`. Use a Nerd Font terminal for the file-type icons.
 
 ---
 
 ## Good to know
 
-- **Which build?** `cian --version` prints the commit baked in at build time. An old `cian.exe` on PATH looks exactly like a missing feature.
+- **Which build?** `cian-tui --version` prints the commit baked in at build time. An old `cian-tui.exe` on PATH looks exactly like a missing feature.
 - **Border corners** default to square in the legacy Windows console and rounded elsewhere. Force it with `cian.set_option("borders", "rounded")` (or `"plain"`).
 - **A key that does nothing?** The terminal may be keeping it — a Mac terminal takes Ctrl+F for its find bar, Ctrl+Q for the system zoom — and a key that never arrives cannot be handled. **`:keys`** reports each keystroke as cian received it and names the keyboard mode in effect; `CIAN_LEGACY_KEYS=1` starts without the enhanced-keyboard request. Move the binding somewhere your machine will deliver (`cian.set_keymap("alt+g", "grep_recursive")`), or use the command: the Ctrl-only shortcuts all answer to `:w`, `:q`, `:grep`, `:block`.
 - **Screen scrambled?** `:redraw` repaints from nothing, for when a stray control character leaves text cian never drew.

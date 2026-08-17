@@ -1,0 +1,44 @@
+[package]
+name = "cian-gui"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "cian in a window of its own: winit + wgpu, no terminal emulator required"
+
+# Named `cian` because that is what gets typed, and because macOS takes an
+# unbundled program's name in the menu bar straight from its filename.
+[[bin]]
+name = "cian"
+path = "src/main.rs"
+
+[dependencies]
+cian-core = { workspace = true }
+cian-tui  = { workspace = true }
+anyhow    = { workspace = true }
+# ratatui and crossterm come through cian-tui's re-exports rather than as
+# dependencies of their own: a second copy of either in this binary would be a
+# second, incompatible set of the very types being passed across the seam.
+# Only for cian's own icon: the .ico is read in and written out as a PNG for
+# NSImage. Thumbnails will want more formats here when they arrive.
+image        = { version = "0.25", default-features = false, features = ["png", "ico"] }
+ratatui-wgpu = "0.5"
+winit        = "0.30"
+# For reaching the platform window behind winit's, to start a drag from it.
+raw-window-handle = "0.6"
+# Rasterising cian's own Nerd Font icons, which cannot be drawn in a cell
+# without losing their right edge. See `glyph.rs`.
+ab_glyph     = "0.2"
+pollster     = "0.4"
+
+# The system's own file icons. Both crates are already in the tree — winit
+# is built on them — so this adds nothing but the call.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2            = "0.5"
+objc2-app-kit    = { version = "0.2", features = ["NSWorkspace", "NSImage", "NSGraphics", "NSApplication", "NSResponder", "NSBitmapImageRep", "NSImageRep", "NSGraphicsContext", "NSDragging", "NSDraggingItem", "NSDraggingSession", "NSEvent", "NSPasteboard", "NSView"] }
+objc2-foundation = { version = "0.2", features = ["NSString", "NSData", "NSProcessInfo", "NSGeometry", "NSArray", "NSURL"] }
+
+[features]
+# Build with the font compiled in, so the binary needs nothing installed. Off
+# until a font is committed to `fonts/` — see `font.rs` for what belongs there.
+bundled-font = []

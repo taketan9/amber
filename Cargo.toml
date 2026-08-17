@@ -8,13 +8,14 @@ members = [
     "crates/cian-ai",
     "crates/cian-lua",
     "crates/cian-bin",
+    "crates/cian-gui",
 ]
 
 [workspace.package]
 # Bumped by hand as work lands: patch for fixes, minor for features. `:version`
 # (and `cian --version`) report it with the commit, so "which build is this"
 # has an answer from inside a running session.
-version = "0.4.8"
+version = "0.5.0"
 edition = "2021"
 rust-version = "1.75"
 license = "MIT"
