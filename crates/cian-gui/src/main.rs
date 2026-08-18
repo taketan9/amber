@@ -37,6 +37,7 @@ mod appkit;
 mod dragout;
 mod font;
 mod glyph;
+mod iconjob;
 mod input;
 mod pixels;
 mod shellmenu;
@@ -61,13 +62,6 @@ use winit::window::{Window, WindowAttributes, WindowId};
 const SIZE_DEFAULT: u32 = 22;
 const SIZE_MIN: u32 = 8;
 const SIZE_MAX: u32 = 72;
-
-/// How many icons may be fetched from the system in one frame.
-///
-/// Low on purpose. The cost is in the first ask for a kind of file, and a
-/// listing that fills in over three frames is invisible where one that
-/// stalls for a fifth of a second is not.
-const ICONS_PER_FRAME: usize = 6;
 
 /// Recorded against a path the system had no icon for, so it is asked once
 /// and never again.
@@ -153,6 +147,12 @@ struct Gui {
     /// emptied: an icon costs a few kilobytes and the same kinds of file are
     /// looked at again and again.
     icon_ids: std::collections::HashMap<IconKey, u64>,
+    /// Textures for cian's own glyphs, kept apart from the system's icons:
+    /// a row can want one because the view asked for it, or because the system
+    /// had nothing, and those are different answers to the same key.
+    glyph_ids: std::collections::HashMap<IconKey, u64>,
+    /// The thread that asks the system about icons. See [`iconjob`].
+    icons: iconjob::Icons,
     next_icon_id: u64,
     /// How many pictures the layer was last told to draw, so a change can
     /// be noticed and repainted. See `place_icons`.
@@ -180,6 +180,17 @@ struct Gui {
     prof_build: std::time::Duration,
     prof_icons: std::time::Duration,
     prof_frames: u32,
+    /// The worst single frame since the last report, and its parts.
+    prof_worst: std::time::Duration,
+    prof_worst_build: std::time::Duration,
+    /// How many events were handled between one frame and the next.
+    ///
+    /// This is the number that says whether cian is *behind*. One or two is a
+    /// program keeping up with a person; thirty is a keyboard whose repeats
+    /// have been queuing while cian painted, which is what "it keeps moving
+    /// after I let go" is made of.
+    prof_events: u32,
+    prof_worst_events: u32,
     /// Files dropped on the window since the last turn of the loop. See
     /// `WindowEvent::DroppedFile`.
     dropped: Vec<std::path::PathBuf>,
@@ -265,6 +276,8 @@ impl Gui {
             title: String::new(),
             keylog: std::env::var_os("CIAN_GUI_KEYLOG").is_some(),
             icon_ids: std::collections::HashMap::new(),
+            glyph_ids: std::collections::HashMap::new(),
+            icons: iconjob::Icons::start(),
             // Ids start above the smoke test's, which uses 1.
             next_icon_id: 100,
             last_draws: 0,
@@ -287,6 +300,10 @@ impl Gui {
             prof_build: std::time::Duration::ZERO,
             prof_icons: std::time::Duration::ZERO,
             prof_frames: 0,
+            prof_worst: std::time::Duration::ZERO,
+            prof_worst_build: std::time::Duration::ZERO,
+            prof_events: 0,
+            prof_worst_events: 0,
             drag: None,
             dropped: Vec::new(),
         }
@@ -389,6 +406,7 @@ impl Gui {
         // Nothing may claim to have uploaded a texture into a renderer that no
         // longer exists — every icon would be a draw call against nothing.
         self.icon_ids.clear();
+        self.glyph_ids.clear();
         self.next_icon_id = 100;
         self.last_draws = 0;
 
@@ -466,6 +484,7 @@ impl Gui {
         // cache keyed on the path alone is stale the moment the view changes.
         // Left in place, switching to the detail view kept every glyph.
         self.icon_ids.clear();
+        self.glyph_ids.clear();
         self.cian.show_message(match view {
             View::Finder => "表示: 詳細（Ctrl+Shift+G でアイコン）",
             View::Icons => "表示: アイコン（Ctrl+Shift+G でクラシック）",
@@ -561,70 +580,90 @@ impl Gui {
             (px.width as f32 / grid.width as f32, px.height as f32 / grid.height as f32)
         };
 
-        let mut draws = Vec::new();
-        let mut fetched = 0;
-        for slot in self.cian.icon_slots() {
-            let key = IconKey::of(slot);
-            let id = match self.icon_ids.get(&key) {
-                Some(&NO_ICON) => continue,
-                Some(id) => *id,
-                None => {
-                    // The budget is per frame, not per directory: a row whose
-                    // icon has not been asked for yet simply draws nothing this
-                    // time round and is picked up on the next.
-                    if fetched >= ICONS_PER_FRAME {
-                        continue;
-                    }
-                    fetched += 1;
-                    // Twice the size it will be drawn at, so the sampler is
-                    // always shrinking a picture rather than stretching one.
-                    // Asking for exactly the drawn size leaves it to macOS to
-                    // pick a representation, and the one it picks for an
-                    // in-between size is the smaller — which is what made every
-                    // folder look like a blown-up thumbnail.
-                    let want = (slot.h as f32 * ch).ceil() as u32;
-                    let px = (want * 2).clamp(32, 256);
-                    // The system's icon, unless the view asked for cian's own.
-                    //
-                    // Asked for by path only where the answer could differ per
-                    // file — see [`IconKey`]. Everything else is asked for by
-                    // type, which is also the only question that can be asked
-                    // about a file on a server: its path is real to cian and
-                    // means nothing to this disk.
-                    let icon = match (&key, slot.prefer_glyph) {
-                        (_, true) => None,
-                        (IconKey::Path(p), _) if slot.local => sysicon::icon_for(p, px),
-                        (IconKey::Path(_), _) => sysicon::icon_for_type("", slot.is_dir, px),
-                        (IconKey::Kind(ext), _) => sysicon::icon_for_type(ext, false, px),
-                    };
-                    // Nothing from the system — a platform whose icons cian
-                    // cannot ask for, or a file it has no opinion about. cian's
-                    // own Nerd Font icon goes there instead, which is what the
-                    // terminal build has always drawn. Leaving the square empty
-                    // was the other option, and it is how the Windows build
-                    // ended up with a listing of names and no icons at all.
-                    let uploaded = match icon {
-                        Some(icon) => Some((icon.width, icon.height, icon.rgba)),
-                        None => slot
-                            .glyph
-                            .zip(self.glyphs.as_ref())
-                            .and_then(|((c, rgb), font)| glyph::render(font, c, px, rgb))
-                            .map(|rgba| (px, px, rgba)),
-                    };
-                    let Some((w, h, rgba)) = uploaded else {
-                        if self.keylog {
-                            eprintln!("icon: none for {}", slot.path.display());
-                        }
-                        // Remembered as "no icon" so it is not asked for again
-                        // every frame for the rest of the session.
-                        self.icon_ids.insert(key, NO_ICON);
-                        continue;
-                    };
+        // Anything the worker has finished since the last frame, made into
+        // textures here — uploading is the renderer's business and the renderer
+        // belongs to this thread.
+        for answer in self.icons.collect() {
+            let key = match &answer.ask {
+                iconjob::Ask::Path(p) => IconKey::Path(p.clone()),
+                iconjob::Ask::Kind(e) => IconKey::Kind(e.clone()),
+                iconjob::Ask::Directory => IconKey::Kind(String::new()),
+            };
+            match answer.icon {
+                Some(icon) => {
                     let id = self.next_icon_id;
                     self.next_icon_id += 1;
                     self.icon_ids.insert(key, id);
-                    t.backend_mut().post_processor_mut().upload(id, w, h, rgba);
-                    id
+                    t.backend_mut()
+                        .post_processor_mut()
+                        .upload(id, icon.width, icon.height, icon.rgba);
+                }
+                // The system has no picture for this one. Remembered as such,
+                // so the row falls back to cian's own glyph and nothing asks
+                // again.
+                None => {
+                    self.icon_ids.insert(key, NO_ICON);
+                }
+            }
+        }
+
+        let mut draws = Vec::new();
+        for slot in self.cian.icon_slots() {
+            let key = IconKey::of(slot);
+            let id = match self.icon_ids.get(&key) {
+                Some(&NO_ICON) => {
+                    // No system icon: cian's own glyph, drawn here because
+                    // rasterising one is arithmetic rather than a question for
+                    // the operating system.
+                    match self.glyph_ids.get(&key) {
+                        Some(&NO_ICON) => continue,
+                        Some(id) => *id,
+                        None => {
+                            let want = (slot.h as f32 * ch).ceil() as u32;
+                            let px = (want * 2).clamp(32, 256);
+                            let made = slot
+                                .glyph
+                                .zip(self.glyphs.as_ref())
+                                .and_then(|((c, rgb), font)| glyph::render(font, c, px, rgb));
+                            match made {
+                                Some(rgba) => {
+                                    let id = self.next_icon_id;
+                                    self.next_icon_id += 1;
+                                    self.glyph_ids.insert(key.clone(), id);
+                                    t.backend_mut()
+                                        .post_processor_mut()
+                                        .upload(id, px, px, rgba);
+                                    id
+                                }
+                                None => {
+                                    self.glyph_ids.insert(key.clone(), NO_ICON);
+                                    continue;
+                                }
+                            }
+                        }
+                    }
+                }
+                Some(id) => *id,
+                None => {
+                    // Not known yet. Ask — which returns at once — and draw
+                    // nothing here this time round. The frame never waits for
+                    // an answer from the system: see [`iconjob`].
+                    let want = (slot.h as f32 * ch).ceil() as u32;
+                    let px = (want * 2).clamp(32, 256);
+                    if slot.prefer_glyph {
+                        // The view asked for cian's own glyph, so the system is
+                        // not asked at all.
+                        self.icon_ids.insert(key, NO_ICON);
+                    } else {
+                        let ask = match (&key, slot.local, slot.is_dir) {
+                            (IconKey::Path(p), true, _) => iconjob::Ask::Path(p.clone()),
+                            (IconKey::Path(_), false, true) => iconjob::Ask::Directory,
+                            (IconKey::Path(_), false, false) => iconjob::Ask::Kind(String::new()),
+                            (IconKey::Kind(e), _, _) => iconjob::Ask::Kind(e.clone()),
+                        };
+                        self.icons.want(ask, px);
+                    }
+                    continue;
                 }
             };
             // Square, centred in the cells cian set aside, and inset a little
@@ -669,7 +708,7 @@ impl Gui {
                 "icons: {} slots, {} known, {} fetched, {} drawn",
                 self.cian.icon_slots().len(),
                 self.icon_ids.len(),
-                fetched,
+                usize::from(self.icons.waiting()),
                 draws.len(),
             );
         }
@@ -684,8 +723,10 @@ impl Gui {
         //
         // So: whenever the list is not the one already on the layer, ask for
         // the frame that will put it right.
+        // Keep painting while the worker still owes an answer, so pictures
+        // appear as they land rather than at the next keypress.
         let changed = draws.len() != self.last_draws
-            || fetched > 0
+            || self.icons.waiting()
             || self.pending_view_change;
         self.last_draws = draws.len();
         self.pending_view_change = false;
@@ -751,6 +792,9 @@ impl ApplicationHandler<Tick> for Gui {
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
+        if self.prof && !matches!(event, WindowEvent::RedrawRequested) {
+            self.prof_events += 1;
+        }
         match event {
             WindowEvent::CloseRequested => {
                 event_loop.exit();
@@ -1042,6 +1086,14 @@ impl ApplicationHandler<Tick> for Gui {
                     let t2 = Instant::now();
                     self.prof_total += t1 - t0;
                     self.prof_build += build;
+                    if t1 - t0 > self.prof_worst {
+                        self.prof_worst = t1 - t0;
+                        self.prof_worst_build = build;
+                    }
+                    if self.prof_events > self.prof_worst_events {
+                        self.prof_worst_events = self.prof_events;
+                    }
+                    self.prof_events = 0;
                     self.prof_icons += t2 - t1;
                     self.prof_frames += 1;
                     if self.prof_frames == PROF_EVERY {
@@ -1050,11 +1102,15 @@ impl ApplicationHandler<Tick> for Gui {
                             // Microseconds spelled `us`. A `Duration`'s own
                             // `{:?}` writes `µs`, and this line is read in a
                             // Windows console — where it arrived as `ﾂｵs`.
-                            "frame x{n}: {} total = cian {} + renderer {}, icons {}{}",
+                            "frame x{n}: {} total = cian {} + renderer {}, icons {} \
+                             | WORST {} (cian {}), {} events waited{}",
                             us(self.prof_total / n),
                             us(self.prof_build / n),
                             us((self.prof_total - self.prof_build) / n),
                             us(self.prof_icons / n),
+                            us(self.prof_worst),
+                            us(self.prof_worst_build),
+                            self.prof_worst_events,
                             // Which part of cian's own time, when the parts are
                             // being counted. See `cian_tui::prof`.
                             cian_tui::prof::take_report(n),
@@ -1062,6 +1118,9 @@ impl ApplicationHandler<Tick> for Gui {
                         eprintln!("{line}");
                         cian_core::log::log(&line);
                         self.prof_frames = 0;
+                        self.prof_worst = std::time::Duration::ZERO;
+                        self.prof_worst_build = std::time::Duration::ZERO;
+                        self.prof_worst_events = 0;
                         self.prof_total = std::time::Duration::ZERO;
                         self.prof_build = std::time::Duration::ZERO;
                         self.prof_icons = std::time::Duration::ZERO;

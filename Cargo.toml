@@ -45,7 +45,19 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 # Embedded shell pane. tui-term, ratatui and vt100 move together: tui-term
 # renders vt100's `Screen` into ratatui's buffer, so all three have to agree
 # on those two types. Bump them as a set.
-portable-pty = "0.9"
+# Pinned, and this one has a reason that must not be lost.
+#
+# 0.9.0 added `PSEUDOCONSOLE_INHERIT_CURSOR` to its `CreatePseudoConsole` call.
+# That flag makes ConPTY ask the terminal where the cursor is — `ESC[6n` — and
+# *wait for the answer* before it renders anything. cian does not answer
+# terminal queries, so ConPTY waited forever: the shell panel showed sixteen
+# bytes of mode-setting and then nothing, on Windows, in both front ends, with
+# PowerShell alive and silent behind it. It looked for all the world like a
+# shell that would not start.
+#
+# Unpinning means teaching cian's shell panel to answer a Device Status Report,
+# which is the right thing to do and is not a dependency bump.
+portable-pty = "=0.8.1"
 vt100        = "0.16"
 tui-term     = { version = "0.3", features = ["vt100"] }
 
