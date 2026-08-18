@@ -146,8 +146,10 @@ mod platform {
 
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
     use windows::Win32::Foundation::HWND;
-    use windows::Win32::System::Com::IDataObject;
-    use windows::Win32::System::Ole::{DROPEFFECT_COPY, DROPEFFECT_LINK, DROPEFFECT_MOVE};
+    use windows::Win32::System::Com::{IBindCtx, IDataObject};
+    use windows::Win32::System::Ole::{
+        IDropSource, DROPEFFECT_COPY, DROPEFFECT_LINK, DROPEFFECT_MOVE,
+    };
     use windows::Win32::UI::Shell::Common::ITEMIDLIST;
     use windows::Win32::UI::Shell::{
         ILCreateFromPathW, ILFree, SHCreateShellItemArrayFromIDLists, SHDoDragDrop, BHID_DataObject,
@@ -210,14 +212,15 @@ mod platform {
             let Ok(items) = SHCreateShellItemArrayFromIDLists(ids) else {
                 return false;
             };
-            let Ok(data) = items.BindToHandler::<_, IDataObject>(None, &BHID_DataObject) else {
+            let Ok(data) = items.BindToHandler::<_, IDataObject>(None::<&IBindCtx>, &BHID_DataObject)
+            else {
                 return false;
             };
             // What cian is willing to let happen. The desktop decides which of
             // them it is, from where the file lands and which keys are held —
             // exactly as it does for a drag out of Explorer.
             let allowed = DROPEFFECT_COPY | DROPEFFECT_MOVE | DROPEFFECT_LINK;
-            SHDoDragDrop(Some(hwnd), &data, None, allowed).is_ok()
+            SHDoDragDrop(Some(hwnd), &data, None::<&IDropSource>, allowed).is_ok()
         }
     }
 

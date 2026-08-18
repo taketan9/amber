@@ -50,7 +50,7 @@ mod platform {
 
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
     use windows::core::PCWSTR;
-    use windows::Win32::Foundation::{HWND, POINT};
+    use windows::Win32::Foundation::HWND;
     use windows::Win32::UI::Shell::Common::ITEMIDLIST;
     use windows::Win32::UI::Shell::{
         IContextMenu, IShellFolder, ILCreateFromPathW, ILFree, SHBindToParent, CMF_NORMAL,
@@ -79,7 +79,7 @@ mod platform {
         let together: Vec<&PathBuf> =
             paths.iter().filter(|p| p.parent().map(|q| q.to_path_buf()) == parent).collect();
 
-        let mut ids: Vec<*mut ITEMIDLIST> = Vec::with_capacity(together.len());
+        let mut ids: Vec<*const ITEMIDLIST> = Vec::with_capacity(together.len());
         for p in &together {
             let wide: Vec<u16> = p.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
             // SAFETY: a NUL-terminated wide string that outlives the call.
@@ -105,7 +105,7 @@ mod platform {
     ///
     /// # Safety
     /// `ids` must be live absolute id lists, all with the same parent.
-    unsafe fn run(hwnd: HWND, ids: &[*mut ITEMIDLIST], at: (i32, i32)) -> bool {
+    unsafe fn run(hwnd: HWND, ids: &[*const ITEMIDLIST], at: (i32, i32)) -> bool {
         let Some(&first) = ids.first() else { return false };
         // The folder the items are in, and each item's id *within* it: a
         // context menu is asked of the parent, about its children.
@@ -131,7 +131,7 @@ mod platform {
         };
         let Ok(hmenu) = CreatePopupMenu() else { return false };
 
-        let filled = menu.QueryContextMenu(hmenu, 0, FIRST_ID, LAST_ID, CMF_NORMAL.0);
+        let filled = menu.QueryContextMenu(hmenu, 0, FIRST_ID, LAST_ID, CMF_NORMAL);
         if filled.is_err() {
             let _ = DestroyMenu(hmenu);
             return false;
@@ -145,7 +145,7 @@ mod platform {
             (TPM_RETURNCMD | TPM_LEFTALIGN | TPM_RIGHTBUTTON).0,
             at.0,
             at.1,
-            Some(hwnd),
+            hwnd,
             None,
         );
 
@@ -182,9 +182,6 @@ mod platform {
             _ => None,
         }
     }
-
-    #[allow(dead_code)]
-    fn unused(_: POINT) {}
 }
 
 #[cfg(not(windows))]
