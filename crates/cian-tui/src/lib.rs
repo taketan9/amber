@@ -2549,6 +2549,8 @@ pub struct App {
     native_icons: bool,
     /// Filled every frame while `native_icons` is on.
     icon_slots: Vec<IconSlot>,
+    /// The last "still blank" second written to the log, so each is said once.
+    blank_said: u64,
     /// Which sidebar paths are directories. Asked once per path, per session.
     ///
     /// The sidebar is drawn every frame, and on Windows these paths are usually
@@ -2862,6 +2864,7 @@ impl App {
             skin: Skin::Classic,
             native_icons: false,
             icon_slots: Vec::new(),
+            blank_said: 0,
             sidebar_dirs: (Instant::now(), std::collections::HashMap::new()),
             type_ahead: String::new(),
             type_ahead_at: Instant::now(),
@@ -5133,6 +5136,22 @@ impl App {
         if self.any_logging() && self.last_pulse.elapsed() >= Duration::from_millis(125) {
             self.last_pulse = Instant::now();
             redraw = true;
+        }
+        // A shell that is running, is on screen, and has drawn nothing: say so
+        // in the log at widening intervals. Silence is the one state that
+        // leaves no trace of itself, and "the log stops" reads the same as
+        // "cian stopped" — so it is written down.
+        if cian_core::log::enabled() {
+            if let Some(s) = self.shell.active_session() {
+                let secs = s.age().as_secs();
+                if s.screen_is_blank() && matches!(secs, 5 | 15 | 30 | 60) && self.blank_said != secs
+                {
+                    self.blank_said = secs;
+                    cian_core::log::log(&format!(
+                        "shell: {secs}s in, still nothing on its screen",
+                    ));
+                }
+            }
         }
         // Install the shell tab once its background spawn (see `ensure`) lands.
         if self.shell.poll_pending() {

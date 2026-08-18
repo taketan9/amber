@@ -144,6 +144,8 @@ pub struct PtySession {
     /// When the shell was started, so a panel that is still blank can say how
     /// long it has been blank for.
     started: std::time::Instant,
+    /// Whether the shell's exit has already been written to the log.
+    reported_exit: bool,
     /// Set by the reader thread the first time the shell says anything.
     ///
     /// A panel showing an empty screen cannot tell "the shell has not spoken
@@ -258,6 +260,7 @@ impl PtySession {
             // take half a minute, and that is a different problem from silence.
             let mut heard = false;
             let started = std::time::Instant::now();
+            let mut last_told = started;
             let heard_flag = reader_heard;
             loop {
                 match reader.read(&mut buf) {
@@ -270,20 +273,29 @@ impl PtySession {
                         break; // EOF: child closed the pty
                     }
                     Ok(n) => {
-                        if !heard {
-                            heard = true;
-                            heard_flag.store(true, Ordering::Relaxed);
-                            // A short, printable taste of it: enough to tell a
-                            // prompt from an error message, not enough to put
-                            // anything private in a log.
+                        // Every arrival is worth a line, but not more than one
+                        // a second: what a diagnosis needs is *when* the shell
+                        // spoke and roughly what it said, not a transcript. A
+                        // prompt that turns up forty seconds in is the whole
+                        // answer to "why is the panel empty", and the first
+                        // sixteen bytes alone could never show it.
+                        let now = std::time::Instant::now();
+                        let due = !heard
+                            || now.duration_since(last_told) >= std::time::Duration::from_secs(1);
+                        if due && cian_core::log::enabled() {
+                            last_told = now;
                             let taste: String = String::from_utf8_lossy(&buf[..n.min(48)])
                                 .chars()
                                 .map(|c| if c.is_control() { '.' } else { c })
                                 .collect();
                             cian_core::log::log(&format!(
-                                "pty reader: first {n} bytes after {:?}: {taste}",
+                                "pty reader: {n} bytes at {:?}: {taste}",
                                 started.elapsed(),
                             ));
+                        }
+                        if !heard {
+                            heard = true;
+                            heard_flag.store(true, Ordering::Relaxed);
                         }
                         // Decode to UTF-8 when a non-UTF-8 encoding is chosen
                         // (e.g. a Shift_JIS shell); UTF-8 passes through as-is.
@@ -339,6 +351,7 @@ impl PtySession {
             rows,
             cols,
             started: std::time::Instant::now(),
+            reported_exit: false,
             heard,
             log,
             title,
@@ -518,8 +531,20 @@ impl PtySession {
         match self.child.try_wait() {
             // Still running.
             Ok(None) => true,
-            // Finished, with a status. The panel closes on this.
-            Ok(Some(_)) => false,
+            // Finished, with a status. The panel closes on this — and the
+            // status is said once, because "the shell went away" and "the shell
+            // went away with code 1" are different problems and only one of
+            // them is cian's.
+            Ok(Some(status)) => {
+                if !self.reported_exit {
+                    self.reported_exit = true;
+                    cian_core::log::log(&format!(
+                        "pty: the shell exited after {:?} with {status:?}",
+                        self.started.elapsed(),
+                    ));
+                }
+                false
+            }
             // Asked and could not be told. "I do not know" is not "it exited",
             // and treating it as one closes the panel the moment after it
             // opened — which looks exactly like a shell that would not start.
