@@ -540,6 +540,11 @@ impl App {
         // Junk review: a click toggles the row's checkbox (and moves the cursor
         // to it); the wheel scrolls. Approval is still Enter/the button.
         if matches!(self.popup, Popup::JunkReview { .. }) {
+            // Off the list altogether: closed, like any other popup. Nothing
+            // is carried out — the click is spent on the dismissal.
+            if self.click_dismissed_popup(ev) {
+                return;
+            }
             let body = self.junk_rect;
             let row_at = |row: u16, scroll: usize, n: usize| -> Option<usize> {
                 if row < body.y || row >= body.y + body.height { return None; }
@@ -565,6 +570,11 @@ impl App {
 
         // Dupe review: same feel — click a row to toggle it.
         if matches!(self.popup, Popup::DupeReview { .. }) {
+            // Off the list altogether: closed, like any other popup. Nothing
+            // is carried out — the click is spent on the dismissal.
+            if self.click_dismissed_popup(ev) {
+                return;
+            }
             let body = self.dupe_rect;
             let row_at = |row: u16, scroll: usize, n: usize| -> Option<usize> {
                 if row < body.y || row >= body.y + body.height { return None; }
@@ -590,6 +600,11 @@ impl App {
 
         // Structure review: same feel as junk review — click a row to toggle it.
         if matches!(self.popup, Popup::StructureReview { .. }) {
+            // Off the list altogether: closed, like any other popup. Nothing
+            // is carried out — the click is spent on the dismissal.
+            if self.click_dismissed_popup(ev) {
+                return;
+            }
             let body = self.struct_rect;
             let row_at = |row: u16, scroll: usize, n: usize| -> Option<usize> {
                 if row < body.y || row >= body.y + body.height { return None; }
@@ -615,6 +630,11 @@ impl App {
 
         // Rename review: same feel — click a row to toggle it.
         if matches!(self.popup, Popup::RenameReview { .. }) {
+            // Off the list altogether: closed, like any other popup. Nothing
+            // is carried out — the click is spent on the dismissal.
+            if self.click_dismissed_popup(ev) {
+                return;
+            }
             let body = self.rename_rect;
             let row_at = |row: u16, scroll: usize, n: usize| -> Option<usize> {
                 if row < body.y || row >= body.y + body.height { return None; }

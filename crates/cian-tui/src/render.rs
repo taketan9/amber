@@ -658,6 +658,10 @@ pub(crate) fn draw(f: &mut Frame, app: &mut App) {
                 app.viewer_rect.height,
             );
             let _ = full;
+            // Out through the same door as everything else: a split editor is
+            // still a popup, and the icons still belong under it rather than
+            // over it. See `draws_its_own_frame`.
+            hide_icons_under_popup(app);
             return;
         }
         draw_popup(

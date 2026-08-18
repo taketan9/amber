@@ -13860,3 +13860,573 @@ mod a_window_shows_the_picture_itself {
         assert!(app.image_slot.is_none(), "no picture, no rectangle");
     }
 }
+
+/// Every popup there is, checked for the two things a popup has to get right
+/// in a window: it takes the file icons with it, and a click off it closes it.
+///
+/// Written as a sweep rather than as a case per popup because both answers come
+/// from shared machinery — the one exit at the foot of `draw`, and the
+/// rectangle each popup records when it clears the cells it is about to cover —
+/// and shared machinery is exactly the kind that is right for fifty popups and
+/// wrong for the fifty-first. The last test here reads the enum out of
+/// `lib.rs`, so a popup added later cannot quietly skip the sweep.
+mod every_popup_behaves {
+    use super::*;
+
+    /// The name to report a failure under, and the popup itself.
+    fn all(dir: &std::path::Path) -> Vec<(&'static str, Popup)> {
+        let file = dir.join("a.txt");
+        let files = vec![file.clone()];
+        vec![
+            ("ConfirmDelete", Popup::ConfirmDelete { targets: files.clone() }),
+            ("OpQueue", Popup::OpQueue { cursor: 0 }),
+            ("ConfirmNoBom", Popup::ConfirmNoBom { targets: files.clone() }),
+            (
+                "ConfirmZipAdd",
+                Popup::ConfirmZipAdd {
+                    archive: dir.join("a.zip"),
+                    sub: String::new(),
+                    sources: files.clone(),
+                },
+            ),
+            (
+                "ConfirmZipDelete",
+                Popup::ConfirmZipDelete {
+                    archive: dir.join("a.zip"),
+                    members: vec!["a.txt".into()],
+                    shown: vec!["a.txt".into()],
+                },
+            ),
+            (
+                "ConfirmTransfer",
+                Popup::ConfirmTransfer {
+                    op: PendingOp::Copy,
+                    targets: files.clone(),
+                    dest: dir.to_path_buf(),
+                },
+            ),
+            (
+                "ConfirmDiffCopy",
+                Popup::ConfirmDiffCopy {
+                    src: file.clone(),
+                    dst: dir.join("b.txt"),
+                    is_dir: false,
+                    back: Box::new(Popup::None),
+                },
+            ),
+            (
+                "ConfirmShortcutDelete",
+                Popup::ConfirmShortcutDelete {
+                    path: Vec::new(),
+                    idx: 0,
+                    name: "here".into(),
+                    back: Box::new(Popup::None),
+                },
+            ),
+            (
+                "ConfirmDirSync",
+                Popup::ConfirmDirSync {
+                    to_right: true,
+                    ops: Vec::new(),
+                    extra: 0,
+                    back: Box::new(Popup::None),
+                },
+            ),
+            (
+                "ConfirmRemoteDelete",
+                Popup::ConfirmRemoteDelete {
+                    side: FocusedPane::Left,
+                    path: "/tmp/a".into(),
+                    name: "a".into(),
+                    is_dir: false,
+                },
+            ),
+            (
+                "ConfirmRemoteMove",
+                Popup::ConfirmRemoteMove {
+                    plan: crate::RemoteMovePlan {
+                        files: vec!["a.txt".into()],
+                        src_target: None,
+                        dst_target: None,
+                        dst_dir: "/tmp".into(),
+                    },
+                    from: "host:/a".into(),
+                    to: "host:/b".into(),
+                },
+            ),
+            (
+                "TextInput",
+                text_input(" Rename ", "new name:", "a.txt".into(), InputKind::Rename { original: file.clone() }),
+            ),
+            ("Notice", Popup::Notice { lines: vec!["something happened".into()] }),
+            (
+                "Report",
+                Popup::Report {
+                    title: " Report ".into(),
+                    lines: vec!["a line".into()],
+                    scroll: 0,
+                    back: Box::new(Popup::None),
+                },
+            ),
+            (
+                "Palette",
+                Popup::Palette {
+                    kind: crate::PaletteKind::Commands,
+                    query: String::new(),
+                    items: Vec::new(),
+                    shown: Vec::new(),
+                    cursor: 0,
+                    scroll: 0,
+                },
+            ),
+            (
+                "DiskUsage",
+                Popup::DiskUsage {
+                    dir: dir.to_path_buf(),
+                    entries: vec![cian_core::du::DuEntry {
+                        name: "a.txt".into(),
+                        path: file.clone(),
+                        size: 1,
+                        is_dir: false,
+                    }],
+                    total: 1,
+                    cursor: 0,
+                    scroll: 0,
+                },
+            ),
+            ("Manual", Popup::Manual { lines: vec!["keys".into()], scroll: 0 }),
+            (
+                "ContextMenu",
+                Popup::ContextMenu { items: vec![MenuItem::Quit], cursor: 0, at: (10, 6) },
+            ),
+            ("ColorPicker", Popup::ColorPicker { pane: FocusedPane::Left, cursor: 0 }),
+            ("SortPicker", Popup::SortPicker { cursor: 0 }),
+            ("Macros", Popup::Macros { cursor: 0, names: vec!["one".into()] }),
+            (
+                "GitLog",
+                Popup::GitLog {
+                    title: " git log ".into(),
+                    dir: dir.to_path_buf(),
+                    commits: vec![cian_core::git::Commit {
+                        hash: "abc1234".into(),
+                        date: "2026-08-19".into(),
+                        author: "someone".into(),
+                        subject: "a change".into(),
+                    }],
+                    cursor: 0,
+                    scroll: 0,
+                    vcs: crate::Vcs::Git,
+                },
+            ),
+            ("EncodingPicker", Popup::EncodingPicker { cursor: 0, target: crate::EncTarget::Shell }),
+            (
+                "DirCompare",
+                Popup::DirCompare {
+                    left: "left".into(),
+                    right: "right".into(),
+                    left_root: dir.to_path_buf(),
+                    right_root: dir.to_path_buf(),
+                    entries: Vec::new(),
+                    cursor: 0,
+                    scroll: 0,
+                    truncated: false,
+                },
+            ),
+            (
+                "Diff",
+                Popup::Diff {
+                    left: "a.txt".into(),
+                    right: "b.txt".into(),
+                    left_path: file.clone(),
+                    right_path: dir.join("b.txt"),
+                    encoding: cian_core::viewer::TextEncoding::Utf8,
+                    result: cian_core::diff::Diff {
+                        rows: Vec::new(),
+                        added: 0,
+                        removed: 0,
+                        changed: 0,
+                        truncated: false,
+                        binary: false,
+                        identical: true,
+                        too_large: false,
+                    },
+                    folded: Vec::new(),
+                    fold: false,
+                    scroll: 0,
+                    find: None,
+                    find_input: None,
+                },
+            ),
+            (
+                "Archive",
+                Popup::Archive {
+                    path: dir.join("a.zip"),
+                    members: Vec::new(),
+                    cursor: 0,
+                    scroll: 0,
+                },
+            ),
+            (
+                "DestPicker",
+                Popup::DestPicker { op: PendingOp::Copy, targets: files.clone(), cursor: 0 },
+            ),
+            (
+                "FindResults",
+                Popup::FindResults {
+                    hits: vec![cian_core::search::Hit {
+                        path: file.clone(),
+                        rel: "a.txt".into(),
+                        is_dir: false,
+                        line: None,
+                    }],
+                    cursor: 0,
+                    scroll: 0,
+                    by_ai: false,
+                },
+            ),
+            (
+                "GrepReplace",
+                Popup::GrepReplace(Box::new(crate::ReplacePlan {
+                    changes: Vec::new(),
+                    skipped: Vec::new(),
+                    cursor: 0,
+                    scroll: 0,
+                    what: "a → b".into(),
+                })),
+            ),
+            ("SshHosts", Popup::SshHosts { cursor: 0, filter: String::new() }),
+            ("SshUsers", Popup::SshUsers { host: 0, cursor: 0 }),
+            (
+                "RemoteBrowser",
+                Popup::RemoteBrowser {
+                    label: "host".into(),
+                    cwd: "/".into(),
+                    entries: Vec::new(),
+                    cursor: 0,
+                    scroll: 0,
+                    marked: Default::default(),
+                    loading: false,
+                    purpose: crate::BrowsePurpose::Download,
+                },
+            ),
+            ("LocalDest", Popup::LocalDest { files: vec!["a.txt".into()], cursor: 0 }),
+            (
+                "ThemePicker",
+                Popup::ThemePicker {
+                    cursor: 0,
+                    scope: crate::ThemeScope::App { revert: crate::theme::theme() },
+                },
+            ),
+            ("Snippets", Popup::Snippets { cursor: 0, filter: String::new() }),
+            (
+                "ConfirmSnippet",
+                Popup::ConfirmSnippet { name: "s".into(), cmd: "ls".into(), enter: false },
+            ),
+            ("Search", Popup::Search { buffer: "a".into() }),
+            ("History", Popup::History { entries: vec![dir.to_path_buf()], cursor: 0 }),
+            (
+                "Shortcuts",
+                Popup::Shortcuts {
+                    entries: vec![crate::Shortcut {
+                        name: "here".into(),
+                        target: Some(dir.display().to_string()),
+                        children: None,
+                    }],
+                    cursor: 0,
+                    path: Vec::new(),
+                },
+            ),
+            ("ConfirmQuit", Popup::ConfirmQuit),
+            (
+                "ConfirmClose",
+                Popup::ConfirmClose { target: crate::CloseTarget::FileTab(FocusedPane::Left) },
+            ),
+            ("ConfirmNewTab", Popup::ConfirmNewTab { side: FocusedPane::Left }),
+            ("AiShellConfirm", Popup::AiShellConfirm { command: "ls -la".into() }),
+            (
+                "AiChat",
+                Popup::AiChat {
+                    input: String::new(),
+                    log: vec![ChatMsg { user: true, text: "hello".into() }],
+                    scroll: 0,
+                    pending: true,
+                    sel: None,
+                    mode: ChatMode::Ai,
+                    skin: ChatSkin::of(ChatMode::Ai),
+                },
+            ),
+            ("AiHistory", Popup::AiHistory { cursor: 0 }),
+            ("Toggles", Popup::Toggles { cursor: 0 }),
+            (
+                "ConfirmElevate",
+                Popup::ConfirmElevate {
+                    op: PendingOp::Copy,
+                    targets: files.clone(),
+                    dest: dir.to_path_buf(),
+                },
+            ),
+            (
+                "CommitMessage",
+                Popup::CommitMessage {
+                    buffer: "a change".into(),
+                    stat: "1 file".into(),
+                    dir: dir.to_path_buf(),
+                    editing: false,
+                },
+            ),
+            (
+                "JunkReview",
+                Popup::JunkReview {
+                    items: vec![crate::JunkItem {
+                        path: file.clone(),
+                        reason: "empty".into(),
+                        selected: true,
+                    }],
+                    cursor: 0,
+                    scroll: 0,
+                },
+            ),
+            (
+                "StructureReview",
+                Popup::StructureReview {
+                    items: vec![crate::MoveItem {
+                        path: file.clone(),
+                        name: "a.txt".into(),
+                        dest: "docs".into(),
+                        reason: "text".into(),
+                        selected: true,
+                    }],
+                    cursor: 0,
+                    scroll: 0,
+                    dir: dir.to_path_buf(),
+                },
+            ),
+            (
+                "RenameReview",
+                Popup::RenameReview {
+                    items: vec![crate::RenameItem {
+                        path: file.clone(),
+                        old: "a.txt".into(),
+                        new: "b.txt".into(),
+                        selected: true,
+                    }],
+                    cursor: 0,
+                    scroll: 0,
+                    by_ai: false,
+                },
+            ),
+            (
+                "ConfirmDiscard",
+                Popup::ConfirmDiscard { targets: files.clone(), dir: dir.to_path_buf() },
+            ),
+            (
+                "DupeReview",
+                Popup::DupeReview {
+                    items: vec![crate::DupeItem {
+                        path: file.clone(),
+                        group: 0,
+                        keeper: true,
+                        selected: false,
+                    }],
+                    cursor: 0,
+                    scroll: 0,
+                },
+            ),
+        ]
+    }
+
+    /// The two the sweep cannot build here, and why.
+    ///
+    /// Both are opened by a key in tests of their own — see
+    /// `f3_on_an_image_opens_the_half_block_preview` and the viewer's tests —
+    /// and both are checked below through that door instead.
+    const OPENED_WITH_A_KEY: &[&str] = &["ImageView", "Viewer"];
+
+    fn desktop(icon_view: bool) -> (tempfile::TempDir, App) {
+        let (d, mut app) = app_with(&["a.txt", "b.txt", "c.txt"]);
+        app.skin = Skin::Finder;
+        app.native_icons = true;
+        app.icon_view = icon_view;
+        // A server to be in the middle of picking a login for. Without one the
+        // SSH popups have nothing to draw and draw nothing — which is a state
+        // the keys already recover from (any key closes it), and not the state
+        // this sweep is asking about.
+        app.config.ssh_hosts = vec![cian_lua::SshHost {
+            name: "box".into(),
+            host: "box.example".into(),
+            users: vec![cian_lua::SshUser::plain("taro")],
+            port: None,
+            notes: None,
+        }];
+        (d, app)
+    }
+
+    #[test]
+    fn none_of_them_leaves_icons_on_top() {
+        for icons in [false, true] {
+            let (d, mut app) = desktop(icons);
+            let dir = app.active_pane().unwrap().cwd.clone();
+            for (name, popup) in all(&dir) {
+                app.popup = popup;
+                let _ = render(&mut app, 140, 40);
+                if name == "ContextMenu" {
+                    // The menu is small, so the icons it does not cover stay:
+                    // a listing that empties itself the moment a menu opens is
+                    // the bug this behaviour was written to avoid.
+                    let m = app.menu_rect;
+                    for s in &app.icon_slots {
+                        let clear = s.x + s.w <= m.x
+                            || s.x >= m.x + m.width
+                            || s.y + s.h <= m.y
+                            || s.y >= m.y + m.height;
+                        assert!(clear, "icon_view={icons}: an icon sits on the menu: {s:?} vs {m:?}");
+                    }
+                    continue;
+                }
+                assert!(
+                    app.icon_slots.is_empty(),
+                    "icon_view={icons}: {name} left {} icons on top of itself",
+                    app.icon_slots.len(),
+                );
+            }
+            drop(d);
+        }
+    }
+
+    #[test]
+    fn every_one_of_them_says_where_it_is() {
+        let (_d, mut app) = desktop(false);
+        let dir = app.active_pane().unwrap().cwd.clone();
+        for (name, popup) in all(&dir) {
+            app.popup = popup;
+            let _ = render(&mut app, 140, 40);
+            assert!(
+                crate::render::popup_ink().is_some(),
+                "{name} drew without saying what it covers, so a click cannot be outside it",
+            );
+        }
+    }
+
+    #[test]
+    fn a_click_off_any_of_them_closes_it() {
+        for icons in [false, true] {
+            let (_d, mut app) = desktop(icons);
+            let dir = app.active_pane().unwrap().cwd.clone();
+            for (name, popup) in all(&dir) {
+                app.popup = popup;
+                let _ = render(&mut app, 140, 40);
+                let before = std::mem::discriminant(&app.popup);
+                app.handle_mouse(MouseEvent {
+                    kind: MouseEventKind::Down(MouseButton::Left),
+                    column: 139,
+                    row: 39,
+                    modifiers: KeyModifiers::NONE,
+                });
+                assert_ne!(
+                    std::mem::discriminant(&app.popup),
+                    before,
+                    "icon_view={icons}: {name} is still open after a click off it",
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_picture_popup_too() {
+        let (d, mut app) = desktop(false);
+        let mut img = image::RgbImage::new(40, 20);
+        for px in img.pixels_mut() {
+            *px = image::Rgb([200, 40, 40]);
+        }
+        img.save(d.path().join("pic.png")).unwrap();
+        app.reload_both();
+        app.active_pane_mut().unwrap().cursor =
+            app.active_pane().unwrap().entries.iter().position(|e| e.name == "pic.png").unwrap();
+        app.handle_key(code(KeyCode::F(3))).unwrap();
+        assert!(matches!(app.popup, Popup::ImageView { .. }));
+        let _ = render(&mut app, 140, 40);
+        assert!(app.icon_slots.is_empty(), "no listing icons over the picture");
+        app.handle_mouse(MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 139,
+            row: 39,
+            modifiers: KeyModifiers::NONE,
+        });
+        assert!(matches!(app.popup, Popup::None), "a click off it closes it");
+    }
+
+    /// The editor panel is the one popup that does *not* close on an outside
+    /// click, on purpose: it is a place to be rather than a question to answer.
+    /// It still has to take the icons with it.
+    #[test]
+    fn the_editor_panel_keeps_its_file_and_loses_the_icons() {
+        let (_d, mut app) = desktop(false);
+        app.handle_key(code(KeyCode::F(3))).unwrap();
+        assert!(matches!(app.popup, Popup::Viewer { .. }), "{:?}", app.popup);
+        let _ = render(&mut app, 140, 40);
+        assert!(app.icon_slots.is_empty(), "no listing icons over the open file");
+        app.handle_mouse(MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 139,
+            row: 39,
+            modifiers: KeyModifiers::NONE,
+        });
+        assert!(matches!(app.popup, Popup::Viewer { .. }), "and it stays open");
+    }
+
+    /// …and the same when it is split in two, which leaves the frame by a door
+    /// of its own.
+    #[test]
+    fn a_split_editor_panel_loses_them_too() {
+        let (_d, mut app) = desktop(false);
+        app.handle_key(code(KeyCode::F(3))).unwrap();
+        assert!(matches!(app.popup, Popup::Viewer { .. }), "{:?}", app.popup);
+        app.split_viewer(true);
+        assert!(app.viewer_split.is_some(), "split in two");
+        let _ = render(&mut app, 140, 40);
+        assert!(app.icon_slots.is_empty(), "{} icons over the split panel", app.icon_slots.len());
+    }
+
+    /// A popup added later has to be added to the sweep as well. Read out of
+    /// the enum itself, so forgetting is a failing test rather than a gap.
+    #[test]
+    fn the_sweep_covers_every_variant_there_is() {
+        let src = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/lib.rs"),
+        )
+        .unwrap();
+        let body = src
+            .split_once("\nenum Popup {")
+            .expect("the enum is where it was")
+            .1
+            .split_once("\n}\n")
+            .unwrap()
+            .0;
+        let mut depth = 0i32;
+        let mut variants = Vec::new();
+        for line in body.lines() {
+            let s = line.trim();
+            if depth == 0 && !s.starts_with("//") && !s.starts_with('#') {
+                if let Some(name) = s.split(['{', '(', ',']).next() {
+                    let name = name.trim();
+                    if !name.is_empty()
+                        && name.chars().next().unwrap().is_ascii_uppercase()
+                        && name.chars().all(|c| c.is_ascii_alphanumeric())
+                    {
+                        variants.push(name.to_string());
+                    }
+                }
+            }
+            depth += line.matches('{').count() as i32 - line.matches('}').count() as i32;
+        }
+        let d = tempfile::tempdir().unwrap();
+        let covered: Vec<&str> = all(d.path()).iter().map(|(n, _)| *n).collect();
+        let missing: Vec<&String> = variants
+            .iter()
+            .filter(|v| *v != "None")
+            .filter(|v| !covered.contains(&v.as_str()) && !OPENED_WITH_A_KEY.contains(&v.as_str()))
+            .collect();
+        assert!(missing.is_empty(), "popups the sweep never sees: {missing:?}");
+        assert!(variants.len() > 50, "the enum was parsed, not merely searched: {}", variants.len());
+    }
+}
