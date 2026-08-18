@@ -379,6 +379,7 @@ impl App {
             Popup::Report { .. } => self.report_key(key),
             Popup::Shortcuts { .. } => self.shortcuts_key(key),
             Popup::ConfirmClose { .. } => self.confirm_close_key(key),
+            Popup::ConfirmNewTab { .. } => self.confirm_new_tab_key(key),
             Popup::ConfirmElevate { .. } => self.confirm_elevate_key(key),
             Popup::AiShellConfirm { .. } => self.ai_shell_confirm_key(key),
             Popup::CommitMessage { .. } => self.commit_message_key(key),
@@ -1657,6 +1658,19 @@ impl App {
         Ok(())
     }
 
+    fn confirm_new_tab_key(&mut self, key: KeyEvent) -> Result<()> {
+        let Popup::ConfirmNewTab { side } = self.popup else { return Ok(()) };
+        match key.code {
+            KeyCode::Char('y') | KeyCode::Enter => {
+                self.popup = Popup::None;
+                self.open_new_tab(side)?;
+            }
+            KeyCode::Char('n') | KeyCode::Esc => self.popup = Popup::None,
+            _ => {}
+        }
+        Ok(())
+    }
+
     fn confirm_elevate_key(&mut self, key: KeyEvent) -> Result<()> {
             match key.code {
                 KeyCode::Char('y') | KeyCode::Enter => self.run_elevated_transfer(),
@@ -2257,19 +2271,17 @@ impl App {
             (_, _, KeyCode::BackTab) => {
                 if let Some(t) = self.active_file_tabs_mut() { t.next_tab(); }
             }
-            // Tab management: t = new tab, w = close active tab.
-            (false, false, KeyCode::Char('t')) => {
-                if let Some(t) = self.active_file_tabs_mut() { t.add_clone()?; }
-            }
+            // Tab management: t = new tab, w = close active tab. Both ask
+            // first — `t` is a letter, and a letter is the easiest key in the
+            // world to press by accident.
+            (false, false, KeyCode::Char('t')) => self.ask_new_tab(),
             (false, false, KeyCode::Char('w')) => {
                 if let Some(t) = self.active_file_tabs_mut() { t.close_active(); }
             }
             // F-key tab controls, matching the shell panel: F9 = new tab,
             // F1/F2 = previous/next tab, F10 = close tab (with confirm). Plain
             // and shifted both work, so the muscle memory carries over.
-            (false, _, KeyCode::F(9)) => {
-                if let Some(t) = self.active_file_tabs_mut() { t.add_clone()?; }
-            }
+            (false, _, KeyCode::F(9)) => self.ask_new_tab(),
             (false, _, KeyCode::F(1)) => {
                 if let Some(t) = self.active_file_tabs_mut() { t.prev_tab(); }
             }
@@ -2547,11 +2559,7 @@ impl App {
             }
             Action::Menu => self.open_menu_at_cursor(),
             Action::Ssh => self.start_ssh(),
-            Action::NewTab => {
-                if let Some(t) = self.active_file_tabs_mut() {
-                    t.add_clone()?;
-                }
-            }
+            Action::NewTab => self.ask_new_tab(),
             Action::CloseTab => {
                 if let Some(t) = self.active_file_tabs_mut() {
                     t.close_active();

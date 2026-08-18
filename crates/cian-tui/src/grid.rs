@@ -14,7 +14,9 @@
 
 use std::time::{Duration, Instant};
 
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{
+    KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+};
 
 use crate::render::clamp_list_scroll;
 use crate::{App, FocusedPane, Mode, PendingOp, Popup};
@@ -63,7 +65,7 @@ impl App {
 
     /// Step the cursor by `by` entries, stopping at the ends rather than
     /// wrapping — a grid has corners, and walking off one should feel like it.
-    fn grid_move(&mut self, by: isize) {
+    pub(crate) fn grid_move(&mut self, by: isize) {
         let Some(pane) = self.active_pane_mut() else { return };
         let last = pane.entries.len().saturating_sub(1);
         let want = pane.cursor as isize + by;
@@ -184,6 +186,50 @@ impl App {
 
 /// What the grid does when it is clicked.
 impl App {
+    /// The wheel, and the grid's own scrollbar.
+    ///
+    /// The grid has no scroll offset of its own — which page is showing is
+    /// worked out from where the cursor is — so both of these move the cursor
+    /// and let the page follow. That is the same bargain the arrow keys make,
+    /// and it is why the bar steps a page at a time rather than gliding.
+    pub(crate) fn grid_scroll_mouse(&mut self, ev: MouseEvent) {
+        let (col, row) = (ev.column, ev.row);
+        // A bar being dragged keeps the pointer until it is let go: the hand
+        // wanders off a one-column track constantly.
+        if let Some(what) = self.scroll_drag {
+            match ev.kind {
+                MouseEventKind::Drag(MouseButton::Left) => {
+                    self.scroll_to_fraction(what, col, row);
+                    return;
+                }
+                MouseEventKind::Up(MouseButton::Left) => {
+                    self.scroll_drag = None;
+                    return;
+                }
+                _ => {}
+            }
+        }
+        if matches!(ev.kind, MouseEventKind::Down(MouseButton::Left)) {
+            if let Some(t) = self.scroll_tracks.iter().copied().find(|t| {
+                col >= t.rect.x
+                    && col < t.rect.x + t.rect.width
+                    && row >= t.rect.y
+                    && row < t.rect.y + t.rect.height
+            }) {
+                self.scroll_drag = Some(t.what);
+                self.scroll_to_fraction(t.what, col, row);
+                return;
+            }
+        }
+        // One notch is one row of tiles, whichever way it went.
+        let cols = self.icon_cols.max(1) as isize;
+        match ev.kind {
+            MouseEventKind::ScrollDown => self.grid_move(cols),
+            MouseEventKind::ScrollUp => self.grid_move(-cols),
+            _ => {}
+        }
+    }
+
     /// A single click: put the cursor on what was clicked, or press a button.
     /// Returns whether the click belonged to the grid.
     ///
@@ -226,6 +272,21 @@ impl App {
         }
         if let Some(b) = self.grid_button_at(col, row) {
             self.grid_button(b);
+            return true;
+        }
+        // A tab label on the top row. The grid answers for the whole window in
+        // this view, so the strip it draws would otherwise be a strip that
+        // cannot be clicked — while the same labels in the detail view can be.
+        if let Some((pane, idx, _)) = self
+            .tab_rects
+            .iter()
+            .copied()
+            .find(|(_, _, r)| col >= r.x && col < r.x + r.width && row == r.y)
+        {
+            self.focus(pane);
+            if let Some(t) = self.active_file_tabs_mut() {
+                t.select(idx);
+            }
             return true;
         }
         // The sidebar is one click to a place, which is the whole reason it

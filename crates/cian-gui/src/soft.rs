@@ -192,6 +192,12 @@ impl SoftBackend {
         self.pictures.insert(id, Picture { w, h, rgba });
     }
 
+    /// Forget a picture. For the ones that are megabytes rather than a
+    /// thumbnail, and are not wanted twice.
+    pub fn evict(&mut self, id: u64) {
+        self.pictures.remove(&id);
+    }
+
     /// What to draw over the text this frame.
     pub fn set_frame(&mut self, draws: Vec<Draw>) {
         self.frame = draws;

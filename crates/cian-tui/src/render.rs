@@ -295,6 +295,9 @@ fn draw_zoomed(f: &mut Frame, area: Rect, app: &mut App, ov: AnimOverride) {
 
 pub(crate) fn draw(f: &mut Frame, app: &mut App) {
     let area = f.area();
+    // What the popup covers is worked out afresh every frame, by the drawing
+    // itself. See [`clear_popup`].
+    POPUP_INK.with(|c| c.set(None));
     // Where the pictures go is decided afresh every frame, so the list starts
     // empty every frame.
     //
@@ -307,6 +310,8 @@ pub(crate) fn draw(f: &mut Frame, app: &mut App) {
     // and draw call, for a screen holding thirty icons. Half a core, gone, and
     // growing; the memory went the same way.
     app.icon_slots.clear();
+    // …and so does the picture, which is one slot or none.
+    app.image_slot = None;
     // A light theme paints the whole surface so gaps, the shell panel and the
     // bottom bars share one background rather than showing the terminal's own.
     if let Some(bg) = theme().base_bg {
@@ -432,54 +437,17 @@ pub(crate) fn draw(f: &mut Frame, app: &mut App) {
     if let Some(job) = &app.diff_job {
         draw_progress_bar(f, area, job.label, &job.latest, job.started, app.lang);
     }
-    // The chat has its own renderer so it can stash the transcript geometry on
-    // `app` for mouse selection.
-    if matches!(app.popup, Popup::AiChat { .. }) {
-        draw_ai_chat(f, area, app);
-        return;
-    }
-    if matches!(app.popup, Popup::AiHistory { .. }) {
-        draw_ai_history(f, area, app);
-        return;
-    }
-    if matches!(app.popup, Popup::Toggles { .. }) {
-        draw_toggles(f, area, app);
-        return;
-    }
-    if matches!(app.popup, Popup::OpQueue { .. }) {
-        draw_op_queue(f, area, app);
-        return;
-    }
-    // The image preview decodes to fit its box and caches by size, so it takes
-    // `&mut app` too.
-    if matches!(app.popup, Popup::ImageView { .. }) {
-        draw_image(f, area, app);
-        return;
-    }
-    // The F3 image popup closed: drop its protocol state, and — for a
-    // protocol whose pictures outlive the cells under them — wipe the
-    // terminal once so it does not linger over what is now underneath.
-    if app.img_proto.take().is_some() && app.needs_clear_after_image() {
-        app.full_clear = true;
-    }
-    if matches!(app.popup, Popup::CommitMessage { .. }) {
-        draw_commit_message(f, area, app);
-        return;
-    }
-    if matches!(app.popup, Popup::JunkReview { .. }) {
-        draw_junk_review(f, area, app);
-        return;
-    }
-    if matches!(app.popup, Popup::DupeReview { .. }) {
-        draw_dupe_review(f, area, app);
-        return;
-    }
-    if matches!(app.popup, Popup::StructureReview { .. }) {
-        draw_structure_review(f, area, app);
-        return;
-    }
-    if matches!(app.popup, Popup::RenameReview { .. }) {
-        draw_rename_review(f, area, app);
+    // The popups that draw themselves and are the last word on the frame — each
+    // needs `&mut App`, to stash the geometry the mouse is measured against.
+    //
+    // They leave through one door on purpose. Each used to `return` where it
+    // stood, which skipped the tidying at the foot of this function — and the
+    // first thing that tidying does is take the file icons away from under the
+    // popup. So in the window, where the icons are real pictures composited
+    // over the cells, a listing's worth of them was drawn *on top of* the AI
+    // chat. Which is exactly how it was reported.
+    if draws_its_own_frame(f, area, app) {
+        hide_icons_under_popup(app);
         return;
     }
     // Where the viewer goes: over everything when it was opened with F3 or
@@ -1160,21 +1128,52 @@ fn draw_icon_grid(f: &mut Frame, area: Rect, app: &mut App) {
     let bg = th.base_bg;
     let focus_bg = focus_badge_color(app.mode);
 
+    // The top row carries the tabs, the way both other views carry them.
+    //
+    // It carried the directory instead, which the address bar below it already
+    // says — so opening a second tab in this view changed nothing on screen at
+    // all, and there was no way to tell which of them was showing, or that
+    // there were two. Same strip, same numbers, same click targets as the
+    // detail view, because it is the same tabs.
+    let which_tabs = if app.focused == FocusedPane::Right
+        || (app.focused == FocusedPane::Shell && app.last_file_pane == FocusedPane::Right)
+    {
+        FocusedPane::Right
+    } else {
+        FocusedPane::Left
+    };
+    let mut offsets = Vec::new();
+    let title = {
+        let tabs = if which_tabs == FocusedPane::Right { &app.right } else { &app.left };
+        let focused = app.focused != FocusedPane::Shell;
+        let (title, _) =
+            tabs_title(tabs, focused, focus_bg, area.width.saturating_sub(2), &mut offsets);
+        title
+    };
+    app.tab_rects.clear();
+    for (i, off, w) in &offsets {
+        app.tab_rects.push((which_tabs, *i, Rect::new(area.x + 1 + off, area.y, *w, 1)));
+    }
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(border_type())
         .border_style(Style::default().fg(focus_bg).add_modifier(Modifier::BOLD))
-        .title(format!(
-            " {} ",
-            app.active_pane().map(|p| p.cwd.display().to_string()).unwrap_or_default()
-        ));
+        .title(title);
     let block = match bg {
         Some(c) => block.style(Style::default().bg(c)),
         None => block,
     };
     f.render_widget(block, area);
 
-    let Some(inner) = draw_desktop_chrome(f, area, app, &th, bg, TILE_W) else { return };
+    let Some(chrome) = draw_desktop_chrome(f, area, app, &th, bg, TILE_W) else { return };
+
+    // The rightmost column belongs to the scrollbar, not to the tiles. Taken
+    // before anything is measured, so the grid, the click map and the bar all
+    // agree about where the tiles stop — the grid answers for every cell of
+    // `grid_area`, and a bar drawn inside it would be a bar that cannot be
+    // clicked.
+    let bar = Rect::new(chrome.x + chrome.width.saturating_sub(1), chrome.y, 1, chrome.height);
+    let inner = Rect { width: chrome.width.saturating_sub(1), ..chrome };
 
     let cols = (inner.width / TILE_W).max(1) as usize;
     app.icon_cols = cols;
@@ -1184,13 +1183,14 @@ fn draw_icon_grid(f: &mut Frame, area: Rect, app: &mut App) {
 
     // The grid keeps showing the last file pane while the focus is in the shell
     // panel below it — otherwise going to the shell emptied the whole window.
-    let side = if app.focused == FocusedPane::Right
+    let which = if app.focused == FocusedPane::Right
         || (app.focused == FocusedPane::Shell && app.last_file_pane == FocusedPane::Right)
     {
-        &app.right
+        FocusedPane::Right
     } else {
-        &app.left
+        FocusedPane::Left
     };
+    let side = if which == FocusedPane::Right { &app.right } else { &app.left };
     let pane = side.active_ref();
     let synthetic = pane.is_synthetic();
     let total = pane.entries.len();
@@ -1256,11 +1256,125 @@ fn draw_icon_grid(f: &mut Frame, area: Rect, app: &mut App) {
         );
     }
     app.icon_slots.extend(slots);
+
+    // How much grid there is, and where in it this page sits. The grid pages
+    // rather than scrolls, so the thumb steps a page at a time — which is the
+    // truth about how this view moves, and a bar that slid smoothly over a view
+    // that jumps would be describing something else.
+    // Whatever a previous frame's layout left behind is not on screen any more:
+    // the grid owns the window, and this is the only track in it.
+    app.scroll_tracks.clear();
+    if total > per_page {
+        app.scroll_tracks.push(crate::ScrollTrack {
+            rect: bar,
+            what: crate::ScrollWhat::Pane(which),
+            total,
+            shown: per_page,
+        });
+        let max = total.saturating_sub(per_page);
+        f.render_stateful_widget(
+            Scrollbar::new(ScrollbarOrientation::VerticalRight)
+                .thumb_symbol("█")
+                .thumb_style(Style::default().fg(text_tone(th.accent, bg.unwrap_or(th.popup_bg))))
+                .track_symbol(Some("│"))
+                .track_style(Style::default().fg(th.border))
+                .begin_symbol(None)
+                .end_symbol(None),
+            bar,
+            &mut ScrollbarState::new(max).position(start.min(max)),
+        );
+    }
+}
+
+thread_local! {
+    /// Where the popup on screen is, as of the last frame — the union of every
+    /// rectangle a popup wiped before drawing itself.
+    ///
+    /// The mouse needs to know where "outside the popup" is, and no one owns
+    /// that answer: two dozen popups each work out their own frame, and most of
+    /// them are handed a `&mut Popup` rather than the whole of cian, so there is
+    /// nowhere to put it on the way past. What they do all have in common is
+    /// this: a popup begins by clearing the cells it is about to cover. So the
+    /// clearing is what records it.
+    ///
+    /// Read by the mouse, which runs on the thread that draws — the loop is one
+    /// thread in both front ends — between one frame and the next.
+    static POPUP_INK: std::cell::Cell<Option<Rect>> = const { std::cell::Cell::new(None) };
+}
+
+/// Wipe the cells a popup is about to draw over, and remember them as its own.
+fn clear_popup(f: &mut Frame, rect: Rect) {
+    f.render_widget(Clear, rect);
+    POPUP_INK.with(|c| {
+        c.set(Some(match c.get() {
+            // A popup drawn in two pieces — a frame and a box inside it — is
+            // one popup, and both pieces are inside it.
+            Some(had) => had.union(rect),
+            None => rect,
+        }))
+    });
+}
+
+/// The rectangle the popup on screen covers, if one is showing.
+pub(crate) fn popup_ink() -> Option<Rect> {
+    POPUP_INK.with(|c| c.get())
+}
+
+/// The popups that take the whole frame and end it. Returns whether one drew.
+///
+/// Each of these needs the application, not just its popup — they record where
+/// they put things so a click can be turned back into a line, a row, a tile.
+/// That is why they are not in [`draw_popup`] with the rest.
+fn draws_its_own_frame(f: &mut Frame, area: Rect, app: &mut App) -> bool {
+    match app.popup {
+        Popup::AiChat { .. } => draw_ai_chat(f, area, app),
+        Popup::AiHistory { .. } => draw_ai_history(f, area, app),
+        Popup::Toggles { .. } => draw_toggles(f, area, app),
+        Popup::OpQueue { .. } => draw_op_queue(f, area, app),
+        // The image preview decodes to fit its box and caches by size.
+        Popup::ImageView { .. } => draw_image(f, area, app),
+        _ => {
+            // The F3 image popup closed: drop its protocol state, and — for a
+            // protocol whose pictures outlive the cells under them — wipe the
+            // terminal once so it does not linger over what is now underneath.
+            if app.img_proto.take().is_some() && app.needs_clear_after_image() {
+                app.full_clear = true;
+            }
+            match app.popup {
+                Popup::CommitMessage { .. } => draw_commit_message(f, area, app),
+                Popup::JunkReview { .. } => draw_junk_review(f, area, app),
+                Popup::DupeReview { .. } => draw_dupe_review(f, area, app),
+                Popup::StructureReview { .. } => draw_structure_review(f, area, app),
+                Popup::RenameReview { .. } => draw_rename_review(f, area, app),
+                _ => return false,
+            }
+        }
+    }
+    true
+}
+
+/// Where a spinner is in its turn, `elapsed_ms` into it.
+///
+/// Braille — ⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏ — is what everything spins with, and it is the one
+/// thing this cannot use. The window draws with exactly one font and no
+/// fallback (deliberately: see cian-gui's `font.rs`), and not one of the
+/// Japanese Nerd Fonts it looks for has the braille block in it — HackGen
+/// Console NF, checked: 28,584 characters, U+2800 not among them. Ten frames
+/// that are all the same missing glyph is a spinner that does not spin, which
+/// is exactly how it was reported. The quarter-filled circles are in every font
+/// on this machine — HackGen Console NF and Hack Nerd Font, both weights of
+/// each — at the same advance as `m`, so they sit in one cell and read as one
+/// thing turning.
+///
+/// Four frames rather than ten, at 120ms each: half a second to the turn, which
+/// is a spinner rather than a flicker.
+pub(crate) fn spinner_frame(elapsed_ms: u128) -> &'static str {
+    const SPIN: [&str; 4] = ["◐", "◓", "◑", "◒"];
+    SPIN[((elapsed_ms / 120) % SPIN.len() as u128) as usize]
 }
 
 fn draw_startup_splash(f: &mut Frame, area: Rect, elapsed_ms: u128) {
-    const SPIN: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-    let frame = SPIN[((elapsed_ms / 90) % SPIN.len() as u128) as usize];
+    let frame = spinner_frame(elapsed_ms);
     let w = 34u16.min(area.width);
     let h = 5u16.min(area.height);
     let rect = centered_rect(w, h, area);
@@ -1469,7 +1583,7 @@ fn tabs_title<'a>(
         if let Some(lbl) = tab.flat_label() {
             // …and says how, because "the pane is not a folder any more" is
             // easy to notice and "Esc puts it back" is not.
-            return format!(" {} ⌥ {}  ⏎Esc/⌫ ", i + 1, lbl);
+            return format!(" {} ⌥ {}  ⏎Esc/⇦ ", i + 1, lbl);
         }
         let main = if is_active {
             tab.cwd.display().to_string()
@@ -2098,13 +2212,10 @@ fn draw_file_pane(
     }
 
     // The scrollbar sits on the pane's right border and takes its style from
-    // it, which is right when there is a border. Without one it would be
-    // reversed-out of the focus colour — a solid bar of accent down the side of
-    // a white pane, louder than anything it is next to. Grey, like every
-    // desktop scrollbar.
+    // it, which is right when there is a border.
     let scroll_style =
         if finder { Style::default().fg(th.border) } else { border_style };
-    draw_list_scrollbar(f, area, pane.entries.len(), pane.cursor, pane.scroll, focused && !finder, scroll_style, pane_id, tracks);
+    draw_list_scrollbar(f, area, pane.entries.len(), pane.cursor, pane.scroll, focused, finder, scroll_style, pane_id, tracks);
 
     // The active tab's path segments are click targets (a breadcrumb): the
     // rects live on the title row and are resolved before tab selection.
@@ -2348,6 +2459,7 @@ fn draw_list_scrollbar(
     cursor: usize,
     scroll: usize,
     focused: bool,
+    finder: bool,
     border: Style,
     pane_id: FocusedPane,
     tracks: &mut Vec<crate::ScrollTrack>,
@@ -2371,21 +2483,35 @@ fn draw_list_scrollbar(
     let max = total.saturating_sub(view_h as usize);
     let at = clamp_list_scroll(scroll, cursor, view_h as usize, total);
     let mut state = ScrollbarState::new(max).position(at);
-    // The bar sits *on* the pane's right border, so the track has to be the
-    // border: same glyph, same style. Drawing it in its own dimmer color made
-    // the right edge look broken — bright where the thumb was, faded
-    // elsewhere, while the other three sides stayed the border color.
-    let thumb = if focused {
-        border.add_modifier(Modifier::REVERSED)
-    } else {
-        Style::default().fg(Color::Rgb(120, 120, 145))
+    // With a border, the bar sits *on* it, so the track has to be the border:
+    // same glyph, same style. Drawing it in its own dimmer color made the right
+    // edge look broken — bright where the thumb was, faded elsewhere, while the
+    // other three sides stayed the border color.
+    //
+    // The desktop views have no border to sit on, and the quiet version of this
+    // — a grey │ thumb on a grey │ track — was reported as no scrollbar at all,
+    // which is fair: the two differ by a shade. There, the thumb is a solid
+    // block, in the focus colour when the pane is the one being driven. That is
+    // the classic view's own emphasis (it reverses the border out, which paints
+    // a solid bar) said in the way a borderless pane can say it.
+    let (thumb_symbol, thumb, track_symbol, track_style) = match (finder, focused) {
+        (false, true) => ("│", border.add_modifier(Modifier::REVERSED), "│", border),
+        (false, false) => ("│", Style::default().fg(Color::Rgb(120, 120, 145)), "│", border),
+        (true, true) => (
+            "█",
+            Style::default()
+                .fg(text_tone(theme().accent, theme().base_bg.unwrap_or(theme().popup_bg))),
+            "│",
+            border,
+        ),
+        (true, false) => ("█", Style::default().fg(Color::Rgb(120, 120, 145)), "│", border),
     };
     f.render_stateful_widget(
         Scrollbar::new(ScrollbarOrientation::VerticalRight)
-            .thumb_symbol("│")
+            .thumb_symbol(thumb_symbol)
             .thumb_style(thumb)
-            .track_symbol(Some("│"))
-            .track_style(border)
+            .track_symbol(Some(track_symbol))
+            .track_style(track_style)
             .begin_symbol(None)
             .end_symbol(None),
         track,
@@ -3289,7 +3415,7 @@ fn draw_status(f: &mut Frame, area: Rect, app: &App) {
                 Color::Rgb(235, 200, 100),
             ));
         } else {
-            spans.push(chip(format!("⏳ {}{}{}", job.label, pct, queued), theme().accent));
+            spans.push(chip(format!("↻ {}{}{}", job.label, pct, queued), theme().accent));
         }
     }
 
@@ -3368,7 +3494,7 @@ fn draw_progress_bar(
 ) {
     let w = 74u16.min(area.width.saturating_sub(2));
     let rect = centered_rect(w, 8, area);
-    f.render_widget(Clear, rect);
+    clear_popup(f, rect);
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(border_type())
@@ -3449,7 +3575,7 @@ fn push_row_zone(zones: &mut Vec<PopupZone>, inner: Rect, y: u16, idx: usize) {
 fn draw_image(f: &mut Frame, area: Rect, app: &mut App) {
     let lang = app.lang;
     let rect = centered_rect(area.width.saturating_sub(2), area.height.saturating_sub(2), area);
-    f.render_widget(Clear, rect);
+    clear_popup(f, rect);
     let inner = rect.inner(Margin { vertical: 1, horizontal: 1 });
     let body_w = inner.width;
     let body_h = inner.height.saturating_sub(1); // leave a row for the footer
@@ -3462,6 +3588,53 @@ fn draw_image(f: &mut Frame, area: Rect, app: &mut App) {
     if app.gfx_picker.is_some() && !app.gfx_failed {
         draw_image_gfx(f, rect, inner, app);
         return;
+    }
+
+    // A front end that draws its own icons draws its own pictures: it is handed
+    // the rectangle and the path, and puts real pixels there. Half-blocks are
+    // what a terminal is reduced to — two pixels per cell — and a window has no
+    // reason to be reduced to it. See [`crate::ImageSlot`].
+    if app.native_icons {
+        if let Popup::ImageView { path, title, error, .. } = &app.popup {
+            let (path, title, error) = (path.clone(), title.clone(), error.clone());
+            let caption = image::image_dimensions(&path)
+                .map(|(w, h)| format!("{w}×{h}px"))
+                .unwrap_or_default();
+            let block = Block::default()
+                .borders(Borders::ALL)
+                .border_type(border_type())
+                .border_style(
+                    Style::default()
+                        .fg(text_tone(theme().accent, theme().popup_bg))
+                        .add_modifier(Modifier::BOLD),
+                )
+                .style(Style::default().bg(theme().popup_bg))
+                .title(format!(" {title}  —  {caption} "));
+            f.render_widget(block, rect);
+            match error {
+                Some(e) => f.render_widget(
+                    Paragraph::new(format!("cannot show image: {e}"))
+                        .style(Style::default().fg(text_tone(theme().file.archive, surface()))),
+                    inner,
+                ),
+                None if body_h > 0 => {
+                    app.image_slot = Some(crate::ImageSlot {
+                        x: inner.x,
+                        y: inner.y,
+                        w: body_w,
+                        h: body_h,
+                        path,
+                    });
+                }
+                None => {}
+            }
+            f.render_widget(
+                Paragraph::new(tr(lang, " Esc / q close ", " Esc / q 閉じる "))
+                    .style(Style::default().fg(theme().dim)),
+                Rect::new(inner.x, inner.y + body_h, inner.width, 1),
+            );
+            return;
+        }
     }
 
     // (Re)decode when first shown or after a resize.
@@ -4182,7 +4355,7 @@ fn draw_ai_chat(f: &mut Frame, area: Rect, app: &mut App) {
     let width: u16 = 76u16.min(area.width.saturating_sub(2));
     let height = area.height.saturating_sub(2).max(8);
     let rect = centered_rect(width, height, area);
-    f.render_widget(Clear, rect);
+    clear_popup(f, rect);
     // Each backend wears its own colour, so the frame alone says who is
     // answering: crmaine's signature carmine (the same frame the remote pane
     // wears), and cyan for the local model.
@@ -4193,7 +4366,7 @@ fn draw_ai_chat(f: &mut Frame, area: Rect, app: &mut App) {
         .border_style(Style::default().fg(accent).add_modifier(Modifier::BOLD))
         .style(Style::default().bg(theme().popup_bg))
         .title(Line::from(vec![
-            Span::styled(" ✦ ", Style::default().fg(accent).add_modifier(Modifier::BOLD)),
+            Span::styled(" ◈ ", Style::default().fg(accent).add_modifier(Modifier::BOLD)),
             Span::styled(
                 format!("{} ", skin.title),
                 Style::default().fg(accent).add_modifier(Modifier::BOLD),
@@ -4296,11 +4469,10 @@ fn draw_ai_chat(f: &mut Frame, area: Rect, app: &mut App) {
             flat.push(String::new());
         }
         if *pending {
-            // A braille spinner in the backend's colour, driven off the wall clock
-            // so it turns while the answer is in flight (the loop force-repaints
-            // meanwhile).
-            const FRAMES: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-            let fi = (app.startup_at.elapsed().as_millis() / 90) as usize % FRAMES.len();
+            // A spinner in the backend's colour, driven off the wall clock so it
+            // turns while the answer is in flight (the loop force-repaints
+            // meanwhile). See [`spinner_frame`] for why it is not braille.
+            let frame = spinner_frame(app.startup_at.elapsed().as_millis());
             let label = stage.clone().unwrap_or_else(|| {
                 if skin.simple {
                     tr(lang, "AI - simple is thinking…", "AI - simple が考えています…").to_string()
@@ -4310,7 +4482,7 @@ fn draw_ai_chat(f: &mut Frame, area: Rect, app: &mut App) {
             });
             styled.push(Line::from(vec![
                 Span::styled(
-                    format!("{} ", FRAMES[fi]),
+                    format!("{frame} "),
                     Style::default().fg(accent).add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(label, Style::default().fg(dim_c).add_modifier(Modifier::ITALIC)),
@@ -4346,7 +4518,7 @@ fn draw_ai_chat(f: &mut Frame, area: Rect, app: &mut App) {
         };
         f.render_widget(
             Paragraph::new(Line::from(Span::styled(
-                format!("📎 {label}"),
+                format!("▣ {label}"),
                 Style::default().fg(accent).add_modifier(Modifier::BOLD),
             ))),
             Rect::new(inner.x, inner.y + view_h as u16, inner.width, 1),
@@ -4476,7 +4648,7 @@ let rows = app.toggle_rows();
 let width: u16 = 42u16.min(area.width.saturating_sub(2));
 let height = (rows.len() as u16 + 3).clamp(5, area.height.saturating_sub(2));
 let rect = centered_rect(width, height, area);
-f.render_widget(Clear, rect);
+clear_popup(f, rect);
 let block = Block::default()
     .borders(Borders::ALL)
     .border_type(border_type())
@@ -4529,7 +4701,7 @@ let dim_c = muted_on(theme().popup_bg);
 let width: u16 = 72u16.min(area.width.saturating_sub(2));
 let height = (app.ai_history.len() as u16 + 3).clamp(6, area.height.saturating_sub(2));
 let rect = centered_rect(width, height, area);
-f.render_widget(Clear, rect);
+clear_popup(f, rect);
 let block = Block::default()
     .borders(Borders::ALL)
     .border_type(border_type())
@@ -4578,7 +4750,7 @@ let editing = *editing;
 let width: u16 = 80u16.min(area.width.saturating_sub(2));
 let height = area.height.saturating_sub(2).clamp(10, 30);
 let rect = centered_rect(width, height, area);
-f.render_widget(Clear, rect);
+clear_popup(f, rect);
 let title = if editing {
     tr(lang, " Draft commit message — editing ", " コミットメッセージ生成 — 編集中 ")
 } else {
@@ -4644,7 +4816,7 @@ fn draw_junk_review(f: &mut Frame, area: Rect, app: &mut App) {
     let width: u16 = 88u16.min(area.width.saturating_sub(2));
     let height = area.height.saturating_sub(2).clamp(8, 30);
     let rect = centered_rect(width, height, area);
-    f.render_widget(Clear, rect);
+    clear_popup(f, rect);
     let (n, checked) = if let Popup::JunkReview { items, .. } = &app.popup {
         (items.len(), items.iter().filter(|i| i.selected).count())
     } else {
@@ -4709,7 +4881,7 @@ fn draw_dupe_review(f: &mut Frame, area: Rect, app: &mut App) {
     let width: u16 = 96u16.min(area.width.saturating_sub(2));
     let height = area.height.saturating_sub(2).clamp(8, 30);
     let rect = centered_rect(width, height, area);
-    f.render_widget(Clear, rect);
+    clear_popup(f, rect);
     let (n, checked) = if let Popup::DupeReview { items, .. } = &app.popup {
         (items.len(), items.iter().filter(|i| i.selected).count())
     } else {
@@ -4775,7 +4947,7 @@ fn draw_structure_review(f: &mut Frame, area: Rect, app: &mut App) {
     let width: u16 = 92u16.min(area.width.saturating_sub(2));
     let height = area.height.saturating_sub(2).clamp(8, 30);
     let rect = centered_rect(width, height, area);
-    f.render_widget(Clear, rect);
+    clear_popup(f, rect);
     let (n, checked) = if let Popup::StructureReview { items, .. } = &app.popup {
         (items.len(), items.iter().filter(|i| i.selected).count())
     } else {
@@ -4840,7 +5012,7 @@ fn draw_rename_review(f: &mut Frame, area: Rect, app: &mut App) {
     let width: u16 = 92u16.min(area.width.saturating_sub(2));
     let height = area.height.saturating_sub(2).clamp(8, 30);
     let rect = centered_rect(width, height, area);
-    f.render_widget(Clear, rect);
+    clear_popup(f, rect);
     let (n, checked, by_ai) = if let Popup::RenameReview { items, by_ai, .. } = &app.popup {
         (items.len(), items.iter().filter(|i| i.selected).count(), *by_ai)
     } else {
@@ -4933,7 +5105,7 @@ fn popup_frame_in<'a>(
     accent: Color,
 ) -> Rect {
     let rect = centered_rect(w, h, area);
-    f.render_widget(Clear, rect);
+    clear_popup(f, rect);
     // `Clear` empties the cells; it does not colour them. Without a surface
     // of its own a dialog shows the terminal's background, which is no
     // theme's — the one place the palette never reached.
@@ -5186,6 +5358,13 @@ fn draw_simple_dialog(
                 tr(lang, " y / Enter = yes   n / Esc = no ", " y / Enter = はい   n / Esc = いいえ ").to_string(),
             )
         }
+        Popup::ConfirmNewTab { .. } => (
+            tr(lang, " new tab ", " 新しいタブ ").to_string(),
+            vec![tr(lang, "Open another tab in this pane?", "このペインにタブをもう一つ開きますか？")
+                .to_string()],
+            tr(lang, " y / Enter = yes   n / Esc = no ", " y / Enter = はい   n / Esc = いいえ ")
+                .to_string(),
+        ),
         Popup::AiShellConfirm { command } => {
             (
                 tr(lang, " Command from description ", " 説明からコマンド生成 ").to_string(),
@@ -5449,7 +5628,7 @@ fn draw_simple_dialog(
     let height = (body.len() as u16 + 4 + extra_rows).max(6).min(area.height.saturating_sub(2));
     let rect = centered_rect(width, height, area);
 
-    f.render_widget(Clear, rect);
+    clear_popup(f, rect);
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(border_type())
@@ -5492,7 +5671,7 @@ fn draw_simple_dialog(
             (tr(lang, "Jump", "ジャンプ"), ZoneKind::Enter),
             (tr(lang, "Cancel", "取消"), ZoneKind::Esc),
         ],
-        Popup::ConfirmQuit | Popup::ConfirmClose { .. } => vec![
+        Popup::ConfirmQuit | Popup::ConfirmClose { .. } | Popup::ConfirmNewTab { .. } => vec![
             (tr(lang, "Yes", "はい"), ZoneKind::Enter),
             (tr(lang, "No", "いいえ"), ZoneKind::Esc),
         ],
@@ -5575,7 +5754,7 @@ fn draw_theme_picker(f: &mut Frame, area: Rect, popup: &mut Popup, lang: Lang) {
     let w = 46u16.min(area.width);
     let h = (names.len() as u16 + 4).min(area.height.saturating_sub(2)).max(8);
     let rect = centered_rect(w, h, area);
-    f.render_widget(Clear, rect);
+    clear_popup(f, rect);
     f.render_widget(Block::default().style(Style::default().bg(theme().popup_bg)), rect);
     let title = match scope {
         ThemeScope::App { .. } => tr(lang, " theme — whole app ", " テーマ — 全体 "),
@@ -5902,7 +6081,7 @@ fn draw_scrolling_text(
     *scroll = (*scroll).min(max_scroll);
     let offset = *scroll;
 
-    f.render_widget(Clear, rect);
+    clear_popup(f, rect);
     let pos = match (offset * 100).checked_div(max_scroll) {
         Some(pct) => format!(" {}% ", pct),
         // Everything fits; there is nothing to scroll.
@@ -5956,7 +6135,7 @@ fn draw_context_menu(f: &mut Frame, area: Rect, popup: &mut Popup, menu_lang: La
     let (name_w, hint_w) = menu_dims(items, lang);
     let rect = context_menu_rect(items, *at, area, lang);
 
-    f.render_widget(Clear, rect);
+    clear_popup(f, rect);
     // Follow the theme's own surface (light on a light theme) with readable
     // text, rather than the always-dark popup background.
     let surf = surface();
@@ -6277,7 +6456,7 @@ fn draw_ssh_users(
                 Style::default().fg(readable_on(theme().popup_bg))
             };
             // A key marks logins that will authenticate without typing.
-            let mark = if u.has_secret() { "  🔑" } else { "" };
+            let mark = if u.has_secret() { "  ◆" } else { "" };
             Line::from(Span::styled(
                 format!("{}{}@{}{}", if sel { "▸ " } else { "  " }, u.name, hst.host, mark),
                 style,
@@ -6940,7 +7119,7 @@ fn draw_viewer(
     let mut close_rect = Rect::new(0, 0, 0, 0);
     let Popup::Viewer { title, view, scroll, hscroll, line, col, visual, anchor, find_input, find_query, sub_input, sub_walk, block_input, git_lines, markdown, preview, source, md_styles, md_map, md_width, md_gen, md_seek, editing, dirty, editable, hl, hl_lang, blame, shape, path, count, pending, .. } = popup else { return (tab_rects, close_rect) };
     let rect = viewer_frame_rect_docked(area, docked);
-    f.render_widget(Clear, rect);
+    clear_popup(f, rect);
 
     // The preview owns `view.lines`: render the source to plain text plus a
     // parallel per-character style grid at the current width and swap it in;
@@ -8261,7 +8440,7 @@ fn draw_git_log(
 ) {
     let Popup::GitLog { title, commits, cursor, scroll, .. } = popup else { return };
     let rect = centered_rect(area.width.saturating_sub(4), area.height.saturating_sub(4), area);
-    f.render_widget(Clear, rect);
+    clear_popup(f, rect);
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(border_type())

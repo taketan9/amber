@@ -616,6 +616,7 @@ dependencies = [
  "ratatui-wgpu",
  "raw-window-handle",
  "softbuffer",
+ "tempfile",
  "unicode-width",
  "windows 0.62.2",
  "windows-sys 0.60.2",

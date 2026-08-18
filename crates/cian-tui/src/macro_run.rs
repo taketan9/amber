@@ -369,12 +369,12 @@ impl App {
 
     /// The macros' names, for the launcher list.
     pub(crate) fn macro_names(&self) -> Vec<String> {
-        // A small tag tells the two kinds apart in the launcher: ⚙ automates
+        // A small tag tells the two kinds apart in the launcher: § automates
         // file operations, ▦ builds a shell layout. Display only — selection is
         // by index and `--macro-name` matches the bare name.
         self.macros
             .iter()
-            .map(|m| format!("{} {}", if m.is_script() { "⚙" } else { "▦" }, m.name))
+            .map(|m| format!("{} {}", if m.is_script() { "§" } else { "▦" }, m.name))
             .collect()
     }
 }

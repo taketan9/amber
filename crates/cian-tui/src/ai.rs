@@ -1477,7 +1477,7 @@ impl App {
             return;
         }
         self.chat_attachments.push(path);
-        self.message = Some(format!("📎 image attached ({w}×{h})"));
+        self.message = Some(format!("▣ image attached ({w}×{h})"));
     }
 
     /// Drain the AI worker and route the reply by its purpose.

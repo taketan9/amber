@@ -2500,6 +2500,7 @@ impl App {
             Some(s) => Lang::from_opt(Some(s)),
             None => self.lang,
         };
+        self.menu_lang_pinned = config.options.menu_lang.is_some();
         self.show_key_hints = config.options.key_hints.unwrap_or(true);
         self.clipboard_on_copy = config.options.clipboard_on_copy.unwrap_or(true);
         self.anim_dur =
@@ -2682,6 +2683,31 @@ impl App {
     // ------- Quit confirmation -------
     pub(crate) fn start_quit_confirm(&mut self) {
         self.popup = Popup::ConfirmQuit;
+    }
+
+    /// Ask before opening another tab in this pane.
+    ///
+    /// F9 opened one on the spot, and a new tab looks almost exactly like the
+    /// old one — same directory, same listing — so nothing on screen says a
+    /// tab has appeared until there are several. Asking costs one keystroke
+    /// and makes the tab something that was decided rather than something that
+    /// happened.
+    pub(crate) fn ask_new_tab(&mut self) {
+        let side = match self.focused {
+            FocusedPane::Shell => self.last_file_pane,
+            p => p,
+        };
+        self.popup = Popup::ConfirmNewTab { side };
+    }
+
+    /// Open the tab that [`ask_new_tab`](Self::ask_new_tab) asked about.
+    pub(crate) fn open_new_tab(&mut self, side: FocusedPane) -> Result<()> {
+        let tabs = match side {
+            FocusedPane::Left => &mut self.left,
+            FocusedPane::Right => &mut self.right,
+            FocusedPane::Shell => return Ok(()),
+        };
+        tabs.add_clone()
     }
 
     /// Perform a confirmed close (shell split pane or file tab).

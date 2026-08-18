@@ -118,7 +118,13 @@ impl App {
                     tr(self.lang, "sweeps skip cloud-only files", "一括処理はクラウド上のファイルを飛ばします").into()
                 });
             }
-            ToggleId::Lang => self.lang = self.lang.toggled(),
+            // The whole interface, menus included — see `MenuItem::Lang`.
+            ToggleId::Lang => {
+                self.lang = self.lang.toggled();
+                if !self.menu_lang_pinned {
+                    self.menu_lang = self.lang;
+                }
+            }
         }
     }
 }

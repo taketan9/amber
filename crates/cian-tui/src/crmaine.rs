@@ -933,9 +933,9 @@ impl App {
             let _ = http_post(port, "/feedback", &body);
         });
         self.message = Some(if up {
-            tr(self.lang, "👍 feedback sent to crmaine", "👍 フィードバックを送信").into()
+            tr(self.lang, "↑ feedback sent to crmaine", "↑ フィードバックを送信").into()
         } else {
-            tr(self.lang, "👎 feedback sent to crmaine", "👎 フィードバックを送信").into()
+            tr(self.lang, "↓ feedback sent to crmaine", "↓ フィードバックを送信").into()
         });
     }
 

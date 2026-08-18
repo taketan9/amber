@@ -6,7 +6,7 @@
 --  `:macros`. A macro builds a whole shell layout in one keystroke.
 --
 --  Note: there are also "script macros" (run = function(cx) …) that automate
---  file operations; they appear in the launcher tagged ⚙. See
+--  file operations; they appear in the launcher tagged §. See
 --  examples/macro/Escript.en.lua.
 --
 --  Where it goes (next to init.lua):

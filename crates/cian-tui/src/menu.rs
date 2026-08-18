@@ -607,6 +607,15 @@ impl App {
                 // `self.lang` at draw time, so the next frame is fully in the
                 // new language.
                 self.lang = self.lang.toggled();
+                // The menu and the manual read `menu_lang`, which is what this
+                // switch used to leave behind: "Switch to English" put the
+                // status line into English and left the menu it was chosen from
+                // in Japanese. They follow now — unless init.lua asked for them
+                // in a particular language, which is a choice and not an
+                // oversight.
+                if !self.menu_lang_pinned {
+                    self.menu_lang = self.lang;
+                }
                 self.message = Some(match self.lang {
                     Lang::En => "language: English".into(),
                     Lang::Ja => "言語: 日本語".into(),

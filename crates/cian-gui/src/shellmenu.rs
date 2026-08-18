@@ -8,14 +8,31 @@
 //! "Open in Terminal", "Edit with…" — and a file manager whose right-click does
 //! not have them is a file manager one has to leave.
 //!
-//! So in the desktop-shaped views, the desktop's menu is what right-click
-//! opens. cian's own is still one key away (Shift+right-click), and is still
-//! what the classic view shows: that view is a terminal that happens to be a
-//! file manager, and the shell's menu would be a stranger in it.
+//! So in the window, the desktop's menu is what the right button opens — in
+//! every view. It was cian's own here, and the desktop's only in the two views
+//! that look like a desktop; one button meaning two different menus depending
+//! on the view is one menu too many, and the button that opens the system's
+//! menu everywhere else in the machine should open the system's menu here.
 //!
-//! Only Windows has this. macOS has no API for "give me the Finder's menu for
-//! this file" — the Finder builds it privately — and on Linux it belongs to a
-//! desktop environment rather than to the system, so both keep cian's own.
+//! cian's own is a key away rather than a mode away: `Shift+Enter`, `M`,
+//! `:menu` — and Shift+right-click, for a hand already on the mouse. In a
+//! terminal, where there is no system menu to be had, the right button still
+//! opens cian's.
+//!
+//! Windows hands its whole menu over: `IContextMenu` is the same object
+//! Explorer asks, so what appears is exactly what Explorer would have shown,
+//! third-party entries and all.
+//!
+//! macOS has no such call. The Finder builds its menu privately and there is no
+//! API that returns it — so what happens here is the next true thing: a real
+//! AppKit menu, drawn and driven by macOS, carrying the actions the system
+//! itself provides for a file. Open, and Open With listing the applications
+//! Launch Services actually names for that file; reveal it in the Finder;
+//! Quick Look; copy the path; move it to the Trash. What is missing, and cannot
+//! be had, is the entries other applications install into the Finder's menu.
+//!
+//! Linux keeps cian's own: there the menu belongs to a desktop environment
+//! rather than to the system, and there is no one thing to ask.
 
 use std::path::Path;
 
@@ -34,7 +51,7 @@ pub fn show(window: &winit::window::Window, paths: &[std::path::PathBuf], at: (i
 /// Whether this platform can show a system menu at all. Asked before a click is
 /// routed, so the decision does not depend on a menu failing to appear.
 pub fn available() -> bool {
-    cfg!(windows)
+    cfg!(windows) || cfg!(target_os = "macos")
 }
 
 /// Whether a path is one the system can be asked about — the same rule the
@@ -184,7 +201,239 @@ mod platform {
     }
 }
 
-#[cfg(not(windows))]
+#[cfg(target_os = "macos")]
+mod platform {
+    use std::cell::Cell;
+    use std::path::{Path, PathBuf};
+    use std::process::{Command, Stdio};
+
+    use objc2::rc::Retained;
+    use objc2::runtime::AnyObject;
+    use objc2::{declare_class, msg_send_id, mutability, sel, ClassType, DeclaredClass};
+    use objc2_app_kit::{
+        NSMenu, NSMenuItem, NSPasteboard, NSPasteboardTypeString, NSView, NSWorkspace,
+    };
+    use objc2_foundation::{
+        MainThreadMarker, NSArray, NSFileManager, NSObject, NSObjectProtocol, NSString, NSURL,
+    };
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+
+    /// Nothing chosen. The menu can be dismissed, and dismissal is the common
+    /// case, so it needs a value of its own rather than a flag beside one.
+    const NOTHING: isize = -1;
+
+    thread_local! {
+        /// Which item was picked, written by the callback and read once the
+        /// menu has closed.
+        ///
+        /// A menu is modal: `popUpContextMenu` does not return until the menu
+        /// is gone, and AppKit sends the action from inside that call, on this
+        /// thread. So the answer can simply be left here and collected after —
+        /// no channel, no lock, no lifetime that has to outlive the menu.
+        static CHOSEN: Cell<isize> = const { Cell::new(NOTHING) };
+    }
+
+    declare_class!(
+        /// What the menu items are wired to.
+        ///
+        /// An `NSMenuItem` sends its action to an Objective-C object, so there
+        /// has to be one. It holds nothing: the item's tag says which entry it
+        /// was, and that is the whole message.
+        struct Picker;
+
+        unsafe impl ClassType for Picker {
+            type Super = NSObject;
+            type Mutability = mutability::MainThreadOnly;
+            const NAME: &'static str = "CianMenuPicker";
+        }
+
+        impl DeclaredClass for Picker {}
+
+        unsafe impl NSObjectProtocol for Picker {}
+
+        unsafe impl Picker {
+            #[method(cianPick:)]
+            fn pick(&self, sender: &NSMenuItem) {
+                let tag = unsafe { sender.tag() };
+                CHOSEN.with(|c| c.set(tag));
+            }
+        }
+    );
+
+    impl Picker {
+        fn new(mtm: MainThreadMarker) -> Retained<Self> {
+            let this = mtm.alloc::<Self>();
+            unsafe { msg_send_id![this, init] }
+        }
+    }
+
+    /// The fixed entries. Anything at or above [`OPEN_WITH`] is the nth
+    /// application Launch Services named.
+    const OPEN: isize = 0;
+    const REVEAL: isize = 1;
+    const QUICK_LOOK: isize = 2;
+    const COPY_PATH: isize = 3;
+    const TRASH: isize = 4;
+    const OPEN_WITH: isize = 100;
+
+    fn url(path: &Path) -> Option<Retained<NSURL>> {
+        let s = path.to_str()?;
+        Some(unsafe { NSURL::fileURLWithPath(&NSString::from_str(s)) })
+    }
+
+    /// Add an entry, wired to `picker` and tagged `tag`.
+    fn item(
+        mtm: MainThreadMarker,
+        menu: &NSMenu,
+        picker: &Picker,
+        title: &str,
+        tag: isize,
+    ) {
+        let it = NSMenuItem::new(mtm);
+        unsafe {
+            it.setTitle(&NSString::from_str(title));
+            it.setTarget(Some(&*(picker as *const Picker as *const AnyObject)));
+            it.setAction(Some(sel!(cianPick:)));
+            it.setTag(tag);
+            menu.addItem(&it);
+        }
+    }
+
+    pub fn show(window: &winit::window::Window, paths: &[PathBuf], _at: (i32, i32)) -> bool {
+        let Some(mtm) = MainThreadMarker::new() else { return false };
+        let Ok(handle) = window.window_handle() else { return false };
+        let RawWindowHandle::AppKit(handle) = handle.as_raw() else { return false };
+        // SAFETY: winit's own view, alive for as long as the window is, and
+        // borrowed only for the length of this call.
+        let view: &NSView = unsafe { &*(handle.ns_view.as_ptr() as *const NSView) };
+
+        // The menu is placed by the event that asked for it — the right-mouse
+        // press AppKit has just delivered — so there is no arithmetic here to
+        // get wrong about which corner a screen counts from.
+        let app = objc2_app_kit::NSApplication::sharedApplication(mtm);
+        let Some(event) = app.currentEvent() else { return false };
+
+        let urls: Vec<_> = paths.iter().filter_map(|p| url(p)).collect();
+        if urls.is_empty() {
+            return false;
+        }
+        let one = urls.len() == 1;
+
+        let picker = Picker::new(mtm);
+        let menu = NSMenu::new(mtm);
+        item(mtm, &menu, &picker, "Open", OPEN);
+
+        // The applications the system itself would offer. Only for a single
+        // file: Launch Services answers about one URL, and merging the answers
+        // for a selection would be cian's opinion rather than the system's.
+        let apps: Vec<Retained<NSURL>> = if one {
+            let list = unsafe { NSWorkspace::sharedWorkspace().URLsForApplicationsToOpenURL(&urls[0]) };
+            list.iter().map(|u| u.retain()).collect()
+        } else {
+            Vec::new()
+        };
+        if !apps.is_empty() {
+            let with = NSMenu::new(mtm);
+            for (n, app_url) in apps.iter().enumerate() {
+                let name = unsafe { app_url.lastPathComponent() }
+                    .map(|s| s.to_string())
+                    .unwrap_or_default();
+                let name = name.strip_suffix(".app").unwrap_or(&name).to_string();
+                item(mtm, &with, &picker, &name, OPEN_WITH + n as isize);
+            }
+            let holder = NSMenuItem::new(mtm);
+            unsafe { holder.setTitle(&NSString::from_str("Open With")) };
+            holder.setSubmenu(Some(&with));
+            menu.addItem(&holder);
+        }
+
+        menu.addItem(&NSMenuItem::separatorItem(mtm));
+        item(mtm, &menu, &picker, "Show in Finder", REVEAL);
+        item(mtm, &menu, &picker, "Quick Look", QUICK_LOOK);
+        menu.addItem(&NSMenuItem::separatorItem(mtm));
+        item(mtm, &menu, &picker, if one { "Copy Path" } else { "Copy Paths" }, COPY_PATH);
+        item(mtm, &menu, &picker, "Move to Trash", TRASH);
+
+        CHOSEN.with(|c| c.set(NOTHING));
+        // Modal: this returns when the menu is gone, and the pick (if there was
+        // one) has already been recorded by then.
+        unsafe { NSMenu::popUpContextMenu_withEvent_forView(&menu, &event, view) };
+        let chosen = CHOSEN.with(|c| c.replace(NOTHING));
+        if chosen == NOTHING {
+            // Dismissed. The menu was still shown, which is what the caller
+            // asked about — it must not now open cian's own on top.
+            return true;
+        }
+        run(chosen, paths, &urls, &apps);
+        true
+    }
+
+    fn run(chosen: isize, paths: &[PathBuf], urls: &[Retained<NSURL>], apps: &[Retained<NSURL>]) {
+        let ws = unsafe { NSWorkspace::sharedWorkspace() };
+        match chosen {
+            OPEN => {
+                for u in urls {
+                    unsafe { ws.openURL(u) };
+                }
+            }
+            REVEAL => {
+                let array = NSArray::from_vec(urls.to_vec());
+                unsafe { ws.activateFileViewerSelectingURLs(&array) };
+            }
+            // Quick Look's own panel belongs to a view controller, which cian
+            // does not have; `qlmanage -p` is the system's own way in from
+            // outside one, and it is what the shortcut in the Finder ends up
+            // doing.
+            QUICK_LOOK => {
+                let _ = Command::new("/usr/bin/qlmanage")
+                    .arg("-p")
+                    .args(paths)
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .spawn();
+            }
+            COPY_PATH => {
+                let text = paths
+                    .iter()
+                    .map(|p| p.display().to_string())
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                let pb = unsafe { NSPasteboard::generalPasteboard() };
+                unsafe {
+                    pb.clearContents();
+                    pb.setString_forType(&NSString::from_str(&text), NSPasteboardTypeString);
+                }
+            }
+            // The Trash, not deletion: this is the desktop's menu, and what the
+            // desktop's menu does here is reversible.
+            TRASH => {
+                let fm = unsafe { NSFileManager::defaultManager() };
+                for u in urls {
+                    let _ = unsafe { fm.trashItemAtURL_resultingItemURL_error(u, None) };
+                }
+            }
+            n if n >= OPEN_WITH => {
+                let Some(app) = apps.get((n - OPEN_WITH) as usize) else { return };
+                let Some(app) = (unsafe { app.path() }) else { return };
+                let _ = Command::new("/usr/bin/open")
+                    .arg("-a")
+                    .arg(app.to_string())
+                    .args(paths)
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .spawn();
+            }
+            _ => {}
+        }
+    }
+
+    pub fn to_screen(_window: &winit::window::Window, x: f64, y: f64) -> (i32, i32) {
+        // Unused: the menu is placed by the event that opened it.
+        (x as i32, y as i32)
+    }
+}
+
+#[cfg(not(any(windows, target_os = "macos")))]
 mod platform {
     use std::path::PathBuf;
 

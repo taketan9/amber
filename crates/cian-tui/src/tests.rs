@@ -203,7 +203,7 @@
         app.handle_key(key('@')).unwrap();
         match &app.popup {
             Popup::Macros { names, cursor } => {
-                // Layout macros are tagged ▦ in the launcher (⚙ marks scripts).
+                // Layout macros are tagged ▦ in the launcher (§ marks scripts).
                 assert_eq!(names, &["▦ First".to_string(), "▦ Second".to_string()]);
                 assert_eq!(*cursor, 0);
             }
@@ -3732,7 +3732,8 @@
         assert_eq!(app.focused, FocusedPane::Left);
 
         // Shift+Tab is this pane's own tabs, not the other pane.
-        app.handle_key(key('t')).unwrap(); // a second tab here
+        app.handle_key(key('t')).unwrap(); // a second tab here — asks first
+        app.handle_key(code(KeyCode::Enter)).unwrap(); // yes
         assert_eq!(app.left.tabs.len(), 2, "two tabs open");
         let before = app.left.active;
         app.handle_key(code(KeyCode::BackTab)).unwrap();
@@ -10090,7 +10091,9 @@
         let (_d, mut app) = app_with(&["a.txt"]);
         app.focus(FocusedPane::Left);
         assert_eq!(app.left.tabs.len(), 1);
-        app.handle_key(code(KeyCode::F(9))).unwrap(); // new tab
+        app.handle_key(code(KeyCode::F(9))).unwrap(); // new tab — asks first
+        assert!(matches!(app.popup, Popup::ConfirmNewTab { .. }), "asked: {:?}", app.popup);
+        app.handle_key(code(KeyCode::Enter)).unwrap(); // yes
         assert_eq!(app.left.tabs.len(), 2);
         assert_eq!(app.left.active, 1);
         app.handle_key(code(KeyCode::F(1))).unwrap(); // previous
@@ -13374,5 +13377,486 @@ mod the_sidebar_answers_a_click {
     fn the_classic_view_leaves_the_click_to_the_panes() {
         let (_d, mut app) = app_with(&["a.txt"]);
         assert!(!app.grid_click_mods(2, 5, false), "no chrome in the classic view");
+    }
+}
+
+/// The spinner turns, and turns in glyphs the window can actually draw.
+///
+/// The window draws with one font and no fallback, and the Japanese Nerd Fonts
+/// it looks for have no braille block — so a braille spinner was ten frames of
+/// the same missing glyph there, which is a spinner that does not spin. Hence
+/// both halves of this: that the frame changes with time, and that it stays out
+/// of U+2800.
+mod the_spinner_turns {
+    use crate::render::spinner_frame;
+
+    #[test]
+    fn a_full_turn_shows_every_frame_in_order() {
+        let seen: Vec<&str> = (0..8).map(|i| spinner_frame(i * 120)).collect();
+        assert_eq!(seen[0], seen[4], "it comes back round");
+        assert_eq!(seen[..4].iter().collect::<std::collections::HashSet<_>>().len(), 4);
+    }
+
+    #[test]
+    fn nothing_it_draws_is_braille() {
+        for ms in [0u128, 120, 240, 360, 480, 1_000, 5_432] {
+            for c in spinner_frame(ms).chars() {
+                assert!(
+                    !('\u{2800}'..='\u{28FF}').contains(&c),
+                    "{c:?} is braille, which the window's font does not have",
+                );
+            }
+        }
+    }
+}
+
+/// Everything cian draws has to exist in the font that draws it.
+///
+/// The window loads one font and has no fallback chain, so a character that
+/// font does not have is not substituted, it is *blank* — and a blank is
+/// indistinguishable from a bug. These are the ones HackGen Console NF (and
+/// the Nerd Fonts beside it) turned out not to have: emoji, braille, and a
+/// handful of stray dingbats. Checked against the source rather than against
+/// the font, because the font is not on the machine that runs the tests.
+mod the_window_can_draw_what_cian_writes {
+    /// Found missing by walking the cmap of every font on the machine cian is
+    /// written on. Replaced, in that order, with § ↑ ↓ ▣ ⇦ ↻ ◈ ◆.
+    const ABSENT: &[char] = &['⚙', '👍', '👎', '📎', '⌫', '⏳', '✦', '🔑'];
+
+    #[test]
+    fn no_glyph_the_font_lacks_reaches_the_screen() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut bad = Vec::new();
+        for entry in std::fs::read_dir(&dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.extension().and_then(|e| e.to_str()) != Some("rs") {
+                continue;
+            }
+            // This file names them in order to forbid them.
+            if path.file_name().and_then(|n| n.to_str()) == Some("tests.rs") {
+                continue;
+            }
+            for (n, line) in std::fs::read_to_string(&path).unwrap().lines().enumerate() {
+                // A comment is not drawn, and the reasoning is worth keeping
+                // in the words of the thing it is about.
+                if line.trim_start().starts_with("//") {
+                    continue;
+                }
+                for c in line.chars() {
+                    let missing = ABSENT.contains(&c)
+                        || ('\u{2800}'..='\u{28FF}').contains(&c) // braille
+                        || c >= '\u{1F000}'; // emoji
+                    if missing {
+                        let name = path.file_name().unwrap().to_string_lossy().into_owned();
+                        bad.push(format!("{name}:{} draws {c:?}", n + 1));
+                    }
+                }
+            }
+        }
+        assert!(bad.is_empty(), "the window's font cannot draw these:\n{}", bad.join("\n"));
+    }
+}
+
+/// The desktop views say how far down the listing they are.
+///
+/// They said it in grey on grey — a │ thumb on a │ track, one shade apart —
+/// which was reported as there being no scrollbar at all, and the grid did not
+/// say it at all. Both draw a solid block now, and the grid's is clickable and
+/// answers the wheel.
+mod the_desktop_views_show_where_they_are {
+    use super::*;
+
+    /// Enough files that a page cannot hold them.
+    fn plenty() -> Vec<String> {
+        (0..200).map(|i| format!("file{i:03}.txt")).collect()
+    }
+
+    fn desktop(icon_view: bool) -> (tempfile::TempDir, App) {
+        let names = plenty();
+        let refs: Vec<&str> = names.iter().map(|s| s.as_str()).collect();
+        let (d, mut app) = app_with(&refs);
+        app.skin = Skin::Finder;
+        app.native_icons = true;
+        app.icon_view = icon_view;
+        (d, app)
+    }
+
+    /// Every symbol the frame drew, as one string.
+    fn painted(app: &mut App, w: u16, h: u16) -> String {
+        let mut terminal = Terminal::new(TestBackend::new(w, h)).unwrap();
+        terminal.draw(|f| draw(f, app)).unwrap();
+        let buf = terminal.backend().buffer().clone();
+        (0..h)
+            .flat_map(|y| (0..w).map(move |x| (x, y)))
+            .map(|(x, y)| buf[(x, y)].symbol().to_string())
+            .collect()
+    }
+
+    #[test]
+    fn the_detail_view_draws_a_solid_thumb() {
+        let (_d, mut app) = desktop(false);
+        assert!(painted(&mut app, 140, 40).contains('█'), "a thumb you can see");
+    }
+
+    #[test]
+    fn the_grid_draws_one_too_and_leaves_room_for_it() {
+        let (_d, mut app) = desktop(true);
+        assert!(painted(&mut app, 140, 40).contains('█'), "a thumb you can see");
+        let bar = app.scroll_tracks.first().copied().expect("a track to drag");
+        let grid = app.grid_area.expect("the tiles have a rectangle");
+        assert!(bar.rect.x >= grid.x + grid.width, "the bar is beside the tiles, not on them");
+    }
+
+    #[test]
+    fn the_wheel_walks_the_grid_a_row_at_a_time() {
+        let (_d, mut app) = desktop(true);
+        let _ = painted(&mut app, 140, 40);
+        let cols = app.icon_cols;
+        assert!(cols > 0, "the grid has columns");
+        let before = app.active_pane().unwrap().cursor;
+        app.handle_mouse(MouseEvent {
+            kind: MouseEventKind::ScrollDown,
+            column: 10,
+            row: 10,
+            modifiers: KeyModifiers::NONE,
+        });
+        assert_eq!(
+            app.active_pane().unwrap().cursor - before,
+            cols,
+            "one notch, one row of tiles",
+        );
+    }
+
+    #[test]
+    fn a_click_down_the_grids_track_jumps_that_far_in() {
+        let (_d, mut app) = desktop(true);
+        let _ = painted(&mut app, 140, 40);
+        let bar = app.scroll_tracks.first().copied().expect("a track to click");
+        app.handle_mouse(MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: bar.rect.x,
+            row: bar.rect.y + bar.rect.height - 1,
+            modifiers: KeyModifiers::NONE,
+        });
+        assert!(
+            app.active_pane().unwrap().cursor > bar.shown,
+            "the foot of the track is the foot of the listing, not the first page",
+        );
+    }
+}
+
+/// A click off a popup closes it — in every view, and with nothing else
+/// happening to the listing behind it.
+mod clicking_past_a_popup_closes_it {
+    use super::*;
+
+    fn desktop(icon_view: bool) -> (tempfile::TempDir, App) {
+        let (d, mut app) = app_with(&["a.txt", "b.txt", "c.txt"]);
+        app.skin = Skin::Finder;
+        app.native_icons = true;
+        app.icon_view = icon_view;
+        (d, app)
+    }
+
+    fn click(app: &mut App, col: u16, row: u16) {
+        app.handle_mouse(MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: col,
+            row,
+            modifiers: KeyModifiers::NONE,
+        });
+    }
+
+    /// Open the menu, draw it, and click the far corner — which no popup of
+    /// cian's reaches.
+    fn menu_then_click_away(app: &mut App) {
+        app.open_context_menu(40, 12);
+        let _ = render(app, 140, 40);
+        click(app, 139, 39);
+    }
+
+    #[test]
+    fn in_the_classic_view() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        menu_then_click_away(&mut app);
+        assert!(matches!(app.popup, Popup::None), "the menu went away");
+    }
+
+    #[test]
+    fn in_the_detail_view() {
+        let (_d, mut app) = desktop(false);
+        menu_then_click_away(&mut app);
+        assert!(matches!(app.popup, Popup::None), "the menu went away");
+    }
+
+    #[test]
+    fn in_the_icon_view() {
+        let (_d, mut app) = desktop(true);
+        menu_then_click_away(&mut app);
+        assert!(matches!(app.popup, Popup::None), "the menu went away");
+    }
+
+    #[test]
+    fn a_dialog_goes_too_and_is_never_answered_yes() {
+        let (_d, mut app) = desktop(false);
+        let doomed = app.active_pane().unwrap().cwd.join("a.txt");
+        app.popup = Popup::ConfirmDelete { targets: vec![doomed.clone()] };
+        let _ = render(&mut app, 140, 40);
+        click(&mut app, 139, 39);
+        assert!(matches!(app.popup, Popup::None), "dismissed");
+        assert!(doomed.exists(), "and answered no, not yes");
+    }
+
+    #[test]
+    fn a_click_inside_it_is_left_alone() {
+        let (_d, mut app) = desktop(false);
+        let doomed = app.active_pane().unwrap().cwd.join("a.txt");
+        app.popup = Popup::ConfirmDelete { targets: vec![doomed] };
+        let _ = render(&mut app, 140, 40);
+        // The middle of the dialog: inside it, and on none of its buttons.
+        let box_ = crate::render::popup_ink().expect("the dialog said where it is");
+        click(&mut app, box_.x + box_.width / 2, box_.y + box_.height / 2);
+        assert!(matches!(app.popup, Popup::ConfirmDelete { .. }), "still open: {:?}", app.popup);
+    }
+}
+
+/// The window draws file icons as pictures over the cells, so a popup has to
+/// take them with it. The full-window popups used to leave before that
+/// happened, and a listing's worth of icons was drawn on top of the AI chat.
+mod a_popup_takes_the_icons_with_it {
+    use super::*;
+
+    fn desktop_with_a_chat(icon_view: bool) -> (tempfile::TempDir, App) {
+        let (d, mut app) = app_with(&["a.txt", "b.txt", "c.txt"]);
+        app.skin = Skin::Finder;
+        app.native_icons = true;
+        app.icon_view = icon_view;
+        (d, app)
+    }
+
+    #[test]
+    fn the_listing_has_icons_to_begin_with() {
+        let (_d, mut app) = desktop_with_a_chat(false);
+        let _ = render(&mut app, 140, 40);
+        assert!(!app.icon_slots.is_empty(), "the detail view asks for pictures");
+    }
+
+    #[test]
+    fn and_none_of_them_survive_the_chat() {
+        for icons in [false, true] {
+            let (_d, mut app) = desktop_with_a_chat(icons);
+            app.start_ai_chat(ChatMode::Ai, Vec::new(), true);
+            let _ = render(&mut app, 140, 40);
+            assert!(
+                app.icon_slots.is_empty(),
+                "icon_view={icons}: {} icons left over the chat",
+                app.icon_slots.len(),
+            );
+        }
+    }
+
+    #[test]
+    fn nor_the_other_full_window_popups() {
+        let (_d, mut app) = desktop_with_a_chat(false);
+        app.start_toggles();
+        let _ = render(&mut app, 140, 40);
+        assert!(app.icon_slots.is_empty(), "{} icons left over the toggles", app.icon_slots.len());
+    }
+}
+
+/// Switching the language switches the menu too.
+///
+/// It did not: the menu and the manual read `menu_lang`, the switch moved
+/// `lang`, and "Switch to English" left the menu it had just been chosen from
+/// in Japanese.
+mod switching_language_switches_the_menu {
+    use super::*;
+
+    /// The menu as one string, with the padding taken out — a 全角 character
+    /// occupies two cells and the second of them is blank, so the text read
+    /// back off the screen has a space inside every Japanese word.
+    fn menu_says(app: &mut App) -> String {
+        app.open_context_menu(5, 5);
+        let text: String =
+            render(app, 140, 40).join("").chars().filter(|c| !c.is_whitespace()).collect();
+        app.popup = Popup::None;
+        text
+    }
+
+    #[test]
+    fn the_menu_follows_the_switch() {
+        let (_d, mut app) = app_with_lang(&["a.txt"], "ja");
+        assert!(menu_says(&mut app).contains("cianを終了"), "Japanese to begin with");
+        app.run_menu_item(MenuItem::Lang).unwrap();
+        let english = menu_says(&mut app);
+        assert!(english.contains("Quitcian"), "and English after: {english:.400}");
+        assert!(!english.contains("終了"), "with nothing left behind");
+    }
+
+    #[test]
+    fn and_so_does_the_manual() {
+        let (_d, mut app) = app_with_lang(&["a.txt"], "ja");
+        app.run_menu_item(MenuItem::Lang).unwrap();
+        app.open_manual();
+        let text: String =
+            render(&mut app, 140, 40).join("").chars().filter(|c| !c.is_whitespace()).collect();
+        assert!(!text.contains("移動"), "the manual came with it: {text:.400}");
+    }
+
+    #[test]
+    fn a_language_named_in_init_lua_keeps_its_menu() {
+        let (_d, mut app) = app_with_lang(&["a.txt"], "en");
+        // As `cian.set_option("menu_lang", "ja")` would leave it.
+        app.menu_lang = Lang::Ja;
+        app.menu_lang_pinned = true;
+        app.run_menu_item(MenuItem::Lang).unwrap();
+        assert_eq!(app.lang, Lang::Ja, "the interface switched");
+        assert_eq!(app.menu_lang, Lang::Ja, "and the menu stayed where init.lua put it");
+    }
+}
+
+/// Tabs, in the view that had nowhere to show them.
+mod the_icon_view_shows_its_tabs {
+    use super::*;
+
+    fn grid(names: &[&str]) -> (tempfile::TempDir, App) {
+        let (d, mut app) = app_with(names);
+        app.skin = Skin::Finder;
+        app.native_icons = true;
+        app.icon_view = true;
+        (d, app)
+    }
+
+    fn painted(app: &mut App) -> String {
+        render(app, 140, 40).join("").chars().filter(|c| !c.is_whitespace()).collect()
+    }
+
+    #[test]
+    fn a_second_tab_appears_in_the_strip() {
+        let (_d, mut app) = grid(&["a.txt"]);
+        assert!(app.left.tabs.len() == 1);
+        app.left.add_clone().unwrap();
+        let text = painted(&mut app);
+        assert!(text.contains("2"), "the second tab is named on screen");
+        assert!(!app.tab_rects.is_empty(), "and can be clicked");
+    }
+
+    #[test]
+    fn clicking_a_label_goes_to_that_tab() {
+        let (_d, mut app) = grid(&["a.txt"]);
+        app.left.add_clone().unwrap();
+        let _ = painted(&mut app);
+        assert_eq!(app.left.active, 1, "the new tab is the one showing");
+        let (_, idx, r) = app
+            .tab_rects
+            .iter()
+            .copied()
+            .find(|(_, i, _)| *i == 0)
+            .expect("the first tab has a label");
+        assert_eq!(idx, 0);
+        app.handle_mouse(MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: r.x,
+            row: r.y,
+            modifiers: KeyModifiers::NONE,
+        });
+        assert_eq!(app.left.active, 0, "clicking the first label went back to it");
+    }
+}
+
+/// A tab is opened on purpose or not at all.
+mod a_new_tab_is_asked_about_first {
+    use super::*;
+
+    #[test]
+    fn the_letter_t_asks() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        app.handle_key(key('t')).unwrap();
+        assert!(matches!(app.popup, Popup::ConfirmNewTab { .. }), "{:?}", app.popup);
+        assert_eq!(app.left.tabs.len(), 1, "and nothing has happened yet");
+    }
+
+    #[test]
+    fn no_leaves_the_tabs_alone() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        app.handle_key(key('t')).unwrap();
+        app.handle_key(code(KeyCode::Esc)).unwrap();
+        assert!(matches!(app.popup, Popup::None));
+        assert_eq!(app.left.tabs.len(), 1, "still one tab");
+    }
+
+    #[test]
+    fn yes_opens_it() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        app.handle_key(key('t')).unwrap();
+        app.handle_key(key('y')).unwrap();
+        assert_eq!(app.left.tabs.len(), 2);
+        assert_eq!(app.left.active, 1, "and goes to it");
+    }
+
+    #[test]
+    fn it_asks_in_the_desktop_views_too() {
+        for icons in [false, true] {
+            let (_d, mut app) = app_with(&["a.txt"]);
+            app.skin = Skin::Finder;
+            app.icon_view = icons;
+            // In the grid a letter is type-ahead, so F9 is the key that asks.
+            app.handle_key(code(KeyCode::F(9))).unwrap();
+            assert!(
+                matches!(app.popup, Popup::ConfirmNewTab { .. }),
+                "icon_view={icons}: {:?}",
+                app.popup,
+            );
+        }
+    }
+}
+
+/// In a window the picture is a picture, not an impression of one in
+/// half-blocks: the popup hands the rectangle to the front end and stays out
+/// of it.
+mod a_window_shows_the_picture_itself {
+    use super::*;
+
+    fn with_an_image(native: bool) -> (tempfile::TempDir, App) {
+        let (d, mut app) = app_with(&[]);
+        let mut img = image::RgbImage::new(40, 20);
+        for px in img.pixels_mut() {
+            *px = image::Rgb([30, 160, 90]);
+        }
+        img.save(d.path().join("pic.png")).unwrap();
+        app.reload_both();
+        app.native_icons = native;
+        app.active_pane_mut().unwrap().cursor =
+            app.active_pane().unwrap().entries.iter().position(|e| e.name == "pic.png").unwrap();
+        app.handle_key(code(KeyCode::F(3))).unwrap();
+        assert!(matches!(app.popup, Popup::ImageView { .. }), "{:?}", app.popup);
+        (d, app)
+    }
+
+    #[test]
+    fn the_window_is_told_where_the_picture_goes() {
+        let (_d, mut app) = with_an_image(true);
+        let text = render(&mut app, 80, 24).join("");
+        let slot = app.image_slot.clone().expect("a rectangle for the picture");
+        assert!(slot.path.ends_with("pic.png"));
+        assert!(slot.w > 0 && slot.h > 0, "with room in it: {slot:?}");
+        assert!(!text.contains('▀'), "and no half-blocks drawn into it");
+    }
+
+    #[test]
+    fn a_terminal_still_gets_its_half_blocks() {
+        let (_d, mut app) = with_an_image(false);
+        let text = render(&mut app, 80, 24).join("");
+        assert!(app.image_slot.is_none(), "nothing is asked of a terminal");
+        assert!(text.contains('▀'), "it draws the picture the only way it can");
+    }
+
+    #[test]
+    fn the_rectangle_is_forgotten_when_the_picture_closes() {
+        let (_d, mut app) = with_an_image(true);
+        let _ = render(&mut app, 80, 24);
+        app.handle_key(code(KeyCode::Esc)).unwrap();
+        let _ = render(&mut app, 80, 24);
+        assert!(app.image_slot.is_none(), "no picture, no rectangle");
     }
 }

@@ -13,7 +13,15 @@ impl App {
         // behind — dividers, scrollbar tracks, tab labels — and those are not
         // erased when the grid takes over. A click on a tile was being eaten by
         // the ghost of a scrollbar.
-        if self.single_pane_view() {
+        // …but not while a popup is open. The grid was answering for the whole
+        // window whatever was drawn on top of it, so a click meant to dismiss a
+        // menu went to the listing behind the menu instead — the menu stayed,
+        // and the click did something else entirely. A docked editor panel is
+        // the exception: that one is a surface beside the panes rather than a
+        // dialog over them, and the window still belongs to everybody.
+        let popup_owns_the_mouse =
+            !matches!(self.popup, Popup::None) && self.viewer_dock.is_none();
+        if self.single_pane_view() && !popup_owns_the_mouse {
             if matches!(ev.kind, MouseEventKind::Down(MouseButton::Left)) {
                 // Either modifier means "add to the selection". A terminal
                 // never sees Super at all; a window does, and on a Mac whose
@@ -52,11 +60,12 @@ impl App {
                 self.open_context_menu(col, row);
                 return;
             }
-            // In the grid, scrolling and dragging mean nothing yet; swallow
-            // them rather than letting them reach a layout that is not on
+            // The grid answers the wheel and its own scrollbar; everything else
+            // is swallowed rather than let through to a layout that is not on
             // screen. The detail view has a real listing under the pointer, so
-            // everything the chrome did not claim carries on to it.
+            // there everything the chrome did not claim carries on to it.
             if self.icon_view {
+                self.grid_scroll_mouse(ev);
                 return;
             }
         }
@@ -472,6 +481,12 @@ impl App {
         // In the AI chat, drag selects transcript lines and copies on release;
         // the wheel scrolls; right-click copies. Same feel as the viewer.
         if matches!(self.popup, Popup::AiChat { .. }) {
+            // Off the chat altogether: closed, like any other popup. The
+            // conversation is kept — closing a chat archives it — so this
+            // loses nothing but the window.
+            if self.click_dismissed_popup(ev) {
+                return;
+            }
             let body = self.ai_rect;
             let n = self.ai_lines.len();
             let scroll = self.ai_scroll;
@@ -677,6 +692,9 @@ impl App {
         // could be neither clicked nor scrolled.
         let outside_panel = panel_docked && !inside_panel;
         if !matches!(self.popup, Popup::None) && !border_gesture && !outside_panel {
+            if self.click_dismissed_popup(ev) {
+                return;
+            }
             let _ = self.handle_popup_mouse(ev);
             return;
         }
@@ -994,6 +1012,46 @@ impl App {
     /// Drive the on-screen popup with the mouse: the wheel scrolls, a click on a
     /// registered zone replays the keystroke it stands for so all the existing
     /// popup key handling does the real work.
+    /// A click clean outside the popup closes it. Returns whether it did.
+    ///
+    /// What every menu on every desktop does, and what cian's own context menu
+    /// already did — but only that one, and only in the classic view, so in the
+    /// desktop views a popup could be clicked *past* and stayed open behind
+    /// whatever the click had done instead.
+    ///
+    /// It closes and does nothing else: the click is spent on the dismissal
+    /// rather than passed through to the listing underneath. A dialog asking
+    /// whether to overwrite must never be answered by a click aimed somewhere
+    /// else — which is why this sends Esc, the answer that is always "no".
+    ///
+    /// The editor panel is not one of these. It is a place to be, not a
+    /// question to answer, and it has a ✕ and `:q` for leaving.
+    fn click_dismissed_popup(&mut self, ev: MouseEvent) -> bool {
+        if !matches!(ev.kind, MouseEventKind::Down(MouseButton::Left)) {
+            return false;
+        }
+        if matches!(self.popup, Popup::None | Popup::Viewer { .. }) {
+            return false;
+        }
+        // Where the popup is, as the frame that drew it left it. No frame, no
+        // opinion — better to leave the popup alone than to guess.
+        let Some(ink) = crate::render::popup_ink() else { return false };
+        let (col, row) = (ev.column, ev.row);
+        let inside = col >= ink.x
+            && col < ink.x + ink.width
+            && row >= ink.y
+            && row < ink.y + ink.height;
+        if inside {
+            return false;
+        }
+        // The menu keeps a stack of the levels it was opened through; a click
+        // outside dismisses all of them, not one.
+        self.menu_stack.clear();
+        let esc = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
+        let _ = self.handle_popup_key(esc);
+        true
+    }
+
     pub(crate) fn handle_popup_mouse(&mut self, ev: MouseEvent) -> Result<()> {
         let (col, row) = (ev.column, ev.row);
         let synth = |code| KeyEvent::new(code, KeyModifiers::NONE);
@@ -1442,6 +1500,48 @@ impl App {
     /// Move a file pane's cursor to the entry drawn at absolute screen `row`.
     /// Out-of-range rows (the border, or empty space past the last entry) leave
     /// the cursor alone rather than jumping somewhere arbitrary.
+    /// Put the cursor on whatever is at this cell, without marking it or
+    /// opening anything. Returns whether it landed on a row.
+    ///
+    /// For a front end about to show the *system's* menu about that file: every
+    /// desktop moves its highlight to whatever was right-clicked, and cian's
+    /// highlight is the only sign of which file the menu is about.
+    pub(crate) fn point_at(&mut self, col: u16, row: u16) -> bool {
+        if self.single_pane_view() {
+            if let Some(i) = self.grid_entry_at(col, row) {
+                if let Some(p) = self.active_pane_mut() {
+                    p.cursor = i;
+                }
+                self.type_ahead.clear();
+                return true;
+            }
+            // The detail view is a listing like any other, and answers below.
+            if self.icon_view {
+                return false;
+            }
+        }
+        let in_rect = |r: Rect| {
+            r.width > 0
+                && r.height > 0
+                && col >= r.x
+                && col < r.x + r.width
+                && row >= r.y
+                && row < r.y + r.height
+        };
+        let target = if in_rect(self.layout_rects.left) {
+            FocusedPane::Left
+        } else if in_rect(self.layout_rects.right) {
+            FocusedPane::Right
+        } else {
+            return false;
+        };
+        if self.focused != target {
+            self.focus(target);
+        }
+        self.cursor_to_row(target, row);
+        true
+    }
+
     pub(crate) fn cursor_to_row(&mut self, pane: FocusedPane, row: u16) {
         let rect = match pane {
             FocusedPane::Left => self.layout_rects.left,

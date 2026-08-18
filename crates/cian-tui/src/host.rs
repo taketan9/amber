@@ -192,6 +192,15 @@ impl Session {
         self.app.drag_targets_at(column, row)
     }
 
+    /// Put the cursor on whatever is at this cell. Returns whether it landed.
+    ///
+    /// For a front end about to show the *system's* menu about that file: the
+    /// desktop moves its highlight to whatever was right-clicked, and cian's
+    /// highlight is the only sign of which file the menu is about.
+    pub fn point_at(&mut self, column: u16, row: u16) -> bool {
+        self.app.point_at(column, row)
+    }
+
     /// Where letting go at this cell would put them, if anywhere.
     pub fn drop_target_at(&self, column: u16, row: u16) -> Option<PathBuf> {
         self.app.drop_target_at(column, row)
@@ -215,6 +224,16 @@ impl Session {
     /// Where icons belong, as of the last [`draw`](Self::draw). In cells.
     pub fn icon_slots(&self) -> &[crate::IconSlot] {
         &self.app.icon_slots
+    }
+
+    /// Where the open picture goes, if one is open and this front end draws
+    /// its own. In cells, as of the last [`draw`](Self::draw).
+    ///
+    /// The popup leaves that rectangle empty rather than filling it with
+    /// half-blocks. Decode the file to those pixels and put it there; see
+    /// [`crate::ImageSlot`].
+    pub fn image_slot(&self) -> Option<&crate::ImageSlot> {
+        self.app.image_slot.as_ref()
     }
 
     /// Whether the surface must be wiped before the next paint.

@@ -32,6 +32,12 @@ pub enum Ask {
     Kind(String),
     /// A directory, which the system answers for by kind.
     Directory,
+    /// The picture *in* this file, decoded to fit a box this many pixels
+    /// across and down. Not an icon at all — the image popup's own content —
+    /// but it belongs on this thread for the same reason the icons do: a
+    /// photograph takes tens of milliseconds to decode and scale, which is
+    /// several frames, and the frame must not wait for it.
+    Picture { path: PathBuf, w: u32, h: u32 },
 }
 
 struct Request {
@@ -66,6 +72,7 @@ impl Icons {
                     Ask::Path(p) => crate::sysicon::icon_for(p, req.px),
                     Ask::Kind(ext) => crate::sysicon::icon_for_type(ext, false, req.px),
                     Ask::Directory => crate::sysicon::icon_for_type("", true, req.px),
+                    Ask::Picture { path, w, h } => crate::picture::decode(path, *w, *h),
                 };
                 if answers.send(Answer { ask: req.ask, icon }).is_err() {
                     break;

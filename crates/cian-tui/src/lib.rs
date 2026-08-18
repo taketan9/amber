@@ -119,6 +119,27 @@ pub struct IconSlot {
     pub prefer_glyph: bool,
 }
 
+/// Where the picture goes, when the picture is the point.
+///
+/// The image popup draws itself out of half-blocks: two pixels to a cell, and
+/// a photograph reduced to a few thousand of them. That is everything a
+/// terminal can do without a graphics protocol, and it is not what a window
+/// has to do — a window has real pixels, and already draws real pictures for
+/// the file icons.
+///
+/// So in a front end that draws its own icons, the popup draws its frame and
+/// its footer and leaves the middle empty, saying here — in cells — where the
+/// picture belongs. The front end decodes the file at the size that rectangle
+/// really is and puts it there.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ImageSlot {
+    pub x: u16,
+    pub y: u16,
+    pub w: u16,
+    pub h: u16,
+    pub path: PathBuf,
+}
+
 /// How the file panes are drawn.
 ///
 /// Not a theme — a theme changes the colours, and this changes the furniture.
@@ -720,6 +741,12 @@ enum Popup {
     Shortcuts { entries: Vec<Shortcut>, cursor: usize, path: Vec<usize> },
     ConfirmQuit,
     ConfirmClose { target: CloseTarget },
+    /// About to open another tab in `side`'s pane, and asking first.
+    ///
+    /// Opening one is a keystroke away from closing one, and a tab that opens
+    /// unasked is invisible until there are six of them — which is how it was
+    /// reported: "tabs keep piling up and I don't know where they came from".
+    ConfirmNewTab { side: FocusedPane },
     /// An AI-generated shell command awaiting review before it goes to the
     /// prompt (never auto-run).
     AiShellConfirm { command: String },
@@ -2549,6 +2576,8 @@ pub struct App {
     native_icons: bool,
     /// Filled every frame while `native_icons` is on.
     icon_slots: Vec<IconSlot>,
+    /// Where the open picture goes, for a front end that can draw one.
+    image_slot: Option<ImageSlot>,
     /// The last "still blank" second written to the log, so each is said once.
     blank_said: u64,
     /// Which sidebar paths are directories. Asked once per path, per session.
@@ -2604,6 +2633,14 @@ pub struct App {
     /// Language for the key manual and the right-click menu specifically —
     /// `menu_lang` overrides `lang` for those two surfaces; else follows `lang`.
     menu_lang: Lang,
+    /// Whether init.lua named `menu_lang` outright.
+    ///
+    /// If it did, it keeps it: switching languages from the menu moves
+    /// everything else and leaves those two surfaces where they were asked to
+    /// be. If it did not, they follow — which is what "switch to English" has
+    /// to mean, and did not: the menu that the switch was chosen *from* stayed
+    /// in Japanese, because it reads `menu_lang` and only `lang` was moved.
+    menu_lang_pinned: bool,
     /// Cached git status per file pane `[left, right]`, recomputed when the
     /// pane's directory changes or on an explicit refresh.
     git: [Option<GitState>; 2],
@@ -2864,6 +2901,7 @@ impl App {
             skin: Skin::Classic,
             native_icons: false,
             icon_slots: Vec::new(),
+            image_slot: None,
             blank_said: 0,
             sidebar_dirs: (Instant::now(), std::collections::HashMap::new()),
             type_ahead: String::new(),
@@ -2888,6 +2926,7 @@ impl App {
                 Some(s) => Lang::from_opt(Some(s)),
                 None => Lang::from_opt(config.options.lang.as_deref()),
             },
+            menu_lang_pinned: config.options.menu_lang.is_some(),
             git: [None, None],
             disk: [None, None],
             ai: ai_config_from(&config),

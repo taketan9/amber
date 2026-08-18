@@ -20,8 +20,6 @@
 //!   than hanging. It wants running inside the shell pane instead.
 //! * 未確定文字 land on the status line rather than under the caret, because the
 //!   panes have no notion of a preedit yet.
-//! * Pictures still draw as half-blocks. Drawing them as pixels is the next
-//!   thing the window makes possible.
 
 // A windowed program, and Windows should be told so. Left unsaid, the linker
 // builds a console application: double-clicking cian opened a black console
@@ -39,6 +37,7 @@ mod font;
 mod glyph;
 mod iconjob;
 mod input;
+mod picture;
 mod pixels;
 mod shellmenu;
 mod soft;
@@ -307,6 +306,13 @@ impl Screen {
         }
     }
 
+    fn evict(&mut self, id: u64) {
+        match self {
+            Screen::Gpu(t) => t.backend_mut().post_processor_mut().evict(id),
+            Screen::Cpu(t) => t.backend_mut().evict(id),
+        }
+    }
+
     fn set_frame(&mut self, draws: Vec<pixels::Draw>) {
         match self {
             Screen::Gpu(t) => t.backend_mut().post_processor_mut().set_frame(draws),
@@ -382,6 +388,14 @@ struct Gui {
     /// The thread that asks the system about icons. See [`iconjob`].
     icons: iconjob::Icons,
     next_icon_id: u64,
+    /// The decoded size of each picture, which is not the size of the box it
+    /// was asked to fit: it keeps its shape, so one of the two dimensions comes
+    /// back short and the picture is centred in what is left.
+    picture_size: std::collections::HashMap<IconKey, (f32, f32)>,
+    /// The picture textures now on the layer — at most one, and dropped as soon
+    /// as another arrives. A window-sized photograph is megabytes of texture,
+    /// and unlike an icon it will not be wanted again.
+    picture_ids: Vec<(IconKey, u64)>,
     /// How many pictures the layer was last told to draw, so a change can
     /// be noticed and repainted. See `place_icons`.
     last_draws: usize,
@@ -448,6 +462,10 @@ enum IconKey {
     Path(std::path::PathBuf),
     /// Everything with this extension, lowercased. Empty for "no extension".
     Kind(String),
+    /// The picture in this file, decoded for a box this many pixels across and
+    /// down. The size is part of the key: resize the window and it is a
+    /// different picture, decoded again rather than stretched.
+    Picture(std::path::PathBuf, u32, u32),
 }
 
 /// Extensions whose icon belongs to the file rather than to its kind.
@@ -509,6 +527,8 @@ impl Gui {
             icons: iconjob::Icons::start(),
             // Ids start above the smoke test's, which uses 1.
             next_icon_id: 100,
+            picture_size: std::collections::HashMap::new(),
+            picture_ids: Vec::new(),
             last_draws: 0,
             pending_view_change: false,
             last_click: None,
@@ -838,11 +858,25 @@ impl Gui {
                 iconjob::Ask::Path(p) => IconKey::Path(p.clone()),
                 iconjob::Ask::Kind(e) => IconKey::Kind(e.clone()),
                 iconjob::Ask::Directory => IconKey::Kind(String::new()),
+                iconjob::Ask::Picture { path, w, h } => IconKey::Picture(path.clone(), *w, *h),
             };
             match answer.icon {
                 Some(icon) => {
                     let id = self.next_icon_id;
                     self.next_icon_id += 1;
+                    if matches!(key, IconKey::Picture(..)) {
+                        self.picture_size
+                            .insert(key.clone(), (icon.width as f32, icon.height as f32));
+                        // One picture at a time. A window-sized photograph is
+                        // several megabytes of texture, and the last one is of
+                        // no further use the moment this one exists.
+                        for (old, id) in std::mem::take(&mut self.picture_ids) {
+                            self.icon_ids.remove(&old);
+                            self.picture_size.remove(&old);
+                            t.evict(id);
+                        }
+                        self.picture_ids.push((key.clone(), id));
+                    }
                     self.icon_ids.insert(key, id);
                     t.upload(id, icon.width, icon.height, icon.rgba);
                 }
@@ -906,6 +940,9 @@ impl Gui {
                             (IconKey::Path(_), false, true) => iconjob::Ask::Directory,
                             (IconKey::Path(_), false, false) => iconjob::Ask::Kind(String::new()),
                             (IconKey::Kind(e), _, _) => iconjob::Ask::Kind(e.clone()),
+                            // A row asks for an icon, never for a photograph:
+                            // `IconKey::of` cannot produce this one.
+                            (IconKey::Picture(..), _, _) => continue,
                         };
                         self.icons.want(ask, px);
                     }
@@ -926,6 +963,40 @@ impl Gui {
                 alpha: 1.0,
             });
         }
+        // The picture in the image popup, which is not an icon and is drawn the
+        // same way: the popup left its middle empty and said, in cells, where
+        // it goes. Decoded to the pixels that rectangle really is — so what is
+        // on screen is the file, not an impression of it in half-blocks.
+        if let Some(slot) = self.cian.image_slot().cloned() {
+            let box_w = (slot.w as f32 * cw).floor().max(1.0);
+            let box_h = (slot.h as f32 * ch).floor().max(1.0);
+            let key = IconKey::Picture(slot.path.clone(), box_w as u32, box_h as u32);
+            match self.icon_ids.get(&key).copied() {
+                Some(NO_ICON) => {}
+                Some(id) => {
+                    // Centred, at whatever shape came back — the decoder fitted
+                    // it to the box and the box is rarely the same shape.
+                    let (pw, ph) = self.picture_size.get(&key).copied().unwrap_or((box_w, box_h));
+                    draws.push(pixels::Draw {
+                        id,
+                        x: slot.x as f32 * cw + (box_w - pw) / 2.0,
+                        y: slot.y as f32 * ch + (box_h - ph) / 2.0,
+                        w: pw,
+                        h: ph,
+                        alpha: 1.0,
+                    });
+                }
+                None => self.icons.want(
+                    iconjob::Ask::Picture {
+                        path: slot.path.clone(),
+                        w: box_w as u32,
+                        h: box_h as u32,
+                    },
+                    0,
+                ),
+            }
+        }
+
         // The ghost. Same picture as the file's icon, drawn faintly where the
         // pointer is — which is what a desktop shows, and what makes a drag
         // feel like carrying something rather than like nothing happening.
@@ -1170,22 +1241,39 @@ impl ApplicationHandler<Tick> for Gui {
                 }
             }
 
-            // The desktop's own menu, in the views that are a desktop. cian's
-            // own is still on Shift, and is still what the classic view shows.
+            // The right button belongs to the desktop, in every view. cian's own
+            // menu is on `Shift+Enter`, on `M`, and on `:menu` — and on
+            // Shift+right-click, for a hand already holding the mouse.
+            //
+            // It was cian's menu here, and the desktop's only in the desktop
+            // views. Two menus on one button is one menu too many: the button
+            // that opens the system's menu everywhere else in the machine
+            // should open the system's menu here too, and cian's own is a key
+            // away rather than a mode away.
             WindowEvent::MouseInput {
                 state: ElementState::Pressed,
                 button: MouseButton::Right,
                 ..
-            } if self.view() != View::Classic
-                && !self.mods.shift_key()
-                && shellmenu::available() =>
-            {
-                let paths: Vec<_> = self
+            } if !self.mods.shift_key() && shellmenu::available() => {
+                // Point at it first: the menu is about the file under the
+                // pointer, and the highlight is what says which that is.
+                self.cian.point_at(self.at.column, self.at.row);
+                let mut paths: Vec<_> = self
                     .cian
                     .drag_targets_at(self.at.column, self.at.row)
                     .into_iter()
                     .filter(|p| shellmenu::addressable(p))
                     .collect();
+                // Empty space is not nothing: it is the folder being looked at,
+                // which is what the Finder answers for when a click lands
+                // between the files.
+                if paths.is_empty() {
+                    paths.extend(
+                        self.cian
+                            .drop_target_at(self.at.column, self.at.row)
+                            .filter(|p| shellmenu::addressable(p)),
+                    );
+                }
                 let Some(window) = self.window.clone() else { return };
                 let (cw, ch) = self.cell_size();
                 let at = shellmenu::to_screen(
