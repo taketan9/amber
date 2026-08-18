@@ -107,13 +107,13 @@ impl App {
 fn shell_command(cmd: &str) -> Command {
     #[cfg(windows)]
     {
-        let mut c = Command::new("cmd");
+        let mut c = cian_core::proc::quiet("cmd");
         c.args(["/C", cmd]);
         c
     }
     #[cfg(not(windows))]
     {
-        let mut c = Command::new("sh");
+        let mut c = cian_core::proc::quiet("sh");
         c.args(["-c", cmd]);
         c
     }

@@ -11,7 +11,7 @@
 
 use std::io::Write;
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 
 use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
@@ -122,7 +122,7 @@ fn cache_dir() -> PathBuf {
 pub fn available(cfg: &AiConfig) -> bool {
     // `mock` is always available (no packages, no network) — handy for tests.
     let Ok(script) = script_path() else { return false };
-    Command::new(&cfg.python)
+    cian_core::proc::quiet(&cfg.python)
         .arg(&script)
         .arg("--check")
         .arg(&cfg.auth_mode)
@@ -156,7 +156,7 @@ pub fn chat(cfg: &AiConfig, system: &str, user: &str, images: &[String]) -> Resu
     };
     let body = serde_json::to_vec(&req)?;
 
-    let mut child = Command::new(&cfg.python)
+    let mut child = cian_core::proc::quiet(&cfg.python)
         .arg(&script)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -181,7 +181,7 @@ mod tests {
     use super::*;
 
     fn have_python() -> bool {
-        Command::new("python3").arg("--version").output().map(|o| o.status.success()).unwrap_or(false)
+        cian_core::proc::quiet("python3").arg("--version").output().map(|o| o.status.success()).unwrap_or(false)
     }
 
     #[test]

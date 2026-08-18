@@ -459,14 +459,14 @@ fn build_cx(lua: &Lua, shared: &Rc<RefCell<Shared>>) -> mlua::Result<Table> {
 
 #[cfg(windows)]
 fn shell_command(cmd: &str) -> Command {
-    let mut c = Command::new("cmd");
+    let mut c = cian_core::proc::quiet("cmd");
     c.arg("/C").arg(cmd);
     c
 }
 
 #[cfg(not(windows))]
 fn shell_command(cmd: &str) -> Command {
-    let mut c = Command::new("sh");
+    let mut c = cian_core::proc::quiet("sh");
     c.arg("-c").arg(cmd);
     c
 }

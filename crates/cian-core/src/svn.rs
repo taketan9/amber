@@ -9,7 +9,6 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use anyhow::{bail, Result};
 
@@ -36,7 +35,7 @@ pub fn is_working_copy(dir: &Path) -> bool {
 /// Run `svn` in `dir`, capturing stdout on a zero exit. `--non-interactive`
 /// keeps a missing credential or a prompt from hanging the captured command.
 fn svn_output(dir: &Path, args: &[&str]) -> Option<Vec<u8>> {
-    let out = Command::new("svn")
+    let out = crate::proc::quiet("svn")
         .current_dir(dir)
         .arg("--non-interactive")
         .args(args)
@@ -182,7 +181,7 @@ pub fn blame(dir: &Path, file: &Path) -> Option<Vec<BlameLine>> {
 // ─────────────────────────────── mutations ───────────────────────────────
 
 fn run_svn(dir: &Path, args: &[String]) -> Result<()> {
-    let out = Command::new("svn")
+    let out = crate::proc::quiet("svn")
         .current_dir(dir)
         .arg("--non-interactive")
         .args(args)

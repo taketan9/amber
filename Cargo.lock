@@ -577,6 +577,7 @@ name = "cian-ai"
 version = "0.5.1"
 dependencies = [
  "anyhow",
+ "cian-core",
  "serde",
  "serde_json",
  "tempfile",

@@ -2210,6 +2210,13 @@ impl App {
             (_, _, KeyCode::Right) if alt => self.pane_go_forward(),
             (_, _, KeyCode::Char('h')) if alt => self.pane_go_back(),
             (_, _, KeyCode::Char('l')) if alt => self.pane_go_forward(),
+            // `q` quits — but not in the views that are a desktop rather than
+            // a terminal. There, as in the icon grid and as in every file
+            // manager, a letter looks for a file starting with it. Someone
+            // typing the name of a folder should not be asked whether to leave.
+            (false, _, KeyCode::Char('q')) if self.single_pane_view() => {
+                self.type_ahead_jump('q')
+            }
             (false, _, KeyCode::Char('q')) => self.start_quit_confirm(),
             // `_` for shift, not `false`: `:` is Shift+; on most layouts, and a
             // terminal with the kitty keyboard protocol (WezTerm, kitty, foot)

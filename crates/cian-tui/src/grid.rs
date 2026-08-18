@@ -73,6 +73,12 @@ impl App {
     }
 
     /// Go to the file this letter names.
+    /// The same jump, for a view that is not the grid — see the `q` arm in
+    /// `keys.rs`.
+    pub(crate) fn type_ahead_jump(&mut self, c: char) {
+        self.type_ahead(c);
+    }
+
     fn type_ahead(&mut self, c: char) {
         let now = Instant::now();
         if now.duration_since(self.type_ahead_at) > PATIENCE {
@@ -237,6 +243,17 @@ impl App {
         }
         if let Some(i) = self.grid_entry_at(col, row) {
             if let Some(p) = self.active_pane_mut() {
+                // Ctrl+click *adds* to a selection, so there has to be one to
+                // add to. The file already under the cursor is what the eye
+                // says is selected — it is drawn selected — so the first
+                // Ctrl+click makes that true rather than starting from nothing
+                // and quietly dropping the file the user thought they had.
+                if adding && p.marks.is_empty() {
+                    let was = p.cursor;
+                    if was != i {
+                        p.set_mark_at(was);
+                    }
+                }
                 p.cursor = i;
                 if adding {
                     p.toggle_mark_at(i);

@@ -17,6 +17,7 @@ pub mod du;
 pub mod fuzzy;
 pub mod elevate;
 pub mod git;
+pub mod proc;
 pub mod grepedit;
 pub mod highlight;
 pub mod image;

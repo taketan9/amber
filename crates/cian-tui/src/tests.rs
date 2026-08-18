@@ -13200,3 +13200,75 @@ mod the_sidebar_does_not_ask_the_disk_every_frame {
         assert_eq!(first, again, "the same list, not a fresh one per frame");
     }
 }
+
+/// What the single-pane views do with keys that have nowhere to go, and what
+/// Ctrl+click means when nothing is marked yet.
+mod desktop_view_keys {
+    use super::*;
+    use ratatui::layout::Rect;
+
+    fn detail(names: &[&str]) -> (tempfile::TempDir, App) {
+        let (d, mut app) = app_with(names);
+        app.skin = Skin::Finder;
+        app.native_icons = true;
+        (d, app)
+    }
+
+    #[test]
+    fn shift_l_does_not_swap_which_listing_is_shown() {
+        let (_d, mut app) = detail(&["a.txt"]);
+        app.handle_key(KeyEvent::new(KeyCode::Char('L'), KeyModifiers::SHIFT)).unwrap();
+        assert_eq!(app.focused, FocusedPane::Left, "one pane in this view");
+        assert!(app.message.is_some(), "and it says so");
+    }
+
+    #[test]
+    fn shift_h_likewise() {
+        let (_d, mut app) = detail(&["a.txt"]);
+        app.focus(FocusedPane::Right);
+        app.handle_key(KeyEvent::new(KeyCode::Char('H'), KeyModifiers::SHIFT)).unwrap();
+        assert_eq!(app.focused, FocusedPane::Right);
+    }
+
+    #[test]
+    fn the_classic_view_still_moves_between_panes() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        app.handle_key(KeyEvent::new(KeyCode::Char('L'), KeyModifiers::SHIFT)).unwrap();
+        assert_eq!(app.focused, FocusedPane::Right);
+    }
+
+    /// `q` quits in the classic view and looks for a file in the desktop ones.
+    #[test]
+    fn q_looks_for_a_file_rather_than_the_way_out() {
+        let (_d, mut app) = detail(&["apple.txt", "quince.txt"]);
+        app.handle_key(key('q')).unwrap();
+        assert!(matches!(app.popup, Popup::None), "no 'really quit?' box");
+        let name = app.active_pane().unwrap().selected().unwrap().name.clone();
+        assert_eq!(name, "quince.txt", "it went to the file starting with q");
+    }
+
+    #[test]
+    fn q_still_quits_in_the_classic_view() {
+        let (_d, mut app) = app_with(&["quince.txt"]);
+        app.handle_key(key('q')).unwrap();
+        assert!(!matches!(app.popup, Popup::None), "the classic view asks");
+    }
+
+    /// Ctrl+click adds to a selection, and the file under the cursor is part of
+    /// what the user believes is already selected — it is drawn that way.
+    #[test]
+    fn ctrl_click_keeps_the_file_that_was_already_pointed_at() {
+        let (_d, mut app) = app_with(&["a.txt", "b.txt", "c.txt"]);
+        app.icon_view = true;
+        app.icon_cols = 3;
+        app.grid_area = Some(Rect::new(0, 0, 3 * 14, 4 * 6));
+        // The cursor starts on the first real entry — index 1, since `..` is
+        // index 0. Ctrl+click the one after it.
+        let first = app.active_pane().unwrap().cursor;
+        assert_eq!(first, 1, "the cursor starts on the first file, not on `..`");
+        let (col, row) = (2 * 14 + 2, 1); // tile index 2
+        assert!(app.grid_click_mods(col, row, true), "the click landed on a tile");
+        let marks = app.active_pane().unwrap().marks.len();
+        assert_eq!(marks, 2, "the one that was pointed at, and the one clicked");
+    }
+}

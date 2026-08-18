@@ -368,9 +368,10 @@ pub(crate) fn draw(f: &mut Frame, app: &mut App) {
     // every cell, so an icon recorded for a row underneath would sit on the
     // dialog rather than behind it — and a file listing's worth of them looks
     // like the listing is still there.
-    if !matches!(app.popup, Popup::None) {
-        app.icon_slots.clear();
-    }
+    // Pictures under a dialog are dealt with after it has been laid out, at
+    // the end of this function: where the context menu landed is not known
+    // until it is drawn. See `hide_icons_under_popup`.
+    let popup_open = !matches!(app.popup, Popup::None);
 
     // Reverse the cells of a shell text selection, over whatever was drawn.
     if let Some(sel) = app.shell_sel {
@@ -731,6 +732,16 @@ pub(crate) fn draw(f: &mut Frame, app: &mut App) {
     if matches!(app.popup, Popup::None) && app.is_starting_up() {
         draw_startup_splash(f, area, app.startup_at.elapsed().as_millis());
     }
+    // Icons are drawn on top of every cell by the front end, so one recorded
+    // for a row that a dialog now covers would sit *on* the dialog. Done here
+    // rather than before the popup was drawn, because where the context menu
+    // landed is only known once it has been laid out — and doing it early is
+    // what made every icon in the listing disappear the moment the menu
+    // opened, rather than just the handful behind it.
+    if popup_open {
+        hide_icons_under_popup(app);
+    }
+
 }
 
 /// A centered, animated "starting up" card. Drawn over the UI; purely cosmetic.
@@ -2097,6 +2108,26 @@ fn draw_file_pane(
         // Labels start one cell in from the corner, like the tab rects above.
         push_breadcrumb_rects(&active_title, ix, area, tab_col + 1, pane, pane_id, crumb_rects);
     }
+}
+
+/// Drop the icons a dialog is standing on, and only those.
+///
+/// The context menu records where it landed, so the listing behind it keeps
+/// every icon the menu is not covering. Any other dialog could be anywhere, so
+/// all of them go — an icon floating over a confirmation box is worse than an
+/// icon missing for as long as the box is up.
+fn hide_icons_under_popup(app: &mut App) {
+    let over = app.menu_rect;
+    let is_menu = matches!(app.popup, Popup::ContextMenu { .. });
+    if !is_menu || over.width == 0 || over.height == 0 {
+        app.icon_slots.clear();
+        return;
+    }
+    app.icon_slots.retain(|s| {
+        let (x0, x1) = (s.x, s.x + s.w);
+        let (y0, y1) = (s.y, s.y + s.h);
+        x1 <= over.x || x0 >= over.right() || y1 <= over.y || y0 >= over.bottom()
+    });
 }
 
 /// Write one run of text into the buffer at `(x, y)`, clipped at `end_x`.

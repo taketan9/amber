@@ -8,7 +8,6 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use anyhow::{Context, Result};
 
@@ -161,7 +160,7 @@ impl RepoStatus {
 /// any failure (git missing, not a repo, non-zero exit) so callers can treat
 /// "no git here" uniformly.
 fn git_output(dir: &Path, args: &[&str]) -> Option<Vec<u8>> {
-    let out = Command::new("git")
+    let out = crate::proc::quiet("git")
         .arg("-C")
         .arg(dir)
         // Never let a user's pager or prompts hang a captured command.
@@ -382,7 +381,7 @@ fn epoch_ymd(ts: i64) -> Option<String> {
 /// is returned so it can be shown in-app. Output is captured, never printed, so
 /// it cannot corrupt the TUI.
 pub fn commit(dir: &Path, message: &str) -> Result<()> {
-    let out = Command::new("git")
+    let out = crate::proc::quiet("git")
         .arg("-C")
         .arg(dir)
         .args(["commit", "-m", message])
@@ -517,7 +516,7 @@ fn run_git_args(dir: &Path, args: &[String]) -> Result<()> {
     // Capture output rather than inheriting it: git writes progress to the
     // terminal (`git reset` prints "Unstaged changes after reset…"), which would
     // corrupt the TUI. On failure the captured stderr becomes the error text.
-    let out = Command::new("git")
+    let out = crate::proc::quiet("git")
         .arg("-C")
         .arg(dir)
         .args(args)
@@ -583,7 +582,7 @@ mod tests {
         // Canonicalise so paths match `git rev-parse --show-toplevel` (which
         // resolves symlinks like macOS's /var → /private/var).
         let dir = &std::fs::canonicalize(d.path()).unwrap();
-        let init_ok = Command::new("git")
+        let init_ok = crate::proc::quiet("git")
             .arg("-C")
             .arg(dir)
             .args(["init", "-q"])
@@ -614,19 +613,19 @@ mod tests {
     fn line_changes_classify_added_modified_and_deletions() {
         let d = tempfile::tempdir().unwrap();
         let dir = &std::fs::canonicalize(d.path()).unwrap();
-        let init_ok = Command::new("git").arg("-C").arg(dir).args(["init", "-q"]).status()
+        let init_ok = crate::proc::quiet("git").arg("-C").arg(dir).args(["init", "-q"]).status()
             .map(|s| s.success()).unwrap_or(false);
         if !init_ok {
             eprintln!("git not available; skipping");
             return;
         }
         for kv in [["user.email", "t@e.com"], ["user.name", "T"], ["core.autocrlf", "false"]] {
-            let _ = Command::new("git").arg("-C").arg(dir).args(["config", kv[0], kv[1]]).status();
+            let _ = crate::proc::quiet("git").arg("-C").arg(dir).args(["config", kv[0], kv[1]]).status();
         }
         let f = dir.join("f.txt");
         std::fs::write(&f, "a\nb\nc\nd\n").unwrap();
-        Command::new("git").arg("-C").arg(dir).args(["add", "."]).status().unwrap();
-        Command::new("git").arg("-C").arg(dir).args(["commit", "-qm", "init"]).status().unwrap();
+        crate::proc::quiet("git").arg("-C").arg(dir).args(["add", "."]).status().unwrap();
+        crate::proc::quiet("git").arg("-C").arg(dir).args(["commit", "-qm", "init"]).status().unwrap();
 
         // Modify line 2, delete line 3, append a new line.
         std::fs::write(&f, "a\nB\nd\ne\n").unwrap();
@@ -646,19 +645,19 @@ mod tests {
     fn log_blame_and_file_diff() {
         let d = tempfile::tempdir().unwrap();
         let dir = &std::fs::canonicalize(d.path()).unwrap();
-        let init_ok = Command::new("git").arg("-C").arg(dir).args(["init", "-q"]).status()
+        let init_ok = crate::proc::quiet("git").arg("-C").arg(dir).args(["init", "-q"]).status()
             .map(|s| s.success()).unwrap_or(false);
         if !init_ok {
             eprintln!("git not available; skipping");
             return;
         }
         for kv in [["user.email", "t@e.com"], ["user.name", "Alice"], ["core.autocrlf", "false"]] {
-            let _ = Command::new("git").arg("-C").arg(dir).args(["config", kv[0], kv[1]]).status();
+            let _ = crate::proc::quiet("git").arg("-C").arg(dir).args(["config", kv[0], kv[1]]).status();
         }
         let f = dir.join("f.txt");
         std::fs::write(&f, "one\ntwo\n").unwrap();
-        Command::new("git").arg("-C").arg(dir).args(["add", "."]).status().unwrap();
-        Command::new("git").arg("-C").arg(dir).args(["commit", "-qm", "first commit"]).status().unwrap();
+        crate::proc::quiet("git").arg("-C").arg(dir).args(["add", "."]).status().unwrap();
+        crate::proc::quiet("git").arg("-C").arg(dir).args(["commit", "-qm", "first commit"]).status().unwrap();
 
         // log lists the commit.
         let commits = log(dir, None, 10);
@@ -688,7 +687,7 @@ mod tests {
     fn staged_diff_and_commit_round_trip() {
         let d = tempfile::tempdir().unwrap();
         let dir = &std::fs::canonicalize(d.path()).unwrap();
-        let init_ok = Command::new("git")
+        let init_ok = crate::proc::quiet("git")
             .arg("-C")
             .arg(dir)
             .args(["init", "-q"])
@@ -701,7 +700,7 @@ mod tests {
         }
         // A repo-local identity, so `commit` does not depend on global config.
         for kv in [["user.email", "t@example.com"], ["user.name", "Test"]] {
-            let _ = Command::new("git").arg("-C").arg(dir).args(["config", kv[0], kv[1]]).status();
+            let _ = crate::proc::quiet("git").arg("-C").arg(dir).args(["config", kv[0], kv[1]]).status();
         }
 
         // Nothing staged yet: an empty (but Some) diff.

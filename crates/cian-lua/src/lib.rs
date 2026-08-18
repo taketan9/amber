@@ -24,7 +24,7 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::rc::Rc;
 
 use mlua::{Function, FromLua, Lua, Table, Value};
@@ -153,9 +153,9 @@ impl SshUser {
         }
         let cmd = self.password_cmd.as_ref()?;
         let out = if cfg!(windows) {
-            Command::new("cmd").args(["/C", cmd]).output().ok()?
+            cian_core::proc::quiet("cmd").args(["/C", cmd]).output().ok()?
         } else {
-            Command::new("sh").arg("-c").arg(cmd).output().ok()?
+            cian_core::proc::quiet("sh").arg("-c").arg(cmd).output().ok()?
         };
         if !out.status.success() {
             return None;
@@ -1200,7 +1200,7 @@ fn install_api(lua: &Lua, builder: &Rc<RefCell<Builder>>) -> mlua::Result<()> {
             if args.is_empty() {
                 return Err(mlua::Error::RuntimeError("cian.spawn: empty command".into()));
             }
-            Command::new(&args[0])
+            cian_core::proc::quiet(&args[0])
                 .args(&args[1..])
                 .stdin(Stdio::null())
                 .stdout(Stdio::null())
@@ -1227,12 +1227,12 @@ fn install_api(lua: &Lua, builder: &Rc<RefCell<Builder>>) -> mlua::Result<()> {
 
 fn os_open(target: &str) -> std::io::Result<()> {
     #[cfg(target_os = "macos")]
-    let mut cmd = Command::new("open");
+    let mut cmd = cian_core::proc::quiet("open");
     #[cfg(target_os = "linux")]
-    let mut cmd = Command::new("xdg-open");
+    let mut cmd = cian_core::proc::quiet("xdg-open");
     #[cfg(target_os = "windows")]
     let mut cmd = {
-        let mut c = Command::new("cmd");
+        let mut c = cian_core::proc::quiet("cmd");
         c.arg("/C").arg("start").arg("");
         c
     };

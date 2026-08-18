@@ -3026,7 +3026,16 @@ impl App {
     /// terminal picked. So there is no shell panel in them, and moving the
     /// focus into one would be moving it somewhere nothing is drawn.
     pub(crate) fn has_shell_panel(&self) -> bool {
-        !self.icon_view && self.skin != Skin::Finder
+        !self.single_pane_view()
+    }
+
+    /// Is one pane filling the window?
+    ///
+    /// The details view and the icon grid both show a single listing over the
+    /// whole window. There is no pane beside it and no shell panel under it, so
+    /// the keys that move between those have nowhere to go.
+    pub(crate) fn single_pane_view(&self) -> bool {
+        self.icon_view || self.skin == Skin::Finder
     }
 
     /// Say why the shell is not here, rather than moving the focus to a panel
@@ -3051,6 +3060,20 @@ impl App {
         };
         if next == FocusedPane::Shell && !self.has_shell_panel() {
             self.no_shell_panel_here();
+            return;
+        }
+        // The same for the pane beside it: in a single-pane view there is none
+        // on screen, and H / L quietly swapping which listing is shown looks
+        // like the view jumping for no reason.
+        if matches!(next, FocusedPane::Left | FocusedPane::Right)
+            && next != self.focused
+            && self.single_pane_view()
+        {
+            self.message = Some(tr(
+                self.lang,
+                "one pane in this view — Ctrl+Shift+G for the classic one",
+                "この表示はペインが1つです — クラシックは Ctrl+Shift+G",
+            ).into());
             return;
         }
         if next != self.focused {
@@ -3411,12 +3434,12 @@ fn encode_key(key: KeyEvent, app_cursor: bool) -> Option<Vec<u8>> {
 
 fn os_open(path: &Path) -> Result<()> {
     #[cfg(target_os = "macos")]
-    let mut cmd = Command::new("open");
+    let mut cmd = cian_core::proc::quiet("open");
     #[cfg(target_os = "linux")]
-    let mut cmd = Command::new("xdg-open");
+    let mut cmd = cian_core::proc::quiet("xdg-open");
     #[cfg(target_os = "windows")]
     let mut cmd = {
-        let mut c = Command::new("cmd");
+        let mut c = cian_core::proc::quiet("cmd");
         c.arg("/C").arg("start").arg("");
         c
     };
@@ -3430,12 +3453,12 @@ fn os_open(path: &Path) -> Result<()> {
 
 fn os_open_string(target: &str) -> Result<()> {
     #[cfg(target_os = "macos")]
-    let mut cmd = Command::new("open");
+    let mut cmd = cian_core::proc::quiet("open");
     #[cfg(target_os = "linux")]
-    let mut cmd = Command::new("xdg-open");
+    let mut cmd = cian_core::proc::quiet("xdg-open");
     #[cfg(target_os = "windows")]
     let mut cmd = {
-        let mut c = Command::new("cmd");
+        let mut c = cian_core::proc::quiet("cmd");
         c.arg("/C").arg("start").arg("");
         c
     };
@@ -3540,7 +3563,7 @@ pub(crate) fn save_theme_pref(name: &str) {
 fn os_reveal(path: &Path) -> Result<()> {
     #[cfg(target_os = "macos")]
     let mut cmd = {
-        let mut c = Command::new("open");
+        let mut c = cian_core::proc::quiet("open");
         c.arg("-R").arg(path);
         c
     };
@@ -3556,14 +3579,14 @@ fn os_reveal(path: &Path) -> Result<()> {
         // command line verbatim with `raw_arg`, quoting only the path (a Windows
         // path can never contain a `"`, so this is safe). Explorer exits 1 even
         // on success, so we only spawn — never wait on or check its status.
-        let mut c = Command::new("explorer");
+        let mut c = cian_core::proc::quiet("explorer");
         c.raw_arg(format!("/select,\"{}\"", path.display()));
         c
     };
     #[cfg(target_os = "linux")]
     let mut cmd = {
         let dir = path.parent().unwrap_or(path);
-        let mut c = Command::new("xdg-open");
+        let mut c = cian_core::proc::quiet("xdg-open");
         c.arg(dir);
         c
     };
@@ -3578,7 +3601,7 @@ fn os_reveal(path: &Path) -> Result<()> {
 fn os_open_with(path: &Path) -> Result<()> {
     #[cfg(target_os = "windows")]
     {
-        Command::new("rundll32.exe")
+        cian_core::proc::quiet("rundll32.exe")
             .arg("shell32.dll,OpenAs_RunDLL")
             .arg(path)
             .stdin(Stdio::null())
@@ -3603,7 +3626,7 @@ fn os_properties(path: &Path) -> Result<()> {
     {
         // The path is passed as an argv item (not spliced into the script) so a
         // name with quotes or backslashes cannot break the AppleScript.
-        Command::new("osascript")
+        cian_core::proc::quiet("osascript")
             .args([
                 "-e", "on run argv",
                 "-e", "tell application \"Finder\"",
@@ -3628,7 +3651,7 @@ fn os_properties(path: &Path) -> Result<()> {
              .Namespace((Split-Path $p))\
              .ParseName((Split-Path $p -Leaf))\
              .InvokeVerb('Properties')";
-        Command::new("powershell")
+        cian_core::proc::quiet("powershell")
             .args(["-NoProfile", "-Command", script])
             .arg(path)
             .stdin(Stdio::null())
@@ -3915,7 +3938,7 @@ try
   end repeat
 end try
 return out"#;
-    let out = match Command::new("osascript").args(["-e", SCRIPT]).output() {
+    let out = match cian_core::proc::quiet("osascript").args(["-e", SCRIPT]).output() {
         Ok(o) if o.status.success() => o.stdout,
         _ => return Vec::new(),
     };
@@ -3939,7 +3962,7 @@ fn os_clipboard_file_refs(paths: &[PathBuf]) -> Result<()> {
     } else {
         format!("set the clipboard to {{{}}}", parts.join(", "))
     };
-    let status = Command::new("osascript")
+    let status = cian_core::proc::quiet("osascript")
         .args(["-e", &script])
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -3954,7 +3977,7 @@ fn os_clipboard_file_refs(paths: &[PathBuf]) -> Result<()> {
 #[cfg(target_os = "linux")]
 fn os_clipboard_files_raw() -> Vec<PathBuf> {
     let read = |cmd: &str, args: &[&str]| -> Option<String> {
-        let o = Command::new(cmd).args(args).output().ok()?;
+        let o = cian_core::proc::quiet(cmd).args(args).output().ok()?;
         o.status.success().then(|| String::from_utf8_lossy(&o.stdout).into_owned())
     };
     // Wayland first, then X11, mirroring the write side.
@@ -3997,7 +4020,7 @@ fn os_clipboard_file_refs(paths: &[PathBuf]) -> Result<()> {
         .collect::<Vec<_>>()
         .join("\n");
     // try wl-copy first (wayland), then xclip
-    if let Ok(mut child) = Command::new("wl-copy")
+    if let Ok(mut child) = cian_core::proc::quiet("wl-copy")
         .args(["--type", "text/uri-list"])
         .stdin(Stdio::piped())
         .spawn()
@@ -4009,7 +4032,7 @@ fn os_clipboard_file_refs(paths: &[PathBuf]) -> Result<()> {
             return Ok(());
         }
     }
-    let mut child = Command::new("xclip")
+    let mut child = cian_core::proc::quiet("xclip")
         .args(["-selection", "clipboard", "-t", "text/uri-list"])
         .stdin(Stdio::piped())
         .spawn()?;
@@ -4024,7 +4047,7 @@ fn os_clipboard_file_refs(paths: &[PathBuf]) -> Result<()> {
 
 #[cfg(target_os = "windows")]
 fn os_clipboard_files_raw() -> Vec<PathBuf> {
-    let out = Command::new("powershell")
+    let out = cian_core::proc::quiet("powershell")
         .args([
             "-NoProfile",
             "-Command",
@@ -4057,7 +4080,7 @@ fn os_clipboard_file_refs(paths: &[PathBuf]) -> Result<()> {
         .map(|p| format!("'{}'", p.display().to_string().replace('\'', "''")))
         .collect::<Vec<_>>()
         .join(",");
-    let status = Command::new("powershell")
+    let status = cian_core::proc::quiet("powershell")
         .args(["-NoProfile", "-Command", &format!("Set-Clipboard -Path {}", list)])
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -5007,6 +5030,10 @@ fn suspend_and_edit<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Re
     let _ = execute!(out, PopKeyboardEnhancementFlags);
     execute!(out, DisableBracketedPaste, DisableMouseCapture, LeaveAlternateScreen)?;
 
+    // `Command::new`, deliberately, where everything else in cian uses
+    // `proc::quiet`: this is the one program cian starts *for* the user on the
+    // terminal they are looking at, and vim needs the console it inherits.
+    // Denying it one would open the editor into nowhere.
     let status = Command::new(&cmd[0]).args(&cmd[1..]).arg(&edit.path).status();
 
     // Take it back and rebuild the screen.
