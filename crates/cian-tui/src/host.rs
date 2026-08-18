@@ -322,10 +322,44 @@ impl Session {
     /// What the window should be called: cian, plus the directory in front of
     /// the user. A window in the dock with three cians in it is otherwise three
     /// identical entries.
+    /// What the window should be called.
+    ///
+    /// The name, and nothing else. It carried the current directory for a
+    /// while — the reasoning was that three cians in a taskbar are otherwise
+    /// three identical entries — and the reasoning was worse than the cost: a
+    /// title bar showing a long path is a long path in the title bar, and the
+    /// path is already on screen twice, in the address bar and the breadcrumb.
     pub fn title(&self) -> String {
-        match self.app.active_pane() {
-            Some(p) => format!("cian — {}", p.cwd.display()),
-            None => "cian".to_string(),
+        "cian".to_string()
+    }
+
+    /// Is the theme a light one?
+    ///
+    /// For a front end that has furniture of its own to colour — a title bar
+    /// belongs to the desktop, and the desktop will paint it dark or light if
+    /// it is told which. Measured off the surface cian is actually drawing on
+    /// rather than off the theme's name, because a per-pane override or the
+    /// Finder skin can make a "dark" theme light in practice.
+    pub fn theme_is_light(&self) -> bool {
+        let (r, g, b) = match crate::theme::theme().base_bg.unwrap_or(crate::theme::theme().popup_bg)
+        {
+            ratatui::style::Color::Rgb(r, g, b) => (r as u32, g as u32, b as u32),
+            // A named colour means a terminal palette cian did not choose;
+            // dark is the safer guess for a terminal-shaped theme.
+            _ => return false,
+        };
+        // The usual weighting: green is most of what the eye calls brightness.
+        (299 * r + 587 * g + 114 * b) / 1000 > 128
+    }
+
+    /// The colour cian is drawing its background in, if it is a real one.
+    ///
+    /// For a front end that can paint furniture the desktop owns — see
+    /// [`theme_is_light`](Self::theme_is_light).
+    pub fn theme_surface(&self) -> Option<(u8, u8, u8)> {
+        match crate::theme::theme().base_bg.unwrap_or(crate::theme::theme().popup_bg) {
+            ratatui::style::Color::Rgb(r, g, b) => Some((r, g, b)),
+            _ => None,
         }
     }
 

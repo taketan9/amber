@@ -100,6 +100,36 @@ struct Tick;
 /// both front ends give cian a turn at the same rate.
 const HEARTBEAT: std::time::Duration = std::time::Duration::from_millis(16);
 
+/// Paint the title bar itself, where the desktop allows it.
+///
+/// `set_theme` above gets it to dark or light, which is most of the way. This
+/// is the rest: Windows 11 will take an exact colour for the caption, so the
+/// bar matches the theme rather than merely agreeing with it about the time of
+/// day. Anything older ignores it, which is why the result is not checked.
+#[cfg(windows)]
+fn caption_colour(window: &Window, rgb: Option<(u8, u8, u8)>) {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    let Some((r, g, b)) = rgb else { return };
+    let Ok(handle) = window.window_handle() else { return };
+    let RawWindowHandle::Win32(h) = handle.as_ref() else { return };
+    let hwnd = windows::Win32::Foundation::HWND(h.hwnd.get() as *mut core::ffi::c_void);
+    // COLORREF is 0x00BBGGRR — the other way round from everything else here.
+    let colour: u32 = (b as u32) << 16 | (g as u32) << 8 | r as u32;
+    // SAFETY: a live window handle, and a four-byte value whose size is passed
+    // with it. The call is documented to fail harmlessly on older Windows.
+    unsafe {
+        let _ = windows::Win32::Graphics::Dwm::DwmSetWindowAttribute(
+            hwnd,
+            windows::Win32::Graphics::Dwm::DWMWA_CAPTION_COLOR,
+            &colour as *const u32 as *const core::ffi::c_void,
+            std::mem::size_of::<u32>() as u32,
+        );
+    }
+}
+
+#[cfg(not(windows))]
+fn caption_colour(_window: &Window, _rgb: Option<(u8, u8, u8)>) {}
+
 /// Should cian draw the pixels itself?
 ///
 /// `CIAN_GUI_RENDER=cpu|gpu` decides it outright. Left alone, the machine
@@ -336,6 +366,9 @@ struct Gui {
     next_tick: Instant,
     /// The title last given to the window, so it is only set when it changes.
     title: String,
+    /// Whether the desktop was last told the theme is a light one. `None`
+    /// until it has been told anything.
+    told_light: Option<bool>,
     /// Print every key to stderr — see `CIAN_GUI_KEYLOG`.
     keylog: bool,
     /// Which texture holds which icon, under the key it is shared by. Never
@@ -469,6 +502,7 @@ impl Gui {
             needs_redraw: true,
             next_tick: Instant::now(),
             title: String::new(),
+            told_light: None,
             keylog: std::env::var_os("CIAN_GUI_KEYLOG").is_some(),
             icon_ids: std::collections::HashMap::new(),
             glyph_ids: std::collections::HashMap::new(),
@@ -1417,6 +1451,20 @@ impl ApplicationHandler<Tick> for Gui {
             if title != self.title {
                 w.set_title(&title);
                 self.title = title;
+            }
+            // The title bar belongs to the desktop, and the desktop will paint
+            // it to match — dark or light — if it is told which. Without this
+            // a dark cian wore a white title bar, which is the one piece of
+            // the window cian cannot draw itself.
+            let light = self.cian.theme_is_light();
+            if self.told_light != Some(light) {
+                self.told_light = Some(light);
+                w.set_theme(Some(if light {
+                    winit::window::Theme::Light
+                } else {
+                    winit::window::Theme::Dark
+                }));
+                caption_colour(w, self.cian.theme_surface());
             }
             if self.needs_redraw {
                 w.request_redraw();
