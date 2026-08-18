@@ -141,6 +141,12 @@ pub struct PtySession {
     child: Box<dyn Child + Send + Sync>,
     rows: u16,
     cols: u16,
+    /// Set by the reader thread the first time the shell says anything.
+    ///
+    /// A panel showing an empty screen cannot tell "the shell has not spoken
+    /// yet" from "cian is failing to draw what it said", and those want
+    /// different answers from whoever is looking at it.
+    heard: Arc<AtomicBool>,
     /// Optional session log, shared with the reader thread.
     log: LogSlot,
     title: TitleSink,
@@ -210,6 +216,10 @@ impl PtySession {
         cmd.env("TERM", "xterm-256color");
 
         let child = pair.slave.spawn_command(cmd)?;
+        cian_core::log::log(&format!(
+            "pty: {program:?} started in a {cols}x{rows} pty at {}",
+            cwd.display(),
+        ));
         // Drop the slave handle so the master observes EOF once the child exits.
         drop(pair.slave);
 
@@ -231,12 +241,47 @@ impl PtySession {
         let reader_dirty = Arc::clone(&dirty);
         let reader_log = Arc::clone(&log);
         let reader_enc = Arc::clone(&encoding);
+        let heard = Arc::new(AtomicBool::new(false));
+        let reader_heard = Arc::clone(&heard);
         let reader = std::thread::spawn(move || {
             let mut buf = [0u8; 8192];
+            // Whether anything has been heard from the shell yet.
+            //
+            // "It spawned and the panel stayed empty" is a report that cannot
+            // be acted on: a shell that never starts, one that starts and says
+            // nothing, and one whose output cian fails to display all look the
+            // same from the outside. The first thing it says is logged, with
+            // how long it took to say it — a corporate PowerShell profile can
+            // take half a minute, and that is a different problem from silence.
+            let mut heard = false;
+            let started = std::time::Instant::now();
+            let heard_flag = reader_heard;
             loop {
                 match reader.read(&mut buf) {
-                    Ok(0) => break, // EOF: child closed the pty
+                    Ok(0) => {
+                        cian_core::log::log(&format!(
+                            "pty reader: end of output after {:?}{}",
+                            started.elapsed(),
+                            if heard { "" } else { ", having heard nothing at all" },
+                        ));
+                        break; // EOF: child closed the pty
+                    }
                     Ok(n) => {
+                        if !heard {
+                            heard = true;
+                            heard_flag.store(true, Ordering::Relaxed);
+                            // A short, printable taste of it: enough to tell a
+                            // prompt from an error message, not enough to put
+                            // anything private in a log.
+                            let taste: String = String::from_utf8_lossy(&buf[..n.min(48)])
+                                .chars()
+                                .map(|c| if c.is_control() { '.' } else { c })
+                                .collect();
+                            cian_core::log::log(&format!(
+                                "pty reader: first {n} bytes after {:?}: {taste}",
+                                started.elapsed(),
+                            ));
+                        }
                         // Decode to UTF-8 when a non-UTF-8 encoding is chosen
                         // (e.g. a Shift_JIS shell); UTF-8 passes through as-is.
                         // Per-chunk decoding can split a multi-byte character at
@@ -290,6 +335,7 @@ impl PtySession {
             child,
             rows,
             cols,
+            heard,
             log,
             title,
             encoding,
@@ -420,6 +466,15 @@ impl PtySession {
     }
 
     /// Whether the shell process is still running.
+    /// Has the shell produced any output yet?
+    ///
+    /// False for a shell that started and has not spoken — a corporate
+    /// PowerShell profile can take half a minute to load, and an empty panel
+    /// with no explanation is how that looks.
+    pub fn has_spoken(&self) -> bool {
+        self.heard.load(Ordering::Relaxed)
+    }
+
     pub fn is_alive(&mut self) -> bool {
         match self.child.try_wait() {
             // Still running.

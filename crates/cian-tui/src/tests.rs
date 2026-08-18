@@ -13321,3 +13321,58 @@ mod dropped_paths_are_read_the_platform_way {
         assert_eq!(p[0].to_string_lossy(), "/home/taro/My File.txt");
     }
 }
+
+/// The places down the left of the desktop views are there to be clicked.
+mod the_sidebar_answers_a_click {
+    use super::*;
+
+    fn desktop(icon_view: bool) -> (tempfile::TempDir, App) {
+        let (d, mut app) = app_with(&["a.txt"]);
+        app.skin = Skin::Finder;
+        app.native_icons = true;
+        app.icon_view = icon_view;
+        // A place to go: a real directory, so the jump can succeed.
+        let target = d.path().join("sub");
+        std::fs::create_dir(&target).unwrap();
+        app.shortcuts.entries =
+            vec![crate::Shortcut { name: "sub".into(), target: Some(target.display().to_string()), children: None }];
+        (d, app)
+    }
+
+    fn click_the_bookmark(app: &mut App) -> bool {
+        // Draw first: the sidebar's rows are recorded by the frame that draws
+        // them, which is what a click is tested against.
+        let _ = render(app, 140, 40);
+        let row = app
+            .sidebar_rows
+            .iter()
+            .find(|(p, _)| p.file_name().map(|n| n == "sub").unwrap_or(false))
+            .map(|(_, y)| *y);
+        let Some(row) = row else { return false };
+        app.grid_click_mods(2, row, false)
+    }
+
+    #[test]
+    fn the_detail_view_goes_to_the_place_that_was_clicked() {
+        let (_d, mut app) = desktop(false);
+        assert!(click_the_bookmark(&mut app), "the click landed on the sidebar");
+        assert!(
+            app.active_pane().unwrap().cwd.ends_with("sub"),
+            "it went there: {}",
+            app.active_pane().unwrap().cwd.display()
+        );
+    }
+
+    #[test]
+    fn the_icon_grid_still_does_too() {
+        let (_d, mut app) = desktop(true);
+        assert!(click_the_bookmark(&mut app));
+        assert!(app.active_pane().unwrap().cwd.ends_with("sub"));
+    }
+
+    #[test]
+    fn the_classic_view_leaves_the_click_to_the_panes() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        assert!(!app.grid_click_mods(2, 5, false), "no chrome in the classic view");
+    }
+}

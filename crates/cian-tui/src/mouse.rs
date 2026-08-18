@@ -13,7 +13,7 @@ impl App {
         // behind — dividers, scrollbar tracks, tab labels — and those are not
         // erased when the grid takes over. A click on a tile was being eaten by
         // the ghost of a scrollbar.
-        if self.icon_view {
+        if self.single_pane_view() {
             if matches!(ev.kind, MouseEventKind::Down(MouseButton::Left)) {
                 // Either modifier means "add to the selection". A terminal
                 // never sees Super at all; a window does, and on a Mac whose
@@ -52,9 +52,13 @@ impl App {
                 self.open_context_menu(col, row);
                 return;
             }
-            // Scrolling and dragging mean nothing here yet; swallow them rather
-            // than letting them reach a layout that is not on screen.
-            return;
+            // In the grid, scrolling and dragging mean nothing yet; swallow
+            // them rather than letting them reach a layout that is not on
+            // screen. The detail view has a real listing under the pointer, so
+            // everything the chrome did not claim carries on to it.
+            if self.icon_view {
+                return;
+            }
         }
 
         // A drag in progress owns the mouse until the button comes back up,

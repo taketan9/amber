@@ -105,25 +105,32 @@ struct Tick;
 /// both front ends give cian a turn at the same rate.
 const HEARTBEAT: std::time::Duration = std::time::Duration::from_millis(16);
 
-/// The shortest gap between two frames.
+/// The shortest gap between two *background* frames.
 ///
-/// The terminal build gets this for free and it is easy to miss why. It blocks
-/// on `event::poll`, and when it wakes it *drains* everything waiting — every
-/// key of a repeat, every notch of a wheel spin — runs them all, and paints
-/// once. The window is handed one event at a time, and painted once per event:
-/// a trackpad reports scrolling a hundred times a second, and a hundred full
-/// frames a second is a hundred times cian building its entire screen.
+/// It used to hold back frames that input had asked for as well, and that was
+/// right when a frame cost two and a half milliseconds: a trackpad reports a
+/// hundred times a second, and a hundred full frames a second was a hundred
+/// times cian building its whole screen.
 ///
-/// Measured here, one frame is about two and a half milliseconds — most of it
-/// cian composing the frame, which the terminal build pays too. Paying it 120
-/// times a second instead of 30 is the whole difference between the two front
-/// ends feeling the same and the window feeling like treacle.
+/// A frame costs a twentieth of that now — 485µs, measured in the window on
+/// the machine that was reporting it as slow — and the throttle had turned
+/// into the thing being felt. A keystroke arriving inside the window waited
+/// for the next heartbeat to be painted: up to twenty-four milliseconds of
+/// nothing happening, per key, which is precisely what "もっさり" describes.
+/// winit coalesces repeated `request_redraw` calls into one frame anyway, so
+/// the burst it was defending against was mostly imaginary.
 ///
-/// So: events are always handled the moment they arrive, and the *painting*
-/// waits its turn. The first keystroke after a quiet moment still paints
-/// immediately — `last_frame` is old by then — and only a burst is throttled,
-/// which is exactly when nobody can see the frames being dropped anyway.
+/// Input paints immediately now. This is what remains: the floor under the
+/// background's own repaints.
 const MIN_FRAME: std::time::Duration = std::time::Duration::from_millis(8);
+
+/// A duration in microseconds, written in ASCII.
+///
+/// Everything cian prints for a person to read may end up in a Windows
+/// console, which is not UTF-8 — `µs` arrives there as `ﾂｵs`.
+fn us(d: std::time::Duration) -> String {
+    format!("{}us", d.as_micros())
+}
 
 /// How many frames `CIAN_GUI_PROF` averages over before it says anything.
 const PROF_EVERY: u32 = 120;
@@ -324,12 +331,6 @@ impl Gui {
     /// not up to a tick later. Everything else waits its turn.
     fn redraw_now(&mut self) {
         self.needs_redraw = true;
-        // Not if the last frame is still warm: the heartbeat will ask, within
-        // sixteen milliseconds, and a burst of input gets one frame instead of
-        // one frame each. See [`MIN_FRAME`].
-        if self.last_frame.elapsed() < MIN_FRAME {
-            return;
-        }
         if let Some(w) = self.window.as_ref() {
             w.request_redraw();
         }
@@ -511,6 +512,17 @@ impl Gui {
     /// held, macOS folds the letter into a control character first, so
     /// Ctrl+Shift+G arrives as `U+0007` and never equals `"g"`.
     fn intercept(&mut self, ev: &winit::event::KeyEvent) -> bool {
+        // F11 fills the screen, which is what F11 does everywhere. A terminal
+        // build cannot answer it — the window belongs to the emulator — so
+        // there is nothing in cian's tables for it to collide with.
+        if matches!(ev.logical_key, Key::Named(winit::keyboard::NamedKey::F11)) {
+            if let Some(w) = self.window.as_ref() {
+                // Maximised rather than borderless-fullscreen: this is a file
+                // manager, and the title bar and the taskbar are still wanted.
+                w.set_maximized(!w.is_maximized());
+            }
+            return true;
+        }
         if !self.mods.control_key() {
             return false;
         }
@@ -1019,6 +1031,14 @@ impl ApplicationHandler<Tick> for Gui {
                 self.apply_font_size();
                 let t0 = Instant::now();
                 let Some(t) = self.terminal.as_mut() else { return };
+                // A frame can be asked for while the window is minimised — the
+                // heartbeat does not know — and a grid with no rows or columns
+                // in it is not a frame: the backend walks its cells in chunks
+                // of `width`, and a chunk of nothing panics. See `Resized`.
+                match t.size() {
+                    Ok(grid) if grid.width > 0 && grid.height > 0 => {}
+                    _ => return,
+                }
                 if self.cian.take_full_clear() {
                     let _ = t.clear();
                 }
@@ -1044,11 +1064,14 @@ impl ApplicationHandler<Tick> for Gui {
                     if self.prof_frames == PROF_EVERY {
                         let n = PROF_EVERY;
                         let line = format!(
-                            "frame x{n}: {:?} total = cian {:?} + renderer {:?}, icons {:?}{}",
-                            self.prof_total / n,
-                            self.prof_build / n,
-                            (self.prof_total - self.prof_build) / n,
-                            self.prof_icons / n,
+                            // Microseconds spelled `us`. A `Duration`'s own
+                            // `{:?}` writes `µs`, and this line is read in a
+                            // Windows console — where it arrived as `ﾂｵs`.
+                            "frame x{n}: {} total = cian {} + renderer {}, icons {}{}",
+                            us(self.prof_total / n),
+                            us(self.prof_build / n),
+                            us((self.prof_total - self.prof_build) / n),
+                            us(self.prof_icons / n),
                             // Which part of cian's own time, when the parts are
                             // being counted. See `cian_tui::prof`.
                             cian_tui::prof::take_report(n),

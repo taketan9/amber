@@ -2549,12 +2549,12 @@ pub struct App {
     native_icons: bool,
     /// Filled every frame while `native_icons` is on.
     icon_slots: Vec<IconSlot>,
-    /// Which sidebar paths are directories, and when that was last asked.
+    /// Which sidebar paths are directories. Asked once per path, per session.
     ///
-    /// The sidebar is drawn every frame and a bookmark's target can come and
-    /// go, so it cannot be answered once — but it must not be answered thirty
-    /// times a second either. On Windows these paths are usually OneDrive's,
-    /// and a question about one of those is a question for the sync engine.
+    /// The sidebar is drawn every frame, and on Windows these paths are usually
+    /// OneDrive's — a question about one of those goes to the sync engine and
+    /// is measured in milliseconds. All it decides is which icon to ask for, so
+    /// the answer is kept rather than refreshed.
     sidebar_dirs: (Instant, std::collections::HashMap<PathBuf, bool>),
     /// What the user has typed to jump by name in the grid, and when.
     ///

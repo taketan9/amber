@@ -912,7 +912,13 @@ fn draw_sidebar(
 
     let head = Style::default().fg(th.dim).add_modifier(Modifier::BOLD);
     let item = Style::default().fg(text_tone(th.file.plain, th.status_bg));
-    let here = Style::default().fg(th.file.directory).add_modifier(Modifier::BOLD);
+    // Where you are, as a filled row rather than a shade of text. A sidebar is
+    // clicked at, and a click wants an answer you can see across the room —
+    // coloured letters on a coloured panel are not one.
+    let here = Style::default()
+        .fg(text_tone(th.file.directory, th.selected_bg))
+        .bg(th.selected_bg)
+        .add_modifier(Modifier::BOLD);
     let cwd = app.active_pane().map(|p| p.cwd.clone()).unwrap_or_default();
 
     let mut lines: Vec<Line> = Vec::new();
@@ -927,13 +933,16 @@ fn draw_sidebar(
     // Answers about the disk, at most once every few seconds — see
     // [`App::sidebar_dirs`]. Taken out of `app` for the length of the draw so
     // the closure below can read it while the rest of `app` is written to.
-    const SIDEBAR_STAT_EVERY: std::time::Duration = std::time::Duration::from_secs(3);
+    //
+    // Asked once per path and then never again. It was every three seconds,
+    // which is fine arithmetic and a bad idea: ten questions to the OneDrive
+    // sync engine is not a cost you can average away, it is a frame that takes
+    // eighteen milliseconds while its neighbours take half of one — and a
+    // hitch every three seconds is exactly what a program feels like when it
+    // is described as slow. What is at stake is which icon a bookmark gets, so
+    // a stale answer costs a wrong picture until the next start.
     let mut known: std::collections::HashMap<PathBuf, bool> =
-        if app.sidebar_dirs.0.elapsed() >= SIDEBAR_STAT_EVERY {
-            std::collections::HashMap::new()
-        } else {
-            std::mem::take(&mut app.sidebar_dirs.1)
-        };
+        std::mem::take(&mut app.sidebar_dirs.1);
     let mut slots: Vec<crate::IconSlot> = Vec::new();
     let place = |lines: &mut Vec<Line>,
                  rows: &mut Vec<(PathBuf, u16)>,
@@ -1005,9 +1014,6 @@ fn draw_sidebar(
     );
     let _ = surface;
     app.sidebar_rows = rows;
-    if app.sidebar_dirs.0.elapsed() >= SIDEBAR_STAT_EVERY {
-        app.sidebar_dirs.0 = std::time::Instant::now();
-    }
     app.sidebar_dirs.1 = known;
     // Handed back so the caller can add them to the frame's slots rather than
     // replacing them: the listing has its own.
@@ -2555,6 +2561,23 @@ fn draw_shell_inner(
         };
         f.render_widget(Paragraph::new(body).wrap(Wrap { trim: false }), inner);
         return;
+    }
+
+    // A shell that has started and not yet said anything. The panel would
+    // otherwise be blank, which is what "the shell does not work" looks like
+    // when what is happening is a profile script taking its time.
+    if let Some(s) = shell.active_session() {
+        if !s.has_spoken() {
+            // Japanese first, as everywhere cian speaks for itself: this
+            // function is not handed a language.
+            let waiting = "シェルは起動しました。まだ何も出力していません …";
+            f.render_widget(
+                Paragraph::new(waiting)
+                    .wrap(Wrap { trim: false })
+                    .style(Style::default().fg(theme().dim)),
+                inner,
+            );
+        }
     }
 
     // Shift+F12: show only the active leaf, filling the panel. Suppressed

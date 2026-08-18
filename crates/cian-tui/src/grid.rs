@@ -193,7 +193,12 @@ impl App {
     /// does. In cian's terms that is a mark, the same one `Space` sets, so a
     /// selection built with the mouse can be operated on with the keyboard.
     pub(crate) fn grid_click_mods(&mut self, col: u16, row: u16, adding: bool) -> bool {
-        if !self.icon_view {
+        // Both desktop-shaped views, not just the grid: the detail view has the
+        // same address bar, the same buttons and the same sidebar drawn down
+        // its left — and none of them answered a click, because this whole
+        // function began by asking whether the grid was showing. The places in
+        // the sidebar are the reason a sidebar is there.
+        if !self.single_pane_view() {
             return false;
         }
         // The address bar, before the buttons: it spans the width, so a click
@@ -240,6 +245,11 @@ impl App {
                 self.type_ahead.clear();
                 return true;
             }
+        }
+        // Below here is the grid's own: tiles, and the empty space between
+        // them. The detail view's rows are the listing's to answer.
+        if !self.icon_view {
+            return false;
         }
         if let Some(i) = self.grid_entry_at(col, row) {
             if let Some(p) = self.active_pane_mut() {
