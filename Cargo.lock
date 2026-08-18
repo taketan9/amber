@@ -621,6 +621,7 @@ dependencies = [
  "pollster",
  "ratatui-wgpu",
  "raw-window-handle",
+ "windows 0.62.2",
  "windows-sys 0.60.2",
  "winit",
 ]

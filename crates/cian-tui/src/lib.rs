@@ -3081,6 +3081,20 @@ impl App {
         }
     }
 
+    /// Read both listings again, keeping where each cursor was.
+    ///
+    /// For when something outside cian has changed the disk and cian knows the
+    /// moment it happened — the desktop's own context menu, which can rename or
+    /// delete or extract while cian is showing the folder it did it in.
+    pub(crate) fn reload_both_panes(&mut self) {
+        for tabs in [&mut self.left, &mut self.right] {
+            let pane = tabs.active_mut();
+            if !pane.is_synthetic() {
+                let _ = pane.reload();
+            }
+        }
+    }
+
     fn reload_active(&mut self) {
         if let Some(p) = self.active_pane_mut() {
             let _ = p.reload();

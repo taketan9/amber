@@ -39,6 +39,7 @@ mod font;
 mod glyph;
 mod input;
 mod pixels;
+mod shellmenu;
 mod sysicon;
 
 use std::num::NonZeroU32;
@@ -862,6 +863,45 @@ impl ApplicationHandler<Tick> for Gui {
                     }
                     self.feed(Event::Mouse(input::mouse_move(self.held, at, self.mods)));
                 }
+            }
+
+            // The desktop's own menu, in the views that are a desktop. cian's
+            // own is still on Shift, and is still what the classic view shows.
+            WindowEvent::MouseInput {
+                state: ElementState::Pressed,
+                button: MouseButton::Right,
+                ..
+            } if self.view() != View::Classic
+                && !self.mods.shift_key()
+                && shellmenu::available() =>
+            {
+                let paths: Vec<_> = self
+                    .cian
+                    .drag_targets_at(self.at.column, self.at.row)
+                    .into_iter()
+                    .filter(|p| shellmenu::addressable(p))
+                    .collect();
+                let Some(window) = self.window.clone() else { return };
+                let (cw, ch) = self.cell_size();
+                let at = shellmenu::to_screen(
+                    &window,
+                    (self.at.column as u32 * cw) as f64,
+                    ((self.at.row + 1) as u32 * ch) as f64,
+                );
+                if paths.is_empty() || !shellmenu::show(&window, &paths, at) {
+                    // Nothing under the pointer, or the shell declined: cian's
+                    // own menu rather than no menu at all.
+                    self.feed(Event::Mouse(input::mouse_button(
+                        MouseButton::Right,
+                        ElementState::Pressed,
+                        self.at,
+                        self.mods,
+                    ).unwrap()));
+                    return;
+                }
+                // Whatever was chosen may have changed the directory under us.
+                self.cian.reload_panes();
+                self.redraw_now();
             }
 
             WindowEvent::MouseInput { state, button, .. } => {

@@ -203,6 +203,15 @@ impl Session {
         self.app.drop_onto(targets, dest, move_it);
     }
 
+    /// Read both file panes again.
+    ///
+    /// For a front end that has just let something *else* change the disk — the
+    /// desktop's own context menu, which can rename, delete, extract or install
+    /// while cian watches — and cannot wait for the next poll to notice.
+    pub fn reload_panes(&mut self) {
+        self.app.reload_both_panes();
+    }
+
     /// Where icons belong, as of the last [`draw`](Self::draw). In cells.
     pub fn icon_slots(&self) -> &[crate::IconSlot] {
         &self.app.icon_slots

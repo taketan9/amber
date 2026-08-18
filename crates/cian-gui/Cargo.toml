@@ -35,6 +35,19 @@ pollster     = "0.4"
 # shell's icons come back as an `HICON`, so the pixels behind one have to be
 # fetched with GDI — hence the graphics features next to the shell ones.
 [target.'cfg(windows)'.dependencies]
+# The generated bindings *with* the COM plumbing: dragging files out to the
+# desktop needs interfaces called, not just functions. `windows-sys` has no
+# interfaces at all, and hand-rolling the three a drag source normally wants —
+# `IDataObject`, `IEnumFORMATETC`, `IDropSource` — means writing vtables that
+# cannot be compiled here and crash rather than misbehave when they are wrong.
+# See `dragout.rs` for how the shell is asked to make them instead.
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_System_Com",
+    "Win32_System_Ole",
+    "Win32_UI_Shell",
+    "Win32_UI_Shell_Common",
+] }
 windows-sys = { version = "0.60", features = [
     "Win32_Foundation",
     "Win32_Graphics_Gdi",
