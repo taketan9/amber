@@ -21,7 +21,7 @@
 
 use std::collections::HashMap;
 
-use ratatui_wgpu::shaders::DefaultPostProcessor;
+use ratatui_wgpu::shaders::AspectPreservingDefaultPostProcessor;
 use ratatui_wgpu::wgpu::*;
 use ratatui_wgpu::PostProcessor;
 
@@ -54,7 +54,23 @@ struct Upload {
 
 pub struct PixelLayer {
     /// The text, drawn by the implementation that owns that job.
-    text: DefaultPostProcessor,
+    ///
+    /// The *aspect-preserving* one, and the difference is the whole reason
+    /// this line has a comment. The text is composited into a texture whose
+    /// size is the largest exact multiple of the character size that fits the
+    /// window — and the ordinary blitter then stretches that texture over the
+    /// whole window. A window 2400 pixels wide with an 11-pixel cell holds 218
+    /// characters and 2398 pixels of text, so the last two pixel columns are
+    /// invented: the sampler is `Nearest`, so it duplicates two columns of
+    /// pixels, spread evenly across the width. Those two columns are duplicated
+    /// on *every row*, which is exactly what was reported — the same columns
+    /// smeared, at every font size, in every view. The library says so itself:
+    /// "This will stretch characters if the render area size falls between
+    /// multiples of the character size."
+    ///
+    /// This one blits one texel to one pixel and leaves the remainder alone.
+    /// See `BACKDROP` for what is done with the remainder.
+    text: AspectPreservingDefaultPostProcessor,
 
     /// Kept because `process` is handed a queue but never a device, and a
     /// picture arriving mid-session needs a texture made for it.
@@ -202,7 +218,12 @@ impl PostProcessor for PixelLayer {
         surface_config: &SurfaceConfiguration,
         _user_data: Self::UserData,
     ) -> Self {
-        let text = DefaultPostProcessor::compile(device, text_view, surface_config, ());
+        let text = AspectPreservingDefaultPostProcessor::compile(
+            device,
+            text_view,
+            surface_config,
+            (),
+        );
 
         let texture_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
             label: Some("cian picture layout"),

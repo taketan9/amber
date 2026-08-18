@@ -73,8 +73,25 @@ pub enum GridButton {
     Back,
     Forward,
     Up,
-    /// Leave the grid for the lists.
-    Close,
+    /// One of the three segments of the view switcher.
+    View(ViewWanted),
+}
+
+/// Which of the three looks the panes should wear.
+///
+/// cian does not own this — the front end does, because two of the three only
+/// exist in a window — so this is a request rather than a setting. cian draws
+/// the switcher, knows which segment is lit (it can see its own skin), records
+/// where the segments are so they can be clicked, and says which one was asked
+/// for. What that means is the window's business.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ViewWanted {
+    /// Bordered panes and a shell: cian as it has always looked.
+    Classic,
+    /// One borderless listing with a sidebar and an address bar.
+    Details,
+    /// One pane, as a wall of pictures.
+    Icons,
 }
 
 /// Where a file's icon belongs on screen, in cells, and which file it is.
@@ -986,6 +1003,10 @@ enum ZoneKind {
 /// An entry in the right-click menu.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum MenuItem {
+    /// The three views. What they mean is the front end's — see [`ViewWanted`].
+    ViewDetails,
+    ViewIcons,
+    ViewClassic,
     Copy,
     Cut,
     /// Enter cian's `:` command line (shell menu — the shell can't type `:`).
@@ -1354,6 +1375,9 @@ impl MenuItem {
             MenuItem::ArchiveMenu => tr(lang, "Archive ▸", "書庫 ▸"),
             MenuItem::InspectMenu => tr(lang, "Inspect ▸", "調べる ▸"),
             MenuItem::ViewMenu => tr(lang, "View ▸", "表示 ▸"),
+            MenuItem::ViewDetails => tr(lang, "▤ Details  (:view details)", "▤ 詳細一覧  (:view details)"),
+            MenuItem::ViewIcons => tr(lang, "▦ Icons  (:view icons)", "▦ アイコン  (:view icons)"),
+            MenuItem::ViewClassic => tr(lang, "▥ Classic  (:view classic)", "▥ クラシック  (:view classic)"),
             MenuItem::SessionMenu => tr(lang, "Session ▸", "セッション ▸"),
             MenuItem::CopyPathText => tr(lang, "Copy path text  (p)", "パスをコピー  (p)"),
             MenuItem::CopyFileRef => tr(
@@ -2608,7 +2632,8 @@ pub struct App {
     /// Each breadcrumb segment in that bar and the place it leads to.
     grid_crumbs: Vec<(PathBuf, Rect)>,
     /// Set by the grid's ✕ button; the front end reads it and leaves.
-    icon_view_close: bool,
+    /// The view the switcher (or `:view`) asked for, until the front end takes it.
+    view_request: Option<ViewWanted>,
     /// Draw the left pane as a grid of pictures instead of two lists.
     ///
     /// Only a front end that can draw a picture offers this; in a terminal it
@@ -2913,7 +2938,7 @@ impl App {
             sidebar_add: None,
             grid_address: None,
             grid_crumbs: Vec::new(),
-            icon_view_close: false,
+            view_request: None,
             icon_view: false,
             anim_dur: Duration::from_millis(
                 config.options.animation_ms.unwrap_or(DEFAULT_ANIM_MS),

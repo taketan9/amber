@@ -14395,6 +14395,10 @@ mod every_popup_behaves {
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/lib.rs"),
         )
         .unwrap();
+        // Windows checks the source out with CRLF, and a test that reads its
+        // own source has to read it the way it is on disk rather than the way
+        // it was written. This is what the Windows job is for.
+        let src = src.replace("\r\n", "\n");
         let body = src
             .split_once("\nenum Popup {")
             .expect("the enum is where it was")
@@ -14428,5 +14432,178 @@ mod every_popup_behaves {
             .collect();
         assert!(missing.is_empty(), "popups the sweep never sees: {missing:?}");
         assert!(variants.len() > 50, "the enum was parsed, not merely searched: {}", variants.len());
+    }
+}
+
+/// In the two mouse-driven views a letter goes to a file, not to a command.
+mod letters_move_in_the_desktop_views {
+    use super::*;
+
+    fn desktop(icon_view: bool) -> (tempfile::TempDir, App) {
+        let (d, mut app) = app_with(&["alpha.txt", "delta.txt", "2024-report.txt", "zulu.txt"]);
+        app.skin = Skin::Finder;
+        app.icon_view = icon_view;
+        (d, app)
+    }
+
+    fn name_under_cursor(app: &App) -> String {
+        app.active_pane().unwrap().selected().map(|e| e.name.clone()).unwrap_or_default()
+    }
+
+    /// The keys that were asked for by name.
+    const GIVEN_UP: &[char] = &[
+        'h', 'q', 'c', 'p', 'g', 'G', 'P', 'r', 'j', 'k', 'a', 'A', 's', 'u', 't', 'd', 'z', 'v',
+        'm', 'b',
+    ];
+
+    #[test]
+    fn none_of_the_named_keys_does_anything_but_move() {
+        for icons in [false, true] {
+            for &c in GIVEN_UP {
+                let (_d, mut app) = desktop(icons);
+                let tabs = app.left.tabs.len();
+                app.handle_key(KeyEvent::new(
+                    KeyCode::Char(c),
+                    if c.is_uppercase() { KeyModifiers::SHIFT } else { KeyModifiers::NONE },
+                ))
+                .unwrap();
+                assert!(
+                    matches!(app.popup, Popup::None),
+                    "icon_view={icons}: {c:?} opened {:?}",
+                    app.popup,
+                );
+                assert_eq!(app.mode, Mode::Normal, "icon_view={icons}: {c:?} changed mode");
+                assert_eq!(app.left.tabs.len(), tabs, "icon_view={icons}: {c:?} touched the tabs");
+            }
+        }
+    }
+
+    #[test]
+    fn a_letter_goes_to_the_file_that_starts_with_it() {
+        for icons in [false, true] {
+            let (_d, mut app) = desktop(icons);
+            app.handle_key(key('d')).unwrap();
+            assert_eq!(name_under_cursor(&app), "delta.txt", "icon_view={icons}");
+            app.handle_key(key('z')).unwrap();
+            assert_eq!(name_under_cursor(&app), "zulu.txt", "icon_view={icons}");
+        }
+    }
+
+    #[test]
+    fn so_does_a_digit() {
+        for icons in [false, true] {
+            let (_d, mut app) = desktop(icons);
+            app.handle_key(key('2')).unwrap();
+            assert_eq!(name_under_cursor(&app), "2024-report.txt", "icon_view={icons}");
+        }
+    }
+
+    #[test]
+    fn the_detail_view_keeps_the_letters_that_were_not_asked_for() {
+        let (_d, mut app) = desktop(false);
+        app.handle_key(key('f')).unwrap();
+        assert!(matches!(app.popup, Popup::Search { .. }), "f still searches: {:?}", app.popup);
+    }
+
+    #[test]
+    fn the_classic_view_keeps_all_of_them() {
+        let (_d, mut app) = app_with(&["alpha.txt", "delta.txt"]);
+        app.handle_key(key('t')).unwrap();
+        assert!(
+            matches!(app.popup, Popup::ConfirmNewTab { .. }),
+            "t is still a command in the classic view: {:?}",
+            app.popup,
+        );
+    }
+}
+
+/// The three views, and the three ways of asking for one.
+mod the_view_switcher {
+    use super::*;
+
+    fn painted(app: &mut App) -> String {
+        render(app, 140, 40).join("").chars().filter(|c| !c.is_whitespace()).collect()
+    }
+
+    fn in_view(icon_view: bool, finder: bool) -> (tempfile::TempDir, App) {
+        let (d, mut app) = app_with(&["a.txt"]);
+        app.skin = if finder { Skin::Finder } else { Skin::Classic };
+        app.icon_view = icon_view;
+        (d, app)
+    }
+
+    #[test]
+    fn all_three_views_draw_it() {
+        for (icons, finder) in [(false, true), (true, true), (false, false)] {
+            let (_d, mut app) = in_view(icons, finder);
+            let text = painted(&mut app);
+            assert!(text.contains("詳細"), "icons={icons} finder={finder}: {text:.200}");
+            assert!(text.contains("アイコン"), "icons={icons} finder={finder}");
+            assert!(text.contains("クラシック"), "icons={icons} finder={finder}");
+            assert_eq!(
+                app.grid_buttons.iter().filter(|(b, _)| matches!(b, GridButton::View(_))).count(),
+                3,
+                "three segments to click",
+            );
+        }
+    }
+
+    /// Clicking a segment asks for that view — in every view, including the
+    /// classic one, where the switcher rides the top border row.
+    #[test]
+    fn clicking_a_segment_asks_for_that_view() {
+        for (icons, finder) in [(false, true), (true, true), (false, false)] {
+            let (_d, mut app) = in_view(icons, finder);
+            let _ = painted(&mut app);
+            let (_, r) = app
+                .grid_buttons
+                .iter()
+                .copied()
+                .find(|(b, _)| matches!(b, GridButton::View(crate::ViewWanted::Icons)))
+                .expect("an icons segment");
+            app.handle_mouse(MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: r.x,
+                row: r.y,
+                modifiers: KeyModifiers::NONE,
+            });
+            assert_eq!(
+                app.view_request,
+                Some(crate::ViewWanted::Icons),
+                "icons={icons} finder={finder}: the click asked for the icon view",
+            );
+        }
+    }
+
+    #[test]
+    fn the_command_asks_too_and_leaves_the_viewer_alone() {
+        let (_d, mut app) = in_view(false, true);
+        app.command_buffer = "view icons".into();
+        app.run_command();
+        assert_eq!(app.view_request, Some(crate::ViewWanted::Icons));
+        assert!(matches!(app.popup, Popup::None), "no file was opened");
+
+        // …and bare `:view` still opens the file under the cursor.
+        app.view_request = None;
+        app.command_buffer = "view".into();
+        app.run_command();
+        assert_eq!(app.view_request, None, "no view was asked for");
+        assert!(matches!(app.popup, Popup::Viewer { .. }), "the file opened: {:?}", app.popup);
+    }
+
+    #[test]
+    fn the_menu_asks_too() {
+        let (_d, mut app) = in_view(false, true);
+        app.run_menu_item(MenuItem::ViewClassic).unwrap();
+        assert_eq!(app.view_request, Some(crate::ViewWanted::Classic));
+    }
+
+    /// Nothing switches by itself: two of the three views only exist in a
+    /// window, so cian only ever *asks*.
+    #[test]
+    fn asking_does_not_change_the_view_by_itself() {
+        let (_d, mut app) = in_view(false, true);
+        app.run_menu_item(MenuItem::ViewIcons).unwrap();
+        assert!(!app.icon_view, "still the detail view until the window says otherwise");
     }
 }

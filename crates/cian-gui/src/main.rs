@@ -67,6 +67,15 @@ const SIZE_MAX: u32 = 72;
 /// and never again.
 const NO_ICON: u64 = 0;
 
+/// The texture id of the one-pixel patch that fills the window's edge.
+///
+/// The text is blitted one texel to one pixel now (see [`pixels::PixelLayer`]),
+/// which is what makes it sharp and what leaves up to one character's worth of
+/// window uncovered along the right edge and the bottom. Uncovered means the
+/// blit's own transparent clear, which reads as black. So cian paints it, in
+/// the colour the panes are standing on.
+const BACKDROP: u64 = 2;
+
 /// How close together two clicks have to be to count as one double click.
 /// macOS's own default is half a second; matching it means the grid feels the
 /// same as everything else on the desktop.
@@ -392,6 +401,9 @@ struct Gui {
     /// was asked to fit: it keeps its shape, so one of the two dimensions comes
     /// back short and the picture is centred in what is left.
     picture_size: std::collections::HashMap<IconKey, (f32, f32)>,
+    /// The colour the edge patch was last painted, so it is only uploaded when
+    /// the theme actually changes.
+    backdrop: Option<(u8, u8, u8)>,
     /// The picture textures now on the layer — at most one, and dropped as soon
     /// as another arrives. A window-sized photograph is megabytes of texture,
     /// and unlike an icon it will not be wanted again.
@@ -527,6 +539,7 @@ impl Gui {
             icons: iconjob::Icons::start(),
             // Ids start above the smoke test's, which uses 1.
             next_icon_id: 100,
+            backdrop: None,
             picture_size: std::collections::HashMap::new(),
             picture_ids: Vec::new(),
             last_draws: 0,
@@ -841,13 +854,22 @@ impl Gui {
     /// fills in visibly rather than stopping the world once.
     fn place_icons(&mut self) {
         let Some(t) = self.terminal.as_mut() else { return };
-        let (cw, ch) = {
+        // The cell, in whole pixels, and the strip of window the cells do not
+        // reach. Integer division on purpose: the grid is `px / cell` cells of
+        // `cell` pixels each, so `px / grid` gives the cell back exactly, and
+        // what is left over is the strip. Measuring the cell as a fraction
+        // (`px as f32 / grid as f32`) put every icon a little further right
+        // than its row, by up to two pixels at the far edge.
+        let (cw, ch, edge) = {
             let (Some(w), Some(grid)) = (self.window.as_ref(), t.size()) else { return };
             let px = w.inner_size();
             if grid.width == 0 || grid.height == 0 {
                 return;
             }
-            (px.width as f32 / grid.width as f32, px.height as f32 / grid.height as f32)
+            let cw = px.width / grid.width as u32;
+            let ch = px.height / grid.height as u32;
+            let covered = (cw * grid.width as u32, ch * grid.height as u32);
+            (cw as f32, ch as f32, (covered, (px.width, px.height)))
         };
 
         // Anything the worker has finished since the last frame, made into
@@ -890,6 +912,36 @@ impl Gui {
         }
 
         let mut draws = Vec::new();
+        // The window's edge, where the one-to-one text blit stops. Painted
+        // before anything else so icons and pictures still land on top.
+        let ((cover_w, cover_h), (win_w, win_h)) = edge;
+        if cover_w < win_w || cover_h < win_h {
+            let rgb = self.cian.theme_surface().unwrap_or((0, 0, 0));
+            if self.backdrop != Some(rgb) {
+                self.backdrop = Some(rgb);
+                t.upload(BACKDROP, 1, 1, vec![rgb.0, rgb.1, rgb.2, 255]);
+            }
+            if cover_w < win_w {
+                draws.push(pixels::Draw {
+                    id: BACKDROP,
+                    x: cover_w as f32,
+                    y: 0.0,
+                    w: (win_w - cover_w) as f32,
+                    h: win_h as f32,
+                    alpha: 1.0,
+                });
+            }
+            if cover_h < win_h {
+                draws.push(pixels::Draw {
+                    id: BACKDROP,
+                    x: 0.0,
+                    y: cover_h as f32,
+                    w: win_w as f32,
+                    h: (win_h - cover_h) as f32,
+                    alpha: 1.0,
+                });
+            }
+        }
         for slot in self.cian.icon_slots() {
             let key = IconKey::of(slot);
             let id = match self.icon_ids.get(&key) {
@@ -1117,12 +1169,31 @@ impl ApplicationHandler<Tick> for Gui {
         // launching puts it back.
         appkit::announce();
         let px = window.inner_size();
+        // The cell, and what is left of the window after a whole number of
+        // them — the two numbers that decide whether the text is sharp. See
+        // `pixels::PixelLayer`: a non-zero remainder used to be stretched
+        // across the whole width, duplicating that many pixel columns.
+        let grid = self.terminal.as_ref().and_then(|t| t.size());
+        let fit = match grid {
+            Some(g) if g.width > 0 && g.height > 0 => {
+                let (cw, ch) = (px.width / g.width as u32, px.height / g.height as u32);
+                format!(
+                    ", grid {}x{} cells of {cw}x{ch} px, {}x{} px left over",
+                    g.width,
+                    g.height,
+                    px.width - cw * g.width as u32,
+                    px.height - ch * g.height as u32,
+                )
+            }
+            _ => String::new(),
+        };
         cian_core::log::log(&format!(
-            "cian starting in a window {}x{} px, font {}, present {:?}",
+            "cian starting in a window {}x{} px, font {}, present {:?}{}",
             px.width,
             px.height,
             self.font_name,
             present_mode(),
+            fit,
         ));
         window.request_redraw();
         self.window = Some(window);
@@ -1525,8 +1596,12 @@ impl ApplicationHandler<Tick> for Gui {
             self.needs_redraw = true;
         }
 
-        if self.cian.take_icon_view_close() {
-            self.set_view(View::Classic);
+        if let Some(want) = self.cian.take_view_request() {
+            self.set_view(match want {
+                cian_tui::ViewWanted::Classic => View::Classic,
+                cian_tui::ViewWanted::Details => View::Finder,
+                cian_tui::ViewWanted::Icons => View::Icons,
+            });
         }
         self.needs_redraw |= self.cian.tick();
         // Profiling paints continuously, on purpose: the question it answers is

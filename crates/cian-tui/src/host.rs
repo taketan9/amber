@@ -170,12 +170,13 @@ impl Session {
         self.app.icon_view
     }
 
-    /// Has the grid's ✕ been pressed? Reading it clears it.
+    /// Which view was asked for, if one was. Reading it clears it.
     ///
-    /// The grid cannot leave itself: which view is showing is the front end's
-    /// to decide, and the button only asks.
-    pub fn take_icon_view_close(&mut self) -> bool {
-        std::mem::take(&mut self.app.icon_view_close)
+    /// cian cannot change view by itself: two of the three only exist in a
+    /// window, so the switcher, `:view` and the menu all only *ask*. See
+    /// [`crate::ViewWanted`].
+    pub fn take_view_request(&mut self) -> Option<crate::ViewWanted> {
+        self.app.view_request.take()
     }
 
     /// A double click at this cell. Returns whether the grid took it.

@@ -155,6 +155,13 @@ fn draw_split(f: &mut Frame, main_area: Rect, app: &mut App, ov: AnimOverride) {
     // the file under the cursor instead; the PTY runs on underneath, and
     // focusing the shell (Shift+J / click) gets its pixels back.
     app.scroll_tracks = std::mem::take(&mut tracks);
+    // The switcher, on the top border row. The classic view has no toolbar to
+    // hang it from and should not grow one — a row given to chrome is a row
+    // taken from the files — so it sits in the frame itself, at the right-hand
+    // end where nothing else is drawn.
+    app.grid_buttons.clear();
+    let th = theme();
+    draw_view_switcher(f, Rect::new(main_area.x, main_area.y, main_area.width, 1), app, &th);
     let log_border = recording_pulse(app.started.elapsed());
     if app.preview_on && app.focused != FocusedPane::Shell {
         crate::prof::timed(crate::prof::Phase::Shell, || draw_preview_panel(f, shell_area, app));
@@ -770,31 +777,23 @@ fn draw_desktop_chrome(
     let addr = Rect::new(inner.x, inner.y + 1, inner.width, 1);
     inner = Rect::new(inner.x, inner.y + 3, inner.width, inner.height.saturating_sub(3));
 
-    let dim = Style::default().fg(th.dim);
     let lit = Style::default().fg(text_tone(th.accent, bg.unwrap_or(th.popup_bg)));
     let mut spans = Vec::new();
     let mut x = bar.x;
     app.grid_buttons.clear();
-    // The view button says where you *are*, and pressing it moves on. A
-    // button labelled with its destination is fine when there are two; with
-    // three it just raises the question of which one it means.
-    let view_label = if app.icon_view {
-        "  ▦ アイコン表示  "
-    } else {
-        "  ▤ 詳細表示  "
-    };
     for (label, what) in [
         ("  ‹ 戻る  ", GridButton::Back),
         ("  › 進む  ", GridButton::Forward),
         ("  ↑ 上へ  ", GridButton::Up),
-        (view_label, GridButton::Close),
     ] {
         let w = crate::util::width(label) as u16;
         app.grid_buttons.push((what, Rect::new(x, bar.y, w, 1)));
         x += w;
-        spans.push(Span::styled(label, if what == GridButton::Close { dim } else { lit }));
+        spans.push(Span::styled(label, lit));
     }
     f.render_widget(Paragraph::new(Line::from(spans)), bar);
+    // …and the view switcher at the other end of the same row.
+    draw_view_switcher(f, bar, app, th);
 
     // The address bar. Clicking it opens the same "go to path" prompt `:` has
     // always had, seeded with where you are — so a typed path and Enter get you
@@ -857,6 +856,71 @@ fn draw_desktop_chrome(
     f.render_widget(Paragraph::new(Line::from(spans)), addr);
 
     Some(inner)
+}
+
+/// The three views, as three segments, with the one you are in filled in.
+///
+/// It was one button that said where you *are* and, pressed, went somewhere
+/// else — to the classic view, whichever of the other two you were in. Which is
+/// two questions a button should not raise: what does it do, and where will it
+/// land. Three segments answer both by being three: the lit one is here, the
+/// other two are one click away each, and nothing has to be cycled through.
+///
+/// Drawn right-aligned in `row`, and only if `row` is wide enough to hold it
+/// with the buttons at the other end still readable.
+///
+/// Returns the rectangle it took, so a caller that shares the row knows what is
+/// spoken for.
+pub(crate) fn draw_view_switcher(
+    f: &mut Frame,
+    row: Rect,
+    app: &mut App,
+    th: &ResolvedTheme,
+) -> Rect {
+    let here = if app.icon_view {
+        crate::ViewWanted::Icons
+    } else if app.skin == Skin::Finder {
+        crate::ViewWanted::Details
+    } else {
+        crate::ViewWanted::Classic
+    };
+    let segments = [
+        (" ▤ 詳細 ", crate::ViewWanted::Details),
+        (" ▦ アイコン ", crate::ViewWanted::Icons),
+        (" ▥ クラシック ", crate::ViewWanted::Classic),
+    ];
+    let total: u16 = segments.iter().map(|(l, _)| crate::util::width(l) as u16).sum();
+    // Half the row, at most: a switcher that pushes the address bar off the
+    // screen is not an improvement on a switcher nobody can find.
+    if row.width < total + 4 || total > row.width / 2 + total / 2 {
+        return Rect::new(row.x + row.width, row.y, 0, 1);
+    }
+    // The control paints its own background rather than borrowing whatever is
+    // behind it. In the classic view "behind it" is a border row, and dim text
+    // on a border is the one thing the contrast test in `tests.rs` exists to
+    // catch — it caught this.
+    let surface = th.status_bg;
+    let mut x = row.x + row.width - total;
+    let taken = Rect::new(x, row.y, total, 1);
+    let mut spans = Vec::new();
+    for (label, want) in segments {
+        let w = crate::util::width(label) as u16;
+        app.grid_buttons.push((GridButton::View(want), Rect::new(x, row.y, w, 1)));
+        x += w;
+        // The one you are in is filled rather than merely brighter: a segmented
+        // control says "here" with a block, and colour alone is a hint.
+        let style = if want == here {
+            Style::default()
+                .fg(readable_on(th.selected_bg))
+                .bg(th.selected_bg)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(text_tone(th.dim, surface)).bg(surface)
+        };
+        spans.push(Span::styled(label, style));
+    }
+    f.render_widget(Paragraph::new(Line::from(spans)), taken);
+    taken
 }
 
 /// How wide the grid's sidebar is, in cells.

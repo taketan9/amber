@@ -33,7 +33,19 @@ impl App {
     /// with a modifier — falls through to the keys cian has always had, so the
     /// grid is a different way of *moving*, not a different program.
     pub(crate) fn grid_key(&mut self, key: KeyEvent) -> bool {
-        if !self.icon_view
+        // Both desktop-shaped views, not just the grid.
+        //
+        // These two are driven with the mouse, and a letter in a view driven
+        // with the mouse means *go to the file that starts with it* — that is
+        // what every desktop file manager does with a letter, and what anyone
+        // arriving at one expects. So in these views cian gives the letters up
+        // wholesale: `d` goes to `docs/` rather than deleting, `t` goes to
+        // `todo.md` rather than opening a tab. Every one of those commands is
+        // still on `:`, on the menu, on an F-key, or under the mouse.
+        //
+        // The digits go the same way, for the same reason — they picked a tab,
+        // and a tab is a thing you can see and click. F1/F2 still walk them.
+        if !self.single_pane_view()
             || !matches!(self.popup, Popup::None)
             || self.mode != Mode::Normal
             || self.focused == FocusedPane::Shell
@@ -49,18 +61,44 @@ impl App {
 
         let cols = self.icon_cols.max(1);
         match key.code {
-            KeyCode::Up => self.grid_move(-(cols as isize)),
-            KeyCode::Down => self.grid_move(cols as isize),
-            KeyCode::Left => self.grid_move(-1),
-            KeyCode::Right => self.grid_move(1),
-            // Digits are left alone: they pick a tab, and no one looks for a
-            // file by typing its leading digit often enough to be worth that.
-            KeyCode::Char(c) if c.is_alphanumeric() && !c.is_ascii_digit() => {
-                self.type_ahead(c)
-            }
+            // Only the grid walks in two dimensions; the detail view is a list,
+            // and in a list the arrows mean what they have always meant.
+            KeyCode::Up if self.icon_view => self.grid_move(-(cols as isize)),
+            KeyCode::Down if self.icon_view => self.grid_move(cols as isize),
+            KeyCode::Left if self.icon_view => self.grid_move(-1),
+            KeyCode::Right if self.icon_view => self.grid_move(1),
+            KeyCode::Char(c) if self.typing_moves(c) => self.type_ahead(c),
             _ => return false,
         }
         true
+    }
+
+    /// Does this key mean "go to the file that starts with it" in this view?
+    ///
+    /// The grid gives up every letter and digit: it is a wall of pictures, and
+    /// nothing about it invites typing a command.
+    ///
+    /// The detail view is a listing, and someone who has used cian in a
+    /// terminal still reads it as one — so it gives up a named set instead of
+    /// the whole alphabet. These are the ones asked for, and they are the ones
+    /// that hurt: single letters that do something to a file. What is left —
+    /// `f` find, `n`/`N` next match, `e` encoding, `x` launch, `w` close tab —
+    /// keeps working, and everything given up is still on `:`, on the menu, on
+    /// an F-key or under the mouse.
+    fn typing_moves(&self, c: char) -> bool {
+        /// Asked for by name. `g`/`G` are vim's top and bottom, `A`/`P` the
+        /// shifted pair of `a`/`p`; the rest are cian's one-letter commands.
+        const GIVEN_UP: &[char] = &[
+            'h', 'q', 'c', 'p', 'g', 'G', 'P', 'r', 'j', 'k', 'a', 'A', 's', 'u', 't', 'd', 'z',
+            'v', 'm', 'b',
+        ];
+        if self.icon_view {
+            return c.is_alphanumeric();
+        }
+        // The digits picked a tab. A tab is a thing you can see and click, and
+        // F1/F2 still walk them — while `1` in a listing of numbered files is
+        // worth having.
+        c.is_ascii_digit() || GIVEN_UP.contains(&c)
     }
 
     /// Step the cursor by `by` entries, stopping at the ends rather than
@@ -239,6 +277,13 @@ impl App {
     /// does. In cian's terms that is a mark, the same one `Space` sets, so a
     /// selection built with the mouse can be operated on with the keyboard.
     pub(crate) fn grid_click_mods(&mut self, col: u16, row: u16, adding: bool) -> bool {
+        // The view switcher is in every view, including the classic one, where
+        // it rides the top border row. It is the only piece of chrome that is,
+        // so it is answered before the rest of this function bows out.
+        if let Some(crate::GridButton::View(want)) = self.grid_button_at(col, row) {
+            self.view_request = Some(want);
+            return true;
+        }
         // Both desktop-shaped views, not just the grid: the detail view has the
         // same address bar, the same buttons and the same sidebar drawn down
         // its left — and none of them answered a click, because this whole
@@ -405,9 +450,10 @@ impl App {
                     let _ = p.go_parent();
                 }
             }
-            // Leaving the grid is the front end's business — it owns the view —
-            // so this only says so, and the window notices.
-            Close => self.icon_view_close = true,
+            // Which view is showing is the front end's business — it owns two
+            // of the three — so this only says which was asked for, and the
+            // window notices on its next turn.
+            View(want) => self.view_request = Some(want),
         }
     }
 }

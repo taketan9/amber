@@ -899,6 +899,14 @@ impl App {
             self.apply_sort_key(key);
             return;
         }
+        // The view switcher, wherever it is drawn. Before the tabs and before
+        // the border drag: it sits *on* the top border row in the classic view,
+        // and a border-first test would read every click on it as a resize.
+        if matches!(ev.kind, MouseEventKind::Down(MouseButton::Left))
+            && self.grid_click_mods(col, row, false)
+        {
+            return;
+        }
         // Clicking a tab label switches to that tab. Checked before the border
         // drag, because the shell's tab bar sits on the files|shell seam row —
         // divider-first would swallow every shell-tab click as a drag.

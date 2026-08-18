@@ -60,7 +60,23 @@ impl App {
             "man" | "help" | "h" => self.open_manual(),
             "paste" => { let _ = self.paste_clip(); }
             "hidden" => self.toggle_hidden(),
-            "view" | "look" => self.look_inside(),
+            // `:view` on its own has always opened the file under the cursor,
+            // and still does. `:view details|icons|classic` switches the look —
+            // the same three the switcher in the corner offers, for a hand that
+            // is already on the keyboard.
+            "view" | "look" => match rest {
+                "" => self.look_inside(),
+                "details" | "detail" | "finder" | "list" => {
+                    self.view_request = Some(crate::ViewWanted::Details)
+                }
+                "icons" | "icon" | "grid" => self.view_request = Some(crate::ViewWanted::Icons),
+                "classic" | "panes" => self.view_request = Some(crate::ViewWanted::Classic),
+                other => {
+                    self.message = Some(format!(
+                        "{other}? — :view details | icons | classic",
+                    ))
+                }
+            },
             "diff" | "compare" => self.open_diff(),
             "copyto" => self.start_dest_picker(PendingOp::Copy),
             "moveto" => self.start_dest_picker(PendingOp::Move),

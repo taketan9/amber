@@ -299,6 +299,9 @@ impl App {
                 Some(v)
             }
             MenuItem::ViewMenu => Some(vec![
+                MenuItem::ViewDetails,
+                MenuItem::ViewIcons,
+                MenuItem::ViewClassic,
                 MenuItem::HiddenToggle,
                 MenuItem::ThemePickPane,
                 MenuItem::Back,
@@ -602,6 +605,11 @@ impl App {
                 self.start_pane_theme_picker(side);
             }
             MenuItem::Shortcuts => self.start_shortcuts(),
+            // Asked for, not done: two of the three views only exist in a
+            // window, so the window is what answers. See [`crate::ViewWanted`].
+            MenuItem::ViewDetails => self.view_request = Some(crate::ViewWanted::Details),
+            MenuItem::ViewIcons => self.view_request = Some(crate::ViewWanted::Icons),
+            MenuItem::ViewClassic => self.view_request = Some(crate::ViewWanted::Classic),
             MenuItem::Lang => {
                 // Flip the interface language; every localized string reads
                 // `self.lang` at draw time, so the next frame is fully in the
