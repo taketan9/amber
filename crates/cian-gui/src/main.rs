@@ -1258,22 +1258,28 @@ impl ApplicationHandler<Tick> for Gui {
                 // Point at it first: the menu is about the file under the
                 // pointer, and the highlight is what says which that is.
                 self.cian.point_at(self.at.column, self.at.row);
-                let mut paths: Vec<_> = self
+                let paths: Vec<_> = self
                     .cian
                     .drag_targets_at(self.at.column, self.at.row)
                     .into_iter()
                     .filter(|p| shellmenu::addressable(p))
                     .collect();
                 // Empty space is not nothing: it is the folder being looked at,
-                // which is what the Finder answers for when a click lands
-                // between the files.
-                if paths.is_empty() {
-                    paths.extend(
-                        self.cian
-                            .drop_target_at(self.at.column, self.at.row)
-                            .filter(|p| shellmenu::addressable(p)),
-                    );
-                }
+                // and the folder has a menu of its own — the one with paste on
+                // it. Which is the whole reason the two are told apart here
+                // rather than both being handed over as "some paths".
+                let about = if paths.is_empty() {
+                    match self
+                        .cian
+                        .drop_target_at(self.at.column, self.at.row)
+                        .filter(|p| shellmenu::addressable(p))
+                    {
+                        Some(dir) => shellmenu::About::Folder(dir),
+                        None => shellmenu::About::Items(Vec::new()),
+                    }
+                } else {
+                    shellmenu::About::Items(paths)
+                };
                 let Some(window) = self.window.clone() else { return };
                 let (cw, ch) = self.cell_size();
                 let at = shellmenu::to_screen(
@@ -1281,7 +1287,7 @@ impl ApplicationHandler<Tick> for Gui {
                     (self.at.column as u32 * cw) as f64,
                     ((self.at.row + 1) as u32 * ch) as f64,
                 );
-                if paths.is_empty() || !shellmenu::show(&window, &paths, at) {
+                if !shellmenu::show(&window, &about, at) {
                     // Nothing under the pointer, or the shell declined: cian's
                     // own menu rather than no menu at all.
                     self.feed(Event::Mouse(input::mouse_button(

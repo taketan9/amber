@@ -21,7 +21,20 @@
 //!
 //! Windows hands its whole menu over: `IContextMenu` is the same object
 //! Explorer asks, so what appears is exactly what Explorer would have shown,
-//! third-party entries and all.
+//! third-party entries and all. There are *two* of those objects, and both are
+//! asked here — see [`About`]. The one for a selection comes from the parent
+//! folder (`GetUIObjectOf`) and carries copy, cut, rename, delete, properties;
+//! the one for the folder you are looking at comes from the folder itself
+//! (`CreateViewObject`) and is the only one that has ever carried **paste**.
+//! A file manager that could copy and never paste would be half a file
+//! manager, which is why the empty space between the files answers too.
+//!
+//! What is *not* forwarded is the menu's own window messages. A shell menu
+//! whose submenus are built on demand — "New ▸", "Send to ▸", some
+//! third-party ones — fills them in response to `WM_INITMENUPOPUP`, which
+//! reaches an `IContextMenu2`/`IContextMenu3` only through a window
+//! subclass. Without one, those submenus can come up empty. Every top-level
+//! entry, paste included, works regardless.
 //!
 //! macOS has no such call. The Finder builds its menu privately and there is no
 //! API that returns it — so what happens here is the next true thing: a real
@@ -34,18 +47,35 @@
 //! Linux keeps cian's own: there the menu belongs to a desktop environment
 //! rather than to the system, and there is no one thing to ask.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
-/// Show the system's context menu for `paths` at a point in *screen* pixels,
-/// and carry out whatever is chosen.
+/// What the menu is to be about.
+///
+/// The distinction is Windows', and it is not a nicety: the shell builds *two*
+/// different menus for a folder. The one for a folder as an **item** — the one
+/// you get by right-clicking its icon — carries open, copy, cut, rename,
+/// delete, properties. The one for a folder as a **place**, which is what a
+/// right-click on the empty space in a window gives you, carries **paste**,
+/// **new ▸** and refresh. They come from different COM calls, and the second
+/// one is the one a file manager cannot do without: a copy with nowhere to be
+/// pasted is half an operation.
+pub enum About {
+    /// These files and folders, as a selection.
+    Items(Vec<PathBuf>),
+    /// This folder, as the place you are looking at.
+    Folder(PathBuf),
+}
+
+/// Show the system's context menu at a point in *screen* pixels, and carry out
+/// whatever is chosen.
 ///
 /// Returns whether a menu was shown. `false` means this platform has none to
 /// show and the caller should open cian's own instead.
-pub fn show(window: &winit::window::Window, paths: &[std::path::PathBuf], at: (i32, i32)) -> bool {
-    if paths.is_empty() {
+pub fn show(window: &winit::window::Window, about: &About, at: (i32, i32)) -> bool {
+    if matches!(about, About::Items(paths) if paths.is_empty()) {
         return false;
     }
-    platform::show(window, paths, at)
+    platform::show(window, about, at)
 }
 
 /// Whether this platform can show a system menu at all. Asked before a click is
@@ -63,15 +93,16 @@ pub fn addressable(path: &Path) -> bool {
 #[cfg(windows)]
 mod platform {
     use std::os::windows::ffi::OsStrExt;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
 
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
     use windows::core::PCWSTR;
     use windows::Win32::Foundation::HWND;
+    use windows::Win32::System::Com::IBindCtx;
     use windows::Win32::UI::Shell::Common::ITEMIDLIST;
     use windows::Win32::UI::Shell::{
-        IContextMenu, IShellFolder, ILCreateFromPathW, ILFree, SHBindToParent, CMF_NORMAL,
-        CMINVOKECOMMANDINFO,
+        IContextMenu, IShellFolder, ILCreateFromPathW, ILFree, SHBindToObject, SHBindToParent,
+        CMF_NORMAL, CMINVOKECOMMANDINFO,
     };
     use windows::Win32::UI::WindowsAndMessaging::{
         CreatePopupMenu, DestroyMenu, SetForegroundWindow, TrackPopupMenuEx, SW_SHOWNORMAL,
@@ -85,7 +116,54 @@ mod platform {
     const FIRST_ID: u32 = 1;
     const LAST_ID: u32 = 0x7fff;
 
-    pub fn show(window: &winit::window::Window, paths: &[PathBuf], at: (i32, i32)) -> bool {
+    pub fn show(window: &winit::window::Window, about: &super::About, at: (i32, i32)) -> bool {
+        match about {
+            super::About::Items(paths) => items(window, paths, at),
+            super::About::Folder(dir) => background(window, dir, at),
+        }
+    }
+
+    /// The menu for a folder *as a place*: paste, new, refresh.
+    ///
+    /// A different object to the one below, from a different call. The items
+    /// menu is asked of the parent folder about its children; this one is asked
+    /// of the folder itself, and it is the only one that has ever carried
+    /// paste — which is why right-clicking the empty space in Explorer gives
+    /// you something else than right-clicking a file does.
+    fn background(window: &winit::window::Window, dir: &Path, at: (i32, i32)) -> bool {
+        let Some(hwnd) = hwnd(window) else { return false };
+        let wide: Vec<u16> = dir.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
+        // SAFETY: a NUL-terminated wide string that outlives the call.
+        //
+        // Typed `*const` where it is bound rather than where it is used: the
+        // pointer coercion happens at a `let` with a type on it, and does not
+        // happen inside the `Some(..)` that frees it.
+        let id: *const ITEMIDLIST = unsafe { ILCreateFromPathW(PCWSTR(wide.as_ptr())) };
+        if id.is_null() {
+            return false;
+        }
+        // SAFETY: `id` is a live absolute id list, freed once below.
+        let shown = unsafe {
+            // A null folder means "relative to the desktop", which is what an
+            // absolute id list is relative to.
+            match SHBindToObject::<_, _, IShellFolder>(
+                None::<&IShellFolder>,
+                id,
+                None::<&IBindCtx>,
+            ) {
+                Ok(folder) => match folder.CreateViewObject::<IContextMenu>(hwnd) {
+                    Ok(menu) => track(hwnd, &menu, at),
+                    Err(_) => false,
+                },
+                Err(_) => false,
+            }
+        };
+        // SAFETY: came from `ILCreateFromPathW` and is freed once.
+        unsafe { ILFree(Some(id)) };
+        shown
+    }
+
+    fn items(window: &winit::window::Window, paths: &[PathBuf], at: (i32, i32)) -> bool {
         let Some(hwnd) = hwnd(window) else { return false };
         // One folder's worth at a time: a shell menu is built by the folder the
         // items live in, and items from two folders have no single one to ask.
@@ -146,6 +224,17 @@ mod platform {
         let Ok(menu) = folder.GetUIObjectOf::<IContextMenu>(hwnd, &children, None) else {
             return false;
         };
+        track(hwnd, &menu, at)
+    }
+
+    /// Put a shell menu on screen, wait for it, and invoke what was picked.
+    ///
+    /// The same for both kinds of menu: where the `IContextMenu` came from is
+    /// the only thing that differs, and by here it is just a menu.
+    ///
+    /// # Safety
+    /// `menu` must be a live shell context menu for this window.
+    unsafe fn track(hwnd: HWND, menu: &IContextMenu, at: (i32, i32)) -> bool {
         let Ok(hmenu) = CreatePopupMenu() else { return false };
 
         let filled = menu.QueryContextMenu(hmenu, 0, FIRST_ID, LAST_ID, CMF_NORMAL);
@@ -299,7 +388,19 @@ mod platform {
         }
     }
 
-    pub fn show(window: &winit::window::Window, paths: &[PathBuf], _at: (i32, i32)) -> bool {
+    pub fn show(window: &winit::window::Window, about: &super::About, _at: (i32, i32)) -> bool {
+        // macOS has one menu for a folder, not two: the Finder's "paste item"
+        // lives on its own window's background and is not something another
+        // application can ask for. So a folder is shown as what it is — one
+        // item, with the same actions any other item gets.
+        let owned;
+        let paths: &[PathBuf] = match about {
+            super::About::Items(paths) => paths,
+            super::About::Folder(dir) => {
+                owned = [dir.clone()];
+                &owned
+            }
+        };
         let Some(mtm) = MainThreadMarker::new() else { return false };
         let Ok(handle) = window.window_handle() else { return false };
         let RawWindowHandle::AppKit(handle) = handle.as_raw() else { return false };
@@ -437,7 +538,11 @@ mod platform {
 mod platform {
     use std::path::PathBuf;
 
-    pub fn show(_window: &winit::window::Window, _paths: &[PathBuf], _at: (i32, i32)) -> bool {
+    pub fn show(
+        _window: &winit::window::Window,
+        _about: &super::About,
+        _at: (i32, i32),
+    ) -> bool {
         false
     }
 
