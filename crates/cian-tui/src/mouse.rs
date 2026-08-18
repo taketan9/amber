@@ -8,6 +8,22 @@ impl App {
     pub(crate) fn handle_mouse(&mut self, ev: MouseEvent) {
         let (col, row) = (ev.column, ev.row);
 
+        // The view switcher is drawn last and answered first.
+        //
+        // It is three small rectangles in a corner, and in the classic view
+        // they sit *on* the top border row — where a pane, a border to drag and
+        // a scrollbar track all also want the click. Hit-testing it before any
+        // of them is the same rule the screen already follows: whatever is
+        // painted on top is what was clicked. Ordering it anywhere further down
+        // meant it worked on one platform and not on another, which is what a
+        // rule like this is for.
+        if matches!(ev.kind, MouseEventKind::Down(MouseButton::Left)) {
+            if let Some(crate::GridButton::View(want)) = self.grid_button_at(col, row) {
+                self.view_request = Some(want);
+                return;
+            }
+        }
+
         // The grid covers the window and answers for all of it. First, because
         // everything below tests against rectangles the *list* layout left
         // behind — dividers, scrollbar tracks, tab labels — and those are not
@@ -897,14 +913,6 @@ impl App {
         {
             self.focus(pane);
             self.apply_sort_key(key);
-            return;
-        }
-        // The view switcher, wherever it is drawn. Before the tabs and before
-        // the border drag: it sits *on* the top border row in the classic view,
-        // and a border-first test would read every click on it as a resize.
-        if matches!(ev.kind, MouseEventKind::Down(MouseButton::Left))
-            && self.grid_click_mods(col, row, false)
-        {
             return;
         }
         // Clicking a tab label switches to that tab. Checked before the border

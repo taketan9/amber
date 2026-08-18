@@ -277,13 +277,6 @@ impl App {
     /// does. In cian's terms that is a mark, the same one `Space` sets, so a
     /// selection built with the mouse can be operated on with the keyboard.
     pub(crate) fn grid_click_mods(&mut self, col: u16, row: u16, adding: bool) -> bool {
-        // The view switcher is in every view, including the classic one, where
-        // it rides the top border row. It is the only piece of chrome that is,
-        // so it is answered before the rest of this function bows out.
-        if let Some(crate::GridButton::View(want)) = self.grid_button_at(col, row) {
-            self.view_request = Some(want);
-            return true;
-        }
         // Both desktop-shaped views, not just the grid: the detail view has the
         // same address bar, the same buttons and the same sidebar drawn down
         // its left — and none of them answered a click, because this whole

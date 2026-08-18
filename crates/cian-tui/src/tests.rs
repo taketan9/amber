@@ -14555,23 +14555,30 @@ mod the_view_switcher {
         for (icons, finder) in [(false, true), (true, true), (false, false)] {
             let (_d, mut app) = in_view(icons, finder);
             let _ = painted(&mut app);
-            let (_, r) = app
-                .grid_buttons
-                .iter()
-                .copied()
-                .find(|(b, _)| matches!(b, GridButton::View(crate::ViewWanted::Icons)))
-                .expect("an icons segment");
-            app.handle_mouse(MouseEvent {
-                kind: MouseEventKind::Down(MouseButton::Left),
-                column: r.x,
-                row: r.y,
-                modifiers: KeyModifiers::NONE,
-            });
-            assert_eq!(
-                app.view_request,
-                Some(crate::ViewWanted::Icons),
-                "icons={icons} finder={finder}: the click asked for the icon view",
-            );
+            // Every segment, and the middle of each — a control answered only
+            // at its left edge is a control that half works.
+            for want in
+                [crate::ViewWanted::Details, crate::ViewWanted::Icons, crate::ViewWanted::Classic]
+            {
+                let (_, r) = app
+                    .grid_buttons
+                    .iter()
+                    .copied()
+                    .find(|(b, _)| matches!(b, GridButton::View(w) if *w == want))
+                    .unwrap_or_else(|| panic!("icons={icons} finder={finder}: no {want:?} segment"));
+                app.view_request = None;
+                app.handle_mouse(MouseEvent {
+                    kind: MouseEventKind::Down(MouseButton::Left),
+                    column: r.x + r.width / 2,
+                    row: r.y,
+                    modifiers: KeyModifiers::NONE,
+                });
+                assert_eq!(
+                    app.view_request,
+                    Some(want),
+                    "icons={icons} finder={finder}: clicking {want:?} asked for it",
+                );
+            }
         }
     }
 
