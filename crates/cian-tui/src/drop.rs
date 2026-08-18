@@ -27,33 +27,65 @@ use std::path::PathBuf;
 /// All-or-nothing on existence: a blob where some items are paths and some are
 /// words is prose that happens to mention a file, not a drop.
 pub(crate) fn dropped_paths(text: &str) -> Vec<PathBuf> {
-    let exists_all = |paths: &[PathBuf]| {
-        !paths.is_empty() && paths.iter().all(|p| p.symlink_metadata().is_ok())
+    read_dropped(text, ESCAPES_HERE, |p| p.symlink_metadata().is_ok())
+}
+
+/// Does a backslash escape the next character on this platform?
+///
+/// On Unix a terminal hands over `My\ File.txt` and the backslash is punctuation.
+/// On Windows it is the path separator and escapes nothing — `C:\Users\taro`
+/// must come through with every one of them intact. Named rather than written
+/// as `cfg!(windows)` at the point of use so both readings can be tested from
+/// either platform: this is exactly the kind of difference that is only ever
+/// discovered on the machine one does not develop on.
+const ESCAPES_HERE: bool = !cfg!(windows);
+
+/// The reading of a drop, with the escaping convention spelled out and the
+/// "is it really there" test handed in.
+pub(crate) fn read_dropped(
+    text: &str,
+    escapes: bool,
+    exists: impl Fn(&PathBuf) -> bool,
+) -> Vec<PathBuf> {
+    let exists_all = |paths: &[PathBuf]| !paths.is_empty() && paths.iter().all(&exists);
+    // One item per line: the reading that keeps a name with a space in it.
+    let whole = || -> Vec<PathBuf> {
+        text.lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
+            .map(|l| PathBuf::from(unescape(l.trim_matches(['"', '\''].as_slice()), escapes)))
+            .collect()
     };
-    // First reading: whitespace separates items, which is how a multi-file
-    // drop arrives.
-    let split: Vec<PathBuf> =
-        split_items(text).iter().map(|s| PathBuf::from(unescape(s))).collect();
-    if exists_all(&split) {
-        return split;
+    // Whitespace between items: how a multi-file drop arrives from a terminal
+    // that escapes the spaces inside each name.
+    let split = || -> Vec<PathBuf> {
+        split_items(text, escapes).iter().map(|s| PathBuf::from(unescape(s, escapes))).collect()
+    };
+
+    // Which to believe first depends on what a backslash means here.
+    //
+    // Where it escapes, a space between two items is a real separator and the
+    // spaces *inside* a name arrive escaped — so splitting is right, and the
+    // line-wise reading is the fallback for a terminal that did not escape.
+    //
+    // Where it does not — Windows — a space can only ever be part of a name.
+    // `C:\Users\taro\My Documents\a.txt` split on whitespace becomes three
+    // paths that are not anything, and the only reason it ever worked is that
+    // none of the three happened to exist. Lines first there.
+    let (first, second): (Vec<PathBuf>, Vec<PathBuf>) =
+        if escapes { (split(), whole()) } else { (whole(), split()) };
+    if exists_all(&first) {
+        return first;
     }
-    // Second reading: one path per line, spaces and all. Some terminals hand
-    // over an unescaped name, and then the split above tore it in half.
-    let whole: Vec<PathBuf> = text
-        .lines()
-        .map(str::trim)
-        .filter(|l| !l.is_empty())
-        .map(|l| PathBuf::from(unescape(l.trim_matches(['"', '\''].as_slice()))))
-        .collect();
-    if exists_all(&whole) {
-        return whole;
+    if exists_all(&second) {
+        return second;
     }
     Vec::new()
 }
 
 /// Split a blob into candidate items: one per line, and — within a line —
 /// on unescaped, unquoted whitespace, which is how a multi-file drop arrives.
-fn split_items(text: &str) -> Vec<String> {
+fn split_items(text: &str, escapes: bool) -> Vec<String> {
     let mut out = Vec::new();
     for line in text.lines() {
         let line = line.trim();
@@ -71,7 +103,7 @@ fn split_items(text: &str) -> Vec<String> {
                 continue;
             }
             match ch {
-                '\\' if quote.is_none() => escaped = true,
+                '\\' if escapes && quote.is_none() => escaped = true,
                 '"' | '\'' if quote.is_none() => quote = Some(ch),
                 c if Some(c) == quote => quote = None,
                 c if c.is_whitespace() && quote.is_none() => {
@@ -95,7 +127,7 @@ fn split_items(text: &str) -> Vec<String> {
 
 /// Turn one item into a plain path: strip a `file://` prefix (percent-decoded),
 /// and drop the backslashes a shell-style escape added.
-fn unescape(item: &str) -> String {
+fn unescape(item: &str, escapes: bool) -> String {
     if let Some(rest) = item.strip_prefix("file://") {
         // `file:///path` — the third slash starts the path; a host (rare, and
         // not something cian can open) is dropped with it.
@@ -109,7 +141,7 @@ fn unescape(item: &str) -> String {
             // A backslash escapes the next character — except on Windows,
             // where it is the path separator and escapes nothing.
             match chars.next() {
-                Some(n) if !cfg!(windows) => out.push(n),
+                Some(n) if escapes => out.push(n),
                 Some(n) => {
                     out.push('\\');
                     out.push(n);

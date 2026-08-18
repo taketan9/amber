@@ -190,6 +190,9 @@ struct Gui {
     prof_build: std::time::Duration,
     prof_icons: std::time::Duration,
     prof_frames: u32,
+    /// Files dropped on the window since the last turn of the loop. See
+    /// `WindowEvent::DroppedFile`.
+    dropped: Vec<std::path::PathBuf>,
     /// A drag in progress: what was picked up, and where it started.
     ///
     /// Held from the press, but not a drag until the pointer has moved a cell
@@ -295,6 +298,7 @@ impl Gui {
             prof_icons: std::time::Duration::ZERO,
             prof_frames: 0,
             drag: None,
+            dropped: Vec::new(),
         }
     }
 
@@ -951,11 +955,19 @@ impl ApplicationHandler<Tick> for Gui {
                 }
             }
 
-            // Files dropped on the window. cian already understands a list of
-            // paths arriving as text, because that is how a terminal delivers a
-            // drop too.
+            // Files dropped on the window. One event per file, so a drop of
+            // three arrives as three — and cian answers the first with a
+            // confirmation dialog, which makes the other two land in whatever
+            // that dialog is typing into. They are collected here and handed
+            // over as one drop on the next turn of the loop, which is what the
+            // gesture was.
             WindowEvent::DroppedFile(path) => {
-                self.feed(Event::Paste(path.display().to_string()));
+                if self.keylog {
+                    eprintln!("drop: {}", path.display());
+                }
+                cian_core::log::log(&format!("dropped on the window: {}", path.display()));
+                self.dropped.push(path);
+                self.redraw_now();
             }
 
             // Rendering stays inside the callback: on macOS the window server
@@ -1034,6 +1046,18 @@ impl ApplicationHandler<Tick> for Gui {
             return;
         }
         self.next_tick = now + self.cian.tick_interval();
+
+        // A drop that has finished arriving: one gesture, however many files
+        // winit reported it as.
+        if !self.dropped.is_empty() {
+            let paths = std::mem::take(&mut self.dropped);
+            let text = paths
+                .iter()
+                .map(|p| p.display().to_string())
+                .collect::<Vec<_>>()
+                .join("\n");
+            self.feed(Event::Paste(text));
+        }
 
         // An edit request would hand a terminal to vim. There isn't one.
         if self.cian.pending_edit().is_some() {

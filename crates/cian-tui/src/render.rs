@@ -2542,7 +2542,10 @@ fn draw_shell_inner(
     let active = shell.active;
     if shell.tabs.get(active).is_none() {
         let body = if let Some(err) = &shell.error {
-            format!("shell failed to start: {}", err)
+            // The command that was tried, next to why it did not work: a shell
+            // that will not start is usually a shell that is not where it was
+            // said to be, and the answer is in the name.
+            format!("shell failed to start: {}\n  tried: {}", err, shell.shell_cmd)
         } else if shell.is_starting() {
             "starting shell…".to_string()
         } else {

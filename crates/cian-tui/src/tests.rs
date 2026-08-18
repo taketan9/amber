@@ -13272,3 +13272,52 @@ mod desktop_view_keys {
         assert_eq!(marks, 2, "the one that was pointed at, and the one clicked");
     }
 }
+
+/// A drop from the desktop arrives as text, and on Windows that text is full
+/// of backslashes and spaces. What matters is that a path survives the reading
+/// of it — a name torn in half is a drop that silently does nothing.
+///
+/// Both conventions are asserted from whichever platform runs the tests. The
+/// Windows reading used to be behind `cfg!(windows)` at the point of use,
+/// which meant it was only ever exercised on the machine cian is not written
+/// on.
+mod dropped_paths_are_read_the_platform_way {
+
+    /// The Windows convention: backslashes are separators, and every dropped
+    /// path is on its own line.
+    fn windows(text: &str) -> Vec<std::path::PathBuf> {
+        crate::drop::read_dropped(text, false, |_| true)
+    }
+
+    /// The Unix one: a backslash escapes the space it precedes.
+    fn unix(text: &str) -> Vec<std::path::PathBuf> {
+        crate::drop::read_dropped(text, true, |_| true)
+    }
+
+    #[test]
+    fn a_windows_path_keeps_its_separators() {
+        let one = windows("C:\\Users\\taro\\a.txt");
+        assert_eq!(one.len(), 1);
+        assert_eq!(one[0].to_string_lossy(), "C:\\Users\\taro\\a.txt");
+    }
+
+    #[test]
+    fn a_windows_name_with_spaces_survives() {
+        let p = windows("C:\\Users\\taro\\My Documents\\a b.txt");
+        assert_eq!(p.len(), 1, "not torn at the spaces: {p:?}");
+        assert!(p[0].to_string_lossy().ends_with("a b.txt"));
+    }
+
+    #[test]
+    fn several_windows_files_arrive_as_several_paths() {
+        let many = windows("C:\\a\\one.txt\nC:\\a\\two.txt");
+        assert_eq!(many.len(), 2, "one per line: {many:?}");
+    }
+
+    #[test]
+    fn a_unix_escaped_space_is_one_path() {
+        let p = unix("/home/taro/My\\ File.txt");
+        assert_eq!(p.len(), 1, "the escape held it together: {p:?}");
+        assert_eq!(p[0].to_string_lossy(), "/home/taro/My File.txt");
+    }
+}

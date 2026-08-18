@@ -421,7 +421,16 @@ impl PtySession {
 
     /// Whether the shell process is still running.
     pub fn is_alive(&mut self) -> bool {
-        matches!(self.child.try_wait(), Ok(None))
+        match self.child.try_wait() {
+            // Still running.
+            Ok(None) => true,
+            // Finished, with a status. The panel closes on this.
+            Ok(Some(_)) => false,
+            // Asked and could not be told. "I do not know" is not "it exited",
+            // and treating it as one closes the panel the moment after it
+            // opened — which looks exactly like a shell that would not start.
+            Err(_) => true,
+        }
     }
 }
 

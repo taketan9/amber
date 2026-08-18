@@ -114,7 +114,7 @@ fn run_elevated(script: &str) -> Result<()> {
          -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','{}'; exit $p.ExitCode",
         path.display()
     );
-    let status = std::process::crate::proc::quiet("powershell")
+    let status = crate::proc::quiet("powershell")
         .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", &launcher])
         .status()
         .context("launch elevated PowerShell")?;
