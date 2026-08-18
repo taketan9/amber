@@ -105,25 +105,6 @@ struct Tick;
 /// both front ends give cian a turn at the same rate.
 const HEARTBEAT: std::time::Duration = std::time::Duration::from_millis(16);
 
-/// The shortest gap between two *background* frames.
-///
-/// It used to hold back frames that input had asked for as well, and that was
-/// right when a frame cost two and a half milliseconds: a trackpad reports a
-/// hundred times a second, and a hundred full frames a second was a hundred
-/// times cian building its whole screen.
-///
-/// A frame costs a twentieth of that now — 485µs, measured in the window on
-/// the machine that was reporting it as slow — and the throttle had turned
-/// into the thing being felt. A keystroke arriving inside the window waited
-/// for the next heartbeat to be painted: up to twenty-four milliseconds of
-/// nothing happening, per key, which is precisely what "もっさり" describes.
-/// winit coalesces repeated `request_redraw` calls into one frame anyway, so
-/// the burst it was defending against was mostly imaginary.
-///
-/// Input paints immediately now. This is what remains: the floor under the
-/// background's own repaints.
-const MIN_FRAME: std::time::Duration = std::time::Duration::from_millis(8);
-
 /// A duration in microseconds, written in ASCII.
 ///
 /// Everything cian prints for a person to read may end up in a Windows
@@ -185,7 +166,8 @@ struct Gui {
     zoom_rest: f64,
     /// A font size asked for but not yet built. See `apply_font_size`.
     want_size: Option<u32>,
-    /// When the last frame was painted, for [`MIN_FRAME`].
+    /// When the last frame was painted. Kept for the profiler and for anyone
+    /// asking how long a frame took.
     last_frame: Instant,
     /// `CIAN_GUI_PROF=1`: report what a frame costs, to stderr and the log.
     ///
@@ -330,10 +312,11 @@ impl Gui {
     /// Input takes this path: a keystroke should land on screen immediately,
     /// not up to a tick later. Everything else waits its turn.
     fn redraw_now(&mut self) {
+        // Only says that a frame is wanted. Asking for it happens once the
+        // events waiting behind this one have all been handled — see
+        // `about_to_wait`, which is where a window gets what the terminal
+        // build has for free.
         self.needs_redraw = true;
-        if let Some(w) = self.window.as_ref() {
-            w.request_redraw();
-        }
     }
 
     /// One character cell, in physical pixels. Derived from the surface rather
@@ -1095,14 +1078,6 @@ impl ApplicationHandler<Tick> for Gui {
     /// in — and repaint if any of it changed the screen.
     fn user_event(&mut self, event_loop: &ActiveEventLoop, _tick: Tick) {
         let now = Instant::now();
-        // A frame that input asked for and [`MIN_FRAME`] held back. Ahead of
-        // the tick throttle below, which is three times slower when idle — a
-        // keystroke must not wait on the background's schedule.
-        if self.needs_redraw && now.duration_since(self.last_frame) >= MIN_FRAME {
-            if let Some(w) = self.window.as_ref() {
-                w.request_redraw();
-            }
-        }
         if now < self.next_tick {
             // The thread pokes faster than cian always needs; when it is idle
             // it asks for a longer gap and the extra pokes are dropped here.
@@ -1161,6 +1136,27 @@ impl ApplicationHandler<Tick> for Gui {
     /// Block until something happens. The heartbeat is one of the things that
     /// happens, so nothing is lost by sleeping between them.
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        // Every event that was waiting has now been handled, and *this* is the
+        // moment to paint.
+        //
+        // The terminal build has always done it this way without having to
+        // think about it: `event::poll` blocks, and when it wakes it drains
+        // everything the terminal has — every key of a repeat, every notch of a
+        // wheel — runs them all, and paints once. The window was painting once
+        // per event instead. Hold the up arrow and the key repeats faster than
+        // a frame can be drawn and presented, so the events queue, and the
+        // cursor goes on climbing for a second *after* the key is released —
+        // which is exactly what was reported, and is the clearest possible
+        // description of a backlog.
+        //
+        // Asking here costs no latency: the queue is empty, so the frame is
+        // drawn immediately. It simply cannot be asked for more often than
+        // there is input to justify it.
+        if self.needs_redraw {
+            if let Some(w) = self.window.as_ref() {
+                w.request_redraw();
+            }
+        }
         event_loop.set_control_flow(ControlFlow::Wait);
     }
 

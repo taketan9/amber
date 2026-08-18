@@ -141,6 +141,9 @@ pub struct PtySession {
     child: Box<dyn Child + Send + Sync>,
     rows: u16,
     cols: u16,
+    /// When the shell was started, so a panel that is still blank can say how
+    /// long it has been blank for.
+    started: std::time::Instant,
     /// Set by the reader thread the first time the shell says anything.
     ///
     /// A panel showing an empty screen cannot tell "the shell has not spoken
@@ -335,6 +338,7 @@ impl PtySession {
             child,
             rows,
             cols,
+            started: std::time::Instant::now(),
             heard,
             log,
             title,
@@ -473,6 +477,27 @@ impl PtySession {
     /// with no explanation is how that looks.
     pub fn has_spoken(&self) -> bool {
         self.heard.load(Ordering::Relaxed)
+    }
+
+    /// How long since this shell was started.
+    pub fn age(&self) -> std::time::Duration {
+        self.started.elapsed()
+    }
+
+    /// Is there nothing on the screen at all?
+    ///
+    /// Not the same question as [`has_spoken`](Self::has_spoken): a shell can
+    /// speak without saying anything visible. What arrives first from ConPTY is
+    /// the terminal-mode sequences it sets for itself, and a shell that stops
+    /// there — no banner, no prompt — has started and then gone away to do
+    /// something. On Windows that something is usually a profile script, and on
+    /// a machine whose home directory is OneDrive's, a profile script can take
+    /// a very long time.
+    pub fn screen_is_blank(&self) -> bool {
+        match self.parser.lock() {
+            Ok(p) => p.screen().contents().trim().is_empty(),
+            Err(_) => false,
+        }
     }
 
     pub fn is_alive(&mut self) -> bool {

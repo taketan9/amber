@@ -2567,16 +2567,30 @@ fn draw_shell_inner(
     // otherwise be blank, which is what "the shell does not work" looks like
     // when what is happening is a profile script taking its time.
     if let Some(s) = shell.active_session() {
-        if !s.has_spoken() {
-            // Japanese first, as everywhere cian speaks for itself: this
-            // function is not handed a language.
-            let waiting = "シェルは起動しました。まだ何も出力していません …";
+        // Running, and with nothing on its screen. After a few seconds that is
+        // no longer "starting up", and the panel should say what it is instead
+        // of showing an empty rectangle — which is indistinguishable from cian
+        // being broken, and was reported as exactly that.
+        const PATIENCE: std::time::Duration = std::time::Duration::from_secs(3);
+        if s.screen_is_blank() && s.age() >= PATIENCE {
+            let secs = s.age().as_secs();
+            let waiting = format!(
+                "{} は {secs} 秒前に起動しましたが、まだ何も表示していません。\n\n\
+                 プロファイルの読み込みで止まっていることがあります。\
+                 とくにホームが OneDrive にある環境では時間がかかります。\n\
+                 切り分け: init.lua に次を書いて起動し直すと、\
+                 プロファイルが原因かどうか分かります。\n\n\
+                 {}",
+                shell.shell_cmd,
+                r#"    cian.set_option("shell", "powershell.exe -NoLogo -NoProfile")"#,
+            );
             f.render_widget(
                 Paragraph::new(waiting)
                     .wrap(Wrap { trim: false })
                     .style(Style::default().fg(theme().dim)),
                 inner,
             );
+            return;
         }
     }
 
