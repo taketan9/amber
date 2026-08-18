@@ -30,6 +30,8 @@ raw-window-handle = "0.6"
 # without losing their right edge. See `glyph.rs`.
 ab_glyph     = "0.2"
 pollster     = "0.4"
+softbuffer = "0.4.8"
+unicode-width = "0.2.2"
 
 # The system's own file icons, and the console this build does not open. The
 # shell's icons come back as an `HICON`, so the pixels behind one have to be

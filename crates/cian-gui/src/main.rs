@@ -41,6 +41,7 @@ mod iconjob;
 mod input;
 mod pixels;
 mod shellmenu;
+mod soft;
 mod sysicon;
 
 use std::num::NonZeroU32;
@@ -99,6 +100,33 @@ struct Tick;
 /// both front ends give cian a turn at the same rate.
 const HEARTBEAT: std::time::Duration = std::time::Duration::from_millis(16);
 
+/// Should cian draw the pixels itself?
+///
+/// `CIAN_GUI_RENDER=cpu|gpu` decides it outright. Left alone, the machine
+/// decides: if every adapter that answers is a *software* one, then wgpu would
+/// be a software rasteriser pretending to be a graphics card, and drawing the
+/// cells directly is both simpler and — measured on the machine that reported
+/// this — two orders of magnitude quicker.
+fn want_cpu_renderer() -> bool {
+    match std::env::var("CIAN_GUI_RENDER").ok().as_deref() {
+        Some("cpu") => return true,
+        Some("gpu") => return false,
+        _ => {}
+    }
+    use ratatui_wgpu::wgpu::{Backends, DeviceType, Instance, InstanceDescriptor};
+    let instance =
+        Instance::new(&InstanceDescriptor { backends: Backends::default(), ..Default::default() });
+    let adapters = pollster::block_on(instance.enumerate_adapters(Backends::default()));
+    // Nothing at all answered: there is no wgpu path to take, so take the other
+    // one rather than failing to open a window.
+    if adapters.is_empty() {
+        return true;
+    }
+    adapters
+        .iter()
+        .all(|a| matches!(a.get_info().device_type, DeviceType::Cpu | DeviceType::Other))
+}
+
 /// Which graphics API to draw through, and what is available.
 ///
 /// The default was "whatever wgpu picks", and on the machine that reported the
@@ -121,14 +149,35 @@ fn gpu_instance() -> ratatui_wgpu::wgpu::Instance {
         _ => Backends::default(),
     };
     let instance = Instance::new(&InstanceDescriptor { backends, ..Default::default() });
-    if cian_core::log::enabled() {
-        for adapter in pollster::block_on(instance.enumerate_adapters(backends)) {
-            let info = adapter.get_info();
-            cian_core::log::log(&format!(
-                "gpu: {:?} {} ({:?}, driver {} {})",
-                info.backend, info.name, info.device_type, info.driver, info.driver_info,
-            ));
-        }
+    // Said out loud, always, and to both places. This is the one fact that
+    // decides whether the window is slow because of something cian does or
+    // because there is no graphics driver under it, and it must not depend on
+    // anyone having remembered to turn logging on first.
+    let mut said = 0;
+    for adapter in pollster::block_on(instance.enumerate_adapters(backends)) {
+        let info = adapter.get_info();
+        let line = format!(
+            "gpu: {:?} {} ({:?}, driver {} {})",
+            info.backend, info.name, info.device_type, info.driver, info.driver_info,
+        );
+        eprintln!("{line}");
+        cian_core::log::log(&line);
+        said += 1;
+    }
+    if said == 0 {
+        let line = format!("gpu: nothing at all answered for {backends:?}");
+        eprintln!("{line}");
+        cian_core::log::log(&line);
+    }
+    // And which of them would be chosen, asked the same way the renderer asks.
+    if let Ok(a) = pollster::block_on(instance.request_adapter(&Default::default())) {
+        let info = a.get_info();
+        let line = format!(
+            "gpu: chosen — {:?} {} ({:?})",
+            info.backend, info.name, info.device_type,
+        );
+        eprintln!("{line}");
+        cian_core::log::log(&line);
     }
     instance
 }
@@ -159,10 +208,107 @@ fn us(d: std::time::Duration) -> String {
 /// How many frames `CIAN_GUI_PROF` averages over before it says anything.
 const PROF_EVERY: u32 = 120;
 
+/// The two ways cian can put a frame on screen.
+///
+/// wgpu where there is a driver, and pixels drawn by hand where there is not.
+/// The loop asks the same questions of either; the difference lives here and
+/// nowhere else. See [`soft`] for why the second one exists.
+#[allow(clippy::large_enum_variant)] // One of these exists, for the life of the window.
+enum Screen {
+    Gpu(Terminal<WgpuBackend<'static, 'static, PixelLayer>>),
+    Cpu(Terminal<soft::SoftBackend>),
+}
+
+impl Screen {
+    fn size(&self) -> Option<cian_tui::ratatui::layout::Size> {
+        match self {
+            Screen::Gpu(t) => t.size().ok(),
+            Screen::Cpu(t) => t.size().ok(),
+        }
+    }
+
+    fn resize(&mut self, w: u32, h: u32) {
+        match self {
+            Screen::Gpu(t) => t.backend_mut().resize(w, h),
+            Screen::Cpu(t) => t.backend_mut().resize(w, h),
+        }
+    }
+
+    fn clear(&mut self) {
+        match self {
+            Screen::Gpu(t) => {
+                let _ = t.clear();
+            }
+            Screen::Cpu(t) => {
+                let _ = t.clear();
+            }
+        }
+    }
+
+    /// Draw a frame, and say how long the *composing* half of it took — the
+    /// part that is cian's rather than the renderer's.
+    fn draw(&mut self, cian: &mut Session) -> Result<std::time::Duration, String> {
+        let mut build = std::time::Duration::ZERO;
+        let out = match self {
+            Screen::Gpu(t) => t
+                .draw(|f| {
+                    let b0 = Instant::now();
+                    cian.draw(f);
+                    build = b0.elapsed();
+                })
+                .map(|_| ())
+                .map_err(|e| e.to_string()),
+            Screen::Cpu(t) => t
+                .draw(|f| {
+                    let b0 = Instant::now();
+                    cian.draw(f);
+                    build = b0.elapsed();
+                })
+                .map(|_| ())
+                .map_err(|e| e.to_string()),
+        };
+        out.map(|()| build)
+    }
+
+    fn upload(&mut self, id: u64, w: u32, h: u32, rgba: Vec<u8>) {
+        match self {
+            Screen::Gpu(t) => t.backend_mut().post_processor_mut().upload(id, w, h, rgba),
+            Screen::Cpu(t) => t.backend_mut().upload(id, w, h, rgba),
+        }
+    }
+
+    fn set_frame(&mut self, draws: Vec<pixels::Draw>) {
+        match self {
+            Screen::Gpu(t) => t.backend_mut().post_processor_mut().set_frame(draws),
+            Screen::Cpu(t) => t.backend_mut().set_frame(
+                draws
+                    .into_iter()
+                    .map(|d| soft::Draw {
+                        id: d.id,
+                        x: d.x,
+                        y: d.y,
+                        w: d.w,
+                        h: d.h,
+                        alpha: d.alpha,
+                    })
+                    .collect(),
+            ),
+        }
+    }
+
+    /// Which one this is, for the log and for `:version`.
+    fn name(&self) -> &'static str {
+        match self {
+            Screen::Gpu(_) => "wgpu",
+            Screen::Cpu(_) => "cpu",
+        }
+    }
+}
+
 struct Gui {
     cian: Session,
     window: Option<Arc<Window>>,
-    terminal: Option<Terminal<WgpuBackend<'static, 'static, PixelLayer>>>,
+    terminal: Option<Screen>,
     face: Font<'static>,
     /// The same font, parsed for drawing single glyphs as pictures.
     glyphs: Option<ab_glyph::FontRef<'static>>,
@@ -366,7 +512,7 @@ impl Gui {
         let (Some(t), Some(_)) = (self.terminal.as_ref(), self.window.as_ref()) else {
             return false;
         };
-        let Ok(grid) = t.size() else { return false };
+        let Some(grid) = t.size() else { return false };
         self.at.column == 0
             || self.at.row == 0
             || self.at.column + 1 >= grid.width
@@ -393,7 +539,7 @@ impl Gui {
             return (0, 0);
         };
         let px = w.inner_size();
-        let Ok(grid) = t.size() else { return (0, 0) };
+        let Some(grid) = t.size() else { return (0, 0) };
         if grid.width == 0 || grid.height == 0 {
             return (0, 0);
         }
@@ -459,7 +605,7 @@ impl Gui {
         self.next_icon_id = 100;
         self.last_draws = 0;
 
-        match Self::build_terminal(&window, &self.face, want) {
+        match Self::build_terminal(&window, &self.face, self.glyphs.as_ref(), want) {
             Some(t) => {
                 self.size_px = want;
                 self.terminal = Some(t);
@@ -468,7 +614,7 @@ impl Gui {
                 // Put back the size that was working. If even that cannot be
                 // built the window has no renderer at all, and saying so beats
                 // a window that stays black for the rest of the session.
-                self.terminal = Self::build_terminal(&window, &self.face, was);
+                self.terminal = Self::build_terminal(&window, &self.face, self.glyphs.as_ref(), was);
                 if self.terminal.is_none() {
                     cian_core::log::log("cian-gui: lost the renderer while resizing the font");
                 }
@@ -483,8 +629,27 @@ impl Gui {
     fn build_terminal(
         window: &Arc<Window>,
         face: &Font<'static>,
+        glyphs: Option<&ab_glyph::FontRef<'static>>,
         size_px: u32,
-    ) -> Option<Terminal<WgpuBackend<'static, 'static, PixelLayer>>> {
+    ) -> Option<Screen> {
+        // Pixels drawn by hand where there is no driver to draw them.
+        //
+        // A software rasteriser pretending to be a graphics card is the slowest
+        // way to put text on a screen: a hundred and thirty milliseconds a
+        // frame, measured, against one for cian to compose it. Drawing the
+        // cells directly is what a terminal does on the same machine, and that
+        // machine's terminal is fast. See [`soft`].
+        if want_cpu_renderer() {
+            cian_core::log::log("renderer: drawing on the cpu (no graphics driver worth using)");
+            if let Some(parsed) = glyphs.cloned() {
+                if let Some(b) = soft::SoftBackend::new(window.clone(), parsed, size_px) {
+                    if let Ok(t) = Terminal::new(b) {
+                        return Some(Screen::Cpu(t));
+                    }
+                }
+            }
+            cian_core::log::log("renderer: the cpu path would not start; falling back to wgpu");
+        }
         let size = window.inner_size();
         let backend = pollster::block_on(
             Builder::<PixelLayer>::from_font(face.clone())
@@ -498,7 +663,7 @@ impl Gui {
                 .build_with_target(window.clone()),
         )
         .ok()?;
-        Terminal::new(backend).ok()
+        Terminal::new(backend).ok().map(Screen::Gpu)
     }
 
     /// Which of the three views is showing.
@@ -527,7 +692,7 @@ impl Gui {
         // otherwise carry the old view's pictures — twenty full-size icons over
         // a file listing, with nothing scheduled to take them away again.
         if let Some(t) = self.terminal.as_mut() {
-            t.backend_mut().post_processor_mut().set_frame(Vec::new());
+            t.set_frame(Vec::new());
         }
         self.last_draws = 0;
         // What a path's picture *is* changes with the view — the classic list
@@ -623,7 +788,7 @@ impl Gui {
     fn place_icons(&mut self) {
         let Some(t) = self.terminal.as_mut() else { return };
         let (cw, ch) = {
-            let (Some(w), Ok(grid)) = (self.window.as_ref(), t.size()) else { return };
+            let (Some(w), Some(grid)) = (self.window.as_ref(), t.size()) else { return };
             let px = w.inner_size();
             if grid.width == 0 || grid.height == 0 {
                 return;
@@ -645,9 +810,7 @@ impl Gui {
                     let id = self.next_icon_id;
                     self.next_icon_id += 1;
                     self.icon_ids.insert(key, id);
-                    t.backend_mut()
-                        .post_processor_mut()
-                        .upload(id, icon.width, icon.height, icon.rgba);
+                    t.upload(id, icon.width, icon.height, icon.rgba);
                 }
                 // The system has no picture for this one. Remembered as such,
                 // so the row falls back to cian's own glyph and nothing asks
@@ -681,9 +844,7 @@ impl Gui {
                                     let id = self.next_icon_id;
                                     self.next_icon_id += 1;
                                     self.glyph_ids.insert(key.clone(), id);
-                                    t.backend_mut()
-                                        .post_processor_mut()
-                                        .upload(id, px, px, rgba);
+                                    t.upload(id, px, px, rgba);
                                     id
                                 }
                                 None => {
@@ -784,7 +945,7 @@ impl Gui {
         if changed {
             self.needs_redraw = true;
         }
-        t.backend_mut().post_processor_mut().set_frame(draws);
+        t.set_frame(draws);
     }
 
     fn feed(&mut self, ev: Event) {
@@ -824,10 +985,23 @@ impl ApplicationHandler<Tick> for Gui {
         // has not asked looks exactly like a platform that cannot.
         window.set_ime_allowed(true);
 
-        match Self::build_terminal(&window, &self.face, self.size_px) {
-            Some(t) => self.terminal = Some(t),
+        match Self::build_terminal(&window, &self.face, self.glyphs.as_ref(), self.size_px) {
+            Some(t) => {
+                cian_core::log::log(&format!("renderer: {}", t.name()));
+                self.terminal = Some(t);
+            }
             None => {
-                eprintln!("cian: could not start the renderer");
+                // With the reason, and with the size it was asked for. "Could
+                // not start the renderer" sent someone away with nothing to
+                // report but the sentence itself.
+                let px = window.inner_size();
+                let line = format!(
+                    "cian: could not start the renderer at {}x{} — see the gpu: lines above. \
+                     CIAN_GUI_BACKEND=dx12|vulkan|gl chooses a different one.",
+                    px.width, px.height,
+                );
+                eprintln!("{line}");
+                cian_core::log::log(&line);
                 event_loop.exit();
                 return;
             }
@@ -837,7 +1011,14 @@ impl ApplicationHandler<Tick> for Gui {
         // to an NSApplication that has not finished launching, and finishing
         // launching puts it back.
         appkit::announce();
-        cian_core::log::log(&format!("cian starting in a window, font {}", self.font_name));
+        let px = window.inner_size();
+        cian_core::log::log(&format!(
+            "cian starting in a window {}x{} px, font {}, present {:?}",
+            px.width,
+            px.height,
+            self.font_name,
+            present_mode(),
+        ));
         window.request_redraw();
         self.window = Some(window);
     }
@@ -855,7 +1036,7 @@ impl ApplicationHandler<Tick> for Gui {
 
             WindowEvent::Resized(size) => {
                 if let Some(t) = self.terminal.as_mut() {
-                    t.backend_mut().resize(size.width.max(1), size.height.max(1));
+                    t.resize(size.width.max(1), size.height.max(1));
                 }
                 // cian re-lays-out on resize the same as in a terminal; the
                 // numbers in the event are pixels and it wants cells, which it
@@ -1114,21 +1295,22 @@ impl ApplicationHandler<Tick> for Gui {
                 // in it is not a frame: the backend walks its cells in chunks
                 // of `width`, and a chunk of nothing panics. See `Resized`.
                 match t.size() {
-                    Ok(grid) if grid.width > 0 && grid.height > 0 => {}
+                    Some(grid) if grid.width > 0 && grid.height > 0 => {}
                     _ => return,
                 }
                 if self.cian.take_full_clear() {
-                    let _ = t.clear();
+                    t.clear();
                 }
+                // Timed from inside, so "what cian cost" and "what the
+                // renderer cost" stay separable whichever renderer it is.
                 let cian = &mut self.cian;
-                let mut build = std::time::Duration::ZERO;
-                if let Err(e) = t.draw(|f| {
-                    let b0 = Instant::now();
-                    cian.draw(f);
-                    build = b0.elapsed();
-                }) {
-                    cian_core::log::log(&format!("cian-gui draw failed: {e}"));
-                }
+                let build = match t.draw(cian) {
+                    Ok(build) => build,
+                    Err(e) => {
+                        cian_core::log::log(&format!("cian-gui draw failed: {e}"));
+                        std::time::Duration::ZERO
+                    }
+                };
                 let t1 = Instant::now();
                 self.last_frame = t1;
                 self.needs_redraw = false;
