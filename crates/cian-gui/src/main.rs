@@ -280,7 +280,16 @@ impl Gui {
             zoom_rest: 0.0,
             want_size: None,
             last_frame: Instant::now(),
-            prof: std::env::var_os("CIAN_GUI_PROF").is_some(),
+            prof: {
+                let on = std::env::var_os("CIAN_GUI_PROF").is_some();
+                if on {
+                    // Time the frame in parts too: the total alone cannot say
+                    // which machine's frame is the slow one, and this one is
+                    // not the machine cian is developed on.
+                    cian_tui::prof::enable();
+                }
+                on
+            },
             prof_total: std::time::Duration::ZERO,
             prof_build: std::time::Duration::ZERO,
             prof_icons: std::time::Duration::ZERO,
@@ -983,11 +992,14 @@ impl ApplicationHandler<Tick> for Gui {
                     if self.prof_frames == PROF_EVERY {
                         let n = PROF_EVERY;
                         let line = format!(
-                            "frame x{n}: {:?} total = cian {:?} + renderer {:?}, icons {:?}",
+                            "frame x{n}: {:?} total = cian {:?} + renderer {:?}, icons {:?}{}",
                             self.prof_total / n,
                             self.prof_build / n,
                             (self.prof_total - self.prof_build) / n,
                             self.prof_icons / n,
+                            // Which part of cian's own time, when the parts are
+                            // being counted. See `cian_tui::prof`.
+                            cian_tui::prof::take_report(n),
                         );
                         eprintln!("{line}");
                         cian_core::log::log(&line);

@@ -44,6 +44,7 @@ mod crmaine;
 mod font;
 mod ime;
 mod preview;
+pub mod prof;
 mod markdown;
 mod viewer;
 mod vim;
@@ -2548,6 +2549,13 @@ pub struct App {
     native_icons: bool,
     /// Filled every frame while `native_icons` is on.
     icon_slots: Vec<IconSlot>,
+    /// Which sidebar paths are directories, and when that was last asked.
+    ///
+    /// The sidebar is drawn every frame and a bookmark's target can come and
+    /// go, so it cannot be answered once — but it must not be answered thirty
+    /// times a second either. On Windows these paths are usually OneDrive's,
+    /// and a question about one of those is a question for the sync engine.
+    sidebar_dirs: (Instant, std::collections::HashMap<PathBuf, bool>),
     /// What the user has typed to jump by name in the grid, and when.
     ///
     /// Cleared once a pause makes it obvious the next letter starts a new
@@ -2854,6 +2862,7 @@ impl App {
             skin: Skin::Classic,
             native_icons: false,
             icon_slots: Vec::new(),
+            sidebar_dirs: (Instant::now(), std::collections::HashMap::new()),
             type_ahead: String::new(),
             type_ahead_at: Instant::now(),
             icon_cols: 1,

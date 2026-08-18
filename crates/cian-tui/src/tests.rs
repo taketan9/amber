@@ -13170,3 +13170,33 @@ mod frame_cost {
         eprintln!("frame_cost: {bare:?} 200x60 with three files (no preview)");
     }
 }
+
+/// The sidebar is drawn on every frame, and the disk must not be asked about
+/// it on every frame. On Windows those paths are usually OneDrive's, where a
+/// question costs a round trip to the sync engine — sixteen milliseconds a
+/// frame of them, measured in the window.
+mod the_sidebar_does_not_ask_the_disk_every_frame {
+    use super::*;
+
+    #[test]
+    fn what_it_learned_is_kept_between_frames() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        app.skin = Skin::Finder;
+        app.native_icons = true;
+        assert!(app.sidebar_dirs.1.is_empty(), "nothing known before the first frame");
+        let _ = render(&mut app, 140, 40);
+        let learned = app.sidebar_dirs.1.len();
+        assert!(learned > 0, "the first frame asks, and remembers what it heard");
+        let _ = render(&mut app, 140, 40);
+        assert_eq!(app.sidebar_dirs.1.len(), learned, "the second frame asks nothing new");
+    }
+
+    /// The standard places are worked out once for the life of the process:
+    /// each one probes up to ten paths, and they cannot move while cian runs.
+    #[test]
+    fn the_standard_places_are_worked_out_once() {
+        let first = crate::render::standard_places().as_ptr();
+        let again = crate::render::standard_places().as_ptr();
+        assert_eq!(first, again, "the same list, not a fresh one per frame");
+    }
+}

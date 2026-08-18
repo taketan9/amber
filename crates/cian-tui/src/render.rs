@@ -140,10 +140,14 @@ fn draw_split(f: &mut Frame, main_area: Rect, app: &mut App, ov: AnimOverride) {
         app.take_git(FocusedPane::Left),
         app.take_git(FocusedPane::Right),
     );
+    crate::prof::timed(crate::prof::Phase::Panes, || {
     draw_file_pane(f, panes_split[0], &mut app.left, &mut tracks, app.focused == FocusedPane::Left, visual_for_left, app.mode, bg_l, fl_l, FocusedPane::Left, &mut tab_rects, git_l.as_ref(), app.lang, &mut sort_rects, &mut crumb_rects, &mut nav_rects, app.skin, app.native_icons, &mut icon_slots);
+    });
     if let Some(prev) = restore { set_theme(prev); }
     let restore = push_pane_theme(app, 1);
+    crate::prof::timed(crate::prof::Phase::Panes, || {
     draw_file_pane(f, panes_split[1], &mut app.right, &mut tracks, app.focused == FocusedPane::Right, visual_for_right, app.mode, bg_r, fl_r, FocusedPane::Right, &mut tab_rects, git_r.as_ref(), app.lang, &mut sort_rects, &mut crumb_rects, &mut nav_rects, app.skin, app.native_icons, &mut icon_slots);
+    });
     if let Some(prev) = restore { set_theme(prev); }
     app.put_git(FocusedPane::Left, git_l);
     app.put_git(FocusedPane::Right, git_r);
@@ -153,10 +157,12 @@ fn draw_split(f: &mut Frame, main_area: Rect, app: &mut App, ov: AnimOverride) {
     app.scroll_tracks = std::mem::take(&mut tracks);
     let log_border = recording_pulse(app.started.elapsed());
     if app.preview_on && app.focused != FocusedPane::Shell {
-        draw_preview_panel(f, shell_area, app);
+        crate::prof::timed(crate::prof::Phase::Shell, || draw_preview_panel(f, shell_area, app));
     } else {
         // draw_shell sizes each pane's PTY to its computed sub-rect.
-        draw_shell(f, shell_area, &mut app.shell, app.focused == FocusedPane::Shell, &mut dividers, &mut leaves, ov, &mut tab_rects, log_border);
+        crate::prof::timed(crate::prof::Phase::Shell, || {
+            draw_shell(f, shell_area, &mut app.shell, app.focused == FocusedPane::Shell, &mut dividers, &mut leaves, ov, &mut tab_rects, log_border)
+        });
     }
     app.dividers = dividers;
     app.shell_leaves = leaves;
@@ -763,7 +769,7 @@ fn draw_desktop_chrome(
     // into two columns — which is what Finder does when you drag it small.
     if inner.width >= SIDEBAR_W + min_w * 2 {
         let side = Rect::new(inner.x, inner.y, SIDEBAR_W, inner.height);
-        draw_sidebar(f, side, app, th, bg);
+        crate::prof::timed(crate::prof::Phase::Sidebar, || draw_sidebar(f, side, app, th, bg));
         inner = Rect::new(
             inner.x + SIDEBAR_W,
             inner.y,
@@ -907,10 +913,21 @@ fn draw_sidebar(
         *y += 1;
     };
     let native = app.native_icons;
+    // Answers about the disk, at most once every few seconds — see
+    // [`App::sidebar_dirs`]. Taken out of `app` for the length of the draw so
+    // the closure below can read it while the rest of `app` is written to.
+    const SIDEBAR_STAT_EVERY: std::time::Duration = std::time::Duration::from_secs(3);
+    let mut known: std::collections::HashMap<PathBuf, bool> =
+        if app.sidebar_dirs.0.elapsed() >= SIDEBAR_STAT_EVERY {
+            std::collections::HashMap::new()
+        } else {
+            std::mem::take(&mut app.sidebar_dirs.1)
+        };
     let mut slots: Vec<crate::IconSlot> = Vec::new();
     let place = |lines: &mut Vec<Line>,
                  rows: &mut Vec<(PathBuf, u16)>,
                  slots: &mut Vec<crate::IconSlot>,
+                 known: &mut std::collections::HashMap<PathBuf, bool>,
                  y: &mut u16,
                  icon: &str,
                  name: &str,
@@ -932,7 +949,7 @@ fn draw_sidebar(
                 is_dir: true,
                 // A bookmark pointing somewhere that has gone still reads as a
                 // place; asking the disk about it would answer "blank document".
-                local: path.is_dir(),
+                local: *known.entry(path.clone()).or_insert_with(|| path.is_dir()),
                 glyph: icon.chars().next().map(|c| (c, rgb_of(th.file.directory))),
                 prefer_glyph: false,
             });
@@ -948,8 +965,8 @@ fn draw_sidebar(
 
     app.sidebar_add = None;
     section(&mut lines, &mut y, "よく使う項目");
-    for (icon, name, dir) in standard_places() {
-        place(&mut lines, &mut rows, &mut slots, &mut y, icon, &name, dir);
+    for (icon, name, dir) in standard_places().iter().cloned() {
+        place(&mut lines, &mut rows, &mut slots, &mut known, &mut y, icon, &name, dir);
     }
 
     // The user's own bookmarks. Groups are flattened to their leaves: a
@@ -967,7 +984,7 @@ fn draw_sidebar(
         ]));
         y += 1;
         for (name, path) in saved {
-            place(&mut lines, &mut rows, &mut slots, &mut y, "\u{f07b}", &name, path);
+            place(&mut lines, &mut rows, &mut slots, &mut known, &mut y, "\u{f07b}", &name, path);
         }
     }
 
@@ -977,6 +994,10 @@ fn draw_sidebar(
     );
     let _ = surface;
     app.sidebar_rows = rows;
+    if app.sidebar_dirs.0.elapsed() >= SIDEBAR_STAT_EVERY {
+        app.sidebar_dirs.0 = std::time::Instant::now();
+    }
+    app.sidebar_dirs.1 = known;
     // Handed back so the caller can add them to the frame's slots rather than
     // replacing them: the listing has its own.
     app.icon_slots.extend(slots);
@@ -993,7 +1014,25 @@ fn expand_home(raw: &str) -> PathBuf {
 }
 
 /// The places the system gives everyone, in the order Finder lists them.
-fn standard_places() -> Vec<(&'static str, String, PathBuf)> {
+pub(crate) fn standard_places() -> &'static [(&'static str, String, PathBuf)] {
+    // Worked out once for the life of the process, because working it out is
+    // not free and the sidebar is drawn on every frame.
+    //
+    // `known_dir` looks for each folder under the home directory *and* under
+    // every OneDrive root, by English and Japanese name — up to ten paths
+    // asked about per folder, forty for the four below. On this Mac that is
+    // dozens of microseconds and invisible. On Windows, where the Desktop and
+    // Documents usually *are* OneDrive's, every one of those questions goes
+    // through the sync engine's filter driver, and a windowed cian spent
+    // sixteen milliseconds a frame asking them — measured, in the window, by
+    // someone who reported it as "もっさり". The answers cannot change while
+    // cian runs.
+    static PLACES: std::sync::OnceLock<Vec<(&'static str, String, PathBuf)>> =
+        std::sync::OnceLock::new();
+    PLACES.get_or_init(build_standard_places)
+}
+
+fn build_standard_places() -> Vec<(&'static str, String, PathBuf)> {
     let home = std::env::var_os("HOME")
         .or_else(|| std::env::var_os("USERPROFILE"))
         .map(PathBuf::from);
@@ -1071,11 +1110,13 @@ fn draw_detail_view(f: &mut Frame, area: Rect, app: &mut App, ov: AnimOverride) 
     let g = app.take_git(app.focused);
     let which = if side == 1 { FocusedPane::Right } else { FocusedPane::Left };
     let tabs = if side == 1 { &mut app.right } else { &mut app.left };
+    crate::prof::timed(crate::prof::Phase::Panes, || {
     draw_file_pane(
         f, inner, tabs, &mut tracks, true, va, app.mode, pane_bg, fl, which,
         &mut tab_rects, g.as_ref(), app.lang, &mut sort_rects, &mut crumb_rects,
         &mut nav_rects, app.skin, app.native_icons, &mut icon_slots,
     );
+    });
     app.put_git(which, g);
     if let Some(prev) = restore {
         set_theme(prev);
