@@ -1294,3 +1294,27 @@ fn bench_formatters() {
     }
     eprintln!("human_size: {:?} per call ({n})", t.elapsed() / 80_000);
 }
+
+#[cfg(test)]
+mod log_destination_tests {
+    /// A log that cannot be written where it was asked for lands somewhere it
+    /// can, rather than nowhere at all. The path that prompted this —
+    /// `%USERPROFILE%\Desktop` on a machine whose Desktop is OneDrive's — does
+    /// not exist, and the silence cost an evening.
+    ///
+    /// The resolution happens once per process, so this is one test rather than
+    /// several: a second would see the first one's answer.
+    #[test]
+    fn a_log_path_is_resolved_once_and_never_silently() {
+        // Off unless asked for, which is the normal case.
+        if std::env::var_os("CIAN_LOG").is_none() {
+            assert!(crate::log::destination().is_none(), "no CIAN_LOG, no log");
+            assert!(!crate::log::enabled());
+            return;
+        }
+        // Asked for: wherever it ended up, it takes a line.
+        let where_it_went = crate::log::destination().expect("CIAN_LOG is set");
+        crate::log::log("a line from the test suite");
+        assert!(where_it_went.exists(), "the log exists at {}", where_it_went.display());
+    }
+}

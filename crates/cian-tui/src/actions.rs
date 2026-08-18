@@ -273,6 +273,25 @@ impl App {
             }
         }
         lines.push(String::new());
+        // Where diagnostics are going, and whether they are going anywhere.
+        //
+        // Asked here because this is the command someone runs when nothing is
+        // where they expected it, and because the answer may not be the path
+        // they asked for: a `CIAN_LOG` that cannot be written to falls back to
+        // the temp directory rather than to silence. An evening was lost to a
+        // log that was being written to a Desktop folder which, on a machine
+        // whose Desktop is OneDrive's, does not exist.
+        match cian_core::log::destination() {
+            Some(p) => {
+                let asked = std::env::var("CIAN_LOG").unwrap_or_default();
+                lines.push(format!("log:             {}", p.display()));
+                if !asked.is_empty() && std::path::Path::new(&asked) != p.as_path() {
+                    lines.push(format!("               → asked for {asked}, which could not be written"));
+                }
+            }
+            None => lines.push("log:             off (set CIAN_LOG=<file> to turn it on)".into()),
+        }
+        lines.push(String::new());
         lines.push(format!(
             "exe dir:         {}",
             cian_lua::exe_dir().map(|p| p.display().to_string()).unwrap_or_else(|| "?".into())
