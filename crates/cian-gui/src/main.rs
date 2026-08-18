@@ -1162,6 +1162,21 @@ impl ApplicationHandler<Tick> for Gui {
 
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
         self.cian.finish();
+        // And then stop, rather than unwinding out through everything that was
+        // built on the way in.
+        //
+        // Closing the window was hanging. The session is saved and the shells
+        // are killed by `finish` above; what is left is teardown — a GPU
+        // device, a surface, a pseudo-console, a font atlas — and every one of
+        // those is a thing that can decide to wait. None of it needs doing:
+        // the process is ending, and the operating system reclaims all of it
+        // whether or not the destructors run. What a person wants when they
+        // press the close button is for the window to go away.
+        //
+        // Everything with a reason to be flushed has been flushed first. If
+        // that ever stops being true, it belongs in `finish`, not here.
+        cian_core::log::log("cian closing");
+        std::process::exit(0);
     }
 }
 

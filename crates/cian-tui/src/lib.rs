@@ -5012,6 +5012,11 @@ pub fn run(left: Option<PathBuf>, right: Option<PathBuf>, startup: StartupMacro)
     app.save_session();
     // Give the keyboard back the way it was found.
     app.release_ime();
+    // And end every shell before anything starts dropping. Closing a
+    // pseudo-console on Windows waits for the program inside it, and a wedged
+    // shell never leaves — which turns quitting into a hang. See
+    // [`cian_pty::PtySession::kill_now`].
+    app.shell.kill_all();
 
     if kbd_enhanced {
         let _ = execute!(terminal.backend_mut(), PopKeyboardEnhancementFlags);

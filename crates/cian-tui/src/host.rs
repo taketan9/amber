@@ -334,5 +334,9 @@ impl Session {
     pub fn finish(&mut self) {
         self.app.save_session();
         self.app.release_ime();
+        // Before anything is dropped: a pseudo-console on Windows is closed by
+        // waiting for the program inside it, and the program inside it may be
+        // the reason cian is being closed. See `ShellPane::kill_all`.
+        self.app.shell.kill_all();
     }
 }

@@ -382,6 +382,23 @@ impl ShellPane {
         self.tabs.get_mut(self.active).and_then(|t| t.active_pane_mut())
     }
 
+    /// Kill every shell in every tab, at once and without waiting.
+    ///
+    /// Called on the way out. See [`cian_pty::PtySession::kill_now`] for why
+    /// this cannot be left to the destructors: on Windows they wait for exactly
+    /// the process that is least likely to be able to exit.
+    pub(crate) fn kill_all(&mut self) {
+        for tab in &mut self.tabs {
+            for i in tab.leaves() {
+                if let Some(Node::Leaf { session, .. }) =
+                    tab.nodes.get_mut(i).and_then(|n| n.as_mut())
+                {
+                    session.kill_now();
+                }
+            }
+        }
+    }
+
     /// Start a PTY spawn on a background thread.
     ///
     /// Spawning (openpty + fork/exec of the shell) must never run on the UI

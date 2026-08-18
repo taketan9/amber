@@ -479,6 +479,20 @@ impl PtySession {
         self.heard.load(Ordering::Relaxed)
     }
 
+    /// End this shell now, without waiting for it.
+    ///
+    /// Closing a pseudo-console on Windows *waits for the program inside it to
+    /// exit*, and a shell that has wedged — one stuck loading a profile, say —
+    /// never does. That wait happens inside `drop`, which is to say while cian
+    /// is trying to close its window: the window stops answering, and the only
+    /// way out is the task manager.
+    ///
+    /// So the child is killed first, deliberately and early, and the tidying up
+    /// that follows has nothing left to wait for.
+    pub fn kill_now(&mut self) {
+        let _ = self.child.kill();
+    }
+
     /// How long since this shell was started.
     pub fn age(&self) -> std::time::Duration {
         self.started.elapsed()

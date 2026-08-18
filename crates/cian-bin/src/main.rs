@@ -54,5 +54,16 @@ fn main() -> Result<()> {
         (None, Some(n)) => cian_tui::StartupMacro::Named(n),
         (None, None) => cian_tui::StartupMacro::None,
     };
-    cian_tui::run(left, right, startup)
+    let result = cian_tui::run(left, right, startup);
+    // The terminal has been given back by now, and the session saved. Stopping
+    // here rather than unwinding means no destructor can decide to wait — the
+    // one that could is a pseudo-console with a wedged shell in it, and waiting
+    // for that is a program that will not quit. See `PtySession::kill_now`.
+    match result {
+        Ok(()) => std::process::exit(0),
+        Err(e) => {
+            eprintln!("cian: {e:#}");
+            std::process::exit(1);
+        }
+    }
 }
