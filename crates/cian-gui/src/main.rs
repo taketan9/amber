@@ -99,6 +99,55 @@ struct Tick;
 /// both front ends give cian a turn at the same rate.
 const HEARTBEAT: std::time::Duration = std::time::Duration::from_millis(16);
 
+/// Which graphics API to draw through, and what is available.
+///
+/// The default was "whatever wgpu picks", and on the machine that reported the
+/// window as unusable it picked something that takes a hundred and thirty
+/// milliseconds to put one frame on screen — against one millisecond for cian
+/// to compose it. Seven frames a second, and not one of them cian's fault.
+///
+/// A locked-down Windows machine can have no usable hardware driver at all, in
+/// which case the choice is a software rasteriser and the only question is
+/// which one. So: every adapter is written to the log with what it is, and
+/// `CIAN_GUI_BACKEND=dx12|vulkan|gl` picks between them when the automatic
+/// choice is a bad one. Naming what is wrong is most of fixing it.
+fn gpu_instance() -> ratatui_wgpu::wgpu::Instance {
+    use ratatui_wgpu::wgpu::{Backends, Instance, InstanceDescriptor};
+    let backends = match std::env::var("CIAN_GUI_BACKEND").ok().as_deref() {
+        Some("dx12") => Backends::DX12,
+        Some("vulkan") => Backends::VULKAN,
+        Some("gl") => Backends::GL,
+        Some("metal") => Backends::METAL,
+        _ => Backends::default(),
+    };
+    let instance = Instance::new(&InstanceDescriptor { backends, ..Default::default() });
+    if cian_core::log::enabled() {
+        for adapter in pollster::block_on(instance.enumerate_adapters(backends)) {
+            let info = adapter.get_info();
+            cian_core::log::log(&format!(
+                "gpu: {:?} {} ({:?}, driver {} {})",
+                info.backend, info.name, info.device_type, info.driver, info.driver_info,
+            ));
+        }
+    }
+    instance
+}
+
+/// How finished frames reach the screen.
+///
+/// `CIAN_GUI_PRESENT=vsync|immediate|mailbox`. The renderer's own default is
+/// immediate; on a machine where presenting is the slow part, which one is
+/// being used is worth being able to change without a new build.
+fn present_mode() -> ratatui_wgpu::wgpu::PresentMode {
+    use ratatui_wgpu::wgpu::PresentMode;
+    match std::env::var("CIAN_GUI_PRESENT").ok().as_deref() {
+        Some("vsync") => PresentMode::AutoVsync,
+        Some("mailbox") => PresentMode::Mailbox,
+        Some("immediate") => PresentMode::Immediate,
+        _ => PresentMode::AutoNoVsync,
+    }
+}
+
 /// A duration in microseconds, written in ASCII.
 ///
 /// Everything cian prints for a person to read may end up in a Windows
@@ -440,6 +489,8 @@ impl Gui {
         let backend = pollster::block_on(
             Builder::<PixelLayer>::from_font(face.clone())
                 .with_font_size_px(size_px)
+                .with_instance(gpu_instance())
+                .with_present_mode(present_mode())
                 .with_width_and_height(Dimensions {
                     width: NonZeroU32::new(size.width.max(1)).unwrap(),
                     height: NonZeroU32::new(size.height.max(1)).unwrap(),
