@@ -63,6 +63,11 @@ pub enum About {
     /// These files and folders, as a selection.
     Items(Vec<PathBuf>),
     /// This folder, as the place you are looking at.
+    // Read on the platforms that have a menu to show. On the ones that do not,
+    // the caller still says what it *would* have asked about, and the stub
+    // still answers "there is nothing to show" — so the payload is dead there
+    // and only there.
+    #[cfg_attr(not(any(windows, target_os = "macos")), allow(dead_code))]
     Folder(PathBuf),
 }
 
@@ -536,8 +541,6 @@ mod platform {
 
 #[cfg(not(any(windows, target_os = "macos")))]
 mod platform {
-    use std::path::PathBuf;
-
     pub fn show(
         _window: &winit::window::Window,
         _about: &super::About,
