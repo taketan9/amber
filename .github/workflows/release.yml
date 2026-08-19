@@ -25,8 +25,14 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      # Both architectures, because the runner is one of them and half the
+      # Macs in the world are the other. An arm64-only bundle on an Intel Mac
+      # does not fail to run, it fails to *open*: "このMacには対応していない",
+      # with nothing to say which Mac it was built for.
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin, x86_64-apple-darwin
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
@@ -40,10 +46,26 @@ jobs:
         env:
           FONT_URL: https://github.com/yuru7/HackGen/releases/download/v2.10.0/HackGen_NF_v2.10.0.zip
 
-      - name: Build (release)
+      - name: Build (release, both architectures)
         run: |
-          cargo build --release --bin cian-tui
-          cargo build --release --bin cian --features cian-gui/bundled-font
+          for target in aarch64-apple-darwin x86_64-apple-darwin; do
+            cargo build --release --target "$target" --bin cian-tui
+            cargo build --release --target "$target" --bin cian --features cian-gui/bundled-font
+          done
+
+      # One binary that holds both, where the bundler and the zip expect to
+      # find it. `lipo` is what "universal" means: the two builds glued into
+      # one file, and macOS picks the slice it can run.
+      - name: Make them universal
+        run: |
+          mkdir -p target/release
+          for bin in cian cian-tui; do
+            lipo -create \
+              "target/aarch64-apple-darwin/release/$bin" \
+              "target/x86_64-apple-darwin/release/$bin" \
+              -output "target/release/$bin"
+            lipo -info "target/release/$bin"
+          done
 
       - name: Bundle and stage
         run: |

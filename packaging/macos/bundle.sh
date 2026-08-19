@@ -84,6 +84,12 @@ PLIST
 
 # Ad-hoc signing. Not a distribution signature — it is what stops macOS
 # treating a freshly built bundle as damaged on the machine that built it.
+# After the copy, never before: signing a binary and then replacing it leaves a
+# signature that describes something else, which macOS reports as damage.
 codesign --force --deep --sign - "$app" 2>/dev/null || true
 
+# What is actually in there. A bundle built for one architecture opens on that
+# architecture and nowhere else, and the message macOS gives for the other case
+# — "not supported on this Mac" — does not say which Mac it *was* built for.
 echo "built $app"
+lipo -info "$app/Contents/MacOS/cian" 2>/dev/null || true
