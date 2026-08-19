@@ -14963,3 +14963,77 @@ mod reload_keeps_the_look_it_is_wearing {
         crate::theme::set_theme(was);
     }
 }
+
+/// Where you are, on every theme cian ships.
+///
+/// The presets put their selection at 1.1–1.4 times the contrast of their page,
+/// light and dark alike — and on a dark page that is a shade rather than a
+/// band, which is what "the dark theme is hard to read" turned out to mean.
+mod the_selection_can_be_seen_on_every_theme {
+    use super::*;
+    use crate::render::{contrast_ratio, rel_luminance, selection_on};
+
+    #[test]
+    fn a_dark_page_gets_a_band_you_can_see() {
+        let mut checked = 0;
+        for name in crate::theme::THEME_NAMES {
+            let t = crate::theme::theme_preset(name).unwrap();
+            let page = t.base_bg.unwrap_or(t.popup_bg);
+            if rel_luminance(page) > 0.18 {
+                continue;
+            }
+            checked += 1;
+            let lifted = selection_on(page, t.selected_bg);
+            let r = contrast_ratio(lifted, page);
+            assert!(r >= 1.95, "{name}: the selection is still a shade at {r:.2}:1");
+        }
+        assert!(checked >= 10, "the dark presets were actually walked: {checked}");
+    }
+
+    /// A light page is left exactly as its author drew it — it was never the
+    /// half that could not be read.
+    #[test]
+    fn a_light_page_is_left_alone() {
+        let mut checked = 0;
+        for name in crate::theme::THEME_NAMES {
+            let t = crate::theme::theme_preset(name).unwrap();
+            let page = t.base_bg.unwrap_or(t.popup_bg);
+            if rel_luminance(page) <= 0.18 {
+                continue;
+            }
+            checked += 1;
+            assert_eq!(selection_on(page, t.selected_bg), t.selected_bg, "{name}");
+        }
+        assert!(checked >= 4, "the light presets were actually walked: {checked}");
+    }
+
+    /// The hue is the theme's: lifting a band must not turn a blue selection
+    /// grey, or every theme ends up with the same one.
+    #[test]
+    fn the_theme_keeps_its_own_colour() {
+        let page = Color::Rgb(26, 27, 38);
+        let sel = Color::Rgb(41, 46, 66); // tokyo-night: blue, and barely there
+        let Color::Rgb(r, g, b) = selection_on(page, sel) else { panic!("not rgb") };
+        assert!(b > r && b > g, "still blue: {r},{g},{b}");
+        assert!(b - r >= 20, "and still as blue as it was: {r},{g},{b}");
+    }
+
+    /// The cursor row on a dark theme is drawn with the lifted band, not the
+    /// raw one — the rule is applied where the row is painted.
+    #[test]
+    fn and_the_row_is_actually_drawn_with_it() {
+        let _g = THEME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let was = crate::theme::theme();
+        crate::theme::set_theme(crate::theme::theme_preset("tokyo-night").unwrap());
+        let (_d, mut app) = app_with(&["a.txt", "b.txt", "c.txt"]);
+        let buf = render_buf(&mut app, 100, 20);
+        let th = crate::theme::theme();
+        let page = th.base_bg.unwrap_or(th.popup_bg);
+        let want = selection_on(page, th.selected_bg);
+        let found = (0..20)
+            .flat_map(|y| (0..100).map(move |x| (x, y)))
+            .any(|(x, y)| buf[(x, y)].bg == want);
+        assert!(found, "the lifted band is on screen");
+        crate::theme::set_theme(was);
+    }
+}

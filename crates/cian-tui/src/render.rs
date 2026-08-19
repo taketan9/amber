@@ -1298,7 +1298,11 @@ fn draw_icon_grid(f: &mut Frame, area: Rect, app: &mut App) {
         // detail view and the way every desktop marks a selection; a *marked*
         // tile keeps the theme's own tint, so the two states are told apart at
         // a glance instead of by counting.
-        let tile_bg = if selected { th.accent } else { th.selected_bg };
+        let tile_bg = if selected {
+            th.accent
+        } else {
+            selection_on(bg.unwrap_or(th.popup_bg), th.selected_bg)
+        };
         let mut style = Style::default().fg(text_tone(
             kind_for(e).color(),
             if selected || marked { tile_bg } else { bg.unwrap_or(th.popup_bg) },
@@ -2111,7 +2115,11 @@ fn draw_file_pane(
     // that reads on the page can vanish on it.
     // The size and date columns, dimmed against whatever they land on — the
     // page, or the selection, which in the desktop views is the accent.
-    let sel_bg_for_meta = if finder { th.accent } else { th.selected_bg };
+    let sel_bg_for_meta = if finder {
+        th.accent
+    } else {
+        selection_on(bg.unwrap_or(th.popup_bg), th.selected_bg)
+    };
     let meta_on = |selected: bool| {
         Style::default()
             .fg(dim_text(if selected { sel_bg_for_meta } else { bg.unwrap_or(th.popup_bg) }))
@@ -2166,7 +2174,11 @@ fn draw_file_pane(
     // selection was reported as hard to find on dark, and merely findable on
     // light. So there the selection is the accent itself, filled, the way
     // every desktop file manager marks the row you are on.
-    let sel_bg = if finder { th.accent } else { th.selected_bg };
+    let sel_bg = if finder {
+        th.accent
+    } else {
+        selection_on(bg.unwrap_or(th.popup_bg), th.selected_bg)
+    };
     let selected_style = Style::default().bg(sel_bg).add_modifier(Modifier::BOLD);
     let buf = f.buffer_mut();
     // The whole area first, so the rows below the last file carry the pane's
@@ -4293,6 +4305,37 @@ pub(crate) fn contrast_ratio(a: Color, b: Color) -> f32 {
 /// used as text rather than as a chip. It keeps its hue and only gives up as
 /// much lightness as it must: a theme accent chosen to look right *as* an
 /// accent is often too close to that theme's own page to read a number in.
+/// The selection band, lifted off a dark page until it can be seen.
+///
+/// Measured across the presets, every one of them — light and dark alike —
+/// puts its selection between 1.1 and 1.4 times the contrast of its page. On a
+/// light page that is enough: a slightly darker band under a row reads at a
+/// glance. On a dark one it does not, and that is the report: "the light theme
+/// shows me where I am and the dark one does not", with the *same* numbers
+/// behind both.
+///
+/// So the rule is one-sided on purpose. A dark page has its selection pushed
+/// away until it is unmistakable; a light page is left exactly as its author
+/// drew it.
+pub(crate) fn selection_on(page: Color, sel: Color) -> Color {
+    /// Enough for a band to read as a band. Below this it is a shade.
+    const WANT: f32 = 2.0;
+    let (Color::Rgb(mut r, mut g, mut b), Color::Rgb(..)) = (sel, page) else { return sel };
+    if rel_luminance(page) > 0.18 {
+        return sel; // a light page: already legible, and its own author's choice
+    }
+    for _ in 0..48 {
+        if contrast_ratio(Color::Rgb(r, g, b), page) >= WANT {
+            break;
+        }
+        // Lifted, not tinted: the hue is the theme's and stays the theme's.
+        r = (r as u16 + 6).min(255) as u8;
+        g = (g as u16 + 6).min(255) as u8;
+        b = (b as u16 + 6).min(255) as u8;
+    }
+    Color::Rgb(r, g, b)
+}
+
 pub(crate) fn text_tone(c: Color, bg: Color) -> Color {
     const WANT: f32 = 4.5;
     let (Color::Rgb(mut r, mut g, mut b), Color::Rgb(..)) = (c, bg) else { return c };
