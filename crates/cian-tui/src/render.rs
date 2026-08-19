@@ -18,8 +18,8 @@ use super::*;
 /// it asks first, and the review lists its answers become — wears this cyan, so
 /// a glance says the answer came from the model configured in `cian.ai`.
 const AI_SIMPLE: Color = Color::Rgb(0, 190, 205);
-/// crmaine's signature carmine, worn by the crmaine-backed chats (and by the
-/// remote pane), so the two assistants never look like one.
+/// The carmine a remote pane wears, so a listing on a server never looks like
+/// a listing on this disk.
 const CRMAINE: Color = Color::Rgb(214, 45, 70);
 
 /// True when this popup belongs to the AI - simple family, and so wears
@@ -4478,8 +4478,6 @@ fn draw_ai_chat(f: &mut Frame, area: Rect, app: &mut App) {
     f.render_widget(block, rect);
     let body_w = inner.width.max(1) as usize;
 
-    // The current pipeline stage (if any), read before the popup is borrowed.
-    let stage = app.crmaine_stage.clone();
     // The input can be several lines (Alt+Enter); the transcript gives up a row
     // per extra input line, capped so a huge paste can't swallow the answer.
     // Wrapped, not just split: a long line typed or pasted in one piece used
@@ -4570,13 +4568,7 @@ fn draw_ai_chat(f: &mut Frame, area: Rect, app: &mut App) {
             // turns while the answer is in flight (the loop force-repaints
             // meanwhile). See [`spinner_frame`] for why it is not braille.
             let frame = spinner_frame(app.startup_at.elapsed().as_millis());
-            let label = stage.clone().unwrap_or_else(|| {
-                if skin.simple {
-                    tr(lang, "AI - simple is thinking…", "AI - simple が考えています…").to_string()
-                } else {
-                    tr(lang, "crmaine is thinking…", "カーマイン が考えています…").to_string()
-                }
-            });
+            let label = tr(lang, "AI - simple is thinking…", "AI - simple が考えています…");
             styled.push(Line::from(vec![
                 Span::styled(
                     format!("{frame} "),

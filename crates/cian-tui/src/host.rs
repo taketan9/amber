@@ -313,8 +313,7 @@ impl Session {
         let busy = self.app.anim.is_some()
             || self.app.flash.is_some()
             || self.app.op_job.is_some()
-            || self.app.ai_job.is_some()
-            || self.app.crmaine_rx.is_some();
+            || self.app.ai_job.is_some();
         std::time::Duration::from_millis(if busy { 16 } else { 33 })
     }
 

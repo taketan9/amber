@@ -1951,7 +1951,7 @@ impl App {
     /// Returns true when the key was consumed.
     ///
     /// Two deliberate deviations, because existing bindings win: `A` stays
-    /// crmaine Coding (append-at-end is `$` then `a`), and on non-editable
+    /// append-at-end (`$` then `a`), and on non-editable
     /// views `d`/`u` keep their pager scrolling — here they are operator and
     /// undo, with Ctrl+d/Ctrl+u still scrolling as in vim.
     fn viewer_edit_operator(&mut self, key: KeyEvent) -> bool {

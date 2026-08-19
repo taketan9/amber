@@ -784,23 +784,6 @@ impl App {
                     }
                 }
                 KeyCode::Enter => self.send_ai_message(),
-                // Ctrl+D asks the retriever what it handed the model for this
-                // question — the "the answer is wrong, whose fault is it?" key.
-                // Not while an answer streams: the report takes the popup, and
-                // the rest of the answer would have nowhere to land.
-                KeyCode::Char('d') if ctrl => {
-                    if self.crmaine_rx.is_some() {
-                        self.message =
-                            Some(tr(self.lang, "wait for the answer to finish", "回答の完了を待ってください").into());
-                    } else {
-                        // No argument: the last question `/query` was sent —
-                        // which, in a RAG chat, is the one on screen.
-                        self.start_debug_search("");
-                    }
-                }
-                // Ctrl+↑ / Ctrl+↓ rate the last RAG answer (thumbs up / down).
-                KeyCode::Up if ctrl => self.send_crmaine_feedback(true),
-                KeyCode::Down if ctrl => self.send_crmaine_feedback(false),
                 KeyCode::PageUp | KeyCode::Up => {
                     if let Popup::AiChat { scroll, .. } = &mut self.popup {
                         *scroll = scroll.saturating_sub(3);

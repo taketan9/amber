@@ -235,28 +235,6 @@ impl Default for AiOptions {
     }
 }
 
-/// Settings from `cian.crmaine{...}`. Presence turns on the crmaine bridge:
-/// cian attaches to the crmaine RAG server that the VS Code extension already
-/// started (same deterministic port, config read live from VS Code's
-/// settings.json). Every field is an optional override — with none set, cian
-/// mirrors crmaine's own VS Code configuration.
-#[derive(Debug, Clone, Default)]
-pub struct CrmaineOptions {
-    /// Path to VS Code's `settings.json` (auto-detected per-OS when unset).
-    pub settings_path: Option<String>,
-    /// Force the server port (else computed from the login name, as the
-    /// extension does).
-    pub port: Option<u16>,
-    /// Override the RAG index cache dir (else `crmaine.cacheDir` from settings).
-    pub cache_dir: Option<String>,
-    /// Override the Azure endpoint / model / API version / auth mode (else the
-    /// matching `crmaine.*` settings, then crmaine's own defaults).
-    pub endpoint: Option<String>,
-    pub model: Option<String>,
-    pub api_version: Option<String>,
-    pub auth_mode: Option<String>,
-}
-
 /// Settings from `cian.ime{...}`: the commands cian runs to turn the system's
 /// input method off and on again.
 ///
@@ -335,8 +313,6 @@ struct Builder {
     ext_open: HashMap<String, Function>,
     ssh_hosts: Vec<SshHost>,
     ai: Option<AiOptions>,
-    /// crmaine bridge settings, if `cian.crmaine{...}` was called.
-    crmaine: Option<CrmaineOptions>,
     /// Input-method switching, if `cian.ime{...}` was called.
     ime: Option<ImeOptions>,
     /// Font-size stepping, if `cian.font{...}` was called.
@@ -367,8 +343,6 @@ pub struct Config {
     pub ssh_hosts: Vec<SshHost>,
     /// AI settings declared with `cian.ai{...}`, if any.
     pub ai: Option<AiOptions>,
-    /// crmaine bridge settings declared with `cian.crmaine{...}`, if any.
-    pub crmaine: Option<CrmaineOptions>,
     /// Input-method switching declared with `cian.ime{...}`, if any.
     pub ime: Option<ImeOptions>,
     /// Font-size stepping declared with `cian.font{...}`, if any.
@@ -627,7 +601,7 @@ fn load_from(path: &Path) -> Config {
     // Pull the accumulated config out by cloning; the Lua handles stay valid
     // because we move `lua` into the returned Config below.
     #[allow(clippy::type_complexity)]
-    let (theme, options, keymaps, sharepoint, ext_open, ssh_hosts, ai, crmaine, ime, font, ai_context, snippets, builder_errors) = {
+    let (theme, options, keymaps, sharepoint, ext_open, ssh_hosts, ai, ime, font, ai_context, snippets, builder_errors) = {
         let b = builder.borrow();
         (
             b.theme.clone(),
@@ -637,7 +611,6 @@ fn load_from(path: &Path) -> Config {
             b.ext_open.clone(),
             b.ssh_hosts.clone(),
             b.ai.clone(),
-            b.crmaine.clone(),
             b.ime.clone(),
             b.font.clone(),
             b.ai_context.clone(),
@@ -655,7 +628,6 @@ fn load_from(path: &Path) -> Config {
         ext_open,
         ssh_hosts,
         ai,
-        crmaine,
         ime,
         font,
         ai_context,
@@ -1029,30 +1001,6 @@ fn install_api(lua: &Lua, builder: &Rc<RefCell<Builder>>) -> mlua::Result<()> {
         )?;
     }
 
-    // cian.crmaine{}  — turn on the crmaine bridge (attach to the running server).
-    // Optional overrides: settings_path, port, cache_dir, endpoint, model,
-    // api_version, auth_mode. With none set, cian mirrors VS Code's crmaine.*.
-    {
-        let b = builder.clone();
-        cian.set(
-            "crmaine",
-            lua.create_function(move |_, t: Option<Table>| {
-                let mut c = CrmaineOptions::default();
-                if let Some(t) = t {
-                    let s = |k: &str| -> Option<String> { t.get::<Option<String>>(k).ok().flatten() };
-                    c.settings_path = s("settings_path");
-                    c.cache_dir = s("cache_dir");
-                    c.endpoint = s("endpoint");
-                    c.model = s("model");
-                    c.api_version = s("api_version");
-                    c.auth_mode = s("auth_mode");
-                    c.port = t.get::<Option<u16>>("port").ok().flatten();
-                }
-                b.borrow_mut().crmaine = Some(c);
-                Ok(())
-            })?,
-        )?;
-    }
 
     // cian.ime{ off = "...", on = "..." }  — switch the system input method
     // with cian's mode, so single-key commands work with Japanese input on.

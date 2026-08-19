@@ -24,9 +24,6 @@ impl App {
         if self.ai.is_some() && self.ai_ready() {
             items.push(MenuItem::ViewerSummary);
         }
-        if self.config.crmaine.is_some() {
-            items.push(MenuItem::ViewerCoding);
-        }
         items.push(MenuItem::ViewerEdit);
         items.push(MenuItem::ViewerEncoding);
         items.push(MenuItem::ViewerBlame);
@@ -57,16 +54,12 @@ impl App {
         // Whether the AI helper is usable, checked (and cached) up front so the
         // AI entries only appear when they will work.
         let ai = self.ai.is_some() && self.ai_ready();
-        let crmaine = self.config.crmaine.is_some();
         let mut items = Vec::new();
         // Launchers lead both menus: "AI - simple ▸" (when the local model is
-        // on), then "AI - crmaine ▸" (when the bridge is on), then snippets,
-        // macros. Each appears only when it has something to offer.
+        // on), then snippets, macros. Each appears only when it has something
+        // to offer.
         if ai {
             items.push(MenuItem::AiMenu);
-        }
-        if crmaine {
-            items.push(MenuItem::CrmaineMenu);
         }
         if !self.config.snippets.is_empty() {
             items.push(MenuItem::Snippets);
@@ -157,7 +150,7 @@ impl App {
     pub(crate) fn submenu_children(&self, item: MenuItem) -> Option<Vec<MenuItem>> {
         match item {
             MenuItem::AiMenu => {
-                // The local (non-crmaine) assistant: a plain chat plus the
+                // The local assistant: a plain chat plus the
                 // helpers for whatever it was opened over.
                 let mut v = vec![MenuItem::AiChat];
                 if self.viewer_return.is_some() {
@@ -180,30 +173,6 @@ impl App {
                     v.push(MenuItem::AiRename);
                     v.push(MenuItem::AiCommit);
                 }
-                v.push(MenuItem::Back);
-                Some(v)
-            }
-            MenuItem::CrmaineMenu => {
-                // The crmaine bridge: RAG / Agent / Coding, then the corpus tools.
-                let mut v = vec![MenuItem::CrmaineRag, MenuItem::CrmaineAgent];
-                if self.focused != FocusedPane::Shell {
-                    v.push(MenuItem::CrmaineCoding); // needs a file to read
-                }
-                v.push(MenuItem::CrmaineKnowledge); // index / analysis / diag ▸
-                v.push(MenuItem::Back);
-                Some(v)
-            }
-            MenuItem::CrmaineKnowledge => {
-                let mut v = vec![MenuItem::CrmaineIndex];
-                if self.crmaine_cache_override.is_some() {
-                    v.push(MenuItem::CrmaineShared);
-                }
-                v.push(MenuItem::CrmaineSearchFiles);
-                v.push(MenuItem::CrmaineImpact);
-                v.push(MenuItem::CrmaineContradiction);
-                v.push(MenuItem::CrmaineGlossary);
-                v.push(MenuItem::CrmaineDebugSearch);
-                v.push(MenuItem::CrmaineInfo);
                 v.push(MenuItem::Back);
                 Some(v)
             }
@@ -435,7 +404,7 @@ impl App {
         self.menu_stack.clear();
         self.popup = Popup::None;
         match item {
-            MenuItem::AiMenu | MenuItem::CrmaineMenu | MenuItem::SendMenu | MenuItem::WindowMenu | MenuItem::GitMenu | MenuItem::SvnMenu | MenuItem::CompressMenu | MenuItem::FileMenu | MenuItem::ArchiveMenu | MenuItem::InspectMenu | MenuItem::OsMenu | MenuItem::ViewMenu | MenuItem::SessionMenu | MenuItem::CrmaineKnowledge | MenuItem::Back => {} // handled above
+            MenuItem::AiMenu | MenuItem::SendMenu | MenuItem::WindowMenu | MenuItem::GitMenu | MenuItem::SvnMenu | MenuItem::CompressMenu | MenuItem::FileMenu | MenuItem::ArchiveMenu | MenuItem::InspectMenu | MenuItem::OsMenu | MenuItem::ViewMenu | MenuItem::SessionMenu | MenuItem::Back => {} // handled above
             MenuItem::OpenDefault => self.open_externally(),
             MenuItem::OpenWithOs => self.open_with_os(),
             MenuItem::OfficeOpen => self.open_in_office(),
@@ -535,27 +504,11 @@ impl App {
             MenuItem::AiStructure => self.start_ai_structure(),
             MenuItem::AiRename => self.start_ai_rename_prompt(),
             MenuItem::AiSearch => self.start_ai_search_prompt(),
-            // crmaine — the ones needing a question drop onto the `:` line.
-            // Open the crmaine window straight away; the question is typed in it.
-            MenuItem::CrmaineRag => self.open_crmaine_chat(ChatMode::Rag),
-            MenuItem::CrmaineAgent => self.open_crmaine_chat(ChatMode::Agent),
-            MenuItem::CrmaineCoding => self.start_coding(""),
-            MenuItem::CrmaineImpact => self.prefill_command("impact "),
-            MenuItem::CrmaineContradiction => self.prefill_command("contradiction "),
-            MenuItem::CrmaineGlossary => self.start_glossary(),
-            MenuItem::CrmaineIndex => self.start_index(""),
-            MenuItem::CrmaineShared => self.crmaine_use_shared_index(),
-            MenuItem::CrmaineInfo => self.crmaine_doctor(),
-            MenuItem::CrmaineSearchFiles => self.prefill_command("searchfiles "),
             // With a `:rag` question behind it this needs no argument, so it
             // runs; otherwise it opens the prompt for one.
             MenuItem::ViewerSummary => {
                 self.restore_viewer();
                 self.summarize_viewer();
-            }
-            MenuItem::ViewerCoding => {
-                self.restore_viewer();
-                self.start_coding("");
             }
             MenuItem::ViewerBlame => {
                 self.restore_viewer();
@@ -572,13 +525,6 @@ impl App {
             MenuItem::ViewerEdit => {
                 self.restore_viewer();
                 self.edit_viewer_file_externally();
-            }
-            MenuItem::CrmaineDebugSearch => {
-                if self.crmaine_last_question.is_some() {
-                    self.start_debug_search("")
-                } else {
-                    self.prefill_command("ragdebug ")
-                }
             }
             MenuItem::RemotePane => self.start_scp(ScpDir::BrowsePane),
             MenuItem::DiskUsage => self.start_du_here(),

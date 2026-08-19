@@ -1,5 +1,5 @@
 //! Optional AI features for cian, talking to Azure OpenAI through the same
-//! Windows broker (WAM) authentication crmaine uses.
+//! Windows broker (WAM) authentication.
 //!
 //! The actual auth and API call live in a small Python helper ([`SCRIPT`],
 //! embedded at build time and written to a cache dir on first use) because the
@@ -19,7 +19,7 @@ use serde::{Deserialize, Serialize};
 /// The bundled Python helper, materialised to disk when needed.
 const SCRIPT: &str = include_str!("../cian_ai.py");
 
-/// How to reach the model. Mirrors crmaine's CLI knobs; `auth_mode` is
+/// How to reach the model. `auth_mode` is
 /// `broker` (Windows AAD), `apikey`, or `mock` (offline echo, for testing).
 #[derive(Debug, Clone)]
 pub struct AiConfig {

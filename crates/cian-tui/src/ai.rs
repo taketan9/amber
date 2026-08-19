@@ -8,7 +8,7 @@ use super::*;
 
 /// A stored chat conversation for `ai_history.json` — a transcript, the backend
 /// it spoke to (so a reopened conversation still routes follow-ups) and how the
-/// window looked (so a reopened crmaine answer is not re-signed "AI - simple").
+/// window looked, so a reopened conversation keeps the title it had.
 /// `skin` is absent in files written before it existed; those fall back to the
 /// mode's default look.
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
@@ -75,7 +75,7 @@ fn read_tail(path: &std::path::Path, max_bytes: u64) -> String {
 }
 
 /// Who the assistant is, prepended to every conversational (chat) system prompt.
-/// This is the local model configured in `cian.ai`, not crmaine, so it answers
+/// This is the local model configured in `cian.ai`, so it answers
 /// to "AI - simple" — the same name the menu and the transcript use. It refers
 /// to itself in the first person as「私」.
 fn persona() -> &'static str {
@@ -621,6 +621,10 @@ impl App {
     }
 
     /// Open a chat popup wearing the default look for its backend.
+    ///
+    /// Only the tests reach for this now — everything in the program opens a
+    /// chat with a title of its own through [`start_ai_chat_as`](Self::start_ai_chat_as).
+    #[cfg(test)]
     pub(crate) fn start_ai_chat(&mut self, mode: ChatMode, log: Vec<ChatMsg>, pending: bool) {
         self.start_ai_chat_as(mode, ChatSkin::of(mode), log, pending);
     }
@@ -704,7 +708,7 @@ impl App {
     pub(crate) fn load_ai_conversation(&mut self, i: usize) {
         let Some(c) = self.ai_history.get(i) else { return };
         // Reopened as it was: same backend for follow-ups, same name and colour,
-        // so an archived crmaine answer is still shown as crmaine's.
+        // so a reopened conversation is shown the way it was.
         self.popup = Popup::AiChat {
             input: String::new(),
             log: c.log().to_vec(),
@@ -727,19 +731,25 @@ impl App {
         }
     }
 
-    /// First-Esc behaviour in the chat: stop a running answer (crmaine over the
-    /// server, or a local request) and leave the chat open. Returns true if it
-    /// cancelled something; false means nothing was in flight (so Esc closes).
-    pub(crate) fn cancel_ai_pending(&mut self) -> bool {
-        if self.crmaine_rx.is_some() {
-            self.cancel_crmaine();
-            return true;
+    /// Add to the answer being written in the chat, or start one.
+    pub(crate) fn append_ai_answer(&mut self, text: &str) {
+        if let Popup::AiChat { log, scroll, .. } = &mut self.popup {
+            match log.last_mut() {
+                Some(m) if !m.user => m.text.push_str(text),
+                _ => log.push(ChatMsg { user: false, text: text.to_string() }),
+            }
+            *scroll = usize::MAX;
         }
+    }
+
+    /// First-Esc behaviour in the chat: stop a running answer and leave the
+    /// chat open. Returns true if it cancelled something; false means nothing
+    /// was in flight (so Esc closes).
+    pub(crate) fn cancel_ai_pending(&mut self) -> bool {
         if self.ai_job.is_some() {
             // The python worker may keep running, but stop waiting on it.
             self.ai_job = None;
-            self.crmaine_stage = None;
-            self.append_crmaine_answer(&format!("\n⚠ {}", tr(self.lang, "cancelled", "中断しました")));
+            self.append_ai_answer(&format!("\n⚠ {}", tr(self.lang, "cancelled", "中断しました")));
             if let Popup::AiChat { pending, scroll, .. } = &mut self.popup {
                 *pending = false;
                 *scroll = usize::MAX;
@@ -749,9 +759,7 @@ impl App {
         false
     }
 
-    /// Send the typed chat line, routing a follow-up to the same backend the
-    /// conversation started on — the local `:ai` model, or crmaine `/query` /
-    /// `/agent` — so a RAG/agent thread stays a RAG/agent thread.
+    /// Send the typed chat line to the model.
     pub(crate) fn send_ai_message(&mut self) {
         let (question, mode) =
             if let Popup::AiChat { input, log, pending, scroll, mode, .. } = &mut self.popup {
@@ -773,13 +781,6 @@ impl App {
                               manager. Answer briefly in plain text."
                     .to_string();
                 self.ai_request(AiPurpose::Chat, system, question);
-            }
-            ChatMode::Rag => self.fire_crmaine("/query", &question, serde_json::Value::Null),
-            // Coding follow-ups are just agent follow-ups (the code went in the
-            // first turn; the conversation history carries it from there).
-            ChatMode::Agent | ChatMode::Coding => {
-                let history = self.crmaine_history_json();
-                self.fire_crmaine("/agent", &question, history);
             }
         }
     }
@@ -1442,7 +1443,7 @@ impl App {
 
     /// Attach the image on the system clipboard to the open chat (Alt+V), so a
     /// screenshot can be asked about. Written out as a PNG under the temp dir
-    /// because both backends want a file path: crmaine reads it server-side,
+    /// because the helper wants a file path:
     /// and the Simple AI helper base64s it into the request. Alt rather than
     /// Ctrl/Cmd+V — the terminal claims those for pasting text.
     pub(crate) fn attach_clipboard_image(&mut self) {
@@ -1470,7 +1471,7 @@ impl App {
         }
         // Named off the monotonic clock rather than a per-question index: the
         // list is emptied on send, so an index would reuse the name of a file
-        // crmaine may still be reading out of the temp dir.
+        // the helper may still be reading out of the temp dir.
         let path = dir.join(format!("paste-{}.png", self.startup_at.elapsed().as_nanos()));
         if buf.save(&path).is_err() {
             self.message = Some(tr(self.lang, "cannot write temp file", "一時ファイルを作れません").into());
@@ -1583,17 +1584,18 @@ mod ai_history_tests {
     fn stored_chats_round_trip_mode_skin_and_log() {
         let stored = vec![
             StoredChat::new(
-                ChatMode::Rag,
-                ChatSkin::of(ChatMode::Rag),
+                ChatMode::Ai,
+                ChatSkin::of(ChatMode::Ai),
                 vec![
                     ChatMsg { user: true, text: "q1".into() },
                     ChatMsg { user: false, text: "a1\nline".into() },
                 ],
             ),
-            // A crmaine corpus tool: local follow-ups, but crmaine answered.
+            // A window with a title of its own — the AI actions that name what
+            // they did rather than just "Chat".
             StoredChat::new(
                 ChatMode::Ai,
-                ChatSkin { title: "crmaine - Impact analysis".into(), simple: false },
+                ChatSkin { title: "AI - Rename".into(), simple: true },
                 vec![ChatMsg { user: true, text: "q2".into() }],
             ),
         ];
@@ -1601,19 +1603,18 @@ mod ai_history_tests {
         let json = serde_json::to_string(&stored).unwrap();
         let back: Vec<StoredChat> = serde_json::from_str(&json).unwrap();
         assert_eq!(back, stored, "mode and transcript survive a round trip");
-        assert_eq!(back[0].skin().title, "crmaine - RAG");
-        assert_eq!(back[1].skin().title, "crmaine - Impact analysis");
-        assert!(!back[1].skin().simple, "the reopened window still credits crmaine");
+        assert_eq!(back[0].skin().title, "Chat");
+        assert_eq!(back[1].skin().title, "AI - Rename");
     }
 
     /// History written before skins existed still loads, falling back to the
     /// backend's default look.
     #[test]
     fn a_skinless_stored_chat_falls_back_to_its_mode() {
-        let json = r#"[{"mode":"Agent","log":[{"user":true,"text":"q"}]}]"#;
+        let json = r#"[{"mode":"Ai","log":[{"user":true,"text":"q"}]}]"#;
         let back: Vec<StoredChat> = serde_json::from_str(json).unwrap();
-        assert_eq!(back[0].skin().title, "crmaine - Agent");
-        assert!(!back[0].skin().simple);
+        assert_eq!(back[0].skin().title, "Chat");
+        assert!(back[0].skin().simple);
     }
 }
 

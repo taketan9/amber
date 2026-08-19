@@ -12,13 +12,6 @@ impl App {
         self.mode = Mode::Command;
     }
 
-    /// Enter command mode with `prefix` already typed (e.g. `"rag "`), so a menu
-    /// item that needs an argument drops the user straight onto the `:` line.
-    pub(crate) fn prefill_command(&mut self, prefix: &str) {
-        self.command_buffer = prefix.to_string();
-        self.mode = Mode::Command;
-    }
-
     pub(crate) fn run_command(&mut self) {
         let raw = self.command_buffer.trim().to_string();
         self.command_buffer.clear();
@@ -155,8 +148,8 @@ impl App {
             "sftp" | "remote" | "scp" | "browse" | "remotepane" => {
                 self.start_scp(ScpDir::BrowsePane)
             }
-            "ai" | "chat" | "crmaine" => self.open_ai_chat(),
-            "aicmd" | "crmainecmd" => {
+            "ai" | "chat" => self.open_ai_chat(),
+            "aicmd" => {
                 if rest.is_empty() {
                     self.start_ai_shell_prompt();
                 } else {
@@ -174,10 +167,10 @@ impl App {
             "svncommit" | "commit" | "ci" => self.svn_commit_prompt(),
             "svnresolve" | "resolve" => self.svn_resolve(),
             "snip" | "snippet" | "snippets" => self.start_snippets(),
-            "aicommit" | "commitmsg" | "crmainecommit" => self.start_ai_commit_message(),
-            "aijunk" | "junk" | "crmainejunk" => self.start_ai_junk(),
-            "aiorganize" | "aistructure" | "organize" | "crmaineorganize" => self.start_ai_structure(),
-            "airename" | "rename" | "crmainerename" => {
+            "aicommit" | "commitmsg" => self.start_ai_commit_message(),
+            "aijunk" | "junk" => self.start_ai_junk(),
+            "aiorganize" | "aistructure" | "organize" => self.start_ai_structure(),
+            "airename" | "rename" => {
                 if rest.is_empty() {
                     self.start_ai_rename_prompt();
                 } else {
@@ -198,40 +191,16 @@ impl App {
                     }
                 }
             }
-            "aisearch" | "semsearch" | "ask" | "crmainesearch" => {
+            "aisearch" | "semsearch" | "ask" => {
                 if rest.is_empty() {
                     self.start_ai_search_prompt();
                 } else {
                     self.start_ai_search(rest);
                 }
             }
-            "aierror" | "explain" | "crmaineerror" => self.explain_shell_error(),
-            // With a question, fire it; bare, just open the window to type in.
-            "rag" | "crmainerag" | "ask_rag" => {
-                if rest.is_empty() {
-                    self.open_crmaine_chat(ChatMode::Rag);
-                } else {
-                    self.start_rag(rest);
-                }
-            }
-            "agent" | "ajent" | "crmaineagent" => {
-                if rest.is_empty() {
-                    self.open_crmaine_chat(ChatMode::Agent);
-                } else {
-                    self.start_agent(rest);
-                }
-            }
-            "raginfo" | "crmaineinfo" | "crmainedoctor" | "ragstatus" => self.crmaine_doctor(),
-            "index" | "ragindex" | "reindex" => self.start_index(rest),
-            "ragshared" | "ragdefault" | "unindex" => self.crmaine_use_shared_index(),
-            "coding" | "code" | "crmainecoding" => self.start_coding(rest),
-            "impact" => self.start_impact(rest),
-            "contradiction" | "contra" => self.start_contradiction(rest),
-            "glossary" | "glossagen" => self.start_glossary(),
-            "searchfiles" | "sf" | "corpussearch" => self.start_searchfiles(rest),
-            "ragdebug" | "debugsearch" | "ragwhy" | "ragtrace" => self.start_debug_search(rest),
-            "aidiff" | "explaindiff" | "crmainediff" => self.explain_diff(),
-            "ailog" | "logtriage" | "triage" | "crmainelog" => self.triage_log(),
+            "aierror" | "explain" => self.explain_shell_error(),
+            "aidiff" | "explaindiff" => self.explain_diff(),
+            "ailog" | "logtriage" | "triage" => self.triage_log(),
             "dupes" | "dup" | "duplicates" => self.start_dupes(),
             "theme" | "colorscheme" | "colourscheme" => {
                 if rest.is_empty() {

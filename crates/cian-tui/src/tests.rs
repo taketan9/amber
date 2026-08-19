@@ -5599,36 +5599,13 @@
         }
     }
 
-    /// A crmaine corpus tool streams *crmaine's* answer into a chat whose typed
-    /// follow-ups go to the local model. The window must keep crmaine's name,
-    /// so the reply is never credited to AI - simple.
-    #[test]
-    fn a_crmaine_tool_chat_keeps_crmaines_name() {
-        let dir = tempfile::tempdir().unwrap();
-        let p = dir.path().to_path_buf();
-        let mut app = App::new(p.clone(), p, en_config()).unwrap();
-        app.start_ai_chat_as(
-            ChatMode::Ai,
-            ChatSkin { title: "crmaine - Impact".into(), simple: false },
-            vec![ChatMsg { user: true, text: "Impact: x".into() }],
-            true,
-        );
-        match &app.popup {
-            Popup::AiChat { skin, mode, .. } => {
-                assert_eq!(skin.title, "crmaine - Impact");
-                assert!(!skin.simple, "crmaine answered it");
-                assert_eq!(*mode, ChatMode::Ai, "follow-ups still route to the local model");
-            }
-            other => panic!("expected the chat, got {:?}", other),
-        }
-    }
 
     /// The retrieval trace is read *about* a conversation, so closing it must
     /// put that conversation back rather than dump the user in the file pane.
     #[test]
     fn a_report_raised_over_the_chat_gives_the_chat_back() {
         let (_d, mut app) = app_with(&["a.txt"]);
-        app.start_ai_chat(ChatMode::Rag, vec![ChatMsg { user: true, text: "RAG: q".into() }], false);
+        app.start_ai_chat(ChatMode::Ai, vec![ChatMsg { user: true, text: "a question".into() }], false);
         let chat = std::mem::replace(&mut app.popup, Popup::None);
         app.popup = Popup::Report {
             title: " what RAG retrieved ".into(),
@@ -5644,57 +5621,11 @@
         // …and Esc lands back in the conversation it explains.
         app.handle_key(code(KeyCode::Esc)).unwrap();
         match &app.popup {
-            Popup::AiChat { log, .. } => assert!(log[0].text.contains("RAG: q")),
+            Popup::AiChat { log, .. } => assert!(log[0].text.contains("a question")),
             other => panic!("expected the chat back, got {:?}", other),
         }
     }
 
-    /// The report draws under its own title (not the manual's), and the ranking
-    /// reads as a ranking on an 80-column terminal.
-    #[test]
-    fn the_retrieval_trace_draws_as_a_scrolling_report() {
-        let (_d, mut app) = app_with(&["a.txt"]);
-        let d = crmaine::DebugSearch {
-            hits: vec![
-                crmaine::DebugHit {
-                    file: "keihi_rule.md".into(),
-                    score: 18.4213,
-                    chunk_id: Some(12),
-                    preview: "出張費は帰着日の翌月10日までに精算してください。".into(),
-                },
-                crmaine::DebugHit {
-                    file: "faq.md".into(),
-                    score: 4.6,
-                    chunk_id: Some(3),
-                    preview: "経費の締めについてよくある質問".into(),
-                },
-            ],
-            tokens: vec!["出張".into(), "費".into(), "精算".into(), "期限".into()],
-            token_count: 4,
-        };
-        let lines = crmaine::debug_report_lines(Lang::Ja, "出張費の精算期限は？", "C:\\idx", false, &d, 72);
-        app.popup = Popup::Report {
-            title: " RAG が拾った断片 ".into(),
-            lines,
-            scroll: 0,
-            back: Box::new(Popup::None),
-        };
-        // The test backend pads wide characters with a blank cell, so the
-        // assertions stay on the ASCII parts of each line.
-        let rows = render(&mut app, 80, 30);
-        let screen = rows.join("\n");
-        assert!(screen.contains("RAG"), "its own title, not the manual's:\n{screen}");
-        assert!(!screen.contains("manual"), "the manual's title must not leak in:\n{screen}");
-        assert!(screen.contains("C:\\idx"), "which index answered:\n{screen}");
-        assert!(screen.contains("BM25"), "says the scores are raw:\n{screen}");
-        assert!(screen.contains("keihi_rule.md #12"), "the top hit:\n{screen}");
-        assert!(screen.contains("18.4213") && screen.contains("4.6000"), "the scores:\n{screen}");
-        // The top hit fills its bar and the weaker one does not — the shape of
-        // the ranking is the thing you read first.
-        assert!(screen.contains(&"█".repeat(16)), "top hit's bar:\n{screen}");
-        assert!(screen.contains("████············"), "a quarter-height bar:\n{screen}");
-        assert!(rows.iter().any(|r| r.contains("Esc")), "says how to leave:\n{screen}");
-    }
 
     /// Opened from the command line there is nothing underneath, so Esc closes.
     #[test]
@@ -5710,21 +5641,6 @@
         assert!(matches!(app.popup, Popup::None));
     }
 
-    /// `:ragdebug` with no argument means "the question I just asked". With no
-    /// question behind it, it says how to use it instead of asking for nothing.
-    #[test]
-    fn ragdebug_with_no_argument_needs_a_previous_question() {
-        let (_d, mut app) = app_with(&["a.txt"]);
-        app.start_debug_search("");
-        assert!(app.debug_search_rx.is_none(), "nothing was sent");
-        let msg = app.message.clone().unwrap_or_default();
-        assert!(msg.contains(":ragdebug"), "explains itself: {msg}");
-        // With a remembered question it gets as far as needing crmaine's config
-        // (which this app has none of), rather than complaining about the query.
-        app.crmaine_last_question = Some("expenses deadline".into());
-        app.start_debug_search("");
-        assert!(app.message.clone().unwrap_or_default().contains("crmaine"));
-    }
 
     #[test]
     fn pasted_images_ride_along_with_a_chat_turn_only() {
@@ -10976,18 +10892,18 @@
             scroll: 0,
             pending: false,
             sel: None,
-            mode: ChatMode::Rag,
-            skin: ChatSkin::of(ChatMode::Rag),
+            mode: ChatMode::Ai,
+            skin: ChatSkin::of(ChatMode::Ai),
         };
         app.open_ai_history();
         assert!(matches!(app.popup, Popup::AiHistory { .. }), "history picker opens");
         assert_eq!(app.ai_history.len(), 1, "current conversation archived");
-        assert_eq!(app.ai_history[0].mode(), ChatMode::Rag, "backend remembered");
+        assert_eq!(app.ai_history[0].mode(), ChatMode::Ai, "backend remembered");
         assert_eq!(App::ai_history_title(app.ai_history[0].log()), "first question");
 
-        // Reopening restores the backend, so a follow-up still goes to RAG.
+        // Reopening restores the backend, so a follow-up goes the same way.
         app.load_ai_conversation(0);
-        assert!(matches!(app.popup, Popup::AiChat { mode: ChatMode::Rag, .. }), "mode restored");
+        assert!(matches!(app.popup, Popup::AiChat { mode: ChatMode::Ai, .. }), "mode restored");
         app.open_ai_history();
         assert_eq!(app.ai_history.len(), 1, "identical snapshot deduped");
 

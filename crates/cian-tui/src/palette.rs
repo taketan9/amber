@@ -11,17 +11,6 @@ use super::*;
 #[rustfmt::skip]
 fn command_list() -> &'static [(&'static str, (&'static str, &'static str), bool)] {
     &[
-        ("rag",        ("crmaine RAG: ask the running crmaine server", "crmaine RAG に質問"), true),
-        ("agent",      ("crmaine Ajent: an agent answer", "crmaine エージェント回答"), true),
-        ("coding",     ("crmaine Coding: ask about the current file's code", "crmaine Coding: 現在のファイルのコードを相談"), true),
-        ("raginfo",    ("crmaine diagnostics: port, server, config", "crmaine 診断: ポート・接続・設定"), false),
-        ("index",      ("index a folder into cian's own RAG index", "フォルダを cian の RAG にインデックス"), true),
-        ("ragshared",  ("go back to crmaine's own index for :rag", ":rag を crmaine 本体のインデックスに戻す"), false),
-        ("impact",     ("crmaine: which docs a change would touch", "crmaine: 変更の影響を受ける文書"), true),
-        ("contradiction", ("crmaine: find conflicting statements on a topic", "crmaine: トピックの矛盾を検出"), true),
-        ("glossary",   ("crmaine: generate a glossary of the corpus", "crmaine: コーパスの用語集を生成"), false),
-        ("searchfiles", ("crmaine: keyword-search the corpus into the pane", "crmaine: コーパスをキーワード検索してペイン表示"), true),
-        ("ragdebug",   ("crmaine: what RAG retrieved, with scores", "crmaine: RAG が拾った断片とスコア"), true),
         ("ime",        ("input-method switching: state and helper", "日本語入力の自動切替: 状態と設定"), false),
         ("ai",         ("AI - simple: chat with the local model", "AI - simple: ローカルモデルとチャット"), false),
         ("aicmd",      ("AI: shell command from a description", "AI: 説明からコマンド"), true),

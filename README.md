@@ -6,7 +6,7 @@
 
 One binary. macOS, Windows, Linux. No runtime, no DLLs, nothing to install alongside it.
 
-**Contents** — [Try it](#try-it) · [The basics](#the-basics) · [Get around fast](#get-around-fast) · [The text editor panel](#the-text-editor-panel) · [Find things](#find-things) · [Compare and clean up](#compare-and-clean-up) · [Files and version control](#files-and-version-control) · [SSH and remote panes](#ssh-and-remote-panes) · [The shell panel](#the-shell-panel) · [Macros](#macros) · [AI](#ai-optional) · [crmaine](#crmaine-optional) · [Japanese input](#japanese-input-ime) · [Configuration](#configuration) · [How it fits together](#how-it-fits-together) · [Windows install](#install-on-windows-offline) · [Good to know](#good-to-know)
+**Contents** — [Try it](#try-it) · [The basics](#the-basics) · [Get around fast](#get-around-fast) · [The text editor panel](#the-text-editor-panel) · [Find things](#find-things) · [Compare and clean up](#compare-and-clean-up) · [Files and version control](#files-and-version-control) · [SSH and remote panes](#ssh-and-remote-panes) · [The shell panel](#the-shell-panel) · [Macros](#macros) · [AI](#ai-optional) · [Japanese input](#japanese-input-ime) · [Configuration](#configuration) · [How it fits together](#how-it-fits-together) · [Windows install](#install-on-windows-offline) · [Good to know](#good-to-know)
 
 ---
 
@@ -156,7 +156,7 @@ Each open file keeps its own cursor, folds and unsaved edits. Closing a split re
 | `Ctrl+Q` / `Alt+v` (`:block`) | rectangular selection — `d` `I` `A` `c`. `$` then `A` appends to the end of every line, however ragged. Terminals differ about which they hand over |
 | `V` then `I` / `A` | insert at the start / end of every selected line |
 | `:r` after a search | replace, with the pattern already filled in (`r` is vi's replace-a-character) |
-| **`Ctrl+H`** (or `:replace`) | **the replace bar** — `find` and `with` on the line along the bottom, the file still in view. `Tab` moves between the fields; `Enter` replaces this one and stops on it, `Shift+Enter` replaces all of them, `Alt+n` steps to the next without replacing. `Alt+r` cycles **as typed → `*` `?` wildcard → regex**, `Alt+c` match case, `Alt+w` whole words. `\n` `\t` `\r` work in either field. In wildcard mode `crm*ne` finds `crmaine`; in regex mode `*` repeats the character before it, so that pattern is `crm.*ne` — and a regex that finds nothing says so |
+| **`Ctrl+H`** (or `:replace`) | **the replace bar** — `find` and `with` on the line along the bottom, the file still in view. `Tab` moves between the fields; `Enter` replaces this one and stops on it, `Shift+Enter` replaces all of them, `Alt+n` steps to the next without replacing. `Alt+r` cycles **as typed → `*` `?` wildcard → regex**, `Alt+c` match case, `Alt+w` whole words. `\n` `\t` `\r` work in either field. In wildcard mode `rep*rt` finds `report`; in regex mode `*` repeats the character before it, so that pattern is `rep.*rt` — and a regex that finds nothing says so |
 | `:s/old/new/[gci]` | the same thing said vi's way — `g` every match on a line, `c` confirm each, `i` ignore case |
 | `:expand` / `:unexpand` | tabs ↔ spaces |
 | `:lf` / `:crlf` | convert the line ending |
@@ -387,29 +387,6 @@ Off unless `cian.ai{…}` is set, and always in the loop — nothing runs or del
 **Give it context.** `cian.ai_context("…")` records facts about your setup — the OS, the deployment target, house rules — and cian prepends them to every prompt. Per-server facts go on the host (`notes = "RHEL 8; Oracle 19c; …"`) and are handed over when the shell is logged into it.
 
 cian reaches the model through a small bundled Python helper (Windows broker sign-in). `auth_mode = "mock"` is an offline echo for wiring it up; `api_base_url` points at a local server (Ollama, LM Studio). This is the one place cian is not fully self-contained, which is why it is opt-in. See [`examples/init.en.lua`](examples/init.en.lua).
-
----
-
-## crmaine (optional)
-
-If your team runs the **crmaine** VS Code extension, cian attaches to its already-running local server — same index, same endpoint, nothing extra to install. Start crmaine in VS Code, then:
-
-```lua
-cian.crmaine{}   -- reads the port and cache dir from VS Code's own settings each launch
-```
-
-| Command | You get |
-|---|---|
-| `:rag <question>` | ask the RAG over crmaine's index; the answer streams in |
-| `:agent <question>` | an agent answer, showing each tool call as it runs |
-| `:coding [question]` | ask about the current file's code (`A` in F3) |
-| `:impact` / `:contradiction` / `:glossary` | corpus analysis |
-| `:searchfiles <words>` | keyword-search the corpus into the pane |
-| `:ragdebug [question]` | what the retriever actually picked, with raw BM25 scores — no argument means the question you just asked |
-| `:index [dir]` | build cian's *own* index of a folder; `:ragshared` goes back to crmaine's |
-| `:raginfo` | diagnostics — the port, whether the server is up, which index is active |
-
-A crmaine chat wears crmaine's carmine (the local `:ai` model's windows are cyan, titled **AI - simple**), so you always know which answered. **Shift+Enter** newline, **Ctrl+R** past conversations (they survive a restart), **Ctrl+↑ / Ctrl+↓** rate the last answer, **Ctrl+D** see what the retriever fed it, **Esc** stop mid-stream. Answers render as Markdown and list their sources. Everything here is on the right-click **AI - crmaine ▸** menu too.
 
 ---
 

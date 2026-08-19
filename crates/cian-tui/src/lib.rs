@@ -40,7 +40,6 @@ use util::{
 mod ai;
 mod arcview;
 mod drop;
-mod crmaine;
 mod font;
 mod ime;
 mod preview;
@@ -1086,34 +1085,8 @@ enum MenuItem {
     AiRename,
     /// Semantic search over the tree from a natural-language query.
     AiSearch,
-    /// crmaine RAG — opens the `:rag ` prompt.
-    CrmaineRag,
-    /// crmaine Ajent — opens the `:agent ` prompt.
-    CrmaineAgent,
-    /// crmaine Coding — ask the Ajent about the current file's code.
-    CrmaineCoding,
-    /// A submenu of crmaine's corpus tools (index, analysis, diagnostics).
-    CrmaineKnowledge,
-    /// crmaine impact analysis — opens the `:impact ` prompt.
-    CrmaineImpact,
-    /// crmaine contradiction detection — opens the `:contradiction ` prompt.
-    CrmaineContradiction,
-    /// crmaine glossary generation.
-    CrmaineGlossary,
-    /// Index the current folder into cian's own RAG index (`:index`).
-    CrmaineIndex,
-    /// Switch queries back to crmaine's own index (`:ragshared`).
-    CrmaineShared,
-    /// crmaine diagnostics (`:raginfo`).
-    CrmaineInfo,
-    /// Keyword-search the corpus into the pane (`:searchfiles`).
-    CrmaineSearchFiles,
-    /// Show what RAG retrieved, with scores (`:ragdebug`).
-    CrmaineDebugSearch,
     /// Summarise the file being read (`:summary`).
     ViewerSummary,
-    /// Ask crmaine about this code (`:coding`).
-    ViewerCoding,
     /// Blame gutter — who last changed each line (`:blame`).
     ViewerBlame,
     /// Force a text encoding (`:enc`).
@@ -1179,10 +1152,8 @@ enum MenuItem {
     Extract,
     /// Count files/steps under the selection (`:count`).
     Count,
-    /// A submenu grouping the local (non-crmaine) AI actions.
+    /// A submenu grouping the AI actions.
     AiMenu,
-    /// A submenu grouping the crmaine actions (RAG / Agent / Coding / tools).
-    CrmaineMenu,
     /// A submenu grouping the file-transfer actions.
     SendMenu,
     /// A submenu grouping the shell window actions (splits, tabs, zoom).
@@ -1231,7 +1202,6 @@ impl MenuItem {
         matches!(
             self,
             MenuItem::AiMenu
-                | MenuItem::CrmaineMenu
                 | MenuItem::SendMenu
                 | MenuItem::WindowMenu
                 | MenuItem::FileMenu
@@ -1243,7 +1213,6 @@ impl MenuItem {
                 | MenuItem::SvnMenu
                 | MenuItem::CompressMenu
                 | MenuItem::OsMenu
-                | MenuItem::CrmaineKnowledge
         )
     }
 }
@@ -1312,20 +1281,7 @@ impl MenuItem {
                 Lang::Ja => "Switch to English",
             },
             MenuItem::AiChat => tr(lang, "Chat  (:ai)", "チャット  (:ai)"),
-            MenuItem::CrmaineRag => tr(lang, "RAG  (:rag)", "RAG  (:rag)"),
-            MenuItem::CrmaineAgent => tr(lang, "Agent  (:agent)", "エージェント  (:agent)"),
-            MenuItem::CrmaineCoding => tr(lang, "Coding — this file  (:coding)", "コーディング — このファイル  (:coding)"),
-            MenuItem::CrmaineKnowledge => tr(lang, "Corpus tools ▸", "コーパスツール ▸"),
-            MenuItem::CrmaineImpact => tr(lang, "Impact analysis  (:impact)", "影響分析  (:impact)"),
-            MenuItem::CrmaineContradiction => tr(lang, "Find contradictions  (:contradiction)", "矛盾検出  (:contradiction)"),
-            MenuItem::CrmaineGlossary => tr(lang, "Generate glossary  (:glossary)", "用語集を生成  (:glossary)"),
-            MenuItem::CrmaineIndex => tr(lang, "Index this folder  (:index)", "このフォルダをインデックス  (:index)"),
-            MenuItem::CrmaineShared => tr(lang, "Use crmaine's index  (:ragshared)", "crmaine のインデックスを使う  (:ragshared)"),
-            MenuItem::CrmaineInfo => tr(lang, "Diagnostics  (:raginfo)", "診断  (:raginfo)"),
-            MenuItem::CrmaineSearchFiles => tr(lang, "Search corpus  (:searchfiles)", "コーパス検索  (:searchfiles)"),
-            MenuItem::CrmaineDebugSearch => tr(lang, "What RAG retrieved  (:ragdebug)", "RAG が拾った断片  (:ragdebug)"),
             MenuItem::ViewerSummary => tr(lang, "Summarise this file  (:summary)", "このファイルを要約  (:summary)"),
-            MenuItem::ViewerCoding => tr(lang, "Ask crmaine about this code  (:coding)", "このコードを crmaine に相談  (:coding)"),
             MenuItem::ViewerBlame => tr(lang, "Who changed each line  (:blame)", "各行の最終変更者  (:blame)"),
             MenuItem::ViewerEncoding => tr(lang, "Text encoding…  (:enc)", "文字コードを指定…  (:enc)"),
             MenuItem::ViewerMermaid => tr(lang, "Mermaid diagrams in a browser  (:mermaid)", "mermaid 図をブラウザで開く  (:mermaid)"),
@@ -1365,10 +1321,9 @@ impl MenuItem {
             MenuItem::Macros => tr(lang, "Macros  (@)", "マクロ  (@)"),
             MenuItem::Shortcuts => tr(lang, "Shortcuts  (s)", "ショートカット  (s)"),
             // The two AI backends read as one family, named for the model behind
-            // each: "simple" is the local model configured in cian.ai, "crmaine"
+            // "simple" is the local model configured in cian.ai
             // is the bridge to the VS Code server.
             MenuItem::AiMenu => tr(lang, "AI - simple ▸", "AI - simple ▸"),
-            MenuItem::CrmaineMenu => tr(lang, "AI - crmaine ▸", "AI - crmaine ▸"),
             MenuItem::SendMenu => tr(lang, "Transfer ▸", "転送 ▸"),
             MenuItem::WindowMenu => tr(lang, "Window ▸", "ウィンドウ ▸"),
             MenuItem::FileMenu => tr(lang, "File ▸", "ファイル操作 ▸"),
@@ -1723,14 +1678,8 @@ pub(crate) enum AiOverText {
 /// place the conversation started (not always the local `:ai` model).
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 enum ChatMode {
-    /// The local python `:ai` assistant.
+    /// The local python `:ai` assistant — the only backend there is.
     Ai,
-    /// crmaine RAG (`/query`).
-    Rag,
-    /// crmaine Ajent (`/agent`).
-    Agent,
-    /// crmaine Coding — the Ajent (`/agent`) seeded with the current file's code.
-    Coding,
 }
 
 /// How a chat window presents itself: the name in its frame, and whether it
@@ -1739,8 +1688,6 @@ enum ChatMode {
 /// Deliberately separate from [`ChatMode`], which only says where a typed
 /// follow-up goes: every AI-simple action opens the same chat, so the title has
 /// to name the action that opened it ("Triage this log", not just "Chat"), and
-/// crmaine's corpus tools stream a *crmaine* answer into a chat whose
-/// follow-ups are local.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 struct ChatSkin {
     /// Shown at the top of the window — the menu item that opened it.
@@ -1762,24 +1709,16 @@ impl ChatSkin {
 }
 
 impl ChatMode {
-    /// The full name shown in the chat title — the crmaine-backed modes carry
-    /// crmaine's own wording; the local model is just "Chat", so nothing in the
-    /// window credits crmaine for an answer it never gave.
+    /// The name shown in the chat title.
     fn title(self) -> &'static str {
         match self {
             ChatMode::Ai => "Chat",
-            ChatMode::Rag => "crmaine - RAG",
-            ChatMode::Agent => "crmaine - Agent",
-            ChatMode::Coding => "crmaine - Coding",
         }
     }
     /// A short badge for the history list.
     fn badge(self) -> &'static str {
         match self {
             ChatMode::Ai => "simple",
-            ChatMode::Rag => "RAG",
-            ChatMode::Agent => "Agent",
-            ChatMode::Coding => "Coding",
         }
     }
 }
@@ -2710,42 +2649,13 @@ pub struct App {
     startup_at: Instant,
     /// A pending AI request running on a worker thread.
     ai_job: Option<AiJob>,
-    /// A pending crmaine call, streaming its answer over the channel event by
-    /// event (see [`crmaine::CrmaineEvent`]).
-    crmaine_rx: Option<std::sync::mpsc::Receiver<crmaine::CrmaineEvent>>,
-    /// The latest crmaine pipeline stage (query expansion, rerank, a tool call)
-    /// shown next to the spinner while the answer streams in.
-    crmaine_stage: Option<String>,
-    /// Citations collected during a stream, appended to the answer when it ends.
-    crmaine_sources: Vec<String>,
-    /// When set, `:rag`/`:agent` query this index directory instead of the
-    /// crmaine/VS Code one — the isolated index built by `:index`. Cleared by
-    /// `:ragshared` to go back to crmaine's own index.
-    crmaine_cache_override: Option<String>,
-    /// Monotonic counter for crmaine `request_id`s, and the id of the call
-    /// currently in flight (so Esc can cancel exactly that one) with the port to
-    /// reach it on.
-    crmaine_req_seq: u64,
-    crmaine_inflight: Option<(String, u16)>,
-    /// The citations from the last finished answer, kept so feedback can name
-    /// the files it should boost / demote.
-    crmaine_last_sources: Vec<String>,
     /// Which way the input-method switch is currently thrown (`None` until
     /// the first sync). See `ime.rs`.
     ime_on: Option<bool>,
-    /// The last question sent to RAG, so `:ragdebug` (and `Ctrl+D` in the chat)
-    /// can show what the retriever picked for *that* question without it being
-    /// typed again — the whole point is to ask "why this answer?".
-    crmaine_last_question: Option<String>,
-    /// A pending `/debug_search` — the retrieval trace, or an error.
-    debug_search_rx: Option<std::sync::mpsc::Receiver<Result<crmaine::DebugSearch, String>>>,
-    /// The question that trace is for, kept to head the report.
-    debug_query: String,
     /// A pending `:searchfiles` corpus search — its (name, path) hits, or an
     /// error — to panelize into the active pane when it lands.
     #[allow(clippy::type_complexity)]
-    searchfiles_rx: Option<std::sync::mpsc::Receiver<Result<Vec<(String, String)>, String>>>,
-    /// Past AI/crmaine conversations this session, newest first, for the history
+    /// Past AI conversations this session, newest first, for the history
     /// picker (`Ctrl+R` in the chat). Each is a transcript plus the backend it
     /// spoke to, so reopening one still routes follow-ups correctly.
     ai_history: Vec<ai::StoredChat>,
@@ -2959,18 +2869,7 @@ impl App {
             ai_probe: None,
             startup_at: Instant::now(),
             ai_job: None,
-            crmaine_rx: None,
-            crmaine_stage: None,
-            crmaine_sources: Vec::new(),
-            crmaine_cache_override: None,
-            crmaine_req_seq: 0,
-            crmaine_inflight: None,
-            crmaine_last_sources: Vec::new(),
             ime_on: None,
-            crmaine_last_question: None,
-            debug_search_rx: None,
-            debug_query: String::new(),
-            searchfiles_rx: None,
             ai_history: Vec::new(),
             ai_rect: Rect::new(0, 0, 0, 0),
             junk_rect: Rect::new(0, 0, 0, 0),
@@ -4431,8 +4330,6 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry(":aicmd", None, "AI: shell command from a description", "AI: 説明からシェルコマンド生成"),
                 entry(":aidiff", None, "AI: explain the diff on screen (x in the diff view)", "AI: 表示中の差分を説明（差分画面で x）"),
                 entry(":ailog", None, "AI: triage the selected log file (errors, cause, next check)", "AI: 選択中のログを診断（エラー・原因・次の確認）"),
-                entry(":rag <q>", None, "crmaine RAG: ask the running crmaine server (start it in VS Code first)", "crmaine RAG: 起動中の crmaine に質問（先に VS Code で crmaine 起動）"),
-                entry(":agent <q>", None, "crmaine Ajent: an agent answer via the running crmaine server", "crmaine エージェント: 起動中の crmaine でエージェント回答"),
                 entry(":zip", None, "bundle selection;  :zip -e  for a password", "選択物をまとめる；  :zip -e でパスワード付き"),
                 entry(":tar / :targz", None, "make a .tar / .tar.gz (also right-click ▸ Compress)", ".tar / .tar.gz を作成（右クリック▸圧縮でも）"),
                 entry(":unzip", None, "extract the archive here (also right-click ▸ Extract)", "書庫をここに解凍（右クリック▸解凍でも）"),
@@ -4598,7 +4495,6 @@ pub(crate) fn viewer_manual_lines(lang: Lang) -> Vec<String> {
     ];
     const ASK: &[Row] = &[
         (":summary", "summarise this file", "このファイルを要約"),
-        (":coding", "ask crmaine about this code", "このコードを crmaine に相談"),
         ("Shift+Enter", "the menu — ask, copy, theme (right-click too)", "メニュー — 相談・コピー・テーマ（右クリックでも）"),
     ];
     const LINES: &[Row] = &[
@@ -5307,22 +5203,10 @@ impl App {
         if self.ai_job.is_some() {
             redraw |= self.poll_ai_job();
         }
-        // A pending crmaine RAG answer, likewise.
-        if self.crmaine_rx.is_some() {
-            redraw |= self.poll_crmaine();
-        }
-        // A finished `:searchfiles` corpus search panelizes into the pane.
-        if self.searchfiles_rx.is_some() {
-            redraw |= self.poll_searchfiles();
-        }
-        // A finished `:ragdebug` retrieval trace opens as a report.
-        if self.debug_search_rx.is_some() {
-            redraw |= self.poll_debug_search();
-        }
-        // While an AI / crmaine reply is still in flight, keep repainting so the
+        // While an AI reply is still in flight, keep repainting so the
         // "thinking" spinner actually spins (the poll above returns false until
         // the answer lands, which would otherwise let the loop go idle).
-        if self.ai_job.is_some() || self.crmaine_rx.is_some() {
+        if self.ai_job.is_some() {
             redraw = true;
         }
         // A running duplicate scan reports its groups when done.
@@ -5382,7 +5266,6 @@ fn run_loop<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Result<()>
             || app.flash.is_some()
             || app.op_job.is_some()
             || app.ai_job.is_some()
-            || app.crmaine_rx.is_some()
         {
             16
         } else {
