@@ -1052,6 +1052,14 @@ impl App {
                 KeyCode::Char('k') | KeyCode::Up => *cursor = cursor.saturating_sub(1),
                 KeyCode::Char('g') | KeyCode::Home => *cursor = 0,
                 KeyCode::Char('G') | KeyCode::End => *cursor = n.saturating_sub(1),
+                // A server directory can be thousands of names long, and
+                // walking one a line at a time is not walking, it is waiting.
+                KeyCode::PageDown | KeyCode::Char('f') => {
+                    if n > 0 {
+                        *cursor = (*cursor + 10).min(n - 1);
+                    }
+                }
+                KeyCode::PageUp | KeyCode::Char('b') => *cursor = cursor.saturating_sub(10),
                 KeyCode::Enter | KeyCode::Char('l') | KeyCode::Right => self.remote_browser_enter(),
                 // Space marks a file to fetch — only meaningful when downloading.
                 KeyCode::Char(' ') if !uploading => self.remote_browser_mark(),

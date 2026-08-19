@@ -6451,14 +6451,14 @@ fn draw_remote_browser(
     let footer = if uploading {
         tr(
             lang,
-            " Enter=open  -=up  u=upload here  Esc ",
-            " Enter=開く  -=上  u=ここへアップロード  Esc ",
+            " Enter=open  -=up  PgUp/PgDn  u=upload here  Esc ",
+            " Enter=開く  -=上  PgUp/PgDn  u=ここへアップロード  Esc ",
         )
     } else {
         tr(
             lang,
-            " Enter=open/mark  Space=mark  -=up  d=download  Esc ",
-            " Enter=開く/選択  Space=選択  -=上  d=ダウンロード  Esc ",
+            " Enter=open/mark  Space=mark  -=up  PgUp/PgDn  d=download  Esc ",
+            " Enter=開く/選択  Space=選択  -=上  PgUp/PgDn  d=ダウンロード  Esc ",
         )
     };
     let inner = popup_frame(f, area, w, h, title, footer);
@@ -6471,13 +6471,34 @@ fn draw_remote_browser(
         );
         return;
     }
-    *scroll = (*scroll).min(cursor.saturating_sub(view_h.saturating_sub(1)));
-    if *cursor < *scroll {
-        *scroll = *cursor;
-    }
+    // The window follows the cursor, and the arithmetic has to say so: this
+    // took the *smaller* of where it was and where the cursor needs it, which
+    // for a cursor walking downwards is always where it already was. So the
+    // listing never scrolled: everything past the first screenful of a server
+    // directory could be walked onto and not seen. The panes have had the right
+    // version of this all along — one line, and now one owner.
+    *scroll = clamp_list_scroll(*scroll, *cursor, view_h, entries.len());
     let mut lines: Vec<Line> = Vec::new();
     if entries.is_empty() {
         lines.push(Line::from(Span::styled("  (empty)", Style::default().fg(muted_on(theme().popup_bg)))));
+    }
+    // How much listing there is, and where in it this screen sits. A server
+    // directory is the one listing whose length is a surprise — you cannot see
+    // the folder to guess — so it says so rather than leaving the reader to
+    // find out by walking off the end.
+    if entries.len() > view_h {
+        let bar = Rect::new(inner.x + inner.width.saturating_sub(1), inner.y, 1, inner.height);
+        f.render_stateful_widget(
+            Scrollbar::new(ScrollbarOrientation::VerticalRight)
+                .thumb_symbol("█")
+                .thumb_style(Style::default().fg(text_tone(th.accent, th.popup_bg)))
+                .track_symbol(Some("│"))
+                .track_style(Style::default().fg(th.border))
+                .begin_symbol(None)
+                .end_symbol(None),
+            bar,
+            &mut ScrollbarState::new(entries.len().saturating_sub(view_h)).position(*scroll),
+        );
     }
     for (i, e) in entries.iter().enumerate().skip(*scroll).take(view_h) {
         let sel = i == *cursor;

@@ -14714,3 +14714,99 @@ mod clicking_a_row_after_scrolling {
         assert!(app.active_pane().unwrap().scroll > 0);
     }
 }
+
+/// A server directory with more in it than fits on screen can be walked to the
+/// end of it.
+mod the_server_browser_scrolls {
+    use super::*;
+
+    fn browsing(n: usize) -> (tempfile::TempDir, App) {
+        let (d, mut app) = app_with(&["a.txt"]);
+        app.popup = Popup::RemoteBrowser {
+            label: "box".into(),
+            cwd: "/var/log".into(),
+            entries: (0..n)
+                .map(|i| cian_scp::RemoteEntry {
+                    name: format!("file{i:04}.log"),
+                    is_dir: false,
+                    size: 1,
+                    link: false,
+                })
+                .collect(),
+            cursor: 0,
+            scroll: 0,
+            marked: Default::default(),
+            loading: false,
+            purpose: crate::BrowsePurpose::Download,
+        };
+        (d, app)
+    }
+
+    fn showing(app: &mut App) -> String {
+        render(app, 120, 30).join("\n")
+    }
+
+    fn cursor_and_scroll(app: &App) -> (usize, usize) {
+        match &app.popup {
+            Popup::RemoteBrowser { cursor, scroll, .. } => (*cursor, *scroll),
+            other => panic!("not the browser: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn walking_down_brings_the_listing_with_it() {
+        let (_d, mut app) = browsing(200);
+        let _ = showing(&mut app);
+        for _ in 0..60 {
+            app.handle_key(code(KeyCode::Down)).unwrap();
+        }
+        let text = showing(&mut app);
+        let (cursor, scroll) = cursor_and_scroll(&app);
+        assert_eq!(cursor, 60);
+        assert!(scroll > 0, "the window followed the cursor, not {scroll}");
+        assert!(text.contains("file0060.log"), "and the file under the cursor is on screen");
+    }
+
+    #[test]
+    fn the_end_is_reachable() {
+        let (_d, mut app) = browsing(500);
+        let _ = showing(&mut app);
+        app.handle_key(key('G')).unwrap();
+        let text = showing(&mut app);
+        assert!(text.contains("file0499.log"), "the last file is on screen");
+    }
+
+    #[test]
+    fn a_page_at_a_time_too() {
+        let (_d, mut app) = browsing(200);
+        let _ = showing(&mut app);
+        app.handle_key(code(KeyCode::PageDown)).unwrap();
+        assert_eq!(cursor_and_scroll(&app).0, 10);
+        app.handle_key(code(KeyCode::PageUp)).unwrap();
+        assert_eq!(cursor_and_scroll(&app).0, 0);
+    }
+
+    #[test]
+    fn the_wheel_moves_it_as_well() {
+        let (_d, mut app) = browsing(200);
+        let _ = showing(&mut app);
+        for _ in 0..40 {
+            app.handle_mouse(MouseEvent {
+                kind: MouseEventKind::ScrollDown,
+                column: 40,
+                row: 10,
+                modifiers: KeyModifiers::NONE,
+            });
+        }
+        assert_eq!(cursor_and_scroll(&app).0, 40, "the wheel walks it too");
+    }
+
+    /// …and it says how far down it is, so a long listing looks long.
+    #[test]
+    fn a_long_listing_shows_a_scrollbar() {
+        let (_d, mut app) = browsing(200);
+        assert!(showing(&mut app).contains('█'), "a thumb on the right-hand edge");
+        let (_d2, mut short) = browsing(3);
+        assert!(!showing(&mut short).contains('█'), "and none when everything fits");
+    }
+}
