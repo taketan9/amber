@@ -15264,3 +15264,109 @@ mod going_up_lands_where_you_were {
         assert!(p.selected().is_some(), "the cursor is somewhere sensible");
     }
 }
+
+/// The keys as the *window* sends them: a capital letter, and no Shift bit.
+///
+/// cian reads a letter's case as its shift — terminals do not report the
+/// modifier for letters reliably, and the window build strips it deliberately
+/// for that reason. One guard in the editor panel asked for the bit instead,
+/// so Shift+H did nothing at all in the window while working in a terminal.
+mod the_panel_answers_a_capital_letter {
+    use super::*;
+
+    /// `Char('H')` with no modifiers — exactly what `cian-gui` produces.
+    fn windowed(c: char) -> KeyEvent {
+        KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE)
+    }
+
+    fn docked(app: &mut App) {
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+        assert!(app.viewer_dock.is_some());
+    }
+
+    #[test]
+    fn shift_l_crosses_to_the_other_listing() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        docked(&mut app);
+        app.handle_key(windowed('L')).unwrap();
+        assert_eq!(app.focused, FocusedPane::Right);
+    }
+
+    #[test]
+    fn shift_h_comes_back() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        docked(&mut app);
+        app.handle_key(windowed('L')).unwrap();
+        app.handle_key(windowed('H')).unwrap();
+        assert_eq!(app.focused, FocusedPane::Left);
+    }
+
+    #[test]
+    fn shift_j_goes_down_to_the_shell() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        docked(&mut app);
+        app.handle_key(windowed('J')).unwrap();
+        assert_eq!(app.focused, FocusedPane::Shell);
+    }
+
+    /// …and a letter that means something else after `g` still does. `gJ` is
+    /// vi's join; the focus keys must see the `g` first.
+    #[test]
+    fn but_a_pending_operator_keeps_its_letter() {
+        let (d, mut app) = app_with(&["a.txt"]);
+        std::fs::write(d.path().join("a.txt"), b"one\ntwo\n").unwrap();
+        app.reload_both();
+        docked(&mut app);
+        app.handle_key(key('g')).unwrap();
+        app.handle_key(windowed('J')).unwrap();
+        assert_eq!(app.focused, FocusedPane::Left, "the focus did not move");
+        assert!(matches!(app.popup, Popup::Viewer { .. }), "still in the file");
+    }
+
+    /// The terminal's spelling of the same keystroke still works.
+    #[test]
+    fn and_the_terminals_spelling_too() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        docked(&mut app);
+        app.handle_key(KeyEvent::new(KeyCode::Char('L'), KeyModifiers::SHIFT)).unwrap();
+        assert_eq!(app.focused, FocusedPane::Right);
+    }
+}
+
+/// Redo, on the key vi puts it on.
+mod ctrl_r_redoes {
+    use super::*;
+
+    fn ctrl(c: char) -> KeyEvent {
+        KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL)
+    }
+
+    #[test]
+    fn it_puts_back_what_u_took_away() {
+        let (d, mut app) = app_with(&["a.txt"]);
+        std::fs::create_dir(d.path().join("sub")).unwrap();
+        app.reload_both();
+        let i = app.active_pane().unwrap().entries.iter().position(|e| e.name == "sub").unwrap();
+        app.active_pane_mut().unwrap().cursor = i;
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+        let inside = app.active_pane().unwrap().cwd.clone();
+
+        app.handle_key(key('u')).unwrap();
+        assert_ne!(app.active_pane().unwrap().cwd, inside, "u came out");
+        app.handle_key(ctrl('r')).unwrap();
+        assert_eq!(app.active_pane().unwrap().cwd, inside, "Ctrl+R went back in");
+    }
+
+    /// …and refresh keeps F5, which is now its own key rather than its second.
+    #[test]
+    fn refresh_is_f5_and_no_longer_ctrl_r() {
+        let (d, mut app) = app_with(&["a.txt"]);
+        std::fs::write(d.path().join("new.txt"), b"").unwrap();
+        assert!(
+            !app.active_pane().unwrap().entries.iter().any(|e| e.name == "new.txt"),
+            "not seen yet",
+        );
+        app.handle_key(code(KeyCode::F(5))).unwrap();
+        assert!(app.active_pane().unwrap().entries.iter().any(|e| e.name == "new.txt"), "F5 sees it");
+    }
+}

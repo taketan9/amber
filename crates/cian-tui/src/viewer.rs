@@ -349,8 +349,14 @@ impl App {
         // Shift+H / Shift+L / Shift+J move the focus, as they do between the
         // listings — but only while reading. In the editor, and while a
         // selection is up, `H` and `L` belong to the file.
-        if shift
-            && self.viewer_dock.is_some()
+        //
+        // The capital letter is the signal, not the Shift bit. cian reads a
+        // letter's case as its shift everywhere — terminals do not report the
+        // modifier for letters reliably, and the window build strips it for
+        // exactly that reason — and this one line asked for the bit instead.
+        // So it worked in a terminal and did nothing at all in the window,
+        // which is how it was reported.
+        if self.viewer_dock.is_some()
             && self.viewer_split.is_none()
             && matches!(
                 self.popup,
@@ -359,6 +365,12 @@ impl App {
                     visual: None,
                     find_input: None,
                     sub_input: None,
+                    // …and with nothing half-typed. `gJ` is vi's join, and its
+                    // `J` is the file's however the letter is spelled: a key
+                    // that means one thing on its own and another after `g`
+                    // has to see the `g` first.
+                    pending: None,
+                    count: None,
                     ..
                 }
             )

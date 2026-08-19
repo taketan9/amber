@@ -249,6 +249,12 @@ impl App {
                 }
             }
             "reload" | "source" => self.reload_config(),
+            // Re-read both listings. F5's own command, for a keyboard that
+            // cannot spare the function keys.
+            "refresh" | "rescan" => {
+                self.reload_both();
+                self.message = Some(tr(self.lang, "refreshed", "更新しました").into());
+            }
             "where" | "config" | "paths" => self.show_config_paths(),
             // Mark / unmark entries whose name matches a glob (`:mark *.rs`).
             "mark" | "select" => self.cmd_mark(rest, true),

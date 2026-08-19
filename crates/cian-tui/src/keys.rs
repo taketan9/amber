@@ -2328,10 +2328,13 @@ impl App {
             (false, _, KeyCode::Char('=')) => self.open_diff(),
             // Manual refresh, for the cases the timer cannot see — a file
             // whose contents changed without the directory being touched.
-            (true, _, KeyCode::Char('r')) | (false, false, KeyCode::F(5)) => {
+            (false, false, KeyCode::F(5)) => {
                 self.reload_both();
                 self.message = Some(tr(self.lang, "refreshed", "更新しました").into());
             }
+            // Redo, on the key vi puts it on. It was the second key for
+            // refresh, which still has F5 and `:refresh`.
+            (true, _, KeyCode::Char('r')) => self.redo_last(),
             // `M` (and Shift+Enter, where the terminal can report it) opens the
             // same menu the right mouse button does, for the entry under the
             // cursor. Shift+Enter needs a terminal that distinguishes it from
@@ -2395,8 +2398,7 @@ impl App {
             (false, false, KeyCode::Char('d')) => self.start_delete(),
             // Undo the last rename / create / move (also `:undo`).
             (false, false, KeyCode::Char('u')) => self.undo_last(),
-            // Redo. `Ctrl+R` is already the refresh, so this is the other
-            // convention for it.
+            // …and on the other convention for it, for a hand used to that.
             (true, _, KeyCode::Char('y')) => self.redo_last(),
             (false, false, KeyCode::Char('r')) => self.start_rename(),
             (false, false, KeyCode::Char('a')) => self.start_new_file(),
