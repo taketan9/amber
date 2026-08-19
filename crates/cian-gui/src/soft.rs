@@ -212,7 +212,9 @@ fn blocks(c: char) -> Option<[Option<Part>; 4]> {
 }
 
 pub struct SoftBackend {
-    surface: softbuffer::Surface<Arc<Window>, Arc<Window>>,
+    /// Where the pixels are presented. `None` only in the tests, which drive
+    /// the painting without a window to put it in — see `damage_tests`.
+    surface: Option<softbuffer::Surface<Arc<Window>, Arc<Window>>>,
     font: FontRef<'static>,
     /// Pixels per cell, and where the baseline sits inside one.
     cell_w: u32,
@@ -268,7 +270,7 @@ impl SoftBackend {
         let baseline = scaled.ascent().ceil() as i32;
 
         let mut out = Self {
-            surface,
+            surface: Some(surface),
             font,
             cell_w,
             cell_h,
@@ -293,6 +295,45 @@ impl SoftBackend {
         let px = window.inner_size();
         out.resize(px.width.max(1), px.height.max(1));
         Some(out)
+    }
+
+    /// The same painter with nowhere to present it, for the tests.
+    ///
+    /// Everything about damage tracking — which cells are repainted, and what
+    /// the pixels end up as — is in here rather than in the window, so it can
+    /// be checked exactly: paint a screen, paint another, and compare the
+    /// result against painting the second one from scratch. See `damage_tests`.
+    #[cfg(test)]
+    fn headless(font: FontRef<'static>, size_px: u32, w: u32, h: u32) -> Self {
+        let scaled = font.as_scaled(size_px as f32);
+        let cell_w = scaled.h_advance(font.glyph_id('M')).ceil().max(1.0) as u32;
+        let cell_h = (scaled.ascent() - scaled.descent() + scaled.line_gap()).ceil().max(1.0) as u32;
+        let baseline = scaled.ascent().ceil() as i32;
+        let mut out = Self {
+            surface: None,
+            font,
+            cell_w,
+            cell_h,
+            baseline,
+            px_w: 0,
+            px_h: 0,
+            cols: 0,
+            rows: 0,
+            cells: Vec::new(),
+            painted: Vec::new(),
+            pixels: Vec::new(),
+            all_dirty: true,
+            glyphs: HashMap::new(),
+            pictures: HashMap::new(),
+            frame: Vec::new(),
+            drawn: Vec::new(),
+            cursor: Position::new(0, 0),
+            cursor_visible: false,
+            painted_cursor: None,
+            said: None,
+        };
+        out.resize(w, h);
+        out
     }
 
     /// The window changed size: work out the new grid and start again.
@@ -324,7 +365,9 @@ impl SoftBackend {
         self.painted.iter_mut().for_each(|c| *c = Cell::EMPTY);
         self.all_dirty = true;
         if let (Some(nw), Some(nh)) = (NonZeroU32::new(w), NonZeroU32::new(h)) {
-            let _ = self.surface.resize(nw, nh);
+            if let Some(s) = self.surface.as_mut() {
+                let _ = s.resize(nw, nh);
+            }
         }
     }
 
@@ -622,6 +665,11 @@ fn sample(pic: &Picture, fx: f32, fy: f32) -> Option<((u8, u8, u8), f32)> {
     if alpha <= 0.0 {
         return None;
     }
+    // Four weights that ought to sum to one sum to 0.99999994, and a picture
+    // drawn over itself then comes out a shade darker each time — which is a
+    // difference between "repainted this frame" and "left from the last one",
+    // and so reads as damage. Opaque is opaque.
+    let alpha = if alpha >= 0.998 { 1.0 } else { alpha };
     // Premultiplied on the way in, divided back out on the way to a colour.
     let mut rgb = [0.0f32; 3];
     for ((r, g, b), w) in c.iter().map(|((r, g, b, a), w)| ((*r, *g, *b), a * w)) {
@@ -775,6 +823,29 @@ impl Backend for SoftBackend {
                     dirty.push(i);
                 }
             }
+            // A cell that holds — or held — a two-cell character owns the cell
+            // after it, and paints across both. When it stops holding one, the
+            // cell to its right still has the *right half of the old glyph* in
+            // it, while the cell itself has not changed and so is not dirty:
+            // 漢 replaced by `a` left half a 漢 on the screen. Neither the
+            // cursor rule below nor the picture rule above covers this, because
+            // nothing here changed except a neighbour.
+            let wide = |c: Option<&Cell>| {
+                c.and_then(|c| c.symbol().chars().next())
+                    .and_then(|c| c.width())
+                    .unwrap_or(1)
+                    > 1
+            };
+            let mut spilled = Vec::new();
+            for &i in &dirty {
+                if (wide(self.cells.get(i)) || wide(self.painted.get(i)))
+                    && (i + 1) % self.cols as usize != 0
+                {
+                    spilled.push(i + 1);
+                }
+            }
+            dirty.extend(spilled);
+
             // Where the caret is, and where it was. Neither cell changed, and
             // both of them look different because of it.
             if caret != self.painted_cursor {
@@ -854,7 +925,11 @@ impl Backend for SoftBackend {
         self.painted_cursor = caret;
         self.all_dirty = false;
 
-        if let Ok(mut buf) = self.surface.buffer_mut() {
+        let Some(surface) = self.surface.as_mut() else {
+            // No window: the tests read `pixels` directly.
+            return Ok(());
+        };
+        if let Ok(mut buf) = surface.buffer_mut() {
             let n = buf.len().min(self.pixels.len());
             buf[..n].copy_from_slice(&self.pixels[..n]);
             let _ = buf.present();
@@ -1025,5 +1100,274 @@ mod picture_tests {
     fn a_wholly_transparent_spot_is_not_drawn_at_all() {
         let pic = Picture { w: 1, h: 1, rgba: vec![9, 9, 9, 0] };
         assert!(sample(&pic, 0.0, 0.0).is_none());
+    }
+}
+
+/// Does painting only what changed leave the same pixels as painting all of it?
+///
+/// That question is the whole of "old text is still on the screen". The
+/// renderer keeps its own framebuffer between frames and repaints only the
+/// cells it believes differ, so anything that changes how a cell *looks*
+/// without changing the cell itself — a caret moving, a picture that stopped
+/// being drawn, ink that escaped its cell — leaves the old pixels behind. Every
+/// case below paints a screen, paints a second one over it, and compares the
+/// result against painting the second one on a fresh canvas. A difference is a
+/// leftover, and the message says where.
+#[cfg(test)]
+mod damage_tests {
+    use super::*;
+    use cian_tui::ratatui::style::Style;
+
+    /// A real font, because the fault being hunted is about *ink* — where a
+    /// glyph's pixels land and whether they stay in their cell. Any monospaced
+    /// face will do, so the first one this machine has is the one used; the
+    /// test steps aside where there is none rather than failing for a reason
+    /// that has nothing to do with cian.
+    fn font() -> Option<FontRef<'static>> {
+        const CANDIDATES: &[&str] = &[
+            // What cian itself looks for, first.
+            "~/Library/Fonts/HackGenConsoleNF-Regular.ttf",
+            "~/Downloads/HackGenConsoleNF-Regular.ttf",
+            // Then whatever the platform is sure to have.
+            "/System/Library/Fonts/Menlo.ttc",
+            "/System/Library/Fonts/Supplemental/Arial.ttf",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+            "/usr/share/fonts/truetype/liberation/LiberationMono-Regular.ttf",
+            "C:/Windows/Fonts/consola.ttf",
+            "C:/Windows/Fonts/arial.ttf",
+        ];
+        for path in CANDIDATES {
+            let path = match path.strip_prefix("~/") {
+                Some(rest) => match std::env::var_os("HOME") {
+                    Some(home) => std::path::PathBuf::from(home).join(rest),
+                    None => continue,
+                },
+                None => std::path::PathBuf::from(path),
+            };
+            let Ok(bytes) = std::fs::read(&path) else { continue };
+            // Leaked: the face borrows it for the length of the test.
+            let bytes: &'static [u8] = Box::leak(bytes.into_boxed_slice());
+            if let Ok(f) = FontRef::try_from_slice(bytes) {
+                return Some(f);
+            }
+        }
+        eprintln!("damage_tests: no font on this machine, skipping");
+        None
+    }
+
+    /// One screen: a row of (column, row, symbol, style).
+    type Screen = Vec<(u16, u16, String, Style)>;
+
+    /// Laid out the way a `Buffer` lays it out: a two-cell character owns the
+    /// cell after it, and that cell stays empty. Writing them shoulder to
+    /// shoulder would be testing a screen ratatui never produces.
+    fn plain(text: &str, row: u16) -> Screen {
+        let mut out = Screen::new();
+        let mut x = 0u16;
+        for c in text.chars() {
+            out.push((x, row, c.to_string(), Style::default()));
+            x += c.width().unwrap_or(1).max(1) as u16;
+        }
+        out
+    }
+
+    /// Hand over the *whole* grid, the way ratatui does — a cell that lost its
+    /// character is sent as a space, never left out. Leaving it out would be
+    /// asking the backend about a cell nobody told it had changed, which is a
+    /// different question from the one here.
+    fn paint(back: &mut SoftBackend, screen: &Screen) {
+        let (cols, rows) = (back.cols, back.rows);
+        let mut cells: Vec<(u16, u16, Cell)> = Vec::with_capacity(cols as usize * rows as usize);
+        for y in 0..rows {
+            for x in 0..cols {
+                cells.push((x, y, Cell::EMPTY));
+            }
+        }
+        for (x, y, s, st) in screen {
+            if *x < cols && *y < rows {
+                let cell = &mut cells[*y as usize * cols as usize + *x as usize].2;
+                cell.set_symbol(s);
+                cell.set_style(*st);
+            }
+        }
+        back.draw(cells.iter().map(|(x, y, c)| (*x, *y, c))).unwrap();
+        back.flush().unwrap();
+    }
+
+    /// Paint `first` then `second` on one canvas; paint `second` alone on
+    /// another. The pixels must match.
+    fn incremental_matches_full(first: &Screen, second: &Screen, setup: impl Fn(&mut SoftBackend, usize)) {
+        let (w, h) = (240, 120);
+        let Some(f) = font() else { return };
+        let mut step = SoftBackend::headless(f, 16, w, h);
+        setup(&mut step, 0);
+        paint(&mut step, first);
+        setup(&mut step, 1);
+        paint(&mut step, second);
+
+        let Some(f) = font() else { return };
+        let mut fresh = SoftBackend::headless(f, 16, w, h);
+        setup(&mut fresh, 1);
+        // A blank screen under it, so both canvases start from the same page.
+        paint(&mut fresh, &Vec::new());
+        paint(&mut fresh, second);
+
+        let differing = step
+            .pixels
+            .iter()
+            .zip(fresh.pixels.iter())
+            .enumerate()
+            .filter(|(_, (a, b))| a != b)
+            .map(|(i, _)| (i as u32 % step.px_w, i as u32 / step.px_w))
+            .collect::<Vec<_>>();
+        if !differing.is_empty() {
+            let (x, y) = differing[0];
+            let i = (y * step.px_w + x) as usize;
+            eprintln!(
+                "cell {}x{} px; first diff at ({x},{y}) = cell ({},{}): step {:08x} vs fresh {:08x}",
+                step.cell_w, step.cell_h, x / step.cell_w, y / step.cell_h,
+                step.pixels[i], fresh.pixels[i],
+            );
+        }
+        assert!(
+            differing.is_empty(),
+            "{} pixels left over from the first screen, first at {:?}",
+            differing.len(),
+            differing.first(),
+        );
+    }
+
+    #[test]
+    fn text_replaced_by_shorter_text() {
+        incremental_matches_full(&plain("a long line of text", 1), &plain("short", 1), |_, _| {});
+    }
+
+    #[test]
+    fn text_replaced_by_nothing() {
+        incremental_matches_full(&plain("some output", 2), &Vec::new(), |_, _| {});
+    }
+
+    #[test]
+    fn a_wide_character_replaced_by_a_narrow_one() {
+        incremental_matches_full(&plain("漢字漢字", 0), &plain("ab", 0), |_, _| {});
+    }
+
+    #[test]
+    fn a_character_with_ink_wider_than_its_cell() {
+        // `█` fills its cell exactly; `W` in most faces has ink to spare. Both
+        // are followed by a space in the second screen, so anything that leaked
+        // sideways shows up.
+        incremental_matches_full(&plain("███WWW", 1), &plain("  ", 1), |_, _| {});
+    }
+
+    #[test]
+    fn a_caret_that_moved() {
+        incremental_matches_full(&plain("prompt$ ls", 0), &plain("prompt$ ls", 0), |b, step| {
+            b.show_cursor().unwrap();
+            b.set_cursor_position(Position::new(if step == 0 { 3 } else { 9 }, 0)).unwrap();
+        });
+    }
+
+    #[test]
+    fn a_caret_that_went_away() {
+        incremental_matches_full(&plain("prompt$", 0), &plain("prompt$", 0), |b, step| {
+            if step == 0 {
+                b.show_cursor().unwrap();
+                b.set_cursor_position(Position::new(2, 0)).unwrap();
+            } else {
+                b.hide_cursor().unwrap();
+            }
+        });
+    }
+
+    /// A picture — an icon, a preview — is drawn over the cells, so when it
+    /// moves, shrinks or goes away, the cells under it have to be repainted.
+    #[test]
+    fn a_picture_that_shrank() {
+        let pic = |b: &mut SoftBackend, w: u32, h: u32| {
+            b.upload(7, 4, 4, vec![255; 4 * 4 * 4]);
+            b.set_frame(vec![Draw { id: 7, x: 20.0, y: 20.0, w: w as f32, h: h as f32, alpha: 1.0 }]);
+        };
+        incremental_matches_full(&plain("under the picture", 2), &plain("under the picture", 2), move |b, step| {
+            if step == 0 {
+                pic(b, 80, 80);
+            } else {
+                pic(b, 80, 20);
+            }
+        });
+    }
+
+    #[test]
+    fn a_picture_that_went_away() {
+        incremental_matches_full(&plain("under the picture", 2), &plain("under the picture", 2), |b, step| {
+            b.upload(7, 4, 4, vec![255; 4 * 4 * 4]);
+            if step == 0 {
+                b.set_frame(vec![Draw { id: 7, x: 10.0, y: 10.0, w: 60.0, h: 60.0, alpha: 1.0 }]);
+            } else {
+                b.set_frame(Vec::new());
+            }
+        });
+    }
+
+    #[test]
+    fn a_picture_that_moved() {
+        incremental_matches_full(&plain("under the picture", 2), &plain("under the picture", 2), |b, step| {
+            b.upload(7, 4, 4, vec![255; 4 * 4 * 4]);
+            let x = if step == 0 { 10.0 } else { 90.0 };
+            b.set_frame(vec![Draw { id: 7, x, y: 10.0, w: 60.0, h: 60.0, alpha: 1.0 }]);
+        });
+    }
+
+    /// The general case, swept: random screens of random text and colours, one
+    /// after another. This is the one that finds what the cases above did not
+    /// think of.
+    #[test]
+    fn any_screen_over_any_other_screen() {
+        // A tiny deterministic generator — a seed in the failure message beats
+        // a dependency, and a fixed sequence beats a flaky test.
+        let mut seed = 0x2545F491_4F6CDD1Du64;
+        let mut next = move || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed
+        };
+        let alphabet: Vec<char> = "ab漢 █─│▀xyz".chars().collect();
+        for round in 0..200 {
+            let screen = |n: &mut dyn FnMut() -> u64| -> Screen {
+                let mut s = Screen::new();
+                for y in 0..6u16 {
+                    for x in 0..14u16 {
+                        if n() % 3 == 0 {
+                            continue; // a gap, so cells appear and disappear
+                        }
+                        let c = alphabet[(n() % alphabet.len() as u64) as usize];
+                        let style = if n() % 4 == 0 {
+                            Style::default().add_modifier(Modifier::REVERSED)
+                        } else if n() % 5 == 0 {
+                            Style::default().add_modifier(Modifier::BOLD)
+                        } else {
+                            Style::default()
+                        };
+                        s.push((x, y, c.to_string(), style));
+                    }
+                }
+                s
+            };
+            let first = screen(&mut next);
+            let second = screen(&mut next);
+            let (w, h) = (240, 120);
+            let Some(f) = font() else { return };
+        let mut step = SoftBackend::headless(f, 16, w, h);
+            paint(&mut step, &first);
+            paint(&mut step, &second);
+            let Some(f) = font() else { return };
+        let mut fresh = SoftBackend::headless(f, 16, w, h);
+            paint(&mut fresh, &Vec::new());
+            paint(&mut fresh, &second);
+            let bad = step.pixels.iter().zip(fresh.pixels.iter()).filter(|(a, b)| a != b).count();
+            assert_eq!(bad, 0, "round {round}: {bad} pixels left over from the screen before");
+        }
     }
 }
