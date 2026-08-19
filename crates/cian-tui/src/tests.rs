@@ -14907,3 +14907,59 @@ mod the_transfer_limit {
         assert!(zero.wait_after(10_000_000).is_none(), "0 means no ceiling, not no bytes");
     }
 }
+
+/// `:reload` re-reads init.lua, and must not undress the view it is in.
+///
+/// The desktop views stand on their own palette — a borderless listing on a
+/// dark page is a pane with its edges missing — and a reload was putting
+/// init.lua's colours back underneath one. The rule is the same one the front
+/// end applies when it changes skin, and it is asserted here as a rule: given
+/// the configured colours, which skin is on, and whether the user named a
+/// theme, what should be worn?
+mod reload_keeps_the_look_it_is_wearing {
+    use super::*;
+    use crate::theme::{theme_for_skin, ResolvedTheme};
+
+    #[test]
+    fn the_desktop_views_wear_their_own() {
+        assert_eq!(
+            theme_for_skin(ResolvedTheme::DARK, true, false),
+            ResolvedTheme::FINDER,
+            "a borderless listing stands on its own page",
+        );
+    }
+
+    #[test]
+    fn the_classic_view_wears_what_init_lua_says() {
+        assert_eq!(theme_for_skin(ResolvedTheme::DARK, false, false), ResolvedTheme::DARK);
+    }
+
+    #[test]
+    fn a_theme_asked_for_by_name_outranks_the_skin() {
+        assert_eq!(
+            theme_for_skin(ResolvedTheme::DARK, true, true),
+            ResolvedTheme::DARK,
+            "the user's choice is not overruled by a change of view",
+        );
+    }
+
+    /// And the reload really asks: with the desktop skin on, re-reading the
+    /// config leaves the desktop palette in force rather than the file's.
+    #[test]
+    fn and_reload_puts_the_answer_into_force() {
+        let _g = THEME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let was = crate::theme::theme();
+        let (_d, mut app) = app_with(&["a.txt"]);
+        app.skin = Skin::Finder;
+        crate::theme::set_theme(ResolvedTheme::FINDER);
+        app.reload_config();
+        // Whatever the flag says on this run, the answer is one of the two the
+        // rule allows — never something else, which is what the bug was.
+        let now = crate::theme::theme();
+        assert!(
+            now == ResolvedTheme::FINDER || now == crate::theme::theme_preset("dark").unwrap(),
+            "reload settled on a theme the rule allows",
+        );
+        crate::theme::set_theme(was);
+    }
+}

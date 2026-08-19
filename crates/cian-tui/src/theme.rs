@@ -346,6 +346,28 @@ pub(crate) fn skin_may_swap_theme(theme_is_the_users: bool) -> bool {
     !theme_is_the_users
 }
 
+/// Which colours a view should be wearing.
+///
+/// The desktop skins only read on a light surface — a borderless dark pane is
+/// not a Finder, it is a pane with its edges missing — so switching to one
+/// brings its palette with it. A theme the user asked for by name outranks
+/// that, everywhere it comes up.
+///
+/// Written as a function of what it depends on, not of the process-wide flag,
+/// so the rule can be asserted without one test's `:theme` deciding another
+/// test's colours.
+pub(crate) fn theme_for_skin(
+    configured: ResolvedTheme,
+    finder_skin: bool,
+    theme_is_the_users: bool,
+) -> ResolvedTheme {
+    if finder_skin && skin_may_swap_theme(theme_is_the_users) {
+        ResolvedTheme::FINDER
+    } else {
+        configured
+    }
+}
+
 /// Swap the active theme (from `:theme`, the picker preview, or `:reload`).
 pub(crate) fn set_theme(t: ResolvedTheme) {
     let mut w = THEME.write().unwrap_or_else(|e| e.into_inner());
