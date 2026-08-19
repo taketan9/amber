@@ -240,6 +240,17 @@ pub struct SoftBackend {
 
     cursor: Position,
     cursor_visible: bool,
+    /// Where the caret was when the screen was last painted, if it was showing.
+    ///
+    /// The caret is not in the cells — it is a swap of two colours done while
+    /// painting — so moving it changes two cells' pixels without changing
+    /// either cell. Nothing marked them for repainting, and the block stayed
+    /// where it had been: a trail of them along a shell prompt, which is the
+    /// "old text left on screen" that survived every other fix here. `:redraw`
+    /// cleared it, which is exactly what a missed repaint looks like.
+    painted_cursor: Option<Position>,
+    /// When the debug line was last written. See `CIAN_SOFT_DEBUG`.
+    said: Option<std::time::Instant>,
 }
 
 impl SoftBackend {
@@ -276,6 +287,8 @@ impl SoftBackend {
             drawn: Vec::new(),
             cursor: Position::new(0, 0),
             cursor_visible: false,
+            painted_cursor: None,
+            said: None,
         };
         let px = window.inner_size();
         out.resize(px.width.max(1), px.height.max(1));
@@ -696,12 +709,22 @@ impl Backend for SoftBackend {
         // picture has moved, the cells it used to be over and the ones it is
         // over now, because those pixels are not the cells' own.
         let mut dirty: Vec<usize> = Vec::new();
+        let caret = self.cursor_visible.then_some(self.cursor);
         if self.all_dirty {
             dirty.extend(0..self.cells.len());
         } else {
             for (i, (now, was)) in self.cells.iter().zip(self.painted.iter()).enumerate() {
                 if now != was {
                     dirty.push(i);
+                }
+            }
+            // Where the caret is, and where it was. Neither cell changed, and
+            // both of them look different because of it.
+            if caret != self.painted_cursor {
+                for at in [caret, self.painted_cursor].into_iter().flatten() {
+                    if at.x < self.cols && at.y < self.rows {
+                        dirty.push(at.y as usize * self.cols as usize + at.x as usize);
+                    }
                 }
             }
             if self.frame.len() != self.drawn.len()
@@ -736,7 +759,13 @@ impl Backend for SoftBackend {
         if dirty.is_empty() {
             return Ok(());
         }
-        if std::env::var_os("CIAN_SOFT_DEBUG").is_some() {
+        // `CIAN_SOFT_DEBUG=1`, at most once a second. Per frame it is sixty
+        // lines a second of nearly identical text, which is not a diagnostic,
+        // it is a way to lose one.
+        if std::env::var_os("CIAN_SOFT_DEBUG").is_some()
+            && self.said.map(|t| t.elapsed() >= std::time::Duration::from_secs(1)).unwrap_or(true)
+        {
+            self.said = Some(std::time::Instant::now());
             let filled = self.cells.iter().filter(|c| c.symbol() != " ").count();
             cian_core::log::log(&format!(
                 "soft: {}x{} cells ({}px/{}px each), {} dirty, {} with a symbol, {} glyphs cached",
@@ -765,6 +794,7 @@ impl Backend for SoftBackend {
 
         self.painted.clone_from(&self.cells);
         self.drawn.clone_from(&self.frame);
+        self.painted_cursor = caret;
         self.all_dirty = false;
 
         if let Ok(mut buf) = self.surface.buffer_mut() {
