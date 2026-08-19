@@ -568,6 +568,7 @@ impl App {
     /// directory history. Says so when there is nowhere to go, rather than
     /// swallowing the key.
     pub(crate) fn pane_go_back(&mut self) {
+        self.nav_suppressed = true;
         let moved = self.active_pane_mut().map(|p| p.go_back().unwrap_or(false)).unwrap_or(false);
         self.message = Some(if moved {
             let cwd = self.active_pane().map(|p| p.cwd.display().to_string()).unwrap_or_default();
@@ -579,6 +580,7 @@ impl App {
 
     /// `Alt+→` / `Alt+l` — forward again, undoing a back step.
     pub(crate) fn pane_go_forward(&mut self) {
+        self.nav_suppressed = true;
         let moved = self.active_pane_mut().map(|p| p.go_forward().unwrap_or(false)).unwrap_or(false);
         self.message = Some(if moved {
             let cwd = self.active_pane().map(|p| p.cwd.display().to_string()).unwrap_or_default();
@@ -3165,19 +3167,37 @@ impl App {
     /// session cannot grow it without bound.
     pub(crate) fn record_undo(&mut self, action: UndoAction) {
         const UNDO_CAP: usize = 64;
+        // Doing something new is where a redo chain ends.
+        self.redo_stack.clear();
         self.undo_stack.push(action);
         if self.undo_stack.len() > UNDO_CAP {
             self.undo_stack.remove(0);
         }
     }
 
-    /// `u` — reverse the last recorded operation (rename / create / move).
+    /// `u` — reverse the last thing done: a rename, a create, a move, or a
+    /// step into another directory.
     pub(crate) fn undo_last(&mut self) {
         let Some(action) = self.undo_stack.pop() else {
             self.message = Some(tr(self.lang, "nothing to undo", "元に戻す操作はありません").into());
             return;
         };
+        // Undoing is not itself something to undo.
+        self.nav_suppressed = true;
+        // What `Ctrl+Y` would put back. A file that was *created* is the one
+        // thing that cannot be: undoing it removed it, and nothing here
+        // remembers what was inside.
+        if !matches!(action, UndoAction::Created { .. }) {
+            self.redo_stack.push(action.clone());
+        }
         let msg = match action {
+            UndoAction::Navigated { pane, from, to: _ } => {
+                self.focus(pane);
+                match self.active_pane_mut().map(|p| p.jump_to(from.clone())) {
+                    Some(Ok(())) => format!("◀ {}", from.display()),
+                    _ => format!("cannot go back to {}", from.display()),
+                }
+            }
             UndoAction::Rename { from, to } => {
                 if !to.exists() {
                     format!("cannot undo rename: {} is gone", to.display())
@@ -3225,6 +3245,92 @@ impl App {
         };
         self.reload_both();
         self.message = Some(msg);
+    }
+
+    /// `Ctrl+Y` / `:redo` — do again what `u` just undid.
+    pub(crate) fn redo_last(&mut self) {
+        let Some(action) = self.redo_stack.pop() else {
+            self.message = Some(tr(self.lang, "nothing to redo", "やり直す操作はありません").into());
+            return;
+        };
+        self.nav_suppressed = true;
+        // Back onto the undo stack, so the two keys walk the same chain in
+        // either direction. Not through `record_undo`, which would empty the
+        // redo stack it was just taken from.
+        self.undo_stack.push(action.clone());
+        let msg = match action {
+            UndoAction::Navigated { pane, from: _, to } => {
+                self.focus(pane);
+                match self.active_pane_mut().map(|p| p.jump_to(to.clone())) {
+                    Some(Ok(())) => format!("▶ {}", to.display()),
+                    _ => format!("cannot go on to {}", to.display()),
+                }
+            }
+            UndoAction::Rename { from, to } => match std::fs::rename(&from, &to) {
+                Ok(()) => format!("redo: renamed to {}", to.display()),
+                Err(e) => format!("redo failed: {e}"),
+            },
+            UndoAction::Moved { pairs } => {
+                let (mut ok, mut fail) = (0usize, 0usize);
+                for (now, back) in pairs {
+                    // `pairs` reads "it is at `now`, it was at `back`", so a
+                    // redo is the move from `back` to `now` again.
+                    if let Some(parent) = now.parent() {
+                        let _ = std::fs::create_dir_all(parent);
+                    }
+                    match std::fs::rename(&back, &now) {
+                        Ok(()) => ok += 1,
+                        Err(_) => fail += 1,
+                    }
+                }
+                if fail == 0 {
+                    format!("redo: moved {ok} again")
+                } else {
+                    format!("redo: moved {ok} again, {fail} could not be redone")
+                }
+            }
+            // Never pushed to the redo stack — see `undo_last`.
+            UndoAction::Created { .. } => String::new(),
+        };
+        self.reload_both();
+        self.message = Some(msg);
+    }
+
+    /// Where the user is, before a keystroke or a click is handled.
+    pub(crate) fn nav_snapshot(&self) -> Option<(FocusedPane, PathBuf)> {
+        let pane = match self.focused {
+            FocusedPane::Shell => return None,
+            p => p,
+        };
+        self.active_pane().map(|p| (pane, p.cwd.clone()))
+    }
+
+    /// Did that keystroke move a pane somewhere? Then it is undoable.
+    ///
+    /// Asked here rather than at each of the dozen places that can navigate —
+    /// Enter, Backspace, a bookmark, a breadcrumb, the address bar, `:cd`, the
+    /// fuzzy jump, a click in the grid — because the question is about the
+    /// result, and the result is one comparison.
+    pub(crate) fn note_navigation(&mut self, before: Option<(FocusedPane, PathBuf)>) {
+        let suppressed = std::mem::take(&mut self.nav_suppressed);
+        let Some((pane, from)) = before else { return };
+        if suppressed {
+            return;
+        }
+        let Some(now) = self.pane_cwd(pane) else { return };
+        if now != from {
+            self.record_undo(UndoAction::Navigated { pane, from, to: now });
+        }
+    }
+
+    /// This pane's directory, whichever pane has the focus.
+    fn pane_cwd(&self, pane: FocusedPane) -> Option<PathBuf> {
+        let tabs = match pane {
+            FocusedPane::Left => &self.left,
+            FocusedPane::Right => &self.right,
+            FocusedPane::Shell => return None,
+        };
+        Some(tabs.active_ref().cwd.clone())
     }
 
     pub(crate) fn finish_transfer(&mut self, conflict: Conflict) -> Result<()> {

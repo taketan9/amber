@@ -167,6 +167,7 @@ impl App {
             "recent" | "oldfiles" | "fo" => self.start_recent_files(),
             "each" | "foreach" => self.run_each(rest),
             "undo" => self.undo_last(),
+            "redo" => self.redo_last(),
             "edit" | "e" => self.edit_selected_file(),
             // Rename by editing a list of names (vidir's interface).
             "bulkrename" | "brn" | "vidir" => self.start_editor_rename(),

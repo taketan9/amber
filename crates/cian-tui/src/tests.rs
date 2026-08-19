@@ -15037,3 +15037,230 @@ mod the_selection_can_be_seen_on_every_theme {
         crate::theme::set_theme(was);
     }
 }
+
+/// Shift+H / Shift+L / Shift+J in the editor panel, and where they stop.
+mod the_panel_moves_the_focus_like_a_listing_does {
+    use super::*;
+
+    fn docked(app: &mut App) {
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+        assert!(app.viewer_dock.is_some(), "the file opened in its pane");
+        assert!(matches!(app.popup, Popup::Viewer { editing: false, .. }), "and in read mode");
+    }
+
+    fn shift(c: char) -> KeyEvent {
+        KeyEvent::new(KeyCode::Char(c), KeyModifiers::SHIFT)
+    }
+
+    #[test]
+    fn reading_a_file_docked_in_a_pane_they_move_the_focus() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        docked(&mut app);
+        app.handle_key(shift('L')).unwrap();
+        assert_eq!(app.focused, FocusedPane::Right, "Shift+L crosses to the other listing");
+        app.handle_key(shift('H')).unwrap();
+        assert_eq!(app.focused, FocusedPane::Left);
+        app.handle_key(shift('J')).unwrap();
+        assert_eq!(app.focused, FocusedPane::Shell, "and Shift+J goes down to the shell");
+    }
+
+    /// …and the file is still open behind the focus, not closed by moving away.
+    #[test]
+    fn and_the_file_stays_open() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        docked(&mut app);
+        app.handle_key(shift('L')).unwrap();
+        assert!(matches!(app.popup, Popup::Viewer { .. }), "still open: {:?}", app.popup);
+    }
+
+    /// In a split panel the same keys cross between the two halves — that is
+    /// the one place they cannot also move the focus.
+    #[test]
+    fn but_in_a_split_they_belong_to_the_split() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        docked(&mut app);
+        app.split_viewer(true);
+        assert!(app.viewer_split.is_some());
+        app.handle_key(shift('L')).unwrap();
+        assert_eq!(app.focused, FocusedPane::Left, "the focus stayed in the panel");
+    }
+
+    /// While typing, `H` and `L` are letters.
+    #[test]
+    fn and_while_editing_they_are_letters() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        docked(&mut app);
+        app.handle_key(key('i')).unwrap();
+        assert!(matches!(app.popup, Popup::Viewer { editing: true, .. }), "typing now");
+        app.handle_key(shift('L')).unwrap();
+        assert_eq!(app.focused, FocusedPane::Left, "the focus did not move");
+    }
+}
+
+/// `u` takes back the last thing you did — including walking into a folder.
+mod undo_covers_where_you_are {
+    use super::*;
+
+    fn tree() -> (tempfile::TempDir, App) {
+        let (d, mut app) = app_with(&["a.txt"]);
+        std::fs::create_dir_all(d.path().join("abc/def")).unwrap();
+        std::fs::write(d.path().join("abc/inside.txt"), b"").unwrap();
+        app.reload_both();
+        (d, app)
+    }
+
+    fn go_into(app: &mut App, name: &str) {
+        let i = app
+            .active_pane()
+            .unwrap()
+            .entries
+            .iter()
+            .position(|e| e.name == name)
+            .unwrap_or_else(|| panic!("no {name} here"));
+        app.active_pane_mut().unwrap().cursor = i;
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+    }
+
+    fn here(app: &App) -> String {
+        app.active_pane().unwrap().cwd.file_name().unwrap().to_string_lossy().into_owned()
+    }
+
+    #[test]
+    fn stepping_into_a_folder_can_be_taken_back() {
+        let (_d, mut app) = tree();
+        let was = app.active_pane().unwrap().cwd.clone();
+        go_into(&mut app, "abc");
+        assert_eq!(here(&app), "abc");
+        app.handle_key(key('u')).unwrap();
+        assert_eq!(app.active_pane().unwrap().cwd, was, "u came back out");
+    }
+
+    #[test]
+    fn and_put_back_again() {
+        let (_d, mut app) = tree();
+        go_into(&mut app, "abc");
+        app.handle_key(key('u')).unwrap();
+        app.handle_key(KeyEvent::new(KeyCode::Char('y'), KeyModifiers::CONTROL)).unwrap();
+        assert_eq!(here(&app), "abc", "Ctrl+Y walked back in");
+    }
+
+    /// Several steps, unwound in the order they were taken.
+    #[test]
+    fn a_chain_unwinds_in_order() {
+        let (_d, mut app) = tree();
+        let root = app.active_pane().unwrap().cwd.clone();
+        go_into(&mut app, "abc");
+        go_into(&mut app, "def");
+        assert_eq!(here(&app), "def");
+        app.handle_key(key('u')).unwrap();
+        assert_eq!(here(&app), "abc");
+        app.handle_key(key('u')).unwrap();
+        assert_eq!(app.active_pane().unwrap().cwd, root);
+    }
+
+    /// A file operation and a walk are on one stack, in the order they
+    /// happened — which is what makes `u` mean "take back what I just did".
+    #[test]
+    fn a_rename_and_a_walk_share_one_stack() {
+        let (d, mut app) = tree();
+        // The pane's own idea of where it is — on a Mac the temp dir is
+        // reached through a symlink, so `d.path()` and the pane's `cwd` are
+        // two spellings of one directory.
+        let root = app.active_pane().unwrap().cwd.clone();
+        std::fs::rename(d.path().join("a.txt"), d.path().join("renamed.txt")).unwrap();
+        app.record_undo(crate::UndoAction::Rename {
+            from: d.path().join("a.txt"),
+            to: d.path().join("renamed.txt"),
+        });
+        go_into(&mut app, "abc");
+
+        // The walk was last, so the walk comes back first.
+        app.handle_key(key('u')).unwrap();
+        assert_eq!(app.active_pane().unwrap().cwd, root);
+        assert!(d.path().join("renamed.txt").exists(), "the rename is still done");
+
+        // …and then the rename.
+        app.handle_key(key('u')).unwrap();
+        assert!(d.path().join("a.txt").exists(), "the name came back");
+    }
+
+    /// Alt+← is already a way back, so using it must not leave a step that
+    /// `u` would then undo by walking *forward* again — the two would fight.
+    #[test]
+    fn stepping_back_through_history_is_not_itself_undoable() {
+        let (_d, mut app) = tree();
+        let root = app.active_pane().unwrap().cwd.clone();
+        go_into(&mut app, "abc");
+        app.pane_go_back();
+        assert_eq!(app.active_pane().unwrap().cwd, root, "Alt+← came back");
+        app.handle_key(key('u')).unwrap();
+        assert_eq!(
+            app.active_pane().unwrap().cwd,
+            root,
+            "and u did not bounce forward into the folder again",
+        );
+    }
+
+    /// Doing something new ends the redo chain, as everywhere else.
+    #[test]
+    fn a_new_step_ends_the_chain() {
+        let (_d, mut app) = tree();
+        go_into(&mut app, "abc");
+        app.handle_key(key('u')).unwrap();
+        go_into(&mut app, "abc");
+        app.handle_key(KeyEvent::new(KeyCode::Char('y'), KeyModifiers::CONTROL)).unwrap();
+        assert_eq!(here(&app), "abc", "there was nothing to redo");
+    }
+
+    #[test]
+    fn the_commands_do_the_same() {
+        let (_d, mut app) = tree();
+        let root = app.active_pane().unwrap().cwd.clone();
+        go_into(&mut app, "abc");
+        app.command_buffer = "undo".into();
+        app.run_command();
+        assert_eq!(app.active_pane().unwrap().cwd, root);
+        app.command_buffer = "redo".into();
+        app.run_command();
+        assert_eq!(here(&app), "abc");
+    }
+}
+
+/// Coming up out of a folder lands on the folder you came out of.
+mod going_up_lands_where_you_were {
+    use super::*;
+
+    #[test]
+    fn the_cursor_is_on_the_folder_just_left() {
+        let (d, mut app) = app_with(&["a.txt"]);
+        for n in ["aaa", "bbb", "def", "zzz"] {
+            std::fs::create_dir(d.path().join(n)).unwrap();
+        }
+        std::fs::create_dir(d.path().join("def/sub")).unwrap();
+        app.reload_both();
+        let i = app.active_pane().unwrap().entries.iter().position(|e| e.name == "def").unwrap();
+        app.active_pane_mut().unwrap().cursor = i;
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+        assert!(app.active_pane().unwrap().cwd.ends_with("def"));
+
+        app.handle_key(code(KeyCode::Backspace)).unwrap();
+        let on = app.active_pane().unwrap().selected().map(|e| e.name.clone()).unwrap_or_default();
+        assert_eq!(on, "def", "back upstairs, standing on the folder just left");
+    }
+
+    /// And from a folder whose parent no longer lists it, the old behaviour:
+    /// the first real row rather than nothing at all.
+    #[test]
+    fn or_the_first_row_when_it_is_not_there_any_more() {
+        let (d, mut app) = app_with(&["a.txt"]);
+        std::fs::create_dir(d.path().join("gone")).unwrap();
+        app.reload_both();
+        let i = app.active_pane().unwrap().entries.iter().position(|e| e.name == "gone").unwrap();
+        app.active_pane_mut().unwrap().cursor = i;
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+        std::fs::remove_dir(d.path().join("gone")).unwrap();
+        app.handle_key(code(KeyCode::Backspace)).unwrap();
+        let p = app.active_pane().unwrap();
+        assert!(p.selected().is_some(), "the cursor is somewhere sensible");
+    }
+}

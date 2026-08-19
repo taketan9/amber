@@ -5,7 +5,15 @@ use super::*;
 
 impl App {
     // ------- Mouse -------
+    /// One mouse event, and the same question the keyboard is asked: a click
+    /// on a bookmark, a breadcrumb or a folder moves a pane too.
     pub(crate) fn handle_mouse(&mut self, ev: MouseEvent) {
+        let before = self.nav_snapshot();
+        self.handle_mouse_inner(ev);
+        self.note_navigation(before);
+    }
+
+    fn handle_mouse_inner(&mut self, ev: MouseEvent) {
         let (col, row) = (ev.column, ev.row);
 
         // The view switcher is drawn last and answered first.

@@ -6281,11 +6281,20 @@ fn draw_scrolling_text(
         .title_bottom(pos);
     f.render_widget(block, rect);
 
+    // Cut to the width here, by display cells, rather than left to the
+    // widget's own truncation.
+    //
+    // A 全角 character is two cells, and a line cut *between* its halves leaves
+    // the second half as a cell nobody wrote: what is drawn there is whatever
+    // the renderer makes of half a character, which on this Mac was a reversed
+    // block — a stray highlight at the end of exactly the lines long enough to
+    // reach the edge. Cut on a character boundary and the question never comes
+    // up.
     let body: Vec<Line> = lines
         .iter()
         .skip(offset)
         .take(view_h)
-        .map(|l| Line::from(l.clone()))
+        .map(|l| Line::from(crate::util::truncate(l, inner.width as usize)))
         .collect();
     let body_area = Rect::new(inner.x, inner.y, inner.width, view_h as u16);
     f.render_widget(

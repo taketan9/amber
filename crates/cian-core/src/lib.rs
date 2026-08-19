@@ -758,13 +758,25 @@ impl Pane {
         let parent_owned = self.cwd.parent().map(|p| p.to_path_buf());
         if let Some(parent) = parent_owned {
             let prev = self.cwd.clone();
+            // The folder being left, so the cursor can land on it upstairs.
+            let came_from = prev.file_name().map(|n| n.to_string_lossy().into_owned());
             self.push_history(prev);
             self.cwd = parent;
             self.view = PaneView::Dir;
             self.marks.clear();
             self.filter.clear();
             self.reload()?;
-            self.cursor_to_first_real();
+            // Where you were, not where the listing starts.
+            //
+            // Going up from `abc/def` put the cursor on the first row of `abc`,
+            // which is nowhere near `def` in a folder of any size — so climbing
+            // one level and stepping back into it meant finding it again by
+            // eye. Every file manager lands on the folder you came out of, and
+            // it is the only row you are certainly interested in.
+            match came_from.and_then(|name| self.entries.iter().position(|e| e.name == name)) {
+                Some(i) => self.cursor = i,
+                None => self.cursor_to_first_real(),
+            }
         }
         Ok(())
     }

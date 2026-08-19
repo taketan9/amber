@@ -86,7 +86,18 @@ impl App {
     /// there was no way to answer it from inside cian. Reported after the key
     /// has been handled, so it is the last word rather than the first thing
     /// overwritten.
+    /// One keystroke, and the question that follows it: did it move a pane?
+    ///
+    /// See [`App::note_navigation`] — every route into another directory is
+    /// caught here rather than at each of the dozen places that can take one.
     pub(crate) fn handle_key(&mut self, key: KeyEvent) -> Result<()> {
+        let before = self.nav_snapshot();
+        let out = self.handle_key_body(key);
+        self.note_navigation(before);
+        out
+    }
+
+    fn handle_key_body(&mut self, key: KeyEvent) -> Result<()> {
         // Whether the message on screen is an answer to *this* keystroke.
         // Messages have no expiry — they sit there until something replaces
         // them — so anywhere that gives a message the floor has to know the
@@ -2384,6 +2395,9 @@ impl App {
             (false, false, KeyCode::Char('d')) => self.start_delete(),
             // Undo the last rename / create / move (also `:undo`).
             (false, false, KeyCode::Char('u')) => self.undo_last(),
+            // Redo. `Ctrl+R` is already the refresh, so this is the other
+            // convention for it.
+            (true, _, KeyCode::Char('y')) => self.redo_last(),
             (false, false, KeyCode::Char('r')) => self.start_rename(),
             (false, false, KeyCode::Char('a')) => self.start_new_file(),
             (false, true, KeyCode::Char('A')) => self.start_new_dir(),

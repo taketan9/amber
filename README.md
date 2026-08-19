@@ -143,7 +143,7 @@ Each open file keeps its own cursor, folds and unsaved edits. Closing a split re
 
 | `x` `dd` `D` `J` | delete and join, vim's small change set; `d` cuts a `v`/`V` selection |
 | `p` / `P` | paste after / at the cursor, vi's way |
-| `u` | undo |
+| `u` / `Ctrl+Y` | undo / redo — the last rename, create, move **or step into a folder**, on one stack in the order things happened |
 | `gg` / `G` / `5gg` | the top, the bottom, line 5 |
 | a line wider than the panel | the view follows the cursor sideways rather than wrapping — a record keeps its shape. Bars on the right and bottom borders say how much is off screen, and appear only when some is |
 | `w` `b` `e` / `W` `B` `E` / `ge` | word by word (stopping at punctuation) and WORD by WORD (running to the next space); `ge` is the end of the word behind you |

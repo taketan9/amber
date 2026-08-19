@@ -1455,6 +1455,13 @@ enum UndoAction {
     Created { path: PathBuf },
     /// Undo by moving each `.0` (where it is now) back to `.1` (where it was).
     Moved { pairs: Vec<(PathBuf, PathBuf)> },
+    /// Undo by taking this pane back to `from`.
+    ///
+    /// Walking into the wrong folder is the commonest thing to want back, and
+    /// it was the one thing `u` did not cover: the file operations were on one
+    /// stack and where you *are* was on another (`Alt+←`). One stack now, in
+    /// the order things happened, which is what undo means everywhere else.
+    Navigated { pane: FocusedPane, from: PathBuf, to: PathBuf },
 }
 
 enum OpMsg {
@@ -2712,6 +2719,12 @@ pub struct App {
     pending_edit: Option<edit::PendingEdit>,
     /// Reversible operations, newest last; `u` undoes the last one.
     undo_stack: Vec<UndoAction>,
+    /// What `Ctrl+Y` / `:redo` would put back. Emptied by any new action, as
+    /// a redo chain is everywhere else.
+    redo_stack: Vec<UndoAction>,
+    /// Set by the routes that are *already* an undo — back, forward, undo,
+    /// redo — so stepping through history does not itself become history.
+    nav_suppressed: bool,
     pending_g: bool,
     /// When true, only the focused surface is drawn, filling the window.
     pub zoomed: bool,
@@ -2923,6 +2936,8 @@ impl App {
             du_job: None,
             pending_edit: None,
             undo_stack: Vec::new(),
+            redo_stack: Vec::new(),
+            nav_suppressed: false,
             pending_g: false,
             zoomed: false,
             debug_keys: std::env::var("CIAN_DEBUG_KEYS").is_ok(),
@@ -4251,7 +4266,8 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry("  a", None, "  in visual: select all (or gg v G)", "  ビジュアル中：全選択（gg v G でも）"),
                 entry("  gg / G", None, "  in visual: extend to top / bottom", "  ビジュアル中：先頭／末尾まで伸ばす"),
                 entry("V", Some(InvertMarks), "invert all marks", "全マークを反転"),
-                entry("u", None, "undo the last rename / create / move (also :undo)", "直前のリネーム／作成／移動を取り消し（:undo でも）"),
+                entry("u", None, "undo the last rename / create / move / folder step (also :undo)", "直前のリネーム／作成／移動／フォルダ移動を取り消し（:undo でも）"),
+                entry("Ctrl+Y", None, "redo what u just undid (also :redo)", "u で取り消した操作をやり直し（:redo でも）"),
                 entry("c", Some(Copy), "copy to opposite pane", "反対ペインへコピー"),
                 entry("m", Some(Move), "move to opposite pane", "反対ペインへ移動"),
                 entry("Ctrl+C", None, "copy to the file clipboard (Windows-style)", "ファイルクリップボードへコピー（Windows流）"),
