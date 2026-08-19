@@ -80,6 +80,137 @@ impl std::fmt::Display for Never {
 
 impl core::error::Error for Never {}
 
+/// What a box-drawing or block character covers, in fractions of its cell.
+///
+/// These are not letters and drawing them as letters is why the borders looked
+/// like they had been drawn freehand. A font's `─` is an outline scaled to
+/// 0.82 of the cell and *centred* in it, so it stops short of both edges and
+/// the next cell's `─` starts short of its own: a border comes out as a dashed,
+/// wandering line. `│` lands wherever rounding puts it, so a vertical border
+/// wobbles by a pixel from row to row — which is exactly the "wavy" that was
+/// reported. And `█`, drawn the same way, is a block with gaps around it, which
+/// is why the scrollbar could not be seen.
+///
+/// Every terminal emulator worth using draws these itself instead, and this is
+/// that: rectangles in cell-relative coordinates, snapped to whole pixels, so a
+/// line meets its neighbour exactly and a block fills its cell exactly.
+#[derive(Clone, Copy)]
+struct Part {
+    /// Left, top, right, bottom, each 0.0–1.0 of the cell.
+    l: f32,
+    t: f32,
+    r: f32,
+    b: f32,
+    /// How much of the foreground to mix in. The shades (░▒▓) are the only
+    /// ones that are not solid.
+    ink: f32,
+}
+
+const fn part(l: f32, t: f32, r: f32, b: f32) -> Part {
+    Part { l, t, r, b, ink: 1.0 }
+}
+
+/// A line's thickness, as a fraction of the cell. Light strokes are one
+/// device pixel at ordinary sizes and grow with the font; heavy ones are twice
+/// that, which is the distinction the characters themselves make.
+const LIGHT: f32 = 0.09;
+const HEAVY: f32 = 0.18;
+
+/// Half a cell, give or take the stroke: where a line stops when it is a
+/// corner or a tee rather than a crossing.
+const MID: f32 = 0.5;
+
+/// The rectangles for one character, or `None` if it is an ordinary glyph.
+///
+/// The lines are built from four arms — left, up, right, down — so a corner, a
+/// tee and a crossing are the same code with different arms.
+fn cell_art(c: char) -> Option<[Option<Part>; 4]> {
+    // (left, up, right, down) as stroke widths; 0.0 means "no arm".
+    let l = LIGHT;
+    let h = HEAVY;
+    let arms: (f32, f32, f32, f32) = match c {
+        // Straight lines.
+        '─' | '╌' | '╍' => (l, 0.0, l, 0.0),
+        '━' => (h, 0.0, h, 0.0),
+        '│' | '╎' | '╏' => (0.0, l, 0.0, l),
+        '┃' => (0.0, h, 0.0, h),
+        // Corners, square and rounded. A rounded corner is one or two pixels of
+        // curve at these sizes; the join is what matters and the join is square.
+        '┌' | '╭' => (0.0, 0.0, l, l),
+        '┐' | '╮' => (l, 0.0, 0.0, l),
+        '└' | '╰' => (0.0, l, l, 0.0),
+        '┘' | '╯' => (l, l, 0.0, 0.0),
+        '┏' => (0.0, 0.0, h, h),
+        '┓' => (h, 0.0, 0.0, h),
+        '┗' => (0.0, h, h, 0.0),
+        '┛' => (h, h, 0.0, 0.0),
+        // Tees and the crossing.
+        '├' => (0.0, l, l, l),
+        '┤' => (l, l, 0.0, l),
+        '┬' => (l, 0.0, l, l),
+        '┴' => (l, l, l, 0.0),
+        '┼' => (l, l, l, l),
+        '┣' => (0.0, h, h, h),
+        '┫' => (h, h, 0.0, h),
+        '┳' => (h, 0.0, h, h),
+        '┻' => (h, h, h, 0.0),
+        '╋' => (h, h, h, h),
+        _ => return blocks(c),
+    };
+    let (la, ua, ra, da) = arms;
+    let mut out = [None; 4];
+    // Each arm reaches the cell edge and stops in the middle, so two arms of
+    // the same width meeting across a cell boundary make one unbroken line.
+    if la > 0.0 {
+        let half = la / 2.0;
+        out[0] = Some(part(0.0, MID - half, MID + half.max(ra / 2.0), MID + half));
+    }
+    if ra > 0.0 {
+        let half = ra / 2.0;
+        out[1] = Some(part(MID - half.max(la / 2.0), MID - half, 1.0, MID + half));
+    }
+    if ua > 0.0 {
+        let half = ua / 2.0;
+        out[2] = Some(part(MID - half, 0.0, MID + half, MID + half.max(da / 2.0)));
+    }
+    if da > 0.0 {
+        let half = da / 2.0;
+        out[3] = Some(part(MID - half, MID - half.max(ua / 2.0), MID + half, 1.0));
+    }
+    Some(out)
+}
+
+/// The blocks and shades, which are rectangles by definition.
+fn blocks(c: char) -> Option<[Option<Part>; 4]> {
+    let one = |p: Part| Some([Some(p), None, None, None]);
+    let eighth = |n: f32| n / 8.0;
+    match c {
+        '█' => one(part(0.0, 0.0, 1.0, 1.0)),
+        '▀' => one(part(0.0, 0.0, 1.0, 0.5)),
+        '▄' => one(part(0.0, 0.5, 1.0, 1.0)),
+        '▌' => one(part(0.0, 0.0, 0.5, 1.0)),
+        '▐' => one(part(0.5, 0.0, 1.0, 1.0)),
+        // Eighths, up from the bottom and in from the left.
+        '▁'..='▇' => {
+            let n = c as u32 - '▁' as u32 + 1;
+            one(part(0.0, 1.0 - eighth(n as f32), 1.0, 1.0))
+        }
+        '▏' => one(part(0.0, 0.0, eighth(1.0), 1.0)),
+        '▎' => one(part(0.0, 0.0, eighth(2.0), 1.0)),
+        '▍' => one(part(0.0, 0.0, eighth(3.0), 1.0)),
+        '▋' => one(part(0.0, 0.0, eighth(5.0), 1.0)),
+        '▊' => one(part(0.0, 0.0, eighth(6.0), 1.0)),
+        '▉' => one(part(0.0, 0.0, eighth(7.0), 1.0)),
+        '▕' => one(part(1.0 - eighth(1.0), 0.0, 1.0, 1.0)),
+        // The shades are the whole cell at a fraction of the ink. Dithering
+        // them would be more faithful to a VGA font and worse to look at.
+        '░' => one(Part { ink: 0.25, ..part(0.0, 0.0, 1.0, 1.0) }),
+        '▒' => one(Part { ink: 0.5, ..part(0.0, 0.0, 1.0, 1.0) }),
+        '▓' => one(Part { ink: 0.75, ..part(0.0, 0.0, 1.0, 1.0) }),
+        _ => None,
+    }
+}
+
 pub struct SoftBackend {
     surface: softbuffer::Surface<Arc<Window>, Arc<Window>>,
     font: FontRef<'static>,
@@ -313,6 +444,29 @@ impl SoftBackend {
 
         let symbol = cell.symbol();
         let Some(c) = symbol.chars().next().filter(|c| !c.is_whitespace()) else { return };
+        // Lines and blocks are drawn, not typeset. See [`cell_art`].
+        if let Some(parts) = cell_art(c) {
+            for p in parts.into_iter().flatten() {
+                let x1 = x0 + (p.l * fill_w as f32).round() as u32;
+                let x2 = x0 + (p.r * fill_w as f32).round().max(1.0) as u32;
+                let y1 = y0 + (p.t * self.cell_h as f32).round() as u32;
+                let y2 = y0 + (p.b * self.cell_h as f32).round().max(1.0) as u32;
+                // A stroke that rounds to nothing is still a stroke: a hairline
+                // border is thin, not absent.
+                let x2 = x2.max(x1 + 1);
+                let y2 = y2.max(y1 + 1);
+                let ink = if p.ink >= 1.0 { pack(fg) } else { pack(mix(fg, bg, p.ink)) };
+                for y in y1..y2.min(self.px_h) {
+                    let row_start = (y * self.px_w) as usize;
+                    let from = row_start + x1 as usize;
+                    let to = (row_start + x2.min(self.px_w) as usize).min(self.pixels.len());
+                    if from < to {
+                        self.pixels[from..to].fill(ink);
+                    }
+                }
+            }
+            return;
+        }
         let bold = cell.modifier.contains(Modifier::BOLD);
         let (px_w, px_h, baseline, cell_w) =
             (self.px_w, self.px_h, self.baseline, self.cell_w);
@@ -328,14 +482,24 @@ impl SoftBackend {
         // Centred in the cell horizontally; on the baseline vertically.
         let pen_x = x0 as i32 + (((cell_w * span) as i32 - stamp.w as i32) / 2).max(0);
         let pen_y = y0 as i32 + baseline + stamp.top;
+        // Clipped to the cell it belongs to, not merely to the window.
+        //
+        // A glyph whose ink is wider than its advance — a Nerd Font icon, a
+        // box character in a face that draws them long, some CJK forms — was
+        // painted straight over its neighbours' pixels. Those pixels belong to
+        // cells that were not redrawn, so the overspill stayed on screen after
+        // the character that made it had gone: the leftovers reported in the
+        // shell panel, under a preview, and along the hint bar.
+        let (clip_x0, clip_x1) = (x0, (x0 + fill_w).min(px_w));
+        let (clip_y0, clip_y1) = (y0, (y0 + self.cell_h).min(px_h));
         for sy in 0..stamp.h {
             let y = pen_y + sy as i32;
-            if y < 0 || y as u32 >= px_h {
+            if y < 0 || (y as u32) < clip_y0 || y as u32 >= clip_y1 {
                 continue;
             }
             for sx in 0..stamp.w {
                 let x = pen_x + sx as i32;
-                if x < 0 || x as u32 >= px_w {
+                if x < 0 || (x as u32) < clip_x0 || x as u32 >= clip_x1 {
                     continue;
                 }
                 let a = stamp.cover[sy * stamp.w + sx];
@@ -542,7 +706,16 @@ impl Backend for SoftBackend {
             }
             if self.frame.len() != self.drawn.len()
                 || self.frame.iter().zip(self.drawn.iter()).any(|(a, b)| {
-                    a.id != b.id || a.x != b.x || a.y != b.y || a.w != b.w || a.alpha != b.alpha
+                    // …including its *height*, which was left out — so a
+                    // preview replaced by a shorter picture kept the bottom of
+                    // the old one, because the cells under it were never
+                    // marked for repainting.
+                    a.id != b.id
+                        || a.x != b.x
+                        || a.y != b.y
+                        || a.w != b.w
+                        || a.h != b.h
+                        || a.alpha != b.alpha
                 })
             {
                 let boxes: Vec<Draw> =
@@ -600,5 +773,108 @@ impl Backend for SoftBackend {
             let _ = buf.present();
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every character cian frames a pane with, plus the ones the bars are
+    /// made of. If one of these falls back to the font, it is drawn as a letter
+    /// — centred, short of the edges, and wandering by a pixel per row.
+    const DRAWN: &[char] = &[
+        // Plain and rounded borders — the two `resolve_border_type` can pick.
+        '─', '│', '┌', '┐', '└', '┘', '╭', '╮', '╰', '╯',
+        // Tees and crossings, for a frame with a divider in it.
+        '├', '┤', '┬', '┴', '┼',
+        // The bars: a solid thumb, a hairline track, a gutter, and the
+        // half-block the picture preview is made of.
+        '█', '▏', '▌', '▐', '▀', '▄', '░', '▒', '▓',
+    ];
+
+    #[test]
+    fn everything_cian_draws_a_frame_with_is_drawn_rather_than_typeset() {
+        for &c in DRAWN {
+            assert!(cell_art(c).is_some(), "{c:?} would fall back to the font");
+        }
+    }
+
+    #[test]
+    fn a_letter_is_still_a_letter() {
+        for c in ['a', 'Z', '0', '?', 'あ', '漢', '☂'] {
+            assert!(cell_art(c).is_none(), "{c:?} should be typeset");
+        }
+    }
+
+    /// A line has to reach both edges of its cell, or the next cell's line
+    /// starts after this one stopped and the border comes out dashed.
+    #[test]
+    fn a_line_reaches_the_edges_of_its_cell() {
+        let across = cell_art('─').unwrap();
+        assert!(across.iter().flatten().any(|p| p.l == 0.0), "reaches the left edge");
+        assert!(across.iter().flatten().any(|p| p.r == 1.0), "reaches the right edge");
+        let down = cell_art('│').unwrap();
+        assert!(down.iter().flatten().any(|p| p.t == 0.0), "reaches the top");
+        assert!(down.iter().flatten().any(|p| p.b == 1.0), "reaches the bottom");
+    }
+
+    /// …and a corner reaches exactly the two edges it turns between, so it
+    /// meets its neighbours and does not stick out into the ones it does not.
+    #[test]
+    fn a_corner_reaches_two_edges_and_no_others() {
+        // ╭ turns from the right edge down to the bottom.
+        let parts: Vec<Part> = cell_art('╭').unwrap().into_iter().flatten().collect();
+        assert!(parts.iter().any(|p| p.r == 1.0), "joins the line to its right");
+        assert!(parts.iter().any(|p| p.b == 1.0), "joins the line below it");
+        assert!(!parts.iter().any(|p| p.l == 0.0), "nothing to its left");
+        assert!(!parts.iter().any(|p| p.t == 0.0), "nothing above it");
+    }
+
+    #[test]
+    fn the_crossing_has_all_four_arms() {
+        assert_eq!(cell_art('┼').unwrap().iter().flatten().count(), 4);
+    }
+
+    #[test]
+    fn a_full_block_fills_its_cell_exactly() {
+        let parts: Vec<Part> = cell_art('█').unwrap().into_iter().flatten().collect();
+        assert_eq!(parts.len(), 1);
+        let p = parts[0];
+        assert_eq!((p.l, p.t, p.r, p.b, p.ink), (0.0, 0.0, 1.0, 1.0, 1.0));
+    }
+
+    #[test]
+    fn the_halves_and_eighths_are_the_fractions_they_are_named_after() {
+        let only = |c: char| cell_art(c).unwrap().into_iter().flatten().next().unwrap();
+        assert_eq!(only('▀').b, 0.5, "the top half stops halfway down");
+        assert_eq!(only('▄').t, 0.5, "the bottom half starts halfway down");
+        assert_eq!(only('▌').r, 0.5, "the left half stops halfway across");
+        assert_eq!(only('▏').r, 0.125, "one eighth");
+        assert_eq!(only('▄').b, 1.0, "and reaches the bottom");
+        // ▁ is one eighth up from the bottom, ▇ is seven.
+        assert!((only('▁').t - 0.875).abs() < 1e-6, "{}", only('▁').t);
+        assert!((only('▇').t - 0.125).abs() < 1e-6, "{}", only('▇').t);
+    }
+
+    #[test]
+    fn the_shades_are_the_whole_cell_at_less_than_full_ink() {
+        for (c, want) in [('░', 0.25), ('▒', 0.5), ('▓', 0.75)] {
+            let p = cell_art(c).unwrap().into_iter().flatten().next().unwrap();
+            assert_eq!((p.l, p.t, p.r, p.b), (0.0, 0.0, 1.0, 1.0), "{c:?} covers the cell");
+            assert_eq!(p.ink, want, "{c:?} is {want} ink");
+        }
+    }
+
+    /// The two line weights are different, and both are thin enough to be a
+    /// line rather than a bar.
+    #[test]
+    fn a_heavy_line_is_thicker_than_a_light_one() {
+        let width = |c: char| {
+            let p = cell_art(c).unwrap().into_iter().flatten().next().unwrap();
+            p.b - p.t
+        };
+        assert!(width('━') > width('─'), "heavier");
+        assert!(width('─') > 0.0 && width('━') < 0.5, "still a line");
     }
 }

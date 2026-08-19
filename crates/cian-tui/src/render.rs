@@ -1240,8 +1240,9 @@ fn draw_icon_grid(f: &mut Frame, area: Rect, app: &mut App) {
     // agree about where the tiles stop — the grid answers for every cell of
     // `grid_area`, and a bar drawn inside it would be a bar that cannot be
     // clicked.
-    let bar = Rect::new(chrome.x + chrome.width.saturating_sub(1), chrome.y, 1, chrome.height);
-    let inner = Rect { width: chrome.width.saturating_sub(1), ..chrome };
+    const BAR_W: u16 = 2;
+    let bar = Rect::new(chrome.x + chrome.width.saturating_sub(BAR_W), chrome.y, BAR_W, chrome.height);
+    let inner = Rect { width: chrome.width.saturating_sub(BAR_W), ..chrome };
 
     let cols = (inner.width / TILE_W).max(1) as usize;
     app.icon_cols = cols;
@@ -1340,17 +1341,21 @@ fn draw_icon_grid(f: &mut Frame, area: Rect, app: &mut App) {
             shown: per_page,
         });
         let max = total.saturating_sub(per_page);
-        f.render_stateful_widget(
-            Scrollbar::new(ScrollbarOrientation::VerticalRight)
-                .thumb_symbol("█")
-                .thumb_style(Style::default().fg(text_tone(th.accent, bg.unwrap_or(th.popup_bg))))
-                .track_symbol(Some("│"))
-                .track_style(Style::default().fg(th.border))
-                .begin_symbol(None)
-                .end_symbol(None),
-            bar,
-            &mut ScrollbarState::new(max).position(start.min(max)),
-        );
+        for i in 0..BAR_W {
+            f.render_stateful_widget(
+                Scrollbar::new(ScrollbarOrientation::VerticalRight)
+                    .thumb_symbol("█")
+                    .thumb_style(
+                        Style::default().fg(text_tone(th.accent, bg.unwrap_or(th.popup_bg))),
+                    )
+                    .track_symbol(Some("│"))
+                    .track_style(Style::default().fg(th.border))
+                    .begin_symbol(None)
+                    .end_symbol(None),
+                Rect::new(bar.x + i, bar.y, 1, bar.height),
+                &mut ScrollbarState::new(max).position(start.min(max)),
+            );
+        }
     }
 }
 
@@ -2537,7 +2542,15 @@ fn draw_list_scrollbar(
     if view_h == 0 || total <= view_h as usize {
         return;
     }
-    let track = Rect::new(area.x + area.width.saturating_sub(1), area.y + 2, 1, view_h);
+    // Two columns in the desktop views, one in the classic.
+    //
+    // The classic view's bar *is* the pane's border, and a two-cell border
+    // would be a different frame. The desktop views have no border there and
+    // are driven with the mouse, where a one-cell bar is a thing you aim at
+    // rather than a thing you grab — which is what "I can't see a scrollbar"
+    // turned out to mean once it was drawn solidly.
+    let thick: u16 = if finder { 2 } else { 1 };
+    let track = Rect::new(area.x + area.width.saturating_sub(thick), area.y + 2, thick, view_h);
     tracks.push(crate::ScrollTrack {
         rect: track,
         what: crate::ScrollWhat::Pane(pane_id),
@@ -2550,7 +2563,6 @@ fn draw_list_scrollbar(
     // the pane it reached the middle and no further.
     let max = total.saturating_sub(view_h as usize);
     let at = clamp_list_scroll(scroll, cursor, view_h as usize, total);
-    let mut state = ScrollbarState::new(max).position(at);
     // With a border, the bar sits *on* it, so the track has to be the border:
     // same glyph, same style. Drawing it in its own dimmer color made the right
     // edge look broken — bright where the thumb was, faded elsewhere, while the
@@ -2574,17 +2586,22 @@ fn draw_list_scrollbar(
         ),
         (true, false) => ("█", Style::default().fg(Color::Rgb(120, 120, 145)), "│", border),
     };
-    f.render_stateful_widget(
-        Scrollbar::new(ScrollbarOrientation::VerticalRight)
-            .thumb_symbol(thumb_symbol)
-            .thumb_style(thumb)
-            .track_symbol(Some(track_symbol))
-            .track_style(track_style)
-            .begin_symbol(None)
-            .end_symbol(None),
-        track,
-        &mut state,
-    );
+    // One widget per column: ratatui's scrollbar is one cell wide by
+    // definition, and two of them side by side are one bar you can hit.
+    for i in 0..thick {
+        let mut state = ScrollbarState::new(max).position(at);
+        f.render_stateful_widget(
+            Scrollbar::new(ScrollbarOrientation::VerticalRight)
+                .thumb_symbol(thumb_symbol)
+                .thumb_style(thumb)
+                .track_symbol(Some(track_symbol))
+                .track_style(track_style)
+                .begin_symbol(None)
+                .end_symbol(None),
+            Rect::new(track.x + i, track.y, 1, track.height),
+            &mut state,
+        );
+    }
 }
 
 /// How far back through the scrollback this pane is looking: a bar down its

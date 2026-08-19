@@ -13498,6 +13498,29 @@ mod the_desktop_views_show_where_they_are {
         assert!(painted(&mut app, 140, 40).contains('█'), "a thumb you can see");
     }
 
+    /// Two cells wide in the views driven with the mouse: a one-cell bar is
+    /// something to aim at rather than something to grab.
+    #[test]
+    fn the_desktop_bars_are_two_cells_wide() {
+        for icons in [false, true] {
+            let (_d, mut app) = desktop(icons);
+            let _ = painted(&mut app, 140, 40);
+            let bar = app.scroll_tracks.first().copied().expect("a track");
+            assert_eq!(bar.rect.width, 2, "icon_view={icons}");
+        }
+    }
+
+    /// …and the classic view's is still exactly its border.
+    #[test]
+    fn the_classic_bar_is_still_the_border_it_is_drawn_on() {
+        let names = plenty();
+        let refs: Vec<&str> = names.iter().map(|s| s.as_str()).collect();
+        let (_d, mut app) = app_with(&refs);
+        let _ = painted(&mut app, 140, 40);
+        let bar = app.scroll_tracks.first().copied().expect("a track");
+        assert_eq!(bar.rect.width, 1);
+    }
+
     #[test]
     fn the_grid_draws_one_too_and_leaves_room_for_it() {
         let (_d, mut app) = desktop(true);
