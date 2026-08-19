@@ -3227,6 +3227,18 @@ pub(crate) fn key_hints(app: &App) -> Vec<(&'static str, &'static str)> {
             v.push(("?", d("help", "ヘルプ")));
             v
         }
+        // A narrowed listing says how to widen it again, in the bar rather than
+        // in the manual: the state is easy to get into and used to be hard to
+        // notice you were in.
+        _ if app.active_pane().map(|p| !p.filter.is_empty()).unwrap_or(false) => vec![
+            ("⇦/Esc", d("clear filter", "絞込解除")),
+            ("Space", d("mark", "マーク")),
+            ("/", d("filter", "絞込")),
+            ("Enter", d("open", "開く")),
+            ("F3", d("view", "閲覧")),
+            ("M", d("menu", "メニュー")),
+            ("?", d("help", "ヘルプ")),
+        ],
         _ if app.active_pane().map(|p| p.is_flat()).unwrap_or(false) => vec![
             ("b/Esc", d("leave", "戻る")),
             ("Space", d("mark", "マーク")),

@@ -14614,3 +14614,87 @@ mod the_view_switcher {
         assert!(!app.icon_view, "still the detail view until the window says otherwise");
     }
 }
+
+/// With the listing narrowed, Backspace un-narrows it rather than walking off.
+mod backspace_undoes_the_filter_first {
+    use super::*;
+
+    /// A directory with a `sub/` to climb down from, and files to filter.
+    fn filtered() -> (tempfile::TempDir, App) {
+        let (d, mut app) = app_with(&["sample-a.txt", "sample-b.txt", "other.txt"]);
+        std::fs::create_dir(d.path().join("sub")).unwrap();
+        app.reload_both();
+        // `/sample` then Enter: the pane keeps the narrowing and the keys go
+        // back to normal, which is the state this is about.
+        app.handle_key(key('/')).unwrap();
+        for c in "sample".chars() {
+            app.handle_key(key(c)).unwrap();
+        }
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+        assert_eq!(app.mode, Mode::Normal, "Enter kept the filter and left filter mode");
+        let showing = &app.active_pane().unwrap().entries;
+        assert!(
+            showing.iter().all(|e| e.is_parent || e.name.contains("sample")),
+            "only the matches are left (and `..`, which is always a way out): {:?}",
+            showing.iter().map(|e| e.name.clone()).collect::<Vec<_>>(),
+        );
+        assert!(showing.iter().any(|e| e.name == "sample-a.txt"), "the matches are there");
+        let narrowed = showing.len();
+        let _ = narrowed;
+        (d, app)
+    }
+
+    #[test]
+    fn it_widens_the_listing_and_stays_put() {
+        let (d, mut app) = filtered();
+        let here = app.active_pane().unwrap().cwd.clone();
+        app.handle_key(code(KeyCode::Backspace)).unwrap();
+        assert_eq!(app.active_pane().unwrap().cwd, here, "the directory did not change");
+        assert!(app.active_pane().unwrap().filter.is_empty(), "the filter is gone");
+        assert!(
+            app.active_pane().unwrap().entries.iter().any(|e| e.name == "other.txt"),
+            "the whole listing is back",
+        );
+        drop(d);
+    }
+
+    #[test]
+    fn a_second_backspace_then_goes_up_as_it_always_did() {
+        let (d, mut app) = filtered();
+        let here = app.active_pane().unwrap().cwd.clone();
+        app.handle_key(code(KeyCode::Backspace)).unwrap();
+        app.handle_key(code(KeyCode::Backspace)).unwrap();
+        assert_ne!(app.active_pane().unwrap().cwd, here, "the second one climbed");
+        drop(d);
+    }
+
+    #[test]
+    fn with_no_filter_it_climbs_straight_away() {
+        let (d, mut app) = app_with(&["a.txt"]);
+        let here = app.active_pane().unwrap().cwd.clone();
+        app.handle_key(code(KeyCode::Backspace)).unwrap();
+        assert_ne!(app.active_pane().unwrap().cwd, here, "nothing to undo, so it went up");
+        drop(d);
+    }
+
+    /// The `parent` action means "up" and nothing else, and still does — it is
+    /// what the ↑ button presses and what `cian.set_keymap("-", "parent")`
+    /// binds. Only the key shaped like "back" learned to peel.
+    #[test]
+    fn the_parent_action_still_goes_straight_up() {
+        let (d, mut app) = filtered();
+        let here = app.active_pane().unwrap().cwd.clone();
+        app.execute_action(crate::Action::Parent).unwrap();
+        assert_ne!(app.active_pane().unwrap().cwd, here, "it climbed");
+        drop(d);
+    }
+
+    /// The typed filter is forgotten too, so `/` starts a fresh word rather
+    /// than resuming the one that was just abandoned.
+    #[test]
+    fn the_typed_word_is_forgotten_with_it() {
+        let (_d, mut app) = filtered();
+        app.handle_key(code(KeyCode::Backspace)).unwrap();
+        assert!(app.filter_buffer.is_empty(), "{:?}", app.filter_buffer);
+    }
+}

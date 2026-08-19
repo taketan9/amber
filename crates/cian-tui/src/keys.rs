@@ -2402,11 +2402,27 @@ impl App {
             (false, false, KeyCode::Char('k')) | (_, _, KeyCode::Up) => {
                 if let Some(p) = self.active_pane_mut() { p.move_cursor(-1); }
             }
-            // Parent: `-` or Backspace. The arrows move between panes instead,
-            // which is what a two-pane layout makes people reach for — using
-            // them for up/into a directory was reported as confusing.
+            // Parent: Backspace (and whatever init.lua binds to the `parent`
+            // action — the examples suggest `-`). The arrows move between panes
+            // instead, which is what a two-pane layout makes people reach for —
+            // using them for up/into a directory was reported as confusing.
             (_, _, KeyCode::Backspace) => {
-                if self.active_pane().map(|p| p.archive_view().is_some()).unwrap_or(false) {
+                // A narrowed listing is undone before the directory is left.
+                //
+                // `/sample` and Enter leaves the pane showing the handful of
+                // entries that matched, and Backspace there went *up a
+                // directory* — which is a long way from where the eye is, and
+                // takes the filter with it silently. So Backspace peels one
+                // layer at a time: the filter first, then a search listing,
+                // then the directory. The `parent` action — what `cian.set_keymap
+                // ("-", "parent")` binds, and what the ↑ button presses — still
+                // climbs in one go, for when that is what was meant.
+                if self.active_pane().map(|p| !p.filter.is_empty()).unwrap_or(false) {
+                    if let Some(p) = self.active_pane_mut() {
+                        p.clear_filter();
+                    }
+                    self.filter_buffer.clear();
+                } else if self.active_pane().map(|p| p.archive_view().is_some()).unwrap_or(false) {
                     self.archive_go_up();
                 } else if self.active_pane().map(|p| p.is_flat()).unwrap_or(false) {
                     // A search listing has no parent to climb to: "up" from a
