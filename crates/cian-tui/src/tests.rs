@@ -14658,3 +14658,59 @@ mod backspace_undoes_the_filter_first {
         assert!(app.filter_buffer.is_empty(), "{:?}", app.filter_buffer);
     }
 }
+
+/// A click lands on the row that was clicked, however far down the listing is.
+mod clicking_a_row_after_scrolling {
+    use super::*;
+
+    fn many(detail: bool) -> (tempfile::TempDir, App) {
+        let names: Vec<String> = (0..200).map(|i| format!("file{i:03}.txt")).collect();
+        let refs: Vec<&str> = names.iter().map(|s| s.as_str()).collect();
+        let (d, mut app) = app_with(&refs);
+        if detail {
+            app.skin = Skin::Finder;
+            app.native_icons = true;
+        }
+        (d, app)
+    }
+
+    /// Walk a long way down, then click a row near the middle of the screen.
+    fn scroll_then_click(app: &mut App) -> (String, String) {
+        let _ = render(app, 140, 40);
+        for _ in 0..120 {
+            app.handle_key(code(KeyCode::Down)).unwrap();
+        }
+        let _ = render(app, 140, 40);
+        let before = app.active_pane().unwrap().scroll;
+        assert!(before > 0, "the listing scrolled");
+        let rect = app.layout_rects.for_pane(app.focused);
+        // Four rows into the listing: past the border and the column header.
+        app.handle_mouse(MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: rect.x + 6,
+            row: rect.y + 4,
+            modifiers: KeyModifiers::NONE,
+        });
+        let p = app.active_pane().unwrap();
+        // The row two down from the top of the listing is the one that was
+        // clicked, whatever the listing has scrolled to.
+        let want = p.entries.get(p.scroll + 2).map(|e| e.name.clone()).unwrap_or_default();
+        (p.selected().map(|e| e.name.clone()).unwrap_or_default(), want)
+    }
+
+    #[test]
+    fn in_the_detail_view() {
+        let (_d, mut app) = many(true);
+        let (clicked, on_that_row) = scroll_then_click(&mut app);
+        assert_eq!(clicked, on_that_row, "the file that was under the pointer");
+        assert!(app.active_pane().unwrap().scroll > 0, "and the listing stayed where it was");
+    }
+
+    #[test]
+    fn and_in_the_classic_view() {
+        let (_d, mut app) = many(false);
+        let (clicked, on_that_row) = scroll_then_click(&mut app);
+        assert_eq!(clicked, on_that_row);
+        assert!(app.active_pane().unwrap().scroll > 0);
+    }
+}

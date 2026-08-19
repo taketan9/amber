@@ -122,15 +122,6 @@ fn draw_split(f: &mut Frame, main_area: Rect, app: &mut App, ov: AnimOverride) {
     // one measured — the same arrangement the editor panel uses. Doing it
     // inside the pane renderer would mean borrowing the pane mutably while
     // its own title is still borrowed from it.
-    for (id, tabs) in [(FocusedPane::Left, &mut app.left), (FocusedPane::Right, &mut app.right)] {
-        let h = match id {
-            FocusedPane::Left => panes_split[0].height,
-            _ => panes_split[1].height,
-        };
-        let list_h = h.saturating_sub(3) as usize;
-        let p = tabs.active_mut();
-        p.scroll = clamp_list_scroll(p.scroll, p.cursor, list_h, p.entries.len());
-    }
     let (fl_l, fl_r) = (app.flash_level(FocusedPane::Left), app.flash_level(FocusedPane::Right));
     let restore = push_pane_theme(app, 0);
     // Taken rather than borrowed: the panes are drawn with `&mut`, and a borrow
@@ -1303,15 +1294,18 @@ fn draw_icon_grid(f: &mut Frame, area: Rect, app: &mut App) {
         let used = Span::raw(&name).width();
         let left = (TILE_W as usize - used) / 2;
         let right = TILE_W as usize - used - left;
+        // The tile you are on wears the accent, the way the row does in the
+        // detail view and the way every desktop marks a selection; a *marked*
+        // tile keeps the theme's own tint, so the two states are told apart at
+        // a glance instead of by counting.
+        let tile_bg = if selected { th.accent } else { th.selected_bg };
         let mut style = Style::default().fg(text_tone(
             kind_for(e).color(),
-            if selected { th.selected_bg } else { bg.unwrap_or(th.popup_bg) },
+            if selected || marked { tile_bg } else { bg.unwrap_or(th.popup_bg) },
         ));
         if selected || marked {
-            style = style.bg(th.selected_bg).add_modifier(Modifier::BOLD);
-            // The colour that says "chosen" is one colour. A marked tile shown
-            // in a paler tint reads as a third state nobody asked about.
-            style = style.fg(text_tone(kind_for(e).color(), th.selected_bg));
+            style = style.bg(tile_bg).add_modifier(Modifier::BOLD);
+            style = style.fg(text_tone(kind_for(e).color(), tile_bg));
         }
         let plain = Style::default().bg(bg.unwrap_or(th.popup_bg));
         let label_rect = Rect::new(cx, cy + TILE_ICON_H, TILE_W, 1);
@@ -2034,6 +2028,13 @@ fn draw_file_pane(
     if tabs.active_ref().is_remote() {
         border_style = Style::default().fg(CRMAINE).add_modifier(Modifier::BOLD);
     }
+    // The window the listing will show, settled before anything reads it — see
+    // the note by `start` below.
+    {
+        let list_h = area.height.saturating_sub(3) as usize;
+        let p = tabs.active_mut();
+        p.scroll = clamp_list_scroll(p.scroll, p.cursor, list_h, p.entries.len());
+    }
     let max_title_w = area.width.saturating_sub(2);
     let mut offsets = Vec::new();
     let (title, active_title) = tabs_title(tabs, focused, focus_bg, max_title_w, &mut offsets);
@@ -2094,13 +2095,26 @@ fn draw_file_pane(
     // used to be derived from the cursor with a formula that put the cursor
     // on the *last* visible row, so clicking a file — or jumping to one —
     // scrolled it to the bottom of the pane.
-    let start = clamp_list_scroll(pane.scroll, pane.cursor, list_h, total);
+    // Written back, not just computed.
+    //
+    // The window the listing shows is `scroll`, and the mouse turns a click
+    // into a row with `scroll + offset`. The classic view kept the two in step
+    // by assigning it before drawing; the detail view did not, so its `scroll`
+    // stayed at zero however far the listing had been walked — and a click
+    // twenty rows down the *screen* selected the twentieth file in the
+    // *listing*, which then dragged the view back to the top. One owner, at
+    // the one place that knows both the pane and the height it is drawn in.
+    let start = pane.scroll;
     let end = start.saturating_add(list_h).min(total);
     let mark_style = Style::default().fg(th.mark_fg).add_modifier(Modifier::BOLD);
     // Per row, because the cursor's row has a tint of its own and a dim grey
     // that reads on the page can vanish on it.
+    // The size and date columns, dimmed against whatever they land on — the
+    // page, or the selection, which in the desktop views is the accent.
+    let sel_bg_for_meta = if finder { th.accent } else { th.selected_bg };
     let meta_on = |selected: bool| {
-        Style::default().fg(dim_text(if selected { th.selected_bg } else { bg.unwrap_or(th.popup_bg) }))
+        Style::default()
+            .fg(dim_text(if selected { sel_bg_for_meta } else { bg.unwrap_or(th.popup_bg) }))
     };
 
     // Where the listing starts, in absolute cells: one in for the border. The
@@ -2143,7 +2157,17 @@ fn draw_file_pane(
     // above — the same columns, colours, banding and selection — and does none
     // of the packaging. See [`put`] for the one that matters: a file listing is
     // overwhelmingly ASCII, and ASCII needs no segmenter.
-    let selected_style = Style::default().bg(th.selected_bg).add_modifier(Modifier::BOLD);
+    // What "this one" looks like.
+    //
+    // The theme's `selected_bg` is a tint — right for the classic view, where
+    // the cursor row sits among borders and the pane's own focus colour says
+    // which side is live. In the desktop views there is one pane and no
+    // border, and on a dark theme that tint is a shade away from the page: the
+    // selection was reported as hard to find on dark, and merely findable on
+    // light. So there the selection is the accent itself, filled, the way
+    // every desktop file manager marks the row you are on.
+    let sel_bg = if finder { th.accent } else { th.selected_bg };
+    let selected_style = Style::default().bg(sel_bg).add_modifier(Modifier::BOLD);
     let buf = f.buffer_mut();
     // The whole area first, so the rows below the last file carry the pane's
     // background rather than whatever was behind it.
@@ -2174,7 +2198,7 @@ fn draw_file_pane(
         // Fitted to the row it lands on: the same colour reads differently on
         // the page and on the selection, and a light theme's palette is close
         // enough to its own selection tint to disappear into it.
-        let kind_color = text_tone(kind.color(), if selected_row { th.selected_bg } else { bg.unwrap_or(th.popup_bg) });
+        let kind_color = text_tone(kind.color(), if selected_row { sel_bg } else { bg.unwrap_or(th.popup_bg) });
         let mut name_style = Style::default().fg(kind_color);
         if kind.bold() {
             name_style = name_style.add_modifier(Modifier::BOLD);
@@ -3426,6 +3450,22 @@ fn draw_status(f: &mut Frame, area: Rect, app: &App) {
             if mark_count > 0 { theme().mark_fg } else { muted_on(theme().status_bg) },
         ),
     ]);
+
+    // The whole name of the file under the cursor.
+    //
+    // Both desktop views cut a long name to the width they have — the detail
+    // view to its name column, the grid to its tile — and a cut name is not a
+    // name: `2026-04_...port.xlsx` could be any of six files. The bar has the
+    // width, and the cursor is the one row anyone needs it for.
+    if let Some(name) = app
+        .active_pane()
+        .and_then(|p| p.selected())
+        .map(|e| e.name.clone())
+        .filter(|n| n != "..")
+    {
+        spans.push(dim_sep.clone());
+        spans.push(chip(name, readable_on(theme().status_bg)));
+    }
 
     // A narrowed listing must never look like a complete one, so the active
     // filter stays visible after leaving filter mode.

@@ -540,25 +540,26 @@ impl SoftBackend {
                 if y >= self.px_h {
                     break;
                 }
-                // Nearest neighbour: an icon is drawn at about the size it
-                // arrived at, and the difference is not worth a filter written
-                // to run on every pixel of every frame.
-                let sy = (oy as f32 / dh * pic.h as f32) as u32;
+                // Bilinear, and it is not a luxury: the shell keeps ready-made
+                // icons at 32 pixels, the grid draws its tiles at a hundred, and
+                // nearest neighbour turns a 32-pixel icon into visible squares —
+                // "とてつもなく粗い", as reported. Four taps a pixel is nothing
+                // beside the decode that produced the picture.
+                let fy = (oy as f32 + 0.5) / dh * pic.h as f32 - 0.5;
                 for ox in 0..dw as u32 {
                     let x = x0 + ox;
                     if x >= self.px_w {
                         break;
                     }
-                    let sx = (ox as f32 / dw * pic.w as f32) as u32;
-                    let si = ((sy.min(pic.h - 1) * pic.w + sx.min(pic.w - 1)) * 4) as usize;
-                    let Some(px) = pic.rgba.get(si..si + 4) else { continue };
-                    let a = px[3] as f32 / 255.0 * d.alpha;
+                    let fx = (ox as f32 + 0.5) / dw * pic.w as f32 - 0.5;
+                    let Some((rgb, a)) = sample(pic, fx, fy) else { continue };
+                    let a = a * d.alpha;
                     if a <= 0.004 {
                         continue;
                     }
                     let at = (y * self.px_w + x) as usize;
                     let under = unpack(self.pixels[at]);
-                    self.pixels[at] = pack(mix((px[0], px[1], px[2]), under, a));
+                    self.pixels[at] = pack(mix(rgb, under, a));
                 }
             }
         }
@@ -579,6 +580,62 @@ impl SoftBackend {
 /// these are what is left.
 const FG: (u8, u8, u8) = (0xcd, 0xcd, 0xda);
 const BG: (u8, u8, u8) = (0x1a, 0x1b, 0x26);
+
+/// The colour of a picture at a fractional position, blended from the four
+/// texels around it.
+///
+/// Alpha is blended too, and the colour is weighted *by* alpha — otherwise the
+/// transparent border around an icon drags its (arbitrary) colour into the
+/// edge, and every icon comes out with a dark halo.
+fn sample(pic: &Picture, fx: f32, fy: f32) -> Option<((u8, u8, u8), f32)> {
+    if pic.w == 0 || pic.h == 0 {
+        return None;
+    }
+    let x0 = fx.floor();
+    let y0 = fy.floor();
+    let tx = fx - x0;
+    let ty = fy - y0;
+    let cx = |v: f32| (v.max(0.0) as u32).min(pic.w - 1);
+    let cy = |v: f32| (v.max(0.0) as u32).min(pic.h - 1);
+    let (x0, x1) = (cx(x0), cx(x0 + 1.0));
+    let (y0, y1) = (cy(y0), cy(y0 + 1.0));
+    let texel = |x: u32, y: u32| -> (f32, f32, f32, f32) {
+        let i = ((y * pic.w + x) * 4) as usize;
+        match pic.rgba.get(i..i + 4) {
+            Some(p) => (p[0] as f32, p[1] as f32, p[2] as f32, p[3] as f32 / 255.0),
+            None => (0.0, 0.0, 0.0, 0.0),
+        }
+    };
+    let (w00, w10, w01, w11) = (
+        (1.0 - tx) * (1.0 - ty),
+        tx * (1.0 - ty),
+        (1.0 - tx) * ty,
+        tx * ty,
+    );
+    let c = [
+        (texel(x0, y0), w00),
+        (texel(x1, y0), w10),
+        (texel(x0, y1), w01),
+        (texel(x1, y1), w11),
+    ];
+    let alpha: f32 = c.iter().map(|((_, _, _, a), w)| a * w).sum();
+    if alpha <= 0.0 {
+        return None;
+    }
+    // Premultiplied on the way in, divided back out on the way to a colour.
+    let mut rgb = [0.0f32; 3];
+    for ((r, g, b), w) in c.iter().map(|((r, g, b, a), w)| ((*r, *g, *b), a * w)) {
+        rgb[0] += r * w;
+        rgb[1] += g * w;
+        rgb[2] += b * w;
+    }
+    let out = (
+        (rgb[0] / alpha).round().clamp(0.0, 255.0) as u8,
+        (rgb[1] / alpha).round().clamp(0.0, 255.0) as u8,
+        (rgb[2] / alpha).round().clamp(0.0, 255.0) as u8,
+    );
+    Some((out, alpha.clamp(0.0, 1.0)))
+}
 
 fn pack((r, g, b): (u8, u8, u8)) -> u32 {
     ((r as u32) << 16) | ((g as u32) << 8) | b as u32
@@ -906,5 +963,67 @@ mod tests {
         };
         assert!(width('━') > width('─'), "heavier");
         assert!(width('─') > 0.0 && width('━') < 0.5, "still a line");
+    }
+}
+
+#[cfg(test)]
+mod picture_tests {
+    use super::*;
+
+    fn checker(w: u32, h: u32) -> Picture {
+        let mut rgba = Vec::with_capacity((w * h * 4) as usize);
+        for y in 0..h {
+            for x in 0..w {
+                let on = (x + y) % 2 == 0;
+                let v = if on { 255 } else { 0 };
+                rgba.extend_from_slice(&[v, v, v, 255]);
+            }
+        }
+        Picture { w, h, rgba }
+    }
+
+    #[test]
+    fn between_two_texels_is_between_two_colours() {
+        let pic = checker(2, 1);
+        // Dead centre of the pair: half of each, which nearest neighbour can
+        // never produce and which is the whole difference in a scaled-up icon.
+        let ((r, _, _), a) = sample(&pic, 0.5, 0.0).unwrap();
+        assert!((100..=155).contains(&r), "blended, not snapped: {r}");
+        assert_eq!(a, 1.0);
+    }
+
+    #[test]
+    fn on_a_texel_is_that_texel() {
+        let pic = checker(2, 1);
+        assert_eq!(sample(&pic, 0.0, 0.0).unwrap().0, (255, 255, 255));
+        assert_eq!(sample(&pic, 1.0, 0.0).unwrap().0, (0, 0, 0));
+    }
+
+    #[test]
+    fn outside_the_picture_clamps_rather_than_wraps() {
+        let pic = checker(2, 1);
+        assert_eq!(sample(&pic, -3.0, -3.0).unwrap().0, (255, 255, 255));
+        assert_eq!(sample(&pic, 9.0, 9.0).unwrap().0, (0, 0, 0));
+    }
+
+    /// A transparent border must not drag its colour into the edge — that is
+    /// where the dark halo round a scaled icon comes from.
+    #[test]
+    fn a_transparent_neighbour_does_not_tint_the_edge() {
+        let pic = Picture {
+            w: 2,
+            h: 1,
+            // A white pixel beside a fully transparent black one.
+            rgba: vec![255, 255, 255, 255, 0, 0, 0, 0],
+        };
+        let ((r, g, b), a) = sample(&pic, 0.5, 0.0).unwrap();
+        assert_eq!((r, g, b), (255, 255, 255), "the colour stays white");
+        assert!((a - 0.5).abs() < 0.01, "and it is the alpha that fades: {a}");
+    }
+
+    #[test]
+    fn a_wholly_transparent_spot_is_not_drawn_at_all() {
+        let pic = Picture { w: 1, h: 1, rgba: vec![9, 9, 9, 0] };
+        assert!(sample(&pic, 0.0, 0.0).is_none());
     }
 }
