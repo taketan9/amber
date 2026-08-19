@@ -54,6 +54,9 @@ pub struct Theme {
 /// Behavioural switches. `None` means "keep the built-in default".
 #[derive(Debug, Clone, Default)]
 pub struct Options {
+    /// Ceiling on transfer speed to and from a server: `"2M"`, `"500k"`,
+    /// `"1.5MB/s"`. Unset is as fast as the link allows.
+    pub transfer_limit: Option<String>,
     pub clipboard_on_copy: Option<bool>,
     /// After an SFTP upload/download, re-read the remote file and compare its
     /// checksum with the local one, warning on a mismatch. Off by default: it is
@@ -906,6 +909,15 @@ fn install_api(lua: &Lua, builder: &Rc<RefCell<Builder>>) -> mlua::Result<()> {
                         Err(_) => bm
                             .errors
                             .push("set_option: notify_min_secs expects a number".into()),
+                    },
+                    // A speed, written the way a speed is written: "2M",
+                    // "500k", "1.5MB/s". cian parses it; anything unreadable is
+                    // reported rather than silently ignored.
+                    "transfer_limit" | "speed_limit" => match String::from_lua(val, lua) {
+                        Ok(v) => bm.options.transfer_limit = Some(v),
+                        Err(_) => bm
+                            .errors
+                            .push("set_option: transfer_limit expects a string like \"2M\"".into()),
                     },
                     "lang" => match String::from_lua(val, lua) {
                         Ok(v) if v == "ja" || v == "en" => bm.options.lang = Some(v),

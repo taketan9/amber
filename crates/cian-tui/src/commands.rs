@@ -111,6 +111,44 @@ impl App {
             }
             "find" => self.start_find_prompt(),
             "menu" => self.open_menu_at_cursor(),
+            // `:limit 2M` — how fast a transfer to or from a server may go.
+            // Bare, it says what the ceiling is; `off` takes it away.
+            "limit" | "speed" | "ratelimit" => match rest {
+                "" => {
+                    let ja = self.lang == Lang::Ja;
+                    self.message = Some(match (self.transfer_limit, ja) {
+                        (Some(b), true) => {
+                            format!("転送速度の上限: {} — :limit off で解除", rate_text(b))
+                        }
+                        (Some(b), false) => {
+                            format!("transfer limit: {} — :limit off to remove", rate_text(b))
+                        }
+                        (None, true) => "転送速度の上限なし — :limit 2M で設定".to_string(),
+                        (None, false) => "no transfer limit — :limit 2M to set one".to_string(),
+                    });
+                }
+                arg => match parse_rate(arg) {
+                    Some(b) => {
+                        self.transfer_limit = Some(b);
+                        self.message = Some(if self.lang == Lang::Ja {
+                            format!("転送速度の上限: {}", rate_text(b))
+                        } else {
+                            format!("transfer limit: {}", rate_text(b))
+                        });
+                    }
+                    // `off`, `none`, `0` — and anything unreadable, which is
+                    // told apart from them so a typo is not silently "off".
+                    None if matches!(arg.trim().to_lowercase().as_str(), "off" | "none" | "0") => {
+                        self.transfer_limit = None;
+                        self.message = Some(
+                            tr(self.lang, "transfer limit removed", "転送速度の上限を解除").into(),
+                        );
+                    }
+                    None => {
+                        self.message = Some(format!("{arg}? — :limit 2M | 500k | off"))
+                    }
+                },
+            },
             "sync" | "broadcast" => {
                 self.focus(FocusedPane::Shell);
                 let on = self.shell.toggle_broadcast();

@@ -92,6 +92,11 @@
 -- big copy and walk away. Default: true. Windows Terminal and iTerm2 support
 -- it; other terminals ignore it.
 -- cian.set_option("notify", false)
+
+-- A ceiling on transfers to and from a server (unset = as fast as the link
+-- allows). Written like a speed: "2M", "500k", "1.5MB/s". `:limit 2M` and
+-- `:limit off` change it for the session.
+-- cian.set_option("transfer_limit", "2M")
 -- How many seconds a job must run before the finish notification fires.
 -- Default: 5, so quick operations stay silent.
 -- cian.set_option("notify_min_secs", 10)

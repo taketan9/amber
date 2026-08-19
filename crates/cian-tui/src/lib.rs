@@ -2588,6 +2588,12 @@ pub struct App {
     zoom_return: Option<Rect>,
     /// Show the contextual key-hint bar.
     show_key_hints: bool,
+    /// How fast a transfer to or from a server may go, in bytes a second.
+    ///
+    /// `None` is "as fast as the link allows", which is the default and the
+    /// wrong answer on somebody else's network in the middle of the day. Set
+    /// with `cian.set_option("transfer_limit", "2M")` or `:limit 2M`.
+    transfer_limit: Option<u64>,
     /// The active theme's preset name (e.g. "dracula"), or "custom" when the
     /// config tweaked colors past any named preset. Drives the `:theme` picker's
     /// initial highlight and the status readout.
@@ -2855,6 +2861,7 @@ impl App {
             ),
             show_key_hints: config.options.key_hints.unwrap_or(true),
             // `theme::install` has already set the active theme from the config.
+            transfer_limit: config.options.transfer_limit.as_deref().and_then(parse_rate),
             theme_name: theme_name_of(&theme()).unwrap_or("custom").to_string(),
             lang: Lang::from_opt(config.options.lang.as_deref()),
             menu_lang: match config.options.menu_lang.as_deref() {
@@ -4802,6 +4809,42 @@ pub enum StartupMacro {
     File(PathBuf),
     /// `--macro-name <name>`: run a macro of this name from the loaded config.
     Named(String),
+}
+
+/// A transfer ceiling as a number of bytes a second: `2M`, `500k`, `1.5MB/s`.
+///
+/// Written the way anyone writes a speed, and read the way everyone means it —
+/// `M` is a million bytes here, not 1,048,576, because a line rented in
+/// megabits is sold in powers of ten and a limit that is 5% out is a limit that
+/// argues with the invoice.
+pub(crate) fn parse_rate(text: &str) -> Option<u64> {
+    let t = text.trim().to_lowercase();
+    let t = t.strip_suffix("/s").unwrap_or(&t).trim().to_string();
+    let t = t.strip_suffix("bps").or_else(|| t.strip_suffix('b')).unwrap_or(&t).trim().to_string();
+    if t.is_empty() || t == "off" || t == "none" || t == "0" {
+        return None;
+    }
+    let (num, scale) = match t.chars().last()? {
+        'k' => (&t[..t.len() - 1], 1_000f64),
+        'm' => (&t[..t.len() - 1], 1_000_000f64),
+        'g' => (&t[..t.len() - 1], 1_000_000_000f64),
+        _ => (t.as_str(), 1f64),
+    };
+    let n: f64 = num.trim().parse().ok()?;
+    if n <= 0.0 {
+        return None;
+    }
+    Some((n * scale) as u64)
+}
+
+/// The same number written the way it was asked for.
+pub(crate) fn rate_text(bps: u64) -> String {
+    match bps {
+        b if b >= 1_000_000_000 => format!("{:.1}G/s", b as f64 / 1e9),
+        b if b >= 1_000_000 => format!("{:.1}M/s", b as f64 / 1e6),
+        b if b >= 1_000 => format!("{:.0}k/s", b as f64 / 1e3),
+        b => format!("{b}B/s"),
+    }
 }
 
 /// Which kind of front end this is being built for.

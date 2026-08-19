@@ -699,6 +699,7 @@ impl App {
         dst: cian_scp::Target,
         dst_dir: String,
     ) {
+        let limit = self.transfer_limit;
         self.start_op("copying", move |ctl| {
             let mut report = OpReport::default();
             let cancel = ctl.cancel;
@@ -723,7 +724,7 @@ impl App {
                             current: cur.clone(),
                         });
                     };
-                    let mut sctl = cian_scp::Ctl { cancel, on_progress: &mut fwd };
+                    let mut sctl = cian_scp::Ctl { cancel, on_progress: &mut fwd, limit_bps: limit };
                     cian_scp::download(&src, remote, &tmp, &mut sctl)
                 };
                 if let Err(e) = dl {
@@ -744,7 +745,7 @@ impl App {
                             current: cur.clone(),
                         });
                     };
-                    let mut sctl = cian_scp::Ctl { cancel, on_progress: &mut fwd };
+                    let mut sctl = cian_scp::Ctl { cancel, on_progress: &mut fwd, limit_bps: limit };
                     cian_scp::upload(&dst, &tmp, &dst_path, None, &mut sctl)
                 };
                 match up {
@@ -777,6 +778,7 @@ impl App {
             FocusedPane::Right
         });
         let RemoteMovePlan { files, src_target, dst_target, dst_dir } = plan;
+        let limit = self.transfer_limit;
         self.start_op("moving", move |ctl| {
             let mut report = OpReport::default();
             let cancel = ctl.cancel;
@@ -797,7 +799,7 @@ impl App {
                             let mut fwd = |done: u64, tot: u64| {
                                 (ctl.on_progress)(&cian_core::progress::Progress { bytes_done: done, bytes_total: tot, files_done: i, files_total: total, current: format!("↓ {fname}") });
                             };
-                            let mut sctl = cian_scp::Ctl { cancel, on_progress: &mut fwd };
+                            let mut sctl = cian_scp::Ctl { cancel, on_progress: &mut fwd, limit_bps: limit };
                             cian_scp::download(s, src, &tmp, &mut sctl)
                         };
                         let r = dl.map_err(|e| format!("download: {e}")).and_then(|_| {
@@ -805,7 +807,7 @@ impl App {
                             let mut fwd = |done: u64, tot: u64| {
                                 (ctl.on_progress)(&cian_core::progress::Progress { bytes_done: done, bytes_total: tot, files_done: i, files_total: total, current: format!("↑ {fname}") });
                             };
-                            let mut sctl = cian_scp::Ctl { cancel, on_progress: &mut fwd };
+                            let mut sctl = cian_scp::Ctl { cancel, on_progress: &mut fwd, limit_bps: limit };
                             cian_scp::upload(d, &tmp, &dst_path, None, &mut sctl).map(|_| ()).map_err(|e| format!("upload: {e}"))
                         });
                         let _ = std::fs::remove_file(&tmp);
@@ -817,7 +819,7 @@ impl App {
                         let mut fwd = |done: u64, tot: u64| {
                             (ctl.on_progress)(&cian_core::progress::Progress { bytes_done: done, bytes_total: tot, files_done: i, files_total: total, current: format!("↓ {fname}") });
                         };
-                        let mut sctl = cian_scp::Ctl { cancel, on_progress: &mut fwd };
+                        let mut sctl = cian_scp::Ctl { cancel, on_progress: &mut fwd, limit_bps: limit };
                         cian_scp::download(s, src, &dst, &mut sctl).map(|_| ()).map_err(|e| e.to_string())
                     }
                     (None, Some(d)) => {
@@ -826,7 +828,7 @@ impl App {
                         let mut fwd = |done: u64, tot: u64| {
                             (ctl.on_progress)(&cian_core::progress::Progress { bytes_done: done, bytes_total: tot, files_done: i, files_total: total, current: format!("↑ {fname}") });
                         };
-                        let mut sctl = cian_scp::Ctl { cancel, on_progress: &mut fwd };
+                        let mut sctl = cian_scp::Ctl { cancel, on_progress: &mut fwd, limit_bps: limit };
                         cian_scp::upload(d, std::path::Path::new(src), &dst_path, None, &mut sctl).map(|_| ()).map_err(|e| e.to_string())
                     }
                     (None, None) => Err("both ends local".into()),
@@ -874,10 +876,11 @@ impl App {
         self.remote_edits.insert(temp.clone(), (target.clone(), remote_path.clone()));
         let (tx, rx) = std::sync::mpsc::channel();
         let temp_worker = temp.clone();
+        let limit = self.transfer_limit;
         std::thread::spawn(move || {
             let cancel = std::sync::atomic::AtomicBool::new(false);
             let mut prog = |_: u64, _: u64| {};
-            let mut ctl = cian_scp::Ctl { cancel: &cancel, on_progress: &mut prog };
+            let mut ctl = cian_scp::Ctl { cancel: &cancel, on_progress: &mut prog, limit_bps: limit };
             let r = cian_scp::download(&target, &remote_path, &temp_worker, &mut ctl)
                 .map(|_| ())
                 .map_err(|e| e.to_string());
@@ -923,10 +926,11 @@ impl App {
         }
         let local = local.to_path_buf();
         let (tx, rx) = std::sync::mpsc::channel();
+        let limit = self.transfer_limit;
         std::thread::spawn(move || {
             let cancel = std::sync::atomic::AtomicBool::new(false);
             let mut prog = |_: u64, _: u64| {};
-            let mut sctl = cian_scp::Ctl { cancel: &cancel, on_progress: &mut prog };
+            let mut sctl = cian_scp::Ctl { cancel: &cancel, on_progress: &mut prog, limit_bps: limit };
             let r = cian_scp::upload(&target, &local, &remote, None, &mut sctl)
                 .map(|_| "uploaded your edit to the server")
                 .map_err(|e| e.to_string());
@@ -1026,6 +1030,7 @@ impl App {
         let verify = self.verify_runtime.or(self.config.options.verify_transfers).unwrap_or(false);
         self.popup = Popup::None;
         self.message = Some(format!("uploading {} …", label));
+        let limit = self.transfer_limit;
         self.start_op("uploading", move |ctl| {
             let mut report = OpReport::default();
             let cancel = ctl.cancel;
@@ -1047,7 +1052,7 @@ impl App {
                     });
                 };
                 let mode = modes.get(i).copied().flatten();
-                let mut sctl = cian_scp::Ctl { cancel, on_progress: &mut fwd };
+                let mut sctl = cian_scp::Ctl { cancel, on_progress: &mut fwd, limit_bps: limit };
                 match cian_scp::upload(&target, local, &dest, mode, &mut sctl) {
                     Ok(via) => {
                         report.ok += 1;
@@ -1137,6 +1142,7 @@ impl App {
         } else {
             format!("downloading {} file(s) from {} …", files.len(), label)
         });
+        let limit = self.transfer_limit;
         self.start_op("downloading", move |ctl| {
             let mut report = OpReport::default();
             let cancel = ctl.cancel;
@@ -1157,7 +1163,7 @@ impl App {
                         current: cur.clone(),
                     });
                 };
-                let mut sctl = cian_scp::Ctl { cancel, on_progress: &mut fwd };
+                let mut sctl = cian_scp::Ctl { cancel, on_progress: &mut fwd, limit_bps: limit };
                 match cian_scp::download(&target, remote, &dest, &mut sctl) {
                     Ok(via) => {
                         // The file is down; a chmod failure is secondary, so still

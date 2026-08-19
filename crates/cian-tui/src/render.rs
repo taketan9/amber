@@ -3552,7 +3552,16 @@ fn draw_status(f: &mut Frame, area: Rect, app: &App) {
                 Color::Rgb(235, 200, 100),
             ));
         } else {
-            spans.push(chip(format!("↻ {}{}{}", job.label, pct, queued), theme().accent));
+            // …and the ceiling, when there is one: a transfer that is slow on
+            // purpose should say so, or it looks like a transfer that is slow.
+            let capped = match app.transfer_limit {
+                Some(b) => format!("  ≤{}", crate::rate_text(b)),
+                None => String::new(),
+            };
+            spans.push(chip(
+                format!("↻ {}{}{}{}", job.label, pct, queued, capped),
+                theme().accent,
+            ));
         }
     }
 

@@ -91,6 +91,10 @@
 -- デスクトップ通知（OSC 9）を出す。大きなコピーを走らせて席を外したときのため。
 -- 既定: true。対応端末は Windows Terminal と iTerm2（非対応端末は無視します）。
 -- cian.set_option("notify", false)
+
+-- サーバとの転送速度の上限（未設定なら無制限）。"2M" "500k" "1.5MB/s" のように書きます。
+-- セッション中は `:limit 2M` / `:limit off` でも変えられます。
+-- cian.set_option("transfer_limit", "2M")
 -- 通知が出るまでに処理が最低何秒かかっている必要があるか。既定: 5（短い処理は
 -- 鳴りません）。
 -- cian.set_option("notify_min_secs", 10)

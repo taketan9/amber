@@ -14810,3 +14810,100 @@ mod the_server_browser_scrolls {
         assert!(!showing(&mut short).contains('█'), "and none when everything fits");
     }
 }
+
+/// A transfer can be told how much of the network to take.
+mod the_transfer_limit {
+    use super::*;
+
+    #[test]
+    fn a_speed_is_read_the_way_it_is_written() {
+        use crate::parse_rate;
+        assert_eq!(parse_rate("2M"), Some(2_000_000));
+        assert_eq!(parse_rate("2m"), Some(2_000_000));
+        assert_eq!(parse_rate("500k"), Some(500_000));
+        assert_eq!(parse_rate("1.5M"), Some(1_500_000));
+        assert_eq!(parse_rate("1.5MB/s"), Some(1_500_000));
+        assert_eq!(parse_rate(" 800 "), Some(800));
+        assert_eq!(parse_rate("1G"), Some(1_000_000_000));
+    }
+
+    /// "No limit" has to be sayable, and unsayable by accident: a typo must
+    /// not read as "off".
+    #[test]
+    fn off_is_off_and_nonsense_is_nothing() {
+        use crate::parse_rate;
+        for off in ["off", "none", "0", "", "  "] {
+            assert_eq!(parse_rate(off), None, "{off:?}");
+        }
+        for junk in ["fast", "-2M", "M", "2X"] {
+            assert_eq!(parse_rate(junk), None, "{junk:?}");
+        }
+    }
+
+    #[test]
+    fn and_written_back_the_same_way() {
+        use crate::rate_text;
+        assert_eq!(rate_text(2_000_000), "2.0M/s");
+        assert_eq!(rate_text(500_000), "500k/s");
+        assert_eq!(rate_text(800), "800B/s");
+    }
+
+    #[test]
+    fn the_command_sets_it_shows_it_and_takes_it_away() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        assert_eq!(app.transfer_limit, None, "no ceiling by default");
+
+        app.command_buffer = "limit 2M".into();
+        app.run_command();
+        assert_eq!(app.transfer_limit, Some(2_000_000));
+        assert!(app.message.as_deref().unwrap_or_default().contains("2.0M/s"));
+
+        app.command_buffer = "limit".into();
+        app.run_command();
+        assert!(app.message.as_deref().unwrap_or_default().contains("2.0M/s"), "says what it is");
+
+        app.command_buffer = "limit off".into();
+        app.run_command();
+        assert_eq!(app.transfer_limit, None);
+    }
+
+    /// A typo leaves the ceiling where it was rather than removing it.
+    #[test]
+    fn a_typo_changes_nothing() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        app.command_buffer = "limit 2M".into();
+        app.run_command();
+        app.command_buffer = "limit 2X".into();
+        app.run_command();
+        assert_eq!(app.transfer_limit, Some(2_000_000), "still capped");
+        assert!(app.message.as_deref().unwrap_or_default().contains("2X?"));
+    }
+
+    /// The pacer holds a transfer to the rate it was given: a megabyte at
+    /// half a megabyte a second owes about two seconds.
+    #[test]
+    fn the_pacer_asks_for_the_time_the_bytes_should_have_taken() {
+        let mut p = cian_scp::Pacer::new(Some(500_000));
+        let mut last = None;
+        for _ in 0..16 {
+            last = p.wait_after(64 * 1024);
+        }
+        // Each answer is "how far ahead of the rate are you *now*", so the one
+        // that matters is the last: a megabyte at 500 kB/s owes two seconds,
+        // less the little that has really elapsed.
+        let last = last.expect("still ahead of the rate");
+        assert!(
+            last > std::time::Duration::from_millis(1900)
+                && last < std::time::Duration::from_millis(2100),
+            "asked to wait {last:?}",
+        );
+    }
+
+    #[test]
+    fn and_asks_for_nothing_when_there_is_no_ceiling() {
+        let mut p = cian_scp::Pacer::new(None);
+        assert!(p.wait_after(10_000_000).is_none());
+        let mut zero = cian_scp::Pacer::new(Some(0));
+        assert!(zero.wait_after(10_000_000).is_none(), "0 means no ceiling, not no bytes");
+    }
+}

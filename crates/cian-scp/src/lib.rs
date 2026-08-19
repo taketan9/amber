@@ -42,6 +42,41 @@ pub struct Ctl<'a> {
     pub cancel: &'a AtomicBool,
     /// Called with `(bytes_done, bytes_total)` as the transfer advances.
     pub on_progress: &'a mut dyn FnMut(u64, u64),
+    /// Ceiling on the transfer rate, in bytes a second. `None` is as fast as
+    /// the link will go.
+    ///
+    /// A copy to a server is a copy over somebody else's network, and a file
+    /// manager that takes all of it is a file manager you cannot run during
+    /// the day. See [`Pacer`].
+    pub limit_bps: Option<u64>,
+}
+
+/// Holds a transfer to a rate by making it wait.
+///
+/// No token bucket and no averaging window: the honest question is "by now,
+/// how long *should* this many bytes have taken?", and the answer is the only
+/// thing to sleep for. Bursts are allowed to the size of one chunk, which is
+/// what makes the first write immediate and the rate exact over any longer
+/// stretch.
+pub struct Pacer {
+    limit: Option<u64>,
+    started: std::time::Instant,
+    sent: u64,
+}
+
+impl Pacer {
+    pub fn new(limit_bps: Option<u64>) -> Self {
+        Self { limit: limit_bps.filter(|b| *b > 0), started: std::time::Instant::now(), sent: 0 }
+    }
+
+    /// How long to wait after sending `n` more bytes. `None` means carry on.
+    pub fn wait_after(&mut self, n: u64) -> Option<std::time::Duration> {
+        let limit = self.limit?;
+        self.sent += n;
+        let owed = std::time::Duration::from_secs_f64(self.sent as f64 / limit as f64);
+        let spent = self.started.elapsed();
+        (owed > spent).then(|| owed - spent)
+    }
 }
 
 /// Which wire protocol carried a transfer, so the UI can say so.
@@ -349,6 +384,7 @@ async fn sftp_upload(
 
     let mut buf = vec![0u8; CHUNK];
     let mut done = 0u64;
+    let mut pacer = Pacer::new(ctl.limit_bps);
     (ctl.on_progress)(0, total);
     loop {
         if ctl.cancel.load(Ordering::Relaxed) {
@@ -361,6 +397,10 @@ async fn sftp_upload(
         dst.write_all(&buf[..n]).await.context("write remote")?;
         done += n as u64;
         (ctl.on_progress)(done, total);
+        // Held to the rate, if there is one — see [`Pacer`].
+        if let Some(wait) = pacer.wait_after(n as u64) {
+            tokio::time::sleep(wait).await;
+        }
     }
     dst.shutdown().await.context("finish remote file")?;
     // Apply the requested permission bits (e.g. 0o777) to the uploaded file.
@@ -389,6 +429,7 @@ async fn sftp_download(
 
     let mut buf = vec![0u8; CHUNK];
     let mut done = 0u64;
+    let mut pacer = Pacer::new(ctl.limit_bps);
     (ctl.on_progress)(0, total);
     loop {
         if ctl.cancel.load(Ordering::Relaxed) {
@@ -403,6 +444,10 @@ async fn sftp_download(
         dst.write_all(&buf[..n]).await.context("write local")?;
         done += n as u64;
         (ctl.on_progress)(done, total);
+        // Held to the rate, if there is one — see [`Pacer`].
+        if let Some(wait) = pacer.wait_after(n as u64) {
+            tokio::time::sleep(wait).await;
+        }
     }
     dst.flush().await.context("finish local file")?;
     let _ = sftp.close().await;
@@ -501,6 +546,7 @@ where
 
     let mut buf = vec![0u8; CHUNK];
     let mut done = 0u64;
+    let mut pacer = Pacer::new(ctl.limit_bps);
     (ctl.on_progress)(0, total);
     loop {
         if ctl.cancel.load(Ordering::Relaxed) {
@@ -513,6 +559,10 @@ where
         stream.write_all(&buf[..n]).await.context("send file bytes")?;
         done += n as u64;
         (ctl.on_progress)(done, total);
+        // Held to the rate, if there is one — see [`Pacer`].
+        if let Some(wait) = pacer.wait_after(n as u64) {
+            tokio::time::sleep(wait).await;
+        }
     }
     stream.write_all(&[0u8]).await.context("finish file")?; // end-of-file ack
     stream.flush().await.ok();
@@ -580,6 +630,7 @@ where
 
     let mut buf = vec![0u8; CHUNK];
     let mut done = 0u64;
+    let mut pacer = Pacer::new(ctl.limit_bps);
     (ctl.on_progress)(0, total);
     while done < total {
         if ctl.cancel.load(Ordering::Relaxed) {
@@ -593,6 +644,10 @@ where
         dst.write_all(&buf[..n]).await.context("write local")?;
         done += n as u64;
         (ctl.on_progress)(done, total);
+        // Held to the rate, if there is one — see [`Pacer`].
+        if let Some(wait) = pacer.wait_after(n as u64) {
+            tokio::time::sleep(wait).await;
+        }
     }
     read_ack(stream).await?; // trailing status after the payload
     stream.write_all(&[0u8]).await.ok(); // final ack
@@ -691,7 +746,7 @@ mod tests {
 
             let cancel = no_cancel();
             let mut prog = |_a: u64, _b: u64| {};
-            let mut ctl = Ctl { cancel: &cancel, on_progress: &mut prog };
+            let mut ctl = Ctl { cancel: &cancel, on_progress: &mut prog, limit_bps: None };
             let mut src = std::io::Cursor::new(payload.clone());
             scp_send(&mut ours, "file.txt", payload.len() as u64, Some(0o777), &mut src, &mut ctl)
                 .await
@@ -728,7 +783,7 @@ mod tests {
 
             let cancel = no_cancel();
             let mut prog = |_a: u64, _b: u64| {};
-            let mut ctl = Ctl { cancel: &cancel, on_progress: &mut prog };
+            let mut ctl = Ctl { cancel: &cancel, on_progress: &mut prog, limit_bps: None };
             let mut dst: Vec<u8> = Vec::new();
             scp_recv(&mut ours, &mut dst, &mut ctl).await.unwrap();
 
@@ -751,7 +806,7 @@ mod tests {
             });
             let cancel = no_cancel();
             let mut prog = |_a: u64, _b: u64| {};
-            let mut ctl = Ctl { cancel: &cancel, on_progress: &mut prog };
+            let mut ctl = Ctl { cancel: &cancel, on_progress: &mut prog, limit_bps: None };
             let mut dst: Vec<u8> = Vec::new();
             let err = scp_recv(&mut ours, &mut dst, &mut ctl).await.unwrap_err();
             assert!(err.to_string().contains("No such file"), "got: {err}");
