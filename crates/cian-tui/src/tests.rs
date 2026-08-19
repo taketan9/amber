@@ -14286,6 +14286,12 @@ mod every_popup_behaves {
 
     #[test]
     fn none_of_them_leaves_icons_on_top() {
+        // The theme picker restores the theme it was opened on when it is
+        // dismissed, and the theme is global: dismissing one here while the
+        // contrast tests are painting under another is how a frame ends up
+        // half in one theme and half in the other. Same lock they take.
+        let _g = THEME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let was = crate::theme::theme();
         for icons in [false, true] {
             let (d, mut app) = desktop(icons);
             let dir = app.active_pane().unwrap().cwd.clone();
@@ -14314,10 +14320,17 @@ mod every_popup_behaves {
             }
             drop(d);
         }
+        crate::theme::set_theme(was);
     }
 
     #[test]
     fn every_one_of_them_says_where_it_is() {
+        // The theme picker restores the theme it was opened on when it is
+        // dismissed, and the theme is global: dismissing one here while the
+        // contrast tests are painting under another is how a frame ends up
+        // half in one theme and half in the other. Same lock they take.
+        let _g = THEME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let was = crate::theme::theme();
         let (_d, mut app) = desktop(false);
         let dir = app.active_pane().unwrap().cwd.clone();
         for (name, popup) in all(&dir) {
@@ -14328,10 +14341,17 @@ mod every_popup_behaves {
                 "{name} drew without saying what it covers, so a click cannot be outside it",
             );
         }
+        crate::theme::set_theme(was);
     }
 
     #[test]
     fn a_click_off_any_of_them_closes_it() {
+        // The theme picker restores the theme it was opened on when it is
+        // dismissed, and the theme is global: dismissing one here while the
+        // contrast tests are painting under another is how a frame ends up
+        // half in one theme and half in the other. Same lock they take.
+        let _g = THEME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let was = crate::theme::theme();
         for icons in [false, true] {
             let (_d, mut app) = desktop(icons);
             let dir = app.active_pane().unwrap().cwd.clone();
@@ -14352,6 +14372,7 @@ mod every_popup_behaves {
                 );
             }
         }
+        crate::theme::set_theme(was);
     }
 
     #[test]
