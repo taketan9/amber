@@ -305,7 +305,19 @@ impl App {
         // viewer closes now, and a document that cannot be written is exactly
         // as much in need of being closed as one that can. The commands that
         // *write* check for themselves.
-        if !ctrl && !alt && key.code == KeyCode::Char(':')
+        //
+        // But not while the editor is taking text. After `i`, `a`, `o`, `c`,
+        // `s` or `R` the keyboard belongs to the file, and a colon is a colon —
+        // a YAML key, a Rust path, a time of day. vi opens its command line
+        // from normal mode only, and so does this: Esc first, then `:`. The hex
+        // editor is exempt because it types hex digits rather than text, so a
+        // colon there could only ever have been the command line.
+        let typing_text = matches!(
+            &self.popup,
+            Popup::Viewer { editing: true, view, .. }
+                if view.kind != cian_core::viewer::ViewKind::Binary
+        );
+        if !ctrl && !alt && !typing_text && key.code == KeyCode::Char(':')
             && matches!(self.popup, Popup::Viewer { .. })
         {
             if let Popup::Viewer { sub_input, .. } = &mut self.popup {

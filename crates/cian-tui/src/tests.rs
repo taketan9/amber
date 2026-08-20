@@ -385,6 +385,39 @@
         assert!(out.contains("secret contents"), "opt-in reads it: {out}");
     }
 
+    /// In the editor, `:` is a colon. It opened the command line instead —
+    /// the binding sat ahead of the editor's own key handling, so a YAML key
+    /// or a `foo::bar` could not be typed at all.
+    #[test]
+    fn colon_types_a_colon_while_editing() {
+        let (_d, mut app) = viewer_on("one\n");
+        // From READ mode it still opens the command line.
+        app.handle_key(key(':')).unwrap();
+        assert!(matches!(&app.popup, Popup::Viewer { sub_input: Some(_), .. }));
+        app.handle_key(code(KeyCode::Esc)).unwrap();
+
+        app.handle_key(key('i')).unwrap();
+        assert!(matches!(app.popup, Popup::Viewer { editing: true, .. }), "in the editor");
+        for c in "a:b".chars() {
+            app.handle_key(key(c)).unwrap();
+        }
+        assert!(
+            matches!(&app.popup, Popup::Viewer { sub_input: None, .. }),
+            "no command line opened",
+        );
+        assert!(matches!(app.popup, Popup::Viewer { editing: true, .. }), "still editing");
+        let body = match &app.popup {
+            Popup::Viewer { view, .. } => view.lines.join("\n"),
+            _ => panic!("no viewer"),
+        };
+        assert!(body.starts_with("a:bone"), "the colon was typed: {body:?}");
+
+        // Esc, and the command line is back.
+        app.handle_key(code(KeyCode::Esc)).unwrap();
+        app.handle_key(key(':')).unwrap();
+        assert!(matches!(&app.popup, Popup::Viewer { sub_input: Some(_), .. }));
+    }
+
     /// `:` opens replace in the viewer; a plain command replaces everything
     /// at once, and `u` takes the whole thing back as one step.
     #[test]
