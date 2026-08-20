@@ -385,6 +385,200 @@
         assert!(out.contains("secret contents"), "opt-in reads it: {out}");
     }
 
+    /// Notepad style: a file opens already taking text, and every letter is a
+    /// letter — `j` types a j, `:` types a colon. Vim style is untouched.
+    #[test]
+    fn notepad_style_types_where_vim_style_navigates() {
+        // Vim, the default: `j` moves down and `:` opens the command line.
+        let (_d, mut app) = viewer_on("alpha\nbravo\n");
+        assert_eq!(app.edit_style, EditStyle::Vim, "vim is the default");
+        assert!(matches!(app.popup, Popup::Viewer { editing: false, .. }), "opens reading");
+        app.handle_key(key('j')).unwrap();
+        assert!(matches!(app.popup, Popup::Viewer { line: 1, .. }), "j moved down");
+        assert_eq!(viewer_lines(&app), vec!["alpha".to_string(), "bravo".into()], "and typed nothing");
+
+        // Notepad: the same keys are text.
+        let (_d, mut app) = viewer_on("alpha\nbravo\n");
+        app.edit_style = EditStyle::Notepad;
+        app.sync_edit_style();
+        assert!(matches!(app.popup, Popup::Viewer { editing: true, .. }), "opens taking text");
+        for c in "j:x".chars() {
+            app.handle_key(key(c)).unwrap();
+        }
+        assert_eq!(
+            viewer_lines(&app).first().map(String::as_str),
+            Some("j:xalpha"),
+            "every one of them was a character: {:?}",
+            viewer_lines(&app),
+        );
+        assert!(
+            matches!(&app.popup, Popup::Viewer { sub_input: None, .. }),
+            "and no command line opened",
+        );
+    }
+
+    /// Shift and an arrow select; the same arrow without it lets go. Typing
+    /// over the selection replaces it — and leaves the clipboard alone, which
+    /// is what separates replacing from cutting.
+    #[test]
+    fn notepad_style_selects_with_shift_and_types_over_the_selection() {
+        let (_d, mut app) = viewer_on("alpha bravo\n");
+        app.edit_style = EditStyle::Notepad;
+        app.sync_edit_style();
+        app.yank = Some("something copied earlier".into());
+
+        let shift_right = || KeyEvent::new(KeyCode::Right, KeyModifiers::SHIFT);
+        for _ in 0..5 {
+            app.handle_key(shift_right()).unwrap();
+        }
+        assert!(
+            matches!(app.popup, Popup::Viewer { visual: Some(ViewVisual::Char), .. }),
+            "five Shift+Rights selected: {:?}",
+            app.popup,
+        );
+
+        // Typing replaces what was selected.
+        app.handle_key(key('X')).unwrap();
+        assert_eq!(
+            viewer_lines(&app).first().map(String::as_str),
+            Some("X bravo"),
+            "the selection was replaced: {:?}",
+            viewer_lines(&app),
+        );
+        assert!(matches!(app.popup, Popup::Viewer { visual: None, .. }), "and the selection is over");
+        assert_eq!(
+            app.yank.as_deref(),
+            Some("something copied earlier"),
+            "typing over a selection is not a cut — the clipboard is untouched",
+        );
+
+        // A plain arrow lets go of a selection.
+        app.handle_key(shift_right()).unwrap();
+        assert!(matches!(app.popup, Popup::Viewer { visual: Some(_), .. }), "selected again");
+        app.handle_key(code(KeyCode::Left)).unwrap();
+        assert!(matches!(app.popup, Popup::Viewer { visual: None, .. }), "and let go");
+    }
+
+    /// Copy, cut and the highlight agree with the delete about where a notepad
+    /// selection stops.
+    ///
+    /// vi's caret sits on a character and takes it; a notepad caret sits
+    /// between two and stops short. Every reader of a selection had vi's
+    /// reckoning built in, so Ctrl+C took one character more than was lit up
+    /// and Ctrl+X removed one more than it had copied.
+    #[test]
+    fn a_notepad_selection_ends_where_it_looks_like_it_ends() {
+        let sel5 = |app: &mut App| {
+            for _ in 0..5 {
+                app.handle_key(KeyEvent::new(KeyCode::Right, KeyModifiers::SHIFT)).unwrap();
+            }
+        };
+
+        // Copy takes exactly the five characters selected.
+        let (_d, mut app) = viewer_on("alpha bravo\n");
+        app.edit_style = EditStyle::Notepad;
+        app.sync_edit_style();
+        sel5(&mut app);
+        app.handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)).unwrap();
+        assert_eq!(app.yank.as_deref(), Some("alpha"), "not \"alpha \"");
+
+        // Cut removes exactly what it copied.
+        let (_d, mut app) = viewer_on("alpha bravo\n");
+        app.edit_style = EditStyle::Notepad;
+        app.sync_edit_style();
+        sel5(&mut app);
+        app.handle_key(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::CONTROL)).unwrap();
+        assert_eq!(app.yank.as_deref(), Some("alpha"), "took five");
+        assert_eq!(
+            viewer_lines(&app).first().map(String::as_str),
+            Some(" bravo"),
+            "and left the space: {:?}",
+            viewer_lines(&app),
+        );
+
+        // Vim style is untouched: its selection includes the character under
+        // the cursor, which is what `v` has always meant.
+        let (_d, mut app) = viewer_on("alpha bravo\n");
+        app.handle_key(key('v')).unwrap();
+        for _ in 0..4 {
+            app.handle_key(key('l')).unwrap();
+        }
+        app.handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)).unwrap();
+        assert_eq!(app.yank.as_deref(), Some("alpha"), "vim's v then 4l is still five");
+    }
+
+    /// Esc has no mode to leave here, so it drops the selection; with nothing
+    /// selected it reaches the way out — which still refuses to discard unsaved
+    /// work, as `:q` and the ✕ do.
+    #[test]
+    fn notepad_style_esc_clears_then_closes_but_not_over_unsaved_work() {
+        let (_d, mut app) = viewer_on("alpha\n");
+        app.edit_style = EditStyle::Notepad;
+        app.sync_edit_style();
+
+        app.handle_key(KeyEvent::new(KeyCode::Right, KeyModifiers::SHIFT)).unwrap();
+        assert!(matches!(app.popup, Popup::Viewer { visual: Some(_), .. }));
+        app.handle_key(code(KeyCode::Esc)).unwrap();
+        assert!(matches!(app.popup, Popup::Viewer { visual: None, .. }), "Esc dropped the selection");
+        assert!(matches!(app.popup, Popup::Viewer { .. }), "and kept the file open");
+
+        // Dirty: Esc says why rather than closing.
+        app.handle_key(key('z')).unwrap();
+        assert!(matches!(app.popup, Popup::Viewer { dirty: true, .. }), "edited");
+        app.handle_key(code(KeyCode::Esc)).unwrap();
+        assert!(matches!(app.popup, Popup::Viewer { .. }), "the file is still open");
+        let said = app.message.clone().unwrap_or_default();
+        assert!(said.contains("Ctrl+S"), "and it named the key that saves: {said:?}");
+
+        // Clean: Esc closes.
+        app.handle_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL)).unwrap();
+        assert!(matches!(app.popup, Popup::Viewer { dirty: false, .. }), "saved");
+        app.handle_key(code(KeyCode::Esc)).unwrap();
+        assert!(!matches!(app.popup, Popup::Viewer { .. }), "and Esc closed it");
+    }
+
+    /// Ctrl and a sideways arrow steps a word, the motion the shared editor
+    /// does not otherwise have.
+    #[test]
+    fn notepad_style_steps_by_word_with_ctrl() {
+        let (_d, mut app) = viewer_on("alpha bravo charlie\n");
+        app.edit_style = EditStyle::Notepad;
+        app.sync_edit_style();
+        let ctrl_right = || KeyEvent::new(KeyCode::Right, KeyModifiers::CONTROL);
+        app.handle_key(ctrl_right()).unwrap();
+        assert!(matches!(app.popup, Popup::Viewer { col: 5, .. }), "to the end of alpha: {:?}", app.popup);
+        app.handle_key(ctrl_right()).unwrap();
+        assert!(matches!(app.popup, Popup::Viewer { col: 11, .. }), "and of bravo: {:?}", app.popup);
+        app.handle_key(KeyEvent::new(KeyCode::Left, KeyModifiers::CONTROL)).unwrap();
+        assert!(matches!(app.popup, Popup::Viewer { col: 6, .. }), "back to its start: {:?}", app.popup);
+    }
+
+    /// The switch is in the toggles menu, it flips a file already open, and the
+    /// badge says which grammar is on.
+    #[test]
+    fn the_toggles_menu_switches_the_editor_grammar() {
+        let (_d, mut app) = viewer_on("alpha\n");
+        assert!(matches!(app.popup, Popup::Viewer { editing: false, .. }), "vim opens reading");
+        let row = app
+            .toggle_rows()
+            .into_iter()
+            .position(|(id, ..)| id == crate::toggles::ToggleId::EditStyle)
+            .expect("the switch is in the menu");
+
+        // Flipping it reaches the file that is already open.
+        app.popup = Popup::Toggles { cursor: row };
+        app.toggles_apply();
+        assert_eq!(app.edit_style, EditStyle::Notepad);
+        app.restore_viewer();
+        app.popup = Popup::None;
+        let (_d2, mut app2) = viewer_on("alpha\n");
+        app2.edit_style = EditStyle::Notepad;
+        app2.sync_edit_style();
+        assert!(matches!(app2.popup, Popup::Viewer { editing: true, .. }), "notepad takes text");
+        let screen = render(&mut app2, 100, 30).join("\n");
+        assert!(screen.contains("NOTEPAD"), "the badge names the grammar:\n{screen}");
+    }
+
     /// A file open beside the listing is not thrown away by a question about
     /// the window.
     ///

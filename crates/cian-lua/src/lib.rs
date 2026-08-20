@@ -77,6 +77,14 @@ pub struct Options {
     pub view: Option<String>,
     /// Show the contextual key-hint bar above the status line.
     pub key_hints: Option<bool>,
+    /// Which grammar the built-in editor answers to: `"vim"` or `"notepad"`.
+    ///
+    /// Defaults to vim — cian's editor is vi-shaped and so, usually, is the
+    /// person who installed it. `"notepad"` is for handing the same binary to
+    /// someone who has never used vi: arrows move, Shift and an arrow select,
+    /// and every letter is a letter. `T` flips it live either way; this is only
+    /// what a machine starts with.
+    pub edit_style: Option<String>,
     /// Border corners: "rounded", "plain", or unset for per-terminal defaults.
     pub borders: Option<String>,
     /// Start with dotfiles visible. Defaults to true.
@@ -845,6 +853,19 @@ fn install_api(lua: &Lua, builder: &Rc<RefCell<Builder>>) -> mlua::Result<()> {
                         Err(_) => bm
                             .errors
                             .push("set_option: key_hints expects a boolean".into()),
+                    },
+                    // Not `editor`, which is above and means something else
+                    // entirely — the *external* one `E` shells out to.
+                    "edit_style" => match String::from_lua(val, lua) {
+                        Ok(v) if matches!(v.as_str(), "vim" | "notepad") => {
+                            bm.options.edit_style = Some(v)
+                        }
+                        Ok(v) => bm.errors.push(format!(
+                            "set_option: edit_style expects \"vim\" or \"notepad\" (got {v:?})"
+                        )),
+                        Err(_) => bm
+                            .errors
+                            .push("set_option: edit_style expects a string".into()),
                     },
                     "view" => match String::from_lua(val, lua) {
                         Ok(v) if matches!(v.as_str(), "classic" | "details" | "icons") => {

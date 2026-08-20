@@ -1065,7 +1065,10 @@ impl App {
                     replacing: false,
                     replace: None,
                     redo: Vec::new(),
-                }
+                };
+                // Notepad has no mode to be out of: an editable file opens
+                // already taking text. Vim opens where vi opens.
+                self.sync_edit_style();
             }
             Err(e) => self.message = Some(format!("cannot view: {}", e)),
         }
@@ -1135,6 +1138,7 @@ impl App {
                     replace: None,
                     redo: Vec::new(),
                 };
+                self.sync_edit_style();
             }
             Err(e) => self.message = Some(format!("cannot read document: {}", e)),
         }

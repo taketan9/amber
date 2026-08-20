@@ -21,6 +21,8 @@ pub(crate) enum ToggleId {
     ReadCloud,
     /// Interface language (English ↔ Japanese).
     Lang,
+    /// Which grammar the built-in editor answers to: vim ↔ notepad.
+    EditStyle,
 }
 
 impl App {
@@ -66,6 +68,21 @@ impl App {
                 tr(self.lang, "Language", "言語").into(),
                 if ja { "日本語".into() } else { "English".into() },
                 ja,
+            ),
+            // Named by what it *is*, not by on/off: neither of the two is the
+            // absence of the other, and "Editor: off" would say nothing. The
+            // accent goes to vim because that is the one this switch is a
+            // departure from.
+            (
+                ToggleId::EditStyle,
+                tr(self.lang, "Editor keys", "エディタのキー操作").into(),
+                match self.edit_style {
+                    crate::EditStyle::Vim => tr(self.lang, "vim", "vim").to_string(),
+                    crate::EditStyle::Notepad => {
+                        tr(self.lang, "notepad", "メモ帳ふう").to_string()
+                    }
+                },
+                self.edit_style == crate::EditStyle::Vim,
             ),
         ]
     }
@@ -124,6 +141,32 @@ impl App {
                 if !self.menu_lang_pinned {
                     self.menu_lang = self.lang;
                 }
+            }
+            ToggleId::EditStyle => {
+                self.edit_style = match self.edit_style {
+                    crate::EditStyle::Vim => crate::EditStyle::Notepad,
+                    crate::EditStyle::Notepad => crate::EditStyle::Vim,
+                };
+                // A file already open changes grammar under the cursor, which
+                // is the point of flipping this while one is: the switch is
+                // reached for *because* the editor is not behaving the way the
+                // hands expect. Notepad is always typing, so a panel that was
+                // sitting in normal mode starts taking text.
+                self.sync_edit_style();
+                self.message = Some(match self.edit_style {
+                    crate::EditStyle::Vim => tr(
+                        self.lang,
+                        "editor: vim keys — i to type, Esc to stop",
+                        "エディタ: vim キー操作 — i で入力、Esc で抜ける",
+                    )
+                    .into(),
+                    crate::EditStyle::Notepad => tr(
+                        self.lang,
+                        "editor: notepad keys — just type; Shift+arrows select",
+                        "エディタ: メモ帳ふう — そのまま入力、Shift+矢印で選択",
+                    )
+                    .into(),
+                });
             }
         }
     }

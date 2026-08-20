@@ -24,6 +24,7 @@ impl App {
         if self.ai.is_some() && self.ai_ready() {
             items.push(MenuItem::ViewerSummary);
         }
+        items.push(MenuItem::ViewerSave);
         items.push(MenuItem::ViewerEdit);
         items.push(MenuItem::ViewerEncoding);
         items.push(MenuItem::ViewerBlame);
@@ -32,6 +33,8 @@ impl App {
         // the folder it is in. This used to be Shift+Enter's whole job.
         items.push(MenuItem::RevealInPane);
         items.push(MenuItem::ThemePick);
+        // Last, and on its own: it is the one item here that loses work.
+        items.push(MenuItem::ViewerCloseDiscard);
         // The viewer steps aside rather than closing: the question is about
         // the file, and the file may have unsaved edits in it.
         self.viewer_return = Some(Box::new(std::mem::replace(&mut self.popup, Popup::None)));
@@ -548,6 +551,17 @@ impl App {
             MenuItem::ViewerEdit => {
                 self.restore_viewer();
                 self.edit_viewer_file_externally();
+            }
+            MenuItem::ViewerSave => {
+                self.restore_viewer();
+                self.save_viewer_file();
+            }
+            MenuItem::ViewerCloseDiscard => {
+                // Put it back before closing it: `close_viewer_file` works on
+                // the panel in `popup`, and while the menu is up the panel
+                // is not there.
+                self.restore_viewer();
+                self.close_viewer_file();
             }
             MenuItem::RemotePane => self.start_scp(ScpDir::BrowsePane),
             MenuItem::DiskUsage => self.start_du_here(),

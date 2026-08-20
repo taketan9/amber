@@ -88,6 +88,257 @@ impl App {
         }
     }
 
+    /// Remove what a notepad-style selection covers, leaving the caret where
+    /// the selection began.
+    ///
+    /// Written out rather than handed to vi's `d`, because the two grammars do
+    /// not mean the same thing by a selection. vi's caret sits *on* a
+    /// character and its visual range includes it; a notepad caret sits
+    /// *between* two characters and the range stops short of the one it is in
+    /// front of. Five Shift+Rights over "alpha bravo" select five characters
+    /// here and six there, so borrowing `d` ate the space as well.
+    ///
+    /// It does not yank, which is the other difference: someone who copies a
+    /// paragraph, then selects a word and types over it, still expects the
+    /// paragraph when they paste. Replacing is not cutting.
+    fn delete_viewer_selection(&mut self) {
+        let Popup::Viewer { anchor, line, col, .. } = &self.popup else { return };
+        // Whichever way round it was dragged, work on it forwards.
+        let (a, b) = ((anchor.0, anchor.1), (*line, *col));
+        let (start, end) = if a <= b { (a, b) } else { (b, a) };
+        if start == end {
+            return;
+        }
+        if let Popup::Viewer { view, undo, redo, line, col, goal, dirty, hl, visual, editing, editable, .. } =
+            &mut self.popup
+        {
+            push_viewer_undo(undo, redo, &view.lines, *line, *col);
+            let lines = &mut view.lines;
+            let last = lines.len().saturating_sub(1);
+            let (sl, sc) = (start.0.min(last), start.1);
+            let (el, ec) = (end.0.min(last), end.1);
+            if sl == el {
+                let chs: Vec<char> = lines[sl].chars().collect();
+                let sc = sc.min(chs.len());
+                let ec = ec.min(chs.len());
+                lines[sl] = chs[..sc].iter().chain(chs[ec..].iter()).collect();
+            } else {
+                let head: String = lines[sl].chars().take(sc).collect();
+                let tail: String = lines[el].chars().skip(ec).collect();
+                lines[sl] = head + &tail;
+                lines.drain(sl + 1..=el);
+            }
+            if lines.is_empty() {
+                lines.push(String::new());
+            }
+            (*line, *col, *goal) = (sl, sc, sc);
+            *dirty = true;
+            hl.clear();
+            *visual = None;
+            // Straight back to taking text — there is no other state here.
+            *editing = *editable;
+        }
+    }
+
+    /// Close the panel, or say why it will not.
+    ///
+    /// The same refusal `:q` and the ✕ give. Written once so the third way out
+    /// cannot drift from the other two — which is how the manual and the menu
+    /// came to throw away a dirty file while those two refused to.
+    pub(crate) fn close_viewer_or_say_why(&mut self) -> Result<()> {
+        if matches!(self.popup, Popup::Viewer { dirty: true, .. }) {
+            self.message = Some(if self.notepad_keys() {
+                // `:w` and `:q!` are vim style's answers, and notepad style has
+                // no command line to type them at. Name what it does have.
+                tr(
+                    self.lang,
+                    "unsaved changes — Ctrl+S to save, or the menu to close without saving",
+                    "未保存の変更があります — Ctrl+S で保存、破棄はメニューから",
+                )
+                .into()
+            } else {
+                tr(
+                    self.lang,
+                    "unsaved changes — :w to save, :q! to discard",
+                    "未保存の変更があります — :w で保存、:q! で破棄",
+                )
+                .into()
+            });
+        } else {
+            self.close_viewer_file();
+        }
+        Ok(())
+    }
+
+    /// The keys notepad style adds to the editor: selection with Shift, word
+    /// steps with Ctrl, and a selection that the next keystroke replaces.
+    ///
+    /// Returns whether the key was dealt with. Everything it declines falls
+    /// through to the shared editor below, which is where typing, Enter,
+    /// Backspace and the plain arrows already live — those mean the same thing
+    /// in both grammars and are not duplicated here.
+    fn notepad_editor_key(&mut self, key: KeyEvent) -> Result<bool> {
+        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        let shift = key.modifiers.contains(KeyModifiers::SHIFT);
+
+        // Ctrl+W closes, as it does in a browser tab and in most editors. The
+        // panel otherwise has no keyboard way out in this style: Esc reaches
+        // one, but only after clearing a selection.
+        if ctrl && matches!(key.code, KeyCode::Char('w') | KeyCode::Char('W')) {
+            return self.close_viewer_or_say_why().map(|_| true);
+        }
+        // Ctrl+F is find, the name it has outside vi. `/` is a character here.
+        if ctrl && matches!(key.code, KeyCode::Char('f') | KeyCode::Char('F')) {
+            if let Popup::Viewer { find_input, .. } = &mut self.popup {
+                *find_input = Some(String::new());
+            }
+            return Ok(true);
+        }
+
+        // A keystroke that produces text replaces what is selected, which is
+        // what every editor outside vi does and what makes select-then-type
+        // work at all. Done before the key is handled, so the shared editor
+        // below then acts on a buffer with the selection already gone.
+        let types_over = matches!(
+            key.code,
+            KeyCode::Char(_) | KeyCode::Enter | KeyCode::Tab | KeyCode::Backspace | KeyCode::Delete
+        ) && !ctrl;
+        if types_over && matches!(self.popup, Popup::Viewer { visual: Some(_), .. }) {
+            self.delete_viewer_selection();
+            // Backspace and Delete have now done their whole job: what they
+            // were asked to remove is gone. Letting them through as well would
+            // eat a second character, the one that moved under the caret.
+            if matches!(key.code, KeyCode::Backspace | KeyCode::Delete) {
+                return Ok(true);
+            }
+        }
+
+        // Shift and a motion select; the same motion without it moves. The
+        // anchor is planted on the first Shift+key of a run and kept until a
+        // plain motion drops the selection.
+        let motion = matches!(
+            key.code,
+            KeyCode::Left
+                | KeyCode::Right
+                | KeyCode::Up
+                | KeyCode::Down
+                | KeyCode::Home
+                | KeyCode::End
+                | KeyCode::PageUp
+                | KeyCode::PageDown
+        );
+        if !motion {
+            return Ok(false);
+        }
+        if shift {
+            if matches!(self.popup, Popup::Viewer { visual: None, .. }) {
+                if let Popup::Viewer { visual, anchor, line, col, .. } = &mut self.popup {
+                    *anchor = (*line, *col);
+                    *visual = Some(ViewVisual::Char);
+                }
+            }
+        } else if let Popup::Viewer { visual, .. } = &mut self.popup {
+            // Moving without Shift lets go, as it does everywhere else.
+            *visual = None;
+        }
+        // Ctrl and a sideways arrow steps a word, which is the one motion the
+        // shared editor below does not have. Everything else it does.
+        if ctrl && matches!(key.code, KeyCode::Left | KeyCode::Right) {
+            let forward = key.code == KeyCode::Right;
+            self.notepad_word_step(forward);
+            return Ok(true);
+        }
+        Ok(false)
+    }
+
+    /// Move the caret one word left or right, the way Ctrl+arrow does outside
+    /// vi: to the far side of the run of word characters next to the caret,
+    /// skipping the whitespace in between, stopping at the ends of the line.
+    fn notepad_word_step(&mut self, forward: bool) {
+        let body_h = (self.viewer_rect.height as usize).max(1).saturating_sub(1).max(1);
+        if let Popup::Viewer { view, line, col, goal, scroll, .. } = &mut self.popup {
+            let chars: Vec<char> = view.lines.get(*line).map(|l| l.chars().collect()).unwrap_or_default();
+            let word = |c: char| c.is_alphanumeric() || c == '_';
+            if forward {
+                let mut i = *col;
+                while i < chars.len() && !word(chars[i]) {
+                    i += 1;
+                }
+                while i < chars.len() && word(chars[i]) {
+                    i += 1;
+                }
+                if i == *col && *line + 1 < view.lines.len() {
+                    // Already at the end: over the line break, as Ctrl+Right
+                    // does rather than stopping dead.
+                    *line += 1;
+                    *col = 0;
+                } else {
+                    *col = i;
+                }
+            } else {
+                let mut i = *col;
+                while i > 0 && !word(chars[i - 1]) {
+                    i -= 1;
+                }
+                while i > 0 && word(chars[i - 1]) {
+                    i -= 1;
+                }
+                if i == *col && *line > 0 {
+                    *line -= 1;
+                    *col = view.lines[*line].chars().count();
+                } else {
+                    *col = i;
+                }
+            }
+            *goal = *col;
+            clamp_scroll(*line, scroll, body_h);
+        }
+    }
+
+    /// Bring an open panel into line with the current [`EditStyle`].
+    ///
+    /// Notepad has no mode to be out of: an editable file is always taking
+    /// text, which is the whole of what "not modal" means here. Vim starts
+    /// where vi starts — reading, waiting for `i`.
+    ///
+    /// Called when a file opens and when the switch is flipped, because
+    /// flipping it while a file is open is exactly when people reach for it:
+    /// the editor is not behaving the way their hands expect, and the fix has
+    /// to apply to the file in front of them rather than to the next one.
+    ///
+    /// The hex editor answers to neither grammar — it types hex digits into
+    /// fixed offsets — so it is left alone.
+    pub(crate) fn sync_edit_style(&mut self) {
+        let notepad = self.edit_style == crate::EditStyle::Notepad;
+        if let Popup::Viewer { editing, editable, replacing, view, .. } = &mut self.popup {
+            if view.kind == cian_core::viewer::ViewKind::Binary {
+                return;
+            }
+            if notepad {
+                // A file that cannot be written stays being read: there is
+                // nothing to type into it whatever the grammar.
+                *editing = *editable;
+            } else {
+                *editing = false;
+                *replacing = false;
+            }
+        }
+    }
+
+    /// Whether the editor is answering to notepad keys right now.
+    ///
+    /// The panel has to be what is open for the question to mean anything —
+    /// the style is a property of the person, the behaviour is a property of
+    /// the person *and* a file being in front of them.
+    pub(crate) fn notepad_keys(&self) -> bool {
+        self.edit_style == crate::EditStyle::Notepad
+            && matches!(
+                &self.popup,
+                Popup::Viewer { view, .. }
+                    if view.kind != cian_core::viewer::ViewKind::Binary
+            )
+    }
+
     /// Whether one of the panel's prompts is taking text: the `/` search, the
     /// `:` command line, the text for a rectangular edit, the replace bar, or
     /// the confirm-each-one walk.
@@ -2499,12 +2750,33 @@ impl App {
             self.save_viewer_file();
             return Ok(());
         }
+        // Notepad has no mode to leave, so Esc means the thing it means in
+        // every other editor: drop the selection. With nothing selected it
+        // falls through to the panel's own way out, which still refuses to
+        // discard unsaved work.
+        if key.code == KeyCode::Esc && self.notepad_keys() {
+            let had = matches!(self.popup, Popup::Viewer { visual: Some(_), .. });
+            if had {
+                if let Popup::Viewer { visual, .. } = &mut self.popup {
+                    *visual = None;
+                }
+                return Ok(());
+            }
+            return self.close_viewer_or_say_why();
+        }
         if key.code == KeyCode::Esc {
             if let Popup::Viewer { editing, replacing, .. } = &mut self.popup {
                 *editing = false;
                 *replacing = false;
             }
             self.message = Some(tr(self.lang, "left edit mode", "編集モード終了").into());
+            return Ok(());
+        }
+        // Everything below this line is notepad's: selection with Shift, word
+        // steps with Ctrl, and a selection that a keystroke replaces. In vim
+        // these keys belong to normal mode, which is reached by leaving the
+        // editor rather than by holding a modifier.
+        if self.notepad_keys() && self.notepad_editor_key(key)? {
             return Ok(());
         }
         let overwrite = matches!(self.popup, Popup::Viewer { replacing: true, .. });
@@ -2741,7 +3013,7 @@ impl App {
     }
 
     /// Write the edited buffer back to disk in the file's own encoding.
-    fn save_viewer_file(&mut self) {
+    pub(crate) fn save_viewer_file(&mut self) {
         let (path, bytes) = if let Popup::Viewer { path, view, .. } = &self.popup {
             if view.kind == cian_core::viewer::ViewKind::Binary {
                 // Hex edits write the raw bytes back — after keeping a `.bak`
@@ -2942,6 +3214,16 @@ impl App {
             if let Popup::Viewer { visual, .. } = &mut self.popup {
                 *visual = held;
             }
+            // Notepad's char-wise selection is half-open, and `d` is not — so
+            // the cut takes its own exclusive delete, the same one that runs
+            // when a keystroke replaces a selection. Otherwise Ctrl+X removed
+            // one character more than Ctrl+C had just copied.
+            if self.notepad_keys()
+                && matches!(self.popup, Popup::Viewer { visual: Some(ViewVisual::Char), .. })
+            {
+                self.delete_viewer_selection();
+                return;
+            }
             // `d` over the selection: that delete knows about line-, char- and
             // block-wise selections, and about the undo step each of them owes.
             //
@@ -2967,6 +3249,7 @@ impl App {
     }
 
     pub(crate) fn copy_viewer_selection(&mut self) {
+        let notepad = self.notepad_keys();
         let text = if let Popup::Viewer { view, line, col, visual, anchor, .. } = &self.popup {
             let lines = &view.lines;
             let n = lines.len();
@@ -2988,7 +3271,14 @@ impl App {
                         // Order the two endpoints, then take an inclusive
                         // char-wise span across the lines between them.
                         let (s, e) = order_pos((anchor.0, anchor.1), (*line, *col));
-                        viewer_charwise(lines, s, e)
+                        // …except that notepad's far end is one *past* the
+                        // last selected character, where vi's is the last one
+                        // itself. Stepped back so a copy takes exactly what
+                        // was highlighted. See `delete_viewer_selection`.
+                        match if notepad { back_one_char(lines, s, e) } else { Some(e) } {
+                            Some(e) => viewer_charwise(lines, s, e),
+                            None => String::new(),
+                        }
                     }
                     // Through the block itself, so a copy takes exactly what
                     // the highlight showed and `d` would have cut — this used
@@ -4109,12 +4399,23 @@ impl App {
             replace: None,
             redo: Vec::new(),
         };
+        self.sync_edit_style();
         self.full_clear = true;
         self.message = Some(
             tr(
                 self.lang,
-                "empty file — i to type, :w <name> to save it somewhere",
-                "空のファイル — i で入力、:w <名前> で保存",
+                // A scratch file in notepad style is already taking text, so
+                // the half of this about `i` would be a lie there.
+                if self.notepad_keys() {
+                    "empty file — type away, Ctrl+S to save it somewhere"
+                } else {
+                    "empty file — i to type, :w <name> to save it somewhere"
+                },
+                if self.notepad_keys() {
+                    "空のファイル — そのまま入力、Ctrl+S で保存"
+                } else {
+                    "空のファイル — i で入力、:w <名前> で保存"
+                },
             )
             .into(),
         );

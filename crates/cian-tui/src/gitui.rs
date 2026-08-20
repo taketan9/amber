@@ -354,6 +354,7 @@ impl App {
             replace: None,
             redo: Vec::new(),
         };
+        self.sync_edit_style();
     }
 
     /// `:gitdiff` / right-click: show the selected file's working-tree changes

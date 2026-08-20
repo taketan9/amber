@@ -299,6 +299,8 @@ pub(crate) fn draw(f: &mut Frame, app: &mut App) {
     // What the popup covers is worked out afresh every frame, by the drawing
     // itself. See [`clear_popup`].
     POPUP_INK.with(|c| c.set(None));
+    // Which editor grammar is in force, for this frame. See [`notepad_keys`].
+    NOTEPAD_KEYS.with(|c| c.set(app.notepad_keys()));
 
     // A popup that opened, closed, changed or scrolled: repaint everything.
     // See [`App::popup_shape`].
@@ -1385,6 +1387,21 @@ thread_local! {
     /// Read by the mouse, which runs on the thread that draws — the loop is one
     /// thread in both front ends — between one frame and the next.
     static POPUP_INK: std::cell::Cell<Option<Rect>> = const { std::cell::Cell::new(None) };
+
+    /// Whether the editor is answering to notepad keys, for the frame being
+    /// drawn.
+    ///
+    /// Mirrored here rather than threaded down. The viewer is drawn four calls
+    /// deep and not one of the layers in between owns an `App`, so carrying a
+    /// bool through would mean widening four signatures to tell one badge what
+    /// word to use. The theme and the popup's ink already reach the renderer
+    /// this way, on the same thread and with the same lifetime — one frame.
+    static NOTEPAD_KEYS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// The editor grammar in force for the frame being drawn. See [`NOTEPAD_KEYS`].
+fn notepad_keys() -> bool {
+    NOTEPAD_KEYS.with(|c| c.get())
 }
 
 /// Wipe the cells a popup is about to draw over, and remember them as its own.
@@ -3508,10 +3525,11 @@ fn draw_status(f: &mut Frame, area: Rect, app: &App) {
     // It used to live on the panel's own frame; docked in a pane there is no
     // room for it there, and this is where the window already reports what is
     // going on.
+    let notepad_keys = app.notepad_keys();
     let docked_editor = app
         .viewer_dock
         .filter(|p| *p == app.focused)
-        .and_then(|_| editor_mode_of(&app.popup))
+        .and_then(|_| editor_mode_of(&app.popup, notepad_keys))
         .map(editor_mode);
     let (badge_text, badge_bg) = match docked_editor {
         Some((word, colour)) => (format!(" {focus_label} {word} "), colour),
@@ -6276,6 +6294,11 @@ pub(crate) fn editor_mode(m: EditorMode) -> (&'static str, Color) {
         // Not orange: the selecting modes are orange, and "the next key goes
         // into the file" is the one state worth never mistaking.
         EditorMode::Edit => ("EDIT", Color::Rgb(235, 105, 105)),
+        // Notepad's typing state wears its own word. It is the same state as
+        // EDIT underneath, but "EDIT" invites the question "as opposed to
+        // what?" — and in this grammar there is no opposite to be in. Saying
+        // NOTEPAD answers the question the badge would otherwise raise.
+        EditorMode::Notepad => ("NOTEPAD", Color::Rgb(235, 105, 105)),
         EditorMode::Read => ("READ", theme().accent),
         EditorMode::Visual => ("VISUAL", Color::Rgb(255, 140, 0)),
         EditorMode::VisualLine => ("V-LINE", Color::Rgb(255, 140, 0)),
@@ -6288,6 +6311,7 @@ pub(crate) fn editor_mode(m: EditorMode) -> (&'static str, Color) {
 pub(crate) enum EditorMode {
     Read,
     Edit,
+    Notepad,
     Command,
     Search,
     Visual,
@@ -6300,13 +6324,23 @@ fn popup_mode_of(
     find: bool,
     editing: bool,
     visual: Option<ViewVisual>,
+    notepad: bool,
 ) -> EditorMode {
     if sub {
         EditorMode::Command
     } else if find {
         EditorMode::Search
     } else if editing {
-        EditorMode::Edit
+        // In vim, typing is the news: a selection cannot be live at the same
+        // time. In notepad the two coexist — typing is always possible, so it
+        // is not news, and the selection is the more interesting of the facts.
+        match (notepad, visual) {
+            (true, Some(ViewVisual::Char)) => EditorMode::Visual,
+            (true, Some(ViewVisual::Line)) => EditorMode::VisualLine,
+            (true, Some(ViewVisual::Block)) => EditorMode::VisualBlock,
+            (true, None) => EditorMode::Notepad,
+            (false, _) => EditorMode::Edit,
+        }
     } else {
         match visual {
             None => EditorMode::Read,
@@ -6318,13 +6352,14 @@ fn popup_mode_of(
 }
 
 /// The mode of the file the keyboard is pointed at, if that is a file.
-pub(crate) fn editor_mode_of(popup: &Popup) -> Option<EditorMode> {
+pub(crate) fn editor_mode_of(popup: &Popup, notepad: bool) -> Option<EditorMode> {
     match popup {
         Popup::Viewer { sub_input, find_input, editing, visual, .. } => Some(popup_mode_of(
             sub_input.is_some(),
             find_input.is_some(),
             *editing,
             *visual,
+            notepad,
         )),
         _ => None,
     }
@@ -7538,6 +7573,7 @@ fn draw_viewer(
         find_input.is_some(),
         *editing,
         *visual,
+        notepad_keys(),
     ));
     let dirty_mark = if *dirty { " ●" } else { "" };
     // The BOM is invisible in the text, which is exactly why it gets a badge:
@@ -7808,14 +7844,21 @@ fn draw_viewer(
                 }
             }
             Some(ViewVisual::Char) => {
+                // Where the two grammars part company. vi's caret sits *on* a
+                // character and its selection includes it; a notepad caret
+                // sits *between* two and the selection stops short of the one
+                // it is in front of. Drawn the way it will be deleted, or the
+                // highlight promises a character the next keystroke does not
+                // take. See `delete_viewer_selection`.
+                let end_col = if notepad_keys() { e0.1.checked_sub(1) } else { Some(e0.1) };
                 if i < s0.0 || i > e0.0 {
                     None
                 } else if s0.0 == e0.0 {
-                    Some((s0.1, e0.1))
+                    end_col.filter(|e| *e >= s0.1).map(|e| (s0.1, e))
                 } else if i == s0.0 {
                     Some((s0.1, len))
                 } else if i == e0.0 {
-                    Some((0, e0.1))
+                    end_col.map(|e| (0, e))
                 } else {
                     Some((0, len))
                 }

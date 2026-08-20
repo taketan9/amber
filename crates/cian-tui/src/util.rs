@@ -364,6 +364,33 @@ pub(crate) fn order_pos(a: (usize, usize), b: (usize, usize)) -> ((usize, usize)
     }
 }
 
+/// Turn a notepad-style end position into a vi-style one: the character before
+/// it, across a line break if it sits at the start of a line.
+///
+/// The two grammars disagree about where a selection stops. A notepad caret
+/// sits *between* two characters and the selection ends in front of the one it
+/// is on; vi's caret sits *on* a character and the selection includes it. So
+/// everything that reads a selection — the highlight, the copy, the delete —
+/// needs the far end stepped back one before it can use vi's reckoning.
+///
+/// `None` when there is nothing between `s` and `e`: an empty selection, which
+/// vi has no way to express and notepad makes every time the caret moves back
+/// onto its own anchor.
+pub(crate) fn back_one_char(
+    lines: &[String],
+    s: (usize, usize),
+    e: (usize, usize),
+) -> Option<(usize, usize)> {
+    if e <= s {
+        return None;
+    }
+    match e {
+        (l, 0) if l > 0 => Some((l - 1, lines.get(l - 1).map(|x| x.chars().count()).unwrap_or(0))),
+        (l, c) if c > 0 => Some((l, c - 1)),
+        _ => None,
+    }
+}
+
 /// Char-wise text between two ordered positions, end-inclusive (vim `v` yank).
 pub(crate) fn viewer_charwise(lines: &[String], s: (usize, usize), e: (usize, usize)) -> String {
     let take = |l: usize, from: usize, to_incl: Option<usize>| -> String {

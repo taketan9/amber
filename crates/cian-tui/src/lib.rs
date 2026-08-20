@@ -33,7 +33,8 @@ use theme::*;
 mod util;
 use cian_lua::glob_match;
 use util::{
-    centered_rect, fit, order_pos, pad_left, pad_to, truncate, truncate_middle, union_rect,
+    back_one_char, centered_rect, fit, order_pos, pad_left, pad_to, truncate, truncate_middle,
+    union_rect,
     viewer_charwise, viewer_find, viewer_match_bracket, viewer_paragraph, vlen, width, wrap_str,
 };
 
@@ -968,6 +969,38 @@ pub(crate) struct ViewerSnap {
     pub(crate) bytes: Option<Vec<u8>>,
 }
 
+/// How the built-in editor answers the keyboard.
+///
+/// One editor, two grammars over it — not two editors. Everything below the
+/// keys is shared: the same buffer, undo stack, selection kinds, search,
+/// replace, save. What differs is the layer that decides what a keystroke
+/// *means*, and it differs in exactly one way that matters: whether there is a
+/// normal mode to be in.
+///
+/// The seven keys every editor has in common — save, copy, cut, paste, undo,
+/// redo, select-all — already meant the same thing in every mode before this
+/// existed, which is most of why a second grammar is cheap.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum EditStyle {
+    /// Modal, as vi is: reading until `i`, and the whole change set behind the
+    /// letters. The default, and the one cian was built around.
+    Vim,
+    /// Always typing, as everything that is not vi is. Arrows move, Shift and
+    /// an arrow select, and a letter is a letter — including `:`, which has no
+    /// command line to open here because there is no mode for it to be in.
+    Notepad,
+}
+
+impl EditStyle {
+    fn from_name(s: &str) -> Option<Self> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "vim" | "vi" => Some(Self::Vim),
+            "notepad" | "plain" | "normal" => Some(Self::Notepad),
+            _ => None,
+        }
+    }
+}
+
 /// The F3 viewer's visual-selection mode, matching vim's three flavours.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ViewVisual {
@@ -1098,6 +1131,13 @@ enum MenuItem {
     ViewerMermaid,
     /// Open the file in the external editor (`:edit`).
     ViewerEdit,
+    /// Write the panel's file. `Ctrl+S` everywhere, and here too — notepad
+    /// style has no `:w` to fall back on.
+    ViewerSave,
+    /// Close the panel, throwing away unsaved edits. `:q!` in vim style; in
+    /// notepad style there is no command line, so this is the only way past
+    /// the refusal that guards a dirty file.
+    ViewerCloseDiscard,
     /// Open a server in this pane over SFTP (`:sftp` / remote pane).
     RemotePane,
     /// Disk-usage breakdown of the current folder (`:du`).
@@ -1289,6 +1329,8 @@ impl MenuItem {
             MenuItem::ViewerEncoding => tr(lang, "Text encoding…  (:enc)", "文字コードを指定…  (:enc)"),
             MenuItem::ViewerMermaid => tr(lang, "Mermaid diagrams in a browser  (:mermaid)", "mermaid 図をブラウザで開く  (:mermaid)"),
             MenuItem::ViewerEdit => tr(lang, "Open in my editor  (:edit)", "外部エディタで開く  (:edit)"),
+            MenuItem::ViewerSave => tr(lang, "Save  (Ctrl+S)", "保存  (Ctrl+S)"),
+            MenuItem::ViewerCloseDiscard => tr(lang, "Close without saving", "保存せずに閉じる"),
             MenuItem::RemotePane => tr(lang, "Open server in pane  (:sftp)", "サーバをペインで開く  (:sftp)"),
             MenuItem::DiskUsage => tr(lang, "Disk usage  (:du)", "容量分析  (:du)"),
             MenuItem::AiShellCmd => tr(lang, "Command from description  (:aicmd)", "説明からコマンド生成  (:aicmd)"),
@@ -2436,6 +2478,13 @@ pub struct App {
     /// Reported by `:keys`, because it is the first thing to suspect when every
     /// Ctrl combination goes quiet at once.
     kbd_enhanced: bool,
+    /// Which grammar the editor panel answers to. See [`EditStyle`].
+    ///
+    /// Live, and on `App` rather than on the panel: it is a property of who is
+    /// sitting at the keyboard, not of the file they happen to have open, so it
+    /// must not reset when the panel closes. `T` flips it; `init.lua` sets the
+    /// one a machine starts with.
+    edit_style: EditStyle,
     /// The viewer's bordered frame, whose top row holds the tab arrows.
     viewer_frame: Rect,
     viewer_rect: Rect,
@@ -2856,6 +2905,16 @@ impl App {
             key_probe: false,
             message_fresh: false,
             kbd_enhanced: false,
+            // Vim unless a machine says otherwise. cian's editor is vi-shaped
+            // and the person who reached for cian in the first place is very
+            // likely to want that; the other grammar is for the colleague they
+            // hand it to.
+            edit_style: config
+                .options
+                .edit_style
+                .as_deref()
+                .and_then(EditStyle::from_name)
+                .unwrap_or(EditStyle::Vim),
             viewer_frame: Rect::new(0, 0, 0, 0),
             viewer_rect: Rect::new(0, 0, 0, 0),
             outline_rect: Rect::new(0, 0, 0, 0),
