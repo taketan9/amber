@@ -360,9 +360,17 @@ impl App {
         // walked the open files, Shift+F8/9/10 split the panel — until you
         // pressed `i`, and then they did nothing at all, with no way to tell
         // why. They cost nothing to let past.
-        if !matches!(key.code, KeyCode::F(_))
-            && matches!(self.popup, Popup::Viewer { editing: true, .. })
-        {
+        // Shift+Enter joins them: it opens the panel's menu, and the editor has
+        // no use for it that plain Enter does not already serve.
+        //
+        // Worth knowing where it does not arrive: a terminal has to report the
+        // Shift on an Enter for this to be distinguishable at all, and plenty
+        // do not (iTerm2 without the kitty protocol, macOS Terminal). There the
+        // key stays a newline, which is the harmless failure — `:keys` says
+        // what a terminal is actually sending.
+        let window_key =
+            matches!(key.code, KeyCode::F(_)) || (key.code == KeyCode::Enter && shift);
+        if !window_key && matches!(self.popup, Popup::Viewer { editing: true, .. }) {
             return self.handle_editor_key(key);
         }
         // `]c` / `[c` — the next and previous difference, vimdiff's own keys,

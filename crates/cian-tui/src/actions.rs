@@ -3527,7 +3527,7 @@ impl App {
                 return Ok(());
             }
             InputKind::AiShellRefine { description, rejected } => {
-                self.start_ai_shell_refine(&description, &rejected, &name);
+                self.start_ai_shell_refine(description, rejected, &name);
                 return Ok(());
             }
             InputKind::AiRename => {
