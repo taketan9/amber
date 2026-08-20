@@ -242,8 +242,15 @@ impl Session {
     /// Terminal graphics live outside the cell grid, so a picture that stops
     /// being shown only goes away when the screen is cleared. A window draws
     /// every pixel it owns and never needs this, but it costs nothing to ask.
+    /// Either reason counts here. The terminal build separates them — wipe the
+    /// screen, or merely paint every cell again — because wiping it costs a
+    /// visible flash there. A window wipes and repaints in one go and shows
+    /// nothing in between, so it has nothing to gain from the distinction.
     pub fn take_full_clear(&mut self) -> bool {
-        std::mem::take(&mut self.app.full_clear)
+        // Both taken, not short-circuited: a flag left set would fire on some
+        // later, unrelated frame.
+        let repaint = std::mem::take(&mut self.app.full_repaint);
+        std::mem::take(&mut self.app.full_clear) || repaint
     }
 
     /// Feed cian one event. Returns whether the screen needs repainting.

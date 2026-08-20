@@ -305,7 +305,10 @@ pub(crate) fn draw(f: &mut Frame, app: &mut App) {
     let shape = (std::mem::discriminant(&app.popup), popup_scroll(&app.popup));
     if app.popup_shape != Some(shape) {
         app.popup_shape = Some(shape);
-        app.full_clear = true;
+        // Painted again, not wiped. What this is for is overhanging ink, and
+        // painting over it is enough to remove it — blanking the screen first
+        // only added the flash. See [`App::full_repaint`].
+        app.full_repaint = true;
     }
     // Where the pictures go is decided afresh every frame, so the list starts
     // empty every frame.

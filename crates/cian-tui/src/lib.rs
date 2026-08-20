@@ -2355,6 +2355,20 @@ pub struct App {
     /// next. Every place an image stops being shown sets this, and the loop
     /// pays for one full clear exactly then.
     full_clear: bool,
+    /// Ask the main loop to repaint every cell — without wiping the screen.
+    ///
+    /// The weaker half of [`App::full_clear`], and the one nearly everything
+    /// actually wanted. A popup opening or closing needs the surface painted
+    /// again, because a glyph whose ink overhangs its cell leaves the overhang
+    /// behind (see [`App::popup_shape`]); it does not need the screen blanked
+    /// first. It was blanking it anyway, and `Terminal::clear` is expensive in
+    /// a way that shows: it asks the terminal where the cursor is and waits for
+    /// the reply, wipes every cell, then writes the whole surface back. On a
+    /// large window that last write is tens of kilobytes and the terminal
+    /// paints it as it arrives — so every popup, `c` to copy included, flashed
+    /// black and filled back in. Repainting over what is already there has no
+    /// blank moment to see.
+    full_repaint: bool,
     /// Terminal-graphics capability, when the terminal answered the startup
     /// query with a real protocol (kitty / iTerm2 / sixel). `None` falls back
     /// to the half-block cell renderer — including always in tests, which
@@ -2949,6 +2963,7 @@ impl App {
             preview: None,
             preview_gfx: None,
             full_clear: false,
+            full_repaint: false,
             archive_cache: None,
             zoom_return: None,
             pending_shell_input: None,
@@ -5348,8 +5363,15 @@ fn run_loop<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Result<()>
             // outside the cell buffer, so only a real clear removes them.
             // ratatui 0.30's backend error is an associated type with no
             // Send + Sync bound, so `?` into anyhow needs it flattened.
+            let repaint = std::mem::take(&mut app.full_repaint);
             if std::mem::take(&mut app.full_clear) {
                 terminal.clear().map_err(|e| anyhow::anyhow!("{e}"))?;
+            } else if repaint {
+                // Every cell painted again, with no blank moment in between:
+                // resetting the buffer the next frame is compared against makes
+                // the whole surface differ, so all of it is written. `clear`
+                // would do this too, and would black the screen out first.
+                terminal.swap_buffers();
             }
             terminal.draw(|f| draw(f, app)).map_err(|e| anyhow::anyhow!("{e}"))?;
             needs_redraw = false;

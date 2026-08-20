@@ -15542,9 +15542,21 @@ mod ctrl_r_redoes {
 mod a_popup_asks_for_a_clean_surface {
     use super::*;
 
+    /// Whether the frame asked for the surface to be painted again.
+    ///
+    /// It used to ask for a *wipe* — `Terminal::clear` — which blanks every
+    /// cell before writing the surface back, and on a full-size window that
+    /// write is big enough that the terminal paints it as it arrives. Every
+    /// popup flashed black and filled back in; `c` to copy was where it was
+    /// reported. Painting over what is there needs no blank moment, and this
+    /// checks the weaker request is the one being made.
     fn drew(app: &mut App) -> bool {
         let _ = render(app, 100, 30);
-        std::mem::take(&mut app.full_clear)
+        assert!(
+            !std::mem::take(&mut app.full_clear),
+            "a popup must not wipe the screen — only a picture needs that",
+        );
+        std::mem::take(&mut app.full_repaint)
     }
 
     #[test]
@@ -15585,5 +15597,43 @@ mod a_popup_asks_for_a_clean_surface {
         let _ = drew(&mut app);
         app.start_toggles();
         assert!(drew(&mut app));
+    }
+
+    /// Why painting again is as strong as wiping, here.
+    ///
+    /// `swap_buffers` makes the next frame differ from a blank one, so every
+    /// cell that is *not* blank gets written. That is only as good as a wipe if
+    /// cian leaves no blank cells — and it does not, because it paints its own
+    /// background into every cell it owns rather than letting the terminal's
+    /// show through. This is the assumption the fix rests on, checked rather
+    /// than assumed: if a future layout ever stops painting some corner, the
+    /// stale ink would come back there and this says so first.
+    #[test]
+    fn and_painting_again_reaches_every_cell() {
+        use ratatui::style::Style;
+        let (_d, mut app) = app_with(&["a.txt", "b.txt"]);
+        for open in [false, true] {
+            if open {
+                app.open_manual();
+            }
+            let mut terminal =
+                Terminal::new(TestBackend::new(100, 30)).unwrap();
+            terminal.draw(|f| draw(f, &mut app)).unwrap();
+            let buf = terminal.backend().buffer().clone();
+            let blank: Vec<(u16, u16)> = (0..buf.area.height)
+                .flat_map(|y| (0..buf.area.width).map(move |x| (x, y)))
+                .filter(|&(x, y)| {
+                    let c = &buf[(x, y)];
+                    c.symbol() == " " && c.style() == Style::default()
+                })
+                .collect();
+            assert!(
+                blank.is_empty(),
+                "{} cell(s) carry no styling of their own (popup open: {open}) — \
+                 stale ink on those would survive a repaint; first at {:?}",
+                blank.len(),
+                blank.first(),
+            );
+        }
     }
 }
