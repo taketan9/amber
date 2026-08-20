@@ -3167,6 +3167,134 @@
         assert!(screen.contains("word23"), "and the end:\n{screen}");
     }
 
+    /// The same, in Japanese, which is where it actually broke. The box grew by
+    /// `chars().count() / cols` — but a Japanese character is two columns wide,
+    /// so a sentence that needed two rows was told it needed none and the rest
+    /// fell off the bottom. It only ever looked right because the test above
+    /// types ASCII.
+    #[test]
+    fn a_long_japanese_prompt_is_visible_in_full() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        // 60 characters — 120 columns — in a box whose inner width is 92.
+        let head = "先頭がここ";
+        let tail = "末尾はここ";
+        let long = format!("{head}{}{tail}", "あいうえおかきくけこ".repeat(5));
+        app.popup = Popup::TextInput {
+            title: " 説明からコマンド生成 ".into(),
+            prompt: "やりたいことを説明してください:".into(),
+            buffer: long.clone(),
+            kind: InputKind::AiShellCmd,
+            cursor: long.chars().count(),
+            select_all: false,
+        };
+        let screen = render(&mut app, 100, 30).join("\n");
+        // A wide character occupies two cells, and the test backend hands back
+        // one symbol per cell — so the screen reads "先 頭", not "先頭". The
+        // blanks are the rendering, not the text; drop them before comparing.
+        let flat: String = screen.chars().filter(|c| !c.is_whitespace()).collect();
+        assert!(flat.contains(head), "the start is there:\n{screen}");
+        assert!(flat.contains(tail), "and the end, which used to be cut off:\n{screen}");
+    }
+
+    /// The AI's answer wraps too. `extra_rows` only ever applied to the text
+    /// input, so a long command came back, wrapped onto a second row, and the
+    /// box had no room for it — the tail was simply gone.
+    #[test]
+    fn a_long_ai_command_is_visible_in_full() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        let tail = "--exclude=NOTICEABLE_END";
+        let command = format!(
+            "find . -type f -name '*.log' -mtime +30 -print0 | xargs -0 tar czf logs.tar.gz {tail}"
+        );
+        app.popup = Popup::AiShellConfirm {
+            command: command.clone(),
+            description: "compress old logs".into(),
+        };
+        let screen = render(&mut app, 100, 30).join("\n");
+        assert!(screen.contains("find . -type f"), "the start is there:\n{screen}");
+        assert!(screen.contains(tail), "and the end, which used to be cut off:\n{screen}");
+    }
+
+    /// Shift+Enter is a newline in the fields that take a paragraph, and stays
+    /// "submit" in the ones that do not — a filename with a newline in it is a
+    /// mistake, not a feature.
+    #[test]
+    fn shift_enter_is_a_newline_only_where_a_paragraph_belongs() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        app.popup = Popup::TextInput {
+            title: " t ".into(),
+            prompt: "p".into(),
+            buffer: "ログを".into(),
+            kind: InputKind::AiShellCmd,
+            cursor: 3,
+            select_all: false,
+        };
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::SHIFT)).unwrap();
+        for c in "まとめる".chars() {
+            app.handle_key(code(KeyCode::Char(c))).unwrap();
+        }
+        match &app.popup {
+            Popup::TextInput { buffer, .. } => {
+                assert_eq!(buffer, "ログを\nまとめる", "Shift+Enter put a line break in");
+            }
+            other => panic!("the prompt should still be open, got {other:?}"),
+        }
+        // Both rows are drawn, not just the one the caret is on.
+        let screen = render(&mut app, 100, 30).join("\n");
+        let flat: String = screen.chars().filter(|c| !c.is_whitespace()).collect();
+        assert!(flat.contains("ログを"), "first row:\n{screen}");
+        assert!(flat.contains("まとめる"), "second row:\n{screen}");
+        // And plain Enter still submits.
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+        assert!(!matches!(app.popup, Popup::TextInput { .. }), "Enter submitted");
+
+        // A rename field is one line by nature: Shift+Enter submits it.
+        let (_d, mut app) = app_with(&["a.txt"]);
+        app.popup = Popup::TextInput {
+            title: " rename ".into(),
+            prompt: "new name:".into(),
+            buffer: "b.txt".into(),
+            kind: InputKind::Rename { original: std::path::PathBuf::from("a.txt") },
+            cursor: 5,
+            select_all: false,
+        };
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::SHIFT)).unwrap();
+        assert!(
+            !matches!(app.popup, Popup::TextInput { .. }),
+            "Shift+Enter submitted the rename rather than breaking the name in two",
+        );
+    }
+
+    /// "Close, but not quite" — the third answer to a proposed command. It used
+    /// to be yes or no, so an almost-right command had to be asked for again
+    /// from nothing.
+    #[test]
+    fn a_proposed_command_can_be_sent_back_for_another_try() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        app.popup = Popup::AiShellConfirm {
+            command: "rm -rf /tmp/logs".into(),
+            description: "clear the logs".into(),
+        };
+        app.handle_key(code(KeyCode::Char('r'))).unwrap();
+        let Popup::TextInput { kind, .. } = &app.popup else {
+            panic!("r should open the adjust prompt, got {:?}", app.popup)
+        };
+        match kind {
+            InputKind::AiShellRefine { description, rejected } => {
+                assert_eq!(description, "clear the logs", "the original request came along");
+                assert_eq!(rejected, "rm -rf /tmp/logs", "and so did the command being rejected");
+            }
+            other => panic!("wrong kind: {other:?}"),
+        }
+        // Saying nothing puts the command back rather than asking the model to
+        // interpret silence.
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+        match &app.popup {
+            Popup::AiShellConfirm { command, .. } => assert_eq!(command, "rm -rf /tmp/logs"),
+            other => panic!("an empty note should restore the command, got {other:?}"),
+        }
+    }
+
     /// A bookmark that could not be written says so. Adding one reported a
     /// failed save; deleting one and making a group did not — the list on
     /// screen changed, the file did not, and the next launch had the old
@@ -5691,7 +5819,7 @@
         // A structured purpose parses its reply and has no attachment UI, so it
         // must leave a pending image alone rather than consuming it.
         app.chat_attachments.push(std::path::PathBuf::from("/tmp/shot.png"));
-        app.ai_request(AiPurpose::ShellCommand, "sys".into(), "usr".into());
+        app.ai_request(AiPurpose::ShellCommand { description: "usr".into() }, "sys".into(), "usr".into());
         assert_eq!(app.chat_attachments.len(), 1, "a shell-command request keeps the image");
 
         // A chat turn takes them, so the same image isn't sent twice.
@@ -6276,7 +6404,7 @@
             std::thread::sleep(Duration::from_millis(5));
         }
         match &app.popup {
-            Popup::AiShellConfirm { command } => {
+            Popup::AiShellConfirm { command, .. } => {
                 assert!(command.contains("compress the logs"), "got {command:?}");
             }
             other => panic!("expected the command-confirm popup, got {:?}", other),
@@ -14114,7 +14242,7 @@ mod every_popup_behaves {
                 Popup::ConfirmClose { target: crate::CloseTarget::FileTab(FocusedPane::Left) },
             ),
             ("ConfirmNewTab", Popup::ConfirmNewTab { side: FocusedPane::Left }),
-            ("AiShellConfirm", Popup::AiShellConfirm { command: "ls -la".into() }),
+            ("AiShellConfirm", Popup::AiShellConfirm { command: "ls -la".into(), description: "list them".into() }),
             (
                 "AiChat",
                 Popup::AiChat {

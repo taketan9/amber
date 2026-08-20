@@ -37,7 +37,10 @@ fn is_ai_simple(popup: &Popup) -> bool {
         // The AI prompts; every other text input is a plain file operation.
         Popup::TextInput { kind, .. } => matches!(
             kind,
-            InputKind::AiShellCmd | InputKind::AiRename | InputKind::AiSearch
+            InputKind::AiShellCmd
+                | InputKind::AiShellRefine { .. }
+                | InputKind::AiRename
+                | InputKind::AiSearch
         ),
         _ => false,
     }
@@ -1623,28 +1626,64 @@ fn menu_dims(items: &[MenuItem], lang: Lang) -> (usize, usize) {
     (name_w.max(6), hint_w)
 }
 
-/// A text-input field line with the cursor shown as a highlighted character
-/// (reverse video), so moving the cursor never shifts the text. A password is
+/// The text-input field, with the cursor shown as a highlighted character
+/// (reverse video) so moving it never shifts the text around it. A password is
 /// masked; a cursor at the end highlights a trailing space (a block cursor).
-fn caret_line(buffer: &str, cursor: usize, secret: bool, selected: bool) -> Line<'static> {
+///
+/// One row per typed line, because the AI prompts take a newline now
+/// (Shift+Enter): "what do you want the command to do" is a sentence or three,
+/// not a filename. Only the first row wears the `>`; the rest are indented by
+/// one so the whole field reads as a block. Wrapping the *long* rows is the
+/// paragraph's job, and the box is sized for it above.
+fn caret_lines(buffer: &str, cursor: usize, secret: bool, selected: bool) -> Vec<Line<'static>> {
     let shown: String = if secret { "•".repeat(buffer.chars().count()) } else { buffer.to_string() };
-    // Select-all: the whole line reversed out, so "the next key replaces this"
+    let lead = |i: usize| Span::raw(if i == 0 { ">" } else { " " });
+    // Select-all: the whole value reversed out, so "the next key replaces this"
     // is visible rather than something you have to remember having pressed.
     if selected && !shown.is_empty() {
         let hl = Style::default().fg(readable_on(theme().accent)).bg(theme().accent);
-        return Line::from(vec![Span::raw(">"), Span::styled(shown, hl)]);
+        return shown
+            .split('\n')
+            .enumerate()
+            .map(|(i, seg)| Line::from(vec![lead(i), Span::styled(seg.to_string(), hl)]))
+            .collect();
     }
-    let chars: Vec<char> = shown.chars().collect();
-    let cur = cursor.min(chars.len());
-    let before: String = chars[..cur].iter().collect();
-    let at: String = chars.get(cur).map(|c| c.to_string()).unwrap_or_else(|| " ".to_string());
-    let after: String = chars.get(cur + 1..).map(|s| s.iter().collect()).unwrap_or_default();
-    Line::from(vec![
-        Span::raw(">"),
-        Span::raw(before),
-        Span::styled(at, Style::default().fg(readable_on(theme().accent)).bg(theme().accent)),
-        Span::raw(after),
-    ])
+    let cur = cursor.min(shown.chars().count());
+    let mut out = Vec::new();
+    // Chars consumed by the rows already emitted, counting the `\n` between
+    // them, so the caret's index into the whole buffer can be resolved to a
+    // row and an offset within it.
+    let mut seen = 0usize;
+    let mut placed = false;
+    for (i, seg) in shown.split('\n').enumerate() {
+        let chars: Vec<char> = seg.chars().collect();
+        // The first row that could contain it does. `<=` rather than `<` so a
+        // caret sitting at the end of a row is drawn there, on the space after
+        // the last character, rather than falling between two rows and
+        // vanishing.
+        if !placed && cur <= seen + chars.len() {
+            placed = true;
+            let at_i = cur - seen;
+            let before: String = chars[..at_i].iter().collect();
+            let at: String =
+                chars.get(at_i).map(|c| c.to_string()).unwrap_or_else(|| " ".to_string());
+            let after: String =
+                chars.get(at_i + 1..).map(|s| s.iter().collect()).unwrap_or_default();
+            out.push(Line::from(vec![
+                lead(i),
+                Span::raw(before),
+                Span::styled(
+                    at,
+                    Style::default().fg(readable_on(theme().accent)).bg(theme().accent),
+                ),
+                Span::raw(after),
+            ]));
+        } else {
+            out.push(Line::from(vec![lead(i), Span::raw(seg.to_string())]));
+        }
+        seen += chars.len() + 1;
+    }
+    out
 }
 
 
@@ -5528,12 +5567,22 @@ fn draw_simple_dialog(
             };
             (title, lines, foot.to_string())
         }
-        Popup::TextInput { title, prompt, .. } => {
-            // The field line is filled in below as a styled Line (the cursor
+        Popup::TextInput { title, prompt, kind, .. } => {
+            // The field line is filled in below as styled Lines (the cursor
             // highlights a character rather than inserting one, so nothing
             // shifts as it moves).
             let body = vec![prompt.clone(), String::new()];
-            let foot = tr(lang, " Enter=ok  ←→ move  Esc=cancel ", " Enter=決定  ←→ 移動  Esc=取消 ");
+            // The fields that take a paragraph say so. A hint about a key that
+            // does nothing is worse than no hint, so the plain ones keep theirs.
+            let foot = if kind.is_multiline() {
+                tr(
+                    lang,
+                    " Enter=ok  Shift+Enter=newline  ←→ move  Esc=cancel ",
+                    " Enter=決定  Shift+Enter=改行  ←→ 移動  Esc=取消 ",
+                )
+            } else {
+                tr(lang, " Enter=ok  ←→ move  Esc=cancel ", " Enter=決定  ←→ 移動  Esc=取消 ")
+            };
             (format!(" {} ", title), body, foot.to_string())
         }
         Popup::Notice { lines } => {
@@ -5580,7 +5629,7 @@ fn draw_simple_dialog(
             tr(lang, " y / Enter = yes   n / Esc = no ", " y / Enter = はい   n / Esc = いいえ ")
                 .to_string(),
         ),
-        Popup::AiShellConfirm { command } => {
+        Popup::AiShellConfirm { command, .. } => {
             (
                 tr(lang, " Command from description ", " 説明からコマンド生成 ").to_string(),
                 vec![
@@ -5588,7 +5637,12 @@ fn draw_simple_dialog(
                     String::new(),
                     format!("  {}", command),
                 ],
-                tr(lang, " y/Enter = insert   n/Esc = cancel ", " y/Enter = 入力   n/Esc = 取消 ").to_string(),
+                tr(
+                    lang,
+                    " y/Enter = insert   r = not quite, try again   n/Esc = cancel ",
+                    " y/Enter = 入力   r = 少し違う、やり直す   n/Esc = 取消 ",
+                )
+                .to_string(),
             )
         }
         Popup::ConfirmDiscard { targets, .. } => {
@@ -5834,12 +5888,24 @@ fn draw_simple_dialog(
         }
         _ => 70u16.min(area.width.saturating_sub(2)),
     };
-    let extra_rows = if let Popup::TextInput { buffer, .. } = popup {
-        let inner_w = width.saturating_sub(4).max(1) as usize;
-        (buffer.chars().count() / inner_w) as u16
-    } else {
-        0
-    };
+    // How many rows the body actually needs once the paragraph below wraps it.
+    //
+    // Counted in display columns, not characters. A line of Japanese is twice
+    // as wide as its character count says, so `chars().count() / cols` decided
+    // a sixty-character sentence needed no second row when it needed two — and
+    // the wrapped remainder fell off the bottom of the box. That was the whole
+    // of "the text is cut off": the wrapping worked, the room for it did not.
+    //
+    // And for every popup, not only the text input. The command the AI proposes
+    // is one long line that wraps exactly the same way, and nothing was making
+    // room for *its* second row either.
+    let inner_w = width.saturating_sub(4).max(1) as usize;
+    let grown = |s: &str| wrap_input(s, inner_w).len().saturating_sub(1) as u16;
+    let mut extra_rows: u16 = body.iter().map(|l| grown(l)).sum();
+    if let Popup::TextInput { buffer, .. } = popup {
+        // The field replaces body line 1 and carries a one-column prefix.
+        extra_rows += grown(&format!(">{buffer}"));
+    }
     let height = (body.len() as u16 + 4 + extra_rows).max(6).min(area.height.saturating_sub(2));
     let rect = centered_rect(width, height, area);
 
@@ -5896,6 +5962,7 @@ fn draw_simple_dialog(
         ],
         Popup::AiShellConfirm { .. } => vec![
             (tr(lang, "Insert", "入力"), ZoneKind::Enter),
+            (tr(lang, "Try again", "やり直す"), ZoneKind::Char('r')),
             (tr(lang, "Cancel", "取消"), ZoneKind::Esc),
         ],
         Popup::ConfirmDiscard { .. } => vec![
@@ -5912,7 +5979,8 @@ fn draw_simple_dialog(
     // above already laid out.
     if let Popup::TextInput { buffer, cursor, kind, select_all, .. } = popup {
         if body_text.len() >= 2 {
-            body_text[1] = caret_line(buffer, *cursor, kind.is_secret(), *select_all);
+            let field = caret_lines(buffer, *cursor, kind.is_secret(), *select_all);
+            body_text.splice(1..2, field);
         }
     }
     // A dialog gets a dedicated button row above the hint footer; everything

@@ -881,7 +881,52 @@ impl App {
              {ctx}"
         );
         self.message = Some(tr(self.lang, "asking AI for a command…", "AI にコマンドを問い合わせ中…").into());
-        self.ai_request(AiPurpose::ShellCommand, system, description);
+        self.ai_request(AiPurpose::ShellCommand { description: description.clone() }, system, description);
+    }
+
+    /// Open the "not quite — more like this" prompt over a proposed command.
+    pub(crate) fn start_ai_shell_refine_prompt(&mut self) {
+        let Popup::AiShellConfirm { command, description } = &self.popup else { return };
+        self.popup = text_input(
+            tr(self.lang, " Adjust the command ", " コマンドを修正 "),
+            tr(
+                self.lang,
+                "what should be different about it?",
+                "どこをどう変えてほしいですか？",
+            ),
+            String::new(),
+            InputKind::AiShellRefine {
+                description: description.clone(),
+                rejected: command.clone(),
+            },
+        );
+    }
+
+    /// Ask again, with the first answer and what was wrong with it in hand.
+    ///
+    /// The whole exchange goes back rather than just the correction: a model
+    /// told only "shorter" has nothing to make shorter. What comes back lands
+    /// in the same review popup, so this can be done as many times as it takes
+    /// — and each round keeps the ones before it, so the model is reading the
+    /// conversation rather than the last sentence of it.
+    pub(crate) fn start_ai_shell_refine(&mut self, description: &str, rejected: &str, note: &str) {
+        let note = note.trim();
+        if note.is_empty() {
+            // Nothing said — put the command back rather than asking the model
+            // to guess at what silence meant.
+            self.popup = Popup::AiShellConfirm {
+                command: rejected.to_string(),
+                description: description.to_string(),
+            };
+            return;
+        }
+        let combined = format!(
+            "{description}\n\n\
+             You already proposed this command, and it was not right:\n\
+             {rejected}\n\n\
+             Change it so that: {note}",
+        );
+        self.start_ai_shell_cmd(&combined);
     }
 
     /// Draft a commit message from the staged diff of the active pane's repo,
@@ -1501,13 +1546,13 @@ impl App {
                     }
                 }
             }
-            AiPurpose::ShellCommand => match result {
+            AiPurpose::ShellCommand { description } => match result {
                 Ok(text) => {
                     let command = clean_ai_command(&text);
                     if command.is_empty() {
                         self.message = Some(tr(self.lang, "AI returned no command", "AI からコマンドが返りませんでした").into());
                     } else {
-                        self.popup = Popup::AiShellConfirm { command };
+                        self.popup = Popup::AiShellConfirm { command, description };
                     }
                 }
                 Err(e) => self.message = Some(format!("AI: {}", e)),

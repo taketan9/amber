@@ -3437,10 +3437,18 @@ impl App {
         let popup = std::mem::replace(&mut self.popup, Popup::None);
         let Popup::TextInput { buffer, kind, .. } = popup else { return Ok(()) };
         let name = buffer.trim().to_string();
-        // A blank chmod means "keep the default", so it is valid there; every
-        // other field still treats empty as a cancel.
-        let chmod_field = matches!(kind, InputKind::UploadChmod { .. } | InputKind::DownloadChmod { .. });
-        if name.is_empty() && !chmod_field {
+        // A blank chmod means "keep the default", so it is valid there. A blank
+        // adjustment means "never mind", and it has somewhere to go back to —
+        // the command it was raised over, which must not be thrown away just
+        // because the prompt over it was dismissed. Every other field still
+        // treats empty as a cancel.
+        let empty_means_something = matches!(
+            kind,
+            InputKind::UploadChmod { .. }
+                | InputKind::DownloadChmod { .. }
+                | InputKind::AiShellRefine { .. }
+        );
+        if name.is_empty() && !empty_means_something {
             self.message = Some(tr(self.lang, "cancelled (empty name)", "中止しました（名前が空）").into());
             return Ok(());
         }
@@ -3505,6 +3513,10 @@ impl App {
             }
             InputKind::AiShellCmd => {
                 self.start_ai_shell_cmd(&name);
+                return Ok(());
+            }
+            InputKind::AiShellRefine { description, rejected } => {
+                self.start_ai_shell_refine(&description, &rejected, &name);
                 return Ok(());
             }
             InputKind::AiRename => {

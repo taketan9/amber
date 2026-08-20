@@ -765,7 +765,10 @@ enum Popup {
     ConfirmNewTab { side: FocusedPane },
     /// An AI-generated shell command awaiting review before it goes to the
     /// prompt (never auto-run).
-    AiShellConfirm { command: String },
+    /// A command the AI proposed, held for review. `description` is what was
+    /// asked for, carried so `r` can send it back with more direction instead
+    /// of making the user retype the request from the beginning.
+    AiShellConfirm { command: String, description: String },
     /// The AI chat: a transcript, an input line, and whether a reply is pending.
     /// `sel` is a selected range of wrapped transcript lines `(anchor, cursor)`,
     /// for copying, mirroring the F3 viewer's line selection.
@@ -1646,8 +1649,9 @@ enum FindMsg {
 enum AiPurpose {
     /// Append to the chat transcript.
     Chat,
-    /// A shell command to review and insert at the prompt.
-    ShellCommand,
+    /// A shell command to review and insert at the prompt. `description` rides
+    /// along so the review can offer another try without losing the request.
+    ShellCommand { description: String },
     /// A git commit message drafted from the staged diff. `dir`/`stat` are
     /// carried through so the editable preview can commit into the right repo.
     CommitMessage { dir: PathBuf, stat: String },
@@ -1845,6 +1849,11 @@ enum InputKind {
     LogDir,
     /// A natural-language description to turn into a shell command via AI.
     AiShellCmd,
+    /// A second try at that command. The model answered, the answer missed, and
+    /// this is the direction to give it: `description` is what was asked for the
+    /// first time and `rejected` is what came back, both sent again so the model
+    /// is correcting a draft rather than starting over from a fragment.
+    AiShellRefine { description: String, rejected: String },
     /// A natural-language instruction for how to bulk-rename the chosen files.
     AiRename,
     /// A natural-language query for semantic search over the tree.
@@ -1901,6 +1910,22 @@ impl InputKind {
     /// Whether the field holds a secret and should be shown as dots.
     fn is_secret(&self) -> bool {
         matches!(self, InputKind::ZipPassword { .. } | InputKind::ExtractPassword { .. } | InputKind::ManualSshPass { .. })
+    }
+
+    /// Whether Shift+Enter puts a newline in the field instead of submitting it.
+    ///
+    /// Only where a paragraph is the honest answer. A filename is one line by
+    /// nature and a newline in one is a mistake the field should not make
+    /// possible; a description of what you want a command to do is not, and
+    /// having to say it without a line break made it a wall of text.
+    fn is_multiline(&self) -> bool {
+        matches!(
+            self,
+            InputKind::AiShellCmd
+                | InputKind::AiShellRefine { .. }
+                | InputKind::AiRename
+                | InputKind::AiSearch
+        )
     }
 }
 

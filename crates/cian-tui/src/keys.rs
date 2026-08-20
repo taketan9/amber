@@ -526,15 +526,55 @@ impl App {
                     _ => {}
                 }
             }
-            let Popup::TextInput { buffer, cursor, select_all, .. } = &mut self.popup else {
+            // Esc, before the buffer is borrowed, because backing out of a
+            // prompt raised *over* another popup goes back to that popup rather
+            // than to nothing. Opening "adjust this command" and changing your
+            // mind should not cost you the command.
+            if key.code == KeyCode::Esc {
+                let back = match &self.popup {
+                    Popup::TextInput {
+                        kind: InputKind::AiShellRefine { description, rejected },
+                        ..
+                    } => Popup::AiShellConfirm {
+                        command: rejected.clone(),
+                        description: description.clone(),
+                    },
+                    _ => Popup::None,
+                };
+                self.popup = back;
+                return Ok(());
+            }
+            let shift = key.modifiers.contains(KeyModifiers::SHIFT);
+            let alt = key.modifiers.contains(KeyModifiers::ALT);
+            let Popup::TextInput { buffer, cursor, select_all, kind, .. } = &mut self.popup else {
                 return Ok(());
             };
+            let multiline = kind.is_multiline();
             let len = buffer.chars().count();
             // Anything that is not a movement or a copy replaces the selection,
             // which is what "select all and type" means.
             let selected = std::mem::take(select_all);
             match key.code {
-                KeyCode::Esc => { self.popup = Popup::None; Ok(())}
+                // Shift+Enter is a newline where the field takes one; plain
+                // Enter still submits. Alt+Enter and Ctrl+J do the same, as
+                // fallbacks for terminals that do not report Shift with Enter
+                // — the same three the chat window takes, so the habit carries.
+                KeyCode::Enter if multiline && (shift || alt) => {
+                    if selected {
+                        buffer.clear();
+                        *cursor = 0;
+                    }
+                    insert_char_at(buffer, cursor, '\n');
+                    Ok(())
+                }
+                KeyCode::Char('j') if multiline && ctrl => {
+                    if selected {
+                        buffer.clear();
+                        *cursor = 0;
+                    }
+                    insert_char_at(buffer, cursor, '\n');
+                    Ok(())
+                }
                 KeyCode::Enter => { self.finish_text_input()}
                 // Caret movement, so the middle of a name can be reached.
                 KeyCode::Left => { *cursor = cursor.saturating_sub(1); Ok(())}
@@ -1683,13 +1723,17 @@ impl App {
     }
 
     fn ai_shell_confirm_key(&mut self, key: KeyEvent) -> Result<()> {
-        let Popup::AiShellConfirm { command } = &self.popup else { return Ok(()) };
+        let Popup::AiShellConfirm { command, .. } = &self.popup else { return Ok(()) };
             match key.code {
                 KeyCode::Char('y') | KeyCode::Enter => {
                     let cmd = command.clone();
                     self.popup = Popup::None;
                     self.insert_ai_command_at_prompt(&cmd);
                 }
+                // `r` — not right, try again with direction. The third answer
+                // to a proposed command, next to yes and no: the one that was
+                // missing was "close, but".
+                KeyCode::Char('r') | KeyCode::Char('R') => self.start_ai_shell_refine_prompt(),
                 KeyCode::Char('n') | KeyCode::Esc => self.popup = Popup::None,
                 _ => {}
             }
