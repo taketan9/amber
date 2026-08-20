@@ -15370,3 +15370,59 @@ mod ctrl_r_redoes {
         assert!(app.active_pane().unwrap().entries.iter().any(|e| e.name == "new.txt"), "F5 sees it");
     }
 }
+
+/// A popup that opens, scrolls or closes asks for the whole surface again.
+///
+/// Every renderer under cian repaints only what changed, and a popup changes
+/// more than the cell diff can always see: a glyph whose ink overhangs its
+/// cell leaves the overhang behind, and those leftovers were piling up as
+/// white blocks along the manual's lines and staying on the panes after it
+/// closed.
+mod a_popup_asks_for_a_clean_surface {
+    use super::*;
+
+    fn drew(app: &mut App) -> bool {
+        let _ = render(app, 100, 30);
+        std::mem::take(&mut app.full_clear)
+    }
+
+    #[test]
+    fn opening_one_does() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        let _ = drew(&mut app); // the first frame always wipes
+        assert!(!drew(&mut app), "a still screen does not");
+        app.open_manual();
+        assert!(drew(&mut app), "the manual opened");
+    }
+
+    #[test]
+    fn scrolling_one_does() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        app.open_manual();
+        let _ = drew(&mut app);
+        assert!(!drew(&mut app), "and then settles");
+        app.handle_key(key('j')).unwrap();
+        assert!(drew(&mut app), "scrolled by a line");
+    }
+
+    #[test]
+    fn and_closing_one_does() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        app.open_manual();
+        let _ = drew(&mut app);
+        app.handle_key(code(KeyCode::Esc)).unwrap();
+        assert!(matches!(app.popup, Popup::None));
+        assert!(drew(&mut app), "the panes underneath get a clean start");
+    }
+
+    /// Switching from one popup to another counts too — they are different
+    /// shapes over the same cells.
+    #[test]
+    fn so_does_swapping_one_for_another() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        app.open_manual();
+        let _ = drew(&mut app);
+        app.start_toggles();
+        assert!(drew(&mut app));
+    }
+}

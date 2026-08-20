@@ -296,6 +296,14 @@ pub(crate) fn draw(f: &mut Frame, app: &mut App) {
     // What the popup covers is worked out afresh every frame, by the drawing
     // itself. See [`clear_popup`].
     POPUP_INK.with(|c| c.set(None));
+
+    // A popup that opened, closed, changed or scrolled: repaint everything.
+    // See [`App::popup_shape`].
+    let shape = (std::mem::discriminant(&app.popup), popup_scroll(&app.popup));
+    if app.popup_shape != Some(shape) {
+        app.popup_shape = Some(shape);
+        app.full_clear = true;
+    }
     // Where the pictures go is decided afresh every frame, so the list starts
     // empty every frame.
     //
@@ -1422,6 +1430,32 @@ fn draws_its_own_frame(f: &mut Frame, area: Rect, app: &mut App) -> bool {
         }
     }
     true
+}
+
+/// How far the popup on top is scrolled, for the ones that scroll.
+///
+/// Part of the fingerprint that decides whether the surface needs wiping — a
+/// manual scrolled by a line is as much of a change as a manual that just
+/// opened, and leaves the same leftovers if the renderer is left to work it
+/// out from the cells alone.
+fn popup_scroll(popup: &Popup) -> usize {
+    match popup {
+        Popup::Manual { scroll, .. }
+        | Popup::Report { scroll, .. }
+        | Popup::Diff { scroll, .. }
+        | Popup::DiskUsage { scroll, .. }
+        | Popup::GitLog { scroll, .. }
+        | Popup::FindResults { scroll, .. }
+        | Popup::DirCompare { scroll, .. }
+        | Popup::Archive { scroll, .. }
+        | Popup::JunkReview { scroll, .. }
+        | Popup::DupeReview { scroll, .. }
+        | Popup::StructureReview { scroll, .. }
+        | Popup::RenameReview { scroll, .. }
+        | Popup::RemoteBrowser { scroll, .. }
+        | Popup::AiChat { scroll, .. } => *scroll,
+        _ => 0,
+    }
 }
 
 /// Where a spinner is in its turn, `elapsed_ms` into it.

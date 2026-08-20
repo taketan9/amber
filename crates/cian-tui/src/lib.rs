@@ -2580,6 +2580,17 @@ pub struct App {
     /// Set by the grid's ✕ button; the front end reads it and leaves.
     /// The view the switcher (or `:view`) asked for, until the front end takes it.
     view_request: Option<ViewWanted>,
+    /// What was on top last frame, and how far it was scrolled.
+    ///
+    /// A popup covers cells it does not own, and every renderer under cian
+    /// repaints only what changed. When one opens, closes or scrolls, what
+    /// changed is "most of the screen, in a way the cell diff cannot always
+    /// see" — a glyph whose ink overhangs its cell leaves the overhang behind,
+    /// and the leftovers pile up as white blocks along the lines and stay on
+    /// the panes after the popup has gone. So the frame that changes a popup
+    /// asks for the whole surface to be repainted, which is cheap once and
+    /// exact.
+    popup_shape: Option<(std::mem::Discriminant<Popup>, usize)>,
     /// Draw the left pane as a grid of pictures instead of two lists.
     ///
     /// Only a front end that can draw a picture offers this; in a terminal it
@@ -2868,6 +2879,7 @@ impl App {
             grid_address: None,
             grid_crumbs: Vec::new(),
             view_request: None,
+            popup_shape: None,
             icon_view: false,
             anim_dur: Duration::from_millis(
                 config.options.animation_ms.unwrap_or(DEFAULT_ANIM_MS),
