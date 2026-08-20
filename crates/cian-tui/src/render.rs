@@ -3272,11 +3272,31 @@ pub(crate) fn key_hints(app: &App) -> Vec<(&'static str, &'static str)> {
     // there is room for them.
     if matches!(app.popup, Popup::Viewer { .. }) && app.viewer_dock == Some(app.focused) {
         let editing = matches!(app.popup, Popup::Viewer { editing: true, .. });
+        // Notepad style first: half of what the editor otherwise advertises
+        // does not exist there. There is no mode for Esc to leave and no
+        // command line for `:q` to be typed at, so those two hints would be
+        // instructions that fail.
+        if app.notepad_keys() {
+            return vec![
+                ("Ctrl+S", d("save", "保存")),
+                ("Shift+←→", d("select", "選択")),
+                ("Ctrl+C / V", d("copy / paste", "コピー / 貼付")),
+                ("Ctrl+F", d("search", "検索")),
+                ("Esc", d("close", "閉じる")),
+                ("T", d("vim keys", "vim キーに戻す")),
+            ];
+        }
+        // `T` on both of vim's rows. Someone who opens a file, types a
+        // sentence and watches it not appear is not going to find the switch
+        // by guessing that a *file manager* menu holds it — and that person is
+        // exactly who it was added for. It costs one column to say so, and no
+        // heuristic has to work out whether they are lost.
         return if editing {
             vec![
                 ("Ctrl+S", d("save", "保存")),
                 ("Esc", d("leave the editor", "編集終了")),
                 (":q", d("close", "閉じる")),
+                ("T", d("notepad keys", "メモ帳ふうに")),
                 ("?", d("keys", "キー一覧")),
             ]
         } else {
@@ -3288,6 +3308,7 @@ pub(crate) fn key_hints(app: &App) -> Vec<(&'static str, &'static str)> {
                 ("d c y", d("+ motion", "＋モーション")),
                 ("Tab", d("the other pane", "反対ペインへ")),
                 (":q", d("close", "閉じる")),
+                ("T", d("notepad keys", "メモ帳ふうに")),
                 ("?", d("keys", "キー一覧")),
             ]
         };

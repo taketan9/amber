@@ -459,6 +459,60 @@
         assert!(matches!(app.popup, Popup::Viewer { visual: None, .. }), "and let go");
     }
 
+    /// Alt and Shift and an arrow select a rectangle, where VS Code and
+    /// Notepad++ put column select. It keeps vi's reckoning — what matters is
+    /// that the highlight, the copy and the cut agree, and all three already
+    /// read a rectangle the same way.
+    #[test]
+    fn notepad_style_selects_a_rectangle_with_alt_shift() {
+        let (_d, mut app) = viewer_on("abcdef\nghijkl\nmnopqr\n");
+        app.edit_style = EditStyle::Notepad;
+        app.sync_edit_style();
+        let alt_shift = |c| KeyEvent::new(c, KeyModifiers::ALT | KeyModifiers::SHIFT);
+
+        app.handle_key(alt_shift(KeyCode::Right)).unwrap();
+        assert!(
+            matches!(app.popup, Popup::Viewer { visual: Some(ViewVisual::Block), .. }),
+            "a rectangle, not a run: {:?}",
+            app.popup,
+        );
+        app.handle_key(alt_shift(KeyCode::Down)).unwrap();
+        app.handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)).unwrap();
+        assert_eq!(app.yank.as_deref(), Some("ab\ngh"), "two columns of two rows");
+
+        // Shift alone goes back to a character run rather than extending the
+        // rectangle — the anchor is re-planted where the caret is.
+        app.handle_key(KeyEvent::new(KeyCode::Right, KeyModifiers::SHIFT)).unwrap();
+        assert!(
+            matches!(app.popup, Popup::Viewer { visual: Some(ViewVisual::Char), .. }),
+            "back to a run: {:?}",
+            app.popup,
+        );
+    }
+
+    /// The hint bar tells whoever is looking at it that the other grammar
+    /// exists. Someone who types a sentence into normal mode and watches it not
+    /// appear will not guess that a file-manager menu holds the switch.
+    #[test]
+    fn the_hint_bar_offers_the_other_grammar() {
+        let (_d, mut app) = viewer_on("alpha\n");
+        let keys: Vec<&str> = key_hints(&app).into_iter().map(|(k, _)| k).collect();
+        assert!(keys.contains(&"T"), "vim's bar offers the switch: {keys:?}");
+        assert!(keys.contains(&"i"), "and still says how to type: {keys:?}");
+
+        app.edit_style = EditStyle::Notepad;
+        app.sync_edit_style();
+        let hints = key_hints(&app);
+        let keys: Vec<&str> = hints.iter().map(|(k, _)| *k).collect();
+        assert!(keys.contains(&"T"), "notepad's bar offers the way back: {keys:?}");
+        assert!(keys.contains(&"Ctrl+S"), "{keys:?}");
+        // The two hints that would be lies here: there is no mode for Esc to
+        // leave, and no command line for `:q` to be typed at.
+        assert!(!keys.contains(&":q"), "no command line in this grammar: {keys:?}");
+        let esc = hints.iter().find(|(k, _)| *k == "Esc").map(|(_, v)| *v);
+        assert_eq!(esc, Some("close"), "Esc closes rather than leaving a mode");
+    }
+
     /// Copy, cut and the highlight agree with the delete about where a notepad
     /// selection stops.
     ///

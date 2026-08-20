@@ -102,6 +102,26 @@ impl App {
     /// paragraph, then selects a word and types over it, still expects the
     /// paragraph when they paste. Replacing is not cutting.
     fn delete_viewer_selection(&mut self) {
+        // A rectangle and a run of whole lines mean the same thing in both
+        // grammars — only the character-wise caret disagrees — so those go
+        // through vi's `d`, which already knows how to take them out. The
+        // clipboard is lifted out of reach for the duration for the same
+        // reason as below: replacing is not cutting.
+        if matches!(
+            self.popup,
+            Popup::Viewer { visual: Some(ViewVisual::Block | ViewVisual::Line), .. }
+        ) {
+            let held = self.clipboard.take();
+            let yank = self.yank.clone();
+            let _ = self.viewer_edit_operator(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE));
+            self.clipboard = held;
+            self.yank = yank;
+            if let Popup::Viewer { visual, editing, editable, .. } = &mut self.popup {
+                *visual = None;
+                *editing = *editable;
+            }
+            return;
+        }
         let Popup::Viewer { anchor, line, col, .. } = &self.popup else { return };
         // Whichever way round it was dragged, work on it forwards.
         let (a, b) = ((anchor.0, anchor.1), (*line, *col));
@@ -180,6 +200,7 @@ impl App {
     fn notepad_editor_key(&mut self, key: KeyEvent) -> Result<bool> {
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         let shift = key.modifiers.contains(KeyModifiers::SHIFT);
+        let alt = key.modifiers.contains(KeyModifiers::ALT);
 
         // Ctrl+W closes, as it does in a browser tab and in most editors. The
         // panel otherwise has no keyboard way out in this style: Esc reaches
@@ -231,10 +252,25 @@ impl App {
             return Ok(false);
         }
         if shift {
-            if matches!(self.popup, Popup::Viewer { visual: None, .. }) {
+            // Alt as well makes it a rectangle, which is where VS Code and
+            // Notepad++ put column select and so where hands look for it.
+            //
+            // A block keeps vi's reckoning rather than the half-open one the
+            // character-wise selection above got: what matters is that the
+            // highlight, the copy and the cut agree with each other, and all
+            // three already read the rectangle the same way. Matching another
+            // editor's keystroke *count* is not worth six call sites of
+            // off-by-one — the eye stops pressing when the highlight covers
+            // what it wanted, and it covers what will be taken.
+            let want = if alt { ViewVisual::Block } else { ViewVisual::Char };
+            let restart = !matches!(
+                &self.popup,
+                Popup::Viewer { visual: Some(v), .. } if *v == want
+            );
+            if restart {
                 if let Popup::Viewer { visual, anchor, line, col, .. } = &mut self.popup {
                     *anchor = (*line, *col);
-                    *visual = Some(ViewVisual::Char);
+                    *visual = Some(want);
                 }
             }
         } else if let Popup::Viewer { visual, .. } = &mut self.popup {
