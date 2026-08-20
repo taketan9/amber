@@ -24,6 +24,19 @@ which is where ssh and tmux need it. Everything below describes `cian-tui`
 unless it says otherwise — the window build is the same program with the
 terminal taken out from under it.
 
+**If a downloaded `cian.app` "cannot be opened".** macOS quarantines anything a
+browser delivered and refuses to run what Apple has not notarised — and since
+Sequoia, right-click → Open is no longer a way round it. cian is not signed
+with an Apple Developer certificate, so this applies. Any one of these works:
+
+```sh
+xattr -dr com.apple.quarantine /path/to/cian.app   # drop the attribute
+gh run download <run-id> -n cian-macos             # never gets one: no browser involved
+```
+
+System Settings → Privacy & Security, scrolled to the bottom, has **Open
+Anyway**. A build you made yourself is never quarantined.
+
 - On Windows use **Windows Terminal** or **WezTerm** with a Nerd Font — that is where the icons and rounded corners look right. Offline install is [at the bottom](#install-on-windows-offline).
 - **`?`** shows the full key list, generated from your live keymap, so rebound keys show up too. `cian-tui -man` prints it from a shell; `cian-tui -h` prints the command-line usage.
 - The UI is Japanese by default — cian is written in Japanese first. For English: `cian.set_option("lang", "en")`, or the right-click menu.

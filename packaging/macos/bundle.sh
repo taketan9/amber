@@ -84,6 +84,13 @@ PLIST
 
 # Ad-hoc signing. Not a distribution signature — it is what stops macOS
 # treating a freshly built bundle as damaged on the machine that built it.
+#
+# It is *not* notarisation, and cannot be: that needs an Apple Developer
+# certificate and a round trip to Apple. So a bundle that reaches another Mac
+# through a browser arrives quarantined, and since Sequoia the right-click →
+# Open way round that is gone. `xattr -dr com.apple.quarantine cian.app`, or
+# System Settings → Privacy & Security → Open Anyway. A bundle built on the
+# machine that runs it is never quarantined in the first place.
 # After the copy, never before: signing a binary and then replacing it leaves a
 # signature that describes something else, which macOS reports as damage.
 codesign --force --deep --sign - "$app" 2>/dev/null || true
