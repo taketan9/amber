@@ -1816,6 +1816,13 @@ pub(crate) fn resolve_bg(spec: &str) -> Option<Color> {
 enum CloseTarget {
     /// The active split pane in the shell.
     ShellPane,
+    /// The whole active shell tab, splits and all.
+    ///
+    /// Asked about, like the other two. It used to close on the keypress, which
+    /// left F10 the one key in cian that could end a running shell with no
+    /// question asked — while Shift+F10, which closes one *pane* of that same
+    /// tab, stopped to ask. The bigger loss was the quieter one.
+    ShellTab,
     /// The active tab of a file pane.
     FileTab(FocusedPane),
 }

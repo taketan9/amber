@@ -246,9 +246,13 @@ impl App {
             && !key.modifiers.contains(KeyModifiers::ALT)
             && matches!(self.popup, Popup::None | Popup::Viewer { .. })
             && !matches!(self.popup, Popup::Viewer { editing: true, .. })
-            // …nor while the replace bar is up, where Tab moves between its
-            // two fields and there is nothing else it could mean.
-            && !matches!(self.popup, Popup::Viewer { replace: Some(_), .. })
+            // …nor while any of the panel's prompts is taking text. The replace
+            // bar was the one that had been thought of — Tab moves between its
+            // two fields there — but the `/` search and the `:` command line
+            // have the same claim, and crossing panes from inside one threw
+            // away what had been typed: the prompt row is only drawn for the
+            // pane the panel is docked in, so it left with the focus.
+            && !self.viewer_prompt_is_open()
             && self.focused != FocusedPane::Shell
             && self.mode != Mode::Command
             && self.mode != Mode::Filter
@@ -274,7 +278,7 @@ impl App {
             && !key.modifiers.contains(KeyModifiers::ALT)
             && matches!(self.popup, Popup::Viewer { .. })
             && !matches!(self.popup, Popup::Viewer { editing: true, .. })
-            && !matches!(self.popup, Popup::Viewer { replace: Some(_), .. })
+            && !self.viewer_prompt_is_open()
             && self.viewer_dock == Some(self.focused)
         {
             self.viewer_switch_tab(true);
@@ -304,7 +308,13 @@ impl App {
         // Ctrl+. shows the key manual. `?` does the same without needing the
         // kitty keyboard protocol (plain terminals cannot encode Ctrl+.), and
         // `:man` works everywhere. Full-screen shell apps keep both keys.
-        if self.focused != FocusedPane::Shell
+        //
+        // Only where a key is a key. `?` is also a character people type — into
+        // a `:` command, a `/` filter, a glob — and this asked for the shell
+        // pane alone, so those all opened the manual instead. `key_is_a_command`
+        // is the question being asked, and it already knew the answer: it lists
+        // command mode, filter mode and every viewer prompt as text.
+        if self.key_is_a_command()
             && ((key.code == KeyCode::Char('.') && key.modifiers.contains(KeyModifiers::CONTROL))
                 || (key.code == KeyCode::Char('?') && !key.modifiers.contains(KeyModifiers::CONTROL)))
         {
@@ -682,6 +692,10 @@ impl App {
                     }
                     Ok(())
                 }
+                // Without this guard every Ctrl+<key> typed its bare letter, so
+                // Ctrl+V put a "v" in the search box. The text-input field has
+                // carried the same guard, and the same comment, for as long.
+                KeyCode::Char(_) if key.modifiers.contains(KeyModifiers::CONTROL) => Ok(()),
                 KeyCode::Char(c) => { buffer.push(c); Ok(())}
                 _ => Ok(()),
             }
@@ -1914,7 +1928,19 @@ impl App {
             // the term is one gesture; it must not land in the file, which is
             // both a surprise and an edit.
             let one_line: String = text.chars().filter(|c| *c != '\n' && *c != '\r').collect();
-            if let Popup::Viewer { find_input, sub_input, block_input, .. } = &mut self.popup {
+            if let Popup::Viewer { find_input, sub_input, block_input, replace, .. } = &mut self.popup {
+                // The replace bar was the prompt this list forgot, and it is
+                // the one people paste into most: pasting the term to search
+                // for went into the *file* instead, as a line-wise `p`. Into
+                // whichever of its two fields the caret is in.
+                if let Some(r) = replace.as_mut() {
+                    if r.in_with {
+                        r.with.push_str(&one_line);
+                    } else {
+                        r.find.push_str(&one_line);
+                    }
+                    return;
+                }
                 if let Some(q) = find_input.as_mut() {
                     q.push_str(&one_line);
                     return;
@@ -2098,9 +2124,7 @@ impl App {
                     return Ok(());
                 }
                 KeyCode::F(10) if !shift => {
-                    if self.shell.close_active() {
-                        self.focus(self.last_file_pane);
-                    }
+                    self.popup = Popup::ConfirmClose { target: CloseTarget::ShellTab };
                     return Ok(());
                 }
                 _ => {}

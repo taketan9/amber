@@ -88,6 +88,28 @@ impl App {
         }
     }
 
+    /// Whether one of the panel's prompts is taking text: the `/` search, the
+    /// `:` command line, the text for a rectangular edit, the replace bar, or
+    /// the confirm-each-one walk.
+    ///
+    /// Deliberately *not* `editing`. The seven keys every editor shares — copy,
+    /// cut, paste, undo, redo, select-all, replace — are meant to reach the file
+    /// while it is being typed into; that is the point of the block that checks
+    /// this. Inside a prompt they are not: the text being typed there belongs to
+    /// the prompt, and a paste that lands in the file behind it is an edit
+    /// nobody asked for and a surprise to undo.
+    pub(crate) fn viewer_prompt_is_open(&self) -> bool {
+        matches!(
+            &self.popup,
+            Popup::Viewer { find_input, sub_input, block_input, replace, sub_walk, .. }
+                if find_input.is_some()
+                    || sub_input.is_some()
+                    || block_input.is_some()
+                    || replace.is_some()
+                    || sub_walk.is_some()
+        )
+    }
+
     fn handle_viewer_key_inner(&mut self, key: KeyEvent) -> Result<()> {
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         let shift = key.modifiers.contains(KeyModifiers::SHIFT);
@@ -186,7 +208,13 @@ impl App {
         //
         // The hex editor keeps its own: a paste of text into a hex dump would
         // edit the rendering rather than the file.
+        // …and not while a prompt is taking text over the top of it. These
+        // reached the file from inside the `:` command line and the
+        // rectangular-edit box, so Ctrl+V pasted into the document behind the
+        // prompt rather than into it. The bracketed-paste route already had the
+        // rule right and said so; this one disagreed with it.
         if ctrl
+            && !self.viewer_prompt_is_open()
             && matches!(
                 &self.popup,
                 Popup::Viewer { view, .. } if view.kind == cian_core::viewer::ViewKind::Text
@@ -325,8 +353,16 @@ impl App {
             }
             return Ok(());
         }
-        // While editing, the built-in plain-text editor owns every key.
-        if matches!(self.popup, Popup::Viewer { editing: true, .. }) {
+        // While editing, the built-in plain-text editor owns every key — bar
+        // the ones it could never want. An F-key is not text in any mode, and
+        // neither editor handles one: everything below this line that answers
+        // to an F-key was simply dead while typing. F12 zoomed the pane, F2
+        // walked the open files, Shift+F8/9/10 split the panel — until you
+        // pressed `i`, and then they did nothing at all, with no way to tell
+        // why. They cost nothing to let past.
+        if !matches!(key.code, KeyCode::F(_))
+            && matches!(self.popup, Popup::Viewer { editing: true, .. })
+        {
             return self.handle_editor_key(key);
         }
         // `]c` / `[c` — the next and previous difference, vimdiff's own keys,
@@ -2898,10 +2934,18 @@ impl App {
             if let Popup::Viewer { visual, .. } = &mut self.popup {
                 *visual = held;
             }
-            // `d` over the selection, through the same path the key takes:
-            // that delete knows about line-, char- and block-wise selections,
-            // and about the undo step each of them owes.
-            let _ = self.handle_viewer_key_inner(KeyEvent::new(
+            // `d` over the selection: that delete knows about line-, char- and
+            // block-wise selections, and about the undo step each of them owes.
+            //
+            // Handed to the operator directly, not fed back into the top of the
+            // dispatcher. Going in at the top meant going past the layers above
+            // it — including the one that gives every key to the editor while
+            // it is taking text — so a Ctrl+X pressed in insert mode came back
+            // round as a plain `d` and was *typed into the file*. The copy
+            // happened, the cut never did, and the file grew a letter. The `d`
+            // is an implementation detail of the cut; it has no business being
+            // re-read as input.
+            let _ = self.viewer_edit_operator(KeyEvent::new(
                 KeyCode::Char('d'),
                 KeyModifiers::NONE,
             ));

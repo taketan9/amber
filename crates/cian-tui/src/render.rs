@@ -5614,8 +5614,12 @@ fn draw_simple_dialog(
         Popup::ConfirmClose { target } => {
             let what = match (target, lang) {
                 (CloseTarget::ShellPane, Lang::Ja) => "このシェルペイン",
+                // Named for what goes: a tab is every pane split inside it, and
+                // whatever each of them is still running.
+                (CloseTarget::ShellTab, Lang::Ja) => "このシェルタブ（分割ごと）",
                 (CloseTarget::FileTab(_), Lang::Ja) => "このタブ",
                 (CloseTarget::ShellPane, Lang::En) => "this shell pane",
+                (CloseTarget::ShellTab, Lang::En) => "this shell tab, splits and all",
                 (CloseTarget::FileTab(_), Lang::En) => "this tab",
             };
             let head = if lang == Lang::Ja { format!("{}を閉じますか？", what) } else { format!("Close {}?", what) };

@@ -385,6 +385,159 @@
         assert!(out.contains("secret contents"), "opt-in reads it: {out}");
     }
 
+    /// F10 asks before it closes a shell tab.
+    ///
+    /// It was the one key in cian that could end a running shell with nothing
+    /// asked — while Shift+F10, which closes a single *pane* of that same tab,
+    /// stopped to ask. The bigger loss was the quieter one.
+    #[test]
+    fn f10_asks_before_it_closes_a_shell_tab() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        app.focus(FocusedPane::Shell);
+        app.handle_key(code(KeyCode::F(10))).unwrap();
+        assert!(
+            matches!(app.popup, Popup::ConfirmClose { target: CloseTarget::ShellTab }),
+            "F10 asked first, got {:?}",
+            app.popup,
+        );
+        // The dialog names what goes, and n backs out.
+        let screen = render(&mut app, 100, 30).join("\n");
+        let flat: String = screen.chars().filter(|c| !c.is_whitespace()).collect();
+        assert!(flat.contains("shelltab"), "the dialog says what closes:\n{screen}");
+        app.handle_key(key('n')).unwrap();
+        assert!(matches!(app.popup, Popup::None), "n kept the tab");
+    }
+
+    /// Ctrl+X cuts. It used to cut *and type a `d`*.
+    ///
+    /// The cut is implemented by handing the delete operator a `d`, and it was
+    /// handing it in at the top of the dispatcher — past the layer that gives
+    /// every key to the editor while it is taking text. So in insert mode the
+    /// synthetic key came back round as input: the copy happened, the delete
+    /// never did, and the file grew a letter nobody typed.
+    #[test]
+    fn ctrl_x_while_editing_cuts_rather_than_typing_a_d() {
+        let (_d, mut app) = viewer_on("alpha\nbravo\ncharlie\n");
+        app.handle_key(key('i')).unwrap();
+        assert!(matches!(app.popup, Popup::Viewer { editing: true, .. }), "in the editor");
+        app.handle_key(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::CONTROL)).unwrap();
+        let lines = viewer_lines(&app);
+        assert!(
+            !lines.iter().any(|l| l.contains('d')),
+            "no stray `d` was typed into the file: {lines:?}",
+        );
+        assert_eq!(lines.first().map(String::as_str), Some("bravo"), "the line was cut: {lines:?}");
+        assert_eq!(app.yank.as_deref(), Some("alpha\n"), "and it went to the clipboard");
+    }
+
+    /// `?` is a character people type. The manual only opens when the key is a
+    /// key — it used to open from inside the `:` command line and the `/`
+    /// filter, which made a `?` impossible to type into either.
+    #[test]
+    fn question_mark_is_a_character_while_typing() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        app.handle_key(key(':')).unwrap();
+        assert_eq!(app.mode, Mode::Command);
+        for c in "grep foo?".chars() {
+            app.handle_key(key(c)).unwrap();
+        }
+        assert_eq!(app.mode, Mode::Command, "still at the command line");
+        assert_eq!(app.command_buffer, "grep foo?", "the ? was typed");
+        app.handle_key(code(KeyCode::Esc)).unwrap();
+
+        // The filter too.
+        app.start_filter();
+        assert_eq!(app.mode, Mode::Filter);
+        for c in "a??.txt".chars() {
+            app.handle_key(key(c)).unwrap();
+        }
+        assert_eq!(app.mode, Mode::Filter, "still filtering");
+        app.handle_key(code(KeyCode::Esc)).unwrap();
+
+        // And it still opens the manual when it is a key.
+        app.handle_key(key('?')).unwrap();
+        assert!(!matches!(app.popup, Popup::None), "? opened the manual from normal mode");
+    }
+
+    /// A paste belongs to the prompt on top, not to the file underneath.
+    #[test]
+    fn a_paste_goes_to_the_prompt_over_the_file_not_into_it() {
+        // The `:` command line: Ctrl+V used to reach the file behind it.
+        let (_d, mut app) = viewer_on("alpha\nbravo\n");
+        let before = viewer_lines(&app);
+        app.handle_key(key(':')).unwrap();
+        assert!(matches!(&app.popup, Popup::Viewer { sub_input: Some(_), .. }));
+        app.handle_key(KeyEvent::new(KeyCode::Char('v'), KeyModifiers::CONTROL)).unwrap();
+        assert_eq!(viewer_lines(&app), before, "the file was not edited behind the prompt");
+        assert!(
+            matches!(&app.popup, Popup::Viewer { sub_input: Some(_), .. }),
+            "and the prompt is still open",
+        );
+
+        // The replace bar: a terminal paste used to land in the file as a
+        // line-wise `p`. It goes into whichever field the caret is in.
+        let (_d, mut app) = viewer_on("alpha\nbravo\n");
+        let before = viewer_lines(&app);
+        app.start_replace_bar();
+        app.insert_into_active_text("needle");
+        match &app.popup {
+            Popup::Viewer { replace: Some(r), .. } => {
+                assert_eq!(r.find, "needle", "into the find field");
+                assert!(r.with.is_empty());
+            }
+            other => panic!("the replace bar should be open, got {other:?}"),
+        }
+        assert_eq!(viewer_lines(&app), before, "and the file is untouched");
+    }
+
+    /// Tab crosses panes — but not out of a prompt, taking what was typed with
+    /// it. The prompt row is only drawn for the pane the panel is docked in, so
+    /// moving the focus made a half-typed search vanish.
+    #[test]
+    fn tab_does_not_walk_out_of_a_viewer_prompt() {
+        let (_d, mut app) = viewer_on("alpha\nbravo\n");
+        app.handle_key(key('/')).unwrap();
+        for c in "brav".chars() {
+            app.handle_key(key(c)).unwrap();
+        }
+        let focus_before = app.focused;
+        app.handle_key(code(KeyCode::Tab)).unwrap();
+        assert_eq!(app.focused, focus_before, "the focus stayed put");
+        match &app.popup {
+            Popup::Viewer { find_input: Some(q), .. } => assert_eq!(q, "brav", "and so did the query"),
+            other => panic!("the search prompt should still be open, got {other:?}"),
+        }
+    }
+
+    /// An F-key is not text in any mode, and neither editor handles one — so
+    /// the editor no longer swallows them. F2 walked the open files until you
+    /// pressed `i`, and then it did nothing, silently.
+    #[test]
+    fn f_keys_still_work_while_editing() {
+        let (_d, mut app) = viewer_on("alpha\n");
+        app.handle_key(key('i')).unwrap();
+        assert!(matches!(app.popup, Popup::Viewer { editing: true, .. }));
+        let zoomed = app.zoomed;
+        app.handle_key(code(KeyCode::F(12))).unwrap();
+        assert_ne!(app.zoomed, zoomed, "F12 reached the window from inside the editor");
+        // And nothing was typed into the file by the F-key going past.
+        assert_eq!(viewer_lines(&app), vec!["alpha".to_string()], "the file is untouched");
+    }
+
+    /// The pane's `f` search box discards Ctrl+<key> rather than typing its
+    /// bare letter — Ctrl+V used to put a "v" in the box.
+    #[test]
+    fn the_search_box_does_not_type_control_keys() {
+        let (_d, mut app) = app_with(&["alpha.txt", "beta.txt"]);
+        app.start_search();
+        app.handle_key(key('a')).unwrap();
+        app.handle_key(KeyEvent::new(KeyCode::Char('v'), KeyModifiers::CONTROL)).unwrap();
+        match &app.popup {
+            Popup::Search { buffer } => assert_eq!(buffer, "a", "the Ctrl+V typed nothing"),
+            other => panic!("the search box should be open, got {other:?}"),
+        }
+    }
+
     /// In the editor, `:` is a colon. It opened the command line instead —
     /// the binding sat ahead of the editor's own key handling, so a YAML key
     /// or a `foo::bar` could not be typed at all.

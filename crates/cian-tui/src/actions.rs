@@ -2730,6 +2730,13 @@ impl App {
             // Shrink the pane away first; the removal happens when the
             // transition lands (or immediately if animation is off).
             CloseTarget::ShellPane => self.close_shell_pane_animated(),
+            CloseTarget::ShellTab => {
+                // The last tab taking the shell with it hands the focus back to
+                // the listing it was called from, rather than to nothing.
+                if self.shell.close_active() {
+                    self.focus(self.last_file_pane);
+                }
+            }
             CloseTarget::FileTab(pane) => {
                 let tabs = match pane {
                     FocusedPane::Left => &mut self.left,
