@@ -2448,6 +2448,10 @@ impl App {
 
     // ------- Manual -------
     pub(crate) fn open_manual(&mut self) {
+        // Reading the keys is a question about the window, not a request to
+        // close whatever is open in it. A panel docked beside the listing steps
+        // aside and comes back when the manual does. See `stash_viewer`.
+        self.stash_viewer();
         self.popup = Popup::Manual { lines: manual_lines(&self.keymap, self.menu_lang), scroll: 0 };
     }
 

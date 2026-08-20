@@ -385,6 +385,94 @@
         assert!(out.contains("secret contents"), "opt-in reads it: {out}");
     }
 
+    /// A file open beside the listing is not thrown away by a question about
+    /// the window.
+    ///
+    /// `self.popup` holds one thing, and a docked panel is in it — while the
+    /// listing beside it still answers its own keys, by design. So `?` and `M`
+    /// wrote straight over the open file, unsaved edits and all, while the ✕
+    /// and `:q` both refused to close a dirty panel. Now the panel steps aside
+    /// and comes back, the way the panel's own menu has always done.
+    #[test]
+    fn the_manual_and_the_menu_step_aside_rather_than_over_the_panel() {
+        for (what, open) in [
+            ("the manual", (|a: &mut App| a.handle_key(key('?')).unwrap()) as fn(&mut App)),
+            ("the menu", |a: &mut App| a.handle_key(key('M')).unwrap()),
+        ] {
+            let (_d, mut app) = viewer_on("alpha\nbravo\n");
+            // Dock it beside the listing, and dirty it, so what is at stake is
+            // the same thing ✕ and `:q` refuse to discard.
+            app.handle_key(code(KeyCode::F(12))).unwrap();
+            app.handle_key(key('x')).unwrap();
+            assert!(matches!(app.popup, Popup::Viewer { dirty: true, .. }), "edited: {what}");
+            let dock = app.viewer_dock.expect("docked");
+            let edited = viewer_lines(&app);
+            // Focus the listing beside it — this is the state where the
+            // listing's own keys run with the panel still in the popup slot.
+            app.focus(match dock {
+                FocusedPane::Left => FocusedPane::Right,
+                _ => FocusedPane::Left,
+            });
+            let _ = render(&mut app, 160, 30);
+
+            open(&mut app);
+            assert!(
+                !matches!(app.popup, Popup::None),
+                "{what} opened",
+            );
+            assert!(
+                app.viewer_return.is_some(),
+                "{what} put the panel aside rather than over it",
+            );
+
+            // And closing it brings the file back, edits intact.
+            app.handle_key(code(KeyCode::Esc)).unwrap();
+            match &app.popup {
+                Popup::Viewer { dirty, .. } => assert!(*dirty, "{what}: the edits survived"),
+                other => panic!("{what}: the panel should be back, got {other:?}"),
+            }
+            assert_eq!(viewer_lines(&app), edited, "{what}: and it is the same buffer");
+        }
+    }
+
+    /// In the Finder and icon skins, a right-click inside the open file belongs
+    /// to the file.
+    ///
+    /// The single-pane block claimed every click in the window — it asked only
+    /// whether a panel was docked, never where the pointer was — and returned
+    /// before the panel's own mouse handling ran. So a right-click in the
+    /// editor opened the *pane's* menu, and took the file with it.
+    #[test]
+    fn a_right_click_in_the_docked_panel_opens_the_panels_own_menu() {
+        let (_d, mut app) = viewer_on("alpha\nbravo\ncharlie\n");
+        app.handle_key(code(KeyCode::F(12))).unwrap();
+        app.skin = Skin::Finder;
+        assert!(app.single_pane_view(), "the skin this was reported in");
+        let _ = render(&mut app, 160, 30);
+        let f = app.viewer_frame;
+        assert!(f.width > 0 && f.height > 0, "the panel was measured");
+
+        app.handle_mouse(crossterm::event::MouseEvent {
+            kind: crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Right),
+            column: f.x + f.width / 2,
+            row: f.y + f.height / 2,
+            modifiers: KeyModifiers::NONE,
+        });
+        assert!(
+            matches!(app.popup, Popup::ContextMenu { .. }),
+            "a menu opened, got {:?}",
+            app.popup,
+        );
+        // The panel's menu, not the pane's: the panel's is the one that puts
+        // the file aside rather than over it.
+        assert!(
+            app.viewer_return.is_some(),
+            "it was the panel's own menu — the file is still there behind it",
+        );
+        app.handle_key(code(KeyCode::Esc)).unwrap();
+        assert!(matches!(app.popup, Popup::Viewer { .. }), "and Esc goes back to the file");
+    }
+
     /// F10 asks before it closes a shell tab.
     ///
     /// It was the one key in cian that could end a running shell with nothing

@@ -13,6 +13,29 @@ impl App {
         self.note_navigation(before);
     }
 
+    /// Whether the pointer is over the viewer panel's own frame.
+    ///
+    /// Purely geometric — it does not ask whether the panel is docked, because
+    /// one caller wants the answer for a floating one too. Written once because
+    /// three places ask it and they have to agree: two carried a copy each and
+    /// the third had none, which is how a right-click inside a docked panel
+    /// ended up being answered by the pane behind it.
+    fn pointer_over_panel(&self, col: u16, row: u16) -> bool {
+        let hit = |r: Rect| {
+            r.width > 0
+                && r.height > 0
+                && col >= r.x
+                && col < r.x + r.width
+                && row >= r.y
+                && row < r.y + r.height
+        };
+        // Split in two, the panel is both halves — `viewer_frame` only
+        // describes the one the keyboard is on.
+        hit(self.viewer_frame)
+            || (self.viewer_split.is_some()
+                && (hit(self.viewer_half_rects[0]) || hit(self.viewer_half_rects[1])))
+    }
+
     fn handle_mouse_inner(&mut self, ev: MouseEvent) {
         let (col, row) = (ev.column, ev.row);
 
@@ -45,7 +68,19 @@ impl App {
         // dialog over them, and the window still belongs to everybody.
         let popup_owns_the_mouse =
             !matches!(self.popup, Popup::None) && self.viewer_dock.is_none();
-        if self.single_pane_view() && !popup_owns_the_mouse {
+        // …and the exception cuts both ways. "The window still belongs to
+        // everybody" is the half about the panes; the other half is that inside
+        // its own frame the panel is what the pointer is over. This asked only
+        // the first, so it claimed clicks that landed *on* the panel and
+        // returned before the panel's own handling further down ever ran: in
+        // the Finder and icon skins a right-click inside the open file gave you
+        // the pane's menu — and, because that menu overwrites the popup slot,
+        // took the file with it — while the wheel scrolled the grid behind the
+        // text the pointer was resting on.
+        let on_the_panel = matches!(self.popup, Popup::Viewer { .. })
+            && self.viewer_dock.is_some()
+            && self.pointer_over_panel(col, row);
+        if self.single_pane_view() && !popup_owns_the_mouse && !on_the_panel {
             if matches!(ev.kind, MouseEventKind::Down(MouseButton::Left)) {
                 // Either modifier means "add to the selection". A terminal
                 // never sees Super at all; a window does, and on a Mac whose
@@ -152,6 +187,9 @@ impl App {
         // — the panel is one surface among the window's, not a dialog over
         // them.
         if !on_divider && matches!(self.popup, Popup::Viewer { .. }) && self.viewer_dock.is_some() {
+            let inside = self.pointer_over_panel(col, row);
+            // The panes, for working out which one a click outside the panel
+            // landed on. The panel's own frame is `pointer_over_panel`.
             let hit = |r: Rect| {
                 r.width > 0
                     && r.height > 0
@@ -160,9 +198,6 @@ impl App {
                     && row >= r.y
                     && row < r.y + r.height
             };
-            let inside = hit(self.viewer_frame)
-                || (self.viewer_split.is_some()
-                    && (hit(self.viewer_half_rects[0]) || hit(self.viewer_half_rects[1])));
             if matches!(ev.kind, MouseEventKind::Down(_)) {
                 let to = if inside {
                     // Clicking the panel focuses it, the same way clicking a
@@ -199,21 +234,7 @@ impl App {
         // …and it only handles the mouse *inside its own frame* when it is
         // docked: outside it, the click belongs to the window — a border to
         // drag, a pane to focus.
-        let inside_panel = {
-            let hit = |r: Rect| {
-                r.width > 0
-                    && r.height > 0
-                    && col >= r.x
-                    && col < r.x + r.width
-                    && row >= r.y
-                    && row < r.y + r.height
-            };
-            // Split in two, the panel is both halves — `viewer_frame` only
-            // describes the one the keyboard is on.
-            hit(self.viewer_frame)
-                || (self.viewer_split.is_some()
-                    && (hit(self.viewer_half_rects[0]) || hit(self.viewer_half_rects[1])))
-        };
+        let inside_panel = self.pointer_over_panel(col, row);
         // The seam between two panes runs along the panel's own border, so a
         // click there is a resize even though it is "inside" the frame.
         // The wheel belongs to whatever the pointer is over, never to whatever

@@ -38,6 +38,25 @@ impl App {
         self.popup = Popup::ContextMenu { items, cursor: 0, at: (col, row) };
     }
 
+    /// Put a live panel aside before something else takes the popup slot.
+    ///
+    /// `self.popup` holds one thing at a time, and a docked panel is in it —
+    /// while the listing beside it still answers its own keys, by design. So
+    /// anything the listing opened *wrote over the open file*, unsaved edits
+    /// and all: `?` for the manual, `M` for the menu, a right-click on the
+    /// neighbouring pane. Meanwhile the ✕ and `:q` both refuse to close a dirty
+    /// panel — the same loss was forbidden through two doors and silent through
+    /// a third.
+    ///
+    /// Nothing is asked of the user, because nothing is lost: what goes aside
+    /// is drawn behind whatever took its place and comes back when that closes.
+    /// A no-op unless a viewer is what is being displaced.
+    pub(crate) fn stash_viewer(&mut self) {
+        if matches!(self.popup, Popup::Viewer { .. }) {
+            self.viewer_return = Some(Box::new(std::mem::replace(&mut self.popup, Popup::None)));
+        }
+    }
+
     /// Put the viewer back after a menu (or what the menu opened) is done.
     /// A no-op when nothing was put aside.
     pub(crate) fn restore_viewer(&mut self) -> bool {
@@ -142,6 +161,10 @@ impl App {
         items.push(MenuItem::Quit);
         items.push(MenuItem::Manual);
         self.menu_stack.clear();
+        // A panel open beside the listing steps aside rather than being
+        // overwritten — the same courtesy `open_viewer_menu` above already
+        // extends, and for the same reason.
+        self.stash_viewer();
         self.popup = Popup::ContextMenu { items, cursor: 0, at: (col, row) };
     }
 

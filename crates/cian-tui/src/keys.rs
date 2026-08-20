@@ -1583,7 +1583,14 @@ impl App {
             // saturating at the line count here is safe.
             let last = lines.len().saturating_sub(1);
             match key.code {
-                KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q') => self.popup = Popup::None,
+                // Back to whatever the manual was raised over — the panel, when
+                // it was opened beside one. `menu_back` does the same for the
+                // menu; this was the one way out that did not.
+                KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q') => {
+                    if !self.restore_viewer() {
+                        self.popup = Popup::None;
+                    }
+                }
                 KeyCode::Char('j') | KeyCode::Down => *scroll = (*scroll + 1).min(last),
                 KeyCode::Char('k') | KeyCode::Up => *scroll = scroll.saturating_sub(1),
                 KeyCode::Char('d') | KeyCode::PageDown => *scroll = (*scroll + 10).min(last),
