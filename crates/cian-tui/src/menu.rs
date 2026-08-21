@@ -63,6 +63,19 @@ impl App {
 
     /// Put the viewer back after a menu (or what the menu opened) is done.
     /// A no-op when nothing was put aside.
+    /// Dismiss whatever is on screen: back to the panel it was raised over, or
+    /// to nothing when it was not raised over one.
+    ///
+    /// What every way out of a dialog, menu, manual or switch list does, in one
+    /// place. Four of them had written it out, which is three chances for the
+    /// next one to forget — and forgetting it is how an open file gets left
+    /// stranded behind a popup that has already closed.
+    pub(crate) fn dismiss_to_viewer(&mut self) {
+        if !self.restore_viewer() {
+            self.popup = Popup::None;
+        }
+    }
+
     pub(crate) fn restore_viewer(&mut self) -> bool {
         match self.viewer_return.take() {
             Some(v) => {
@@ -337,11 +350,7 @@ impl App {
             Some(parent) => self.popup = parent,
             // Closing the top of the menu goes back to whatever it was opened
             // over — the viewer, when it was opened over one.
-            None => {
-                if !self.restore_viewer() {
-                    self.popup = Popup::None;
-                }
-            }
+            None => self.dismiss_to_viewer(),
         }
     }
 

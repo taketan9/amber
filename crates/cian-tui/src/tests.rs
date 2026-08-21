@@ -828,8 +828,9 @@
         assert!(matches!(app.popup, Popup::Viewer { visual: None, .. }), "Esc dropped the selection");
         assert!(matches!(app.popup, Popup::Viewer { .. }), "and kept the file open");
 
-        // Dirty, and it still goes on the third — the same bargain `:q!` and
-        // vim style's own three Escs make.
+        // With unsaved work in it the third press asks rather than going.
+        // Three presses show intent; they do not show intent to lose anything,
+        // and a hand pressing Esc repeatedly is usually the least sure one.
         app.handle_key(key('z')).unwrap();
         assert!(matches!(app.popup, Popup::Viewer { dirty: true, .. }), "edited");
         for _ in 0..2 {
@@ -837,7 +838,37 @@
             assert!(matches!(app.popup, Popup::Viewer { .. }), "not yet");
         }
         app.handle_key(code(KeyCode::Esc)).unwrap();
-        assert!(!matches!(app.popup, Popup::Viewer { .. }), "the third closed it");
+        assert!(
+            matches!(app.popup, Popup::ConfirmClose { target: CloseTarget::ViewerFile }),
+            "the third asked, got {:?}",
+            app.popup,
+        );
+        // And backing out returns the file with its edits, rather than nothing.
+        app.handle_key(key('n')).unwrap();
+        match &app.popup {
+            Popup::Viewer { dirty, .. } => assert!(*dirty, "the edits came back"),
+            other => panic!("the panel should be back, got {other:?}"),
+        }
+        // Saying yes goes through with it.
+        for _ in 0..3 {
+            app.handle_key(code(KeyCode::Esc)).unwrap();
+        }
+        app.handle_key(key('y')).unwrap();
+        assert!(!matches!(app.popup, Popup::Viewer { .. }), "closed on yes");
+    }
+
+    /// A clean file is not asked about: three presses and it goes. A question
+    /// with one answer is not worth asking.
+    #[test]
+    fn three_escapes_do_not_ask_about_a_file_with_nothing_to_lose() {
+        let (_d, mut app) = viewer_on("alpha\n");
+        app.edit_style = EditStyle::Notepad;
+        app.sync_edit_style();
+        for _ in 0..3 {
+            app.handle_key(code(KeyCode::Esc)).unwrap();
+        }
+        assert!(!matches!(app.popup, Popup::Viewer { .. }), "it just closed");
+        assert!(!matches!(app.popup, Popup::ConfirmClose { .. }), "with nothing asked");
     }
 
     /// Ctrl+W is the other way out, and that one refuses to discard: it is one

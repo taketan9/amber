@@ -5660,9 +5660,14 @@ fn draw_simple_dialog(
                 // Named for what goes: a tab is every pane split inside it, and
                 // whatever each of them is still running.
                 (CloseTarget::ShellTab, Lang::Ja) => "このシェルタブ（分割ごと）",
+                // Named for what is at stake, not for the file: the file is
+                // on disk either way, and what this question is really about
+                // is the part of it that is not.
+                (CloseTarget::ViewerFile, Lang::Ja) => "このファイル — 未保存の変更は失われます",
                 (CloseTarget::FileTab(_), Lang::Ja) => "このタブ",
                 (CloseTarget::ShellPane, Lang::En) => "this shell pane",
                 (CloseTarget::ShellTab, Lang::En) => "this shell tab, splits and all",
+                (CloseTarget::ViewerFile, Lang::En) => "this file — unsaved changes will be lost",
                 (CloseTarget::FileTab(_), Lang::En) => "this tab",
             };
             let head = if lang == Lang::Ja { format!("{}を閉じますか？", what) } else { format!("Close {}?", what) };

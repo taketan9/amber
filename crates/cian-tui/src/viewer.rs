@@ -1410,6 +1410,17 @@ impl App {
         self.viewer_escapes = self.viewer_escapes.saturating_add(1);
         if self.viewer_escapes >= n {
             self.viewer_escapes = 0;
+            // Three presses show intent, which is why this way out exists at
+            // all — but they do not show intent to *lose* anything, and the
+            // hand that finds itself pressing Esc repeatedly is usually the one
+            // least sure of what is going on. With unsaved work in the file the
+            // third press asks; with none it just goes, because a question with
+            // one answer is not worth asking.
+            if matches!(self.popup, Popup::Viewer { dirty: true, .. }) {
+                self.stash_viewer();
+                self.popup = Popup::ConfirmClose { target: crate::CloseTarget::ViewerFile };
+                return;
+            }
             self.close_viewer_file();
         }
     }

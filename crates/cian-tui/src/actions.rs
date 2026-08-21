@@ -2738,6 +2738,13 @@ impl App {
             // Shrink the pane away first; the removal happens when the
             // transition lands (or immediately if animation is off).
             CloseTarget::ShellPane => self.close_shell_pane_animated(),
+            CloseTarget::ViewerFile => {
+                // Put the panel back before closing it: `close_viewer_file`
+                // works on what is in `popup`, and the dialog was standing
+                // where the panel had been.
+                self.restore_viewer();
+                self.close_viewer_file();
+            }
             CloseTarget::ShellTab => {
                 // The last tab taking the shell with it hands the focus back to
                 // the listing it was called from, rather than to nothing.

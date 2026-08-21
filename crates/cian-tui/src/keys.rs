@@ -968,11 +968,7 @@ impl App {
             match key.code {
                 // Back to whatever the switches were raised over, the way
                 // the manual and the menu both go back.
-                KeyCode::Esc | KeyCode::Char('q') => {
-                    if !self.restore_viewer() {
-                        self.popup = Popup::None;
-                    }
-                }
+                KeyCode::Esc | KeyCode::Char('q') => self.dismiss_to_viewer(),
                 KeyCode::Char('j') | KeyCode::Down => self.toggles_move(1),
                 KeyCode::Char('k') | KeyCode::Up => self.toggles_move(-1),
                 // Enter / Space flip the highlighted switch, keeping the menu up.
@@ -1613,11 +1609,7 @@ impl App {
                 // Back to whatever the manual was raised over — the panel, when
                 // it was opened beside one. `menu_back` does the same for the
                 // menu; this was the one way out that did not.
-                KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q') => {
-                    if !self.restore_viewer() {
-                        self.popup = Popup::None;
-                    }
-                }
+                KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q') => self.dismiss_to_viewer(),
                 KeyCode::Char('j') | KeyCode::Down => *scroll = (*scroll + 1).min(last),
                 KeyCode::Char('k') | KeyCode::Up => *scroll = scroll.saturating_sub(1),
                 KeyCode::Char('d') | KeyCode::PageDown => *scroll = (*scroll + 10).min(last),
@@ -1742,7 +1734,9 @@ impl App {
                     self.popup = Popup::None;
                     self.execute_close(target);
                 }
-                KeyCode::Char('n') | KeyCode::Esc => { self.popup = Popup::None; }
+                // Backing out goes back to the panel when the dialog was
+                // raised over one, rather than to nothing.
+                KeyCode::Char('n') | KeyCode::Esc => self.dismiss_to_viewer(),
                 _ => {}
             }
         Ok(())

@@ -1883,6 +1883,12 @@ enum CloseTarget {
     ShellTab,
     /// The active tab of a file pane.
     FileTab(FocusedPane),
+    /// The file open in the editor panel, with unsaved edits in it.
+    ///
+    /// Only ever raised when it is dirty: three Escs on a clean file just
+    /// close it, and asking about work that is already on disk would be a
+    /// question with one answer.
+    ViewerFile,
 }
 
 #[derive(Debug, Clone)]
