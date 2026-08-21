@@ -617,6 +617,93 @@
         );
     }
 
+    /// Ctrl+Z and Ctrl+Y walk notepad's history.
+    ///
+    /// The keys were always wired; what was missing was anything to walk. vim
+    /// takes one snapshot when insert is entered, and notepad never enters
+    /// insert — it is always in it — so nothing was ever remembered and Ctrl+Z
+    /// had nowhere to go. A run of typing is one step; a line break is its own.
+    #[test]
+    fn notepad_style_can_undo_and_redo_what_was_typed() {
+        let (_d, mut app) = viewer_on("alpha\n");
+        app.edit_style = EditStyle::Notepad;
+        app.sync_edit_style();
+        let undo = || KeyEvent::new(KeyCode::Char('z'), KeyModifiers::CONTROL);
+        let redo = || KeyEvent::new(KeyCode::Char('y'), KeyModifiers::CONTROL);
+
+        for c in "abc".chars() {
+            app.handle_key(key(c)).unwrap();
+        }
+        assert_eq!(viewer_lines(&app).first().map(String::as_str), Some("abcalpha"));
+
+        // One press takes the whole run, not one character of it.
+        app.handle_key(undo()).unwrap();
+        assert_eq!(
+            viewer_lines(&app).first().map(String::as_str),
+            Some("alpha"),
+            "the run came back as a unit: {:?}",
+            viewer_lines(&app),
+        );
+        app.handle_key(redo()).unwrap();
+        assert_eq!(viewer_lines(&app).first().map(String::as_str), Some("abcalpha"), "and went again");
+
+        // A line break ends the run, so it is its own step.
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+        for c in "xy".chars() {
+            app.handle_key(key(c)).unwrap();
+        }
+        assert_eq!(viewer_lines(&app).len(), 2, "the line was split in two");
+        app.handle_key(undo()).unwrap();
+        app.handle_key(undo()).unwrap();
+        assert_eq!(
+            viewer_lines(&app).first().map(String::as_str),
+            Some("abcalpha"),
+            "two presses: the typing, then the break: {:?}",
+            viewer_lines(&app),
+        );
+
+        // Select-and-type is one step, not two — the delete and the character
+        // that replaced it come back together.
+        let (_d, mut app) = viewer_on("alpha\n");
+        app.edit_style = EditStyle::Notepad;
+        app.sync_edit_style();
+        for _ in 0..5 {
+            app.handle_key(KeyEvent::new(KeyCode::Right, KeyModifiers::SHIFT)).unwrap();
+        }
+        app.handle_key(key('Z')).unwrap();
+        assert_eq!(viewer_lines(&app).first().map(String::as_str), Some("Z"));
+        app.handle_key(undo()).unwrap();
+        assert_eq!(
+            viewer_lines(&app).first().map(String::as_str),
+            Some("alpha"),
+            "one press put it all back: {:?}",
+            viewer_lines(&app),
+        );
+    }
+
+    /// Three Escs close the file in notepad style, as they do everywhere else.
+    /// The count was armed on "not editing", and notepad is always editing — so
+    /// that grammar had no way out by keyboard at all.
+    #[test]
+    fn notepad_style_keeps_the_three_escape_way_out() {
+        let (_d, mut app) = viewer_on("alpha\n");
+        app.edit_style = EditStyle::Notepad;
+        app.sync_edit_style();
+
+        // A press that clears a selection did something, so it does not count.
+        app.handle_key(KeyEvent::new(KeyCode::Right, KeyModifiers::SHIFT)).unwrap();
+        app.handle_key(code(KeyCode::Esc)).unwrap();
+        assert!(matches!(app.popup, Popup::Viewer { visual: None, .. }), "cleared");
+        assert!(matches!(app.popup, Popup::Viewer { .. }), "and kept the file");
+
+        app.handle_key(code(KeyCode::Esc)).unwrap();
+        assert!(matches!(app.popup, Popup::Viewer { .. }), "one is not enough");
+        app.handle_key(code(KeyCode::Esc)).unwrap();
+        assert!(matches!(app.popup, Popup::Viewer { .. }), "nor two");
+        app.handle_key(code(KeyCode::Esc)).unwrap();
+        assert!(!matches!(app.popup, Popup::Viewer { .. }), "three closed it");
+    }
+
     /// Alt and Shift and an arrow select a rectangle, where VS Code and
     /// Notepad++ put column select. It keeps vi's reckoning — what matters is
     /// that the highlight, the copy and the cut agree, and all three already
@@ -725,11 +812,12 @@
         assert_eq!(app.yank.as_deref(), Some("alpha"), "vim's v then 4l is still five");
     }
 
-    /// Esc has no mode to leave here, so it drops the selection; with nothing
-    /// selected it reaches the way out — which still refuses to discard unsaved
-    /// work, as `:q` and the ✕ do.
+    /// Esc has no mode to leave here, so it drops the selection first. With
+    /// nothing selected it counts toward the way out — and that way out is
+    /// `:q!`, unsaved edits and all, exactly as it is in vim style. Pinned
+    /// because it loses work: three deliberate presses, no question asked.
     #[test]
-    fn notepad_style_esc_clears_then_closes_but_not_over_unsaved_work() {
+    fn notepad_style_esc_clears_then_counts_toward_the_way_out() {
         let (_d, mut app) = viewer_on("alpha\n");
         app.edit_style = EditStyle::Notepad;
         app.sync_edit_style();
@@ -740,19 +828,37 @@
         assert!(matches!(app.popup, Popup::Viewer { visual: None, .. }), "Esc dropped the selection");
         assert!(matches!(app.popup, Popup::Viewer { .. }), "and kept the file open");
 
-        // Dirty: Esc says why rather than closing.
+        // Dirty, and it still goes on the third — the same bargain `:q!` and
+        // vim style's own three Escs make.
         app.handle_key(key('z')).unwrap();
         assert!(matches!(app.popup, Popup::Viewer { dirty: true, .. }), "edited");
+        for _ in 0..2 {
+            app.handle_key(code(KeyCode::Esc)).unwrap();
+            assert!(matches!(app.popup, Popup::Viewer { .. }), "not yet");
+        }
         app.handle_key(code(KeyCode::Esc)).unwrap();
+        assert!(!matches!(app.popup, Popup::Viewer { .. }), "the third closed it");
+    }
+
+    /// Ctrl+W is the other way out, and that one refuses to discard: it is one
+    /// press, so it cannot ask for the deliberateness three presses show.
+    #[test]
+    fn notepad_style_ctrl_w_will_not_throw_away_unsaved_work() {
+        let (_d, mut app) = viewer_on("alpha\n");
+        app.edit_style = EditStyle::Notepad;
+        app.sync_edit_style();
+        app.handle_key(key('z')).unwrap();
+        assert!(matches!(app.popup, Popup::Viewer { dirty: true, .. }), "edited");
+
+        app.handle_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL)).unwrap();
         assert!(matches!(app.popup, Popup::Viewer { .. }), "the file is still open");
         let said = app.message.clone().unwrap_or_default();
         assert!(said.contains("Ctrl+S"), "and it named the key that saves: {said:?}");
 
-        // Clean: Esc closes.
         app.handle_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL)).unwrap();
         assert!(matches!(app.popup, Popup::Viewer { dirty: false, .. }), "saved");
-        app.handle_key(code(KeyCode::Esc)).unwrap();
-        assert!(!matches!(app.popup, Popup::Viewer { .. }), "and Esc closed it");
+        app.handle_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL)).unwrap();
+        assert!(!matches!(app.popup, Popup::Viewer { .. }), "and now it closes");
     }
 
     /// Ctrl and a sideways arrow steps a word, the motion the shared editor

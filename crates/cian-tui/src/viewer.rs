@@ -25,8 +25,17 @@ impl App {
         // place every key passes through exactly once — counting inside the
         // handler counted some of them twice, which is why the countdown read
         // 1, 2, 1.
-        let way_out = !matches!(self.popup, Popup::Viewer { editing: true, .. })
-            && matches!(key.code, KeyCode::Esc | KeyCode::Backspace);
+        // In notepad style there is no mode for Esc to leave, so it is free to
+        // mean what it means everywhere else in cian: three of them and the
+        // file is gone. The `!editing` test alone never armed it there —
+        // notepad is *always* editing — which left that grammar with no way out
+        // by keyboard at all. Backspace is not offered as one: here it deletes.
+        let way_out = if self.notepad_keys() {
+            key.code == KeyCode::Esc
+        } else {
+            !matches!(self.popup, Popup::Viewer { editing: true, .. })
+                && matches!(key.code, KeyCode::Esc | KeyCode::Backspace)
+        };
         if !way_out || self.viewer_escape_key != Some(key.code) {
             self.viewer_escapes = 0;
             self.viewer_escape_key = way_out.then_some(key.code);
@@ -224,6 +233,36 @@ impl App {
             key.code,
             KeyCode::Char(_) | KeyCode::Enter | KeyCode::Tab | KeyCode::Backspace | KeyCode::Delete
         ) && !ctrl;
+
+        // Undo, for a grammar with no `i` to hang it on.
+        //
+        // vim takes one snapshot when insert is entered, so a whole typing
+        // session walks back as a unit. Notepad never enters insert — it is
+        // always in it — so nothing was taking a snapshot at all, and Ctrl+Z
+        // had no history to walk. It was not that undo was missing; it was
+        // that nothing was being remembered for it.
+        //
+        // A run of plain characters coalesces into one step, the way every
+        // other editor does it. Anything that is not a plain character ends the
+        // run and is a step of its own, so a line break, a delete and a paste
+        // each come back on their own press.
+        if types_over {
+            let plain = matches!(key.code, KeyCode::Char(_));
+            let selected = matches!(self.popup, Popup::Viewer { visual: Some(_), .. });
+            // A selection about to be replaced is snapshotted by the delete
+            // below, which would otherwise make "select, type" two steps.
+            if !selected && (!plain || !self.notepad_typing) {
+                if let Popup::Viewer { view, undo, redo, line, col, .. } = &mut self.popup {
+                    push_viewer_undo(undo, redo, &view.lines, *line, *col);
+                }
+            }
+            self.notepad_typing = plain;
+        } else {
+            // Moving, selecting or saving ends the run: what is typed next is a
+            // separate thought and comes back separately.
+            self.notepad_typing = false;
+        }
+
         if types_over && matches!(self.popup, Popup::Viewer { visual: Some(_), .. }) {
             self.delete_viewer_selection();
             // Backspace and Delete have now done their whole job: what they
@@ -2791,14 +2830,23 @@ impl App {
         // falls through to the panel's own way out, which still refuses to
         // discard unsaved work.
         if key.code == KeyCode::Esc && self.notepad_keys() {
+            self.notepad_typing = false;
             let had = matches!(self.popup, Popup::Viewer { visual: Some(_), .. });
             if had {
                 if let Popup::Viewer { visual, .. } = &mut self.popup {
                     *visual = None;
                 }
+                // A press that did something is not a press asking to leave,
+                // so it does not count toward the three.
+                self.viewer_escapes = 0;
                 return Ok(());
             }
-            return self.close_viewer_or_say_why();
+            // Three in a row is the way out everywhere else in cian, and it is
+            // what hands already know. One press closing the file would make
+            // Esc the most dangerous key on the keyboard in the one grammar
+            // where it is pressed by reflex.
+            self.viewer_way_out(3);
+            return Ok(());
         }
         if key.code == KeyCode::Esc {
             if let Popup::Viewer { editing, replacing, .. } = &mut self.popup {

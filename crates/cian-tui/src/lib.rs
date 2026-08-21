@@ -2498,6 +2498,9 @@ pub struct App {
     /// currently arriving. Cleared by the first key an input method could not
     /// have produced. See [`App::note_ime_is_on`].
     ime_warned: bool,
+    /// Whether notepad style is in the middle of a run of typed characters,
+    /// for coalescing them into one undo step. See `notepad_editor_key`.
+    notepad_typing: bool,
     /// Which grammar the editor panel answers to. See [`EditStyle`].
     ///
     /// Live, and on `App` rather than on the panel: it is a property of who is
@@ -2926,6 +2929,7 @@ impl App {
             message_fresh: false,
             kbd_enhanced: false,
             ime_warned: false,
+            notepad_typing: false,
             // Vim unless a machine says otherwise. cian's editor is vi-shaped
             // and the person who reached for cian in the first place is very
             // likely to want that; the other grammar is for the colleague they
