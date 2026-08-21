@@ -168,10 +168,31 @@ impl App {
         // are a different matter: the IME holds those until they are
         // committed, and they never arrive at all.)
         let key = match key.code {
-            KeyCode::Char(c) if self.key_is_a_command() => match crate::util::fold_ime_key(c) {
-                Some(a) => KeyEvent::new(KeyCode::Char(a), key.modifiers),
-                None => key,
-            },
+            KeyCode::Char(c) if self.key_is_a_command() => {
+                // A character that could only have come from an input method,
+                // arriving where a command was expected, is proof one is on:
+                // cian binds no command to kana, and none to the full-width
+                // block. Worth saying, because the symptom otherwise is that
+                // nothing happens and nothing explains why.
+                //
+                // It cannot catch the case that prompts the question, and that
+                // limit is worth stating plainly: while the IME is *composing*,
+                // a letter is held by the terminal and never reaches cian at
+                // all, so `c` and `s` produce no keystroke to notice. What this
+                // catches is what does arrive — punctuation, and whatever a
+                // composition commits. The real answer to the composing case is
+                // `cian.ime{}`, which switches the input method off whenever
+                // cian is being driven rather than typed into.
+                if c.is_ascii() {
+                    self.ime_warned = false;
+                } else {
+                    self.note_ime_is_on();
+                }
+                match crate::util::fold_ime_key(c) {
+                    Some(a) => KeyEvent::new(KeyCode::Char(a), key.modifiers),
+                    None => key,
+                }
+            }
             _ => key,
         };
         // A copy/move/delete or a directory-compare runs on a worker thread and

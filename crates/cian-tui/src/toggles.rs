@@ -142,32 +142,44 @@ impl App {
                     self.menu_lang = self.lang;
                 }
             }
-            ToggleId::EditStyle => {
-                self.edit_style = match self.edit_style {
-                    crate::EditStyle::Vim => crate::EditStyle::Notepad,
-                    crate::EditStyle::Notepad => crate::EditStyle::Vim,
-                };
-                // A file already open changes grammar under the cursor, which
-                // is the point of flipping this while one is: the switch is
-                // reached for *because* the editor is not behaving the way the
-                // hands expect. Notepad is always typing, so a panel that was
-                // sitting in normal mode starts taking text.
-                self.sync_edit_style();
-                self.message = Some(match self.edit_style {
-                    crate::EditStyle::Vim => tr(
-                        self.lang,
-                        "editor: vim keys — i to type, Esc to stop",
-                        "エディタ: vim キー操作 — i で入力、Esc で抜ける",
-                    )
-                    .into(),
-                    crate::EditStyle::Notepad => tr(
-                        self.lang,
-                        "editor: notepad keys — just type; Shift+arrows select",
-                        "エディタ: メモ帳ふう — そのまま入力、Shift+矢印で選択",
-                    )
-                    .into(),
-                });
-            }
+            ToggleId::EditStyle => self.flip_edit_style(),
         }
+    }
+
+    /// Swap the editor's grammar, and say which one is on now.
+    ///
+    /// Shared by the three ways in: `T` in the listings, the panel's own menu
+    /// (the only one reachable once the editor has the keyboard, since `T` is
+    /// a vi motion there and a character in the other grammar), and
+    /// `:vim` / `:notepad`.
+    pub(crate) fn flip_edit_style(&mut self) {
+        self.set_edit_style(match self.edit_style {
+            crate::EditStyle::Vim => crate::EditStyle::Notepad,
+            crate::EditStyle::Notepad => crate::EditStyle::Vim,
+        });
+    }
+
+    pub(crate) fn set_edit_style(&mut self, to: crate::EditStyle) {
+        self.edit_style = to;
+        // A file already open changes grammar under the cursor, which is the
+        // point of flipping this while one is: the switch is reached for
+        // *because* the editor is not behaving the way the hands expect.
+        // Notepad is always typing, so a panel that was sitting in normal mode
+        // starts taking text.
+        self.sync_edit_style();
+        self.message = Some(match self.edit_style {
+            crate::EditStyle::Vim => tr(
+                self.lang,
+                "editor: vim keys — i to type, Esc to stop",
+                "エディタ: vim キー操作 — i で入力、Esc で抜ける",
+            )
+            .into(),
+            crate::EditStyle::Notepad => tr(
+                self.lang,
+                "editor: notepad keys — just type; Shift+arrows select",
+                "エディタ: メモ帳ふう — そのまま入力、Shift+矢印で選択",
+            )
+            .into(),
+        });
     }
 }

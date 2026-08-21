@@ -163,6 +163,23 @@ impl App {
             "palette" | "commands" | "p" => self.start_command_palette(),
             "jump" | "j" => self.start_fuzzy_jump(),
             "toggles" | "ui" | "toggle" => self.start_toggles(),
+            // Named by what you get, because that is what someone types when
+            // the editor is not behaving the way their hands expect. `T` is
+            // the same switch from a listing; from inside the editor `T` is a
+            // vi motion, so it needs a name that is not a letter.
+            //
+            // Not `:vim` — that is taken, and means the external editor. The
+            // way *back* to vim keys is the panel's menu rather than a command
+            // anyway: notepad style has no command line to type one at.
+            "notepad" => self.set_edit_style(crate::EditStyle::Notepad),
+            "editstyle" | "vimkeys" => match rest.trim() {
+                "vim" | "vi" => self.set_edit_style(crate::EditStyle::Vim),
+                "notepad" | "plain" => self.set_edit_style(crate::EditStyle::Notepad),
+                "" => self.flip_edit_style(),
+                other => {
+                    self.message = Some(format!("editstyle: vim | notepad (got {other:?})"))
+                }
+            },
             "files" | "ff" | "findfile" => self.start_file_finder(),
             "recent" | "oldfiles" | "fo" => self.start_recent_files(),
             "each" | "foreach" => self.run_each(rest),

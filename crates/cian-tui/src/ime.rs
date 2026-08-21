@@ -118,6 +118,49 @@ impl App {
 
     /// `:ime` — what is configured, what cian remembers, and what the last
     /// switch actually did. The answer to "it is set up and nothing happens".
+    /// Say that the input method is on, when a keystroke has just proved it.
+    ///
+    /// Once per run of them, not once per key: a committed composition arrives
+    /// as a burst, and five identical complaints in a row is noise rather than
+    /// news. The flag clears as soon as a key arrives that an input method
+    /// could not have produced, so the next time it happens it is said again.
+    ///
+    /// It names the fix it can offer. Where `cian.ime{}` is configured this
+    /// should never fire — the input method is switched off before a command
+    /// key is ever waited for — so the message doubles as a sign that the
+    /// helper is not set up or is not working, which is the other half of what
+    /// a person in this situation needs to know.
+    pub(crate) fn note_ime_is_on(&mut self) {
+        if self.ime_warned {
+            return;
+        }
+        self.ime_warned = true;
+        self.message = Some(if let Some(cfg) = self.config.ime.clone() {
+            // Configured, and on anyway — so it was turned on *after* cian last
+            // threw the switch. cian only switches on transitions: it sets the
+            // input method off on the way into command mode and never looks
+            // again, so a hand (or the OS, or another window's focus) that
+            // turns it back on afterwards is invisible. This keystroke is that
+            // event finally becoming visible, and the switch is worth throwing
+            // again rather than only complaining about.
+            self.ime_on = Some(false);
+            queue(Job::LeaveText, &cfg);
+            tr(
+                self.lang,
+                "IME was on — switched off so the keys work again",
+                "IME が ON でした — コマンドが効くよう OFF に戻しました",
+            )
+            .into()
+        } else {
+            tr(
+                self.lang,
+                "IME is on — commands need it off. cian can switch it for you: see cian.ime{} (:ime)",
+                "IME が ON です — コマンドは OFF で。cian が自動で切替できます: cian.ime{}（:ime）",
+            )
+            .into()
+        });
+    }
+
     pub(crate) fn ime_report(&mut self, arg: &str) {
         let Some(cfg) = self.config.ime.clone() else {
             self.popup = Popup::Notice { lines: not_configured(self.lang) };

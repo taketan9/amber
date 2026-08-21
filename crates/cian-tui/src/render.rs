@@ -3283,7 +3283,11 @@ pub(crate) fn key_hints(app: &App) -> Vec<(&'static str, &'static str)> {
                 ("Ctrl+C / V", d("copy / paste", "コピー / 貼付")),
                 ("Ctrl+F", d("search", "検索")),
                 ("Esc", d("close", "閉じる")),
-                ("T", d("vim keys", "vim キーに戻す")),
+                // Not `T`: that is a character in this grammar and a vi motion
+                // in the other, so it only reaches the switch from a listing.
+                // The panel's own menu is what is reachable from inside it —
+                // by right-click too, which no terminal can take away.
+                ("S-Enter", d("menu — editor keys", "メニュー — キー操作切替")),
             ];
         }
         // `T` on both of vim's rows. Someone who opens a file, types a
@@ -3296,7 +3300,7 @@ pub(crate) fn key_hints(app: &App) -> Vec<(&'static str, &'static str)> {
                 ("Ctrl+S", d("save", "保存")),
                 ("Esc", d("leave the editor", "編集終了")),
                 (":q", d("close", "閉じる")),
-                ("T", d("notepad keys", "メモ帳ふうに")),
+                (":notepad", d("notepad keys", "メモ帳ふうに")),
                 ("?", d("keys", "キー一覧")),
             ]
         } else {
@@ -3308,7 +3312,7 @@ pub(crate) fn key_hints(app: &App) -> Vec<(&'static str, &'static str)> {
                 ("d c y", d("+ motion", "＋モーション")),
                 ("Tab", d("the other pane", "反対ペインへ")),
                 (":q", d("close", "閉じる")),
-                ("T", d("notepad keys", "メモ帳ふうに")),
+                (":notepad", d("notepad keys", "メモ帳ふうに")),
                 ("?", d("keys", "キー一覧")),
             ]
         };

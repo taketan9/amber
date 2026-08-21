@@ -1134,6 +1134,12 @@ enum MenuItem {
     /// Write the panel's file. `Ctrl+S` everywhere, and here too — notepad
     /// style has no `:w` to fall back on.
     ViewerSave,
+    /// Flip the editor between vim keys and notepad keys.
+    ///
+    /// Also on `T` in the listings — but `T` is a vi motion once the panel
+    /// has the keyboard, and a character once notepad style does, so from
+    /// inside the editor this menu is how it is reached.
+    ViewerEditStyle,
     /// Close the panel, throwing away unsaved edits. `:q!` in vim style; in
     /// notepad style there is no command line, so this is the only way past
     /// the refusal that guards a dirty file.
@@ -1330,6 +1336,9 @@ impl MenuItem {
             MenuItem::ViewerMermaid => tr(lang, "Mermaid diagrams in a browser  (:mermaid)", "mermaid 図をブラウザで開く  (:mermaid)"),
             MenuItem::ViewerEdit => tr(lang, "Open in my editor  (:edit)", "外部エディタで開く  (:edit)"),
             MenuItem::ViewerSave => tr(lang, "Save  (Ctrl+S)", "保存  (Ctrl+S)"),
+            MenuItem::ViewerEditStyle => {
+                tr(lang, "Editor keys: vim / notepad", "エディタのキー操作: vim / メモ帳ふう")
+            }
             MenuItem::ViewerCloseDiscard => tr(lang, "Close without saving", "保存せずに閉じる"),
             MenuItem::RemotePane => tr(lang, "Open server in pane  (:sftp)", "サーバをペインで開く  (:sftp)"),
             MenuItem::DiskUsage => tr(lang, "Disk usage  (:du)", "容量分析  (:du)"),
@@ -2478,6 +2487,10 @@ pub struct App {
     /// Reported by `:keys`, because it is the first thing to suspect when every
     /// Ctrl combination goes quiet at once.
     kbd_enhanced: bool,
+    /// Whether the "your IME is on" note has been made for the run of keys
+    /// currently arriving. Cleared by the first key an input method could not
+    /// have produced. See [`App::note_ime_is_on`].
+    ime_warned: bool,
     /// Which grammar the editor panel answers to. See [`EditStyle`].
     ///
     /// Live, and on `App` rather than on the panel: it is a property of who is
@@ -2905,6 +2918,7 @@ impl App {
             key_probe: false,
             message_fresh: false,
             kbd_enhanced: false,
+            ime_warned: false,
             // Vim unless a machine says otherwise. cian's editor is vi-shaped
             // and the person who reached for cian in the first place is very
             // likely to want that; the other grammar is for the colleague they

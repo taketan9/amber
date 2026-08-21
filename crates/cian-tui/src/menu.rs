@@ -32,6 +32,7 @@ impl App {
         // Where the file lives, for when reading it raises a question about
         // the folder it is in. This used to be Shift+Enter's whole job.
         items.push(MenuItem::RevealInPane);
+        items.push(MenuItem::ViewerEditStyle);
         items.push(MenuItem::ThemePick);
         // Last, and on its own: it is the one item here that loses work.
         items.push(MenuItem::ViewerCloseDiscard);
@@ -555,6 +556,10 @@ impl App {
             MenuItem::ViewerSave => {
                 self.restore_viewer();
                 self.save_viewer_file();
+            }
+            MenuItem::ViewerEditStyle => {
+                self.restore_viewer();
+                self.flip_edit_style();
             }
             MenuItem::ViewerCloseDiscard => {
                 // Put it back before closing it: `close_viewer_file` works on

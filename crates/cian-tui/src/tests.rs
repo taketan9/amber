@@ -459,6 +459,88 @@
         assert!(matches!(app.popup, Popup::Viewer { visual: None, .. }), "and let go");
     }
 
+    /// `T` reaches the switch from a listing — where it is bound — and the
+    /// panel's own menu reaches it from inside the editor, where `T` cannot:
+    /// there it is a vi motion in one grammar and a character in the other.
+    ///
+    /// The hint bar had been advertising `T` on the editor's rows, which is a
+    /// key that does nothing there.
+    #[test]
+    fn the_editor_grammar_is_reachable_from_where_you_are() {
+        // From a listing: `T` opens the toggles, and the switch is in it.
+        let (_d, mut app) = app_with(&["a.txt"]);
+        app.handle_key(key('T')).unwrap();
+        assert!(matches!(app.popup, Popup::Toggles { .. }), "T opened the toggles");
+        let row = app
+            .toggle_rows()
+            .into_iter()
+            .position(|(id, ..)| id == crate::toggles::ToggleId::EditStyle)
+            .expect("the switch is a row");
+        app.popup = Popup::Toggles { cursor: row };
+        app.toggles_apply();
+        assert_eq!(app.edit_style, EditStyle::Notepad, "and flipped it");
+
+        // From inside the editor: `T` is not the way, so the panel's menu is.
+        let (_d, mut app) = viewer_on("alpha\n");
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::SHIFT)).unwrap();
+        let Popup::ContextMenu { items, .. } = &app.popup else {
+            panic!("Shift+Enter opens the panel's menu, got {:?}", app.popup)
+        };
+        assert!(
+            items.contains(&MenuItem::ViewerEditStyle),
+            "and the switch is in it: {items:?}",
+        );
+
+        // And `:notepad` / `:vim` name it for anyone who would rather type.
+        let (_d, mut app) = viewer_on("alpha\n");
+        run_cmd(&mut app, "notepad");
+        assert_eq!(app.edit_style, EditStyle::Notepad);
+        // `:vim` is taken — it opens the external editor — so the way back by
+        // command is spelled out.
+        run_cmd(&mut app, "editstyle vim");
+        assert_eq!(app.edit_style, EditStyle::Vim);
+
+        // No hint offers a key that does not work where it is shown.
+        let (_d, app) = viewer_on("alpha\n");
+        let keys: Vec<&str> = key_hints(&app).into_iter().map(|(k, _)| k).collect();
+        assert!(!keys.contains(&"T"), "T is not the editor's key: {keys:?}");
+    }
+
+    /// A character an input method could only have produced, arriving where a
+    /// command was expected, says so. Nothing else in cian would explain why
+    /// the keys stopped working.
+    #[test]
+    fn a_key_that_could_only_be_ime_output_says_the_ime_is_on() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        app.handle_key(key('あ')).unwrap();
+        let said = app.message.clone().unwrap_or_default();
+        assert!(said.contains("IME"), "it said so: {said:?}");
+        // Unconfigured, it can only say so. Configured, it throws the switch
+        // as well — the input method was turned on after cian last set it, and
+        // cian has no other way to notice that has happened.
+        assert!(
+            said.contains("cian.ime"),
+            "with no helper it says how to get one: {said:?}",
+        );
+
+        // Once per run, not once per key: a committed composition arrives as a
+        // burst and would otherwise complain five times.
+        app.message = None;
+        app.handle_key(key('い')).unwrap();
+        assert!(app.message.is_none(), "the second one is quiet: {:?}", app.message);
+
+        // A key an input method could not have produced ends the run, so the
+        // next time it happens it is said again.
+        app.handle_key(key('j')).unwrap();
+        app.message = None;
+        app.handle_key(key('う')).unwrap();
+        assert!(
+            app.message.clone().unwrap_or_default().contains("IME"),
+            "and said again after an ASCII key: {:?}",
+            app.message,
+        );
+    }
+
     /// Alt and Shift and an arrow select a rectangle, where VS Code and
     /// Notepad++ put column select. It keeps vi's reckoning — what matters is
     /// that the highlight, the copy and the cut agree, and all three already
@@ -497,14 +579,20 @@
     fn the_hint_bar_offers_the_other_grammar() {
         let (_d, mut app) = viewer_on("alpha\n");
         let keys: Vec<&str> = key_hints(&app).into_iter().map(|(k, _)| k).collect();
-        assert!(keys.contains(&"T"), "vim's bar offers the switch: {keys:?}");
+        // Not `T`: that is the listings' key for the toggles, and a vi motion
+        // once the panel has the keyboard. The bar names what works here.
+        assert!(!keys.contains(&"T"), "T does nothing in the editor: {keys:?}");
+        assert!(keys.contains(&":notepad"), "vim's bar offers the switch: {keys:?}");
         assert!(keys.contains(&"i"), "and still says how to type: {keys:?}");
 
         app.edit_style = EditStyle::Notepad;
         app.sync_edit_style();
         let hints = key_hints(&app);
         let keys: Vec<&str> = hints.iter().map(|(k, _)| *k).collect();
-        assert!(keys.contains(&"T"), "notepad's bar offers the way back: {keys:?}");
+        // `:notepad` would be a lie here — there is no command line in this
+        // grammar — so the way back is the panel's own menu.
+        assert!(keys.contains(&"S-Enter"), "notepad's bar offers the way back: {keys:?}");
+        assert!(!keys.contains(&"T"), "{keys:?}");
         assert!(keys.contains(&"Ctrl+S"), "{keys:?}");
         // The two hints that would be lies here: there is no mode for Esc to
         // leave, and no command line for `:q` to be typed at.
