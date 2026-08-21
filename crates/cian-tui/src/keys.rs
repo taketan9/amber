@@ -966,7 +966,13 @@ impl App {
     fn toggles_key(&mut self, key: KeyEvent) -> Result<()> {
         let Popup::Toggles { .. } = &self.popup else { return Ok(()) };
             match key.code {
-                KeyCode::Esc | KeyCode::Char('q') => self.popup = Popup::None,
+                // Back to whatever the switches were raised over, the way
+                // the manual and the menu both go back.
+                KeyCode::Esc | KeyCode::Char('q') => {
+                    if !self.restore_viewer() {
+                        self.popup = Popup::None;
+                    }
+                }
                 KeyCode::Char('j') | KeyCode::Down => self.toggles_move(1),
                 KeyCode::Char('k') | KeyCode::Up => self.toggles_move(-1),
                 // Enter / Space flip the highlighted switch, keeping the menu up.

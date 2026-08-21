@@ -1140,6 +1140,12 @@ enum MenuItem {
     /// has the keyboard, and a character once notepad style does, so from
     /// inside the editor this menu is how it is reached.
     ViewerEditStyle,
+    /// Open the toggles menu (`T` / `:toggles`).
+    ///
+    /// The switches live behind a single letter that is easy to have never
+    /// found. Right-click is where people look for "what can this do", so the
+    /// menu carries a way in rather than leaving `T` as the only one.
+    TogglesMenu,
     /// Close the panel, throwing away unsaved edits. `:q!` in vim style; in
     /// notepad style there is no command line, so this is the only way past
     /// the refusal that guards a dirty file.
@@ -1384,6 +1390,7 @@ impl MenuItem {
             MenuItem::ArchiveMenu => tr(lang, "Archive ▸", "書庫 ▸"),
             MenuItem::InspectMenu => tr(lang, "Inspect ▸", "調べる ▸"),
             MenuItem::ViewMenu => tr(lang, "View ▸", "表示 ▸"),
+            MenuItem::TogglesMenu => tr(lang, "Switches…  (T)", "各種スイッチ…  (T)"),
             MenuItem::ViewDetails => tr(lang, "▤ Details  (:view details)", "▤ 詳細一覧  (:view details)"),
             MenuItem::ViewIcons => tr(lang, "▦ Icons  (:view icons)", "▦ アイコン  (:view icons)"),
             MenuItem::ViewClassic => tr(lang, "▥ Classic  (:view classic)", "▥ クラシック  (:view classic)"),

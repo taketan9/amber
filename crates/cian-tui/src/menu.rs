@@ -300,6 +300,7 @@ impl App {
                 MenuItem::ViewClassic,
                 MenuItem::HiddenToggle,
                 MenuItem::ThemePickPane,
+                MenuItem::TogglesMenu,
                 MenuItem::Back,
             ]),
             MenuItem::SessionMenu => {
@@ -567,6 +568,12 @@ impl App {
                 // is not there.
                 self.restore_viewer();
                 self.close_viewer_file();
+            }
+            MenuItem::TogglesMenu => {
+                // Not `restore_viewer` first: the toggles are a popup of
+                // their own and would be written over by it. What was put
+                // aside stays aside and comes back when they close.
+                self.start_toggles();
             }
             MenuItem::RemotePane => self.start_scp(ScpDir::BrowsePane),
             MenuItem::DiskUsage => self.start_du_here(),

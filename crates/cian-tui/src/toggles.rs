@@ -28,6 +28,12 @@ pub(crate) enum ToggleId {
 impl App {
     /// Open the toggles menu (`T` / `:toggles`).
     pub(crate) fn start_toggles(&mut self) {
+        // A panel open beside the listing steps aside rather than being
+        // written over — `T` reaches this from a listing while the panel is
+        // still the thing in `self.popup`, so without this the switches ate
+        // the open file, unsaved edits and all. Same fault the manual and the
+        // context menu had; see `stash_viewer`.
+        self.stash_viewer();
         self.popup = Popup::Toggles { cursor: 0 };
     }
 
@@ -107,23 +113,74 @@ impl App {
         match id {
             ToggleId::Dotfiles => self.toggle_hidden(),
             ToggleId::Sync => {
+                let was = self.shell.is_broadcasting();
                 let on = self.shell.toggle_broadcast();
                 self.message = Some(if on {
                     tr(self.lang, "⇄ input synchronize ON", "⇄ 入力同期 ON").into()
+                } else if !was {
+                    // It refused rather than turned off. `set_broadcast` will
+                    // not switch on with nothing to synchronise *to*, and said
+                    // so by staying off — which from the menu is indis-
+                    // tinguishable from the key not working at all.
+                    tr(
+                        self.lang,
+                        "input sync needs two or more shell panes — Shift+F8 / Shift+F9 to split one",
+                        "入力同期にはシェルペインが2つ以上必要です — Shift+F8 / Shift+F9 で分割",
+                    )
+                    .into()
                 } else {
                     tr(self.lang, "input synchronize off", "入力同期 OFF").into()
                 });
             }
+            // These two changed a value and said nothing, so the only sign
+            // anything had happened was the row's own state text — which is
+            // easy to miss when the eye is on the key you just pressed. Every
+            // other switch here reports; these now do too.
             ToggleId::Notify => {
                 let cur = self.notify_runtime.or(self.config.options.notify).unwrap_or(true);
                 self.notify_runtime = Some(!cur);
+                self.message = Some(if !cur {
+                    tr(
+                        self.lang,
+                        "task-done notification ON — a bell and a toast when a long job finishes",
+                        "完了通知 ON — 時間のかかる処理が終わったら知らせます",
+                    )
+                    .into()
+                } else {
+                    tr(self.lang, "task-done notification off", "完了通知 OFF").into()
+                });
             }
             ToggleId::Verify => {
                 let cur =
                     self.verify_runtime.or(self.config.options.verify_transfers).unwrap_or(false);
                 self.verify_runtime = Some(!cur);
+                self.message = Some(if !cur {
+                    tr(
+                        self.lang,
+                        "verify transfers ON — files are re-read and checksummed after an upload",
+                        "転送後ベリファイ ON — 転送後に読み直してチェックサムを照合します",
+                    )
+                    .into()
+                } else {
+                    tr(self.lang, "verify transfers off", "転送後ベリファイ OFF").into()
+                });
             }
-            ToggleId::Preview => self.toggle_preview(),
+            ToggleId::Preview => {
+                self.toggle_preview();
+                // It turned on, but there is nowhere for it to appear: the
+                // preview draws in the shell panel's area, and this view has
+                // no shell panel. Without this the switch reads as broken.
+                if self.preview_on && !self.has_shell_panel() {
+                    self.message = Some(
+                        tr(
+                            self.lang,
+                            "preview on — but it draws in the shell panel, which is not open here (Shift+J)",
+                            "プレビュー ON — ただし表示先のシェル枠が開いていません（Shift+J）",
+                        )
+                        .into(),
+                    );
+                }
+            }
             ToggleId::ReadCloud => {
                 let on = !cian_core::cloud::include();
                 cian_core::cloud::set_include(on);

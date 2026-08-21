@@ -459,6 +459,82 @@
         assert!(matches!(app.popup, Popup::Viewer { visual: None, .. }), "and let go");
     }
 
+    /// Every switch says what it did. Three of them changed something and
+    /// reported nothing, so the only sign was the row's own state text — and
+    /// two of those can *refuse*, which from the menu looked identical to the
+    /// key not working.
+    #[test]
+    fn every_switch_says_what_it_did() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        // The cloud switch is a *process-wide* setting, and these tests run in
+        // parallel — flipping it here reached into whichever other test was
+        // reading it at the time. Put back exactly as found.
+        let cloud_was = cian_core::cloud::include();
+        let rows = app.toggle_rows();
+        for (i, (id, label, ..)) in rows.iter().enumerate() {
+            // Language flips the whole interface, including these labels;
+            // it is checked on its own elsewhere.
+            if *id == crate::toggles::ToggleId::Lang {
+                continue;
+            }
+            app.popup = Popup::Toggles { cursor: i };
+            app.message = None;
+            app.toggles_apply();
+            assert!(
+                app.message.is_some(),
+                "\"{label}\" changed something and said nothing",
+            );
+        }
+        cian_core::cloud::set_include(cloud_was);
+    }
+
+    /// Input sync refuses with fewer than two shell panes — and says so, rather
+    /// than staying off and looking broken.
+    #[test]
+    fn input_sync_says_why_it_refused() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        assert!(!app.shell.is_broadcasting());
+        let row = app
+            .toggle_rows()
+            .into_iter()
+            .position(|(id, ..)| id == crate::toggles::ToggleId::Sync)
+            .expect("the row is there");
+        app.popup = Popup::Toggles { cursor: row };
+        app.toggles_apply();
+        assert!(!app.shell.is_broadcasting(), "still off — there is nothing to sync to");
+        let said = app.message.clone().unwrap_or_default();
+        assert!(
+            said.contains("F8") || said.contains("F9"),
+            "and it said what is missing: {said:?}",
+        );
+    }
+
+    /// The switches step aside for an open panel rather than over it — `T`
+    /// reaches them from a listing while the panel is still what is in
+    /// `self.popup`, so this ate the open file, unsaved edits and all.
+    #[test]
+    fn the_switches_do_not_eat_an_open_panel() {
+        let (_d, mut app) = viewer_on("alpha\nbravo\n");
+        app.handle_key(code(KeyCode::F(12))).unwrap();
+        app.handle_key(key('x')).unwrap();
+        assert!(matches!(app.popup, Popup::Viewer { dirty: true, .. }), "edited");
+        let dock = app.viewer_dock.expect("docked");
+        app.focus(match dock {
+            FocusedPane::Left => FocusedPane::Right,
+            _ => FocusedPane::Left,
+        });
+        let _ = render(&mut app, 160, 30);
+
+        app.handle_key(key('T')).unwrap();
+        assert!(matches!(app.popup, Popup::Toggles { .. }), "the switches opened");
+        assert!(app.viewer_return.is_some(), "and the file went aside, not away");
+        app.handle_key(code(KeyCode::Esc)).unwrap();
+        match &app.popup {
+            Popup::Viewer { dirty, .. } => assert!(*dirty, "the edits came back with it"),
+            other => panic!("the panel should be back, got {other:?}"),
+        }
+    }
+
     /// `T` reaches the switch from a listing — where it is bound — and the
     /// panel's own menu reaches it from inside the editor, where `T` cannot:
     /// there it is a vi motion in one grammar and a character in the other.
