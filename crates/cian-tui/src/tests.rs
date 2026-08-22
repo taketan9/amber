@@ -7492,6 +7492,27 @@
                 missing.push(format!("palette: :{verb}"));
             }
         }
+        // The two READMEs are the first thing anyone reads, and nothing holds
+        // them to the code at all — `:coding` sat in both for as long as it
+        // took someone to type it.
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(|p| p.parent())
+            .expect("the workspace root");
+        for doc in ["README.md", "README.ja.md"] {
+            let text = std::fs::read_to_string(root.join(doc)).expect("a readme");
+            for name in named(&text) {
+                // `:s/…`, `:g/…` and `:v/…` are matched on their pattern, not
+                // on a name; `:cq` is typed in the user's own vim, which is
+                // what cian reads the exit code of.
+                if matches!(name.as_str(), "s" | "g" | "v" | "cq") {
+                    continue;
+                }
+                if !known.contains(&name) {
+                    missing.push(format!("{doc}: :{name}"));
+                }
+            }
+        }
         missing.sort();
         missing.dedup();
         assert!(missing.is_empty(), "named but not answered: {missing:?}");

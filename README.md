@@ -128,7 +128,7 @@ Vim-flavoured: `h j k l`, `w b`, `0 $`, `gg G`, `Ctrl-D/U`, `Ctrl-F/B`, `{` `}`,
 | `]c` / `[c` | step through those differences |
 | `]]` / `[[` | next / previous heading or definition |
 | `Space` / `za` / `zA` | fold one section / toggle all |
-| `:summary` / `:coding` | ask the AI to summarise the file / talk about its code (right-click too) |
+| `:summary` | ask the AI to summarise the file (right-click too). Right-click also has **Review and fix this code** for a selection |
 | `?` | the viewer's own key list, grouped by what you are doing |
 | **Tab** | cross to the pane beside it and back — a listing or another open file, whichever is there. Never the shell: that is `Shift+J` |
 | **Esc ×3** | leave the file the way `:q!` does — one Esc must not close a file with unsaved edits in it, three deliberate presses are not a slip |
