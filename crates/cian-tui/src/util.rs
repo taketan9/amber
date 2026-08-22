@@ -3,7 +3,16 @@
 //! `App` state, so it lives apart from the main file for readability.
 
 use unicode_width::UnicodeWidthStr;
-use ratatui::layout::Rect;
+use ratatui::layout::{Position, Rect};
+
+/// Is the pointer inside this rectangle? Ratatui's own containment test, named
+/// for how the mouse code reads. It was written out by hand in twenty places,
+/// each spelling the same four comparisons; several also guarded on a non-zero
+/// width first, which this needs no help with — a rectangle of no size holds
+/// no point, so a widget that has not been laid out yet answers false.
+pub(crate) fn hit_rect(r: Rect, col: u16, row: u16) -> bool {
+    r.contains(Position::new(col, row))
+}
 
 /// Break `s` into chunks no wider than `width` display columns, on the char
 /// boundary (no hyphenation). A blank string yields one empty chunk so the line

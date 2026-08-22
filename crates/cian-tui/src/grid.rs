@@ -19,7 +19,7 @@ use crossterm::event::{
 };
 
 use crate::render::clamp_list_scroll;
-use crate::{App, FocusedPane, Mode, PendingOp, Popup};
+use crate::{hit_rect, App, FocusedPane, Mode, PendingOp, Popup};
 
 /// How long a typed prefix stays live. Long enough to finish a word, short
 /// enough that a letter pressed a moment later is obviously a new search.
@@ -189,8 +189,7 @@ impl App {
     /// rather than jump the cursor to the end.
     pub(crate) fn grid_entry_at(&self, col: u16, row: u16) -> Option<usize> {
         let area = self.grid_area?;
-        if col < area.x || row < area.y || col >= area.x + area.width || row >= area.y + area.height
-        {
+        if !hit_rect(area, col, row) {
             return None;
         }
         let cols = self.icon_cols.max(1);
@@ -215,9 +214,7 @@ impl App {
     pub(crate) fn grid_button_at(&self, col: u16, row: u16) -> Option<crate::GridButton> {
         self.grid_buttons
             .iter()
-            .find(|(_, r)| {
-                col >= r.x && col < r.x + r.width && row >= r.y && row < r.y + r.height
-            })
+            .find(|(_, r)| hit_rect(*r, col, row))
             .map(|(b, _)| *b)
     }
 }
@@ -248,12 +245,7 @@ impl App {
             }
         }
         if matches!(ev.kind, MouseEventKind::Down(MouseButton::Left)) {
-            if let Some(t) = self.scroll_tracks.iter().copied().find(|t| {
-                col >= t.rect.x
-                    && col < t.rect.x + t.rect.width
-                    && row >= t.rect.y
-                    && row < t.rect.y + t.rect.height
-            }) {
+            if let Some(t) = self.scroll_tracks.iter().copied().find(|t| hit_rect(t.rect, col, row)) {
                 self.scroll_drag = Some(t.what);
                 self.scroll_to_fraction(t.what, col, row);
                 return;
@@ -377,9 +369,7 @@ impl App {
         // background does not fall through to the list panes underneath — and
         // it empties the selection, which is what clicking the empty part of a
         // window means everywhere else.
-        let inside = self.grid_area.is_some_and(|a| {
-            col >= a.x && row >= a.y && col < a.x + a.width && row < a.y + a.height
-        });
+        let inside = self.grid_area.is_some_and(|a| hit_rect(a, col, row));
         if inside {
             if let Some(p) = self.active_pane_mut() {
                 p.marks.clear();
@@ -508,12 +498,7 @@ impl App {
     /// Which entry a cell falls on in a list pane, if any.
     fn row_entry_at(&self, col: u16, row: u16) -> Option<usize> {
         let area = self.layout_rects.for_pane(self.focused);
-        if area.width == 0
-            || col < area.x
-            || row < area.y
-            || col >= area.x + area.width
-            || row >= area.y + area.height
-        {
+        if !hit_rect(area, col, row) {
             return None;
         }
         // One row for the border, one for the column headings.
@@ -557,11 +542,7 @@ impl App {
                 (FocusedPane::Right, self.layout_rects.right),
             ] {
                 if which != self.focused
-                    && rect.width > 0
-                    && col >= rect.x
-                    && row >= rect.y
-                    && col < rect.x + rect.width
-                    && row < rect.y + rect.height
+                    && hit_rect(rect, col, row)
                 {
                     let tabs = if which == FocusedPane::Left { &self.left } else { &self.right };
                     return Some(tabs.active_ref().cwd.clone());

@@ -1812,103 +1812,63 @@ impl App {
     }
 
     fn junk_review_key(&mut self, key: KeyEvent) -> Result<()> {
-        let Popup::JunkReview { items, cursor, .. } = &mut self.popup else { return Ok(()) };
-            let n = items.len();
-            match key.code {
-                KeyCode::Esc | KeyCode::Char('q') => self.popup = Popup::None,
-                KeyCode::Char('j') | KeyCode::Down => {
-                    if n > 0 { *cursor = (*cursor + 1).min(n - 1); }
-                }
-                KeyCode::Char('k') | KeyCode::Up => *cursor = cursor.saturating_sub(1),
-                KeyCode::Char('g') | KeyCode::Home => *cursor = 0,
-                KeyCode::Char('G') | KeyCode::End => *cursor = n.saturating_sub(1),
-                // Space toggles the item under the cursor; `a` toggles all.
-                KeyCode::Char(' ') => {
-                    if let Some(it) = items.get_mut(*cursor) { it.selected = !it.selected; }
-                }
-                KeyCode::Char('a') => {
-                    let all_on = items.iter().all(|it| it.selected);
-                    for it in items.iter_mut() { it.selected = !all_on; }
-                }
-                // Enter/d hands the checked paths to the normal delete confirm.
-                KeyCode::Enter | KeyCode::Char('d') => self.confirm_junk_deletion(),
-                _ => {}
-            }
+        // Enter/d hands the checked paths to the normal delete confirm.
+        if matches!(key.code, KeyCode::Enter | KeyCode::Char('d')) {
+            self.confirm_junk_deletion();
+            return Ok(());
+        }
+        if let Popup::JunkReview { items, cursor, .. } = &mut self.popup {
+            review_list_key(items, cursor, key.code);
+        }
+        self.review_list_exit(key.code);
         Ok(())
     }
 
     fn dupe_review_key(&mut self, key: KeyEvent) -> Result<()> {
-        let Popup::DupeReview { items, cursor, .. } = &mut self.popup else { return Ok(()) };
-            let n = items.len();
-            match key.code {
-                KeyCode::Esc | KeyCode::Char('q') => self.popup = Popup::None,
-                KeyCode::Char('j') | KeyCode::Down => {
-                    if n > 0 { *cursor = (*cursor + 1).min(n - 1); }
-                }
-                KeyCode::Char('k') | KeyCode::Up => *cursor = cursor.saturating_sub(1),
-                KeyCode::Char('g') | KeyCode::Home => *cursor = 0,
-                KeyCode::Char('G') | KeyCode::End => *cursor = n.saturating_sub(1),
-                KeyCode::Char(' ') => {
-                    if let Some(it) = items.get_mut(*cursor) { it.selected = !it.selected; }
-                }
-                KeyCode::Char('a') => {
-                    let all_on = items.iter().all(|it| it.selected);
-                    for it in items.iter_mut() { it.selected = !all_on; }
-                }
-                KeyCode::Enter | KeyCode::Char('d') => self.confirm_dupe_deletion(),
-                _ => {}
-            }
+        if matches!(key.code, KeyCode::Enter | KeyCode::Char('d')) {
+            self.confirm_dupe_deletion();
+            return Ok(());
+        }
+        if let Popup::DupeReview { items, cursor, .. } = &mut self.popup {
+            review_list_key(items, cursor, key.code);
+        }
+        self.review_list_exit(key.code);
         Ok(())
     }
 
     fn structure_review_key(&mut self, key: KeyEvent) -> Result<()> {
-        let Popup::StructureReview { items, cursor, .. } = &mut self.popup else { return Ok(()) };
-            let n = items.len();
-            match key.code {
-                KeyCode::Esc | KeyCode::Char('q') => self.popup = Popup::None,
-                KeyCode::Char('j') | KeyCode::Down => {
-                    if n > 0 { *cursor = (*cursor + 1).min(n - 1); }
-                }
-                KeyCode::Char('k') | KeyCode::Up => *cursor = cursor.saturating_sub(1),
-                KeyCode::Char('g') | KeyCode::Home => *cursor = 0,
-                KeyCode::Char('G') | KeyCode::End => *cursor = n.saturating_sub(1),
-                KeyCode::Char(' ') => {
-                    if let Some(it) = items.get_mut(*cursor) { it.selected = !it.selected; }
-                }
-                KeyCode::Char('a') => {
-                    let all_on = items.iter().all(|it| it.selected);
-                    for it in items.iter_mut() { it.selected = !all_on; }
-                }
-                // Enter/m runs the checked moves (creating folders as needed).
-                KeyCode::Enter | KeyCode::Char('m') => self.apply_structure_plan(),
-                _ => {}
-            }
+        // Enter/m runs the checked moves (creating folders as needed).
+        if matches!(key.code, KeyCode::Enter | KeyCode::Char('m')) {
+            self.apply_structure_plan();
+            return Ok(());
+        }
+        if let Popup::StructureReview { items, cursor, .. } = &mut self.popup {
+            review_list_key(items, cursor, key.code);
+        }
+        self.review_list_exit(key.code);
         Ok(())
     }
 
     fn rename_review_key(&mut self, key: KeyEvent) -> Result<()> {
-        let Popup::RenameReview { items, cursor, .. } = &mut self.popup else { return Ok(()) };
-            let n = items.len();
-            match key.code {
-                KeyCode::Esc | KeyCode::Char('q') => self.popup = Popup::None,
-                KeyCode::Char('j') | KeyCode::Down => {
-                    if n > 0 { *cursor = (*cursor + 1).min(n - 1); }
-                }
-                KeyCode::Char('k') | KeyCode::Up => *cursor = cursor.saturating_sub(1),
-                KeyCode::Char('g') | KeyCode::Home => *cursor = 0,
-                KeyCode::Char('G') | KeyCode::End => *cursor = n.saturating_sub(1),
-                KeyCode::Char(' ') => {
-                    if let Some(it) = items.get_mut(*cursor) { it.selected = !it.selected; }
-                }
-                KeyCode::Char('a') => {
-                    let all_on = items.iter().all(|it| it.selected);
-                    for it in items.iter_mut() { it.selected = !all_on; }
-                }
-                // Enter/r renames the checked files.
-                KeyCode::Enter | KeyCode::Char('r') => self.apply_rename_plan(),
-                _ => {}
-            }
+        // Enter/r renames the checked files.
+        if matches!(key.code, KeyCode::Enter | KeyCode::Char('r')) {
+            self.apply_rename_plan();
+            return Ok(());
+        }
+        if let Popup::RenameReview { items, cursor, .. } = &mut self.popup {
+            review_list_key(items, cursor, key.code);
+        }
+        self.review_list_exit(key.code);
         Ok(())
+    }
+
+    /// Esc and `q` leave a review list without carrying anything out. Kept
+    /// apart from `review_list_key` because closing needs the whole app, not
+    /// just the rows — a docked panel underneath has to come back.
+    fn review_list_exit(&mut self, code: KeyCode) {
+        if matches!(code, KeyCode::Esc | KeyCode::Char('q')) {
+            self.dismiss_to_viewer();
+        }
     }
 
     pub(crate) fn handle_command_key(&mut self, key: KeyEvent) -> Result<()> {

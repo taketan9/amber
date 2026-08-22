@@ -7269,6 +7269,160 @@
         }
     }
 
+    /// All four review lists are the same list with different rows in it, so
+    /// they have to answer the same keys. They used to carry a copy of the
+    /// handling each; this walks every one of them over the same keystrokes.
+    #[test]
+    fn every_review_list_answers_the_same_keys() {
+        let p = |s: &str| PathBuf::from("/p").join(s);
+        let lists: Vec<(&str, Popup)> = vec![
+            (
+                "junk",
+                Popup::JunkReview {
+                    items: (0..3)
+                        .map(|i| JunkItem {
+                            path: p(&i.to_string()),
+                            reason: String::new(),
+                            selected: false,
+                        })
+                        .collect(),
+                    cursor: 0,
+                    scroll: 0,
+                },
+            ),
+            (
+                "duplicates",
+                Popup::DupeReview {
+                    items: (0..3)
+                        .map(|i| DupeItem {
+                            path: p(&i.to_string()),
+                            group: 0,
+                            keeper: false,
+                            selected: false,
+                        })
+                        .collect(),
+                    cursor: 0,
+                    scroll: 0,
+                },
+            ),
+            (
+                "structure",
+                Popup::StructureReview {
+                    items: (0..3)
+                        .map(|i| MoveItem {
+                            path: p(&i.to_string()),
+                            name: i.to_string(),
+                            dest: "d".into(),
+                            reason: String::new(),
+                            selected: false,
+                        })
+                        .collect(),
+                    cursor: 0,
+                    scroll: 0,
+                    dir: p(""),
+                },
+            ),
+            (
+                "rename",
+                Popup::RenameReview {
+                    items: (0..3)
+                        .map(|i| RenameItem {
+                            path: p(&i.to_string()),
+                            old: i.to_string(),
+                            new: format!("{i}.new"),
+                            selected: false,
+                        })
+                        .collect(),
+                    cursor: 0,
+                    scroll: 0,
+                    by_ai: true,
+                },
+            ),
+        ];
+        /// The cursor and the checkboxes of whichever review list is open.
+        fn state(app: &App) -> (usize, Vec<bool>) {
+            match &app.popup {
+                Popup::JunkReview { items, cursor, .. } => {
+                    (*cursor, items.iter().map(|i| i.selected).collect())
+                }
+                Popup::DupeReview { items, cursor, .. } => {
+                    (*cursor, items.iter().map(|i| i.selected).collect())
+                }
+                Popup::StructureReview { items, cursor, .. } => {
+                    (*cursor, items.iter().map(|i| i.selected).collect())
+                }
+                Popup::RenameReview { items, cursor, .. } => {
+                    (*cursor, items.iter().map(|i| i.selected).collect())
+                }
+                other => panic!("the list closed: {:?}", other),
+            }
+        }
+        for (what, popup) in lists {
+            let (_d, mut app) = app_with(&["a.txt"]);
+            app.popup = popup;
+            // j moves down and stops at the end, k comes back up.
+            for _ in 0..5 {
+                app.handle_key(code(KeyCode::Char('j'))).unwrap();
+            }
+            assert_eq!(state(&app).0, 2, "{what}: j stops at the last row");
+            app.handle_key(code(KeyCode::Char('k'))).unwrap();
+            assert_eq!(state(&app).0, 1, "{what}: k comes back");
+            // Space checks the row under the cursor, and only that one.
+            app.handle_key(code(KeyCode::Char(' '))).unwrap();
+            assert_eq!(state(&app).1, vec![false, true, false], "{what}: space checks one row");
+            // `a` turns everything on while any row is off, then off again.
+            app.handle_key(code(KeyCode::Char('a'))).unwrap();
+            assert_eq!(state(&app).1, vec![true; 3], "{what}: a checks all");
+            app.handle_key(code(KeyCode::Char('a'))).unwrap();
+            assert_eq!(state(&app).1, vec![false; 3], "{what}: and clears them");
+            // G and g go to the ends.
+            app.handle_key(code(KeyCode::Char('G'))).unwrap();
+            assert_eq!(state(&app).0, 2, "{what}: G is the last row");
+            app.handle_key(code(KeyCode::Char('g'))).unwrap();
+            assert_eq!(state(&app).0, 0, "{what}: g is the first");
+            // q leaves without carrying anything out.
+            app.handle_key(code(KeyCode::Char('q'))).unwrap();
+            assert!(matches!(app.popup, Popup::None), "{what}: q closes it");
+        }
+    }
+
+    /// Leaving a review list used to blank the popup slot outright, which took
+    /// a docked panel with it — the same bug the one-door change fixed
+    /// everywhere else. Esc has to put the file back.
+    #[test]
+    fn leaving_a_review_list_gives_the_docked_panel_back() {
+        let (_d, mut app) = viewer_on("alpha\nbravo\n");
+        app.handle_key(code(KeyCode::F(12))).unwrap();
+        assert!(app.viewer_dock.is_some(), "the file is open, docked beside the panes");
+        app.open_popup(Popup::JunkReview {
+            items: vec![JunkItem {
+                path: PathBuf::from("/p/target"),
+                reason: "build".into(),
+                selected: true,
+            }],
+            cursor: 0,
+            scroll: 0,
+        });
+        assert!(app.viewer_return.is_some(), "the file went aside, not away");
+        app.handle_key(code(KeyCode::Esc)).unwrap();
+        assert!(matches!(app.popup, Popup::Viewer { .. }), "and Esc brings it back");
+        assert!(app.viewer_return.is_none(), "with nothing left waiting");
+    }
+
+    /// A rectangle of no size holds no point. Several hit tests used to guard
+    /// on a non-zero width before asking, which this makes unnecessary — the
+    /// case that matters is a widget the layout has not placed yet.
+    #[test]
+    fn nothing_is_inside_a_rectangle_of_no_size() {
+        let r = Rect::new(4, 2, 6, 3);
+        assert!(hit_rect(r, 4, 2), "the top-left corner is inside");
+        assert!(hit_rect(r, 9, 4), "and so is the bottom-right");
+        assert!(!hit_rect(r, 10, 4), "one column past the right edge is not");
+        assert!(!hit_rect(r, 9, 5), "nor one row below");
+        assert!(!hit_rect(Rect::new(4, 2, 0, 3), 4, 2), "an unplaced widget holds nothing");
+        assert!(!hit_rect(Rect::new(4, 2, 6, 0), 4, 2), "in either direction");
+    }
+
     #[test]
     fn parse_sem_search_reply_matches_orders_and_folds_reasons() {
         let hit = |rel: &str| cian_core::search::Hit {

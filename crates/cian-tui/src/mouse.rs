@@ -21,14 +21,7 @@ impl App {
     /// the third had none, which is how a right-click inside a docked panel
     /// ended up being answered by the pane behind it.
     fn pointer_over_panel(&self, col: u16, row: u16) -> bool {
-        let hit = |r: Rect| {
-            r.width > 0
-                && r.height > 0
-                && col >= r.x
-                && col < r.x + r.width
-                && row >= r.y
-                && row < r.y + r.height
-        };
+        let hit = |r: Rect| hit_rect(r, col, row);
         // Split in two, the panel is both halves — `viewer_frame` only
         // describes the one the keyboard is on.
         hit(self.viewer_frame)
@@ -163,14 +156,7 @@ impl App {
             }
         }
         if matches!(ev.kind, MouseEventKind::Down(MouseButton::Left)) {
-            if let Some(t) = self.scroll_tracks.iter().copied().find(|t| {
-                t.rect.width > 0
-                    && t.rect.height > 0
-                    && col >= t.rect.x
-                    && col < t.rect.x + t.rect.width
-                    && row >= t.rect.y
-                    && row < t.rect.y + t.rect.height
-            }) {
+            if let Some(t) = self.scroll_tracks.iter().copied().find(|t| hit_rect(t.rect, col, row)) {
                 self.scroll_drag = Some(t.what);
                 self.scroll_to_fraction(t.what, col, row);
                 return;
@@ -180,7 +166,7 @@ impl App {
         // a resize, not a click on a pane or on the panel.
         let on_divider = self.dividers.iter().any(|d| {
             let r = d.zone;
-            col >= r.x && col < r.x + r.width && row >= r.y && row < r.y + r.height
+            hit_rect(r, col, row)
         });
         // A docked panel only owns the mouse inside its own frame. A click on
         // the listing beside it, or on the shell below, moves the focus there
@@ -190,14 +176,7 @@ impl App {
             let inside = self.pointer_over_panel(col, row);
             // The panes, for working out which one a click outside the panel
             // landed on. The panel's own frame is `pointer_over_panel`.
-            let hit = |r: Rect| {
-                r.width > 0
-                    && r.height > 0
-                    && col >= r.x
-                    && col < r.x + r.width
-                    && row >= r.y
-                    && row < r.y + r.height
-            };
+            let hit = |r: Rect| hit_rect(r, col, row);
             if matches!(ev.kind, MouseEventKind::Down(_)) {
                 let to = if inside {
                     // Clicking the panel focuses it, the same way clicking a
@@ -311,11 +290,7 @@ impl App {
                 && matches!(ev.kind, MouseEventKind::Down(MouseButton::Left))
             {
                 let theirs = self.viewer_half_rects[1];
-                if theirs.width > 0
-                    && col >= theirs.x
-                    && col < theirs.x + theirs.width
-                    && row >= theirs.y
-                    && row < theirs.y + theirs.height
+                if hit_rect(theirs, col, row)
                 {
                     self.swap_viewer_split();
                     self.full_clear = true;
@@ -327,10 +302,7 @@ impl App {
             let ol = self.outline_rect;
             if ol.width > 0
                 && matches!(ev.kind, MouseEventKind::Down(MouseButton::Left))
-                && col >= ol.x
-                && col < ol.x + ol.width
-                && row >= ol.y
-                && row < ol.y + ol.height
+                && hit_rect(ol, col, row)
             {
                 if let Popup::Viewer { shape, line, col: c, goal, visual, md_map, view, .. } = &mut self.popup {
                     let items = shape.as_deref().map(|s| s.items.as_slice()).unwrap_or(&[]);
@@ -539,11 +511,7 @@ impl App {
                 let rel = row.saturating_sub(body.y) as usize;
                 (scroll + rel).min(n.saturating_sub(1))
             };
-            let in_body = body.width > 0
-                && col >= body.x
-                && col < body.x + body.width
-                && row >= body.y
-                && row < body.y + body.height;
+            let in_body = hit_rect(body, col, row);
             match ev.kind {
                 MouseEventKind::Down(MouseButton::Left) if in_body && n > 0 => {
                     let l = line_at(row);
@@ -582,123 +550,47 @@ impl App {
             return;
         }
 
-        // Junk review: a click toggles the row's checkbox (and moves the cursor
-        // to it); the wheel scrolls. Approval is still Enter/the button.
+        // The four review lists all feel the same under the mouse: a click
+        // toggles the row's checkbox and moves the cursor to it, the wheel
+        // scrolls, and a click off the list closes it without carrying
+        // anything out. Approval stays on Enter and the button.
         if matches!(self.popup, Popup::JunkReview { .. }) {
-            // Off the list altogether: closed, like any other popup. Nothing
-            // is carried out — the click is spent on the dismissal.
             if self.click_dismissed_popup(ev) {
                 return;
             }
             let body = self.junk_rect;
-            let row_at = |row: u16, scroll: usize, n: usize| -> Option<usize> {
-                if row < body.y || row >= body.y + body.height { return None; }
-                let idx = scroll + (row - body.y) as usize;
-                if idx < n { Some(idx) } else { None }
-            };
             if let Popup::JunkReview { items, cursor, scroll } = &mut self.popup {
-                let n = items.len();
-                match ev.kind {
-                    MouseEventKind::Down(MouseButton::Left) => {
-                        if let Some(idx) = row_at(row, *scroll, n) {
-                            *cursor = idx;
-                            items[idx].selected = !items[idx].selected;
-                        }
-                    }
-                    MouseEventKind::ScrollDown => *scroll = (*scroll + 1).min(n.saturating_sub(1)),
-                    MouseEventKind::ScrollUp => *scroll = scroll.saturating_sub(1),
-                    _ => {}
-                }
+                review_list_mouse(items, cursor, scroll, body, ev);
             }
             return;
         }
-
-        // Dupe review: same feel — click a row to toggle it.
         if matches!(self.popup, Popup::DupeReview { .. }) {
-            // Off the list altogether: closed, like any other popup. Nothing
-            // is carried out — the click is spent on the dismissal.
             if self.click_dismissed_popup(ev) {
                 return;
             }
             let body = self.dupe_rect;
-            let row_at = |row: u16, scroll: usize, n: usize| -> Option<usize> {
-                if row < body.y || row >= body.y + body.height { return None; }
-                let idx = scroll + (row - body.y) as usize;
-                if idx < n { Some(idx) } else { None }
-            };
             if let Popup::DupeReview { items, cursor, scroll } = &mut self.popup {
-                let n = items.len();
-                match ev.kind {
-                    MouseEventKind::Down(MouseButton::Left) => {
-                        if let Some(idx) = row_at(row, *scroll, n) {
-                            *cursor = idx;
-                            items[idx].selected = !items[idx].selected;
-                        }
-                    }
-                    MouseEventKind::ScrollDown => *scroll = (*scroll + 1).min(n.saturating_sub(1)),
-                    MouseEventKind::ScrollUp => *scroll = scroll.saturating_sub(1),
-                    _ => {}
-                }
+                review_list_mouse(items, cursor, scroll, body, ev);
             }
             return;
         }
-
-        // Structure review: same feel as junk review — click a row to toggle it.
         if matches!(self.popup, Popup::StructureReview { .. }) {
-            // Off the list altogether: closed, like any other popup. Nothing
-            // is carried out — the click is spent on the dismissal.
             if self.click_dismissed_popup(ev) {
                 return;
             }
             let body = self.struct_rect;
-            let row_at = |row: u16, scroll: usize, n: usize| -> Option<usize> {
-                if row < body.y || row >= body.y + body.height { return None; }
-                let idx = scroll + (row - body.y) as usize;
-                if idx < n { Some(idx) } else { None }
-            };
             if let Popup::StructureReview { items, cursor, scroll, .. } = &mut self.popup {
-                let n = items.len();
-                match ev.kind {
-                    MouseEventKind::Down(MouseButton::Left) => {
-                        if let Some(idx) = row_at(row, *scroll, n) {
-                            *cursor = idx;
-                            items[idx].selected = !items[idx].selected;
-                        }
-                    }
-                    MouseEventKind::ScrollDown => *scroll = (*scroll + 1).min(n.saturating_sub(1)),
-                    MouseEventKind::ScrollUp => *scroll = scroll.saturating_sub(1),
-                    _ => {}
-                }
+                review_list_mouse(items, cursor, scroll, body, ev);
             }
             return;
         }
-
-        // Rename review: same feel — click a row to toggle it.
         if matches!(self.popup, Popup::RenameReview { .. }) {
-            // Off the list altogether: closed, like any other popup. Nothing
-            // is carried out — the click is spent on the dismissal.
             if self.click_dismissed_popup(ev) {
                 return;
             }
             let body = self.rename_rect;
-            let row_at = |row: u16, scroll: usize, n: usize| -> Option<usize> {
-                if row < body.y || row >= body.y + body.height { return None; }
-                let idx = scroll + (row - body.y) as usize;
-                if idx < n { Some(idx) } else { None }
-            };
             if let Popup::RenameReview { items, cursor, scroll, .. } = &mut self.popup {
-                let n = items.len();
-                match ev.kind {
-                    MouseEventKind::Down(MouseButton::Left) => {
-                        if let Some(idx) = row_at(row, *scroll, n) {
-                            *cursor = idx;
-                            items[idx].selected = !items[idx].selected;
-                        }
-                    }
-                    MouseEventKind::ScrollDown => *scroll = (*scroll + 1).min(n.saturating_sub(1)),
-                    MouseEventKind::ScrollUp => *scroll = scroll.saturating_sub(1),
-                    _ => {}
-                }
+                review_list_mouse(items, cursor, scroll, body, ev);
             }
             return;
         }
@@ -764,11 +656,7 @@ impl App {
             return;
         }
 
-        let in_rect = |r: Rect| {
-            r.width > 0 && r.height > 0
-                && col >= r.x && col < r.x + r.width
-                && row >= r.y && row < r.y + r.height
-        };
+        let in_rect = |r: Rect| hit_rect(r, col, row);
 
         // Right-click focuses what was clicked, puts the cursor on the row
         // under the pointer, and opens the context menu there.
@@ -803,11 +691,7 @@ impl App {
         // pane it is over.
         let rects = self.layout_rects;
         let pane_at = move |col: u16, row: u16| -> Option<FocusedPane> {
-            let hit = |r: Rect| {
-                r.width > 0 && r.height > 0
-                    && col >= r.x && col < r.x + r.width
-                    && row >= r.y && row < r.y + r.height
-            };
+            let hit = |r: Rect| hit_rect(r, col, row);
             if hit(rects.left) {
                 Some(FocusedPane::Left)
             } else if hit(rects.right) {
@@ -978,14 +862,7 @@ impl App {
                     .shell_leaves
                     .iter()
                     .copied()
-                    .find(|(_, _, _, inner)| {
-                        inner.width > 0
-                            && inner.height > 0
-                            && col >= inner.x
-                            && col < inner.x + inner.width
-                            && row >= inner.y
-                            && row < inner.y + inner.height
-                    })
+                    .find(|(_, _, _, inner)| hit_rect(*inner, col, row))
                     .map(|(tab, leaf, _, inner)| {
                         let a = grid_pos(inner, col, row);
                         ShellSel { tab, leaf, inner, anchor: a, end: a, dragged: false }
@@ -1036,12 +913,7 @@ impl App {
             .rev()
             .find(|z| {
                 let r = z.rect;
-                r.width > 0
-                    && r.height > 0
-                    && col >= r.x
-                    && col < r.x + r.width
-                    && row >= r.y
-                    && row < r.y + r.height
+                hit_rect(r, col, row)
             })
             .map(|z| z.kind)
     }
@@ -1102,10 +974,7 @@ impl App {
         // opinion — better to leave the popup alone than to guess.
         let Some(ink) = crate::render::popup_ink() else { return false };
         let (col, row) = (ev.column, ev.row);
-        let inside = col >= ink.x
-            && col < ink.x + ink.width
-            && row >= ink.y
-            && row < ink.y + ink.height;
+        let inside = hit_rect(ink, col, row);
         if inside {
             return false;
         }
@@ -1549,11 +1418,7 @@ impl App {
     }
 
     pub(crate) fn select_shell_leaf_at(&mut self, col: u16, row: u16) {
-        let hit = self.shell_leaves.iter().copied().find(|(_, _, r, _)| {
-            r.width > 0 && r.height > 0
-                && col >= r.x && col < r.x + r.width
-                && row >= r.y && row < r.y + r.height
-        });
+        let hit = self.shell_leaves.iter().copied().find(|(_, _, r, _)| hit_rect(*r, col, row));
         if let Some((tab, leaf, _, _)) = hit {
             self.shell.active = tab;
             if let Some(t) = self.shell.tabs.get_mut(tab) {
@@ -1585,14 +1450,7 @@ impl App {
                 return false;
             }
         }
-        let in_rect = |r: Rect| {
-            r.width > 0
-                && r.height > 0
-                && col >= r.x
-                && col < r.x + r.width
-                && row >= r.y
-                && row < r.y + r.height
-        };
+        let in_rect = |r: Rect| hit_rect(r, col, row);
         let target = if in_rect(self.layout_rects.left) {
             FocusedPane::Left
         } else if in_rect(self.layout_rects.right) {

@@ -33,7 +33,7 @@ use theme::*;
 mod util;
 use cian_lua::glob_match;
 use util::{
-    back_one_char, centered_rect, fit, order_pos, pad_left, pad_to, truncate, truncate_middle,
+    back_one_char, centered_rect, fit, hit_rect, order_pos, pad_left, pad_to, truncate, truncate_middle,
     union_rect,
     viewer_charwise, viewer_find, viewer_match_bracket, viewer_paragraph, vlen, width, wrap_str,
 };
@@ -877,6 +877,76 @@ struct RenameItem {
     old: String,
     new: String,
     selected: bool,
+}
+
+/// The one thing the four review lists (junk, duplicates, structure, rename)
+/// have in common: every row carries a checkbox. Their rows are otherwise
+/// unrelated, so the shared key and mouse handling asks for no more than this.
+trait Checkable {
+    fn checked(&mut self) -> &mut bool;
+}
+
+macro_rules! checkable {
+    ($($t:ty),+) => {$(impl Checkable for $t {
+        fn checked(&mut self) -> &mut bool { &mut self.selected }
+    })+};
+}
+checkable!(JunkItem, DupeItem, MoveItem, RenameItem);
+
+/// The keys every review list answers to: move by one, jump to either end,
+/// toggle the row under the cursor or all of them at once. Written once for
+/// the four lists (junk, duplicates, structure, rename), which differ only in
+/// what they hold and in the key that approves it.
+pub(crate) fn review_list_key<T: Checkable>(items: &mut [T], cursor: &mut usize, code: KeyCode) {
+    let n = items.len();
+    match code {
+        KeyCode::Char('j') | KeyCode::Down => {
+            if n > 0 { *cursor = (*cursor + 1).min(n - 1); }
+        }
+        KeyCode::Char('k') | KeyCode::Up => *cursor = cursor.saturating_sub(1),
+        KeyCode::Char('g') | KeyCode::Home => *cursor = 0,
+        KeyCode::Char('G') | KeyCode::End => *cursor = n.saturating_sub(1),
+        // Space toggles the row under the cursor; `a` toggles every row, off
+        // if they are all on and on otherwise.
+        KeyCode::Char(' ') => {
+            if let Some(it) = items.get_mut(*cursor) {
+                let on = it.checked();
+                *on = !*on;
+            }
+        }
+        KeyCode::Char('a') => {
+            let all_on = items.iter_mut().all(|it| *it.checked());
+            for it in items.iter_mut() { *it.checked() = !all_on; }
+        }
+        _ => {}
+    }
+}
+
+/// A click on a review list row moves the cursor there and toggles it; the
+/// wheel scrolls. The mouse half of [`review_list_key`], shared by the same
+/// four lists.
+pub(crate) fn review_list_mouse<T: Checkable>(
+    items: &mut [T],
+    cursor: &mut usize,
+    scroll: &mut usize,
+    body: Rect,
+    ev: MouseEvent,
+) {
+    let n = items.len();
+    match ev.kind {
+        MouseEventKind::Down(MouseButton::Left) => {
+            if ev.row < body.y || ev.row >= body.y + body.height { return; }
+            let idx = *scroll + (ev.row - body.y) as usize;
+            if idx < n {
+                *cursor = idx;
+                let on = items[idx].checked();
+                *on = !*on;
+            }
+        }
+        MouseEventKind::ScrollDown => *scroll = (*scroll + 1).min(n.saturating_sub(1)),
+        MouseEventKind::ScrollUp => *scroll = scroll.saturating_sub(1),
+        _ => {}
+    }
 }
 
 /// What the encoding picker applies its choice to.
