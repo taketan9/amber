@@ -107,7 +107,9 @@ impl App {
             "version" | "about" => self.show_version(),
             // Pixels or half-blocks, for a terminal that offers a picture
             // protocol and then does not draw with it.
-            "gfx" | "images" => self.toggle_image_protocol(),
+            // Not `:gfx` — three letters nobody reaches for, and `image` says
+            // what it is about.
+            "image" => self.toggle_image_protocol(),
             // The prompt opens seeded when a pattern was given: it used to be
             // parsed off the line and thrown away, so `:grep foo` and `:grep`
             // did the same thing and one of them looked broken.

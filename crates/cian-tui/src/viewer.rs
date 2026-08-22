@@ -1976,7 +1976,7 @@ impl App {
             // on the bare letter made this a catch-all for *every* verb
             // beginning with g or v, and without a slash it returned in
             // silence — so `:version` in the panel did nothing at all, which
-            // is precisely what the arm below was added to stop. `:gfx` went
+            // is precisely what the arm below was added to stop. `:image` goes
             // the same way.
             _ if cmd.starts_with("g/") || cmd.starts_with("v/") => {
                 // `:g/re/d` deletes every line that matches, `:v/re/d` every

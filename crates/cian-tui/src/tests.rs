@@ -509,6 +509,46 @@
         );
     }
 
+    /// A second slash opens the fuzzy finder.
+    ///
+    /// The finder was good and had no key at all — `:file` was the only way in.
+    /// A slash cannot appear in a filename on any platform (the separator on
+    /// Unix, illegal on Windows) and the filter matches names alone, so a
+    /// leading slash was input that could never match: free to give a meaning,
+    /// and the meaning writes itself. One narrows what is here, two looks
+    /// underneath.
+    #[test]
+    fn a_second_slash_opens_the_fuzzy_finder() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(d.path().join("sub")).unwrap();
+        std::fs::write(d.path().join("sub/deep.txt"), "x").unwrap();
+        std::fs::write(d.path().join("top.txt"), "x").unwrap();
+        let p = d.path().to_path_buf();
+        let mut app = App::new(p.clone(), p, en_config()).unwrap();
+
+        app.handle_key(key('/')).unwrap();
+        assert_eq!(app.mode, Mode::Filter, "one slash narrows this listing");
+        app.handle_key(key('/')).unwrap();
+        assert_eq!(app.mode, Mode::Normal, "the second left the filter behind");
+        let Popup::Palette { items, .. } = &app.popup else {
+            panic!("the finder should be open, got {:?}", app.popup)
+        };
+        assert!(
+            items.iter().any(|i| i.label.contains("deep.txt")),
+            "and it reaches below this directory: {:?}",
+            items.iter().map(|i| &i.label).collect::<Vec<_>>(),
+        );
+
+        // A slash typed *into* a filter is still a slash — only the first one
+        // means this.
+        app.handle_key(code(KeyCode::Esc)).unwrap();
+        app.handle_key(key('/')).unwrap();
+        app.handle_key(key('t')).unwrap();
+        app.handle_key(key('/')).unwrap();
+        assert_eq!(app.mode, Mode::Filter, "still filtering");
+        assert_eq!(app.filter_buffer, "t/", "the slash went into the query");
+    }
+
     /// Every switch says what it did. Three of them changed something and
     /// reported nothing, so the only sign was the row's own state text — and
     /// two of those can *refuse*, which from the menu looked identical to the
@@ -3901,7 +3941,7 @@
     /// `:gfx` steps through the ways of drawing a picture — the way out when
     /// a terminal advertises a protocol and then draws nothing with it.
     #[test]
-    fn gfx_walks_the_ways_of_drawing_a_picture() {
+    fn image_walks_the_ways_of_drawing_a_picture() {
         let dir = tempfile::tempdir().unwrap();
         image::RgbImage::from_pixel(8, 8, image::Rgb([200, 40, 40]))
             .save(dir.path().join("shot.png"))
@@ -3937,7 +3977,7 @@
         let before = crate::state_get("images");
         let mut seen = Vec::new();
         for _ in 0..5 {
-            app.command_buffer = "gfx".into();
+            app.command_buffer = "image".into();
             app.run_command();
             seen.push(app.message.clone().unwrap_or_default());
             // Whichever it lands on, a picture is drawn: with no terminal

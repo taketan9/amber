@@ -361,7 +361,7 @@ impl App {
         }
     }
 
-    /// `:gfx` — draw pictures with the terminal's own protocol, or with
+    /// `:image` — draw pictures with the terminal's own protocol, or with
     /// half-blocks.
     ///
     /// A terminal can advertise a protocol and then show nothing: the escape
@@ -392,12 +392,12 @@ impl App {
                 "{} {:?} ({})",
                 tr(self.lang, "pictures:", "画像:"),
                 p.protocol_type(),
-                tr(self.lang, ":gfx for the next one", ":gfx で次の方式へ"),
+                tr(self.lang, ":image for the next one", ":image で次の方式へ"),
             ),
             None => format!(
                 "{} ({})",
                 tr(self.lang, "pictures: half-blocks", "画像: 半角ブロック"),
-                tr(self.lang, ":gfx for the next one", ":gfx で次の方式へ"),
+                tr(self.lang, ":image for the next one", ":image で次の方式へ"),
             ),
         });
     }
@@ -649,6 +649,20 @@ impl App {
             }
             KeyCode::Down => {
                 if let Some(p) = self.active_pane_mut() { p.move_cursor(1); }
+            }
+            // `//` opens the fuzzy finder. A slash cannot appear in a filename
+            // on any platform — it is the separator on Unix and an illegal
+            // character on Windows — and the filter matches names alone, so a
+            // leading slash was input that could never match anything. It costs
+            // nothing to give it a meaning, and the meaning writes itself: one
+            // slash narrows what is here, two goes looking underneath.
+            KeyCode::Char('/') if self.filter_buffer.is_empty() => {
+                self.filter_buffer.clear();
+                if let Some(p) = self.active_pane_mut() {
+                    p.clear_filter();
+                }
+                self.mode = Mode::Normal;
+                self.start_file_finder();
             }
             KeyCode::Char(c) => {
                 self.filter_buffer.push(c);
