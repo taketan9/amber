@@ -5828,7 +5828,7 @@ fn draw_simple_dialog(
                 String::new(),
                 format!("  {}", name),
                 String::new(),
-                tr(lang, "This is permanent — the server has no trash.", "取り消せません（サーバにゴミ箱はありません）。").to_string(),
+                tr(lang, "this cannot be undone. the server has no trash", "取り消せません。サーバにゴミ箱はありません").to_string(),
             ];
             (
                 tr(lang, " remote delete ", " リモート削除 ").to_string(),

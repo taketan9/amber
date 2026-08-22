@@ -146,8 +146,7 @@ impl App {
                 self.message = Some(if self.key_probe {
                     format!(
                         "{} [keyboard: {mode}]",
-                        tr(self.lang, "showing every key as cian receives it — :keys again to stop",
-                                      "受け取ったキーをそのまま表示します — 止めるには もう一度 :keys"),
+                        tr(self.lang, "showing every key as cian receives it. :keys again to stop", "受け取ったキーをそのまま表示します。止めるには もう一度 :keys"),
                     )
                 } else {
                     tr(self.lang, "key report off", "キー表示をやめました").to_string()

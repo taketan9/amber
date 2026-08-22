@@ -949,7 +949,7 @@ impl App {
             return;
         };
         if diff.trim().is_empty() {
-            self.message = Some(tr(self.lang, "nothing staged — `git add` first (or stage from the pane)", "ステージされていません — 先に `git add`（ペインからでも可）").into());
+            self.message = Some(tr(self.lang, "nothing staged. `git add` first (or stage from the pane)", "ステージされていません。先に `git add`（ペインからでも可）").into());
             return;
         }
         if !self.ai_ready() {
@@ -1412,7 +1412,7 @@ impl App {
             return;
         };
         if message.is_empty() {
-            self.message = Some(tr(self.lang, "empty message — nothing committed", "メッセージが空です — コミットしていません").into());
+            self.message = Some(tr(self.lang, "empty message. nothing committed", "メッセージが空です。コミットしていません").into());
             return;
         }
         self.popup = Popup::None;

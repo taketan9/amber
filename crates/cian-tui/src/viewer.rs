@@ -1457,8 +1457,8 @@ impl App {
         self.viewer_split_focus = false;
         self.full_clear = true;
         self.message = Some(tr(self.lang,
-            "split — Shift+H/L crosses over, Shift+F10 closes it",
-            "分割 — Shift+H/L で行き来、Shift+F10 で解除").into());
+            "split. Shift+H/L crosses over, Shift+F10 closes it",
+            "分割しました。Shift+H/L で行き来、Shift+F10 で解除します").into());
     }
 
     /// Shift+F10: back to one file, keeping the one being read.
@@ -1530,9 +1530,7 @@ impl App {
             return;
         }
         if self.viewer_split.is_none() {
-            self.message = Some(tr(self.lang,
-                "split first — Shift+F8 puts two files side by side",
-                "先に分割してください — Shift+F8 で2つ並びます").into());
+            self.message = Some(tr(self.lang, "split first. Shift+F8 puts two files side by side", "先に分割してください。Shift+F8 で2つ並びます").into());
             return;
         }
         self.recompute_viewer_diff();
@@ -1570,7 +1568,7 @@ impl App {
     /// `]c` / `[c`: the next or previous line that differs, in this half.
     pub(crate) fn viewer_diff_step(&mut self, forward: bool) {
         let Some(d) = self.viewer_diff.as_deref() else {
-            self.message = Some(tr(self.lang, "no comparison — = starts one", "差分表示していません — = で開始").into());
+            self.message = Some(tr(self.lang, "no comparison. = starts one", "差分表示していません。= で開始").into());
             return;
         };
         let marks = d.mine.clone();
@@ -1681,7 +1679,7 @@ impl App {
             }
         }
         if no_query {
-            self.message = Some(tr(self.lang, "no search — press / first", "検索していません — 先に / を押してください").into());
+            self.message = Some(tr(self.lang, "no search. press / first", "検索していません。先に / を押してください").into());
         } else if not_found {
             self.message = Some(tr(self.lang, "no match", "一致しません").into());
         }
@@ -1940,9 +1938,7 @@ impl App {
             }
             "q" => {
                 if matches!(self.popup, Popup::Viewer { dirty: true, .. }) {
-                    self.message = Some(tr(self.lang,
-                        "unsaved changes — :w to save, :q! to discard",
-                        "未保存の変更があります — :w で保存、:q! で破棄").into());
+                    self.message = Some(tr(self.lang, "unsaved changes. :w to save, :q! to discard", "未保存の変更があります。:w で保存、:q! で破棄").into());
                 } else {
                     self.close_viewer_file();
                 }
@@ -3410,7 +3406,7 @@ impl App {
         }
         if !is_md {
             self.message = Some(tr(self.lang,
-                "not a Markdown file — nothing to preview",
+                "not a Markdown file. there is nothing to preview",
                 "Markdown ではないのでプレビューはありません").into());
         }
     }
@@ -4202,8 +4198,8 @@ impl App {
                     *sub_input = Some(format!("s{d}{q}{d}"));
                 }
                 self.message = Some(tr(self.lang,
-                    "type the replacement — add c before Enter to confirm each one",
-                    "置換後の文字を入力 — 末尾に c を足すと1件ずつ確認").into());
+                    "type the replacement. add c before Enter to confirm each one",
+                    "置換後の文字を入力してください。末尾に c を足すと1件ずつ確認します").into());
             }
             None => {
                 self.message = Some(tr(self.lang,

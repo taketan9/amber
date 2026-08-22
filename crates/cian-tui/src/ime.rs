@@ -245,7 +245,7 @@ impl App {
 
 fn not_configured(lang: Lang) -> Vec<String> {
     vec![
-        tr(lang, "input method — not configured", "日本語入力の切替 — 未設定").to_string(),
+        tr(lang, "the input-method switch is not configured", "日本語入力の切替は未設定です").to_string(),
         String::new(),
         tr(
             lang,

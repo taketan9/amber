@@ -492,7 +492,7 @@ impl App {
                 self.focus(FocusedPane::Shell);
                 let on = self.shell.set_broadcast(matches!(item, MenuItem::SyncStart));
                 self.message = Some(if on {
-                    tr(self.lang, "⇄ synchronize ON — input goes to all panes", "⇄ 同時入力 ON — 全ペインに入力").into()
+                    tr(self.lang, "⇄ synchronize ON. input goes to every pane", "⇄ 同時入力 ON。全ペインに入力されます").into()
                 } else {
                     tr(self.lang, "synchronize off", "同時入力 OFF").into()
                 });
@@ -502,7 +502,7 @@ impl App {
                 let n = self.shell.toggle_sync_member();
                 let total = self.shell.active_pane_count();
                 self.message = Some(if n == 0 {
-                    tr(self.lang, "⇄ sync group cleared — all panes", "⇄ 同時入力グループ解除 — 全ペイン").into()
+                    tr(self.lang, "⇄ sync group cleared. every pane again", "⇄ 同時入力グループを解除しました。対象は全ペインです").into()
                 } else {
                     format!("⇄ sync group: {n}/{total}")
                 });

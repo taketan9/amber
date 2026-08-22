@@ -138,7 +138,7 @@ impl App {
             if dir.join(to).symlink_metadata().is_ok() && !moving_away.contains(to.as_str()) {
                 self.message = Some(format!(
                     "{}: {}",
-                    tr(self.lang, "bulk rename cancelled — already exists", "一括リネーム中止 — 既に存在します"),
+                    tr(self.lang, "bulk rename cancelled. a name already exists", "一括リネームを中止しました。既に存在する名前があります"),
                     to
                 ));
                 return;

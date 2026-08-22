@@ -678,7 +678,7 @@ impl App {
             Some(s) => s.write_input(cmd.as_bytes()),
             None => self.pending_shell_input = Some(cmd.to_string()),
         }
-        self.message = Some(tr(self.lang, "command at prompt — review and press Enter", "プロンプトに入れました — 確認して Enter").into());
+        self.message = Some(tr(self.lang, "command at prompt. review and press Enter", "プロンプトに入れました。確認して Enter").into());
     }
 
     /// Send a command line to the shell panel, starting the shell if needed.
@@ -914,7 +914,7 @@ impl App {
         {
             match self.active_pane().and_then(|p| p.selected()).cloned() {
                 Some(e) if e.is_parent || e.is_dir => {
-                    self.message = Some(tr(self.lang, "that is a directory — Enter to go in", "ディレクトリです — Enter で入る").into());
+                    self.message = Some(tr(self.lang, "that is a directory. Enter to go in", "ディレクトリです。Enter で入る").into());
                 }
                 Some(e) => self.archive_view_member(&archive, &format!("{}{}", sub, e.name)),
                 None => self.message = Some(tr(self.lang, "nothing selected", "選択されていません").into()),
@@ -952,7 +952,7 @@ impl App {
             return;
         };
         if entry.is_dir {
-            self.message = Some(tr(self.lang, "that is a directory — Enter to go in", "ディレクトリです — Enter で入れます").into());
+            self.message = Some(tr(self.lang, "that is a directory. Enter to go in", "ディレクトリです。Enter で入れます").into());
             return;
         }
         if cian_core::archive::is_archive(&entry.path) {
@@ -1170,7 +1170,7 @@ impl App {
             return;
         }
         if a.is_dir || b.is_dir {
-            self.message = Some(tr(self.lang, "compare two files, or two folders — not one of each", "ファイル同士かフォルダ同士で比較してください（混在は不可）").into());
+            self.message = Some(tr(self.lang, "compare two files, or two folders. not one of each", "ファイル同士かフォルダ同士で比較してください（混在は不可）").into());
             return;
         }
         match cian_core::diff::diff_files(&a.path, &b.path) {
@@ -2017,9 +2017,7 @@ impl App {
         })?;
         let maps = self.sync_maps();
         if maps.is_empty() {
-            return Err(tr(self.lang,
-                "no synced libraries configured — see cian.sharepoint{} in init.lua",
-                "同期ライブラリが未設定です — init.lua の cian.sharepoint{} を参照").to_string());
+            return Err(tr(self.lang, "no synced libraries configured. see cian.sharepoint{} in init.lua", "同期ライブラリが未設定です。init.lua の cian.sharepoint{} を参照").to_string());
         }
         let url = cian_core::office::cloud_url(&path, &maps).ok_or_else(|| {
             tr(self.lang,
@@ -2220,7 +2218,7 @@ impl App {
             return Ok(());
         };
         if !plan.changes.iter().any(|c| c.picked) {
-            self.message = Some(tr(self.lang, "nothing checked — nothing written", "チェックが無いので何も書いていません").into());
+            self.message = Some(tr(self.lang, "nothing checked. nothing was written", "チェックが無いので何も書いていません").into());
             return Ok(());
         }
         let report = cian_core::grepedit::apply(&plan.changes);
@@ -2634,7 +2632,7 @@ impl App {
             }
             self.popup = Popup::Notice { lines };
         } else if borders_changed {
-            self.message = Some(tr(self.lang, "config reloaded — restart to apply the border change", "設定を再読み込みしました — 枠線の変更は再起動後に反映されます").into());
+            self.message = Some(tr(self.lang, "config reloaded. restart to apply the border change", "設定を再読み込みしました。枠線の変更は再起動後に反映されます").into());
         } else {
             self.message = Some(tr(self.lang, "config reloaded", "設定を再読み込みしました").into());
         }

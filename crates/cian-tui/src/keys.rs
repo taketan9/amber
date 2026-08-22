@@ -1253,7 +1253,7 @@ impl App {
         match key.code {
             KeyCode::Esc | KeyCode::Char('q') => {
                 self.popup = Popup::None;
-                self.message = Some(tr(self.lang, "replace cancelled — nothing written", "置換を取り消した（書き込みなし）").into());
+                self.message = Some(tr(self.lang, "replace cancelled. nothing was written", "置換を取り消しました。書き込みはしていません").into());
             }
             KeyCode::Char('j') | KeyCode::Down => {
                 if n > 0 {
