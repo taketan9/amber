@@ -589,6 +589,46 @@
         assert!(matches!(&app.popup, Popup::Palette { kind: PaletteKind::Commands, .. }));
     }
 
+    /// The operation queue: the only way to call off a copy that is already
+    /// running, and it had no test.
+    ///
+    /// Row 0 is the runner — drawn as "(nothing running)" when there is none —
+    /// and rows below are the waiting line, so `x` on row `n` removes queue
+    /// item `n - 1`. The renderer and the handler agree about that; what they
+    /// did not agree about was row 0 with nothing running, where `x` did
+    /// nothing and said nothing.
+    #[test]
+    fn the_queue_removes_the_line_the_cursor_is_on() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        for label in ["first", "second"] {
+            app.op_queue.push_back(crate::QueuedOp {
+                label,
+                work: Box::new(|_| Default::default()),
+                retries: 0,
+            });
+        }
+        run_cmd(&mut app, "queue");
+        assert!(matches!(app.popup, Popup::OpQueue { cursor: 0 }), "{:?}", app.popup);
+
+        // Row 0 with nothing running says so rather than doing nothing.
+        app.handle_key(key('x')).unwrap();
+        assert_eq!(app.op_queue.len(), 2, "nothing was removed");
+        let said = app.message.clone().unwrap_or_default();
+        assert!(!said.is_empty(), "and it said why: {said:?}");
+
+        // Row 1 is the first waiting line.
+        app.handle_key(key('j')).unwrap();
+        app.handle_key(key('x')).unwrap();
+        assert_eq!(app.op_queue.len(), 1, "one left");
+        assert_eq!(app.op_queue[0].label, "second", "the right one went");
+
+        // The cursor cannot walk past the end.
+        for _ in 0..5 {
+            app.handle_key(key('j')).unwrap();
+        }
+        assert!(matches!(app.popup, Popup::OpQueue { cursor: 1 }), "clamped: {:?}", app.popup);
+    }
+
     /// The sweeps that change files on disk say what they actually did.
     ///
     /// `:chmod` stopped at the first failure and reported only "chmod failed",

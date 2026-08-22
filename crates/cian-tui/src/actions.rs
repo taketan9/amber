@@ -3033,6 +3033,11 @@ impl App {
             ).into());
             return;
         }
+        // A panel open beside the listing steps aside rather than being
+        // written over — `:queue` is reached from a listing while the panel is
+        // still what is in `self.popup`. Fourth instance of this; the fix
+        // belongs in a setter, not at each call site. See `stash_viewer`.
+        self.stash_viewer();
         self.popup = Popup::OpQueue { cursor: 0 };
     }
 
@@ -3046,6 +3051,17 @@ impl App {
                 .as_ref()
                 .and_then(|j| j.cancel_requested)
                 .map(|t| t.elapsed().as_secs());
+            if self.op_job.is_none() {
+                // The row is drawn as "(nothing running)" and `x` on it did
+                // nothing and said nothing — the same silent refusal the
+                // switches had.
+                self.message = Some(tr(
+                    self.lang,
+                    "nothing is running — x on a queued line removes it",
+                    "実行中の操作はありません — 待機行の x で取り消せます",
+                ).into());
+                return;
+            }
             match stuck_for {
                 None => self.cancel_op_job(),
                 Some(s) if s >= OP_ABANDON_GRACE_SECS => self.abandon_op(),

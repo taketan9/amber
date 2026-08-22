@@ -951,7 +951,7 @@ impl App {
         let rows = 1 + self.op_queue.len();
         let Popup::OpQueue { cursor } = &mut self.popup else { return Ok(()) };
         match key.code {
-            KeyCode::Esc | KeyCode::Char('q') => self.popup = Popup::None,
+            KeyCode::Esc | KeyCode::Char('q') => self.dismiss_to_viewer(),
             KeyCode::Char('j') | KeyCode::Down => *cursor = (*cursor + 1).min(rows.saturating_sub(1)),
             KeyCode::Char('k') | KeyCode::Up => *cursor = cursor.saturating_sub(1),
             KeyCode::Char('x') | KeyCode::Delete => {
