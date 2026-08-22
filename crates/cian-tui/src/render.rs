@@ -1511,7 +1511,7 @@ fn draw_startup_splash(f: &mut Frame, area: Rect, elapsed_ms: u128) {
         .borders(Borders::ALL)
         .border_type(border_type())
         .border_style(Style::default().fg(text_tone(theme().accent, theme().popup_bg)).add_modifier(Modifier::BOLD))
-        .style(Style::default().bg(theme().popup_bg));
+        .style(Style::default().bg(theme().popup_bg).fg(readable_on(theme().popup_bg)));
     let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
     f.render_widget(block, rect);
     let lines = vec![
@@ -3890,7 +3890,7 @@ fn draw_image(f: &mut Frame, area: Rect, app: &mut App) {
                         .fg(text_tone(theme().accent, theme().popup_bg))
                         .add_modifier(Modifier::BOLD),
                 )
-                .style(Style::default().bg(theme().popup_bg))
+                .style(Style::default().bg(theme().popup_bg).fg(readable_on(theme().popup_bg)))
                 .title(format!(" {title}  —  {caption} "));
             f.render_widget(block, rect);
             match error {
@@ -3954,7 +3954,7 @@ fn draw_image(f: &mut Frame, area: Rect, app: &mut App) {
         .borders(Borders::ALL)
         .border_type(border_type())
         .border_style(Style::default().fg(text_tone(theme().accent, theme().popup_bg)).add_modifier(Modifier::BOLD))
-        .style(Style::default().bg(theme().popup_bg))
+        .style(Style::default().bg(theme().popup_bg).fg(readable_on(theme().popup_bg)))
         .title(format!(" {}  —  {} ", title, caption));
     f.render_widget(block, rect);
 
@@ -4236,7 +4236,7 @@ fn draw_image_gfx(f: &mut Frame, rect: Rect, inner: Rect, app: &mut App) {
         .borders(Borders::ALL)
         .border_type(border_type())
         .border_style(Style::default().fg(text_tone(theme().accent, theme().popup_bg)).add_modifier(Modifier::BOLD))
-        .style(Style::default().bg(theme().popup_bg))
+        .style(Style::default().bg(theme().popup_bg).fg(readable_on(theme().popup_bg)))
         .title(format!(" {}  —  {} ", title, caption));
     f.render_widget(block, rect);
 
@@ -4677,7 +4677,7 @@ fn draw_ai_chat(f: &mut Frame, area: Rect, app: &mut App) {
         .borders(Borders::ALL)
         .border_type(border_type())
         .border_style(Style::default().fg(accent).add_modifier(Modifier::BOLD))
-        .style(Style::default().bg(theme().popup_bg))
+        .style(Style::default().bg(theme().popup_bg).fg(readable_on(theme().popup_bg)))
         .title(Line::from(vec![
             Span::styled(" ◈ ", Style::default().fg(accent).add_modifier(Modifier::BOLD)),
             Span::styled(
@@ -4958,7 +4958,7 @@ let block = Block::default()
     .borders(Borders::ALL)
     .border_type(border_type())
     .border_style(Style::default().fg(text_tone(theme().accent, theme().popup_bg)).add_modifier(Modifier::BOLD))
-    .style(Style::default().bg(theme().popup_bg))
+    .style(Style::default().bg(theme().popup_bg).fg(readable_on(theme().popup_bg)))
     .title(tr(lang, " toggles ", " トグル "))
     .title_bottom(tr(lang, " Enter/Space=flip  ↑↓  Esc ", " Enter/Space=切替  ↑↓  Esc "));
 let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
@@ -5011,7 +5011,7 @@ let block = Block::default()
     .borders(Borders::ALL)
     .border_type(border_type())
     .border_style(Style::default().fg(frame_c).add_modifier(Modifier::BOLD))
-    .style(Style::default().bg(theme().popup_bg))
+    .style(Style::default().bg(theme().popup_bg).fg(readable_on(theme().popup_bg)))
     .title(tr(lang, " chat history ", " チャット履歴 "))
     .title_bottom(tr(lang, " Enter=open  d=delete  ↑↓  Esc ", " Enter=開く  d=削除  ↑↓  Esc "));
 let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
@@ -5072,7 +5072,7 @@ let block = Block::default()
     .borders(Borders::ALL)
     .border_type(border_type())
     .border_style(Style::default().fg(text_tone(AI_SIMPLE, theme().popup_bg)).add_modifier(Modifier::BOLD))
-    .style(Style::default().bg(theme().popup_bg))
+    .style(Style::default().bg(theme().popup_bg).fg(readable_on(theme().popup_bg)))
     .title(title)
     .title_bottom(footer);
 let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
@@ -5136,7 +5136,7 @@ fn draw_junk_review(f: &mut Frame, area: Rect, app: &mut App) {
         .borders(Borders::ALL)
         .border_type(border_type())
         .border_style(Style::default().fg(text_tone(AI_SIMPLE, theme().popup_bg)).add_modifier(Modifier::BOLD))
-        .style(Style::default().bg(theme().popup_bg))
+        .style(Style::default().bg(theme().popup_bg).fg(readable_on(theme().popup_bg)))
         .title(title)
         .title_bottom(tr(lang,
             " Space/click=toggle  a=all  Enter/d=delete checked  Esc=cancel ",
@@ -5149,11 +5149,7 @@ fn draw_junk_review(f: &mut Frame, area: Rect, app: &mut App) {
     let mut rows: Vec<Line> = Vec::new();
     if let Popup::JunkReview { items, cursor, scroll } = &mut app.popup {
         // Keep the cursor in view.
-        if *cursor < *scroll {
-            *scroll = *cursor;
-        } else if *cursor >= *scroll + body_h {
-            *scroll = *cursor + 1 - body_h;
-        }
+        keep_in_view(*cursor, scroll, body_h);
         for (i, it) in items.iter().enumerate().skip(*scroll).take(body_h) {
             let sel = i == *cursor;
             let checkbox = if it.selected { "[x] " } else { "[ ] " };
@@ -5201,7 +5197,7 @@ fn draw_dupe_review(f: &mut Frame, area: Rect, app: &mut App) {
         .borders(Borders::ALL)
         .border_type(border_type())
         .border_style(Style::default().fg(text_tone(theme().accent, theme().popup_bg)).add_modifier(Modifier::BOLD))
-        .style(Style::default().bg(theme().popup_bg))
+        .style(Style::default().bg(theme().popup_bg).fg(readable_on(theme().popup_bg)))
         .title(title)
         .title_bottom(tr(lang,
             " Space/click=toggle  a=all  Enter/d=delete checked  Esc=cancel ",
@@ -5213,11 +5209,7 @@ fn draw_dupe_review(f: &mut Frame, area: Rect, app: &mut App) {
     let body_w = inner.width as usize;
     let mut rows: Vec<Line> = Vec::new();
     if let Popup::DupeReview { items, cursor, scroll } = &mut app.popup {
-        if *cursor < *scroll {
-            *scroll = *cursor;
-        } else if *cursor >= *scroll + body_h {
-            *scroll = *cursor + 1 - body_h;
-        }
+        keep_in_view(*cursor, scroll, body_h);
         for (i, it) in items.iter().enumerate().skip(*scroll).take(body_h) {
             let sel = i == *cursor;
             // A group-change gets a subtle "#N" tag so the groups read apart.
@@ -5267,7 +5259,7 @@ fn draw_structure_review(f: &mut Frame, area: Rect, app: &mut App) {
         .borders(Borders::ALL)
         .border_type(border_type())
         .border_style(Style::default().fg(text_tone(AI_SIMPLE, theme().popup_bg)).add_modifier(Modifier::BOLD))
-        .style(Style::default().bg(theme().popup_bg))
+        .style(Style::default().bg(theme().popup_bg).fg(readable_on(theme().popup_bg)))
         .title(title)
         .title_bottom(tr(lang,
             " Space/click=toggle  a=all  Enter/m=move checked  Esc=cancel ",
@@ -5279,11 +5271,7 @@ fn draw_structure_review(f: &mut Frame, area: Rect, app: &mut App) {
     let body_w = inner.width as usize;
     let mut rows: Vec<Line> = Vec::new();
     if let Popup::StructureReview { items, cursor, scroll, .. } = &mut app.popup {
-        if *cursor < *scroll {
-            *scroll = *cursor;
-        } else if *cursor >= *scroll + body_h {
-            *scroll = *cursor + 1 - body_h;
-        }
+        keep_in_view(*cursor, scroll, body_h);
         for (i, it) in items.iter().enumerate().skip(*scroll).take(body_h) {
             let sel = i == *cursor;
             let checkbox = if it.selected { "[x] " } else { "[ ] " };
@@ -5341,7 +5329,7 @@ fn draw_rename_review(f: &mut Frame, area: Rect, app: &mut App) {
         .borders(Borders::ALL)
         .border_type(border_type())
         .border_style(Style::default().fg(accent).add_modifier(Modifier::BOLD))
-        .style(Style::default().bg(theme().popup_bg))
+        .style(Style::default().bg(theme().popup_bg).fg(readable_on(theme().popup_bg)))
         .title(title)
         .title_bottom(tr(lang,
             " Space/click=toggle  a=all  Enter/r=rename checked  Esc=cancel ",
@@ -5354,11 +5342,7 @@ fn draw_rename_review(f: &mut Frame, area: Rect, app: &mut App) {
     let half = body_w.saturating_sub(8) / 2;
     let mut rows: Vec<Line> = Vec::new();
     if let Popup::RenameReview { items, cursor, scroll, .. } = &mut app.popup {
-        if *cursor < *scroll {
-            *scroll = *cursor;
-        } else if *cursor >= *scroll + body_h {
-            *scroll = *cursor + 1 - body_h;
-        }
+        keep_in_view(*cursor, scroll, body_h);
         for (i, it) in items.iter().enumerate().skip(*scroll).take(body_h) {
             let sel = i == *cursor;
             let checkbox = if it.selected { "[x] " } else { "[ ] " };
@@ -5386,6 +5370,21 @@ fn draw_rename_review(f: &mut Frame, area: Rect, app: &mut App) {
 /// nothing. The handful of popups that need something else (their own anchor
 /// rect, a filled background, a tighter margin) still build their own block;
 /// this is the common case, not a mandate.
+/// Keep `cursor` inside the `body_h` rows that start at `scroll`.
+///
+/// Ten copies of this existed and they did not agree: some guarded on
+/// `body_h > 0` and some did not. Without the guard a zero-height body makes
+/// `cursor >= scroll + 0` true the moment the cursor is at or past the scroll,
+/// and the list scrolls to `cursor + 1` — past the end of something that has no
+/// room to show a row in the first place.
+fn keep_in_view(cursor: usize, scroll: &mut usize, body_h: usize) {
+    if cursor < *scroll {
+        *scroll = cursor;
+    } else if body_h > 0 && cursor >= *scroll + body_h {
+        *scroll = cursor + 1 - body_h;
+    }
+}
+
 fn popup_frame<'a>(
     f: &mut Frame,
     area: Rect,
@@ -5976,7 +5975,7 @@ fn draw_simple_dialog(
         // The AI - simple dialogs (the command confirm, the rename/search
         // prompts) wear the local model's cyan; the rest keep the theme accent.
         .border_style(Style::default().fg(popup_accent(popup)).add_modifier(Modifier::BOLD))
-        .style(Style::default().bg(theme().popup_bg))
+        .style(Style::default().bg(theme().popup_bg).fg(readable_on(theme().popup_bg)))
         .title(title);
     let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
     f.render_widget(block, rect);
@@ -6098,7 +6097,7 @@ fn draw_theme_picker(f: &mut Frame, area: Rect, popup: &mut Popup, lang: Lang) {
     let h = (names.len() as u16 + 4).min(area.height.saturating_sub(2)).max(8);
     let rect = centered_rect(w, h, area);
     clear_popup(f, rect);
-    f.render_widget(Block::default().style(Style::default().bg(theme().popup_bg)), rect);
+    f.render_widget(Block::default().style(Style::default().bg(theme().popup_bg).fg(readable_on(theme().popup_bg))), rect);
     let title = match scope {
         ThemeScope::App { .. } => tr(lang, " theme — whole app ", " テーマ — 全体 "),
         ThemeScope::Pane { side, .. } if *side == 0 => tr(lang, " theme — left pane ", " テーマ — 左ペイン "),
@@ -7061,11 +7060,7 @@ fn draw_find_results(
 
     let body_h = inner.height.saturating_sub(1) as usize;
     // Keep the cursor on screen as results stream in beneath it.
-    if *cursor < *scroll {
-        *scroll = *cursor;
-    } else if body_h > 0 && *cursor >= *scroll + body_h {
-        *scroll = *cursor + 1 - body_h;
-    }
+    keep_in_view(*cursor, scroll, body_h);
 
     if hits.is_empty() {
         f.render_widget(
@@ -8383,11 +8378,7 @@ fn draw_dir_compare(
 
     let body_h = (inner.height.saturating_sub(1) as usize).max(1);
     // Keep the cursor on screen.
-    if *cursor < *scroll {
-        *scroll = *cursor;
-    } else if *cursor >= *scroll + body_h {
-        *scroll = *cursor + 1 - body_h;
-    }
+    keep_in_view(*cursor, scroll, body_h);
     let first = *scroll;
     let add = Color::Rgb(130, 225, 150);
     let del = Color::Rgb(255, 140, 145);
@@ -8638,11 +8629,7 @@ fn draw_archive(
     let inner = popup_frame(f, area, w, h, title, "");
 
     let body_h = inner.height.saturating_sub(1) as usize;
-    if *cursor < *scroll {
-        *scroll = *cursor;
-    } else if body_h > 0 && *cursor >= *scroll + body_h {
-        *scroll = *cursor + 1 - body_h;
-    }
+    keep_in_view(*cursor, scroll, body_h);
     for (row, (i, m)) in members.iter().enumerate().skip(*scroll).take(body_h).enumerate() {
         let sel = i == *cursor;
         let line = Rect::new(inner.x, inner.y + row as u16, inner.width, 1);
@@ -8706,11 +8693,7 @@ fn draw_palette(
     );
     let list_top = inner.y + 1;
     let body_h = inner.height.saturating_sub(2) as usize;
-    if *cursor < *scroll {
-        *scroll = *cursor;
-    } else if body_h > 0 && *cursor >= *scroll + body_h {
-        *scroll = *cursor + 1 - body_h;
-    }
+    keep_in_view(*cursor, scroll, body_h);
     for (row, si) in (*scroll..shown.len().min(*scroll + body_h)).enumerate() {
         let idx = shown[si];
         let it = &items[idx];
@@ -8772,11 +8755,7 @@ fn draw_disk_usage(
     let inner = popup_frame(f, area, w, h, title, "");
 
     let body_h = inner.height.saturating_sub(1) as usize;
-    if *cursor < *scroll {
-        *scroll = *cursor;
-    } else if body_h > 0 && *cursor >= *scroll + body_h {
-        *scroll = *cursor + 1 - body_h;
-    }
+    keep_in_view(*cursor, scroll, body_h);
     // Bars scale to the biggest child, so the space hog fills the bar.
     let max = entries.first().map(|e| e.size).unwrap_or(0).max(1);
     let bar_w = 18usize;
@@ -8849,11 +8828,7 @@ fn draw_git_log(
     let inner = rect.inner(Margin { vertical: 1, horizontal: 1 });
     f.render_widget(block, rect);
     let body_h = inner.height as usize;
-    if *cursor < *scroll {
-        *scroll = *cursor;
-    } else if *cursor >= *scroll + body_h {
-        *scroll = *cursor + 1 - body_h;
-    }
+    keep_in_view(*cursor, scroll, body_h);
     let hash_w = 8usize;
     let date_w = 10usize;
     let author_w = 14usize;

@@ -509,7 +509,7 @@ impl App {
             || target.starts_with("https://")
             || target.starts_with("file://")
         {
-            let _ = os_open_string(&target);
+            let _ = os_open(&target);
             self.message = Some(format!("◂ {}", entry.name));
             return Ok(());
         }
@@ -548,7 +548,7 @@ impl App {
         }
 
         // Fallback: hand off the raw string to the OS opener (e.g. unknown protocols).
-        match os_open_string(&target) {
+        match os_open(&target) {
             Ok(()) => self.message = Some(format!("◂ {}", entry.name)),
             Err(e) => self.message = Some(format!("shortcut failed: {}", e)),
         }
