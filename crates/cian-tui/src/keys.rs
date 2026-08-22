@@ -2260,8 +2260,10 @@ impl App {
         // (yet) do local file operations. Handle its keys before the local ones.
         if self.active_pane().map(|p| p.is_remote()).unwrap_or(false) {
             match key.code {
-                // Match the local panes exactly: Enter / `l` go into a folder,
-                // `-` / Backspace go up. The ←/→ arrows are NOT navigation here —
+                // Enter / `l` go into a folder, `-` / Backspace go up. The
+                // local panes leave `-` for init.lua to bind and answer only
+                // Backspace; here both are taken, since a remote pane has no
+                // competing use for the key. The ←/→ arrows are NOT navigation here —
                 // they switch panes, so they fall through to the shared handler
                 // below (using them to go up/into was reported as confusing).
                 KeyCode::Enter | KeyCode::Char('l') => {
@@ -2418,6 +2420,12 @@ impl App {
             // than `;`, which is too easily confused with `:` on a US keyboard.
             // The char already encodes the shift, so `_` matches whether or not
             // the modifier is reported.
+            // Ctrl+, joins it, now that a terminal which can encode Ctrl and a
+            // punctuation mark is the one being used. `C` stays: that encoding
+            // needs the kitty keyboard protocol, and a plain terminal sends
+            // nothing at all for this — a key that silently does not arrive is
+            // worse than a second way in.
+            (true, _, KeyCode::Char(',')) => self.start_command_palette(),
             (false, _, KeyCode::Char('C')) => self.start_command_palette(),
             (false, _, KeyCode::Char('Z')) => self.start_fuzzy_jump(),
             // `T` = the UI-toggles menu (dotfiles, input sync, notifications…).
