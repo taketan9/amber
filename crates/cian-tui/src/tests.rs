@@ -612,7 +612,12 @@
         }
         std::fs::remove_file(d.path().join("gone.txt")).unwrap();
 
-        run_cmd(&mut app, "chmod 644");
+        // `readonly`, not `chmod`: Windows has no mode bits at all, so chmod
+        // fails on every path there and the mixed outcome this is about cannot
+        // happen. The read-only attribute exists on both. (The Windows CI leg
+        // caught exactly this — the first version of the test was written on a
+        // Mac and asserted two successes.)
+        run_cmd(&mut app, "readonly on");
         let said = app.message.clone().unwrap_or_default();
         assert!(said.contains('2'), "the two that worked are counted: {said:?}");
         assert!(
@@ -624,8 +629,30 @@
         // a no-op, which is the whole reason it has to be reported.
         for name in ["a.txt", "b.txt"] {
             let a = cian_core::attrs::read_attrs(&d.path().join(name)).unwrap();
-            assert!(a.size.is_some(), "{name} is still there");
+            assert!(a.readonly, "{name} really was changed");
         }
+    }
+
+    /// The same, for `:chmod` itself — Unix only, since Windows answers every
+    /// path with "no mode bits" and cannot produce a mixed result.
+    #[cfg(unix)]
+    #[test]
+    fn chmod_reports_both_halves() {
+        let (d, mut app) = app_with(&["a.txt", "b.txt", "gone.txt"]);
+        {
+            let pane = app.active_pane_mut().unwrap();
+            let _ = pane.reload();
+            for name in ["a.txt", "b.txt", "gone.txt"] {
+                let i = pane.entries.iter().position(|e| e.name == name).unwrap();
+                pane.set_mark_at(i);
+            }
+        }
+        std::fs::remove_file(d.path().join("gone.txt")).unwrap();
+
+        run_cmd(&mut app, "chmod 644");
+        let said = app.message.clone().unwrap_or_default();
+        assert!(said.contains('2'), "two changed: {said:?}");
+        assert!(said.contains('1') && said.to_lowercase().contains("fail"), "one did not: {said:?}");
     }
 
     /// Total failure is not success with a zero.
