@@ -12,6 +12,24 @@ impl App {
         self.mode = Mode::Command;
     }
 
+    /// Say that a view belongs to the windowed build, when this is not one.
+    ///
+    /// The request itself is harmless in a terminal — nothing collects it — but
+    /// a command that changes nothing and says nothing reads as broken.
+    fn say_view_is_window_only(&mut self) {
+        if crate::theme::in_a_window() {
+            return;
+        }
+        self.message = Some(
+            tr(
+                self.lang,
+                "that view is in the windowed build — the terminal has the classic panes",
+                "その表示は窓版のものです — 端末版はクラシック表示のみ",
+            )
+            .into(),
+        );
+    }
+
     pub(crate) fn run_command(&mut self) {
         let raw = self.command_buffer.trim().to_string();
         self.command_buffer.clear();
@@ -53,16 +71,29 @@ impl App {
             "man" | "help" | "h" => self.open_manual(),
             "paste" => { let _ = self.paste_clip(); }
             "hidden" => self.toggle_hidden(),
+            // `r` and the menu have always had this; the command line never
+            // did, and the name was taken by the AI renamer.
+            "rename" | "ren" => self.start_rename(),
             // `:view` on its own has always opened the file under the cursor,
             // and still does. `:view details|icons|classic` switches the look —
             // the same three the switcher in the corner offers, for a hand that
             // is already on the keyboard.
             "view" | "look" => match rest {
                 "" => self.look_inside(),
+                // Two of the three only exist in a window: `view_request` is
+                // read by the windowed build alone, so in a terminal these set
+                // a flag nobody collects. The request still goes up — one code
+                // path, and the window is where it lands — but a terminal is
+                // told why nothing happened, which it never was. Silence is
+                // indistinguishable from the command not existing.
                 "details" | "detail" | "finder" | "list" => {
-                    self.view_request = Some(crate::ViewWanted::Details)
+                    self.view_request = Some(crate::ViewWanted::Details);
+                    self.say_view_is_window_only();
                 }
-                "icons" | "icon" | "grid" => self.view_request = Some(crate::ViewWanted::Icons),
+                "icons" | "icon" | "grid" => {
+                    self.view_request = Some(crate::ViewWanted::Icons);
+                    self.say_view_is_window_only();
+                }
                 "classic" | "panes" => self.view_request = Some(crate::ViewWanted::Classic),
                 other => {
                     self.message = Some(format!(
@@ -77,7 +108,18 @@ impl App {
             // Pixels or half-blocks, for a terminal that offers a picture
             // protocol and then does not draw with it.
             "gfx" | "images" => self.toggle_image_protocol(),
-            "grep" => self.start_grep_prompt(),
+            // The prompt opens seeded when a pattern was given: it used to be
+            // parsed off the line and thrown away, so `:grep foo` and `:grep`
+            // did the same thing and one of them looked broken.
+            "grep" => {
+                self.start_grep_prompt();
+                if !rest.is_empty() {
+                    if let Popup::TextInput { buffer, cursor, .. } = &mut self.popup {
+                        *buffer = rest.to_string();
+                        *cursor = buffer.chars().count();
+                    }
+                }
+            }
             // A blank file in this pane, with no name until `:w <name>`.
             "new" | "scratch" => self.open_scratch_viewer(),
             "markall" | "selectall" => self.mark_all(),
@@ -109,7 +151,15 @@ impl App {
                     tr(self.lang, "key report off", "キー表示をやめました").to_string()
                 });
             }
-            "find" => self.start_find_prompt(),
+            "find" => {
+                self.start_find_prompt();
+                if !rest.is_empty() {
+                    if let Popup::TextInput { buffer, cursor, .. } = &mut self.popup {
+                        *buffer = rest.to_string();
+                        *cursor = buffer.chars().count();
+                    }
+                }
+            }
             "menu" => self.open_menu_at_cursor(),
             // `:limit 2M` — how fast a transfer to or from a server may go.
             // Bare, it says what the ceiling is; `off` takes it away.
@@ -217,6 +267,9 @@ impl App {
             "unstage" | "reset" => self.git_unstage(),
             "discard" | "revert" | "checkout" | "svnrevert" => self.git_discard_prompt(),
             "gitlog" | "log" | "history" | "svnlog" => self.start_git_log(),
+            // The session log had no verb at all, while the menu item that
+            // starts it was labelled `(:log)` — a name git had already taken.
+            "sessionlog" | "startlog" => self.start_log_prompt(),
             "gitdiff" | "gdiff" | "svndiff" => self.git_diff_file(),
             // SVN-only working-copy operations.
             "svnupdate" | "update" | "up" => self.svn_update(),
@@ -226,7 +279,11 @@ impl App {
             "aicommit" | "commitmsg" => self.start_ai_commit_message(),
             "aijunk" | "junk" => self.start_ai_junk(),
             "aiorganize" | "aistructure" | "organize" => self.start_ai_structure(),
-            "airename" | "rename" => {
+            // Not `:rename` — that is the ordinary one, below. Pointing the
+            // most obvious verb in a file manager at the AI meant a default
+            // install answered "add cian.ai{ endpoint = … } to init.lua" to a
+            // request to rename a file.
+            "airename" => {
                 if rest.is_empty() {
                     self.start_ai_rename_prompt();
                 } else {
@@ -295,6 +352,21 @@ impl App {
             // y/m keys; an argument is an explicit destination.
             "cp" | "copy" => self.cmd_transfer(PendingOp::Copy, rest),
             "mv" | "move" => self.cmd_transfer(PendingOp::Move, rest),
+            // …but `rm` does not take one, and must say so rather than guess.
+            // `:cp` and `:mv` one line up *do* honour an argument, so a hand
+            // that has just used those will write `:rm oldfile.txt` — and this
+            // deleted whatever was marked or under the cursor instead, which is
+            // the one mistake in the group that cannot be taken back.
+            "rm" | "del" | "delete" if !rest.is_empty() => {
+                self.message = Some(
+                    tr(
+                        self.lang,
+                        "rm works on the marks, or the file under the cursor — it takes no name",
+                        "rm はマークまたはカーソル位置に対して働きます — 名前は取りません",
+                    )
+                    .into(),
+                )
+            }
             "rm" | "del" | "delete" => self.start_delete(),
 
             // Inspection.

@@ -307,15 +307,23 @@ impl App {
                 v.push(MenuItem::Back);
                 Some(v)
             }
-            MenuItem::ViewMenu => Some(vec![
-                MenuItem::ViewDetails,
-                MenuItem::ViewIcons,
-                MenuItem::ViewClassic,
-                MenuItem::HiddenToggle,
-                MenuItem::ThemePickPane,
-                MenuItem::TogglesMenu,
-                MenuItem::Back,
-            ]),
+            MenuItem::ViewMenu => {
+                let mut v = Vec::new();
+                // Details and Icons belong to the windowed build: they set
+                // `view_request`, and only `cian-gui` reads it. In a terminal
+                // they were two items that did nothing at all when chosen,
+                // which is worse than two items that are not offered.
+                if crate::theme::in_a_window() {
+                    v.push(MenuItem::ViewDetails);
+                    v.push(MenuItem::ViewIcons);
+                    v.push(MenuItem::ViewClassic);
+                }
+                v.push(MenuItem::HiddenToggle);
+                v.push(MenuItem::ThemePickPane);
+                v.push(MenuItem::TogglesMenu);
+                v.push(MenuItem::Back);
+                Some(v)
+            }
             MenuItem::SessionMenu => {
                 let mut v = Vec::new();
                 if self.shell.active_session().map(|s| s.is_logging()).unwrap_or(false) {

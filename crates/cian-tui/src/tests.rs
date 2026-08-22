@@ -459,6 +459,56 @@
         assert!(matches!(app.popup, Popup::Viewer { visual: None, .. }), "and let go");
     }
 
+    /// The audit pass: promises that named the wrong key, verbs that ate their
+    /// argument, and one catch-all that swallowed the command it was written
+    /// to protect.
+    #[test]
+    fn the_audit_findings_stay_fixed() {
+        // `:version` in the panel was eaten by the `:g/re/d` arm above it —
+        // `strip_prefix('v')` on "version" leaves "ersion", no slash, silent
+        // return. The comment over the version arm was added *because* the
+        // command doing nothing there is "the worst answer to am I running
+        // the fix", and it had been doing nothing the whole time.
+        let (_d, mut app) = viewer_on("alpha\n");
+        if let Popup::Viewer { sub_input, .. } = &mut app.popup {
+            *sub_input = Some("version".into());
+        }
+        app.handle_key(code(KeyCode::Enter)).unwrap();
+        assert!(
+            !matches!(app.popup, Popup::Viewer { .. }) || app.message.is_some(),
+            "it answered rather than returning in silence",
+        );
+
+        // `:rm` takes no name, and must not silently delete something else.
+        // `:cp` and `:mv` beside it *do* take one, which is what makes the
+        // silence dangerous.
+        let (_d, mut app) = app_with(&["keep.txt", "other.txt"]);
+        run_cmd(&mut app, "rm keep.txt");
+        assert!(
+            !matches!(app.popup, Popup::ConfirmDelete { .. }),
+            "it did not go ahead and delete something: {:?}",
+            app.popup,
+        );
+        assert!(app.message.is_some(), "and it said why");
+
+        // `:grep foo` opens the prompt with foo in it, rather than throwing
+        // the word away and looking broken.
+        let (_d, mut app) = app_with(&["a.txt"]);
+        run_cmd(&mut app, "grep needle");
+        match &app.popup {
+            Popup::TextInput { buffer, .. } => assert_eq!(buffer, "needle"),
+            other => panic!("expected the grep prompt, got {other:?}"),
+        }
+
+        // Shift+F1 goes back and Shift+F2 forward — the hint bar and the
+        // comment above the binding both said so; the arms were swapped.
+        let hints = key_hints(&app);
+        assert!(
+            hints.iter().all(|(k, _)| *k != "T"),
+            "no hint names a key that does nothing where it is shown: {hints:?}",
+        );
+    }
+
     /// Every switch says what it did. Three of them changed something and
     /// reported nothing, so the only sign was the row's own state text — and
     /// two of those can *refuse*, which from the menu looked identical to the
@@ -12463,9 +12513,13 @@
         app.activate_selected().unwrap();
         let hints = crate::render::key_hints(&app);
         let keys: Vec<&str> = hints.iter().map(|(k, _)| *k).collect();
-        assert!(keys.contains(&"Enter/l") && keys.contains(&"-/h"), "navigation named: {keys:?}");
+        // Backspace, not `-/h`: `-` is bound to nothing without a keymap and
+        // `h` opens the directory history.
+        assert!(keys.contains(&"Enter/l") && keys.contains(&"Bksp"), "navigation named: {keys:?}");
         assert!(keys.contains(&"F3"), "member viewing named");
-        assert!(keys.contains(&"F2") && keys.contains(&"d"), "zip is writable, so say so: {keys:?}");
+        // `r` renames a member; F2 is the file-tab key and never reached the
+        // archive at all.
+        assert!(keys.contains(&"r") && keys.contains(&"d"), "zip is writable, so say so: {keys:?}");
     }
 
     /// Enter on a zip browses into it like a folder: members list, subdirs

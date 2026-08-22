@@ -116,7 +116,7 @@ impl App {
         if !self.key_probe {
             return r;
         }
-        if self.key_probe {
+        {
             let mut mods: Vec<&str> = Vec::new();
             for (m, name) in [
                 (KeyModifiers::CONTROL, "Ctrl"),
@@ -2117,12 +2117,15 @@ impl App {
             let shift = key.modifiers.contains(KeyModifiers::SHIFT);
             match key.code {
                 // Pane navigation (parallels file-pane tab nav): Shift+F1/F2.
+                // F1 back, F2 forward — which is what the hint bar says and
+                // what the comment above claims to parallel. The two arms were
+                // the other way round, so the binding contradicted both.
                 KeyCode::F(1) if shift => {
-                    self.shell.next_pane();
+                    self.shell.prev_pane();
                     return Ok(());
                 }
                 KeyCode::F(2) if shift => {
-                    self.shell.prev_pane();
+                    self.shell.next_pane();
                     return Ok(());
                 }
                 // Splits within the active tab: Shift+F8 left/right, F9 top/bottom.

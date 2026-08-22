@@ -1325,7 +1325,7 @@ impl MenuItem {
             MenuItem::Ssh => tr(lang, "SSH connect  (:ssh)", "SSH接続  (:ssh)"),
             MenuItem::ScpUpload => tr(lang, "Upload → server", "アップロード → サーバ"),
             MenuItem::ScpDownload => tr(lang, "Download ← server", "ダウンロード ← サーバ"),
-            MenuItem::StartLog => tr(lang, "Start session log  (:log)", "セッションログ開始  (:log)"),
+            MenuItem::StartLog => tr(lang, "Start session log  (:sessionlog)", "セッションログ開始  (:sessionlog)"),
             MenuItem::StopLog => tr(lang, "Stop session log  ●", "セッションログ停止  ●"),
             MenuItem::Encoding => tr(lang, "Text encoding  (e)", "文字コード  (e)"),
             MenuItem::Quit => tr(lang, "Quit cian  (q)", "cian を終了  (q)"),

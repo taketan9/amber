@@ -3295,13 +3295,16 @@ pub(crate) fn key_hints(app: &App) -> Vec<(&'static str, &'static str)> {
         // by guessing that a *file manager* menu holds it — and that person is
         // exactly who it was added for. It costs one column to say so, and no
         // heuristic has to work out whether they are lost.
+        // Only what works *while typing*. `:` and `?` are characters here —
+        // the editor takes every key that is not an F-key or Shift+Enter — so
+        // `:q`, `:notepad` and `?` were three hints that typed themselves into
+        // the file. The `T` on this row was found and fixed; its neighbours,
+        // which are wrong for the same reason, were not re-read at the time.
         return if editing {
             vec![
                 ("Ctrl+S", d("save", "保存")),
                 ("Esc", d("leave the editor", "編集終了")),
-                (":q", d("close", "閉じる")),
-                (":notepad", d("notepad keys", "メモ帳ふうに")),
-                ("?", d("keys", "キー一覧")),
+                ("S-Enter", d("menu", "メニュー")),
             ]
         } else {
             vec![
@@ -3373,7 +3376,9 @@ pub(crate) fn key_hints(app: &App) -> Vec<(&'static str, &'static str)> {
         _ if app.active_pane().map(|p| p.archive_view().is_some()).unwrap_or(false) => {
             let mut v = vec![
                 ("Enter/l", d("in", "入る")),
-                ("-/h", d("out", "戻る")),
+                // Backspace, not `-/h`: `-` is bound to nothing at all unless
+                // a keymap says so, and `h` opens the directory history.
+                ("Bksp", d("out", "戻る")),
                 ("F3", d("view member", "メンバー閲覧")),
                 ("Space", d("mark", "マーク")),
                 ("c", d("extract →", "展開 →")),
@@ -3391,7 +3396,7 @@ pub(crate) fn key_hints(app: &App) -> Vec<(&'static str, &'static str)> {
                 })
                 .unwrap_or(false);
             if zip {
-                v.extend([("F2", d("rename", "リネーム")), ("d", d("delete", "削除"))]);
+                v.extend([("r", d("rename", "リネーム")), ("d", d("delete", "削除"))]);
             } else {
                 v.push(("", d("(read-only)", "（読取専用）")));
             }

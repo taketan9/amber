@@ -1972,7 +1972,13 @@ impl App {
             }
             // From here `:edit` means *this* file, not the one under the
             // pane's cursor.
-            _ if cmd.starts_with('g') || cmd.starts_with('v') => {
+            // The slash is part of the pattern: `:g/re/d`, `:v/re/d`. Matching
+            // on the bare letter made this a catch-all for *every* verb
+            // beginning with g or v, and without a slash it returned in
+            // silence — so `:version` in the panel did nothing at all, which
+            // is precisely what the arm below was added to stop. `:gfx` went
+            // the same way.
+            _ if cmd.starts_with("g/") || cmd.starts_with("v/") => {
                 // `:g/re/d` deletes every line that matches, `:v/re/d` every
                 // line that does not — the two halves of a log triage, and
                 // one undo step either way.
