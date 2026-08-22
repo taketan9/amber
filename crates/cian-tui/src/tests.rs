@@ -549,6 +549,109 @@
         assert_eq!(app.filter_buffer, "t/", "the slash went into the query");
     }
 
+    /// The sweeps that change files on disk say what they actually did.
+    ///
+    /// `:chmod` stopped at the first failure and reported only "chmod failed",
+    /// throwing away the count of what it had already changed — so a partial
+    /// application read as "nothing happened" while several files had in fact
+    /// been touched. `:readonly` discarded every error and always reported
+    /// success, so a run where nothing could be changed said "on 0 item(s)".
+    /// Neither had a test.
+    #[test]
+    fn a_sweep_over_files_reports_both_halves() {
+        // Mark three files, then remove one from disk behind the pane's back:
+        // that one cannot be changed, the other two can.
+        let (d, mut app) = app_with(&["a.txt", "b.txt", "gone.txt"]);
+        {
+            let pane = app.active_pane_mut().unwrap();
+            let _ = pane.reload();
+            for name in ["a.txt", "b.txt", "gone.txt"] {
+                let i = pane.entries.iter().position(|e| e.name == name).unwrap();
+                pane.set_mark_at(i);
+            }
+        }
+        std::fs::remove_file(d.path().join("gone.txt")).unwrap();
+
+        run_cmd(&mut app, "chmod 644");
+        let said = app.message.clone().unwrap_or_default();
+        assert!(said.contains('2'), "the two that worked are counted: {said:?}");
+        assert!(
+            said.contains('1') && (said.to_lowercase().contains("fail") || said.contains("失敗")),
+            "and the one that did not is named: {said:?}",
+        );
+
+        // The two that could be changed really were — a partial sweep is not
+        // a no-op, which is the whole reason it has to be reported.
+        for name in ["a.txt", "b.txt"] {
+            let a = cian_core::attrs::read_attrs(&d.path().join(name)).unwrap();
+            assert!(a.size.is_some(), "{name} is still there");
+        }
+    }
+
+    /// Total failure is not success with a zero.
+    #[test]
+    fn readonly_does_not_report_success_when_nothing_worked() {
+        let (d, mut app) = app_with(&["gone.txt"]);
+        {
+            let pane = app.active_pane_mut().unwrap();
+            let _ = pane.reload();
+            let i = pane.entries.iter().position(|e| e.name == "gone.txt").unwrap();
+            pane.set_mark_at(i);
+        }
+        std::fs::remove_file(d.path().join("gone.txt")).unwrap();
+
+        run_cmd(&mut app, "readonly on");
+        let said = app.message.clone().unwrap_or_default();
+        assert!(
+            said.to_lowercase().contains("fail") || said.contains("失敗"),
+            "it said the truth rather than \"on 0 item(s)\": {said:?}",
+        );
+    }
+
+    /// `:tar` and `:targz` write archives and had no test at all. The parts
+    /// worth pinning are the ones the TUI owns: the extension it appends, the
+    /// one it leaves alone, and the refusal to write over something.
+    #[test]
+    fn tar_names_its_own_output_and_will_not_overwrite() {
+        let (d, mut app) = app_with(&["one.txt", "two.txt"]);
+        {
+            let pane = app.active_pane_mut().unwrap();
+            let _ = pane.reload();
+            let i = pane.entries.iter().position(|e| e.name == "one.txt").unwrap();
+            pane.set_mark_at(i);
+        }
+
+        // The write runs on a worker, as zip's does, so each one is drained.
+        run_cmd(&mut app, "tar bundle");
+        drain_op(&mut app);
+        assert!(d.path().join("bundle.tar").is_file(), "the extension was appended");
+
+        run_cmd(&mut app, "targz zipped");
+        drain_op(&mut app);
+        assert!(d.path().join("zipped.tar.gz").is_file(), "and the gz one");
+
+        // A name that already carries a gz extension is left as it is — which
+        // is the only way to ask for a `.tgz`, `:tgz` having been the verb that
+        // did not give you one.
+        run_cmd(&mut app, "targz short.tgz");
+        drain_op(&mut app);
+        assert!(d.path().join("short.tgz").is_file(), "the given name was kept");
+
+        // And it refuses rather than writing over what is there.
+        let before = std::fs::metadata(d.path().join("bundle.tar")).unwrap().len();
+        run_cmd(&mut app, "tar bundle");
+        let said = app.message.clone().unwrap_or_default();
+        assert!(
+            said.contains("exists") || said.contains("存在"),
+            "it said why: {said:?}",
+        );
+        assert_eq!(
+            std::fs::metadata(d.path().join("bundle.tar")).unwrap().len(),
+            before,
+            "and left the archive alone",
+        );
+    }
+
     /// Every switch says what it did. Three of them changed something and
     /// reported nothing, so the only sign was the row's own state text — and
     /// two of those can *refuse*, which from the menu looked identical to the

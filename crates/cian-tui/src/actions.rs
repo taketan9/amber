@@ -1900,22 +1900,73 @@ impl App {
             self.message = Some(tr(self.lang, "nothing selected", "選択されていません").into());
             return;
         }
+        // Every path is attempted, and both halves are reported. It used to
+        // stop at the first failure and say only "chmod failed" — discarding
+        // the count of what it had already changed, so a partial application
+        // read as "nothing happened" and the files it *had* touched went
+        // unmentioned.
+        let (ok, err) = self.apply_to_each(&paths, |p| cian_core::attrs::set_mode(p, arg));
+        self.reload_both();
+        self.message = Some(self.each_report(&format!("chmod {arg}"), ok, paths.len(), err));
+    }
+
+    /// Run `f` over every path, counting what worked and keeping the first
+    /// complaint. Nothing stops early: a sweep that gives up halfway leaves the
+    /// selection in two states and tells you about neither.
+    fn apply_to_each<F>(&self, paths: &[PathBuf], mut f: F) -> (usize, Option<String>)
+    where
+        F: FnMut(&PathBuf) -> anyhow::Result<()>,
+    {
         let mut ok = 0;
         let mut err = None;
-        for path in &paths {
-            match cian_core::attrs::set_mode(path, arg) {
+        for path in paths {
+            match f(path) {
                 Ok(()) => ok += 1,
                 Err(e) => {
-                    err = Some(e.to_string());
-                    break;
+                    if err.is_none() {
+                        err = Some(format!("{}: {}", path.display(), e));
+                    }
                 }
             }
         }
-        self.reload_both();
-        self.message = Some(match err {
-            Some(e) => format!("chmod failed: {}", e),
-            None => format!("chmod {} on {} item(s)", arg, ok),
-        });
+        (ok, err)
+    }
+
+    /// What a sweep over several files did, in one line: how many took, how
+    /// many did not, and why the first one did not.
+    fn each_report(&self, what: &str, ok: usize, total: usize, err: Option<String>) -> String {
+        let failed = total.saturating_sub(ok);
+        let ja = self.lang == crate::theme::Lang::Ja;
+        match (failed, err) {
+            (0, _) => {
+                if ja {
+                    format!("{what}: {ok} 件")
+                } else {
+                    format!("{what} on {ok} item(s)")
+                }
+            }
+            (n, Some(e)) if ok == 0 => {
+                if ja {
+                    format!("{what}: {n} 件すべて失敗 — {e}")
+                } else {
+                    format!("{what}: all {n} failed — {e}")
+                }
+            }
+            (n, Some(e)) => {
+                if ja {
+                    format!("{what}: {ok} 件成功、{n} 件失敗 — {e}")
+                } else {
+                    format!("{what} on {ok} item(s) — {n} failed: {e}")
+                }
+            }
+            (n, None) => {
+                if ja {
+                    format!("{what}: {ok} 件成功、{n} 件失敗")
+                } else {
+                    format!("{what} on {ok} item(s) — {n} failed")
+                }
+            }
+        }
     }
 
     pub(crate) fn set_readonly_command(&mut self, on: bool) {
@@ -1924,18 +1975,17 @@ impl App {
             self.message = Some(tr(self.lang, "nothing selected", "選択されていません").into());
             return;
         }
-        let mut ok = 0;
-        for path in &paths {
-            if cian_core::attrs::set_readonly(path, on).is_ok() {
-                ok += 1;
-            }
-        }
+        // It threw every error away and always reported success — so a run
+        // where nothing at all could be changed said "on 0 item(s)", which is
+        // true and reads as though it worked.
+        let (ok, err) = self.apply_to_each(&paths, |p| cian_core::attrs::set_readonly(p, on));
         self.reload_both();
-        self.message = Some(if self.lang == crate::theme::Lang::Ja {
-            format!("読み取り専用を {} に設定（{} 件）", if on { "set" } else { "cleared" }, ok)
+        let what = if self.lang == crate::theme::Lang::Ja {
+            format!("読み取り専用を{}", if on { "設定" } else { "解除" })
         } else {
-            format!("read-only {} on {} item(s)", if on { "set" } else { "cleared" }, ok)
-        });
+            format!("read-only {}", if on { "set" } else { "cleared" })
+        };
+        self.message = Some(self.each_report(&what, ok, paths.len(), err));
     }
 
     // ------- Recursive search -------
