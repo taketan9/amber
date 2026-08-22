@@ -871,27 +871,6 @@
         assert!(!matches!(app.popup, Popup::ConfirmClose { .. }), "with nothing asked");
     }
 
-    /// Ctrl+W is the other way out, and that one refuses to discard: it is one
-    /// press, so it cannot ask for the deliberateness three presses show.
-    #[test]
-    fn notepad_style_ctrl_w_will_not_throw_away_unsaved_work() {
-        let (_d, mut app) = viewer_on("alpha\n");
-        app.edit_style = EditStyle::Notepad;
-        app.sync_edit_style();
-        app.handle_key(key('z')).unwrap();
-        assert!(matches!(app.popup, Popup::Viewer { dirty: true, .. }), "edited");
-
-        app.handle_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL)).unwrap();
-        assert!(matches!(app.popup, Popup::Viewer { .. }), "the file is still open");
-        let said = app.message.clone().unwrap_or_default();
-        assert!(said.contains("Ctrl+S"), "and it named the key that saves: {said:?}");
-
-        app.handle_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL)).unwrap();
-        assert!(matches!(app.popup, Popup::Viewer { dirty: false, .. }), "saved");
-        app.handle_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL)).unwrap();
-        assert!(!matches!(app.popup, Popup::Viewer { .. }), "and now it closes");
-    }
-
     /// Ctrl and a sideways arrow steps a word, the motion the shared editor
     /// does not otherwise have.
     #[test]

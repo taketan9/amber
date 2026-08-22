@@ -169,36 +169,6 @@ impl App {
         }
     }
 
-    /// Close the panel, or say why it will not.
-    ///
-    /// The same refusal `:q` and the ✕ give. Written once so the third way out
-    /// cannot drift from the other two — which is how the manual and the menu
-    /// came to throw away a dirty file while those two refused to.
-    pub(crate) fn close_viewer_or_say_why(&mut self) -> Result<()> {
-        if matches!(self.popup, Popup::Viewer { dirty: true, .. }) {
-            self.message = Some(if self.notepad_keys() {
-                // `:w` and `:q!` are vim style's answers, and notepad style has
-                // no command line to type them at. Name what it does have.
-                tr(
-                    self.lang,
-                    "unsaved changes — Ctrl+S to save, or the menu to close without saving",
-                    "未保存の変更があります — Ctrl+S で保存、破棄はメニューから",
-                )
-                .into()
-            } else {
-                tr(
-                    self.lang,
-                    "unsaved changes — :w to save, :q! to discard",
-                    "未保存の変更があります — :w で保存、:q! で破棄",
-                )
-                .into()
-            });
-        } else {
-            self.close_viewer_file();
-        }
-        Ok(())
-    }
-
     /// The keys notepad style adds to the editor: selection with Shift, word
     /// steps with Ctrl, and a selection that the next keystroke replaces.
     ///
@@ -211,12 +181,12 @@ impl App {
         let shift = key.modifiers.contains(KeyModifiers::SHIFT);
         let alt = key.modifiers.contains(KeyModifiers::ALT);
 
-        // Ctrl+W closes, as it does in a browser tab and in most editors. The
-        // panel otherwise has no keyboard way out in this style: Esc reaches
-        // one, but only after clearing a selection.
-        if ctrl && matches!(key.code, KeyCode::Char('w') | KeyCode::Char('W')) {
-            return self.close_viewer_or_say_why().map(|_| true);
-        }
+        // No Ctrl+W. Everywhere this grammar borrows its keys from, Ctrl+W
+        // closes the *window* — and on Windows the terminal takes it before
+        // cian ever sees it, so the binding would have been both a surprise
+        // and an unreliable one. Esc three times is the way out, the ✕ is the
+        // mouse's, and the panel's menu holds Save and "Close without saving".
+        //
         // Ctrl+F is find, the name it has outside vi. `/` is a character here.
         if ctrl && matches!(key.code, KeyCode::Char('f') | KeyCode::Char('F')) {
             if let Popup::Viewer { find_input, .. } = &mut self.popup {
