@@ -137,7 +137,7 @@ impl App {
                 InputKind::Rename { original: e.path.clone() },
             );
     }
-    /// `:brename` / right-click: pattern-based bulk rename of the marked files
+    /// `:renamepattern` / right-click: pattern-based bulk rename of the marked files
     /// (or the one under the cursor). Prompts for the pattern; the proposed
     /// names are shown for review (the same checklist the AI rename uses)
     /// before anything touches disk.

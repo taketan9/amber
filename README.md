@@ -243,8 +243,8 @@ Bare text is literal, with nothing to escape; slashes make it a regex ([Rust `re
 | `x` | ask the AI what changed |
 
 - **`:dupes`** finds byte-identical files under this pane and offers them as a checklist; one per group is kept, the rest go through the normal delete confirm.
-- **`:brename`** renames the marked files by a template (`report_{n3}.{ext}`) or a substitution (`s/IMG/photo/i`), with an `old → new` review. No AI, no network.
-- **`:bulkrename`** (`:vidir`) opens the names in your editor, one per line. Save and quit and each changed line renames its file, swaps included — all-or-nothing, so a duplicate or a lost line cancels the batch rather than half-applying it. `:cq` cancels.
+- **`:renamepattern`** renames the marked files by a template (`report_{n3}.{ext}`) or a substitution (`s/IMG/photo/i`), with an `old → new` review. No AI, no network.
+- **`:renamelist`** opens the names in your editor, one per line. Save and quit and each changed line renames its file, swaps included — all-or-nothing, so a duplicate or a lost line cancels the batch rather than half-applying it. `:cq` cancels.
 
 ---
 
@@ -269,7 +269,7 @@ The status line always shows free space on the active pane's drive — amber pas
 
 ## SSH and remote panes
 
-**`:sftp`** (`:remote`, `:scp`) turns one pane into the server, framed in **carmine** so it is never mistaken for local. It moves like any pane, and:
+**`:remote`** (`:sftp`) turns one pane into the server, framed in **carmine** so it is never mistaken for local. It moves like any pane, and:
 
 | Key | Does |
 |---|---|

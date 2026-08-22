@@ -806,7 +806,7 @@ enum Popup {
     StructureReview { items: Vec<MoveItem>, cursor: usize, scroll: usize, dir: PathBuf },
     /// Proposed renames (old → new), each toggleable. Approving renames the
     /// checked files in place. `by_ai` says which side proposed them — the AI
-    /// (`:airename`) or the `:brename` pattern — which is what the window is
+    /// (`:airename`) or the `:renamepattern` rule — which is what the window is
     /// named and coloured for.
     RenameReview { items: Vec<RenameItem>, cursor: usize, scroll: usize, by_ai: bool },
     /// Confirm discarding (reverting) worktree changes to tracked files. This
@@ -1150,7 +1150,7 @@ enum MenuItem {
     /// notepad style there is no command line, so this is the only way past
     /// the refusal that guards a dirty file.
     ViewerCloseDiscard,
-    /// Open a server in this pane over SFTP (`:sftp` / remote pane).
+    /// Open a server in this pane over SFTP (`:remote` / remote pane).
     RemotePane,
     /// Disk-usage breakdown of the current folder (`:du`).
     DiskUsage,
@@ -1185,9 +1185,9 @@ enum MenuItem {
     /// Put the selection on the system clipboard as real file references, so
     /// Finder / Explorer can paste them (`Shift+P`).
     CopyFileRef,
-    /// Pattern-based bulk rename of the marked files (`:brename`).
+    /// Pattern-based bulk rename of the marked files (`:renamepattern`).
     BulkRename,
-    /// Rename by editing a list of names in the editor (`:bulkrename`).
+    /// Rename by editing a list of names in the editor (`:renamelist`).
     EditorRename,
     /// Open the command-snippet launcher (`:snip`).
     Snippets,
@@ -1375,8 +1375,8 @@ impl MenuItem {
             MenuItem::SvnLog => tr(lang, "History / log  (svn log)", "履歴 / ログ  (svn log)"),
             MenuItem::SvnUpdate => tr(lang, "Update  (svn update)", "更新  (svn update)"),
             MenuItem::SvnCommit => tr(lang, "Commit  (svn commit)", "コミット  (svn commit)"),
-            MenuItem::BulkRename => tr(lang, "Bulk rename  (:brename)", "一括リネーム  (:brename)"),
-            MenuItem::EditorRename => tr(lang, "Rename in editor  (:bulkrename)", "エディタでリネーム  (:bulkrename)"),
+            MenuItem::BulkRename => tr(lang, "Rename by pattern  (:renamepattern)", "パターンでリネーム  (:renamepattern)"),
+            MenuItem::EditorRename => tr(lang, "Rename in editor  (:renamelist)", "エディタでリネーム  (:renamelist)"),
             MenuItem::Snippets => tr(lang, "Snippets  (:snip)", "スニペット  (:snip)"),
             MenuItem::Macros => tr(lang, "Macros  (@)", "マクロ  (@)"),
             MenuItem::Shortcuts => tr(lang, "Shortcuts  (s)", "ショートカット  (s)"),
@@ -4374,7 +4374,7 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry("  normal mode", None, "x/dd/D/J delete·join, u undo, v+d cut selection (d/u scroll via Ctrl)", "ノーマルモード：x/dd/D/J 削除·結合, u 取消, v+d 選択削除（スクロールは Ctrl+d/u）"),
                 entry(":edit", None, "edit the file in your external editor (E in the viewer)", "外部エディタで編集（ビューア内は E）"),
                 entry(":vi / :vim / :nvim", None, "open the file in that editor in a new shell tab", "新規シェルタブでそのエディタでファイルを開く"),
-                entry(":bulkrename", None, "rename marked (or all) files by editing the list in your editor (:brn, :vidir)", "マーク（無ければ全部）の名前一覧をエディタで編集してリネーム（:brn, :vidir）"),
+                entry(":renamelist", None, "rename marked (or all) files by editing the list in your editor", "マーク（無ければ全部）の名前一覧をエディタで編集してリネーム"),
                 entry("  in viewer", None, "hjkl move, /n/N search, %/{/}/NG jump, v/V/C-v select y copy", "ビューア内：hjkl移動, /n/N検索, %/{/}/NG移動, v/V/C-v選択 yコピー"),
                 entry("  B in viewer", None, "toggle the git blame gutter (who last changed each line)", "ビューア内：git blame ガター切替（各行の最終変更者）"),
                 entry("  from a grep hit", None, "Ctrl+n/N next/prev hit, e encoding (reveal is in the menu)", "grepヒットから：Ctrl+n/N 次/前, e 文字コード（場所を開くはメニュー内）"),
@@ -4402,7 +4402,7 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry("/", None, "filter list as you type", "入力に応じて一覧を絞り込み"),
                 entry(",", None, "sort by name / size / date / ext", "ソート：名前／サイズ／日付／拡張子"),
                 entry("Shift+S", None, "ssh picker (also :ssh, or right-click)", "SSHピッカー（:ssh・右クリックでも）"),
-                entry(":sftp", None, "open a server IN this pane (a remote pane; carmine frame). Enter/l/- navigate, Esc leaves", "サーバをこのペインで開く（リモートペイン・カーマイン枠）。Enter/l/- で移動、Esc で戻る"),
+                entry(":remote", None, "open a server IN this pane (a remote pane; carmine frame). Enter/l navigate, Esc leaves", "サーバをこのペインで開く（リモートペイン・カーマイン枠）。Enter/l で移動、Esc で戻る"),
                 entry("Enter, Esc", None, "while filtering: keep / clear it", "フィルタ中：適用したまま／解除"),
             ],
         ),
@@ -4424,7 +4424,7 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry("Ctrl+V, y", Some(Paste), "paste the file clipboard here", "ファイルクリップボードをここに貼り付け"),
                 entry("d", Some(Delete), "delete (to trash)", "削除（ゴミ箱へ）"),
                 entry("r", Some(Rename), "rename", "リネーム"),
-                entry(":brename", None, "bulk rename by pattern: {name}_{n3}.{ext} or s/re/rep/gi (preview first)", "パターン一括リネーム：{name}_{n3}.{ext} / s/re/rep/gi（先にプレビュー）"),
+                entry(":renamepattern", None, "bulk rename by pattern: {name}_{n3}.{ext} or s/re/rep/gi (preview first)", "パターン一括リネーム：{name}_{n3}.{ext} / s/re/rep/gi（先にプレビュー）"),
                 entry("a", Some(NewFile), "new file", "新規ファイル"),
                 entry("A", Some(NewDir), "new directory", "新規ディレクトリ"),
                 entry("o", Some(SyncFromOther), "this pane → other pane's directory", "このペインを反対ペインと同じ場所に"),

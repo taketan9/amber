@@ -54,7 +54,7 @@ impl App {
         }
     }
 
-    /// `:bulkrename` (also `:vidir`): rename by editing a list of names.
+    /// `:renamelist`: rename by editing a list of names.
     ///
     /// The marked entries — or, with nothing marked, everything in the pane —
     /// are written one name per line to a temp file and opened in the editor

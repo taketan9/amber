@@ -31,7 +31,7 @@ fn is_ai_simple(popup: &Popup) -> bool {
         | Popup::CommitMessage { .. }
         | Popup::JunkReview { .. }
         | Popup::StructureReview { .. } => true,
-        // `:brename` and `:find` share their result lists with the AI; only the
+        // `:renamepattern` and `:find` share their result lists with the AI; only the
         // AI side of each belongs to the family.
         Popup::RenameReview { by_ai, .. } | Popup::FindResults { by_ai, .. } => *by_ai,
         // The AI prompts; every other text input is a plain file operation.
@@ -1622,7 +1622,7 @@ pub(crate) fn outline_top(items: &[cian_core::outline::Item], line: usize, h: us
 /// drawn.
 /// Split a menu label into (name, hint), where the hint is a trailing
 /// `(…)`-style key/command annotation preceded by two spaces (e.g.
-/// `"Bulk rename…  (:brename)"` → `("Bulk rename…", "(:brename)")`). No hint
+/// `"Rename by pattern…  (:renamepattern)"` → name and hint). No hint
 /// yields an empty second element.
 pub(crate) fn menu_label_parts(label: &str) -> (&str, &str) {
     if label.ends_with(')') {

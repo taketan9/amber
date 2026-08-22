@@ -237,7 +237,12 @@ impl App {
             "redo" => self.redo_last(),
             "edit" | "e" => self.edit_selected_file(),
             // Rename by editing a list of names (vidir's interface).
-            "bulkrename" | "brn" | "vidir" => self.start_editor_rename(),
+            // Named for what they do, because `:bulkrename` and `:brename`
+            // were three characters apart and did different things. The
+            // family now reads together: `:rename` one file, `:renamelist`
+            // edit them all as text, `:renamepattern` by rule, `:airename`
+            // by instruction.
+            "renamelist" => self.start_editor_rename(),
             // Cursor-follow preview in the shell panel's area.
             "preview" | "pv" => self.toggle_preview(),
             // The operation queue: running + waiting file operations.
@@ -251,9 +256,10 @@ impl App {
             "vi" | "vim" | "nvim" => self.edit_in_new_tab(Some(verb)),
             "macro" | "macros" => self.start_macros(),
             "ssh" => self.start_ssh(),
-            "sftp" | "remote" | "scp" | "browse" | "remotepane" => {
-                self.start_scp(ScpDir::BrowsePane)
-            }
+            // `remote` is what it is; `sftp` is how, and people do search by
+            // protocol. `scp` named the fallback rather than the thing, and
+            // `browse`/`remotepane` named an action and a piece of the UI.
+            "remote" | "sftp" => self.start_scp(ScpDir::BrowsePane),
             "ai" | "chat" => self.open_ai_chat(),
             "aicmd" => {
                 if rest.is_empty() {
@@ -277,8 +283,13 @@ impl App {
             "sessionlog" | "startlog" => self.start_log_prompt(),
             "gitdiff" | "gdiff" | "svndiff" => self.git_diff_file(),
             // SVN-only working-copy operations.
-            "svnupdate" | "update" | "up" => self.svn_update(),
-            "svncommit" | "commit" | "ci" => self.svn_commit_prompt(),
+            // svn-only, so it says so in the name. `:up` in a file manager
+            // reads as "go to the parent", which is not what it did.
+            "svnupdate" => self.svn_update(),
+            // Likewise. cian has no git commit, so a bare `:commit` was a
+            // generic name for a specific thing — and left the obvious verb
+            // taken if git commit is ever added.
+            "svncommit" => self.svn_commit_prompt(),
             "svnresolve" | "resolve" => self.svn_resolve(),
             "snip" | "snippet" | "snippets" => self.start_snippets(),
             "aicommit" | "commitmsg" => self.start_ai_commit_message(),
@@ -297,7 +308,7 @@ impl App {
             }
             // Pattern-based (non-AI) bulk rename. With no argument it prompts;
             // with one it applies the pattern straight to the review checklist.
-            "brename" | "bren" | "renumber" | "renum" => {
+            "renamepattern" => {
                 if rest.is_empty() {
                     self.start_bulk_rename();
                 } else {
