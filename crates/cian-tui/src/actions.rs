@@ -89,7 +89,7 @@ impl App {
                 self.message = Some(tr(self.lang, "nothing to operate on", "操作する対象がありません").into());
                 return;
             }
-            self.popup = Popup::ConfirmZipAdd { archive, sub, sources };
+            self.open_popup(Popup::ConfirmZipAdd { archive, sub, sources });
             return;
         }
         // Copying to/from a remote pane is an SFTP transfer, not a local copy.
@@ -102,7 +102,7 @@ impl App {
             None => return,
         };
         if targets.is_empty() { self.message = Some(tr(self.lang, "nothing to operate on", "操作する対象がありません").into()); return; }
-        self.popup = Popup::ConfirmTransfer { op, targets, dest };
+        self.open_popup(Popup::ConfirmTransfer { op, targets, dest });
     }
     pub(crate) fn start_delete(&mut self) {
         if self.active_pane().map(|p| p.archive_view().is_some()).unwrap_or(false) {
@@ -114,7 +114,7 @@ impl App {
             None => return,
         };
         if targets.is_empty() { self.message = Some(tr(self.lang, "nothing to delete", "削除する対象がありません").into()); return; }
-        self.popup = Popup::ConfirmDelete { targets };
+        self.open_popup(Popup::ConfirmDelete { targets });
     }
     pub(crate) fn start_rename(&mut self) {
         if self.active_pane().map(|p| p.archive_view().is_some()).unwrap_or(false) {
@@ -179,7 +179,7 @@ impl App {
             self.message = Some(tr(self.lang, "the pattern changed no names", "パターンで変わる名前がありません").into());
             return;
         }
-        self.popup = Popup::RenameReview { items, cursor: 0, scroll: 0, by_ai: false };
+        self.open_popup(Popup::RenameReview { items, cursor: 0, scroll: 0, by_ai: false });
     }
 
     pub(crate) fn start_new_file(&mut self) {
@@ -203,7 +203,7 @@ impl App {
 
     // ------- Search -------
     pub(crate) fn start_search(&mut self) {
-        self.popup = Popup::Search { buffer: String::new() };
+        self.open_popup(Popup::Search { buffer: String::new() });
         self.mode = Mode::Search;
     }
 
@@ -305,16 +305,16 @@ impl App {
         if !home.is_empty() && !up.is_empty() && home != up {
             lines.push("note: HOME differs from USERPROFILE — cian uses HOME for ~/.config/cian.".into());
         }
-        self.popup = Popup::Notice { lines };
+        self.open_popup(Popup::Notice { lines });
     }
 
     // ------- Shortcuts -------
     pub(crate) fn start_shortcuts(&mut self) {
-        self.popup = Popup::Shortcuts {
+        self.open_popup(Popup::Shortcuts {
             entries: self.shortcuts.entries.clone(),
             cursor: 0,
             path: Vec::new(),
-        };
+        });
     }
 
     /// Re-open the shortcuts popup at `path`/`cursor` from the saved store (used
@@ -336,7 +336,7 @@ impl App {
                 self.reopen_shortcuts(path, cursor);
             }
             Err(e) => {
-                self.popup = Popup::Notice {
+                self.open_popup(Popup::Notice {
                     lines: vec![
                         tr(self.lang, "the bookmarks could not be saved:", "ブックマークを保存できませんでした:")
                             .to_string(),
@@ -349,8 +349,7 @@ impl App {
                         )
                         .to_string(),
                     ],
-                }
-            }
+                })}
         }
     }
 
@@ -409,21 +408,21 @@ impl App {
             None => tr(self.lang, "half-blocks (no protocol offered)", "半角ブロック（プロトコルなし）")
                 .to_string(),
         };
-        self.popup = Popup::Notice {
+        self.open_popup(Popup::Notice {
             lines: vec![
                 crate::version_text(),
                 format!("{}: {}", tr(self.lang, "images", "画像"), gfx),
             ],
-        };
+        });
     }
 
     pub(crate) fn reopen_shortcuts(&mut self, path: Vec<usize>, cursor: usize) {
         let n = sc_level(&self.shortcuts.entries, &path).len();
-        self.popup = Popup::Shortcuts {
+        self.open_popup(Popup::Shortcuts {
             entries: self.shortcuts.entries.clone(),
             cursor: cursor.min(n.saturating_sub(1)),
             path,
-        };
+        });
     }
 
     /// Prompt for a new shortcut's name in the group at `path`. `group` makes a
@@ -589,7 +588,7 @@ impl App {
             self.message = Some(tr(self.lang, "no history yet", "履歴がまだありません").into());
             return;
         }
-        self.popup = Popup::History { entries, cursor: 0 };
+        self.open_popup(Popup::History { entries, cursor: 0 });
     }
 
     pub(crate) fn finish_history(&mut self) -> Result<()> {
@@ -743,7 +742,7 @@ impl App {
             );
             return;
         }
-        self.popup = Popup::Snippets { cursor: 0, filter: String::new() };
+        self.open_popup(Popup::Snippets { cursor: 0, filter: String::new() });
     }
 
     /// The snippets matching `filter` (case-insensitive, over name and command),
@@ -768,7 +767,7 @@ impl App {
         let Some(s) = self.config.snippets.get(index) else { return };
         let (name, cmd, enter, confirm) = (s.name.clone(), s.cmd.clone(), s.enter, s.confirm);
         if confirm {
-            self.popup = Popup::ConfirmSnippet { name, cmd, enter };
+            self.open_popup(Popup::ConfirmSnippet { name, cmd, enter });
         } else {
             self.deliver_snippet(&cmd, enter);
         }
@@ -802,7 +801,7 @@ impl App {
             .active_pane()
             .and_then(|p| SortKey::ALL.iter().position(|k| *k == p.sort.key))
             .unwrap_or(0);
-        self.popup = Popup::SortPicker { cursor: cur };
+        self.open_popup(Popup::SortPicker { cursor: cur });
     }
 
     /// Apply a sort key. Choosing the key that is already active flips the
@@ -833,7 +832,7 @@ impl App {
             self.message = Some(tr(self.lang, "nothing selected", "選択されていません").into());
             return;
         }
-        self.popup = Popup::DestPicker { op, targets, cursor: 0 };
+        self.open_popup(Popup::DestPicker { op, targets, cursor: 0 });
     }
 
     /// Rows of the destination picker: the opposite pane first, then history.
@@ -958,12 +957,12 @@ impl App {
         if cian_core::archive::is_archive(&entry.path) {
             match cian_core::archive::list(&entry.path) {
                 Ok(members) => {
-                    self.popup = Popup::Archive {
+                    self.open_popup(Popup::Archive {
                         path: entry.path,
                         members,
                         cursor: 0,
                         scroll: 0,
-                    };
+                    });
                     return;
                 }
                 // Named like an archive but unreadable as one: fall through to
@@ -981,12 +980,12 @@ impl App {
         self.note_recent_file(path);
         // Images preview as half-block cells rather than a hex dump.
         if cian_core::image::is_image(path) {
-            self.popup = Popup::ImageView {
+            self.open_popup(Popup::ImageView {
                 path: path.to_path_buf(),
                 title: title.to_string(),
                 shown: None,
                 error: None,
-            };
+            });
             return;
         }
         // Office/PDF documents are extracted to text first (fully in-process, no
@@ -1178,17 +1177,17 @@ impl App {
                 // Identical files get a clear notice rather than a diff of
                 // nothing — the same feedback the folder compare now gives.
                 if !result.rows.iter().any(|r| r.is_difference()) {
-                    self.popup = Popup::Notice {
+                    self.open_popup(Popup::Notice {
                         lines: vec![
                             tr(self.lang, "The two files are identical.", "2つのファイルは同一です").to_string(),
                             String::new(),
                             format!("{}  ↔  {}", a.name, b.name),
                         ],
-                    };
+                    });
                     return;
                 }
                 let folded = cian_core::diff::fold(&result.rows, cian_core::diff::CONTEXT);
-                self.popup = Popup::Diff {
+                self.open_popup(Popup::Diff {
                     left: a.name.clone(),
                     right: b.name.clone(),
                     left_path: a.path.clone(),
@@ -1203,7 +1202,7 @@ impl App {
                     scroll: 0,
                     find: None,
                     find_input: None,
-                };
+                });
             }
             Err(e) => self.message = Some(format!("cannot compare: {}", e)),
         }
@@ -1270,16 +1269,16 @@ impl App {
         if diff.is_identical() {
             // A clear notice, not just a status line — the compare felt
             // unresponsive when identical folders only whispered a message.
-            self.popup = Popup::Notice {
+            self.open_popup(Popup::Notice {
                 lines: vec![
                     tr(self.lang, "The two folders are identical.", "2つのフォルダは同一です").to_string(),
                     String::new(),
                     format!("{}  ↔  {}", job.left, job.right),
                 ],
-            };
+            });
             return true;
         }
-        self.popup = Popup::DirCompare {
+        self.open_popup(Popup::DirCompare {
             left: job.left,
             right: job.right,
             left_root: job.left_root,
@@ -1288,7 +1287,7 @@ impl App {
             cursor: 0,
             scroll: 0,
             truncated: diff.truncated,
-        };
+        });
         true
     }
 
@@ -1525,7 +1524,7 @@ impl App {
             return;
         }
         let back = std::mem::replace(&mut self.popup, Popup::None);
-        self.popup = Popup::ConfirmDirSync { to_right, ops, extra, back: Box::new(back) };
+        self.open_popup(Popup::ConfirmDirSync { to_right, ops, extra, back: Box::new(back) });
     }
 
     /// Confirmed folder sync: run every queued copy on the worker thread.
@@ -1592,7 +1591,7 @@ impl App {
     fn begin_diff_copy(&mut self, src: PathBuf, dst: PathBuf, is_dir: bool) {
         if dst.exists() {
             let back = std::mem::replace(&mut self.popup, Popup::None);
-            self.popup = Popup::ConfirmDiffCopy { src, dst, is_dir, back: Box::new(back) };
+            self.open_popup(Popup::ConfirmDiffCopy { src, dst, is_dir, back: Box::new(back) });
         } else {
             self.perform_diff_copy(&src, &dst, is_dir);
             self.after_diff_copy(&dst);
@@ -1682,7 +1681,7 @@ impl App {
             0
         };
         let diff = std::mem::replace(&mut self.popup, Popup::None);
-        self.popup = Popup::EncodingPicker { cursor: cur, target: EncTarget::Diff(Box::new(diff)) };
+        self.open_popup(Popup::EncodingPicker { cursor: cur, target: EncTarget::Diff(Box::new(diff)) });
     }
 
     /// Pull members out of the open archive into the opposite pane.
@@ -1784,7 +1783,7 @@ impl App {
             self.message = Some(tr(self.lang, "nothing selected", "選択されていません").into());
             return;
         }
-        self.popup = Popup::Notice { lines: self.attributes_lines(&paths, 40) };
+        self.open_popup(Popup::Notice { lines: self.attributes_lines(&paths, 40) });
     }
 
     /// Build the Attributes listing (permissions, size, owner) for `paths`,
@@ -2203,13 +2202,13 @@ impl App {
             return;
         }
         let what = format!("{pattern} → {}", if with.is_empty() { "(nothing)" } else { with });
-        self.popup = Popup::GrepReplace(Box::new(crate::ReplacePlan {
+        self.open_popup(Popup::GrepReplace(Box::new(crate::ReplacePlan {
             changes,
             skipped,
             cursor: 0,
             scroll: 0,
             what,
-        }));
+        })));
     }
 
     /// Enter on the preview: write the checked lines and report what happened.
@@ -2296,7 +2295,7 @@ impl App {
             done: None,
             to_pane,
         });
-        self.popup = Popup::FindResults { hits: Vec::new(), cursor: 0, scroll: 0, by_ai: false };
+        self.open_popup(Popup::FindResults { hits: Vec::new(), cursor: 0, scroll: 0, by_ai: false });
     }
 
     /// Load a set of search hits into the active pane as a flat listing so the
@@ -2528,8 +2527,7 @@ impl App {
         // Reading the keys is a question about the window, not a request to
         // close whatever is open in it. A panel docked beside the listing steps
         // aside and comes back when the manual does. See `stash_viewer`.
-        self.stash_viewer();
-        self.popup = Popup::Manual { lines: manual_lines(&self.keymap, self.menu_lang), scroll: 0 };
+        self.open_popup(Popup::Manual { lines: manual_lines(&self.keymap, self.menu_lang), scroll: 0 });
     }
 
     // ------- AI -------
@@ -2630,7 +2628,7 @@ impl App {
             if total > 10 {
                 lines.push(format!("... and {} more", total - 10));
             }
-            self.popup = Popup::Notice { lines };
+            self.open_popup(Popup::Notice { lines });
         } else if borders_changed {
             self.message = Some(tr(self.lang, "config reloaded. restart to apply the border change", "設定を再読み込みしました。枠線の変更は再起動後に反映されます").into());
         } else {
@@ -2647,7 +2645,7 @@ impl App {
         let cursor = theme_name_of(&current)
             .and_then(|n| THEME_NAMES.iter().position(|&m| m == n))
             .unwrap_or(0);
-        self.popup = Popup::ThemePicker { cursor, scope: ThemeScope::App { revert: current } };
+        self.open_popup(Popup::ThemePicker { cursor, scope: ThemeScope::App { revert: current } });
     }
 
     /// Open the gallery targeting a single file pane (0 = left, 1 = right). The
@@ -2658,7 +2656,7 @@ impl App {
             .as_deref()
             .and_then(|n| THEME_NAMES.iter().position(|&m| m == n))
             .unwrap_or(0);
-        self.popup = Popup::ThemePicker { cursor, scope: ThemeScope::Pane { side, revert } };
+        self.open_popup(Popup::ThemePicker { cursor, scope: ThemeScope::Pane { side, revert } });
     }
 
     /// Move the gallery cursor by `delta` (wrapping) and preview that preset,
@@ -2776,7 +2774,7 @@ impl App {
 
     // ------- Quit confirmation -------
     pub(crate) fn start_quit_confirm(&mut self) {
-        self.popup = Popup::ConfirmQuit;
+        self.open_popup(Popup::ConfirmQuit);
     }
 
     /// Ask before opening another tab in this pane.
@@ -2791,7 +2789,7 @@ impl App {
             FocusedPane::Shell => self.last_file_pane,
             p => p,
         };
-        self.popup = Popup::ConfirmNewTab { side };
+        self.open_popup(Popup::ConfirmNewTab { side });
     }
 
     /// Open the tab that [`ask_new_tab`](Self::ask_new_tab) asked about.
@@ -2970,7 +2968,7 @@ impl App {
             self.message = Some(tr(self.lang, "nothing selected", "選択されていません").into());
             return;
         }
-        self.popup = Popup::ConfirmNoBom { targets };
+        self.open_popup(Popup::ConfirmNoBom { targets });
     }
 
     pub(crate) fn confirm_nobom(&mut self) -> Result<()> {
@@ -3027,8 +3025,7 @@ impl App {
         // written over — `:queue` is reached from a listing while the panel is
         // still what is in `self.popup`. Fourth instance of this; the fix
         // belongs in a setter, not at each call site. See `stash_viewer`.
-        self.stash_viewer();
-        self.popup = Popup::OpQueue { cursor: 0 };
+        self.open_popup(Popup::OpQueue { cursor: 0 });
     }
 
     /// `x` in the queue popup. Row 0 = the running op: first press asks it to
@@ -3200,7 +3197,7 @@ impl App {
                 ));
             } else if elevate {
                 let (op, targets, dest) = self.pending_elevation.take().unwrap();
-                self.popup = Popup::ConfirmElevate { op, targets, dest };
+                self.open_popup(Popup::ConfirmElevate { op, targets, dest });
             } else {
                 self.show_op_report(&report);
                 // A checksum is worth pasting into a verify field, so put the
@@ -3532,7 +3529,7 @@ impl App {
             if report.errors.len() > 8 {
                 lines.push(format!("... and {} more", report.errors.len() - 8));
             }
-            self.popup = Popup::Notice { lines };
+            self.open_popup(Popup::Notice { lines });
         } else {
             let mut msg = format!("done — {} ok · {} skipped", report.ok, report.skipped);
             if let Some(note) = &report.note {
@@ -3922,7 +3919,7 @@ impl App {
         if let Some(t) = self.active_file_tabs_mut() { let _ = t.active_mut().reload(); }
         match result {
             Ok(msg) => self.message = Some(msg),
-            Err(e) => self.popup = Popup::Notice { lines: vec![e.to_string()] },
+            Err(e) => self.open_popup(Popup::Notice { lines: vec![e.to_string()] }),
         }
         Ok(())
     }

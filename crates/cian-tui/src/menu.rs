@@ -37,9 +37,10 @@ impl App {
         // Last, and on its own: it is the one item here that loses work.
         items.push(MenuItem::ViewerCloseDiscard);
         // The viewer steps aside rather than closing: the question is about
-        // the file, and the file may have unsaved edits in it.
-        self.viewer_return = Some(Box::new(std::mem::replace(&mut self.popup, Popup::None)));
-        self.popup = Popup::ContextMenu { items, cursor: 0, at: (col, row) };
+        // the file, and the file may have unsaved edits in it. `open_popup`
+        // does that for every popup now; this line was the original, written
+        // out by hand before there was a door to walk through.
+        self.open_popup(Popup::ContextMenu { items, cursor: 0, at: (col, row) });
     }
 
     /// Put a live panel aside before something else takes the popup slot.
@@ -63,6 +64,28 @@ impl App {
 
     /// Put the viewer back after a menu (or what the menu opened) is done.
     /// A no-op when nothing was put aside.
+    /// Put a popup on screen, standing a live panel aside first.
+    ///
+    /// `self.popup` holds one thing, and a docked editor panel lives in it
+    /// while the listing beside it still answers its own keys — so anything
+    /// the listing opened used to write straight over the open file, unsaved
+    /// edits and all. That was found and patched four separate times before
+    /// anyone counted: the manual, the context menu, the switches, the
+    /// operation queue. Four patches is three chances to forget, and there are
+    /// ninety-odd places that raise a popup.
+    ///
+    /// So it is one door. `stash_viewer` does nothing unless a viewer is what
+    /// is being displaced, which makes this safe everywhere and needed at only
+    /// a handful of the sites that now use it.
+    ///
+    /// Not for a viewer itself: opening a second file *replaces* the first,
+    /// which is long-standing and pinned by a test, and `viewer_return` holds
+    /// one panel — for a menu raised over one, not for the file before last.
+    pub(crate) fn open_popup(&mut self, popup: Popup) {
+        self.stash_viewer();
+        self.popup = popup;
+    }
+
     /// Dismiss whatever is on screen: back to the panel it was raised over, or
     /// to nothing when it was not raised over one.
     ///
@@ -181,8 +204,7 @@ impl App {
         // A panel open beside the listing steps aside rather than being
         // overwritten — the same courtesy `open_viewer_menu` above already
         // extends, and for the same reason.
-        self.stash_viewer();
-        self.popup = Popup::ContextMenu { items, cursor: 0, at: (col, row) };
+        self.open_popup(Popup::ContextMenu { items, cursor: 0, at: (col, row) });
     }
 
     /// The children a group item drills into (context-dependent). `None` for a
@@ -349,7 +371,7 @@ impl App {
         if matches!(parent, Popup::ContextMenu { .. }) {
             self.menu_stack.push(parent);
         }
-        self.popup = Popup::ContextMenu { items, cursor: 0, at };
+        self.open_popup(Popup::ContextMenu { items, cursor: 0, at });
     }
 
     /// Go back up one menu level, or close the menu when at the top.
@@ -474,7 +496,7 @@ impl App {
                 self.focus(FocusedPane::Shell);
             }
             MenuItem::ShellCloseSplit => {
-                self.popup = Popup::ConfirmClose { target: CloseTarget::ShellPane };
+                self.open_popup(Popup::ConfirmClose { target: CloseTarget::ShellPane });
             }
             MenuItem::ShellCloseTab => {
                 if self.shell.close_active() {
@@ -674,7 +696,7 @@ impl App {
                 let cur = current
                     .and_then(|c| PANE_BG_PRESETS.iter().position(|(_, p)| *p == Some(c)))
                     .unwrap_or(0);
-                self.popup = Popup::ColorPicker { pane, cursor: cur };
+                self.open_popup(Popup::ColorPicker { pane, cursor: cur });
             }
         }
         Ok(())

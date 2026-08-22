@@ -147,7 +147,7 @@ impl App {
             self.message = Some(tr(self.lang, "nothing selected", "選択されていません").into());
             return;
         }
-        self.popup = Popup::ConfirmDiscard { targets: paths, dir };
+        self.open_popup(Popup::ConfirmDiscard { targets: paths, dir });
     }
 
     /// Discard worktree changes to the selection: `git checkout --` in git,
@@ -409,7 +409,7 @@ impl App {
             Some((_, name)) => format!("{} log — {}", vcs_name, name),
             None => format!("{} log", vcs_name),
         };
-        self.popup = Popup::GitLog { title, dir, commits, cursor: 0, scroll: 0, vcs: kind };
+        self.open_popup(Popup::GitLog { title, dir, commits, cursor: 0, scroll: 0, vcs: kind });
     }
 
     /// Show a commit's diff (`git show` / `svn diff -c`) in the viewer.

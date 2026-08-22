@@ -671,6 +671,47 @@
         );
     }
 
+    /// Every popup goes through one door, and that door stands a live panel
+    /// aside rather than writing over it.
+    ///
+    /// This fault was patched four separate times — the manual, the context
+    /// menu, the switches, the operation queue — before anyone counted the
+    /// places that raise a popup. There are ninety. The test walks a handful
+    /// of the ones a hand can reach while a file is open beside the listing.
+    #[test]
+    fn a_popup_never_writes_over_an_open_panel() {
+        for open in [
+            ("the manual", "man"),
+            ("the switches", "toggle"),
+            ("the queue", "queue"),
+            ("the sort picker", "sort"),
+            ("bookmarks", "bookmark"),
+        ] {
+            let (label, verb) = open;
+            let (_d, mut app) = viewer_on("alpha\nbravo\n");
+            app.handle_key(code(KeyCode::F(12))).unwrap();
+            app.handle_key(key('x')).unwrap();
+            assert!(matches!(app.popup, Popup::Viewer { dirty: true, .. }), "{label}: edited");
+            let dock = app.viewer_dock.expect("docked");
+            app.focus(match dock {
+                FocusedPane::Left => FocusedPane::Right,
+                _ => FocusedPane::Left,
+            });
+            let _ = render(&mut app, 160, 30);
+
+            run_cmd(&mut app, verb);
+            if matches!(app.popup, Popup::Viewer { .. } | Popup::None) {
+                // The verb refused for a reason of its own (nothing queued,
+                // say). Nothing was displaced, so nothing was lost.
+                continue;
+            }
+            assert!(
+                app.viewer_return.is_some(),
+                "{label} wrote over the panel instead of standing it aside",
+            );
+        }
+    }
+
     /// The operation queue: the only way to call off a copy that is already
     /// running, and it had no test.
     ///

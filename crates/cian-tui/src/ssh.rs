@@ -34,7 +34,7 @@ impl App {
             self.start_manual_ssh();
             return;
         }
-        self.popup = Popup::SshHosts { cursor: 0, filter: String::new() };
+        self.open_popup(Popup::SshHosts { cursor: 0, filter: String::new() });
     }
 
     /// Begin an SFTP transfer: capture the local side, then reuse the SSH
@@ -69,7 +69,7 @@ impl App {
                 return;
             }
         }
-        self.popup = Popup::SshHosts { cursor: 0, filter: String::new() };
+        self.open_popup(Popup::SshHosts { cursor: 0, filter: String::new() });
     }
 
     /// The configured host+user the active shell is logged into, if its title is
@@ -190,7 +190,7 @@ impl App {
 
     /// Open the remote file browser at `cwd` and kick off its listing.
     pub(crate) fn open_remote_browser(&mut self, label: String, cwd: &str, purpose: BrowsePurpose) {
-        self.popup = Popup::RemoteBrowser {
+        self.open_popup(Popup::RemoteBrowser {
             label,
             cwd: cwd.to_string(),
             entries: Vec::new(),
@@ -199,7 +199,7 @@ impl App {
             marked: std::collections::BTreeSet::new(),
             loading: true,
             purpose,
-        };
+        });
         self.remote_ls_spawn(cwd.to_string());
     }
 
@@ -516,12 +516,12 @@ impl App {
         if e.is_parent {
             return;
         }
-        self.popup = Popup::ConfirmRemoteDelete {
+        self.open_popup(Popup::ConfirmRemoteDelete {
             side,
             path: e.path.to_string_lossy().into_owned(),
             name: e.name.clone(),
             is_dir: e.is_dir,
-        };
+        });
     }
 
     /// Confirmed remote delete: run it on the worker.
@@ -613,7 +613,7 @@ impl App {
             let dst_target = self.remote_targets[Self::side_idx(opp)].clone();
             let from = src_target.as_ref().map(|(_, l)| l.clone()).unwrap_or_else(|| "local".into());
             let to = dst_target.as_ref().map(|(_, l)| l.clone()).unwrap_or_else(|| "local".into());
-            self.popup = Popup::ConfirmRemoteMove {
+            self.open_popup(Popup::ConfirmRemoteMove {
                 plan: RemoteMovePlan {
                     files,
                     src_target: src_target.map(|(t, _)| t),
@@ -622,7 +622,7 @@ impl App {
                 },
                 from,
                 to,
-            };
+            });
             return true;
         }
         if a_remote && !o_remote {
@@ -970,7 +970,7 @@ impl App {
             self.message = Some(tr(self.lang, "mark a file (Space) or put the cursor on one", "ファイルをマーク（Space）するか、カーソルを合わせてください").into());
             return;
         }
-        self.popup = Popup::LocalDest { files, cursor: 0 };
+        self.open_popup(Popup::LocalDest { files, cursor: 0 });
     }
 
     /// Confirm the current remote directory as the upload destination and move on

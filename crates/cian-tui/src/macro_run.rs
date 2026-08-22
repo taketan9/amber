@@ -105,7 +105,7 @@ impl App {
             });
             return;
         }
-        self.popup = Popup::Macros { cursor: 0, names: self.macro_names() };
+        self.open_popup(Popup::Macros { cursor: 0, names: self.macro_names() });
     }
 
     /// Begin running macro `idx` from the loaded set. The build proceeds in
@@ -187,9 +187,9 @@ impl App {
                 lines.push(String::new());
                 lines.extend(outcome.messages);
             }
-            self.popup = Popup::Notice { lines };
+            self.open_popup(Popup::Notice { lines });
         } else if outcome.messages.len() > 1 {
-            self.popup = Popup::Notice { lines: outcome.messages };
+            self.open_popup(Popup::Notice { lines: outcome.messages });
         } else if let Some(one) = outcome.messages.into_iter().next() {
             self.message = Some(one);
         } else {

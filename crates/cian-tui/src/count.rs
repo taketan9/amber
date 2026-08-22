@@ -52,7 +52,7 @@ impl App {
             Ok(report) => {
                 self.count_job = None;
                 let lines = self.format_count(&report);
-                self.popup = Popup::Notice { lines };
+                self.open_popup(Popup::Notice { lines });
                 true
             }
             Err(std::sync::mpsc::TryRecvError::Empty) => false,

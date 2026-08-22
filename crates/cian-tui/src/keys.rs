@@ -1037,7 +1037,7 @@ impl App {
                                 self.ssh_connect(i, &only);
                             }
                         } else {
-                            self.popup = Popup::SshUsers { host: i, cursor: 0 };
+                            self.open_popup(Popup::SshUsers { host: i, cursor: 0 });
                         }
                     }
                 }
@@ -1071,7 +1071,7 @@ impl App {
             }
             match key.code {
                 // Esc steps back to the host list rather than closing outright.
-                KeyCode::Esc => self.popup = Popup::SshHosts { cursor: 0, filter: String::new() },
+                KeyCode::Esc => self.open_popup(Popup::SshHosts { cursor: 0, filter: String::new() }),
                 KeyCode::Char('j') | KeyCode::Down => *cursor = (*cursor + 1) % n,
                 KeyCode::Char('k') | KeyCode::Up => *cursor = (*cursor + n - 1) % n,
                 KeyCode::Enter => {
@@ -1338,7 +1338,7 @@ impl App {
                         return Ok(());
                     };
                     if let Some((_, dest)) = self.dest_choices().into_iter().nth(c) {
-                        self.popup = Popup::ConfirmTransfer { op, targets, dest };
+                        self.open_popup(Popup::ConfirmTransfer { op, targets, dest });
                     }
                 }
                 _ => {}
@@ -1702,12 +1702,12 @@ impl App {
                             .map(|s| s.name.clone())
                             .unwrap_or_default();
                         let back = std::mem::replace(&mut self.popup, Popup::None);
-                        self.popup = Popup::ConfirmShortcutDelete {
+                        self.open_popup(Popup::ConfirmShortcutDelete {
                             path: p,
                             idx,
                             name,
                             back: Box::new(back),
-                        };
+                        });
                     }
                 }
                 KeyCode::Char('r') => {
@@ -2141,7 +2141,7 @@ impl App {
                 }
                 // Close the active split pane, with confirmation.
                 KeyCode::F(10) if shift => {
-                    self.popup = Popup::ConfirmClose { target: CloseTarget::ShellPane };
+                    self.open_popup(Popup::ConfirmClose { target: CloseTarget::ShellPane });
                     return Ok(());
                 }
                 // Tab controls: plain F-keys.
@@ -2155,7 +2155,7 @@ impl App {
                     return Ok(());
                 }
                 KeyCode::F(10) if !shift => {
-                    self.popup = Popup::ConfirmClose { target: CloseTarget::ShellTab };
+                    self.open_popup(Popup::ConfirmClose { target: CloseTarget::ShellTab });
                     return Ok(());
                 }
                 _ => {}
@@ -2392,7 +2392,7 @@ impl App {
                 if let Some(t) = self.active_file_tabs_mut() { t.next_tab(); }
             }
             (false, _, KeyCode::F(10)) => {
-                self.popup = Popup::ConfirmClose { target: CloseTarget::FileTab(self.focused) };
+                self.open_popup(Popup::ConfirmClose { target: CloseTarget::FileTab(self.focused) });
             }
             // search, filter, history, shortcuts
             (false, false, KeyCode::Char('f')) => self.start_search(),

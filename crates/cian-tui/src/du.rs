@@ -51,7 +51,7 @@ impl App {
             Ok((dir, entries)) => {
                 self.du_job = None;
                 let total: u64 = entries.iter().map(|e| e.size).sum();
-                self.popup = Popup::DiskUsage { dir, entries, total, cursor: 0, scroll: 0 };
+                self.open_popup(Popup::DiskUsage { dir, entries, total, cursor: 0, scroll: 0 });
                 self.message = None;
                 true
             }

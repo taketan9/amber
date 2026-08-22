@@ -169,7 +169,7 @@ impl App {
 
     fn open_palette(&mut self, kind: PaletteKind, items: Vec<PaletteItem>) {
         let shown = (0..items.len()).collect();
-        self.popup = Popup::Palette { kind, query: String::new(), items, shown, cursor: 0, scroll: 0 };
+        self.open_popup(Popup::Palette { kind, query: String::new(), items, shown, cursor: 0, scroll: 0 });
     }
 
     /// Re-rank the picker's rows against the current query (called on every edit).

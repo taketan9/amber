@@ -1068,12 +1068,12 @@ impl App {
             // file itself waits behind it and comes back on Esc.
             let lines = crate::viewer_manual_lines(self.lang);
             let back = std::mem::replace(&mut self.popup, Popup::None);
-            self.popup = Popup::Report {
+            self.open_popup(Popup::Report {
                 title: tr(self.lang, " the viewer ", " ビューア ").to_string(),
                 lines,
                 scroll: 0,
                 back: Box::new(back),
-            };
+            });
             return Ok(());
         }
         // `/`, `f` and `Shift+F` all open the search prompt (the pane's own
@@ -1387,8 +1387,7 @@ impl App {
             // third press asks; with none it just goes, because a question with
             // one answer is not worth asking.
             if matches!(self.popup, Popup::Viewer { dirty: true, .. }) {
-                self.stash_viewer();
-                self.popup = Popup::ConfirmClose { target: crate::CloseTarget::ViewerFile };
+                self.open_popup(Popup::ConfirmClose { target: crate::CloseTarget::ViewerFile });
                 return;
             }
             self.close_viewer_file();

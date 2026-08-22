@@ -33,8 +33,7 @@ impl App {
         // still the thing in `self.popup`, so without this the switches ate
         // the open file, unsaved edits and all. Same fault the manual and the
         // context menu had; see `stash_viewer`.
-        self.stash_viewer();
-        self.popup = Popup::Toggles { cursor: 0 };
+        self.open_popup(Popup::Toggles { cursor: 0 });
     }
 
     /// The rows shown in the menu: `(id, label, state text, on?)`. `on` drives

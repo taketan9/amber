@@ -573,7 +573,7 @@ impl App {
         }
         let dest = expand_path(arg);
         if dest.is_dir() {
-            self.popup = Popup::ConfirmTransfer { op, targets, dest };
+            self.open_popup(Popup::ConfirmTransfer { op, targets, dest });
             return;
         }
         // Not an existing directory: only meaningful as a rename/copy of a
@@ -636,7 +636,7 @@ impl App {
         }
         // Same cap as the Attributes window — the popup is not scrollable, and a
         // longer list would clip; the trailing "… and N more" says so.
-        self.popup = Popup::Notice { lines: self.attributes_lines(&paths, 40) };
+        self.open_popup(Popup::Notice { lines: self.attributes_lines(&paths, 40) });
     }
     pub(crate) fn cmd_wc(&mut self) {
         let paths = self.active_pane().map(|p| p.target_paths()).unwrap_or_default();
@@ -664,7 +664,7 @@ impl App {
             lines.push(String::new());
             lines.push(format!("{:>9} {:>9} {:>11}  total", tot.lines, tot.words, tot.bytes));
         }
-        self.popup = Popup::Notice { lines };
+        self.open_popup(Popup::Notice { lines });
     }
 
     /// `head`/`tail [-n N]`: the first or last N lines of the selected file.
@@ -680,7 +680,7 @@ impl App {
                 let name = path.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
                 let mut lines = vec![format!("{} -n {}  {}", which, n, name), String::new()];
                 lines.extend(rows.into_iter().map(|l| truncate(&l, 200)));
-                self.popup = Popup::Notice { lines };
+                self.open_popup(Popup::Notice { lines });
             }
             Err(e) => self.message = Some(format!("{}", e)),
         }
@@ -708,7 +708,7 @@ impl App {
                     format!("used       {}   ({}%)", unit.format(s.used()), s.percent_used()),
                     format!("available  {}", unit.format(s.available)),
                 ];
-                self.popup = Popup::Notice { lines };
+                self.open_popup(Popup::Notice { lines });
             }
             Err(e) => self.message = Some(format!("df: {}", e)),
         }

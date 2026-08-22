@@ -643,7 +643,7 @@ impl App {
         // A fresh conversation starts with no attachments: an image pasted for
         // the old one must not leak into the new one.
         self.chat_attachments.clear();
-        self.popup = Popup::AiChat {
+        self.open_popup(Popup::AiChat {
             input: String::new(),
             log,
             scroll: usize::MAX,
@@ -651,7 +651,7 @@ impl App {
             sel: None,
             mode,
             skin,
-        };
+        });
     }
 
     /// Snapshot the open chat into `ai_history` (newest first, deduped) if it
@@ -701,7 +701,7 @@ impl App {
                 Some(tr(self.lang, "no past conversations yet", "過去の会話はまだありません").into());
             return;
         }
-        self.popup = Popup::AiHistory { cursor: 0 };
+        self.open_popup(Popup::AiHistory { cursor: 0 });
     }
 
     /// Reopen the conversation at `i` as the live chat.
@@ -709,7 +709,7 @@ impl App {
         let Some(c) = self.ai_history.get(i) else { return };
         // Reopened as it was: same backend for follow-ups, same name and colour,
         // so a reopened conversation is shown the way it was.
-        self.popup = Popup::AiChat {
+        self.open_popup(Popup::AiChat {
             input: String::new(),
             log: c.log().to_vec(),
             scroll: usize::MAX,
@@ -717,7 +717,7 @@ impl App {
             sel: None,
             mode: c.mode(),
             skin: c.skin(),
-        };
+        });
     }
 
     /// Forget the stored conversation at `i`.
@@ -914,10 +914,10 @@ impl App {
         if note.is_empty() {
             // Nothing said — put the command back rather than asking the model
             // to guess at what silence meant.
-            self.popup = Popup::AiShellConfirm {
+            self.open_popup(Popup::AiShellConfirm {
                 command: rejected.to_string(),
                 description: description.to_string(),
-            };
+            });
             return;
         }
         let combined = format!(
@@ -1370,7 +1370,7 @@ impl App {
         }
         let dupes = groups.len();
         self.message = Some(format!("{} duplicate group(s) — review and delete", dupes));
-        self.popup = Popup::DupeReview { items, cursor: 0, scroll: 0 };
+        self.open_popup(Popup::DupeReview { items, cursor: 0, scroll: 0 });
         true
     }
 
@@ -1385,7 +1385,7 @@ impl App {
             self.message = Some(tr(self.lang, "nothing checked", "チェックされていません").into());
             return;
         }
-        self.popup = Popup::ConfirmDelete { targets };
+        self.open_popup(Popup::ConfirmDelete { targets });
     }
 
     /// Hand the checked junk candidates to the normal delete confirmation, so
@@ -1401,7 +1401,7 @@ impl App {
             self.message = Some(tr(self.lang, "nothing checked", "チェックされていません").into());
             return;
         }
-        self.popup = Popup::ConfirmDelete { targets };
+        self.open_popup(Popup::ConfirmDelete { targets });
     }
 
     /// Commit the staged changes with the (possibly edited) drafted message.
@@ -1424,9 +1424,9 @@ impl App {
                 self.invalidate_git();
             }
             Err(e) => {
-                self.popup = Popup::Notice {
+                self.open_popup(Popup::Notice {
                     lines: vec!["commit failed:".into(), String::new(), e.to_string()],
-                };
+                });
             }
         }
     }
@@ -1552,7 +1552,7 @@ impl App {
                     if command.is_empty() {
                         self.message = Some(tr(self.lang, "AI returned no command", "AI からコマンドが返りませんでした").into());
                     } else {
-                        self.popup = Popup::AiShellConfirm { command, description };
+                        self.open_popup(Popup::AiShellConfirm { command, description });
                     }
                 }
                 Err(e) => self.message = Some(format!("AI: {}", e)),
@@ -1563,7 +1563,7 @@ impl App {
                     if msg.is_empty() {
                         self.message = Some(tr(self.lang, "AI returned no message", "AI からメッセージが返りませんでした").into());
                     } else {
-                        self.popup = Popup::CommitMessage { buffer: msg, stat, dir, editing: false };
+                        self.open_popup(Popup::CommitMessage { buffer: msg, stat, dir, editing: false });
                     }
                 }
                 Err(e) => self.message = Some(format!("AI: {}", e)),
@@ -1574,7 +1574,7 @@ impl App {
                     if items.is_empty() {
                         self.message = Some(tr(self.lang, "AI found no obvious junk", "AI は不要そうなファイルを見つけませんでした").into());
                     } else {
-                        self.popup = Popup::JunkReview { items, cursor: 0, scroll: 0 };
+                        self.open_popup(Popup::JunkReview { items, cursor: 0, scroll: 0 });
                     }
                 }
                 Err(e) => self.message = Some(format!("AI: {}", e)),
@@ -1585,7 +1585,7 @@ impl App {
                     if items.is_empty() {
                         self.message = Some(tr(self.lang, "AI had no structure changes to suggest", "AI から構成変更の提案はありません").into());
                     } else {
-                        self.popup = Popup::StructureReview { items, cursor: 0, scroll: 0, dir };
+                        self.open_popup(Popup::StructureReview { items, cursor: 0, scroll: 0, dir });
                     }
                 }
                 Err(e) => self.message = Some(format!("AI: {}", e)),
@@ -1596,7 +1596,7 @@ impl App {
                     if items.is_empty() {
                         self.message = Some(tr(self.lang, "AI proposed no renames", "AI からリネームの提案はありません").into());
                     } else {
-                        self.popup = Popup::RenameReview { items, cursor: 0, scroll: 0, by_ai: true };
+                        self.open_popup(Popup::RenameReview { items, cursor: 0, scroll: 0, by_ai: true });
                     }
                 }
                 Err(e) => self.message = Some(format!("AI: {}", e)),

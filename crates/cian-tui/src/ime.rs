@@ -163,7 +163,7 @@ impl App {
 
     pub(crate) fn ime_report(&mut self, arg: &str) {
         let Some(cfg) = self.config.ime.clone() else {
-            self.popup = Popup::Notice { lines: not_configured(self.lang) };
+            self.open_popup(Popup::Notice { lines: not_configured(self.lang) });
             return;
         };
         // `:ime on` / `:ime off` switch now, so a helper can be tested without
@@ -239,7 +239,7 @@ impl App {
             )
             .to_string(),
         ];
-        self.popup = Popup::Notice { lines };
+        self.open_popup(Popup::Notice { lines });
     }
 }
 

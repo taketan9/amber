@@ -1247,7 +1247,7 @@ impl App {
                 } else {
                     PendingOp::Copy
                 };
-                self.popup = Popup::ConfirmTransfer { op, targets: drag.paths, dest };
+                self.open_popup(Popup::ConfirmTransfer { op, targets: drag.paths, dest });
             }
         }
     }

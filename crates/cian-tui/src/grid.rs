@@ -589,6 +589,6 @@ impl App {
             return;
         }
         let op = if move_it { PendingOp::Move } else { PendingOp::Copy };
-        self.popup = Popup::ConfirmTransfer { op, targets, dest };
+        self.open_popup(Popup::ConfirmTransfer { op, targets, dest });
     }
 }
