@@ -725,8 +725,8 @@ impl App {
         if lines.is_empty() {
             self.message = Some(tr(
                 self.lang,
-                "no usable paths (a double quote in the name)",
-                "使えるパスがありません（名前に \" が含まれています）",
+                "no usable paths — a name holds \" $ ` or a line break, which the shell would read",
+                "使えるパスがありません — 名前に \" $ ` か改行があり、シェルが解釈してしまいます",
             ).into());
             return;
         }
@@ -3974,12 +3974,23 @@ fn unique_dir(parent: &Path, stem: &str) -> PathBuf {
 /// each path double-quoted; with no `{}` the quoted path is appended. Paths
 /// containing a double quote can't be quoted safely and are skipped — the
 /// second element counts them.
-fn each_lines(template: &str, paths: &[PathBuf]) -> (Vec<String>, usize) {
+pub(crate) fn each_lines(template: &str, paths: &[PathBuf]) -> (Vec<String>, usize) {
     let mut lines = Vec::new();
     let mut skipped = 0usize;
     for p in paths {
         let s = p.display().to_string();
-        if s.contains('"') {
+        // The line goes straight into the live shell, and a double quote is not
+        // the only thing that survives being inside one. A POSIX shell still
+        // expands `$` and a backtick between double quotes, so a file called
+        // `$(id).txt` *ran* `id`; PowerShell treats both the same way. A
+        // newline would end the command and start another.
+        //
+        // Not the backslash, though the same list would suggest it: on Windows
+        // it is the path separator, and rejecting it would skip every path
+        // there. With `$`, the backtick, the quote and the newline gone it can
+        // only escape itself or a literal — mangling at worst, never a second
+        // command.
+        if s.contains(['"', '$', '`', '\n', '\r']) {
             skipped += 1;
             continue;
         }

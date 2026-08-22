@@ -589,6 +589,88 @@
         assert!(matches!(&app.popup, Popup::Palette { kind: PaletteKind::Commands, .. }));
     }
 
+    /// `:each` builds shell lines from filenames, and the guard has to hold —
+    /// the line goes straight into the live shell.
+    ///
+    /// It rejected only a double quote. A POSIX shell expands `$` and a
+    /// backtick *inside* double quotes, so a file called `$(id).txt` ran `id`;
+    /// a newline in a name would have ended the command and begun another.
+    #[test]
+    fn each_will_not_let_a_filename_become_a_command() {
+        use std::path::PathBuf;
+        let p = |s: &str| PathBuf::from(s);
+
+        // The shapes that must never reach a shell.
+        for bad in ["$(id).txt", "`whoami`.txt", "say \"hi\".txt", "two\nlines.txt"] {
+            let (lines, skipped) = crate::actions::each_lines("echo {}", &[p(bad)]);
+            assert!(lines.is_empty(), "{bad:?} was let through as {lines:?}");
+            assert_eq!(skipped, 1, "and counted as skipped");
+        }
+
+        // A backslash stays: on Windows it is the path separator, and with the
+        // four above gone it can no longer escape anything dangerous.
+        let (lines, skipped) = crate::actions::each_lines("echo {}", &[p(r"C:\Users\a.txt")]);
+        assert_eq!(skipped, 0, "a Windows path is usable");
+        assert_eq!(lines, vec![r#"echo "C:\Users\a.txt""#.to_string()]);
+
+        // The ordinary jobs still work: `{}` substitutes, and without it the
+        // path is appended.
+        let (lines, _) = crate::actions::each_lines("wc -l {}", &[p("/tmp/a b.txt")]);
+        assert_eq!(lines, vec![r#"wc -l "/tmp/a b.txt""#.to_string()], "spaces are quoted");
+        let (lines, _) = crate::actions::each_lines("file", &[p("/tmp/x.txt")]);
+        assert_eq!(lines, vec![r#"file "/tmp/x.txt""#.to_string()], "appended with no placeholder");
+
+        // A mixed selection runs what it can and counts what it could not.
+        let (lines, skipped) =
+            crate::actions::each_lines("echo {}", &[p("/tmp/ok.txt"), p("/tmp/$(id).txt")]);
+        assert_eq!(lines.len(), 1);
+        assert_eq!(skipped, 1);
+    }
+
+    /// The svn verbs refuse politely outside a working copy, and in a git one.
+    /// That refusal is cian's whole responsibility here — whether `svn update`
+    /// itself is correct is svn's — and it is what stops a git repository
+    /// getting an svn command fired at it.
+    #[test]
+    fn the_svn_verbs_refuse_where_they_do_not_belong() {
+        // Not version-controlled at all.
+        let (_d, mut app) = app_with(&["a.txt"]);
+        for verb in ["svnupdate", "svncommit", "svnresolve"] {
+            app.message = None;
+            run_cmd(&mut app, verb);
+            let said = app.message.clone().unwrap_or_default();
+            assert!(
+                said.contains("version-controlled") || said.contains("バージョン管理"),
+                "{verb} said why: {said:?}",
+            );
+        }
+
+        // A git repository is version-controlled, and still not svn — the
+        // refusal that matters, since this is the case where something *would*
+        // have run. A real repo: the check shells out to git.
+        let (d, mut app) = app_with(&["a.txt"]);
+        let dir = std::fs::canonicalize(d.path()).unwrap();
+        let ok = std::process::Command::new("git")
+            .arg("-C")
+            .arg(&dir)
+            .args(["init", "-q"])
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if !ok {
+            eprintln!("no git; skipping the git half");
+            return;
+        }
+        app.reload_active();
+        app.message = None;
+        run_cmd(&mut app, "svnupdate");
+        let said = app.message.clone().unwrap_or_default();
+        assert!(
+            said.contains("svn") || said.contains("専用"),
+            "it did not fire svn at a git repo: {said:?}",
+        );
+    }
+
     /// The operation queue: the only way to call off a copy that is already
     /// running, and it had no test.
     ///
