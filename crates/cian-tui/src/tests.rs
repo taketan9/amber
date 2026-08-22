@@ -549,6 +549,46 @@
         assert_eq!(app.filter_buffer, "t/", "the slash went into the query");
     }
 
+    /// Ctrl+Shift+P opens the palette and Ctrl+P the finder — including when
+    /// the terminal spells the first one as a lowercase p with Shift reported
+    /// alongside, which would otherwise have been swallowed by the second.
+    #[test]
+    fn the_palette_and_the_finder_do_not_take_each_others_key() {
+        let ctrl_shift = |c| KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL | KeyModifiers::SHIFT);
+
+        // The capital spelling.
+        let (_d, mut app) = app_with(&["a.txt"]);
+        app.handle_key(ctrl_shift('P')).unwrap();
+        assert!(
+            matches!(&app.popup, Popup::Palette { kind: PaletteKind::Commands, .. }),
+            "Ctrl+Shift+P is the palette, got {:?}",
+            app.popup,
+        );
+
+        // …and the lowercase-with-Shift spelling, which reaches the same arm.
+        let (_d, mut app) = app_with(&["a.txt"]);
+        app.handle_key(ctrl_shift('p')).unwrap();
+        assert!(
+            matches!(&app.popup, Popup::Palette { kind: PaletteKind::Commands, .. }),
+            "the other spelling too, got {:?}",
+            app.popup,
+        );
+
+        // Plain Ctrl+P is still the finder.
+        let (_d, mut app) = app_with(&["a.txt"]);
+        app.handle_key(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::CONTROL)).unwrap();
+        assert!(
+            matches!(&app.popup, Popup::Palette { kind: PaletteKind::File, .. }),
+            "Ctrl+P is the finder, got {:?}",
+            app.popup,
+        );
+
+        // Ctrl+, is the palette as well.
+        let (_d, mut app) = app_with(&["a.txt"]);
+        app.handle_key(KeyEvent::new(KeyCode::Char(','), KeyModifiers::CONTROL)).unwrap();
+        assert!(matches!(&app.popup, Popup::Palette { kind: PaletteKind::Commands, .. }));
+    }
+
     /// The sweeps that change files on disk say what they actually did.
     ///
     /// `:chmod` stopped at the first failure and reported only "chmod failed",

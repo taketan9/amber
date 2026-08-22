@@ -4385,7 +4385,7 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry("Left / Right", None, "focus the left / right pane", "左／右のペインにフォーカス"),
                 entry("h", Some(History), "history popup", "履歴ポップアップ"),
                 entry("z", None, "go to a typed path (also :cd)", "入力したパスへ移動（:cd でも）"),
-                entry("C, Ctrl+,", None, "command palette: fuzzy-find any command", "コマンドパレット：全コマンドをあいまい検索"),
+                entry("Ctrl+Shift+P, Ctrl+,, C", None, "command palette: fuzzy-find any command", "コマンドパレット：全コマンドをあいまい検索"),
                 entry("Z", None, "fuzzy-jump to a recent / bookmarked directory (also :jump)", "最近/ブックマークのディレクトリへあいまいジャンプ（:jump でも）"),
                 entry("T", None, "UI toggles menu — dotfiles, input sync, notifications… (also :toggles)", "UIトグルメニュー — 隠しファイル/入力同期/通知…（:toggles でも）"),
                 entry(":each", None, "run a shell command per marked file — {} = path (:each grep -l foo {})", "マーク各ファイルにコマンド実行 — {} = パス（:each grep -l foo {}）"),
