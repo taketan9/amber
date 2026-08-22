@@ -78,7 +78,7 @@ impl App {
             // and still does. `:view details|icons|classic` switches the look —
             // the same three the switcher in the corner offers, for a hand that
             // is already on the keyboard.
-            "view" | "look" => match rest {
+            "view" => match rest {
                 "" => self.look_inside(),
                 // Two of the three only exist in a window: `view_request` is
                 // read by the windowed build alone, so in a terminal these set
@@ -86,11 +86,11 @@ impl App {
                 // path, and the window is where it lands — but a terminal is
                 // told why nothing happened, which it never was. Silence is
                 // indistinguishable from the command not existing.
-                "details" | "detail" | "finder" | "list" => {
+                "details" | "finder" => {
                     self.view_request = Some(crate::ViewWanted::Details);
                     self.say_view_is_window_only();
                 }
-                "icons" | "icon" | "grid" => {
+                "icons" | "grid" => {
                     self.view_request = Some(crate::ViewWanted::Icons);
                     self.say_view_is_window_only();
                 }
@@ -209,14 +209,14 @@ impl App {
                     "synchronize off".into()
                 });
             }
-            "count" | "steps" => self.start_count(),
-            "du" | "diskusage" | "usage" => self.start_du_here(),
-            "palette" | "commands" | "p" => self.start_command_palette(),
-            "jump" | "j" => self.start_fuzzy_jump(),
+            "count" | "step" => self.start_count(),
+            "du" | "diskusage" => self.start_du_here(),
+            "palette" => self.start_command_palette(),
+            "jump" => self.start_fuzzy_jump(),
             // Singular is the house rule, whatever the command opens a list
             // of: "when in doubt, drop the s" is a rule you can hold in your
             // head, and one that is right more often than it is wrong.
-            "toggle" | "ui" => self.start_toggles(),
+            "toggle" => self.start_toggles(),
             // Named by what you get, because that is what someone types when
             // the editor is not behaving the way their hands expect. `T` is
             // the same switch from a listing; from inside the editor `T` is a
@@ -226,7 +226,7 @@ impl App {
             // way *back* to vim keys is the panel's menu rather than a command
             // anyway: notepad style has no command line to type one at.
             "notepad" => self.set_edit_style(crate::EditStyle::Notepad),
-            "editstyle" | "vimkey" | "vimkeys" => match rest.trim() {
+            "editstyle" | "vimkey" => match rest.trim() {
                 "vim" | "vi" => self.set_edit_style(crate::EditStyle::Vim),
                 "notepad" | "plain" => self.set_edit_style(crate::EditStyle::Notepad),
                 "" => self.flip_edit_style(),
@@ -234,9 +234,9 @@ impl App {
                     self.message = Some(format!("editstyle: vim | notepad (got {other:?})"))
                 }
             },
-            "files" | "ff" | "findfile" => self.start_file_finder(),
-            "recent" | "oldfiles" | "fo" => self.start_recent_files(),
-            "each" | "foreach" => self.run_each(rest),
+            "files" => self.start_file_finder(),
+            "recent" | "oldfiles" => self.start_recent_files(),
+            "each" => self.run_each(rest),
             "undo" => self.undo_last(),
             "redo" => self.redo_last(),
             "edit" | "e" => self.edit_selected_file(),
@@ -248,12 +248,12 @@ impl App {
             // by instruction.
             "renamelist" => self.start_editor_rename(),
             // Cursor-follow preview in the shell panel's area.
-            "preview" | "pv" => self.toggle_preview(),
+            "preview" => self.toggle_preview(),
             // The operation queue: running + waiting file operations.
             "queue" => self.start_op_queue(),
             // The pane's directory history. It lost its `h` key to pane
             // movement, so it needs a name you can reach.
-            "back" | "dirhistory" | "visited" => self.start_history(),
+            "back" => self.start_history(),
             // Strip UTF-8 BOMs from the selection (UTF-16 left alone).
             "nobom" | "stripbom" => self.start_nobom(),
             // Open the file in a specific vi-family editor in a new shell tab.
@@ -284,7 +284,7 @@ impl App {
             "log" | "history" => self.start_git_log(),
             // The session log had no verb at all, while the menu item that
             // starts it was labelled `(:log)` — a name git had already taken.
-            "sessionlog" | "startlog" => self.start_log_prompt(),
+            "sessionlog" => self.start_log_prompt(),
             "gitdiff" | "gdiff" | "svndiff" => self.git_diff_file(),
             // SVN-only working-copy operations.
             // svn-only, so it says so in the name. `:up` in a file manager

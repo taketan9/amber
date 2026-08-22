@@ -7423,6 +7423,80 @@
         assert!(!hit_rect(Rect::new(4, 2, 6, 0), 4, 2), "in either direction");
     }
 
+    /// Every `:command` the manual and the palette name has to be one the
+    /// dispatcher answers to. The names have been pruned twice now, and a
+    /// pruned name leaves no trace in the code — the manual keeps advertising
+    /// it and the user gets "unknown command". Reading the dispatcher's own
+    /// source for the set of names it matches on is blunt, but it is the only
+    /// list that cannot drift from what actually runs.
+    #[test]
+    fn the_manual_never_names_a_command_that_does_not_exist() {
+        // The dispatcher is in two halves: cian's own commands, and the ex
+        // commands the viewer answers while a file is open.
+        let src = concat!(include_str!("commands.rs"), include_str!("viewer.rs"));
+        // Every quoted lowercase word in the dispatcher: a superset of the
+        // verbs, which is all a membership test needs.
+        let mut known: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut rest = src;
+        while let Some(i) = rest.find('"') {
+            rest = &rest[i + 1..];
+            let Some(j) = rest.find('"') else { break };
+            let word = &rest[..j];
+            if !word.is_empty()
+                && word.chars().all(|c| c.is_ascii_lowercase() || c == '.' || c.is_ascii_digit())
+            {
+                known.insert(word.to_string());
+            }
+            rest = &rest[j + 1..];
+        }
+        // Commands the dispatcher reaches by another route rather than by a
+        // quoted name of its own.
+        for extra in ["notepad", "vim"] {
+            known.insert(extra.to_string());
+        }
+
+        // Pull `:name` out of a line of prose, in either language.
+        let named = |text: &str| -> Vec<String> {
+            let mut out = Vec::new();
+            let b: Vec<char> = text.chars().collect();
+            let mut i = 0;
+            while i < b.len() {
+                if b[i] == ':' {
+                    let start = i + 1;
+                    let mut end = start;
+                    while end < b.len() && (b[end].is_ascii_lowercase() || b[end] == '.') {
+                        end += 1;
+                    }
+                    // A bare `:` (the prompt itself) and `http:` are not names.
+                    if end > start && (i == 0 || b[i - 1] != '/') {
+                        out.push(b[start..end].iter().collect());
+                    }
+                    i = end;
+                } else {
+                    i += 1;
+                }
+            }
+            out
+        };
+
+        let mut missing: Vec<String> = Vec::new();
+        for line in crate::manual_lines(&HashMap::new(), Lang::En) {
+            for name in named(&line) {
+                if !known.contains(&name) {
+                    missing.push(format!("manual: :{name}"));
+                }
+            }
+        }
+        for (verb, _, _) in crate::palette::command_list() {
+            if !known.contains(*verb) {
+                missing.push(format!("palette: :{verb}"));
+            }
+        }
+        missing.sort();
+        missing.dedup();
+        assert!(missing.is_empty(), "named but not answered: {missing:?}");
+    }
+
     #[test]
     fn parse_sem_search_reply_matches_orders_and_folds_reasons() {
         let hit = |rel: &str| cian_core::search::Hit {

@@ -9,7 +9,7 @@ use super::*;
 /// The commands the palette offers, as `(verb, description, takes_arg)`. Kept a
 /// curated list (not every alias) so the picker stays scannable.
 #[rustfmt::skip]
-fn command_list() -> &'static [(&'static str, (&'static str, &'static str), bool)] {
+pub(crate) fn command_list() -> &'static [(&'static str, (&'static str, &'static str), bool)] {
     &[
         ("ime",        ("input-method switching: state and helper", "日本語入力の自動切替: 状態と設定"), false),
         ("ai",         ("AI - simple: chat with the local model", "AI - simple: ローカルモデルとチャット"), false),
@@ -28,8 +28,8 @@ fn command_list() -> &'static [(&'static str, (&'static str, &'static str), bool
         ("nobom",      ("strip UTF-8 BOMs from the selection", "選択から UTF-8 BOM を除去"), false),
         ("count",      ("count files, lines and steps", "ファイル/行/ステップ数"), false),
         ("diff",       ("compare the two panes", "左右を比較"), false),
-        ("dupes",      ("find duplicate files", "重複ファイル検出"), false),
-        ("brename",    ("bulk rename by a pattern", "パターン一括リネーム"), false),
+        ("duplicate", ("find duplicate files", "重複ファイル検出"), false),
+        ("renamepattern",("bulk rename by a pattern", "パターン一括リネーム"), false),
         ("each",       ("run a command per marked file ({} = path)", "マーク各ファイルにコマンド実行（{} = パス）"), true),
         ("sftp",       ("open a server in this pane (remote pane)", "サーバをペインで開く"), false),
         ("ssh",        ("ssh connect picker", "SSH 接続ピッカー"), false),
@@ -44,17 +44,17 @@ fn command_list() -> &'static [(&'static str, (&'static str, &'static str), bool
         ("theme",      ("theme gallery / set a theme", "テーマ選択"), true),
         ("sync",       ("synchronize input across shell panes", "シェル入力同期"), false),
         ("snip",       ("snippet launcher", "スニペット"), false),
-        ("macros",     ("run a macro", "マクロ実行"), false),
+        ("macro",     ("run a macro", "マクロ実行"), false),
         ("stage",      ("git add the selection", "git add"), false),
         ("unstage",    ("git reset the selection", "git reset"), false),
         ("discard",    ("discard worktree changes", "変更を破棄"), false),
-        ("gitlog",     ("commit log", "コミットログ"), false),
+        ("log",       ("commit log", "コミットログ"), false),
         ("gitdiff",    ("working-tree diff vs HEAD", "作業ツリーの差分"), false),
         ("back",       ("this pane's directory history", "このペインの移動履歴"), false),
         ("jump",       ("fuzzy-jump to a recent directory", "最近のディレクトリへ移動"), false),
         ("files",      ("live fuzzy file finder (this tree)", "ライブ・ファイル検索（このツリー）"), false),
         ("recent",     ("recently-opened files", "最近開いたファイル"), false),
-        ("toggles",    ("UI toggles menu (T)", "UIトグルメニュー（T）"), false),
+        ("toggle",    ("UI toggles menu (T)", "UIトグルメニュー（T）"), false),
         ("cd",         ("go to a typed path", "パス入力で移動"), true),
         ("edit",       ("open in the external editor", "外部エディタで開く"), false),
         ("reload",     ("reload init.lua", "init.lua を再読込"), false),
