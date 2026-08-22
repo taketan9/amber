@@ -1140,7 +1140,7 @@ enum MenuItem {
     /// has the keyboard, and a character once notepad style does, so from
     /// inside the editor this menu is how it is reached.
     ViewerEditStyle,
-    /// Open the toggles menu (`T` / `:toggles`).
+    /// Open the toggles menu (`T` / `:toggle`).
     ///
     /// The switches live behind a single letter that is easy to have never
     /// found. Right-click is where people look for "what can this do", so the
@@ -1357,7 +1357,7 @@ impl MenuItem {
             MenuItem::AiCommit => tr(lang, "Draft commit message  (:aicommit)", "コミットメッセージ生成  (:aicommit)"),
             MenuItem::AiJunk => tr(lang, "Detect junk files  (:aijunk)", "ゴミファイル検出  (:aijunk)"),
             MenuItem::AiTriageLog => tr(lang, "Triage this log  (:ailog)", "このログを診断  (:ailog)"),
-            MenuItem::FindDupes => tr(lang, "Find duplicate files  (:dupes)", "重複ファイルを検出  (:dupes)"),
+            MenuItem::FindDupes => tr(lang, "Find duplicate files  (:duplicate)", "重複ファイルを検出  (:duplicate)"),
             MenuItem::AiStructure => tr(lang, "Suggest folder structure  (:organize)", "フォルダ構成を提案  (:organize)"),
             MenuItem::AiRename => tr(lang, "AI rename  (:airename)", "AIリネーム  (:airename)"),
             MenuItem::AiSearch => tr(lang, "Semantic search  (:ask)", "セマンティック検索  (:ask)"),
@@ -2458,7 +2458,7 @@ pub struct App {
     /// back up instead of closing everything.
     menu_stack: Vec<Popup>,
     /// The viewer's text body rect, for mapping a mouse click to a line.
-    /// `:keys` — report every keystroke as cian received it, for finding out
+    /// `:key` — report every keystroke as cian received it, for finding out
     /// whether a binding is broken or the terminal simply never sent the key.
     /// The viewer's other open files. The active one is `popup`; these are the
     /// rest, in order, with `viewer_tab_idx` saying where the active one sits
@@ -2496,7 +2496,7 @@ pub struct App {
     /// from an earlier one. Only a fresh message may take a footer.
     message_fresh: bool,
     /// Whether the terminal accepted the enhanced-keyboard request at startup.
-    /// Reported by `:keys`, because it is the first thing to suspect when every
+    /// Reported by `:key`, because it is the first thing to suspect when every
     /// Ctrl combination goes quiet at once.
     kbd_enhanced: bool,
     /// Whether the "your IME is on" note has been made for the run of keys
@@ -4384,7 +4384,7 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry("z", None, "go to a typed path (also :cd)", "入力したパスへ移動（:cd でも）"),
                 entry("Ctrl+Shift+P, Ctrl+,, C", None, "command palette: fuzzy-find any command", "コマンドパレット：全コマンドをあいまい検索"),
                 entry("Z", None, "fuzzy-jump to a recent / bookmarked directory (also :jump)", "最近/ブックマークのディレクトリへあいまいジャンプ（:jump でも）"),
-                entry("T", None, "UI toggles menu — dotfiles, input sync, notifications… (also :toggles)", "UIトグルメニュー — 隠しファイル/入力同期/通知…（:toggles でも）"),
+                entry("T", None, "UI toggles menu: dotfiles, input sync, notifications… (also :toggle)", "UIトグルメニュー：隠しファイル/入力同期/通知…（:toggle でも）"),
                 entry(":each", None, "run a shell command per marked file — {} = path (:each grep -l foo {})", "マーク各ファイルにコマンド実行 — {} = パス（:each grep -l foo {}）"),
                 entry("F5", None, "refresh now (:refresh)", "今すぐ再読み込み（:refresh）"),
                 entry("f", Some(Search), "search in this folder", "このフォルダ内を検索"),
@@ -4431,7 +4431,7 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry("p", Some(CopyPath), "copy path text to clipboard", "パス文字列をクリップボードにコピー"),
                 entry("Shift+P", Some(CopyFileRef), "copy file(s) to clipboard", "ファイルをクリップボードにコピー"),
                 entry("s", Some(Shortcuts), "shortcuts menu", "ショートカットメニュー"),
-                entry("@", None, "run a macro (layout builder; also :macros / right-click)", "マクロを実行（レイアウト構築；:macros／右クリックでも）"),
+                entry("@", None, "run a macro (layout builder; also :macro / right-click)", "マクロを実行（レイアウト構築；:macro／右クリックでも）"),
                 entry(":count", None, "count files & steps (marked, or the whole tree)", "ファイル・ステップ数を数える（マーク or ツリー全体）"),
                 entry(":du", None, "disk usage: what's biggest here (Enter into a folder, - up)", "容量分析: 何が大きいか（Enter でフォルダへ、- で上へ）"),
                 entry(":hidden", None, "show / hide dotfiles (also right-click)", "ドットファイルの表示切替（右クリックでも）"),
@@ -4490,7 +4490,7 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry(":office", None, "open a synced Office file's cloud copy in the desktop app (also right-click ▸ OS)", "同期された Office 文書のクラウド側をアプリで開く（右クリック ▸ OS からも）"),
                 entry(":officelink", None, "write a .url shortcut to the cloud copy — the thing to paste into a mail", "クラウド側への .url ショートカットを作成（メールに貼るのはこれ）"),
                 entry("Ctrl+A, :markall", None, "mark everything here — in the viewer, select the whole file", "ここにある全部をマーク — ビューアではファイル全体を選択"),
-                entry(":keys", None, "report every keystroke as cian receives it, and which keyboard mode is in use", "受け取ったキーをそのまま表示（キーボードのモードも表示）"),
+                entry(":key", None, "report every keystroke as cian receives it, and which keyboard mode is in use", "受け取ったキーをそのまま表示（キーボードのモードも表示）"),
                 entry("  set_keymap", None, "init.lua: cian.set_keymap(\"alt+g\", \"grep_recursive\") — modifiers allowed", "init.lua: cian.set_keymap(\"alt+g\", \"grep_recursive\") — 修飾キーも書ける"),
                 entry("  CIAN_LEGACY_KEYS=1", None, "start without the enhanced-keyboard request — try it if every Ctrl shortcut is dead", "拡張キーボード要求なしで起動 — Ctrl 系が全滅するときに試す"),
                 entry(":where", None, "which config files cian reads/writes (portable vs ~/.config)", "cianが読み書きする設定ファイルの場所（ポータブル/~/.config）"),
