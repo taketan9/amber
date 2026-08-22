@@ -9,7 +9,7 @@
 
 One binary. macOS, Windows, Linux. No runtime, no DLLs, nothing to install alongside it.
 
-**Contents** — [Download](#download) · [The basics](#the-basics) · [Get around fast](#get-around-fast) · [The text editor panel](#the-text-editor-panel) · [Find things](#find-things) · [Compare and clean up](#compare-and-clean-up) · [Files and version control](#files-and-version-control) · [SSH and remote panes](#ssh-and-remote-panes) · [The shell panel](#the-shell-panel) · [Macros](#macros) · [AI](#ai-optional) · [Japanese input](#japanese-input-ime) · [Configuration](#configuration) · [Build from source](#build-from-source) · [How it fits together](#how-it-fits-together) · [Windows install](#install-on-windows-offline) · [Troubleshooting](#troubleshooting)
+**Contents** — [Download](#download) · [The basics](#the-basics) · [Get around fast](#get-around-fast) · [The text editor panel](#the-text-editor-panel) · [Find things](#find-things) · [Compare and clean up](#compare-and-clean-up) · [Files and version control](#files-and-version-control) · [SSH and remote panes](#ssh-and-remote-panes) · [The shell panel](#the-shell-panel) · [Macros](#macros) · [AI](#ai-optional) · [Japanese input](#japanese-input-ime) · [Configuration](#configuration) · [Build from source](#build-from-source) · [How it fits together](#how-it-fits-together) · [Windows install](#install-on-windows-offline) · [Troubleshooting](#troubleshooting) · [License](#license)
 
 ---
 
@@ -552,7 +552,7 @@ Self-contained executables — no runtime, no DLLs, no network. Take `cian-windo
 Get-FileHash cian-windows-x64.zip -Algorithm SHA256
 ```
 
-To build the zip yourself instead — from a Mac, with no Windows dev machine — the bundled workflow does it on a real Windows runner: push a tag (`git tag v0.6.1 && git push --tags`), or **Actions → release → Run workflow**, and take the artifact from that run.
+To build the zip yourself instead — from a Mac, with no Windows dev machine — the bundled workflow does it on a real Windows runner: push a tag (`git tag v1.0.3 && git push --tags`), or **Actions → release → Run workflow**, and take the artifact from that run.
 
 On the offline machine, unzip and either run `cian-tui.exe` where it sits, or put it on PATH:
 
@@ -577,3 +577,9 @@ Open a new terminal and type `cian-tui`. Use a Nerd Font terminal for the file-t
 - **A key that does nothing?** The terminal may be keeping it — a Mac terminal takes Ctrl+F for its find bar, Ctrl+Q for the system zoom — and a key that never arrives cannot be handled. **`:key`** reports each keystroke as cian received it and names the keyboard mode in effect; `CIAN_LEGACY_KEYS=1` starts without the enhanced-keyboard request. Move the binding somewhere your machine will deliver (`cian.set_keymap("alt+g", "grep_recursive")`), or use the command: the Ctrl-only shortcuts all answer to `:w`, `:q`, `:grep`, `:block`.
 - **Screen scrambled?** `:redraw` repaints from nothing, for when a stray control character leaves text cian never drew.
 - **Trouble?** `CIAN_LOG=/tmp/cian.log` captures diagnostics. A panic restores the terminal on the way out, so you are never left needing `reset`.
+
+---
+
+## License
+
+MIT — see [LICENSE](LICENSE).
