@@ -5530,8 +5530,8 @@ fn draw_simple_dialog(
             lines.push(String::new());
             lines.push(
                 tr(lang,
-                   "UTF-16 files are detected and left alone (their BOM is load-bearing).",
-                   "UTF-16 のファイルは検出してスキップします（BOM が必須のため）。")
+                   "UTF-16 files are detected and left alone (their BOM is load-bearing)",
+                   "UTF-16 のファイルは検出してスキップします（BOM が必須のため）")
                 .to_string(),
             );
             let foot = tr(lang, " y/Enter=strip  n/Esc=cancel ", " y/Enter=除去  n/Esc=取消 ");
@@ -5722,8 +5722,8 @@ fn draw_simple_dialog(
             }
             lines.push(String::new());
             lines.push(tr(lang,
-                "This throws away uncommitted changes and cannot be undone.",
-                "コミットしていない変更は失われ、元に戻せません。").to_string());
+                "This throws away uncommitted changes and cannot be undone",
+                "コミットしていない変更は失われ、元に戻せません").to_string());
             (
                 tr(lang, " discard changes ", " 変更を破棄 ").to_string(),
                 lines,
@@ -5738,8 +5738,8 @@ fn draw_simple_dialog(
                 String::new(),
                 tr(
                     lang,
-                    "The place itself is untouched — only the bookmark goes.",
-                    "場所そのものは消えません。お気に入りの登録だけを消します。",
+                    "The place itself is untouched. Only the bookmark goes",
+                    "場所そのものは消えません。お気に入りの登録だけを消します",
                 )
                 .to_string(),
             ];
@@ -5771,7 +5771,7 @@ fn draw_simple_dialog(
                 format!("  {} {}", tr(lang, "from", "元"), src.display()),
                 format!("  {}   {}", tr(lang, "to", "先"), dst.display()),
                 String::new(),
-                tr(lang, "The destination will be replaced.", "コピー先は置き換えられます。").to_string(),
+                tr(lang, "The destination will be replaced", "コピー先は置き換えられます").to_string(),
             ];
             (
                 tr(lang, " copy across ", " 反対側へコピー ").to_string(),
@@ -5804,8 +5804,8 @@ fn draw_simple_dialog(
             lines.push(
                 tr(
                     lang,
-                    "Nothing is deleted; the source's files are copied over.",
-                    "削除は行いません。コピー元のファイルで置き換えます。",
+                    "Nothing is deleted; the source's files are copied over",
+                    "削除は行いません。コピー元のファイルで置き換えます",
                 )
                 .to_string(),
             );
@@ -5847,7 +5847,7 @@ fn draw_simple_dialog(
                 String::new(),
                 format!("  {}  →  {}", from, to),
                 String::new(),
-                tr(lang, "Each file is copied, then deleted from the source.", "各ファイルをコピー後、コピー元から削除します。").to_string(),
+                tr(lang, "Each file is copied, then deleted from the source", "各ファイルをコピー後、コピー元から削除します").to_string(),
             ];
             (
                 tr(lang, " move across hosts ", " ホスト間の移動 ").to_string(),
@@ -5879,7 +5879,7 @@ fn draw_simple_dialog(
                 vec![
                     format!("{} への書き込みには管理者権限が必要です", dest.display()),
                     String::new(),
-                    format!("{} 件の{}を昇格して再試行しますか？ UACの確認が出ます。", targets.len(), verb),
+                    format!("{} 件の{}を昇格して再試行しますか？ UACの確認が出ます", targets.len(), verb),
                 ]
             } else {
                 vec![
@@ -7164,7 +7164,7 @@ fn draw_shortcuts(
                 Style::default().fg(muted_on(theme().popup_bg)),
             )),
             Line::from(""),
-            Line::from(tr(lang, "a = add a shortcut,  A = add a folder.", "a = ショートカット追加,  A = フォルダ追加。")),
+            Line::from(tr(lang, "a = add a shortcut,  A = add a folder", "a = ショートカット追加,  A = フォルダ追加")),
         ];
         f.render_widget(
             Paragraph::new(hint),

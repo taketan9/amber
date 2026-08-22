@@ -1413,7 +1413,7 @@ impl MenuItem {
             MenuItem::ViewerEdit => tr(lang, "Open in my editor  (:edit)", "外部エディタで開く  (:edit)"),
             MenuItem::ViewerSave => tr(lang, "Save  (Ctrl+S)", "保存  (Ctrl+S)"),
             MenuItem::ViewerEditStyle => {
-                tr(lang, "Editor keys: vim / notepad", "エディタのキー操作: vim / メモ帳ふう")
+                tr(lang, "Editor keys: vim / notepad", "エディタのキー操作: vim / メモ帳")
             }
             MenuItem::ViewerCloseDiscard => tr(lang, "Close without saving", "保存せずに閉じる"),
             MenuItem::RemotePane => tr(lang, "Open server in pane  (:sftp)", "サーバをペインで開く  (:sftp)"),
@@ -4422,7 +4422,7 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry("  outline", None, "]] / [[ next/prev section, click an entry to jump, :outline hides the column", "]] / [[ 次/前の見出し、項目クリックで移動、:outline で列を隠す"),
                 entry("  folding", None, "Space or za fold/unfold here, zA all (either way), or click the ▾ in the gutter", "Space か za で折りたたみ切替、zA で全部（開いていれば閉じ、閉じていれば開く）、余白の ▾ クリックでも可"),
                 entry("  :w :wq :q :q!", None, "save / save and close / close / close discarding — when Ctrl+S is taken by the terminal", "保存 / 保存して閉じる / 閉じる / 破棄して閉じる — Ctrl+S が端末に取られている場合に"),
-                entry("  V then I / A", None, "line selection: put text at the start, or at the end, of every line", "行選択：全行の先頭に、または全行の末尾に文字を入れる"),
+                entry("  V then I / A", None, "line selection: put text at the start, or at the end, of every line", "行選択：全行の先頭、または全行の末尾に文字を入れます"),
                 entry("  Ctrl+Q / Alt+v / :block", None, "rectangle: d cuts it, I/A insert at the left/right edge, c replaces", "矩形選択：d で切り取り、I/A で左端/右端に挿入、c で置換"),
                 entry("  normal mode", None, "x/dd/D/J delete·join, u undo, v+d cut selection (d/u scroll via Ctrl)", "ノーマルモード：x/dd/D/J 削除·結合, u 取消, v+d 選択削除（スクロールは Ctrl+d/u）"),
                 entry(":edit", None, "edit the file in your external editor (E in the viewer)", "外部エディタで編集（ビューア内は E）"),
@@ -4447,7 +4447,7 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry("Shift+F", None, "find by name, whole tree below here", "名前で検索（ここ以下のツリー全体）"),
                 entry("Ctrl+F / Ctrl+G", Some(Action::GrepRecursive), "grep inside files, whole tree below here (:grep too)", "ファイル内をgrep（ここ以下のツリー全体）— Ctrl+G（サクラと同じ）や :grep でも可"),
                 entry("  patterns", None, "  bare text = literal; /re/ = regex, /re/i ignores case; grep also reads SJIS", "  裸の文字列=そのまま、/re/=正規表現（/re/i で大小無視）、grep は SJIS も読む"),
-                entry("  p in results", None, "panelize: load the find/grep matches into the pane to mark & operate on", "検索結果を p でペイン化：マーク＆一括操作できる"),
+                entry("  p in results", None, "panelize: load the find/grep matches into the pane to mark & operate on", "検索結果を p でペイン化：マークして一括操作できます"),
                 entry("  r in results", None, "replace across every file the grep matched: preview each line, Space unchecks", "grep 結果の全ファイルを一括置換：1行ずつ確認、Space で除外"),
                 entry("b", None, "branch view: flatten this subtree into the pane, one row per file (b/Esc to leave)", "ブランチビュー：この配下を1ファイル1行に平坦化（b/Esc で戻る）"),
                 entry("n", Some(SearchNext), "next match", "次のマッチ"),

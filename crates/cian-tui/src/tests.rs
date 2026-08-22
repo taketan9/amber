@@ -7497,6 +7497,95 @@
         assert!(missing.is_empty(), "named but not answered: {missing:?}");
     }
 
+    /// Nothing cian says to a person ends in a full stop — 「〜ます」 and
+    /// `nothing to operate on`, not 「〜ます。」 and `nothing to operate on.`.
+    /// A stop between two sentences is right; a stop on the end is one the
+    /// reader will never be followed past. Both languages, because a dialog
+    /// that drops it in one and keeps it in the other looks unfinished in one
+    /// of them. Reading the sources is blunt, but the alternative is a rule
+    /// that only holds for the strings someone remembered to check.
+    #[test]
+    fn nothing_cian_says_ends_in_a_full_stop() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut bad: Vec<String> = Vec::new();
+        for entry in std::fs::read_dir(&dir).expect("the source directory") {
+            let path = entry.expect("a source file").path();
+            if path.extension().and_then(|e| e.to_str()) != Some("rs") {
+                continue;
+            }
+            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
+            // The tests are full of sample prose, which is not what cian says.
+            if name == "tests.rs" {
+                continue;
+            }
+            let text = std::fs::read_to_string(&path).expect("readable source");
+            let bytes: Vec<char> = text.chars().collect();
+            // Every `tr(` call, and every string literal in its arguments —
+            // the forms are often each on their own line, so this reads the
+            // call rather than the line.
+            let mut i = 0;
+            while i + 3 < bytes.len() {
+                let is_call = bytes[i] == 't'
+                    && bytes[i + 1] == 'r'
+                    && bytes[i + 2] == '('
+                    && (i == 0 || !bytes[i - 1].is_alphanumeric() && bytes[i - 1] != '_');
+                if !is_call {
+                    i += 1;
+                    continue;
+                }
+                // A `tr(` inside a comment is prose about the rule, not a
+                // string cian says.
+                let line_start = text[..text
+                    .char_indices()
+                    .nth(i)
+                    .map(|(b, _)| b)
+                    .unwrap_or(0)]
+                    .rfind('\n')
+                    .map(|b| b + 1)
+                    .unwrap_or(0);
+                if text[line_start..].trim_start().starts_with("//") {
+                    i += 3;
+                    continue;
+                }
+                let mut j = i + 3;
+                let mut depth = 1usize;
+                while j < bytes.len() && depth > 0 {
+                    match bytes[j] {
+                        '(' => depth += 1,
+                        ')' => depth -= 1,
+                        '"' => {
+                            let start = j + 1;
+                            let mut k = start;
+                            while k < bytes.len() && bytes[k] != '"' {
+                                // An escape puts a quote inside the literal;
+                                // step over the pair.
+                                if bytes[k] == '\\' {
+                                    k += 1;
+                                }
+                                k += 1;
+                            }
+                            let s: String = bytes[start..k.min(bytes.len())].iter().collect();
+                            let s = s.trim_end();
+                            if s.chars().count() >= 4
+                                && !s.ends_with("..")
+                                && (s.ends_with('。') || s.ends_with('.'))
+                            {
+                                bad.push(format!("{name}: {s}"));
+                            }
+                            j = k;
+                        }
+                        _ => {}
+                    }
+                    j += 1;
+                }
+                i = j;
+            }
+        }
+        bad.sort();
+        bad.dedup();
+        assert!(bad.is_empty(), "these end in a full stop: {bad:#?}");
+    }
+
     #[test]
     fn parse_sem_search_reply_matches_orders_and_folds_reasons() {
         let hit = |rel: &str| cian_core::search::Hit {

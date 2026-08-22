@@ -1003,7 +1003,7 @@ impl App {
             if empty {
                 self.message = Some(tr(self.lang,
                     "no outline for this kind of file",
-                    "この種類のファイルにはアウトラインがない").into());
+                    "この種類のファイルにはアウトラインがありません").into());
             }
             return Ok(());
         }
@@ -2065,7 +2065,7 @@ impl App {
                 let Some(sh) = shape.as_deref_mut() else {
                     self.message = Some(tr(self.lang,
                         "no outline rules for this kind of file",
-                        "この種類のファイルにはアウトラインの規則がない").into());
+                        "この種類のファイルにはアウトラインの規則がありません").into());
                     return;
                 };
                 sh.shown = !sh.shown;
@@ -2199,7 +2199,7 @@ impl App {
         };
         self.message = Some(if untouched {
             if self.lang == Lang::Ja {
-                format!("{verb}: {scope} — 変わるものがなかった")
+                format!("{verb}: {scope} — 変わるものがありませんでした")
             } else {
                 format!("{verb}: {scope} — nothing to change")
             }

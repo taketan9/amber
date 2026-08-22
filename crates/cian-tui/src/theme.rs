@@ -512,12 +512,13 @@ impl Lang {
 ///   to operate on`, but `AI returned no command`. A terminal tool's voice,
 ///   the same as `ls` and `git`.
 /// * **Japanese is 敬体** — 「〜ます」「〜ません」. Never 常体.
-/// * **No 句点 at the end of a message.** Between two sentences, yes: 「未保存
-///   の変更があります。Ctrl+S で保存できます」 — the reader needs the break,
-///   and the line does not need a full stop it will never be followed past.
+/// * **No full stop at the end**, in either language. Between two sentences,
+///   yes: 「未保存の変更があります。Ctrl+S で保存できます」, `unsaved changes.
+///   Ctrl+S saves` — the reader needs the break, but the line does not need a
+///   stop it will never be followed past. A test holds both languages to this.
 /// * **Two sentences, not a dash.** State what happened, then what can be done
 ///   about it. `unsaved changes — Ctrl+S saves` reads as one breathless
-///   thought; `unsaved changes. Ctrl+S saves.` is two clear ones.
+///   thought; `unsaved changes. Ctrl+S saves` is two clear ones.
 /// * **Never "for now", "not yet", "temporarily".** A limit is a fact about
 ///   the tool, not an apology for it: `archives are read-only. copy extracts.`
 ///   Saying nothing at all about a limit is worse — silence reads as a bug.

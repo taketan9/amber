@@ -84,7 +84,7 @@ impl App {
                 match self.edit_style {
                     crate::EditStyle::Vim => tr(self.lang, "vim", "vim").to_string(),
                     crate::EditStyle::Notepad => {
-                        tr(self.lang, "notepad", "メモ帳ふう").to_string()
+                        tr(self.lang, "notepad", "メモ帳").to_string()
                     }
                 },
                 self.edit_style == crate::EditStyle::Vim,

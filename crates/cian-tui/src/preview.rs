@@ -350,8 +350,8 @@ pub(crate) fn preview_target(app: &App) -> Result<PathBuf, String> {
         // the one case where following the cursor is actively expensive.
         Some(e) if e.cloud && !cian_core::cloud::include() => Err(tr(
             app.lang,
-            "☁ This file has not been downloaded yet.\n\n             Showing it here would fetch it over the network, and holding a\n             cursor down a folder would fetch every file in it.\n\n             F3 opens this one (and downloads it).\n             T → \"Read ☁ cloud-only files\" previews them from now on.",
-            "☁ このファイルはまだダウンロードされていません。\n\n             ここに表示するとネットワーク越しに取得することになり、\n             カーソルを押しっぱなしにするとフォルダ内が全部落ちてきます。\n\n             F3 でこの1つを開けます（ダウンロードされます）。\n             T →「☁ クラウド上のファイルも読む」で以後プレビューします。",
+            "☁ This file has not been downloaded yet.\n\n             Showing it here would fetch it over the network, and holding a\n             cursor down a folder would fetch every file in it.\n\n             F3 opens this one (and downloads it).\n             T → \"Read ☁ cloud-only files\" previews them from now on",
+            "☁ このファイルはまだダウンロードされていません。\n\n             ここに表示するとネットワーク越しに取得することになり、\n             カーソルを押しっぱなしにするとフォルダ内が全部落ちてきます。\n\n             F3 でこの1つを開けます（ダウンロードされます）。\n             T →「☁ クラウド上のファイルも読む」で以後プレビューします",
         )
         .into()),
         // Kinds the config says not to open unasked. A `.vsix` is a zip of an

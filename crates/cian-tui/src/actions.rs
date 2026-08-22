@@ -344,8 +344,8 @@ impl App {
                         String::new(),
                         tr(
                             self.lang,
-                            "The change is in this session only. `:where` says which file it would go to.",
-                            "変更はこのセッション限りです。保存先は `:where` で確認できます。",
+                            "The change is in this session only. `:where` says which file it would go to",
+                            "変更はこのセッション限りです。保存先は `:where` で確認できます",
                         )
                         .to_string(),
                     ],
@@ -1179,7 +1179,7 @@ impl App {
                 if !result.rows.iter().any(|r| r.is_difference()) {
                     self.open_popup(Popup::Notice {
                         lines: vec![
-                            tr(self.lang, "The two files are identical.", "2つのファイルは同一です").to_string(),
+                            tr(self.lang, "The two files are identical", "2つのファイルは同一です").to_string(),
                             String::new(),
                             format!("{}  ↔  {}", a.name, b.name),
                         ],
@@ -1271,7 +1271,7 @@ impl App {
             // unresponsive when identical folders only whispered a message.
             self.open_popup(Popup::Notice {
                 lines: vec![
-                    tr(self.lang, "The two folders are identical.", "2つのフォルダは同一です").to_string(),
+                    tr(self.lang, "The two folders are identical", "2つのフォルダは同一です").to_string(),
                     String::new(),
                     format!("{}  ↔  {}", job.left, job.right),
                 ],

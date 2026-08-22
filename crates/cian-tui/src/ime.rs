@@ -228,14 +228,14 @@ impl App {
             .to_string(),
             tr(
                 self.lang,
-                "typed with — cian reads it each time it takes the keyboard back.",
-                "いた入力ソースに戻します（毎回読み取って覚えています）。",
+                "typed with — cian reads it each time it takes the keyboard back",
+                "いた入力ソースに戻します（毎回読み取って覚えています）",
             )
             .to_string(),
             tr(
                 self.lang,
-                ":ime on / :ime off switch now, to check the helper works.",
-                ":ime on / :ime off でその場で切り替えて動作確認できます。",
+                ":ime on / :ime off switch now, to check the helper works",
+                ":ime on / :ime off でその場で切り替えて動作確認できます",
             )
             .to_string(),
         ];
@@ -263,8 +263,8 @@ fn not_configured(lang: Lang) -> Vec<String> {
         String::new(),
         tr(
             lang,
-            "macism, im-select, or cian's own examples/cian-ime.swift.",
-            "macism / im-select、または同梱の examples/cian-ime.swift。",
+            "macism, im-select, or cian's own examples/cian-ime.swift",
+            "macism / im-select、または同梱の examples/cian-ime.swift",
         )
         .to_string(),
     ]
