@@ -2407,11 +2407,17 @@ impl App {
             (true, _, KeyCode::Char('f')) | (true, _, KeyCode::Char('g')) => {
                 self.start_grep_prompt()
             }
+            // Ctrl+P finds a file, as it has in every editor since CtrlP. It
+            // was ruled out once because macOS terminals eat Ctrl+P/O — that
+            // is no longer a constraint worth designing around, and the finder
+            // had no key at all, which made the best thing in here the hardest
+            // to reach. `//` from the filter is the same door.
+            (true, _, KeyCode::Char('p')) => self.start_file_finder(),
             // `C` = command palette (mnemonic: Commands), `Z` = fuzzy-jump to a
-            // recent dir (complements `z`, jump-to-typed-path). Letter keys, not
-            // Ctrl (macOS terminals steal Ctrl+P/O) nor `;` (too easily confused
-            // with `:` command mode on a US keyboard). The char already encodes
-            // the shift, so `_` matches whether or not the modifier is reported.
+            // recent dir (complements `z`, jump-to-typed-path). Letters rather
+            // than `;`, which is too easily confused with `:` on a US keyboard.
+            // The char already encodes the shift, so `_` matches whether or not
+            // the modifier is reported.
             (false, _, KeyCode::Char('C')) => self.start_command_palette(),
             (false, _, KeyCode::Char('Z')) => self.start_fuzzy_jump(),
             // `T` = the UI-toggles menu (dotfiles, input sync, notifications…).

@@ -4400,7 +4400,7 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry("n", Some(SearchNext), "next match", "次のマッチ"),
                 entry("N", Some(SearchPrev), "previous match", "前のマッチ"),
                 entry("/", None, "filter list as you type", "入力に応じて一覧を絞り込み"),
-                entry("//", None, "fuzzy-find a file anywhere below here", "この下のどこかにあるファイルをあいまい検索"),
+                entry("// , Ctrl+P", None, "fuzzy-find a file anywhere below here", "この下のどこかにあるファイルをあいまい検索"),
                 entry(",", None, "sort by name / size / date / ext", "ソート：名前／サイズ／日付／拡張子"),
                 entry("Shift+S", None, "ssh picker (also :ssh, or right-click)", "SSHピッカー（:ssh・右クリックでも）"),
                 entry(":remote", None, "open a server IN this pane (a remote pane; carmine frame). Enter/l navigate, Esc leaves", "サーバをこのペインで開く（リモートペイン・カーマイン枠）。Enter/l で移動、Esc で戻る"),
