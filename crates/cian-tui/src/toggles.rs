@@ -1,4 +1,4 @@
-//! The UI-toggles menu (`T` / `:toggles`): one place to flip the handful of
+//! The UI-toggles menu (`T` / `:toggle`): one place to flip the handful of
 //! live on/off settings, inspired by AstroNvim's `<Leader>u`. Each row shows its
 //! current state and toggles in place, so the menu stays open for several flips.
 

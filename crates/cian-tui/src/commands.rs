@@ -94,7 +94,7 @@ impl App {
                     self.view_request = Some(crate::ViewWanted::Icons);
                     self.say_view_is_window_only();
                 }
-                "classic" | "panes" => self.view_request = Some(crate::ViewWanted::Classic),
+                "classic" => self.view_request = Some(crate::ViewWanted::Classic),
                 other => {
                     self.message = Some(format!(
                         "{other}? — :view details | icons | classic",
@@ -138,7 +138,7 @@ impl App {
             "ime" | "inputmethod" => self.ime_report(rest),
             // Which key did the terminal actually send? The answer to every
             // "that shortcut does nothing on my machine".
-            "keys" => {
+            "key" => {
                 self.key_probe = !self.key_probe;
                 let mode = if self.kbd_enhanced { "enhanced" } else { "legacy" };
                 self.message = Some(if self.key_probe {
@@ -212,7 +212,10 @@ impl App {
             "du" | "diskusage" | "usage" => self.start_du_here(),
             "palette" | "commands" | "p" => self.start_command_palette(),
             "jump" | "j" => self.start_fuzzy_jump(),
-            "toggles" | "ui" | "toggle" => self.start_toggles(),
+            // Singular is the house rule, whatever the command opens a list
+            // of: "when in doubt, drop the s" is a rule you can hold in your
+            // head, and one that is right more often than it is wrong.
+            "toggle" | "ui" => self.start_toggles(),
             // Named by what you get, because that is what someone types when
             // the editor is not behaving the way their hands expect. `T` is
             // the same switch from a listing; from inside the editor `T` is a
@@ -222,7 +225,7 @@ impl App {
             // way *back* to vim keys is the panel's menu rather than a command
             // anyway: notepad style has no command line to type one at.
             "notepad" => self.set_edit_style(crate::EditStyle::Notepad),
-            "editstyle" | "vimkeys" => match rest.trim() {
+            "editstyle" | "vimkey" | "vimkeys" => match rest.trim() {
                 "vim" | "vi" => self.set_edit_style(crate::EditStyle::Vim),
                 "notepad" | "plain" => self.set_edit_style(crate::EditStyle::Notepad),
                 "" => self.flip_edit_style(),
@@ -246,7 +249,7 @@ impl App {
             // Cursor-follow preview in the shell panel's area.
             "preview" | "pv" => self.toggle_preview(),
             // The operation queue: running + waiting file operations.
-            "queue" | "ops" | "jobs" => self.start_op_queue(),
+            "queue" => self.start_op_queue(),
             // The pane's directory history. It lost its `h` key to pane
             // movement, so it needs a name you can reach.
             "back" | "dirhistory" | "visited" => self.start_history(),
@@ -254,7 +257,7 @@ impl App {
             "nobom" | "stripbom" => self.start_nobom(),
             // Open the file in a specific vi-family editor in a new shell tab.
             "vi" | "vim" | "nvim" => self.edit_in_new_tab(Some(verb)),
-            "macro" | "macros" => self.start_macros(),
+            "macro" => self.start_macros(),
             "ssh" => self.start_ssh(),
             // `remote` is what it is; `sftp` is how, and people do search by
             // protocol. `scp` named the fallback rather than the thing, and
@@ -291,7 +294,7 @@ impl App {
             // taken if git commit is ever added.
             "svncommit" => self.svn_commit_prompt(),
             "svnresolve" | "resolve" => self.svn_resolve(),
-            "snip" | "snippet" | "snippets" => self.start_snippets(),
+            "snip" | "snippet" => self.start_snippets(),
             "aicommit" | "commitmsg" => self.start_ai_commit_message(),
             "aijunk" | "junk" => self.start_ai_junk(),
             "aiorganize" | "aistructure" | "organize" => self.start_ai_structure(),
@@ -330,7 +333,7 @@ impl App {
             "aierror" | "explain" => self.explain_shell_error(),
             "aidiff" | "explaindiff" => self.explain_diff(),
             "ailog" | "logtriage" | "triage" => self.triage_log(),
-            "dupes" | "dup" | "duplicates" => self.start_dupes(),
+            "duplicate" | "dup" => self.start_dupes(),
             "theme" | "colorscheme" | "colourscheme" => {
                 if rest.is_empty() {
                     self.start_theme_picker();
@@ -345,7 +348,7 @@ impl App {
                 self.reload_both();
                 self.message = Some(tr(self.lang, "refreshed", "更新しました").into());
             }
-            "where" | "config" | "paths" => self.show_config_paths(),
+            "where" | "config" => self.show_config_paths(),
             // Mark / unmark entries whose name matches a glob (`:mark *.rs`).
             "mark" | "select" => self.cmd_mark(rest, true),
             "unmark" | "deselect" => self.cmd_mark(rest, false),
@@ -387,8 +390,9 @@ impl App {
 
             // Inspection.
             "ls" | "dir" => self.cmd_ls(&args),
-            "stat" | "attr" | "attrs" => self.show_attributes(),
-            "file" => self.cmd_file(),
+            // `:ls` is here too: it is the same question asked of the whole
+            // listing rather than the selection, and it is what hands type.
+            "stat" | "attr" => self.show_attributes(),
             "wc" => self.cmd_wc(),
             "head" => self.cmd_peek(cian_core::inspect::End::Head, &args),
             "tail" => self.cmd_peek(cian_core::inspect::End::Tail, &args),
@@ -633,27 +637,6 @@ impl App {
         // longer list would clip; the trailing "… and N more" says so.
         self.popup = Popup::Notice { lines: self.attributes_lines(&paths, 40) };
     }
-
-    /// `file`: name what the selection is, by magic number and content.
-    pub(crate) fn cmd_file(&mut self) {
-        let paths = self.active_pane().map(|p| p.target_paths()).unwrap_or_default();
-        if paths.is_empty() {
-            self.message = Some(tr(self.lang, "nothing selected", "選択されていません").into());
-            return;
-        }
-        let mut lines = Vec::new();
-        for path in paths.iter().take(30) {
-            let name = path.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
-            let desc = cian_core::inspect::classify(path).unwrap_or_else(|e| e.to_string());
-            lines.push(format!("{} {}", fit(&name, 28), desc));
-        }
-        if paths.len() > 30 {
-            lines.push(format!("... and {} more", paths.len() - 30));
-        }
-        self.popup = Popup::Notice { lines };
-    }
-
-    /// `wc`: line, word and byte counts for the selection, with a total.
     pub(crate) fn cmd_wc(&mut self) {
         let paths = self.active_pane().map(|p| p.target_paths()).unwrap_or_default();
         if paths.is_empty() {

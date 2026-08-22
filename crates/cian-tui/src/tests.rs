@@ -5680,7 +5680,7 @@
         let mut app = App::new(deep.clone(), deep, en_config()).unwrap();
 
         app.mode = Mode::Command;
-        app.command_buffer = "keys".into();
+        app.command_buffer = "key".into();
         app.run_command();
         for w in [60u16, 80, 120] {
             let screen = render(&mut app, w, 24).join("\n");
@@ -10848,9 +10848,15 @@
         app.reload_active();
         app.active_pane_mut().unwrap().cursor = 1; // notes.txt (index 0 is `..`)
 
-        run_cmd(&mut app, "file");
-        let Popup::Notice { lines } = &app.popup else { panic!("file → notice") };
-        assert!(lines.iter().any(|l| l.contains("text")), "{:?}", lines);
+        // `:file` used to answer this, one letter from `:files` and doing
+        // something else entirely. It is a column of `:attr` now, so one
+        // command answers everything about the thing under the cursor.
+        run_cmd(&mut app, "attr");
+        let Popup::Notice { lines } = &app.popup else { panic!("attr → notice") };
+        assert!(
+            lines.iter().any(|l| l.contains("text")),
+            "the classification came with it: {lines:?}",
+        );
 
         run_cmd(&mut app, "wc");
         let Popup::Notice { lines } = &app.popup else { panic!("wc → notice") };

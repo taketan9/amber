@@ -1797,7 +1797,25 @@ impl App {
                         format!("{:>10}", cian_core::human_size(a.size.unwrap_or(0)))
                     };
                     let owner = a.owner.as_ref().map(|o| format!("  owner {}", o)).unwrap_or_default();
-                    lines.push(format!("{} {}  {}{}", fit(&name, 28), a.describe(), size, owner));
+                    // What the thing *is*, next to what may be done to it.
+                    // `:file` used to answer this on its own, one letter away
+                    // from `:files` and doing something else entirely; folded
+                    // in here, one command answers "tell me about this".
+                    let kind = if a.is_dir {
+                        String::new()
+                    } else {
+                        cian_core::inspect::classify(path)
+                            .map(|d| format!("  {d}"))
+                            .unwrap_or_default()
+                    };
+                    lines.push(format!(
+                        "{} {}  {}{}{}",
+                        fit(&name, 28),
+                        a.describe(),
+                        size,
+                        owner,
+                        kind
+                    ));
                 }
                 Err(e) => lines.push(format!("{} {}", fit(&name, 28), e)),
             }

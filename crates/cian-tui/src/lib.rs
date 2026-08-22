@@ -1191,7 +1191,7 @@ enum MenuItem {
     EditorRename,
     /// Open the command-snippet launcher (`:snip`).
     Snippets,
-    /// Open the layout-macro launcher (`@` / `:macros`).
+    /// Open the layout-macro launcher (`@` / `:macro`).
     Macros,
     /// Open the shortcuts / bookmarks menu (the `s` key).
     Shortcuts,
@@ -4482,8 +4482,7 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry(":pwd", None, "show the directory, copy it to the clipboard", "ディレクトリを表示しクリップボードにコピー"),
                 entry(":ls", None, "refresh;  :ls -a  toggles dotfiles", "再読み込み；  :ls -a でドットファイル切替"),
                 entry(":stat", None, "attributes (same as :attr)", "属性（:attr と同じ）"),
-                entry(":file", None, "what the selection is, by content", "選択物の種別を内容から判定"),
-                entry(":wc", None, "line / word / byte counts", "行／単語／バイト数"),
+                                entry(":wc", None, "line / word / byte counts", "行／単語／バイト数"),
                 entry(":head / :tail", None, "first / last lines;  :tail -n 40", "先頭／末尾の行；  :tail -n 40"),
                 entry(":df", None, "free disk space;  :df -h -k -m -g", "ディスク空き容量；  :df -h -k -m -g"),
                 entry(":theme", None, "theme gallery;  :theme dracula  sets one directly", "テーマ一覧；  :theme dracula で直接指定"),

@@ -85,7 +85,7 @@ Fuzzy pickers: type a few letters, press Enter.
 | **`Z`** (`:jump`) | a recent or bookmarked folder |
 | **`:files`** | live file finder over the whole tree |
 | **`:recent`** | files opened this session |
-| **`T`** (`:toggles`) | live settings — dotfiles, input sync, notifications, verify-transfers, language |
+| **`T`** (`:toggle`) | live settings — dotfiles, input sync, notifications, verify-transfers, language |
 | **`:du`** | disk usage, biggest first; `Enter` drills in |
 
 **`:each <cmd>`** runs a command on every marked file — `:each gzip {}` (`{}` is the path), or `:each md5sum` with the path appended.
@@ -191,7 +191,7 @@ A rectangle is reckoned in **screen columns**, not characters, so a block drawn 
 
 - **Cursor-follow preview (on by default).** The shell panel's area previews whatever the cursor is on — code in colour, images, folder and archive listings, Office/PDF text. The shell keeps running underneath; `Shift+J` or a click brings it back. Remote panes deliberately show no preview (it would download every file the cursor touches). Pictures use the terminal's own protocol (kitty / iTerm2 / sixel) when it offers one, and half-blocks otherwise; `:gfx` switches between them for a terminal that advertises a protocol and then draws nothing, and `:version` says which is in use. `:preview` turns it off, and kinds that would have to be unpacked or scanned to show anything are skipped already — `.vsix`, `.jar`, `.whl`, `.iso`, `.msi`, `.pdf`, `.mdf` and friends — while `.zip` and `.tar` are not, because listing one is the point. `cian.set_option("preview_skip", { "bak" })` adds more. `F3` opens any of them.
 - **Walk into archives.** `Enter` on a zip or tarball puts the *pane* inside it, browsing like a folder. Copying out extracts relative to where you stand. For **zip** it works both ways: copy files in, `F2` renames a member, `d` deletes one — rewritten atomically, kept members raw-copied. tar/tar.gz are read-only, and password-protected zips are never modified. `F3` on a member opens the real viewer, and saving puts it back into the zip.
-- **Cloud files stay in the cloud.** A synced OneDrive / Teams / iCloud / Google Drive folder lists files that were never downloaded, and reading one pulls it over the network. Panes holding them get a **☁** column, and the sweeps — grep, `:count`, `:hash`, `:dupes`, `:preview` — skip them and say how many. Deliberate acts (`F3`, a copy, opening a file) still work. `cian.set_option("read_cloud_files", true)` lets the sweeps reach in.
+- **Cloud files stay in the cloud.** A synced OneDrive / Teams / iCloud / Google Drive folder lists files that were never downloaded, and reading one pulls it over the network. Panes holding them get a **☁** column, and the sweeps — grep, `:count`, `:hash`, `:duplicate`, `:preview` — skip them and say how many. Deliberate acts (`F3`, a copy, opening a file) still work. `cian.set_option("read_cloud_files", true)` lets the sweeps reach in.
 - **Ask about what you are reading.** Right-click (or `Shift+Enter`) for a short menu over the file: improve this writing, explain or write this command, review this code — over the selection, or the whole file. The file steps aside while the answer comes back and returns with it.
 - **SharePoint documents.** Tell cian which local folders are synced libraries — `cian.sharepoint{ { local = …, url = … } }` — and `:office` hands the *cloud* copy to Word or Excel, so check-out and co-authoring work. `:officelink` writes a `.url` shortcut to the same address, which is the thing to paste into a mail.
 - **Copy and paste without a clipboard.** A yank is kept inside cian as well as on the system clipboard, so copying three lines works on a machine with no clipboard service.
@@ -242,7 +242,7 @@ Bare text is literal, with nothing to escape; slashes make it a regex ([Rust `re
 | `w` | save the comparison as an HTML or Markdown report (the extension picks) |
 | `x` | ask the AI what changed |
 
-- **`:dupes`** finds byte-identical files under this pane and offers them as a checklist; one per group is kept, the rest go through the normal delete confirm.
+- **`:duplicate`** finds byte-identical files under this pane and offers them as a checklist; one per group is kept, the rest go through the normal delete confirm.
 - **`:renamepattern`** renames the marked files by a template (`report_{n3}.{ext}`) or a substitution (`s/IMG/photo/i`), with an `old → new` review. No AI, no network.
 - **`:renamelist`** opens the names in your editor, one per line. Save and quit and each changed line renames its file, swaps included — all-or-nothing, so a duplicate or a lost line cancels the batch rather than half-applying it. `:cq` cancels.
 
@@ -343,7 +343,7 @@ cian.snippets{
 
 ## Macros
 
-**`@`** (`:macros`) picks one. Two kinds.
+**`@`** (`:macro`) picks one. Two kinds.
 
 **Layout macros** build the screen — split the panel, SSH each pane somewhere, tint them apart, start logging:
 
@@ -548,6 +548,6 @@ Open a new terminal and type `cian-tui`. Use a Nerd Font terminal for the file-t
 
 - **Which build?** `cian-tui --version` prints the commit baked in at build time. An old `cian-tui.exe` on PATH looks exactly like a missing feature.
 - **Border corners** default to square in the legacy Windows console and rounded elsewhere. Force it with `cian.set_option("borders", "rounded")` (or `"plain"`).
-- **A key that does nothing?** The terminal may be keeping it — a Mac terminal takes Ctrl+F for its find bar, Ctrl+Q for the system zoom — and a key that never arrives cannot be handled. **`:keys`** reports each keystroke as cian received it and names the keyboard mode in effect; `CIAN_LEGACY_KEYS=1` starts without the enhanced-keyboard request. Move the binding somewhere your machine will deliver (`cian.set_keymap("alt+g", "grep_recursive")`), or use the command: the Ctrl-only shortcuts all answer to `:w`, `:q`, `:grep`, `:block`.
+- **A key that does nothing?** The terminal may be keeping it — a Mac terminal takes Ctrl+F for its find bar, Ctrl+Q for the system zoom — and a key that never arrives cannot be handled. **`:key`** reports each keystroke as cian received it and names the keyboard mode in effect; `CIAN_LEGACY_KEYS=1` starts without the enhanced-keyboard request. Move the binding somewhere your machine will deliver (`cian.set_keymap("alt+g", "grep_recursive")`), or use the command: the Ctrl-only shortcuts all answer to `:w`, `:q`, `:grep`, `:block`.
 - **Screen scrambled?** `:redraw` repaints from nothing, for when a stray control character leaves text cian never drew.
 - **Trouble?** `CIAN_LOG=/tmp/cian.log` captures diagnostics. A panic restores the terminal on the way out, so you are never left needing `reset`.
