@@ -2,21 +2,28 @@
 
 [English](README.md) · **日本語**
 
+[![ci](https://github.com/taketan9/cian/actions/workflows/ci.yml/badge.svg)](https://github.com/taketan9/cian/actions/workflows/ci.yml)
+[![release](https://img.shields.io/github/v/release/taketan9/cian?sort=semver)](https://github.com/taketan9/cian/releases)
+
 **C**omfortable **I**nterface for **A**gile File e**X**plorer **N**avigation — シェルを内蔵した2ペイン型のターミナルファイラーです。[AFXW（あふｗ）](https://akt.d.dooo.jp/akt_afxw.htm)に着想を得ています。
 
 バイナリ1つ。macOS / Windows / Linux。ランタイムもDLLも要らず、一緒に入れるものもありません。
 
-**目次** — [試す](#試す) · [基本](#基本) · [すばやく移動する](#すばやく移動する) · [テキストエディタパネル](#テキストエディタパネル) · [探す](#探す) · [比較と整理](#比較と整理) · [ファイルとバージョン管理](#ファイルとバージョン管理) · [SSH とリモートペイン](#ssh-とリモートペイン) · [シェルパネル](#シェルパネル) · [マクロ](#マクロ) · [AI](#ai-任意) · [日本語入力](#日本語入力-ime) · [設定](#設定) · [構成](#構成) · [Windows 導入](#windows-へオフライン導入) · [知っておくと良いこと](#知っておくと良いこと)
+**目次** — [ダウンロード](#ダウンロード) · [基本](#基本) · [すばやく移動する](#すばやく移動する) · [テキストエディタパネル](#テキストエディタパネル) · [探す](#探す) · [比較と整理](#比較と整理) · [ファイルとバージョン管理](#ファイルとバージョン管理) · [SSH とリモートペイン](#ssh-とリモートペイン) · [シェルパネル](#シェルパネル) · [マクロ](#マクロ) · [AI](#ai-任意) · [日本語入力](#日本語入力-ime) · [設定](#設定) · [ソースからビルド](#ソースからビルド) · [構成](#構成) · [Windows 導入](#windows-へオフライン導入) · [困ったとき](#困ったとき)
 
 ---
 
-## 試す
+## ダウンロード
 
-```sh
-cargo build --release
-./target/release/cian-tui   # 今使っている端末の中で
-./target/release/cian       # 自前のウィンドウで
-```
+**[→ リリース](https://github.com/taketan9/cian/releases)** — 3つのパッケージと、照合用の `SHA256SUMS` が付いています。
+
+| プラットフォーム | パッケージ | 中身 |
+|---|---|---|
+| macOS（Intel / Apple シリコン） | `cian-macos.zip` | ダブルクリックで起動する `cian.app` と、ターミナル用の `cian-tui` |
+| Windows x64 | `cian-windows-x64.zip` | `cian.exe` / `cian-tui.exe` / `install.ps1` — [オフライン導入](#windows-へオフライン導入)を参照 |
+| Linux x64 | `cian-linux-x64.tar.gz` | `cian` と `cian-tui` |
+
+展開して実行するだけです。インストーラの質問に答える必要はなく、設定を保存するまで置いたフォルダの外には何も書きません。
 
 **ファイラは1つ、ビルドは2つ。** `cian` はウィンドウを開き、動かすのに何も
 入れる必要がありません。`cian-tui` は今ある端末の中で動きます — ssh 先や
@@ -37,7 +44,7 @@ gh run download <run-id> -n cian-macos             # そもそも付けない。
 システム設定 →「プライバシーとセキュリティ」を下までスクロールし、
 **「このまま開く」** でも通ります。自分でビルドしたものには最初から付きません。
 
-- Windows では **Windows Terminal** か **WezTerm** ＋ Nerd Font を。アイコンと角丸が正しく出るのはそこです。オフライン導入は[一番下](#windows-へオフライン導入)。
+- Windows では **Windows Terminal** か **WezTerm** ＋ Nerd Font を。アイコンと角丸が正しく出るのはそこです。オフライン導入は[下のほう](#windows-へオフライン導入)。
 - **`?`** で全キー一覧。現在のキーマップから生成するので、自分で割り当てたキーも載ります。シェルからは `cian-tui -man`、コマンドラインの使い方は `cian-tui -h`。
 - 画面は既定で日本語です。英語にするなら `cian.set_option("lang", "en")`、または右クリックメニューから。
 
@@ -466,6 +473,21 @@ cian.font{                                                                     -
 
 ---
 
+## ソースからビルド
+
+```sh
+cargo build --release
+./target/release/cian-tui   # 今使っている端末の中で
+./target/release/cian       # 自前のウィンドウで
+```
+
+stable の Rust だけで通ります。リリース版のウィンドウ側は
+`--features cian-gui/bundled-font` 付きでビルドしていて、日本語 Nerd Font を
+埋め込むためフォントを入れなくても表示できます。この feature なしの場合は
+システムにあるフォントを探します。
+
+---
+
 ## 構成
 
 7つのクレートからなる cargo ワークスペースです。UI と描画は1本のメインループが持ち、ブロックし得るもの（検索・差分・転送・AI）はワーカースレッドに出して結果を毎フレーム回収します。だから UI は止まりません。
@@ -524,11 +546,15 @@ flowchart TD
 
 ## Windows へオフライン導入
 
-自己完結した `cian-tui.exe` 1つです（ランタイム・DLL・実行時ネットワークなし）。Windows の開発機なしで x64 ビルドを得るには、同梱の GitHub Actions を使います：
+自己完結した実行ファイルです（ランタイム・DLL・実行時ネットワークなし）。ネットにつながる機械で [リリース](https://github.com/taketan9/cian/releases) から `cian-windows-x64.zip` を取り、`SHA256SUMS` と照合して持ち込みます：
 
-1. タグを push（`git tag v0.1.0 && git push --tags`）、または **Actions → release → Run workflow**。
-2. その実行結果から `cian-windows-x64.zip` をダウンロード。
-3. オフライン機で展開し、`cian-tui.exe` を直接動かすか、PATH に導入：
+```powershell
+Get-FileHash cian-windows-x64.zip -Algorithm SHA256
+```
+
+zip 自体を自前で作ることもできます（Mac から、Windows の開発機なしで）。同梱のワークフローが本物の Windows ランナーでビルドします — タグを push（`git tag v0.6.1 && git push --tags`）、または **Actions → release → Run workflow** で、その実行結果のアーティファクトを取ってください。
+
+オフライン機で展開し、`cian-tui.exe` をその場で動かすか、PATH に導入します：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\install.ps1
@@ -544,7 +570,7 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1 -Dest "C:\Program Files\c
 
 ---
 
-## 知っておくと良いこと
+## 困ったとき
 
 - **どのビルド？** `cian-tui --version` がビルド時のコミットを表示します。PATH に残った古い `cian-tui.exe` は、機能が無いのと見分けがつきません。
 - **枠線の角**は旧 Windows コンソールでは直角、それ以外では丸角が既定です。`cian.set_option("borders", "rounded")`（または `"plain"`）で強制できます。

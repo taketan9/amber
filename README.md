@@ -2,21 +2,28 @@
 
 **English** · [日本語](README.ja.md)
 
+[![ci](https://github.com/taketan9/cian/actions/workflows/ci.yml/badge.svg)](https://github.com/taketan9/cian/actions/workflows/ci.yml)
+[![release](https://img.shields.io/github/v/release/taketan9/cian?sort=semver)](https://github.com/taketan9/cian/releases)
+
 **C**omfortable **I**nterface for **A**gile File e**X**plorer **N**avigation — a two-pane terminal file manager with a real shell built in. Inspired by [AFXW (あふｗ)](https://akt.d.dooo.jp/akt_afxw.htm).
 
 One binary. macOS, Windows, Linux. No runtime, no DLLs, nothing to install alongside it.
 
-**Contents** — [Try it](#try-it) · [The basics](#the-basics) · [Get around fast](#get-around-fast) · [The text editor panel](#the-text-editor-panel) · [Find things](#find-things) · [Compare and clean up](#compare-and-clean-up) · [Files and version control](#files-and-version-control) · [SSH and remote panes](#ssh-and-remote-panes) · [The shell panel](#the-shell-panel) · [Macros](#macros) · [AI](#ai-optional) · [Japanese input](#japanese-input-ime) · [Configuration](#configuration) · [How it fits together](#how-it-fits-together) · [Windows install](#install-on-windows-offline) · [Good to know](#good-to-know)
+**Contents** — [Download](#download) · [The basics](#the-basics) · [Get around fast](#get-around-fast) · [The text editor panel](#the-text-editor-panel) · [Find things](#find-things) · [Compare and clean up](#compare-and-clean-up) · [Files and version control](#files-and-version-control) · [SSH and remote panes](#ssh-and-remote-panes) · [The shell panel](#the-shell-panel) · [Macros](#macros) · [AI](#ai-optional) · [Japanese input](#japanese-input-ime) · [Configuration](#configuration) · [Build from source](#build-from-source) · [How it fits together](#how-it-fits-together) · [Windows install](#install-on-windows-offline) · [Troubleshooting](#troubleshooting)
 
 ---
 
-## Try it
+## Download
 
-```sh
-cargo build --release
-./target/release/cian-tui   # in your terminal
-./target/release/cian       # in a window of its own
-```
+**[→ Releases](https://github.com/taketan9/cian/releases)** — three packages, and a `SHA256SUMS` to check them against.
+
+| Platform | Package | What is in it |
+|---|---|---|
+| macOS (Intel and Apple silicon) | `cian-macos.zip` | `cian.app` to double-click, and `cian-tui` for the terminal |
+| Windows x64 | `cian-windows-x64.zip` | `cian.exe`, `cian-tui.exe` and `install.ps1` — see [offline install](#install-on-windows-offline) |
+| Linux x64 | `cian-linux-x64.tar.gz` | `cian` and `cian-tui` |
+
+Unpack it and run it. There is no installer to answer to, and nothing is written outside the folder you put it in until you save a setting.
 
 **Two builds, one file manager.** `cian` opens a window and needs nothing
 installed to run in; `cian-tui` runs inside the terminal you already have,
@@ -37,7 +44,7 @@ gh run download <run-id> -n cian-macos             # never gets one: no browser 
 System Settings → Privacy & Security, scrolled to the bottom, has **Open
 Anyway**. A build you made yourself is never quarantined.
 
-- On Windows use **Windows Terminal** or **WezTerm** with a Nerd Font — that is where the icons and rounded corners look right. Offline install is [at the bottom](#install-on-windows-offline).
+- On Windows use **Windows Terminal** or **WezTerm** with a Nerd Font — that is where the icons and rounded corners look right. Offline install is [further down](#install-on-windows-offline).
 - **`?`** shows the full key list, generated from your live keymap, so rebound keys show up too. `cian-tui -man` prints it from a shell; `cian-tui -h` prints the command-line usage.
 - The UI is Japanese by default — cian is written in Japanese first. For English: `cian.set_option("lang", "en")`, or the right-click menu.
 
@@ -466,6 +473,21 @@ cian.font{                                                                     -
 
 ---
 
+## Build from source
+
+```sh
+cargo build --release
+./target/release/cian-tui   # in your terminal
+./target/release/cian       # in a window of its own
+```
+
+Stable Rust and nothing else. The release packages build the window binary with
+`--features cian-gui/bundled-font`, which embeds a Japanese Nerd Font so the
+download needs no font installed; without the feature it looks for one on the
+system.
+
+---
+
 ## How it fits together
 
 A cargo workspace of seven crates. One main loop owns all UI and drawing; anything that could block — search, diff, transfer, AI — runs on a worker thread whose result is polled back each frame, so the UI never freezes.
@@ -524,11 +546,15 @@ flowchart TD
 
 ## Install on Windows (offline)
 
-A single self-contained `cian-tui.exe` — no runtime, no DLLs, no network. To get a Windows x64 build without a Windows dev machine, use the bundled GitHub Actions workflow:
+Self-contained executables — no runtime, no DLLs, no network. Take `cian-windows-x64.zip` from the [releases](https://github.com/taketan9/cian/releases) on a machine that has one, check it against `SHA256SUMS`, and carry it across:
 
-1. Push a tag (`git tag v0.1.0 && git push --tags`), or **Actions → release → Run workflow**.
-2. Download `cian-windows-x64.zip` from that run.
-3. Unzip on the offline machine and either run `cian-tui.exe` or install it on PATH:
+```powershell
+Get-FileHash cian-windows-x64.zip -Algorithm SHA256
+```
+
+To build the zip yourself instead — from a Mac, with no Windows dev machine — the bundled workflow does it on a real Windows runner: push a tag (`git tag v0.6.1 && git push --tags`), or **Actions → release → Run workflow**, and take the artifact from that run.
+
+On the offline machine, unzip and either run `cian-tui.exe` where it sits, or put it on PATH:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\install.ps1
@@ -544,7 +570,7 @@ Open a new terminal and type `cian-tui`. Use a Nerd Font terminal for the file-t
 
 ---
 
-## Good to know
+## Troubleshooting
 
 - **Which build?** `cian-tui --version` prints the commit baked in at build time. An old `cian-tui.exe` on PATH looks exactly like a missing feature.
 - **Border corners** default to square in the legacy Windows console and rounded elsewhere. Force it with `cian.set_option("borders", "rounded")` (or `"plain"`).
