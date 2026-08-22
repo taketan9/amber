@@ -265,8 +265,13 @@ impl App {
             // These dispatch to git or svn based on the pane's VCS.
             "stage" | "add" | "svnadd" => self.git_stage(),
             "unstage" | "reset" => self.git_unstage(),
-            "discard" | "revert" | "checkout" | "svnrevert" => self.git_discard_prompt(),
-            "gitlog" | "log" | "history" | "svnlog" => self.start_git_log(),
+            // Not `:checkout`: in git that switches branches, and here it threw
+            // work away. A name that means something else somewhere else, on a
+            // command that cannot be undone, is not a convenience.
+            "discard" | "revert" | "svnrevert" => self.git_discard_prompt(),
+            // One function reads whichever VCS is there, so `:gitlog` and
+            // `:svnlog` offered a choice that does not exist.
+            "log" | "history" => self.start_git_log(),
             // The session log had no verb at all, while the menu item that
             // starts it was labelled `(:log)` — a name git had already taken.
             "sessionlog" | "startlog" => self.start_log_prompt(),
@@ -397,12 +402,16 @@ impl App {
             // Archiving.
             "zip" => self.cmd_zip(&args),
             "tar" => self.cmd_tar(&args, false),
-            "targz" | "tgz" | "tarball" | "tar.gz" => self.cmd_tar(&args, true),
-            // Extraction auto-detects the format (zip / tar / tar.gz), so all of
-            // these aliases do the same thing on the archive under the cursor.
-            "unzip" | "untar" | "untargz" | "untar.gz" | "untgz" | "extract" | "unar" => {
-                self.extract_selected()
-            }
+            // Not `:tgz` — the extension comes from the *name*, so `:tgz foo`
+            // made `foo.tar.gz` and the verb was a small lie. `:targz foo.tgz`
+            // still gets you a `.tgz`, which is the honest way to ask.
+            "targz" | "tar.gz" => self.cmd_tar(&args, true),
+            // Extraction auto-detects the format (zip / tar / tar.gz), so the
+            // name you use says nothing about what it will open. `:extract` is
+            // the honest one; `:unzip` and `:untar` stay because they are what
+            // hands type. The rest spelled out a format the code never asked
+            // about, and `:unar` is another program's name.
+            "extract" | "unzip" | "untar" => self.extract_selected(),
 
             other => self.message = Some(format!("unknown command: :{}", other)),
         }

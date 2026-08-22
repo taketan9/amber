@@ -4441,7 +4441,7 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry(":hash", None, "checksum;  :hash md5  /  :hash sha256", "チェックサム；  :hash md5  /  :hash sha256"),
                 entry(":stage / :unstage", None, "git add / git reset the selection (in a repo)", "選択を git add / git reset（リポジトリ内）"),
                 entry(":discard", None, "git/svn: throw away worktree changes (git checkout / svn revert)", "作業ツリーの変更を破棄（git checkout / svn revert）"),
-                entry(":gitlog", None, "commit log / a file's history — git or svn (also right-click)", "コミットログ／ファイル履歴 — git・svn（右クリックでも）"),
+                entry(":log", None, "commit log / a file's history — git or svn (also right-click)", "コミットログ／ファイル履歴 — git・svn（右クリックでも）"),
                 entry(":gitdiff", None, "the selected file's diff vs HEAD/BASE — git or svn", "選択ファイルの HEAD／BASE との差分 — git・svn"),
                 entry(":svnupdate", None, "svn update the working copy (also right-click SVN ▸)", "svn update で作業コピーを更新（右クリック SVN ▸ でも）"),
                 entry(":svncommit", None, "svn commit the selection (prompts for a message)", "選択を svn commit（メッセージ入力）"),

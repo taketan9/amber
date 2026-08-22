@@ -263,7 +263,7 @@ Bare text is literal, with nothing to escape; slashes make it a regex ([Rust `re
 
 The status line always shows free space on the active pane's drive — amber past 80 % used, red past 95 %.
 
-**git and svn just work.** Each entry gets a badge (`●` staged, `✚` modified, `?` untracked, `‼` conflict), the status line shows the branch (or `svn r123`), and F3 marks changed lines against HEAD. `:stage` `:unstage` `:discard` `:gitlog` `:gitdiff`, and `B` in the viewer for blame — all under right-click **Git ▸** / **SVN ▸**. cian shells out to your own `git` / `svn`.
+**git and svn just work.** Each entry gets a badge (`●` staged, `✚` modified, `?` untracked, `‼` conflict), the status line shows the branch (or `svn r123`), and F3 marks changed lines against HEAD. `:stage` `:unstage` `:discard` `:log` `:gitdiff`, and `B` in the viewer for blame — all under right-click **Git ▸** / **SVN ▸**. cian shells out to your own `git` / `svn`.
 
 ---
 

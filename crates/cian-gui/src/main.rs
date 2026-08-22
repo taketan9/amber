@@ -115,28 +115,28 @@ const HEARTBEAT: std::time::Duration = std::time::Duration::from_millis(16);
 /// bar matches the theme rather than merely agreeing with it about the time of
 /// day. Anything older ignores it, which is why the result is not checked.
 #[cfg(windows)]
-fn caption_colour(window: &Window, rgb: Option<(u8, u8, u8)>) {
+fn caption_color(window: &Window, rgb: Option<(u8, u8, u8)>) {
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
     let Some((r, g, b)) = rgb else { return };
     let Ok(handle) = window.window_handle() else { return };
     let RawWindowHandle::Win32(h) = handle.as_ref() else { return };
     let hwnd = windows::Win32::Foundation::HWND(h.hwnd.get() as *mut core::ffi::c_void);
     // COLORREF is 0x00BBGGRR — the other way round from everything else here.
-    let colour: u32 = (b as u32) << 16 | (g as u32) << 8 | r as u32;
+    let color: u32 = (b as u32) << 16 | (g as u32) << 8 | r as u32;
     // SAFETY: a live window handle, and a four-byte value whose size is passed
     // with it. The call is documented to fail harmlessly on older Windows.
     unsafe {
         let _ = windows::Win32::Graphics::Dwm::DwmSetWindowAttribute(
             hwnd,
             windows::Win32::Graphics::Dwm::DWMWA_CAPTION_COLOR,
-            &colour as *const u32 as *const core::ffi::c_void,
+            &color as *const u32 as *const core::ffi::c_void,
             std::mem::size_of::<u32>() as u32,
         );
     }
 }
 
 #[cfg(not(windows))]
-fn caption_colour(_window: &Window, _rgb: Option<(u8, u8, u8)>) {}
+fn caption_color(_window: &Window, _rgb: Option<(u8, u8, u8)>) {}
 
 /// Should cian draw the pixels itself?
 ///
@@ -1633,7 +1633,7 @@ impl ApplicationHandler<Tick> for Gui {
                 } else {
                     winit::window::Theme::Dark
                 }));
-                caption_colour(w, self.cian.theme_surface());
+                caption_color(w, self.cian.theme_surface());
             }
             if self.needs_redraw {
                 w.request_redraw();
