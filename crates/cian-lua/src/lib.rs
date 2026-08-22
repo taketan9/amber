@@ -10,7 +10,6 @@
 //! cian.set_keymap("alt+g", "grep_recursive") -- …with a modifier, for the
 //!                                            -- Ctrl combinations a terminal
 //!                                            -- may keep to itself
-//! cian.set_option("clipboard_on_copy", false)
 //! cian.on_open("md", function(path)        -- extension-dispatch execution
 //!   cian.spawn({ "open", "-a", "Typora", path })
 //! end)
@@ -57,7 +56,6 @@ pub struct Options {
     /// Ceiling on transfer speed to and from a server: `"2M"`, `"500k"`,
     /// `"1.5MB/s"`. Unset is as fast as the link allows.
     pub transfer_limit: Option<String>,
-    pub clipboard_on_copy: Option<bool>,
     /// After an SFTP upload/download, re-read the remote file and compare its
     /// checksum with the local one, warning on a mismatch. Off by default: it is
     /// worth the second read of the data only when integrity matters more than
@@ -778,7 +776,6 @@ fn install_api(lua: &Lua, builder: &Rc<RefCell<Builder>>) -> mlua::Result<()> {
         )?;
     }
 
-    // cian.set_option("clipboard_on_copy", false)
     {
         let b = builder.clone();
         cian.set(
@@ -786,12 +783,6 @@ fn install_api(lua: &Lua, builder: &Rc<RefCell<Builder>>) -> mlua::Result<()> {
             lua.create_function(move |lua, (name, val): (String, Value)| {
                 let mut bm = b.borrow_mut();
                 match name.as_str() {
-                    "clipboard_on_copy" => match bool::from_lua(val, lua) {
-                        Ok(v) => bm.options.clipboard_on_copy = Some(v),
-                        Err(_) => bm
-                            .errors
-                            .push("set_option: clipboard_on_copy expects a boolean".into()),
-                    },
                     "verify_transfers" => match bool::from_lua(val, lua) {
                         Ok(v) => bm.options.verify_transfers = Some(v),
                         Err(_) => bm

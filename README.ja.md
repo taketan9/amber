@@ -438,7 +438,7 @@ cian は `~/.config/cian/init.lua` を読みます（`$CIAN_CONFIG_DIR` で変�
 
 ```lua
 cian.set_theme({ accent = "#00d7d7", mark_fg = "yellow" })
-cian.set_option("clipboard_on_copy", false)
+cian.set_option("verify_transfers", true)
 cian.set_keymap("x", "delete")           -- キーを割り当てると既定を置き換え。"none" で無効化
 cian.on_open("md", function(path)        -- .md を自分のやり方で開く
   cian.spawn({ "open", "-a", "Typora", path })

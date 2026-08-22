@@ -438,7 +438,7 @@ cian reads `~/.config/cian/init.lua` (override with `$CIAN_CONFIG_DIR`). It is L
 
 ```lua
 cian.set_theme({ accent = "#00d7d7", mark_fg = "yellow" })
-cian.set_option("clipboard_on_copy", false)
+cian.set_option("verify_transfers", true)
 cian.set_keymap("x", "delete")           -- binding a key replaces its default; "none" disables it
 cian.on_open("md", function(path)        -- open .md files your way
   cian.spawn({ "open", "-a", "Typora", path })

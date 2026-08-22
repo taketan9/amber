@@ -501,6 +501,26 @@ impl Lang {
 }
 
 /// Pick the English or Japanese form of a fixed UI string.
+///
+/// # How cian talks
+///
+/// Every string that reaches a person goes through here, so the house style
+/// belongs here too. It was arrived at by measuring what the six hundred
+/// existing messages already did and settling the exceptions, not by decree.
+///
+/// * **English begins lower-case**, unless the first word is a name: `nothing
+///   to operate on`, but `AI returned no command`. A terminal tool's voice,
+///   the same as `ls` and `git`.
+/// * **Japanese is 敬体** — 「〜ます」「〜ません」. Never 常体.
+/// * **No 句点 at the end of a message.** Between two sentences, yes: 「未保存
+///   の変更があります。Ctrl+S で保存できます」 — the reader needs the break,
+///   and the line does not need a full stop it will never be followed past.
+/// * **Two sentences, not a dash.** State what happened, then what can be done
+///   about it. `unsaved changes — Ctrl+S saves` reads as one breathless
+///   thought; `unsaved changes. Ctrl+S saves.` is two clear ones.
+/// * **Never "for now", "not yet", "temporarily".** A limit is a fact about
+///   the tool, not an apology for it: `archives are read-only. copy extracts.`
+///   Saying nothing at all about a limit is worse — silence reads as a bug.
 pub(crate) fn tr(lang: Lang, en: &'static str, ja: &'static str) -> &'static str {
     match lang {
         Lang::En => en,

@@ -3398,7 +3398,7 @@ pub(crate) fn key_hints(app: &App) -> Vec<(&'static str, &'static str)> {
             if zip {
                 v.extend([("r", d("rename", "リネーム")), ("d", d("delete", "削除"))]);
             } else {
-                v.push(("", d("(read-only)", "（読取専用）")));
+                v.push(("", d("(this archive cannot be written)", "（この書庫は書き換えられません）")));
             }
             v.push(("?", d("help", "ヘルプ")));
             v

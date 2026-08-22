@@ -2371,7 +2371,6 @@ pub struct App {
     pub last_file_pane: FocusedPane,
     pub should_quit: bool,
     pub visual_anchor: Option<usize>,
-    pub clipboard_on_copy: bool,
     clipboard: Option<arboard::Clipboard>,
     popup: Popup,
     layout_rects: LayoutRects,
@@ -2882,7 +2881,6 @@ impl App {
                 keymap.insert(k, a);
             }
         }
-        let clipboard_on_copy = config.options.clipboard_on_copy.unwrap_or(true);
         let shell_cmd = config
             .options
             .shell
@@ -2909,7 +2907,6 @@ impl App {
             last_file_pane: FocusedPane::Left,
             should_quit: false,
             visual_anchor: None,
-            clipboard_on_copy,
             clipboard: arboard::Clipboard::new().ok(),
             popup: Popup::None,
             layout_rects: LayoutRects::default(),

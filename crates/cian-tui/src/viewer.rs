@@ -1791,7 +1791,7 @@ impl App {
             }
         }
         if nothing {
-            self.message = Some(tr(self.lang, "nothing to fold here", "ここには折りたためるものがない").into());
+            self.message = Some(tr(self.lang, "nothing to fold here", "ここには折りたためるものがありません").into());
         }
     }
 
@@ -1993,7 +1993,7 @@ impl App {
                     };
                     if action.trim() != "d" {
                         self.message = Some(
-                            tr(self.lang, "only :g/pattern/d for now", "今のところ :g/パターン/d のみ").into(),
+                            tr(self.lang, "the action must be d. :g/pattern/d deletes every matching line", "動作は d のみです。:g/パターン/d で一致行を削除します").into(),
                         );
                         return;
                     }

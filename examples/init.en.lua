@@ -79,7 +79,6 @@
 
 -- Also put files on the SYSTEM clipboard when you copy with `y` (so they paste
 -- in Explorer / Finder too). Default: true.
--- cian.set_option("clipboard_on_copy", true)
 
 -- After an SFTP upload/download, re-read the remote file and compare its
 -- checksum with the local one, warning on a mismatch. Default: false (it reads

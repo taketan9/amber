@@ -12986,10 +12986,15 @@
         drain_op_job(&mut app);
         assert!(r.path().join("docs/deep/note.txt").exists(), "subtree extracted");
 
-        // Move is refused while archives are read-only.
+        // Move out is refused: it would mean deleting members, which the write
+        // side does not do yet. Said as a fact about the tool rather than as
+        // "for now" — a limit is not an apology.
         app.start_transfer(PendingOp::Move);
         let msg = app.message.clone().unwrap_or_default();
-        assert!(msg.contains("read-only") || msg.contains("読み取り専用"), "{msg}");
+        assert!(
+            msg.contains("cannot be moved out of") || msg.contains("移動はできません"),
+            "{msg}",
+        );
     }
 
     /// The write side, end to end: copy INTO the zip from the other pane,

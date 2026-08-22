@@ -24,13 +24,6 @@ impl App {
         }
     }
 
-    pub(crate) fn push_clipboard(&mut self, paths: &[PathBuf]) {
-        if !self.clipboard_on_copy { return; }
-        let Some(cb) = self.clipboard.as_mut() else { return; };
-        let text = paths.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join("\n");
-        let _ = cb.set_text(text);
-    }
-
     // ------- Visual mode -------
     pub(crate) fn visual_start(&mut self) {
         if let Some(p) = self.active_pane() {
@@ -64,8 +57,8 @@ impl App {
             if matches!(op, PendingOp::Move) {
                 self.message = Some(tr(
                     self.lang,
-                    "archives are read-only for now — copy extracts",
-                    "アーカイブ内は今は読み取り専用 — コピー（展開）は可能",
+                    "an archive cannot be moved out of. copy extracts instead",
+                    "アーカイブ内から移動はできません。コピーで展開してください",
                 ).into());
                 return;
             }
@@ -1187,7 +1180,7 @@ impl App {
                 if !result.rows.iter().any(|r| r.is_difference()) {
                     self.popup = Popup::Notice {
                         lines: vec![
-                            tr(self.lang, "The two files are identical.", "2つのファイルは同一です。").to_string(),
+                            tr(self.lang, "The two files are identical.", "2つのファイルは同一です").to_string(),
                             String::new(),
                             format!("{}  ↔  {}", a.name, b.name),
                         ],
@@ -1279,7 +1272,7 @@ impl App {
             // unresponsive when identical folders only whispered a message.
             self.popup = Popup::Notice {
                 lines: vec![
-                    tr(self.lang, "The two folders are identical.", "2つのフォルダは同一です。").to_string(),
+                    tr(self.lang, "The two folders are identical.", "2つのフォルダは同一です").to_string(),
                     String::new(),
                     format!("{}  ↔  {}", job.left, job.right),
                 ],
@@ -2167,7 +2160,7 @@ impl App {
             }
         }
         if paths.is_empty() {
-            self.message = Some(tr(self.lang, "nothing to replace in", "置換対象がない").into());
+            self.message = Some(tr(self.lang, "nothing to replace in", "置換対象がありません").into());
             return Ok(());
         }
         self.stop_find();
@@ -2227,7 +2220,7 @@ impl App {
             return Ok(());
         };
         if !plan.changes.iter().any(|c| c.picked) {
-            self.message = Some(tr(self.lang, "nothing checked — nothing written", "チェックが無いので何も書いていない").into());
+            self.message = Some(tr(self.lang, "nothing checked — nothing written", "チェックが無いので何も書いていません").into());
             return Ok(());
         }
         let report = cian_core::grepedit::apply(&plan.changes);
@@ -2594,7 +2587,6 @@ impl App {
         };
         self.menu_lang_pinned = config.options.menu_lang.is_some();
         self.show_key_hints = config.options.key_hints.unwrap_or(true);
-        self.clipboard_on_copy = config.options.clipboard_on_copy.unwrap_or(true);
         self.anim_dur =
             Duration::from_millis(config.options.animation_ms.unwrap_or(DEFAULT_ANIM_MS));
         let show_hidden = config.options.show_hidden.unwrap_or(true);
@@ -3456,7 +3448,6 @@ impl App {
     pub(crate) fn finish_transfer(&mut self, conflict: Conflict) -> Result<()> {
         let popup = std::mem::replace(&mut self.popup, Popup::None);
         let Popup::ConfirmTransfer { op, targets, dest } = popup else { return Ok(()) };
-        self.push_clipboard(&targets);
         self.remember_dest(&dest);
         let label = match op {
             PendingOp::Copy => "copying",
