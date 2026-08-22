@@ -1,11 +1,17 @@
 name: release
 
-# Builds a self-contained Windows x64 binary on a real Windows runner and
-# packages it as a zip you can carry into an offline environment.
+# Builds the three downloads and publishes them as one GitHub Release.
 #
-# Trigger it either by pushing a version tag (e.g. `git tag v0.1.0 && git push
-# --tags`) or manually from the Actions tab ("Run workflow"). The zip appears
-# as a workflow artifact, and is also attached to a GitHub Release for tags.
+# Trigger it by pushing a version tag (`git tag v0.6.1 && git push --tags`), or
+# by hand from the Actions tab. A tag publishes a release; a manual run only
+# leaves the packages as workflow artifacts, which is the way to rehearse the
+# build without announcing anything.
+#
+# Each platform job stages a package and uploads it as an artifact. One publish
+# job at the end gathers all three, writes the checksums over the finished set,
+# and creates the release. That ordering matters: when each job attached its own
+# file, three jobs raced to create the same release, and the notes came out
+# belonging to whichever finished first.
 
 on:
   push:
@@ -17,10 +23,30 @@ permissions:
   contents: write
 
 jobs:
+  # A tag that disagrees with Cargo.toml ships binaries whose `:version` says
+  # something other than the release they are attached to. Cheap to check, and
+  # the only moment it can still be fixed by moving the tag.
+  version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: The tag and Cargo.toml have to agree
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          crate=$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)
+          echo "tag $tag, Cargo.toml $crate"
+          if [ "$tag" != "$crate" ]; then
+            echo "::error::tag v$tag does not match the workspace version $crate"
+            exit 1
+          fi
+
   # The window build for a Mac, as a double-clickable .app. This is the one to
   # download to try `cian` on a real machine; `cian-tui` rides along in the same
   # zip for the terminal.
   macos:
+    needs: version
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v5
@@ -75,6 +101,7 @@ jobs:
           cp -R target/cian.app "$stage/"
           cp target/release/cian-tui "$stage/"
           cp examples/init.lua "$stage/examples/"
+          cp README.md README.ja.md "$stage/"
           # Zipped with ditto so the .app keeps its permissions and the
           # ad-hoc signature survives the round trip.
           ditto -c -k --sequesterRsrc --keepParent "$stage" cian-macos.zip
@@ -85,13 +112,8 @@ jobs:
           name: cian-macos
           path: cian-macos.zip
 
-      - name: Attach to release
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: cian-macos.zip
-
   windows-x64:
+    needs: version
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v5
@@ -129,6 +151,7 @@ jobs:
           Copy-Item target/release/cian-tui.exe $stage/
           Copy-Item packaging/windows/install.ps1 $stage/
           Copy-Item packaging/windows/README.txt $stage/
+          Copy-Item README.md, README.ja.md $stage/
           New-Item -ItemType Directory -Force -Path "$stage/examples" | Out-Null
           Copy-Item examples/init.lua "$stage/examples/"
           Compress-Archive -Path "$stage/*" -DestinationPath "cian-windows-x64.zip" -Force
@@ -139,8 +162,74 @@ jobs:
           name: cian-windows-x64
           path: cian-windows-x64.zip
 
-      - name: Attach to release
-        if: startsWith(github.ref, 'refs/tags/')
+  # The readme has said macOS, Windows and Linux since the first commit, and
+  # the release shipped two of them. A tarball rather than a zip, because that
+  # is what a Linux user's hands already know.
+  linux-x64:
+    needs: version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Fetch the bundled font
+        run: |
+          mkdir -p crates/cian-gui/fonts
+          curl -sL -o font.zip "$FONT_URL"
+          unzip -q font.zip -d font
+          cp "$(find font -name 'HackGenConsoleNF-Regular.ttf' | head -1)" crates/cian-gui/fonts/cian.ttf
+        env:
+          FONT_URL: https://github.com/yuru7/HackGen/releases/download/v2.10.0/HackGen_NF_v2.10.0.zip
+
+      - name: Build (release)
+        run: |
+          cargo build --release --bin cian-tui
+          cargo build --release --bin cian --features cian-gui/bundled-font
+
+      - name: Stage package
+        run: |
+          stage=cian-linux-x64
+          mkdir -p "$stage/examples"
+          cp target/release/cian target/release/cian-tui "$stage/"
+          cp examples/init.lua "$stage/examples/"
+          cp README.md README.ja.md "$stage/"
+          tar czf cian-linux-x64.tar.gz "$stage"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: cian-linux-x64
+          path: cian-linux-x64.tar.gz
+
+  # One release, made once, over the finished set of packages.
+  publish:
+    needs: [macos, windows-x64, linux-x64]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Collect the packages
+        uses: actions/download-artifact@v6
+        with:
+          path: dist
+          merge-multiple: true
+
+      # A Windows machine cut off from the network is the one that most needs
+      # to know its zip arrived whole. `sha256sum -c SHA256SUMS` on the far
+      # side, or `Get-FileHash` on Windows itself.
+      - name: Checksums
+        working-directory: dist
+        run: |
+          sha256sum cian-* > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Publish the release
         uses: softprops/action-gh-release@v2
         with:
-          files: cian-windows-x64.zip
+          files: dist/*
+          generate_release_notes: true
+          fail_on_unmatched_files: true
