@@ -54,42 +54,54 @@ fn dest_for(src: &Path, dest_dir: &Path) -> PathBuf {
     dest_dir.join(name)
 }
 
+/// Copy one entry into `dest_dir`, keeping its name. `false` means the target
+/// was already there and the conflict rule said to leave it.
 pub fn copy_one(src: &Path, dest_dir: &Path, on_conflict: Conflict) -> Result<bool> {
-    let target = dest_for(src, dest_dir);
-    if target.exists() && on_conflict == Conflict::Skip {
-        return Ok(false);
-    }
-    if src.is_dir() {
-        let mut opts = DirCopyOptions::new();
-        opts.overwrite = on_conflict == Conflict::Overwrite;
-        opts.copy_inside = false;
-        dir::copy(src, dest_dir, &opts)
-            .with_context(|| format!("copy dir {} -> {}", src.display(), dest_dir.display()))?;
-    } else {
-        let mut opts = FileCopyOptions::new();
-        opts.overwrite = on_conflict == Conflict::Overwrite;
-        file::copy(src, &target, &opts)
-            .with_context(|| format!("copy file {} -> {}", src.display(), target.display()))?;
-    }
-    Ok(true)
+    transfer_one(src, dest_dir, on_conflict, false)
 }
 
+/// The same, but the source does not survive it.
 pub fn move_one(src: &Path, dest_dir: &Path, on_conflict: Conflict) -> Result<bool> {
+    transfer_one(src, dest_dir, on_conflict, true)
+}
+
+/// The two above. They were written out twice and differed in one call each —
+/// `dir::copy` against `dir::move_dir`, `file::copy` against `file::move_file`
+/// — plus the verb in the message when it goes wrong.
+fn transfer_one(
+    src: &Path,
+    dest_dir: &Path,
+    on_conflict: Conflict,
+    moving: bool,
+) -> Result<bool> {
     let target = dest_for(src, dest_dir);
     if target.exists() && on_conflict == Conflict::Skip {
         return Ok(false);
     }
+    let verb = if moving { "move" } else { "copy" };
     if src.is_dir() {
         let mut opts = DirCopyOptions::new();
         opts.overwrite = on_conflict == Conflict::Overwrite;
         opts.copy_inside = false;
-        dir::move_dir(src, dest_dir, &opts)
-            .with_context(|| format!("move dir {} -> {}", src.display(), dest_dir.display()))?;
+        let done = if moving {
+            dir::move_dir(src, dest_dir, &opts)
+        } else {
+            dir::copy(src, dest_dir, &opts)
+        };
+        done.with_context(|| {
+            format!("{verb} dir {} -> {}", src.display(), dest_dir.display())
+        })?;
     } else {
         let mut opts = FileCopyOptions::new();
         opts.overwrite = on_conflict == Conflict::Overwrite;
-        file::move_file(src, &target, &opts)
-            .with_context(|| format!("move file {} -> {}", src.display(), target.display()))?;
+        let done = if moving {
+            file::move_file(src, &target, &opts)
+        } else {
+            file::copy(src, &target, &opts)
+        };
+        done.with_context(|| {
+            format!("{verb} file {} -> {}", src.display(), target.display())
+        })?;
     }
     Ok(true)
 }

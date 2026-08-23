@@ -384,6 +384,28 @@ impl Pane {
         self.forward.clear();
     }
 
+    /// Read `cwd` as a plain directory listing again: out of any synthetic
+    /// view, marks and filter dropped.
+    ///
+    /// Every arrival does this. It was written out six times, and the seventh
+    /// place to forget one line of it would be a pane still holding the last
+    /// folder's marks.
+    fn reread(&mut self) -> Result<()> {
+        self.view = PaneView::Dir;
+        self.marks.clear();
+        self.filter.clear();
+        self.reload()
+    }
+
+    /// The same, with the cursor put on the first real row — which is what
+    /// every arrival wants except climbing out, where the cursor belongs on
+    /// the folder just left.
+    fn arrive(&mut self) -> Result<()> {
+        self.reread()?;
+        self.cursor_to_first_real();
+        Ok(())
+    }
+
     /// Step back to the previously visited directory (`Alt+←`). The place we
     /// leave becomes the forward step, so the two arrows are inverses.
     pub fn go_back(&mut self) -> Result<bool> {
@@ -397,11 +419,7 @@ impl Pane {
         self.history.remove(0);
         self.forward.insert(0, leaving);
         self.cwd = prev;
-        self.view = PaneView::Dir;
-        self.marks.clear();
-        self.filter.clear();
-        self.reload()?;
-        self.cursor_to_first_real();
+        self.arrive()?;
         Ok(true)
     }
 
@@ -416,11 +434,7 @@ impl Pane {
         self.forward.remove(0);
         self.history.insert(0, leaving);
         self.cwd = next;
-        self.view = PaneView::Dir;
-        self.marks.clear();
-        self.filter.clear();
-        self.reload()?;
-        self.cursor_to_first_real();
+        self.arrive()?;
         Ok(true)
     }
 
@@ -718,11 +732,7 @@ impl Pane {
     /// again as an ordinary directory.
     pub fn leave_flat(&mut self) -> Result<()> {
         if self.view.is_synthetic() {
-            self.view = PaneView::Dir;
-            self.marks.clear();
-            self.filter.clear();
-            self.reload()?;
-            self.cursor_to_first_real();
+            self.arrive()?;
         }
         Ok(())
     }
@@ -744,11 +754,7 @@ impl Pane {
                 self.cwd = e.path;
                 // Stepping into a folder from a flat / search listing leaves the
                 // flat view: the destination is a real directory to read.
-                self.view = PaneView::Dir;
-                self.marks.clear();
-                self.filter.clear();
-                self.reload()?;
-                self.cursor_to_first_real();
+                self.arrive()?;
             }
         }
         Ok(())
@@ -762,10 +768,7 @@ impl Pane {
             let came_from = prev.file_name().map(|n| n.to_string_lossy().into_owned());
             self.push_history(prev);
             self.cwd = parent;
-            self.view = PaneView::Dir;
-            self.marks.clear();
-            self.filter.clear();
-            self.reload()?;
+            self.reread()?;
             // Where you were, not where the listing starts.
             //
             // Going up from `abc/def` put the cursor on the first row of `abc`,
@@ -785,11 +788,7 @@ impl Pane {
         let prev = self.cwd.clone();
         self.push_history(prev);
         self.cwd = path;
-        self.view = PaneView::Dir;
-        self.marks.clear();
-        self.filter.clear();
-        self.reload()?;
-        self.cursor_to_first_real();
+        self.arrive()?;
         Ok(())
     }
 

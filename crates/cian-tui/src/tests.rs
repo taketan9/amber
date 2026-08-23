@@ -7844,6 +7844,34 @@
         assert_eq!(items.len(), 1, "only what was opened: {:?}", items.iter().map(|i| &i.label).collect::<Vec<_>>());
     }
 
+    /// A text prompt must step aside for an open panel, not over it. Thirty-two
+    /// places built one and assigned it straight into `self.popup`, which is
+    /// the slot the docked panel is sitting in — so asking the AI for a command
+    /// from the listing beside an edited file threw the file away.
+    #[test]
+    fn a_text_prompt_does_not_eat_an_open_panel() {
+        let (_d, mut app) = viewer_on("alpha\nbravo\n");
+        app.handle_key(code(KeyCode::F(12))).unwrap();
+        app.handle_key(key('x')).unwrap();
+        assert!(matches!(app.popup, Popup::Viewer { dirty: true, .. }), "edited, unsaved");
+        let dock = app.viewer_dock.expect("docked");
+        app.focus(match dock {
+            FocusedPane::Left => FocusedPane::Right,
+            _ => FocusedPane::Left,
+        });
+        let _ = render(&mut app, 160, 30);
+
+        // Any prompt will do; this one asks for the name to rename to.
+        app.start_rename();
+        assert!(matches!(app.popup, Popup::TextInput { .. }), "the prompt opened");
+        assert!(app.viewer_return.is_some(), "and the file went aside, not away");
+        app.handle_key(code(KeyCode::Esc)).unwrap();
+        match &app.popup {
+            Popup::Viewer { dirty, .. } => assert!(*dirty, "the unsaved edit came back"),
+            other => panic!("the file did not come back: {:?}", other),
+        }
+    }
+
     #[test]
     fn parse_sem_search_reply_matches_orders_and_folds_reasons() {
         let hit = |rel: &str| cian_core::search::Hit {

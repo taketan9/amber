@@ -111,16 +111,6 @@ impl PartialEq for Draw {
 }
 
 impl PixelLayer {
-    /// Is this picture already on the GPU?
-    ///
-    /// The caller keeps its own map of what it has uploaded, so nothing asks
-    /// this at the moment. It stays because "have you got this one" is the
-    /// question any second caller would open with.
-    #[allow(dead_code)]
-    pub fn has(&self, id: u64) -> bool {
-        self.cache.contains_key(&id) || self.pending.iter().any(|u| u.id == id)
-    }
-
     /// Hand over a picture as tightly-packed RGBA8. Uploaded on the next frame.
     pub fn upload(&mut self, id: u64, width: u32, height: u32, rgba: Vec<u8>) {
         if width == 0 || height == 0 {
@@ -133,11 +123,8 @@ impl PixelLayer {
     /// Forget a picture. The next [`upload`](Self::upload) under the same id
     /// starts again from nothing.
     ///
-    /// Nothing calls this yet — the cache is small and every id so far lives as
-    /// long as the session. It is here because the moment thumbnails arrive
-    /// there will be thousands of them, and a cache with no way out is a leak
-    /// with a nicer name.
-    #[allow(dead_code)]
+    /// A cache with no way out is a leak with a nicer name, and a preview that
+    /// scrolls past a thousand files would be exactly that.
     pub fn evict(&mut self, id: u64) {
         self.cache.remove(&id);
         self.pending.retain(|u| u.id != id);

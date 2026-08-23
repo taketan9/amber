@@ -745,12 +745,12 @@ impl App {
         if encrypt {
             // Collect the password on a masked prompt, then build the zip when
             // it is submitted.
-            self.popup = text_input(
+            self.open_popup(text_input(
                 "zip password",
                 "password (AES-256; Explorer cannot open — use 7-Zip):",
                 String::new(),
                 InputKind::ZipPassword { dest, sources },
-            );
+            ));
         } else {
             self.start_zip(dest, sources, None);
         }
@@ -823,12 +823,12 @@ impl App {
             CompressKind::Zip | CompressKind::ZipEnc => ".zip",
             CompressKind::TarGz => ".tar.gz",
         };
-        self.popup = text_input(
+        self.open_popup(text_input(
             "compress",
             format!("archive name (adds {}):", ext),
             default,
             InputKind::CompressName { kind, sources },
-        );
+        ));
     }
 
     /// `!cmd`: run a shell command in the shell panel, with `%` substituted by

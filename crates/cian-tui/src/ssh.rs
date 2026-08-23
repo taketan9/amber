@@ -140,22 +140,22 @@ impl App {
     /// the final step either kicks off the transfer or logs a shell in.
     pub(crate) fn start_manual_ssh(&mut self) {
         let for_scp = self.scp_dir.is_some();
-        self.popup = text_input(
+        self.open_popup(text_input(
             "manual connection — server",
             "user@host  (e.g. root@10.0.1.5, or deploy@web1:2222):",
             String::new(),
             InputKind::ManualSshTarget { for_scp },
-        );
+        ));
     }
 
     /// Second manual step: ask for the password for `user@host:port`.
     pub(crate) fn manual_ssh_password(&mut self, user: String, host: String, port: u16, for_scp: bool) {
-        self.popup = text_input(
+        self.open_popup(text_input(
             "manual connection — password",
             format!("password for {user}@{host} (blank = none):"),
             String::new(),
             InputKind::ManualSshPass { user, host, port, for_scp },
-        );
+        ));
     }
 
     /// Final manual step: build the connection and either run the transfer or log
@@ -470,12 +470,12 @@ impl App {
         if self.remote_cwd(side).is_none() {
             return;
         }
-        self.popup = text_input(
+        self.open_popup(text_input(
             tr(self.lang, "New remote folder", "リモート: 新規フォルダ"),
             tr(self.lang, "name:", "名前:"),
             String::new(),
             InputKind::RemoteMkdir { side },
-        );
+        ));
     }
 
     /// `a` in a remote pane: prompt for a new (empty) file name.
@@ -484,12 +484,12 @@ impl App {
         if self.remote_cwd(side).is_none() {
             return;
         }
-        self.popup = text_input(
+        self.open_popup(text_input(
             tr(self.lang, "New remote file", "リモート: 新規ファイル"),
             tr(self.lang, "name:", "名前:"),
             String::new(),
             InputKind::RemoteTouch { side },
-        );
+        ));
     }
 
     /// `r` in a remote pane: prompt to rename the entry under the cursor.
@@ -501,12 +501,12 @@ impl App {
         }
         let from = e.path.to_string_lossy().into_owned();
         let name = e.name.clone();
-        self.popup = text_input(
+        self.open_popup(text_input(
             tr(self.lang, "Rename remote", "リモート: リネーム"),
             tr(self.lang, "new name:", "新しい名前:"),
             name,
             InputKind::RemoteRename { side, from },
-        );
+        ));
     }
 
     /// `d` in a remote pane: confirm, then delete the entry under the cursor.
@@ -1009,12 +1009,12 @@ impl App {
             .and_then(|m| *m)
             .map(|m| format!("{m:o}"))
             .unwrap_or_else(|| "777".to_string());
-        self.popup = text_input(
+        self.open_popup(text_input(
             format!("upload chmod — {}/{}", idx + 1, n),
             format!("mode for {fname} (octal e.g. 777; blank = keep server default):"),
             seed,
             InputKind::UploadChmod { remote, idx },
-        );
+        ));
     }
 
     /// Upload the pending files, each with its collected mode, on a worker thread.
@@ -1099,12 +1099,12 @@ impl App {
                 self.prompt_download_chmod(files, dir);
             }
             None => {
-                self.popup = text_input(
+                self.open_popup(text_input(
                     "download to",
                     "local directory:",
                     self.active_pane().map(|p| p.cwd.display().to_string()).unwrap_or_default(),
                     InputKind::LocalDestPath { files },
-                );
+                ));
             }
         }
     }
@@ -1119,12 +1119,12 @@ impl App {
             self.start_remote_download(files, dir, None);
             return;
         }
-        self.popup = text_input(
+        self.open_popup(text_input(
             "download — chmod",
             "mode for downloaded files (octal, e.g. 644; blank = keep):",
             String::new(),
             InputKind::DownloadChmod { files, dir },
-        );
+        ));
     }
 
     /// Download `files` (remote paths) into `local_dir` on a worker thread, then

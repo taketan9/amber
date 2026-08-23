@@ -123,12 +123,12 @@ impl App {
         }
         let Some(p) = self.active_pane() else { return };
         let Some(e) = p.selected() else { return };
-        self.popup = text_input(
+        self.open_popup(text_input(
                 "rename",
                 "new name:",
                 e.name.clone(),
                 InputKind::Rename { original: e.path.clone() },
-            );
+            ));
     }
     /// `:renamepattern` / right-click: pattern-based bulk rename of the marked files
     /// (or the one under the cursor). Prompts for the pattern; the proposed
@@ -140,12 +140,12 @@ impl App {
             self.message = Some(tr(self.lang, "nothing selected to rename", "リネーム対象がありません").into());
             return;
         }
-        self.popup = text_input(
+        self.open_popup(text_input(
             "bulk rename",
             "pattern:  {name}_{n3}.{ext}   or   s/regex/replacement/gi",
             String::new(),
             InputKind::BulkRenamePattern { targets },
-        );
+        ));
     }
 
     /// Build the rename review from a bulk pattern applied to `targets`. Reports
@@ -184,21 +184,21 @@ impl App {
 
     pub(crate) fn start_new_file(&mut self) {
         let Some(p) = self.active_pane() else { return };
-        self.popup = text_input(
+        self.open_popup(text_input(
                 "new file",
                 "name:",
                 String::new(),
                 InputKind::NewFile { parent: p.cwd.clone() },
-            );
+            ));
     }
     pub(crate) fn start_new_dir(&mut self) {
         let Some(p) = self.active_pane() else { return };
-        self.popup = text_input(
+        self.open_popup(text_input(
                 "new directory",
                 "name:",
                 String::new(),
                 InputKind::NewDir { parent: p.cwd.clone() },
-            );
+            ));
     }
 
     // ------- Search -------
@@ -429,23 +429,23 @@ impl App {
     /// folder (name only, no target step).
     pub(crate) fn start_shortcut_add(&mut self, path: Vec<usize>, group: bool) {
         let title = if group { "new folder — name" } else { "new shortcut — name" };
-        self.popup = text_input(
+        self.open_popup(text_input(
             title,
             "name:",
             String::new(),
             InputKind::ShortcutName { path, edit_idx: None, group },
-        );
+        ));
     }
 
     pub(crate) fn start_shortcut_edit(&mut self, path: Vec<usize>, idx: usize) {
         let Some(s) = sc_level(&self.shortcuts.entries, &path).get(idx).cloned() else { return };
         let group = s.is_group();
-        self.popup = text_input(
+        self.open_popup(text_input(
             "edit shortcut — name",
             "name:",
             s.name,
             InputKind::ShortcutName { path, edit_idx: Some(idx), group },
-        );
+        ));
     }
 
     pub(crate) fn copy_paths_to_clipboard(&mut self) {
@@ -1444,14 +1444,14 @@ impl App {
         let Some(text) = self.diff_as_text() else { return };
         let html = self.diff_as_html().unwrap_or_default();
         let md = self.diff_as_markdown().unwrap_or_default();
-        self.popup = text_input(
+        self.open_popup(text_input(
             tr(self.lang, "save comparison as", "比較結果を保存"),
             tr(self.lang,
                 ".html / .md = side by side; .txt = plain  (in the active pane):",
                 ".html / .md = 左右並び、.txt = プレーン（アクティブペインに保存）:"),
             "diff.html".to_string(),
             InputKind::DiffSaveAs { text, html, md },
-        );
+        ));
     }
 
     /// `>` / `<` in the folder compare: copy the highlighted entry across to the
@@ -1742,12 +1742,12 @@ impl App {
         strip: String,
     ) {
         if cian_core::archive::zip_needs_password(&archive) {
-            self.popup = text_input(
+            self.open_popup(text_input(
                 "encrypted zip",
                 "password:",
                 String::new(),
                 InputKind::ExtractPassword { archive, members, dest, strip },
-            );
+            ));
         } else {
             self.run_extract(archive, members, dest, None, strip);
         }
@@ -1982,12 +1982,12 @@ impl App {
 
     // ------- Recursive search -------
     pub(crate) fn start_find_prompt(&mut self) {
-        self.popup = text_input(
+        self.open_popup(text_input(
                 "find (recursive)",
                 "name contains   (Ctrl+V paste, Ctrl+A select all):",
                 String::new(),
                 InputKind::FindRecursive,
-            );
+            ));
     }
 
     /// The synced libraries from `init.lua`, as the core wants them.
@@ -2125,12 +2125,12 @@ impl App {
     }
 
     pub(crate) fn start_grep_prompt(&mut self) {
-        self.popup = text_input(
+        self.open_popup(text_input(
                 "grep (recursive)",
                 "text inside files   (Ctrl+V paste, Ctrl+A select all):",
                 String::new(),
                 InputKind::GrepRecursive,
-            );
+            ));
     }
 
     /// `r` in the grep results: ask what the matched text should become.
@@ -2161,12 +2161,12 @@ impl App {
             return Ok(());
         }
         self.stop_find();
-        self.popup = text_input(
+        self.open_popup(text_input(
             format!("replace in {} file(s)", paths.len()),
             format!("replace {pattern:?} with   (blank = delete it):"),
             String::new(),
             InputKind::GrepReplaceWith { paths, pattern },
-        );
+        ));
         Ok(())
     }
 
@@ -2452,12 +2452,12 @@ impl App {
         // Seed with the current directory: most jumps are edits of where you
         // already are, and it doubles as a reminder of the expected form.
         let here = self.active_pane().map(|p| p.cwd.display().to_string()).unwrap_or_default();
-        self.popup = text_input(
+        self.open_popup(text_input(
                 "go to path",
                 "directory to enter, or file to open:",
                 here,
                 InputKind::JumpPath,
-            );
+            ));
     }
 
     /// Enter a typed directory, or open a typed file with its usual program.
@@ -3719,12 +3719,12 @@ impl App {
                     CompressKind::TarGz => self.start_tar(dest, sources.clone(), true),
                     // Encrypted: chain to the password prompt, which builds it.
                     CompressKind::ZipEnc => {
-                        self.popup = text_input(
+                        self.open_popup(text_input(
                             "zip password",
                             "password (AES-256; open with 7-Zip, not Explorer):",
                             String::new(),
                             InputKind::ZipPassword { dest, sources: sources.clone() },
-                        );
+                        ));
                     }
                 }
                 return Ok(());
@@ -3882,12 +3882,12 @@ impl App {
                     .and_then(|i| sc_level(&self.shortcuts.entries, path).get(i).map(|s| s.target_str().to_string()))
                     .filter(|t| !t.is_empty())
                     .unwrap_or(here);
-                self.popup = text_input(
+                self.open_popup(text_input(
                     "shortcut — target",
                     "URL / path / app   (Ctrl+V paste, Ctrl+A select all):",
                     prev_target,
                     InputKind::ShortcutTarget { path: path.clone(), edit_idx: *edit_idx, name },
-                );
+                ));
                 return Ok(());
             }
             InputKind::ShortcutTarget { path, edit_idx, name: stored_name } => {

@@ -125,7 +125,10 @@ def dead() -> int:
         for m in re.finditer(r'#\[allow\([^)]*dead_code[^)]*\)\]', src):
             line = src[:m.start()].count('\n') + 1
             nxt = src[m.end():m.end() + 120].strip().splitlines()
-            print(f'    ★ {_rel(p)}:{line} → {nxt[0][:60] if nxt else ""}')
+            what = nxt[0][:60] if nxt else ''
+            if any(k in what for k in DEAD_OK):
+                continue
+            print(f'    ★ {_rel(p)}:{line} → {what}')
             found += 1
 
     # (c) 人間が辿り着けないもの。**関数としては生きていても、押す道がなければ
@@ -163,18 +166,36 @@ def dead() -> int:
 
 
 def _arms() -> list[set[str]]:
-    """`:` コマンドを match の腕ごとに。同じ腕の名前は互いの別名。"""
+    """`:` コマンドを match の腕ごとに。同じ腕の名前は互いの別名。
+
+    **一番外側の腕だけ。** `:editstyle vim|notepad` の引数も同じ形をしていて、
+    数えると「`:notepad` が文書に無い」を二重に言い出す。深さは字下げで分かり、
+    最小の字下げがコマンド本体の段。
+    """
     out: list[set[str]] = []
+    arm = re.compile(r'^([ \t]*)((?:"[a-z][a-z0-9.]*"(?: \| )?)+) =>', re.M)
     for f in ('commands.rs', 'viewer.rs'):
         src = _read(os.path.join(ROOT, 'crates', 'cian-tui', 'src', f))
-        for m in re.finditer(r'^\s*((?:"[a-z][a-z0-9.]*"(?: \| )?)+) =>', src, re.M):
-            out.append(set(re.findall(r'"([a-z][a-z0-9.]*)"', m.group(1))))
+        hits = [(len(m.group(1)), m.group(2)) for m in arm.finditer(src)]
+        if not hits:
+            continue
+        top = min(i for i, _ in hits)
+        out += [set(re.findall(r'"([a-z][a-z0-9.]*)"', names))
+                for i, names in hits if i == top]
     return out
 
 
 def _verbs() -> set[str]:
     """`:` コマンドの名前、全部。"""
     return {v for arm in _arms() for v in arm}
+
+
+#: 握り潰したままでよい dead_code（理由つき）
+DEAD_OK = {
+    # **死んでいない。** Lua ランタイムを app の生存期間ぶん生かしておくためだけ
+    # の保持で、読まないことが役目。落とすと ext_open のハンドルが道連れになる
+    '_lua: Option<Lua>',
+}
 
 
 # ── ② 重複・冗長 ────────────────────────────────
@@ -186,8 +207,20 @@ def dup() -> int:
     found = 0
     for p in SRC:
         src = _read(p)
+        # テストは互いに似ていて当然（同じ段取りを条件だけ変えて並べる）ので
+        # 落とす。**列0のモジュールだけを切ること。** どこにでもある
+        # `#[cfg(test)]` を探した版は、テスト専用ヘルパに付いた字下げ済みの
+        # 1つを拾って soft.rs の3分の2を監査から消していた ―― 指摘が減るので
+        # 「きれいになった」に見える
+        m = re.search(r'^#\[cfg\(test\)\]', src, re.M)
+        if m:
+            src = src[:m.start()]
         funcs = {}
         for name, line, body in _functions(src):
+            # テスト専用のヘルパは、本体の関数を真似て作るので似ていて当然
+            head = src.splitlines()[max(0, line - 3):line - 1]
+            if any('#[cfg(test)]' in h for h in head):
+                continue
             norm = re.sub(r'//[^\n]*', '', body)
             norm = re.sub(r'\s+', ' ', norm).strip()
             if len(norm) > 300:

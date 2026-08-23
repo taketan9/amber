@@ -238,12 +238,12 @@ impl App {
             self.message = Some(tr(self.lang, "nothing selected to commit", "コミットする対象が選択されていません").into());
             return;
         }
-        self.popup = text_input(
+        self.open_popup(text_input(
             "svn commit",
             "message:",
             String::new(),
             InputKind::SvnCommit { paths },
-        );
+        ));
     }
 
     /// `svn commit -m <message>` the given paths (called when the input popup

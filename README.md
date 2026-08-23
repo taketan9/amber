@@ -195,6 +195,25 @@ A rectangle is reckoned in **screen columns**, not characters, so a block drawn 
 
 **Binary files** are edited in hex: `i`, then hex digits overwrite the byte under the cursor. Overwrite only — offsets never shift, the size cannot change — and `Ctrl+S` writes a `.bak` first.
 
+### vim keys, or notepad keys
+
+Everything above is the vi grammar, and it is the default. The same editor
+answers to a second one for anyone who does not have vi in their hands:
+**`:notepad`**, or `T` from a listing, or **Editor keys** on the panel's own
+menu (Shift+Enter). `:editstyle vim` puts it back. It is one editor with two
+grammars — the buffer, the undo stack, search, replace and saving are the same
+code either way, and the only difference is whether a normal mode exists at
+all.
+
+In notepad style the panel is in insert from the moment it opens. Shift with
+the arrows selects, Alt+Shift draws a rectangle, Ctrl with the arrows moves by
+word, and Ctrl+X / C / V / A / S / Z / Y are what they are everywhere else —
+those seven work in vi style too. With no normal mode there is nothing for
+`Esc` to return to and no command line to open: **`:` types a colon**, and
+`Esc` three times leaves (asking first, if there is anything unsaved).
+
+`cian.set_option("edit_style", "notepad")` makes it the one you start in.
+
 ### Around the viewer
 
 - **Cursor-follow preview (on by default).** The shell panel's area previews whatever the cursor is on — code in colour, images, folder and archive listings, Office/PDF text. The shell keeps running underneath; `Shift+J` or a click brings it back. Remote panes deliberately show no preview (it would download every file the cursor touches). Pictures use the terminal's own protocol (kitty / iTerm2 / sixel) when it offers one, and half-blocks otherwise; `:image` switches between them for a terminal that advertises a protocol and then draws nothing, and `:version` says which is in use. `:preview` turns it off, and kinds that would have to be unpacked or scanned to show anything are skipped already — `.vsix`, `.jar`, `.whl`, `.iso`, `.msi`, `.pdf`, `.mdf` and friends — while `.zip` and `.tar` are not, because listing one is the point. `cian.set_option("preview_skip", { "bak" })` adds more. `F3` opens any of them.

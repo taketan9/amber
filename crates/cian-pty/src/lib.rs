@@ -146,12 +146,6 @@ pub struct PtySession {
     started: std::time::Instant,
     /// Whether the shell's exit has already been written to the log.
     reported_exit: bool,
-    /// Set by the reader thread the first time the shell says anything.
-    ///
-    /// A panel showing an empty screen cannot tell "the shell has not spoken
-    /// yet" from "cian is failing to draw what it said", and those want
-    /// different answers from whoever is looking at it.
-    heard: Arc<AtomicBool>,
     /// Optional session log, shared with the reader thread.
     log: LogSlot,
     title: TitleSink,
@@ -246,8 +240,6 @@ impl PtySession {
         let reader_dirty = Arc::clone(&dirty);
         let reader_log = Arc::clone(&log);
         let reader_enc = Arc::clone(&encoding);
-        let heard = Arc::new(AtomicBool::new(false));
-        let reader_heard = Arc::clone(&heard);
         let reader = std::thread::spawn(move || {
             let mut buf = [0u8; 8192];
             // Whether anything has been heard from the shell yet.
@@ -261,7 +253,6 @@ impl PtySession {
             let mut heard = false;
             let started = std::time::Instant::now();
             let mut last_told = started;
-            let heard_flag = reader_heard;
             loop {
                 match reader.read(&mut buf) {
                     Ok(0) => {
@@ -293,10 +284,7 @@ impl PtySession {
                                 started.elapsed(),
                             ));
                         }
-                        if !heard {
-                            heard = true;
-                            heard_flag.store(true, Ordering::Relaxed);
-                        }
+                        heard = true;
                         // Decode to UTF-8 when a non-UTF-8 encoding is chosen
                         // (e.g. a Shift_JIS shell); UTF-8 passes through as-is.
                         // Per-chunk decoding can split a multi-byte character at
@@ -352,7 +340,6 @@ impl PtySession {
             cols,
             started: std::time::Instant::now(),
             reported_exit: false,
-            heard,
             log,
             title,
             encoding,
@@ -483,15 +470,6 @@ impl PtySession {
     }
 
     /// Whether the shell process is still running.
-    /// Has the shell produced any output yet?
-    ///
-    /// False for a shell that started and has not spoken — a corporate
-    /// PowerShell profile can take half a minute to load, and an empty panel
-    /// with no explanation is how that looks.
-    pub fn has_spoken(&self) -> bool {
-        self.heard.load(Ordering::Relaxed)
-    }
-
     /// End this shell now, without waiting for it.
     ///
     /// Closing a pseudo-console on Windows *waits for the program inside it to

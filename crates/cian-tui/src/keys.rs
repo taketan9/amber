@@ -513,12 +513,12 @@ impl App {
                         let dest = dest.clone();
                         let name =
                             src.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
-                        self.popup = text_input(
+                        self.open_popup(text_input(
                             match op { PendingOp::Move => "move as", PendingOp::Copy => "copy as" },
                             "new name in the destination:",
                             name,
                             InputKind::TransferAs { op, src, dest_dir: dest },
-                        );
+                        ));
                     } else {
                         self.message = Some(tr(self.lang, "rename applies to a single item", "リネームは1件ずつです").into());
                     }
@@ -570,7 +570,13 @@ impl App {
                         command: rejected.clone(),
                         description: description.clone(),
                     },
-                    _ => Popup::None,
+                    // Otherwise back to whatever the prompt was raised over —
+                    // a docked panel, most of the time. Blanking the slot here
+                    // took the file with it, unsaved edits and all.
+                    _ => {
+                        self.dismiss_to_viewer();
+                        return Ok(());
+                    }
                 };
                 self.popup = back;
                 return Ok(());
@@ -1320,7 +1326,7 @@ impl App {
                     else {
                         return Ok(());
                     };
-                    self.popup = text_input(
+                    self.open_popup(text_input(
                 "destination",
                 "copy/move to which directory:",
                 self
@@ -1328,7 +1334,7 @@ impl App {
                             .map(|p| p.display().to_string())
                             .unwrap_or_default(),
                 InputKind::DestPath { op, targets },
-            );
+            ));
                 }
                 KeyCode::Enter => {
                     let c = *cursor;
@@ -1818,7 +1824,7 @@ impl App {
     fn junk_review_key(&mut self, key: KeyEvent) -> Result<()> {
         // Enter/d hands the checked paths to the normal delete confirm.
         if matches!(key.code, KeyCode::Enter | KeyCode::Char('d')) {
-            self.confirm_junk_deletion();
+            self.confirm_review_deletion();
             return Ok(());
         }
         if let Popup::JunkReview { items, cursor, .. } = &mut self.popup {
@@ -1830,7 +1836,7 @@ impl App {
 
     fn dupe_review_key(&mut self, key: KeyEvent) -> Result<()> {
         if matches!(key.code, KeyCode::Enter | KeyCode::Char('d')) {
-            self.confirm_dupe_deletion();
+            self.confirm_review_deletion();
             return Ok(());
         }
         if let Popup::DupeReview { items, cursor, .. } = &mut self.popup {

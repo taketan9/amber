@@ -884,14 +884,24 @@ struct RenameItem {
 /// unrelated, so the shared key and mouse handling asks for no more than this.
 trait Checkable {
     fn checked(&mut self) -> &mut bool;
+    fn is_checked(&self) -> bool;
+    /// What the row is about. Every review is a review of paths.
+    fn path(&self) -> &std::path::Path;
 }
 
 macro_rules! checkable {
     ($($t:ty),+) => {$(impl Checkable for $t {
         fn checked(&mut self) -> &mut bool { &mut self.selected }
+        fn is_checked(&self) -> bool { self.selected }
+        fn path(&self) -> &std::path::Path { &self.path }
     })+};
 }
 checkable!(JunkItem, DupeItem, MoveItem, RenameItem);
+
+/// The paths a review has checked.
+fn checked_paths<T: Checkable>(items: &[T]) -> Vec<PathBuf> {
+    items.iter().filter(|it| it.is_checked()).map(|it| it.path().to_path_buf()).collect()
+}
 
 /// The keys every review list answers to: move by one, jump to either end,
 /// toggle the row under the cursor or all of them at once. Written once for
@@ -3477,7 +3487,7 @@ impl App {
             .and_then(|t| host_from_title(&t))
             .unwrap_or_else(|| "shell".to_string());
         let prompt = format!("directory for the log  (file: <time>_{}.log):", host);
-        self.popup = text_input("session log — folder", &prompt, seed, InputKind::LogDir);
+        self.open_popup(text_input("session log — folder", &prompt, seed, InputKind::LogDir));
     }
 
     /// Start logging the active shell pane into `dir`, building the file name
@@ -4517,6 +4527,7 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry("drag an entry", None, "to the other pane: copy (Shift: move)", "反対ペインへ：コピー（Shift で移動）"),
                 entry("  ", None, "  onto the shell: type its path there", "  シェルへ：パスをそこに入力"),
                 entry(":copyto", None, "copy to a recent or typed directory", "最近使った／入力したディレクトリへコピー"),
+                entry(":moveto", None, "move there instead", "同じ選び方で移動"),
                 entry("right-click", None, "context menu (copy/cut/paste, color)", "コンテキストメニュー（コピー/カット/貼付、色）"),
                 entry("Ctrl+H/J/K/L", None, "same (needs kitty keyboard support)", "同上（kittyキーボード対応が必要）"),
                 entry("t, F9", None, "new tab", "新規タブ"),
@@ -4689,6 +4700,8 @@ pub(crate) fn viewer_manual_lines(lang: Lang) -> Vec<String> {
         (".", "do that change again", "直前の変更をもう一度"),
         ("V then I  A", "insert at the start, end of every selected line", "選択全行の先頭・末尾に挿入"),
         (":edit", "open it in your own editor", "外部エディタで開く"),
+        (":notepad  :editstyle vim", "swap the whole grammar: notepad keys, or vi's back again (T, or the panel's menu)", "文法ごと切替：メモ帳のキー／vi のキーに戻す（T かパネルのメニューでも）"),
+        ("in notepad style", "Shift+arrows select, Alt+Shift a rectangle, Ctrl+arrows by word; no normal mode, so : is a colon and Esc ×3 leaves", "メモ帳文法：Shift+矢印で選択・Alt+Shift で矩形・Ctrl+矢印で単語。ノーマルモードが無いので : はただの文字、Esc 3回で退出"),
     ];
     const FILES: &[Row] = &[
         ("F2  Shift+F2", "next, previous open file", "次・前の開いているファイル"),

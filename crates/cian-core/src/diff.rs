@@ -120,8 +120,28 @@ pub const CONTEXT: usize = 3;
 
 /// Compare two files line by line.
 pub fn diff_files(left: &Path, right: &Path) -> Result<Diff> {
-    let a = view_file(left)?;
-    let b = view_file(right)?;
+    diff_files_as(left, right, None)
+}
+
+/// Like [`diff_files`], but decode both sides with an explicit encoding first —
+/// for the diff viewer's "switch encoding" the same way the F3 viewer offers.
+pub fn diff_files_with_encoding(
+    left: &Path,
+    right: &Path,
+    enc: crate::viewer::TextEncoding,
+) -> Result<Diff> {
+    diff_files_as(left, right, Some(enc))
+}
+
+/// The two above, which differed by one call: whether the sides are decoded
+/// again under a chosen encoding before being compared.
+fn diff_files_as(
+    left: &Path,
+    right: &Path,
+    enc: Option<crate::viewer::TextEncoding>,
+) -> Result<Diff> {
+    let mut a = view_file(left)?;
+    let mut b = view_file(right)?;
     let truncated = a.truncated || b.truncated;
 
     // A hex dump diffed line-by-line produces noise, and a shifted byte makes
@@ -140,37 +160,11 @@ pub fn diff_files(left: &Path, right: &Path) -> Result<Diff> {
             too_large: false,
         });
     }
-
-    let mut d = diff_lines(&a.lines, &b.lines);
-    d.truncated = truncated;
-    Ok(d)
-}
-
-/// Like [`diff_files`], but decode both sides with an explicit encoding first —
-/// for the diff viewer's "switch encoding" the same way the F3 viewer offers.
-pub fn diff_files_with_encoding(
-    left: &Path,
-    right: &Path,
-    enc: crate::viewer::TextEncoding,
-) -> Result<Diff> {
-    let mut a = view_file(left)?;
-    let mut b = view_file(right)?;
-    let truncated = a.truncated || b.truncated;
-    if a.kind == ViewKind::Binary || b.kind == ViewKind::Binary {
-        let identical = a.total_bytes == b.total_bytes && a.lines == b.lines;
-        return Ok(Diff {
-            rows: Vec::new(),
-            added: 0,
-            removed: 0,
-            changed: 0,
-            truncated,
-            binary: true,
-            identical,
-            too_large: false,
-        });
+    if let Some(enc) = enc {
+        a.redecode(enc);
+        b.redecode(enc);
     }
-    a.redecode(enc);
-    b.redecode(enc);
+
     let mut d = diff_lines(&a.lines, &b.lines);
     d.truncated = truncated;
     Ok(d)
