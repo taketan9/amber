@@ -214,9 +214,101 @@ jobs:
           name: cian-linux-x64
           path: cian-linux-x64.tar.gz
 
+  # The whole of cian as one file that builds with no network at all: the
+  # source, and every crate it depends on already downloaded. This is what
+  # goes in-house, where the point is to change cian rather than to run it.
+  #
+  # Vendored on Linux although the target is Windows — `cargo vendor` works
+  # from Cargo.lock, which lists every platform's crates, so the tree it
+  # writes is not the runner's. The job after this one proves that on a real
+  # Windows machine rather than trusting it.
+  source-offline:
+    needs: version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      # Carried, not fetched. A build behind a company firewall cannot reach
+      # GitHub for it, and without it the window build has no font.
+      - name: Fetch the bundled font
+        run: |
+          mkdir -p crates/cian-gui/fonts
+          curl -sL -o font.zip "$FONT_URL"
+          unzip -q font.zip -d font
+          cp "$(find font -name 'HackGenConsoleNF-Regular.ttf' | head -1)" crates/cian-gui/fonts/cian.ttf
+        env:
+          FONT_URL: https://github.com/yuru7/HackGen/releases/download/v2.10.0/HackGen_NF_v2.10.0.zip
+
+      - name: Vendor every dependency
+        run: |
+          mkdir -p .cargo
+          cargo vendor --versioned-dirs vendor > .cargo/config.toml
+          echo "vendored crates: $(ls vendor | wc -l)"
+          du -sh vendor
+
+      - name: Stage the bundle
+        run: |
+          stage=cian-source-offline
+          mkdir -p "$stage"
+          # The tracked tree, exactly — no target/, no .git, nothing local.
+          git archive HEAD | tar -x -C "$stage"
+          cp -R vendor .cargo "$stage/"
+          mkdir -p "$stage/crates/cian-gui/fonts"
+          cp crates/cian-gui/fonts/cian.ttf "$stage/crates/cian-gui/fonts/"
+          cp packaging/offline/README.txt "$stage/"
+          {
+            echo "cian $(git describe --tags --always)"
+            echo "commit $(git rev-parse HEAD)"
+            echo "vendored $(date -u +%Y-%m-%dT%H:%M:%SZ) with $(rustc -V)"
+            echo
+            echo "Build with this version of Rust or newer."
+          } > "$stage/BUILT-WITH.txt"
+          zip -qr cian-source-offline.zip "$stage"
+          du -sh cian-source-offline.zip
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: cian-source-offline
+          path: cian-source-offline.zip
+
+  # Does the bundle actually build with nothing but itself? `--offline` makes
+  # cargo fail rather than quietly reach crates.io, so a green run here is the
+  # claim the package makes, tested on the platform it is for.
+  source-offline-check:
+    needs: source-offline
+    runs-on: windows-latest
+    steps:
+      - uses: actions/download-artifact@v6
+        with:
+          name: cian-source-offline
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Unpack
+        shell: pwsh
+        run: Expand-Archive cian-source-offline.zip -DestinationPath .
+
+      - name: Build it with cargo cut off from the network
+        shell: pwsh
+        working-directory: cian-source-offline
+        run: cargo build --release --offline --bin cian-tui
+
+      # The window build pulls in wgpu and winit, which the terminal build
+      # never touches — vendoring that missed them would pass the step above
+      # and fail in-house. Checked rather than built: it walks the whole of
+      # that dependency graph, which is the thing in question, without paying
+      # for the link.
+      - name: And the window build's dependencies too
+        shell: pwsh
+        working-directory: cian-source-offline
+        run: cargo check --release --offline --bin cian --features cian-gui/bundled-font
+
   # One release, made once, over the finished set of packages.
   publish:
-    needs: [macos, windows-x64, linux-x64]
+    needs: [macos, windows-x64, linux-x64, source-offline-check]
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     steps:

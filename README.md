@@ -22,6 +22,7 @@ One binary. macOS, Windows, Linux. No runtime, no DLLs, nothing to install along
 | macOS (Intel and Apple silicon) | `cian-macos.zip` | `cian.app` to double-click, and `cian-tui` for the terminal |
 | Windows x64 | `cian-windows-x64.zip` | `cian.exe`, `cian-tui.exe` and `install.ps1` — see [offline install](#install-on-windows-offline) |
 | Linux x64 | `cian-linux-x64.tar.gz` | `cian` and `cian-tui` |
+| Any, to build on | `cian-source-offline.zip` | the source with every dependency already downloaded — see [build from source](#build-from-source) |
 
 Unpack it and run it. There is no installer to answer to, and nothing is written outside the folder you put it in until you save a setting.
 
@@ -481,10 +482,20 @@ cargo build --release
 ./target/release/cian       # in a window of its own
 ```
 
-Stable Rust and nothing else. The release packages build the window binary with
-`--features cian-gui/bundled-font`, which embeds a Japanese Nerd Font so the
-download needs no font installed; without the feature it looks for one on the
-system.
+Stable Rust and nothing else — cargo fetches the rest. The release packages
+build the window binary with `--features cian-gui/bundled-font`, which embeds a
+Japanese Nerd Font so the download needs no font installed; without the feature
+it looks for one on the system.
+
+**Building where there is no network.** `cian-source-offline.zip` on the
+releases page is the same source with every crate it depends on already
+downloaded into `vendor/`, so `cargo build --release --offline` works on a
+machine that has never reached crates.io. Three of the dependencies compile C
+of their own, so that machine also needs a C toolchain — on Windows, Visual
+Studio Build Tools, CMake and NASM. The zip carries the instructions for
+installing those offline as well. Each release is checked by building the
+bundle on a Windows runner with cargo cut off from the network, so the claim
+is tested rather than asserted.
 
 ---
 

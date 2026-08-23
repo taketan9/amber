@@ -22,6 +22,7 @@
 | macOS（Intel / Apple シリコン） | `cian-macos.zip` | ダブルクリックで起動する `cian.app` と、ターミナル用の `cian-tui` |
 | Windows x64 | `cian-windows-x64.zip` | `cian.exe` / `cian-tui.exe` / `install.ps1` — [オフライン導入](#windows-へオフライン導入)を参照 |
 | Linux x64 | `cian-linux-x64.tar.gz` | `cian` と `cian-tui` |
+| ビルドする人向け | `cian-source-offline.zip` | 依存クレートを全部同梱したソース一式 — [ソースからビルド](#ソースからビルド)を参照 |
 
 展開して実行するだけです。インストーラの質問に答える必要はなく、設定を保存するまで置いたフォルダの外には何も書きません。
 
@@ -481,10 +482,19 @@ cargo build --release
 ./target/release/cian       # 自前のウィンドウで
 ```
 
-stable の Rust だけで通ります。リリース版のウィンドウ側は
-`--features cian-gui/bundled-font` 付きでビルドしていて、日本語 Nerd Font を
-埋め込むためフォントを入れなくても表示できます。この feature なしの場合は
-システムにあるフォントを探します。
+stable の Rust だけで通ります（残りは cargo が取ってきます）。リリース版の
+ウィンドウ側は `--features cian-gui/bundled-font` 付きでビルドしていて、
+日本語 Nerd Font を埋め込むためフォントを入れなくても表示できます。この
+feature なしの場合はシステムにあるフォントを探します。
+
+**ネットワークのない環境でビルドする場合。** リリースページの
+`cian-source-offline.zip` は、依存クレートを全部 `vendor/` に落とし込んだ
+同じソースです。crates.io に一度も到達したことのない機械でも
+`cargo build --release --offline` が通ります。依存のうち3つは C をビルドする
+ので、その機械には C のツールチェーンも要ります — Windows なら Visual Studio
+Build Tools・CMake・NASM です。それらをオフライン導入する手順も zip に同梱
+しています。リリースごとに、Windows ランナー上で cargo をネットワークから
+切り離してビルドする検査を通しているので、この話は主張ではなく検証済みです。
 
 ---
 
