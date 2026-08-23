@@ -2,9 +2,40 @@
 //! commands, and a **fuzzy jump** (`Z` / `:jump`) over recently-visited
 //! directories and bookmarks. Both share [`cian_core::fuzzy`] for ranking.
 
+use std::collections::HashSet;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 use super::*;
+
+/// How many paths the walk carries back at a time. Small enough that the first
+/// of them lands within a frame or two of the picker opening, large enough
+/// that a fast local tree is not a channel benchmark.
+const FILE_SCAN_BATCH: usize = 512;
+
+/// Where the walk gives up. It is not there to keep the picker responsive any
+/// more — the walk is off the main loop now — but ranking every row against
+/// every keystroke does cost something, and a tree this size is one to narrow
+/// rather than to scroll.
+const FILE_SCAN_CAP: usize = 50_000;
+
+/// The file finder's tree walk, in flight while its picker is already open.
+pub(crate) struct FileScan {
+    rx: std::sync::mpsc::Receiver<FileBatch>,
+    /// Set when the picker closes, so the walk stops rather than reading a
+    /// network drive to the end for a list nobody will see.
+    cancel: Arc<AtomicBool>,
+    root: PathBuf,
+    /// Paths already in the picker — the recent files went in before the walk
+    /// started, and the walk will find them again.
+    seen: HashSet<PathBuf>,
+}
+
+enum FileBatch {
+    More(Vec<PathBuf>),
+    Done { capped: bool, count: usize },
+}
 
 /// The commands the palette offers, as `(verb, description, takes_arg)`. Kept a
 /// curated list (not every alias) so the picker stays scannable.
@@ -127,28 +158,138 @@ impl App {
     /// empty-query list leads with the recently-opened files, then the tree.
     pub(crate) fn start_file_finder(&mut self) {
         let Some(root) = self.active_pane().map(|p| p.cwd.clone()) else { return };
-        let mut items = Vec::new();
-        let mut seen = std::collections::HashSet::new();
-        // Recently-opened files first (still on disk).
-        for p in &self.recent_files {
-            if p.is_file() && seen.insert(p.clone()) {
-                items.push(file_item(p, &root, "recent"));
-            }
-        }
-        // Then the tree, bounded so a giant directory can't hang the picker.
-        let mut count = 0usize;
-        gather_files(&root, &mut |p| {
-            if seen.insert(p.to_path_buf()) {
-                items.push(file_item(p, &root, ""));
-            }
-            count += 1;
-            count < 10_000
-        });
-        if items.is_empty() {
-            self.message = Some(tr(self.lang, "no files here", "ファイルがありません").into());
-            return;
-        }
+        // The recently-opened files are a short list already in memory, so the
+        // picker opens on them at once.
+        let mut seen: HashSet<PathBuf> = HashSet::new();
+        let items: Vec<PaletteItem> = self
+            .recent_files
+            .iter()
+            .filter(|p| p.is_file() && seen.insert((*p).clone()))
+            .map(|p| file_item(p, &root, "recent"))
+            .collect();
         self.open_palette(PaletteKind::File, items);
+        self.start_file_scan(root, seen, FILE_SCAN_CAP);
+    }
+
+    /// Walk the tree on a worker, sending files back in batches.
+    ///
+    /// This used to run to completion on the main loop before the picker drew
+    /// a single row: on a deep tree or a network drive, opening the finder
+    /// meant waiting for it with no sign that anything was happening. Every
+    /// other slow thing in cian is a worker polled each frame, and this is
+    /// that — the picker is usable from the first keystroke and the rest of
+    /// the tree arrives underneath.
+    /// `cap` is where the walk gives up; the tests hand it a small one rather
+    /// than making fifty thousand files.
+    fn start_file_scan(&mut self, root: PathBuf, seen: HashSet<PathBuf>, cap: usize) {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let worker_cancel = Arc::clone(&cancel);
+        let worker_root = root.clone();
+        std::thread::spawn(move || {
+            let mut batch: Vec<PathBuf> = Vec::with_capacity(FILE_SCAN_BATCH);
+            let mut count = 0usize;
+            let complete = gather_files(&worker_root, &mut |p| {
+                if worker_cancel.load(Ordering::Relaxed) {
+                    return false;
+                }
+                batch.push(p.to_path_buf());
+                count += 1;
+                if batch.len() >= FILE_SCAN_BATCH && tx.send(FileBatch::More(std::mem::take(&mut batch))).is_err()
+                {
+                    // The picker closed; nobody is listening any more.
+                    return false;
+                }
+                count < cap
+            });
+            if !batch.is_empty() {
+                let _ = tx.send(FileBatch::More(batch));
+            }
+            // `gather_files` returns false when the callback stopped it. A
+            // cancelled walk says nothing; one the cap stopped has to say so.
+            let capped = !complete && !worker_cancel.load(Ordering::Relaxed);
+            let _ = tx.send(FileBatch::Done { capped, count });
+        });
+        self.file_scan = Some(FileScan { rx, cancel, root, seen });
+    }
+
+    /// Take whatever the walk has found since the last frame into the open
+    /// picker. Returns true if anything changed on screen.
+    pub(crate) fn poll_file_scan(&mut self) -> bool {
+        // Typing into it, or leaving it, both end the walk's usefulness.
+        if !matches!(self.popup, Popup::Palette { kind: PaletteKind::File, .. }) {
+            self.stop_file_scan();
+            return false;
+        }
+        let mut added = 0usize;
+        let mut finished: Option<(bool, usize)> = None;
+        {
+            let Some(scan) = &mut self.file_scan else { return false };
+            let Popup::Palette { items, .. } = &mut self.popup else { return false };
+            loop {
+                match scan.rx.try_recv() {
+                    Ok(FileBatch::More(paths)) => {
+                        for p in paths {
+                            if scan.seen.insert(p.clone()) {
+                                items.push(file_item(&p, &scan.root, ""));
+                                added += 1;
+                            }
+                        }
+                    }
+                    Ok(FileBatch::Done { capped, count }) => {
+                        finished = Some((capped, count));
+                        break;
+                    }
+                    Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                        finished = Some((false, 0));
+                        break;
+                    }
+                }
+            }
+        }
+        if let Some((capped, count)) = finished {
+            self.file_scan = None;
+            // A walk that stopped at the cap used to say nothing at all, so a
+            // file that existed simply was not in the list and the finder
+            // looked wrong rather than full.
+            if capped {
+                self.message = Some(match self.lang {
+                    Lang::En => format!("first {count} files — narrow the folder to see the rest"),
+                    Lang::Ja => format!("{count} 件で打ち切りました。フォルダを絞ると残りも見られます"),
+                });
+            } else if matches!(&self.popup, Popup::Palette { items, .. } if items.is_empty()) {
+                // Nothing here at all. Better to say so than to leave an empty
+                // picker open for the user to type into.
+                self.popup = Popup::None;
+                self.message = Some(tr(self.lang, "no files here", "ファイルがありません").into());
+            }
+        }
+        if added > 0 {
+            // Rank what arrived against whatever has been typed so far.
+            self.palette_refilter_keeping_cursor();
+            return true;
+        }
+        finished.is_some()
+    }
+
+    /// The two hooks the tests drive the walk through: an empty picker, and a
+    /// walk with a cap small enough to reach without making the files.
+    #[cfg(test)]
+    pub(crate) fn open_palette_for_test(&mut self) {
+        self.open_palette(PaletteKind::File, Vec::new());
+    }
+
+    #[cfg(test)]
+    pub(crate) fn start_file_scan_for_test(&mut self, root: PathBuf, cap: usize) {
+        self.start_file_scan(root, HashSet::new(), cap);
+    }
+
+    /// Drop the walk and ask the worker to stop.
+    pub(crate) fn stop_file_scan(&mut self) {
+        if let Some(scan) = self.file_scan.take() {
+            scan.cancel.store(true, Ordering::Relaxed);
+        }
     }
 
     /// `:recent` — just the recently-opened files.
@@ -168,8 +309,28 @@ impl App {
     }
 
     fn open_palette(&mut self, kind: PaletteKind, items: Vec<PaletteItem>) {
+        // Any walk still out belongs to the picker being replaced. `:recent`
+        // opens the same kind of picker as the finder, so without this a walk
+        // left over from an `//` closed in the same breath would pour the
+        // whole tree into the list of files you have actually opened.
+        self.stop_file_scan();
         let shown = (0..items.len()).collect();
         self.open_popup(Popup::Palette { kind, query: String::new(), items, shown, cursor: 0, scroll: 0 });
+    }
+
+    /// Re-rank without losing the row under the cursor.
+    ///
+    /// The file finder ranks again every time the walk hands back a batch, and
+    /// the plain refilter puts the cursor back at the top — which, while rows
+    /// are still arriving, means the highlight will not stay where it is put.
+    pub(crate) fn palette_refilter_keeping_cursor(&mut self) {
+        let Popup::Palette { shown, cursor, .. } = &self.popup else { return };
+        let on = shown.get(*cursor).copied();
+        self.palette_refilter();
+        let Popup::Palette { shown, cursor, .. } = &mut self.popup else { return };
+        if let Some(at) = on.and_then(|i| shown.iter().position(|&j| j == i)) {
+            *cursor = at;
+        }
     }
 
     /// Re-rank the picker's rows against the current query (called on every edit).

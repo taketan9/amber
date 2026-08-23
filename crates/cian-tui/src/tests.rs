@@ -530,8 +530,15 @@
         assert_eq!(app.mode, Mode::Filter, "one slash narrows this listing");
         app.handle_key(key('/')).unwrap();
         assert_eq!(app.mode, Mode::Normal, "the second left the filter behind");
+        assert!(
+            matches!(app.popup, Popup::Palette { .. }),
+            "the finder should be open, got {:?}",
+            app.popup
+        );
+        // The tree arrives from a worker, the way the main loop takes it.
+        drain_file_scan(&mut app);
         let Popup::Palette { items, .. } = &app.popup else {
-            panic!("the finder should be open, got {:?}", app.popup)
+            panic!("the finder closed, got {:?}", app.popup)
         };
         assert!(
             items.iter().any(|i| i.label.contains("deep.txt")),
@@ -7713,6 +7720,128 @@
             assert!(crate::util::width(r) <= 20, "row over the width: {r:?}");
         }
         assert_eq!(jp.concat(), "マークしたファイルを反対のペインへコピーします");
+    }
+
+    /// Drive a running file scan to its end, the way the main loop would.
+    fn drain_file_scan(app: &mut App) {
+        for _ in 0..2000 {
+            if app.file_scan.is_none() {
+                return;
+            }
+            app.poll_file_scan();
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        panic!("the walk never finished");
+    }
+
+    /// The finder used to walk the whole tree on the main loop before drawing
+    /// a row, so opening it on a deep tree or a network drive was a freeze
+    /// with nothing on screen. It opens first and fills in behind.
+    #[test]
+    fn the_file_finder_opens_before_it_has_looked() {
+        let (d, mut app) = app_with(&["a.txt"]);
+        let deep = d.path().join("one/two/three");
+        std::fs::create_dir_all(&deep).unwrap();
+        for i in 0..40 {
+            std::fs::write(deep.join(format!("f{i}.txt")), b"").unwrap();
+        }
+        app.start_file_finder();
+        // Open already, with the walk still out.
+        assert!(
+            matches!(app.popup, Popup::Palette { kind: PaletteKind::File, .. }),
+            "the picker is up before the tree has been read"
+        );
+        assert!(app.file_scan.is_some(), "and the walk is in flight");
+        // Nothing from the tree yet — this is what "before it has looked"
+        // means, and what the old synchronous walk could not do.
+        let Popup::Palette { items, .. } = &app.popup else { panic!("no picker") };
+        assert!(items.is_empty(), "opened on the recent files alone, got {items:?}");
+
+        drain_file_scan(&mut app);
+        let Popup::Palette { items, .. } = &app.popup else { panic!("the picker closed") };
+        assert!(
+            items.iter().any(|i| i.label.contains("f39.txt")),
+            "the tree arrived: {} rows",
+            items.len()
+        );
+        assert!(items.iter().any(|i| i.label.contains("a.txt")), "including the shallow ones");
+    }
+
+    /// A walk stopped by the cap used to say nothing, so a file that was
+    /// really there simply was not in the list — the finder looked wrong
+    /// rather than full.
+    #[test]
+    fn a_finder_that_gave_up_early_says_so() {
+        let (d, mut app) = app_with(&["a.txt"]);
+        for i in 0..20 {
+            std::fs::write(d.path().join(format!("f{i}.txt")), b"").unwrap();
+        }
+        let root = d.path().to_path_buf();
+        app.open_palette_for_test();
+        app.start_file_scan_for_test(root, 5);
+        drain_file_scan(&mut app);
+        let said = app.message.clone().unwrap_or_default();
+        assert!(said.contains('5') || said.contains("first"), "it owned up: {said:?}");
+    }
+
+    /// Leaving the picker ends the walk. Reading a network drive to the end
+    /// for a list nobody will see is the case this is for.
+    #[test]
+    fn closing_the_finder_calls_off_the_walk() {
+        let (d, mut app) = app_with(&["a.txt"]);
+        for i in 0..30 {
+            std::fs::write(d.path().join(format!("f{i}.txt")), b"").unwrap();
+        }
+        app.start_file_finder();
+        assert!(app.file_scan.is_some(), "a walk is out");
+        app.handle_key(code(KeyCode::Esc)).unwrap();
+        assert!(!matches!(app.popup, Popup::Palette { .. }), "the picker closed");
+        app.poll_file_scan();
+        assert!(app.file_scan.is_none(), "and the walk was called off");
+    }
+
+    /// Rows arriving under the cursor must not move it. The finder ranks again
+    /// on every batch, and the plain refilter puts the cursor back at the top.
+    #[test]
+    fn arriving_rows_do_not_move_the_cursor() {
+        let (d, mut app) = app_with(&["a.txt"]);
+        for i in 0..40 {
+            std::fs::write(d.path().join(format!("f{i}.txt")), b"").unwrap();
+        }
+        app.start_file_finder();
+        drain_file_scan(&mut app);
+        // Put the cursor on a row that is not the first.
+        let Popup::Palette { shown, cursor, .. } = &mut app.popup else { panic!("no picker") };
+        assert!(shown.len() > 3, "enough rows to move within");
+        *cursor = 3;
+        let on = shown[3];
+        app.palette_refilter_keeping_cursor();
+        let Popup::Palette { shown, cursor, .. } = &app.popup else { panic!("no picker") };
+        assert_eq!(shown.get(*cursor).copied(), Some(on), "still on the same row");
+    }
+
+    /// `:recent` opens the same kind of picker as the finder, so a walk left
+    /// over from an `//` closed in the same breath would pour the whole tree
+    /// into the list of files actually opened. Both keys land before the loop
+    /// polls, so the gap is real.
+    #[test]
+    fn a_leftover_walk_does_not_pour_into_the_recent_list() {
+        let (d, mut app) = app_with(&["a.txt"]);
+        for i in 0..60 {
+            std::fs::write(d.path().join(format!("f{i}.txt")), b"").unwrap();
+        }
+        app.recent_files.push(d.path().join("a.txt"));
+        app.start_file_finder();
+        assert!(app.file_scan.is_some(), "a walk is out");
+        // No poll in between: the finder closes and `:recent` opens first.
+        app.handle_key(code(KeyCode::Esc)).unwrap();
+        app.start_recent_files();
+        assert!(app.file_scan.is_none(), "the walk was called off by the new picker");
+        for _ in 0..50 {
+            app.poll_file_scan();
+        }
+        let Popup::Palette { items, .. } = &app.popup else { panic!("no picker") };
+        assert_eq!(items.len(), 1, "only what was opened: {:?}", items.iter().map(|i| &i.label).collect::<Vec<_>>());
     }
 
     #[test]

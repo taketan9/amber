@@ -2918,6 +2918,8 @@ pub struct App {
     count_job: Option<std::sync::mpsc::Receiver<cian_core::count::Report>>,
     /// A disk-usage analysis in flight (its directory + the sized children).
     du_job: Option<std::sync::mpsc::Receiver<(PathBuf, Vec<cian_core::du::DuEntry>)>>,
+    /// The file finder's tree walk, running while its picker is already open.
+    file_scan: Option<crate::palette::FileScan>,
     /// A file the user asked to edit; the main loop suspends the TUI, runs the
     /// external editor, and restores. See [`crate::edit`].
     pending_edit: Option<edit::PendingEdit>,
@@ -3150,6 +3152,7 @@ impl App {
             count_opts,
             count_job: None,
             du_job: None,
+            file_scan: None,
             pending_edit: None,
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
@@ -5410,6 +5413,10 @@ impl App {
         }
         // A finished file/step count shows its report.
         if self.du_job.is_some() && self.poll_du() {
+            redraw = true;
+        }
+        // The file finder fills in while it is being typed into.
+        if self.file_scan.is_some() && self.poll_file_scan() {
             redraw = true;
         }
         if self.count_job.is_some() && self.poll_count() {
