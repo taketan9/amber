@@ -42,7 +42,7 @@ impl App {
     /// under the cursor (a directory is walked recursively). `target_paths`
     /// gives exactly that (marks, else the cursor, never `..`).
     fn count_targets(&self) -> Vec<PathBuf> {
-        self.active_pane().map(|p| p.target_paths()).unwrap_or_default()
+        self.target_paths()
     }
 
     /// Install a finished count as a notice. Returns true if a report landed.

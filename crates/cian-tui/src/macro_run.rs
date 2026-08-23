@@ -159,7 +159,7 @@ impl App {
     pub(crate) fn run_script_macro(&mut self, m: &Macro) {
         let Some(src) = m.script.clone() else { return };
         let (Some(dir), Some(other)) =
-            (self.active_pane().map(|p| p.cwd.clone()), self.opposite_pane_cwd())
+            (self.cwd(), self.opposite_pane_cwd())
         else {
             self.message = Some(
                 tr(self.lang, "no active pane for the macro", "マクロ対象のペインがありません").into(),

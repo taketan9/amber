@@ -924,7 +924,7 @@ impl App {
         if !self.ai_configured() {
             return;
         }
-        let Some(dir) = self.active_pane().map(|p| p.cwd.clone()) else { return };
+        let Some(dir) = self.cwd() else { return };
         // Not in a repo at all?
         let Some(diff) = cian_core::git::staged_diff(&dir) else {
             self.message = Some(tr(self.lang, "not a git repository", "git リポジトリではありません").into());
@@ -1183,7 +1183,7 @@ impl App {
             self.message = Some(tr(self.lang, "cancelled (no query)", "中止しました（検索語なし）").into());
             return;
         }
-        let Some(root) = self.active_pane().map(|p| p.cwd.clone()) else { return };
+        let Some(root) = self.cwd() else { return };
         // Collect up to a bounded number of file paths, breadth-first, stopping
         // early so a huge tree cannot stall the UI. Files only — the results
         // preview in F3, and a directory has nothing to preview.
@@ -1257,7 +1257,7 @@ impl App {
             self.message = Some(tr(self.lang, "a duplicate scan is already running", "重複スキャンは既に実行中です").into());
             return;
         }
-        let Some(root) = self.active_pane().map(|p| p.cwd.clone()) else { return };
+        let Some(root) = self.cwd() else { return };
         // Collect files recursively, bounded so a giant tree cannot run away.
         const CAP: usize = 20_000;
         let cancel = std::sync::Arc::new(AtomicBool::new(false));

@@ -53,7 +53,7 @@ impl App {
     pub(crate) fn start_transfer(&mut self, op: PendingOp) {
         // Copying out of an archive is an extraction; moving would mean
         // deleting members, which waits for the zip-write phase.
-        if self.active_pane().map(|p| p.archive_view().is_some()).unwrap_or(false) {
+        if self.in_archive() {
             if matches!(op, PendingOp::Move) {
                 self.message = Some(tr(
                     self.lang,
@@ -84,7 +84,7 @@ impl App {
             if !self.require_zip_writable(&archive) {
                 return;
             }
-            let sources = self.active_pane().map(|p| p.target_paths()).unwrap_or_default();
+            let sources = self.target_paths();
             if sources.is_empty() {
                 self.message = Some(tr(self.lang, "nothing to operate on", "操作する対象がありません").into());
                 return;
@@ -105,7 +105,7 @@ impl App {
         self.open_popup(Popup::ConfirmTransfer { op, targets, dest });
     }
     pub(crate) fn start_delete(&mut self) {
-        if self.active_pane().map(|p| p.archive_view().is_some()).unwrap_or(false) {
+        if self.in_archive() {
             self.archive_delete();
             return;
         }
@@ -117,7 +117,7 @@ impl App {
         self.open_popup(Popup::ConfirmDelete { targets });
     }
     pub(crate) fn start_rename(&mut self) {
-        if self.active_pane().map(|p| p.archive_view().is_some()).unwrap_or(false) {
+        if self.in_archive() {
             self.archive_rename_start();
             return;
         }
@@ -135,7 +135,7 @@ impl App {
     /// names are shown for review (the same checklist the AI rename uses)
     /// before anything touches disk.
     pub(crate) fn start_bulk_rename(&mut self) {
-        let targets = self.active_pane().map(|p| p.target_paths()).unwrap_or_default();
+        let targets = self.target_paths();
         if targets.is_empty() {
             self.message = Some(tr(self.lang, "nothing selected to rename", "リネーム対象がありません").into());
             return;
@@ -708,7 +708,7 @@ impl App {
             ).into());
             return;
         }
-        let paths = self.active_pane().map(|p| p.target_paths()).unwrap_or_default();
+        let paths = self.target_paths();
         if paths.is_empty() {
             self.message = Some(tr(self.lang, "nothing selected", "選択なし").into());
             return;
@@ -827,7 +827,7 @@ impl App {
 
     /// Offer somewhere other than the opposite pane to send the selection.
     pub(crate) fn start_dest_picker(&mut self, op: PendingOp) {
-        let targets = self.active_pane().map(|p| p.target_paths()).unwrap_or_default();
+        let targets = self.target_paths();
         if targets.is_empty() {
             self.message = Some(tr(self.lang, "nothing selected", "選択されていません").into());
             return;
@@ -1778,7 +1778,7 @@ impl App {
     }
 
     pub(crate) fn show_attributes(&mut self) {
-        let paths = self.active_pane().map(|p| p.target_paths()).unwrap_or_default();
+        let paths = self.target_paths();
         if paths.is_empty() {
             self.message = Some(tr(self.lang, "nothing selected", "選択されていません").into());
             return;
@@ -1887,7 +1887,7 @@ impl App {
     }
 
     pub(crate) fn set_attr_command(&mut self, arg: &str) {
-        let paths = self.active_pane().map(|p| p.target_paths()).unwrap_or_default();
+        let paths = self.target_paths();
         if paths.is_empty() {
             self.message = Some(tr(self.lang, "nothing selected", "選択されていません").into());
             return;
@@ -1962,7 +1962,7 @@ impl App {
     }
 
     pub(crate) fn set_readonly_command(&mut self, on: bool) {
-        let paths = self.active_pane().map(|p| p.target_paths()).unwrap_or_default();
+        let paths = self.target_paths();
         if paths.is_empty() {
             self.message = Some(tr(self.lang, "nothing selected", "選択されていません").into());
             return;
@@ -2258,7 +2258,7 @@ impl App {
     /// and are panelized into the active pane when the walk completes.
     fn begin_find(&mut self, needle: &str, mode: cian_core::search::Mode, to_pane: Option<String>) {
         self.find_return = None; // a fresh search invalidates any stashed list
-        let Some(root) = self.active_pane().map(|p| p.cwd.clone()) else { return };
+        let Some(root) = self.cwd() else { return };
         // `/re/` compiles to a regex; anything else is a literal substring. A
         // bad pattern stops here with its reason — searching for the wrong
         // thing silently would be worse.
@@ -3634,7 +3634,7 @@ impl App {
                 return Ok(());
             }
             InputKind::DiffSaveAs { text, html, md } => {
-                let dir = self.active_pane().map(|p| p.cwd.clone());
+                let dir = self.cwd();
                 if let Some(dir) = dir {
                     let path = dir.join(&name);
                     // The extension chooses the rendering: side-by-side HTML or
@@ -3691,7 +3691,7 @@ impl App {
                     self.message = Some(tr(self.lang, "compress cancelled", "圧縮を中止しました").into());
                     return Ok(());
                 }
-                let Some(cwd) = self.active_pane().map(|p| p.cwd.clone()) else { return Ok(()) };
+                let Some(cwd) = self.cwd() else { return Ok(()) };
                 let ext = match kind {
                     CompressKind::Zip | CompressKind::ZipEnc => ".zip",
                     CompressKind::TarGz => ".tar.gz",

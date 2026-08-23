@@ -219,7 +219,7 @@ fn draw_pane_zoom_overlay(f: &mut Frame, rect: Rect, app: &mut App) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(border_type())
-        .border_style(Style::default().fg(text_tone(theme().accent, theme().popup_bg)).add_modifier(Modifier::BOLD));
+        .border_style(accent_on_popup());
     let inner = rect.inner(Margin { vertical: 1, horizontal: 1 });
     f.render_widget(block, rect);
 
@@ -1510,7 +1510,7 @@ fn draw_startup_splash(f: &mut Frame, area: Rect, elapsed_ms: u128) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(border_type())
-        .border_style(Style::default().fg(text_tone(theme().accent, theme().popup_bg)).add_modifier(Modifier::BOLD))
+        .border_style(accent_on_popup())
         .style(Style::default().bg(theme().popup_bg).fg(readable_on(theme().popup_bg)));
     let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
     f.render_widget(block, rect);
@@ -1518,11 +1518,11 @@ fn draw_startup_splash(f: &mut Frame, area: Rect, elapsed_ms: u128) {
         Line::from(vec![
             Span::styled(
                 format!("{}  ", frame),
-                Style::default().fg(text_tone(theme().accent, theme().popup_bg)).add_modifier(Modifier::BOLD),
+                accent_on_popup(),
             ),
             Span::styled(
                 "cian",
-                Style::default().fg(text_tone(theme().accent, theme().popup_bg)).add_modifier(Modifier::BOLD),
+                accent_on_popup(),
             ),
             Span::styled("  starting up…", Style::default().fg(readable_on(theme().popup_bg))),
         ]),
@@ -1825,7 +1825,7 @@ fn tabs_title<'a>(
     // Their rects are pushed by the caller, which knows the pane's origin.
     {
         let active = &tabs.tabs[tabs.active.min(tabs.tabs.len().saturating_sub(1))];
-        let lit = Style::default().fg(text_tone(theme().accent, theme().popup_bg)).add_modifier(Modifier::BOLD);
+        let lit = accent_on_popup();
         let out = Style::default().fg(theme().dim);
         spans.push(Span::styled(
             "◀",
@@ -2864,7 +2864,7 @@ fn draw_shell_inner(
     let border_style = if panel_logs {
         Style::default().fg(log_border).add_modifier(Modifier::BOLD)
     } else if focused {
-        Style::default().fg(text_tone(theme().accent, theme().popup_bg)).add_modifier(Modifier::BOLD)
+        accent_on_popup()
     } else {
         Style::default().fg(theme().border)
     };
@@ -3059,7 +3059,7 @@ fn render_node(
                 } else if session.is_logging() {
                     Style::default().fg(log_border).add_modifier(Modifier::BOLD)
                 } else if is_active {
-                    Style::default().fg(text_tone(theme().accent, theme().popup_bg)).add_modifier(Modifier::BOLD)
+                    accent_on_popup()
                 } else {
                     Style::default().fg(dim_text(surface()))
                 };
@@ -3780,7 +3780,7 @@ fn draw_progress_bar(
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(border_type())
-        .border_style(Style::default().fg(text_tone(theme().accent, theme().popup_bg)).add_modifier(Modifier::BOLD))
+        .border_style(accent_on_popup())
         .title(format!(" {} ", tr_op_label(lang, label)));
     let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
     f.render_widget(block, rect);
@@ -3833,7 +3833,7 @@ fn draw_progress_bar(
         Paragraph::new(tr(lang, " Esc = stop   b = background ", " Esc = 中止   b = バックグラウンドへ ")).style(
             Style::default().fg(readable_on(theme().accent)).bg(theme().accent).add_modifier(Modifier::BOLD),
         ),
-        Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1),
+        footer_row(inner),
     );
 }
 
@@ -3886,9 +3886,7 @@ fn draw_image(f: &mut Frame, area: Rect, app: &mut App) {
                 .borders(Borders::ALL)
                 .border_type(border_type())
                 .border_style(
-                    Style::default()
-                        .fg(text_tone(theme().accent, theme().popup_bg))
-                        .add_modifier(Modifier::BOLD),
+                    accent_on_popup(),
                 )
                 .style(Style::default().bg(theme().popup_bg).fg(readable_on(theme().popup_bg)))
                 .title(format!(" {title}  —  {caption} "));
@@ -3953,7 +3951,7 @@ fn draw_image(f: &mut Frame, area: Rect, app: &mut App) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(border_type())
-        .border_style(Style::default().fg(text_tone(theme().accent, theme().popup_bg)).add_modifier(Modifier::BOLD))
+        .border_style(accent_on_popup())
         .style(Style::default().bg(theme().popup_bg).fg(readable_on(theme().popup_bg)))
         .title(format!(" {}  —  {} ", title, caption));
     f.render_widget(block, rect);
@@ -3973,7 +3971,7 @@ fn draw_image(f: &mut Frame, area: Rect, app: &mut App) {
         f.render_widget(Paragraph::new(rows), pic);
     }
 
-    let footer_area = Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1);
+    let footer_area = footer_row(inner);
     f.render_widget(
         Paragraph::new(tr(lang, " S-Enter reveal   E edit   Esc close ", " S-Enter 場所へ   E 編集   Esc 閉じる "))
             .style(Style::default().fg(readable_on(theme().accent)).bg(theme().accent).add_modifier(Modifier::BOLD)),
@@ -4235,7 +4233,7 @@ fn draw_image_gfx(f: &mut Frame, rect: Rect, inner: Rect, app: &mut App) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(border_type())
-        .border_style(Style::default().fg(text_tone(theme().accent, theme().popup_bg)).add_modifier(Modifier::BOLD))
+        .border_style(accent_on_popup())
         .style(Style::default().bg(theme().popup_bg).fg(readable_on(theme().popup_bg)))
         .title(format!(" {}  —  {} ", title, caption));
     f.render_widget(block, rect);
@@ -4268,7 +4266,7 @@ fn draw_image_gfx(f: &mut Frame, rect: Rect, inner: Rect, app: &mut App) {
         }
     }
 
-    let footer_area = Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1);
+    let footer_area = footer_row(inner);
     f.render_widget(
         Paragraph::new(tr(lang, " S-Enter reveal   E edit   Esc close ", " S-Enter 場所へ   E 編集   Esc 閉じる "))
             .style(Style::default().fg(readable_on(theme().accent)).bg(theme().accent).add_modifier(Modifier::BOLD)),
@@ -6072,7 +6070,7 @@ fn draw_simple_dialog(
     let button_row = !buttons.is_empty() && inner.height >= 3;
     let body_h = inner.height.saturating_sub(if button_row { 2 } else { 1 });
     let body_area = Rect::new(inner.x, inner.y, inner.width, body_h);
-    let footer_area = Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1);
+    let footer_area = footer_row(inner);
 
     // Spelled out rather than inherited: a `Block`'s style does not reach a
     // paragraph rendered into it, so without this the text kept the
@@ -6094,9 +6092,7 @@ fn draw_simple_dialog(
             let r = Rect::new(x, btn_area.y, w, 1);
             f.render_widget(
                 Paragraph::new(text).style(
-                    Style::default()
-                        .fg(text_tone(theme().accent, theme().popup_bg))
-                        .add_modifier(Modifier::BOLD),
+                    accent_on_popup(),
                 ),
                 r,
             );
@@ -6513,7 +6509,7 @@ fn draw_scrolling_text(
     );
 
     let footer_area =
-        Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1);
+        footer_row(inner);
     let footer_text = match lang {
         Lang::En => " j/k scroll  u/d page  g/G  Esc close ",
         Lang::Ja => " j/k スクロール  u/d ページ  g/G  Esc 閉じる ",
@@ -6573,6 +6569,18 @@ fn draw_context_menu(f: &mut Frame, area: Rect, popup: &mut Popup, menu_lang: La
 
 /// The two lines every filterable list opens with: what has been typed, and
 /// "(no match)" when it has ruled everything out.
+/// Everything inside a popup's frame except the footer row.
+fn body_rows(inner: Rect) -> Rect {
+    Rect::new(inner.x, inner.y, inner.width, inner.height.saturating_sub(1))
+}
+
+/// The last row inside a popup's frame — where its key hints go. Written out
+/// twenty-two times, and off by one in the twenty-third is a footer drawn over
+/// the last line of the body.
+fn footer_row(inner: Rect) -> Rect {
+    Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1)
+}
+
 fn filter_head(filter: &str, empty: bool) -> Vec<Line<'static>> {
     let mut lines = vec![Line::from(Span::styled(format!("/{filter}_"), accent_on_popup()))];
     if empty {
@@ -6636,10 +6644,10 @@ fn draw_ssh_hosts(
         // Row 0 is the filter line, so host `i` sits one below it.
         push_row_zone(zones, inner, inner.y + 1 + i as u16, i);
     }
-    let body_area = Rect::new(inner.x, inner.y, inner.width, inner.height.saturating_sub(1));
+    let body_area = body_rows(inner);
     f.render_widget(Paragraph::new(lines), body_area);
     let footer_area =
-        Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1);
+        footer_row(inner);
     f.render_widget(
         Paragraph::new(tr(lang, " type to filter  ↑↓ select  Enter next  Esc cancel ", " 入力で絞込  ↑↓ 選択  Enter 次へ  Esc 取消 ")).style(
             accent_bar(),
@@ -6686,10 +6694,10 @@ fn draw_snippets(
         ]));
         push_row_zone(zones, inner, inner.y + 1 + i as u16, i);
     }
-    let body_area = Rect::new(inner.x, inner.y, inner.width, inner.height.saturating_sub(1));
+    let body_area = body_rows(inner);
     f.render_widget(Paragraph::new(lines), body_area);
     let footer_area =
-        Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1);
+        footer_row(inner);
     f.render_widget(
         Paragraph::new(tr(lang, " type to filter  ↑↓ select  Enter send  Esc cancel ", " 入力で絞込  ↑↓ 選択  Enter 送信  Esc 取消 ")).style(
             accent_bar(),
@@ -6883,10 +6891,10 @@ fn draw_ssh_users(
     for i in 0..hst.users.len() {
         push_row_zone(zones, inner, inner.y + i as u16, i);
     }
-    let body_area = Rect::new(inner.x, inner.y, inner.width, inner.height.saturating_sub(1));
+    let body_area = body_rows(inner);
     f.render_widget(Paragraph::new(lines), body_area);
     let footer_area =
-        Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1);
+        footer_row(inner);
     f.render_widget(
         Paragraph::new(tr(lang, " Enter connect   Esc back ", " Enter 接続   Esc 戻る ")).style(
             accent_bar(),
@@ -7028,7 +7036,7 @@ fn draw_grep_replace(
             " Space=切替  a=全部  f=このファイル  Enter=書き込み  Esc=取消 ",
         ))
         .style(accent_bar()),
-        Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1),
+        footer_row(inner),
     );
 }
 
@@ -7152,7 +7160,7 @@ fn draw_find_results(
         Paragraph::new(tr(lang, " Enter=go  r=replace all  p=panelize  j/k=move  Esc=close ", " Enter=移動  r=一括置換  p=ペイン化  j/k=カーソル  Esc=閉じる ")).style(
             accent_bar(),
         ),
-        Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1),
+        footer_row(inner),
     );
 }
 
@@ -7183,7 +7191,7 @@ fn draw_shortcuts(
 
     let body_h = inner.height.saturating_sub(1);
     let footer_area =
-        Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1);
+        footer_row(inner);
 
     if level.is_empty() {
         let hint = vec![
@@ -7318,7 +7326,7 @@ fn draw_history(
         Paragraph::new(tr(lang, " ↑↓/jk select  Enter jump  a add shortcut  Esc cancel ", " ↑↓/jk 選択  Enter 移動  a ショートカット追加  Esc 取消 ")).style(
             accent_bar(),
         ),
-        Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1),
+        footer_row(inner),
     );
 }
 
@@ -7378,7 +7386,7 @@ fn draw_dest_picker(
         Paragraph::new(tr(lang, " Enter=send here   n=type a path   Esc=cancel ", " Enter=ここへ   n=パス入力   Esc=取消 ")).style(
             accent_bar(),
         ),
-        Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1),
+        footer_row(inner),
     );
 }
 
@@ -8451,7 +8459,7 @@ fn draw_dir_compare(
             " ◀ 左  ▶ 右  ≠ 相違   Enter=移動  </> 1件コピー  [/] 一括同期  w 保存  Esc ",
         ))
         .style(accent_bar()),
-        Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1),
+        footer_row(inner),
     );
 }
 
@@ -8636,7 +8644,7 @@ fn draw_diff(
     f.render_widget(
         Paragraph::new(footer)
         .style(accent_bar()),
-        Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1),
+        footer_row(inner),
     );
 }
 
@@ -8691,7 +8699,7 @@ fn draw_archive(
         Paragraph::new(tr(lang, " Enter=extract this   a=extract all   Esc=close ", " Enter=これを展開   a=全展開   Esc=閉じる ")).style(
             accent_bar(),
         ),
-        Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1),
+        footer_row(inner),
     );
 }
 
@@ -8760,7 +8768,7 @@ fn draw_palette(
     f.render_widget(
         Paragraph::new(tr(lang, " type to filter   ↑/↓ move   Enter run   Esc close ", " 入力で絞込   ↑/↓ 移動   Enter 実行   Esc 閉じる "))
             .style(accent_bar()),
-        Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1),
+        footer_row(inner),
     );
 }
 
@@ -8832,7 +8840,7 @@ fn draw_disk_usage(
             " Enter=ディレクトリへ   -=上へ   j/k 移動   Esc=閉じる ",
         ))
         .style(accent_bar()),
-        Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1),
+        footer_row(inner),
     );
 }
 
@@ -8918,12 +8926,12 @@ fn draw_macros(
             ))
         })
         .collect();
-    let body_area = Rect::new(inner.x, inner.y, inner.width, inner.height.saturating_sub(1));
+    let body_area = body_rows(inner);
     f.render_widget(Paragraph::new(rows), body_area);
     for i in 0..names.len() {
         push_row_zone(zones, inner, inner.y + i as u16, i);
     }
-    let footer_area = Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1);
+    let footer_area = footer_row(inner);
     f.render_widget(
         Paragraph::new(tr(lang, " Enter=run  j/k  Esc ", " Enter=実行  j/k  Esc ")).style(
             accent_bar(),
@@ -8967,13 +8975,13 @@ fn draw_sort_picker(
             ))
         })
         .collect();
-    let body_area = Rect::new(inner.x, inner.y, inner.width, inner.height.saturating_sub(1));
+    let body_area = body_rows(inner);
     f.render_widget(Paragraph::new(rows), body_area);
     for i in 0..SortKey::ALL.len() {
         push_row_zone(zones, inner, inner.y + i as u16, i);
     }
     let footer_area =
-        Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1);
+        footer_row(inner);
     f.render_widget(
         Paragraph::new(tr(lang, " Enter=apply (again = reverse)  Esc ", " Enter=適用（再度で逆順）  Esc ")).style(
             accent_bar(),
@@ -9021,7 +9029,7 @@ fn draw_encoding_picker(
         Paragraph::new(tr(lang, " Enter=apply  Esc=cancel ", " Enter=適用  Esc=取消 ")).style(
             accent_bar(),
         ),
-        Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1),
+        footer_row(inner),
     );
 }
 
@@ -9060,13 +9068,13 @@ fn draw_color_picker(
             Line::from(vec![swatch, label])
         })
         .collect();
-    let body_area = Rect::new(inner.x, inner.y, inner.width, inner.height.saturating_sub(1));
+    let body_area = body_rows(inner);
     f.render_widget(Paragraph::new(rows), body_area);
     for i in 0..PANE_BG_PRESETS.len() {
         push_row_zone(zones, inner, inner.y + i as u16, i);
     }
     let footer_area =
-        Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1);
+        footer_row(inner);
     f.render_widget(
         Paragraph::new(tr(lang, " Enter=apply  Esc=cancel ", " Enter=適用  Esc=取消 ")).style(
             accent_bar(),

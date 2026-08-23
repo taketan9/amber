@@ -83,7 +83,7 @@ impl App {
     /// The selection to act on for a git command: marked files, else the entry
     /// under the cursor (never the `..` row).
     pub(crate) fn git_targets(&self) -> Vec<PathBuf> {
-        self.active_pane().map(|p| p.target_paths()).unwrap_or_default()
+        self.target_paths()
     }
 
     /// Stage the selection: `git add` in git, `svn add` in an svn working copy.

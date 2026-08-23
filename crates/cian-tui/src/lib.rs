@@ -3198,6 +3198,25 @@ impl App {
         }
     }
     fn active_pane(&self) -> Option<&Pane> { self.active_file_tabs().map(|t| t.active_ref()) }
+
+    /// Is the active pane looking inside an archive? Six places ask, and the
+    /// answer decides whether a file operation goes to disk or to the zip.
+    pub(crate) fn in_archive(&self) -> bool {
+        self.active_pane().map(|p| p.archive_view().is_some()).unwrap_or(false)
+    }
+
+    /// Where the active pane is, if there is one.
+    pub(crate) fn cwd(&self) -> Option<PathBuf> {
+        self.active_pane().map(|p| p.cwd.clone())
+    }
+
+    /// What an operation acts on: the marked entries, or the one under the
+    /// cursor when nothing is marked. Never `..`.
+    ///
+    /// Seven callers asked the pane for this, all spelling it the same way.
+    pub(crate) fn target_paths(&self) -> Vec<PathBuf> {
+        self.active_pane().map(|p| p.target_paths()).unwrap_or_default()
+    }
     fn active_pane_mut(&mut self) -> Option<&mut Pane> {
         self.active_file_tabs_mut().map(|t| t.active_mut())
     }

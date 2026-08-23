@@ -386,7 +386,7 @@ impl App {
 
     /// Put the pane's targets into the file clipboard.
     pub(crate) fn clip_targets(&mut self, op: ClipOp) {
-        let paths = self.active_pane().map(|p| p.target_paths()).unwrap_or_default();
+        let paths = self.target_paths();
         if paths.is_empty() {
             self.message = Some(tr(self.lang, "nothing selected", "選択されていません").into());
             return;

@@ -890,7 +890,7 @@ impl App {
                 // stays a click is decided on release. The cursor was just put
                 // on the clicked row, so that is the selection anchor.
                 let anchor = self.active_pane().map(|p| p.cursor).unwrap_or(0);
-                let paths = self.active_pane().map(|p| p.target_paths()).unwrap_or_default();
+                let paths = self.target_paths();
                 if !paths.is_empty() {
                     self.file_drag = Some(FileDrag {
                         from: pane,
@@ -1028,7 +1028,7 @@ impl App {
     /// application that opens by accident has to be found and closed.
     /// Ctrl+Enter is the launch, and `x` where a terminal keeps Ctrl.
     pub(crate) fn activate_selected(&mut self) -> Result<()> {
-        if self.active_pane().map(|p| p.archive_view().is_some()).unwrap_or(false) {
+        if self.in_archive() {
             self.archive_activate();
             return Ok(());
         }

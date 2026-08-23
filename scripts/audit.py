@@ -207,6 +207,36 @@ DUP_OK = {
 }
 
 
+#: 4回以上出ても**それでよい行**（理由つき）。
+#
+# 同じ言い回しを同じ意味で使っているだけのものは、括ると読めなくなる。
+LINE_OK = {
+    # 画面に出る文言。`self.say(en, ja)` に括れば全部1行短くなるが、
+    # **何と表示されるかがその場で読めなくなる**。文言はコードより頻繁に
+    # 直すので、直す人が探す場所に置いておく
+    'self.message = Some(tr(',
+    # 別々のポップアップが、同じキーに同じ意味を与えているだけ。1つの
+    # ハンドラに束ねるには、中身の違うリストを1つの型にするしかない
+    "KeyCode::Char('k') | KeyCode::Up",
+    'let base = if sel {',
+    # 転送ごとに違うクロージャを載せる制御構造体。共有できるのは名前だけ
+    'cian_scp::Ctl {',
+    # エラーに文脈を付ける定型。付け忘れた1箇所が「No such file」とだけ
+    # 言うので、**書いてあること自体に意味がある**
+    '.with_context(|| format!(',
+    # 選択範囲の矩形。オペレータごとに anchor が違う
+    'cian_core::textops::Block::between(',
+    # 転送の入口。4つの操作が同じ一文で SFTP を開くだけ
+    'open_sftp(&handle)',
+    # パスから表示名を取る定型
+    'path.file_name().map(|s| s.to_string_lossy()',
+    # レビュー行のチェックボックスの色。4つのレビューが同じ見た目を持つ
+    'let box_c = if it.selected {',
+    # リモートペインの現在地。左右それぞれで前後を見るので4回出る
+    '.remote_view().map(|(_, p)|',
+}
+
+
 #: 握り潰したままでよい dead_code（理由つき）
 DEAD_OK = {
     # **死んでいない。** Lua ランタイムを app の生存期間ぶん生かしておくためだけ
@@ -261,10 +291,17 @@ def dup() -> int:
     c = collections.Counter(
         l.strip() for p in SRC for l in _read(p).splitlines()
         if len(l.strip()) > 70 and not l.strip().startswith(('//', '///', '*')))
-    for line, n in c.most_common(8):
-        if n >= 4:
-            print(f'  ★ 同じ行が {n} 回  {line[:78]}')
-            found += 1
+    # **総数を先に言う。** 上位8件だけ出していた版は、潰しても下位が繰り上がって
+    # 件数が動かず、「進んでいない」ように見えた。多いのは省くが、いくつ省いたかは
+    # 言う ―― 黙って切ると「これで全部」に読める
+    over = [(n, l) for l, n in c.items()
+            if n >= 4 and not any(k in l for k in LINE_OK)]
+    over.sort(reverse=True)
+    for n, line in over[:10]:
+        print(f'  ★ 同じ行が {n} 回  {line[:78]}')
+    if len(over) > 10:
+        print(f'    …ほか {len(over) - 10} 種類')
+    found += len(over)
     print(f'  → {found} 件' if found else '  なし')
     return found
 

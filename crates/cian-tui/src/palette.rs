@@ -157,7 +157,7 @@ impl App {
     /// `:files` — a live fuzzy finder over the files under the active pane. The
     /// empty-query list leads with the recently-opened files, then the tree.
     pub(crate) fn start_file_finder(&mut self) {
-        let Some(root) = self.active_pane().map(|p| p.cwd.clone()) else { return };
+        let Some(root) = self.cwd() else { return };
         // The recently-opened files are a short list already in memory, so the
         // picker opens on them at once.
         let mut seen: HashSet<PathBuf> = HashSet::new();
@@ -294,7 +294,7 @@ impl App {
 
     /// `:recent` — just the recently-opened files.
     pub(crate) fn start_recent_files(&mut self) {
-        let root = self.active_pane().map(|p| p.cwd.clone()).unwrap_or_default();
+        let root = self.cwd().unwrap_or_default();
         let items: Vec<PaletteItem> = self
             .recent_files
             .iter()

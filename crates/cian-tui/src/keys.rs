@@ -2520,7 +2520,7 @@ impl App {
                         p.clear_filter();
                     }
                     self.filter_buffer.clear();
-                } else if self.active_pane().map(|p| p.archive_view().is_some()).unwrap_or(false) {
+                } else if self.in_archive() {
                     self.archive_go_up();
                 } else if self.active_pane().map(|p| p.is_flat()).unwrap_or(false) {
                     // A search listing has no parent to climb to: "up" from a
@@ -2598,12 +2598,12 @@ impl App {
                 if let Some(p) = self.active_pane_mut() { p.move_cursor(10); }
             }
             Action::Parent => {
-                if self.active_pane().map(|p| p.archive_view().is_some()).unwrap_or(false) {
+                if self.in_archive() {
                     self.archive_go_up();
                 } else if let Some(p) = self.active_pane_mut() { p.go_parent()?; }
             }
             Action::EnterDir => {
-                if self.active_pane().map(|p| p.archive_view().is_some()).unwrap_or(false) {
+                if self.in_archive() {
                     // Inside an archive `l` behaves like Enter on directories.
                     let on_dir = self
                         .active_pane()

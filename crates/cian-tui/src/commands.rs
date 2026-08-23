@@ -316,7 +316,7 @@ impl App {
                 if rest.is_empty() {
                     self.start_bulk_rename();
                 } else {
-                    let targets = self.active_pane().map(|p| p.target_paths()).unwrap_or_default();
+                    let targets = self.target_paths();
                     if targets.is_empty() {
                         self.message = Some(tr(self.lang, "nothing selected to rename", "リネーム対象がありません").into());
                     } else {
@@ -509,7 +509,7 @@ impl App {
             self.message = Some(tr(self.lang, "usage: :mkdir [-p] <name>", "使い方: :mkdir [-p] <名前>").into());
             return;
         }
-        let Some(cwd) = self.active_pane().map(|p| p.cwd.clone()) else { return };
+        let Some(cwd) = self.cwd() else { return };
         let mut made = 0;
         for name in &names {
             match cian_core::ops::make_dir(&cwd, name, parents) {
@@ -539,7 +539,7 @@ impl App {
             self.message = Some(tr(self.lang, "usage: :touch <name>", "使い方: :touch <名前>").into());
             return;
         }
-        let Some(cwd) = self.active_pane().map(|p| p.cwd.clone()) else { return };
+        let Some(cwd) = self.cwd() else { return };
         let mut n = 0;
         for name in &names {
             match cian_core::ops::touch(&cwd, name) {
@@ -566,7 +566,7 @@ impl App {
             self.start_transfer(op);
             return;
         }
-        let targets = self.active_pane().map(|p| p.target_paths()).unwrap_or_default();
+        let targets = self.target_paths();
         if targets.is_empty() {
             self.message = Some(tr(self.lang, "nothing to operate on", "操作する対象がありません").into());
             return;
@@ -639,7 +639,7 @@ impl App {
         self.open_popup(Popup::Notice { lines: self.attributes_lines(&paths, 40) });
     }
     pub(crate) fn cmd_wc(&mut self) {
-        let paths = self.active_pane().map(|p| p.target_paths()).unwrap_or_default();
+        let paths = self.target_paths();
         if paths.is_empty() {
             self.message = Some(tr(self.lang, "nothing selected", "選択されていません").into());
             return;
@@ -698,7 +698,7 @@ impl App {
             },
             None => cian_core::inspect::Unit::Human,
         };
-        let Some(cwd) = self.active_pane().map(|p| p.cwd.clone()) else { return };
+        let Some(cwd) = self.cwd() else { return };
         match cian_core::inspect::disk_space(&cwd) {
             Ok(s) => {
                 let lines = vec![
@@ -723,12 +723,12 @@ impl App {
             self.message = Some(tr(self.lang, "usage: :zip [-e] <name.zip>", "使い方: :zip [-e] <名前.zip>").into());
             return;
         };
-        let sources = self.active_pane().map(|p| p.target_paths()).unwrap_or_default();
+        let sources = self.target_paths();
         if sources.is_empty() {
             self.message = Some(tr(self.lang, "nothing selected to zip", "zip にする対象が選択されていません").into());
             return;
         }
-        let Some(cwd) = self.active_pane().map(|p| p.cwd.clone()) else { return };
+        let Some(cwd) = self.cwd() else { return };
         let mut fname = name.to_string();
         if !fname.to_lowercase().ends_with(".zip") {
             fname.push_str(".zip");
@@ -771,12 +771,12 @@ impl App {
             self.message = Some(if gz { "usage: :targz <name>" } else { "usage: :tar <name>" }.into());
             return;
         };
-        let sources = self.active_pane().map(|p| p.target_paths()).unwrap_or_default();
+        let sources = self.target_paths();
         if sources.is_empty() {
             self.message = Some(tr(self.lang, "nothing selected to archive", "アーカイブにする対象が選択されていません").into());
             return;
         }
-        let Some(cwd) = self.active_pane().map(|p| p.cwd.clone()) else { return };
+        let Some(cwd) = self.cwd() else { return };
         let mut fname = name.to_string();
         let low = fname.to_lowercase();
         if gz {
@@ -807,7 +807,7 @@ impl App {
     /// From the right-click Compress submenu: gather the selection and ask for
     /// the archive name; [`Self::finish_text_input`] builds it on submit.
     pub(crate) fn prompt_compress(&mut self, kind: CompressKind) {
-        let sources = self.active_pane().map(|p| p.target_paths()).unwrap_or_default();
+        let sources = self.target_paths();
         if sources.is_empty() {
             self.message = Some(tr(self.lang, "nothing selected to compress", "圧縮対象がありません").into());
             return;
