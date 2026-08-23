@@ -491,6 +491,104 @@ pub(crate) fn width(s: &str) -> usize {
     UnicodeWidthStr::width(s)
 }
 
+/// Wrap by display width, breaking at a space when there is one to hand.
+///
+/// Japanese has no spaces between words and breaks anywhere, which is what
+/// [`wrap_str`] does and what Japanese wants. English in the same paragraph
+/// would come out cut through the middle of a word, so a break is pulled back
+/// to the last space when that space is in the second half of the row —
+/// far enough along that the row is still mostly full.
+pub(crate) fn wrap_words(s: &str, width: usize) -> Vec<String> {
+    let width = width.max(1);
+    if s.is_empty() {
+        return vec![String::new()];
+    }
+    let mut out: Vec<String> = Vec::new();
+    let mut row = String::new();
+    let mut w = 0usize;
+    // Where the last space sits in `row`, and how wide the row was before it.
+    let mut space: Option<(usize, usize)> = None;
+    for ch in s.chars() {
+        let cw = UnicodeWidthStr::width(ch.to_string().as_str()).max(1);
+        if w + cw > width && !row.is_empty() {
+            match space {
+                Some((at, upto)) if upto * 2 >= width => {
+                    // The space stays on the row it ended. Invisible against
+                    // the edge, and it means the rows put back together are
+                    // the text that went in — which a manual entry needs.
+                    let tail = row[at + 1..].to_string();
+                    row.truncate(at + 1);
+                    out.push(std::mem::take(&mut row));
+                    w = UnicodeWidthStr::width(tail.as_str());
+                    row = tail;
+                }
+                _ => {
+                    out.push(std::mem::take(&mut row));
+                    w = 0;
+                }
+            }
+            space = None;
+        }
+        if ch == ' ' {
+            space = Some((row.len(), w));
+        }
+        row.push(ch);
+        w += cw;
+    }
+    if !row.is_empty() {
+        out.push(row);
+    }
+    out
+}
+
+/// Wrap a two-column line — a key and what it does — so that nothing is lost
+/// to the edge, with the continuations lined up under the description instead
+/// of back at the margin. A wrapped entry has to still read as one entry.
+///
+/// The description starts after the run of spaces that separates the columns;
+/// a line with no such run (a heading, a paragraph) hangs at its own indent.
+pub(crate) fn wrap_hanging(line: &str, width: usize) -> Vec<String> {
+    if width == 0 || UnicodeWidthStr::width(line) <= width {
+        return vec![line.to_string()];
+    }
+    let split = column_gap(line).filter(|&(_, col)| col * 2 < width);
+    let (at, hang) = split.unwrap_or((0, 0));
+    let (head, rest) = line.split_at(at);
+    let mut rows = wrap_words(rest, width - hang).into_iter();
+    let first = rows.next().unwrap_or_default();
+    let mut out = vec![format!("{head}{first}")];
+    let pad = " ".repeat(hang);
+    out.extend(rows.map(|r| format!("{pad}{r}")));
+    out
+}
+
+/// The byte index and display column where the second column starts: past the
+/// indent, past the first word, past the run of two or more spaces after it.
+pub(crate) fn column_gap(line: &str) -> Option<(usize, usize)> {
+    let mut col = 0usize;
+    let mut seen_text = false;
+    let mut run: Option<(usize, usize)> = None; // start byte, start column
+    for (i, ch) in line.char_indices() {
+        if ch == ' ' {
+            if seen_text && run.is_none() {
+                run = Some((i, col));
+            }
+        } else {
+            if let Some((start, start_col)) = run {
+                // Two or more spaces after some text: the columns part here.
+                if col - start_col >= 2 {
+                    return Some((i, col));
+                }
+                let _ = start;
+                run = None;
+            }
+            seen_text = true;
+        }
+        col += UnicodeWidthStr::width(ch.to_string().as_str()).max(1);
+    }
+    None
+}
+
 /// Pad to `w` display cells, accounting for wide characters.
 pub(crate) fn pad_to(s: &str, w: usize) -> String {
     let mut out = s.to_string();

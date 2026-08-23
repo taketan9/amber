@@ -7607,6 +7607,114 @@
         assert!(bad.is_empty(), "these end in a full stop: {bad:#?}");
     }
 
+    /// Every entry the manual holds reaches the eye. It used to be cut to the
+    /// popup's width, and 75 of its 195 entries were long enough to lose their
+    /// ending — a key list you have to guess at is not a key list.
+    #[test]
+    fn the_manual_never_cuts_an_entry_short() {
+        let lines = crate::manual_lines(&HashMap::new(), Lang::Ja);
+        assert!(lines.iter().any(|l| crate::util::width(l) > 100), "the long ones are the point");
+        for w in [40usize, 56, 76, 100, 120] {
+            for line in &lines {
+                let rows = crate::util::wrap_hanging(line, w);
+                for r in &rows {
+                    assert!(crate::util::width(r) <= w, "at {w}: {r:?} from {line:?}");
+                }
+                // Put back together, the rows are the entry that went in.
+                // The indent is asked for rather than counted: a continuation
+                // may legitimately open on a space of its own.
+                let hang = crate::util::column_gap(line)
+                    .map(|(_, col)| col)
+                    .filter(|col| col * 2 < w)
+                    .unwrap_or(0);
+                let rebuilt: String = rows
+                    .iter()
+                    .enumerate()
+                    .map(|(i, r)| if i == 0 { r.as_str() } else { &r[hang..] })
+                    .collect();
+                assert_eq!(&rebuilt, line, "at {w}, an entry came back changed");
+            }
+        }
+    }
+
+    /// And on the screen: the widest entry there is, whole, at a width that
+    /// used to cut it.
+    #[test]
+    fn the_widest_entry_arrives_whole() {
+        let widest = crate::manual_lines(&HashMap::new(), Lang::Ja)
+            .into_iter()
+            .max_by_key(|l| crate::util::width(l))
+            .expect("the manual has entries");
+        // Its last few characters: the part a cut takes away first.
+        let tail: String = widest.chars().rev().take(6).collect::<Vec<_>>().into_iter().rev().collect();
+        for (w, h) in [(80, 30), (100, 24), (140, 40)] {
+            let (_d, mut app) = app_with_lang(&["a.txt"], "ja");
+            app.handle_key(key('?')).unwrap();
+            // Page down through the whole thing looking for the ending.
+            let mut found = false;
+            for _ in 0..40 {
+                // A 全角 character is two cells and the second comes back as
+                // a space, so the rendered row reads "リ ッ ク". Compare
+                // without the spaces.
+                let bare = tail.replace(' ', "");
+                if render(&mut app, w, h)
+                    .iter()
+                    .any(|l| l.replace(' ', "").contains(&bare))
+                {
+                    found = true;
+                    break;
+                }
+                app.handle_key(key('d')).unwrap();
+            }
+            assert!(found, "{w}x{h}: the widest entry never showed its ending {tail:?}");
+        }
+    }
+
+    /// Wrapping loses nothing and invents nothing: the rows put back together
+    /// are the line that went in, and the continuations line up under the
+    /// description rather than back at the margin.
+    #[test]
+    fn a_wrapped_entry_still_reads_as_one_entry() {
+        let line = "  Shift+P     選択をクリップボードへ（Finder/エクスプローラに貼り付けられます）";
+        let rows = crate::util::wrap_hanging(line, 40);
+        assert!(rows.len() > 1, "this one has to wrap at 40 cells");
+        for r in &rows {
+            assert!(crate::util::width(r) <= 40, "row over the width: {r:?}");
+        }
+        let hang = crate::util::column_gap(line).expect("two columns").1;
+        assert_eq!(hang, 14, "continuations hang under the description column");
+        for r in &rows[1..] {
+            assert!(r.starts_with(&" ".repeat(hang)), "every continuation, not just the first");
+        }
+        let rebuilt: String = rows
+            .iter()
+            .enumerate()
+            .map(|(i, r)| if i == 0 { r.clone() } else { r[hang..].to_string() })
+            .collect();
+        assert_eq!(rebuilt, line, "nothing was lost and nothing added");
+    }
+
+    /// English breaks at a space when there is one to hand; Japanese has no
+    /// spaces to break at and breaks where the width runs out.
+    #[test]
+    fn wrapping_prefers_a_space_but_does_not_need_one() {
+        let rows = crate::util::wrap_words("copy the marked files to the other pane", 20);
+        for r in &rows {
+            assert!(!r.starts_with(' ') || r.is_empty(), "no row opens on a space: {r:?}");
+            assert!(crate::util::width(r) <= 20);
+        }
+        // The break's own space stays where it was, so the rows put back
+        // together are the text that went in.
+        assert_eq!(rows.concat(), "copy the marked files to the other pane");
+
+        let jp = crate::util::wrap_words("マークしたファイルを反対のペインへコピーします", 20);
+        assert!(jp.len() > 1, "too wide for one row");
+        for r in &jp {
+            assert!(crate::util::width(r) <= 20, "row over the width: {r:?}");
+        }
+        assert_eq!(jp.concat(), "マークしたファイルを反対のペインへコピーします");
+    }
+
     #[test]
     fn parse_sem_search_reply_matches_orders_and_folds_reasons() {
         let hit = |rel: &str| cian_core::search::Hit {
@@ -8400,13 +8508,20 @@
         let Popup::Manual { scroll, .. } = &app.popup else { panic!("expected manual") };
         assert_eq!(*scroll, 0);
 
-        // Paging past the end settles on the last page after a render.
+        // Paging past the end settles on the last page after a render, and
+        // stays there. The end is wherever the renderer puts it — the entries
+        // are wrapped to the popup's width, so it is not the count of them.
         for _ in 0..50 {
             app.handle_key(key('d')).unwrap();
         }
         let _ = render(&mut app, 100, 24);
-        let Popup::Manual { scroll, lines } = &app.popup else { panic!("expected manual") };
-        assert!(*scroll < lines.len(), "scroll must stay inside the document");
+        let Popup::Manual { scroll, .. } = &app.popup else { panic!("expected manual") };
+        let settled = *scroll;
+        assert!(settled > 0, "paging moved off the top");
+        app.handle_key(key('d')).unwrap();
+        let _ = render(&mut app, 100, 24);
+        let Popup::Manual { scroll, .. } = &app.popup else { panic!("expected manual") };
+        assert_eq!(*scroll, settled, "and the last page is where paging stops");
     }
 
     /// The manual reflects `init.lua` overrides rather than a hardcoded list.

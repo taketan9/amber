@@ -1601,10 +1601,14 @@ impl App {
     }
 
     fn manual_key(&mut self, key: KeyEvent) -> Result<()> {
-        let Popup::Manual { lines, scroll } = &mut self.popup else { return Ok(()) };
+        let Popup::Manual { scroll, .. } = &mut self.popup else { return Ok(()) };
             // The renderer clamps `scroll` to the last full page each frame, so
-            // saturating at the line count here is safe.
-            let last = lines.len().saturating_sub(1);
+            // overshooting here is safe — and necessary, because the entries
+            // are wrapped to the popup's width and only the renderer knows how
+            // many rows that came to. `G` used to stop at the count of
+            // unwrapped entries, which is short of the end whenever anything
+            // wrapped.
+            let last = usize::MAX;
             match key.code {
                 // Back to whatever the manual was raised over — the panel, when
                 // it was opened beside one. `menu_back` does the same for the

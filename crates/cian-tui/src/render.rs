@@ -6403,7 +6403,10 @@ pub(crate) fn editor_mode_of(popup: &Popup, notepad: bool) -> Option<EditorMode>
 /// viewport rather than the fixed block the other popups use.
 fn draw_manual(f: &mut Frame, area: Rect, popup: &mut Popup, lang: Lang) {
     let Popup::Manual { lines, scroll } = popup else { return };
-    draw_scrolling_text(f, area, lines, scroll, tr(lang, " manual ", " キー一覧 "), 70, lang);
+    // 70 cut a third of the entries in half: the widest is 122 cells, and the
+    // Japanese descriptions are two cells a character. Wide enough for almost
+    // all of them, and the rest wrap.
+    draw_scrolling_text(f, area, lines, scroll, tr(lang, " manual ", " キー一覧 "), 104, lang);
 }
 
 /// A read-only report (`:ragdebug`) — the manual's viewport with its own title.
@@ -6434,6 +6437,14 @@ fn draw_scrolling_text(
     let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
     let view_h = inner.height.saturating_sub(1) as usize;
 
+    // Wrapped, not cut. This viewport used to truncate every line that reached
+    // the edge, which in a narrow terminal is most of the manual — and a key
+    // list whose descriptions end in `…` is a key list you have to guess at.
+    // The continuations line up under the description so an entry that took
+    // two rows still reads as one entry.
+    let lines: Vec<String> =
+        lines.iter().flat_map(|l| crate::util::wrap_hanging(l, inner.width as usize)).collect();
+
     // Clamp so the last page sits flush with the bottom; this also
     // normalises an over-scrolled offset from the key handler.
     let max_scroll = lines.len().saturating_sub(view_h);
@@ -6459,20 +6470,15 @@ fn draw_scrolling_text(
         .title_bottom(pos);
     f.render_widget(block, rect);
 
-    // Cut to the width here, by display cells, rather than left to the
-    // widget's own truncation.
-    //
-    // A 全角 character is two cells, and a line cut *between* its halves leaves
-    // the second half as a cell nobody wrote: what is drawn there is whatever
-    // the renderer makes of half a character, which on this Mac was a reversed
-    // block — a stray highlight at the end of exactly the lines long enough to
-    // reach the edge. Cut on a character boundary and the question never comes
-    // up.
+    // Every row already fits, so nothing here can cut a 全角 character in half
+    // — which used to leave the second cell as one nobody wrote, drawn as a
+    // stray reversed block at the end of exactly the lines long enough to
+    // reach the edge.
     let body: Vec<Line> = lines
         .iter()
         .skip(offset)
         .take(view_h)
-        .map(|l| Line::from(crate::util::truncate(l, inner.width as usize)))
+        .map(|l| Line::from(l.clone()))
         .collect();
     let body_area = Rect::new(inner.x, inner.y, inner.width, view_h as u16);
     f.render_widget(
