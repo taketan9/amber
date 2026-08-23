@@ -106,6 +106,10 @@ jobs:
           cp target/release/cian-tui "$stage/"
           cp examples/init.lua "$stage/examples/"
           cp README.md README.ja.md LICENSE "$stage/"
+          # The quarantine catches everyone who downloads this, and cian is
+          # not notarised. The fix belongs where they will look for it — in
+          # the folder, not on line 30 of a manual.
+          cp packaging/macos/README.txt "$stage/"
           # Zipped with ditto so the .app keeps its permissions and the
           # ad-hoc signature survives the round trip.
           ditto -c -k --sequesterRsrc --keepParent "$stage" cian-macos.zip
