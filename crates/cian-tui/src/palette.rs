@@ -47,7 +47,7 @@ pub(crate) fn command_list() -> &'static [(&'static str, (&'static str, &'static
         ("aicmd",      ("AI: shell command from a description", "AI: 説明からコマンド"), true),
         ("aicommit",   ("AI: draft a commit message", "AI: コミットメッセージ下書き"), false),
         ("aijunk",     ("AI: detect junk files", "AI: 不要ファイル検出"), false),
-        ("aiorganize", ("AI: suggest a folder structure", "AI: フォルダ構成を提案"), false),
+        ("aiorganize", ("AI: suggest a folder structure", "AI: ディレクトリ構成を提案"), false),
         ("airename",   ("AI: rename by instruction", "AI: 指示でリネーム"), false),
         ("aisearch",   ("AI: semantic file search", "AI: 意味検索"), true),
         ("aierror",    ("AI: explain the last shell error", "AI: 直前のエラーを説明"), false),
@@ -67,7 +67,7 @@ pub(crate) fn command_list() -> &'static [(&'static str, (&'static str, &'static
         ("zip",        ("zip the selection (-e for a password)", "選択を zip（-e で暗号化）"), false),
         ("tar",        ("tar the selection", "選択を tar"), false),
         ("targz",      ("tar.gz the selection", "選択を tar.gz"), false),
-        ("unzip",      ("extract the archive here", "書庫をここに展開"), false),
+        ("unzip",      ("extract the archive here", "アーカイブをここに展開"), false),
         ("hash",       ("checksum the selection (md5 / sha256)", "チェックサム"), true),
         ("attr",       ("permissions & owner", "権限・所有者"), false),
         ("chmod",      ("change the mode (octal)", "モード変更（8進）"), true),
@@ -256,7 +256,7 @@ impl App {
             if capped {
                 self.message = Some(match self.lang {
                     Lang::En => format!("first {count} files — narrow the folder to see the rest"),
-                    Lang::Ja => format!("{count} 件で打ち切りました。フォルダを絞ると残りも見られます"),
+                    Lang::Ja => format!("{count} 件で打ち切りました。ディレクトリを絞ると残りも見られます"),
                 });
             } else if matches!(&self.popup, Popup::Palette { items, .. } if items.is_empty()) {
                 // Nothing here at all. Better to say so than to leave an empty

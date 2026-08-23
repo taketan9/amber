@@ -190,6 +190,23 @@ def _verbs() -> set[str]:
     return {v for arm in _arms() for v in arm}
 
 
+#: 似ているが**分けたままでよい**関数（理由つき）。
+#
+# ここに書くのは「重複を見逃す」ためではなく、**なぜ括らないか**を残すため。
+# 括った方が高くつく組がある。
+DUP_OK = {
+    # 前後の鏡像。1本にすると「どちらのメソッドを呼ぶか」「矢印」「メッセージ」
+    # で `if back` が3つ入る。10行の読める関数2本が、13行の分岐だらけ1本に
+    # 化けるだけで、読む側は毎回どちらの方向の話かを追うことになる
+    ('pane_go_back', 'pane_go_forward'),
+    # 共有していた「返答から JSON 配列を切り出す」7行は `json_array` に出した。
+    # 残る類似は、別々の構造体を別々の項目に組み立てている部分そのもので、
+    # 括るには型を1つにするしかない ―― 片方は移動先を、もう片方は理由だけを
+    # 持つので、1つにした型は常にどちらかの欄が空になる
+    ('parse_junk_reply', 'parse_structure_reply'),
+}
+
+
 #: 握り潰したままでよい dead_code（理由つき）
 DEAD_OK = {
     # **死んでいない。** Lua ランタイムを app の生存期間ぶん生かしておくためだけ
@@ -236,7 +253,7 @@ def dup() -> int:
                 if s.quick_ratio() < 0.80:
                     continue
                 r = s.ratio()
-                if r >= 0.80:
+                if r >= 0.80 and (a, b) not in DUP_OK and (b, a) not in DUP_OK:
                     print(f'  ★ {r:.2f} {_rel(p)}: {a}:{funcs[a][1]} ↔ {b}:{funcs[b][1]}')
                     found += 1
 

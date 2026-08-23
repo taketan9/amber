@@ -3398,7 +3398,7 @@ pub(crate) fn key_hints(app: &App) -> Vec<(&'static str, &'static str)> {
             if zip {
                 v.extend([("r", d("rename", "リネーム")), ("d", d("delete", "削除"))]);
             } else {
-                v.push(("", d("(this archive cannot be written)", "（この書庫は書き換えられません）")));
+                v.push(("", d("(this archive cannot be written)", "（このアーカイブは書き換えられません）")));
             }
             v.push(("?", d("help", "ヘルプ")));
             v
@@ -4345,6 +4345,31 @@ fn fit_to_surface(c: Color) -> Color {
 /// badge, say — sits near enough to the line that the threshold could call it
 /// either way, and calling it wrong puts pale text on a pale blue. Whichever
 /// of the two actually contrasts more, wins.
+/// The surface a popup is drawn on: its background, and a foreground the
+/// theme guarantees is legible against it.
+///
+/// Written out at every popup — eighteen of them — and a nineteenth that gave
+/// only the background is how a dialog ends up with the terminal's own text
+/// colour on the theme's paper.
+pub(crate) fn popup_style() -> Style {
+    Style::default().bg(theme().popup_bg).fg(readable_on(theme().popup_bg))
+}
+
+/// The accent bar a popup's footer and title sit on: the accent as paper, and
+/// bold text the theme guarantees is legible on it.
+pub(crate) fn accent_bar() -> Style {
+    Style::default()
+        .fg(readable_on(theme().accent))
+        .bg(theme().accent)
+        .add_modifier(Modifier::BOLD)
+}
+
+/// A popup's own border and heading: the accent, toned to stay legible where
+/// it is drawn on the popup's paper rather than filling it.
+pub(crate) fn accent_on_popup() -> Style {
+    Style::default().fg(text_tone(theme().accent, theme().popup_bg)).add_modifier(Modifier::BOLD)
+}
+
 pub(crate) fn readable_on(bg: Color) -> Color {
     const DARK: Color = Color::Rgb(30, 32, 40);
     const LIGHT: Color = Color::Rgb(228, 228, 240);
@@ -4677,7 +4702,7 @@ fn draw_ai_chat(f: &mut Frame, area: Rect, app: &mut App) {
         .borders(Borders::ALL)
         .border_type(border_type())
         .border_style(Style::default().fg(accent).add_modifier(Modifier::BOLD))
-        .style(Style::default().bg(theme().popup_bg).fg(readable_on(theme().popup_bg)))
+        .style(popup_style())
         .title(Line::from(vec![
             Span::styled(" ◈ ", Style::default().fg(accent).add_modifier(Modifier::BOLD)),
             Span::styled(
@@ -4957,8 +4982,8 @@ clear_popup(f, rect);
 let block = Block::default()
     .borders(Borders::ALL)
     .border_type(border_type())
-    .border_style(Style::default().fg(text_tone(theme().accent, theme().popup_bg)).add_modifier(Modifier::BOLD))
-    .style(Style::default().bg(theme().popup_bg).fg(readable_on(theme().popup_bg)))
+    .border_style(accent_on_popup())
+    .style(popup_style())
     .title(tr(lang, " toggles ", " トグル "))
     .title_bottom(tr(lang, " Enter/Space=flip  ↑↓  Esc ", " Enter/Space=切替  ↑↓  Esc "));
 let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
@@ -5011,7 +5036,7 @@ let block = Block::default()
     .borders(Borders::ALL)
     .border_type(border_type())
     .border_style(Style::default().fg(frame_c).add_modifier(Modifier::BOLD))
-    .style(Style::default().bg(theme().popup_bg).fg(readable_on(theme().popup_bg)))
+    .style(popup_style())
     .title(tr(lang, " chat history ", " チャット履歴 "))
     .title_bottom(tr(lang, " Enter=open  d=delete  ↑↓  Esc ", " Enter=開く  d=削除  ↑↓  Esc "));
 let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
@@ -5072,7 +5097,7 @@ let block = Block::default()
     .borders(Borders::ALL)
     .border_type(border_type())
     .border_style(Style::default().fg(text_tone(AI_SIMPLE, theme().popup_bg)).add_modifier(Modifier::BOLD))
-    .style(Style::default().bg(theme().popup_bg).fg(readable_on(theme().popup_bg)))
+    .style(popup_style())
     .title(title)
     .title_bottom(footer);
 let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
@@ -5136,7 +5161,7 @@ fn draw_junk_review(f: &mut Frame, area: Rect, app: &mut App) {
         .borders(Borders::ALL)
         .border_type(border_type())
         .border_style(Style::default().fg(text_tone(AI_SIMPLE, theme().popup_bg)).add_modifier(Modifier::BOLD))
-        .style(Style::default().bg(theme().popup_bg).fg(readable_on(theme().popup_bg)))
+        .style(popup_style())
         .title(title)
         .title_bottom(tr(lang,
             " Space/click=toggle  a=all  Enter/d=delete checked  Esc=cancel ",
@@ -5196,8 +5221,8 @@ fn draw_dupe_review(f: &mut Frame, area: Rect, app: &mut App) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(border_type())
-        .border_style(Style::default().fg(text_tone(theme().accent, theme().popup_bg)).add_modifier(Modifier::BOLD))
-        .style(Style::default().bg(theme().popup_bg).fg(readable_on(theme().popup_bg)))
+        .border_style(accent_on_popup())
+        .style(popup_style())
         .title(title)
         .title_bottom(tr(lang,
             " Space/click=toggle  a=all  Enter/d=delete checked  Esc=cancel ",
@@ -5251,7 +5276,7 @@ fn draw_structure_review(f: &mut Frame, area: Rect, app: &mut App) {
         (0, 0)
     };
     let title = if lang == Lang::Ja {
-        format!(" フォルダ構成を提案  {}/{} 選択 ", checked, n)
+        format!(" ディレクトリ構成を提案  {}/{} 選択 ", checked, n)
     } else {
         format!(" Suggest folder structure  {}/{} checked ", checked, n)
     };
@@ -5259,7 +5284,7 @@ fn draw_structure_review(f: &mut Frame, area: Rect, app: &mut App) {
         .borders(Borders::ALL)
         .border_type(border_type())
         .border_style(Style::default().fg(text_tone(AI_SIMPLE, theme().popup_bg)).add_modifier(Modifier::BOLD))
-        .style(Style::default().bg(theme().popup_bg).fg(readable_on(theme().popup_bg)))
+        .style(popup_style())
         .title(title)
         .title_bottom(tr(lang,
             " Space/click=toggle  a=all  Enter/m=move checked  Esc=cancel ",
@@ -5329,7 +5354,7 @@ fn draw_rename_review(f: &mut Frame, area: Rect, app: &mut App) {
         .borders(Borders::ALL)
         .border_type(border_type())
         .border_style(Style::default().fg(accent).add_modifier(Modifier::BOLD))
-        .style(Style::default().bg(theme().popup_bg).fg(readable_on(theme().popup_bg)))
+        .style(popup_style())
         .title(title)
         .title_bottom(tr(lang,
             " Space/click=toggle  a=all  Enter/r=rename checked  Esc=cancel ",
@@ -5417,7 +5442,7 @@ fn popup_frame_in<'a>(
         .borders(Borders::ALL)
         .border_type(border_type())
         .border_style(Style::default().fg(accent).add_modifier(Modifier::BOLD))
-        .style(Style::default().bg(theme().popup_bg).fg(readable_on(theme().popup_bg)))
+        .style(popup_style())
         .title(title)
         .title_bottom(footer);
     let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
@@ -5706,7 +5731,7 @@ fn draw_simple_dialog(
         }
         Popup::ConfirmDiscard { targets, .. } => {
             let head = if lang == Lang::Ja {
-                format!("{} 件の変更を破棄（元に戻す）:", targets.len())
+                format!("{} 件の変更をコミット時点に戻します:", targets.len())
             } else {
                 format!("discard changes to {} path(s):", targets.len())
             };
@@ -5784,7 +5809,7 @@ fn draw_simple_dialog(
             let arrow_ja = if *to_right { "左 → 右" } else { "右 → 左" };
             let n = ops.len();
             let head = if lang == Lang::Ja {
-                format!("フォルダを一方向に同期（{}）", arrow_ja)
+                format!("ディレクトリを一方向に同期（{}）", arrow_ja)
             } else {
                 format!("one-way folder sync ({})", arrow)
             };
@@ -5818,7 +5843,7 @@ fn draw_simple_dialog(
         Popup::ConfirmRemoteDelete { name, is_dir, .. } => {
             let head = if *is_dir {
                 tr(lang, "delete this folder and everything inside it, on the server:",
-                      "このフォルダを中身ごとサーバ上で削除します:").to_string()
+                      "このディレクトリを中身ごとサーバ上で削除します:").to_string()
             } else {
                 tr(lang, "delete this file on the server:", "このファイルをサーバ上で削除します:").to_string()
             };
@@ -5975,7 +6000,7 @@ fn draw_simple_dialog(
         // The AI - simple dialogs (the command confirm, the rename/search
         // prompts) wear the local model's cyan; the rest keep the theme accent.
         .border_style(Style::default().fg(popup_accent(popup)).add_modifier(Modifier::BOLD))
-        .style(Style::default().bg(theme().popup_bg).fg(readable_on(theme().popup_bg)))
+        .style(popup_style())
         .title(title);
     let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
     f.render_widget(block, rect);
@@ -6081,7 +6106,7 @@ fn draw_simple_dialog(
     }
 
     let footer_p = Paragraph::new(footer).style(
-        Style::default().fg(readable_on(theme().accent)).bg(theme().accent).add_modifier(Modifier::BOLD),
+        accent_bar(),
     );
     f.render_widget(footer_p, footer_area);
 }
@@ -6097,7 +6122,7 @@ fn draw_theme_picker(f: &mut Frame, area: Rect, popup: &mut Popup, lang: Lang) {
     let h = (names.len() as u16 + 4).min(area.height.saturating_sub(2)).max(8);
     let rect = centered_rect(w, h, area);
     clear_popup(f, rect);
-    f.render_widget(Block::default().style(Style::default().bg(theme().popup_bg).fg(readable_on(theme().popup_bg))), rect);
+    f.render_widget(Block::default().style(popup_style()), rect);
     let title = match scope {
         ThemeScope::App { .. } => tr(lang, " theme — whole app ", " テーマ — 全体 "),
         ThemeScope::Pane { side, .. } if *side == 0 => tr(lang, " theme — left pane ", " テーマ — 左ペイン "),
@@ -6113,7 +6138,7 @@ fn draw_theme_picker(f: &mut Frame, area: Rect, popup: &mut Popup, lang: Lang) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(border_type())
-        .border_style(Style::default().fg(text_tone(theme().accent, theme().popup_bg)).add_modifier(Modifier::BOLD))
+        .border_style(accent_on_popup())
         .title(title)
         .title_bottom(footer);
     let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
@@ -6127,7 +6152,7 @@ fn draw_theme_picker(f: &mut Frame, area: Rect, popup: &mut Popup, lang: Lang) {
         // A compact swatch: directory / code / archive / executable accents.
         let sw = |c: Color| Span::styled("█", Style::default().fg(c));
         let name_style = if sel {
-            Style::default().fg(text_tone(theme().accent, theme().popup_bg)).add_modifier(Modifier::BOLD)
+            accent_on_popup()
         } else {
             Style::default().fg(text_tone(theme().file.plain, theme().popup_bg))
         };
@@ -6464,8 +6489,8 @@ fn draw_scrolling_text(
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(border_type())
-        .border_style(Style::default().fg(text_tone(theme().accent, theme().popup_bg)).add_modifier(Modifier::BOLD))
-        .style(Style::default().bg(theme().popup_bg).fg(readable_on(theme().popup_bg)))
+        .border_style(accent_on_popup())
+        .style(popup_style())
         .title(title.to_string())
         .title_bottom(pos);
     f.render_widget(block, rect);
@@ -6483,7 +6508,7 @@ fn draw_scrolling_text(
     let body_area = Rect::new(inner.x, inner.y, inner.width, view_h as u16);
     f.render_widget(
         Paragraph::new(body)
-            .style(Style::default().bg(theme().popup_bg).fg(readable_on(theme().popup_bg))),
+            .style(popup_style()),
         body_area,
     );
 
@@ -6494,7 +6519,7 @@ fn draw_scrolling_text(
         Lang::Ja => " j/k スクロール  u/d ページ  g/G  Esc 閉じる ",
     };
     let footer = Paragraph::new(footer_text).style(
-        Style::default().fg(readable_on(theme().accent)).bg(theme().accent).add_modifier(Modifier::BOLD),
+        accent_bar(),
     );
     f.render_widget(footer, footer_area);
 }
@@ -6546,6 +6571,29 @@ fn draw_context_menu(f: &mut Frame, area: Rect, popup: &mut Popup, menu_lang: La
     f.render_widget(Paragraph::new(rows), inner);
 }
 
+/// The two lines every filterable list opens with: what has been typed, and
+/// "(no match)" when it has ruled everything out.
+fn filter_head(filter: &str, empty: bool) -> Vec<Line<'static>> {
+    let mut lines = vec![Line::from(Span::styled(format!("/{filter}_"), accent_on_popup()))];
+    if empty {
+        lines.push(Line::from(Span::styled(
+            "  (no match)",
+            Style::default().fg(muted_on(theme().popup_bg)),
+        )));
+    }
+    lines
+}
+
+/// One row of such a list: the accent when the cursor is on it, plain text
+/// otherwise.
+fn row_style(selected: bool) -> Style {
+    if selected {
+        accent_on_popup()
+    } else {
+        Style::default().fg(readable_on(theme().popup_bg))
+    }
+}
+
 fn draw_ssh_hosts(
     f: &mut Frame,
     area: Rect,
@@ -6569,23 +6617,10 @@ fn draw_ssh_hosts(
     let footer = tr(lang, " Enter=select  F2=type by hand  Esc ", " Enter=選択  F2=手入力  Esc ");
     let inner = popup_frame(f, area, w, h, tr(lang, " ssh — host ", " SSH — ホスト "), footer);
 
-    let mut lines = vec![Line::from(Span::styled(
-        format!("/{}_", filter),
-        Style::default().fg(text_tone(theme().accent, theme().popup_bg)).add_modifier(Modifier::BOLD),
-    ))];
-    if matches.is_empty() {
-        lines.push(Line::from(Span::styled(
-            "  (no match)",
-            Style::default().fg(muted_on(theme().popup_bg)),
-        )));
-    }
+    let mut lines = filter_head(filter, matches.is_empty());
     for (i, hst) in matches.iter().enumerate() {
         let sel = i == *cursor;
-        let style = if sel {
-            Style::default().fg(text_tone(theme().accent, theme().popup_bg)).add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().fg(readable_on(theme().popup_bg))
-        };
+        let style = row_style(sel);
         let users = if hst.users.len() == 1 {
             hst.users[0].name.clone()
         } else {
@@ -6607,7 +6642,7 @@ fn draw_ssh_hosts(
         Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1);
     f.render_widget(
         Paragraph::new(tr(lang, " type to filter  ↑↓ select  Enter next  Esc cancel ", " 入力で絞込  ↑↓ 選択  Enter 次へ  Esc 取消 ")).style(
-            Style::default().fg(readable_on(theme().accent)).bg(theme().accent).add_modifier(Modifier::BOLD),
+            accent_bar(),
         ),
         footer_area,
     );
@@ -6635,23 +6670,10 @@ fn draw_snippets(
     let h = (matches.len() as u16 + 5).min(area.height.saturating_sub(2)).max(6);
     let inner = popup_frame(f, area, w, h, tr(lang, " snippets → shell ", " スニペット → シェル "), "");
 
-    let mut lines = vec![Line::from(Span::styled(
-        format!("/{}_", filter),
-        Style::default().fg(text_tone(theme().accent, theme().popup_bg)).add_modifier(Modifier::BOLD),
-    ))];
-    if matches.is_empty() {
-        lines.push(Line::from(Span::styled(
-            "  (no match)",
-            Style::default().fg(muted_on(theme().popup_bg)),
-        )));
-    }
+    let mut lines = filter_head(filter, matches.is_empty());
     for (i, s) in matches.iter().enumerate() {
         let sel = i == *cursor;
-        let style = if sel {
-            Style::default().fg(text_tone(theme().accent, theme().popup_bg)).add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().fg(readable_on(theme().popup_bg))
-        };
+        let style = row_style(sel);
         // A tag shows what will happen: run, type-only, or confirm-first.
         let tag = if s.confirm { "?" } else if s.enter { "↵" } else { "…" };
         lines.push(Line::from(vec![
@@ -6670,7 +6692,7 @@ fn draw_snippets(
         Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1);
     f.render_widget(
         Paragraph::new(tr(lang, " type to filter  ↑↓ select  Enter send  Esc cancel ", " 入力で絞込  ↑↓ 選択  Enter 送信  Esc 取消 ")).style(
-            Style::default().fg(readable_on(theme().accent)).bg(theme().accent).add_modifier(Modifier::BOLD),
+            accent_bar(),
         ),
         footer_area,
     );
@@ -6814,7 +6836,7 @@ fn draw_local_dest(
         .map(|(i, l)| {
             let sel = i == *cursor;
             let style = if sel {
-                Style::default().fg(text_tone(theme().accent, theme().popup_bg)).add_modifier(Modifier::BOLD)
+                accent_on_popup()
             } else {
                 Style::default().fg(readable_on(theme().popup_bg))
             };
@@ -6846,7 +6868,7 @@ fn draw_ssh_users(
         .map(|(i, u)| {
             let sel = i == *cursor;
             let style = if sel {
-                Style::default().fg(text_tone(theme().accent, theme().popup_bg)).add_modifier(Modifier::BOLD)
+                accent_on_popup()
             } else {
                 Style::default().fg(readable_on(theme().popup_bg))
             };
@@ -6867,7 +6889,7 @@ fn draw_ssh_users(
         Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1);
     f.render_widget(
         Paragraph::new(tr(lang, " Enter connect   Esc back ", " Enter 接続   Esc 戻る ")).style(
-            Style::default().fg(readable_on(theme().accent)).bg(theme().accent).add_modifier(Modifier::BOLD),
+            accent_bar(),
         ),
         footer_area,
     );
@@ -7005,7 +7027,7 @@ fn draw_grep_replace(
             " Space=toggle  a=all  f=this file  Enter=write  Esc=cancel ",
             " Space=切替  a=全部  f=このファイル  Enter=書き込み  Esc=取消 ",
         ))
-        .style(Style::default().fg(readable_on(theme().accent)).bg(theme().accent).add_modifier(Modifier::BOLD)),
+        .style(accent_bar()),
         Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1),
     );
 }
@@ -7128,7 +7150,7 @@ fn draw_find_results(
     }
     f.render_widget(
         Paragraph::new(tr(lang, " Enter=go  r=replace all  p=panelize  j/k=move  Esc=close ", " Enter=移動  r=一括置換  p=ペイン化  j/k=カーソル  Esc=閉じる ")).style(
-            Style::default().fg(readable_on(theme().accent)).bg(theme().accent).add_modifier(Modifier::BOLD),
+            accent_bar(),
         ),
         Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1),
     );
@@ -7170,7 +7192,7 @@ fn draw_shortcuts(
                 Style::default().fg(muted_on(theme().popup_bg)),
             )),
             Line::from(""),
-            Line::from(tr(lang, "a = add a shortcut,  A = add a folder", "a = ショートカット追加,  A = フォルダ追加")),
+            Line::from(tr(lang, "a = add a shortcut,  A = add a folder", "a = ショートカット追加,  A = ディレクトリ追加")),
         ];
         f.render_widget(
             Paragraph::new(hint),
@@ -7237,7 +7259,7 @@ fn draw_shortcuts(
         }
     }
     f.render_widget(
-        Paragraph::new(tr(lang, " Enter=open/into  a=add  A=folder  d=del  r=edit  ←=back  Esc ", " Enter=開く/入る  a=追加  A=フォルダ  d=削除  r=編集  ←=戻る  Esc "))
+        Paragraph::new(tr(lang, " Enter=open/into  a=add  A=folder  d=del  r=edit  ←=back  Esc ", " Enter=開く/入る  a=追加  A=ディレクトリ  d=削除  r=編集  ←=戻る  Esc "))
             .style(
                 Style::default()
                     .fg(readable_on(theme().accent))
@@ -7294,7 +7316,7 @@ fn draw_history(
     }
     f.render_widget(
         Paragraph::new(tr(lang, " ↑↓/jk select  Enter jump  a add shortcut  Esc cancel ", " ↑↓/jk 選択  Enter 移動  a ショートカット追加  Esc 取消 ")).style(
-            Style::default().fg(readable_on(theme().accent)).bg(theme().accent).add_modifier(Modifier::BOLD),
+            accent_bar(),
         ),
         Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1),
     );
@@ -7354,7 +7376,7 @@ fn draw_dest_picker(
     }
     f.render_widget(
         Paragraph::new(tr(lang, " Enter=send here   n=type a path   Esc=cancel ", " Enter=ここへ   n=パス入力   Esc=取消 ")).style(
-            Style::default().fg(readable_on(theme().accent)).bg(theme().accent).add_modifier(Modifier::BOLD),
+            accent_bar(),
         ),
         Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1),
     );
@@ -7669,7 +7691,7 @@ fn draw_viewer(
             // column so the mouse can find them whatever the names are.
             let mut spans = vec![Span::styled(
                 " ◂ ▸ ".to_string(),
-                Style::default().fg(text_tone(theme().accent, theme().popup_bg)).add_modifier(Modifier::BOLD),
+                accent_on_popup(),
             )];
             let mut at = rect.x + 1 + 5;
             for (i, name) in tab_names.iter().enumerate() {
@@ -8428,7 +8450,7 @@ fn draw_dir_compare(
             " ◀ left  ▶ right  ≠ differ   Enter=go  </> copy one  [/] sync all  w save  Esc ",
             " ◀ 左  ▶ 右  ≠ 相違   Enter=移動  </> 1件コピー  [/] 一括同期  w 保存  Esc ",
         ))
-        .style(Style::default().fg(readable_on(theme().accent)).bg(theme().accent).add_modifier(Modifier::BOLD)),
+        .style(accent_bar()),
         Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1),
     );
 }
@@ -8613,7 +8635,7 @@ fn draw_diff(
     };
     f.render_widget(
         Paragraph::new(footer)
-        .style(Style::default().fg(readable_on(theme().accent)).bg(theme().accent).add_modifier(Modifier::BOLD)),
+        .style(accent_bar()),
         Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1),
     );
 }
@@ -8667,7 +8689,7 @@ fn draw_archive(
     }
     f.render_widget(
         Paragraph::new(tr(lang, " Enter=extract this   a=extract all   Esc=close ", " Enter=これを展開   a=全展開   Esc=閉じる ")).style(
-            Style::default().fg(readable_on(theme().accent)).bg(theme().accent).add_modifier(Modifier::BOLD),
+            accent_bar(),
         ),
         Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1),
     );
@@ -8692,7 +8714,7 @@ fn draw_palette(
     // Row 0 is the live query; the list fills the rest above the footer.
     f.render_widget(
         Paragraph::new(Line::from(vec![
-            Span::styled("› ", Style::default().fg(text_tone(theme().accent, theme().popup_bg)).add_modifier(Modifier::BOLD)),
+            Span::styled("› ", accent_on_popup()),
             Span::styled(format!("{}_", query), Style::default().fg(readable_on(theme().popup_bg))),
         ])),
         Rect::new(inner.x, inner.y, inner.width, 1),
@@ -8737,7 +8759,7 @@ fn draw_palette(
     }
     f.render_widget(
         Paragraph::new(tr(lang, " type to filter   ↑/↓ move   Enter run   Esc close ", " 入力で絞込   ↑/↓ 移動   Enter 実行   Esc 閉じる "))
-            .style(Style::default().fg(readable_on(theme().accent)).bg(theme().accent).add_modifier(Modifier::BOLD)),
+            .style(accent_bar()),
         Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1),
     );
 }
@@ -8807,9 +8829,9 @@ fn draw_disk_usage(
     f.render_widget(
         Paragraph::new(tr(lang,
             " Enter=into folder   -=up   j/k move   Esc=close ",
-            " Enter=フォルダへ   -=上へ   j/k 移動   Esc=閉じる ",
+            " Enter=ディレクトリへ   -=上へ   j/k 移動   Esc=閉じる ",
         ))
-        .style(Style::default().fg(readable_on(theme().accent)).bg(theme().accent).add_modifier(Modifier::BOLD)),
+        .style(accent_bar()),
         Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1),
     );
 }
@@ -8827,8 +8849,8 @@ fn draw_git_log(
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(border_type())
-        .border_style(Style::default().fg(text_tone(theme().accent, theme().popup_bg)).add_modifier(Modifier::BOLD))
-        .style(Style::default().bg(theme().popup_bg).fg(readable_on(theme().popup_bg)))
+        .border_style(accent_on_popup())
+        .style(popup_style())
         .title(format!(" {} ", title))
         .title_bottom(tr(lang, " Enter=show diff  j/k  g/G  Esc ", " Enter=差分表示  j/k  g/G  Esc "));
     let inner = rect.inner(Margin { vertical: 1, horizontal: 1 });
@@ -8886,7 +8908,7 @@ fn draw_macros(
         .map(|(i, name)| {
             let sel = i == *cursor;
             let style = if sel {
-                Style::default().fg(text_tone(theme().accent, theme().popup_bg)).add_modifier(Modifier::BOLD)
+                accent_on_popup()
             } else {
                 Style::default().fg(readable_on(theme().popup_bg))
             };
@@ -8904,7 +8926,7 @@ fn draw_macros(
     let footer_area = Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1);
     f.render_widget(
         Paragraph::new(tr(lang, " Enter=run  j/k  Esc ", " Enter=実行  j/k  Esc ")).style(
-            Style::default().fg(readable_on(theme().accent)).bg(theme().accent).add_modifier(Modifier::BOLD),
+            accent_bar(),
         ),
         footer_area,
     );
@@ -8928,7 +8950,7 @@ fn draw_sort_picker(
         .map(|(i, k)| {
             let sel = i == *cursor;
             let style = if sel {
-                Style::default().fg(text_tone(theme().accent, theme().popup_bg)).add_modifier(Modifier::BOLD)
+                accent_on_popup()
             } else {
                 Style::default().fg(readable_on(theme().popup_bg))
             };
@@ -8954,7 +8976,7 @@ fn draw_sort_picker(
         Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1);
     f.render_widget(
         Paragraph::new(tr(lang, " Enter=apply (again = reverse)  Esc ", " Enter=適用（再度で逆順）  Esc ")).style(
-            Style::default().fg(readable_on(theme().accent)).bg(theme().accent).add_modifier(Modifier::BOLD),
+            accent_bar(),
         ),
         footer_area,
     );
@@ -8978,7 +9000,7 @@ fn draw_encoding_picker(
         .map(|(i, e)| {
             let sel = i == *cursor;
             let style = if sel {
-                Style::default().fg(text_tone(theme().accent, theme().popup_bg)).add_modifier(Modifier::BOLD)
+                accent_on_popup()
             } else {
                 Style::default().fg(readable_on(theme().popup_bg))
             };
@@ -8997,7 +9019,7 @@ fn draw_encoding_picker(
     }
     f.render_widget(
         Paragraph::new(tr(lang, " Enter=apply  Esc=cancel ", " Enter=適用  Esc=取消 ")).style(
-            Style::default().fg(readable_on(theme().accent)).bg(theme().accent).add_modifier(Modifier::BOLD),
+            accent_bar(),
         ),
         Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1),
     );
@@ -9047,7 +9069,7 @@ fn draw_color_picker(
         Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1);
     f.render_widget(
         Paragraph::new(tr(lang, " Enter=apply  Esc=cancel ", " Enter=適用  Esc=取消 ")).style(
-            Style::default().fg(readable_on(theme().accent)).bg(theme().accent).add_modifier(Modifier::BOLD),
+            accent_bar(),
         ),
         footer_area,
     );

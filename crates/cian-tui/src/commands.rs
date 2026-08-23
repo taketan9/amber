@@ -773,7 +773,7 @@ impl App {
         };
         let sources = self.active_pane().map(|p| p.target_paths()).unwrap_or_default();
         if sources.is_empty() {
-            self.message = Some(tr(self.lang, "nothing selected to archive", "書庫にする対象が選択されていません").into());
+            self.message = Some(tr(self.lang, "nothing selected to archive", "アーカイブにする対象が選択されていません").into());
             return;
         }
         let Some(cwd) = self.active_pane().map(|p| p.cwd.clone()) else { return };

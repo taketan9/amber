@@ -36,6 +36,21 @@ pub(crate) fn clean_ai_commit_message(raw: &str) -> String {
     text.trim().to_string()
 }
 
+/// The JSON array in a model's reply, parsed — or nothing.
+///
+/// Isolated by its brackets first, because a model asked for JSON will still
+/// wrap it in prose or ``` fences about a third of the time. Four parsers
+/// opened with these seven lines.
+fn json_array<T: serde::de::DeserializeOwned>(raw: &str) -> Vec<T> {
+    let (Some(start), Some(end)) = (raw.find('['), raw.rfind(']')) else {
+        return Vec::new();
+    };
+    if end <= start {
+        return Vec::new();
+    }
+    serde_json::from_str(&raw[start..=end]).unwrap_or_default()
+}
+
 /// Parse the junk detector's reply into concrete candidates. The model is asked
 /// for a JSON array of `{name, reason}`; we strip any fences, parse leniently,
 /// and keep only names that match a real entry in `names` (so a hallucinated or
@@ -48,14 +63,7 @@ pub(crate) fn parse_junk_reply(raw: &str, names: &[(String, PathBuf)]) -> Vec<Ju
         #[serde(default)]
         reason: String,
     }
-    // Isolate the JSON array: models sometimes wrap it in prose or ``` fences.
-    let start = raw.find('[');
-    let end = raw.rfind(']');
-    let json = match (start, end) {
-        (Some(s), Some(e)) if e > s => &raw[s..=e],
-        _ => return Vec::new(),
-    };
-    let hits: Vec<Hit> = serde_json::from_str(json).unwrap_or_default();
+    let hits: Vec<Hit> = json_array(raw);
     let mut out = Vec::new();
     let mut seen = std::collections::HashSet::new();
     for hit in hits {
@@ -107,13 +115,7 @@ pub(crate) fn parse_structure_reply(raw: &str, names: &[(String, PathBuf)]) -> V
         #[serde(default)]
         reason: String,
     }
-    let start = raw.find('[');
-    let end = raw.rfind(']');
-    let json = match (start, end) {
-        (Some(s), Some(e)) if e > s => &raw[s..=e],
-        _ => return Vec::new(),
-    };
-    let hits: Vec<Hit> = serde_json::from_str(json).unwrap_or_default();
+    let hits: Vec<Hit> = json_array(raw);
     let mut out = Vec::new();
     let mut seen = std::collections::HashSet::new();
     for hit in hits {
@@ -176,13 +178,7 @@ pub(crate) fn parse_rename_reply(raw: &str, names: &[(String, PathBuf)]) -> Vec<
         #[serde(default, alias = "newName", alias = "new")]
         new_name: String,
     }
-    let start = raw.find('[');
-    let end = raw.rfind(']');
-    let json = match (start, end) {
-        (Some(s), Some(e)) if e > s => &raw[s..=e],
-        _ => return Vec::new(),
-    };
-    let hits: Vec<Hit> = serde_json::from_str(json).unwrap_or_default();
+    let hits: Vec<Hit> = json_array(raw);
     let mut out = Vec::new();
     let mut used_src = std::collections::HashSet::new();
     let mut used_dst = std::collections::HashSet::new();
@@ -214,13 +210,7 @@ pub(crate) fn parse_sem_search_reply(raw: &str, catalog: &[cian_core::search::Hi
         reason: String,
     }
     let norm = |s: &str| s.replace('\\', "/");
-    let start = raw.find('[');
-    let end = raw.rfind(']');
-    let json = match (start, end) {
-        (Some(s), Some(e)) if e > s => &raw[s..=e],
-        _ => return Vec::new(),
-    };
-    let picks: Vec<Hit> = serde_json::from_str(json).unwrap_or_default();
+    let picks: Vec<Hit> = json_array(raw);
     let mut out = Vec::new();
     let mut seen = std::collections::HashSet::new();
     for pick in picks {

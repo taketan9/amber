@@ -471,7 +471,7 @@ impl App {
             return;
         }
         self.open_popup(text_input(
-            tr(self.lang, "New remote folder", "リモート: 新規フォルダ"),
+            tr(self.lang, "New remote folder", "リモート: 新規ディレクトリ"),
             tr(self.lang, "name:", "名前:"),
             String::new(),
             InputKind::RemoteMkdir { side },

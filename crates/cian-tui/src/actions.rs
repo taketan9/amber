@@ -913,7 +913,7 @@ impl App {
         {
             match self.active_pane().and_then(|p| p.selected()).cloned() {
                 Some(e) if e.is_parent || e.is_dir => {
-                    self.message = Some(tr(self.lang, "that is a directory. Enter to go in", "ディレクトリです。Enter で入る").into());
+                    self.message = Some(tr(self.lang, "that is a directory. Enter to go in", "ディレクトリです。Enter で入れます").into());
                 }
                 Some(e) => self.archive_view_member(&archive, &format!("{}{}", sub, e.name)),
                 None => self.message = Some(tr(self.lang, "nothing selected", "選択されていません").into()),
@@ -1160,7 +1160,7 @@ impl App {
         // The `..` row is never a comparison subject; treat it as no selection.
         let pick = |t: &PaneTabs| t.active_ref().selected().filter(|e| !e.is_parent).cloned();
         let (Some(a), Some(b)) = (pick(&self.left), pick(&self.right)) else {
-            self.message = Some(tr(self.lang, "select a file (or a folder) in each pane to compare", "比較するには各ペインでファイル（またはフォルダ）を選んでください").into());
+            self.message = Some(tr(self.lang, "select a file (or a folder) in each pane to compare", "比較するには各ペインでファイル（またはディレクトリ）を選んでください").into());
             return;
         };
         // Two directories: a recursive tree comparison. Two files: a line diff.
@@ -1169,7 +1169,7 @@ impl App {
             return;
         }
         if a.is_dir || b.is_dir {
-            self.message = Some(tr(self.lang, "compare two files, or two folders. not one of each", "ファイル同士かフォルダ同士で比較してください（混在は不可）").into());
+            self.message = Some(tr(self.lang, "compare two files, or two folders. not one of each", "ファイル同士かディレクトリ同士で比較してください（混在は不可）").into());
             return;
         }
         match cian_core::diff::diff_files(&a.path, &b.path) {
@@ -1271,7 +1271,7 @@ impl App {
             // unresponsive when identical folders only whispered a message.
             self.open_popup(Popup::Notice {
                 lines: vec![
-                    tr(self.lang, "The two folders are identical", "2つのフォルダは同一です").to_string(),
+                    tr(self.lang, "The two folders are identical", "2つのディレクトリは同一です").to_string(),
                     String::new(),
                     format!("{}  ↔  {}", job.left, job.right),
                 ],
@@ -1655,7 +1655,7 @@ impl App {
                 } else {
                     self.popup = Popup::None;
                     self.message = Some(
-                        tr(self.lang, "folders reconciled", "フォルダを同期しました").into(),
+                        tr(self.lang, "folders reconciled", "ディレクトリを同期しました").into(),
                     );
                 }
             }
@@ -1713,11 +1713,11 @@ impl App {
     pub(crate) fn extract_selected(&mut self) {
         let Some(p) = self.active_pane() else { return };
         let Some(e) = p.selected().filter(|e| !e.is_parent) else {
-            self.message = Some(tr(self.lang, "select an archive to extract", "解凍する書庫を選択してください").into());
+            self.message = Some(tr(self.lang, "select an archive to extract", "解凍するアーカイブを選択してください").into());
             return;
         };
         if e.is_dir || !cian_core::archive::is_archive(&e.path) {
-            self.message = Some(format!("{}: {}", tr(self.lang, "not an archive", "書庫ではありません"), e.name));
+            self.message = Some(format!("{}: {}", tr(self.lang, "not an archive", "アーカイブではありません"), e.name));
             return;
         }
         let archive = e.path.clone();
@@ -1798,7 +1798,7 @@ impl App {
                     // A folder is labelled as such; a file shows its byte size,
                     // right-aligned so the sizes form a readable column.
                     let size = if a.is_dir {
-                        format!("{:>10}", tr(self.lang, "<dir>", "<フォルダ>"))
+                        format!("{:>10}", tr(self.lang, "<dir>", "<ディレクトリ>"))
                     } else {
                         format!("{:>10}", cian_core::human_size(a.size.unwrap_or(0)))
                     };
@@ -3286,7 +3286,7 @@ impl App {
     /// step into another directory.
     pub(crate) fn undo_last(&mut self) {
         let Some(action) = self.undo_stack.pop() else {
-            self.message = Some(tr(self.lang, "nothing to undo", "元に戻す操作はありません").into());
+            self.message = Some(tr(self.lang, "nothing to undo", "取り消せる操作はありません").into());
             return;
         };
         // Undoing is not itself something to undo.

@@ -4513,7 +4513,7 @@ impl App {
         if let Some(parent) = path.parent() {
             if !parent.exists() {
                 self.message = Some(if self.lang == crate::theme::Lang::Ja {
-            format!("そのようなフォルダはありません: {}", parent.display())
+            format!("そのようなディレクトリはありません: {}", parent.display())
         } else {
             format!("no such folder: {}", parent.display())
         });
