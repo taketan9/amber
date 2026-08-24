@@ -7872,6 +7872,54 @@
         }
     }
 
+    /// The editor's grammar switches from inside the editor. It used to be on
+    /// the file pane's command line only — the one place you are not when you
+    /// reach for it — and `:notepad` there fell through to the substitute
+    /// parser, which read the `n` as a delimiter and said so.
+    #[test]
+    fn notepad_switches_from_the_editors_own_command_line() {
+        let (_d, mut app) = viewer_on("alpha\nbravo\n");
+        assert_eq!(app.edit_style, EditStyle::Vim, "vim by default");
+
+        app.run_substitute("notepad");
+        assert_eq!(app.edit_style, EditStyle::Notepad, "and now notepad");
+        let said = app.message.clone().unwrap_or_default();
+        assert!(!said.contains("separate the parts"), "not a replacement error: {said:?}");
+
+        app.run_substitute("editstyle vim");
+        assert_eq!(app.edit_style, EditStyle::Vim, "and back again");
+
+        // Bare `:editstyle` flips, the same as on the file pane.
+        app.run_substitute("editstyle");
+        assert_eq!(app.edit_style, EditStyle::Notepad);
+    }
+
+    /// An unknown command in the viewer says it does not know the command.
+    /// Everything unrecognised used to reach the substitute parser, which
+    /// explained the syntax of a replacement nobody was writing.
+    #[test]
+    fn an_unknown_viewer_command_says_that_is_what_it_is() {
+        let (_d, mut app) = viewer_on("alpha\n");
+        app.run_substitute("nosuchthing");
+        let said = app.message.clone().unwrap_or_default();
+        assert!(said.contains("nosuchthing"), "names what was typed: {said:?}");
+        assert!(!said.contains("separate the parts"), "not replacement syntax: {said:?}");
+
+        // A real replacement still runs, in both spellings.
+        app.run_substitute("s/alpha/omega/");
+        if let Popup::Viewer { view, .. } = &app.popup {
+            assert_eq!(view.lines[0], "omega", "s/old/new/ still works");
+        } else {
+            panic!("the viewer closed");
+        }
+        app.run_substitute("/omega/alpha/");
+        if let Popup::Viewer { view, .. } = &app.popup {
+            assert_eq!(view.lines[0], "alpha", "and the bare form the prompt shows");
+        } else {
+            panic!("the viewer closed");
+        }
+    }
+
     #[test]
     fn parse_sem_search_reply_matches_orders_and_folds_reasons() {
         let hit = |rel: &str| cian_core::search::Hit {

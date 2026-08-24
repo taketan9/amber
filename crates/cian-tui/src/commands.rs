@@ -225,15 +225,7 @@ impl App {
             // Not `:vim` — that is taken, and means the external editor. The
             // way *back* to vim keys is the panel's menu rather than a command
             // anyway: notepad style has no command line to type one at.
-            "notepad" => self.set_edit_style(crate::EditStyle::Notepad),
-            "editstyle" | "vimkey" => match rest.trim() {
-                "vim" | "vi" => self.set_edit_style(crate::EditStyle::Vim),
-                "notepad" | "plain" => self.set_edit_style(crate::EditStyle::Notepad),
-                "" => self.flip_edit_style(),
-                other => {
-                    self.message = Some(format!("editstyle: vim | notepad (got {other:?})"))
-                }
-            },
+            "notepad" | "editstyle" | "vimkey" => self.edit_style_command(verb, rest.trim()),
             "files" => self.start_file_finder(),
             "recent" | "oldfiles" => self.start_recent_files(),
             "each" => self.run_each(rest),

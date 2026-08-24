@@ -215,6 +215,23 @@ impl App {
         });
     }
 
+    /// `:notepad`, `:editstyle vim|notepad`, or either with no argument to
+    /// flip. Shared by the file pane's command line and the editor's own,
+    /// because the editor is where you are when you reach for this and the
+    /// two must not drift.
+    pub(crate) fn edit_style_command(&mut self, verb: &str, arg: &str) {
+        if verb == "notepad" || verb == "plain" {
+            self.set_edit_style(crate::EditStyle::Notepad);
+            return;
+        }
+        match arg {
+            "vim" | "vi" => self.set_edit_style(crate::EditStyle::Vim),
+            "notepad" | "plain" => self.set_edit_style(crate::EditStyle::Notepad),
+            "" => self.flip_edit_style(),
+            other => self.message = Some(format!("editstyle: vim | notepad (got {other:?})")),
+        }
+    }
+
     pub(crate) fn set_edit_style(&mut self, to: crate::EditStyle) {
         self.edit_style = to;
         // A file already open changes grammar under the cursor, which is the

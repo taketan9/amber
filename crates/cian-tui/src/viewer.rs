@@ -2033,6 +2033,18 @@ impl App {
                 self.show_version();
                 return;
             }
+            // The editor's own grammar, switched from inside the editor.
+            //
+            // These lived only on the file pane's command line, which is the
+            // one place you are *not* when you want them: reaching for
+            // notepad keys happens while a file is open and behaving the way
+            // your hands do not expect. Typing `:notepad` here fell through
+            // to the substitute parser and came back complaining that 'n'
+            // cannot separate the parts of a replacement.
+            "notepad" | "plain" | "vimkey" | "editstyle" => {
+                self.edit_style_command(words.first().copied().unwrap_or(""), words.get(1).copied().unwrap_or(""));
+                return;
+            }
             "undo" | "u" => {
                 self.viewer_undo();
                 return;
@@ -2113,6 +2125,29 @@ impl App {
                 format!("line endings → {} (Ctrl+S to write)", want.label())
             } else {
                 format!("already {}", want.label())
+            });
+            return;
+        }
+        // Everything the viewer knows has been tried, so what is left is a
+        // replacement — if it looks like one. A replacement is `s` and then a
+        // delimiter, or the bare `/old/new/` the prompt offers, and in both
+        // cases the delimiter is punctuation.
+        //
+        // Without this test every unknown command was handed to the
+        // substitute parser, which read the second letter as the delimiter and
+        // answered accordingly: `:notepad` came back with "'n' cannot separate
+        // the parts". An unknown command should say it does not know the
+        // command.
+        let body = cmd.strip_prefix('s').unwrap_or(cmd);
+        let is_substitute = body
+            .chars()
+            .next()
+            .is_some_and(|d| !d.is_alphanumeric() && !d.is_whitespace());
+        if !is_substitute {
+            let verb = cmd.split_whitespace().next().unwrap_or(cmd);
+            self.message = Some(match self.lang {
+                Lang::En => format!("✖ no such command here: :{verb} — ? lists what this panel takes"),
+                Lang::Ja => format!("✖ ここでは使えないコマンドです: :{verb} — ? でこの画面のキー一覧"),
             });
             return;
         }
