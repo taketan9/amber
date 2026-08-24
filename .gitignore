@@ -24,3 +24,6 @@ __pycache__/
 /cian-macos/
 /cian-windows-x64/
 /target/cian.app
+
+# Local Claude Code settings. The skill link beside it is shared.
+.claude/settings.local.json
