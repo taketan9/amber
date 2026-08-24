@@ -7920,6 +7920,45 @@
         }
     }
 
+    /// Ctrl+C in the shell copies when something is selected, and interrupts
+    /// when nothing is. Selecting output and reaching for Ctrl+C used to kill
+    /// whatever was running.
+    ///
+    /// The copy itself needs a live shell with text on it, so what is pinned
+    /// here is the decision and what the other branch sends. The first version
+    /// of this test asserted on the selection being cleared, which the handler
+    /// does to *every* keypress on its first line — so it passed with the
+    /// feature disabled, and the feature was in fact dead: the selection was
+    /// already gone by the time the branch looked at it.
+    #[test]
+    fn ctrl_c_in_the_shell_copies_a_selection_and_otherwise_interrupts() {
+        let (_d, mut app) = app_with(&["a.txt"]);
+        app.focus(FocusedPane::Shell);
+        let sel = ShellSel {
+            tab: 0,
+            leaf: 0,
+            inner: Rect::new(0, 0, 20, 5),
+            anchor: (0, 0),
+            end: (0, 4),
+            dragged: true,
+        };
+
+        assert!(!app.shell_ctrl_c_copies(), "nothing selected: Ctrl+C interrupts");
+        app.shell_sel = Some(sel);
+        assert!(app.shell_ctrl_c_copies(), "a finished drag: Ctrl+C copies");
+        // A press that never became a drag is not a selection.
+        app.shell_sel = Some(ShellSel { dragged: false, ..sel });
+        assert!(!app.shell_ctrl_c_copies(), "a bare click is not a selection");
+
+        // And what the interrupting branch actually sends.
+        let ctrl_c = KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL);
+        assert_eq!(
+            crate::encode_key(ctrl_c, false),
+            Some(vec![0x03]),
+            "the other branch is the interrupt, not a letter",
+        );
+    }
+
     #[test]
     fn parse_sem_search_reply_matches_orders_and_folds_reasons() {
         let hit = |rel: &str| cian_core::search::Hit {

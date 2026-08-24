@@ -2005,10 +2005,22 @@ impl App {
         }
     }
 
+    /// Does Ctrl+C copy here rather than interrupt? A finished drag-selection
+    /// decides, and nothing else does — a shell you cannot stop is worse than
+    /// one you cannot copy from.
+    pub(crate) fn shell_ctrl_c_copies(&self) -> bool {
+        self.shell_ctrl_c_copies_with(self.shell_sel)
+    }
+
+    fn shell_ctrl_c_copies_with(&self, sel: Option<ShellSel>) -> bool {
+        sel.is_some_and(|s| s.dragged)
+    }
+
     pub(crate) fn handle_shell_key(&mut self, key: KeyEvent) -> Result<()> {
         // Any keypress ends a mouse selection's highlight — the screen is about
-        // to change under it anyway.
-        self.shell_sel = None;
+        // to change under it anyway. **Taken, not dropped**: Ctrl+C below has to
+        // know whether there was one, and this line runs first.
+        let selection = self.shell_sel.take();
         let (alt_screen, app_cursor) = self.shell.active_modes();
         if self.debug_keys {
             self.message = Some(format!(
@@ -2130,6 +2142,37 @@ impl App {
                 }
                 _ => {}
             }
+        }
+        // Ctrl+C with something selected copies it, the way Windows Terminal
+        // and every console host do. With nothing selected it is the interrupt
+        // it has always been — a shell you cannot stop is worse than one you
+        // cannot copy from, so the selection is what decides, never a mode.
+        //
+        // The drag already copied on release; this is for the hand that
+        // selects and then reaches for Ctrl+C, which was sending SIGINT and
+        // killing whatever was running.
+        if key.modifiers.contains(KeyModifiers::CONTROL)
+            && matches!(key.code, KeyCode::Char('c') | KeyCode::Char('C'))
+            && selection.is_some_and(|s| s.dragged)
+        {
+            debug_assert!(self.shell_ctrl_c_copies_with(selection));
+            // Put back what the first line took: the copy reads it from there.
+            self.shell_sel = selection;
+            self.copy_shell_selection();
+            self.shell_sel = None;
+            return Ok(());
+        }
+        // Ctrl+V pastes into the shell.
+        //
+        // In a terminal this rarely arrives: the terminal takes Ctrl+V itself
+        // and hands cian a paste event, which is why this worked in Windows
+        // Terminal and not in the window build, where nothing was listening.
+        // Answering the key too costs nothing and makes the two the same.
+        if key.modifiers.contains(KeyModifiers::CONTROL)
+            && matches!(key.code, KeyCode::Char('v') | KeyCode::Char('V'))
+        {
+            self.paste_from_clipboard();
+            return Ok(());
         }
         // Everything else is forwarded to the shell — to every pane in the tab
         // when broadcast/synchronize is on, otherwise just the active one.

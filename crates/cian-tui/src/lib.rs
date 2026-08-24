@@ -3483,6 +3483,25 @@ impl App {
     }
 
     /// Text on the system clipboard, if any.
+    /// Put the clipboard wherever cian is currently taking text, as if the
+    /// terminal had delivered a paste.
+    ///
+    /// A terminal turns Ctrl+V into a paste event before cian sees the key, so
+    /// the terminal build never needed this. The window build has no such
+    /// middleman — and no clipboard code of its own — so Ctrl+V there went to
+    /// the shell as a raw ^V and did nothing.
+    pub(crate) fn paste_from_clipboard(&mut self) {
+        match self.clipboard_text() {
+            Some(t) => self.insert_into_active_text(&t),
+            None => {
+                self.message = Some(
+                    tr(self.lang, "clipboard has no text", "クリップボードにテキストがありません")
+                        .into(),
+                )
+            }
+        }
+    }
+
     fn clipboard_text(&mut self) -> Option<String> {
         self.clipboard.as_mut()?.get_text().ok().filter(|t| !t.is_empty())
     }
@@ -3614,7 +3633,7 @@ fn normalize_jp_key(key: &mut KeyEvent) {
 /// Translate a key event into the byte sequence a terminal would send to the
 /// shell. `app_cursor` selects between normal (`ESC [`) and application
 /// (`ESC O`) cursor-key encodings, mirroring the active DECCKM mode.
-fn encode_key(key: KeyEvent, app_cursor: bool) -> Option<Vec<u8>> {
+pub(crate) fn encode_key(key: KeyEvent, app_cursor: bool) -> Option<Vec<u8>> {
     let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
     let alt = key.modifiers.contains(KeyModifiers::ALT);
     let cursor = |c: u8| -> Vec<u8> {

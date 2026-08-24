@@ -3322,6 +3322,14 @@ pub(crate) fn key_hints(app: &App) -> Vec<(&'static str, &'static str)> {
     }
     if app.focused == FocusedPane::Shell {
         let mut v = vec![("Esc", d("files", "ファイル"))];
+        // How to copy out of a shell, which nothing on screen said. Shown while
+        // a selection is up, when it is the question being asked; the rest of
+        // the time the row has more useful things on it.
+        if app.shell_ctrl_c_copies() {
+            v.push(("^C", d("copy the selection", "選択をコピー")));
+        } else {
+            v.push((d("drag", "ドラッグ"), d("select = copy", "選択でコピー")));
+        }
         // When the last output looks like an error, nudge toward asking Carmine
         // to explain it — the action lives at the top of the shell menu
         // (Shift+Enter), which works everywhere a modifier-combo might not.
