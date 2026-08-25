@@ -22,6 +22,7 @@
 | macOS（Intel / Apple シリコン） | `cian-macos.zip` | ダブルクリックで起動する `cian.app` と、ターミナル用の `cian-tui` |
 | Windows x64 | `cian-windows-x64.zip` | `cian.exe` / `cian-tui.exe` / `install.ps1` — [オフライン導入](#windows-へオフライン導入)を参照 |
 | Linux x64 | `cian-linux-x64.tar.gz` | `cian` と `cian-tui` |
+| エンジンだけ | `cian-server-win-x64.exe` | 約1MB — Electron 版が喋る相手。Rust の無い機械向け |
 | ビルドする人向け | `cian-source-offline.zip` | 依存クレートを全部同梱したソース一式 — [ソースからビルド](#ソースからビルド)を参照 |
 
 展開して実行するだけです。インストーラの質問に答える必要はなく、設定を保存するまで置いたディレクトリの外には何も書きません。
@@ -579,7 +580,7 @@ flowchart TD
 Get-FileHash cian-windows-x64.zip -Algorithm SHA256
 ```
 
-zip 自体を自前で作ることもできます（Mac から、Windows の開発機なしで）。同梱のワークフローが本物の Windows ランナーでビルドします — タグを push（`git tag v1.0.6 && git push --tags`）、または **Actions → release → Run workflow** で、その実行結果のアーティファクトを取ってください。
+zip 自体を自前で作ることもできます（Mac から、Windows の開発機なしで）。同梱のワークフローが本物の Windows ランナーでビルドします — タグを push（`git tag v1.0.7 && git push --tags`）、または **Actions → release → Run workflow** で、その実行結果のアーティファクトを取ってください。
 
 オフライン機で展開し、`cian-tui.exe` をその場で動かすか、PATH に導入します：
 

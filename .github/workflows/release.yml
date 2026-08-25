@@ -2,7 +2,7 @@ name: release
 
 # Builds the three downloads and publishes them as one GitHub Release.
 #
-# Trigger it by pushing a version tag (`git tag v1.0.6 && git push --tags`), or
+# Trigger it by pushing a version tag (`git tag v1.0.7 && git push --tags`), or
 # by hand from the Actions tab. A tag publishes a release; a manual run only
 # leaves the packages as workflow artifacts, which is the way to rehearse the
 # build without announcing anything.
@@ -172,6 +172,23 @@ jobs:
         with:
           name: cian-windows-x64
           path: cian-windows-x64.zip
+
+      # The engine on its own, about a megabyte.
+      #
+      # The Electron front end is developed in-house against a prebuilt engine
+      # — Rust is not installed there and does not need to be, since the front
+      # end is JavaScript and the engine changes rarely. Carrying the whole
+      # 21MB package for one file that fits on anything is the sort of friction
+      # that stops people updating.
+      - name: Stage the engine on its own
+        shell: pwsh
+        run: Copy-Item target/release/cian-server.exe cian-server-win-x64.exe
+
+      - name: Upload the engine
+        uses: actions/upload-artifact@v6
+        with:
+          name: cian-server-win-x64
+          path: cian-server-win-x64.exe
 
   # The readme has said macOS, Windows and Linux since the first commit, and
   # the release shipped two of them. A tarball rather than a zip, because that

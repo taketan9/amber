@@ -12,46 +12,62 @@ one is already built.
 What has to be on the machine first
 -----------------------------------
 
-Four things, and none of them can be fetched during the build, so bring
-their installers in with this zip.
+That depends on which half you mean to change, and the two are very
+different sizes.
 
-1. Rust (MSVC toolchain)
-     https://forge.rust-lang.org/infra/other-installation-methods.html
-     Take the standalone installer for x86_64-pc-windows-msvc — the .msi,
-     not rustup-init.exe, which wants the network.
-     BUILT-WITH.txt in this folder records the exact version this package
-     was vendored and verified with. That version or newer.
+**To work on the Electron front end, nothing.** Not Rust, not npm.
+The front end is JavaScript; it talks to a prebuilt cian-server.exe over
+a pipe. Take that one file (about a megabyte, `cian-server-win-x64.exe`
+on the releases page) and a standalone Electron, and you can edit and
+restart all day. See "The Electron front end" below.
 
-2. Visual Studio Build Tools (the C/C++ compiler)
-     Rust on Windows compiles through MSVC's linker, and three of cian's
-     dependencies build C of their own. In the Visual Studio Installer,
-     the "Desktop development with C++" workload is what you want.
-     For an offline install, Microsoft's own layout mechanism:
-        vs_BuildTools.exe --layout C:\vslayout ^
-          --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended ^
-          --lang en-US ja-JP
-     Run that on a machine with network, carry C:\vslayout across, and
-     install from it there.
+**To build the Rust side**, one thing or four, depending on which
+programs you want:
 
-3. CMake            https://cmake.org/download/  (the .msi)
-4. NASM             https://www.nasm.us/          (the .exe installer)
+  cian-server.exe alone — the engine, and all the Electron front end
+  needs — compiles no C at all. Its ninety crates are pure Rust. So the
+  GNU toolchain, which brings its own linker, is enough on its own:
 
-     3 and 4 are for aws-lc-sys, the cryptography behind cian's SFTP.
-     It is the one dependency that builds a C library through CMake, and
-     on x86_64 Windows its assembly goes through NASM. Both must be on
-     PATH — open a new terminal after installing and check:
-        cmake --version
-        nasm -v
+     rust-<version>-x86_64-pc-windows-gnu.msi   (about 350 MB)
 
-     If a build fails somewhere inside aws-lc-sys, one of these two is
-     the reason nine times out of ten.
+     From https://forge.rust-lang.org/infra/other-installation-methods.html
+     — the standalone .msi, not rustup-init.exe, which wants the network.
+     BUILT-WITH.txt records the version this package was verified with.
+
+  cian-tui.exe and cian.exe need three more, because they carry SFTP and
+  Lua, and those build C:
+
+  1. Rust, MSVC flavour this time
+       rust-<version>-x86_64-pc-windows-msvc.msi  (about 290 MB)
+  2. Visual Studio Build Tools — the C/C++ compiler. **Several GB**, and
+       the reason the list above is worth reading first. Offline layout:
+          vs_BuildTools.exe --layout C:\vslayout ^
+            --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended ^
+            --lang en-US ja-JP
+       Run that where there is network, carry C:\vslayout across.
+  3. CMake            https://cmake.org/download/  (the .msi)
+  4. NASM             https://www.nasm.us/          (the .exe installer)
+
+       3 and 4 are for aws-lc-sys, the cryptography behind SFTP. It is
+       the one dependency that builds a C library through CMake, and on
+       x86_64 Windows its assembly goes through NASM. Both must be on
+       PATH — open a new terminal after installing and check:
+          cmake --version
+          nasm -v
+
+       If a build fails somewhere inside aws-lc-sys, one of these two is
+       the reason nine times out of ten.
 
 
 Building
 --------
 
-Open "x64 Native Tools Command Prompt for VS" — it is the one with the
-MSVC environment already set — cd into this folder, and:
+For the engine alone, on the GNU toolchain, any command prompt will do:
+
+    cargo build --release --offline -p cian-server
+
+For everything, open "x64 Native Tools Command Prompt for VS" — the one
+with the MSVC environment already set — cd into this folder, and:
 
     cargo build --release --offline
 
@@ -83,20 +99,31 @@ The Electron front end
 ----------------------
 
 `gui\` is a second front end, in progress, that draws through Chromium
-instead of the terminal. It talks to cian-server.exe over a pipe, so the
-Rust side above is all it needs from cargo.
+instead of the terminal.
 
-What it does need is Node's own dependencies, and those are not in this
-zip — `npm install` reaches the network, which is the thing this package
-exists to avoid. Carry `node_modules\` across whole, from a machine that
-has it, and never run npm here:
+**It needs no npm and no node_modules.** Everything it requires is
+Electron itself and Node's built-in modules — nothing from the registry
+is loaded yet. So a standalone Electron distribution is the whole of it:
 
-    cd gui
-    npm start
+    electron-v33.4.11-win32-x64.zip
+    https://github.com/electron/electron/releases
 
-**Copy node_modules from a Windows machine, not from a Mac.** Electron
-ships a different binary per platform: a macOS copy holds Electron.app
-and will not run here.
+Unzip that anywhere, put cian-server.exe beside gui\ (or build it), and:
+
+    <where you unzipped>\electron.exe <this folder>\gui
+
+That is the entire command. No `npm install`, which would reach the
+network, and no `npm start`, which would want node_modules to exist.
+
+The engine is found automatically: gui\engine.js looks beside itself
+first, then in target\release\ and target\debug\. Dropping
+cian-server.exe into gui\ is the simplest arrangement.
+
+Editing gui\*.js or index.html and restarting Electron is the whole
+development loop. Nothing is compiled.
+
+When the editor arrives this changes — Monaco does come from the
+registry — and this file will say how to carry it.
 
 
 How the offline part works

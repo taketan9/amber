@@ -22,6 +22,7 @@ One binary. macOS, Windows, Linux. No runtime, no DLLs, nothing to install along
 | macOS (Intel and Apple silicon) | `cian-macos.zip` | `cian.app` to double-click, and `cian-tui` for the terminal |
 | Windows x64 | `cian-windows-x64.zip` | `cian.exe`, `cian-tui.exe` and `install.ps1` — see [offline install](#install-on-windows-offline) |
 | Linux x64 | `cian-linux-x64.tar.gz` | `cian` and `cian-tui` |
+| Just the engine | `cian-server-win-x64.exe` | about a megabyte — what the Electron front end talks to, for a machine with no Rust |
 | Any, to build on | `cian-source-offline.zip` | the source with every dependency already downloaded — see [build from source](#build-from-source) |
 
 Unpack it and run it. There is no installer to answer to, and nothing is written outside the folder you put it in until you save a setting.
@@ -582,7 +583,7 @@ Self-contained executables — no runtime, no DLLs, no network. Take `cian-windo
 Get-FileHash cian-windows-x64.zip -Algorithm SHA256
 ```
 
-To build the zip yourself instead — from a Mac, with no Windows dev machine — the bundled workflow does it on a real Windows runner: push a tag (`git tag v1.0.6 && git push --tags`), or **Actions → release → Run workflow**, and take the artifact from that run.
+To build the zip yourself instead — from a Mac, with no Windows dev machine — the bundled workflow does it on a real Windows runner: push a tag (`git tag v1.0.7 && git push --tags`), or **Actions → release → Run workflow**, and take the artifact from that run.
 
 On the offline machine, unzip and either run `cian-tui.exe` where it sits, or put it on PATH:
 
