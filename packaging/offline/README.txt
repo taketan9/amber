@@ -60,10 +60,11 @@ MSVC environment already set — cd into this folder, and:
     reach crates.io. If the build succeeds with it, the build needs no
     network at all.
 
-The two programs land in target\release\ :
+What lands in target\release\ :
 
-    cian-tui.exe    the terminal build
-    cian.exe        the window build
+    cian-tui.exe     the terminal build
+    cian.exe         the window build
+    cian-server.exe  the engine the Electron front end talks to
 
 The window build carries a Japanese Nerd Font inside it, and needs to be
 told to:
@@ -76,6 +77,26 @@ fine on a machine that has one.
 Running the tests:
 
     cargo test --workspace --offline
+
+
+The Electron front end
+----------------------
+
+`gui\` is a second front end, in progress, that draws through Chromium
+instead of the terminal. It talks to cian-server.exe over a pipe, so the
+Rust side above is all it needs from cargo.
+
+What it does need is Node's own dependencies, and those are not in this
+zip — `npm install` reaches the network, which is the thing this package
+exists to avoid. Carry `node_modules\` across whole, from a machine that
+has it, and never run npm here:
+
+    cd gui
+    npm start
+
+**Copy node_modules from a Windows machine, not from a Mac.** Electron
+ships a different binary per platform: a macOS copy holds Electron.app
+and will not run here.
 
 
 How the offline part works

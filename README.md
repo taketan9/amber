@@ -582,7 +582,7 @@ Self-contained executables — no runtime, no DLLs, no network. Take `cian-windo
 Get-FileHash cian-windows-x64.zip -Algorithm SHA256
 ```
 
-To build the zip yourself instead — from a Mac, with no Windows dev machine — the bundled workflow does it on a real Windows runner: push a tag (`git tag v1.0.5 && git push --tags`), or **Actions → release → Run workflow**, and take the artifact from that run.
+To build the zip yourself instead — from a Mac, with no Windows dev machine — the bundled workflow does it on a real Windows runner: push a tag (`git tag v1.0.6 && git push --tags`), or **Actions → release → Run workflow**, and take the artifact from that run.
 
 On the offline machine, unzip and either run `cian-tui.exe` where it sits, or put it on PATH:
 

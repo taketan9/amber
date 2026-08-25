@@ -2,7 +2,7 @@ name: release
 
 # Builds the three downloads and publishes them as one GitHub Release.
 #
-# Trigger it by pushing a version tag (`git tag v1.0.5 && git push --tags`), or
+# Trigger it by pushing a version tag (`git tag v1.0.6 && git push --tags`), or
 # by hand from the Actions tab. A tag publishes a release; a manual run only
 # leaves the packages as workflow artifacts, which is the way to rehearse the
 # build without announcing anything.
@@ -80,6 +80,7 @@ jobs:
         run: |
           for target in aarch64-apple-darwin x86_64-apple-darwin; do
             cargo build --release --target "$target" --bin cian-tui
+            cargo build --release --target "$target" --bin cian-server
             cargo build --release --target "$target" --bin cian --features cian-gui/bundled-font
           done
 
@@ -89,7 +90,7 @@ jobs:
       - name: Make them universal
         run: |
           mkdir -p target/release
-          for bin in cian cian-tui; do
+          for bin in cian cian-tui cian-server; do
             lipo -create \
               "target/aarch64-apple-darwin/release/$bin" \
               "target/x86_64-apple-darwin/release/$bin" \
@@ -103,7 +104,7 @@ jobs:
           stage=cian-macos
           mkdir -p "$stage/examples"
           cp -R target/cian.app "$stage/"
-          cp target/release/cian-tui "$stage/"
+          cp target/release/cian-tui target/release/cian-server "$stage/"
           cp examples/init.lua "$stage/examples/"
           cp README.md README.ja.md LICENSE "$stage/"
           # The quarantine catches everyone who downloads this, and cian is
@@ -148,6 +149,7 @@ jobs:
       - name: Build (release)
         run: |
           cargo build --release --bin cian-tui
+          cargo build --release --bin cian-server
           cargo build --release --bin cian --features cian-gui/bundled-font
 
       - name: Stage package
@@ -157,6 +159,7 @@ jobs:
           New-Item -ItemType Directory -Force -Path $stage | Out-Null
           Copy-Item target/release/cian.exe $stage/
           Copy-Item target/release/cian-tui.exe $stage/
+          Copy-Item target/release/cian-server.exe $stage/
           Copy-Item packaging/windows/install.ps1 $stage/
           Copy-Item packaging/windows/README.txt $stage/
           Copy-Item README.md, README.ja.md, LICENSE $stage/
@@ -197,13 +200,14 @@ jobs:
       - name: Build (release)
         run: |
           cargo build --release --bin cian-tui
+          cargo build --release --bin cian-server
           cargo build --release --bin cian --features cian-gui/bundled-font
 
       - name: Stage package
         run: |
           stage=cian-linux-x64
           mkdir -p "$stage/examples"
-          cp target/release/cian target/release/cian-tui "$stage/"
+          cp target/release/cian target/release/cian-tui target/release/cian-server "$stage/"
           cp examples/init.lua "$stage/examples/"
           cp README.md README.ja.md LICENSE "$stage/"
           tar czf cian-linux-x64.tar.gz "$stage"
@@ -294,7 +298,7 @@ jobs:
       - name: Build it with cargo cut off from the network
         shell: pwsh
         working-directory: cian-source-offline
-        run: cargo build --release --offline --bin cian-tui
+        run: cargo build --release --offline --bin cian-tui --bin cian-server
 
       # The window build pulls in wgpu and winit, which the terminal build
       # never touches — vendoring that missed them would pass the step above
