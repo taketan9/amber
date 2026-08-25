@@ -27,3 +27,7 @@ __pycache__/
 
 # Local Claude Code settings. The skill link beside it is shared.
 .claude/settings.local.json
+
+# The Electron front end fetches its own dependencies; the packaging story for
+# them is node_modules.zip, the same as crmaine. See gui/package.json.
+/gui/node_modules/

@@ -1,0 +1,17 @@
+{
+  "name": "cian-gui-electron",
+  "version": "1.0.5",
+  "private": true,
+  "description": "cian in a window, over cian-core",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^33.0.0"
+  },
+  "dependencies": {
+    "monaco-editor": "^0.52.2",
+    "monaco-vim": "^0.4.4"
+  }
+}

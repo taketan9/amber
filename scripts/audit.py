@@ -27,7 +27,7 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 CRATES = ['cian-core', 'cian-tui', 'cian-lua', 'cian-pty', 'cian-scp', 'cian-ai',
-          'cian-bin', 'cian-gui']
+          'cian-bin', 'cian-gui', 'cian-server']
 #: 本体のソース。tests.rs は読み手が違う（テストが唯一の利用者でも死んではいない）
 SRC = sorted(p for c in CRATES
              for p in glob.glob(os.path.join(ROOT, 'crates', c, 'src', '**', '*.rs'),

@@ -654,6 +654,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "cian-server"
+version = "1.0.5"
+dependencies = [
+ "anyhow",
+ "cian-core",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "cian-tui"
 version = "1.0.5"
 dependencies = [
