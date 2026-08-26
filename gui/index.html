@@ -22,13 +22,26 @@
   --accent-dim:#1d6b62;
   --mark:      #ffcc66;
   --cell-h:    22px;
+  --size:      15px;
+  /* A Nerd Font first, because that is what cian-tui is read in and it is the
+     one people said looked best of the three. Then the UI faces Windows and
+     macOS ship, then anything. The last two are the safety net: `sans-serif`
+     rather than nothing, so a miss lands on a gothic face and never on 明朝. */
+  --face: "HackGen Console NF", "HackGen35 Console NF", "UDEV Gothic NF",
+          "Cica", "Yu Gothic UI", "Meiryo UI", "Hiragino Sans", "Noto Sans JP",
+          system-ui, sans-serif;
 }
 * { box-sizing: border-box; }
 html, body {
   margin: 0; height: 100%;
   background: var(--bg); color: var(--text);
-  font: 14px/var(--cell-h) "Yu Gothic UI", "Meiryo UI", "Hiragino Sans",
-        "Noto Sans JP", system-ui, sans-serif;
+  /* Written out rather than as the `font` shorthand. The shorthand takes a
+     size and a family together, and one unparseable piece throws away the
+     whole declaration — which lands on the browser default, and on Japanese
+     Windows that default is 明朝. Three properties fail one at a time. */
+  font-family: var(--face);
+  font-size: var(--size);
+  line-height: var(--cell-h);
   /* A file manager is not a document: nothing here should be draggable text. */
   user-select: none; cursor: default;
   overflow: hidden;

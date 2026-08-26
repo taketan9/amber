@@ -141,4 +141,27 @@ document.addEventListener('keydown', (e) => {
     e.preventDefault();
 });
 
-refresh();
+/// Which face the listing actually got.
+///
+/// Naming a font is a request, not an instruction: the browser walks the list
+/// and takes the first one installed, and if none is, the answer is whatever
+/// the machine calls `sans-serif` — or worse, its default, which on Japanese
+/// Windows is 明朝. That happened, and it took a person at the machine to
+/// notice. A guess about type is not worth having when the answer can be
+/// measured in one line.
+function resolvedFace() {
+    const asked = getComputedStyle(document.body).fontFamily.split(',');
+    for (const raw of asked) {
+        const name = raw.trim().replace(/^["']|["']$/g, '');
+        if (document.fonts.check(`16px "${name}"`)) return name;
+    }
+    return '(none of them — the browser chose)';
+}
+
+refresh().then(() => {
+    // Said once, on the status line, where it costs nothing and answers the
+    // only question this milestone exists to answer.
+    const face = resolvedFace();
+    const size = getComputedStyle(document.body).fontSize;
+    say(`${el.status.textContent}   ·   ${face} ${size}`);
+});
