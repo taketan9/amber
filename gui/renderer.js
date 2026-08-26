@@ -9,7 +9,47 @@ const el = {
     left: document.querySelector('[data-pane="left"]'),
     right: document.querySelector('[data-pane="right"]'),
     status: document.getElementById('status'),
+    ask: document.getElementById('ask'),
 };
+
+/// The operation currently running, if any, so its progress has somewhere to
+/// land and Esc has something to call off.
+let running = null;
+
+/// Ask before doing. Resolves true only on a deliberate yes.
+///
+/// Nothing in cian reaches the disk without passing through here: the terminal
+/// build's whole promise is that a slip costs nothing, and a front end that
+/// quietly skipped the asking would not be the same program.
+function confirm(head, body) {
+    el.ask.querySelector('.head').textContent = head;
+    el.ask.querySelector('.body').textContent = body;
+    el.ask.hidden = false;
+    // The safe button has the focus. Leaning on the keyboard should not
+    // delete anything.
+    const no = el.ask.querySelector('[data-answer="no"]');
+    no.focus();
+    return new Promise((resolve) => {
+        const done = (answer) => {
+            el.ask.hidden = true;
+            el.ask.removeEventListener('click', onClick);
+            document.removeEventListener('keydown', onKey, true);
+            resolve(answer);
+        };
+        const onClick = (e) => {
+            const a = e.target.dataset && e.target.dataset.answer;
+            if (a) done(a === 'yes');
+        };
+        const onKey = (e) => {
+            if (e.key === 'Escape') { e.stopPropagation(); done(false); }
+            else if (e.key === 'Enter') { e.stopPropagation(); done(true); }
+            else if (e.key !== 'Tab') { e.stopPropagation(); }
+        };
+        el.ask.addEventListener('click', onClick);
+        // Captured, so the listing's own keys never see these.
+        document.addEventListener('keydown', onKey, true);
+    });
+}
 
 function say(text, bad = false) {
     el.status.textContent = text;
@@ -118,6 +158,77 @@ async function parent() {
     say(next.cwd);
 }
 
+/// Mark the row under the cursor, or every row.
+async function mark(all) {
+    const which = state.focus;
+    const next = await ask(all ? 'markall' : 'mark', { pane: which });
+    if (!next) return;
+    state[which] = next;
+    draw(which);
+    say(next.marked ? `${next.marked} 件マーク` : 'マークなし');
+}
+
+/// Copy, move or delete whatever is marked — or the row under the cursor when
+/// nothing is. The destination is the other pane, which is the whole idea of
+/// two panes side by side.
+async function operate(kind) {
+    if (running) {
+        say('実行中です。Esc で中止できます');
+        return;
+    }
+    const which = state.focus;
+    const pane = state[which];
+    if (!pane) return;
+
+    // What is about to happen, named, before anything happens. The count comes
+    // from the same rule the engine will use, so the sheet cannot promise one
+    // thing and the engine do another.
+    const chosen = pane.entries.filter((r) => !r.parent && r.marked);
+    const here = pane.entries[pane.cursor];
+    const rows = chosen.length ? chosen : (here && !here.parent ? [here] : []);
+    if (!rows.length) {
+        say('対象がありません');
+        return;
+    }
+    const dest = state[which === 'left' ? 'right' : 'left'];
+    const verb = { copy: 'コピー', move: '移動', delete: '削除' }[kind];
+    const head = kind === 'delete'
+        ? `${rows.length} 件をゴミ箱へ`
+        : `${rows.length} 件を${verb}: → ${dest.cwd}`;
+    // Every name, not a summary. "12 件" tells you nothing about whether the
+    // twelve are the ones you meant.
+    const body = rows.map((r) => r.name).join('\n');
+    if (!await confirm(head, body)) {
+        say('やめました');
+        return;
+    }
+
+    const started = await ask(kind, { pane: which });
+    if (!started) return;
+    running = { op: started.op, kind, verb, total: started.count };
+    say(`${verb}中… 0 / ${started.count}`);
+}
+
+/// Everything the engine says unasked.
+window.cian.onEvent((msg) => {
+    if (!running || msg.op !== running.op) return;
+    if (msg.event === 'progress') {
+        say(`${running.verb}中… ${msg.done} / ${msg.total}`);
+    } else if (msg.event === 'done') {
+        const was = running;
+        running = null;
+        // Both panes: one lost files, the other gained them.
+        refresh().then(() => {
+            const bits = [`${was.verb} ${msg.ok} 件`];
+            if (msg.skipped) bits.push(`${msg.skipped} 件スキップ`);
+            if (msg.cancelled) bits.push('中止しました');
+            if (msg.errors.length) bits.push(`${msg.errors.length} 件失敗`);
+            bits.push(`${msg.ms} ms`);
+            say(bits.join(' · '), msg.errors.length > 0);
+        });
+    }
+});
+
 document.addEventListener('keydown', (e) => {
     // cian's own keys first; anything not claimed here is left to Chromium,
     // which is what makes Ctrl+C and friends work without being written out.
@@ -137,6 +248,15 @@ document.addEventListener('keydown', (e) => {
     else if (k === 'Tab') { state.focus = state.focus === 'left' ? 'right' : 'left'; draw('left'); draw('right'); }
     else if (k === 'Enter') enter();
     else if (k === 'Backspace') parent();
+    else if (k === ' ') mark(false);
+    else if (k === 'a' && (e.ctrlKey || e.metaKey)) mark(true);
+    else if (k === 'c' && !e.ctrlKey && !e.metaKey) operate('copy');
+    else if (k === 'm') operate('move');
+    else if (k === 'd') operate('delete');
+    else if (k === 'Escape' && running) {
+        window.cian.call('cancel', { op: running.op });
+        say('中止しています…');
+    }
     else return;
     e.preventDefault();
 });

@@ -29,6 +29,18 @@ function createWindow() {
         },
     });
     win.loadFile(path.join(__dirname, 'index.html'));
+
+    // The window's own console, in the terminal that started it.
+    //
+    // A renderer throws into a devtools nobody has open, and the process that
+    // launched it prints nothing at all — so a key that quietly does nothing
+    // looks the same as a key that is not bound. In-house there may be no
+    // devtools habit at all, and this is the only trail.
+    win.webContents.on('console-message', (_e, level, message, line, source) => {
+        const where = source ? `${source.split('/').pop()}:${line}` : 'renderer';
+        const how = level >= 2 ? console.error : console.log;
+        how(`[${where}] ${message}`);
+    });
     return win;
 }
 
@@ -44,7 +56,12 @@ app.whenReady().then(() => {
             return { error: String(e.message || e) };
         }
     });
-    createWindow();
+    const win = createWindow();
+    // The engine's unasked lines go straight to the window. Nothing here
+    // interprets them; a progress count is the renderer's business.
+    engine.onEvent = (msg) => {
+        if (!win.isDestroyed()) win.webContents.send('cian-event', msg);
+    };
 
     app.on('activate', () => {
         if (BrowserWindow.getAllWindows().length === 0) createWindow();

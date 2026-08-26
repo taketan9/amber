@@ -46,6 +46,20 @@ impl OpReport {
     }
 }
 
+/// Are these two paths the same file on disk?
+///
+/// Compared by what the filesystem says rather than by the text, because the
+/// same file has many spellings — a symlinked folder, a case-insensitive
+/// volume, `.` in the middle — and the one that matters is whichever the user
+/// typed by accident.
+fn same_file(a: &Path, b: &Path) -> bool {
+    match (a.canonicalize(), b.canonicalize()) {
+        (Ok(a), Ok(b)) => a == b,
+        // A destination that does not exist yet cannot be the source.
+        _ => false,
+    }
+}
+
 fn dest_for(src: &Path, dest_dir: &Path) -> PathBuf {
     let name = src
         .file_name()
@@ -75,6 +89,23 @@ fn transfer_one(
     moving: bool,
 ) -> Result<bool> {
     let target = dest_for(src, dest_dir);
+
+    // Where it already is, and where it cannot go.
+    //
+    // Copying a file into its own directory used to be carried out: the
+    // destination resolved to the same path, the copy opened it for writing —
+    // the same inode — truncated it, and wrote the nothing it could now read.
+    // Eight bytes in, zero out, reported as a success. Two panes on one folder
+    // is a keystroke away, so this was reachable by accident.
+    //
+    // A directory into itself is the other shape of it, and never ends.
+    if same_file(src, &target) {
+        anyhow::bail!("{} is already there — a file cannot be copied onto itself", src.display());
+    }
+    if src.is_dir() && dest_dir.starts_with(src) {
+        anyhow::bail!("{} cannot be put inside itself", src.display());
+    }
+
     if target.exists() && on_conflict == Conflict::Skip {
         return Ok(false);
     }
@@ -250,6 +281,44 @@ pub fn delete_many(srcs: &[PathBuf], mode: DeleteMode) -> OpReport {
         }
     }
     report
+}
+
+#[cfg(test)]
+mod transfer_tests {
+    use super::*;
+
+    /// Copying a file into the directory it is already in destroyed it.
+    ///
+    /// Two panes showing the same folder is one keystroke away — they start
+    /// there — and `c` then asked the filesystem to copy a file over itself.
+    /// It opened the destination for writing, which is the same inode,
+    /// truncated it to nothing, and copied the nothing. Nine bytes in, zero
+    /// bytes out, reported as a success.
+    #[test]
+    fn a_copy_onto_itself_is_refused_rather_than_emptying_the_file() {
+        let d = tempfile::tempdir().unwrap();
+        let f = d.path().join("note.txt");
+        std::fs::write(&f, b"sample 1").unwrap();
+
+        let err = copy_one(&f, d.path(), Conflict::Overwrite).unwrap_err();
+        assert!(err.to_string().contains("itself"), "says what is wrong: {err}");
+        assert_eq!(std::fs::read(&f).unwrap(), b"sample 1", "and the file is untouched");
+
+        let err = move_one(&f, d.path(), Conflict::Overwrite).unwrap_err();
+        assert!(err.to_string().contains("itself"), "a move is the same mistake");
+        assert!(f.exists(), "still there");
+    }
+
+    /// And a directory cannot be given a home inside itself, which never ends.
+    #[test]
+    fn a_directory_is_refused_a_home_inside_itself() {
+        let d = tempfile::tempdir().unwrap();
+        let inner = d.path().join("outer/inner");
+        std::fs::create_dir_all(&inner).unwrap();
+
+        let err = copy_one(&d.path().join("outer"), &inner, Conflict::Overwrite).unwrap_err();
+        assert!(err.to_string().contains("itself"), "says so: {err}");
+    }
 }
 
 #[cfg(test)]

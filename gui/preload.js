@@ -12,4 +12,10 @@ contextBridge.exposeInMainWorld('cian', {
         if (reply.error) throw new Error(reply.error);
         return reply.ok;
     },
+    /// Listen for what the engine says unasked. The callback is handed the
+    /// message itself and nothing else — no event object, which would carry a
+    /// sender the renderer has no business holding.
+    onEvent: (fn) => {
+        ipcRenderer.on('cian-event', (_e, msg) => fn(msg));
+    },
 });

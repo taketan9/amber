@@ -15,14 +15,20 @@
 //! ```
 //!
 //! Every reply carries the `id` it answers, so the caller may have several in
-//! flight. Nothing is pushed unasked yet; when the watchers arrive they will
-//! come as replies with no `id`.
+//! flight. A long operation also speaks unasked, on lines carrying `event`
+//! instead of `id` — see [`wire`].
 
-use std::io::{BufRead, Write};
+use std::io::BufRead;
 
 use serde::{Deserialize, Serialize};
 
 use cian_core::Pane;
+
+mod jobs;
+mod wire;
+
+use jobs::{Jobs, Kind};
+use wire::Out;
 
 /// One call from the front end.
 #[derive(Deserialize)]
@@ -44,6 +50,9 @@ struct PaneView {
     cwd: String,
     entries: Vec<Row>,
     cursor: usize,
+    /// How many rows are marked. The front end could count them, but this is
+    /// the number it puts on the status line and counting is the engine's job.
+    marked: usize,
 }
 
 /// One line of a listing.
@@ -67,6 +76,7 @@ impl PaneView {
         PaneView {
             cwd: pane.cwd.display().to_string(),
             cursor: pane.cursor,
+            marked: pane.mark_count(),
             entries: pane
                 .entries
                 .iter()
@@ -87,15 +97,56 @@ impl PaneView {
     }
 }
 
-/// The two panes, which is the whole of cian's state so far.
+/// The two panes and whatever is running over them.
 struct Session {
     left: Pane,
     right: Pane,
+    jobs: Jobs,
+    out: Out,
 }
 
 impl Session {
-    fn new(dir: std::path::PathBuf) -> anyhow::Result<Self> {
-        Ok(Session { left: Pane::new(dir.clone())?, right: Pane::new(dir)? })
+    fn new(dir: std::path::PathBuf, out: Out) -> anyhow::Result<Self> {
+        Ok(Session {
+            left: Pane::new(dir.clone())?,
+            right: Pane::new(dir)?,
+            jobs: Jobs::default(),
+            out,
+        })
+    }
+
+    /// The paths an operation acts on: the marked rows, or the one under the
+    /// cursor when nothing is marked. Never the `..` row — it is navigable but
+    /// is not a thing to copy.
+    fn targets(&self, which: &str) -> anyhow::Result<Vec<std::path::PathBuf>> {
+        let pane = match which {
+            "left" => &self.left,
+            "right" => &self.right,
+            other => anyhow::bail!("no such pane: {other}"),
+        };
+        let marked: Vec<_> = pane
+            .entries
+            .iter()
+            .filter(|e| !e.is_parent && pane.marks.contains(&e.path))
+            .map(|e| e.path.clone())
+            .collect();
+        if !marked.is_empty() {
+            return Ok(marked);
+        }
+        match pane.entries.get(pane.cursor).filter(|e| !e.is_parent) {
+            Some(e) => Ok(vec![e.path.clone()]),
+            None => Ok(Vec::new()),
+        }
+    }
+
+    /// Where a transfer goes: the directory the other pane is showing. Two
+    /// panes side by side, and you copy between them — that is the whole idea,
+    /// and it is why the destination never has to be typed.
+    fn other_cwd(&self, which: &str) -> std::path::PathBuf {
+        match which {
+            "left" => self.right.cwd.clone(),
+            _ => self.left.cwd.clone(),
+        }
     }
 
     fn pane_mut(&mut self, which: &str) -> anyhow::Result<&mut Pane> {
@@ -148,6 +199,61 @@ impl Session {
                 pane.go_parent()?;
                 Ok(serde_json::to_value(PaneView::of(pane))?)
             }
+            // Marking. `at` is a row; without it the cursor's row is meant.
+            "mark" => {
+                let which = req.params["pane"].as_str().unwrap_or("left").to_string();
+                let at = req.params["at"].as_u64().map(|n| n as usize);
+                let pane = self.pane_mut(&which)?;
+                let row = at.unwrap_or(pane.cursor);
+                pane.toggle_mark_at(row);
+                // Marking walks down the list, the way it does everywhere else:
+                // one keystroke marks and moves on.
+                if at.is_none() && pane.cursor + 1 < pane.entries.len() {
+                    pane.cursor += 1;
+                }
+                Ok(serde_json::to_value(PaneView::of(pane))?)
+            }
+            "markall" => {
+                let which = req.params["pane"].as_str().unwrap_or("left").to_string();
+                let pane = self.pane_mut(&which)?;
+                // A second press clears, which is what every "select all" does
+                // once everything is already selected.
+                if pane.mark_count() > 0 {
+                    pane.clear_marks();
+                } else {
+                    for i in 0..pane.entries.len() {
+                        pane.set_mark_at(i);
+                    }
+                }
+                Ok(serde_json::to_value(PaneView::of(pane))?)
+            }
+            "unmarkall" => {
+                let which = req.params["pane"].as_str().unwrap_or("left").to_string();
+                let pane = self.pane_mut(&which)?;
+                pane.clear_marks();
+                Ok(serde_json::to_value(PaneView::of(pane))?)
+            }
+            // The operations. Each answers with the number it will report
+            // under, before it has touched anything.
+            "copy" | "move" | "delete" => {
+                let which = req.params["pane"].as_str().unwrap_or("left").to_string();
+                let paths = self.targets(&which)?;
+                if paths.is_empty() {
+                    anyhow::bail!("nothing to operate on");
+                }
+                let (kind, dest) = match req.method.as_str() {
+                    "copy" => (Kind::Copy, Some(self.other_cwd(&which))),
+                    "move" => (Kind::Move, Some(self.other_cwd(&which))),
+                    _ => (Kind::Delete, None),
+                };
+                let count = paths.len();
+                let op = self.jobs.start(kind, paths, dest, self.out.clone());
+                Ok(serde_json::json!({ "op": op, "count": count }))
+            }
+            "cancel" => {
+                let op = req.params["op"].as_u64().unwrap_or(0);
+                Ok(serde_json::json!({ "stopping": self.jobs.cancel(op) }))
+            }
             other => Err(anyhow::anyhow!("no such method: {other}")),
         }
     }
@@ -158,10 +264,10 @@ fn main() -> anyhow::Result<()> {
         .nth(1)
         .map(std::path::PathBuf::from)
         .unwrap_or(std::env::current_dir()?);
-    let mut session = Session::new(start)?;
+    let out = Out::start();
+    let mut session = Session::new(start, out.clone())?;
 
     let stdin = std::io::stdin();
-    let mut out = std::io::stdout();
     for line in stdin.lock().lines() {
         let line = line?;
         if line.trim().is_empty() {
@@ -170,15 +276,16 @@ fn main() -> anyhow::Result<()> {
         // A line that is not a request at all still gets an answer, because a
         // front end waiting on an id it will never be sent is the worst way
         // for this to go wrong.
-        let reply = match serde_json::from_str::<Request>(&line) {
+        match serde_json::from_str::<Request>(&line) {
             Ok(req) => match session.handle(&req) {
-                Ok(ok) => serde_json::json!({ "id": req.id, "ok": ok }),
-                Err(e) => serde_json::json!({ "id": req.id, "error": e.to_string() }),
+                Ok(ok) => out.reply(req.id, ok),
+                Err(e) => out.fail(req.id, e),
             },
-            Err(e) => serde_json::json!({ "id": serde_json::Value::Null, "error": format!("bad request: {e}") }),
-        };
-        writeln!(out, "{reply}")?;
-        out.flush()?;
+            Err(e) => out.send(serde_json::json!({
+                "id": serde_json::Value::Null,
+                "error": format!("bad request: {e}"),
+            })),
+        }
     }
     Ok(())
 }
