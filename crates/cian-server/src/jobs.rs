@@ -11,6 +11,7 @@ use std::sync::Arc;
 
 use cian_core::ops::{self, Conflict, DeleteMode};
 
+use crate::undo::{Stack, Undo};
 use crate::wire::Out;
 
 /// How often a running operation is allowed to speak.
@@ -54,6 +55,7 @@ impl Jobs {
         paths: Vec<PathBuf>,
         dest: Option<PathBuf>,
         out: Out,
+        undo: Stack,
     ) -> u64 {
         let op = self.next.fetch_add(1, Ordering::Relaxed) + 1;
         let cancel = Arc::new(AtomicBool::new(false));
@@ -68,6 +70,11 @@ impl Jobs {
 
             let mut ok = 0usize;
             let mut skipped = 0usize;
+            // Where each moved thing ended up, and where it came from. Only a
+            // move records this: a copy is not undone (undoing one deletes
+            // files that now exist) and a delete went to the trash, which has
+            // its own way back.
+            let mut moved: Vec<(PathBuf, PathBuf)> = Vec::new();
             let mut errors: Vec<String> = Vec::new();
             let mut last = std::time::Instant::now();
             let began = std::time::Instant::now();
@@ -99,7 +106,14 @@ impl Jobs {
                     _ => Err(anyhow::anyhow!("no destination")),
                 };
                 match result {
-                    Ok(true) => ok += 1,
+                    Ok(true) => {
+                        ok += 1;
+                        if let (Kind::Move, Some(d)) = (kind, dest.as_ref()) {
+                            if let Some(name) = path.file_name() {
+                                moved.push((d.join(name), path.clone()));
+                            }
+                        }
+                    }
                     Ok(false) => skipped += 1,
                     Err(e) => errors.push(format!("{}: {}", path.display(), e)),
                 }
@@ -114,6 +128,9 @@ impl Jobs {
                         }),
                     );
                 }
+            }
+            if !moved.is_empty() {
+                undo.push(Undo::Moved { pairs: moved });
             }
             out.event(
                 "done",

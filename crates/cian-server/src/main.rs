@@ -25,9 +25,11 @@ use serde::{Deserialize, Serialize};
 use cian_core::Pane;
 
 mod jobs;
+mod undo;
 mod wire;
 
 use jobs::{Jobs, Kind};
+use undo::{Stack, Undo};
 use wire::Out;
 
 /// One call from the front end.
@@ -103,6 +105,7 @@ struct Session {
     right: Pane,
     jobs: Jobs,
     out: Out,
+    undo: Stack,
 }
 
 impl Session {
@@ -112,6 +115,7 @@ impl Session {
             right: Pane::new(dir)?,
             jobs: Jobs::default(),
             out,
+            undo: Stack::default(),
         })
     }
 
@@ -190,13 +194,25 @@ impl Session {
                 if let Some(n) = at {
                     pane.cursor = n.min(pane.entries.len().saturating_sub(1));
                 }
+                let was = pane.cwd.clone();
                 pane.enter_selected()?;
+                // Only if it actually went somewhere: `Enter` on a file will
+                // one day open it, and that is not a step to walk back.
+                if pane.cwd != was {
+                    self.undo.push(Undo::Navigated { pane: which.clone(), from: was });
+                }
+                let pane = self.pane_mut(&which)?;
                 Ok(serde_json::to_value(PaneView::of(pane))?)
             }
             "parent" => {
                 let which = req.params["pane"].as_str().unwrap_or("left").to_string();
                 let pane = self.pane_mut(&which)?;
+                let was = pane.cwd.clone();
                 pane.go_parent()?;
+                if pane.cwd != was {
+                    self.undo.push(Undo::Navigated { pane: which.clone(), from: was });
+                }
+                let pane = self.pane_mut(&which)?;
                 Ok(serde_json::to_value(PaneView::of(pane))?)
             }
             // Marking. `at` is a row; without it the cursor's row is meant.
@@ -247,8 +263,104 @@ impl Session {
                     _ => (Kind::Delete, None),
                 };
                 let count = paths.len();
-                let op = self.jobs.start(kind, paths, dest, self.out.clone());
+                let op = self.jobs.start(kind, paths, dest, self.out.clone(), self.undo.clone());
                 Ok(serde_json::json!({ "op": op, "count": count }))
+            }
+            // Rename in place. The name is a bare filename, never a path —
+            // moving something is what `move` is for, and a rename that could
+            // also move would make one confirm dialog have to explain two
+            // things.
+            "rename" => {
+                let which = req.params["pane"].as_str().unwrap_or("left").to_string();
+                let to = req.params["name"].as_str().unwrap_or("").trim().to_string();
+                if to.is_empty() {
+                    anyhow::bail!("名前が空です");
+                }
+                if to.contains('/') || to.contains('\\') {
+                    anyhow::bail!("名前に区切り文字は使えません: {to}");
+                }
+                let pane = self.pane_mut(&which)?;
+                let Some(entry) = pane.entries.get(pane.cursor).filter(|e| !e.is_parent) else {
+                    anyhow::bail!("対象がありません");
+                };
+                let from = entry.path.clone();
+                let dest = from.with_file_name(&to);
+                if dest.exists() {
+                    anyhow::bail!("{to} はすでにあります");
+                }
+                cian_core::ops::rename_in_place(&from, &to)?;
+                self.undo.push(Undo::Rename { from: from.clone(), to: dest });
+                let pane = self.pane_mut(&which)?;
+                pane.reload()?;
+                Ok(serde_json::to_value(PaneView::of(pane))?)
+            }
+            // A new file or a new directory, in the pane being looked at.
+            "create" => {
+                let which = req.params["pane"].as_str().unwrap_or("left").to_string();
+                let name = req.params["name"].as_str().unwrap_or("").trim().to_string();
+                let dir = req.params["dir"].as_bool().unwrap_or(false);
+                if name.is_empty() {
+                    anyhow::bail!("名前が空です");
+                }
+                let pane = self.pane_mut(&which)?;
+                let at = pane.cwd.clone();
+                let made = if dir {
+                    cian_core::ops::create_dir(&at, &name)?
+                } else {
+                    cian_core::ops::create_file(&at, &name)?
+                };
+                self.undo.push(Undo::Created { path: made });
+                let pane = self.pane_mut(&which)?;
+                pane.reload()?;
+                Ok(serde_json::to_value(PaneView::of(pane))?)
+            }
+            // One step back, whatever it was.
+            "undo" => {
+                let Some(step) = self.undo.pop() else {
+                    anyhow::bail!("取り消せる操作はありません");
+                };
+                let said = step.describe();
+                match &step {
+                    Undo::Rename { from, to } => {
+                        let name = from
+                            .file_name()
+                            .map(|s| s.to_string_lossy().into_owned())
+                            .unwrap_or_default();
+                        cian_core::ops::rename_in_place(to, &name)?;
+                    }
+                    Undo::Created { path } => {
+                        // Straight off the disk rather than into the trash. It
+                        // was made a moment ago and never had anything in it;
+                        // putting it in the bin would leave litter to explain.
+                        if path.is_dir() {
+                            std::fs::remove_dir(path)?;
+                        } else {
+                            std::fs::remove_file(path)?;
+                        }
+                    }
+                    Undo::Moved { pairs } => {
+                        for (now, was) in pairs {
+                            if let Some(parent) = was.parent() {
+                                cian_core::ops::move_one(
+                                    now,
+                                    parent,
+                                    cian_core::ops::Conflict::Skip,
+                                )?;
+                            }
+                        }
+                    }
+                    Undo::Navigated { pane, from } => {
+                        let p = self.pane_mut(pane)?;
+                        *p = Pane::new(from.clone())?;
+                    }
+                }
+                self.left.reload()?;
+                self.right.reload()?;
+                Ok(serde_json::json!({
+                    "said": said,
+                    "left": PaneView::of(&self.left),
+                    "right": PaneView::of(&self.right),
+                }))
             }
             "cancel" => {
                 let op = req.params["op"].as_u64().unwrap_or(0);

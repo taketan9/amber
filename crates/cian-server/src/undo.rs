@@ -1,0 +1,79 @@
+//! Walking the last few things back.
+//!
+//! The shape is the terminal build's, arrived at again rather than invented:
+//! four things are undoable, and two deliberately are not.
+//!
+//! **A copy is not undone**, because undoing one means deleting files that now
+//! exist, and a key that sometimes deletes is not a key anyone can trust.
+//! **A delete is not undone either** — it went to the trash, which is the
+//! system's own undo and already has a window for it.
+//!
+//! Where you *are* is on the same stack as what you did, in the order things
+//! happened. Walking into the wrong folder is the commonest thing to want
+//! back, and keeping it on a second stack meant `u` did not cover it.
+
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
+
+/// One step back.
+#[derive(Debug, Clone)]
+pub enum Undo {
+    /// Rename `to` back to `from`.
+    Rename { from: PathBuf, to: PathBuf },
+    /// Remove what was just made. **Not redoable** — undoing it destroys it,
+    /// and nothing here remembers what was inside.
+    Created { path: PathBuf },
+    /// Move each `.0` (where it is now) back to `.1` (where it was).
+    Moved { pairs: Vec<(PathBuf, PathBuf)> },
+    /// Take this pane back to `from`.
+    Navigated { pane: String, from: PathBuf },
+}
+
+impl Undo {
+    /// What was undone, for the person who pressed the key. Naming it is the
+    /// point: `u` that says "done" leaves you wondering which of the last
+    /// three things it took back.
+    pub fn describe(&self) -> String {
+        match self {
+            Undo::Rename { from, to } => format!(
+                "{} → {} を戻しました",
+                name_of(to),
+                name_of(from)
+            ),
+            Undo::Created { path } => format!("{} を取り消しました", name_of(path)),
+            Undo::Moved { pairs } => format!("{} 件の移動を戻しました", pairs.len()),
+            Undo::Navigated { from, .. } => format!("{} に戻りました", from.display()),
+        }
+    }
+}
+
+fn name_of(p: &std::path::Path) -> String {
+    p.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| p.display().to_string())
+}
+
+/// The stack, shared with whatever thread finishes a move.
+///
+/// A move reports what it actually shifted only once it is over, and that
+/// happens on a worker — so the stack cannot live behind the session's own
+/// borrow.
+#[derive(Clone, Default)]
+pub struct Stack(Arc<Mutex<Vec<Undo>>>);
+
+/// How far back `u` reaches. Deep enough to cover a wrong turn and the two
+/// things before it, shallow enough that it is never a substitute for a
+/// backup — which is a promise this cannot make.
+const DEPTH: usize = 32;
+
+impl Stack {
+    pub fn push(&self, step: Undo) {
+        let mut v = self.0.lock().unwrap();
+        v.push(step);
+        if v.len() > DEPTH {
+            v.remove(0);
+        }
+    }
+
+    pub fn pop(&self) -> Option<Undo> {
+        self.0.lock().unwrap().pop()
+    }
+}

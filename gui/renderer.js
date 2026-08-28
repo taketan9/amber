@@ -158,6 +158,96 @@ async function parent() {
     say(next.cwd);
 }
 
+/// Ask for a line of text. Resolves to null when the answer is no answer.
+///
+/// The same sheet as the confirm, with a field in it: one dialog to know
+/// rather than two, and the keys mean the same thing in both.
+function askFor(head, initial = '') {
+    const sheet = el.ask.querySelector('.sheet');
+    el.ask.querySelector('.head').textContent = head;
+    const body = el.ask.querySelector('.body');
+    body.textContent = '';
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.value = initial;
+    input.className = 'field';
+    body.append(input);
+    el.ask.hidden = false;
+    input.focus();
+    // The stem, not the suffix: renaming is nearly always about the name and
+    // almost never about the `.txt`.
+    const dot = initial.lastIndexOf('.');
+    if (dot > 0) input.setSelectionRange(0, dot);
+    else input.select();
+
+    return new Promise((resolve) => {
+        const done = (value) => {
+            el.ask.hidden = true;
+            body.textContent = '';
+            el.ask.removeEventListener('click', onClick);
+            document.removeEventListener('keydown', onKey, true);
+            resolve(value);
+        };
+        const onClick = (e) => {
+            const a = e.target.dataset && e.target.dataset.answer;
+            if (a) done(a === 'yes' ? input.value : null);
+        };
+        const onKey = (e) => {
+            if (e.key === 'Escape') { e.stopPropagation(); done(null); }
+            else if (e.key === 'Enter') { e.stopPropagation(); done(input.value); }
+            else e.stopPropagation();
+        };
+        el.ask.addEventListener('click', onClick);
+        document.addEventListener('keydown', onKey, true);
+    });
+}
+
+/// Rename what the cursor is on.
+async function rename() {
+    const which = state.focus;
+    const pane = state[which];
+    const row = pane && pane.entries[pane.cursor];
+    if (!row || row.parent) {
+        say('対象がありません');
+        return;
+    }
+    const name = await askFor(`${row.name} の新しい名前`, row.name);
+    if (name === null || name === row.name) {
+        say('やめました');
+        return;
+    }
+    const next = await ask('rename', { pane: which, name });
+    if (!next) return;
+    state[which] = next;
+    draw(which);
+    say(`${row.name} → ${name}`);
+}
+
+/// A new file, or a new directory.
+async function create(dir) {
+    const which = state.focus;
+    const name = await askFor(dir ? '新しいディレクトリの名前' : '新しいファイルの名前');
+    if (name === null || !name.trim()) {
+        say('やめました');
+        return;
+    }
+    const next = await ask('create', { pane: which, name, dir });
+    if (!next) return;
+    state[which] = next;
+    draw(which);
+    say(`${name} を作りました`);
+}
+
+/// One step back, whatever it was.
+async function undo() {
+    const r = await ask('undo', {});
+    if (!r) return;
+    state.left = r.left;
+    state.right = r.right;
+    draw('left'); draw('right');
+    say(r.said);
+}
+
 /// The looks, in the order `T` walks them.
 ///
 /// 白磁 leads because it is the default, and the default is chosen for the
@@ -280,6 +370,10 @@ document.addEventListener('keydown', (e) => {
     else if (k === 'm') operate('move');
     else if (k === 'd') operate('delete');
     else if (k === 'T') cycleLook();
+    else if (k === 'r') rename();
+    else if (k === 'a' && !e.ctrlKey && !e.metaKey) create(false);
+    else if (k === 'A') create(true);
+    else if (k === 'u') undo();
     else if (k === 'Escape' && running) {
         window.cian.call('cancel', { op: running.op });
         say('中止しています…');
