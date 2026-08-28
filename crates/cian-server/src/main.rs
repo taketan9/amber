@@ -19,15 +19,18 @@
 //! instead of `id` — see [`wire`].
 
 use std::io::BufRead;
+use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
 use cian_core::Pane;
 
+mod find;
 mod jobs;
 mod undo;
 mod wire;
 
+use find::Find;
 use jobs::{Jobs, Kind};
 use undo::{Stack, Undo};
 use wire::Out;
@@ -106,6 +109,7 @@ struct Session {
     jobs: Jobs,
     out: Out,
     undo: Stack,
+    find: Find,
 }
 
 impl Session {
@@ -116,6 +120,7 @@ impl Session {
             jobs: Jobs::default(),
             out,
             undo: Stack::default(),
+            find: Find::default(),
         })
     }
 
@@ -361,6 +366,108 @@ impl Session {
                     "left": PaneView::of(&self.left),
                     "right": PaneView::of(&self.right),
                 }))
+            }
+            // Narrow the listing to names containing this. Case-insensitive,
+            // and it scopes everything downstream — marks, operations, the
+            // count on the status line — because they all work off what is
+            // shown rather than off what is there.
+            "filter" => {
+                let which = req.params["pane"].as_str().unwrap_or("left").to_string();
+                let text = req.params["text"].as_str().unwrap_or("").to_string();
+                let pane = self.pane_mut(&which)?;
+                if text.is_empty() {
+                    pane.clear_filter();
+                } else {
+                    pane.set_filter(text);
+                }
+                Ok(serde_json::to_value(PaneView::of(pane))?)
+            }
+            "hidden" => {
+                let which = req.params["pane"].as_str().unwrap_or("left").to_string();
+                let pane = self.pane_mut(&which)?;
+                let now = !pane.show_hidden;
+                pane.set_show_hidden(now);
+                Ok(serde_json::json!({
+                    "pane": PaneView::of(pane),
+                    "showing": now,
+                }))
+            }
+            "sort" => {
+                use cian_core::{Sort, SortKey};
+                let which = req.params["pane"].as_str().unwrap_or("left").to_string();
+                let key = match req.params["key"].as_str().unwrap_or("name") {
+                    "size" => SortKey::Size,
+                    "date" | "modified" => SortKey::Modified,
+                    "ext" | "extension" => SortKey::Extension,
+                    _ => SortKey::Name,
+                };
+                let pane = self.pane_mut(&which)?;
+                // The same key twice turns it round, which is what a column
+                // heading does everywhere and what the hand expects.
+                let reverse = pane.sort.key == key && !pane.sort.reverse;
+                pane.set_sort(Sort { key, reverse });
+                Ok(serde_json::json!({
+                    "pane": PaneView::of(pane),
+                    "by": key.label(),
+                    "reverse": reverse,
+                }))
+            }
+            // Everything under the pane's directory, walked on a worker.
+            // The picker opens on nothing and fills in; it never waits.
+            "find" => {
+                let which = req.params["pane"].as_str().unwrap_or("left").to_string();
+                let root = match which.as_str() {
+                    "left" => self.left.cwd.clone(),
+                    _ => self.right.cwd.clone(),
+                };
+                self.find.start(root.clone(), self.out.clone());
+                Ok(serde_json::json!({ "root": root.display().to_string() }))
+            }
+            // The best of what has been found so far, for what has been typed
+            // so far. Ranked here so there is one fuzzy matcher and not two.
+            "rank" => {
+                let query = req.params["query"].as_str().unwrap_or("");
+                let limit = req.params["limit"].as_u64().unwrap_or(200) as usize;
+                let rows: Vec<_> = self
+                    .find
+                    .rank(query, limit)
+                    .into_iter()
+                    .map(|h| {
+                        serde_json::json!({
+                            "rel": h.rel,
+                            "path": h.full.display().to_string(),
+                            "is_dir": h.is_dir,
+                        })
+                    })
+                    .collect();
+                Ok(serde_json::json!({ "rows": rows, "of": self.find.found() }))
+            }
+            // Take a pane to a found path — into it if it is a directory, to
+            // its folder with the cursor on it if it is a file.
+            "reveal" => {
+                let which = req.params["pane"].as_str().unwrap_or("left").to_string();
+                let path = PathBuf::from(req.params["path"].as_str().unwrap_or(""));
+                let (dir, name) = if path.is_dir() {
+                    (path.clone(), None)
+                } else {
+                    (
+                        path.parent().map(|p| p.to_path_buf()).unwrap_or_default(),
+                        path.file_name().map(|s| s.to_string_lossy().into_owned()),
+                    )
+                };
+                let pane = self.pane_mut(&which)?;
+                let was = pane.cwd.clone();
+                *pane = Pane::new(dir)?;
+                if let Some(n) = name {
+                    if let Some(i) = pane.entries.iter().position(|e| e.name == n) {
+                        pane.cursor = i;
+                    }
+                }
+                if pane.cwd != was {
+                    self.undo.push(Undo::Navigated { pane: which.clone(), from: was });
+                }
+                let pane = self.pane_mut(&which)?;
+                Ok(serde_json::to_value(PaneView::of(pane))?)
             }
             "cancel" => {
                 let op = req.params["op"].as_u64().unwrap_or(0);

@@ -10,6 +10,10 @@ const el = {
     right: document.querySelector('[data-pane="right"]'),
     status: document.getElementById('status'),
     ask: document.getElementById('ask'),
+    find: document.getElementById('find'),
+    findQ: document.getElementById('find-q'),
+    findHits: document.getElementById('find-hits'),
+    findFoot: document.getElementById('find-foot'),
 };
 
 /// The operation currently running, if any, so its progress has somewhere to
@@ -248,6 +252,132 @@ async function undo() {
     say(r.said);
 }
 
+/// Show or hide the dotfiles.
+async function toggleHidden() {
+    const which = state.focus;
+    const r = await ask('hidden', { pane: which });
+    if (!r) return;
+    state[which] = r.pane;
+    draw(which);
+    say(r.showing ? '隠しファイルを表示' : '隠しファイルを非表示');
+}
+
+/// Walk the sort keys, and turn one round when it is already chosen.
+const SORTS = ['name', 'size', 'date', 'ext'];
+let sortAt = 0;
+async function sortBy() {
+    const which = state.focus;
+    const key = SORTS[sortAt];
+    const r = await ask('sort', { pane: which, key });
+    if (!r) return;
+    // Reversed means the same key again; otherwise move on to the next one.
+    if (!r.reverse) sortAt = (sortAt + 1) % SORTS.length;
+    state[which] = r.pane;
+    draw(which);
+    say(`並び: ${r.by}${r.reverse ? ' ↓' : ' ↑'}`);
+}
+
+/// `/` narrows what is here. A second `/`, with nothing typed yet, looks
+/// underneath instead — one slash for this listing, two for the tree. The
+/// terminal build settled on that and it reads itself.
+const filter = { on: false };
+
+function startFilter() {
+    filter.on = true;
+    el.find.hidden = false;
+    el.findQ.value = '';
+    el.findQ.placeholder = 'この一覧を絞り込み（もう一度 / で下を探す）';
+    el.findHits.replaceChildren();
+    el.findFoot.textContent = '';
+    el.findQ.focus();
+}
+
+function endFilter(keep) {
+    filter.on = false;
+    el.find.hidden = true;
+    el.findQ.placeholder = '/ で絞り込み';
+    if (!keep) applyFilter('');
+}
+
+async function applyFilter(text) {
+    const which = state.focus;
+    const next = await ask('filter', { pane: which, text });
+    if (!next) return;
+    state[which] = next;
+    draw(which);
+    say(text ? `絞り込み: ${text} — ${next.entries.length} 件` : `${next.entries.length} 件`);
+}
+
+/// The file finder: `//` opens it, typing narrows it, Enter goes there.
+///
+/// Ranking is the engine's — one fuzzy matcher rather than two that would
+/// drift — and the round trip costs less than the ranking, because the engine
+/// is a pipe away and not a network away.
+const finder = { open: false, rows: [], at: 0, walking: false };
+
+async function openFinder() {
+    const which = state.focus;
+    finder.open = true;
+    finder.rows = [];
+    finder.at = 0;
+    finder.walking = true;
+    el.find.hidden = false;
+    el.findQ.value = '';
+    el.findFoot.textContent = '探しています…';
+    el.findHits.replaceChildren();
+    el.findQ.focus();
+    // Asked for before the walk has found anything, on purpose: the picker is
+    // usable from the first keystroke and the tree arrives underneath it.
+    await ask('find', { pane: which });
+    rankNow();
+}
+
+function closeFinder() {
+    finder.open = false;
+    el.find.hidden = true;
+}
+
+async function rankNow() {
+    if (!finder.open) return;
+    const r = await ask('rank', { query: el.findQ.value, limit: 200 });
+    if (!r || !finder.open) return;
+    finder.rows = r.rows;
+    finder.at = Math.min(finder.at, Math.max(0, r.rows.length - 1));
+    drawHits(r.of);
+}
+
+function drawHits(of) {
+    const frag = document.createDocumentFragment();
+    finder.rows.forEach((row, i) => {
+        const div = document.createElement('div');
+        div.className = 'hit' + (row.is_dir ? ' d' : '') + (i === finder.at ? ' on' : '');
+        const p = document.createElement('span');
+        p.className = 'p';
+        p.textContent = row.rel;
+        div.append(p);
+        div.addEventListener('mousedown', () => { finder.at = i; goToHit(); });
+        frag.append(div);
+    });
+    el.findHits.replaceChildren(frag);
+    const on = el.findHits.children[finder.at];
+    if (on) on.scrollIntoView({ block: 'nearest' });
+    el.findFoot.textContent = finder.walking
+        ? `${finder.rows.length} / ${of} 件（まだ探しています）`
+        : `${finder.rows.length} / ${of} 件`;
+}
+
+async function goToHit() {
+    const row = finder.rows[finder.at];
+    if (!row) return;
+    const which = state.focus;
+    closeFinder();
+    const next = await ask('reveal', { pane: which, path: row.path });
+    if (!next) return;
+    state[which] = next;
+    draw(which);
+    say(row.rel);
+}
+
 /// The looks, in the order `T` walks them.
 ///
 /// 白磁 leads because it is the default, and the default is chosen for the
@@ -327,6 +457,15 @@ async function operate(kind) {
 
 /// Everything the engine says unasked.
 window.cian.onEvent((msg) => {
+    // The walk, which belongs to the finder rather than to an operation.
+    if (msg.event === 'finding' || msg.event === 'found') {
+        if (!finder.open) return;
+        finder.walking = msg.event === 'finding';
+        // Re-rank as more arrives: what was typed a moment ago should see the
+        // files that turned up since.
+        rankNow();
+        return;
+    }
     if (!running || msg.op !== running.op) return;
     if (msg.event === 'progress') {
         say(`${running.verb}中… ${msg.done} / ${msg.total}`);
@@ -343,6 +482,50 @@ window.cian.onEvent((msg) => {
             say(bits.join(' · '), msg.errors.length > 0);
         });
     }
+});
+
+/// The filter's keys, while it is up.
+document.addEventListener('keydown', (e) => {
+    if (!filter.on) return;
+    e.stopPropagation();
+    if (e.key === 'Escape') { endFilter(false); say('絞り込みを解除'); }
+    else if (e.key === 'Enter') { endFilter(true); }
+    else if (e.key === '/' && el.findQ.value === '') {
+        // Two slashes: this listing was not it, so look underneath.
+        endFilter(true);
+        openFinder();
+    }
+    else return;
+    e.preventDefault();
+}, true);
+
+document.addEventListener('input', (e) => {
+    if (filter.on && e.target === el.findQ) applyFilter(el.findQ.value);
+});
+
+/// The finder's own keys, while it is up.
+document.addEventListener('keydown', (e) => {
+    if (!finder.open) return;
+    e.stopPropagation();
+    if (e.key === 'Escape') { closeFinder(); say('やめました'); }
+    else if (e.key === 'Enter') goToHit();
+    else if (e.key === 'ArrowDown' || (e.key === 'n' && e.ctrlKey)) {
+        finder.at = Math.min(finder.rows.length - 1, finder.at + 1);
+        drawHits(finder.rows.length);
+    }
+    else if (e.key === 'ArrowUp' || (e.key === 'p' && e.ctrlKey)) {
+        finder.at = Math.max(0, finder.at - 1);
+        drawHits(finder.rows.length);
+    }
+    else return;   // everything else is typing, and belongs to the field
+    e.preventDefault();
+}, true);
+
+// Each keystroke re-ranks. Not debounced: the answer comes from a pipe, and
+// waiting on a timer to save a round trip that costs nothing would only make
+// the picker feel slower than it is.
+document.addEventListener('input', (e) => {
+    if (finder.open && e.target === el.findQ) rankNow();
 });
 
 document.addEventListener('keydown', (e) => {
@@ -374,11 +557,24 @@ document.addEventListener('keydown', (e) => {
     else if (k === 'a' && !e.ctrlKey && !e.metaKey) create(false);
     else if (k === 'A') create(true);
     else if (k === 'u') undo();
+    else if (k === '/') startFilter();
+    else if (k === '.') toggleHidden();
+    else if (k === 's') sortBy();
     else if (k === 'Escape' && running) {
         window.cian.call('cancel', { op: running.op });
         say('中止しています…');
     }
-    else return;
+    else {
+        // Nothing claimed it. Said out loud rather than swallowed: a key that
+        // does nothing and a key that is not bound look identical from the
+        // outside, and the terminal build grew `:key` for exactly this.
+        if (k.length === 1 || k.startsWith('Arrow') || k.startsWith('F')) {
+            console.log(`key: ${JSON.stringify(k)} code=${e.code}`
+                + (e.ctrlKey ? ' ctrl' : '') + (e.metaKey ? ' meta' : '')
+                + (e.shiftKey ? ' shift' : '') + (e.altKey ? ' alt' : ''));
+        }
+        return;
+    }
     e.preventDefault();
 });
 
