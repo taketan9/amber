@@ -259,6 +259,7 @@ async function toggleHidden() {
     if (!r) return;
     state[which] = r.pane;
     draw(which);
+    if (toggles.on) drawToggles();
     say(r.showing ? '隠しファイルを表示' : '隠しファイルを非表示');
 }
 
@@ -396,12 +397,67 @@ const LOOKS = [
 /// read it from later.
 let look = 0;
 
-function cycleLook() {
-    look = (look + 1) % LOOKS.length;
-    const [value, name] = LOOKS[look];
+function setLook(i) {
+    look = (i + LOOKS.length) % LOOKS.length;
+    const [value] = LOOKS[look];
     if (value) document.documentElement.dataset.look = value;
     else delete document.documentElement.dataset.look;
-    say(`配色: ${name}`);
+}
+
+/// The switches, on `T` — the key the terminal build puts them on.
+///
+/// Not a key each. cian-tui gathers the live settings into one menu rather
+/// than spending a letter on every one of them, and a front end that scattered
+/// them would be a second set of habits to learn.
+const toggles = { on: false, at: 0 };
+
+function togglesRows() {
+    const pane = state[state.focus];
+    return [
+        {
+            label: '隠しファイル',
+            value: pane && pane.hidden_shown ? '表示' : '非表示',
+            run: () => toggleHidden(),
+        },
+        {
+            label: '配色',
+            value: LOOKS[look][1],
+            run: () => { setLook(look + 1); drawToggles(); say(`配色: ${LOOKS[look][1]}`); },
+        },
+    ];
+}
+
+function openToggles() {
+    toggles.on = true;
+    toggles.at = 0;
+    el.find.hidden = false;
+    el.findQ.hidden = true;
+    el.findFoot.textContent = '↑↓ 選ぶ  Enter 切替  Esc 閉じる';
+    drawToggles();
+}
+
+function closeToggles() {
+    toggles.on = false;
+    el.find.hidden = true;
+    el.findQ.hidden = false;
+}
+
+function drawToggles() {
+    const rows = togglesRows();
+    const frag = document.createDocumentFragment();
+    rows.forEach((row, i) => {
+        const div = document.createElement('div');
+        div.className = 'hit' + (i === toggles.at ? ' on' : '');
+        const l = document.createElement('span');
+        l.className = 'p';
+        l.textContent = row.label;
+        const v = document.createElement('span');
+        v.textContent = row.value;
+        div.append(l, v);
+        div.addEventListener('mousedown', () => { toggles.at = i; row.run(); });
+        frag.append(div);
+    });
+    el.findHits.replaceChildren(frag);
 }
 
 /// Mark the row under the cursor, or every row.
@@ -484,6 +540,19 @@ window.cian.onEvent((msg) => {
     }
 });
 
+/// The switches' keys, while they are up.
+document.addEventListener('keydown', (e) => {
+    if (!toggles.on) return;
+    e.stopPropagation();
+    const rows = togglesRows();
+    if (e.key === 'Escape' || e.key === 'T') closeToggles();
+    else if (e.key === 'ArrowDown') { toggles.at = Math.min(rows.length - 1, toggles.at + 1); drawToggles(); }
+    else if (e.key === 'ArrowUp') { toggles.at = Math.max(0, toggles.at - 1); drawToggles(); }
+    else if (e.key === 'Enter' || e.key === ' ') rows[toggles.at].run();
+    else return;
+    e.preventDefault();
+}, true);
+
 /// The filter's keys, while it is up.
 document.addEventListener('keydown', (e) => {
     if (!filter.on) return;
@@ -552,14 +621,13 @@ document.addEventListener('keydown', (e) => {
     else if (k === 'c' && !e.ctrlKey && !e.metaKey) operate('copy');
     else if (k === 'm') operate('move');
     else if (k === 'd') operate('delete');
-    else if (k === 'T') cycleLook();
+    else if (k === 'T') openToggles();
     else if (k === 'r') rename();
     else if (k === 'a' && !e.ctrlKey && !e.metaKey) create(false);
     else if (k === 'A') create(true);
     else if (k === 'u') undo();
     else if (k === '/') startFilter();
-    else if (k === '.') toggleHidden();
-    else if (k === 's') sortBy();
+    else if (k === ',') sortBy();
     else if (k === 'Escape' && running) {
         window.cian.call('cancel', { op: running.op });
         say('中止しています…');

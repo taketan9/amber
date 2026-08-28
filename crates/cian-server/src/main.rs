@@ -58,6 +58,10 @@ struct PaneView {
     /// How many rows are marked. The front end could count them, but this is
     /// the number it puts on the status line and counting is the engine's job.
     marked: usize,
+    /// Whether dotfiles are showing. The switches menu puts the current value
+    /// beside the name, so it has to come from the engine rather than from
+    /// whatever the front end last remembered asking for.
+    hidden_shown: bool,
 }
 
 /// One line of a listing.
@@ -82,6 +86,7 @@ impl PaneView {
             cwd: pane.cwd.display().to_string(),
             cursor: pane.cursor,
             marked: pane.mark_count(),
+            hidden_shown: pane.show_hidden,
             entries: pane
                 .entries
                 .iter()
