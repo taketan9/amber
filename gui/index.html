@@ -11,17 +11,23 @@
    DirectWrite, and asking for a downloaded font would throw that away. The
    stack names what each platform actually ships. */
 :root {
-  --bg:        #11131a;
-  --pane:      #161923;
-  --pane-off:  #12141c;
-  --line:      #262c3b;
-  --text:      #d7dcea;
-  --dim:       #6f7891;
-  --dir:       #7fb2ff;
-  --accent:    #33e0c8;
-  --accent-dim:#1d6b62;
-  --mark:      #ffcc66;
-  --cell-h:    22px;
+  /* 白磁 — the default.
+     Colour where it means something and nowhere else: a directory, a mark,
+     the cursor. Everything else is spacing and a hairline. Rows are open
+     enough to be read by somebody who does not live in a file manager, which
+     is who this build is for. */
+  --bg:        #f7f8f8;
+  --pane:      #ffffff;
+  --pane-off:  #f3f5f5;
+  --line:      #e3e7e6;
+  --text:      #2b3333;
+  --dim:       #8b9493;
+  --dir:       #17706a;
+  --accent:    #0e9e8f;
+  --accent-dim:#e6f1ef;
+  --on-accent: #ffffff;
+  --mark:      #bf6b34;
+  --cell-h:    26px;
   --size:      15px;
   /* A Nerd Font first, because that is what cian-tui is read in and it is the
      one people said looked best of the three. Then the UI faces Windows and
@@ -31,6 +37,60 @@
           "Cica", "Yu Gothic UI", "Meiryo UI", "Hiragino Sans", "Noto Sans JP",
           system-ui, sans-serif;
 }
+
+/* Solarized Light — Ethan Schoonover's palette, unaltered.
+   The one preset that exists on both sides: cian-tui has it too, so this is
+   the only way to have the terminal and the window in the same colours. */
+:root[data-look="solarized-light"] {
+  --bg:        #fdf6e3;
+  --pane:      #fdf6e3;
+  --pane-off:  #f4eeda;
+  --line:      #ddd6c1;
+  --text:      #586e75;
+  --dim:       #93a1a1;
+  --dir:       #268bd2;
+  --accent:    #2aa198;
+  --accent-dim:#eee8d5;
+  --on-accent: #fdf6e3;
+  --mark:      #b58900;
+}
+
+/* 陰翳 — dark kept dark, and only what matters catches the light.
+   The ground is not black but a deep brown; one gold and one vermilion. */
+:root[data-look="inei"] {
+  --bg:        #14110f;
+  --pane:      #1c1714;
+  --pane-off:  #161211;
+  --line:      #2b2320;
+  --text:      #d9d0c5;
+  --dim:       #7c6f64;
+  --dir:       #c9a227;
+  --accent:    #e8b84b;
+  --accent-dim:#2e2519;
+  --on-accent: #1a1409;
+  --mark:      #c8703c;
+}
+
+/* 端末譲り — the terminal build, not disowned.
+   Monospace throughout, rows tight, ANSI bright colours as they are. */
+:root[data-look="terminal"] {
+  --bg:        #0c0c0c;
+  --pane:      #111111;
+  --pane-off:  #0d0d0d;
+  --line:      #232323;
+  --text:      #c8c8c8;
+  --dim:       #6a6a6a;
+  --dir:       #5fafff;
+  --accent:    #5fffd7;
+  --accent-dim:#1c2a28;
+  --on-accent: #04120f;
+  --mark:      #ffd75f;
+  --cell-h:    19px;
+  --size:      14px;
+  --face: "HackGen Console NF", "UDEV Gothic NF", "Cica",
+          ui-monospace, "Consolas", monospace;
+}
+
 * { box-sizing: border-box; }
 html, body {
   margin: 0; height: 100%;
@@ -71,9 +131,9 @@ html, body {
 .row.dir .name { color: var(--dir); }
 .row.marked .name { color: var(--mark); }
 .row.cursor { background: var(--accent-dim); }
-.pane.active .row.cursor { background: var(--accent); color: #06231f; }
-.pane.active .row.cursor .size { color: #06231f; }
-.pane.active .row.cursor .name { color: #06231f; }
+.pane.active .row.cursor { background: var(--accent); color: var(--on-accent); }
+.pane.active .row.cursor .size { color: var(--on-accent); }
+.pane.active .row.cursor .name { color: var(--on-accent); }
 #status {
   position: fixed; left: 0; right: 0; bottom: 0;
   padding: 3px 10px; font-size: 12px;
@@ -109,7 +169,7 @@ html, body {
   font: inherit; padding: 5px 14px; border-radius: 4px;
   border: 1px solid var(--line); background: var(--pane-off); color: var(--text);
 }
-.sheet button.go { border-color: var(--accent); background: var(--accent); color: #06231f; }
+.sheet button.go { border-color: var(--accent); background: var(--accent); color: var(--on-accent); }
 .sheet button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 </style>
 </head>

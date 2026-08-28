@@ -158,6 +158,32 @@ async function parent() {
     say(next.cwd);
 }
 
+/// The looks, in the order `T` walks them.
+///
+/// 白磁 leads because it is the default, and the default is chosen for the
+/// person opening this for the first time rather than for the person who
+/// built it — the same reasoning that made notepad the default grammar.
+/// Taketan's own is solarized-light, one press away.
+const LOOKS = [
+    ['', '白磁'],
+    ['solarized-light', 'Solarized Light'],
+    ['inei', '陰翳'],
+    ['terminal', '端末譲り'],
+];
+
+/// Which look is showing. Not yet written anywhere — where a preference
+/// lives is still open, and guessing at a file now would mean two places to
+/// read it from later.
+let look = 0;
+
+function cycleLook() {
+    look = (look + 1) % LOOKS.length;
+    const [value, name] = LOOKS[look];
+    if (value) document.documentElement.dataset.look = value;
+    else delete document.documentElement.dataset.look;
+    say(`配色: ${name}`);
+}
+
 /// Mark the row under the cursor, or every row.
 async function mark(all) {
     const which = state.focus;
@@ -253,6 +279,7 @@ document.addEventListener('keydown', (e) => {
     else if (k === 'c' && !e.ctrlKey && !e.metaKey) operate('copy');
     else if (k === 'm') operate('move');
     else if (k === 'd') operate('delete');
+    else if (k === 'T') cycleLook();
     else if (k === 'Escape' && running) {
         window.cian.call('cancel', { op: running.op });
         say('中止しています…');
