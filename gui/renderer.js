@@ -427,6 +427,152 @@ function togglesRows() {
     ];
 }
 
+/// What `?` shows.
+///
+/// **Taken from cian's own key table, not written afresh.** Two keys in this
+/// front end had drifted — sorting had wandered off `,`, and the look cycle had
+/// taken `T`, which is the switches — and both were found by reading the
+/// terminal build's list rather than by anyone noticing while using it. A help
+/// screen written from memory would have recorded the drift as if it were the
+/// design.
+const HELP = [
+    ['移動', [
+        ['j / k / ↑ ↓', 'ひとつ下 / 上'],
+        ['Enter', 'ディレクトリへ入る'],
+        ['Backspace', '親ディレクトリへ'],
+        ['z', '入力したパスへ移動'],
+        ['Tab', '反対のペインへ'],
+        ['← → / Ctrl+h / Ctrl+l', '左 / 右のペインにフォーカス'],
+        ['F5', '読み直す'],
+    ]],
+    ['探す', [
+        ['/', 'この一覧を絞り込み'],
+        ['/ /', 'この下のどこかにあるファイルをあいまい検索'],
+        [',', 'ソート：名前／サイズ／日付／拡張子'],
+        ['T', 'トグルメニュー：隠しファイル・配色'],
+    ]],
+    ['マークと操作', [
+        ['Space', 'マーク切替して下へ'],
+        ['Ctrl+A', '全マーク（もう一度で解除）'],
+        ['V', '全マークを反転'],
+        ['c / m / d', '反対ペインへコピー / 移動 / 削除（ゴミ箱へ）'],
+        ['r', 'リネーム'],
+        ['a / A', '新規ファイル / 新規ディレクトリ'],
+        ['p', 'パス文字列をクリップボードへ'],
+        ['o / O', 'このペインを反対側へ / 反対側をここへ'],
+        ['u', '直前のリネーム／作成／移動／ディレクトリ移動を取り消し'],
+        ['Esc', '実行中の操作を中止'],
+    ]],
+];
+
+const help = { on: false };
+
+function openHelp() {
+    help.on = true;
+    el.find.hidden = false;
+    el.find.classList.add('help');
+    el.findQ.hidden = true;
+    el.findFoot.textContent = 'Esc か ? で閉じる  ── 端末版の cian と同じキーです';
+    const frag = document.createDocumentFragment();
+    for (const [group, rows] of HELP) {
+        const h = document.createElement('div');
+        h.className = 'group';
+        h.textContent = group;
+        frag.append(h);
+        for (const [keys, what] of rows) {
+            const div = document.createElement('div');
+            div.className = 'hit';
+            const l = document.createElement('span');
+            l.className = 'k';
+            l.textContent = keys;
+            const v = document.createElement('span');
+            v.className = 'w';
+            v.textContent = what;
+            div.append(l, v);
+            frag.append(div);
+        }
+    }
+    el.findHits.replaceChildren(frag);
+    el.findHits.scrollTop = 0;
+}
+
+function closeHelp() {
+    help.on = false;
+    el.find.classList.remove('help');
+    el.find.hidden = true;
+    el.findQ.hidden = false;
+}
+
+/// Help's keys. It scrolls, because the terminal build's help did not and
+/// the bottom of it could not be read.
+document.addEventListener('keydown', (e) => {
+    if (!help.on) return;
+    e.stopPropagation();
+    if (e.key === 'Escape' || e.key === '?') closeHelp();
+    else if (e.key === 'ArrowDown' || e.key === 'j') el.findHits.scrollTop += 40;
+    else if (e.key === 'ArrowUp' || e.key === 'k') el.findHits.scrollTop -= 40;
+    else if (e.key === 'PageDown' || e.key === ' ') el.findHits.scrollTop += el.findHits.clientHeight - 40;
+    else if (e.key === 'PageUp') el.findHits.scrollTop -= el.findHits.clientHeight - 40;
+    else return;
+    e.preventDefault();
+}, true);
+
+function focusPane(which) {
+    state.focus = which;
+    draw('left');
+    draw('right');
+}
+
+async function invert() {
+    const which = state.focus;
+    state[which] = await call('invert', { pane: which });
+    draw(which);
+    say(`${state[which].marked} 件をマーク`);
+}
+
+/// `o` brings this pane to the other one; `O` sends the other one here.
+///
+/// The pair is easy to get backwards, so the message names the direction
+/// rather than saying "done" — the same reason `u` names what it undid.
+async function syncPane(pullToHere) {
+    const here = state.focus;
+    const there = here === 'left' ? 'right' : 'left';
+    const [to, from] = pullToHere ? [here, there] : [there, here];
+    const path = state[from].path;
+    state[to] = await call('list', { pane: to, path });
+    draw(to);
+    say(`${to === 'left' ? '左' : '右'}を ${path} へ`);
+}
+
+async function goToPath() {
+    const path = await askFor('移動先', state[state.focus].path);
+    if (!path) return;
+    const which = state.focus;
+    state[which] = await call('list', { pane: which, path });
+    draw(which);
+}
+
+/// `p` puts the paths on the clipboard — the marked ones, or the one under
+/// the cursor. The text, not the files: copying the files is Ctrl+C, and
+/// conflating the two is how you paste a path into a folder.
+async function copyPaths() {
+    const pane = state[state.focus];
+    const marked = pane.entries.filter((x) => x.marked);
+    const rows = marked.length ? marked : [pane.entries[pane.cursor]].filter(Boolean);
+    if (!rows.length) return;
+    const text = rows.map((x) => x.path).join('\n');
+    await navigator.clipboard.writeText(text);
+    say(`${rows.length} 件のパスをコピー`);
+}
+
+async function refresh() {
+    for (const which of ['left', 'right']) {
+        state[which] = await call('list', { pane: which, path: state[which].path });
+        draw(which);
+    }
+    say('読み直しました');
+}
+
 function openToggles() {
     toggles.on = true;
     toggles.at = 0;
@@ -611,8 +757,8 @@ document.addEventListener('keydown', (e) => {
         p.cursor = Math.max(0, p.entries.length - 1);
         draw(state.focus);
     }
-    else if (k === 'ArrowLeft' || k === 'h') { state.focus = 'left'; draw('left'); draw('right'); }
-    else if (k === 'ArrowRight' || k === 'l') { state.focus = 'right'; draw('left'); draw('right'); }
+    else if (k === 'ArrowLeft' || (k === 'h' && e.ctrlKey)) focusPane('left');
+    else if (k === 'ArrowRight' || (k === 'l' && e.ctrlKey)) focusPane('right');
     else if (k === 'Tab') { state.focus = state.focus === 'left' ? 'right' : 'left'; draw('left'); draw('right'); }
     else if (k === 'Enter') enter();
     else if (k === 'Backspace') parent();
@@ -626,6 +772,13 @@ document.addEventListener('keydown', (e) => {
     else if (k === 'a' && !e.ctrlKey && !e.metaKey) create(false);
     else if (k === 'A') create(true);
     else if (k === 'u') undo();
+    else if (k === 'V') invert();
+    else if (k === 'o') syncPane(true);
+    else if (k === 'O') syncPane(false);
+    else if (k === 'z') goToPath();
+    else if (k === 'p' && !e.ctrlKey && !e.metaKey) copyPaths();
+    else if (k === 'F5') refresh();
+    else if (k === '?') openHelp();
     else if (k === '/') startFilter();
     else if (k === ',') sortBy();
     else if (k === 'Escape' && running) {

@@ -253,6 +253,14 @@ impl Session {
                 }
                 Ok(serde_json::to_value(PaneView::of(pane))?)
             }
+            "invert" => {
+                let which = req.params["pane"].as_str().unwrap_or("left").to_string();
+                let pane = self.pane_mut(&which)?;
+                for i in 0..pane.entries.len() {
+                    pane.toggle_mark_at(i);
+                }
+                Ok(serde_json::to_value(PaneView::of(pane))?)
+            }
             "unmarkall" => {
                 let which = req.params["pane"].as_str().unwrap_or("left").to_string();
                 let pane = self.pane_mut(&which)?;

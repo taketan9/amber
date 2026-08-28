@@ -196,6 +196,20 @@ html, body {
 }
 .hit .p { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; direction: rtl; text-align: left; }
 .hit span + span { flex: 0 0 auto; color: var(--dim); }
+/* Help puts the keys in a fixed column so they line up down the page, and
+   lets the description take whatever is left. The keys are the thing being
+   looked up; a ragged left edge makes them hard to scan. */
+.hit .k { flex: 0 0 13rem; color: var(--accent); font-variant-numeric: tabular-nums; }
+.hit .w { flex: 1 1 auto; color: var(--fg); white-space: normal; }
+.group { padding: 0.9rem 0.75rem 0.3rem; font-size: 0.78rem; letter-spacing: 0.08em; color: var(--dim); }
+.group:first-child { padding-top: 0.2rem; }
+/* The help rows are the one place a row may be taller than a cell. Every
+   other list here is one line per file and clips deliberately; help is prose,
+   and the fixed height with `overflow: hidden` is precisely what cut the
+   bottom off the old help screen. It scrolls, and it gets more of the window
+   than the finder does — nobody is reading help and a listing at once. */
+#find.help .hits { max-height: 74vh; }
+#find.help .hit { height: auto; min-height: var(--cell-h); padding: 4px 6px; white-space: normal; overflow: visible; align-items: baseline; }
 .hit.on span + span { color: var(--on-accent); }
 .hit.d .p { color: var(--dir); }
 .hit.on { background: var(--accent); color: var(--on-accent); }
