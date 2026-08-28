@@ -405,6 +405,84 @@ def naming() -> int:
     return found
 
 
+#: ブラウザ・Electron 側が用意しているもの。ここに無い名前を呼んでいたら、
+#: それは書き間違いか、消し忘れた呼び出し。
+JS_GLOBALS = {
+    'window', 'document', 'navigator', 'console', 'setTimeout', 'clearTimeout',
+    'setInterval', 'clearInterval', 'requestAnimationFrame', 'fetch', 'alert',
+    'Promise', 'Array', 'Object', 'String', 'Number', 'Boolean', 'Math', 'JSON',
+    'Date', 'Map', 'Set', 'Error', 'RegExp', 'Intl', 'parseInt', 'parseFloat',
+    'isNaN', 'encodeURIComponent', 'decodeURIComponent', 'structuredClone',
+    'require', 'module', 'process', 'Buffer', '__dirname', 'queueMicrotask',
+    'getComputedStyle', 'URL', 'Blob', 'TextDecoder', 'TextEncoder',
+    'if', 'for', 'while', 'switch', 'catch', 'return', 'typeof', 'function',
+    'await', 'new', 'else', 'do', 'of', 'in', 'delete', 'void', 'throw', 'yield',
+    'async', 'class', 'super', 'this',
+}
+
+
+def js() -> int:
+    """レンダラの JS を、node --check が見ないところで見る。
+
+    **JS は文句を言わない。** 同じ名前で関数を二度書けば後ろが黙って勝ち、
+    存在しない関数を呼んでも実行してその行に来るまで何も起きない。
+    実際にこの二つを同時にやって、`node --check` も `cargo test` も
+    `audit.py` も全部緑のまま、起動した瞬間に落ちた。
+
+    構文解析ではなく字面で見ているので取りこぼしはある。狙っているのは
+    「動かしさえすれば必ず出るのに、動かすまで誰も気づかない」種類だけ。
+    """
+    print()
+    print('=' * 72)
+    print('④ レンダラの JS（重複定義・呼べない呼び出し）')
+    print('=' * 72)
+    n = 0
+    for path in sorted(glob.glob(os.path.join(ROOT, 'gui', '*.js'))):
+        src = _read(path)
+        defs = re.findall(r'^\s*(?:async\s+)?function\s+([A-Za-z_$][\w$]*)', src, re.M)
+        dupes = [name for name, c in collections.Counter(defs).items() if c > 1]
+        if dupes:
+            n += len(dupes)
+            print(f'  ■ {_rel(path)}: 二度定義されている関数')
+            for name in sorted(dupes):
+                print(f'      {name}()  ── 後ろの定義が前を黙って置き換える')
+
+        # 定義されている名前 = 関数宣言 + const/let/var + 引数っぽいもの。
+        known = set(defs) | set(JS_GLOBALS)
+        known |= set(re.findall(r'\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)', src))
+        known |= set(re.findall(r'\b([A-Za-z_$][\w$]*)\s*=>', src))
+        # クラスの中のメソッド。`name(args) {` が行頭に来る形だけを見る。
+        known |= set(re.findall(r'^\s{2,}(?:async\s+|static\s+)*([A-Za-z_$][\w$]*)\s*\([^()]*\)\s*\{',
+                                src, re.M))
+        # 分割代入で受けたもの: const { app, BrowserWindow } = require(...)
+        for names in re.findall(r'\b(?:const|let|var)\s*\{([^}]*)\}', src):
+            known |= {x.strip().split(':')[-1].strip() for x in names.split(',') if x.strip()}
+        for args in re.findall(r'\(([^()]*)\)\s*=>', src):
+            known |= {a.strip().split('=')[0].strip() for a in args.split(',') if a.strip()}
+        for args in re.findall(r'function[^(]*\(([^()]*)\)', src):
+            known |= {a.strip().split('=')[0].strip() for a in args.split(',') if a.strip()}
+
+        # 呼び出し。`.foo(` はメソッドなので除く（何に生えているかは追えない）。
+        missing = collections.Counter()
+        # `new Foo(` は生成であって呼び出しではない ── Foo はここに無くてよい。
+        # バッククォートは _strip が知らない（あちらは Rust 用）。中の英字と
+        # 括弧が並んでいるだけで呼び出しに見えるので、先に落とす。
+        bare = _strip(re.sub(r'`(?:[^`\\]|\\.)*`', '``', src, flags=re.S))
+        for m in re.finditer(r'(?<![.\w$])([A-Za-z_$][\w$]*)\s*\(', bare):
+            if bare[max(0, m.start() - 4):m.start()].rstrip().endswith('new'):
+                continue
+            if m.group(1) not in known:
+                missing[m.group(1)] += 1
+        if missing:
+            n += len(missing)
+            print(f'  ■ {_rel(path)}: どこにも定義がない呼び出し')
+            for name, c in missing.most_common():
+                print(f'      {name}()  × {c}')
+    if not n:
+        print('  なし')
+    return n
+
+
 def main() -> int:
     which = sys.argv[1] if len(sys.argv) > 1 else 'all'
     n = 0
@@ -414,6 +492,8 @@ def main() -> int:
         n += dup()
     if which in ('all', 'naming'):
         n += naming()
+    if which in ('all', 'js'):
+        n += js()
     print()
     print('=' * 72)
     print(f'合計 {n} 件の候補' if n else 'きれいです')

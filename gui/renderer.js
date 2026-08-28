@@ -127,6 +127,57 @@ async function refresh() {
     say(`${state.left.entries.length} 件 / ${state.right.entries.length} 件`);
 }
 
+/// Mark the row under the cursor, or every row.
+async function mark(all) {
+    const which = state.focus;
+    const next = await ask(all ? 'markall' : 'mark', { pane: which });
+    if (!next) return;
+    state[which] = next;
+    draw(which);
+    say(next.marked ? `${next.marked} 件マーク` : 'マークなし');
+}
+
+/// Copy, move or delete whatever is marked — or the row under the cursor when
+/// nothing is. The destination is the other pane, which is the whole idea of
+/// two panes side by side.
+async function operate(kind) {
+    if (running) {
+        say('実行中です。Esc で中止できます');
+        return;
+    }
+    const which = state.focus;
+    const pane = state[which];
+    if (!pane) return;
+
+    // What is about to happen, named, before anything happens. The count comes
+    // from the same rule the engine will use, so the sheet cannot promise one
+    // thing and the engine do another.
+    const chosen = pane.entries.filter((r) => !r.parent && r.marked);
+    const here = pane.entries[pane.cursor];
+    const rows = chosen.length ? chosen : (here && !here.parent ? [here] : []);
+    if (!rows.length) {
+        say('対象がありません');
+        return;
+    }
+    const dest = state[which === 'left' ? 'right' : 'left'];
+    const verb = { copy: 'コピー', move: '移動', delete: '削除' }[kind];
+    const head = kind === 'delete'
+        ? `${rows.length} 件をゴミ箱へ`
+        : `${rows.length} 件を${verb}: → ${dest.cwd}`;
+    // Every name, not a summary. "12 件" tells you nothing about whether the
+    // twelve are the ones you meant.
+    const body = rows.map((r) => r.name).join('\n');
+    if (!await confirm(head, body)) {
+        say('やめました');
+        return;
+    }
+
+    const started = await ask(kind, { pane: which });
+    if (!started) return;
+    running = { op: started.op, kind, verb, total: started.count };
+    say(`${verb}中… 0 / ${started.count}`);
+}
+
 function move(delta) {
     const pane = state[state.focus];
     if (!pane || !pane.entries.length) return;
@@ -259,20 +310,25 @@ async function toggleHidden() {
     if (!r) return;
     state[which] = r.pane;
     draw(which);
-    if (toggles.on) drawToggles();
+    if (menu.spec === TOGGLES) drawMenu();
     say(r.showing ? '隠しファイルを表示' : '隠しファイルを非表示');
 }
 
-/// Walk the sort keys, and turn one round when it is already chosen.
-const SORTS = ['name', 'size', 'date', 'ext'];
-let sortAt = 0;
-async function sortBy() {
+/// `,` shows the four keys and lets you choose — it does not walk them.
+///
+/// It had walked them, which is a different thing: the terminal build opens a
+/// picker on whichever key is in force, with n/s/d/e as direct picks, and
+/// choosing the key already in force flips the direction. Walking meant `,`
+/// took two presses to leave `name`, because the first one only reversed it.
+const SORTS = [['name', '名前', 'n'], ['size', 'サイズ', 's'],
+               ['date', '日付', 'd'], ['ext', '拡張子', 'e']];
+let sortKey = 'name';
+
+async function applySort(key) {
     const which = state.focus;
-    const key = SORTS[sortAt];
     const r = await ask('sort', { pane: which, key });
     if (!r) return;
-    // Reversed means the same key again; otherwise move on to the next one.
-    if (!r.reverse) sortAt = (sortAt + 1) % SORTS.length;
+    sortKey = r.by;
     state[which] = r.pane;
     draw(which);
     say(`並び: ${r.by}${r.reverse ? ' ↓' : ' ↑'}`);
@@ -409,23 +465,102 @@ function setLook(i) {
 /// Not a key each. cian-tui gathers the live settings into one menu rather
 /// than spending a letter on every one of them, and a front end that scattered
 /// them would be a second set of habits to learn.
-const toggles = { on: false, at: 0 };
+const TOGGLES = {
+    key: 'T',
+    foot: '↑↓ 選ぶ  Enter 切替  Esc 閉じる',
+    stay: true,
+    rows: () => {
+        const pane = state[state.focus];
+        return [
+            {
+                label: '隠しファイル',
+                value: pane && pane.hidden_shown ? '表示' : '非表示',
+                run: () => toggleHidden(),
+            },
+            {
+                label: '配色',
+                value: LOOKS[look][1],
+                run: () => { setLook(look + 1); drawMenu(); say(`配色: ${LOOKS[look][1]}`); },
+            },
+        ];
+    },
+};
 
-function togglesRows() {
-    const pane = state[state.focus];
-    return [
-        {
-            label: '隠しファイル',
-            value: pane && pane.hidden_shown ? '表示' : '非表示',
-            run: () => toggleHidden(),
-        },
-        {
-            label: '配色',
-            value: LOOKS[look][1],
-            run: () => { setLook(look + 1); drawToggles(); say(`配色: ${LOOKS[look][1]}`); },
-        },
-    ];
+const SORT_MENU = {
+    key: ',',
+    foot: '↑↓ 選ぶ  Enter 決定  n s d e で直接  Esc 閉じる',
+    stay: false,
+    at: () => SORTS.findIndex(([k]) => k === sortKey),
+    rows: () => SORTS.map(([k, label, letter]) => ({
+        label,
+        value: k === sortKey ? '●' : letter,
+        run: () => applySort(k),
+    })),
+    // The letters, so the picker is skippable once it is in the fingers —
+    // the terminal build has the same four.
+    letters: Object.fromEntries(SORTS.map(([k, , letter]) => [letter, () => applySort(k)])),
+};
+
+/// One menu driver, not one per menu.
+///
+/// The switches and the sort picker are the same object with different rows,
+/// and a third near-copy of "draw a list, move a cursor, run the row" is how
+/// they would start behaving differently from each other.
+const menu = { spec: null, at: 0 };
+
+function openMenu(spec) {
+    menu.spec = spec;
+    menu.at = Math.max(0, spec.at ? spec.at() : 0);
+    el.find.hidden = false;
+    el.findQ.hidden = true;
+    el.findFoot.textContent = spec.foot;
+    drawMenu();
 }
+
+function closeMenu() {
+    menu.spec = null;
+    el.find.hidden = true;
+    el.findQ.hidden = false;
+}
+
+function drawMenu() {
+    const rows = menu.spec.rows();
+    const frag = document.createDocumentFragment();
+    rows.forEach((row, i) => {
+        const div = document.createElement('div');
+        div.className = 'hit' + (i === menu.at ? ' on' : '');
+        const l = document.createElement('span');
+        l.className = 'p';
+        l.textContent = row.label;
+        const v = document.createElement('span');
+        v.textContent = row.value;
+        div.append(l, v);
+        div.addEventListener('mousedown', () => {
+            menu.at = i;
+            row.run();
+            if (!menu.spec.stay) closeMenu();
+        });
+        frag.append(div);
+    });
+    el.findHits.replaceChildren(frag);
+}
+
+document.addEventListener('keydown', (e) => {
+    if (!menu.spec) return;
+    e.stopPropagation();
+    const spec = menu.spec;
+    const rows = spec.rows();
+    const pick = spec.letters && spec.letters[e.key];
+    if (e.key === 'Escape' || e.key === spec.key) closeMenu();
+    else if (e.key === 'ArrowDown' || e.key === 'j') { menu.at = (menu.at + 1) % rows.length; drawMenu(); }
+    else if (e.key === 'ArrowUp' || e.key === 'k') { menu.at = (menu.at + rows.length - 1) % rows.length; drawMenu(); }
+    else if (pick) { closeMenu(); pick(); }
+    else if (e.key === 'Enter' || e.key === ' ') {
+        rows[menu.at].run();
+        if (!spec.stay) closeMenu();
+    } else return;
+    e.preventDefault();
+}, true);
 
 /// What `?` shows.
 ///
@@ -448,7 +583,7 @@ const HELP = [
     ['探す', [
         ['/', 'この一覧を絞り込み'],
         ['/ /', 'この下のどこかにあるファイルをあいまい検索'],
-        [',', 'ソート：名前／サイズ／日付／拡張子'],
+        [',', 'ソート：名前／サイズ／日付／拡張子（n s d e で直接、同じキーで昇降反転）'],
         ['T', 'トグルメニュー：隠しファイル・配色'],
     ]],
     ['マークと操作', [
@@ -525,9 +660,11 @@ function focusPane(which) {
 
 async function invert() {
     const which = state.focus;
-    state[which] = await call('invert', { pane: which });
+    const pane = await ask('invert', { pane: which });
+    if (!pane) return;
+    state[which] = pane;
     draw(which);
-    say(`${state[which].marked} 件をマーク`);
+    say(pane.marked ? `${pane.marked} 件をマーク` : 'マークなし');
 }
 
 /// `o` brings this pane to the other one; `O` sends the other one here.
@@ -538,18 +675,23 @@ async function syncPane(pullToHere) {
     const here = state.focus;
     const there = here === 'left' ? 'right' : 'left';
     const [to, from] = pullToHere ? [here, there] : [there, here];
-    const path = state[from].path;
-    state[to] = await call('list', { pane: to, path });
+    const path = state[from].cwd;
+    const pane = await ask('list', { pane: to, path });
+    if (!pane) return;
+    state[to] = pane;
     draw(to);
     say(`${to === 'left' ? '左' : '右'}を ${path} へ`);
 }
 
 async function goToPath() {
-    const path = await askFor('移動先', state[state.focus].path);
+    const path = await askFor('移動先', state[state.focus].cwd);
     if (!path) return;
     const which = state.focus;
-    state[which] = await call('list', { pane: which, path });
+    const pane = await ask('list', { pane: which, path });
+    if (!pane) return;
+    state[which] = pane;
     draw(which);
+    say(pane.cwd);
 }
 
 /// `p` puts the paths on the clipboard — the marked ones, or the one under
@@ -565,139 +707,18 @@ async function copyPaths() {
     say(`${rows.length} 件のパスをコピー`);
 }
 
-async function refresh() {
+/// F5 goes back to the disk. `refresh()` above asks the engine what it
+/// already holds, which is right at startup and wrong here — the point of
+/// the key is that something changed underneath us.
+async function reread() {
     for (const which of ['left', 'right']) {
-        state[which] = await call('list', { pane: which, path: state[which].path });
+        const pane = await ask('list', { pane: which, path: state[which].cwd });
+        if (!pane) return;
+        state[which] = pane;
         draw(which);
     }
     say('読み直しました');
 }
-
-function openToggles() {
-    toggles.on = true;
-    toggles.at = 0;
-    el.find.hidden = false;
-    el.findQ.hidden = true;
-    el.findFoot.textContent = '↑↓ 選ぶ  Enter 切替  Esc 閉じる';
-    drawToggles();
-}
-
-function closeToggles() {
-    toggles.on = false;
-    el.find.hidden = true;
-    el.findQ.hidden = false;
-}
-
-function drawToggles() {
-    const rows = togglesRows();
-    const frag = document.createDocumentFragment();
-    rows.forEach((row, i) => {
-        const div = document.createElement('div');
-        div.className = 'hit' + (i === toggles.at ? ' on' : '');
-        const l = document.createElement('span');
-        l.className = 'p';
-        l.textContent = row.label;
-        const v = document.createElement('span');
-        v.textContent = row.value;
-        div.append(l, v);
-        div.addEventListener('mousedown', () => { toggles.at = i; row.run(); });
-        frag.append(div);
-    });
-    el.findHits.replaceChildren(frag);
-}
-
-/// Mark the row under the cursor, or every row.
-async function mark(all) {
-    const which = state.focus;
-    const next = await ask(all ? 'markall' : 'mark', { pane: which });
-    if (!next) return;
-    state[which] = next;
-    draw(which);
-    say(next.marked ? `${next.marked} 件マーク` : 'マークなし');
-}
-
-/// Copy, move or delete whatever is marked — or the row under the cursor when
-/// nothing is. The destination is the other pane, which is the whole idea of
-/// two panes side by side.
-async function operate(kind) {
-    if (running) {
-        say('実行中です。Esc で中止できます');
-        return;
-    }
-    const which = state.focus;
-    const pane = state[which];
-    if (!pane) return;
-
-    // What is about to happen, named, before anything happens. The count comes
-    // from the same rule the engine will use, so the sheet cannot promise one
-    // thing and the engine do another.
-    const chosen = pane.entries.filter((r) => !r.parent && r.marked);
-    const here = pane.entries[pane.cursor];
-    const rows = chosen.length ? chosen : (here && !here.parent ? [here] : []);
-    if (!rows.length) {
-        say('対象がありません');
-        return;
-    }
-    const dest = state[which === 'left' ? 'right' : 'left'];
-    const verb = { copy: 'コピー', move: '移動', delete: '削除' }[kind];
-    const head = kind === 'delete'
-        ? `${rows.length} 件をゴミ箱へ`
-        : `${rows.length} 件を${verb}: → ${dest.cwd}`;
-    // Every name, not a summary. "12 件" tells you nothing about whether the
-    // twelve are the ones you meant.
-    const body = rows.map((r) => r.name).join('\n');
-    if (!await confirm(head, body)) {
-        say('やめました');
-        return;
-    }
-
-    const started = await ask(kind, { pane: which });
-    if (!started) return;
-    running = { op: started.op, kind, verb, total: started.count };
-    say(`${verb}中… 0 / ${started.count}`);
-}
-
-/// Everything the engine says unasked.
-window.cian.onEvent((msg) => {
-    // The walk, which belongs to the finder rather than to an operation.
-    if (msg.event === 'finding' || msg.event === 'found') {
-        if (!finder.open) return;
-        finder.walking = msg.event === 'finding';
-        // Re-rank as more arrives: what was typed a moment ago should see the
-        // files that turned up since.
-        rankNow();
-        return;
-    }
-    if (!running || msg.op !== running.op) return;
-    if (msg.event === 'progress') {
-        say(`${running.verb}中… ${msg.done} / ${msg.total}`);
-    } else if (msg.event === 'done') {
-        const was = running;
-        running = null;
-        // Both panes: one lost files, the other gained them.
-        refresh().then(() => {
-            const bits = [`${was.verb} ${msg.ok} 件`];
-            if (msg.skipped) bits.push(`${msg.skipped} 件スキップ`);
-            if (msg.cancelled) bits.push('中止しました');
-            if (msg.errors.length) bits.push(`${msg.errors.length} 件失敗`);
-            bits.push(`${msg.ms} ms`);
-            say(bits.join(' · '), msg.errors.length > 0);
-        });
-    }
-});
-
-/// The switches' keys, while they are up.
-document.addEventListener('keydown', (e) => {
-    if (!toggles.on) return;
-    e.stopPropagation();
-    const rows = togglesRows();
-    if (e.key === 'Escape' || e.key === 'T') closeToggles();
-    else if (e.key === 'ArrowDown') { toggles.at = Math.min(rows.length - 1, toggles.at + 1); drawToggles(); }
-    else if (e.key === 'ArrowUp') { toggles.at = Math.max(0, toggles.at - 1); drawToggles(); }
-    else if (e.key === 'Enter' || e.key === ' ') rows[toggles.at].run();
-    else return;
-    e.preventDefault();
-}, true);
 
 /// The filter's keys, while it is up.
 document.addEventListener('keydown', (e) => {
@@ -767,7 +788,7 @@ document.addEventListener('keydown', (e) => {
     else if (k === 'c' && !e.ctrlKey && !e.metaKey) operate('copy');
     else if (k === 'm') operate('move');
     else if (k === 'd') operate('delete');
-    else if (k === 'T') openToggles();
+    else if (k === 'T') openMenu(TOGGLES);
     else if (k === 'r') rename();
     else if (k === 'a' && !e.ctrlKey && !e.metaKey) create(false);
     else if (k === 'A') create(true);
@@ -777,10 +798,10 @@ document.addEventListener('keydown', (e) => {
     else if (k === 'O') syncPane(false);
     else if (k === 'z') goToPath();
     else if (k === 'p' && !e.ctrlKey && !e.metaKey) copyPaths();
-    else if (k === 'F5') refresh();
+    else if (k === 'F5') reread();
     else if (k === '?') openHelp();
     else if (k === '/') startFilter();
-    else if (k === ',') sortBy();
+    else if (k === ',') openMenu(SORT_MENU);
     else if (k === 'Escape' && running) {
         window.cian.call('cancel', { op: running.op });
         say('中止しています…');

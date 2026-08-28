@@ -45,7 +45,13 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
-    engine = new Engine(process.argv[2] || os.homedir());
+    // The first plain argument is where to start; anything beginning with a
+    // dash belongs to Chromium and may turn up anywhere in the line. Taking
+    // argv[2] whatever it was meant that adding `--remote-debugging-port` gave
+    // the engine a switch as its starting directory, and the window came up
+    // empty with the reason only in a stream nobody was reading.
+    const where = process.argv.slice(2).find((a) => !a.startsWith('-'));
+    engine = new Engine(where || os.homedir());
     // Every call from the renderer, forwarded whole. The engine names its own
     // methods; this does not want a case per method that would need editing
     // each time one is added.
