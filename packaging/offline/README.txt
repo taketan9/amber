@@ -108,12 +108,27 @@ is loaded yet. So a standalone Electron distribution is the whole of it:
     electron-v33.4.11-win32-x64.zip
     https://github.com/electron/electron/releases
 
-Unzip that anywhere, put cian-server.exe beside gui\ (or build it), and:
+Unzip that anywhere, put cian-server.exe beside gui\ (or build it), and
+double-click:
+
+    gui\run.bat
+
+It looks for Electron in the places it is usually put — $CIAN_ELECTRON,
+a distribution unzipped next to the repository, a copy under
+node_modules — and says which places it looked in when it finds none.
+It also refuses to open an empty window when the engine is missing, and
+says which of the two ways to supply it.
+
+To point it somewhere specific:
+
+    set CIAN_ELECTRON=C:\path\to\electron-v33.4.11-win32-x64\electron.exe
+
+The long way still works, and is what run.bat does:
 
     <where you unzipped>\electron.exe <this folder>\gui
 
-That is the entire command. No `npm install`, which would reach the
-network, and no `npm start`, which would want node_modules to exist.
+No `npm install`, which would reach the network, and no `npm start`,
+which would want node_modules to exist.
 
 The engine is found automatically: gui\engine.js looks beside itself
 first, then in target\release\ and target\debug\. Dropping
@@ -162,6 +177,7 @@ Contents
                                        during a build; carried here instead.
     examples\init.lua                  A starter configuration.
     packaging\windows\install.ps1      Puts a built exe on PATH.
+    gui\run.bat                        Starts the Electron front end.
     BUILT-WITH.txt                     The compiler and commit this was
                                        vendored from.
     README.md / README.ja.md           The manual.
