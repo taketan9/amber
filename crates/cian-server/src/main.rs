@@ -62,6 +62,10 @@ struct PaneView {
     /// beside the name, so it has to come from the engine rather than from
     /// whatever the front end last remembered asking for.
     hidden_shown: bool,
+    /// The label of the flat listing showing here, if one is — a branch view
+    /// or a panelized search. The window needs it to know that Esc means
+    /// "back to the directory" rather than "nothing to cancel".
+    flat: Option<String>,
 }
 
 /// One line of a listing.
@@ -87,6 +91,7 @@ impl PaneView {
             cursor: pane.cursor,
             marked: pane.mark_count(),
             hidden_shown: pane.show_hidden,
+            flat: pane.flat_label().map(str::to_string),
             entries: pane
                 .entries
                 .iter()
@@ -166,6 +171,20 @@ impl Session {
             // the front end between its last draw and this request.
             pane.cursor = (at as usize).min(pane.entries.len().saturating_sub(1));
         }
+    }
+
+    /// The row under the cursor, which is never `..`.
+    ///
+    /// Four handlers had written this out, and the parent guard is the whole
+    /// point of it: without it `r` renames the directory you are standing in
+    /// and `view` tries to read it. One place, so the guard cannot be the one
+    /// thing a fifth handler forgets.
+    fn selected(&mut self, which: &str) -> anyhow::Result<(std::path::PathBuf, String, bool)> {
+        let pane = self.pane_mut(which)?;
+        let Some(e) = pane.entries.get(pane.cursor).filter(|e| !e.is_parent) else {
+            anyhow::bail!("対象がありません");
+        };
+        Ok((e.path.clone(), e.name.clone(), e.is_dir))
     }
 
     fn targets(&self, which: &str) -> anyhow::Result<Vec<std::path::PathBuf>> {
@@ -380,13 +399,8 @@ impl Session {
             "open" => {
                 let which = req.params["pane"].as_str().unwrap_or("left").to_string();
                 let other = if which == "left" { "right" } else { "left" };
-                let pane = self.pane_mut(&which)?;
-                let Some(entry) = pane.entries.get(pane.cursor).filter(|e| !e.is_parent) else {
-                    anyhow::bail!("対象がありません");
-                };
-                let path = entry.path.clone();
-                let name = entry.name.clone();
-                if entry.is_dir {
+                let (path, name, is_dir) = self.selected(&which)?;
+                if is_dir {
                     let there = self.pane_mut(other)?;
                     *there = Pane::new(path)?;
                     let view = serde_json::to_value(PaneView::of(there))?;
@@ -404,16 +418,11 @@ impl Session {
             // writing that detection a second time, in JavaScript.
             "view" => {
                 let which = req.params["pane"].as_str().unwrap_or("left").to_string();
-                let pane = self.pane_mut(&which)?;
-                let Some(entry) = pane.entries.get(pane.cursor).filter(|e| !e.is_parent) else {
-                    anyhow::bail!("対象がありません");
-                };
-                if entry.is_dir {
-                    anyhow::bail!("{} はディレクトリです", entry.name);
+                let (path, name, is_dir) = self.selected(&which)?;
+                if is_dir {
+                    anyhow::bail!("{name} はディレクトリです");
                 }
-                let path = entry.path.clone();
-                let name = entry.name.clone();
-                let len = entry.len;
+                let len = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
                 let file = cian_core::grepedit::read_text(&path)?;
                 let reply = serde_json::json!({
                     "name": name,
@@ -447,6 +456,245 @@ impl Session {
                 self.open = Some((path.clone(), file));
                 Ok(serde_json::json!({ "saved": name, "lines": lines }))
             }
+            // ---- What is here, measured rather than felt ----
+            //
+            // Every one of these already exists in cian-core, written and
+            // tested for the terminal build. The engine's whole job is to let
+            // the window ask; none of the answering happens here.
+            "count" => {
+                let which = req.params["pane"].as_str().unwrap_or("left").to_string();
+                let paths = self.targets(&which)?;
+                let o = cian_core::count::Options::default();
+                let r = cian_core::count::count(&paths, &o);
+                Ok(serde_json::json!({
+                    "files": r.total.files,
+                    "steps": r.total.steps(&o),
+                    "lines": r.total.total,
+                    "blank": r.total.blank,
+                    "comments": r.total.comment,
+                    "truncated": r.truncated,
+                    "by_ext": r.by_ext.iter().take(20).map(|(e, c)| serde_json::json!({
+                        "ext": if e.is_empty() { "(拡張子なし)" } else { e },
+                        "files": c.files,
+                        "steps": c.steps(&o),
+                    })).collect::<Vec<_>>(),
+                }))
+            }
+            "attr" => {
+                let which = req.params["pane"].as_str().unwrap_or("left").to_string();
+                let (path, name, _) = self.selected(&which)?;
+                let a = cian_core::attrs::read_attrs(&path)?;
+                Ok(serde_json::json!({
+                    "name": name,
+                    "path": path.display().to_string(),
+                    "mode": a.mode.map(|m| format!("{:o}", m & 0o7777)),
+                    "readonly": a.readonly,
+                    "owner": a.owner,
+                    "size": a.size,
+                    "is_dir": a.is_dir,
+                }))
+            }
+            "chmod" => {
+                let which = req.params["pane"].as_str().unwrap_or("left").to_string();
+                let spec = req.params["spec"].as_str().unwrap_or("").trim().to_string();
+                if spec.is_empty() {
+                    anyhow::bail!("モードを指定してください（例: 644）");
+                }
+                let paths = self.targets(&which)?;
+                for p in &paths {
+                    cian_core::attrs::set_mode(p, &spec)?;
+                }
+                let pane = self.pane_mut(&which)?;
+                pane.reload()?;
+                Ok(serde_json::json!({ "changed": paths.len(), "spec": spec }))
+            }
+            "readonly" => {
+                let which = req.params["pane"].as_str().unwrap_or("left").to_string();
+                let on = req.params["on"].as_bool().unwrap_or(true);
+                let paths = self.targets(&which)?;
+                for p in &paths {
+                    cian_core::attrs::set_readonly(p, on)?;
+                }
+                let pane = self.pane_mut(&which)?;
+                pane.reload()?;
+                Ok(serde_json::json!({ "changed": paths.len(), "on": on }))
+            }
+            // Checksums. Cancellable because a checksum of something large is
+            // the one "quick look" in here that is not quick.
+            "hash" => {
+                let which = req.params["pane"].as_str().unwrap_or("left").to_string();
+                let kind = match req.params["kind"].as_str() {
+                    Some("md5") => cian_core::attrs::HashKind::Md5,
+                    _ => cian_core::attrs::HashKind::Sha256,
+                };
+                let paths = self.targets(&which)?;
+                let stop = std::sync::atomic::AtomicBool::new(false);
+                let mut rows = Vec::new();
+                for p in paths.iter().take(200) {
+                    // A directory has no checksum, and saying so beats the
+                    // read error the caller would otherwise be handed.
+                    if p.is_dir() {
+                        rows.push(serde_json::json!({
+                            "name": p.file_name().map(|s| s.to_string_lossy().into_owned()),
+                            "sum": "(ディレクトリ)",
+                        }));
+                        continue;
+                    }
+                    let sum = cian_core::attrs::hash_file(p, kind, &stop)?;
+                    rows.push(serde_json::json!({
+                        "name": p.file_name().map(|s| s.to_string_lossy().into_owned()),
+                        "sum": sum,
+                    }));
+                }
+                Ok(serde_json::json!({ "kind": req.params["kind"].as_str().unwrap_or("sha256"), "rows": rows }))
+            }
+            // What is biggest here. On a worker with a cancel flag, because
+            // pointed at a home directory it is minutes rather than seconds.
+            "du" => {
+                let which = req.params["pane"].as_str().unwrap_or("left").to_string();
+                let dir = match req.params["path"].as_str() {
+                    Some(p) => std::path::PathBuf::from(p),
+                    None => self.pane_mut(&which)?.cwd.clone(),
+                };
+                let stop = std::sync::atomic::AtomicBool::new(false);
+                let rows = cian_core::du::analyze(&dir, &stop, &mut |_| {});
+                Ok(serde_json::json!({
+                    "cwd": dir.display().to_string(),
+                    "rows": rows.iter().take(500).map(|e| serde_json::json!({
+                        "name": e.name,
+                        "path": e.path.display().to_string(),
+                        "size": e.size,
+                        "is_dir": e.is_dir,
+                    })).collect::<Vec<_>>(),
+                }))
+            }
+            // Find by name, or grep inside files. One method: the two differ
+            // by a mode, and the pattern language — bare text is a literal,
+            // /re/ is a regex, /re/i ignores case — is the same for both, so
+            // splitting them would be two doors onto one room.
+            "search" => {
+                let which = req.params["pane"].as_str().unwrap_or("left").to_string();
+                let needle = req.params["needle"].as_str().unwrap_or("").to_string();
+                if needle.is_empty() {
+                    anyhow::bail!("探す文字列がありません");
+                }
+                let mode = match req.params["mode"].as_str() {
+                    Some("content") => cian_core::search::Mode::Content,
+                    _ => cian_core::search::Mode::Name,
+                };
+                let root = self.pane_mut(&which)?.cwd.clone();
+                let query = cian_core::search::Query::parse(&needle, mode)
+                    .map_err(|e| anyhow::anyhow!(e))?;
+                let stop = std::sync::atomic::AtomicBool::new(false);
+                let mut hits = Vec::new();
+                let outcome = cian_core::search::search(&root, &query, &stop, &mut |h| {
+                    if hits.len() < 2000 {
+                        hits.push(serde_json::json!({
+                            "path": h.path.display().to_string(),
+                            "rel": h.rel.display().to_string(),
+                            "is_dir": h.is_dir,
+                            "line": h.line.as_ref().map(|(n, t)| serde_json::json!({
+                                "n": n,
+                                "text": t.chars().take(400).collect::<String>(),
+                            })),
+                        }));
+                    }
+                });
+                Ok(serde_json::json!({
+                    "root": root.display().to_string(),
+                    "needle": needle,
+                    "mode": if matches!(mode, cian_core::search::Mode::Content) { "content" } else { "name" },
+                    "truncated": matches!(outcome, cian_core::search::Outcome::Truncated),
+                    "hits": hits,
+                }))
+            }
+            // Load a set of paths into a pane as if it were a listing.
+            //
+            // The terminal build calls it panelizing, and it is what makes a
+            // search result useful rather than merely informative: the matches
+            // become rows to mark and operate on with the keys already known.
+            "panelize" => {
+                let which = req.params["pane"].as_str().unwrap_or("left").to_string();
+                let paths: Vec<std::path::PathBuf> = req.params["paths"]
+                    .as_array()
+                    .map(|a| a.iter().filter_map(|v| v.as_str()).map(std::path::PathBuf::from).collect())
+                    .unwrap_or_default();
+                if paths.is_empty() {
+                    anyhow::bail!("読み込むものがありません");
+                }
+                let label = req.params["label"].as_str().unwrap_or("結果").to_string();
+                let pane = self.pane_mut(&which)?;
+                let root = pane.cwd.clone();
+                let entries: Vec<cian_core::Entry> = paths
+                    .iter()
+                    .map(|p| {
+                        let rel = p.strip_prefix(&root).unwrap_or(p);
+                        cian_core::Entry::flat(rel, p.clone(), p.is_dir())
+                    })
+                    .collect();
+                pane.enter_flat(label, entries);
+                Ok(serde_json::to_value(PaneView::of(pane))?)
+            }
+            // Everything below here, one row per file.
+            //
+            // Its own method rather than a search for nothing: a search wants
+            // something to look for and is right to refuse an empty needle,
+            // and "show me all of it" is a different question with a different
+            // answer — directories are rows in a listing and noise in a branch.
+            "branch" => {
+                let which = req.params["pane"].as_str().unwrap_or("left").to_string();
+                let root = self.pane_mut(&which)?.cwd.clone();
+                let stop = std::sync::atomic::AtomicBool::new(false);
+                let query = cian_core::search::Query::new("");
+                let mut entries = Vec::new();
+                cian_core::search::search(&root, &query, &stop, &mut |h| {
+                    if !h.is_dir && entries.len() < 20_000 {
+                        entries.push(cian_core::Entry::flat(&h.rel, h.path, false));
+                    }
+                });
+                let found = entries.len();
+                let pane = self.pane_mut(&which)?;
+                pane.enter_flat("ブランチ", entries);
+                Ok(serde_json::json!({
+                    "found": found,
+                    "pane": serde_json::to_value(PaneView::of(pane))?,
+                }))
+            }
+            // Leave a flat listing and go back to the directory it came from.
+            "leaveflat" => {
+                let which = req.params["pane"].as_str().unwrap_or("left").to_string();
+                let pane = self.pane_mut(&which)?;
+                if !pane.is_flat() {
+                    anyhow::bail!("一覧はもともとのディレクトリです");
+                }
+                pane.leave_flat()?;
+                Ok(serde_json::to_value(PaneView::of(pane))?)
+            }
+            // Where this pane has been. Its own history, not a shared one —
+            // the two panes are two places at once, which is the point of two.
+            "back" | "forward" => {
+                let which = req.params["pane"].as_str().unwrap_or("left").to_string();
+                let pane = self.pane_mut(&which)?;
+                let moved = if req.method == "back" { pane.go_back()? } else { pane.go_forward()? };
+                if !moved {
+                    anyhow::bail!(
+                        "{}に履歴がありません",
+                        if req.method == "back" { "前" } else { "先" }
+                    );
+                }
+                Ok(serde_json::to_value(PaneView::of(pane))?)
+            }
+            "history" => {
+                let which = req.params["pane"].as_str().unwrap_or("left").to_string();
+                let pane = self.pane_mut(&which)?;
+                Ok(serde_json::json!({
+                    "cwd": pane.cwd.display().to_string(),
+                    "back": pane.history.iter().take(40)
+                        .map(|p| p.display().to_string()).collect::<Vec<_>>(),
+                    "forward": pane.forward.iter().take(40)
+                        .map(|p| p.display().to_string()).collect::<Vec<_>>(),
+                }))
+            }
             // Rename in place. The name is a bare filename, never a path —
             // moving something is what `move` is for, and a rename that could
             // also move would make one confirm dialog have to explain two
@@ -460,11 +708,7 @@ impl Session {
                 if to.contains('/') || to.contains('\\') {
                     anyhow::bail!("名前に区切り文字は使えません: {to}");
                 }
-                let pane = self.pane_mut(&which)?;
-                let Some(entry) = pane.entries.get(pane.cursor).filter(|e| !e.is_parent) else {
-                    anyhow::bail!("対象がありません");
-                };
-                let from = entry.path.clone();
+                let (from, _, _) = self.selected(&which)?;
                 let dest = from.with_file_name(&to);
                 if dest.exists() {
                     anyhow::bail!("{to} はすでにあります");

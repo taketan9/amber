@@ -156,7 +156,7 @@ html, body {
    raises. Closing a file with unsaved edits in it did nothing you could see:
    the confirmation was open, behind the editor. Stated, so that adding a
    fourth overlay is a decision rather than an accident. */
-#view { z-index: 10; }   /* a surface: it replaces the listing */
+#view, #report { z-index: 10; }   /* surfaces: they replace the listing */
 #find { z-index: 20; }   /* over whatever it is searching */
 #ask  { z-index: 30; }   /* always the top: it is the thing being answered */
 
@@ -194,11 +194,20 @@ html, body {
 }
 .sheet .field:focus { outline: none; border-color: var(--accent); }
 
-#view {
+#view, #report {
   position: fixed; inset: 0; display: flex; flex-direction: column;
   background: var(--pane); color: var(--text);
 }
-#view[hidden] { display: none; }
+#view[hidden], #report[hidden] { display: none; }
+#report .hits { flex: 1 1 auto; max-height: none; margin: 0; border: 0; }
+#report .hit { cursor: default; }
+#report .hit .n {
+  flex: 0 0 auto; color: var(--dim); font-variant-numeric: tabular-nums;
+  min-width: 9ch; text-align: right;
+}
+#report .hit.on .n { color: var(--on-accent); }
+#report .hit .sub { flex: 2 1 0; color: var(--dim); overflow: hidden; text-overflow: ellipsis; }
+#report .hit.on .sub { color: var(--on-accent); }
 .vhead, .vfoot {
   display: flex; gap: 12px;
   padding: 6px 10px; background: var(--pane-off); color: var(--dim);
@@ -321,6 +330,15 @@ html, body {
       <div class="hits" id="find-hits"></div>
       <div class="foot" id="find-foot"></div>
     </div>
+  </div>
+
+  <!-- Anything that answers with a list: a search, disk usage, checksums, the
+       history. One screen rather than one per question — they differ in what
+       Enter does, not in how they look. -->
+  <div id="report" hidden>
+    <div class="vhead"><span id="r-name"></span><span id="r-about"></span></div>
+    <div class="hits" id="r-rows"></div>
+    <div class="vfoot" id="r-foot"></div>
   </div>
 
   <!-- The viewer. `Enter` on a file, or F3. Draws a window of lines rather

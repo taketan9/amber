@@ -265,6 +265,12 @@ const LOOK = `({
     cursor: state?.[state.focus]?.cursor,
     cwd: state?.[state.focus]?.cwd,
     typed: document.querySelector('input:not([hidden])')?.value ?? null,
+    report: document.querySelector('#report:not([hidden])')
+        ? { name: document.getElementById('r-name').textContent,
+            about: document.getElementById('r-about').textContent,
+            rows: document.querySelectorAll('#report .hit').length,
+            first: document.querySelector('#report .hit')?.textContent }
+        : null,
     view: document.querySelector('#view:not([hidden])')
         ? { about: document.getElementById('v-about').textContent,
             foot: document.getElementById('v-foot').textContent,
@@ -349,7 +355,10 @@ async function main() {
             const note = what ? `  ${what}` : '';
             const asking = after.prompt ? `  ｜: ${after.prompt}  枠 ${after.frame}`
                 : (after.asking ? `  ⟨${after.asking}⟩ 焦点=${after.focused}` : null);
-            const marks = asking ?? (after.view
+            const rep = after.report
+                ? `  ▤ ${after.report.name} ｜${after.report.about}｜ ${after.report.rows}行  «${after.report.first}»`
+                : null;
+            const marks = asking ?? rep ?? (after.view
                 ? `  ｜${after.view.foot}  ${after.view.about}  «${after.view.first}»`
                 : (after.marks.length ? `  [${after.marks.join(' ')}]` : ''));
             console.log(`${moved ? '  ' : '× '}${key.padEnd(8)}${note.padEnd(16)} ${after.status}${marks}`);

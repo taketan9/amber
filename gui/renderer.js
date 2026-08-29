@@ -14,6 +14,11 @@ const el = {
     findQ: document.getElementById('find-q'),
     findHits: document.getElementById('find-hits'),
     findFoot: document.getElementById('find-foot'),
+    report: document.getElementById('report'),
+    rName: document.getElementById('r-name'),
+    rAbout: document.getElementById('r-about'),
+    rRows: document.getElementById('r-rows'),
+    rFoot: document.getElementById('r-foot'),
     view: document.getElementById('view'),
     vName: document.getElementById('v-name'),
     vAbout: document.getElementById('v-about'),
@@ -604,10 +609,25 @@ const HELP = [
         ['F5', '読み直す'],
     ]],
     ['探す', [
+        ['f  →  n / N', 'この一覧を検索・次・前'],
         ['/', 'この一覧を絞り込み'],
         ['/ /', 'この下のどこかにあるファイルをあいまい検索'],
+        ['Shift+F', '名前で探す（この下すべて）── :find'],
+        ['Ctrl+F / Ctrl+G', 'ファイルの中を探す（:grep）'],
+        ['  結果で p', '一覧に読み込んで、いつものキーで操作する'],
+        ['b', 'この配下を1ファイル1行に平坦化（b か Esc で戻る）'],
+        ['h', 'このペインの履歴'],
+        ['Alt+← / Alt+→', '前 / 先のディレクトリへ'],
         [',', 'ソート：名前／サイズ／日付／拡張子（n s d e で直接、同じキーで昇降反転）'],
         ['T', 'トグルメニュー：隠しファイル・配色・エディタの流儀'],
+    ]],
+    ['コマンド', [
+        [':', 'コマンドを打つ（:count :du :grep …）'],
+        ['C', 'コマンド一覧をあいまい検索'],
+        [':count', 'ファイル数とステップ数'],
+        [':du', '容量分析 — 何が大きいか（Enter で中へ）'],
+        [':attr / :chmod / :readonly', '属性を見る・変える'],
+        [':hash', 'チェックサム（既定 sha256、:hash md5 も）'],
     ]],
     ['読み書き（F3・Enter）', [
         ['Ctrl+S', '保存（元の文字コード・改行・BOM のまま）'],
@@ -838,8 +858,10 @@ document.addEventListener('keydown', (e) => {
         p.cursor = Math.max(0, p.entries.length - 1);
         draw(state.focus);
     }
-    else if (k === 'ArrowLeft' || (k === 'h' && e.ctrlKey)) focusPane('left');
-    else if (k === 'ArrowRight' || (k === 'l' && e.ctrlKey)) focusPane('right');
+    else if (k === 'ArrowLeft' && !e.altKey) focusPane('left');
+    else if (k === 'h' && e.ctrlKey) focusPane('left');
+    else if (k === 'ArrowRight' && !e.altKey) focusPane('right');
+    else if (k === 'l' && e.ctrlKey) focusPane('right');
     else if (k === 'Tab') { state.focus = state.focus === 'left' ? 'right' : 'left'; draw('left'); draw('right'); }
     else if (k === 'Enter' && (e.ctrlKey || e.metaKey)) openOut();
     else if (k === 'Enter') enter();
@@ -862,11 +884,27 @@ document.addEventListener('keydown', (e) => {
     else if (k === 'F5') reread();
     else if (k === '?') openHelp();
     else if (k === 'F3') lookInside();
+    else if (k === ':') commandLine();
+    else if (k === 'C') openPalette();
+    // The modified ones first: `f` on its own would otherwise swallow Ctrl+F.
+    else if ((k === 'f' || k === 'g') && (e.ctrlKey || e.metaKey)) runCommand(findCommand('grep'), '');
+    else if (k === 'f') searchHere();
+    else if (k === 'F') runCommand(findCommand('find'), '');
+    else if (k === 'n') hopHere(1);
+    else if (k === 'N') hopHere(-1);
+    else if (k === 'b') cmdBranch();
+    else if (k === 'h' && !e.ctrlKey) cmdHistory();
+    else if (k === 'ArrowLeft' && e.altKey) step('back');
+    else if (k === 'ArrowRight' && e.altKey) step('forward');
     else if (k === 'c' && (e.ctrlKey || e.metaKey)) hold('copy');
     else if (k === 'x' && (e.ctrlKey || e.metaKey)) hold('cut');
     else if ((k === 'v' && (e.ctrlKey || e.metaKey)) || k === 'y') paste();
     else if (k === '/') startFilter();
     else if (k === ',') openMenu(SORT_MENU);
+    // Esc backs out of whatever the listing is showing that is not a
+    // directory. A branch view and a panelized search are both "here is a set
+    // of files"; leaving them is the same gesture.
+    else if (k === 'Escape' && state[state.focus] && state[state.focus].flat) leaveFlat();
     else if (k === 'Escape' && running) {
         window.cian.call('cancel', { op: running.op });
         say('中止しています…');
@@ -900,6 +938,102 @@ function resolvedFace() {
         if (document.fonts.check(`16px "${name}"`)) return name;
     }
     return '(none of them — the browser chose)';
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Anything that answers with a list.
+//
+// A search, disk usage, checksums, the history: one screen, not one per
+// question. They differ in what Enter does and in nothing else, so the screen
+// takes a `pick` and the rest is the same rows, the same j/k, the same Esc.
+// Written the other way, cian's twenty-odd reports would be twenty-odd
+// almost-identical lists, and they would stop agreeing within a month.
+// ─────────────────────────────────────────────────────────────────────────
+const report = { on: false, rows: [], at: 0, pick: null, act: null };
+
+/// Show a list. `rows` are `{ n, label, sub, path }` — `n` is the right-aligned
+/// left column (a size, a line number, nothing), `label` the thing itself,
+/// `sub` the dimmed remainder.
+function show(title, about, rows, opts = {}) {
+    report.on = true;
+    report.rows = rows;
+    report.at = 0;
+    report.pick = opts.pick || null;
+    report.act = opts.act || null;
+    el.rName.textContent = title;
+    el.rAbout.textContent = about;
+    el.rFoot.textContent = opts.foot
+        || (rows.length ? '↑↓ 選ぶ   Enter 開く   Esc 閉じる' : 'Esc 閉じる');
+    el.report.hidden = false;
+    drawReport();
+}
+
+function closeReport() {
+    report.on = false;
+    report.rows = [];
+    el.report.hidden = true;
+}
+
+function drawReport() {
+    const frag = document.createDocumentFragment();
+    report.rows.forEach((row, i) => {
+        const div = document.createElement('div');
+        div.className = 'hit' + (i === report.at ? ' on' : '');
+        if (row.n !== undefined && row.n !== null) {
+            const n = document.createElement('span');
+            n.className = 'n';
+            n.textContent = row.n;
+            div.append(n);
+        }
+        const l = document.createElement('span');
+        l.className = 'p';
+        l.textContent = row.label;
+        div.append(l);
+        if (row.sub) {
+            const sub = document.createElement('span');
+            sub.className = 'sub';
+            sub.textContent = row.sub;
+            div.append(sub);
+        }
+        div.addEventListener('mousedown', () => {
+            report.at = i;
+            drawReport();
+            if (report.pick) report.pick(row);
+        });
+        frag.append(div);
+    });
+    el.rRows.replaceChildren(frag);
+    const on = el.rRows.children[report.at];
+    if (on) on.scrollIntoView({ block: 'nearest' });
+}
+
+document.addEventListener('keydown', (e) => {
+    if (!report.on) return;
+    e.stopPropagation();
+    const last = report.rows.length - 1;
+    const go = (to) => { report.at = Math.max(0, Math.min(last, to)); drawReport(); };
+    const k = e.key;
+    if (k === 'Escape' || k === 'q') closeReport();
+    else if (k === 'j' || k === 'ArrowDown') go(report.at + 1);
+    else if (k === 'k' || k === 'ArrowUp') go(report.at - 1);
+    else if (k === 'PageDown') go(report.at + 20);
+    else if (k === 'PageUp') go(report.at - 20);
+    else if (k === 'g') go(0);
+    else if (k === 'G') go(last);
+    else if (k === 'Enter' && report.pick && report.rows[report.at]) report.pick(report.rows[report.at]);
+    else if (report.act && report.act[k]) report.act[k]();
+    else return;
+    e.preventDefault();
+}, true);
+
+/// Bytes, the way a person reads them.
+function human(n) {
+    if (n < 1024) return `${n} B`;
+    const u = ['KB', 'MB', 'GB', 'TB'];
+    let v = n / 1024;
+    let i = 0;
+    while (v >= 1024 && i < u.length - 1) { v /= 1024; i += 1; }
+    return `${v < 10 ? v.toFixed(1) : Math.round(v)} ${u[i]}`;
 }
 
 /// The editor's runtime, loaded once and only when a file is opened.
@@ -1250,6 +1384,284 @@ async function openOut() {
     } else {
         say(`${r.opened} を既定のアプリで開きました`);
     }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// The commands, and the two ways to reach them.
+//
+// `:` for the name you already know, `C` for fuzzy-finding the one you don't.
+// Both run the same table, which is the point: a command added here gets a
+// prompt, a palette entry and a help line without any of them being written.
+// The terminal build reached the same arrangement, and for the same reason —
+// it has far more commands than it has keys.
+// ─────────────────────────────────────────────────────────────────────────
+const COMMANDS = [
+    { name: 'count', about: 'ファイル数と行数を数える', run: cmdCount },
+    { name: 'du', about: '容量分析 — 何が大きいか', run: cmdDu },
+    { name: 'attr', about: '属性を見る', run: cmdAttr },
+    { name: 'chmod', about: 'モードを変える（例 :chmod 644）', arg: 'モード', run: cmdChmod },
+    { name: 'readonly', about: '読み取り専用にする / 解除（既定 on）', run: cmdReadonly },
+    { name: 'hash', about: 'チェックサム（既定 sha256、:hash md5 も）', run: cmdHash },
+    { name: 'find', about: '名前で探す（この下すべて）', arg: '名前', run: (a) => cmdSearch('name', a) },
+    { name: 'grep', about: 'ファイルの中を探す（この下すべて）', arg: '文字列か /正規表現/', run: (a) => cmdSearch('content', a) },
+    { name: 'branch', about: 'この配下を1ファイル1行に平坦化', run: cmdBranch },
+    { name: 'back', about: 'ひとつ前のディレクトリへ', run: () => step('back') },
+    { name: 'forward', about: 'ひとつ先のディレクトリへ', run: () => step('forward') },
+    { name: 'history', about: 'このペインの履歴', run: cmdHistory },
+    { name: 'cd', about: '入力したパスへ移動', arg: 'パス', run: (a) => goToPath(a) },
+    { name: 'hidden', about: '隠しファイルの表示切替', run: toggleHidden },
+    { name: 'refresh', about: '読み直す', run: reread },
+    { name: 'undo', about: '直前の操作を取り消す', run: undo },
+    { name: 'menu', about: 'トグルメニュー', run: () => openMenu(TOGGLES) },
+    { name: 'help', about: 'キー一覧', run: openHelp },
+];
+
+function findCommand(name) {
+    return COMMANDS.find((c) => c.name === name);
+}
+
+/// `:` — the name, then whatever it takes.
+async function commandLine(initial = '') {
+    const line = await askFor(':', initial);
+    if (line === null) return;
+    const text = line.trim();
+    if (!text) return;
+    const at = text.indexOf(' ');
+    const name = at < 0 ? text : text.slice(0, at);
+    const arg = at < 0 ? '' : text.slice(at + 1).trim();
+    const cmd = findCommand(name);
+    if (!cmd) {
+        // Named, not "unknown command": the name typed is the one thing the
+        // person can compare against the list.
+        say(`:${name} は知りません — C でコマンド一覧`, true);
+        return;
+    }
+    await runCommand(cmd, arg);
+}
+
+async function runCommand(cmd, arg) {
+    let a = arg;
+    // Only where there is no sensible default. `:hash` means sha256 and
+    // `:readonly` means on; stopping to ask would be a prompt with one likely
+    // answer, which is the kind of question that trains people to hit Enter.
+    if (cmd.arg && !a) {
+        a = await askFor(`:${cmd.name}`, '');
+        if (a === null) return;
+    }
+    try {
+        await cmd.run(a);
+    } catch (e) {
+        say(String(e.message || e), true);
+    }
+}
+
+/// `C` — every command, fuzzy.
+function openPalette() {
+    const rows = COMMANDS.map((c) => ({ label: `:${c.name}`, sub: c.about, cmd: c }));
+    show('コマンド', `${rows.length} 個`, rows, {
+        foot: '↑↓ 選ぶ   Enter 実行   Esc 閉じる',
+        pick: (row) => { closeReport(); runCommand(row.cmd, ''); },
+    });
+}
+
+// ---- The commands themselves ----
+
+async function cmdCount() {
+    const r = await ask('count', { pane: state.focus });
+    if (!r) return;
+    const rows = r.by_ext.map((e) => ({
+        n: e.steps.toLocaleString(),
+        label: e.ext,
+        sub: `${e.files} ファイル`,
+    }));
+    show('ファイル数とステップ数',
+        `${r.files.toLocaleString()} ファイル   ${r.steps.toLocaleString()} ステップ`
+        + `   （実行 ${r.steps.toLocaleString()} / 空白 ${r.blank.toLocaleString()} / コメント ${r.comments.toLocaleString()}）`
+        + (r.truncated ? '   ※上限で打ち切り' : ''),
+        rows, { foot: 'Esc 閉じる' });
+}
+
+async function cmdDu(path) {
+    const r = await ask('du', { pane: state.focus, ...(path ? { path } : {}) });
+    if (!r) return;
+    const rows = r.rows.map((x) => ({
+        n: human(x.size),
+        label: x.is_dir ? `${x.name}/` : x.name,
+        path: x.path,
+        is_dir: x.is_dir,
+    }));
+    const total = r.rows.reduce((n, x) => n + x.size, 0);
+    show('容量分析', `${r.cwd}   合計 ${human(total)}`, rows, {
+        foot: 'Enter ディレクトリへ入る   Esc 閉じる',
+        pick: (row) => { if (row.is_dir) cmdDu(row.path); },
+    });
+}
+
+async function cmdAttr() {
+    const r = await ask('attr', { pane: state.focus });
+    if (!r) return;
+    const rows = [
+        { label: '種類', sub: r.is_dir ? 'ディレクトリ' : 'ファイル' },
+        { label: 'モード', sub: r.mode || '(なし)' },
+        { label: '読み取り専用', sub: r.readonly ? 'はい' : 'いいえ' },
+        { label: '所有者', sub: r.owner || '(不明)' },
+        { label: '大きさ', sub: r.size === null ? '—' : `${human(r.size)}（${r.size.toLocaleString()} バイト）` },
+        { label: '場所', sub: r.path },
+    ];
+    show('属性', r.name, rows, { foot: 'Esc 閉じる' });
+}
+
+async function cmdChmod(spec) {
+    const r = await ask('chmod', { pane: state.focus, spec });
+    if (!r) return;
+    await reread();
+    say(`${r.changed} 件を ${r.spec} にしました`);
+}
+
+async function cmdReadonly(onOff) {
+    const on = !/^(off|no|false|0|解除)$/i.test((onOff || '').trim());
+    const r = await ask('readonly', { pane: state.focus, on });
+    if (!r) return;
+    await reread();
+    say(`${r.changed} 件を${on ? '読み取り専用に' : '書き込み可に'}しました`);
+}
+
+async function cmdHash(kind) {
+    const k = /md5/i.test(kind || '') ? 'md5' : 'sha256';
+    say(`${k} を計算中…`);
+    const r = await ask('hash', { pane: state.focus, kind: k });
+    if (!r) return;
+    show(`チェックサム（${r.kind}）`, `${r.rows.length} 件`,
+        r.rows.map((x) => ({ label: x.name, sub: x.sum })),
+        { foot: 'Esc 閉じる' });
+}
+
+async function cmdSearch(mode, needle) {
+    if (!needle) return;
+    say(`${mode === 'content' ? '中を' : '名前を'}探しています…`);
+    const r = await ask('search', { pane: state.focus, needle, mode });
+    if (!r) return;
+    const rows = r.hits.map((h) => ({
+        n: h.line ? String(h.line.n) : null,
+        label: h.rel + (h.is_dir ? '/' : ''),
+        sub: h.line ? h.line.text.trim() : '',
+        path: h.path,
+        is_dir: h.is_dir,
+    }));
+    show(mode === 'content' ? `grep ${needle}` : `find ${needle}`,
+        `${r.root}   ${rows.length} 件${r.truncated ? '（打ち切り）' : ''}`,
+        rows, {
+            foot: 'Enter そこへ   p 一覧に読み込む   Esc 閉じる',
+            pick: (row) => { closeReport(); revealPath(row.path, row.is_dir); },
+            act: {
+                p: async () => {
+                    const paths = rows.map((x) => x.path);
+                    const which = state.focus;
+                    const pane = await ask('panelize', {
+                        pane: which, paths, label: `${mode === 'content' ? 'grep' : 'find'} ${needle}`,
+                    });
+                    if (!pane) return;
+                    closeReport();
+                    state[which] = pane;
+                    draw(which);
+                    say(`${paths.length} 件を一覧に読み込みました（Esc で戻る）`);
+                },
+            },
+        });
+}
+
+/// Put the cursor on a path, entering its directory if need be.
+async function revealPath(path, isDir) {
+    const which = state.focus;
+    const dir = isDir ? path : path.replace(/[\\/][^\\/]*$/, '');
+    const pane = await ask('list', { pane: which, path: dir });
+    if (!pane) return;
+    const want = isDir ? null : path;
+    const at = want ? pane.entries.findIndex((x) => x.path === want) : 0;
+    pane.cursor = at < 0 ? 0 : at;
+    state[which] = pane;
+    draw(which);
+    say(pane.cwd);
+}
+
+async function cmdBranch() {
+    const which = state.focus;
+    if (state[which].flat) { await leaveFlat(); return; }
+    say('この配下を集めています…');
+    const r = await ask('branch', { pane: which });
+    if (!r) return;
+    state[which] = r.pane;
+    draw(which);
+    say(`${r.found} 件（b か Esc で戻る）`);
+}
+
+async function leaveFlat() {
+    const which = state.focus;
+    const pane = await ask('leaveflat', { pane: which });
+    if (!pane) return;
+    state[which] = pane;
+    draw(which);
+    say(pane.cwd);
+}
+
+async function step(dir) {
+    const which = state.focus;
+    const pane = await ask(dir, { pane: which });
+    if (!pane) return;
+    state[which] = pane;
+    draw(which);
+    say(pane.cwd);
+}
+
+async function cmdHistory() {
+    const r = await ask('history', { pane: state.focus });
+    if (!r) return;
+    const rows = [
+        ...r.back.map((p) => ({ n: '←', label: p })),
+        { n: '', label: r.cwd, sub: 'いまここ' },
+        ...r.forward.map((p) => ({ n: '→', label: p })),
+    ];
+    show('履歴', r.cwd, rows, {
+        foot: 'Enter そこへ   Esc 閉じる',
+        pick: (row) => { closeReport(); revealPath(row.label, true); },
+    });
+}
+
+/// `f` looks in *this* listing, and `n`/`N` walk the matches.
+///
+/// Not the same as `/`, which narrows the listing to what matches, and not the
+/// same as `Shift+F`, which walks the whole tree below here. The terminal
+/// build keeps all three, and they answer three different questions: where is
+/// it, show me only those, and is it anywhere under here.
+let here = { needle: '', at: -1 };
+
+async function searchHere() {
+    const needle = await askFor('この一覧を検索', here.needle);
+    if (needle === null || !needle) return;
+    here.needle = needle;
+    here.at = -1;
+    hopHere(1);
+}
+
+function hopHere(step) {
+    const pane = state[state.focus];
+    if (!pane || !here.needle) return;
+    const q = here.needle.toLowerCase();
+    const hits = [];
+    pane.entries.forEach((x, i) => {
+        if (!x.parent && x.name.toLowerCase().includes(q)) hits.push(i);
+    });
+    if (!hits.length) { say(`${here.needle} — 見つかりません`, true); return; }
+    if (here.at < 0) {
+        // The first hop starts from where the eye is, not from the top.
+        const ahead = hits.findIndex((n) => n > pane.cursor);
+        here.at = step > 0 ? (ahead < 0 ? 0 : ahead) : (ahead <= 0 ? hits.length - 1 : ahead - 1);
+    } else {
+        here.at = (here.at + step + hits.length) % hits.length;
+    }
+    pane.cursor = hits[here.at];
+    draw(state.focus);
+    say(`${here.needle}   ${here.at + 1} / ${hits.length}`);
 }
 
 /// What the engine says unasked.
