@@ -1865,6 +1865,88 @@ impl Session {
                 cian_core::fileclip::put_files(&paths)?;
                 Ok(serde_json::json!({ "count": paths.len() }))
             }
+            // ---- Macros ----
+            //
+            // A layout macro in the terminal build builds a *grid* of shell
+            // panes. There are no splits here yet, so each pane becomes a
+            // tab. That is a real reduction and it is said out loud rather
+            // than papered over: the shells, their commands and their scripted
+            // steps all run, and only the arrangement is lost.
+            "macros" => {
+                let path = cian_lua::config_read_path("macro.lua");
+                let list = path
+                    .as_ref()
+                    .filter(|p| p.exists())
+                    .and_then(|p| cian_lua::macros::load(p).ok())
+                    .unwrap_or_default();
+                Ok(serde_json::json!({
+                    "where": path.map(|p| p.display().to_string()),
+                    "macros": list.iter().map(|m| serde_json::json!({
+                        "name": m.name,
+                        "panes": m.panes.len(),
+                        "script": m.is_script(),
+                        "sync": m.sync,
+                    })).collect::<Vec<_>>(),
+                }))
+            }
+            "macrorun" => {
+                let which = req.params["pane"].as_str().unwrap_or("left").to_string();
+                let want = req.params["name"].as_str().unwrap_or("").to_string();
+                let rows = req.params["rows"].as_u64().unwrap_or(24) as u16;
+                let cols = req.params["cols"].as_u64().unwrap_or(80) as u16;
+                let path = cian_lua::config_read_path("macro.lua")
+                    .filter(|p| p.exists())
+                    .ok_or_else(|| anyhow::anyhow!("macro.lua がありません"))?;
+                let list = cian_lua::macros::load(&path).map_err(|e| anyhow::anyhow!(e))?;
+                let Some(mac) = list.into_iter().find(|m| m.name == want) else {
+                    anyhow::bail!("{want} というマクロはありません");
+                };
+                if mac.is_script() {
+                    anyhow::bail!("スクリプトマクロはまだ動かせません（レイアウトのみ）");
+                }
+                let cwd = self.pane_mut(&which)?.cwd.clone();
+                let mut opened = 0usize;
+                for step in &mac.panes {
+                    let id = self.shell_next;
+                    self.shell_next += 1;
+                    let sh = shell::Shell::start(id, &cwd, rows, cols, self.out.clone())?;
+                    // The command and its scripted steps, on a worker: an
+                    // `expect` waits for a prompt, and waiting here would hold
+                    // the engine for as long as the login takes.
+                    let cmd = step.cmd.clone();
+                    let steps = step.steps.clone();
+                    let handle = sh.handle();
+                    std::thread::spawn(move || {
+                        if let Some(cmd) = cmd {
+                            handle.write(format!("{cmd}\n").as_bytes());
+                        }
+                        for s in &steps {
+                            match s {
+                                cian_lua::macros::Step::Send(line) => {
+                                    handle.write(format!("{line}\n").as_bytes());
+                                }
+                                cian_lua::macros::Step::Wait(secs) => {
+                                    std::thread::sleep(std::time::Duration::from_secs_f64(*secs));
+                                }
+                                cian_lua::macros::Step::Expect { text, timeout } => {
+                                    handle.wait_for(text, *timeout);
+                                }
+                            }
+                        }
+                    });
+                    self.shells.push(sh);
+                    opened += 1;
+                }
+                if opened == 0 {
+                    anyhow::bail!("{want} にはペインがありません");
+                }
+                self.shell_at = self.shells.len() - opened;
+                let screen = self.shells[self.shell_at].screen();
+                let mut reply = self.shell_reply(screen);
+                reply["name"] = serde_json::json!(mac.name);
+                reply["opened"] = serde_json::json!(opened);
+                Ok(reply)
+            }
             // Leave a flat listing and go back to the directory it came from.
             "leaveflat" => {
                 let which = req.params["pane"].as_str().unwrap_or("left").to_string();

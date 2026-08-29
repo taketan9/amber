@@ -84,6 +84,12 @@ impl Shell {
         Ok(Shell { session, stop, id, rows, cols })
     }
 
+    /// A handle a worker can hold: writing and waiting, without the Shell
+    /// itself (which lives in the session and cannot cross a thread).
+    pub fn handle(&self) -> Handle {
+        Handle { session: Arc::clone(&self.session) }
+    }
+
     pub fn write(&self, bytes: &[u8]) {
         if let Ok(mut s) = self.session.lock() {
             s.write_input(bytes);
@@ -129,6 +135,43 @@ impl Drop for Shell {
         self.stop.store(true, Ordering::Relaxed);
         if let Ok(mut s) = self.session.lock() {
             s.kill_now();
+        }
+    }
+}
+
+/// What a macro's worker holds while it types into a shell it does not own.
+pub struct Handle {
+    session: Arc<Mutex<PtySession>>,
+}
+
+impl Handle {
+    pub fn write(&self, bytes: &[u8]) {
+        if let Ok(mut s) = self.session.lock() {
+            s.write_input(bytes);
+        }
+    }
+
+    /// Wait until `text` shows up on the screen, or `secs` pass.
+    ///
+    /// What makes a login macro possible: `sqlplus /nolog` is not ready when
+    /// the process starts, it is ready when it says so. Case-insensitive,
+    /// because a prompt's capitalisation is not something anyone should have
+    /// to get right in a config file.
+    pub fn wait_for(&self, text: &str, secs: f64) {
+        let want = text.to_lowercase();
+        let until = std::time::Instant::now() + std::time::Duration::from_secs_f64(secs);
+        while std::time::Instant::now() < until {
+            let seen = self
+                .session
+                .lock()
+                .ok()
+                .and_then(|s| s.parser().lock().ok().map(|p| p.screen().contents()))
+                .map(|c| c.to_lowercase().contains(&want))
+                .unwrap_or(false);
+            if seen {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
         }
     }
 }

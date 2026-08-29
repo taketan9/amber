@@ -784,6 +784,7 @@ const HELP = [
         [':each コマンド', 'マーク各ファイルに実行 — {} がパス'],
         ['F9 / F10', 'シェルのタブを開く / 閉じる（パネルにいるとき）'],
         ['F1 / F2', '前 / 次のシェルタブ'],
+        ['@  /  :macro', 'マクロを実行 ── 各ペインをタブで開きます（分割はまだ）'],
     ]],
     ['読み書き（F3・Enter）', [
         ['画像・PDF', 'F3 か Enter でそのまま表示（寸法も出ます）'],
@@ -1063,6 +1064,7 @@ document.addEventListener('keydown', (e) => {
     else if (k === 'M' || (k === 'Enter' && e.shiftKey)) openMenu(CONTEXT);
     else if (k === 'Z') cmdJump();
     else if (k === 's') cmdShortcuts();
+    else if (k === '@') cmdMacros();
     else if (k === 't' || k === 'F9') tabNew();
     else if (k === 'w' || k === 'F10') tabClose();
     else if (k === 'F1') goTab(state.focus, { step: -1 });
@@ -1709,6 +1711,7 @@ const COMMANDS = [
     { name: 'aicmd', about: 'AI: 説明からシェルコマンドを作る', arg: 'やりたいこと', run: cmdAiCmd },
     { name: 'ailog', about: 'AI: 選択したログを診断する', run: cmdAiLog },
     { name: 'bookmark', about: 'いまの場所を登録する', arg: '名前（省略可）', run: cmdBookmark },
+    { name: 'macro', about: 'マクロを実行（@ でも）', run: cmdMacros },
     { name: 'queue', about: '実行中の操作を見る・止める', run: cmdQueue },
     { name: 'tab', about: '新しいタブ（t / F9 でも）', run: () => tabNew() },
     { name: 'tabclose', about: 'タブを閉じる（w / F10 でも）', run: () => tabClose() },
@@ -1807,6 +1810,42 @@ async function cmdQueue() {
                 say(`#${row.op} を止めています`);
                 closeReport();
             },
+        },
+    });
+}
+
+/// `@` — the macros in `macro.lua`.
+///
+/// **A layout macro builds a grid of shell panes in the terminal build, and
+/// there are no splits here yet — so each pane becomes a tab.** The shells,
+/// their commands and their scripted steps all run; only the arrangement is
+/// lost. Said out loud in the list rather than discovered.
+async function cmdMacros() {
+    const r = await ask('macros', {});
+    if (!r) return;
+    if (!r.macros.length) {
+        say(`マクロがありません（${r.where || 'macro.lua'}）`);
+        return;
+    }
+    show('マクロ', r.where || '', r.macros.map((m) => ({
+        n: m.script ? 'script' : `${m.panes}枚`,
+        label: m.name,
+        sub: m.script ? '（スクリプトはまだ動きません）' : 'タブとして開きます',
+        name: m.name,
+        script: m.script,
+    })), {
+        foot: 'Enter 実行   Esc 閉じる',
+        pick: async (row) => {
+            closeReport();
+            if (!term.on) await openShell();
+            const done = await ask('macrorun', {
+                pane: state.focus, name: row.name, ...shellSize(),
+            });
+            if (!done) return;
+            takeShell(done);
+            term.focused = true;
+            el.shell.classList.add('on');
+            say(`${done.name} — ${done.opened} 枚をタブで開きました`);
         },
     });
 }
