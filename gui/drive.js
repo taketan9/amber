@@ -248,6 +248,11 @@ const LOOK = `({
     })(),
     rows: document.querySelectorAll('#find:not([hidden]) .hit').length,
     at: [...document.querySelectorAll('#find:not([hidden]) .hit')].findIndex((e) => e.classList.contains('on')),
+    focused: document.activeElement?.dataset?.answer ?? null,
+    frame: (() => {
+        const v = document.querySelector('#view:not([hidden])');
+        return v ? getComputedStyle(v).boxShadow.replace(/px/g, '') : null;
+    })(),
     prompt: (() => {
         const i = document.querySelector('.vfoot input');
         if (!i) return null;
@@ -342,8 +347,8 @@ async function main() {
             const after = await cdp.read(LOOK);
             const moved = JSON.stringify(before) !== JSON.stringify(after);
             const note = what ? `  ${what}` : '';
-            const asking = after.prompt ? `  ｜: ${after.prompt}`
-                : (after.asking ? `  ⟨${after.asking}⟩` : null);
+            const asking = after.prompt ? `  ｜: ${after.prompt}  枠 ${after.frame}`
+                : (after.asking ? `  ⟨${after.asking}⟩ 焦点=${after.focused}` : null);
             const marks = asking ?? (after.view
                 ? `  ｜${after.view.foot}  ${after.view.about}  «${after.view.first}»`
                 : (after.marks.length ? `  [${after.marks.join(' ')}]` : ''));

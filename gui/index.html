@@ -223,6 +223,17 @@ html, body {
    vim the last line *becomes* the command line. Leaving the mode there pushed
    the colon a hundred pixels in from the edge — a command line in a place no
    vim has ever put one. */
+/* While a command is being typed, the frame says so.
+   The terminal build gives a typed prompt one look wherever it is raised — a
+   bar, in a colour nothing else wears — precisely so that "this is taking
+   text" never has to be worked out. Here it is the editor's own frame, which
+   is what was asked for, and a tinted line to join it to the prompt. */
+#view:has(.vfoot input) { box-shadow: inset 0 0 0 2px var(--accent); }
+.vfoot:has(input) {
+  background: var(--accent-dim);
+  border-top-color: var(--accent);
+  color: var(--text);
+}
 .vfoot:has(input) > span:not(:has(input)) { display: none; }
 .vfoot > span:has(input),
 .vfoot > span:has(input) > span { flex: 1 1 auto; min-width: 0; display: flex; }

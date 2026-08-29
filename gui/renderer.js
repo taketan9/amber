@@ -34,10 +34,14 @@ function confirm(head, body) {
     el.ask.querySelector('.head').textContent = head;
     el.ask.querySelector('.body').textContent = body;
     el.ask.hidden = false;
-    // The safe button has the focus. Leaning on the keyboard should not
-    // delete anything.
-    const no = el.ask.querySelector('[data-answer="no"]');
-    no.focus();
+    // The focus goes where Enter goes.
+    //
+    // It used to sit on the safe button, meaning to make leaning on the
+    // keyboard harmless — but Enter answers yes here whatever has the focus,
+    // so it was not protecting anything. All it did was put a ring around
+    // やめる while the key labelled (Enter) did 実行, which reads as the
+    // opposite of what happens. Being asked at all is the protection.
+    el.ask.querySelector('[data-answer="yes"]').focus();
     return new Promise((resolve) => {
         const done = (answer) => {
             el.ask.hidden = true;
