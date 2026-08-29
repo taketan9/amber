@@ -823,6 +823,10 @@ const HELP = [
         [':lf :crlf', '改行コードを変える（保存時に反映）'],
         ['流儀', 'メモ帳流（既定）／ vim ── 一覧に戻って T のメニューの中'],
         ['  vim のとき', 'ノーマルモードで開く。:w 保存 :q 閉じる :wq 両方'],
+        ['  % ', '対応する括弧へ（monaco-vim のもの）'],
+        ['  ]] / [[', '次 / 前の見出しへ'],
+        ['  za', '折り畳む・開く'],
+        ['Ctrl+] / Ctrl+[', '見出し移動（メモ帳流でも使えます）'],
         ['  メモ帳流のとき', 'Ctrl+C/V/Z/F など Windows の手が効く'],
     ]],
     ['マークと操作', [
@@ -1546,6 +1550,8 @@ async function openInEditor(which) {
     // and a file is not modified by having been opened.
     viewer.base = viewer.ed.getModel().getAlternativeVersionId();
     viewer.dirty = false;
+    // A different file has different sections.
+    sections = null;
     setStyle(style);
     el.vName.textContent = f.name;
     el.vAbout.textContent = viewer.about;
@@ -1575,8 +1581,53 @@ function setStyle(i, remember = true) {
         ex.defineEx('wq', 'wq', async () => { if (await saveFile()) closeView(false); });
         ex.defineEx('outline', 'outline', () => cmdOutline());
         ex.defineEx('blame', 'blame', () => cmdBlame());
+        // `]]` and `[[`, which monaco-vim does not have. `%` it does — it is
+        // `moveToMatchedSymbol` and it works; the first version of this
+        // replaced it with a worse one, which is what comes of adding a
+        // feature without checking whether it is already there.
+        // eslint-disable-next-line no-undef
+        const vim = MonacoVim.VimMode.Vim;
+        vim.defineAction('cianNextSection', () => hopSection(1));
+        vim.defineAction('cianPrevSection', () => hopSection(-1));
+        vim.mapCommand(']]', 'action', 'cianNextSection', {}, { isJump: true });
+        vim.mapCommand('[[', 'action', 'cianPrevSection', {}, { isJump: true });
+        // Folding, which monaco-vim also leaves out. Monaco does the folding;
+        // this is only the key.
+        vim.defineAction('cianFold', () => viewer.ed.trigger('cian', 'editor.toggleFold'));
+        vim.mapCommand('za', 'action', 'cianFold');
+        vim.mapCommand('zA', 'action', 'cianFold');
+    }
+    // Sections, in both grammars: `]]` and `[[` walk the outline the way they
+    // walk headings in vim.
+    if (viewer.ed) {
+        viewer.ed.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.BracketRight,
+            () => hopSection(1));
+        viewer.ed.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.BracketLeft,
+            () => hopSection(-1));
     }
     drawViewFoot();
+}
+
+/// `]]` / `[[` — the next or previous section.
+///
+/// The outline decides what a section is, which is the same answer `:outline`
+/// gives. Two ideas of "section" in one editor would be one too many.
+let sections = null;
+
+async function hopSection(step) {
+    if (!viewer.on || !viewer.ed) return;
+    if (!sections) {
+        const r = await ask('outline', {});
+        sections = r ? r.items.map((i) => i.line) : [];
+    }
+    if (!sections.length) { say('見出しがありません'); return; }
+    const now = viewer.ed.getPosition().lineNumber - 1;
+    const to = step > 0
+        ? sections.find((n) => n > now)
+        : [...sections].reverse().find((n) => n < now);
+    if (to === undefined) { say(step > 0 ? '最後の見出しです' : '最初の見出しです'); return; }
+    viewer.ed.setPosition({ lineNumber: to + 1, column: 1 });
+    viewer.ed.revealLineInCenter(to + 1);
 }
 
 function drawViewFoot() {

@@ -421,6 +421,62 @@ JS_GLOBALS = {
 }
 
 
+def _strip_js(src: str) -> str:
+    """JS からコメントと文字列を落とす。**一度の走査で、順番を作らない。**
+
+    正規表現を順番に当てる版を2つ書いて、2つとも壊れた。バッククォートを
+    先に外すと、コメントの散文に書いた ` が数に入って囲みが1つずれ、
+    テンプレートの中身がコードとして数えられる。コメントを先に外すと
+    `'http://…'` の `//` から行末までが消えて、その行の呼び出しが見えなくなる
+    ―― **物差しが黙る方の壊れ方**で、わざと壊しても何も言わなくなった。
+
+    どちらの順番も間違いなので、順番を持たない。いま何の中にいるかを見ながら
+    1文字ずつ進めば、`//` が文字列の中にあるのか外にあるのかは迷いようがない。
+    """
+    out = []
+    i, n = 0, len(src)
+    while i < n:
+        c = src[i]
+        if c == '/' and i + 1 < n and src[i + 1] == '/':
+            while i < n and src[i] != '\n':
+                i += 1
+            continue
+        if c == '/' and i + 1 < n and src[i + 1] == '*':
+            end = src.find('*/', i + 2)
+            i = n if end < 0 else end + 2
+            continue
+        if c in '\'"`':
+            quote = c
+            i += 1
+            while i < n:
+                if src[i] == '\\':
+                    i += 2
+                    continue
+                if src[i] == quote:
+                    i += 1
+                    break
+                # A template's `${…}` is code, not text, and a call inside one
+                # is a call. Kept rather than blanked.
+                if quote == '`' and src[i] == '$' and i + 1 < n and src[i + 1] == '{':
+                    depth = 1
+                    i += 2
+                    start = i
+                    while i < n and depth:
+                        if src[i] == '{':
+                            depth += 1
+                        elif src[i] == '}':
+                            depth -= 1
+                        i += 1
+                    out.append(src[start:i - 1])
+                    continue
+                i += 1
+            out.append('""')
+            continue
+        out.append(c)
+        i += 1
+    return ''.join(out)
+
+
 def js() -> int:
     """レンダラの JS を、node --check が見ないところで見る。
 
@@ -464,10 +520,7 @@ def js() -> int:
 
         # 呼び出し。`.foo(` はメソッドなので除く（何に生えているかは追えない）。
         missing = collections.Counter()
-        # `new Foo(` は生成であって呼び出しではない ── Foo はここに無くてよい。
-        # バッククォートは _strip が知らない（あちらは Rust 用）。中の英字と
-        # 括弧が並んでいるだけで呼び出しに見えるので、先に落とす。
-        bare = _strip(re.sub(r'`(?:[^`\\]|\\.)*`', '``', src, flags=re.S))
+        bare = _strip_js(src)
         for m in re.finditer(r'(?<![.\w$])([A-Za-z_$][\w$]*)\s*\(', bare):
             if bare[max(0, m.start() - 4):m.start()].rstrip().endswith('new'):
                 continue

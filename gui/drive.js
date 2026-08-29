@@ -90,8 +90,17 @@ function virtual(key) {
             return { code: `Digit${up}`, windowsVirtualKeyCode: up.charCodeAt(0) };
         }
     }
-    // Punctuation and anything else: the page reads `e.key` for those, and
-    // nothing here binds a chord to one.
+    // Punctuation. cian's own handlers read `e.key` and would not care, but
+    // Monaco resolves its bindings from the number — so a chord on `]` or `,`
+    // was untestable until these were here.
+    const PUNCT = {
+        ';': ['Semicolon', 186], '=': ['Equal', 187], ',': ['Comma', 188],
+        '-': ['Minus', 189], '.': ['Period', 190], '/': ['Slash', 191],
+        '`': ['Backquote', 192], '[': ['BracketLeft', 219], '\\': ['Backslash', 220],
+        ']': ['BracketRight', 221], "'": ['Quote', 222],
+    };
+    const p = PUNCT[key];
+    if (p) return { code: p[0], windowsVirtualKeyCode: p[1] };
     return {};
 }
 
@@ -317,6 +326,9 @@ async function main() {
     // itself, and the round read as a paste that had quietly done nothing.
     fs.mkdirSync(path.join(sand, 'from'));
     fs.mkdirSync(path.join(sand, 'to'));
+    // Brackets, for `%`.
+    fs.writeFileSync(path.join(sand, 'from', 'k.rs'),
+        'fn main() {\n    let x = (1 + 2);\n    println!("hi");\n}\n');
     // A binary, for the hex editor.
     fs.writeFileSync(path.join(sand, 'from', 'z.bin'), Buffer.from('HELLO WORLD\u0000\u0001', 'latin1'));
     // A picture, for F3 on something the window draws rather than reads.
