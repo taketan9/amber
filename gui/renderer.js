@@ -730,6 +730,7 @@ const HELP = [
         ['← → / Ctrl+h / Ctrl+l', '左 / 右のペインにフォーカス'],
         ['Shift+H / Shift+L', '同じ（端末版と同じ綴り）'],
         ['F5', '読み直す'],
+        ['Ctrl+= / Ctrl+- / Ctrl+0', '文字を大きく / 小さく / 元に戻す'],
     ]],
     ['探す', [
         ['f  →  n / N', 'この一覧を検索・次・前'],
@@ -739,6 +740,7 @@ const HELP = [
         ['Ctrl+F / Ctrl+G', 'ファイルの中を探す（:grep）'],
         ['  結果で p', '一覧に読み込んで、いつものキーで操作する'],
         ['  結果で r', 'マッチした全ファイルを一括置換（1行ずつ確認）'],
+        ['  Ctrl+N / Ctrl+Shift+N', 'ファイルを開いたまま次 / 前のヒットへ'],
         ['b', 'この配下を1ファイル1行に平坦化（b か Esc で戻る）'],
         ['h', 'このペインの履歴'],
         ['Z', '行った場所へ飛ぶ'],
@@ -1118,6 +1120,9 @@ document.addEventListener('keydown', (e) => {
     else if (k === 's') cmdShortcuts();
     else if (k === '@') cmdMacros();
     else if (k === 'F12') zoomShell();
+    else if ((k === '=' || k === '+') && (e.ctrlKey || e.metaKey)) { setFont(FONT.at + 1); say(`文字の大きさ ${FONT.at}px`); }
+    else if (k === '-' && (e.ctrlKey || e.metaKey)) { setFont(FONT.at - 1); say(`文字の大きさ ${FONT.at}px`); }
+    else if (k === '0' && (e.ctrlKey || e.metaKey)) { setFont(15); say('文字の大きさを戻しました'); }
     else if (k === 't' || k === 'F9') tabNew();
     else if (k === 'w' || k === 'F10') tabClose();
     else if (k === 'F1') goTab(state.focus, { step: -1 });
@@ -1910,6 +1915,13 @@ document.addEventListener('keydown', (e) => {
         return;
     }
     // Between the open files, when there is more than one.
+    // The grep's hits, from inside the file one of them opened.
+    if (e.key === 'n' && (e.ctrlKey || e.metaKey)) {
+        e.stopPropagation();
+        e.preventDefault();
+        hopHit(e.shiftKey ? -1 : 1);
+        return;
+    }
     if ((e.key === 'F2') && openFiles.list.length > 1) {
         e.stopPropagation();
         e.preventDefault();
@@ -2102,6 +2114,38 @@ async function cmdLs(arg) {
     await reread();
 }
 
+/// Where the grep results are, so the viewer can walk them.
+///
+/// Kept after the report closes: opening a hit and then stepping to the next
+/// is the whole point of a grep, and it cannot be done from a screen that had
+/// to be closed to open the file.
+const hits = { list: [], at: -1, needle: '' };
+
+/// `Ctrl+N` / `Ctrl+Shift+N` — the next or previous grep hit, opened and
+/// scrolled to its line.
+async function hopHit(step) {
+    if (!hits.list.length) { say('grep の結果がありません', true); return; }
+    hits.at = (hits.at + step + hits.list.length) % hits.list.length;
+    const h = hits.list[hits.at];
+    const which = state.focus;
+    const dir = h.path.replace(/[\\/][^\\/]*$/, '');
+    if (state[which].cwd !== dir) {
+        const pane = await ask('list', { pane: which, path: dir });
+        if (!pane) return;
+        state[which] = pane;
+    }
+    const at = state[which].entries.findIndex((x) => x.path === h.path);
+    if (at >= 0) state[which].cursor = at;
+    draw(which);
+    if (viewer.on) await closeView(false);
+    await lookInside();
+    if (viewer.ed && h.line) {
+        viewer.ed.setPosition({ lineNumber: h.line, column: 1 });
+        viewer.ed.revealLineInCenter(h.line);
+    }
+    say(`${hits.needle}   ${hits.at + 1} / ${hits.list.length}   ${h.path.split(/[\\/]/).pop()}`);
+}
+
 /// `:queue` — what is running, and a way to stop one without stopping the
 /// rest. A file manager copying ten thousand files should be able to say which
 /// ten thousand.
@@ -2116,7 +2160,7 @@ async function cmdQueue() {
         sub: j.stopping ? '止めています…' : (j.dest || ''),
         op: j.op,
     })), {
-        foot: 'x 止める   Esc 閉じる',
+        foot: 'x 止める   b 動かしたまま閉じる   Esc 閉じる',
         act: {
             x: async () => {
                 const row = report.rows[report.at];
@@ -2124,6 +2168,12 @@ async function cmdQueue() {
                 await ask('cancel', { op: row.op });
                 say(`#${row.op} を止めています`);
                 closeReport();
+            },
+            // `b` puts it out of the way and leaves it running — the terminal
+            // build's word for it. Nothing is cancelled; the screen is.
+            b: () => {
+                closeReport();
+                say('操作は動いたままです（:queue で戻れます）');
             },
         },
     });
@@ -2749,11 +2799,20 @@ async function cmdSearch(mode, needle) {
         path: h.path,
         is_dir: h.is_dir,
     }));
+    // Remembered, so Ctrl+N can walk them after this screen is gone.
+    hits.list = r.hits.map((h) => ({ path: h.path, line: h.line ? h.line.n : 0 }));
+    hits.at = -1;
+    hits.needle = needle;
     show(mode === 'content' ? `grep ${needle}` : `find ${needle}`,
         `${r.root}   ${rows.length} 件${r.truncated ? '（打ち切り）' : ''}`,
         rows, {
             foot: 'Enter そこへ   p 一覧に読み込む   r 一括置換   Esc 閉じる',
-            pick: (row) => { closeReport(); revealPath(row.path, row.is_dir); },
+            pick: (row) => {
+                closeReport();
+                hits.at = rows.indexOf(row) - 1;
+                if (row.n) hopHit(1);
+                else revealPath(row.path, row.is_dir);
+            },
             act: {
                 r: async () => {
                     // Replace across every file the grep matched. The plan
@@ -3828,6 +3887,26 @@ function base(p) {
     return String(p).split(/[\\/]/).pop();
 }
 
+/// `Ctrl+=` / `Ctrl+-` / `Ctrl+0` — the window's own type size.
+///
+/// The terminal build cannot do this: the font belongs to the emulator, so it
+/// asks the emulator to change it and remembers a point size in `font_level`.
+/// This build owns its window, so it just changes it — and keeps the number
+/// under `gui_font`, because pixels here and points there are not the same
+/// number even though they are the same idea.
+const FONT = { min: 10, max: 28, at: 15 };
+
+function setFont(px, remember = true) {
+    FONT.at = Math.max(FONT.min, Math.min(FONT.max, px));
+    document.documentElement.style.setProperty('--size', `${FONT.at}px`);
+    // The rows have to grow with the type or the listing keeps its old
+    // spacing and the text collides with it.
+    document.documentElement.style.setProperty('--cell-h', `${Math.round(FONT.at * 1.7)}px`);
+    if (viewer.ed) viewer.ed.updateOptions({ fontSize: FONT.at });
+    if (term.on) ask('shellresize', shellSize());
+    if (remember) ask('remember', { key: 'gui_font', value: String(FONT.at) });
+}
+
 /// What the last session chose. Applied before the first draw, so the window
 /// never flashes the default look on its way to the chosen one.
 async function recall() {
@@ -3840,6 +3919,10 @@ async function recall() {
     if (s.style) {
         const at = STYLES.findIndex(([v]) => v === s.style);
         if (at >= 0) setStyle(at, false);
+    }
+    if (s.font) {
+        const px = Number(s.font);
+        if (px >= FONT.min && px <= FONT.max) setFont(px, false);
     }
 }
 

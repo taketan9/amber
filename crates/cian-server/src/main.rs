@@ -1921,6 +1921,13 @@ impl Session {
             "settings" => Ok(serde_json::json!({
                 "look": cian_lua::state_get("gui_look"),
                 "style": cian_lua::state_get("gui_editor"),
+                // Its own key, not `font_level`. That one is the terminal
+                // emulator's point size, which cian-tui asks the emulator to
+                // set because it cannot set it itself; this is a number of
+                // pixels in a window this build owns. Same idea, different
+                // number — and one key holding two meanings is a key that is
+                // wrong for somebody.
+                "font": cian_lua::state_get("gui_font"),
                 "theme": cian_lua::state_get("theme"),
                 "where": cian_lua::config_read_path("state.toml")
                     .map(|p| p.display().to_string()),
@@ -1928,7 +1935,7 @@ impl Session {
             "remember" => {
                 let key = req.params["key"].as_str().unwrap_or("");
                 let value = req.params["value"].as_str().unwrap_or("");
-                if !matches!(key, "gui_look" | "gui_editor") {
+                if !matches!(key, "gui_look" | "gui_editor" | "gui_font") {
                     anyhow::bail!("覚えられない項目です: {key}");
                 }
                 cian_lua::state_set(key, value);
