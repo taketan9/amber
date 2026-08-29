@@ -404,17 +404,6 @@ impl App {
         // cian's own register wins when set — it was filled deliberately, from
         // here. Otherwise fall back to the OS clipboard, so a file copied in
         // Explorer or Finder pastes as you would expect.
-        let (clip, from_os) = match self.file_clip.clone() {
-            Some(c) => (c, false),
-            None => {
-                let paths = os_clipboard_files();
-                if paths.is_empty() {
-                    self.message = Some(tr(self.lang, "clipboard has no files", "クリップボードにファイルがありません").into());
-                    return Ok(());
-                }
-                (FileClipboard { paths, op: ClipOp::Copy }, true)
-            }
-        };
         let dest = match self.focused {
             FocusedPane::Shell => self.shell_cwd(),
             _ => match self.active_pane() {
@@ -422,18 +411,23 @@ impl App {
                 None => return Ok(()),
             },
         };
-        // Pasting into the directory the files already live in would be a
-        // no-op at best and a self-overwrite at worst.
-        if clip.paths.iter().any(|p| p.parent() == Some(dest.as_path())) {
-            self.message = Some(tr(self.lang, "already in this directory", "既にこのディレクトリです").into());
-            return Ok(());
-        }
-        let report = match clip.op {
-            ClipOp::Copy => ops::copy_many(&clip.paths, &dest, Conflict::Skip),
-            ClipOp::Cut => ops::move_many(&clip.paths, &dest, Conflict::Skip),
+        let (paths, op, from_os) =
+            match clip::plan(self.file_clip.as_ref(), os_clipboard_files, &dest) {
+                clip::Paste::Empty => {
+                    self.message = Some(tr(self.lang, "clipboard has no files", "クリップボードにファイルがありません").into());
+                    return Ok(());
+                }
+                clip::Paste::AlreadyHere => {
+                    self.message = Some(tr(self.lang, "already in this directory", "既にこのディレクトリです").into());
+                    return Ok(());
+                }
+                clip::Paste::Go { paths, op, from_os } => (paths, op, from_os),
+            };
+        let report = match op {
+            ClipOp::Copy => ops::copy_many(&paths, &dest, Conflict::Skip),
+            ClipOp::Cut => ops::move_many(&paths, &dest, Conflict::Skip),
         };
-        // A cut is consumed by its paste; a copy stays available.
-        if clip.op == ClipOp::Cut {
+        if !clip::survives(op) {
             self.file_clip = None;
         }
         self.reload_both();

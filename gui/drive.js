@@ -15,9 +15,17 @@
 // project whose whole point is that it builds offline would be a poor trade.
 
 const { spawn } = require('node:child_process');
+const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 
-const PORT = 9223;
+/// A port of this run's own.
+///
+/// It was fixed, and a window left over from the run before answered on it —
+/// so the keys went to a dead sandbox and the report described someone else's
+/// files. The pid is enough to keep two runs apart, and `whose()` below checks
+/// that the window it reached is in fact this one's.
+const PORT = 9200 + (process.pid % 300);
 const ROOT = path.join(__dirname, '..');
 
 /// Keys as you would say them out loud, turned into what CDP wants.
@@ -55,6 +63,19 @@ async function target() {
     throw new Error('the window never appeared on the debugging port');
 }
 
+/// Wait until the window is showing this run's sandbox, and say so if it never
+/// does. Attaching to the wrong window is silent otherwise: the keys land, the
+/// status line answers, and every line of the report is about another
+/// directory.
+async function settle(cdp, sand) {
+    for (let i = 0; i < 40; i++) {
+        const cwd = await cdp.read('state?.left?.cwd ?? null');
+        if (cwd && cwd.endsWith(path.join(path.basename(sand), 'from'))) return;
+        await sleep(200);
+    }
+    throw new Error('the window never opened on this run\'s sandbox');
+}
+
 class Cdp {
     constructor(ws) { this.ws = ws; this.id = 0; this.waiting = new Map(); }
 
@@ -79,6 +100,12 @@ class Cdp {
     }
 
     async press(spec) {
+        // `type:…` puts a string in, one character at a time, so a prompt can
+        // be answered. Everything else is one key.
+        if (spec.startsWith('type:')) {
+            for (const ch of spec.slice(5)) await this.press(ch);
+            return;
+        }
         const k = parseKey(spec);
         for (const type of ['keyDown', 'keyUp']) {
             await this.send('Input.dispatchKeyEvent', {
@@ -107,6 +134,10 @@ const LOOK = `({
     sheet: document.querySelector('#find:not([hidden])') ? 'sheet' : null,
     rows: document.querySelectorAll('#find:not([hidden]) .hit').length,
     at: [...document.querySelectorAll('#find:not([hidden]) .hit')].findIndex((e) => e.classList.contains('on')),
+    cursor: state?.[state.focus]?.cursor,
+    cwd: state?.[state.focus]?.cwd,
+    typed: document.querySelector('input:not([hidden])')?.value ?? null,
+    marks: state?.[state.focus]?.entries?.filter((x) => x.marked).map((x) => x.name) ?? [],
     scroll: document.querySelector('#find:not([hidden]) .hits')?.scrollTop ?? 0,
     focus: state?.focus,
     left: state?.left ? state.left.entries.length : null,
@@ -114,6 +145,19 @@ const LOOK = `({
 })`;
 
 async function main() {
+    // Its own sandbox, always. The round presses keys that copy, move and
+    // delete; pointed at a home directory it would do all three there. The
+    // left pane opens on it, and `z` reaches `to`.
+    const sand = fs.mkdtempSync(path.join(os.tmpdir(), 'cian-drive-'));
+    // `from` holds files only, so `Space` always marks a file. It marked the
+    // `to` directory once, the engine correctly refused to put it inside
+    // itself, and the round read as a paste that had quietly done nothing.
+    fs.mkdirSync(path.join(sand, 'from'));
+    fs.mkdirSync(path.join(sand, 'to'));
+    for (const name of ['あ.txt', 'b.md', 'c.rs']) {
+        fs.writeFileSync(path.join(sand, 'from', name), `${name} の中身\n`);
+    }
+
     const keys = process.argv.slice(2);
     const round = keys.length ? keys.map((k) => [k, '']) : [
         [',', 'ソート'], [',', 'ソートもう一度'],
@@ -123,11 +167,15 @@ async function main() {
         ['Tab', 'ペイン切替'], ['Ctrl+l', '右へ'], ['Ctrl+h', '左へ'],
         ['F5', '読み直し'], ['p', 'パスをコピー'],
         ['o', 'ペインを揃える'],
+        ['Space', 'ひとつ持つ'], ['Ctrl+c', 'クリップボードへ'],
+        ['Tab', '反対ペインへ'],
+        ['z', 'パスで移動'], [`type:${sand}/to`, ''], ['Enter', 'to へ'],
+        ['Ctrl+v', '貼り付け'],
     ];
 
     const el = spawn(process.env.CIAN_ELECTRON
         || path.join(__dirname, 'node_modules/electron/dist/Electron.app/Contents/MacOS/Electron'),
-        [__dirname, `--remote-debugging-port=${PORT}`],
+        [__dirname, path.join(sand, 'from'), `--remote-debugging-port=${PORT}`],
         { cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'] });
 
     const crashes = [];
@@ -142,7 +190,7 @@ async function main() {
     try {
         const cdp = await Cdp.open(await target());
         await cdp.send('Runtime.enable');
-        await sleep(1200);
+        await settle(cdp, sand);
 
         for (const [key, what] of round) {
             const before = await cdp.read(LOOK);
@@ -150,11 +198,23 @@ async function main() {
             const after = await cdp.read(LOOK);
             const moved = JSON.stringify(before) !== JSON.stringify(after);
             const note = what ? `  ${what}` : '';
-            console.log(`${moved ? '  ' : '× '}${key.padEnd(8)}${note.padEnd(16)} ${after.status}`);
+            const marks = after.marks.length ? `  [${after.marks.join(' ')}]` : '';
+            console.log(`${moved ? '  ' : '× '}${key.padEnd(8)}${note.padEnd(16)} ${after.status}${marks}`);
             if (!moved) bad++;
+        }
+        // Let the last job finish before looking. A copy started by the
+        // final key is still running when the loop ends.
+        await sleep(600);
+        console.log(`\n最後の状態: ${(await cdp.read(LOOK)).status}`);
+        console.log('砂場:');
+        for (const dir of ['from', 'to']) {
+            const at = path.join(sand, dir);
+            const names = fs.readdirSync(at).sort().join('  ');
+            console.log(`  ${dir}/  ${names || '(空)'}`);
         }
     } finally {
         el.kill();
+        fs.rmSync(sand, { recursive: true, force: true });
     }
 
     if (crashes.length) {

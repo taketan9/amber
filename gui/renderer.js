@@ -591,6 +591,8 @@ const HELP = [
         ['Ctrl+A', '全マーク（もう一度で解除）'],
         ['V', '全マークを反転'],
         ['c / m / d', '反対ペインへコピー / 移動 / 削除（ゴミ箱へ）'],
+        ['Ctrl+C / Ctrl+X', 'ファイルを保持（コピー / 切り取り）'],
+        ['Ctrl+V / y', '保持したファイルをここへ貼り付け'],
         ['r', 'リネーム'],
         ['a / A', '新規ファイル / 新規ディレクトリ'],
         ['p', 'パス文字列をクリップボードへ'],
@@ -710,6 +712,28 @@ async function copyPaths() {
 /// F5 goes back to the disk. `refresh()` above asks the engine what it
 /// already holds, which is right at startup and wrong here — the point of
 /// the key is that something changed underneath us.
+/// Hold the selection for a later paste.
+///
+/// The pair to `c`/`m`, which go straight to the other pane. This one is for
+/// when the destination is not on screen yet: hold here, walk there, paste.
+/// The Windows letters, because that is what the hands do.
+async function hold(op) {
+    const r = await ask('clip', { pane: state.focus, op });
+    if (!r) return;
+    say(`${r.held} 件を${r.op === 'cut' ? '切り取り' : 'コピー'}`);
+}
+
+async function paste() {
+    const r = await ask('paste', { pane: state.focus });
+    if (!r) return;
+    // The engine decides whether this is a copy or a move — it is holding the
+    // register — so the verb comes back with the job rather than being
+    // guessed here from which key was pressed.
+    const verb = r.kind === 'move' ? '移動' : 'コピー';
+    running = { op: r.op, kind: r.kind, verb, total: r.count };
+    say(`${verb}中… 0 / ${r.count}`);
+}
+
 async function reread() {
     for (const which of ['left', 'right']) {
         const pane = await ask('list', { pane: which, path: state[which].cwd });
@@ -800,6 +824,9 @@ document.addEventListener('keydown', (e) => {
     else if (k === 'p' && !e.ctrlKey && !e.metaKey) copyPaths();
     else if (k === 'F5') reread();
     else if (k === '?') openHelp();
+    else if (k === 'c' && (e.ctrlKey || e.metaKey)) hold('copy');
+    else if (k === 'x' && (e.ctrlKey || e.metaKey)) hold('cut');
+    else if ((k === 'v' && (e.ctrlKey || e.metaKey)) || k === 'y') paste();
     else if (k === '/') startFilter();
     else if (k === ',') openMenu(SORT_MENU);
     else if (k === 'Escape' && running) {
@@ -835,6 +862,54 @@ function resolvedFace() {
         if (document.fonts.check(`16px "${name}"`)) return name;
     }
     return '(none of them — the browser chose)';
+}
+
+/// What the engine says unasked.
+///
+/// **Nothing was listening.** The bridge has offered `onEvent` since the spine
+/// went in, and the renderer never subscribed — so a copy said "0 / 1" and
+/// then sat there for ever, the panes did not reload when it finished, and a
+/// job that failed reported nothing at all. The engine had been refusing to
+/// copy a directory into itself, correctly and in silence.
+window.cian.onEvent(async (msg) => {
+    switch (msg.event) {
+        case 'progress':
+            if (!running || msg.op !== running.op) return;
+            say(`${running.verb}中… ${msg.done} / ${msg.total}  ${base(msg.path)}`);
+            return;
+
+        case 'done': {
+            if (!running || msg.op !== running.op) return;
+            const verb = running.verb;
+            running = null;
+            // Awaited, because the listings speak too — and whichever of the
+            // two says its piece last is the one that stays on screen.
+            await reread();
+            if (msg.cancelled) say(`${verb}を中止しました（${msg.ok} 件は済み）`, true);
+            // Every failure, named. A count of them tells you something went
+            // wrong without telling you what, which is the worst of both.
+            else if (msg.errors.length) say(msg.errors.join('  /  '), true);
+            else if (msg.skipped) say(`${verb} ${msg.ok} 件、${msg.skipped} 件は飛ばしました`);
+            else say(`${verb} ${msg.ok} 件（${msg.ms} ms）`);
+            return;
+        }
+
+        case 'finding':
+            if (finder.open) el.findFoot.textContent = `${msg.found} 件を見ています…`;
+            return;
+
+        case 'found':
+            if (!finder.open) return;
+            el.findFoot.textContent = msg.capped
+                ? `${msg.total} 件で打ち切り — 絞り込んでください`
+                : `${msg.total} 件`;
+            rankNow();
+            return;
+    }
+});
+
+function base(p) {
+    return String(p).split(/[\\/]/).pop();
 }
 
 refresh().then(() => {

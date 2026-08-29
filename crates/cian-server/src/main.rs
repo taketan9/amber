@@ -115,6 +115,9 @@ struct Session {
     out: Out,
     undo: Stack,
     find: Find,
+    /// Held for a later paste. Independent of the system clipboard, and of
+    /// which pane is focused — that is the point of it.
+    clip: Option<cian_core::clip::Clipboard>,
 }
 
 impl Session {
@@ -126,6 +129,7 @@ impl Session {
             out,
             undo: Stack::default(),
             find: Find::default(),
+            clip: None,
         })
     }
 
@@ -283,6 +287,58 @@ impl Session {
                 let count = paths.len();
                 let op = self.jobs.start(kind, paths, dest, self.out.clone(), self.undo.clone());
                 Ok(serde_json::json!({ "op": op, "count": count }))
+            }
+            // Hold the selection for a later paste, and drop it somewhere
+            // else. `c`/`m` go straight to the other pane; this is the other
+            // half of the pair, for when the destination is not on screen yet.
+            "clip" => {
+                let which = req.params["pane"].as_str().unwrap_or("left").to_string();
+                let op = match req.params["op"].as_str() {
+                    Some("cut") => cian_core::clip::Op::Cut,
+                    _ => cian_core::clip::Op::Copy,
+                };
+                let paths = self.targets(&which)?;
+                if paths.is_empty() {
+                    anyhow::bail!("対象がありません");
+                }
+                let count = paths.len();
+                self.clip = Some(cian_core::clip::Clipboard { paths, op });
+                Ok(serde_json::json!({
+                    "held": count,
+                    "op": if op == cian_core::clip::Op::Cut { "cut" } else { "copy" },
+                }))
+            }
+            "paste" => {
+                let which = req.params["pane"].as_str().unwrap_or("left").to_string();
+                let dest = self.pane_mut(&which)?.cwd.clone();
+                // The engine has no system clipboard of its own — the window
+                // is the only thing here that can see one, and it has not been
+                // asked for yet. `plan` takes the fallback as a closure for
+                // exactly this: the day it can, it is one argument.
+                let (paths, op) =
+                    match cian_core::clip::plan(self.clip.as_ref(), Vec::new, &dest) {
+                        cian_core::clip::Paste::Empty => {
+                            anyhow::bail!("クリップボードは空です")
+                        }
+                        cian_core::clip::Paste::AlreadyHere => {
+                            anyhow::bail!("既にこのディレクトリです")
+                        }
+                        cian_core::clip::Paste::Go { paths, op, .. } => (paths, op),
+                    };
+                let kind = if op == cian_core::clip::Op::Cut { Kind::Move } else { Kind::Copy };
+                if !cian_core::clip::survives(op) {
+                    self.clip = None;
+                }
+                let count = paths.len();
+                let job = self.jobs.start(
+                    kind, paths, Some(dest), self.out.clone(), self.undo.clone());
+                // Which it is, said back: the key pressed was "paste" either
+                // way, and only the register knew whether that meant a copy.
+                Ok(serde_json::json!({
+                    "op": job,
+                    "count": count,
+                    "kind": if matches!(kind, Kind::Move) { "move" } else { "copy" },
+                }))
             }
             // Rename in place. The name is a bare filename, never a path —
             // moving something is what `move` is for, and a rename that could

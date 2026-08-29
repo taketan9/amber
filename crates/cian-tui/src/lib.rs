@@ -1887,21 +1887,9 @@ enum PendingClose {
     ShellPane,
 }
 
-/// Whether a clipboard entry will be copied or moved when pasted.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ClipOp {
-    Copy,
-    Cut,
-}
-
-/// Files held for a later paste, Explorer-style: copy or cut here, navigate
-/// somewhere else, paste there. Independent of the system clipboard, which
-/// `p`/`Shift+P` still drive.
-#[derive(Debug, Clone)]
-struct FileClipboard {
-    paths: Vec<PathBuf>,
-    op: ClipOp,
-}
+/// The file register lives in `cian-core` — both front ends hold one, and the
+/// rules for what a paste does are judgements rather than plumbing.
+pub(crate) use cian_core::clip::{self, Clipboard as FileClipboard, Op as ClipOp};
 
 /// Preset pane backgrounds.
 ///
