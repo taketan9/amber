@@ -14,6 +14,10 @@ const el = {
     findQ: document.getElementById('find-q'),
     findHits: document.getElementById('find-hits'),
     findFoot: document.getElementById('find-foot'),
+    shell: document.getElementById('shell'),
+    sTitle: document.getElementById('s-title'),
+    sAbout: document.getElementById('s-about'),
+    sGrid: document.getElementById('s-grid'),
     report: document.getElementById('report'),
     rName: document.getElementById('r-name'),
     rAbout: document.getElementById('r-about'),
@@ -690,6 +694,13 @@ const HELP = [
         [':stage / :unstage / :discard', 'git add / reset / 変更の破棄'],
         [':dedup', '中身が同じファイルを探す'],
     ]],
+    ['シェル', [
+        ['Shift+J  /  :shell', 'シェルパネル（下半分に出る）'],
+        ['Esc', 'ファイルへ戻る（Esc 2回でシェルへ渡る）'],
+        ['Shift+PgUp / PgDn', '流れた出力を遡る'],
+        [':!コマンド', 'シェルで実行 — % 選択、%f ファイル、%d ディレクトリ'],
+        [':each コマンド', 'マーク各ファイルに実行 — {} がパス'],
+    ]],
     ['読み書き（F3・Enter）', [
         ['Ctrl+S', '保存（元の文字コード・改行・BOM のまま）'],
         ['Esc ×3', '閉じる ── 3回連続（未保存なら3回目で確認）'],
@@ -948,6 +959,7 @@ document.addEventListener('keydown', (e) => {
     else if (k === 'T') openMenu(TOGGLES);
     else if (k === 'M' || (k === 'Enter' && e.shiftKey)) openMenu(CONTEXT);
     else if (k === 'Z') cmdJump();
+    else if (k === 'J') { if (term.on) { term.focused = true; el.shell.classList.add('on'); say('シェル'); } else openShell(); }
     else if (k === 'r' && !e.ctrlKey && !e.metaKey) rename();
     else if (k === 'a' && !e.ctrlKey && !e.metaKey) create(false);
     else if (k === 'A') create(true);
@@ -1498,6 +1510,8 @@ const COMMANDS = [
     { name: 'discard', about: '作業ツリーの変更を破棄', run: () => cmdVcs('discard') },
     { name: 'dedup', about: '中身が同じファイルを探す', run: cmdDedup },
     { name: 'redo', about: 'u で取り消した操作をやり直す', run: redo },
+    { name: 'shell', about: 'シェルパネルを開く（Shift+J でも）', run: openShell },
+    { name: 'each', about: 'マーク各ファイルにコマンド — {} がパス', arg: 'コマンド', run: cmdEach },
     { name: 'back', about: 'ひとつ前のディレクトリへ', run: () => step('back') },
     { name: 'forward', about: 'ひとつ先のディレクトリへ', run: () => step('forward') },
     { name: 'history', about: 'このペインの履歴', run: cmdHistory },
@@ -1509,6 +1523,23 @@ const COMMANDS = [
     { name: 'help', about: 'キー一覧', run: openHelp },
 ];
 
+/// `:!cmd` — run it in the shell, in this pane's directory. `%` is the
+/// selection, `%f` the file, `%d` the directory; the engine substitutes them,
+/// quoted, because a path with a space in it is the common case.
+async function cmdBang(line) {
+    if (!term.on) await openShell();
+    const r = await ask('run', { pane: state.focus, line });
+    if (!r) return;
+    say(r.sent);
+}
+
+async function cmdEach(line) {
+    if (!term.on) await openShell();
+    const r = await ask('each', { pane: state.focus, line });
+    if (!r) return;
+    say(`${r.ran} 件に実行しました`);
+}
+
 function findCommand(name) {
     return COMMANDS.find((c) => c.name === name);
 }
@@ -1519,6 +1550,12 @@ async function commandLine(initial = '') {
     if (line === null) return;
     const text = line.trim();
     if (!text) return;
+    // `!` is a prefix, not a name: everything after it is the command line
+    // itself, spaces and all.
+    if (text.startsWith('!')) {
+        await cmdBang(text.slice(1).trim());
+        return;
+    }
     const at = text.indexOf(' ');
     const name = at < 0 ? text : text.slice(0, at);
     const arg = at < 0 ? '' : text.slice(at + 1).trim();
@@ -1937,6 +1974,182 @@ async function cmdJump() {
     });
 }
 
+// ─────────────────────────────────────────────────────────────────────────
+// The shell.
+//
+// **The terminal is in the engine.** Electron's usual answer is node-pty — a
+// native module wanting a C++ toolchain and a rebuild against Electron's ABI,
+// which is the several gigabytes this project already refused once. cian-pty
+// is portable-pty and vt100, both plain Rust, and it is the same emulator the
+// terminal build reads its shell through. So the window here knows nothing
+// about escape sequences: it is handed a grid and it draws it. Interpreting
+// them is a job with twenty years of edge cases in it, and a second answer to
+// any of them is how two front ends stop looking like one program.
+// ─────────────────────────────────────────────────────────────────────────
+const term = { on: false, focused: false, rows: 24, cols: 80 };
+
+/// How many cells fit. Measured from a real character rather than assumed:
+/// the font is whatever the machine had, and three of the four looks disagree
+/// about the size.
+function measureCell() {
+    const probe = document.createElement('span');
+    probe.textContent = 'M'.repeat(100);
+    probe.style.cssText = 'position:absolute;visibility:hidden;white-space:pre';
+    el.sGrid.append(probe);
+    const w = probe.getBoundingClientRect().width / 100;
+    const h = probe.getBoundingClientRect().height * 1.25;
+    probe.remove();
+    return { w: w || 8, h: h || 20 };
+}
+
+function shellSize() {
+    const { w, h } = measureCell();
+    const box = el.sGrid.getBoundingClientRect();
+    return {
+        cols: Math.max(20, Math.floor((box.width - 16) / w)),
+        rows: Math.max(4, Math.floor((box.height - 8) / h)),
+    };
+}
+
+async function openShell() {
+    el.shell.hidden = false;
+    term.on = true;
+    term.focused = true;
+    el.shell.classList.add('on');
+    const size = shellSize();
+    term.rows = size.rows;
+    term.cols = size.cols;
+    const r = await ask('shellopen', { pane: state.focus, ...size });
+    if (!r) { closeShell(); return; }
+    if (r.screen) drawShell(r.screen);
+    say('シェル — Esc でファイルへ戻る');
+}
+
+function closeShell() {
+    term.on = false;
+    term.focused = false;
+    el.shell.hidden = true;
+    el.shell.classList.remove('on');
+}
+
+/// Focus without closing. The panel stays visible while the files have the
+/// keys — which is the point of docking it rather than opening it instead.
+function blurShell() {
+    term.focused = false;
+    el.shell.classList.remove('on');
+    say('ファイルへ戻りました（Shift+J でシェルへ）');
+}
+
+function drawShell(screen) {
+    term.rows = screen.rows;
+    term.cols = screen.cols;
+    el.sTitle.textContent = screen.title || 'シェル';
+    el.sAbout.textContent = `${screen.cols}×${screen.rows}`
+        + (screen.scrollback ? `   ↑ ${screen.scrollback} 行戻っています` : '');
+    const frag = document.createDocumentFragment();
+    screen.lines.forEach((runs, row) => {
+        const div = document.createElement('div');
+        // The cursor is drawn by splitting the run it lands in, because a cell
+        // is not an element here — runs are, and a run is however many cells
+        // looked the same.
+        let col = 0;
+        for (const run of runs) {
+            const text = run.t;
+            const onThisRun = !screen.hidden && screen.cursor.row === row
+                && screen.cursor.col >= col && screen.cursor.col < col + text.length;
+            if (!onThisRun) {
+                div.append(styled(run, text));
+                col += text.length;
+                continue;
+            }
+            const at = screen.cursor.col - col;
+            if (at > 0) div.append(styled(run, text.slice(0, at)));
+            const cur = styled(run, text.slice(at, at + 1) || ' ');
+            cur.classList.add('cur');
+            div.append(cur);
+            if (at + 1 < text.length) div.append(styled(run, text.slice(at + 1)));
+            col += text.length;
+        }
+        if (!div.childNodes.length) div.append(document.createTextNode(' '));
+        frag.append(div);
+    });
+    el.sGrid.replaceChildren(frag);
+}
+
+function styled(run, text) {
+    const span = document.createElement('span');
+    span.textContent = text;
+    if (run.f) span.style.color = run.f.startsWith('c') ? `var(--${run.f})` : run.f;
+    if (run.b) span.style.background = run.b.startsWith('c') ? `var(--${run.b})` : run.b;
+    if (run.bold) span.style.fontWeight = '600';
+    if (run.it) span.style.fontStyle = 'italic';
+    if (run.ul) span.style.textDecoration = 'underline';
+    if (run.inv) span.classList.add('inv');
+    return span;
+}
+
+/// What a key means to a shell.
+///
+/// Not a lookup table of everything — the printable characters are themselves,
+/// and only the ones that are not a character need naming. Ctrl+letter is the
+/// arithmetic it has always been: the letter's position in the alphabet.
+function shellBytes(e) {
+    const k = e.key;
+    if (e.ctrlKey && k.length === 1) {
+        const up = k.toUpperCase();
+        if (up >= 'A' && up <= 'Z') return String.fromCharCode(up.charCodeAt(0) - 64);
+    }
+    const named = {
+        Enter: '\r', Tab: '\t', Backspace: '\x7f', Escape: '\x1b',
+        ArrowUp: '\x1b[A', ArrowDown: '\x1b[B', ArrowRight: '\x1b[C', ArrowLeft: '\x1b[D',
+        Home: '\x1b[H', End: '\x1b[F', Delete: '\x1b[3~',
+        PageUp: '\x1b[5~', PageDown: '\x1b[6~',
+    };
+    if (named[k]) return named[k];
+    if (k.length === 1) return e.altKey ? `\x1b${k}` : k;
+    return null;
+}
+
+document.addEventListener('keydown', (e) => {
+    if (!term.on || !term.focused) return;
+    // Esc hands the keys back to the files. A shell wants Esc too — vi lives
+    // in one — so it is the one key that has to be pressed twice to reach it,
+    // the same bargain the terminal build makes.
+    if (e.key === 'Escape' && !escTwice()) {
+        e.stopPropagation();
+        e.preventDefault();
+        blurShell();
+        return;
+    }
+    // Scrolling back through what has gone past, rather than into the shell.
+    if (e.shiftKey && (e.key === 'PageUp' || e.key === 'PageDown')) {
+        e.stopPropagation();
+        e.preventDefault();
+        scrollShell(e.key === 'PageUp' ? -term.rows : term.rows);
+        return;
+    }
+    const bytes = shellBytes(e);
+    if (bytes === null) return;
+    e.stopPropagation();
+    e.preventDefault();
+    ask('shellinput', { text: bytes });
+}, true);
+
+/// Two Escs in quick succession go through to the shell; one comes back to the
+/// files. Anything else in between resets it.
+let lastEsc = 0;
+function escTwice() {
+    const now = performance.now();
+    const twice = now - lastEsc < 500;
+    lastEsc = twice ? 0 : now;
+    return twice;
+}
+
+async function scrollShell(lines) {
+    const r = await ask('shellscroll', { lines });
+    if (r && r.screen) drawShell(r.screen);
+}
+
 /// What the engine says unasked.
 ///
 /// **Nothing was listening.** The bridge has offered `onEvent` since the spine
@@ -1966,6 +2179,18 @@ window.cian.onEvent(async (msg) => {
             else say(`${verb} ${msg.ok} 件（${msg.ms} ms）`);
             return;
         }
+
+        case 'shell':
+            if (term.on) drawShell(msg);
+            return;
+
+        case 'shellnote':
+            say(msg.note, true);
+            return;
+
+        case 'shellgone':
+            if (term.on) { closeShell(); say('シェルが終了しました'); }
+            return;
 
         case 'finding':
             if (finder.open) el.findFoot.textContent = `${msg.found} 件を見ています…`;

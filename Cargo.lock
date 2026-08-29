@@ -659,8 +659,10 @@ version = "1.0.8"
 dependencies = [
  "anyhow",
  "cian-core",
+ "cian-pty",
  "serde",
  "serde_json",
+ "vt100",
 ]
 
 [[package]]

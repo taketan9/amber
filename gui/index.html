@@ -157,6 +157,36 @@ html, body {
    the confirmation was open, behind the editor. Stated, so that adding a
    fourth overlay is a decision rather than an accident. */
 #view, #report { z-index: 10; }   /* surfaces: they replace the listing */
+
+/* The shell's sixteen. Named rather than fixed, so each look chooses them —
+   a shell frozen to one palette would ignore 白磁 and 陰翳 alike. These are
+   the defaults; the dark looks override them below. */
+:root {
+  --c0:#2b3333; --c1:#c0392b; --c2:#2f8f5b; --c3:#a9781a;
+  --c4:#2b6cb0; --c5:#8e44ad; --c6:#17706a; --c7:#8b9493;
+  --c8:#5c6664; --c9:#e05a4a; --c10:#43b57a; --c11:#d2a03a;
+  --c12:#4a90d9; --c13:#b06bd0; --c14:#2aa198; --c15:#2b3333;
+}
+:root[data-look="inei"], :root[data-look="terminal"] {
+  --c0:#3b3b3b; --c1:#e06c75; --c2:#98c379; --c3:#e5c07b;
+  --c4:#61afef; --c5:#c678dd; --c6:#56b6c2; --c7:#d9d0c5;
+  --c8:#6b6b6b; --c9:#ff7b86; --c10:#b5e08f; --c11:#ffd88a;
+  --c12:#82c8ff; --c13:#e0a0f0; --c14:#7fe0e8; --c15:#ffffff;
+}
+
+#shell {
+  position: fixed; left: 0; right: 0; bottom: 0; height: 45vh;
+  display: flex; flex-direction: column; z-index: 5;
+  background: var(--pane); border-top: 1px solid var(--line);
+}
+#shell[hidden] { display: none; }
+#shell.on { border-top-color: var(--accent); }
+.sgrid {
+  flex: 1 1 auto; overflow: hidden; padding: 4px 8px;
+  white-space: pre; line-height: 1.25;
+}
+.sgrid .cur { background: var(--accent); color: var(--on-accent); }
+.sgrid .inv { filter: invert(1); }
 #find { z-index: 20; }   /* over whatever it is searching */
 #ask  { z-index: 30; }   /* always the top: it is the thing being answered */
 
@@ -330,6 +360,13 @@ html, body {
       <div class="hits" id="find-hits"></div>
       <div class="foot" id="find-foot"></div>
     </div>
+  </div>
+
+  <!-- The shell. Docked under the panes rather than over them: it is a place
+       you look at while you work, not a thing you open instead of working. -->
+  <div id="shell" hidden>
+    <div class="vhead"><span id="s-title">シェル</span><span id="s-about"></span></div>
+    <div class="sgrid" id="s-grid"></div>
   </div>
 
   <!-- Anything that answers with a list: a search, disk usage, checksums, the

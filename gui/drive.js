@@ -265,6 +265,15 @@ const LOOK = `({
     cursor: state?.[state.focus]?.cursor,
     cwd: state?.[state.focus]?.cwd,
     typed: document.querySelector('input:not([hidden])')?.value ?? null,
+    shell: document.querySelector('#shell:not([hidden])')
+        ? { about: document.getElementById('s-about').textContent,
+            text: [...document.querySelectorAll('#s-grid > div')]
+                // Doubled on purpose: LOOK is a template literal, and inside
+                // one a lone \\s is just an s. The regex reaching the page was
+                // /s+$/ — it trimmed trailing letters and left the spaces.
+                .map((d) => d.textContent.replace(/[ ]+$/, ''))
+                .filter(Boolean).slice(-3).join(' ⏎ ') }
+        : null,
     report: document.querySelector('#report:not([hidden])')
         ? { name: document.getElementById('r-name').textContent,
             about: document.getElementById('r-about').textContent,
@@ -358,10 +367,11 @@ async function main() {
             const menu = after.sheet && after.rows
                 ? `  ▣ ${after.rows}項目（${after.at + 1}番目）`
                 : null;
+            const sh = after.shell ? `  ▸ ${after.shell.about}  «${after.shell.text}»` : null;
             const rep = after.report
                 ? `  ▤ ${after.report.name} ｜${after.report.about}｜ ${after.report.rows}行  «${after.report.first}»`
                 : null;
-            const marks = asking ?? rep ?? menu ?? (after.view
+            const marks = asking ?? rep ?? menu ?? sh ?? (after.view
                 ? `  ｜${after.view.foot}  ${after.view.about}  «${after.view.first}»`
                 : (after.marks.length ? `  [${after.marks.join(' ')}]` : ''));
             console.log(`${moved ? '  ' : '× '}${key.padEnd(8)}${note.padEnd(16)} ${after.status}${marks}`);

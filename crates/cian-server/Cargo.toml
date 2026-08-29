@@ -8,6 +8,14 @@ repository.workspace = true
 
 [dependencies]
 cian-core = { workspace = true }
+# The shell lives here rather than in the window. Electron's usual answer is
+# node-pty — a native module needing a C++ toolchain and a rebuild against
+# Electron's ABI, which is exactly the several gigabytes this project refused
+# for SFTP. cian-pty is portable-pty and vt100, both plain Rust, and it is the
+# same terminal emulator the terminal build reads its shell through. One
+# emulator, and no compiler on the machine that runs it.
+cian-pty  = { workspace = true }
+vt100     = { workspace = true }
 serde      = { workspace = true }
 serde_json = { workspace = true }
 anyhow     = { workspace = true }

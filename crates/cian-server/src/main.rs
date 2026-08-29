@@ -27,6 +27,7 @@ use cian_core::Pane;
 
 mod find;
 mod jobs;
+mod shell;
 mod undo;
 mod wire;
 
@@ -137,6 +138,10 @@ struct Session {
     /// done something new, the branch you undid is gone. A redo stack that
     /// survives that puts files back on top of work done since.
     redo: Stack,
+    /// The shell panel, once it has been opened. Started on demand rather than
+    /// at launch: most sessions never open it, and a shell process per window
+    /// that nobody asked for is a process nobody accounts for.
+    shell: Option<shell::Shell>,
 }
 
 impl Session {
@@ -151,6 +156,7 @@ impl Session {
             clip: None,
             open: None,
             redo: Stack::default(),
+            shell: None,
         })
     }
 
@@ -955,6 +961,97 @@ impl Session {
                         .collect::<Vec<_>>(),
                 }))
             }
+            // ---- The shell ----
+            "shellopen" => {
+                let which = req.params["pane"].as_str().unwrap_or("left").to_string();
+                let rows = req.params["rows"].as_u64().unwrap_or(24) as u16;
+                let cols = req.params["cols"].as_u64().unwrap_or(80) as u16;
+                if self.shell.as_ref().is_some_and(|s| s.alive()) {
+                    let sh = self.shell.as_mut().unwrap();
+                    sh.resize(rows, cols);
+                    return Ok(serde_json::json!({ "screen": sh.screen() }));
+                }
+                let cwd = self.pane_mut(&which)?.cwd.clone();
+                let sh = shell::Shell::start(&cwd, rows, cols, self.out.clone())?;
+                let screen = sh.screen();
+                self.shell = Some(sh);
+                Ok(serde_json::json!({ "screen": screen, "cwd": cwd.display().to_string() }))
+            }
+            "shellinput" => {
+                let Some(sh) = self.shell.as_ref() else {
+                    anyhow::bail!("シェルが開いていません");
+                };
+                let text = req.params["text"].as_str().unwrap_or("");
+                sh.write(text.as_bytes());
+                Ok(serde_json::json!({}))
+            }
+            "shellresize" => {
+                let Some(sh) = self.shell.as_mut() else {
+                    anyhow::bail!("シェルが開いていません");
+                };
+                sh.resize(
+                    req.params["rows"].as_u64().unwrap_or(24) as u16,
+                    req.params["cols"].as_u64().unwrap_or(80) as u16,
+                );
+                Ok(serde_json::json!({}))
+            }
+            "shellscroll" => {
+                let Some(sh) = self.shell.as_ref() else {
+                    anyhow::bail!("シェルが開いていません");
+                };
+                match req.params["lines"].as_i64() {
+                    Some(n) => sh.scroll(n as isize),
+                    None => sh.to_bottom(),
+                }
+                Ok(serde_json::json!({ "screen": sh.screen() }))
+            }
+            "shellclose" => {
+                self.shell = None;
+                Ok(serde_json::json!({}))
+            }
+            // Run a command in the shell, in this pane's directory.
+            //
+            // `%` is the selection, `%f` the file, `%d` the directory — the
+            // terminal build's substitutions, so a command that works there
+            // works here.
+            "run" => {
+                let which = req.params["pane"].as_str().unwrap_or("left").to_string();
+                let line = req.params["line"].as_str().unwrap_or("").to_string();
+                if line.trim().is_empty() {
+                    anyhow::bail!("コマンドがありません");
+                }
+                let cwd = self.pane_mut(&which)?.cwd.clone();
+                let paths = self.targets(&which).unwrap_or_default();
+                let quoted: Vec<String> = paths.iter().map(|p| quote(&p.display().to_string())).collect();
+                let file = paths.first().map(|p| quote(&p.display().to_string())).unwrap_or_default();
+                let text = line
+                    .replace("%d", &quote(&cwd.display().to_string()))
+                    .replace("%f", &file)
+                    .replace('%', &quoted.join(" "));
+                let Some(sh) = self.shell.as_ref() else {
+                    anyhow::bail!("シェルが開いていません");
+                };
+                sh.write(format!("{text}\n").as_bytes());
+                Ok(serde_json::json!({ "sent": text }))
+            }
+            // One command per marked file. `{}` is the path — the terminal
+            // build's `:each`.
+            "each" => {
+                let which = req.params["pane"].as_str().unwrap_or("left").to_string();
+                let line = req.params["line"].as_str().unwrap_or("").to_string();
+                if !line.contains("{}") {
+                    anyhow::bail!("{{}} がありません（例: :each grep -l foo {{}}）");
+                }
+                let paths = self.targets(&which)?;
+                let Some(sh) = self.shell.as_ref() else {
+                    anyhow::bail!("シェルが開いていません");
+                };
+                for p in &paths {
+                    let one = line.replace("{}", &quote(&p.display().to_string()));
+                    sh.write(format!("{one}\n").as_bytes());
+                }
+                Ok(serde_json::json!({ "ran": paths.len() }))
+            }
             // Leave a flat listing and go back to the directory it came from.
             "leaveflat" => {
                 let which = req.params["pane"].as_str().unwrap_or("left").to_string();
@@ -1233,4 +1330,17 @@ fn main() -> anyhow::Result<()> {
         }
     }
     Ok(())
+}
+
+/// A path, safe to hand to a shell.
+///
+/// Single quotes with the single quote itself escaped the only way `sh`
+/// accepts — close, escape, reopen. A space in a path is the common case and
+/// an apostrophe in a filename is not rare enough to leave broken.
+fn quote(s: &str) -> String {
+    if cfg!(windows) {
+        format!("\"{}\"", s.replace('"', "\\\""))
+    } else {
+        format!("'{}'", s.replace('\'', "'\\''"))
+    }
 }

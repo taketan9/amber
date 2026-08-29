@@ -213,6 +213,22 @@ impl PtySession {
         // Advertise a capable terminal so programs emit color/cursor sequences
         // that vt100 understands.
         cmd.env("TERM", "xterm-256color");
+        // And a UTF-8 locale, when the process has none to pass on.
+        //
+        // A terminal always has one, so the terminal build inherited it and
+        // never had to think about this. **A window started from Finder or
+        // Explorer has none**, and without it zsh's line editor treats every
+        // byte over 0x7f as unprintable: typing 日本語 at the prompt showed
+        // `<0083><0086>…` while the command's own output came out perfectly,
+        // which reads as a font problem and is not one.
+        //
+        // Not on Windows, where the console works from a code page and these
+        // variables mean nothing.
+        #[cfg(not(windows))]
+        if std::env::var_os("LC_ALL").is_none() && std::env::var_os("LANG").is_none() {
+            cmd.env("LANG", "en_US.UTF-8");
+            cmd.env("LC_CTYPE", "en_US.UTF-8");
+        }
 
         let child = pair.slave.spawn_command(cmd)?;
         cian_core::log::log(&format!(
