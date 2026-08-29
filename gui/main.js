@@ -6,7 +6,7 @@
 // the disk hands it; the window that draws the listing has no business being
 // able to read the disk itself.
 
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, Menu, ipcMain } = require('electron');
 const path = require('node:path');
 const os = require('node:os');
 const { Engine } = require('./engine');
@@ -44,7 +44,37 @@ function createWindow() {
     return win;
 }
 
+/// The menu bar, decided rather than inherited.
+///
+/// **Electron installs a default menu when none is set, and on Windows that
+/// menu owns Ctrl+A, Ctrl+C, Ctrl+X, Ctrl+V, Ctrl+Z, Ctrl+Y and Ctrl+R.**
+/// Those are seven of cian's keys, and a menu accelerator takes the keystroke
+/// before the page ever sees it — so mark-all, the file clipboard and redo
+/// would have been dead on the only platform this build is for. It cannot be
+/// seen from a Mac, where that same default menu is on Cmd instead.
+///
+/// So: no menu at all off macOS. cian is a full-screen keyboard program and
+/// the bar is a row of pixels it has no use for.
+///
+/// macOS keeps one, and keeps Edit in it. Not for the look — without an Edit
+/// menu, Cmd+C and Cmd+V stop working inside text fields on macOS, which is a
+/// platform behaviour rather than a choice. Cmd there means "the text in this
+/// field", which is what a Mac user means by it; cian's own bindings take
+/// Ctrl as well, and Ctrl is what the hands this is built for use.
+function installMenu() {
+    if (process.platform !== 'darwin') {
+        Menu.setApplicationMenu(null);
+        return;
+    }
+    Menu.setApplicationMenu(Menu.buildFromTemplate([
+        { role: 'appMenu' },
+        { role: 'editMenu' },
+        { role: 'windowMenu' },
+    ]));
+}
+
 app.whenReady().then(() => {
+    installMenu();
     // The first plain argument is where to start; anything beginning with a
     // dash belongs to Chromium and may turn up anywhere in the line. Taking
     // argv[2] whatever it was meant that adding `--remote-debugging-port` gave

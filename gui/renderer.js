@@ -541,6 +541,43 @@ const SORT_MENU = {
     letters: Object.fromEntries(SORTS.map(([k, , letter]) => [letter, () => applySort(k)])),
 };
 
+/// `M` — everything you can do to the row under the cursor.
+///
+/// Built fresh each time from what the row actually is, so a directory is not
+/// offered "extract" and a plain file is not offered it either. The terminal
+/// build's menu does the same, and it is the discoverable half of a program
+/// whose other half is a hundred and forty keys.
+const CONTEXT = {
+    key: 'M',
+    foot: '↑↓ 選ぶ   Enter 実行   Esc 閉じる',
+    stay: false,
+    rows: () => {
+        const pane = state[state.focus];
+        const row = pane && pane.entries[pane.cursor];
+        if (!row || row.parent) return [{ label: '対象がありません', value: '', run: () => {} }];
+        const items = [
+            { label: '開く', value: 'Enter', run: enter },
+            { label: '既定のアプリで開く', value: 'Ctrl+Enter', run: openOut },
+            { label: '名前を変える', value: 'r', run: rename },
+            { label: '反対ペインへコピー', value: 'c', run: () => operate('copy') },
+            { label: '反対ペインへ移動', value: 'm', run: () => operate('move') },
+            { label: '削除（ゴミ箱へ）', value: 'd', run: () => operate('delete') },
+            { label: 'パスをコピー', value: 'p', run: copyPaths },
+            { label: '属性', value: ':attr', run: cmdAttr },
+            { label: 'チェックサム', value: ':hash', run: () => cmdHash('') },
+        ];
+        if (!row.is_dir && /\.(zip|tar|gz|tgz|7z|rar)$/i.test(row.name)) {
+            items.push({ label: 'アーカイブの中身', value: ':lsar', run: cmdArchiveList });
+            items.push({ label: 'ここに展開', value: ':unzip', run: cmdExtract });
+        } else {
+            items.push({ label: 'アーカイブにまとめる', value: ':zip', run: () => cmdCompress('zip') });
+        }
+        items.push({ label: 'このファイルの履歴', value: ':filelog', run: () => cmdLog(true) });
+        items.push({ label: '差分（HEAD との）', value: ':gitdiff', run: () => cmdVcsDiff(null) });
+        return items;
+    },
+};
+
 /// One menu driver, not one per menu.
 ///
 /// The switches and the sort picker are the same object with different rows,
@@ -632,6 +669,7 @@ const HELP = [
         ['  結果で p', '一覧に読み込んで、いつものキーで操作する'],
         ['b', 'この配下を1ファイル1行に平坦化（b か Esc で戻る）'],
         ['h', 'このペインの履歴'],
+        ['Z', '行った場所へ飛ぶ'],
         ['Alt+← / Alt+→', '前 / 先のディレクトリへ'],
         [',', 'ソート：名前／サイズ／日付／拡張子（n s d e で直接、同じキーで昇降反転）'],
         ['T', 'トグルメニュー：隠しファイル・配色・エディタの流儀'],
@@ -647,6 +685,10 @@ const HELP = [
         [':renamepattern', '一括リネーム {name}_{n3}.{ext}（先にプレビュー）'],
         [':zip / :tar / :targz', 'マークをアーカイブにまとめる'],
         [':unzip / :lsar', 'ここに展開 / 中身を見る'],
+        [':log / :filelog', 'コミットログ / このファイルの履歴（git・svn）'],
+        [':gitdiff', '選択ファイルの差分'],
+        [':stage / :unstage / :discard', 'git add / reset / 変更の破棄'],
+        [':dedup', '中身が同じファイルを探す'],
     ]],
     ['読み書き（F3・Enter）', [
         ['Ctrl+S', '保存（元の文字コード・改行・BOM のまま）'],
@@ -669,7 +711,8 @@ const HELP = [
         ['a / A', '新規ファイル / 新規ディレクトリ'],
         ['p', 'パス文字列をクリップボードへ'],
         ['o / O', 'このペインを反対側へ / 反対側をここへ'],
-        ['u', '直前のリネーム／作成／移動／ディレクトリ移動を取り消し'],
+        ['u / Ctrl+R', '取り消し / やり直し'],
+        ['M / Shift+Enter', 'このエントリにできること'],
         ['Esc', '実行中の操作を中止'],
     ]],
 ];
@@ -903,7 +946,9 @@ document.addEventListener('keydown', (e) => {
     else if (k === 'm') operate('move');
     else if (k === 'd') operate('delete');
     else if (k === 'T') openMenu(TOGGLES);
-    else if (k === 'r') rename();
+    else if (k === 'M' || (k === 'Enter' && e.shiftKey)) openMenu(CONTEXT);
+    else if (k === 'Z') cmdJump();
+    else if (k === 'r' && !e.ctrlKey && !e.metaKey) rename();
     else if (k === 'a' && !e.ctrlKey && !e.metaKey) create(false);
     else if (k === 'A') create(true);
     else if (k === 'u') undo();
@@ -925,6 +970,7 @@ document.addEventListener('keydown', (e) => {
     else if (k === 'N') hopHere(-1);
     else if (k === 'b') cmdBranch();
     else if (k === '=') cmdCompare();
+    else if ((k === 'r' || k === 'y') && (e.ctrlKey || e.metaKey)) redo();
     else if (k === 'h' && !e.ctrlKey) cmdHistory();
     else if (k === 'ArrowLeft' && e.altKey) step('back');
     else if (k === 'ArrowRight' && e.altKey) step('forward');
@@ -1444,6 +1490,14 @@ const COMMANDS = [
     { name: 'targz', about: 'マークを tar.gz にまとめる', run: () => cmdCompress('targz') },
     { name: 'unzip', about: 'カーソルのアーカイブをここに展開', run: cmdExtract },
     { name: 'lsar', about: 'アーカイブの中身を見る', run: cmdArchiveList },
+    { name: 'log', about: 'コミットログ（git / svn）', run: () => cmdLog(false) },
+    { name: 'filelog', about: 'このファイルの履歴', run: () => cmdLog(true) },
+    { name: 'gitdiff', about: '選択ファイルの差分（git / svn）', run: () => cmdVcsDiff(null) },
+    { name: 'stage', about: 'git add', run: () => cmdVcs('stage') },
+    { name: 'unstage', about: 'git reset', run: () => cmdVcs('unstage') },
+    { name: 'discard', about: '作業ツリーの変更を破棄', run: () => cmdVcs('discard') },
+    { name: 'dedup', about: '中身が同じファイルを探す', run: cmdDedup },
+    { name: 'redo', about: 'u で取り消した操作をやり直す', run: redo },
     { name: 'back', about: 'ひとつ前のディレクトリへ', run: () => step('back') },
     { name: 'forward', about: 'ひとつ先のディレクトリへ', run: () => step('forward') },
     { name: 'history', about: 'このペインの履歴', run: cmdHistory },
@@ -1802,6 +1856,85 @@ async function cmdArchiveList() {
             sub: m.is_dir ? '' : `圧縮後 ${human(m.compressed)}`,
         })),
         { foot: 'Esc 閉じる' });
+}
+
+// ---- Version control, duplicates, redo ----
+
+async function cmdLog(justThisFile) {
+    const r = await ask('log', { pane: state.focus, file: justThisFile });
+    if (!r) return;
+    show(r.of ? `${r.of} の履歴` : 'コミットログ',
+        `${r.kind}   ${r.commits.length} 件`,
+        r.commits.map((c) => ({ n: c.date, label: c.subject, sub: `${c.author}  ${c.hash}`, hash: c.hash })),
+        {
+            foot: 'Enter そのコミットの差分   Esc 閉じる',
+            pick: (row) => cmdVcsDiff(row.hash),
+        });
+}
+
+/// A diff, shown the way a diff reads: the sign in its own column, so `+` and
+/// `-` line up down the page instead of hiding at the start of the text.
+async function cmdVcsDiff(hash) {
+    const r = await ask('vcsdiff', { pane: state.focus, ...(hash ? { hash } : {}) });
+    if (!r) return;
+    show(hash ? `差分 ${hash}` : '差分', `${r.lines.length} 行`,
+        r.lines.map((t) => ({
+            n: t.startsWith('+') ? '+' : t.startsWith('-') ? '-' : t.startsWith('@') ? '@' : '',
+            label: t,
+        })),
+        { foot: 'Esc 閉じる' });
+}
+
+async function cmdVcs(what) {
+    const r = await ask(what, { pane: state.focus });
+    if (!r) return;
+    state[state.focus] = r.pane;
+    draw(state.focus);
+    const verb = { stage: 'git add', unstage: 'git reset', discard: '破棄' }[what];
+    say(`${r.count} 件を ${verb} しました`);
+}
+
+async function cmdDedup() {
+    say('中身を突き合わせています…');
+    const r = await ask('dedup', { pane: state.focus });
+    if (!r) return;
+    if (!r.groups.length) { say('同じ中身のファイルはありません'); return; }
+    const rows = [];
+    r.groups.forEach((g, i) => {
+        g.forEach((p, j) => rows.push({ n: j === 0 ? `${i + 1}` : '', label: p }));
+    });
+    show('中身が同じファイル', `${r.groups.length} 組`, rows, { foot: 'Esc 閉じる' });
+}
+
+async function redo() {
+    const r = await ask('redo', {});
+    if (!r) return;
+    state.left = r.left;
+    state.right = r.right;
+    draw('left');
+    draw('right');
+    say(r.said);
+}
+
+/// `Z` — the places this session has been, newest first.
+///
+/// The terminal build's jump list is history plus bookmarks; bookmarks need
+/// somewhere to live, which is the same open question as the look and the
+/// editor style, so this is the half that needs nothing written down.
+async function cmdJump() {
+    const seen = [];
+    for (const which of ['left', 'right']) {
+        const r = await ask('history', { pane: which });
+        if (!r) continue;
+        for (const p of [r.cwd, ...r.back, ...r.forward]) {
+            if (!seen.includes(p)) seen.push(p);
+        }
+    }
+    if (!seen.length) { say('まだどこにも行っていません'); return; }
+    show('行き先', `${seen.length} 件`, seen.map((p) => ({ label: p })), {
+        foot: 'Enter そこへ   Esc 閉じる',
+        pick: (row) => { closeReport(); revealPath(row.label, true); },
+    });
 }
 
 /// What the engine says unasked.

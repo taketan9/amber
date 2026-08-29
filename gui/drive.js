@@ -355,10 +355,13 @@ async function main() {
             const note = what ? `  ${what}` : '';
             const asking = after.prompt ? `  ｜: ${after.prompt}  枠 ${after.frame}`
                 : (after.asking ? `  ⟨${after.asking}⟩ 焦点=${after.focused}` : null);
+            const menu = after.sheet && after.rows
+                ? `  ▣ ${after.rows}項目（${after.at + 1}番目）`
+                : null;
             const rep = after.report
                 ? `  ▤ ${after.report.name} ｜${after.report.about}｜ ${after.report.rows}行  «${after.report.first}»`
                 : null;
-            const marks = asking ?? rep ?? (after.view
+            const marks = asking ?? rep ?? menu ?? (after.view
                 ? `  ｜${after.view.foot}  ${after.view.about}  «${after.view.first}»`
                 : (after.marks.length ? `  [${after.marks.join(' ')}]` : ''));
             console.log(`${moved ? '  ' : '× '}${key.padEnd(8)}${note.padEnd(16)} ${after.status}${marks}`);

@@ -30,19 +30,21 @@ pub enum Undo {
 }
 
 impl Undo {
-    /// What was undone, for the person who pressed the key. Naming it is the
-    /// point: `u` that says "done" leaves you wondering which of the last
-    /// three things it took back.
-    pub fn describe(&self) -> String {
+    /// What just happened, for the person who pressed the key.
+    ///
+    /// Naming it is the point: `u` that says "done" leaves you wondering which
+    /// of the last three things it took back. And the direction is a parameter
+    /// rather than assumed, because Ctrl+R applies the very same step and
+    /// saying "戻しました" there would describe the opposite of what happened.
+    pub fn describe(&self, undoing: bool) -> String {
+        let verb = if undoing { "戻しました" } else { "やり直しました" };
         match self {
-            Undo::Rename { from, to } => format!(
-                "{} → {} を戻しました",
-                name_of(to),
-                name_of(from)
-            ),
+            Undo::Rename { from, to } => {
+                format!("{} → {} を{}", name_of(to), name_of(from), verb)
+            }
             Undo::Created { path } => format!("{} を取り消しました", name_of(path)),
-            Undo::Moved { pairs } => format!("{} 件の移動を戻しました", pairs.len()),
-            Undo::Navigated { from, .. } => format!("{} に戻りました", from.display()),
+            Undo::Moved { pairs } => format!("{} 件の移動を{}", pairs.len(), verb),
+            Undo::Navigated { from, .. } => format!("{} に{}", from.display(), verb),
         }
     }
 }
@@ -75,5 +77,30 @@ impl Stack {
 
     pub fn pop(&self) -> Option<Undo> {
         self.0.lock().unwrap().pop()
+    }
+}
+
+/// The other direction.
+///
+/// Not a second kind of step: what `u` undoes is described by the step it took
+/// off the stack, and putting it back is the same description read the other
+/// way — a rename swaps its two names, a move swaps its two places. Only the
+/// two that cannot be undone at all have nothing to redo, and they never reach
+/// here.
+impl Undo {
+    /// This step inverted, for the redo stack. `None` where undoing it
+    /// destroyed what redoing it would need — a created file that has just
+    /// been removed cannot be brought back with what is remembered here.
+    pub fn inverted(&self) -> Option<Undo> {
+        match self {
+            Undo::Rename { from, to } => Some(Undo::Rename { from: to.clone(), to: from.clone() }),
+            Undo::Moved { pairs } => Some(Undo::Moved {
+                pairs: pairs.iter().map(|(now, was)| (was.clone(), now.clone())).collect(),
+            }),
+            Undo::Navigated { pane, from } => {
+                Some(Undo::Navigated { pane: pane.clone(), from: from.clone() })
+            }
+            Undo::Created { .. } => None,
+        }
     }
 }

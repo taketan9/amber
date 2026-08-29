@@ -131,6 +131,12 @@ struct Session {
     /// turns a one-line edit into a diff on every line — and on a Shift_JIS
     /// log, into a file the tool that wrote it can no longer read.
     open: Option<(std::path::PathBuf, cian_core::grepedit::TextFile)>,
+    /// What `u` has taken back, waiting for Ctrl+R.
+    ///
+    /// Cleared by anything else that pushes onto the undo stack: once you have
+    /// done something new, the branch you undid is gone. A redo stack that
+    /// survives that puts files back on top of work done since.
+    redo: Stack,
 }
 
 impl Session {
@@ -144,6 +150,7 @@ impl Session {
             find: Find::default(),
             clip: None,
             open: None,
+            redo: Stack::default(),
         })
     }
 
@@ -850,6 +857,104 @@ impl Session {
                     "pane": serde_json::to_value(PaneView::of(pane))?,
                 }))
             }
+            // ---- Version control ----
+            //
+            // git and svn behind one set of methods, because a person standing
+            // in a working copy wants "the history of this file" and not "the
+            // git history of this file". Which one it is, is a property of the
+            // directory rather than a question worth asking.
+            "vcs" => {
+                let which = req.params["pane"].as_str().unwrap_or("left").to_string();
+                let dir = self.pane_mut(&which)?.cwd.clone();
+                let git = cian_core::git::status(&dir);
+                let svn = cian_core::svn::is_working_copy(&dir);
+                Ok(serde_json::json!({
+                    "kind": if git.is_some() { Some("git") } else if svn { Some("svn") } else { None },
+                    "branch": git.as_ref().map(|g| g.branch.clone()),
+                    "root": git.as_ref().map(|g| g.root.display().to_string()),
+                }))
+            }
+            "log" => {
+                let which = req.params["pane"].as_str().unwrap_or("left").to_string();
+                let only_this = req.params["file"].as_bool().unwrap_or(false);
+                let dir = self.pane_mut(&which)?.cwd.clone();
+                let file = if only_this { self.selected(&which).ok().map(|(p, _, _)| p) } else { None };
+                let (kind, commits) = if cian_core::git::status(&dir).is_some() {
+                    ("git", cian_core::git::log(&dir, file.as_deref(), 200))
+                } else if cian_core::svn::is_working_copy(&dir) {
+                    ("svn", cian_core::svn::log(&dir, file.as_deref(), 200))
+                } else {
+                    anyhow::bail!("git でも svn でもありません");
+                };
+                Ok(serde_json::json!({
+                    "kind": kind,
+                    "of": file.as_ref().and_then(|p| p.file_name()).map(|s| s.to_string_lossy().into_owned()),
+                    "commits": commits.iter().map(|c| serde_json::json!({
+                        "hash": c.hash, "date": c.date, "author": c.author, "subject": c.subject,
+                    })).collect::<Vec<_>>(),
+                }))
+            }
+            // The diff of one file against what is committed, or of one commit.
+            "vcsdiff" => {
+                let which = req.params["pane"].as_str().unwrap_or("left").to_string();
+                let dir = self.pane_mut(&which)?.cwd.clone();
+                let is_git = cian_core::git::status(&dir).is_some();
+                let text = match req.params["hash"].as_str() {
+                    Some(h) => if is_git {
+                        cian_core::git::show(&dir, h)
+                    } else {
+                        cian_core::svn::show(&dir, h)
+                    },
+                    None => {
+                        let (path, _, _) = self.selected(&which)?;
+                        if is_git {
+                            cian_core::git::file_diff(&dir, &path)
+                        } else {
+                            cian_core::svn::file_diff(&dir, &path)
+                        }
+                    }
+                };
+                let Some(text) = text else {
+                    anyhow::bail!("差分がありません");
+                };
+                Ok(serde_json::json!({
+                    "lines": text.lines().take(20_000).map(str::to_string).collect::<Vec<_>>(),
+                }))
+            }
+            "stage" | "unstage" | "discard" => {
+                let which = req.params["pane"].as_str().unwrap_or("left").to_string();
+                let dir = self.pane_mut(&which)?.cwd.clone();
+                if cian_core::git::status(&dir).is_none() {
+                    anyhow::bail!("git リポジトリではありません");
+                }
+                let paths = self.targets(&which)?;
+                match req.method.as_str() {
+                    "stage" => cian_core::git::stage(&dir, &paths)?,
+                    "unstage" => cian_core::git::unstage(&dir, &paths)?,
+                    _ => cian_core::git::discard(&dir, &paths)?,
+                }
+                let pane = self.pane_mut(&which)?;
+                pane.reload()?;
+                Ok(serde_json::json!({
+                    "did": req.method,
+                    "count": paths.len(),
+                    "pane": serde_json::to_value(PaneView::of(pane))?,
+                }))
+            }
+            // Files with the same contents. Compared by content, not by name —
+            // which is the whole reason to ask, since two copies of a photo
+            // rarely share a name.
+            "dedup" => {
+                let which = req.params["pane"].as_str().unwrap_or("left").to_string();
+                let paths = self.targets(&which)?;
+                let stop = std::sync::atomic::AtomicBool::new(false);
+                let groups = cian_core::dedup::find_duplicates(&paths, &stop);
+                Ok(serde_json::json!({
+                    "groups": groups.iter().map(|g| g.iter()
+                        .map(|p| p.display().to_string()).collect::<Vec<_>>())
+                        .collect::<Vec<_>>(),
+                }))
+            }
             // Leave a flat listing and go back to the directory it came from.
             "leaveflat" => {
                 let which = req.params["pane"].as_str().unwrap_or("left").to_string();
@@ -930,11 +1035,22 @@ impl Session {
                 Ok(serde_json::to_value(PaneView::of(pane))?)
             }
             // One step back, whatever it was.
-            "undo" => {
-                let Some(step) = self.undo.pop() else {
-                    anyhow::bail!("取り消せる操作はありません");
+            "undo" | "redo" => {
+                let taking = if req.method == "undo" { &self.undo } else { &self.redo };
+                let Some(step) = taking.pop() else {
+                    anyhow::bail!(
+                        "{}操作はありません",
+                        if req.method == "undo" { "取り消せる" } else { "やり直せる" }
+                    );
                 };
-                let said = step.describe();
+                if req.method == "undo" {
+                    if let Some(back) = step.inverted() {
+                        self.redo.push(back);
+                    }
+                } else if let Some(back) = step.inverted() {
+                    self.undo.push(back);
+                }
+                let said = step.describe(req.method == "undo");
                 match &step {
                     Undo::Rename { from, to } => {
                         let name = from
