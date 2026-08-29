@@ -273,7 +273,10 @@ const LOOK = `({
     typed: document.querySelector('input:not([hidden])')?.value ?? null,
     shell: document.querySelector('#shell:not([hidden])')
         ? { about: document.getElementById('s-about').textContent,
-            text: [...document.querySelectorAll('#s-grid > div')]
+            panes: [...document.querySelectorAll('#s-panes .sgrid')]
+                .map((n) => n.style.left + '+' + n.style.width
+                    + (n.classList.contains('on') ? '◀' : '')).join(' '),
+            text: [...document.querySelectorAll('#s-panes .sgrid.on > div')]
                 // Doubled on purpose: LOOK is a template literal, and inside
                 // one a lone \\s is just an s. The regex reaching the page was
                 // /s+$/ — it trimmed trailing letters and left the spaces.
@@ -383,7 +386,9 @@ async function main() {
             const menu = after.sheet && after.rows
                 ? `  ▣ ${after.rows}項目（${after.at + 1}番目）`
                 : null;
-            const sh = after.shell ? `  ▸ ${after.shell.about}  «${after.shell.text}»` : null;
+            const sh = after.shell
+                ? `  ▸ ${after.shell.about}  [${after.shell.panes}]  «${after.shell.text}»`
+                : null;
             const rep = after.report
                 ? `  ▤ ${after.report.name} ｜${after.report.about}｜ ${after.report.rows}行  «${after.report.first}»`
                 : null;

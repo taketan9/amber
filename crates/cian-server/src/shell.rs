@@ -304,3 +304,93 @@ fn xterm256(i: u8) -> (u8, u8, u8) {
         (v, v, v)
     }
 }
+
+/// How a tab's shells are arranged.
+///
+/// A tree rather than a list, because that is what splitting *is*: every split
+/// takes one pane and makes it two, and the pane it takes might itself be half
+/// of an earlier split. A flat list of panes with one direction covers "two
+/// side by side" and falls apart the moment somebody splits the right-hand one
+/// downwards — which is the second thing anybody does.
+pub enum Node {
+    Leaf(u64),
+    Split {
+        down: bool,
+        /// What fraction the first half keeps, 0.05–0.95.
+        ratio: f32,
+        a: Box<Node>,
+        b: Box<Node>,
+    },
+}
+
+impl Node {
+    /// Replace the leaf `id` with a split holding it and `fresh`.
+    pub fn split_at(&mut self, id: u64, fresh: u64, down: bool) -> bool {
+        match self {
+            Node::Leaf(mine) if *mine == id => {
+                *self = Node::Split {
+                    down,
+                    ratio: 0.5,
+                    a: Box::new(Node::Leaf(id)),
+                    b: Box::new(Node::Leaf(fresh)),
+                };
+                true
+            }
+            Node::Leaf(_) => false,
+            Node::Split { a, b, .. } => a.split_at(id, fresh, down) || b.split_at(id, fresh, down),
+        }
+    }
+
+    /// Remove the leaf `id`, collapsing the split it was half of.
+    ///
+    /// Returns false when `id` is the only leaf: a tab with no panes is not a
+    /// tab, and closing the last pane means closing the tab.
+    pub fn close(&mut self, id: u64) -> bool {
+        let replacement = match self {
+            Node::Leaf(_) => return false,
+            Node::Split { a, b, .. } => match (a.as_ref(), b.as_ref()) {
+                (Node::Leaf(x), _) if *x == id => Some(std::mem::replace(b.as_mut(), Node::Leaf(0))),
+                (_, Node::Leaf(y)) if *y == id => Some(std::mem::replace(a.as_mut(), Node::Leaf(0))),
+                _ => None,
+            },
+        };
+        if let Some(kept) = replacement {
+            *self = kept;
+            return true;
+        }
+        match self {
+            Node::Split { a, b, .. } => a.close(id) || b.close(id),
+            Node::Leaf(_) => false,
+        }
+    }
+
+    pub fn leaves(&self, out: &mut Vec<u64>) {
+        match self {
+            Node::Leaf(id) => out.push(*id),
+            Node::Split { a, b, .. } => {
+                a.leaves(out);
+                b.leaves(out);
+            }
+        }
+    }
+
+    /// Where each pane sits, as fractions of the panel: `(id, x, y, w, h)`.
+    ///
+    /// Worked out here rather than in the window because the tree is here.
+    /// The window places boxes; it does not need to know what a split is.
+    pub fn places(&self, x: f32, y: f32, w: f32, h: f32, out: &mut Vec<(u64, f32, f32, f32, f32)>) {
+        match self {
+            Node::Leaf(id) => out.push((*id, x, y, w, h)),
+            Node::Split { down, ratio, a, b } => {
+                let r = ratio.clamp(0.05, 0.95);
+                if *down {
+                    a.places(x, y, w, h * r, out);
+                    b.places(x, y + h * r, w, h * (1.0 - r), out);
+                } else {
+                    a.places(x, y, w * r, h, out);
+                    b.places(x + w * r, y, w * (1.0 - r), h, out);
+                }
+            }
+        }
+    }
+}

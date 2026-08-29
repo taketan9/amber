@@ -146,6 +146,18 @@ impl PaneView {
 }
 
 /// The two panes and whatever is running over them.
+/// One tab of the shell panel: its layout, and which pane has the keyboard.
+struct ShellTab {
+    root: shell::Node,
+    focus: u64,
+    /// Type into every pane of this tab at once.
+    ///
+    /// The reason splits exist for a lot of people: four servers side by side
+    /// and the same command on all four. Per tab rather than global, because
+    /// the tab you built for that is not the tab you keep a shell in.
+    sync: bool,
+}
+
 /// One side of the window, and the tabs it holds.
 ///
 /// The active tab *is* the pane as far as everything else is concerned —
@@ -202,7 +214,11 @@ struct Session {
     /// panel, and a shell process per window that nobody asked for is a
     /// process nobody accounts for. More than one because a long build in tab
     /// one is the reason you want tab two.
+    /// Every shell alive, whichever tab or split it belongs to.
     shells: Vec<shell::Shell>,
+    /// One tree per tab: how that tab's shells are arranged, and which of them
+    /// has the keyboard.
+    tabs: Vec<ShellTab>,
     shell_at: usize,
     shell_next: u64,
     /// Where a remote pane is connected, and how.
@@ -226,6 +242,7 @@ impl Session {
             open: None,
             redo: Stack::default(),
             shells: Vec::new(),
+            tabs: Vec::new(),
             shell_at: 0,
             shell_next: 1,
             remotes: std::collections::HashMap::new(),
@@ -360,20 +377,60 @@ impl Session {
         Ok(serde_json::to_value(PaneView::of_side(self.side_mut(which)?))?)
     }
 
-    /// The shell tab showing, if the panel is open and its shell is alive.
+    /// The pane with the keyboard, in the tab that is showing.
     fn shell_now(&mut self) -> Option<&mut shell::Shell> {
-        let at = self.shell_at.min(self.shells.len().saturating_sub(1));
-        self.shells.get_mut(at).filter(|s| s.alive())
+        let id = self.tabs.get(self.shell_at)?.focus;
+        self.shells.iter_mut().find(|s| s.id == id).filter(|s| s.alive())
     }
 
-    /// A screen, with the tab strip that belongs beside it.
-    fn shell_reply(&self, screen: Option<serde_json::Value>) -> serde_json::Value {
+    /// The panel as the window needs it: every pane of the showing tab, where
+    /// it sits, and its screen.
+    ///
+    /// Places are worked out here because the tree is here. The window puts
+    /// boxes where it is told; it does not need to know what a split is.
+    fn shell_reply(&self) -> serde_json::Value {
+        let Some(tab) = self.tabs.get(self.shell_at) else {
+            return serde_json::json!({ "gone": true });
+        };
+        let mut places = Vec::new();
+        tab.root.places(0.0, 0.0, 1.0, 1.0, &mut places);
+        let panes: Vec<_> = places
+            .iter()
+            .filter_map(|(id, x, y, w, h)| {
+                let sh = self.shells.iter().find(|s| s.id == *id)?;
+                Some(serde_json::json!({
+                    "id": id,
+                    "x": x, "y": y, "w": w, "h": h,
+                    "focused": *id == tab.focus,
+                    "screen": sh.screen(),
+                }))
+            })
+            .collect();
         serde_json::json!({
-            "screen": screen,
-            "tabs": self.shells.len(),
+            "panes": panes,
+            "tabs": self.tabs.len(),
             "tab": self.shell_at,
-            "showing": self.shells.get(self.shell_at).map(|s| s.id),
+            "showing": tab.focus,
+            "sync": tab.sync,
         })
+    }
+
+    /// Start a shell and hand back its id.
+    fn new_shell(&mut self, cwd: &std::path::Path, rows: u16, cols: u16) -> anyhow::Result<u64> {
+        let id = self.shell_next;
+        self.shell_next += 1;
+        let sh = shell::Shell::start(id, cwd, rows, cols, self.out.clone())?;
+        self.shells.push(sh);
+        Ok(id)
+    }
+
+    /// Forget every shell no tab still points at.
+    fn prune_shells(&mut self) {
+        let mut alive = Vec::new();
+        for tab in &self.tabs {
+            tab.root.leaves(&mut alive);
+        }
+        self.shells.retain(|s| alive.contains(&s.id));
     }
 
     fn side_mut(&mut self, which: &str) -> anyhow::Result<&mut Side> {
@@ -1176,41 +1233,124 @@ impl Session {
                 let which = req.params["pane"].as_str().unwrap_or("left").to_string();
                 let rows = req.params["rows"].as_u64().unwrap_or(24) as u16;
                 let cols = req.params["cols"].as_u64().unwrap_or(80) as u16;
-                let fresh = req.method == "shelltab";
-                if !fresh {
-                    if let Some(sh) = self.shell_now() {
+                if req.method == "shellopen" && !self.tabs.is_empty() {
+                    for sh in &mut self.shells {
                         sh.resize(rows, cols);
-                        let screen = sh.screen();
-                        return Ok(self.shell_reply(screen));
                     }
+                    return Ok(self.shell_reply());
                 }
                 let cwd = self.pane_mut(&which)?.cwd.clone();
-                let id = self.shell_next;
-                self.shell_next += 1;
-                let sh = shell::Shell::start(id, &cwd, rows, cols, self.out.clone())?;
-                let screen = sh.screen();
-                self.shells.push(sh);
-                self.shell_at = self.shells.len() - 1;
-                Ok(self.shell_reply(screen))
+                let id = self.new_shell(&cwd, rows, cols)?;
+                self.tabs.push(ShellTab { root: shell::Node::Leaf(id), focus: id, sync: false });
+                self.shell_at = self.tabs.len() - 1;
+                Ok(self.shell_reply())
+            }
+            // Split the focused pane. Shift+F8 side by side, Shift+F9 stacked
+            // — the terminal build's two keys.
+            "shellsplit" => {
+                let which = req.params["pane"].as_str().unwrap_or("left").to_string();
+                let down = req.params["down"].as_bool().unwrap_or(false);
+                let rows = req.params["rows"].as_u64().unwrap_or(24) as u16;
+                let cols = req.params["cols"].as_u64().unwrap_or(80) as u16;
+                let Some(tab) = self.tabs.get(self.shell_at) else {
+                    anyhow::bail!("シェルが開いていません");
+                };
+                let at = tab.focus;
+                let cwd = self.pane_mut(&which)?.cwd.clone();
+                let fresh = self.new_shell(&cwd, rows, cols)?;
+                let tab = &mut self.tabs[self.shell_at];
+                if !tab.root.split_at(at, fresh, down) {
+                    anyhow::bail!("分割できませんでした");
+                }
+                tab.focus = fresh;
+                Ok(self.shell_reply())
+            }
+            // Move the keyboard to the next pane of this tab.
+            "shellfocus" => {
+                let step = req.params["step"].as_i64().unwrap_or(1);
+                let Some(tab) = self.tabs.get_mut(self.shell_at) else {
+                    anyhow::bail!("シェルが開いていません");
+                };
+                let mut ids = Vec::new();
+                tab.root.leaves(&mut ids);
+                if let Some(now) = ids.iter().position(|id| *id == tab.focus) {
+                    let n = ids.len() as i64;
+                    tab.focus = ids[((now as i64 + step).rem_euclid(n)) as usize];
+                }
+                Ok(self.shell_reply())
+            }
+            // Close the focused pane; the last one closes the tab.
+            "shellpaneclose" => {
+                let Some(tab) = self.tabs.get_mut(self.shell_at) else {
+                    anyhow::bail!("シェルが開いていません");
+                };
+                let going = tab.focus;
+                if tab.root.close(going) {
+                    let mut ids = Vec::new();
+                    tab.root.leaves(&mut ids);
+                    tab.focus = ids[0];
+                    self.prune_shells();
+                    return Ok(self.shell_reply());
+                }
+                // It was the only pane: closing it closes the tab.
+                self.tabs.remove(self.shell_at);
+                self.prune_shells();
+                if self.tabs.is_empty() {
+                    return Ok(serde_json::json!({ "gone": true }));
+                }
+                self.shell_at = self.shell_at.min(self.tabs.len() - 1);
+                Ok(self.shell_reply())
             }
             "shellinput" => {
                 let text = req.params["text"].as_str().unwrap_or("").to_string();
-                let Some(sh) = self.shell_now() else {
+                let Some(tab) = self.tabs.get(self.shell_at) else {
                     anyhow::bail!("シェルが開いていません");
                 };
-                sh.write(text.as_bytes());
+                // With sync on, every pane of this tab hears it.
+                let targets: Vec<u64> = if tab.sync {
+                    let mut ids = Vec::new();
+                    tab.root.leaves(&mut ids);
+                    ids
+                } else {
+                    vec![tab.focus]
+                };
+                for id in targets {
+                    if let Some(sh) = self.shells.iter().find(|s| s.id == id) {
+                        sh.write(text.as_bytes());
+                    }
+                }
                 Ok(serde_json::json!({}))
             }
+            // Type into every pane of this tab at once, or stop.
+            "shellsync" => {
+                let Some(tab) = self.tabs.get_mut(self.shell_at) else {
+                    anyhow::bail!("シェルが開いていません");
+                };
+                tab.sync = req.params["on"].as_bool().unwrap_or(!tab.sync);
+                let on = tab.sync;
+                let mut reply = self.shell_reply();
+                reply["sync"] = serde_json::json!(on);
+                Ok(reply)
+            }
             "shellresize" => {
+                // Each pane gets the size of *its* box, not the panel's — a
+                // pane that thinks it is full width wraps its output at the
+                // wrong column, which is the classic broken-split look.
                 let (rows, cols) = (
-                    req.params["rows"].as_u64().unwrap_or(24) as u16,
-                    req.params["cols"].as_u64().unwrap_or(80) as u16,
+                    req.params["rows"].as_u64().unwrap_or(24) as f32,
+                    req.params["cols"].as_u64().unwrap_or(80) as f32,
                 );
-                // Every tab, not just the visible one: they all share the
-                // panel, and a tab resized only when you switch to it redraws
-                // wrong for one frame every time.
-                for sh in &mut self.shells {
-                    sh.resize(rows, cols);
+                for tab in &self.tabs {
+                    let mut places = Vec::new();
+                    tab.root.places(0.0, 0.0, 1.0, 1.0, &mut places);
+                    for (id, _, _, w, h) in places {
+                        if let Some(sh) = self.shells.iter_mut().find(|s| s.id == id) {
+                            sh.resize(
+                                ((rows * h) as u16).max(2),
+                                ((cols * w) as u16).max(20),
+                            );
+                        }
+                    }
                 }
                 Ok(serde_json::json!({}))
             }
@@ -1223,35 +1363,31 @@ impl Session {
                     Some(n) => sh.scroll(n as isize),
                     None => sh.to_bottom(),
                 }
-                let screen = sh.screen();
-                Ok(self.shell_reply(screen))
+                Ok(self.shell_reply())
             }
             "shellgo" => {
-                if self.shells.is_empty() {
+                if self.tabs.is_empty() {
                     anyhow::bail!("シェルが開いていません");
                 }
-                let n = self.shells.len() as i64;
+                let n = self.tabs.len() as i64;
                 self.shell_at = match req.params["at"].as_i64() {
                     Some(at) => at.rem_euclid(n) as usize,
                     None => (self.shell_at as i64 + req.params["step"].as_i64().unwrap_or(1))
                         .rem_euclid(n) as usize,
                 };
-                let screen = self.shells[self.shell_at].screen();
-                Ok(self.shell_reply(screen))
+                Ok(self.shell_reply())
             }
             "shellclose" => {
-                if self.shells.is_empty() {
+                if self.tabs.is_empty() {
                     return Ok(serde_json::json!({ "gone": true }));
                 }
-                // One tab closes the panel; several close just this one, which
-                // is what closing a tab means everywhere.
-                self.shells.remove(self.shell_at);
-                if self.shells.is_empty() {
+                self.tabs.remove(self.shell_at);
+                self.prune_shells();
+                if self.tabs.is_empty() {
                     return Ok(serde_json::json!({ "gone": true }));
                 }
-                self.shell_at = self.shell_at.min(self.shells.len() - 1);
-                let screen = self.shells[self.shell_at].screen();
-                Ok(self.shell_reply(screen))
+                self.shell_at = self.shell_at.min(self.tabs.len() - 1);
+                Ok(self.shell_reply())
             }
             // Run a command in the shell, in this pane's directory.
             //
@@ -1905,11 +2041,28 @@ impl Session {
                     anyhow::bail!("スクリプトマクロはまだ動かせません（レイアウトのみ）");
                 }
                 let cwd = self.pane_mut(&which)?.cwd.clone();
+                // The layout the macro actually asked for. `from` names an
+                // earlier pane to split off (1-based), so a macro can build a
+                // grid rather than a row — which is the whole reason the field
+                // exists.
+                let mut made: Vec<u64> = Vec::new();
+                let mut root: Option<shell::Node> = None;
                 let mut opened = 0usize;
                 for step in &mac.panes {
-                    let id = self.shell_next;
-                    self.shell_next += 1;
-                    let sh = shell::Shell::start(id, &cwd, rows, cols, self.out.clone())?;
+                    let id = self.new_shell(&cwd, rows, cols)?;
+                    match &mut root {
+                        None => root = Some(shell::Node::Leaf(id)),
+                        Some(tree) => {
+                            let from = step
+                                .from
+                                .and_then(|n| made.get(n.saturating_sub(1)).copied())
+                                .unwrap_or_else(|| *made.last().unwrap());
+                            let down = matches!(step.dir, cian_lua::macros::Split::Down);
+                            tree.split_at(from, id, down);
+                        }
+                    }
+                    made.push(id);
+                    let sh = self.shells.last().unwrap();
                     // The command and its scripted steps, on a worker: an
                     // `expect` waits for a prompt, and waiting here would hold
                     // the engine for as long as the login takes.
@@ -1934,15 +2087,15 @@ impl Session {
                             }
                         }
                     });
-                    self.shells.push(sh);
                     opened += 1;
                 }
-                if opened == 0 {
+                let Some(root) = root else {
                     anyhow::bail!("{want} にはペインがありません");
-                }
-                self.shell_at = self.shells.len() - opened;
-                let screen = self.shells[self.shell_at].screen();
-                let mut reply = self.shell_reply(screen);
+                };
+                let focus = made[0];
+                self.tabs.push(ShellTab { root, focus, sync: mac.sync });
+                self.shell_at = self.tabs.len() - 1;
+                let mut reply = self.shell_reply();
                 reply["name"] = serde_json::json!(mac.name);
                 reply["opened"] = serde_json::json!(opened);
                 Ok(reply)

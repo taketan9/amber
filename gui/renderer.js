@@ -17,7 +17,7 @@ const el = {
     shell: document.getElementById('shell'),
     sTitle: document.getElementById('s-title'),
     sAbout: document.getElementById('s-about'),
-    sGrid: document.getElementById('s-grid'),
+    sPanes: document.getElementById('s-panes'),
     report: document.getElementById('report'),
     rName: document.getElementById('r-name'),
     rAbout: document.getElementById('r-about'),
@@ -255,6 +255,7 @@ function move(delta) {
     pane.cursor = Math.min(last, Math.max(0, pane.cursor + delta));
     draw(state.focus);
     if (visual.on) paintVisual();
+    if (preview.on) showPreview();
 }
 
 async function enter() {
@@ -784,7 +785,13 @@ const HELP = [
         [':each コマンド', 'マーク各ファイルに実行 — {} がパス'],
         ['F9 / F10', 'シェルのタブを開く / 閉じる（パネルにいるとき）'],
         ['F1 / F2', '前 / 次のシェルタブ'],
-        ['@  /  :macro', 'マクロを実行 ── 各ペインをタブで開きます（分割はまだ）'],
+        ['Shift+F8 / Shift+F9', '左右 / 上下に分割'],
+        ['Shift+F10', '分割したペインを閉じる'],
+        ['Shift+F1 / Shift+F2', '前 / 次のペインへ'],
+        ['Ctrl+S  /  :sync', '全ペインに同時入力（同じコマンドを4台へ）'],
+        ['F12  /  :zoom', 'シェルパネルを広げる／戻す'],
+        [':preview', 'カーソルのファイルを追って表示（もう一度で止める）'],
+        ['@  /  :macro', 'マクロを実行 ── レイアウトどおりに分割して開きます'],
     ]],
     ['読み書き（F3・Enter）', [
         ['画像・PDF', 'F3 か Enter でそのまま表示（寸法も出ます）'],
@@ -1065,6 +1072,7 @@ document.addEventListener('keydown', (e) => {
     else if (k === 'Z') cmdJump();
     else if (k === 's') cmdShortcuts();
     else if (k === '@') cmdMacros();
+    else if (k === 'F12') zoomShell();
     else if (k === 't' || k === 'F9') tabNew();
     else if (k === 'w' || k === 'F10') tabClose();
     else if (k === 'F1') goTab(state.focus, { step: -1 });
@@ -1108,6 +1116,9 @@ document.addEventListener('keydown', (e) => {
     // directory. A branch view and a panelized search are both "here is a set
     // of files"; leaving them is the same gesture.
     else if (k === 'Escape' && visual.on) endVisual(false);
+    // A preview is showing but the keys are here, so Esc has to reach it from
+    // the listing — `viewer.on` is false precisely so that j and k still move.
+    else if (k === 'Escape' && preview.on) togglePreview();
     else if (k === 'Escape' && state[state.focus] && state[state.focus].flat) leaveFlat();
     else if (k === 'Escape' && running) {
         window.cian.call('cancel', { op: running.op });
@@ -1712,6 +1723,9 @@ const COMMANDS = [
     { name: 'ailog', about: 'AI: 選択したログを診断する', run: cmdAiLog },
     { name: 'bookmark', about: 'いまの場所を登録する', arg: '名前（省略可）', run: cmdBookmark },
     { name: 'macro', about: 'マクロを実行（@ でも）', run: cmdMacros },
+    { name: 'sync', about: 'シェル: 全ペインに同時入力（Ctrl+S でも）', run: cmdSync },
+    { name: 'zoom', about: 'シェルパネルを広げる／戻す（F12 でも）', run: zoomShell },
+    { name: 'preview', about: 'カーソルのファイルを追って表示（もう一度で止める）', run: togglePreview },
     { name: 'queue', about: '実行中の操作を見る・止める', run: cmdQueue },
     { name: 'tab', about: '新しいタブ（t / F9 でも）', run: () => tabNew() },
     { name: 'tabclose', about: 'タブを閉じる（w / F10 でも）', run: () => tabClose() },
@@ -2731,16 +2745,20 @@ function measureCell() {
     const probe = document.createElement('span');
     probe.textContent = 'M'.repeat(100);
     probe.style.cssText = 'position:absolute;visibility:hidden;white-space:pre';
-    el.sGrid.append(probe);
+    el.sPanes.append(probe);
     const w = probe.getBoundingClientRect().width / 100;
     const h = probe.getBoundingClientRect().height * 1.25;
     probe.remove();
     return { w: w || 8, h: h || 20 };
 }
 
+/// The whole panel in cells. The engine divides this by each pane's share, so
+/// a pane knows the width it actually has rather than the panel's — a shell
+/// that thinks it is full width wraps at the wrong column, which is the
+/// classic broken-split look.
 function shellSize() {
     const { w, h } = measureCell();
-    const box = el.sGrid.getBoundingClientRect();
+    const box = el.sPanes.getBoundingClientRect();
     return {
         cols: Math.max(20, Math.floor((box.width - 16) / w)),
         rows: Math.max(4, Math.floor((box.height - 8) / h)),
@@ -2782,7 +2800,115 @@ function takeShell(r) {
     term.tabs = r.tabs ?? 1;
     term.tab = r.tab ?? 0;
     term.showing = r.showing ?? null;
-    if (r.screen) drawShell(r.screen);
+    term.sync = !!r.sync;
+    el.shell.classList.toggle('sync', term.sync);
+    if (r.panes) layoutShell(r.panes);
+}
+
+/// Place the panes where the engine said, and draw each one's screen.
+///
+/// Absolute positions from fractions, because the layout is a tree the engine
+/// has already turned into rectangles. Deriving it again here out of nested
+/// boxes would be the same arithmetic written twice.
+function layoutShell(panes) {
+    const have = new Map([...el.sPanes.children].map((n) => [Number(n.dataset.id), n]));
+    const want = new Set(panes.map((p) => p.id));
+    for (const [id, node] of have) if (!want.has(id)) node.remove();
+    for (const p of panes) {
+        let node = have.get(p.id);
+        if (!node) {
+            node = document.createElement('div');
+            node.className = 'sgrid';
+            node.dataset.id = p.id;
+            node.addEventListener('mousedown', () => focusPaneOf(p.id));
+            el.sPanes.append(node);
+        }
+        node.style.left = `${p.x * 100}%`;
+        node.style.top = `${p.y * 100}%`;
+        node.style.width = `${p.w * 100}%`;
+        node.style.height = `${p.h * 100}%`;
+        node.classList.toggle('on', p.focused && term.focused);
+        if (p.screen) drawShell(p.screen, node);
+    }
+}
+
+async function focusPaneOf(id) {
+    // Step until it lands: the engine owns the order, and asking it to move
+    // one at a time is cheaper than teaching the window the tree.
+    for (let i = 0; i < 8 && term.showing !== id; i++) {
+        const r = await ask('shellfocus', { step: 1 });
+        if (!r) return;
+        takeShell(r);
+    }
+    term.focused = true;
+    el.shell.classList.add('on');
+}
+
+/// F12 — give the shell the window, or give it back.
+///
+/// Two thirds of the height is not enough to read a build's output and too
+/// much to keep a listing usable; the answer everywhere else is a key that
+/// swaps between them rather than a compromise that suits neither.
+function zoomShell() {
+    if (!term.on) { say('シェルが開いていません', true); return; }
+    const big = el.shell.classList.toggle('zoom');
+    say(big ? 'シェルを広げました（F12 で戻る）' : '戻しました');
+    // The panes were sized for the old height; tell the engine the new one.
+    ask('shellresize', shellSize());
+}
+
+/// `:preview` — follow the cursor.
+///
+/// Off by default and deliberately: reading every file the cursor passes over
+/// is a lot of disk for a feature you want on the ten seconds you are looking
+/// for something. On, it is the fastest way to find "the one with the error
+/// in it".
+const preview = { on: false };
+
+function togglePreview() {
+    preview.on = !preview.on;
+    say(preview.on ? 'プレビュー: カーソルを追います' : 'プレビューを止めました');
+    if (preview.on) showPreview();
+    else if (viewer.on) closeView(false);
+}
+
+let previewSoon = null;
+function showPreview() {
+    if (!preview.on) return;
+    // A beat behind the cursor. Held down, `j` would otherwise open every file
+    // it passes, and the one you stop on is the only one that matters.
+    clearTimeout(previewSoon);
+    previewSoon = setTimeout(async () => {
+        const pane = state[state.focus];
+        const row = pane && pane.entries[pane.cursor];
+        if (!row || row.parent || row.is_dir) return;
+        if (viewer.on) await closeView(false);
+        await lookInside();
+        // The keys stay with the listing: this is a preview, not an opening.
+        viewer.on = false;
+    }, 250);
+}
+
+async function cmdSync() {
+    if (!term.on) { say('シェルが開いていません', true); return; }
+    const r = await ask('shellsync', {});
+    if (!r) return;
+    takeShell(r);
+    say(r.sync ? '同期入力: 全ペインに送ります' : '同期入力を止めました');
+}
+
+async function splitShell(down) {
+    const r = await ask('shellsplit', { pane: state.focus, down, ...shellSize() });
+    if (!r) return;
+    takeShell(r);
+    say(down ? '上下に分割' : '左右に分割');
+}
+
+async function closePane() {
+    const r = await ask('shellpaneclose', {});
+    if (!r) return;
+    if (r.gone) { closeShell(); say('シェルを閉じました'); return; }
+    takeShell(r);
 }
 
 async function shellTab() {
@@ -2808,17 +2934,20 @@ async function shellCloseTab() {
     say(`シェル ${term.tab + 1} / ${term.tabs}`);
 }
 
-function drawShell(screen) {
-    // A hidden tab keeps running — that is the point of tabs — and keeps
-    // sending screens. Drawing whichever moved last would let a build
-    // scrolling in tab two stamp itself over tab one.
-    if (term.showing !== null && screen.id !== undefined && screen.id !== term.showing) return;
-    term.rows = screen.rows;
-    term.cols = screen.cols;
-    el.sTitle.textContent = (term.tabs > 1 ? `[${term.tab + 1}/${term.tabs}] ` : '')
-        + (screen.title || 'シェル');
-    el.sAbout.textContent = `${screen.cols}×${screen.rows}`
-        + (screen.scrollback ? `   ↑ ${screen.scrollback} 行戻っています` : '');
+function drawShell(screen, into) {
+    // A pane that is not on screen keeps running — that is the point of tabs —
+    // and keeps sending screens. Without its own box to go in, drawing it
+    // would let a build scrolling in another tab stamp itself over this one.
+    const node = into || el.sPanes.querySelector(`.sgrid[data-id="${screen.id}"]`);
+    if (!node) return;
+    if (screen.id === term.showing) {
+        term.rows = screen.rows;
+        term.cols = screen.cols;
+        el.sTitle.textContent = (term.tabs > 1 ? `[${term.tab + 1}/${term.tabs}] ` : '')
+            + (screen.title || 'シェル');
+        el.sAbout.textContent = `${screen.cols}×${screen.rows}`
+            + (screen.scrollback ? `   ↑ ${screen.scrollback} 行戻っています` : '');
+    }
     const frag = document.createDocumentFragment();
     screen.lines.forEach((runs, row) => {
         const div = document.createElement('div');
@@ -2846,7 +2975,7 @@ function drawShell(screen) {
         if (!div.childNodes.length) div.append(document.createTextNode(' '));
         frag.append(div);
     });
-    el.sGrid.replaceChildren(frag);
+    node.replaceChildren(frag);
 }
 
 function styled(run, text) {
@@ -2898,8 +3027,34 @@ document.addEventListener('keydown', (e) => {
     // the same reason they are in the terminal build: a shell almost never
     // wants them, and a panel with no way to open a second tab is a panel you
     // leave to run one thing.
-    if (e.key === 'F9') { e.stopPropagation(); e.preventDefault(); shellTab(); return; }
-    if (e.key === 'F10') { e.stopPropagation(); e.preventDefault(); shellCloseTab(); return; }
+    if (e.key === 'F9' && !e.shiftKey) { e.stopPropagation(); e.preventDefault(); shellTab(); return; }
+    if (e.key === 'F10' && !e.shiftKey) { e.stopPropagation(); e.preventDefault(); shellCloseTab(); return; }
+    // The terminal build's three: split, split the other way, close the pane.
+    if (e.shiftKey && (e.key === 'F8' || e.key === 'F9' || e.key === 'F10')) {
+        e.stopPropagation();
+        e.preventDefault();
+        if (e.key === 'F10') closePane();
+        else splitShell(e.key === 'F9');
+        return;
+    }
+    // Ctrl+S here is not save — there is nothing to save in a shell — it is
+    // "say this to all of them", which is what splits are for.
+    if (e.key === 's' && (e.ctrlKey || e.metaKey)) {
+        e.stopPropagation();
+        e.preventDefault();
+        ask('shellsync', {}).then((r) => {
+            if (!r) return;
+            takeShell(r);
+            say(r.sync ? '同期入力: 全ペインに送ります' : '同期入力を止めました');
+        });
+        return;
+    }
+    if (e.shiftKey && (e.key === 'F1' || e.key === 'F2')) {
+        e.stopPropagation();
+        e.preventDefault();
+        ask('shellfocus', { step: e.key === 'F1' ? -1 : 1 }).then((r) => r && takeShell(r));
+        return;
+    }
     if (e.key === 'F1' || e.key === 'F2') {
         e.stopPropagation();
         e.preventDefault();

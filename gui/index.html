@@ -201,10 +201,24 @@ html, body {
 }
 #shell[hidden] { display: none; }
 #shell.on { border-top-color: var(--accent); }
+/* Typing into four servers at once should not look like typing into one. */
+#shell.zoom { height: 92vh; }
+#shell.sync { border-top: 2px solid var(--mark); }
+#shell.sync .vhead { color: var(--mark); }
+/* The panes of a split, placed where the engine says. Absolute rather than
+   flex: the layout is a tree and the engine has already turned it into
+   rectangles, so re-deriving it here out of nested boxes would be a second
+   implementation of the same arithmetic. */
+.spanes { flex: 1 1 auto; position: relative; overflow: hidden; }
 .sgrid {
-  flex: 1 1 auto; overflow: hidden; padding: 4px 8px;
+  position: absolute; overflow: hidden; padding: 4px 8px;
   white-space: pre; line-height: 1.25;
+  box-sizing: border-box;
 }
+/* Which pane the keys go to. A row of identical shells with no way to tell
+   which is listening is the failure mode of every split terminal. */
+.sgrid.on { box-shadow: inset 0 0 0 1px var(--accent); }
+.sgrid + .sgrid { border-left: 1px solid var(--line); }
 .sgrid .cur { background: var(--accent); color: var(--on-accent); }
 .sgrid .inv { filter: invert(1); }
 #find { z-index: 20; }   /* over whatever it is searching */
@@ -401,7 +415,7 @@ html, body {
        you look at while you work, not a thing you open instead of working. -->
   <div id="shell" hidden>
     <div class="vhead"><span id="s-title">シェル</span><span id="s-about"></span></div>
-    <div class="sgrid" id="s-grid"></div>
+    <div class="spanes" id="s-panes"></div>
   </div>
 
   <!-- Anything that answers with a list: a search, disk usage, checksums, the
