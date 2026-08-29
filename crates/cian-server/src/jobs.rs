@@ -39,11 +39,41 @@ impl Kind {
     }
 }
 
-/// The operations in flight, so they can be numbered and called off.
+/// One operation, while it is happening.
+#[derive(Clone)]
+struct Live {
+    op: u64,
+    kind: &'static str,
+    /// How many files it was given. Not how many are left: what a person
+    /// wants from a queue is "what did I start", and the progress line
+    /// already says how far it has got.
+    total: usize,
+    dest: Option<String>,
+    cancel: Arc<AtomicBool>,
+}
+
+/// The operations in flight, so they can be numbered, listed and called off.
 #[derive(Default)]
 pub struct Jobs {
     next: AtomicU64,
-    running: std::sync::Mutex<Vec<(u64, Arc<AtomicBool>)>>,
+    running: Arc<std::sync::Mutex<Vec<Live>>>,
+}
+
+/// Takes the job off the list however the worker ends — finished, cancelled,
+/// or by an early `return` from a branch someone adds later. A removal written
+/// at the end of the function is a removal one `return` away from not
+/// happening.
+struct LeaveOnDrop {
+    roll: Arc<std::sync::Mutex<Vec<Live>>>,
+    op: u64,
+}
+
+impl Drop for LeaveOnDrop {
+    fn drop(&mut self) {
+        if let Ok(mut v) = self.roll.lock() {
+            v.retain(|j| j.op != self.op);
+        }
+    }
 }
 
 impl Jobs {
@@ -59,9 +89,23 @@ impl Jobs {
     ) -> u64 {
         let op = self.next.fetch_add(1, Ordering::Relaxed) + 1;
         let cancel = Arc::new(AtomicBool::new(false));
-        self.running.lock().unwrap().push((op, Arc::clone(&cancel)));
+        self.running.lock().unwrap().push(Live {
+            op,
+            kind: kind.name(),
+            total: paths.len(),
+            dest: dest.as_ref().map(|p| p.display().to_string()),
+            cancel: Arc::clone(&cancel),
+        });
 
+        // The list is what `:queue` shows, so a job has to leave it when it
+        // is over. Nothing removed them before, which was invisible while the
+        // only use was `cancel` — setting a flag nobody reads costs nothing —
+        // and would have made the queue a list of everything ever run.
+        let roll = Arc::clone(&self.running_handle());
         std::thread::spawn(move || {
+            // Named with an underscore because it is held for its `Drop`, not
+            // for anything read from it.
+            let _leave = LeaveOnDrop { roll, op };
             let total = paths.len();
             out.event(
                 "started",
@@ -149,11 +193,36 @@ impl Jobs {
 
     /// Ask an operation to stop. It stops between files, never inside one —
     /// a half-copied file is worse than a slow cancel.
+    fn running_handle(&self) -> Arc<std::sync::Mutex<Vec<Live>>> {
+        Arc::clone(&self.running)
+    }
+
+    /// What is running, for `:queue`.
+    ///
+    /// A file manager that is copying ten thousand files should be able to say
+    /// which ten thousand, and let you stop one without stopping the others.
+    pub fn listing(&self) -> Vec<serde_json::Value> {
+        self.running
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|j| {
+                serde_json::json!({
+                    "op": j.op,
+                    "kind": j.kind,
+                    "total": j.total,
+                    "dest": j.dest,
+                    "stopping": j.cancel.load(Ordering::Relaxed),
+                })
+            })
+            .collect()
+    }
+
     pub fn cancel(&self, op: u64) -> bool {
         let running = self.running.lock().unwrap();
-        match running.iter().find(|(n, _)| *n == op) {
-            Some((_, flag)) => {
-                flag.store(true, Ordering::Relaxed);
+        match running.iter().find(|j| j.op == op) {
+            Some(j) => {
+                j.cancel.store(true, Ordering::Relaxed);
                 true
             }
             None => false,

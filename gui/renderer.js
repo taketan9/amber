@@ -774,6 +774,7 @@ const HELP = [
     ]],
     ['読み書き（F3・Enter）', [
         ['画像・PDF', 'F3 か Enter でそのまま表示（寸法も出ます）'],
+        ['バイナリ', '16進で表示（読むだけ）'],
         ['Ctrl+S', '保存（元の文字コード・改行・BOM のまま）'],
         ['Esc ×3', '閉じる ── 3回連続（未保存なら3回目で確認）'],
         ['Backspace ×3', '同じ。vim 流儀でノーマルモードのときだけ'],
@@ -804,6 +805,7 @@ const HELP = [
         ['u / Ctrl+R', '取り消し / やり直し'],
         ['M / Shift+Enter', 'このエントリにできること'],
         ['Esc', '実行中の操作を中止'],
+        [':queue', '実行中の操作を見る — x で1つだけ止める'],
     ]],
 ];
 
@@ -1298,7 +1300,7 @@ function withVim() {
 /// rules and the copy guard live in cian-core.
 const viewer = {
     on: false, opening: false, ed: null, vim: null,
-    name: '', about: '', dirty: false,
+    name: '', about: '', dirty: false, readOnly: false,
     /// The model's version at the last read or write.
     ///
     /// Dirtiness is this compared against the current version, not a flag set
@@ -1447,11 +1449,16 @@ async function openInEditor(which) {
     // Japanese Windows machine asks of every file it did not write, and the
     // answer decides whether saving it is safe.
     viewer.about = [
-        enc[f.encoding] || f.encoding,
+        f.binary ? 'バイナリ（16進）' : (enc[f.encoding] || f.encoding),
         f.bom ? 'BOM' : null,
-        f.eol.toUpperCase(),
+        f.binary ? null : f.eol.toUpperCase(),
         `${f.lines.length} 行`,
+        human(f.bytes),
+        f.truncated ? '※先頭のみ' : null,
     ].filter(Boolean).join('  ·  ');
+    // A hex dump is a rendering of the file, not the file. Saving one back
+    // would write the dump, so it opens read-only and says so.
+    viewer.readOnly = !!f.binary;
     viewer.name = f.name;
     viewer.dirty = false;
     viewer.on = true;
@@ -1460,6 +1467,7 @@ async function openInEditor(which) {
     const text = f.lines.join('\n');
     const lang = MONACO_LANG[f.lang] || 'plaintext';
     makeEditor(monaco, text, lang);
+    viewer.ed.updateOptions({ readOnly: viewer.readOnly });
     // After the text is in, not before: loading it is a change to the model,
     // and a file is not modified by having been opened.
     viewer.base = viewer.ed.getModel().getAlternativeVersionId();
@@ -1505,6 +1513,10 @@ function drawViewFoot() {
             + '   ·   Ctrl+S 適用   Esc ×3 やめる';
         return;
     }
+    if (viewer.readOnly) {
+        el.vFoot.textContent = '16進表示 — 読むだけ   ·   Esc ×3 閉じる';
+        return;
+    }
     // In vim style the footer is vim's own — its mode line and its `:` prompt
     // live there, and writing over them would take the command line away.
     if (viewer.vim) return;
@@ -1520,6 +1532,7 @@ function drawViewFoot() {
 
 async function saveFile() {
     if (!viewer.ed) return false;
+    if (viewer.readOnly) { say('16進表示は保存できません', true); return false; }
     // The editor is holding a list of names rather than a file's contents.
     if (renameList.on) {
         const ok = await applyRenameList();
@@ -1681,6 +1694,7 @@ const COMMANDS = [
     { name: 'aicmd', about: 'AI: 説明からシェルコマンドを作る', arg: 'やりたいこと', run: cmdAiCmd },
     { name: 'ailog', about: 'AI: 選択したログを診断する', run: cmdAiLog },
     { name: 'bookmark', about: 'いまの場所を登録する', arg: '名前（省略可）', run: cmdBookmark },
+    { name: 'queue', about: '実行中の操作を見る・止める', run: cmdQueue },
     { name: 'tab', about: '新しいタブ（t / F9 でも）', run: () => tabNew() },
     { name: 'tabclose', about: 'タブを閉じる（w / F10 でも）', run: () => tabClose() },
     // The short ones the terminal build has, spelled the same way. A person who
@@ -1753,6 +1767,33 @@ async function cmdPwd() {
 async function cmdLs(arg) {
     if (/-a/.test(arg || '')) { await toggleHidden(); return; }
     await reread();
+}
+
+/// `:queue` — what is running, and a way to stop one without stopping the
+/// rest. A file manager copying ten thousand files should be able to say which
+/// ten thousand.
+async function cmdQueue() {
+    const r = await ask('queue', {});
+    if (!r) return;
+    if (!r.jobs.length) { say('動いている操作はありません'); return; }
+    const verb = { copy: 'コピー', move: '移動', delete: '削除' };
+    show('実行中の操作', `${r.jobs.length} 件`, r.jobs.map((j) => ({
+        n: `#${j.op}`,
+        label: `${verb[j.kind] || j.kind}  ${j.total} 件`,
+        sub: j.stopping ? '止めています…' : (j.dest || ''),
+        op: j.op,
+    })), {
+        foot: 'x 止める   Esc 閉じる',
+        act: {
+            x: async () => {
+                const row = report.rows[report.at];
+                if (!row) return;
+                await ask('cancel', { op: row.op });
+                say(`#${row.op} を止めています`);
+                closeReport();
+            },
+        },
+    });
 }
 
 // ---- Tabs ----

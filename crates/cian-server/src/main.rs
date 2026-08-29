@@ -603,18 +603,40 @@ impl Session {
                     anyhow::bail!("{name} はディレクトリです");
                 }
                 let len = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
-                let file = cian_core::grepedit::read_text(&path)?;
+                // `view_file` rather than `read_text`, because it answers for
+                // everything: text in whatever encoding, a hex dump for a
+                // binary, extracted text for an Office file or a PDF. The
+                // narrower read refused a binary with "looks binary", which is
+                // true and leaves the person with nothing.
+                let shown = cian_core::viewer::view_file(&path)?;
+                let binary = matches!(shown.kind, cian_core::viewer::ViewKind::Binary);
+                // The editable copy is only fetched for real text: a hex dump
+                // is a rendering, and saving one back would write the dump.
+                let file = if binary {
+                    None
+                } else {
+                    cian_core::grepedit::read_text(&path).ok()
+                };
                 let reply = serde_json::json!({
                     "name": name,
                     "path": path.display().to_string(),
-                    "lines": file.lines,
+                    "lines": shown.lines,
                     "bytes": len,
-                    "encoding": format!("{:?}", file.encoding),
-                    "eol": format!("{:?}", file.eol),
-                    "bom": file.bom,
-                    "lang": cian_core::highlight::detect(&path).map(|l| format!("{l:?}")),
+                    "binary": binary,
+                    "truncated": shown.truncated,
+                    "encoding": format!("{:?}", shown.encoding),
+                    "eol": format!("{:?}", shown.eol),
+                    "bom": shown.bom,
+                    "lang": if binary {
+                        None
+                    } else {
+                        cian_core::highlight::detect(&path).map(|l| format!("{l:?}"))
+                    },
                 });
-                self.open = Some((path, file));
+                // Only a text file is remembered as open: `save` writes back
+                // through what was read, and there is nothing safe to write
+                // back for a dump.
+                self.open = file.map(|f| (path, f));
                 Ok(reply)
             }
             // Write the open file back, in the encoding it arrived in.
@@ -1771,6 +1793,8 @@ impl Session {
                 };
                 Ok(serde_json::to_value(PaneView::of_side(side))?)
             }
+            // What is running, and a way to stop one of them.
+            "queue" => Ok(serde_json::json!({ "jobs": self.jobs.listing() })),
             // Leave a flat listing and go back to the directory it came from.
             "leaveflat" => {
                 let which = req.params["pane"].as_str().unwrap_or("left").to_string();
