@@ -712,6 +712,8 @@ const HELP = [
         ['b', 'この配下を1ファイル1行に平坦化（b か Esc で戻る）'],
         ['h', 'このペインの履歴'],
         ['Z', '行った場所へ飛ぶ'],
+        ['s', 'ショートカット（登録した場所）'],
+        [':bookmark', 'いまの場所を登録する'],
         ['ドラッグして落とす', 'デスクトップからペインへ ── 移動します（先に確認）'],
         ['Alt+← / Alt+→', '前 / 先のディレクトリへ'],
         [',', 'ソート：名前／サイズ／日付／拡張子（n s d e で直接、同じキーで昇降反転）'],
@@ -741,6 +743,10 @@ const HELP = [
         ['c', '反対ペインへ — 立っている側でアップロードか転送かが決まる'],
         [':local', 'サーバを閉じてローカルへ戻る'],
         ['枠が変わります', 'サーバを表示しているペインは色の違う枠になります'],
+    ]],
+    ['AI（init.lua で設定したとき）', [
+        [':aicmd 説明', 'コマンドを作ってシェルに置く ── 実行はしません'],
+        [':ailog', '選択したログを診断（末尾を読みます）'],
     ]],
     ['シェル', [
         ['Shift+J  /  :shell', 'シェルパネル（下半分に出る）'],
@@ -1023,6 +1029,7 @@ document.addEventListener('keydown', (e) => {
     else if (k === 'T') openMenu(TOGGLES);
     else if (k === 'M' || (k === 'Enter' && e.shiftKey)) openMenu(CONTEXT);
     else if (k === 'Z') cmdJump();
+    else if (k === 's') cmdShortcuts();
     else if (k === 'J') { if (term.on) { term.focused = true; el.shell.classList.add('on'); say('シェル'); } else openShell(); }
     else if (k === 'r' && !e.ctrlKey && !e.metaKey) rename();
     else if (k === 'a' && !e.ctrlKey && !e.metaKey) create(false);
@@ -1649,6 +1656,9 @@ const COMMANDS = [
     { name: 'remote', about: 'このペインでサーバを開く（SFTP）', run: cmdConnect },
     { name: 'ssh', about: '同じ（:remote の別名）', run: cmdConnect },
     { name: 'local', about: 'サーバを閉じてローカルに戻る', run: cmdDisconnect },
+    { name: 'aicmd', about: 'AI: 説明からシェルコマンドを作る', arg: 'やりたいこと', run: cmdAiCmd },
+    { name: 'ailog', about: 'AI: 選択したログを診断する', run: cmdAiLog },
+    { name: 'bookmark', about: 'いまの場所を登録する', arg: '名前（省略可）', run: cmdBookmark },
     { name: 'each', about: 'マーク各ファイルにコマンド — {} がパス', arg: 'コマンド', run: cmdEach },
     { name: 'nobom', about: 'UTF-8 BOM を除去（UTF-16 は触らない）', run: cmdNoBom },
     { name: 'renamelist', about: '名前の一覧を編集してリネーム', run: cmdRenameList },
@@ -1678,6 +1688,80 @@ const COMMANDS = [
     { name: 'menu', about: 'トグルメニュー', run: () => openMenu(TOGGLES) },
     { name: 'help', about: 'キー一覧', run: openHelp },
 ];
+
+/// `s` — the folders worth going back to.
+///
+/// The terminal build's own `shortcuts.lua`, read and written through the same
+/// renderer. A second bookmark list would be the worst kind of two-programs
+/// problem: which folders you had saved would depend on which one you saved
+/// them from.
+async function cmdShortcuts() {
+    const r = await ask('shortcuts', {});
+    if (!r) return;
+    if (!r.rows.length) {
+        say('登録がありません — :bookmark でいまの場所を登録できます');
+        return;
+    }
+    show('ショートカット', r.where || '', r.rows.map((x) => ({
+        n: x.group ? '▸' : '',
+        label: '  '.repeat(x.depth) + x.name,
+        sub: x.target || '',
+        target: x.target,
+    })), {
+        foot: 'Enter そこへ   Esc 閉じる',
+        pick: (row) => { if (row.target) { closeReport(); revealPath(row.target, true); } },
+    });
+}
+
+async function cmdBookmark(name) {
+    const r = await ask('bookmark', { pane: state.focus, name });
+    if (!r) return;
+    say(`${r.name} を登録しました`);
+}
+
+// ---- The AI, where a site has configured one ----
+//
+// The prompts live in the engine, word for word the terminal build's. Two
+// front ends asking the same model differently would give two different
+// answers to the same question, which is the kind of difference nobody can
+// debug.
+
+/// `:aicmd` — a description in, a command out, into the shell's prompt but
+/// **not run**. A model that guesses wrong is a model that guesses wrong; the
+/// person presses Enter, not the program.
+/// What to do with the answer when it arrives. The engine runs the model on a
+/// worker — it waits on a python process talking to somebody else's network —
+/// so this is a question asked and an answer heard, not a call.
+let aiWaiting = null;
+
+async function cmdAiCmd(want) {
+    const r = await ask('ai', { pane: state.focus, what: 'cmd', text: want });
+    if (!r) return;
+    say('考えています…');
+    aiWaiting = async (answer) => {
+        // Into the prompt, **not run**. A model that guesses wrong guesses
+        // wrong; the person presses Enter, not the program.
+        const line = answer.trim().split('\n')[0].replace(/^[$#>]\s*/, '');
+        if (!term.on) await openShell();
+        await ask('shellinput', { text: line });
+        term.focused = true;
+        el.shell.classList.add('on');
+        say('Enter で実行、Ctrl+C で捨てる — 実行はしていません');
+    };
+}
+
+async function cmdAiLog() {
+    const pane = state[state.focus];
+    const name = pane.entries[pane.cursor]?.name || '';
+    const r = await ask('ai', { pane: state.focus, what: 'log' });
+    if (!r) return;
+    say('ログを読んでいます…');
+    aiWaiting = (answer) => {
+        show(`${name} の診断`, 'AI の答え — 確かめてから使ってください',
+            answer.split('\n').map((t) => ({ label: t })),
+            { foot: 'Esc 閉じる' });
+    };
+}
 
 // ---- A server, in this pane ----
 //
@@ -2671,6 +2755,14 @@ window.cian.onEvent(async (msg) => {
             else if (msg.errors.length) say(msg.errors.join('  /  '), true);
             else if (msg.skipped) say(`${verb} ${msg.ok} 件、${msg.skipped} 件は飛ばしました`);
             else say(`${verb} ${msg.ok} 件（${msg.ms} ms）`);
+            return;
+        }
+
+        case 'ai': {
+            const hand = aiWaiting;
+            aiWaiting = null;
+            if (msg.error) { say(msg.error, true); return; }
+            if (hand) await hand(msg.answer);
             return;
         }
 

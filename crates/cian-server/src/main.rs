@@ -1539,6 +1539,133 @@ impl Session {
                 cian_lua::state_set(key, value);
                 Ok(serde_json::json!({ "key": key, "value": value }))
             }
+            // ---- The AI, where a site has configured one ----
+            //
+            // The prompts are the terminal build's, word for word. Two front
+            // ends asking the same model differently would give two different
+            // answers to the same question, which is the kind of difference
+            // nobody can debug.
+            "ai" => {
+                let cfg = cian_ai::AiConfig::from_lua(&cian_lua::load());
+                let Some(cfg) = cfg else {
+                    anyhow::bail!("AI が設定されていません（init.lua の cian.ai{{…}}）");
+                };
+                if !cian_ai::available(&cfg) {
+                    anyhow::bail!("AI を利用できません（python・パッケージ・サインインのいずれか）");
+                }
+                let which = req.params["pane"].as_str().unwrap_or("left").to_string();
+                let (system, user) = match req.params["what"].as_str().unwrap_or("") {
+                    "cmd" => {
+                        let want = req.params["text"].as_str().unwrap_or("");
+                        if want.trim().is_empty() {
+                            anyhow::bail!("やりたいことを書いてください");
+                        }
+                        let cwd = self.pane_mut(&which)?.cwd.display().to_string();
+                        (
+                            "You write a single shell command for the platform named.                              Answer with the command only — no explanation, no code                              fence, no leading prompt character.".to_string(),
+                            format!(
+                                "Platform: {}\nDirectory: {cwd}\nTask: {want}",
+                                std::env::consts::OS
+                            ),
+                        )
+                    }
+                    "log" => {
+                        let (path, name, is_dir) = self.selected(&which)?;
+                        if is_dir {
+                            anyhow::bail!("ログファイルを選んでください");
+                        }
+                        // A log's meaning is at its end — read the tail.
+                        let tail = read_tail(&path, 16_000);
+                        if tail.trim().is_empty() {
+                            anyhow::bail!("{name} は空です");
+                        }
+                        (
+                            "You triage a log file for an operator (often RHEL/AIX or                              Oracle). From the tail below: list the errors and warnings                              that matter, each with its key line; note a rough timeline                              if the timestamps show one; then give the single most                              likely cause and the next thing to check. Ignore routine                              INFO noise. Be concise; plain text, no markdown headings."
+                                .to_string(),
+                            tail,
+                        )
+                    }
+                    "text" => (
+                        req.params["system"].as_str().unwrap_or("Answer concisely.").to_string(),
+                        req.params["text"].as_str().unwrap_or("").to_string(),
+                    ),
+                    other => anyhow::bail!("知らない AI 依頼: {other}"),
+                };
+                // On a worker, and answered by an event.
+                //
+                // `chat` waits on a python subprocess talking to a server on
+                // somebody else's network. Run here it would hold the whole
+                // engine — every keystroke in the listing queued behind a
+                // question about a log file. The first attempt did exactly
+                // that and looked like a freeze.
+                let out = self.out.clone();
+                std::thread::spawn(move || match cian_ai::chat(&cfg, &system, &user, &[]) {
+                    Ok(answer) => out.event("ai", serde_json::json!({ "answer": answer })),
+                    Err(e) => out.event("ai", serde_json::json!({ "error": e.to_string() })),
+                });
+                Ok(serde_json::json!({ "asked": true }))
+            }
+            // ---- Bookmarks ----
+            //
+            // The terminal build's own `shortcuts.lua`, read the same way and
+            // written back through the same renderer. A second bookmark list
+            // would be the worst of the two-programs problems: the folders you
+            // saved would depend on which one you saved them from.
+            "shortcuts" => {
+                let path = cian_lua::config_read_path("shortcuts.lua");
+                let nodes = path
+                    .as_ref()
+                    .filter(|p| p.exists())
+                    .and_then(|p| cian_lua::shortcuts::load(p).ok())
+                    .unwrap_or_default();
+                fn flatten(nodes: &[cian_lua::shortcuts::Node], depth: usize, out: &mut Vec<serde_json::Value>) {
+                    for n in nodes {
+                        out.push(serde_json::json!({
+                            "name": n.name,
+                            "target": n.target,
+                            "depth": depth,
+                            "group": n.children.is_some(),
+                        }));
+                        if let Some(kids) = &n.children {
+                            flatten(kids, depth + 1, out);
+                        }
+                    }
+                }
+                let mut rows = Vec::new();
+                flatten(&nodes, 0, &mut rows);
+                Ok(serde_json::json!({
+                    "where": path.map(|p| p.display().to_string()),
+                    "rows": rows,
+                }))
+            }
+            "bookmark" => {
+                let which = req.params["pane"].as_str().unwrap_or("left").to_string();
+                let cwd = self.pane_mut(&which)?.cwd.clone();
+                let name = req.params["name"].as_str().unwrap_or("").trim().to_string();
+                let name = if name.is_empty() {
+                    cwd.file_name().map(|s| s.to_string_lossy().into_owned())
+                        .unwrap_or_else(|| cwd.display().to_string())
+                } else {
+                    name
+                };
+                let path = cian_lua::config_write_path("shortcuts.lua")
+                    .ok_or_else(|| anyhow::anyhow!("設定の置き場所が分かりません"))?;
+                let mut nodes = if path.exists() {
+                    cian_lua::shortcuts::load(&path).unwrap_or_default()
+                } else {
+                    Vec::new()
+                };
+                let target = cwd.display().to_string();
+                if nodes.iter().any(|n| n.target.as_deref() == Some(target.as_str())) {
+                    anyhow::bail!("すでに登録されています");
+                }
+                nodes.push(cian_lua::shortcuts::Node::leaf(name.clone(), target.clone()));
+                if let Some(dir) = path.parent() {
+                    let _ = std::fs::create_dir_all(dir);
+                }
+                std::fs::write(&path, cian_lua::shortcuts::to_lua(&nodes))?;
+                Ok(serde_json::json!({ "name": name, "target": target }))
+            }
             // Leave a flat listing and go back to the directory it came from.
             "leaveflat" => {
                 let which = req.params["pane"].as_str().unwrap_or("left").to_string();
@@ -1887,4 +2014,20 @@ fn remote_rows(dir: &str, entries: &[cian_scp::RemoteEntry]) -> Vec<cian_core::E
         ));
     }
     rows
+}
+
+/// The last `cap` bytes of a file, decoded loosely.
+///
+/// A log's meaning is at its end: the head of a hundred-megabyte log is the
+/// day it was created, and the question is always about today.
+fn read_tail(path: &std::path::Path, cap: u64) -> String {
+    use std::io::{Read, Seek, SeekFrom};
+    let Ok(mut f) = std::fs::File::open(path) else { return String::new() };
+    let len = f.metadata().map(|m| m.len()).unwrap_or(0);
+    if len > cap {
+        let _ = f.seek(SeekFrom::Start(len - cap));
+    }
+    let mut buf = Vec::new();
+    let _ = f.read_to_end(&mut buf);
+    String::from_utf8_lossy(&buf).into_owned()
 }

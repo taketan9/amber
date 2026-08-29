@@ -25,6 +25,8 @@ cian-scp  = { workspace = true }
 # comes with it and compiles C, which the Windows release has been doing all
 # along for cian-tui; the "no compiler" property was spent long before this.
 cian-lua  = { workspace = true }
+# The three AI commands the terminal build has. Same config, same prompts.
+cian-ai   = { workspace = true }
 vt100     = { workspace = true }
 serde      = { workspace = true }
 serde_json = { workspace = true }

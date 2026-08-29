@@ -572,6 +572,7 @@ version = "1.0.8"
 dependencies = [
  "anyhow",
  "cian-core",
+ "cian-lua",
  "serde",
  "serde_json",
  "tempfile",
@@ -658,6 +659,7 @@ name = "cian-server"
 version = "1.0.8"
 dependencies = [
  "anyhow",
+ "cian-ai",
  "cian-core",
  "cian-lua",
  "cian-pty",

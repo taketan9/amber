@@ -12,6 +12,10 @@ anyhow = { workspace = true }
 # For `proc::quiet`: a probe that opens a console window on Windows is a
 # window the user did not ask for. See `cian_core::proc`.
 cian-core = { workspace = true }
+# For `AiConfig::from_lua`. The mapping from `cian.ai{…}` to a request lived in
+# cian-tui, and the GUI's engine needs the same one — seven fields copied by
+# hand in two places is seven chances for them to stop agreeing.
+cian-lua  = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 

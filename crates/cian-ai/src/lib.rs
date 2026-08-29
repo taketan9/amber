@@ -176,6 +176,24 @@ pub fn chat(cfg: &AiConfig, system: &str, user: &str, images: &[String]) -> Resu
     }
 }
 
+impl AiConfig {
+    /// Build a request-side config from what `cian.ai{…}` declared.
+    ///
+    /// Here rather than in a front end because there are two of them now, and
+    /// this is the one place that decides what a setting in `init.lua` means.
+    pub fn from_lua(config: &cian_lua::Config) -> Option<AiConfig> {
+        config.ai.as_ref().map(|a| AiConfig {
+            python: a.python.clone(),
+            endpoint: a.endpoint.clone(),
+            model: a.model.clone(),
+            api_version: a.api_version.clone(),
+            auth_mode: a.auth_mode.clone(),
+            api_key: a.api_key.clone(),
+            api_base_url: a.api_base_url.clone(),
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

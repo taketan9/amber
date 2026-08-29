@@ -2145,17 +2145,10 @@ pub struct ShortcutStore {
 }
 
 /// Build the request-side [`cian_ai::AiConfig`] from the parsed Lua config.
-/// Shared by startup and `:reload` so AI settings can be tuned live.
+/// The mapping lives in cian-ai now, because the GUI's engine needs the same
+/// one — this is the call site, kept for startup and `:reload`.
 pub(crate) fn ai_config_from(config: &cian_lua::Config) -> Option<cian_ai::AiConfig> {
-    config.ai.as_ref().map(|a| cian_ai::AiConfig {
-        python: a.python.clone(),
-        endpoint: a.endpoint.clone(),
-        model: a.model.clone(),
-        api_version: a.api_version.clone(),
-        auth_mode: a.auth_mode.clone(),
-        api_key: a.api_key.clone(),
-        api_base_url: a.api_base_url.clone(),
-    })
+    cian_ai::AiConfig::from_lua(config)
 }
 
 impl ShortcutStore {
