@@ -779,6 +779,7 @@ const HELP = [
         [':remote  /  :ssh', 'このペインでサーバを開く — user@host[:port][:/path]'],
         ['Enter / Backspace', 'サーバの中を移動'],
         ['c', '反対ペインへ — 立っている側でアップロードか転送かが決まる'],
+        ['a / A / r / d', 'サーバ上でも同じキー（削除はゴミ箱なし＝戻せません）'],
         [':local', 'サーバを閉じてローカルへ戻る'],
         ['枠が変わります', 'サーバを表示しているペインは色の違う枠になります'],
     ]],
@@ -1099,7 +1100,9 @@ document.addEventListener('keydown', (e) => {
              && (state.left.remote || state.right.remote)) transfer();
     else if (k === 'c' && !e.ctrlKey && !e.metaKey) operate('copy');
     else if (k === 'm') operate('move');
-    else if (k === 'd') operate('delete');
+    else if (k === 'd') {
+        if (state[state.focus].remote) remoteOp('delete'); else operate('delete');
+    }
     else if (k === 'T') openMenu(TOGGLES);
     else if (k === 'M' || (k === 'Enter' && e.shiftKey)) openMenu(CONTEXT);
     else if (k === 'Z') cmdJump();
@@ -1112,9 +1115,15 @@ document.addEventListener('keydown', (e) => {
     else if (k === 'F2') goTab(state.focus, { step: 1 });
     else if (k === 'Tab' && e.shiftKey) goTab(state.focus, { step: 1 });
     else if (k === 'J') { if (term.on) { term.focused = true; el.shell.classList.add('on'); say('シェル'); } else openShell(); }
-    else if (k === 'r' && !e.ctrlKey && !e.metaKey) rename();
-    else if (k === 'a' && !e.ctrlKey && !e.metaKey) create(false);
-    else if (k === 'A') create(true);
+    else if (k === 'r' && !e.ctrlKey && !e.metaKey) {
+        if (state[state.focus].remote) remoteOp('rename'); else rename();
+    }
+    else if (k === 'a' && !e.ctrlKey && !e.metaKey) {
+        if (state[state.focus].remote) remoteOp('touch'); else create(false);
+    }
+    else if (k === 'A') {
+        if (state[state.focus].remote) remoteOp('mkdir'); else create(true);
+    }
     else if (k === 'u') undo();
     else if (k === 'V') invert();
     else if (k === 'v') startVisual();
@@ -2256,6 +2265,39 @@ async function cmdDisconnect() {
     state[state.focus] = pane;
     draw(state.focus);
     say(pane.cwd);
+}
+
+/// The same keys, over the network.
+///
+/// `a`, `A`, `r`, `d` behave as they do locally — the rows look the same, so
+/// they should act the same. The one difference is said out loud rather than
+/// discovered: a remote delete is a delete, because SFTP has no trash.
+async function remoteOp(what) {
+    const which = state.focus;
+    const pane = state[which];
+    let name;
+    if (what === 'mkdir' || what === 'touch') {
+        name = await askFor(what === 'mkdir' ? '新しいディレクトリの名前' : '新しいファイルの名前', '');
+        if (name === null || !name) return;
+    } else if (what === 'rename') {
+        const row = pane.entries[pane.cursor];
+        if (!row || row.parent) return;
+        name = await askFor(`${row.name} の新しい名前`, row.name);
+        if (name === null || !name) return;
+    } else if (what === 'delete') {
+        const marked = pane.entries.filter((x) => x.marked);
+        const rows = marked.length ? marked : [pane.entries[pane.cursor]].filter((x) => x && !x.parent);
+        if (!rows.length) { say('対象がありません', true); return; }
+        if (!await confirm(
+            `${rows.length} 件をサーバから削除します`,
+            'ゴミ箱はありません — 元に戻せません\n\n' + rows.map((x) => x.name).join('\n'),
+        )) { say('やめました'); return; }
+    }
+    const r = await ask('remoteop', { pane: which, what, name });
+    if (!r) return;
+    state[which] = r;
+    draw(which);
+    say(r.said);
 }
 
 async function remoteStep(opts) {

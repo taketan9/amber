@@ -1821,6 +1821,82 @@ impl Session {
                     "right": PaneView::of(self.right.get()),
                 }))
             }
+            // Making, renaming and removing on the server.
+            //
+            // The same keys as here — `a`, `A`, `r`, `d` — because the rows
+            // look the same and behave the same. The one difference is stated
+            // rather than hidden: a remote delete is a delete, since SFTP has
+            // no trash to put anything in.
+            "remoteop" => {
+                let which = req.params["pane"].as_str().unwrap_or("left").to_string();
+                let Some(target) = self.remotes.get(&which).cloned() else {
+                    anyhow::bail!("このペインはサーバに繋がっていません");
+                };
+                let here = {
+                    let pane = self.pane_mut(&which)?;
+                    let Some((_, p)) = pane.remote_view() else {
+                        anyhow::bail!("このペインはサーバを表示していません");
+                    };
+                    p.to_string()
+                };
+                let what = req.params["what"].as_str().unwrap_or("");
+                let name = req.params["name"].as_str().unwrap_or("").trim().to_string();
+                let said = match what {
+                    "mkdir" | "touch" => {
+                        if name.is_empty() {
+                            anyhow::bail!("名前が空です");
+                        }
+                        let at = cian_scp::remote_join(&here, &name);
+                        if what == "mkdir" {
+                            cian_scp::make_dir(&target, &at)?;
+                        } else {
+                            cian_scp::make_file(&target, &at)?;
+                        }
+                        format!("{name} を作りました")
+                    }
+                    "rename" => {
+                        if name.is_empty() {
+                            anyhow::bail!("名前が空です");
+                        }
+                        let (from, was, _) = self.selected(&which)?;
+                        let from = from.display().to_string();
+                        cian_scp::rename(&target, &from, &cian_scp::remote_join(&here, &name))?;
+                        format!("{was} → {name}")
+                    }
+                    "delete" => {
+                        let paths = self.targets(&which)?;
+                        if paths.is_empty() {
+                            anyhow::bail!("対象がありません");
+                        }
+                        let mut gone = 0usize;
+                        for p in &paths {
+                            let path = p.display().to_string();
+                            // The row knows whether it was a directory; SFTP
+                            // needs telling, because rmdir and unlink are two
+                            // calls and picking the wrong one just fails.
+                            let is_dir = self
+                                .pane_mut(&which)?
+                                .entries
+                                .iter()
+                                .find(|e| e.path == *p)
+                                .map(|e| e.is_dir)
+                                .unwrap_or(false);
+                            cian_scp::remove(&target, &path, is_dir)?;
+                            gone += 1;
+                        }
+                        format!("{gone} 件を消しました")
+                    }
+                    other => anyhow::bail!("知らないリモート操作: {other}"),
+                };
+                let (_, entries) = cian_scp::list_dir(&target, &here)?;
+                let label = format!("{}@{}", target.user, target.host);
+                let rows = remote_rows(&here, &entries);
+                let pane = self.pane_mut(&which)?;
+                pane.enter_remote(label, here, rows);
+                let mut reply = self.view(&which)?;
+                reply["said"] = serde_json::json!(said);
+                Ok(reply)
+            }
             "disconnect" => {
                 let which = req.params["pane"].as_str().unwrap_or("left").to_string();
                 self.remotes.remove(&which);
