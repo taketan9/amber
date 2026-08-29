@@ -687,6 +687,7 @@ const HELP = [
         ['b', 'この配下を1ファイル1行に平坦化（b か Esc で戻る）'],
         ['h', 'このペインの履歴'],
         ['Z', '行った場所へ飛ぶ'],
+        ['ドラッグして落とす', 'デスクトップからペインへ ── 移動します（先に確認）'],
         ['Alt+← / Alt+→', '前 / 先のディレクトリへ'],
         [',', 'ソート：名前／サイズ／日付／拡張子（n s d e で直接、同じキーで昇降反転）'],
         ['T', 'トグルメニュー：隠しファイル・配色・エディタの流儀'],
@@ -721,6 +722,7 @@ const HELP = [
         ['Esc ×3', '閉じる ── 3回連続（未保存なら3回目で確認）'],
         ['Backspace ×3', '同じ。vim 流儀でノーマルモードのときだけ'],
         ['F3', '1回で閉じる'],
+        ['Ctrl+Shift+O', '見出し一覧から飛ぶ（vim 流儀は :outline）'],
         ['流儀', 'メモ帳流（既定）／ vim ── 一覧に戻って T のメニューの中'],
         ['  vim のとき', 'ノーマルモードで開く。:w 保存 :q 閉じる :wq 両方'],
         ['  メモ帳流のとき', 'Ctrl+C/V/Z/F など Windows の手が効く'],
@@ -1337,6 +1339,12 @@ function makeEditor(monaco, text, lang) {
         drawViewFoot();
     });
     viewer.ed.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => saveFile());
+    // The outline needs a key of its own in here: `:` belongs to the editor
+    // once a file is open, so the command line cannot reach it.
+    viewer.ed.addCommand(
+        monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyO,
+        () => cmdOutline(),
+    );
     viewer.ed.onDidChangeCursorPosition(drawViewFoot);
     } else {
     viewer.ed.updateOptions({ theme: editorTheme() });
@@ -1411,6 +1419,7 @@ function setStyle(i) {
         ex.defineEx('write', 'w', saveFile);
         ex.defineEx('quit', 'q', () => closeView(false));
         ex.defineEx('wq', 'wq', async () => { if (await saveFile()) closeView(false); });
+        ex.defineEx('outline', 'outline', () => cmdOutline());
     }
     drawViewFoot();
 }
@@ -1597,6 +1606,7 @@ const COMMANDS = [
     { name: 'each', about: 'マーク各ファイルにコマンド — {} がパス', arg: 'コマンド', run: cmdEach },
     { name: 'nobom', about: 'UTF-8 BOM を除去（UTF-16 は触らない）', run: cmdNoBom },
     { name: 'renamelist', about: '名前の一覧を編集してリネーム', run: cmdRenameList },
+    { name: 'outline', about: '開いているファイルの見出し一覧', run: cmdOutline },
     { name: 'visual', about: 'ビジュアル選択（v でも）', run: startVisual },
     { name: 'compare', about: '左右を比較（= でも）', run: cmdCompare },
     { name: 'back', about: 'ひとつ前のディレクトリへ', run: () => step('back') },
@@ -1682,6 +1692,33 @@ async function applyRenameList() {
     if (done.errors.length) say(done.errors.join('  /  '), true);
     else say(`${done.renamed} 件の名前を変えました`);
     return true;
+}
+
+/// The open file's headings, and a way to land on one.
+///
+/// Closing the list rather than keeping it beside the text: a file manager's
+/// editor is a place you go to change one thing, and a permanent outline
+/// column would be a third of the width spent on navigation you use twice.
+async function cmdOutline() {
+    if (!viewer.on) { say('先にファイルを開いてください', true); return; }
+    const r = await ask('outline', {});
+    if (!r) return;
+    if (!r.items.length) { say('見出しが見つかりません'); return; }
+    show(`${viewer.name} の見出し`, `${r.items.length} 件`,
+        r.items.map((i) => ({
+            n: String(i.line + 1),
+            label: '  '.repeat(i.level) + i.text,
+            line: i.line,
+        })),
+        {
+            foot: 'Enter そこへ   Esc 閉じる',
+            pick: (row) => {
+                closeReport();
+                viewer.ed.revealLineInCenter(row.line + 1);
+                viewer.ed.setPosition({ lineNumber: row.line + 1, column: 1 });
+                viewer.ed.focus();
+            },
+        });
 }
 
 async function cmdNoBom() {
@@ -2364,6 +2401,43 @@ function escTwice() {
 async function scrollShell(lines) {
     const r = await ask('shellscroll', { lines });
     if (r && r.screen) drawShell(r.screen);
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Dropping files in from the desktop.
+//
+// The one thing a window can do that a terminal can only imitate. It **moves**
+// them, which is what the terminal build's drop does and what dragging between
+// two folders means everywhere else — and it asks first, by name, because a
+// drop is the easiest gesture in the whole program to make by accident.
+// ─────────────────────────────────────────────────────────────────────────
+for (const which of ['left', 'right']) {
+    const pane = el[which];
+    pane.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        pane.classList.add('dropping');
+    });
+    pane.addEventListener('dragleave', () => pane.classList.remove('dropping'));
+    pane.addEventListener('drop', async (e) => {
+        e.preventDefault();
+        pane.classList.remove('dropping');
+        const paths = [...e.dataTransfer.files]
+            .map((f) => window.cian.pathOf(f))
+            .filter(Boolean);
+        if (!paths.length) { say('落とされたものの場所が分かりません', true); return; }
+        const dest = state[which];
+        if (!dest) return;
+        const names = paths.map((p) => p.split(/[\\/]/).pop());
+        if (!await confirm(`${paths.length} 件を ${dest.cwd} へ移動します`, names.join('\n'))) {
+            say('やめました');
+            return;
+        }
+        const r = await ask('drop', { pane: which, paths });
+        if (!r) return;
+        running = { op: r.op, kind: 'move', verb: '移動', total: r.count };
+        say(`移動中… 0 / ${r.count}`);
+    });
 }
 
 /// What the engine says unasked.

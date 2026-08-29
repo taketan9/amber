@@ -1210,6 +1210,36 @@ impl Session {
                     "pane": serde_json::to_value(PaneView::of(pane))?,
                 }))
             }
+            // The headings and definitions in the open file, for jumping.
+            "outline" => {
+                let Some((path, file)) = self.open.as_ref() else {
+                    anyhow::bail!("開いているファイルがありません");
+                };
+                let items = cian_core::outline::outline(path, &file.lines);
+                Ok(serde_json::json!({
+                    "items": items.iter().map(|i| serde_json::json!({
+                        "line": i.line, "level": i.level, "text": i.text,
+                        "kind": format!("{:?}", i.kind),
+                    })).collect::<Vec<_>>(),
+                }))
+            }
+            // Files dropped onto a pane from the desktop. A move, like a drag
+            // between two folders anywhere else.
+            "drop" => {
+                let which = req.params["pane"].as_str().unwrap_or("left").to_string();
+                let paths: Vec<std::path::PathBuf> = req.params["paths"]
+                    .as_array()
+                    .map(|a| a.iter().filter_map(|v| v.as_str()).map(std::path::PathBuf::from).collect())
+                    .unwrap_or_default();
+                if paths.is_empty() {
+                    anyhow::bail!("落とされたものがありません");
+                }
+                let dest = self.pane_mut(&which)?.cwd.clone();
+                let count = paths.len();
+                let op = self.jobs.start(
+                    Kind::Move, paths, Some(dest), self.out.clone(), self.undo.clone());
+                Ok(serde_json::json!({ "op": op, "count": count }))
+            }
             // Leave a flat listing and go back to the directory it came from.
             "leaveflat" => {
                 let which = req.params["pane"].as_str().unwrap_or("left").to_string();

@@ -313,7 +313,11 @@ async function main() {
         // Long enough that G and gg have somewhere to go, and one of them in
         // Shift_JIS — the encoding the viewer exists to get right, and the one
         // a machine in Tokyo meets in every log it did not write.
-        const body = Array.from({ length: 40 }, (_, i) => `${i + 1} 行目 ${name} テスト`).join('\n');
+        // The markdown one gets headings, so :outline has something to find.
+        const body = name === 'b.md'
+            ? ['# 見出し一', '本文', '## 小見出し A', '本文', '## 小見出し B', '本文',
+               '# 見出し二', ...Array.from({ length: 33 }, (_, i) => `${i + 1} 行目`)].join('\n')
+            : Array.from({ length: 40 }, (_, i) => `${i + 1} 行目 ${name} テスト`).join('\n');
         if (name === 'あ.txt') {
             fs.writeFileSync(path.join(sand, 'from', name), sjis(body + '\n'));
         } else {
