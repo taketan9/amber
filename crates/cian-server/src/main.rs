@@ -202,6 +202,46 @@ impl Session {
         Ok((e.path.clone(), e.name.clone(), e.is_dir))
     }
 
+    /// Climb one level inside an archive; past the root, leave it and land on
+    /// the archive file, which is where you were when you went in.
+    fn archive_up(
+        &mut self,
+        which: &str,
+        archive: &std::path::Path,
+        sub: &str,
+    ) -> anyhow::Result<serde_json::Value> {
+        if sub.is_empty() {
+            let dir = archive.parent().unwrap_or(archive).to_path_buf();
+            let name = archive.file_name().map(|s| s.to_string_lossy().into_owned());
+            let pane = self.pane_mut(which)?;
+            *pane = Pane::new(dir)?;
+            if let Some(name) = name {
+                if let Some(i) = pane.entries.iter().position(|e| e.name == name) {
+                    pane.cursor = i;
+                }
+            }
+            return Ok(serde_json::to_value(PaneView::of(pane))?);
+        }
+        // "a/b/" → "a/"; "a/" → "".
+        let parent = sub
+            .trim_end_matches('/')
+            .rsplit_once('/')
+            .map(|(head, _)| format!("{head}/"))
+            .unwrap_or_default();
+        let child = sub.trim_end_matches('/').rsplit('/').next().map(str::to_string);
+        let members = cian_core::archive::list(archive)?;
+        let rows = cian_core::archive::archive_rows(archive, &members, &parent);
+        let pane = self.pane_mut(which)?;
+        pane.enter_archive(archive.to_path_buf(), parent, rows);
+        // Land on the directory just left, as real navigation does.
+        if let Some(child) = child {
+            if let Some(i) = pane.entries.iter().position(|e| e.name == child) {
+                pane.cursor = i;
+            }
+        }
+        Ok(serde_json::to_value(PaneView::of(pane))?)
+    }
+
     fn targets(&self, which: &str) -> anyhow::Result<Vec<std::path::PathBuf>> {
         let pane = match which {
             "left" => &self.left,
@@ -275,6 +315,28 @@ impl Session {
                 if let Some(n) = at {
                     pane.cursor = n.min(pane.entries.len().saturating_sub(1));
                 }
+                // Inside an archive the rows are synthetic: their paths do
+                // not exist on the disk, so the ordinary descent would look
+                // for a directory that is not there. A directory row means
+                // "list this prefix instead".
+                if let Some((archive, sub)) = pane.archive_view() {
+                    let (archive, sub) = (archive.to_path_buf(), sub.to_string());
+                    let Some(row) = pane.entries.get(pane.cursor) else {
+                        anyhow::bail!("対象がありません");
+                    };
+                    if row.is_parent {
+                        return self.archive_up(&which, &archive, &sub);
+                    }
+                    if !row.is_dir {
+                        anyhow::bail!("アーカイブ内のファイルはまだ開けません");
+                    }
+                    let deeper = format!("{sub}{}/", row.name);
+                    let members = cian_core::archive::list(&archive)?;
+                    let rows = cian_core::archive::archive_rows(&archive, &members, &deeper);
+                    let pane = self.pane_mut(&which)?;
+                    pane.enter_archive(archive, deeper, rows);
+                    return Ok(serde_json::to_value(PaneView::of(pane))?);
+                }
                 let was = pane.cwd.clone();
                 pane.enter_selected()?;
                 // Only if it actually went somewhere: `Enter` on a file will
@@ -288,6 +350,10 @@ impl Session {
             "parent" => {
                 let which = req.params["pane"].as_str().unwrap_or("left").to_string();
                 let pane = self.pane_mut(&which)?;
+                if let Some((archive, sub)) = pane.archive_view() {
+                    let (archive, sub) = (archive.to_path_buf(), sub.to_string());
+                    return self.archive_up(&which, &archive, &sub);
+                }
                 let was = pane.cwd.clone();
                 pane.go_parent()?;
                 if pane.cwd != was {
@@ -329,6 +395,27 @@ impl Session {
                 let pane = self.pane_mut(&which)?;
                 for i in 0..pane.entries.len() {
                     pane.toggle_mark_at(i);
+                }
+                Ok(serde_json::to_value(PaneView::of(pane))?)
+            }
+            // Exactly these, and nothing else, marked.
+            //
+            // Visual selection re-marks from its anchor on every move, so it
+            // needs to *state* the set rather than toggle towards it —
+            // toggling would make an overshoot permanent instead of something
+            // you correct by moving back.
+            "setmarks" => {
+                let which = req.params["pane"].as_str().unwrap_or("left").to_string();
+                let want: std::collections::HashSet<String> = req.params["paths"]
+                    .as_array()
+                    .map(|a| a.iter().filter_map(|v| v.as_str()).map(str::to_string).collect())
+                    .unwrap_or_default();
+                let pane = self.pane_mut(&which)?;
+                pane.clear_marks();
+                for i in 0..pane.entries.len() {
+                    if want.contains(&pane.entries[i].path.display().to_string()) {
+                        pane.set_mark_at(i);
+                    }
                 }
                 Ok(serde_json::to_value(PaneView::of(pane))?)
             }
@@ -1052,6 +1139,77 @@ impl Session {
                 }
                 Ok(serde_json::json!({ "ran": paths.len() }))
             }
+            // Walk into an archive as though it were a directory.
+            //
+            // The rows come from cian-core, which is where they came from for
+            // the terminal build too — two front ends disagreeing about what
+            // is inside one zip would be a strange thing to ship.
+            "enterarchive" => {
+                let which = req.params["pane"].as_str().unwrap_or("left").to_string();
+                let sub = req.params["sub"].as_str().unwrap_or("").to_string();
+                let archive = match req.params["archive"].as_str() {
+                    Some(p) => std::path::PathBuf::from(p),
+                    None => self.selected(&which)?.0,
+                };
+                if !cian_core::archive::is_archive(&archive) {
+                    anyhow::bail!("アーカイブではありません");
+                }
+                let members = cian_core::archive::list(&archive)?;
+                let rows = cian_core::archive::archive_rows(&archive, &members, &sub);
+                let pane = self.pane_mut(&which)?;
+                pane.enter_archive(archive.clone(), sub.clone(), rows);
+                Ok(serde_json::json!({
+                    "archive": archive.display().to_string(),
+                    "sub": sub,
+                    "pane": serde_json::to_value(PaneView::of(pane))?,
+                }))
+            }
+            // The file's bytes, for something the window can draw but not read
+            // — an image, mostly. Capped, and refused outright above the cap
+            // rather than truncated: half a PNG is not a smaller PNG.
+            "bytes" => {
+                let which = req.params["pane"].as_str().unwrap_or("left").to_string();
+                let (path, name, is_dir) = self.selected(&which)?;
+                if is_dir {
+                    anyhow::bail!("{name} はディレクトリです");
+                }
+                const CAP: u64 = 24 * 1024 * 1024;
+                let len = std::fs::metadata(&path)?.len();
+                if len > CAP {
+                    anyhow::bail!("{name} は大きすぎます（{} MB）", len / 1024 / 1024);
+                }
+                let bytes = std::fs::read(&path)?;
+                Ok(serde_json::json!({
+                    "name": name,
+                    "kind": mime_of(&path),
+                    "len": len,
+                    "b64": b64(&bytes),
+                }))
+            }
+            // Strip UTF-8 byte-order marks. UTF-16 ones are left alone:
+            // without one, a UTF-16 file's byte order is guesswork.
+            "nobom" => {
+                let which = req.params["pane"].as_str().unwrap_or("left").to_string();
+                let paths: Vec<_> = self.targets(&which)?.into_iter().filter(|p| p.is_file()).collect();
+                if paths.is_empty() {
+                    anyhow::bail!("対象がありません");
+                }
+                let (mut stripped, mut none, mut utf16, mut failed) = (0, 0, 0, 0);
+                for p in &paths {
+                    match cian_core::ops::strip_utf8_bom(p) {
+                        Ok(Some(true)) => stripped += 1,
+                        Ok(Some(false)) => none += 1,
+                        Ok(None) => utf16 += 1,
+                        Err(_) => failed += 1,
+                    }
+                }
+                let pane = self.pane_mut(&which)?;
+                pane.reload()?;
+                Ok(serde_json::json!({
+                    "stripped": stripped, "none": none, "utf16": utf16, "failed": failed,
+                    "pane": serde_json::to_value(PaneView::of(pane))?,
+                }))
+            }
             // Leave a flat listing and go back to the directory it came from.
             "leaveflat" => {
                 let which = req.params["pane"].as_str().unwrap_or("left").to_string();
@@ -1343,4 +1501,42 @@ fn quote(s: &str) -> String {
     } else {
         format!("'{}'", s.replace('\'', "'\\''"))
     }
+}
+
+/// What a browser will call this.
+///
+/// Only the ones a window can actually draw. Anything else is not offered as
+/// an image at all, rather than handed over to be shown as a broken one.
+fn mime_of(path: &std::path::Path) -> Option<&'static str> {
+    let ext = path.extension()?.to_str()?.to_ascii_lowercase();
+    Some(match ext.as_str() {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "bmp" => "image/bmp",
+        "svg" => "image/svg+xml",
+        "avif" => "image/avif",
+        "ico" => "image/x-icon",
+        "pdf" => "application/pdf",
+        _ => return None,
+    })
+}
+
+/// Base64, written out rather than pulled in.
+///
+/// One dependency avoided is one fewer crate in the offline bundle, and this
+/// is twenty lines that have not changed since 1987.
+fn b64(bytes: &[u8]) -> String {
+    const A: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let b = [chunk[0], *chunk.get(1).unwrap_or(&0), *chunk.get(2).unwrap_or(&0)];
+        let n = ((b[0] as u32) << 16) | ((b[1] as u32) << 8) | b[2] as u32;
+        out.push(A[(n >> 18) as usize & 63] as char);
+        out.push(A[(n >> 12) as usize & 63] as char);
+        out.push(if chunk.len() > 1 { A[(n >> 6) as usize & 63] as char } else { '=' });
+        out.push(if chunk.len() > 2 { A[n as usize & 63] as char } else { '=' });
+    }
+    out
 }

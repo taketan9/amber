@@ -255,6 +255,17 @@ html, body {
    height of its own — a flex child with `min-height: 0` rather than one that
    grows to fit content it is also being asked to scroll. */
 .vbody { flex: 1 1 auto; min-height: 0; }
+.vbody[hidden] { display: none; }
+/* A picture is shown whole, at its own size until that is bigger than the
+   window — a file manager's preview should answer "what is this" before it
+   answers "at what magnification". */
+.vpic {
+  flex: 1 1 auto; min-height: 0; display: flex;
+  align-items: center; justify-content: center; overflow: auto;
+  background: var(--pane-off);
+}
+.vpic[hidden] { display: none; }
+.vpic img, .vpic embed { max-width: 100%; max-height: 100%; object-fit: contain; }
 /* vim's mode line and its `:` prompt live in the footer, and monaco-vim puts
    them there as plain text. */
 /* The `:` prompt takes the whole line while it is up.
@@ -385,6 +396,7 @@ html, body {
   <div id="view" hidden>
     <div class="vhead"><span id="v-name"></span><span id="v-about"></span></div>
     <div class="vbody" id="v-body"></div>
+    <div class="vpic" id="v-pic" hidden></div>
     <div class="vfoot" id="v-foot"></div>
   </div>
 

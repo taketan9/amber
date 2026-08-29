@@ -854,6 +854,68 @@ fn collect_tree(dir: &Path, prefix: &str, jobs: &mut Vec<(PathBuf, String)>, rep
     }
 }
 
+// ---- Reading an archive as if it were a directory ----
+//
+// Down here rather than in a front end because it is arithmetic on member
+// names and nothing else: which of them are directly under this prefix, which
+// deeper ones collapse into a directory row. Two front ends browsing the same
+// zip and disagreeing about what is in it would be a strange thing to ship.
+
+/// The rows for directory `sub` (`""` = root) of `members`: the `..` row,
+/// then direct child directories (explicit or implied by deeper members),
+/// then direct child files. Pure, so the tests can pin the shape down.
+pub fn archive_rows(archive: &Path, members: &[Member], sub: &str) -> Vec<crate::Entry> {
+    let mut dirs: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    let mut files: Vec<(String, u64)> = Vec::new();
+    for m in members {
+        let name = m.name.trim_end_matches('/');
+        let Some(rest) = name.strip_prefix(sub) else { continue };
+        if rest.is_empty() {
+            continue; // the directory entry for `sub` itself
+        }
+        match rest.split_once('/') {
+            // Deeper than one level: only its first segment shows, as a dir.
+            Some((head, _)) => {
+                dirs.insert(head.to_string());
+            }
+            None => {
+                if m.is_dir {
+                    dirs.insert(rest.to_string());
+                } else {
+                    files.push((rest.to_string(), m.size));
+                }
+            }
+        }
+    }
+    files.sort();
+    // The `..` row: its synthetic path is the archive-or-parent target, but
+    // navigation intercepts it before anything touches the path.
+    let up = crate::Entry::remote("..", archive.display().to_string(), true, 0, true);
+    let mut out = vec![up];
+    for d in dirs {
+        let p = format!("{}/{}{}", archive.display(), sub, d);
+        out.push(crate::Entry::remote(d, p, true, 0, false));
+    }
+    for (f, size) in files {
+        let p = format!("{}/{}{}", archive.display(), sub, f);
+        out.push(crate::Entry::remote(f, p, false, size, false));
+    }
+    out
+}
+
+/// The member names under `prefix` (the entries a dir row stands for),
+/// including the file `prefix` itself when it names a file directly.
+pub fn members_under<'a>(members: &'a [Member], prefix: &str) -> Vec<&'a Member> {
+    members
+        .iter()
+        .filter(|m| {
+            let name = m.name.trim_end_matches('/');
+            name == prefix.trim_end_matches('/') || name.starts_with(&format!("{}/", prefix.trim_end_matches('/')))
+        })
+        .collect()
+}
+
+
 #[cfg(test)]
 mod tests {
     use super::*;

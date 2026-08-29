@@ -14,9 +14,12 @@
 use std::path::{Path, PathBuf};
 
 use cian_core::archive::Member;
-use cian_core::Entry;
 
 use crate::{tr, App};
+
+// The two pure ones live in cian-core: the GUI's engine browses the same zips,
+// and two front ends disagreeing about what is inside one would be strange.
+use cian_core::archive::{archive_rows, members_under};
 
 /// Members are listed once per archive and kept while browsing inside it —
 /// tar.gz listing decompresses the whole stream, which must not happen per
@@ -26,60 +29,6 @@ pub(crate) struct ArchiveCache {
     pub path: PathBuf,
     mtime: Option<std::time::SystemTime>,
     pub members: Vec<Member>,
-}
-
-/// The rows for directory `sub` (`""` = root) of `members`: the `..` row,
-/// then direct child directories (explicit or implied by deeper members),
-/// then direct child files. Pure, so the tests can pin the shape down.
-pub(crate) fn archive_rows(archive: &Path, members: &[Member], sub: &str) -> Vec<Entry> {
-    let mut dirs: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
-    let mut files: Vec<(String, u64)> = Vec::new();
-    for m in members {
-        let name = m.name.trim_end_matches('/');
-        let Some(rest) = name.strip_prefix(sub) else { continue };
-        if rest.is_empty() {
-            continue; // the directory entry for `sub` itself
-        }
-        match rest.split_once('/') {
-            // Deeper than one level: only its first segment shows, as a dir.
-            Some((head, _)) => {
-                dirs.insert(head.to_string());
-            }
-            None => {
-                if m.is_dir {
-                    dirs.insert(rest.to_string());
-                } else {
-                    files.push((rest.to_string(), m.size));
-                }
-            }
-        }
-    }
-    files.sort();
-    // The `..` row: its synthetic path is the archive-or-parent target, but
-    // navigation intercepts it before anything touches the path.
-    let up = Entry::remote("..", archive.display().to_string(), true, 0, true);
-    let mut out = vec![up];
-    for d in dirs {
-        let p = format!("{}/{}{}", archive.display(), sub, d);
-        out.push(Entry::remote(d, p, true, 0, false));
-    }
-    for (f, size) in files {
-        let p = format!("{}/{}{}", archive.display(), sub, f);
-        out.push(Entry::remote(f, p, false, size, false));
-    }
-    out
-}
-
-/// The member names under `prefix` (the entries a dir row stands for),
-/// including the file `prefix` itself when it names a file directly.
-pub(crate) fn members_under<'a>(members: &'a [Member], prefix: &str) -> Vec<&'a Member> {
-    members
-        .iter()
-        .filter(|m| {
-            let name = m.name.trim_end_matches('/');
-            name == prefix.trim_end_matches('/') || name.starts_with(&format!("{}/", prefix.trim_end_matches('/')))
-        })
-        .collect()
 }
 
 impl App {
@@ -534,6 +483,11 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+// The two pure ones live in cian-core: the GUI's engine browses the same
+// zips, and two front ends disagreeing about what is inside one would be a
+// strange thing to ship.
+use cian_core::archive::{archive_rows, members_under};
 
     fn m(name: &str, is_dir: bool, size: u64) -> Member {
         Member { name: name.to_string(), is_dir, size, compressed: 0 }

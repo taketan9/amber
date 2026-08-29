@@ -281,7 +281,9 @@ const LOOK = `({
             first: document.querySelector('#report .hit')?.textContent }
         : null,
     view: document.querySelector('#view:not([hidden])')
-        ? { about: document.getElementById('v-about').textContent,
+        ? { pic: document.querySelector('#v-pic:not([hidden]) img, #v-pic:not([hidden]) embed')
+                ? document.querySelector('#v-pic img, #v-pic embed').src.slice(0, 24) + '…' : null,
+            about: document.getElementById('v-about').textContent,
             foot: document.getElementById('v-foot').textContent,
             first: document.querySelector('.view-line')?.textContent,
             lines: document.querySelectorAll('.view-line').length }
@@ -303,6 +305,10 @@ async function main() {
     // itself, and the round read as a paste that had quietly done nothing.
     fs.mkdirSync(path.join(sand, 'from'));
     fs.mkdirSync(path.join(sand, 'to'));
+    // A picture, for F3 on something the window draws rather than reads.
+    fs.writeFileSync(path.join(sand, 'from', 'p.png'), Buffer.from(
+        'iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAHElEQVQoz2NgGAWjYBSMglEwCkbB'
+        + 'KBgFo2AUjAIAB9wAAeEjBaEAAAAASUVORK5CYII=', 'base64'));
     for (const name of ['あ.txt', 'b.md', 'c.rs']) {
         // Long enough that G and gg have somewhere to go, and one of them in
         // Shift_JIS — the encoding the viewer exists to get right, and the one
@@ -372,7 +378,9 @@ async function main() {
                 ? `  ▤ ${after.report.name} ｜${after.report.about}｜ ${after.report.rows}行  «${after.report.first}»`
                 : null;
             const marks = asking ?? rep ?? menu ?? sh ?? (after.view
-                ? `  ｜${after.view.foot}  ${after.view.about}  «${after.view.first}»`
+                ? (after.view.pic
+                    ? `  ▦ ${after.view.about}  ${after.view.pic}`
+                    : `  ｜${after.view.foot}  ${after.view.about}  «${after.view.first}»`)
                 : (after.marks.length ? `  [${after.marks.join(' ')}]` : ''));
             console.log(`${moved ? '  ' : '× '}${key.padEnd(8)}${note.padEnd(16)} ${after.status}${marks}`);
             if (!moved) bad++;

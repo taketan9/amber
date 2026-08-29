@@ -27,6 +27,7 @@ const el = {
     vName: document.getElementById('v-name'),
     vAbout: document.getElementById('v-about'),
     vBody: document.getElementById('v-body'),
+    vPic: document.getElementById('v-pic'),
     vFoot: document.getElementById('v-foot'),
 };
 
@@ -222,6 +223,7 @@ function move(delta) {
     const last = pane.entries.length - 1;
     pane.cursor = Math.min(last, Math.max(0, pane.cursor + delta));
     draw(state.focus);
+    if (visual.on) paintVisual();
 }
 
 async function enter() {
@@ -230,6 +232,17 @@ async function enter() {
     if (!pane) return;
     const row = pane.entries[pane.cursor];
     if (!row) return;
+    // An archive is a directory you can walk into, which is what the terminal
+    // build does with Enter — reading a zip as a list of names is `:lsar`, and
+    // it is a different question.
+    if (!row.is_dir && !row.parent && /\.(zip|tar|gz|tgz|7z|rar|jar)$/i.test(row.name)) {
+        const r = await ask('enterarchive', { pane: which });
+        if (!r) return;
+        state[which] = r.pane;
+        draw(which);
+        say(`${r.archive.split(/[\\/]/).pop()} の中`);
+        return;
+    }
     // A file is read here rather than handed to the desktop — the same
     // division the terminal build makes. Ctrl+Enter is the other one.
     if (!row.is_dir && !row.parent) {
@@ -656,7 +669,7 @@ const HELP = [
         ['j / k / ↑ ↓', 'ひとつ下 / 上'],
         ['Shift+D / Shift+U', '10行ずつ'],
         ['gg / G', '先頭 / 末尾'],
-        ['Enter', 'ディレクトリへ入る / ファイルを読む'],
+        ['Enter', 'ディレクトリへ入る / ファイルを読む / アーカイブの中へ'],
         ['Ctrl+Enter', 'ディレクトリは反対ペインへ / ファイルは既定のアプリで'],
         ['Backspace', '親ディレクトリへ'],
         ['z', '入力したパスへ移動'],
@@ -687,6 +700,7 @@ const HELP = [
         [':hash', 'チェックサム（既定 sha256、:hash md5 も）'],
         ['=  /  :diff', '左右を比較 — ファイル同士は行差分、ディレクトリ同士は再帰'],
         [':renamepattern', '一括リネーム {name}_{n3}.{ext}（先にプレビュー）'],
+        [':renamelist', '名前の一覧を編集してリネーム（Ctrl+S で適用）'],
         [':zip / :tar / :targz', 'マークをアーカイブにまとめる'],
         [':unzip / :lsar', 'ここに展開 / 中身を見る'],
         [':log / :filelog', 'コミットログ / このファイルの履歴（git・svn）'],
@@ -702,6 +716,7 @@ const HELP = [
         [':each コマンド', 'マーク各ファイルに実行 — {} がパス'],
     ]],
     ['読み書き（F3・Enter）', [
+        ['画像・PDF', 'F3 か Enter でそのまま表示（寸法も出ます）'],
         ['Ctrl+S', '保存（元の文字コード・改行・BOM のまま）'],
         ['Esc ×3', '閉じる ── 3回連続（未保存なら3回目で確認）'],
         ['Backspace ×3', '同じ。vim 流儀でノーマルモードのときだけ'],
@@ -713,6 +728,8 @@ const HELP = [
     ['マークと操作', [
         ['Space', 'マーク切替して下へ'],
         ['Shift+Space', 'マーク切替して上へ'],
+        ['v', 'ビジュアル選択（Enter 確定・Esc 取消）'],
+        [':nobom', 'UTF-8 BOM を除去（UTF-16 は触らない）'],
         ['Ctrl+A', '全マーク（もう一度で解除）'],
         ['V', '全マークを反転'],
         ['c / m / d', '反対ペインへコピー / 移動 / 削除（ゴミ箱へ）'],
@@ -949,6 +966,9 @@ document.addEventListener('keydown', (e) => {
     else if (k === 'l' && e.ctrlKey) focusPane('right');
     else if (k === 'Tab') { state.focus = state.focus === 'left' ? 'right' : 'left'; draw('left'); draw('right'); }
     else if (k === 'Enter' && (e.ctrlKey || e.metaKey)) openOut();
+    // Visual selection first: Enter there means "keep these", and entering a
+    // directory in the middle of choosing files is never what was meant.
+    else if (k === 'Enter' && visual.on) endVisual(true);
     else if (k === 'Enter') enter();
     else if (k === 'Backspace') parent();
     else if (k === ' ') mark(false);
@@ -965,6 +985,7 @@ document.addEventListener('keydown', (e) => {
     else if (k === 'A') create(true);
     else if (k === 'u') undo();
     else if (k === 'V') invert();
+    else if (k === 'v') startVisual();
     else if (k === 'o') syncPane(true);
     else if (k === 'O') syncPane(false);
     else if (k === 'z') goToPath();
@@ -994,6 +1015,7 @@ document.addEventListener('keydown', (e) => {
     // Esc backs out of whatever the listing is showing that is not a
     // directory. A branch view and a panelized search are both "here is a set
     // of files"; leaving them is the same gesture.
+    else if (k === 'Escape' && visual.on) endVisual(false);
     else if (k === 'Escape' && state[state.focus] && state[state.focus].flat) leaveFlat();
     else if (k === 'Escape' && running) {
         window.cian.call('cancel', { op: running.op });
@@ -1258,7 +1280,78 @@ async function lookInside() {
     }
 }
 
+/// Something the window can draw but not read: a picture, a PDF.
+///
+/// Tried before the text read, not after it fails. `read_text` refuses a PNG
+/// with "looks binary", which is true and unhelpful — the answer to opening a
+/// picture is the picture.
+async function openAsPicture(which) {
+    const r = await ask('bytes', { pane: which });
+    if (!r || !r.kind) return false;
+    viewer.on = true;
+    viewer.name = r.name;
+    el.view.hidden = false;
+    el.vBody.hidden = true;
+    el.vPic.hidden = false;
+    const node = document.createElement(r.kind === 'application/pdf' ? 'embed' : 'img');
+    node.src = `data:${r.kind};base64,${r.b64}`;
+    if (node.tagName === 'EMBED') { node.type = r.kind; node.style.cssText = 'width:100%;height:100%'; }
+    node.addEventListener('load', () => {
+        el.vAbout.textContent = node.naturalWidth
+            ? `${node.naturalWidth} × ${node.naturalHeight}   ${human(r.len)}`
+            : human(r.len);
+    });
+    el.vPic.replaceChildren(node);
+    el.vName.textContent = r.name;
+    el.vAbout.textContent = human(r.len);
+    el.vFoot.textContent = 'Esc ×3 閉じる';
+    return true;
+}
+
+/// Make the editor once, or reuse it.
+///
+/// Extracted because two things open it now — a file, and the list of names
+/// `:renamelist` edits — and the second was reaching it by opening a file and
+/// closing it again, which worked exactly as badly as it sounds.
+function makeEditor(monaco, text, lang) {
+    if (!viewer.ed) {
+    viewer.ed = monaco.editor.create(el.vBody, {
+        value: text,
+        language: lang,
+        theme: editorTheme(),
+        automaticLayout: true,
+        fontFamily: getComputedStyle(document.body).fontFamily,
+        fontSize: parseFloat(getComputedStyle(document.body).fontSize),
+        minimap: { enabled: false },
+        // The one place this build differs from a code editor's defaults:
+        // a file manager opens files it did not write, and reformatting
+        // them on the way past is not its business.
+        renderWhitespace: 'selection',
+        scrollBeyondLastLine: false,
+    });
+    viewer.ed.onDidChangeModelContent(() => {
+        const now = viewer.ed.getModel().getAlternativeVersionId();
+        const dirty = now !== viewer.base;
+        if (dirty === viewer.dirty) return;
+        viewer.dirty = dirty;
+        drawViewFoot();
+    });
+    viewer.ed.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => saveFile());
+    viewer.ed.onDidChangeCursorPosition(drawViewFoot);
+    } else {
+    viewer.ed.updateOptions({ theme: editorTheme() });
+    monaco.editor.setModelLanguage(viewer.ed.getModel(), lang);
+    viewer.ed.setValue(text);
+    }
+
+}
+
 async function openInEditor(which) {
+    const pane = state[which];
+    const row = pane && pane.entries[pane.cursor];
+    if (row && /\.(png|jpe?g|gif|webp|bmp|svg|avif|ico|pdf)$/i.test(row.name)) {
+        if (await openAsPicture(which)) return;
+    }
     const f = await ask('view', { pane: which });
     if (!f) return;
 
@@ -1287,35 +1380,7 @@ async function openInEditor(which) {
 
     const text = f.lines.join('\n');
     const lang = MONACO_LANG[f.lang] || 'plaintext';
-    if (!viewer.ed) {
-        viewer.ed = monaco.editor.create(el.vBody, {
-            value: text,
-            language: lang,
-            theme: editorTheme(),
-            automaticLayout: true,
-            fontFamily: getComputedStyle(document.body).fontFamily,
-            fontSize: parseFloat(getComputedStyle(document.body).fontSize),
-            minimap: { enabled: false },
-            // The one place this build differs from a code editor's defaults:
-            // a file manager opens files it did not write, and reformatting
-            // them on the way past is not its business.
-            renderWhitespace: 'selection',
-            scrollBeyondLastLine: false,
-        });
-        viewer.ed.onDidChangeModelContent(() => {
-            const now = viewer.ed.getModel().getAlternativeVersionId();
-            const dirty = now !== viewer.base;
-            if (dirty === viewer.dirty) return;
-            viewer.dirty = dirty;
-            drawViewFoot();
-        });
-        viewer.ed.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => saveFile());
-        viewer.ed.onDidChangeCursorPosition(drawViewFoot);
-    } else {
-        viewer.ed.updateOptions({ theme: editorTheme() });
-        monaco.editor.setModelLanguage(viewer.ed.getModel(), lang);
-        viewer.ed.setValue(text);
-    }
+    makeEditor(monaco, text, lang);
     // After the text is in, not before: loading it is a change to the model,
     // and a file is not modified by having been opened.
     viewer.base = viewer.ed.getModel().getAlternativeVersionId();
@@ -1351,6 +1416,14 @@ function setStyle(i) {
 }
 
 function drawViewFoot() {
+    // The list of names is not a file, so the footer must not offer to save
+    // one — it applies a rename, and saying 保存 there would describe
+    // something that is not about to happen.
+    if (renameList.on) {
+        el.vFoot.textContent = `${renameList.paths.length} 件   1行に1つ、順番は変えないこと`
+            + '   ·   Ctrl+S 適用   Esc ×3 やめる';
+        return;
+    }
     // In vim style the footer is vim's own — its mode line and its `:` prompt
     // live there, and writing over them would take the command line away.
     if (viewer.vim) return;
@@ -1366,6 +1439,12 @@ function drawViewFoot() {
 
 async function saveFile() {
     if (!viewer.ed) return false;
+    // The editor is holding a list of names rather than a file's contents.
+    if (renameList.on) {
+        const ok = await applyRenameList();
+        if (ok) { renameList.on = false; await closeView(false); }
+        return ok;
+    }
     const lines = viewer.ed.getValue().split(/\r?\n/);
     const r = await ask('save', { lines });
     if (!r) return false;
@@ -1386,7 +1465,11 @@ async function closeView(ask_first = true) {
     }
     viewer.on = false;
     viewer.dirty = false;
+    renameList.on = false;
     if (viewer.vim) { viewer.vim.dispose(); viewer.vim = null; }
+    el.vPic.replaceChildren();
+    el.vPic.hidden = true;
+    el.vBody.hidden = false;
     el.view.hidden = true;
     el.status.focus?.();
 }
@@ -1512,6 +1595,10 @@ const COMMANDS = [
     { name: 'redo', about: 'u で取り消した操作をやり直す', run: redo },
     { name: 'shell', about: 'シェルパネルを開く（Shift+J でも）', run: openShell },
     { name: 'each', about: 'マーク各ファイルにコマンド — {} がパス', arg: 'コマンド', run: cmdEach },
+    { name: 'nobom', about: 'UTF-8 BOM を除去（UTF-16 は触らない）', run: cmdNoBom },
+    { name: 'renamelist', about: '名前の一覧を編集してリネーム', run: cmdRenameList },
+    { name: 'visual', about: 'ビジュアル選択（v でも）', run: startVisual },
+    { name: 'compare', about: '左右を比較（= でも）', run: cmdCompare },
     { name: 'back', about: 'ひとつ前のディレクトリへ', run: () => step('back') },
     { name: 'forward', about: 'ひとつ先のディレクトリへ', run: () => step('forward') },
     { name: 'history', about: 'このペインの履歴', run: cmdHistory },
@@ -1531,6 +1618,88 @@ async function cmdBang(line) {
     const r = await ask('run', { pane: state.focus, line });
     if (!r) return;
     say(r.sent);
+}
+
+/// `:renamelist` — edit the names as a list, apply the list.
+///
+/// The other bulk rename. `:renamepattern` is for a rule; this is for the
+/// hundred names that follow no rule, which is most of them. Editing them as
+/// text is the only way that is not a hundred prompts, and it is what every
+/// filer that has this feature does.
+async function cmdRenameList() {
+    const pane = state[state.focus];
+    const rows = pane.entries.filter((x) => x.marked);
+    const what = rows.length ? rows : pane.entries.filter((x) => !x.parent);
+    if (!what.length) { say('対象がありません', true); return; }
+
+    let monaco;
+    try {
+        monaco = await loadMonaco();
+    } catch (e) { say(e.message, true); return; }
+
+    // The editor, on a list rather than a file. Nothing is written until it is
+    // closed, and the line count has to still match — a list one line short is
+    // a rename that would pair the wrong names together, silently.
+    renameList.on = true;
+    renameList.paths = what.map((x) => x.path);
+    viewer.on = true;
+    viewer.name = '名前の一覧';
+    el.view.hidden = false;
+    el.vBody.hidden = false;
+    el.vPic.hidden = true;
+    makeEditor(monaco, what.map((x) => x.name).join('\n'), 'plaintext');
+    viewer.base = viewer.ed.getModel().getAlternativeVersionId();
+    viewer.dirty = false;
+    setStyle(style);
+    el.vName.textContent = '名前の一覧を編集';
+    el.vAbout.textContent = `${what.length} 件   1行に1つ、順番は変えないこと`;
+    el.vFoot.textContent = 'Ctrl+S 適用   Esc ×3 やめる';
+    viewer.ed.focus();
+}
+
+const renameList = { on: false, paths: [] };
+
+async function applyRenameList() {
+    const names = viewer.ed.getValue().split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+    if (names.length !== renameList.paths.length) {
+        say(`行数が合いません（${names.length} 行 / ${renameList.paths.length} 件）`, true);
+        return false;
+    }
+    const rows = renameList.paths
+        .map((path, i) => ({ path, to: names[i] }))
+        .filter((x, i) => x.to !== state[state.focus].entries.find((e) => e.path === x.path)?.name
+            || names[i] !== names[i]);
+    const changing = rows.filter((x) => x.to !== x.path.split(/[\\/]/).pop());
+    if (!changing.length) { say('変わる名前がありません'); return true; }
+    if (!await confirm(`${changing.length} 件の名前を変えます`,
+        changing.map((x) => `${x.path.split(/[\\/]/).pop()}  →  ${x.to}`).join('\n'))) {
+        say('やめました');
+        return false;
+    }
+    const done = await ask('renameapply', { rows: changing });
+    if (!done) return false;
+    await reread();
+    if (done.errors.length) say(done.errors.join('  /  '), true);
+    else say(`${done.renamed} 件の名前を変えました`);
+    return true;
+}
+
+async function cmdNoBom() {
+    const pane = state[state.focus];
+    const rows = pane.entries.filter((x) => x.marked);
+    const what = rows.length ? rows : [pane.entries[pane.cursor]].filter((x) => x && !x.parent);
+    if (!what.length) { say('対象がありません', true); return; }
+    if (!await confirm(`${what.length} 件から UTF-8 BOM を除去します`,
+        what.map((x) => x.name).join('\n'))) { say('やめました'); return; }
+    const r = await ask('nobom', { pane: state.focus });
+    if (!r) return;
+    state[state.focus] = r.pane;
+    draw(state.focus);
+    const parts = [`BOM除去 ${r.stripped} 件`];
+    if (r.none) parts.push(`もともと無し ${r.none} 件`);
+    if (r.utf16) parts.push(`UTF-16 は据置 ${r.utf16} 件`);
+    if (r.failed) parts.push(`失敗 ${r.failed} 件`);
+    say(parts.join('   '), r.failed > 0);
 }
 
 async function cmdEach(line) {
@@ -1758,6 +1927,53 @@ async function cmdHistory() {
 }
 
 let lastGG = 0;
+
+/// `v` — mark a run without pressing Space down it.
+///
+/// The anchor is where it started; every move re-marks from there, so
+/// overshooting is corrected by moving back rather than by starting again.
+/// `Enter` or a second `v` keeps it, `Esc` puts the marks back as they were.
+const visual = { on: false, from: 0, was: null };
+
+async function startVisual() {
+    const pane = state[state.focus];
+    if (!pane) return;
+    if (visual.on) { await endVisual(true); return; }
+    visual.on = true;
+    visual.from = pane.cursor;
+    visual.was = pane.entries.filter((x) => x.marked).map((x) => x.path);
+    await paintVisual();
+    say('ビジュアル選択 — Enter で確定、Esc で取消');
+}
+
+async function paintVisual() {
+    const which = state.focus;
+    const pane = state[which];
+    const lo = Math.min(visual.from, pane.cursor);
+    const hi = Math.max(visual.from, pane.cursor);
+    const want = new Set(visual.was);
+    pane.entries.forEach((x, i) => { if (i >= lo && i <= hi && !x.parent) want.add(x.path); });
+    const next = await ask('setmarks', { pane: which, paths: [...want] });
+    if (!next) return;
+    next.cursor = pane.cursor;
+    state[which] = next;
+    draw(which);
+    say(`ビジュアル: ${next.marked} 件`);
+}
+
+async function endVisual(keep) {
+    if (!visual.on) return;
+    visual.on = false;
+    if (!keep) {
+        const which = state.focus;
+        const next = await ask('setmarks', { pane: which, paths: visual.was });
+        if (next) { state[which] = next; draw(which); }
+        say('取り消しました');
+    } else {
+        say(`${state[state.focus].marked} 件をマーク`);
+    }
+    visual.was = null;
+}
 
 /// `f` looks in *this* listing, and `n`/`N` walk the matches.
 ///
