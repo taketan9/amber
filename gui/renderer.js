@@ -684,6 +684,7 @@ const HELP = [
         ['Shift+F', '名前で探す（この下すべて）── :find'],
         ['Ctrl+F / Ctrl+G', 'ファイルの中を探す（:grep）'],
         ['  結果で p', '一覧に読み込んで、いつものキーで操作する'],
+        ['  結果で r', 'マッチした全ファイルを一括置換（1行ずつ確認）'],
         ['b', 'この配下を1ファイル1行に平坦化（b か Esc で戻る）'],
         ['h', 'このペインの履歴'],
         ['Z', '行った場所へ飛ぶ'],
@@ -707,6 +708,7 @@ const HELP = [
         [':log / :filelog', 'コミットログ / このファイルの履歴（git・svn）'],
         [':gitdiff', '選択ファイルの差分'],
         [':stage / :unstage / :discard', 'git add / reset / 変更の破棄'],
+        [':svnupdate :svncommit :svnresolve', 'svn の3つ'],
         [':dedup', '中身が同じファイルを探す'],
     ]],
     ['シェル', [
@@ -723,6 +725,10 @@ const HELP = [
         ['Backspace ×3', '同じ。vim 流儀でノーマルモードのときだけ'],
         ['F3', '1回で閉じる'],
         ['Ctrl+Shift+O', '見出し一覧から飛ぶ（vim 流儀は :outline）'],
+        [':sort2 :rsort :uniq', '行をソート / 逆順 / 重複を落とす'],
+        [':han :zen', '全角ASCII→半角 / 半角カナ→全角'],
+        [':expand :unexpand :reindent', 'タブ↔スペース、インデントを揃える'],
+        [':lf :crlf', '改行コードを変える（保存時に反映）'],
         ['流儀', 'メモ帳流（既定）／ vim ── 一覧に戻って T のメニューの中'],
         ['  vim のとき', 'ノーマルモードで開く。:w 保存 :q 閉じる :wq 両方'],
         ['  メモ帳流のとき', 'Ctrl+C/V/Z/F など Windows の手が効く'],
@@ -1607,6 +1613,19 @@ const COMMANDS = [
     { name: 'nobom', about: 'UTF-8 BOM を除去（UTF-16 は触らない）', run: cmdNoBom },
     { name: 'renamelist', about: '名前の一覧を編集してリネーム', run: cmdRenameList },
     { name: 'outline', about: '開いているファイルの見出し一覧', run: cmdOutline },
+    { name: 'sort2', about: '開いているファイルの行をソート', run: () => textOp('sort') },
+    { name: 'rsort', about: '行を逆順ソート', run: () => textOp('rsort') },
+    { name: 'uniq', about: '重複行を落とす', run: () => textOp('uniq') },
+    { name: 'han', about: '全角ASCII → 半角', run: () => textOp('han') },
+    { name: 'zen', about: '半角カナ → 全角', run: () => textOp('zen') },
+    { name: 'expand', about: '行頭のタブ → スペース', run: () => textOp('expand') },
+    { name: 'unexpand', about: '行頭のスペース → タブ', run: () => textOp('unexpand') },
+    { name: 'reindent', about: 'インデントを揃える', run: () => textOp('reindent') },
+    { name: 'lf', about: '改行を LF にする', run: () => setEol('lf') },
+    { name: 'crlf', about: '改行を CRLF にする', run: () => setEol('crlf') },
+    { name: 'svnupdate', about: 'svn update', run: () => cmdSvn('update') },
+    { name: 'svncommit', about: 'svn commit（メッセージを訊きます）', run: () => cmdSvn('commit') },
+    { name: 'svnresolve', about: 'svn resolve --accept working', run: () => cmdSvn('resolve') },
     { name: 'visual', about: 'ビジュアル選択（v でも）', run: startVisual },
     { name: 'compare', about: '左右を比較（= でも）', run: cmdCompare },
     { name: 'back', about: 'ひとつ前のディレクトリへ', run: () => step('back') },
@@ -1719,6 +1738,46 @@ async function cmdOutline() {
                 viewer.ed.focus();
             },
         });
+}
+
+/// A line operation on whatever the editor is holding.
+///
+/// The lines go down to cian-core and come back changed. `:han` and `:zen`
+/// alone are a table of Japanese width mappings, and nobody should own two
+/// copies of that.
+async function textOp(op) {
+    if (!viewer.on || !viewer.ed) { say('先にファイルを開いてください', true); return; }
+    const lines = viewer.ed.getValue().split(/\r?\n/);
+    const r = await ask('textop', { op, lines });
+    if (!r) return;
+    // Through the editor's own edit stack, not setValue: this has to be
+    // undoable with the key that undoes everything else in here.
+    const model = viewer.ed.getModel();
+    viewer.ed.executeEdits('cian', [{
+        range: model.getFullModelRange(),
+        text: r.lines.join('\n'),
+    }]);
+    viewer.ed.pushUndoStop();
+    say(`:${op}   ${lines.length} 行 → ${r.lines.length} 行`);
+}
+
+async function setEol(kind) {
+    const r = await ask('eol', { kind });
+    if (!r) return;
+    say(`改行を ${r.eol.toUpperCase()} にしました（保存時に反映）`);
+}
+
+async function cmdSvn(what) {
+    let message;
+    if (what === 'commit') {
+        message = await askFor('コミットメッセージ', '');
+        if (message === null || !message.trim()) return;
+    }
+    const r = await ask('svn', { pane: state.focus, what, message });
+    if (!r) return;
+    state[state.focus] = r.pane;
+    draw(state.focus);
+    say(r.said);
 }
 
 async function cmdNoBom() {
@@ -1887,9 +1946,46 @@ async function cmdSearch(mode, needle) {
     show(mode === 'content' ? `grep ${needle}` : `find ${needle}`,
         `${r.root}   ${rows.length} 件${r.truncated ? '（打ち切り）' : ''}`,
         rows, {
-            foot: 'Enter そこへ   p 一覧に読み込む   Esc 閉じる',
+            foot: 'Enter そこへ   p 一覧に読み込む   r 一括置換   Esc 閉じる',
             pick: (row) => { closeReport(); revealPath(row.path, row.is_dir); },
             act: {
+                r: async () => {
+                    // Replace across every file the grep matched. The plan
+                    // first, every line of it: this writes to files that are
+                    // not open and `u` cannot take it back.
+                    const spec = await askFor('置換 s/古い/新しい/g', `s/${needle}//g`);
+                    if (spec === null || !spec.trim()) return;
+                    const paths = [...new Set(rows.map((x) => x.path))];
+                    const plan = await ask('replaceplan', { paths, spec });
+                    if (!plan) return;
+                    if (!plan.changes.length) { say('変わる行がありません'); return; }
+                    closeReport();
+                    show(`置換 ${spec}`,
+                        `${plan.changes.length} 行 / ${new Set(plan.changes.map((c) => c.path)).size} ファイル`
+                        + (plan.skipped.length ? `   飛ばした ${plan.skipped.length} 件` : ''),
+                        plan.changes.map((c) => ({
+                            n: String(c.line + 1),
+                            label: c.path.split(/[\\/]/).pop() + '  ' + c.before,
+                            sub: c.after,
+                        })),
+                        {
+                            foot: 'Enter 実行   Esc やめる',
+                            pick: async () => {
+                                closeReport();
+                                if (!await confirm(`${plan.changes.length} 行を置換します`,
+                                    `${new Set(plan.changes.map((c) => c.path)).size} ファイル — u では戻せません`)) {
+                                    say('やめました');
+                                    return;
+                                }
+                                const done = await ask('replaceapply', { changes: plan.changes });
+                                if (!done) return;
+                                await reread();
+                                const bits = [`${done.files} ファイル ${done.lines} 行を置換`];
+                                if (done.stale) bits.push(`${done.stale} 行は変わっていたので触らず`);
+                                say(bits.join('   '), done.errors.length > 0);
+                            },
+                        });
+                },
                 p: async () => {
                     const paths = rows.map((x) => x.path);
                     const which = state.focus;

@@ -1240,6 +1240,128 @@ impl Session {
                     Kind::Move, paths, Some(dest), self.out.clone(), self.undo.clone());
                 Ok(serde_json::json!({ "op": op, "count": count }))
             }
+            // ---- Line operations on the open file ----
+            //
+            // Done here rather than in the window because cian-core already
+            // does them, correctly, for the terminal build. `:han` and `:zen`
+            // in particular are a table of Japanese width mappings that nobody
+            // should own two copies of.
+            "textop" => {
+                let Some((_, file)) = self.open.as_ref() else {
+                    anyhow::bail!("開いているファイルがありません");
+                };
+                let lines: Vec<String> = req.params["lines"]
+                    .as_array()
+                    .map(|a| a.iter().map(|v| v.as_str().unwrap_or("").to_string()).collect())
+                    .unwrap_or_else(|| file.lines.clone());
+                let width = req.params["width"].as_u64().unwrap_or(4) as usize;
+                use cian_core::textops as t;
+                let out = match req.params["op"].as_str().unwrap_or("") {
+                    "sort" => t::sort(&lines, false),
+                    "rsort" => t::sort(&lines, true),
+                    "uniq" => t::uniq(&lines),
+                    "han" => lines.iter().map(|l| t::to_halfwidth(l)).collect(),
+                    "zen" => lines.iter().map(|l| t::to_fullwidth(l)).collect(),
+                    "expand" => t::expand_tabs(&lines, width),
+                    "expandall" => t::expand_all_tabs(&lines, width),
+                    "unexpand" => t::unexpand_tabs(&lines, width),
+                    "reindent" => t::reindent(&lines, width),
+                    other => anyhow::bail!("知らない操作: {other}"),
+                };
+                Ok(serde_json::json!({ "lines": out }))
+            }
+            // Change the line endings the open file will be written with.
+            "eol" => {
+                let Some((_, file)) = self.open.as_mut() else {
+                    anyhow::bail!("開いているファイルがありません");
+                };
+                file.eol = match req.params["kind"].as_str() {
+                    Some("crlf") => cian_core::viewer::Eol::Crlf,
+                    _ => cian_core::viewer::Eol::Lf,
+                };
+                Ok(serde_json::json!({ "eol": format!("{:?}", file.eol) }))
+            }
+            // ---- Replace across every file a grep matched ----
+            //
+            // The plan first, and every line of it: this writes to files that
+            // are not open and cannot be undone with `u`. Seeing each line
+            // before and after is the only thing that makes it safe.
+            "replaceplan" => {
+                let paths: Vec<std::path::PathBuf> = req.params["paths"]
+                    .as_array()
+                    .map(|a| a.iter().filter_map(|v| v.as_str()).map(std::path::PathBuf::from).collect())
+                    .unwrap_or_default();
+                let spec = req.params["spec"].as_str().unwrap_or("");
+                let sub = cian_core::substitute::parse(spec).map_err(|e| anyhow::anyhow!(e))?;
+                let (changes, skipped) = cian_core::grepedit::plan(&paths, &sub);
+                Ok(serde_json::json!({
+                    "changes": changes.iter().map(|c| serde_json::json!({
+                        "path": c.path.display().to_string(),
+                        "line": c.line, "before": c.before, "after": c.after,
+                    })).collect::<Vec<_>>(),
+                    "skipped": skipped.iter().map(|s| serde_json::json!({
+                        "path": s.path.display().to_string(), "why": s.why,
+                    })).collect::<Vec<_>>(),
+                }))
+            }
+            "replaceapply" => {
+                let changes: Vec<cian_core::grepedit::Change> = req.params["changes"]
+                    .as_array()
+                    .map(|a| a.iter().filter_map(|v| Some(cian_core::grepedit::Change {
+                        path: std::path::PathBuf::from(v["path"].as_str()?),
+                        line: v["line"].as_u64()? as usize,
+                        before: v["before"].as_str()?.to_string(),
+                        after: v["after"].as_str()?.to_string(),
+                        picked: true,
+                    })).collect())
+                    .unwrap_or_default();
+                if changes.is_empty() {
+                    anyhow::bail!("置換する行がありません");
+                }
+                let r = cian_core::grepedit::apply(&changes);
+                for which in ["left", "right"] {
+                    let _ = self.pane_mut(which).map(|p| p.reload());
+                }
+                Ok(serde_json::json!({
+                    "files": r.files, "lines": r.lines, "stale": r.stale, "errors": r.errors,
+                }))
+            }
+            // ---- svn, the three that are not shared with git ----
+            "svn" => {
+                let which = req.params["pane"].as_str().unwrap_or("left").to_string();
+                let dir = self.pane_mut(&which)?.cwd.clone();
+                if !cian_core::svn::is_working_copy(&dir) {
+                    anyhow::bail!("svn の作業コピーではありません");
+                }
+                let paths = self.targets(&which).unwrap_or_default();
+                let what = req.params["what"].as_str().unwrap_or("");
+                // These three answer with `()`; what to say is this end's job.
+                let said = match what {
+                    "update" => {
+                        cian_core::svn::update(&dir)?;
+                        "svn update しました".to_string()
+                    }
+                    "commit" => {
+                        let msg = req.params["message"].as_str().unwrap_or("");
+                        if msg.trim().is_empty() {
+                            anyhow::bail!("コミットメッセージがありません");
+                        }
+                        cian_core::svn::commit(&dir, &paths, msg)?;
+                        format!("{} 件を svn commit しました", paths.len())
+                    }
+                    "resolve" => {
+                        cian_core::svn::resolve(&dir, &paths)?;
+                        format!("{} 件を解決済みにしました", paths.len())
+                    }
+                    other => anyhow::bail!("知らない svn 操作: {other}"),
+                };
+                let pane = self.pane_mut(&which)?;
+                pane.reload()?;
+                Ok(serde_json::json!({
+                    "said": said,
+                    "pane": serde_json::to_value(PaneView::of(pane))?,
+                }))
+            }
             // Leave a flat listing and go back to the directory it came from.
             "leaveflat" => {
                 let which = req.params["pane"].as_str().unwrap_or("left").to_string();

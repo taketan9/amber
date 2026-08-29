@@ -227,7 +227,13 @@ class Cdp {
         const r = await this.send('Runtime.evaluate', {
             expression: expr, returnByValue: true, awaitPromise: true,
         });
-        if (r.exceptionDetails) throw new Error(r.exceptionDetails.text);
+        if (r.exceptionDetails) {
+            // `.text` on its own is the word "Uncaught" and nothing else,
+            // which is worse than no message at all — it names the category
+            // and hides the fault.
+            const d = r.exceptionDetails;
+            throw new Error(d.exception?.description || d.exception?.value || d.text);
+        }
         return r.result.value;
     }
 }
