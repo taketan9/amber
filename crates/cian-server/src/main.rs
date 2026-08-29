@@ -136,6 +136,29 @@ impl Session {
     /// The paths an operation acts on: the marked rows, or the one under the
     /// cursor when nothing is marked. Never the `..` row — it is navigable but
     /// is not a thing to copy.
+    /// Where the front end says its cursor is.
+    ///
+    /// **The front end owns the cursor.** It moves on every `j` without asking,
+    /// because a round trip per keystroke to redraw one highlighted row would
+    /// be absurd — but that left the engine's own idea of it only being
+    /// updated by `enter` and `mark`. Three presses of `j` and then `r`
+    /// renamed whatever had been under the cursor three rows ago.
+    ///
+    /// So every request that names a pane states the cursor too, and it is
+    /// taken here, once, rather than in each of the handlers that consult it.
+    fn take_cursor(&mut self, req: &Request) {
+        let (Some(which), Some(at)) = (req.params["pane"].as_str(), req.params["cursor"].as_u64())
+        else {
+            return;
+        };
+        let which = which.to_string();
+        if let Ok(pane) = self.pane_mut(&which) {
+            // Clamped rather than trusted: the listing can have changed under
+            // the front end between its last draw and this request.
+            pane.cursor = (at as usize).min(pane.entries.len().saturating_sub(1));
+        }
+    }
+
     fn targets(&self, which: &str) -> anyhow::Result<Vec<std::path::PathBuf>> {
         let pane = match which {
             "left" => &self.left,
@@ -178,6 +201,7 @@ impl Session {
     /// Answer one call. The error is a string because it is going to a person,
     /// through a dialog, not to code that will match on it.
     fn handle(&mut self, req: &Request) -> anyhow::Result<serde_json::Value> {
+        self.take_cursor(req);
         match req.method.as_str() {
             // Both panes as they stand. What the front end asks for on startup
             // and after anything that could have changed the world.
@@ -338,6 +362,59 @@ impl Session {
                     "op": job,
                     "count": count,
                     "kind": if matches!(kind, Kind::Move) { "move" } else { "copy" },
+                }))
+            }
+            // Hand the file to whatever the desktop opens it with. A
+            // directory goes to the other pane instead, which is what the
+            // terminal build's Ctrl+Enter does — one key, and the answer
+            // depends on what is under the cursor.
+            "open" => {
+                let which = req.params["pane"].as_str().unwrap_or("left").to_string();
+                let other = if which == "left" { "right" } else { "left" };
+                let pane = self.pane_mut(&which)?;
+                let Some(entry) = pane.entries.get(pane.cursor).filter(|e| !e.is_parent) else {
+                    anyhow::bail!("対象がありません");
+                };
+                let path = entry.path.clone();
+                let name = entry.name.clone();
+                if entry.is_dir {
+                    let there = self.pane_mut(other)?;
+                    *there = Pane::new(path)?;
+                    let view = serde_json::to_value(PaneView::of(there))?;
+                    return Ok(serde_json::json!({ "pane": other, "view": view, "name": name }));
+                }
+                cian_core::proc::open_with_desktop(&path)?;
+                Ok(serde_json::json!({ "opened": name }))
+            }
+            // Read a file for the viewer.
+            //
+            // Decoding is the engine's job, not the window's. A browser reads
+            // UTF-8 and nothing else, and half of what this meets on a
+            // Japanese Windows machine is Shift_JIS — a log, a batch file,
+            // something out of an old tool. Handing over raw bytes would mean
+            // writing that detection a second time, in JavaScript.
+            "view" => {
+                let which = req.params["pane"].as_str().unwrap_or("left").to_string();
+                let pane = self.pane_mut(&which)?;
+                let Some(entry) = pane.entries.get(pane.cursor).filter(|e| !e.is_parent) else {
+                    anyhow::bail!("対象がありません");
+                };
+                if entry.is_dir {
+                    anyhow::bail!("{} はディレクトリです", entry.name);
+                }
+                let path = entry.path.clone();
+                let name = entry.name.clone();
+                let len = entry.len;
+                let file = cian_core::grepedit::read_text(&path)?;
+                Ok(serde_json::json!({
+                    "name": name,
+                    "path": path.display().to_string(),
+                    "lines": file.lines,
+                    "bytes": len,
+                    "encoding": format!("{:?}", file.encoding),
+                    "eol": format!("{:?}", file.eol),
+                    "bom": file.bom,
+                    "lang": cian_core::highlight::detect(&path).map(|l| format!("{l:?}")),
                 }))
             }
             // Rename in place. The name is a bare filename, never a path —

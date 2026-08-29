@@ -177,6 +177,32 @@ html, body {
 }
 .sheet .field:focus { outline: none; border-color: var(--accent); }
 
+#view {
+  position: fixed; inset: 0; display: flex; flex-direction: column;
+  background: var(--pane); color: var(--text);
+}
+#view[hidden] { display: none; }
+.vhead, .vfoot {
+  display: flex; justify-content: space-between; gap: 12px;
+  padding: 6px 10px; background: var(--pane-off); color: var(--dim);
+  white-space: nowrap; overflow: hidden;
+}
+.vhead { border-bottom: 1px solid var(--line); }
+.vfoot { border-top: 1px solid var(--line); }
+.vbody { flex: 1 1 auto; overflow: hidden; padding: 4px 0; }
+.vline { display: flex; gap: 10px; height: var(--cell-h); padding: 0 10px; white-space: pre; }
+.vline.on { background: var(--accent); color: var(--on-accent); }
+/* The numbers get a column of their own so the text starts at one place down
+   the whole file, and they are dimmed because they are not the thing being
+   read. */
+.vline .n {
+  flex: 0 0 5ch; text-align: right; color: var(--dim);
+  font-variant-numeric: tabular-nums; user-select: none;
+}
+.vline.on .n { color: var(--on-accent); }
+.vline .t { flex: 1 1 auto; overflow: hidden; }
+.vline mark { background: var(--accent); color: var(--on-accent); }
+
 #find {
   position: fixed; inset: 0; display: flex;
   align-items: flex-start; justify-content: center;
@@ -255,6 +281,16 @@ html, body {
       <div class="hits" id="find-hits"></div>
       <div class="foot" id="find-foot"></div>
     </div>
+  </div>
+
+  <!-- The viewer. `Enter` on a file, or F3. Draws a window of lines rather
+       than the whole file, the way the terminal build does: a listing of a
+       hundred thousand rows is a hundred thousand elements otherwise, and the
+       scroll goes to treacle on exactly the files worth opening this way. -->
+  <div id="view" hidden>
+    <div class="vhead"><span id="v-name"></span><span id="v-about"></span></div>
+    <div class="vbody" id="v-body"></div>
+    <div class="vfoot" id="v-foot"></div>
   </div>
 
   <script src="renderer.js"></script>

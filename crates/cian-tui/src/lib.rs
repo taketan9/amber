@@ -3689,27 +3689,10 @@ pub(crate) fn encode_key(key: KeyEvent, app_cursor: bool) -> Option<Vec<u8>> {
     }
 }
 
-/// Hand something to whatever the desktop opens it with.
-///
-/// A path and a URL were two functions, identical to the byte apart from the
-/// type of the one argument — and both `&Path` and `&str` are `AsRef<OsStr>`,
-/// which is all `Command::arg` ever wanted.
+/// Hand something to whatever the desktop opens it with. The three-way
+/// platform split lives in `cian-core`, so the GUI's engine shares it.
 fn os_open(target: impl AsRef<std::ffi::OsStr>) -> Result<()> {
-    #[cfg(target_os = "macos")]
-    let mut cmd = cian_core::proc::quiet("open");
-    #[cfg(target_os = "linux")]
-    let mut cmd = cian_core::proc::quiet("xdg-open");
-    #[cfg(target_os = "windows")]
-    let mut cmd = {
-        let mut c = cian_core::proc::quiet("cmd");
-        c.arg("/C").arg("start").arg("");
-        c
-    };
-    cmd.arg(target)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()?;
+    cian_core::proc::open_with_desktop(target)?;
     Ok(())
 }
 

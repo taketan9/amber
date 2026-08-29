@@ -50,6 +50,38 @@ function parseKey(spec) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+/// Shift_JIS bytes. Node cannot encode it, and pulling in iconv for a test
+/// fixture would be a dependency for the sake of three lines — but every
+/// character used here is in JIS X 0208, so the table is one `Intl`-free map
+/// built from what the platform *can* decode.
+function sjis(text) {
+    const out = [];
+    for (const ch of text) {
+        const code = ch.codePointAt(0);
+        if (code < 0x80) { out.push(code); continue; }
+        const found = SJIS_TABLE.get(ch);
+        if (found === undefined) throw new Error(`no Shift_JIS byte pair for ${ch}`);
+        out.push(found >> 8, found & 0xff);
+    }
+    return Buffer.from(out);
+}
+
+/// Built by asking the platform to decode every two-byte pair once. The
+/// decoder is the authority on the mapping, so the table cannot disagree with
+/// what the engine will read back.
+const SJIS_TABLE = (() => {
+    const dec = new TextDecoder('shift_jis', { fatal: false });
+    const map = new Map();
+    for (let hi = 0x81; hi <= 0xef; hi++) {
+        for (let lo = 0x40; lo <= 0xfc; lo++) {
+            if (lo === 0x7f) continue;
+            const ch = dec.decode(Buffer.from([hi, lo]));
+            if (ch.length === 1 && ch !== '\uFFFD' && !map.has(ch)) map.set(ch, (hi << 8) | lo);
+        }
+    }
+    return map;
+})();
+
 async function target() {
     // Electron takes a moment to open the port; the page target appears after.
     for (let i = 0; i < 60; i++) {
@@ -137,6 +169,11 @@ const LOOK = `({
     cursor: state?.[state.focus]?.cursor,
     cwd: state?.[state.focus]?.cwd,
     typed: document.querySelector('input:not([hidden])')?.value ?? null,
+    view: document.querySelector('#view:not([hidden])')
+        ? { about: document.getElementById('v-about').textContent,
+            foot: document.getElementById('v-foot').textContent,
+            first: document.querySelector('.vline .t')?.textContent }
+        : null,
     marks: state?.[state.focus]?.entries?.filter((x) => x.marked).map((x) => x.name) ?? [],
     scroll: document.querySelector('#find:not([hidden]) .hits')?.scrollTop ?? 0,
     focus: state?.focus,
@@ -155,7 +192,15 @@ async function main() {
     fs.mkdirSync(path.join(sand, 'from'));
     fs.mkdirSync(path.join(sand, 'to'));
     for (const name of ['あ.txt', 'b.md', 'c.rs']) {
-        fs.writeFileSync(path.join(sand, 'from', name), `${name} の中身\n`);
+        // Long enough that G and gg have somewhere to go, and one of them in
+        // Shift_JIS — the encoding the viewer exists to get right, and the one
+        // a machine in Tokyo meets in every log it did not write.
+        const body = Array.from({ length: 40 }, (_, i) => `${i + 1} 行目 ${name} テスト`).join('\n');
+        if (name === 'あ.txt') {
+            fs.writeFileSync(path.join(sand, 'from', name), sjis(body + '\n'));
+        } else {
+            fs.writeFileSync(path.join(sand, 'from', name), body + '\n');
+        }
     }
 
     const keys = process.argv.slice(2);
@@ -171,6 +216,10 @@ async function main() {
         ['Tab', '反対ペインへ'],
         ['z', 'パスで移動'], [`type:${sand}/to`, ''], ['Enter', 'to へ'],
         ['Ctrl+v', '貼り付け'],
+        ['Tab', '左へ'], ['Down', ''], ['Enter', 'ファイルを読む'],
+        ['G', '末尾へ'], ['g', ''], ['g', '先頭へ'],
+        ['/', '検索'], ['type:37 行目', ''], ['Enter', '37行目へ'],
+        ['Esc', '閉じる'],
     ];
 
     const el = spawn(process.env.CIAN_ELECTRON
@@ -198,7 +247,9 @@ async function main() {
             const after = await cdp.read(LOOK);
             const moved = JSON.stringify(before) !== JSON.stringify(after);
             const note = what ? `  ${what}` : '';
-            const marks = after.marks.length ? `  [${after.marks.join(' ')}]` : '';
+            const marks = after.view
+                ? `  ｜${after.view.foot}  ${after.view.about}  «${after.view.first}»`
+                : (after.marks.length ? `  [${after.marks.join(' ')}]` : '');
             console.log(`${moved ? '  ' : '× '}${key.padEnd(8)}${note.padEnd(16)} ${after.status}${marks}`);
             if (!moved) bad++;
         }

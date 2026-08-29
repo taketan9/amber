@@ -44,3 +44,33 @@ pub fn hide(cmd: &mut Command) {
         let _ = cmd;
     }
 }
+
+/// Hand something to whatever the desktop opens it with.
+///
+/// A path and a URL were two functions, identical to the byte apart from the
+/// type of the one argument — and both `&Path` and `&str` are `AsRef<OsStr>`,
+/// which is all `Command::arg` ever wanted.
+///
+/// Down here rather than in a front end because there are two of them now, and
+/// the three-way `open` / `xdg-open` / `cmd /C start ""` split is the sort of
+/// thing that gets copied with one platform quietly missing.
+pub fn open_with_desktop(target: impl AsRef<OsStr>) -> std::io::Result<()> {
+    #[cfg(target_os = "macos")]
+    let mut cmd = quiet("open");
+    #[cfg(target_os = "linux")]
+    let mut cmd = quiet("xdg-open");
+    #[cfg(target_os = "windows")]
+    let mut cmd = {
+        // The empty argument is the window title `start` insists on, and
+        // without it a quoted path is taken as the title and nothing opens.
+        let mut c = quiet("cmd");
+        c.arg("/C").arg("start").arg("");
+        c
+    };
+    cmd.arg(target)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()?;
+    Ok(())
+}

@@ -14,6 +14,11 @@ const el = {
     findQ: document.getElementById('find-q'),
     findHits: document.getElementById('find-hits'),
     findFoot: document.getElementById('find-foot'),
+    view: document.getElementById('view'),
+    vName: document.getElementById('v-name'),
+    vAbout: document.getElementById('v-about'),
+    vBody: document.getElementById('v-body'),
+    vFoot: document.getElementById('v-foot'),
 };
 
 /// The operation currently running, if any, so its progress has somewhere to
@@ -111,6 +116,13 @@ function draw(which) {
 
 async function ask(method, params) {
     try {
+        // Every request that names a pane states where the cursor is. The
+        // cursor moves here, on every `j`, without asking the engine — so the
+        // engine's own copy went stale, and `r` after three presses of `j`
+        // renamed a file three rows up. Stated once, here, rather than
+        // remembered at each of the dozen call sites.
+        const pane = params && params.pane && state[params.pane];
+        if (pane && params.cursor === undefined) params = { ...params, cursor: pane.cursor };
         return await window.cian.call(method, params);
     } catch (e) {
         say(String(e.message || e), true);
@@ -191,10 +203,11 @@ async function enter() {
     const pane = state[which];
     if (!pane) return;
     const row = pane.entries[pane.cursor];
-    // Only directories go anywhere yet. Opening a file is the next milestone,
-    // and pretending otherwise would be a click that silently does nothing.
-    if (!row || (!row.is_dir && !row.parent)) {
-        say(`${row ? row.name : ''} — ファイルを開くのは次の段階です`);
+    if (!row) return;
+    // A file is read here rather than handed to the desktop — the same
+    // division the terminal build makes. Ctrl+Enter is the other one.
+    if (!row.is_dir && !row.parent) {
+        await lookInside();
         return;
     }
     const next = await ask('enter', { pane: which, cursor: pane.cursor });
@@ -573,7 +586,8 @@ document.addEventListener('keydown', (e) => {
 const HELP = [
     ['移動', [
         ['j / k / ↑ ↓', 'ひとつ下 / 上'],
-        ['Enter', 'ディレクトリへ入る'],
+        ['Enter', 'ディレクトリへ入る / ファイルを読む'],
+        ['Ctrl+Enter', 'ディレクトリは反対ペインへ / ファイルは既定のアプリで'],
         ['Backspace', '親ディレクトリへ'],
         ['z', '入力したパスへ移動'],
         ['Tab', '反対のペインへ'],
@@ -585,6 +599,12 @@ const HELP = [
         ['/ /', 'この下のどこかにあるファイルをあいまい検索'],
         [',', 'ソート：名前／サイズ／日付／拡張子（n s d e で直接、同じキーで昇降反転）'],
         ['T', 'トグルメニュー：隠しファイル・配色'],
+    ]],
+    ['読む（F3・Enter）', [
+        ['j / k / Ctrl+d / Ctrl+u', '行・半画面ずつ'],
+        ['gg / G', '先頭 / 末尾'],
+        ['/ n / N', '検索・次・前'],
+        ['q / Esc / F3', '閉じる'],
     ]],
     ['マークと操作', [
         ['Space', 'マーク切替して下へ'],
@@ -805,6 +825,7 @@ document.addEventListener('keydown', (e) => {
     else if (k === 'ArrowLeft' || (k === 'h' && e.ctrlKey)) focusPane('left');
     else if (k === 'ArrowRight' || (k === 'l' && e.ctrlKey)) focusPane('right');
     else if (k === 'Tab') { state.focus = state.focus === 'left' ? 'right' : 'left'; draw('left'); draw('right'); }
+    else if (k === 'Enter' && (e.ctrlKey || e.metaKey)) openOut();
     else if (k === 'Enter') enter();
     else if (k === 'Backspace') parent();
     else if (k === ' ') mark(false);
@@ -824,6 +845,7 @@ document.addEventListener('keydown', (e) => {
     else if (k === 'p' && !e.ctrlKey && !e.metaKey) copyPaths();
     else if (k === 'F5') reread();
     else if (k === '?') openHelp();
+    else if (k === 'F3') lookInside();
     else if (k === 'c' && (e.ctrlKey || e.metaKey)) hold('copy');
     else if (k === 'x' && (e.ctrlKey || e.metaKey)) hold('cut');
     else if ((k === 'v' && (e.ctrlKey || e.metaKey)) || k === 'y') paste();
@@ -863,6 +885,206 @@ function resolvedFace() {
     }
     return '(none of them — the browser chose)';
 }
+
+/// Reading a file, without leaving cian.
+///
+/// A window of lines is drawn rather than the whole file. The terminal build
+/// works this way because a terminal has no choice; here it is a choice, and
+/// the right one — a hundred thousand rows is a hundred thousand elements
+/// otherwise, and the files worth opening in a viewer are exactly the long
+/// ones. Which lines are on screen is arithmetic either way.
+const viewer = { on: false, lines: [], top: 0, cur: 0, query: '', hits: [], at: -1, about: '' };
+
+/// How many lines fit. Measured rather than assumed: the cell height is a
+/// theme token, and three of the four themes disagree about it.
+function viewRows() {
+    const h = parseFloat(getComputedStyle(document.documentElement)
+        .getPropertyValue('--cell-h')) || 20;
+    return Math.max(1, Math.floor(el.vBody.clientHeight / h));
+}
+
+/// Ctrl+Enter: a folder to the other pane, a file to your own application.
+///
+/// One key with two answers, because that is the terminal build's — and the
+/// two share a question ("open this somewhere other than here") rather than
+/// being two features that happen to sit on one chord.
+async function openOut() {
+    const r = await ask('open', { pane: state.focus });
+    if (!r) return;
+    if (r.view) {
+        state[r.pane] = r.view;
+        draw(r.pane);
+        say(`${r.name} を${r.pane === 'left' ? '左' : '右'}で開きました`);
+    } else {
+        say(`${r.opened} を既定のアプリで開きました`);
+    }
+}
+
+async function lookInside() {
+    const which = state.focus;
+    const pane = state[which];
+    const row = pane && pane.entries[pane.cursor];
+    if (!row || row.parent) return;
+    if (row.is_dir) { await enter(); return; }
+    const f = await ask('view', { pane: which });
+    if (!f) return;
+    viewer.on = true;
+    viewer.lines = f.lines;
+    viewer.top = 0;
+    viewer.cur = 0;
+    viewer.query = '';
+    viewer.hits = [];
+    viewer.at = -1;
+    const enc = { Utf8: 'UTF-8', ShiftJis: 'Shift_JIS', Utf16Le: 'UTF-16LE', Utf16Be: 'UTF-16BE' };
+    // Named, always. Which encoding it turned out to be is the question a
+    // Japanese Windows machine asks of every file it did not write.
+    viewer.about = [
+        enc[f.encoding] || f.encoding,
+        f.bom ? 'BOM' : null,
+        f.eol.toUpperCase(),
+        f.lang,
+        `${f.lines.length} 行`,
+    ].filter(Boolean).join('  ·  ');
+    el.vName.textContent = f.name;
+    el.vAbout.textContent = viewer.about;
+    el.view.hidden = false;
+    drawView();
+}
+
+function closeView() {
+    viewer.on = false;
+    viewer.lines = [];
+    el.view.hidden = true;
+}
+
+function drawView() {
+    const rows = viewRows();
+    // Keep the cursor on screen, scrolling by the least that does it.
+    if (viewer.cur < viewer.top) viewer.top = viewer.cur;
+    if (viewer.cur >= viewer.top + rows) viewer.top = viewer.cur - rows + 1;
+    viewer.top = Math.max(0, Math.min(viewer.top, Math.max(0, viewer.lines.length - rows)));
+
+    const frag = document.createDocumentFragment();
+    const width = String(viewer.lines.length).length;
+    for (let i = viewer.top; i < Math.min(viewer.lines.length, viewer.top + rows); i++) {
+        const div = document.createElement('div');
+        div.className = 'vline' + (i === viewer.cur ? ' on' : '');
+        const n = document.createElement('span');
+        n.className = 'n';
+        n.style.flexBasis = `${width}ch`;
+        n.textContent = String(i + 1);
+        const t = document.createElement('span');
+        t.className = 't';
+        paintLine(t, viewer.lines[i]);
+        div.append(n, t);
+        frag.append(div);
+    }
+    el.vBody.replaceChildren(frag);
+
+    const where = `${viewer.cur + 1} / ${viewer.lines.length}`;
+    const found = viewer.query
+        ? (viewer.hits.length ? `  /${viewer.query}  ${viewer.at + 1} / ${viewer.hits.length}` : `  /${viewer.query}  見つかりません`)
+        : '';
+    el.vFoot.textContent = `${where}${found}`;
+    el.vName.textContent = el.vName.textContent;
+}
+
+/// Put the line in, marking the search term where it appears.
+///
+/// Built out of text nodes rather than assembled as HTML, because the text is
+/// a file's contents: a line containing `<script>` would otherwise be a line
+/// that runs.
+function paintLine(into, text) {
+    if (!viewer.query) {
+        into.textContent = text;
+        return;
+    }
+    const q = viewer.query.toLowerCase();
+    const hay = text.toLowerCase();
+    let from = 0;
+    let at = hay.indexOf(q, from);
+    if (at < 0) {
+        into.textContent = text;
+        return;
+    }
+    const bits = [];
+    while (at >= 0) {
+        if (at > from) bits.push(document.createTextNode(text.slice(from, at)));
+        const m = document.createElement('mark');
+        m.textContent = text.slice(at, at + q.length);
+        bits.push(m);
+        from = at + q.length;
+        at = hay.indexOf(q, from);
+    }
+    if (from < text.length) bits.push(document.createTextNode(text.slice(from)));
+    into.replaceChildren(...bits);
+}
+
+function searchView(query) {
+    viewer.query = query;
+    const q = query.toLowerCase();
+    viewer.hits = [];
+    if (q) {
+        viewer.lines.forEach((line, i) => {
+            if (line.toLowerCase().includes(q)) viewer.hits.push(i);
+        });
+    }
+    viewer.at = -1;
+    if (viewer.hits.length) hopTo(1);
+    else drawView();
+}
+
+/// Next hit, or the one before. Wraps, and says so by simply arriving at the
+/// other end — a search that stops at the last match is a search you have to
+/// restart by hand.
+function hopTo(step) {
+    if (!viewer.hits.length) return;
+    if (viewer.at < 0) {
+        // The first hop from a fresh search starts where the eye is.
+        const ahead = viewer.hits.findIndex((n) => n >= viewer.cur);
+        viewer.at = step > 0 ? (ahead < 0 ? 0 : ahead) : (ahead <= 0 ? viewer.hits.length - 1 : ahead - 1);
+    } else {
+        viewer.at = (viewer.at + step + viewer.hits.length) % viewer.hits.length;
+    }
+    viewer.cur = viewer.hits[viewer.at];
+    drawView();
+}
+
+/// The viewer's keys. vim's, as far as this milestone goes — the operators and
+/// text objects are the editor's job and arrive with it.
+let lastG = 0;
+document.addEventListener('keydown', (e) => {
+    if (!viewer.on) return;
+    e.stopPropagation();
+    const rows = viewRows();
+    const last = viewer.lines.length - 1;
+    const go = (to) => { viewer.cur = Math.max(0, Math.min(last, to)); drawView(); };
+    const k = e.key;
+    const ctrl = e.ctrlKey || e.metaKey;
+
+    if (k === 'Escape' || k === 'q' || k === 'F3') closeView();
+    else if (k === 'j' || k === 'ArrowDown') go(viewer.cur + 1);
+    else if (k === 'k' || k === 'ArrowUp') go(viewer.cur - 1);
+    else if (k === 'd' && ctrl) go(viewer.cur + Math.floor(rows / 2));
+    else if (k === 'u' && ctrl) go(viewer.cur - Math.floor(rows / 2));
+    else if (k === 'PageDown' || (k === 'f' && ctrl)) go(viewer.cur + rows);
+    else if (k === 'PageUp' || (k === 'b' && ctrl)) go(viewer.cur - rows);
+    else if (k === 'G') go(last);
+    else if (k === 'g') {
+        // `gg`, which is two keystrokes and therefore a small state machine.
+        // A second `g` within the second means the top; a lone one means
+        // nothing, the way it does in vim.
+        const now = performance.now();
+        if (now - lastG < 1000) { lastG = 0; go(0); } else lastG = now;
+    }
+    else if (k === 'n') hopTo(1);
+    else if (k === 'N') hopTo(-1);
+    else if (k === '/') {
+        askFor('検索', viewer.query).then((q) => { if (q !== null) searchView(q); });
+    }
+    else return;
+    e.preventDefault();
+}, true);
 
 /// What the engine says unasked.
 ///
