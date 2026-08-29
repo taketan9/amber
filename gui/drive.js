@@ -294,7 +294,7 @@ async function main() {
         ['Tab', '左へ'], ['Down', ''], ['Enter', 'ファイルを読む'],
         ['F3', 'エディタで開く'], ['wait:3000', ''],
         ['type:XX', '打つ'], ['Mod+s', '保存'], ['wait:900', ''],
-        ['Esc', '閉じる'],
+        ['Esc', ''], ['Esc', ''], ['Esc', '3回で閉じる'],
     ];
 
     const el = spawn(process.env.CIAN_ELECTRON
@@ -325,9 +325,10 @@ async function main() {
             const after = await cdp.read(LOOK);
             const moved = JSON.stringify(before) !== JSON.stringify(after);
             const note = what ? `  ${what}` : '';
-            const marks = after.view
+            const asking = after.asking ? `  ⟨${after.asking}⟩` : null;
+            const marks = asking ?? (after.view
                 ? `  ｜${after.view.foot}  ${after.view.about}  «${after.view.first}»`
-                : (after.marks.length ? `  [${after.marks.join(' ')}]` : '');
+                : (after.marks.length ? `  [${after.marks.join(' ')}]` : ''));
             console.log(`${moved ? '  ' : '× '}${key.padEnd(8)}${note.padEnd(16)} ${after.status}${marks}`);
             if (!moved) bad++;
         }

@@ -603,12 +603,14 @@ const HELP = [
         ['/', 'この一覧を絞り込み'],
         ['/ /', 'この下のどこかにあるファイルをあいまい検索'],
         [',', 'ソート：名前／サイズ／日付／拡張子（n s d e で直接、同じキーで昇降反転）'],
-        ['T', 'トグルメニュー：隠しファイル・配色'],
+        ['T', 'トグルメニュー：隠しファイル・配色・エディタの流儀'],
     ]],
     ['読み書き（F3・Enter）', [
         ['Ctrl+S', '保存（元の文字コード・改行・BOM のまま）'],
-        ['Esc / F3', '閉じる（未保存なら確認）'],
-        ['T で流儀を切替', 'メモ帳流（既定） / vim'],
+        ['Esc ×3', '閉じる ── 3回連続（未保存なら3回目で確認）'],
+        ['Backspace ×3', '同じ。vim 流儀でノーマルモードのときだけ'],
+        ['F3', '1回で閉じる'],
+        ['流儀', 'メモ帳流（既定）／ vim ── 一覧に戻って T のメニューの中'],
         ['  vim のとき', 'ノーマルモードで開く。:w 保存 :q 閉じる :wq 両方'],
         ['  メモ帳流のとき', 'Ctrl+C/V/Z/F など Windows の手が効く'],
     ]],
@@ -1130,7 +1132,7 @@ function drawViewFoot() {
         where,
         viewer.dirty ? '未保存' : null,
         STYLES[style][1],
-        'Ctrl+S 保存   Esc 閉じる',
+        'Ctrl+S 保存   Esc ×3 閉じる',
     ].filter(Boolean).join('   ·   ');
 }
 
@@ -1161,24 +1163,71 @@ async function closeView(ask_first = true) {
     el.status.focus?.();
 }
 
-/// The only keys the page handles while the editor is up. Everything else is
-/// the editor's, which is the point of having one.
+/// Three of the same key in a row is the way out.
 ///
-/// **Only the keys it claims are stopped.** Every other overlay here stops the
-/// lot in the capture phase, which is right when the overlay is the whole
-/// interface. It is wrong here: a capture-phase `stopPropagation` never
-/// reaches the editor's own listeners, so Ctrl+S, and every other binding
-/// Monaco has, silently did nothing. Typed characters still arrived — those
-/// come in as text rather than through a keybinding — so the editor looked
-/// perfectly alive right up until you tried to save.
+/// The terminal build's rule, taken rather than invented — and the reason it
+/// exists is worth keeping with it. One press must not close a file with
+/// unsaved work in it, and Esc is pressed by reflex, so a single Esc closing
+/// the editor would make it the most dangerous key on the keyboard in the one
+/// grammar where it is hit without thinking. Three in a row is not a stray
+/// keystroke.
+///
+/// It counts silently. A tally along the bottom, raised by a key pressed in
+/// error, is noise exactly when it is least wanted; `?` says how to leave.
+const wayOut = { key: null, times: 0 };
+
+/// Whether vim is taking text right now.
+///
+/// Read off the mode line, because that is where vim itself says so — and
+/// because this listener runs in the capture phase, before monaco-vim has
+/// seen the key, the line still reads INSERT on the press that leaves insert
+/// mode. Which is what is wanted: that press is leaving insert, not asking to
+/// leave the file.
+function vimTyping() {
+    return !!viewer.vim && /INSERT|REPLACE/.test(el.vFoot.textContent || '');
+}
+
 document.addEventListener('keydown', (e) => {
     if (!viewer.on) return;
-    // In vim style Esc is normal mode, not the door — leaving on it would make
-    // every cancelled insert close the file.
-    const leave = e.key === 'F3' || (e.key === 'Escape' && !viewer.vim);
-    if (!leave) return;
-    e.stopPropagation();
-    e.preventDefault();
+    // Not while the question is up. Esc answers it — and counting those
+    // presses toward another way out would mean declining to close three
+    // times and being asked a fourth.
+    if (!el.ask.hidden) { wayOut.key = null; wayOut.times = 0; return; }
+
+    // F3 is nobody's editing key, so it is the one door that opens on a single
+    // press. Esc and Backspace are both, which is why they take three.
+    if (e.key === 'F3') {
+        e.stopPropagation();
+        e.preventDefault();
+        wayOut.key = null;
+        wayOut.times = 0;
+        closeView();
+        return;
+    }
+
+    // Backspace deletes in notepad style, so it is not offered as a way out
+    // there. In vim style it is, but not while insert mode has the keyboard.
+    const doors = viewer.vim
+        ? (vimTyping() ? [] : ['Escape', 'Backspace'])
+        : ['Escape'];
+    if (!doors.includes(e.key)) {
+        wayOut.key = null;
+        wayOut.times = 0;
+        return;
+    }
+    // The same key three times. Esc, Backspace, Esc is three presses and no
+    // intent — it is a hand looking for something.
+    if (wayOut.key !== e.key) {
+        wayOut.key = e.key;
+        wayOut.times = 0;
+    }
+    wayOut.times += 1;
+    if (wayOut.times < 3) return;
+    wayOut.key = null;
+    wayOut.times = 0;
+    // Not stopped on the way through: the editor still gets its Esc, which is
+    // how vim leaves whatever it was in the middle of. The third press asks
+    // only when there is something to lose.
     closeView();
 }, true);
 
