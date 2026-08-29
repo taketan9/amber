@@ -1216,6 +1216,91 @@ fn os_open(target: &str) -> std::io::Result<()> {
     Ok(())
 }
 
+// ---- Remembered UI state ----
+//
+// A plain `key = value` file beside the config, for the things a person
+// changes by using the program rather than by editing it: which look, which
+// editor grammar, how big the font. Deliberately not `init.lua` — that file is
+// written by hand and read as code, and a program that rewrites it would be
+// reformatting somebody's comments.
+//
+// Here rather than in a front end because there are two of them now, and a
+// look chosen in one and not the other would be two programs.
+const STATE_FILE: &str = "state.toml";
+
+/// The theme name saved from a previous session's `:theme`, if any. Applied at
+/// startup on top of init.lua so a chosen theme survives a restart.
+pub fn load_saved_theme() -> Option<String> {
+    state_get("theme")
+}
+
+/// One value out of the state file. Hand-parsed `key = value` — no TOML
+/// dependency for a handful of scalars.
+pub fn state_get(key: &str) -> Option<String> {
+    let path = config_read_path(STATE_FILE)?;
+    let text = std::fs::read_to_string(path).ok()?;
+    state_get_in(&text, key)
+}
+
+pub fn state_get_in(text: &str, key: &str) -> Option<String> {
+    for line in text.lines() {
+        let line = line.trim();
+        if line.starts_with('#') {
+            continue;
+        }
+        let Some(rest) = line.strip_prefix(key) else { continue };
+        let Some(val) = rest.trim_start().strip_prefix('=') else { continue };
+        let val = val.trim().trim_matches('"').trim();
+        if !val.is_empty() {
+            return Some(val.to_string());
+        }
+    }
+    None
+}
+
+/// Set one value, keeping the others. Best-effort: a read-only config dir
+/// just means the choice does not stick, which is not worth interrupting
+/// anyone over.
+pub fn state_set(key: &str, value: &str) {
+    let Some(path) = config_write_path(STATE_FILE) else { return };
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let old = std::fs::read_to_string(&path).unwrap_or_default();
+    let _ = std::fs::write(path, state_with(&old, key, value));
+}
+
+/// The state file's text with `key` set to `value` — replacing the line it
+/// was on, or added at the end.
+pub fn state_with(text: &str, key: &str, value: &str) -> String {
+    const HEAD: &str = "# cian runtime state — managed by cian (see :where)";
+    let mut out: Vec<String> = Vec::new();
+    let mut replaced = false;
+    for line in text.lines() {
+        let is_key = line
+            .trim_start()
+            .strip_prefix(key)
+            .map(|r| r.trim_start().starts_with('='))
+            .unwrap_or(false);
+        if is_key {
+            if !replaced {
+                out.push(format!("{key} = \"{value}\""));
+                replaced = true;
+            }
+            continue;
+        }
+        out.push(line.to_string());
+    }
+    if out.first().map(|l| l.trim() != HEAD).unwrap_or(true) {
+        out.insert(0, HEAD.to_string());
+    }
+    if !replaced {
+        out.push(format!("{key} = \"{value}\""));
+    }
+    out.join("\n") + "\n"
+}
+
+
 #[cfg(test)]
 mod tests {
     use super::*;

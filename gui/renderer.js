@@ -517,16 +517,23 @@ const LOOKS = [
     ['terminal', '端末譲り'],
 ];
 
-/// Which look is showing. Not yet written anywhere — where a preference
-/// lives is still open, and guessing at a file now would mean two places to
-/// read it from later.
+/// Which look is showing, and it *is* written down now.
+///
+/// The question was open for months because the answer looked expensive:
+/// reading `init.lua` needs Lua, which needs a C compiler. It turned out the
+/// terminal build already carries one — mlua, vendored, built green on
+/// Windows every release — so the property being protected had been spent long
+/// ago. The engine reads and writes the terminal build's own state file, so a
+/// look chosen here is the look `cian` opens with, and the other way round.
 let look = 0;
 
-function setLook(i) {
+function setLook(i, remember = true) {
     look = (i + LOOKS.length) % LOOKS.length;
     const [value] = LOOKS[look];
     if (value) document.documentElement.dataset.look = value;
     else delete document.documentElement.dataset.look;
+    if (viewer.ed) viewer.ed.updateOptions({ theme: editorTheme() });
+    if (remember) ask('remember', { key: 'gui_look', value: LOOKS[look][0] || 'hakuji' });
 }
 
 /// The switches, on `T` — the key the terminal build puts them on.
@@ -1439,8 +1446,9 @@ async function openInEditor(which) {
 /// Attach or drop the vim grammar. Called on open and whenever the switch is
 /// flipped, so the running editor changes under you rather than needing to be
 /// closed and reopened.
-function setStyle(i) {
+function setStyle(i, remember = true) {
     style = (i + STYLES.length) % STYLES.length;
+    if (remember) ask('remember', { key: 'gui_editor', value: STYLES[style][0] });
     if (!viewer.ed) return;
     if (viewer.vim) { viewer.vim.dispose(); viewer.vim = null; }
     if (STYLES[style][0] === 'vim') {
@@ -2695,6 +2703,23 @@ window.cian.onEvent(async (msg) => {
 function base(p) {
     return String(p).split(/[\\/]/).pop();
 }
+
+/// What the last session chose. Applied before the first draw, so the window
+/// never flashes the default look on its way to the chosen one.
+async function recall() {
+    const s = await ask('settings', {});
+    if (!s) return;
+    if (s.look) {
+        const at = LOOKS.findIndex(([v]) => (v || 'hakuji') === s.look);
+        if (at >= 0) setLook(at, false);
+    }
+    if (s.style) {
+        const at = STYLES.findIndex(([v]) => v === s.style);
+        if (at >= 0) setStyle(at, false);
+    }
+}
+
+recall();
 
 refresh().then(() => {
     // Said once, on the status line, where it costs nothing and answers the

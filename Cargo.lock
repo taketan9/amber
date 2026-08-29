@@ -659,6 +659,7 @@ version = "1.0.8"
 dependencies = [
  "anyhow",
  "cian-core",
+ "cian-lua",
  "cian-pty",
  "cian-scp",
  "serde",

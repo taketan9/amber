@@ -1516,6 +1516,29 @@ impl Session {
                 *pane = Pane::new(home)?;
                 Ok(serde_json::to_value(PaneView::of(pane))?)
             }
+            // ---- What is remembered between sessions ----
+            //
+            // The terminal build's own state file, not a second one. A look
+            // chosen in the window and not in the terminal would be two
+            // programs wearing one name. `init.lua` stays untouched: it is
+            // written by hand and read as code, and a program that rewrote it
+            // would be reformatting somebody's comments.
+            "settings" => Ok(serde_json::json!({
+                "look": cian_lua::state_get("gui_look"),
+                "style": cian_lua::state_get("gui_editor"),
+                "theme": cian_lua::state_get("theme"),
+                "where": cian_lua::config_read_path("state.toml")
+                    .map(|p| p.display().to_string()),
+            })),
+            "remember" => {
+                let key = req.params["key"].as_str().unwrap_or("");
+                let value = req.params["value"].as_str().unwrap_or("");
+                if !matches!(key, "gui_look" | "gui_editor") {
+                    anyhow::bail!("覚えられない項目です: {key}");
+                }
+                cian_lua::state_set(key, value);
+                Ok(serde_json::json!({ "key": key, "value": value }))
+            }
             // Leave a flat listing and go back to the directory it came from.
             "leaveflat" => {
                 let which = req.params["pane"].as_str().unwrap_or("left").to_string();

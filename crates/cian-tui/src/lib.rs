@@ -3699,78 +3699,19 @@ fn os_open(target: impl AsRef<std::ffi::OsStr>) -> Result<()> {
 /// The file cian writes runtime preferences to (theme, and room for more
 /// later). It sits with the other config in the portable dir or `~/.config/cian`
 /// and is managed by cian, not hand-edited — `:theme` keeps it in sync.
-const STATE_FILE: &str = "state.toml";
+/// Remembered UI state lives in cian-lua, beside the config paths it uses.
+/// The GUI's engine remembers the same things in the same file — a look chosen
+/// in one and not the other would be two programs.
+pub(crate) use cian_lua::{state_get, state_set};
+// The two pure ones are used only by the tests that pin their behaviour down;
+// naming them here as well would be an unused import in every other build.
+#[cfg(test)]
+pub(crate) use cian_lua::{state_get_in, state_with};
 
 /// The theme name saved from a previous session's `:theme`, if any. Applied at
 /// startup on top of init.lua so a chosen theme survives a restart.
-pub(crate) fn load_saved_theme() -> Option<String> {
+fn load_saved_theme() -> Option<String> {
     state_get("theme")
-}
-
-/// One value out of the state file. Hand-parsed `key = value` — no TOML
-/// dependency for a handful of scalars.
-pub(crate) fn state_get(key: &str) -> Option<String> {
-    let path = cian_lua::config_read_path(STATE_FILE)?;
-    let text = std::fs::read_to_string(path).ok()?;
-    state_get_in(&text, key)
-}
-
-pub(crate) fn state_get_in(text: &str, key: &str) -> Option<String> {
-    for line in text.lines() {
-        let line = line.trim();
-        if line.starts_with('#') {
-            continue;
-        }
-        let Some(rest) = line.strip_prefix(key) else { continue };
-        let Some(val) = rest.trim_start().strip_prefix('=') else { continue };
-        let val = val.trim().trim_matches('"').trim();
-        if !val.is_empty() {
-            return Some(val.to_string());
-        }
-    }
-    None
-}
-
-/// Set one value, keeping the others. Best-effort: a read-only config dir
-/// just means the choice does not stick, which is not worth interrupting
-/// anyone over.
-pub(crate) fn state_set(key: &str, value: &str) {
-    let Some(path) = cian_lua::config_write_path(STATE_FILE) else { return };
-    if let Some(dir) = path.parent() {
-        let _ = std::fs::create_dir_all(dir);
-    }
-    let old = std::fs::read_to_string(&path).unwrap_or_default();
-    let _ = std::fs::write(path, state_with(&old, key, value));
-}
-
-/// The state file's text with `key` set to `value` — replacing the line it
-/// was on, or added at the end.
-pub(crate) fn state_with(text: &str, key: &str, value: &str) -> String {
-    const HEAD: &str = "# cian runtime state — managed by cian (see :where)";
-    let mut out: Vec<String> = Vec::new();
-    let mut replaced = false;
-    for line in text.lines() {
-        let is_key = line
-            .trim_start()
-            .strip_prefix(key)
-            .map(|r| r.trim_start().starts_with('='))
-            .unwrap_or(false);
-        if is_key {
-            if !replaced {
-                out.push(format!("{key} = \"{value}\""));
-                replaced = true;
-            }
-            continue;
-        }
-        out.push(line.to_string());
-    }
-    if out.first().map(|l| l.trim() != HEAD).unwrap_or(true) {
-        out.insert(0, HEAD.to_string());
-    }
-    if !replaced {
-        out.push(format!("{key} = \"{value}\""));
-    }
-    out.join("\n") + "\n"
 }
 
 /// Persist the chosen whole-app theme so the next launch keeps it. Best-effort:

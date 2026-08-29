@@ -20,6 +20,11 @@ cian-pty  = { workspace = true }
 # gigabytes once feared were for *building* on the offline machine, and that
 # machine receives an exe.
 cian-scp  = { workspace = true }
+# The config paths and the remembered-state file — the same ones the terminal
+# build uses, so a look chosen in one is the look the other opens with. mlua
+# comes with it and compiles C, which the Windows release has been doing all
+# along for cian-tui; the "no compiler" property was spent long before this.
+cian-lua  = { workspace = true }
 vt100     = { workspace = true }
 serde      = { workspace = true }
 serde_json = { workspace = true }
