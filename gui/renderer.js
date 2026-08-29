@@ -728,6 +728,7 @@ const HELP = [
         ['w / F10', 'タブを閉じる'],
         ['F1 / F2', '前 / 次のタブ（Shift+Tab でも次へ）'],
         ['← → / Ctrl+h / Ctrl+l', '左 / 右のペインにフォーカス'],
+        ['Shift+H / Shift+L', '同じ（端末版と同じ綴り）'],
         ['F5', '読み直す'],
     ]],
     ['探す', [
@@ -798,6 +799,8 @@ const HELP = [
         ['Shift+F8 / Shift+F9', '左右 / 上下に分割'],
         ['Shift+F10', '分割したペインを閉じる'],
         ['Shift+F1 / Shift+F2', '前 / 次のペインへ'],
+        ['F1〜F8', 'そのシェルタブへ直接'],
+        ['Ctrl+Shift+矢印', '分割の境界を動かす'],
         ['Ctrl+S  /  :sync', '全ペインに同時入力（同じコマンドを4台へ）'],
         ['F12  /  :zoom', 'シェルパネルを広げる／戻す'],
         [':preview', 'カーソルのファイルを追って表示（もう一度で止める）'],
@@ -1071,6 +1074,9 @@ document.addEventListener('keydown', (e) => {
         p.cursor = Math.max(0, p.entries.length - 1);
         draw(state.focus);
     }
+    // Shift+H / Shift+L cross the panes, as in the terminal build.
+    else if (k === 'H') focusPane('left');
+    else if (k === 'L') focusPane('right');
     else if (k === 'ArrowLeft' && !e.altKey) focusPane('left');
     else if (k === 'h' && e.ctrlKey) focusPane('left');
     else if (k === 'ArrowRight' && !e.altKey) focusPane('right');
@@ -3128,6 +3134,13 @@ async function shellTab() {
     say(`シェル ${term.tab + 1} / ${term.tabs}`);
 }
 
+async function goTabOfShell(at) {
+    const r = await ask('shellgo', { at });
+    if (!r) return;
+    takeShell(r);
+    say(`シェル ${term.tab + 1} / ${term.tabs}`);
+}
+
 async function shellGo(how) {
     const r = await ask('shellgo', how);
     if (!r) return;
@@ -3237,6 +3250,12 @@ document.addEventListener('keydown', (e) => {
     // wants them, and a panel with no way to open a second tab is a panel you
     // leave to run one thing.
     if (e.key === 'F9' && !e.shiftKey) { e.stopPropagation(); e.preventDefault(); shellTab(); return; }
+    if (e.key === 'F12') {
+        e.stopPropagation();
+        e.preventDefault();
+        zoomShell();
+        return;
+    }
     if (e.key === 'F10' && !e.shiftKey) { e.stopPropagation(); e.preventDefault(); shellCloseTab(); return; }
     // The terminal build's three: split, split the other way, close the pane.
     if (e.shiftKey && (e.key === 'F8' || e.key === 'F9' || e.key === 'F10')) {
@@ -3256,6 +3275,22 @@ document.addEventListener('keydown', (e) => {
             takeShell(r);
             say(r.sync ? '同期入力: 全ペインに送ります' : '同期入力を止めました');
         });
+        return;
+    }
+    // Ctrl+Shift+arrow drags the border the focused pane sits against.
+    if (e.ctrlKey && e.shiftKey && e.key.startsWith('Arrow')) {
+        e.stopPropagation();
+        e.preventDefault();
+        const down = e.key === 'ArrowUp' || e.key === 'ArrowDown';
+        const wider = e.key === 'ArrowRight' || e.key === 'ArrowDown';
+        ask('shellresizepane', { wider, down }).then((r) => r && takeShell(r));
+        return;
+    }
+    // F1-F8 go straight to a tab; the pane keys are the Shift ones.
+    if (/^F[1-8]$/.test(e.key) && !e.shiftKey && !e.ctrlKey) {
+        e.stopPropagation();
+        e.preventDefault();
+        goTabOfShell(Number(e.key.slice(1)) - 1);
         return;
     }
     if (e.shiftKey && (e.key === 'F1' || e.key === 'F2')) {

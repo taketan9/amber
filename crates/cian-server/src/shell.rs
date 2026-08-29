@@ -364,6 +364,38 @@ impl Node {
         }
     }
 
+    /// Nudge the split that `id` sits under, in the given direction.
+    ///
+    /// The *nearest* split of the right orientation, walking out from the
+    /// leaf: dragging a border means moving the one you can see, and the one
+    /// you can see is the innermost that runs the right way.
+    pub fn resize(&mut self, id: u64, wider: bool, down_axis: bool) -> bool {
+        let Node::Split { down, ratio, a, b } = self else { return false };
+        // Inner splits first: the border you can see is the innermost one.
+        if a.resize(id, wider, down_axis) || b.resize(id, wider, down_axis) {
+            return true;
+        }
+        if *down != down_axis {
+            return false;
+        }
+        let mut mine = Vec::new();
+        a.leaves(&mut mine);
+        let mut theirs = Vec::new();
+        b.leaves(&mut theirs);
+        let first = if mine.contains(&id) {
+            true
+        } else if theirs.contains(&id) {
+            false
+        } else {
+            return false;
+        };
+        // Which half the leaf is in decides which way "wider" goes: widening
+        // the right-hand pane means giving the first half less, not more.
+        let step = if first == wider { 0.05 } else { -0.05 };
+        *ratio = (*ratio + step).clamp(0.1, 0.9);
+        true
+    }
+
     pub fn leaves(&self, out: &mut Vec<u64>) {
         match self {
             Node::Leaf(id) => out.push(*id),

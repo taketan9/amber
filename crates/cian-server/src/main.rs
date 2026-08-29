@@ -1265,17 +1265,37 @@ impl Session {
                 tab.focus = fresh;
                 Ok(self.shell_reply())
             }
+            // Drag the border the focused pane sits against.
+            "shellresizepane" => {
+                let wider = req.params["wider"].as_bool().unwrap_or(true);
+                let down = req.params["down"].as_bool().unwrap_or(false);
+                let Some(tab) = self.tabs.get_mut(self.shell_at) else {
+                    anyhow::bail!("シェルが開いていません");
+                };
+                let id = tab.focus;
+                if !tab.root.resize(id, wider, down) {
+                    anyhow::bail!("その向きに動かせる境界がありません");
+                }
+                Ok(self.shell_reply())
+            }
             // Move the keyboard to the next pane of this tab.
             "shellfocus" => {
                 let step = req.params["step"].as_i64().unwrap_or(1);
+                let at = req.params["at"].as_u64();
                 let Some(tab) = self.tabs.get_mut(self.shell_at) else {
                     anyhow::bail!("シェルが開いていません");
                 };
                 let mut ids = Vec::new();
                 tab.root.leaves(&mut ids);
-                if let Some(now) = ids.iter().position(|id| *id == tab.focus) {
-                    let n = ids.len() as i64;
-                    tab.focus = ids[((now as i64 + step).rem_euclid(n)) as usize];
+                match at.and_then(|n| ids.get(n as usize).copied()) {
+                    Some(id) => tab.focus = id,
+                    None if at.is_some() => anyhow::bail!("そのペインはありません"),
+                    None => {
+                        if let Some(now) = ids.iter().position(|id| *id == tab.focus) {
+                            let n = ids.len() as i64;
+                            tab.focus = ids[((now as i64 + step).rem_euclid(n)) as usize];
+                        }
+                    }
                 }
                 Ok(self.shell_reply())
             }
