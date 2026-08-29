@@ -826,6 +826,9 @@ const HELP = [
         ['  % ', '対応する括弧へ（monaco-vim のもの）'],
         ['  ]] / [[', '次 / 前の見出しへ'],
         ['  za', '折り畳む・開く'],
+        ['  :enc', '文字コードを変えて読み直す（引数なしで順に）'],
+        ['  :ws / :ruler', '見えない文字 / 桁の目盛り'],
+        ['  :s/古い/新しい/g', 'このファイルを置換'],
         ['Ctrl+] / Ctrl+[', '見出し移動（メモ帳流でも使えます）'],
         ['  メモ帳流のとき', 'Ctrl+C/V/Z/F など Windows の手が効く'],
     ]],
@@ -1581,6 +1584,9 @@ function setStyle(i, remember = true) {
         ex.defineEx('wq', 'wq', async () => { if (await saveFile()) closeView(false); });
         ex.defineEx('outline', 'outline', () => cmdOutline());
         ex.defineEx('blame', 'blame', () => cmdBlame());
+        ex.defineEx('enc', 'enc', (_cm, params) => cmdEncoding((params.args || [])[0]));
+        ex.defineEx('ws', 'ws', () => toggleWs());
+        ex.defineEx('ruler', 'ruler', () => toggleRuler());
         // `]]` and `[[`, which monaco-vim does not have. `%` it does — it is
         // `moveToMatchedSymbol` and it works; the first version of this
         // replaced it with a worse one, which is what comes of adding a
@@ -1962,6 +1968,10 @@ const COMMANDS = [
     { name: 'edit', about: '外部エディタで開く（$EDITOR）', run: cmdEditExternal },
     { name: 'stat', about: '属性（:attr と同じ）', run: cmdAttr },
     { name: 'blame', about: '各行を最後に変えた人（開いているファイル）', run: cmdBlame },
+    { name: 'enc', about: '開いているファイルの文字コードを変えて読み直す', arg: 'utf8 / sjis / utf16le / utf16be', optional: true, run: cmdEncoding },
+    { name: 'ws', about: 'タブ・行末の空白などを見せる／隠す', run: toggleWs },
+    { name: 'ruler', about: '桁の目盛りを出す／消す', run: toggleRuler },
+    { name: 's', about: '開いているファイルを置換 s/古い/新しい/g', arg: 's/…/…/', run: cmdSubstitute },
     { name: 'theme', about: '配色を選ぶ（T のメニューにも）', arg: '名前', optional: true, run: cmdTheme },
     { name: 'redraw', about: '画面を描き直す', run: () => { draw('left'); draw('right'); say('描き直しました'); } },
     { name: 'preview', about: 'カーソルのファイルを追って表示（もう一度で止める）', run: togglePreview },
@@ -3243,6 +3253,70 @@ async function cmdBlame() {
     })));
     blameOn = true;
     say(`${r.lines.length} 行の blame（もう一度 :blame で消えます）`);
+}
+
+/// `:enc` — read the open file again in another encoding.
+///
+/// The bytes are already in the engine, so this decodes rather than re-reads.
+/// That matters for a log something is still writing to: re-reading would show
+/// a different file than the one being looked at.
+async function cmdEncoding(name) {
+    if (!viewer.on || !viewer.ed) { say('先にファイルを開いてください', true); return; }
+    const r = await ask('encoding', { as: name || undefined });
+    if (!r) return;
+    const model = viewer.ed.getModel();
+    model.applyEdits([{ range: model.getFullModelRange(), text: r.lines.join('\n') }]);
+    viewer.base = model.getAlternativeVersionId();
+    viewer.dirty = false;
+    const pretty = { Utf8: 'UTF-8', ShiftJis: 'Shift_JIS', Utf16Le: 'UTF-16LE', Utf16Be: 'UTF-16BE' };
+    el.vAbout.textContent = `${pretty[r.encoding] || r.encoding}  ·  ${r.eol.toUpperCase()}`
+        + `  ·  ${r.lines.length} 行`;
+    say(`文字コード: ${pretty[r.encoding] || r.encoding}`);
+}
+
+/// `:ws` — the characters you cannot see but a compiler can.
+///
+/// A trailing space, a tab where spaces were meant, an ideographic space that
+/// arrived from a Japanese editor and looks exactly like a normal one. All
+/// three break things silently, which is why showing them is a mode rather
+/// than a hunt.
+let wsOn = false;
+function toggleWs() {
+    if (!viewer.ed) { say('先にファイルを開いてください', true); return; }
+    wsOn = !wsOn;
+    viewer.ed.updateOptions({
+        renderWhitespace: wsOn ? 'all' : 'selection',
+        renderControlCharacters: wsOn,
+        // The ideographic space is not whitespace to Monaco, so it needs the
+        // unicode highlighter to be pointed at it — and it is the one of the
+        // three that a person cannot spot by eye at all.
+        unicodeHighlight: { ambiguousCharacters: wsOn, invisibleCharacters: wsOn },
+    });
+    say(wsOn ? '見えない文字を表示' : '見えない文字を隠しました');
+}
+
+let rulerOn = false;
+function toggleRuler() {
+    if (!viewer.ed) { say('先にファイルを開いてください', true); return; }
+    rulerOn = !rulerOn;
+    viewer.ed.updateOptions({ rulers: rulerOn ? [80, 100, 120] : [] });
+    say(rulerOn ? '桁の目盛り: 80 / 100 / 120' : '目盛りを消しました');
+}
+
+/// `:s/old/new/g` — the same substitution language as the grep-wide replace,
+/// because it is the same question asked of one file instead of many.
+async function cmdSubstitute(spec) {
+    if (!viewer.on || !viewer.ed) { say('先にファイルを開いてください', true); return; }
+    const lines = viewer.ed.getValue().split(/\r?\n/);
+    const r = await ask('substitute', { spec, lines });
+    if (!r) return;
+    const model = viewer.ed.getModel();
+    viewer.ed.executeEdits('cian', [{
+        range: model.getFullModelRange(),
+        text: r.lines.join('\n'),
+    }]);
+    viewer.ed.pushUndoStop();
+    say(`${r.changed} 箇所を置換しました`);
 }
 
 async function cmdDf() {

@@ -194,6 +194,10 @@ struct Session {
     /// Held for a later paste. Independent of the system clipboard, and of
     /// which pane is focused — that is the point of it.
     clip: Option<cian_core::clip::Clipboard>,
+    /// The file open in the viewer, as `view_file` read it — kept whether it
+    /// is text or a binary, because re-decoding needs the raw bytes and a
+    /// second read would be a second answer to "what is in this file".
+    shown: Option<(std::path::PathBuf, cian_core::viewer::View)>,
     /// A binary open in the hex editor, as it was read plus whatever has been
     /// overwritten. Separate from `open` because the two save differently:
     /// text goes back through its encoding, bytes go back as bytes.
@@ -244,6 +248,7 @@ impl Session {
             find: Find::default(),
             clip: None,
             open: None,
+            shown: None,
             hex: None,
             redo: Stack::default(),
             shells: Vec::new(),
@@ -723,11 +728,12 @@ impl Session {
                 // would make `save` guess which it was holding.
                 if binary {
                     self.open = None;
-                    self.hex = Some((path, shown));
+                    self.hex = Some((path.clone(), shown.clone()));
                 } else {
                     self.hex = None;
-                    self.open = file.map(|f| (path, f));
+                    self.open = file.map(|f| (path.clone(), f));
                 }
+                self.shown = Some((path, shown));
                 Ok(reply)
             }
             // Write the open file back, in the encoding it arrived in.
@@ -2427,6 +2433,62 @@ impl Session {
                         "hash": b.hash, "author": b.author, "date": b.date,
                     })).collect::<Vec<_>>(),
                 }))
+            }
+            // Read the open file again in another encoding.
+            //
+            // The bytes are already here, so this decodes rather than reads —
+            // which matters because the file on disk may be a log something is
+            // still writing to, and re-reading it would show a different file
+            // than the one being looked at.
+            "encoding" => {
+                let Some((path, view)) = self.shown.as_mut() else {
+                    anyhow::bail!("開いているファイルがありません");
+                };
+                let want = match req.params["as"].as_str() {
+                    Some("utf8") => cian_core::viewer::TextEncoding::Utf8,
+                    Some("sjis") => cian_core::viewer::TextEncoding::ShiftJis,
+                    Some("utf16le") => cian_core::viewer::TextEncoding::Utf16Le,
+                    Some("utf16be") => cian_core::viewer::TextEncoding::Utf16Be,
+                    // No name means the next one round, which is how the
+                    // terminal build's `:enc` is used: press it until the
+                    // mojibake stops.
+                    _ => view.encoding.next(),
+                };
+                view.redecode(want);
+                let path = path.clone();
+                let lines = view.lines.clone();
+                let enc = format!("{:?}", view.encoding);
+                let eol = format!("{:?}", view.eol);
+                // The editable copy has to agree, or a save would write back
+                // through the encoding the file *was* read with.
+                if let Ok(mut f) = cian_core::grepedit::read_text(&path) {
+                    f.lines = lines.clone();
+                    f.encoding = match want {
+                        cian_core::viewer::TextEncoding::Utf8 => cian_core::viewer::TextEncoding::Utf8,
+                        other => other,
+                    };
+                    self.open = Some((path, f));
+                }
+                Ok(serde_json::json!({ "lines": lines, "encoding": enc, "eol": eol }))
+            }
+            // `:s/old/new/` inside the open file.
+            //
+            // The same substitution language as the grep-wide replace, because
+            // it is the same question asked of one file instead of many —
+            // learning two spellings of `s///` would be absurd.
+            "substitute" => {
+                let spec = req.params["spec"].as_str().unwrap_or("");
+                let lines: Vec<String> = req.params["lines"]
+                    .as_array()
+                    .map(|a| a.iter().map(|v| v.as_str().unwrap_or("").to_string()).collect())
+                    .unwrap_or_default();
+                let sub = cian_core::substitute::parse(spec).map_err(|e| anyhow::anyhow!(e))?;
+                let hits = cian_core::substitute::find(&sub, &lines, None);
+                if hits.is_empty() {
+                    anyhow::bail!("見つかりません");
+                }
+                let out = cian_core::substitute::apply(&lines, &hits);
+                Ok(serde_json::json!({ "lines": out, "changed": hits.len() }))
             }
             // Leave a flat listing and go back to the directory it came from.
             "leaveflat" => {
