@@ -660,6 +660,7 @@ dependencies = [
  "anyhow",
  "cian-core",
  "cian-pty",
+ "cian-scp",
  "serde",
  "serde_json",
  "vt100",

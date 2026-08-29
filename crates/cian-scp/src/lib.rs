@@ -216,6 +216,23 @@ pub struct RemoteEntry {
 
 /// Join a remote directory and a name, POSIX-style — the only separator SFTP
 /// knows, whatever the local platform uses.
+///
+/// Public because the GUI's engine builds its remote rows too, and a remote
+/// path assembled with a backslash on Windows names nothing on the server.
+pub fn remote_join(dir: &str, name: &str) -> String {
+    join(dir, name)
+}
+
+/// One level up, POSIX-style. The root is its own parent, so climbing past it
+/// stays put rather than producing an empty path nothing will list.
+pub fn remote_parent(path: &str) -> String {
+    let trimmed = path.trim_end_matches('/');
+    match trimmed.rsplit_once('/') {
+        Some(("", _)) | None => "/".to_string(),
+        Some((head, _)) => head.to_string(),
+    }
+}
+
 fn join(dir: &str, name: &str) -> String {
     if dir.ends_with('/') {
         format!("{dir}{name}")

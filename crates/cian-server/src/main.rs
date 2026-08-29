@@ -63,6 +63,9 @@ struct PaneView {
     /// beside the name, so it has to come from the engine rather than from
     /// whatever the front end last remembered asking for.
     hidden_shown: bool,
+    /// `user@host` when this pane is showing a server. The window needs it to
+    /// know that Enter, `..` and `c` all mean something over the network.
+    remote: Option<String>,
     /// The label of the flat listing showing here, if one is — a branch view
     /// or a panelized search. The window needs it to know that Esc means
     /// "back to the directory" rather than "nothing to cancel".
@@ -93,6 +96,7 @@ impl PaneView {
             marked: pane.mark_count(),
             hidden_shown: pane.show_hidden,
             flat: pane.flat_label().map(str::to_string),
+            remote: pane.remote_view().map(|(host, _)| host.to_string()),
             entries: pane
                 .entries
                 .iter()
@@ -142,6 +146,12 @@ struct Session {
     /// at launch: most sessions never open it, and a shell process per window
     /// that nobody asked for is a process nobody accounts for.
     shell: Option<shell::Shell>,
+    /// Where a remote pane is connected, and how.
+    ///
+    /// Held rather than asked for each time: SFTP wants a password, and a file
+    /// manager that asks again for every directory you walk into is one nobody
+    /// uses twice. Kept only in memory — never written anywhere.
+    remotes: std::collections::HashMap<String, cian_scp::Target>,
 }
 
 impl Session {
@@ -157,6 +167,7 @@ impl Session {
             open: None,
             redo: Stack::default(),
             shell: None,
+            remotes: std::collections::HashMap::new(),
         })
     }
 
@@ -1362,6 +1373,149 @@ impl Session {
                     "pane": serde_json::to_value(PaneView::of(pane))?,
                 }))
             }
+            // ---- A server, in this pane ----
+            //
+            // Not a separate window or a transfer dialog: the rows are rows,
+            // and `c`/`m` across to the other pane are an upload or a
+            // download. That is the terminal build's arrangement and the
+            // reason it is worth having at all.
+            "connect" => {
+                let which = req.params["pane"].as_str().unwrap_or("left").to_string();
+                let target = cian_scp::Target {
+                    host: req.params["host"].as_str().unwrap_or("").to_string(),
+                    port: req.params["port"].as_u64().unwrap_or(22) as u16,
+                    user: req.params["user"].as_str().unwrap_or("").to_string(),
+                    password: req.params["password"].as_str().unwrap_or("").to_string(),
+                };
+                if target.host.is_empty() || target.user.is_empty() {
+                    anyhow::bail!("ホストとユーザが要ります");
+                }
+                let start = req.params["path"].as_str().unwrap_or(".").to_string();
+                let (resolved, entries) = cian_scp::list_dir(&target, &start)?;
+                let label = format!("{}@{}", target.user, target.host);
+                self.remotes.insert(which.clone(), target);
+                let rows = remote_rows(&resolved, &entries);
+                let pane = self.pane_mut(&which)?;
+                pane.enter_remote(label.clone(), resolved.clone(), rows);
+                Ok(serde_json::json!({
+                    "host": label,
+                    "path": resolved,
+                    "pane": serde_json::to_value(PaneView::of(pane))?,
+                }))
+            }
+            "remotelist" => {
+                let which = req.params["pane"].as_str().unwrap_or("left").to_string();
+                let Some(target) = self.remotes.get(&which).cloned() else {
+                    anyhow::bail!("このペインはサーバに繋がっていません");
+                };
+                let (label, here) = {
+                    let pane = self.pane_mut(&which)?;
+                    let Some((h, p)) = pane.remote_view() else {
+                        anyhow::bail!("このペインはサーバを表示していません");
+                    };
+                    (h.to_string(), p.to_string())
+                };
+                // A named path, or the row under the cursor, or one level up.
+                let want = match req.params["path"].as_str() {
+                    Some(p) => p.to_string(),
+                    None if req.params["up"].as_bool().unwrap_or(false) => {
+                        cian_scp::remote_parent(&here)
+                    }
+                    None => {
+                        let (path, _, is_dir) = self.selected(&which)?;
+                        if !is_dir {
+                            anyhow::bail!("ディレクトリではありません");
+                        }
+                        path.display().to_string()
+                    }
+                };
+                let (resolved, entries) = cian_scp::list_dir(&target, &want)?;
+                let rows = remote_rows(&resolved, &entries);
+                let pane = self.pane_mut(&which)?;
+                pane.enter_remote(label, resolved.clone(), rows);
+                Ok(serde_json::json!({
+                    "path": resolved,
+                    "pane": serde_json::to_value(PaneView::of(pane))?,
+                }))
+            }
+            // Copy across when one of the two panes is a server.
+            //
+            // `c` is `c` either way: the difference between a copy and an
+            // upload is which pane you are standing in, and making it a
+            // separate command would be asking the person to know something
+            // the program already knows.
+            "transfer" => {
+                let from = req.params["pane"].as_str().unwrap_or("left").to_string();
+                let to = if from == "left" { "right" } else { "left" };
+                let paths = self.targets(&from)?;
+                if paths.is_empty() {
+                    anyhow::bail!("対象がありません");
+                }
+                let up = self.remotes.contains_key(to);
+                let down = self.remotes.contains_key(&from);
+                let target = self.remotes.get(if up { to } else { &from }).cloned();
+                let Some(target) = target else {
+                    anyhow::bail!("どちらのペインもサーバではありません");
+                };
+                if up && down {
+                    anyhow::bail!("サーバ同士の転送はできません");
+                }
+                let dest = if up {
+                    self.pane_mut(to)?.remote_view().map(|(_, p)| p.to_string())
+                        .ok_or_else(|| anyhow::anyhow!("転送先が分かりません"))?
+                } else {
+                    self.pane_mut(to)?.cwd.display().to_string()
+                };
+                let stop = std::sync::atomic::AtomicBool::new(false);
+                let (mut ok, mut errors) = (0usize, Vec::new());
+                for p in &paths {
+                    let name = p.file_name().map(|s| s.to_string_lossy().into_owned())
+                        .unwrap_or_else(|| p.display().to_string());
+                    let mut noop = |_: u64, _: u64| {};
+                    let mut ctl = cian_scp::Ctl {
+                        cancel: &stop,
+                        on_progress: &mut noop,
+                        limit_bps: None,
+                    };
+                    let r = if up {
+                        cian_scp::upload(&target, p, &cian_scp::remote_join(&dest, &name), None, &mut ctl)
+                            .map(|_| ())
+                    } else {
+                        // A remote row's `path` is the remote absolute path.
+                        cian_scp::download(
+                            &target,
+                            &p.display().to_string(),
+                            &std::path::Path::new(&dest).join(&name),
+                            &mut ctl,
+                        ).map(|_| ())
+                    };
+                    match r {
+                        Ok(()) => ok += 1,
+                        Err(e) => errors.push(format!("{name}: {e}")),
+                    }
+                }
+                // Both sides may have changed; re-read whichever is local.
+                for which in ["left", "right"] {
+                    if !self.remotes.contains_key(which) {
+                        let _ = self.pane_mut(which).map(|p| p.reload());
+                    }
+                }
+                Ok(serde_json::json!({
+                    "direction": if up { "up" } else { "down" },
+                    "ok": ok,
+                    "errors": errors,
+                    "left": PaneView::of(&self.left),
+                    "right": PaneView::of(&self.right),
+                }))
+            }
+            "disconnect" => {
+                let which = req.params["pane"].as_str().unwrap_or("left").to_string();
+                self.remotes.remove(&which);
+                let pane = self.pane_mut(&which)?;
+                let home = pane.cwd.clone();
+                *pane = Pane::new(home)?;
+                Ok(serde_json::to_value(PaneView::of(pane))?)
+            }
             // Leave a flat listing and go back to the directory it came from.
             "leaveflat" => {
                 let which = req.params["pane"].as_str().unwrap_or("left").to_string();
@@ -1691,4 +1845,23 @@ fn b64(bytes: &[u8]) -> String {
         out.push(if chunk.len() > 2 { A[n as usize & 63] as char } else { '=' });
     }
     out
+}
+
+/// Remote entries as pane rows.
+///
+/// The row's `path` holds the *remote* absolute path, which is what every
+/// remote operation needs and what nothing on this disk should ever be asked
+/// to open. The `..` row is synthetic; navigation intercepts it.
+fn remote_rows(dir: &str, entries: &[cian_scp::RemoteEntry]) -> Vec<cian_core::Entry> {
+    let mut rows = vec![cian_core::Entry::remote("..", dir.to_string(), true, 0, true)];
+    for e in entries {
+        rows.push(cian_core::Entry::remote(
+            e.name.clone(),
+            cian_scp::remote_join(dir, &e.name),
+            e.is_dir,
+            e.size,
+            false,
+        ));
+    }
+    rows
 }

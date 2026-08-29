@@ -15,6 +15,11 @@ cian-core = { workspace = true }
 # same terminal emulator the terminal build reads its shell through. One
 # emulator, and no compiler on the machine that runs it.
 cian-pty  = { workspace = true }
+# SFTP. Pure Rust (russh), and already built for the Windows release because
+# the terminal build carries it — so this costs the engine nothing new. The
+# gigabytes once feared were for *building* on the offline machine, and that
+# machine receives an exe.
+cian-scp  = { workspace = true }
 vt100     = { workspace = true }
 serde      = { workspace = true }
 serde_json = { workspace = true }

@@ -122,6 +122,11 @@ html, body {
 /* Where the drop will land, said plainly. Two panes means a drop is always
    about to go into one of them and not the other. */
 .pane.dropping { outline: 2px dashed var(--accent); outline-offset: -3px; }
+/* A pane showing a server wears a different frame. The terminal build uses a
+   carmine border for exactly this: the rows look like files, and mistaking
+   somebody's server for your own disk is the one confusion worth spending a
+   colour on. */
+.pane.remote { outline: 2px solid var(--mark); outline-offset: -2px; }
 .crumb {
   padding: 6px 10px; border-bottom: 1px solid var(--line);
   color: var(--dim); font-size: 12px;

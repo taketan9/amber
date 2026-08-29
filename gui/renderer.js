@@ -94,7 +94,13 @@ function draw(which) {
     const root = el[which];
     root.classList.toggle('active', state.focus === which);
     if (!pane) return;
-    root.querySelector('.crumb').textContent = pane.cwd;
+    root.classList.toggle('remote', !!pane.remote);
+    // What this pane is showing, said in the one line people actually read.
+    // A server's rows look exactly like a local directory's, and mistaking
+    // somebody's server for your own disk is worth a word and a frame.
+    root.querySelector('.crumb').textContent = pane.remote
+        ? `${pane.remote}:${pane.cwd}`
+        : (pane.flat ? `${pane.flat} — ${pane.cwd}` : pane.cwd);
 
     const rows = root.querySelector('.rows');
     // Rebuilt whole. A listing is a few hundred rows and Chromium does not
@@ -232,6 +238,14 @@ async function enter() {
     if (!pane) return;
     const row = pane.entries[pane.cursor];
     if (!row) return;
+    // Over the network the rows' paths are the server's, not this disk's —
+    // opening one locally would look for a directory that is not here.
+    if (pane.remote) {
+        if (row.parent) { await remoteStep({ up: true }); return; }
+        if (!row.is_dir) { say('サーバ上のファイルはまだ開けません — c でこちらへ', true); return; }
+        await remoteStep({});
+        return;
+    }
     // An archive is a directory you can walk into, which is what the terminal
     // build does with Enter — reading a zip as a list of names is `:lsar`, and
     // it is a different question.
@@ -269,21 +283,24 @@ async function parent() {
 ///
 /// The same sheet as the confirm, with a field in it: one dialog to know
 /// rather than two, and the keys mean the same thing in both.
-function askFor(head, initial = '') {
+function askFor(head, initial = '', opts = {}) {
     const sheet = el.ask.querySelector('.sheet');
     el.ask.querySelector('.head').textContent = head;
     const body = el.ask.querySelector('.body');
     body.textContent = '';
     const input = document.createElement('input');
-    input.type = 'text';
-    input.value = initial;
+    // A password is never shown, and never pre-filled. cian has nowhere to
+    // keep one that would be better than not keeping one, so it is asked for
+    // each time and held only until the connection is made.
+    input.type = opts.secret ? 'password' : 'text';
+    input.value = opts.secret ? '' : initial;
     input.className = 'field';
     body.append(input);
     el.ask.hidden = false;
     input.focus();
     // The stem, not the suffix: renaming is nearly always about the name and
     // almost never about the `.txt`.
-    const dot = initial.lastIndexOf('.');
+    const dot = opts.secret ? -1 : initial.lastIndexOf('.');
     if (dot > 0) input.setSelectionRange(0, dot);
     else input.select();
 
@@ -711,6 +728,13 @@ const HELP = [
         [':svnupdate :svncommit :svnresolve', 'svn の3つ'],
         [':dedup', '中身が同じファイルを探す'],
     ]],
+    ['サーバ（SFTP）', [
+        [':remote  /  :ssh', 'このペインでサーバを開く — user@host[:port][:/path]'],
+        ['Enter / Backspace', 'サーバの中を移動'],
+        ['c', '反対ペインへ — 立っている側でアップロードか転送かが決まる'],
+        [':local', 'サーバを閉じてローカルへ戻る'],
+        ['枠が変わります', 'サーバを表示しているペインは色の違う枠になります'],
+    ]],
     ['シェル', [
         ['Shift+J  /  :shell', 'シェルパネル（下半分に出る）'],
         ['Esc', 'ファイルへ戻る（Esc 2回でシェルへ渡る）'],
@@ -978,9 +1002,14 @@ document.addEventListener('keydown', (e) => {
     // directory in the middle of choosing files is never what was meant.
     else if (k === 'Enter' && visual.on) endVisual(true);
     else if (k === 'Enter') enter();
+    else if (k === 'Backspace' && state[state.focus].remote) remoteStep({ up: true });
     else if (k === 'Backspace') parent();
     else if (k === ' ') mark(false);
     else if (k === 'a' && (e.ctrlKey || e.metaKey)) mark(true);
+    // `c` is `c` either way: whether it is a copy or an upload is decided by
+    // which pane you are standing in, which the program already knows.
+    else if (k === 'c' && !e.ctrlKey && !e.metaKey
+             && (state.left.remote || state.right.remote)) transfer();
     else if (k === 'c' && !e.ctrlKey && !e.metaKey) operate('copy');
     else if (k === 'm') operate('move');
     else if (k === 'd') operate('delete');
@@ -1609,6 +1638,9 @@ const COMMANDS = [
     { name: 'dedup', about: '中身が同じファイルを探す', run: cmdDedup },
     { name: 'redo', about: 'u で取り消した操作をやり直す', run: redo },
     { name: 'shell', about: 'シェルパネルを開く（Shift+J でも）', run: openShell },
+    { name: 'remote', about: 'このペインでサーバを開く（SFTP）', run: cmdConnect },
+    { name: 'ssh', about: '同じ（:remote の別名）', run: cmdConnect },
+    { name: 'local', about: 'サーバを閉じてローカルに戻る', run: cmdDisconnect },
     { name: 'each', about: 'マーク各ファイルにコマンド — {} がパス', arg: 'コマンド', run: cmdEach },
     { name: 'nobom', about: 'UTF-8 BOM を除去（UTF-16 は触らない）', run: cmdNoBom },
     { name: 'renamelist', about: '名前の一覧を編集してリネーム', run: cmdRenameList },
@@ -1638,6 +1670,74 @@ const COMMANDS = [
     { name: 'menu', about: 'トグルメニュー', run: () => openMenu(TOGGLES) },
     { name: 'help', about: 'キー一覧', run: openHelp },
 ];
+
+// ---- A server, in this pane ----
+//
+// Not a transfer dialog. The rows are rows, `Enter` walks into a directory,
+// `..` climbs, and `c` across to the other pane is an upload or a download
+// depending on which side you are standing on. That is the terminal build's
+// arrangement, and the reason it is worth having at all: nothing new to learn.
+
+async function cmdConnect() {
+    const spec = await askFor('user@host[:port][:/path]', '');
+    if (spec === null || !spec.trim()) return;
+    const m = spec.trim().match(/^([^@]+)@([^:/]+)(?::(\d+))?(?::?(\/.*))?$/);
+    if (!m) { say('user@host の形で書いてください', true); return; }
+    const [, user, host, port, path] = m;
+    // Asked for, never stored. cian has nowhere to keep a password that would
+    // be better than not keeping one.
+    const password = await askFor(`${user}@${host} のパスワード`, '', { secret: true });
+    if (password === null) return;
+    say(`${user}@${host} に繋いでいます…`);
+    const r = await ask('connect', {
+        pane: state.focus, user, host,
+        port: port ? Number(port) : 22,
+        path: path || '.',
+        password,
+    });
+    if (!r) return;
+    state[state.focus] = r.pane;
+    draw(state.focus);
+    say(`${r.host}  ${r.path}`);
+}
+
+async function cmdDisconnect() {
+    const pane = await ask('disconnect', { pane: state.focus });
+    if (!pane) return;
+    state[state.focus] = pane;
+    draw(state.focus);
+    say(pane.cwd);
+}
+
+async function remoteStep(opts) {
+    const which = state.focus;
+    const r = await ask('remotelist', { pane: which, ...opts });
+    if (!r) return;
+    state[which] = r.pane;
+    draw(which);
+    say(r.path);
+}
+
+async function transfer() {
+    const which = state.focus;
+    const other = which === 'left' ? 'right' : 'left';
+    const pane = state[which];
+    const rows = pane.entries.filter((x) => x.marked);
+    const what = rows.length ? rows : [pane.entries[pane.cursor]].filter((x) => x && !x.parent);
+    if (!what.length) { say('対象がありません', true); return; }
+    const up = !!state[other].remote;
+    const head = `${what.length} 件を ${up ? 'アップロード' : 'ダウンロード'}`;
+    if (!await confirm(head, what.map((x) => x.name).join('\n'))) { say('やめました'); return; }
+    say(`${head}中…`);
+    const r = await ask('transfer', { pane: which });
+    if (!r) return;
+    state.left = r.left;
+    state.right = r.right;
+    draw('left');
+    draw('right');
+    if (r.errors.length) say(r.errors.join('  /  '), true);
+    else say(`${r.ok} 件を${r.direction === 'up' ? 'アップロード' : 'ダウンロード'}しました`);
+}
 
 /// `:!cmd` — run it in the shell, in this pane's directory. `%` is the
 /// selection, `%f` the file, `%d` the directory; the engine substitutes them,
