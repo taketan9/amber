@@ -369,6 +369,12 @@ async function main() {
         await sleep(600);
         console.log(`\n最後の状態: ${(await cdp.read(LOOK)).status}`);
         console.log('砂場:');
+        for (const extra of ['from/展開先']) {
+            const at = path.join(sand, ...extra.split('/'));
+            if (fs.existsSync(at)) {
+                console.log(`  ${extra}/  ${fs.readdirSync(at).sort().join('  ') || '(空)'}`);
+            }
+        }
         // Bytes, not just names: the editor's whole promise is that a file
         // goes back the way it came, and a name tells you nothing about that.
         const edited = path.join(sand, 'from', 'あ.txt');

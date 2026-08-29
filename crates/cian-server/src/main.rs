@@ -161,15 +161,17 @@ impl Session {
     /// So every request that names a pane states the cursor too, and it is
     /// taken here, once, rather than in each of the handlers that consult it.
     fn take_cursor(&mut self, req: &Request) {
-        let (Some(which), Some(at)) = (req.params["pane"].as_str(), req.params["cursor"].as_u64())
-        else {
-            return;
-        };
-        let which = which.to_string();
-        if let Ok(pane) = self.pane_mut(&which) {
-            // Clamped rather than trusted: the listing can have changed under
-            // the front end between its last draw and this request.
-            pane.cursor = (at as usize).min(pane.entries.len().saturating_sub(1));
+        // Both panes, every time. `compare` needs the row under each cursor —
+        // `=` is one key and the answer is what the two of them are pointing
+        // at — and a request that could only state one of them made that
+        // impossible to ask for.
+        for which in ["left", "right"] {
+            let Some(at) = req.params["cursors"][which].as_u64() else { continue };
+            if let Ok(pane) = self.pane_mut(which) {
+                // Clamped rather than trusted: the listing can have changed
+                // under the front end between its last draw and this request.
+                pane.cursor = (at as usize).min(pane.entries.len().saturating_sub(1));
+            }
         }
     }
 
@@ -657,6 +659,194 @@ impl Session {
                 pane.enter_flat("ブランチ", entries);
                 Ok(serde_json::json!({
                     "found": found,
+                    "pane": serde_json::to_value(PaneView::of(pane))?,
+                }))
+            }
+            // ---- Left against right ----
+            //
+            // One method for both, because `=` is one key. What is under the
+            // two cursors decides: two files are compared line by line, two
+            // directories recursively. Asking the window to work out which
+            // would put the decision where the files are not.
+            "compare" => {
+                let (lp, ln, ld) = self.selected("left")?;
+                let (rp, rn, rd) = self.selected("right")?;
+                if ld != rd {
+                    anyhow::bail!("{ln} と {rn} は種類が違います");
+                }
+                let stop = std::sync::atomic::AtomicBool::new(false);
+                if ld {
+                    let d = cian_core::dirdiff::compare(&lp, &rp, &stop, &mut |_| {});
+                    let rows: Vec<_> = d.entries.iter().take(5000).map(|e| serde_json::json!({
+                        "rel": e.rel.display().to_string(),
+                        "is_dir": e.is_dir,
+                        "status": match e.status {
+                            cian_core::dirdiff::Status::OnlyLeft => "left",
+                            cian_core::dirdiff::Status::OnlyRight => "right",
+                            cian_core::dirdiff::Status::Differ => "differ",
+                        },
+                    })).collect();
+                    return Ok(serde_json::json!({
+                        "kind": "dirs",
+                        "left": lp.display().to_string(),
+                        "right": rp.display().to_string(),
+                        "truncated": d.truncated,
+                        "rows": rows,
+                    }));
+                }
+                let d = cian_core::diff::diff_files(&lp, &rp)?;
+                // Folded to three lines of context. The whole file is right
+                // for a file being read and wrong for a difference being
+                // looked at: the point is what changed, and pages of identical
+                // lines between two changes hide it.
+                let folded = cian_core::diff::fold(&d.rows, 3);
+                let rows: Vec<_> = folded.iter().take(20_000).map(|r| match r {
+                    cian_core::diff::Row::Same { left, right } => serde_json::json!({
+                        "kind": "same", "ln": left.no, "rn": right.no,
+                        "left": left.text, "right": right.text,
+                    }),
+                    cian_core::diff::Row::Changed { left, right } => serde_json::json!({
+                        "kind": "changed", "ln": left.no, "rn": right.no,
+                        "left": left.text, "right": right.text,
+                    }),
+                    cian_core::diff::Row::Removed { left } => serde_json::json!({
+                        "kind": "removed", "ln": left.no, "left": left.text,
+                    }),
+                    cian_core::diff::Row::Added { right } => serde_json::json!({
+                        "kind": "added", "rn": right.no, "right": right.text,
+                    }),
+                    cian_core::diff::Row::Skipped { lines } => serde_json::json!({
+                        "kind": "skipped", "lines": lines,
+                    }),
+                }).collect();
+                Ok(serde_json::json!({
+                    "kind": "files",
+                    "left": ln, "right": rn,
+                    "added": d.added, "removed": d.removed, "changed": d.changed,
+                    "truncated": d.truncated,
+                    "summary": cian_core::diff::summary(&d),
+                    "rows": rows,
+                }))
+            }
+            // ---- Bulk rename ----
+            //
+            // The plan first, always. `:renamepattern` can rename a hundred
+            // files, and the one thing that makes that safe is seeing the
+            // hundred new names before any of them exists.
+            "renameplan" => {
+                let which = req.params["pane"].as_str().unwrap_or("left").to_string();
+                let pattern = req.params["pattern"].as_str().unwrap_or("").to_string();
+                let paths = self.targets(&which)?;
+                let names: Vec<String> = paths
+                    .iter()
+                    .map(|p| p.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default())
+                    .collect();
+                let planned = cian_core::rename::plan_batch(&pattern, &names, Default::default())
+                    .map_err(|e| anyhow::anyhow!("{e}"))?;
+                let rows: Vec<_> = names.iter().zip(planned.iter()).zip(paths.iter())
+                    .map(|((from, to), p)| serde_json::json!({
+                        "from": from, "to": to,
+                        "path": p.display().to_string(),
+                        "same": from == to,
+                        "clash": p.with_file_name(to).exists() && from != to,
+                    }))
+                    .collect();
+                Ok(serde_json::json!({ "pattern": pattern, "rows": rows }))
+            }
+            "renameapply" => {
+                let pairs = req.params["rows"].as_array().cloned().unwrap_or_default();
+                let mut done = 0usize;
+                let mut errors: Vec<String> = Vec::new();
+                for row in &pairs {
+                    let (Some(path), Some(to)) = (row["path"].as_str(), row["to"].as_str()) else {
+                        continue;
+                    };
+                    let from = std::path::PathBuf::from(path);
+                    match cian_core::ops::rename_in_place(&from, to) {
+                        Ok(_) => {
+                            self.undo.push(Undo::Rename { from: from.clone(), to: from.with_file_name(to) });
+                            done += 1;
+                        }
+                        Err(e) => errors.push(format!("{}: {e}", from.display())),
+                    }
+                }
+                for which in ["left", "right"] {
+                    let _ = self.pane_mut(which).map(|p| p.reload());
+                }
+                Ok(serde_json::json!({ "renamed": done, "errors": errors }))
+            }
+            // ---- Archives ----
+            "archivelist" => {
+                let which = req.params["pane"].as_str().unwrap_or("left").to_string();
+                let (path, name, _) = self.selected(&which)?;
+                if !cian_core::archive::is_archive(&path) {
+                    anyhow::bail!("{name} はアーカイブではありません");
+                }
+                let members = cian_core::archive::list(&path)?;
+                Ok(serde_json::json!({
+                    "name": name,
+                    "path": path.display().to_string(),
+                    "members": members.iter().take(5000).map(|m| serde_json::json!({
+                        "name": m.name, "is_dir": m.is_dir,
+                        "size": m.size, "compressed": m.compressed,
+                    })).collect::<Vec<_>>(),
+                }))
+            }
+            "compress" => {
+                let which = req.params["pane"].as_str().unwrap_or("left").to_string();
+                let kind = req.params["kind"].as_str().unwrap_or("zip").to_string();
+                let paths = self.targets(&which)?;
+                if paths.is_empty() {
+                    anyhow::bail!("対象がありません");
+                }
+                let cwd = self.pane_mut(&which)?.cwd.clone();
+                let stem = req.params["name"].as_str().map(str::to_string).unwrap_or_else(|| {
+                    paths[0].file_stem().map(|s| s.to_string_lossy().into_owned())
+                        .unwrap_or_else(|| "archive".into())
+                });
+                let ext = match kind.as_str() {
+                    "tar" => "tar",
+                    "targz" => "tar.gz",
+                    _ => "zip",
+                };
+                let dest = cwd.join(format!("{stem}.{ext}"));
+                if dest.exists() {
+                    anyhow::bail!("{} はすでにあります", dest.display());
+                }
+                let stop = std::sync::atomic::AtomicBool::new(false);
+                let mut noop = |_: &cian_core::progress::Progress| {};
+                let mut ctl = cian_core::progress::Ctl { cancel: &stop, on_progress: &mut noop };
+                let report = match kind.as_str() {
+                    "tar" => cian_core::archive::create_tar(&paths, &dest, false, &mut ctl),
+                    "targz" => cian_core::archive::create_tar(&paths, &dest, true, &mut ctl),
+                    _ => cian_core::archive::create_zip(
+                        &paths, &dest, req.params["password"].as_str(), &mut ctl),
+                };
+                self.undo.push(Undo::Created { path: dest.clone() });
+                let pane = self.pane_mut(&which)?;
+                pane.reload()?;
+                Ok(serde_json::json!({
+                    "made": dest.file_name().map(|s| s.to_string_lossy().into_owned()),
+                    "ok": report.ok, "errors": report.errors,
+                    "pane": serde_json::to_value(PaneView::of(pane))?,
+                }))
+            }
+            "extract" => {
+                let which = req.params["pane"].as_str().unwrap_or("left").to_string();
+                let (path, name, _) = self.selected(&which)?;
+                if !cian_core::archive::is_archive(&path) {
+                    anyhow::bail!("{name} はアーカイブではありません");
+                }
+                let cwd = self.pane_mut(&which)?.cwd.clone();
+                let stop = std::sync::atomic::AtomicBool::new(false);
+                let mut noop = |_: &cian_core::progress::Progress| {};
+                let mut ctl = cian_core::progress::Ctl { cancel: &stop, on_progress: &mut noop };
+                let report = cian_core::archive::extract(
+                    &path, &[], &cwd, req.params["password"].as_str(), "", &mut ctl);
+                let pane = self.pane_mut(&which)?;
+                pane.reload()?;
+                Ok(serde_json::json!({
+                    "from": name, "ok": report.ok, "errors": report.errors,
                     "pane": serde_json::to_value(PaneView::of(pane))?,
                 }))
             }

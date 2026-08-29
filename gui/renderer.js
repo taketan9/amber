@@ -125,13 +125,18 @@ function draw(which) {
 
 async function ask(method, params) {
     try {
-        // Every request that names a pane states where the cursor is. The
-        // cursor moves here, on every `j`, without asking the engine — so the
-        // engine's own copy went stale, and `r` after three presses of `j`
-        // renamed a file three rows up. Stated once, here, rather than
+        // Every request states where both cursors are. The cursor moves here,
+        // on every `j`, without asking the engine — so the engine's own copy
+        // went stale, and `r` after three presses of `j` renamed a file three
+        // rows up. Both, not just the focused one, because `=` compares what
+        // the two of them are pointing at. Stated once, here, rather than
         // remembered at each of the dozen call sites.
-        const pane = params && params.pane && state[params.pane];
-        if (pane && params.cursor === undefined) params = { ...params, cursor: pane.cursor };
+        if (state.left && state.right) {
+            params = {
+                cursors: { left: state.left.cursor, right: state.right.cursor },
+                ...params,
+            };
+        }
         return await window.cian.call(method, params);
     } catch (e) {
         say(String(e.message || e), true);
@@ -149,10 +154,18 @@ async function refresh() {
 }
 
 /// Mark the row under the cursor, or every row.
-async function mark(all) {
+/// Mark, and step. `Space` steps down and `Shift+Space` up — the terminal
+/// build has both, because marking a run upwards is as common as downwards
+/// and doing it with Space and k is two hands' worth of keys.
+async function mark(all, step = 1) {
     const which = state.focus;
     const next = await ask(all ? 'markall' : 'mark', { pane: which });
     if (!next) return;
+    if (!all && step < 0) {
+        // The engine always steps down after marking; going up is two steps
+        // back from where it left the cursor.
+        next.cursor = Math.max(0, next.cursor - 2);
+    }
     state[which] = next;
     draw(which);
     say(next.marked ? `${next.marked} 件マーク` : 'マークなし');
@@ -600,6 +613,8 @@ document.addEventListener('keydown', (e) => {
 const HELP = [
     ['移動', [
         ['j / k / ↑ ↓', 'ひとつ下 / 上'],
+        ['Shift+D / Shift+U', '10行ずつ'],
+        ['gg / G', '先頭 / 末尾'],
         ['Enter', 'ディレクトリへ入る / ファイルを読む'],
         ['Ctrl+Enter', 'ディレクトリは反対ペインへ / ファイルは既定のアプリで'],
         ['Backspace', '親ディレクトリへ'],
@@ -628,6 +643,10 @@ const HELP = [
         [':du', '容量分析 — 何が大きいか（Enter で中へ）'],
         [':attr / :chmod / :readonly', '属性を見る・変える'],
         [':hash', 'チェックサム（既定 sha256、:hash md5 も）'],
+        ['=  /  :diff', '左右を比較 — ファイル同士は行差分、ディレクトリ同士は再帰'],
+        [':renamepattern', '一括リネーム {name}_{n3}.{ext}（先にプレビュー）'],
+        [':zip / :tar / :targz', 'マークをアーカイブにまとめる'],
+        [':unzip / :lsar', 'ここに展開 / 中身を見る'],
     ]],
     ['読み書き（F3・Enter）', [
         ['Ctrl+S', '保存（元の文字コード・改行・BOM のまま）'],
@@ -640,6 +659,7 @@ const HELP = [
     ]],
     ['マークと操作', [
         ['Space', 'マーク切替して下へ'],
+        ['Shift+Space', 'マーク切替して上へ'],
         ['Ctrl+A', '全マーク（もう一度で解除）'],
         ['V', '全マークを反転'],
         ['c / m / d', '反対ペインへコピー / 移動 / 削除（ゴミ箱へ）'],
@@ -852,6 +872,17 @@ document.addEventListener('keydown', (e) => {
     else if (k === 'ArrowUp' || k === 'k') move(-1);
     else if (k === 'PageDown') move(20);
     else if (k === 'PageUp') move(-20);
+    else if (k === 'D') move(10);
+    else if (k === 'U') move(-10);
+    else if (k === 'G') { state[state.focus].cursor = state[state.focus].entries.length - 1; draw(state.focus); }
+    else if (k === 'g') {
+        // `gg`, two keystrokes and therefore a small state machine — a lone
+        // `g` means nothing here, as in vim.
+        const now = performance.now();
+        if (now - lastGG < 1000) { lastGG = 0; state[state.focus].cursor = 0; draw(state.focus); }
+        else lastGG = now;
+    }
+    else if (k === ' ' && e.shiftKey) mark(false, -1);
     else if (k === 'Home') { state[state.focus].cursor = 0; draw(state.focus); }
     else if (k === 'End') {
         const p = state[state.focus];
@@ -893,6 +924,7 @@ document.addEventListener('keydown', (e) => {
     else if (k === 'n') hopHere(1);
     else if (k === 'N') hopHere(-1);
     else if (k === 'b') cmdBranch();
+    else if (k === '=') cmdCompare();
     else if (k === 'h' && !e.ctrlKey) cmdHistory();
     else if (k === 'ArrowLeft' && e.altKey) step('back');
     else if (k === 'ArrowRight' && e.altKey) step('forward');
@@ -1405,6 +1437,13 @@ const COMMANDS = [
     { name: 'find', about: '名前で探す（この下すべて）', arg: '名前', run: (a) => cmdSearch('name', a) },
     { name: 'grep', about: 'ファイルの中を探す（この下すべて）', arg: '文字列か /正規表現/', run: (a) => cmdSearch('content', a) },
     { name: 'branch', about: 'この配下を1ファイル1行に平坦化', run: cmdBranch },
+    { name: 'diff', about: '左右を比較（= でも）', run: cmdCompare },
+    { name: 'renamepattern', about: '一括リネーム: {name}_{n3}.{ext}', arg: 'パターン', run: cmdRenamePattern },
+    { name: 'zip', about: 'マークを zip にまとめる', run: () => cmdCompress('zip') },
+    { name: 'tar', about: 'マークを tar にまとめる', run: () => cmdCompress('tar') },
+    { name: 'targz', about: 'マークを tar.gz にまとめる', run: () => cmdCompress('targz') },
+    { name: 'unzip', about: 'カーソルのアーカイブをここに展開', run: cmdExtract },
+    { name: 'lsar', about: 'アーカイブの中身を見る', run: cmdArchiveList },
     { name: 'back', about: 'ひとつ前のディレクトリへ', run: () => step('back') },
     { name: 'forward', about: 'ひとつ先のディレクトリへ', run: () => step('forward') },
     { name: 'history', about: 'このペインの履歴', run: cmdHistory },
@@ -1627,6 +1666,8 @@ async function cmdHistory() {
     });
 }
 
+let lastGG = 0;
+
 /// `f` looks in *this* listing, and `n`/`N` walk the matches.
 ///
 /// Not the same as `/`, which narrows the listing to what matches, and not the
@@ -1662,6 +1703,105 @@ function hopHere(step) {
     pane.cursor = hits[here.at];
     draw(state.focus);
     say(`${here.needle}   ${here.at + 1} / ${hits.length}`);
+}
+
+// ---- Left against right, bulk rename, archives ----
+
+/// `=` — one key, and what the two cursors point at decides the answer.
+async function cmdCompare() {
+    say('比べています…');
+    const r = await ask('compare', {});
+    if (!r) return;
+    if (r.kind === 'dirs') {
+        const mark = { left: '◀ 左だけ', right: '右だけ ▶', differ: '≠ 違う' };
+        show('ディレクトリ比較', `${r.left}   ↔   ${r.right}   ${r.rows.length} 件${r.truncated ? '（打ち切り）' : ''}`,
+            r.rows.map((x) => ({ n: mark[x.status], label: x.rel + (x.is_dir ? '/' : '') })),
+            { foot: 'Esc 閉じる' });
+        return;
+    }
+    // A difference is read by its differences, so the identical runs between
+    // them are folded away — the engine did that; here they are one row
+    // saying how many went past.
+    const glyph = { same: ' ', changed: '~', removed: '-', added: '+', skipped: '⋯' };
+    const rows = r.rows.map((x) => {
+        if (x.kind === 'skipped') return { n: '⋯', label: `── 同じ ${x.lines} 行 ──`, sub: '' };
+        return {
+            n: `${glyph[x.kind]} ${x.ln ?? ''}`.trim(),
+            label: x.left ?? '',
+            sub: x.right ?? '',
+        };
+    });
+    show('ファイル比較', `${r.left}   ↔   ${r.right}   ${r.summary}`, rows, { foot: 'Esc 閉じる' });
+}
+
+/// The plan first, always — the hundred new names before any of them exists.
+async function cmdRenamePattern(pattern) {
+    const r = await ask('renameplan', { pane: state.focus, pattern });
+    if (!r) return;
+    const changing = r.rows.filter((x) => !x.same);
+    if (!changing.length) { say('変わる名前がありません'); return; }
+    const clashes = changing.filter((x) => x.clash);
+    show(`一括リネーム   ${r.pattern}`,
+        `${changing.length} 件が変わります` + (clashes.length ? `   ★ ${clashes.length} 件は既にある名前` : ''),
+        r.rows.map((x) => ({
+            n: x.clash ? '★' : (x.same ? '=' : '→'),
+            label: x.from,
+            sub: x.to,
+        })),
+        {
+            foot: clashes.length
+                ? '★ の名前は既にあります — Enter で残りだけ実行   Esc やめる'
+                : 'Enter 実行   Esc やめる',
+            pick: async () => {
+                closeReport();
+                const rows = changing.filter((x) => !x.clash);
+                if (!rows.length) { say('実行できる行がありません', true); return; }
+                if (!await confirm(`${rows.length} 件の名前を変えます`,
+                    rows.map((x) => `${x.from}  →  ${x.to}`).join('\n'))) { say('やめました'); return; }
+                const done = await ask('renameapply', { rows });
+                if (!done) return;
+                await reread();
+                if (done.errors.length) say(done.errors.join('  /  '), true);
+                else say(`${done.renamed} 件の名前を変えました`);
+            },
+        });
+}
+
+async function cmdCompress(kind) {
+    const pane = state[state.focus];
+    const rows = pane.entries.filter((x) => x.marked);
+    const what = rows.length ? rows : [pane.entries[pane.cursor]].filter((x) => x && !x.parent);
+    if (!what.length) { say('対象がありません', true); return; }
+    const name = await askFor('アーカイブの名前（拡張子なし）', what[0].name.replace(/\.[^.]*$/, ''));
+    if (name === null || !name) return;
+    say(`${kind} を作っています…`);
+    const r = await ask('compress', { pane: state.focus, kind, name });
+    if (!r) return;
+    state[state.focus] = r.pane;
+    draw(state.focus);
+    if (r.errors.length) say(r.errors.join('  /  '), true);
+    else say(`${r.made} を作りました（${r.ok} 件）`);
+}
+
+async function cmdExtract() {
+    const r = await ask('extract', { pane: state.focus });
+    if (!r) return;
+    state[state.focus] = r.pane;
+    draw(state.focus);
+    if (r.errors.length) say(r.errors.join('  /  '), true);
+    else say(`${r.from} を展開しました（${r.ok} 件）`);
+}
+
+async function cmdArchiveList() {
+    const r = await ask('archivelist', { pane: state.focus });
+    if (!r) return;
+    show(r.name, `${r.members.length} 件`,
+        r.members.map((m) => ({
+            n: m.is_dir ? '' : human(m.size),
+            label: m.name,
+            sub: m.is_dir ? '' : `圧縮後 ${human(m.compressed)}`,
+        })),
+        { foot: 'Esc 閉じる' });
 }
 
 /// What the engine says unasked.
