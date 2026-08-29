@@ -49,5 +49,10 @@ if [ ! -x "$here/cian-server" ] \
     exit 1
 fi
 
+# エディタの資材が無ければ、開いた瞬間に困る前に言う。
+if [ ! -f "$here/vendor/monaco/vs/loader.js" ]; then
+    echo "gui/vendor がありません（エディタは開けません）: node gui/vendor.js" >&2
+fi
+
 echo "Electron: $found"
 exec "$found" "$here" "$@"

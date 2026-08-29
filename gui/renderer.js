@@ -495,6 +495,11 @@ const TOGGLES = {
                 value: LOOKS[look][1],
                 run: () => { setLook(look + 1); drawMenu(); say(`配色: ${LOOKS[look][1]}`); },
             },
+            {
+                label: 'エディタの流儀',
+                value: STYLES[style][1],
+                run: () => { setStyle(style + 1); drawMenu(); say(`エディタ: ${STYLES[style][1]}`); },
+            },
         ];
     },
 };
@@ -600,11 +605,12 @@ const HELP = [
         [',', 'ソート：名前／サイズ／日付／拡張子（n s d e で直接、同じキーで昇降反転）'],
         ['T', 'トグルメニュー：隠しファイル・配色'],
     ]],
-    ['読む（F3・Enter）', [
-        ['j / k / Ctrl+d / Ctrl+u', '行・半画面ずつ'],
-        ['gg / G', '先頭 / 末尾'],
-        ['/ n / N', '検索・次・前'],
-        ['q / Esc / F3', '閉じる'],
+    ['読み書き（F3・Enter）', [
+        ['Ctrl+S', '保存（元の文字コード・改行・BOM のまま）'],
+        ['Esc / F3', '閉じる（未保存なら確認）'],
+        ['T で流儀を切替', 'メモ帳流（既定） / vim'],
+        ['  vim のとき', 'ノーマルモードで開く。:w 保存 :q 閉じる :wq 両方'],
+        ['  メモ帳流のとき', 'Ctrl+C/V/Z/F など Windows の手が効く'],
     ]],
     ['マークと操作', [
         ['Space', 'マーク切替して下へ'],
@@ -809,6 +815,10 @@ document.addEventListener('input', (e) => {
 });
 
 document.addEventListener('keydown', (e) => {
+    // Not while a file is open. The editor no longer stops every key on its
+    // way past — it cannot, or its own bindings never fire — so the listing's
+    // keys have to decline for themselves.
+    if (viewer.on) return;
     // cian's own keys first; anything not claimed here is left to Chromium,
     // which is what makes Ctrl+C and friends work without being written out.
     const k = e.key;
@@ -886,6 +896,44 @@ function resolvedFace() {
     return '(none of them — the browser chose)';
 }
 
+/// The editor's runtime, loaded once and only when a file is opened.
+///
+/// **One component reads and writes.** The terminal build has no separate
+/// editor either — its viewer becomes editable where you stand — and a
+/// hand-written viewer beside a real editor would be two implementations of
+/// the same motions and the same search, which is the pair that always drifts.
+///
+/// It is not in the repository. `node gui/vendor.js` puts it there out of
+/// node_modules, trimmed to what actually runs; the release builds carry it.
+let monacoLoading = null;
+
+function loadMonaco() {
+    if (monacoLoading) return monacoLoading;
+    monacoLoading = new Promise((ok, no) => {
+        const s = document.createElement('script');
+        s.src = 'vendor/monaco/vs/loader.js';
+        s.onerror = () => no(new Error(
+            'gui/vendor がありません — gui/ で `node vendor.js` を実行してください'));
+        s.onload = () => {
+            // Absolute, because the editor starts a worker and a worker has
+            // no idea what this page's directory was. A relative path sent it
+            // looking for `file:///vendor/...` — the root of the disk — and
+            // the editor came up as an exception with an empty window behind
+            // it.
+            const vs = new URL('vendor/monaco/vs', document.baseURI).href;
+            // eslint-disable-next-line no-undef
+            require.config({
+                paths: { vs },
+                'vs/nls': { availableLanguages: { '*': 'ja' } },
+            });
+            // eslint-disable-next-line no-undef
+            require(['vs/editor/editor.main'], () => withVim().then(() => ok(window.monaco), no), no);
+        };
+        document.head.append(s);
+    });
+    return monacoLoading;
+}
+
 /// Reading a file, without leaving cian.
 ///
 /// A window of lines is drawn rather than the whole file. The terminal build
@@ -893,15 +941,246 @@ function resolvedFace() {
 /// the right one — a hundred thousand rows is a hundred thousand elements
 /// otherwise, and the files worth opening in a viewer are exactly the long
 /// ones. Which lines are on screen is arithmetic either way.
-const viewer = { on: false, lines: [], top: 0, cur: 0, query: '', hits: [], at: -1, about: '' };
-
-/// How many lines fit. Measured rather than assumed: the cell height is a
-/// theme token, and three of the four themes disagree about it.
-function viewRows() {
-    const h = parseFloat(getComputedStyle(document.documentElement)
-        .getPropertyValue('--cell-h')) || 20;
-    return Math.max(1, Math.floor(el.vBody.clientHeight / h));
+/// Add the vim grammar, which will not load itself.
+///
+/// monaco-vim ships a UMD bundle that checks for `define.amd` first — and
+/// Monaco's own loader defines one, so it takes the AMD branch and goes
+/// looking for `monaco-editor/esm/vs/editor/editor.api`, which is not in the
+/// trimmed runtime and would not be the same copy of Monaco if it were. With
+/// `define` out of sight for the length of the load it takes the plain-global
+/// branch instead and picks up the `monaco` already on the window: one copy of
+/// the editor, which is the only arrangement in which the vim keys reach the
+/// editor the file is open in.
+function withVim() {
+    return new Promise((ok, no) => {
+        const saved = window.define;
+        window.define = undefined;
+        const s = document.createElement('script');
+        s.src = 'vendor/monaco-vim.js';
+        const restore = () => { window.define = saved; };
+        s.onload = () => { restore(); ok(); };
+        s.onerror = () => { restore(); no(new Error('vendor/monaco-vim.js がありません')); };
+        document.head.append(s);
+    });
 }
+
+/// Reading and writing a file, without leaving cian.
+///
+/// **One component does both.** The terminal build has no separate editor —
+/// its viewer becomes editable where you stand — and a hand-written viewer
+/// beside a real editor would be two implementations of the same motions and
+/// the same search. That pair always drifts; it is the reason the clipboard
+/// rules and the copy guard live in cian-core.
+const viewer = {
+    on: false, opening: false, ed: null, vim: null,
+    name: '', about: '', dirty: false,
+    /// The model's version at the last read or write.
+    ///
+    /// Dirtiness is this compared against the current version, not a flag set
+    /// by the first edit. A flag says "changed" for ever, including after the
+    /// edits have been undone back to what is on disk — and it also went up
+    /// the moment the file was loaded, because filling an editor is a change
+    /// like any other. Monaco's alternative version id is exactly this
+    /// question already answered.
+    base: 0,
+};
+
+/// Which grammar the editor speaks.
+///
+/// notepad by default, because that is what a Windows desktop expects and
+/// what was decided for this build. vim for Taketan, and for anyone else who
+/// would rather. Where the choice is remembered is still open — the same
+/// question as the look, and answering it in two places would be worse than
+/// leaving it unanswered in one.
+const STYLES = [['notepad', 'メモ帳流'], ['vim', 'vim']];
+let style = 0;
+
+/// The four looks are two grounds. Monaco ships a light and a dark theme, and
+/// the editor sitting in the wrong one is the sort of thing that reads as
+/// broken rather than as unstyled.
+function editorTheme() {
+    return LOOKS[look][0] === 'inei' || LOOKS[look][0] === 'terminal' ? 'vs-dark' : 'vs';
+}
+
+const MONACO_LANG = {
+    Rust: 'rust', TypeScript: 'typescript', JavaScript: 'javascript', Python: 'python',
+    Json: 'json', Toml: 'ini', Yaml: 'yaml', Markdown: 'markdown', Html: 'html',
+    Css: 'css', Shell: 'shell', C: 'c', Cpp: 'cpp', Go: 'go', Java: 'java',
+    Lua: 'lua', Sql: 'sql', Xml: 'xml', Ruby: 'ruby', Php: 'php',
+};
+
+async function lookInside() {
+    const which = state.focus;
+    const pane = state[which];
+    const row = pane && pane.entries[pane.cursor];
+    if (!row || row.parent) return;
+    if (row.is_dir) { await enter(); return; }
+    // Opening takes a second the first time — the editor's runtime has to load
+    // — and `viewer.on` is not true until it has. Enter followed by F3 in that
+    // second started a second open, and the second one's setValue landed on
+    // the first one's editor.
+    if (viewer.opening || viewer.on) return;
+    viewer.opening = true;
+    try {
+        await openInEditor(which);
+    } finally {
+        viewer.opening = false;
+    }
+}
+
+async function openInEditor(which) {
+    const f = await ask('view', { pane: which });
+    if (!f) return;
+
+    let monaco;
+    try {
+        monaco = await loadMonaco();
+    } catch (e) {
+        say(e.message, true);
+        return;
+    }
+
+    const enc = { Utf8: 'UTF-8', ShiftJis: 'Shift_JIS', Utf16Le: 'UTF-16LE', Utf16Be: 'UTF-16BE' };
+    // Named, always. Which encoding it turned out to be is the question a
+    // Japanese Windows machine asks of every file it did not write, and the
+    // answer decides whether saving it is safe.
+    viewer.about = [
+        enc[f.encoding] || f.encoding,
+        f.bom ? 'BOM' : null,
+        f.eol.toUpperCase(),
+        `${f.lines.length} 行`,
+    ].filter(Boolean).join('  ·  ');
+    viewer.name = f.name;
+    viewer.dirty = false;
+    viewer.on = true;
+    el.view.hidden = false;
+
+    const text = f.lines.join('\n');
+    const lang = MONACO_LANG[f.lang] || 'plaintext';
+    if (!viewer.ed) {
+        viewer.ed = monaco.editor.create(el.vBody, {
+            value: text,
+            language: lang,
+            theme: editorTheme(),
+            automaticLayout: true,
+            fontFamily: getComputedStyle(document.body).fontFamily,
+            fontSize: parseFloat(getComputedStyle(document.body).fontSize),
+            minimap: { enabled: false },
+            // The one place this build differs from a code editor's defaults:
+            // a file manager opens files it did not write, and reformatting
+            // them on the way past is not its business.
+            renderWhitespace: 'selection',
+            scrollBeyondLastLine: false,
+        });
+        viewer.ed.onDidChangeModelContent(() => {
+            const now = viewer.ed.getModel().getAlternativeVersionId();
+            const dirty = now !== viewer.base;
+            if (dirty === viewer.dirty) return;
+            viewer.dirty = dirty;
+            drawViewFoot();
+        });
+        viewer.ed.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => saveFile());
+        viewer.ed.onDidChangeCursorPosition(drawViewFoot);
+    } else {
+        viewer.ed.updateOptions({ theme: editorTheme() });
+        monaco.editor.setModelLanguage(viewer.ed.getModel(), lang);
+        viewer.ed.setValue(text);
+    }
+    // After the text is in, not before: loading it is a change to the model,
+    // and a file is not modified by having been opened.
+    viewer.base = viewer.ed.getModel().getAlternativeVersionId();
+    viewer.dirty = false;
+    setStyle(style);
+    el.vName.textContent = f.name;
+    el.vAbout.textContent = viewer.about;
+    viewer.ed.setPosition({ lineNumber: 1, column: 1 });
+    viewer.ed.focus();
+    drawViewFoot();
+}
+
+/// Attach or drop the vim grammar. Called on open and whenever the switch is
+/// flipped, so the running editor changes under you rather than needing to be
+/// closed and reopened.
+function setStyle(i) {
+    style = (i + STYLES.length) % STYLES.length;
+    if (!viewer.ed) return;
+    if (viewer.vim) { viewer.vim.dispose(); viewer.vim = null; }
+    if (STYLES[style][0] === 'vim') {
+        // eslint-disable-next-line no-undef
+        viewer.vim = MonacoVim.initVimMode(viewer.ed, el.vFoot);
+        // `:w` and `:q` where the fingers put them. Without these, vim style
+        // would still need Ctrl+S and Esc — which is exactly the seam that
+        // makes a vim mode feel like a costume.
+        // eslint-disable-next-line no-undef
+        const ex = MonacoVim.VimMode.Vim;
+        ex.defineEx('write', 'w', saveFile);
+        ex.defineEx('quit', 'q', () => closeView(false));
+        ex.defineEx('wq', 'wq', async () => { if (await saveFile()) closeView(false); });
+    }
+    drawViewFoot();
+}
+
+function drawViewFoot() {
+    // In vim style the footer is vim's own — its mode line and its `:` prompt
+    // live there, and writing over them would take the command line away.
+    if (viewer.vim) return;
+    const at = viewer.ed && viewer.ed.getPosition();
+    const where = at ? `${at.lineNumber} : ${at.column}` : '';
+    el.vFoot.textContent = [
+        where,
+        viewer.dirty ? '未保存' : null,
+        STYLES[style][1],
+        'Ctrl+S 保存   Esc 閉じる',
+    ].filter(Boolean).join('   ·   ');
+}
+
+async function saveFile() {
+    if (!viewer.ed) return false;
+    const lines = viewer.ed.getValue().split(/\r?\n/);
+    const r = await ask('save', { lines });
+    if (!r) return false;
+    viewer.base = viewer.ed.getModel().getAlternativeVersionId();
+    viewer.dirty = false;
+    drawViewFoot();
+    say(`${r.saved} を保存しました（${r.lines} 行）`);
+    // The listing shows a size and a date; both just changed.
+    await reread();
+    return true;
+}
+
+/// Leaving. An unsaved file asks first — the only door out of an editor that
+/// can lose work.
+async function closeView(ask_first = true) {
+    if (ask_first && viewer.dirty) {
+        if (!await confirm(`${viewer.name} は未保存です`, '閉じると編集は失われます')) return;
+    }
+    viewer.on = false;
+    viewer.dirty = false;
+    if (viewer.vim) { viewer.vim.dispose(); viewer.vim = null; }
+    el.view.hidden = true;
+    el.status.focus?.();
+}
+
+/// The only keys the page handles while the editor is up. Everything else is
+/// the editor's, which is the point of having one.
+///
+/// **Only the keys it claims are stopped.** Every other overlay here stops the
+/// lot in the capture phase, which is right when the overlay is the whole
+/// interface. It is wrong here: a capture-phase `stopPropagation` never
+/// reaches the editor's own listeners, so Ctrl+S, and every other binding
+/// Monaco has, silently did nothing. Typed characters still arrived — those
+/// come in as text rather than through a keybinding — so the editor looked
+/// perfectly alive right up until you tried to save.
+document.addEventListener('keydown', (e) => {
+    if (!viewer.on) return;
+    // In vim style Esc is normal mode, not the door — leaving on it would make
+    // every cancelled insert close the file.
+    const leave = e.key === 'F3' || (e.key === 'Escape' && !viewer.vim);
+    if (!leave) return;
+    e.stopPropagation();
+    e.preventDefault();
+    closeView();
+}, true);
 
 /// Ctrl+Enter: a folder to the other pane, a file to your own application.
 ///
@@ -919,172 +1198,6 @@ async function openOut() {
         say(`${r.opened} を既定のアプリで開きました`);
     }
 }
-
-async function lookInside() {
-    const which = state.focus;
-    const pane = state[which];
-    const row = pane && pane.entries[pane.cursor];
-    if (!row || row.parent) return;
-    if (row.is_dir) { await enter(); return; }
-    const f = await ask('view', { pane: which });
-    if (!f) return;
-    viewer.on = true;
-    viewer.lines = f.lines;
-    viewer.top = 0;
-    viewer.cur = 0;
-    viewer.query = '';
-    viewer.hits = [];
-    viewer.at = -1;
-    const enc = { Utf8: 'UTF-8', ShiftJis: 'Shift_JIS', Utf16Le: 'UTF-16LE', Utf16Be: 'UTF-16BE' };
-    // Named, always. Which encoding it turned out to be is the question a
-    // Japanese Windows machine asks of every file it did not write.
-    viewer.about = [
-        enc[f.encoding] || f.encoding,
-        f.bom ? 'BOM' : null,
-        f.eol.toUpperCase(),
-        f.lang,
-        `${f.lines.length} 行`,
-    ].filter(Boolean).join('  ·  ');
-    el.vName.textContent = f.name;
-    el.vAbout.textContent = viewer.about;
-    el.view.hidden = false;
-    drawView();
-}
-
-function closeView() {
-    viewer.on = false;
-    viewer.lines = [];
-    el.view.hidden = true;
-}
-
-function drawView() {
-    const rows = viewRows();
-    // Keep the cursor on screen, scrolling by the least that does it.
-    if (viewer.cur < viewer.top) viewer.top = viewer.cur;
-    if (viewer.cur >= viewer.top + rows) viewer.top = viewer.cur - rows + 1;
-    viewer.top = Math.max(0, Math.min(viewer.top, Math.max(0, viewer.lines.length - rows)));
-
-    const frag = document.createDocumentFragment();
-    const width = String(viewer.lines.length).length;
-    for (let i = viewer.top; i < Math.min(viewer.lines.length, viewer.top + rows); i++) {
-        const div = document.createElement('div');
-        div.className = 'vline' + (i === viewer.cur ? ' on' : '');
-        const n = document.createElement('span');
-        n.className = 'n';
-        n.style.flexBasis = `${width}ch`;
-        n.textContent = String(i + 1);
-        const t = document.createElement('span');
-        t.className = 't';
-        paintLine(t, viewer.lines[i]);
-        div.append(n, t);
-        frag.append(div);
-    }
-    el.vBody.replaceChildren(frag);
-
-    const where = `${viewer.cur + 1} / ${viewer.lines.length}`;
-    const found = viewer.query
-        ? (viewer.hits.length ? `  /${viewer.query}  ${viewer.at + 1} / ${viewer.hits.length}` : `  /${viewer.query}  見つかりません`)
-        : '';
-    el.vFoot.textContent = `${where}${found}`;
-    el.vName.textContent = el.vName.textContent;
-}
-
-/// Put the line in, marking the search term where it appears.
-///
-/// Built out of text nodes rather than assembled as HTML, because the text is
-/// a file's contents: a line containing `<script>` would otherwise be a line
-/// that runs.
-function paintLine(into, text) {
-    if (!viewer.query) {
-        into.textContent = text;
-        return;
-    }
-    const q = viewer.query.toLowerCase();
-    const hay = text.toLowerCase();
-    let from = 0;
-    let at = hay.indexOf(q, from);
-    if (at < 0) {
-        into.textContent = text;
-        return;
-    }
-    const bits = [];
-    while (at >= 0) {
-        if (at > from) bits.push(document.createTextNode(text.slice(from, at)));
-        const m = document.createElement('mark');
-        m.textContent = text.slice(at, at + q.length);
-        bits.push(m);
-        from = at + q.length;
-        at = hay.indexOf(q, from);
-    }
-    if (from < text.length) bits.push(document.createTextNode(text.slice(from)));
-    into.replaceChildren(...bits);
-}
-
-function searchView(query) {
-    viewer.query = query;
-    const q = query.toLowerCase();
-    viewer.hits = [];
-    if (q) {
-        viewer.lines.forEach((line, i) => {
-            if (line.toLowerCase().includes(q)) viewer.hits.push(i);
-        });
-    }
-    viewer.at = -1;
-    if (viewer.hits.length) hopTo(1);
-    else drawView();
-}
-
-/// Next hit, or the one before. Wraps, and says so by simply arriving at the
-/// other end — a search that stops at the last match is a search you have to
-/// restart by hand.
-function hopTo(step) {
-    if (!viewer.hits.length) return;
-    if (viewer.at < 0) {
-        // The first hop from a fresh search starts where the eye is.
-        const ahead = viewer.hits.findIndex((n) => n >= viewer.cur);
-        viewer.at = step > 0 ? (ahead < 0 ? 0 : ahead) : (ahead <= 0 ? viewer.hits.length - 1 : ahead - 1);
-    } else {
-        viewer.at = (viewer.at + step + viewer.hits.length) % viewer.hits.length;
-    }
-    viewer.cur = viewer.hits[viewer.at];
-    drawView();
-}
-
-/// The viewer's keys. vim's, as far as this milestone goes — the operators and
-/// text objects are the editor's job and arrive with it.
-let lastG = 0;
-document.addEventListener('keydown', (e) => {
-    if (!viewer.on) return;
-    e.stopPropagation();
-    const rows = viewRows();
-    const last = viewer.lines.length - 1;
-    const go = (to) => { viewer.cur = Math.max(0, Math.min(last, to)); drawView(); };
-    const k = e.key;
-    const ctrl = e.ctrlKey || e.metaKey;
-
-    if (k === 'Escape' || k === 'q' || k === 'F3') closeView();
-    else if (k === 'j' || k === 'ArrowDown') go(viewer.cur + 1);
-    else if (k === 'k' || k === 'ArrowUp') go(viewer.cur - 1);
-    else if (k === 'd' && ctrl) go(viewer.cur + Math.floor(rows / 2));
-    else if (k === 'u' && ctrl) go(viewer.cur - Math.floor(rows / 2));
-    else if (k === 'PageDown' || (k === 'f' && ctrl)) go(viewer.cur + rows);
-    else if (k === 'PageUp' || (k === 'b' && ctrl)) go(viewer.cur - rows);
-    else if (k === 'G') go(last);
-    else if (k === 'g') {
-        // `gg`, which is two keystrokes and therefore a small state machine.
-        // A second `g` within the second means the top; a lone one means
-        // nothing, the way it does in vim.
-        const now = performance.now();
-        if (now - lastG < 1000) { lastG = 0; go(0); } else lastG = now;
-    }
-    else if (k === 'n') hopTo(1);
-    else if (k === 'N') hopTo(-1);
-    else if (k === '/') {
-        askFor('検索', viewer.query).then((q) => { if (q !== null) searchView(q); });
-    }
-    else return;
-    e.preventDefault();
-}, true);
 
 /// What the engine says unasked.
 ///

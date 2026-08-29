@@ -36,6 +36,10 @@ const NAMED = {
 };
 
 function parseKey(spec) {
+    // `Mod` is the platform's own: Cmd on macOS, Ctrl everywhere else. Monaco
+    // binds Ctrl+S that way and is right to — but the driver was sending Ctrl
+    // on a Mac, where it reaches nothing, and reporting the save key as dead.
+    spec = spec.replace(/^Mod\+/, process.platform === 'darwin' ? 'Meta+' : 'Ctrl+');
     const parts = spec.split('+');
     const base = parts.pop();
     const mods = parts.map((m) => m.toLowerCase());
@@ -45,10 +49,55 @@ function parseKey(spec) {
     if (mods.includes('meta') || mods.includes('cmd')) bits |= 4;
     if (mods.includes('shift')) bits |= 8;
     const key = NAMED[base] || base;
-    return { key, modifiers: bits, text: key.length === 1 && bits < 2 ? key : undefined };
+    return {
+        key,
+        modifiers: bits,
+        text: key.length === 1 && bits < 2 ? key : undefined,
+        ...virtual(key),
+    };
+}
+
+/// The key's number and its physical code.
+///
+/// **Without these, CDP sends keyCode 0.** A page reading `e.key` — everything
+/// cian's own handlers do — never notices. Monaco does not read `e.key`: it
+/// resolves its keybindings from the number, so Ctrl+S arrived as a keystroke
+/// with no identity and the save silently never ran. The driver had reported
+/// the key as dead, which was true and not the reason.
+const VKEY = {
+    Escape: 27, Enter: 13, Tab: 9, Backspace: 8, ' ': 32,
+    ArrowLeft: 37, ArrowUp: 38, ArrowRight: 39, ArrowDown: 40,
+    Home: 36, End: 35, PageUp: 33, PageDown: 34, Delete: 46, Insert: 45,
+};
+const CODE = {
+    Escape: 'Escape', Enter: 'Enter', Tab: 'Tab', Backspace: 'Backspace', ' ': 'Space',
+    ArrowLeft: 'ArrowLeft', ArrowUp: 'ArrowUp', ArrowRight: 'ArrowRight', ArrowDown: 'ArrowDown',
+    Home: 'Home', End: 'End', PageUp: 'PageUp', PageDown: 'PageDown',
+    Delete: 'Delete', Insert: 'Insert',
+};
+
+function virtual(key) {
+    if (VKEY[key]) return { code: CODE[key], windowsVirtualKeyCode: VKEY[key] };
+    if (/^F\d{1,2}$/.test(key)) {
+        return { code: key, windowsVirtualKeyCode: 111 + Number(key.slice(1)) };
+    }
+    if (key.length === 1) {
+        const up = key.toUpperCase();
+        if (up >= 'A' && up <= 'Z') {
+            return { code: `Key${up}`, windowsVirtualKeyCode: up.charCodeAt(0) };
+        }
+        if (up >= '0' && up <= '9') {
+            return { code: `Digit${up}`, windowsVirtualKeyCode: up.charCodeAt(0) };
+        }
+    }
+    // Punctuation and anything else: the page reads `e.key` for those, and
+    // nothing here binds a chord to one.
+    return {};
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+const argText = (a) => a.value ?? a.description ?? a.unserializableValue ?? JSON.stringify(a.preview ?? '');
 
 /// Shift_JIS bytes. Node cannot encode it, and pulling in iconv for a test
 /// fixture would be a dependency for the sake of three lines — but every
@@ -109,7 +158,7 @@ async function settle(cdp, sand) {
 }
 
 class Cdp {
-    constructor(ws) { this.ws = ws; this.id = 0; this.waiting = new Map(); }
+    constructor(ws) { this.ws = ws; this.id = 0; this.waiting = new Map(); this.said = []; }
 
     static async open(url) {
         const ws = new WebSocket(url);
@@ -117,6 +166,20 @@ class Cdp {
         const cdp = new Cdp(ws);
         ws.onmessage = (e) => {
             const msg = JSON.parse(e.data);
+            // Everything the page says, not only what it prints to stderr.
+            // The first Monaco run opened nothing and reported nothing, and
+            // the reason — a plain exception — was sitting in a console this
+            // was not reading.
+            if (msg.method === 'Runtime.consoleAPICalled' && msg.params.type !== 'log') {
+                cdp.said.push(`${msg.params.type}: ${msg.params.args.map(argText).join(' ')}`);
+            }
+            if (msg.method === 'Runtime.exceptionThrown') {
+                cdp.said.push(`例外: ${msg.params.exceptionDetails.exception?.description
+                    || msg.params.exceptionDetails.text}`);
+            }
+            if (msg.method === 'Log.entryAdded' && msg.params.entry.level === 'error') {
+                cdp.said.push(`${msg.params.entry.source}: ${msg.params.entry.text}`);
+            }
             const w = cdp.waiting.get(msg.id);
             if (!w) return;
             cdp.waiting.delete(msg.id);
@@ -134,6 +197,13 @@ class Cdp {
     async press(spec) {
         // `type:…` puts a string in, one character at a time, so a prompt can
         // be answered. Everything else is one key.
+        // `wait:1200` gives something slow a moment. The editor's runtime
+        // takes about a second to load the first time, and reading the window
+        // 120 ms after F3 said the key had done nothing.
+        if (spec.startsWith('wait:')) {
+            await sleep(Number(spec.slice(5)));
+            return;
+        }
         if (spec.startsWith('type:')) {
             for (const ch of spec.slice(5)) await this.press(ch);
             return;
@@ -143,6 +213,9 @@ class Cdp {
             await this.send('Input.dispatchKeyEvent', {
                 type: type === 'keyDown' && k.text ? 'keyDown' : type,
                 key: k.key,
+                code: k.code,
+                windowsVirtualKeyCode: k.windowsVirtualKeyCode,
+                nativeVirtualKeyCode: k.windowsVirtualKeyCode,
                 text: type === 'keyDown' ? k.text : undefined,
                 modifiers: k.modifiers,
             });
@@ -164,6 +237,7 @@ class Cdp {
 const LOOK = `({
     status: document.querySelector('#status')?.textContent?.trim() ?? '',
     sheet: document.querySelector('#find:not([hidden])') ? 'sheet' : null,
+    asking: document.querySelector('#ask:not([hidden]) .head')?.textContent ?? null,
     rows: document.querySelectorAll('#find:not([hidden]) .hit').length,
     at: [...document.querySelectorAll('#find:not([hidden]) .hit')].findIndex((e) => e.classList.contains('on')),
     cursor: state?.[state.focus]?.cursor,
@@ -172,7 +246,8 @@ const LOOK = `({
     view: document.querySelector('#view:not([hidden])')
         ? { about: document.getElementById('v-about').textContent,
             foot: document.getElementById('v-foot').textContent,
-            first: document.querySelector('.vline .t')?.textContent }
+            first: document.querySelector('.view-line')?.textContent,
+            lines: document.querySelectorAll('.view-line').length }
         : null,
     marks: state?.[state.focus]?.entries?.filter((x) => x.marked).map((x) => x.name) ?? [],
     scroll: document.querySelector('#find:not([hidden]) .hits')?.scrollTop ?? 0,
@@ -217,8 +292,8 @@ async function main() {
         ['z', 'パスで移動'], [`type:${sand}/to`, ''], ['Enter', 'to へ'],
         ['Ctrl+v', '貼り付け'],
         ['Tab', '左へ'], ['Down', ''], ['Enter', 'ファイルを読む'],
-        ['G', '末尾へ'], ['g', ''], ['g', '先頭へ'],
-        ['/', '検索'], ['type:37 行目', ''], ['Enter', '37行目へ'],
+        ['F3', 'エディタで開く'], ['wait:3000', ''],
+        ['type:XX', '打つ'], ['Mod+s', '保存'], ['wait:900', ''],
         ['Esc', '閉じる'],
     ];
 
@@ -236,9 +311,12 @@ async function main() {
     }
 
     let bad = 0;
+    let said = [];
     try {
         const cdp = await Cdp.open(await target());
+        said = cdp.said;
         await cdp.send('Runtime.enable');
+        await cdp.send('Log.enable');
         await settle(cdp, sand);
 
         for (const [key, what] of round) {
@@ -258,6 +336,12 @@ async function main() {
         await sleep(600);
         console.log(`\n最後の状態: ${(await cdp.read(LOOK)).status}`);
         console.log('砂場:');
+        // Bytes, not just names: the editor's whole promise is that a file
+        // goes back the way it came, and a name tells you nothing about that.
+        const edited = path.join(sand, 'from', 'あ.txt');
+        const raw = fs.readFileSync(edited);
+        const head = [...raw.subarray(0, 12)].map((b) => b.toString(16).padStart(2, '0')).join(' ');
+        console.log(`  あ.txt  ${raw.length} バイト  先頭: ${head}`);
         for (const dir of ['from', 'to']) {
             const at = path.join(sand, dir);
             const names = fs.readdirSync(at).sort().join('  ');
@@ -271,6 +355,10 @@ async function main() {
     if (crashes.length) {
         console.log('\n落ちた:');
         crashes.forEach((c) => console.log('  ' + c));
+    }
+    if (said.length) {
+        console.log('\nページが言ったこと:');
+        said.forEach((c) => console.log('  ' + c));
     }
     // A key that changed nothing is not always wrong — pressing `,` twice only
     // reverses — so this reports rather than fails. The crashes are the failure.

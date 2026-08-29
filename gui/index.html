@@ -2,8 +2,15 @@
 <html lang="ja">
 <head>
 <meta charset="utf-8">
+<!-- Still nothing from the network. The additions are all `self` or inline
+     data: the editor's runtime sits beside this file, it spawns a worker from
+     that same directory, and it draws its icons from a font it ships. `blob:`
+     is there because the AMD loader hands the worker its bootstrap that way
+     when the page is on file://. -->
 <meta http-equiv="Content-Security-Policy"
-      content="default-src 'none'; style-src 'unsafe-inline'; script-src 'self';">
+      content="default-src 'none'; style-src 'self' 'unsafe-inline'; script-src 'self' blob:;
+               worker-src 'self' blob:; child-src 'self' blob:;
+               font-src 'self'; img-src 'self' data:;">
 <title>cian</title>
 <style>
 /* The look is the whole reason this build exists, so the type comes first.
@@ -189,19 +196,13 @@ html, body {
 }
 .vhead { border-bottom: 1px solid var(--line); }
 .vfoot { border-top: 1px solid var(--line); }
-.vbody { flex: 1 1 auto; overflow: hidden; padding: 4px 0; }
-.vline { display: flex; gap: 10px; height: var(--cell-h); padding: 0 10px; white-space: pre; }
-.vline.on { background: var(--accent); color: var(--on-accent); }
-/* The numbers get a column of their own so the text starts at one place down
-   the whole file, and they are dimmed because they are not the thing being
-   read. */
-.vline .n {
-  flex: 0 0 5ch; text-align: right; color: var(--dim);
-  font-variant-numeric: tabular-nums; user-select: none;
-}
-.vline.on .n { color: var(--on-accent); }
-.vline .t { flex: 1 1 auto; overflow: hidden; }
-.vline mark { background: var(--accent); color: var(--on-accent); }
+/* Monaco measures this box and lays itself out inside it, so it must have a
+   height of its own — a flex child with `min-height: 0` rather than one that
+   grows to fit content it is also being asked to scroll. */
+.vbody { flex: 1 1 auto; min-height: 0; }
+/* vim's mode line and its `:` prompt live in the footer, and monaco-vim puts
+   them there as plain text. */
+.vfoot input { background: transparent; border: 0; color: inherit; font: inherit; outline: none; }
 
 #find {
   position: fixed; inset: 0; display: flex;

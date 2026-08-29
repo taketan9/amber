@@ -118,6 +118,14 @@ struct Session {
     /// Held for a later paste. Independent of the system clipboard, and of
     /// which pane is focused — that is the point of it.
     clip: Option<cian_core::clip::Clipboard>,
+    /// The file the viewer has open, as it was read.
+    ///
+    /// A save writes back through this rather than through anything the front
+    /// end says, so it cannot land on another path and cannot lose the
+    /// encoding, BOM or line ending the file arrived with. Getting those wrong
+    /// turns a one-line edit into a diff on every line — and on a Shift_JIS
+    /// log, into a file the tool that wrote it can no longer read.
+    open: Option<(std::path::PathBuf, cian_core::grepedit::TextFile)>,
 }
 
 impl Session {
@@ -130,6 +138,7 @@ impl Session {
             undo: Stack::default(),
             find: Find::default(),
             clip: None,
+            open: None,
         })
     }
 
@@ -406,7 +415,7 @@ impl Session {
                 let name = entry.name.clone();
                 let len = entry.len;
                 let file = cian_core::grepedit::read_text(&path)?;
-                Ok(serde_json::json!({
+                let reply = serde_json::json!({
                     "name": name,
                     "path": path.display().to_string(),
                     "lines": file.lines,
@@ -415,7 +424,28 @@ impl Session {
                     "eol": format!("{:?}", file.eol),
                     "bom": file.bom,
                     "lang": cian_core::highlight::detect(&path).map(|l| format!("{l:?}")),
-                }))
+                });
+                self.open = Some((path, file));
+                Ok(reply)
+            }
+            // Write the open file back, in the encoding it arrived in.
+            "save" => {
+                let Some((path, original)) = self.open.as_ref() else {
+                    anyhow::bail!("開いているファイルがありません");
+                };
+                let lines: Vec<String> = req.params["lines"]
+                    .as_array()
+                    .map(|a| a.iter().map(|v| v.as_str().unwrap_or("").to_string()).collect())
+                    .unwrap_or_default();
+                let file = cian_core::grepedit::TextFile { lines, ..original.clone() };
+                cian_core::grepedit::write_text(path, &file)?;
+                let name = path
+                    .file_name()
+                    .map(|s| s.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                let lines = file.lines.len();
+                self.open = Some((path.clone(), file));
+                Ok(serde_json::json!({ "saved": name, "lines": lines }))
             }
             // Rename in place. The name is a bare filename, never a path —
             // moving something is what `move` is for, and a rename that could
