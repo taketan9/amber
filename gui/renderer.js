@@ -815,6 +815,8 @@ const HELP = [
         ['Esc ×3', '閉じる ── 3回連続（未保存なら3回目で確認）'],
         ['Backspace ×3', '同じ。vim 流儀でノーマルモードのときだけ'],
         ['F3', '1回で閉じる'],
+        ['F3（マーク中）', 'マークした全部を開く'],
+        ['F2 / Shift+F2', '次 / 前の開いているファイル'],
         ['Ctrl+Shift+O', '見出し一覧から飛ぶ（vim 流儀は :outline）'],
         ['Ctrl+Shift+B', '各行を最後に変えた人（vim 流儀は :blame、もう一度で消す）'],
         [':sort2 :rsort :uniq', '行をソート / 逆順 / 重複を落とす'],
@@ -1141,7 +1143,7 @@ document.addEventListener('keydown', (e) => {
     else if (k === 'p' && !e.ctrlKey && !e.metaKey) copyPaths();
     else if (k === 'F5') reread();
     else if (k === '?') openHelp();
-    else if (k === 'F3') lookInside();
+    else if (k === 'F3') lookInsideAll();
     else if (k === ':') commandLine();
     else if (k === 'C') openPalette();
     // The modified ones first: `f` on its own would otherwise swallow Ctrl+F.
@@ -1375,6 +1377,13 @@ function withVim() {
 /// beside a real editor would be two implementations of the same motions and
 /// the same search. That pair always drifts; it is the reason the clipboard
 /// rules and the copy guard live in cian-core.
+/// The files open in the viewer, and which one is showing.
+///
+/// More than one because the answer to "which of these has the error" is found
+/// by opening several and stepping between them, and closing one to look at
+/// the next loses your place in the first.
+const openFiles = { list: [], at: 0 };
+
 const viewer = {
     on: false, opening: false, ed: null, vim: null,
     name: '', about: '', dirty: false, readOnly: false,
@@ -1508,6 +1517,36 @@ function makeEditor(monaco, text, lang) {
 
 }
 
+/// `F3` on a marked set opens all of them; `F2` and `Shift+F2` step between.
+async function lookInsideAll() {
+    const pane = state[state.focus];
+    const marked = pane.entries.filter((x) => x.marked && !x.is_dir);
+    if (marked.length < 2) { await lookInside(); return; }
+    openFiles.list = marked.map((x) => x.path);
+    openFiles.at = 0;
+    await openNth(0);
+    say(`${marked.length} 件を開きました（F2 / Shift+F2 で行き来）`);
+}
+
+async function openNth(at) {
+    const n = openFiles.list.length;
+    if (!n) return;
+    openFiles.at = ((at % n) + n) % n;
+    const path = openFiles.list[openFiles.at];
+    const which = state.focus;
+    // The cursor has to move too: everything downstream — save, blame,
+    // outline — asks the engine about "the selected file", and a viewer
+    // showing one file while the engine holds another is the kind of
+    // disagreement that writes to the wrong place.
+    const at2 = state[which].entries.findIndex((x) => x.path === path);
+    if (at2 >= 0) state[which].cursor = at2;
+    if (viewer.on) await closeView(false);
+    await lookInside();
+    if (openFiles.list.length > 1) {
+        el.vName.textContent = `[${openFiles.at + 1}/${openFiles.list.length}] ${viewer.name}`;
+    }
+}
+
 async function openInEditor(which) {
     const pane = state[which];
     const row = pane && pane.entries[pane.cursor];
@@ -1571,6 +1610,10 @@ function setStyle(i, remember = true) {
     if (remember) ask('remember', { key: 'gui_editor', value: STYLES[style][0] });
     if (!viewer.ed) return;
     if (viewer.vim) { viewer.vim.dispose(); viewer.vim = null; }
+    // Cleared before vim takes the line. Otherwise the footer keeps whatever
+    // was last written into it and vim's mode line appends to it — two status
+    // lines in one, which is how it looked the first time.
+    el.vFoot.textContent = '';
     if (STYLES[style][0] === 'vim') {
         // eslint-disable-next-line no-undef
         viewer.vim = MonacoVim.initVimMode(viewer.ed, el.vFoot);
@@ -1696,6 +1739,8 @@ async function closeView(ask_first = true) {
     viewer.dirty = false;
     renameList.on = false;
     stopHex();
+    // Only when the door is being used, not when stepping between files.
+    if (ask_first) openFiles.list = [];
     if (viewer.vim) { viewer.vim.dispose(); viewer.vim = null; }
     el.vPic.replaceChildren();
     el.vPic.hidden = true;
@@ -1862,6 +1907,13 @@ document.addEventListener('keydown', (e) => {
         wayOut.key = null;
         wayOut.times = 0;
         closeView();
+        return;
+    }
+    // Between the open files, when there is more than one.
+    if ((e.key === 'F2') && openFiles.list.length > 1) {
+        e.stopPropagation();
+        e.preventDefault();
+        openNth(openFiles.at + (e.shiftKey ? -1 : 1));
         return;
     }
 
