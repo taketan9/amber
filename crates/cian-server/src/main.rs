@@ -194,6 +194,10 @@ struct Session {
     /// Held for a later paste. Independent of the system clipboard, and of
     /// which pane is focused — that is the point of it.
     clip: Option<cian_core::clip::Clipboard>,
+    /// The right-hand file of a side-by-side comparison, when one is up.
+    /// `open` holds the left; both are kept so a save on either goes back
+    /// through the encoding that side arrived with.
+    pair: Option<(std::path::PathBuf, cian_core::grepedit::TextFile)>,
     /// The file open in the viewer, as `view_file` read it — kept whether it
     /// is text or a binary, because re-decoding needs the raw bytes and a
     /// second read would be a second answer to "what is in this file".
@@ -249,6 +253,7 @@ impl Session {
             clip: None,
             open: None,
             shown: None,
+            pair: None,
             hex: None,
             redo: Stack::default(),
             shells: Vec::new(),
@@ -741,10 +746,7 @@ impl Session {
                 let Some((path, original)) = self.open.as_ref() else {
                     anyhow::bail!("開いているファイルがありません");
                 };
-                let lines: Vec<String> = req.params["lines"]
-                    .as_array()
-                    .map(|a| a.iter().map(|v| v.as_str().unwrap_or("").to_string()).collect())
-                    .unwrap_or_default();
+                let lines: Vec<String> = lines_of(req).unwrap_or_default();
                 let file = cian_core::grepedit::TextFile { lines, ..original.clone() };
                 cian_core::grepedit::write_text(path, &file)?;
                 let name = path
@@ -1580,10 +1582,7 @@ impl Session {
                 let Some((_, file)) = self.open.as_ref() else {
                     anyhow::bail!("開いているファイルがありません");
                 };
-                let lines: Vec<String> = req.params["lines"]
-                    .as_array()
-                    .map(|a| a.iter().map(|v| v.as_str().unwrap_or("").to_string()).collect())
-                    .unwrap_or_else(|| file.lines.clone());
+                let lines: Vec<String> = lines_of(req).unwrap_or_else(|| file.lines.clone());
                 let width = req.params["width"].as_u64().unwrap_or(4) as usize;
                 use cian_core::textops as t;
                 let out = match req.params["op"].as_str().unwrap_or("") {
@@ -2485,10 +2484,7 @@ impl Session {
             // learning two spellings of `s///` would be absurd.
             "substitute" => {
                 let spec = req.params["spec"].as_str().unwrap_or("");
-                let lines: Vec<String> = req.params["lines"]
-                    .as_array()
-                    .map(|a| a.iter().map(|v| v.as_str().unwrap_or("").to_string()).collect())
-                    .unwrap_or_default();
+                let lines: Vec<String> = lines_of(req).unwrap_or_default();
                 let sub = cian_core::substitute::parse(spec).map_err(|e| anyhow::anyhow!(e))?;
                 let hits = cian_core::substitute::find(&sub, &lines, None);
                 if hits.is_empty() {
@@ -2496,6 +2492,47 @@ impl Session {
                 }
                 let out = cian_core::substitute::apply(&lines, &hits);
                 Ok(serde_json::json!({ "lines": out, "changed": hits.len() }))
+            }
+            // Both sides of a comparison, as text, for an editor that shows
+            // them next to each other and lets you change either.
+            //
+            // Separate from `compare`, which answers with rows for the report
+            // screen. This is the same two files asked for differently: there,
+            // "what differs"; here, "let me fix it".
+            "twofiles" => {
+                let (lp, ln, ld) = self.selected("left")?;
+                let (rp, rn, rd) = self.selected("right")?;
+                if ld || rd {
+                    anyhow::bail!("ファイル同士でないと並べられません");
+                }
+                let l = cian_core::grepedit::read_text(&lp)?;
+                let r = cian_core::grepedit::read_text(&rp)?;
+                let lang = cian_core::highlight::detect(&lp).map(|x| format!("{x:?}"));
+                // Both remembered, so `save` on either writes back through the
+                // encoding it arrived with.
+                self.open = Some((lp.clone(), l.clone()));
+                self.pair = Some((rp.clone(), r.clone()));
+                Ok(serde_json::json!({
+                    "left": { "name": ln, "lines": l.lines, "encoding": format!("{:?}", l.encoding) },
+                    "right": { "name": rn, "lines": r.lines, "encoding": format!("{:?}", r.encoding) },
+                    "lang": lang,
+                }))
+            }
+            // Save the right-hand side of a comparison.
+            "savepair" => {
+                let Some((path, original)) = self.pair.as_ref() else {
+                    anyhow::bail!("並べているファイルがありません");
+                };
+                let lines: Vec<String> = lines_of(req).unwrap_or_default();
+                let file = cian_core::grepedit::TextFile { lines, ..original.clone() };
+                cian_core::grepedit::write_text(path, &file)?;
+                let name = path
+                    .file_name()
+                    .map(|s| s.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                let n = file.lines.len();
+                self.pair = Some((path.clone(), file));
+                Ok(serde_json::json!({ "saved": name, "lines": n }))
             }
             // Leave a flat listing and go back to the directory it came from.
             "leaveflat" => {
@@ -2914,4 +2951,17 @@ fn shellexpand(path: &str) -> String {
         Some(home) => format!("{}{rest}", home.to_string_lossy()),
         None => path.to_string(),
     }
+}
+
+/// The `lines` argument, when a request carries one.
+///
+/// Four handlers had written this out — the text operations, the two saves and
+/// the substitute — and all four mean the same thing: the window's current
+/// idea of the file's contents, which may be ahead of what the engine last
+/// read. Written four times it is four chances for one of them to start
+/// treating a missing `lines` differently from the rest.
+fn lines_of(req: &Request) -> Option<Vec<String>> {
+    req.params["lines"]
+        .as_array()
+        .map(|a| a.iter().map(|v| v.as_str().unwrap_or("").to_string()).collect())
 }

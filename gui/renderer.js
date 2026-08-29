@@ -759,6 +759,8 @@ const HELP = [
         [':attr / :chmod / :readonly', '属性を見る・変える'],
         [':hash', 'チェックサム（既定 sha256、:hash md5 も）'],
         ['=  /  :diff', '左右を比較 — ファイル同士は行差分、ディレクトリ同士は再帰'],
+        ['  比較で Enter', '並べて開く — 左右とも編集でき、Ctrl+S で両方保存'],
+        ['  F7 / Shift+F7', '次 / 前の相違へ'],
         [':renamepattern', '一括リネーム {name}_{n3}.{ext}（先にプレビュー）'],
         [':renamelist', '名前の一覧を編集してリネーム（Ctrl+S で適用）'],
         [':zip / :tar / :targz', 'マークをアーカイブにまとめる'],
@@ -1715,6 +1717,7 @@ function drawViewFoot() {
 
 async function saveFile() {
     if (!viewer.ed) return false;
+    if (pair.on) { await savePair(); return true; }
     if (viewer.readOnly) { say('16進表示は保存できません', true); return false; }
     // The editor is holding a list of names rather than a file's contents.
     if (renameList.on) {
@@ -1744,6 +1747,8 @@ async function closeView(ask_first = true) {
     viewer.dirty = false;
     renameList.on = false;
     stopHex();
+    if (pair.ed) { pair.ed.dispose(); pair.ed = null; }
+    pair.on = false;
     // Only when the door is being used, not when stepping between files.
     if (ask_first) openFiles.list = [];
     if (viewer.vim) { viewer.vim.dispose(); viewer.vim = null; }
@@ -1906,6 +1911,13 @@ document.addEventListener('keydown', (e) => {
 
     // F3 is nobody's editing key, so it is the one door that opens on a single
     // press. Esc and Backspace are both, which is why they take three.
+    // Between the differences, when two files are side by side.
+    if (e.key === 'F7' && pair.ed) {
+        e.stopPropagation();
+        e.preventDefault();
+        pair.ed.trigger('cian', e.shiftKey ? 'editor.action.diffReview.prev' : 'editor.action.diffReview.next');
+        return;
+    }
     if (e.key === 'F3') {
         e.stopPropagation();
         e.preventDefault();
@@ -1992,6 +2004,7 @@ const COMMANDS = [
     { name: 'grep', about: 'ファイルの中を探す（この下すべて）', arg: '文字列か /正規表現/', run: (a) => cmdSearch('content', a) },
     { name: 'branch', about: 'この配下を1ファイル1行に平坦化', run: cmdBranch },
     { name: 'diff', about: '左右を比較（= でも）', run: cmdCompare },
+    { name: 'diffedit', about: '左右のファイルを並べて、どちらも編集できる形で開く', run: cmdDiffEdit },
     { name: 'renamepattern', about: '一括リネーム: {name}_{n3}.{ext}', arg: 'パターン', run: cmdRenamePattern },
     { name: 'zip', about: 'マークを zip にまとめる', run: () => cmdCompress('zip') },
     { name: 'tar', about: 'マークを tar にまとめる', run: () => cmdCompress('tar') },
@@ -3024,6 +3037,14 @@ async function cmdCompare() {
             { foot: 'Esc 閉じる' });
         return;
     }
+    if (r.kind === 'files') {
+        // Nothing to look at when they are the same, and a screen saying
+        // "identical" over an empty list is a screen that wasted a keystroke.
+        if (!r.added && !r.removed && !r.changed) {
+            say(`${r.left} と ${r.right} は同じ内容です`);
+            return;
+        }
+    }
     // A difference is read by its differences, so the identical runs between
     // them are folded away — the engine did that; here they are one row
     // saying how many went past.
@@ -3036,7 +3057,69 @@ async function cmdCompare() {
             sub: x.right ?? '',
         };
     });
-    show('ファイル比較', `${r.left}   ↔   ${r.right}   ${r.summary}`, rows, { foot: 'Esc 閉じる' });
+    show('ファイル比較', `${r.left}   ↔   ${r.right}   ${r.summary}`, rows, {
+        foot: 'Enter 並べて編集   Esc 閉じる',
+        pick: () => { closeReport(); cmdDiffEdit(); },
+    });
+}
+
+/// `=` in the comparison, or `:diffedit` — the two files side by side, both
+/// editable.
+///
+/// The report screen answers "what differs"; this answers "let me fix it".
+/// Same two files, a different question — and fixing a difference by reading
+/// it in one window and typing in another is how the wrong half gets edited.
+const pair = { on: false, ed: null };
+
+async function cmdDiffEdit() {
+    const r = await ask('twofiles', {});
+    if (!r) return;
+    let monaco;
+    try {
+        monaco = await loadMonaco();
+    } catch (e) { say(e.message, true); return; }
+
+    if (viewer.on) await closeView(false);
+    if (report.on) closeReport();
+    viewer.on = true;
+    pair.on = true;
+    viewer.name = `${r.left.name} ↔ ${r.right.name}`;
+    el.view.hidden = false;
+    el.vBody.hidden = false;
+    el.vPic.hidden = true;
+    el.vName.textContent = viewer.name;
+    el.vAbout.textContent = '左右とも編集できます — Ctrl+S でどちらも保存';
+    el.vFoot.textContent = 'F7 / Shift+F7 次 / 前の相違   ·   Ctrl+S 保存   ·   Esc ×3 閉じる';
+
+    const lang = MONACO_LANG[r.lang] || 'plaintext';
+    // A fresh diff editor each time: reusing one across different file pairs
+    // means old models hanging on to files nobody has open.
+    if (pair.ed) pair.ed.dispose();
+    el.vBody.replaceChildren();
+    pair.ed = monaco.editor.createDiffEditor(el.vBody, {
+        theme: editorTheme(),
+        automaticLayout: true,
+        fontFamily: getComputedStyle(document.body).fontFamily,
+        fontSize: FONT.at,
+        originalEditable: true,
+        renderSideBySide: true,
+        minimap: { enabled: false },
+    });
+    pair.ed.setModel({
+        original: monaco.editor.createModel(r.left.lines.join('\n'), lang),
+        modified: monaco.editor.createModel(r.right.lines.join('\n'), lang),
+    });
+    say(`${r.left.name} ↔ ${r.right.name}`);
+}
+
+async function savePair() {
+    if (!pair.ed) return;
+    const m = pair.ed.getModel();
+    const l = await ask('save', { lines: m.original.getValue().split(/\r?\n/) });
+    const r = await ask('savepair', { lines: m.modified.getValue().split(/\r?\n/) });
+    if (!l && !r) return;
+    await reread();
+    say(`${[l && l.saved, r && r.saved].filter(Boolean).join('  と  ')} を保存しました`);
 }
 
 /// The plan first, always — the hundred new names before any of them exists.
