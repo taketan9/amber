@@ -580,7 +580,7 @@ flowchart TD
 Get-FileHash cian-windows-x64.zip -Algorithm SHA256
 ```
 
-zip 自体を自前で作ることもできます（Mac から、Windows の開発機なしで）。同梱のワークフローが本物の Windows ランナーでビルドします — タグを push（`git tag v1.0.9 && git push --tags`）、または **Actions → release → Run workflow** で、その実行結果のアーティファクトを取ってください。
+zip 自体を自前で作ることもできます（Mac から、Windows の開発機なしで）。同梱のワークフローが本物の Windows ランナーでビルドします — タグを push（`git tag v1.0.10 && git push --tags`）、または **Actions → release → Run workflow** で、その実行結果のアーティファクトを取ってください。
 
 オフライン機で展開し、`cian-tui.exe` をその場で動かすか、PATH に導入します：
 
