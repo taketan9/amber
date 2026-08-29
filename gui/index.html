@@ -150,6 +150,16 @@ html, body {
 #status.bad { background: #5a2233; color: #ffd7de; }
 #status .run { color: var(--accent); }
 
+/* The order these sit in.
+   Not one of them had a z-index, so they stacked in the order they happen to
+   appear in this file — and the editor, added last, covered the question it
+   raises. Closing a file with unsaved edits in it did nothing you could see:
+   the confirmation was open, behind the editor. Stated, so that adding a
+   fourth overlay is a decision rather than an accident. */
+#view { z-index: 10; }   /* a surface: it replaces the listing */
+#find { z-index: 20; }   /* over whatever it is searching */
+#ask  { z-index: 30; }   /* always the top: it is the thing being answered */
+
 #ask {
   position: fixed; inset: 0; display: flex;
   align-items: center; justify-content: center;
@@ -190,10 +200,16 @@ html, body {
 }
 #view[hidden] { display: none; }
 .vhead, .vfoot {
-  display: flex; justify-content: space-between; gap: 12px;
+  display: flex; gap: 12px;
   padding: 6px 10px; background: var(--pane-off); color: var(--dim);
   white-space: nowrap; overflow: hidden;
 }
+.vhead { justify-content: space-between; }
+/* vim's command line starts at the left edge, the way it does in vim. The
+   footer was `space-between`, which pushed the `:` prompt to the far right of
+   a wide window — a command line in a place no vim has ever put one. */
+.vfoot { justify-content: flex-start; align-items: baseline; }
+.vfoot > * { flex: 0 0 auto; }
 .vhead { border-bottom: 1px solid var(--line); }
 .vfoot { border-top: 1px solid var(--line); }
 /* Monaco measures this box and lays itself out inside it, so it must have a
@@ -202,7 +218,19 @@ html, body {
 .vbody { flex: 1 1 auto; min-height: 0; }
 /* vim's mode line and its `:` prompt live in the footer, and monaco-vim puts
    them there as plain text. */
-.vfoot input { background: transparent; border: 0; color: inherit; font: inherit; outline: none; }
+/* The `:` prompt takes the whole line while it is up.
+   monaco-vim leaves `--NORMAL--` sitting to its left, which vim does not: in
+   vim the last line *becomes* the command line. Leaving the mode there pushed
+   the colon a hundred pixels in from the edge — a command line in a place no
+   vim has ever put one. */
+.vfoot:has(input) > span:not(:has(input)) { display: none; }
+.vfoot > span:has(input),
+.vfoot > span:has(input) > span { flex: 1 1 auto; min-width: 0; display: flex; }
+.vfoot input {
+  flex: 1 1 auto; min-width: 0;
+  background: transparent; border: 0; color: var(--text);
+  font: inherit; outline: none;
+}
 
 #find {
   position: fixed; inset: 0; display: flex;

@@ -237,9 +237,26 @@ class Cdp {
 const LOOK = `({
     status: document.querySelector('#status')?.textContent?.trim() ?? '',
     sheet: document.querySelector('#find:not([hidden])') ? 'sheet' : null,
-    asking: document.querySelector('#ask:not([hidden]) .head')?.textContent ?? null,
+    // Not just present — actually on top. The confirmation opened behind the
+    // editor for a while, and merely being un-hidden said it was up all along.
+    asking: (() => {
+        const head = document.querySelector('#ask:not([hidden]) .head');
+        if (!head) return null;
+        const b = head.getBoundingClientRect();
+        const at = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2);
+        return head.contains(at) || at === head ? head.textContent : '(裏に隠れている)';
+    })(),
     rows: document.querySelectorAll('#find:not([hidden]) .hit').length,
     at: [...document.querySelectorAll('#find:not([hidden]) .hit')].findIndex((e) => e.classList.contains('on')),
+    prompt: (() => {
+        const i = document.querySelector('.vfoot input');
+        if (!i) return null;
+        const b = i.getBoundingClientRect();
+        const f = document.querySelector('.vfoot').getBoundingClientRect();
+        // No template literal here: LOOK is one, and a backtick inside it
+        // ends it. Twice now.
+        return '左端から ' + Math.round(b.left - f.left) + 'px  幅 ' + Math.round(b.width) + 'px';
+    })(),
     cursor: state?.[state.focus]?.cursor,
     cwd: state?.[state.focus]?.cwd,
     typed: document.querySelector('input:not([hidden])')?.value ?? null,
@@ -325,7 +342,8 @@ async function main() {
             const after = await cdp.read(LOOK);
             const moved = JSON.stringify(before) !== JSON.stringify(after);
             const note = what ? `  ${what}` : '';
-            const asking = after.asking ? `  ⟨${after.asking}⟩` : null;
+            const asking = after.prompt ? `  ｜: ${after.prompt}`
+                : (after.asking ? `  ⟨${after.asking}⟩` : null);
             const marks = asking ?? (after.view
                 ? `  ｜${after.view.foot}  ${after.view.about}  «${after.view.first}»`
                 : (after.marks.length ? `  [${after.marks.join(' ')}]` : ''));
