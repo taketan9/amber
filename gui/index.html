@@ -135,6 +135,18 @@ html, body {
   user-select: text; cursor: text;
 }
 .pane.active .crumb { color: var(--accent); }
+/* The tab strip, and only when there is more than one — a row of chrome
+   showing a single tab is a row of chrome saying nothing. */
+.tabs { display: flex; gap: 2px; padding: 2px 4px 0; overflow: hidden; }
+.tabs:empty { display: none; }
+.tabs span {
+  padding: 1px 8px; border-radius: 4px 4px 0 0; font-size: 12px;
+  color: var(--dim); background: var(--pane-off);
+  max-width: 14ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  cursor: default;
+}
+.tabs span.on { color: var(--text); background: var(--pane); font-weight: 600; }
+.pane.active .tabs span.on { color: var(--accent); }
 .rows { flex: 1 1 auto; overflow-y: auto; overflow-x: hidden; }
 .row {
   display: flex; align-items: center; gap: 8px;
@@ -348,10 +360,14 @@ html, body {
 <body>
   <div id="panes">
     <section class="pane active" data-pane="left">
+      <div class="tabs"></div>
+      <div class="tabs"></div>
       <div class="crumb"></div>
       <div class="rows"></div>
     </section>
     <section class="pane" data-pane="right">
+      <div class="tabs"></div>
+      <div class="tabs"></div>
       <div class="crumb"></div>
       <div class="rows"></div>
     </section>

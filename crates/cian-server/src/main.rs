@@ -63,6 +63,9 @@ struct PaneView {
     /// beside the name, so it has to come from the engine rather than from
     /// whatever the front end last remembered asking for.
     hidden_shown: bool,
+    /// This side's tabs — one crumb each — and which is showing.
+    tabs: Vec<String>,
+    tab: usize,
     /// `user@host` when this pane is showing a server. The window needs it to
     /// know that Enter, `..` and `c` all mean something over the network.
     remote: Option<String>,
@@ -89,6 +92,28 @@ struct Row {
 }
 
 impl PaneView {
+    /// The active tab of a side, with the side's tab strip attached.
+    fn of_side(side: &Side) -> PaneView {
+        let mut v = PaneView::of(side.get());
+        v.tabs = side
+            .tabs
+            .iter()
+            .map(|p| {
+                p.flat_label()
+                    .map(str::to_string)
+                    .or_else(|| p.remote_view().map(|(h, _)| h.to_string()))
+                    .unwrap_or_else(|| {
+                        p.cwd
+                            .file_name()
+                            .map(|s| s.to_string_lossy().into_owned())
+                            .unwrap_or_else(|| p.cwd.display().to_string())
+                    })
+            })
+            .collect();
+        v.tab = side.at;
+        v
+    }
+
     fn of(pane: &Pane) -> Self {
         PaneView {
             cwd: pane.cwd.display().to_string(),
@@ -96,6 +121,9 @@ impl PaneView {
             marked: pane.mark_count(),
             hidden_shown: pane.show_hidden,
             flat: pane.flat_label().map(str::to_string),
+            // Filled in by `of_side`; a bare pane does not know its siblings.
+            tabs: Vec::new(),
+            tab: 0,
             remote: pane.remote_view().map(|(host, _)| host.to_string()),
             entries: pane
                 .entries
@@ -118,9 +146,35 @@ impl PaneView {
 }
 
 /// The two panes and whatever is running over them.
+/// One side of the window, and the tabs it holds.
+///
+/// The active tab *is* the pane as far as everything else is concerned —
+/// `pane_mut` hands back a `&mut Pane` exactly as it always did, so the forty
+/// call sites that operate on "this pane" did not have to learn what a tab is.
+/// Only the handful that switch or close one know there is a list.
+struct Side {
+    tabs: Vec<Pane>,
+    at: usize,
+}
+
+impl Side {
+    fn new(pane: Pane) -> Self {
+        Side { tabs: vec![pane], at: 0 }
+    }
+
+    fn now(&mut self) -> &mut Pane {
+        let at = self.at.min(self.tabs.len().saturating_sub(1));
+        &mut self.tabs[at]
+    }
+
+    fn get(&self) -> &Pane {
+        &self.tabs[self.at.min(self.tabs.len().saturating_sub(1))]
+    }
+}
+
 struct Session {
-    left: Pane,
-    right: Pane,
+    left: Side,
+    right: Side,
     jobs: Jobs,
     out: Out,
     undo: Stack,
@@ -157,8 +211,8 @@ struct Session {
 impl Session {
     fn new(dir: std::path::PathBuf, out: Out) -> anyhow::Result<Self> {
         Ok(Session {
-            left: Pane::new(dir.clone())?,
-            right: Pane::new(dir)?,
+            left: Side::new(Pane::new(dir.clone())?),
+            right: Side::new(Pane::new(dir)?),
             jobs: Jobs::default(),
             out,
             undo: Stack::default(),
@@ -231,7 +285,7 @@ impl Session {
                     pane.cursor = i;
                 }
             }
-            return Ok(serde_json::to_value(PaneView::of(pane))?);
+            return self.view(which);
         }
         // "a/b/" → "a/"; "a/" → "".
         let parent = sub
@@ -250,13 +304,13 @@ impl Session {
                 pane.cursor = i;
             }
         }
-        Ok(serde_json::to_value(PaneView::of(pane))?)
+        self.view(which)
     }
 
     fn targets(&self, which: &str) -> anyhow::Result<Vec<std::path::PathBuf>> {
         let pane = match which {
-            "left" => &self.left,
-            "right" => &self.right,
+            "left" => self.left.get(),
+            "right" => self.right.get(),
             other => anyhow::bail!("no such pane: {other}"),
         };
         let marked: Vec<_> = pane
@@ -279,12 +333,27 @@ impl Session {
     /// and it is why the destination never has to be typed.
     fn other_cwd(&self, which: &str) -> std::path::PathBuf {
         match which {
-            "left" => self.right.cwd.clone(),
-            _ => self.left.cwd.clone(),
+            "left" => self.right.get().cwd.clone(),
+            _ => self.left.get().cwd.clone(),
         }
     }
 
     fn pane_mut(&mut self, which: &str) -> anyhow::Result<&mut Pane> {
+        Ok(self.side_mut(which)?.now())
+    }
+
+    /// This side, as the window wants it: the active tab's listing *and* the
+    /// tab strip.
+    ///
+    /// Every reply that hands back a pane goes through here. Returning a bare
+    /// pane worked until there were tabs, and then every operation would have
+    /// quietly dropped the strip — a tab bar that vanishes when you rename a
+    /// file is worse than no tab bar.
+    fn view(&mut self, which: &str) -> anyhow::Result<serde_json::Value> {
+        Ok(serde_json::to_value(PaneView::of_side(self.side_mut(which)?))?)
+    }
+
+    fn side_mut(&mut self, which: &str) -> anyhow::Result<&mut Side> {
         match which {
             "left" => Ok(&mut self.left),
             "right" => Ok(&mut self.right),
@@ -300,8 +369,8 @@ impl Session {
             // Both panes as they stand. What the front end asks for on startup
             // and after anything that could have changed the world.
             "state" => Ok(serde_json::json!({
-                "left": PaneView::of(&self.left),
-                "right": PaneView::of(&self.right),
+                "left": PaneView::of_side(&self.left),
+                "right": PaneView::of_side(&self.right),
             })),
             // Read a directory into a pane.
             "list" => {
@@ -316,7 +385,7 @@ impl Session {
                 } else {
                     pane.reload()?;
                 }
-                Ok(serde_json::to_value(PaneView::of(pane))?)
+                self.view(&which)
             }
             // Step into whatever the cursor is on, or out to the parent.
             "enter" => {
@@ -346,7 +415,7 @@ impl Session {
                     let rows = cian_core::archive::archive_rows(&archive, &members, &deeper);
                     let pane = self.pane_mut(&which)?;
                     pane.enter_archive(archive, deeper, rows);
-                    return Ok(serde_json::to_value(PaneView::of(pane))?);
+                    return self.view(&which);
                 }
                 let was = pane.cwd.clone();
                 pane.enter_selected()?;
@@ -355,8 +424,7 @@ impl Session {
                 if pane.cwd != was {
                     self.undo.push(Undo::Navigated { pane: which.clone(), from: was });
                 }
-                let pane = self.pane_mut(&which)?;
-                Ok(serde_json::to_value(PaneView::of(pane))?)
+                self.view(&which)
             }
             "parent" => {
                 let which = req.params["pane"].as_str().unwrap_or("left").to_string();
@@ -370,8 +438,7 @@ impl Session {
                 if pane.cwd != was {
                     self.undo.push(Undo::Navigated { pane: which.clone(), from: was });
                 }
-                let pane = self.pane_mut(&which)?;
-                Ok(serde_json::to_value(PaneView::of(pane))?)
+                self.view(&which)
             }
             // Marking. `at` is a row; without it the cursor's row is meant.
             "mark" => {
@@ -385,7 +452,7 @@ impl Session {
                 if at.is_none() && pane.cursor + 1 < pane.entries.len() {
                     pane.cursor += 1;
                 }
-                Ok(serde_json::to_value(PaneView::of(pane))?)
+                self.view(&which)
             }
             "markall" => {
                 let which = req.params["pane"].as_str().unwrap_or("left").to_string();
@@ -399,7 +466,7 @@ impl Session {
                         pane.set_mark_at(i);
                     }
                 }
-                Ok(serde_json::to_value(PaneView::of(pane))?)
+                self.view(&which)
             }
             "invert" => {
                 let which = req.params["pane"].as_str().unwrap_or("left").to_string();
@@ -407,7 +474,7 @@ impl Session {
                 for i in 0..pane.entries.len() {
                     pane.toggle_mark_at(i);
                 }
-                Ok(serde_json::to_value(PaneView::of(pane))?)
+                self.view(&which)
             }
             // Exactly these, and nothing else, marked.
             //
@@ -428,13 +495,13 @@ impl Session {
                         pane.set_mark_at(i);
                     }
                 }
-                Ok(serde_json::to_value(PaneView::of(pane))?)
+                self.view(&which)
             }
             "unmarkall" => {
                 let which = req.params["pane"].as_str().unwrap_or("left").to_string();
                 let pane = self.pane_mut(&which)?;
                 pane.clear_marks();
-                Ok(serde_json::to_value(PaneView::of(pane))?)
+                self.view(&which)
             }
             // The operations. Each answers with the number it will report
             // under, before it has touched anything.
@@ -746,7 +813,7 @@ impl Session {
                     })
                     .collect();
                 pane.enter_flat(label, entries);
-                Ok(serde_json::to_value(PaneView::of(pane))?)
+                self.view(&which)
             }
             // Everything below here, one row per file.
             //
@@ -770,7 +837,7 @@ impl Session {
                 pane.enter_flat("ブランチ", entries);
                 Ok(serde_json::json!({
                     "found": found,
-                    "pane": serde_json::to_value(PaneView::of(pane))?,
+                    "pane": self.view(&which)?,
                 }))
             }
             // ---- Left against right ----
@@ -939,7 +1006,7 @@ impl Session {
                 Ok(serde_json::json!({
                     "made": dest.file_name().map(|s| s.to_string_lossy().into_owned()),
                     "ok": report.ok, "errors": report.errors,
-                    "pane": serde_json::to_value(PaneView::of(pane))?,
+                    "pane": self.view(&which)?,
                 }))
             }
             "extract" => {
@@ -958,7 +1025,7 @@ impl Session {
                 pane.reload()?;
                 Ok(serde_json::json!({
                     "from": name, "ok": report.ok, "errors": report.errors,
-                    "pane": serde_json::to_value(PaneView::of(pane))?,
+                    "pane": self.view(&which)?,
                 }))
             }
             // ---- Version control ----
@@ -1042,7 +1109,7 @@ impl Session {
                 Ok(serde_json::json!({
                     "did": req.method,
                     "count": paths.len(),
-                    "pane": serde_json::to_value(PaneView::of(pane))?,
+                    "pane": self.view(&which)?,
                 }))
             }
             // Files with the same contents. Compared by content, not by name —
@@ -1172,7 +1239,7 @@ impl Session {
                 Ok(serde_json::json!({
                     "archive": archive.display().to_string(),
                     "sub": sub,
-                    "pane": serde_json::to_value(PaneView::of(pane))?,
+                    "pane": self.view(&which)?,
                 }))
             }
             // The file's bytes, for something the window can draw but not read
@@ -1218,7 +1285,7 @@ impl Session {
                 pane.reload()?;
                 Ok(serde_json::json!({
                     "stripped": stripped, "none": none, "utf16": utf16, "failed": failed,
-                    "pane": serde_json::to_value(PaneView::of(pane))?,
+                    "pane": self.view(&which)?,
                 }))
             }
             // The headings and definitions in the open file, for jumping.
@@ -1370,7 +1437,7 @@ impl Session {
                 pane.reload()?;
                 Ok(serde_json::json!({
                     "said": said,
-                    "pane": serde_json::to_value(PaneView::of(pane))?,
+                    "pane": self.view(&which)?,
                 }))
             }
             // ---- A server, in this pane ----
@@ -1400,7 +1467,7 @@ impl Session {
                 Ok(serde_json::json!({
                     "host": label,
                     "path": resolved,
-                    "pane": serde_json::to_value(PaneView::of(pane))?,
+                    "pane": self.view(&which)?,
                 }))
             }
             "remotelist" => {
@@ -1435,7 +1502,7 @@ impl Session {
                 pane.enter_remote(label, resolved.clone(), rows);
                 Ok(serde_json::json!({
                     "path": resolved,
-                    "pane": serde_json::to_value(PaneView::of(pane))?,
+                    "pane": self.view(&which)?,
                 }))
             }
             // Copy across when one of the two panes is a server.
@@ -1504,8 +1571,8 @@ impl Session {
                     "direction": if up { "up" } else { "down" },
                     "ok": ok,
                     "errors": errors,
-                    "left": PaneView::of(&self.left),
-                    "right": PaneView::of(&self.right),
+                    "left": PaneView::of(self.left.get()),
+                    "right": PaneView::of(self.right.get()),
                 }))
             }
             "disconnect" => {
@@ -1514,7 +1581,7 @@ impl Session {
                 let pane = self.pane_mut(&which)?;
                 let home = pane.cwd.clone();
                 *pane = Pane::new(home)?;
-                Ok(serde_json::to_value(PaneView::of(pane))?)
+                self.view(&which)
             }
             // ---- What is remembered between sessions ----
             //
@@ -1666,6 +1733,44 @@ impl Session {
                 std::fs::write(&path, cian_lua::shortcuts::to_lua(&nodes))?;
                 Ok(serde_json::json!({ "name": name, "target": target }))
             }
+            // ---- Tabs ----
+            //
+            // Each side keeps a list, and the active one *is* the pane
+            // everywhere else. A new tab opens where you are standing, which
+            // is what makes it useful: the reason to open one is almost always
+            // "keep this, and go somewhere else for a moment".
+            "tabnew" => {
+                let which = req.params["pane"].as_str().unwrap_or("left").to_string();
+                let here = self.pane_mut(&which)?.cwd.clone();
+                let fresh = Pane::new(here)?;
+                let side = self.side_mut(&which)?;
+                side.tabs.insert(side.at + 1, fresh);
+                side.at += 1;
+                Ok(serde_json::to_value(PaneView::of_side(side))?)
+            }
+            "tabclose" => {
+                let which = req.params["pane"].as_str().unwrap_or("left").to_string();
+                let side = self.side_mut(&which)?;
+                if side.tabs.len() <= 1 {
+                    anyhow::bail!("最後のタブは閉じられません");
+                }
+                side.tabs.remove(side.at);
+                side.at = side.at.min(side.tabs.len() - 1);
+                Ok(serde_json::to_value(PaneView::of_side(side))?)
+            }
+            "tabgo" => {
+                let which = req.params["pane"].as_str().unwrap_or("left").to_string();
+                let side = self.side_mut(&which)?;
+                let n = side.tabs.len();
+                side.at = match req.params["at"].as_i64() {
+                    Some(at) => (at.rem_euclid(n as i64)) as usize,
+                    None => {
+                        let step = req.params["step"].as_i64().unwrap_or(1);
+                        ((side.at as i64 + step).rem_euclid(n as i64)) as usize
+                    }
+                };
+                Ok(serde_json::to_value(PaneView::of_side(side))?)
+            }
             // Leave a flat listing and go back to the directory it came from.
             "leaveflat" => {
                 let which = req.params["pane"].as_str().unwrap_or("left").to_string();
@@ -1674,7 +1779,7 @@ impl Session {
                     anyhow::bail!("一覧はもともとのディレクトリです");
                 }
                 pane.leave_flat()?;
-                Ok(serde_json::to_value(PaneView::of(pane))?)
+                self.view(&which)
             }
             // Where this pane has been. Its own history, not a shared one —
             // the two panes are two places at once, which is the point of two.
@@ -1688,7 +1793,7 @@ impl Session {
                         if req.method == "back" { "前" } else { "先" }
                     );
                 }
-                Ok(serde_json::to_value(PaneView::of(pane))?)
+                self.view(&which)
             }
             "history" => {
                 let which = req.params["pane"].as_str().unwrap_or("left").to_string();
@@ -1723,7 +1828,7 @@ impl Session {
                 self.undo.push(Undo::Rename { from: from.clone(), to: dest });
                 let pane = self.pane_mut(&which)?;
                 pane.reload()?;
-                Ok(serde_json::to_value(PaneView::of(pane))?)
+                self.view(&which)
             }
             // A new file or a new directory, in the pane being looked at.
             "create" => {
@@ -1735,15 +1840,30 @@ impl Session {
                 }
                 let pane = self.pane_mut(&which)?;
                 let at = pane.cwd.clone();
-                let made = if dir {
+                let made = if dir && req.params["deep"].as_bool().unwrap_or(false) {
+                    // `:mkdir -p a/b/c`. The undo remembers the *outermost*
+                    // one made, because removing that removes the chain — and
+                    // remembering the innermost would leave the rest behind.
+                    let full = at.join(&name);
+                    std::fs::create_dir_all(&full)?;
+                    let first = name.split(['/', '\\']).next().unwrap_or(&name);
+                    at.join(first)
+                } else if dir {
                     cian_core::ops::create_dir(&at, &name)?
+                } else if req.params["touch"].as_bool().unwrap_or(false) && at.join(&name).exists() {
+                    // `:touch` on something that is already there bumps its
+                    // time rather than failing, which is what touch means.
+                    let full = at.join(&name);
+                    std::fs::OpenOptions::new().append(true).open(&full)?;
+                    filetime_now(&full)?;
+                    full
                 } else {
                     cian_core::ops::create_file(&at, &name)?
                 };
                 self.undo.push(Undo::Created { path: made });
                 let pane = self.pane_mut(&which)?;
                 pane.reload()?;
-                Ok(serde_json::to_value(PaneView::of(pane))?)
+                self.view(&which)
             }
             // One step back, whatever it was.
             "undo" | "redo" => {
@@ -1796,12 +1916,12 @@ impl Session {
                         *p = Pane::new(from.clone())?;
                     }
                 }
-                self.left.reload()?;
-                self.right.reload()?;
+                self.left.now().reload()?;
+                self.right.now().reload()?;
                 Ok(serde_json::json!({
                     "said": said,
-                    "left": PaneView::of(&self.left),
-                    "right": PaneView::of(&self.right),
+                    "left": PaneView::of(self.left.get()),
+                    "right": PaneView::of(self.right.get()),
                 }))
             }
             // Narrow the listing to names containing this. Case-insensitive,
@@ -1817,7 +1937,7 @@ impl Session {
                 } else {
                     pane.set_filter(text);
                 }
-                Ok(serde_json::to_value(PaneView::of(pane))?)
+                self.view(&which)
             }
             "hidden" => {
                 let which = req.params["pane"].as_str().unwrap_or("left").to_string();
@@ -1854,8 +1974,8 @@ impl Session {
             "find" => {
                 let which = req.params["pane"].as_str().unwrap_or("left").to_string();
                 let root = match which.as_str() {
-                    "left" => self.left.cwd.clone(),
-                    _ => self.right.cwd.clone(),
+                    "left" => self.left.get().cwd.clone(),
+                    _ => self.right.get().cwd.clone(),
                 };
                 self.find.start(root.clone(), self.out.clone());
                 Ok(serde_json::json!({ "root": root.display().to_string() }))
@@ -1903,8 +2023,7 @@ impl Session {
                 if pane.cwd != was {
                     self.undo.push(Undo::Navigated { pane: which.clone(), from: was });
                 }
-                let pane = self.pane_mut(&which)?;
-                Ok(serde_json::to_value(PaneView::of(pane))?)
+                self.view(&which)
             }
             "cancel" => {
                 let op = req.params["op"].as_u64().unwrap_or(0);
@@ -2030,4 +2149,14 @@ fn read_tail(path: &std::path::Path, cap: u64) -> String {
     let mut buf = Vec::new();
     let _ = f.read_to_end(&mut buf);
     String::from_utf8_lossy(&buf).into_owned()
+}
+
+/// Set a file's modification time to now.
+///
+/// `:touch` on a file that already exists means "say this changed", which is
+/// what half the uses of touch are for — a build that keys off mtime, a script
+/// waiting on a marker.
+fn filetime_now(path: &std::path::Path) -> std::io::Result<()> {
+    let f = std::fs::OpenOptions::new().append(true).open(path)?;
+    f.set_modified(std::time::SystemTime::now())
 }

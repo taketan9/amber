@@ -98,6 +98,20 @@ function draw(which) {
     // What this pane is showing, said in the one line people actually read.
     // A server's rows look exactly like a local directory's, and mistaking
     // somebody's server for your own disk is worth a word and a frame.
+    // The tab strip, drawn only when there is a second tab: a row of chrome
+    // showing one tab is a row of chrome saying nothing.
+    const strip = root.querySelector('.tabs');
+    if (!pane.tabs || pane.tabs.length < 2) {
+        strip.replaceChildren();
+    } else {
+        strip.replaceChildren(...pane.tabs.map((name, i) => {
+            const t = document.createElement('span');
+            t.textContent = name;
+            if (i === pane.tab) t.className = 'on';
+            t.addEventListener('mousedown', () => goTab(which, { at: i }));
+            return t;
+        }));
+    }
     root.querySelector('.crumb').textContent = pane.remote
         ? `${pane.remote}:${pane.cwd}`
         : (pane.flat ? `${pane.flat} — ${pane.cwd}` : pane.cwd);
@@ -698,6 +712,9 @@ const HELP = [
         ['Backspace', '親ディレクトリへ'],
         ['z', '入力したパスへ移動'],
         ['Tab', '反対のペインへ'],
+        ['t / F9', '新しいタブ（いまの場所で開く）'],
+        ['w / F10', 'タブを閉じる'],
+        ['F1 / F2', '前 / 次のタブ（Shift+Tab でも次へ）'],
         ['← → / Ctrl+h / Ctrl+l', '左 / 右のペインにフォーカス'],
         ['F5', '読み直す'],
     ]],
@@ -1030,6 +1047,11 @@ document.addEventListener('keydown', (e) => {
     else if (k === 'M' || (k === 'Enter' && e.shiftKey)) openMenu(CONTEXT);
     else if (k === 'Z') cmdJump();
     else if (k === 's') cmdShortcuts();
+    else if (k === 't' || k === 'F9') tabNew();
+    else if (k === 'w' || k === 'F10') tabClose();
+    else if (k === 'F1') goTab(state.focus, { step: -1 });
+    else if (k === 'F2') goTab(state.focus, { step: 1 });
+    else if (k === 'Tab' && e.shiftKey) goTab(state.focus, { step: 1 });
     else if (k === 'J') { if (term.on) { term.focused = true; el.shell.classList.add('on'); say('シェル'); } else openShell(); }
     else if (k === 'r' && !e.ctrlKey && !e.metaKey) rename();
     else if (k === 'a' && !e.ctrlKey && !e.metaKey) create(false);
@@ -1659,6 +1681,18 @@ const COMMANDS = [
     { name: 'aicmd', about: 'AI: 説明からシェルコマンドを作る', arg: 'やりたいこと', run: cmdAiCmd },
     { name: 'ailog', about: 'AI: 選択したログを診断する', run: cmdAiLog },
     { name: 'bookmark', about: 'いまの場所を登録する', arg: '名前（省略可）', run: cmdBookmark },
+    { name: 'tab', about: '新しいタブ（t / F9 でも）', run: () => tabNew() },
+    { name: 'tabclose', about: 'タブを閉じる（w / F10 でも）', run: () => tabClose() },
+    // The short ones the terminal build has, spelled the same way. A person who
+    // knows `:mkdir -p` should not have to find out that this one is different.
+    { name: 'mkdir', about: 'ディレクトリを作る（:mkdir -p a/b/c）', arg: '名前', run: cmdMkdir },
+    { name: 'touch', about: 'ファイルを作る／時刻を更新', arg: '名前', run: cmdTouch },
+    { name: 'cp', about: '反対ペインへコピー', run: () => operate('copy') },
+    { name: 'mv', about: '反対ペインへ移動', run: () => operate('move') },
+    { name: 'rm', about: '削除（ゴミ箱へ）', run: () => operate('delete') },
+    { name: 'pwd', about: 'いまの場所を表示してクリップボードへ', run: cmdPwd },
+    { name: 'ls', about: '読み直す（:ls -a で隠しファイル切替）', run: cmdLs },
+    { name: 'q', about: '閉じる', run: () => window.close() },
     { name: 'each', about: 'マーク各ファイルにコマンド — {} がパス', arg: 'コマンド', run: cmdEach },
     { name: 'nobom', about: 'UTF-8 BOM を除去（UTF-16 は触らない）', run: cmdNoBom },
     { name: 'renamelist', about: '名前の一覧を編集してリネーム', run: cmdRenameList },
@@ -1688,6 +1722,72 @@ const COMMANDS = [
     { name: 'menu', about: 'トグルメニュー', run: () => openMenu(TOGGLES) },
     { name: 'help', about: 'キー一覧', run: openHelp },
 ];
+
+async function cmdMkdir(spec) {
+    // `-p a/b/c` makes the whole chain; without it, one directory here.
+    const deep = /^-p\s+/.test(spec);
+    const name = spec.replace(/^-p\s+/, '').trim();
+    if (!name) { say('名前がありません', true); return; }
+    const r = await ask('create', { pane: state.focus, name, dir: true, deep });
+    if (!r) return;
+    state[state.focus] = r.pane ?? r;
+    draw(state.focus);
+    say(`${name} を作りました`);
+}
+
+async function cmdTouch(name) {
+    if (!name) { say('名前がありません', true); return; }
+    const r = await ask('create', { pane: state.focus, name, dir: false, touch: true });
+    if (!r) return;
+    state[state.focus] = r.pane ?? r;
+    draw(state.focus);
+    say(`${name} を作りました`);
+}
+
+async function cmdPwd() {
+    const cwd = state[state.focus].cwd;
+    await navigator.clipboard.writeText(cwd);
+    say(`${cwd} — クリップボードへ`);
+}
+
+async function cmdLs(arg) {
+    if (/-a/.test(arg || '')) { await toggleHidden(); return; }
+    await reread();
+}
+
+// ---- Tabs ----
+//
+// One list per side, and the active tab *is* that pane. A tab opens where you
+// are standing, which is what makes it useful: the reason to open one is
+// nearly always "keep this, and go somewhere else for a moment".
+
+async function tabNew() {
+    const which = state.focus;
+    const pane = await ask('tabnew', { pane: which });
+    if (!pane) return;
+    state[which] = pane;
+    draw(which);
+    say(`タブ ${pane.tab + 1} / ${pane.tabs.length}`);
+}
+
+async function tabClose() {
+    const which = state.focus;
+    const pane = await ask('tabclose', { pane: which });
+    if (!pane) return;
+    state[which] = pane;
+    draw(which);
+    say(pane.cwd);
+}
+
+async function goTab(which, how) {
+    const pane = await ask('tabgo', { pane: which, ...how });
+    if (!pane) return;
+    state[which] = pane;
+    state.focus = which;
+    draw('left');
+    draw('right');
+    say(pane.cwd);
+}
 
 /// `s` — the folders worth going back to.
 ///
