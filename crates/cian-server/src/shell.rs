@@ -30,12 +30,25 @@ const TICK_MS: u64 = 30;
 pub struct Shell {
     session: Arc<Mutex<PtySession>>,
     stop: Arc<AtomicBool>,
+    /// Which shell this is, carried on every screen it sends.
+    ///
+    /// A hidden tab keeps running — that is the reason to have tabs — and it
+    /// keeps producing screens. Without a name on them the window would draw
+    /// whichever one moved last, and a build scrolling in tab two would keep
+    /// stamping itself over tab one.
+    pub id: u64,
     pub rows: u16,
     pub cols: u16,
 }
 
 impl Shell {
-    pub fn start(cwd: &std::path::Path, rows: u16, cols: u16, out: Out) -> anyhow::Result<Self> {
+    pub fn start(
+        id: u64,
+        cwd: &std::path::Path,
+        rows: u16,
+        cols: u16,
+        out: Out,
+    ) -> anyhow::Result<Self> {
         let shell = cian_pty::default_shell();
         // `start` rather than `new`: it falls back to something that will run
         // and says which. A panel with cmd.exe in it and a line saying why
@@ -58,16 +71,17 @@ impl Shell {
                     continue;
                 }
                 let Ok(s) = watch.lock() else { continue };
-                if let Some(grid) = render(&s) {
+                if let Some(mut grid) = render(&s) {
+                    grid["id"] = serde_json::json!(id);
                     out.event("shell", grid);
                 }
             }
             // Say so once it has gone, so the window can take the panel down
             // rather than leaving a frozen screen that looks alive.
-            out.event("shellgone", serde_json::json!({}));
+            out.event("shellgone", serde_json::json!({ "id": id }));
         });
 
-        Ok(Shell { session, stop, rows, cols })
+        Ok(Shell { session, stop, id, rows, cols })
     }
 
     pub fn write(&self, bytes: &[u8]) {
@@ -99,7 +113,10 @@ impl Shell {
     /// The screen as it stands, for a window that has just opened the panel and
     /// has nothing to draw yet.
     pub fn screen(&self) -> Option<serde_json::Value> {
-        self.session.lock().ok().and_then(|s| render(&s))
+        self.session.lock().ok().and_then(|s| render(&s)).map(|mut g| {
+            g["id"] = serde_json::json!(self.id);
+            g
+        })
     }
 
     pub fn alive(&self) -> bool {

@@ -771,6 +771,8 @@ const HELP = [
         ['Shift+PgUp / PgDn', '流れた出力を遡る'],
         [':!コマンド', 'シェルで実行 — % 選択、%f ファイル、%d ディレクトリ'],
         [':each コマンド', 'マーク各ファイルに実行 — {} がパス'],
+        ['F9 / F10', 'シェルのタブを開く / 閉じる（パネルにいるとき）'],
+        ['F1 / F2', '前 / 次のシェルタブ'],
     ]],
     ['読み書き（F3・Enter）', [
         ['画像・PDF', 'F3 か Enter でそのまま表示（寸法も出ます）'],
@@ -2668,7 +2670,7 @@ async function cmdJump() {
 // them is a job with twenty years of edge cases in it, and a second answer to
 // any of them is how two front ends stop looking like one program.
 // ─────────────────────────────────────────────────────────────────────────
-const term = { on: false, focused: false, rows: 24, cols: 80 };
+const term = { on: false, focused: false, rows: 24, cols: 80, tabs: 1, tab: 0, showing: null };
 
 /// How many cells fit. Measured from a real character rather than assumed:
 /// the font is whatever the machine had, and three of the four looks disagree
@@ -2703,7 +2705,7 @@ async function openShell() {
     term.cols = size.cols;
     const r = await ask('shellopen', { pane: state.focus, ...size });
     if (!r) { closeShell(); return; }
-    if (r.screen) drawShell(r.screen);
+    takeShell(r);
     say('シェル — Esc でファイルへ戻る');
 }
 
@@ -2722,10 +2724,47 @@ function blurShell() {
     say('ファイルへ戻りました（Shift+J でシェルへ）');
 }
 
+/// A reply that carries a screen and the strip that belongs beside it.
+function takeShell(r) {
+    if (r.gone) { closeShell(); return; }
+    term.tabs = r.tabs ?? 1;
+    term.tab = r.tab ?? 0;
+    term.showing = r.showing ?? null;
+    if (r.screen) drawShell(r.screen);
+}
+
+async function shellTab() {
+    if (!term.on) { await openShell(); return; }
+    const r = await ask('shelltab', { pane: state.focus, ...shellSize() });
+    if (!r) return;
+    takeShell(r);
+    say(`シェル ${term.tab + 1} / ${term.tabs}`);
+}
+
+async function shellGo(how) {
+    const r = await ask('shellgo', how);
+    if (!r) return;
+    takeShell(r);
+    say(`シェル ${term.tab + 1} / ${term.tabs}`);
+}
+
+async function shellCloseTab() {
+    const r = await ask('shellclose', {});
+    if (!r) return;
+    if (r.gone) { closeShell(); say('シェルを閉じました'); return; }
+    takeShell(r);
+    say(`シェル ${term.tab + 1} / ${term.tabs}`);
+}
+
 function drawShell(screen) {
+    // A hidden tab keeps running — that is the point of tabs — and keeps
+    // sending screens. Drawing whichever moved last would let a build
+    // scrolling in tab two stamp itself over tab one.
+    if (term.showing !== null && screen.id !== undefined && screen.id !== term.showing) return;
     term.rows = screen.rows;
     term.cols = screen.cols;
-    el.sTitle.textContent = screen.title || 'シェル';
+    el.sTitle.textContent = (term.tabs > 1 ? `[${term.tab + 1}/${term.tabs}] ` : '')
+        + (screen.title || 'シェル');
     el.sAbout.textContent = `${screen.cols}×${screen.rows}`
         + (screen.scrollback ? `   ↑ ${screen.scrollback} 行戻っています` : '');
     const frag = document.createDocumentFragment();
@@ -2803,6 +2842,18 @@ document.addEventListener('keydown', (e) => {
         blurShell();
         return;
     }
+    // The panel's own keys, before the shell's. F-keys are cian's here for
+    // the same reason they are in the terminal build: a shell almost never
+    // wants them, and a panel with no way to open a second tab is a panel you
+    // leave to run one thing.
+    if (e.key === 'F9') { e.stopPropagation(); e.preventDefault(); shellTab(); return; }
+    if (e.key === 'F10') { e.stopPropagation(); e.preventDefault(); shellCloseTab(); return; }
+    if (e.key === 'F1' || e.key === 'F2') {
+        e.stopPropagation();
+        e.preventDefault();
+        shellGo({ step: e.key === 'F1' ? -1 : 1 });
+        return;
+    }
     // Scrolling back through what has gone past, rather than into the shell.
     if (e.shiftKey && (e.key === 'PageUp' || e.key === 'PageDown')) {
         e.stopPropagation();
@@ -2829,7 +2880,7 @@ function escTwice() {
 
 async function scrollShell(lines) {
     const r = await ask('shellscroll', { lines });
-    if (r && r.screen) drawShell(r.screen);
+    if (r) takeShell(r);
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -2916,7 +2967,12 @@ window.cian.onEvent(async (msg) => {
             return;
 
         case 'shellgone':
-            if (term.on) { closeShell(); say('シェルが終了しました'); }
+            // Only when it is the one on screen: another tab's shell exiting
+            // is not a reason to take the panel down.
+            if (term.on && (msg.id === undefined || msg.id === term.showing)) {
+                await shellCloseTab();
+                say('シェルが終了しました');
+            }
             return;
 
         case 'finding':

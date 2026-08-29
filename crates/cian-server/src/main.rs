@@ -196,10 +196,15 @@ struct Session {
     /// done something new, the branch you undid is gone. A redo stack that
     /// survives that puts files back on top of work done since.
     redo: Stack,
-    /// The shell panel, once it has been opened. Started on demand rather than
-    /// at launch: most sessions never open it, and a shell process per window
-    /// that nobody asked for is a process nobody accounts for.
-    shell: Option<shell::Shell>,
+    /// The shell panel's tabs, and which one is showing.
+    ///
+    /// Started on demand rather than at launch: most sessions never open the
+    /// panel, and a shell process per window that nobody asked for is a
+    /// process nobody accounts for. More than one because a long build in tab
+    /// one is the reason you want tab two.
+    shells: Vec<shell::Shell>,
+    shell_at: usize,
+    shell_next: u64,
     /// Where a remote pane is connected, and how.
     ///
     /// Held rather than asked for each time: SFTP wants a password, and a file
@@ -220,7 +225,9 @@ impl Session {
             clip: None,
             open: None,
             redo: Stack::default(),
-            shell: None,
+            shells: Vec::new(),
+            shell_at: 0,
+            shell_next: 1,
             remotes: std::collections::HashMap::new(),
         })
     }
@@ -351,6 +358,22 @@ impl Session {
     /// file is worse than no tab bar.
     fn view(&mut self, which: &str) -> anyhow::Result<serde_json::Value> {
         Ok(serde_json::to_value(PaneView::of_side(self.side_mut(which)?))?)
+    }
+
+    /// The shell tab showing, if the panel is open and its shell is alive.
+    fn shell_now(&mut self) -> Option<&mut shell::Shell> {
+        let at = self.shell_at.min(self.shells.len().saturating_sub(1));
+        self.shells.get_mut(at).filter(|s| s.alive())
+    }
+
+    /// A screen, with the tab strip that belongs beside it.
+    fn shell_reply(&self, screen: Option<serde_json::Value>) -> serde_json::Value {
+        serde_json::json!({
+            "screen": screen,
+            "tabs": self.shells.len(),
+            "tab": self.shell_at,
+            "showing": self.shells.get(self.shell_at).map(|s| s.id),
+        })
     }
 
     fn side_mut(&mut self, which: &str) -> anyhow::Result<&mut Side> {
@@ -1149,52 +1172,86 @@ impl Session {
                 }))
             }
             // ---- The shell ----
-            "shellopen" => {
+            "shellopen" | "shelltab" => {
                 let which = req.params["pane"].as_str().unwrap_or("left").to_string();
                 let rows = req.params["rows"].as_u64().unwrap_or(24) as u16;
                 let cols = req.params["cols"].as_u64().unwrap_or(80) as u16;
-                if self.shell.as_ref().is_some_and(|s| s.alive()) {
-                    let sh = self.shell.as_mut().unwrap();
-                    sh.resize(rows, cols);
-                    return Ok(serde_json::json!({ "screen": sh.screen() }));
+                let fresh = req.method == "shelltab";
+                if !fresh {
+                    if let Some(sh) = self.shell_now() {
+                        sh.resize(rows, cols);
+                        let screen = sh.screen();
+                        return Ok(self.shell_reply(screen));
+                    }
                 }
                 let cwd = self.pane_mut(&which)?.cwd.clone();
-                let sh = shell::Shell::start(&cwd, rows, cols, self.out.clone())?;
+                let id = self.shell_next;
+                self.shell_next += 1;
+                let sh = shell::Shell::start(id, &cwd, rows, cols, self.out.clone())?;
                 let screen = sh.screen();
-                self.shell = Some(sh);
-                Ok(serde_json::json!({ "screen": screen, "cwd": cwd.display().to_string() }))
+                self.shells.push(sh);
+                self.shell_at = self.shells.len() - 1;
+                Ok(self.shell_reply(screen))
             }
             "shellinput" => {
-                let Some(sh) = self.shell.as_ref() else {
+                let text = req.params["text"].as_str().unwrap_or("").to_string();
+                let Some(sh) = self.shell_now() else {
                     anyhow::bail!("シェルが開いていません");
                 };
-                let text = req.params["text"].as_str().unwrap_or("");
                 sh.write(text.as_bytes());
                 Ok(serde_json::json!({}))
             }
             "shellresize" => {
-                let Some(sh) = self.shell.as_mut() else {
-                    anyhow::bail!("シェルが開いていません");
-                };
-                sh.resize(
+                let (rows, cols) = (
                     req.params["rows"].as_u64().unwrap_or(24) as u16,
                     req.params["cols"].as_u64().unwrap_or(80) as u16,
                 );
+                // Every tab, not just the visible one: they all share the
+                // panel, and a tab resized only when you switch to it redraws
+                // wrong for one frame every time.
+                for sh in &mut self.shells {
+                    sh.resize(rows, cols);
+                }
                 Ok(serde_json::json!({}))
             }
             "shellscroll" => {
-                let Some(sh) = self.shell.as_ref() else {
+                let lines = req.params["lines"].as_i64();
+                let Some(sh) = self.shell_now() else {
                     anyhow::bail!("シェルが開いていません");
                 };
-                match req.params["lines"].as_i64() {
+                match lines {
                     Some(n) => sh.scroll(n as isize),
                     None => sh.to_bottom(),
                 }
-                Ok(serde_json::json!({ "screen": sh.screen() }))
+                let screen = sh.screen();
+                Ok(self.shell_reply(screen))
+            }
+            "shellgo" => {
+                if self.shells.is_empty() {
+                    anyhow::bail!("シェルが開いていません");
+                }
+                let n = self.shells.len() as i64;
+                self.shell_at = match req.params["at"].as_i64() {
+                    Some(at) => at.rem_euclid(n) as usize,
+                    None => (self.shell_at as i64 + req.params["step"].as_i64().unwrap_or(1))
+                        .rem_euclid(n) as usize,
+                };
+                let screen = self.shells[self.shell_at].screen();
+                Ok(self.shell_reply(screen))
             }
             "shellclose" => {
-                self.shell = None;
-                Ok(serde_json::json!({}))
+                if self.shells.is_empty() {
+                    return Ok(serde_json::json!({ "gone": true }));
+                }
+                // One tab closes the panel; several close just this one, which
+                // is what closing a tab means everywhere.
+                self.shells.remove(self.shell_at);
+                if self.shells.is_empty() {
+                    return Ok(serde_json::json!({ "gone": true }));
+                }
+                self.shell_at = self.shell_at.min(self.shells.len() - 1);
+                let screen = self.shells[self.shell_at].screen();
+                Ok(self.shell_reply(screen))
             }
             // Run a command in the shell, in this pane's directory.
             //
@@ -1215,7 +1272,7 @@ impl Session {
                     .replace("%d", &quote(&cwd.display().to_string()))
                     .replace("%f", &file)
                     .replace('%', &quoted.join(" "));
-                let Some(sh) = self.shell.as_ref() else {
+                let Some(sh) = self.shell_now() else {
                     anyhow::bail!("シェルが開いていません");
                 };
                 sh.write(format!("{text}\n").as_bytes());
@@ -1230,7 +1287,7 @@ impl Session {
                     anyhow::bail!("{{}} がありません（例: :each grep -l foo {{}}）");
                 }
                 let paths = self.targets(&which)?;
-                let Some(sh) = self.shell.as_ref() else {
+                let Some(sh) = self.shell_now() else {
                     anyhow::bail!("シェルが開いていません");
                 };
                 for p in &paths {
