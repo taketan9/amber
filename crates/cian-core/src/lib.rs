@@ -15,6 +15,7 @@ pub mod diff;
 pub mod disk;
 pub mod dirdiff;
 pub mod du;
+pub mod fileclip;
 pub mod fuzzy;
 pub mod elevate;
 pub mod git;

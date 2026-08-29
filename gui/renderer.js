@@ -169,6 +169,17 @@ async function ask(method, params) {
     }
 }
 
+/// `Shift+P` — the files themselves, for Finder or Explorer to paste.
+///
+/// `p` puts the path text on the clipboard. These are two different things and
+/// the terminal build keeps them on two keys for a reason: pasting a path into
+/// a folder is not pasting a file into it.
+async function clipFiles() {
+    const r = await ask('clipfiles', { pane: state.focus });
+    if (!r) return;
+    say(`${r.count} 件をクリップボードへ（Finder で貼り付けられます）`);
+}
+
 async function refresh() {
     const s = await ask('state', {});
     if (!s) return;
@@ -803,6 +814,7 @@ const HELP = [
         ['r', 'リネーム'],
         ['a / A', '新規ファイル / 新規ディレクトリ'],
         ['p', 'パス文字列をクリップボードへ'],
+        ['Shift+P', 'ファイルそのものをクリップボードへ（Finder/エクスプローラで貼れます）'],
         ['o / O', 'このペインを反対側へ / 反対側をここへ'],
         ['u / Ctrl+R', '取り消し / やり直し'],
         ['M / Shift+Enter', 'このエントリにできること'],
@@ -1066,6 +1078,7 @@ document.addEventListener('keydown', (e) => {
     else if (k === 'o') syncPane(true);
     else if (k === 'O') syncPane(false);
     else if (k === 'z') goToPath();
+    else if (k === 'P') clipFiles();
     else if (k === 'p' && !e.ctrlKey && !e.metaKey) copyPaths();
     else if (k === 'F5') reread();
     else if (k === '?') openHelp();

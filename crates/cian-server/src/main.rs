@@ -1852,6 +1852,19 @@ impl Session {
             }
             // What is running, and a way to stop one of them.
             "queue" => Ok(serde_json::json!({ "jobs": self.jobs.listing() })),
+            // The files themselves onto the OS clipboard, so Finder or
+            // Explorer pastes the files rather than their names. `p` puts the
+            // path text there; conflating the two is how you end up pasting a
+            // path into a folder.
+            "clipfiles" => {
+                let which = req.params["pane"].as_str().unwrap_or("left").to_string();
+                let paths = self.targets(&which)?;
+                if paths.is_empty() {
+                    anyhow::bail!("対象がありません");
+                }
+                cian_core::fileclip::put_files(&paths)?;
+                Ok(serde_json::json!({ "count": paths.len() }))
+            }
             // Leave a flat listing and go back to the directory it came from.
             "leaveflat" => {
                 let which = req.params["pane"].as_str().unwrap_or("left").to_string();
