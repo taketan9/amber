@@ -300,6 +300,12 @@ html, body {
 }
 .vpic[hidden] { display: none; }
 .vpic img, .vpic embed { max-width: 100%; max-height: 100%; object-fit: contain; }
+/* Which byte the next digit lands on. A hex editor with no cursor is a hex
+   editor you overwrite the wrong byte with. */
+.hexcur { background: var(--accent); color: var(--on-accent) !important; }
+/* Dimmed, because it is context rather than content — the line is the thing
+   being read, and blame that competes with it is blame in the way. */
+.blame { color: var(--dim) !important; opacity: .8; margin-right: 1ch; }
 /* vim's mode line and its `:` prompt live in the footer, and monaco-vim puts
    them there as plain text. */
 /* The `:` prompt takes the whole line while it is up.

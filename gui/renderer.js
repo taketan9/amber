@@ -808,12 +808,14 @@ const HELP = [
     ]],
     ['読み書き（F3・Enter）', [
         ['画像・PDF', 'F3 か Enter でそのまま表示（寸法も出ます）'],
-        ['バイナリ', '16進で表示（読むだけ）'],
+        ['バイナリ', '16進で表示。i で編集 — 0-9 a-f で上書き、Ctrl+S 保存（.bak を残す）'],
+        ['  上書きのみ', 'ずれないので、ファイルの大きさは変わりません'],
         ['Ctrl+S', '保存（元の文字コード・改行・BOM のまま）'],
         ['Esc ×3', '閉じる ── 3回連続（未保存なら3回目で確認）'],
         ['Backspace ×3', '同じ。vim 流儀でノーマルモードのときだけ'],
         ['F3', '1回で閉じる'],
         ['Ctrl+Shift+O', '見出し一覧から飛ぶ（vim 流儀は :outline）'],
+        ['Ctrl+Shift+B', '各行を最後に変えた人（vim 流儀は :blame、もう一度で消す）'],
         [':sort2 :rsort :uniq', '行をソート / 逆順 / 重複を落とす'],
         [':han :zen', '全角ASCII→半角 / 半角カナ→全角'],
         [':expand :unexpand :reindent', 'タブ↔スペース、インデントを揃える'],
@@ -1477,6 +1479,10 @@ function makeEditor(monaco, text, lang) {
         monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyO,
         () => cmdOutline(),
     );
+    viewer.ed.addCommand(
+        monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyB,
+        () => cmdBlame(),
+    );
     viewer.ed.onDidChangeCursorPosition(drawViewFoot);
     } else {
     viewer.ed.updateOptions({ theme: editorTheme() });
@@ -1559,6 +1565,7 @@ function setStyle(i, remember = true) {
         ex.defineEx('quit', 'q', () => closeView(false));
         ex.defineEx('wq', 'wq', async () => { if (await saveFile()) closeView(false); });
         ex.defineEx('outline', 'outline', () => cmdOutline());
+        ex.defineEx('blame', 'blame', () => cmdBlame());
     }
     drawViewFoot();
 }
@@ -1573,7 +1580,10 @@ function drawViewFoot() {
         return;
     }
     if (viewer.readOnly) {
-        el.vFoot.textContent = '16進表示 — 読むだけ   ·   Esc ×3 閉じる';
+        el.vFoot.textContent = hex.editing
+            ? `16進編集 — 0-9 a-f で上書き   ·   ${hex.at.toString(16).padStart(8, '0')} 番地`
+              + `${hex.half ? '（下位けた待ち）' : ''}   ·   Ctrl+S 保存（.bak を残します）   Esc 戻る`
+            : '16進表示 — i で編集   ·   Esc ×3 閉じる';
         return;
     }
     // In vim style the footer is vim's own — its mode line and its `:` prompt
@@ -1619,12 +1629,98 @@ async function closeView(ask_first = true) {
     viewer.on = false;
     viewer.dirty = false;
     renameList.on = false;
+    stopHex();
     if (viewer.vim) { viewer.vim.dispose(); viewer.vim = null; }
     el.vPic.replaceChildren();
     el.vPic.hidden = true;
     el.vBody.hidden = false;
     el.view.hidden = true;
     el.status.focus?.();
+}
+
+/// Editing a binary, one byte at a time.
+///
+/// **Overwrite only.** Offsets never shift and the file cannot change size,
+/// which is the difference between editing a binary and corrupting one: an
+/// inserted byte moves everything after it, and in a binary those offsets are
+/// usually written down inside the file itself.
+///
+/// Two hex digits make a byte, so the first one is remembered and shown as
+/// pending rather than applied — half a byte written is a byte nobody meant.
+const hex = { editing: false, at: 0, half: null };
+
+function startHex() {
+    if (!viewer.readOnly) return;
+    hex.editing = true;
+    hex.at = 0;
+    hex.half = null;
+    viewer.ed.updateOptions({ readOnly: true });
+    markHexByte();
+    drawViewFoot();
+    say('16進編集 — 0-9 a-f で上書き、Ctrl+S で保存');
+}
+
+function stopHex() {
+    hex.editing = false;
+    hex.half = null;
+    if (viewer.ed) viewer.ed.deltaDecorations(hexMark, []);
+    hexMark = [];
+    drawViewFoot();
+}
+
+let hexMark = [];
+
+/// Show which byte the next digit lands on. A hex editor with no cursor is a
+/// hex editor you overwrite the wrong byte with.
+function markHexByte() {
+    if (!viewer.ed) return;
+    const line = Math.floor(hex.at / 16) + 1;
+    // The dump is `oooooooo  xx xx …` — two hex digits per byte, a space
+    // between, and an extra space after the eighth.
+    const col = 11 + (hex.at % 16) * 3 + (hex.at % 16 >= 8 ? 1 : 0);
+    hexMark = viewer.ed.deltaDecorations(hexMark, [{
+        range: new (window.monaco.Range)(line, col, line, col + 2),
+        options: { inlineClassName: 'hexcur' },
+    }]);
+    viewer.ed.revealLineInCenterIfOutsideViewport(line);
+}
+
+async function hexDigit(ch) {
+    const v = parseInt(ch, 16);
+    if (Number.isNaN(v)) return;
+    if (hex.half === null) {
+        hex.half = v;
+        drawViewFoot();
+        return;
+    }
+    const byte = (hex.half << 4) | v;
+    hex.half = null;
+    const r = await ask('hexset', { at: hex.at, byte });
+    if (!r) return;
+    // One line back, not the file: a dump of a large binary is a lot of text
+    // to resend because two digits changed.
+    // Through the model, not the editor: `executeEdits` is a no-op while the
+    // editor is read-only, and the editor has to stay read-only or the digits
+    // would be typed into the dump as text. The first version saved the right
+    // bytes and showed the old ones.
+    const model = viewer.ed.getModel();
+    const line = r.line + 1;
+    model.applyEdits([{
+        range: new (window.monaco.Range)(line, 1, line, model.getLineMaxColumn(line)),
+        text: r.text,
+    }]);
+    viewer.dirty = true;
+    hex.at += 1;
+    markHexByte();
+    drawViewFoot();
+}
+
+async function saveHex() {
+    const r = await ask('hexsave', {});
+    if (!r) return;
+    viewer.dirty = false;
+    await reread();
+    say(`${r.saved} を保存しました（元は ${r.backup} に残しました）`);
 }
 
 /// Three of the same key in a row is the way out.
@@ -1653,6 +1749,40 @@ function vimTyping() {
 
 document.addEventListener('keydown', (e) => {
     if (!viewer.on) return;
+    // The hex editor owns its keys while it is on.
+    if (hex.editing) {
+        if (e.key === 'Escape') { e.stopPropagation(); e.preventDefault(); stopHex(); return; }
+        if (e.key === 's' && (e.ctrlKey || e.metaKey)) {
+            e.stopPropagation();
+            e.preventDefault();
+            saveHex();
+            return;
+        }
+        if (/^[0-9a-fA-F]$/.test(e.key) && !e.ctrlKey && !e.metaKey) {
+            e.stopPropagation();
+            e.preventDefault();
+            hexDigit(e.key);
+            return;
+        }
+        // Moving between bytes, so a mistake is walked back to rather than
+        // restarted from the top.
+        const step = { ArrowRight: 1, ArrowLeft: -1, ArrowDown: 16, ArrowUp: -16 }[e.key];
+        if (step) {
+            e.stopPropagation();
+            e.preventDefault();
+            hex.at = Math.max(0, hex.at + step);
+            hex.half = null;
+            markHexByte();
+            drawViewFoot();
+            return;
+        }
+    }
+    if (viewer.readOnly && !hex.editing && e.key === 'i') {
+        e.stopPropagation();
+        e.preventDefault();
+        startHex();
+        return;
+    }
     // Not while the question is up. Esc answers it — and counting those
     // presses toward another way out would mean declining to close three
     // times and being asked a fourth.
@@ -1771,6 +1901,7 @@ const COMMANDS = [
     { name: 'moveto', about: '指定した場所へ移動', arg: '行き先', run: (a) => cmdTo('moveto', a) },
     { name: 'edit', about: '外部エディタで開く（$EDITOR）', run: cmdEditExternal },
     { name: 'stat', about: '属性（:attr と同じ）', run: cmdAttr },
+    { name: 'blame', about: '各行を最後に変えた人（開いているファイル）', run: cmdBlame },
     { name: 'theme', about: '配色を選ぶ（T のメニューにも）', arg: '名前', optional: true, run: cmdTheme },
     { name: 'redraw', about: '画面を描き直す', run: () => { draw('left'); draw('right'); say('描き直しました'); } },
     { name: 'preview', about: 'カーソルのファイルを追って表示（もう一度で止める）', run: togglePreview },
@@ -2985,6 +3116,40 @@ async function cmdTheme(name) {
         foot: 'Enter 決定   Esc 閉じる',
         pick: (row) => { closeReport(); setLook(row.at); say(`配色: ${LOOKS[row.at][1]}`); },
     });
+}
+
+/// `:blame` — who last changed each line, in the gutter.
+///
+/// In the gutter rather than as a list, because the question is always about a
+/// *particular* line: "when did this become like this". A separate window with
+/// the same line numbers is the same information at arm's length.
+let blameOn = false;
+let blameMarks = [];
+
+async function cmdBlame() {
+    if (!viewer.on || !viewer.ed) { say('先にファイルを開いてください', true); return; }
+    if (blameOn) {
+        blameMarks = viewer.ed.deltaDecorations(blameMarks, []);
+        blameOn = false;
+        say('blame を消しました');
+        return;
+    }
+    const r = await ask('blame', { pane: state.focus });
+    if (!r) return;
+    // One decoration per line, each carrying its own text: Monaco draws the
+    // gutter, so the width sorts itself out and the code does not move.
+    blameMarks = viewer.ed.deltaDecorations(blameMarks, r.lines.map((b, i) => ({
+        range: new (window.monaco.Range)(i + 1, 1, i + 1, 1),
+        options: {
+            isWholeLine: true,
+            before: {
+                content: `${b.date} ${b.author}`.slice(0, 22).padEnd(22),
+                inlineClassName: 'blame',
+            },
+        },
+    })));
+    blameOn = true;
+    say(`${r.lines.length} 行の blame（もう一度 :blame で消えます）`);
 }
 
 async function cmdDf() {

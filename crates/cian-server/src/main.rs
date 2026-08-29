@@ -194,6 +194,10 @@ struct Session {
     /// Held for a later paste. Independent of the system clipboard, and of
     /// which pane is focused — that is the point of it.
     clip: Option<cian_core::clip::Clipboard>,
+    /// A binary open in the hex editor, as it was read plus whatever has been
+    /// overwritten. Separate from `open` because the two save differently:
+    /// text goes back through its encoding, bytes go back as bytes.
+    hex: Option<(std::path::PathBuf, cian_core::viewer::View)>,
     /// The file the viewer has open, as it was read.
     ///
     /// A save writes back through this rather than through anything the front
@@ -240,6 +244,7 @@ impl Session {
             find: Find::default(),
             clip: None,
             open: None,
+            hex: None,
             redo: Stack::default(),
             shells: Vec::new(),
             tabs: Vec::new(),
@@ -713,10 +718,16 @@ impl Session {
                         cian_core::highlight::detect(&path).map(|l| format!("{l:?}"))
                     },
                 });
-                // Only a text file is remembered as open: `save` writes back
-                // through what was read, and there is nothing safe to write
-                // back for a dump.
-                self.open = file.map(|f| (path, f));
+                // Text and binary are remembered separately: one saves back
+                // through its encoding, the other as bytes, and a single slot
+                // would make `save` guess which it was holding.
+                if binary {
+                    self.open = None;
+                    self.hex = Some((path, shown));
+                } else {
+                    self.hex = None;
+                    self.open = file.map(|f| (path, f));
+                }
                 Ok(reply)
             }
             // Write the open file back, in the encoding it arrived in.
@@ -2269,6 +2280,76 @@ impl Session {
                     "ai": cfg.ai.is_some(),
                     "sync_maps": cfg.sharepoint.len(),
                     "ssh_hosts": cfg.ssh_hosts.len(),
+                }))
+            }
+            // ---- Hex editing ----
+            //
+            // Overwrite only. Offsets never shift and the file cannot change
+            // size, which is the difference between editing a binary and
+            // corrupting one — an inserted byte moves every offset after it,
+            // and in a binary those offsets are usually written down inside
+            // the file itself.
+            "hexset" => {
+                let Some((_, view)) = self.hex.as_mut() else {
+                    anyhow::bail!("16進で開いているファイルがありません");
+                };
+                let at = req.params["at"].as_u64().unwrap_or(0) as usize;
+                let val = req.params["byte"].as_u64().unwrap_or(0) as u8;
+                view.hex_set_byte(at, val);
+                let line = at / 16;
+                Ok(serde_json::json!({
+                    "line": line,
+                    "text": view.lines.get(line),
+                }))
+            }
+            // Write the bytes back, keeping the original as `.bak`.
+            //
+            // The backup is not optional. A hex edit is the one change in here
+            // nobody can read back to check, so the version that was working
+            // has to survive it.
+            "hexsave" => {
+                let Some((path, view)) = self.hex.as_ref() else {
+                    anyhow::bail!("16進で開いているファイルがありません");
+                };
+                let bak = path.with_extension(format!(
+                    "{}.bak",
+                    path.extension().map(|e| e.to_string_lossy().into_owned()).unwrap_or_default()
+                ));
+                std::fs::copy(path, &bak)?;
+                std::fs::write(path, view.raw_bytes())?;
+                let name = path
+                    .file_name()
+                    .map(|s| s.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                let bak_name = bak
+                    .file_name()
+                    .map(|s| s.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                for which in ["left", "right"] {
+                    let _ = self.pane_mut(which).map(|p| p.reload());
+                }
+                Ok(serde_json::json!({ "saved": name, "backup": bak_name }))
+            }
+            // Who last changed each line of the open file.
+            "blame" => {
+                let which = req.params["pane"].as_str().unwrap_or("left").to_string();
+                let dir = self.pane_mut(&which)?.cwd.clone();
+                let path = match self.open.as_ref() {
+                    Some((p, _)) => p.clone(),
+                    None => self.selected(&which)?.0,
+                };
+                let lines = if cian_core::git::status(&dir).is_some() {
+                    cian_core::git::blame(&dir, &path)
+                } else {
+                    cian_core::svn::blame(&dir, &path)
+                };
+                let Some(lines) = lines else {
+                    anyhow::bail!("blame を取れませんでした");
+                };
+                Ok(serde_json::json!({
+                    "lines": lines.iter().map(|b| serde_json::json!({
+                        "hash": b.hash, "author": b.author, "date": b.date,
+                    })).collect::<Vec<_>>(),
                 }))
             }
             // Leave a flat listing and go back to the directory it came from.

@@ -178,7 +178,10 @@ class Cdp {
                     || msg.params.exceptionDetails.text}`);
             }
             if (msg.method === 'Log.entryAdded' && msg.params.entry.level === 'error') {
-                cdp.said.push(`${msg.params.entry.source}: ${msg.params.entry.text}`);
+                // The URL too: "failed to load resource" without saying which
+                // resource is the least useful true sentence a browser says.
+                const e = msg.params.entry;
+                cdp.said.push(`${e.source}: ${e.text}${e.url ? '  ← ' + e.url : ''}`);
             }
             const w = cdp.waiting.get(msg.id);
             if (!w) return;
@@ -314,6 +317,8 @@ async function main() {
     // itself, and the round read as a paste that had quietly done nothing.
     fs.mkdirSync(path.join(sand, 'from'));
     fs.mkdirSync(path.join(sand, 'to'));
+    // A binary, for the hex editor.
+    fs.writeFileSync(path.join(sand, 'from', 'z.bin'), Buffer.from('HELLO WORLD\u0000\u0001', 'latin1'));
     // A picture, for F3 on something the window draws rather than reads.
     fs.writeFileSync(path.join(sand, 'from', 'p.png'), Buffer.from(
         'iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAHElEQVQoz2NgGAWjYBSMglEwCkbB'

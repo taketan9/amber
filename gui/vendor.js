@@ -7,12 +7,18 @@
 // font: several megabytes that never change do not belong in every clone
 // forever, and the release workflow is the place that assembles them.
 //
-// **What is left out is most of it.** `min/vs/language` is 6.9 MB of language
-// *services* — the whole TypeScript compiler, and the CSS, HTML and JSON
-// analysers — which exist to give an IDE its red squiggles. cian is a file
-// manager with an editor in it, and shipping a compiler to colour a batch file
-// would be absurd. Syntax highlighting comes from `basic-languages`, which is
-// 640 KB for eighty-one of them.
+// **The language services are in, and they were not at first.** They are 7 MB —
+// the TypeScript compiler among them — and leaving them out looked obviously
+// right: colouring comes from `basic-languages`, which is 640 KB for
+// eighty-one languages, and shipping a compiler to colour a batch file would
+// be absurd.
+//
+// It was wrong. Monaco asks for `vs/language/typescript/tsMode` the moment a
+// `.js` file is opened, and without it every such file threw on the way in.
+// The file displayed and the colouring worked, so the damage was one exception
+// per open — the kind of thing that is fine until it is the exception hiding
+// the real one. Seven megabytes inside a bundle that is already 173 is not a
+// saving worth an error message.
 
 const fs = require('node:fs');
 const path = require('node:path');
@@ -27,6 +33,7 @@ const WANTED = [
     ['monaco-editor/min/vs/base', 'monaco/vs/base'],
     ['monaco-editor/min/vs/editor', 'monaco/vs/editor'],
     ['monaco-editor/min/vs/basic-languages', 'monaco/vs/basic-languages'],
+    ['monaco-editor/min/vs/language', 'monaco/vs/language'],
     // Japanese only. The other eight locales are 1.5 MB for languages this
     // is not offered in; English is built into editor.main.js.
     ['monaco-editor/min/vs/nls.messages.ja.js', 'monaco/vs/nls.messages.ja.js'],
