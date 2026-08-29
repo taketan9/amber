@@ -765,6 +765,14 @@ const HELP = [
         [':stage / :unstage / :discard', 'git add / reset / 変更の破棄'],
         [':svnupdate :svncommit :svnresolve', 'svn の3つ'],
         [':dedup', '中身が同じファイルを探す'],
+        [':df / :wc / :stat', '空き容量 / 行・単語・バイト / 属性'],
+        [':mark *.rs  :unmark *', 'ワイルドカードでマーク'],
+        [':copyto / :moveto', '反対ペイン以外の場所へ'],
+        [':edit', '外部エディタ（$EDITOR）で開く'],
+        [':where', '設定ファイルがどこにあるか'],
+        [':key', '押したキーをそのまま表示（効かないキーの調査に）'],
+        [':reload', 'init.lua を読み直す'],
+        [':office / :officelink', 'Office 文書のクラウド側を開く / .url を作る'],
     ]],
     ['サーバ（SFTP）', [
         [':remote  /  :ssh', 'このペインでサーバを開く — user@host[:port][:/path]'],
@@ -776,6 +784,8 @@ const HELP = [
     ['AI（init.lua で設定したとき）', [
         [':aicmd 説明', 'コマンドを作ってシェルに置く ── 実行はしません'],
         [':ailog', '選択したログを診断（末尾を読みます）'],
+        [':ai 質問', '自由に訊く'],
+        [':aidiff', '表示中の差分を説明する'],
     ]],
     ['シェル', [
         ['Shift+J  /  :shell', 'シェルパネル（下半分に出る）'],
@@ -1018,6 +1028,21 @@ document.addEventListener('input', (e) => {
 });
 
 document.addEventListener('keydown', (e) => {
+    if (keyEcho.on) {
+        // Swallowed, not just reported. The point of this mode is to try the
+        // key that "does nothing" — and the first one anybody tries is a
+        // chord, half of which cut, delete or overwrite. Showing Ctrl+X and
+        // *also* cutting the file would be the worst possible answer.
+        if (e.key === 'Escape') { toggleKeyEcho(); return; }
+        e.stopPropagation();
+        e.preventDefault();
+        const bits = [
+            e.ctrlKey && 'Ctrl', e.altKey && 'Alt', e.shiftKey && 'Shift', e.metaKey && 'Meta',
+        ].filter(Boolean);
+        say(`${[...bits, e.key].join('+')}   code=${e.code}   keyCode=${e.keyCode}`
+            + '   — Esc で止める');
+        return;
+    }
     // Not while a file is open. The editor no longer stops every key on its
     // way past — it cannot, or its own bindings never fire — so the listing's
     // keys have to decline for themselves.
@@ -1721,10 +1746,27 @@ const COMMANDS = [
     { name: 'local', about: 'サーバを閉じてローカルに戻る', run: cmdDisconnect },
     { name: 'aicmd', about: 'AI: 説明からシェルコマンドを作る', arg: 'やりたいこと', run: cmdAiCmd },
     { name: 'ailog', about: 'AI: 選択したログを診断する', run: cmdAiLog },
-    { name: 'bookmark', about: 'いまの場所を登録する', arg: '名前（省略可）', run: cmdBookmark },
+    { name: 'ai', about: 'AI: 自由に訊く', arg: '訊きたいこと', run: cmdAiAsk },
+    { name: 'aidiff', about: 'AI: 表示中の差分を説明する', run: cmdAiDiff },
+    { name: 'office', about: 'Office 文書のクラウド側を開く', run: () => cmdOffice('office') },
+    { name: 'officelink', about: 'クラウド側への .url を作る（メールに貼るのはこれ）', run: () => cmdOffice('officelink') },
+    { name: 'reload', about: 'init.lua を読み直す', run: cmdReload },
+    { name: 'key', about: '受け取ったキーをそのまま表示（もう一度で止める）', run: toggleKeyEcho },
+    { name: 'bookmark', about: 'いまの場所を登録する', arg: '名前', optional: true, run: cmdBookmark },
     { name: 'macro', about: 'マクロを実行（@ でも）', run: cmdMacros },
     { name: 'sync', about: 'シェル: 全ペインに同時入力（Ctrl+S でも）', run: cmdSync },
     { name: 'zoom', about: 'シェルパネルを広げる／戻す（F12 でも）', run: zoomShell },
+    { name: 'df', about: 'ディスクの空き容量', run: cmdDf },
+    { name: 'wc', about: '行／単語／バイト数', run: cmdWc },
+    { name: 'where', about: 'cian が読み書きする設定ファイルの場所', run: cmdWhere },
+    { name: 'mark', about: 'ワイルドカードでマーク（:mark *.rs）', arg: 'パターン', run: (a) => cmdMarkGlob(a, true) },
+    { name: 'unmark', about: 'ワイルドカードでマークを外す', arg: 'パターン', run: (a) => cmdMarkGlob(a, false) },
+    { name: 'copyto', about: '指定した場所へコピー', arg: '行き先', run: (a) => cmdTo('copyto', a) },
+    { name: 'moveto', about: '指定した場所へ移動', arg: '行き先', run: (a) => cmdTo('moveto', a) },
+    { name: 'edit', about: '外部エディタで開く（$EDITOR）', run: cmdEditExternal },
+    { name: 'stat', about: '属性（:attr と同じ）', run: cmdAttr },
+    { name: 'theme', about: '配色を選ぶ（T のメニューにも）', arg: '名前', optional: true, run: cmdTheme },
+    { name: 'redraw', about: '画面を描き直す', run: () => { draw('left'); draw('right'); say('描き直しました'); } },
     { name: 'preview', about: 'カーソルのファイルを追って表示（もう一度で止める）', run: togglePreview },
     { name: 'queue', about: '実行中の操作を見る・止める', run: cmdQueue },
     { name: 'tab', about: '新しいタブ（t / F9 でも）', run: () => tabNew() },
@@ -1970,6 +2012,75 @@ async function cmdAiLog() {
             answer.split('\n').map((t) => ({ label: t })),
             { foot: 'Esc 閉じる' });
     };
+}
+
+async function cmdAiAsk(question) {
+    const r = await ask('ai', { pane: state.focus, what: 'text', text: question });
+    if (!r) return;
+    say('考えています…');
+    aiWaiting = (answer) => {
+        show('AI', question, answer.split('\n').map((t) => ({ label: t })), { foot: 'Esc 閉じる' });
+    };
+}
+
+/// `:aidiff` — explain what is on the comparison screen.
+///
+/// Only from a comparison, because "explain the diff" with no diff up is a
+/// question about nothing.
+async function cmdAiDiff() {
+    if (!report.on || !report.rows.length) {
+        say('先に = で比較してください', true);
+        return;
+    }
+    const text = report.rows.map((x) => `${x.n || ''} ${x.label} ${x.sub || ''}`).join('\n');
+    const r = await ask('ai', {
+        pane: state.focus, what: 'text',
+        system: 'You explain a diff to the person who is about to act on it. '
+            + 'Say what changed and, where it is clear, why it matters. '
+            + 'Be concise; plain text, no markdown headings.',
+        text: text.slice(0, 16000),
+    });
+    if (!r) return;
+    say('差分を読んでいます…');
+    aiWaiting = (answer) => {
+        show('差分の説明', 'AI の答え — 確かめてから使ってください',
+            answer.split('\n').map((t) => ({ label: t })), { foot: 'Esc 閉じる' });
+    };
+}
+
+async function cmdOffice(what) {
+    const r = await ask(what, { pane: state.focus });
+    if (!r) return;
+    if (r.made) {
+        state[state.focus] = r;
+        draw(state.focus);
+        say(`${r.made} を作りました`);
+        return;
+    }
+    say(`${r.opened} をクラウドで開きました`);
+}
+
+async function cmdReload() {
+    const r = await ask('reload', {});
+    if (!r) return;
+    // Said plainly rather than "reloaded": some of init.lua is read once, at
+    // startup, and claiming otherwise sends people looking for a bug.
+    say(`init.lua を読み直しました（AI ${r.ai ? 'あり' : 'なし'}、`
+        + `同期 ${r.sync_maps} 件、SSH ${r.ssh_hosts} 件）— 枠線などは再起動が要ります`);
+}
+
+/// `:key` — show what the window actually received.
+///
+/// The first thing to ask when a key "does nothing": did it arrive, and as
+/// what? On this build it also answers whether a menu accelerator ate it,
+/// which is a Windows-only failure invisible from a Mac.
+const keyEcho = { on: false };
+
+function toggleKeyEcho() {
+    keyEcho.on = !keyEcho.on;
+    say(keyEcho.on
+        ? 'キー表示: 押したキーを出すだけで、何も実行しません（Esc で止める）'
+        : 'キー表示を止めました');
 }
 
 // ---- A server, in this pane ----
@@ -2237,10 +2348,12 @@ async function commandLine(initial = '') {
 
 async function runCommand(cmd, arg) {
     let a = arg;
-    // Only where there is no sensible default. `:hash` means sha256 and
-    // `:readonly` means on; stopping to ask would be a prompt with one likely
-    // answer, which is the kind of question that trains people to hit Enter.
-    if (cmd.arg && !a) {
+    // Only where there is no sensible default, and only where there is no
+    // sensible *nothing*: `:theme` with no name shows the list, which is a
+    // better answer than a prompt. `:hash` means sha256 and `:readonly` means
+    // on; stopping to ask would be a prompt with one likely answer, which is
+    // the kind of question that trains people to hit Enter.
+    if (cmd.arg && !a && !cmd.optional) {
         a = await askFor(`:${cmd.name}`, '');
         if (a === null) return;
     }
@@ -2842,6 +2955,102 @@ async function focusPaneOf(id) {
     }
     term.focused = true;
     el.shell.classList.add('on');
+}
+
+/// `:theme` — pick a look by name, rather than cycling to it.
+///
+/// The switches menu walks them, which is right when there are four. Naming
+/// one is what you want when you know which.
+async function cmdTheme(name) {
+    if (name) {
+        const at = LOOKS.findIndex(([v, label]) =>
+            v === name || label === name || (v || 'hakuji').startsWith(name.toLowerCase()));
+        if (at < 0) { say(`${name} という配色はありません`, true); return; }
+        setLook(at);
+        say(`配色: ${LOOKS[at][1]}`);
+        return;
+    }
+    show('配色', `${LOOKS.length} 種`, LOOKS.map(([v, label], i) => ({
+        n: i === look ? '●' : '',
+        label,
+        sub: v || 'hakuji',
+        at: i,
+    })), {
+        foot: 'Enter 決定   Esc 閉じる',
+        pick: (row) => { closeReport(); setLook(row.at); say(`配色: ${LOOKS[row.at][1]}`); },
+    });
+}
+
+async function cmdDf() {
+    const r = await ask('df', { pane: state.focus });
+    if (!r) return;
+    const pct = r.total ? Math.round((r.used / r.total) * 100) : 0;
+    show('ディスクの空き', r.where, [
+        { n: human(r.total), label: '全体' },
+        { n: human(r.used), label: '使用中', sub: `${pct}%` },
+        { n: human(r.available), label: '空き' },
+    ], { foot: 'Esc 閉じる' });
+}
+
+async function cmdWc() {
+    const r = await ask('wc', { pane: state.focus });
+    if (!r) return;
+    if (!r.rows.length) { say('数えられるファイルがありません'); return; }
+    const sum = r.rows.reduce((a, x) => ({
+        lines: a.lines + x.lines, words: a.words + x.words, bytes: a.bytes + x.bytes,
+    }), { lines: 0, words: 0, bytes: 0 });
+    show('行・単語・バイト',
+        `${r.rows.length} ファイル   ${sum.lines.toLocaleString()} 行   `
+        + `${sum.words.toLocaleString()} 語   ${human(sum.bytes)}`,
+        r.rows.map((x) => ({
+            n: x.lines.toLocaleString(),
+            label: x.name,
+            sub: `${x.words.toLocaleString()} 語   ${human(x.bytes)}`,
+        })),
+        { foot: 'Esc 閉じる' });
+}
+
+/// `:where` — which of the config files cian actually found.
+///
+/// The question exists because a copy beside the executable wins over the one
+/// in the home directory, and that is not where anybody looks first. Editing
+/// the wrong file and wondering why nothing changed is the failure this
+/// answers.
+async function cmdWhere() {
+    const r = await ask('where', {});
+    if (!r) return;
+    show('設定の場所', '書き込み先: ' + (r.writes || '(不明)'), [
+        { label: 'init.lua', sub: r.config || '(無し)' },
+        { label: 'state.toml', sub: r.state || '(無し)' },
+        { label: 'shortcuts.lua', sub: r.shortcuts || '(無し)' },
+        { label: 'macro.lua', sub: r.macros || '(無し)' },
+    ], { foot: 'Esc 閉じる' });
+}
+
+async function cmdMarkGlob(glob, on) {
+    const r = await ask('markglob', { pane: state.focus, glob, on });
+    if (!r) return;
+    state[state.focus] = r;
+    draw(state.focus);
+    say(`${glob}: ${r.matched} 件を${on ? 'マーク' : '解除'}`);
+}
+
+/// `:copyto` / `:moveto` — somewhere that is not the other pane.
+async function cmdTo(what, dest) {
+    const r = await ask(what, { pane: state.focus, dest });
+    if (!r) return;
+    running = {
+        op: r.op, kind: r.kind,
+        verb: r.kind === 'move' ? '移動' : 'コピー',
+        total: r.count,
+    };
+    say(`${r.count} 件を ${r.dest} へ`);
+}
+
+async function cmdEditExternal() {
+    const r = await ask('editexternal', { pane: state.focus });
+    if (!r) return;
+    say(`${r.name} を ${r.editor} で開きました`);
 }
 
 /// F12 — give the shell the window, or give it back.

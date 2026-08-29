@@ -2100,6 +2100,157 @@ impl Session {
                 reply["opened"] = serde_json::json!(opened);
                 Ok(reply)
             }
+            // Free space on the disk this pane is on.
+            "df" => {
+                let which = req.params["pane"].as_str().unwrap_or("left").to_string();
+                let at = self.pane_mut(&which)?.cwd.clone();
+                let d = cian_core::inspect::disk_space(&at)?;
+                Ok(serde_json::json!({
+                    "where": at.display().to_string(),
+                    "total": d.total,
+                    "available": d.available,
+                    "used": d.used(),
+                }))
+            }
+            // Lines, words and bytes, for the selection.
+            "wc" => {
+                let which = req.params["pane"].as_str().unwrap_or("left").to_string();
+                let paths = self.targets(&which)?;
+                let mut rows = Vec::new();
+                for p in paths.iter().take(500) {
+                    if p.is_dir() {
+                        continue;
+                    }
+                    if let Ok(c) = cian_core::inspect::count(p) {
+                        rows.push(serde_json::json!({
+                            "name": p.file_name().map(|s| s.to_string_lossy().into_owned()),
+                            "lines": c.lines, "words": c.words, "bytes": c.bytes,
+                        }));
+                    }
+                }
+                Ok(serde_json::json!({ "rows": rows }))
+            }
+            // Where cian reads and writes its settings — the question `:where`
+            // exists to answer, because a portable copy beside the executable
+            // wins and that is not where anybody looks first.
+            "where" => Ok(serde_json::json!({
+                "config": cian_lua::config_read_path("init.lua").map(|p| p.display().to_string()),
+                "state": cian_lua::config_read_path("state.toml").map(|p| p.display().to_string()),
+                "shortcuts": cian_lua::config_read_path("shortcuts.lua").map(|p| p.display().to_string()),
+                "macros": cian_lua::config_read_path("macro.lua").map(|p| p.display().to_string()),
+                "writes": cian_lua::config_write_path("init.lua").map(|p| p.display().to_string()),
+            })),
+            // Mark by pattern. `*.rs` is what a person types; it becomes a
+            // glob rather than a regex, because that is what the asterisk
+            // means to everyone who is not writing one.
+            "markglob" => {
+                let which = req.params["pane"].as_str().unwrap_or("left").to_string();
+                let pattern = req.params["glob"].as_str().unwrap_or("*").to_string();
+                let on = req.params["on"].as_bool().unwrap_or(true);
+                let re = glob_to_regex(&pattern)?;
+                let pane = self.pane_mut(&which)?;
+                let hits: Vec<usize> = pane
+                    .entries
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, e)| !e.is_parent && re.is_match(&e.name.to_lowercase()))
+                    .map(|(i, _)| i)
+                    .collect();
+                for i in &hits {
+                    if on {
+                        pane.set_mark_at(*i);
+                    } else if pane.is_marked(*i) {
+                        pane.toggle_mark_at(*i);
+                    }
+                }
+                let n = hits.len();
+                let mut reply = self.view(&which)?;
+                reply["matched"] = serde_json::json!(n);
+                Ok(reply)
+            }
+            // Copy or move to somewhere that is not the other pane.
+            "copyto" | "moveto" => {
+                let which = req.params["pane"].as_str().unwrap_or("left").to_string();
+                let dest = req.params["dest"].as_str().unwrap_or("").trim().to_string();
+                if dest.is_empty() {
+                    anyhow::bail!("行き先がありません");
+                }
+                let dest = std::path::PathBuf::from(shellexpand(&dest));
+                if !dest.is_dir() {
+                    anyhow::bail!("{} はディレクトリではありません", dest.display());
+                }
+                let paths = self.targets(&which)?;
+                if paths.is_empty() {
+                    anyhow::bail!("対象がありません");
+                }
+                let kind = if req.method == "copyto" { Kind::Copy } else { Kind::Move };
+                let count = paths.len();
+                let op = self.jobs.start(
+                    kind, paths, Some(dest.clone()), self.out.clone(), self.undo.clone());
+                Ok(serde_json::json!({
+                    "op": op, "count": count,
+                    "kind": if matches!(kind, Kind::Move) { "move" } else { "copy" },
+                    "dest": dest.display().to_string(),
+                }))
+            }
+            // Hand the file to the editor named in init.lua, or the one the
+            // environment names.
+            "editexternal" => {
+                let which = req.params["pane"].as_str().unwrap_or("left").to_string();
+                let (path, name, is_dir) = self.selected(&which)?;
+                if is_dir {
+                    anyhow::bail!("{name} はディレクトリです");
+                }
+                let editor = std::env::var("VISUAL")
+                    .or_else(|_| std::env::var("EDITOR"))
+                    .unwrap_or_else(|_| if cfg!(windows) { "notepad".into() } else { "vi".into() });
+                cian_core::proc::quiet(&editor)
+                    .arg(&path)
+                    .spawn()
+                    .map_err(|e| anyhow::anyhow!("{editor}: {e}"))?;
+                Ok(serde_json::json!({ "editor": editor, "name": name }))
+            }
+            // ---- Office documents synced from a cloud drive ----
+            //
+            // `:office` opens the *cloud* copy in the web app; `:officelink`
+            // makes a .url pointing at it. The distinction matters at work: a
+            // local path in an email is a path only you can open.
+            "office" | "officelink" => {
+                let which = req.params["pane"].as_str().unwrap_or("left").to_string();
+                let (path, name, _) = self.selected(&which)?;
+                let cfg = cian_lua::load();
+                let Some(url) = cian_core::office::cloud_url(&path, &cian_core::office::SyncMap::from_pairs(&cfg.sharepoint)) else {
+                    anyhow::bail!("{name} のクラウド側が分かりません（init.lua の cian.sync{{…}}）");
+                };
+                if req.method == "officelink" {
+                    let at = path.with_extension("url");
+                    std::fs::write(&at, cian_core::office::url_shortcut(&url))?;
+                    self.undo.push(Undo::Created { path: at.clone() });
+                    let pane = self.pane_mut(&which)?;
+                    pane.reload()?;
+                    let mut reply = self.view(&which)?;
+                    reply["made"] = serde_json::json!(
+                        at.file_name().map(|s| s.to_string_lossy().into_owned()));
+                    return Ok(reply);
+                }
+                // The app's own URI where there is one — that opens Word
+                // rather than a browser tab pretending to be Word.
+                let target = cian_core::office::classify(&path)
+                    .and_then(|doc| cian_core::office::app_uri(doc, &url))
+                    .unwrap_or_else(|| url.clone());
+                cian_core::proc::open_with_desktop(&target)?;
+                Ok(serde_json::json!({ "opened": name, "url": url }))
+            }
+            // Re-read init.lua. Says what it could not change, rather than
+            // pretending a restart is never needed.
+            "reload" => {
+                let cfg = cian_lua::load();
+                Ok(serde_json::json!({
+                    "ai": cfg.ai.is_some(),
+                    "sync_maps": cfg.sharepoint.len(),
+                    "ssh_hosts": cfg.ssh_hosts.len(),
+                }))
+            }
             // Leave a flat listing and go back to the directory it came from.
             "leaveflat" => {
                 let which = req.params["pane"].as_str().unwrap_or("left").to_string();
@@ -2488,4 +2639,33 @@ fn read_tail(path: &std::path::Path, cap: u64) -> String {
 fn filetime_now(path: &std::path::Path) -> std::io::Result<()> {
     let f = std::fs::OpenOptions::new().append(true).open(path)?;
     f.set_modified(std::time::SystemTime::now())
+}
+
+/// A shell-style glob as a regex, anchored.
+///
+/// `*.rs` is what a person types and `.*\.rs` is what they mean; treating the
+/// input as a regex would make `.` match anything and quietly mark the wrong
+/// files. Only `*` and `?` are special, which is the whole of what a filename
+/// pattern has ever meant.
+fn glob_to_regex(pattern: &str) -> anyhow::Result<regex::Regex> {
+    let mut out = String::from("^");
+    for c in pattern.to_lowercase().chars() {
+        match c {
+            '*' => out.push_str(".*"),
+            '?' => out.push('.'),
+            c => out.push_str(&regex::escape(&c.to_string())),
+        }
+    }
+    out.push('$');
+    Ok(regex::Regex::new(&out)?)
+}
+
+/// `~` at the start means home. Nothing else is expanded: a path typed into a
+/// file manager is a path, not a shell line.
+fn shellexpand(path: &str) -> String {
+    let Some(rest) = path.strip_prefix('~') else { return path.to_string() };
+    match std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }) {
+        Some(home) => format!("{}{rest}", home.to_string_lossy()),
+        None => path.to_string(),
+    }
 }

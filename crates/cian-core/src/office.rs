@@ -84,6 +84,31 @@ pub struct SyncMap {
     pub url: String,
 }
 
+impl SyncMap {
+    /// The maps a config declared, with `~` expanded.
+    ///
+    /// Here rather than in a front end because both of them read the same
+    /// `cian.sharepoint{…}` and would otherwise each decide separately what a
+    /// leading tilde means.
+    pub fn from_pairs(pairs: &[(String, String)]) -> Vec<SyncMap> {
+        pairs
+            .iter()
+            .map(|(local, url)| SyncMap {
+                local: expand_home(local),
+                url: url.trim_end_matches('/').to_string(),
+            })
+            .collect()
+    }
+}
+
+fn expand_home(path: &str) -> PathBuf {
+    let Some(rest) = path.strip_prefix('~') else { return PathBuf::from(path) };
+    match std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }) {
+        Some(home) => PathBuf::from(format!("{}{rest}", home.to_string_lossy())),
+        None => PathBuf::from(path),
+    }
+}
+
 /// The cloud address of `path`, if it lives under one of the mapped folders.
 ///
 /// The longest match wins, so a library synced inside another library resolves
