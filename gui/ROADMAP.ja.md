@@ -36,6 +36,17 @@
 同じヘルパー（macism / im-select / cian-ime）を駆動し、vim のノーマルモード
 で自動オフ・挿入で復元。実測でことえりの ID が読めている。
 
+### 2026-08-30 その2 ── mermaid・keymap・統合
+
+- **mermaid** 入った。3.4MB、図が出たときだけ読む。strict。書体はページのもの
+- **init.lua の keymap** 49個のアクション名すべて適用。途中で2つの沈黙が出た:
+  `keymap.lua` は init.lua が無いと読まれなかった（**端末版も同じバグ**、直した）／
+  Lua 自身のエラーが窓に届いていなかった
+- **統合**: `openMenu`↔`show` は読んだら別物だった。代わりに監査へ JS の
+  類似度測定を足したら `cmdSubstitute`↔`textOp` 0.88 が出て、そこから
+  **9個の到達不能コマンド**（`:sort :uniq :s` ほか）が見つかった。ex コマンドに登録
+- **drive.js が実設定を汚していた**。砂場に config を切った
+
 **まだ実機の AI で通していないもの**: aijunk/aistructure/airename/aisearch の
 「返事が来てからの画面」。組み立て・拒否経路・検証器はテスト済みだが、
 本物のモデルの返事は endpoint のある社内でしか流せない。
