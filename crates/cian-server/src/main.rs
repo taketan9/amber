@@ -1104,7 +1104,15 @@ impl Session {
                 // for a file being read and wrong for a difference being
                 // looked at: the point is what changed, and pages of identical
                 // lines between two changes hide it.
-                let folded = cian_core::diff::fold(&d.rows, 3);
+                // …but not always: cian-tui's `f` unfolds them, for the times
+                // the question is "what is around this change" rather than
+                // "what changed". The window could only ever see the folded
+                // view, so that key had nothing to toggle.
+                let folded = if req.params["folded"].as_bool().unwrap_or(true) {
+                    cian_core::diff::fold(&d.rows, 3)
+                } else {
+                    d.rows.clone()
+                };
                 let rows: Vec<_> = folded.iter().take(20_000).map(|r| match r {
                     cian_core::diff::Row::Same { left, right } => serde_json::json!({
                         "kind": "same", "ln": left.no, "rn": right.no,

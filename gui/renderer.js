@@ -4910,7 +4910,7 @@ function hopHere(step) {
 /// `=` — one key, and what the two cursors point at decides the answer.
 async function cmdCompare() {
     say('比べています…');
-    const r = await ask('compare', {});
+    const r = await ask('compare', { folded: diffFolded });
     if (!r) return;
     if (r.kind === 'dirs') {
         const mark = { left: '◀ 左だけ', right: '右だけ ▶', differ: '≠ 違う' };
@@ -4923,10 +4923,25 @@ async function cmdCompare() {
                 status: x.status,
             })),
             {
-                foot: '> 右へコピー   < 左へコピー   c 一覧をコピー   w 保存   Esc 閉じる',
+                foot: 'Enter 両ペインをそこへ   > 右へ   < 左へ   ] 右を揃える   [ 左を揃える   c コピー   w 保存   Esc',
+                // Enter takes both panes to the entry, which is what you want
+                // after finding the difference: cian-tui does it, and without
+                // it you memorise a path and type it twice.
+                pick: async (row) => {
+                    closeReport();
+                    const dir = (root) => `${root}/${row.rel}`.replace(/[\\/][^\\/]+$/, '');
+                    await landOn(dir(r.left), true);
+                    state.focus = state.focus === 'left' ? 'right' : 'left';
+                    await landOn(dir(r.right), true);
+                    state.focus = state.focus === 'left' ? 'right' : 'left';
+                    draw('left'); draw('right');
+                    say(row.rel);
+                },
                 act: {
                     '>': () => copyAcross(roots, 'left', 'right'),
                     '<': () => copyAcross(roots, 'right', 'left'),
+                    ']': () => syncTree(roots, 'left', 'right'),
+                    '[': () => syncTree(roots, 'right', 'left'),
                     c: () => copyReport('ディレクトリ比較'),
                     w: () => saveReport(`${r.left} ↔ ${r.right}`),
                 },
@@ -4954,13 +4969,83 @@ async function cmdCompare() {
         };
     });
     show('ファイル比較', `${r.left}   ↔   ${r.right}   ${r.summary}`, rows, {
-        foot: 'Enter 並べて編集   c 一覧をコピー   w 保存   Esc 閉じる',
+        foot: 'Enter 並べて編集   / 検索   n/N 次・前   f 同じ行の畳みを解く   x AI に訊く   c コピー   w 保存   Esc',
         pick: () => { closeReport(); cmdDiffEdit(); },
         act: {
             c: () => copyReport(`${r.left} ↔ ${r.right}`),
             w: () => saveReport(`${r.left} ↔ ${r.right}`),
+            // The same three cian-tui puts on this screen. A long diff is a
+            // list you search, and the folded runs are folded until you want
+            // one of them.
+            '/': () => diffFind(),
+            n: () => diffHop(1),
+            N: () => diffHop(-1),
+            f: () => { diffFolded = !diffFolded; closeReport(); cmdCompare(); },
+            x: () => { closeReport(); runCommand(findCommand('aidiff'), ''); },
         },
     });
+}
+
+/// Whether the identical runs in a file comparison are folded. cian-tui's
+/// `f`, and off by default for the same reason: a diff is read by its
+/// differences, and the sameness between them is noise until it is not.
+let diffFolded = true;
+
+/// `]` / `[` — make one side match the other, whole.
+///
+/// The per-entry `>` and `<` are for picking; this is for "these two should
+/// be the same". Named and counted before anything happens, because it is
+/// the one action on this screen that can overwrite work in bulk.
+async function syncTree(roots, from, to) {
+    const rows = report.rows.filter((x) => x.status !== 'same');
+    // Only what is missing on `to` or differs — an entry that exists only on
+    // the destination side is not made by copying anything.
+    const going = rows.filter((x) => x.status === 'differ'
+        || x.status === (from === 'left' ? 'left' : 'right'));
+    if (!going.length) { say('その向きに送るものはありません'); return; }
+    closeReport();
+    const ok = await confirm(
+        `${going.length} 件を ${from === 'left' ? '左 → 右' : '右 → 左'} に揃えます`,
+        `${going.map((x) => x.rel).slice(0, 20).join('\n')}`
+        + (going.length > 20 ? `\n… 他 ${going.length - 20} 件` : '')
+        + '\n\n同じ名前は上書きされます',
+    );
+    if (!ok) { say('やめました'); return; }
+    let done = 0;
+    for (const row of going) {
+        const src = `${roots[from]}/${row.rel}`;
+        const dest = `${roots[to]}/${row.rel}`.replace(/[\\/][^\\/]+$/, '');
+        const r = await ask('copyone', { src, dest });
+        if (r) done += 1;
+    }
+    await reread();
+    say(`${done} 件を揃えました`);
+}
+
+/// `/` and `n`/`N` on a file comparison — the diff is a list, and a long one.
+let diffNeedle = '';
+
+async function diffFind() {
+    const q = await askFor('比較結果を検索', diffNeedle);
+    if (q === null || !q) return;
+    diffNeedle = q;
+    diffHop(1);
+}
+
+function diffHop(step) {
+    if (!report.on || !diffNeedle) return;
+    const q = diffNeedle.toLowerCase();
+    const n = report.rows.length;
+    for (let i = 1; i <= n; i++) {
+        const at = ((report.at + step * i) % n + n) % n;
+        const row = report.rows[at];
+        if (`${row.label} ${row.sub || ''}`.toLowerCase().includes(q)) {
+            report.at = at;
+            drawReport();
+            return;
+        }
+    }
+    say(`${diffNeedle} — 見つかりません`, true);
 }
 
 /// `>` / `<` in a directory comparison — put this entry on the other side.
