@@ -1248,8 +1248,16 @@ impl Session {
                     anyhow::bail!("{name} はアーカイブではありません");
                 }
                 let cwd = self.pane_mut(&which)?.cwd.clone();
+                // One member where the caller named one, the whole archive
+                // otherwise. `extract` has taken a member list since it was
+                // written; only the whole-archive call was ever made, so the
+                // list screen could show a file it could not get out.
+                let members: Vec<String> = match req.params["member"].as_str() {
+                    Some(m) if !m.is_empty() => vec![m.to_string()],
+                    _ => Vec::new(),
+                };
                 let report = quietly(|ctl| cian_core::archive::extract(
-                    &path, &[], &cwd, req.params["password"].as_str(), "", ctl));
+                    &path, &members, &cwd, req.params["password"].as_str(), "", ctl));
                 let pane = self.pane_mut(&which)?;
                 pane.reload()?;
                 Ok(serde_json::json!({

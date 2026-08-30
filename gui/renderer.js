@@ -4091,9 +4091,16 @@ async function cmdAiCmd(want) {
     if (!r) return;
     say('考えています…');
     aiWaiting = async (answer) => {
-        // Into the prompt, **not run**. A model that guesses wrong guesses
-        // wrong; the person presses Enter, not the program.
+        // Shown before it is put anywhere. It was typed straight into the
+        // shell prompt — never run, which is the important half — but
+        // cian-tui asks first (AiShellConfirm), and a command you did not ask
+        // to see sitting on your prompt is a command you might Enter on
+        // reflex.
         const line = answer.trim().split('\n')[0].replace(/^[$#>]\s*/, '');
+        if (!line) { say('返事が空でした', true); return; }
+        const ok = await confirm('このコマンドをプロンプトに置きますか',
+            `${line}\n\n置くだけで実行はしません`);
+        if (!ok) { say('やめました'); return; }
         if (!term.on) await openShell();
         await ask('shellinput', { text: line });
         setShellFocus(true);
@@ -5227,8 +5234,32 @@ async function cmdArchiveList() {
             n: m.is_dir ? '' : human(m.size),
             label: m.name,
             sub: m.is_dir ? '' : `圧縮後 ${human(m.compressed)}`,
+            member: m.name,
+            is_dir: m.is_dir,
         })),
-        { foot: 'Esc 閉じる' });
+        {
+            // cian-tui's Archive popup extracts from here: Enter for the one
+            // under the cursor, `a` for all of it. Reading the list and then
+            // having to know `:unzip` is two screens for one intention.
+            foot: 'Enter この1件を展開   a 全部展開   Esc 閉じる',
+            pick: async (row) => {
+                if (row.is_dir) return;
+                closeReport();
+                const done = await ask('extract', { pane: state.focus, member: row.member });
+                if (!done) return;
+                await reread();
+                say(`${row.member} を展開しました`);
+            },
+            act: {
+                a: async () => {
+                    closeReport();
+                    const done = await ask('extract', { pane: state.focus });
+                    if (!done) return;
+                    await reread();
+                    say(`${r.name} を展開しました`);
+                },
+            },
+        });
 }
 
 // ---- Version control, duplicates, redo ----
