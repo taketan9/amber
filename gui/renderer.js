@@ -1474,9 +1474,13 @@ function contextRows() {
     v.push({ label: '保存したコマンド', value: 'Ctrl+Shift+Enter', run: cmdSnippets });
     v.push({ label: 'マクロ', value: '@', run: cmdMacros });
     v.push({ label: 'ブックマーク', value: 's', run: cmdShortcuts });
-    v.push({ label: 'コマンド入力', value: ':', run: () => commandLine() });
 
     if (inShell) {
+        // `:` is a character in a shell, so the command line needs a way in
+        // that is not a keystroke — which is why cian-tui puts this row here
+        // and only here (menu.rs). In a file pane the key works, and a row
+        // that duplicates a working key is a row in the way.
+        v.push({ label: 'コマンド入力', value: 'Ctrl+Enter', run: () => commandLine() });
         // The shell's own menu: what can be done to a terminal, not to a file.
         v.push({ label: '貼り付け（シェルへ）', value: 'Ctrl+V', run: () => document.execCommand('paste') });
         v.push(group('セッション ▸', () => [
@@ -1500,12 +1504,15 @@ function contextRows() {
 
     // ── the frequent file operations ──
     if (has) {
-        v.push({ label: '開く', value: 'Enter', run: enter });
+        // cian-tui's order, item for item (menu.rs `open_context_menu`):
+        // copy, the two ways of copying *what it is*, cut, paste, rename,
+        // delete, open in a tab. The window had `開く` first and the three
+        // copies scattered, which is a different menu wearing the same words.
         v.push({ label: 'コピー（保持）', value: 'Ctrl+C', run: () => hold('copy') });
-        v.push({ label: '切り取り（保持）', value: 'Ctrl+X', run: () => hold('cut') });
-        v.push({ label: 'ここに貼り付け', value: 'Ctrl+V', run: paste });
         v.push({ label: 'パスをコピー', value: 'p', run: copyPaths });
         v.push({ label: 'ファイルとしてコピー', value: 'P', run: clipFiles });
+        v.push({ label: '切り取り（保持）', value: 'Ctrl+X', run: () => hold('cut') });
+        v.push({ label: 'ここに貼り付け', value: 'Ctrl+V', run: paste });
         v.push({ label: '名前を変える', value: 'r', run: rename });
         v.push({ label: '削除（ゴミ箱へ）', value: 'd', run: () => operate('delete') });
         v.push({ label: '新しいタブで開く', value: 't', run: tabNew });
@@ -1569,8 +1576,9 @@ function contextRows() {
         { label: '外部エディタで開く', value: ':edit', run: cmdEditExternal },
         { label: 'Finder で表示', value: ':revealos', run: cmdRevealOs },
     ]));
-    v.push({ label: 'キー一覧', value: '?', run: openHelp });
+    // cian-tui ends Quit then Manual — the way out, then the way to find out.
     v.push({ label: '閉じる', value: ':q', run: cmdQuit });
+    v.push({ label: 'キー一覧', value: '?', run: openHelp });
     return v;
 }
 
