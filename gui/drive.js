@@ -373,10 +373,22 @@ async function main() {
         ['Esc', ''], ['Esc', ''], ['Esc', '3回で閉じる'],
     ];
 
+    // Its own config directory, inside the sandbox.
+    //
+    // Without this the driver ran against the real ~/.config/cian, and every
+    // `:editstyle vim` or `:view icons` it typed while testing was written
+    // into somebody's actual settings — quietly, and the next run then
+    // started from whatever the last test had left. A test that changes what
+    // it is testing is not a test. An explicit CIAN_CONFIG_DIR still wins, so
+    // a keymap.lua can be handed in on purpose.
+    const conf = process.env.CIAN_CONFIG_DIR || path.join(sand, 'config');
+    fs.mkdirSync(conf, { recursive: true });
+
     const el = spawn(process.env.CIAN_ELECTRON
         || path.join(__dirname, 'node_modules/electron/dist/Electron.app/Contents/MacOS/Electron'),
         [__dirname, path.join(sand, 'from'), `--remote-debugging-port=${PORT}`],
-        { cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'] });
+        { cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'],
+          env: { ...process.env, CIAN_CONFIG_DIR: conf } });
 
     const crashes = [];
     for (const s of [el.stdout, el.stderr]) {

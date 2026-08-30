@@ -531,6 +531,35 @@ def js() -> int:
             print(f'  ■ {_rel(path)}: どこにも定義がない呼び出し')
             for name, c in missing.most_common():
                 print(f'      {name}()  × {c}')
+        # 双子。**Rust では測っているのに JS では見ていなかった。**
+        # 「統合できるものはないか」を印象で答えると、読まずに似ていると
+        # 決めた組（openMenu と show）を畳んで、実際に違う二つを1つの
+        # フラグ付き関数にしてしまう。測って答える。
+        funcs = {}
+        for m in re.finditer(r'^\s*(?:async\s+)?function\s+([A-Za-z_$][\w$]*)', src, re.M):
+            body = _body(src, src.index('{', m.end()))
+            norm = re.sub(r'//[^\n]*', '', body)
+            norm = re.sub(r'\s+', ' ', norm).strip()
+            if len(norm) > 300:
+                funcs[m.group(1)] = (norm, src[:m.start()].count('\n') + 1)
+        names = sorted(funcs)
+        for i, a2 in enumerate(names):
+            for b2 in names[i + 1:]:
+                sm = difflib.SequenceMatcher(None, funcs[a2][0], funcs[b2][0])
+                if sm.quick_ratio() < 0.80:
+                    continue
+                r = sm.ratio()
+                if r >= 0.80 and (a2, b2) not in DUP_OK and (b2, a2) not in DUP_OK:
+                    print(f'  ★ {r:.2f} {_rel(path)}: {a2}:{funcs[a2][1]} ↔ {b2}:{funcs[b2][1]}')
+                    n += 1
+
+        # 同じ行の繰り返し。Rust 側と同じ物差し。
+        c = collections.Counter(
+            l.strip() for l in src.splitlines()
+            if len(l.strip()) > 70 and not l.strip().startswith(('//', '///', '*')))
+        for line, k in sorted(((l, k) for l, k in c.items() if k >= 4), key=lambda x: -x[1])[:5]:
+            print(f'  ★ 同じ行が {k} 回  {line[:78]}')
+            n += 1
     if not n:
         print('  なし')
     return n

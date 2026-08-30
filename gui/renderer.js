@@ -954,7 +954,9 @@ const HELP = [
         ['F2 / Shift+F2', '次 / 前の開いているファイル'],
         ['Ctrl+Shift+O', '見出し一覧から飛ぶ（vim 流儀は :outline）'],
         ['Ctrl+Shift+B', '各行を最後に変えた人（vim 流儀は :blame、もう一度で消す）'],
+        ['── 以下は vim 流儀のコマンド行から ──', 'T でエディタの流儀を vim に'],
         [':sort :rsort :uniq', '行をソート / 逆順 / 重複を落とす'],
+        [':s/古い/新しい/g', '開いているファイルを置換'],
         [':han :zen', '全角ASCII→半角 / 半角カナ→全角'],
         [':expand :unexpand :reindent', 'タブ↔スペース、インデントを揃える'],
         [':lf :crlf', '改行コードを変える（保存時に反映）'],
@@ -1842,14 +1844,11 @@ async function openNth(at) {
     const n = openFiles.list.length;
     if (!n) return;
     openFiles.at = ((at % n) + n) % n;
-    const path = openFiles.list[openFiles.at];
-    const which = state.focus;
     // The cursor has to move too: everything downstream — save, blame,
     // outline — asks the engine about "the selected file", and a viewer
     // showing one file while the engine holds another is the kind of
     // disagreement that writes to the wrong place.
-    const at2 = state[which].entries.findIndex((x) => x.path === path);
-    if (at2 >= 0) state[which].cursor = at2;
+    if (!await landOn(openFiles.list[openFiles.at])) return;
     if (viewer.on) await closeView(false);
     await lookInside();
     if (openFiles.list.length > 1) {
@@ -1999,6 +1998,19 @@ function setStyle(i, remember = true) {
         ex.defineEx('ruler', 'ruler', () => toggleRuler());
         ex.defineEx('preview', 'preview', () => togglePreview2());
         ex.defineEx('combine', 'combine', (_cm, p) => cmdCombine((p.args || []).join(' ') + (p.argString || '')));
+        // The line operations, which until now could not be reached at all:
+        // each needs a file open, and cian's own `:` belongs to the listing,
+        // which declines every key while a file is open. They were in the
+        // command table, in the help, and unreachable — found by measuring
+        // the code for twins, not by anybody using it. Here is where a vim
+        // user would look for them anyway.
+        for (const op of ['sort', 'rsort', 'uniq', 'han', 'zen', 'expand', 'unexpand', 'reindent']) {
+            ex.defineEx(op, op, () => textOp(op));
+        }
+        // `:s/old/new/g`. monaco-vim has its own substitute, but it does not
+        // know cian's — the engine holds the same one the terminal build
+        // uses, so the two builds agree on what a pattern means.
+        ex.defineEx('subst', 's', (_cm, p) => cmdSubstitute('s' + (p.argString || '')));
         // `:g/re/d` and `:v/re/d`, spelled as vim spells them.
         ex.defineEx('global', 'g', (_cm, p) => runGlobal(p, false));
         ex.defineEx('vglobal', 'v', (_cm, p) => runGlobal(p, true));
@@ -2603,16 +2615,7 @@ async function hopHit(step) {
     if (!hits.list.length) { say('grep の結果がありません', true); return; }
     hits.at = (hits.at + step + hits.list.length) % hits.list.length;
     const h = hits.list[hits.at];
-    const which = state.focus;
-    const dir = h.path.replace(/[\\/][^\\/]*$/, '');
-    if (state[which].cwd !== dir) {
-        const pane = await ask('list', { pane: which, path: dir });
-        if (!pane) return;
-        state[which] = pane;
-    }
-    const at = state[which].entries.findIndex((x) => x.path === h.path);
-    if (at >= 0) state[which].cursor = at;
-    draw(which);
+    if (!await landOn(h.path)) return;
     if (viewer.on) await closeView(false);
     await lookInside();
     if (viewer.ed && h.line) {
@@ -3130,20 +3133,32 @@ async function cmdOutline() {
 /// The lines go down to cian-core and come back changed. `:han` and `:zen`
 /// alone are a table of Japanese width mappings, and nobody should own two
 /// copies of that.
-async function textOp(op) {
-    if (!viewer.on || !viewer.ed) { say('先にファイルを開いてください', true); return; }
+/// Hand the whole buffer to the engine and take back what it returns.
+///
+/// The line work — sort, uniq, the substitutions — belongs on the engine's
+/// side, where cian-core already holds it and the terminal build already
+/// calls it. What is left here is the same six lines every time, and putting
+/// the answer back **through the editor's own edit stack rather than
+/// setValue** is the part that matters: it has to be undoable with the key
+/// that undoes everything else in here.
+async function rewriteBuffer(method, params, said) {
+    if (!viewer.on || !viewer.ed) { say('先にファイルを開いてください', true); return null; }
     const lines = viewer.ed.getValue().split(/\r?\n/);
-    const r = await ask('textop', { op, lines });
-    if (!r) return;
-    // Through the editor's own edit stack, not setValue: this has to be
-    // undoable with the key that undoes everything else in here.
+    const r = await ask(method, { ...params, lines });
+    if (!r) return null;
     const model = viewer.ed.getModel();
     viewer.ed.executeEdits('cian', [{
         range: model.getFullModelRange(),
         text: r.lines.join('\n'),
     }]);
     viewer.ed.pushUndoStop();
-    say(`:${op}   ${lines.length} 行 → ${r.lines.length} 行`);
+    say(said(r, lines));
+    return r;
+}
+
+async function textOp(op) {
+    await rewriteBuffer('textop', { op },
+        (r, lines) => `:${op}   ${lines.length} 行 → ${r.lines.length} 行`);
 }
 
 async function setEol(kind) {
@@ -3383,17 +3398,33 @@ async function cmdSearch(mode, needle) {
 }
 
 /// Put the cursor on a path, entering its directory if need be.
-async function revealPath(path, isDir) {
+/// Put the cursor on this path, reading its directory only if we are not
+/// standing in it already.
+///
+/// Three things wanted this — jumping to a search hit, landing on a row
+/// picked out of a report, stepping through the files opened at once — and
+/// each had written its own. Staying put when the directory is already the
+/// right one is not only faster: a re-read would drop the marks and the
+/// filter, which is a visible loss for a gesture that means "look over
+/// there", not "start again".
+async function landOn(path, isDir = false) {
     const which = state.focus;
     const dir = isDir ? path : path.replace(/[\\/][^\\/]*$/, '');
-    const pane = await ask('list', { pane: which, path: dir });
-    if (!pane) return;
-    const want = isDir ? null : path;
-    const at = want ? pane.entries.findIndex((x) => x.path === want) : 0;
-    pane.cursor = at < 0 ? 0 : at;
-    state[which] = pane;
+    if (state[which].cwd !== dir) {
+        const pane = await ask('list', { pane: which, path: dir });
+        if (!pane) return false;
+        state[which] = pane;
+    }
+    if (!isDir) {
+        const at = state[which].entries.findIndex((x) => x.path === path);
+        if (at >= 0) state[which].cursor = at;
+    }
     draw(which);
-    say(pane.cwd);
+    return true;
+}
+
+async function revealPath(path, isDir) {
+    if (await landOn(path, isDir)) say(state[state.focus].cwd);
 }
 
 async function cmdBranch() {
@@ -4226,17 +4257,7 @@ function toggleRuler() {
 /// `:s/old/new/g` — the same substitution language as the grep-wide replace,
 /// because it is the same question asked of one file instead of many.
 async function cmdSubstitute(spec) {
-    if (!viewer.on || !viewer.ed) { say('先にファイルを開いてください', true); return; }
-    const lines = viewer.ed.getValue().split(/\r?\n/);
-    const r = await ask('substitute', { spec, lines });
-    if (!r) return;
-    const model = viewer.ed.getModel();
-    viewer.ed.executeEdits('cian', [{
-        range: model.getFullModelRange(),
-        text: r.lines.join('\n'),
-    }]);
-    viewer.ed.pushUndoStop();
-    say(`${r.changed} 箇所を置換しました`);
+    await rewriteBuffer('substitute', { spec }, (r) => `${r.changed} 箇所を置換しました`);
 }
 
 /// The replace plan, with each line kept or dropped one at a time.
