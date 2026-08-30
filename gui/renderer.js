@@ -23,6 +23,11 @@ const el = {
     fbar: document.getElementById('fbar'),
     fInput: document.getElementById('f-input'),
     fCount: document.getElementById('f-count'),
+    prog: document.getElementById('prog'),
+    pHead: document.getElementById('p-head'),
+    pNow: document.getElementById('p-now'),
+    pFill: document.getElementById('p-fill'),
+    pNum: document.getElementById('p-num'),
     shell: document.getElementById('shell'),
     sTabs: document.getElementById('s-tabs'),
     sTitle: document.getElementById('s-title'),
@@ -174,7 +179,12 @@ function drawStatus() {
             `空き ${human(d.available)} / ${human(d.total)}`);
     }
     if (running) {
-        chip('op', `↻ ${running.verb} ${running.done ?? 0} / ${running.total}`);
+        // Per cent where the bytes are known — the same number the bar shows,
+        // so the chip left behind by `b` is not a different measurement.
+        const pct = running.bytesTotal > 0
+            ? `${Math.round((running.bytes / running.bytesTotal) * 100)}%`
+            : `${running.done ?? 0} / ${running.total}`;
+        chip('op', `↻ ${running.verb} ${pct}`);
     }
     el.stChips.replaceChildren(...chips);
     el.stMsg.textContent = status.msg ? `◂ ${status.msg}` : '';
@@ -433,14 +443,54 @@ async function mark(all, step = 1) {
     say(next.marked ? `${next.marked} 件マーク` : 'マークなし');
 }
 
+/// The bar, while an operation is running.
+///
+/// Shown for as long as the work takes, as the terminal build shows it, and
+/// dismissed with `b` *without cancelling* — the status chip carries the rest.
+/// `op_bar_hidden` there, `prog.hidden` here.
+const prog = { hidden: false, stalledAt: 0 };
+
+/// A path shortened from the middle, keeping both ends — the terminal
+/// build's `truncate_middle`. Both ends carry: the head says which volume or
+/// project, the tail says which file. Cutting either off answers half the
+/// question the line exists to answer.
+function truncateMiddle(text, max = 68) {
+    if (text.length <= max) return text;
+    const keep = max - 1;
+    const head = Math.ceil(keep / 2);
+    return `${text.slice(0, head)}…${text.slice(text.length - (keep - head))}`;
+}
+
+function drawProg() {
+    if (!running || prog.hidden) { el.prog.hidden = true; return; }
+    el.prog.hidden = false;
+    el.pHead.textContent = `${running.verb}中`;
+    el.pNow.textContent = truncateMiddle(running.path || '');
+    // By bytes where they are known, by files otherwise — cian-core's own
+    // rule (Progress::fraction), so the bar and the numbers cannot disagree.
+    const frac = running.bytesTotal > 0
+        ? running.bytes / running.bytesTotal
+        : (running.total > 0 ? running.done / running.total : 0);
+    el.pFill.style.width = `${Math.round(Math.min(1, frac) * 100)}%`;
+    const secs = Math.round((running.ms ?? 0) / 1000);
+    const elapsed = secs >= 60 ? `${Math.floor(secs / 60)}分${secs % 60}秒` : `${secs}秒`;
+    const bytes = running.bytesTotal > 0
+        ? `${human(running.bytes)} / ${human(running.bytesTotal)}   `
+        : '';
+    // Stalled: the work has not reported for a while. Said plainly, because a
+    // bar that has not moved in twenty seconds is otherwise indistinguishable
+    // from a program that has died.
+    const still = prog.stalledAt && performance.now() - prog.stalledAt > 8000
+        ? `   ⚠ ${Math.round((performance.now() - prog.stalledAt) / 1000)} 秒動いていません`
+        : '';
+    el.pNum.textContent =
+        `${Math.round(Math.min(1, frac) * 100)}%   ${bytes}(${running.done} / ${running.total} 件)   ·   ${elapsed}${still}`;
+}
+
 /// Copy, move or delete whatever is marked — or the row under the cursor when
 /// nothing is. The destination is the other pane, which is the whole idea of
 /// two panes side by side.
 async function operate(kind) {
-    if (running) {
-        say('実行中です。Esc で中止できます');
-        return;
-    }
     const which = state.focus;
     const pane = state[which];
     if (!pane) return;
@@ -497,7 +547,24 @@ async function operate(kind) {
         mode: answer === 'a' ? 'permanent' : 'trash',
     });
     if (!started) return;
-    running = { op: started.op, kind, verb, total: started.count };
+    beginOp(started, kind, verb);
+}
+
+/// Take up an operation the engine has just accepted — running now, or in
+/// line behind one that is. A queued job gets no bar: there is nothing to
+/// show yet, and the one on screen belongs to the job actually working.
+function beginOp(started, kind, verb) {
+    if (started.queued) {
+        say(`キューに追加 — ${started.queued} 件待ち（:queue で一覧）`);
+        return;
+    }
+    running = {
+        op: started.op, kind, verb,
+        total: started.count, done: 0, bytes: 0, bytesTotal: 0, ms: 0, path: '',
+    };
+    prog.hidden = false;
+    prog.stalledAt = performance.now();
+    drawProg();
     say(`${verb}中… 0 / ${started.count}`);
 }
 
@@ -1844,8 +1911,7 @@ async function paste() {
     // register — so the verb comes back with the job rather than being
     // guessed here from which key was pressed.
     const verb = r.kind === 'move' ? '移動' : 'コピー';
-    running = { op: r.op, kind: r.kind, verb, total: r.count };
-    say(`${verb}中… 0 / ${r.count}`);
+    beginOp(r, r.kind, verb);
 }
 
 async function reread() {
@@ -1906,6 +1972,32 @@ document.addEventListener('keydown', (e) => {
 document.addEventListener('input', (e) => {
     if (finder.open && e.target === el.findQ) rankNow();
 });
+
+/// While the bar is up it owns the keyboard — two keys, the terminal build's
+/// (keys.rs, the progress popup): Esc stops the work, `b` stops only the
+/// screen. Registered before the listing's handler so neither reaches it.
+document.addEventListener('keydown', (e) => {
+    if (!running || prog.hidden) return;
+    if (e.key === 'Escape') {
+        e.stopPropagation();
+        e.preventDefault();
+        window.cian.call('cancel', { op: running.op });
+        say('中止しています…');
+        return;
+    }
+    if (e.key === 'b' || e.key === 'Enter') {
+        e.stopPropagation();
+        e.preventDefault();
+        prog.hidden = true;
+        drawProg();
+        say('バックグラウンドで実行中 — :queue で管理');
+        return;
+    }
+    // Everything else is swallowed rather than passed on. A `d` typed at a
+    // bar is a `d` meant for the listing behind it, and that one deletes.
+    e.stopPropagation();
+    e.preventDefault();
+}, true);
 
 /// The 49 action names `cian.set_keymap` accepts, each pointing at what this
 /// build already does for that key.
@@ -3397,29 +3489,37 @@ async function cmdQueue() {
     if (!r) return;
     if (!r.jobs.length) { say('動いている操作はありません'); return; }
     const verb = { copy: 'コピー', move: '移動', delete: '削除' };
-    show('実行中の操作', `${r.jobs.length} 件`, r.jobs.map((j) => ({
-        n: `#${j.op}`,
-        label: `${verb[j.kind] || j.kind}  ${j.total} 件`,
-        sub: j.stopping ? '止めています…' : (j.dest || ''),
-        op: j.op,
-    })), {
-        foot: 'x 中止   b 動かしたまま閉じる   Esc 閉じる',
-        act: {
-            x: async () => {
-                const row = report.rows[report.at];
-                if (!row) return;
-                await ask('cancel', { op: row.op });
-                say(`#${row.op} を中止しています`);
-                closeReport();
+    const waiting = r.jobs.filter((j) => j.state === 'waiting').length;
+    show('操作キュー', waiting ? `実行中 1 件、待ち ${waiting} 件` : '実行中 1 件',
+        r.jobs.map((j) => ({
+            // The runner is marked, because "what is happening now" and "what
+            // is about to" are different questions and the list answers both.
+            n: j.state === 'running' ? '▶' : `#${j.op}`,
+            label: `${verb[j.kind] || j.kind}  ${j.total} 件`,
+            sub: j.stopping ? '止めています…'
+                : j.state === 'waiting' ? `待機中   ${j.dest || ''}` : (j.dest || ''),
+            op: j.op,
+        })), {
+            foot: 'x 中止（待機中なら取り消し）   b 動かしたまま閉じる   Esc 閉じる',
+            act: {
+                x: async () => {
+                    const row = report.rows[report.at];
+                    if (!row) return;
+                    await ask('cancel', { op: row.op });
+                    say(`#${row.op} を中止しています`);
+                    closeReport();
+                },
+                // `b` puts it out of the way and leaves it running — the
+                // terminal build's word for it. Nothing is cancelled; the
+                // screen is. The bar goes with it, for the same reason.
+                b: () => {
+                    prog.hidden = true;
+                    drawProg();
+                    closeReport();
+                    say('操作は動いたままです（:queue で戻れます）');
+                },
             },
-            // `b` puts it out of the way and leaves it running — the terminal
-            // build's word for it. Nothing is cancelled; the screen is.
-            b: () => {
-                closeReport();
-                say('操作は動いたままです（:queue で戻れます）');
-            },
-        },
-    });
+        });
 }
 
 /// `@` — the macros in `macro.lua`.
@@ -5313,12 +5413,8 @@ async function cmdMarkGlob(glob, on) {
 async function cmdTo(what, dest) {
     const r = await ask(what, { pane: state.focus, dest });
     if (!r) return;
-    running = {
-        op: r.op, kind: r.kind,
-        verb: r.kind === 'move' ? '移動' : 'コピー',
-        total: r.count,
-    };
-    say(`${r.count} 件を ${r.dest} へ`);
+    beginOp(r, r.kind, r.kind === 'move' ? '移動' : 'コピー');
+    if (!r.queued) say(`${r.count} 件を ${r.dest} へ`);
 }
 
 /// `:vi` / `:vim` / `:nvim` — the file, in that editor, in a new shell tab.
@@ -6002,8 +6098,7 @@ for (const which of ['left', 'right']) {
         }
         const r = await ask('drop', { pane: which, paths });
         if (!r) return;
-        running = { op: r.op, kind: 'move', verb: '移動', total: r.count };
-        say(`移動中… 0 / ${r.count}`);
+        beginOp(r, 'move', '移動');
     });
 }
 
@@ -6019,14 +6114,27 @@ window.cian.onEvent(async (msg) => {
         case 'progress':
             if (!running || msg.op !== running.op) return;
             running.done = msg.done;
-            running.total = msg.total;
-            say(`${running.verb}中… ${msg.done} / ${msg.total}  ${base(msg.path)}`);
+            running.total = Math.max(msg.total, running.total);
+            running.bytes = msg.bytes ?? 0;
+            running.bytesTotal = msg.bytes_total ?? 0;
+            running.ms = msg.ms ?? 0;
+            running.path = msg.path || '';
+            prog.stalledAt = performance.now();
+            drawProg();
+            say(`${running.verb}中… ${msg.done} / ${running.total}  ${base(msg.path)}`);
             return;
 
         case 'done': {
-            if (!running || msg.op !== running.op) return;
+            if (!running || msg.op !== running.op) {
+                // A job cancelled while it was still in the queue: it never
+                // ran, so nothing here is tracking it, and it still has to be
+                // said — silence would read as "the cancel did not take".
+                if (msg.cancelled) say(`#${msg.op} を取り消しました`);
+                return;
+            }
             const verb = running.verb;
             running = null;
+            el.prog.hidden = true;
             // Awaited, because the listings speak too — and whichever of the
             // two says its piece last is the one that stays on screen.
             await reread();

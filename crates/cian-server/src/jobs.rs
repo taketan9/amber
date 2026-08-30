@@ -4,12 +4,21 @@
 //! answerable while it runs — the cursor still moves, the other pane still
 //! reads. So the call returns an operation number at once and the work goes to
 //! a thread, which reports against that number until it is finished.
+//!
+//! **One runs at a time, and the rest wait in line.** A second operation used
+//! to be refused outright ("実行中です") — but the answer to "I have started a
+//! long copy and now want to move something else" is not *no*, and the
+//! terminal build has said so since it grew `:queue`. The queue is the reason
+//! that key exists: a file manager copying ten thousand files should be able
+//! to say which ten thousand, and let you drop one without stopping the rest.
 
+use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
-use cian_core::ops::{self, Conflict, DeleteMode};
+use cian_core::ops::{self, Conflict, DeleteMode, OpReport};
+use cian_core::progress::{self, Ctl, Progress};
 
 use crate::undo::{Stack, Undo};
 use crate::wire::Out;
@@ -22,7 +31,7 @@ use crate::wire::Out;
 const REPORT_EVERY_MS: u128 = 80;
 
 /// What a running operation is doing, for the front end's benefit.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
     Copy,
     Move,
@@ -56,46 +65,61 @@ impl Plan {
     }
 }
 
-/// One operation, while it is happening.
-#[derive(Clone)]
+/// Everything an operation needs, before it has a thread of its own.
+struct Pending {
+    op: u64,
+    plan: Plan,
+    paths: Vec<PathBuf>,
+    dest: Option<PathBuf>,
+    out: Out,
+    undo: Stack,
+    redo: Stack,
+}
+
+impl Pending {
+    /// How many files, and where to — what `:queue` shows about a job that
+    /// has not started and so has no progress to report.
+    fn line(&self, state: &'static str) -> serde_json::Value {
+        serde_json::json!({
+            "op": self.op,
+            "kind": self.plan.kind.name(),
+            "total": self.paths.len(),
+            "dest": self.dest.as_ref().map(|p| p.display().to_string()),
+            "state": state,
+            "stopping": false,
+        })
+    }
+}
+
+/// The operation actually on a thread right now.
 struct Live {
     op: u64,
     kind: &'static str,
-    /// How many files it was given. Not how many are left: what a person
-    /// wants from a queue is "what did I start", and the progress line
-    /// already says how far it has got.
     total: usize,
     dest: Option<String>,
     cancel: Arc<AtomicBool>,
 }
 
+#[derive(Default)]
+struct Inner {
+    next: AtomicU64,
+    /// At most one. The terminal build runs one operation at a time — two
+    /// copies competing for the same disk finish no sooner together and make
+    /// the progress of each unreadable.
+    running: Mutex<Option<Live>>,
+    waiting: Mutex<VecDeque<Pending>>,
+}
+
 /// The operations in flight, so they can be numbered, listed and called off.
 #[derive(Default)]
 pub struct Jobs {
-    next: AtomicU64,
-    running: Arc<std::sync::Mutex<Vec<Live>>>,
-}
-
-/// Takes the job off the list however the worker ends — finished, cancelled,
-/// or by an early `return` from a branch someone adds later. A removal written
-/// at the end of the function is a removal one `return` away from not
-/// happening.
-struct LeaveOnDrop {
-    roll: Arc<std::sync::Mutex<Vec<Live>>>,
-    op: u64,
-}
-
-impl Drop for LeaveOnDrop {
-    fn drop(&mut self) {
-        if let Ok(mut v) = self.roll.lock() {
-            v.retain(|j| j.op != self.op);
-        }
-    }
+    inner: Arc<Inner>,
 }
 
 impl Jobs {
-    /// Start one. Returns the number it will report under, immediately —
-    /// before any file has been touched.
+    /// Start one, or put it in line. Returns the number it will report under
+    /// — immediately, before any file has been touched — and how many jobs
+    /// are waiting ahead of it (`0` means it started).
     pub fn start(
         &self,
         plan: Plan,
@@ -104,147 +128,297 @@ impl Jobs {
         out: Out,
         undo: Stack,
         redo: Stack,
-    ) -> u64 {
-        let Plan { kind, conflict, delete } = plan;
-        let op = self.next.fetch_add(1, Ordering::Relaxed) + 1;
-        let cancel = Arc::new(AtomicBool::new(false));
-        self.running.lock().unwrap().push(Live {
-            op,
-            kind: kind.name(),
-            total: paths.len(),
-            dest: dest.as_ref().map(|p| p.display().to_string()),
-            cancel: Arc::clone(&cancel),
-        });
-
-        // The list is what `:queue` shows, so a job has to leave it when it
-        // is over. Nothing removed them before, which was invisible while the
-        // only use was `cancel` — setting a flag nobody reads costs nothing —
-        // and would have made the queue a list of everything ever run.
-        let roll = Arc::clone(&self.running_handle());
-        std::thread::spawn(move || {
-            // Named with an underscore because it is held for its `Drop`, not
-            // for anything read from it.
-            let _leave = LeaveOnDrop { roll, op };
-            let total = paths.len();
-            out.event(
-                "started",
-                serde_json::json!({ "op": op, "kind": kind.name(), "total": total }),
-            );
-
-            let mut ok = 0usize;
-            let mut skipped = 0usize;
-            // Where each moved thing ended up, and where it came from. Only a
-            // move records this: a copy is not undone (undoing one deletes
-            // files that now exist) and a delete went to the trash, which has
-            // its own way back.
-            let mut moved: Vec<(PathBuf, PathBuf)> = Vec::new();
-            let mut errors: Vec<String> = Vec::new();
-            let mut last = std::time::Instant::now();
-            let began = std::time::Instant::now();
-
-            // One at a time rather than through `copy_many`, which cannot say
-            // where it has got to. The per-file calls are the same ones it
-            // makes; what is added here is the counting and the way out.
-            for (done, path) in paths.iter().enumerate() {
-                if cancel.load(Ordering::Relaxed) {
-                    out.event(
-                        "done",
-                        serde_json::json!({
-                            "op": op, "ok": ok, "skipped": skipped,
-                            "errors": errors, "cancelled": true,
-                        }),
-                    );
-                    return;
-                }
-                let result = match (kind, dest.as_ref()) {
-                    // The caller's answer, not a constant. Skip is the plain
-                    // yes — it used to be Overwrite here while the terminal
-                    // build's Enter meant skip, so the same keystroke clobbered
-                    // in one front end and preserved in the other.
-                    (Kind::Copy, Some(d)) => ops::copy_one(path, d, conflict),
-                    (Kind::Move, Some(d)) => ops::move_one(path, d, conflict),
-                    (Kind::Delete, _) => ops::delete_one(path, delete).map(|()| true),
-                    // A copy or move with nowhere to go. Caught before starting,
-                    // so this is only here to make the match total.
-                    _ => Err(anyhow::anyhow!("no destination")),
-                };
-                match result {
-                    Ok(true) => {
-                        ok += 1;
-                        if let (Kind::Move, Some(d)) = (kind, dest.as_ref()) {
-                            if let Some(name) = path.file_name() {
-                                moved.push((d.join(name), path.clone()));
-                            }
-                        }
-                    }
-                    Ok(false) => skipped += 1,
-                    Err(e) => errors.push(format!("{}: {}", path.display(), e)),
-                }
-                // Throttled, and always truthful about which file it is on.
-                if last.elapsed().as_millis() >= REPORT_EVERY_MS {
-                    last = std::time::Instant::now();
-                    out.event(
-                        "progress",
-                        serde_json::json!({
-                            "op": op, "done": done + 1, "total": total,
-                            "path": path.display().to_string(),
-                        }),
-                    );
-                }
-            }
-            if !moved.is_empty() {
-                crate::did_step(&undo, &redo, Undo::Moved { pairs: moved });
-            }
-            out.event(
-                "done",
-                serde_json::json!({
-                    "op": op, "ok": ok, "skipped": skipped,
-                    "errors": errors, "cancelled": false,
-                    // How long it took, so the front end can say so and so
-                    // that "no progress was reported" can be told apart from
-                    // "it was over before there was anything to report".
-                    "ms": began.elapsed().as_millis() as u64,
-                }),
-            );
-        });
-        op
+    ) -> (u64, usize) {
+        let op = self.inner.next.fetch_add(1, Ordering::Relaxed) + 1;
+        let job = Pending { op, plan, paths, dest, out, undo, redo };
+        // The two locks are never held at once, here or anywhere below.
+        let busy = self.inner.running.lock().unwrap().is_some();
+        if busy {
+            let mut waiting = self.inner.waiting.lock().unwrap();
+            waiting.push_back(job);
+            return (op, waiting.len());
+        }
+        run(Arc::clone(&self.inner), job);
+        (op, 0)
     }
 
-    /// Ask an operation to stop. It stops between files, never inside one —
-    /// a half-copied file is worse than a slow cancel.
-    fn running_handle(&self) -> Arc<std::sync::Mutex<Vec<Live>>> {
-        Arc::clone(&self.running)
-    }
-
-    /// What is running, for `:queue`.
-    ///
-    /// A file manager that is copying ten thousand files should be able to say
-    /// which ten thousand, and let you stop one without stopping the others.
+    /// The line, runner first — for `:queue`.
     pub fn listing(&self) -> Vec<serde_json::Value> {
-        self.running
-            .lock()
-            .unwrap()
-            .iter()
-            .map(|j| {
-                serde_json::json!({
-                    "op": j.op,
-                    "kind": j.kind,
-                    "total": j.total,
-                    "dest": j.dest,
-                    "stopping": j.cancel.load(Ordering::Relaxed),
-                })
-            })
-            .collect()
+        let mut rows = Vec::new();
+        if let Some(j) = self.inner.running.lock().unwrap().as_ref() {
+            rows.push(serde_json::json!({
+                "op": j.op,
+                "kind": j.kind,
+                "total": j.total,
+                "dest": j.dest,
+                "state": "running",
+                "stopping": j.cancel.load(Ordering::Relaxed),
+            }));
+        }
+        rows.extend(self.inner.waiting.lock().unwrap().iter().map(|j| j.line("waiting")));
+        rows
     }
 
+    /// Ask an operation to stop, or take it out of the line before it starts.
+    ///
+    /// A running one stops between files, never inside one — a half-copied
+    /// file is worse than a slow cancel. A waiting one simply never happens,
+    /// and says so, so nothing is left watching for a job that will not run.
     pub fn cancel(&self, op: u64) -> bool {
-        let running = self.running.lock().unwrap();
-        match running.iter().find(|j| j.op == op) {
-            Some(j) => {
+        if let Some(j) = self.inner.running.lock().unwrap().as_ref() {
+            if j.op == op {
                 j.cancel.store(true, Ordering::Relaxed);
+                return true;
+            }
+        }
+        let dropped = {
+            let mut waiting = self.inner.waiting.lock().unwrap();
+            match waiting.iter().position(|j| j.op == op) {
+                Some(at) => waiting.remove(at),
+                None => None,
+            }
+        };
+        match dropped {
+            Some(j) => {
+                j.out.event(
+                    "done",
+                    serde_json::json!({
+                        "op": op, "ok": 0, "skipped": 0,
+                        "errors": [], "cancelled": true, "ms": 0,
+                    }),
+                );
                 true
             }
             None => false,
         }
+    }
+}
+
+/// Put one job on a thread, and start the next when it is done.
+fn run(inner: Arc<Inner>, job: Pending) {
+    let cancel = Arc::new(AtomicBool::new(false));
+    *inner.running.lock().unwrap() = Some(Live {
+        op: job.op,
+        kind: job.plan.kind.name(),
+        total: job.paths.len(),
+        dest: job.dest.as_ref().map(|p| p.display().to_string()),
+        cancel: Arc::clone(&cancel),
+    });
+
+    std::thread::spawn(move || {
+        let Pending { op, plan, paths, dest, out, undo, redo } = job;
+        let total = paths.len();
+        out.event(
+            "started",
+            serde_json::json!({ "op": op, "kind": plan.kind.name(), "total": total }),
+        );
+        let began = std::time::Instant::now();
+
+        // A move can be undone: each target ends up at dest/<name>, and undo
+        // moves it back. Derived before the work, as the terminal build does
+        // (actions.rs finish_transfer) — a copy is additive and is not
+        // tracked, and a delete went to the trash, which has its own way back.
+        let undo_step = match (plan.kind, dest.as_ref()) {
+            (Kind::Move, Some(d)) => Some(Undo::Moved {
+                pairs: paths
+                    .iter()
+                    .filter_map(|p| p.file_name().map(|n| (d.join(n), p.clone())))
+                    .collect(),
+            }),
+            _ => None,
+        };
+
+        // Rate-limited, and always truthful about which file it is on. The
+        // chunked copy calls back on every megabyte; forwarding all of that
+        // would repaint far more often than a screen can show.
+        let mut last = std::time::Instant::now() - std::time::Duration::from_secs(1);
+        let out_for_progress = out.clone();
+        let mut on_progress = |p: &Progress| {
+            if last.elapsed().as_millis() < REPORT_EVERY_MS {
+                return;
+            }
+            last = std::time::Instant::now();
+            out_for_progress.event(
+                "progress",
+                serde_json::json!({
+                    "op": op,
+                    "done": p.files_done,
+                    "total": p.files_total.max(total),
+                    "bytes": p.bytes_done,
+                    "bytes_total": p.bytes_total,
+                    "path": p.current,
+                    "ms": began.elapsed().as_millis() as u64,
+                }),
+            );
+        };
+        let mut ctl = Ctl { cancel: &cancel, on_progress: &mut on_progress };
+
+        // Through cian-core, which counts bytes as it goes. It was a loop of
+        // `copy_one` here — the per-file calls that cannot say where inside a
+        // file they have got to, so a single four-gigabyte file showed "1 / 1"
+        // and then nothing for two minutes.
+        let report: OpReport = match (plan.kind, dest.as_ref()) {
+            (Kind::Copy, Some(d)) => progress::copy_many(&paths, d, plan.conflict, &mut ctl),
+            (Kind::Move, Some(d)) => progress::move_many(&paths, d, plan.conflict, &mut ctl),
+            (Kind::Delete, _) => ops::delete_many(&paths, plan.delete),
+            // A copy or move with nowhere to go. Caught before starting, so
+            // this is only here to make the match total.
+            _ => {
+                let mut r = OpReport::default();
+                r.note_error("no destination");
+                r
+            }
+        };
+
+        let stopped = cancel.load(Ordering::Relaxed);
+        if !stopped && report.ok > 0 {
+            if let Some(step) = undo_step {
+                crate::did_step(&undo, &redo, step);
+            }
+        }
+        out.event(
+            "done",
+            serde_json::json!({
+                "op": op,
+                "ok": report.ok,
+                "skipped": report.skipped,
+                "errors": report.errors,
+                "cancelled": stopped,
+                // How long it took, so the front end can say so and so that
+                // "no progress was reported" can be told apart from "it was
+                // over before there was anything to report".
+                "ms": began.elapsed().as_millis() as u64,
+            }),
+        );
+
+        // Out of the runner's seat before the next one takes it. Written here
+        // rather than in a `Drop` guard because the next job must not start
+        // while this thread still holds the lock.
+        *inner.running.lock().unwrap() = None;
+        let next = inner.waiting.lock().unwrap().pop_front();
+        if let Some(next) = next {
+            run(inner, next);
+        }
+    });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::wire::Line;
+    use std::sync::mpsc::Receiver;
+
+    /// A sandbox with one source file big enough that copying it cannot be
+    /// over before the next statement runs.
+    ///
+    /// Not a synchronisation primitive, and it does not pretend to be: the
+    /// two `start` calls are microseconds apart and this copy takes tens of
+    /// milliseconds anywhere, a margin of three orders of magnitude. What the
+    /// test actually guarantees is the end state — both jobs finish, and the
+    /// files land — which is what a lost or deadlocked queue would break.
+    fn sandbox(name: &str) -> (PathBuf, PathBuf, Vec<PathBuf>) {
+        let root = std::env::temp_dir().join(format!("cian-jobs-{}-{}", name, std::process::id()));
+        let from = root.join("from");
+        let to = root.join("to");
+        std::fs::create_dir_all(&from).unwrap();
+        std::fs::create_dir_all(&to).unwrap();
+        let big = vec![7u8; 48 * 1024 * 1024];
+        let mut paths = Vec::new();
+        for i in 0..2 {
+            let at = from.join(format!("big-{i}.bin"));
+            std::fs::write(&at, &big).unwrap();
+            paths.push(at);
+        }
+        (root, to, paths)
+    }
+
+    /// Every `done` event, in order, until `want` of them have arrived.
+    fn wait_done(rx: &Receiver<Line>, want: usize) -> Vec<serde_json::Value> {
+        let mut out = Vec::new();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        while out.len() < want && std::time::Instant::now() < deadline {
+            match rx.recv_timeout(std::time::Duration::from_secs(30)) {
+                Ok(line) => {
+                    let v: serde_json::Value = serde_json::from_str(&line).unwrap();
+                    if v["event"] == "done" {
+                        out.push(v);
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn a_second_operation_waits_its_turn_and_then_runs() {
+        // The failure this pins: the front end used to be told 実行中です and
+        // the second operation simply did not happen. Starting one while
+        // another runs must queue it — and the queue must actually drain.
+        let (root, to, paths) = sandbox("queue");
+        let (out, rx) = Out::piped();
+        let (undo, redo) = (Stack::default(), Stack::default());
+        let jobs = Jobs::default();
+
+        let (first, ahead) = jobs.start(
+            Plan::of(Kind::Copy), paths.clone(), Some(to.clone()),
+            out.clone(), undo.clone(), redo.clone(),
+        );
+        assert_eq!(ahead, 0, "the first one starts");
+        let second_dest = root.join("to2");
+        std::fs::create_dir_all(&second_dest).unwrap();
+        let (second, ahead) = jobs.start(
+            Plan::of(Kind::Copy), paths.clone(), Some(second_dest.clone()),
+            out.clone(), undo, redo,
+        );
+        assert_eq!(ahead, 1, "the second one waits rather than being refused");
+
+        // And says so while it waits: one running, one queued behind it.
+        let listing = jobs.listing();
+        assert_eq!(listing.len(), 2);
+        assert_eq!(listing[0]["state"], "running");
+        assert_eq!(listing[1]["state"], "waiting");
+        assert_eq!(listing[1]["op"], second);
+
+        let dones = wait_done(&rx, 2);
+        assert_eq!(dones.len(), 2, "both finished");
+        assert_eq!(dones[0]["op"], first);
+        assert_eq!(dones[1]["op"], second);
+        for d in &dones {
+            assert_eq!(d["ok"], 2);
+            assert_eq!(d["cancelled"], false);
+        }
+        // The queue emptied itself; nothing is left holding the seat.
+        assert!(jobs.listing().is_empty());
+        assert!(second_dest.join("big-0.bin").exists(), "the queued copy really ran");
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn cancelling_a_waiting_job_takes_it_out_of_the_line() {
+        // A job dropped before it starts still has to say `done`, or the
+        // front end waits for ever for something that will never run.
+        let (root, to, paths) = sandbox("cancel");
+        let (out, rx) = Out::piped();
+        let (undo, redo) = (Stack::default(), Stack::default());
+        let jobs = Jobs::default();
+
+        jobs.start(
+            Plan::of(Kind::Copy), paths.clone(), Some(to.clone()),
+            out.clone(), undo.clone(), redo.clone(),
+        );
+        let never = root.join("never");
+        std::fs::create_dir_all(&never).unwrap();
+        let (second, _) = jobs.start(
+            Plan::of(Kind::Copy), paths.clone(), Some(never.clone()),
+            out.clone(), undo, redo,
+        );
+        assert!(jobs.cancel(second), "a waiting job can be called off");
+
+        let dones = wait_done(&rx, 2);
+        let called_off = dones.iter().find(|d| d["op"] == second).expect("it said done");
+        assert_eq!(called_off["cancelled"], true);
+        assert!(!never.join("big-0.bin").exists(), "and never ran");
+        std::fs::remove_dir_all(&root).ok();
     }
 }

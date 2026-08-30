@@ -696,12 +696,12 @@ impl Session {
                     _ => cian_core::ops::DeleteMode::Trash,
                 };
                 let count = paths.len();
-                let op = self.jobs.start(
+                let (op, queued) = self.jobs.start(
                     jobs::Plan { kind, conflict, delete: mode },
                     paths, dest, self.out.clone(),
                     self.undo.clone(), self.redo.clone(),
                 );
-                Ok(serde_json::json!({ "op": op, "count": count }))
+                Ok(serde_json::json!({ "op": op, "count": count, "queued": queued }))
             }
             // Hold the selection for a later paste, and drop it somewhere
             // else. `c`/`m` go straight to the other pane; this is the other
@@ -747,7 +747,7 @@ impl Session {
                 let count = paths.len();
                 // Skip, as the terminal build's paste does: what is already
                 // there survives, and pasting again is cheap.
-                let job = self.jobs.start(
+                let (job, queued) = self.jobs.start(
                     jobs::Plan::of(kind), paths, Some(dest), self.out.clone(),
                     self.undo.clone(), self.redo.clone(),
                 );
@@ -755,6 +755,7 @@ impl Session {
                 // way, and only the register knew whether that meant a copy.
                 Ok(serde_json::json!({
                     "op": job,
+                    "queued": queued,
                     "count": count,
                     "kind": if matches!(kind, Kind::Move) { "move" } else { "copy" },
                 }))
@@ -1696,11 +1697,11 @@ impl Session {
                 }
                 let dest = self.pane_mut(&which)?.cwd.clone();
                 let count = paths.len();
-                let op = self.jobs.start(
+                let (op, queued) = self.jobs.start(
                     jobs::Plan::of(Kind::Move), paths, Some(dest), self.out.clone(),
                     self.undo.clone(), self.redo.clone(),
                 );
-                Ok(serde_json::json!({ "op": op, "count": count }))
+                Ok(serde_json::json!({ "op": op, "count": count, "queued": queued }))
             }
             // ---- Line operations on the open file ----
             //
@@ -2592,12 +2593,12 @@ impl Session {
                 }
                 let kind = if req.method == "copyto" { Kind::Copy } else { Kind::Move };
                 let count = paths.len();
-                let op = self.jobs.start(
+                let (op, queued) = self.jobs.start(
                     jobs::Plan::of(kind), paths, Some(dest.clone()), self.out.clone(),
                     self.undo.clone(), self.redo.clone(),
                 );
                 Ok(serde_json::json!({
-                    "op": op, "count": count,
+                    "op": op, "count": count, "queued": queued,
                     "kind": if matches!(kind, Kind::Move) { "move" } else { "copy" },
                     "dest": dest.display().to_string(),
                 }))

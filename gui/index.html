@@ -445,7 +445,38 @@ html, body {
 .sgrid .cur { background: var(--accent); color: var(--on-accent); }
 .sgrid .inv { filter: invert(1); }
 #find { z-index: 20; }   /* over whatever it is searching */
+#prog { z-index: 25; }   /* over the listing it is changing, under the asking */
 #ask  { z-index: 30; }   /* always the top: it is the thing being answered */
+
+/* The progress sheet. Same furniture as the confirm — one dialog to know
+   rather than two — with a bar and a line of numbers in the body. */
+#prog {
+  position: fixed; inset: 0; display: flex;
+  align-items: center; justify-content: center;
+  background: var(--scrim);
+}
+#prog[hidden] { display: none; }
+#prog .sheet { min-width: 34rem; }
+/* Tighter than the listing behind it: this is four lines that belong
+   together, not rows to be scanned.
+
+   `white-space: normal` matters more than it looks. The shared `.body` keeps
+   whitespace, because the confirm sheet puts a list of filenames in it as one
+   `\n`-joined string — and that turned the newlines *between these elements
+   in the markup* into blank lines, spacing the bar out over 265px. Measured,
+   not guessed: nothing in the box model accounted for it. */
+#prog .sheet .body { line-height: 1.6; white-space: normal; }
+/* Shortened in JS, in the middle — the terminal build's `truncate_middle`.
+   It was `direction: rtl` for a while, which clips the head in the right
+   place and then reorders the punctuation: a path came out starting with
+   `private/` and ending in a stray `/` that belonged at the front. */
+#p-now { color: var(--dim); overflow: hidden; white-space: nowrap; }
+#prog .bar {
+  height: 8px; margin: .7em 0 .4em; border-radius: 4px;
+  background: var(--accent-dim); overflow: hidden;
+}
+#p-fill { height: 100%; width: 0; background: var(--accent); transition: width .12s linear; }
+#p-num { color: var(--dim); font-variant-numeric: tabular-nums; }
 
 #ask {
   position: fixed; inset: 0; display: flex;
@@ -670,7 +701,15 @@ html, body {
   height: var(--cell-h); padding: 0 6px;
   white-space: nowrap; overflow: hidden;
 }
-.hit .p { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; direction: rtl; text-align: left; }
+/* Clipped at the head, because the tail of a path is the part that says
+   which file. `direction: rtl` is what puts the ellipsis on that side — and
+   on its own it also *reorders* the string, walking a trailing `)` or `/`
+   round to the front. `unicode-bidi: plaintext` keeps the run in its own
+   (left-to-right) order inside the right-to-left box. */
+.hit .p {
+  flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis;
+  direction: rtl; text-align: left; unicode-bidi: plaintext;
+}
 .hit span + span { flex: 0 0 auto; color: var(--dim); }
 /* Help puts the keys in a fixed column so they line up down the page, and
    lets the description take whatever is left. The keys are the thing being
@@ -732,6 +771,22 @@ html, body {
        them rather than instead of them. -->
   <div id="status">
     <span id="st-badge"></span><span id="st-chips"></span><span id="st-msg"></span><span id="st-shell"></span>
+  </div>
+
+  <!-- What a long operation is doing. The terminal build puts a bar on the
+       screen for exactly as long as the work takes, and `b` sets it going in
+       the background rather than cancelling it — the status chip carries on
+       from there. -->
+  <div id="prog" hidden>
+    <div class="sheet">
+      <div class="head" id="p-head"></div>
+      <div class="body">
+        <div id="p-now"></div>
+        <div class="bar"><div id="p-fill"></div></div>
+        <div id="p-num"></div>
+      </div>
+      <div class="foot" id="p-foot">Esc = 中止   b = バックグラウンドへ</div>
+    </div>
   </div>
 
   <!-- The confirm. cian's spine is that nothing is lost by a slip, so every

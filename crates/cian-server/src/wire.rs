@@ -73,4 +73,15 @@ impl Out {
         m["event"] = serde_json::Value::String(name.to_string());
         self.send(m);
     }
+
+    /// An `Out` a test can read back, instead of one that writes to stdout.
+    ///
+    /// The events *are* the interface for anything long-running — a queued
+    /// job that never says "done" is a front end waiting for ever — so a test
+    /// of that has to be able to hear them.
+    #[cfg(test)]
+    pub fn piped() -> (Out, Receiver<Line>) {
+        let (tx, rx) = channel();
+        (Out(tx), rx)
+    }
 }
