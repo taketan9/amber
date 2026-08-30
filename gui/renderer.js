@@ -1181,6 +1181,119 @@ document.addEventListener('input', (e) => {
     if (finder.open && e.target === el.findQ) rankNow();
 });
 
+/// The 49 action names `cian.set_keymap` accepts, each pointing at what this
+/// build already does for that key.
+///
+/// The terminal build resolves the same names out of the same init.lua; a
+/// binding that worked in one and not the other would be two programs wearing
+/// one name. `unbind` is the one that does nothing on purpose — it exists so
+/// a key can be made to shadow its own default.
+const ACTIONS = {
+    cursor_down: () => move(1),
+    cursor_up: () => move(-1),
+    cursor_top: () => jumpTo(0),
+    cursor_bottom: () => jumpTo(state[state.focus].entries.length - 1),
+    page_up: () => move(-20),
+    page_down: () => move(20),
+    parent: () => parent(),
+    enter: () => enter(),
+    quit: () => cmdQuit(),
+    search: () => searchHere(),
+    search_next: () => hopHere(1),
+    search_prev: () => hopHere(-1),
+    history: () => cmdHistory(),
+    shortcuts: () => cmdShortcuts(),
+    copy: () => operate('copy'),
+    move: () => operate('move'),
+    paste: () => paste(),
+    cut: () => hold('cut'),
+    delete: () => operate('delete'),
+    rename: () => rename(),
+    new_file: () => create(false),
+    new_dir: () => create(true),
+    open_other: () => openOut(),
+    open_other_tab: () => tabNew(),
+    sync_from_other: () => syncPane(true),
+    sync_to_other: () => syncPane(false),
+    // One function, because Ctrl+Enter is one key with two answers here: a
+    // folder to the other pane, a file to your own application. Both names
+    // land on it, and which half happens is decided by what is under the
+    // cursor — as it is in the terminal build.
+    open_external: () => openOut(),
+    copy_path: () => copyPaths(),
+    copy_file_ref: () => clipFiles(),
+    mark_down: () => mark(false),
+    mark_up: () => mark(false, -1),
+    invert_marks: () => invert(),
+    select_all: () => mark(true),
+    visual: () => startVisual(),
+    command: () => commandLine(),
+    filter: () => startFilter(),
+    find_recursive: () => runCommand(findCommand('find'), ''),
+    grep_recursive: () => runCommand(findCommand('grep'), ''),
+    sort: () => openMenu(SORT_MENU),
+    jump_path: () => goToPath(),
+    view: () => lookInsideAll(),
+    diff: () => cmdCompare(),
+    refresh: () => reread(),
+    menu: () => openMenu(CONTEXT),
+    ssh: () => cmdSshPicker(),
+    new_tab: () => tabNew(),
+    close_tab: () => tabClose(),
+    manual: () => openHelp(),
+    unbind: () => {},
+};
+
+/// What init.lua bound, keyed the way a keydown arrives: "ctrl+alt+x".
+const bound = new Map();
+
+/// `cian.set_keymap("alt+g", …)` → the string a keydown makes.
+///
+/// The terminal build's own spec parser, in the terminal build's order:
+/// modifiers before the key, `shift` folded into an upper-case letter rather
+/// than carried as a flag — because that is what a terminal actually
+/// delivers, and a window that disagreed would need its own documentation.
+function keySpec(spec) {
+    const parts = String(spec).trim().split('+');
+    let key = parts.pop();
+    if (!key || [...key].length !== 1) return null;
+    let ctrl = false;
+    let alt = false;
+    for (const m of parts) {
+        const w = m.trim().toLowerCase();
+        if (w === 'ctrl' || w === 'control' || w === 'c') ctrl = true;
+        else if (w === 'alt' || w === 'opt' || w === 'option' || w === 'meta' || w === 'm') alt = true;
+        else if (w === 'shift' || w === 's') key = key.toUpperCase();
+        else return null;
+    }
+    return (ctrl ? 'ctrl+' : '') + (alt ? 'alt+' : '') + key;
+}
+
+function pressSpec(e) {
+    return (e.ctrlKey || e.metaKey ? 'ctrl+' : '') + (e.altKey ? 'alt+' : '') + e.key;
+}
+
+/// Take what init.lua bound. Names that are not actions and keys that are not
+/// keys are said out loud — a binding that silently does nothing is worse than
+/// no binding, because the person goes looking in the wrong place.
+function applyKeymaps(list) {
+    bound.clear();
+    const bad = [];
+    for (const { key, action } of list || []) {
+        const spec = keySpec(key);
+        if (!spec) { bad.push(`${key}（キーとして読めません）`); continue; }
+        if (!ACTIONS[action]) { bad.push(`${action}（そんな動作はありません）`); continue; }
+        bound.set(spec, action);
+    }
+    keymapErrors = bad;
+}
+
+/// What was wrong with the bindings, held until the opening line is out of
+/// the way. A config error that scrolls past in 200ms is a config error
+/// nobody sees, and a binding that silently does nothing sends the person
+/// looking in the wrong place.
+let keymapErrors = [];
+
 document.addEventListener('keydown', (e) => {
     if (keyEcho.on) {
         // Swallowed, not just reported. The point of this mode is to try the
@@ -1201,6 +1314,16 @@ document.addEventListener('keydown', (e) => {
     // way past — it cannot, or its own bindings never fire — so the listing's
     // keys have to decline for themselves.
     if (viewer.on) return;
+    // What init.lua bound comes before what cian ships: rebinding a key is
+    // saying "not the default", and a default that still fired would make the
+    // binding a suggestion.
+    const mine = bound.get(pressSpec(e));
+    if (mine) {
+        e.preventDefault();
+        e.stopPropagation();
+        ACTIONS[mine]();
+        return;
+    }
     // cian's own keys first; anything not claimed here is left to Chromium,
     // which is what makes Ctrl+C and friends work without being written out.
     const k = e.key;
@@ -5107,11 +5230,19 @@ async function recall() {
         if (px >= FONT.min && px <= FONT.max) setFont(px, false);
     }
     if (s.view && VIEWS.includes(s.view)) setView(s.view, false);
+    applyKeymaps(s.keymaps);
+    // Lua's own complaints go in the same queue as mine — from where the
+    // person stands they are one thing: "my config did not take".
+    keymapErrors = [...(s.config_errors || []), ...keymapErrors];
 }
 
 recall();
 
 refresh().then(() => {
+    if (keymapErrors.length) {
+        say(`init.lua の keymap: ${keymapErrors.join('  /  ')}`, true);
+        return;
+    }
     // Said once, on the status line, where it costs nothing and answers the
     // only question this milestone exists to answer.
     const face = resolvedFace();

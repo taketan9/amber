@@ -522,7 +522,13 @@ fn escape_hint(err: &str) -> Vec<String> {
 
 pub fn load() -> Config {
     match config_path() {
-        Some(p) if p.exists() => {
+        // init.lua itself may be absent while a split file is not: somebody
+        // who only wanted key bindings writes keymap.lua and nothing else, and
+        // somebody tidying up deletes an init.lua that had become empty. Both
+        // used to lose their config in silence. `load_from` filters the split
+        // files for existence and reports a missing init.lua as nothing at
+        // all, so the path can be handed over either way.
+        Some(p) if p.exists() || split_config_exists(&p) => {
             let mut c = load_from(&p);
             // Only worth saying if a config actually holds a secret — and the
             // secret may live in ssh.lua now rather than init.lua, so check both.
@@ -572,6 +578,12 @@ fn permission_warning(_path: &Path) -> Vec<String> {
 /// `cian.set_keymap(…)` in `keymap.lua` accumulate into the same config.
 pub const SPLIT_CONFIG_FILES: [&str; 2] = ["ssh.lua", "keymap.lua"];
 
+/// Is there a `ssh.lua` or `keymap.lua` beside this (possibly absent)
+/// `init.lua`?
+fn split_config_exists(init: &Path) -> bool {
+    init.parent().is_some_and(|dir| SPLIT_CONFIG_FILES.iter().any(|n| dir.join(n).exists()))
+}
+
 fn load_from(path: &Path) -> Config {
     let lua = Lua::new();
     let builder = Rc::new(RefCell::new(Builder::default()));
@@ -586,7 +598,10 @@ fn load_from(path: &Path) -> Config {
     let mut errors = Vec::new();
     // init.lua first, then any split-out files in the same directory, all sharing
     // one Lua context so their cian.* calls build one config.
-    let mut files = vec![path.to_path_buf()];
+    let mut files = Vec::new();
+    if path.exists() {
+        files.push(path.to_path_buf());
+    }
     if let Some(dir) = path.parent() {
         files.extend(SPLIT_CONFIG_FILES.iter().map(|n| dir.join(n)).filter(|p| p.exists()));
     }
@@ -1494,5 +1509,30 @@ ls]] },
     fn unrelated_errors_get_no_hint() {
         assert!(escape_hint("attempt to call a nil value").is_empty());
         assert!(escape_hint(r#"set_option: unknown option "nope""#).is_empty());
+    }
+}
+
+#[cfg(test)]
+mod split_config_alone_tests {
+    use super::*;
+
+    #[test]
+    fn keymap_lua_is_read_without_an_init_lua() {
+        // Somebody who only wants key bindings writes keymap.lua and nothing
+        // else. It used to be read only when init.lua existed beside it, so
+        // that person's bindings vanished without a word.
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("keymap.lua"),
+            "cian.set_keymap(\"x\", \"delete\")\n",
+        )
+        .unwrap();
+        let cfg = load_from(&dir.path().join("init.lua"));
+        assert!(
+            cfg.keymaps.iter().any(|(k, a)| k == "x" && a == "delete"),
+            "keymap.lua alone bound x → delete: {:?}",
+            cfg.keymaps
+        );
+        assert!(cfg.errors.is_empty(), "a missing init.lua is not an error: {:?}", cfg.errors);
     }
 }

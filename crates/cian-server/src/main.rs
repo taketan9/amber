@@ -2142,7 +2142,11 @@ impl Session {
             // programs wearing one name. `init.lua` stays untouched: it is
             // written by hand and read as code, and a program that rewrote it
             // would be reformatting somebody's comments.
-            "settings" => Ok(serde_json::json!({
+            "settings" => {
+                // Read once: `load()` opens and parses the files, and asking
+                // it twice in one reply would be two answers to one question.
+                let cfg = cian_lua::load();
+                Ok(serde_json::json!({
                 "look": cian_lua::state_get("gui_look"),
                 "style": cian_lua::state_get("gui_editor"),
                 // Its own key, not `font_level`. That one is the terminal
@@ -2154,9 +2158,22 @@ impl Session {
                 "font": cian_lua::state_get("gui_font"),
                 "view": cian_lua::state_get("gui_view"),
                 "theme": cian_lua::state_get("theme"),
+                // The keys the person bound in init.lua. The terminal build
+                // reads the same list; a binding that works in one and not the
+                // other would be two programs wearing one name.
+                "keymaps": cfg.keymaps
+                    .iter()
+                    .map(|(spec, action)| serde_json::json!({ "key": spec, "action": action }))
+                    .collect::<Vec<_>>(),
+                // What Lua itself refused — a syntax error, a key spec it
+                // could not read. The terminal build shows these; without
+                // them a typo in init.lua is a setting that silently is not
+                // there, and the person goes looking in the wrong place.
+                "config_errors": cfg.errors,
                 "where": cian_lua::config_read_path("state.toml")
                     .map(|p| p.display().to_string()),
-            })),
+            }))
+            }
             "remember" => {
                 let key = req.params["key"].as_str().unwrap_or("");
                 let value = req.params["value"].as_str().unwrap_or("");
