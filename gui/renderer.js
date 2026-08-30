@@ -1555,6 +1555,7 @@ function contextRows() {
             { label: '反対ペインへ移動', value: 'm', run: () => operate('move') },
             { label: '行き先を指定してコピー', value: ':cp', run: () => commandLine('cp ') },
             { label: 'まとめてリネーム', value: ':renamelist', run: cmdRenameList },
+            { label: 'パターンでリネーム', value: ':renamepattern', run: cmdRenamePattern },
         ]));
         v.push(group('圧縮・展開 ▸', () => {
             const rows = [
@@ -1584,7 +1585,7 @@ function contextRows() {
         { label: '変更を破棄', value: ':discard', run: () => cmdVcs('discard') },
         { label: '差分', value: ':gitdiff', run: () => cmdVcsDiff(null) },
         { label: 'このファイルの履歴', value: ':filelog', run: () => cmdLog(true) },
-        { label: 'ブランチ', value: 'b', run: cmdBranch },
+        { label: 'リポジトリの履歴', value: ':log', run: () => cmdLog(false) },
     ]));
     v.push(group('svn ▸', () => [
         { label: '追加', value: ':svnadd', run: () => cmdSvn('stage') },
@@ -1701,6 +1702,13 @@ function runMenuRow(row, spec) {
     if (!spec.stay) closeMenu();
 }
 
+/// Up one level, or out. cian-tui's `menu_back()` — written once here now
+/// that the mouse wants it too (right-click inside a submenu).
+function menuBack() {
+    if (menuStack.length) openMenu(menuStack.pop());
+    else closeMenu();
+}
+
 function closeMenu() {
     menuStack.length = 0;
     menu.spec = null;
@@ -1723,10 +1731,46 @@ function drawMenu() {
             menu.at = i;
             runMenuRow(row, menu.spec);
         });
+        // The pointer moves the cursor, as it does in cian-tui (mouse.rs:609).
+        // Without it the highlight and the pointer disagree about which row
+        // a click is going to land on.
+        div.addEventListener('mouseenter', () => {
+            if (menu.at === i) return;
+            menu.at = i;
+            drawMenu();
+        });
+        // Right-click climbs one level, which is the mouse's Esc here.
+        div.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            menuBack();
+        });
         frag.append(div);
     });
     el.findHits.replaceChildren(frag);
 }
+
+// Clicking away from a sheet closes it. cian-tui works out whether the click
+// landed on the popup's ink and sends Esc when it did not (mouse.rs:966) —
+// here the sheet simply swallowed the click and stayed open, which is the one
+// thing every window in the world does differently.
+function dismissFind() {
+    if (menu.spec) closeMenu();
+    else if (finder.open) closeFinder();
+    else if (help.on) closeHelp();
+}
+
+// Written out rather than looped: a call through a destructured name is a
+// call the audit cannot follow to a definition, and a checker that shrugs at
+// one call shrugs at the next one too.
+el.find.addEventListener('mousedown', (e) => {
+    if (e.target !== e.currentTarget) return;   // the sheet itself, not its ink
+    dismissFind();
+});
+el.report.addEventListener('mousedown', (e) => {
+    if (e.target !== e.currentTarget) return;
+    closeReport(true);
+});
 
 document.addEventListener('keydown', (e) => {
     if (!menu.spec) return;
@@ -1737,7 +1781,7 @@ document.addEventListener('keydown', (e) => {
     if ((e.key === 'Escape' || e.key === 'ArrowLeft' || e.key === 'h') && menuStack.length) {
         // Up one level, not out. The terminal build's `Back` row, on the key
         // a vi user's hand is already on.
-        openMenu(menuStack.pop());
+        menuBack();
     }
     else if (e.key === 'Escape' || e.key === spec.key) closeMenu();
     else if (e.key === 'ArrowDown' || e.key === 'j') { menu.at = (menu.at + 1) % rows.length; drawMenu(); }
@@ -4958,6 +5002,20 @@ async function cmdVcsDiff(hash) {
 }
 
 async function cmdVcs(what) {
+    // Discarding is the one of the three that loses work, and it was the one
+    // that did not ask. cian-tui raises ConfirmDiscard for it.
+    if (what === 'discard') {
+        const pane = state[state.focus];
+        const rows = pane.entries.filter((x) => !x.parent && x.marked);
+        const here = pane.entries[pane.cursor];
+        const targets = rows.length ? rows : (here && !here.parent ? [here] : []);
+        if (!targets.length) { say('対象がありません'); return; }
+        const ok = await confirm(
+            `${targets.length} 件の変更を破棄`,
+            `${targets.map((x) => x.name).join('\n')}\n\n元には戻せません`,
+        );
+        if (!ok) { say('やめました'); return; }
+    }
     const r = await ask(what, { pane: state.focus });
     if (!r) return;
     state[state.focus] = r.pane;
@@ -6195,10 +6253,18 @@ async function cmdSnippets() {
         sub: x.cmd,
         cmd: x.cmd,
         enter: x.enter,
+        confirm: x.confirm,
     })), {
         foot: 'Enter シェルへ送る   Esc 閉じる',
         pick: async (row) => {
             closeReport();
+            // `confirm = true` in init.lua means "ask me before you send
+            // this one" — it is put there for the snippets that do something.
+            // The flag was being ignored, which made it a lie in the config.
+            if (row.confirm && !await confirm(`${row.label} を実行`, row.cmd)) {
+                say('やめました');
+                return;
+            }
             if (!term.on) await openShell();
             await ask('shellinput', { text: row.cmd + (row.enter ? '\n' : '') });
             setShellFocus(true);
@@ -6472,7 +6538,12 @@ document.addEventListener('keydown', (e) => {
     if (e.shiftKey && (e.key === 'PageUp' || e.key === 'PageDown')) {
         e.stopPropagation();
         e.preventDefault();
-        scrollShell(e.key === 'PageUp' ? -term.rows : term.rows);
+        // Positive goes *back* through the history (cian-pty `scroll_back`,
+        // and cian-tui passes `page` for PageUp). This had the sign the other
+        // way round, so Shift+PageUp asked to go forward from the live end —
+        // clamped at zero, a no-op. The panel's scrollback has never been
+        // reachable from this window.
+        scrollShell(e.key === 'PageUp' ? term.rows : -term.rows);
         return;
     }
     const bytes = shellBytes(e);
@@ -6500,7 +6571,14 @@ function escTwice() {
 
 async function scrollShell(lines) {
     const r = await ask('shellscroll', { lines });
-    if (r) takeShell(r);
+    if (!r) return;
+    takeShell(r);
+    // Where you are in the history, said as cian-tui says it — a panel
+    // showing old output with no sign that it is old is a panel you think
+    // has stopped.
+    const back = r.panes && r.panes.find((p) => p.focused);
+    const at = back && back.screen ? back.screen.scrollback : 0;
+    say(at ? `${at} 行さかのぼり中 — 何か入力すると戻ります` : '最新の出力');
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -6527,6 +6605,27 @@ for (const which of ['left', 'right']) {
         draw('left');
         draw('right');
     });
+    // The menu on the pane's own background, its path line, an empty listing —
+    // cian-tui opens it for a right-click anywhere in the pane (mouse.rs), and
+    // this had it only on a row with something under the pointer.
+    pane.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        setShellFocus(false);
+        state.focus = which;
+        draw('left');
+        draw('right');
+        openMenu(CONTEXT);
+    });
+    // The wheel takes the pane too. Two panes side by side and a wheel that
+    // scrolls whichever one the pointer is over, while the keys stay in the
+    // other, is two different answers to "where am I".
+    pane.addEventListener('wheel', () => {
+        if (state.focus === which && !(term.on && term.focused)) return;
+        setShellFocus(false);
+        state.focus = which;
+        draw('left');
+        draw('right');
+    }, { passive: true });
     pane.addEventListener('dragover', (e) => {
         e.preventDefault();
         e.dataTransfer.dropEffect = 'move';
@@ -6745,6 +6844,23 @@ async function recall() {
 /// window was dragged, and every full-screen program in it drew to the wrong
 /// rectangle. Debounced, because a drag is a hundred of these.
 let resizeTimer = null;
+
+// The wheel over the shell walks its scrollback, as it does in cian-tui
+// (mouse.rs) — the panel is `overflow: hidden`, so without this the gesture
+// did nothing at all and Shift+PageUp was the only way back.
+el.sPanes.addEventListener('wheel', (e) => {
+    if (!term.on) return;
+    e.preventDefault();
+    // Wheel up goes back, as it does in cian-tui (mouse.rs:754).
+    scrollShell(e.deltaY < 0 ? 3 : -3);
+}, { passive: false });
+
+// Right-click in the shell opens the shell's own menu — it opened nothing.
+el.sPanes.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    setShellFocus(true);
+    openMenu(CONTEXT);
+});
 
 el.gripPanes.addEventListener('mousedown', (e) => startGripDrag('panes', e));
 el.gripMain.addEventListener('mousedown', (e) => startGripDrag('main', e));

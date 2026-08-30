@@ -3636,7 +3636,12 @@ impl Session {
                 let cfg = cian_lua::load();
                 Ok(serde_json::json!({
                     "rows": cfg.snippets.iter().map(|sn| serde_json::json!({
+                        // `confirm` was read from init.lua and then dropped
+                        // here, so a snippet marked "ask me first" was sent
+                        // straight to the shell — the one flag whose whole
+                        // purpose is to stop that.
                         "name": sn.name, "cmd": sn.cmd, "enter": sn.enter,
+                        "confirm": sn.confirm,
                     })).collect::<Vec<_>>(),
                 }))
             }
