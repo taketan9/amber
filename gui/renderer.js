@@ -1816,6 +1816,7 @@ async function showFile(f) {
     viewer.name = f.name;
     viewer.dirty = false;
     viewer.on = true;
+    if (f.path) noteRecent(f.path, f.name);
     el.view.hidden = false;
 
     const text = f.lines.join('\n');
@@ -1960,6 +1961,7 @@ function drawViewFoot() {
 async function saveFile() {
     if (!viewer.ed) return false;
     if (pair.on) { await savePair(); return true; }
+    if (scratch.on) { return saveScratch(); }
     if (remoteMember.on) {
         say('サーバへ送っています…');
         const r = await ask('remotesave', { lines: viewer.ed.getValue().split(/\r?\n/) });
@@ -2014,6 +2016,7 @@ async function closeView(ask_first = true) {
     el.vRead.replaceChildren();
     member.on = false;
     remoteMember.on = false;
+    scratch.on = false;
     if (pair.ed) { pair.ed.dispose(); pair.ed = null; }
     pair.on = false;
     // Only when the door is being used, not when stepping between files.
@@ -2271,7 +2274,7 @@ async function openOut() {
 // ─────────────────────────────────────────────────────────────────────────
 const COMMANDS = [
     { name: 'count', about: 'ファイル数と行数を数える', run: cmdCount },
-    { name: 'du', about: '容量分析 — 何が大きいか', run: cmdDu },
+    { name: 'du', alias: ['diskusage'], about: '容量分析 — 何が大きいか', run: cmdDu },
     { name: 'attr', about: '属性を見る', run: cmdAttr },
     { name: 'chmod', about: 'モードを変える（例 :chmod 644）', arg: 'モード', run: cmdChmod },
     { name: 'readonly', about: '読み取り専用にする / 解除（既定 on）', run: cmdReadonly },
@@ -2285,44 +2288,65 @@ const COMMANDS = [
     { name: 'zip', about: 'マークを zip に（:zip -e でパスワード付き）', arg: '-e', optional: true, run: (a) => cmdCompress('zip', /-e/.test(a || '')) },
     { name: 'tar', about: 'マークを tar にまとめる', run: () => cmdCompress('tar') },
     { name: 'targz', about: 'マークを tar.gz にまとめる', run: () => cmdCompress('targz') },
-    { name: 'unzip', about: 'カーソルのアーカイブをここに展開', run: cmdExtract },
+    { name: 'unzip', alias: ['extract'], about: 'カーソルのアーカイブをここに展開', run: cmdExtract },
     { name: 'lsar', about: 'アーカイブの中身を見る', run: cmdArchiveList },
     { name: 'log', about: 'コミットログ（git / svn）', run: () => cmdLog(false) },
     { name: 'filelog', about: 'このファイルの履歴', run: () => cmdLog(true) },
     { name: 'gitdiff', about: '選択ファイルの差分（git / svn）', run: () => cmdVcsDiff(null) },
-    { name: 'stage', about: 'git add', run: () => cmdVcs('stage') },
-    { name: 'unstage', about: 'git reset', run: () => cmdVcs('unstage') },
-    { name: 'discard', about: '作業ツリーの変更を破棄', run: () => cmdVcs('discard') },
+    { name: 'stage', alias: ['add', 'svnadd'], about: 'git add', run: () => cmdVcs('stage') },
+    { name: 'unstage', alias: ['reset'], about: 'git reset', run: () => cmdVcs('unstage') },
+    { name: 'discard', alias: ['revert', 'svnrevert'], about: '作業ツリーの変更を破棄', run: () => cmdVcs('discard') },
     { name: 'dup', alias: ['duplicate', 'dedup'], about: '中身が同じファイルを探す', run: cmdDedup },
     { name: 'redo', about: 'u で取り消した操作をやり直す', run: redo },
+    { name: 'image', about: '画像の表示方式（窓では常に描画されます）', run: () => say('窓では画像は常に表示されます — F3 でどうぞ') },
     { name: 'view', alias: ['grid', 'icons', 'details', 'finder', 'classic'], about: '一覧の見せ方 — :view details | icons | classic', arg: 'details / icons / classic', optional: true, run: cmdView },
     { name: 'shell', about: 'シェルパネルを開く（Shift+J でも）', run: openShell },
-    { name: 'remote', about: 'このペインでサーバを開く（SFTP）', run: cmdConnect },
-    { name: 'ssh', about: '同じ（:remote の別名）', run: cmdConnect },
+    { name: 'remote', alias: ['sftp'], about: 'このペインでサーバを開く（SFTP）', run: cmdConnect },
+
+    { name: 'ssh', about: 'SSHピッカー（Shift+S でも）', run: cmdSshPicker },
+    { name: 'paste', about: '保持したファイルをここへ貼り付け（Ctrl+V / y でも）', run: paste },
     { name: 'local', about: 'サーバを閉じてローカルへ戻る', run: cmdDisconnect },
     { name: 'aicmd', about: 'AI: 説明からシェルコマンドを作る', arg: 'やりたいこと', run: cmdAiCmd },
-    { name: 'ailog', about: 'AI: 選択したログを診断する', run: cmdAiLog },
-    { name: 'ai', about: 'AI: 自由に訊く', arg: '訊きたいこと', run: cmdAiAsk },
-    { name: 'aidiff', about: 'AI: 表示中の差分を説明する', run: cmdAiDiff },
+    { name: 'ailog', alias: ['logtriage', 'triage'], about: 'AI: 選択したログを診断する', run: cmdAiLog },
+    { name: 'ai', alias: ['chat'], about: 'AI: 自由に訊く', arg: '訊きたいこと', run: cmdAiAsk },
+    { name: 'aidiff', alias: ['explain', 'explaindiff'], about: 'AI: 表示中の差分を説明する', run: cmdAiDiff },
     { name: 'office', about: 'Office 文書のクラウド側を開く', run: () => cmdOffice('office') },
     { name: 'officelink', about: 'クラウド側への .url を作る（メールに貼るのはこれ）', run: () => cmdOffice('officelink') },
     { name: 'reload', about: 'init.lua を読み直す', run: cmdReload },
     { name: 'key', about: '受け取ったキーをそのまま表示（もう一度で止める）', run: toggleKeyEcho },
     { name: 'bookmark', about: 'いまの場所を登録する', arg: '名前', optional: true, run: cmdBookmark },
     { name: 'macro', about: 'マクロを実行（@ でも）', run: cmdMacros },
-    { name: 'sync', about: 'シェル: 全ペインに同時入力（Ctrl+S でも）', run: cmdSync },
+    { name: 'sync', alias: ['broadcast'], about: 'シェル: 全ペインに同時入力（Ctrl+S でも）', run: cmdSync },
     { name: 'snip', alias: ['snippet'], about: '保存したコマンドをシェルへ（Ctrl+Shift+Enter でも）', run: cmdSnippets },
     { name: 'sessionlog', alias: ['log2'], about: 'シェルの写しをファイルに取る／止める', run: cmdShellLog },
     { name: 'zoom', about: 'シェルパネルを広げる／戻す（F12 でも）', run: zoomShell },
     { name: 'df', about: 'ディスクの空き容量', run: cmdDf },
     { name: 'wc', about: '行／単語／バイト数', run: cmdWc },
-    { name: 'where', about: 'cian が読み書きする設定ファイルの場所', run: cmdWhere },
+    { name: 'head', about: '先頭だけ見る（:head -n 20）', arg: '-n 数', optional: true, run: (a) => cmdPeek(a, false) },
+    { name: 'tail', about: '末尾だけ見る（:tail -n 20）', arg: '-n 数', optional: true, run: (a) => cmdPeek(a, true) },
+    { name: 'recent', alias: ['oldfiles'], about: '最近開いたファイル', run: cmdRecent },
+    { name: 'version', alias: ['about'], about: '版と居場所', run: cmdVersion },
+    { name: 'man', about: 'キー一覧（:help と同じ）', run: openHelp },
+    { name: 'goto', about: '入力したパスへ移動（:cd と同じ）', arg: 'パス', run: cmdCd },
+    { name: 'jump', about: '登録した場所と履歴へ飛ぶ（Z でも）', run: cmdJump },
+    { name: 'palette', about: 'コマンド一覧（C でも）', run: openPalette },
+    { name: 'selectall', alias: ['markall'], about: '全部マーク（Ctrl+A でも）', run: () => mark(true) },
+    { name: 'ren', alias: ['rename'], about: 'リネーム（r でも）', run: rename },
+    { name: 'untar', about: 'ここに展開（:unzip と同じ）', run: cmdExtract },
+    { name: 'gdiff', alias: ['svndiff'], about: '選択ファイルの差分（:gitdiff と同じ）', run: () => cmdVcsDiff(null) },
+    { name: 'step', about: 'ファイル数とステップ数（:count と同じ）', run: cmdCount },
+    { name: 'files', alias: ['finder'], about: 'この下のファイルをあいまい検索（// でも）', run: openFinder },
+    { name: 'where', alias: ['config'], about: 'cian が読み書きする設定ファイルの場所', run: cmdWhere },
     { name: 'mark', about: 'ワイルドカードでマーク（:mark *.rs）', arg: 'パターン', run: (a) => cmdMarkGlob(a, true) },
-    { name: 'unmark', about: 'ワイルドカードでマークを外す', arg: 'パターン', run: (a) => cmdMarkGlob(a, false) },
+    { name: 'unmark', alias: ['deselect'], about: 'ワイルドカードでマークを外す', arg: 'パターン', run: (a) => cmdMarkGlob(a, false) },
     { name: 'copyto', about: '指定した場所へコピー', arg: '行き先', run: (a) => cmdTo('copyto', a) },
     { name: 'moveto', about: '指定した場所へ移動', arg: '行き先', run: (a) => cmdTo('moveto', a) },
-    { name: 'edit', about: '外部エディタで開く（$EDITOR）', run: cmdEditExternal },
+    { name: 'edit', alias: ['e'], about: '外部エディタで開く（$EDITOR）', run: cmdEditExternal },
     { name: 'vi', alias: ['vim', 'nvim'], about: 'そのエディタを新しいシェルタブで開く', run: cmdEditorTab },
+    { name: 'editstyle', alias: ['notepad', 'vimkey'], about: 'エディタの流儀 — :editstyle vim / :notepad', arg: 'vim / notepad', optional: true, run: cmdEditStyle },
+    { name: 'scratch', alias: ['new'], about: '下書きを開く（:w で名前を付けて保存）', run: cmdScratch },
+    { name: 'limit', alias: ['speed', 'ratelimit'], about: '転送の速さの上限 — :limit 2m / 500k / off', arg: '2m / 500k / off', optional: true, run: cmdLimit },
+    { name: 'aicommit', alias: ['commitmsg'], about: 'AI: ステージ済みの差分からコミットメッセージを作る', run: cmdAiCommit },
     { name: 'stat', about: '属性（:attr と同じ）', run: cmdAttr },
     { name: 'blame', about: '各行を最後に変えた人（開いているファイル）', run: cmdBlame },
     { name: 'enc', about: '開いているファイルの文字コードを変えて読み直す', arg: 'utf8 / sjis / utf16le / utf16be', optional: true, run: cmdEncoding },
@@ -2332,25 +2356,25 @@ const COMMANDS = [
     { name: 'g', about: '一致した行を削除（:g/re/d）', arg: '正規表現', run: (a) => cmdLineFilter(a, false) },
     { name: 'v', about: '一致した行だけ残す（:v/re/d）', arg: '正規表現', run: (a) => cmdLineFilter(a, true) },
     { name: 'combine', about: '次の行を連結（:combine 3 で3行、:combine! は空白なし）', arg: '行数', optional: true, run: cmdCombine },
-    { name: 'theme', about: '配色を選ぶ（T のメニューにも）', arg: '名前', optional: true, run: cmdTheme },
+    { name: 'theme', alias: ['colorscheme', 'colourscheme'], about: '配色を選ぶ（T のメニューにも）', arg: '名前', optional: true, run: cmdTheme },
     { name: 'redraw', about: '画面を描き直す', run: () => { draw('left'); draw('right'); say('描き直しました'); } },
     { name: 'preview', about: 'カーソルのファイルを追って表示（もう一度で止める）', run: togglePreview },
-    { name: 'render', about: 'Markdown を組んで表示（Ctrl+E でも）', run: togglePreview2 },
+    { name: 'render', alias: ['source'], about: 'Markdown を組んで表示（Ctrl+E でも）', run: togglePreview2 },
     { name: 'queue', about: '実行中の操作を見る・止める', run: cmdQueue },
     { name: 'tab', about: '新しいタブ（t / F9 でも）', run: () => tabNew() },
     { name: 'tabclose', about: 'タブを閉じる（w / F10 でも）', run: () => tabClose() },
     // The short ones the terminal build has, spelled the same way. A person who
     // knows `:mkdir -p` should not have to find out that this one is different.
-    { name: 'mkdir', about: 'ディレクトリを作る（:mkdir -p a/b/c）', arg: '名前', run: cmdMkdir },
+    { name: 'mkdir', alias: ['md'], about: 'ディレクトリを作る（:mkdir -p a/b/c）', arg: '名前', run: cmdMkdir },
     { name: 'touch', about: 'ファイルを作る／時刻を更新', arg: '名前', run: cmdTouch },
-    { name: 'cp', about: 'コピー — 引数なしで反対ペインへ、:cp <行き先> でそこへ', arg: '行き先', optional: true, run: (a) => a ? cmdTo('copyto', a) : operate('copy') },
-    { name: 'mv', about: '移動 — 引数なしで反対ペインへ、:mv <行き先> でそこへ', arg: '行き先', optional: true, run: (a) => a ? cmdTo('moveto', a) : operate('move') },
-    { name: 'rm', about: '削除（ゴミ箱へ）', run: () => operate('delete') },
+    { name: 'cp', alias: ['copy'], about: 'コピー — 引数なしで反対ペインへ、:cp <行き先> でそこへ', arg: '行き先', optional: true, run: (a) => a ? cmdTo('copyto', a) : operate('copy') },
+    { name: 'mv', alias: ['move'], about: '移動 — 引数なしで反対ペインへ、:mv <行き先> でそこへ', arg: '行き先', optional: true, run: (a) => a ? cmdTo('moveto', a) : operate('move') },
+    { name: 'rm', alias: ['del', 'delete'], about: '削除（ゴミ箱へ）', run: () => operate('delete') },
     { name: 'pwd', about: 'いまの場所を表示してクリップボードへ', run: cmdPwd },
-    { name: 'ls', about: '読み直す（:ls -a で隠しファイル切替）', run: cmdLs },
-    { name: 'q', about: '閉じる（確認します）', run: cmdQuit },
+    { name: 'ls', alias: ['dir'], about: '読み直す（:ls -a で隠しファイル切替）', run: cmdLs },
+    { name: 'q', alias: ['quit'], about: '閉じる（確認します）', run: cmdQuit },
     { name: 'each', about: 'マーク各ファイルにコマンド — {} がパス', arg: 'コマンド', run: cmdEach },
-    { name: 'nobom', about: 'UTF-8 BOM を除去（UTF-16 は触らない）', run: cmdNoBom },
+    { name: 'nobom', alias: ['stripbom'], about: 'UTF-8 BOM を除去（UTF-16 は触らない）', run: cmdNoBom },
     { name: 'renamelist', about: '名前の一覧を編集してリネーム', run: cmdRenameList },
     { name: 'outline', about: '開いているファイルの見出し一覧', run: cmdOutline },
     { name: 'sort', about: '開いているファイルの行をソート', run: () => textOp('sort') },
@@ -2365,18 +2389,18 @@ const COMMANDS = [
     { name: 'crlf', about: '改行を CRLF にする', run: () => setEol('crlf') },
     { name: 'svnupdate', about: 'svn update', run: () => cmdSvn('update') },
     { name: 'svncommit', about: 'svn commit（メッセージを訊きます）', run: () => cmdSvn('commit') },
-    { name: 'svnresolve', about: 'svn resolve --accept working', run: () => cmdSvn('resolve') },
-    { name: 'visual', about: 'ビジュアル選択（v でも）', run: startVisual },
+    { name: 'svnresolve', alias: ['resolve'], about: 'svn resolve --accept working', run: () => cmdSvn('resolve') },
+    { name: 'visual', alias: ['select'], about: 'ビジュアル選択（v でも）', run: startVisual },
     { name: 'compare', about: '左右を比較（= でも）', run: cmdCompare },
     { name: 'back', about: 'ひとつ前のディレクトリへ', run: () => step('back') },
     { name: 'forward', about: 'ひとつ先のディレクトリへ', run: () => step('forward') },
     { name: 'history', about: 'このペインの履歴', run: cmdHistory },
     { name: 'cd', about: ':cd <パス> / :cd .. / :cd - / :cd ~', arg: 'パス', run: cmdCd },
     { name: 'hidden', about: '隠しファイルの表示切替', run: toggleHidden },
-    { name: 'refresh', about: '読み直す', run: reread },
+    { name: 'refresh', alias: ['rescan'], about: '読み直す', run: reread },
     { name: 'undo', about: '直前の操作を取り消す', run: undo },
-    { name: 'menu', about: 'トグルメニュー', run: () => openMenu(TOGGLES) },
-    { name: 'help', about: 'キー一覧', run: openHelp },
+    { name: 'menu', alias: ['toggle'], about: 'トグルメニュー', run: () => openMenu(TOGGLES) },
+    { name: 'help', alias: ['h'], about: 'キー一覧', run: openHelp },
 ];
 
 /// `:q` — with the question, as the terminal build asks it. A window's ✕
@@ -4135,6 +4159,47 @@ async function cmdDf() {
     ], { foot: 'Esc 閉じる' });
 }
 
+/// `:head` / `:tail` — the ends of the file, without opening it. What a
+/// log asks for first: the tail says what is happening, the head says when
+/// it started.
+async function cmdPeek(args, tail) {
+    const n = Number(((args || '').match(/-n\s*(\d+)/) || [, 10])[1]) || 10;
+    const r = await ask('peek', { pane: state.focus, n, tail });
+    if (!r) return;
+    show(`${tail ? 'tail' : 'head'} -n ${n}  ${r.name}`, `${r.rows.length} 行`,
+        r.rows.map((t, i2) => ({ n: String(tail ? '' : i2 + 1), label: t })),
+        { foot: 'Esc 閉じる' });
+}
+
+/// `:recent` — the files this session has opened, newest first.
+const recentFiles = [];
+
+function noteRecent(path, name) {
+    const at = recentFiles.findIndex((x) => x.path === path);
+    if (at >= 0) recentFiles.splice(at, 1);
+    recentFiles.unshift({ path, name });
+    if (recentFiles.length > 40) recentFiles.pop();
+}
+
+async function cmdRecent() {
+    if (!recentFiles.length) { say('まだ何も開いていません'); return; }
+    show('最近開いたファイル', `${recentFiles.length} 件`,
+        recentFiles.map((x) => ({ label: x.name, sub: x.path, path: x.path })),
+        {
+            foot: 'Enter そこへ   Esc 閉じる',
+            pick: (row) => { closeReport(); revealPath(row.path, false); },
+        });
+}
+
+async function cmdVersion() {
+    const w = await ask('where', {});
+    show('cian', 'GUI 1.1.0 — cian-core の上の窓', [
+        { label: '設定', sub: (w && w.config) || '(なし)' },
+        { label: '書き込み先', sub: (w && w.writes) || '(なし)' },
+        { label: 'エンジン', sub: 'cian-server（JSON lines / stdio）' },
+    ], { foot: 'Esc 閉じる' });
+}
+
 async function cmdWc() {
     const r = await ask('wc', { pane: state.focus });
     if (!r) return;
@@ -4207,6 +4272,88 @@ async function cmdEditorTab(_arg, invokedAs) {
     el.shell.classList.add('on');
     await ask('run', { pane: state.focus, line: `${editor} %f` });
     say(`${editor} で開きました（F10 でタブごと閉じる）`);
+}
+
+async function cmdEditStyle(arg, invokedAs) {
+    const want = (arg || (invokedAs === 'notepad' ? 'notepad' : '')).trim();
+    const at = STYLES.findIndex(([v]) => v === want);
+    if (at < 0) { say(':editstyle vim か :editstyle notepad', true); return; }
+    setStyle(at);
+    say(`エディタ: ${STYLES[at][1]}`);
+}
+
+/// `:scratch` — an empty buffer to think in. `:w` (or Ctrl+S) asks for a
+/// name and it becomes a real file where you stand; closing it unsaved
+/// costs nothing, which is the point of a scratchpad.
+async function cmdScratch() {
+    let monaco;
+    try {
+        monaco = await loadMonaco();
+    } catch (e) { say(e.message, true); return; }
+    if (viewer.on) await closeView(false);
+    viewer.on = true;
+    scratch.on = true;
+    viewer.name = '下書き';
+    el.view.hidden = false;
+    el.vBody.hidden = false;
+    el.vPic.hidden = true;
+    makeEditor(monaco, '', 'plaintext');
+    viewer.base = viewer.ed.getModel().getAlternativeVersionId();
+    viewer.dirty = false;
+    setStyle(style);
+    el.vName.textContent = '下書き';
+    el.vAbout.textContent = '保存されるまでどこにもありません';
+    el.vFoot.textContent = 'Ctrl+S 名前を付けて保存   ·   Esc ×3 捨てる';
+    viewer.ed.focus();
+}
+
+const scratch = { on: false };
+
+async function saveScratch() {
+    const name = await askFor('保存する名前', 'scratch.txt');
+    if (name === null || !name) return false;
+    const r = await ask('writefile', {
+        pane: state.focus, name,
+        text: viewer.ed.getValue() + '\n',
+    });
+    if (!r) return false;
+    scratch.on = false;
+    viewer.dirty = false;
+    await reread();
+    say(`${r.wrote} に保存しました`);
+    await closeView(false);
+    return true;
+}
+
+async function cmdLimit(spec) {
+    const r = await ask('limit', { spec });
+    if (!r) return;
+    say(r.bps ? `転送の上限: ${human(r.bps)}/s` : '転送の上限: なし');
+}
+
+/// `:aicommit` — the staged diff in, a Conventional Commits message out,
+/// **shown, not committed**. Enter commits with it; Esc walks away. The
+/// model drafts; the person signs.
+async function cmdAiCommit() {
+    const r = await ask('aicommit', { pane: state.focus });
+    if (!r) return;
+    say('コミットメッセージを作っています…');
+    aiWaiting = (answer) => {
+        const msg = answer.trim();
+        show('コミットメッセージ（案）', 'Enter でこのままコミット   Esc やめる',
+            msg.split('\n').map((t) => ({ label: t })), {
+                foot: 'Enter コミット   Esc やめる',
+                pick: async () => {
+                    closeReport();
+                    if (!await confirm('この文でコミットします', msg)) { say('やめました'); return; }
+                    const done = await ask('commit', { pane: state.focus, message: msg });
+                    if (!done) return;
+                    state[state.focus] = done.pane;
+                    draw(state.focus);
+                    say('コミットしました');
+                },
+            });
+    };
 }
 
 async function cmdEditExternal() {

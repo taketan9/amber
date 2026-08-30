@@ -207,6 +207,10 @@ struct Session {
     /// Held for a later paste. Independent of the system clipboard, and of
     /// which pane is focused — that is the point of it.
     clip: Option<cian_core::clip::Clipboard>,
+    /// Ceiling on transfer speed, bytes a second. A copy to a server is a
+    /// copy over somebody else's network, and a file manager that takes all
+    /// of it is one you cannot run during the day.
+    limit_bps: Option<u64>,
     /// A file on the server, opened by downloading it: the connection, the
     /// remote path, and where the copy is. Same shape and same reason as the
     /// archive member below.
@@ -278,6 +282,7 @@ impl Session {
             pair: None,
             member: None,
             remote_member: None,
+            limit_bps: None,
             hex: None,
             redo: Stack::default(),
             shells: Vec::new(),
@@ -1915,7 +1920,7 @@ impl Session {
                     let mut ctl = cian_scp::Ctl {
                         cancel: &stop,
                         on_progress: &mut noop,
-                        limit_bps: None,
+                        limit_bps: self.limit_bps,
                     };
                     let r = if up {
                         cian_scp::upload(&target, p, &cian_scp::remote_join(&dest, &name), None, &mut ctl)
@@ -2044,7 +2049,7 @@ impl Session {
                 let at = dir.join(&name);
                 let stop = std::sync::atomic::AtomicBool::new(false);
                 let mut noop = |_: u64, _: u64| {};
-                let mut ctl = cian_scp::Ctl { cancel: &stop, on_progress: &mut noop, limit_bps: None };
+                let mut ctl = cian_scp::Ctl { cancel: &stop, on_progress: &mut noop, limit_bps: self.limit_bps };
                 cian_scp::download(&target, &remote_path, &at, &mut ctl)?;
                 self.remote_member = Some((target, remote_path, at.clone()));
                 Ok(serde_json::json!({ "path": at.display().to_string(), "name": name }))
@@ -2061,7 +2066,7 @@ impl Session {
                 }
                 let stop = std::sync::atomic::AtomicBool::new(false);
                 let mut noop = |_: u64, _: u64| {};
-                let mut ctl = cian_scp::Ctl { cancel: &stop, on_progress: &mut noop, limit_bps: None };
+                let mut ctl = cian_scp::Ctl { cancel: &stop, on_progress: &mut noop, limit_bps: self.limit_bps };
                 cian_scp::upload(&target, &at, &remote_path, None, &mut ctl)?;
                 let name = remote_path.rsplit('/').next().unwrap_or(&remote_path).to_string();
                 Ok(serde_json::json!({ "saved": name }))
@@ -2100,7 +2105,7 @@ impl Session {
                     let name = p.file_name().map(|s| s.to_string_lossy().into_owned())
                         .unwrap_or_else(|| p.display().to_string());
                     let mut noop = |_: u64, _: u64| {};
-                    let mut ctl = cian_scp::Ctl { cancel: &stop, on_progress: &mut noop, limit_bps: None };
+                    let mut ctl = cian_scp::Ctl { cancel: &stop, on_progress: &mut noop, limit_bps: self.limit_bps };
                     match cian_scp::upload(&target, p, &cian_scp::remote_join(&dest, &name), None, &mut ctl) {
                         Ok(_) => ok += 1,
                         Err(e) => errors.push(format!("{name}: {e}")),
@@ -2975,6 +2980,84 @@ impl Session {
                 }
                 cian_core::proc::open_with_desktop(&url)?;
                 Ok(serde_json::json!({ "opened": url }))
+            }
+            // The first or last lines of the selection, without opening it.
+            "peek" => {
+                let which = req.params["pane"].as_str().unwrap_or("left").to_string();
+                let (path, name, is_dir) = self.selected(&which)?;
+                if is_dir {
+                    anyhow::bail!("{name} はディレクトリです");
+                }
+                let n = req.params["n"].as_u64().unwrap_or(10) as usize;
+                let end = if req.params["tail"].as_bool().unwrap_or(false) {
+                    cian_core::inspect::End::Tail
+                } else {
+                    cian_core::inspect::End::Head
+                };
+                let rows = cian_core::inspect::peek(&path, end, n)?;
+                Ok(serde_json::json!({ "name": name, "rows": rows }))
+            }
+            // The transfer speed ceiling. `:limit 2m`, `:limit 500k`,
+            // `:limit off`; bare `:limit` says what it is.
+            "limit" => {
+                let spec = arg(req, "spec");
+                if !spec.is_empty() {
+                    self.limit_bps = if matches!(spec.as_str(), "off" | "none" | "0") {
+                        None
+                    } else {
+                        let (num, mul) = match spec.chars().last() {
+                            Some('k' | 'K') => (&spec[..spec.len() - 1], 1024u64),
+                            Some('m' | 'M') => (&spec[..spec.len() - 1], 1024 * 1024),
+                            _ => (spec.as_str(), 1),
+                        };
+                        let n: u64 = num.trim().parse()
+                            .map_err(|_| anyhow::anyhow!("読めません: {spec}（例 2m / 500k / off）"))?;
+                        Some(n * mul)
+                    };
+                }
+                Ok(serde_json::json!({ "bps": self.limit_bps }))
+            }
+            // The commit message, drafted from the staged diff. The prompt is
+            // the terminal build's, word for word.
+            "aicommit" => {
+                let which = req.params["pane"].as_str().unwrap_or("left").to_string();
+                let cfg = cian_ai::AiConfig::from_lua(&cian_lua::load());
+                let Some(cfg) = cfg else {
+                    anyhow::bail!("AI が設定されていません（init.lua の cian.ai{{…}}）");
+                };
+                let dir = self.pane_cwd(&which);
+                let Some(diff) = cian_core::git::staged_diff(&dir) else {
+                    anyhow::bail!("git リポジトリではありません");
+                };
+                if diff.trim().is_empty() {
+                    anyhow::bail!("ステージされていません。先に `git add`（:stage でも）");
+                }
+                let diff: String = diff.chars().take(12_000).collect();
+                let system = "You write a git commit message for the given staged diff. \
+             Use the Conventional Commits style: a concise subject line under ~70 \
+             characters (an optional type prefix like feat:/fix:/refactor: is fine), \
+             then a blank line and a short body of bullet points explaining WHY, \
+             only if it adds something. Output ONLY the commit message — no code \
+             fences, no preamble.";
+                let out = self.out.clone();
+                std::thread::spawn(move || match cian_ai::chat(&cfg, system, &diff, &[]) {
+                    Ok(answer) => out.event("ai", serde_json::json!({ "answer": answer })),
+                    Err(e) => out.event("ai", serde_json::json!({ "error": e.to_string() })),
+                });
+                Ok(serde_json::json!({ "asked": true }))
+            }
+            // Run the commit, with the message the person approved.
+            "commit" => {
+                let which = req.params["pane"].as_str().unwrap_or("left").to_string();
+                let message = arg(req, "message");
+                if message.is_empty() {
+                    anyhow::bail!("コミットメッセージがありません");
+                }
+                let dir = self.pane_cwd(&which);
+                cian_core::git::commit(&dir, &message)?;
+                let pane = self.pane_mut(&which)?;
+                pane.reload()?;
+                Ok(serde_json::json!({ "committed": true, "pane": self.view(&which)? }))
             }
             // The snippets init.lua declares, for Ctrl+Shift+Enter.
             "snippets" => {
