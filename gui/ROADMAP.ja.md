@@ -66,8 +66,10 @@ Taketan の「実装漏れが多くないか」に答えるため、**それま�
 - メニュー … `MenuItem` enum（約110種）+ `toggles.rs` の `ToggleId`（8種）
 
 **この回で直した分**は本文の各節に。**続けて潰した分**（2026-08-31 その2）:
-review 4種の行ごとチェック（`show()` の `checks`。重複一覧は読むだけだったのを
-選んで削除できるように）と、**ビューアの右クリックメニュー**（`Shift+Enter` でも）。
+review 4種の行ごとチェック（`show()` の `checks`）・ビューアの右クリックメニュー・
+比較画面の深さ（`/` `n` `N` `f` `x` と Enter・`]`/`[`）・アーカイブの展開・
+`:aicmd` の確認・小物9件・パンくずのクリック・余白でマーク解除・
+修飾クリックでマーク追加（**Mac は Cmd**。Ctrl+クリックは OS の右クリック）。
 以下は**残っている差**。
 
 #### マウスで届かないもの
@@ -75,9 +77,6 @@ review 4種の行ごとチェック（`show()` の `checks`。重複一覧は読
 | 何 | 端末版 |
 |---|---|
 | ファイル行のドラッグ → 反対ペイン / シェル / デスクトップ | `mouse.rs:892` `finish_file_drag`。Shift 併用で移動 |
-| Ctrl+クリックでマークに足す | `grid.rs:352` |
-| 一覧の余白クリックでマーク解除 | `grid.rs:372` |
-| パンくずの各セグメントをクリックして祖先へ | `mouse.rs:803`。GUI のパンくずは表示のみ |
 | ペイン見出しの `◀ ▶`（履歴の前後） | `mouse.rs:791` |
 | シェル分割の内部境界をドラッグ | `DividerTarget::ShellSplit` |
 
@@ -90,26 +89,18 @@ review 4種の行ごとチェック（`show()` の `checks`。重複一覧は読
 
 1. `AiChat` … 会話窓そのもの。GUI は1問1答を一覧に出すだけ（履歴・停止・画像貼付なし）
 2. `ConfirmNewTab` … `t`/F9 が無確認
-3. `AiShellConfirm` … `:aicmd` の「このコマンドでいいか」
-5. `Diff` の深さ … `/` 検索・`n`/`N`・`f` 畳み・`e` 文字コード・`x` AI 説明・`>`/`<`
-6. `DirCompare` の `Enter`（両ペインを差異へ）と `]`/`[`（丸ごと同期）
-7. `Archive` の `Enter`（1件展開）/ `a`（全部展開）
-8. `ColorPicker`（ペイン背景色）・`LocalDest`・`ConfirmZipAdd/Delete`・
+5. `Diff` の `e`（文字コード）と `>`/`<`（片側を上書き）
+6. `ColorPicker`（ペイン背景色）・`LocalDest`・`ConfirmZipAdd/Delete`・
    `ConfirmRemoteMove`・`ConfirmElevate`・`AiHistory`
-9. 小物: `Notice` の `y`/`c`（全文コピー）、`DiskUsage` の親へ戻る、
-   `Manual` の `g`/`G`、`SortPicker` の直接キー `n s d e`、
-   `Snippets`/`SshHosts` の絞り込み、`History` の `a`、`Search` の開いたまま↑↓、
-   `GrepReplace` の `f`、`CommitMessage` の `e`、`ImageView` の `Shift+Enter`/`E`
+7. 小物: `Search` の開いたまま↑↓、`GrepReplace` の `f`、
+   `CommitMessage` の `e`、`ImageView` の `Shift+Enter`/`E`
 
 #### メニュー・トグルで無いもの
 
-- `Back`（◂ 戻る）行 … マウスだけでサブメニューから戻れない（右クリックは実装済み）
 - `SendMenu ▸`（アップロード/ダウンロード）・`RemotePane`
 - `Background`（ペイン背景色14種）・`Lang`・`ThemePickPane`
 - `OpenWithOs`（プログラムから開く）・`PropertiesOs`（情報を見る）
-- `EditTab`（`:vim` を新しいシェルタブで）
-- `T` に無いトグル: `Sync` `Notify` `Verify` `Preview` `ReadCloud` `Lang`
-  （`Notify` `Verify` `ReadCloud` は機能自体が無い）
+- `T` に無いトグル: `Notify` `Verify` `ReadCloud` `Lang`（前3つは機能自体が無い）
 
 ### P3 ── 挙動の深さ
 
