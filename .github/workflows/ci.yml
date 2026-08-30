@@ -41,3 +41,31 @@ jobs:
 
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
+
+  # The half the Rust jobs above cannot see.
+  #
+  # **Everything that has actually landed on Taketan's screen broke in the
+  # renderer**, and every check the project had ran against the engine: a call
+  # to a function that did not exist and a second `refresh()` quietly replacing
+  # the first went through `cargo test` and `cargo clippy` untouched. `node
+  # --check` would have caught both. It costs seconds and needs nothing
+  # installed.
+  #
+  # `gui/drive.js` — the one that presses real keys at a real window — is not
+  # here: it wants a display and an Electron download. It stays a thing you run
+  # before pushing (see gui/ROADMAP.ja.md).
+  front-end:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Parse every file the window loads
+        run: for f in gui/*.js; do node --check "$f"; done
+
+      - name: The usual audit
+        run: python3 scripts/audit.py

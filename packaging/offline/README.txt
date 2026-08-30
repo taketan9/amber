@@ -98,12 +98,15 @@ Running the tests:
 The Electron front end
 ----------------------
 
-`gui\` is a second front end, in progress, that draws through Chromium
-instead of the terminal.
+`gui\` is a second front end that draws through Chromium instead of the
+terminal. It is what this package is usually brought in-house for.
 
-**It needs no npm and no node_modules.** Everything it requires is
-Electron itself and Node's built-in modules — nothing from the registry
-is loaded yet. So a standalone Electron distribution is the whole of it:
+**It still needs no npm.** What it loads beyond Node's own modules — the
+editor, the diagram drawer, the font — is already unpacked in `gui\vendor\`
+in this package, which is the whole reason that folder is here. Nothing in
+running it reaches the registry or the network.
+
+What you have to supply is Electron itself:
 
     electron-v33.4.11-win32-x64.zip
     https://github.com/electron/electron/releases
@@ -113,11 +116,11 @@ double-click:
 
     gui\run.bat
 
-It looks for Electron in the places it is usually put — $CIAN_ELECTRON,
-a distribution unzipped next to the repository, a copy under
-node_modules — and says which places it looked in when it finds none.
-It also refuses to open an empty window when the engine is missing, and
-says which of the two ways to supply it.
+It looks for Electron in the places it is usually put — $CIAN_ELECTRON, a
+distribution unzipped next to the repository, a copy under node_modules — and
+says which places it looked in when it finds none. It also refuses to open an
+empty window when the engine is missing, and says which of the two ways to
+supply it.
 
 To point it somewhere specific:
 
@@ -127,18 +130,48 @@ The long way still works, and is what run.bat does:
 
     <where you unzipped>\electron.exe <this folder>\gui
 
-No `npm install`, which would reach the network, and no `npm start`,
-which would want node_modules to exist.
+No `npm install`, which would reach the network, and no `npm start`, which
+would want node_modules to exist.
 
-The engine is found automatically: gui\engine.js looks beside itself
-first, then in target\release\ and target\debug\. Dropping
-cian-server.exe into gui\ is the simplest arrangement.
+The engine is found automatically: gui\engine.js looks beside itself first,
+then in target\release\ and target\debug\, **newest wins rather than
+release wins** — a morning's release build sitting beside an afternoon of
+`cargo build` is how you end up talking to yesterday's engine.
 
 Editing gui\*.js or index.html and restarting Electron is the whole
 development loop. Nothing is compiled.
 
-When the editor arrives this changes — Monaco does come from the
-registry — and this file will say how to carry it.
+
+What is in gui\vendor\, and when you have to rebuild it
+-------------------------------------------------------
+
+    monaco\          The editor: what F3 opens files in.
+    monaco-vim.js    The vim grammar over it.
+    mermaid.js       Diagrams in the Markdown preview.
+    fonts\cian.ttf   HackGen Console NF — Japanese, monospaced, with the
+                     Nerd Font glyphs the listing draws its icons from.
+
+**The font is not decoration.** Without it the listing falls back to whatever
+the machine has, which on a Mac is a proportional face — columns stop lining
+up, the shell grid shears, and the icons come out as boxes. It is the same
+file the window build (`cian.exe`) carries inside itself.
+
+None of this is committed to the repository — several megabytes that never
+change do not belong in every clone — so a *checkout* has to build it once,
+on a machine with a network:
+
+    cd gui
+    npm install --omit=dev --no-audit --no-fund
+    node vendor.js
+
+`vendor.js` copies out of node_modules and looks for the font in, in order:
+$CIAN_FONT, crates\cian-gui\fonts\cian.ttf (where the release workflow puts
+it), and the usual system locations. When it finds none it says every place it
+looked and carries on — the window still runs, it just is not laid out on a
+grid.
+
+**In this package all of that is already done.** You only need it if you take
+a fresh clone instead.
 
 
 How the offline part works
@@ -173,8 +206,14 @@ Contents
     Cargo.toml, Cargo.lock, crates\   The source.
     vendor\                            Its dependencies.
     .cargo\config.toml                 The redirect that makes them count.
-    crates\cian-gui\fonts\cian.ttf     The bundled font. Normally fetched
-                                       during a build; carried here instead.
+    crates\cian-gui\fonts\cian.ttf     The bundled font, for cian.exe.
+                                       Normally fetched during a build;
+                                       carried here instead.
+    gui\vendor\                        The editor, the diagram drawer and
+                                       the same font, for the Electron front
+                                       end. Normally built by
+                                       `node gui/vendor.js` against
+                                       node_modules; carried here instead.
     examples\init.lua                  A starter configuration.
     packaging\windows\install.ps1      Puts a built exe on PATH.
     gui\run.bat                        Starts the Electron front end.

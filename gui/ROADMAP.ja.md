@@ -44,20 +44,36 @@
    - `node gui/drive.js` → **例外 0 件**（先に `pkill -f "Electron.app/Contents/MacOS/Electron"`）
    - `python3 scripts/audit.py` → **きれいです**
    - `cargo test -q --workspace` / `cargo clippy -q --workspace --all-targets -- -D warnings`
-3. フォントが無い環境では `node gui/vendor.js` が探した場所を言う。
+   - CI は上記のうち Rust と、`node --check gui/*.js` + audit を回す（front-end ジョブ）。
+     **drive.js は CI に無い**（画面と Electron が要る）ので、押す前に手で回す
+3. **エンジンを触ったら `cargo build -p cian-server`。** `cargo test` は bin を
+   更新しないので、古いエンジン相手に「直っていない」と読むことになる
+4. フォントが無い環境では `node gui/vendor.js` が探した場所を言う。
    release.yml と同じ HackGen NF zip から `crates/cian-gui/fonts/cian.ttf` へ
 
-### P3 ── 挙動の深さ（端末版が深く GUI が浅い所、優先順）
+### P3 ── 挙動の深さ
 
-| | 何 | 備考 |
+**高の3つは済んだ（2026-08-30 その4）。**
+
+- **進捗モーダル + 本物のキュー**: jobs.rs を `cian-core` の
+  `copy_many`/`move_many` に載せ替え（バイト進捗・キャンセル対応）。ランナー1本 +
+  待ち行列。バーは中央省略パス・バイト%・経過・`Esc` 中止・`b` で裏へ。
+  `:queue` は実行中と待ちを並べ、待機中の `x` は走る前に取り消す（`done` は必ず言う
+  ── 言わないと前端が永遠に待つ）。**変異テストで空振りしないことを確認済み**
+- **絞り込み入力**: `show()` の `filter` オプション。パレット（132行）・`:theme`
+  （21行）・`Z`。矢印と `Ctrl+n`/`Ctrl+p`（文字は入力欄のもの）。Backspace で戻る。
+  絞り込みに合わせてプレビューも追う。**あいまいにはしない**（Rust 側の1つに任せる）
+- **IME 全面追従**: 端末版 `wants_text_input` を写した1つの規則。ビューアを先に見る
+  （Monaco は読んでいる時も textarea に焦点を持つ）。capture + microtask で
+  1ターンに1回。壊れたら一度言って止まる。実測で全面確認済み
+
+| | 残り | 備考 |
 |---|---|---|
-| 高 | コピー/移動の**進捗モーダル**（バイト%・経過・Esc中止・b=裏へ）と**本物のキュー** | 今は「実行中です」と断る。端末版は積む（actions.rs:2864）。jobs.rs をバイト進捗に。停滞検知も |
-| 高 | コマンドパレット C / `:theme` 一覧 / Z に**絞り込み入力** | show() に query 欄。今は 132 行を j/k で歩くだけ |
-| 高 | IME 追従を全テキスト面に | 今は vim の INSERT だけ。engine の ime 要求は実装済み（main.rs:3127） |
 | 中 | ビューア: notepad 流でも `:` 面へ届く道・対ディスク差分ガター | 端末版 viewer.rs:1526 |
 | 中 | リモート: 移動・chmod・転送進捗・保存先ピッカー・**リモート同士転送** | **端末版 ssh.rs:695 に実装あり**（旧記述「端末版も不可」は誤りだった） |
 | 中 | git 列（M/A/D バッジ）とステータスのブランチチップ | エンジンが Row に git 状態を載せる所から |
-| 低 | `f` 検索の「開いたまま ↑↓」・アーカイブ内 r/d（zip）・`.hit .p` の RTL 省略が括弧を動かす件 | |
+| 中 | 転送の進捗も同じバーに乗せる | SCP は今 `noop` の進捗コールバック（main.rs:2074 ほか） |
+| 低 | `f` 検索の「開いたまま ↑↓」・アーカイブ内 r/d（zip） | |
 
 ### P4 ── 機能（判断・仕様が要るもの）
 
