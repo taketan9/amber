@@ -1096,6 +1096,17 @@ const palettes = new Map();
 /// publishes — and the arithmetic that had to match the terminal build's
 /// (which ink reads on the accent, how far to pull a colour toward the page)
 /// is done in the engine, so there is one answer rather than two.
+/// `a` blended toward `b` by `t` (0 = all `a`, 1 = all `b`). The window's own
+/// small piece of colour arithmetic — everything else comes from the engine,
+/// which is where cian-tui's `toward` lives.
+function mix(a, b, t) {
+    const rgb = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
+    const [ar, ag, ab] = rgb(a);
+    const [br, bg, bb] = rgb(b);
+    const one = (x, y) => Math.round(x + (y - x) * t).toString(16).padStart(2, '0');
+    return `#${one(ar, br)}${one(ag, bg)}${one(ab, bb)}`;
+}
+
 function paintPalette(t) {
     const r = document.documentElement.style;
     const set = {
@@ -1122,6 +1133,11 @@ function paintPalette(t) {
         '--k-media': t.cyan,
         '--k-archive': t.red,
         '--k-exec': t.green,
+        // Derived rather than sent: `sel` is the terminal build's selection
+        // colour and these are two steps of it toward the page, which is the
+        // same arithmetic `accent_dim` gets on the engine side.
+        '--sel-strong': mix(t.sel, t.bg, 0.35),
+        '--row-hover': mix(t.fg, t.bg, 0.94),
     };
     for (const [k, v] of Object.entries(set)) r.setProperty(k, v);
     document.documentElement.dataset.dark = t.light ? '' : '1';
@@ -1132,7 +1148,7 @@ function clearPalette() {
     for (const k of ['--bg', '--pane', '--pane-off', '--line', '--text', '--dim',
         '--dir', '--accent', '--accent-dim', '--on-accent', '--mark',
         '--k-code', '--k-config', '--k-doc', '--k-image', '--k-media',
-        '--k-archive', '--k-exec']) r.removeProperty(k);
+        '--k-archive', '--k-exec', '--sel-strong', '--row-hover']) r.removeProperty(k);
     delete document.documentElement.dataset.dark;
 }
 

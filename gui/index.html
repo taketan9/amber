@@ -34,6 +34,12 @@
   --accent:    #0e9e8f;
   --accent-dim:#e6f1ef;
   --on-accent: #ffffff;
+  /* The selected row in the pane that has the keys, and the row under the
+     pointer. Both are grounds rather than fills — a saturated bar across a
+     row is the loudest thing on a light screen and says no more than a tint
+     does. */
+  --sel-strong:#c8e4df;
+  --row-hover: #eef2f1;
   --mark:      #bf6b34;
   /* What kind of file a name is, said in its colour — the terminal build's
      FilePalette (theme.rs), quietened for 白磁's ground. Directory is --dir,
@@ -112,6 +118,8 @@
   --accent:    #e8b84b;
   --accent-dim:#2e2519;
   --on-accent: #1a1409;
+  --sel-strong:#3d3120;
+  --row-hover: #241d19;
   --mark:      #c8703c;
   --k-code:    #d0b05a;
   --k-config:  #8fb8a8;
@@ -135,6 +143,8 @@
   --accent:    #5fffd7;
   --accent-dim:#1c2a28;
   --on-accent: #04120f;
+  --sel-strong:#263a37;
+  --row-hover: #1a1a1a;
   --mark:      #ffd75f;
   --k-code:    #d7af5f;
   --k-config:  #5fd7d7;
@@ -171,7 +181,9 @@ html, body {
    on an 800px window left thirteen rows for a listing and three hundred
    pixels of empty terminal. */
 :root { --main-pct: 75%; --panes-pct: 50%; }
-#panes { flex: 1 1 auto; display: flex; gap: 1px; background: var(--line); min-height: 0; }
+/* Space between the panes rather than a rule down the middle, and the ground
+   showing through it. */
+#panes { flex: 1 1 auto; display: flex; gap: 6px; padding: 6px 6px 0; background: transparent; min-height: 0; }
 /* The two dividers, grabbable. cian-tui drags its borders with the mouse
    (`set_divider_ratio`) and this could only be moved by a key — and on macOS
    that key is Mission Control's. A hairline is not a target, so each handle
@@ -190,9 +202,11 @@ html, body {
 .pane {
   flex: 1 1 0; min-width: 0; min-height: 0; display: flex; flex-direction: column;
   background: var(--pane-off);
+  border-radius: 6px;
   /* Room for the focused pane's frame, always — so gaining focus does not
      move the rows by two pixels. */
   border: 2px solid transparent;
+  overflow: hidden;
 }
 /* Two different questions, and they were one class.
    `.active` is *which pane is the current one* — what Tab switches, what the
@@ -292,8 +306,11 @@ html, body {
 /* The column header. Built from the same class names as a row, so a column
    and its heading cannot drift apart in width. */
 .dhead {
-  flex: 0 0 auto; color: var(--dim); font-size: .85em;
-  border-bottom: 1px solid var(--line); background: var(--pane-off);
+  flex: 0 0 auto; color: var(--dim); font-size: .78em;
+  /* No band. A heading that is the same weight as the rows below it competes
+     with them; a hairline and lighter ink is enough to say "this is the
+     label row". */
+  border-bottom: 1px solid var(--line);
   cursor: default; user-select: none;
 }
 .dhead .glyph { flex: 0 0 1.6em; }
@@ -325,8 +342,26 @@ html, body {
 }
 .rows.icons .row .size, .rows.icons .row .when, .rows.icons .row .mark,
 .rows.icons .row .kind, .rows.icons .row .cloud { display: none; }
-.rows.icons .row.cursor { background: var(--accent-dim); }
-.pane.active .rows.icons .row.cursor { background: var(--accent); }
+.rows.icons .row.cursor { border-radius: 8px; }
+/* The row under the cursor.
+   It was a full-bleed bar of saturated accent with white text — the shape a
+   file manager had in 2005, and the loudest thing on a 白磁 screen. A tint
+   with a marker down its edge says the same thing without shouting it, and
+   it lets a name keep the colour that says what kind of file it is. The
+   marker is what survives on the palettes where a tint is nearly nothing. */
+.row.cursor {
+  background: var(--accent-dim);
+  box-shadow: inset 3px 0 0 var(--accent);
+  border-radius: 0 4px 4px 0;
+}
+#work[data-focus="files"] .pane.active .row.cursor {
+  background: var(--sel-strong);
+  box-shadow: inset 4px 0 0 var(--accent);
+}
+/* The pointer gets an answer too. Nothing here responded to it at all. */
+.row:hover:not(.cursor) { background: var(--row-hover); }
+.rows.icons .row:hover:not(.cursor) { background: var(--row-hover); }
+
 /* The terminal build's file palette: the kind of a file is its colour, a
    directory and an executable are bold, dotfiles recede. */
 .row.dir .name { color: var(--dir); font-weight: 600; }
@@ -339,22 +374,26 @@ html, body {
 .row.k-exec .name { color: var(--k-exec); font-weight: 600; }
 .row.k-muted .name { color: var(--dim); }
 .row.marked .name { color: var(--mark); }
-.row.cursor { background: var(--accent-dim); }
-.pane.active .row.cursor { background: var(--accent); color: var(--on-accent); }
-/* Every span, not a hand-kept list — the kind, date and ☁ columns kept their
-   dim ink on the accent fill and sank into it. */
-.pane.active .row.cursor span { color: var(--on-accent); }
+/* The name stands out a little in the selected row without changing hue —
+   the colour is already saying what kind of file it is. */
+.row.cursor .name { font-weight: 600; }
 #status {
   position: fixed; left: 0; right: 0; bottom: 0;
-  display: flex; align-items: center; gap: .8em;
-  padding: 0 10px 0 0; font-size: .8em; line-height: 2;
-  background: var(--line); color: var(--dim);
+  display: flex; align-items: center; gap: .9em;
+  padding: 0 12px 0 0; font-size: .78em; line-height: 2.1;
+  /* The pane's own ground with one hairline above it. It was a solid band of
+     `--line`, which is the shape a status bar had on Windows 95 and reads as
+     a slab of chrome under the thing you are looking at. */
+  background: var(--pane); color: var(--dim);
+  border-top: 1px solid var(--line);
   white-space: nowrap; overflow: hidden;
 }
 /* The pane-and-mode badge, first and never dropped. Its colour is the mode's:
    the terminal build gives "am I in visual?" one glance, not a guess. */
 #st-badge {
-  flex: 0 0 auto; padding: 0 .8em; font-weight: 600;
+  flex: 0 0 auto; margin: 0 .2em 0 8px; padding: 0 .7em;
+  font-weight: 600; font-size: .92em; line-height: 1.5;
+  border-radius: 999px;
   background: var(--accent); color: var(--on-accent);
 }
 #st-badge.visual { background: var(--mark); }
@@ -426,12 +465,18 @@ html, body {
 #shell {
   flex: 0 0 calc(100% - var(--main-pct));
   display: flex; flex-direction: column; min-height: 0;
-  background: var(--pane); border-top: 2px solid var(--line);
+  background: var(--pane);
+  /* The same card the file panes are, since it is the same kind of thing —
+     it sat flush to the window edges while they were inset, which read as
+     two different programs stacked. */
+  margin: 6px; border-radius: 6px;
+  border: 2px solid transparent;
+  overflow: hidden;
 }
 #shell[hidden] { display: none; }
 /* Same signal as a file pane: the surface the keys are talking to wears the
    accent. Two pixels either way, so focus does not move anything. */
-#shell.on { border-top-color: var(--accent); }
+#shell.on { border-color: var(--accent); }
 
 /* F12 — the *focused* surface fills the window, which is what the terminal
    build's `toggle_zoom` does. It only ever grew the shell here, whichever
@@ -457,12 +502,12 @@ html, body {
   bottom: calc(var(--status-h) + var(--hints-h));
   display: flex; flex-direction: column; min-height: 0;
 }
-#shell.sync { border-top: 2px solid var(--mark); }
+#shell.sync { border-color: var(--mark); }
 /* Recording. The terminal build turns the frame carmine for the same
    reason: a shell being written to a file must not look like one that
    is not. */
-#shell.logging { border-top: 2px solid #b03a48; }
-#shell.logging .vhead { color: #b03a48; }
+#shell.logging { border-color: var(--msg-bad); }
+#shell.logging .vhead { color: var(--msg-bad); }
 /* The key hints — what the keys do *here*, right now. The terminal build
    carries this bar and the window did not, which is most of why the two felt
    like different programs: cian tells you what you can press, continuously,
@@ -473,8 +518,10 @@ html, body {
      would otherwise push this off the bottom edge, laid out and invisible. */
   position: fixed; left: 0; right: 0; bottom: var(--status-h);
   display: flex; gap: 1.4em; overflow: hidden; white-space: nowrap;
-  padding: 3px 10px; font-size: .82em; color: var(--dim);
-  background: var(--pane-off); border-top: 1px solid var(--line);
+  padding: 4px 12px; font-size: .78em; color: var(--dim);
+  /* No border of its own: the status line below it already draws one, and
+     two hairlines four pixels apart is a seam, not a structure. */
+  background: var(--pane);
 }
 /* The filter bar, one prompt row above the hints — where the terminal build
    types it. The listing stays fully visible while it narrows. */
