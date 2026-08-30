@@ -159,7 +159,14 @@ async function target() {
 /// directory.
 async function settle(cdp, sand) {
     for (let i = 0; i < 40; i++) {
-        const cwd = await cdp.read('state?.left?.cwd ?? null');
+        // Before renderer.js has been evaluated, `state` is not defined and
+        // the read throws — which is "not ready yet", the exact thing this
+        // loop exists to wait out. It killed the whole run instead, every
+        // run, once mermaid's 3.4MB slowed the page past the first poll.
+        let cwd = null;
+        try {
+            cwd = await cdp.read('state?.left?.cwd ?? null');
+        } catch { /* the page is still loading */ }
         if (cwd && cwd.endsWith(path.join(path.basename(sand), 'from'))) return;
         await sleep(200);
     }
@@ -309,6 +316,11 @@ const LOOK = `({
             first: document.querySelector('.view-line')?.textContent,
             lines: document.querySelectorAll('.view-line').length }
         : null,
+    // The viewer's own idea of itself, not just its DOM. "F3 did nothing" has
+    // two very different causes — never asked, or asked and stuck half-open —
+    // and the sheet's hidden attribute cannot tell them apart.
+    // No backtick in here: LOOK is one template literal, and one inside ends it.
+    vstate: (() => { try { return (viewer.on ? 'on' : 'off') + (viewer.opening ? '+opening' : ''); } catch { return null; } })(),
     marks: state?.[state.focus]?.entries?.filter((x) => x.marked).map((x) => x.name) ?? [],
     scroll: document.querySelector('#find:not([hidden]) .hits')?.scrollTop ?? 0,
     focus: state?.focus,
@@ -424,11 +436,18 @@ async function main() {
             const rep = after.report
                 ? `  ▤ ${after.report.name} ｜${after.report.about}｜ ${after.report.rows}行  «${after.report.first}»`
                 : null;
-            const marks = asking ?? rep ?? menu ?? sh ?? (after.view
+            const vst = after.vstate && after.vstate !== 'off' ? `  ◈${after.vstate}` : '';
+            // The viewer before the shell. The shell panel is open from
+            // startup now, so a report that prefers it can never show the
+            // viewer — which read as "F3 did nothing" for a whole afternoon
+            // while F3 was working fine.
+            const view = after.view
                 ? (after.view.pic
                     ? `  ▦ ${after.view.about}  ${after.view.pic}`
                     : `  ｜${after.view.foot}  ${after.view.about}  «${after.view.first}»`)
-                : (after.marks.length ? `  [${after.marks.join(' ')}]` : ''));
+                : null;
+            const marks = vst + (asking ?? rep ?? menu ?? view ?? sh
+                ?? (after.marks.length ? `  [${after.marks.join(' ')}]` : ''));
             console.log(`${moved ? '  ' : '× '}${key.padEnd(8)}${note.padEnd(16)} ${after.status}${marks}`);
             if (!moved) bad++;
         }
