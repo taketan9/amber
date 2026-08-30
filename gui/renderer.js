@@ -8,6 +8,8 @@ const state = { left: null, right: null, focus: 'left' };
 const el = {
     hints: document.getElementById('hints'),
     work: document.getElementById('work'),
+    gripPanes: document.getElementById('grip-panes'),
+    gripMain: document.getElementById('grip-main'),
     panes: document.getElementById('panes'),
     left: document.querySelector('[data-pane="left"]'),
     right: document.querySelector('[data-pane="right"]'),
@@ -424,6 +426,7 @@ function draw(which) {
     // the disk chip refreshes itself only when the pane landed somewhere new.
     drawStatus();
     freshenDisk(which);
+    placeGrips();
 }
 
 /// How many engine calls are outstanding and have been slow enough to be
@@ -3757,21 +3760,77 @@ async function goTab(which, how) {
 /// renderer. A second bookmark list would be the worst kind of two-programs
 /// problem: which folders you had saved would depend on which one you saved
 /// them from.
+/// `s` — the bookmarks, and the keys that change them.
+///
+/// cian-tui edits them from this very popup (`a` add, `A` add a folder, `d`
+/// delete, `r` rename, `p` copy the target) and the window could only read
+/// the list and jump. Same letters, same file — `shortcuts.lua`, which both
+/// builds read, so a bookmark made in one is there in the other.
 async function cmdShortcuts() {
     const r = await ask('shortcuts', {});
     if (!r) return;
-    if (!r.rows.length) {
-        say('登録がありません — :bookmark でいまの場所を登録できます');
-        return;
-    }
-    show('ショートカット', r.where || '', r.rows.map((x) => ({
+    const rows = r.rows.map((x) => ({
         n: x.group ? '▸' : '',
         label: '  '.repeat(x.depth) + x.name,
         sub: x.target || '',
         target: x.target,
-    })), {
-        foot: 'Enter そこへ   Esc 閉じる',
+        at: x.at,
+        group: x.group,
+        plain: x.name,
+    }));
+    // Even with nothing in it: `a` has to have somewhere to be pressed.
+    const edit = async (params, done) => {
+        const res = await ask('shortcutedit', params);
+        if (!res) return;
+        say(res.said);
+        if (done) done();
+        closeReport();
+        cmdShortcuts();
+    };
+    show('ショートカット', rows.length ? (r.where || '') : '登録がありません', rows, {
+        foot: 'Enter そこへ   a 追加   A まとめる   r 名前   d 削除   p パス   Esc 閉じる',
         pick: (row) => { if (row.target) { closeReport(); revealPath(row.target, true); } },
+        act: {
+            a: async () => {
+                const name = await askFor('ここを登録する名前', state[state.focus].cwd.split(/[\\/]/).pop() || '');
+                if (name === null) return;
+                const made = await ask('bookmark', { pane: state.focus, name: name.trim() });
+                if (!made) return;
+                say(`${made.name} を登録しました`);
+                closeReport();
+                cmdShortcuts();
+            },
+            A: async () => {
+                const name = await askFor('まとめの名前', '');
+                if (name === null || !name.trim()) return;
+                await edit({ do: 'group', value: name.trim() });
+            },
+            r: async () => {
+                const row = report.rows[report.at];
+                if (!row) return;
+                const name = await askFor('新しい名前', row.plain);
+                if (name === null || !name.trim()) return;
+                await edit({ do: 'rename', at: row.at, value: name.trim() });
+            },
+            d: async () => {
+                const row = report.rows[report.at];
+                if (!row) return;
+                // Asked, like everything else that loses something. A folder
+                // takes its contents with it, and that is worth saying.
+                const ok = await confirm(
+                    row.group ? `${row.plain} を中身ごと削除` : `${row.plain} を削除`,
+                    row.target || '',
+                );
+                if (!ok) return;
+                await edit({ do: 'delete', at: row.at });
+            },
+            p: async () => {
+                const row = report.rows[report.at];
+                if (!row || !row.target) return;
+                await navigator.clipboard.writeText(row.target);
+                say(`${row.target} をコピー`);
+            },
+        },
     });
 }
 
@@ -5725,7 +5784,7 @@ async function cmdAiScan(what) {
                 foot: 'Enter 実行（u で戻せます）   Esc やめる',
                 pick: async () => {
                     closeReport();
-                    if (!await confirm(`${rows.length} 件をサブフォルダへ移します`,
+                    if (!await confirm(`${rows.length} 件を下のディレクトリへ移します`,
                         rows.map((x) => `${x.name} → ${x.folder}/`).join('\n'))) { say('やめました'); return; }
                     const done = await ask('organizeapply', {
                         pane: state.focus,
@@ -5930,10 +5989,59 @@ function applyLayout(remember = true) {
     r.setProperty('--main-pct', `${layout.main}%`);
     r.setProperty('--panes-pct', `${layout.panes}%`);
     if (term.on) ask('shellresize', shellSize());
+    // Measured after the boxes have moved, not from the percentages.
+    requestAnimationFrame(placeGrips);
     if (remember) {
-        ask('remember', { key: 'gui_main_pct', value: String(layout.main) });
-        ask('remember', { key: 'gui_panes_pct', value: String(layout.panes) });
+        ask('remember', { key: 'gui_main_pct', value: String(Math.round(layout.main)) });
+        ask('remember', { key: 'gui_panes_pct', value: String(Math.round(layout.panes)) });
     }
+}
+
+/// Put the two grips on the seams they move.
+///
+/// Measured from the real boxes rather than computed from the percentages:
+/// the seam between the panes is a 1px flex gap and the one above the shell
+/// is a border, and neither is at exactly the fraction — the borders, the
+/// gap and the foot bars all move it.
+function placeGrips() {
+    const panes = el.panes.getBoundingClientRect();
+    const left = el.left.getBoundingClientRect();
+    el.gripPanes.style.top = `${panes.top}px`;
+    el.gripPanes.style.height = `${panes.height}px`;
+    el.gripPanes.style.left = `${left.right - 4}px`;
+    el.gripPanes.hidden = el.panes.classList.contains('one');
+    const shellShown = term.on && !el.shell.hidden && !el.work.dataset.zoom;
+    el.gripMain.hidden = !shellShown;
+    if (shellShown) {
+        el.gripMain.style.top = `${el.shell.getBoundingClientRect().top - 4}px`;
+    }
+}
+
+/// Drag a divider. The percentage follows the pointer directly — a divider
+/// that moves by a step per drag is a scrollbar, not a divider.
+function startGripDrag(which, e) {
+    e.preventDefault();
+    document.body.classList.add('dragging');
+    const work = el.work.getBoundingClientRect();
+    const move = (ev) => {
+        if (which === 'panes') {
+            layout.panes = ((ev.clientX - work.left) / work.width) * 100;
+        } else {
+            layout.main = ((ev.clientY - work.top) / work.height) * 100;
+        }
+        applyLayout(false);
+        placeGrips();
+    };
+    const done = () => {
+        document.removeEventListener('mousemove', move);
+        document.removeEventListener('mouseup', done);
+        document.body.classList.remove('dragging');
+        // Written down once, at the end — not on every pixel of the drag.
+        applyLayout();
+        say(`ファイル ${Math.round(layout.main)}%   左ペイン ${Math.round(layout.panes)}%`);
+    };
+    document.addEventListener('mousemove', move);
+    document.addEventListener('mouseup', done);
 }
 
 function resizeSplit(key) {
@@ -6596,8 +6704,12 @@ async function recall() {
 /// rectangle. Debounced, because a drag is a hundred of these.
 let resizeTimer = null;
 
+el.gripPanes.addEventListener('mousedown', (e) => startGripDrag('panes', e));
+el.gripMain.addEventListener('mousedown', (e) => startGripDrag('main', e));
+
 window.addEventListener('resize', () => {
     measureFoot();
+    placeGrips();
     if (viewer.ed) viewer.ed.layout();
     // The shell is handled by the observer below, which sees the panel's box
     // change for any reason — a drag, a font change, the hint bar going away

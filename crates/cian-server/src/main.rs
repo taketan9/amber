@@ -2350,7 +2350,13 @@ impl Session {
                     .unwrap_or_default();
                 fn flatten(nodes: &[cian_lua::shortcuts::Node], depth: usize, out: &mut Vec<serde_json::Value>) {
                     for n in nodes {
+                        // Its position in this very walk, so the window can
+                        // name a row back to the engine. Depth-first, and the
+                        // editing below walks it the same way — one order, so
+                        // "the third row" cannot mean two different nodes.
+                        let at = out.len();
                         out.push(serde_json::json!({
+                            "at": at,
                             "name": n.name,
                             "target": n.target,
                             "depth": depth,
@@ -2367,6 +2373,108 @@ impl Session {
                     "where": path.map(|p| p.display().to_string()),
                     "rows": rows,
                 }))
+            }
+            // Edit the bookmarks: rename one, retarget one, delete one, or
+            // add a folder. cian-tui does all of this from its shortcuts
+            // popup (`a A d r p`), and the window could only ever append.
+            "shortcutedit" => {
+                let path = cian_lua::config_write_path("shortcuts.lua")
+                    .ok_or_else(|| anyhow::anyhow!("設定の置き場所が分かりません"))?;
+                let mut nodes = if path.exists() {
+                    cian_lua::shortcuts::load(&path).unwrap_or_default()
+                } else {
+                    Vec::new()
+                };
+                let want = req.params["at"].as_u64().map(|v| v as usize);
+                let value = arg(req, "value");
+                // The same depth-first walk the listing above hands out, so a
+                // row number means one node.
+                fn at_mut<'a>(
+                    nodes: &'a mut [cian_lua::shortcuts::Node],
+                    want: usize,
+                    seen: &mut usize,
+                ) -> Option<&'a mut cian_lua::shortcuts::Node> {
+                    for n in nodes.iter_mut() {
+                        if *seen == want {
+                            return Some(n);
+                        }
+                        *seen += 1;
+                        if let Some(kids) = n.children.as_mut() {
+                            if let Some(found) = at_mut(kids, want, seen) {
+                                return Some(found);
+                            }
+                        }
+                    }
+                    None
+                }
+                fn remove_at(
+                    nodes: &mut Vec<cian_lua::shortcuts::Node>,
+                    want: usize,
+                    seen: &mut usize,
+                ) -> bool {
+                    for i in 0..nodes.len() {
+                        if *seen == want {
+                            nodes.remove(i);
+                            return true;
+                        }
+                        *seen += 1;
+                        if nodes[i].children.is_some() {
+                            let mut kids = nodes[i].children.take().unwrap_or_default();
+                            let hit = remove_at(&mut kids, want, seen);
+                            nodes[i].children = Some(kids);
+                            if hit {
+                                return true;
+                            }
+                        }
+                    }
+                    false
+                }
+                let said = match req.params["do"].as_str().unwrap_or("") {
+                    "group" => {
+                        if value.is_empty() {
+                            anyhow::bail!("名前を入れてください");
+                        }
+                        nodes.push(cian_lua::shortcuts::Node {
+                            name: value.clone(), target: None, children: Some(Vec::new()),
+                        });
+                        format!("{value} を作りました")
+                    }
+                    "rename" => {
+                        if value.is_empty() {
+                            anyhow::bail!("名前を入れてください");
+                        }
+                        let Some(at) = want else { anyhow::bail!("どれを直すか分かりません") };
+                        let Some(n) = at_mut(&mut nodes, at, &mut 0) else {
+                            anyhow::bail!("その行はありません")
+                        };
+                        n.name = value.clone();
+                        format!("{value} に変えました")
+                    }
+                    "target" => {
+                        let Some(at) = want else { anyhow::bail!("どれを直すか分かりません") };
+                        let Some(n) = at_mut(&mut nodes, at, &mut 0) else {
+                            anyhow::bail!("その行はありません")
+                        };
+                        if n.children.is_some() {
+                            anyhow::bail!("まとめには行き先がありません");
+                        }
+                        n.target = Some(value.clone());
+                        format!("行き先を {value} に変えました")
+                    }
+                    "delete" => {
+                        let Some(at) = want else { anyhow::bail!("どれを消すか分かりません") };
+                        if !remove_at(&mut nodes, at, &mut 0) {
+                            anyhow::bail!("その行はありません");
+                        }
+                        "削除しました".to_string()
+                    }
+                    other => anyhow::bail!("知らない操作: {other}"),
+                };
+                if let Some(dir) = path.parent() {
+                    let _ = std::fs::create_dir_all(dir);
+                }
+                std::fs::write(&path, cian_lua::shortcuts::to_lua(&nodes))?;
+                Ok(serde_json::json!({ "said": said }))
             }
             "bookmark" => {
                 let which = req.params["pane"].as_str().unwrap_or("left").to_string();

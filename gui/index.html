@@ -167,6 +167,19 @@ html, body {
    pixels of empty terminal. */
 :root { --main-pct: 75%; --panes-pct: 50%; }
 #panes { flex: 1 1 auto; display: flex; gap: 1px; background: var(--line); min-height: 0; }
+/* The two dividers, grabbable. cian-tui drags its borders with the mouse
+   (`set_divider_ratio`) and this could only be moved by a key — and on macOS
+   that key is Mission Control's. A hairline is not a target, so each handle
+   is a few pixels of transparent hit area straddling the seam. */
+#grip-panes, #grip-main { position: fixed; z-index: 5; }
+#grip-panes { cursor: col-resize; width: 9px; }
+#grip-main  { cursor: row-resize; height: 9px; left: 0; right: 0; }
+#grip-panes:hover, #grip-main:hover, .dragging #grip-panes, .dragging #grip-main {
+  background: var(--accent); opacity: .35;
+}
+/* While a drag is on, nothing else takes the pointer — a listing that
+   selects rows under a divider drag is a listing fighting the gesture. */
+.dragging, .dragging * { cursor: inherit !important; user-select: none !important; }
 .pane[data-pane="left"] { flex: 0 0 var(--panes-pct); }
 .pane[data-pane="right"] { flex: 1 1 auto; }
 .pane {
@@ -858,6 +871,10 @@ html, body {
   <!-- The filter, typed in place. It used to raise the full-screen search
        sheet — a dark scrim over the very listing being narrowed. The terminal
        build types this on its prompt row, and this bar is that row. -->
+  <!-- The grips for the two dividers. Placed by measurement rather than by
+       flow, because the seam they straddle is a 1px gap between flex items. -->
+  <div id="grip-panes"></div>
+  <div id="grip-main"></div>
   <div id="fbar" hidden>
     <b id="f-sign">/</b><input id="f-input" autocomplete="off" spellcheck="false"><span id="f-count"></span>
   </div>
