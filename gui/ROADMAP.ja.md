@@ -51,6 +51,67 @@
 4. フォントが無い環境では `node gui/vendor.js` が探した場所を言う。
    release.yml と同じ HackGen NF zip から `crates/cian-gui/fonts/cian.ttf` へ
 
+### 端末版との差の全数調査（2026-08-31）
+
+Taketan の「実装漏れが多くないか」に答えるため、**それまで見ていなかった3次元**を
+機械で突き合わせた。最初の調査（コマンド名・キー表・主要10領域）だけでは足りず、
+以後は Taketan が踏むたびに1件ずつ直す形になっていた。反省として全数を記録する。
+
+**測り方**（次のセッションも同じ手が使える）:
+- マウス面 … `crates/cian-tui/src/mouse.rs` と当たり判定の登録（`tab_rects`
+  `sort_rects` `crumb_rects` `nav_rects` `dividers` `scroll_tracks` `icon_slots`
+  `grid_buttons`、popup の `ZoneKind`）を全部列挙し、`gui/renderer.js` の
+  `addEventListener('mousedown'|'contextmenu'|'wheel'|…)` と突き合わせる
+- ポップアップ … `Popup` enum（56種）と `handle_popup_key` の分岐
+- メニュー … `MenuItem` enum（約110種）+ `toggles.rs` の `ToggleId`（8種）
+
+**この回で直した分**は本文の各節に。以下は**残っている差**。
+
+#### マウスで届かないもの
+
+| 何 | 端末版 |
+|---|---|
+| ファイル行のドラッグ → 反対ペイン / シェル / デスクトップ | `mouse.rs:892` `finish_file_drag`。Shift 併用で移動 |
+| Ctrl+クリックでマークに足す | `grid.rs:352` |
+| 一覧の余白クリックでマーク解除 | `grid.rs:372` |
+| パンくずの各セグメントをクリックして祖先へ | `mouse.rs:803`。GUI のパンくずは表示のみ |
+| ペイン見出しの `◀ ▶`（履歴の前後） | `mouse.rs:791` |
+| シェル分割の内部境界をドラッグ | `DividerTarget::ShellSplit` |
+| ビューアの右クリック（cian のメニュー） | いまは Monaco 既定のメニューが出る |
+| ビューアの `✕` / タブ列 / アウトライン列のクリック | `mouse.rs:243`〜`320` |
+| 一覧ホイールでカーソルが動く | GUI はビューだけ動く（**窓の作法としては現状が正しいと判断**。要相談） |
+| review 一覧の行クリック = チェック切替 | GUI は即実行 |
+| サイドバー（場所の一覧）そのもの | `grid.rs:331`。GUI に概念が無い |
+
+#### ポップアップで無い・浅いもの（頻度順）
+
+1. `AiChat` … 会話窓そのもの。GUI は1問1答を一覧に出すだけ（履歴・停止・画像貼付なし）
+2. `ConfirmNewTab` … `t`/F9 が無確認
+3. `AiShellConfirm` … `:aicmd` の「このコマンドでいいか」
+4. review 4種（`JunkReview` `DupeReview` `StructureReview` `RenameReview`）…
+   **行ごとのチェック（Space / a）が無く全件か中止かの二択**
+5. `Diff` の深さ … `/` 検索・`n`/`N`・`f` 畳み・`e` 文字コード・`x` AI 説明・`>`/`<`
+6. `DirCompare` の `Enter`（両ペインを差異へ）と `]`/`[`（丸ごと同期）
+7. `Archive` の `Enter`（1件展開）/ `a`（全部展開）
+8. `ColorPicker`（ペイン背景色）・`LocalDest`・`ConfirmZipAdd/Delete`・
+   `ConfirmRemoteMove`・`ConfirmElevate`・`AiHistory`
+9. 小物: `Notice` の `y`/`c`（全文コピー）、`DiskUsage` の親へ戻る、
+   `Manual` の `g`/`G`、`SortPicker` の直接キー `n s d e`、
+   `Snippets`/`SshHosts` の絞り込み、`History` の `a`、`Search` の開いたまま↑↓、
+   `GrepReplace` の `f`、`CommitMessage` の `e`、`ImageView` の `Shift+Enter`/`E`
+
+#### メニュー・トグルで無いもの
+
+- **ビューアの右クリックメニューが丸ごと無い**（保存・文字コード・blame・要約・
+  破棄して閉じる・場所を開く）
+- `Back`（◂ 戻る）行 … マウスだけでサブメニューから戻れない（右クリックは実装済み）
+- `SendMenu ▸`（アップロード/ダウンロード）・`RemotePane`
+- `Background`（ペイン背景色14種）・`Lang`・`ThemePickPane`
+- `OpenWithOs`（プログラムから開く）・`PropertiesOs`（情報を見る）
+- `EditTab`（`:vim` を新しいシェルタブで）
+- `T` に無いトグル: `Sync` `Notify` `Verify` `Preview` `ReadCloud` `Lang`
+  （`Notify` `Verify` `ReadCloud` は機能自体が無い）
+
 ### P3 ── 挙動の深さ
 
 **高の3つは済んだ（2026-08-30 その4）。**
