@@ -1323,7 +1323,7 @@ function hintsNow() {
     if (viewer.on) {
         if (style === 1) {
             return [['Ctrl+S', '保存'], ['Shift+←→', '選択'], ['Ctrl+C / V', 'コピー / 貼付'],
-                ['Ctrl+F', '検索'], ['Esc ×3', '閉じる'], ['Shift+Enter', 'メニュー — キー操作切替']];
+                ['Ctrl+F', '検索'], ['Esc ×3', '閉じる'], ['Shift+Enter', 'メニュー']];
         }
         return [['Ctrl+S', '保存'], ['Esc', '編集終了'], ['/', '検索'], ['i', '編集'],
             ['v', '選択'], ['y', 'コピー'], ['d c y', '＋モーション'], [':q', '閉じる'],
@@ -1496,6 +1496,42 @@ const SORT_MENU = {
 ///
 /// A group with nothing in it is not offered: an entry that can only refuse
 /// is worse than no entry.
+/// The viewer's own menu — cian-tui's `open_viewer_menu` (menu.rs:10), item
+/// for item. Right-clicking an open file used to raise Monaco's own editor
+/// menu, which is a menu about a text box rather than about the file.
+///
+/// The one that loses work is last and on its own, as it is there.
+function viewerRows() {
+    const v = [];
+    // The AI heading is unconditional here as it is in the file menu — the
+    // engine says so when no model is configured, which is a better answer
+    // than a menu that quietly has one item fewer on some machines.
+    v.push(group('AI ▸', aiRows));
+    v.push({ label: 'コピー', value: 'Ctrl+C', run: () => document.execCommand('copy') });
+    v.push({ label: '保存', value: 'Ctrl+S', run: saveFile });
+    v.push({ label: '外部エディタで開く', value: ':edit', run: cmdEditExternal });
+    v.push({ label: '文字コードを指定', value: ':enc', run: () => cmdEncoding() });
+    v.push({ label: '各行の最終変更者', value: ':blame', run: cmdBlame });
+    v.push({ label: '見出しから飛ぶ', value: 'Ctrl+Shift+O', run: cmdOutline });
+    v.push({ label: 'Markdown プレビュー', value: 'Ctrl+E', run: togglePreview2 });
+    // Where the file lives, for when reading it raises a question about the
+    // folder it is in. The cursor is already on it, so this is just the way
+    // back out of the viewer.
+    v.push({ label: 'このファイルの場所を開く', value: '', run: () => closeView(false) });
+    v.push({ label: 'エディタの流儀', value: STYLES[style][1], run: () => setStyle(style + 1) });
+    v.push({ label: '配色', value: ':theme', run: () => cmdTheme() });
+    v.push({ label: '保存せずに閉じる', value: '', run: () => closeView(false) });
+    v.push({ label: 'キー一覧', value: '?', run: openHelp });
+    return v;
+}
+
+const VIEWER_MENU = {
+    key: 'M',
+    foot: '↑↓ 選ぶ   Enter 実行   Esc 閉じる',
+    stay: false,
+    rows: viewerRows,
+};
+
 function contextRows() {
     const pane = state[state.focus];
     const row = pane && pane.entries[pane.cursor];
@@ -1763,6 +1799,19 @@ function dismissFind() {
 // Written out rather than looped: a call through a destructured name is a
 // call the audit cannot follow to a definition, and a checker that shrugs at
 // one call shrugs at the next one too.
+// Right-click on an open file opens cian's menu, not Monaco's. Monaco's is a
+// menu about a text box — cut, copy, the command palette — where the question
+// is about the file: save it, re-read it in another encoding, who changed
+// this line, close it without saving.
+// Captured, because Monaco handles `contextmenu` on its own container and
+// stops it there — a listener waiting for the bubble never hears the click.
+el.view.addEventListener('contextmenu', (e) => {
+    if (!viewer.on) return;
+    e.preventDefault();
+    e.stopPropagation();
+    openMenu(VIEWER_MENU);
+}, true);
+
 el.find.addEventListener('mousedown', (e) => {
     if (e.target !== e.currentTarget) return;   // the sheet itself, not its ink
     dismissFind();
@@ -3426,6 +3475,15 @@ function vimTyping() {
 
 document.addEventListener('keydown', (e) => {
     if (!viewer.on) return;
+    // Shift+Enter opens the file's own menu, the key cian-tui puts it on in
+    // the viewer as well as in a listing. Before the editor sees it: in
+    // notepad style a plain Enter is a newline, and this one is not.
+    if (e.key === 'Enter' && e.shiftKey && !hex.editing) {
+        e.stopPropagation();
+        e.preventDefault();
+        openMenu(VIEWER_MENU);
+        return;
+    }
     // The hex editor owns its keys while it is on.
     if (hex.editing) {
         if (e.key === 'Escape') { e.stopPropagation(); e.preventDefault(); stopHex(); return; }
