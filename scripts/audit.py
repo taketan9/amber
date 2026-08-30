@@ -526,6 +526,14 @@ def js() -> int:
                 continue
             if m.group(1) not in known:
                 missing[m.group(1)] += 1
+        # **呼ばずに渡す形。** `run: cmdJobs` のように関数を値として渡すと、
+        # 上の「名前(」では一生見えない ―― メニューを作り直したとき、存在しない
+        # 関数を4つ渡していて監査は「なし」と言った。押せば必ず落ちる行を、
+        # 押すまで誰も知らない。
+        for m in re.finditer(r'(?<![.\w$])(?:run|pick|move|leave|act|group|then|catch)\s*:\s*'
+                             r'([A-Za-z_$][\w$]*)\s*[,}\n)]', bare):
+            if m.group(1) not in known and m.group(1) not in ('null', 'true', 'false', 'undefined'):
+                missing[m.group(1)] += 1
         if missing:
             n += len(missing)
             print(f'  ■ {_rel(path)}: どこにも定義がない呼び出し')

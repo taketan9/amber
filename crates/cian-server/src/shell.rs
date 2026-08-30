@@ -64,8 +64,24 @@ impl Shell {
         let watch = Arc::clone(&session);
         let watch_stop = Arc::clone(&stop);
         std::thread::spawn(move || {
+            let mut ticks: u32 = 0;
             while !watch_stop.load(Ordering::Relaxed) {
                 std::thread::sleep(std::time::Duration::from_millis(TICK_MS));
+                // Has the shell exited on its own — `exit`, Ctrl+D, a crash?
+                // Nothing used to ask, so a shell the person closed by typing
+                // `exit` left a frozen screen that looked alive. Asked twice a
+                // second, which is often enough to feel immediate and rare
+                // enough not to matter.
+                ticks += 1;
+                if ticks % 8 == 0 && !watch.lock().map(|mut s| s.is_alive()).unwrap_or(false) {
+                    // A pane whose shell has ended, not a panel to take down:
+                    // exactly what Shift+F10 does, which is why one word says
+                    // both. The old event said "gone" and the window heard
+                    // "the shell is over", so closing one split pane closed
+                    // every other pane with it.
+                    out.event("shellexit", serde_json::json!({ "id": id }));
+                    return;
+                }
                 let dirty = watch.lock().map(|s| s.take_dirty()).unwrap_or(false);
                 if !dirty {
                     continue;
@@ -76,9 +92,9 @@ impl Shell {
                     out.event("shell", grid);
                 }
             }
-            // Say so once it has gone, so the window can take the panel down
-            // rather than leaving a frozen screen that looks alive.
-            out.event("shellgone", serde_json::json!({ "id": id }));
+            // Stopped because the Shell was dropped — the engine already knows,
+            // having done it. Saying so would be the engine telling the window
+            // about the window's own request.
         });
 
         Ok(Shell { session, stop, id, rows, cols })

@@ -57,34 +57,11 @@ const fn rgb(v: u32) -> Color {
     Color::Rgb((v >> 16) as u8, (v >> 8) as u8, v as u8)
 }
 
-/// A compact palette spec: the handful of colors a well-known theme actually
-/// defines, from which [`from_spec`] derives every [`ResolvedTheme`] slot. Named
-/// after the ANSI-ish roles most palettes publish, so a theme reads at a glance.
-struct Spec {
-    bg: u32,
-    fg: u32,
-    dim: u32,
-    border: u32,
-    accent: u32,
-    sel: u32,
-    visual: u32,
-    mark: u32,
-    /// The surface dialogs and menus are drawn on. A shade off `bg`, in the
-    /// same direction the theme itself goes: a light theme's dialogs are
-    /// light. (They were all dark once, whatever the theme, which made every
-    /// popup look like a different program had opened it.) Text on them is
-    /// `readable_on`, so either way round reads.
-    popup: u32,
-    status: u32,
-    // File-type accents.
-    blue: u32,
-    yellow: u32,
-    cyan: u32,
-    magenta: u32,
-    red: u32,
-    green: u32,
-    doc: u32,
-}
+// The palettes themselves live in `cian_core::theme`, because the window
+// needs the same eighteen and a palette kept in two places is two palettes the
+// first time somebody adjusts one of them. What stays here is the part that is
+// this front end's own: turning a spec into ratatui colours.
+use cian_core::theme::Spec;
 
 /// Expand a [`Spec`] into the full resolved palette. `const` so every preset is
 /// a `const ResolvedTheme`.
@@ -143,146 +120,38 @@ impl ResolvedTheme {
 
     // Ethan Schoonover's Solarized, light and dark. Popups stay on Solarized's
     // dark base02 so their light body text reads over the light surface.
-    pub(crate) const SOLARIZED_LIGHT: ResolvedTheme = from_spec(Spec {
-        bg: 0xfdf6e3, fg: 0x657b83, dim: 0x93a1a1, border: 0x93a1a1,
-        accent: 0x268bd2, sel: 0xdcd5be, visual: 0xf7e4b0, mark: 0xcb4b16,
-        popup: 0xf5efdc, status: 0xeee8d5,
-        blue: 0x268bd2, yellow: 0xb58900, cyan: 0x2aa198, magenta: 0xd33682,
-        red: 0xdc322f, green: 0x859900, doc: 0x586e75,
-    });
+    pub(crate) const SOLARIZED_LIGHT: ResolvedTheme = from_spec(cian_core::theme::SOLARIZED_LIGHT);
     /// The palette a desktop file manager is drawn in: near-white, one strong
     /// blue for the selection, and greys quiet enough that the eye goes to the
     /// names. Paired with [`crate::Skin::Finder`], which is what takes the
     /// borders away — the colours alone are just another light theme.
-    pub(crate) const FINDER: ResolvedTheme = from_spec(Spec {
-        bg: 0xffffff, fg: 0x1d1d1f, dim: 0x86868b, border: 0xd8d8dc,
-        accent: 0x0a84ff, sel: 0x0a84ff, visual: 0xd6e9ff, mark: 0xff9500,
-        popup: 0xf7f7f9, status: 0xececee,
-        blue: 0x2f7de0, yellow: 0x9a6b00, cyan: 0x0a7f8c, magenta: 0xa63aa6,
-        red: 0xc0392b, green: 0x2f8a3e, doc: 0x3a3a3c,
-    });
-    pub(crate) const SOLARIZED_DARK: ResolvedTheme = from_spec(Spec {
-        bg: 0x002b36, fg: 0x839496, dim: 0x586e75, border: 0x586e75,
-        accent: 0x268bd2, sel: 0x073642, visual: 0x0a4a5a, mark: 0xcb4b16,
-        popup: 0x073642, status: 0x073642,
-        blue: 0x268bd2, yellow: 0xb58900, cyan: 0x2aa198, magenta: 0xd33682,
-        red: 0xdc322f, green: 0x859900, doc: 0x93a1a1,
-    });
-    pub(crate) const DRACULA: ResolvedTheme = from_spec(Spec {
-        bg: 0x282a36, fg: 0xf8f8f2, dim: 0x6272a4, border: 0x6272a4,
-        accent: 0xbd93f9, sel: 0x44475a, visual: 0x424458, mark: 0xffb86c,
-        popup: 0x21222c, status: 0x191a21,
-        blue: 0xbd93f9, yellow: 0xf1fa8c, cyan: 0x8be9fd, magenta: 0xff79c6,
-        red: 0xff5555, green: 0x50fa7b, doc: 0xf8f8f2,
-    });
-    pub(crate) const NORD: ResolvedTheme = from_spec(Spec {
-        bg: 0x2e3440, fg: 0xd8dee9, dim: 0x4c566a, border: 0x4c566a,
-        accent: 0x88c0d0, sel: 0x3b4252, visual: 0x434c5e, mark: 0xebcb8b,
-        popup: 0x272c36, status: 0x3b4252,
-        blue: 0x81a1c1, yellow: 0xebcb8b, cyan: 0x88c0d0, magenta: 0xb48ead,
-        red: 0xbf616a, green: 0xa3be8c, doc: 0xe5e9f0,
-    });
-    pub(crate) const GRUVBOX_DARK: ResolvedTheme = from_spec(Spec {
-        bg: 0x282828, fg: 0xebdbb2, dim: 0x928374, border: 0x504945,
-        accent: 0xfe8019, sel: 0x3c3836, visual: 0x504945, mark: 0xfabd2f,
-        popup: 0x1d2021, status: 0x3c3836,
-        blue: 0x83a598, yellow: 0xfabd2f, cyan: 0x8ec07c, magenta: 0xd3869b,
-        red: 0xfb4934, green: 0xb8bb26, doc: 0xebdbb2,
-    });
-    pub(crate) const GRUVBOX_LIGHT: ResolvedTheme = from_spec(Spec {
-        bg: 0xfbf1c7, fg: 0x3c3836, dim: 0x7c6f64, border: 0xd5c4a1,
-        accent: 0xaf3a03, sel: 0xebdbb2, visual: 0xd5c4a1, mark: 0xb57614,
-        popup: 0xf2e5bc, status: 0xebdbb2,
-        blue: 0x076678, yellow: 0xb57614, cyan: 0x427b58, magenta: 0x8f3f71,
-        red: 0x9d0006, green: 0x79740e, doc: 0x3c3836,
-    });
-    pub(crate) const TOKYO_NIGHT: ResolvedTheme = from_spec(Spec {
-        bg: 0x1a1b26, fg: 0xc0caf5, dim: 0x565f89, border: 0x292e42,
-        accent: 0x7aa2f7, sel: 0x292e42, visual: 0x33467c, mark: 0xe0af68,
-        popup: 0x16161e, status: 0x16161e,
-        blue: 0x7aa2f7, yellow: 0xe0af68, cyan: 0x7dcfff, magenta: 0xbb9af7,
-        red: 0xf7768e, green: 0x9ece6a, doc: 0xc0caf5,
-    });
-    pub(crate) const CATPPUCCIN_MOCHA: ResolvedTheme = from_spec(Spec {
-        bg: 0x1e1e2e, fg: 0xcdd6f4, dim: 0x6c7086, border: 0x313244,
-        accent: 0x89b4fa, sel: 0x313244, visual: 0x45475a, mark: 0xf9e2af,
-        popup: 0x181825, status: 0x181825,
-        blue: 0x89b4fa, yellow: 0xf9e2af, cyan: 0x94e2d5, magenta: 0xf5c2e7,
-        red: 0xf38ba8, green: 0xa6e3a1, doc: 0xcdd6f4,
-    });
-    pub(crate) const CATPPUCCIN_LATTE: ResolvedTheme = from_spec(Spec {
-        bg: 0xeff1f5, fg: 0x4c4f69, dim: 0x6c6f85, border: 0xccd0da,
-        accent: 0x1e66f5, sel: 0xccd0da, visual: 0xdce0e8, mark: 0xdf8e1d,
-        popup: 0xe6e9ef, status: 0xccd0da,
-        blue: 0x1e66f5, yellow: 0xdf8e1d, cyan: 0x179299, magenta: 0xea76cb,
-        red: 0xd20f39, green: 0x40a02b, doc: 0x4c4f69,
-    });
-    pub(crate) const MONOKAI: ResolvedTheme = from_spec(Spec {
-        bg: 0x272822, fg: 0xf8f8f2, dim: 0x75715e, border: 0x3e3d32,
-        accent: 0x66d9ef, sel: 0x3e3d32, visual: 0x49483e, mark: 0xfd971f,
-        popup: 0x1e1f1c, status: 0x3e3d32,
-        blue: 0x66d9ef, yellow: 0xe6db74, cyan: 0x66d9ef, magenta: 0xae81ff,
-        red: 0xf92672, green: 0xa6e22e, doc: 0xf8f8f2,
-    });
-    pub(crate) const ONE_DARK: ResolvedTheme = from_spec(Spec {
-        bg: 0x282c34, fg: 0xabb2bf, dim: 0x5c6370, border: 0x3b4048,
-        accent: 0x61afef, sel: 0x3b4048, visual: 0x3e4451, mark: 0xe5c07b,
-        popup: 0x21252b, status: 0x21252b,
-        blue: 0x61afef, yellow: 0xe5c07b, cyan: 0x56b6c2, magenta: 0xc678dd,
-        red: 0xe06c75, green: 0x98c379, doc: 0xabb2bf,
-    });
-    pub(crate) const GITHUB_LIGHT: ResolvedTheme = from_spec(Spec {
-        bg: 0xffffff, fg: 0x24292e, dim: 0x6a737d, border: 0xd1d5da,
-        accent: 0x0366d6, sel: 0xeef2f5, visual: 0xdbe9ff, mark: 0xe36209,
-        popup: 0xf6f8fa, status: 0xeaeef2,
-        blue: 0x0366d6, yellow: 0xb08800, cyan: 0x1b7c83, magenta: 0x6f42c1,
-        red: 0xd73a49, green: 0x22863a, doc: 0x24292e,
-    });
+    pub(crate) const FINDER: ResolvedTheme = from_spec(cian_core::theme::FINDER);
+    pub(crate) const SOLARIZED_DARK: ResolvedTheme = from_spec(cian_core::theme::SOLARIZED_DARK);
+    pub(crate) const DRACULA: ResolvedTheme = from_spec(cian_core::theme::DRACULA);
+    pub(crate) const NORD: ResolvedTheme = from_spec(cian_core::theme::NORD);
+    pub(crate) const GRUVBOX_DARK: ResolvedTheme = from_spec(cian_core::theme::GRUVBOX_DARK);
+    pub(crate) const GRUVBOX_LIGHT: ResolvedTheme = from_spec(cian_core::theme::GRUVBOX_LIGHT);
+    pub(crate) const TOKYO_NIGHT: ResolvedTheme = from_spec(cian_core::theme::TOKYO_NIGHT);
+    pub(crate) const CATPPUCCIN_MOCHA: ResolvedTheme = from_spec(cian_core::theme::CATPPUCCIN_MOCHA);
+    pub(crate) const CATPPUCCIN_LATTE: ResolvedTheme = from_spec(cian_core::theme::CATPPUCCIN_LATTE);
+    pub(crate) const MONOKAI: ResolvedTheme = from_spec(cian_core::theme::MONOKAI);
+    pub(crate) const ONE_DARK: ResolvedTheme = from_spec(cian_core::theme::ONE_DARK);
+    pub(crate) const GITHUB_LIGHT: ResolvedTheme = from_spec(cian_core::theme::GITHUB_LIGHT);
     /// Monokai Pro — the paid Monokai's own palette, not the classic one
     /// above: warmer greys, and the amber that everything is keyed to.
-    pub(crate) const MONOKAI_PRO: ResolvedTheme = from_spec(Spec {
-        bg: 0x2d2a2e, fg: 0xfcfcfa, dim: 0x727072, border: 0x5b595c,
-        accent: 0xffd866, sel: 0x423f42, visual: 0x5b595c, mark: 0xfc9867,
-        popup: 0x221f22, status: 0x221f22,
-        blue: 0x78dce8, yellow: 0xffd866, cyan: 0x78dce8, magenta: 0xab9df2,
-        red: 0xff6188, green: 0xa9dc76, doc: 0xc1c0c0,
-    });
+    pub(crate) const MONOKAI_PRO: ResolvedTheme = from_spec(cian_core::theme::MONOKAI_PRO);
     /// Ayu Dark — near-black with one amber accent, which is the whole idea.
-    pub(crate) const AYU_DARK: ResolvedTheme = from_spec(Spec {
-        bg: 0x0d1017, fg: 0xbfbdb6, dim: 0x565b66, border: 0x1d2229,
-        accent: 0xe6b450, sel: 0x1d2733, visual: 0x2d3640, mark: 0xff8f40,
-        popup: 0x131721, status: 0x11151c,
-        blue: 0x59c2ff, yellow: 0xe6b450, cyan: 0x95e6cb, magenta: 0xd2a6ff,
-        red: 0xf26d78, green: 0xaad94c, doc: 0xacb6bf,
-    });
+    pub(crate) const AYU_DARK: ResolvedTheme = from_spec(cian_core::theme::AYU_DARK);
     /// Ayu Light — the same palette on paper.
-    pub(crate) const AYU_LIGHT: ResolvedTheme = from_spec(Spec {
-        bg: 0xfcfcfc, fg: 0x5c6166, dim: 0x8a9199, border: 0xe7e8e9,
-        accent: 0xf2ae49, sel: 0xeaeaeb, visual: 0xffe9b3, mark: 0xfa8d3e,
-        popup: 0xf3f3f3, status: 0xf0f0f0,
-        blue: 0x399ee6, yellow: 0xf2ae49, cyan: 0x4cbf99, magenta: 0xa37acc,
-        red: 0xf07171, green: 0x86b300, doc: 0x787b80,
-    });
+    pub(crate) const AYU_LIGHT: ResolvedTheme = from_spec(cian_core::theme::AYU_LIGHT);
     /// Bluloco Light — a light theme with saturated syntax rather than pastel.
-    pub(crate) const BLULOCO_LIGHT: ResolvedTheme = from_spec(Spec {
-        bg: 0xf9f9f9, fg: 0x383a42, dim: 0xa0a1a7, border: 0xd4d4d4,
-        accent: 0x275fe4, sel: 0xe5e5e6, visual: 0xd7e0f5, mark: 0xd52753,
-        popup: 0xf0f0f0, status: 0xefefef,
-        blue: 0x275fe4, yellow: 0xc18401, cyan: 0x0098dd, magenta: 0x823ff1,
-        red: 0xd52753, green: 0x23974a, doc: 0x7a82da,
-    });
+    pub(crate) const BLULOCO_LIGHT: ResolvedTheme = from_spec(cian_core::theme::BLULOCO_LIGHT);
     /// Bearded — the family's dark, vivid look: a near-black violet ground
     /// with pink, amethyst and teal on it. Approximated from the family's
     /// signature colours rather than copied from one variant, since Bearded
     /// ships dozens; `cian.set_theme{...}` takes exact values if you have a
     /// particular one in mind.
-    pub(crate) const BEARDED: ResolvedTheme = from_spec(Spec {
-        bg: 0x16161d, fg: 0xebebf0, dim: 0x6c6f93, border: 0x2a2a3c,
-        accent: 0xa45fff, sel: 0x2c2c3f, visual: 0x3a2f55, mark: 0xff3e7b,
-        popup: 0x1d1d28, status: 0x1d1d28,
-        blue: 0x50b0f0, yellow: 0xffb86c, cyan: 0x21c7a8, magenta: 0xff3e7b,
-        red: 0xff5f87, green: 0x7ddb8a, doc: 0xb9bacb,
-    });
+    pub(crate) const BEARDED: ResolvedTheme = from_spec(cian_core::theme::BEARDED);
 }
 
 /// The named presets, in gallery order. `default` is the transparent-background

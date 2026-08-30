@@ -1376,10 +1376,27 @@ impl Session {
             }
             // Close the focused pane; the last one closes the tab.
             "shellpaneclose" => {
-                let Some(tab) = self.tabs.get_mut(self.shell_at) else {
+                // Which pane: the focused one for Shift+F10, or a named one
+                // when a shell has ended by itself. The same close either way
+                // — a pane that is over is a pane that is over.
+                let named = req.params["id"].as_u64();
+                let Some(at) = named
+                    .and_then(|id| self.tabs.iter().position(|t| {
+                        let mut ids = Vec::new();
+                        t.root.leaves(&mut ids);
+                        ids.contains(&id)
+                    }))
+                    .or(Some(self.shell_at))
+                else {
                     anyhow::bail!("シェルが開いていません");
                 };
-                let going = tab.focus;
+                if named.is_some() {
+                    self.shell_at = at;
+                }
+                let Some(tab) = self.tabs.get_mut(at) else {
+                    anyhow::bail!("シェルが開いていません");
+                };
+                let going = named.unwrap_or(tab.focus);
                 if tab.root.close(going) {
                     let mut ids = Vec::new();
                     tab.root.leaves(&mut ids);
@@ -1388,7 +1405,7 @@ impl Session {
                     return Ok(self.shell_reply());
                 }
                 // It was the only pane: closing it closes the tab.
-                self.tabs.remove(self.shell_at);
+                self.tabs.remove(at);
                 self.prune_shells();
                 if self.tabs.is_empty() {
                     return Ok(serde_json::json!({ "gone": true }));
@@ -2157,6 +2174,7 @@ impl Session {
                 // wrong for somebody.
                 "font": cian_lua::state_get("gui_font"),
                 "view": cian_lua::state_get("gui_view"),
+                "hints": cian_lua::state_get("gui_hints"),
                 "theme": cian_lua::state_get("theme"),
                 // The keys the person bound in init.lua. The terminal build
                 // reads the same list; a binding that works in one and not the
@@ -2177,7 +2195,12 @@ impl Session {
             "remember" => {
                 let key = req.params["key"].as_str().unwrap_or("");
                 let value = req.params["value"].as_str().unwrap_or("");
-                if !matches!(key, "gui_look" | "gui_editor" | "gui_font" | "gui_view") {
+                // `theme` is the terminal build's own key, deliberately: a
+                // palette chosen in the window is the palette the terminal
+                // opens with, because they are one program.
+                if !matches!(key,
+                    "gui_look" | "gui_editor" | "gui_font" | "gui_view" | "gui_hints" | "theme")
+                {
                     anyhow::bail!("覚えられない項目です: {key}");
                 }
                 cian_lua::state_set(key, value);
@@ -3031,6 +3054,66 @@ impl Session {
                     };
                 }
                 Ok(serde_json::json!({ "bps": self.limit_bps }))
+            }
+            // The eighteen named palettes, from the same table the terminal
+            // build reads. The window turns a spec into CSS properties; the
+            // terminal turns it into ratatui colours; neither owns it.
+            "themes" => Ok(serde_json::json!({
+                "now": cian_lua::state_get("theme"),
+                "list": cian_core::theme::PRESETS
+                    .iter()
+                    .map(|(name, s)| serde_json::json!({
+                        "name": name,
+                        "light": s.is_light(),
+                        "bg": format!("#{:06x}", s.bg),
+                        "fg": format!("#{:06x}", s.fg),
+                        "dim": format!("#{:06x}", s.dim),
+                        "border": format!("#{:06x}", s.border),
+                        "accent": format!("#{:06x}", s.accent),
+                        "sel": format!("#{:06x}", s.sel),
+                        "visual": format!("#{:06x}", s.visual),
+                        "mark": format!("#{:06x}", s.mark),
+                        "popup": format!("#{:06x}", s.popup),
+                        "status": format!("#{:06x}", s.status),
+                        "blue": format!("#{:06x}", s.blue),
+                        "yellow": format!("#{:06x}", s.yellow),
+                        "cyan": format!("#{:06x}", s.cyan),
+                        "magenta": format!("#{:06x}", s.magenta),
+                        "red": format!("#{:06x}", s.red),
+                        "green": format!("#{:06x}", s.green),
+                        "doc": format!("#{:06x}", s.doc),
+                        // Derived here, by the terminal build's own rules, so
+                        // the window is not left doing colour arithmetic that
+                        // has to agree with somebody else's.
+                        "on_accent": format!("#{:06x}", cian_core::theme::readable_on(s.accent)),
+                        "on_sel": format!("#{:06x}", cian_core::theme::readable_on(s.sel)),
+                        "accent_dim": format!("#{:06x}", cian_core::theme::toward(s.accent, s.bg, 0.85)),
+                    }))
+                    .collect::<Vec<_>>(),
+            })),
+            // Hand the file to Finder / Explorer, with it selected.
+            //
+            // The way out of cian into the rest of the machine: a file manager
+            // that cannot say "show me this where the OS shows things" is a
+            // place you have to leave by hand.
+            "revealos" => {
+                let which = req.params["pane"].as_str().unwrap_or("left").to_string();
+                let (path, name, _) = self.selected(&which)?;
+                #[cfg(target_os = "macos")]
+                let out = cian_core::proc::quiet("open").arg("-R").arg(&path).status();
+                #[cfg(windows)]
+                let out = cian_core::proc::quiet("explorer")
+                    .arg(format!("/select,{}", path.display()))
+                    .status();
+                #[cfg(all(not(target_os = "macos"), not(windows)))]
+                let out = cian_core::proc::quiet("xdg-open")
+                    .arg(path.parent().unwrap_or(&path))
+                    .status();
+                // Explorer answers 1 on success, which is not a failure; the
+                // others answer 0. Neither number is worth reporting, so only
+                // a failure to start the program at all is.
+                out.map_err(|e| anyhow::anyhow!("開けませんでした: {e}"))?;
+                Ok(serde_json::json!({ "revealed": name }))
             }
             // The input method, herded.
             //

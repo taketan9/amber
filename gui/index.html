@@ -35,6 +35,11 @@
   --on-accent: #ffffff;
   --mark:      #bf6b34;
   --cell-h:    26px;
+  /* The two fixed bars at the foot. Measured at runtime rather than declared:
+     the text in them is set at a size the person can change, so a number
+     written here would be right until the first Ctrl+= and wrong after. */
+  --status-h:  20px;
+  --hints-h:   0px;
   --size:      15px;
   /* The face the listing and the code use. Named so the preview can borrow
      it for code while setting prose in something proportional. */
@@ -117,7 +122,13 @@ html, body {
   user-select: none; cursor: default;
   overflow: hidden;
 }
-#panes { display: flex; height: 100%; gap: 1px; background: var(--line); }
+#panes {
+  display: flex; gap: 1px; background: var(--line);
+  /* Room for the status line, and for the hint bar when it is out. Measured
+     rather than guessed: a listing whose last row sits under the status bar
+     is a row you cannot see or reach. */
+  height: calc(100% - var(--status-h) - var(--hints-h));
+}
 .pane {
   flex: 1 1 0; min-width: 0; display: flex; flex-direction: column;
   background: var(--pane-off);
@@ -165,10 +176,26 @@ html, body {
 }
 .row .name { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; }
 .row .size { flex: 0 0 auto; color: var(--dim); font-variant-numeric: tabular-nums; }
-/* details — the extra columns. Date fixed-width so the column reads as a
-   column; a ☁ mark for a file that is listed but lives in the cloud. */
+/* details — Explorer's columns, in Explorer's widths. Each fixed so they
+   read as columns; a ☁ for a file that is listed but lives in the cloud. */
 .row .when { flex: 0 0 11ch; text-align: right; color: var(--dim); font-variant-numeric: tabular-nums; }
 .row .cloud { flex: 0 0 2ch; text-align: center; color: var(--dim); }
+.row .kind { flex: 0 0 12ch; color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The small leading icon. Only in details — classic is a text listing on
+   purpose, and the tiles have their own, much larger one. */
+.rows.details .row .glyph { flex: 0 0 1.6em; font-size: 1em; text-align: center; }
+.rows.details .row .size { flex: 0 0 9ch; text-align: right; }
+.rows.details { padding-top: 0; }
+/* The column header. Built from the same class names as a row, so a column
+   and its heading cannot drift apart in width. */
+.dhead {
+  flex: 0 0 auto; color: var(--dim); font-size: .85em;
+  border-bottom: 1px solid var(--line); background: var(--pane-off);
+  cursor: default; user-select: none;
+}
+.dhead .glyph { flex: 0 0 1.6em; }
+.dhead .size { flex: 0 0 9ch; text-align: right; }
+.dhead .sortable:hover { color: var(--fg); text-decoration: underline; }
 
 /* icons — a grid of tiles. The listing turns sideways: the same rows, the
    same cursor, laid out as a wall. Made for a mouse and a quick visual scan;
@@ -187,7 +214,8 @@ html, body {
   width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   font-size: .85em; direction: initial;
 }
-.rows.icons .row .size, .rows.icons .row .when { display: none; }
+.rows.icons .row .size, .rows.icons .row .when,
+.rows.icons .row .kind, .rows.icons .row .cloud { display: none; }
 .rows.icons .row.cursor { background: var(--accent-dim); }
 .pane.active .rows.icons .row.cursor { background: var(--accent); }
 .row.dir .name { color: var(--dir); }
@@ -244,6 +272,34 @@ html, body {
    is not. */
 #shell.logging { border-top: 2px solid #b03a48; }
 #shell.logging .vhead { color: #b03a48; }
+/* The shell tabs, the terminal build's own strip: `shell 1 | shell 2`, the
+   active one on the accent. It replaced a heading that said "シェル" — a
+   label naming the thing you are already looking at, where the tabs you
+   cannot otherwise see could have been. */
+/* The key hints — what the keys do *here*, right now. The terminal build
+   carries this bar and the window did not, which is most of why the two felt
+   like different programs: cian tells you what you can press, continuously,
+   and a window that stayed silent made you remember instead. Ordered by how
+   often each is reached for, so a narrow window drops from the end. */
+#hints {
+  /* Fixed, like the status line it sits on — the panes fill the window and
+     would otherwise push this off the bottom edge, laid out and invisible. */
+  position: fixed; left: 0; right: 0; bottom: var(--status-h);
+  display: flex; gap: 1.4em; overflow: hidden; white-space: nowrap;
+  padding: 3px 10px; font-size: .82em; color: var(--dim);
+  background: var(--pane-off); border-top: 1px solid var(--line);
+}
+#hints b { color: var(--accent); font-weight: 600; margin-right: .35em; }
+#hints span { flex: 0 0 auto; }
+.stabs { display: flex; gap: 0; align-items: stretch; margin-right: .8em; }
+.stabs span {
+  padding: 0 .7em; cursor: pointer; color: var(--dim);
+  border-right: 1px solid var(--line);
+}
+.stabs span:last-child { border-right: 0; }
+.stabs span.on { background: var(--accent); color: var(--accent-fg); font-weight: 600; }
+.stabs span:hover:not(.on) { color: var(--fg); }
+#s-title { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sgrid { user-select: text; cursor: text; }
 #shell.sync .vhead { color: var(--mark); }
 /* The panes of a split, placed where the engine says. Absolute rather than
@@ -516,15 +572,18 @@ html, body {
       <div class="tabs"></div>
       <div class="tabs"></div>
       <div class="crumb"></div>
+      <div class="dhead row" hidden></div>
       <div class="rows"></div>
     </section>
     <section class="pane" data-pane="right">
       <div class="tabs"></div>
       <div class="tabs"></div>
       <div class="crumb"></div>
+      <div class="dhead row" hidden></div>
       <div class="rows"></div>
     </section>
   </div>
+  <div id="hints"></div>
   <div id="status">…</div>
 
   <!-- The confirm. cian's spine is that nothing is lost by a slip, so every
@@ -553,7 +612,7 @@ html, body {
   <!-- The shell. Docked under the panes rather than over them: it is a place
        you look at while you work, not a thing you open instead of working. -->
   <div id="shell" hidden>
-    <div class="vhead"><span id="s-title">シェル</span><span id="s-about"></span></div>
+    <div class="vhead"><span id="s-tabs" class="stabs"></span><span id="s-title"></span><span id="s-about"></span></div>
     <div class="spanes" id="s-panes"></div>
   </div>
 

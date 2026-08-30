@@ -6,6 +6,7 @@
 const state = { left: null, right: null, focus: 'left' };
 
 const el = {
+    hints: document.getElementById('hints'),
     panes: document.getElementById('panes'),
     left: document.querySelector('[data-pane="left"]'),
     right: document.querySelector('[data-pane="right"]'),
@@ -16,6 +17,7 @@ const el = {
     findHits: document.getElementById('find-hits'),
     findFoot: document.getElementById('find-foot'),
     shell: document.getElementById('shell'),
+    sTabs: document.getElementById('s-tabs'),
     sTitle: document.getElementById('s-title'),
     sAbout: document.getElementById('s-about'),
     sPanes: document.getElementById('s-panes'),
@@ -79,6 +81,10 @@ function confirm(head, body) {
 function say(text, bad = false) {
     el.status.textContent = text;
     el.status.classList.toggle('bad', bad);
+    // Every state change in this program passes through here on its way to
+    // saying what happened, which makes it the one place the hint bar can be
+    // kept honest without threading a call through eighty functions.
+    drawHints();
 }
 
 /// Bytes, in the width a listing can spare. Directories show nothing rather
@@ -123,13 +129,46 @@ function draw(which) {
     // With both panes visible the highlight says it; with one, Tab would
     // otherwise change everything and announce nothing.
     root.querySelector('.crumb').textContent =
-        viewMode === 'icons' ? `[${which === 'left' ? '左' : '右'}] ${where}` : where;
+        ONE_PANE.includes(viewMode) ? `[${which === 'left' ? '左' : '右'}] ${where}` : where;
 
     const rows = root.querySelector('.rows');
     // Rebuilt whole. A listing is a few hundred rows and Chromium does not
     // notice; the moment it does, this is where a windowed list goes.
     const frag = document.createDocumentFragment();
     rows.classList.toggle('icons', viewMode === 'icons');
+    rows.classList.toggle('details', viewMode === 'details');
+    // The column header, which is what makes a details list a table rather
+    // than a listing with extra words on it. Clicking one sorts by it, as it
+    // does everywhere else this arrangement appears.
+    const head = root.querySelector('.dhead');
+    head.hidden = viewMode !== 'details';
+    if (viewMode === 'details' && !head.dataset.built) {
+        head.dataset.built = '1';
+        for (const [cls, label, key] of [
+            ['glyph', '', null], ['name', '名前', 'name'], ['cloud', '', null],
+            ['size', 'サイズ', 'size'], ['kind', '種類', 'ext'], ['when', '更新日時', 'date'],
+        ]) {
+            const c = document.createElement('span');
+            c.className = cls;
+            c.textContent = label;
+            c.dataset.key = key || '';
+            if (key) {
+                c.classList.add('sortable');
+                c.addEventListener('mousedown', () => applySort(key));
+            }
+            head.append(c);
+        }
+    }
+    if (viewMode === 'details') {
+        // Which column the listing is actually sorted by. Explorer marks it,
+        // and a table that does not is a table you have to remember about.
+        for (const c of head.children) {
+            c.textContent = c.textContent.replace(/ [↑↓]$/, '');
+            if (c.dataset.key && c.dataset.key === sortKey) {
+                c.textContent += sortDown ? ' ↓' : ' ↑';
+            }
+        }
+    }
     pane.entries.forEach((row, i) => {
         const div = document.createElement('div');
         div.className = 'row'
@@ -145,16 +184,26 @@ function draw(which) {
             g.textContent = glyphFor(row);
             div.append(g, name);
         } else if (viewMode === 'details') {
-            const len = document.createElement('span');
-            len.className = 'size';
-            len.textContent = size(row);
-            const w = document.createElement('span');
-            w.className = 'when';
-            w.textContent = when(row);
+            // Explorer's details, in Explorer's order: icon, name, size,
+            // kind, date. The icon belongs here too — a details list with no
+            // picture in it reads as a table of strings, and the kind of a
+            // file is the first thing the eye wants.
+            const g = document.createElement('span');
+            g.className = 'glyph';
+            g.textContent = glyphFor(row);
             const cl = document.createElement('span');
             cl.className = 'cloud';
             cl.textContent = row.cloud ? '☁' : '';
-            div.append(name, cl, len, w);
+            const len = document.createElement('span');
+            len.className = 'size';
+            len.textContent = size(row);
+            const kind = document.createElement('span');
+            kind.className = 'kind';
+            kind.textContent = kindOf(row);
+            const w = document.createElement('span');
+            w.className = 'when';
+            w.textContent = when(row);
+            div.append(g, name, cl, len, kind, w);
         } else {
             const len = document.createElement('span');
             len.className = 'size';
@@ -167,6 +216,16 @@ function draw(which) {
             draw('left'); draw('right');
         });
         div.addEventListener('dblclick', () => { state.focus = which; enter(); });
+        // Right-click opens the same menu Shift+Enter does, on the row you
+        // pointed at. A file manager where the right button does nothing is a
+        // file manager that feels broken before you have tried anything.
+        div.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            state.focus = which;
+            pane.cursor = i;
+            draw('left'); draw('right');
+            openMenu(CONTEXT);
+        });
         frag.append(div);
     });
     rows.replaceChildren(frag);
@@ -400,6 +459,9 @@ function askFor(head, initial = '', opts = {}) {
     input.type = opts.secret ? 'password' : 'text';
     input.value = opts.secret ? '' : initial;
     input.className = 'field';
+    // A prompt inside the field, when the command it takes has one — `:` is
+    // information about what you type, not about what the box is.
+    if (opts.hint) input.placeholder = opts.hint;
     body.append(input);
     el.ask.hidden = false;
     input.focus();
@@ -497,12 +559,14 @@ async function toggleHidden() {
 const SORTS = [['name', '名前', 'n'], ['size', 'サイズ', 's'],
                ['date', '日付', 'd'], ['ext', '拡張子', 'e']];
 let sortKey = 'name';
+let sortDown = false;
 
 async function applySort(key) {
     const which = state.focus;
     const r = await ask('sort', { pane: which, key });
     if (!r) return;
     sortKey = r.by;
+    sortDown = !!r.reverse;
     state[which] = r.pane;
     draw(which);
     say(`並び: ${r.by}${r.reverse ? ' ↓' : ' ↑'}`);
@@ -615,18 +679,61 @@ async function goToHit() {
 /// person opening this for the first time rather than for the person who
 /// built it — the same reasoning that made notepad the default grammar.
 /// Taketan's own is solarized-light, one press away.
+/// The window's own three, hand-made for this window: 白磁 is the default,
+/// 陰翳 its dark counterpart, 端末譲り the one that looks like the terminal
+/// build. The eighteen named palettes cian-tui ships arrive beside them at
+/// startup, from cian-core's table — one list, one key, and a theme chosen
+/// here is the theme the terminal opens with.
 const LOOKS = [
     ['', '白磁'],
-    ['solarized-light', 'Solarized Light'],
     ['inei', '陰翳'],
     ['terminal', '端末譲り'],
 ];
+
+/// The palettes from cian-core, once they have arrived.
+const palettes = new Map();
+
+/// A spec becomes CSS custom properties.
+///
+/// The eleven the window uses are derived from the seventeen a palette
+/// publishes — and the arithmetic that had to match the terminal build's
+/// (which ink reads on the accent, how far to pull a colour toward the page)
+/// is done in the engine, so there is one answer rather than two.
+function paintPalette(t) {
+    const r = document.documentElement.style;
+    const set = {
+        '--bg': t.bg,
+        '--pane': t.bg,
+        '--pane-off': t.popup,
+        '--line': t.border,
+        '--text': t.fg,
+        '--dim': t.dim,
+        '--dir': t.blue,
+        '--accent': t.accent,
+        '--accent-dim': t.accent_dim,
+        '--on-accent': t.on_accent,
+        '--mark': t.mark,
+    };
+    for (const [k, v] of Object.entries(set)) r.setProperty(k, v);
+    document.documentElement.dataset.dark = t.light ? '' : '1';
+}
+
+function clearPalette() {
+    const r = document.documentElement.style;
+    for (const k of ['--bg', '--pane', '--pane-off', '--line', '--text', '--dim',
+        '--dir', '--accent', '--accent-dim', '--on-accent', '--mark']) r.removeProperty(k);
+    delete document.documentElement.dataset.dark;
+}
 
 /// How the listing is laid out: the terminal build's `:view`, which it
 /// could only ask for — ":view icons" in a terminal answers "window only",
 /// because this is the feature a window exists to have.
 const VIEWS = ['classic', 'details', 'icons'];
-const VIEW_NAMES = { classic: 'いつもの', details: '詳しく', icons: 'アイコン（1面）' };
+const VIEW_NAMES = { classic: 'クラシック', details: '詳細一覧', icons: 'アイコン' };
+/// The two that take the whole window. Both are the Explorer arrangement,
+/// where the listing is the thing you are looking at; classic keeps the two
+/// panes, which is what cian is for.
+const ONE_PANE = ['details', 'icons'];
 let viewMode = 'classic';
 
 function setView(mode, remember = true) {
@@ -635,13 +742,38 @@ function setView(mode, remember = true) {
     // Icons take the whole window; the other two keep the two panes. A wall
     // of tiles split down the middle is two narrow columns of icons, which is
     // not what either half of that arrangement is for.
-    el.panes.classList.toggle('one', mode === 'icons');
+    el.panes.classList.toggle('one', ONE_PANE.includes(mode));
     // `draw` already paints `active` on the focused pane, which is what
     // decides who is at the front here — so the two views need no second
     // notion of focus.
     draw('left');
     draw('right');
     if (remember) ask('remember', { key: 'gui_view', value: mode });
+}
+
+/// What kind of thing this is, said in a word. Explorer's "種類" column —
+/// which is more useful than the extension it is derived from, because the
+/// extension is already right there in the name.
+function kindOf(row) {
+    if (row.parent) return '';
+    if (row.is_dir) return 'フォルダー';
+    const ext = (row.name.match(/\.([a-z0-9]+)$/i) || [, ''])[1].toLowerCase();
+    if (!ext) return 'ファイル';
+    const known = {
+        md: 'Markdown', txt: 'テキスト', log: 'ログ', json: 'JSON', toml: 'TOML',
+        yml: 'YAML', yaml: 'YAML', csv: 'CSV', tsv: 'TSV', xml: 'XML', html: 'HTML',
+        css: 'CSS', js: 'JavaScript', ts: 'TypeScript', rs: 'Rust', py: 'Python',
+        go: 'Go', c: 'C', h: 'C ヘッダ', cpp: 'C++', java: 'Java', lua: 'Lua',
+        sh: 'シェル', bat: 'バッチ', ps1: 'PowerShell', sql: 'SQL',
+        pdf: 'PDF', zip: 'ZIP', tar: 'TAR', gz: 'GZIP', '7z': '7-Zip', rar: 'RAR',
+        png: 'PNG 画像', jpg: 'JPEG 画像', jpeg: 'JPEG 画像', gif: 'GIF 画像',
+        webp: 'WebP 画像', svg: 'SVG 画像', bmp: 'BMP 画像', ico: 'アイコン',
+        mp3: '音声', wav: '音声', flac: '音声', mp4: '動画', mov: '動画', mkv: '動画',
+        xlsx: 'Excel', xls: 'Excel', docx: 'Word', doc: 'Word', pptx: 'PowerPoint',
+        ttf: 'フォント', otf: 'フォント', woff2: 'フォント',
+        exe: 'アプリケーション', dll: 'ライブラリ', so: 'ライブラリ', dylib: 'ライブラリ',
+    };
+    return known[ext] || `${ext.toUpperCase()} ファイル`;
 }
 
 /// What an icon tile shows for a file. Deliberately coarse: a dozen kinds a
@@ -683,10 +815,100 @@ let look = 0;
 function setLook(i, remember = true) {
     look = (i + LOOKS.length) % LOOKS.length;
     const [value] = LOOKS[look];
+    clearPalette();
     if (value) document.documentElement.dataset.look = value;
     else delete document.documentElement.dataset.look;
     if (viewer.ed) viewer.ed.updateOptions({ theme: editorTheme() });
     if (remember) ask('remember', { key: 'gui_look', value: LOOKS[look][0] || 'hakuji' });
+}
+
+/// One of the eighteen. Same key, same list, same file the terminal build
+/// reads its own choice out of.
+function setPalette(name, remember = true) {
+    const t = palettes.get(name);
+    if (!t) { say(`${name}? — :theme で一覧`, true); return; }
+    delete document.documentElement.dataset.look;
+    paintPalette(t);
+    palette = name;
+    if (viewer.ed) viewer.ed.updateOptions({ theme: editorTheme() });
+    if (remember) ask('remember', { key: 'theme', value: name });
+}
+
+/// Which named palette is on, or null when one of the window's own looks is.
+let palette = null;
+
+/// What the keys do here, right now.
+///
+/// **Taken from cian-tui's own hint table, translated key for key.** The
+/// terminal build carries this bar and the window did not, which is most of
+/// why the two felt like different programs: cian tells you what you can
+/// press, continuously, and a window that stayed silent made you remember
+/// instead. Ordered by how often each is reached for, so a narrow window
+/// drops from the end.
+function hintsNow() {
+    if (viewer.on) {
+        if (style === 1) {
+            return [['Ctrl+S', '保存'], ['Shift+←→', '選択'], ['Ctrl+C / V', 'コピー / 貼付'],
+                ['Ctrl+F', '検索'], ['Esc ×3', '閉じる'], ['Shift+Enter', 'メニュー — キー操作切替']];
+        }
+        return [['Ctrl+S', '保存'], ['Esc', '編集終了'], ['/', '検索'], ['i', '編集'],
+            ['v', '選択'], ['y', 'コピー'], ['d c y', '＋モーション'], [':q', '閉じる'],
+            [':notepad', 'メモ帳ふうに'], ['?', 'キー一覧']];
+    }
+    if (term.on && term.focused) {
+        return [['Esc', 'ファイル'], ['Ctrl+C', '選択をコピー'], ['Shift+F1/F2', '前/次のペイン'],
+            ['F9', '新規タブ'], ['F10', 'タブを閉じる'], ['Shift+F8', '左右分割'],
+            ['Shift+F9', '上下分割'], ['Shift+F10', '分割を閉じる'], ['F12', 'ズーム']];
+    }
+    if (visual.on) {
+        return [['j/k', '伸ばす'], ['a', '全選択'], ['gg/G', '先頭/末尾'],
+            ['Enter', '確定'], ['Esc', '取消']];
+    }
+    if (filter.on) return [['type', '絞込'], ['Enter', '適用'], ['Esc', '解除']];
+    const pane = state[state.focus];
+    if (pane && pane.archive) {
+        return [['Enter/l', '入る'], ['Bksp', '戻る'], ['F3', 'メンバー閲覧'],
+            ['Space', 'マーク'], ['c', '展開 →'], ['?', 'ヘルプ']];
+    }
+    if (pane && pane.remote) {
+        return [['Esc', '切断'], ['Space', 'マーク'], ['c', '転送'], ['r', 'リネーム'],
+            ['d', '削除'], ['Enter', '開く'], ['?', 'ヘルプ']];
+    }
+    if (pane && pane.flat) {
+        return [['b/Esc', '戻る'], ['Space', 'マーク'], ['/', '絞込'],
+            ['Enter', '開く'], ['F3', '閲覧'], ['?', 'ヘルプ']];
+    }
+    return [['←→', 'ペイン'], ['Shift+J', 'シェル'], ['Space', 'マーク'], ['/', '絞込'],
+        [',', '並替'], ['Shift+F', '検索'], ['Ctrl+F', 'grep'], ['b', 'ブランチ'],
+        ['F3', '閲覧'], ['Shift+Enter', 'メニュー'], ['F1/F2', '前/次タブ'],
+        ['F9', '新規タブ'], ['F10', 'タブを閉じる'], ['=', '差分'], ['?', 'ヘルプ']];
+}
+
+let hintsOn = true;
+
+/// Tell the layout how tall the two fixed foot bars actually are.
+///
+/// Measured, not declared: their text is set at a size the person changes
+/// with Ctrl+=, so a number in the stylesheet would be right until the first
+/// press. A listing whose last row sits under the status bar is a row you
+/// cannot see or reach.
+function measureFoot() {
+    const r = document.documentElement.style;
+    r.setProperty('--status-h', `${el.status.offsetHeight}px`);
+    r.setProperty('--hints-h', `${hintsOn ? el.hints.offsetHeight : 0}px`);
+}
+
+function drawHints() {
+    el.hints.hidden = !hintsOn;
+    if (!hintsOn) return;
+    el.hints.replaceChildren(...hintsNow().map(([k, what]) => {
+        const s = document.createElement('span');
+        const b = document.createElement('b');
+        b.textContent = k;
+        s.append(b, document.createTextNode(what));
+        return s;
+    }));
+    measureFoot();
 }
 
 /// The switches, on `T` — the key the terminal build puts them on.
@@ -701,6 +923,16 @@ const TOGGLES = {
     rows: () => {
         const pane = state[state.focus];
         return [
+            {
+                label: 'キーヒント',
+                value: hintsOn ? '出す' : '出さない',
+                run: () => {
+                    hintsOn = !hintsOn;
+                    drawHints();
+                    drawMenu();
+                    ask('remember', { key: 'gui_hints', value: hintsOn ? '1' : '0' });
+                },
+            },
             {
                 label: '隠しファイル',
                 value: pane && pane.hidden_shown ? '表示' : '非表示',
@@ -722,8 +954,11 @@ const TOGGLES = {
             },
             {
                 label: '配色',
-                value: LOOKS[look][1],
-                run: () => { setLook(look + 1); drawMenu(); say(`配色: ${LOOKS[look][1]}`); },
+                value: palette || LOOKS[look][1],
+                // Opens the gallery rather than cycling: there are twenty-one
+                // of them now, and stepping through twenty-one with one key is
+                // not choosing, it is waiting.
+                run: () => { closeMenu(); cmdTheme(); },
             },
             {
                 label: 'エディタの流儀',
@@ -755,35 +990,172 @@ const SORT_MENU = {
 /// offered "extract" and a plain file is not offered it either. The terminal
 /// build's menu does the same, and it is the discoverable half of a program
 /// whose other half is a hundred and forty keys.
-const CONTEXT = {
-    key: 'M',
-    foot: '↑↓ 選ぶ   Enter 実行   Esc 閉じる',
-    stay: false,
-    rows: () => {
-        const pane = state[state.focus];
-        const row = pane && pane.entries[pane.cursor];
-        if (!row || row.parent) return [{ label: '対象がありません', value: '', run: () => {} }];
-        const items = [
-            { label: '開く', value: 'Enter', run: enter },
-            { label: '既定のアプリで開く', value: 'Ctrl+Enter', run: openOut },
-            { label: '名前を変える', value: 'r', run: rename },
+/// The context menu, built the way cian-tui builds it.
+///
+/// **Taken from the terminal build's own tree, group for group.** It was
+/// twelve flat items here and about a hundred in five zones there, which is
+/// most of what "全然違う" meant: in the terminal, `M` is how you reach
+/// everything cian does without remembering a key for it, and a short flat
+/// list is not that. The zones are its zones — launchers, then the frequent
+/// file operations, then the groups, then the OS, then quit — so items sit
+/// where the hand already expects them.
+///
+/// A group with nothing in it is not offered: an entry that can only refuse
+/// is worse than no entry.
+function contextRows() {
+    const pane = state[state.focus];
+    const row = pane && pane.entries[pane.cursor];
+    const has = row && !row.parent;
+    const inShell = term.on && term.focused;
+    const v = [];
+
+    // ── launchers ──
+    v.push(group('AI ▸', aiRows));
+    v.push({ label: '保存したコマンド', value: 'Ctrl+Shift+Enter', run: cmdSnippets });
+    v.push({ label: 'マクロ', value: '@', run: cmdMacros });
+    v.push({ label: 'ブックマーク', value: 's', run: cmdShortcuts });
+    v.push({ label: 'コマンド入力', value: ':', run: () => commandLine() });
+
+    if (inShell) {
+        // The shell's own menu: what can be done to a terminal, not to a file.
+        v.push({ label: '貼り付け（シェルへ）', value: 'Ctrl+V', run: () => document.execCommand('paste') });
+        v.push(group('セッション ▸', () => [
+            { label: '記録を取る／止める', value: ':sessionlog', run: cmdShellLog },
+            { label: '文字コード', value: ':enc', run: () => cmdEncoding() },
+        ]));
+        v.push(group('ウィンドウ ▸', () => [
+            { label: '左右に分割', value: 'Shift+F8', run: () => splitShell(false) },
+            { label: '上下に分割', value: 'Shift+F9', run: () => splitShell(true) },
+            { label: '新しいタブ', value: 'F9', run: shellTab },
+            { label: '分割を閉じる', value: 'Shift+F10', run: () => closePane() },
+            { label: 'ズーム', value: 'F12', run: zoomShell },
+            { label: 'このペインだけ', value: 'Shift+F12', run: () => ask('shellpanezoom', {}).then((r) => r && takeShell(r)) },
+        ]));
+        v.push({ label: '全ペインに同時入力', value: 'Ctrl+S', run: cmdSync });
+        v.push({ label: '閉じる', value: 'Esc', run: () => { term.focused = false; el.shell.classList.remove('on'); say('ファイル'); } });
+        v.push({ label: 'キー一覧', value: '?', run: openHelp });
+        return v;
+    }
+
+    // ── the frequent file operations ──
+    if (has) {
+        v.push({ label: '開く', value: 'Enter', run: enter });
+        v.push({ label: 'コピー（保持）', value: 'Ctrl+C', run: () => hold('copy') });
+        v.push({ label: '切り取り（保持）', value: 'Ctrl+X', run: () => hold('cut') });
+        v.push({ label: 'ここに貼り付け', value: 'Ctrl+V', run: paste });
+        v.push({ label: 'パスをコピー', value: 'p', run: copyPaths });
+        v.push({ label: 'ファイルとしてコピー', value: 'P', run: clipFiles });
+        v.push({ label: '名前を変える', value: 'r', run: rename });
+        v.push({ label: '削除（ゴミ箱へ）', value: 'd', run: () => operate('delete') });
+        v.push({ label: '新しいタブで開く', value: 't', run: tabNew });
+        v.push(group('ファイル ▸', () => [
             { label: '反対ペインへコピー', value: 'c', run: () => operate('copy') },
             { label: '反対ペインへ移動', value: 'm', run: () => operate('move') },
-            { label: '削除（ゴミ箱へ）', value: 'd', run: () => operate('delete') },
-            { label: 'パスをコピー', value: 'p', run: copyPaths },
-            { label: '属性', value: ':attr', run: cmdAttr },
-            { label: 'チェックサム', value: ':hash', run: () => cmdHash('') },
+            { label: '行き先を指定してコピー', value: ':cp', run: () => commandLine('cp ') },
+            { label: 'まとめてリネーム', value: ':renamelist', run: cmdRenameList },
+        ]));
+        v.push(group('圧縮・展開 ▸', () => {
+            const rows = [
+                { label: 'zip にまとめる', value: ':zip', run: () => cmdCompress('zip') },
+                { label: 'パスワード付き zip', value: ':zipenc', run: () => cmdCompress('zipenc') },
+                { label: 'tar.gz にまとめる', value: ':targz', run: () => cmdCompress('targz') },
+            ];
+            if (isArchive(row)) {
+                rows.push({ label: '中身を見る', value: ':lsar', run: cmdArchiveList });
+                rows.push({ label: 'ここに展開', value: ':unzip', run: cmdExtract });
+            }
+            return rows;
+        }));
+    }
+
+    v.push(group('調べる ▸', () => [
+        { label: '属性', value: ':attr', run: cmdAttr },
+        { label: 'チェックサム', value: ':hash', run: () => cmdHash('') },
+        { label: '差分をとる', value: '=', run: cmdCompare },
+        { label: 'ファイル数と行数', value: ':count', run: cmdCount },
+        { label: '容量分析', value: ':du', run: cmdDu },
+        { label: '重複を探す', value: ':dup', run: cmdDedup },
+    ]));
+    v.push(group('git ▸', () => [
+        { label: 'ステージ', value: ':stage', run: () => cmdVcs('stage') },
+        { label: 'ステージ解除', value: ':unstage', run: () => cmdVcs('unstage') },
+        { label: '変更を破棄', value: ':discard', run: () => cmdVcs('discard') },
+        { label: '差分', value: ':gitdiff', run: () => cmdVcsDiff(null) },
+        { label: 'このファイルの履歴', value: ':filelog', run: () => cmdLog(true) },
+        { label: 'ブランチ', value: 'b', run: cmdBranch },
+    ]));
+    v.push(group('svn ▸', () => [
+        { label: '追加', value: ':svnadd', run: () => cmdSvn('stage') },
+        { label: '取り消す', value: ':svnrevert', run: () => cmdSvn('discard') },
+        { label: '衝突を解決', value: ':svnresolve', run: () => cmdSvn('resolve') },
+        { label: '差分', value: ':svndiff', run: () => cmdVcsDiff('svn') },
+        { label: '履歴', value: ':svnlog', run: () => cmdLog(false, 'svn') },
+        { label: '更新', value: ':svnupdate', run: () => cmdSvn('update') },
+        { label: 'コミット', value: ':svncommit', run: () => cmdSvn('commit') },
+    ]));
+    v.push({ label: 'サーバへつなぐ', value: 'Shift+S', run: cmdSshPicker });
+    v.push({ label: '動いている処理', value: ':queue', run: cmdQueue });
+    v.push(group('表示 ▸', () => [
+        { label: 'クラシック', value: ':view classic', run: () => { setView('classic'); say('一覧: クラシック'); } },
+        { label: '詳細一覧', value: ':view details', run: () => { setView('details'); say('一覧: 詳細一覧'); } },
+        { label: 'アイコン', value: ':view icons', run: () => { setView('icons'); say('一覧: アイコン'); } },
+        { label: '隠しファイル', value: 'T', run: toggleHidden },
+        { label: '配色', value: ':theme', run: cmdTheme },
+        { label: 'トグル', value: 'T', run: () => openMenu(TOGGLES) },
+    ]));
+    v.push(group('OS ▸', () => [
+        { label: '既定のアプリで開く', value: 'Ctrl+Enter', run: openOut },
+        { label: '外部エディタで開く', value: ':edit', run: cmdEditExternal },
+        { label: 'Finder で表示', value: ':revealos', run: cmdRevealOs },
+    ]));
+    v.push({ label: 'キー一覧', value: '?', run: openHelp });
+    v.push({ label: '閉じる', value: ':q', run: cmdQuit });
+    return v;
+}
+
+/// A row that opens a submenu instead of doing something.
+///
+/// `rows` is a function, not a list: what a group offers depends on what is
+/// under the cursor at the moment it is opened, and a list built when the
+/// parent was drawn would be a list about the file you were on then.
+function group(label, rows) {
+    return { label, value: '▸', group: rows };
+}
+
+function isArchive(row) {
+    return row && !row.is_dir && /\.(zip|tar|gz|tgz|bz2|xz|7z|rar|jar)$/i.test(row.name);
+}
+
+function aiRows() {
+    if (viewer.on) {
+        return [
+            { label: 'この文章について訊く', value: ':ai', run: () => cmdAiAsk('') },
+            { label: 'コマンドの書き方', value: ':aicmd', run: () => cmdAiCmd('') },
+            { label: 'このコードを直す', value: ':aifix', run: () => commandLine('ai この選択を直して ') },
         ];
-        if (!row.is_dir && /\.(zip|tar|gz|tgz|7z|rar)$/i.test(row.name)) {
-            items.push({ label: 'アーカイブの中身', value: ':lsar', run: cmdArchiveList });
-            items.push({ label: 'ここに展開', value: ':unzip', run: cmdExtract });
-        } else {
-            items.push({ label: 'アーカイブにまとめる', value: ':zip', run: () => cmdCompress('zip') });
-        }
-        items.push({ label: 'このファイルの履歴', value: ':filelog', run: () => cmdLog(true) });
-        items.push({ label: '差分（HEAD との）', value: ':gitdiff', run: () => cmdVcsDiff(null) });
-        return items;
-    },
+    }
+    if (term.on && term.focused) {
+        return [
+            { label: 'コマンドを作る', value: ':aicmd', run: () => cmdAiCmd('') },
+            { label: '直近のエラーを説明', value: ':aierror', run: cmdAiError },
+        ];
+    }
+    return [
+        { label: '自由に訊く', value: ':ai', run: () => cmdAiAsk('') },
+        { label: 'ログを診断', value: ':ailog', run: cmdAiLog },
+        { label: '不要さがし', value: ':aijunk', run: () => cmdAiScan('aijunk') },
+        { label: '畳み方の案', value: ':aistructure', run: () => cmdAiScan('aistructure') },
+        { label: '意味で探す', value: ':aisearch', run: () => commandLine('aisearch ') },
+        { label: '改名案', value: ':airename', run: () => commandLine('airename ') },
+        { label: 'コミットメッセージ', value: ':aicommit', run: cmdAiCommit },
+    ];
+}
+
+const CONTEXT = {
+    key: 'M',
+    foot: '↑↓ 選ぶ   Enter 実行   ← / Esc 戻る',
+    stay: false,
+    rows: contextRows,
 };
 
 /// One menu driver, not one per menu.
@@ -793,7 +1165,13 @@ const CONTEXT = {
 /// they would start behaving differently from each other.
 const menu = { spec: null, at: 0 };
 
+/// Where a submenu came from, so ← and Esc go back one level rather than
+/// dropping you out of the menu entirely — which in a tree this size means
+/// starting the whole search again.
+const menuStack = [];
+
 function openMenu(spec) {
+    if (!spec.child) menuStack.length = 0;
     menu.spec = spec;
     menu.at = Math.max(0, spec.at ? spec.at() : 0);
     el.find.hidden = false;
@@ -802,7 +1180,27 @@ function openMenu(spec) {
     drawMenu();
 }
 
+/// Do what a row says: open its submenu, or run it and close.
+function runMenuRow(row, spec) {
+    if (!row) return;
+    if (row.group) {
+        const rows = row.group();
+        if (!rows.length) { say(`${row.label} — できることがありません`, true); return; }
+        menuStack.push(spec);
+        openMenu({
+            key: spec.key,
+            foot: '↑↓ 選ぶ   Enter 実行   ← / Esc 戻る',
+            child: true,
+            rows: () => rows,
+        });
+        return;
+    }
+    row.run();
+    if (!spec.stay) closeMenu();
+}
+
 function closeMenu() {
+    menuStack.length = 0;
     menu.spec = null;
     el.find.hidden = true;
     el.findQ.hidden = false;
@@ -822,8 +1220,7 @@ function drawMenu() {
         div.append(l, v);
         div.addEventListener('mousedown', () => {
             menu.at = i;
-            row.run();
-            if (!menu.spec.stay) closeMenu();
+            runMenuRow(row, menu.spec);
         });
         frag.append(div);
     });
@@ -836,13 +1233,17 @@ document.addEventListener('keydown', (e) => {
     const spec = menu.spec;
     const rows = spec.rows();
     const pick = spec.letters && spec.letters[e.key];
-    if (e.key === 'Escape' || e.key === spec.key) closeMenu();
+    if ((e.key === 'Escape' || e.key === 'ArrowLeft' || e.key === 'h') && menuStack.length) {
+        // Up one level, not out. The terminal build's `Back` row, on the key
+        // a vi user's hand is already on.
+        openMenu(menuStack.pop());
+    }
+    else if (e.key === 'Escape' || e.key === spec.key) closeMenu();
     else if (e.key === 'ArrowDown' || e.key === 'j') { menu.at = (menu.at + 1) % rows.length; drawMenu(); }
     else if (e.key === 'ArrowUp' || e.key === 'k') { menu.at = (menu.at + rows.length - 1) % rows.length; drawMenu(); }
     else if (pick) { closeMenu(); pick(); }
-    else if (e.key === 'Enter' || e.key === ' ') {
-        rows[menu.at].run();
-        if (!spec.stay) closeMenu();
+    else if (e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowRight' || e.key === 'l') {
+        runMenuRow(rows[menu.at], spec);
     } else return;
     e.preventDefault();
 }, true);
@@ -872,7 +1273,7 @@ const HELP = [
         ['← → / Ctrl+h / Ctrl+l', '左 / 右のペインにフォーカス'],
         ['Shift+H / Shift+L', '同じ（端末版と同じ綴り）'],
         ['F5', '読み直す'],
-        [':view', '一覧の見せ方 — details（列つき） / icons（1面のタイル） / classic。T でも'],
+        [':view', '一覧の見せ方 — classic（2画面） / details（詳細一覧） / icons（アイコン）。T でも'],
         ['Ctrl+= / Ctrl+- / Ctrl+0', '文字を大きく / 小さく / 元に戻す'],
     ]],
     ['探す', [
@@ -1019,7 +1420,7 @@ const HELP = [
         ['Shift+P', 'ファイルそのものをクリップボードへ（Finder/エクスプローラで貼れます）'],
         ['o / O', 'このペインを反対側へ / 反対側をここへ'],
         ['u / Ctrl+R', '取り消し / やり直し'],
-        ['M / Shift+Enter', 'このエントリにできること'],
+        ['M / Shift+Enter / 右クリック', 'このエントリにできること'],
         ['Esc', 'マーク・フィルタ解除 → 実行中の操作を中止'],
         [':queue', '実行中の操作を見る — x で1つだけ止める'],
     ]],
@@ -1385,6 +1786,10 @@ document.addEventListener('keydown', (e) => {
     else if (k === 'l' && e.ctrlKey) focusPane('right');
     else if (k === 'Tab') { state.focus = state.focus === 'left' ? 'right' : 'left'; draw('left'); draw('right'); }
     else if (k === 'Enter' && (e.ctrlKey || e.metaKey)) openOut();
+    // Before the plain Enter, which used to swallow it: the menu was written,
+    // listed in the help, and never once opened from this key. A modified key
+    // has to be tested before the key it modifies.
+    else if (k === 'Enter' && e.shiftKey) openMenu(CONTEXT);
     // Visual selection first: Enter there means "keep these", and entering a
     // directory in the middle of choosing files is never what was meant.
     else if (k === 'Enter' && visual.on) endVisual(true);
@@ -1409,7 +1814,7 @@ document.addEventListener('keydown', (e) => {
         if (state[state.focus].remote) remoteOp('delete'); else operate('delete');
     }
     else if (k === 'T') openMenu(TOGGLES);
-    else if (k === 'M' || (k === 'Enter' && e.shiftKey)) openMenu(CONTEXT);
+    else if (k === 'M') openMenu(CONTEXT);
     else if (k === 'Z') cmdJump();
     else if (k === 's') cmdShortcuts();
     else if (k === 'S') cmdSshPicker();
@@ -1535,7 +1940,7 @@ function resolvedFace() {
 // Written the other way, cian's twenty-odd reports would be twenty-odd
 // almost-identical lists, and they would stop agreeing within a month.
 // ─────────────────────────────────────────────────────────────────────────
-const report = { on: false, rows: [], at: 0, pick: null, act: null };
+const report = { on: false, rows: [], at: 0, pick: null, act: null, move: null, leave: null };
 
 /// Show a list. `rows` are `{ n, label, sub, path }` — `n` is the right-aligned
 /// left column (a size, a line number, nothing), `label` the thing itself,
@@ -1546,6 +1951,13 @@ function show(title, about, rows, opts = {}) {
     report.at = 0;
     report.pick = opts.pick || null;
     report.act = opts.act || null;
+    // Called as the cursor passes, not on Enter. For a list whose rows *are*
+    // the thing — the palettes — where reading a name is no substitute for
+    // seeing it.
+    report.move = opts.move || null;
+    // Called when the list is dismissed rather than chosen from — for a list
+    // that has been changing things while you looked at it.
+    report.leave = opts.leave || null;
     el.rName.textContent = title;
     el.rAbout.textContent = about;
     el.rFoot.textContent = opts.foot
@@ -1554,8 +1966,11 @@ function show(title, about, rows, opts = {}) {
     drawReport();
 }
 
-function closeReport() {
+function closeReport(abandoned = false) {
+    if (abandoned && report.leave) report.leave();
     report.on = false;
+    report.move = null;
+    report.leave = null;
     report.rows = [];
     el.report.hidden = true;
 }
@@ -1597,9 +2012,13 @@ document.addEventListener('keydown', (e) => {
     if (!report.on) return;
     e.stopPropagation();
     const last = report.rows.length - 1;
-    const go = (to) => { report.at = Math.max(0, Math.min(last, to)); drawReport(); };
+    const go = (to) => {
+        report.at = Math.max(0, Math.min(last, to));
+        drawReport();
+        if (report.move && report.rows[report.at]) report.move(report.rows[report.at]);
+    };
     const k = e.key;
-    if (k === 'Escape' || k === 'q') closeReport();
+    if (k === 'Escape' || k === 'q') closeReport(true);
     else if (k === 'j' || k === 'ArrowDown') go(report.at + 1);
     else if (k === 'k' || k === 'ArrowUp') go(report.at - 1);
     else if (k === 'PageDown') go(report.at + 20);
@@ -1732,7 +2151,15 @@ let style = 0;
 /// the editor sitting in the wrong one is the sort of thing that reads as
 /// broken rather than as unstyled.
 function editorTheme() {
+    if (palette) return palettes.get(palette).light ? 'vs' : 'vs-dark';
     return LOOKS[look][0] === 'inei' || LOOKS[look][0] === 'terminal' ? 'vs-dark' : 'vs';
+}
+
+/// Is the window dark right now? Asked by mermaid and the preview, which have
+/// to choose a diagram theme and a code theme before they draw.
+function isDark() {
+    if (palette) return !palettes.get(palette).light;
+    return LOOKS[look][0] === 'inei' || LOOKS[look][0] === 'terminal';
 }
 
 const MONACO_LANG = {
@@ -2513,6 +2940,7 @@ const COMMANDS = [
     { name: 'unmark', alias: ['deselect'], about: 'ワイルドカードでマークを外す', arg: 'パターン', run: (a) => cmdMarkGlob(a, false) },
     { name: 'copyto', about: '指定した場所へコピー', arg: '行き先', run: (a) => cmdTo('copyto', a) },
     { name: 'moveto', about: '指定した場所へ移動', arg: '行き先', run: (a) => cmdTo('moveto', a) },
+    { name: 'revealos', alias: ['showinfinder'], about: 'Finder / エクスプローラで表示', run: cmdRevealOs },
     { name: 'edit', alias: ['e'], about: '外部エディタで開く（$EDITOR）', run: cmdEditExternal },
     { name: 'vi', alias: ['vim', 'nvim'], about: 'そのエディタを新しいシェルタブで開く', run: cmdEditorTab },
     { name: 'editstyle', alias: ['notepad', 'vimkey'], about: 'エディタの流儀 — :editstyle vim / :notepad', arg: 'vim / notepad', optional: true, run: cmdEditStyle },
@@ -2534,7 +2962,7 @@ const COMMANDS = [
     { name: 'g', about: '一致した行を削除（:g/re/d）', arg: '正規表現', run: (a) => cmdLineFilter(a, false) },
     { name: 'v', about: '一致した行だけ残す（:v/re/d）', arg: '正規表現', run: (a) => cmdLineFilter(a, true) },
     { name: 'combine', about: '次の行を連結（:combine 3 で3行、:combine! は空白なし）', arg: '行数', optional: true, run: cmdCombine },
-    { name: 'theme', alias: ['colorscheme', 'colourscheme'], about: '配色を選ぶ（T のメニューにも）', arg: '名前', optional: true, run: cmdTheme },
+    { name: 'theme', alias: ['colorscheme', 'colourscheme'], about: '配色 21 種 — 選ぶだけで着せ替わります（T のメニューにも）', arg: '名前', optional: true, run: cmdTheme },
     { name: 'redraw', about: '画面を描き直す', run: () => { draw('left'); draw('right'); say('描き直しました'); } },
     { name: 'preview', about: 'カーソルのファイルを追って表示（もう一度で止める）', run: togglePreview },
     { name: 'render', alias: ['source'], about: 'Markdown を組んで表示（Ctrl+E でも）', run: togglePreview2 },
@@ -3241,7 +3669,9 @@ function findCommand(name) {
 
 /// `:` — the name, then whatever it takes.
 async function commandLine(initial = '') {
-    const line = await askFor(':', initial);
+    // Named, not spelled. The heading used to be a bare `:`, which is the key
+    // you pressed, not the answer to "what is this box".
+    const line = await askFor('コマンド入力', initial, { hint: ':' });
     if (line === null) return;
     const text = line.trim();
     if (!text) return;
@@ -4057,24 +4487,73 @@ async function focusPaneOf(id) {
 ///
 /// The switches menu walks them, which is right when there are four. Naming
 /// one is what you want when you know which.
+/// Every palette, the window's own three and cian-tui's eighteen, in one
+/// list — because from where a person stands there is one question here.
+function themeRows() {
+    const rows = LOOKS.map(([, label], i) => ({
+        n: !palette && i === look ? '●' : '',
+        label,
+        look: i,
+    }));
+    for (const name of palettes.keys()) {
+        // No light/dark column: the gallery is live, so which way round a
+        // palette goes is on the screen behind the list. A word saying so
+        // would be describing what you can see.
+        rows.push({ n: palette === name ? '●' : '', label: name, palette: name });
+    }
+    return rows;
+}
+
+/// Wear this one. `keep` is false while the cursor is only passing over it —
+/// trying on eighteen palettes should not write eighteen settings.
+function pickTheme(row, keep = true) {
+    if (row.palette) {
+        setPalette(row.palette, keep);
+        if (keep) say(`配色: ${row.palette}`);
+    } else {
+        palette = null;
+        setLook(row.look, keep);
+        if (keep) say(`配色: ${LOOKS[row.look][1]}`);
+    }
+    // Move the ● with the choice. It used to be drawn once, when the list
+    // opened, and then sat on whatever had been chosen before — pointing at
+    // the wrong row of a list whose whole point is which row is on.
+    if (report.on) {
+        for (const r of report.rows) {
+            r.n = (r.palette ? palette === r.palette : !palette && r.look === look) ? '●' : '';
+        }
+        drawReport();
+    }
+}
+
 async function cmdTheme(name) {
     if (name) {
+        const want = name.toLowerCase();
+        if (palettes.has(want)) { setPalette(want); say(`配色: ${want}`); return; }
         const at = LOOKS.findIndex(([v, label]) =>
-            v === name || label === name || (v || 'hakuji').startsWith(name.toLowerCase()));
-        if (at < 0) { say(`${name} という配色はありません`, true); return; }
-        setLook(at);
-        say(`配色: ${LOOKS[at][1]}`);
+            v === name || label === name || (v || 'hakuji').startsWith(want));
+        if (at >= 0) { setLook(at); say(`配色: ${LOOKS[at][1]}`); return; }
+        // Named, not "no such theme": what was typed is the one thing the
+        // person knows about, so the near misses are worth more than the
+        // refusal.
+        const near = [...palettes.keys()].filter((k) => k.includes(want)).slice(0, 4);
+        say(near.length ? `${name}? — ${near.join('  ')}` : `${name} という配色はありません`, true);
         return;
     }
-    show('配色', `${LOOKS.length} 種`, LOOKS.map(([v, label], i) => ({
-        n: i === look ? '●' : '',
-        label,
-        sub: v || 'hakuji',
-        at: i,
-    })), {
-        foot: 'Enter 決定   Esc 閉じる',
-        pick: (row) => { closeReport(); setLook(row.at); say(`配色: ${LOOKS[row.at][1]}`); },
-    });
+    // What was on before the gallery opened, so Esc can put it back. The
+    // foot says "Esc 戻す" and a promise on the screen has to be kept.
+    const was = palette ? { palette } : { look };
+    const rows = themeRows();
+    show('配色', `${rows.length} 種 — 上の ${LOOKS.length} つは窓のもの、あとは cian-tui のもの`,
+        rows, {
+            foot: '↑↓ 選ぶだけで着せ替わります   Enter 決定   Esc 戻す',
+            // Live, as the terminal build's gallery is: a palette is a thing
+            // you look at, and choosing one from a list of names without
+            // seeing it is choosing by memory.
+            move: (row) => pickTheme(row, false),
+            pick: (row) => { closeReport(); pickTheme(row); },
+            leave: () => pickTheme(was, false),
+        });
 }
 
 /// `:blame` — who last changed each line, in the gutter.
@@ -4188,7 +4667,7 @@ async function drawDiagrams() {
     try {
         mermaid = await loadMermaid();
     } catch (e) { say(e.message, true); return; }
-    const dark = LOOKS[look][0] === 'inei' || LOOKS[look][0] === 'terminal';
+    const dark = isDark();
     // mermaid ships trebuchet, which has no Japanese and falls back silently
     // to whatever the system picks. Hand it the page's own body face so a
     // diagram's labels are set in the same type as the prose around them.
@@ -4766,6 +5245,12 @@ async function cmdAiError() {
     };
 }
 
+/// `:revealos` — hand the file to Finder, with it selected.
+async function cmdRevealOs() {
+    const r = await ask('revealos', { pane: state.focus });
+    if (r) say(`${r.revealed} を Finder で表示しました`);
+}
+
 async function cmdEditExternal() {
     const r = await ask('editexternal', { pane: state.focus });
     if (!r) return;
@@ -4874,11 +5359,21 @@ async function splitShell(down) {
     say(down ? '上下に分割' : '左右に分割');
 }
 
-async function closePane() {
-    const r = await ask('shellpaneclose', {});
+/// Close one shell pane — the focused one, or the named one when a shell
+/// has ended on its own.
+///
+/// Asked for first when it is a deliberate close, as the terminal build asks:
+/// a split pane may be holding a program that is still running, and Shift+F10
+/// is one key away from Shift+F9.
+async function closePane(id) {
+    const byHand = id === undefined;
+    if (byHand && !await confirm('この分割パネルを閉じます',
+        '動いているプログラムがあれば終わります')) { say('やめました'); return; }
+    const r = await ask('shellpaneclose', id === undefined ? {} : { id });
     if (!r) return;
     if (r.gone) { closeShell(); say('シェルを閉じました'); return; }
     takeShell(r);
+    if (byHand) say('分割パネルを閉じました');
 }
 
 async function shellTab() {
@@ -4920,8 +5415,19 @@ function drawShell(screen, into) {
     if (screen.id === term.showing) {
         term.rows = screen.rows;
         term.cols = screen.cols;
-        el.sTitle.textContent = (term.tabs > 1 ? `[${term.tab + 1}/${term.tabs}] ` : '')
-            + (screen.title || 'シェル');
+        // The tab strip, spelled the way the terminal build spells it, and
+        // drawn even for one tab — the strip is where you learn that F9 makes
+        // another, which a heading reading "シェル" never told anybody.
+        el.sTabs.replaceChildren(...Array.from({ length: Math.max(1, term.tabs) }, (_, i) => {
+            const t = document.createElement('span');
+            t.textContent = `shell ${i + 1}`;
+            if (i === term.tab) t.className = 'on';
+            t.addEventListener('mousedown', () => goTabOfShell(i));
+            return t;
+        }));
+        // What the shell itself says it is: `user@host: cwd`, which is the
+        // only part of this bar carrying information.
+        el.sTitle.textContent = screen.title || '';
         el.sAbout.textContent = `${screen.cols}×${screen.rows}`
             + (screen.scrollback ? `   ↑ ${screen.scrollback} 行戻っています` : '');
     }
@@ -5214,13 +5720,11 @@ window.cian.onEvent(async (msg) => {
             say(msg.note, true);
             return;
 
-        case 'shellgone':
-            // Only when it is the one on screen: another tab's shell exiting
-            // is not a reason to take the panel down.
-            if (term.on && (msg.id === undefined || msg.id === term.showing)) {
-                await shellCloseTab();
-                say('シェルが終了しました');
-            }
+        case 'shellexit':
+            // A shell that ended by itself — `exit`, Ctrl+D, a crash. Its
+            // pane goes; the others keep running. Nothing is asked, because
+            // the person already said so by typing exit.
+            if (term.on) await closePane(msg.id);
             return;
 
         case 'finding':
@@ -5258,6 +5762,9 @@ function setFont(px, remember = true) {
     document.documentElement.style.setProperty('--cell-h', `${Math.round(FONT.at * 1.7)}px`);
     if (viewer.ed) viewer.ed.updateOptions({ fontSize: FONT.at });
     if (term.on) ask('shellresize', shellSize());
+    // The foot bars grew or shrank with everything else; the panes have to be
+    // told, or the last row hides under them.
+    measureFoot();
     if (remember) ask('remember', { key: 'gui_font', value: String(FONT.at) });
 }
 
@@ -5279,13 +5786,23 @@ async function recall() {
         if (px >= FONT.min && px <= FONT.max) setFont(px, false);
     }
     if (s.view && VIEWS.includes(s.view)) setView(s.view, false);
+    if (s.hints === '0') { hintsOn = false; drawHints(); }
     applyKeymaps(s.keymaps);
+    // The eighteen, and whichever of them the terminal build was last set to
+    // — because they are one program and `theme` is one setting.
+    const t = await ask('themes', {});
+    if (t) {
+        for (const p of t.list) palettes.set(p.name, p);
+        if (t.now && palettes.has(t.now) && !s.look) setPalette(t.now, false);
+        else if (t.now && palettes.has(t.now) && s.look === 'hakuji') setPalette(t.now, false);
+    }
     // Lua's own complaints go in the same queue as mine — from where the
     // person stands they are one thing: "my config did not take".
     keymapErrors = [...(s.config_errors || []), ...keymapErrors];
 }
 
 recall();
+drawHints();
 
 refresh().then(() => {
     if (keymapErrors.length) {

@@ -35,6 +35,7 @@ pub mod search;
 pub mod substitute;
 pub mod textops;
 pub mod svn;
+pub mod theme;
 pub mod viewer;
 
 #[derive(Debug, Clone)]
