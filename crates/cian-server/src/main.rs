@@ -1845,7 +1845,7 @@ impl Session {
                     p.to_string()
                 };
                 let what = req.params["what"].as_str().unwrap_or("");
-                let name = req.params["name"].as_str().unwrap_or("").trim().to_string();
+                let name = arg(req, "name");
                 let said = match what {
                     "mkdir" | "touch" => {
                         if name.is_empty() {
@@ -2042,7 +2042,7 @@ impl Session {
             "bookmark" => {
                 let which = req.params["pane"].as_str().unwrap_or("left").to_string();
                 let cwd = self.pane_mut(&which)?.cwd.clone();
-                let name = req.params["name"].as_str().unwrap_or("").trim().to_string();
+                let name = arg(req, "name");
                 let name = if name.is_empty() {
                     cwd.file_name().map(|s| s.to_string_lossy().into_owned())
                         .unwrap_or_else(|| cwd.display().to_string())
@@ -2534,6 +2534,38 @@ impl Session {
                 self.pair = Some((path.clone(), file));
                 Ok(serde_json::json!({ "saved": name, "lines": n }))
             }
+            // One named file to one named directory. Used by the comparison
+            // screen's `>` and `<`, where the two sides are not the two panes.
+            "copyone" => {
+                let src = std::path::PathBuf::from(req.params["src"].as_str().unwrap_or(""));
+                let dest = std::path::PathBuf::from(req.params["dest"].as_str().unwrap_or(""));
+                if !src.exists() {
+                    anyhow::bail!("{} がありません", src.display());
+                }
+                std::fs::create_dir_all(&dest)?;
+                cian_core::ops::copy_one(&src, &dest, cian_core::ops::Conflict::Overwrite)?;
+                for which in ["left", "right"] {
+                    let _ = self.pane_mut(which).map(|p| p.reload());
+                }
+                Ok(serde_json::json!({ "copied": src.display().to_string() }))
+            }
+            // Write text the window composed — a comparison saved as a file.
+            "writefile" => {
+                let which = req.params["pane"].as_str().unwrap_or("left").to_string();
+                let name = arg(req, "name");
+                if name.is_empty() || name.contains('/') || name.contains('\\') {
+                    anyhow::bail!("名前が正しくありません");
+                }
+                let at = self.pane_mut(&which)?.cwd.join(&name);
+                if at.exists() {
+                    anyhow::bail!("{name} はすでにあります");
+                }
+                std::fs::write(&at, req.params["text"].as_str().unwrap_or(""))?;
+                self.undo.push(Undo::Created { path: at });
+                let pane = self.pane_mut(&which)?;
+                pane.reload()?;
+                Ok(serde_json::json!({ "wrote": name }))
+            }
             // Leave a flat listing and go back to the directory it came from.
             "leaveflat" => {
                 let which = req.params["pane"].as_str().unwrap_or("left").to_string();
@@ -2596,7 +2628,7 @@ impl Session {
             // A new file or a new directory, in the pane being looked at.
             "create" => {
                 let which = req.params["pane"].as_str().unwrap_or("left").to_string();
-                let name = req.params["name"].as_str().unwrap_or("").trim().to_string();
+                let name = arg(req, "name");
                 let dir = req.params["dir"].as_bool().unwrap_or(false);
                 if name.is_empty() {
                     anyhow::bail!("名前が空です");
@@ -2964,4 +2996,13 @@ fn lines_of(req: &Request) -> Option<Vec<String>> {
     req.params["lines"]
         .as_array()
         .map(|a| a.iter().map(|v| v.as_str().unwrap_or("").to_string()).collect())
+}
+
+/// A trimmed string argument, or empty when it was not given.
+///
+/// The trim is the point: a name typed into a prompt picks up whatever the
+/// person's finger left on the end of it, and `"report.txt "` is a filename
+/// nobody meant and every filesystem accepts.
+fn arg(req: &Request, key: &str) -> String {
+    req.params[key].as_str().unwrap_or("").trim().to_string()
 }

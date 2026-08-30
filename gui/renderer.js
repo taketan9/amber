@@ -761,6 +761,8 @@ const HELP = [
         ['=  /  :diff', '左右を比較 — ファイル同士は行差分、ディレクトリ同士は再帰'],
         ['  比較で Enter', '並べて開く — 左右とも編集でき、Ctrl+S で両方保存'],
         ['  F7 / Shift+F7', '次 / 前の相違へ'],
+        ['  > / <', 'ディレクトリ比較：そのエントリを反対側へコピー'],
+        ['  c / w', '比較結果をクリップボードへ / ファイルに保存'],
         [':renamepattern', '一括リネーム {name}_{n3}.{ext}（先にプレビュー）'],
         [':renamelist', '名前の一覧を編集してリネーム（Ctrl+S で適用）'],
         [':zip / :tar / :targz', 'マークをアーカイブにまとめる'],
@@ -3032,9 +3034,23 @@ async function cmdCompare() {
     if (!r) return;
     if (r.kind === 'dirs') {
         const mark = { left: '◀ 左だけ', right: '右だけ ▶', differ: '≠ 違う' };
+        const roots = { left: r.left, right: r.right };
         show('ディレクトリ比較', `${r.left}   ↔   ${r.right}   ${r.rows.length} 件${r.truncated ? '（打ち切り）' : ''}`,
-            r.rows.map((x) => ({ n: mark[x.status], label: x.rel + (x.is_dir ? '/' : '') })),
-            { foot: 'Esc 閉じる' });
+            r.rows.map((x) => ({
+                n: mark[x.status],
+                label: x.rel + (x.is_dir ? '/' : ''),
+                rel: x.rel,
+                status: x.status,
+            })),
+            {
+                foot: '> 右へコピー   < 左へコピー   c 一覧をコピー   w 保存   Esc 閉じる',
+                act: {
+                    '>': () => copyAcross(roots, 'left', 'right'),
+                    '<': () => copyAcross(roots, 'right', 'left'),
+                    c: () => copyReport('ディレクトリ比較'),
+                    w: () => saveReport(`${r.left} ↔ ${r.right}`),
+                },
+            });
         return;
     }
     if (r.kind === 'files') {
@@ -3058,9 +3074,62 @@ async function cmdCompare() {
         };
     });
     show('ファイル比較', `${r.left}   ↔   ${r.right}   ${r.summary}`, rows, {
-        foot: 'Enter 並べて編集   Esc 閉じる',
+        foot: 'Enter 並べて編集   c 一覧をコピー   w 保存   Esc 閉じる',
         pick: () => { closeReport(); cmdDiffEdit(); },
+        act: {
+            c: () => copyReport(`${r.left} ↔ ${r.right}`),
+            w: () => saveReport(`${r.left} ↔ ${r.right}`),
+        },
     });
+}
+
+/// `>` / `<` in a directory comparison — put this entry on the other side.
+///
+/// The row knows where it is missing from, so the direction is checked rather
+/// than assumed: copying a file that only exists on the right *to* the right
+/// is a no-op that would still ask for a confirmation, and copying the wrong
+/// way over a newer file is the mistake this screen exists to prevent.
+async function copyAcross(roots, from, to) {
+    const row = report.rows[report.at];
+    if (!row) return;
+    if (row.status === (from === 'left' ? 'right' : 'left')) {
+        say(`${row.rel} は${from === 'left' ? '左' : '右'}にありません`, true);
+        return;
+    }
+    const src = `${roots[from]}/${row.rel}`;
+    const destDir = `${roots[to]}/${row.rel}`.replace(/[\\/][^\\/]*$/, '');
+    if (!await confirm(`${row.rel} を${to === 'right' ? '右' : '左'}へコピー`, `${src}\n  →  ${destDir}`)) {
+        say('やめました');
+        return;
+    }
+    const r = await ask('copyone', { src, dest: destDir });
+    if (!r) return;
+    say(`${row.rel} をコピーしました`);
+}
+
+/// `c` / `w` on any report — the list as text, to the clipboard or to a file.
+///
+/// A comparison is something people paste into a ticket. Reading it off the
+/// screen and retyping it is the alternative, and that is where the typos in
+/// change requests come from.
+async function copyReport(title) {
+    const text = report.rows
+        .map((x) => [x.n, x.label, x.sub].filter(Boolean).join('\t'))
+        .join('\n');
+    await navigator.clipboard.writeText(`${title}\n${text}`);
+    say(`${report.rows.length} 行をクリップボードへ`);
+}
+
+async function saveReport(title) {
+    const name = await askFor('保存する名前', 'compare.txt');
+    if (name === null || !name) return;
+    const text = report.rows
+        .map((x) => [x.n, x.label, x.sub].filter(Boolean).join('\t'))
+        .join('\n');
+    const r = await ask('writefile', { pane: state.focus, name, text: `${title}\n${text}\n` });
+    if (!r) return;
+    await reread();
+    say(`${r.wrote} に保存しました`);
 }
 
 /// `=` in the comparison, or `:diffedit` — the two files side by side, both
