@@ -6,6 +6,7 @@
 const state = { left: null, right: null, focus: 'left' };
 
 const el = {
+    panes: document.getElementById('panes'),
     left: document.querySelector('[data-pane="left"]'),
     right: document.querySelector('[data-pane="right"]'),
     status: document.getElementById('status'),
@@ -113,11 +114,16 @@ function draw(which) {
             return t;
         }));
     }
-    root.querySelector('.crumb').textContent = pane.remote
+    const where = pane.remote
         ? `${pane.remote}:${pane.cwd}`
         : pane.archive
             ? `${pane.archive.split(/[\\/]/).pop()} の中`
             : (pane.flat ? `${pane.flat} — ${pane.cwd}` : pane.cwd);
+    // Which side you are on, but only when the other side is not on screen.
+    // With both panes visible the highlight says it; with one, Tab would
+    // otherwise change everything and announce nothing.
+    root.querySelector('.crumb').textContent =
+        viewMode === 'icons' ? `[${which === 'left' ? '左' : '右'}] ${where}` : where;
 
     const rows = root.querySelector('.rows');
     // Rebuilt whole. A listing is a few hundred rows and Chromium does not
@@ -620,11 +626,19 @@ const LOOKS = [
 /// could only ask for — ":view icons" in a terminal answers "window only",
 /// because this is the feature a window exists to have.
 const VIEWS = ['classic', 'details', 'icons'];
+const VIEW_NAMES = { classic: 'いつもの', details: '詳しく', icons: 'アイコン（1面）' };
 let viewMode = 'classic';
 
 function setView(mode, remember = true) {
     if (!VIEWS.includes(mode)) { say(`${mode}? — :view details | icons | classic`, true); return; }
     viewMode = mode;
+    // Icons take the whole window; the other two keep the two panes. A wall
+    // of tiles split down the middle is two narrow columns of icons, which is
+    // not what either half of that arrangement is for.
+    el.panes.classList.toggle('one', mode === 'icons');
+    // `draw` already paints `active` on the focused pane, which is what
+    // decides who is at the front here — so the two views need no second
+    // notion of focus.
     draw('left');
     draw('right');
     if (remember) ask('remember', { key: 'gui_view', value: mode });
@@ -691,6 +705,20 @@ const TOGGLES = {
                 label: '隠しファイル',
                 value: pane && pane.hidden_shown ? '表示' : '非表示',
                 run: () => toggleHidden(),
+            },
+            // Put where it can be found. A view you can only leave by knowing
+            // the words `:view classic` is a view you are stuck in — and
+            // icons is the one that hides the listing you would have read the
+            // help from.
+            {
+                label: '一覧の見せ方',
+                value: VIEW_NAMES[viewMode],
+                run: () => {
+                    const next = VIEWS[(VIEWS.indexOf(viewMode) + 1) % VIEWS.length];
+                    setView(next);
+                    drawMenu();
+                    say(`一覧: ${VIEW_NAMES[next]}`);
+                },
             },
             {
                 label: '配色',
@@ -844,7 +872,7 @@ const HELP = [
         ['← → / Ctrl+h / Ctrl+l', '左 / 右のペインにフォーカス'],
         ['Shift+H / Shift+L', '同じ（端末版と同じ綴り）'],
         ['F5', '読み直す'],
-        [':view', '一覧の見せ方 — details（列つき） / icons（タイル） / classic'],
+        [':view', '一覧の見せ方 — details（列つき） / icons（1面のタイル） / classic。T でも'],
         ['Ctrl+= / Ctrl+- / Ctrl+0', '文字を大きく / 小さく / 元に戻す'],
     ]],
     ['探す', [
@@ -864,7 +892,7 @@ const HELP = [
         ['ドラッグして落とす', 'デスクトップからペインへ ── 移動します（先に確認）'],
         ['Alt+← / Alt+→', '前 / 先のディレクトリへ'],
         [',', 'ソート：名前／サイズ／日付／拡張子（n s d e で直接、同じキーで昇降反転）'],
-        ['T', 'トグルメニュー：隠しファイル・配色・エディタの流儀'],
+        ['T', 'トグルメニュー：隠しファイル・一覧の見せ方・配色・エディタの流儀'],
     ]],
     ['コマンド', [
         [':', 'コマンドを打つ（:count :du :grep …）'],

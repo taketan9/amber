@@ -122,6 +122,12 @@ html, body {
   flex: 1 1 0; min-width: 0; display: flex; flex-direction: column;
   background: var(--pane-off);
 }
+/* Icons take the whole window. Tiles need width, and two halves of a window
+   give a wall of icons two narrow columns of them — which is neither of the
+   things the mode is for. Tab still crosses to the other pane; it simply
+   comes to the front rather than sitting beside. */
+#panes.one .pane { display: none; }
+#panes.one .pane.active { display: flex; flex: 1 1 100%; }
 .pane.active { background: var(--pane); }
 /* Where the drop will land, said plainly. Two panes means a drop is always
    about to go into one of them and not the other. */
