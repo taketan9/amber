@@ -2491,7 +2491,13 @@ impl Session {
             }
             "bookmark" => {
                 let which = req.params["pane"].as_str().unwrap_or("left").to_string();
-                let cwd = self.pane_mut(&which)?.cwd.clone();
+                // A named place, or where the pane is standing. The history
+                // screen bookmarks the row you are looking at, which is where
+                // you notice that somewhere was worth keeping.
+                let cwd = match req.params["path"].as_str() {
+                    Some(p) if !p.is_empty() => std::path::PathBuf::from(p),
+                    _ => self.pane_mut(&which)?.cwd.clone(),
+                };
                 let name = arg(req, "name");
                 let name = if name.is_empty() {
                     cwd.file_name().map(|s| s.to_string_lossy().into_owned())

@@ -1432,6 +1432,20 @@ const TOGGLES = {
                 value: pane && pane.hidden_shown ? '表示' : '非表示',
                 run: () => toggleHidden(),
             },
+            // Both of these existed only as commands. cian-tui gathers its
+            // switches in one menu rather than spending a letter on each, and
+            // a switch that is not in the one place switches live is a switch
+            // nobody finds.
+            {
+                label: 'カーソル追従プレビュー',
+                value: preview.on ? 'する' : 'しない',
+                run: () => { togglePreview(); drawMenu(); },
+            },
+            {
+                label: '入力同期（全シェルペイン）',
+                value: term.sync ? 'する' : 'しない',
+                run: async () => { await cmdSync(); drawMenu(); },
+            },
             // Put where it can be found. A view you can only leave by knowing
             // the words `:view classic` is a view you are stuck in — and
             // icons is the one that hides the listing you would have read the
@@ -1586,6 +1600,9 @@ function contextRows() {
         v.push({ label: '名前を変える', value: 'r', run: rename });
         v.push({ label: '削除（ゴミ箱へ）', value: 'd', run: () => operate('delete') });
         v.push({ label: '新しいタブで開く', value: 't', run: tabNew });
+        // cian-tui's EditTab: the file in $EDITOR, in a shell tab of its own.
+        // It was reachable only by knowing `:vim`.
+        v.push({ label: 'エディタで開く（新しいシェルタブ）', value: ':vim', run: () => cmdEditorTab('') });
         v.push(group('ファイル ▸', () => [
             { label: '反対ペインへコピー', value: 'c', run: () => operate('copy') },
             { label: '反対ペインへ移動', value: 'm', run: () => operate('move') },
@@ -1722,6 +1739,7 @@ function openMenu(spec) {
 /// Do what a row says: open its submenu, or run it and close.
 function runMenuRow(row, spec) {
     if (!row) return;
+    if (row.back) { menuBack(); return; }
     if (row.group) {
         const rows = row.group();
         if (!rows.length) { say(`${row.label} — できることがありません`, true); return; }
@@ -1730,7 +1748,11 @@ function runMenuRow(row, spec) {
             key: spec.key,
             foot: '↑↓ 選ぶ   Enter 実行   ← / Esc 戻る',
             child: true,
-            rows: () => rows,
+            // A *copy* each time. The submenu closed over one array, and
+            // menuRows() appends the `◂ 戻る` row to what it is given — so
+            // asking twice put two of them on, and the drawing and the keys
+            // ask separately.
+            rows: () => rows.slice(),
         });
         return;
     }
@@ -1751,8 +1773,18 @@ function closeMenu() {
     el.find.hidden = true;
 }
 
-function drawMenu() {
+/// The rows the menu is showing, including the `◂ 戻る` cian-tui ends every
+/// submenu with. One function, because the drawing and the keys both need
+/// them and a Back row added to only one of the two lists puts the cursor and
+/// the row it runs one apart.
+function menuRows() {
     const rows = menu.spec.rows();
+    if (menuStack.length) rows.push({ label: '◂ 戻る', value: 'Esc', back: true });
+    return rows;
+}
+
+function drawMenu() {
+    const rows = menuRows();
     const frag = document.createDocumentFragment();
     rows.forEach((row, i) => {
         const div = document.createElement('div');
@@ -1825,7 +1857,7 @@ document.addEventListener('keydown', (e) => {
     if (!menu.spec) return;
     e.stopPropagation();
     const spec = menu.spec;
-    const rows = spec.rows();
+    const rows = menuRows();
     const pick = spec.letters && spec.letters[e.key];
     if ((e.key === 'Escape' || e.key === 'ArrowLeft' || e.key === 'h') && menuStack.length) {
         // Up one level, not out. The terminal build's `Back` row, on the key
@@ -2066,6 +2098,8 @@ document.addEventListener('keydown', (e) => {
     else if (e.key === 'ArrowUp' || e.key === 'k') el.findHits.scrollTop -= 40;
     else if (e.key === 'PageDown' || e.key === ' ') el.findHits.scrollTop += el.findHits.clientHeight - 40;
     else if (e.key === 'PageUp') el.findHits.scrollTop -= el.findHits.clientHeight - 40;
+    else if (e.key === 'g') el.findHits.scrollTop = 0;
+    else if (e.key === 'G') el.findHits.scrollTop = el.findHits.scrollHeight;
     else return;
     e.preventDefault();
 }, true);
@@ -2757,6 +2791,16 @@ document.addEventListener('keydown', (e) => {
     else if (k === 'g') go(0);
     else if (k === 'G') go(last);
     else if (report.act && report.act[k]) report.act[k]();
+    else if (k === 'y') {
+        // The whole list, as text. cian-tui's Notice copies with `y`/`c`, and
+        // the reason is the same here: a result screen is a thing you paste
+        // into a ticket, and without this you retype it off the screen.
+        const text = report.rows
+            .map((r) => [r.n, r.label, r.sub].filter(Boolean).join('\t'))
+            .join('\n');
+        navigator.clipboard.writeText(text);
+        say(`${report.rows.length} 行をコピー`);
+    }
     else return;
     e.preventDefault();
 }, true);
@@ -4170,7 +4214,12 @@ async function cmdSshPicker() {
         }
     }
     show('SSH', `${rows.length} 件（init.lua の cian.ssh）`, rows, {
-        foot: 'Enter 接続   Esc 閉じる',
+        // A host list is long the moment there is more than a handful, and
+        // cian-tui narrows it as you type.
+        filter: true,
+        hint: '打って絞り込み（ホスト名・ユーザー）',
+        foot: '打って絞る   Enter 接続   F2 手で入力   Esc 閉じる',
+        act: { F2: () => { closeReport(); cmdConnect(); } },
         pick: async (row) => {
             closeReport();
             let password;
@@ -4574,9 +4623,17 @@ async function cmdDu(path) {
         is_dir: x.is_dir,
     }));
     const total = r.rows.reduce((n, x) => n + x.size, 0);
+    const up = r.cwd.replace(/[\\/][^\\/]+$/, '') || r.cwd;
     show('容量分析', `${r.cwd}   合計 ${human(total)}`, rows, {
-        foot: 'Enter ディレクトリへ入る   Esc 閉じる',
+        foot: 'Enter 入る   ← / Bksp 親へ   Esc 閉じる',
         pick: (row) => { if (row.is_dir) cmdDu(row.path); },
+        act: {
+            // cian-tui walks back out of a du tree with `-`, Backspace or ←.
+            // Going in with no way out is a one-way screen.
+            '-': () => { if (up !== r.cwd) cmdDu(up); },
+            Backspace: () => { if (up !== r.cwd) cmdDu(up); },
+            ArrowLeft: () => { if (up !== r.cwd) cmdDu(up); },
+        },
     });
 }
 
@@ -4743,8 +4800,22 @@ async function cmdHistory() {
         ...r.forward.map((p) => ({ n: '→', label: p })),
     ];
     show('履歴', r.cwd, rows, {
-        foot: 'Enter そこへ   Esc 閉じる',
+        foot: 'Enter そこへ   a ここを登録   Esc 閉じる',
         pick: (row) => { closeReport(); revealPath(row.label, true); },
+        act: {
+            // Bookmark the row you are looking at. The history is where you
+            // notice that a place is worth keeping — cian-tui puts `a` here
+            // for that reason.
+            a: async () => {
+                const row = report.rows[report.at];
+                if (!row) return;
+                const name = await askFor('この場所を登録する名前',
+                    row.label.split(/[\\/]/).pop() || row.label);
+                if (name === null) return;
+                const made = await ask('bookmark', { path: row.label, name: name.trim() });
+                if (made) say(`${made.name} を登録しました`);
+            },
+        },
     });
 }
 
@@ -6371,7 +6442,9 @@ async function cmdSnippets() {
         enter: x.enter,
         confirm: x.confirm,
     })), {
-        foot: 'Enter シェルへ送る   Esc 閉じる',
+        filter: true,
+        hint: '打って絞り込み',
+        foot: '打って絞る   Enter シェルへ送る   Esc 閉じる',
         pick: async (row) => {
             closeReport();
             // `confirm = true` in init.lua means "ask me before you send
