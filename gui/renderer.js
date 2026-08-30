@@ -7224,7 +7224,7 @@ function setFont(px, remember = true) {
         r.setProperty('--size', `${FONT.at}px`);
         // The rows have to grow with the type or the listing keeps its old
         // spacing and the text collides with it.
-        r.setProperty('--cell-h', `${Math.round(FONT.at * 1.7)}px`);
+        r.setProperty('--cell-h', `${Math.round(FONT.at * 1.45)}px`);
     }
     if (viewer.ed) viewer.ed.updateOptions({ fontSize: FONT.at });
     if (term.on) ask('shellresize', shellSize());

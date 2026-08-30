@@ -74,7 +74,7 @@
   --scrim:     rgba(23, 26, 31, .45);
   --bad-bg:    #5a2233;
   --bad-fg:    #ffd7de;
-  --cell-h:    26px;
+  --cell-h:    22px;
   /* The two fixed bars at the foot. Measured at runtime rather than declared:
      the text in them is set at a size the person can change, so a number
      written here would be right until the first Ctrl+= and wrong after. */
@@ -181,9 +181,9 @@ html, body {
    on an 800px window left thirteen rows for a listing and three hundred
    pixels of empty terminal. */
 :root { --main-pct: 75%; --panes-pct: 50%; }
-/* Space between the panes rather than a rule down the middle, and the ground
-   showing through it. */
-#panes { flex: 1 1 auto; display: flex; gap: 6px; padding: 6px 6px 0; background: transparent; min-height: 0; }
+/* One hairline down the middle and nothing else. The listing is the window;
+   every pixel spent on a frame around it is a row not shown. */
+#panes { flex: 1 1 auto; display: flex; background: var(--line); gap: 1px; min-height: 0; }
 /* The two dividers, grabbable. cian-tui drags its borders with the mouse
    (`set_divider_ratio`) and this could only be moved by a key — and on macOS
    that key is Mission Control's. A hairline is not a target, so each handle
@@ -202,12 +202,11 @@ html, body {
 .pane {
   flex: 1 1 0; min-width: 0; min-height: 0; display: flex; flex-direction: column;
   background: var(--pane-off);
-  border-radius: 6px;
-  /* Room for the focused pane's frame, always — so gaining focus does not
-     move the rows by two pixels. */
-  border: 2px solid transparent;
-  overflow: hidden;
 }
+/* Which pane has the keys, said in tone rather than in a frame: the one you
+   are in is lit, the other sits back. A 2px accent border around a pane is
+   the loudest way to answer a question the cursor already answers. */
+.pane.active { background: var(--pane); }
 /* Two different questions, and they were one class.
    `.active` is *which pane is the current one* — what Tab switches, what the
    one-pane views show, what F12 zooms. `#work[data-focus]` is *where the keys
@@ -215,7 +214,7 @@ html, body {
    accent frame while you were typing into the shell, so two surfaces claimed
    the keyboard at once. */
 .pane.active { background: var(--pane); }
-#work[data-focus="files"] .pane.active { border-color: var(--accent); }
+
 /* Icons take the whole window. Tiles need width, and two halves of a window
    give a wall of icons two narrow columns of them — which is neither of the
    things the mode is for. Tab still crosses to the other pane; it simply
@@ -240,7 +239,7 @@ html, body {
    the descenders were cut. (ASCII survived it; Japanese would not have.) */
 .crumb {
   flex: 0 0 auto;
-  padding: 5px 10px; border-bottom: 1px solid var(--line);
+  padding: 3px 10px 1px;
   color: var(--dim);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   /* The path is the one thing here worth copying out. */
@@ -466,17 +465,12 @@ html, body {
   flex: 0 0 calc(100% - var(--main-pct));
   display: flex; flex-direction: column; min-height: 0;
   background: var(--pane);
-  /* The same card the file panes are, since it is the same kind of thing —
-     it sat flush to the window edges while they were inset, which read as
-     two different programs stacked. */
-  margin: 6px; border-radius: 6px;
-  border: 2px solid transparent;
-  overflow: hidden;
+  border-top: 2px solid var(--line);
 }
 #shell[hidden] { display: none; }
 /* Same signal as a file pane: the surface the keys are talking to wears the
    accent. Two pixels either way, so focus does not move anything. */
-#shell.on { border-color: var(--accent); }
+#shell.on { border-top-color: var(--accent); }
 
 /* F12 — the *focused* surface fills the window, which is what the terminal
    build's `toggle_zoom` does. It only ever grew the shell here, whichever
@@ -502,11 +496,11 @@ html, body {
   bottom: calc(var(--status-h) + var(--hints-h));
   display: flex; flex-direction: column; min-height: 0;
 }
-#shell.sync { border-color: var(--mark); }
+#shell.sync { border-top-color: var(--mark); }
 /* Recording. The terminal build turns the frame carmine for the same
    reason: a shell being written to a file must not look like one that
    is not. */
-#shell.logging { border-color: var(--msg-bad); }
+#shell.logging { border-top-color: var(--msg-bad); }
 #shell.logging .vhead { color: var(--msg-bad); }
 /* The key hints — what the keys do *here*, right now. The terminal build
    carries this bar and the window did not, which is most of why the two felt
@@ -550,28 +544,48 @@ html, body {
 #fbar #f-count { color: var(--dim); }
 #hints b { color: var(--accent); font-weight: 600; margin-right: .35em; }
 #hints span { flex: 0 0 auto; }
-/* The shell tabs, the terminal build's own strip: `shell 1 | shell 2`, the
-   active one on the accent. It replaced a heading that said "シェル" — a
-   label naming the thing you are already looking at, where the tabs you
-   cannot otherwise see could have been. */
-.stabs { display: flex; gap: 3px; align-items: center; margin-right: .8em; }
+/* The strip read as one more row of the listing above it — a line with
+   `Aserver  shell 2` in it and nothing saying what it belonged to. cian-tui
+   never had the problem because its tabs are drawn *on the panel's border*,
+   which attaches them to the box; a window has to say it another way.
+   Two things do it here: a prompt mark at the left, which is what a terminal
+   looks like anywhere, and tabs that sit on the seam with the active one
+   open at the bottom into the panel below — the shape every tab has had
+   since tabs existed. */
+#shell .vhead::before {
+  content: "❯"; flex: 0 0 auto; margin-right: .55em;
+  color: var(--accent); font-weight: 700; opacity: .85;
+}
+.stabs { display: flex; gap: 3px; align-items: stretch; margin-right: .8em; }
 .stabs span {
-  padding: 1px .7em; cursor: pointer; color: var(--dim);
-  border-radius: 3px; max-width: 16ch;
+  padding: 1px .8em; cursor: pointer; color: var(--dim);
+  border-radius: 4px 4px 0 0; max-width: 16ch;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  border: 1px solid transparent; border-bottom: 0;
+  /* Down onto the strip's own bottom rule, so the open tab breaks it. */
+  margin-bottom: -1px;
 }
 /* The current tab, and *whether the keys are in it* — two different things,
    which one solid accent block could not say. Unfocused it is a quiet chip;
    focused it takes the accent. It used to be a hard square of accent even
    while you were typing in a file pane, which made the least important thing
    on screen the most visible. */
-.stabs span.on { background: var(--accent-dim); color: var(--text); font-weight: 600; }
-#shell.on .stabs span.on { background: var(--accent); color: var(--on-accent); }
+.stabs span.on {
+  background: var(--pane); color: var(--text); font-weight: 600;
+  border-color: var(--line); border-bottom: 1px solid var(--pane);
+}
+/* The keys are in it: the open tab takes the accent along its top edge
+   rather than filling — a filled chip was the most visible thing on screen
+   while you were typing in a file pane. */
+#shell.on .stabs span.on { color: var(--accent); box-shadow: inset 0 2px 0 var(--accent); }
 .stabs span:hover:not(.on) { color: var(--text); background: var(--pane-off); }
 #s-title { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* The strip was 39px for three short words. Its own line-height rather than
    the listing's 26px row. */
-#shell .vhead { padding: 2px 10px; line-height: 1.6; }
+#shell .vhead {
+  padding: 3px 10px 0; line-height: 1.7; align-items: flex-end;
+  background: var(--pane-off); border-bottom: 1px solid var(--line);
+}
 .sgrid { user-select: text; cursor: text; }
 #shell.sync .vhead { color: var(--mark); }
 /* The panes of a split, placed where the engine says. Absolute rather than
