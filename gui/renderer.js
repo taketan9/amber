@@ -147,6 +147,9 @@ function say(text, bad = false) {
 /// path: the status line redraws on every keystroke and a statvfs per `j`
 /// would be a disk question asked two hundred times for one answer.
 const disk = { left: { at: null, v: null }, right: { at: null, v: null } };
+/// And the branch bar, cached the same way: it costs a `git status`, which is
+/// a per-directory question and not a per-keystroke one.
+const repo = { left: { at: null, v: null }, right: { at: null, v: null } };
 
 async function freshenDisk(which) {
     const pane = state[which];
@@ -159,6 +162,11 @@ async function freshenDisk(which) {
         // a dialog.
         d.v = await window.cian.call('df', { pane: which });
     } catch { d.v = null; }
+    try {
+        const r = await window.cian.call('vcs', { pane: which });
+        repo[which].v = r && r.branch ? r : null;
+    } catch { repo[which].v = null; }
+    repo[which].at = pane.cwd;
     drawStatus();
 }
 
@@ -189,6 +197,17 @@ function drawStatus() {
         const row = pane.entries[pane.cursor];
         if (row && !row.parent) chip('cur', row.name);
         if (pane.filter) chip('flt', `フィルタ /${pane.filter} (${pane.entries.length} 件)`);
+    }
+    // The branch, with ahead/behind and how many files are changed — green
+    // when the tree is clean, amber when it is not. cian-tui's own chip
+    // (render.rs), and the one line a developer glances at most.
+    const g = repo[which]?.v;
+    if (g && g.branch) {
+        const bits = [`\u{e0a0} ${g.branch}`];
+        if (g.ahead > 0) bits.push(`↑${g.ahead}`);
+        if (g.behind > 0) bits.push(`↓${g.behind}`);
+        if (g.changed > 0) bits.push(` ✚${g.changed}`);
+        chip(g.changed > 0 ? 'git dirty' : 'git', bits.join(' '));
     }
     const d = disk[which]?.v;
     if (d && d.total > 0) {

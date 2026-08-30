@@ -1257,6 +1257,12 @@ impl Session {
                     "kind": if git.is_some() { Some("git") } else if svn { Some("svn") } else { None },
                     "branch": git.as_ref().map(|g| g.branch.clone()),
                     "root": git.as_ref().map(|g| g.root.display().to_string()),
+                    // What the terminal build puts on its status line: the
+                    // branch bar every developer glances at. It answered only
+                    // "which branch", so the window could not draw the rest.
+                    "ahead": git.as_ref().map(|g| g.ahead),
+                    "behind": git.as_ref().map(|g| g.behind),
+                    "changed": git.as_ref().map(|g| g.changed_count()),
                 }))
             }
             "log" => {
