@@ -3771,6 +3771,22 @@ impl App {
                 self.prompt_download_chmod(files, dir);
                 return Ok(());
             }
+            InputKind::ShellName => {
+                let name = name.trim().to_string();
+                if name.chars().count() > 24 {
+                    self.message = Some(tr(self.lang,
+                        "a tab label is a short one", "名前は 24 文字までです").into());
+                    return Ok(());
+                }
+                let said = name.clone();
+                self.shell.rename_active(name);
+                self.message = Some(if said.is_empty() {
+                    tr(self.lang, "the tab shows its number again", "番号に戻しました").into()
+                } else {
+                    said
+                });
+                return Ok(());
+            }
             InputKind::LogDir => {
                 self.start_session_log(&name);
                 return Ok(());

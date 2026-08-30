@@ -46,7 +46,7 @@ impl PaneTabs {
 
 impl ShellTab {
     pub(crate) fn new(session: PtySession) -> Self {
-        Self { nodes: vec![Some(Node::Leaf { session, bg: None })], root: 0, active: 0 }
+        Self { nodes: vec![Some(Node::Leaf { session, bg: None })], root: 0, active: 0, name: String::new() }
     }
 
     pub(crate) fn alloc(&mut self, node: Node) -> usize {
@@ -309,6 +309,24 @@ impl ShellPane {
 
     pub(crate) fn count(&self) -> usize {
         self.tabs.len()
+    }
+
+    /// Which tab is showing.
+    pub(crate) fn active_tab_index(&self) -> usize {
+        self.active
+    }
+
+    /// What tab `i` is for, if it has been named.
+    pub(crate) fn tab_name(&self, i: usize) -> Option<&str> {
+        self.tabs.get(i).map(|t| t.name.as_str())
+    }
+
+    /// Name the active tab. An empty name puts its number back.
+    pub(crate) fn rename_active(&mut self, name: String) {
+        let at = self.active;
+        if let Some(t) = self.tabs.get_mut(at) {
+            t.name = name;
+        }
     }
 
     pub(crate) fn active_tab(&self) -> Option<&ShellTab> {

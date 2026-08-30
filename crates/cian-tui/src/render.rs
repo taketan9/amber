@@ -2049,7 +2049,12 @@ fn shell_tabs_title<'a>(
     let mut col: u16 = 1; // the leading space below
     spans.push(Span::raw(" "));
     for i in 0..tabs.count().max(1) {
-        let label = format!(" shell {} ", i + 1);
+        // Its name where it has one. A strip of `shell 1`..`shell 4` is a
+        // strip you have to open every tab to read.
+        let label = match tabs.tab_name(i) {
+            Some(n) if !n.is_empty() => format!(" {n} "),
+            _ => format!(" shell {} ", i + 1),
+        };
         let style = if i == tabs.active {
             if focused {
                 Style::default().fg(readable_on(theme().accent)).bg(theme().accent).add_modifier(Modifier::BOLD)

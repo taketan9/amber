@@ -467,7 +467,14 @@ def _strip_js(src: str) -> str:
                         elif src[i] == '}':
                             depth -= 1
                         i += 1
+                    # Spaced apart, because the text between two `${…}` runs
+                    # is dropped and the two would otherwise be glued into one
+                    # token: `${md} ${p(x)}` read as a call to `mdp`. It
+                    # invented a missing function, and — worse — could hide a
+                    # real one by welding its name to whatever precedes it.
+                    out.append(' ')
                     out.append(src[start:i - 1])
+                    out.append(' ')
                     continue
                 i += 1
             out.append('""')

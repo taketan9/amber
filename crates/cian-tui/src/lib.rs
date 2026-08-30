@@ -253,6 +253,14 @@ struct ShellTab {
     root: usize,
     /// Index of the active leaf node.
     active: usize,
+    /// What this tab is *for*, when it has been said. Empty means the strip
+    /// shows its number.
+    ///
+    /// Four tabs called `shell 1`..`shell 4` are four tabs you have to open
+    /// to tell apart, and the reason for the second one is always that the
+    /// first is busy with something in particular. `Aserver` answers that at
+    /// a glance; `shell 2` never can.
+    name: String,
 }
 
 
@@ -1986,6 +1994,8 @@ enum InputKind {
     TransferAs { op: PendingOp, src: PathBuf, dest_dir: PathBuf },
     /// A directory to write a session log into; the file name is generated.
     LogDir,
+    /// What this shell tab is for.
+    ShellName,
     /// A natural-language description to turn into a shell command via AI.
     AiShellCmd,
     /// A second try at that command. The model answered, the answer missed, and
@@ -3509,6 +3519,28 @@ impl App {
         self.open_popup(text_input("session log — folder", &prompt, seed, InputKind::LogDir));
     }
 
+    /// `:shellname` — say what this shell tab is for.
+    ///
+    /// A strip reading `shell 1 | shell 2 | shell 3` is a strip you have to
+    /// open every tab to read, and the reason there is a second tab is always
+    /// that the first is busy with something in particular. Empty puts the
+    /// number back.
+    fn start_shell_name_prompt(&mut self) {
+        if self.shell.count() == 0 {
+            self.message = Some(tr(self.lang, "no shell here to name", "名前を付けるシェルがありません").into());
+            return;
+        }
+        let at = self.shell.active_tab_index();
+        let seed = self.shell.tab_name(at).unwrap_or("").to_string();
+        self.open_popup(text_input(
+            "shell tab name",
+            tr(self.lang, "what this tab is for  (empty puts the number back):",
+               "このタブの用途  (空にすると番号に戻ります):"),
+            seed,
+            InputKind::ShellName,
+        ));
+    }
+
     /// Start logging the active shell pane into `dir`, building the file name
     /// from the timestamp and the pane's host (e.g. `20260723_140501_myhost.log`).
     fn start_session_log(&mut self, dir: &str) {
@@ -4358,6 +4390,7 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry("wheel / Shift+PgUp / Shift+↑", None, "scroll back through output that has gone past (Shift+Home / End for the two ends; typing returns to live)", "流れた出力をさかのぼる（Shift+Home / End で両端、入力すれば最新へ）"),
                 entry("F12", None, "zoom focused surface (toggle)", "フォーカス中の面をズーム（トグル）"),
                 entry("Shift+F12", None, "zoom active split pane (toggle)", "アクティブな分割ペインをズーム（トグル）"),
+                entry(":shellname", None, "name this shell tab for what it is doing (empty puts the number back)", "このシェルタブに用途の名前を付ける（空で番号に戻る）"),
                 entry(":sync", None, "synchronize: type into all panes at once (also right-click)", "同時入力：全ペインへ一括入力（右クリックでも）"),
                 entry("Ctrl+Shift+Enter / :snip", None, "snippet launcher → send a saved command to the shell; works from the shell too (cian.snippets)", "スニペットランチャー → 定型コマンドをシェルへ送信；シェルからも可（cian.snippets）"),
                 entry("drag", None, "select text; it is copied to the clipboard on release", "テキスト選択；離すとクリップボードにコピー"),

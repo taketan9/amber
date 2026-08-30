@@ -10295,7 +10295,7 @@
         let l0 = Rect::new(shell.x, shell.y, half, shell.height);
         let l1 = Rect::new(shell.x + half, shell.y, half, shell.height);
         app.shell_leaves = vec![(0, 7, l0, l0), (0, 9, l1, l1)];
-        app.shell.tabs.push(ShellTab { nodes: Vec::new(), root: 0, active: 9 });
+        app.shell.tabs.push(ShellTab { nodes: Vec::new(), root: 0, active: 9, name: String::new() });
 
         app.select_shell_leaf_at(shell.x + 2, shell.y + 2);
         assert_eq!(app.shell.tabs[0].active, 7, "should pick the left pane");

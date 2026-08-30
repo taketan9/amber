@@ -177,6 +177,14 @@ struct ShellTab {
     /// and the same command on all four. Per tab rather than global, because
     /// the tab you built for that is not the tab you keep a shell in.
     sync: bool,
+    /// What this tab is *for*, when it has been said. Empty means the tab
+    /// shows its number instead.
+    ///
+    /// Four tabs called `shell 1`..`shell 4` are four tabs you have to open
+    /// to tell apart, and the whole reason for a second one is that the first
+    /// is busy with something in particular. `Aserver` answers that at a
+    /// glance; `shell 2` never can.
+    name: String,
 }
 
 /// One side of the window, and the tabs it holds.
@@ -493,6 +501,7 @@ impl Session {
             "tab": self.shell_at,
             "showing": tab.focus,
             "sync": tab.sync,
+            "names": self.tabs.iter().map(|t| t.name.clone()).collect::<Vec<_>>(),
         })
     }
 
@@ -1344,7 +1353,10 @@ impl Session {
                 }
                 let cwd = self.pane_mut(&which)?.cwd.clone();
                 let id = self.new_shell(&cwd, rows, cols)?;
-                self.tabs.push(ShellTab { root: shell::Node::Leaf(id), focus: id, sync: false, zoom: false });
+                self.tabs.push(ShellTab {
+                    root: shell::Node::Leaf(id), focus: id,
+                    sync: false, zoom: false, name: String::new(),
+                });
                 self.shell_at = self.tabs.len() - 1;
                 Ok(self.shell_reply())
             }
@@ -1369,6 +1381,22 @@ impl Session {
                 Ok(self.shell_reply())
             }
             // Drag the border the focused pane sits against.
+            // Name this tab for what it is doing. An empty name puts the
+            // number back.
+            "shellrename" => {
+                let name = arg(req, "name");
+                // A tab strip is a row of short labels; a long one would push
+                // every other tab off the strip it is supposed to help read.
+                if name.chars().count() > 24 {
+                    anyhow::bail!("名前は 24 文字までです");
+                }
+                let at = req.params["tab"].as_u64().map(|v| v as usize).unwrap_or(self.shell_at);
+                let Some(tab) = self.tabs.get_mut(at) else {
+                    anyhow::bail!("そのタブはありません");
+                };
+                tab.name = name;
+                Ok(self.shell_reply())
+            }
             "shellresizepane" => {
                 let wider = req.params["wider"].as_bool().unwrap_or(true);
                 let down = req.params["down"].as_bool().unwrap_or(false);
@@ -1376,10 +1404,15 @@ impl Session {
                     anyhow::bail!("シェルが開いていません");
                 };
                 let id = tab.focus;
-                if !tab.root.resize(id, wider, down) {
-                    anyhow::bail!("その向きに動かせる境界がありません");
-                }
-                Ok(self.shell_reply())
+                // Said rather than raised. "No inner split along this axis" is
+                // not a failure — it is the case where the key means the
+                // outer divider instead, which is what the terminal build
+                // does with it (keys.rs `resize_split`). Bailing here made
+                // the front end show an error for a key that had more to try.
+                let moved = tab.root.resize(id, wider, down);
+                let mut reply = self.shell_reply();
+                reply["moved"] = serde_json::Value::Bool(moved);
+                Ok(reply)
             }
             // Move the keyboard to the next pane of this tab.
             "shellfocus" => {
@@ -2205,6 +2238,12 @@ impl Session {
                 "font": cian_lua::state_get("gui_font"),
                 "view": cian_lua::state_get("gui_view"),
                 "hints": cian_lua::state_get("gui_hints"),
+                // Where the two dividers were left. GUI-only keys: the
+                // terminal build has `main_pct` and `panes_pct` too but does
+                // not persist them, so there is nothing to share — only a
+                // name to avoid colliding with.
+                "main_pct": cian_lua::state_get("gui_main_pct"),
+                "panes_pct": cian_lua::state_get("gui_panes_pct"),
                 "theme": cian_lua::state_get("theme"),
                 // The keys the person bound in init.lua. The terminal build
                 // reads the same list; a binding that works in one and not the
@@ -2229,7 +2268,8 @@ impl Session {
                 // palette chosen in the window is the palette the terminal
                 // opens with, because they are one program.
                 if !matches!(key,
-                    "gui_look" | "gui_editor" | "gui_font" | "gui_view" | "gui_hints" | "theme")
+                    "gui_look" | "gui_editor" | "gui_font" | "gui_view" | "gui_hints"
+                    | "gui_main_pct" | "gui_panes_pct" | "theme")
                 {
                     anyhow::bail!("覚えられない項目です: {key}");
                 }
@@ -2501,7 +2541,11 @@ impl Session {
                     anyhow::bail!("{want} にはペインがありません");
                 };
                 let focus = made[0];
-                self.tabs.push(ShellTab { root, focus, sync: mac.sync, zoom: mac.zoom });
+                // A macro names its layout, and that name is exactly what the
+                // tab is for — so it wears it.
+                self.tabs.push(ShellTab {
+                    root, focus, sync: mac.sync, zoom: mac.zoom, name: mac.name.clone(),
+                });
                 self.shell_at = self.tabs.len() - 1;
                 let mut reply = self.shell_reply();
                 reply["name"] = serde_json::json!(mac.name);

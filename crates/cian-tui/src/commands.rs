@@ -277,6 +277,7 @@ impl App {
             // The session log had no verb at all, while the menu item that
             // starts it was labelled `(:log)` — a name git had already taken.
             "sessionlog" => self.start_log_prompt(),
+            "shellname" | "tabname" => self.start_shell_name_prompt(),
             "gitdiff" | "gdiff" | "svndiff" => self.git_diff_file(),
             // SVN-only working-copy operations.
             // svn-only, so it says so in the name. `:up` in a file manager

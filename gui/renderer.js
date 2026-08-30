@@ -7,6 +7,7 @@ const state = { left: null, right: null, focus: 'left' };
 
 const el = {
     hints: document.getElementById('hints'),
+    work: document.getElementById('work'),
     panes: document.getElementById('panes'),
     left: document.querySelector('[data-pane="left"]'),
     right: document.querySelector('[data-pane="right"]'),
@@ -187,6 +188,10 @@ function drawStatus() {
             : `${running.done ?? 0} / ${running.total}`;
         chip('op', `↻ ${running.verb} ${pct}`);
     }
+    // Something is being asked of the engine and is taking a moment. It has
+    // no percentage to report — `:du` cannot know how deep the tree is until
+    // it has walked it — so this says only that the key landed.
+    if (busy.n > 0) chip('op', '⋯ 実行中');
     el.stChips.replaceChildren(...chips);
     el.stMsg.textContent = status.msg ? `◂ ${status.msg}` : '';
     el.stMsg.classList.toggle('bad', status.bad);
@@ -207,10 +212,30 @@ function size(row) {
     return (i === 0 ? n : n.toFixed(n < 10 ? 1 : 0)) + u[i];
 }
 
+/// Which surface the keys are actually in, said on `#work` so the stylesheet
+/// can tell "this is the current pane" from "this is where you are typing".
+/// The file pane wore the accent frame while the shell had the keyboard.
+function markFocus() {
+    el.work.dataset.focus = term.on && term.focused ? 'shell' : 'files';
+}
+
+/// The one owner of "the keys are in the shell now".
+///
+/// Ten places set `term.focused` and nine of them also had to remember the
+/// class beside it — so the frame and the flag drifted apart, and the tenth
+/// site somebody adds next month would have drifted too. Same shape as the
+/// undo stacks: if two things must move together, one function moves them.
+function setShellFocus(on) {
+    term.focused = on;
+    el.shell.classList.toggle('on', on);
+    markFocus();
+}
+
 function draw(which) {
     const pane = state[which];
     const root = el[which];
     root.classList.toggle('active', state.focus === which);
+    markFocus();
     if (!pane) return;
     root.classList.toggle('remote', !!pane.remote);
     // What this pane is showing, said in the one line people actually read.
@@ -238,8 +263,24 @@ function draw(which) {
     // Which side you are on, but only when the other side is not on screen.
     // With both panes visible the highlight says it; with one, Tab would
     // otherwise change everything and announce nothing.
-    root.querySelector('.crumb').textContent =
-        ONE_PANE.includes(viewMode) ? `[${which === 'left' ? '左' : '右'}] ${where}` : where;
+    const lead = ONE_PANE.includes(viewMode) ? `[${which === 'left' ? '左' : '右'}] ` : '';
+    // A breadcrumb rather than a grey string: the parents dim, the folder you
+    // are *in* in the text colour. It is the most-read line in the window and
+    // it was set smaller than the date column and in the same ink as the
+    // things nobody reads.
+    const crumb = root.querySelector('.crumb');
+    const cut = Math.max(where.lastIndexOf('/'), where.lastIndexOf('\\'));
+    const here = cut >= 0 && cut < where.length - 1 ? where.slice(cut + 1) : '';
+    const parents = here ? where.slice(0, cut + 1) : where;
+    // One isolated run holding both parts, so the right-to-left box clips the
+    // head without reordering anything inside it.
+    const path = document.createElement('span');
+    path.className = 'path';
+    const tail = document.createElement('span');
+    tail.className = 'here';
+    tail.textContent = here;
+    path.append(document.createTextNode(lead + parents), tail);
+    crumb.replaceChildren(path);
 
     const rows = root.querySelector('.rows');
     // Rebuilt whole. A listing is a few hundred rows and Chromium does not
@@ -385,7 +426,24 @@ function draw(which) {
     freshenDisk(which);
 }
 
+/// How many engine calls are outstanding and have been slow enough to be
+/// worth admitting to.
+///
+/// `:du` over a big tree takes seconds, and the window said nothing at all
+/// while it did — no way to tell "working" from "the key did not land".
+/// Anything under a quarter of a second stays silent, because a chip that
+/// flashes on every keystroke is worse than no chip.
+const busy = { n: 0 };
+const BUSY_AFTER_MS = 250;
+
 async function ask(method, params) {
+    let slow = null;
+    let counted = false;
+    slow = setTimeout(() => {
+        counted = true;
+        busy.n += 1;
+        drawStatus();
+    }, BUSY_AFTER_MS);
     try {
         // Every request states where both cursors are. The cursor moves here,
         // on every `j`, without asking the engine — so the engine's own copy
@@ -403,6 +461,9 @@ async function ask(method, params) {
     } catch (e) {
         say(String(e.message || e), true);
         return null;
+    } finally {
+        clearTimeout(slow);
+        if (counted) { busy.n -= 1; drawStatus(); }
     }
 }
 
@@ -1123,14 +1184,21 @@ function glyphFor(row) {
     return '📄';
 }
 
-/// A modified time, the way a listing shows one: `YYYY-MM-DD HH:MM`, the
-/// terminal build's format to the digit. It had a two-digit year here, which
-/// made the two listings answer the same question differently.
+/// A modified time, the way a listing shows one.
+///
+/// This year gets `MM-DD HH:MM`; anything older gets the year instead of the
+/// clock — `ls -l` and Finder both do this, and for good reason. The year is
+/// the same four digits on almost every row, so printing it everywhere spends
+/// the width of the widest column saying the least. What the eye wants from
+/// this column is "recently, or long ago".
 function when(row) {
     if (!row.modified) return '';
     const d = new Date(row.modified * 1000);
     const p = (n) => String(n).padStart(2, '0');
-    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+    const md = `${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+    return d.getFullYear() === new Date().getFullYear()
+        ? `${md} ${p(d.getHours())}:${p(d.getMinutes())}`
+        : `${d.getFullYear()}-${md}`;
 }
 
 /// Which look is showing, and it *is* written down now.
@@ -1386,11 +1454,12 @@ function contextRows() {
             { label: '上下に分割', value: 'Shift+F9', run: () => splitShell(true) },
             { label: '新しいタブ', value: 'F9', run: shellTab },
             { label: '分割を閉じる', value: 'Shift+F10', run: () => closePane() },
-            { label: 'ズーム', value: 'F12', run: zoomShell },
+            { label: 'ズーム', value: 'F12', run: zoomFocused },
             { label: 'このペインだけ', value: 'Shift+F12', run: () => ask('shellpanezoom', {}).then((r) => r && takeShell(r)) },
         ]));
+        v.push({ label: 'このシェルに名前を付ける', value: ':shellname', run: cmdShellName });
         v.push({ label: '全ペインに同時入力', value: 'Ctrl+S', run: cmdSync });
-        v.push({ label: '閉じる', value: 'Esc', run: () => { term.focused = false; el.shell.classList.remove('on'); say('ファイル'); } });
+        v.push({ label: '閉じる', value: 'Esc', run: () => { setShellFocus(false); say('ファイル'); } });
         v.push({ label: 'キー一覧', value: '?', run: openHelp });
         return v;
     }
@@ -2152,7 +2221,11 @@ document.addEventListener('keydown', (e) => {
     // chord now falls through to the report at the bottom instead of quietly
     // running the letter it happens to contain.
     const bare = !e.ctrlKey && !e.metaKey;
-    if (k === 'ArrowDown' || (k === 'j' && bare)) move(1);
+    // The dividers, and *first*: the plain arrows below carry no modifier
+    // guard, so tested later this key would have moved the cursor instead —
+    // the same shape as the four chords that were dead in this chain before.
+    if (e.ctrlKey && e.shiftKey && k.startsWith('Arrow')) resizeSplit(k);
+    else if (k === 'ArrowDown' || (k === 'j' && bare)) move(1);
     else if (k === 'ArrowUp' || (k === 'k' && bare)) move(-1);
     else if (k === 'PageDown') move(20);
     else if (k === 'PageUp') move(-20);
@@ -2218,7 +2291,7 @@ document.addEventListener('keydown', (e) => {
     else if (k === 's' && bare) cmdShortcuts();
     else if (k === 'S' && bare) cmdSshPicker();
     else if (k === '@' && bare) cmdMacros();
-    else if (k === 'F12') zoomShell();
+    else if (k === 'F12') zoomFocused();
     else if ((k === '=' || k === '+') && (e.ctrlKey || e.metaKey)) { setFont(FONT.at + 1); say(`文字の大きさ ${FONT.at}px`); }
     else if (k === '-' && (e.ctrlKey || e.metaKey)) { setFont(FONT.at - 1); say(`文字の大きさ ${FONT.at}px`); }
     else if (k === '0' && (e.ctrlKey || e.metaKey)) { setFont(baseFont()); say('文字の大きさを戻しました'); }
@@ -2226,7 +2299,7 @@ document.addEventListener('keydown', (e) => {
     else if ((k === 'w' && bare) || k === 'F10') tabClose();
     else if (k === 'F1') goTab(state.focus, { step: -1 });
     else if (k === 'F2') goTab(state.focus, { step: 1 });
-    else if (k === 'J' && bare) { if (term.on) { term.focused = true; el.shell.classList.add('on'); say('シェル'); } else openShell(); }
+    else if (k === 'J' && bare) { if (term.on) { setShellFocus(true); say('シェル'); } else openShell(); }
     else if (k === 'r' && bare) {
         if (state[state.focus].remote) remoteOp('rename'); else rename();
     }
@@ -3374,7 +3447,8 @@ const COMMANDS = [
     { name: 'sync', alias: ['broadcast'], about: 'シェル: 全ペインに同時入力（Ctrl+S でも）', run: cmdSync },
     { name: 'snip', alias: ['snippet'], about: '保存したコマンドをシェルへ（Ctrl+Shift+Enter でも）', run: cmdSnippets },
     { name: 'sessionlog', alias: ['log2'], about: 'シェルの写しをファイルに取る／止める', run: cmdShellLog },
-    { name: 'zoom', about: 'シェルパネルを広げる／戻す（F12 でも）', run: zoomShell },
+    { name: 'shellname', alias: ['tabname'], about: 'このシェルタブに名前を付ける（タブを二度押しでも）', arg: '名前', optional: true, run: cmdShellName },
+    { name: 'zoom', about: 'いま操作している面を広げる／戻す（F12 でも）', run: zoomFocused },
     { name: 'df', about: 'ディスクの空き容量', run: cmdDf },
     { name: 'wc', about: '行／単語／バイト数', run: cmdWc },
     { name: 'head', about: '先頭だけ見る（:head -n 20）', arg: '-n 数', optional: true, run: (a) => cmdPeek(a, false) },
@@ -3607,8 +3681,7 @@ async function cmdMacros() {
             });
             if (!done) return;
             takeShell(done);
-            term.focused = true;
-            el.shell.classList.add('on');
+            setShellFocus(true);
             say(`${done.name} — ${done.opened} 枚をタブで開きました`);
         },
     });
@@ -3703,8 +3776,7 @@ async function cmdAiCmd(want) {
         const line = answer.trim().split('\n')[0].replace(/^[$#>]\s*/, '');
         if (!term.on) await openShell();
         await ask('shellinput', { text: line });
-        term.focused = true;
-        el.shell.classList.add('on');
+        setShellFocus(true);
         say('Enter で実行、Ctrl+C で捨てる — 実行はしていません');
     };
 }
@@ -4135,7 +4207,9 @@ function findCommand(name) {
 async function commandLine(initial = '') {
     // Named, not spelled. The heading used to be a bare `:`, which is the key
     // you pressed, not the answer to "what is this box".
-    const line = await askFor('コマンド入力', initial, { hint: ':' });
+    // No placeholder. A ghost `:` sitting in an empty box is a character you
+    // cannot tell from one you typed until you try to delete it.
+    const line = await askFor('コマンド入力', initial);
     if (line === null) return;
     const text = line.trim();
     if (!text) return;
@@ -4847,7 +4921,7 @@ async function cmdJump() {
 // them is a job with twenty years of edge cases in it, and a second answer to
 // any of them is how two front ends stop looking like one program.
 // ─────────────────────────────────────────────────────────────────────────
-const term = { on: false, focused: false, rows: 24, cols: 80, tabs: 1, tab: 0, showing: null };
+const term = { on: false, focused: false, rows: 24, cols: 80, tabs: 1, tab: 0, showing: null, names: [] };
 
 /// How many cells fit. Measured from a real character rather than assumed:
 /// the font is whatever the machine had, and three of the four looks disagree
@@ -4892,8 +4966,7 @@ async function openShell(opts = {}) {
     const takeKeys = opts.focus !== false;
     el.shell.hidden = false;
     term.on = true;
-    term.focused = takeKeys;
-    el.shell.classList.toggle('on', takeKeys);
+    setShellFocus(takeKeys);
     const size = shellSize();
     term.rows = size.rows;
     term.cols = size.cols;
@@ -4906,16 +4979,14 @@ async function openShell(opts = {}) {
 
 function closeShell() {
     term.on = false;
-    term.focused = false;
+    setShellFocus(false);
     el.shell.hidden = true;
-    el.shell.classList.remove('on');
 }
 
 /// Focus without closing. The panel stays visible while the files have the
 /// keys — which is the point of docking it rather than opening it instead.
 function blurShell() {
-    term.focused = false;
-    el.shell.classList.remove('on');
+    setShellFocus(false);
     say('ファイルへ戻りました（Shift+J でシェルへ）');
 }
 
@@ -4926,6 +4997,7 @@ function takeShell(r) {
     term.tab = r.tab ?? 0;
     term.showing = r.showing ?? null;
     term.sync = !!r.sync;
+    if (r.names) term.names = r.names;
     el.shell.classList.toggle('sync', term.sync);
     if (r.panes) layoutShell(r.panes);
 }
@@ -4965,8 +5037,7 @@ async function focusPaneOf(id) {
         if (!r) return;
         takeShell(r);
     }
-    term.focused = true;
-    el.shell.classList.add('on');
+    setShellFocus(true);
 }
 
 /// `:theme` — pick a look by name, rather than cycling to it.
@@ -5496,8 +5567,7 @@ async function cmdEditorTab(_arg, invokedAs) {
     const t = await ask('shelltab', { pane: state.focus, ...shellSize() });
     if (!t) return;
     takeShell(t);
-    term.focused = true;
-    el.shell.classList.add('on');
+    setShellFocus(true);
     await ask('run', { pane: state.focus, line: `${editor} %f` });
     say(`${editor} で開きました（F10 でタブごと閉じる）`);
 }
@@ -5787,12 +5857,78 @@ async function cmdEditExternal() {
 /// Two thirds of the height is not enough to read a build's output and too
 /// much to keep a listing usable; the answer everywhere else is a key that
 /// swaps between them rather than a compromise that suits neither.
-function zoomShell() {
-    if (!term.on) { say('シェルが開いていません', true); return; }
-    const big = el.shell.classList.toggle('zoom');
-    say(big ? 'シェルを広げました（F12 で戻る）' : '戻しました');
-    // The panes were sized for the old height; tell the engine the new one.
-    ask('shellresize', shellSize());
+/// F12 — the surface the keys are in fills the window.
+///
+/// The terminal build's `toggle_zoom` (keys.rs:363) zooms *the focused
+/// surface*: standing in a file pane, that pane; standing in the shell, the
+/// shell. This only ever grew the shell, whichever pane you were in — so F12
+/// from a listing made the thing you were not looking at bigger.
+function zoomFocused() {
+    const now = el.work.dataset.zoom;
+    if (now) {
+        el.work.dataset.zoom = '';
+        say('戻しました');
+    } else if (term.on && term.focused) {
+        el.work.dataset.zoom = 'shell';
+        say('シェルを広げました（F12 で戻る）');
+    } else {
+        el.work.dataset.zoom = 'files';
+        say(`${state.focus === 'left' ? '左' : '右'}ペインを広げました（F12 で戻る）`);
+    }
+    // Whatever just changed shape, the shell's idea of its own size is stale.
+    if (term.on) ask('shellresize', shellSize());
+    measureFoot();
+}
+
+/// The two dividers, moved by Ctrl+Shift+arrow.
+///
+/// `main` is the share given to the *files* and `panes` the share given to
+/// the left pane, which is how the terminal build holds them (`main_pct`,
+/// `panes_pct`). The help has listed this key since the beginning and the
+/// listing had no handler for it at all — only the shell's inner splits did.
+const layout = { main: 75, panes: 50 };
+const MIN_PCT = 15;
+const STEP_PCT = 4;
+
+function applyLayout(remember = true) {
+    const clamp = (v) => Math.max(MIN_PCT, Math.min(100 - MIN_PCT, v));
+    layout.main = clamp(layout.main);
+    layout.panes = clamp(layout.panes);
+    const r = document.documentElement.style;
+    r.setProperty('--main-pct', `${layout.main}%`);
+    r.setProperty('--panes-pct', `${layout.panes}%`);
+    if (term.on) ask('shellresize', shellSize());
+    if (remember) {
+        ask('remember', { key: 'gui_main_pct', value: String(layout.main) });
+        ask('remember', { key: 'gui_panes_pct', value: String(layout.panes) });
+    }
+}
+
+function resizeSplit(key) {
+    // In the shell, the arrow first tries the nearest inner split along that
+    // axis; only when there is none does it move the files|shell divider.
+    // That is the terminal build's order, and it is what makes the key mean
+    // "make the thing I am looking at bigger" in both places.
+    if (term.on && term.focused) {
+        const wider = key === 'ArrowRight' || key === 'ArrowDown';
+        const down = key === 'ArrowUp' || key === 'ArrowDown';
+        ask('shellresizepane', { wider, down }).then((r) => {
+            if (r && r.moved) { takeShell(r); return; }
+            // No split that way: grow or shrink the whole panel instead.
+            if (key === 'ArrowUp') { layout.main -= STEP_PCT; applyLayout(); }
+            else if (key === 'ArrowDown') { layout.main += STEP_PCT; applyLayout(); }
+            if (r) takeShell(r);
+        });
+        return;
+    }
+    if (key === 'ArrowRight') layout.panes += STEP_PCT;
+    else if (key === 'ArrowLeft') layout.panes -= STEP_PCT;
+    // Down gives the files more room, which is to say the shell less.
+    else if (key === 'ArrowDown') layout.main += STEP_PCT;
+    else if (key === 'ArrowUp') layout.main -= STEP_PCT;
+    else return;
+    applyLayout();
+    say(`ファイル ${layout.main}%   左ペイン ${layout.panes}%`);
 }
 
 /// `:preview` — follow the cursor.
@@ -5831,6 +5967,27 @@ function showPreview() {
 ///
 /// `enter: false` types the line and stops, which is for the commands worth
 /// reading before running — the terminal build's distinction, kept.
+/// `:shellname` — what this shell tab is for.
+///
+/// The terminal build wants this too: a tab strip is only worth having if the
+/// labels tell the tabs apart, and `shell 2` never does. Empty puts the
+/// number back.
+async function cmdShellName(name) {
+    if (!term.on) { say('シェルが開いていません', true); return; }
+    const now = (term.names || [])[term.tab] || '';
+    // An optional argument arrives as `''`, not `undefined` — so testing for
+    // undefined renamed the tab to nothing the moment `:shellname` was typed
+    // on its own, which is the one spelling that should ask.
+    const want = name ? name : await askFor('このシェルの名前', now);
+    if (want === null) return;
+    const r = await ask('shellrename', { name: want.trim() });
+    if (!r) return;
+    // takeShell lays the panes out again, and the strip is drawn from there.
+    // Calling drawShell() by hand meant calling it with no screen at all.
+    takeShell(r);
+    say(want.trim() ? `シェル ${term.tab + 1}: ${want.trim()}` : '名前を外しました');
+}
+
 /// `:sessionlog` — everything this pane shows, teed to a file. On again to
 /// stop. The frame turns carmine while it runs, which is the terminal
 /// build's signal: a recorded shell should not look like an unrecorded one.
@@ -5862,8 +6019,7 @@ async function cmdSnippets() {
             closeReport();
             if (!term.on) await openShell();
             await ask('shellinput', { text: row.cmd + (row.enter ? '\n' : '') });
-            term.focused = true;
-            el.shell.classList.add('on');
+            setShellFocus(true);
             say(row.enter ? `${row.label} を実行` : `${row.label} を置きました — Enter で実行`);
         },
     });
@@ -5952,9 +6108,17 @@ function drawShell(screen, into) {
         // another, which a heading reading "シェル" never told anybody.
         el.sTabs.replaceChildren(...Array.from({ length: Math.max(1, term.tabs) }, (_, i) => {
             const t = document.createElement('span');
-            t.textContent = `shell ${i + 1}`;
+            // Its name where it has one. Four tabs called `shell 1..4` are
+            // four tabs you have to open to tell apart, and the reason for
+            // the second one is always that the first is busy with something
+            // in particular.
+            const name = (term.names || [])[i];
+            t.textContent = name || `shell ${i + 1}`;
+            t.title = name ? `${name}（shell ${i + 1}）` : `shell ${i + 1}`;
             if (i === term.tab) t.className = 'on';
             t.addEventListener('mousedown', () => goTabOfShell(i));
+            // Double-click to rename, the way every tab strip renames.
+            t.addEventListener('dblclick', () => { goTabOfShell(i); cmdShellName(); });
             return t;
         }));
         // What the shell itself says it is: `user@host: cwd`, which is the
@@ -6070,7 +6234,7 @@ document.addEventListener('keydown', (e) => {
     if (e.key === 'F12') {
         e.stopPropagation();
         e.preventDefault();
-        zoomShell();
+        zoomFocused();
         return;
     }
     if (e.key === 'F10' && !e.shiftKey) { e.stopPropagation(); e.preventDefault(); shellCloseTab(); return; }
@@ -6356,6 +6520,11 @@ async function recall() {
     }
     if (s.view && VIEWS.includes(s.view)) setView(s.view, false);
     if (s.hints === '0') { hintsOn = false; drawHints(); }
+    // Where the dividers were left. Applied without saving them straight back.
+    const pct = (v, fallback) => (Number.isFinite(Number(v)) && Number(v) > 0 ? Number(v) : fallback);
+    layout.main = pct(s.main_pct, layout.main);
+    layout.panes = pct(s.panes_pct, layout.panes);
+    applyLayout(false);
     applyKeymaps(s.keymaps);
     // The eighteen, and whichever of them the terminal build was last set to
     // — because they are one program and `theme` is one setting.

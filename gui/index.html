@@ -146,7 +146,16 @@ html, body {
   user-select: none; cursor: default;
   overflow: hidden;
 }
+/* The two splits, as percentages, the way the terminal build holds them:
+   `--main-pct` is the height given to the *files* (so the shell gets the
+   rest) and `--panes-pct` the width given to the left pane. Ctrl+Shift+arrow
+   moves them, and they are remembered. The shell was a hardcoded 40%, which
+   on an 800px window left thirteen rows for a listing and three hundred
+   pixels of empty terminal. */
+:root { --main-pct: 75%; --panes-pct: 50%; }
 #panes { flex: 1 1 auto; display: flex; gap: 1px; background: var(--line); min-height: 0; }
+.pane[data-pane="left"] { flex: 0 0 var(--panes-pct); }
+.pane[data-pane="right"] { flex: 1 1 auto; }
 .pane {
   flex: 1 1 0; min-width: 0; min-height: 0; display: flex; flex-direction: column;
   background: var(--pane-off);
@@ -154,10 +163,14 @@ html, body {
      move the rows by two pixels. */
   border: 2px solid transparent;
 }
-/* Which pane the keys are talking to. It was a background shade, which on a
-   light theme is nearly nothing; the terminal build draws a frame, and a
-   frame is what reads across all twenty-one palettes. */
-.pane.active { border-color: var(--accent); background: var(--pane); }
+/* Two different questions, and they were one class.
+   `.active` is *which pane is the current one* — what Tab switches, what the
+   one-pane views show, what F12 zooms. `#work[data-focus]` is *where the keys
+   actually are*, which the shell can take. Conflated, the file pane kept its
+   accent frame while you were typing into the shell, so two surfaces claimed
+   the keyboard at once. */
+.pane.active { background: var(--pane); }
+#work[data-focus="files"] .pane.active { border-color: var(--accent); }
 /* Icons take the whole window. Tiles need width, and two halves of a window
    give a wall of icons two narrow columns of them — which is neither of the
    things the mode is for. Tab still crosses to the other pane; it simply
@@ -172,14 +185,35 @@ html, body {
    somebody's server for your own disk is the one confusion worth spending a
    colour on. */
 .pane.remote { outline: 2px solid var(--mark); outline-offset: -2px; }
+/* Where you are. The most-read line in a file manager, and it was set two
+   points smaller than the date column and in the dim colour — the priorities
+   the wrong way round. Full size now, with the parents dim and the folder you
+   are actually in in the text colour.
+
+   `flex: 0 0 auto` is the fix for the clipping: a flex item shrinks by
+   default, and this one was being squeezed to 30px around 38px of content, so
+   the descenders were cut. (ASCII survived it; Japanese would not have.) */
 .crumb {
-  padding: 6px 10px; border-bottom: 1px solid var(--line);
-  color: var(--dim); font-size: .8em;
+  flex: 0 0 auto;
+  padding: 5px 10px; border-bottom: 1px solid var(--line);
+  color: var(--dim);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   /* The path is the one thing here worth copying out. */
   user-select: text; cursor: text;
+  /* Clipped at the *head*, so a deep path keeps the end that says where you
+     are. The box is right-to-left, which is what moves the ellipsis to that
+     side; the run inside it is isolated back to left-to-right so the
+     characters keep their order. `unicode-bidi: plaintext` here instead put
+     the direction back to auto — the box behaved left-to-right again and
+     truncated the only part worth keeping. */
+  direction: rtl; text-align: left;
 }
-.pane.active .crumb { color: var(--accent); }
+/* *One* isolate holding the whole path. Two of them — parents and here — are
+   two runs, and in a right-to-left box two runs are laid out right to left:
+   the folder you are in went off the left edge and only its parents showed. */
+.crumb > .path { unicode-bidi: isolate; direction: ltr; }
+.crumb .here { color: var(--text); font-weight: 600; }
+#work[data-focus="files"] .pane.active .crumb .here { color: var(--accent); }
 /* The tab strip, and only when there is more than one — a row of chrome
    showing a single tab is a row of chrome saying nothing. */
 .tabs { display: flex; gap: 2px; padding: 2px 4px 0; overflow: hidden; }
@@ -202,7 +236,7 @@ html, body {
 .row .size { flex: 0 0 auto; color: var(--dim); font-variant-numeric: tabular-nums; }
 /* details — Explorer's columns, in Explorer's widths. Each fixed so they
    read as columns; a ☁ for a file that is listed but lives in the cloud. */
-.row .when { flex: 0 0 17ch; text-align: right; color: var(--dim); font-variant-numeric: tabular-nums; }
+.row .when { flex: 0 0 12ch; text-align: right; color: var(--dim); font-variant-numeric: tabular-nums; }
 .row .cloud { flex: 0 0 2ch; text-align: center; color: var(--dim); }
 .row .kind { flex: 0 0 12ch; color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* The mark column — the terminal build's `● `, in the mark colour. A colour
@@ -292,12 +326,15 @@ html, body {
 }
 #st-badge.visual { background: var(--mark); }
 #st-badge.filter { background: var(--k-exec, #3a7a4a); color: var(--on-accent); }
-/* The chips. Aligned to their end and clipped at their start, which is the
-   terminal build's overflow rule — a narrow window loses the leftmost chips
-   one by one and never the badge or the message. */
+/* The chips, left to right from the badge — the terminal build's order.
+   They were pushed to the right end to get the overflow to clip on the left,
+   and the cost was that every chip *moved* on every keystroke: the name under
+   the cursor is one of them, so walking a listing slid the whole row about.
+   A thing that moves is a thing you cannot read. Dropping from the left is
+   done by the message being last and taking the space instead. */
 #st-chips {
-  flex: 1 1 auto; display: flex; gap: .8em; overflow: hidden;
-  justify-content: flex-end;
+  flex: 0 1 auto; display: flex; gap: .8em; overflow: hidden;
+  justify-content: flex-start;
 }
 #st-chips span { flex: 0 0 auto; }
 #st-chips .n { color: var(--text); }
@@ -307,7 +344,10 @@ html, body {
 #st-chips .disk.warn { color: var(--mark); font-weight: 600; }
 #st-chips .disk.crit { color: #d04a3a; font-weight: 600; }
 #st-chips .op { color: var(--accent); font-weight: 600; }
-#st-msg { flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; font-style: italic; color: var(--text); }
+#st-msg { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; font-style: italic; color: var(--text); }
+/* The name under the cursor changes on every j and k. Given a floor it stops
+   dragging everything to its right back and forth as the name gets shorter. */
+#st-chips .cur { min-width: 12ch; }
 #st-msg.bad { color: var(--bad-fg); background: var(--bad-bg); padding: 0 .6em; font-style: normal; }
 #st-shell { flex: 0 0 auto; color: var(--dir); }
 
@@ -347,7 +387,7 @@ html, body {
    and, worse, that scrolling a listing to its last row put that row
    underneath the shell where it could not be seen or reached. */
 #shell {
-  flex: 0 0 auto; height: 40%;
+  flex: 0 0 calc(100% - var(--main-pct));
   display: flex; flex-direction: column; min-height: 0;
   background: var(--pane); border-top: 2px solid var(--line);
 }
@@ -355,6 +395,16 @@ html, body {
 /* Same signal as a file pane: the surface the keys are talking to wears the
    accent. Two pixels either way, so focus does not move anything. */
 #shell.on { border-top-color: var(--accent); }
+
+/* F12 — the *focused* surface fills the window, which is what the terminal
+   build's `toggle_zoom` does. It only ever grew the shell here, whichever
+   pane you were standing in. The others are hidden rather than shrunk: a
+   zoom that leaves slivers of the others is a smaller zoom, not a zoom. */
+#work[data-zoom="files"] #shell { display: none; }
+#work[data-zoom="files"] .pane:not(.active) { display: none; }
+#work[data-zoom="files"] .pane.active { flex: 1 1 100%; }
+#work[data-zoom="shell"] #panes { display: none; }
+#work[data-zoom="shell"] #shell { flex: 1 1 auto; }
 
 /* Typing into four servers at once should not look like typing into one. */
 #shell.zoom { height: 88%; }
@@ -408,15 +458,24 @@ html, body {
    active one on the accent. It replaced a heading that said "シェル" — a
    label naming the thing you are already looking at, where the tabs you
    cannot otherwise see could have been. */
-.stabs { display: flex; gap: 0; align-items: stretch; margin-right: .8em; }
+.stabs { display: flex; gap: 3px; align-items: center; margin-right: .8em; }
 .stabs span {
-  padding: 0 .7em; cursor: pointer; color: var(--dim);
-  border-right: 1px solid var(--line);
+  padding: 1px .7em; cursor: pointer; color: var(--dim);
+  border-radius: 3px; max-width: 16ch;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.stabs span:last-child { border-right: 0; }
-.stabs span.on { background: var(--accent); color: var(--on-accent); font-weight: 600; }
-.stabs span:hover:not(.on) { color: var(--text); }
+/* The current tab, and *whether the keys are in it* — two different things,
+   which one solid accent block could not say. Unfocused it is a quiet chip;
+   focused it takes the accent. It used to be a hard square of accent even
+   while you were typing in a file pane, which made the least important thing
+   on screen the most visible. */
+.stabs span.on { background: var(--accent-dim); color: var(--text); font-weight: 600; }
+#shell.on .stabs span.on { background: var(--accent); color: var(--on-accent); }
+.stabs span:hover:not(.on) { color: var(--text); background: var(--pane-off); }
 #s-title { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The strip was 39px for three short words. Its own line-height rather than
+   the listing's 26px row. */
+#shell .vhead { padding: 2px 10px; line-height: 1.6; }
 .sgrid { user-select: text; cursor: text; }
 #shell.sync .vhead { color: var(--mark); }
 /* The panes of a split, placed where the engine says. Absolute rather than
@@ -806,7 +865,7 @@ html, body {
       <div class="head"></div>
       <div class="body"></div>
       <div class="buttons">
-        <button data-answer="no">やめる  (Esc)</button>
+        <button data-answer="no">キャンセル  (Esc)</button>
         <button data-answer="yes" class="go">実行  (Enter)</button>
       </div>
     </div>
