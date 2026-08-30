@@ -39,6 +39,23 @@ impl Kind {
     }
 }
 
+/// What to do and how to do it — the operation and the caller's answers to
+/// the two questions the confirmation sheet asks: what happens to a name that
+/// is already there, and where a delete sends things.
+#[derive(Clone, Copy)]
+pub struct Plan {
+    pub kind: Kind,
+    pub conflict: Conflict,
+    pub delete: DeleteMode,
+}
+
+impl Plan {
+    /// The terminal build's defaults: skip what exists, trash what is deleted.
+    pub fn of(kind: Kind) -> Self {
+        Plan { kind, conflict: Conflict::Skip, delete: DeleteMode::Trash }
+    }
+}
+
 /// One operation, while it is happening.
 #[derive(Clone)]
 struct Live {
@@ -81,12 +98,14 @@ impl Jobs {
     /// before any file has been touched.
     pub fn start(
         &self,
-        kind: Kind,
+        plan: Plan,
         paths: Vec<PathBuf>,
         dest: Option<PathBuf>,
         out: Out,
         undo: Stack,
+        redo: Stack,
     ) -> u64 {
+        let Plan { kind, conflict, delete } = plan;
         let op = self.next.fetch_add(1, Ordering::Relaxed) + 1;
         let cancel = Arc::new(AtomicBool::new(false));
         self.running.lock().unwrap().push(Live {
@@ -138,13 +157,13 @@ impl Jobs {
                     return;
                 }
                 let result = match (kind, dest.as_ref()) {
-                    (Kind::Copy, Some(d)) => ops::copy_one(path, d, Conflict::Overwrite),
-                    (Kind::Move, Some(d)) => ops::move_one(path, d, Conflict::Overwrite),
-                    // Trash, never unlink. `d` is one keystroke from destroying
-                    // work, and this front end has no undo yet at all.
-                    (Kind::Delete, _) => {
-                        ops::delete_one(path, DeleteMode::Trash).map(|()| true)
-                    }
+                    // The caller's answer, not a constant. Skip is the plain
+                    // yes — it used to be Overwrite here while the terminal
+                    // build's Enter meant skip, so the same keystroke clobbered
+                    // in one front end and preserved in the other.
+                    (Kind::Copy, Some(d)) => ops::copy_one(path, d, conflict),
+                    (Kind::Move, Some(d)) => ops::move_one(path, d, conflict),
+                    (Kind::Delete, _) => ops::delete_one(path, delete).map(|()| true),
                     // A copy or move with nowhere to go. Caught before starting,
                     // so this is only here to make the match total.
                     _ => Err(anyhow::anyhow!("no destination")),
@@ -174,7 +193,7 @@ impl Jobs {
                 }
             }
             if !moved.is_empty() {
-                undo.push(Undo::Moved { pairs: moved });
+                crate::did_step(&undo, &redo, Undo::Moved { pairs: moved });
             }
             out.event(
                 "done",

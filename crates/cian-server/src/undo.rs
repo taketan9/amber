@@ -78,6 +78,14 @@ impl Stack {
     pub fn pop(&self) -> Option<Undo> {
         self.0.lock().unwrap().pop()
     }
+
+    /// Empty it. The redo stack is cleared whenever something *new* lands on
+    /// the undo stack: once you have done something else, the branch you
+    /// undid is gone, and replaying it would put files back on top of work
+    /// done since.
+    pub fn clear(&self) {
+        self.0.lock().unwrap().clear();
+    }
 }
 
 /// The other direction.

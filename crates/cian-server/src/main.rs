@@ -81,6 +81,12 @@ struct PaneView {
     /// or a panelized search. The window needs it to know that Esc means
     /// "back to the directory" rather than "nothing to cancel".
     flat: Option<String>,
+    /// How this pane is ordered. Sorting is per pane in the core; a window
+    /// that remembers one global "current sort" describes the wrong pane the
+    /// moment the other one is sorted — its picker cursor and the ▲▼ in the
+    /// column header both lied after a Tab.
+    sort_key: &'static str,
+    sort_reverse: bool,
 }
 
 /// One line of a listing.
@@ -128,6 +134,8 @@ impl PaneView {
             cursor: pane.cursor,
             marked: pane.mark_count(),
             hidden_shown: pane.show_hidden,
+            sort_key: pane.sort.key.label(),
+            sort_reverse: pane.sort.reverse,
             flat: pane.flat_label().map(str::to_string),
             // Filled in by `of_side`; a bare pane does not know its siblings.
             tabs: Vec::new(),
@@ -413,6 +421,14 @@ impl Session {
     /// Where a transfer goes: the directory the other pane is showing. Two
     /// panes side by side, and you copy between them — that is the whole idea,
     /// and it is why the destination never has to be typed.
+    /// A new step onto the undo stack — and the redo stack emptied, because
+    /// once something new has happened the branch that was undone is gone.
+    /// Every "something happened" site goes through here; only the undo/redo
+    /// handler itself pushes raw, since its pushes are the walk, not a step.
+    fn did(&self, step: Undo) {
+        did_step(&self.undo, &self.redo, step);
+    }
+
     fn other_cwd(&self, which: &str) -> std::path::PathBuf {
         match which {
             "left" => self.right.get().cwd.clone(),
@@ -582,7 +598,7 @@ impl Session {
                 // Only if it actually went somewhere: `Enter` on a file will
                 // one day open it, and that is not a step to walk back.
                 if pane.cwd != was {
-                    self.undo.push(Undo::Navigated { pane: which.clone(), from: was });
+                    self.did(Undo::Navigated { pane: which.clone(), from: was });
                 }
                 self.view(&which)
             }
@@ -596,7 +612,7 @@ impl Session {
                 let was = pane.cwd.clone();
                 pane.go_parent()?;
                 if pane.cwd != was {
-                    self.undo.push(Undo::Navigated { pane: which.clone(), from: was });
+                    self.did(Undo::Navigated { pane: which.clone(), from: was });
                 }
                 self.view(&which)
             }
@@ -616,16 +632,7 @@ impl Session {
             }
             "markall" => {
                 let which = req.params["pane"].as_str().unwrap_or("left").to_string();
-                let pane = self.pane_mut(&which)?;
-                // A second press clears, which is what every "select all" does
-                // once everything is already selected.
-                if pane.mark_count() > 0 {
-                    pane.clear_marks();
-                } else {
-                    for i in 0..pane.entries.len() {
-                        pane.set_mark_at(i);
-                    }
-                }
+                mark_all(self.pane_mut(&which)?);
                 self.view(&which)
             }
             "invert" => {
@@ -676,8 +683,24 @@ impl Session {
                     "move" => (Kind::Move, Some(self.other_cwd(&which))),
                     _ => (Kind::Delete, None),
                 };
+                // The window's answer to the confirmation, with the terminal
+                // build's defaults: an existing destination is skipped unless
+                // overwriting was asked for by name, and a delete goes to the
+                // trash unless "permanent" was.
+                let conflict = match req.params["conflict"].as_str() {
+                    Some("overwrite") => cian_core::ops::Conflict::Overwrite,
+                    _ => cian_core::ops::Conflict::Skip,
+                };
+                let mode = match req.params["mode"].as_str() {
+                    Some("permanent") => cian_core::ops::DeleteMode::Permanent,
+                    _ => cian_core::ops::DeleteMode::Trash,
+                };
                 let count = paths.len();
-                let op = self.jobs.start(kind, paths, dest, self.out.clone(), self.undo.clone());
+                let op = self.jobs.start(
+                    jobs::Plan { kind, conflict, delete: mode },
+                    paths, dest, self.out.clone(),
+                    self.undo.clone(), self.redo.clone(),
+                );
                 Ok(serde_json::json!({ "op": op, "count": count }))
             }
             // Hold the selection for a later paste, and drop it somewhere
@@ -722,8 +745,12 @@ impl Session {
                     self.clip = None;
                 }
                 let count = paths.len();
+                // Skip, as the terminal build's paste does: what is already
+                // there survives, and pasting again is cheap.
                 let job = self.jobs.start(
-                    kind, paths, Some(dest), self.out.clone(), self.undo.clone());
+                    jobs::Plan::of(kind), paths, Some(dest), self.out.clone(),
+                    self.undo.clone(), self.redo.clone(),
+                );
                 // Which it is, said back: the key pressed was "paste" either
                 // way, and only the register knew whether that meant a copy.
                 Ok(serde_json::json!({
@@ -1125,7 +1152,7 @@ impl Session {
                     let from = std::path::PathBuf::from(path);
                     match cian_core::ops::rename_in_place(&from, to) {
                         Ok(_) => {
-                            self.undo.push(Undo::Rename { from: from.clone(), to: from.with_file_name(to) });
+                            self.did(Undo::Rename { from: from.clone(), to: from.with_file_name(to) });
                             done += 1;
                         }
                         Err(e) => errors.push(format!("{}: {e}", from.display())),
@@ -1180,7 +1207,7 @@ impl Session {
                     _ => cian_core::archive::create_zip(
                         &paths, &dest, req.params["password"].as_str(), ctl),
                 });
-                self.undo.push(Undo::Created { path: dest.clone() });
+                self.did(Undo::Created { path: dest.clone() });
                 let pane = self.pane_mut(&which)?;
                 pane.reload()?;
                 Ok(serde_json::json!({
@@ -1670,7 +1697,9 @@ impl Session {
                 let dest = self.pane_mut(&which)?.cwd.clone();
                 let count = paths.len();
                 let op = self.jobs.start(
-                    Kind::Move, paths, Some(dest), self.out.clone(), self.undo.clone());
+                    jobs::Plan::of(Kind::Move), paths, Some(dest), self.out.clone(),
+                    self.undo.clone(), self.redo.clone(),
+                );
                 Ok(serde_json::json!({ "op": op, "count": count }))
             }
             // ---- Line operations on the open file ----
@@ -2564,7 +2593,9 @@ impl Session {
                 let kind = if req.method == "copyto" { Kind::Copy } else { Kind::Move };
                 let count = paths.len();
                 let op = self.jobs.start(
-                    kind, paths, Some(dest.clone()), self.out.clone(), self.undo.clone());
+                    jobs::Plan::of(kind), paths, Some(dest.clone()), self.out.clone(),
+                    self.undo.clone(), self.redo.clone(),
+                );
                 Ok(serde_json::json!({
                     "op": op, "count": count,
                     "kind": if matches!(kind, Kind::Move) { "move" } else { "copy" },
@@ -2603,7 +2634,7 @@ impl Session {
                 if req.method == "officelink" {
                     let at = path.with_extension("url");
                     std::fs::write(&at, cian_core::office::url_shortcut(&url))?;
-                    self.undo.push(Undo::Created { path: at.clone() });
+                    self.did(Undo::Created { path: at.clone() });
                     let pane = self.pane_mut(&which)?;
                     pane.reload()?;
                     let mut reply = self.view(&which)?;
@@ -2795,6 +2826,49 @@ impl Session {
             }
             // One named file to one named directory. Used by the comparison
             // screen's `>` and `<`, where the two sides are not the two panes.
+            // A single item copied or moved under a new name — the `r` answer
+            // on the transfer sheet. The terminal build's shape (actions.rs,
+            // TransferAs): a move is one rename; a copy lands under its own
+            // name first and is then renamed, so the copy machinery stays one.
+            "transferas" => {
+                let src = std::path::PathBuf::from(req.params["src"].as_str().unwrap_or(""));
+                let dest_dir = std::path::PathBuf::from(req.params["dest"].as_str().unwrap_or(""));
+                let name = arg(req, "name");
+                if name.is_empty() || name.contains('/') || name.contains('\\') {
+                    anyhow::bail!("名前が正しくありません");
+                }
+                if !src.exists() {
+                    anyhow::bail!("{} がありません", src.display());
+                }
+                let target = dest_dir.join(&name);
+                if target.exists() {
+                    anyhow::bail!("{} は既にあります", target.display());
+                }
+                if req.params["move"].as_bool().unwrap_or(false) {
+                    std::fs::rename(&src, &target)?;
+                    self.did(Undo::Moved { pairs: vec![(target.clone(), src)] });
+                } else if src.is_dir() {
+                    // A directory has to land under its own name first. If
+                    // that spot is taken, going through it would overwrite a
+                    // bystander on the way — refusing is the only safe answer.
+                    let landed = dest_dir.join(src.file_name().unwrap_or_default());
+                    if landed != target && landed.exists() {
+                        anyhow::bail!("{} が既にあり、経由できません", landed.display());
+                    }
+                    cian_core::ops::copy_one(&src, &dest_dir, cian_core::ops::Conflict::Overwrite)?;
+                    if landed != target {
+                        std::fs::rename(&landed, &target)?;
+                    }
+                } else {
+                    // A file goes straight to its new name — no stop at the
+                    // old one, which may be occupied by something unrelated.
+                    std::fs::copy(&src, &target)?;
+                }
+                for which in ["left", "right"] {
+                    let _ = self.pane_mut(which).map(|p| p.reload());
+                }
+                Ok(serde_json::json!({ "to": target.display().to_string() }))
+            }
             "copyone" => {
                 let src = std::path::PathBuf::from(req.params["src"].as_str().unwrap_or(""));
                 let dest = std::path::PathBuf::from(req.params["dest"].as_str().unwrap_or(""));
@@ -2820,7 +2894,7 @@ impl Session {
                     anyhow::bail!("{name} はすでにあります");
                 }
                 std::fs::write(&at, req.params["text"].as_str().unwrap_or(""))?;
-                self.undo.push(Undo::Created { path: at });
+                self.did(Undo::Created { path: at });
                 let pane = self.pane_mut(&which)?;
                 pane.reload()?;
                 Ok(serde_json::json!({ "wrote": name }))
@@ -3355,7 +3429,7 @@ impl Session {
                     }
                 }
                 if !moved.is_empty() {
-                    self.undo.push(Undo::Moved { pairs: moved.clone() });
+                    self.did(Undo::Moved { pairs: moved.clone() });
                 }
                 let pane = self.pane_mut(&which)?;
                 pane.reload()?;
@@ -3477,7 +3551,7 @@ impl Session {
                     anyhow::bail!("{to} はすでにあります");
                 }
                 cian_core::ops::rename_in_place(&from, &to)?;
-                self.undo.push(Undo::Rename { from: from.clone(), to: dest });
+                self.did(Undo::Rename { from: from.clone(), to: dest });
                 let pane = self.pane_mut(&which)?;
                 pane.reload()?;
                 self.view(&which)
@@ -3512,7 +3586,7 @@ impl Session {
                 } else {
                     cian_core::ops::create_file(&at, &name)?
                 };
-                self.undo.push(Undo::Created { path: made });
+                self.did(Undo::Created { path: made });
                 let pane = self.pane_mut(&which)?;
                 pane.reload()?;
                 self.view(&which)
@@ -3673,7 +3747,7 @@ impl Session {
                     }
                 }
                 if pane.cwd != was {
-                    self.undo.push(Undo::Navigated { pane: which.clone(), from: was });
+                    self.did(Undo::Navigated { pane: which.clone(), from: was });
                 }
                 self.view(&which)
             }
@@ -3959,6 +4033,68 @@ fn ai_in_background(
 fn ai_config() -> anyhow::Result<cian_ai::AiConfig> {
     cian_ai::AiConfig::from_lua(&cian_lua::load())
         .ok_or_else(|| anyhow::anyhow!("AI が設定されていません（init.lua の cian.ai{{…}}）"))
+}
+
+/// The two stacks moved together. Free-standing so the worker in `jobs.rs`
+/// and the tests reach the same rule the session uses.
+fn did_step(undo: &crate::undo::Stack, redo: &crate::undo::Stack, step: Undo) {
+    undo.push(step);
+    redo.clear();
+}
+
+/// Ctrl+A: everything marked, always, as the terminal build has it
+/// (actions.rs `mark_all`). It used to clear when anything was marked, so
+/// Ctrl+A on a partial selection *unselected* — the opposite of what was
+/// asked. Esc is the clearing gesture; `..` is skipped by `set_mark_at`.
+fn mark_all(pane: &mut Pane) {
+    for i in 0..pane.entries.len() {
+        pane.set_mark_at(i);
+    }
+}
+
+#[cfg(test)]
+mod markall_tests {
+    use super::*;
+
+    #[test]
+    fn a_partial_selection_becomes_everything_not_nothing() {
+        let dir = std::env::temp_dir().join(format!("cian-markall-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        for n in ["a.txt", "b.txt", "c.txt"] {
+            std::fs::write(dir.join(n), "x").unwrap();
+        }
+        let mut pane = Pane::new(dir.clone()).unwrap();
+        // One thing marked by hand — the state the toggle used to punish.
+        let at = pane.entries.iter().position(|e| !e.is_parent).unwrap();
+        pane.set_mark_at(at);
+        mark_all(&mut pane);
+        assert_eq!(pane.mark_count(), 3, "all three, not zero");
+        // And `..` never rides along into an operation.
+        assert!(pane.entries.iter().filter(|e| e.is_parent)
+            .all(|e| !pane.marks.contains(&e.path)));
+        // A second press keeps them — clearing is Esc's job.
+        mark_all(&mut pane);
+        assert_eq!(pane.mark_count(), 3);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+}
+
+#[cfg(test)]
+mod undo_stack_tests {
+    use super::*;
+
+    #[test]
+    fn something_new_empties_the_redo_side() {
+        // The failure this pins: undo a move, then rename something, then
+        // Ctrl+R — the stale branch must be gone, not replayed on top of the
+        // rename. `Stack::push` does not clear it; `Session::did` must.
+        let undo = crate::undo::Stack::default();
+        let redo = crate::undo::Stack::default();
+        redo.push(Undo::Rename { from: "/a".into(), to: "/b".into() });
+        did_step(&undo, &redo, Undo::Created { path: "/c".into() });
+        assert!(redo.pop().is_none(), "the undone branch is gone");
+        assert!(undo.pop().is_some());
+    }
 }
 
 #[cfg(test)]
