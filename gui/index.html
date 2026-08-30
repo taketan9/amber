@@ -58,6 +58,11 @@
   /* A pane showing somebody else's server. cian-tui's CRMAINE, and the one
      confusion worth spending a colour on. */
   --m-remote:  rgb(214, 45, 70);
+  /* What kind of news a message carries — cian-tui's `message_color`, again
+     value for value. A failure must never wear a success's clothes. */
+  --msg-good:  rgb(110, 200, 130);
+  --msg-warn:  rgb(235, 200, 100);
+  --msg-bad:   rgb(235, 110, 110);
   /* The veil behind a dialog. A hardcoded near-black sat over 白磁 and
      github-light alike; now the dark looks and palettes deepen it below. */
   --scrim:     rgba(23, 26, 31, .45);
@@ -374,7 +379,9 @@ html, body {
 /* The name under the cursor changes on every j and k. Given a floor it stops
    dragging everything to its right back and forth as the name gets shorter. */
 #st-chips .cur { min-width: 12ch; }
-#st-msg.bad { color: var(--bad-fg); background: var(--bad-bg); padding: 0 .6em; font-style: normal; }
+#st-msg.good { color: var(--msg-good); }
+#st-msg.warn { color: var(--msg-warn); }
+#st-msg.bad  { color: var(--msg-bad); font-style: normal; }
 #st-shell { flex: 0 0 auto; color: var(--dir); }
 
 /* The order these sit in.

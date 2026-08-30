@@ -114,6 +114,20 @@ function confirm(head, body, choices = {}) {
     });
 }
 
+/// What kind of news a message carries — cian-tui's `message_color`
+/// (render.rs:3223), classified from the text for the same reason: messages
+/// come from a hundred call sites, and most already begin with a glyph or
+/// contain an unambiguous word. The window had two states, "bad" and "not
+/// bad", so a cancellation and a completion looked alike.
+function messageKind(msg, bad) {
+    if (bad) return 'bad';
+    if (!msg) return '';
+    if (/^✔|^保存|しました$|できました/.test(msg)) return 'good';
+    if (/^⚠|中止|未保存|やめました/.test(msg)) return 'warn';
+    if (/できません|失敗|ありません|知りません|エラー/.test(msg)) return 'bad';
+    return '';
+}
+
 /// The transient half of the status line. The chips beside it are rebuilt by
 /// drawStatus(); this is the one thing that changes because something was
 /// *said* rather than because something *is*.
@@ -196,7 +210,8 @@ function drawStatus() {
     if (busy.n > 0) chip('op', '⋯ 実行中');
     el.stChips.replaceChildren(...chips);
     el.stMsg.textContent = status.msg ? `◂ ${status.msg}` : '';
-    el.stMsg.classList.toggle('bad', status.bad);
+    const kind = messageKind(status.msg, status.bad);
+    el.stMsg.className = kind;
     // The active shell's own title on the right, the terminal build's rule:
     // suppressed while a message is showing — the message wins the space.
     el.stShell.textContent = !status.msg && term.on ? el.sTitle.textContent : '';
