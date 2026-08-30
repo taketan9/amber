@@ -125,6 +125,14 @@ impl Shell {
         })
     }
 
+    /// The visible screen as plain text, for the AI to read.
+    pub fn contents(&self) -> Option<String> {
+        self.session
+            .lock()
+            .ok()
+            .and_then(|s| s.parser().lock().ok().map(|p| p.screen().contents()))
+    }
+
     pub fn is_logging(&self) -> bool {
         self.session.lock().map(|s| s.is_logging()).unwrap_or(false)
     }

@@ -910,6 +910,12 @@ const HELP = [
     ['AI（init.lua で設定したとき）', [
         [':aicmd 説明', 'コマンドを作ってシェルに置く ── 実行はしません'],
         [':ailog', '選択したログを診断（末尾を読みます）'],
+        [':aijunk / :aistructure', '不要さがし / 畳み方の案（中身は送らない・実行前に全部見せる）'],
+        [':airename 指示', '改名案（例 :airename snake_case に）'],
+        [':aisearch 探しもの', '意味で探す'],
+        [':aierror', 'シェルの直近のエラーを説明'],
+        [':aicommit', 'ステージ済み差分からコミットメッセージ（Enter で署名）'],
+        [':ime', 'vim のノーマルモードで IME を自動オフ（init.lua の cian.ime）'],
         [':ai 質問', '自由に訊く'],
         [':aidiff', '表示中の差分を説明する'],
     ]],
@@ -1852,6 +1858,9 @@ function setStyle(i, remember = true) {
     if (STYLES[style][0] === 'vim') {
         // eslint-disable-next-line no-undef
         viewer.vim = MonacoVim.initVimMode(viewer.ed, el.vFoot);
+        // The IME follows the mode: off when keys are commands, back when
+        // they are text. monaco-vim announces every change.
+        viewer.vim.on('vim-mode-change', (m) => herdIme(m && m.mode));
         // `:w` and `:q` where the fingers put them. Without these, vim style
         // would still need Ctrl+S and Esc — which is exactly the seam that
         // makes a vim mode feel like a costume.
@@ -2347,6 +2356,12 @@ const COMMANDS = [
     { name: 'scratch', alias: ['new'], about: '下書きを開く（:w で名前を付けて保存）', run: cmdScratch },
     { name: 'limit', alias: ['speed', 'ratelimit'], about: '転送の速さの上限 — :limit 2m / 500k / off', arg: '2m / 500k / off', optional: true, run: cmdLimit },
     { name: 'aicommit', alias: ['commitmsg'], about: 'AI: ステージ済みの差分からコミットメッセージを作る', run: cmdAiCommit },
+    { name: 'aijunk', alias: ['junk'], about: 'AI: 消してよさそうなものを探す（中身は送らない）', run: () => cmdAiScan('aijunk') },
+    { name: 'aistructure', alias: ['organize', 'aiorganize'], about: 'AI: 散らかりを畳む案を作る（実行前に全部見せる）', run: () => cmdAiScan('aistructure') },
+    { name: 'airename', about: 'AI: 指示どおりの改名案を作る（:airename snake_case に）', arg: 'どう変えるか', run: cmdAiRename },
+    { name: 'aisearch', alias: ['ask', 'semsearch'], about: 'AI: 意味で探す（:aisearch 先月の請求書）', arg: '探しもの', run: cmdAiSearch },
+    { name: 'aierror', about: 'AI: シェルの直近のエラーを説明する', run: cmdAiError },
+    { name: 'ime', alias: ['inputmethod'], about: 'IME 連携 — vim のノーマルモードで自動オフ（cian.ime）', run: cmdIme },
     { name: 'stat', about: '属性（:attr と同じ）', run: cmdAttr },
     { name: 'blame', about: '各行を最後に変えた人（開いているファイル）', run: cmdBlame },
     { name: 'enc', about: '開いているファイルの文字コードを変えて読み直す', arg: 'utf8 / sjis / utf16le / utf16be', optional: true, run: cmdEncoding },
@@ -4356,6 +4371,151 @@ async function cmdAiCommit() {
     };
 }
 
+/// The AI extension family. Everything here is metadata in, a *plan* out,
+/// and nothing happens until the person says so on a list they can read —
+/// which is the terminal build's arrangement and the only sane one for a
+/// model with opinions about other people's files.
+
+async function cmdAiScan(what) {
+    const r = await ask(what, { pane: state.focus });
+    if (!r) return;
+    say(what === 'aijunk' ? '不要そうなものを探しています…' : '畳み方を考えています…');
+    aiWaiting = async (payload) => {
+        const rows = payload.rows || [];
+        if (!rows.length) {
+            say(what === 'aijunk' ? '明らかな不要ファイルは見つかりませんでした' : 'もう整っています、と言っています');
+            return;
+        }
+        if (what === 'aijunk') {
+            show('不要かもしれないもの', `${rows.length} 件 — AI の見立てです。確かめてから`,
+                rows.map((x) => ({ label: x.name, sub: x.reason || '', path: x.path })),
+                {
+                    foot: 'Enter 全部をマーク（消すのは d で自分で）   Esc 閉じる',
+                    pick: async () => {
+                        closeReport();
+                        const p = await ask('setmarks', {
+                            pane: state.focus, paths: rows.map((x) => x.path),
+                        });
+                        if (!p) return;
+                        state[state.focus] = p;
+                        draw(state.focus);
+                        say(`${rows.length} 件をマークしました — d で削除（ゴミ箱へ）`);
+                    },
+                });
+            return;
+        }
+        show('畳み方の案', `${rows.length} 件 — 移すだけ。消しも改名もしません`,
+            rows.map((x) => ({ n: '→ ' + x.folder, label: x.name, sub: x.reason || '', path: x.path, folder: x.folder })),
+            {
+                foot: 'Enter 実行（u で戻せます）   Esc やめる',
+                pick: async () => {
+                    closeReport();
+                    if (!await confirm(`${rows.length} 件をサブフォルダへ移します`,
+                        rows.map((x) => `${x.name} → ${x.folder}/`).join('\n'))) { say('やめました'); return; }
+                    const done = await ask('organizeapply', {
+                        pane: state.focus,
+                        rows: rows.map((x) => ({ path: x.path, folder: x.folder })),
+                    });
+                    if (!done) return;
+                    state[state.focus] = done.pane;
+                    draw(state.focus);
+                    if (done.errors.length) say(done.errors.join('  /  '), true);
+                    else say(`${done.moved} 件を移しました（u で戻せます）`);
+                },
+            });
+    };
+}
+
+async function cmdAiRename(instruction) {
+    const r = await ask('airename', { pane: state.focus, instruction });
+    if (!r) return;
+    say('改名案を考えています…');
+    aiWaiting = (payload) => {
+        const rows = (payload.rows || []).filter((x) => x.new_name && !/[\\/]/.test(x.new_name));
+        if (!rows.length) { say('変える案がありませんでした'); return; }
+        // Through the same plan screen every bulk rename uses: clashes marked,
+        // nothing moves until Enter.
+        showRenamePlanRows(rows.map((x) => ({
+            from: x.name, to: x.new_name, path: x.path,
+            same: x.name === x.new_name, clash: false,
+        })), `AI 改名案`);
+    };
+}
+
+/// The bulk-rename confirmation, callable with rows from anywhere — the
+/// pattern rename builds them from a pattern, the AI from an instruction.
+function showRenamePlanRows(rows, title) {
+    const changing = rows.filter((x) => !x.same);
+    if (!changing.length) { say('変わる名前がありません'); return; }
+    show(title, `${changing.length} 件が変わります`,
+        rows.map((x) => ({ n: x.same ? '=' : '→', label: x.from, sub: x.to })),
+        {
+            foot: 'Enter 実行   Esc やめる',
+            pick: async () => {
+                closeReport();
+                if (!await confirm(`${changing.length} 件の名前を変えます`,
+                    changing.map((x) => `${x.from}  →  ${x.to}`).join('\n'))) { say('やめました'); return; }
+                const done = await ask('renameapply', { rows: changing });
+                if (!done) return;
+                await reread();
+                if (done.errors.length) say(done.errors.join('  /  '), true);
+                else say(`${done.renamed} 件の名前を変えました`);
+            },
+        });
+}
+
+async function cmdAiSearch(query) {
+    const r = await ask('aisearch', { pane: state.focus, query });
+    if (!r) return;
+    say('意味で探しています…');
+    aiWaiting = (payload) => {
+        const rows = payload.rows || [];
+        if (!rows.length) { say('それらしいものは見つかりませんでした'); return; }
+        show(`「${query}」らしいもの`, `${rows.length} 件 — AI の見立てです`,
+            rows.map((x) => ({ label: x.path, sub: x.reason || '', full: x.full })),
+            {
+                foot: 'Enter そこへ   Esc 閉じる',
+                pick: (row) => { closeReport(); revealPath(row.full, false); },
+            });
+    };
+}
+
+/// `:ime` — the input method, herded around vim's modes.
+///
+/// The one thing a vim grammar cannot survive is an IME that stays on in
+/// normal mode: `j` becomes かな and nothing moves. When cian.ime{…} names a
+/// helper, entering normal mode switches to the no-IME source and entering
+/// insert puts back whatever the person was typing with. `:ime` itself
+/// toggles the herding and says what is configured.
+const ime = { on: false };
+
+async function cmdIme() {
+    const r = await ask('ime', {});
+    if (!r) return;
+    ime.on = !ime.on;
+    say(ime.on
+        ? `IME 連携: オン（いま ${r.current || '?'}）— ノーマルモードで自動オフ`
+        : 'IME 連携: オフ');
+}
+
+/// Wired to monaco-vim's own mode notifications, so the switch rides the
+/// grammar rather than guessing from keys.
+function herdIme(mode) {
+    if (!ime.on) return;
+    if (mode === 'insert') ask('ime', { do: 'restore' });
+    else ask('ime', { do: 'off' });
+}
+
+async function cmdAiError() {
+    const r = await ask('aierror', {});
+    if (!r) return;
+    say('シェルの画面を読んでいます…');
+    aiWaiting = (answer) => {
+        show('直近のエラーの説明', 'AI の答え — 確かめてから使ってください',
+            String(answer).split('\n').map((t) => ({ label: t })), { foot: 'Esc 閉じる' });
+    };
+}
+
 async function cmdEditExternal() {
     const r = await ask('editexternal', { pane: state.focus });
     if (!r) return;
@@ -4790,7 +4950,9 @@ window.cian.onEvent(async (msg) => {
             const hand = aiWaiting;
             aiWaiting = null;
             if (msg.error) { say(msg.error, true); return; }
-            if (hand) await hand(msg.answer);
+            // A plain answer hands over its text; a structured one (rows and
+            // a `what`) hands over the whole payload.
+            if (hand) await hand(msg.rows ? msg : msg.answer);
             return;
         }
 

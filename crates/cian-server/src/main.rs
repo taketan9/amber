@@ -207,6 +207,10 @@ struct Session {
     /// Held for a later paste. Independent of the system clipboard, and of
     /// which pane is focused — that is the point of it.
     clip: Option<cian_core::clip::Clipboard>,
+    /// The input source the person was typing with before cian switched it
+    /// off for normal mode. Held so `restore` puts back *their* choice, not a
+    /// guess.
+    ime_saved: Option<String>,
     /// Ceiling on transfer speed, bytes a second. A copy to a server is a
     /// copy over somebody else's network, and a file manager that takes all
     /// of it is one you cannot run during the day.
@@ -283,6 +287,7 @@ impl Session {
             member: None,
             remote_member: None,
             limit_bps: None,
+            ime_saved: None,
             hex: None,
             redo: Stack::default(),
             shells: Vec::new(),
@@ -2168,10 +2173,7 @@ impl Session {
             // answers to the same question, which is the kind of difference
             // nobody can debug.
             "ai" => {
-                let cfg = cian_ai::AiConfig::from_lua(&cian_lua::load());
-                let Some(cfg) = cfg else {
-                    anyhow::bail!("AI が設定されていません（init.lua の cian.ai{{…}}）");
-                };
+                let cfg = ai_config()?;
                 if !cian_ai::available(&cfg) {
                     anyhow::bail!("AI を利用できません（python・パッケージ・サインインのいずれか）");
                 }
@@ -2220,11 +2222,7 @@ impl Session {
                 // engine — every keystroke in the listing queued behind a
                 // question about a log file. The first attempt did exactly
                 // that and looked like a freeze.
-                let out = self.out.clone();
-                std::thread::spawn(move || match cian_ai::chat(&cfg, &system, &user, &[]) {
-                    Ok(answer) => out.event("ai", serde_json::json!({ "answer": answer })),
-                    Err(e) => out.event("ai", serde_json::json!({ "error": e.to_string() })),
-                });
+                ai_in_background(self.out.clone(), cfg, system.to_string(), user.to_string(), |answer| Ok(serde_json::json!({ "answer": answer })));
                 Ok(serde_json::json!({ "asked": true }))
             }
             // ---- Bookmarks ----
@@ -3017,14 +3015,259 @@ impl Session {
                 }
                 Ok(serde_json::json!({ "bps": self.limit_bps }))
             }
+            // The input method, herded.
+            //
+            // The one thing a vim grammar cannot survive is an IME that stays
+            // on in normal mode: `j` becomes かな and nothing moves. The
+            // terminal build drives a helper (`macism`, `im-select`, cian-ime)
+            // named in `cian.ime{…}`; the same helper works from here, and
+            // the same three verbs cover it — off when keys become commands,
+            // restore when they become text again, and the answer to "is this
+            // even configured".
+            "ime" => {
+                let cfg = cian_lua::load();
+                let Some(ime) = cfg.ime else {
+                    anyhow::bail!("IME 連携が設定されていません（init.lua の cian.ime{{…}}）");
+                };
+                let run = |cmd: &str| -> anyhow::Result<String> {
+                    let out = cian_core::proc::quiet(if cfg!(windows) { "cmd" } else { "sh" })
+                        .args(if cfg!(windows) { ["/C", cmd] } else { ["-c", cmd] })
+                        .output()?;
+                    Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+                };
+                match req.params["do"].as_str().unwrap_or("") {
+                    // Keys are about to be commands: remember what was on,
+                    // switch to the no-IME source.
+                    "off" => {
+                        let Some(off) = ime.off.clone() else {
+                            anyhow::bail!("off の入力ソースが設定されていません（cian.ime{{ off = … }}）");
+                        };
+                        if let Some(q) = ime.query_cmd() {
+                            let now = run(&q)?;
+                            if !now.is_empty() && now != off {
+                                self.ime_saved = Some(now);
+                            }
+                        }
+                        if let Some(cmd) = ime.set_cmd(&off) {
+                            run(&cmd)?;
+                        }
+                        Ok(serde_json::json!({ "off": true }))
+                    }
+                    // Keys are text again: put back whatever was on.
+                    "restore" => {
+                        if let Some(saved) = self.ime_saved.take() {
+                            if let Some(cmd) = ime.set_cmd(&saved) {
+                                run(&cmd)?;
+                            }
+                            return Ok(serde_json::json!({ "restored": saved }));
+                        }
+                        Ok(serde_json::json!({ "restored": serde_json::Value::Null }))
+                    }
+                    _ => Ok(serde_json::json!({
+                        "configured": true,
+                        "current": ime.query_cmd().and_then(|q| run(&q).ok()),
+                    })),
+                }
+            }
+            // What just went wrong in the shell, explained.
+            "aierror" => {
+                let cfg = ai_config()?;
+                let Some(text) = self.shell_now().and_then(|sh| sh.contents()) else {
+                    anyhow::bail!("シェルが開いていません");
+                };
+                if text.trim().is_empty() {
+                    anyhow::bail!("シェルにまだ何もありません");
+                }
+                let body: String = text.chars().take(8_000).collect();
+                let os = if cfg!(windows) { "Windows" } else if cfg!(target_os = "macos") { "macOS" } else { "Linux" };
+                let system = format!(
+                    "You explain shell/terminal errors for a developer on {os}. Given the \
+             recent terminal output, say plainly what went wrong and the most \
+             likely fix (a command or a change). If there is no error, say the \
+             output looks fine. Be concise; plain text, no markdown headings.",
+                );
+                ai_in_background(self.out.clone(), cfg, system.to_string(), body.to_string(), |answer| Ok(serde_json::json!({ "answer": answer })));
+                Ok(serde_json::json!({ "asked": true }))
+            }
+            // ---- The AI extension family ----
+            //
+            // Metadata only — names, kinds, sizes. File *contents* never leave
+            // the machine from any of these, which is the terminal build's
+            // rule and the only rule that makes them usable at work. Prompts
+            // are the terminal build's, word for word; the reply is parsed and
+            // validated here, against the real names, before the window sees
+            // it — a model that invents a filename must not reach a delete key.
+            "aijunk" | "aistructure" => {
+                let which = req.params["pane"].as_str().unwrap_or("left").to_string();
+                let cfg = ai_config()?;
+                let (dir, rows) = {
+                    let pane = self.pane_mut(&which)?;
+                    let rows: Vec<(String, String, bool, u64)> = pane
+                        .entries
+                        .iter()
+                        .filter(|e| !e.is_parent)
+                        .map(|e| (e.name.clone(), e.path.display().to_string(), e.is_dir, e.len))
+                        .collect();
+                    (pane.cwd.clone(), rows)
+                };
+                if rows.is_empty() {
+                    anyhow::bail!("スキャンする対象がありません");
+                }
+                let mut listing = String::new();
+                for (name, _, is_dir, len) in rows.iter().take(400) {
+                    let kind = if *is_dir { "dir " } else { "file" };
+                    let size = if *is_dir { String::new() } else { format!("{len}") };
+                    listing.push_str(&format!("{kind}\t{size}\t{name}\n"));
+                }
+                let junk = req.method == "aijunk";
+                let system = if junk {
+                    "You spot disposable JUNK in a directory listing: build output \
+             (target, build, dist, node_modules, __pycache__, .gradle), caches, \
+             logs, temp and editor-backup files (*.tmp, *.bak, *~, *.swp), and OS \
+             cruft (.DS_Store, Thumbs.db, desktop.ini). Be CONSERVATIVE — never \
+             flag source code, documents, configs, or anything whose loss would \
+             hurt. Reply with ONLY a JSON array of objects {\"name\": string, \
+             \"reason\": short string}, using names exactly as given. Empty array \
+             if nothing is clearly junk. No prose, no code fences."
+                } else {
+                    "You propose a tidy folder structure for a directory by \
+             grouping loose files into sub-folders (e.g. images/, docs/, src/, \
+             archive/2023/). Only MOVE existing entries into sub-folders — never \
+             rename, never delete, never move a file out of this directory. Group \
+             by obvious type or theme; leave a file where it is if no grouping is \
+             clearly better (omit it). Prefer a few meaningful folders over many \
+             tiny ones. Reply with ONLY a JSON array of objects {\"name\": string \
+             (exactly as given), \"folder\": string (a NEW or existing sub-folder, \
+             a simple relative path, no ..), \"reason\": short string}. Empty array \
+             if the directory is already well organised. No prose, no code fences."
+                };
+                let user = format!("Directory: {}\n\nEntries (kind, size, name):\n{listing}", dir.display());
+                let what = if junk { "junk" } else { "structure" };
+                ai_in_background(self.out.clone(), cfg, system.to_string(), user, move |answer| {
+                    let v = parse_ai_reply(&answer, &rows, "name")?;
+                    Ok(serde_json::json!({ "what": what, "rows": v }))
+                });
+                Ok(serde_json::json!({ "asked": true }))
+            }
+            "airename" => {
+                let which = req.params["pane"].as_str().unwrap_or("left").to_string();
+                let instruction = arg(req, "instruction");
+                if instruction.is_empty() {
+                    anyhow::bail!("どうリネームするかを書いてください");
+                }
+                let cfg = ai_config()?;
+                let paths = self.targets(&which)?;
+                let rows: Vec<(String, String, bool, u64)> = paths
+                    .iter()
+                    .filter(|p| p.is_file())
+                    .map(|p| (
+                        p.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default(),
+                        p.display().to_string(),
+                        false,
+                        0,
+                    ))
+                    .collect();
+                if rows.is_empty() {
+                    anyhow::bail!("対象がありません");
+                }
+                let listing: String = rows.iter().take(400).map(|(n, ..)| format!("{n}\n")).collect();
+                let system = "You propose new file names following the user's instruction. \
+             Keep it a RENAME only: never change the folder, never add a path. \
+             Preserve the extension unless the instruction says otherwise. Reply \
+             with ONLY a JSON array of objects {\"name\": string (exactly as \
+             given), \"new_name\": string (a bare filename, no path)}. Include \
+             only files that should change; omit the rest. No prose, no fences."
+                    .to_string();
+                let user = format!("Instruction: {instruction}\n\nFiles:\n{listing}");
+                ai_in_background(self.out.clone(), cfg, system.clone(), user.clone(), move |answer| {
+                    let v = parse_ai_reply(&answer, &rows, "name")?;
+                    Ok(serde_json::json!({ "what": "rename", "rows": v }))
+                });
+                Ok(serde_json::json!({ "asked": true }))
+            }
+            "aisearch" => {
+                let which = req.params["pane"].as_str().unwrap_or("left").to_string();
+                let query = arg(req, "query");
+                if query.is_empty() {
+                    anyhow::bail!("何を探すかを書いてください");
+                }
+                let cfg = ai_config()?;
+                let root = self.pane_cwd(&which);
+                // The tree below here, names only, bounded. Breadth first for
+                // the same reason the finder is.
+                let stop = std::sync::atomic::AtomicBool::new(false);
+                let q = cian_core::search::Query::new("");
+                let mut rows: Vec<(String, String, bool, u64)> = Vec::new();
+                cian_core::search::search(&root, &q, &stop, &mut |h| {
+                    if rows.len() < 2000 {
+                        rows.push((
+                            h.rel.display().to_string(),
+                            h.path.display().to_string(),
+                            h.is_dir,
+                            0,
+                        ));
+                    }
+                });
+                let listing: String = rows.iter().map(|(rel, ..)| format!("{rel}\n")).collect();
+                let system = "You do semantic file search. Given a list of file paths and \
+             a natural-language query, return the paths whose names/locations are \
+             most relevant to the query, most relevant first. Reply with ONLY a \
+             JSON array of objects {\"path\": string (exactly as given), \
+             \"reason\": short string}. Use only paths from the list. Empty array \
+             if none are a good match. No prose, no code fences."
+                    .to_string();
+                let user = format!("Query: {query}\n\nPaths:\n{listing}");
+                ai_in_background(self.out.clone(), cfg, system.clone(), user.clone(), move |answer| {
+                    let v = parse_ai_reply(&answer, &rows, "path")?;
+                    Ok(serde_json::json!({ "what": "search", "rows": v }))
+                });
+                Ok(serde_json::json!({ "asked": true }))
+            }
+            // Carry out the structure plan the person approved: make the
+            // folders, move the files, remember the moves for `u`.
+            "organizeapply" => {
+                let which = req.params["pane"].as_str().unwrap_or("left").to_string();
+                let cwd = self.pane_cwd(&which);
+                let rows = req.params["rows"].as_array().cloned().unwrap_or_default();
+                let mut moved: Vec<(std::path::PathBuf, std::path::PathBuf)> = Vec::new();
+                let mut errors: Vec<String> = Vec::new();
+                for row in &rows {
+                    let (Some(path), Some(folder)) = (row["path"].as_str(), row["folder"].as_str())
+                    else { continue };
+                    // The model was told "no ..", and the engine checks anyway:
+                    // instructions constrain the honest, not the confused.
+                    if folder.contains("..") || std::path::Path::new(folder).is_absolute() {
+                        errors.push(format!("{folder}: そこへは動かせません"));
+                        continue;
+                    }
+                    let from = std::path::PathBuf::from(path);
+                    let dest = cwd.join(folder);
+                    if let Err(e) = std::fs::create_dir_all(&dest) {
+                        errors.push(format!("{folder}: {e}"));
+                        continue;
+                    }
+                    match cian_core::ops::move_one(&from, &dest, cian_core::ops::Conflict::Skip) {
+                        Ok(_) => {
+                            let name = from.file_name().map(|s| s.to_os_string()).unwrap_or_default();
+                            moved.push((dest.join(name), from.clone()));
+                        }
+                        Err(e) => errors.push(format!("{}: {e}", from.display())),
+                    }
+                }
+                if !moved.is_empty() {
+                    self.undo.push(Undo::Moved { pairs: moved.clone() });
+                }
+                let pane = self.pane_mut(&which)?;
+                pane.reload()?;
+                Ok(serde_json::json!({
+                    "moved": moved.len(), "errors": errors, "pane": self.view(&which)?,
+                }))
+            }
             // The commit message, drafted from the staged diff. The prompt is
             // the terminal build's, word for word.
             "aicommit" => {
                 let which = req.params["pane"].as_str().unwrap_or("left").to_string();
-                let cfg = cian_ai::AiConfig::from_lua(&cian_lua::load());
-                let Some(cfg) = cfg else {
-                    anyhow::bail!("AI が設定されていません（init.lua の cian.ai{{…}}）");
-                };
+                let cfg = ai_config()?;
                 let dir = self.pane_cwd(&which);
                 let Some(diff) = cian_core::git::staged_diff(&dir) else {
                     anyhow::bail!("git リポジトリではありません");
@@ -3039,11 +3282,7 @@ impl Session {
              then a blank line and a short body of bullet points explaining WHY, \
              only if it adds something. Output ONLY the commit message — no code \
              fences, no preamble.";
-                let out = self.out.clone();
-                std::thread::spawn(move || match cian_ai::chat(&cfg, system, &diff, &[]) {
-                    Ok(answer) => out.event("ai", serde_json::json!({ "answer": answer })),
-                    Err(e) => out.event("ai", serde_json::json!({ "error": e.to_string() })),
-                });
+                ai_in_background(self.out.clone(), cfg, system.to_string(), diff.to_string(), |answer| Ok(serde_json::json!({ "answer": answer })));
                 Ok(serde_json::json!({ "asked": true }))
             }
             // Run the commit, with the message the person approved.
@@ -3558,4 +3797,110 @@ fn paths_of(req: &Request) -> Vec<std::path::PathBuf> {
         .as_array()
         .map(|a| a.iter().filter_map(|v| v.as_str()).map(std::path::PathBuf::from).collect())
         .unwrap_or_default()
+}
+
+/// A model's JSON reply, validated against the names that were actually sent.
+///
+/// The model was told to use names exactly as given, and the engine checks
+/// anyway: instructions constrain the honest, not the confused, and an
+/// invented filename must never reach a delete key. Rows that name nothing
+/// real are dropped, not guessed at. `key` is which field carries the name —
+/// the junk and rename prompts answer by `"name"`, the search by `"path"`.
+fn parse_ai_reply(
+    answer: &str,
+    rows: &[(String, String, bool, u64)],
+    key: &str,
+) -> Result<Vec<serde_json::Value>, String> {
+    let body = answer
+        .trim()
+        .trim_start_matches("```json")
+        .trim_start_matches("```")
+        .trim_end_matches("```")
+        .trim();
+    let parsed: Vec<serde_json::Value> =
+        serde_json::from_str(body).map_err(|e| format!("AI の返事が読めません: {e}"))?;
+    let mut out = Vec::new();
+    for item in parsed {
+        let Some(given) = item[key].as_str() else { continue };
+        let Some((_, full, ..)) = rows.iter().find(|(n, ..)| n == given) else { continue };
+        let mut v = item.clone();
+        // Both spellings ride along so the window never joins names to paths
+        // itself: `path` for the name-keyed answers, `full` for the path-keyed.
+        v["path"] = serde_json::json!(full);
+        v["full"] = serde_json::json!(full);
+        out.push(v);
+    }
+    Ok(out)
+}
+
+/// One AI request, off the main loop, answered by an event.
+///
+/// Every AI command is this shape — chat on a worker, wrap the answer,
+/// emit "ai" — and it was written out six times before the audit counted
+/// them. `wrap` turns the raw answer into the event's payload and may
+/// refuse it.
+fn ai_in_background(
+    out: Out,
+    cfg: cian_ai::AiConfig,
+    system: String,
+    user: String,
+    wrap: impl FnOnce(String) -> Result<serde_json::Value, String> + Send + 'static,
+) {
+    std::thread::spawn(move || match cian_ai::chat(&cfg, &system, &user, &[]) {
+        Ok(answer) => match wrap(answer) {
+            Ok(v) => out.event("ai", v),
+            Err(e) => out.event("ai", serde_json::json!({ "error": e })),
+        },
+        Err(e) => out.event("ai", serde_json::json!({ "error": e.to_string() })),
+    });
+}
+
+/// The AI config, or the one sentence that says how to get one.
+fn ai_config() -> anyhow::Result<cian_ai::AiConfig> {
+    cian_ai::AiConfig::from_lua(&cian_lua::load())
+        .ok_or_else(|| anyhow::anyhow!("AI が設定されていません（init.lua の cian.ai{{…}}）"))
+}
+
+#[cfg(test)]
+mod ai_reply_tests {
+    use super::*;
+
+    fn rows() -> Vec<(String, String, bool, u64)> {
+        vec![
+            ("a.log".into(), "/tmp/x/a.log".into(), false, 10),
+            ("b.txt".into(), "/tmp/x/b.txt".into(), false, 20),
+        ]
+    }
+
+    #[test]
+    fn a_fenced_reply_still_parses() {
+        // Models fence JSON no matter how firmly they are told not to.
+        let v = parse_ai_reply(
+            "```json\n[{\"name\": \"a.log\", \"reason\": \"log\"}]\n```",
+            &rows(),
+            "name",
+        )
+        .unwrap();
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0]["path"], "/tmp/x/a.log");
+    }
+
+    #[test]
+    fn an_invented_name_is_dropped_not_guessed() {
+        // The whole point of validating here: a hallucinated filename must
+        // never reach a delete key with a real path attached.
+        let v = parse_ai_reply(
+            "[{\"name\": \"important.doc\", \"reason\": \"junk\"}, {\"name\": \"b.txt\", \"reason\": \"tmp\"}]",
+            &rows(),
+            "name",
+        )
+        .unwrap();
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0]["name"], "b.txt");
+    }
+
+    #[test]
+    fn prose_instead_of_json_is_an_error_not_a_crash() {
+        assert!(parse_ai_reply("I think a.log is junk.", &rows(), "name").is_err());
+    }
 }
