@@ -2886,8 +2886,10 @@ function setStyle(i, remember = true) {
         // eslint-disable-next-line no-undef
         viewer.vim = MonacoVim.initVimMode(viewer.ed, el.vFoot);
         // The IME follows the mode: off when keys are commands, back when
-        // they are text. monaco-vim announces every change.
-        viewer.vim.on('vim-mode-change', (m) => herdIme(m && m.mode));
+        // they are text. monaco-vim announces every change, and syncIme reads
+        // the mode back out of the footer — one rule for the whole window
+        // rather than one for the editor and none for anywhere else.
+        viewer.vim.on('vim-mode-change', () => queueMicrotask(syncIme));
         // `:w` and `:q` where the fingers put them. Without these, vim style
         // would still need Ctrl+S and Esc — which is exactly the seam that
         // makes a vim mode feel like a costume.
@@ -5691,31 +5693,72 @@ async function cmdAiSearch(query) {
     };
 }
 
-/// `:ime` — the input method, herded around vim's modes.
+/// `:ime` — the input method, put where this moment wants it.
 ///
-/// The one thing a vim grammar cannot survive is an IME that stays on in
-/// normal mode: `j` becomes かな and nothing moves. When cian.ime{…} names a
-/// helper, entering normal mode switches to the no-IME source and entering
-/// insert puts back whatever the person was typing with. `:ime` itself
-/// toggles the herding and says what is configured.
-const ime = { on: false };
+/// The one thing a keyboard program cannot survive is an IME that stays on
+/// where the keys are commands: `j` becomes か and nothing moves. When
+/// cian.ime{…} names a helper, cian switches to the no-IME source wherever it
+/// is being driven and puts back whatever was on wherever it is being typed
+/// into. `:ime` toggles the herding and says what is configured.
+const ime = { on: false, want: null, broken: false };
 
 async function cmdIme() {
     const r = await ask('ime', {});
     if (!r) return;
     ime.on = !ime.on;
+    ime.want = null;
+    ime.broken = false;
     say(ime.on
-        ? `IME 連携: オン（いま ${r.current || '?'}）— ノーマルモードで自動オフ`
+        ? `IME 連携: オン（いま ${r.current || '?'}）— 文字を打つ所だけ IME が戻ります`
         : 'IME 連携: オフ');
+    if (ime.on) syncIme();
 }
 
-/// Wired to monaco-vim's own mode notifications, so the switch rides the
-/// grammar rather than guessing from keys.
-function herdIme(mode) {
-    if (!ime.on) return;
-    if (mode === 'insert') ask('ime', { do: 'restore' });
-    else ask('ime', { do: 'off' });
+/// Is cian taking text right now, rather than being driven by commands?
+///
+/// The terminal build's whole rule, in this window's terms (ime.rs
+/// `wants_text_input`): everything that reads a typed string says yes; the
+/// file panes and a viewer being *read* say no. It used to be wired to
+/// monaco-vim's mode changes alone, so the `:` line, the filter, every
+/// askFor prompt, the finder and the shell were never herded at all — and in
+/// notepad style, which is the default, nothing was.
+function wantsTextInput() {
+    // The viewer first, because Monaco holds the focus in a hidden textarea
+    // whether or not it is taking text — the generic test below would say
+    // "typing" in vim's normal mode, which is precisely the case this exists
+    // to switch the IME *off* for.
+    if (viewer.on && viewer.ed) return STYLES[style][0] === 'vim' ? vimTyping() : true;
+    if (term.on && term.focused) return true;
+    const at = document.activeElement;
+    return !!at && (at.tagName === 'INPUT' || at.tagName === 'TEXTAREA' || at.isContentEditable);
 }
+
+/// Put the input method where this moment wants it.
+///
+/// Cheap to call — it compares one boolean and does nothing until the answer
+/// changes — so it runs after every keystroke and every focus change rather
+/// than being remembered at each of the dozen places that open a prompt.
+function syncIme() {
+    if (!ime.on || ime.broken) return;
+    const want = wantsTextInput();
+    if (ime.want === want) return;
+    ime.want = want;
+    window.cian.call('ime', { do: want ? 'restore' : 'off' }).catch((e) => {
+        // Said once, and then left alone. A helper that is not there fails
+        // on every switch, and a message per keystroke would bury the one
+        // that matters.
+        ime.broken = true;
+        say(`IME 連携を止めました — ${e.message}`, true);
+    });
+}
+
+// Once per turn round the event loop, which is where the terminal build calls
+// it. A capture listener always fires (an overlay's stopPropagation cannot
+// reach it), and the microtask runs after the handlers have moved the state
+// the answer depends on.
+document.addEventListener('keydown', () => queueMicrotask(syncIme), true);
+document.addEventListener('focusin', syncIme);
+document.addEventListener('focusout', () => queueMicrotask(syncIme));
 
 async function cmdAiError() {
     const r = await ask('aierror', {});
