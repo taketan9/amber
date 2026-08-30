@@ -312,10 +312,35 @@ function draw(which) {
     // head without reordering anything inside it.
     const path = document.createElement('span');
     path.className = 'path';
+    // Each ancestor is its own target. cian-tui registers a click rect per
+    // segment (mouse.rs:803) — a path you can read and not click is a path
+    // you retype into `z`.
+    const clickable = !pane.remote && !pane.archive && !pane.flat;
+    if (clickable) {
+        let sofar = '';
+        for (const seg of (lead + parents).split(/(?<=[\\/])/)) {
+            sofar += seg;
+            const at = sofar.slice(lead.length);
+            const s2 = document.createElement('span');
+            s2.className = 'seg';
+            s2.textContent = seg;
+            if (at.length > 1) {
+                s2.addEventListener('mousedown', (e) => {
+                    e.stopPropagation();
+                    setShellFocus(false);
+                    state.focus = which;
+                    landOn(at.replace(/[\\/]$/, '') || '/', true).then(() => say(state[which].cwd));
+                });
+            }
+            path.append(s2);
+        }
+    } else {
+        path.append(document.createTextNode(lead + parents));
+    }
     const tail = document.createElement('span');
     tail.className = 'here';
     tail.textContent = here;
-    path.append(document.createTextNode(lead + parents), tail);
+    path.append(tail);
     crumb.replaceChildren(path);
 
     const rows = root.querySelector('.rows');
@@ -431,8 +456,22 @@ function draw(which) {
             // the numbers.
             div.append(cl, mk, g, name, len, w);
         }
-        div.addEventListener('mousedown', () => {
+        div.addEventListener('mousedown', async (e) => {
             state.focus = which;
+            // Add to the marks rather than moving the cursor — cian-tui's
+            // grid does this (grid.rs:352), and it is what every list in
+            // every OS does with that modifier.
+            //
+            // Which modifier, though, is the platform's: on macOS Ctrl+click
+            // *is* the secondary click, so binding this to Ctrl there marks a
+            // row and opens the context menu on the same press. Cmd is the
+            // Mac's add-to-selection and Ctrl is everywhere else's.
+            if (ADD_TO_MARKS(e)) {
+                e.preventDefault();
+                const next = await ask('mark', { pane: which, at: i });
+                if (next) { state[which] = next; draw(which); }
+                return;
+            }
             pane.cursor = i;
             draw('left'); draw('right');
         });
@@ -1675,6 +1714,11 @@ function contextRows() {
 /// `rows` is a function, not a list: what a group offers depends on what is
 /// under the cursor at the moment it is opened, and a list built when the
 /// parent was drawn would be a list about the file you were on then.
+/// Which modifier means "add this to the selection". Not the same key
+/// everywhere: Ctrl+click is the secondary click on macOS.
+const ON_MAC = navigator.userAgent.includes('Mac');
+const ADD_TO_MARKS = (e) => (ON_MAC ? e.metaKey && !e.ctrlKey : e.ctrlKey);
+
 function group(label, rows) {
     return { label, value: '▸', group: rows };
 }
@@ -6904,11 +6948,18 @@ for (const which of ['left', 'right']) {
     // keyboard in the shell, so neither surface looked right. Registered on
     // the pane once rather than on every row every repaint, so an empty pane
     // and the path line take focus too.
-    pane.addEventListener('mousedown', () => {
+    pane.addEventListener('mousedown', async (e) => {
         setShellFocus(false);
         state.focus = which;
         draw('left');
         draw('right');
+        // The empty ground below the listing clears the marks (grid.rs:372).
+        // A pane full of marks and no obvious way to drop them is a pane you
+        // reach for Esc in and hope.
+        if (e.target.classList.contains('rows') && state[which].marked > 0) {
+            const next = await ask('unmarkall', { pane: which });
+            if (next) { state[which] = next; draw(which); say('マークを解除しました'); }
+        }
     });
     // The menu on the pane's own background, its path line, an empty listing —
     // cian-tui opens it for a right-click anywhere in the pane (mouse.rs), and

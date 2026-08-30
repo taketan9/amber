@@ -244,6 +244,8 @@ html, body {
    the folder you are in went off the left edge and only its parents showed. */
 .crumb > .path { unicode-bidi: isolate; direction: ltr; }
 .crumb .here { color: var(--text); font-weight: 600; }
+/* Each ancestor is clickable, and says so on the way past. */
+.crumb .seg:hover { color: var(--accent); text-decoration: underline; cursor: pointer; }
 #work[data-focus="files"] .pane.active .crumb .here { color: var(--accent); }
 /* The tab strip, and only when there is more than one — a row of chrome
    showing a single tab is a row of chrome saying nothing. */
