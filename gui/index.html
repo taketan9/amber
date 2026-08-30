@@ -122,17 +122,18 @@ html, body {
   user-select: none; cursor: default;
   overflow: hidden;
 }
-#panes {
-  display: flex; gap: 1px; background: var(--line);
-  /* Room for the status line, and for the hint bar when it is out. Measured
-     rather than guessed: a listing whose last row sits under the status bar
-     is a row you cannot see or reach. */
-  height: calc(100% - var(--status-h) - var(--hints-h));
-}
+#panes { flex: 1 1 auto; display: flex; gap: 1px; background: var(--line); min-height: 0; }
 .pane {
-  flex: 1 1 0; min-width: 0; display: flex; flex-direction: column;
+  flex: 1 1 0; min-width: 0; min-height: 0; display: flex; flex-direction: column;
   background: var(--pane-off);
+  /* Room for the focused pane's frame, always — so gaining focus does not
+     move the rows by two pixels. */
+  border: 2px solid transparent;
 }
+/* Which pane the keys are talking to. It was a background shade, which on a
+   light theme is nearly nothing; the terminal build draws a frame, and a
+   frame is what reads across all twenty-one palettes. */
+.pane.active { border-color: var(--accent); background: var(--pane); }
 /* Icons take the whole window. Tiles need width, and two halves of a window
    give a wall of icons two narrow columns of them — which is neither of the
    things the mode is for. Tab still crosses to the other pane; it simply
@@ -196,6 +197,11 @@ html, body {
 .dhead .glyph { flex: 0 0 1.6em; }
 .dhead .size { flex: 0 0 9ch; text-align: right; }
 .dhead .sortable:hover { color: var(--fg); text-decoration: underline; }
+/* `hidden` is only `display: none` in the browser's own stylesheet, and any
+   author rule beats it — `.row { display: flex }` did, so the header stayed
+   laid out in classic view as an empty band under the path. Said here, where
+   it wins. */
+.dhead[hidden] { display: none; }
 
 /* icons — a grid of tiles. The listing turns sideways: the same rows, the
    same cursor, laid out as a wall. Made for a mouse and a quick visual scan;
@@ -257,15 +263,31 @@ html, body {
   --c12:#82c8ff; --c13:#e0a0f0; --c14:#7fe0e8; --c15:#ffffff;
 }
 
+/* The third surface, not a panel laid over the other two.
+   cian-tui's normal layout is three: the file panes on top and the shell
+   below, always there. This was a fixed overlay that appeared on Shift+J,
+   which meant the shell was not part of the program until you asked for it —
+   and, worse, that scrolling a listing to its last row put that row
+   underneath the shell where it could not be seen or reached. */
 #shell {
-  position: fixed; left: 0; right: 0; bottom: 0; height: 45vh;
-  display: flex; flex-direction: column; z-index: 5;
-  background: var(--pane); border-top: 1px solid var(--line);
+  flex: 0 0 auto; height: 40%;
+  display: flex; flex-direction: column; min-height: 0;
+  background: var(--pane); border-top: 2px solid var(--line);
 }
 #shell[hidden] { display: none; }
+/* Same signal as a file pane: the surface the keys are talking to wears the
+   accent. Two pixels either way, so focus does not move anything. */
 #shell.on { border-top-color: var(--accent); }
+
 /* Typing into four servers at once should not look like typing into one. */
-#shell.zoom { height: 92vh; }
+#shell.zoom { height: 88%; }
+/* The two surfaces stack; between them and the foot bars, the window is
+   accounted for exactly. */
+#work {
+  position: fixed; left: 0; right: 0; top: 0;
+  bottom: calc(var(--status-h) + var(--hints-h));
+  display: flex; flex-direction: column; min-height: 0;
+}
 #shell.sync { border-top: 2px solid var(--mark); }
 /* Recording. The terminal build turns the frame carmine for the same
    reason: a shell being written to a file must not look like one that
@@ -314,7 +336,9 @@ html, body {
 }
 /* Which pane the keys go to. A row of identical shells with no way to tell
    which is listening is the failure mode of every split terminal. */
-.sgrid.on { box-shadow: inset 0 0 0 1px var(--accent); }
+/* Two pixels, matching the file panes: one was a hairline that disappeared
+   against half the palettes. */
+.sgrid.on { box-shadow: inset 0 0 0 2px var(--accent); }
 .sgrid + .sgrid { border-left: 1px solid var(--line); }
 .sgrid .cur { background: var(--accent); color: var(--on-accent); }
 .sgrid .inv { filter: invert(1); }
@@ -567,9 +591,9 @@ html, body {
 </style>
 </head>
 <body>
+  <div id="work">
   <div id="panes">
     <section class="pane active" data-pane="left">
-      <div class="tabs"></div>
       <div class="tabs"></div>
       <div class="crumb"></div>
       <div class="dhead row" hidden></div>
@@ -577,11 +601,14 @@ html, body {
     </section>
     <section class="pane" data-pane="right">
       <div class="tabs"></div>
-      <div class="tabs"></div>
       <div class="crumb"></div>
       <div class="dhead row" hidden></div>
       <div class="rows"></div>
     </section>
+  </div>
+  <div id="shell" hidden>
+    <div class="vhead"><span id="s-tabs" class="stabs"></span><span id="s-title"></span><span id="s-about"></span></div>
+    <div class="spanes" id="s-panes"></div>
   </div>
   <div id="hints"></div>
   <div id="status">…</div>
@@ -611,9 +638,6 @@ html, body {
 
   <!-- The shell. Docked under the panes rather than over them: it is a place
        you look at while you work, not a thing you open instead of working. -->
-  <div id="shell" hidden>
-    <div class="vhead"><span id="s-tabs" class="stabs"></span><span id="s-title"></span><span id="s-about"></span></div>
-    <div class="spanes" id="s-panes"></div>
   </div>
 
   <!-- Anything that answers with a list: a search, disk usage, checksums, the

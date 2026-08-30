@@ -69,9 +69,10 @@ pub struct Options {
     /// Which view the window opens in: `"classic"`, `"details"` or `"icons"`.
     ///
     /// Only the windowed build has views to choose between; the terminal build
-    /// ignores it. Defaults to `"details"` — the one that looks least like a
-    /// terminal, for the person meeting cian for the first time. Anyone who
-    /// wants the two panes back says so once here.
+    /// ignores it. Defaults to `"classic"` — the two panes, because that is
+    /// what cian is; the other two are one pane at a time and give up the
+    /// arrangement the whole program is built around. Anyone who wants
+    /// Explorer's list or a wall of tiles says so here, or on `T`.
     pub view: Option<String>,
     /// Show the contextual key-hint bar above the status line.
     pub key_hints: Option<bool>,

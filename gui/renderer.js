@@ -4380,13 +4380,25 @@ const term = { on: false, focused: false, rows: 24, cols: 80, tabs: 1, tab: 0, s
 /// How many cells fit. Measured from a real character rather than assumed:
 /// the font is whatever the machine had, and three of the four looks disagree
 /// about the size.
+/// How big one character cell is, measured in the box the shell is drawn in.
+///
+/// The probe used to be a bare span dropped into the panel, which inherited
+/// the *listing's* line height (--cell-h, made for rows you click on) and was
+/// then multiplied by a hopeful 1.25 — so the panel was told it had seven
+/// rows where twelve fitted, and two thirds of the shell was empty. It wears
+/// `.sgrid` now, so it is measured under the rules the real thing is drawn
+/// under, and ten lines are measured rather than one so rounding cannot
+/// accumulate.
 function measureCell() {
-    const probe = document.createElement('span');
-    probe.textContent = 'M'.repeat(100);
-    probe.style.cssText = 'position:absolute;visibility:hidden;white-space:pre';
+    const probe = document.createElement('div');
+    probe.className = 'sgrid';
+    probe.textContent = Array.from({ length: 10 }, () => 'M'.repeat(100)).join('\n');
+    probe.style.cssText = 'position:absolute;visibility:hidden;left:-9999px;top:0;'
+        + 'width:auto;height:auto;padding:0';
     el.sPanes.append(probe);
-    const w = probe.getBoundingClientRect().width / 100;
-    const h = probe.getBoundingClientRect().height * 1.25;
+    const box = probe.getBoundingClientRect();
+    const w = box.width / 100;
+    const h = box.height / 10;
     probe.remove();
     return { w: w || 8, h: h || 20 };
 }
@@ -4404,18 +4416,20 @@ function shellSize() {
     };
 }
 
-async function openShell() {
+async function openShell(opts = {}) {
+    const takeKeys = opts.focus !== false;
     el.shell.hidden = false;
     term.on = true;
-    term.focused = true;
-    el.shell.classList.add('on');
+    term.focused = takeKeys;
+    el.shell.classList.toggle('on', takeKeys);
     const size = shellSize();
     term.rows = size.rows;
     term.cols = size.cols;
     const r = await ask('shellopen', { pane: state.focus, ...size });
     if (!r) { closeShell(); return; }
     takeShell(r);
-    say('シェル — Esc でファイルへ戻る');
+    if (takeKeys) say('シェル — Esc でファイルへ戻る');
+    else draw('left');
 }
 
 function closeShell() {
@@ -5398,7 +5412,14 @@ async function shellGo(how) {
     say(`シェル ${term.tab + 1} / ${term.tabs}`);
 }
 
+/// Close the whole shell tab — every split pane in it.
+///
+/// Asked for, as the terminal build asks: F10 sits one key from F9, and the
+/// difference between them is a tab appearing and a tab with four panes in it
+/// disappearing.
 async function shellCloseTab() {
+    if (!await confirm('このシェルタブを閉じます（分割ごと）',
+        '動いているプログラムがあれば終わります')) { say('やめました'); return; }
     const r = await ask('shellclose', {});
     if (!r) return;
     if (r.gone) { closeShell(); say('シェルを閉じました'); return; }
@@ -5801,7 +5822,47 @@ async function recall() {
     keymapErrors = [...(s.config_errors || []), ...keymapErrors];
 }
 
-recall();
+/// The window changed shape, so the shell's idea of its own size is stale.
+///
+/// Nothing watched for this: a PTY opened at 82×7 stayed 82×7 however far the
+/// window was dragged, and every full-screen program in it drew to the wrong
+/// rectangle. Debounced, because a drag is a hundred of these.
+let resizeTimer = null;
+
+window.addEventListener('resize', () => {
+    measureFoot();
+    if (viewer.ed) viewer.ed.layout();
+    // The shell is handled by the observer below, which sees the panel's box
+    // change for any reason — a drag, a font change, the hint bar going away
+    // — rather than only for this one.
+});
+
+recall().then(() => {
+    // The third surface, from the start.
+    //
+    // cian-tui's normal layout is three — the two file panes and the shell —
+    // and a window where the shell only exists after Shift+J is a window
+    // where the shell is not part of the program. Opened without focus: the
+    // keys still belong to the listing until Shift+J asks for them.
+    if (!term.on) openShell({ focus: false });
+});
+
+/// Keep the PTY's size equal to the box it is drawn in.
+///
+/// Watched rather than timed. The shell is opened before the hint bar has
+/// been drawn and before the panel has its final height, so any single
+/// re-measure is a guess about when layout finishes — and a PTY told the
+/// wrong number paints its bottom rows off the end of the panel. This fires
+/// when the box actually changes, which is the condition itself.
+new ResizeObserver(() => {
+    if (!term.on) return;
+    const size = shellSize();
+    if (size.cols === term.cols && size.rows === term.rows) return;
+    term.cols = size.cols;
+    term.rows = size.rows;
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => ask('shellresize', size), 60);
+}).observe(el.sPanes);
 drawHints();
 
 refresh().then(() => {
