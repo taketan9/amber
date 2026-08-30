@@ -18,10 +18,10 @@ const el = {
     stShell: document.getElementById('st-shell'),
     ask: document.getElementById('ask'),
     find: document.getElementById('find'),
-    findQ: document.getElementById('find-q'),
     findHits: document.getElementById('find-hits'),
     findFoot: document.getElementById('find-foot'),
     fbar: document.getElementById('fbar'),
+    fSign: document.getElementById('f-sign'),
     fInput: document.getElementById('f-input'),
     fCount: document.getElementById('f-count'),
     prog: document.getElementById('prog'),
@@ -865,25 +865,51 @@ async function applySort(key) {
 /// `/` narrows what is here. A second `/`, with nothing typed yet, looks
 /// underneath instead — one slash for this listing, two for the tree. The
 /// terminal build settled on that and it reads itself.
-const filter = { on: false };
+/// The prompt row at the foot, and which of the three things is typing into it.
+///
+/// `/` narrows the listing, `//` searches the tree below it, `:` takes a
+/// command — three different questions, one place to type them, which is
+/// where cian-tui puts all three (its prompt line, above the hints). The
+/// command line used to raise a modal sheet in the middle of the window and
+/// the finder a full-screen scrim over the very listing it was searching.
+///
+/// The colour says which: green for the two that search, purple for the one
+/// that runs — cian-tui's own, because they take the same letters and the
+/// only thing telling them apart is the frame.
+const filter = { on: false, mode: null, resolve: null };
 
-function startFilter() {
+const PROMPT_SIGN = { filter: '/', find: '//', cmd: ':' };
+
+function openPrompt(mode, seed = '', note = '') {
     filter.on = true;
+    filter.mode = mode;
+    el.fbar.dataset.mode = mode === 'cmd' ? 'cmd' : 'search';
+    el.fSign.textContent = PROMPT_SIGN[mode];
     el.fbar.hidden = false;
-    // Seeded with what is already narrowing this pane, as the terminal build
-    // seeds its box — reopening the filter to adjust it should not clear it.
-    el.fInput.value = state[state.focus]?.filter ?? '';
-    el.fCount.textContent = '';
+    el.fInput.value = seed;
+    el.fCount.textContent = note;
     el.fInput.focus();
+    el.fInput.select();
     drawHints();
 }
 
-function endFilter(keep) {
+function closePrompt() {
     filter.on = false;
+    filter.mode = null;
     el.fbar.hidden = true;
     el.fInput.blur();
-    if (!keep) applyFilter('');
     drawHints();
+}
+
+function startFilter() {
+    // Seeded with what is already narrowing this pane, as the terminal build
+    // seeds its box — reopening the filter to adjust it should not clear it.
+    openPrompt('filter', state[state.focus]?.filter ?? '');
+}
+
+function endFilter(keep) {
+    closePrompt();
+    if (!keep) applyFilter('');
 }
 
 async function applyFilter(text) {
@@ -911,10 +937,10 @@ async function openFinder() {
     finder.at = 0;
     finder.walking = true;
     el.find.hidden = false;
-    el.findQ.value = '';
     el.findFoot.textContent = '探しています…';
     el.findHits.replaceChildren();
-    el.findQ.focus();
+    // Typed at the foot like everything else; the sheet above holds the hits.
+    openPrompt('find');
     // Asked for before the walk has found anything, on purpose: the picker is
     // usable from the first keystroke and the tree arrives underneath it.
     await ask('find', { pane: which });
@@ -924,11 +950,12 @@ async function openFinder() {
 function closeFinder() {
     finder.open = false;
     el.find.hidden = true;
+    if (filter.mode === 'find') closePrompt();
 }
 
 async function rankNow() {
     if (!finder.open) return;
-    const r = await ask('rank', { query: el.findQ.value, limit: 200 });
+    const r = await ask('rank', { query: el.fInput.value, limit: 200 });
     if (!r || !finder.open) return;
     finder.rows = r.rows;
     finder.at = Math.min(finder.at, Math.max(0, r.rows.length - 1));
@@ -1284,7 +1311,11 @@ function hintsNow() {
         return [['j/k', '伸ばす'], ['a', '全選択'], ['gg/G', '先頭/末尾'],
             ['Enter', '確定'], ['Esc', '取消']];
     }
-    if (filter.on) return [['type', '絞込'], ['Enter', '適用'], ['Esc', '解除']];
+    if (filter.on) {
+        if (filter.mode === 'cmd') return [['打つ', 'コマンド'], ['Enter', '実行'], ['Esc', 'やめる'], ['C', '一覧から選ぶ']];
+        if (filter.mode === 'find') return [['打つ', '絞込'], ['↑↓', '選ぶ'], ['Enter', 'そこへ'], ['Esc', 'やめる']];
+        return [['打つ', '絞込'], ['↑↓', 'カーソル'], ['Enter', '適用'], ['Esc', '解除'], ['/', 'この下を探す']];
+    }
     const pane = state[state.focus];
     if (pane && pane.archive) {
         return [['Enter/l', '入る'], ['Bksp', '戻る'], ['F3', 'メンバー閲覧'],
@@ -1602,7 +1633,6 @@ function openMenu(spec) {
     menu.spec = spec;
     menu.at = Math.max(0, spec.at ? spec.at() : 0);
     el.find.hidden = false;
-    el.findQ.hidden = true;
     el.findFoot.textContent = spec.foot;
     drawMenu();
 }
@@ -1630,7 +1660,6 @@ function closeMenu() {
     menuStack.length = 0;
     menu.spec = null;
     el.find.hidden = true;
-    el.findQ.hidden = false;
 }
 
 function drawMenu() {
@@ -1859,7 +1888,6 @@ function openHelp() {
     help.on = true;
     el.find.hidden = false;
     el.find.classList.add('help');
-    el.findQ.hidden = true;
     el.findFoot.textContent = 'Esc か ? で閉じる  ── 端末版の cian と同じキーです';
     const frag = document.createDocumentFragment();
     for (const [group, rows] of HELP) {
@@ -1888,7 +1916,6 @@ function closeHelp() {
     help.on = false;
     el.find.classList.remove('help');
     el.find.hidden = true;
-    el.findQ.hidden = false;
 }
 
 /// Help's keys. It scrolls, because the terminal build's help did not and
@@ -1998,50 +2025,53 @@ async function reread() {
 document.addEventListener('keydown', (e) => {
     if (!filter.on) return;
     e.stopPropagation();
-    if (e.key === 'Escape') { endFilter(false); say('絞り込みを解除'); }
-    else if (e.key === 'Enter') { endFilter(true); }
-    else if (e.key === '/' && el.fInput.value === '') {
+    const k = e.key;
+    const mode = filter.mode;
+    if (k === 'Escape') {
+        if (mode === 'filter') { endFilter(false); say('絞り込みを解除'); }
+        else if (mode === 'find') { closeFinder(); say('やめました'); }
+        else { closePrompt(); say('やめました'); }
+    }
+    else if (k === 'Enter') {
+        if (mode === 'filter') endFilter(true);
+        else if (mode === 'find') goToHit();
+        else { const line = el.fInput.value; closePrompt(); runTypedCommand(line); }
+    }
+    else if (k === '/' && mode === 'filter' && el.fInput.value === '') {
         // Two slashes: this listing was not it, so look underneath.
         endFilter(true);
         openFinder();
     }
-    // The cursor still walks the narrowing list while the box is open — the
-    // terminal build's filter mode does the same, and it is what makes
-    // "type three letters, arrow down, Enter" one motion.
-    else if (e.key === 'ArrowDown') move(1);
-    else if (e.key === 'ArrowUp') move(-1);
+    // The cursor still walks while the box is open — the terminal build's
+    // filter mode does the same, and it is what makes "type three letters,
+    // arrow down, Enter" one motion. In the finder the arrows walk the hits.
+    else if (k === 'ArrowDown' || (e.ctrlKey && k === 'n')) {
+        if (mode === 'find') { finder.at = Math.min(finder.rows.length - 1, finder.at + 1); drawHits(finder.rows.length); }
+        else if (mode === 'filter') move(1);
+        else return;
+    }
+    else if (k === 'ArrowUp' || (e.ctrlKey && k === 'p')) {
+        if (mode === 'find') { finder.at = Math.max(0, finder.at - 1); drawHits(finder.rows.length); }
+        else if (mode === 'filter') move(-1);
+        else return;
+    }
     else return;
     e.preventDefault();
 }, true);
 
 document.addEventListener('input', (e) => {
-    if (filter.on && e.target === el.fInput) applyFilter(el.fInput.value);
+    if (!filter.on || e.target !== el.fInput) return;
+    if (filter.mode === 'filter') applyFilter(el.fInput.value);
+    else if (filter.mode === 'find') rankNow();
 });
 
-/// The finder's own keys, while it is up.
-document.addEventListener('keydown', (e) => {
-    if (!finder.open) return;
-    e.stopPropagation();
-    if (e.key === 'Escape') { closeFinder(); say('やめました'); }
-    else if (e.key === 'Enter') goToHit();
-    else if (e.key === 'ArrowDown' || (e.key === 'n' && e.ctrlKey)) {
-        finder.at = Math.min(finder.rows.length - 1, finder.at + 1);
-        drawHits(finder.rows.length);
-    }
-    else if (e.key === 'ArrowUp' || (e.key === 'p' && e.ctrlKey)) {
-        finder.at = Math.max(0, finder.at - 1);
-        drawHits(finder.rows.length);
-    }
-    else return;   // everything else is typing, and belongs to the field
-    e.preventDefault();
-}, true);
+// The finder's keys are the prompt row's now — it types there like the other
+// two, so a second handler for the same keystrokes would be a second answer.
 
 // Each keystroke re-ranks. Not debounced: the answer comes from a pipe, and
 // waiting on a timer to save a round trip that costs nothing would only make
 // the picker feel slower than it is.
-document.addEventListener('input', (e) => {
-    if (finder.open && e.target === el.findQ) rankNow();
-});
+
 
 /// While the bar is up it owns the keyboard — two keys, the terminal build's
 /// (keys.rs, the progress popup): Esc stops the work, `b` stops only the
@@ -4204,13 +4234,15 @@ function findCommand(name) {
 }
 
 /// `:` — the name, then whatever it takes.
-async function commandLine(initial = '') {
-    // Named, not spelled. The heading used to be a bare `:`, which is the key
-    // you pressed, not the answer to "what is this box".
-    // No placeholder. A ghost `:` sitting in an empty box is a character you
-    // cannot tell from one you typed until you try to delete it.
-    const line = await askFor('コマンド入力', initial);
-    if (line === null) return;
+function commandLine(initial = '') {
+    // On the prompt row at the foot, where cian-tui puts its command line —
+    // not in a sheet in the middle of the window. Purple, because `/` above
+    // it is green and the two take the same letters.
+    openPrompt('cmd', initial);
+}
+
+/// Run whatever was typed on the command line.
+async function runTypedCommand(line) {
     const text = line.trim();
     if (!text) return;
     // `!` is a prefix, not a name: everything after it is the command line

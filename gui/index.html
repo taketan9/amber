@@ -45,6 +45,19 @@
   --k-media:   #2f6f74;
   --k-archive: #9a4a3a;
   --k-exec:    #3a7a4a;
+  /* What mode the keys are in, in the colours cian-tui uses for exactly this
+     (render.rs `focus_badge_color`). Copied value for value rather than
+     chosen again: a person who knows that green means "searching" in one
+     build must not have to learn a second vocabulary for the other.
+     Not themed — they say *which mode*, and a mode that changed colour with
+     the palette would be a fact you had to re-learn per theme. */
+  --m-visual:  rgb(255, 140, 0);
+  --m-search:  rgb(80, 200, 120);
+  --m-command: rgb(200, 100, 200);
+  --m-shell:   rgb(200, 160, 60);
+  /* A pane showing somebody else's server. cian-tui's CRMAINE, and the one
+     confusion worth spending a colour on. */
+  --m-remote:  rgb(214, 45, 70);
   /* The veil behind a dialog. A hardcoded near-black sat over 白磁 and
      github-light alike; now the dark looks and palettes deepen it below. */
   --scrim:     rgba(23, 26, 31, .45);
@@ -184,7 +197,7 @@ html, body {
    carmine border for exactly this: the rows look like files, and mistaking
    somebody's server for your own disk is the one confusion worth spending a
    colour on. */
-.pane.remote { outline: 2px solid var(--mark); outline-offset: -2px; }
+.pane.remote { outline: 2px solid var(--m-remote); outline-offset: -2px; }
 /* Where you are. The most-read line in a file manager, and it was set two
    points smaller than the date column and in the dim colour — the priorities
    the wrong way round. Full size now, with the parents dim and the folder you
@@ -441,8 +454,15 @@ html, body {
   bottom: calc(var(--status-h) + var(--hints-h));
   display: flex; align-items: center; gap: .5em;
   padding: 3px 10px; background: var(--pane);
-  border-top: 2px solid var(--accent);
+  /* The mode's own colour, cian-tui's: green while searching or narrowing,
+     purple on the command line. One glance says which of the two the keys
+     are going to, which matters because they take the same letters. */
+  border-top: 2px solid var(--m-search);
+  z-index: 22;   /* over the finder's list, which it is typing into */
 }
+#fbar[data-mode="cmd"] { border-top-color: var(--m-command); }
+#fbar b { color: var(--m-search); font-weight: 600; }
+#fbar[data-mode="cmd"] b { color: var(--m-command); }
 /* `hidden` is the browser's own display:none, and the flex above beats it —
    the bar showed at startup, empty, the day it was added. Bug shape ③. */
 #fbar[hidden] { display: none; }
@@ -596,6 +616,10 @@ html, body {
   font: inherit; padding: 5px 10px;
 }
 #r-q[hidden] { display: none; }
+/* The finder types into the prompt row at the foot, like everything else, so
+   its own box is gone and the sheet holds only the hits. It sat behind a
+   scrim over the very listing it was searching. */
+#find-q { display: none; }
 #report .hit { cursor: default; }
 #report .hit .n {
   flex: 0 0 auto; color: var(--dim); font-variant-numeric: tabular-nums;
@@ -835,7 +859,7 @@ html, body {
        sheet — a dark scrim over the very listing being narrowed. The terminal
        build types this on its prompt row, and this bar is that row. -->
   <div id="fbar" hidden>
-    <b>/</b><input id="f-input" autocomplete="off" spellcheck="false"><span id="f-count"></span>
+    <b id="f-sign">/</b><input id="f-input" autocomplete="off" spellcheck="false"><span id="f-count"></span>
   </div>
   <div id="hints"></div>
   <!-- The status line, the terminal build's chip row: which pane and mode,
