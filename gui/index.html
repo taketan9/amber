@@ -523,6 +523,15 @@ html, body {
 }
 #view[hidden], #report[hidden] { display: none; }
 #report .hits { flex: 1 1 auto; max-height: none; margin: 0; border: 0; }
+/* The narrowing box. Accented like every other place cian is taking text —
+   the terminal build gives one look to "I am typing into something". */
+#r-q {
+  flex: 0 0 auto; border: 0; outline: 0;
+  border-bottom: 2px solid var(--accent);
+  background: var(--pane-off); color: var(--text);
+  font: inherit; padding: 5px 10px;
+}
+#r-q[hidden] { display: none; }
 #report .hit { cursor: default; }
 #report .hit .n {
   flex: 0 0 auto; color: var(--dim); font-variant-numeric: tabular-nums;
@@ -819,6 +828,10 @@ html, body {
        Enter does, not in how they look. -->
   <div id="report" hidden>
     <div class="vhead"><span id="r-name"></span><span id="r-about"></span></div>
+    <!-- Only for the lists that are long enough to need it — the palette, the
+         palettes, the jump list. A hundred and thirty rows walked with j and k
+         is not a palette, whatever the help calls it. -->
+    <input id="r-q" hidden autocomplete="off" spellcheck="false">
     <div class="hits" id="r-rows"></div>
     <div class="vfoot" id="r-foot"></div>
   </div>

@@ -36,6 +36,7 @@ const el = {
     report: document.getElementById('report'),
     rName: document.getElementById('r-name'),
     rAbout: document.getElementById('r-about'),
+    rQ: document.getElementById('r-q'),
     rRows: document.getElementById('r-rows'),
     rFoot: document.getElementById('r-foot'),
     view: document.getElementById('view'),
@@ -2344,6 +2345,11 @@ const report = { on: false, rows: [], at: 0, pick: null, act: null, move: null, 
 function show(title, about, rows, opts = {}) {
     report.on = true;
     report.rows = rows;
+    // The unfiltered set, kept so narrowing is reversible by backspacing —
+    // a filter that discards what it hides can only ever be typed forwards.
+    report.all = rows;
+    report.about = about;
+    report.query = !!opts.filter;
     report.at = 0;
     report.pick = opts.pick || null;
     report.act = opts.act || null;
@@ -2357,9 +2363,37 @@ function show(title, about, rows, opts = {}) {
     el.rName.textContent = title;
     el.rAbout.textContent = about;
     el.rFoot.textContent = opts.foot
-        || (rows.length ? '↑↓ 選ぶ   Enter 開く   Esc 閉じる' : 'Esc 閉じる');
+        || (report.query ? '打って絞る   ↑↓ 選ぶ   Enter 開く   Esc 閉じる'
+            : rows.length ? '↑↓ 選ぶ   Enter 開く   Esc 閉じる' : 'Esc 閉じる');
+    el.rQ.hidden = !report.query;
+    el.rQ.value = '';
+    el.rQ.placeholder = opts.hint || '打って絞り込み';
     el.report.hidden = false;
     drawReport();
+    if (report.query) el.rQ.focus();
+}
+
+/// Narrow the list to what was typed.
+///
+/// A plain case-insensitive substring, over the label and whatever is beside
+/// it. Deliberately *not* fuzzy: the file finder's ranking lives in Rust so
+/// there is only one of it, and a second matcher written here would drift
+/// from it within a month. These lists are a hundred-odd known names, where
+/// "contains what I typed" is both predictable and enough.
+function filterReport() {
+    const q = el.rQ.value.trim().toLowerCase();
+    report.rows = q
+        ? report.all.filter((r) => `${r.label} ${r.sub || ''}`.toLowerCase().includes(q))
+        : report.all;
+    report.at = 0;
+    el.rAbout.textContent = q
+        ? `${report.rows.length} / ${report.all.length} 件`
+        : report.about;
+    drawReport();
+    // The preview follows the narrowing, not just the arrows: with the
+    // palettes, the top row of what you have typed *is* the answer you are
+    // looking at.
+    if (report.move && report.rows[report.at]) report.move(report.rows[report.at]);
 }
 
 function closeReport(abandoned = false) {
@@ -2368,6 +2402,10 @@ function closeReport(abandoned = false) {
     report.move = null;
     report.leave = null;
     report.rows = [];
+    report.all = [];
+    report.query = false;
+    el.rQ.hidden = true;
+    el.rQ.blur();
     el.report.hidden = true;
 }
 
@@ -2414,18 +2452,34 @@ document.addEventListener('keydown', (e) => {
         if (report.move && report.rows[report.at]) report.move(report.rows[report.at]);
     };
     const k = e.key;
-    if (k === 'Escape' || k === 'q') closeReport(true);
-    else if (k === 'j' || k === 'ArrowDown') go(report.at + 1);
-    else if (k === 'k' || k === 'ArrowUp') go(report.at - 1);
+    const ctrl = e.ctrlKey || e.metaKey;
+    // What means the same thing whether or not there is a box to type in.
+    // Ctrl+n / Ctrl+p are here because with a filter the letters are text,
+    // and the terminal build's palette takes exactly these (keys.rs:813).
+    if (k === 'Escape') closeReport(true);
+    else if (k === 'ArrowDown' || (ctrl && k === 'n')) go(report.at + 1);
+    else if (k === 'ArrowUp' || (ctrl && k === 'p')) go(report.at - 1);
     else if (k === 'PageDown') go(report.at + 20);
     else if (k === 'PageUp') go(report.at - 20);
+    else if (k === 'Enter' && report.pick && report.rows[report.at]) report.pick(report.rows[report.at]);
+    else if (report.query) {
+        // Everything else is text. Not swallowed and not acted on: the box
+        // has the focus and the character belongs to it.
+        return;
+    }
+    else if (k === 'q') closeReport(true);
+    else if (k === 'j') go(report.at + 1);
+    else if (k === 'k') go(report.at - 1);
     else if (k === 'g') go(0);
     else if (k === 'G') go(last);
-    else if (k === 'Enter' && report.pick && report.rows[report.at]) report.pick(report.rows[report.at]);
     else if (report.act && report.act[k]) report.act[k]();
     else return;
     e.preventDefault();
 }, true);
+
+document.addEventListener('input', (e) => {
+    if (report.on && report.query && e.target === el.rQ) filterReport();
+});
 
 /// Bytes, the way a person reads them.
 function human(n) {
@@ -4130,7 +4184,11 @@ async function runCommand(cmd, arg, invokedAs) {
 function openPalette() {
     const rows = COMMANDS.map((c) => ({ label: `:${c.name}`, sub: c.about, cmd: c }));
     show('コマンド', `${rows.length} 個`, rows, {
-        foot: '↑↓ 選ぶ   Enter 実行   Esc 閉じる',
+        // The one the help has always called あいまい検索 and which walked
+        // a hundred and thirty rows with j and k until now.
+        filter: true,
+        hint: '打って絞り込み（:name か説明）',
+        foot: '打って絞る   ↑↓ 選ぶ   Enter 実行   Esc 閉じる',
         pick: (row) => { closeReport(); runCommand(row.cmd, ''); },
     });
 }
@@ -4766,7 +4824,11 @@ async function cmdJump() {
     }
     if (!rows.length) { say('まだどこにも行っていません'); return; }
     show('行き先', `${rows.length} 件（★ = 登録済み）`, rows, {
-        foot: 'Enter そこへ   Esc 閉じる',
+        // The terminal build calls `Z` a *fuzzy* jump, and a list of paths is
+        // exactly the list where typing three letters beats arrowing.
+        filter: true,
+        hint: '打って絞り込み（パスの一部）',
+        foot: '打って絞る   Enter そこへ   Esc 閉じる',
         pick: (row) => { closeReport(); revealPath(row.target, true); },
     });
 }
@@ -4968,7 +5030,9 @@ async function cmdTheme(name) {
     const rows = themeRows();
     show('配色', `${rows.length} 種 — 上の ${LOOKS.length} つは窓のもの、あとは cian-tui のもの`,
         rows, {
-            foot: '↑↓ 選ぶだけで着せ替わります   Enter 決定   Esc 戻す',
+            filter: true,
+            hint: '打って絞り込み（dracula, light, …）',
+            foot: '打って絞る   ↑↓ 選ぶだけで着せ替わります   Enter 決定   Esc 戻す',
             // Live, as the terminal build's gallery is: a palette is a thing
             // you look at, and choosing one from a list of names without
             // seeing it is choosing by memory.
