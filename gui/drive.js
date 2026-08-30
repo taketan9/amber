@@ -326,6 +326,9 @@ async function main() {
     // itself, and the round read as a paste that had quietly done nothing.
     fs.mkdirSync(path.join(sand, 'from'));
     fs.mkdirSync(path.join(sand, 'to'));
+    // A diagram, for the mermaid preview.
+    fs.writeFileSync(path.join(sand, 'from', 'zu.md'),
+        '# 図\n\n```mermaid\ngraph LR\n  A[開始] --> B{判定}\n  B -->|yes| C[実行]\n  B -->|no| D[終了]\n```\n\nおわり\n');
     // Brackets, for `%`.
     fs.writeFileSync(path.join(sand, 'from', 'k.rs'),
         'fn main() {\n    let x = (1 + 2);\n    println!("hi");\n}\n');

@@ -3960,6 +3960,83 @@ async function cmdEncoding(name) {
 /// was in the repository somebody cloned.
 let reading = false;
 
+/// mermaid, loaded the first time a diagram appears — most Markdown has none,
+/// and 3.4 MB is not a toll every preview should pay.
+let mermaidLoading = null;
+
+function loadMermaid() {
+    if (mermaidLoading) return mermaidLoading;
+    mermaidLoading = new Promise((ok, no) => {
+        // The same trap monaco-vim fell into: a UMD bundle sees Monaco's AMD
+        // `define` and takes the AMD branch, which cannot work here. With
+        // `define` out of sight for the length of the load it lands on the
+        // plain global instead.
+        const savedDefine = window.define;
+        window.define = undefined;
+        const sc = document.createElement('script');
+        sc.src = 'vendor/mermaid.js';
+        sc.onload = () => {
+            window.define = savedDefine;
+            // strict: a README is a file from somewhere, and a diagram that
+            // can run script is not a diagram.
+            window.mermaid.initialize({ startOnLoad: false, securityLevel: 'strict' });
+            ok(window.mermaid);
+        };
+        sc.onerror = () => {
+            window.define = savedDefine;
+            no(new Error('vendor/mermaid.js がありません — node gui/vendor.js'));
+        };
+        document.head.append(sc);
+    });
+    return mermaidLoading;
+}
+
+/// Draw every ```mermaid fence in the preview.
+///
+/// The terminal build folds these into an arrow list, because a terminal
+/// cannot draw; this is the drawing. A diagram that fails to parse keeps its
+/// source on screen with the reason — a blank where a diagram should be says
+/// nothing, and the source at least says what was meant.
+let mermaidSeq = 0;
+
+async function drawDiagrams() {
+    const fences = [...el.vRead.querySelectorAll('code.language-mermaid')];
+    if (!fences.length) return;
+    let mermaid;
+    try {
+        mermaid = await loadMermaid();
+    } catch (e) { say(e.message, true); return; }
+    const dark = LOOKS[look][0] === 'inei' || LOOKS[look][0] === 'terminal';
+    // mermaid ships trebuchet, which has no Japanese and falls back silently
+    // to whatever the system picks. Hand it the page's own body face so a
+    // diagram's labels are set in the same type as the prose around them.
+    const body = getComputedStyle(el.vRead).fontFamily;
+    mermaid.initialize({
+        startOnLoad: false,
+        securityLevel: 'strict',
+        theme: dark ? 'dark' : 'default',
+        fontFamily: body,
+        themeVariables: { fontFamily: body },
+    });
+    for (const code of fences) {
+        const src = code.textContent;
+        const pre = code.parentElement;
+        try {
+            mermaidSeq += 1;
+            const { svg } = await mermaid.render(`cian-mermaid-${mermaidSeq}`, src);
+            const box = document.createElement('div');
+            box.className = 'diagram';
+            box.innerHTML = svg;
+            pre.replaceWith(box);
+        } catch (e) {
+            const why = document.createElement('div');
+            why.className = 'diagram-error';
+            why.textContent = `図として読めませんでした: ${String(e.message || e).split('\n')[0]}`;
+            pre.before(why);
+        }
+    }
+}
+
 async function togglePreview2() {
     if (!viewer.on || !viewer.ed) { say('先にファイルを開いてください', true); return; }
     if (reading) {
@@ -3990,6 +4067,7 @@ async function togglePreview2() {
     el.vBody.hidden = true;
     el.vRead.hidden = false;
     el.vRead.scrollTop = 0;
+    drawDiagrams();
     say('プレビュー — Ctrl+E でソースに戻ります');
 }
 

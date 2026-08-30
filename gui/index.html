@@ -418,6 +418,14 @@ html, body {
 .vread tbody tr:hover { background: var(--pane-off); }
 
 .vread hr { border: 0; border-top: 1px solid var(--line); margin: 2.4em auto; }
+/* A diagram gets more width than prose — it is looked at, not read line by
+   line — and scrolls inside itself rather than widening the page. */
+.vread .diagram { max-width: 48rem; margin: 0 auto 1.6em; overflow-x: auto; text-align: center; }
+.vread .diagram svg { max-width: 100%; height: auto; }
+.vread .diagram-error {
+  max-width: 44rem; margin: 0 auto .5em; padding: .4em .8em;
+  color: var(--mark); background: var(--accent-dim); border-radius: 6px; font-size: .9em;
+}
 .vread del { color: var(--dim); }
 /* Which byte the next digit lands on. A hex editor with no cursor is a hex
    editor you overwrite the wrong byte with. */

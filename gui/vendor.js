@@ -38,6 +38,12 @@ const WANTED = [
     // is not offered in; English is built into editor.main.js.
     ['monaco-editor/min/vs/nls.messages.ja.js', 'monaco/vs/nls.messages.ja.js'],
     ['monaco-vim/dist/monaco-vim.umd.js', 'monaco-vim.js'],
+    // The diagrams. 3.4 MB, which in a 173 MB bundle is not a number worth an
+    // argument — and it is the second thing (after real type) that a window
+    // can do with Markdown that a terminal cannot: the terminal build folds a
+    // mermaid graph into an arrow list, and this draws the graph.
+    ['mermaid/dist/mermaid.min.js', 'mermaid.js'],
+    ['mermaid/LICENSE', 'mermaid.LICENSE'],
     // The licences travel with the code they cover. Both are MIT, and a
     // release that shipped the minified JavaScript without them would be
     // distributing someone's work with the terms filed off.
