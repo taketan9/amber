@@ -2542,6 +2542,12 @@ function show(title, about, rows, opts = {}) {
     report.all = rows;
     report.about = about;
     report.query = !!opts.filter;
+    // A list you answer per row rather than all at once. cian-tui's four
+    // review screens (junk, dupes, structure, rename) are all this shape:
+    // the model proposes, and a person ticks off the ones they meant. All-or-
+    // nothing turns "mostly right" into "start again by hand".
+    report.checks = !!opts.checks;
+    if (report.checks) for (const r of rows) if (r.on === undefined) r.on = true;
     report.at = 0;
     report.pick = opts.pick || null;
     report.act = opts.act || null;
@@ -2555,13 +2561,15 @@ function show(title, about, rows, opts = {}) {
     el.rName.textContent = title;
     el.rAbout.textContent = about;
     el.rFoot.textContent = opts.foot
-        || (report.query ? '打って絞る   ↑↓ 選ぶ   Enter 開く   Esc 閉じる'
+        || (report.checks ? 'Space 外す／戻す   a 全部   n 全部外す   Enter 実行   Esc やめる'
+            : report.query ? '打って絞る   ↑↓ 選ぶ   Enter 開く   Esc 閉じる'
             : rows.length ? '↑↓ 選ぶ   Enter 開く   Esc 閉じる' : 'Esc 閉じる');
     el.rQ.hidden = !report.query;
     el.rQ.value = '';
     el.rQ.placeholder = opts.hint || '打って絞り込み';
     el.report.hidden = false;
     drawReport();
+    drawCheckCount();
     if (report.query) el.rQ.focus();
 }
 
@@ -2588,6 +2596,14 @@ function filterReport() {
     if (report.move && report.rows[report.at]) report.move(report.rows[report.at]);
 }
 
+/// How many are ticked, said where the total was. The number is the whole
+/// point of ticking, and a list that does not show it makes you count.
+function drawCheckCount() {
+    if (!report.checks) return;
+    const on = report.rows.filter((r) => r.on).length;
+    el.rAbout.textContent = `${on} / ${report.rows.length} 件   ${report.about}`;
+}
+
 function closeReport(abandoned = false) {
     if (abandoned && report.leave) report.leave();
     report.on = false;
@@ -2605,7 +2621,22 @@ function drawReport() {
     const frag = document.createDocumentFragment();
     report.rows.forEach((row, i) => {
         const div = document.createElement('div');
-        div.className = 'hit' + (i === report.at ? ' on' : '');
+        div.className = 'hit' + (i === report.at ? ' on' : '')
+            + (report.checks && !row.on ? ' off' : '');
+        if (report.checks) {
+            const box = document.createElement('span');
+            box.className = 'box';
+            box.textContent = row.on ? '✓' : '·';
+            box.addEventListener('mousedown', (e) => {
+                // The click ticks the box and does *not* run the list —
+                // cian-tui's review rows toggle on click (lib.rs:955).
+                e.stopPropagation();
+                row.on = !row.on;
+                report.at = i;
+                drawReport();
+            });
+            div.append(box);
+        }
         if (row.n !== undefined && row.n !== null) {
             const n = document.createElement('span');
             n.className = 'n';
@@ -2653,7 +2684,19 @@ document.addEventListener('keydown', (e) => {
     else if (k === 'ArrowUp' || (ctrl && k === 'p')) go(report.at - 1);
     else if (k === 'PageDown') go(report.at + 20);
     else if (k === 'PageUp') go(report.at - 20);
+    else if (k === 'Enter' && report.checks && report.pick) {
+        // The ticked ones, not the row under the cursor.
+        report.pick(report.rows.filter((r) => r.on));
+    }
     else if (k === 'Enter' && report.pick && report.rows[report.at]) report.pick(report.rows[report.at]);
+    else if (report.checks && (k === ' ' || k === 'a' || k === 'n')) {
+        if (k === ' ') { const r = report.rows[report.at]; if (r) r.on = !r.on; }
+        else for (const r of report.rows) r.on = (k === 'a');
+        // The cursor stays put. A list that jumps to the top on every tick is
+        // a list you cannot work down.
+        drawReport();
+        drawCheckCount();
+    }
     else if (report.query) {
         // Everything else is text. Not swallowed and not acted on: the box
         // has the focus and the character belongs to it.
@@ -5029,11 +5072,31 @@ async function cmdDedup() {
     const r = await ask('dedup', { pane: state.focus });
     if (!r) return;
     if (!r.groups.length) { say('同じ中身のファイルはありません'); return; }
+    // The first of each group starts unticked: a duplicate set with every
+    // copy ticked is a set with nothing left. cian-tui's DupeReview is for
+    // choosing which copies to lose, and one of them has to stay.
     const rows = [];
     r.groups.forEach((g, i) => {
-        g.forEach((p, j) => rows.push({ n: j === 0 ? `${i + 1}` : '', label: p }));
+        g.forEach((p, j) => rows.push({
+            n: j === 0 ? `${i + 1}` : '', label: p, path: p, on: j !== 0,
+        }));
     });
-    show('中身が同じファイル', `${r.groups.length} 組`, rows, { foot: 'Esc 閉じる' });
+    show('中身が同じファイル', `${r.groups.length} 組 — 各組の1つ目は残す側`, rows, {
+        checks: true,
+        foot: 'Space 外す／戻す   a 全部   n 全部外す   Enter 選んだ分を削除   Esc やめる',
+        pick: async (chosen) => {
+            if (!chosen.length) { say('選ばれている行がありません', true); return; }
+            closeReport();
+            const ok = await confirm(`${chosen.length} 件をゴミ箱へ`,
+                chosen.map((x) => x.path).join('\n'));
+            if (!ok) { say('やめました'); return; }
+            const done = await ask('delete', {
+                pane: state.focus, paths: chosen.map((x) => x.path), mode: 'trash',
+            });
+            if (!done) return;
+            beginOp(done, 'delete', '削除');
+        },
+    });
 }
 
 /// `:view`, and the terminal build's aliases for it — `:icons` on its own
@@ -5524,28 +5587,23 @@ async function cmdSubstitute(spec) {
 /// the terminal build's reasoning and it is right. Space unchecks; the count
 /// on the header says how many are still going.
 function showReplacePlan(spec, plan) {
-    const picked = plan.changes.map(() => true);
-    const draw = () => {
-        const on = picked.filter(Boolean).length;
-        show(`置換 ${spec}`,
-            `${on} / ${plan.changes.length} 行   `
-            + `${new Set(plan.changes.map((c) => c.path)).size} ファイル`
-            + (plan.skipped.length ? `   飛ばした ${plan.skipped.length} 件` : ''),
-            plan.changes.map((c, i) => ({
-                n: (picked[i] ? '✓ ' : '  ') + (c.line + 1),
-                label: c.path.split(/[\\/]/).pop() + '  ' + c.before,
-                sub: c.after,
-                at: i,
-            })),
-            {
-                foot: 'Space 外す／戻す   a 全部   n 全部外す   Enter 実行   Esc やめる',
-                act: {
-                    ' ': () => { picked[report.at] = !picked[report.at]; keepPlace(draw); },
-                    a: () => { picked.fill(true); keepPlace(draw); },
-                    n: () => { picked.fill(false); keepPlace(draw); },
-                },
-                pick: async () => {
-                    const going = plan.changes.filter((_, i) => picked[i]);
+    // On `show`'s own tick boxes rather than a second set kept beside it —
+    // this screen had the only hand-rolled ones, and four review screens
+    // needed the same thing.
+    show(`置換 ${spec}`,
+        `${new Set(plan.changes.map((c) => c.path)).size} ファイル`
+        + (plan.skipped.length ? `   飛ばした ${plan.skipped.length} 件` : ''),
+        plan.changes.map((c) => ({
+            n: String(c.line + 1),
+            label: c.path.split(/[\\/]/).pop() + '  ' + c.before,
+            sub: c.after,
+            change: c,
+        })),
+        {
+            checks: true,
+            foot: 'Space 外す／戻す   a 全部   n 全部外す   Enter 実行   Esc やめる',
+                pick: async (chosen) => {
+                    const going = chosen.map((r) => r.change);
                     if (!going.length) { say('選ばれている行がありません', true); return; }
                     closeReport();
                     if (!await confirm(`${going.length} 行を置換します`,
@@ -5560,19 +5618,7 @@ function showReplacePlan(spec, plan) {
                     if (done.stale) bits.push(`${done.stale} 行は変わっていたので触らず`);
                     say(bits.join('   '), done.errors.length > 0);
                 },
-            });
-    };
-    draw();
-}
-
-/// Redraw a report without losing where the cursor was. `show` resets it, and
-/// a list that jumps to the top every time you tick a box is a list you cannot
-/// work down.
-function keepPlace(redraw) {
-    const at = report.at;
-    redraw();
-    report.at = Math.min(at, report.rows.length - 1);
-    drawReport();
+        });
 }
 
 /// `:g/re/d` and `:v/re/d` — drop or keep every matching line.
@@ -5861,34 +5907,38 @@ async function cmdAiScan(what) {
             return;
         }
         if (what === 'aijunk') {
-            show('不要かもしれないもの', `${rows.length} 件 — AI の見立てです。確かめてから`,
+            show('不要かもしれないもの', 'AI の見立てです。確かめてから',
                 rows.map((x) => ({ label: x.name, sub: x.reason || '', path: x.path })),
                 {
-                    foot: 'Enter 全部をマーク（消すのは d で自分で）   Esc 閉じる',
-                    pick: async () => {
+                    checks: true,
+                    foot: 'Space 外す／戻す   a 全部   n 全部外す   Enter 選んだ分をマーク   Esc やめる',
+                    pick: async (chosen) => {
+                        if (!chosen.length) { say('選ばれている行がありません', true); return; }
                         closeReport();
                         const p = await ask('setmarks', {
-                            pane: state.focus, paths: rows.map((x) => x.path),
+                            pane: state.focus, paths: chosen.map((x) => x.path),
                         });
                         if (!p) return;
                         state[state.focus] = p;
                         draw(state.focus);
-                        say(`${rows.length} 件をマークしました — d で削除（ゴミ箱へ）`);
+                        say(`${chosen.length} 件をマークしました — d で削除（ゴミ箱へ）`);
                     },
                 });
             return;
         }
-        show('畳み方の案', `${rows.length} 件 — 移すだけ。消しも改名もしません`,
+        show('畳み方の案', '移すだけ。消しも改名もしません',
             rows.map((x) => ({ n: '→ ' + x.folder, label: x.name, sub: x.reason || '', path: x.path, folder: x.folder })),
             {
-                foot: 'Enter 実行（u で戻せます）   Esc やめる',
-                pick: async () => {
+                checks: true,
+                foot: 'Space 外す／戻す   a 全部   n 全部外す   Enter 実行（u で戻せます）   Esc やめる',
+                pick: async (chosen) => {
+                    if (!chosen.length) { say('選ばれている行がありません', true); return; }
                     closeReport();
-                    if (!await confirm(`${rows.length} 件を下のディレクトリへ移します`,
-                        rows.map((x) => `${x.name} → ${x.folder}/`).join('\n'))) { say('やめました'); return; }
+                    if (!await confirm(`${chosen.length} 件を下のディレクトリへ移します`,
+                        chosen.map((x) => `${x.name} → ${x.folder}/`).join('\n'))) { say('やめました'); return; }
                     const done = await ask('organizeapply', {
                         pane: state.focus,
-                        rows: rows.map((x) => ({ path: x.path, folder: x.folder })),
+                        rows: chosen.map((x) => ({ path: x.path, folder: x.folder })),
                     });
                     if (!done) return;
                     state[state.focus] = done.pane;
@@ -5921,15 +5971,23 @@ async function cmdAiRename(instruction) {
 function showRenamePlanRows(rows, title) {
     const changing = rows.filter((x) => !x.same);
     if (!changing.length) { say('変わる名前がありません'); return; }
-    show(title, `${changing.length} 件が変わります`,
-        rows.map((x) => ({ n: x.same ? '=' : '→', label: x.from, sub: x.to })),
+    show(title, '一行ずつ選べます',
+        // A row whose name does not change starts unticked and stays that
+        // way — there is nothing in it to do.
+        rows.map((x) => ({
+            n: x.same ? '=' : '→', label: x.from, sub: x.to,
+            from: x.from, to: x.to, same: x.same, on: !x.same,
+        })),
         {
-            foot: 'Enter 実行   Esc やめる',
-            pick: async () => {
+            checks: true,
+            foot: 'Space 外す／戻す   a 全部   n 全部外す   Enter 実行   Esc やめる',
+            pick: async (chosen) => {
+                const going = chosen.filter((x) => !x.same);
+                if (!going.length) { say('選ばれている行がありません', true); return; }
                 closeReport();
-                if (!await confirm(`${changing.length} 件の名前を変えます`,
-                    changing.map((x) => `${x.from}  →  ${x.to}`).join('\n'))) { say('やめました'); return; }
-                const done = await ask('renameapply', { rows: changing });
+                if (!await confirm(`${going.length} 件の名前を変えます`,
+                    going.map((x) => `${x.from}  →  ${x.to}`).join('\n'))) { say('やめました'); return; }
+                const done = await ask('renameapply', { rows: going.map((x) => ({ from: x.from, to: x.to })) });
                 if (!done) return;
                 await reread();
                 if (done.errors.length) say(done.errors.join('  /  '), true);

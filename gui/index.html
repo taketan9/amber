@@ -643,6 +643,17 @@ html, body {
    scrim over the very listing it was searching. */
 #find-q { display: none; }
 #report .hit { cursor: default; }
+/* The tick box on a review row. Its own hit area, because clicking the box
+   and clicking the row mean different things. */
+#report .hit .box {
+  flex: 0 0 2ch; text-align: center; cursor: pointer;
+  color: var(--accent); font-weight: 600;
+}
+#report .hit.off .box { color: var(--dim); font-weight: 400; }
+/* An unticked row recedes — it is still readable, and it is not going to
+   happen. */
+#report .hit.off { opacity: .55; }
+#report .hit.on .box { color: var(--on-accent); }
 #report .hit .n {
   flex: 0 0 auto; color: var(--dim); font-variant-numeric: tabular-nums;
   min-width: 9ch; text-align: right;

@@ -683,7 +683,14 @@ impl Session {
             // under, before it has touched anything.
             "copy" | "move" | "delete" => {
                 let which = req.params["pane"].as_str().unwrap_or("left").to_string();
-                let paths = self.targets(&which)?;
+                // Named paths where the caller has them, marks otherwise.
+                //
+                // A review screen has already decided which rows it means —
+                // the dupes it ticked are not the pane's marks and must not
+                // have to become them first. Marking them to delete them
+                // would leave the marks behind on whatever survived.
+                let named = paths_of(req);
+                let paths = if named.is_empty() { self.targets(&which)? } else { named };
                 if paths.is_empty() {
                     anyhow::bail!("nothing to operate on");
                 }
