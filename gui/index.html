@@ -36,6 +36,10 @@
   --mark:      #bf6b34;
   --cell-h:    26px;
   --size:      15px;
+  /* The face the listing and the code use. Named so the preview can borrow
+     it for code while setting prose in something proportional. */
+  --mono: "HackGen Console NF", "HackGen35 Console NF", Menlo, Consolas,
+          "BIZ UDGothic", ui-monospace, monospace;
   /* A Nerd Font first, because that is what cian-tui is read in and it is the
      one people said looked best of the three. Then the UI faces Windows and
      macOS ship, then anything. The last two are the safety net: `sans-serif`
@@ -300,6 +304,90 @@ html, body {
 }
 .vpic[hidden] { display: none; }
 .vpic img, .vpic embed { max-width: 100%; max-height: 100%; object-fit: contain; }
+
+/* ── The Markdown preview ────────────────────────────────────────────────
+   The one place this build can be better than the terminal rather than
+   merely equal to it. A terminal renders Markdown in one font at one size;
+   a window can set it, and a document that is set properly is read faster
+   than the same words in a grid.
+
+   The measure is capped at 34rem — around 70 characters, which is where
+   the eye stops having to hunt for the start of the next line. Everything
+   else here follows from that one decision. */
+.vread {
+  flex: 1 1 auto; min-height: 0; overflow: auto;
+  padding: 3rem 2rem 6rem;
+  color: var(--text);
+  /* Proportional for prose. The Nerd Font stays for code, where the
+     columns matter; body text in a monospace face is a terminal
+     pretending to be a page. */
+  font-family: "Hiragino Kaku Gothic ProN", "Yu Gothic UI", "Noto Sans JP",
+               -apple-system, "Segoe UI", system-ui, sans-serif;
+  font-size: calc(var(--size) * 1.05);
+  line-height: 1.85;
+}
+.vread[hidden] { display: none; }
+.vread > * { max-width: 34rem; margin-left: auto; margin-right: auto; }
+
+.vread h1, .vread h2, .vread h3, .vread h4, .vread h5, .vread h6 {
+  line-height: 1.35; text-wrap: balance;
+  /* `auto` kept in the shorthand: a later `margin: 2.4em 0 …` silently
+     overrides the centring above, which is exactly what happened — the
+     headings sat flush left while the table floated in the middle. */
+  margin: 2.4em auto .8em; font-weight: 650;
+}
+.vread > :first-child { margin-top: 0; }
+.vread h1 { font-size: 1.9em; letter-spacing: -0.01em; }
+/* A rule under the top two, which is what a reader uses to find where a
+   section begins when skimming rather than reading. */
+.vread h1, .vread h2 { padding-bottom: .3em; border-bottom: 1px solid var(--line); }
+.vread h2 { font-size: 1.45em; }
+.vread h3 { font-size: 1.18em; }
+.vread h4, .vread h5, .vread h6 { font-size: 1em; color: var(--dim); }
+
+.vread p { margin: 0 auto 1.15em; }
+.vread ul { margin: 0 auto 1.15em; padding-left: 1.4em; }
+.vread li { margin: .3em 0; }
+.vread li > ul { margin: .3em 0 .3em; }
+.vread li.task { list-style: none; margin-left: -1.4em; }
+.vread li.task .box { display: inline-block; width: 1.4em; color: var(--accent); }
+
+.vread a { color: var(--dir); text-underline-offset: .18em; }
+.vread a:hover { color: var(--accent); }
+
+/* Code keeps the monospace face — that is what it is for. The inline form
+   is tinted rather than boxed, because a box every few words turns a
+   paragraph into a fence. */
+.vread code {
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: .88em; background: var(--accent-dim);
+  padding: .12em .35em; border-radius: 4px;
+}
+.vread pre {
+  margin: 0 auto 1.4em; padding: 1em 1.1em; max-width: 44rem;
+  background: var(--pane-off); border: 1px solid var(--line); border-radius: 8px;
+  overflow-x: auto;
+}
+.vread pre code { background: none; padding: 0; font-size: .9em; line-height: 1.6; }
+
+/* A quote is set in from the measure and marked, not boxed: it is still
+   the same document. */
+.vread blockquote {
+  margin: 0 auto 1.2em; padding: .1em 0 .1em 1.1em;
+  border-left: 3px solid var(--accent-dim); color: var(--dim);
+}
+.vread blockquote p:last-child { margin-bottom: 0; }
+
+.vread table {
+  border-collapse: collapse; margin: 0 auto 1.4em; max-width: 44rem;
+  font-size: .95em; font-variant-numeric: tabular-nums;
+}
+.vread th, .vread td { padding: .45em .9em; border-bottom: 1px solid var(--line); }
+.vread th { text-align: left; font-weight: 650; color: var(--dim); }
+.vread tbody tr:hover { background: var(--pane-off); }
+
+.vread hr { border: 0; border-top: 1px solid var(--line); margin: 2.4em auto; }
+.vread del { color: var(--dim); }
 /* Which byte the next digit lands on. A hex editor with no cursor is a hex
    editor you overwrite the wrong byte with. */
 .hexcur { background: var(--accent); color: var(--on-accent) !important; }
@@ -441,6 +529,7 @@ html, body {
     <div class="vhead"><span id="v-name"></span><span id="v-about"></span></div>
     <div class="vbody" id="v-body"></div>
     <div class="vpic" id="v-pic" hidden></div>
+    <div class="vread" id="v-read" hidden></div>
     <div class="vfoot" id="v-foot"></div>
   </div>
 

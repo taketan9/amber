@@ -28,6 +28,7 @@ const el = {
     vAbout: document.getElementById('v-about'),
     vBody: document.getElementById('v-body'),
     vPic: document.getElementById('v-pic'),
+    vRead: document.getElementById('v-read'),
     vFoot: document.getElementById('v-foot'),
 };
 
@@ -839,6 +840,7 @@ const HELP = [
         ['  za', '折り畳む・開く'],
         ['  :enc', '文字コードを変えて読み直す（引数なしで順に）'],
         ['  :ws / :ruler', '見えない文字 / 桁の目盛り'],
+        ['Ctrl+E', 'Markdown を組んで表示 / ソースへ戻る（:render・vim は :preview）'],
         ['  :s/古い/新しい/g', 'このファイルを置換'],
         ['  :g/re/d  :v/re/d', '一致した行を削除 / 一致した行だけ残す'],
         ['  :combine [n][!]', '次の行を連結（! は空白なし）'],
@@ -1541,6 +1543,8 @@ function makeEditor(monaco, text, lang) {
         () => blockEdit('replace'));
     viewer.ed.addCommand(monaco.KeyMod.Alt | monaco.KeyMod.Shift | monaco.KeyCode.KeyD,
         () => blockEdit('delete'));
+    // The rendered document, and back. The terminal build's key for it.
+    viewer.ed.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyE, () => togglePreview2());
     viewer.ed.onDidChangeCursorPosition(drawViewFoot);
     } else {
     viewer.ed.updateOptions({ theme: editorTheme() });
@@ -1695,6 +1699,7 @@ function setStyle(i, remember = true) {
         ex.defineEx('enc', 'enc', (_cm, params) => cmdEncoding((params.args || [])[0]));
         ex.defineEx('ws', 'ws', () => toggleWs());
         ex.defineEx('ruler', 'ruler', () => toggleRuler());
+        ex.defineEx('preview', 'preview', () => togglePreview2());
         ex.defineEx('combine', 'combine', (_cm, p) => cmdCombine((p.args || []).join(' ') + (p.argString || '')));
         // `:g/re/d` and `:v/re/d`, spelled as vim spells them.
         ex.defineEx('global', 'g', (_cm, p) => runGlobal(p, false));
@@ -1828,6 +1833,9 @@ async function closeView(ask_first = true) {
     viewer.dirty = false;
     renameList.on = false;
     stopHex();
+    reading = false;
+    el.vRead.hidden = true;
+    el.vRead.replaceChildren();
     member.on = false;
     if (pair.ed) { pair.ed.dispose(); pair.ed = null; }
     pair.on = false;
@@ -2000,6 +2008,15 @@ document.addEventListener('keydown', (e) => {
         pair.ed.trigger('cian', e.shiftKey ? 'editor.action.diffReview.prev' : 'editor.action.diffReview.next');
         return;
     }
+    // Reading the rendered document: Esc goes back to the source rather than
+    // out of the file, because "back one step" is what Esc means everywhere
+    // else in here.
+    if (reading && (e.key === 'Escape' || (e.key === 'e' && (e.ctrlKey || e.metaKey)))) {
+        e.stopPropagation();
+        e.preventDefault();
+        togglePreview2();
+        return;
+    }
     if (e.key === 'F3') {
         e.stopPropagation();
         e.preventDefault();
@@ -2137,6 +2154,7 @@ const COMMANDS = [
     { name: 'theme', about: '配色を選ぶ（T のメニューにも）', arg: '名前', optional: true, run: cmdTheme },
     { name: 'redraw', about: '画面を描き直す', run: () => { draw('left'); draw('right'); say('描き直しました'); } },
     { name: 'preview', about: 'カーソルのファイルを追って表示（もう一度で止める）', run: togglePreview },
+    { name: 'render', about: 'Markdown を組んで表示（Ctrl+E でも）', run: togglePreview2 },
     { name: 'queue', about: '実行中の操作を見る・止める', run: cmdQueue },
     { name: 'tab', about: '新しいタブ（t / F9 でも）', run: () => tabNew() },
     { name: 'tabclose', about: 'タブを閉じる（w / F10 でも）', run: () => tabClose() },
@@ -3594,6 +3612,51 @@ async function cmdEncoding(name) {
     el.vAbout.textContent = `${pretty[r.encoding] || r.encoding}  ·  ${r.eol.toUpperCase()}`
         + `  ·  ${r.lines.length} 行`;
     say(`文字コード: ${pretty[r.encoding] || r.encoding}`);
+}
+
+/// The Markdown preview — the rendered document instead of the source.
+///
+/// **The one thing this build can do that the terminal cannot.** A terminal
+/// draws Markdown in one face at one size; a window can set it, and a document
+/// that is set properly is read faster than the same words in a grid.
+///
+/// The HTML comes from the engine, from the same parse cian-tui draws — so the
+/// two never disagree about the program's own README — and it arrives already
+/// escaped. A preview that runs what it finds is a preview that runs whatever
+/// was in the repository somebody cloned.
+let reading = false;
+
+async function togglePreview2() {
+    if (!viewer.on || !viewer.ed) { say('先にファイルを開いてください', true); return; }
+    if (reading) {
+        reading = false;
+        el.vRead.hidden = true;
+        el.vBody.hidden = false;
+        viewer.ed.focus();
+        say('ソースに戻りました');
+        return;
+    }
+    const r = await ask('markdown', { lines: viewer.ed.getValue().split(/\r?\n/) });
+    if (!r) return;
+    // `innerHTML` on purpose, and only here: the engine escaped every piece of
+    // text on the way out, and the markup is its own — not the file's.
+    el.vRead.innerHTML = r.html;
+    // Links go to the desktop's browser rather than replacing the preview.
+    // A file manager that navigates away from itself is a file manager you
+    // have to restart.
+    for (const a2 of el.vRead.querySelectorAll('a[href]')) {
+        a2.addEventListener('click', (e) => {
+            e.preventDefault();
+            const href = a2.getAttribute('href');
+            if (/^https?:|^mailto:/i.test(href)) ask('openurl', { url: href });
+            else say(`${href} — 相対リンクはまだ開けません`);
+        });
+    }
+    reading = true;
+    el.vBody.hidden = true;
+    el.vRead.hidden = false;
+    el.vRead.scrollTop = 0;
+    say('プレビュー — Ctrl+E でソースに戻ります');
 }
 
 /// `:ws` — the characters you cannot see but a compiler can.

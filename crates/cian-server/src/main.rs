@@ -2740,6 +2740,36 @@ impl Session {
                     "archive": archive.file_name().map(|s| s.to_string_lossy().into_owned()),
                 }))
             }
+            // A link from the preview, in the desktop's browser.
+            "openurl" => {
+                let url = arg(req, "url");
+                let lower = url.to_ascii_lowercase();
+                // Checked again here, not only where the HTML was built. The
+                // window is not the place a scheme should be trusted from.
+                if !(lower.starts_with("http://") || lower.starts_with("https://")
+                    || lower.starts_with("mailto:"))
+                {
+                    anyhow::bail!("開けないリンクです: {url}");
+                }
+                cian_core::proc::open_with_desktop(&url)?;
+                Ok(serde_json::json!({ "opened": url }))
+            }
+            // The open file as HTML, for the preview.
+            //
+            // Rendered here because the reading is here — the same parse the
+            // terminal build draws, turned into a document instead of into
+            // styled lines. The window is handed markup it did not have to
+            // understand, which is also what keeps a README from running.
+            "markdown" => {
+                let lines: Vec<String> = match lines_of(req) {
+                    Some(l) => l,
+                    None => match self.open.as_ref() {
+                        Some((_, f)) => f.lines.clone(),
+                        None => anyhow::bail!("開いているファイルがありません"),
+                    },
+                };
+                Ok(serde_json::json!({ "html": cian_core::markdown::to_html(&lines) }))
+            }
             // Leave a flat listing and go back to the directory it came from.
             "leaveflat" => {
                 let which = req.params["pane"].as_str().unwrap_or("left").to_string();

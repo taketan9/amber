@@ -25,6 +25,7 @@ pub mod highlight;
 pub mod image;
 pub mod inspect;
 pub mod log;
+pub mod markdown;
 pub mod office;
 pub mod ops;
 pub mod outline;

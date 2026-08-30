@@ -10,51 +10,22 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use unicode_width::UnicodeWidthStr;
 
+// The reading — inline marks and every block recogniser — lives in cian-core,
+// so the window's preview and this renderer agree about what the file says.
+// What stays here is how it looks in a terminal.
+use cian_core::markdown::{
+    cell_align, fence_lang, heading, is_rule, is_table_separator, list_item, split_cells,
+    task_item, Align,
+};
+
 use crate::render::{dim_text, readable_on, text_tone};
 use crate::theme;
 use crate::theme::surface;
 use crate::util::{pad_left, pad_to, truncate, wrap_str};
 
-/// Column alignment for a pipe-table, from its `:---:` separator row.
-#[derive(Clone, Copy, PartialEq)]
-enum Align {
-    Left,
-    Center,
-    Right,
-}
 
-/// Is `line` a table separator row (`|---|:--:|---:|`)? Every cell must be dashes
-/// with optional leading/trailing colons, and there must be at least one dash.
-fn is_table_separator(line: &str) -> bool {
-    let t = line.trim();
-    if !t.contains('-') || !t.contains('|') {
-        return false;
-    }
-    let cells = split_cells(t);
-    !cells.is_empty()
-        && cells.iter().all(|c| {
-            let c = c.trim();
-            !c.is_empty() && c.contains('-') && c.chars().all(|ch| ch == '-' || ch == ':')
-        })
-}
 
-/// Split a table row into trimmed cells, dropping the outer pipes.
-fn split_cells(line: &str) -> Vec<String> {
-    let t = line.trim();
-    let t = t.strip_prefix('|').unwrap_or(t);
-    let t = t.strip_suffix('|').unwrap_or(t);
-    t.split('|').map(|c| c.trim().to_string()).collect()
-}
 
-/// Alignment from a separator cell: `:--` left, `--:` right, `:-:` centre.
-fn cell_align(sep: &str) -> Align {
-    let c = sep.trim();
-    match (c.starts_with(':'), c.ends_with(':')) {
-        (true, true) => Align::Center,
-        (false, true) => Align::Right,
-        _ => Align::Left,
-    }
-}
 
 /// The plain text of an inline-formatted string (markers stripped), for a table
 /// cell — so `**x**` measures and shows as `x`.
@@ -384,52 +355,9 @@ fn render_inner(
     out
 }
 
-/// If `line` opens/closes a fenced code block, return its language tag (empty
-/// string when none). ` ``` `, ` ```rust `, `~~~`.
-fn fence_lang(line: &str) -> Option<String> {
-    let t = line.trim_end();
-    t.strip_prefix("```")
-        .or_else(|| t.strip_prefix("~~~"))
-        .map(|rest| rest.trim().to_lowercase())
-}
 
-fn is_rule(t: &str) -> bool {
-    let t = t.trim();
-    (t.len() >= 3) && (t.chars().all(|c| c == '-') || t.chars().all(|c| c == '*') || t.chars().all(|c| c == '_'))
-}
 
-fn heading(t: &str) -> Option<(usize, String)> {
-    let hashes = t.chars().take_while(|&c| c == '#').count();
-    if (1..=6).contains(&hashes) && t.chars().nth(hashes) == Some(' ') {
-        Some((hashes, t[hashes + 1..].trim().to_string()))
-    } else {
-        None
-    }
-}
 
-/// `(bullet-or-number, text, indent)` for a list line, else None.
-fn list_item(raw: &str) -> Option<(String, String, usize)> {
-    let indent = raw.len() - raw.trim_start().len();
-    let t = raw.trim_start();
-    for m in ['-', '*', '+'] {
-        if let Some(rest) = t.strip_prefix(m) {
-            if rest.starts_with(' ') {
-                return Some(("•".to_string(), rest.trim_start().to_string(), indent));
-            }
-        }
-    }
-    // Ordered: "1." / "12)".
-    let digits: String = t.chars().take_while(|c| c.is_ascii_digit()).collect();
-    if !digits.is_empty() {
-        let after = &t[digits.len()..];
-        if let Some(rest) = after.strip_prefix('.').or_else(|| after.strip_prefix(')')) {
-            if rest.starts_with(' ') {
-                return Some((format!("{}.", digits), rest.trim_start().to_string(), indent));
-            }
-        }
-    }
-    None
-}
 
 /// One token of a flowchart line: a node reference (raw text incl. any brackets)
 /// or an arrow with its optional `|label|`.
@@ -638,19 +566,6 @@ fn mermaid_flow(lines: &[String], width: usize) -> Option<Vec<Line<'static>>> {
     Some(out)
 }
 
-/// A task-list item `[ ] rest` / `[x] rest` → `(checked, rest)`.
-fn task_item(text: &str) -> Option<(bool, String)> {
-    let t = text.trim_start();
-    if let Some(r) = t.strip_prefix("[ ]") {
-        return Some((false, r.trim_start().to_string()));
-    }
-    for mark in ["[x]", "[X]"] {
-        if let Some(r) = t.strip_prefix(mark) {
-            return Some((true, r.trim_start().to_string()));
-        }
-    }
-    None
-}
 
 /// A fenced code block as boxed, monospaced lines, on a theme-derived surface
 /// raised off the viewer background. A ```mermaid``` block is first parsed into a
@@ -707,92 +622,39 @@ fn inline(text: &str, base: Style, _width: usize) -> Vec<Span<'static>> {
     let link_style = base
         .fg(text_tone(theme().accent, surface()))
         .add_modifier(Modifier::UNDERLINED);
-    let mut spans: Vec<Span<'static>> = Vec::new();
-    let mut buf = String::new();
-    let chars: Vec<char> = text.chars().collect();
-    let mut i = 0;
-    let flush = |spans: &mut Vec<Span<'static>>, buf: &mut String| {
-        if !buf.is_empty() {
-            spans.push(Span::styled(std::mem::take(buf), base));
-        }
-    };
-    while i < chars.len() {
-        let c = chars[i];
-        // Inline code `...`. The coloured background is the marker, so the text
-        // is not padded — padding it looked wrong hugged against punctuation,
-        // e.g. `(`meso`)` rendering as `( meso )`.
-        if c == '`' {
-            if let Some(end) = chars[i + 1..].iter().position(|&x| x == '`') {
-                flush(&mut spans, &mut buf);
-                let inner: String = chars[i + 1..i + 1 + end].iter().collect();
-                spans.push(Span::styled(inner, code_style));
-                i += end + 2;
-                continue;
+
+    // The reading is cian-core's, shared with the window — this is only the
+    // dressing. Two front ends with two parsers would be two opinions about
+    // what `*a_b*` means, which reads as carelessness in a program's own
+    // README.
+    let mut spans: Vec<Span<'static>> = cian_core::markdown::inline(text)
+        .into_iter()
+        .map(|piece| match piece {
+            cian_core::markdown::Inline::Text(t) => Span::styled(t, base),
+            cian_core::markdown::Inline::Code(t) => Span::styled(t, code_style),
+            cian_core::markdown::Inline::Bold(t) => {
+                Span::styled(t, base.add_modifier(Modifier::BOLD))
             }
-        }
-        // Bold **...** or __...__
-        if (c == '*' || c == '_') && i + 1 < chars.len() && chars[i + 1] == c {
-            let marker = [c, c];
-            if let Some(end) = find_run(&chars, i + 2, &marker) {
-                flush(&mut spans, &mut buf);
-                let inner: String = chars[i + 2..end].iter().collect();
-                spans.push(Span::styled(inner, base.add_modifier(Modifier::BOLD)));
-                i = end + 2;
-                continue;
+            cian_core::markdown::Inline::Italic(t) => {
+                Span::styled(t, base.add_modifier(Modifier::ITALIC))
             }
-        }
-        // Italic *...* or _..._
-        if c == '*' || c == '_' {
-            if let Some(end) = chars[i + 1..].iter().position(|&x| x == c) {
-                let inner: String = chars[i + 1..i + 1 + end].iter().collect();
-                if !inner.is_empty() && !inner.starts_with(' ') {
-                    flush(&mut spans, &mut buf);
-                    spans.push(Span::styled(inner, base.add_modifier(Modifier::ITALIC)));
-                    i += end + 2;
-                    continue;
-                }
+            cian_core::markdown::Inline::Strike(t) => {
+                Span::styled(t, base.add_modifier(Modifier::CROSSED_OUT))
             }
-        }
-        // Link [text](url)
-        if c == '[' {
-            if let Some(close) = chars[i + 1..].iter().position(|&x| x == ']') {
-                let after = i + 1 + close + 1;
-                if chars.get(after) == Some(&'(') {
-                    if let Some(paren) = chars[after + 1..].iter().position(|&x| x == ')') {
-                        flush(&mut spans, &mut buf);
-                        let label: String = chars[i + 1..i + 1 + close].iter().collect();
-                        spans.push(Span::styled(label, link_style));
-                        i = after + 1 + paren + 1;
-                        continue;
-                    }
-                }
-            }
-        }
-        buf.push(c);
-        i += 1;
-    }
-    flush(&mut spans, &mut buf);
+            cian_core::markdown::Inline::Link { text, .. } => Span::styled(text, link_style),
+        })
+        .collect();
     if spans.is_empty() {
         spans.push(Span::styled(String::new(), base));
     }
     spans
 }
 
-/// Index of the start of a two-char `marker` run at or after `from`.
-fn find_run(chars: &[char], from: usize, marker: &[char; 2]) -> Option<usize> {
-    let mut i = from;
-    while i + 1 < chars.len() {
-        if chars[i] == marker[0] && chars[i + 1] == marker[1] {
-            return Some(i);
-        }
-        i += 1;
-    }
-    None
-}
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
 
     fn lines(s: &str) -> Vec<String> {
         s.lines().map(|l| l.to_string()).collect()
