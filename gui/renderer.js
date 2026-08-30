@@ -1485,6 +1485,43 @@ const TOGGLES = {
                 value: term.sync ? 'する' : 'しない',
                 run: async () => { await cmdSync(); drawMenu(); },
             },
+            {
+                label: '完了通知',
+                value: switches.notify ? 'する' : 'しない',
+                run: () => {
+                    switches.notify = !switches.notify;
+                    drawMenu();
+                    say(switches.notify
+                        ? `完了通知 ON — ${NOTIFY_AFTER_MS / 1000} 秒より長い処理が終わったら知らせます`
+                        : '完了通知 OFF');
+                },
+            },
+            {
+                label: '転送後ベリファイ',
+                value: switches.verify ? 'する' : 'しない',
+                run: async () => {
+                    const r = await ask('switches', { verify: !switches.verify });
+                    if (!r) return;
+                    switches.verify = r.verify;
+                    drawMenu();
+                    say(switches.verify
+                        ? '転送後ベリファイ ON — 送ったあと読み直して照合します（往復が倍になります）'
+                        : '転送後ベリファイ OFF');
+                },
+            },
+            {
+                label: '☁ クラウド上のファイルも読む',
+                value: switches.cloud ? 'する' : 'しない',
+                run: async () => {
+                    const r = await ask('switches', { cloud: !switches.cloud });
+                    if (!r) return;
+                    switches.cloud = r.cloud;
+                    drawMenu();
+                    say(switches.cloud
+                        ? '⚠ 検索やチェックサムがクラウド上のファイルを実際に落とすようになります'
+                        : '☁ クラウド上のファイルは読みません');
+                },
+            },
             // Put where it can be found. A view you can only leave by knowing
             // the words `:view classic` is a view you are stuck in — and
             // icons is the one that hides the listing you would have read the
@@ -6301,6 +6338,32 @@ async function cmdAiSearch(query) {
     };
 }
 
+/// The three switches cian-tui keeps in `T` and this build did not have at
+/// all. Runtime-only in both, because they answer about *this session*: a
+/// verify that had silently stayed on since last month would be a surprise
+/// on the first big upload.
+///
+/// Defaults are cian-tui's: notify on, verify off, cloud reads off.
+const switches = { notify: true, verify: false, cloud: false };
+
+/// Say that a long job finished, when the person may have walked away.
+///
+/// cian-tui writes OSC 9 and lets the terminal decide; a window has the
+/// desktop's own notifications, which is the same idea with a better answer.
+/// Silent under `notify_min_secs`, because a notification for a job that took
+/// two seconds is a notification you turn off.
+const NOTIFY_AFTER_MS = 5000;
+
+function notifyDone(ms, summary) {
+    if (!switches.notify || ms < NOTIFY_AFTER_MS) return;
+    try {
+        // Control characters dropped, as the terminal build drops them — the
+        // text comes from paths and error messages.
+        const clean = String(summary).replace(/[\u0000-\u001f\u007f]/g, ' ').trim();
+        new Notification('cian', { body: clean, silent: false });
+    } catch { /* a desktop with no notifications is not an error */ }
+}
+
 /// `:ime` — the input method, put where this moment wants it.
 ///
 /// The one thing a keyboard program cannot survive is an IME that stays on
@@ -7066,6 +7129,9 @@ window.cian.onEvent(async (msg) => {
             else if (msg.errors.length) say(msg.errors.join('  /  '), true);
             else if (msg.skipped) say(`${verb} ${msg.ok} 件、${msg.skipped} 件は飛ばしました`);
             else say(`${verb} ${msg.ok} 件（${msg.ms} ms）`);
+            // The desktop is told too, for the job that outlasted your
+            // attention — which is the only kind worth interrupting for.
+            notifyDone(msg.ms ?? 0, status.msg);
             return;
         }
 
@@ -7189,6 +7255,11 @@ async function recall() {
             setPalette(t.now, false);
         }
     }
+    // init.lua can set the two the engine owns, so ask what it actually
+    // holds rather than assuming the defaults. Written as one round trip with
+    // nothing to change: `switches` with no argument only answers.
+    const sw = await ask('switches', {});
+    if (sw) { switches.verify = !!sw.verify; switches.cloud = !!sw.cloud; }
     // Lua's own complaints go in the same queue as mine — from where the
     // person stands they are one thing: "my config did not take".
     keymapErrors = [...(s.config_errors || []), ...keymapErrors];

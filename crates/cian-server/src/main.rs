@@ -260,6 +260,11 @@ struct Session {
     /// turns a one-line edit into a diff on every line — and on a Shift_JIS
     /// log, into a file the tool that wrote it can no longer read.
     open: Option<(std::path::PathBuf, cian_core::grepedit::TextFile)>,
+    /// Re-read and checksum every file after an SFTP transfer.
+    ///
+    /// Off by default, as in cian-tui: it doubles the traffic, and the answer
+    /// it gives is only worth that on a link you do not trust.
+    verify_transfers: bool,
     /// What `u` has taken back, waiting for Ctrl+R.
     ///
     /// Cleared by anything else that pushes onto the undo stack: once you have
@@ -306,6 +311,14 @@ impl Session {
             ime_saved: None,
             hex: None,
             redo: Stack::default(),
+            // init.lua has the say; the toggle moves it for this session.
+            // cian-tui reads the same two options (lib.rs:4971 for the cloud
+            // one, which is process-wide in cian-core).
+            verify_transfers: {
+                let cfg = cian_lua::load();
+                cian_core::cloud::set_include(cfg.options.read_cloud_files.unwrap_or(false));
+                cfg.options.verify_transfers.unwrap_or(false)
+            },
             shells: Vec::new(),
             tabs: Vec::new(),
             shell_at: 0,
@@ -2049,7 +2062,31 @@ impl Session {
                         ).map(|_| ())
                     };
                     match r {
-                        Ok(()) => ok += 1,
+                        Ok(()) => {
+                            // Read it back and compare checksums, when asked.
+                            // cian-tui's `verify_transfer`: the local file
+                            // hashed here, the remote one streamed through the
+                            // same hasher, so a truncated upload is caught
+                            // rather than reported as a success.
+                            if self.verify_transfers {
+                                let remote = if up {
+                                    cian_scp::remote_join(&dest, &name)
+                                } else {
+                                    p.display().to_string()
+                                };
+                                let local = if up {
+                                    p.clone()
+                                } else {
+                                    std::path::Path::new(&dest).join(&name)
+                                };
+                                match verify_transfer(&target, &remote, &local, &stop) {
+                                    Ok(()) => ok += 1,
+                                    Err(e) => errors.push(format!("{name}: {e}")),
+                                }
+                            } else {
+                                ok += 1;
+                            }
+                        }
                         Err(e) => errors.push(format!("{name}: {e}")),
                     }
                 }
@@ -3320,6 +3357,26 @@ impl Session {
             // The eighteen named palettes, from the same table the terminal
             // build reads. The window turns a spec into CSS properties; the
             // terminal turns it into ratatui colours; neither owns it.
+            // The switches cian-tui keeps in its `T` menu and nowhere else.
+            // Runtime-only in both builds: they are answers about *this
+            // session*, and a verify that silently stayed on from last month
+            // would be a surprise on the first big upload.
+            "switches" => {
+                if let Some(v) = req.params["verify"].as_bool() {
+                    self.verify_transfers = v;
+                }
+                if let Some(v) = req.params["cloud"].as_bool() {
+                    // Process-wide in cian-core, because every bulk reader
+                    // asks it — the search, the checksum sweep, the duplicate
+                    // finder. One flag rather than a parameter threaded
+                    // through all of them.
+                    cian_core::cloud::set_include(v);
+                }
+                Ok(serde_json::json!({
+                    "verify": self.verify_transfers,
+                    "cloud": cian_core::cloud::include(),
+                }))
+            }
             "themes" => Ok(serde_json::json!({
                 "now": cian_lua::state_get("theme"),
                 "list": cian_core::theme::PRESETS
@@ -4226,6 +4283,39 @@ fn ai_in_background(
 fn ai_config() -> anyhow::Result<cian_ai::AiConfig> {
     cian_ai::AiConfig::from_lua(&cian_lua::load())
         .ok_or_else(|| anyhow::anyhow!("AI が設定されていません（init.lua の cian.ai{{…}}）"))
+}
+
+/// Read a transferred file back and compare it with what was sent.
+///
+/// cian-tui's own (`ssh.rs`), copied rather than re-invented: the local file
+/// is hashed here and the remote one is streamed through the same hasher, so
+/// nothing has to be downloaded twice to answer the question. An upload that
+/// arrived short is a success as far as SFTP is concerned, and this is the
+/// only thing that notices.
+fn verify_transfer(
+    target: &cian_scp::Target,
+    remote_path: &str,
+    local_path: &std::path::Path,
+    cancel: &std::sync::atomic::AtomicBool,
+) -> Result<(), String> {
+    use cian_core::attrs::{hash_file, HashKind, Hasher};
+    let kind = HashKind::Sha256;
+    let local = match hash_file(local_path, kind, cancel) {
+        Ok(Some(h)) => h,
+        Ok(None) => return Err("ベリファイを中止しました".into()),
+        Err(e) => return Err(format!("ベリファイ: 手元のファイルが読めません: {e}")),
+    };
+    let mut hasher = Hasher::new(kind);
+    if let Err(e) = cian_scp::remote_read(target, remote_path, cancel, &mut |b| hasher.update(b)) {
+        return Err(format!("ベリファイできません: {e}"));
+    }
+    let remote = hasher.finish();
+    if remote == local {
+        Ok(())
+    } else {
+        let short = |s: &str| s.chars().take(12).collect::<String>();
+        Err(format!("中身が違います — 手元 {}… ≠ 向こう {}…", short(&local), short(&remote)))
+    }
 }
 
 /// The two stacks moved together. Free-standing so the worker in `jobs.rs`
