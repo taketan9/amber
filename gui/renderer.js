@@ -114,7 +114,9 @@ function draw(which) {
     }
     root.querySelector('.crumb').textContent = pane.remote
         ? `${pane.remote}:${pane.cwd}`
-        : (pane.flat ? `${pane.flat} — ${pane.cwd}` : pane.cwd);
+        : pane.archive
+            ? `${pane.archive.split(/[\\/]/).pop()} の中`
+            : (pane.flat ? `${pane.flat} — ${pane.cwd}` : pane.cwd);
 
     const rows = root.querySelector('.rows');
     // Rebuilt whole. A listing is a few hundred rows and Chromium does not
@@ -720,6 +722,7 @@ const HELP = [
         ['Shift+D / Shift+U', '10行ずつ'],
         ['gg / G', '先頭 / 末尾'],
         ['Enter', 'ディレクトリへ入る / ファイルを読む / アーカイブの中へ'],
+        ['アーカイブの中で F3', '中のファイルを読む・直す。Ctrl+S で書き戻す'],
         ['Ctrl+Enter', 'ディレクトリは反対ペインへ / ファイルは既定のアプリで'],
         ['Backspace', '親ディレクトリへ'],
         ['z', '入力したパスへ移動'],
@@ -837,6 +840,9 @@ const HELP = [
         ['  :enc', '文字コードを変えて読み直す（引数なしで順に）'],
         ['  :ws / :ruler', '見えない文字 / 桁の目盛り'],
         ['  :s/古い/新しい/g', 'このファイルを置換'],
+        ['  :g/re/d  :v/re/d', '一致した行を削除 / 一致した行だけ残す'],
+        ['  :combine [n][!]', '次の行を連結（! は空白なし）'],
+        ['矩形', 'Alt+Shift+矢印 で選び、Alt+Shift+I/A/C/D で 左端/右端/置換/削除'],
         ['Ctrl+] / Ctrl+[', '見出し移動（メモ帳流でも使えます）'],
         ['  メモ帳流のとき', 'Ctrl+C/V/Z/F など Windows の手が効く'],
     ]],
@@ -1444,7 +1450,15 @@ async function lookInside() {
     if (viewer.opening || viewer.on) return;
     viewer.opening = true;
     try {
-        await openInEditor(which);
+        // Inside an archive the row names nothing on this disk, so the member
+        // is extracted first and read from there.
+        if (pane.remote) {
+            say('サーバ上のファイルはまだ開けません — c でこちらへ', true);
+        } else if (pane.archive) {
+            await openArchiveMember(which);
+        } else {
+            await openInEditor(which);
+        }
     } finally {
         viewer.opening = false;
     }
@@ -1517,6 +1531,16 @@ function makeEditor(monaco, text, lang) {
         monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyB,
         () => cmdBlame(),
     );
+    // The rectangle's verbs. Monaco selects one; these are what vim does to
+    // it, and they are the reason to select one at all.
+    viewer.ed.addCommand(monaco.KeyMod.Alt | monaco.KeyMod.Shift | monaco.KeyCode.KeyI,
+        () => blockEdit('insert'));
+    viewer.ed.addCommand(monaco.KeyMod.Alt | monaco.KeyMod.Shift | monaco.KeyCode.KeyA,
+        () => blockEdit('append'));
+    viewer.ed.addCommand(monaco.KeyMod.Alt | monaco.KeyMod.Shift | monaco.KeyCode.KeyC,
+        () => blockEdit('replace'));
+    viewer.ed.addCommand(monaco.KeyMod.Alt | monaco.KeyMod.Shift | monaco.KeyCode.KeyD,
+        () => blockEdit('delete'));
     viewer.ed.onDidChangeCursorPosition(drawViewFoot);
     } else {
     viewer.ed.updateOptions({ theme: editorTheme() });
@@ -1556,6 +1580,29 @@ async function openNth(at) {
     }
 }
 
+/// Reading a file that only exists inside an archive.
+///
+/// It is extracted first, because everything downstream — the viewer, the
+/// editor, the encoding switch — works on a path. Ctrl+S puts it back, and
+/// the engine remembers which member it came from: a temporary file with no
+/// idea where it came from is a file that can only be lost.
+const member = { on: false };
+
+async function openArchiveMember(which) {
+    const r = await ask('archiveview', { pane: which });
+    if (!r) return false;
+    member.on = true;
+    const at = { path: r.path, name: r.name };
+    // The listing is inside the archive, so the ordinary read cannot find the
+    // file; it is opened from the temporary by path instead.
+    const f = await ask('viewpath', { path: at.path });
+    if (!f) { member.on = false; return false; }
+    await showFile(f);
+    el.vName.textContent = `${at.name}（アーカイブの中）`;
+    el.vFoot.textContent = 'Ctrl+S でアーカイブに書き戻す   ·   Esc ×3 閉じる';
+    return true;
+}
+
 async function openInEditor(which) {
     const pane = state[which];
     const row = pane && pane.entries[pane.cursor];
@@ -1564,6 +1611,15 @@ async function openInEditor(which) {
     }
     const f = await ask('view', { pane: which });
     if (!f) return;
+    await showFile(f);
+}
+
+/// Put a file the engine has read into the editor.
+///
+/// Split out because two things reach here now — a file in the listing,
+/// and a member extracted from an archive — and the second was going to
+/// need a copy of all of it.
+async function showFile(f) {
 
     let monaco;
     try {
@@ -1639,6 +1695,10 @@ function setStyle(i, remember = true) {
         ex.defineEx('enc', 'enc', (_cm, params) => cmdEncoding((params.args || [])[0]));
         ex.defineEx('ws', 'ws', () => toggleWs());
         ex.defineEx('ruler', 'ruler', () => toggleRuler());
+        ex.defineEx('combine', 'combine', (_cm, p) => cmdCombine((p.args || []).join(' ') + (p.argString || '')));
+        // `:g/re/d` and `:v/re/d`, spelled as vim spells them.
+        ex.defineEx('global', 'g', (_cm, p) => runGlobal(p, false));
+        ex.defineEx('vglobal', 'v', (_cm, p) => runGlobal(p, true));
         // `]]` and `[[`, which monaco-vim does not have. `%` it does — it is
         // `moveToMatchedSymbol` and it works; the first version of this
         // replaced it with a worse one, which is what comes of adding a
@@ -1688,6 +1748,16 @@ async function hopSection(step) {
     viewer.ed.revealLineInCenter(to + 1);
 }
 
+/// `:g/re/d` from vim's command line. Only `d` is supported as the action,
+/// which is the one everybody means — `:g/re/s/…` is `:s` with a filter and
+/// that is a different command.
+function runGlobal(params, keep) {
+    const raw = (params.argString || (params.args || []).join(' ') || '').trim();
+    const m = raw.match(/^\/(.*)\/\s*d\s*$/);
+    if (!m) { say(':g/正規表現/d の形で書いてください', true); return; }
+    cmdLineFilter(m[1], keep);
+}
+
 function drawViewFoot() {
     // The list of names is not a file, so the footer must not offer to save
     // one — it applies a rename, and saying 保存 there would describe
@@ -1720,6 +1790,15 @@ function drawViewFoot() {
 async function saveFile() {
     if (!viewer.ed) return false;
     if (pair.on) { await savePair(); return true; }
+    if (member.on) {
+        const r = await ask('archivesave', { lines: viewer.ed.getValue().split(/\r?\n/) });
+        if (!r) return false;
+        viewer.base = viewer.ed.getModel().getAlternativeVersionId();
+        viewer.dirty = false;
+        drawViewFoot();
+        say(`${r.saved} を ${r.archive} に書き戻しました`);
+        return true;
+    }
     if (viewer.readOnly) { say('16進表示は保存できません', true); return false; }
     // The editor is holding a list of names rather than a file's contents.
     if (renameList.on) {
@@ -1749,6 +1828,7 @@ async function closeView(ask_first = true) {
     viewer.dirty = false;
     renameList.on = false;
     stopHex();
+    member.on = false;
     if (pair.ed) { pair.ed.dispose(); pair.ed = null; }
     pair.on = false;
     // Only when the door is being used, not when stepping between files.
@@ -2051,6 +2131,9 @@ const COMMANDS = [
     { name: 'ws', about: 'タブ・行末の空白などを見せる／隠す', run: toggleWs },
     { name: 'ruler', about: '桁の目盛りを出す／消す', run: toggleRuler },
     { name: 's', about: '開いているファイルを置換 s/古い/新しい/g', arg: 's/…/…/', run: cmdSubstitute },
+    { name: 'g', about: '一致した行を削除（:g/re/d）', arg: '正規表現', run: (a) => cmdLineFilter(a, false) },
+    { name: 'v', about: '一致した行だけ残す（:v/re/d）', arg: '正規表現', run: (a) => cmdLineFilter(a, true) },
+    { name: 'combine', about: '次の行を連結（:combine 3 で3行、:combine! は空白なし）', arg: '行数', optional: true, run: cmdCombine },
     { name: 'theme', about: '配色を選ぶ（T のメニューにも）', arg: '名前', optional: true, run: cmdTheme },
     { name: 'redraw', about: '画面を描き直す', run: () => { draw('left'); draw('right'); say('描き直しました'); } },
     { name: 'preview', about: 'カーソルのファイルを追って表示（もう一度で止める）', run: togglePreview },
@@ -2840,31 +2923,7 @@ async function cmdSearch(mode, needle) {
                     if (!plan) return;
                     if (!plan.changes.length) { say('変わる行がありません'); return; }
                     closeReport();
-                    show(`置換 ${spec}`,
-                        `${plan.changes.length} 行 / ${new Set(plan.changes.map((c) => c.path)).size} ファイル`
-                        + (plan.skipped.length ? `   飛ばした ${plan.skipped.length} 件` : ''),
-                        plan.changes.map((c) => ({
-                            n: String(c.line + 1),
-                            label: c.path.split(/[\\/]/).pop() + '  ' + c.before,
-                            sub: c.after,
-                        })),
-                        {
-                            foot: 'Enter 実行   Esc やめる',
-                            pick: async () => {
-                                closeReport();
-                                if (!await confirm(`${plan.changes.length} 行を置換します`,
-                                    `${new Set(plan.changes.map((c) => c.path)).size} ファイル — u では戻せません`)) {
-                                    say('やめました');
-                                    return;
-                                }
-                                const done = await ask('replaceapply', { changes: plan.changes });
-                                if (!done) return;
-                                await reread();
-                                const bits = [`${done.files} ファイル ${done.lines} 行を置換`];
-                                if (done.stale) bits.push(`${done.stale} 行は変わっていたので触らず`);
-                                say(bits.join('   '), done.errors.length > 0);
-                            },
-                        });
+                    showReplacePlan(spec, plan);
                 },
                 p: async () => {
                     const paths = rows.map((x) => x.path);
@@ -3580,6 +3639,131 @@ async function cmdSubstitute(spec) {
     }]);
     viewer.ed.pushUndoStop();
     say(`${r.changed} 箇所を置換しました`);
+}
+
+/// The replace plan, with each line kept or dropped one at a time.
+///
+/// **Everything starts checked.** The common case is "yes, all of them", and
+/// unchecking the exceptions is less work than checking the rest — which is
+/// the terminal build's reasoning and it is right. Space unchecks; the count
+/// on the header says how many are still going.
+function showReplacePlan(spec, plan) {
+    const picked = plan.changes.map(() => true);
+    const draw = () => {
+        const on = picked.filter(Boolean).length;
+        show(`置換 ${spec}`,
+            `${on} / ${plan.changes.length} 行   `
+            + `${new Set(plan.changes.map((c) => c.path)).size} ファイル`
+            + (plan.skipped.length ? `   飛ばした ${plan.skipped.length} 件` : ''),
+            plan.changes.map((c, i) => ({
+                n: (picked[i] ? '✓ ' : '  ') + (c.line + 1),
+                label: c.path.split(/[\\/]/).pop() + '  ' + c.before,
+                sub: c.after,
+                at: i,
+            })),
+            {
+                foot: 'Space 外す／戻す   a 全部   n 全部外す   Enter 実行   Esc やめる',
+                act: {
+                    ' ': () => { picked[report.at] = !picked[report.at]; keepPlace(draw); },
+                    a: () => { picked.fill(true); keepPlace(draw); },
+                    n: () => { picked.fill(false); keepPlace(draw); },
+                },
+                pick: async () => {
+                    const going = plan.changes.filter((_, i) => picked[i]);
+                    if (!going.length) { say('選ばれている行がありません', true); return; }
+                    closeReport();
+                    if (!await confirm(`${going.length} 行を置換します`,
+                        `${new Set(going.map((c) => c.path)).size} ファイル — u では戻せません`)) {
+                        say('やめました');
+                        return;
+                    }
+                    const done = await ask('replaceapply', { changes: going });
+                    if (!done) return;
+                    await reread();
+                    const bits = [`${done.files} ファイル ${done.lines} 行を置換`];
+                    if (done.stale) bits.push(`${done.stale} 行は変わっていたので触らず`);
+                    say(bits.join('   '), done.errors.length > 0);
+                },
+            });
+    };
+    draw();
+}
+
+/// Redraw a report without losing where the cursor was. `show` resets it, and
+/// a list that jumps to the top every time you tick a box is a list you cannot
+/// work down.
+function keepPlace(redraw) {
+    const at = report.at;
+    redraw();
+    report.at = Math.min(at, report.rows.length - 1);
+    drawReport();
+}
+
+/// `:g/re/d` and `:v/re/d` — drop or keep every matching line.
+///
+/// The one line operation that filters rather than transforms, and the one
+/// people reach for on a log: "everything except the heartbeats", once.
+async function cmdLineFilter(pattern, keep) {
+    if (!viewer.on || !viewer.ed) { say('先にファイルを開いてください', true); return; }
+    const lines = viewer.ed.getValue().split(/\r?\n/);
+    const r = await ask('grepdel', { lines, pattern, keep });
+    if (!r) return;
+    replaceAll(r.lines);
+    say(keep ? `${r.removed} 行を落として、一致した行だけ残しました` : `${r.removed} 行を削除しました`);
+}
+
+/// `:combine` — join the next line up, with a space or without.
+async function cmdCombine(spec) {
+    if (!viewer.on || !viewer.ed) { say('先にファイルを開いてください', true); return; }
+    const bang = /!$/.test(spec || '');
+    const count = Math.max(2, Number((spec || '').replace('!', '').trim()) || 2);
+    const lines = viewer.ed.getValue().split(/\r?\n/);
+    const at = viewer.ed.getPosition().lineNumber - 1;
+    const r = await ask('combine', { lines, at, count, space: !bang });
+    if (!r) return;
+    replaceAll(r.lines);
+    viewer.ed.setPosition({ lineNumber: at + 1, column: 1 });
+    say(`${r.joined} 行を連結しました`);
+}
+
+/// Put a whole new set of lines in, through the edit stack so `u` takes it
+/// back. Every line operation ends here, which is why it is one function.
+function replaceAll(lines) {
+    const model = viewer.ed.getModel();
+    viewer.ed.executeEdits('cian', [{
+        range: model.getFullModelRange(),
+        text: lines.join('\n'),
+    }]);
+    viewer.ed.pushUndoStop();
+}
+
+/// `Ctrl+Q` / `Alt+V` — a rectangle, and what can be done to one.
+///
+/// Monaco has rectangular *selection*; what it does not have is vim's verbs
+/// for it — `I` and `A` put text down the left or right edge of every line at
+/// once, which is the whole reason anybody selects a rectangle. Columns are
+/// display columns, so a line with a tab in it lines up the way it looks.
+async function blockEdit(what) {
+    if (!viewer.on || !viewer.ed) { say('先にファイルを開いてください', true); return; }
+    const sels = viewer.ed.getSelections() || [];
+    if (!sels.length) { say('矩形選択がありません', true); return; }
+    const top = Math.min(...sels.map((s) => s.startLineNumber)) - 1;
+    const bottom = Math.max(...sels.map((s) => s.endLineNumber)) - 1;
+    const left = Math.min(...sels.map((s) => Math.min(s.startColumn, s.endColumn))) - 1;
+    const right = Math.max(...sels.map((s) => Math.max(s.startColumn, s.endColumn))) - 1;
+    let text = '';
+    if (what !== 'delete') {
+        text = await askFor(
+            { insert: '左端に入れる文字', append: '右端に足す文字', replace: '置き換える文字' }[what],
+            '',
+        );
+        if (text === null) return;
+    }
+    const lines = viewer.ed.getValue().split(/\r?\n/);
+    const r = await ask('block', { lines, what, top, bottom, left, right, text });
+    if (!r) return;
+    replaceAll(r.lines);
+    say({ delete: '矩形を削除', insert: '左端に挿入', append: '右端に追加', replace: '矩形を置換' }[what]);
 }
 
 async function cmdDf() {

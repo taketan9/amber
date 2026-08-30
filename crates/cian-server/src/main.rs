@@ -66,6 +66,10 @@ struct PaneView {
     /// This side's tabs — one crumb each — and which is showing.
     tabs: Vec<String>,
     tab: usize,
+    /// The archive this pane is looking inside, if it is. The window needs it
+    /// for the same reason it needs `remote`: the rows name nothing on this
+    /// disk, so opening one has to go a different way.
+    archive: Option<String>,
     /// `user@host` when this pane is showing a server. The window needs it to
     /// know that Enter, `..` and `c` all mean something over the network.
     remote: Option<String>,
@@ -125,6 +129,7 @@ impl PaneView {
             tabs: Vec::new(),
             tab: 0,
             remote: pane.remote_view().map(|(host, _)| host.to_string()),
+            archive: pane.archive_view().map(|(a, _)| a.display().to_string()),
             entries: pane
                 .entries
                 .iter()
@@ -194,6 +199,11 @@ struct Session {
     /// Held for a later paste. Independent of the system clipboard, and of
     /// which pane is focused — that is the point of it.
     clip: Option<cian_core::clip::Clipboard>,
+    /// A member of an archive, opened by extracting it: which archive, which
+    /// member, and where the copy is. Kept so a save knows where to put it
+    /// back — a temporary file with no idea where it came from is a file that
+    /// can only be lost.
+    member: Option<(std::path::PathBuf, String, std::path::PathBuf)>,
     /// The right-hand file of a side-by-side comparison, when one is up.
     /// `open` holds the left; both are kept so a save on either goes back
     /// through the encoding that side arrived with.
@@ -254,6 +264,7 @@ impl Session {
             open: None,
             shown: None,
             pair: None,
+            member: None,
             hex: None,
             redo: Stack::default(),
             shells: Vec::new(),
@@ -1112,15 +1123,12 @@ impl Session {
                 if dest.exists() {
                     anyhow::bail!("{} はすでにあります", dest.display());
                 }
-                let stop = std::sync::atomic::AtomicBool::new(false);
-                let mut noop = |_: &cian_core::progress::Progress| {};
-                let mut ctl = cian_core::progress::Ctl { cancel: &stop, on_progress: &mut noop };
-                let report = match kind.as_str() {
-                    "tar" => cian_core::archive::create_tar(&paths, &dest, false, &mut ctl),
-                    "targz" => cian_core::archive::create_tar(&paths, &dest, true, &mut ctl),
+                let report = quietly(|ctl| match kind.as_str() {
+                    "tar" => cian_core::archive::create_tar(&paths, &dest, false, ctl),
+                    "targz" => cian_core::archive::create_tar(&paths, &dest, true, ctl),
                     _ => cian_core::archive::create_zip(
-                        &paths, &dest, req.params["password"].as_str(), &mut ctl),
-                };
+                        &paths, &dest, req.params["password"].as_str(), ctl),
+                });
                 self.undo.push(Undo::Created { path: dest.clone() });
                 let pane = self.pane_mut(&which)?;
                 pane.reload()?;
@@ -1137,11 +1145,8 @@ impl Session {
                     anyhow::bail!("{name} はアーカイブではありません");
                 }
                 let cwd = self.pane_mut(&which)?.cwd.clone();
-                let stop = std::sync::atomic::AtomicBool::new(false);
-                let mut noop = |_: &cian_core::progress::Progress| {};
-                let mut ctl = cian_core::progress::Ctl { cancel: &stop, on_progress: &mut noop };
-                let report = cian_core::archive::extract(
-                    &path, &[], &cwd, req.params["password"].as_str(), "", &mut ctl);
+                let report = quietly(|ctl| cian_core::archive::extract(
+                    &path, &[], &cwd, req.params["password"].as_str(), "", ctl));
                 let pane = self.pane_mut(&which)?;
                 pane.reload()?;
                 Ok(serde_json::json!({
@@ -2566,6 +2571,175 @@ impl Session {
                 pane.reload()?;
                 Ok(serde_json::json!({ "wrote": name }))
             }
+            // `:g/re/d` and `:v/re/d` — keep or drop every matching line.
+            //
+            // The one line operation that is a *filter* rather than a
+            // transform, and the one people reach for on a log: "everything
+            // except the heartbeats", in one command.
+            "grepdel" => {
+                let lines: Vec<String> = lines_of(req).unwrap_or_default();
+                let pattern = arg(req, "pattern");
+                let keep = req.params["keep"].as_bool().unwrap_or(false);
+                let re = regex::Regex::new(&pattern)
+                    .map_err(|e| anyhow::anyhow!("正規表現が読めません: {e}"))?;
+                let out: Vec<String> = lines
+                    .iter()
+                    .filter(|l| re.is_match(l) == keep)
+                    .cloned()
+                    .collect();
+                Ok(serde_json::json!({
+                    "lines": out,
+                    "removed": lines.len() - out.len(),
+                }))
+            }
+            // `:combine` — join lines onto one, with a space or without.
+            "combine" => {
+                let lines: Vec<String> = lines_of(req).unwrap_or_default();
+                let at = req.params["at"].as_u64().unwrap_or(0) as usize;
+                let count = (req.params["count"].as_u64().unwrap_or(2) as usize).max(2);
+                let space = req.params["space"].as_bool().unwrap_or(true);
+                if at >= lines.len() {
+                    anyhow::bail!("行がありません");
+                }
+                let end = (at + count).min(lines.len());
+                // Trimmed on the way in, because joining "foo   " to "  bar"
+                // with a space is three spaces nobody asked for.
+                let joined = lines[at..end]
+                    .iter()
+                    .map(|l| l.trim())
+                    .collect::<Vec<_>>()
+                    .join(if space { " " } else { "" });
+                let mut out = lines[..at].to_vec();
+                out.push(joined);
+                out.extend_from_slice(&lines[end..]);
+                Ok(serde_json::json!({ "lines": out, "joined": end - at }))
+            }
+            // Rectangular edits: cut, or put text down the left or right edge.
+            "block" => {
+                let lines: Vec<String> = lines_of(req).unwrap_or_default();
+                let b = cian_core::textops::Block {
+                    top: req.params["top"].as_u64().unwrap_or(0) as usize,
+                    bottom: req.params["bottom"].as_u64().unwrap_or(0) as usize,
+                    left: req.params["left"].as_u64().unwrap_or(0) as usize,
+                    right: req.params["right"].as_u64().unwrap_or(0) as usize,
+                };
+                let text = arg(req, "text");
+                use cian_core::textops as t;
+                let out = match req.params["what"].as_str().unwrap_or("") {
+                    "delete" => t::block_delete(&lines, b),
+                    "insert" => t::block_insert(&lines, b, &text),
+                    "append" => t::block_append(&lines, b, &text),
+                    "replace" => t::block_replace(&lines, b, &text),
+                    other => anyhow::bail!("知らない矩形操作: {other}"),
+                };
+                Ok(serde_json::json!({ "lines": out }))
+            }
+            // Read a file by path rather than by cursor.
+            //
+            // For a member extracted from an archive: the listing is inside
+            // the archive, so the row's path names nothing on this disk and
+            // the ordinary read cannot find it.
+            "viewpath" => {
+                let path = std::path::PathBuf::from(arg(req, "path"));
+                if !path.is_file() {
+                    anyhow::bail!("{} がありません", path.display());
+                }
+                let name = path
+                    .file_name()
+                    .map(|s| s.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                let len = std::fs::metadata(&path)?.len();
+                let shown = cian_core::viewer::view_file(&path)?;
+                let binary = matches!(shown.kind, cian_core::viewer::ViewKind::Binary);
+                let file = if binary { None } else { cian_core::grepedit::read_text(&path).ok() };
+                let reply = serde_json::json!({
+                    "name": name,
+                    "path": path.display().to_string(),
+                    "lines": shown.lines,
+                    "bytes": len,
+                    "binary": binary,
+                    "truncated": shown.truncated,
+                    "encoding": format!("{:?}", shown.encoding),
+                    "eol": format!("{:?}", shown.eol),
+                    "bom": shown.bom,
+                    "lang": if binary {
+                        None
+                    } else {
+                        cian_core::highlight::detect(&path).map(|l| format!("{l:?}"))
+                    },
+                });
+                if binary {
+                    self.open = None;
+                    self.hex = Some((path.clone(), shown.clone()));
+                } else {
+                    self.hex = None;
+                    self.open = file.map(|f| (path.clone(), f));
+                }
+                self.shown = Some((path, shown));
+                Ok(reply)
+            }
+            // Read a member of the archive being browsed.
+            //
+            // Extracted to a temporary file and opened from there, because
+            // everything downstream — the viewer, the editor, the encoding
+            // switch — works on a path. The temporary is remembered so a save
+            // knows which member it came from.
+            "archiveview" => {
+                let which = req.params["pane"].as_str().unwrap_or("left").to_string();
+                let (archive, sub) = {
+                    let pane = self.pane_mut(&which)?;
+                    let Some((a, s)) = pane.archive_view() else {
+                        anyhow::bail!("アーカイブの中ではありません");
+                    };
+                    (a.to_path_buf(), s.to_string())
+                };
+                let (_, name, is_dir) = self.selected(&which)?;
+                if is_dir {
+                    anyhow::bail!("{name} はディレクトリです");
+                }
+                let member = format!("{sub}{name}");
+                let dir = std::env::temp_dir().join(format!("cian-arc-{}", std::process::id()));
+                std::fs::create_dir_all(&dir)?;
+                let report = quietly(|ctl| cian_core::archive::extract(
+                    &archive, std::slice::from_ref(&member), &dir, None, &sub, ctl));
+                if report.ok == 0 {
+                    anyhow::bail!("{name} を取り出せませんでした");
+                }
+                let at = dir.join(&name);
+                self.member = Some((archive, member, at.clone()));
+                Ok(serde_json::json!({ "path": at.display().to_string(), "name": name }))
+            }
+            // Put an edited member back into the archive it came from.
+            //
+            // Rebuilt rather than patched: a zip is a container with an index,
+            // and rewriting one entry in place is how archives get corrupted.
+            // cian-core's `zip_modify` writes a fresh one, which is slower and
+            // is the only version that is safe to interrupt.
+            "archivesave" => {
+                let Some((archive, member, at)) = self.member.clone() else {
+                    anyhow::bail!("アーカイブから開いたファイルがありません");
+                };
+                // The window sends what it is holding, and that is written to
+                // the temporary before it is packed. Relying on something else
+                // having written the temporary already is how a save reports
+                // success and repacks the file it extracted a moment ago —
+                // which is exactly what the first version did.
+                if let Some(lines) = lines_of(req) {
+                    let original = cian_core::grepedit::read_text(&at)?;
+                    let file = cian_core::grepedit::TextFile { lines, ..original };
+                    cian_core::grepedit::write_text(&at, &file)?;
+                }
+                let prefix = member.rsplit_once('/').map(|(h, _)| format!("{h}/")).unwrap_or_default();
+                let report = quietly(|ctl| cian_core::archive::zip_modify(
+                    &archive, std::slice::from_ref(&member), &[], std::slice::from_ref(&at), &prefix, ctl));
+                if !report.errors.is_empty() {
+                    anyhow::bail!("{}", report.errors.join(" / "));
+                }
+                Ok(serde_json::json!({
+                    "saved": member,
+                    "archive": archive.file_name().map(|s| s.to_string_lossy().into_owned()),
+                }))
+            }
             // Leave a flat listing and go back to the directory it came from.
             "leaveflat" => {
                 let which = req.params["pane"].as_str().unwrap_or("left").to_string();
@@ -3005,4 +3179,17 @@ fn lines_of(req: &Request) -> Option<Vec<String>> {
 /// nobody meant and every filesystem accepts.
 fn arg(req: &Request, key: &str) -> String {
     req.params[key].as_str().unwrap_or("").trim().to_string()
+}
+
+/// Run an archive operation with a progress handle that reports to nobody.
+///
+/// The four archive calls all want a `Ctl`, and none of them has anywhere to
+/// report: they answer in the time it takes to answer, so there is no bar to
+/// feed. Passed in rather than returned, because a `Ctl` borrows the flag and
+/// the closure it was built from and cannot outlive either.
+fn quietly<T>(f: impl FnOnce(&mut cian_core::progress::Ctl) -> T) -> T {
+    let stop = std::sync::atomic::AtomicBool::new(false);
+    let mut noop = |_: &cian_core::progress::Progress| {};
+    let mut ctl = cian_core::progress::Ctl { cancel: &stop, on_progress: &mut noop };
+    f(&mut ctl)
 }
