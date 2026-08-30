@@ -125,6 +125,27 @@ impl Shell {
         })
     }
 
+    pub fn is_logging(&self) -> bool {
+        self.session.lock().map(|s| s.is_logging()).unwrap_or(false)
+    }
+
+    pub fn log_path(&self) -> Option<std::path::PathBuf> {
+        self.session.lock().ok().and_then(|s| s.log_path())
+    }
+
+    pub fn start_log(&self, at: &std::path::Path) -> anyhow::Result<()> {
+        self.session
+            .lock()
+            .map_err(|_| anyhow::anyhow!("シェルに触れません"))?
+            .start_log(at)
+    }
+
+    pub fn stop_log(&self) {
+        if let Ok(s) = self.session.lock() {
+            s.stop_log();
+        }
+    }
+
     pub fn alive(&self) -> bool {
         self.session.lock().map(|mut s| s.is_alive()).unwrap_or(false)
     }

@@ -123,6 +123,7 @@ function draw(which) {
     // Rebuilt whole. A listing is a few hundred rows and Chromium does not
     // notice; the moment it does, this is where a windowed list goes.
     const frag = document.createDocumentFragment();
+    rows.classList.toggle('icons', viewMode === 'icons');
     pane.entries.forEach((row, i) => {
         const div = document.createElement('div');
         div.className = 'row'
@@ -132,10 +133,28 @@ function draw(which) {
         const name = document.createElement('span');
         name.className = 'name';
         name.textContent = row.parent ? '..' : row.name;
-        const len = document.createElement('span');
-        len.className = 'size';
-        len.textContent = size(row);
-        div.append(name, len);
+        if (viewMode === 'icons') {
+            const g = document.createElement('span');
+            g.className = 'glyph';
+            g.textContent = glyphFor(row);
+            div.append(g, name);
+        } else if (viewMode === 'details') {
+            const len = document.createElement('span');
+            len.className = 'size';
+            len.textContent = size(row);
+            const w = document.createElement('span');
+            w.className = 'when';
+            w.textContent = when(row);
+            const cl = document.createElement('span');
+            cl.className = 'cloud';
+            cl.textContent = row.cloud ? '☁' : '';
+            div.append(name, cl, len, w);
+        } else {
+            const len = document.createElement('span');
+            len.className = 'size';
+            len.textContent = size(row);
+            div.append(name, len);
+        }
         div.addEventListener('mousedown', () => {
             state.focus = which;
             pane.cursor = i;
@@ -277,9 +296,24 @@ async function clearMarksAndFilter() {
     say('マークとフィルタを解除しました');
 }
 
+/// How many tiles sit on one visual row of the icon grid, measured off the
+/// live layout — the grid is `auto-fill` and only the browser knows.
+function iconCols() {
+    const grid = el[state.focus].querySelector('.rows');
+    const tiles = grid.children;
+    if (tiles.length < 2) return 1;
+    const top = tiles[0].offsetTop;
+    let n = 1;
+    while (n < tiles.length && tiles[n].offsetTop === top) n += 1;
+    return n;
+}
+
 function move(delta) {
     const pane = state[state.focus];
     if (!pane || !pane.entries.length) return;
+    // In the icon grid, a step up or down is a visual row, not a file — the
+    // keys follow the eyes.
+    if (viewMode === 'icons' && Math.abs(delta) === 1) delta *= iconCols();
     const last = pane.entries.length - 1;
     pane.cursor = Math.min(last, Math.max(0, pane.cursor + delta));
     draw(state.focus);
@@ -297,7 +331,9 @@ async function enter() {
     // opening one locally would look for a directory that is not here.
     if (pane.remote) {
         if (row.parent) { await remoteStep({ up: true }); return; }
-        if (!row.is_dir) { say('サーバ上のファイルはまだ開けません — c でこちらへ', true); return; }
+        // A file opens — downloaded and read, Ctrl+S uploads it back. Enter
+        // means "read it" on a server the same as it does on this disk.
+        if (!row.is_dir) { await lookInside(); return; }
         await remoteStep({});
         return;
     }
@@ -580,6 +616,46 @@ const LOOKS = [
     ['terminal', '端末譲り'],
 ];
 
+/// How the listing is laid out: the terminal build's `:view`, which it
+/// could only ask for — ":view icons" in a terminal answers "window only",
+/// because this is the feature a window exists to have.
+const VIEWS = ['classic', 'details', 'icons'];
+let viewMode = 'classic';
+
+function setView(mode, remember = true) {
+    if (!VIEWS.includes(mode)) { say(`${mode}? — :view details | icons | classic`, true); return; }
+    viewMode = mode;
+    draw('left');
+    draw('right');
+    if (remember) ask('remember', { key: 'gui_view', value: mode });
+}
+
+/// What an icon tile shows for a file. Deliberately coarse: a dozen kinds a
+/// glance can tell apart, not a catalogue. Anything unknown is a plain page,
+/// which is honest — the name below it is the real information.
+function glyphFor(row) {
+    if (row.parent) return '↩';
+    if (row.is_dir) return '📁';
+    const ext = (row.name.match(/\.([a-z0-9]+)$/i) || [, ''])[1].toLowerCase();
+    if (/^(png|jpe?g|gif|webp|bmp|svg|avif|ico)$/.test(ext)) return '🖼️';
+    if (/^(zip|tar|gz|tgz|7z|rar|jar)$/.test(ext)) return '📦';
+    if (/^(pdf)$/.test(ext)) return '📕';
+    if (/^(md|txt|log)$/.test(ext)) return '📝';
+    if (/^(rs|js|ts|py|lua|c|h|cpp|go|java|sh|bat|ps1|toml|ya?ml|json|html|css)$/.test(ext)) return '📜';
+    if (/^(xlsx?|csv)$/.test(ext)) return '📊';
+    if (/^(docx?|pptx?)$/.test(ext)) return '📄';
+    if (/^(mp[34]|wav|mov|mkv|flac|m4a)$/.test(ext)) return '🎞️';
+    return '📄';
+}
+
+/// A modified time, the way a listing shows one.
+function when(row) {
+    if (!row.modified) return '';
+    const d = new Date(row.modified * 1000);
+    const p = (n) => String(n).padStart(2, '0');
+    return `${String(d.getFullYear()).slice(2)}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
 /// Which look is showing, and it *is* written down now.
 ///
 /// The question was open for months because the answer looked expensive:
@@ -768,6 +844,7 @@ const HELP = [
         ['← → / Ctrl+h / Ctrl+l', '左 / 右のペインにフォーカス'],
         ['Shift+H / Shift+L', '同じ（端末版と同じ綴り）'],
         ['F5', '読み直す'],
+        [':view', '一覧の見せ方 — details（列つき） / icons（タイル） / classic'],
         ['Ctrl+= / Ctrl+- / Ctrl+0', '文字を大きく / 小さく / 元に戻す'],
     ]],
     ['探す', [
@@ -825,6 +902,8 @@ const HELP = [
         ['Enter / Backspace', 'サーバの中を移動'],
         ['c', '反対ペインへ — 立っている側でアップロードか転送かが決まる'],
         ['a / A / r / d', 'サーバ上でも同じキー（削除はゴミ箱なし＝戻せません）'],
+        ['Enter / F3', 'サーバのファイルを開く — Ctrl+S でサーバへ書き戻す'],
+        ['Ctrl+V / ドロップ', 'ローカルのファイルをアップロード'],
         [':local', 'サーバを閉じてローカルへ戻る'],
         ['枠が変わります', 'サーバを表示しているペインは色の違う枠になります'],
     ]],
@@ -839,6 +918,8 @@ const HELP = [
         ['Esc', 'ファイルへ戻る（Esc 2回でシェルへ渡る）'],
         ['Shift+PgUp / PgDn', '流れた出力を遡る'],
         [':!コマンド', 'シェルで実行 — % 選択、%f ファイル、%d ディレクトリ'],
+        ['Ctrl+Shift+Enter / :snip', '保存したコマンドを選んでシェルへ（cian.snippets）'],
+        [':vi / :vim / :nvim', 'そのエディタを新しいシェルタブで開く'],
         [':each コマンド', 'マーク各ファイルに実行 — {} がパス'],
         ['F9 / F10', 'シェルのタブを開く / 閉じる（パネルにいるとき）'],
         ['F1 / F2', '前 / 次のシェルタブ'],
@@ -849,6 +930,9 @@ const HELP = [
         ['Ctrl+Shift+矢印', '分割の境界を動かす'],
         ['Ctrl+S  /  :sync', '全ペインに同時入力（同じコマンドを4台へ）'],
         ['F12  /  :zoom', 'シェルパネルを広げる／戻す'],
+        ['Shift+F12', 'いまのペインだけを表示／分割に戻す'],
+        [':sessionlog', 'シェルの写しをファイルに取る（もう一度で止める）'],
+        ['ドラッグで選択', '放した瞬間にクリップボードへ'],
         [':preview', 'カーソルのファイルを追って表示（もう一度で止める）'],
         ['@  /  :macro', 'マクロを実行 ── レイアウトどおりに分割して開きます'],
     ]],
@@ -1134,6 +1218,8 @@ document.addEventListener('keydown', (e) => {
     // Shift+H / Shift+L cross the panes, as in the terminal build.
     else if (k === 'H') focusPane('left');
     else if (k === 'L') focusPane('right');
+    else if (k === 'ArrowLeft' && !e.altKey && viewMode === 'icons') { const p = state[state.focus]; p.cursor = Math.max(0, p.cursor - 1); draw(state.focus); }
+    else if (k === 'ArrowRight' && !e.altKey && viewMode === 'icons') { const p = state[state.focus]; p.cursor = Math.min(p.entries.length - 1, p.cursor + 1); draw(state.focus); }
     else if (k === 'ArrowLeft' && !e.altKey) focusPane('left');
     else if (k === 'h' && e.ctrlKey) focusPane('left');
     else if (k === 'ArrowRight' && !e.altKey) focusPane('right');
@@ -1170,6 +1256,7 @@ document.addEventListener('keydown', (e) => {
     else if (k === 'S') cmdSshPicker();
     else if (k === '@') cmdMacros();
     else if (k === 'F12') zoomShell();
+    else if (k === 'Enter' && e.ctrlKey && e.shiftKey) cmdSnippets();
     else if ((k === '=' || k === '+') && (e.ctrlKey || e.metaKey)) { setFont(FONT.at + 1); say(`文字の大きさ ${FONT.at}px`); }
     else if (k === '-' && (e.ctrlKey || e.metaKey)) { setFont(FONT.at - 1); say(`文字の大きさ ${FONT.at}px`); }
     else if (k === '0' && (e.ctrlKey || e.metaKey)) { setFont(15); say('文字の大きさを戻しました'); }
@@ -1219,8 +1306,11 @@ document.addEventListener('keydown', (e) => {
     else if ((k === 'c' || k === 'x') && (e.ctrlKey || e.metaKey) && state[state.focus].remote) {
         say('サーバ上のファイルはクリップボードに持てません — c で転送してください', true);
     }
+    // Pasting into a server pane uploads what the register holds. The
+    // register's paths never travel to the window — the engine owns both
+    // halves of the gesture.
     else if (((k === 'v' && (e.ctrlKey || e.metaKey)) || k === 'y') && state[state.focus].remote) {
-        say('サーバへの貼り付けはまだです', true);
+        uploadHeld();
     }
     else if (k === 'c' && (e.ctrlKey || e.metaKey)) hold('copy');
     else if (k === 'x' && (e.ctrlKey || e.metaKey)) hold('cut');
@@ -1509,7 +1599,7 @@ async function lookInside() {
         // Inside an archive the row names nothing on this disk, so the member
         // is extracted first and read from there.
         if (pane.remote) {
-            say('サーバ上のファイルはまだ開けません — c でこちらへ', true);
+            await openRemoteMember(which);
         } else if (pane.archive) {
             await openArchiveMember(which);
         } else {
@@ -1645,6 +1735,24 @@ async function openNth(at) {
 /// the engine remembers which member it came from: a temporary file with no
 /// idea where it came from is a file that can only be lost.
 const member = { on: false };
+
+/// A file on the server: downloaded, opened, and Ctrl+S uploads it back.
+/// The same shape as an archive member, for the same reason — everything
+/// downstream works on a path.
+const remoteMember = { on: false };
+
+async function openRemoteMember(which) {
+    say('落としています…');
+    const r = await ask('remoteview', { pane: which });
+    if (!r) return false;
+    remoteMember.on = true;
+    const f = await ask('viewpath', { path: r.path });
+    if (!f) { remoteMember.on = false; return false; }
+    await showFile(f);
+    el.vName.textContent = `${r.name}（サーバ上）`;
+    el.vFoot.textContent = 'Ctrl+S でサーバへ書き戻す   ·   Esc ×3 閉じる';
+    return true;
+}
 
 async function openArchiveMember(which) {
     const r = await ask('archiveview', { pane: which });
@@ -1852,6 +1960,16 @@ function drawViewFoot() {
 async function saveFile() {
     if (!viewer.ed) return false;
     if (pair.on) { await savePair(); return true; }
+    if (remoteMember.on) {
+        say('サーバへ送っています…');
+        const r = await ask('remotesave', { lines: viewer.ed.getValue().split(/\r?\n/) });
+        if (!r) return false;
+        viewer.base = viewer.ed.getModel().getAlternativeVersionId();
+        viewer.dirty = false;
+        drawViewFoot();
+        say(`${r.saved} をサーバへ書き戻しました`);
+        return true;
+    }
     if (member.on) {
         if (!member.writable) { say('tar への書き戻しはまだです', true); return false; }
         const r = await ask('archivesave', { lines: viewer.ed.getValue().split(/\r?\n/) });
@@ -1895,6 +2013,7 @@ async function closeView(ask_first = true) {
     el.vRead.hidden = true;
     el.vRead.replaceChildren();
     member.on = false;
+    remoteMember.on = false;
     if (pair.ed) { pair.ed.dispose(); pair.ed = null; }
     pair.on = false;
     // Only when the door is being used, not when stepping between files.
@@ -2176,6 +2295,7 @@ const COMMANDS = [
     { name: 'discard', about: '作業ツリーの変更を破棄', run: () => cmdVcs('discard') },
     { name: 'dup', alias: ['duplicate', 'dedup'], about: '中身が同じファイルを探す', run: cmdDedup },
     { name: 'redo', about: 'u で取り消した操作をやり直す', run: redo },
+    { name: 'view', alias: ['grid', 'icons', 'details', 'finder', 'classic'], about: '一覧の見せ方 — :view details | icons | classic', arg: 'details / icons / classic', optional: true, run: cmdView },
     { name: 'shell', about: 'シェルパネルを開く（Shift+J でも）', run: openShell },
     { name: 'remote', about: 'このペインでサーバを開く（SFTP）', run: cmdConnect },
     { name: 'ssh', about: '同じ（:remote の別名）', run: cmdConnect },
@@ -2191,6 +2311,8 @@ const COMMANDS = [
     { name: 'bookmark', about: 'いまの場所を登録する', arg: '名前', optional: true, run: cmdBookmark },
     { name: 'macro', about: 'マクロを実行（@ でも）', run: cmdMacros },
     { name: 'sync', about: 'シェル: 全ペインに同時入力（Ctrl+S でも）', run: cmdSync },
+    { name: 'snip', alias: ['snippet'], about: '保存したコマンドをシェルへ（Ctrl+Shift+Enter でも）', run: cmdSnippets },
+    { name: 'sessionlog', alias: ['log2'], about: 'シェルの写しをファイルに取る／止める', run: cmdShellLog },
     { name: 'zoom', about: 'シェルパネルを広げる／戻す（F12 でも）', run: zoomShell },
     { name: 'df', about: 'ディスクの空き容量', run: cmdDf },
     { name: 'wc', about: '行／単語／バイト数', run: cmdWc },
@@ -2200,6 +2322,7 @@ const COMMANDS = [
     { name: 'copyto', about: '指定した場所へコピー', arg: '行き先', run: (a) => cmdTo('copyto', a) },
     { name: 'moveto', about: '指定した場所へ移動', arg: '行き先', run: (a) => cmdTo('moveto', a) },
     { name: 'edit', about: '外部エディタで開く（$EDITOR）', run: cmdEditExternal },
+    { name: 'vi', alias: ['vim', 'nvim'], about: 'そのエディタを新しいシェルタブで開く', run: cmdEditorTab },
     { name: 'stat', about: '属性（:attr と同じ）', run: cmdAttr },
     { name: 'blame', about: '各行を最後に変えた人（開いているファイル）', run: cmdBlame },
     { name: 'enc', about: '開いているファイルの文字コードを変えて読み直す', arg: 'utf8 / sjis / utf16le / utf16be', optional: true, run: cmdEncoding },
@@ -2707,6 +2830,17 @@ async function remoteStep(opts) {
     say(r.path);
 }
 
+async function uploadHeld() {
+    const which = state.focus;
+    say('アップロード中…');
+    const r = await ask('uploadclip', { pane: which });
+    if (!r) return;
+    state[which] = r;
+    draw(which);
+    if (r.errors.length) say(r.errors.join('  /  '), true);
+    else say(`${r.ok} 件をアップロードしました`);
+}
+
 async function transfer() {
     const which = state.focus;
     const other = which === 'left' ? 'right' : 'left';
@@ -2916,6 +3050,12 @@ async function commandLine(initial = '') {
     const name = at < 0 ? text : text.slice(0, at);
     const arg = at < 0 ? '' : text.slice(at + 1).trim();
     const cmd = findCommand(name);
+    if (cmd && cmd.name !== name) {
+        // Called by an alias: the spelling used is information (`:icons` is
+        // `:view icons`, `:nvim` names its editor), so it rides along.
+        await runCommand(cmd, arg, name);
+        return;
+    }
     if (!cmd) {
         // Named, not "unknown command": the name typed is the one thing the
         // person can compare against the list.
@@ -2925,7 +3065,7 @@ async function commandLine(initial = '') {
     await runCommand(cmd, arg);
 }
 
-async function runCommand(cmd, arg) {
+async function runCommand(cmd, arg, invokedAs) {
     let a = arg;
     // Only where there is no sensible default, and only where there is no
     // sensible *nothing*: `:theme` with no name shows the list, which is a
@@ -2937,7 +3077,7 @@ async function runCommand(cmd, arg) {
         if (a === null) return;
     }
     try {
-        await cmd.run(a);
+        await cmd.run(a, invokedAs);
     } catch (e) {
         say(String(e.message || e), true);
     }
@@ -3512,6 +3652,19 @@ async function cmdDedup() {
     show('中身が同じファイル', `${r.groups.length} 組`, rows, { foot: 'Esc 閉じる' });
 }
 
+/// `:view`, and the terminal build's aliases for it — `:icons` on its own
+/// means `:view icons`, which is how fingers actually type it.
+async function cmdView(arg, invokedAs) {
+    const mode = (arg || invokedAs || '').trim();
+    const map = { grid: 'icons', finder: 'details' };
+    if (!mode || mode === 'view') {
+        setView(VIEWS[(VIEWS.indexOf(viewMode) + 1) % VIEWS.length]);
+    } else {
+        setView(map[mode] || mode);
+    }
+    say(`表示: ${viewMode}`);
+}
+
 async function redo() {
     const r = await ask('redo', {});
     if (!r) return;
@@ -4037,6 +4190,25 @@ async function cmdTo(what, dest) {
     say(`${r.count} 件を ${r.dest} へ`);
 }
 
+/// `:vi` / `:vim` / `:nvim` — the file, in that editor, in a new shell tab.
+/// The tab is the terminal build's arrangement: the editor gets a real
+/// terminal, and closing it brings you back to the files rather than to a
+/// desktop window somewhere.
+async function cmdEditorTab(_arg, invokedAs) {
+    const pane = state[state.focus];
+    const row = pane.entries[pane.cursor];
+    if (!row || row.parent || row.is_dir) { say('ファイルを選んでください', true); return; }
+    const editor = invokedAs && invokedAs !== 'vi' ? invokedAs : 'vi';
+    if (!term.on) await openShell();
+    const t = await ask('shelltab', { pane: state.focus, ...shellSize() });
+    if (!t) return;
+    takeShell(t);
+    term.focused = true;
+    el.shell.classList.add('on');
+    await ask('run', { pane: state.focus, line: `${editor} %f` });
+    say(`${editor} で開きました（F10 でタブごと閉じる）`);
+}
+
 async function cmdEditExternal() {
     const r = await ask('editexternal', { pane: state.focus });
     if (!r) return;
@@ -4086,6 +4258,48 @@ function showPreview() {
         // The keys stay with the listing: this is a preview, not an opening.
         viewer.on = false;
     }, 250);
+}
+
+/// `Ctrl+Shift+Enter` — the commands init.lua keeps, sent to the shell.
+///
+/// `enter: false` types the line and stops, which is for the commands worth
+/// reading before running — the terminal build's distinction, kept.
+/// `:sessionlog` — everything this pane shows, teed to a file. On again to
+/// stop. The frame turns carmine while it runs, which is the terminal
+/// build's signal: a recorded shell should not look like an unrecorded one.
+async function cmdShellLog() {
+    if (!term.on) { say('シェルが開いていません', true); return; }
+    const d = new Date();
+    const p = (n) => String(n).padStart(2, '0');
+    const name = `cian-shell-${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}.log`;
+    const r = await ask('shelllog', { pane: state.focus, name });
+    if (!r) return;
+    el.shell.classList.toggle('logging', !!r.logging);
+    if (r.logging) say(`記録中: ${r.logging}`);
+    else say(`記録を止めました: ${r.stopped || ''}`);
+}
+
+async function cmdSnippets() {
+    const r = await ask('snippets', {});
+    if (!r) return;
+    if (!r.rows.length) { say('スニペットがありません（init.lua の cian.snippets）'); return; }
+    show('スニペット', `${r.rows.length} 件`, r.rows.map((x) => ({
+        n: x.enter ? '⏎' : '',
+        label: x.name,
+        sub: x.cmd,
+        cmd: x.cmd,
+        enter: x.enter,
+    })), {
+        foot: 'Enter シェルへ送る   Esc 閉じる',
+        pick: async (row) => {
+            closeReport();
+            if (!term.on) await openShell();
+            await ask('shellinput', { text: row.cmd + (row.enter ? '\n' : '') });
+            term.focused = true;
+            el.shell.classList.add('on');
+            say(row.enter ? `${row.label} を実行` : `${row.label} を置きました — Enter で実行`);
+        },
+    });
 }
 
 async function cmdSync() {
@@ -4218,6 +4432,20 @@ function shellBytes(e) {
     return null;
 }
 
+/// Select text in the shell with the mouse; it is on the clipboard the
+/// moment the button comes up. The terminal build's gesture — a terminal
+/// where selecting is copying is a terminal you never reach for Cmd+C in.
+document.addEventListener('mouseup', () => {
+    if (!term.on) return;
+    const sel = window.getSelection();
+    if (!sel || sel.isCollapsed) return;
+    if (!el.sPanes.contains(sel.anchorNode)) return;
+    const text = sel.toString();
+    if (!text.trim()) return;
+    navigator.clipboard.writeText(text);
+    say(`${text.length} 文字をコピー`);
+});
+
 document.addEventListener('keydown', (e) => {
     if (!term.on || !term.focused) return;
     // Esc hands the keys back to the files. A shell wants Esc too — vi lives
@@ -4234,6 +4462,16 @@ document.addEventListener('keydown', (e) => {
     // wants them, and a panel with no way to open a second tab is a panel you
     // leave to run one thing.
     if (e.key === 'F9' && !e.shiftKey) { e.stopPropagation(); e.preventDefault(); shellTab(); return; }
+    if (e.key === 'F12' && e.shiftKey) {
+        e.stopPropagation();
+        e.preventDefault();
+        ask('shellpanezoom', {}).then((r) => {
+            if (!r) return;
+            takeShell(r);
+            say(r.zoom ? 'このペインだけを表示（Shift+F12 で戻る）' : '分割に戻しました');
+        });
+        return;
+    }
     if (e.key === 'F12') {
         e.stopPropagation();
         e.preventDefault();
@@ -4346,8 +4584,20 @@ for (const which of ['left', 'right']) {
         // A drop lands in `pane.cwd`, and on a remote pane that is still the
         // *local* directory from before the connection — the files would move
         // somewhere real and invisible, which is the worst combination.
-        if (dest.remote) { say('サーバへのドロップはまだです', true); return; }
         const names = paths.map((p) => p.split(/[\\/]/).pop());
+        if (dest.remote) {
+            if (!await confirm(`${paths.length} 件を ${dest.remote} へアップロードします`, names.join('\n'))) {
+                say('やめました');
+                return;
+            }
+            const up = await ask('uploadpaths', { pane: which, paths });
+            if (!up) return;
+            state[which] = up;
+            draw(which);
+            if (up.errors.length) say(up.errors.join('  /  '), true);
+            else say(`${up.ok} 件をアップロードしました`);
+            return;
+        }
         if (!await confirm(`${paths.length} 件を ${dest.cwd} へ移動します`, names.join('\n'))) {
             say('やめました');
             return;
@@ -4469,6 +4719,7 @@ async function recall() {
         const px = Number(s.font);
         if (px >= FONT.min && px <= FONT.max) setFont(px, false);
     }
+    if (s.view && VIEWS.includes(s.view)) setView(s.view, false);
 }
 
 recall();

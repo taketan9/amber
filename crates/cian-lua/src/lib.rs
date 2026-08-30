@@ -329,7 +329,7 @@ struct Builder {
     /// Precondition facts about the environment, fed to every AI prompt.
     ai_context: Vec<String>,
     /// Command snippets declared with `cian.snippets{...}`.
-    snippets: Vec<Snippet>,
+    pub snippets: Vec<Snippet>,
     errors: Vec<String>,
 }
 

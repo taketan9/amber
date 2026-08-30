@@ -159,6 +159,31 @@ html, body {
 }
 .row .name { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; }
 .row .size { flex: 0 0 auto; color: var(--dim); font-variant-numeric: tabular-nums; }
+/* details — the extra columns. Date fixed-width so the column reads as a
+   column; a ☁ mark for a file that is listed but lives in the cloud. */
+.row .when { flex: 0 0 11ch; text-align: right; color: var(--dim); font-variant-numeric: tabular-nums; }
+.row .cloud { flex: 0 0 2ch; text-align: center; color: var(--dim); }
+
+/* icons — a grid of tiles. The listing turns sideways: the same rows, the
+   same cursor, laid out as a wall. Made for a mouse and a quick visual scan;
+   the keys still work because Up and Down step by one visual row. */
+.rows.icons {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(7.5rem, 1fr));
+  gap: 2px; padding: 6px; align-content: start;
+}
+.rows.icons .row {
+  flex-direction: column; height: auto; padding: 10px 4px 8px;
+  border-radius: 8px; text-align: center; gap: 2px;
+}
+.rows.icons .row .glyph { font-size: 2rem; line-height: 1.2; }
+.rows.icons .row .name {
+  width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: .85em; direction: initial;
+}
+.rows.icons .row .size, .rows.icons .row .when { display: none; }
+.rows.icons .row.cursor { background: var(--accent-dim); }
+.pane.active .rows.icons .row.cursor { background: var(--accent); }
 .row.dir .name { color: var(--dir); }
 .row.marked .name { color: var(--mark); }
 .row.cursor { background: var(--accent-dim); }
@@ -208,6 +233,12 @@ html, body {
 /* Typing into four servers at once should not look like typing into one. */
 #shell.zoom { height: 92vh; }
 #shell.sync { border-top: 2px solid var(--mark); }
+/* Recording. The terminal build turns the frame carmine for the same
+   reason: a shell being written to a file must not look like one that
+   is not. */
+#shell.logging { border-top: 2px solid #b03a48; }
+#shell.logging .vhead { color: #b03a48; }
+.sgrid { user-select: text; cursor: text; }
 #shell.sync .vhead { color: var(--mark); }
 /* The panes of a split, placed where the engine says. Absolute rather than
    flex: the layout is a tree and the engine has already turned it into

@@ -160,6 +160,9 @@ impl PaneView {
 struct ShellTab {
     root: shell::Node,
     focus: u64,
+    /// Shift+F12 — this tab is showing only its focused pane, full size.
+    /// The others keep running; they are hidden, not paused.
+    zoom: bool,
     /// Type into every pane of this tab at once.
     ///
     /// The reason splits exist for a lot of people: four servers side by side
@@ -204,6 +207,10 @@ struct Session {
     /// Held for a later paste. Independent of the system clipboard, and of
     /// which pane is focused — that is the point of it.
     clip: Option<cian_core::clip::Clipboard>,
+    /// A file on the server, opened by downloading it: the connection, the
+    /// remote path, and where the copy is. Same shape and same reason as the
+    /// archive member below.
+    remote_member: Option<(cian_scp::Target, String, std::path::PathBuf)>,
     /// A member of an archive, opened by extracting it: which archive, which
     /// member, and where the copy is. Kept so a save knows where to put it
     /// back — a temporary file with no idea where it came from is a file that
@@ -270,6 +277,7 @@ impl Session {
             shown: None,
             pair: None,
             member: None,
+            remote_member: None,
             hex: None,
             redo: Stack::default(),
             shells: Vec::new(),
@@ -433,7 +441,14 @@ impl Session {
             return serde_json::json!({ "gone": true });
         };
         let mut places = Vec::new();
-        tab.root.places(0.0, 0.0, 1.0, 1.0, &mut places);
+        if tab.zoom {
+            // Zoomed: the focused pane is the whole panel and the rest are
+            // off screen. Sizing follows automatically, because sizes come
+            // from these boxes.
+            places.push((tab.focus, 0.0, 0.0, 1.0, 1.0));
+        } else {
+            tab.root.places(0.0, 0.0, 1.0, 1.0, &mut places);
+        }
         let panes: Vec<_> = places
             .iter()
             .filter_map(|(id, x, y, w, h)| {
@@ -956,10 +971,7 @@ impl Session {
             // become rows to mark and operate on with the keys already known.
             "panelize" => {
                 let which = req.params["pane"].as_str().unwrap_or("left").to_string();
-                let paths: Vec<std::path::PathBuf> = req.params["paths"]
-                    .as_array()
-                    .map(|a| a.iter().filter_map(|v| v.as_str()).map(std::path::PathBuf::from).collect())
-                    .unwrap_or_default();
+                let paths: Vec<std::path::PathBuf> = paths_of(req);
                 if paths.is_empty() {
                     anyhow::bail!("読み込むものがありません");
                 }
@@ -1294,7 +1306,7 @@ impl Session {
                 }
                 let cwd = self.pane_mut(&which)?.cwd.clone();
                 let id = self.new_shell(&cwd, rows, cols)?;
-                self.tabs.push(ShellTab { root: shell::Node::Leaf(id), focus: id, sync: false });
+                self.tabs.push(ShellTab { root: shell::Node::Leaf(id), focus: id, sync: false, zoom: false });
                 self.shell_at = self.tabs.len() - 1;
                 Ok(self.shell_reply())
             }
@@ -1395,6 +1407,37 @@ impl Session {
                 Ok(serde_json::json!({}))
             }
             // Type into every pane of this tab at once, or stop.
+            "shellpanezoom" => {
+                let Some(tab) = self.tabs.get_mut(self.shell_at) else {
+                    anyhow::bail!("シェルが開いていません");
+                };
+                tab.zoom = !tab.zoom;
+                let on = tab.zoom;
+                let mut reply = self.shell_reply();
+                reply["zoom"] = serde_json::json!(on);
+                Ok(reply)
+            }
+            // Write everything this pane shows (and will show) to a file.
+            "shelllog" => {
+                let name = arg(req, "name");
+                let dir = self.pane_cwd(req.params["pane"].as_str().unwrap_or("left"));
+                let Some(sh) = self.shell_now() else {
+                    anyhow::bail!("シェルが開いていません");
+                };
+                if sh.is_logging() {
+                    let was = sh.log_path();
+                    sh.stop_log();
+                    return Ok(serde_json::json!({
+                        "stopped": was.map(|p| p.display().to_string()),
+                    }));
+                }
+                if name.is_empty() {
+                    anyhow::bail!("ログの名前がありません");
+                }
+                let at = dir.join(name);
+                sh.start_log(&at)?;
+                Ok(serde_json::json!({ "logging": at.display().to_string() }))
+            }
             "shellsync" => {
                 let Some(tab) = self.tabs.get_mut(self.shell_at) else {
                     anyhow::bail!("シェルが開いていません");
@@ -1593,10 +1636,7 @@ impl Session {
             // between two folders anywhere else.
             "drop" => {
                 let which = req.params["pane"].as_str().unwrap_or("left").to_string();
-                let paths: Vec<std::path::PathBuf> = req.params["paths"]
-                    .as_array()
-                    .map(|a| a.iter().filter_map(|v| v.as_str()).map(std::path::PathBuf::from).collect())
-                    .unwrap_or_default();
+                let paths: Vec<std::path::PathBuf> = paths_of(req);
                 if paths.is_empty() {
                     anyhow::bail!("落とされたものがありません");
                 }
@@ -1650,10 +1690,7 @@ impl Session {
             // are not open and cannot be undone with `u`. Seeing each line
             // before and after is the only thing that makes it safe.
             "replaceplan" => {
-                let paths: Vec<std::path::PathBuf> = req.params["paths"]
-                    .as_array()
-                    .map(|a| a.iter().filter_map(|v| v.as_str()).map(std::path::PathBuf::from).collect())
-                    .unwrap_or_default();
+                let paths: Vec<std::path::PathBuf> = paths_of(req);
                 let spec = req.params["spec"].as_str().unwrap_or("");
                 let sub = cian_core::substitute::parse(spec).map_err(|e| anyhow::anyhow!(e))?;
                 let (changes, skipped) = cian_core::grepedit::plan(&paths, &sub);
@@ -1987,6 +2024,99 @@ impl Session {
                 reply["said"] = serde_json::json!(said);
                 Ok(reply)
             }
+            // Read a file that lives on the server: downloaded to a
+            // temporary and opened from there, exactly the archive-member
+            // arrangement — everything downstream works on a path, and the
+            // engine remembers where the copy came from so Ctrl+S can put it
+            // back. A temporary that has forgotten its origin can only be lost.
+            "remoteview" => {
+                let which = req.params["pane"].as_str().unwrap_or("left").to_string();
+                let Some(target) = self.remotes.get(&which).cloned() else {
+                    anyhow::bail!("このペインはサーバに繋がっていません");
+                };
+                let (rpath, name, is_dir) = self.selected(&which)?;
+                if is_dir {
+                    anyhow::bail!("{name} はディレクトリです");
+                }
+                let remote_path = rpath.display().to_string();
+                let dir = std::env::temp_dir().join(format!("cian-remote-{}", std::process::id()));
+                std::fs::create_dir_all(&dir)?;
+                let at = dir.join(&name);
+                let stop = std::sync::atomic::AtomicBool::new(false);
+                let mut noop = |_: u64, _: u64| {};
+                let mut ctl = cian_scp::Ctl { cancel: &stop, on_progress: &mut noop, limit_bps: None };
+                cian_scp::download(&target, &remote_path, &at, &mut ctl)?;
+                self.remote_member = Some((target, remote_path, at.clone()));
+                Ok(serde_json::json!({ "path": at.display().to_string(), "name": name }))
+            }
+            // Put the edited copy back where it came from.
+            "remotesave" => {
+                let Some((target, remote_path, at)) = self.remote_member.clone() else {
+                    anyhow::bail!("サーバから開いたファイルがありません");
+                };
+                if let Some(lines) = lines_of(req) {
+                    let original = cian_core::grepedit::read_text(&at)?;
+                    let file = cian_core::grepedit::TextFile { lines, ..original };
+                    cian_core::grepedit::write_text(&at, &file)?;
+                }
+                let stop = std::sync::atomic::AtomicBool::new(false);
+                let mut noop = |_: u64, _: u64| {};
+                let mut ctl = cian_scp::Ctl { cancel: &stop, on_progress: &mut noop, limit_bps: None };
+                cian_scp::upload(&target, &at, &remote_path, None, &mut ctl)?;
+                let name = remote_path.rsplit('/').next().unwrap_or(&remote_path).to_string();
+                Ok(serde_json::json!({ "saved": name }))
+            }
+            // Local files up to the pane's remote directory — what a paste or
+            // a desktop drop means when the pane is a server.
+            "uploadpaths" | "uploadclip" => {
+                let which = req.params["pane"].as_str().unwrap_or("left").to_string();
+                let Some(target) = self.remotes.get(&which).cloned() else {
+                    anyhow::bail!("このペインはサーバに繋がっていません");
+                };
+                let dest = {
+                    let pane = self.pane_mut(&which)?;
+                    pane.remote_view()
+                        .map(|(_, p)| p.to_string())
+                        .ok_or_else(|| anyhow::anyhow!("転送先が分かりません"))?
+                };
+                let paths: Vec<std::path::PathBuf> = if req.method == "uploadclip" {
+                    // The window never sees what the register holds; the
+                    // register is here.
+                    let held = self.clip.clone()
+                        .ok_or_else(|| anyhow::anyhow!("クリップボードは空です"))?;
+                    if !cian_core::clip::survives(held.op) {
+                        self.clip = None;
+                    }
+                    held.paths
+                } else {
+                    paths_of(req)
+                };
+                if paths.is_empty() {
+                    anyhow::bail!("送るものがありません");
+                }
+                let stop = std::sync::atomic::AtomicBool::new(false);
+                let (mut ok, mut errors) = (0usize, Vec::new());
+                for p in &paths {
+                    let name = p.file_name().map(|s| s.to_string_lossy().into_owned())
+                        .unwrap_or_else(|| p.display().to_string());
+                    let mut noop = |_: u64, _: u64| {};
+                    let mut ctl = cian_scp::Ctl { cancel: &stop, on_progress: &mut noop, limit_bps: None };
+                    match cian_scp::upload(&target, p, &cian_scp::remote_join(&dest, &name), None, &mut ctl) {
+                        Ok(_) => ok += 1,
+                        Err(e) => errors.push(format!("{name}: {e}")),
+                    }
+                }
+                // Re-list so the uploads appear where they landed.
+                let (resolved, entries) = cian_scp::list_dir(&target, &dest)?;
+                let label = format!("{}@{}", target.user, target.host);
+                let rows = remote_rows(&resolved, &entries);
+                let pane = self.pane_mut(&which)?;
+                pane.enter_remote(label, resolved, rows);
+                let mut reply = self.view(&which)?;
+                reply["ok"] = serde_json::json!(ok);
+                reply["errors"] = serde_json::json!(errors);
+                Ok(reply)
+            }
             "disconnect" => {
                 let which = req.params["pane"].as_str().unwrap_or("left").to_string();
                 self.remotes.remove(&which);
@@ -2012,6 +2142,7 @@ impl Session {
                 // number — and one key holding two meanings is a key that is
                 // wrong for somebody.
                 "font": cian_lua::state_get("gui_font"),
+                "view": cian_lua::state_get("gui_view"),
                 "theme": cian_lua::state_get("theme"),
                 "where": cian_lua::config_read_path("state.toml")
                     .map(|p| p.display().to_string()),
@@ -2019,7 +2150,7 @@ impl Session {
             "remember" => {
                 let key = req.params["key"].as_str().unwrap_or("");
                 let value = req.params["value"].as_str().unwrap_or("");
-                if !matches!(key, "gui_look" | "gui_editor" | "gui_font") {
+                if !matches!(key, "gui_look" | "gui_editor" | "gui_font" | "gui_view") {
                     anyhow::bail!("覚えられない項目です: {key}");
                 }
                 cian_lua::state_set(key, value);
@@ -2297,7 +2428,7 @@ impl Session {
                     anyhow::bail!("{want} にはペインがありません");
                 };
                 let focus = made[0];
-                self.tabs.push(ShellTab { root, focus, sync: mac.sync });
+                self.tabs.push(ShellTab { root, focus, sync: mac.sync, zoom: mac.zoom });
                 self.shell_at = self.tabs.len() - 1;
                 let mut reply = self.shell_reply();
                 reply["name"] = serde_json::json!(mac.name);
@@ -2845,6 +2976,15 @@ impl Session {
                 cian_core::proc::open_with_desktop(&url)?;
                 Ok(serde_json::json!({ "opened": url }))
             }
+            // The snippets init.lua declares, for Ctrl+Shift+Enter.
+            "snippets" => {
+                let cfg = cian_lua::load();
+                Ok(serde_json::json!({
+                    "rows": cfg.snippets.iter().map(|sn| serde_json::json!({
+                        "name": sn.name, "cmd": sn.cmd, "enter": sn.enter,
+                    })).collect::<Vec<_>>(),
+                }))
+            }
             // The open file as HTML, for the preview.
             //
             // Rendered here because the reading is here — the same parse the
@@ -3325,4 +3465,14 @@ fn zip_writable(archive: &std::path::Path) -> bool {
         archive.extension().and_then(|e| e.to_str()).map(|e| e.to_ascii_lowercase()).as_deref(),
         Some("zip" | "jar")
     )
+}
+
+/// The `paths` argument. Four handlers take one — panelize, drop, the
+/// desktop-drop upload and its clipboard twin — and all four mean the same
+/// list of local files chosen in the window.
+fn paths_of(req: &Request) -> Vec<std::path::PathBuf> {
+    req.params["paths"]
+        .as_array()
+        .map(|a| a.iter().filter_map(|v| v.as_str()).map(std::path::PathBuf::from).collect())
+        .unwrap_or_default()
 }
