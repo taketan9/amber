@@ -13,13 +13,16 @@ const { Engine } = require('./engine');
 
 let engine = null;
 
-function createWindow() {
+/// The frame's colour before the page paints, matched to the saved look so
+/// the window does not flash the wrong ground on the way up. It was a fixed
+/// dark — right for a dark theme and exactly wrong for 白磁, the default.
+const GROUNDS = { hakuji: '#f7f8f8', inei: '#14110f', terminal: '#0c0c0c' };
+
+function createWindow(ground) {
     const win = new BrowserWindow({
         width: 1200,
         height: 800,
-        // The listing is dark before the stylesheet loads either way; without
-        // this the frame flashes white on the way up.
-        backgroundColor: '#11131a',
+        backgroundColor: ground,
         title: 'cian',
         webPreferences: {
             preload: path.join(__dirname, 'preload.js'),
@@ -73,7 +76,7 @@ function installMenu() {
     ]));
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
     installMenu();
     // The first plain argument is where to start; anything beginning with a
     // dash belongs to Chromium and may turn up anywhere in the line. Taking
@@ -92,7 +95,18 @@ app.whenReady().then(() => {
             return { error: String(e.message || e) };
         }
     });
-    const win = createWindow();
+    // One quick question before the frame exists: which ground was saved.
+    // Bounded, because a window that waits on a wedged engine is worse than a
+    // window that flashes.
+    let ground = GROUNDS.hakuji;
+    try {
+        const s = await Promise.race([
+            engine.call('settings', {}),
+            new Promise((_, no) => setTimeout(() => no(new Error('slow')), 1500)),
+        ]);
+        ground = GROUNDS[s && s.look] || ground;
+    } catch { /* the default ground */ }
+    const win = createWindow(ground);
     // The engine's unasked lines go straight to the window. Nothing here
     // interprets them; a progress count is the renderer's business.
     engine.onEvent = (msg) => {
@@ -100,7 +114,7 @@ app.whenReady().then(() => {
     };
 
     app.on('activate', () => {
-        if (BrowserWindow.getAllWindows().length === 0) createWindow();
+        if (BrowserWindow.getAllWindows().length === 0) createWindow(ground);
     });
 });
 

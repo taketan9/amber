@@ -11,11 +11,18 @@ const el = {
     left: document.querySelector('[data-pane="left"]'),
     right: document.querySelector('[data-pane="right"]'),
     status: document.getElementById('status'),
+    stBadge: document.getElementById('st-badge'),
+    stChips: document.getElementById('st-chips'),
+    stMsg: document.getElementById('st-msg'),
+    stShell: document.getElementById('st-shell'),
     ask: document.getElementById('ask'),
     find: document.getElementById('find'),
     findQ: document.getElementById('find-q'),
     findHits: document.getElementById('find-hits'),
     findFoot: document.getElementById('find-foot'),
+    fbar: document.getElementById('fbar'),
+    fInput: document.getElementById('f-input'),
+    fCount: document.getElementById('f-count'),
     shell: document.getElementById('shell'),
     sTabs: document.getElementById('s-tabs'),
     sTitle: document.getElementById('s-title'),
@@ -44,9 +51,22 @@ let running = null;
 /// Nothing in cian reaches the disk without passing through here: the terminal
 /// build's whole promise is that a slip costs nothing, and a front end that
 /// quietly skipped the asking would not be the same program.
-function confirm(head, body) {
+function confirm(head, body, choices = {}) {
     el.ask.querySelector('.head').textContent = head;
     el.ask.querySelector('.body').textContent = body;
+    const yesBtn = el.ask.querySelector('[data-answer="yes"]');
+    // The plain answer can be renamed per question — a transfer's Enter means
+    // "skip what already exists", a delete's means "to the trash" — and the
+    // stronger variants ride on their own letter, as the terminal build has
+    // them: `a` is the "I really mean it" key, `r` renames on the way.
+    yesBtn.textContent = `${choices.yes ?? '実行'}  (Enter)`;
+    const extras = choices.extras ?? [];
+    for (const x of extras) {
+        const b = document.createElement('button');
+        b.dataset.answer = x.key;
+        b.textContent = `${x.label}  (${x.key})`;
+        yesBtn.before(b);
+    }
     el.ask.hidden = false;
     // The focus goes where Enter goes.
     //
@@ -55,21 +75,28 @@ function confirm(head, body) {
     // so it was not protecting anything. All it did was put a ring around
     // やめる while the key labelled (Enter) did 実行, which reads as the
     // opposite of what happens. Being asked at all is the protection.
-    el.ask.querySelector('[data-answer="yes"]').focus();
+    yesBtn.focus();
     return new Promise((resolve) => {
         const done = (answer) => {
             el.ask.hidden = true;
             el.ask.removeEventListener('click', onClick);
             document.removeEventListener('keydown', onKey, true);
+            for (const b of el.ask.querySelectorAll('.buttons button')) {
+                if (b.dataset.answer !== 'yes' && b.dataset.answer !== 'no') b.remove();
+            }
+            yesBtn.textContent = '実行  (Enter)';
             resolve(answer);
         };
         const onClick = (e) => {
             const a = e.target.dataset && e.target.dataset.answer;
-            if (a) done(a === 'yes');
+            if (a === 'yes') done(true);
+            else if (a === 'no') done(false);
+            else if (a) done(a);
         };
         const onKey = (e) => {
-            if (e.key === 'Escape') { e.stopPropagation(); done(false); }
-            else if (e.key === 'Enter') { e.stopPropagation(); done(true); }
+            if (e.key === 'Escape' || e.key === 'n') { e.stopPropagation(); done(false); }
+            else if (e.key === 'Enter' || e.key === 'y') { e.stopPropagation(); done(true); }
+            else if (extras.some((x) => x.key === e.key)) { e.stopPropagation(); done(e.key); }
             else if (e.key !== 'Tab') { e.stopPropagation(); }
         };
         el.ask.addEventListener('click', onClick);
@@ -78,20 +105,92 @@ function confirm(head, body) {
     });
 }
 
+/// The transient half of the status line. The chips beside it are rebuilt by
+/// drawStatus(); this is the one thing that changes because something was
+/// *said* rather than because something *is*.
+const status = { msg: '', bad: false };
+
 function say(text, bad = false) {
-    el.status.textContent = text;
-    el.status.classList.toggle('bad', bad);
+    status.msg = text;
+    status.bad = bad;
+    drawStatus();
     // Every state change in this program passes through here on its way to
     // saying what happened, which makes it the one place the hint bar can be
     // kept honest without threading a call through eighty functions.
     drawHints();
 }
 
-/// Bytes, in the width a listing can spare. Directories show nothing rather
-/// than `0`, which is a number that means "we did not look".
+/// Free space per pane, fetched when the pane lands somewhere new. Cached by
+/// path: the status line redraws on every keystroke and a statvfs per `j`
+/// would be a disk question asked two hundred times for one answer.
+const disk = { left: { at: null, v: null }, right: { at: null, v: null } };
+
+async function freshenDisk(which) {
+    const pane = state[which];
+    const d = disk[which];
+    if (!pane || pane.remote || pane.cwd === d.at) return;
+    d.at = pane.cwd;
+    try {
+        // Straight through the bridge, not ask(): a pane that cannot answer
+        // (an archive, a listing mid-change) is a chip that stays blank, not
+        // a dialog.
+        d.v = await window.cian.call('df', { pane: which });
+    } catch { d.v = null; }
+    drawStatus();
+}
+
+/// The terminal build's status row (render.rs draw_status), chip for chip:
+/// badge → counts → marks → the file under the cursor → the filter → the
+/// disk → the running operation → the message. The badge and the message are
+/// never dropped; the chips clip from the left (CSS does the dropping).
+function drawStatus() {
+    const which = state.focus;
+    const pane = state[which];
+    // The badge: which surface has the keys, and in what mode.
+    const mode = term.on && term.focused ? ['S', '']
+        : visual.on ? [which === 'left' ? 'L' : 'R', ' VISUAL']
+        : filter.on ? [which === 'left' ? 'L' : 'R', ' FILTER']
+        : [which === 'left' ? 'L' : 'R', ''];
+    el.stBadge.textContent = mode[0] + mode[1];
+    el.stBadge.className = mode[1] === ' VISUAL' ? 'visual' : mode[1] === ' FILTER' ? 'filter' : '';
+    const chips = [];
+    const chip = (cls, text) => {
+        const s = document.createElement('span');
+        s.className = cls;
+        s.textContent = text;
+        chips.push(s);
+    };
+    if (pane) {
+        chip('n', `${pane.entries.length} 件`);
+        if (pane.marked > 0) chip('mk', `マーク ${pane.marked}`);
+        const row = pane.entries[pane.cursor];
+        if (row && !row.parent) chip('cur', row.name);
+        if (pane.filter) chip('flt', `フィルタ /${pane.filter} (${pane.entries.length} 件)`);
+    }
+    const d = disk[which]?.v;
+    if (d && d.total > 0) {
+        const usedPct = (d.total - d.available) / d.total;
+        chip(`disk${usedPct >= 0.95 ? ' crit' : usedPct >= 0.8 ? ' warn' : ''}`,
+            `空き ${human(d.available)} / ${human(d.total)}`);
+    }
+    if (running) {
+        chip('op', `↻ ${running.verb} ${running.done ?? 0} / ${running.total}`);
+    }
+    el.stChips.replaceChildren(...chips);
+    el.stMsg.textContent = status.msg ? `◂ ${status.msg}` : '';
+    el.stMsg.classList.toggle('bad', status.bad);
+    // The active shell's own title on the right, the terminal build's rule:
+    // suppressed while a message is showing — the message wins the space.
+    el.stShell.textContent = !status.msg && term.on ? el.sTitle.textContent : '';
+}
+
+/// Bytes, in the width a listing can spare. A directory shows `—` as the
+/// terminal build has it — a dash is "not a number here", where a blank reads
+/// as a cell that failed to load. `..` alone shows nothing.
 function size(row) {
-    if (row.is_dir || row.parent) return '';
-    const u = ['B', 'K', 'M', 'G', 'T'];
+    if (row.parent) return '';
+    if (row.is_dir) return '—';
+    const u = ['B', 'K', 'M', 'G', 'T', 'P', 'E'];
     let n = row.len, i = 0;
     while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
     return (i === 0 ? n : n.toFixed(n < 10 ? 1 : 0)) + u[i];
@@ -137,17 +236,30 @@ function draw(which) {
     const frag = document.createDocumentFragment();
     rows.classList.toggle('icons', viewMode === 'icons');
     rows.classList.toggle('details', viewMode === 'details');
-    // The column header, which is what makes a details list a table rather
-    // than a listing with extra words on it. Clicking one sorts by it, as it
-    // does everywhere else this arrangement appears.
+    rows.classList.toggle('classic', viewMode === 'classic');
+    // The columns that fit, decided by the pane's real width — the terminal
+    // build's progressive drop (render.rs: the date needs ~52 columns, the
+    // size ~34), translated through the half-width cell of the current size.
+    const ch = FONT.at / 2;
+    root.classList.toggle('no-when', viewMode !== 'details' && root.clientWidth < 52 * ch);
+    root.classList.toggle('no-size', viewMode !== 'details' && root.clientWidth < 34 * ch);
+    // The ☁ column only where something is actually in the cloud, as the
+    // terminal build allocates it — two blank cells on every row otherwise.
+    root.classList.toggle('no-cloud', !pane.entries.some((e) => e.cloud));
+    // The column header, in classic and details both — the terminal build
+    // draws one in every list view, and a table without its sort marker is a
+    // table you have to remember about. Clicking a heading sorts by it.
     const head = root.querySelector('.dhead');
-    head.hidden = viewMode !== 'details';
-    if (viewMode === 'details' && !head.dataset.built) {
-        head.dataset.built = '1';
-        for (const [cls, label, key] of [
-            ['glyph', '', null], ['name', '名前', 'name'], ['cloud', '', null],
-            ['size', 'サイズ', 'size'], ['kind', '種類', 'ext'], ['when', '更新日時', 'date'],
-        ]) {
+    head.hidden = viewMode === 'icons';
+    if (!head.hidden && head.dataset.built !== viewMode) {
+        head.dataset.built = viewMode;
+        head.replaceChildren();
+        const cols = viewMode === 'details'
+            ? [['glyph', '', null], ['name', '名前', 'name'], ['cloud', '', null],
+               ['size', 'サイズ', 'size'], ['kind', '種類', 'ext'], ['when', '更新日時', 'date']]
+            : [['cloud', '', null], ['mark', '', null], ['glyph', '', null],
+               ['name', '名前', 'name'], ['size', 'サイズ', 'size'], ['when', '日時', 'date']];
+        for (const [cls, label, key] of cols) {
             const c = document.createElement('span');
             c.className = cls;
             c.textContent = label;
@@ -159,13 +271,15 @@ function draw(which) {
             head.append(c);
         }
     }
-    if (viewMode === 'details') {
+    if (!head.hidden) {
         // Which column the listing is actually sorted by. Explorer marks it,
         // and a table that does not is a table you have to remember about.
+        // The pane's own order, not a global — sorting is per pane, and a
+        // remembered "current sort" described the wrong pane after a Tab.
         for (const c of head.children) {
             c.textContent = c.textContent.replace(/ [↑↓]$/, '');
-            if (c.dataset.key && c.dataset.key === sortKey) {
-                c.textContent += sortDown ? ' ↓' : ' ↑';
+            if (c.dataset.key && c.dataset.key === pane.sort_key) {
+                c.textContent += pane.sort_reverse ? ' ↓' : ' ↑';
             }
         }
     }
@@ -173,6 +287,7 @@ function draw(which) {
         const div = document.createElement('div');
         div.className = 'row'
             + (row.is_dir ? ' dir' : '')
+            + kindClassOf(row)
             + (row.marked ? ' marked' : '')
             + (i === pane.cursor ? ' cursor' : '');
         const name = document.createElement('span');
@@ -205,10 +320,28 @@ function draw(which) {
             w.textContent = when(row);
             div.append(g, name, cl, len, kind, w);
         } else {
+            // Classic, in the terminal build's column order: mark, icon,
+            // name, then the numbers. The ● column is what makes ten marked
+            // rows readable at a glance — a colour on the name alone
+            // vanishes into whichever row is the cursor.
+            const mk = document.createElement('span');
+            mk.className = 'mark';
+            mk.textContent = row.marked ? '●' : '';
+            const g = document.createElement('span');
+            g.className = 'glyph';
+            g.textContent = iconFor(row);
+            const cl = document.createElement('span');
+            cl.className = 'cloud';
+            cl.textContent = row.cloud ? '☁' : '';
             const len = document.createElement('span');
             len.className = 'size';
             len.textContent = size(row);
-            div.append(name, len);
+            const w = document.createElement('span');
+            w.className = 'when';
+            w.textContent = when(row);
+            // The terminal build's column order: ☁, mark, icon, name, then
+            // the numbers.
+            div.append(cl, mk, g, name, len, w);
         }
         div.addEventListener('mousedown', () => {
             state.focus = which;
@@ -233,6 +366,12 @@ function draw(which) {
     // Keep the cursor on screen without yanking the view about.
     const at = rows.children[pane.cursor];
     if (at) at.scrollIntoView({ block: 'nearest' });
+
+    // The chip row follows every repaint — the counts, the marks and the
+    // name under the cursor are all things a repaint may have changed — and
+    // the disk chip refreshes itself only when the pane landed somewhere new.
+    drawStatus();
+    freshenDisk(which);
 }
 
 async function ask(method, params) {
@@ -324,12 +463,39 @@ async function operate(kind) {
     // Every name, not a summary. "12 件" tells you nothing about whether the
     // twelve are the ones you meant.
     const body = rows.map((r) => r.name).join('\n');
-    if (!await confirm(head, body)) {
+    // The terminal build's three answers. The plain yes *skips* what already
+    // exists — it used to overwrite, silently, which is the one outcome a
+    // confirmation exists to prevent. `a` overwrites on purpose; `r` renames
+    // a single item on the way over.
+    const answer = kind === 'delete'
+        ? await confirm(head, body, { yes: 'ゴミ箱へ', extras: [{ key: 'a', label: '完全削除' }] })
+        : await confirm(head, body, {
+            yes: `${verb}（同名はスキップ）`,
+            extras: [
+                { key: 'a', label: '上書き' },
+                ...(rows.length === 1 ? [{ key: 'r', label: '名前を変えて' }] : []),
+            ],
+        });
+    if (!answer) {
         say('やめました');
         return;
     }
-
-    const started = await ask(kind, { pane: which });
+    if (answer === 'r') {
+        // A single-item move/copy can be renamed on the way, seeded with the
+        // name it arrived with.
+        const name = await askFor(`${verb}先の名前`, rows[0].name);
+        if (!name) { say('やめました'); return; }
+        const r = await ask('transferas', {
+            src: rows[0].path, dest: dest.cwd, name, move: kind === 'move',
+        });
+        if (r) { say(`${verb} → ${name}`); await reread(); }
+        return;
+    }
+    const started = await ask(kind, {
+        pane: which,
+        conflict: answer === 'a' ? 'overwrite' : 'skip',
+        mode: answer === 'a' ? 'permanent' : 'trash',
+    });
     if (!started) return;
     running = { op: started.op, kind, verb, total: started.count };
     say(`${verb}中… 0 / ${started.count}`);
@@ -558,15 +724,10 @@ async function toggleHidden() {
 /// took two presses to leave `name`, because the first one only reversed it.
 const SORTS = [['name', '名前', 'n'], ['size', 'サイズ', 's'],
                ['date', '日付', 'd'], ['ext', '拡張子', 'e']];
-let sortKey = 'name';
-let sortDown = false;
-
 async function applySort(key) {
     const which = state.focus;
     const r = await ask('sort', { pane: which, key });
     if (!r) return;
-    sortKey = r.by;
-    sortDown = !!r.reverse;
     state[which] = r.pane;
     draw(which);
     say(`並び: ${r.by}${r.reverse ? ' ↓' : ' ↑'}`);
@@ -579,19 +740,21 @@ const filter = { on: false };
 
 function startFilter() {
     filter.on = true;
-    el.find.hidden = false;
-    el.findQ.value = '';
-    el.findQ.placeholder = 'この一覧を絞り込み（もう一度 / で下を探す）';
-    el.findHits.replaceChildren();
-    el.findFoot.textContent = '';
-    el.findQ.focus();
+    el.fbar.hidden = false;
+    // Seeded with what is already narrowing this pane, as the terminal build
+    // seeds its box — reopening the filter to adjust it should not clear it.
+    el.fInput.value = state[state.focus]?.filter ?? '';
+    el.fCount.textContent = '';
+    el.fInput.focus();
+    drawHints();
 }
 
 function endFilter(keep) {
     filter.on = false;
-    el.find.hidden = true;
-    el.findQ.placeholder = '/ で絞り込み';
+    el.fbar.hidden = true;
+    el.fInput.blur();
     if (!keep) applyFilter('');
+    drawHints();
 }
 
 async function applyFilter(text) {
@@ -600,7 +763,9 @@ async function applyFilter(text) {
     if (!next) return;
     state[which] = next;
     draw(which);
-    say(text ? `絞り込み: ${text} — ${next.entries.length} 件` : `${next.entries.length} 件`);
+    const n = next.entries.length;
+    el.fCount.textContent = `${n} 件`;
+    say(text ? `絞り込み: ${text} — ${n} 件` : `${n} 件`);
 }
 
 /// The file finder: `//` opens it, typing narrows it, Enter goes there.
@@ -713,6 +878,18 @@ function paintPalette(t) {
         '--accent-dim': t.accent_dim,
         '--on-accent': t.on_accent,
         '--mark': t.mark,
+        // The file-kind colours, mapped as the terminal build maps its
+        // FilePalette from the same Spec (theme.rs from_spec): code=yellow,
+        // config=cyan, document=doc, image=magenta, media=cyan, archive=red,
+        // executable=green. Without these the 白磁 quiet tones stayed put
+        // under every one of the eighteen palettes.
+        '--k-code': t.yellow,
+        '--k-config': t.cyan,
+        '--k-doc': t.doc,
+        '--k-image': t.magenta,
+        '--k-media': t.cyan,
+        '--k-archive': t.red,
+        '--k-exec': t.green,
     };
     for (const [k, v] of Object.entries(set)) r.setProperty(k, v);
     document.documentElement.dataset.dark = t.light ? '' : '1';
@@ -721,7 +898,9 @@ function paintPalette(t) {
 function clearPalette() {
     const r = document.documentElement.style;
     for (const k of ['--bg', '--pane', '--pane-off', '--line', '--text', '--dim',
-        '--dir', '--accent', '--accent-dim', '--on-accent', '--mark']) r.removeProperty(k);
+        '--dir', '--accent', '--accent-dim', '--on-accent', '--mark',
+        '--k-code', '--k-config', '--k-doc', '--k-image', '--k-media',
+        '--k-archive', '--k-exec']) r.removeProperty(k);
     delete document.documentElement.dataset.dark;
 }
 
@@ -751,13 +930,20 @@ function setView(mode, remember = true) {
     if (remember) ask('remember', { key: 'gui_view', value: mode });
 }
 
+/// The lower-cased extension, or ''. Four functions asked this question with
+/// the same regex on four lines — the audit's "same line four times" — and
+/// four copies of one rule is how one of them starts answering differently.
+function extOf(row) {
+    return (row.name.match(/\.([a-z0-9]+)$/i) || [, ''])[1].toLowerCase();
+}
+
 /// What kind of thing this is, said in a word. Explorer's "種類" column —
 /// which is more useful than the extension it is derived from, because the
 /// extension is already right there in the name.
 function kindOf(row) {
     if (row.parent) return '';
     if (row.is_dir) return 'フォルダー';
-    const ext = (row.name.match(/\.([a-z0-9]+)$/i) || [, ''])[1].toLowerCase();
+    const ext = extOf(row);
     if (!ext) return 'ファイル';
     const known = {
         md: 'Markdown', txt: 'テキスト', log: 'ログ', json: 'JSON', toml: 'TOML',
@@ -776,13 +962,88 @@ function kindOf(row) {
     return known[ext] || `${ext.toUpperCase()} ファイル`;
 }
 
+/// What kind of file this is, as a row class — the terminal build's
+/// `kind_for` (render.rs), extension for extension. The class picks the
+/// name's colour from the palette; a dotfile recedes to muted.
+function kindClassOf(row) {
+    if (row.parent || row.is_dir) return '';
+    if (row.name.startsWith('.')) return ' k-muted';
+    const ext = extOf(row);
+    if (/^(rs|py|js|mjs|cjs|ts|tsx|jsx|go|c|h|cpp|cc|cxx|hpp|java|rb|php|lua|swift|kt|kts|vue|svelte|html|htm|css|scss|sass|less)$/.test(ext)) return ' k-code';
+    if (/^(toml|ini|conf|cfg|yaml|yml|json|jsonc|xml|env)$/.test(ext)) return ' k-config';
+    if (/^(md|markdown|txt|log|pdf|docx?|xlsx?|pptx?|rtf|csv|tsv)$/.test(ext)) return ' k-doc';
+    if (/^(png|jpe?g|gif|bmp|svg|webp|ico|tiff?)$/.test(ext)) return ' k-image';
+    if (/^(mp3|wav|flac|ogg|m4a|aac|mp4|mov|mkv|avi|webm|wmv)$/.test(ext)) return ' k-media';
+    if (/^(zip|tar|gz|7z|rar|bz2|xz|zst|tgz)$/.test(ext)) return ' k-archive';
+    if (/^(exe|msi|bat|cmd|ps1|sh|bash|zsh|fish|app|dll|so|dylib)$/.test(ext)) return ' k-exec';
+    return '';
+}
+
+/// The row's small leading icon — the terminal build's `icon_for`
+/// (render.rs), codepoint for codepoint, drawn from the bundled Nerd font.
+/// Written as escapes and copied from that table, not from memory: a glyph
+/// remembered wrong renders as some other picture, silently. The emoji set
+/// below stays for the icon tiles, where a big picture is the point.
+function iconFor(row) {
+    if (row.parent) return '\u{f062}';
+    if (row.is_dir) {
+        return {
+            '.git': '\u{e702}', '.github': '\u{f408}', node_modules: '\u{e5fa}',
+            src: '\u{f121}', tests: '\u{f0c3}', test: '\u{f0c3}',
+            docs: '\u{f02d}', doc: '\u{f02d}',
+            target: '\u{f1c6}', build: '\u{f1c6}', dist: '\u{f1c6}', out: '\u{f1c6}',
+            '.vscode': '\u{e7c5}', '.idea': '\u{e7c5}',
+        }[row.name] ?? '\u{f07b}';
+    }
+    const whole = {
+        'cargo.toml': '\u{e7a8}', 'cargo.lock': '\u{e7a8}',
+        dockerfile: '\u{f308}', '.dockerignore': '\u{f308}',
+        makefile: '\u{e779}', 'readme.md': '\u{f48a}', readme: '\u{f48a}',
+        license: '\u{f02d}', 'license.md': '\u{f02d}',
+        '.gitignore': '\u{f1d3}', '.gitattributes': '\u{f1d3}', '.gitmodules': '\u{f1d3}',
+        '.env': '\u{f462}', '.env.local': '\u{f462}',
+        'package.json': '\u{e60b}', 'package-lock.json': '\u{e60b}', 'yarn.lock': '\u{e60b}',
+    }[row.name.toLowerCase()];
+    if (whole) return whole;
+    const ext = extOf(row);
+    const map = {
+        rs: '\u{e7a8}', py: '\u{e73c}',
+        js: '\u{f2ee}', mjs: '\u{f2ee}', cjs: '\u{f2ee}',
+        ts: '\u{e628}', tsx: '\u{e628}', jsx: '\u{e628}', go: '\u{e627}',
+        c: '\u{e61e}', h: '\u{e61e}',
+        cpp: '\u{e61d}', cc: '\u{e61d}', cxx: '\u{e61d}', hpp: '\u{e61d}',
+        java: '\u{e738}', rb: '\u{e21e}', php: '\u{e608}', lua: '\u{e620}',
+        swift: '\u{e755}', kt: '\u{e634}', kts: '\u{e634}',
+        md: '\u{f48a}', markdown: '\u{f48a}',
+        json: '\u{e60b}', jsonc: '\u{e60b}', yaml: '\u{f481}', yml: '\u{f481}',
+        toml: '\u{f013}', ini: '\u{f013}', conf: '\u{f013}', cfg: '\u{f013}',
+        xml: '\u{f72d}', html: '\u{f13b}', htm: '\u{f13b}',
+        css: '\u{f13c}', scss: '\u{f13c}', sass: '\u{f13c}', less: '\u{f13c}',
+        vue: '\u{fd42}', svelte: '\u{e697}',
+        sh: '\u{f489}', bash: '\u{f489}', zsh: '\u{f489}', fish: '\u{f489}',
+        png: '\u{f1c5}', jpg: '\u{f1c5}', jpeg: '\u{f1c5}', gif: '\u{f1c5}',
+        bmp: '\u{f1c5}', svg: '\u{f1c5}', webp: '\u{f1c5}', ico: '\u{f1c5}',
+        tif: '\u{f1c5}', tiff: '\u{f1c5}',
+        mp3: '\u{f001}', wav: '\u{f001}', flac: '\u{f001}', ogg: '\u{f001}',
+        m4a: '\u{f001}', aac: '\u{f001}',
+        mp4: '\u{f03d}', mov: '\u{f03d}', mkv: '\u{f03d}', avi: '\u{f03d}',
+        webm: '\u{f03d}', wmv: '\u{f03d}',
+        pdf: '\u{f1c1}',
+        zip: '\u{f1c6}', tar: '\u{f1c6}', gz: '\u{f1c6}', '7z': '\u{f1c6}',
+        rar: '\u{f1c6}', bz2: '\u{f1c6}', xz: '\u{f1c6}',
+        txt: '\u{f0f6}', log: '\u{f0f6}',
+        exe: '\u{f013}', dll: '\u{f013}', so: '\u{f013}', dylib: '\u{f013}',
+    };
+    return map[ext] ?? '\u{f15c}';
+}
+
 /// What an icon tile shows for a file. Deliberately coarse: a dozen kinds a
 /// glance can tell apart, not a catalogue. Anything unknown is a plain page,
 /// which is honest — the name below it is the real information.
 function glyphFor(row) {
     if (row.parent) return '↩';
     if (row.is_dir) return '📁';
-    const ext = (row.name.match(/\.([a-z0-9]+)$/i) || [, ''])[1].toLowerCase();
+    const ext = extOf(row);
     if (/^(png|jpe?g|gif|webp|bmp|svg|avif|ico)$/.test(ext)) return '🖼️';
     if (/^(zip|tar|gz|tgz|7z|rar|jar)$/.test(ext)) return '📦';
     if (/^(pdf)$/.test(ext)) return '📕';
@@ -794,12 +1055,14 @@ function glyphFor(row) {
     return '📄';
 }
 
-/// A modified time, the way a listing shows one.
+/// A modified time, the way a listing shows one: `YYYY-MM-DD HH:MM`, the
+/// terminal build's format to the digit. It had a two-digit year here, which
+/// made the two listings answer the same question differently.
 function when(row) {
     if (!row.modified) return '';
     const d = new Date(row.modified * 1000);
     const p = (n) => String(n).padStart(2, '0');
-    return `${String(d.getFullYear()).slice(2)}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
 /// Which look is showing, and it *is* written down now.
@@ -815,9 +1078,13 @@ let look = 0;
 function setLook(i, remember = true) {
     look = (i + LOOKS.length) % LOOKS.length;
     const [value] = LOOKS[look];
+    // At the look's own base size, follow the new look's base — 端末譲り is
+    // 14px on purpose. An explicit Ctrl+= choice survives the switch.
+    const wasBase = FONT.at === baseFont();
     clearPalette();
     if (value) document.documentElement.dataset.look = value;
     else delete document.documentElement.dataset.look;
+    if (wasBase) setFont(baseFont(), false);
     if (viewer.ed) viewer.ed.updateOptions({ theme: editorTheme() });
     if (remember) ask('remember', { key: 'gui_look', value: LOOKS[look][0] || 'hakuji' });
 }
@@ -831,7 +1098,14 @@ function setPalette(name, remember = true) {
     paintPalette(t);
     palette = name;
     if (viewer.ed) viewer.ed.updateOptions({ theme: editorTheme() });
-    if (remember) ask('remember', { key: 'theme', value: name });
+    if (remember) {
+        ask('remember', { key: 'theme', value: name });
+        // Choosing a palette *is* choosing the window's ground. Left in
+        // place, a `gui_look` of 陰翳 from last month silently overrode this
+        // palette — and the terminal build's — on every startup after.
+        look = 0;
+        ask('remember', { key: 'gui_look', value: 'hakuji' });
+    }
 }
 
 /// Which named palette is on, or null when one of the window's own looks is.
@@ -856,9 +1130,19 @@ function hintsNow() {
             [':notepad', 'メモ帳ふうに'], ['?', 'キー一覧']];
     }
     if (term.on && term.focused) {
-        return [['Esc', 'ファイル'], ['Ctrl+C', '選択をコピー'], ['Shift+F1/F2', '前/次のペイン'],
+        // Dynamic, as the terminal build's shell hints are: ^C only while a
+        // drag selection exists (otherwise it names the gesture that makes
+        // one), the pane keys only while there is a second pane to go to.
+        const sel = window.getSelection();
+        const hasSel = sel && !sel.isCollapsed && el.sPanes.contains(sel.anchorNode);
+        const split = el.sPanes.querySelectorAll('.sgrid').length > 1;
+        return [['Esc', 'ファイル'],
+            hasSel ? ['Ctrl+C', '選択をコピー'] : ['ドラッグ選択', '= コピー'],
+            ...(split ? [['Shift+F1/F2', '前/次のペイン']] : []),
             ['F9', '新規タブ'], ['F10', 'タブを閉じる'], ['Shift+F8', '左右分割'],
-            ['Shift+F9', '上下分割'], ['Shift+F10', '分割を閉じる'], ['F12', 'ズーム']];
+            ['Shift+F9', '上下分割'],
+            ...(split ? [['Shift+F10', '分割を閉じる']] : []),
+            ['F12', 'ズーム']];
     }
     if (visual.on) {
         return [['j/k', '伸ばす'], ['a', '全選択'], ['gg/G', '先頭/末尾'],
@@ -908,6 +1192,12 @@ function drawHints() {
         s.append(b, document.createTextNode(what));
         return s;
     }));
+    // A narrow window gives up hints from just before the end, so the last
+    // one — `? ヘルプ`, the door to all the others — is never the one lost.
+    // It used to clip from the right, which dropped exactly that one first.
+    while (el.hints.scrollWidth > el.hints.clientWidth && el.hints.children.length > 2) {
+        el.hints.children[el.hints.children.length - 2].remove();
+    }
     measureFoot();
 }
 
@@ -973,10 +1263,10 @@ const SORT_MENU = {
     key: ',',
     foot: '↑↓ 選ぶ  Enter 決定  n s d e で直接  Esc 閉じる',
     stay: false,
-    at: () => SORTS.findIndex(([k]) => k === sortKey),
+    at: () => SORTS.findIndex(([k]) => k === (state[state.focus]?.sort_key ?? 'name')),
     rows: () => SORTS.map(([k, label, letter]) => ({
         label,
-        value: k === sortKey ? '●' : letter,
+        value: k === (state[state.focus]?.sort_key ?? 'name') ? '●' : letter,
         run: () => applySort(k),
     })),
     // The letters, so the picker is skippable once it is in the fingers —
@@ -1574,17 +1864,22 @@ document.addEventListener('keydown', (e) => {
     e.stopPropagation();
     if (e.key === 'Escape') { endFilter(false); say('絞り込みを解除'); }
     else if (e.key === 'Enter') { endFilter(true); }
-    else if (e.key === '/' && el.findQ.value === '') {
+    else if (e.key === '/' && el.fInput.value === '') {
         // Two slashes: this listing was not it, so look underneath.
         endFilter(true);
         openFinder();
     }
+    // The cursor still walks the narrowing list while the box is open — the
+    // terminal build's filter mode does the same, and it is what makes
+    // "type three letters, arrow down, Enter" one motion.
+    else if (e.key === 'ArrowDown') move(1);
+    else if (e.key === 'ArrowUp') move(-1);
     else return;
     e.preventDefault();
 }, true);
 
 document.addEventListener('input', (e) => {
-    if (filter.on && e.target === el.findQ) applyFilter(el.findQ.value);
+    if (filter.on && e.target === el.fInput) applyFilter(el.fInput.value);
 });
 
 /// The finder's own keys, while it is up.
@@ -1758,33 +2053,44 @@ document.addEventListener('keydown', (e) => {
     // cian's own keys first; anything not claimed here is left to Chromium,
     // which is what makes Ctrl+C and friends work without being written out.
     const k = e.key;
-    if (k === 'ArrowDown' || k === 'j') move(1);
-    else if (k === 'ArrowUp' || k === 'k') move(-1);
+    // Every bare letter is guarded with !ctrl && !meta. Four chords in this
+    // chain were dead because their plain letter matched first — and Ctrl+D
+    // *deleted*, because `d` did not care about its modifiers. An unclaimed
+    // chord now falls through to the report at the bottom instead of quietly
+    // running the letter it happens to contain.
+    const bare = !e.ctrlKey && !e.metaKey;
+    if (k === 'ArrowDown' || (k === 'j' && bare)) move(1);
+    else if (k === 'ArrowUp' || (k === 'k' && bare)) move(-1);
     else if (k === 'PageDown') move(20);
     else if (k === 'PageUp') move(-20);
-    else if (k === 'D') move(10);
-    else if (k === 'U') move(-10);
-    else if (k === 'G') jumpTo(state[state.focus].entries.length - 1);
-    else if (k === 'g') {
+    else if (k === 'D' && bare) move(10);
+    else if (k === 'U' && bare) move(-10);
+    else if (k === 'G' && bare) jumpTo(state[state.focus].entries.length - 1);
+    else if (k === 'g' && bare) {
         // `gg`, two keystrokes and therefore a small state machine — a lone
         // `g` means nothing here, as in vim.
         const now = performance.now();
         if (now - lastGG < 1000) { lastGG = 0; jumpTo(0); }
         else lastGG = now;
     }
-    else if (k === ' ' && e.shiftKey) mark(false, -1);
+    else if (k === ' ' && e.shiftKey && bare) mark(false, -1);
     else if (k === 'Home') jumpTo(0);
     else if (k === 'End') jumpTo(state[state.focus].entries.length - 1);
     // Shift+H / Shift+L cross the panes, as in the terminal build.
-    else if (k === 'H') focusPane('left');
-    else if (k === 'L') focusPane('right');
+    else if (k === 'H' && bare) focusPane('left');
+    else if (k === 'L' && bare) focusPane('right');
     else if (k === 'ArrowLeft' && !e.altKey && viewMode === 'icons') { const p = state[state.focus]; p.cursor = Math.max(0, p.cursor - 1); draw(state.focus); }
     else if (k === 'ArrowRight' && !e.altKey && viewMode === 'icons') { const p = state[state.focus]; p.cursor = Math.min(p.entries.length - 1, p.cursor + 1); draw(state.focus); }
     else if (k === 'ArrowLeft' && !e.altKey) focusPane('left');
     else if (k === 'h' && e.ctrlKey) focusPane('left');
     else if (k === 'ArrowRight' && !e.altKey) focusPane('right');
     else if (k === 'l' && e.ctrlKey) focusPane('right');
+    // Shift+Tab before Tab, which swallowed it — the same shape as Enter below.
+    else if (k === 'Tab' && e.shiftKey) goTab(state.focus, { step: 1 });
     else if (k === 'Tab') { state.focus = state.focus === 'left' ? 'right' : 'left'; draw('left'); draw('right'); }
+    // The most-modified Enter first: Ctrl+Shift lands on the Ctrl arm if it
+    // is tested second, and the snippet launcher was unreachable for it.
+    else if (k === 'Enter' && (e.ctrlKey || e.metaKey) && e.shiftKey) cmdSnippets();
     else if (k === 'Enter' && (e.ctrlKey || e.metaKey)) openOut();
     // Before the plain Enter, which used to swallow it: the menu was written,
     // listed in the help, and never once opened from this key. A modified key
@@ -1796,72 +2102,70 @@ document.addEventListener('keydown', (e) => {
     else if (k === 'Enter') enter();
     else if (k === 'Backspace' && state[state.focus].remote) remoteStep({ up: true });
     else if (k === 'Backspace') parent();
-    else if (k === ' ') mark(false);
+    else if (k === ' ' && bare) mark(false);
     else if (k === 'a' && (e.ctrlKey || e.metaKey)) mark(true);
     // `c` is `c` either way: whether it is a copy or an upload is decided by
     // which pane you are standing in, which the program already knows.
     else if (k === 'c' && !e.ctrlKey && !e.metaKey
              && (state.left.remote || state.right.remote)) transfer();
     else if (k === 'c' && !e.ctrlKey && !e.metaKey) operate('copy');
-    else if (k === 'm') {
+    else if (k === 'm' && bare) {
         // Moving across the network is a download that then deletes the
         // original, and nothing here does the second half yet. `c` copies;
         // saying so beats an error per file from a move that never could.
         if (state[state.focus].remote) say('サーバとの移動はまだです — c でコピーしてください', true);
         else operate('move');
     }
-    else if (k === 'd') {
+    else if (k === 'd' && bare) {
         if (state[state.focus].remote) remoteOp('delete'); else operate('delete');
     }
-    else if (k === 'T') openMenu(TOGGLES);
-    else if (k === 'M') openMenu(CONTEXT);
-    else if (k === 'Z') cmdJump();
-    else if (k === 's') cmdShortcuts();
-    else if (k === 'S') cmdSshPicker();
-    else if (k === '@') cmdMacros();
+    else if (k === 'T' && bare) openMenu(TOGGLES);
+    else if (k === 'M' && bare) openMenu(CONTEXT);
+    else if (k === 'Z' && bare) cmdJump();
+    else if (k === 's' && bare) cmdShortcuts();
+    else if (k === 'S' && bare) cmdSshPicker();
+    else if (k === '@' && bare) cmdMacros();
     else if (k === 'F12') zoomShell();
-    else if (k === 'Enter' && e.ctrlKey && e.shiftKey) cmdSnippets();
     else if ((k === '=' || k === '+') && (e.ctrlKey || e.metaKey)) { setFont(FONT.at + 1); say(`文字の大きさ ${FONT.at}px`); }
     else if (k === '-' && (e.ctrlKey || e.metaKey)) { setFont(FONT.at - 1); say(`文字の大きさ ${FONT.at}px`); }
-    else if (k === '0' && (e.ctrlKey || e.metaKey)) { setFont(15); say('文字の大きさを戻しました'); }
-    else if (k === 't' || k === 'F9') tabNew();
-    else if (k === 'w' || k === 'F10') tabClose();
+    else if (k === '0' && (e.ctrlKey || e.metaKey)) { setFont(baseFont()); say('文字の大きさを戻しました'); }
+    else if ((k === 't' && bare) || k === 'F9') tabNew();
+    else if ((k === 'w' && bare) || k === 'F10') tabClose();
     else if (k === 'F1') goTab(state.focus, { step: -1 });
     else if (k === 'F2') goTab(state.focus, { step: 1 });
-    else if (k === 'Tab' && e.shiftKey) goTab(state.focus, { step: 1 });
-    else if (k === 'J') { if (term.on) { term.focused = true; el.shell.classList.add('on'); say('シェル'); } else openShell(); }
-    else if (k === 'r' && !e.ctrlKey && !e.metaKey) {
+    else if (k === 'J' && bare) { if (term.on) { term.focused = true; el.shell.classList.add('on'); say('シェル'); } else openShell(); }
+    else if (k === 'r' && bare) {
         if (state[state.focus].remote) remoteOp('rename'); else rename();
     }
-    else if (k === 'a' && !e.ctrlKey && !e.metaKey) {
+    else if (k === 'a' && bare) {
         if (state[state.focus].remote) remoteOp('touch'); else create(false);
     }
-    else if (k === 'A') {
+    else if (k === 'A' && bare) {
         if (state[state.focus].remote) remoteOp('mkdir'); else create(true);
     }
-    else if (k === 'u') undo();
-    else if (k === 'V') invert();
-    else if (k === 'v') startVisual();
-    else if (k === 'o') syncPane(true);
-    else if (k === 'O') syncPane(false);
-    else if (k === 'z') goToPath();
-    else if (k === 'P') clipFiles();
-    else if (k === 'p' && !e.ctrlKey && !e.metaKey) copyPaths();
+    else if (k === 'u' && bare) undo();
+    else if (k === 'V' && bare) invert();
+    else if (k === 'v' && bare) startVisual();
+    else if (k === 'o' && bare) syncPane(true);
+    else if (k === 'O' && bare) syncPane(false);
+    else if (k === 'z' && bare) goToPath();
+    else if (k === 'P' && bare) clipFiles();
+    else if (k === 'p' && bare) copyPaths();
     else if (k === 'F5') reread();
-    else if (k === '?') openHelp();
+    else if (k === '?' && bare) openHelp();
     else if (k === 'F3') lookInsideAll();
-    else if (k === ':') commandLine();
-    else if (k === 'C') openPalette();
+    else if (k === ':' && bare) commandLine();
+    else if (k === 'C' && bare) openPalette();
     // The modified ones first: `f` on its own would otherwise swallow Ctrl+F.
     else if ((k === 'f' || k === 'g') && (e.ctrlKey || e.metaKey)) runCommand(findCommand('grep'), '');
-    else if (k === 'f') searchHere();
-    else if (k === 'F') runCommand(findCommand('find'), '');
-    else if (k === 'n') hopHere(1);
-    else if (k === 'N') hopHere(-1);
-    else if (k === 'b') cmdBranch();
-    else if (k === '=') cmdCompare();
+    else if (k === 'f' && bare) searchHere();
+    else if (k === 'F' && bare) runCommand(findCommand('find'), '');
+    else if (k === 'n' && bare) hopHere(1);
+    else if (k === 'N' && bare) hopHere(-1);
+    else if (k === 'b' && bare) cmdBranch();
+    else if (k === '=' && bare) cmdCompare();
     else if ((k === 'r' || k === 'y') && (e.ctrlKey || e.metaKey)) redo();
-    else if (k === 'h' && !e.ctrlKey) cmdHistory();
+    else if (k === 'h' && bare) cmdHistory();
     else if (k === 'ArrowLeft' && e.altKey) step('back');
     else if (k === 'ArrowRight' && e.altKey) step('forward');
     // The file clipboard holds *local* paths. A remote row's path names a
@@ -1873,14 +2177,14 @@ document.addEventListener('keydown', (e) => {
     // Pasting into a server pane uploads what the register holds. The
     // register's paths never travel to the window — the engine owns both
     // halves of the gesture.
-    else if (((k === 'v' && (e.ctrlKey || e.metaKey)) || k === 'y') && state[state.focus].remote) {
+    else if (((k === 'v' && (e.ctrlKey || e.metaKey)) || (k === 'y' && bare)) && state[state.focus].remote) {
         uploadHeld();
     }
     else if (k === 'c' && (e.ctrlKey || e.metaKey)) hold('copy');
     else if (k === 'x' && (e.ctrlKey || e.metaKey)) hold('cut');
-    else if ((k === 'v' && (e.ctrlKey || e.metaKey)) || k === 'y') paste();
-    else if (k === '/') startFilter();
-    else if (k === ',') openMenu(SORT_MENU);
+    else if ((k === 'v' && (e.ctrlKey || e.metaKey)) || (k === 'y' && bare)) paste();
+    else if (k === '/' && bare) startFilter();
+    else if (k === ',' && bare) openMenu(SORT_MENU);
     // Esc backs out of whatever the listing is showing that is not a
     // directory. A branch view and a panelized search are both "here is a set
     // of files"; leaving them is the same gesture.
@@ -2147,7 +2451,7 @@ const viewer = {
 const STYLES = [['notepad', 'メモ帳流'], ['vim', 'vim']];
 let style = 0;
 
-/// The four looks are two grounds. Monaco ships a light and a dark theme, and
+/// Every look is one of two grounds. Monaco ships a light and a dark theme, and
 /// the editor sitting in the wrong one is the sort of thing that reads as
 /// broken rather than as unstyled.
 function editorTheme() {
@@ -2898,7 +3202,11 @@ const COMMANDS = [
     { name: 'dup', alias: ['duplicate', 'dedup'], about: '中身が同じファイルを探す', run: cmdDedup },
     { name: 'redo', about: 'u で取り消した操作をやり直す', run: redo },
     { name: 'image', about: '画像の表示方式（窓では常に描画されます）', run: () => say('窓では画像は常に表示されます — F3 でどうぞ') },
-    { name: 'view', alias: ['grid', 'icons', 'details', 'finder', 'classic'], about: '一覧の見せ方 — :view details | icons | classic', arg: 'details / icons / classic', optional: true, run: cmdView },
+    // `finder` is NOT an alias here: it is `:files`'s, and a spelling that
+    // lives on two commands reaches only the first — the fuzzy finder its own
+    // about-text promised could never open. `:view finder` still works as an
+    // argument (cmdView maps it to details).
+    { name: 'view', alias: ['grid', 'icons', 'details', 'classic'], about: '一覧の見せ方 — :view details | icons | classic', arg: 'details / icons / classic', optional: true, run: cmdView },
     { name: 'shell', about: 'シェルパネルを開く（Shift+J でも）', run: openShell },
     { name: 'remote', alias: ['sftp'], about: 'このペインでサーバを開く（SFTP）', run: cmdConnect },
 
@@ -5619,7 +5927,13 @@ document.addEventListener('keydown', (e) => {
         return;
     }
     const bytes = shellBytes(e);
-    if (bytes === null) return;
+    if (bytes === null) {
+        // A key the shell cannot encode still must not fall through to the
+        // listing — F3 used to open the viewer over a shell being typed in.
+        // Propagation stops; the browser default is left alone.
+        e.stopPropagation();
+        return;
+    }
     e.stopPropagation();
     e.preventDefault();
     ask('shellinput', { text: bytes });
@@ -5704,6 +6018,8 @@ window.cian.onEvent(async (msg) => {
     switch (msg.event) {
         case 'progress':
             if (!running || msg.op !== running.op) return;
+            running.done = msg.done;
+            running.total = msg.total;
             say(`${running.verb}中… ${msg.done} / ${msg.total}  ${base(msg.path)}`);
             return;
 
@@ -5754,6 +6070,9 @@ window.cian.onEvent(async (msg) => {
 
         case 'found':
             if (!finder.open) return;
+            // The walk is over. Left true, the very next drawHits() painted
+            // "（まだ探しています）" over this line forever.
+            finder.walking = false;
             el.findFoot.textContent = msg.capped
                 ? `${msg.total} 件で打ち切り — 絞り込んでください`
                 : `${msg.total} 件`;
@@ -5775,12 +6094,26 @@ function base(p) {
 /// number even though they are the same idea.
 const FONT = { min: 10, max: 28, at: 15 };
 
+/// What size this look starts from — 端末譲り is deliberately tighter. Ctrl+0
+/// returns here, and an inline override is only written when the choice
+/// differs from it: a permanent inline style silently beat the look's own
+/// 14px/19px forever after the first Ctrl+=.
+function baseFont() {
+    return document.documentElement.dataset.look === 'terminal' ? 14 : 15;
+}
+
 function setFont(px, remember = true) {
     FONT.at = Math.max(FONT.min, Math.min(FONT.max, px));
-    document.documentElement.style.setProperty('--size', `${FONT.at}px`);
-    // The rows have to grow with the type or the listing keeps its old
-    // spacing and the text collides with it.
-    document.documentElement.style.setProperty('--cell-h', `${Math.round(FONT.at * 1.7)}px`);
+    const r = document.documentElement.style;
+    if (FONT.at === baseFont()) {
+        r.removeProperty('--size');
+        r.removeProperty('--cell-h');
+    } else {
+        r.setProperty('--size', `${FONT.at}px`);
+        // The rows have to grow with the type or the listing keeps its old
+        // spacing and the text collides with it.
+        r.setProperty('--cell-h', `${Math.round(FONT.at * 1.7)}px`);
+    }
     if (viewer.ed) viewer.ed.updateOptions({ fontSize: FONT.at });
     if (term.on) ask('shellresize', shellSize());
     // The foot bars grew or shrank with everything else; the panes have to be
@@ -5814,8 +6147,12 @@ async function recall() {
     const t = await ask('themes', {});
     if (t) {
         for (const p of t.list) palettes.set(p.name, p);
-        if (t.now && palettes.has(t.now) && !s.look) setPalette(t.now, false);
-        else if (t.now && palettes.has(t.now) && s.look === 'hakuji') setPalette(t.now, false);
+        // `theme` wins unless one of the window's own looks (陰翳・端末譲り)
+        // was chosen *after* it — setPalette resets gui_look to 白磁, so a
+        // surviving non-白磁 look is by definition the later choice.
+        if (t.now && palettes.has(t.now) && (!s.look || s.look === 'hakuji')) {
+            setPalette(t.now, false);
+        }
     }
     // Lua's own complaints go in the same queue as mine — from where the
     // person stands they are one thing: "my config did not take".
@@ -5874,5 +6211,7 @@ refresh().then(() => {
     // only question this milestone exists to answer.
     const face = resolvedFace();
     const size = getComputedStyle(document.body).fontSize;
-    say(`${el.status.textContent}   ·   ${face} ${size}`);
+    // The message half only — the whole bar carries chips now, and reading
+    // the element back would fold the badge and counts into the greeting.
+    say(`${status.msg}   ·   ${face} ${size}`);
 });

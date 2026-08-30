@@ -14,9 +14,10 @@
 <title>cian</title>
 <style>
 /* The look is the whole reason this build exists, so the type comes first.
-   No web font: the point of Chromium here is that Windows draws text with
-   DirectWrite, and asking for a downloaded font would throw that away. The
-   stack names what each platform actually ships. */
+   The face is bundled (vendor/fonts, via `node gui/vendor.js`) — nothing from
+   the network, same as ever; it ships beside the app the way the window
+   build's font does. Chromium still draws it with DirectWrite on Windows,
+   which is the whole point of this front end. */
 :root {
   /* 白磁 — the default.
      Colour where it means something and nowhere else: a directory, a mark,
@@ -34,6 +35,21 @@
   --accent-dim:#e6f1ef;
   --on-accent: #ffffff;
   --mark:      #bf6b34;
+  /* What kind of file a name is, said in its colour — the terminal build's
+     FilePalette (theme.rs), quietened for 白磁's ground. Directory is --dir,
+     dotfiles are --dim; these seven cover the rest. */
+  --k-code:    #7a6a2f;
+  --k-config:  #2f6f74;
+  --k-doc:     #4a5a8a;
+  --k-image:   #8a4a7a;
+  --k-media:   #2f6f74;
+  --k-archive: #9a4a3a;
+  --k-exec:    #3a7a4a;
+  /* The veil behind a dialog. A hardcoded near-black sat over 白磁 and
+     github-light alike; now the dark looks and palettes deepen it below. */
+  --scrim:     rgba(23, 26, 31, .45);
+  --bad-bg:    #5a2233;
+  --bad-fg:    #ffd7de;
   --cell-h:    26px;
   /* The two fixed bars at the foot. Measured at runtime rather than declared:
      the text in them is set at a size the person can change, so a number
@@ -43,32 +59,26 @@
   --size:      15px;
   /* The face the listing and the code use. Named so the preview can borrow
      it for code while setting prose in something proportional. */
-  --mono: "HackGen Console NF", "HackGen35 Console NF", Menlo, Consolas,
+  --mono: "cian gothic", "HackGen Console NF", "HackGen35 Console NF", Menlo,
+          Consolas, "BIZ UDGothic", ui-monospace, monospace;
+  /* The bundled face first — HackGen Console NF, carried in gui/vendor/fonts
+     the way the window build carries the same file. Hoping HackGen was
+     installed put the listing in Hiragino (proportional) and drew the shell
+     prompt as tofu on most Macs. After the bundled and installed Nerd faces,
+     the fallbacks are *monospaced* — this is a grid program, and columns cut
+     in a proportional face never line up — ending on `monospace` rather than
+     nothing, so a miss lands on a gothic grid and never on 明朝. */
+  --face: "cian gothic", "HackGen Console NF", "HackGen35 Console NF",
+          "UDEV Gothic NF", "Cica", Menlo, "Osaka-Mono", "MS Gothic",
           "BIZ UDGothic", ui-monospace, monospace;
-  /* A Nerd Font first, because that is what cian-tui is read in and it is the
-     one people said looked best of the three. Then the UI faces Windows and
-     macOS ship, then anything. The last two are the safety net: `sans-serif`
-     rather than nothing, so a miss lands on a gothic face and never on 明朝. */
-  --face: "HackGen Console NF", "HackGen35 Console NF", "UDEV Gothic NF",
-          "Cica", "Yu Gothic UI", "Meiryo UI", "Hiragino Sans", "Noto Sans JP",
-          system-ui, sans-serif;
 }
 
-/* Solarized Light — Ethan Schoonover's palette, unaltered.
-   The one preset that exists on both sides: cian-tui has it too, so this is
-   the only way to have the terminal and the window in the same colours. */
-:root[data-look="solarized-light"] {
-  --bg:        #fdf6e3;
-  --pane:      #fdf6e3;
-  --pane-off:  #f4eeda;
-  --line:      #ddd6c1;
-  --text:      #586e75;
-  --dim:       #93a1a1;
-  --dir:       #268bd2;
-  --accent:    #2aa198;
-  --accent-dim:#eee8d5;
-  --on-accent: #fdf6e3;
-  --mark:      #b58900;
+/* The bundled font. When gui/vendor/fonts is absent (a checkout that has not
+   run `node gui/vendor.js`), this fails quietly and the stack above walks on. */
+@font-face {
+  font-family: "cian gothic";
+  src: url("vendor/fonts/cian.ttf") format("truetype");
+  font-display: swap;
 }
 
 /* 陰翳 — dark kept dark, and only what matters catches the light.
@@ -85,6 +95,13 @@
   --accent-dim:#2e2519;
   --on-accent: #1a1409;
   --mark:      #c8703c;
+  --k-code:    #d0b05a;
+  --k-config:  #8fb8a8;
+  --k-doc:     #a8b8d0;
+  --k-image:   #c08ab0;
+  --k-media:   #8fb8a8;
+  --k-archive: #d08a6a;
+  --k-exec:    #9ac07a;
 }
 
 /* 端末譲り — the terminal build, not disowned.
@@ -101,9 +118,16 @@
   --accent-dim:#1c2a28;
   --on-accent: #04120f;
   --mark:      #ffd75f;
+  --k-code:    #d7af5f;
+  --k-config:  #5fd7d7;
+  --k-doc:     #87afd7;
+  --k-image:   #d787d7;
+  --k-media:   #5fd7d7;
+  --k-archive: #ff8787;
+  --k-exec:    #87d787;
   --cell-h:    19px;
   --size:      14px;
-  --face: "HackGen Console NF", "UDEV Gothic NF", "Cica",
+  --face: "cian gothic", "HackGen Console NF", "UDEV Gothic NF", "Cica",
           ui-monospace, "Consolas", monospace;
 }
 
@@ -140,7 +164,6 @@ html, body {
    comes to the front rather than sitting beside. */
 #panes.one .pane { display: none; }
 #panes.one .pane.active { display: flex; flex: 1 1 100%; }
-.pane.active { background: var(--pane); }
 /* Where the drop will land, said plainly. Two panes means a drop is always
    about to go into one of them and not the other. */
 .pane.dropping { outline: 2px dashed var(--accent); outline-offset: -3px; }
@@ -151,7 +174,7 @@ html, body {
 .pane.remote { outline: 2px solid var(--mark); outline-offset: -2px; }
 .crumb {
   padding: 6px 10px; border-bottom: 1px solid var(--line);
-  color: var(--dim); font-size: 12px;
+  color: var(--dim); font-size: .8em;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   /* The path is the one thing here worth copying out. */
   user-select: text; cursor: text;
@@ -162,7 +185,7 @@ html, body {
 .tabs { display: flex; gap: 2px; padding: 2px 4px 0; overflow: hidden; }
 .tabs:empty { display: none; }
 .tabs span {
-  padding: 1px 8px; border-radius: 4px 4px 0 0; font-size: 12px;
+  padding: 1px 8px; border-radius: 4px 4px 0 0; font-size: .8em;
   color: var(--dim); background: var(--pane-off);
   max-width: 14ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   cursor: default;
@@ -179,14 +202,26 @@ html, body {
 .row .size { flex: 0 0 auto; color: var(--dim); font-variant-numeric: tabular-nums; }
 /* details — Explorer's columns, in Explorer's widths. Each fixed so they
    read as columns; a ☁ for a file that is listed but lives in the cloud. */
-.row .when { flex: 0 0 11ch; text-align: right; color: var(--dim); font-variant-numeric: tabular-nums; }
+.row .when { flex: 0 0 17ch; text-align: right; color: var(--dim); font-variant-numeric: tabular-nums; }
 .row .cloud { flex: 0 0 2ch; text-align: center; color: var(--dim); }
 .row .kind { flex: 0 0 12ch; color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* The small leading icon. Only in details — classic is a text listing on
-   purpose, and the tiles have their own, much larger one. */
-.rows.details .row .glyph { flex: 0 0 1.6em; font-size: 1em; text-align: center; }
+/* The mark column — the terminal build's `● `, in the mark colour. A colour
+   on the name alone disappears the moment the row is the cursor; a bullet in
+   its own column survives every background. */
+.row .mark { flex: 0 0 2ch; color: var(--mark); font-weight: 600; }
+/* The small leading icon, in classic and details both — the terminal build
+   puts a Nerd glyph on every row, and the bundled font carries them. The
+   tiles' much larger one overrides below. */
+.row .glyph { flex: 0 0 1.6em; font-size: 1em; text-align: center; }
 .rows.details .row .size { flex: 0 0 9ch; text-align: right; }
+.rows.classic .row .size { flex: 0 0 8ch; text-align: right; }
 .rows.details { padding-top: 0; }
+/* The columns that no longer fit, dropped in the terminal build's order:
+   the date first, then the size — the name is the last thing to go. */
+.pane.no-when .row .when, .pane.no-when .dhead .when { display: none; }
+.pane.no-size .row .size, .pane.no-size .dhead .size { display: none; }
+/* And the ☁ column only when something is actually in the cloud. */
+.pane.no-cloud .row .cloud { display: none; }
 /* The column header. Built from the same class names as a row, so a column
    and its heading cannot drift apart in width. */
 .dhead {
@@ -196,7 +231,8 @@ html, body {
 }
 .dhead .glyph { flex: 0 0 1.6em; }
 .dhead .size { flex: 0 0 9ch; text-align: right; }
-.dhead .sortable:hover { color: var(--fg); text-decoration: underline; }
+.dhead .sortable { cursor: pointer; }
+.dhead .sortable:hover { color: var(--text); text-decoration: underline; }
 /* `hidden` is only `display: none` in the browser's own stylesheet, and any
    author rule beats it — `.row { display: flex }` did, so the header stayed
    laid out in classic view as an empty band under the path. Said here, where
@@ -220,24 +256,60 @@ html, body {
   width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   font-size: .85em; direction: initial;
 }
-.rows.icons .row .size, .rows.icons .row .when,
+.rows.icons .row .size, .rows.icons .row .when, .rows.icons .row .mark,
 .rows.icons .row .kind, .rows.icons .row .cloud { display: none; }
 .rows.icons .row.cursor { background: var(--accent-dim); }
 .pane.active .rows.icons .row.cursor { background: var(--accent); }
-.row.dir .name { color: var(--dir); }
+/* The terminal build's file palette: the kind of a file is its colour, a
+   directory and an executable are bold, dotfiles recede. */
+.row.dir .name { color: var(--dir); font-weight: 600; }
+.row.k-code .name { color: var(--k-code); }
+.row.k-config .name { color: var(--k-config); }
+.row.k-doc .name { color: var(--k-doc); }
+.row.k-image .name { color: var(--k-image); }
+.row.k-media .name { color: var(--k-media); }
+.row.k-archive .name { color: var(--k-archive); }
+.row.k-exec .name { color: var(--k-exec); font-weight: 600; }
+.row.k-muted .name { color: var(--dim); }
 .row.marked .name { color: var(--mark); }
 .row.cursor { background: var(--accent-dim); }
 .pane.active .row.cursor { background: var(--accent); color: var(--on-accent); }
-.pane.active .row.cursor .size { color: var(--on-accent); }
-.pane.active .row.cursor .name { color: var(--on-accent); }
+/* Every span, not a hand-kept list — the kind, date and ☁ columns kept their
+   dim ink on the accent fill and sank into it. */
+.pane.active .row.cursor span { color: var(--on-accent); }
 #status {
   position: fixed; left: 0; right: 0; bottom: 0;
-  padding: 3px 10px; font-size: 12px;
+  display: flex; align-items: center; gap: .8em;
+  padding: 0 10px 0 0; font-size: .8em; line-height: 2;
   background: var(--line); color: var(--dim);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; overflow: hidden;
 }
-#status.bad { background: #5a2233; color: #ffd7de; }
-#status .run { color: var(--accent); }
+/* The pane-and-mode badge, first and never dropped. Its colour is the mode's:
+   the terminal build gives "am I in visual?" one glance, not a guess. */
+#st-badge {
+  flex: 0 0 auto; padding: 0 .8em; font-weight: 600;
+  background: var(--accent); color: var(--on-accent);
+}
+#st-badge.visual { background: var(--mark); }
+#st-badge.filter { background: var(--k-exec, #3a7a4a); color: var(--on-accent); }
+/* The chips. Aligned to their end and clipped at their start, which is the
+   terminal build's overflow rule — a narrow window loses the leftmost chips
+   one by one and never the badge or the message. */
+#st-chips {
+  flex: 1 1 auto; display: flex; gap: .8em; overflow: hidden;
+  justify-content: flex-end;
+}
+#st-chips span { flex: 0 0 auto; }
+#st-chips .n { color: var(--text); }
+#st-chips .mk { color: var(--mark); font-weight: 600; }
+#st-chips .flt { color: var(--k-exec, #2f8f5b); }
+#st-chips .disk { color: var(--dir); }
+#st-chips .disk.warn { color: var(--mark); font-weight: 600; }
+#st-chips .disk.crit { color: #d04a3a; font-weight: 600; }
+#st-chips .op { color: var(--accent); font-weight: 600; }
+#st-msg { flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; font-style: italic; color: var(--text); }
+#st-msg.bad { color: var(--bad-fg); background: var(--bad-bg); padding: 0 .6em; font-style: normal; }
+#st-shell { flex: 0 0 auto; color: var(--dir); }
 
 /* The order these sit in.
    Not one of them had a z-index, so they stacked in the order they happen to
@@ -256,7 +328,12 @@ html, body {
   --c8:#5c6664; --c9:#e05a4a; --c10:#43b57a; --c11:#d2a03a;
   --c12:#4a90d9; --c13:#b06bd0; --c14:#2aa198; --c15:#2b3333;
 }
-:root[data-look="inei"], :root[data-look="terminal"] {
+/* `data-dark` too, not only the two dark looks: the eighteen shared palettes
+   arrive from the engine and half of them are dark, but these sixteen were
+   keyed on `data-look` alone — so dracula and tokyo-night drew the shell in
+   the light defaults, near-invisible on their grounds. */
+:root[data-look="inei"], :root[data-look="terminal"], :root[data-dark="1"] {
+  --scrim: rgba(4, 6, 10, .62);
   --c0:#3b3b3b; --c1:#e06c75; --c2:#98c379; --c3:#e5c07b;
   --c4:#61afef; --c5:#c678dd; --c6:#56b6c2; --c7:#d9d0c5;
   --c8:#6b6b6b; --c9:#ff7b86; --c10:#b5e08f; --c11:#ffd88a;
@@ -294,10 +371,6 @@ html, body {
    is not. */
 #shell.logging { border-top: 2px solid #b03a48; }
 #shell.logging .vhead { color: #b03a48; }
-/* The shell tabs, the terminal build's own strip: `shell 1 | shell 2`, the
-   active one on the accent. It replaced a heading that said "シェル" — a
-   label naming the thing you are already looking at, where the tabs you
-   cannot otherwise see could have been. */
 /* The key hints — what the keys do *here*, right now. The terminal build
    carries this bar and the window did not, which is most of why the two felt
    like different programs: cian tells you what you can press, continuously,
@@ -311,16 +384,38 @@ html, body {
   padding: 3px 10px; font-size: .82em; color: var(--dim);
   background: var(--pane-off); border-top: 1px solid var(--line);
 }
+/* The filter bar, one prompt row above the hints — where the terminal build
+   types it. The listing stays fully visible while it narrows. */
+#fbar {
+  position: fixed; left: 0; right: 0;
+  bottom: calc(var(--status-h) + var(--hints-h));
+  display: flex; align-items: center; gap: .5em;
+  padding: 3px 10px; background: var(--pane);
+  border-top: 2px solid var(--accent);
+}
+/* `hidden` is the browser's own display:none, and the flex above beats it —
+   the bar showed at startup, empty, the day it was added. Bug shape ③. */
+#fbar[hidden] { display: none; }
+#fbar b { color: var(--accent); }
+#fbar input {
+  flex: 1 1 auto; border: 0; outline: 0; background: transparent;
+  color: var(--text); font: inherit;
+}
+#fbar #f-count { color: var(--dim); }
 #hints b { color: var(--accent); font-weight: 600; margin-right: .35em; }
 #hints span { flex: 0 0 auto; }
+/* The shell tabs, the terminal build's own strip: `shell 1 | shell 2`, the
+   active one on the accent. It replaced a heading that said "シェル" — a
+   label naming the thing you are already looking at, where the tabs you
+   cannot otherwise see could have been. */
 .stabs { display: flex; gap: 0; align-items: stretch; margin-right: .8em; }
 .stabs span {
   padding: 0 .7em; cursor: pointer; color: var(--dim);
   border-right: 1px solid var(--line);
 }
 .stabs span:last-child { border-right: 0; }
-.stabs span.on { background: var(--accent); color: var(--accent-fg); font-weight: 600; }
-.stabs span:hover:not(.on) { color: var(--fg); }
+.stabs span.on { background: var(--accent); color: var(--on-accent); font-weight: 600; }
+.stabs span:hover:not(.on) { color: var(--text); }
 #s-title { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sgrid { user-select: text; cursor: text; }
 #shell.sync .vhead { color: var(--mark); }
@@ -332,6 +427,9 @@ html, body {
 .sgrid {
   position: absolute; overflow: hidden; padding: 4px 8px;
   white-space: pre; line-height: 1.25;
+  /* Strictly the mono stack. This is a vt100 grid: one proportional glyph
+     and every column to its right is somewhere else. */
+  font-family: var(--mono);
   box-sizing: border-box;
 }
 /* Which pane the keys go to. A row of identical shells with no way to tell
@@ -339,7 +437,11 @@ html, body {
 /* Two pixels, matching the file panes: one was a hairline that disappeared
    against half the palettes. */
 .sgrid.on { box-shadow: inset 0 0 0 2px var(--accent); }
-.sgrid + .sgrid { border-left: 1px solid var(--line); }
+/* The seam between split panes, drawn on each pane's own left/top edge —
+   the panes are absolutely placed from engine fractions, so an
+   adjacent-sibling border landed on whichever node happened to be second in
+   the DOM, nowhere near the seam. */
+.sgrid { box-shadow: inset 1px 0 0 var(--line), inset 0 1px 0 var(--line); }
 .sgrid .cur { background: var(--accent); color: var(--on-accent); }
 .sgrid .inv { filter: invert(1); }
 #find { z-index: 20; }   /* over whatever it is searching */
@@ -380,7 +482,12 @@ html, body {
 .sheet .field:focus { outline: none; border-color: var(--accent); }
 
 #view, #report {
-  position: fixed; inset: 0; display: flex; flex-direction: column;
+  /* They replace the listing, not the whole window: the hint and status bars
+     stay visible underneath — the terminal build never covers them, and every
+     say() from viewer code used to land on a bar nobody could see. */
+  position: fixed; top: 0; left: 0; right: 0;
+  bottom: calc(var(--status-h) + var(--hints-h));
+  display: flex; flex-direction: column;
   background: var(--pane); color: var(--text);
 }
 #view[hidden], #report[hidden] { display: none; }
@@ -569,7 +676,7 @@ html, body {
    lets the description take whatever is left. The keys are the thing being
    looked up; a ragged left edge makes them hard to scan. */
 .hit .k { flex: 0 0 13rem; color: var(--accent); font-variant-numeric: tabular-nums; }
-.hit .w { flex: 1 1 auto; color: var(--fg); white-space: normal; }
+.hit .w { flex: 1 1 auto; color: var(--text); white-space: normal; }
 .group { padding: 0.9rem 0.75rem 0.3rem; font-size: 0.78rem; letter-spacing: 0.08em; color: var(--dim); }
 .group:first-child { padding-top: 0.2rem; }
 /* The help rows are the one place a row may be taller than a cell. Every
@@ -584,7 +691,7 @@ html, body {
 .hit.on { background: var(--accent); color: var(--on-accent); }
 .hit.on .p { color: var(--on-accent); }
 .foot {
-  margin-top: 8px; font-size: 12px; color: var(--dim);
+  margin-top: 8px; font-size: .8em; color: var(--dim);
   display: flex; justify-content: space-between;
 }
 .sheet button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
@@ -606,12 +713,26 @@ html, body {
       <div class="rows"></div>
     </section>
   </div>
+  <!-- The shell. Docked under the panes rather than over them: it is a place
+       you look at while you work, not a thing you open instead of working. -->
   <div id="shell" hidden>
     <div class="vhead"><span id="s-tabs" class="stabs"></span><span id="s-title"></span><span id="s-about"></span></div>
     <div class="spanes" id="s-panes"></div>
   </div>
+  <!-- The filter, typed in place. It used to raise the full-screen search
+       sheet — a dark scrim over the very listing being narrowed. The terminal
+       build types this on its prompt row, and this bar is that row. -->
+  <div id="fbar" hidden>
+    <b>/</b><input id="f-input" autocomplete="off" spellcheck="false"><span id="f-count"></span>
+  </div>
   <div id="hints"></div>
-  <div id="status">…</div>
+  <!-- The status line, the terminal build's chip row: which pane and mode,
+       how many things, how many marked, the file under the cursor, the
+       filter, the disk — always there, with the transient message beside
+       them rather than instead of them. -->
+  <div id="status">
+    <span id="st-badge"></span><span id="st-chips"></span><span id="st-msg"></span><span id="st-shell"></span>
+  </div>
 
   <!-- The confirm. cian's spine is that nothing is lost by a slip, so every
        copy, move and delete goes through here — never a keystroke straight to
@@ -636,8 +757,6 @@ html, body {
     </div>
   </div>
 
-  <!-- The shell. Docked under the panes rather than over them: it is a place
-       you look at while you work, not a thing you open instead of working. -->
   </div>
 
   <!-- Anything that answers with a list: a search, disk usage, checksums, the
