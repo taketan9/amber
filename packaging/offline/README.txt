@@ -17,9 +17,26 @@ different sizes.
 
 **To work on the Electron front end, nothing.** Not Rust, not npm.
 The front end is JavaScript; it talks to a prebuilt cian-server.exe over
-a pipe. Take that one file (about a megabyte, `cian-server-win-x64.exe`
-on the releases page) and a standalone Electron, and you can edit and
-restart all day. See "The Electron front end" below.
+a pipe. Take that one file (9 MB, `cian-server-win-x64.exe` on the
+releases page) and a standalone Electron, and you can edit and restart
+all day. See "The Electron front end" below.
+
+Measured, v1.1.0, so that what to carry in can be decided before
+carrying it:
+
+    cian-tui.exe              13 MB   the terminal build, one file
+    cian-server.exe            9 MB   the engine, one file
+    cian.exe                  31 MB   the window build; 12 MB of that is
+                                      the font it carries inside itself
+    cian-windows-x64.zip      25 MB   all three, compressed, plus docs
+
+    gui\ + gui\vendor\        29 MB   the Electron front end's own files
+    Electron itself          247 MB   unzipped; ~100 MB as its own zip
+
+**So the Electron front end is not "an exe".** It is about 285 MB of
+files, or roughly 110 MB zipped, because Chromium comes with it. If the
+constraint is what fits on the way in, cian-tui.exe is one file and
+cian.exe is one file; the Electron build is a folder.
 
 **To build the Rust side**, one thing or four, depending on which
 programs you want:
