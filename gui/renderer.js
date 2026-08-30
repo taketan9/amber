@@ -251,6 +251,32 @@ async function operate(kind) {
     say(`${verb}中… 0 / ${started.count}`);
 }
 
+/// Land the cursor on a row. Every jump goes through here so that a jump
+/// made mid-visual extends the selection — `G` in visual means "to the end",
+/// and a `G` that moved the cursor without re-painting silently didn't.
+function jumpTo(at) {
+    const pane = state[state.focus];
+    if (!pane || !pane.entries.length) return;
+    pane.cursor = Math.max(0, Math.min(pane.entries.length - 1, at));
+    draw(state.focus);
+    if (visual.on) paintVisual();
+    if (preview.on) showPreview();
+}
+
+async function clearMarksAndFilter() {
+    const which = state.focus;
+    if (state[which].filter) {
+        const p = await ask('filter', { pane: which, text: '' });
+        if (p) state[which] = p.pane ?? p;
+    }
+    if (state[which].marked > 0) {
+        const p = await ask('unmarkall', { pane: which });
+        if (p) state[which] = p;
+    }
+    draw(which);
+    say('マークとフィルタを解除しました');
+}
+
 function move(delta) {
     const pane = state[state.focus];
     if (!pane || !pane.entries.length) return;
@@ -273,6 +299,14 @@ async function enter() {
         if (row.parent) { await remoteStep({ up: true }); return; }
         if (!row.is_dir) { say('サーバ上のファイルはまだ開けません — c でこちらへ', true); return; }
         await remoteStep({});
+        return;
+    }
+    // Inside an archive, Enter on a file reads it — the same thing Enter
+    // means on a file everywhere else. It used to fall through to the engine,
+    // which refused with "まだ開けません" long after F3 could open it: the
+    // message had outlived the limitation it described.
+    if (pane.archive && !row.is_dir && !row.parent) {
+        await lookInside();
         return;
     }
     // An archive is a directory you can walk into, which is what the terminal
@@ -747,7 +781,7 @@ const HELP = [
         ['  Ctrl+N / Ctrl+Shift+N', 'ファイルを開いたまま次 / 前のヒットへ'],
         ['b', 'この配下を1ファイル1行に平坦化（b か Esc で戻る）'],
         ['h', 'このペインの履歴'],
-        ['Z', '行った場所へ飛ぶ'],
+        ['Z', '登録した場所と行った場所へ飛ぶ'],
         ['s', 'ショートカット（登録した場所）'],
         [':bookmark', 'いまの場所を登録する'],
         ['ドラッグして落とす', 'デスクトップからペインへ ── 移動します（先に確認）'],
@@ -775,7 +809,7 @@ const HELP = [
         [':gitdiff', '選択ファイルの差分'],
         [':stage / :unstage / :discard', 'git add / reset / 変更の破棄'],
         [':svnupdate :svncommit :svnresolve', 'svn の3つ'],
-        [':dedup', '中身が同じファイルを探す'],
+        [':dup', '中身が同じファイルを探す（:duplicate でも）'],
         [':df / :wc / :stat', '空き容量 / 行・単語・バイト / 属性'],
         [':mark *.rs  :unmark *', 'ワイルドカードでマーク'],
         [':copyto / :moveto', '反対ペイン以外の場所へ'],
@@ -786,7 +820,8 @@ const HELP = [
         [':office / :officelink', 'Office 文書のクラウド側を開く / .url を作る'],
     ]],
     ['サーバ（SFTP）', [
-        [':remote  /  :ssh', 'このペインでサーバを開く — user@host[:port][:/path]'],
+        ['Shift+S', 'SSHピッカー — init.lua の cian.ssh から選ぶ'],
+        [':remote  /  :ssh', '手で打つなら — user@host[:port][:/path]'],
         ['Enter / Backspace', 'サーバの中を移動'],
         ['c', '反対ペインへ — 立っている側でアップロードか転送かが決まる'],
         ['a / A / r / d', 'サーバ上でも同じキー（削除はゴミ箱なし＝戻せません）'],
@@ -829,7 +864,7 @@ const HELP = [
         ['F2 / Shift+F2', '次 / 前の開いているファイル'],
         ['Ctrl+Shift+O', '見出し一覧から飛ぶ（vim 流儀は :outline）'],
         ['Ctrl+Shift+B', '各行を最後に変えた人（vim 流儀は :blame、もう一度で消す）'],
-        [':sort2 :rsort :uniq', '行をソート / 逆順 / 重複を落とす'],
+        [':sort :rsort :uniq', '行をソート / 逆順 / 重複を落とす'],
         [':han :zen', '全角ASCII→半角 / 半角カナ→全角'],
         [':expand :unexpand :reindent', 'タブ↔スペース、インデントを揃える'],
         [':lf :crlf', '改行コードを変える（保存時に反映）'],
@@ -865,7 +900,7 @@ const HELP = [
         ['o / O', 'このペインを反対側へ / 反対側をここへ'],
         ['u / Ctrl+R', '取り消し / やり直し'],
         ['M / Shift+Enter', 'このエントリにできること'],
-        ['Esc', '実行中の操作を中止'],
+        ['Esc', 'マーク・フィルタ解除 → 実行中の操作を中止'],
         [':queue', '実行中の操作を見る — x で1つだけ止める'],
     ]],
 ];
@@ -953,8 +988,8 @@ async function syncPane(pullToHere) {
     say(`${to === 'left' ? '左' : '右'}を ${path} へ`);
 }
 
-async function goToPath() {
-    const path = await askFor('移動先', state[state.focus].cwd);
+async function goToPath(given) {
+    const path = given || await askFor('移動先', state[state.focus].cwd);
     if (!path) return;
     const which = state.focus;
     const pane = await ask('list', { pane: which, path });
@@ -1085,21 +1120,17 @@ document.addEventListener('keydown', (e) => {
     else if (k === 'PageUp') move(-20);
     else if (k === 'D') move(10);
     else if (k === 'U') move(-10);
-    else if (k === 'G') { state[state.focus].cursor = state[state.focus].entries.length - 1; draw(state.focus); }
+    else if (k === 'G') jumpTo(state[state.focus].entries.length - 1);
     else if (k === 'g') {
         // `gg`, two keystrokes and therefore a small state machine — a lone
         // `g` means nothing here, as in vim.
         const now = performance.now();
-        if (now - lastGG < 1000) { lastGG = 0; state[state.focus].cursor = 0; draw(state.focus); }
+        if (now - lastGG < 1000) { lastGG = 0; jumpTo(0); }
         else lastGG = now;
     }
     else if (k === ' ' && e.shiftKey) mark(false, -1);
-    else if (k === 'Home') { state[state.focus].cursor = 0; draw(state.focus); }
-    else if (k === 'End') {
-        const p = state[state.focus];
-        p.cursor = Math.max(0, p.entries.length - 1);
-        draw(state.focus);
-    }
+    else if (k === 'Home') jumpTo(0);
+    else if (k === 'End') jumpTo(state[state.focus].entries.length - 1);
     // Shift+H / Shift+L cross the panes, as in the terminal build.
     else if (k === 'H') focusPane('left');
     else if (k === 'L') focusPane('right');
@@ -1122,7 +1153,13 @@ document.addEventListener('keydown', (e) => {
     else if (k === 'c' && !e.ctrlKey && !e.metaKey
              && (state.left.remote || state.right.remote)) transfer();
     else if (k === 'c' && !e.ctrlKey && !e.metaKey) operate('copy');
-    else if (k === 'm') operate('move');
+    else if (k === 'm') {
+        // Moving across the network is a download that then deletes the
+        // original, and nothing here does the second half yet. `c` copies;
+        // saying so beats an error per file from a move that never could.
+        if (state[state.focus].remote) say('サーバとの移動はまだです — c でコピーしてください', true);
+        else operate('move');
+    }
     else if (k === 'd') {
         if (state[state.focus].remote) remoteOp('delete'); else operate('delete');
     }
@@ -1130,6 +1167,7 @@ document.addEventListener('keydown', (e) => {
     else if (k === 'M' || (k === 'Enter' && e.shiftKey)) openMenu(CONTEXT);
     else if (k === 'Z') cmdJump();
     else if (k === 's') cmdShortcuts();
+    else if (k === 'S') cmdSshPicker();
     else if (k === '@') cmdMacros();
     else if (k === 'F12') zoomShell();
     else if ((k === '=' || k === '+') && (e.ctrlKey || e.metaKey)) { setFont(FONT.at + 1); say(`文字の大きさ ${FONT.at}px`); }
@@ -1175,6 +1213,15 @@ document.addEventListener('keydown', (e) => {
     else if (k === 'h' && !e.ctrlKey) cmdHistory();
     else if (k === 'ArrowLeft' && e.altKey) step('back');
     else if (k === 'ArrowRight' && e.altKey) step('forward');
+    // The file clipboard holds *local* paths. A remote row's path names a
+    // place on the server, and holding it would paste a path that exists
+    // nowhere on this disk — quietly, later, somewhere else.
+    else if ((k === 'c' || k === 'x') && (e.ctrlKey || e.metaKey) && state[state.focus].remote) {
+        say('サーバ上のファイルはクリップボードに持てません — c で転送してください', true);
+    }
+    else if (((k === 'v' && (e.ctrlKey || e.metaKey)) || k === 'y') && state[state.focus].remote) {
+        say('サーバへの貼り付けはまだです', true);
+    }
     else if (k === 'c' && (e.ctrlKey || e.metaKey)) hold('copy');
     else if (k === 'x' && (e.ctrlKey || e.metaKey)) hold('cut');
     else if ((k === 'v' && (e.ctrlKey || e.metaKey)) || k === 'y') paste();
@@ -1188,6 +1235,13 @@ document.addEventListener('keydown', (e) => {
     // the listing — `viewer.on` is false precisely so that j and k still move.
     else if (k === 'Escape' && preview.on) togglePreview();
     else if (k === 'Escape' && state[state.focus] && state[state.focus].flat) leaveFlat();
+    // Leaving a server is Esc, as the terminal build has it (":remote … Esc
+    // leaves"). :local stays as the spoken form of the same thing.
+    else if (k === 'Escape' && state[state.focus] && state[state.focus].remote) cmdDisconnect();
+    // The terminal build's listing Esc: clear marks and filter. Both at once,
+    // because "get me back to the plain listing" is one intention.
+    else if (k === 'Escape' && state[state.focus]
+             && (state[state.focus].marked > 0 || state[state.focus].filter)) clearMarksAndFilter();
     else if (k === 'Escape' && running) {
         window.cian.call('cancel', { op: running.op });
         say('中止しています…');
@@ -1596,6 +1650,7 @@ async function openArchiveMember(which) {
     const r = await ask('archiveview', { pane: which });
     if (!r) return false;
     member.on = true;
+    member.writable = !!r.writable;
     const at = { path: r.path, name: r.name };
     // The listing is inside the archive, so the ordinary read cannot find the
     // file; it is opened from the temporary by path instead.
@@ -1603,7 +1658,9 @@ async function openArchiveMember(which) {
     if (!f) { member.on = false; return false; }
     await showFile(f);
     el.vName.textContent = `${at.name}（アーカイブの中）`;
-    el.vFoot.textContent = 'Ctrl+S でアーカイブに書き戻す   ·   Esc ×3 閉じる';
+    el.vFoot.textContent = member.writable
+        ? 'Ctrl+S でアーカイブに書き戻す   ·   Esc ×3 閉じる'
+        : '読むだけ（tar への書き戻しはまだ）   ·   Esc ×3 閉じる';
     return true;
 }
 
@@ -1796,6 +1853,7 @@ async function saveFile() {
     if (!viewer.ed) return false;
     if (pair.on) { await savePair(); return true; }
     if (member.on) {
+        if (!member.writable) { say('tar への書き戻しはまだです', true); return false; }
         const r = await ask('archivesave', { lines: viewer.ed.getValue().split(/\r?\n/) });
         if (!r) return false;
         viewer.base = viewer.ed.getModel().getAlternativeVersionId();
@@ -2105,7 +2163,7 @@ const COMMANDS = [
     { name: 'diff', about: '左右を比較（= でも）', run: cmdCompare },
     { name: 'diffedit', about: '左右のファイルを並べて、どちらも編集できる形で開く', run: cmdDiffEdit },
     { name: 'renamepattern', about: '一括リネーム: {name}_{n3}.{ext}', arg: 'パターン', run: cmdRenamePattern },
-    { name: 'zip', about: 'マークを zip にまとめる', run: () => cmdCompress('zip') },
+    { name: 'zip', about: 'マークを zip に（:zip -e でパスワード付き）', arg: '-e', optional: true, run: (a) => cmdCompress('zip', /-e/.test(a || '')) },
     { name: 'tar', about: 'マークを tar にまとめる', run: () => cmdCompress('tar') },
     { name: 'targz', about: 'マークを tar.gz にまとめる', run: () => cmdCompress('targz') },
     { name: 'unzip', about: 'カーソルのアーカイブをここに展開', run: cmdExtract },
@@ -2116,12 +2174,12 @@ const COMMANDS = [
     { name: 'stage', about: 'git add', run: () => cmdVcs('stage') },
     { name: 'unstage', about: 'git reset', run: () => cmdVcs('unstage') },
     { name: 'discard', about: '作業ツリーの変更を破棄', run: () => cmdVcs('discard') },
-    { name: 'dedup', about: '中身が同じファイルを探す', run: cmdDedup },
+    { name: 'dup', alias: ['duplicate', 'dedup'], about: '中身が同じファイルを探す', run: cmdDedup },
     { name: 'redo', about: 'u で取り消した操作をやり直す', run: redo },
     { name: 'shell', about: 'シェルパネルを開く（Shift+J でも）', run: openShell },
     { name: 'remote', about: 'このペインでサーバを開く（SFTP）', run: cmdConnect },
     { name: 'ssh', about: '同じ（:remote の別名）', run: cmdConnect },
-    { name: 'local', about: 'サーバを閉じてローカルに戻る', run: cmdDisconnect },
+    { name: 'local', about: 'サーバを閉じてローカルへ戻る', run: cmdDisconnect },
     { name: 'aicmd', about: 'AI: 説明からシェルコマンドを作る', arg: 'やりたいこと', run: cmdAiCmd },
     { name: 'ailog', about: 'AI: 選択したログを診断する', run: cmdAiLog },
     { name: 'ai', about: 'AI: 自由に訊く', arg: '訊きたいこと', run: cmdAiAsk },
@@ -2162,17 +2220,17 @@ const COMMANDS = [
     // knows `:mkdir -p` should not have to find out that this one is different.
     { name: 'mkdir', about: 'ディレクトリを作る（:mkdir -p a/b/c）', arg: '名前', run: cmdMkdir },
     { name: 'touch', about: 'ファイルを作る／時刻を更新', arg: '名前', run: cmdTouch },
-    { name: 'cp', about: '反対ペインへコピー', run: () => operate('copy') },
-    { name: 'mv', about: '反対ペインへ移動', run: () => operate('move') },
+    { name: 'cp', about: 'コピー — 引数なしで反対ペインへ、:cp <行き先> でそこへ', arg: '行き先', optional: true, run: (a) => a ? cmdTo('copyto', a) : operate('copy') },
+    { name: 'mv', about: '移動 — 引数なしで反対ペインへ、:mv <行き先> でそこへ', arg: '行き先', optional: true, run: (a) => a ? cmdTo('moveto', a) : operate('move') },
     { name: 'rm', about: '削除（ゴミ箱へ）', run: () => operate('delete') },
     { name: 'pwd', about: 'いまの場所を表示してクリップボードへ', run: cmdPwd },
     { name: 'ls', about: '読み直す（:ls -a で隠しファイル切替）', run: cmdLs },
-    { name: 'q', about: '閉じる', run: () => window.close() },
+    { name: 'q', about: '閉じる（確認します）', run: cmdQuit },
     { name: 'each', about: 'マーク各ファイルにコマンド — {} がパス', arg: 'コマンド', run: cmdEach },
     { name: 'nobom', about: 'UTF-8 BOM を除去（UTF-16 は触らない）', run: cmdNoBom },
     { name: 'renamelist', about: '名前の一覧を編集してリネーム', run: cmdRenameList },
     { name: 'outline', about: '開いているファイルの見出し一覧', run: cmdOutline },
-    { name: 'sort2', about: '開いているファイルの行をソート', run: () => textOp('sort') },
+    { name: 'sort', about: '開いているファイルの行をソート', run: () => textOp('sort') },
     { name: 'rsort', about: '行を逆順ソート', run: () => textOp('rsort') },
     { name: 'uniq', about: '重複行を落とす', run: () => textOp('uniq') },
     { name: 'han', about: '全角ASCII → 半角', run: () => textOp('han') },
@@ -2190,13 +2248,30 @@ const COMMANDS = [
     { name: 'back', about: 'ひとつ前のディレクトリへ', run: () => step('back') },
     { name: 'forward', about: 'ひとつ先のディレクトリへ', run: () => step('forward') },
     { name: 'history', about: 'このペインの履歴', run: cmdHistory },
-    { name: 'cd', about: '入力したパスへ移動', arg: 'パス', run: (a) => goToPath(a) },
+    { name: 'cd', about: ':cd <パス> / :cd .. / :cd - / :cd ~', arg: 'パス', run: cmdCd },
     { name: 'hidden', about: '隠しファイルの表示切替', run: toggleHidden },
     { name: 'refresh', about: '読み直す', run: reread },
     { name: 'undo', about: '直前の操作を取り消す', run: undo },
     { name: 'menu', about: 'トグルメニュー', run: () => openMenu(TOGGLES) },
     { name: 'help', about: 'キー一覧', run: openHelp },
 ];
+
+/// `:q` — with the question, as the terminal build asks it. A window's ✕
+/// button exists, so anyone typing :q is a person whose hands close things
+/// by keyboard — and a typo away from :w.
+/// `:cd`, the four ways the terminal build spells it. `-` is the previous
+/// directory — the pane's own history already remembers it, so it is `back`
+/// by another name. `~` and relatives resolve in the engine, against the
+/// pane rather than against wherever the engine process was started.
+async function cmdCd(dest) {
+    if (dest.trim() === '-') { await step('back'); return; }
+    await goToPath(dest.trim());
+}
+
+async function cmdQuit() {
+    if (await confirm('cian を閉じます', '')) window.close();
+    else say('やめました');
+}
 
 async function cmdMkdir(spec) {
     // `-p a/b/c` makes the whole chain; without it, one directory here.
@@ -2276,13 +2351,13 @@ async function cmdQueue() {
         sub: j.stopping ? '止めています…' : (j.dest || ''),
         op: j.op,
     })), {
-        foot: 'x 止める   b 動かしたまま閉じる   Esc 閉じる',
+        foot: 'x 中止   b 動かしたまま閉じる   Esc 閉じる',
         act: {
             x: async () => {
                 const row = report.rows[report.at];
                 if (!row) return;
                 await ask('cancel', { op: row.op });
-                say(`#${row.op} を止めています`);
+                say(`#${row.op} を中止しています`);
                 closeReport();
             },
             // `b` puts it out of the way and leaves it running — the terminal
@@ -2514,6 +2589,50 @@ function toggleKeyEcho() {
 // `..` climbs, and `c` across to the other pane is an upload or a download
 // depending on which side you are standing on. That is the terminal build's
 // arrangement, and the reason it is worth having at all: nothing new to learn.
+
+/// `Shift+S` — the hosts init.lua declares, picked rather than typed.
+///
+/// Whether a password is stored comes over as a yes or a no; the password
+/// itself never leaves the engine, which resolves it (or runs password_cmd)
+/// at connect time.
+async function cmdSshPicker() {
+    const r = await ask('sshhosts', {});
+    if (!r) return;
+    if (!r.hosts.length) { await cmdConnect(); return; }
+    const rows = [];
+    for (const h of r.hosts) {
+        for (const u of h.users) {
+            rows.push({
+                n: u.stored ? '鍵あり' : '',
+                label: `${u.name}@${h.name}`,
+                sub: `${h.host}:${h.port}`,
+                host: h.at,
+                user: u.at,
+                stored: u.stored,
+                who: `${u.name}@${h.host}`,
+            });
+        }
+    }
+    show('SSH', `${rows.length} 件（init.lua の cian.ssh）`, rows, {
+        foot: 'Enter 接続   Esc 閉じる',
+        pick: async (row) => {
+            closeReport();
+            let password;
+            if (!row.stored) {
+                password = await askFor(`${row.who} のパスワード`, '', { secret: true });
+                if (password === null) return;
+            }
+            say(`${row.who} に繋いでいます…`);
+            const c = await ask('connect', {
+                pane: state.focus, preset_host: row.host, preset_user: row.user, password,
+            });
+            if (!c) return;
+            state[state.focus] = c.pane;
+            draw(state.focus);
+            say(`${c.host}  ${c.path}`);
+        },
+    });
+}
 
 async function cmdConnect() {
     const spec = await askFor('user@host[:port][:/path]', '');
@@ -2776,7 +2895,9 @@ async function cmdEach(line) {
 }
 
 function findCommand(name) {
-    return COMMANDS.find((c) => c.name === name);
+    // Aliases carry the terminal build's other spellings (`:duplicate`,
+    // `:dup`) without a second palette entry per spelling.
+    return COMMANDS.find((c) => c.name === name || (c.alias || []).includes(name));
 }
 
 /// `:` — the name, then whatever it takes.
@@ -2871,7 +2992,7 @@ async function cmdAttr() {
         { label: '種類', sub: r.is_dir ? 'ディレクトリ' : 'ファイル' },
         { label: 'モード', sub: r.mode || '(なし)' },
         { label: '読み取り専用', sub: r.readonly ? 'はい' : 'いいえ' },
-        { label: '所有者', sub: r.owner || '(不明)' },
+        { label: '所有者', sub: r.owner || '(なし)' },
         { label: '大きさ', sub: r.size === null ? '—' : `${human(r.size)}（${r.size.toLocaleString()} バイト）` },
         { label: '場所', sub: r.path },
     ];
@@ -3301,15 +3422,20 @@ async function cmdRenamePattern(pattern) {
         });
 }
 
-async function cmdCompress(kind) {
+async function cmdCompress(kind, encrypted = false) {
     const pane = state[state.focus];
     const rows = pane.entries.filter((x) => x.marked);
     const what = rows.length ? rows : [pane.entries[pane.cursor]].filter((x) => x && !x.parent);
     if (!what.length) { say('対象がありません', true); return; }
     const name = await askFor('アーカイブの名前（拡張子なし）', what[0].name.replace(/\.[^.]*$/, ''));
     if (name === null || !name) return;
+    let password;
+    if (encrypted) {
+        password = await askFor('zip のパスワード', '', { secret: true });
+        if (password === null || !password) return;
+    }
     say(`${kind} を作っています…`);
-    const r = await ask('compress', { pane: state.focus, kind, name });
+    const r = await ask('compress', { pane: state.focus, kind, name, password });
     if (!r) return;
     state[state.focus] = r.pane;
     draw(state.focus);
@@ -3402,18 +3528,34 @@ async function redo() {
 /// somewhere to live, which is the same open question as the look and the
 /// editor style, so this is the half that needs nothing written down.
 async function cmdJump() {
-    const seen = [];
+    // Recents and bookmarks together, which is what the terminal build's `Z`
+    // is: "fuzzy-jump to a recent / bookmarked directory". Bookmarks first —
+    // a place worth naming outranks a place merely visited.
+    const rows = [];
+    const seen = new Set();
+    const marks = await ask('shortcuts', {});
+    if (marks) {
+        for (const x of marks.rows) {
+            if (x.target && !seen.has(x.target)) {
+                seen.add(x.target);
+                rows.push({ n: '★', label: x.name, sub: x.target, target: x.target });
+            }
+        }
+    }
     for (const which of ['left', 'right']) {
         const r = await ask('history', { pane: which });
         if (!r) continue;
         for (const p of [r.cwd, ...r.back, ...r.forward]) {
-            if (!seen.includes(p)) seen.push(p);
+            if (!seen.has(p)) {
+                seen.add(p);
+                rows.push({ n: '', label: p, target: p });
+            }
         }
     }
-    if (!seen.length) { say('まだどこにも行っていません'); return; }
-    show('行き先', `${seen.length} 件`, seen.map((p) => ({ label: p })), {
+    if (!rows.length) { say('まだどこにも行っていません'); return; }
+    show('行き先', `${rows.length} 件（★ = 登録済み）`, rows, {
         foot: 'Enter そこへ   Esc 閉じる',
-        pick: (row) => { closeReport(); revealPath(row.label, true); },
+        pick: (row) => { closeReport(); revealPath(row.target, true); },
     });
 }
 
@@ -3868,10 +4010,10 @@ async function cmdWhere() {
     const r = await ask('where', {});
     if (!r) return;
     show('設定の場所', '書き込み先: ' + (r.writes || '(不明)'), [
-        { label: 'init.lua', sub: r.config || '(無し)' },
-        { label: 'state.toml', sub: r.state || '(無し)' },
-        { label: 'shortcuts.lua', sub: r.shortcuts || '(無し)' },
-        { label: 'macro.lua', sub: r.macros || '(無し)' },
+        { label: 'init.lua', sub: r.config || '(なし)' },
+        { label: 'state.toml', sub: r.state || '(なし)' },
+        { label: 'shortcuts.lua', sub: r.shortcuts || '(なし)' },
+        { label: 'macro.lua', sub: r.macros || '(なし)' },
     ], { foot: 'Esc 閉じる' });
 }
 
@@ -4201,6 +4343,10 @@ for (const which of ['left', 'right']) {
         if (!paths.length) { say('落とされたものの場所が分かりません', true); return; }
         const dest = state[which];
         if (!dest) return;
+        // A drop lands in `pane.cwd`, and on a remote pane that is still the
+        // *local* directory from before the connection — the files would move
+        // somewhere real and invisible, which is the worst combination.
+        if (dest.remote) { say('サーバへのドロップはまだです', true); return; }
         const names = paths.map((p) => p.split(/[\\/]/).pop());
         if (!await confirm(`${paths.length} 件を ${dest.cwd} へ移動します`, names.join('\n'))) {
             say('やめました');

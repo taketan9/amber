@@ -66,6 +66,10 @@ struct PaneView {
     /// This side's tabs — one crumb each — and which is showing.
     tabs: Vec<String>,
     tab: usize,
+    /// The filter narrowing this listing, when one is. Esc has to know
+    /// whether there is anything to clear, and guessing from the row count
+    /// cannot tell "filtered to 3" from "a folder with 3 things in it".
+    filter: String,
     /// The archive this pane is looking inside, if it is. The window needs it
     /// for the same reason it needs `remote`: the rows name nothing on this
     /// disk, so opening one has to go a different way.
@@ -130,6 +134,7 @@ impl PaneView {
             tab: 0,
             remote: pane.remote_view().map(|(host, _)| host.to_string()),
             archive: pane.archive_view().map(|(a, _)| a.display().to_string()),
+            filter: pane.filter.clone(),
             entries: pane
                 .entries
                 .iter()
@@ -357,6 +362,15 @@ impl Session {
         self.view(which)
     }
 
+    /// This pane's directory without borrowing the pane mutably — `list`
+    /// needs it while it is still deciding what to do.
+    fn pane_cwd(&self, which: &str) -> std::path::PathBuf {
+        match which {
+            "right" => self.right.get().cwd.clone(),
+            _ => self.left.get().cwd.clone(),
+        }
+    }
+
     fn targets(&self, which: &str) -> anyhow::Result<Vec<std::path::PathBuf>> {
         let pane = match which {
             "left" => self.left.get(),
@@ -481,7 +495,19 @@ impl Session {
             // Read a directory into a pane.
             "list" => {
                 let which = req.params["pane"].as_str().unwrap_or("left").to_string();
-                let path = req.params["path"].as_str().map(std::path::PathBuf::from);
+                let path = req.params["path"].as_str().map(|raw| {
+                    // `~` and relative paths resolve against the *pane*, not
+                    // against wherever the engine process happens to have been
+                    // started. `is_dir()` on a bare ".." answers for the
+                    // process's directory, which is a different place with the
+                    // same name.
+                    let p = std::path::PathBuf::from(shellexpand(raw));
+                    if p.is_absolute() {
+                        p
+                    } else {
+                        self.pane_cwd(&which).join(p)
+                    }
+                });
                 let pane = self.pane_mut(&which)?;
                 if let Some(p) = path {
                     if !p.is_dir() {
@@ -514,7 +540,10 @@ impl Session {
                         return self.archive_up(&which, &archive, &sub);
                     }
                     if !row.is_dir {
-                        anyhow::bail!("アーカイブ内のファイルはまだ開けません");
+                        // The window reads members itself (Enter and F3 both route to the
+                        // extract-and-open path); reaching this line means an old front
+                        // end, so the message says what to do rather than "not yet".
+                        anyhow::bail!("アーカイブ内のファイルは F3 で開いてください");
                     }
                     let deeper = format!("{sub}{}/", row.name);
                     let members = cian_core::archive::list(&archive)?;
@@ -1702,13 +1731,64 @@ impl Session {
             // and `c`/`m` across to the other pane are an upload or a
             // download. That is the terminal build's arrangement and the
             // reason it is worth having at all.
+            // The hosts init.lua declares, for the Shift+S picker. Names
+            // only — whether a password is stored is a yes or a no, never the
+            // password itself. Secrets do not travel to the window.
+            "sshhosts" => {
+                let cfg = cian_lua::load();
+                Ok(serde_json::json!({
+                    "hosts": cfg.ssh_hosts.iter().enumerate().map(|(i, h)| serde_json::json!({
+                        "at": i,
+                        "name": h.name,
+                        "host": h.host,
+                        "port": h.port.unwrap_or(22),
+                        "users": h.users.iter().enumerate().map(|(j, u)| serde_json::json!({
+                            "at": j,
+                            "name": u.name,
+                            "stored": u.password.is_some() || u.password_cmd.is_some(),
+                        })).collect::<Vec<_>>(),
+                    })).collect::<Vec<_>>(),
+                }))
+            }
             "connect" => {
                 let which = req.params["pane"].as_str().unwrap_or("left").to_string();
-                let target = cian_scp::Target {
-                    host: req.params["host"].as_str().unwrap_or("").to_string(),
-                    port: req.params["port"].as_u64().unwrap_or(22) as u16,
-                    user: req.params["user"].as_str().unwrap_or("").to_string(),
-                    password: req.params["password"].as_str().unwrap_or("").to_string(),
+                // Either spelled out, or named from the config. The named form
+                // resolves the stored password (or runs password_cmd) here, so
+                // the secret exists in the engine and nowhere else.
+                let target = if let Some(hi) = req.params["preset_host"].as_u64() {
+                    let cfg = cian_lua::load();
+                    let h = cfg
+                        .ssh_hosts
+                        .get(hi as usize)
+                        .ok_or_else(|| anyhow::anyhow!("そのホストはありません"))?;
+                    let u = h
+                        .users
+                        .get(req.params["preset_user"].as_u64().unwrap_or(0) as usize)
+                        .ok_or_else(|| anyhow::anyhow!("そのユーザはありません"))?;
+                    let password = match (&u.password, &u.password_cmd) {
+                        (Some(p), _) => p.clone(),
+                        (None, Some(cmd)) => {
+                            let out = cian_core::proc::quiet(
+                                if cfg!(windows) { "cmd" } else { "sh" })
+                                .args(if cfg!(windows) { ["/C", cmd.as_str()] } else { ["-c", cmd.as_str()] })
+                                .output()?;
+                            String::from_utf8_lossy(&out.stdout).trim_end().to_string()
+                        }
+                        (None, None) => req.params["password"].as_str().unwrap_or("").to_string(),
+                    };
+                    cian_scp::Target {
+                        host: h.host.clone(),
+                        port: h.port.unwrap_or(22),
+                        user: u.name.clone(),
+                        password,
+                    }
+                } else {
+                    cian_scp::Target {
+                        host: req.params["host"].as_str().unwrap_or("").to_string(),
+                        port: req.params["port"].as_u64().unwrap_or(22) as u16,
+                        user: req.params["user"].as_str().unwrap_or("").to_string(),
+                        password: req.params["password"].as_str().unwrap_or("").to_string(),
+                    }
                 };
                 if target.host.is_empty() || target.user.is_empty() {
                     anyhow::bail!("ホストとユーザが要ります");
@@ -2706,8 +2786,13 @@ impl Session {
                     anyhow::bail!("{name} を取り出せませんでした");
                 }
                 let at = dir.join(&name);
+                let writable = zip_writable(&archive);
                 self.member = Some((archive, member, at.clone()));
-                Ok(serde_json::json!({ "path": at.display().to_string(), "name": name }))
+                Ok(serde_json::json!({
+                    "path": at.display().to_string(),
+                    "name": name,
+                    "writable": writable,
+                }))
             }
             // Put an edited member back into the archive it came from.
             //
@@ -2719,6 +2804,12 @@ impl Session {
                 let Some((archive, member, at)) = self.member.clone() else {
                     anyhow::bail!("アーカイブから開いたファイルがありません");
                 };
+                // zip only, and said so. `zip_modify` rebuilds a zip; pointed
+                // at a tar it would write a zip with a tar's name, which is
+                // strictly worse than refusing.
+                if !zip_writable(&archive) {
+                    anyhow::bail!("書き戻せるのは zip だけです（tar はまだ）");
+                }
                 // The window sends what it is holding, and that is written to
                 // the temporary before it is packed. Relying on something else
                 // having written the temporary already is how a save reports
@@ -3222,4 +3313,16 @@ fn quietly<T>(f: impl FnOnce(&mut cian_core::progress::Ctl) -> T) -> T {
     let mut noop = |_: &cian_core::progress::Progress| {};
     let mut ctl = cian_core::progress::Ctl { cancel: &stop, on_progress: &mut noop };
     f(&mut ctl)
+}
+
+/// Whether an edited member can go back into this archive.
+///
+/// `zip_modify` rebuilds zips; handed a tar it would write a zip under a
+/// tar's name. The terminal build draws the same line ("F3 inside a *zip* …
+/// it goes back into the zip"), so the answer is by container, up front.
+fn zip_writable(archive: &std::path::Path) -> bool {
+    matches!(
+        archive.extension().and_then(|e| e.to_str()).map(|e| e.to_ascii_lowercase()).as_deref(),
+        Some("zip" | "jar")
+    )
 }
