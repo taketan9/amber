@@ -6331,6 +6331,20 @@ async function scrollShell(lines) {
 // ─────────────────────────────────────────────────────────────────────────
 for (const which of ['left', 'right']) {
     const pane = el[which];
+    // Clicking a pane puts the keys in it — anywhere in it, and whether or
+    // not there is a row under the pointer.
+    //
+    // The row handlers moved the *cursor* and the current pane, which is not
+    // the same question: with the shell focused, clicking a listing left the
+    // keyboard in the shell, so neither surface looked right. Registered on
+    // the pane once rather than on every row every repaint, so an empty pane
+    // and the path line take focus too.
+    pane.addEventListener('mousedown', () => {
+        setShellFocus(false);
+        state.focus = which;
+        draw('left');
+        draw('right');
+    });
     pane.addEventListener('dragover', (e) => {
         e.preventDefault();
         e.dataTransfer.dropEffect = 'move';

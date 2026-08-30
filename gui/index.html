@@ -495,7 +495,12 @@ html, body {
    which is listening is the failure mode of every split terminal. */
 /* Two pixels, matching the file panes: one was a hairline that disappeared
    against half the palettes. */
-.sgrid.on { box-shadow: inset 0 0 0 2px var(--accent); }
+/* Which split pane is current, and — separately — whether the keys are in
+   the shell at all. Painted with the accent unconditionally, the panel went
+   on wearing the focus colour while you were typing in a file pane, so two
+   surfaces claimed the keyboard at once. Quiet when the keys are elsewhere. */
+.sgrid.on { box-shadow: inset 0 0 0 2px var(--line); }
+#shell.on .sgrid.on { box-shadow: inset 0 0 0 2px var(--accent); }
 /* The seam between split panes, drawn on each pane's own left/top edge —
    the panes are absolutely placed from engine fractions, so an
    adjacent-sibling border landed on whichever node happened to be second in
