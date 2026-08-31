@@ -2811,6 +2811,13 @@ impl Session {
                 "shortcuts": cian_lua::config_read_path("shortcuts.lua").map(|p| p.display().to_string()),
                 "macros": cian_lua::config_read_path("macro.lua").map(|p| p.display().to_string()),
                 "writes": cian_lua::config_write_path("init.lua").map(|p| p.display().to_string()),
+                // Which build this is. The version number cannot say — every
+                // release this year is 1.1.0 on purpose — so `:version` had
+                // no way to tell today's engine from last week's, which is
+                // the first thing to establish when a fix looks unapplied.
+                "version": env!("CARGO_PKG_VERSION"),
+                "commit": env!("CIAN_COMMIT"),
+                "built_at": env!("CIAN_BUILT_AT").parse::<i64>().unwrap_or(0),
             })),
             // Mark by pattern. `*.rs` is what a person types; it becomes a
             // glob rather than a regex, because that is what the asterisk

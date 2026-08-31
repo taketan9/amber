@@ -203,10 +203,6 @@ html, body {
   flex: 1 1 0; min-width: 0; min-height: 0; display: flex; flex-direction: column;
   background: var(--pane-off);
 }
-/* Which pane has the keys, said in tone rather than in a frame: the one you
-   are in is lit, the other sits back. A 2px accent border around a pane is
-   the loudest way to answer a question the cursor already answers. */
-.pane.active { background: var(--pane); }
 /* Two different questions, and they were one class.
    `.active` is *which pane is the current one* — what Tab switches, what the
    one-pane views show, what F12 zooms. `#work[data-focus]` is *where the keys
@@ -214,6 +210,20 @@ html, body {
    accent frame while you were typing into the shell, so two surfaces claimed
    the keyboard at once. */
 .pane.active { background: var(--pane); }
+/* Tone alone used to be the whole answer, on the argument that a frame is the
+   loudest way to say something the cursor already says. It was asked about
+   three times — on a light palette the two grounds are a couple of percent
+   apart and the argument does not survive that. So: a frame, and only while
+   the files actually hold the keys. */
+#work[data-focus="files"] .pane.active {
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+/* And the pane that is not current steps back rather than merely being a
+   shade darker — the eye should land on the live one without being asked. */
+.pane:not(.active) .rows,
+.pane:not(.active) .crumb,
+.pane:not(.active) .dhead,
+.pane:not(.active) .tabs { opacity: .62; }
 
 /* Icons take the whole window. Tiles need width, and two halves of a window
    give a wall of icons two narrow columns of them — which is neither of the

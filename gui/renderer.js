@@ -4162,18 +4162,53 @@ async function goTab(which, how) {
 /// delete, `r` rename, `p` copy the target) and the window could only read
 /// the list and jump. Same letters, same file — `shortcuts.lua`, which both
 /// builds read, so a bookmark made in one is there in the other.
+/// Which folder of the bookmarks is open, as a list of row names.
+///
+/// cian-tui shows one level at a time and walks into a folder on Enter
+/// (keys.rs, over `sc_level(entries, path)`). The window laid the whole tree
+/// out flat and put two spaces of indent in front of each name to suggest the
+/// nesting — so a folder was permanently open, and the path in the second
+/// column inherited the indent and sat at a margin of its own.
+let scPath = [];
+
 async function cmdShortcuts() {
     const r = await ask('shortcuts', {});
     if (!r) return;
-    const rows = r.rows.map((x) => ({
+    // The engine hands back a depth-first walk with a depth on each row.
+    // Rebuild the shape it walked, so a level can be asked for.
+    const roots = [];
+    const stack = [{ kids: roots, depth: -1 }];
+    for (const x of r.rows) {
+        while (stack.length > 1 && stack[stack.length - 1].depth >= x.depth) stack.pop();
+        const node = { ...x, kids: x.group ? [] : null };
+        stack[stack.length - 1].kids.push(node);
+        if (x.group) stack.push({ kids: node.kids, depth: x.depth });
+    }
+    // Walk down to whatever was open. A folder that has since been renamed or
+    // deleted drops the path rather than showing an empty level with no way
+    // back — the list is re-read after every edit, so this happens.
+    let here = roots;
+    const open = [];
+    for (const name of scPath) {
+        const found = here.find((n) => n.group && n.name === name);
+        if (!found) break;
+        open.push(name);
+        here = found.kids;
+    }
+    scPath = open;
+
+    const rows = here.map((x) => ({
         n: x.group ? '▸' : '',
-        label: '  '.repeat(x.depth) + x.name,
-        sub: x.target || '',
+        label: x.name,
+        sub: x.group ? `${x.kids.length} 件` : (x.target || ''),
         target: x.target,
         at: x.at,
         group: x.group,
         plain: x.name,
     }));
+    if (scPath.length) {
+        rows.unshift({ n: '◂', label: '戻る', sub: scPath.join(' / '), up: true, plain: '' });
+    }
     // Even with nothing in it: `a` has to have somewhere to be pressed.
     const edit = async (params, done) => {
         const res = await ask('shortcutedit', params);
@@ -4183,9 +4218,17 @@ async function cmdShortcuts() {
         closeReport();
         cmdShortcuts();
     };
-    show('ショートカット', rows.length ? (r.where || '') : '登録がありません', rows, {
-        foot: 'Enter そこへ   a 追加   A まとめる   r 名前   d 削除   p パス   Esc 閉じる',
-        pick: (row) => { if (row.target) { closeReport(); revealPath(row.target, true); } },
+    show('ショートカット' + (scPath.length ? ` / ${scPath.join(' / ')}` : ''),
+        rows.length ? (r.where || '') : '登録がありません', rows, {
+        foot: 'Enter 開く／そこへ   a 追加   A まとめる   r 名前   d 削除   p パス   Esc 閉じる',
+        // Enter on a folder walks into it, as the terminal build's does; on a
+        // bookmark it goes there. Nothing else opens a level, so a folder that
+        // is not entered stays shut.
+        pick: (row) => {
+            if (row.up) { scPath.pop(); closeReport(); cmdShortcuts(); return; }
+            if (row.group) { scPath.push(row.plain); closeReport(); cmdShortcuts(); return; }
+            if (row.target) { closeReport(); revealPath(row.target, true); }
+        },
         act: {
             a: async () => {
                 const name = await askFor('ここを登録する名前', state[state.focus].cwd.split(/[\\/]/).pop() || '');
@@ -5945,6 +5988,29 @@ document.addEventListener('keydown', (e) => {
     togglePreview2();
 }, true);
 
+/// Ctrl+C / Ctrl+X / Ctrl+V keep meaning the clipboard in vim style.
+///
+/// This is cian-tui's rule, stated in one line at the top of its grammar
+/// (viewer.rs `viewer_vim_key`): if CONTROL or ALT is held, the vim grammar
+/// declines the key and it falls through to the ordinary handlers. So in the
+/// terminal build's vim style these three are still copy, cut and paste.
+///
+/// monaco-vim disagrees — it wants Ctrl+V for visual block, Ctrl+C for
+/// "back to normal" and Ctrl+X for decrement — so in the window, vim style
+/// silently had no clipboard while notepad style did. Reported from Windows,
+/// 2026-08-31.
+///
+/// `stopPropagation` and *not* `preventDefault`: the point is to keep the
+/// editor's own handler from seeing the chord while leaving the browser free
+/// to perform the copy. Preventing the default would take the clipboard away
+/// from both of them, which is the bug wearing a different hat.
+document.addEventListener('keydown', (e) => {
+    if (!viewer.on || !viewer.vim) return;
+    if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey) return;
+    if (!/^[cxvCXV]$/.test(e.key)) return;
+    e.stopPropagation();
+}, true);
+
 async function togglePreview2() {
     if (!viewer.on || !viewer.ed) { say('先にファイルを開いてください', true); return; }
     if (reading) {
@@ -6166,10 +6232,21 @@ async function cmdRecent() {
 }
 
 async function cmdVersion() {
-    const w = await ask('where', {});
-    show('cian', 'GUI 1.1.0 — cian-core の上の窓', [
-        { label: '設定', sub: (w && w.config) || '(なし)' },
-        { label: '書き込み先', sub: (w && w.writes) || '(なし)' },
+    const w = await ask('where', {}) || {};
+    // When this engine was built, and from what. The version number is the
+    // same on every build this year by design, so on its own it cannot answer
+    // the only question anybody opens this to ask: am I running the thing I
+    // just downloaded? Local time, because that is the clock beside the person
+    // reading it.
+    const built = w.built_at
+        ? new Date(w.built_at * 1000).toLocaleString('ja-JP',
+            { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+        : '(不明)';
+    show('cian', `${w.version || '1.1.0'} — cian-core の上の窓`, [
+        { label: 'ビルド日時', sub: built + (w.commit ? `   ${w.commit}` : '') },
+        { label: '書体', sub: `${resolvedFace()}   ${FONT.at}px` },
+        { label: '設定', sub: w.config || '(なし)' },
+        { label: '書き込み先', sub: w.writes || '(なし)' },
         { label: 'エンジン', sub: 'cian-server（JSON lines / stdio）' },
     ], { foot: 'Esc 閉じる' });
 }
