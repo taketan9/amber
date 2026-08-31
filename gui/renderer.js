@@ -3323,6 +3323,10 @@ const viewer = {
 /// door that makes the window do the same, rather than eight remembered calls.
 function setViewerOn(on) {
     viewer.on = on;
+    // A diagram parked in the editor belongs to the file that was open. Left
+    // behind, the next file inherits somebody else's picture at whatever line
+    // number it happened to be on.
+    if (!on) { clearDiagramZones(); zones.on = false; }
     drawHints();
 }
 
@@ -6527,6 +6531,122 @@ async function drawDiagrams() {
     }
 }
 
+/// The diagrams, drawn **inside the editor**, under the fence they come from.
+///
+/// Taketan asked for this and it is the thing a window can do that a terminal
+/// cannot even approximate: a view zone is a strip of real DOM that Monaco
+/// keeps parked at a line, so the source stays exactly where it was — still
+/// editable, still searchable, still vim — with the picture sitting under the
+/// ```mermaid fence that produced it.
+///
+/// The terminal build's answer to "show me the diagram" is to leave: a browser
+/// (`:mermaid`) or a rendered document instead of the source. Both make you
+/// choose between reading the diagram and editing the text that makes it.
+const zones = { ids: [], nodes: [], on: false, seq: 0 };
+
+/// Where each ```mermaid fence starts and ends, and what is between them.
+///
+/// The same fence rule `cian_core::mermaid::extract_blocks` uses — ``` or ~~~
+/// with `mermaid` after it — but it has to be done here as well as there,
+/// because the zones need the *line numbers* and the engine's extractor
+/// returns only the text. Kept next to that fact so the two stay together.
+function mermaidFences(lines) {
+    const out = [];
+    for (let i = 0; i < lines.length; i++) {
+        const t = lines[i].trimStart();
+        const open = (t.startsWith('```') || t.startsWith('~~~'))
+            && t.replace(/^[`~]+/, '').trim().toLowerCase() === 'mermaid';
+        if (!open) continue;
+        let j = i + 1;
+        const body = [];
+        while (j < lines.length
+               && !(lines[j].trimStart().startsWith('```') || lines[j].trimStart().startsWith('~~~'))) {
+            body.push(lines[j]);
+            j++;
+        }
+        if (body.join('\n').trim()) out.push({ end: Math.min(j + 1, lines.length), src: body.join('\n') });
+        i = j;
+    }
+    return out;
+}
+
+function clearDiagramZones() {
+    if (!viewer.ed || !zones.ids.length) return;
+    viewer.ed.changeViewZones((acc) => {
+        for (const id of zones.ids) acc.removeZone(id);
+    });
+    zones.ids = [];
+    zones.nodes = [];
+}
+
+/// Draw (or redraw) every fence's diagram as a zone under it.
+async function drawDiagramZones() {
+    if (!viewer.ed) return;
+    clearDiagramZones();
+    const lines = viewer.ed.getModel().getValue().split(/\r?\n/);
+    const fences = mermaidFences(lines);
+    if (!fences.length) return 0;
+    let mermaid;
+    try {
+        mermaid = await loadMermaid();
+    } catch (e) { say(e.message, true); return 0; }
+    const body = getComputedStyle(document.body).fontFamily;
+    mermaid.initialize({
+        startOnLoad: false,
+        securityLevel: 'strict',
+        theme: isDark() ? 'dark' : 'default',
+        fontFamily: body,
+        themeVariables: { fontFamily: body },
+    });
+    const drawn = [];
+    for (const f of fences) {
+        const node = document.createElement('div');
+        node.className = 'zone-diagram';
+        try {
+            zones.seq += 1;
+            const { svg } = await mermaid.render(`cian-zone-${zones.seq}`, f.src);
+            node.innerHTML = svg;
+        } catch (e) {
+            // The source is already on screen right above, so a failed
+            // diagram says why rather than leaving a gap.
+            node.textContent = `図として読めませんでした: ${String(e.message || e).split('\n')[0]}`;
+            node.classList.add('bad');
+        }
+        drawn.push({ line: f.end, node });
+    }
+    // A zone's height is given to Monaco in pixels, and a diagram's height is
+    // whatever mermaid decided at the width it ends up with. Measuring a copy
+    // off screen gets the wrong number — the copy lays out in a box with no
+    // width — so the zone goes in at a guess and is measured **in place**,
+    // then told its real height. The first version clipped every diagram.
+    const specs = [];
+    viewer.ed.changeViewZones((acc) => {
+        for (const d of drawn) {
+            const spec = { afterLineNumber: d.line, heightInPx: 200, domNode: d.node };
+            specs.push(spec);
+            zones.nodes.push(d.node);
+            zones.ids.push(acc.addZone(spec));
+        }
+    });
+    // One frame later the nodes have a width and the SVGs have scaled to it.
+    await new Promise((ok) => requestAnimationFrame(() => requestAnimationFrame(ok)));
+    let changed = false;
+    for (let i = 0; i < specs.length; i++) {
+        const inner = zones.nodes[i].firstElementChild;
+        const h = Math.ceil((inner ? inner.getBoundingClientRect().height : 0) + 16);
+        if (h > 20 && Math.abs(h - specs[i].heightInPx) > 1) {
+            specs[i].heightInPx = h;
+            changed = true;
+        }
+    }
+    if (changed) {
+        viewer.ed.changeViewZones((acc) => {
+            for (const id of zones.ids) acc.layoutZone(id);
+        });
+    }
+    return drawn.length;
+}
+
 /// `Ctrl+E` — the rendered document and the source, back and forth.
 ///
 /// In the capture phase, and this is the whole reason it works: Monaco binds
@@ -6573,7 +6693,13 @@ async function togglePreview2() {
         el.vRead.hidden = true;
         el.vBody.hidden = false;
         viewer.ed.focus();
-        say('ソースに戻りました');
+        // Back to the source — with the diagrams still on screen, parked
+        // under the fences that make them. Asked for by name: the point of a
+        // window is not having to choose between reading the picture and
+        // editing the text.
+        const n = await drawDiagramZones();
+        zones.on = !!n;
+        say(n ? `ソースに戻りました — 図 ${n} 件はそのまま出しています` : 'ソースに戻りました');
         return;
     }
     const r = await ask('markdown', { lines: viewer.ed.getValue().split(/\r?\n/) });
@@ -6593,6 +6719,9 @@ async function togglePreview2() {
         });
     }
     reading = true;
+    // The zones belong to the editor, and the editor is about to be hidden.
+    clearDiagramZones();
+    zones.on = false;
     el.vBody.hidden = true;
     el.vRead.hidden = false;
     el.vRead.scrollTop = 0;

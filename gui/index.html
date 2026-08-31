@@ -210,6 +210,15 @@ html, body {
    accent frame while you were typing into the shell, so two surfaces claimed
    the keyboard at once. */
 .pane.active { background: var(--pane); }
+/* A diagram parked in the editor, under the fence that makes it. White ground
+   whatever the theme: mermaid draws for a page, and its own dark theme still
+   assumes ink darker than the lines it draws. */
+.zone-diagram {
+  display: flex; align-items: flex-start; justify-content: center;
+  padding: 8px 0; overflow: auto;
+}
+.zone-diagram svg { max-width: 100%; height: auto; }
+.zone-diagram.bad { color: var(--k-archive); font-size: 0.9em; justify-content: flex-start; padding-left: 12px; }
 /* The two history arrows in the breadcrumb. Quiet until the pointer is on
    them: they are always drawn (a control that comes and goes cannot be aimed
    at) and they are not what the line is for. */
