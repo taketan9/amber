@@ -173,12 +173,12 @@ jobs:
           name: cian-windows-x64
           path: cian-windows-x64.zip
 
-      # The engine on its own, about a megabyte.
+      # The engine on its own, nine megabytes.
       #
       # The Electron front end is developed in-house against a prebuilt engine
       # — Rust is not installed there and does not need to be, since the front
       # end is JavaScript and the engine changes rarely. Carrying the whole
-      # 21MB package for one file that fits on anything is the sort of friction
+      # 25MB package for one file that fits on anything is the sort of friction
       # that stops people updating.
       - name: Stage the engine on its own
         shell: pwsh
@@ -189,6 +189,44 @@ jobs:
         with:
           name: cian-server-win-x64
           path: cian-server-win-x64.exe
+
+      # The window front end, ready to run. cian-windows-x64.zip carries the
+      # three exes and nothing of `gui/`, so until now the only way to get the
+      # Electron build onto a Windows machine was the 175MB source bundle —
+      # for a front end that is JavaScript and needs no compiler at all.
+      #
+      # Everything except Electron itself: the front end, its vendored runtime
+      # (Monaco, monaco-vim, mermaid, the font), and the engine dropped in
+      # beside it, which is the first place engine.js looks.
+      - name: Fetch the editor's runtime
+        run: |
+          cd gui
+          npm install --omit=dev --no-audit --no-fund
+          node vendor.js
+
+      - name: Stage the window front end
+        shell: pwsh
+        run: |
+          $stage = "cian-gui-win-x64"
+          # robocopy rather than Copy-Item: -Exclude does not reach into a
+          # -Recurse copy, and node_modules is a hundred megabytes of the
+          # untrimmed originals that gui/vendor/ already replaces.
+          robocopy gui $stage /E /XD node_modules | Out-Null
+          if ($LASTEXITCODE -ge 8) { throw "robocopy failed ($LASTEXITCODE)" }
+          $global:LASTEXITCODE = 0
+          Copy-Item target/release/cian-server.exe "$stage/"
+          Copy-Item packaging/windows/GUI.txt "$stage/"
+          Copy-Item README.md, README.ja.md, LICENSE "$stage/"
+          New-Item -ItemType Directory -Force -Path "$stage/examples" | Out-Null
+          Copy-Item examples/init.lua "$stage/examples/"
+          Compress-Archive -Path "$stage/*" -DestinationPath "cian-gui-win-x64.zip" -Force
+          "{0:N0} MB" -f ((Get-Item cian-gui-win-x64.zip).Length / 1MB)
+
+      - name: Upload the window front end
+        uses: actions/upload-artifact@v6
+        with:
+          name: cian-gui-win-x64
+          path: cian-gui-win-x64.zip
 
   # The readme has said macOS, Windows and Linux since the first commit, and
   # the release shipped two of them. A tarball rather than a zip, because that

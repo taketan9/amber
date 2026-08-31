@@ -1,0 +1,54 @@
+cian — 窓版（Electron） Windows x64
+===================================
+
+端末版の cian をそのまま窓に移したものです。中身は JavaScript なので、
+コンパイラも Rust も要りません。要るのは Electron 本体だけです。
+
+同梱しているもの
+  main.js / renderer.js / index.html   前面（窓の中身そのもの）
+  vendor\                              エディタの実行時一式
+                                       （Monaco・monaco-vim・mermaid・同梱フォント）
+  cian-server.exe                      エンジン。前面はこれと話します
+  run.bat                              Electron を探して起動する
+  examples\init.lua                    設定の見本
+
+同梱していないもの
+  Electron 本体。247MB あり、社内にすでにあるものを使う前提です。
+  無ければ https://github.com/electron/electron/releases から
+  electron-v33.x.x-win32-x64.zip を落として展開してください。
+
+起動
+  1. この zip を好きな場所に展開する
+  2. Electron の場所を教える（フルパス。electron.exe まで）
+       set CIAN_ELECTRON=C:\tools\electron-v33.4.11-win32-x64\electron.exe
+  3. run.bat
+
+  set を毎回打ちたくないなら、Electron を展開したフォルダをこの zip の展開先の
+  中か、すぐ隣に置いてください。run.bat は CIAN_ELECTRON → 隣の electron-v* →
+  1つ上 → 2つ上 → node_modules の順に探し、見つからなければ探した場所を全部
+  言って止まります（黙って落ちるのが一番たちが悪いので）。
+
+  つまり、こう置けば set は要りません:
+       C:\tools\cian\               ← この zip の中身
+       C:\tools\cian\electron-v33.4.11-win32-x64\electron.exe
+
+設定
+  %USERPROFILE%\.config\cian\init.lua を端末版と共用します。同じファイルが
+  そのまま効きます（CIAN_CONFIG_DIR で置き場所を変えられます）。
+  読む項目は端末版と同じではありません — 窓版が見ているものは
+  gui\ROADMAP.ja.md に一覧があります。
+
+フォント
+  vendor\fonts\cian.ttf（HackGen Console NF）を同梱していて、窓が自分で
+  読み込みます。インストールは不要です。これが無いと一覧が等幅にならず、
+  アイコンが豆腐になります。
+
+うまくいかないとき
+  窓は出るが中身が空
+    cian-server.exe がこのフォルダにあるか確認してください。前面は
+    「隣の cian-server.exe」を最優先で探します。
+  文字が化ける・アイコンが四角
+    vendor\fonts\cian.ttf があるか確認してください。
+  Ctrl のキーが効かない
+    既定のメニューが Ctrl+W などを持っていく問題は前面側で外してあります。
+    それでも効かないものがあれば、どのキーかを控えてください。

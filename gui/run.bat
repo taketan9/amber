@@ -16,14 +16,21 @@ if defined CIAN_ELECTRON (
     if exist "%CIAN_ELECTRON%" set "FOUND=%CIAN_ELECTRON%"
 )
 
-rem 2. リポジトリの隣に展開した配布版（社内はこの形）
+rem 2. すぐ隣、または1つ上に展開した配布版（zip を並べて置いた形）
+if not defined FOUND (
+    for /d %%D in ("%HERE%\electron-v*" "%HERE%\..\electron-v*") do (
+        if exist "%%D\electron.exe" set "FOUND=%%D\electron.exe"
+    )
+)
+
+rem 3. リポジトリの隣に展開した配布版（ソースから開発している形）
 if not defined FOUND (
     for /d %%D in ("%HERE%\..\..\electron-v*") do (
         if exist "%%D\electron.exe" set "FOUND=%%D\electron.exe"
     )
 )
 
-rem 3. npm で入れた場合
+rem 4. npm で入れた場合
 if not defined FOUND (
     if exist "%HERE%\node_modules\electron\dist\electron.exe" (
         set "FOUND=%HERE%\node_modules\electron\dist\electron.exe"
@@ -33,8 +40,9 @@ if not defined FOUND (
 if not defined FOUND (
     echo Electron が見つかりません。探した場所:
     echo   1. %%CIAN_ELECTRON%%  (いまの値: "%CIAN_ELECTRON%"^)
-    echo   2. %HERE%\..\..\electron-v*\electron.exe
-    echo   3. %HERE%\node_modules\electron\dist\electron.exe
+    echo   2. %HERE%\electron-v*\electron.exe  と  %HERE%\..\electron-v*\electron.exe
+    echo   3. %HERE%\..\..\electron-v*\electron.exe
+    echo   4. %HERE%\node_modules\electron\dist\electron.exe
     echo.
     echo 配布版を展開した場所を指定するなら:
     echo   set CIAN_ELECTRON=C:\path\to\electron-v33.4.11-win32-x64\electron.exe
