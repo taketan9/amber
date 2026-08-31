@@ -177,6 +177,12 @@ struct ShellTab {
     /// and the same command on all four. Per tab rather than global, because
     /// the tab you built for that is not the tab you keep a shell in.
     sync: bool,
+    /// Which panes hear the synced input. Empty means "all of them", which is
+    /// what a fresh sync starts as — the subset is for the case where one of
+    /// the four is the box you must not type into. cian-tui's
+    /// `Shells::sync_members`, with the same rule: turning sync off clears it,
+    /// so the next sync starts as all again.
+    sync_members: std::collections::BTreeSet<u64>,
     /// What this tab is *for*, when it has been said. Empty means the tab
     /// shows its number instead.
     ///
@@ -1403,6 +1409,7 @@ impl Session {
                 self.tabs.push(ShellTab {
                     root: shell::Node::Leaf(id), focus: id,
                     sync: false, zoom: false, name: String::new(),
+                    sync_members: Default::default(),
                 });
                 self.shell_at = self.tabs.len() - 1;
                 Ok(self.shell_reply())
@@ -1530,6 +1537,10 @@ impl Session {
                 let targets: Vec<u64> = if tab.sync {
                     let mut ids = Vec::new();
                     tab.root.leaves(&mut ids);
+                    // The chosen members if any are set, otherwise every pane.
+                    if !tab.sync_members.is_empty() {
+                        ids.retain(|i| tab.sync_members.contains(i));
+                    }
                     ids
                 } else {
                     vec![tab.focus]
@@ -1579,8 +1590,28 @@ impl Session {
                 };
                 tab.sync = req.params["on"].as_bool().unwrap_or(!tab.sync);
                 let on = tab.sync;
+                // A fresh sync is all panes; the subset is chosen after.
+                if !on {
+                    tab.sync_members.clear();
+                }
                 let mut reply = self.shell_reply();
                 reply["sync"] = serde_json::json!(on);
+                Ok(reply)
+            }
+            // Put this pane in the sync group, or take it out. With nobody
+            // chosen the group is every pane, so the first pane picked is the
+            // one that *narrows* it — cian-tui's `toggle_sync_member`.
+            "shellsyncmember" => {
+                let Some(tab) = self.tabs.get_mut(self.shell_at) else {
+                    anyhow::bail!("シェルが開いていません");
+                };
+                let id = tab.focus;
+                if !tab.sync_members.insert(id) {
+                    tab.sync_members.remove(&id);
+                }
+                let n = tab.sync_members.len();
+                let mut reply = self.shell_reply();
+                reply["members"] = serde_json::json!(n);
                 Ok(reply)
             }
             "shellresize" => {
@@ -2785,6 +2816,7 @@ impl Session {
                 // tab is for — so it wears it.
                 self.tabs.push(ShellTab {
                     root, focus, sync: mac.sync, zoom: mac.zoom, name: mac.name.clone(),
+                    sync_members: Default::default(),
                 });
                 self.shell_at = self.tabs.len() - 1;
                 let mut reply = self.shell_reply();

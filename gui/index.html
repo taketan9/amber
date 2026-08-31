@@ -210,6 +210,22 @@ html, body {
    accent frame while you were typing into the shell, so two surfaces claimed
    the keyboard at once. */
 .pane.active { background: var(--pane); }
+/* The two history arrows in the breadcrumb. Quiet until the pointer is on
+   them: they are always drawn (a control that comes and goes cannot be aimed
+   at) and they are not what the line is for. */
+/* The crumb box is right-to-left so a long path clips at the head; that also
+   reversed these two, so they read ▶ ◀. Isolated as their own left-to-right
+   run. They sit at the trailing edge, which in an RTL box is the end that
+   never gets clipped. */
+.crumb .nav {
+  margin-left: 6px; white-space: nowrap;
+  direction: ltr; unicode-bidi: isolate;
+}
+.crumb .navb {
+  display: inline-block; padding: 0 3px; cursor: pointer;
+  color: var(--dim); user-select: none;
+}
+.crumb .navb:hover { color: var(--accent); }
 /* Tone alone used to be the whole answer, on the argument that a frame is the
    loudest way to say something the cursor already says. It was asked about
    three times — on a light palette the two grounds are a couple of percent

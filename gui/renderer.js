@@ -344,7 +344,27 @@ function draw(which) {
     tail.className = 'here';
     tail.textContent = here;
     path.append(tail);
-    crumb.replaceChildren(path);
+    // ◀ ▶ — this pane's history, one click each. cian-tui puts them in the
+    // pane's title bar (`nav_rects`, mouse.rs:791) and the window had the
+    // journey on Alt+← / Alt+→ and nowhere a hand holding a mouse could find
+    // it. Drawn always, dimmed when there is nowhere to go: a control that
+    // appears and disappears is a control you cannot aim at.
+    const nav = document.createElement('span');
+    nav.className = 'nav';
+    for (const [glyph, fwd, what] of [['◀', false, '戻る'], ['▶', true, '進む']]) {
+        const b = document.createElement('span');
+        b.className = 'navb';
+        b.textContent = glyph;
+        b.title = what;
+        b.addEventListener('mousedown', (e) => {
+            e.stopPropagation();
+            setShellFocus(false);
+            state.focus = which;
+            step(fwd ? 'forward' : 'back');
+        });
+        nav.append(b);
+    }
+    crumb.replaceChildren(nav, path);
 
     const rows = root.querySelector('.rows');
     // Rebuilt whole. A listing is a few hundred rows and Chromium does not
@@ -1463,7 +1483,7 @@ function hintsNow() {
             ['F9', '新規タブ'], ['F10', 'タブを閉じる'], ['Shift+F8', '左右分割'],
             ['Shift+F9', '上下分割'],
             ...(split ? [['Shift+F10', '分割を閉じる']] : []),
-            ['F12', 'ズーム']];
+            ['F12', 'ズーム'], ['Shift+Enter', 'メニュー']];
     }
     if (visual.on) {
         return [['j/k', '伸ばす'], ['a', '全選択'], ['gg/G', '先頭/末尾'],
@@ -1804,7 +1824,15 @@ function contextRows() {
         // synchronise (menu.rs: `if active_pane_count() > 1`). One pane
         // "broadcasting" to itself is a row that describes nothing.
         if (shellPaneCount() > 1) {
-            v.push({ label: term.sync ? '同時入力を停止  ⇄' : '同時入力を開始  ⇄', value: 'Ctrl+S', run: cmdSync });
+            // cian-tui offers the member row only while sync is on: with it
+            // off the group is a thing that does not exist yet, and narrowing
+            // nothing is not an action.
+            if (term.sync) {
+                v.push({ label: '同時入力を停止  ⇄', value: 'Ctrl+S', run: cmdSync });
+                v.push({ label: 'このペインを同時入力に含める/外す  ⇄', value: '', run: cmdSyncMember });
+            } else {
+                v.push({ label: '同時入力を開始  ⇄', value: 'Ctrl+S', run: cmdSync });
+            }
         }
         v.push({ label: 'ファイルへ戻る', value: 'Esc', run: () => { setShellFocus(false); say('ファイル'); } });
         // and on into the shared block below — the shell menu used to stop
@@ -1902,6 +1930,14 @@ function contextRows() {
     // The window had `:sftp` as a command only, so the one way to reach a
     // server by mouse was the ssh picker — which opens a shell, not a pane.
     v.push({ label: 'サーバをペインで開く', value: ':sftp', run: cmdConnect });
+    // cian-tui offers this group only when init.lua names a host — with none
+    // configured the two rows can only say so (menu.rs: `if has_hosts`).
+    if (cfg.hosts) {
+        v.push(group('転送 ▸', () => [
+            { label: 'アップロード → サーバ', value: '', run: () => cmdSend('up') },
+            { label: 'ダウンロード ← サーバ', value: '', run: () => cmdSend('down') },
+        ]));
+    }
     v.push({ label: '動いている処理', value: ':queue', run: cmdQueue });
     // Appearance sits at the top level in cian-tui (ThemePick, between
     // Background and Lang), not folded into the view group. It was two levels
@@ -4807,6 +4843,72 @@ async function cmdSshPicker() {
     });
 }
 
+/// `転送 ▸` — send the marked files to a configured server, or fetch from one.
+///
+/// cian-tui's `SendMenu` picks a host and then opens a *modal* remote browser
+/// to choose the far end. The window already browses a server in a pane, which
+/// is the same journey in this build's own idiom and better: the far side is a
+/// listing you can navigate, mark in and sort, not a dialog. So this connects
+/// the **opposite** pane to the host and hands you back to `c`, which is the
+/// key that already means "across" in both builds.
+async function cmdSend(dir) {
+    const here = state[state.focus];
+    if (dir === 'up') {
+        const rows = (here.entries || []).filter((r) => r.marked && !r.parent);
+        const one = here.entries[here.cursor];
+        if (!rows.length && (!one || one.parent)) {
+            say('アップロードするファイルを選んでください', true);
+            return;
+        }
+    }
+    const other = state.focus === 'left' ? 'right' : 'left';
+    const r = await ask('sshhosts', {});
+    if (!r) return;
+    if (!r.hosts.length) {
+        say('init.lua の cian.ssh にサーバがありません — :sftp で手入力できます', true);
+        return;
+    }
+    const rows = [];
+    for (const h of r.hosts) {
+        for (const u of h.users) {
+            rows.push({
+                n: u.stored ? '鍵あり' : '',
+                label: `${u.name}@${h.name}`,
+                sub: `${h.host}:${h.port}`,
+                host: h.at, user: u.at, stored: u.stored,
+                who: `${u.name}@${h.host}`,
+            });
+        }
+    }
+    show(dir === 'up' ? 'アップロード → サーバ' : 'ダウンロード ← サーバ',
+        `${rows.length} 件（init.lua の cian.ssh）— ${other === 'left' ? '左' : '右'}のペインに開きます`,
+        rows, {
+            filter: true,
+            hint: '打って絞り込み（ホスト名・ユーザー）',
+            foot: '打って絞る   Enter 接続   Esc 閉じる',
+            pick: async (row) => {
+                closeReport();
+                let password;
+                if (!row.stored) {
+                    password = await askFor(`${row.who} のパスワード`, '', { secret: true });
+                    if (password === null) return;
+                }
+                say(`${row.who} に繋いでいます…`);
+                const c = await ask('connect', {
+                    pane: other, preset_host: row.host, preset_user: row.user, password,
+                });
+                if (!c) return;
+                state[other] = c.pane;
+                draw(other);
+                // Back to the key that already means "across". The far side is
+                // a listing now, so the folder is chosen by walking to it.
+                say(dir === 'up'
+                    ? `${c.host}  ${c.path} — 送り先まで移動して c`
+                    : `${c.host}  ${c.path} — 取ってくるものをマークして、そちらで c`);
+            },
+        });
+}
+
 async function cmdConnect() {
     const spec = await askFor('user@host[:port][:/path]', '');
     if (spec === null || !spec.trim()) return;
@@ -7275,6 +7377,21 @@ async function cmdShellName(name) {
 /// `:sessionlog` — everything this pane shows, teed to a file. On again to
 /// stop. The frame turns carmine while it runs, which is the terminal
 /// build's signal: a recorded shell should not look like an unrecorded one.
+/// Put this shell pane in the sync group, or take it out.
+///
+/// With nobody chosen the group is every pane, so the first pane picked is the
+/// one that *narrows* it — which is worth saying, because "1 pane in the
+/// group" reads like less than "all of them" until you have done it once.
+async function cmdSyncMember() {
+    if (!term.on) { say('シェルが開いていません', true); return; }
+    const r = await ask('shellsyncmember', {});
+    if (!r) return;
+    takeShell(r);
+    say(r.members
+        ? `同時入力: 選んだ ${r.members} ペインだけに送ります`
+        : '同時入力: 全ペインに送ります');
+}
+
 async function cmdShellLog() {
     if (!term.on) { say('シェルが開いていません', true); return; }
     const d = new Date();
@@ -7514,6 +7631,17 @@ document.addEventListener('keydown', (e) => {
     // the same reason they are in the terminal build: a shell almost never
     // wants them, and a panel with no way to open a second tab is a panel you
     // leave to run one thing.
+    // The menu. In a shell `:` is a character, so this is the only way to
+    // cian's command line from here — which is exactly why cian-tui puts
+    // `コマンド入力` at the top of the shell menu and advertises `S-Enter` on
+    // the shell's hint row. The window advertised it too, on the *file* row,
+    // and had it nowhere: from the shell the menu was right-click only.
+    if (e.key === 'Enter' && e.shiftKey) {
+        e.stopPropagation();
+        e.preventDefault();
+        openMenu(CONTEXT);
+        return;
+    }
     if (e.key === 'F9' && !e.shiftKey) { e.stopPropagation(); e.preventDefault(); shellTab(); return; }
     if (e.key === 'F12' && e.shiftKey) {
         e.stopPropagation();

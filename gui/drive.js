@@ -447,6 +447,37 @@ async function main() {
                 console.log(`  shot    ${what || key.slice(5)}  → ${at}`);
                 continue;
             }
+            // `click:<css>` — press the mouse on the first match. The whole
+            // mouse surface was untestable: every check up to now sent keys,
+            // and the differences that kept surviving (the ◀ ▶ arrows, the
+            // breadcrumb segments, the dividers) are all things you can only
+            // reach with a pointer.
+            if (key.startsWith('click:')) {
+                const sel = key.slice(6);
+                const box = await cdp.read(`(() => {
+                    const n = document.querySelector(${JSON.stringify(sel)});
+                    if (!n) return null;
+                    const b = n.getBoundingClientRect();
+                    return { x: Math.round(b.left + b.width / 2), y: Math.round(b.top + b.height / 2) };
+                })()`);
+                if (!box) {
+                    console.log(`× ${key.padEnd(8)}${(what || '').padEnd(16)} 見つかりません`);
+                    bad++;
+                    continue;
+                }
+                const before = await cdp.read(LOOK);
+                for (const type of ['mousePressed', 'mouseReleased']) {
+                    await cdp.send('Input.dispatchMouseEvent', {
+                        type, x: box.x, y: box.y, button: 'left', clickCount: 1,
+                    });
+                }
+                await sleep(250);
+                const after = await cdp.read(LOOK);
+                const moved = JSON.stringify(before) !== JSON.stringify(after);
+                console.log(`${moved ? '  ' : '× '}${key.padEnd(8)}${(what || '').padEnd(16)} ${after.status}`);
+                if (!moved) bad++;
+                continue;
+            }
             if (key === 'list') {
                 const rows = await cdp.read(`[...document.querySelectorAll('#find:not([hidden]) .hit, #report:not([hidden]) .hit')]
                     .map((e) => e.textContent.replace(/\\s+/g, ' ').trim())`);
