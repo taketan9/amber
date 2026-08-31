@@ -374,6 +374,11 @@ async function main() {
         // second, which turned input-sync on and left it on for the rest of
         // the round — a label that had drifted from what the key does.
         ['T', 'トグルを開く'], ['Enter', '隠しファイルを切り替える'], ['Esc', '閉じる'],
+        // With an input method holding the character. A terminal never sees
+        // this event, which is why both builds shipped a helper to switch the
+        // IME off; the window reads the physical key instead and leaves the
+        // person's input method alone.
+        ['ime:j', 'IME 中でも下へ'], ['ime:k', 'IME 中でも上へ'],
         ['?', 'ヘルプを開く'], ['Esc', '閉じる'],
         ['Space', 'マーク'], ['V', '反転'], ['Ctrl+a', '全マーク'],
         ['Tab', 'ペイン切替'], ['Ctrl+l', '右へ'], ['Ctrl+h', '左へ'],
@@ -428,6 +433,32 @@ async function main() {
         await cdp.send('Log.enable');
         await settle(cdp, sand);
 
+        // What a state looks like in one line. Written once: the `click:` and
+        // `ime:` steps printed only the status, so a menu that opened was
+        // invisible in the report — which is the fault that once made a
+        // working F3 read as dead.
+        const marks = (after) => {
+            const asking = after.prompt ? `  ｜: ${after.prompt}  枠 ${after.frame}`
+                : (after.asking ? `  ⟨${after.asking}⟩ 焦点=${after.focused}` : null);
+            const menu = after.sheet && after.rows
+                ? `  ▣ ${after.rows}項目（${after.at + 1}番目）`
+                : null;
+            const sh = after.shell
+                ? `  ▸ ${after.shell.about}  [${after.shell.panes}]  «${after.shell.text}»`
+                : null;
+            const rep = after.report
+                ? `  ▤ ${after.report.name} ｜${after.report.about}｜ ${after.report.rows}行  «${after.report.first}»`
+                : null;
+            const vst = after.vstate && after.vstate !== 'off' ? `  ◈${after.vstate}` : '';
+            const view = after.view
+                ? (after.view.pic
+                    ? `  ▦ ${after.view.about}  ${after.view.pic}`
+                    : `  ｜${after.view.foot}  ${after.view.about}  «${after.view.first}»`)
+                : null;
+            return vst + (asking ?? rep ?? menu ?? view ?? sh
+                ?? (after.marks.length ? `  [${after.marks.join(' ')}]` : ''));
+        };
+
         for (const [key, what] of round) {
             // `list` reads instead of pressing: every row of whatever sheet is
             // open, with its right-hand column. The menus were compared with
@@ -474,8 +505,46 @@ async function main() {
                 await sleep(250);
                 const after = await cdp.read(LOOK);
                 const moved = JSON.stringify(before) !== JSON.stringify(after);
-                console.log(`${moved ? '  ' : '× '}${key.padEnd(8)}${(what || '').padEnd(16)} ${after.status}`);
+                console.log(`${moved ? '  ' : '× '}${key.padEnd(8)}${(what || '').padEnd(16)} ${after.status}${marks(after)}`);
                 if (!moved) bad++;
+                continue;
+            }
+            // `ime:j` — the keydown a browser reports while an input method
+            // holds the character: `Process`, virtual key 229, and the
+            // physical key still named. It is the only way to test the IME
+            // road without a Japanese IME on this machine, and the road exists
+            // precisely because a terminal never sees this event at all.
+            if (key.startsWith('ime:')) {
+                const ch = key.slice(4);
+                const before = await cdp.read(LOOK);
+                for (const type of ['rawKeyDown', 'keyUp']) {
+                    await cdp.send('Input.dispatchKeyEvent', {
+                        type,
+                        key: 'Process',
+                        code: `Key${ch.toUpperCase()}`,
+                        windowsVirtualKeyCode: 229,
+                        nativeVirtualKeyCode: 229,
+                        modifiers: ch === ch.toUpperCase() && /[A-Z]/.test(ch) ? 8 : 0,
+                    });
+                }
+                await sleep(200);
+                const after = await cdp.read(LOOK);
+                const moved = JSON.stringify(before) !== JSON.stringify(after);
+                console.log(`${moved ? '  ' : '× '}${key.padEnd(8)}${(what || '').padEnd(16)} ${after.status}${marks(after)}`);
+                if (!moved) bad++;
+                continue;
+            }
+            // `read:<expr>` — evaluate something in the page and print it.
+            // Added the third time a state was diagnosed by reasoning about
+            // which listener ran first, which is a way of being wrong slowly.
+            if (key.startsWith('read:')) {
+                let out;
+                try {
+                    out = await cdp.read(key.slice(5));
+                } catch (err) {
+                    out = `例外: ${err.message}`;
+                }
+                console.log(`  read    ${what || key.slice(5)} = ${JSON.stringify(out)}`);
                 continue;
             }
             if (key === 'list') {
@@ -490,30 +559,11 @@ async function main() {
             const after = await cdp.read(LOOK);
             const moved = JSON.stringify(before) !== JSON.stringify(after);
             const note = what ? `  ${what}` : '';
-            const asking = after.prompt ? `  ｜: ${after.prompt}  枠 ${after.frame}`
-                : (after.asking ? `  ⟨${after.asking}⟩ 焦点=${after.focused}` : null);
-            const menu = after.sheet && after.rows
-                ? `  ▣ ${after.rows}項目（${after.at + 1}番目）`
-                : null;
-            const sh = after.shell
-                ? `  ▸ ${after.shell.about}  [${after.shell.panes}]  «${after.shell.text}»`
-                : null;
-            const rep = after.report
-                ? `  ▤ ${after.report.name} ｜${after.report.about}｜ ${after.report.rows}行  «${after.report.first}»`
-                : null;
-            const vst = after.vstate && after.vstate !== 'off' ? `  ◈${after.vstate}` : '';
             // The viewer before the shell. The shell panel is open from
             // startup now, so a report that prefers it can never show the
             // viewer — which read as "F3 did nothing" for a whole afternoon
             // while F3 was working fine.
-            const view = after.view
-                ? (after.view.pic
-                    ? `  ▦ ${after.view.about}  ${after.view.pic}`
-                    : `  ｜${after.view.foot}  ${after.view.about}  «${after.view.first}»`)
-                : null;
-            const marks = vst + (asking ?? rep ?? menu ?? view ?? sh
-                ?? (after.marks.length ? `  [${after.marks.join(' ')}]` : ''));
-            console.log(`${moved ? '  ' : '× '}${key.padEnd(8)}${note.padEnd(16)} ${after.status}${marks}`);
+            console.log(`${moved ? '  ' : '× '}${key.padEnd(8)}${note.padEnd(16)} ${after.status}${marks(after)}`);
             if (!moved) bad++;
         }
         // Let the last job finish before looking. A copy started by the

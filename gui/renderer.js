@@ -2341,6 +2341,7 @@ const HELP = [
         [':aierror  、:explain', 'シェルの直近のエラーを説明'],
         [':aicommit', 'ステージ済み差分からコミットメッセージ（Enter で署名）'],
         [':ime', 'vim のノーマルモードで IME を自動オフ（init.lua の cian.ime）'],
+        ['  IME オンのまま', '一覧のキーはそのまま効きます — 窓版は物理キーを読みます（ヘルパー不要）'],
         [':ai 質問', 'AI - simple: ローカルモデルとチャット'],
         [':aidiff', '表示中の差分を説明（差分画面で x）'],
     ]],
@@ -7255,6 +7256,65 @@ async function cmdIme() {
         : 'IME 連携: オフ');
     if (ime.on) syncIme();
 }
+
+/// A physical key, when the input method has swallowed the character.
+///
+/// **This is the one thing the window can do that the terminal genuinely
+/// cannot.** With a Japanese IME on, a terminal holds every letter in
+/// composition until it is committed, so `j` never reaches cian at all — the
+/// note in the terminal build says as much, and both builds answer it the
+/// same way: drive an external helper (`macism`, `im-select`, the bundled
+/// `cian-ime`) to switch the IME *off* whenever keys become commands.
+///
+/// A browser does not swallow the key. It reports the keydown with
+/// `isComposing` set and `key` as `Process`, and it still says **which
+/// physical key** was pressed. So the window can read the key and leave the
+/// person's input method exactly where they left it: no helper to install, no
+/// `im-select` on Windows, and nothing switching under them mid-sentence.
+///
+/// Letters and digits only. `code` is a *physical* position, so punctuation
+/// differs between a JIS and an ANSI keyboard and guessing it would put the
+/// wrong character under somebody's finger; cian's commands are letters and
+/// digits, and the rest keeps the old road.
+function keyFromCode(e) {
+    const c = e.code || '';
+    if (/^Key[A-Z]$/.test(c)) {
+        const ch = c.slice(3);
+        return e.shiftKey ? ch : ch.toLowerCase();
+    }
+    if (/^Digit[0-9]$/.test(c) && !e.shiftKey) return c.slice(5);
+    return null;
+}
+
+/// Marks the keydown we made ourselves, so it is not re-read as a composing
+/// one and turned into another.
+const RESENT = Symbol('cian-resent');
+
+window.addEventListener('keydown', (e) => {
+    // Only while keys are commands. In a text field the composition is the
+    // point, and a listing key fired from under it would be a `d` that
+    // deletes a file while somebody types a filename.
+    if (e[RESENT] || wantsTextInput()) return;
+    // 229 is what a browser reports for "the IME has this one"; `isComposing`
+    // is the modern spelling and not every platform sets it on the first key.
+    if (!e.isComposing && e.keyCode !== 229 && e.key !== 'Process') return;
+    const key = keyFromCode(e);
+    if (!key) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    const out = new KeyboardEvent('keydown', {
+        key,
+        code: e.code,
+        shiftKey: e.shiftKey,
+        ctrlKey: e.ctrlKey,
+        altKey: e.altKey,
+        metaKey: e.metaKey,
+        bubbles: true,
+        cancelable: true,
+    });
+    out[RESENT] = true;
+    document.dispatchEvent(out);
+}, true);
 
 /// Is cian taking text right now, rather than being driven by commands?
 ///
