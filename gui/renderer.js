@@ -164,7 +164,10 @@ async function freshenDisk(which) {
     } catch { d.v = null; }
     try {
         const r = await window.cian.call('vcs', { pane: which });
-        repo[which].v = r && r.branch ? r : null;
+        // On `kind`, not on `branch`: only git reports a branch, so keying on
+        // it threw away every Subversion answer — and with it the menu's way
+        // of telling which of the two groups belongs here.
+        repo[which].v = r && r.kind ? r : null;
     } catch { repo[which].v = null; }
     repo[which].at = pane.cwd;
     drawStatus();
@@ -1612,7 +1615,9 @@ function viewerRows() {
     // The AI heading is unconditional here as it is in the file menu — the
     // engine says so when no model is configured, which is a better answer
     // than a menu that quietly has one item fewer on some machines.
-    v.push(group('AI ▸', aiRows));
+    // Only when it is configured, as in the listing's menu and as cian-tui
+    // does here (menu.rs open_viewer_menu: `if self.ai.is_some() && ai_ready`).
+    if (cfg.ai) v.push(group('AI ▸', aiRows));
     v.push({ label: 'コピー', value: 'Ctrl+C', run: () => document.execCommand('copy') });
     v.push({ label: '保存', value: 'Ctrl+S', run: saveFile });
     v.push({ label: '外部エディタで開く', value: ':edit', run: cmdEditExternal });
@@ -1638,6 +1643,11 @@ const VIEWER_MENU = {
     rows: viewerRows,
 };
 
+/// What init.lua turned on, as far as the menu is concerned. Filled from the
+/// `settings` reply at startup; false until then, which is the safe way round
+/// — a row that is missing for a moment beats a row that leads nowhere.
+const cfg = { ai: false, snippets: false, macros: false, hosts: false };
+
 function contextRows() {
     const pane = state[state.focus];
     const row = pane && pane.entries[pane.cursor];
@@ -1646,10 +1656,18 @@ function contextRows() {
     const v = [];
 
     // ── launchers ──
-    v.push(group('AI ▸', aiRows));
-    v.push({ label: '保存したコマンド', value: 'Ctrl+Shift+Enter', run: cmdSnippets });
-    v.push({ label: 'マクロ', value: '@', run: cmdMacros });
-    v.push({ label: 'ブックマーク', value: 's', run: cmdShortcuts });
+    //
+    // Each only when it has something to offer, which is the rule cian-tui
+    // follows (menu.rs open_context_menu: `if ai`, `if !snippets.is_empty()`,
+    // `if !macros.is_empty()`). Offered unconditionally here, three of the
+    // first four rows led to "there is nothing here" on a machine with no
+    // init.lua — and pushed everything that does work further down.
+    if (cfg.ai) v.push(group('AI ▸', aiRows));
+    if (cfg.snippets) v.push({ label: '保存したコマンド', value: 'Ctrl+Shift+Enter', run: cmdSnippets });
+    if (cfg.macros) v.push({ label: 'マクロ', value: '@', run: cmdMacros });
+    // Bookmarks are a launcher too, so cian-tui keeps them in this cluster
+    // rather than down among the connect rows — but only in a file pane.
+    if (!inShell) v.push({ label: 'ブックマーク', value: 's', run: cmdShortcuts });
 
     if (inShell) {
         // `:` is a character in a shell, so the command line needs a way in
@@ -1672,14 +1690,21 @@ function contextRows() {
             { label: 'このペインだけ', value: 'Shift+F12', run: () => ask('shellpanezoom', {}).then((r) => r && takeShell(r)) },
         ]));
         v.push({ label: 'このシェルに名前を付ける', value: ':shellname', run: cmdShellName });
-        v.push({ label: '全ペインに同時入力', value: 'Ctrl+S', run: cmdSync });
-        v.push({ label: '閉じる', value: 'Esc', run: () => { setShellFocus(false); say('ファイル'); } });
-        v.push({ label: 'キー一覧', value: '?', run: openHelp });
-        return v;
+        // cian-tui offers this only when there is more than one pane to
+        // synchronise (menu.rs: `if active_pane_count() > 1`). One pane
+        // "broadcasting" to itself is a row that describes nothing.
+        if (shellPaneCount() > 1) {
+            v.push({ label: '全ペインに同時入力', value: 'Ctrl+S', run: cmdSync });
+        }
+        v.push({ label: 'ファイルへ戻る', value: 'Esc', run: () => { setShellFocus(false); say('ファイル'); } });
+        // and on into the shared block below — the shell menu used to stop
+        // here, so connecting to a server, changing the colours and quitting
+        // were all unreachable by mouse from the shell. cian-tui runs both
+        // menus through the same tail for exactly that reason.
     }
 
     // ── the frequent file operations ──
-    if (has) {
+    if (has && !inShell) {
         // cian-tui's order, item for item (menu.rs `open_context_menu`):
         // copy, the two ways of copying *what it is*, cut, paste, rename,
         // delete, open in a tab. The window had `開く` first and the three
@@ -1716,48 +1741,71 @@ function contextRows() {
         }));
     }
 
-    v.push(group('調べる ▸', () => [
-        { label: '属性', value: ':attr', run: cmdAttr },
-        { label: 'チェックサム', value: ':hash', run: () => cmdHash('') },
-        { label: '差分をとる', value: '=', run: cmdCompare },
-        { label: 'ファイル数と行数', value: ':count', run: cmdCount },
-        { label: '容量分析', value: ':du', run: cmdDu },
-        { label: '重複を探す', value: ':dup', run: cmdDedup },
-    ]));
-    v.push(group('git ▸', () => [
-        { label: 'ステージ', value: ':stage', run: () => cmdVcs('stage') },
-        { label: 'ステージ解除', value: ':unstage', run: () => cmdVcs('unstage') },
-        { label: '変更を破棄', value: ':discard', run: () => cmdVcs('discard') },
-        { label: '差分', value: ':gitdiff', run: () => cmdVcsDiff(null) },
-        { label: 'このファイルの履歴', value: ':filelog', run: () => cmdLog(true) },
-        { label: 'リポジトリの履歴', value: ':log', run: () => cmdLog(false) },
-    ]));
-    v.push(group('svn ▸', () => [
-        { label: '追加', value: ':svnadd', run: () => cmdSvn('stage') },
-        { label: '取り消す', value: ':svnrevert', run: () => cmdSvn('discard') },
-        { label: '衝突を解決', value: ':svnresolve', run: () => cmdSvn('resolve') },
-        { label: '差分', value: ':svndiff', run: () => cmdVcsDiff('svn') },
-        { label: '履歴', value: ':svnlog', run: () => cmdLog(false, 'svn') },
-        { label: '更新', value: ':svnupdate', run: () => cmdSvn('update') },
-        { label: 'コミット', value: ':svncommit', run: () => cmdSvn('commit') },
-    ]));
+    // Inspect and the version control groups belong to a listing; cian-tui
+    // keeps them inside the non-shell branch, and a shell has no cursor for
+    // them to act on.
+    if (!inShell) {
+        v.push(group('調べる ▸', () => [
+            { label: '属性', value: ':attr', run: cmdAttr },
+            { label: 'チェックサム', value: ':hash', run: () => cmdHash('') },
+            { label: '差分をとる', value: '=', run: cmdCompare },
+            { label: 'ファイル数と行数', value: ':count', run: cmdCount },
+            { label: '容量分析', value: ':du', run: cmdDu },
+            { label: '重複を探す', value: ':dup', run: cmdDedup },
+        ]));
+        // One of the two, and only where there is a repository. Both were
+        // offered everywhere, so a plain directory showed thirteen version
+        // control rows that could only answer "not a repository" — and in a
+        // git checkout, `svn ▸` sat there claiming otherwise. cian-tui matches
+        // on the kind and pushes one (menu.rs `match self.vcs_kind()`).
+        const kind = repo[state.focus] && repo[state.focus].v && repo[state.focus].v.kind;
+        if (kind === 'git') {
+            v.push(group('git ▸', () => [
+                { label: 'ステージ', value: ':stage', run: () => cmdVcs('stage') },
+                { label: 'ステージ解除', value: ':unstage', run: () => cmdVcs('unstage') },
+                { label: '変更を破棄', value: ':discard', run: () => cmdVcs('discard') },
+                { label: '差分', value: ':gitdiff', run: () => cmdVcsDiff(null) },
+                { label: 'このファイルの履歴', value: ':filelog', run: () => cmdLog(true) },
+                { label: 'リポジトリの履歴', value: ':log', run: () => cmdLog(false) },
+            ]));
+        } else if (kind === 'svn') {
+            v.push(group('svn ▸', () => [
+                { label: '追加', value: ':svnadd', run: () => cmdSvn('stage') },
+                { label: '取り消す', value: ':svnrevert', run: () => cmdSvn('discard') },
+                { label: '衝突を解決', value: ':svnresolve', run: () => cmdSvn('resolve') },
+                { label: '差分', value: ':svndiff', run: () => cmdVcsDiff('svn') },
+                { label: '履歴', value: ':svnlog', run: () => cmdLog(false, 'svn') },
+                { label: '更新', value: ':svnupdate', run: () => cmdSvn('update') },
+                { label: 'コミット', value: ':svncommit', run: () => cmdSvn('commit') },
+            ]));
+        }
+    }
+    // ── shared: connect, then appearance, then the way out ──
     v.push({ label: 'サーバへつなぐ', value: 'Shift+S', run: cmdSshPicker });
     v.push({ label: '動いている処理', value: ':queue', run: cmdQueue });
-    v.push(group('表示 ▸', () => [
-        { label: 'クラシック', value: ':view classic', run: () => { setView('classic'); say('一覧: クラシック'); } },
-        { label: '詳細一覧', value: ':view details', run: () => { setView('details'); say('一覧: 詳細一覧'); } },
-        { label: 'アイコン', value: ':view icons', run: () => { setView('icons'); say('一覧: アイコン'); } },
-        { label: '隠しファイル', value: 'T', run: toggleHidden },
-        { label: '配色 ── 21 種', value: ':theme', run: cmdTheme },
-        { label: '全画面', value: 'F11', run: cmdFullscreen },
-        { label: 'この面を広げる', value: 'F12', run: zoomFocused },
-        { label: 'トグル', value: 'T', run: () => openMenu(TOGGLES) },
-    ]));
-    v.push(group('OS ▸', () => [
-        { label: '既定のアプリで開く', value: 'Ctrl+Enter', run: openOut },
-        { label: '外部エディタで開く', value: ':edit', run: cmdEditExternal },
-        { label: 'Finder で表示', value: ':revealos', run: cmdRevealOs },
-    ]));
+    // Appearance sits at the top level in cian-tui (ThemePick, between
+    // Background and Lang), not folded into the view group. It was two levels
+    // down here, which is how someone with twenty-one palettes in front of
+    // them came to ask whether themes could be chosen at all.
+    v.push({ label: '配色 ── 21 種', value: ':theme', run: cmdTheme });
+    v.push({ label: '全画面', value: 'F11', run: cmdFullscreen });
+    v.push({ label: 'この面を広げる', value: 'F12', run: zoomFocused });
+    // The listing's own groups, and the OS group: both act on a file under a
+    // cursor, so cian-tui leaves them out of the shell menu.
+    if (!inShell) {
+        v.push(group('表示 ▸', () => [
+            { label: 'クラシック', value: ':view classic', run: () => { setView('classic'); say('一覧: クラシック'); } },
+            { label: '詳細一覧', value: ':view details', run: () => { setView('details'); say('一覧: 詳細一覧'); } },
+            { label: 'アイコン', value: ':view icons', run: () => { setView('icons'); say('一覧: アイコン'); } },
+            { label: '隠しファイル', value: 'T', run: toggleHidden },
+            { label: 'トグル', value: 'T', run: () => openMenu(TOGGLES) },
+        ]));
+        v.push(group('OS ▸', () => [
+            { label: '既定のアプリで開く', value: 'Ctrl+Enter', run: openOut },
+            { label: '外部エディタで開く', value: ':edit', run: cmdEditExternal },
+            { label: 'Finder で表示', value: ':revealos', run: cmdRevealOs },
+        ]));
+    }
     // cian-tui ends Quit then Manual — the way out, then the way to find out.
     v.push({ label: '閉じる', value: ':q', run: cmdQuit });
     v.push({ label: 'キー一覧', value: '?', run: openHelp });
@@ -3165,7 +3213,10 @@ function makeEditor(monaco, text, lang) {
     viewer.ed.addCommand(monaco.KeyMod.Alt | monaco.KeyMod.Shift | monaco.KeyCode.KeyD,
         () => blockEdit('delete'));
     // The rendered document, and back. The terminal build's key for it.
-    viewer.ed.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyE, () => togglePreview2());
+    // Ctrl+E is not registered here. It was, and it never ran: Monaco's own
+    // binding for that chord won, so the key moved the cursor to the end of
+    // the line instead of drawing the document. It is taken in a capture-phase
+    // listener beside togglePreview2, ahead of the editor.
     viewer.ed.onDidChangeCursorPosition(drawViewFoot);
     } else {
     viewer.ed.updateOptions({ theme: editorTheme() });
@@ -3691,8 +3742,9 @@ document.addEventListener('keydown', (e) => {
     }
     // Reading the rendered document: Esc goes back to the source rather than
     // out of the file, because "back one step" is what Esc means everywhere
-    // else in here.
-    if (reading && (e.key === 'Escape' || (e.key === 'e' && (e.ctrlKey || e.metaKey)))) {
+    // else in here. (Ctrl+E does both directions, and is taken in the capture
+    // listener further down — Monaco claims that chord.)
+    if (reading && e.key === 'Escape') {
         e.stopPropagation();
         e.preventDefault();
         togglePreview2();
@@ -5603,6 +5655,14 @@ function blurShell() {
 }
 
 /// A reply that carries a screen and the strip that belongs beside it.
+/// How many split panes the shell is showing. Counted from the boxes on the
+/// screen, which is the same thing the engine's `active_pane_count()` counts —
+/// the menu asks so it can leave "type into all of them" out when there is
+/// only one of them.
+function shellPaneCount() {
+    return el.sPanes.querySelectorAll('.sgrid').length || 1;
+}
+
 function takeShell(r) {
     if (r.gone) { closeShell(); return; }
     term.tabs = r.tabs ?? 1;
@@ -5868,6 +5928,22 @@ async function drawDiagrams() {
         }
     }
 }
+
+/// `Ctrl+E` — the rendered document and the source, back and forth.
+///
+/// In the capture phase, and this is the whole reason it works: Monaco binds
+/// Ctrl+E itself (it moves to the end of the line), and a listener on the
+/// bubble never got a look. Pressed on a Markdown file it did nothing at all
+/// except step the cursor six columns right, which is a hard thing to read as
+/// "this key is taken".
+document.addEventListener('keydown', (e) => {
+    if (!viewer.on) return;
+    if (e.key !== 'e' && e.key !== 'E') return;
+    if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+    e.stopPropagation();
+    e.preventDefault();
+    togglePreview2();
+}, true);
 
 async function togglePreview2() {
     if (!viewer.on || !viewer.ed) { say('先にファイルを開いてください', true); return; }
@@ -7331,6 +7407,14 @@ async function recall() {
     // `hidden` is a toggle on the engine, so ask for it only when init.lua
     // wants it on and it is not already.
     if (c.show_hidden === true && state.left && !state.left.hidden_shown) await toggleHidden();
+    // What the context menu needs before it can decide which launcher rows
+    // exist at all. Kept rather than re-asked: the menu is built synchronously
+    // on a keystroke, and a row that appears a moment after the menu does is
+    // worse than one that never appears.
+    cfg.ai = c.ai === true;
+    cfg.snippets = c.snippets === true;
+    cfg.macros = c.macros === true;
+    cfg.hosts = c.ssh_hosts === true;
     // Lua's own complaints go in the same queue as mine — from where the
     // person stands they are one thing: "my config did not take".
     keymapErrors = [...(s.config_errors || []), ...keymapErrors];
@@ -7398,6 +7482,35 @@ new ResizeObserver(() => {
     clearTimeout(resizeTimer);
     resizeTimer = setTimeout(() => ask('shellresize', size), 60);
 }).observe(el.sPanes);
+
+/// Measure again once the bundled font is actually in.
+///
+/// The observer above watches the *box*, which is the right thing to watch
+/// for a panel that changes size — and blind to this: the box does not move
+/// when the font underneath it is swapped. cian.ttf is twelve megabytes, so
+/// the first `measureCell()` can run against the fallback, and a fallback one
+/// pixel shorter per line is one row too many in the panel. The rows that do
+/// not fit are clipped by `.sgrid`'s `overflow: hidden`, and the row that
+/// gets clipped is the last one — the one being typed on.
+///
+/// Reported from a Windows machine on 2026-08-31, where the font takes longer
+/// to arrive and the software renderer changes when layout settles. Not
+/// reproduced on a Mac, where it loads before anything asks.
+document.fonts.ready.then(() => {
+    if (term.on) {
+        const size = shellSize();
+        if (size.rows !== term.rows || size.cols !== term.cols) {
+            term.rows = size.rows;
+            term.cols = size.cols;
+            ask('shellresize', size);
+        }
+    }
+    // The listing counts rows the same way, and the hint bar's own height
+    // feeds the space everything else is laid out in.
+    drawHints();
+    refresh();
+});
+
 drawHints();
 
 refresh().then(() => {

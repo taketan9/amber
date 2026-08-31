@@ -2334,6 +2334,22 @@ impl Session {
                     "notify_min_secs": cfg.options.notify_min_secs,
                     "preview": cfg.options.preview,
                     "transfer_limit": cfg.options.transfer_limit,
+                    // What the context menu's launcher rows need to know
+                    // before it draws them. cian-tui asks the same three
+                    // questions in menu.rs (`if ai`, `if !snippets
+                    // .is_empty()`, `if !macros.is_empty()`) and leaves the
+                    // row out when the answer is no; the window offered all
+                    // three unconditionally, so on a machine with no init.lua
+                    // the menu opened with three rows that led nowhere.
+                    "ai": cfg.ai.is_some(),
+                    "snippets": !cfg.snippets.is_empty(),
+                    "ssh_hosts": !cfg.ssh_hosts.is_empty(),
+                    "macros": cian_lua::config_read_path("macro.lua")
+                        .as_ref()
+                        .filter(|p| p.exists())
+                        .and_then(|p| cian_lua::macros::load(p).ok())
+                        .map(|m| !m.is_empty())
+                        .unwrap_or(false),
                 },
                 // The keys the person bound in init.lua. The terminal build
                 // reads the same list; a binding that works in one and not the
