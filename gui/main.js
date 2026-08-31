@@ -118,6 +118,24 @@ app.whenReady().then(async () => {
     // F11 fills the screen, which is what F11 does on Windows. The window is
     // this process's to change; the key that asks for it is read in the page,
     // with every other key.
+    // The icon the desktop itself uses for a file.
+    //
+    // A terminal can only draw a glyph from a font, so cian-tui picks from a
+    // Nerd Font table and the window inherited it. This is a window: the OS
+    // already has a picture for every registered type — the actual Excel icon
+    // for an .xlsx, the app that claims a .psd — and it is one call away.
+    //
+    // The renderer asks per *extension*, not per file, so a folder of two
+    // thousand files is a handful of calls.
+    ipcMain.handle('cian-fileicon', async (_event, path) => {
+        try {
+            const img = await app.getFileIcon(path, { size: 'normal' });
+            return img.isEmpty() ? null : img.toDataURL();
+        } catch {
+            return null;
+        }
+    });
+
     ipcMain.handle('cian-fullscreen', (event) => {
         const win = BrowserWindow.fromWebContents(event.sender);
         if (!win) return false;

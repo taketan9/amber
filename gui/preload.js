@@ -36,6 +36,9 @@ contextBridge.exposeInMainWorld('cian', {
     /// driver that cannot reach it.
     fullscreen: () => ipcRenderer.invoke('cian-fullscreen'),
 
+    /// The desktop's own icon for a path, as a data URL (or null).
+    fileIcon: (path) => ipcRenderer.invoke('cian-fileicon', path),
+
     /// Listen for what the engine says unasked. The callback is handed the
     /// message itself and nothing else — no event object, which would carry a
     /// sender the renderer has no business holding.

@@ -433,6 +433,9 @@ function draw(which) {
             const g = document.createElement('span');
             g.className = 'glyph';
             g.textContent = glyphFor(row);
+            // The tiles are where a picture is the point, so this is where
+            // the desktop's own icon is worth waiting a frame for.
+            nativeIconFor(row, g);
             div.append(g, name);
         } else if (viewMode === 'details') {
             // Explorer's details, in Explorer's order: icon, name, size,
@@ -1311,6 +1314,42 @@ function kindClassOf(row) {
 /// Written as escapes and copied from that table, not from memory: a glyph
 /// remembered wrong renders as some other picture, silently. The emoji set
 /// below stays for the icon tiles, where a big picture is the point.
+/// The desktop's own icon for a row, when it has one.
+///
+/// A terminal can only draw a glyph from a font, which is why cian-tui picks
+/// from a Nerd Font table and why the window inherited that table. The OS
+/// already has a picture for every registered type — the real Excel icon for
+/// an .xlsx, whatever app claims a .psd — and it is one call away here.
+///
+/// Cached by **extension**, not by path: a folder of two thousand files is a
+/// handful of calls, and the icon of a `.rs` is the icon of every `.rs`. The
+/// glyph is drawn first and replaced when the picture arrives, so a slow
+/// answer costs nothing and a missing one costs nothing either.
+const nativeIcons = new Map();
+
+function nativeIconFor(row, into) {
+    if (!window.cian.fileIcon || row.parent || row.is_dir) return;
+    const key = extOf(row) || `\u0000${row.name.toLowerCase()}`;
+    const known = nativeIcons.get(key);
+    if (known === null) return;
+    if (typeof known === 'string') { paintIcon(into, known); return; }
+    if (known instanceof Promise) { known.then((url) => url && paintIcon(into, url)); return; }
+    const p = window.cian.fileIcon(row.path).then((url) => {
+        nativeIcons.set(key, url || null);
+        return url;
+    }).catch(() => { nativeIcons.set(key, null); return null; });
+    nativeIcons.set(key, p);
+    p.then((url) => url && paintIcon(into, url));
+}
+
+function paintIcon(into, url) {
+    if (!into.isConnected) return;
+    const img = document.createElement('img');
+    img.className = 'nativeicon';
+    img.src = url;
+    into.replaceChildren(img);
+}
+
 function iconFor(row) {
     if (row.parent) return '\u{f062}';
     if (row.is_dir) {
@@ -3125,6 +3164,18 @@ function drawReport() {
             n.textContent = row.n;
             div.append(n);
         }
+        // A proportion, drawn rather than written. `row.bar` is 0..1 and the
+        // strip sits behind the name: "what is big here" is a question about
+        // relative size, and a column of numbers makes you do the comparing.
+        // A terminal can only spend cells on this; a window can put it under
+        // the text and cost nothing.
+        if (typeof row.bar === 'number') {
+            const b = document.createElement('span');
+            b.className = 'bar';
+            b.style.width = `${Math.max(1, Math.round(row.bar * 100))}%`;
+            div.append(b);
+            div.classList.add('barred');
+        }
         const l = document.createElement('span');
         l.className = 'p';
         l.textContent = row.label;
@@ -4007,6 +4058,17 @@ document.addEventListener('keydown', (e) => {
         e.stopPropagation();
         e.preventDefault();
         pair.ed.trigger('cian', e.shiftKey ? 'editor.action.diffReview.prev' : 'editor.action.diffReview.next');
+        return;
+    }
+    // `L` — the same comparison as a list. The editor is the better way to
+    // *read* a difference; the list is the better way to take one out of the
+    // window (`c`, `w`) or ask about it (`x`), and it folds the identical runs
+    // away. Both, one key apart, rather than one of them behind the other.
+    if (e.key === 'L' && pair.on && !e.ctrlKey && !e.metaKey) {
+        e.stopPropagation();
+        e.preventDefault();
+        compareAsList = true;
+        closeView(false).then(() => cmdCompare());
         return;
     }
     // Reading the rendered document: Esc goes back to the source rather than
@@ -5313,8 +5375,10 @@ function openPalette() {
 async function cmdCount() {
     const r = await ask('count', { pane: state.focus });
     if (!r) return;
+    const most = r.by_ext.reduce((n, e) => Math.max(n, e.steps), 0) || 1;
     const rows = r.by_ext.map((e) => ({
         n: e.steps.toLocaleString(),
+        bar: e.steps / most,
         label: e.ext,
         sub: `${e.files} ファイル`,
     }));
@@ -5328,13 +5392,19 @@ async function cmdCount() {
 async function cmdDu(path) {
     const r = await ask('du', { pane: state.focus, ...(path ? { path } : {}) });
     if (!r) return;
+    const big = r.rows.reduce((n, x) => Math.max(n, x.size), 0) || 1;
+    const total = r.rows.reduce((n, x) => n + x.size, 0);
     const rows = r.rows.map((x) => ({
         n: human(x.size),
+        // Two proportions in one row: the bar is this entry against the
+        // biggest one (which is what the eye compares), the percentage is
+        // against the whole folder (which is what you say out loud).
+        bar: x.size / big,
         label: x.is_dir ? `${x.name}/` : x.name,
+        sub: total ? `${(x.size * 100 / total).toFixed(1)}%` : '',
         path: x.path,
         is_dir: x.is_dir,
     }));
-    const total = r.rows.reduce((n, x) => n + x.size, 0);
     const up = r.cwd.replace(/[\\/][^\\/]+$/, '') || r.cwd;
     show('容量分析', `${r.cwd}   合計 ${human(total)}`, rows, {
         foot: 'Enter 入る   ← / Bksp 親へ   Esc 閉じる',
@@ -5667,6 +5737,17 @@ async function cmdCompare() {
             say(`${r.left} と ${r.right} は同じ内容です`);
             return;
         }
+        // Two files go to the **diff editor**, not to a list of lines.
+        //
+        // cian-tui shows a list because a terminal has no diff editor; the
+        // window has had one all along, one keystroke behind the list. Side by
+        // side, coloured within the line, foldable, and both halves editable —
+        // that is what a comparison is *for*, and it was the second thing you
+        // reached rather than the first. `L` still gets the list, which keeps
+        // what a list is better at: `f` to unfold, `c` and `w` to take it out
+        // of the window, `x` to ask about it.
+        if (!compareAsList) { closeReport(); await cmdDiffEdit(); return; }
+        compareAsList = false;
     }
     // A difference is read by its differences, so the identical runs between
     // them are folded away — the engine did that; here they are one row
@@ -5697,6 +5778,11 @@ async function cmdCompare() {
         },
     });
 }
+
+/// Ask for the list rather than the diff editor, once. Set by `L` from the
+/// editor and cleared the moment the list is drawn — a preference nobody set
+/// is not a preference.
+let compareAsList = false;
 
 /// Whether the identical runs in a file comparison are folded. cian-tui's
 /// `f`, and off by default for the same reason: a diff is read by its
@@ -5835,7 +5921,7 @@ async function cmdDiffEdit() {
     el.vPic.hidden = true;
     el.vName.textContent = viewer.name;
     el.vAbout.textContent = '左右とも編集できます — Ctrl+S でどちらも保存';
-    el.vFoot.textContent = 'F7 / Shift+F7 次 / 前の相違   ·   Ctrl+S 保存   ·   Esc ×3 閉じる';
+    el.vFoot.textContent = 'F7 / Shift+F7 次 / 前の相違   ·   L 一覧で見る   ·   Ctrl+S 保存   ·   Esc ×3 閉じる';
 
     const lang = MONACO_LANG[r.lang] || 'plaintext';
     // A fresh diff editor each time: reusing one across different file pairs
