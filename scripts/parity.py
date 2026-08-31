@@ -106,13 +106,13 @@ def speech(path):
 
 # 窓版にまだ無いもの。「無い」ことを覚えておく表で、免除の理由が要ります。
 KNOWN = {
-    "背景色": "ペイン背景色 14 色（PANE_BG_PRESETS）が窓版に無い — ROADMAP P4",
-    "テーマ（このペイン）": "ペット別配色（ThemePickPane）が窓版に無い — ROADMAP P4",
-    "プログラムから開く": "OpenWithOs（Windows のみ）が窓版に無い — ROADMAP P4",
-    "情報を見る": "PropertiesOs が窓版に無い — ROADMAP P4",
+    "背景色": "ペイン背景色 14 色（PANE_BG_PRESETS）が窓版に無い — ROADMAP「残っている差」",
+    "テーマ（このペイン）": "ペイン別配色（ThemePickPane）が窓版に無い — ROADMAP「残っている差」",
+    "プログラムから開く": "OpenWithOs（Windows のみ）が窓版に無い — ROADMAP「残っている差」",
+    "情報を見る": "PropertiesOs が窓版に無い — ROADMAP「残っている差」",
     "Office で開く（クラウド側）": "SharePoint 連携の入口が窓版のメニューに無い",
     "クラウド側へのショートカットを作成": "同上",
-    "転送 ▸": "SendMenu（SFTP 転送）が窓版に無い — ROADMAP P3",
+    "転送 ▸": "SendMenu（SFTP 転送）が窓版に無い — ROADMAP「残っている差」",
     "アップロード → サーバ": "同上",
     "ダウンロード ← サーバ": "同上",
     "このファイルを要約": "AI 要約（:summary）が窓版のエンジンに無い",
