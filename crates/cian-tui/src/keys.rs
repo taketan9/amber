@@ -1582,14 +1582,14 @@ impl App {
 
     fn color_picker_key(&mut self, key: KeyEvent) -> Result<()> {
         let Popup::ColorPicker { pane, cursor } = &mut self.popup else { return Ok(()) };
-            let n = PANE_BG_PRESETS.len();
+            let n = pane_bg_presets().len();
             match key.code {
                 KeyCode::Esc | KeyCode::Char('q') => self.popup = Popup::None,
                 KeyCode::Char('j') | KeyCode::Down => *cursor = (*cursor + 1) % n,
                 KeyCode::Char('k') | KeyCode::Up => *cursor = (*cursor + n - 1) % n,
                 KeyCode::Enter => {
                     let (pane, idx) = (*pane, *cursor);
-                    let color = PANE_BG_PRESETS[idx].1;
+                    let color = pane_bg_presets()[idx].1;
                     match pane {
                         // Only the split pane that was clicked, not the panel.
                         FocusedPane::Shell => self.shell.set_active_pane_bg(color),

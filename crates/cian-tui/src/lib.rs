@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -1913,34 +1913,33 @@ pub(crate) use cian_core::clip::{self, Clipboard as FileClipboard, Op as ClipOp}
 /// (luminance < 90), and pairwise distinct enough to tell two panes apart at a
 /// glance — both enforced by a test. A richer, more saturated spread than the
 /// original set, and more of them.
-const PANE_BG_PRESETS: [(&str, Option<Color>); 14] = [
-    ("default", None),
-    ("navy", Some(Color::Rgb(10, 40, 140))),
-    ("ocean", Some(Color::Rgb(15, 95, 160))),
-    ("teal", Some(Color::Rgb(10, 110, 110))),
-    ("forest", Some(Color::Rgb(25, 120, 25))),
-    ("moss", Some(Color::Rgb(60, 100, 40))),
-    ("olive", Some(Color::Rgb(110, 90, 10))),
-    ("mocha", Some(Color::Rgb(95, 60, 35))),
-    ("rust", Some(Color::Rgb(150, 50, 15))),
-    ("crimson", Some(Color::Rgb(160, 25, 45))),
-    // Named for Taketan's own project, crmaine — the emoticon marks it as a nod.
-    ("crmaine (^_-)", Some(Color::Rgb(140, 15, 85))),
-    ("plum", Some(Color::Rgb(85, 20, 150))),
-    ("steel", Some(Color::Rgb(40, 60, 90))),
-    ("slate", Some(Color::Rgb(70, 85, 120))),
-];
+/// The same fourteen, as ratatui colours. The table itself is
+/// `cian_core::theme::PANE_BG_PRESETS` — both front ends offer this list, and a
+/// window whose "navy" was a different navy would be two programs wearing one
+/// name (the same reason the palettes moved).
+fn pane_bg_presets() -> Vec<(&'static str, Option<Color>)> {
+    cian_core::theme::PANE_BG_PRESETS
+        .iter()
+        .map(|(name, rgb)| {
+            (*name, rgb.map(|c| Color::Rgb((c >> 16) as u8, (c >> 8) as u8, c as u8)))
+        })
+        .collect()
+}
 
 /// Resolve a macro's `bg = "…"`: a preset name (matched on its first word, so
 /// `"crmaine"` finds `"crmaine (^_-)"`), else a `#rrggbb` / named / `"r,g,b"`
 /// spec. `None` for an unknown spec or the "default" preset.
 pub(crate) fn resolve_bg(spec: &str) -> Option<Color> {
-    let key = spec.trim().to_lowercase();
-    for (name, color) in PANE_BG_PRESETS {
-        let first = name.split_whitespace().next().unwrap_or(name).to_lowercase();
-        if first == key {
-            return color;
-        }
+    if let Some(c) = cian_core::theme::pane_bg(spec) {
+        return Some(Color::Rgb((c >> 16) as u8, (c >> 8) as u8, c as u8));
+    }
+    // "default" resolves to no colour, and so does an unknown preset name;
+    // anything else is a colour spec of its own.
+    if cian_core::theme::PANE_BG_PRESETS
+        .iter()
+        .any(|(n, _)| n.split_whitespace().next().unwrap_or(n).eq_ignore_ascii_case(spec.trim()))
+    {
+        return None;
     }
     theme::parse_color(spec)
 }
@@ -3443,7 +3442,7 @@ impl App {
             self.message = Some(tr(self.lang, "nothing selected", "選択されていません").into());
             return;
         };
-        match os_reveal(&path) {
+        match cian_core::os::reveal(&path) {
             Ok(()) => self.message = Some(format!("revealed: {}", path.display())),
             Err(e) => self.message = Some(format!("reveal failed: {e}")),
         }
@@ -3455,7 +3454,7 @@ impl App {
             self.message = Some(tr(self.lang, "nothing selected", "選択されていません").into());
             return;
         };
-        match os_open_with(&path) {
+        match cian_core::os::open_with(&path) {
             Ok(()) => self.message = Some(format!("open with…: {}", path.display())),
             Err(e) => self.message = Some(e.to_string()),
         }
@@ -3467,7 +3466,7 @@ impl App {
             self.message = Some(tr(self.lang, "nothing selected", "選択されていません").into());
             return;
         };
-        match os_properties(&path) {
+        match cian_core::os::properties(&path) {
             Ok(()) => self.message = Some(format!("properties: {}", path.display())),
             Err(e) => self.message = Some(e.to_string()),
         }
@@ -3749,114 +3748,12 @@ pub(crate) fn save_theme_pref(name: &str) {
     state_set("theme", name);
 }
 
-/// Reveal `path` in the OS file manager, selecting it where the platform's
-/// manager supports it. Windows Explorer and macOS Finder select the file
-/// itself; Linux has no portable "select", so its parent folder is opened.
-fn os_reveal(path: &Path) -> Result<()> {
-    #[cfg(target_os = "macos")]
-    let mut cmd = {
-        let mut c = cian_core::proc::quiet("open");
-        c.arg("-R").arg(path);
-        c
-    };
-    #[cfg(target_os = "windows")]
-    let mut cmd = {
-        use std::os::windows::process::CommandExt;
-        // Explorer wants the PATH quoted, and its own (non-standard) parser
-        // rejects the whole `/select,PATH` token being quoted — which is exactly
-        // what `Command::arg` does when the path contains a space. An
-        // OneDrive-redirected Desktop is `C:\Users\name\OneDrive - Corp\Desktop`,
-        // so from there `/select` was handed a wrongly-quoted argument and
-        // Explorer silently fell back to opening the Documents folder. Emit the
-        // command line verbatim with `raw_arg`, quoting only the path (a Windows
-        // path can never contain a `"`, so this is safe). Explorer exits 1 even
-        // on success, so we only spawn — never wait on or check its status.
-        let mut c = cian_core::proc::quiet("explorer");
-        c.raw_arg(format!("/select,\"{}\"", path.display()));
-        c
-    };
-    #[cfg(target_os = "linux")]
-    let mut cmd = {
-        let dir = path.parent().unwrap_or(path);
-        let mut c = cian_core::proc::quiet("xdg-open");
-        c.arg(dir);
-        c
-    };
-    cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn()?;
-    Ok(())
-}
-
-/// Show the OS "Open with…" application picker for `path`. Only Windows has a
-/// portable shell command for this (`OpenAs_RunDLL`); elsewhere it is reported
-/// as unsupported so the menu can degrade gracefully.
-#[allow(unused_variables)]
-fn os_open_with(path: &Path) -> Result<()> {
-    #[cfg(target_os = "windows")]
-    {
-        cian_core::proc::quiet("rundll32.exe")
-            .arg("shell32.dll,OpenAs_RunDLL")
-            .arg(path)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()?;
-        Ok(())
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        anyhow::bail!("\u{201c}Open with\u{201d} is only available on Windows");
-    }
-}
-
-/// Open the OS properties / Get-Info panel for `path`. macOS opens Finder's
-/// information window; Windows invokes the shell "Properties" verb via
-/// PowerShell (best-effort — the verb name can be localized). Linux has no
-/// portable equivalent.
-#[allow(unused_variables)]
-fn os_properties(path: &Path) -> Result<()> {
-    #[cfg(target_os = "macos")]
-    {
-        // The path is passed as an argv item (not spliced into the script) so a
-        // name with quotes or backslashes cannot break the AppleScript.
-        cian_core::proc::quiet("osascript")
-            .args([
-                "-e", "on run argv",
-                "-e", "tell application \"Finder\"",
-                "-e", "activate",
-                "-e", "open information window of (POSIX file (item 1 of argv))",
-                "-e", "end tell",
-                "-e", "end run",
-            ])
-            .arg(path)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()?;
-        Ok(())
-    }
-    #[cfg(target_os = "windows")]
-    {
-        // Shell.Application's Properties verb. The path arrives as $args[0], not
-        // spliced into the script text.
-        let script = "$p=$args[0]; \
-             (New-Object -ComObject Shell.Application)\
-             .Namespace((Split-Path $p))\
-             .ParseName((Split-Path $p -Leaf))\
-             .InvokeVerb('Properties')";
-        cian_core::proc::quiet("powershell")
-            .args(["-NoProfile", "-Command", script])
-            .arg(path)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()?;
-        Ok(())
-    }
-    #[cfg(target_os = "linux")]
-    {
-        anyhow::bail!("Properties is not available on this platform");
-    }
-}
+// `os_reveal` / `os_open_with` / `os_properties` moved to `cian_core::os`.
+// The windowed engine had written its own `revealos` — one verb with two
+// implementations, and the copies had drifted: the engine's built Explorer's
+// argument with `Command::arg`, which mis-quotes a path holding a space, so
+// reveal silently showed Documents from a OneDrive Desktop. Both call the one
+// implementation now.
 
 /// The user's home directory: `$HOME`, or `$USERPROFILE` on Windows.
 fn home_dir() -> Option<PathBuf> {

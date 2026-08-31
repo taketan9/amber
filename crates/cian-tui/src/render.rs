@@ -9067,10 +9067,10 @@ fn draw_color_picker(
 ) {
     let Popup::ColorPicker { cursor, .. } = popup else { return };
     let w = 26u16.min(area.width);
-    let h = PANE_BG_PRESETS.len() as u16 + 3;
+    let h = pane_bg_presets().len() as u16 + 3;
     let inner = popup_frame(f, area, w, h.min(area.height), tr(lang, " background ", " 背景色 "), "");
 
-    let rows: Vec<Line> = PANE_BG_PRESETS
+    let rows: Vec<Line> = pane_bg_presets()
         .iter()
         .enumerate()
         .map(|(i, (name, color))| {
@@ -9095,7 +9095,7 @@ fn draw_color_picker(
         .collect();
     let body_area = body_rows(inner);
     f.render_widget(Paragraph::new(rows), body_area);
-    for i in 0..PANE_BG_PRESETS.len() {
+    for i in 0..pane_bg_presets().len() {
         push_row_zone(zones, inner, inner.y + i as u16, i);
     }
     let footer_area =

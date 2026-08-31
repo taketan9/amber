@@ -246,6 +246,45 @@ pub fn toward(c: u32, bg: u32, amount: f32) -> u32 {
     (mix(16) << 16) | (mix(8) << 8) | mix(0)
 }
 
+/// The colours a *pane* can be given as its ground, on top of whatever theme
+/// is on.
+///
+/// A ground per pane is how you tell two panes apart at a glance when both are
+/// showing directories with the same name — which at work is most of the time.
+/// `None` means "whatever the theme says", and is deliberately first: the way
+/// back is the same list as the way in.
+///
+/// Here rather than in a front end because both of them offer this list, and a
+/// window whose "navy" was a different navy would be two programs wearing one
+/// name — the same reason [`PRESETS`] moved.
+pub const PANE_BG_PRESETS: [(&str, Option<u32>); 14] = [
+    ("default", None),
+    ("navy", Some(0x0a288c)),
+    ("ocean", Some(0x0f5fa0)),
+    ("teal", Some(0x0a6e6e)),
+    ("forest", Some(0x197819)),
+    ("moss", Some(0x3c6428)),
+    ("olive", Some(0x6e5a0a)),
+    ("mocha", Some(0x5f3c23)),
+    ("rust", Some(0x96320f)),
+    ("crimson", Some(0xa0192d)),
+    // Named for Taketan's own project, crmaine — the emoticon marks it as a nod.
+    ("crmaine (^_-)", Some(0x8c0f55)),
+    ("plum", Some(0x551496)),
+    ("steel", Some(0x283c5a)),
+    ("slate", Some(0x465578)),
+];
+
+/// A pane ground by name, matched on its first word so `"crmaine"` finds
+/// `"crmaine (^_-)"`. `None` for an unknown name or for `"default"`.
+pub fn pane_bg(name: &str) -> Option<u32> {
+    let key = name.trim().to_lowercase();
+    PANE_BG_PRESETS.iter().find_map(|(n, c)| {
+        let first = n.split_whitespace().next().unwrap_or(n).to_lowercase();
+        (first == key).then_some(*c).flatten()
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

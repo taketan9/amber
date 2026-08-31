@@ -1115,9 +1115,9 @@ function mix(a, b, t) {
     return `#${one(ar, br)}${one(ag, bg)}${one(ab, bb)}`;
 }
 
-function paintPalette(t) {
-    const r = document.documentElement.style;
-    const set = {
+/// A palette spec becomes the window's custom properties.
+function paletteVars(t) {
+    return {
         '--bg': t.bg,
         '--pane': t.bg,
         '--pane-off': t.popup,
@@ -1147,16 +1147,67 @@ function paintPalette(t) {
         '--sel-strong': mix(t.sel, t.bg, 0.35),
         '--row-hover': mix(t.fg, t.bg, 0.94),
     };
-    for (const [k, v] of Object.entries(set)) r.setProperty(k, v);
+}
+
+function paintPalette(t) {
+    const r = document.documentElement.style;
+    for (const [k, v] of Object.entries(paletteVars(t))) r.setProperty(k, v);
     document.documentElement.dataset.dark = t.light ? '' : '1';
+}
+
+/// The variables a palette sets. One list, used to paint the whole window, to
+/// paint a single pane, and to wipe either — three copies of it would drift
+/// the first time a colour was added.
+const PALETTE_VARS = ['--bg', '--pane', '--pane-off', '--line', '--text', '--dim',
+    '--dir', '--accent', '--accent-dim', '--on-accent', '--mark',
+    '--k-code', '--k-config', '--k-doc', '--k-image', '--k-media',
+    '--k-archive', '--k-exec', '--sel-strong', '--row-hover'];
+
+/// What one pane is wearing, over whatever the window is wearing.
+///
+/// cian-tui has both of these and keeps both for the session only
+/// (`App.pane_bg`, `App.pane_theme`): a ground you give the left listing is
+/// for the work in front of you, not a preference to be remembered. The point
+/// is telling two panes apart when both are showing a directory called `src`.
+const paneSkin = { left: { ground: null, theme: null }, right: { ground: null, theme: null } };
+
+/// The fourteen pane grounds, from the engine (cian-core's own table).
+let grounds = [];
+
+function paneEl(which) {
+    return el.panes.querySelector(`.pane[data-pane="${which}"]`);
+}
+
+/// Put a pane's own ground and palette on the pane element itself.
+///
+/// A custom property set on the element wins for that subtree, so this is the
+/// whole mechanism — no second stylesheet, and the rest of the window keeps
+/// the palette it had. `--panes-pct` and `--main-pct` live on `:root`, so
+/// clearing the element's inline properties cannot disturb the layout.
+function paintPane(which) {
+    const node = paneEl(which);
+    if (!node) return;
+    for (const k of PALETTE_VARS) node.style.removeProperty(k);
+    const skin = paneSkin[which];
+    if (skin.theme) {
+        const t = palettes.get(skin.theme);
+        if (t) {
+            const vars = paletteVars(t);
+            for (const [k, v] of Object.entries(vars)) node.style.setProperty(k, v);
+        }
+    }
+    if (skin.ground) {
+        // The active pane shows `--pane` and the other `--pane-off`; a chosen
+        // ground is the pane's ground either way, a shade quieter when the
+        // keys are elsewhere.
+        node.style.setProperty('--pane', skin.ground);
+        node.style.setProperty('--pane-off', mix(skin.ground, '#000000', 0.3));
+    }
 }
 
 function clearPalette() {
     const r = document.documentElement.style;
-    for (const k of ['--bg', '--pane', '--pane-off', '--line', '--text', '--dim',
-        '--dir', '--accent', '--accent-dim', '--on-accent', '--mark',
-        '--k-code', '--k-config', '--k-doc', '--k-image', '--k-media',
-        '--k-archive', '--k-exec', '--sel-strong', '--row-hover']) r.removeProperty(k);
+    for (const k of PALETTE_VARS) r.removeProperty(k);
     delete document.documentElement.dataset.dark;
 }
 
@@ -1636,6 +1687,7 @@ function viewerRows() {
     // does here (menu.rs open_viewer_menu: `if self.ai.is_some() && ai_ready`).
     if (cfg.ai) v.push(group('AI - simple ▸', aiRows));
     v.push({ label: 'コピー', value: 'Ctrl+C', run: () => document.execCommand('copy') });
+    if (cfg.ai) v.push({ label: 'このファイルを要約', value: ':summary', run: cmdSummary });
     v.push({ label: '保存', value: 'Ctrl+S', run: saveFile });
     v.push({ label: '外部エディタで開く', value: ':edit', run: cmdEditExternal });
     v.push({ label: '文字コードを指定…', value: ':enc', run: () => cmdEncoding() });
@@ -1643,6 +1695,7 @@ function viewerRows() {
     // cian-tui's row here is `mermaid 図をブラウザで開く`; the window draws the
     // diagrams in the preview instead, so this is the same row by another road.
     v.push({ label: 'Markdown プレビュー', value: 'Ctrl+E', run: togglePreview2 });
+    v.push({ label: 'mermaid 図をブラウザで開く', value: ':mermaid', run: cmdMermaidOut });
     v.push({ label: '見出しから飛ぶ', value: 'Ctrl+Shift+O', run: cmdOutline });
     // Where the file lives, for when reading it raises a question about the
     // folder it is in. The cursor is already on it, so this is just the way
@@ -1666,6 +1719,32 @@ const VIEWER_MENU = {
 /// `settings` reply at startup; false until then, which is the safe way round
 /// — a row that is missing for a moment beats a row that leads nowhere.
 const cfg = { ai: false, snippets: false, macros: false, hosts: false };
+
+/// What this platform will do, from the engine — not from the user agent.
+///
+/// `navigator.platform` knows which browser this is, and the file manager is a
+/// different question: "Open with…" is a Windows shell verb and the properties
+/// panel exists on two of the three. cian-tui gates the same two rows on the
+/// same facts (menu.rs `OsMenu`), so the engine answers for both.
+const osCan = { open_with: false, properties: false, file_manager: 'Finder' };
+
+/// Where the synced Office libraries are on this disk, from init.lua's
+/// `cian.sharepoint{…}`. Empty until the engine answers, which is the safe way
+/// round — the two Office rows appear a moment late rather than appearing and
+/// then only being able to refuse.
+let sharepoint = [];
+
+/// Would the Office rows do anything for the row under the cursor?
+///
+/// The two tests `cloud_url` and `classify` do, run here: is this an Office
+/// document, and is it inside a configured library. cian-tui asks the same
+/// pair before it pushes the rows (menu.rs: `!sharepoint.is_empty() &&
+/// office_target_ok()`).
+function officeTarget(row) {
+    if (!sharepoint.length || !row || row.is_dir || row.parent) return false;
+    if (!/\.(docx?|docm|xlsx?|xlsm|xlm|pptx?|pptm|pdf)$/i.test(row.name)) return false;
+    return sharepoint.some((root) => row.path && row.path.startsWith(root));
+}
 
 function contextRows() {
     const pane = state[state.focus];
@@ -1697,7 +1776,13 @@ function contextRows() {
         // The shell's own menu: what can be done to a terminal, not to a file.
         v.push({ label: '貼り付け', value: ':paste', run: () => document.execCommand('paste') });
         v.push(group('セッション ▸', () => [
-            { label: 'セッションログ開始／停止', value: ':sessionlog', run: cmdShellLog },
+            // Named for what it will do, as cian-tui names it (`StartLog` /
+            // `StopLog`, chosen in `submenu_children` from whether this pane is
+            // already recording). One row that says "start／stop" makes the
+            // reader work out which of the two they are about to get.
+            el.shell.classList.contains('logging')
+                ? { label: 'セッションログ停止  ●', value: ':sessionlog', run: cmdShellLog }
+                : { label: 'セッションログ開始', value: ':sessionlog', run: cmdShellLog },
             { label: '文字コード', value: 'e', run: () => cmdEncoding() },
         ]));
         v.push(group('ウィンドウ ▸', () => [
@@ -1822,6 +1907,10 @@ function contextRows() {
     // Background and Lang), not folded into the view group. It was two levels
     // down here, which is how someone with twenty-one palettes in front of
     // them came to ask whether themes could be chosen at all.
+    // cian-tui's appearance zone, in its order: Background, then the whole-app
+    // theme (menu.rs pushes them adjacent, ahead of Lang and the view group).
+    // Menu-only, as it is there: cian-tui gives this no key and no `:` verb.
+    if (!inShell) v.push({ label: '背景色', value: '', run: cmdPaneGround });
     v.push({ label: 'テーマ（全体）', value: ':theme', run: cmdTheme });
     v.push({ label: '全画面', value: 'F11', run: cmdFullscreen });
     v.push({ label: 'この面を広げる', value: 'F12', run: zoomFocused });
@@ -1835,13 +1924,32 @@ function contextRows() {
             { label: '▦ アイコン', value: ':view icons', run: () => { setView('icons'); say('一覧: アイコン'); } },
             { label: '▥ クラシック', value: ':view classic', run: () => { setView('classic'); say('一覧: クラシック'); } },
             { label: 'ドットファイルの表示切替', value: ':hidden', run: toggleHidden },
+            { label: 'テーマ（このペイン）', value: '', run: cmdPaneTheme },
             { label: '各種スイッチ…', value: 'T', run: () => openMenu(TOGGLES) },
         ]));
-        v.push(group('開く / 場所 ▸', () => [
-            { label: '開く', value: 'Ctrl+Enter', run: openOut },
-            { label: '外部エディタで開く', value: ':edit', run: cmdEditExternal },
-            { label: ON_MAC ? 'Finder で表示' : 'エクスプローラーで表示', value: ':revealos', run: cmdRevealOs },
-        ]));
+        v.push(group('開く / 場所 ▸', () => {
+            // cian-tui's OsMenu, row for row and gated the same way: a row that
+            // could only answer "not on this platform" is worse than no row.
+            const rows = [
+                { label: '開く', value: 'Ctrl+Enter', run: openOut },
+            ];
+            if (osCan.open_with) {
+                rows.push({ label: 'プログラムから開く', value: '', run: cmdOpenWith });
+            }
+            // Only where there are libraries to resolve against and the file
+            // is one of theirs — an item that can only ever refuse is not
+            // worth the row (cian-tui's words for its own version of this).
+            if (officeTarget(row)) {
+                rows.push({ label: 'Office で開く（クラウド側）', value: ':office', run: () => cmdOffice('office') });
+                rows.push({ label: 'クラウド側へのショートカットを作成', value: ':officelink', run: () => cmdOffice('officelink') });
+            }
+            rows.push({ label: '外部エディタで開く', value: ':edit', run: cmdEditExternal });
+            rows.push({ label: `${osCan.file_manager} で表示`, value: ':revealos', run: cmdRevealOs });
+            if (osCan.properties) {
+                rows.push({ label: ON_MAC ? '情報を見る' : 'プロパティ', value: '', run: cmdProperties });
+            }
+            return rows;
+        }));
     }
     // cian-tui ends Quit then Manual — the way out, then the way to find out.
     v.push({ label: 'cian を終了', value: 'q', run: cmdQuit });
@@ -1906,6 +2014,15 @@ const CONTEXT = {
     rows: contextRows,
 };
 
+/// Called as the menu cursor passes a row, for a menu whose rows *are* the
+/// thing being chosen — a colour is looked at, not read. The sheet is a small
+/// centred panel, so the panes are visible around it and the preview is
+/// actually on screen; the full-width report is not (which is why the colour
+/// pickers use this and not `show()`).
+function menuMoved(spec, rows) {
+    if (spec.move) spec.move(rows[menu.at]);
+}
+
 /// One menu driver, not one per menu.
 ///
 /// The switches and the sort picker are the same object with different rows,
@@ -1947,8 +2064,13 @@ function runMenuRow(row, spec) {
         });
         return;
     }
+    // What the row opened, if it opened anything. `各種スイッチ…` and the two
+    // colour pickers all answer by raising another menu — and this line then
+    // closed it again, one statement after it appeared. The switches menu was
+    // therefore reachable by `T` and not by the menu row that names it.
+    const before = menu.spec;
     row.run();
-    if (!spec.stay) closeMenu();
+    if (!spec.stay && menu.spec === before) closeMenu();
 }
 
 /// Up one level, or out. cian-tui's `menu_back()` — written once here now
@@ -1959,9 +2081,20 @@ function menuBack() {
 }
 
 function closeMenu() {
+    // A menu that has been changing something while you looked at it gets to
+    // put it back when you leave without choosing — the same promise `show()`
+    // keeps with `leave`, and the reason Esc on the colour pickers restores
+    // the ground rather than leaving whatever the cursor last passed over.
+    if (menu.spec && menu.spec.leave) menu.spec.leave();
     menuStack.length = 0;
     menu.spec = null;
     el.find.hidden = true;
+}
+
+/// Close without the `leave` promise — for the row that *chose* something.
+function closeMenuChosen() {
+    if (menu.spec) menu.spec.leave = null;
+    closeMenu();
 }
 
 /// The rows the menu is showing, including the `◂ 戻る` cian-tui ends every
@@ -2056,13 +2189,22 @@ document.addEventListener('keydown', (e) => {
         menuBack();
     }
     else if (e.key === 'Escape' || e.key === spec.key) closeMenu();
-    else if (e.key === 'ArrowDown' || e.key === 'j') { menu.at = (menu.at + 1) % rows.length; drawMenu(); }
-    else if (e.key === 'ArrowUp' || e.key === 'k') { menu.at = (menu.at + rows.length - 1) % rows.length; drawMenu(); }
+    else if (e.key === 'ArrowDown' || e.key === 'j') { menu.at = (menu.at + 1) % rows.length; drawMenu(); menuMoved(spec, rows); }
+    else if (e.key === 'ArrowUp' || e.key === 'k') { menu.at = (menu.at + rows.length - 1) % rows.length; drawMenu(); menuMoved(spec, rows); }
     else if (pick) { closeMenu(); pick(); }
     else if (e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowRight' || e.key === 'l') {
         runMenuRow(rows[menu.at], spec);
     } else return;
     e.preventDefault();
+    // Not `stopPropagation`: that stops the event travelling *onward*, and
+    // every one of these handlers is on `document`, so it stops nothing here.
+    // The row this Enter ran may have opened a list — and that list's handler,
+    // registered later on the same element, then saw the same Enter and picked
+    // its first row. `テーマ（全体）` from this menu therefore chose 白磁 and
+    // closed before anyone could look at the gallery, which is what was
+    // reported on Windows as "配色が選べない" and diagnosed as the menu being
+    // two levels deep. It was two faults wearing one symptom.
+    e.stopImmediatePropagation();
 }, true);
 
 /// What `?` shows.
@@ -3473,6 +3615,14 @@ function setStyle(i, remember = true) {
         ex.defineEx('ws', 'ws', () => toggleWs());
         ex.defineEx('ruler', 'ruler', () => toggleRuler());
         ex.defineEx('preview', 'preview', () => togglePreview2());
+        // cian-tui's viewer verbs, reachable from vim's command line the way
+        // they are there. Without these, `:mermaid` and `:summary` answered
+        // "Not an editor command" — they existed in the dictionary the listing
+        // reads, and the viewer has a different one.
+        ex.defineEx('mermaid', 'mermaid', () => cmdMermaidOut());
+        ex.defineEx('summary', 'summary', () => cmdSummary());
+        ex.defineEx('edit', 'edit', () => cmdEditExternal());
+        ex.defineEx('theme', 'theme', (_cm, p) => cmdTheme((p.args || [])[0]));
         ex.defineEx('combine', 'combine', (_cm, p) => cmdCombine((p.args || []).join(' ') + (p.argString || '')));
         // The line operations, which until now could not be reached at all:
         // each needs a file open, and cian's own `:` belongs to the listing,
@@ -3985,6 +4135,7 @@ const COMMANDS = [
     { name: 'editstyle', alias: ['notepad', 'vimkey'], about: 'エディタのキー操作 — :editstyle vim / :notepad', arg: 'vim / notepad', optional: true, run: cmdEditStyle },
     { name: 'scratch', alias: ['new'], about: '下書きを開く（:w で名前を付けて保存）', run: cmdScratch },
     { name: 'limit', alias: ['speed', 'ratelimit'], about: '転送の速さの上限 — :limit 2m / 500k / off', arg: '2m / 500k / off', optional: true, run: cmdLimit },
+    { name: 'summary', alias: ['summarize', 'summarise'], about: 'AI: 開いているファイルを要約', run: cmdSummary },
     { name: 'aicommit', alias: ['commitmsg'], about: 'AI: ステージ済みの差分からコミットメッセージを作る', run: cmdAiCommit },
     { name: 'aijunk', alias: ['junk'], about: 'AI: ゴミファイル検出 — 中身は送りません', run: () => cmdAiScan('aijunk') },
     { name: 'aistructure', alias: ['organize', 'aiorganize'], about: 'AI: ディレクトリ構成を提案 — 実行前に全部見せます', run: () => cmdAiScan('aistructure') },
@@ -4004,6 +4155,11 @@ const COMMANDS = [
     { name: 'theme', alias: ['colorscheme', 'colourscheme'], about: '配色 21 種 — 選ぶだけで着せ替わります（T のメニューにも）', arg: '名前', optional: true, run: cmdTheme },
     { name: 'redraw', alias: ['refresh!'], about: '画面を描き直す', run: () => { draw('left'); draw('right'); say('描き直しました'); } },
     { name: 'preview', about: 'カーソルのファイルを追って表示（もう一度で止める）', run: togglePreview },
+    // cian-tui's `:mermaid` opens the file's diagrams in a browser. The window
+    // draws them in the preview, but the browser is still the place you go to
+    // make one big enough to read — so the verb exists here too, and does the
+    // same thing.
+    { name: 'mermaid', about: 'mermaid 図をブラウザで開く', run: cmdMermaidOut },
     { name: 'render', alias: ['source'], about: 'Markdown を組んで表示（Ctrl+E でも）', run: togglePreview2 },
     { name: 'queue', about: '実行中の操作を見る・止める', run: cmdQueue },
     { name: 'tab', about: '新しいタブ（t / F9 でも）', run: () => tabNew() },
@@ -4466,6 +4622,48 @@ const AI_OVER_TEXT = {
         'このコードを点検・修正',
     ],
 };
+
+/// `:mermaid` — the open file's diagrams, in a browser.
+///
+/// The preview draws them inline (Ctrl+E); this is the other half of what
+/// cian-tui's `:mermaid` is for — a diagram big enough to read, and one you
+/// can hand to somebody.
+async function cmdMermaidOut() {
+    if (!viewer.on || !viewer.ed) {
+        say('先にファイルを開いてください（F3）', true);
+        return;
+    }
+    const r = await ask('mermaid', { text: viewer.ed.getModel().getValue() });
+    if (!r) return;
+    say(`mermaid を ${r.blocks} 件ブラウザで開きました（${r.offline ? 'offline' : 'via CDN'}）`);
+}
+
+/// `:summary` — what this file is, for someone about to work on it.
+///
+/// cian-tui's `summarize_viewer` (ai.rs:303), prompt and bound alike. Unlike
+/// the scans, this sends the file's **text** to the model, which is why it is
+/// an explicit row rather than something the viewer does on opening.
+async function cmdSummary() {
+    if (!viewer.on || !viewer.ed) {
+        say('先にファイルを開いてください（F3）', true);
+        return;
+    }
+    const body = viewer.ed.getModel().getValue().slice(0, 24000);
+    if (!body.trim()) { say('要約する対象がありません', true); return; }
+    const r = await ask('ai', {
+        pane: state.focus, what: 'text',
+        system: 'You summarise a file\'s contents for a developer. Give a '
+            + 'short, plain-text summary: what it is, its purpose, and the key '
+            + 'points or structure. Be concise; no preamble, no markdown headings.',
+        text: body,
+    });
+    if (!r) return;
+    say('読んでいます…');
+    aiWaiting = (answer) => {
+        show('このファイルを要約', `${viewer.name} — AI の答え、確かめてから使ってください`,
+            answer.split('\n').map((t) => ({ label: t })), { foot: 'Esc 閉じる' });
+    };
+}
 
 async function cmdAiOverText(kind) {
     if (!viewer.on || !viewer.ed) {
@@ -5985,6 +6183,69 @@ async function cmdTheme(name) {
         });
 }
 
+/// `背景色` — one pane's ground, from the fourteen cian-core publishes.
+///
+/// A menu rather than the report, because the report is the whole window and a
+/// colour you cannot see while choosing it is a colour chosen by name. The
+/// sheet leaves the panes visible, so `↑↓` really does dress the pane.
+function cmdPaneGround() {
+    const which = state.focus;
+    const was = paneSkin[which].ground;
+    const wear = (row) => { paneSkin[which].ground = row.color; paintPane(which); };
+    const rows = grounds.map((g) => ({
+        label: g.name,
+        value: (g.color || null) === was ? '●' : '',
+        color: g.color || null,
+        run: () => { closeMenuChosen(); say(`背景色: ${g.name}`); },
+    }));
+    const at = Math.max(0, rows.findIndex((r) => r.color === was));
+    openMenu({
+        key: '',
+        foot: `${which === 'left' ? '左' : '右'}のペイン   ↑↓ 選ぶだけで着きます   Enter 決定   Esc 戻す`,
+        stay: false,
+        rows: () => rows,
+        at: () => at,
+        move: wear,
+        leave: () => { paneSkin[which].ground = was; paintPane(which); },
+    });
+    // The cursor starts on the current colour, so nothing changes until it moves.
+}
+
+/// `テーマ（このペイン）` — a palette for one listing only.
+///
+/// cian-tui's `ThemePickPane`, including the way out: the first row clears the
+/// override rather than being another palette, so the way back is in the same
+/// list as the way in.
+function cmdPaneTheme() {
+    const which = state.focus;
+    const was = paneSkin[which].theme;
+    const wear = (row) => { paneSkin[which].theme = row.palette || null; paintPane(which); };
+    const rows = [{
+        label: '解除（窓ぜんたいの配色に戻す）',
+        value: was ? '' : '●',
+        palette: null,
+        run: () => { closeMenuChosen(); say('このペインの配色を解除しました'); },
+    }];
+    for (const name of palettes.keys()) {
+        rows.push({
+            label: name,
+            value: was === name ? '●' : '',
+            palette: name,
+            run: () => { closeMenuChosen(); say(`このペインの配色: ${name}`); },
+        });
+    }
+    const at = Math.max(0, rows.findIndex((r) => r.palette === (was || null)));
+    openMenu({
+        key: '',
+        foot: `${which === 'left' ? '左' : '右'}のペインだけ   ↑↓ 選ぶだけで着せ替わります   Enter 決定   Esc 戻す`,
+        stay: false,
+        rows: () => rows,
+        at: () => at,
+        move: wear,
+        leave: () => { paneSkin[which].theme = was; paintPane(which); },
+    });
+}
+
 /// `:blame` — who last changed each line, in the gutter.
 ///
 /// In the gutter rather than as a list, because the question is always about a
@@ -6786,7 +7047,19 @@ async function cmdAiError() {
 /// `:revealos` — hand the file to Finder, with it selected.
 async function cmdRevealOs() {
     const r = await ask('revealos', { pane: state.focus });
-    if (r) say(`${r.revealed} を Finder で表示しました`);
+    if (r) say(`${r.revealed} を ${osCan.file_manager} で表示しました`);
+}
+
+/// The OS "Open with…" picker (Windows only — the engine says so).
+async function cmdOpenWith() {
+    const r = await ask('openwith', { pane: state.focus });
+    if (r) say(`${r.opened} を「プログラムから開く」に渡しました`);
+}
+
+/// The OS properties / Get-Info panel.
+async function cmdProperties() {
+    const r = await ask('properties', { pane: state.focus });
+    if (r) say(`${r.shown} の${ON_MAC ? '情報' : 'プロパティ'}を開きました`);
 }
 
 async function cmdEditExternal() {
@@ -7609,6 +7882,7 @@ async function recall() {
     const t = await ask('themes', {});
     if (t) {
         for (const p of t.list) palettes.set(p.name, p);
+        if (Array.isArray(t.grounds)) grounds = t.grounds;
         // `theme` wins unless one of the window's own looks (陰翳・端末譲り)
         // was chosen *after* it — setPalette resets gui_look to 白磁, so a
         // surviving non-白磁 look is by definition the later choice.
@@ -7647,6 +7921,9 @@ async function recall() {
     cfg.snippets = c.snippets === true;
     cfg.macros = c.macros === true;
     cfg.hosts = c.ssh_hosts === true;
+    // Same reason, for the OS group: asked once, used synchronously.
+    if (s.os) Object.assign(osCan, s.os);
+    if (Array.isArray(s.sharepoint)) sharepoint = s.sharepoint;
     // Lua's own complaints go in the same queue as mine — from where the
     // person stands they are one thing: "my config did not take".
     keymapErrors = [...(s.config_errors || []), ...keymapErrors];

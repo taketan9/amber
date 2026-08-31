@@ -4615,7 +4615,7 @@ impl App {
     /// works offline; otherwise the CDN, so it just works when online.
     pub(crate) fn open_mermaid_in_browser(&mut self) {
         let Popup::Viewer { source, .. } = &self.popup else { return };
-        let blocks = extract_mermaid_blocks(source);
+        let blocks = cian_core::mermaid::extract_blocks(source);
         if blocks.is_empty() {
             self.message = Some(tr(self.lang, "no mermaid blocks here", "mermaid ブロックがありません").into());
             return;
@@ -4635,7 +4635,7 @@ impl App {
             }
             None => "<script type=\"module\">import mermaid from \"https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs\";mermaid.initialize({startOnLoad:true});</script>".to_string(),
         };
-        let html = mermaid_html(&blocks, &script);
+        let html = cian_core::mermaid::page(&blocks, &script);
         let page = dir.join("diagram.html");
         if let Err(e) = std::fs::write(&page, html) {
             self.message = Some(format!("cannot write page: {e}"));
@@ -4746,55 +4746,16 @@ fn push_viewer_undo(
     }
 }
 
-fn extract_mermaid_blocks(source: &[String]) -> Vec<String> {
-    let mut blocks = Vec::new();
-    let mut i = 0;
-    while i < source.len() {
-        let t = source[i].trim_start();
-        let is_mermaid_fence = (t.starts_with("```") || t.starts_with("~~~"))
-            && t.trim_start_matches(['`', '~']).trim().eq_ignore_ascii_case("mermaid");
-        if is_mermaid_fence {
-            i += 1;
-            let mut body = String::new();
-            while i < source.len()
-                && !(source[i].trim_start().starts_with("```") || source[i].trim_start().starts_with("~~~"))
-            {
-                body.push_str(&source[i]);
-                body.push('\n');
-                i += 1;
-            }
-            i += 1; // consume the closing fence
-            if !body.trim().is_empty() {
-                blocks.push(body);
-            }
-        } else {
-            i += 1;
-        }
-    }
-    blocks
-}
+// moved to `cian_core::mermaid::extract_blocks` — the window wants the same
+// extractor, and two of them would drift the first time a fence style changed.
 
-/// A self-contained HTML page rendering `blocks` as mermaid diagrams.
-fn mermaid_html(blocks: &[String], script: &str) -> String {
-    let escape = |s: &str| s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;");
-    let mut body = String::new();
-    for b in blocks {
-        body.push_str("<pre class=\"mermaid\">\n");
-        body.push_str(&escape(b));
-        body.push_str("</pre>\n");
-    }
-    format!(
-        "<!doctype html><html><head><meta charset=\"utf-8\"><title>cian — mermaid</title>\
-<style>body{{background:#0f1116;color:#cdd0d8;font-family:system-ui,sans-serif;margin:0;padding:20px}}\
-h3{{margin:0 0 12px;font-weight:600}}\
-.mermaid{{background:#fff;border-radius:10px;padding:16px;margin:16px 0;overflow:auto}}</style>\
-</head><body><h3>cian — mermaid</h3>{body}{script}</body></html>"
-    )
-}
+
+// `mermaid_html` moved to `cian_core::mermaid::page`.
+
 
 #[cfg(test)]
 mod mermaid_tests {
-    use super::{extract_mermaid_blocks, mermaid_html};
+    use cian_core::mermaid::{extract_blocks as extract_mermaid_blocks, page as mermaid_html};
 
     fn lines(s: &str) -> Vec<String> {
         s.lines().map(str::to_string).collect()

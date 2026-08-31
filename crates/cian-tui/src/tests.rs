@@ -10320,14 +10320,14 @@
     fn the_palette_is_distinct_enough_to_tell_panes_apart() {
         // The first entry is "no color"; the rest must be visibly different
         // from one another, which an earlier too-subtle set was not.
-        let colors: Vec<(u8, u8, u8)> = PANE_BG_PRESETS
+        let colors: Vec<(u8, u8, u8)> = pane_bg_presets()
             .iter()
             .filter_map(|(_, c)| match c {
                 Some(Color::Rgb(r, g, b)) => Some((*r, *g, *b)),
                 _ => None,
             })
             .collect();
-        assert_eq!(colors.len(), PANE_BG_PRESETS.len() - 1);
+        assert_eq!(colors.len(), pane_bg_presets().len() - 1);
         for (i, a) in colors.iter().enumerate() {
             for b in colors.iter().skip(i + 1) {
                 let d = (a.0 as i32 - b.0 as i32).abs()

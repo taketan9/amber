@@ -2365,6 +2365,26 @@ impl Session {
                 "config_errors": cfg.errors,
                 "where": cian_lua::config_read_path("state.toml")
                     .map(|p| p.display().to_string()),
+                // What this platform will actually do, so the menu can leave
+                // out a row that could only answer "not on this platform".
+                // cian-tui asks the same question at the same place
+                // (menu.rs `OsMenu`); the window was guessing from the user
+                // agent, which knows the browser's platform, not the file
+                // manager's.
+                "os": {
+                    "open_with": cian_core::os::open_with_supported(),
+                    "properties": cian_core::os::properties_supported(),
+                    "file_manager": cian_core::os::file_manager_name(),
+                },
+                // Where the synced libraries live on this disk. The menu tests
+                // a path against these before it offers the two Office rows —
+                // the same prefix test `cloud_url` does, run where the menu is
+                // built rather than over the pipe, because a menu is drawn on
+                // a keystroke and cannot wait for an answer.
+                "sharepoint": cian_core::office::SyncMap::from_pairs(&cfg.sharepoint)
+                    .iter()
+                    .map(|m| m.local.display().to_string())
+                    .collect::<Vec<_>>(),
             }))
             }
             "remember" => {
@@ -3426,6 +3446,16 @@ impl Session {
             }
             "themes" => Ok(serde_json::json!({
                 "now": cian_lua::state_get("theme"),
+                // The fourteen pane grounds, from the same table cian-tui
+                // reads. `null` is "whatever the theme says", and is first —
+                // the way back is the same list as the way in.
+                "grounds": cian_core::theme::PANE_BG_PRESETS
+                    .iter()
+                    .map(|(name, rgb)| serde_json::json!({
+                        "name": name,
+                        "color": rgb.map(|c| format!("#{c:06x}")),
+                    }))
+                    .collect::<Vec<_>>(),
                 "list": cian_core::theme::PRESETS
                     .iter()
                     .map(|(name, s)| serde_json::json!({
@@ -3462,24 +3492,64 @@ impl Session {
             // The way out of cian into the rest of the machine: a file manager
             // that cannot say "show me this where the OS shows things" is a
             // place you have to leave by hand.
+            // The three ways of handing a file to the desktop. All of them are
+            // `cian_core::os` now, which is the terminal build's implementation
+            // — this one used to be written here, and it built Explorer's
+            // argument with `Command::arg`, so a path holding a space (a
+            // OneDrive-redirected Desktop, say) was mis-quoted and Explorer
+            // silently opened Documents. One verb, one implementation.
             "revealos" => {
                 let which = req.params["pane"].as_str().unwrap_or("left").to_string();
                 let (path, name, _) = self.selected(&which)?;
-                #[cfg(target_os = "macos")]
-                let out = cian_core::proc::quiet("open").arg("-R").arg(&path).status();
-                #[cfg(windows)]
-                let out = cian_core::proc::quiet("explorer")
-                    .arg(format!("/select,{}", path.display()))
-                    .status();
-                #[cfg(all(not(target_os = "macos"), not(windows)))]
-                let out = cian_core::proc::quiet("xdg-open")
-                    .arg(path.parent().unwrap_or(&path))
-                    .status();
-                // Explorer answers 1 on success, which is not a failure; the
-                // others answer 0. Neither number is worth reporting, so only
-                // a failure to start the program at all is.
-                out.map_err(|e| anyhow::anyhow!("開けませんでした: {e}"))?;
+                cian_core::os::reveal(&path)
+                    .map_err(|e| anyhow::anyhow!("開けませんでした: {e}"))?;
                 Ok(serde_json::json!({ "revealed": name }))
+            }
+            // `:mermaid` — the file's diagrams, in a browser.
+            //
+            // The window draws them in the preview already; this is the other
+            // half of what cian-tui's `:mermaid` is for, which is a diagram big
+            // enough to read. Same extractor, same page, and the same
+            // preference for a local `mermaid.min.js` beside the config over
+            // the CDN — an offline machine has no CDN.
+            "mermaid" => {
+                let text = req.params["text"].as_str().unwrap_or("");
+                let lines: Vec<String> = text.lines().map(str::to_string).collect();
+                let blocks = cian_core::mermaid::extract_blocks(&lines);
+                if blocks.is_empty() {
+                    anyhow::bail!("mermaid ブロックがありません");
+                }
+                let dir = std::env::temp_dir().join("cian-mermaid");
+                std::fs::create_dir_all(&dir)?;
+                let local = cian_lua::config_read_path("mermaid.min.js").filter(|p| p.exists());
+                let script = match &local {
+                    Some(js) => {
+                        let _ = std::fs::copy(js, dir.join("mermaid.min.js"));
+                        "<script src=\"mermaid.min.js\"></script>\n<script>mermaid.initialize({startOnLoad:true});</script>".to_string()
+                    }
+                    None => "<script type=\"module\">import mermaid from \"https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs\";mermaid.initialize({startOnLoad:true});</script>".to_string(),
+                };
+                let page = dir.join("diagram.html");
+                std::fs::write(&page, cian_core::mermaid::page(&blocks, &script))?;
+                cian_core::proc::open_with_desktop(page.display().to_string())?;
+                Ok(serde_json::json!({
+                    "blocks": blocks.len(),
+                    "offline": local.is_some(),
+                }))
+            }
+            "openwith" => {
+                let which = req.params["pane"].as_str().unwrap_or("left").to_string();
+                let (path, name, _) = self.selected(&which)?;
+                cian_core::os::open_with(&path)
+                    .map_err(|e| anyhow::anyhow!("開けませんでした: {e}"))?;
+                Ok(serde_json::json!({ "opened": name }))
+            }
+            "properties" => {
+                let which = req.params["pane"].as_str().unwrap_or("left").to_string();
+                let (path, name, _) = self.selected(&which)?;
+                cian_core::os::properties(&path)
+                    .map_err(|e| anyhow::anyhow!("開けませんでした: {e}"))?;
+                Ok(serde_json::json!({ "shown": name }))
             }
             // The input method, herded.
             //

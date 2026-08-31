@@ -106,23 +106,22 @@ def speech(path):
 
 # 窓版にまだ無いもの。「無い」ことを覚えておく表で、免除の理由が要ります。
 KNOWN = {
-    "背景色": "ペイン背景色 14 色（PANE_BG_PRESETS）が窓版に無い — ROADMAP「残っている差」",
-    "テーマ（このペイン）": "ペイン別配色（ThemePickPane）が窓版に無い — ROADMAP「残っている差」",
-    "プログラムから開く": "OpenWithOs（Windows のみ）が窓版に無い — ROADMAP「残っている差」",
-    "情報を見る": "PropertiesOs が窓版に無い — ROADMAP「残っている差」",
-    "Office で開く（クラウド側）": "SharePoint 連携の入口が窓版のメニューに無い",
-    "クラウド側へのショートカットを作成": "同上",
     "転送 ▸": "SendMenu（SFTP 転送）が窓版に無い — ROADMAP「残っている差」",
     "アップロード → サーバ": "同上",
     "ダウンロード ← サーバ": "同上",
-    "このファイルを要約": "AI 要約（:summary）が窓版のエンジンに無い",
-    "mermaid 図をブラウザで開く": "窓版はプレビューの中に図を描く（Ctrl+E）ので、外へ出す行が無い",
-    "セッションログ開始": "窓版は開始／停止を 1 行で切り替える（:sessionlog）",
-    "セッションログ停止 ●": "同上",
     "このペインを同時入力に含める/外す ⇄": "同時入力の部分集合が窓版に無い",
     "言語": "Lang（英日切替）が窓版に無い — 窓版は日本語直書き。ROADMAP P4",
     "日本語に切替": "同上",
     "Switch to English": "同上",
+}
+
+# 窓版が**エンジンの答えから組み立てる**ラベル。字面はソースに無いので、
+# 組み立てている場所があることを見ます。端末版はプラットフォームごとに3通り
+# 書いていて、窓版は `cian_core::os::file_manager_name()` の1語を差し込みます。
+BUILT = {
+    "Finder で表示": r"osCan\.file_manager\} で表示",
+    "エクスプローラーで表示": r"osCan\.file_manager\} で表示",
+    "ファイルマネージャで表示": r"osCan\.file_manager\} で表示",
 }
 
 # ①②③ の語を集める。
@@ -199,6 +198,10 @@ def main():
         pool = (TOGGLE_WORDS if where.startswith("ToggleId")
                 else SORT_WORDS if where == "sort_label"
                 else MENU_WORDS)
+        if h in BUILT:
+            if not re.search(BUILT[h], GUI):
+                missing.append((where, f"{h}（組み立てている場所が見当たりません）"))
+            continue
         if h not in pool:
             missing.append((where, h))
 

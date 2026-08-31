@@ -688,7 +688,7 @@ impl App {
                     _ => Self::bg_slot(pane).and_then(|s| self.pane_bg[s]),
                 };
                 let cur = current
-                    .and_then(|c| PANE_BG_PRESETS.iter().position(|(_, p)| *p == Some(c)))
+                    .and_then(|c| pane_bg_presets().iter().position(|(_, p)| *p == Some(c)))
                     .unwrap_or(0);
                 self.open_popup(Popup::ColorPicker { pane, cursor: cur });
             }
