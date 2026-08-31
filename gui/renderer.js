@@ -1407,8 +1407,8 @@ function hintsNow() {
             ['Enter', '確定'], ['Esc', '取消']];
     }
     if (filter.on) {
-        if (filter.mode === 'cmd') return [['打つ', 'コマンド'], ['Enter', '実行'], ['Esc', 'やめる'], ['C', '一覧から選ぶ']];
-        if (filter.mode === 'find') return [['打つ', '絞込'], ['↑↓', '選ぶ'], ['Enter', 'そこへ'], ['Esc', 'やめる']];
+        if (filter.mode === 'cmd') return [['打つ', 'コマンド'], ['Enter', '実行'], ['Esc', '取消'], ['C', '一覧から選ぶ']];
+        if (filter.mode === 'find') return [['打つ', '絞込'], ['↑↓', '選ぶ'], ['Enter', 'そこへ'], ['Esc', '取消']];
         return [['打つ', '絞込'], ['↑↓', 'カーソル'], ['Enter', '適用'], ['Esc', '解除'], ['/', 'この下を探す']];
     }
     const pane = state[state.focus];
@@ -2805,7 +2805,7 @@ function show(title, about, rows, opts = {}) {
     el.rName.textContent = title;
     el.rAbout.textContent = about;
     el.rFoot.textContent = opts.foot
-        || (report.checks ? 'Space 外す／戻す   a 全部   n 全部外す   Enter 実行   Esc やめる'
+        || (report.checks ? 'Space 外す／戻す   a 全部   n 全部外す   Enter 実行   Esc 取消'
             : report.query ? '打って絞る   ↑↓ 選ぶ   Enter 開く   Esc 閉じる'
             : rows.length ? '↑↓ 選ぶ   Enter 開く   Esc 閉じる' : 'Esc 閉じる');
     el.rQ.hidden = !report.query;
@@ -3478,7 +3478,7 @@ function drawViewFoot() {
     // something that is not about to happen.
     if (renameList.on) {
         el.vFoot.textContent = `${renameList.paths.length} 件   1行に1つ、順番は変えないこと`
-            + '   ·   Ctrl+S 適用   Esc ×3 やめる';
+            + '   ·   Ctrl+S 適用   Esc ×3 取消';
         return;
     }
     if (viewer.readOnly) {
@@ -4602,7 +4602,7 @@ async function cmdRenameList() {
     setStyle(style);
     el.vName.textContent = '名前の一覧を編集';
     el.vAbout.textContent = `${what.length} 件   1行に1つ、順番は変えないこと`;
-    el.vFoot.textContent = 'Ctrl+S 適用   Esc ×3 やめる';
+    el.vFoot.textContent = 'Ctrl+S 適用   Esc ×3 取消';
     viewer.ed.focus();
 }
 
@@ -5387,8 +5387,8 @@ async function cmdRenamePattern(pattern) {
         })),
         {
             foot: clashes.length
-                ? '★ の名前は既にあります — Enter で残りだけ実行   Esc やめる'
-                : 'Enter 実行   Esc やめる',
+                ? '★ の名前は既にあります — Enter で残りだけ実行   Esc 取消'
+                : 'Enter 実行   Esc 取消',
             pick: async () => {
                 closeReport();
                 const rows = changing.filter((x) => !x.clash);
@@ -5536,7 +5536,7 @@ async function cmdDedup() {
     });
     show('中身が同じファイル', `${r.groups.length} 組 — 各組の1つ目は残す側`, rows, {
         checks: true,
-        foot: 'Space 外す／戻す   a 全部   n 全部外す   Enter 選んだ分を削除   Esc やめる',
+        foot: 'Space 外す／戻す   a 全部   n 全部外す   Enter 選んだ分を削除   Esc 取消',
         pick: async (chosen) => {
             if (!chosen.length) { say('選ばれている行がありません', true); return; }
             closeReport();
@@ -6101,7 +6101,7 @@ function showReplacePlan(spec, plan) {
         })),
         {
             checks: true,
-            foot: 'Space 外す／戻す   a 全部   n 全部外す   Enter 実行   Esc やめる',
+            foot: 'Space 外す／戻す   a 全部   n 全部外す   Enter 実行   Esc 取消',
                 pick: async (chosen) => {
                     const going = chosen.map((r) => r.change);
                     if (!going.length) { say('選ばれている行がありません', true); return; }
@@ -6386,9 +6386,9 @@ async function cmdAiCommit() {
     say('コミットメッセージを作っています…');
     aiWaiting = (answer) => {
         const msg = answer.trim();
-        show('コミットメッセージ（案）', 'Enter でこのままコミット   Esc やめる',
+        show('コミットメッセージ（案）', 'Enter でこのままコミット   Esc 取消',
             msg.split('\n').map((t) => ({ label: t })), {
-                foot: 'Enter コミット   Esc やめる',
+                foot: 'Enter コミット   Esc 取消',
                 pick: async () => {
                     closeReport();
                     if (!await confirm('この文でコミットします', msg)) { say('やめました'); return; }
@@ -6422,7 +6422,7 @@ async function cmdAiScan(what) {
                 rows.map((x) => ({ label: x.name, sub: x.reason || '', path: x.path })),
                 {
                     checks: true,
-                    foot: 'Space 外す／戻す   a 全部   n 全部外す   Enter 選んだ分をマーク   Esc やめる',
+                    foot: 'Space 外す／戻す   a 全部   n 全部外す   Enter 選んだ分をマーク   Esc 取消',
                     pick: async (chosen) => {
                         if (!chosen.length) { say('選ばれている行がありません', true); return; }
                         closeReport();
@@ -6441,7 +6441,7 @@ async function cmdAiScan(what) {
             rows.map((x) => ({ n: '→ ' + x.folder, label: x.name, sub: x.reason || '', path: x.path, folder: x.folder })),
             {
                 checks: true,
-                foot: 'Space 外す／戻す   a 全部   n 全部外す   Enter 実行（u で戻せます）   Esc やめる',
+                foot: 'Space 外す／戻す   a 全部   n 全部外す   Enter 実行（u で戻せます）   Esc 取消',
                 pick: async (chosen) => {
                     if (!chosen.length) { say('選ばれている行がありません', true); return; }
                     closeReport();
@@ -6491,7 +6491,7 @@ function showRenamePlanRows(rows, title) {
         })),
         {
             checks: true,
-            foot: 'Space 外す／戻す   a 全部   n 全部外す   Enter 実行   Esc やめる',
+            foot: 'Space 外す／戻す   a 全部   n 全部外す   Enter 実行   Esc 取消',
             pick: async (chosen) => {
                 const going = chosen.filter((x) => !x.same);
                 if (!going.length) { say('選ばれている行がありません', true); return; }

@@ -69,3 +69,11 @@ jobs:
 
       - name: The usual audit
         run: python3 scripts/audit.py
+
+      # Is every promise still kept? A failure here is not a lint to be
+      # silenced: it means something Taketan asked for has been removed. That
+      # happened once — a pane border was built to order and then deleted by a
+      # later design pass, with a comment arguing against them — so the check
+      # names the request and the date, and the answer is to ask, not to edit.
+      - name: The register of requests
+        run: python3 scripts/requests.py
