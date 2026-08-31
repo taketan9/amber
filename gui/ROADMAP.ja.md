@@ -185,11 +185,11 @@ OS 連携は `cian_core::os`、ペイン背景色は `cian_core::theme`、mermai
 ### ポップアップが無い・浅いもの（頻度順）
 
 1. **`AiChat`** … 会話窓そのもの。GUI は1問1答を一覧に出すだけ（履歴・停止・画像貼付なし）
-2. `Diff` の `e`（文字コード）と `>`/`<`（片側を上書き）
-3. `ColorPicker`（ペイン背景色）・`LocalDest`・`ConfirmZipAdd/Delete`・
-   `ConfirmRemoteMove`・`ConfirmElevate`・`AiHistory`
-4. 小物: `Search` の開いたまま↑↓、`GrepReplace` の `f`、`CommitMessage` の `e`、
-   `ImageView` の `Shift+Enter`/`E`
+2. `LocalDest`・`ConfirmZipAdd/Delete`・`ConfirmRemoteMove`・`ConfirmElevate`・`AiHistory`
+3. 小物: `Search` の開いたまま↑↓、`GrepReplace` の `f`、`CommitMessage` の `e`
+
+`Diff` の `e`・`>`・`<` と `ImageView` の `E`・`Shift+Enter`、`ColorPicker` は
+2026-09-01 に入った。
 
 ### 挙動の深さ
 
@@ -197,7 +197,6 @@ OS 連携は `cian_core::os`、ペイン背景色は `cian_core::theme`、mermai
 |---|---|---|
 | 中 | ビューア: notepad 流でも `:` 面へ届く道・対ディスク差分ガター | 端末版 `viewer.rs:1526` |
 | 中 | リモート: 移動・chmod・転送進捗・保存先ピッカー・**リモート同士転送** | **端末版 `ssh.rs:695` に実装あり** |
-| 中 | git 列（M/A/D バッジ）とステータスのブランチチップ | エンジンが Row に git 状態を載せる所から |
 | 中 | 転送の進捗も同じバーに乗せる | SCP は今 `noop` の進捗コールバック（`main.rs:2074` ほか） |
 | 低 | `f` 検索の「開いたまま ↑↓」・アーカイブ内 r/d（zip） | |
 | 低 | シェル境界のドラッグ（`main_pct` 相当の永続）・スクリプトマクロ・tar 書き戻し・md プレビューの相対リンク・アイコンビューの本物のファイルアイコン（今は絵文字） | |

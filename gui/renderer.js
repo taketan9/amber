@@ -3602,7 +3602,7 @@ async function openAsPicture(which) {
     el.vPic.replaceChildren(node);
     if (node.tagName === 'IMG') {
         fitPicture(node, r);
-        el.vFoot.textContent = '+ / − 拡大・縮小   ·   0 原寸   ·   f 窓に合わせる   ·   ドラッグで移動   ·   Esc ×3 閉じる';
+        el.vFoot.textContent = '+ / − 拡大・縮小   ·   0 原寸   ·   f 窓に合わせる   ·   ドラッグで移動   ·   E 外部エディタ   ·   Shift+Enter 場所   ·   Esc ×3 閉じる';
     }
     el.vName.textContent = r.name;
     el.vAbout.textContent = human(r.len);
@@ -5842,9 +5842,16 @@ function hopHere(step) {
 // ---- Left against right, bulk rename, archives ----
 
 /// `=` — one key, and what the two cursors point at decides the answer.
+/// Which encoding the comparison is being read under. cian-tui's `e` on this
+/// screen: two Shift_JIS files read as UTF-8 differ on every line that holds a
+/// Japanese character, which is a comparison that says nothing about the files.
+const DIFF_ENCS = [null, 'sjis', 'utf8', 'utf16le', 'utf16be'];
+const ENC_NAME = { sjis: 'Shift_JIS', utf8: 'UTF-8', utf16le: 'UTF-16LE', utf16be: 'UTF-16BE' };
+let diffEnc = null;
+
 async function cmdCompare() {
     say('比べています…');
-    const r = await ask('compare', { folded: diffFolded });
+    const r = await ask('compare', { folded: diffFolded, enc: diffEnc || undefined });
     if (!r) return;
     if (r.kind === 'dirs') {
         const mark = { left: '◀ 左だけ', right: '右だけ ▶', differ: '≠ 違う' };
@@ -5913,8 +5920,9 @@ async function cmdCompare() {
             sub: x.right ?? '',
         };
     });
-    show('ファイル比較', `${r.left}   ↔   ${r.right}   ${r.summary}`, rows, {
-        foot: 'Enter 並べて編集   / 検索   n/N 次・前   f 同じ行の畳みを解く   x AI に訊く   c コピー   w 保存   Esc',
+    const encNote = diffEnc ? `   [${ENC_NAME[diffEnc]}]` : '';
+    show('ファイル比較', `${r.left}   ↔   ${r.right}   ${r.summary}${encNote}`, rows, {
+        foot: 'Enter 並べて編集   / 検索   n/N 次・前   f 畳みを解く   e 文字コード   > 右へ   < 左へ   x AI   c コピー   w 保存   Esc',
         pick: () => { closeReport(); cmdDiffEdit(); },
         act: {
             c: () => copyReport(`${r.left} ↔ ${r.right}`),
@@ -5925,8 +5933,24 @@ async function cmdCompare() {
             '/': () => diffFind(),
             n: () => diffHop(1),
             N: () => diffHop(-1),
-            f: () => { diffFolded = !diffFolded; closeReport(); cmdCompare(); },
+            // Re-running from the list stays in the list. Without this,
+            // changing the folding or the encoding threw you into the diff
+            // editor — the answer to a question you asked *of the list*.
+            f: () => { diffFolded = !diffFolded; compareAsList = true; closeReport(); cmdCompare(); },
             x: () => { closeReport(); runCommand(findCommand('aidiff'), ''); },
+            // cian-tui's `e` on this screen, cycling the same list its viewer
+            // offers. Both sides are decoded again and compared afresh.
+            e: () => {
+                diffEnc = DIFF_ENCS[(DIFF_ENCS.indexOf(diffEnc) + 1) % DIFF_ENCS.length];
+                compareAsList = true;
+                closeReport();
+                cmdCompare();
+            },
+            // And `>` / `<`: put one side's file over the other. The whole
+            // point of standing two files next to each other is often to make
+            // one of them the other, and the window could only look.
+            '>': () => copyOneOver(r, 'right'),
+            '<': () => copyOneOver(r, 'left'),
         },
     });
 }
@@ -6004,6 +6028,28 @@ function diffHop(step) {
 /// than assumed: copying a file that only exists on the right *to* the right
 /// is a no-op that would still ask for a confirmation, and copying the wrong
 /// way over a newer file is the mistake this screen exists to prevent.
+/// Overwrite one side of a file comparison with the other.
+///
+/// cian-tui's `>` / `<` on the diff screen — with its confirmation, because
+/// this is the one key here that destroys something. The name says which file
+/// is about to stop existing as it is.
+async function copyOneOver(r, to) {
+    const from = to === 'right' ? 'left' : 'right';
+    const src = r[`${from}_path`];
+    const dst = r[`${to}_path`];
+    if (!src || !dst) { say('パスが分かりません', true); return; }
+    if (!await confirm(`${r[to]} を ${r[from]} で上書きします`,
+        `${src}\n  →  ${dst}\n\n${r[to]} のいまの中身は失われます`)) {
+        say('やめました');
+        return;
+    }
+    const done = await ask('copyone', { src, dest: dst.replace(/[\\/][^\\/]*$/, '') });
+    if (!done) return;
+    closeReport();
+    await reread();
+    say(`${r[from]} を ${r[to]} へ上書きしました`);
+}
+
 async function copyAcross(roots, from, to) {
     const row = report.rows[report.at];
     if (!row) return;

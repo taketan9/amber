@@ -1123,7 +1123,22 @@ impl Session {
                         "rows": rows,
                     }));
                 }
-                let d = cian_core::diff::diff_files(&lp, &rp)?;
+                // With an encoding named, both sides are decoded that way
+                // before being compared — cian-tui's `e` on this screen. Two
+                // Shift_JIS files read as UTF-8 differ on every line that
+                // holds a Japanese character, which is a comparison that says
+                // nothing about the files.
+                let d = match req.params["enc"].as_str() {
+                    Some("utf8") => cian_core::diff::diff_files_with_encoding(
+                        &lp, &rp, cian_core::viewer::TextEncoding::Utf8)?,
+                    Some("sjis") => cian_core::diff::diff_files_with_encoding(
+                        &lp, &rp, cian_core::viewer::TextEncoding::ShiftJis)?,
+                    Some("utf16le") => cian_core::diff::diff_files_with_encoding(
+                        &lp, &rp, cian_core::viewer::TextEncoding::Utf16Le)?,
+                    Some("utf16be") => cian_core::diff::diff_files_with_encoding(
+                        &lp, &rp, cian_core::viewer::TextEncoding::Utf16Be)?,
+                    _ => cian_core::diff::diff_files(&lp, &rp)?,
+                };
                 // Folded to three lines of context. The whole file is right
                 // for a file being read and wrong for a difference being
                 // looked at: the point is what changed, and pages of identical
@@ -1159,6 +1174,10 @@ impl Session {
                 Ok(serde_json::json!({
                     "kind": "files",
                     "left": ln, "right": rn,
+                    // The paths as well as the names: `>` and `<` copy one
+                    // side over the other and need somewhere to copy to.
+                    "left_path": lp.display().to_string(),
+                    "right_path": rp.display().to_string(),
                     "added": d.added, "removed": d.removed, "changed": d.changed,
                     "truncated": d.truncated,
                     "summary": cian_core::diff::summary(&d),
