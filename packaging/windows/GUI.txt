@@ -24,16 +24,30 @@ cian — 窓版（Electron） Windows x64
      cian-server.exe が黙って起動しないことがあります。展開してから1つずつ
      外すより、zip のうちに1回外すほうが早いです。
   2. 右クリック →「すべて展開」で好きな場所に出す
-  3. Electron の場所を教える（フルパス。electron.exe まで）
-       set CIAN_ELECTRON=C:\tools\electron-v33.4.11-win32-x64\electron.exe
+  3. Electron の場所を教える（下記）
   4. run.bat をダブルクリック
 
-  set を毎回打ちたくないなら、Electron を展開したフォルダをこの zip の展開先の
-  中か、すぐ隣に置いてください。run.bat は CIAN_ELECTRON → 隣の electron-v* →
-  1つ上 → 2つ上 → node_modules の順に探し、見つからなければ探した場所を全部
-  言って止まります（黙って落ちるのが一番たちが悪いので）。
+Electron の場所の教え方
+  Electron を別の場所に置いている場合は、展開したフォルダに electron.txt を
+  作って1行だけ書いてください。メモ帳で作れます。
 
-  つまり、こう置けば set は要りません:
+       D:\apps\electron-v33.4.11-win32-x64
+
+  electron.exe まで書いても、それが入っているフォルダまででも受けます。
+  引用符も末尾の \ も要りません。; で始まる行は覚え書きとして読み飛ばします。
+
+  ★ run.bat を直接書き換えないでください。動きはしますが、次の版を展開した
+    ときに上書きされて、毎回やり直しになります。electron.txt は配布物に
+    入れていないので上書きされません。
+
+  一時的に別の Electron で試したいときは環境変数が最優先です:
+       set CIAN_ELECTRON=D:\apps\electron-v33.4.11-win32-x64\electron.exe
+
+  探す順は CIAN_ELECTRON → electron.txt → 隣の electron-v* → 1つ上 →
+  2つ上 → node_modules。見つからなければ探した場所を全部言って止まります
+  （黙って落ちるのが一番たちが悪いので）。
+
+  Electron をこの zip の展開先の中か隣に置くなら、electron.txt すら要りません:
        C:\tools\cian\               ← この zip の中身
        C:\tools\cian\electron-v33.4.11-win32-x64\electron.exe
 

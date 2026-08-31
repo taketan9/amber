@@ -32,3 +32,9 @@ __pycache__/
 # them is node_modules.zip, the same as crmaine. See gui/package.json.
 /gui/node_modules/
 gui/vendor/
+
+# Where a particular machine keeps Electron. run.bat reads it; it is one line
+# and it is nobody else's business. Deliberately not shipped in the zip either
+# — a file that ships is a file the next version overwrites, which is the whole
+# reason this exists instead of editing run.bat.
+gui/electron.txt
