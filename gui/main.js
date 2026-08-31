@@ -6,7 +6,17 @@
 // the disk hands it; the window that draws the listing has no business being
 // able to read the disk itself.
 
-const { app, BrowserWindow, Menu, ipcMain } = require('electron');
+const { app, BrowserWindow, Menu, ipcMain, nativeImage } = require('electron');
+
+/// The picture under the pointer when the file type has none of its own. A
+/// 16×16 page, drawn here rather than shipped as a file: `startDrag` refuses
+/// an empty icon and this is the whole of the fallback.
+const DRAG_ICON = nativeImage.createFromDataURL(
+    'data:image/svg+xml;base64,' + Buffer.from(
+        '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32">'
+        + '<rect x="6" y="3" width="20" height="26" rx="3" fill="#f2f2f4" stroke="#9aa0a6"/>'
+        + '<path d="M10 10h12M10 15h12M10 20h8" stroke="#9aa0a6" stroke-width="2"/></svg>',
+    ).toString('base64'));
 const path = require('node:path');
 const os = require('node:os');
 const { Engine } = require('./engine');
@@ -134,6 +144,31 @@ app.whenReady().then(async () => {
         } catch {
             return null;
         }
+    });
+
+    // Drag a file out of cian and into anything else.
+    //
+    // **A terminal program cannot be a drag source at all** — cian-tui says so
+    // where it offers the clipboard instead, and the clipboard is the whole of
+    // its answer. A window can hand the desktop the real file, so dropping
+    // onto Finder, Explorer, a mail draft or another application works the way
+    // it does from any other window.
+    //
+    // `startDrag` must be called while the drag is starting, which is why this
+    // is `on` (fire and forget) rather than `handle` (await a reply): the
+    // round trip of a reply is long enough for the gesture to be over.
+    ipcMain.on('cian-drag', async (event, paths) => {
+        if (!Array.isArray(paths) || !paths.length) return;
+        let icon;
+        try {
+            icon = await app.getFileIcon(paths[0], { size: 'normal' });
+        } catch { /* fall through to the drawn one */ }
+        // Electron refuses an empty icon, and a file type with no registered
+        // picture gives one — so there is always something to hold.
+        if (!icon || icon.isEmpty()) icon = DRAG_ICON;
+        try {
+            event.sender.startDrag({ files: paths, file: paths[0], icon });
+        } catch { /* the gesture ended before we got here */ }
     });
 
     ipcMain.handle('cian-fullscreen', (event) => {

@@ -426,6 +426,22 @@ function draw(which) {
             + kindClassOf(row)
             + (row.marked ? ' marked' : '')
             + (i === pane.cursor ? ' cursor' : '');
+        // Draggable out of the window — to the desktop, to Finder or
+        // Explorer, to a mail draft, to another application. **cian-tui
+        // cannot do this at any price**: a terminal program is not a drag
+        // source, which is why its answer is `Shift+P` and the clipboard.
+        // The marked files if there are any, otherwise this one.
+        if (!row.parent && !pane.remote && !pane.archive && window.cian.startDrag) {
+            div.draggable = true;
+            div.addEventListener('dragstart', (e) => {
+                const marked = pane.entries.filter((x) => x.marked && !x.parent);
+                const paths = (marked.length ? marked : [row]).map((x) => x.path);
+                // Electron takes the drag over from here; the browser's own
+                // would carry text, not files.
+                e.preventDefault();
+                window.cian.startDrag(paths);
+            });
+        }
         const name = document.createElement('span');
         name.className = 'name';
         name.textContent = row.parent ? '..' : row.name;
@@ -2456,6 +2472,7 @@ const HELP = [
         ['a / A', '新規ファイル / 新規ディレクトリ'],
         ['p', 'パス文字列をクリップボードへ'],
         ['Shift+P', 'ファイルそのものをクリップボードへ（Finder/エクスプローラで貼れます）'],
+        ['行をドラッグ', 'デスクトップや他のアプリへ、ファイルそのものを渡します（端末版にはできません）'],
         ['o / O', 'このペインを反対側へ / 反対側をここへ'],
         ['u / Ctrl+R', '取り消し / やり直し'],
         ['M / Shift+Enter / 右クリック', 'このエントリにできること'],
@@ -3447,6 +3464,76 @@ async function lookInside() {
     }
 }
 
+/// Zoom and pan a picture.
+///
+/// cian-tui draws images as half-blocks (`▀`, 24-bit colour) because that is
+/// the most a terminal cell can hold, and at that fidelity zooming has nothing
+/// to show. A window has the actual pixels, and "is that the right screenshot"
+/// is usually a question about a detail — so: `+` / `-` / wheel to scale, `0`
+/// for actual size, `f` to fit the window, and drag to move it around.
+const pic = { at: 1, fit: true, node: null, ox: 0, oy: 0 };
+
+function fitPicture(node, r) {
+    pic.node = node;
+    pic.at = 1;
+    pic.fit = true;
+    pic.ox = 0;
+    pic.oy = 0;
+    node.classList.add('zoomable');
+    paintPicture(r);
+    // Dragging moves the picture, which only means anything once it is bigger
+    // than the box — but a gesture that works sometimes and is dead the rest
+    // of the time reads as broken, so it always moves and simply has nowhere
+    // to go when the whole picture fits.
+    let from = null;
+    node.addEventListener('mousedown', (e) => {
+        from = { x: e.clientX - pic.ox, y: e.clientY - pic.oy };
+        e.preventDefault();
+    });
+    window.addEventListener('mousemove', (e) => {
+        if (!from || !pic.node) return;
+        pic.ox = e.clientX - from.x;
+        pic.oy = e.clientY - from.y;
+        pic.fit = false;
+        paintPicture();
+    });
+    window.addEventListener('mouseup', () => { from = null; });
+    node.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        zoomPicture(e.deltaY < 0 ? 1.15 : 1 / 1.15);
+    }, { passive: false });
+}
+
+function paintPicture(r) {
+    const n = pic.node;
+    if (!n) return;
+    if (pic.fit) {
+        n.style.cssText = '';
+        n.classList.add('fit');
+    } else {
+        n.classList.remove('fit');
+        n.style.transformOrigin = 'center center';
+        n.style.transform = `translate(${pic.ox}px, ${pic.oy}px) scale(${pic.at})`;
+    }
+    const size = n.naturalWidth ? `${n.naturalWidth} × ${n.naturalHeight}` : '';
+    el.vAbout.textContent = pic.fit
+        ? `${size}   窓に合わせています`
+        : `${size}   ${Math.round(pic.at * 100)}%`;
+}
+
+function zoomPicture(by) {
+    if (!pic.node) return;
+    // Coming out of "fit" starts from what is on screen, not from 1× — the
+    // picture would otherwise jump to full size on the first press.
+    if (pic.fit) {
+        const box = pic.node.getBoundingClientRect();
+        pic.at = pic.node.naturalWidth ? box.width / pic.node.naturalWidth : 1;
+        pic.fit = false;
+    }
+    pic.at = Math.max(0.05, Math.min(20, pic.at * by));
+    paintPicture();
+}
+
 /// Something the window can draw but not read: a picture, a PDF.
 ///
 /// Tried before the text read, not after it fails. `read_text` refuses a PNG
@@ -3467,8 +3554,16 @@ async function openAsPicture(which) {
         el.vAbout.textContent = node.naturalWidth
             ? `${node.naturalWidth} × ${node.naturalHeight}   ${human(r.len)}`
             : human(r.len);
+        // The load lands after the first paint, so the zoom state has to be
+        // written *again* here or the picture's own line goes back to saying
+        // only its dimensions.
+        if (node.classList.contains('zoomable')) paintPicture(r);
     });
     el.vPic.replaceChildren(node);
+    if (node.tagName === 'IMG') {
+        fitPicture(node, r);
+        el.vFoot.textContent = '+ / − 拡大・縮小   ·   0 原寸   ·   f 窓に合わせる   ·   ドラッグで移動   ·   Esc ×3 閉じる';
+    }
     el.vName.textContent = r.name;
     el.vAbout.textContent = human(r.len);
     el.vFoot.textContent = 'Esc ×3 閉じる';
@@ -3886,6 +3981,7 @@ async function closeView(ask_first = true) {
     if (ask_first) openFiles.list = [];
     if (viewer.vim) { viewer.vim.dispose(); viewer.vim = null; }
     el.vPic.replaceChildren();
+    pic.node = null;
     el.vPic.hidden = true;
     el.vBody.hidden = false;
     el.view.hidden = true;
@@ -4003,6 +4099,22 @@ function vimTyping() {
 
 document.addEventListener('keydown', (e) => {
     if (!viewer.on) return;
+    // The picture keys. A terminal draws images as half-blocks, where zooming
+    // has nothing to show; this window has the pixels.
+    if (pic.node && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        if (e.key === '+' || e.key === '=') {
+            e.stopPropagation(); e.preventDefault(); zoomPicture(1.25); return;
+        }
+        if (e.key === '-') { e.stopPropagation(); e.preventDefault(); zoomPicture(1 / 1.25); return; }
+        if (e.key === '0') {
+            e.stopPropagation(); e.preventDefault();
+            pic.fit = false; pic.at = 1; pic.ox = 0; pic.oy = 0; paintPicture(); return;
+        }
+        if (e.key === 'f') {
+            e.stopPropagation(); e.preventDefault();
+            pic.fit = true; pic.ox = 0; pic.oy = 0; paintPicture(); return;
+        }
+    }
     // Shift+Enter opens the file's own menu, the key cian-tui puts it on in
     // the viewer as well as in a listing. Before the editor sees it: in
     // notepad style a plain Enter is a newline, and this one is not.

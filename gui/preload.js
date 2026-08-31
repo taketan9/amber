@@ -36,6 +36,10 @@ contextBridge.exposeInMainWorld('cian', {
     /// driver that cannot reach it.
     fullscreen: () => ipcRenderer.invoke('cian-fullscreen'),
 
+    /// Hand these files to the desktop's drag. Fire and forget on purpose —
+    /// the drag has to start while the gesture is still happening.
+    startDrag: (paths) => ipcRenderer.send('cian-drag', paths),
+
     /// The desktop's own icon for a path, as a data URL (or null).
     fileIcon: (path) => ipcRenderer.invoke('cian-fileicon', path),
 

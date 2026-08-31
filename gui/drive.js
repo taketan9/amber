@@ -40,7 +40,18 @@ function parseKey(spec) {
     // binds Ctrl+S that way and is right to — but the driver was sending Ctrl
     // on a Mac, where it reaches nothing, and reporting the save key as dead.
     spec = spec.replace(/^Mod\+/, process.platform === 'darwin' ? 'Meta+' : 'Ctrl+');
+    // `+` is both a key and the separator between modifiers, so splitting on
+    // it left the spec `"+"` with no key at all and the page was handed an
+    // empty string. A step pressing `+` therefore looked like a key the app
+    // ignored, and the app had never been given anything to ignore. Stand the
+    // final `+` aside before splitting.
+    let plus = false;
+    if (spec.endsWith('+') && spec.length > 1 ? spec[spec.length - 2] === '+' : spec === '+') {
+        plus = true;
+        spec = spec.slice(0, -1);
+    }
     const parts = spec.split('+');
+    if (plus) parts.push('+');
     const base = parts.pop();
     const mods = parts.map((m) => m.toLowerCase());
     let bits = 0;
@@ -49,11 +60,14 @@ function parseKey(spec) {
     if (mods.includes('meta') || mods.includes('cmd')) bits |= 4;
     if (mods.includes('shift')) bits |= 8;
     const key = NAMED[base] || base;
+    const v = virtual(key);
+    if (v.needsShift) bits |= 8;
+    delete v.needsShift;
     return {
         key,
         modifiers: bits,
-        text: key.length === 1 && bits < 2 ? key : undefined,
-        ...virtual(key),
+        text: key.length === 1 && (bits & ~8) < 2 ? key : undefined,
+        ...v,
     };
 }
 
@@ -98,9 +112,19 @@ function virtual(key) {
         '-': ['Minus', 189], '.': ['Period', 190], '/': ['Slash', 191],
         '`': ['Backquote', 192], '[': ['BracketLeft', 219], '\\': ['Backslash', 220],
         ']': ['BracketRight', 221], "'": ['Quote', 222],
+        // The shifted ones. Without a virtual key code the page is handed an
+        // empty `key`, so a step pressing `+` looked like a key the app
+        // ignored — and the app was never given anything to ignore.
+        '+': ['Equal', 187, true], ':': ['Semicolon', 186, true], '?': ['Slash', 191, true],
+        '<': ['Comma', 188, true], '>': ['Period', 190, true], '~': ['Backquote', 192, true],
+        '_': ['Minus', 189, true], '"': ['Quote', 222, true], '|': ['Backslash', 220, true],
     };
     const p = PUNCT[key];
-    if (p) return { code: p[0], windowsVirtualKeyCode: p[1] };
+    // The third element says "this character *is* the shifted one", and the
+    // shift has to be in the modifiers or Chromium works the key back out
+    // from the physical position and hands the page `=` where `+` was meant —
+    // or, with no code at all, an empty string.
+    if (p) return { code: p[0], windowsVirtualKeyCode: p[1], needsShift: !!p[2] };
     return {};
 }
 
