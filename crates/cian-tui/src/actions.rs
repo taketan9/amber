@@ -810,8 +810,14 @@ impl App {
         let Some(p) = self.active_pane_mut() else { return };
         let reverse = if p.sort.key == key { !p.sort.reverse } else { false };
         p.set_sort(Sort { key, reverse });
-        let arrow = if reverse { "descending" } else { "ascending" };
-        self.message = Some(format!("sorted by {} ({})", key.label(), arrow));
+        let arrow = if reverse { "▼" } else { "▲" };
+        let lang = self.lang;
+        self.message = Some(format!(
+            "{}: {} {}",
+            tr(lang, "sort", "並び"),
+            crate::render::sort_label(key, lang),
+            arrow
+        ));
     }
 
     /// Note a directory as a copy/move destination.

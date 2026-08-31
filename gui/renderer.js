@@ -372,7 +372,7 @@ function draw(which) {
         head.replaceChildren();
         const cols = viewMode === 'details'
             ? [['glyph', '', null], ['name', '名前', 'name'], ['cloud', '', null],
-               ['size', 'サイズ', 'size'], ['kind', '種類', 'ext'], ['when', '更新日時', 'date']]
+               ['size', 'サイズ', 'size'], ['kind', '種類', 'ext'], ['when', '日時', 'date']]
             : [['cloud', '', null], ['mark', '', null], ['glyph', '', null],
                ['name', '名前', 'name'], ['size', 'サイズ', 'size'], ['when', '日時', 'date']];
         for (const [cls, label, key] of cols) {
@@ -930,15 +930,20 @@ async function toggleHidden() {
 /// picker on whichever key is in force, with n/s/d/e as direct picks, and
 /// choosing the key already in force flips the direction. Walking meant `,`
 /// took two presses to leave `name`, because the first one only reversed it.
+// The words are cian-tui's `sort_label()` — the same four the column headings
+// use, in both builds. This list said 日付 while the heading above it said 日時.
 const SORTS = [['name', '名前', 'n'], ['size', 'サイズ', 's'],
-               ['date', '日付', 'd'], ['ext', '拡張子', 'e']];
+               ['date', '日時', 'd'], ['ext', '拡張子', 'e']];
 async function applySort(key) {
     const which = state.focus;
     const r = await ask('sort', { pane: which, key });
     if (!r) return;
     state[which] = r.pane;
     draw(which);
-    say(`並び: ${r.by}${r.reverse ? ' ↓' : ' ↑'}`);
+    // `r.by` is the engine's wire name (`date`), not a label: cian-tui says
+    // 並び: 日時 ▲ and so does this.
+    const word = (SORTS.find(([k]) => k === key) || [, r.by])[1];
+    say(`並び: ${word} ${r.reverse ? '▼' : '▲'}`);
 }
 
 /// `/` narrows what is here. A second `/`, with nothing typed yet, looks
@@ -1379,9 +1384,16 @@ let palette = null;
 /// drops from the end.
 function hintsNow() {
     if (viewer.on) {
-        if (style === 1) {
+        // `STYLES[0]` is notepad and `STYLES[1]` is vim; this asked for 1 and
+        // returned the notepad row. It had never been on screen to disagree
+        // with — `drawHints()` was not called when a file opened — so an
+        // inverted test sat here saying Shift+←→ 選択 under a --NORMAL-- line.
+        if (style === 0) {
+            // `メニュー — キー操作切替` as cian-tui names it here: from inside
+            // notepad style `T` is a character, so this menu is the only way
+            // back to the other grammar and the bar should say so.
             return [['Ctrl+S', '保存'], ['Shift+←→', '選択'], ['Ctrl+C / V', 'コピー / 貼付'],
-                ['Ctrl+F', '検索'], ['Esc ×3', '閉じる'], ['Shift+Enter', 'メニュー']];
+                ['Ctrl+F', '検索'], ['Esc ×3', '閉じる'], ['Shift+Enter', 'メニュー — キー操作切替']];
         }
         return [['Ctrl+S', '保存'], ['Esc', '編集終了'], ['/', '検索'], ['i', '編集'],
             ['v', '選択'], ['y', 'コピー'], ['d c y', '＋モーション'], [':q', '閉じる'],
@@ -1426,7 +1438,7 @@ function hintsNow() {
     }
     return [['←→', 'ペイン'], ['Shift+J', 'シェル'], ['Space', 'マーク'], ['/', '絞込'],
         [',', '並替'], ['Shift+F', '検索'], ['Ctrl+F', 'grep'], ['b', 'ブランチ'],
-        ['F3', '閲覧'], ['Shift+Enter', 'メニュー'], ['F1/F2', '前/次タブ'],
+        ['F3', '閲覧'], ['M', 'メニュー'], ['F1/F2', '前/次タブ'],
         ['F9', '新規タブ'], ['F10', 'タブを閉じる'], ['=', '差分'], ['?', 'ヘルプ']];
 }
 
@@ -1472,41 +1484,27 @@ const TOGGLES = {
     key: 'T',
     foot: '↑↓ 選ぶ  Enter 切替  Esc 閉じる',
     stay: true,
+    // The rows are cian-tui's `toggle_rows()` (toggles.rs:41), in its order and
+    // with its words — including its ON / OFF, which used to be four different
+    // pairs here (出す・表示・する…). The window's own three come after, so the
+    // shared part of the list is the same list in both builds.
     rows: () => {
         const pane = state[state.focus];
+        const onoff = (b) => (b ? 'ON' : 'OFF');
         return [
             {
-                label: 'キーヒント',
-                value: hintsOn ? '出す' : '出さない',
-                run: () => {
-                    hintsOn = !hintsOn;
-                    drawHints();
-                    drawMenu();
-                    ask('remember', { key: 'gui_hints', value: hintsOn ? '1' : '0' });
-                },
-            },
-            {
                 label: '隠しファイル',
-                value: pane && pane.hidden_shown ? '表示' : '非表示',
+                value: onoff(pane && pane.hidden_shown),
                 run: () => toggleHidden(),
             },
-            // Both of these existed only as commands. cian-tui gathers its
-            // switches in one menu rather than spending a letter on each, and
-            // a switch that is not in the one place switches live is a switch
-            // nobody finds.
             {
-                label: 'カーソル追従プレビュー',
-                value: preview.on ? 'する' : 'しない',
-                run: () => { togglePreview(); drawMenu(); },
-            },
-            {
-                label: '入力同期（全シェルペイン）',
-                value: term.sync ? 'する' : 'しない',
+                label: '入力同期（全シェル）',
+                value: onoff(term.sync),
                 run: async () => { await cmdSync(); drawMenu(); },
             },
             {
                 label: '完了通知',
-                value: switches.notify ? 'する' : 'しない',
+                value: onoff(switches.notify),
                 run: () => {
                     switches.notify = !switches.notify;
                     drawMenu();
@@ -1517,7 +1515,7 @@ const TOGGLES = {
             },
             {
                 label: '転送後ベリファイ',
-                value: switches.verify ? 'する' : 'しない',
+                value: onoff(switches.verify),
                 run: async () => {
                     const r = await ask('switches', { verify: !switches.verify });
                     if (!r) return;
@@ -1529,8 +1527,13 @@ const TOGGLES = {
                 },
             },
             {
+                label: 'カーソル追従プレビュー',
+                value: onoff(preview.on),
+                run: () => { togglePreview(); drawMenu(); },
+            },
+            {
                 label: '☁ クラウド上のファイルも読む',
-                value: switches.cloud ? 'する' : 'しない',
+                value: onoff(switches.cloud),
                 run: async () => {
                     const r = await ask('switches', { cloud: !switches.cloud });
                     if (!r) return;
@@ -1541,6 +1544,15 @@ const TOGGLES = {
                         : '☁ クラウド上のファイルは読みません');
                 },
             },
+            // Named by what it *is*, not by on/off — as cian-tui names it, and
+            // for its reason: neither of the two is the absence of the other.
+            {
+                label: 'エディタのキー操作',
+                value: STYLES[style][1],
+                run: () => { setStyle(style + 1); drawMenu(); say(`エディタ: ${STYLES[style][1]}`); },
+            },
+            // ── the window's own three ──
+            //
             // Put where it can be found. A view you can only leave by knowing
             // the words `:view classic` is a view you are stuck in — and
             // icons is the one that hides the listing you would have read the
@@ -1556,7 +1568,7 @@ const TOGGLES = {
                 },
             },
             {
-                label: '配色',
+                label: 'テーマ（全体）',
                 value: palette || LOOKS[look][1],
                 // Opens the gallery rather than cycling: there are twenty-one
                 // of them now, and stepping through twenty-one with one key is
@@ -1564,9 +1576,14 @@ const TOGGLES = {
                 run: () => { closeMenu(); cmdTheme(); },
             },
             {
-                label: 'エディタの流儀',
-                value: STYLES[style][1],
-                run: () => { setStyle(style + 1); drawMenu(); say(`エディタ: ${STYLES[style][1]}`); },
+                label: 'キーヒント',
+                value: onoff(hintsOn),
+                run: () => {
+                    hintsOn = !hintsOn;
+                    drawHints();
+                    drawMenu();
+                    ask('remember', { key: 'gui_hints', value: hintsOn ? '1' : '0' });
+                },
             },
         ];
     },
@@ -1617,20 +1634,22 @@ function viewerRows() {
     // than a menu that quietly has one item fewer on some machines.
     // Only when it is configured, as in the listing's menu and as cian-tui
     // does here (menu.rs open_viewer_menu: `if self.ai.is_some() && ai_ready`).
-    if (cfg.ai) v.push(group('AI ▸', aiRows));
+    if (cfg.ai) v.push(group('AI - simple ▸', aiRows));
     v.push({ label: 'コピー', value: 'Ctrl+C', run: () => document.execCommand('copy') });
     v.push({ label: '保存', value: 'Ctrl+S', run: saveFile });
     v.push({ label: '外部エディタで開く', value: ':edit', run: cmdEditExternal });
-    v.push({ label: '文字コードを指定', value: ':enc', run: () => cmdEncoding() });
+    v.push({ label: '文字コードを指定…', value: ':enc', run: () => cmdEncoding() });
     v.push({ label: '各行の最終変更者', value: ':blame', run: cmdBlame });
-    v.push({ label: '見出しから飛ぶ', value: 'Ctrl+Shift+O', run: cmdOutline });
+    // cian-tui's row here is `mermaid 図をブラウザで開く`; the window draws the
+    // diagrams in the preview instead, so this is the same row by another road.
     v.push({ label: 'Markdown プレビュー', value: 'Ctrl+E', run: togglePreview2 });
+    v.push({ label: '見出しから飛ぶ', value: 'Ctrl+Shift+O', run: cmdOutline });
     // Where the file lives, for when reading it raises a question about the
     // folder it is in. The cursor is already on it, so this is just the way
     // back out of the viewer.
     v.push({ label: 'このファイルの場所を開く', value: '', run: () => closeView(false) });
-    v.push({ label: 'エディタの流儀', value: STYLES[style][1], run: () => setStyle(style + 1) });
-    v.push({ label: '配色', value: ':theme', run: () => cmdTheme() });
+    v.push({ label: 'エディタのキー操作: vim / メモ帳', value: STYLES[style][1], run: () => setStyle(style + 1) });
+    v.push({ label: 'テーマ（全体）', value: ':theme', run: () => cmdTheme() });
     v.push({ label: '保存せずに閉じる', value: '', run: () => closeView(false) });
     v.push({ label: 'キー一覧', value: '?', run: openHelp });
     return v;
@@ -1662,12 +1681,12 @@ function contextRows() {
     // `if !macros.is_empty()`). Offered unconditionally here, three of the
     // first four rows led to "there is nothing here" on a machine with no
     // init.lua — and pushed everything that does work further down.
-    if (cfg.ai) v.push(group('AI ▸', aiRows));
-    if (cfg.snippets) v.push({ label: '保存したコマンド', value: 'Ctrl+Shift+Enter', run: cmdSnippets });
+    if (cfg.ai) v.push(group('AI - simple ▸', aiRows));
+    if (cfg.snippets) v.push({ label: 'スニペット', value: ':snip', run: cmdSnippets });
     if (cfg.macros) v.push({ label: 'マクロ', value: '@', run: cmdMacros });
     // Bookmarks are a launcher too, so cian-tui keeps them in this cluster
     // rather than down among the connect rows — but only in a file pane.
-    if (!inShell) v.push({ label: 'ブックマーク', value: 's', run: cmdShortcuts });
+    if (!inShell) v.push({ label: 'ショートカット', value: 's', run: cmdShortcuts });
 
     if (inShell) {
         // `:` is a character in a shell, so the command line needs a way in
@@ -1676,25 +1695,31 @@ function contextRows() {
         // that duplicates a working key is a row in the way.
         v.push({ label: 'コマンド入力', value: 'Ctrl+Enter', run: () => commandLine() });
         // The shell's own menu: what can be done to a terminal, not to a file.
-        v.push({ label: '貼り付け（シェルへ）', value: 'Ctrl+V', run: () => document.execCommand('paste') });
+        v.push({ label: '貼り付け', value: ':paste', run: () => document.execCommand('paste') });
         v.push(group('セッション ▸', () => [
-            { label: '記録を取る／止める', value: ':sessionlog', run: cmdShellLog },
-            { label: '文字コード', value: ':enc', run: () => cmdEncoding() },
+            { label: 'セッションログ開始／停止', value: ':sessionlog', run: cmdShellLog },
+            { label: '文字コード', value: 'e', run: () => cmdEncoding() },
         ]));
         v.push(group('ウィンドウ ▸', () => [
-            { label: '左右に分割', value: 'Shift+F8', run: () => splitShell(false) },
-            { label: '上下に分割', value: 'Shift+F9', run: () => splitShell(true) },
-            { label: '新しいタブ', value: 'F9', run: shellTab },
-            { label: '分割を閉じる', value: 'Shift+F10', run: () => closePane() },
+            { label: '左右に分割', value: 'S-F8', run: () => splitShell(false) },
+            { label: '上下に分割', value: 'S-F9', run: () => splitShell(true) },
+            { label: '新規タブ', value: 'F9', run: shellTab },
+            // Whichever close matches what is active — a split pane when this
+            // tab is split, otherwise the tab (cian-tui `WindowMenu`). The
+            // window only ever offered the split one, so from an unsplit shell
+            // the menu's close key answered nothing.
+            ...(shellPaneCount() > 1
+                ? [{ label: '分割パネルを閉じる', value: 'S-F10', run: () => closePane() }]
+                : [{ label: 'タブを閉じる', value: 'F10', run: () => shellCloseTab() }]),
             { label: 'ズーム', value: 'F12', run: zoomFocused },
-            { label: 'このペインだけ', value: 'Shift+F12', run: () => ask('shellpanezoom', {}).then((r) => r && takeShell(r)) },
+            { label: 'このペインだけ', value: 'S-F12', run: () => ask('shellpanezoom', {}).then((r) => r && takeShell(r)) },
         ]));
         v.push({ label: 'このシェルに名前を付ける', value: ':shellname', run: cmdShellName });
         // cian-tui offers this only when there is more than one pane to
         // synchronise (menu.rs: `if active_pane_count() > 1`). One pane
         // "broadcasting" to itself is a row that describes nothing.
         if (shellPaneCount() > 1) {
-            v.push({ label: '全ペインに同時入力', value: 'Ctrl+S', run: cmdSync });
+            v.push({ label: term.sync ? '同時入力を停止  ⇄' : '同時入力を開始  ⇄', value: 'Ctrl+S', run: cmdSync });
         }
         v.push({ label: 'ファイルへ戻る', value: 'Esc', run: () => { setShellFocus(false); say('ファイル'); } });
         // and on into the shared block below — the shell menu used to stop
@@ -1709,33 +1734,35 @@ function contextRows() {
         // copy, the two ways of copying *what it is*, cut, paste, rename,
         // delete, open in a tab. The window had `開く` first and the three
         // copies scattered, which is a different menu wearing the same words.
-        v.push({ label: 'コピー（保持）', value: 'Ctrl+C', run: () => hold('copy') });
+        v.push({ label: 'コピー', value: 'Ctrl+C', run: () => hold('copy') });
         v.push({ label: 'パスをコピー', value: 'p', run: copyPaths });
-        v.push({ label: 'ファイルとしてコピー', value: 'P', run: clipFiles });
-        v.push({ label: '切り取り（保持）', value: 'Ctrl+X', run: () => hold('cut') });
-        v.push({ label: 'ここに貼り付け', value: 'Ctrl+V', run: paste });
-        v.push({ label: '名前を変える', value: 'r', run: rename });
-        v.push({ label: '削除（ゴミ箱へ）', value: 'd', run: () => operate('delete') });
-        v.push({ label: '新しいタブで開く', value: 't', run: tabNew });
+        v.push({ label: 'ファイルをコピー — Finder/エクスプローラに貼付', value: 'Shift+P', run: clipFiles });
+        v.push({ label: '切り取り', value: 'Ctrl+X', run: () => hold('cut') });
+        v.push({ label: '貼り付け', value: 'Ctrl+V', run: paste });
+        v.push({ label: 'リネーム', value: 'r', run: rename });
+        v.push({ label: '削除', value: 'd', run: () => operate('delete') });
+        v.push({ label: '新規タブで開く', value: 't', run: tabNew });
         // cian-tui's EditTab: the file in $EDITOR, in a shell tab of its own.
         // It was reachable only by knowing `:vim`.
-        v.push({ label: 'エディタで開く（新しいシェルタブ）', value: ':vim', run: () => cmdEditorTab('') });
-        v.push(group('ファイル ▸', () => [
+        v.push({ label: '新規タブで編集', value: ':vim', run: () => cmdEditorTab('') });
+        v.push(group('ファイル操作 ▸', () => [
             { label: '反対ペインへコピー', value: 'c', run: () => operate('copy') },
             { label: '反対ペインへ移動', value: 'm', run: () => operate('move') },
-            { label: '行き先を指定してコピー', value: ':cp', run: () => commandLine('cp ') },
-            { label: 'まとめてリネーム', value: ':renamelist', run: cmdRenameList },
+            { label: '指定先へコピー', value: ':copyto', run: () => commandLine('copyto ') },
             { label: 'パターンでリネーム', value: ':renamepattern', run: cmdRenamePattern },
+            { label: 'エディタでリネーム', value: ':renamelist', run: cmdRenameList },
         ]));
-        v.push(group('圧縮・展開 ▸', () => {
-            const rows = [
-                { label: 'zip にまとめる', value: ':zip', run: () => cmdCompress('zip') },
-                { label: 'パスワード付き zip', value: ':zipenc', run: () => cmdCompress('zipenc') },
-                { label: 'tar.gz にまとめる', value: ':targz', run: () => cmdCompress('targz') },
-            ];
+        // cian-tui nests this one: `アーカイブ ▸` holds `圧縮 ▸` and, only on
+        // an archive, `ここに解凍`. Same two levels here.
+        v.push(group('アーカイブ ▸', () => {
+            const rows = [group('圧縮 ▸', () => [
+                { label: '→ .zip', value: ':zip', run: () => cmdCompress('zip') },
+                { label: '→ .zip  (パスワード)', value: ':zip -e', run: () => cmdCompress('zipenc') },
+                { label: '→ .tar.gz', value: ':targz', run: () => cmdCompress('targz') },
+            ])];
             if (isArchive(row)) {
                 rows.push({ label: '中身を見る', value: ':lsar', run: cmdArchiveList });
-                rows.push({ label: 'ここに展開', value: ':unzip', run: cmdExtract });
+                rows.push({ label: 'ここに解凍', value: ':extract', run: cmdExtract });
             }
             return rows;
         }));
@@ -1748,10 +1775,10 @@ function contextRows() {
         v.push(group('調べる ▸', () => [
             { label: '属性', value: ':attr', run: cmdAttr },
             { label: 'チェックサム', value: ':hash', run: () => cmdHash('') },
-            { label: '差分をとる', value: '=', run: cmdCompare },
-            { label: 'ファイル数と行数', value: ':count', run: cmdCount },
+            { label: '左右を比較', value: '=', run: cmdCompare },
+            { label: 'ファイル・ステップ数を数える', value: ':count', run: cmdCount },
             { label: '容量分析', value: ':du', run: cmdDu },
-            { label: '重複を探す', value: ':dup', run: cmdDedup },
+            { label: '重複ファイルを検出', value: ':duplicate', run: cmdDedup },
         ]));
         // One of the two, and only where there is a repository. Both were
         // offered everywhere, so a plain directory showed thirteen version
@@ -1760,54 +1787,64 @@ function contextRows() {
         // on the kind and pushes one (menu.rs `match self.vcs_kind()`).
         const kind = repo[state.focus] && repo[state.focus].v && repo[state.focus].v.kind;
         if (kind === 'git') {
-            v.push(group('git ▸', () => [
-                { label: 'ステージ', value: ':stage', run: () => cmdVcs('stage') },
-                { label: 'ステージ解除', value: ':unstage', run: () => cmdVcs('unstage') },
-                { label: '変更を破棄', value: ':discard', run: () => cmdVcs('discard') },
-                { label: '差分', value: ':gitdiff', run: () => cmdVcsDiff(null) },
+            v.push(group('Git ▸', () => [
+                { label: 'ステージ', value: 'git add', run: () => cmdVcs('stage') },
+                { label: 'アンステージ', value: 'git reset', run: () => cmdVcs('unstage') },
+                { label: '変更を破棄', value: 'git checkout', run: () => cmdVcs('discard') },
+                { label: 'HEADとの差分', value: 'git diff', run: () => cmdVcsDiff(null) },
+                { label: '履歴 / ログ', value: 'git log', run: () => cmdLog(false) },
+                // cian-tui's GitHistory is one row (repo, or the file's own
+                // history). The file-scoped one has no counterpart there, so
+                // it keeps its own row rather than changing what the shared
+                // one means.
                 { label: 'このファイルの履歴', value: ':filelog', run: () => cmdLog(true) },
-                { label: 'リポジトリの履歴', value: ':log', run: () => cmdLog(false) },
             ]));
         } else if (kind === 'svn') {
-            v.push(group('svn ▸', () => [
-                { label: '追加', value: ':svnadd', run: () => cmdSvn('stage') },
-                { label: '取り消す', value: ':svnrevert', run: () => cmdSvn('discard') },
-                { label: '衝突を解決', value: ':svnresolve', run: () => cmdSvn('resolve') },
-                { label: '差分', value: ':svndiff', run: () => cmdVcsDiff('svn') },
-                { label: '履歴', value: ':svnlog', run: () => cmdLog(false, 'svn') },
-                { label: '更新', value: ':svnupdate', run: () => cmdSvn('update') },
-                { label: 'コミット', value: ':svncommit', run: () => cmdSvn('commit') },
+            v.push(group('SVN ▸', () => [
+                { label: '追加', value: 'svn add', run: () => cmdSvn('stage') },
+                { label: '変更を破棄', value: 'svn revert', run: () => cmdSvn('discard') },
+                { label: '競合を解決', value: 'svn resolve', run: () => cmdSvn('resolve') },
+                { label: 'BASEとの差分', value: 'svn diff', run: () => cmdVcsDiff('svn') },
+                { label: '履歴 / ログ', value: 'svn log', run: () => cmdLog(false, 'svn') },
+                { label: '更新', value: 'svn update', run: () => cmdSvn('update') },
+                { label: 'コミット', value: 'svn commit', run: () => cmdSvn('commit') },
             ]));
         }
     }
     // ── shared: connect, then appearance, then the way out ──
-    v.push({ label: 'サーバへつなぐ', value: 'Shift+S', run: cmdSshPicker });
+    v.push({ label: 'SSH接続', value: ':ssh', run: cmdSshPicker });
+    // cian-tui offers the remote pane right under SSH (menu.rs RemotePane).
+    // The window had `:sftp` as a command only, so the one way to reach a
+    // server by mouse was the ssh picker — which opens a shell, not a pane.
+    v.push({ label: 'サーバをペインで開く', value: ':sftp', run: cmdConnect });
     v.push({ label: '動いている処理', value: ':queue', run: cmdQueue });
     // Appearance sits at the top level in cian-tui (ThemePick, between
     // Background and Lang), not folded into the view group. It was two levels
     // down here, which is how someone with twenty-one palettes in front of
     // them came to ask whether themes could be chosen at all.
-    v.push({ label: '配色 ── 21 種', value: ':theme', run: cmdTheme });
+    v.push({ label: 'テーマ（全体）', value: ':theme', run: cmdTheme });
     v.push({ label: '全画面', value: 'F11', run: cmdFullscreen });
     v.push({ label: 'この面を広げる', value: 'F12', run: zoomFocused });
     // The listing's own groups, and the OS group: both act on a file under a
     // cursor, so cian-tui leaves them out of the shell menu.
     if (!inShell) {
+        // cian-tui's ViewMenu order: the three views, dotfiles, then the
+        // switches. Its glyphs too — they are what the corner switcher shows.
         v.push(group('表示 ▸', () => [
-            { label: 'クラシック', value: ':view classic', run: () => { setView('classic'); say('一覧: クラシック'); } },
-            { label: '詳細一覧', value: ':view details', run: () => { setView('details'); say('一覧: 詳細一覧'); } },
-            { label: 'アイコン', value: ':view icons', run: () => { setView('icons'); say('一覧: アイコン'); } },
-            { label: '隠しファイル', value: 'T', run: toggleHidden },
-            { label: 'トグル', value: 'T', run: () => openMenu(TOGGLES) },
+            { label: '▤ 詳細一覧', value: ':view details', run: () => { setView('details'); say('一覧: 詳細一覧'); } },
+            { label: '▦ アイコン', value: ':view icons', run: () => { setView('icons'); say('一覧: アイコン'); } },
+            { label: '▥ クラシック', value: ':view classic', run: () => { setView('classic'); say('一覧: クラシック'); } },
+            { label: 'ドットファイルの表示切替', value: ':hidden', run: toggleHidden },
+            { label: '各種スイッチ…', value: 'T', run: () => openMenu(TOGGLES) },
         ]));
-        v.push(group('OS ▸', () => [
-            { label: '既定のアプリで開く', value: 'Ctrl+Enter', run: openOut },
+        v.push(group('開く / 場所 ▸', () => [
+            { label: '開く', value: 'Ctrl+Enter', run: openOut },
             { label: '外部エディタで開く', value: ':edit', run: cmdEditExternal },
-            { label: 'Finder で表示', value: ':revealos', run: cmdRevealOs },
+            { label: ON_MAC ? 'Finder で表示' : 'エクスプローラーで表示', value: ':revealos', run: cmdRevealOs },
         ]));
     }
     // cian-tui ends Quit then Manual — the way out, then the way to find out.
-    v.push({ label: '閉じる', value: ':q', run: cmdQuit });
+    v.push({ label: 'cian を終了', value: 'q', run: cmdQuit });
     v.push({ label: 'キー一覧', value: '?', run: openHelp });
     return v;
 }
@@ -1830,28 +1867,35 @@ function isArchive(row) {
     return row && !row.is_dir && /\.(zip|tar|gz|tgz|bz2|xz|7z|rar|jar)$/i.test(row.name);
 }
 
+/// The AI group, in cian-tui's three shapes (menu.rs `submenu_children`,
+/// `MenuItem::AiMenu`): chat leads all three, then what the surface underneath
+/// is for. The names are its names — this list said 自由に訊く・不要さがし・
+/// 畳み方の案 for rows the terminal build calls チャット・ゴミファイル検出・
+/// ディレクトリ構成を提案, which is one program with two vocabularies.
 function aiRows() {
     if (viewer.on) {
         return [
-            { label: 'この文章について訊く', value: ':ai', run: () => cmdAiAsk('') },
-            { label: 'コマンドの書き方', value: ':aicmd', run: () => cmdAiCmd('') },
-            { label: 'このコードを直す', value: ':aifix', run: () => commandLine('ai この選択を直して ') },
+            { label: 'チャット', value: ':ai', run: () => cmdAiAsk('') },
+            { label: 'この文章を推敲', value: '', run: () => cmdAiOverText('writing') },
+            { label: 'コマンドを説明・作成', value: '', run: () => cmdAiOverText('command') },
+            { label: 'このコードを点検・修正', value: '', run: () => cmdAiOverText('code') },
         ];
     }
     if (term.on && term.focused) {
         return [
-            { label: 'コマンドを作る', value: ':aicmd', run: () => cmdAiCmd('') },
-            { label: '直近のエラーを説明', value: ':aierror', run: cmdAiError },
+            { label: 'チャット', value: ':ai', run: () => cmdAiAsk('') },
+            { label: '説明からコマンド生成', value: ':aicmd', run: () => cmdAiCmd('') },
+            { label: '直近のエラーを説明', value: ':explain', run: cmdAiError },
         ];
     }
     return [
-        { label: '自由に訊く', value: ':ai', run: () => cmdAiAsk('') },
-        { label: 'ログを診断', value: ':ailog', run: cmdAiLog },
-        { label: '不要さがし', value: ':aijunk', run: () => cmdAiScan('aijunk') },
-        { label: '畳み方の案', value: ':aistructure', run: () => cmdAiScan('aistructure') },
-        { label: '意味で探す', value: ':aisearch', run: () => commandLine('aisearch ') },
-        { label: '改名案', value: ':airename', run: () => commandLine('airename ') },
-        { label: 'コミットメッセージ', value: ':aicommit', run: cmdAiCommit },
+        { label: 'チャット', value: ':ai', run: () => cmdAiAsk('') },
+        { label: 'このログを診断', value: ':ailog', run: cmdAiLog },
+        { label: 'ゴミファイル検出', value: ':aijunk', run: () => cmdAiScan('aijunk') },
+        { label: 'ディレクトリ構成を提案', value: ':organize', run: () => cmdAiScan('aistructure') },
+        { label: 'セマンティック検索', value: ':ask', run: () => commandLine('aisearch ') },
+        { label: 'AIリネーム', value: ':airename', run: () => commandLine('airename ') },
+        { label: 'コミットメッセージ生成', value: ':aicommit', run: cmdAiCommit },
     ];
 }
 
@@ -2040,11 +2084,11 @@ const HELP = [
         ['Backspace', '親ディレクトリへ'],
         ['z', '入力したパスへ移動'],
         ['Tab', '反対のペインへ'],
-        ['t / F9', '新しいタブ（いまの場所で開く）'],
-        ['w / F10', 'タブを閉じる'],
+        ['t / F9', '新規タブ（いまの場所で開く。先に訊きます）'],
+        ['w  /  F10', 'タブを閉じる（F10 は確認あり）'],
         ['F1 / F2', '前 / 次のタブ（Shift+Tab でも次へ）'],
         ['← → / Ctrl+h / Ctrl+l', '左 / 右のペインにフォーカス'],
-        ['Shift+H / Shift+L', '同じ（端末版と同じ綴り）'],
+        ['Shift+H / Shift+L', 'ペイン間でフォーカス移動（Shift+J はシェルへ、Esc で戻る）'],
         ['F5', '読み直す'],
         [':view', '一覧の見せ方 — classic（2画面） / details（詳細一覧） / icons（アイコン）。T でも'],
         ['Ctrl+= / Ctrl+- / Ctrl+0', '文字を大きく / 小さく / 元に戻す'],
@@ -2052,26 +2096,26 @@ const HELP = [
     ['探す', [
         ['f  →  n / N', 'この一覧を検索・次・前'],
         ['/', 'この一覧を絞り込み'],
-        ['/ /', 'この下のどこかにあるファイルをあいまい検索'],
+        ['/ /  、Ctrl+P', 'この下のどこかにあるファイルをあいまい検索'],
         ['Shift+F', '名前で探す（この下すべて）── :find'],
         ['Ctrl+F / Ctrl+G', 'ファイルの中を探す（:grep）'],
         ['  結果で p', '一覧に読み込んで、いつものキーで操作する'],
         ['  結果で r', 'マッチした全ファイルを一括置換（1行ずつ確認）'],
         ['  Ctrl+N / Ctrl+Shift+N', 'ファイルを開いたまま次 / 前のヒットへ'],
-        ['b', 'この配下を1ファイル1行に平坦化（b か Esc で戻る）'],
-        ['h', 'このペインの履歴'],
-        ['Z', '登録した場所と行った場所へ飛ぶ'],
-        ['s', 'ショートカット（登録した場所）'],
+        ['b', 'ブランチビュー：この配下を1ファイル1行に平坦化（b / Esc で戻る）'],
+        ['h', 'このペインの移動履歴（:back でも）'],
+        ['Z', '最近 / ブックマークのディレクトリへあいまいジャンプ（:jump でも）'],
+        ['s', 'ショートカットメニュー'],
         [':bookmark', 'いまの場所を登録する'],
         ['ドラッグして落とす', 'デスクトップからペインへ ── 移動します（先に確認）'],
         ['Alt+← / Alt+→', '前 / 先のディレクトリへ'],
-        [',', 'ソート：名前／サイズ／日付／拡張子（n s d e で直接、同じキーで昇降反転）'],
-        ['T', 'トグルメニュー：隠しファイル・一覧の見せ方・配色・エディタの流儀'],
+        [',', 'ソート：名前／サイズ／日時／拡張子（n s d e で直接、同じキーで昇降反転）'],
+        ['T', 'UIトグルメニュー：隠しファイル/入力同期/通知…（:toggle でも）'],
     ]],
     ['コマンド', [
         [':', 'コマンドを打つ（:count :du :grep …）'],
-        ['C', 'コマンド一覧をあいまい検索'],
-        [':count', 'ファイル数とステップ数'],
+        ['C  、Ctrl+Shift+P  、Ctrl+,', 'コマンドパレット：全コマンドをあいまい検索'],
+        [':count', 'ファイル・ステップ数を数える（マーク or ツリー全体）'],
         [':du', '容量分析 — 何が大きいか（Enter で中へ）'],
         [':attr / :chmod / :readonly', '属性を見る・変える'],
         [':hash', 'チェックサム（既定 sha256、:hash md5 も）'],
@@ -2088,7 +2132,7 @@ const HELP = [
         [':gitdiff', '選択ファイルの差分'],
         [':stage / :unstage / :discard', 'git add / reset / 変更の破棄'],
         [':svnupdate :svncommit :svnresolve', 'svn の3つ'],
-        [':dup', '中身が同じファイルを探す（:duplicate でも）'],
+        [':dup', '重複ファイルを検出 — 中身が同じもの（:duplicate でも）'],
         [':df / :wc / :stat', '空き容量 / 行・単語・バイト / 属性'],
         [':mark *.rs  :unmark *', 'ワイルドカードでマーク'],
         [':copyto / :moveto', '反対ペイン以外の場所へ'],
@@ -2110,16 +2154,16 @@ const HELP = [
         ['枠が変わります', 'サーバを表示しているペインは色の違う枠になります'],
     ]],
     ['AI（init.lua で設定したとき）', [
-        [':aicmd 説明', 'コマンドを作ってシェルに置く ── 実行はしません'],
-        [':ailog', '選択したログを診断（末尾を読みます）'],
-        [':aijunk / :aistructure', '不要さがし / 畳み方の案（中身は送らない・実行前に全部見せる）'],
-        [':airename 指示', '改名案（例 :airename snake_case に）'],
-        [':aisearch 探しもの', '意味で探す'],
-        [':aierror', 'シェルの直近のエラーを説明'],
+        [':aicmd 説明', '説明からシェルコマンド生成 ── 置くだけで、実行はしません'],
+        [':ailog', '選択中のログを診断（エラー・原因・次の確認）'],
+        [':aijunk / :aistructure', 'ゴミファイル検出 / ディレクトリ構成を提案（中身は送らない・実行前に全部見せる）'],
+        [':airename 指示', '指示でリネーム（例 :airename snake_case に）'],
+        [':aisearch 探しもの', 'セマンティック検索 — 意味で探す'],
+        [':aierror  、:explain', 'シェルの直近のエラーを説明'],
         [':aicommit', 'ステージ済み差分からコミットメッセージ（Enter で署名）'],
         [':ime', 'vim のノーマルモードで IME を自動オフ（init.lua の cian.ime）'],
-        [':ai 質問', '自由に訊く'],
-        [':aidiff', '表示中の差分を説明する'],
+        [':ai 質問', 'AI - simple: ローカルモデルとチャット'],
+        [':aidiff', '表示中の差分を説明（差分画面で x）'],
     ]],
     ['シェル', [
         ['Shift+J  /  :shell', 'シェルパネル（下半分に出る）'],
@@ -2132,12 +2176,12 @@ const HELP = [
         ['F9 / F10', 'シェルのタブを開く / 閉じる（パネルにいるとき）'],
         ['F1 / F2', '前 / 次のシェルタブ'],
         ['Shift+F8 / Shift+F9', '左右 / 上下に分割'],
-        ['Shift+F10', '分割したペインを閉じる'],
+        ['Shift+F10', '分割パネルを閉じる（確認あり）'],
         ['Shift+F1 / Shift+F2', '前 / 次のペインへ'],
-        ['F1〜F8', 'そのシェルタブへ直接'],
+        ['F1-F8', 'シェルタブ 1-8 に切替'],
         ['Ctrl+Shift+矢印', '分割の境界を動かす'],
         ['Ctrl+S  /  :sync', '全ペインに同時入力（同じコマンドを4台へ）'],
-        ['F12  /  :zoom', 'シェルパネルを広げる／戻す'],
+        ['F12  /  :zoom', 'フォーカス中の面をズーム（トグル）'],
         ['Shift+F12', 'いまのペインだけを表示／分割に戻す'],
         [':sessionlog', 'シェルの写しをファイルに取る（もう一度で止める）'],
         ['ドラッグで選択', '放した瞬間にクリップボードへ'],
@@ -2150,39 +2194,41 @@ const HELP = [
         ['  上書きのみ', 'ずれないので、ファイルの大きさは変わりません'],
         ['Ctrl+S', '保存（元の文字コード・改行・BOM のまま）'],
         ['Esc ×3', '閉じる ── 3回連続（未保存なら3回目で確認）'],
-        ['Backspace ×3', '同じ。vim 流儀でノーマルモードのときだけ'],
+        ['Backspace ×3', '同じ。vim でノーマルモードのときだけ'],
         ['F3', '1回で閉じる'],
         ['F3（マーク中）', 'マークした全部を開く'],
         ['F2 / Shift+F2', '次 / 前の開いているファイル'],
-        ['Ctrl+Shift+O', '見出し一覧から飛ぶ（vim 流儀は :outline）'],
-        ['Ctrl+Shift+B', '各行を最後に変えた人（vim 流儀は :blame、もう一度で消す）'],
-        ['── 以下は vim 流儀のコマンド行から ──', 'T でエディタの流儀を vim に'],
+        ['Ctrl+Shift+O', '見出し一覧から飛ぶ（vim では :outline）'],
+        ['Ctrl+Shift+B', '各行を最後に変えた人（vim では :blame、もう一度で消す）'],
+        ['── 以下は vim のキー操作のコマンド行から ──', 'T のメニューで「エディタのキー操作」を vim に'],
         [':sort :rsort :uniq', '行をソート / 逆順 / 重複を落とす'],
         [':s/古い/新しい/g', '開いているファイルを置換'],
         [':han :zen', '全角ASCII→半角 / 半角カナ→全角'],
         [':expand :unexpand :reindent', 'タブ↔スペース、インデントを揃える'],
         [':lf :crlf', '改行コードを変える（保存時に反映）'],
-        ['流儀', 'メモ帳流（既定）／ vim ── 一覧に戻って T のメニューの中'],
+        // cian-tui's words for this pair, and its default: vim is what cian
+        // was built around, メモ帳 is the one you hand to a colleague.
+        ['エディタのキー操作', 'vim（既定）／ メモ帳 ── 一覧に戻って T のメニューの中（:editstyle vim / :notepad でも）'],
         ['  vim のとき', 'ノーマルモードで開く。:w 保存 :q 閉じる :wq 両方'],
         ['  % ', '対応する括弧へ（monaco-vim のもの）'],
         ['  ]] / [[', '次 / 前の見出しへ'],
         ['  za', '折り畳む・開く'],
         ['  :enc', '文字コードを変えて読み直す（引数なしで順に）'],
         ['  :ws / :ruler', '見えない文字 / 桁の目盛り'],
-        ['Ctrl+E', 'Markdown を組んで表示 / ソースへ戻る（:render・vim は :preview）'],
+        ['Ctrl+E', 'Markdown を組んで表示 / ソースへ戻る（:render・vim では :preview）'],
         ['  :s/古い/新しい/g', 'このファイルを置換'],
         ['  :g/re/d  :v/re/d', '一致した行を削除 / 一致した行だけ残す'],
         ['  :combine [n][!]', '次の行を連結（! は空白なし）'],
         ['矩形', 'Alt+Shift+矢印 で選び、Alt+Shift+I/A/C/D で 左端/右端/置換/削除'],
-        ['Ctrl+] / Ctrl+[', '見出し移動（メモ帳流でも使えます）'],
-        ['  メモ帳流のとき', 'Ctrl+C/V/Z/F など Windows の手が効く'],
+        ['Ctrl+] / Ctrl+[', '見出し移動（メモ帳のキー操作でも使えます）'],
+        ['  メモ帳のとき', 'Ctrl+C/V/Z/F など Windows の手が効く'],
     ]],
     ['マークと操作', [
         ['Space', 'マーク切替して下へ'],
         ['Shift+Space', 'マーク切替して上へ'],
         ['v', 'ビジュアル選択（Enter 確定・Esc 取消）'],
         [':nobom', 'UTF-8 BOM を除去（UTF-16 は触らない）'],
-        ['Ctrl+A', '全マーク（もう一度で解除）'],
+        ['Ctrl+A  、:markall', 'ここにある全部をマーク — ビューアではファイル全体を選択'],
         ['V', '全マークを反転'],
         ['c / m / d', '反対ペインへコピー / 移動 / 削除（ゴミ箱へ）'],
         ['Ctrl+C / Ctrl+X', 'ファイルを保持（コピー / 切り取り）'],
@@ -2659,7 +2705,11 @@ document.addEventListener('keydown', (e) => {
     else if (k === '-' && (e.ctrlKey || e.metaKey)) { setFont(FONT.at - 1); say(`文字の大きさ ${FONT.at}px`); }
     else if (k === '0' && (e.ctrlKey || e.metaKey)) { setFont(baseFont()); say('文字の大きさを戻しました'); }
     else if ((k === 't' && bare) || k === 'F9') tabNew();
-    else if ((k === 'w' && bare) || k === 'F10') tabClose();
+    // `w` closes, F10 asks — cian-tui's split (keys.rs:2394 / 2407). An F-key
+    // is easy to hit by accident and a tab can be the only thing holding a
+    // place you walked to; `w` is deliberate enough not to need the question.
+    else if (k === 'w' && bare) tabClose();
+    else if (k === 'F10') tabClose(true);
     else if (k === 'F1') goTab(state.focus, { step: -1 });
     else if (k === 'F2') goTab(state.focus, { step: 1 });
     else if (k === 'J' && bare) { if (term.on) { setShellFocus(true); say('シェル'); } else openShell(); }
@@ -2684,7 +2734,15 @@ document.addEventListener('keydown', (e) => {
     else if (k === '?' && bare) openHelp();
     else if (k === 'F3') lookInsideAll();
     else if (k === ':' && bare) commandLine();
+    // Three ways in, as cian-tui advertises three (`Ctrl+Shift+P, Ctrl+,, C`).
+    // The window had only `C`, so the two a VS Code hand reaches for first
+    // both did nothing. Modified before bare, or `,` would open the sort
+    // picker and `P` the file clipboard.
+    else if (k === 'P' && e.shiftKey && (e.ctrlKey || e.metaKey)) openPalette();
+    else if (k === ',' && (e.ctrlKey || e.metaKey)) openPalette();
     else if (k === 'C' && bare) openPalette();
+    // `//` has this as its second name in the terminal build's manual.
+    else if (k === 'p' && (e.ctrlKey || e.metaKey) && !e.shiftKey) openFinder();
     // The modified ones first: `f` on its own would otherwise swallow Ctrl+F.
     else if ((k === 'f' || k === 'g') && (e.ctrlKey || e.metaKey)) runCommand(findCommand('grep'), '');
     else if (k === 'f' && bare) searchHere();
@@ -3076,6 +3134,19 @@ const viewer = {
     base: 0,
 };
 
+/// Open or close the reading panel, and tell the hint bar.
+///
+/// The bar had a whole branch for the viewer (`hintsNow`) that nobody ever
+/// saw: `drawHints()` is called from `say()`, and opening a file says nothing,
+/// so a file open in front of you was advertised with the *listing's* keys —
+/// ペイン, マーク, 並替, F3 閲覧 — none of which do anything while the editor
+/// has the keyboard. cian-tui swaps its bar for the panel's; this is the one
+/// door that makes the window do the same, rather than eight remembered calls.
+function setViewerOn(on) {
+    viewer.on = on;
+    drawHints();
+}
+
 /// Which grammar the editor speaks.
 ///
 /// notepad by default, because that is what a Windows desktop expects and
@@ -3083,8 +3154,14 @@ const viewer = {
 /// would rather. Where the choice is remembered is still open — the same
 /// question as the look, and answering it in two places would be worse than
 /// leaving it unanswered in one.
-const STYLES = [['notepad', 'メモ帳流'], ['vim', 'vim']];
-let style = 0;
+const STYLES = [['notepad', 'メモ帳'], ['vim', 'vim']];
+/// vim, as in cian-tui (`edit_style: … unwrap_or(EditStyle::Vim)`, lib.rs:3013):
+/// "the default, and the one cian was built around". This started on notepad,
+/// so a window with no remembered setting and no `edit_style` in init.lua
+/// opened files in a different grammar than the terminal build did — the one
+/// difference in this pair that changes what every key in the editor means.
+/// A remembered setting or init.lua still wins, as it does there.
+let style = 1;
 
 /// Every look is one of two grounds. Monaco ships a light and a dark theme, and
 /// the editor sitting in the wrong one is the sort of thing that reads as
@@ -3143,7 +3220,7 @@ async function lookInside() {
 async function openAsPicture(which) {
     const r = await ask('bytes', { pane: which });
     if (!r || !r.kind) return false;
-    viewer.on = true;
+    setViewerOn(true);
     viewer.name = r.name;
     el.view.hidden = false;
     el.vBody.hidden = true;
@@ -3340,7 +3417,7 @@ async function showFile(f) {
     viewer.readOnly = !!f.binary;
     viewer.name = f.name;
     viewer.dirty = false;
-    viewer.on = true;
+    setViewerOn(true);
     if (f.path) noteRecent(f.path, f.name);
     el.view.hidden = false;
 
@@ -3550,7 +3627,7 @@ async function closeView(ask_first = true) {
     if (ask_first && viewer.dirty) {
         if (!await confirm(`${viewer.name} は未保存です`, '閉じると編集は失われます')) return;
     }
-    viewer.on = false;
+    setViewerOn(false);
     viewer.dirty = false;
     renameList.on = false;
     stopHex();
@@ -3826,12 +3903,13 @@ async function openOut() {
 // it has far more commands than it has keys.
 // ─────────────────────────────────────────────────────────────────────────
 const COMMANDS = [
-    { name: 'count', about: 'ファイル数と行数を数える', run: cmdCount },
+    { name: 'count', about: 'ファイル・ステップ数を数える', run: cmdCount },
     { name: 'du', alias: ['diskusage'], about: '容量分析 — 何が大きいか', run: cmdDu },
     { name: 'attr', about: '属性を見る', run: cmdAttr },
     { name: 'chmod', about: 'モードを変える（例 :chmod 644）', arg: 'モード', run: cmdChmod },
     { name: 'readonly', about: '読み取り専用にする / 解除（既定 on）', run: cmdReadonly },
-    { name: 'hash', about: 'チェックサム（既定 sha256、:hash md5 も）', run: cmdHash },
+    // `:md5` and `:sha256` are verbs of their own in cian-tui (commands.rs:402).
+    { name: 'hash', alias: ['md5', 'sha256'], about: 'チェックサム（既定 sha256、:hash md5 も）', run: (a, as_) => cmdHash(as_ === 'md5' ? 'md5' : a) },
     { name: 'find', about: '名前で探す（この下すべて）', arg: '名前', run: (a) => cmdSearch('name', a) },
     { name: 'grep', about: 'ファイルの中を探す（この下すべて）', arg: '文字列か /正規表現/', run: (a) => cmdSearch('content', a) },
     { name: 'branch', about: 'この配下を1ファイル1行に平坦化', run: cmdBranch },
@@ -3865,8 +3943,10 @@ const COMMANDS = [
     { name: 'local', about: 'サーバを閉じてローカルへ戻る', run: cmdDisconnect },
     { name: 'aicmd', about: 'AI: 説明からシェルコマンドを作る', arg: 'やりたいこと', run: cmdAiCmd },
     { name: 'ailog', alias: ['logtriage', 'triage'], about: 'AI: 選択したログを診断する', run: cmdAiLog },
-    { name: 'ai', alias: ['chat'], about: 'AI: 自由に訊く', arg: '訊きたいこと', run: cmdAiAsk },
-    { name: 'aidiff', alias: ['explain', 'explaindiff'], about: 'AI: 表示中の差分を説明する', run: cmdAiDiff },
+    { name: 'ai', alias: ['chat'], about: 'AI - simple: ローカルモデルとチャット', arg: '訊きたいこと', run: cmdAiAsk },
+    // Not `explain`: that word is cian-tui's `:aierror` (commands.rs:327), and
+    // having it mean "explain the diff" here made one name do two jobs.
+    { name: 'aidiff', alias: ['explaindiff'], about: 'AI: 表示中の差分を説明する', run: cmdAiDiff },
     { name: 'office', about: 'Office 文書のクラウド側を開く', run: () => cmdOffice('office') },
     { name: 'officelink', about: 'クラウド側への .url を作る（メールに貼るのはこれ）', run: () => cmdOffice('officelink') },
     { name: 'reload', about: 'init.lua を読み直す', run: cmdReload },
@@ -3902,15 +3982,15 @@ const COMMANDS = [
     { name: 'revealos', alias: ['showinfinder'], about: 'Finder / エクスプローラで表示', run: cmdRevealOs },
     { name: 'edit', alias: ['e'], about: '外部エディタで開く（$EDITOR）', run: cmdEditExternal },
     { name: 'vi', alias: ['vim', 'nvim'], about: 'そのエディタを新しいシェルタブで開く', run: cmdEditorTab },
-    { name: 'editstyle', alias: ['notepad', 'vimkey'], about: 'エディタの流儀 — :editstyle vim / :notepad', arg: 'vim / notepad', optional: true, run: cmdEditStyle },
+    { name: 'editstyle', alias: ['notepad', 'vimkey'], about: 'エディタのキー操作 — :editstyle vim / :notepad', arg: 'vim / notepad', optional: true, run: cmdEditStyle },
     { name: 'scratch', alias: ['new'], about: '下書きを開く（:w で名前を付けて保存）', run: cmdScratch },
     { name: 'limit', alias: ['speed', 'ratelimit'], about: '転送の速さの上限 — :limit 2m / 500k / off', arg: '2m / 500k / off', optional: true, run: cmdLimit },
     { name: 'aicommit', alias: ['commitmsg'], about: 'AI: ステージ済みの差分からコミットメッセージを作る', run: cmdAiCommit },
-    { name: 'aijunk', alias: ['junk'], about: 'AI: 消してよさそうなものを探す（中身は送らない）', run: () => cmdAiScan('aijunk') },
-    { name: 'aistructure', alias: ['organize', 'aiorganize'], about: 'AI: 散らかりを畳む案を作る（実行前に全部見せる）', run: () => cmdAiScan('aistructure') },
-    { name: 'airename', about: 'AI: 指示どおりの改名案を作る（:airename snake_case に）', arg: 'どう変えるか', run: cmdAiRename },
-    { name: 'aisearch', alias: ['ask', 'semsearch'], about: 'AI: 意味で探す（:aisearch 先月の請求書）', arg: '探しもの', run: cmdAiSearch },
-    { name: 'aierror', about: 'AI: シェルの直近のエラーを説明する', run: cmdAiError },
+    { name: 'aijunk', alias: ['junk'], about: 'AI: ゴミファイル検出 — 中身は送りません', run: () => cmdAiScan('aijunk') },
+    { name: 'aistructure', alias: ['organize', 'aiorganize'], about: 'AI: ディレクトリ構成を提案 — 実行前に全部見せます', run: () => cmdAiScan('aistructure') },
+    { name: 'airename', about: 'AI: 指示でリネーム（:airename snake_case に）', arg: 'どう変えるか', run: cmdAiRename },
+    { name: 'aisearch', alias: ['ask', 'semsearch'], about: 'AI: セマンティック検索（:aisearch 先月の請求書）', arg: '探しもの', run: cmdAiSearch },
+    { name: 'aierror', alias: ['explain'], about: 'AI: シェルの直近のエラーを説明する', run: cmdAiError },
     { name: 'ime', alias: ['inputmethod'], about: 'IME 連携 — vim のノーマルモードで自動オフ（cian.ime）', run: cmdIme },
     { name: 'stat', about: '属性（:attr と同じ）', run: cmdAttr },
     { name: 'blame', about: '各行を最後に変えた人（開いているファイル）', run: cmdBlame },
@@ -3922,7 +4002,7 @@ const COMMANDS = [
     { name: 'v', about: '一致した行だけ残す（:v/re/d）', arg: '正規表現', run: (a) => cmdLineFilter(a, true) },
     { name: 'combine', about: '次の行を連結（:combine 3 で3行、:combine! は空白なし）', arg: '行数', optional: true, run: cmdCombine },
     { name: 'theme', alias: ['colorscheme', 'colourscheme'], about: '配色 21 種 — 選ぶだけで着せ替わります（T のメニューにも）', arg: '名前', optional: true, run: cmdTheme },
-    { name: 'redraw', about: '画面を描き直す', run: () => { draw('left'); draw('right'); say('描き直しました'); } },
+    { name: 'redraw', alias: ['refresh!'], about: '画面を描き直す', run: () => { draw('left'); draw('right'); say('描き直しました'); } },
     { name: 'preview', about: 'カーソルのファイルを追って表示（もう一度で止める）', run: togglePreview },
     { name: 'render', alias: ['source'], about: 'Markdown を組んで表示（Ctrl+E でも）', run: togglePreview2 },
     { name: 'queue', about: '実行中の操作を見る・止める', run: cmdQueue },
@@ -3957,14 +4037,22 @@ const COMMANDS = [
     { name: 'svnresolve', alias: ['resolve'], about: 'svn resolve --accept working', run: () => cmdSvn('resolve') },
     { name: 'visual', alias: ['select'], about: 'ビジュアル選択（v でも）', run: startVisual },
     { name: 'compare', about: '左右を比較（= でも）', run: cmdCompare },
-    { name: 'back', about: 'ひとつ前のディレクトリへ', run: () => step('back') },
+    // `:back` is cian-tui's name for the history popup (commands.rs:248), not
+    // for stepping one directory back — that is Alt+← and `:cd -`, as it is
+    // there. The two builds had the same word doing two different things.
+    { name: 'back', alias: ['history'], about: 'このペインの移動履歴', run: cmdHistory },
     { name: 'forward', about: 'ひとつ先のディレクトリへ', run: () => step('forward') },
-    { name: 'history', about: 'このペインの履歴', run: cmdHistory },
+
     { name: 'cd', about: ':cd <パス> / :cd .. / :cd - / :cd ~', arg: 'パス', run: cmdCd },
     { name: 'hidden', about: '隠しファイルの表示切替', run: toggleHidden },
     { name: 'refresh', alias: ['rescan'], about: '読み直す', run: reread },
     { name: 'undo', about: '直前の操作を取り消す', run: undo },
-    { name: 'menu', alias: ['toggle'], about: 'トグルメニュー', run: () => openMenu(TOGGLES) },
+    // Two commands, not one alias for both: cian-tui's `:menu` is the
+    // right-click menu and `:toggle` is the switches (commands.rs:164/219).
+    // Here they were aliases of each other, both landing on the switches — so
+    // `:menu` opened something else entirely.
+    { name: 'menu', about: '右クリックメニュー', run: () => openMenu(CONTEXT) },
+    { name: 'toggle', about: 'UIトグルメニュー（T）', run: () => openMenu(TOGGLES) },
     { name: 'help', alias: ['h'], about: 'キー一覧', run: openHelp },
 ];
 
@@ -4124,6 +4212,11 @@ async function cmdMacros() {
 
 async function tabNew() {
     const which = state.focus;
+    // Asked, as cian-tui asks (`ask_new_tab`, actions.rs:2793): a tab opens
+    // silently, looks like the pane it came from, and nobody notices one has
+    // appeared until there are several. One keystroke, and the tab is
+    // something that was decided rather than something that happened.
+    if (!await confirm('新しいタブ', 'このペインにタブをもう一つ開きますか？')) return;
     const pane = await ask('tabnew', { pane: which });
     if (!pane) return;
     state[which] = pane;
@@ -4131,8 +4224,12 @@ async function tabNew() {
     say(`タブ ${pane.tab + 1} / ${pane.tabs.length}`);
 }
 
-async function tabClose() {
+async function tabClose(ask_first = false) {
     const which = state.focus;
+    if (ask_first && !await confirm('このタブを閉じます', state[which].cwd)) {
+        say('やめました');
+        return;
+    }
     const pane = await ask('tabclose', { pane: which });
     if (!pane) return;
     state[which] = pane;
@@ -4335,6 +4432,64 @@ async function cmdAiAsk(question) {
     say('考えています…');
     aiWaiting = (answer) => {
         show('AI', question, answer.split('\n').map((t) => ({ label: t })), { foot: 'Esc 閉じる' });
+    };
+}
+
+/// The three things a file open in front of you is usually wanted for —
+/// cian-tui's `AiOverText` (ai.rs:476), prompt for prompt.
+///
+/// The window had one row here that pre-filled the command line with
+/// `ai この選択を直して` and two that were a plain chat wearing a different
+/// name. Same words on the menu, three different actions behind them.
+const AI_OVER_TEXT = {
+    writing: [
+        'You are an editor. Improve the passage below: fix grammar and '
+        + "typos, tighten wording, and keep the author's voice and "
+        + 'language (answer in the language it is written in). Give the '
+        + 'rewritten text first, then a short list of what you changed '
+        + 'and why. Do not invent facts.',
+        'この文章を推敲',
+    ],
+    command: [
+        'You help an operator on RHEL/AIX. If the text below is a shell '
+        + 'command, explain what it does, flag anything destructive, and '
+        + 'suggest a safer or shorter form. If it is a description of a '
+        + 'task, write the command that does it and explain each part. '
+        + 'Plain text, no markdown headings.',
+        'コマンドを説明・作成',
+    ],
+    code: [
+        'You review code. For the excerpt below: point out bugs, '
+        + 'error handling that is missing, and anything that will not do '
+        + 'what it looks like it does — most important first. Then give '
+        + 'the corrected code. Say so plainly if you find nothing wrong.',
+        'このコードを点検・修正',
+    ],
+};
+
+async function cmdAiOverText(kind) {
+    if (!viewer.on || !viewer.ed) {
+        say('先にファイルを開いてください（F3）', true);
+        return;
+    }
+    const [system, title] = AI_OVER_TEXT[kind];
+    // The selection when there is one, the file when there is not — which is
+    // what cian-tui sends (`selected_text().unwrap_or(whole)`). A model has a
+    // limit and a file may be larger than it; the head is the part that says
+    // what the thing is.
+    const model = viewer.ed.getModel();
+    const sel = viewer.ed.getSelection();
+    const text = (sel && !sel.isEmpty() ? model.getValueInRange(sel) : model.getValue()).slice(0, 16000);
+    if (!text.trim()) {
+        say('中身がありません', true);
+        return;
+    }
+    const r = await ask('ai', { pane: state.focus, what: 'text', system, text });
+    if (!r) return;
+    say('考えています…');
+    aiWaiting = (answer) => {
+        show(title, 'AI の答え — 確かめてから使ってください',
+            answer.split('\n').map((t) => ({ label: t })), { foot: 'Esc 閉じる' });
     };
 }
 
@@ -4591,7 +4746,7 @@ async function cmdRenameList() {
     // a rename that would pair the wrong names together, silently.
     renameList.on = true;
     renameList.paths = what.map((x) => x.path);
-    viewer.on = true;
+    setViewerOn(true);
     viewer.name = '名前の一覧';
     el.view.hidden = false;
     el.vBody.hidden = false;
@@ -5330,7 +5485,7 @@ async function cmdDiffEdit() {
 
     if (viewer.on) await closeView(false);
     if (report.on) closeReport();
-    viewer.on = true;
+    setViewerOn(true);
     pair.on = true;
     viewer.name = `${r.left.name} ↔ ${r.right.name}`;
     el.view.hidden = false;
@@ -6337,7 +6492,7 @@ async function cmdScratch() {
         monaco = await loadMonaco();
     } catch (e) { say(e.message, true); return; }
     if (viewer.on) await closeView(false);
-    viewer.on = true;
+    setViewerOn(true);
     scratch.on = true;
     viewer.name = '下書き';
     el.view.hidden = false;
@@ -6437,7 +6592,7 @@ async function cmdAiScan(what) {
                 });
             return;
         }
-        show('畳み方の案', '移すだけ。消しも改名もしません',
+        show('ディレクトリ構成の提案', '移すだけ。消しも改名もしません',
             rows.map((x) => ({ n: '→ ' + x.folder, label: x.name, sub: x.reason || '', path: x.path, folder: x.folder })),
             {
                 checks: true,
@@ -6464,7 +6619,7 @@ async function cmdAiScan(what) {
 async function cmdAiRename(instruction) {
     const r = await ask('airename', { pane: state.focus, instruction });
     if (!r) return;
-    say('改名案を考えています…');
+    say('リネーム案を考えています…');
     aiWaiting = (payload) => {
         const rows = (payload.rows || []).filter((x) => x.new_name && !/[\\/]/.test(x.new_name));
         if (!rows.length) { say('変える案がありませんでした'); return; }
@@ -6473,7 +6628,7 @@ async function cmdAiRename(instruction) {
         showRenamePlanRows(rows.map((x) => ({
             from: x.name, to: x.new_name, path: x.path,
             same: x.name === x.new_name, clash: false,
-        })), `AI 改名案`);
+        })), `AIリネーム`);
     };
 }
 
@@ -6815,7 +6970,7 @@ function showPreview() {
         if (viewer.on) await closeView(false);
         await lookInside();
         // The keys stay with the listing: this is a preview, not an opening.
-        viewer.on = false;
+        setViewerOn(false);
     }, 250);
 }
 

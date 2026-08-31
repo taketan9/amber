@@ -77,3 +77,12 @@ jobs:
       # names the request and the date, and the answer is to ask, not to edit.
       - name: The register of requests
         run: python3 scripts/requests.py
+
+      # Do the two front ends still call the same things by the same names?
+      # Neither of the checks above can see this: audit.py reads one side at a
+      # time and requests.py reads only what was asked for by name. The words
+      # had drifted in about thirty places — コピー / コピー（保持）,
+      # リネーム / 名前を変える, ゴミファイル検出 / 不要さがし — and every one
+      # of them was found by a person using the program.
+      - name: The same words in both front ends
+        run: python3 scripts/parity.py

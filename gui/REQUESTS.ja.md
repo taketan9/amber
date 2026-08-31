@@ -58,6 +58,8 @@ python3 scripts/requests.py --list   # 何を見ているか
 | 17 | 2026-08-31 | :version でビルドの時間は見れないよ | ビルド日時と commit と書体を出す | `crates/cian-server/build.rs ~ CIAN_BUILT_AT` |
 | 18 | 2026-08-30 | 会社ではGitコマンドは使えない前提で | Electron の場所は `electron.txt` に1行。zip に入れない（次の版で消えるので） | `gui/run.bat ~ for /f "usebackq delims=" %%L in \("%HERE%\\electron\.txt"\)` |
 | 19 | 2026-08-31 | run.bat の文字化けエラー | `chcp` を実行しない。純 ASCII | `gui/run.bat !~ ^\s*chcp` |
+| 20 | 2026-08-31 | cian-tui / cian-gui で表記の揺れ・動きの揺れがあれば揃えたい | 端末版の語を窓版のメニュー・スイッチ・並び替えに写し、**機械で確かめる**（`scripts/parity.py`）。CI にも入れた | `.github/workflows/ci.yml ~ python3 scripts/parity\.py` |
+| 21 | 2026-08-31 | （同上）機能・挙動の違いをなくしていきたい | ビューアの文法の既定を端末版と同じ vim に | `gui/renderer.js ~ ^let style = 1;$` |
 
 ## 増やすとき
 

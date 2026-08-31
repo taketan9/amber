@@ -369,7 +369,11 @@ async function main() {
     const keys = process.argv.slice(2);
     const round = keys.length ? keys.map((k) => [k, '']) : [
         [',', 'ソート'], [',', 'ソートもう一度'],
-        ['T', 'トグルを開く'], ['Down', ''], ['Enter', '配色を送る'], ['Esc', '閉じる'],
+        // The first row is 隠しファイル in both builds now (cian-tui's
+        // `toggle_rows` order). It said 配色を送る and pressed whatever was
+        // second, which turned input-sync on and left it on for the rest of
+        // the round — a label that had drifted from what the key does.
+        ['T', 'トグルを開く'], ['Enter', '隠しファイルを切り替える'], ['Esc', '閉じる'],
         ['?', 'ヘルプを開く'], ['Esc', '閉じる'],
         ['Space', 'マーク'], ['V', '反転'], ['Ctrl+a', '全マーク'],
         ['Tab', 'ペイン切替'], ['Ctrl+l', '右へ'], ['Ctrl+h', '左へ'],
@@ -381,7 +385,12 @@ async function main() {
         ['Ctrl+v', '貼り付け'],
         ['Tab', '左へ'], ['Down', ''], ['Enter', 'ファイルを読む'],
         ['F3', 'エディタで開く'], ['wait:3000', ''],
-        ['type:XX', '打つ'], ['Mod+s', '保存'], ['wait:900', ''],
+        // vim style is the default in both builds now, so the round asks for
+        // insert mode before typing. It typed `XX` into normal mode instead —
+        // two motions — and then "saved" a file it had not changed, which is a
+        // write test that cannot fail.
+        ['i', '挿入モードへ'], ['type:XX', '打つ'], ['Esc', 'ノーマルへ'],
+        ['Mod+s', '保存'], ['wait:900', ''],
         ['Esc', ''], ['Esc', ''], ['Esc', '3回で閉じる'],
     ];
 
@@ -420,6 +429,31 @@ async function main() {
         await settle(cdp, sand);
 
         for (const [key, what] of round) {
+            // `list` reads instead of pressing: every row of whatever sheet is
+            // open, with its right-hand column. The menus were compared with
+            // cian-tui's by reading source on both sides, which is how six
+            // labels drifted without anything noticing — a menu nobody ever
+            // reads back is a menu that says whatever it last said.
+            // `shot:name` writes a PNG next to the sandbox. Reading rows back
+            // says what a menu *says*; only a picture says whether it fits.
+            if (key.startsWith('shot:')) {
+                const png = await cdp.send('Page.captureScreenshot', { format: 'png' });
+                // Not in the sandbox: that is deleted when the run ends, and
+                // a picture you cannot open afterwards is not evidence.
+                const dir = path.join(os.tmpdir(), 'cian-shots');
+                fs.mkdirSync(dir, { recursive: true });
+                const at = path.join(dir, `${key.slice(5)}.png`);
+                fs.writeFileSync(at, Buffer.from(png.data, 'base64'));
+                console.log(`  shot    ${what || key.slice(5)}  → ${at}`);
+                continue;
+            }
+            if (key === 'list') {
+                const rows = await cdp.read(`[...document.querySelectorAll('#find:not([hidden]) .hit, #report:not([hidden]) .hit')]
+                    .map((e) => e.textContent.replace(/\\s+/g, ' ').trim())`);
+                console.log(`  list    ${what}`);
+                for (const r of rows) console.log(`            ${r}`);
+                continue;
+            }
             const before = await cdp.read(LOOK);
             await cdp.press(key);
             const after = await cdp.read(LOOK);

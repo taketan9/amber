@@ -1620,6 +1620,23 @@ pub(crate) fn outline_top(items: &[cian_core::outline::Item], line: usize, h: us
 /// The rect the context menu occupies, from its anchor and item count. Shared
 /// by the renderer and the mouse handler so a click lands where the row is
 /// drawn.
+/// What to call a sort key on screen.
+///
+/// One place, because there were three and only one of them was translated:
+/// the column heading said 日時, the picker said `date`, and the message after
+/// sorting said `sorted by date (ascending)` in a Japanese window. The
+/// [`cian_core::SortKey::label`] behind those last two is the wire name — it
+/// goes over the pipe to the windowed build — and a wire name is not a label.
+pub(crate) fn sort_label(key: cian_core::SortKey, lang: Lang) -> &'static str {
+    use cian_core::SortKey;
+    match key {
+        SortKey::Name => tr(lang, "Name", "名前"),
+        SortKey::Size => tr(lang, "Size", "サイズ"),
+        SortKey::Modified => tr(lang, "Date", "日時"),
+        SortKey::Extension => tr(lang, "Extension", "拡張子"),
+    }
+}
+
 /// Split a menu label into (name, hint), where the hint is a trailing
 /// `(…)`-style key/command annotation preceded by two spaces (e.g.
 /// `"Rename by pattern…  (:renamepattern)"` → name and hint). No hint
@@ -2519,12 +2536,7 @@ fn draw_pane_header(
     use cian_core::SortKey;
     let style = base.fg(dim_text(surface()));
     let label = |key: SortKey| -> String {
-        let name = match key {
-            SortKey::Name => tr(lang, "Name", "名前"),
-            SortKey::Size => tr(lang, "Size", "サイズ"),
-            SortKey::Modified => tr(lang, "Date", "日時"),
-            SortKey::Extension => "",
-        };
+        let name = if key == SortKey::Extension { "" } else { sort_label(key, lang) };
         if pane.sort.key == key {
             format!("{} {}", name, if pane.sort.reverse { "▼" } else { "▲" })
         } else {
@@ -8983,7 +8995,7 @@ fn draw_sort_picker(
                 SortKey::Extension => "e",
             };
             Line::from(Span::styled(
-                format!("{}{}  ({})", if sel { "▸ " } else { "  " }, k.label(), hint),
+                format!("{}{}  ({})", if sel { "▸ " } else { "  " }, sort_label(*k, lang), hint),
                 style,
             ))
         })
