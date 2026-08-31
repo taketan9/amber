@@ -149,7 +149,7 @@ function say(text, bad = false) {
 const disk = { left: { at: null, v: null }, right: { at: null, v: null } };
 /// And the branch bar, cached the same way: it costs a `git status`, which is
 /// a per-directory question and not a per-keystroke one.
-const repo = { left: { at: null, v: null }, right: { at: null, v: null } };
+const repo = { left: { at: null, v: null, drawn: null }, right: { at: null, v: null, drawn: null } };
 
 async function freshenDisk(which) {
     const pane = state[which];
@@ -171,6 +171,20 @@ async function freshenDisk(which) {
     } catch { repo[which].v = null; }
     repo[which].at = pane.cwd;
     drawStatus();
+    // And the listing once, because the answer carries a badge per row now.
+    // The status chip was the only thing this fed, so the first version of
+    // the git column drew nothing: the marks arrive a moment after the rows
+    // they belong to, and nothing asked for the rows again.
+    //
+    // Once per directory, tracked separately from `at`. Calling `draw` from
+    // here re-enters this function, and the guard at the top is the *disk*
+    // cache's — in a directory where something else reassigns `state` between
+    // the two, that guard opens again and the pair spin. The window hung on
+    // the first repository it was pointed at.
+    if (repo[which].v && repo[which].v.marks && repo[which].drawn !== pane.cwd) {
+        repo[which].drawn = pane.cwd;
+        draw(which);
+    }
 }
 
 /// The terminal build's status row (render.rs draw_status), chip for chip:
@@ -470,10 +484,11 @@ function draw(which) {
             const kind = document.createElement('span');
             kind.className = 'kind';
             kind.textContent = kindOf(row);
+            const gb = gitBadge(which, row);
             const w = document.createElement('span');
             w.className = 'when';
             w.textContent = when(row);
-            div.append(g, name, cl, len, kind, w);
+            div.append(gb, g, name, cl, len, kind, w);
         } else {
             // Classic, in the terminal build's column order: mark, icon,
             // name, then the numbers. The ● column is what makes ten marked
@@ -494,9 +509,9 @@ function draw(which) {
             const w = document.createElement('span');
             w.className = 'when';
             w.textContent = when(row);
-            // The terminal build's column order: ☁, mark, icon, name, then
-            // the numbers.
-            div.append(cl, mk, g, name, len, w);
+            // The terminal build's column order: git, ☁, mark, icon, name,
+            // then the numbers.
+            div.append(gitBadge(which, row), cl, mk, g, name, len, w);
         }
         div.addEventListener('mousedown', async (e) => {
             state.focus = which;
@@ -1330,6 +1345,31 @@ function kindClassOf(row) {
 /// Written as escapes and copied from that table, not from memory: a glyph
 /// remembered wrong renders as some other picture, silently. The emoji set
 /// below stays for the icon tiles, where a big picture is the point.
+/// The one-character git state of a row, from the engine.
+///
+/// cian-tui draws this column in every listing inside a repository (`●` staged,
+/// `✚` changed, `?` untracked, `‼` conflict, `~` a directory with changes under
+/// it) and the window drew only the branch chip — so "which of these did I
+/// touch" meant running `git status` in the shell beside a file manager that
+/// already knew.
+///
+/// The `~` on a directory is the half that earns the column: it says where to
+/// go next without walking in.
+function gitBadge(which, row) {
+    const b = document.createElement('span');
+    b.className = 'git';
+    const m = repo[which]?.v?.marks?.[row.path];
+    if (m && !row.parent) {
+        b.textContent = m.badge;
+        b.dataset.git = m.kind;
+        b.title = {
+            staged: 'ステージ済み', modified: '変更あり', untracked: '未追跡',
+            conflict: '衝突', dirdirty: 'この下に変更があります',
+        }[m.kind] || m.kind;
+    }
+    return b;
+}
+
 /// The desktop's own icon for a row, when it has one.
 ///
 /// A terminal can only draw a glyph from a font, which is why cian-tui picks

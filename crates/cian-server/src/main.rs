@@ -1297,10 +1297,36 @@ impl Session {
             // directory rather than a question worth asking.
             "vcs" => {
                 let which = req.params["pane"].as_str().unwrap_or("left").to_string();
-                let dir = self.pane_mut(&which)?.cwd.clone();
+                let (dir, paths) = {
+                    let pane = self.pane_mut(&which)?;
+                    (pane.cwd.clone(), pane.entries.iter().map(|e| e.path.clone()).collect::<Vec<_>>())
+                };
                 let git = cian_core::git::status(&dir);
                 let svn = cian_core::svn::is_working_copy(&dir);
+                // The per-row badge, worked out here because `mark_for` knows
+                // how a path is normalised and the window must not learn a
+                // second answer to that. Keyed by the same `path` string the
+                // rows carry, so the window is looking up rather than matching.
+                //
+                // Directories get `~` when something under them has changed,
+                // which is the whole reason the column is worth its width: it
+                // says where to go next without walking in.
+                let mut marks = serde_json::Map::new();
+                if let Some(g) = git.as_ref() {
+                    for p in &paths {
+                        if let Some(m) = g.mark_for(p) {
+                            marks.insert(
+                                p.display().to_string(),
+                                serde_json::json!({
+                                    "badge": m.badge(),
+                                    "kind": format!("{m:?}").to_lowercase(),
+                                }),
+                            );
+                        }
+                    }
+                }
                 Ok(serde_json::json!({
+                    "marks": marks,
                     "kind": if git.is_some() { Some("git") } else if svn { Some("svn") } else { None },
                     "branch": git.as_ref().map(|g| g.branch.clone()),
                     "root": git.as_ref().map(|g| g.root.display().to_string()),

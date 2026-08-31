@@ -231,6 +231,14 @@ html, body {
    tile does not change shape when the picture arrives. */
 /* A picture you can zoom. `fit` is the state it opens in; once scaled it is
    positioned by transform, which does not reflow anything around it. */
+/* The git column. One character wide, and it keeps its width in a repository
+   or out of one so the names do not shift as you walk between them. */
+.row .git { flex: 0 0 auto; width: 1.1em; text-align: center; opacity: 0.9; }
+.row .git[data-git="staged"] { color: var(--k-exec); }
+.row .git[data-git="modified"] { color: var(--k-code); }
+.row .git[data-git="untracked"] { color: var(--dim); }
+.row .git[data-git="conflict"] { color: var(--k-archive); font-weight: 700; }
+.row .git[data-git="dirdirty"] { color: var(--dim); }
 .vpic img.zoomable { cursor: grab; max-width: none; max-height: none; }
 .vpic img.zoomable:active { cursor: grabbing; }
 .vpic img.zoomable.fit { max-width: 100%; max-height: 100%; cursor: default; }
