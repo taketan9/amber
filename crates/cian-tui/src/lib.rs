@@ -4854,25 +4854,7 @@ pub enum StartupMacro {
 /// `M` is a million bytes here, not 1,048,576, because a line rented in
 /// megabits is sold in powers of ten and a limit that is 5% out is a limit that
 /// argues with the invoice.
-pub(crate) fn parse_rate(text: &str) -> Option<u64> {
-    let t = text.trim().to_lowercase();
-    let t = t.strip_suffix("/s").unwrap_or(&t).trim().to_string();
-    let t = t.strip_suffix("bps").or_else(|| t.strip_suffix('b')).unwrap_or(&t).trim().to_string();
-    if t.is_empty() || t == "off" || t == "none" || t == "0" {
-        return None;
-    }
-    let (num, scale) = match t.chars().last()? {
-        'k' => (&t[..t.len() - 1], 1_000f64),
-        'm' => (&t[..t.len() - 1], 1_000_000f64),
-        'g' => (&t[..t.len() - 1], 1_000_000_000f64),
-        _ => (t.as_str(), 1f64),
-    };
-    let n: f64 = num.trim().parse().ok()?;
-    if n <= 0.0 {
-        return None;
-    }
-    Some((n * scale) as u64)
-}
+pub(crate) use cian_core::parse_rate;
 
 /// The same number written the way it was asked for.
 pub(crate) fn rate_text(bps: u64) -> String {

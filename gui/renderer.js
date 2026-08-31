@@ -1508,7 +1508,7 @@ const TOGGLES = {
                     switches.notify = !switches.notify;
                     drawMenu();
                     say(switches.notify
-                        ? `完了通知 ON — ${NOTIFY_AFTER_MS / 1000} 秒より長い処理が終わったら知らせます`
+                        ? `完了通知 ON — ${Math.round(notifyAfterMs / 1000)} 秒より長い処理が終わったら知らせます`
                         : '完了通知 OFF');
                 },
             },
@@ -6368,10 +6368,12 @@ const switches = { notify: true, verify: false, cloud: false };
 /// desktop's own notifications, which is the same idea with a better answer.
 /// Silent under `notify_min_secs`, because a notification for a job that took
 /// two seconds is a notification you turn off.
-const NOTIFY_AFTER_MS = 5000;
+/// `cian.set_option("notify_min_secs", n)` moves this; cian-tui's default is
+/// five seconds and so is this.
+let notifyAfterMs = 5000;
 
 function notifyDone(ms, summary) {
-    if (!switches.notify || ms < NOTIFY_AFTER_MS) return;
+    if (!switches.notify || ms < notifyAfterMs) return;
     try {
         // Control characters dropped, as the terminal build drops them — the
         // text comes from paths and error messages.
@@ -7276,6 +7278,24 @@ async function recall() {
     // nothing to change: `switches` with no argument only answers.
     const sw = await ask('switches', {});
     if (sw) { switches.verify = !!sw.verify; switches.cloud = !!sw.cloud; }
+    // …and the rest of what init.lua asked for. state.toml holds what the app
+    // chose; this holds what the person wrote, and it comes second because a
+    // setting written by hand should not be overwritten by whatever the app
+    // happened to do last — except where the app's own key is the same
+    // question, in which case state.toml has already answered it above.
+    const c = s.cfg || {};
+    if (!s.view && c.view && VIEWS.includes(c.view)) setView(c.view, false);
+    if (!s.style && c.edit_style) {
+        const at = STYLES.findIndex(([v]) => v === (c.edit_style === 'vi' ? 'vim' : c.edit_style));
+        if (at >= 0) setStyle(at, false);
+    }
+    if (s.hints === null && c.key_hints === false) { hintsOn = false; drawHints(); }
+    if (typeof c.notify === 'boolean') switches.notify = c.notify;
+    if (Number.isFinite(c.notify_min_secs)) notifyAfterMs = c.notify_min_secs * 1000;
+    if (c.preview === true) preview.on = true;
+    // `hidden` is a toggle on the engine, so ask for it only when init.lua
+    // wants it on and it is not already.
+    if (c.show_hidden === true && state.left && !state.left.hidden_shown) await toggleHidden();
     // Lua's own complaints go in the same queue as mine — from where the
     // person stands they are one thing: "my config did not take".
     keymapErrors = [...(s.config_errors || []), ...keymapErrors];

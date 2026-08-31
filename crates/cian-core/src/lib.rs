@@ -1333,3 +1333,27 @@ mod log_destination_tests {
         assert!(where_it_went.exists(), "the log exists at {}", where_it_went.display());
     }
 }
+
+/// A transfer cap written the way a person writes one: `2M`, `500k`, `off`.
+///
+/// Moved here from cian-tui so both front ends read the same string the same
+/// way. Two parsers for one setting is two answers to "how fast is 2M".
+pub fn parse_rate(text: &str) -> Option<u64> {
+    let t = text.trim().to_lowercase();
+    let t = t.strip_suffix("/s").unwrap_or(&t).trim().to_string();
+    let t = t.strip_suffix("bps").or_else(|| t.strip_suffix('b')).unwrap_or(&t).trim().to_string();
+    if t.is_empty() || t == "off" || t == "none" || t == "0" {
+        return None;
+    }
+    let (num, scale) = match t.chars().last()? {
+        'k' => (&t[..t.len() - 1], 1_000f64),
+        'm' => (&t[..t.len() - 1], 1_000_000f64),
+        'g' => (&t[..t.len() - 1], 1_000_000_000f64),
+        _ => (t.as_str(), 1f64),
+    };
+    let n: f64 = num.trim().parse().ok()?;
+    if n <= 0.0 {
+        return None;
+    }
+    Some((n * scale) as u64)
+}

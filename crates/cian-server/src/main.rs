@@ -307,7 +307,6 @@ impl Session {
             pair: None,
             member: None,
             remote_member: None,
-            limit_bps: None,
             ime_saved: None,
             hex: None,
             redo: Stack::default(),
@@ -319,6 +318,12 @@ impl Session {
                 cian_core::cloud::set_include(cfg.options.read_cloud_files.unwrap_or(false));
                 cfg.options.verify_transfers.unwrap_or(false)
             },
+            // `cian.set_option("transfer_limit", "2M")`. cian-tui reads it at
+            // startup (lib.rs:3095) and the window ignored it entirely, so a
+            // config written to be kind to somebody's network was kind in
+            // only one of the two builds.
+            limit_bps: cian_lua::load().options.transfer_limit.as_deref()
+                .and_then(cian_core::parse_rate),
             shells: Vec::new(),
             tabs: Vec::new(),
             shell_at: 0,
@@ -2311,6 +2316,25 @@ impl Session {
                 "main_pct": cian_lua::state_get("gui_main_pct"),
                 "panes_pct": cian_lua::state_get("gui_panes_pct"),
                 "theme": cian_lua::state_get("theme"),
+                // What init.lua asked for. state.toml is where the app's own
+                // choices live; these are the person's, and the window was
+                // ignoring seventeen of the twenty settings cian-tui reads —
+                // silently, which is the worst way to ignore a config.
+                "cfg": {
+                    "home": cfg.options.home,
+                    "editor": cfg.options.editor,
+                    "shell": cfg.options.shell,
+                    "view": cfg.options.view,
+                    "key_hints": cfg.options.key_hints,
+                    "edit_style": cfg.options.edit_style,
+                    "show_hidden": cfg.options.show_hidden,
+                    "tab_width": cfg.options.tab_width,
+                    "lang": cfg.options.lang,
+                    "notify": cfg.options.notify,
+                    "notify_min_secs": cfg.options.notify_min_secs,
+                    "preview": cfg.options.preview,
+                    "transfer_limit": cfg.options.transfer_limit,
+                },
                 // The keys the person bound in init.lua. The terminal build
                 // reads the same list; a binding that works in one and not the
                 // other would be two programs wearing one name.
