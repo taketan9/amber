@@ -1715,7 +1715,8 @@ function viewerRows() {
     // cian-tui's row here is `mermaid 図をブラウザで開く`; the window draws the
     // diagrams in the preview instead, so this is the same row by another road.
     v.push({ label: 'Markdown プレビュー', value: 'Ctrl+E', run: togglePreview2 });
-    v.push({ label: 'mermaid 図をブラウザで開く', value: ':mermaid', run: cmdMermaidOut });
+    v.push({ label: 'mermaid 図を描く', value: ':mermaid', run: cmdMermaid });
+    v.push({ label: 'mermaid 図をブラウザで開く', value: ':mermaid!', run: cmdMermaidOut });
     v.push({ label: '見出しから飛ぶ', value: 'Ctrl+Shift+O', run: cmdOutline });
     // Where the file lives, for when reading it raises a question about the
     // folder it is in. The cursor is already on it, so this is just the way
@@ -3655,7 +3656,7 @@ function setStyle(i, remember = true) {
         // they are there. Without these, `:mermaid` and `:summary` answered
         // "Not an editor command" — they existed in the dictionary the listing
         // reads, and the viewer has a different one.
-        ex.defineEx('mermaid', 'mermaid', () => cmdMermaidOut());
+        ex.defineEx('mermaid', 'mermaid', (_cm, p) => ((p.argString || '').trim() === '!' || p.commandName === 'mermaid!' ? cmdMermaidOut() : cmdMermaid()));
         ex.defineEx('summary', 'summary', () => cmdSummary());
         ex.defineEx('edit', 'edit', () => cmdEditExternal());
         ex.defineEx('theme', 'theme', (_cm, p) => cmdTheme((p.args || [])[0]));
@@ -4195,7 +4196,7 @@ const COMMANDS = [
     // draws them in the preview, but the browser is still the place you go to
     // make one big enough to read — so the verb exists here too, and does the
     // same thing.
-    { name: 'mermaid', about: 'mermaid 図をブラウザで開く', run: cmdMermaidOut },
+    { name: 'mermaid', about: 'mermaid 図を描く（:mermaid! でブラウザ）', run: (a, as_) => (as_ === 'mermaid!' ? cmdMermaidOut() : cmdMermaid()), alias: ['mermaid!'] },
     { name: 'render', alias: ['source'], about: 'Markdown を組んで表示（Ctrl+E でも）', run: togglePreview2 },
     { name: 'queue', about: '実行中の操作を見る・止める', run: cmdQueue },
     { name: 'tab', about: '新しいタブ（t / F9 でも）', run: () => tabNew() },
@@ -4659,11 +4660,47 @@ const AI_OVER_TEXT = {
     ],
 };
 
-/// `:mermaid` — the open file's diagrams, in a browser.
+/// `:mermaid` — the open file's diagrams, drawn here.
 ///
-/// The preview draws them inline (Ctrl+E); this is the other half of what
-/// cian-tui's `:mermaid` is for — a diagram big enough to read, and one you
-/// can hand to somebody.
+/// **cian-tui opens a browser because a terminal cannot draw a diagram.** That
+/// is a workaround for a limitation this build does not have, and porting it
+/// unchanged was porting the limitation: the window has been rendering these
+/// inline in the Markdown preview all along. So `:mermaid` now shows the
+/// diagrams — all of them, full width, nothing else — in the reading panel.
+///
+/// The browser is still worth having and is still one row away
+/// (`:mermaid!` / `ブラウザで開く`): it is how a diagram gets printed, zoomed
+/// past the window's width, or handed to somebody who does not have cian.
+async function cmdMermaid() {
+    if (!viewer.on || !viewer.ed) {
+        say('先にファイルを開いてください（F3）', true);
+        return;
+    }
+    // The engine's extractor, not a second one written here.
+    const r = await ask('mermaid', { text: viewer.ed.getModel().getValue(), open: false });
+    if (!r) return;
+    const frag = document.createElement('div');
+    for (const src of r.blocks) {
+        const pre = document.createElement('pre');
+        const code = document.createElement('code');
+        code.className = 'language-mermaid';
+        code.textContent = src;
+        pre.append(code);
+        frag.append(pre);
+    }
+    el.vRead.replaceChildren(frag);
+    el.vRead.hidden = false;
+    el.vBody.hidden = true;
+    reading = true;
+    await drawDiagrams();
+    say(`mermaid ${r.blocks.length} 件 — Ctrl+E か Esc でソースへ、:mermaid! でブラウザ`);
+}
+
+/// `:mermaid!` — the same diagrams, in a browser.
+///
+/// For printing, for a diagram wider than the window, and for handing to
+/// somebody without cian. Offline when `mermaid.min.js` sits beside the
+/// config, exactly as cian-tui does it.
 async function cmdMermaidOut() {
     if (!viewer.on || !viewer.ed) {
         say('先にファイルを開いてください（F3）', true);

@@ -3551,6 +3551,13 @@ impl Session {
                 if blocks.is_empty() {
                     anyhow::bail!("mermaid ブロックがありません");
                 }
+                // The window draws them itself; it only needs the blocks, and
+                // taking them from here keeps one extractor rather than a
+                // second one in JavaScript that would disagree about what a
+                // fence is the first time somebody used `~~~`.
+                if !req.params["open"].as_bool().unwrap_or(true) {
+                    return Ok(serde_json::json!({ "blocks": blocks }));
+                }
                 let dir = std::env::temp_dir().join("cian-mermaid");
                 std::fs::create_dir_all(&dir)?;
                 let local = cian_lua::config_read_path("mermaid.min.js").filter(|p| p.exists());
