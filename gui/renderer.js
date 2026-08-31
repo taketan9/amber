@@ -1748,7 +1748,9 @@ function contextRows() {
         { label: '詳細一覧', value: ':view details', run: () => { setView('details'); say('一覧: 詳細一覧'); } },
         { label: 'アイコン', value: ':view icons', run: () => { setView('icons'); say('一覧: アイコン'); } },
         { label: '隠しファイル', value: 'T', run: toggleHidden },
-        { label: '配色', value: ':theme', run: cmdTheme },
+        { label: '配色 ── 21 種', value: ':theme', run: cmdTheme },
+        { label: '全画面', value: 'F11', run: cmdFullscreen },
+        { label: 'この面を広げる', value: 'F12', run: zoomFocused },
         { label: 'トグル', value: 'T', run: () => openMenu(TOGGLES) },
     ]));
     v.push(group('OS ▸', () => [
@@ -2146,6 +2148,19 @@ const HELP = [
         ['M / Shift+Enter / 右クリック', 'このエントリにできること'],
         ['Esc', 'マーク・フィルタ解除 → 実行中の操作を中止'],
         [':queue', '実行中の操作を見る — x で1つだけ止める'],
+    ]],
+    // The window and how it looks. Absent until 2026-08-31, which is why the
+    // first person to run this asked whether themes could be chosen at all —
+    // twenty-one of them, and `?` did not say the word once.
+    ['窓と見た目', [
+        [':theme  /  T のメニューの「配色」', '配色 21 種 ── ↑↓ で選ぶだけで着せ替わります'],
+        [':theme 名前', '名前で直に（dracula, nord, solarized-light …）'],
+        ['F11', '全画面／戻す'],
+        ['F12', 'キーのある面を広げる／戻す（ファイルでもシェルでも）'],
+        ['Ctrl+= / Ctrl+- / Ctrl+0', '文字を大きく / 小さく / 戻す'],
+        ['Ctrl+Shift+矢印', 'ペインの境界を動かす（境界のドラッグでも）'],
+        [':where', 'いま読んでいる設定ファイルの場所'],
+        [':version', 'いま動いている版 ── 直らないときは、まずこれ'],
     ]],
 ];
 
@@ -2590,6 +2605,7 @@ document.addEventListener('keydown', (e) => {
     else if (k === 's' && bare) cmdShortcuts();
     else if (k === 'S' && bare) cmdSshPicker();
     else if (k === '@' && bare) cmdMacros();
+    else if (k === 'F11') cmdFullscreen();
     else if (k === 'F12') zoomFocused();
     else if ((k === '=' || k === '+') && (e.ctrlKey || e.metaKey)) { setFont(FONT.at + 1); say(`文字の大きさ ${FONT.at}px`); }
     else if (k === '-' && (e.ctrlKey || e.metaKey)) { setFont(FONT.at - 1); say(`文字の大きさ ${FONT.at}px`); }
@@ -6482,6 +6498,25 @@ async function cmdEditExternal() {
 /// surface*: standing in a file pane, that pane; standing in the shell, the
 /// shell. This only ever grew the shell, whichever pane you were in — so F12
 /// from a listing made the thing you were not looking at bigger.
+/// `F11` — fill the screen, or stop.
+///
+/// The neighbour of F12 and a different question: F12 gives one *surface* the
+/// room inside the window, F11 gives the window the room on the screen. The
+/// terminal build has neither, having already been handed a whole terminal.
+async function cmdFullscreen() {
+    try {
+        const on = await window.cian.fullscreen();
+        say(on ? '全画面（F11 で戻る）' : '全画面をやめました');
+    } catch (e) {
+        say(`全画面にできません: ${e.message}`, true);
+        return;
+    }
+    // The window changed shape, so the shell's idea of its own size is stale —
+    // the same reason zoomFocused ends this way.
+    if (term.on) ask('shellresize', shellSize());
+    measureFoot();
+}
+
 function zoomFocused() {
     const now = el.work.dataset.zoom;
     if (now) {

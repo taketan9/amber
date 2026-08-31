@@ -13,6 +13,26 @@ const { Engine } = require('./engine');
 
 let engine = null;
 
+/// Draw on the CPU.
+///
+/// A managed Windows desktop — a VM, an RDP session, a locked-down driver —
+/// hands Chromium a GPU it cannot actually get a command buffer from:
+///
+///     ContextResult::kTransientFailure: Failed to send
+///     GpuControl.CreateCommandBuffer
+///
+/// and the window arrives and then will not go away. That is what the first
+/// Windows machine to run this did, 2026-08-31.
+///
+/// Turning acceleration off costs this program nothing worth measuring. It is
+/// a listing, a status line and a text editor: DOM and text, no canvas, no
+/// WebGL, nothing that a GPU was going to make faster. Weighed against a dead
+/// window on the exact machines this is built for, it is not a close call.
+///
+/// CIAN_GPU=1 puts it back, for a machine where it demonstrably helps.
+/// It has to be decided here — after `ready` Electron will not hear it.
+if (process.env.CIAN_GPU !== '1') app.disableHardwareAcceleration();
+
 /// The frame's colour before the page paints, matched to the saved look so
 /// the window does not flash the wrong ground on the way up. It was a fixed
 /// dark — right for a dark theme and exactly wrong for 白磁, the default.
@@ -94,6 +114,15 @@ app.whenReady().then(async () => {
         } catch (e) {
             return { error: String(e.message || e) };
         }
+    });
+    // F11 fills the screen, which is what F11 does on Windows. The window is
+    // this process's to change; the key that asks for it is read in the page,
+    // with every other key.
+    ipcMain.handle('cian-fullscreen', (event) => {
+        const win = BrowserWindow.fromWebContents(event.sender);
+        if (!win) return false;
+        win.setFullScreen(!win.isFullScreen());
+        return win.isFullScreen();
     });
     // One quick question before the frame exists: which ground was saved.
     // Bounded, because a window that waits on a wedged engine is worse than a

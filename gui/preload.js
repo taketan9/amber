@@ -26,6 +26,16 @@ contextBridge.exposeInMainWorld('cian', {
             return null;
         }
     },
+    /// Fill the screen, or stop filling it. Returns where it ended up.
+    ///
+    /// The window is the main process's to change, but the *key* has to be
+    /// read where every other key is read. Doing it in the main process with
+    /// `before-input-event` looked tidier and could not be tested: injected
+    /// input does not go through that path, so the driver pressed F11 and the
+    /// window did not move, with no way to tell a broken binding from a
+    /// driver that cannot reach it.
+    fullscreen: () => ipcRenderer.invoke('cian-fullscreen'),
+
     /// Listen for what the engine says unasked. The callback is handed the
     /// message itself and nothing else — no event object, which would carry a
     /// sender the renderer has no business holding.
