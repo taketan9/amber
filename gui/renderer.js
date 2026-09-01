@@ -7694,7 +7694,7 @@ async function cmdVersion() {
         ? new Date(w.built_at * 1000).toLocaleString('ja-JP',
             { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
         : tr('(unknown)', '(不明)');
-    show('cian', tr(`${w.version || '1.1.3'} — a window on cian-core`, `${w.version || '1.1.3'} — cian-core の上の窓`), [
+    show('cian', tr(`${w.version || '1.1.4'} — a window on cian-core`, `${w.version || '1.1.4'} — cian-core の上の窓`), [
         { label: tr('Built', 'ビルド日時'), sub: built + (w.commit ? `   ${w.commit}` : '') },
         { label: tr('Typeface', '書体'), sub: `${resolvedFace()}   ${FONT.at}px` },
         { label: tr('Config', '設定'), sub: w.config || tr('(none)', '(なし)') },
