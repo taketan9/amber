@@ -53,8 +53,8 @@ function paintMarkup() {
         const n = document.querySelector(sel);
         if (n) n.textContent = tr(en, ja);
     };
-    set('#p-foot', 'Esc = stop   b = to the background', 'Esc = 中止   b = バックグラウンドへ');
-    set('#ask [data-answer="no"]', 'Cancel  (Esc)', 'キャンセル  (Esc)');
+    set('#p-foot', 'Esc = stop   b = to the background', tr('Esc = stop   b = to the background', 'Esc = 中止   b = バックグラウンドへ'));
+    set('#ask [data-answer="no"]', 'Cancel  (Esc)', tr('Cancel  (Esc)', 'キャンセル  (Esc)'));
     const q = document.getElementById('find-q');
     if (q) q.placeholder = tr('/ to narrow', '/ で絞り込み');
 }
@@ -150,7 +150,7 @@ function confirm(head, body, choices = {}) {
             for (const b of el.ask.querySelectorAll('.buttons button')) {
                 if (b.dataset.answer !== 'yes' && b.dataset.answer !== 'no') b.remove();
             }
-            yesBtn.textContent = '実行  (Enter)';
+            yesBtn.textContent = tr('Do it  (Enter)', '実行  (Enter)');
             resolve(answer);
         };
         const onClick = (e) => {
@@ -368,12 +368,12 @@ function draw(which) {
     const where = pane.remote
         ? `${pane.remote}:${pane.cwd}`
         : pane.archive
-            ? `${pane.archive.split(/[\\/]/).pop()} の中`
+            ? tr(`inside ${pane.archive.split(/[\\/]/).pop()}`, `${pane.archive.split(/[\\/]/).pop()} の中`)
             : (pane.flat ? `${pane.flat} — ${pane.cwd}` : pane.cwd);
     // Which side you are on, but only when the other side is not on screen.
     // With both panes visible the highlight says it; with one, Tab would
     // otherwise change everything and announce nothing.
-    const lead = ONE_PANE.includes(viewMode) ? `[${which === 'left' ? '左' : '右'}] ` : '';
+    const lead = ONE_PANE.includes(viewMode) ? tr(`[${which === 'left' ? 'left' : 'right'}] `, `[${which === 'left' ? '左' : '右'}] `) : '';
     // A breadcrumb rather than a grey string: the parents dim, the folder you
     // are *in* in the text colour. It is the most-read line in the window and
     // it was set smaller than the date column and in the same ink as the
@@ -667,7 +667,7 @@ async function ask(method, params) {
 async function clipFiles() {
     const r = await ask('clipfiles', { pane: state.focus });
     if (!r) return;
-    say(`${r.count} 件をクリップボードへ（Finder で貼り付けられます）`);
+    say(tr(`${r.count} on the clipboard (Finder can paste them)`, `${r.count} 件をクリップボードへ（Finder で貼り付けられます）`));
 }
 
 async function refresh() {
@@ -676,7 +676,7 @@ async function refresh() {
     state.left = s.left;
     state.right = s.right;
     draw('left'); draw('right');
-    say(`${state.left.entries.length} 件 / ${state.right.entries.length} 件`);
+    say(tr(`${state.left.entries.length} / ${state.right.entries.length} items`, `${state.left.entries.length} 件 / ${state.right.entries.length} 件`));
 }
 
 /// Mark the row under the cursor, or every row.
@@ -694,7 +694,7 @@ async function mark(all, step = 1) {
     }
     state[which] = next;
     draw(which);
-    say(next.marked ? `${next.marked} 件マーク` : 'マークなし');
+    say(next.marked ? tr(`${next.marked} marked`, `${next.marked} 件マーク`) : tr('nothing marked', 'マークなし'));
 }
 
 /// The bar, while an operation is running.
@@ -718,7 +718,7 @@ function truncateMiddle(text, max = 68) {
 function drawProg() {
     if (!running || prog.hidden) { el.prog.hidden = true; return; }
     el.prog.hidden = false;
-    el.pHead.textContent = `${running.verb}中`;
+    el.pHead.textContent = tr(`${running.verb}`, `${running.verb}中`);
     el.pNow.textContent = truncateMiddle(running.path || '');
     // By bytes where they are known, by files otherwise — cian-core's own
     // rule (Progress::fraction), so the bar and the numbers cannot disagree.
@@ -727,7 +727,7 @@ function drawProg() {
         : (running.total > 0 ? running.done / running.total : 0);
     el.pFill.style.width = `${Math.round(Math.min(1, frac) * 100)}%`;
     const secs = Math.round((running.ms ?? 0) / 1000);
-    const elapsed = secs >= 60 ? `${Math.floor(secs / 60)}分${secs % 60}秒` : `${secs}秒`;
+    const elapsed = secs >= 60 ? tr(`${Math.floor(secs / 60)}m${secs % 60}s`, `${Math.floor(secs / 60)}分${secs % 60}秒`) : tr(`${secs}s`, `${secs}秒`);
     const bytes = running.bytesTotal > 0
         ? `${human(running.bytes)} / ${human(running.bytesTotal)}   `
         : '';
@@ -735,7 +735,7 @@ function drawProg() {
     // bar that has not moved in twenty seconds is otherwise indistinguishable
     // from a program that has died.
     const still = prog.stalledAt && performance.now() - prog.stalledAt > 8000
-        ? `   ⚠ ${Math.round((performance.now() - prog.stalledAt) / 1000)} 秒動いていません`
+        ? tr(`   ⚠ nothing for ${Math.round((performance.now() - prog.stalledAt) / 1000)}s`, `   ⚠ ${Math.round((performance.now() - prog.stalledAt) / 1000)} 秒動いていません`)
         : '';
     el.pNum.textContent =
         `${Math.round(Math.min(1, frac) * 100)}%   ${bytes}(${running.done} / ${running.total} 件)   ·   ${elapsed}${still}`;
@@ -756,14 +756,14 @@ async function operate(kind) {
     const here = pane.entries[pane.cursor];
     const rows = chosen.length ? chosen : (here && !here.parent ? [here] : []);
     if (!rows.length) {
-        say('対象がありません');
+        say(tr('nothing to work on', '対象がありません'));
         return;
     }
     const dest = state[which === 'left' ? 'right' : 'left'];
-    const verb = { copy: 'コピー', move: '移動', delete: '削除' }[kind];
+    const verb = { copy: tr('copy', 'コピー'), move: tr('move', '移動'), delete: tr('delete', '削除') }[kind];
     const head = kind === 'delete'
-        ? `${rows.length} 件をゴミ箱へ`
-        : `${rows.length} 件を${verb}: → ${dest.cwd}`;
+        ? tr(`${rows.length} to the trash`, `${rows.length} 件をゴミ箱へ`)
+        : tr(`${verb} ${rows.length}: → ${dest.cwd}`, `${rows.length} 件を${verb}: → ${dest.cwd}`);
     // Every name, not a summary. "12 件" tells you nothing about whether the
     // twelve are the ones you meant.
     const body = rows.map((r) => r.name).join('\n');
@@ -772,23 +772,23 @@ async function operate(kind) {
     // confirmation exists to prevent. `a` overwrites on purpose; `r` renames
     // a single item on the way over.
     const answer = kind === 'delete'
-        ? await confirm(head, body, { yes: 'ゴミ箱へ', extras: [{ key: 'a', label: '完全削除' }] })
+        ? await confirm(head, body, { yes: tr('to the trash', 'ゴミ箱へ'), extras: [{ key: 'a', label: tr('delete for good', '完全削除') }] })
         : await confirm(head, body, {
-            yes: `${verb}（同名はスキップ）`,
+            yes: tr(`${verb} (skipping same names)`, `${verb}（同名はスキップ）`),
             extras: [
-                { key: 'a', label: '上書き' },
-                ...(rows.length === 1 ? [{ key: 'r', label: '名前を変えて' }] : []),
+                { key: 'a', label: tr('overwrite', '上書き') },
+                ...(rows.length === 1 ? [{ key: 'r', label: tr('rename', '名前を変えて') }] : []),
             ],
         });
     if (!answer) {
-        say('やめました');
+        say(tr('stopped', 'やめました'));
         return;
     }
     if (answer === 'r') {
         // A single-item move/copy can be renamed on the way, seeded with the
         // name it arrived with.
-        const name = await askFor(`${verb}先の名前`, rows[0].name);
-        if (!name) { say('やめました'); return; }
+        const name = await askFor(tr(`the name to ${verb} to`, `${verb}先の名前`), rows[0].name);
+        if (!name) { say(tr('stopped', 'やめました')); return; }
         const r = await ask('transferas', {
             src: rows[0].path, dest: dest.cwd, name, move: kind === 'move',
         });
@@ -809,7 +809,7 @@ async function operate(kind) {
 /// show yet, and the one on screen belongs to the job actually working.
 function beginOp(started, kind, verb) {
     if (started.queued) {
-        say(`キューに追加 — ${started.queued} 件待ち（:queue で一覧）`);
+        say(tr(`queued — ${started.queued} waiting (:queue lists them)`, `キューに追加 — ${started.queued} 件待ち（:queue で一覧）`));
         return;
     }
     running = {
@@ -819,7 +819,7 @@ function beginOp(started, kind, verb) {
     prog.hidden = false;
     prog.stalledAt = performance.now();
     drawProg();
-    say(`${verb}中… 0 / ${started.count}`);
+    say(tr(`${verb}… 0 / ${started.count}`, `${verb}中… 0 / ${started.count}`));
 }
 
 /// Land the cursor on a row. Every jump goes through here so that a jump
@@ -845,7 +845,7 @@ async function clearMarksAndFilter() {
         if (p) state[which] = p;
     }
     draw(which);
-    say('マークとフィルタを解除しました');
+    say(tr('marks and filter cleared', 'マークとフィルタを解除しました'));
 }
 
 /// How many tiles sit on one visual row of the icon grid, measured off the
@@ -905,7 +905,7 @@ async function enter() {
         if (!r) return;
         state[which] = r.pane;
         draw(which);
-        say(`${r.archive.split(/[\\/]/).pop()} の中`);
+        say(tr(`inside ${r.archive.split(/[\\/]/).pop()}`, `${r.archive.split(/[\\/]/).pop()} の中`));
         return;
     }
     // A file is read here rather than handed to the desktop — the same
@@ -986,12 +986,12 @@ async function rename() {
     const pane = state[which];
     const row = pane && pane.entries[pane.cursor];
     if (!row || row.parent) {
-        say('対象がありません');
+        say(tr('nothing to work on', '対象がありません'));
         return;
     }
-    const name = await askFor(`${row.name} の新しい名前`, row.name);
+    const name = await askFor(tr(`a new name for ${row.name}`, `${row.name} の新しい名前`), row.name);
     if (name === null || name === row.name) {
-        say('やめました');
+        say(tr('stopped', 'やめました'));
         return;
     }
     const next = await ask('rename', { pane: which, name });
@@ -1004,16 +1004,16 @@ async function rename() {
 /// A new file, or a new directory.
 async function create(dir) {
     const which = state.focus;
-    const name = await askFor(dir ? '新しいディレクトリの名前' : '新しいファイルの名前');
+    const name = await askFor(dir ? tr('name for the new folder', '新しいディレクトリの名前') : tr('name for the new file', '新しいファイルの名前'));
     if (name === null || !name.trim()) {
-        say('やめました');
+        say(tr('stopped', 'やめました'));
         return;
     }
     const next = await ask('create', { pane: which, name, dir });
     if (!next) return;
     state[which] = next;
     draw(which);
-    say(`${name} を作りました`);
+    say(tr(`created ${name}`, `${name} を作りました`));
 }
 
 /// One step back, whatever it was.
@@ -1034,7 +1034,7 @@ async function toggleHidden() {
     state[which] = r.pane;
     draw(which);
     if (menu.spec === TOGGLES) drawMenu();
-    say(r.showing ? '隠しファイルを表示' : '隠しファイルを非表示');
+    say(r.showing ? tr('dotfiles shown', '隠しファイルを表示') : tr('dotfiles hidden', '隠しファイルを非表示'));
 }
 
 /// `,` shows the four keys and lets you choose — it does not walk them.
@@ -1046,7 +1046,7 @@ async function toggleHidden() {
 // The words are cian-tui's `sort_label()` — the same four the column headings
 // use, in both builds. This list said 日付 while the heading above it said 日時.
 const SORTS = [['name', tr("Name", '名前'), 'n'], ['size', tr("Size", 'サイズ'), 's'],
-               ['date', tr("Date", '日時'), 'd'], ['ext', '拡張子', 'e']];
+               ['date', tr("Date", '日時'), 'd'], ['ext', tr('Extension', '拡張子'), 'e']];
 async function applySort(key) {
     const which = state.focus;
     const r = await ask('sort', { pane: which, key });
@@ -1056,7 +1056,7 @@ async function applySort(key) {
     // `r.by` is the engine's wire name (`date`), not a label: cian-tui says
     // 並び: 日時 ▲ and so does this.
     const word = (SORTS.find(([k]) => k === key) || [, r.by])[1];
-    say(`並び: ${word} ${r.reverse ? '▼' : '▲'}`);
+    say(tr(`sort: ${word} ${r.reverse ? '▼' : '▲'}`, `並び: ${word} ${r.reverse ? '▼' : '▲'}`));
 }
 
 /// `/` narrows what is here. A second `/`, with nothing typed yet, looks
@@ -1116,8 +1116,8 @@ async function applyFilter(text) {
     state[which] = next;
     draw(which);
     const n = next.entries.length;
-    el.fCount.textContent = `${n} 件`;
-    say(text ? `絞り込み: ${text} — ${n} 件` : `${n} 件`);
+    el.fCount.textContent = tr(`${n} items`, `${n} 件`);
+    say(text ? tr(`narrowed: ${text} — ${n}`, `絞り込み: ${text} — ${n} 件`) : tr(`${n} items`, `${n} 件`));
 }
 
 /// The file finder: `//` opens it, typing narrows it, Enter goes there.
@@ -1134,7 +1134,7 @@ async function openFinder() {
     finder.at = 0;
     finder.walking = true;
     el.find.hidden = false;
-    el.findFoot.textContent = '探しています…';
+    el.findFoot.textContent = tr('looking…', '探しています…');
     el.findHits.replaceChildren();
     // Typed at the foot like everything else; the sheet above holds the hits.
     openPrompt('find');
@@ -1175,8 +1175,8 @@ function drawHits(of) {
     const on = el.findHits.children[finder.at];
     if (on) on.scrollIntoView({ block: 'nearest' });
     el.findFoot.textContent = finder.walking
-        ? `${finder.rows.length} / ${of} 件（まだ探しています）`
-        : `${finder.rows.length} / ${of} 件`;
+        ? tr(`${finder.rows.length} / ${of} (still looking)`, `${finder.rows.length} / ${of} 件（まだ探しています）`)
+        : tr(`${finder.rows.length} / ${of}`, `${finder.rows.length} / ${of} 件`);
 }
 
 async function goToHit() {
@@ -1362,24 +1362,24 @@ function extOf(row) {
 /// extension is already right there in the name.
 function kindOf(row) {
     if (row.parent) return '';
-    if (row.is_dir) return 'フォルダー';
+    if (row.is_dir) return tr('Folder', 'フォルダー');
     const ext = extOf(row);
-    if (!ext) return 'ファイル';
+    if (!ext) return tr('File', 'ファイル');
     const known = {
-        md: 'Markdown', txt: 'テキスト', log: 'ログ', json: 'JSON', toml: 'TOML',
+        md: 'Markdown', txt: tr('Text', 'テキスト'), log: tr('Log', 'ログ'), json: 'JSON', toml: 'TOML',
         yml: 'YAML', yaml: 'YAML', csv: 'CSV', tsv: 'TSV', xml: 'XML', html: 'HTML',
         css: 'CSS', js: 'JavaScript', ts: 'TypeScript', rs: 'Rust', py: 'Python',
-        go: 'Go', c: 'C', h: 'C ヘッダ', cpp: 'C++', java: 'Java', lua: 'Lua',
-        sh: 'シェル', bat: 'バッチ', ps1: 'PowerShell', sql: 'SQL',
+        go: 'Go', c: 'C', h: tr('C header', 'C ヘッダ'), cpp: 'C++', java: 'Java', lua: 'Lua',
+        sh: tr('shell', 'シェル'), bat: tr('Batch', 'バッチ'), ps1: 'PowerShell', sql: 'SQL',
         pdf: 'PDF', zip: 'ZIP', tar: 'TAR', gz: 'GZIP', '7z': '7-Zip', rar: 'RAR',
-        png: 'PNG 画像', jpg: 'JPEG 画像', jpeg: 'JPEG 画像', gif: 'GIF 画像',
-        webp: 'WebP 画像', svg: 'SVG 画像', bmp: 'BMP 画像', ico: tr("icons", 'アイコン'),
-        mp3: '音声', wav: '音声', flac: '音声', mp4: '動画', mov: '動画', mkv: '動画',
+        png: tr('PNG image', 'PNG 画像'), jpg: tr('JPEG image', 'JPEG 画像'), jpeg: tr('JPEG image', 'JPEG 画像'), gif: tr('GIF image', 'GIF 画像'),
+        webp: tr('WebP image', 'WebP 画像'), svg: tr('SVG image', 'SVG 画像'), bmp: tr('BMP image', 'BMP 画像'), ico: tr("icons", 'アイコン'),
+        mp3: tr('Audio', '音声'), wav: tr('Audio', '音声'), flac: tr('Audio', '音声'), mp4: tr('Video', '動画'), mov: tr('Video', '動画'), mkv: tr('Video', '動画'),
         xlsx: 'Excel', xls: 'Excel', docx: 'Word', doc: 'Word', pptx: 'PowerPoint',
-        ttf: 'フォント', otf: 'フォント', woff2: 'フォント',
-        exe: 'アプリケーション', dll: 'ライブラリ', so: 'ライブラリ', dylib: 'ライブラリ',
+        ttf: tr('Font', 'フォント'), otf: tr('Font', 'フォント'), woff2: tr('Font', 'フォント'),
+        exe: tr('Application', 'アプリケーション'), dll: tr('Library', 'ライブラリ'), so: tr('Library', 'ライブラリ'), dylib: tr('Library', 'ライブラリ'),
     };
-    return known[ext] || `${ext.toUpperCase()} ファイル`;
+    return known[ext] || tr(`${ext.toUpperCase()} file`, `${ext.toUpperCase()} ファイル`);
 }
 
 /// What kind of file this is, as a row class — the terminal build's
@@ -1422,8 +1422,8 @@ function gitBadge(which, row) {
         b.textContent = m.badge;
         b.dataset.git = m.kind;
         b.title = {
-            staged: 'ステージ済み', modified: '変更あり', untracked: '未追跡',
-            conflict: '衝突', dirdirty: 'この下に変更があります',
+            staged: tr('staged', 'ステージ済み'), modified: tr('changed', '変更あり'), untracked: tr('untracked', '未追跡'),
+            conflict: tr('conflict', '衝突'), dirdirty: tr('something below here has changed', 'この下に変更があります'),
         }[m.kind] || m.kind;
     }
     return b;
@@ -1581,7 +1581,7 @@ function setLook(i, remember = true) {
 /// reads its own choice out of.
 function setPalette(name, remember = true) {
     const t = palettes.get(name);
-    if (!t) { say(`${name}? — :theme で一覧`, true); return; }
+    if (!t) { say(tr(`${name}? — :theme lists them`, `${name}? — :theme で一覧`), true); return; }
     delete document.documentElement.dataset.look;
     paintPalette(t);
     palette = name;
@@ -1734,8 +1734,8 @@ const TOGGLES = {
                     switches.notify = !switches.notify;
                     drawMenu();
                     say(switches.notify
-                        ? `完了通知 ON — ${Math.round(notifyAfterMs / 1000)} 秒より長い処理が終わったら知らせます`
-                        : '完了通知 OFF');
+                        ? tr(`task-done notification on — anything longer than ${Math.round(notifyAfterMs / 1000)}s`, `完了通知 ON — ${Math.round(notifyAfterMs / 1000)} 秒より長い処理が終わったら知らせます`)
+                        : tr('task-done notification off', '完了通知 OFF'));
                 },
             },
             {
@@ -1747,8 +1747,8 @@ const TOGGLES = {
                     switches.verify = r.verify;
                     drawMenu();
                     say(switches.verify
-                        ? '転送後ベリファイ ON — 送ったあと読み直して照合します（往復が倍になります）'
-                        : '転送後ベリファイ OFF');
+                        ? tr('verify transfers on — read back and compared after sending (twice the round trips)', '転送後ベリファイ ON — 送ったあと読み直して照合します（往復が倍になります）')
+                        : tr('verify transfers off', '転送後ベリファイ OFF'));
                 },
             },
             {
@@ -1765,8 +1765,8 @@ const TOGGLES = {
                     switches.cloud = r.cloud;
                     drawMenu();
                     say(switches.cloud
-                        ? '⚠ 検索やチェックサムがクラウド上のファイルを実際に落とすようになります'
-                        : '☁ クラウド上のファイルは読みません');
+                        ? tr('⚠ searches and checksums will now actually download cloud-only files', '⚠ 検索やチェックサムがクラウド上のファイルを実際に落とすようになります')
+                        : tr('☁ cloud-only files are left alone', '☁ クラウド上のファイルは読みません'));
                 },
             },
             {
@@ -1779,7 +1779,7 @@ const TOGGLES = {
             {
                 label: tr("Editor keys", 'エディタのキー操作'),
                 value: STYLES[style][1],
-                run: () => { setStyle(style + 1); drawMenu(); say(`エディタ: ${STYLES[style][1]}`); },
+                run: () => { setStyle(style + 1); drawMenu(); say(tr(`editor: ${STYLES[style][1]}`, `エディタ: ${STYLES[style][1]}`)); },
             },
             // ── the window's own three ──
             //
@@ -1794,7 +1794,7 @@ const TOGGLES = {
                     const next = VIEWS[(VIEWS.indexOf(viewMode) + 1) % VIEWS.length];
                     setView(next);
                     drawMenu();
-                    say(`一覧: ${VIEW_NAMES[next]}`);
+                    say(tr(`listing: ${VIEW_NAMES[next]}`, `一覧: ${VIEW_NAMES[next]}`));
                 },
             },
             {
@@ -1890,7 +1890,7 @@ function viewerRows() {
 
 const VIEWER_MENU = {
     key: 'M',
-    foot: '↑↓ 選ぶ   Enter 実行   Esc 閉じる',
+    foot: tr('↑↓ choose   Enter run   Esc close', '↑↓ 選ぶ   Enter 実行   Esc 閉じる'),
     stay: false,
     rows: viewerRows,
 };
@@ -1955,7 +1955,7 @@ function contextRows() {
         v.push({ label: tr("Command", 'コマンド入力'), value: 'Ctrl+Enter', run: () => commandLine() });
         // The shell's own menu: what can be done to a terminal, not to a file.
         v.push({ label: tr("Paste", '貼り付け'), value: ':paste', run: () => document.execCommand('paste') });
-        v.push(group('セッション ▸', () => [
+        v.push(group(tr('Session ▸', 'セッション ▸'), () => [
             // Named for what it will do, as cian-tui names it (`StartLog` /
             // `StopLog`, chosen in `submenu_children` from whether this pane is
             // already recording). One row that says "start／stop" makes the
@@ -1965,7 +1965,7 @@ function contextRows() {
                 : { label: tr("Start session log", 'セッションログ開始'), value: ':sessionlog', run: cmdShellLog },
             { label: tr("Text encoding", '文字コード'), value: 'e', run: () => cmdEncoding() },
         ]));
-        v.push(group('ウィンドウ ▸', () => [
+        v.push(group(tr('Window ▸', 'ウィンドウ ▸'), () => [
             { label: tr("Split left / right", '左右に分割'), value: 'S-F8', run: () => splitShell(false) },
             { label: tr("Split top / bottom", '上下に分割'), value: 'S-F9', run: () => splitShell(true) },
             { label: tr("New tab", '新規タブ'), value: 'F9', run: shellTab },
@@ -1994,7 +1994,7 @@ function contextRows() {
                 v.push({ label: tr("Synchronize input  \u21c4", '同時入力を開始  ⇄'), value: 'Ctrl+S', run: cmdSync });
             }
         }
-        v.push({ label: tr("Back to the files", 'ファイルへ戻る'), value: 'Esc', run: () => { setShellFocus(false); say('ファイル'); } });
+        v.push({ label: tr("Back to the files", 'ファイルへ戻る'), value: 'Esc', run: () => { setShellFocus(false); say(tr('files', 'ファイル')); } });
         // and on into the shared block below — the shell menu used to stop
         // here, so connecting to a server, changing the colours and quitting
         // were all unreachable by mouse from the shell. cian-tui runs both
@@ -2124,9 +2124,9 @@ function contextRows() {
         // cian-tui's ViewMenu order: the three views, dotfiles, then the
         // switches. Its glyphs too — they are what the corner switcher shows.
         v.push(group(tr("View \u25b8", '表示 ▸'), () => [
-            { label: tr("\u25a4 Details", '▤ 詳細一覧'), value: ':view details', run: () => { setView('details'); say('一覧: 詳細一覧'); } },
-            { label: tr("\u25a6 Icons", '▦ アイコン'), value: ':view icons', run: () => { setView('icons'); say('一覧: アイコン'); } },
-            { label: tr("\u25a5 Classic", '▥ クラシック'), value: ':view classic', run: () => { setView('classic'); say('一覧: クラシック'); } },
+            { label: tr("\u25a4 Details", '▤ 詳細一覧'), value: ':view details', run: () => { setView('details'); say(tr('listing: details', '一覧: 詳細一覧')); } },
+            { label: tr("\u25a6 Icons", '▦ アイコン'), value: ':view icons', run: () => { setView('icons'); say(tr('listing: icons', '一覧: アイコン')); } },
+            { label: tr("\u25a5 Classic", '▥ クラシック'), value: ':view classic', run: () => { setView('classic'); say(tr('listing: classic', '一覧: クラシック')); } },
             { label: tr("Show / hide dotfiles", 'ドットファイルの表示切替'), value: ':hidden', run: toggleHidden },
             { label: tr("Theme (this pane)", 'テーマ（このペイン）'), value: '', run: cmdPaneTheme },
             { label: tr("Switches\u2026", '各種スイッチ…'), value: 'T', run: () => openMenu(TOGGLES) },
@@ -2148,7 +2148,7 @@ function contextRows() {
                 rows.push({ label: tr("Shortcut to the cloud copy", 'クラウド側へのショートカットを作成'), value: ':officelink', run: () => cmdOffice('officelink') });
             }
             rows.push({ label: tr("Open in my editor", '外部エディタで開く'), value: ':edit', run: cmdEditExternal });
-            rows.push({ label: `${osCan.file_manager} で表示`, value: ':revealos', run: cmdRevealOs });
+            rows.push({ label: tr(`Show in ${osCan.file_manager}`, `${osCan.file_manager} で表示`), value: ':revealos', run: cmdRevealOs });
             if (osCan.properties) {
                 rows.push({ label: ON_MAC ? tr("Get Info", '情報を見る') : tr("Properties", 'プロパティ'), value: '', run: cmdProperties });
             }
@@ -2213,7 +2213,7 @@ function aiRows() {
 
 const CONTEXT = {
     key: 'M',
-    foot: '↑↓ 選ぶ   Enter 実行   ← / Esc 戻る',
+    foot: tr('↑↓ choose   Enter run   ← / Esc back', '↑↓ 選ぶ   Enter 実行   ← / Esc 戻る'),
     stay: false,
     rows: contextRows,
 };
@@ -2257,7 +2257,7 @@ function runMenuRow(row, spec) {
     if (row.back) { menuBack(); return; }
     if (row.group) {
         const rows = row.group();
-        if (!rows.length) { say(`${row.label} — できることがありません`, true); return; }
+        if (!rows.length) { say(tr(`${row.label} — nothing to do here`, `${row.label} — できることがありません`), true); return; }
         menuStack.push(spec);
         openMenu({
             key: spec.key,
@@ -2507,7 +2507,7 @@ function helpRows() {
         ['Enter / F3', tr("open a file on the server \u2014 Ctrl+S writes it back there", 'サーバのファイルを開く — Ctrl+S でサーバへ書き戻す')],
         [tr("Ctrl+V / a drop", 'Ctrl+V / ドロップ'), tr("upload a local file", 'ローカルのファイルをアップロード')],
         [':local', tr("close the server and come back to this disk", 'サーバを閉じてローカルへ戻る')],
-        [tr("the frame changes", tr("the frame changes", '枠が変わります')), tr("a pane showing a server wears a different colour of frame", 'サーバを表示しているペインは色の違う枠になります')],
+        [tr("the frame changes", '枠が変わります'), tr("a pane showing a server wears a different colour of frame", 'サーバを表示しているペインは色の違う枠になります')],
     ]],
     [tr("AI (when init.lua configures it)", 'AI（init.lua で設定したとき）'), [
         [tr(":aicmd <description>", ':aicmd 説明'), tr("a shell command from a description \u2014 it is placed, never run", '説明からシェルコマンド生成 ── 置くだけで、実行はしません')],
@@ -2518,7 +2518,7 @@ function helpRows() {
         [':aierror  、:explain', tr("explain the shell's last error", 'シェルの直近のエラーを説明')],
         [':aicommit', tr("a commit message from the staged diff (Enter signs it)", 'ステージ済み差分からコミットメッセージ（Enter で署名）')],
         [':ime', tr("switch the input method off in vim's normal mode (init.lua's cian.ime)", 'vim のノーマルモードで IME を自動オフ（init.lua の cian.ime）')],
-        [tr("  with the IME on", tr("  with the IME on", '  IME オンのまま')), tr("the listing keys still work \u2014 this build reads the physical key, so no helper is needed", '一覧のキーはそのまま効きます — 窓版は物理キーを読みます（ヘルパー不要）')],
+        [tr("  with the IME on", '  IME オンのまま'), tr("the listing keys still work \u2014 this build reads the physical key, so no helper is needed", '一覧のキーはそのまま効きます — 窓版は物理キーを読みます（ヘルパー不要）')],
         [tr(":ai <question>", ':ai 質問'), tr("AI - simple: chat with the local model", 'AI - simple: ローカルモデルとチャット')],
         [':aidiff', tr("explain the diff on screen (x on the comparison)", '表示中の差分を説明（差分画面で x）')],
     ]],
@@ -2541,14 +2541,14 @@ function helpRows() {
         ['F12  /  :zoom', tr("zoom whichever surface has the keys", 'フォーカス中の面をズーム（トグル）')],
         ['Shift+F12', tr("show only this pane / back to the split", 'いまのペインだけを表示／分割に戻す')],
         [':sessionlog', tr("record the shell to a file (again stops it)", 'シェルの写しをファイルに取る（もう一度で止める）')],
-        [tr("drag to select", tr("drag to select", 'ドラッグで選択')), tr("it is on the clipboard the moment you let go", '放した瞬間にクリップボードへ')],
+        [tr("drag to select", 'ドラッグで選択'), tr("it is on the clipboard the moment you let go", '放した瞬間にクリップボードへ')],
         [':preview', tr("follow the cursor and show what it is on (again stops)", 'カーソルのファイルを追って表示（もう一度で止める）')],
         ['@  /  :macro', tr("run a macro \u2014 it splits and opens the layout it describes", 'マクロを実行 ── レイアウトどおりに分割して開きます')],
     ]],
     [tr("Reading and writing (F3 / Enter)", '読み書き（F3・Enter）'), [
         [tr("images, PDFs", '画像・PDF'), tr("F3 or Enter shows it as it is (with its dimensions)", 'F3 か Enter でそのまま表示（寸法も出ます）')],
         [tr("a binary", 'バイナリ'), tr("shown in hex; i edits \u2014 0-9 a-f overwrite, Ctrl+S saves (keeping a .bak)", '16進で表示。i で編集 — 0-9 a-f で上書き、Ctrl+S 保存（.bak を残す）')],
-        [tr("  overwrite only", tr("  overwrite only", '  上書きのみ')), tr("nothing shifts, so the file cannot change size", 'ずれないので、ファイルの大きさは変わりません')],
+        [tr("  overwrite only", '  上書きのみ'), tr("nothing shifts, so the file cannot change size", 'ずれないので、ファイルの大きさは変わりません')],
         ['Ctrl+S', tr("save (same encoding, same line endings, same BOM)", '保存（元の文字コード・改行・BOM のまま）')],
         ['Esc ×3', tr("close \u2014 three in a row (unsaved, the third asks)", '閉じる ── 3回連続（未保存なら3回目で確認）')],
         ['Backspace ×3', tr("the same, in vim style and only in normal mode", '同じ。vim でノーマルモードのときだけ')],
@@ -2557,7 +2557,7 @@ function helpRows() {
         ['F2 / Shift+F2', tr("next / previous open file", '次 / 前の開いているファイル')],
         ['Ctrl+Shift+O', tr("jump by heading (:outline in vim style)", '見出し一覧から飛ぶ（vim では :outline）')],
         ['Ctrl+Shift+B', tr("who last changed each line (:blame in vim style; again hides it)", '各行を最後に変えた人（vim では :blame、もう一度で消す）')],
-        [tr("\u2500\u2500 the rest are typed at the command line in vim style \u2500\u2500", tr("\u2500\u2500 the rest are typed at the command line in vim style \u2500\u2500", '── 以下は vim のキー操作のコマンド行から ──')), tr("set \u201cEditor keys\u201d to vim in T's menu", 'T のメニューで「エディタのキー操作」を vim に')],
+        [tr("\u2500\u2500 the rest are typed at the command line in vim style \u2500\u2500", '── 以下は vim のキー操作のコマンド行から ──'), tr("set \u201cEditor keys\u201d to vim in T's menu", 'T のメニューで「エディタのキー操作」を vim に')],
         [':sort :rsort :uniq', tr("sort the lines / reverse / drop duplicates", '行をソート / 逆順 / 重複を落とす')],
         [tr(":s/old/new/g", ':s/古い/新しい/g'), tr("replace in the open file", '開いているファイルを置換')],
         [':han :zen', tr("full-width ASCII \u2192 half / half-width kana \u2192 full", '全角ASCII→半角 / 半角カナ→全角')],
@@ -2566,7 +2566,7 @@ function helpRows() {
         // cian-tui's words for this pair, and its default: vim is what cian
         // was built around, メモ帳 is the one you hand to a colleague.
         [tr("Editor keys", 'エディタのキー操作'), tr("vim (the default) / notepad \u2014 back in the listing, inside T\u2019s menu (:editstyle vim / :notepad too)", 'vim（既定）／ メモ帳 ── 一覧に戻って T のメニューの中（:editstyle vim / :notepad でも）')],
-        [tr("  in vim style", tr("  in vim style", '  vim のとき')), tr("opens in normal mode. :w saves, :q closes, :wq both", 'ノーマルモードで開く。:w 保存 :q 閉じる :wq 両方')],
+        [tr("  in vim style", '  vim のとき'), tr("opens in normal mode. :w saves, :q closes, :wq both", 'ノーマルモードで開く。:w 保存 :q 閉じる :wq 両方')],
         ['  % ', tr("to the matching bracket (monaco-vim's)", '対応する括弧へ（monaco-vim のもの）')],
         ['  ]] / [[', tr("next / previous heading", '次 / 前の見出しへ')],
         ['  za', tr("fold and unfold", '折り畳む・開く')],
@@ -2576,9 +2576,9 @@ function helpRows() {
         [tr("  :s/old/new/g", '  :s/古い/新しい/g'), tr("replace in this file", 'このファイルを置換')],
         ['  :g/re/d  :v/re/d', tr("delete the matching lines / keep only them", '一致した行を削除 / 一致した行だけ残す')],
         ['  :combine [n][!]', tr("join the next line (! without a space)", '次の行を連結（! は空白なし）')],
-        [tr("rectangle", tr("rectangle", '矩形')), tr("Alt+Shift+arrows selects; Alt+Shift+I/A/C/D for left edge / right edge / replace / delete", 'Alt+Shift+矢印 で選び、Alt+Shift+I/A/C/D で 左端/右端/置換/削除')],
+        [tr("rectangle", '矩形'), tr("Alt+Shift+arrows selects; Alt+Shift+I/A/C/D for left edge / right edge / replace / delete", 'Alt+Shift+矢印 で選び、Alt+Shift+I/A/C/D で 左端/右端/置換/削除')],
         ['Ctrl+] / Ctrl+[', tr("move by heading (works in notepad style too)", '見出し移動（メモ帳のキー操作でも使えます）')],
-        [tr("  in notepad style", tr("  in notepad style", '  メモ帳のとき')), tr("Ctrl+C/V/Z/F and the rest of the Windows hand", 'Ctrl+C/V/Z/F など Windows の手が効く')],
+        [tr("  in notepad style", '  メモ帳のとき'), tr("Ctrl+C/V/Z/F and the rest of the Windows hand", 'Ctrl+C/V/Z/F など Windows の手が効く')],
     ]],
     [tr("Marks and file operations", 'マークと操作'), [
         ['Space', tr("toggle the mark and step down", 'マーク切替して下へ')],
@@ -2590,11 +2590,11 @@ function helpRows() {
         ['c / m / d', tr("copy / move to the other pane / delete (to the trash)", '反対ペインへコピー / 移動 / 削除（ゴミ箱へ）')],
         ['Ctrl+C / Ctrl+X', tr("hold the files (copy / cut)", 'ファイルを保持（コピー / 切り取り）')],
         ['Ctrl+V / y', tr("paste the held files here", '保持したファイルをここへ貼り付け')],
-        ['r', 'リネーム'],
+        ['r', tr('Rename', 'リネーム')],
         ['a / A', tr("new file / new folder", '新規ファイル / 新規ディレクトリ')],
         ['p', tr("the path, as text, to the clipboard", 'パス文字列をクリップボードへ')],
         ['Shift+P', tr("the file itself to the clipboard (Finder and Explorer can paste it)", 'ファイルそのものをクリップボードへ（Finder/エクスプローラで貼れます）')],
-        [tr("drag a row", tr("drag a row", '行をドラッグ')), tr("to the desktop or another application \u2014 the file itself (the terminal build cannot do this)", 'デスクトップや他のアプリへ、ファイルそのものを渡します（端末版にはできません）')],
+        [tr("drag a row", '行をドラッグ'), tr("to the desktop or another application \u2014 the file itself (the terminal build cannot do this)", 'デスクトップや他のアプリへ、ファイルそのものを渡します（端末版にはできません）')],
         ['o / O', tr("this pane to the other side / the other side to here", 'このペインを反対側へ / 反対側をここへ')],
         ['u / Ctrl+R', tr("undo / redo", '取り消し / やり直し')],
         [tr("M / Shift+Enter / right-click", 'M / Shift+Enter / 右クリック'), tr("what can be done to this entry", 'このエントリにできること')],
@@ -2681,7 +2681,7 @@ async function invert() {
     if (!pane) return;
     state[which] = pane;
     draw(which);
-    say(pane.marked ? `${pane.marked} 件をマーク` : 'マークなし');
+    say(pane.marked ? tr(`${pane.marked} marked`, `${pane.marked} 件をマーク`) : tr('nothing marked', 'マークなし'));
 }
 
 /// `o` brings this pane to the other one; `O` sends the other one here.
@@ -2697,11 +2697,11 @@ async function syncPane(pullToHere) {
     if (!pane) return;
     state[to] = pane;
     draw(to);
-    say(`${to === 'left' ? '左' : '右'}を ${path} へ`);
+    say(tr(`${to === 'left' ? 'left' : 'right'} to ${path}`, `${to === 'left' ? '左' : '右'}を ${path} へ`));
 }
 
 async function goToPath(given) {
-    const path = given || await askFor('移動先', state[state.focus].cwd);
+    const path = given || await askFor(tr('where to', '移動先'), state[state.focus].cwd);
     if (!path) return;
     const which = state.focus;
     const pane = await ask('list', { pane: which, path });
@@ -2721,7 +2721,7 @@ async function copyPaths() {
     if (!rows.length) return;
     const text = rows.map((x) => x.path).join('\n');
     await navigator.clipboard.writeText(text);
-    say(`${rows.length} 件のパスをコピー`);
+    say(tr(`${rows.length} paths copied`, `${rows.length} 件のパスをコピー`));
 }
 
 /// F5 goes back to the disk. `refresh()` above asks the engine what it
@@ -2735,7 +2735,7 @@ async function copyPaths() {
 async function hold(op) {
     const r = await ask('clip', { pane: state.focus, op });
     if (!r) return;
-    say(`${r.held} 件を${r.op === 'cut' ? '切り取り' : 'コピー'}`);
+    say(tr(`${r.held} ${r.op === 'cut' ? 'cut' : 'copied'}`, `${r.held} 件を${r.op === 'cut' ? '切り取り' : 'コピー'}`));
 }
 
 async function paste() {
@@ -2755,7 +2755,7 @@ async function reread() {
         state[which] = pane;
         draw(which);
     }
-    say('読み直しました');
+    say(tr('reloaded', '読み直しました'));
 }
 
 /// The filter's keys, while it is up.
@@ -2765,9 +2765,9 @@ document.addEventListener('keydown', (e) => {
     const k = e.key;
     const mode = filter.mode;
     if (k === 'Escape') {
-        if (mode === 'filter') { endFilter(false); say('絞り込みを解除'); }
-        else if (mode === 'find') { closeFinder(); say('やめました'); }
-        else { closePrompt(); say('やめました'); }
+        if (mode === 'filter') { endFilter(false); say(tr('filter cleared', '絞り込みを解除')); }
+        else if (mode === 'find') { closeFinder(); say(tr('stopped', 'やめました')); }
+        else { closePrompt(); say(tr('stopped', 'やめました')); }
     }
     else if (k === 'Enter') {
         if (mode === 'filter') endFilter(true);
@@ -2819,7 +2819,7 @@ document.addEventListener('keydown', (e) => {
         e.stopPropagation();
         e.preventDefault();
         window.cian.call('cancel', { op: running.op });
-        say('中止しています…');
+        say(tr('stopping…', '中止しています…'));
         return;
     }
     if (e.key === 'b' || e.key === 'Enter') {
@@ -2827,7 +2827,7 @@ document.addEventListener('keydown', (e) => {
         e.preventDefault();
         prog.hidden = true;
         drawProg();
-        say('バックグラウンドで実行中 — :queue で管理');
+        say(tr('running in the background — :queue manages it', 'バックグラウンドで実行中 — :queue で管理'));
         return;
     }
     // Everything else is swallowed rather than passed on. A `d` typed at a
@@ -2936,8 +2936,8 @@ function applyKeymaps(list) {
     const bad = [];
     for (const { key, action } of list || []) {
         const spec = keySpec(key);
-        if (!spec) { bad.push(`${key}（キーとして読めません）`); continue; }
-        if (!ACTIONS[action]) { bad.push(`${action}（そんな動作はありません）`); continue; }
+        if (!spec) { bad.push(tr(`${key} (not a key I can read)`, `${key}（キーとして読めません）`)); continue; }
+        if (!ACTIONS[action]) { bad.push(tr(`${action} (no such action)`, `${action}（そんな動作はありません）`)); continue; }
         bound.set(spec, action);
     }
     keymapErrors = bad;
@@ -2962,7 +2962,7 @@ document.addEventListener('keydown', (e) => {
             e.ctrlKey && 'Ctrl', e.altKey && 'Alt', e.shiftKey && 'Shift', e.metaKey && 'Meta',
         ].filter(Boolean);
         say(`${[...bits, e.key].join('+')}   code=${e.code}   keyCode=${e.keyCode}`
-            + '   — Esc で止める');
+            + tr('   — Esc stops it', '   — Esc で止める'));
         return;
     }
     // Not while a file is open. The editor no longer stops every key on its
@@ -3046,7 +3046,7 @@ document.addEventListener('keydown', (e) => {
         // Moving across the network is a download that then deletes the
         // original, and nothing here does the second half yet. `c` copies;
         // saying so beats an error per file from a move that never could.
-        if (state[state.focus].remote) say('サーバとの移動はまだです — c でコピーしてください', true);
+        if (state[state.focus].remote) say(tr('moving to or from a server is not built yet — use c to copy', 'サーバとの移動はまだです — c でコピーしてください'), true);
         else operate('move');
     }
     else if (k === 'd' && bare) {
@@ -3060,9 +3060,9 @@ document.addEventListener('keydown', (e) => {
     else if (k === '@' && bare) cmdMacros();
     else if (k === 'F11') cmdFullscreen();
     else if (k === 'F12') zoomFocused();
-    else if ((k === '=' || k === '+') && (e.ctrlKey || e.metaKey)) { setFont(FONT.at + 1); say(`文字の大きさ ${FONT.at}px`); }
-    else if (k === '-' && (e.ctrlKey || e.metaKey)) { setFont(FONT.at - 1); say(`文字の大きさ ${FONT.at}px`); }
-    else if (k === '0' && (e.ctrlKey || e.metaKey)) { setFont(baseFont()); say('文字の大きさを戻しました'); }
+    else if ((k === '=' || k === '+') && (e.ctrlKey || e.metaKey)) { setFont(FONT.at + 1); say(tr(`text ${FONT.at}px`, `文字の大きさ ${FONT.at}px`)); }
+    else if (k === '-' && (e.ctrlKey || e.metaKey)) { setFont(FONT.at - 1); say(tr(`text ${FONT.at}px`, `文字の大きさ ${FONT.at}px`)); }
+    else if (k === '0' && (e.ctrlKey || e.metaKey)) { setFont(baseFont()); say(tr('text back to its base size', '文字の大きさを戻しました')); }
     else if ((k === 't' && bare) || k === 'F9') tabNew();
     // `w` closes, F10 asks — cian-tui's split (keys.rs:2394 / 2407). An F-key
     // is easy to hit by accident and a tab can be the only thing holding a
@@ -3071,7 +3071,7 @@ document.addEventListener('keydown', (e) => {
     else if (k === 'F10') tabClose(true);
     else if (k === 'F1') goTab(state.focus, { step: -1 });
     else if (k === 'F2') goTab(state.focus, { step: 1 });
-    else if (k === 'J' && bare) { if (term.on) { setShellFocus(true); say('シェル'); } else openShell(); }
+    else if (k === 'J' && bare) { if (term.on) { setShellFocus(true); say(tr('shell', 'シェル')); } else openShell(); }
     else if (k === 'r' && bare) {
         if (state[state.focus].remote) remoteOp('rename'); else rename();
     }
@@ -3118,7 +3118,7 @@ document.addEventListener('keydown', (e) => {
     // place on the server, and holding it would paste a path that exists
     // nowhere on this disk — quietly, later, somewhere else.
     else if ((k === 'c' || k === 'x') && (e.ctrlKey || e.metaKey) && state[state.focus].remote) {
-        say('サーバ上のファイルはクリップボードに持てません — c で転送してください', true);
+        say(tr('a file on a server cannot be held on the clipboard — use c', 'サーバ上のファイルはクリップボードに持てません — c で転送してください'), true);
     }
     // Pasting into a server pane uploads what the register holds. The
     // register's paths never travel to the window — the engine owns both
@@ -3148,7 +3148,7 @@ document.addEventListener('keydown', (e) => {
              && (state[state.focus].marked > 0 || state[state.focus].filter)) clearMarksAndFilter();
     else if (k === 'Escape' && running) {
         window.cian.call('cancel', { op: running.op });
-        say('中止しています…');
+        say(tr('stopping…', '中止しています…'));
     }
     else {
         // Nothing claimed it. Said out loud rather than swallowed: a key that
@@ -3222,12 +3222,12 @@ function show(title, about, rows, opts = {}) {
     el.rName.textContent = title;
     el.rAbout.textContent = about;
     el.rFoot.textContent = opts.foot
-        || (report.checks ? 'Space 外す／戻す   a 全部   n 全部外す   Enter 実行   Esc 取消'
-            : report.query ? '打って絞る   ↑↓ 選ぶ   Enter 開く   Esc 閉じる'
-            : rows.length ? '↑↓ 選ぶ   Enter 開く   Esc 閉じる' : 'Esc 閉じる');
+        || (report.checks ? tr('Space off/on   a all   n none   Enter run   Esc cancel', 'Space 外す／戻す   a 全部   n 全部外す   Enter 実行   Esc 取消')
+            : report.query ? tr('type to narrow   ↑↓ choose   Enter open   Esc close', '打って絞る   ↑↓ 選ぶ   Enter 開く   Esc 閉じる')
+            : rows.length ? tr('↑↓ choose   Enter open   Esc close', '↑↓ 選ぶ   Enter 開く   Esc 閉じる') : tr('Esc close', 'Esc 閉じる'));
     el.rQ.hidden = !report.query;
     el.rQ.value = '';
-    el.rQ.placeholder = opts.hint || '打って絞り込み';
+    el.rQ.placeholder = opts.hint || tr('type to narrow', '打って絞り込み');
     el.report.hidden = false;
     drawReport();
     drawCheckCount();
@@ -3248,7 +3248,7 @@ function filterReport() {
         : report.all;
     report.at = 0;
     el.rAbout.textContent = q
-        ? `${report.rows.length} / ${report.all.length} 件`
+        ? tr(`${report.rows.length} / ${report.all.length}`, `${report.rows.length} / ${report.all.length} 件`)
         : report.about;
     drawReport();
     // The preview follows the narrowing, not just the arrows: with the
@@ -3262,7 +3262,7 @@ function filterReport() {
 function drawCheckCount() {
     if (!report.checks) return;
     const on = report.rows.filter((r) => r.on).length;
-    el.rAbout.textContent = `${on} / ${report.rows.length} 件   ${report.about}`;
+    el.rAbout.textContent = tr(`${on} / ${report.rows.length}   ${report.about}`, `${on} / ${report.rows.length} 件   ${report.about}`);
 }
 
 function closeReport(abandoned = false) {
@@ -3389,7 +3389,7 @@ document.addEventListener('keydown', (e) => {
             .map((r) => [r.n, r.label, r.sub].filter(Boolean).join('\t'))
             .join('\n');
         navigator.clipboard.writeText(text);
-        say(`${report.rows.length} 行をコピー`);
+        say(tr(`${report.rows.length} lines copied`, `${report.rows.length} 行をコピー`));
     }
     else return;
     e.preventDefault();
@@ -3426,7 +3426,7 @@ function loadMonaco() {
         const s = document.createElement('script');
         s.src = 'vendor/monaco/vs/loader.js';
         s.onerror = () => no(new Error(
-            'gui/vendor がありません — gui/ で `node vendor.js` を実行してください'));
+            tr('gui/vendor is missing — run `node vendor.js` in gui/', 'gui/vendor がありません — gui/ で `node vendor.js` を実行してください')));
         s.onload = () => {
             // Absolute, because the editor starts a worker and a worker has
             // no idea what this page's directory was. A relative path sent it
@@ -3472,7 +3472,7 @@ function withVim() {
         s.src = 'vendor/monaco-vim.js';
         const restore = () => { window.define = saved; };
         s.onload = () => { restore(); ok(); };
-        s.onerror = () => { restore(); no(new Error('vendor/monaco-vim.js がありません')); };
+        s.onerror = () => { restore(); no(new Error(tr('vendor/monaco-vim.js is missing', 'vendor/monaco-vim.js がありません'))); };
         document.head.append(s);
     });
 }
@@ -3529,7 +3529,7 @@ function setViewerOn(on) {
 /// would rather. Where the choice is remembered is still open — the same
 /// question as the look, and answering it in two places would be worse than
 /// leaving it unanswered in one.
-const STYLES = [['notepad', 'メモ帳'], ['vim', 'vim']];
+const STYLES = [['notepad', tr('notepad', 'メモ帳')], ['vim', 'vim']];
 /// vim, as in cian-tui (`edit_style: … unwrap_or(EditStyle::Vim)`, lib.rs:3013):
 /// "the default, and the one cian was built around". This started on notepad,
 /// so a window with no remembered setting and no `edit_style` in init.lua
@@ -3640,7 +3640,7 @@ function paintPicture(r) {
     }
     const size = n.naturalWidth ? `${n.naturalWidth} × ${n.naturalHeight}` : '';
     el.vAbout.textContent = pic.fit
-        ? `${size}   窓に合わせています`
+        ? tr(`${size}   fitted to the window`, `${size}   窓に合わせています`)
         : `${size}   ${Math.round(pic.at * 100)}%`;
 }
 
@@ -3689,7 +3689,7 @@ async function openAsPicture(which) {
     }
     el.vName.textContent = r.name;
     el.vAbout.textContent = human(r.len);
-    el.vFoot.textContent = 'Esc ×3 閉じる';
+    el.vFoot.textContent = tr('Esc ×3 closes', 'Esc ×3 閉じる');
     return true;
 }
 
@@ -3764,7 +3764,7 @@ async function lookInsideAll() {
     openFiles.list = marked.map((x) => x.path);
     openFiles.at = 0;
     await openNth(0);
-    say(`${marked.length} 件を開きました（F2 / Shift+F2 で行き来）`);
+    say(tr(`opened ${marked.length} (F2 / Shift+F2 step between them)`, `${marked.length} 件を開きました（F2 / Shift+F2 で行き来）`));
 }
 
 async function openNth(at) {
@@ -3797,15 +3797,15 @@ const member = { on: false };
 const remoteMember = { on: false };
 
 async function openRemoteMember(which) {
-    say('落としています…');
+    say(tr('fetching…', '落としています…'));
     const r = await ask('remoteview', { pane: which });
     if (!r) return false;
     remoteMember.on = true;
     const f = await ask('viewpath', { path: r.path });
     if (!f) { remoteMember.on = false; return false; }
     await showFile(f);
-    el.vName.textContent = `${r.name}（サーバ上）`;
-    el.vFoot.textContent = 'Ctrl+S でサーバへ書き戻す   ·   Esc ×3 閉じる';
+    el.vName.textContent = tr(`${r.name} (on the server)`, `${r.name}（サーバ上）`);
+    el.vFoot.textContent = tr('Ctrl+S writes it back to the server   ·   Esc ×3 closes', 'Ctrl+S でサーバへ書き戻す   ·   Esc ×3 閉じる');
     return true;
 }
 
@@ -3820,10 +3820,10 @@ async function openArchiveMember(which) {
     const f = await ask('viewpath', { path: at.path });
     if (!f) { member.on = false; return false; }
     await showFile(f);
-    el.vName.textContent = `${at.name}（アーカイブの中）`;
+    el.vName.textContent = tr(`${at.name} (inside the archive)`, `${at.name}（アーカイブの中）`);
     el.vFoot.textContent = member.writable
-        ? 'Ctrl+S でアーカイブに書き戻す   ·   Esc ×3 閉じる'
-        : '読むだけ（tar への書き戻しはまだ）   ·   Esc ×3 閉じる';
+        ? tr('Ctrl+S writes it back into the archive   ·   Esc ×3 closes', 'Ctrl+S でアーカイブに書き戻す   ·   Esc ×3 閉じる')
+        : tr('read-only (writing back into a tar is not built yet)   ·   Esc ×3 closes', '読むだけ（tar への書き戻しはまだ）   ·   Esc ×3 閉じる');
     return true;
 }
 
@@ -3858,12 +3858,12 @@ async function showFile(f) {
     // Japanese Windows machine asks of every file it did not write, and the
     // answer decides whether saving it is safe.
     viewer.about = [
-        f.binary ? 'バイナリ（16進）' : (enc[f.encoding] || f.encoding),
+        f.binary ? tr('binary (hex)', 'バイナリ（16進）') : (enc[f.encoding] || f.encoding),
         f.bom ? 'BOM' : null,
         f.binary ? null : f.eol.toUpperCase(),
-        `${f.lines.length} 行`,
+        tr(`${f.lines.length} lines`, `${f.lines.length} 行`),
         human(f.bytes),
-        f.truncated ? '※先頭のみ' : null,
+        f.truncated ? tr('※ the head only', '※先頭のみ') : null,
     ].filter(Boolean).join('  ·  ');
     // A hex dump is a rendering of the file, not the file. Saving one back
     // would write the dump, so it opens read-only and says so.
@@ -3990,12 +3990,12 @@ async function hopSection(step) {
         const r = await ask('outline', {});
         sections = r ? r.items.map((i) => i.line) : [];
     }
-    if (!sections.length) { say('見出しがありません'); return; }
+    if (!sections.length) { say(tr('no headings here', '見出しがありません')); return; }
     const now = viewer.ed.getPosition().lineNumber - 1;
     const to = step > 0
         ? sections.find((n) => n > now)
         : [...sections].reverse().find((n) => n < now);
-    if (to === undefined) { say(step > 0 ? '最後の見出しです' : '最初の見出しです'); return; }
+    if (to === undefined) { say(step > 0 ? tr('that is the last heading', '最後の見出しです') : tr('that is the first heading', '最初の見出しです')); return; }
     viewer.ed.setPosition({ lineNumber: to + 1, column: 1 });
     viewer.ed.revealLineInCenter(to + 1);
 }
@@ -4006,7 +4006,7 @@ async function hopSection(step) {
 function runGlobal(params, keep) {
     const raw = (params.argString || (params.args || []).join(' ') || '').trim();
     const m = raw.match(/^\/(.*)\/\s*d\s*$/);
-    if (!m) { say(':g/正規表現/d の形で書いてください', true); return; }
+    if (!m) { say(tr('write it as :g/regex/d', ':g/正規表現/d の形で書いてください'), true); return; }
     cmdLineFilter(m[1], keep);
 }
 
@@ -4015,15 +4015,15 @@ function drawViewFoot() {
     // one — it applies a rename, and saying 保存 there would describe
     // something that is not about to happen.
     if (renameList.on) {
-        el.vFoot.textContent = `${renameList.paths.length} 件   1行に1つ、順番は変えないこと`
-            + '   ·   Ctrl+S 適用   Esc ×3 取消';
+        el.vFoot.textContent = tr(`${renameList.paths.length} names   one per line, and keep the order`, `${renameList.paths.length} 件   1行に1つ、順番は変えないこと`)
+            + tr('   ·   Ctrl+S applies   Esc ×3 cancels', '   ·   Ctrl+S 適用   Esc ×3 取消');
         return;
     }
     if (viewer.readOnly) {
         el.vFoot.textContent = hex.editing
-            ? `16進編集 — 0-9 a-f で上書き   ·   ${hex.at.toString(16).padStart(8, '0')} 番地`
-              + `${hex.half ? '（下位けた待ち）' : ''}   ·   Ctrl+S 保存（.bak を残します）   Esc 戻る`
-            : '16進表示 — i で編集   ·   Esc ×3 閉じる';
+            ? tr(`hex edit — 0-9 a-f overwrite   ·   offset ${hex.at.toString(16).padStart(8, '0')}`, `16進編集 — 0-9 a-f で上書き   ·   ${hex.at.toString(16).padStart(8, '0')} 番地`)
+              + `${hex.half ? tr(' (waiting for the low digit)', '（下位けた待ち）') : ''}   ·   Ctrl+S 保存（.bak を残します）   Esc 戻る`
+            : tr('hex — i edits   ·   Esc ×3 closes', '16進表示 — i で編集   ·   Esc ×3 閉じる');
         return;
     }
     // In vim style the footer is vim's own — its mode line and its `:` prompt
@@ -4033,9 +4033,9 @@ function drawViewFoot() {
     const where = at ? `${at.lineNumber} : ${at.column}` : '';
     el.vFoot.textContent = [
         where,
-        viewer.dirty ? '未保存' : null,
+        viewer.dirty ? tr('unsaved', '未保存') : null,
         STYLES[style][1],
-        'Ctrl+S 保存   Esc ×3 閉じる',
+        tr('Ctrl+S saves   Esc ×3 closes', 'Ctrl+S 保存   Esc ×3 閉じる'),
     ].filter(Boolean).join('   ·   ');
 }
 
@@ -4044,26 +4044,26 @@ async function saveFile() {
     if (pair.on) { await savePair(); return true; }
     if (scratch.on) { return saveScratch(); }
     if (remoteMember.on) {
-        say('サーバへ送っています…');
+        say(tr('sending to the server…', 'サーバへ送っています…'));
         const r = await ask('remotesave', { lines: viewer.ed.getValue().split(/\r?\n/) });
         if (!r) return false;
         viewer.base = viewer.ed.getModel().getAlternativeVersionId();
         viewer.dirty = false;
         drawViewFoot();
-        say(`${r.saved} をサーバへ書き戻しました`);
+        say(tr(`${r.saved} written back to the server`, `${r.saved} をサーバへ書き戻しました`));
         return true;
     }
     if (member.on) {
-        if (!member.writable) { say('tar への書き戻しはまだです', true); return false; }
+        if (!member.writable) { say(tr('writing back into a tar is not built yet', 'tar への書き戻しはまだです'), true); return false; }
         const r = await ask('archivesave', { lines: viewer.ed.getValue().split(/\r?\n/) });
         if (!r) return false;
         viewer.base = viewer.ed.getModel().getAlternativeVersionId();
         viewer.dirty = false;
         drawViewFoot();
-        say(`${r.saved} を ${r.archive} に書き戻しました`);
+        say(tr(`${r.saved} written back into ${r.archive}`, `${r.saved} を ${r.archive} に書き戻しました`));
         return true;
     }
-    if (viewer.readOnly) { say('16進表示は保存できません', true); return false; }
+    if (viewer.readOnly) { say(tr('the hex view cannot be saved', '16進表示は保存できません'), true); return false; }
     // The editor is holding a list of names rather than a file's contents.
     if (renameList.on) {
         const ok = await applyRenameList();
@@ -4076,7 +4076,7 @@ async function saveFile() {
     viewer.base = viewer.ed.getModel().getAlternativeVersionId();
     viewer.dirty = false;
     drawViewFoot();
-    say(`${r.saved} を保存しました（${r.lines} 行）`);
+    say(tr(`saved ${r.saved} (${r.lines} lines)`, `${r.saved} を保存しました（${r.lines} 行）`));
     // The listing shows a size and a date; both just changed.
     await reread();
     return true;
@@ -4086,7 +4086,7 @@ async function saveFile() {
 /// can lose work.
 async function closeView(ask_first = true) {
     if (ask_first && viewer.dirty) {
-        if (!await confirm(`${viewer.name} は未保存です`, '閉じると編集は失われます')) return;
+        if (!await confirm(tr(`${viewer.name} has unsaved edits`, `${viewer.name} は未保存です`), tr('closing loses them', '閉じると編集は失われます'))) return;
     }
     setViewerOn(false);
     viewer.dirty = false;
@@ -4130,7 +4130,7 @@ function startHex() {
     viewer.ed.updateOptions({ readOnly: true });
     markHexByte();
     drawViewFoot();
-    say('16進編集 — 0-9 a-f で上書き、Ctrl+S で保存');
+    say(tr('hex edit — 0-9 a-f overwrite, Ctrl+S saves', '16進編集 — 0-9 a-f で上書き、Ctrl+S で保存'));
 }
 
 function stopHex() {
@@ -4193,7 +4193,7 @@ async function saveHex() {
     if (!r) return;
     viewer.dirty = false;
     await reread();
-    say(`${r.saved} を保存しました（元は ${r.backup} に残しました）`);
+    say(tr(`saved ${r.saved} (the original is in ${r.backup})`, `${r.saved} を保存しました（元は ${r.backup} に残しました）`));
 }
 
 /// Three of the same key in a row is the way out.
@@ -4376,9 +4376,9 @@ async function openOut() {
     if (r.view) {
         state[r.pane] = r.view;
         draw(r.pane);
-        say(`${r.name} を${r.pane === 'left' ? '左' : '右'}で開きました`);
+        say(tr(`opened ${r.name} on the ${r.pane === 'left' ? 'left' : 'right'}`, `${r.name} を${r.pane === 'left' ? '左' : '右'}で開きました`));
     } else {
-        say(`${r.opened} を既定のアプリで開きました`);
+        say(tr(`opened ${r.opened} in its default app`, `${r.opened} を既定のアプリで開きました`));
     }
 }
 
@@ -4410,16 +4410,16 @@ function buildCommands() {
     { name: 'count', about: tr("count files, lines and steps", 'ファイル・ステップ数を数える'), run: cmdCount },
     { name: 'du', alias: ['diskusage'], about: tr("disk usage \u2014 what's biggest here", '容量分析 — 何が大きいか'), run: cmdDu },
     { name: 'attr', about: tr("permissions & owner", '属性を見る'), run: cmdAttr },
-    { name: 'chmod', about: tr("change the mode (e.g. :chmod 644)", 'モードを変える（例 :chmod 644）'), arg: 'モード', run: cmdChmod },
+    { name: 'chmod', about: tr("change the mode (e.g. :chmod 644)", 'モードを変える（例 :chmod 644）'), arg: tr('Mode', 'モード'), run: cmdChmod },
     { name: 'readonly', about: tr("set / clear read-only (on by default)", '読み取り専用にする / 解除（既定 on）'), run: cmdReadonly },
     // `:md5` and `:sha256` are verbs of their own in cian-tui (commands.rs:402).
     { name: 'hash', alias: ['md5', 'sha256'], about: tr("checksum (sha256 by default; :hash md5 too)", 'チェックサム（既定 sha256、:hash md5 も）'), run: (a, as_) => cmdHash(as_ === 'md5' ? 'md5' : a) },
-    { name: 'find', about: tr("find by name, through the whole tree", '名前で探す（この下すべて）'), arg: '名前', run: (a) => cmdSearch('name', a) },
-    { name: 'grep', about: tr("search inside files, through the whole tree", 'ファイルの中を探す（この下すべて）'), arg: '文字列か /正規表現/', run: (a) => cmdSearch('content', a) },
+    { name: 'find', about: tr("find by name, through the whole tree", '名前で探す（この下すべて）'), arg: tr('name', '名前'), run: (a) => cmdSearch('name', a) },
+    { name: 'grep', about: tr("search inside files, through the whole tree", 'ファイルの中を探す（この下すべて）'), arg: tr('a string, or /a regex/', '文字列か /正規表現/'), run: (a) => cmdSearch('content', a) },
     { name: 'branch', about: tr("flatten everything below here, one file per line", 'この配下を1ファイル1行に平坦化'), run: cmdBranch },
     { name: 'diff', about: tr("compare the two panes (also =)", '左右を比較（= でも）'), run: cmdCompare },
     { name: 'diffedit', about: tr("open the two files side by side, both editable", '左右のファイルを並べて、どちらも編集できる形で開く'), run: cmdDiffEdit },
-    { name: 'renamepattern', about: tr("bulk rename by a pattern: {name}_{n3}.{ext}", '一括リネーム: {name}_{n3}.{ext}'), arg: 'パターン', run: cmdRenamePattern },
+    { name: 'renamepattern', about: tr("bulk rename by a pattern: {name}_{n3}.{ext}", '一括リネーム: {name}_{n3}.{ext}'), arg: tr('pattern', 'パターン'), run: cmdRenamePattern },
     { name: 'zip', about: tr("zip the marks (:zip -e for a password)", 'マークを zip に（:zip -e でパスワード付き）'), arg: '-e', optional: true, run: (a) => cmdCompress('zip', /-e/.test(a || '')) },
     { name: 'tar', about: tr("tar the marks", 'マークを tar にまとめる'), run: () => cmdCompress('tar') },
     { name: 'targz', about: tr("tar.gz the marks", 'マークを tar.gz にまとめる'), run: () => cmdCompress('targz') },
@@ -4433,7 +4433,7 @@ function buildCommands() {
     { name: 'discard', alias: ['revert', 'svnrevert'], about: tr("discard worktree changes", '作業ツリーの変更を破棄'), run: () => cmdVcs('discard') },
     { name: 'dup', alias: ['duplicate', 'dedup'], about: tr("find files with identical contents", '中身が同じファイルを探す'), run: cmdDedup },
     { name: 'redo', about: tr("redo what u undid", 'u で取り消した操作をやり直す'), run: redo },
-    { name: 'image', about: tr("how images are drawn (a window always draws them)", '画像の表示方式（窓では常に描画されます）'), run: () => say('窓では画像は常に表示されます — F3 でどうぞ') },
+    { name: 'image', about: tr("how images are drawn (a window always draws them)", '画像の表示方式（窓では常に描画されます）'), run: () => say(tr('a window always draws images — just press F3', '窓では画像は常に表示されます — F3 でどうぞ')) },
     // `finder` is NOT an alias here: it is `:files`'s, and a spelling that
     // lives on two commands reaches only the first — the fuzzy finder its own
     // about-text promised could never open. `:view finder` still works as an
@@ -4445,9 +4445,9 @@ function buildCommands() {
     { name: 'ssh', about: tr("the ssh connect picker (also Shift+S)", 'SSHピッカー（Shift+S でも）'), run: cmdSshPicker },
     { name: 'paste', about: tr("paste the held files here (also Ctrl+V / y)", '保持したファイルをここへ貼り付け（Ctrl+V / y でも）'), run: paste },
     { name: 'local', about: tr("close the server and come back to this disk", 'サーバを閉じてローカルへ戻る'), run: cmdDisconnect },
-    { name: 'aicmd', about: tr("AI: a shell command from a description", 'AI: 説明からシェルコマンドを作る'), arg: 'やりたいこと', run: cmdAiCmd },
+    { name: 'aicmd', about: tr("AI: a shell command from a description", 'AI: 説明からシェルコマンドを作る'), arg: tr('what you want', 'やりたいこと'), run: cmdAiCmd },
     { name: 'ailog', alias: ['logtriage', 'triage'], about: tr("AI: triage the selected log", 'AI: 選択したログを診断する'), run: cmdAiLog },
-    { name: 'ai', alias: ['chat'], about: tr("AI - simple: chat with the local model", 'AI - simple: ローカルモデルとチャット'), arg: '訊きたいこと', run: cmdAiAsk },
+    { name: 'ai', alias: ['chat'], about: tr("AI - simple: chat with the local model", 'AI - simple: ローカルモデルとチャット'), arg: tr('what to ask', '訊きたいこと'), run: cmdAiAsk },
     // Not `explain`: that word is cian-tui's `:aierror` (commands.rs:327), and
     // having it mean "explain the diff" here made one name do two jobs.
     { name: 'aidiff', alias: ['explaindiff'], about: tr("AI: explain the diff on screen", 'AI: 表示中の差分を説明する'), run: cmdAiDiff },
@@ -4455,21 +4455,21 @@ function buildCommands() {
     { name: 'officelink', about: tr("write a .url to the cloud copy (this is the one to paste in a mail)", 'クラウド側への .url を作る（メールに貼るのはこれ）'), run: () => cmdOffice('officelink') },
     { name: 'reload', about: tr("reload init.lua", 'init.lua を読み直す'), run: cmdReload },
     { name: 'key', about: tr("report each key as received (again stops)", '受け取ったキーをそのまま表示（もう一度で止める）'), run: toggleKeyEcho },
-    { name: 'bookmark', about: tr("bookmark where you are", 'いまの場所を登録する'), arg: '名前', optional: true, run: cmdBookmark },
+    { name: 'bookmark', about: tr("bookmark where you are", 'いまの場所を登録する'), arg: tr('name', '名前'), optional: true, run: cmdBookmark },
     { name: 'macro', about: tr("run a macro (also @)", 'マクロを実行（@ でも）'), run: cmdMacros },
     { name: 'sync', alias: ['broadcast'], about: tr("shell: type into every pane at once (also Ctrl+S)", 'シェル: 全ペインに同時入力（Ctrl+S でも）'), run: cmdSync },
     { name: 'snip', alias: ['snippet'], about: tr("a saved command, to the shell (also Ctrl+Shift+Enter)", '保存したコマンドをシェルへ（Ctrl+Shift+Enter でも）'), run: cmdSnippets },
     { name: 'sessionlog', alias: ['log2'], about: tr("record the shell to a file, or stop", 'シェルの写しをファイルに取る／止める'), run: cmdShellLog },
-    { name: 'shellname', alias: ['tabname'], about: tr("name this shell tab (double-clicking the tab does it too)", 'このシェルタブに名前を付ける（タブを二度押しでも）'), arg: '名前', optional: true, run: cmdShellName },
+    { name: 'shellname', alias: ['tabname'], about: tr("name this shell tab (double-clicking the tab does it too)", 'このシェルタブに名前を付ける（タブを二度押しでも）'), arg: tr('name', '名前'), optional: true, run: cmdShellName },
     { name: 'zoom', about: tr("zoom whichever surface has the keys, and back (also F12)", 'いま操作している面を広げる／戻す（F12 でも）'), run: zoomFocused },
     { name: 'df', about: tr("free space on the disk", 'ディスクの空き容量'), run: cmdDf },
     { name: 'wc', about: tr("lines / words / bytes", '行／単語／バイト数'), run: cmdWc },
-    { name: 'head', about: tr("the first lines (:head -n 20)", '先頭だけ見る（:head -n 20）'), arg: '-n 数', optional: true, run: (a) => cmdPeek(a, false) },
-    { name: 'tail', about: tr("the last lines (:tail -n 20)", '末尾だけ見る（:tail -n 20）'), arg: '-n 数', optional: true, run: (a) => cmdPeek(a, true) },
+    { name: 'head', about: tr("the first lines (:head -n 20)", '先頭だけ見る（:head -n 20）'), arg: tr('-n count', '-n 数'), optional: true, run: (a) => cmdPeek(a, false) },
+    { name: 'tail', about: tr("the last lines (:tail -n 20)", '末尾だけ見る（:tail -n 20）'), arg: tr('-n count', '-n 数'), optional: true, run: (a) => cmdPeek(a, true) },
     { name: 'recent', alias: ['oldfiles'], about: tr("recently-opened files", '最近開いたファイル'), run: cmdRecent },
     { name: 'version', alias: ['about'], about: tr("the version, and where it lives", '版と居場所'), run: cmdVersion },
     { name: 'man', about: tr("the key manual (same as :help)", 'キー一覧（:help と同じ）'), run: openHelp },
-    { name: 'goto', about: tr("go to a typed path (same as :cd)", '入力したパスへ移動（:cd と同じ）'), arg: 'パス', run: cmdCd },
+    { name: 'goto', about: tr("go to a typed path (same as :cd)", '入力したパスへ移動（:cd と同じ）'), arg: tr('path', 'パス'), run: cmdCd },
     { name: 'jump', about: tr("jump to a bookmark or somewhere you have been (also Z)", '登録した場所と履歴へ飛ぶ（Z でも）'), run: cmdJump },
     { name: 'palette', about: tr("every command (also C)", 'コマンド一覧（C でも）'), run: openPalette },
     { name: 'selectall', alias: ['markall'], about: tr("mark everything (also Ctrl+A)", '全部マーク（Ctrl+A でも）'), run: () => mark(true) },
@@ -4479,10 +4479,10 @@ function buildCommands() {
     { name: 'step', about: tr("files and steps (same as :count)", 'ファイル数とステップ数（:count と同じ）'), run: cmdCount },
     { name: 'files', alias: ['finder'], about: tr("fuzzy-find a file below here (also //)", 'この下のファイルをあいまい検索（// でも）'), run: openFinder },
     { name: 'where', alias: ['config'], about: tr("where cian reads and writes its config", 'cian が読み書きする設定ファイルの場所'), run: cmdWhere },
-    { name: 'mark', about: tr("mark by wildcard (:mark *.rs)", 'ワイルドカードでマーク（:mark *.rs）'), arg: 'パターン', run: (a) => cmdMarkGlob(a, true) },
-    { name: 'unmark', alias: ['deselect'], about: tr("unmark by wildcard", 'ワイルドカードでマークを外す'), arg: 'パターン', run: (a) => cmdMarkGlob(a, false) },
-    { name: 'copyto', about: tr("copy to a named place", '指定した場所へコピー'), arg: '行き先', run: (a) => cmdTo('copyto', a) },
-    { name: 'moveto', about: tr("move to a named place", '指定した場所へ移動'), arg: '行き先', run: (a) => cmdTo('moveto', a) },
+    { name: 'mark', about: tr("mark by wildcard (:mark *.rs)", 'ワイルドカードでマーク（:mark *.rs）'), arg: tr('pattern', 'パターン'), run: (a) => cmdMarkGlob(a, true) },
+    { name: 'unmark', alias: ['deselect'], about: tr("unmark by wildcard", 'ワイルドカードでマークを外す'), arg: tr('pattern', 'パターン'), run: (a) => cmdMarkGlob(a, false) },
+    { name: 'copyto', about: tr("copy to a named place", '指定した場所へコピー'), arg: tr('where to', '行き先'), run: (a) => cmdTo('copyto', a) },
+    { name: 'moveto', about: tr("move to a named place", '指定した場所へ移動'), arg: tr('where to', '行き先'), run: (a) => cmdTo('moveto', a) },
     { name: 'revealos', alias: ['showinfinder'], about: tr("reveal in Finder / Explorer", 'Finder / エクスプローラで表示'), run: cmdRevealOs },
     { name: 'edit', alias: ['e'], about: tr("open in the external editor ($EDITOR)", '外部エディタで開く（$EDITOR）'), run: cmdEditExternal },
     { name: 'vi', alias: ['vim', 'nvim'], about: tr("open the file in that editor, in a shell tab of its own", 'そのエディタを新しいシェルタブで開く'), run: cmdEditorTab },
@@ -4493,8 +4493,8 @@ function buildCommands() {
     { name: 'aicommit', alias: ['commitmsg'], about: tr("AI: a commit message from the staged diff", 'AI: ステージ済みの差分からコミットメッセージを作る'), run: cmdAiCommit },
     { name: 'aijunk', alias: ['junk'], about: tr("AI: detect junk files \u2014 no contents are sent", 'AI: ゴミファイル検出 — 中身は送りません'), run: () => cmdAiScan('aijunk') },
     { name: 'aistructure', alias: ['organize', 'aiorganize'], about: tr("AI: suggest a folder structure \u2014 the whole plan first", 'AI: ディレクトリ構成を提案 — 実行前に全部見せます'), run: () => cmdAiScan('aistructure') },
-    { name: 'airename', about: tr("AI: rename by instruction (:airename to snake_case)", 'AI: 指示でリネーム（:airename snake_case に）'), arg: 'どう変えるか', run: cmdAiRename },
-    { name: 'aisearch', alias: ['ask', 'semsearch'], about: tr("AI: semantic search (:aisearch last month's invoices)", 'AI: セマンティック検索（:aisearch 先月の請求書）'), arg: '探しもの', run: cmdAiSearch },
+    { name: 'airename', about: tr("AI: rename by instruction (:airename to snake_case)", 'AI: 指示でリネーム（:airename snake_case に）'), arg: tr('how to change them', 'どう変えるか'), run: cmdAiRename },
+    { name: 'aisearch', alias: ['ask', 'semsearch'], about: tr("AI: semantic search (:aisearch last month's invoices)", 'AI: セマンティック検索（:aisearch 先月の請求書）'), arg: tr('what to find', '探しもの'), run: cmdAiSearch },
     { name: 'aierror', alias: ['explain'], about: tr("AI: explain the shell's last error", 'AI: シェルの直近のエラーを説明する'), run: cmdAiError },
     { name: 'ime', alias: ['inputmethod'], about: tr("input method \u2014 off in vim's normal mode (cian.ime)", 'IME 連携 — vim のノーマルモードで自動オフ（cian.ime）'), run: cmdIme },
     { name: 'stat', about: tr("attributes (same as :attr)", '属性（:attr と同じ）'), run: cmdAttr },
@@ -4503,11 +4503,11 @@ function buildCommands() {
     { name: 'ws', about: tr("show or hide tabs, trailing spaces and the rest", 'タブ・行末の空白などを見せる／隠す'), run: toggleWs },
     { name: 'ruler', about: tr("show or hide the column ruler", '桁の目盛りを出す／消す'), run: toggleRuler },
     { name: 's', about: tr("replace in the open file, s/old/new/g", '開いているファイルを置換 s/古い/新しい/g'), arg: 's/…/…/', run: cmdSubstitute },
-    { name: 'g', about: tr("delete the matching lines (:g/re/d)", '一致した行を削除（:g/re/d）'), arg: '正規表現', run: (a) => cmdLineFilter(a, false) },
-    { name: 'v', about: tr("keep only the matching lines (:v/re/d)", '一致した行だけ残す（:v/re/d）'), arg: '正規表現', run: (a) => cmdLineFilter(a, true) },
-    { name: 'combine', about: tr("join the next line (:combine 3 for three; :combine! without a space)", '次の行を連結（:combine 3 で3行、:combine! は空白なし）'), arg: '行数', optional: true, run: cmdCombine },
-    { name: 'theme', alias: ['colorscheme', 'colourscheme'], about: tr("twenty-one palettes \u2014 choosing one dresses the window (also in T\u2019s menu)", '配色 21 種 — 選ぶだけで着せ替わります（T のメニューにも）'), arg: '名前', optional: true, run: cmdTheme },
-    { name: 'redraw', alias: ['refresh!'], about: tr("redraw the screen", '画面を描き直す'), run: () => { draw('left'); draw('right'); say('描き直しました'); } },
+    { name: 'g', about: tr("delete the matching lines (:g/re/d)", '一致した行を削除（:g/re/d）'), arg: tr('regex', '正規表現'), run: (a) => cmdLineFilter(a, false) },
+    { name: 'v', about: tr("keep only the matching lines (:v/re/d)", '一致した行だけ残す（:v/re/d）'), arg: tr('regex', '正規表現'), run: (a) => cmdLineFilter(a, true) },
+    { name: 'combine', about: tr("join the next line (:combine 3 for three; :combine! without a space)", '次の行を連結（:combine 3 で3行、:combine! は空白なし）'), arg: tr('how many lines', '行数'), optional: true, run: cmdCombine },
+    { name: 'theme', alias: ['colorscheme', 'colourscheme'], about: tr("twenty-one palettes \u2014 choosing one dresses the window (also in T\u2019s menu)", '配色 21 種 — 選ぶだけで着せ替わります（T のメニューにも）'), arg: tr('name', '名前'), optional: true, run: cmdTheme },
+    { name: 'redraw', alias: ['refresh!'], about: tr("redraw the screen", '画面を描き直す'), run: () => { draw('left'); draw('right'); say(tr('redrawn', '描き直しました')); } },
     { name: 'preview', about: tr("follow the cursor and show what it is on (again stops)", 'カーソルのファイルを追って表示（もう一度で止める）'), run: togglePreview },
     // cian-tui's `:mermaid` opens the file's diagrams in a browser. The window
     // draws them in the preview, but the browser is still the place you go to
@@ -4520,15 +4520,15 @@ function buildCommands() {
     { name: 'tabclose', about: tr("close the tab (also w / F10)", 'タブを閉じる（w / F10 でも）'), run: () => tabClose() },
     // The short ones the terminal build has, spelled the same way. A person who
     // knows `:mkdir -p` should not have to find out that this one is different.
-    { name: 'mkdir', alias: ['md'], about: tr("make a folder (:mkdir -p a/b/c)", 'ディレクトリを作る（:mkdir -p a/b/c）'), arg: '名前', run: cmdMkdir },
-    { name: 'touch', about: tr("create a file, or touch its time", 'ファイルを作る／時刻を更新'), arg: '名前', run: cmdTouch },
-    { name: 'cp', alias: ['copy'], about: tr("copy \u2014 to the other pane with no argument, or :cp <where>", 'コピー — 引数なしで反対ペインへ、:cp <行き先> でそこへ'), arg: '行き先', optional: true, run: (a) => a ? cmdTo('copyto', a) : operate('copy') },
-    { name: 'mv', alias: ['move'], about: tr("move \u2014 to the other pane with no argument, or :mv <where>", '移動 — 引数なしで反対ペインへ、:mv <行き先> でそこへ'), arg: '行き先', optional: true, run: (a) => a ? cmdTo('moveto', a) : operate('move') },
+    { name: 'mkdir', alias: ['md'], about: tr("make a folder (:mkdir -p a/b/c)", 'ディレクトリを作る（:mkdir -p a/b/c）'), arg: tr('name', '名前'), run: cmdMkdir },
+    { name: 'touch', about: tr("create a file, or touch its time", 'ファイルを作る／時刻を更新'), arg: tr('name', '名前'), run: cmdTouch },
+    { name: 'cp', alias: ['copy'], about: tr("copy \u2014 to the other pane with no argument, or :cp <where>", 'コピー — 引数なしで反対ペインへ、:cp <行き先> でそこへ'), arg: tr('where to', '行き先'), optional: true, run: (a) => a ? cmdTo('copyto', a) : operate('copy') },
+    { name: 'mv', alias: ['move'], about: tr("move \u2014 to the other pane with no argument, or :mv <where>", '移動 — 引数なしで反対ペインへ、:mv <行き先> でそこへ'), arg: tr('where to', '行き先'), optional: true, run: (a) => a ? cmdTo('moveto', a) : operate('move') },
     { name: 'rm', alias: ['del', 'delete'], about: tr("delete (to the trash)", '削除（ゴミ箱へ）'), run: () => operate('delete') },
     { name: 'pwd', about: tr("show this folder and put it on the clipboard", 'いまの場所を表示してクリップボードへ'), run: cmdPwd },
     { name: 'ls', alias: ['dir'], about: tr("reload (:ls -a toggles the dotfiles)", '読み直す（:ls -a で隠しファイル切替）'), run: cmdLs },
     { name: 'q', alias: ['quit'], about: tr("quit (it asks)", '閉じる（確認します）'), run: cmdQuit },
-    { name: 'each', about: tr("a command per marked file \u2014 {} is the path", 'マーク各ファイルにコマンド — {} がパス'), arg: 'コマンド', run: cmdEach },
+    { name: 'each', about: tr("a command per marked file \u2014 {} is the path", 'マーク各ファイルにコマンド — {} がパス'), arg: tr('command', 'コマンド'), run: cmdEach },
     { name: 'nobom', alias: ['stripbom'], about: tr("strip UTF-8 BOMs (UTF-16 is left alone)", 'UTF-8 BOM を除去（UTF-16 は触らない）'), run: cmdNoBom },
     { name: 'renamelist', about: tr("rename by editing the list of names", '名前の一覧を編集してリネーム'), run: cmdRenameList },
     { name: 'outline', about: tr("the headings of the open file", '開いているファイルの見出し一覧'), run: cmdOutline },
@@ -4553,7 +4553,7 @@ function buildCommands() {
     { name: 'back', alias: ['history'], about: tr("this pane's directory history", 'このペインの移動履歴'), run: cmdHistory },
     { name: 'forward', about: tr("forward, one directory", 'ひとつ先のディレクトリへ'), run: () => step('forward') },
 
-    { name: 'cd', about: tr(":cd <path> / :cd .. / :cd - / :cd ~", ':cd <パス> / :cd .. / :cd - / :cd ~'), arg: 'パス', run: cmdCd },
+    { name: 'cd', about: tr(":cd <path> / :cd .. / :cd - / :cd ~", ':cd <パス> / :cd .. / :cd - / :cd ~'), arg: tr('path', 'パス'), run: cmdCd },
     { name: 'hidden', about: tr("show / hide dotfiles", '隠しファイルの表示切替'), run: toggleHidden },
     { name: 'refresh', alias: ['rescan'], about: tr("reload", '読み直す'), run: reread },
     { name: 'undo', about: tr("undo the last operation", '直前の操作を取り消す'), run: undo },
@@ -4580,35 +4580,35 @@ async function cmdCd(dest) {
 }
 
 async function cmdQuit() {
-    if (await confirm('cian を閉じます', '')) window.close();
-    else say('やめました');
+    if (await confirm(tr('Quit cian', 'cian を閉じます'), '')) window.close();
+    else say(tr('stopped', 'やめました'));
 }
 
 async function cmdMkdir(spec) {
     // `-p a/b/c` makes the whole chain; without it, one directory here.
     const deep = /^-p\s+/.test(spec);
     const name = spec.replace(/^-p\s+/, '').trim();
-    if (!name) { say('名前がありません', true); return; }
+    if (!name) { say(tr('no name given', '名前がありません'), true); return; }
     const r = await ask('create', { pane: state.focus, name, dir: true, deep });
     if (!r) return;
     state[state.focus] = r.pane ?? r;
     draw(state.focus);
-    say(`${name} を作りました`);
+    say(tr(`created ${name}`, `${name} を作りました`));
 }
 
 async function cmdTouch(name) {
-    if (!name) { say('名前がありません', true); return; }
+    if (!name) { say(tr('no name given', '名前がありません'), true); return; }
     const r = await ask('create', { pane: state.focus, name, dir: false, touch: true });
     if (!r) return;
     state[state.focus] = r.pane ?? r;
     draw(state.focus);
-    say(`${name} を作りました`);
+    say(tr(`created ${name}`, `${name} を作りました`));
 }
 
 async function cmdPwd() {
     const cwd = state[state.focus].cwd;
     await navigator.clipboard.writeText(cwd);
-    say(`${cwd} — クリップボードへ`);
+    say(tr(`${cwd} — on the clipboard`, `${cwd} — クリップボードへ`));
 }
 
 async function cmdLs(arg) {
@@ -4626,7 +4626,7 @@ const hits = { list: [], at: -1, needle: '' };
 /// `Ctrl+N` / `Ctrl+Shift+N` — the next or previous grep hit, opened and
 /// scrolled to its line.
 async function hopHit(step) {
-    if (!hits.list.length) { say('grep の結果がありません', true); return; }
+    if (!hits.list.length) { say(tr('no grep results', 'grep の結果がありません'), true); return; }
     hits.at = (hits.at + step + hits.list.length) % hits.list.length;
     const h = hits.list[hits.at];
     if (!await landOn(h.path)) return;
@@ -4645,26 +4645,26 @@ async function hopHit(step) {
 async function cmdQueue() {
     const r = await ask('queue', {});
     if (!r) return;
-    if (!r.jobs.length) { say('動いている操作はありません'); return; }
-    const verb = { copy: 'コピー', move: '移動', delete: '削除' };
+    if (!r.jobs.length) { say(tr('nothing is running', '動いている操作はありません')); return; }
+    const verb = { copy: tr('copy', 'コピー'), move: tr('move', '移動'), delete: tr('delete', '削除') };
     const waiting = r.jobs.filter((j) => j.state === 'waiting').length;
-    show('操作キュー', waiting ? `実行中 1 件、待ち ${waiting} 件` : '実行中 1 件',
+    show(tr('Operation queue', '操作キュー'), waiting ? tr(`1 running, ${waiting} waiting`, `実行中 1 件、待ち ${waiting} 件`) : tr('1 running', '実行中 1 件'),
         r.jobs.map((j) => ({
             // The runner is marked, because "what is happening now" and "what
             // is about to" are different questions and the list answers both.
             n: j.state === 'running' ? '▶' : `#${j.op}`,
-            label: `${verb[j.kind] || j.kind}  ${j.total} 件`,
-            sub: j.stopping ? '止めています…'
-                : j.state === 'waiting' ? `待機中   ${j.dest || ''}` : (j.dest || ''),
+            label: tr(`${verb[j.kind] || j.kind}  ${j.total}`, `${verb[j.kind] || j.kind}  ${j.total} 件`),
+            sub: j.stopping ? tr('stopping…', '止めています…')
+                : j.state === 'waiting' ? tr(`waiting   ${j.dest || ''}`, `待機中   ${j.dest || ''}`) : (j.dest || ''),
             op: j.op,
         })), {
-            foot: 'x 中止（待機中なら取り消し）   b 動かしたまま閉じる   Esc 閉じる',
+            foot: tr('x stop (or cancel, if it is waiting)   b leave it running   Esc close', 'x 中止（待機中なら取り消し）   b 動かしたまま閉じる   Esc 閉じる'),
             act: {
                 x: async () => {
                     const row = report.rows[report.at];
                     if (!row) return;
                     await ask('cancel', { op: row.op });
-                    say(`#${row.op} を中止しています`);
+                    say(tr(`stopping #${row.op}`, `#${row.op} を中止しています`));
                     closeReport();
                 },
                 // `b` puts it out of the way and leaves it running — the
@@ -4674,7 +4674,7 @@ async function cmdQueue() {
                     prog.hidden = true;
                     drawProg();
                     closeReport();
-                    say('操作は動いたままです（:queue で戻れます）');
+                    say(tr('it is still running (:queue comes back to it)', '操作は動いたままです（:queue で戻れます）'));
                 },
             },
         });
@@ -4690,17 +4690,17 @@ async function cmdMacros() {
     const r = await ask('macros', {});
     if (!r) return;
     if (!r.macros.length) {
-        say(`マクロがありません（${r.where || 'macro.lua'}）`);
+        say(tr(`no macros (${r.where || 'macro.lua'})`, `マクロがありません（${r.where || 'macro.lua'}）`));
         return;
     }
-    show('マクロ', r.where || '', r.macros.map((m) => ({
-        n: m.script ? 'script' : `${m.panes}枚`,
+    show(tr('Macros', 'マクロ'), r.where || '', r.macros.map((m) => ({
+        n: m.script ? 'script' : tr(`${m.panes} panes`, `${m.panes}枚`),
         label: m.name,
-        sub: m.script ? '（スクリプトはまだ動きません）' : 'タブとして開きます',
+        sub: m.script ? tr(' (scripted steps are not run yet)', '（スクリプトはまだ動きません）') : tr('opened as tabs', 'タブとして開きます'),
         name: m.name,
         script: m.script,
     })), {
-        foot: 'Enter 実行   Esc 閉じる',
+        foot: tr('Enter run   Esc close', 'Enter 実行   Esc 閉じる'),
         pick: async (row) => {
             closeReport();
             if (!term.on) await openShell();
@@ -4710,7 +4710,7 @@ async function cmdMacros() {
             if (!done) return;
             takeShell(done);
             setShellFocus(true);
-            say(`${done.name} — ${done.opened} 枚をタブで開きました`);
+            say(tr(`${done.name} — ${done.opened} panes opened as tabs`, `${done.name} — ${done.opened} 枚をタブで開きました`));
         },
     });
 }
@@ -4727,18 +4727,18 @@ async function tabNew() {
     // silently, looks like the pane it came from, and nobody notices one has
     // appeared until there are several. One keystroke, and the tab is
     // something that was decided rather than something that happened.
-    if (!await confirm('新しいタブ', 'このペインにタブをもう一つ開きますか？')) return;
+    if (!await confirm(tr('New tab', '新しいタブ'), tr('Open another tab in this pane?', 'このペインにタブをもう一つ開きますか？'))) return;
     const pane = await ask('tabnew', { pane: which });
     if (!pane) return;
     state[which] = pane;
     draw(which);
-    say(`タブ ${pane.tab + 1} / ${pane.tabs.length}`);
+    say(tr(`tab ${pane.tab + 1} / ${pane.tabs.length}`, `タブ ${pane.tab + 1} / ${pane.tabs.length}`));
 }
 
 async function tabClose(ask_first = false) {
     const which = state.focus;
-    if (ask_first && !await confirm('このタブを閉じます', state[which].cwd)) {
-        say('やめました');
+    if (ask_first && !await confirm(tr('Close this tab', 'このタブを閉じます'), state[which].cwd)) {
+        say(tr('stopped', 'やめました'));
         return;
     }
     const pane = await ask('tabclose', { pane: which });
@@ -4808,14 +4808,14 @@ async function cmdShortcuts() {
     const rows = here.map((x) => ({
         n: x.group ? '▸' : '',
         label: x.name,
-        sub: x.group ? `${x.kids.length} 件` : (x.target || ''),
+        sub: x.group ? tr(`${x.kids.length} items`, `${x.kids.length} 件`) : (x.target || ''),
         target: x.target,
         at: x.at,
         group: x.group,
         plain: x.name,
     }));
     if (scPath.length) {
-        rows.unshift({ n: '◂', label: '戻る', sub: scPath.join(' / '), up: true, plain: '' });
+        rows.unshift({ n: '◂', label: tr('back', '戻る'), sub: scPath.join(' / '), up: true, plain: '' });
     }
     // Even with nothing in it: `a` has to have somewhere to be pressed.
     const edit = async (params, done) => {
@@ -4826,9 +4826,9 @@ async function cmdShortcuts() {
         closeReport();
         cmdShortcuts();
     };
-    show('ショートカット' + (scPath.length ? ` / ${scPath.join(' / ')}` : ''),
-        rows.length ? (r.where || '') : '登録がありません', rows, {
-        foot: 'Enter 開く／そこへ   a 追加   A まとめる   r 名前   d 削除   p パス   Esc 閉じる',
+    show(tr('Shortcuts', 'ショートカット') + (scPath.length ? ` / ${scPath.join(' / ')}` : ''),
+        rows.length ? (r.where || '') : tr('nothing bookmarked yet', '登録がありません'), rows, {
+        foot: tr('Enter open / go   a add   A group   r rename   d delete   p path   Esc close', 'Enter 開く／そこへ   a 追加   A まとめる   r 名前   d 削除   p パス   Esc 閉じる'),
         // Enter on a folder walks into it, as the terminal build's does; on a
         // bookmark it goes there. Nothing else opens a level, so a folder that
         // is not entered stays shut.
@@ -4839,23 +4839,23 @@ async function cmdShortcuts() {
         },
         act: {
             a: async () => {
-                const name = await askFor('ここを登録する名前', state[state.focus].cwd.split(/[\\/]/).pop() || '');
+                const name = await askFor(tr('a name for this place', 'ここを登録する名前'), state[state.focus].cwd.split(/[\\/]/).pop() || '');
                 if (name === null) return;
                 const made = await ask('bookmark', { pane: state.focus, name: name.trim() });
                 if (!made) return;
-                say(`${made.name} を登録しました`);
+                say(tr(`bookmarked ${made.name}`, `${made.name} を登録しました`));
                 closeReport();
                 cmdShortcuts();
             },
             A: async () => {
-                const name = await askFor('まとめの名前', '');
+                const name = await askFor(tr('a name for the group', 'まとめの名前'), '');
                 if (name === null || !name.trim()) return;
                 await edit({ do: 'group', value: name.trim() });
             },
             r: async () => {
                 const row = report.rows[report.at];
                 if (!row) return;
-                const name = await askFor('新しい名前', row.plain);
+                const name = await askFor(tr('a new name', '新しい名前'), row.plain);
                 if (name === null || !name.trim()) return;
                 await edit({ do: 'rename', at: row.at, value: name.trim() });
             },
@@ -4865,7 +4865,7 @@ async function cmdShortcuts() {
                 // Asked, like everything else that loses something. A folder
                 // takes its contents with it, and that is worth saying.
                 const ok = await confirm(
-                    row.group ? `${row.plain} を中身ごと削除` : `${row.plain} を削除`,
+                    row.group ? tr(`delete ${row.plain} and everything in it`, `${row.plain} を中身ごと削除`) : tr(`delete ${row.plain}`, `${row.plain} を削除`),
                     row.target || '',
                 );
                 if (!ok) return;
@@ -4875,7 +4875,7 @@ async function cmdShortcuts() {
                 const row = report.rows[report.at];
                 if (!row || !row.target) return;
                 await navigator.clipboard.writeText(row.target);
-                say(`${row.target} をコピー`);
+                say(tr(`${row.target} copied`, `${row.target} をコピー`));
             },
         },
     });
@@ -4884,7 +4884,7 @@ async function cmdShortcuts() {
 async function cmdBookmark(name) {
     const r = await ask('bookmark', { pane: state.focus, name });
     if (!r) return;
-    say(`${r.name} を登録しました`);
+    say(tr(`bookmarked ${r.name}`, `${r.name} を登録しました`));
 }
 
 // ---- The AI, where a site has configured one ----
@@ -4905,7 +4905,7 @@ let aiWaiting = null;
 async function cmdAiCmd(want) {
     const r = await ask('ai', { pane: state.focus, what: 'cmd', text: want });
     if (!r) return;
-    say('考えています…');
+    say(tr('thinking…', '考えています…'));
     aiWaiting = async (answer) => {
         // Shown before it is put anywhere. It was typed straight into the
         // shell prompt — never run, which is the important half — but
@@ -4913,14 +4913,14 @@ async function cmdAiCmd(want) {
         // to see sitting on your prompt is a command you might Enter on
         // reflex.
         const line = answer.trim().split('\n')[0].replace(/^[$#>]\s*/, '');
-        if (!line) { say('返事が空でした', true); return; }
-        const ok = await confirm('このコマンドをプロンプトに置きますか',
+        if (!line) { say(tr('the answer came back empty', '返事が空でした'), true); return; }
+        const ok = await confirm(tr('Put this command at the prompt?', 'このコマンドをプロンプトに置きますか'),
             `${line}\n\n置くだけで実行はしません`);
-        if (!ok) { say('やめました'); return; }
+        if (!ok) { say(tr('stopped', 'やめました')); return; }
         if (!term.on) await openShell();
         await ask('shellinput', { text: line });
         setShellFocus(true);
-        say('Enter で実行、Ctrl+C で捨てる — 実行はしていません');
+        say(tr('Enter runs it, Ctrl+C throws it away — nothing has run', 'Enter で実行、Ctrl+C で捨てる — 実行はしていません'));
     };
 }
 
@@ -4929,20 +4929,20 @@ async function cmdAiLog() {
     const name = pane.entries[pane.cursor]?.name || '';
     const r = await ask('ai', { pane: state.focus, what: 'log' });
     if (!r) return;
-    say('ログを読んでいます…');
+    say(tr('reading the log…', 'ログを読んでいます…'));
     aiWaiting = (answer) => {
-        show(`${name} の診断`, 'AI の答え — 確かめてから使ってください',
+        show(tr(`${name} — triage`, `${name} の診断`), tr('the AI’s answer — check it before you use it', 'AI の答え — 確かめてから使ってください'),
             answer.split('\n').map((t) => ({ label: t })),
-            { foot: 'Esc 閉じる' });
+            { foot: tr('Esc close', 'Esc 閉じる') });
     };
 }
 
 async function cmdAiAsk(question) {
     const r = await ask('ai', { pane: state.focus, what: 'text', text: question });
     if (!r) return;
-    say('考えています…');
+    say(tr('thinking…', '考えています…'));
     aiWaiting = (answer) => {
-        show('AI', question, answer.split('\n').map((t) => ({ label: t })), { foot: 'Esc 閉じる' });
+        show('AI', question, answer.split('\n').map((t) => ({ label: t })), { foot: tr('Esc close', 'Esc 閉じる') });
     };
 }
 
@@ -4991,7 +4991,7 @@ const AI_OVER_TEXT = {
 /// past the window's width, or handed to somebody who does not have cian.
 async function cmdMermaid() {
     if (!viewer.on || !viewer.ed) {
-        say('先にファイルを開いてください（F3）', true);
+        say(tr('open a file first (F3)', '先にファイルを開いてください（F3）'), true);
         return;
     }
     // The engine's extractor, not a second one written here.
@@ -5011,7 +5011,7 @@ async function cmdMermaid() {
     el.vBody.hidden = true;
     reading = true;
     await drawDiagrams();
-    say(`mermaid ${r.blocks.length} 件 — Ctrl+E か Esc でソースへ、:mermaid! でブラウザ`);
+    say(tr(`${r.blocks.length} mermaid — Ctrl+E or Esc for the source, :mermaid! for a browser`, `mermaid ${r.blocks.length} 件 — Ctrl+E か Esc でソースへ、:mermaid! でブラウザ`));
 }
 
 /// `:mermaid!` — the same diagrams, in a browser.
@@ -5021,12 +5021,12 @@ async function cmdMermaid() {
 /// config, exactly as cian-tui does it.
 async function cmdMermaidOut() {
     if (!viewer.on || !viewer.ed) {
-        say('先にファイルを開いてください（F3）', true);
+        say(tr('open a file first (F3)', '先にファイルを開いてください（F3）'), true);
         return;
     }
     const r = await ask('mermaid', { text: viewer.ed.getModel().getValue() });
     if (!r) return;
-    say(`mermaid を ${r.blocks} 件ブラウザで開きました（${r.offline ? 'offline' : 'via CDN'}）`);
+    say(tr(`opened ${r.blocks} mermaid block(s) in the browser (${r.offline ? 'offline' : 'via CDN'})`, `mermaid を ${r.blocks} 件ブラウザで開きました（${r.offline ? 'offline' : 'via CDN'}）`));
 }
 
 /// `:summary` — what this file is, for someone about to work on it.
@@ -5036,11 +5036,11 @@ async function cmdMermaidOut() {
 /// an explicit row rather than something the viewer does on opening.
 async function cmdSummary() {
     if (!viewer.on || !viewer.ed) {
-        say('先にファイルを開いてください（F3）', true);
+        say(tr('open a file first (F3)', '先にファイルを開いてください（F3）'), true);
         return;
     }
     const body = viewer.ed.getModel().getValue().slice(0, 24000);
-    if (!body.trim()) { say('要約する対象がありません', true); return; }
+    if (!body.trim()) { say(tr('nothing to summarise', '要約する対象がありません'), true); return; }
     const r = await ask('ai', {
         pane: state.focus, what: 'text',
         system: 'You summarise a file\'s contents for a developer. Give a '
@@ -5049,16 +5049,16 @@ async function cmdSummary() {
         text: body,
     });
     if (!r) return;
-    say('読んでいます…');
+    say(tr('reading…', '読んでいます…'));
     aiWaiting = (answer) => {
-        show('このファイルを要約', `${viewer.name} — AI の答え、確かめてから使ってください`,
-            answer.split('\n').map((t) => ({ label: t })), { foot: 'Esc 閉じる' });
+        show('このファイルを要約', tr(`${viewer.name} — the AI’s answer; check it before you use it`, `${viewer.name} — AI の答え、確かめてから使ってください`),
+            answer.split('\n').map((t) => ({ label: t })), { foot: tr('Esc close', 'Esc 閉じる') });
     };
 }
 
 async function cmdAiOverText(kind) {
     if (!viewer.on || !viewer.ed) {
-        say('先にファイルを開いてください（F3）', true);
+        say(tr('open a file first (F3)', '先にファイルを開いてください（F3）'), true);
         return;
     }
     const [system, title] = AI_OVER_TEXT[kind];
@@ -5070,15 +5070,15 @@ async function cmdAiOverText(kind) {
     const sel = viewer.ed.getSelection();
     const text = (sel && !sel.isEmpty() ? model.getValueInRange(sel) : model.getValue()).slice(0, 16000);
     if (!text.trim()) {
-        say('中身がありません', true);
+        say(tr('there is nothing in it', '中身がありません'), true);
         return;
     }
     const r = await ask('ai', { pane: state.focus, what: 'text', system, text });
     if (!r) return;
-    say('考えています…');
+    say(tr('thinking…', '考えています…'));
     aiWaiting = (answer) => {
-        show(title, 'AI の答え — 確かめてから使ってください',
-            answer.split('\n').map((t) => ({ label: t })), { foot: 'Esc 閉じる' });
+        show(title, tr('the AI’s answer — check it before you use it', 'AI の答え — 確かめてから使ってください'),
+            answer.split('\n').map((t) => ({ label: t })), { foot: tr('Esc close', 'Esc 閉じる') });
     };
 }
 
@@ -5088,7 +5088,7 @@ async function cmdAiOverText(kind) {
 /// question about nothing.
 async function cmdAiDiff() {
     if (!report.on || !report.rows.length) {
-        say('先に = で比較してください', true);
+        say(tr('compare something first, with =', '先に = で比較してください'), true);
         return;
     }
     const text = report.rows.map((x) => `${x.n || ''} ${x.label} ${x.sub || ''}`).join('\n');
@@ -5100,10 +5100,10 @@ async function cmdAiDiff() {
         text: text.slice(0, 16000),
     });
     if (!r) return;
-    say('差分を読んでいます…');
+    say(tr('reading the diff…', '差分を読んでいます…'));
     aiWaiting = (answer) => {
-        show('差分の説明', 'AI の答え — 確かめてから使ってください',
-            answer.split('\n').map((t) => ({ label: t })), { foot: 'Esc 閉じる' });
+        show(tr('The diff, explained', '差分の説明'), tr('the AI’s answer — check it before you use it', 'AI の答え — 確かめてから使ってください'),
+            answer.split('\n').map((t) => ({ label: t })), { foot: tr('Esc close', 'Esc 閉じる') });
     };
 }
 
@@ -5113,10 +5113,10 @@ async function cmdOffice(what) {
     if (r.made) {
         state[state.focus] = r;
         draw(state.focus);
-        say(`${r.made} を作りました`);
+        say(tr(`created ${r.made}`, `${r.made} を作りました`));
         return;
     }
-    say(`${r.opened} をクラウドで開きました`);
+    say(tr(`opened ${r.opened} in the cloud`, `${r.opened} をクラウドで開きました`));
 }
 
 async function cmdReload() {
@@ -5138,8 +5138,8 @@ const keyEcho = { on: false };
 function toggleKeyEcho() {
     keyEcho.on = !keyEcho.on;
     say(keyEcho.on
-        ? 'キー表示: 押したキーを出すだけで、何も実行しません（Esc で止める）'
-        : 'キー表示を止めました');
+        ? tr('key echo: each key is shown and nothing is run (Esc stops)', 'キー表示: 押したキーを出すだけで、何も実行しません（Esc で止める）')
+        : tr('key echo stopped', 'キー表示を止めました'));
 }
 
 // ---- A server, in this pane ----
@@ -5162,7 +5162,7 @@ async function cmdSshPicker() {
     for (const h of r.hosts) {
         for (const u of h.users) {
             rows.push({
-                n: u.stored ? '鍵あり' : '',
+                n: u.stored ? tr('key', '鍵あり') : '',
                 label: `${u.name}@${h.name}`,
                 sub: `${h.host}:${h.port}`,
                 host: h.at,
@@ -5172,21 +5172,21 @@ async function cmdSshPicker() {
             });
         }
     }
-    show('SSH', `${rows.length} 件（init.lua の cian.ssh）`, rows, {
+    show('SSH', tr(`${rows.length} hosts (init.lua’s cian.ssh)`, `${rows.length} 件（init.lua の cian.ssh）`), rows, {
         // A host list is long the moment there is more than a handful, and
         // cian-tui narrows it as you type.
         filter: true,
-        hint: '打って絞り込み（ホスト名・ユーザー）',
-        foot: '打って絞る   Enter 接続   F2 手で入力   Esc 閉じる',
+        hint: tr('type to narrow (host or user)', '打って絞り込み（ホスト名・ユーザー）'),
+        foot: tr('type to narrow   Enter connect   F2 type one   Esc close', '打って絞る   Enter 接続   F2 手で入力   Esc 閉じる'),
         act: { F2: () => { closeReport(); cmdConnect(); } },
         pick: async (row) => {
             closeReport();
             let password;
             if (!row.stored) {
-                password = await askFor(`${row.who} のパスワード`, '', { secret: true });
+                password = await askFor(tr(`password for ${row.who}`, `${row.who} のパスワード`), '', { secret: true });
                 if (password === null) return;
             }
-            say(`${row.who} に繋いでいます…`);
+            say(tr(`connecting to ${row.who}…`, `${row.who} に繋いでいます…`));
             const c = await ask('connect', {
                 pane: state.focus, preset_host: row.host, preset_user: row.user, password,
             });
@@ -5212,7 +5212,7 @@ async function cmdSend(dir) {
         const rows = (here.entries || []).filter((r) => r.marked && !r.parent);
         const one = here.entries[here.cursor];
         if (!rows.length && (!one || one.parent)) {
-            say('アップロードするファイルを選んでください', true);
+            say(tr('choose a file to upload', 'アップロードするファイルを選んでください'), true);
             return;
         }
     }
@@ -5220,14 +5220,14 @@ async function cmdSend(dir) {
     const r = await ask('sshhosts', {});
     if (!r) return;
     if (!r.hosts.length) {
-        say('init.lua の cian.ssh にサーバがありません — :sftp で手入力できます', true);
+        say(tr('no hosts in init.lua’s cian.ssh — :sftp takes one by hand', 'init.lua の cian.ssh にサーバがありません — :sftp で手入力できます'), true);
         return;
     }
     const rows = [];
     for (const h of r.hosts) {
         for (const u of h.users) {
             rows.push({
-                n: u.stored ? '鍵あり' : '',
+                n: u.stored ? tr('key', '鍵あり') : '',
                 label: `${u.name}@${h.name}`,
                 sub: `${h.host}:${h.port}`,
                 host: h.at, user: u.at, stored: u.stored,
@@ -5236,19 +5236,19 @@ async function cmdSend(dir) {
         }
     }
     show(dir === 'up' ? 'アップロード → サーバ' : 'ダウンロード ← サーバ',
-        `${rows.length} 件（init.lua の cian.ssh）— ${other === 'left' ? '左' : '右'}のペインに開きます`,
+        tr(`${rows.length} hosts (init.lua’s cian.ssh) — opening in the ${other === 'left' ? 'left' : 'right'} pane`, `${rows.length} 件（init.lua の cian.ssh）— ${other === 'left' ? '左' : '右'}のペインに開きます`),
         rows, {
             filter: true,
-            hint: '打って絞り込み（ホスト名・ユーザー）',
-            foot: '打って絞る   Enter 接続   Esc 閉じる',
+            hint: tr('type to narrow (host or user)', '打って絞り込み（ホスト名・ユーザー）'),
+            foot: tr('type to narrow   Enter connect   Esc close', '打って絞る   Enter 接続   Esc 閉じる'),
             pick: async (row) => {
                 closeReport();
                 let password;
                 if (!row.stored) {
-                    password = await askFor(`${row.who} のパスワード`, '', { secret: true });
+                    password = await askFor(tr(`password for ${row.who}`, `${row.who} のパスワード`), '', { secret: true });
                     if (password === null) return;
                 }
-                say(`${row.who} に繋いでいます…`);
+                say(tr(`connecting to ${row.who}…`, `${row.who} に繋いでいます…`));
                 const c = await ask('connect', {
                     pane: other, preset_host: row.host, preset_user: row.user, password,
                 });
@@ -5258,8 +5258,8 @@ async function cmdSend(dir) {
                 // Back to the key that already means "across". The far side is
                 // a listing now, so the folder is chosen by walking to it.
                 say(dir === 'up'
-                    ? `${c.host}  ${c.path} — 送り先まで移動して c`
-                    : `${c.host}  ${c.path} — 取ってくるものをマークして、そちらで c`);
+                    ? tr(`${c.host}  ${c.path} — walk to where it goes, then c`, `${c.host}  ${c.path} — 送り先まで移動して c`)
+                    : tr(`${c.host}  ${c.path} — mark what to fetch and press c there`, `${c.host}  ${c.path} — 取ってくるものをマークして、そちらで c`));
             },
         });
 }
@@ -5268,13 +5268,13 @@ async function cmdConnect() {
     const spec = await askFor('user@host[:port][:/path]', '');
     if (spec === null || !spec.trim()) return;
     const m = spec.trim().match(/^([^@]+)@([^:/]+)(?::(\d+))?(?::?(\/.*))?$/);
-    if (!m) { say('user@host の形で書いてください', true); return; }
+    if (!m) { say(tr('write it as user@host', 'user@host の形で書いてください'), true); return; }
     const [, user, host, port, path] = m;
     // Asked for, never stored. cian has nowhere to keep a password that would
     // be better than not keeping one.
-    const password = await askFor(`${user}@${host} のパスワード`, '', { secret: true });
+    const password = await askFor(tr(`password for ${user}@${host}`, `${user}@${host} のパスワード`), '', { secret: true });
     if (password === null) return;
-    say(`${user}@${host} に繋いでいます…`);
+    say(tr(`connecting to ${user}@${host}…`, `${user}@${host} に繋いでいます…`));
     const r = await ask('connect', {
         pane: state.focus, user, host,
         port: port ? Number(port) : 22,
@@ -5305,21 +5305,21 @@ async function remoteOp(what) {
     const pane = state[which];
     let name;
     if (what === 'mkdir' || what === 'touch') {
-        name = await askFor(what === 'mkdir' ? '新しいディレクトリの名前' : '新しいファイルの名前', '');
+        name = await askFor(what === 'mkdir' ? tr('name for the new folder', '新しいディレクトリの名前') : tr('name for the new file', '新しいファイルの名前'), '');
         if (name === null || !name) return;
     } else if (what === 'rename') {
         const row = pane.entries[pane.cursor];
         if (!row || row.parent) return;
-        name = await askFor(`${row.name} の新しい名前`, row.name);
+        name = await askFor(tr(`a new name for ${row.name}`, `${row.name} の新しい名前`), row.name);
         if (name === null || !name) return;
     } else if (what === 'delete') {
         const marked = pane.entries.filter((x) => x.marked);
         const rows = marked.length ? marked : [pane.entries[pane.cursor]].filter((x) => x && !x.parent);
-        if (!rows.length) { say('対象がありません', true); return; }
+        if (!rows.length) { say(tr('nothing to work on', '対象がありません'), true); return; }
         if (!await confirm(
-            `${rows.length} 件をサーバから削除します`,
+            tr(`Delete ${rows.length} from the server`, `${rows.length} 件をサーバから削除します`),
             'ゴミ箱はありません — 元に戻せません\n\n' + rows.map((x) => x.name).join('\n'),
-        )) { say('やめました'); return; }
+        )) { say(tr('stopped', 'やめました')); return; }
     }
     const r = await ask('remoteop', { pane: which, what, name });
     if (!r) return;
@@ -5339,13 +5339,13 @@ async function remoteStep(opts) {
 
 async function uploadHeld() {
     const which = state.focus;
-    say('アップロード中…');
+    say(tr('uploading…', 'アップロード中…'));
     const r = await ask('uploadclip', { pane: which });
     if (!r) return;
     state[which] = r;
     draw(which);
     if (r.errors.length) say(r.errors.join('  /  '), true);
-    else say(`${r.ok} 件をアップロードしました`);
+    else say(tr(`uploaded ${r.ok}`, `${r.ok} 件をアップロードしました`));
 }
 
 async function transfer() {
@@ -5354,11 +5354,11 @@ async function transfer() {
     const pane = state[which];
     const rows = pane.entries.filter((x) => x.marked);
     const what = rows.length ? rows : [pane.entries[pane.cursor]].filter((x) => x && !x.parent);
-    if (!what.length) { say('対象がありません', true); return; }
+    if (!what.length) { say(tr('nothing to work on', '対象がありません'), true); return; }
     const up = !!state[other].remote;
-    const head = `${what.length} 件を ${up ? 'アップロード' : 'ダウンロード'}`;
-    if (!await confirm(head, what.map((x) => x.name).join('\n'))) { say('やめました'); return; }
-    say(`${head}中…`);
+    const head = tr(`${up ? 'Upload' : 'Download'} ${what.length}`, `${what.length} 件を ${up ? 'アップロード' : 'ダウンロード'}`);
+    if (!await confirm(head, what.map((x) => x.name).join('\n'))) { say(tr('stopped', 'やめました')); return; }
+    say(tr(`${head}…`, `${head}中…`));
     const r = await ask('transfer', { pane: which });
     if (!r) return;
     state.left = r.left;
@@ -5366,7 +5366,7 @@ async function transfer() {
     draw('left');
     draw('right');
     if (r.errors.length) say(r.errors.join('  /  '), true);
-    else say(`${r.ok} 件を${r.direction === 'up' ? 'アップロード' : 'ダウンロード'}しました`);
+    else say(tr(`${r.direction === 'up' ? 'uploaded' : 'downloaded'} ${r.ok}`, `${r.ok} 件を${r.direction === 'up' ? 'アップロード' : 'ダウンロード'}しました`));
 }
 
 /// `:!cmd` — run it in the shell, in this pane's directory. `%` is the
@@ -5389,7 +5389,7 @@ async function cmdRenameList() {
     const pane = state[state.focus];
     const rows = pane.entries.filter((x) => x.marked);
     const what = rows.length ? rows : pane.entries.filter((x) => !x.parent);
-    if (!what.length) { say('対象がありません', true); return; }
+    if (!what.length) { say(tr('nothing to work on', '対象がありません'), true); return; }
 
     let monaco;
     try {
@@ -5402,7 +5402,7 @@ async function cmdRenameList() {
     renameList.on = true;
     renameList.paths = what.map((x) => x.path);
     setViewerOn(true);
-    viewer.name = '名前の一覧';
+    viewer.name = tr('the list of names', '名前の一覧');
     el.view.hidden = false;
     el.vBody.hidden = false;
     el.vPic.hidden = true;
@@ -5410,9 +5410,9 @@ async function cmdRenameList() {
     viewer.base = viewer.ed.getModel().getAlternativeVersionId();
     viewer.dirty = false;
     setStyle(style);
-    el.vName.textContent = '名前の一覧を編集';
-    el.vAbout.textContent = `${what.length} 件   1行に1つ、順番は変えないこと`;
-    el.vFoot.textContent = 'Ctrl+S 適用   Esc ×3 取消';
+    el.vName.textContent = tr('Edit the list of names', '名前の一覧を編集');
+    el.vAbout.textContent = tr(`${what.length} names   one per line, and keep the order`, `${what.length} 件   1行に1つ、順番は変えないこと`);
+    el.vFoot.textContent = tr('Ctrl+S applies   Esc ×3 cancels', 'Ctrl+S 適用   Esc ×3 取消');
     viewer.ed.focus();
 }
 
@@ -5421,7 +5421,7 @@ const renameList = { on: false, paths: [] };
 async function applyRenameList() {
     const names = viewer.ed.getValue().split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
     if (names.length !== renameList.paths.length) {
-        say(`行数が合いません（${names.length} 行 / ${renameList.paths.length} 件）`, true);
+        say(tr(`the count does not match (${names.length} lines / ${renameList.paths.length} files)`, `行数が合いません（${names.length} 行 / ${renameList.paths.length} 件）`), true);
         return false;
     }
     const rows = renameList.paths
@@ -5429,17 +5429,17 @@ async function applyRenameList() {
         .filter((x, i) => x.to !== state[state.focus].entries.find((e) => e.path === x.path)?.name
             || names[i] !== names[i]);
     const changing = rows.filter((x) => x.to !== x.path.split(/[\\/]/).pop());
-    if (!changing.length) { say('変わる名前がありません'); return true; }
-    if (!await confirm(`${changing.length} 件の名前を変えます`,
+    if (!changing.length) { say(tr('no name would change', '変わる名前がありません')); return true; }
+    if (!await confirm(tr(`Rename ${changing.length}`, `${changing.length} 件の名前を変えます`),
         changing.map((x) => `${x.path.split(/[\\/]/).pop()}  →  ${x.to}`).join('\n'))) {
-        say('やめました');
+        say(tr('stopped', 'やめました'));
         return false;
     }
     const done = await ask('renameapply', { rows: changing });
     if (!done) return false;
     await reread();
     if (done.errors.length) say(done.errors.join('  /  '), true);
-    else say(`${done.renamed} 件の名前を変えました`);
+    else say(tr(`renamed ${done.renamed}`, `${done.renamed} 件の名前を変えました`));
     return true;
 }
 
@@ -5449,18 +5449,18 @@ async function applyRenameList() {
 /// editor is a place you go to change one thing, and a permanent outline
 /// column would be a third of the width spent on navigation you use twice.
 async function cmdOutline() {
-    if (!viewer.on) { say('先にファイルを開いてください', true); return; }
+    if (!viewer.on) { say(tr('open a file first', '先にファイルを開いてください'), true); return; }
     const r = await ask('outline', {});
     if (!r) return;
-    if (!r.items.length) { say('見出しが見つかりません'); return; }
-    show(`${viewer.name} の見出し`, `${r.items.length} 件`,
+    if (!r.items.length) { say(tr('no headings found', '見出しが見つかりません')); return; }
+    show(tr(`headings in ${viewer.name}`, `${viewer.name} の見出し`), `${r.items.length} 件`,
         r.items.map((i) => ({
             n: String(i.line + 1),
             label: '  '.repeat(i.level) + i.text,
             line: i.line,
         })),
         {
-            foot: 'Enter そこへ   Esc 閉じる',
+            foot: tr('Enter go there   Esc close', 'Enter そこへ   Esc 閉じる'),
             pick: (row) => {
                 closeReport();
                 viewer.ed.revealLineInCenter(row.line + 1);
@@ -5484,7 +5484,7 @@ async function cmdOutline() {
 /// setValue** is the part that matters: it has to be undoable with the key
 /// that undoes everything else in here.
 async function rewriteBuffer(method, params, said) {
-    if (!viewer.on || !viewer.ed) { say('先にファイルを開いてください', true); return null; }
+    if (!viewer.on || !viewer.ed) { say(tr('open a file first', '先にファイルを開いてください'), true); return null; }
     const lines = viewer.ed.getValue().split(/\r?\n/);
     const r = await ask(method, { ...params, lines });
     if (!r) return null;
@@ -5500,19 +5500,19 @@ async function rewriteBuffer(method, params, said) {
 
 async function textOp(op) {
     await rewriteBuffer('textop', { op },
-        (r, lines) => `:${op}   ${lines.length} 行 → ${r.lines.length} 行`);
+        (r, lines) => tr(`:${op}   ${lines.length} → ${r.lines.length} lines`, `:${op}   ${lines.length} 行 → ${r.lines.length} 行`));
 }
 
 async function setEol(kind) {
     const r = await ask('eol', { kind });
     if (!r) return;
-    say(`改行を ${r.eol.toUpperCase()} にしました（保存時に反映）`);
+    say(tr(`line endings set to ${r.eol.toUpperCase()} (written on save)`, `改行を ${r.eol.toUpperCase()} にしました（保存時に反映）`));
 }
 
 async function cmdSvn(what) {
     let message;
     if (what === 'commit') {
-        message = await askFor('コミットメッセージ', '');
+        message = await askFor(tr('Commit message', 'コミットメッセージ'), '');
         if (message === null || !message.trim()) return;
     }
     const r = await ask('svn', { pane: state.focus, what, message });
@@ -5526,17 +5526,17 @@ async function cmdNoBom() {
     const pane = state[state.focus];
     const rows = pane.entries.filter((x) => x.marked);
     const what = rows.length ? rows : [pane.entries[pane.cursor]].filter((x) => x && !x.parent);
-    if (!what.length) { say('対象がありません', true); return; }
-    if (!await confirm(`${what.length} 件から UTF-8 BOM を除去します`,
-        what.map((x) => x.name).join('\n'))) { say('やめました'); return; }
+    if (!what.length) { say(tr('nothing to work on', '対象がありません'), true); return; }
+    if (!await confirm(tr(`Strip UTF-8 BOMs from ${what.length}`, `${what.length} 件から UTF-8 BOM を除去します`),
+        what.map((x) => x.name).join('\n'))) { say(tr('stopped', 'やめました')); return; }
     const r = await ask('nobom', { pane: state.focus });
     if (!r) return;
     state[state.focus] = r.pane;
     draw(state.focus);
-    const parts = [`BOM除去 ${r.stripped} 件`];
-    if (r.none) parts.push(`もともと無し ${r.none} 件`);
-    if (r.utf16) parts.push(`UTF-16 は据置 ${r.utf16} 件`);
-    if (r.failed) parts.push(`失敗 ${r.failed} 件`);
+    const parts = [tr(`${r.stripped} stripped`, `BOM除去 ${r.stripped} 件`)];
+    if (r.none) parts.push(tr(`${r.none} had none`, `もともと無し ${r.none} 件`));
+    if (r.utf16) parts.push(tr(`${r.utf16} UTF-16 left alone`, `UTF-16 は据置 ${r.utf16} 件`));
+    if (r.failed) parts.push(tr(`${r.failed} failed`, `失敗 ${r.failed} 件`));
     say(parts.join('   '), r.failed > 0);
 }
 
@@ -5544,7 +5544,7 @@ async function cmdEach(line) {
     if (!term.on) await openShell();
     const r = await ask('each', { pane: state.focus, line });
     if (!r) return;
-    say(`${r.ran} 件に実行しました`);
+    say(tr(`ran on ${r.ran}`, `${r.ran} 件に実行しました`));
 }
 
 function findCommand(name) {
@@ -5584,7 +5584,7 @@ async function runTypedCommand(line) {
     if (!cmd) {
         // Named, not "unknown command": the name typed is the one thing the
         // person can compare against the list.
-        say(`:${name} は知りません — C でコマンド一覧`, true);
+        say(tr(`:${name}? — C lists every command`, `:${name} は知りません — C でコマンド一覧`), true);
         return;
     }
     await runCommand(cmd, arg);
@@ -5611,12 +5611,12 @@ async function runCommand(cmd, arg, invokedAs) {
 /// `C` — every command, fuzzy.
 function openPalette() {
     const rows = commands().map((c) => ({ label: `:${c.name}`, sub: c.about, cmd: c }));
-    show('コマンド', `${rows.length} 個`, rows, {
+    show(tr('command', 'コマンド'), tr(`${rows.length}`, `${rows.length} 個`), rows, {
         // The one the help has always called あいまい検索 and which walked
         // a hundred and thirty rows with j and k until now.
         filter: true,
-        hint: '打って絞り込み（:name か説明）',
-        foot: '打って絞る   ↑↓ 選ぶ   Enter 実行   Esc 閉じる',
+        hint: tr('type to narrow (:name or the description)', '打って絞り込み（:name か説明）'),
+        foot: tr('type to narrow   ↑↓ choose   Enter run   Esc close', '打って絞る   ↑↓ 選ぶ   Enter 実行   Esc 閉じる'),
         pick: (row) => { closeReport(); runCommand(row.cmd, ''); },
     });
 }
@@ -5631,13 +5631,13 @@ async function cmdCount() {
         n: e.steps.toLocaleString(),
         bar: e.steps / most,
         label: e.ext,
-        sub: `${e.files} ファイル`,
+        sub: tr(`${e.files} files`, `${e.files} ファイル`),
     }));
-    show('ファイル数とステップ数',
-        `${r.files.toLocaleString()} ファイル   ${r.steps.toLocaleString()} ステップ`
+    show(tr('Files and steps', 'ファイル数とステップ数'),
+        tr(`${r.files.toLocaleString()} files   ${r.steps.toLocaleString()} steps`, `${r.files.toLocaleString()} ファイル   ${r.steps.toLocaleString()} ステップ`)
         + `   （実行 ${r.steps.toLocaleString()} / 空白 ${r.blank.toLocaleString()} / コメント ${r.comments.toLocaleString()}）`
-        + (r.truncated ? '   ※上限で打ち切り' : ''),
-        rows, { foot: 'Esc 閉じる' });
+        + (r.truncated ? tr('   ※ stopped at the cap', '   ※上限で打ち切り') : ''),
+        rows, { foot: tr('Esc close', 'Esc 閉じる') });
 }
 
 async function cmdDu(path) {
@@ -5657,8 +5657,8 @@ async function cmdDu(path) {
         is_dir: x.is_dir,
     }));
     const up = r.cwd.replace(/[\\/][^\\/]+$/, '') || r.cwd;
-    show('容量分析', `${r.cwd}   合計 ${human(total)}`, rows, {
-        foot: 'Enter 入る   ← / Bksp 親へ   Esc 閉じる',
+    show(tr('Disk usage', '容量分析'), tr(`${r.cwd}   ${human(total)} in all`, `${r.cwd}   合計 ${human(total)}`), rows, {
+        foot: tr('Enter in   ← / Bksp up   Esc close', 'Enter 入る   ← / Bksp 親へ   Esc 閉じる'),
         pick: (row) => { if (row.is_dir) cmdDu(row.path); },
         act: {
             // cian-tui walks back out of a du tree with `-`, Backspace or ←.
@@ -5674,21 +5674,21 @@ async function cmdAttr() {
     const r = await ask('attr', { pane: state.focus });
     if (!r) return;
     const rows = [
-        { label: '種類', sub: r.is_dir ? 'ディレクトリ' : 'ファイル' },
-        { label: 'モード', sub: r.mode || '(なし)' },
-        { label: '読み取り専用', sub: r.readonly ? 'はい' : 'いいえ' },
-        { label: '所有者', sub: r.owner || '(なし)' },
-        { label: '大きさ', sub: r.size === null ? '—' : `${human(r.size)}（${r.size.toLocaleString()} バイト）` },
-        { label: '場所', sub: r.path },
+        { label: tr('Kind', '種類'), sub: r.is_dir ? tr('Folder', 'ディレクトリ') : tr('File', 'ファイル') },
+        { label: tr('Mode', 'モード'), sub: r.mode || tr('(none)', '(なし)') },
+        { label: tr('Read-only', '読み取り専用'), sub: r.readonly ? tr('yes', 'はい') : tr('no', 'いいえ') },
+        { label: tr('Owner', '所有者'), sub: r.owner || tr('(none)', '(なし)') },
+        { label: tr('Size', '大きさ'), sub: r.size === null ? '—' : tr(`${human(r.size)} (${r.size.toLocaleString()} bytes)`, `${human(r.size)}（${r.size.toLocaleString()} バイト）`) },
+        { label: tr('Where', '場所'), sub: r.path },
     ];
-    show('属性', r.name, rows, { foot: 'Esc 閉じる' });
+    show(tr('Attributes', '属性'), r.name, rows, { foot: tr('Esc close', 'Esc 閉じる') });
 }
 
 async function cmdChmod(spec) {
     const r = await ask('chmod', { pane: state.focus, spec });
     if (!r) return;
     await reread();
-    say(`${r.changed} 件を ${r.spec} にしました`);
+    say(tr(`set ${r.changed} to ${r.spec}`, `${r.changed} 件を ${r.spec} にしました`));
 }
 
 async function cmdReadonly(onOff) {
@@ -5696,22 +5696,22 @@ async function cmdReadonly(onOff) {
     const r = await ask('readonly', { pane: state.focus, on });
     if (!r) return;
     await reread();
-    say(`${r.changed} 件を${on ? '読み取り専用に' : '書き込み可に'}しました`);
+    say(tr(`made ${r.changed} ${on ? 'read-only' : 'writable'}`, `${r.changed} 件を${on ? '読み取り専用に' : '書き込み可に'}しました`));
 }
 
 async function cmdHash(kind) {
     const k = /md5/i.test(kind || '') ? 'md5' : 'sha256';
-    say(`${k} を計算中…`);
+    say(tr(`computing ${k}…`, `${k} を計算中…`));
     const r = await ask('hash', { pane: state.focus, kind: k });
     if (!r) return;
-    show(`チェックサム（${r.kind}）`, `${r.rows.length} 件`,
+    show(tr(`Checksum (${r.kind})`, `チェックサム（${r.kind}）`), `${r.rows.length} 件`,
         r.rows.map((x) => ({ label: x.name, sub: x.sum })),
-        { foot: 'Esc 閉じる' });
+        { foot: tr('Esc close', 'Esc 閉じる') });
 }
 
 async function cmdSearch(mode, needle) {
     if (!needle) return;
-    say(`${mode === 'content' ? '中を' : '名前を'}探しています…`);
+    say(tr(`searching ${mode === 'content' ? 'inside' : 'by name'}…`, `${mode === 'content' ? '中を' : '名前を'}探しています…`));
     const r = await ask('search', { pane: state.focus, needle, mode });
     if (!r) return;
     const rows = r.hits.map((h) => ({
@@ -5728,7 +5728,7 @@ async function cmdSearch(mode, needle) {
     show(mode === 'content' ? `grep ${needle}` : `find ${needle}`,
         `${r.root}   ${rows.length} 件${r.truncated ? '（打ち切り）' : ''}`,
         rows, {
-            foot: 'Enter そこへ   p 一覧に読み込む   r 一括置換   Esc 閉じる',
+            foot: tr('Enter go there   p into a pane   r replace across   Esc close', 'Enter そこへ   p 一覧に読み込む   r 一括置換   Esc 閉じる'),
             pick: (row) => {
                 closeReport();
                 hits.at = rows.indexOf(row) - 1;
@@ -5740,12 +5740,12 @@ async function cmdSearch(mode, needle) {
                     // Replace across every file the grep matched. The plan
                     // first, every line of it: this writes to files that are
                     // not open and `u` cannot take it back.
-                    const spec = await askFor('置換 s/古い/新しい/g', `s/${needle}//g`);
+                    const spec = await askFor(tr('replace s/old/new/g', '置換 s/古い/新しい/g'), `s/${needle}//g`);
                     if (spec === null || !spec.trim()) return;
                     const paths = [...new Set(rows.map((x) => x.path))];
                     const plan = await ask('replaceplan', { paths, spec });
                     if (!plan) return;
-                    if (!plan.changes.length) { say('変わる行がありません'); return; }
+                    if (!plan.changes.length) { say(tr('no line would change', '変わる行がありません')); return; }
                     closeReport();
                     showReplacePlan(spec, plan);
                 },
@@ -5759,7 +5759,7 @@ async function cmdSearch(mode, needle) {
                     closeReport();
                     state[which] = pane;
                     draw(which);
-                    say(`${paths.length} 件を一覧に読み込みました（Esc で戻る）`);
+                    say(tr(`${paths.length} loaded into the pane (Esc leaves)`, `${paths.length} 件を一覧に読み込みました（Esc で戻る）`));
                 },
             },
         });
@@ -5798,12 +5798,12 @@ async function revealPath(path, isDir) {
 async function cmdBranch() {
     const which = state.focus;
     if (state[which].flat) { await leaveFlat(); return; }
-    say('この配下を集めています…');
+    say(tr('gathering everything below here…', 'この配下を集めています…'));
     const r = await ask('branch', { pane: which });
     if (!r) return;
     state[which] = r.pane;
     draw(which);
-    say(`${r.found} 件（b か Esc で戻る）`);
+    say(tr(`${r.found} found (b or Esc leaves)`, `${r.found} 件（b か Esc で戻る）`));
 }
 
 async function leaveFlat() {
@@ -5829,11 +5829,11 @@ async function cmdHistory() {
     if (!r) return;
     const rows = [
         ...r.back.map((p) => ({ n: '←', label: p })),
-        { n: '', label: r.cwd, sub: 'いまここ' },
+        { n: '', label: r.cwd, sub: tr('here now', 'いまここ') },
         ...r.forward.map((p) => ({ n: '→', label: p })),
     ];
-    show('履歴', r.cwd, rows, {
-        foot: 'Enter そこへ   a ここを登録   Esc 閉じる',
+    show(tr('History', '履歴'), r.cwd, rows, {
+        foot: tr('Enter go there   a bookmark here   Esc close', 'Enter そこへ   a ここを登録   Esc 閉じる'),
         pick: (row) => { closeReport(); revealPath(row.label, true); },
         act: {
             // Bookmark the row you are looking at. The history is where you
@@ -5842,11 +5842,11 @@ async function cmdHistory() {
             a: async () => {
                 const row = report.rows[report.at];
                 if (!row) return;
-                const name = await askFor('この場所を登録する名前',
+                const name = await askFor(tr('a name for this place', 'この場所を登録する名前'),
                     row.label.split(/[\\/]/).pop() || row.label);
                 if (name === null) return;
                 const made = await ask('bookmark', { path: row.label, name: name.trim() });
-                if (made) say(`${made.name} を登録しました`);
+                if (made) say(tr(`bookmarked ${made.name}`, `${made.name} を登録しました`));
             },
         },
     });
@@ -5869,7 +5869,7 @@ async function startVisual() {
     visual.from = pane.cursor;
     visual.was = pane.entries.filter((x) => x.marked).map((x) => x.path);
     await paintVisual();
-    say('ビジュアル選択 — Enter で確定、Esc で取消');
+    say(tr('visual selection — Enter confirms, Esc cancels', 'ビジュアル選択 — Enter で確定、Esc で取消'));
 }
 
 async function paintVisual() {
@@ -5884,7 +5884,7 @@ async function paintVisual() {
     next.cursor = pane.cursor;
     state[which] = next;
     draw(which);
-    say(`ビジュアル: ${next.marked} 件`);
+    say(tr(`visual: ${next.marked}`, `ビジュアル: ${next.marked} 件`));
 }
 
 async function endVisual(keep) {
@@ -5894,9 +5894,9 @@ async function endVisual(keep) {
         const which = state.focus;
         const next = await ask('setmarks', { pane: which, paths: visual.was });
         if (next) { state[which] = next; draw(which); }
-        say('取り消しました');
+        say(tr('cancelled', '取り消しました'));
     } else {
-        say(`${state[state.focus].marked} 件をマーク`);
+        say(tr(`${state[state.focus].marked} marked`, `${state[state.focus].marked} 件をマーク`));
     }
     visual.was = null;
 }
@@ -5910,7 +5910,7 @@ async function endVisual(keep) {
 let here = { needle: '', at: -1 };
 
 async function searchHere() {
-    const needle = await askFor('この一覧を検索', here.needle);
+    const needle = await askFor(tr('search this listing', 'この一覧を検索'), here.needle);
     if (needle === null || !needle) return;
     here.needle = needle;
     here.at = -1;
@@ -6083,7 +6083,7 @@ async function syncTree(roots, from, to) {
         + (going.length > 20 ? `\n… 他 ${going.length - 20} 件` : '')
         + '\n\n同じ名前は上書きされます',
     );
-    if (!ok) { say('やめました'); return; }
+    if (!ok) { say(tr('stopped', 'やめました')); return; }
     let done = 0;
     for (const row of going) {
         const src = `${roots[from]}/${row.rel}`;
@@ -6139,7 +6139,7 @@ async function copyOneOver(r, to) {
     if (!src || !dst) { say('パスが分かりません', true); return; }
     if (!await confirm(`${r[to]} を ${r[from]} で上書きします`,
         `${src}\n  →  ${dst}\n\n${r[to]} のいまの中身は失われます`)) {
-        say('やめました');
+        say(tr('stopped', 'やめました'));
         return;
     }
     const done = await ask('copyone', { src, dest: dst.replace(/[\\/][^\\/]*$/, '') });
@@ -6159,7 +6159,7 @@ async function copyAcross(roots, from, to) {
     const src = `${roots[from]}/${row.rel}`;
     const destDir = `${roots[to]}/${row.rel}`.replace(/[\\/][^\\/]*$/, '');
     if (!await confirm(`${row.rel} を${to === 'right' ? '右' : '左'}へコピー`, `${src}\n  →  ${destDir}`)) {
-        say('やめました');
+        say(tr('stopped', 'やめました'));
         return;
     }
     const r = await ask('copyone', { src, dest: destDir });
@@ -6256,7 +6256,7 @@ async function cmdRenamePattern(pattern) {
     const r = await ask('renameplan', { pane: state.focus, pattern });
     if (!r) return;
     const changing = r.rows.filter((x) => !x.same);
-    if (!changing.length) { say('変わる名前がありません'); return; }
+    if (!changing.length) { say(tr('no name would change', '変わる名前がありません')); return; }
     const clashes = changing.filter((x) => x.clash);
     show(`一括リネーム   ${r.pattern}`,
         `${changing.length} 件が変わります` + (clashes.length ? `   ★ ${clashes.length} 件は既にある名前` : ''),
@@ -6274,12 +6274,12 @@ async function cmdRenamePattern(pattern) {
                 const rows = changing.filter((x) => !x.clash);
                 if (!rows.length) { say('実行できる行がありません', true); return; }
                 if (!await confirm(`${rows.length} 件の名前を変えます`,
-                    rows.map((x) => `${x.from}  →  ${x.to}`).join('\n'))) { say('やめました'); return; }
+                    rows.map((x) => `${x.from}  →  ${x.to}`).join('\n'))) { say(tr('stopped', 'やめました')); return; }
                 const done = await ask('renameapply', { rows });
                 if (!done) return;
                 await reread();
                 if (done.errors.length) say(done.errors.join('  /  '), true);
-                else say(`${done.renamed} 件の名前を変えました`);
+                else say(tr(`renamed ${done.renamed}`, `${done.renamed} 件の名前を変えました`));
             },
         });
 }
@@ -6288,7 +6288,7 @@ async function cmdCompress(kind, encrypted = false) {
     const pane = state[state.focus];
     const rows = pane.entries.filter((x) => x.marked);
     const what = rows.length ? rows : [pane.entries[pane.cursor]].filter((x) => x && !x.parent);
-    if (!what.length) { say('対象がありません', true); return; }
+    if (!what.length) { say(tr('nothing to work on', '対象がありません'), true); return; }
     const name = await askFor('アーカイブの名前（拡張子なし）', what[0].name.replace(/\.[^.]*$/, ''));
     if (name === null || !name) return;
     let password;
@@ -6374,7 +6374,7 @@ async function cmdVcsDiff(hash) {
             n: t.startsWith('+') ? '+' : t.startsWith('-') ? '-' : t.startsWith('@') ? '@' : '',
             label: t,
         })),
-        { foot: 'Esc 閉じる' });
+        { foot: tr('Esc close', 'Esc 閉じる') });
 }
 
 async function cmdVcs(what) {
@@ -6385,12 +6385,12 @@ async function cmdVcs(what) {
         const rows = pane.entries.filter((x) => !x.parent && x.marked);
         const here = pane.entries[pane.cursor];
         const targets = rows.length ? rows : (here && !here.parent ? [here] : []);
-        if (!targets.length) { say('対象がありません'); return; }
+        if (!targets.length) { say(tr('nothing to work on', '対象がありません')); return; }
         const ok = await confirm(
             `${targets.length} 件の変更を破棄`,
             `${targets.map((x) => x.name).join('\n')}\n\n元には戻せません`,
         );
-        if (!ok) { say('やめました'); return; }
+        if (!ok) { say(tr('stopped', 'やめました')); return; }
     }
     const r = await ask(what, { pane: state.focus });
     if (!r) return;
@@ -6422,7 +6422,7 @@ async function cmdDedup() {
             closeReport();
             const ok = await confirm(`${chosen.length} 件をゴミ箱へ`,
                 chosen.map((x) => x.path).join('\n'));
-            if (!ok) { say('やめました'); return; }
+            if (!ok) { say(tr('stopped', 'やめました')); return; }
             const done = await ask('delete', {
                 pane: state.focus, paths: chosen.map((x) => x.path), mode: 'trash',
             });
@@ -6486,7 +6486,7 @@ async function cmdJump() {
         }
     }
     if (!rows.length) { say('まだどこにも行っていません'); return; }
-    show('行き先', `${rows.length} 件（★ = 登録済み）`, rows, {
+    show(tr('where to', '行き先'), `${rows.length} 件（★ = 登録済み）`, rows, {
         // The terminal build calls `Z` a *fuzzy* jump, and a list of paths is
         // exactly the list where typing three letters beats arrowing.
         filter: true,
@@ -6782,7 +6782,7 @@ let blameOn = false;
 let blameMarks = [];
 
 async function cmdBlame() {
-    if (!viewer.on || !viewer.ed) { say('先にファイルを開いてください', true); return; }
+    if (!viewer.on || !viewer.ed) { say(tr('open a file first', '先にファイルを開いてください'), true); return; }
     if (blameOn) {
         blameMarks = viewer.ed.deltaDecorations(blameMarks, []);
         blameOn = false;
@@ -6813,7 +6813,7 @@ async function cmdBlame() {
 /// That matters for a log something is still writing to: re-reading would show
 /// a different file than the one being looked at.
 async function cmdEncoding(name) {
-    if (!viewer.on || !viewer.ed) { say('先にファイルを開いてください', true); return; }
+    if (!viewer.on || !viewer.ed) { say(tr('open a file first', '先にファイルを開いてください'), true); return; }
     const r = await ask('encoding', { as: name || undefined });
     if (!r) return;
     const model = viewer.ed.getModel();
@@ -7071,7 +7071,7 @@ document.addEventListener('keydown', (e) => {
 }, true);
 
 async function togglePreview2() {
-    if (!viewer.on || !viewer.ed) { say('先にファイルを開いてください', true); return; }
+    if (!viewer.on || !viewer.ed) { say(tr('open a file first', '先にファイルを開いてください'), true); return; }
     if (reading) {
         reading = false;
         el.vRead.hidden = true;
@@ -7121,7 +7121,7 @@ async function togglePreview2() {
 /// than a hunt.
 let wsOn = false;
 function toggleWs() {
-    if (!viewer.ed) { say('先にファイルを開いてください', true); return; }
+    if (!viewer.ed) { say(tr('open a file first', '先にファイルを開いてください'), true); return; }
     wsOn = !wsOn;
     viewer.ed.updateOptions({
         renderWhitespace: wsOn ? 'all' : 'selection',
@@ -7136,7 +7136,7 @@ function toggleWs() {
 
 let rulerOn = false;
 function toggleRuler() {
-    if (!viewer.ed) { say('先にファイルを開いてください', true); return; }
+    if (!viewer.ed) { say(tr('open a file first', '先にファイルを開いてください'), true); return; }
     rulerOn = !rulerOn;
     viewer.ed.updateOptions({ rulers: rulerOn ? [80, 100, 120] : [] });
     say(rulerOn ? '桁の目盛り: 80 / 100 / 120' : '目盛りを消しました');
@@ -7169,14 +7169,14 @@ function showReplacePlan(spec, plan) {
         })),
         {
             checks: true,
-            foot: 'Space 外す／戻す   a 全部   n 全部外す   Enter 実行   Esc 取消',
+            foot: tr('Space off/on   a all   n none   Enter run   Esc cancel', 'Space 外す／戻す   a 全部   n 全部外す   Enter 実行   Esc 取消'),
                 pick: async (chosen) => {
                     const going = chosen.map((r) => r.change);
                     if (!going.length) { say('選ばれている行がありません', true); return; }
                     closeReport();
                     if (!await confirm(`${going.length} 行を置換します`,
                         `${new Set(going.map((c) => c.path)).size} ファイル — u では戻せません`)) {
-                        say('やめました');
+                        say(tr('stopped', 'やめました'));
                         return;
                     }
                     const done = await ask('replaceapply', { changes: going });
@@ -7194,7 +7194,7 @@ function showReplacePlan(spec, plan) {
 /// The one line operation that filters rather than transforms, and the one
 /// people reach for on a log: "everything except the heartbeats", once.
 async function cmdLineFilter(pattern, keep) {
-    if (!viewer.on || !viewer.ed) { say('先にファイルを開いてください', true); return; }
+    if (!viewer.on || !viewer.ed) { say(tr('open a file first', '先にファイルを開いてください'), true); return; }
     const lines = viewer.ed.getValue().split(/\r?\n/);
     const r = await ask('grepdel', { lines, pattern, keep });
     if (!r) return;
@@ -7204,7 +7204,7 @@ async function cmdLineFilter(pattern, keep) {
 
 /// `:combine` — join the next line up, with a space or without.
 async function cmdCombine(spec) {
-    if (!viewer.on || !viewer.ed) { say('先にファイルを開いてください', true); return; }
+    if (!viewer.on || !viewer.ed) { say(tr('open a file first', '先にファイルを開いてください'), true); return; }
     const bang = /!$/.test(spec || '');
     const count = Math.max(2, Number((spec || '').replace('!', '').trim()) || 2);
     const lines = viewer.ed.getValue().split(/\r?\n/);
@@ -7234,7 +7234,7 @@ function replaceAll(lines) {
 /// once, which is the whole reason anybody selects a rectangle. Columns are
 /// display columns, so a line with a tab in it lines up the way it looks.
 async function blockEdit(what) {
-    if (!viewer.on || !viewer.ed) { say('先にファイルを開いてください', true); return; }
+    if (!viewer.on || !viewer.ed) { say(tr('open a file first', '先にファイルを開いてください'), true); return; }
     const sels = viewer.ed.getSelections() || [];
     if (!sels.length) { say('矩形選択がありません', true); return; }
     const top = Math.min(...sels.map((s) => s.startLineNumber)) - 1;
@@ -7264,7 +7264,7 @@ async function cmdDf() {
         { n: human(r.total), label: '全体' },
         { n: human(r.used), label: '使用中', sub: `${pct}%` },
         { n: human(r.available), label: '空き' },
-    ], { foot: 'Esc 閉じる' });
+    ], { foot: tr('Esc close', 'Esc 閉じる') });
 }
 
 /// `:head` / `:tail` — the ends of the file, without opening it. What a
@@ -7276,7 +7276,7 @@ async function cmdPeek(args, tail) {
     if (!r) return;
     show(`${tail ? 'tail' : 'head'} -n ${n}  ${r.name}`, `${r.rows.length} 行`,
         r.rows.map((t, i2) => ({ n: String(tail ? '' : i2 + 1), label: t })),
-        { foot: 'Esc 閉じる' });
+        { foot: tr('Esc close', 'Esc 閉じる') });
 }
 
 /// `:recent` — the files this session has opened, newest first.
@@ -7294,7 +7294,7 @@ async function cmdRecent() {
     show('最近開いたファイル', `${recentFiles.length} 件`,
         recentFiles.map((x) => ({ label: x.name, sub: x.path, path: x.path })),
         {
-            foot: 'Enter そこへ   Esc 閉じる',
+            foot: tr('Enter go there   Esc close', 'Enter そこへ   Esc 閉じる'),
             pick: (row) => { closeReport(); revealPath(row.path, false); },
         });
 }
@@ -7313,10 +7313,10 @@ async function cmdVersion() {
     show('cian', `${w.version || '1.1.0'} — cian-core の上の窓`, [
         { label: 'ビルド日時', sub: built + (w.commit ? `   ${w.commit}` : '') },
         { label: '書体', sub: `${resolvedFace()}   ${FONT.at}px` },
-        { label: '設定', sub: w.config || '(なし)' },
-        { label: '書き込み先', sub: w.writes || '(なし)' },
+        { label: '設定', sub: w.config || tr('(none)', '(なし)') },
+        { label: '書き込み先', sub: w.writes || tr('(none)', '(なし)') },
         { label: 'エンジン', sub: 'cian-server（JSON lines / stdio）' },
-    ], { foot: 'Esc 閉じる' });
+    ], { foot: tr('Esc close', 'Esc 閉じる') });
 }
 
 async function cmdWc() {
@@ -7334,7 +7334,7 @@ async function cmdWc() {
             label: x.name,
             sub: `${x.words.toLocaleString()} 語   ${human(x.bytes)}`,
         })),
-        { foot: 'Esc 閉じる' });
+        { foot: tr('Esc close', 'Esc 閉じる') });
 }
 
 /// `:where` — which of the config files cian actually found.
@@ -7347,11 +7347,11 @@ async function cmdWhere() {
     const r = await ask('where', {});
     if (!r) return;
     show('設定の場所', '書き込み先: ' + (r.writes || '(不明)'), [
-        { label: 'init.lua', sub: r.config || '(なし)' },
-        { label: 'state.toml', sub: r.state || '(なし)' },
-        { label: 'shortcuts.lua', sub: r.shortcuts || '(なし)' },
-        { label: 'macro.lua', sub: r.macros || '(なし)' },
-    ], { foot: 'Esc 閉じる' });
+        { label: 'init.lua', sub: r.config || tr('(none)', '(なし)') },
+        { label: 'state.toml', sub: r.state || tr('(none)', '(なし)') },
+        { label: 'shortcuts.lua', sub: r.shortcuts || tr('(none)', '(なし)') },
+        { label: 'macro.lua', sub: r.macros || tr('(none)', '(なし)') },
+    ], { foot: tr('Esc close', 'Esc 閉じる') });
 }
 
 async function cmdMarkGlob(glob, on) {
@@ -7459,7 +7459,7 @@ async function cmdAiCommit() {
                 foot: 'Enter コミット   Esc 取消',
                 pick: async () => {
                     closeReport();
-                    if (!await confirm('この文でコミットします', msg)) { say('やめました'); return; }
+                    if (!await confirm('この文でコミットします', msg)) { say(tr('stopped', 'やめました')); return; }
                     const done = await ask('commit', { pane: state.focus, message: msg });
                     if (!done) return;
                     state[state.focus] = done.pane;
@@ -7514,7 +7514,7 @@ async function cmdAiScan(what) {
                     if (!chosen.length) { say('選ばれている行がありません', true); return; }
                     closeReport();
                     if (!await confirm(`${chosen.length} 件を下のディレクトリへ移します`,
-                        chosen.map((x) => `${x.name} → ${x.folder}/`).join('\n'))) { say('やめました'); return; }
+                        chosen.map((x) => `${x.name} → ${x.folder}/`).join('\n'))) { say(tr('stopped', 'やめました')); return; }
                     const done = await ask('organizeapply', {
                         pane: state.focus,
                         rows: chosen.map((x) => ({ path: x.path, folder: x.folder })),
@@ -7549,7 +7549,7 @@ async function cmdAiRename(instruction) {
 /// pattern rename builds them from a pattern, the AI from an instruction.
 function showRenamePlanRows(rows, title) {
     const changing = rows.filter((x) => !x.same);
-    if (!changing.length) { say('変わる名前がありません'); return; }
+    if (!changing.length) { say(tr('no name would change', '変わる名前がありません')); return; }
     show(title, '一行ずつ選べます',
         // A row whose name does not change starts unticked and stays that
         // way — there is nothing in it to do.
@@ -7559,18 +7559,18 @@ function showRenamePlanRows(rows, title) {
         })),
         {
             checks: true,
-            foot: 'Space 外す／戻す   a 全部   n 全部外す   Enter 実行   Esc 取消',
+            foot: tr('Space off/on   a all   n none   Enter run   Esc cancel', 'Space 外す／戻す   a 全部   n 全部外す   Enter 実行   Esc 取消'),
             pick: async (chosen) => {
                 const going = chosen.filter((x) => !x.same);
                 if (!going.length) { say('選ばれている行がありません', true); return; }
                 closeReport();
                 if (!await confirm(`${going.length} 件の名前を変えます`,
-                    going.map((x) => `${x.from}  →  ${x.to}`).join('\n'))) { say('やめました'); return; }
+                    going.map((x) => `${x.from}  →  ${x.to}`).join('\n'))) { say(tr('stopped', 'やめました')); return; }
                 const done = await ask('renameapply', { rows: going.map((x) => ({ from: x.from, to: x.to })) });
                 if (!done) return;
                 await reread();
                 if (done.errors.length) say(done.errors.join('  /  '), true);
-                else say(`${done.renamed} 件の名前を変えました`);
+                else say(tr(`renamed ${done.renamed}`, `${done.renamed} 件の名前を変えました`));
             },
         });
 }
@@ -7585,7 +7585,7 @@ async function cmdAiSearch(query) {
         show(`「${query}」らしいもの`, `${rows.length} 件 — AI の見立てです`,
             rows.map((x) => ({ label: x.path, sub: x.reason || '', full: x.full })),
             {
-                foot: 'Enter そこへ   Esc 閉じる',
+                foot: tr('Enter go there   Esc close', 'Enter そこへ   Esc 閉じる'),
                 pick: (row) => { closeReport(); revealPath(row.full, false); },
             });
     };
@@ -7750,8 +7750,8 @@ async function cmdAiError() {
     if (!r) return;
     say('シェルの画面を読んでいます…');
     aiWaiting = (answer) => {
-        show('直近のエラーの説明', 'AI の答え — 確かめてから使ってください',
-            String(answer).split('\n').map((t) => ({ label: t })), { foot: 'Esc 閉じる' });
+        show('直近のエラーの説明', tr('the AI’s answer — check it before you use it', 'AI の答え — 確かめてから使ってください'),
+            String(answer).split('\n').map((t) => ({ label: t })), { foot: tr('Esc close', 'Esc 閉じる') });
     };
 }
 
@@ -8026,7 +8026,7 @@ async function cmdSnippets() {
         confirm: x.confirm,
     })), {
         filter: true,
-        hint: '打って絞り込み',
+        hint: tr('type to narrow', '打って絞り込み'),
         foot: '打って絞る   Enter シェルへ送る   Esc 閉じる',
         pick: async (row) => {
             closeReport();
@@ -8034,7 +8034,7 @@ async function cmdSnippets() {
             // this one" — it is put there for the snippets that do something.
             // The flag was being ignored, which made it a lie in the config.
             if (row.confirm && !await confirm(`${row.label} を実行`, row.cmd)) {
-                say('やめました');
+                say(tr('stopped', 'やめました'));
                 return;
             }
             if (!term.on) await openShell();
@@ -8069,7 +8069,7 @@ async function splitShell(down) {
 async function closePane(id) {
     const byHand = id === undefined;
     if (byHand && !await confirm('この分割パネルを閉じます',
-        '動いているプログラムがあれば終わります')) { say('やめました'); return; }
+        '動いているプログラムがあれば終わります')) { say(tr('stopped', 'やめました')); return; }
     const r = await ask('shellpaneclose', id === undefined ? {} : { id });
     if (!r) return;
     if (r.gone) { closeShell(); say('シェルを閉じました'); return; }
@@ -8106,7 +8106,7 @@ async function shellGo(how) {
 /// disappearing.
 async function shellCloseTab() {
     if (!await confirm('このシェルタブを閉じます（分割ごと）',
-        '動いているプログラムがあれば終わります')) { say('やめました'); return; }
+        '動いているプログラムがあれば終わります')) { say(tr('stopped', 'やめました')); return; }
     const r = await ask('shellclose', {});
     if (!r) return;
     if (r.gone) { closeShell(); say('シェルを閉じました'); return; }
@@ -8437,7 +8437,7 @@ for (const which of ['left', 'right']) {
         const names = paths.map((p) => p.split(/[\\/]/).pop());
         if (dest.remote) {
             if (!await confirm(`${paths.length} 件を ${dest.remote} へアップロードします`, names.join('\n'))) {
-                say('やめました');
+                say(tr('stopped', 'やめました'));
                 return;
             }
             const up = await ask('uploadpaths', { pane: which, paths });
@@ -8449,7 +8449,7 @@ for (const which of ['left', 'right']) {
             return;
         }
         if (!await confirm(`${paths.length} 件を ${dest.cwd} へ移動します`, names.join('\n'))) {
-            say('やめました');
+            say(tr('stopped', 'やめました'));
             return;
         }
         const r = await ask('drop', { pane: which, paths });

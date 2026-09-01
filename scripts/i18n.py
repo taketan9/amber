@@ -74,8 +74,20 @@ def untranslated(path):
     return out
 
 
+def nested(path):
+    """`tr(en, tr(en, ja))` ── 一語を一括で包むと、既に包んであるものの中の
+    日本語まで包みます。二度やりました。英語側が二重になるので画面には
+    出ませんが、次に誰かが英語を直すとき片方しか直りません。"""
+    text = source_without_comments((ROOT / path).read_text(encoding="utf-8"))
+    return [
+        (text[: m.start()].count("\n") + 1, m.group(0)[:80])
+        for m in re.finditer(r"\btr\([^,()]*,\s*tr\(", text)
+    ]
+
+
 def main():
     left = untranslated("gui/renderer.js")
+    bad = nested("gui/renderer.js")
     done = len(spans_inside_tr(source_without_comments(
         (ROOT / "gui/renderer.js").read_text(encoding="utf-8"))))
     total = done + len(left)
@@ -89,10 +101,14 @@ def main():
         print()
     pct = 100 * done // total if total else 100
     print("=" * 72)
+    for n, t in bad:
+        print(f"  ■ tr が入れ子になっています  renderer.js:{n}  {t}")
+    if bad:
+        print()
     print(f"  両方の言葉で言えるもの {done} / {total}（{pct}%）"
           f" ── まだ日本語だけ {len(left)} 件")
     print("=" * 72)
-    return 0
+    return 1 if bad else 0
 
 
 if __name__ == "__main__":
