@@ -64,9 +64,27 @@ pub use cian_core::viewer::TextEncoding;
 type EncSlot = Arc<Mutex<TextEncoding>>;
 
 /// The user's preferred shell, falling back to a sane default per platform.
+///
+/// On Windows this is **Windows PowerShell, not `cmd.exe`**. `COMSPEC` is
+/// what the platform answers when asked for "the shell", and what it names is
+/// the command interpreter from 1987 — which is the shell you get when nobody
+/// chose, not the shell anybody would choose. Asked for by name after the
+/// first Windows session had a `cmd.exe` in the panel.
+///
+/// `cian.set_option("shell", …)` still wins over this, and `fallback_shells()`
+/// still catches the machine where PowerShell has been removed or locked down
+/// — so this is a preference, not a requirement.
 pub fn default_shell() -> String {
     if cfg!(windows) {
-        std::env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".to_string())
+        // The absolute path first: `powershell.exe` resolves through PATH,
+        // and PATH on a managed machine is somebody else's decision.
+        if let Ok(root) = std::env::var("SystemRoot") {
+            let full = format!("{root}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe");
+            if std::path::Path::new(&full).exists() {
+                return full;
+            }
+        }
+        "powershell.exe".to_string()
     } else {
         std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string())
     }
@@ -119,13 +137,19 @@ pub fn split_command(spec: &str) -> Vec<String> {
 /// plus a note saying which one and why.
 pub fn fallback_shells() -> Vec<String> {
     if cfg!(windows) {
-        let mut out = vec!["powershell.exe".to_string(), "cmd.exe".to_string()];
-        if let Ok(comspec) = std::env::var("COMSPEC") {
-            out.insert(0, comspec);
-        }
+        // PowerShell first, then its absolute path, and only then the command
+        // interpreter. `COMSPEC` used to be inserted at the front, which made
+        // the *fallback* order disagree with `default_shell()`'s preference:
+        // a PowerShell that failed to start dropped straight to `cmd.exe`
+        // without trying the copy that is always at the same address.
+        let mut out = vec!["powershell.exe".to_string()];
         if let Ok(root) = std::env::var("SystemRoot") {
             out.push(format!("{root}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"));
         }
+        if let Ok(comspec) = std::env::var("COMSPEC") {
+            out.push(comspec);
+        }
+        out.push("cmd.exe".to_string());
         out
     } else {
         vec!["/bin/sh".to_string()]

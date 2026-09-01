@@ -1103,8 +1103,19 @@ async function toggleHidden() {
 /// took two presses to leave `name`, because the first one only reversed it.
 // The words are cian-tui's `sort_label()` — the same four the column headings
 // use, in both builds. This list said 日付 while the heading above it said 日時.
-const SORTS = [['name', tr("Name", '名前'), 'n'], ['size', tr("Size", 'サイズ'), 's'],
-               ['date', tr("Date", '日時'), 'd'], ['ext', tr('Extension', '拡張子'), 'e']];
+/// The four sort keys, their names, and the letter each answers to.
+///
+/// **A function, not a constant.** `tr()` returns a string, so a `const`
+/// holding one holds whichever language was on when the file loaded — and
+/// nothing short of a reload ever changes it again. Switching to English left
+/// 名前 / サイズ / 日時 in the sort menu, メモ帳 in the toggles and
+/// クラシック / アイコン in the view row: six frozen words in a window that
+/// was otherwise entirely translated. Everything made of words has to be
+/// *asked* for at the moment it is drawn.
+function sorts() {
+    return [['name', tr("Name", '名前'), 'n'], ['size', tr("Size", 'サイズ'), 's'],
+            ['date', tr("Date", '日時'), 'd'], ['ext', tr('Extension', '拡張子'), 'e']];
+}
 async function applySort(key) {
     const which = state.focus;
     const r = await ask('sort', { pane: which, key });
@@ -1113,7 +1124,7 @@ async function applySort(key) {
     draw(which);
     // `r.by` is the engine's wire name (`date`), not a label: cian-tui says
     // 並び: 日時 ▲ and so does this.
-    const word = (SORTS.find(([k]) => k === key) || [, r.by])[1];
+    const word = (sorts().find(([k]) => k === key) || [, r.by])[1];
     say(tr(`sort: ${word} ${r.reverse ? '▼' : '▲'}`, `並び: ${word} ${r.reverse ? '▼' : '▲'}`));
 }
 
@@ -1386,7 +1397,9 @@ function clearPalette() {
 /// could only ask for — ":view icons" in a terminal answers "window only",
 /// because this is the feature a window exists to have.
 const VIEWS = ['classic', 'details', 'icons'];
-const VIEW_NAMES = { classic: tr("classic", 'クラシック'), details: tr("details", '詳細一覧'), icons: tr("icons", 'アイコン') };
+function viewName(mode) {
+    return { classic: tr("classic", 'クラシック'), details: tr("details", '詳細一覧'), icons: tr("icons", 'アイコン') }[mode];
+}
 /// The two that take the whole window. Both are the Explorer arrangement,
 /// where the listing is the thing you are looking at; classic keeps the two
 /// panes, which is what cian is for.
@@ -1501,8 +1514,14 @@ function gitBadge(which, row) {
 const nativeIcons = new Map();
 
 function nativeIconFor(row, into) {
-    if (!window.cian.fileIcon || row.parent || row.is_dir) return;
-    const key = extOf(row) || `\u0000${row.name.toLowerCase()}`;
+    if (!window.cian.fileIcon || row.parent) return;
+    // Folders too. They were excluded here, so `:view icons` drew the desktop's
+    // real icon for every file and a Nerd Font glyph for every directory —
+    // which is what "these are not Windows' icons" was about: the one row
+    // shape a person looks at first was the one row shape still coming from
+    // the font. Every plain folder shares Explorer's folder icon, so they
+    // share one cache key and cost one call for the whole tree.
+    const key = row.is_dir ? '\u0000<dir>' : (extOf(row) || `\u0000${row.name.toLowerCase()}`);
     const known = nativeIcons.get(key);
     if (known === null) return;
     if (typeof known === 'string') { paintIcon(into, known); return; }
@@ -1621,8 +1640,25 @@ function when(row) {
 /// look chosen here is the look `cian` opens with, and the other way round.
 let look = 0;
 
+/// Forget any ground or palette a single pane was wearing.
+///
+/// A pane's own skin is set as inline custom properties on the pane element,
+/// which beat `:root` for that subtree — that is the whole mechanism, and it
+/// is also why choosing a *window* theme afterwards appeared to do nothing to
+/// that pane. Both are "make this look like X"; the later one is the answer.
+/// (Reported after choosing a pane theme and then a whole-window one: the
+/// pane kept the first choice.)
+function clearPaneSkins() {
+    for (const which of ['left', 'right']) {
+        paneSkin[which].ground = null;
+        paneSkin[which].theme = null;
+        paintPane(which);
+    }
+}
+
 function setLook(i, remember = true) {
     look = (i + LOOKS.length) % LOOKS.length;
+    clearPaneSkins();
     const [value] = LOOKS[look];
     // At the look's own base size, follow the new look's base — 端末譲り is
     // 14px on purpose. An explicit Ctrl+= choice survives the switch.
@@ -1640,6 +1676,7 @@ function setLook(i, remember = true) {
 function setPalette(name, remember = true) {
     const t = palettes.get(name);
     if (!t) { say(tr(`${name}? — :theme lists them`, `${name}? — :theme で一覧`), true); return; }
+    clearPaneSkins();
     delete document.documentElement.dataset.look;
     paintPalette(t);
     palette = name;
@@ -1836,8 +1873,8 @@ const TOGGLES = {
             // for its reason: neither of the two is the absence of the other.
             {
                 label: tr("Editor keys", 'エディタのキー操作'),
-                value: STYLES[style][1],
-                run: () => { setStyle(style + 1); drawMenu(); say(tr(`editor: ${STYLES[style][1]}`, `エディタ: ${STYLES[style][1]}`)); },
+                value: styleName(style),
+                run: () => { setStyle(style + 1); drawMenu(); say(tr(`editor: ${styleName(style)}`, `エディタ: ${styleName(style)}`)); },
             },
             // ── the window's own three ──
             //
@@ -1847,12 +1884,12 @@ const TOGGLES = {
             // help from.
             {
                 label: tr("How the listing is laid out", '一覧の見せ方'),
-                value: VIEW_NAMES[viewMode],
+                value: viewName(viewMode),
                 run: () => {
                     const next = VIEWS[(VIEWS.indexOf(viewMode) + 1) % VIEWS.length];
                     setView(next);
                     drawMenu();
-                    say(tr(`listing: ${VIEW_NAMES[next]}`, `一覧: ${VIEW_NAMES[next]}`));
+                    say(tr(`listing: ${viewName(next)}`, `一覧: ${viewName(next)}`));
                 },
             },
             {
@@ -1881,15 +1918,15 @@ const SORT_MENU = {
     key: ',',
     foot: () => tr("\u2191\u2193 choose  Enter apply  n s d e direct  Esc close", '↑↓ 選ぶ  Enter 決定  n s d e で直接  Esc 閉じる'),
     stay: false,
-    at: () => SORTS.findIndex(([k]) => k === (state[state.focus]?.sort_key ?? 'name')),
-    rows: () => SORTS.map(([k, label, letter]) => ({
+    at: () => sorts().findIndex(([k]) => k === (state[state.focus]?.sort_key ?? 'name')),
+    rows: () => sorts().map(([k, label, letter]) => ({
         label,
         value: k === (state[state.focus]?.sort_key ?? 'name') ? '●' : letter,
         run: () => applySort(k),
     })),
     // The letters, so the picker is skippable once it is in the fingers —
     // the terminal build has the same four.
-    letters: Object.fromEntries(SORTS.map(([k, , letter]) => [letter, () => applySort(k)])),
+    letters: Object.fromEntries(sorts().map(([k, , letter]) => [letter, () => applySort(k)])),
 };
 
 /// `M` — everything you can do to the row under the cursor.
@@ -1939,7 +1976,7 @@ function viewerRows() {
     // folder it is in. The cursor is already on it, so this is just the way
     // back out of the viewer.
     v.push({ label: tr("Show where this file is", 'このファイルの場所を開く'), value: '', run: () => closeView(false) });
-    v.push({ label: tr("Editor keys: vim / notepad", 'エディタのキー操作: vim / メモ帳'), value: STYLES[style][1], run: () => setStyle(style + 1) });
+    v.push({ label: tr("Editor keys: vim / notepad", 'エディタのキー操作: vim / メモ帳'), value: styleName(style), run: () => setStyle(style + 1) });
     v.push({ label: tr("Theme (whole app)", 'テーマ（全体）'), value: ':theme', run: () => cmdTheme() });
     v.push({ label: tr("Close without saving", '保存せずに閉じる'), value: '', run: () => closeView(false) });
     v.push({ label: tr("Key manual", 'キー一覧'), value: '?', run: openHelp });
@@ -1948,7 +1985,7 @@ function viewerRows() {
 
 const VIEWER_MENU = {
     key: 'M',
-    foot: tr('↑↓ choose   Enter run   Esc close', '↑↓ 選ぶ   Enter 実行   Esc 閉じる'),
+    foot: () => tr('↑↓ choose   Enter run   Esc close', '↑↓ 選ぶ   Enter 実行   Esc 閉じる'),
     stay: false,
     rows: viewerRows,
 };
@@ -2147,7 +2184,7 @@ function contextRows() {
     // cian-tui offers the remote pane right under SSH (menu.rs RemotePane).
     // The window had `:sftp` as a command only, so the one way to reach a
     // server by mouse was the ssh picker — which opens a shell, not a pane.
-    v.push({ label: tr("Open server in pane", 'サーバをペインで開く'), value: ':sftp', run: cmdConnect });
+    v.push({ label: tr("Open server in pane", 'サーバをペインで開く'), value: ':sftp', run: cmdSftpPicker });
     // cian-tui offers this group only when init.lua names a host — with none
     // configured the two rows can only say so (menu.rs: `if has_hosts`).
     if (cfg.hosts) {
@@ -2271,7 +2308,7 @@ function aiRows() {
 
 const CONTEXT = {
     key: 'M',
-    foot: tr('↑↓ choose   Enter run   ← / Esc back', '↑↓ 選ぶ   Enter 実行   ← / Esc 戻る'),
+    foot: () => tr('↑↓ choose   Enter run   ← / Esc back', '↑↓ 選ぶ   Enter 実行   ← / Esc 戻る'),
     stay: false,
     rows: contextRows,
 };
@@ -2372,12 +2409,34 @@ function menuRows() {
     return rows;
 }
 
+/// Move the highlight without rebuilding the menu.
+///
+/// **`mouseenter` fires when the element arrives under the pointer, not only
+/// when the pointer arrives over the element.** `drawMenu()` replaces every
+/// row, so pressing ↓ built a fresh row underneath a pointer that had not
+/// moved — which fired mouseenter, which put `menu.at` straight back where
+/// the mouse was resting. The highlight could not be moved off whatever the
+/// pointer happened to be over, in T and in M both, while the listing was
+/// fine because it binds no such handler.
+///
+/// The heuristic version of this fix compared pointer coordinates and could
+/// not tell the two cases apart — they have identical coordinates. Not
+/// rebuilding the rows is the whole fix: no element is created, so no
+/// synthetic mouseenter exists to be filtered.
+function paintMenuCursor() {
+    const hits = el.findHits.children;
+    for (let i = 0; i < hits.length; i += 1) hits[i].classList.toggle('on', i === menu.at);
+    hits[menu.at]?.scrollIntoView({ block: 'nearest' });
+}
+
 function drawMenu() {
     const rows = menuRows();
     const frag = document.createDocumentFragment();
+    let cursorRow = null;
     rows.forEach((row, i) => {
         const div = document.createElement('div');
         div.className = 'hit' + (i === menu.at ? ' on' : '');
+        if (i === menu.at) cursorRow = div;
         const l = document.createElement('span');
         l.className = 'p';
         l.textContent = row.label;
@@ -2394,7 +2453,7 @@ function drawMenu() {
         div.addEventListener('mouseenter', () => {
             if (menu.at === i) return;
             menu.at = i;
-            drawMenu();
+            paintMenuCursor();
         });
         // Right-click climbs one level, which is the mouse's Esc here.
         div.addEventListener('contextmenu', (e) => {
@@ -2405,6 +2464,11 @@ function drawMenu() {
         frag.append(div);
     });
     el.findHits.replaceChildren(frag);
+    // Keep the highlight on screen. ↓ moved `menu.at` past the bottom of a
+    // long menu and nothing scrolled after it, so the chosen row was somewhere
+    // below the fold and the menu looked as though the key had stopped
+    // working. `nearest` so a row already in view does not jump.
+    if (cursorRow) cursorRow.scrollIntoView({ block: 'nearest' });
 }
 
 // Clicking away from a sheet closes it. cian-tui works out whether the click
@@ -2454,8 +2518,8 @@ document.addEventListener('keydown', (e) => {
         menuBack();
     }
     else if (e.key === 'Escape' || e.key === spec.key) closeMenu();
-    else if (e.key === 'ArrowDown' || e.key === 'j') { menu.at = (menu.at + 1) % rows.length; drawMenu(); menuMoved(spec, rows); }
-    else if (e.key === 'ArrowUp' || e.key === 'k') { menu.at = (menu.at + rows.length - 1) % rows.length; drawMenu(); menuMoved(spec, rows); }
+    else if (e.key === 'ArrowDown' || e.key === 'j') { menu.at = (menu.at + 1) % rows.length; paintMenuCursor(); menuMoved(spec, rows); }
+    else if (e.key === 'ArrowUp' || e.key === 'k') { menu.at = (menu.at + rows.length - 1) % rows.length; paintMenuCursor(); menuMoved(spec, rows); }
     else if (pick) { closeMenu(); pick(); }
     else if (e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowRight' || e.key === 'l') {
         runMenuRow(rows[menu.at], spec);
@@ -2653,7 +2717,15 @@ function helpRows() {
         ['p', tr("the path, as text, to the clipboard", 'パス文字列をクリップボードへ')],
         ['Shift+P', tr("the file itself to the clipboard (Finder and Explorer can paste it)", 'ファイルそのものをクリップボードへ（Finder/エクスプローラで貼れます）')],
         [tr("drag a row", '行をドラッグ'), tr("to the desktop or another application \u2014 the file itself (the terminal build cannot do this)", 'デスクトップや他のアプリへ、ファイルそのものを渡します（端末版にはできません）')],
-        ['o / O', tr("this pane to the other side / the other side to here", 'このペインを反対側へ / 反対側をここへ')],
+        // **Both halves were the wrong way round.** `o` brings the *other*
+        // pane's directory here and `O` sends this one across (keys.rs:2604,
+        // and cian-tui's own help says so in as many words) — the window's
+        // one-line version had it backwards, so pressing `o` expecting to
+        // push did the opposite and read as a key that was not implemented.
+        // Written out as two rows now, in the terminal build's own words,
+        // because the pair is exactly where a single line invites a mix-up.
+        ['o', tr("this pane → the other pane’s directory", 'このペインを反対ペインと同じ場所に')],
+        ['O', tr("the other pane → this pane’s directory", '反対ペインをこのペインと同じ場所に')],
         ['u / Ctrl+R', tr("undo / redo", '取り消し / やり直し')],
         [tr("M / Shift+Enter / right-click", 'M / Shift+Enter / 右クリック'), tr("what can be done to this entry", 'このエントリにできること')],
         ['Esc', tr("clear marks and filter \u2192 then stop what is running", 'マーク・フィルタ解除 → 実行中の操作を中止')],
@@ -3587,7 +3659,13 @@ function setViewerOn(on) {
 /// would rather. Where the choice is remembered is still open — the same
 /// question as the look, and answering it in two places would be worse than
 /// leaving it unanswered in one.
-const STYLES = [['notepad', tr('notepad', 'メモ帳')], ['vim', 'vim']];
+const STYLES = [['notepad'], ['vim']];
+/// What to call a grammar on screen. Separate from `STYLES` above, which is
+/// the *identity* of each — an id is written into the settings file and must
+/// not change with the language; a label is read by a person and must.
+function styleName(i) {
+    return STYLES[i][0] === 'vim' ? 'vim' : tr('notepad', 'メモ帳');
+}
 /// vim, as in cian-tui (`edit_style: … unwrap_or(EditStyle::Vim)`, lib.rs:3013):
 /// "the default, and the one cian was built around". This started on notepad,
 /// so a window with no remembered setting and no `edit_style` in init.lua
@@ -3839,11 +3917,18 @@ async function openNth(at) {
     if (openFiles.list.length > 1) paintOpenFiles();
 }
 
-/// `◂ [2/5] ▸` in the viewer's title, and the arrows are clickable.
+/// The open files, as a strip of tabs you can click.
 ///
-/// cian-tui puts the open files in a tab strip you can click (`mouse.rs:243`),
-/// and the window had F2 / Shift+F2 and a piece of text. A hand on the mouse
-/// had no way through a set of files it had just opened with F3.
+/// cian-tui puts them in a tab strip (`mouse.rs:243`); the window had
+/// `◂ [2/5] ▸ name`, which says *how many* and never says **what**. F3 on
+/// five marked files then gave you one name and a pair of arrows, and there
+/// was no way to tell from the screen that four other files were open at all,
+/// let alone which. Reported as exactly that: 「複数ファイルがタブ表示されて
+/// いることが分かりにくい」.
+///
+/// So: one tab per file, named, the current one lit, each clickable, with the
+/// arrows kept for the hand that is already on F2. The strip scrolls sideways
+/// rather than squeezing — a tab too narrow to read its name is not a tab.
 function paintOpenFiles() {
     const n = openFiles.list.length;
     if (n <= 1) { el.vName.textContent = viewer.name; return; }
@@ -3858,15 +3943,30 @@ function paintOpenFiles() {
         });
         return b;
     };
-    const at = document.createElement('span');
-    at.className = 'vat';
-    at.textContent = `[${openFiles.at + 1}/${n}]`;
+    const strip = document.createElement('span');
+    strip.className = 'vtabs';
+    let here = null;
+    openFiles.list.forEach((path, i) => {
+        const tab = document.createElement('span');
+        tab.className = 'vtab' + (i === openFiles.at ? ' on' : '');
+        // The name, not the path: the path is what the tab is *for*, and it
+        // is in the tooltip for when two files share a name.
+        tab.textContent = path.split(/[\\/]/).pop();
+        tab.title = path;
+        if (i === openFiles.at) here = tab;
+        tab.addEventListener('mousedown', (e) => {
+            e.stopPropagation();
+            if (i !== openFiles.at) openNth(i);
+        });
+        strip.append(tab);
+    });
     el.vName.replaceChildren(
         arrow('◂', -1, tr('previous file', '前のファイル')),
-        at,
+        strip,
         arrow('▸', 1, tr('next file', '次のファイル')),
-        document.createTextNode(` ${viewer.name}`),
     );
+    // The lit tab may be off the end of a long strip.
+    here?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
 }
 
 
@@ -4121,7 +4221,7 @@ function drawViewFoot() {
     el.vFoot.textContent = [
         where,
         viewer.dirty ? tr('unsaved', '未保存') : null,
-        STYLES[style][1],
+        styleName(style),
         tr('Ctrl+S saves   Esc ×3 closes', 'Ctrl+S 保存   Esc ×3 閉じる'),
     ].filter(Boolean).join('   ·   ');
 }
@@ -4527,9 +4627,9 @@ function buildCommands() {
     // argument (cmdView maps it to details).
     { name: 'view', alias: ['grid', 'icons', 'details', 'classic'], about: tr("how the listing is laid out \u2014 :view details | icons | classic", '一覧の見せ方 — :view details | icons | classic'), arg: 'details / icons / classic', optional: true, run: cmdView },
     { name: 'shell', about: tr("open the shell panel (also Shift+J)", 'シェルパネルを開く（Shift+J でも）'), run: openShell },
-    { name: 'remote', alias: ['sftp'], about: tr("open a server in this pane (SFTP)", 'このペインでサーバを開く（SFTP）'), run: cmdConnect },
+    { name: 'remote', alias: ['sftp'], about: tr("open a server in this pane (SFTP)", 'このペインでサーバを開く（SFTP）'), run: cmdSftpPicker },
 
-    { name: 'ssh', about: tr("the ssh connect picker (also Shift+S)", 'SSHピッカー（Shift+S でも）'), run: cmdSshPicker },
+    { name: 'ssh', about: tr("ssh to a host, in the shell panel (also Shift+S)", 'ホストへ ssh（シェルパネルで。Shift+S でも）'), run: cmdSshPicker },
     { name: 'paste', about: tr("paste the held files here (also Ctrl+V / y)", '保持したファイルをここへ貼り付け（Ctrl+V / y でも）'), run: paste },
     { name: 'local', about: tr("close the server and come back to this disk", 'サーバを閉じてローカルへ戻る'), run: cmdDisconnect },
     { name: 'aicmd', about: tr("AI: a shell command from a description", 'AI: 説明からシェルコマンドを作る'), arg: tr('what you want', 'やりたいこと'), run: cmdAiCmd },
@@ -5039,7 +5139,10 @@ async function cmdAiAsk(question) {
 /// The window had one row here that pre-filled the command line with
 /// `ai この選択を直して` and two that were a plain chat wearing a different
 /// name. Same words on the menu, three different actions behind them.
-const AI_OVER_TEXT = {
+/// A function, not a constant: the second half of each pair is a *title*, and
+/// a title is words on a screen. See `sorts()` for what a `const` does to one.
+function aiOverText() {
+    return {
     writing: [
         'You are an editor. Improve the passage below: fix grammar and '
         + "typos, tighten wording, and keep the author's voice and "
@@ -5063,7 +5166,8 @@ const AI_OVER_TEXT = {
         + 'the corrected code. Say so plainly if you find nothing wrong.',
         tr('Review and fix this code', 'このコードを点検・修正'),
     ],
-};
+    };
+}
 
 /// `:mermaid` — the open file's diagrams, drawn here.
 ///
@@ -5148,7 +5252,7 @@ async function cmdAiOverText(kind) {
         say(tr('open a file first (F3)', '先にファイルを開いてください（F3）'), true);
         return;
     }
-    const [system, title] = AI_OVER_TEXT[kind];
+    const [system, title] = aiOverText()[kind];
     // The selection when there is one, the file when there is not — which is
     // what cian-tui sends (`selected_text().unwrap_or(whole)`). A model has a
     // limit and a file may be larger than it; the head is the part that says
@@ -5241,12 +5345,11 @@ function toggleKeyEcho() {
 /// Whether a password is stored comes over as a yes or a no; the password
 /// itself never leaves the engine, which resolves it (or runs password_cmd)
 /// at connect time.
-async function cmdSshPicker() {
-    const r = await ask('sshhosts', {});
-    if (!r) return;
-    if (!r.hosts.length) { await cmdConnect(); return; }
+/// The hosts from `init.lua`'s `cian.ssh`, as picker rows. Two callers wanted
+/// the same list in the same shape and had a copy each.
+function sshRows(hosts) {
     const rows = [];
-    for (const h of r.hosts) {
+    for (const h of hosts) {
         for (const u of h.users) {
             rows.push({
                 n: u.stored ? tr('key', '鍵あり') : '',
@@ -5259,7 +5362,57 @@ async function cmdSshPicker() {
             });
         }
     }
-    show('SSH', tr(`${rows.length} hosts (init.lua’s cian.ssh)`, `${rows.length} 件（init.lua の cian.ssh）`), rows, {
+    return rows;
+}
+
+/// `:ssh` / Shift+S — **a shell on the far machine**, in the shell panel.
+///
+/// This used to open an SFTP listing in a pane, which is what `:sftp` is for.
+/// The terminal build has always run `ssh user@host` in its shell here
+/// (`App::ssh_connect`), so the same word did two different things depending
+/// on which build you were in — and the window's answer was the one nobody
+/// asked for: you press SSH接続 to get a prompt, not a file list.
+async function cmdSshPicker() {
+    const r = await ask('sshhosts', {});
+    if (!r) return;
+    if (!r.hosts.length) {
+        say(tr('no hosts in init.lua’s cian.ssh', 'init.lua の cian.ssh にサーバがありません'), true);
+        return;
+    }
+    const rows = sshRows(r.hosts);
+    show('SSH', tr(`${rows.length} hosts (init.lua’s cian.ssh) — opens a shell`, `${rows.length} 件（init.lua の cian.ssh）── シェルで開きます`), rows, {
+        filter: true,
+        hint: tr('type to narrow (host or user)', '打って絞り込み（ホスト名・ユーザー）'),
+        foot: tr('type to narrow   Enter connect   Esc close', '打って絞る   Enter 接続   Esc 閉じる'),
+        pick: async (row) => {
+            closeReport();
+            if (!term.on) await openShell();
+            setShellFocus(true);
+            const c = await ask('sshshell', { pane: state.focus, host: row.host, user: row.user, ...shellSize() });
+            if (!c) return;
+            takeShell(c);
+            // Said, because a password is about to be typed by the program
+            // rather than by the person, and that should never be a surprise.
+            say(c.keyed
+                ? tr(`→ ${c.who}`, `→ ${c.who}`)
+                : tr(`→ ${c.who} (the password goes in when it is asked for)`, `→ ${c.who}（訊かれたらパスワードを送ります）`));
+        },
+    });
+}
+
+/// `:sftp` / `:remote` — **a server's files, in this pane.**
+///
+/// Offers what `init.lua` holds first. It went straight to a `user@host` box,
+/// so a machine with five hosts configured made you type one of them out —
+/// "init.lua でセットしているサーバの設定が有効にならなかった", which was
+/// exactly right: the configuration was never consulted. F2 still takes one
+/// by hand, for a host that is not in the file.
+async function cmdSftpPicker() {
+    const r = await ask('sshhosts', {});
+    if (!r) return;
+    if (!r.hosts.length) { await cmdConnect(); return; }
+    const rows = sshRows(r.hosts);
+    show('SFTP', tr(`${rows.length} hosts (init.lua’s cian.ssh)`, `${rows.length} 件（init.lua の cian.ssh）`), rows, {
         // A host list is long the moment there is more than a handful, and
         // cian-tui narrows it as you type.
         filter: true,
@@ -5310,18 +5463,7 @@ async function cmdSend(dir) {
         say(tr('no hosts in init.lua’s cian.ssh — :sftp takes one by hand', 'init.lua の cian.ssh にサーバがありません — :sftp で手入力できます'), true);
         return;
     }
-    const rows = [];
-    for (const h of r.hosts) {
-        for (const u of h.users) {
-            rows.push({
-                n: u.stored ? tr('key', '鍵あり') : '',
-                label: `${u.name}@${h.name}`,
-                sub: `${h.host}:${h.port}`,
-                host: h.at, user: u.at, stored: u.stored,
-                who: `${u.name}@${h.host}`,
-            });
-        }
-    }
+    const rows = sshRows(r.hosts);
     show(dir === 'up' ? tr('Upload → server', 'アップロード → サーバ') : tr('Download ← server', 'ダウンロード ← サーバ'),
         tr(`${rows.length} hosts (init.lua’s cian.ssh) — opening in the ${other === 'left' ? 'left' : 'right'} pane`, `${rows.length} 件（init.lua の cian.ssh）— ${other === 'left' ? '左' : '右'}のペインに開きます`),
         rows, {
@@ -7598,7 +7740,7 @@ async function cmdEditStyle(arg, invokedAs) {
     const at = STYLES.findIndex(([v]) => v === want);
     if (at < 0) { say(tr(':editstyle vim, or :editstyle notepad', ':editstyle vim か :editstyle notepad'), true); return; }
     setStyle(at);
-    say(tr(`editor: ${STYLES[at][1]}`, `エディタ: ${STYLES[at][1]}`));
+    say(tr(`editor: ${styleName(at)}`, `エディタ: ${styleName(at)}`));
 }
 
 /// `:scratch` — an empty buffer to think in. `:w` (or Ctrl+S) asks for a

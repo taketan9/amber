@@ -7,6 +7,7 @@ use anyhow::{Context, Result};
 
 pub mod archive;
 pub mod attrs;
+pub mod auth;
 pub mod clip;
 pub mod cloud;
 pub mod count;

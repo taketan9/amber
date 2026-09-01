@@ -99,9 +99,51 @@ def nested(path):
     ]
 
 
+def frozen(rel):
+    """読み込み時に一度だけ `tr()` を評価してしまう定数。
+
+    `tr()` は文字列を返すので、`const X = tr(...)` が持っているのは
+    **ファイルを読んだときの言語**です。あとで `T → 言語` を切り替えても
+    そこだけ変わりません ── 実際 SORTS・VIEW_NAMES・STYLES・2つのメニューの
+    foot で、英語にしたのに 名前 / サイズ / 日時 / メモ帳 / クラシック /
+    アイコン が残りました。**訳し忘れではなく、訳したものが凍っていた**ので、
+    「日本語が残っている」を数える上の検査には一件も映りませんでした。
+
+    数え方は素朴に: 桁 0 から始まる `const`/`let` の宣言を、括弧の釣り合いが
+    取れるまで読み、その中に `tr(` があれば凍っている。`=>` の右側にある
+    `tr(` は呼ばれるたびに評価されるので数えません。
+    """
+    text = source_without_comments((ROOT / rel).read_text(encoding="utf-8"))
+    lines = text.split("\n")
+    out, i = [], 0
+    while i < len(lines):
+        m = re.match(r"^(const|let)\s+(\w+)\s*=", lines[i])
+        if not m:
+            i += 1
+            continue
+        buf, j, depth = [], i, 0
+        while j < len(lines):
+            buf.append(lines[j])
+            depth += sum(lines[j].count(c) for c in "([{")
+            depth -= sum(lines[j].count(c) for c in ")]}")
+            if depth <= 0 and lines[j].rstrip().endswith(";"):
+                break
+            if j - i > 60:
+                break
+            j += 1
+        body = "\n".join(buf)
+        # `=>` より前に出る `tr(` だけが凍る。矢印の右側は毎回評価される。
+        head = body.split("=>")[0] if "=>" in body else body
+        if "tr(" in head:
+            out.append((i + 1, m.group(2)))
+        i = j + 1
+    return out
+
+
 def main():
     left = untranslated("gui/renderer.js")
     bad = nested("gui/renderer.js")
+    stuck = frozen("gui/renderer.js")
     done = len(spans_inside_tr(source_without_comments(
         (ROOT / "gui/renderer.js").read_text(encoding="utf-8"))))
     total = done + len(left)
@@ -117,13 +159,16 @@ def main():
     print("=" * 72)
     for n, t in bad:
         print(f"  ■ tr が入れ子になっています  renderer.js:{n}  {t}")
-    if bad:
+    for n, t in stuck:
+        print(f"  ■ tr が読み込み時に凍っています  renderer.js:{n}  {t}"
+              "  ── 関数にして、描くたびに訊いてください")
+    if bad or stuck:
         print()
     print(f"  両方の言葉で言えるもの {done} / {total}（{pct}%）"
           f" ── まだ日本語だけ {len(left)} 件"
           + (f"（訳さないと決めたもの {len(KEEP)} 件は除く）" if not left else ""))
     print("=" * 72)
-    return 1 if bad else 0
+    return 1 if (bad or stuck) else 0
 
 
 if __name__ == "__main__":

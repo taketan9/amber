@@ -1529,28 +1529,14 @@ impl std::fmt::Debug for PendingAuth {
 }
 
 /// How long to watch for a password prompt before giving up.
-const AUTH_WINDOW: Duration = Duration::from_secs(20);
+///
+/// In cian-core, with the prompt rule itself: the window runs `ssh` in its
+/// shell too now, and a screen that gets a password out of one build must get
+/// one out of the other.
+use cian_core::auth::AUTH_WINDOW;
 
 /// Two clicks closer together than this on the same row count as a double-click.
 const DOUBLE_CLICK: Duration = Duration::from_millis(400);
-
-/// Does this screen end in something asking for a password?
-///
-/// Deliberately narrow: only a prompt on the last non-empty line counts, so
-/// the word "password" scrolling past in a log cannot trigger a send.
-fn looks_like_password_prompt(screen: &str) -> bool {
-    let Some(last) = screen.lines().map(|l| l.trim_end()).rfind(|l| !l.is_empty())
-    else {
-        return false;
-    };
-    let l = last.to_lowercase();
-    // A host-key question also ends in a colon but must not be answered with a
-    // password; it is handled by the user.
-    if l.contains("yes/no") || l.contains("fingerprint") {
-        return false;
-    }
-    (l.contains("password") || l.contains("passphrase")) && l.trim_end().ends_with(':')
-}
 
 /// A file operation running on a worker thread.
 ///

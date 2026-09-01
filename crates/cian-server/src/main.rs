@@ -2034,6 +2034,71 @@ impl Session {
             // The hosts init.lua declares, for the Shift+S picker. Names
             // only — whether a password is stored is a yes or a no, never the
             // password itself. Secrets do not travel to the window.
+            // `:ssh` / Shift+S / メニューの「SSH接続」 — a **shell session on
+            // the host**, which is what the terminal build has always meant by
+            // it (`App::ssh_connect`, ssh.rs). The window used to answer the
+            // same word by opening an SFTP listing in a pane, so the two
+            // builds disagreed about what `:ssh` *was*: one gave you a prompt
+            // on the far machine, the other gave you its files. Reported after
+            // the first Windows session — "本来はシェルパネルでSSHするはずだ",
+            // and quite right.
+            //
+            // The files are still one key away, and now under their own name:
+            // `:sftp` opens a host from `init.lua` in the pane.
+            "sshshell" => {
+                let which = req.params["pane"].as_str().unwrap_or("left").to_string();
+                let rows = req.params["rows"].as_u64().unwrap_or(24) as u16;
+                let cols = req.params["cols"].as_u64().unwrap_or(80) as u16;
+                let cfg = cian_lua::load();
+                let h = cfg
+                    .ssh_hosts
+                    .get(req.params["host"].as_u64().unwrap_or(0) as usize)
+                    .ok_or_else(|| anyhow::anyhow!("そのホストはありません"))?;
+                let u = h
+                    .users
+                    .get(req.params["user"].as_u64().unwrap_or(0) as usize)
+                    .ok_or_else(|| anyhow::anyhow!("そのユーザはありません"))?;
+                let line = cian_core::auth::ssh_command(&u.name, &h.host, h.port);
+                let label = format!("{}@{}", u.name, h.name);
+                // Resolved before the command is sent, so a slow `password_cmd`
+                // cannot make us miss the prompt — the terminal build learned
+                // this the same way.
+                let secret = match (&u.password, &u.password_cmd) {
+                    (Some(p), _) => Some(p.clone()),
+                    (None, Some(cmd)) => {
+                        let out = cian_core::proc::quiet(if cfg!(windows) { "cmd" } else { "sh" })
+                            .args(if cfg!(windows) { ["/C", cmd.as_str()] } else { ["-c", cmd.as_str()] })
+                            .output()?;
+                        Some(String::from_utf8_lossy(&out.stdout).trim_end().to_string())
+                    }
+                    (None, None) => None,
+                };
+                // A panel that is not open yet is opened, rather than an error
+                // saying so: "connect to this host" is not a request that
+                // becomes invalid because no shell happens to be running.
+                if self.tabs.is_empty() {
+                    let cwd = self.pane_mut(&which)?.cwd.clone();
+                    let id = self.new_shell(&cwd, rows, cols)?;
+                    self.tabs.push(ShellTab {
+                        root: shell::Node::Leaf(id), focus: id,
+                        sync: false, zoom: false, name: String::new(),
+                        sync_members: Default::default(),
+                    });
+                    self.shell_at = self.tabs.len() - 1;
+                }
+                let Some(sh) = self.shell_now() else {
+                    anyhow::bail!("シェルが開けませんでした");
+                };
+                sh.write(format!("{line}\n").as_bytes());
+                if let Some(secret) = secret {
+                    sh.arm_auth(secret);
+                }
+                let mut reply = self.shell_reply();
+                reply["ran"] = serde_json::json!(line);
+                reply["who"] = serde_json::json!(label);
+                reply["keyed"] = serde_json::json!(u.password.is_none() && u.password_cmd.is_none());
+                Ok(reply)
+            }
             "sshhosts" => {
                 let cfg = cian_lua::load();
                 Ok(serde_json::json!({
@@ -3630,8 +3695,28 @@ impl Session {
                 if !report.errors.is_empty() {
                     anyhow::bail!("{}", report.errors.join(" / "));
                 }
+                // **Read the zip again, not the directory.** An archive view is
+                // synthetic — its rows were made from the member list when you
+                // walked in — so `reload()` only re-sorts and re-filters the
+                // rows it already holds. The zip on disk had the new name and
+                // the listing kept the old one until you left the directory
+                // and came back, which is where "renamed it but the pane still
+                // shows the old name" came from.
+                let (archive, sub) = {
+                    let pane = self.pane_mut(&which)?;
+                    let Some((a, sub)) = pane.archive_view() else {
+                        anyhow::bail!("アーカイブを開いていません");
+                    };
+                    (a.to_path_buf(), sub.to_string())
+                };
+                let members = cian_core::archive::list(&archive)?;
+                let rows = cian_core::archive::archive_rows(&archive, &members, &sub);
                 let pane = self.pane_mut(&which)?;
-                pane.reload()?;
+                let was = pane.cursor;
+                pane.enter_archive(archive, sub, rows);
+                // Stay where the hand was. A rebuilt listing that jumps to the
+                // top makes renaming three files in a row three journeys.
+                pane.cursor = was.min(pane.entries.len().saturating_sub(1));
                 let mut reply = self.view(&which)?;
                 reply["member"] = serde_json::json!(member);
                 reply["to"] = serde_json::json!(to);

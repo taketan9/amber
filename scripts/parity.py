@@ -73,7 +73,9 @@ MENU_WORDS |= labels_in(region("function contextRows()", "/// A row that opens a
 MENU_WORDS |= labels_in(region("function aiRows()", "const CONTEXT = {"))
 MENU_WORDS |= labels_in(region("function menuRows()", "function drawMenu()"))
 TOGGLE_WORDS = labels_in(region("const TOGGLES = {", "const SORT_MENU = {"))
-SORT_WORDS = labels_in(region("const SORTS = [", "async function applySort"))
+# `function sorts()` — 定数から関数になりました（`tr()` を読み込み時に評価すると
+# 言語を切り替えても変わらないため。scripts/i18n.py がその検査を持っています）。
+SORT_WORDS = labels_in(region("function sorts()", "async function applySort"))
 
 # 退いた言い方。**どちらの前端にも、画面に出す文字列としては残らない。**
 #

@@ -49,17 +49,34 @@ NOT_DRIVEN = {
 }
 
 
+# ヘルプの行が何行くらいあるはずか、の下限。
+#
+# **この検査は一度黙りました。** 下の正規表現は説明が素の文字列であることを
+# 前提にしていて（`['Ctrl+S', '保存']`）、窓版を `tr(en, ja)` に通した回に
+# ほぼ全部が `['Ctrl+S', tr("save", '保存')]` になり、拾える行が 72 → 2 に
+# 落ちました。それでも百分率は出るので、緑に見えたまま数か月動いていました。
+# 数が崩れたら**落ちる**ようにしておけば、次に形が変わったとき黙りません。
+FLOOR = 40
+
+
 def documented() -> set[str]:
     """Every key the help's first column names."""
     src = RENDERER.read_text(encoding="utf-8")
     keys: set[str] = set()
-    pattern = r"\['([^']*(?:Ctrl|Shift|Alt|F\d|Enter|Esc|Space)[^']*)',\s*'"
+    # 説明は素の文字列でも `tr(...)` でもよい。
+    pattern = r"\['([^']*(?:Ctrl|Shift|Alt|F\d|Enter|Esc|Space)[^']*)',\s*(?:'|\"|`|tr\()"
     for m in re.finditer(pattern, src):
         for part in re.split(r"\s*/\s*", m.group(1)):
             part = part.strip()
             # `:theme` and friends are commands, tested by name elsewhere.
             if part and not part.startswith(":"):
                 keys.add(part)
+    if len(keys) < FLOOR:
+        raise SystemExit(
+            f"ヘルプから拾えたキーが {len(keys)} 種しかありません（下限 {FLOOR}）。\n"
+            "検査が壊れています ── ヘルプ行の書き方が変わったなら、"
+            "この正規表現を直してから数えてください。"
+        )
     return keys
 
 

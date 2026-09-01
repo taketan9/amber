@@ -10601,30 +10601,6 @@
     }
 
     #[test]
-    fn a_password_prompt_is_recognised_only_at_the_end_of_the_screen() {
-        assert!(looks_like_password_prompt("root@10.0.2.31's password:"));
-        assert!(looks_like_password_prompt("Password:"));
-        assert!(looks_like_password_prompt("Enter passphrase for key '/x/id_ed25519':"));
-        // Trailing blank lines are ignored.
-        assert!(looks_like_password_prompt("Password:\n\n  \n"));
-    }
-
-    #[test]
-    fn things_that_must_not_be_mistaken_for_a_password_prompt() {
-        // The word scrolling past in output is not a prompt.
-        assert!(!looks_like_password_prompt("password rotation done\n$ "));
-        assert!(!looks_like_password_prompt("Failed password for root\n$ "));
-        // A host-key question ends in a colon but must be answered by a human.
-        assert!(!looks_like_password_prompt(
-            "The authenticity of host 'x' can't be established.\n\
-             ED25519 key fingerprint is SHA256:abc.\n\
-             Are you sure you want to continue connecting (yes/no)?:"
-        ));
-        assert!(!looks_like_password_prompt(""));
-        assert!(!looks_like_password_prompt("$ "));
-    }
-
-    #[test]
     fn connecting_as_a_user_with_a_secret_arms_the_prompt_watcher() {
         let (_d, mut app) = app_with_ssh();
         app.ssh_connect(1, "postgres");

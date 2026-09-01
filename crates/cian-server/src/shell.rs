@@ -27,9 +27,48 @@ use crate::wire::Out;
 /// changed is the wasteful part, not the looking.
 const TICK_MS: u64 = 30;
 
+/// A password waiting for the prompt that will ask for it.
+///
+/// Held here rather than sent with the command because `ssh` reads the
+/// password from the terminal, not from its arguments — see
+/// `cian_core::auth`. The watcher thread below is already looking at every
+/// frame, so it is the natural place to notice the question.
+struct PendingAuth {
+    secret: String,
+    until: std::time::Instant,
+}
+
+/// Type the held password if this screen is asking for one.
+///
+/// Never logged, never echoed, never put in a message — it goes from the
+/// config straight to the pty and is dropped. Submitted with a carriage
+/// return, because `getpass` reads the line ended by CR and a bare `\n` may
+/// not end it.
+fn send_pending_auth(session: &mut PtySession, slot: &Arc<Mutex<Option<PendingAuth>>>) {
+    let Ok(mut held) = slot.lock() else { return };
+    let Some(pending) = held.as_ref() else { return };
+    if std::time::Instant::now() > pending.until {
+        *held = None;
+        return;
+    }
+    let asking = match session.parser().lock() {
+        Ok(p) => cian_core::auth::looks_like_password_prompt(&p.screen().contents()),
+        Err(_) => false,
+    };
+    if !asking {
+        return;
+    }
+    let Some(pending) = held.take() else { return };
+    let mut bytes = pending.secret.into_bytes();
+    bytes.push(b'\r');
+    session.write_input(&bytes);
+}
+
 pub struct Shell {
     session: Arc<Mutex<PtySession>>,
     stop: Arc<AtomicBool>,
+    /// Shared with the watcher thread, which is the one that sees the prompt.
+    auth: Arc<Mutex<Option<PendingAuth>>>,
     /// Which shell this is, carried on every screen it sends.
     ///
     /// A hidden tab keeps running — that is the reason to have tabs — and it
@@ -61,8 +100,10 @@ impl Shell {
         let session = Arc::new(Mutex::new(session));
         let stop = Arc::new(AtomicBool::new(false));
 
+        let auth: Arc<Mutex<Option<PendingAuth>>> = Arc::new(Mutex::new(None));
         let watch = Arc::clone(&session);
         let watch_stop = Arc::clone(&stop);
+        let watch_auth = Arc::clone(&auth);
         std::thread::spawn(move || {
             let mut ticks: u32 = 0;
             while !watch_stop.load(Ordering::Relaxed) {
@@ -86,7 +127,11 @@ impl Shell {
                 if !dirty {
                     continue;
                 }
-                let Ok(s) = watch.lock() else { continue };
+                let Ok(mut s) = watch.lock() else { continue };
+                // Before the frame goes out, not after: if this screen is the
+                // password prompt, the person should never see it sitting
+                // there unanswered.
+                send_pending_auth(&mut s, &watch_auth);
                 if let Some(mut grid) = render(&s) {
                     grid["id"] = serde_json::json!(id);
                     out.event("shell", grid);
@@ -97,13 +142,28 @@ impl Shell {
             // about the window's own request.
         });
 
-        Ok(Shell { session, stop, id, rows, cols })
+        Ok(Shell { session, stop, auth, id, rows, cols })
     }
 
     /// A handle a worker can hold: writing and waiting, without the Shell
     /// itself (which lives in the session and cannot cross a thread).
     pub fn handle(&self) -> Handle {
         Handle { session: Arc::clone(&self.session) }
+    }
+
+    /// Hold a password until this shell is asked for one.
+    ///
+    /// Armed for `AUTH_WINDOW` and then forgotten, whether or not it was ever
+    /// wanted — a keyed host never asks, and a secret left armed is a secret
+    /// that could be typed into whatever is on the screen twenty minutes
+    /// later.
+    pub fn arm_auth(&self, secret: String) {
+        if let Ok(mut slot) = self.auth.lock() {
+            *slot = Some(PendingAuth {
+                secret,
+                until: std::time::Instant::now() + cian_core::auth::AUTH_WINDOW,
+            });
+        }
     }
 
     pub fn write(&self, bytes: &[u8]) {

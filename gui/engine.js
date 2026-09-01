@@ -68,22 +68,50 @@ class Engine {
         this.child.stderr.on('data', (b) => console.error('engine:', String(b).trimEnd()));
         // A dead engine must not leave callers waiting for ever.
         this.child.on('exit', (code) => {
+            this.gone = true;
             const dead = new Error(`the engine stopped (exit ${code})`);
             for (const { reject } of this.pending.values()) reject(dead);
             this.pending.clear();
         });
+        // **Closing the window used to end with a dialog.** The last thing a
+        // window does on its way out is remember things — the look, the font,
+        // the split — and each of those is a `call`. `stop()` has already
+        // killed the child by then, so the write lands on a pipe with nobody
+        // at the other end: `write EOF`, raised as an `error` event on a
+        // stream nobody was listening to, which Node turns into an uncaught
+        // exception and Electron into `Uncaught Exception: Error: write EOF`.
+        //
+        // Two halves, because either alone still leaves the other case: the
+        // handler here catches a pipe that dies mid-write, and `gone` below
+        // stops us starting a write we already know has nowhere to go. A
+        // shutting-down engine is not an error to show anybody — the answers
+        // were only ever going to be discarded.
+        const quiet = () => { this.gone = true; };
+        this.child.stdin.on('error', quiet);
+        this.child.on('error', quiet);
     }
 
     call(method, params = {}) {
         const id = this.next++;
         const line = JSON.stringify({ id, method, params });
         return new Promise((resolve, reject) => {
+            if (this.gone || !this.child.stdin.writable) {
+                reject(new Error('the engine is not running'));
+                return;
+            }
             this.pending.set(id, { resolve, reject });
-            this.child.stdin.write(line + '\n');
+            // The callback form, so a pipe that closes between the check above
+            // and the write itself is answered here rather than thrown.
+            this.child.stdin.write(line + '\n', (e) => {
+                if (!e) return;
+                this.pending.delete(id);
+                reject(e);
+            });
         });
     }
 
     stop() {
+        this.gone = true;
         this.child.kill();
     }
 }

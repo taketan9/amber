@@ -1200,10 +1200,7 @@ impl App {
     pub(crate) fn ssh_connect(&mut self, idx: usize, user: &str) {
         let Some(h) = self.config.ssh_hosts.get(idx) else { return };
         let Some(u) = h.users.iter().find(|u| u.name == user) else { return };
-        let mut cmd = format!("ssh {}@{}", u.name, h.host);
-        if let Some(p) = h.port {
-            cmd.push_str(&format!(" -p {}", p));
-        }
+        let cmd = cian_core::auth::ssh_command(&u.name, &h.host, h.port);
         let label = format!("{}@{}", u.name, h.name);
         // Resolved before the command is sent so a slow `password_cmd` cannot
         // make us miss the prompt.
@@ -1236,7 +1233,7 @@ impl App {
         }
         let asking = match self.shell.active_session() {
             Some(s) => match s.parser().lock() {
-                Ok(p) => looks_like_password_prompt(&p.screen().contents()),
+                Ok(p) => cian_core::auth::looks_like_password_prompt(&p.screen().contents()),
                 Err(_) => false,
             },
             None => false,
