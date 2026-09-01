@@ -2077,6 +2077,9 @@ function viewerRows() {
     v.push({ label: tr("Save", '保存'), value: 'Ctrl+S', run: saveFile });
     v.push({ label: tr("Open in my editor", '外部エディタで開く'), value: ':edit', run: cmdEditExternal });
     v.push({ label: tr("Text encoding\u2026", '文字コードを指定…'), value: ':enc', run: () => cmdEncoding() });
+    // `?` はキーの取り合いになりうる ── vim の後方検索、IME、配列。
+    // **鍵の取り合いにならない道**を一本、メニューに置く。
+
     v.push({ label: tr("Who changed each line", '各行の最終変更者'), value: ':blame', run: cmdBlame });
     // cian-tui's row here is `mermaid 図をブラウザで開く`; the window draws the
     // diagrams in the preview instead, so this is the same row by another road.
@@ -2091,7 +2094,11 @@ function viewerRows() {
     v.push({ label: tr("Editor keys: vim / notepad", 'エディタのキー操作: vim / メモ帳'), value: styleName(style), run: () => setStyle(style + 1) });
     v.push({ label: tr("Theme (whole app)", 'テーマ（全体）'), value: ':theme', run: () => cmdTheme() });
     v.push({ label: tr("Close without saving", '保存せずに閉じる'), value: '', run: () => closeView(false) });
-    v.push({ label: tr("Key manual", 'キー一覧'), value: '?', run: openHelp });
+    // `?` はこの中のキー、`:help` は cian 全体。**別のもの**で、
+    // ここは `?` と書いておきながら全体のほうを開いていた ── 押した人は
+    // 「? を押したのに違うものが出た」としか思えない。
+    v.push({ label: tr("Keys in here", 'ここのキー一覧'), value: '?', run: viewerHelp });
+    v.push({ label: tr("The whole manual", 'cian のキー一覧（全体）'), value: ':help', run: openHelp });
     return v;
 }
 
@@ -3238,6 +3245,38 @@ function pressSpec(e) {
     return (e.ctrlKey || e.metaKey ? 'ctrl+' : '') + (e.altKey ? 'alt+' : '') + e.key;
 }
 
+/// `:key` — 何が届いているかを見る。**どこにいても。**
+///
+/// これは一覧のキー処理の中にあった。つまり**一覧でしか効かなかった** ──
+/// エディタでは viewer の capture が先に止め、シェルではシェルの capture が
+/// 先に止めるので、いちばん知りたい二つの場所で答えが出なかった。
+/// 「押しても何も起きない」を追うための道具が、押しても何も起きない場所で
+/// 使えない、というのは道具のほうの穴。
+///
+/// **いちばん早い capture** に置く。同じ node の capture は登録順なので、
+/// ファイルのここ（viewer は 4600 台、シェルは 8700 台）に置けば先に届く。
+/// ダイアログの listener だけは開いた時点で足されるので後になるが、
+/// ダイアログが開いているときにキーを調べたい場面は無い。
+document.addEventListener('keydown', (e) => {
+    if (!keyEcho.on) return;
+    // 飲み込む。この機能は「何も起きないキー」を試すためのもので、最初に
+    // 試されるのは大抵は和音 ── その半分は切り取り・削除・上書きをする。
+    // Ctrl+X を表示して**かつ**ファイルを切り取るのは、最悪の答え方。
+    if (e.key === 'Escape') { toggleKeyEcho(); return; }
+    e.stopImmediatePropagation();
+    e.preventDefault();
+    const bits = [
+        e.ctrlKey && 'Ctrl', e.altKey && 'Alt', e.shiftKey && 'Shift', e.metaKey && 'Meta',
+    ].filter(Boolean);
+    // どこで押されたかも言う ── 同じキーが場所によって別の扱いを受けるので、
+    // 「どこで」が抜けていると答えが半分になる。
+    const where = viewer.on ? tr('editor', 'エディタ')
+        : (term.on && term.focused) ? tr('shell', 'シェル')
+        : tr('listing', '一覧');
+    say(`[${where}] ${[...bits, e.key].join('+')}   code=${e.code}   keyCode=${e.keyCode}`
+        + tr('   — Esc stops it', '   — Esc で止める'));
+}, true);
+
 /// Take what init.lua bound. Names that are not actions and keys that are not
 /// keys are said out loud — a binding that silently does nothing is worse than
 /// no binding, because the person goes looking in the wrong place.
@@ -3260,21 +3299,6 @@ function applyKeymaps(list) {
 let keymapErrors = [];
 
 document.addEventListener('keydown', (e) => {
-    if (keyEcho.on) {
-        // Swallowed, not just reported. The point of this mode is to try the
-        // key that "does nothing" — and the first one anybody tries is a
-        // chord, half of which cut, delete or overwrite. Showing Ctrl+X and
-        // *also* cutting the file would be the worst possible answer.
-        if (e.key === 'Escape') { toggleKeyEcho(); return; }
-        e.stopPropagation();
-        e.preventDefault();
-        const bits = [
-            e.ctrlKey && 'Ctrl', e.altKey && 'Alt', e.shiftKey && 'Shift', e.metaKey && 'Meta',
-        ].filter(Boolean);
-        say(`${[...bits, e.key].join('+')}   code=${e.code}   keyCode=${e.keyCode}`
-            + tr('   — Esc stops it', '   — Esc で止める'));
-        return;
-    }
     // Not while a file is open. The editor no longer stops every key on its
     // way past — it cannot, or its own bindings never fire — so the listing's
     // keys have to decline for themselves.
@@ -9162,7 +9186,11 @@ for (const which of ['left', 'right']) {
         // The empty ground below the listing clears the marks (grid.rs:372).
         // A pane full of marks and no obvious way to drop them is a pane you
         // reach for Esc in and hope.
-        if (e.target.classList.contains('rows') && state[which].marked > 0) {
+        // `state[which]` can be null — a pane the engine has not answered for
+        // yet, and every teardown path. The handler is async and threw into a
+        // promise nobody was holding, which is the quietest way for a click
+        // to go wrong.
+        if (e.target.classList.contains('rows') && state[which] && state[which].marked > 0) {
             const next = await ask('unmarkall', { pane: which });
             if (next) { state[which] = next; draw(which); say(tr('marks cleared', 'マークを解除しました')); }
         }
