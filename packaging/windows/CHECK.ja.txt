@@ -1,4 +1,4 @@
-cian-gui 実機チェックリスト  v1.1.6
+cian-gui 実機チェックリスト  v1.1.7
 ====================================
 
 三巡目。前回の 4 件を直した回です ── そのうち 1 件（シェルタブの巻き添え）は
@@ -17,7 +17,7 @@ cian-gui 実機チェックリスト  v1.1.6
 0. まず版を確かめる
 -------------------
 
-  [ ] 「:」→ version が **1.1.6** と今日のビルド日時を出す
+  [ ] 「:」→ version が **1.1.7** と今日のビルド日時を出す
 
 
 第一部 ── 直したものを確かめる
@@ -160,8 +160,8 @@ B. 初回だけ IME がオフになる
   検証中に頼まれた2件です。
 
   [ ] タイトルバーが
-        **cian - Comfortable Interface for Agile File explorer Navigation**
-      （README の頭字語そのまま。x は小文字）
+        **cian — Comfortable Interface for Agile file explorer Navigation**
+      （README の頭字語そのまま。**file と explorer は小文字、区切りは長い —**）
       ※ 62文字あるので、狭い窓では末尾が切れます。短縮版が要れば言ってください
 
   [ ] タスクバーのアイコンが **cian のもの**（Electron の原子の絵ではない）
