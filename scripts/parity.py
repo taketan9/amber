@@ -54,8 +54,16 @@ def labels_in(text):
     for line in text.splitlines():
         if "label:" in line:
             out |= set(re.findall(r"'((?:[^'\\]|\\.)*)'", line.split("label:", 1)[1]))
-    out |= set(re.findall(r"group\(\s*'((?:[^'\\]|\\.)*)'", text))
-    out |= {p for p in re.findall(r"\['[^']*',\s*'((?:[^'\\]|\\.)*)'", text)}
+    # `group(` takes a label that may be `tr(en, ja)`, so take every string on
+    # the line rather than only the first argument — the same reason `label:`
+    # is read that way just above.
+    for line in text.splitlines():
+        if "group(" in line:
+            out |= set(re.findall(r"'((?:[^'\\]|\\.)*)'", line.split("group(", 1)[1]))
+    # `['key', 'label']` — and the label may now be `tr(en, ja)`, so the
+    # Japanese is the second string rather than the first.
+    out |= {p for p in re.findall(
+        r"\['[^']*',\s*(?:tr\([^,]*,\s*)?'((?:[^'\\]|\\.)*)'", text)}
     return {re.sub(r"\s+", " ", x).strip() for x in out}
 
 
@@ -106,9 +114,6 @@ def speech(path):
 
 # 窓版にまだ無いもの。「無い」ことを覚えておく表で、免除の理由が要ります。
 KNOWN = {
-    "言語": "Lang（英日切替）が窓版に無い — 窓版は日本語直書き。ROADMAP P4",
-    "日本語に切替": "同上",
-    "Switch to English": "同上",
 }
 
 # 窓版が**エンジンの答えから組み立てる**ラベル。字面はソースに無いので、

@@ -86,3 +86,9 @@ jobs:
       # of them was found by a person using the program.
       - name: The same words in both front ends
         run: python3 scripts/parity.py
+
+      # How much of the window can speak English yet. Not a gate — it is a
+      # number that should go up — so it never fails the build; it prints so
+      # that a pull request which adds twenty Japanese-only strings says so.
+      - name: How far the second language has got
+        run: python3 scripts/i18n.py
