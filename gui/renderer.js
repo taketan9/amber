@@ -2877,6 +2877,7 @@ function helpRows() {
         [tr("rectangle", '矩形'), tr("Alt+Shift+arrows selects; Alt+Shift+I/A/C/D for left edge / right edge / replace / delete", 'Alt+Shift+矢印 で選び、Alt+Shift+I/A/C/D で 左端/右端/置換/削除')],
         ['Ctrl+] / Ctrl+[', tr("move by heading (works in notepad style too)", '見出し移動（メモ帳のキー操作でも使えます）')],
         [tr("  in notepad style", '  メモ帳のとき'), tr("Ctrl+C/V/Z/F and the rest of the Windows hand", 'Ctrl+C/V/Z/F など Windows の手が効く')],
+        ['jj  /  ｊｊ  /  っｊ', tr("leave insert mode — the last two are what a Japanese IME makes of pressing j twice", '挿入モードを抜ける ── 後ろ2つは、IME オンで j を2回押したときに出るもの')],
     ]],
     [tr("Marks and file operations", 'マークと操作'), [
         ['Space', tr("toggle the mark and step down", 'マーク切替して下へ')],
@@ -3998,6 +3999,57 @@ async function lookInside() {
     }
 }
 
+/// `jj` leaves insert mode — **and so do `ｊｊ` and `っｊ`.**
+///
+/// The first is the mapping half the vim world writes into its config, and
+/// monaco-vim would take `Vim.map('jj', '<Esc>', 'insert')` for it. The other
+/// two are why that is not enough here: with a Japanese IME on, pressing j
+/// twice does not produce two `j` keystrokes at all. In kana mode it makes
+/// `っｊ` — a sokuon and a half-formed consonant — and in full-width mode
+/// `ｊｊ`. Those arrive as **committed text**, through composition, not as
+/// keys, so nothing that maps keystrokes can see them.
+///
+/// So this watches what lands in the buffer instead. Three strings, one rule:
+/// when insert mode has just taken one of them, take it back out and leave.
+/// That nobody types `jj` on purpose is the reason it was chosen in the first
+/// place, and it is as true of the other two.
+///
+/// Bounded: only the characters immediately before the cursor, only while vim
+/// is actually in insert mode, and only for a small change — a paste or an
+/// undo is not somebody pressing a key twice.
+const JJ = ['jj', 'ｊｊ', 'っｊ'];
+
+function armJJ() {
+    if (!viewer.ed) return;
+    if (viewer.jj) { viewer.jj.dispose(); viewer.jj = null; }
+    viewer.jj = viewer.ed.onDidChangeModelContent((ev) => {
+        if (!viewer.vim || !vimTyping()) return;
+        if (!ev.changes.length || ev.changes.some((c) => c.text.length > 2)) return;
+        const model = viewer.ed.getModel();
+        const at = viewer.ed.getPosition();
+        if (!model || !at) return;
+        const before = model.getLineContent(at.lineNumber).slice(0, at.column - 1);
+        const hit = JJ.find((seq) => before.endsWith(seq));
+        if (!hit) return;
+        viewer.ed.executeEdits('cian-jj', [{
+            range: {
+                startLineNumber: at.lineNumber, startColumn: at.column - hit.length,
+                endLineNumber: at.lineNumber, endColumn: at.column,
+            },
+            text: '',
+        }]);
+        // Out the way Esc goes. **`viewer.vim` is the adapter, not the
+        // editor** — what `initVimMode` returns is monaco-vim's CodeMirror
+        // shim (`handleKeyDown`, `state`, `editor`), and that is what these
+        // take. Passing the Monaco editor threw `Cannot read properties of
+        // undefined (reading 'vim')` from inside the library.
+        // eslint-disable-next-line no-undef
+        const V = MonacoVim.VimMode.Vim;
+        if (V.exitInsertMode) V.exitInsertMode(viewer.vim);
+        else V.handleKey(viewer.vim, '<Esc>');
+    });
+}
+
 /// Zoom and pan a picture.
 ///
 /// cian-tui draws images as half-blocks (`▀`, 24-bit colour) because that is
@@ -4428,9 +4480,11 @@ function setStyle(i, remember = true) {
         vim.defineAction('cianFold', () => viewer.ed.trigger('cian', 'editor.toggleFold'));
         vim.mapCommand('za', 'action', 'cianFold');
         vim.mapCommand('zA', 'action', 'cianFold');
+        armJJ();
     }
     // Sections, in both grammars: `]]` and `[[` walk the outline the way they
     // walk headings in vim.
+    // (`armJJ` is defined below.)
     if (viewer.ed) {
         viewer.ed.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.BracketRight,
             () => hopSection(1));
@@ -9479,6 +9533,11 @@ async function recall() {
         const at = STYLES.findIndex(([v]) => v === s.style);
         if (at >= 0) setStyle(at, false);
     }
+    // Configured is on. The terminal build has no switch — `sync_ime` runs
+    // whenever `cian.ime{}` exists — and the window asked you to type `:ime`
+    // first, so the same init.lua behaved differently in the two builds.
+    // `:ime` stays, as the way to stop it and as the diagnosis.
+    if (s.ime) { ime.on = true; syncIme(); }
     if (s.font) {
         const px = Number(s.font);
         if (px >= FONT.min && px <= FONT.max) setFont(px, false);

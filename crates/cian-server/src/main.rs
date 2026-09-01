@@ -2598,6 +2598,15 @@ impl Session {
                 Ok(serde_json::json!({
                 "look": cian_lua::state_get("gui_look"),
                 "style": cian_lua::state_get("gui_editor"),
+                // Whether `cian.ime{}` is configured at all.
+                //
+                // The terminal build herds the input method the moment it is
+                // configured (`sync_ime` returns early only when `config.ime`
+                // is None) — there is no switch to find. The window made you
+                // type `:ime` first, so the same init.lua produced different
+                // behaviour in the two builds, and the one place it matters
+                // most is vim's normal mode.
+                "ime": cfg.ime.is_some(),
                 // Its own key, not `font_level`. That one is the terminal
                 // emulator's point size, which cian-tui asks the emulator to
                 // set because it cannot set it itself; this is a number of

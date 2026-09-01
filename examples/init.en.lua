@@ -328,3 +328,44 @@
 --   model        = "<your model>",
 -- }
 --
+
+-- ----------------------------------------------------------------------------
+--  Japanese input (IME) — all but required if you use the vim grammar
+-- ----------------------------------------------------------------------------
+--  **With the IME on, normal-mode keys never reach cian.** The input method
+--  holds a keystroke until it is committed, so `j`, `i` and `?` do not arrive
+--  at all. This is true in the terminal build and in the window, and it is
+--  the same reason vim users install `im-select`.
+--
+--  Configured, cian switches it **for you, by mode**: off whenever a key is a
+--  command, and back to **the source you were last typing with** wherever
+--  text is being taken (insert mode, rename, the command line).
+--
+--  The helper ships with cian. There is nothing to install from elsewhere.
+--
+--  macOS — one compile (thirty lines over the system API):
+--    swiftc -O -o ~/.local/bin/cian-ime examples/cian-ime.swift
+--
+-- cian.ime{
+--   helper = "$HOME/.local/bin/cian-ime",
+--   off    = "com.apple.keylayout.ABC",   -- run `cian-ime` with no argument
+-- }                                       -- to print the current source id
+--
+--  Windows — nothing to compile; PowerShell runs it as it is:
+--
+-- cian.ime{
+--   helper = [[powershell -NoProfile -File C:\Users\you\cian-ime.ps1]],
+--   off    = "off",
+-- }
+--
+--  Note that Windows' IME is **open or closed per window**, which is a
+--  different thing from macOS' "switch the input source" — so its two ids are
+--  the words "on" and "off". cian never looks inside the string, so the same
+--  mechanism fits both.
+--
+--  `macism` or `im-select` work too if you already have one
+--  (`helper = "macism"`). For an odder helper, give `query` and `set`
+--  separately (`set = "switch --to {}"`).
+--
+--  **`:ime` is the diagnosis.** It shows what is configured, what source is
+--  remembered, and what the last switch did. `:ime on` / `:ime off` try it.
