@@ -898,6 +898,13 @@ html, body {
    its own box is gone and the sheet holds only the hits. It sat behind a
    scrim over the very listing it was searching. */
 #find-q { display: none; }
+/* A sheet raised by a search wears the search colour, the way the pane does
+   while the prompt is up — `Ctrl+F` and `Shift+F` end in a list, and the list
+   is where you are still searching. `#find` is the `//` picker, which types
+   into the same prompt. */
+#report[data-mode="search"], #find .sheet {
+  box-shadow: inset 0 0 0 2px var(--m-search);
+}
 #report .hit { cursor: default; }
 /* The tick box on a review row. Its own hit area, because clicking the box
    and clicking the row mean different things. */

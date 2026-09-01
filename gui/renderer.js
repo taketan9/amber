@@ -3339,6 +3339,11 @@ document.addEventListener('keydown', (e) => {
     }
     else if (k === 'T' && bare) openMenu(TOGGLES);
     else if (k === 'M' && bare) openMenu(CONTEXT);
+    // `q` — 終了。cian-tui は確認を出してから終わる（keys.rs:2350）。
+    // 一画面表示（詳細一覧・アイコン）では**文字**として扱うのも同じ ──
+    // そこは端末ではなくデスクトップの見た目で、頭文字でファイルを探すのが
+    // 当たり前だから、フォルダ名を打っている人に「出ますか」と訊かない。
+    else if (k === 'q' && bare && !ONE_PANE.includes(viewMode)) cmdQuit();
     else if (k === 'Z' && bare) cmdJump();
     else if (k === 's' && bare) cmdShortcuts();
     else if (k === 'S' && bare) cmdSshPicker();
@@ -3504,6 +3509,11 @@ function show(title, about, rows, opts = {}) {
     // Called when the list is dismissed rather than chosen from — for a list
     // that has been changing things while you looked at it.
     report.leave = opts.leave || null;
+    // A sheet raised by a search wears the search colour, as the pane does
+    // while you are typing into it — `Ctrl+F` and `Shift+F` end in a list,
+    // and the list is where you are still searching.
+    if (opts.mode) el.report.dataset.mode = opts.mode;
+    else delete el.report.dataset.mode;
     // Line the second column up.
     //
     // `.hit .p` grows to fill, so the path beside each name started at a
@@ -4608,7 +4618,11 @@ document.addEventListener('keydown', (e) => {
     //
     // Only in vim style, and only when the keys are commands: in notepad
     // style `?` is a character, and so it is in the middle of a word.
-    if (e.key === '?' && viewer.vim && !vimTyping() && !hex.editing
+    // `e.key` で当てるだけでは足りない ── 日本語キーボードでは同じ刻印が
+    // 違う `key` で届きうるし、IME が拾っている間は `Process` になる。
+    // `?` は JIS でも US でも `Slash` の位置なので、物理キーでも受ける。
+    if ((e.key === '?' || (e.code === 'Slash' && e.shiftKey))
+        && viewer.vim && !vimTyping() && !hex.editing
         && !e.ctrlKey && !e.metaKey && !e.altKey) {
         e.stopPropagation();
         e.preventDefault();
@@ -4716,6 +4730,22 @@ document.addEventListener('keydown', (e) => {
         return;
     }
 
+    // A comparison closes on one Esc.
+    //
+    // The three-press rule exists for a file you are *editing*: Esc is vim's
+    // way out of half a command, and a single one must not throw the file
+    // away. A side-by-side comparison is something you opened to look at, and
+    // three presses to put it down is three presses. `closeView` still asks
+    // if either side has unsaved edits, which is the thing the rule was
+    // protecting.
+    if (e.key === 'Escape' && pair.on && !vimTyping()) {
+        e.stopPropagation();
+        e.preventDefault();
+        wayOut.key = null;
+        wayOut.times = 0;
+        closeView();
+        return;
+    }
     // Backspace deletes in notepad style, so it is not offered as a way out
     // there. In vim style it is, but not while insert mode has the keyboard.
     const doors = viewer.vim
@@ -4956,9 +4986,21 @@ async function cmdCd(dest) {
     await goToPath(dest.trim());
 }
 
+/// `q` / `:q` — 終わる。
+///
+/// **`q` が何にも割り当てられていなかった。** `:q` はあったが、端末版は
+/// 一覧の `q` で終了の確認を出す（`start_quit_confirm`、keys.rs:2350）。
+/// 押して何も起きないキーは、無いキーより悪い。
+///
+/// 訊くのは端末版と同じ。シェルで何か動いているかもしれない、というのが
+/// 訊く理由なので、それを言う。
 async function cmdQuit() {
-    if (await confirm(tr('Quit cian', 'cian を閉じます'), '')) window.close();
-    else say(tr('stopped', 'やめました'));
+    if (!await confirm(tr('Quit cian', 'cian を終了します'),
+        term.on ? tr('anything running in the shell ends', 'シェルで動いているものは終わります') : '')) {
+        say(tr('stopped', 'やめました'));
+        return;
+    }
+    window.close();
 }
 
 async function cmdMkdir(spec) {
@@ -6187,6 +6229,9 @@ async function cmdSearch(mode, needle) {
     show(mode === 'content' ? `grep ${needle}` : `find ${needle}`,
         tr(`${r.root}   ${rows.length}${r.truncated ? ' (stopped at the cap)' : ''}`, `${r.root}   ${rows.length} 件${r.truncated ? '（打ち切り）' : ''}`),
         rows, {
+            // Still searching: the sheet takes the search colour, as the pane
+            // does while the prompt is up.
+            mode: 'search',
             foot: tr('Enter go there   p into a pane   r replace across   Esc close', 'Enter そこへ   p 一覧に読み込む   r 一括置換   Esc 閉じる'),
             pick: (row) => {
                 closeReport();
@@ -6288,7 +6333,9 @@ async function cmdHistory() {
     if (!r) return;
     const rows = [
         ...r.back.map((p) => ({ n: '←', label: p })),
-        { n: '', label: r.cwd, sub: tr('here now', 'いまここ') },
+        // 「いまここ」は口語すぎる、と言われた。一覧の中で自分の位置を示す
+        // 語は「現在地」── 地図でも案内でも使われている、説明の要らない語。
+        { n: '', label: r.cwd, sub: tr('current', '現在地') },
         ...r.forward.map((p) => ({ n: '→', label: p })),
     ];
     show(tr('History', '履歴'), r.cwd, rows, {
@@ -7881,7 +7928,7 @@ async function cmdVersion() {
         ? new Date(w.built_at * 1000).toLocaleString('ja-JP',
             { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
         : tr('(unknown)', '(不明)');
-    show('cian', tr(`${w.version || '1.1.7'} — a window on cian-core`, `${w.version || '1.1.7'} — cian-core の上の窓`), [
+    show('cian', tr(`${w.version || '1.1.8'} — a window on cian-core`, `${w.version || '1.1.8'} — cian-core の上の窓`), [
         { label: tr('Built', 'ビルド日時'), sub: built + (w.commit ? `   ${w.commit}` : '') },
         { label: tr('Typeface', '書体'), sub: `${resolvedFace()}   ${FONT.at}px` },
         { label: tr('Config', '設定'), sub: w.config || tr('(none)', '(なし)') },
@@ -8877,11 +8924,20 @@ function shellBytes(e) {
     // `null` rather than an encoding: the caller leaves the browser default
     // alone for an unencodable key, which is exactly what handing a key back
     // to Windows means.
-    if (k === 'Zenkaku' || k === 'Hankaku' || k === 'ZenkakuHankaku'
-        || k === 'KanjiMode' || k === 'Convert' || k === 'NonConvert'
-        || (e.altKey && (k === '`' || k === '@'))) {
+    // **`e.key` では当たらない。** 日本語キーボードの `半角/全角` は
+    // `Backquote` の位置にあり、`key` は環境によって `Zenkaku` だったり
+    // `Process` だったり `Unidentified` だったりする。Alt+` も、JIS では
+    // バッククォート自体が別の位置にあるので `key === '`'` で待っていても
+    // 来ない。**物理位置で見る** ── ただし修飾なしの `Backquote` は US 配列で
+    // ただのバッククォートなので、決して飲み込まない。
+    const imeNamed = ['Zenkaku', 'Hankaku', 'ZenkakuHankaku', 'KanjiMode',
+                      'Convert', 'NonConvert', 'Eisu', 'Kana', 'KanaMode'];
+    if (imeNamed.includes(k)) return null;
+    if (e.code === 'Backquote'
+        && (e.altKey || imeNamed.includes(k) || k === 'Process' || k === 'Unidentified')) {
         return null;
     }
+    if (e.altKey && k === '@') return null;
     if (e.ctrlKey && k.length === 1) {
         const up = k.toUpperCase();
         if (up >= 'A' && up <= 'Z') return String.fromCharCode(up.charCodeAt(0) - 64);

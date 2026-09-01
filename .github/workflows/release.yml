@@ -22,10 +22,26 @@ on:
       - "v[0-9]*"
       - "[0-9]*"
   workflow_dispatch:
+    inputs:
+      everything:
+        description: "Build every platform (off: the Windows window only)"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
 
+# **The Windows window only, unless asked otherwise.**
+#
+# 2026-09-01: "しばらくは Windows の gui モードでしか動作させないから、ビルドは
+# win-gui だけでいいよ". The full set is eleven minutes and a quarter of a
+# gigabyte, nearly all of it for platforms nobody is running this week — the
+# macOS universal build alone is two compiles of a wgpu front end, and the
+# offline source zip is 181MB.
+#
+# Nothing is deleted. The other jobs are gated on one input: run this workflow
+# by hand with **everything = true** and the release is the full set again,
+# which is what a version anybody else downloads will need.
 jobs:
   # A tag that disagrees with Cargo.toml ships binaries whose `:version` says
   # something other than the release they are attached to. Cheap to check, and
@@ -51,6 +67,8 @@ jobs:
   # zip for the terminal.
   macos:
     needs: version
+    # Only when asked for — see the note above `jobs:`.
+    if: inputs.everything
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v5
@@ -136,7 +154,10 @@ jobs:
       # The window build embeds a font so the download needs nothing
       # installed to run. Fetched here rather than committed: it is twelve
       # megabytes that would sit in every clone forever.
+      # Only the frozen winit front end needs it, and that is only built for
+      # the full set.
       - name: Fetch the bundled font
+        if: inputs.everything
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path crates/cian-gui/fonts | Out-Null
@@ -146,13 +167,22 @@ jobs:
         env:
           FONT_URL: https://github.com/yuru7/HackGen/releases/download/v2.10.0/HackGen_NF_v2.10.0.zip
 
-      - name: Build (release)
+      # The engine, always: it is what the window in the zip talks to, and it
+      # is the fastest of the three to build.
+      - name: Build the engine
+        run: cargo build --release --bin cian-server
+
+      # `cian` is the frozen winit front end and by far the slowest thing here
+      # (wgpu). `cian-tui` is the terminal build. Neither is in the window's
+      # zip, so neither is built unless the full set was asked for.
+      - name: Build the terminal build and the winit one
+        if: inputs.everything
         run: |
           cargo build --release --bin cian-tui
-          cargo build --release --bin cian-server
           cargo build --release --bin cian --features cian-gui/bundled-font
 
       - name: Stage package
+        if: inputs.everything
         shell: pwsh
         run: |
           $stage = "cian-windows-x64"
@@ -168,6 +198,7 @@ jobs:
           Compress-Archive -Path "$stage/*" -DestinationPath "cian-windows-x64.zip" -Force
 
       - name: Upload artifact
+        if: inputs.everything
         uses: actions/upload-artifact@v6
         with:
           name: cian-windows-x64
@@ -240,6 +271,8 @@ jobs:
   # is what a Linux user's hands already know.
   linux-x64:
     needs: version
+    # Only when asked for — see the note above `jobs:`.
+    if: inputs.everything
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -290,6 +323,8 @@ jobs:
   # Windows machine rather than trusting it.
   source-offline:
     needs: version
+    # Only when asked for — see the note above `jobs:`.
+    if: inputs.everything
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -356,6 +391,8 @@ jobs:
   # claim the package makes, tested on the platform it is for.
   source-offline-check:
     needs: source-offline
+    # Only when asked for — see the note above `jobs:`.
+    if: inputs.everything
     runs-on: windows-latest
     steps:
       - uses: actions/download-artifact@v6
@@ -386,7 +423,10 @@ jobs:
   # One release, made once, over the finished set of packages.
   publish:
     needs: [macos, windows-x64, linux-x64, source-offline-check]
-    if: startsWith(github.ref, 'refs/tags/')
+    # `always()`, because a skipped need would otherwise skip this too, and
+    # three of the four are skipped on an ordinary tag now. The one that must
+    # have succeeded is named explicitly.
+    if: always() && startsWith(github.ref, 'refs/tags/') && needs.windows-x64.result == 'success'
     runs-on: ubuntu-latest
     steps:
       # The generated notes are a list of commits, which answers a question
