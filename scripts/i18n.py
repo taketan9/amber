@@ -59,6 +59,20 @@ def spans_inside_tr(text):
     return spans
 
 
+# 訳さないもの。**理由が要ります。**
+#
+# どちらも「その言語で書いてあること自体が意味」の文字列です。配色は名前で
+# （dracula や nord を訳さないのと同じ）、切替のラベルは*切り替わる先*の言葉で
+# 書きます ── 端末版の `MenuItem::Lang` も `tr` ではなく match です。
+KEEP = {
+    "白磁": "窓の配色の名前。dracula や nord と同じで、名前は訳さない",
+    "陰翳": "同上",
+    "端末譲り": "同上",
+    "日本語": "スイッチの値。いまの言語の名を、その言語で言う",
+    "日本語に切替": "切り替わる先の言葉で書く（英語のときだけ出る）",
+}
+
+
 def untranslated(path):
     text = source_without_comments((ROOT / path).read_text(encoding="utf-8"))
     inside = spans_inside_tr(text)
@@ -69,7 +83,7 @@ def untranslated(path):
     out = []
     for m in LIT.finditer(text):
         v = m.group(1) or m.group(2) or m.group(3) or ""
-        if JA.search(v) and not covered(m.start()):
+        if JA.search(v) and not covered(m.start()) and v not in KEEP:
             out.append((text[: m.start()].count("\n") + 1, v))
     return out
 
@@ -106,7 +120,8 @@ def main():
     if bad:
         print()
     print(f"  両方の言葉で言えるもの {done} / {total}（{pct}%）"
-          f" ── まだ日本語だけ {len(left)} 件")
+          f" ── まだ日本語だけ {len(left)} 件"
+          + (f"（訳さないと決めたもの {len(KEEP)} 件は除く）" if not left else ""))
     print("=" * 72)
     return 1 if bad else 0
 
