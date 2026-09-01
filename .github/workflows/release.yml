@@ -154,10 +154,12 @@ jobs:
       # The window build embeds a font so the download needs nothing
       # installed to run. Fetched here rather than committed: it is twelve
       # megabytes that would sit in every clone forever.
-      # Only the frozen winit front end needs it, and that is only built for
-      # the full set.
+      # **Always.** The first gui-only build gated this on `everything` and the
+      # window's zip came back 6MB lighter — `gui/vendor.js` copies this same
+      # file into `vendor/fonts/cian.ttf`, which is the face the window draws
+      # its file-type glyphs with. The winit build needs it too; that one is
+      # optional, this is not.
       - name: Fetch the bundled font
-        if: inputs.everything
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path crates/cian-gui/fonts | Out-Null
@@ -254,6 +256,13 @@ jobs:
           # the repository root second, so this is what makes the packaged
           # copy find one at all.
           Copy-Item cian.ico "$stage/"
+          # **The font, or stop.** `vendor.js` prints a line and carries on
+          # when it cannot find one, so the first gui-only build shipped a zip
+          # 6MB lighter with no face in it and nothing failed. A package that
+          # is quietly missing something is worse than a build that stops.
+          if (-not (Test-Path "$stage/vendor/fonts/cian.ttf")) {
+              throw "vendor/fonts/cian.ttf is missing — the window would draw the listing in a proportional face"
+          }
           Copy-Item README.md, README.ja.md, LICENSE "$stage/"
           New-Item -ItemType Directory -Force -Path "$stage/examples" | Out-Null
           Copy-Item examples/init.lua "$stage/examples/"
