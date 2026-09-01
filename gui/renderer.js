@@ -2878,6 +2878,7 @@ function helpRows() {
         ['Ctrl+] / Ctrl+[', tr("move by heading (works in notepad style too)", '見出し移動（メモ帳のキー操作でも使えます）')],
         [tr("  in notepad style", '  メモ帳のとき'), tr("Ctrl+C/V/Z/F and the rest of the Windows hand", 'Ctrl+C/V/Z/F など Windows の手が効く')],
         ['jj  /  ｊｊ  /  っｊ', tr("leave insert mode — the last two are what a Japanese IME makes of pressing j twice", '挿入モードを抜ける ── 後ろ2つは、IME オンで j を2回押したときに出るもの')],
+        ['ZZ  /  ZQ', tr("save and close / close without saving", '保存して閉じる ／ 保存せずに閉じる')],
     ]],
     [tr("Marks and file operations", 'マークと操作'), [
         ['Space', tr("toggle the mark and step down", 'マーク切替して下へ')],
@@ -4753,6 +4754,37 @@ document.addEventListener('keydown', (e) => {
             e.stopPropagation(); e.preventDefault();
             pic.fit = true; pic.ox = 0; pic.oy = 0; paintPicture(); return;
         }
+    }
+    // `ZZ` saves and closes, `ZQ` closes without saving.
+    //
+    // The two the fingers reach for first when leaving vim, and monaco-vim
+    // has neither — `mapCommand('ZZ', …)` does not take, so this counts the
+    // `Z` itself. `Z` alone is a prefix in vim and commands nothing, so
+    // holding it costs nothing; anything else clears it.
+    if (viewer.vim && !vimTyping() && !hex.editing
+        && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        // 物理位置で見る ── `?` と同じ理由（配列と IME で `key` はぶれる）。
+        if (e.code === 'KeyZ' && e.shiftKey) {
+            e.stopPropagation();
+            e.preventDefault();
+            if (viewer.zPending) {
+                viewer.zPending = false;
+                saveFile().then((ok) => { if (ok) closeView(false); });
+            } else {
+                viewer.zPending = true;
+            }
+            return;
+        }
+        if (viewer.zPending && e.code === 'KeyQ' && e.shiftKey) {
+            viewer.zPending = false;
+            e.stopPropagation();
+            e.preventDefault();
+            // `ZQ` is "leave, and I mean it" — `closeView(false)` is the door
+            // that does not ask, which is the whole of what ZQ means.
+            closeView(false);
+            return;
+        }
+        viewer.zPending = false;
     }
     // `?` — what can be done *in here*, which is not the same question as
     // what cian can do.
