@@ -18,6 +18,7 @@ const DRAG_ICON = nativeImage.createFromDataURL(
         + '<path d="M10 10h12M10 15h12M10 20h8" stroke="#9aa0a6" stroke-width="2"/></svg>',
     ).toString('base64'));
 const path = require('node:path');
+const fs = require('node:fs');
 const os = require('node:os');
 const { Engine } = require('./engine');
 
@@ -48,12 +49,41 @@ if (process.env.CIAN_GPU !== '1') app.disableHardwareAcceleration();
 /// dark — right for a dark theme and exactly wrong for 白磁, the default.
 const GROUNDS = { hakuji: '#f7f8f8', inei: '#14110f', terminal: '#0c0c0c' };
 
+/// cian's own icon, wherever this is running from.
+///
+/// **The window had no icon at all.** Nothing was passed to `BrowserWindow`,
+/// so on Windows the taskbar drew Electron's default atom — which is why
+/// "the icon is not cian-ish" was true in a way nobody had said out loud:
+/// the *window* was not wearing cian's icon, whatever `cian.ico` looked like.
+///
+/// Packaged it sits beside `main.js`; from a checkout it is at the root of
+/// the repository. Same two-place search as `enginePath`, for the same
+/// reason. An object rather than a value, so a missing file passes nothing
+/// at all — Electron refuses an icon it cannot read.
+function iconArg() {
+    for (const at of [path.join(__dirname, 'cian.ico'), path.join(__dirname, '..', 'cian.ico')]) {
+        if (fs.existsSync(at)) return { icon: at };
+    }
+    return {};
+}
+
 function createWindow(ground) {
     const win = new BrowserWindow({
         width: 1200,
         height: 800,
         backgroundColor: ground,
-        title: 'cian',
+        // The name says what it stands for, which is where the name came
+        // from: the README has opened with **C**omfortable **I**nterface for
+        // **A**gile File e**X**plorer **N**avigation since the first commit,
+        // and it had never been anywhere a person actually looks. Seven
+        // invented lines were offered and all seven were wrong, for the good
+        // reason that cian already had one.
+        //
+        // `index.html`'s <title> is what Windows draws; this is the frame's
+        // title before the page loads, so the two say the same thing rather
+        // than the bar changing under you a beat after the window opens.
+        title: 'cian - Comfortable Interface for Agile File eXplorer Navigation',
+        ...iconArg(),
         webPreferences: {
             preload: path.join(__dirname, 'preload.js'),
             contextIsolation: true,

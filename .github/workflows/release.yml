@@ -219,6 +219,10 @@ jobs:
           # The checklist travels with the zip: the machine this is carried to
           # is offline, so a link to it would be a link to nothing.
           Copy-Item packaging/windows/CHECK.ja.txt "$stage/"
+          # The window's own icon. `main.js` looks beside itself first and at
+          # the repository root second, so this is what makes the packaged
+          # copy find one at all.
+          Copy-Item cian.ico "$stage/"
           Copy-Item README.md, README.ja.md, LICENSE "$stage/"
           New-Item -ItemType Directory -Force -Path "$stage/examples" | Out-Null
           Copy-Item examples/init.lua "$stage/examples/"
