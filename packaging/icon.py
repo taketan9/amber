@@ -164,3 +164,7 @@ if __name__ == '__main__':
     blob = ico(made)
     (OUT / 'cian.ico').write_bytes(blob)
     print(f'\ncian.ico  {len(blob)} B  ({len(made)} 枚)')
+    # macOS の Dock は .ico を読まない。`app.dock.setIcon` に渡せる PNG を
+    # 一枚、同じ絵から出しておく ── 二つの絵にすると必ずずれる。
+    (OUT / 'cian.png').write_bytes(dict(made)[256])
+    print(f"cian.png  {len(dict(made)[256])} B  (256px、Dock 用)")

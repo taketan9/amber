@@ -61,10 +61,34 @@ const GROUNDS = { hakuji: '#f7f8f8', inei: '#14110f', terminal: '#0c0c0c' };
 /// reason. An object rather than a value, so a missing file passes nothing
 /// at all — Electron refuses an icon it cannot read.
 function iconArg() {
-    for (const at of [path.join(__dirname, 'cian.ico'), path.join(__dirname, '..', 'cian.ico')]) {
+    for (const at of besideOrAbove('cian.ico')) {
         if (fs.existsSync(at)) return { icon: at };
     }
     return {};
+}
+
+/// Packaged, beside `main.js`; from a checkout, at the root of the repository.
+function besideOrAbove(name) {
+    return [path.join(__dirname, name), path.join(__dirname, '..', name)];
+}
+
+/// The Dock, on a Mac.
+///
+/// **`BrowserWindow`'s `icon` does nothing on macOS** — the Dock takes its
+/// picture from the `.app` bundle, and running from a checkout there is no
+/// bundle, so the Dock showed Electron's own icon. `app.dock.setIcon` is the
+/// way to say it anyway, and it wants a PNG: `nativeImage` reads `.ico` on
+/// Windows only. `packaging/icon.py` writes `cian.png` from the same drawing
+/// as the `.ico`, in the same run — two files, one picture, because two
+/// drawings would drift the first time one of them was touched.
+function nameTheDock() {
+    if (process.platform !== 'darwin' || !app.dock) return;
+    for (const at of besideOrAbove('cian.png')) {
+        if (!fs.existsSync(at)) continue;
+        const img = nativeImage.createFromPath(at);
+        if (!img.isEmpty()) app.dock.setIcon(img);
+        return;
+    }
 }
 
 function createWindow(ground) {
@@ -166,6 +190,7 @@ function nameSelf() {
 
 app.whenReady().then(async () => {
     nameSelf();
+    nameTheDock();
     installMenu();
     // The first plain argument is where to start; anything beginning with a
     // dash belongs to Chromium and may turn up anywhere in the line. Taking

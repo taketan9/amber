@@ -255,7 +255,7 @@ jobs:
           # The window's own icon. `main.js` looks beside itself first and at
           # the repository root second, so this is what makes the packaged
           # copy find one at all.
-          Copy-Item cian.ico "$stage/"
+          Copy-Item cian.ico, cian.png "$stage/"
           # **The font, or stop.** `vendor.js` prints a line and carries on
           # when it cannot find one, so the first gui-only build shipped a zip
           # 6MB lighter with no face in it and nothing failed. A package that
