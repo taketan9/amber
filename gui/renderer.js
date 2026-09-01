@@ -3345,6 +3345,16 @@ document.addEventListener('keydown', (e) => {
     // way past — it cannot, or its own bindings never fire — so the listing's
     // keys have to decline for themselves.
     if (viewer.on) return;
+    // **And not before there is a listing to steer.**
+    //
+    // Twenty-seven branches below read a field off a pane — `.remote`,
+    // `.entries`, `.cwd` — and every one of them was a crash waiting for the
+    // moment a pane is null: the first keystroke before the engine has
+    // answered, and the gap while one is being replaced. `Backspace` found it
+    // in the standard round. One guard here rather than twenty-seven, because
+    // the assumption is the same in all of them: a key aimed at a listing
+    // needs a listing.
+    if (!state.left || !state.right || !state[state.focus]) return;
     // What init.lua bound comes before what cian ships: rebinding a key is
     // saying "not the default", and a default that still fired would make the
     // binding a suggestion.

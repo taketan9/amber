@@ -507,14 +507,39 @@ async function main() {
             // `shot:name` writes a PNG next to the sandbox. Reading rows back
             // says what a menu *says*; only a picture says whether it fits.
             if (key.startsWith('shot:')) {
-                const png = await cdp.send('Page.captureScreenshot', { format: 'png' });
+                // `shot:name@<css>` — その要素だけを3倍で撮る。
+                //
+                // **CSS の後勝ちは全景では見えない。** 2pxの枠が消えている、
+                // 線が二本ある、列がずれている ── どれも1200px幅に縮めた絵の
+                // 中では1画素の話になる。毎回 sips でオフセットを当てて
+                // いたが、当て損なうと真っ黒な絵を見て「問題ない」と言う
+                // ことになるので、位置は要素に訊く。
+                const [name, sel] = key.slice(5).split('@');
+                let clip = null;
+                if (sel) {
+                    const box = await cdp.read(`(() => {
+                        const n = document.querySelector(${JSON.stringify(sel)});
+                        if (!n || n.hidden) return null;
+                        const b = n.getBoundingClientRect();
+                        if (!b.width || !b.height) return null;
+                        return { x: b.left, y: b.top, width: b.width, height: b.height };
+                    })()`);
+                    if (!box) {
+                        console.log(`  shot    ${sel} が見つかりません`);
+                        bad++;
+                        continue;
+                    }
+                    clip = { ...box, scale: 3 };
+                }
+                const png = await cdp.send('Page.captureScreenshot',
+                    clip ? { format: 'png', clip, captureBeyondViewport: true } : { format: 'png' });
                 // Not in the sandbox: that is deleted when the run ends, and
                 // a picture you cannot open afterwards is not evidence.
                 const dir = path.join(os.tmpdir(), 'cian-shots');
                 fs.mkdirSync(dir, { recursive: true });
-                const at = path.join(dir, `${key.slice(5)}.png`);
+                const at = path.join(dir, `${name}.png`);
                 fs.writeFileSync(at, Buffer.from(png.data, 'base64'));
-                console.log(`  shot    ${what || key.slice(5)}  → ${at}`);
+                console.log(`  shot    ${what || name}${sel ? ` (${sel} ×3)` : ''}  → ${at}`);
                 continue;
             }
             // `click:<css>` — press the mouse on the first match. The whole

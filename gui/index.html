@@ -752,7 +752,10 @@ html, body {
    than as two things. ("上辺が2つ線が入ったように見える".) At the bottom it
    is the shape a tab has always had, and it matches the editor's file tabs,
    which are the same idea one panel over. */
-#shell.on .stabs span.on { color: var(--accent); box-shadow: inset 0 -2px 0 var(--accent); }
+/* `--mode-accent`、枠と同じ ── シェルにキーがあるとき枠は金（`--m-shell`）
+   なのに、タブの印だけアクセント色のままだった。3倍で撮って初めて見えた
+   類のずれで、同じことを言っている二つが違う色で言っていた。 */
+#shell.on .stabs span.on { color: var(--mode-accent); box-shadow: inset 0 -2px 0 var(--mode-accent); }
 .stabs span:hover:not(.on) { color: var(--text); background: var(--pane-off); }
 #s-title { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* The strip was 39px for three short words. Its own line-height rather than
