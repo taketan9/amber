@@ -2,8 +2,10 @@
 //!
 //! Taketan was told to check the build time in `:version` and there wasn't
 //! one — it said `GUI 1.1.0`, which is the same thing yesterday's zip says.
-//! Every release this year has been tagged 1.1.0 on purpose, so the version
-//! number cannot separate two builds and something else has to.
+//! Several releases have carried the same version on purpose, and even when
+//! the number does move it moves once per release while builds happen all
+//! day, so the version can never separate two builds and something else has
+//! to.
 //!
 //! No dependency for this: a `git` that isn't there, or a source tree with no
 //! `.git` in it (the offline bundle), falls back to the empty string and the
