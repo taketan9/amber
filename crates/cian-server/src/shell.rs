@@ -455,6 +455,61 @@ impl Node {
     ///
     /// Worked out here rather than in the window because the tree is here.
     /// The window places boxes; it does not need to know what a split is.
+    /// Where each divider sits, and which split it belongs to: `(a_leaf, down,
+    /// x, y, w, h)` in the same fractions `places` uses. `a_leaf` is the first
+    /// leaf of the split's left/top half, which is enough to name the split
+    /// again when the window says where the divider was dragged to.
+    ///
+    /// Here for the same reason `places` is here: the window places boxes and
+    /// does not need to know what a split is. cian-tui reaches this through
+    /// `DividerTarget::ShellSplit`; a window has a pointer and needs the box.
+    pub fn dividers(
+        &self,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        out: &mut Vec<(u64, bool, f32, f32, f32, f32)>,
+    ) {
+        let Node::Split { down, ratio, a, b } = self else { return };
+        let r = ratio.clamp(0.05, 0.95);
+        let mut first = Vec::new();
+        a.leaves(&mut first);
+        if let Some(id) = first.first() {
+            if *down {
+                out.push((*id, true, x, y + h * r, w, 0.0));
+            } else {
+                out.push((*id, false, x + w * r, y, 0.0, h));
+            }
+        }
+        if *down {
+            a.dividers(x, y, w, h * r, out);
+            b.dividers(x, y + h * r, w, h * (1.0 - r), out);
+        } else {
+            a.dividers(x, y, w * r, h, out);
+            b.dividers(x + w * r, y, w * (1.0 - r), h, out);
+        }
+    }
+
+    /// Put the split holding `id` on this axis at `ratio` outright, rather
+    /// than stepping it. A drag names a position, not a direction.
+    pub fn set_ratio(&mut self, id: u64, down_axis: bool, to: f32) -> bool {
+        let Node::Split { down, ratio, a, b } = self else { return false };
+        if a.set_ratio(id, down_axis, to) || b.set_ratio(id, down_axis, to) {
+            return true;
+        }
+        if *down != down_axis {
+            return false;
+        }
+        let mut mine = Vec::new();
+        a.leaves(&mut mine);
+        if !mine.contains(&id) {
+            return false;
+        }
+        *ratio = to.clamp(0.1, 0.9);
+        true
+    }
+
     pub fn places(&self, x: f32, y: f32, w: f32, h: f32, out: &mut Vec<(u64, f32, f32, f32, f32)>) {
         match self {
             Node::Leaf(id) => out.push((*id, x, y, w, h)),

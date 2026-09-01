@@ -262,6 +262,21 @@ html, body {
   color: var(--dim); user-select: none;
 }
 .crumb .navb:hover { color: var(--accent); }
+/* The same two arrows in the viewer's title, for stepping between the files
+   F3 opened together. */
+.vhead .vnavb {
+  display: inline-block; padding: 0 4px; cursor: pointer;
+  color: var(--dim); user-select: none;
+}
+.vhead .vnavb:hover { color: var(--accent); }
+.vhead .vat { color: var(--dim); margin: 0 2px; }
+/* The handle on an inner shell split. Four pixels of hit area, invisible
+   until the pointer is on it — the boundary is already drawn by the two
+   panes; this is only somewhere to take hold of it. */
+.scut { position: absolute; z-index: 3; }
+.scut.v { width: 5px; margin-left: -2px; cursor: col-resize; }
+.scut.h { height: 5px; margin-top: -2px; cursor: row-resize; }
+.scut:hover, .dragging .scut { background: var(--accent); opacity: 0.35; }
 /* Tone alone used to be the whole answer, on the argument that a frame is the
    loudest way to say something the cursor already says. It was asked about
    three times — on a light palette the two grounds are a couple of percent

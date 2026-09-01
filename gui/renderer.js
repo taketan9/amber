@@ -973,6 +973,15 @@ function askFor(head, initial = '', opts = {}) {
         const onKey = (e) => {
             if (e.key === 'Escape') { e.stopPropagation(); done(null); }
             else if (e.key === 'Enter') { e.stopPropagation(); done(input.value); }
+            // ↑↓ **without closing the box**, when the caller has somewhere to
+            // step. cian-tui's search popup does this (keys.rs:713): several
+            // files share a substring, and walking them should not mean
+            // closing the search and typing it again.
+            else if (opts.onStep && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+                e.stopPropagation();
+                e.preventDefault();
+                opts.onStep(input.value, e.key === 'ArrowDown' ? 1 : -1);
+            }
             else e.stopPropagation();
         };
         el.ask.addEventListener('click', onClick);
@@ -3778,10 +3787,39 @@ async function openNth(at) {
     if (!await landOn(openFiles.list[openFiles.at])) return;
     if (viewer.on) await closeView(false);
     await lookInside();
-    if (openFiles.list.length > 1) {
-        el.vName.textContent = `[${openFiles.at + 1}/${openFiles.list.length}] ${viewer.name}`;
-    }
+    if (openFiles.list.length > 1) paintOpenFiles();
 }
+
+/// `◂ [2/5] ▸` in the viewer's title, and the arrows are clickable.
+///
+/// cian-tui puts the open files in a tab strip you can click (`mouse.rs:243`),
+/// and the window had F2 / Shift+F2 and a piece of text. A hand on the mouse
+/// had no way through a set of files it had just opened with F3.
+function paintOpenFiles() {
+    const n = openFiles.list.length;
+    if (n <= 1) { el.vName.textContent = viewer.name; return; }
+    const arrow = (glyph, step, what) => {
+        const b = document.createElement('span');
+        b.className = 'vnavb';
+        b.textContent = glyph;
+        b.title = what;
+        b.addEventListener('mousedown', (e) => {
+            e.stopPropagation();
+            openNth(openFiles.at + step);
+        });
+        return b;
+    };
+    const at = document.createElement('span');
+    at.className = 'vat';
+    at.textContent = `[${openFiles.at + 1}/${n}]`;
+    el.vName.replaceChildren(
+        arrow('◂', -1, tr('previous file', '前のファイル')),
+        at,
+        arrow('▸', 1, tr('next file', '次のファイル')),
+        document.createTextNode(` ${viewer.name}`),
+    );
+}
+
 
 /// Reading a file that only exists inside an archive.
 ///
@@ -5910,7 +5948,16 @@ async function endVisual(keep) {
 let here = { needle: '', at: -1 };
 
 async function searchHere() {
-    const needle = await askFor(tr('search this listing', 'この一覧を検索'), here.needle);
+    const needle = await askFor(tr('search this listing', 'この一覧を検索'), here.needle, {
+        // The box stays open and ↑↓ walk the matches — cian-tui's own
+        // behaviour on this popup, and the difference between finding *a*
+        // `main.rs` and finding the one you meant.
+        onStep: (value, step) => {
+            if (!value.trim()) return;
+            here.needle = value;
+            hopHere(step);
+        },
+    });
     if (needle === null || !needle) return;
     here.needle = needle;
     here.at = -1;
@@ -6594,7 +6641,7 @@ function takeShell(r) {
     term.sync = !!r.sync;
     if (r.names) term.names = r.names;
     el.shell.classList.toggle('sync', term.sync);
-    if (r.panes) layoutShell(r.panes);
+    if (r.panes) { layoutShell(r.panes); layoutShellDividers(r.dividers); }
 }
 
 /// Place the panes where the engine said, and draw each one's screen.
@@ -6602,6 +6649,69 @@ function takeShell(r) {
 /// Absolute positions from fractions, because the layout is a tree the engine
 /// has already turned into rectangles. Deriving it again here out of nested
 /// boxes would be the same arithmetic written twice.
+/// A draggable handle on each inner split boundary.
+///
+/// cian-tui reaches these through `DividerTarget::ShellSplit`; a window has a
+/// pointer, and four shells side by side with a boundary that can only be
+/// moved by Ctrl+Shift+arrow is four shells you leave at whatever width they
+/// started. The boxes come from the engine, which is where the tree is.
+function layoutShellDividers(dividers) {
+    for (const n of [...el.sPanes.querySelectorAll('.scut')]) n.remove();
+    for (const d of dividers || []) {
+        const cut = document.createElement('div');
+        cut.className = `scut ${d.down ? 'h' : 'v'}`;
+        cut.style.left = `${d.x * 100}%`;
+        cut.style.top = `${d.y * 100}%`;
+        if (d.down) cut.style.width = `${d.w * 100}%`;
+        else cut.style.height = `${d.h * 100}%`;
+        cut.addEventListener('mousedown', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            // The split's own box, taken from the divider: the boundary sits
+            // inside it, so its extent is what the ratio is a fraction of.
+            const box = el.sPanes.getBoundingClientRect();
+            const spanStart = d.down ? d.y - dividerSpan(d).before : d.x - dividerSpan(d).before;
+            const span = dividerSpan(d).total;
+            const move = (ev) => {
+                const at = d.down
+                    ? (ev.clientY - box.top) / box.height
+                    : (ev.clientX - box.left) / box.width;
+                const ratio = span > 0 ? (at - spanStart) / span : 0.5;
+                ask('shellsetratio', { id: d.id, down: d.down, ratio })
+                    .then((r) => r && takeShell(r));
+            };
+            const up = () => {
+                window.removeEventListener('mousemove', move);
+                window.removeEventListener('mouseup', up);
+                el.work.classList.remove('dragging');
+                if (term.on) ask('shellresize', shellSize());
+            };
+            el.work.classList.add('dragging');
+            window.addEventListener('mousemove', move);
+            window.addEventListener('mouseup', up);
+        });
+        el.sPanes.append(cut);
+    }
+}
+
+/// How much of the panel the split holding this divider covers, and how far
+/// its near edge is from the divider. Worked out from the panes either side —
+/// the engine sends the boundary, and the two boxes it separates say how wide
+/// the thing being divided is.
+function dividerSpan(d) {
+    let lo = d.down ? d.y : d.x;
+    let hi = lo;
+    for (const n of el.sPanes.querySelectorAll('.sgrid')) {
+        const st = n.style;
+        const a = parseFloat(d.down ? st.top : st.left) / 100;
+        const b = a + parseFloat(d.down ? st.height : st.width) / 100;
+        // Only the boxes this boundary actually touches.
+        if (Math.abs(b - (d.down ? d.y : d.x)) < 0.002) lo = Math.min(lo, a);
+        if (Math.abs(a - (d.down ? d.y : d.x)) < 0.002) hi = Math.max(hi, b);
+    }
+    return { before: (d.down ? d.y : d.x) - lo, total: Math.max(0.01, hi - lo) };
+}
+
 function layoutShell(panes) {
     const have = new Map([...el.sPanes.children].map((n) => [Number(n.dataset.id), n]));
     const want = new Set(panes.map((p) => p.id));
@@ -7169,7 +7279,27 @@ function showReplacePlan(spec, plan) {
         })),
         {
             checks: true,
-            foot: tr('Space off/on   a all   n none   Enter run   Esc cancel', 'Space 外す／戻す   a 全部   n 全部外す   Enter 実行   Esc 取消'),
+            foot: tr('Space off/on   a all   n none   f the rest of this file   Enter run   Esc cancel',
+                'Space 外す／戻す   a 全部   n 全部外す   f このファイルの残り   Enter 実行   Esc 取消'),
+                // `f` — off with the whole file under the cursor, or back on
+                // if none of it is picked. cian-tui's key on this screen
+                // (keys.rs:1295), and the usual shape of "not this one, it is
+                // generated": a hundred hits across twelve files, and one of
+                // the twelve is a lock file.
+                act: {
+                    f: () => {
+                        const row = report.rows[report.at];
+                        if (!row || !row.change) return;
+                        const path = row.change.path;
+                        const mine = report.all.filter((r) => r.change && r.change.path === path);
+                        const anyOn = mine.some((r) => r.on);
+                        for (const r of mine) r.on = !anyOn;
+                        drawReport();
+                        drawCheckCount();
+                        say(tr(`${path.split(/[\\/]/).pop()}: ${anyOn ? 'off' : 'on'}`,
+                            `${path.split(/[\\/]/).pop()}: ${anyOn ? '外しました' : '戻しました'}`));
+                    },
+                },
                 pick: async (chosen) => {
                     const going = chosen.map((r) => r.change);
                     if (!going.length) { say(tr('no row is chosen', '選ばれている行がありません'), true); return; }
@@ -7452,22 +7582,47 @@ async function cmdAiCommit() {
     const r = await ask('aicommit', { pane: state.focus });
     if (!r) return;
     say(tr('drafting a commit message…', 'コミットメッセージを作っています…'));
-    aiWaiting = (answer) => {
-        const msg = answer.trim();
-        show(tr('Commit message (a draft)', 'コミットメッセージ（案）'), tr('Enter commits it as it stands   Esc cancels', 'Enter でこのままコミット   Esc 取消'),
-            msg.split('\n').map((t) => ({ label: t })), {
-                foot: tr('Enter commit   Esc cancel', 'Enter コミット   Esc 取消'),
-                pick: async () => {
-                    closeReport();
-                    if (!await confirm(tr('Commit with this message', 'この文でコミットします'), msg)) { say(tr('stopped', 'やめました')); return; }
-                    const done = await ask('commit', { pane: state.focus, message: msg });
-                    if (!done) return;
-                    state[state.focus] = done.pane;
-                    draw(state.focus);
-                    say(tr('committed', 'コミットしました'));
-                },
-            });
+    aiWaiting = (answer) => showCommitDraft(answer.trim());
+}
+
+/// The drafted message, with a way to change it before it is signed.
+///
+/// **`e` edits it.** cian-tui's `CommitMessage` popup has a preview mode and a
+/// typing mode on that key (keys.rs:1813), and it matters more than it looks:
+/// the model drafts, and the person is the one whose name goes on the commit.
+/// A draft you can only accept or throw away is a draft you throw away and
+/// retype.
+function showCommitDraft(msg) {
+    const commit = async (text) => {
+        closeReport();
+        if (!await confirm(tr('Commit with this message', 'この文でコミットします'), text)) {
+            say(tr('stopped', 'やめました'));
+            return;
+        }
+        const done = await ask('commit', { pane: state.focus, message: text });
+        if (!done) return;
+        state[state.focus] = done.pane;
+        draw(state.focus);
+        say(tr('committed', 'コミットしました'));
     };
+    show(tr('Commit message (a draft)', 'コミットメッセージ（案）'),
+        tr('Enter commits it as it stands   e edits it   Esc cancels', 'Enter でこのままコミット   e で直す   Esc 取消'),
+        msg.split('\n').map((t) => ({ label: t })), {
+            foot: tr('Enter commit   e edit   Esc cancel', 'Enter コミット   e 直す   Esc 取消'),
+            act: {
+                e: async () => {
+                    closeReport();
+                    // One line in the box, the rest kept: a commit subject is
+                    // the line that gets read, and it is the line worth fixing.
+                    const first = msg.split('\n')[0];
+                    const rest = msg.split('\n').slice(1).join('\n');
+                    const edited = await askFor(tr('the commit message', 'コミットメッセージ'), first);
+                    if (edited === null) { say(tr('stopped', 'やめました')); return; }
+                    showCommitDraft(rest.trim() ? `${edited}\n${rest}` : edited);
+                },
+            },
+            pick: () => commit(msg),
+        });
 }
 
 /// The AI extension family. Everything here is metadata in, a *plan* out,

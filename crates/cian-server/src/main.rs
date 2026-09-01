@@ -519,8 +519,22 @@ impl Session {
                 }))
             })
             .collect();
+        // The dividers, so the window can put a handle on each one. Empty
+        // while a tab is zoomed: there is one pane on screen and nothing to
+        // divide.
+        let mut cuts = Vec::new();
+        if !tab.zoom {
+            tab.root.dividers(0.0, 0.0, 1.0, 1.0, &mut cuts);
+        }
+        let dividers: Vec<_> = cuts
+            .iter()
+            .map(|(id, down, x, y, w, h)| serde_json::json!({
+                "id": id, "down": down, "x": x, "y": y, "w": w, "h": h,
+            }))
+            .collect();
         serde_json::json!({
             "panes": panes,
+            "dividers": dividers,
             "tabs": self.tabs.len(),
             "tab": self.shell_at,
             "showing": tab.focus,
@@ -1495,6 +1509,21 @@ impl Session {
                 };
                 tab.name = name;
                 Ok(self.shell_reply())
+            }
+            // A divider dragged to a place, rather than nudged in a
+            // direction. `id` is the first leaf of the split's near half, and
+            // `ratio` is where the boundary landed as a fraction of the split.
+            "shellsetratio" => {
+                let id = req.params["id"].as_u64().unwrap_or(0);
+                let down = req.params["down"].as_bool().unwrap_or(false);
+                let to = req.params["ratio"].as_f64().unwrap_or(0.5) as f32;
+                let Some(tab) = self.tabs.get_mut(self.shell_at) else {
+                    anyhow::bail!("シェルが開いていません");
+                };
+                let moved = tab.root.set_ratio(id, down, to);
+                let mut reply = self.shell_reply();
+                reply["moved"] = serde_json::Value::Bool(moved);
+                Ok(reply)
             }
             "shellresizepane" => {
                 let wider = req.params["wider"].as_bool().unwrap_or(true);

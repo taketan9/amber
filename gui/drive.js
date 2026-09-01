@@ -558,6 +558,49 @@ async function main() {
                 if (!moved) bad++;
                 continue;
             }
+            // `drag:<css>:dx,dy` — press on the first match, move by that
+            // many pixels, release. The dividers and the file rows are the
+            // two things in this window that only a held pointer can work,
+            // and neither could be reached from here.
+            if (key.startsWith('drag:')) {
+                const cut = key.lastIndexOf(':');
+                const sel = key.slice(5, cut);
+                const [dx, dy] = key.slice(cut + 1).split(',').map(Number);
+                const box = await cdp.read(`(() => {
+                    const n = document.querySelector(${JSON.stringify(sel)});
+                    if (!n) return null;
+                    const b = n.getBoundingClientRect();
+                    return { x: Math.round(b.left + b.width / 2), y: Math.round(b.top + b.height / 2) };
+                })()`);
+                if (!box) {
+                    console.log(`× ${key.padEnd(8)}${(what || '').padEnd(16)} 見つかりません`);
+                    bad++;
+                    continue;
+                }
+                const before = await cdp.read(LOOK);
+                const at = { x: box.x, y: box.y };
+                await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', ...at, button: 'left', clickCount: 1 });
+                // In steps: a drag handler that follows the pointer needs
+                // moves to follow, and one jump is not a drag.
+                for (let i = 1; i <= 5; i++) {
+                    await cdp.send('Input.dispatchMouseEvent', {
+                        type: 'mouseMoved',
+                        x: box.x + Math.round((dx * i) / 5),
+                        y: box.y + Math.round((dy * i) / 5),
+                        button: 'left', buttons: 1,
+                    });
+                    await sleep(40);
+                }
+                await cdp.send('Input.dispatchMouseEvent', {
+                    type: 'mouseReleased', x: box.x + dx, y: box.y + dy, button: 'left', clickCount: 1,
+                });
+                await sleep(300);
+                const after = await cdp.read(LOOK);
+                const moved = JSON.stringify(before) !== JSON.stringify(after);
+                console.log(`${moved ? '  ' : '× '}${key.padEnd(8)}${(what || '').padEnd(16)} ${after.status}${marks(after)}`);
+                if (!moved) bad++;
+                continue;
+            }
             // `read:<expr>` — evaluate something in the page and print it.
             // Added the third time a state was diagnosed by reasoning about
             // which listener ran first, which is a way of being wrong slowly.
