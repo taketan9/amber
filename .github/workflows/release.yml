@@ -216,6 +216,9 @@ jobs:
           $global:LASTEXITCODE = 0
           Copy-Item target/release/cian-server.exe "$stage/"
           Copy-Item packaging/windows/GUI.txt "$stage/"
+          # The checklist travels with the zip: the machine this is carried to
+          # is offline, so a link to it would be a link to nothing.
+          Copy-Item packaging/windows/CHECK.ja.txt "$stage/"
           Copy-Item README.md, README.ja.md, LICENSE "$stage/"
           New-Item -ItemType Directory -Force -Path "$stage/examples" | Out-Null
           Copy-Item examples/init.lua "$stage/examples/"
