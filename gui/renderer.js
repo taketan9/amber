@@ -3288,7 +3288,12 @@ document.addEventListener('keydown', (e) => {
     // 当て推量が要る。**押されたキーの話だけでは足りない。**
     let where;
     if (viewer.on) {
-        where = `${tr('editor', 'エディタ')}/${STYLES[style][0]}`;
+        // `tr()` をテンプレート literal の中に書かない。中身は訳されて
+        // いても、外側の literal は日本語を含む一つの文字列に見えるので、
+        // scripts/i18n.py が「まだ日本語だけ」と数える ── 検査のほうを
+        // 黙らせるより、書き方を変えるほうが安い。
+        const surface = tr('editor', 'エディタ');
+        where = `${surface}/${STYLES[style][0]}`;
         if (viewer.vim) where += vimTyping() ? tr('/typing', '/入力中') : tr('/normal', '/ノーマル');
         if (hex.editing) where += tr('/hex', '/16進');
     } else if (term.on && term.focused) {
