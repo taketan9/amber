@@ -748,6 +748,11 @@ async function operate(kind) {
     const which = state.focus;
     const pane = state[which];
     if (!pane) return;
+    // And `d` deletes it, for the same reason.
+    if (pane.archive && kind === 'delete') {
+        const row = pane.entries[pane.cursor];
+        if (row && !row.parent) { await archiveEdit(row, 'delete'); return; }
+    }
 
     // What is about to happen, named, before anything happens. The count comes
     // from the same rule the engine will use, so the sheet cannot promise one
@@ -989,11 +994,55 @@ function askFor(head, initial = '', opts = {}) {
     });
 }
 
+/// Rename or delete one member of the open zip.
+///
+/// Rebuilt rather than patched, on the engine's side: a zip is a container
+/// with an index, and rewriting one entry in place is how archives get
+/// corrupted. Only zip — a tar would be rebuilt as a zip wearing a tar's
+/// name, which is worse than refusing.
+async function archiveEdit(row, kind) {
+    const which = state.focus;
+    // A row inside an archive carries `<archive>/<member>` as its path, so the
+    // member is what follows the archive itself — the name alone would be
+    // wrong for anything in a folder inside the zip.
+    const pane = state[which];
+    const member = row.path.startsWith(`${pane.archive}/`)
+        ? row.path.slice(pane.archive.length + 1)
+        : row.name;
+    if (kind === 'delete') {
+        if (!await confirm(tr(`Delete ${row.name} from the archive`, `${row.name} をアーカイブから削除`),
+            tr('the archive is rebuilt without it', 'アーカイブを作り直します'))) {
+            say(tr('stopped', 'やめました'));
+            return;
+        }
+    }
+    let to = '';
+    if (kind === 'rename') {
+        const next = await askFor(tr(`a new name for ${row.name}`, `${row.name} の新しい名前`), row.name);
+        if (next === null || next === row.name) { say(tr('stopped', 'やめました')); return; }
+        // The member keeps the folder it is in; only the last part is asked for.
+        const head = member.includes('/') ? member.slice(0, member.lastIndexOf('/') + 1) : '';
+        to = head + next;
+    }
+    say(tr('rebuilding the archive…', 'アーカイブを作り直しています…'));
+    const r = await ask('archiveedit', { pane: which, member, to });
+    if (!r) return;
+    state[which] = r;
+    draw(which);
+    say(kind === 'delete'
+        ? tr(`removed ${row.name} from the archive`, `${row.name} をアーカイブから削除しました`)
+        : tr(`renamed to ${to.split('/').pop()}`, `${to.split('/').pop()} に変えました`));
+}
+
 /// Rename what the cursor is on.
 async function rename() {
     const which = state.focus;
     const pane = state[which];
     const row = pane && pane.entries[pane.cursor];
+    // Inside an archive, `r` renames the *member* — cian-tui's own key there
+    // (arcview.rs). Browsing a zip should feel like browsing a folder, not
+    // like looking at one through glass.
+    if (pane && pane.archive && row && !row.parent) { await archiveEdit(row, 'rename'); return; }
     if (!row || row.parent) {
         say(tr('nothing to work on', '対象がありません'));
         return;
@@ -5394,17 +5443,43 @@ async function transfer() {
     const what = rows.length ? rows : [pane.entries[pane.cursor]].filter((x) => x && !x.parent);
     if (!what.length) { say(tr('nothing to work on', '対象がありません'), true); return; }
     const up = !!state[other].remote;
-    const head = tr(`${up ? 'Upload' : 'Download'} ${what.length}`, `${what.length} 件を ${up ? 'アップロード' : 'ダウンロード'}`);
-    if (!await confirm(head, what.map((x) => x.name).join('\n'))) { say(tr('stopped', 'やめました')); return; }
+    const relay = up && !!state[which].remote;
+    const head = relay
+        ? tr(`Send ${what.length} to the other server`, `${what.length} 件を反対のサーバへ`)
+        : tr(`${up ? 'Upload' : 'Download'} ${what.length}`, `${what.length} 件を ${up ? 'アップロード' : 'ダウンロード'}`);
+    // Named for what it does: there is no server-to-server SFTP, so the file
+    // comes here and goes out again, and a person watching the bytes twice
+    // should know why.
+    const body = what.map((x) => x.name).join('\n')
+        + (relay ? tr('\n\nthey pass through this machine on the way', '\n\nこの機械を経由します') : '');
+    if (!await confirm(head, body)) { say(tr('stopped', 'やめました')); return; }
     say(tr(`${head}…`, `${head}中…`));
+    // The bar, before the transfer rather than after it. SFTP does not go
+    // through the job queue, so there is no op id to key on yet — the engine's
+    // first progress event carries it and the bar adopts it. Until this, a
+    // transfer of a 400MB file said "uploading…" once and then nothing, while
+    // cian-scp had been counting the bytes all along with nobody listening.
+    running = {
+        op: null, kind: 'transfer', verb: head,
+        total: what.length, done: 0, bytes: 0, bytesTotal: 0, ms: 0, path: '',
+    };
+    prog.hidden = false;
+    prog.stalledAt = performance.now();
+    drawProg();
     const r = await ask('transfer', { pane: which });
+    running = null;
+    prog.hidden = true;
     if (!r) return;
     state.left = r.left;
     state.right = r.right;
     draw('left');
     draw('right');
     if (r.errors.length) say(r.errors.join('  /  '), true);
-    else say(tr(`${r.direction === 'up' ? 'uploaded' : 'downloaded'} ${r.ok}`, `${r.ok} 件を${r.direction === 'up' ? 'アップロード' : 'ダウンロード'}しました`));
+    else if (r.direction === 'relay') {
+        say(tr(`sent ${r.ok} to the other server`, `${r.ok} 件を反対のサーバへ送りました`));
+    } else {
+        say(tr(`${r.direction === 'up' ? 'uploaded' : 'downloaded'} ${r.ok}`, `${r.ok} 件を${r.direction === 'up' ? 'アップロード' : 'ダウンロード'}しました`));
+    }
 }
 
 /// `:!cmd` — run it in the shell, in this pane's directory. `%` is the
@@ -8623,6 +8698,8 @@ for (const which of ['left', 'right']) {
 window.cian.onEvent(async (msg) => {
     switch (msg.event) {
         case 'progress':
+            // A transfer's op is not known until its first event says so.
+            if (running && running.op === null) running.op = msg.op;
             if (!running || msg.op !== running.op) return;
             running.done = msg.done;
             running.total = Math.max(msg.total, running.total);
@@ -8636,6 +8713,9 @@ window.cian.onEvent(async (msg) => {
             return;
 
         case 'done': {
+            // A transfer clears its own bar where it was started — it is
+            // awaited there, and the reply is what reloads the panes.
+            if (running && running.kind === 'transfer' && msg.op === running.op) return;
             if (!running || msg.op !== running.op) {
                 // A job cancelled while it was still in the queue: it never
                 // ran, so nothing here is tracking it, and it still has to be

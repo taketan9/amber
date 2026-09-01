@@ -224,6 +224,9 @@ struct Session {
     right: Side,
     jobs: Jobs,
     out: Out,
+    /// A counter for transfer progress, kept apart from the job queue's.
+    /// SFTP does not go through that queue — see the note in `transfer`.
+    transfer_op: u64,
     undo: Stack,
     find: Find,
     /// Held for a later paste. Independent of the system clipboard, and of
@@ -301,6 +304,9 @@ struct Session {
 impl Session {
     fn new(dir: std::path::PathBuf, out: Out) -> anyhow::Result<Self> {
         Ok(Session {
+            // A high start, so a transfer's op can never collide with a job
+            // queue id — the window keys its progress bar on the number.
+            transfer_op: 1_000_000,
             left: Side::new(Pane::new(dir.clone())?),
             right: Side::new(Pane::new(dir)?),
             jobs: Jobs::default(),
@@ -947,6 +953,21 @@ impl Session {
                 let spec = req.params["spec"].as_str().unwrap_or("").trim().to_string();
                 if spec.is_empty() {
                     anyhow::bail!("モードを指定してください（例: 644）");
+                }
+                // On a server it is the same intention and a different call.
+                // cian-tui's remote pane answers the local keys (A/a/r/d);
+                // `:chmod` is the one that stopped at the boundary, so a mode
+                // on a server meant leaving cian for a shell.
+                if let Some(target) = self.remotes.get(&which).cloned() {
+                    let mode = u32::from_str_radix(spec.trim_start_matches("0o"), 8)
+                        .map_err(|_| anyhow::anyhow!("8進で書いてください（例: 644）"))?;
+                    let paths = self.targets(&which)?;
+                    for p in &paths {
+                        cian_scp::chmod(&target, &p.display().to_string(), mode)?;
+                    }
+                    let pane = self.pane_mut(&which)?;
+                    pane.reload()?;
+                    return Ok(serde_json::json!({ "changed": paths.len(), "spec": spec }));
                 }
                 let paths = self.targets(&which)?;
                 for p in &paths {
@@ -2139,8 +2160,73 @@ impl Session {
                 let Some(target) = target else {
                     anyhow::bail!("どちらのペインもサーバではありません");
                 };
+                // Server to server, by way of this machine.
+                //
+                // cian-tui does exactly this (`start_remote_to_remote`,
+                // ssh.rs:695): download to a temporary, upload to the far
+                // side, delete the temporary. There is no server-to-server
+                // SFTP, and on a segmented corporate network the two hosts
+                // usually cannot reach each other anyway — the machine in the
+                // middle is the only route there is.
                 if up && down {
-                    anyhow::bail!("サーバ同士の転送はできません");
+                    let from_target = self.remotes.get(&from).cloned()
+                        .ok_or_else(|| anyhow::anyhow!("送り元がサーバではありません"))?;
+                    let to_target = self.remotes.get(to).cloned()
+                        .ok_or_else(|| anyhow::anyhow!("送り先がサーバではありません"))?;
+                    let dest = self.pane_mut(to)?.remote_view().map(|(_, p)| p.to_string())
+                        .ok_or_else(|| anyhow::anyhow!("転送先が分かりません"))?;
+                    let relay = std::env::temp_dir().join("cian-relay");
+                    std::fs::create_dir_all(&relay)?;
+                    let stop = std::sync::atomic::AtomicBool::new(false);
+                    let out = self.out.clone();
+                    let op = self.transfer_op;
+                    let (mut ok, mut errors) = (0usize, Vec::new());
+                    for (i, p) in paths.iter().enumerate() {
+                        let name = p.file_name().map(|s| s.to_string_lossy().into_owned())
+                            .unwrap_or_else(|| p.display().to_string());
+                        let hop = relay.join(&name);
+                        let started = std::time::Instant::now();
+                        let shown = p.display().to_string();
+                        let out2 = out.clone();
+                        let mut report = |done: u64, total: u64| {
+                            out2.event("progress", serde_json::json!({
+                                "op": op, "done": i, "total": paths.len(),
+                                "bytes": done, "bytes_total": total,
+                                "ms": started.elapsed().as_millis() as u64,
+                                "path": shown,
+                            }));
+                        };
+                        let mut ctl = cian_scp::Ctl {
+                            cancel: &stop, on_progress: &mut report, limit_bps: self.limit_bps,
+                        };
+                        let step = cian_scp::download(
+                            &from_target, &p.display().to_string(), &hop, &mut ctl,
+                        ).map(|_| ()).and_then(|()| {
+                            cian_scp::upload(
+                                &to_target, &hop, &cian_scp::remote_join(&dest, &name), None, &mut ctl,
+                            ).map(|_| ())
+                        });
+                        // The temporary goes whether or not it arrived: it is
+                        // somebody's file sitting in /tmp otherwise.
+                        let _ = std::fs::remove_file(&hop);
+                        match step {
+                            Ok(()) => ok += 1,
+                            Err(e) => errors.push(format!("{name}: {e}")),
+                        }
+                    }
+                    out.event("done", serde_json::json!({
+                        "op": op, "ok": ok, "skipped": 0, "ms": 0,
+                        "errors": errors.clone(), "cancelled": false,
+                    }));
+                    self.transfer_op += 1;
+                    return Ok(serde_json::json!({
+                        "direction": "relay",
+                        "op": op,
+                        "ok": ok,
+                        "errors": errors,
+                        "left": PaneView::of(self.left.get()),
+                        "right": PaneView::of(self.right.get()),
+                    }));
                 }
                 let dest = if up {
                     self.pane_mut(to)?.remote_view().map(|(_, p)| p.to_string())
@@ -2150,13 +2236,40 @@ impl Session {
                 };
                 let stop = std::sync::atomic::AtomicBool::new(false);
                 let (mut ok, mut errors) = (0usize, Vec::new());
-                for p in &paths {
+                // The same progress the local operations report, so a transfer
+                // uses the bar that is already on screen rather than sitting
+                // silent until it finishes. `on_progress` was a `noop` here
+                // from the beginning: cian-scp has always counted the bytes
+                // and nobody was listening to them.
+                //
+                // `op` is 0 — the bar is told about this one by the reply, and
+                // the job queue is untouched: SFTP does not go through it, and
+                // rebuilding the queue around a transfer I cannot test would
+                // put the local copies at risk to move a progress bar.
+                let out = self.out.clone();
+                let total_files = paths.len();
+                let op = self.transfer_op;
+                out.event("progress", serde_json::json!({
+                    "op": op, "done": 0, "total": total_files,
+                    "bytes": 0, "bytes_total": 0, "ms": 0, "path": "",
+                }));
+                for (i, p) in paths.iter().enumerate() {
                     let name = p.file_name().map(|s| s.to_string_lossy().into_owned())
                         .unwrap_or_else(|| p.display().to_string());
-                    let mut noop = |_: u64, _: u64| {};
+                    let started = std::time::Instant::now();
+                    let shown = p.display().to_string();
+                    let out2 = out.clone();
+                    let mut report = |done: u64, total: u64| {
+                        out2.event("progress", serde_json::json!({
+                            "op": op, "done": i, "total": total_files,
+                            "bytes": done, "bytes_total": total,
+                            "ms": started.elapsed().as_millis() as u64,
+                            "path": shown,
+                        }));
+                    };
                     let mut ctl = cian_scp::Ctl {
                         cancel: &stop,
-                        on_progress: &mut noop,
+                        on_progress: &mut report,
                         limit_bps: self.limit_bps,
                     };
                     let r = if up {
@@ -2206,8 +2319,14 @@ impl Session {
                         let _ = self.pane_mut(which).map(|p| p.reload());
                     }
                 }
+                out.event("done", serde_json::json!({
+                    "op": op, "ok": ok, "skipped": 0, "ms": 0,
+                    "errors": errors.clone(), "cancelled": false,
+                }));
+                self.transfer_op += 1;
                 Ok(serde_json::json!({
                     "direction": if up { "up" } else { "down" },
+                    "op": op,
                     "ok": ok,
                     "errors": errors,
                     "left": PaneView::of(self.left.get()),
@@ -3476,6 +3595,46 @@ impl Session {
                     "saved": member,
                     "archive": archive.file_name().map(|s| s.to_string_lossy().into_owned()),
                 }))
+            }
+            // Rename or delete a member of the open zip.
+            //
+            // cian-tui's `r` and `d` while a listing is *inside* an archive
+            // (arcview.rs) — the half that makes browsing one feel like
+            // browsing a folder rather than looking at one through glass. Same
+            // `zip_modify`, same reason it rebuilds rather than patches.
+            "archiveedit" => {
+                let which = req.params["pane"].as_str().unwrap_or("left").to_string();
+                let member = arg(req, "member");
+                let to = arg(req, "to");
+                let archive = {
+                    let pane = self.pane_mut(&which)?;
+                    let Some((a, _)) = pane.archive_view() else {
+                        anyhow::bail!("アーカイブを開いていません");
+                    };
+                    a.to_path_buf()
+                };
+                if !zip_writable(&archive) {
+                    anyhow::bail!("書き換えられるのは zip だけです（tar はまだ）");
+                }
+                if member.is_empty() {
+                    anyhow::bail!("対象がありません");
+                }
+                let report = if to.is_empty() {
+                    quietly(|ctl| cian_core::archive::zip_modify(
+                        &archive, std::slice::from_ref(&member), &[], &[], "", ctl))
+                } else {
+                    quietly(|ctl| cian_core::archive::zip_modify(
+                        &archive, &[], &[(member.clone(), to.clone())], &[], "", ctl))
+                };
+                if !report.errors.is_empty() {
+                    anyhow::bail!("{}", report.errors.join(" / "));
+                }
+                let pane = self.pane_mut(&which)?;
+                pane.reload()?;
+                let mut reply = self.view(&which)?;
+                reply["member"] = serde_json::json!(member);
+                reply["to"] = serde_json::json!(to);
+                Ok(reply)
             }
             // A link from the preview, in the desktop's browser.
             "openurl" => {

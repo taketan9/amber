@@ -324,6 +324,28 @@ pub fn make_file(target: &Target, path: &str) -> Result<()> {
 }
 
 /// Rename / move a remote entry within the server.
+/// Set the mode of a remote file. The octal a person typed, as SFTP wants it.
+///
+/// Only the permission bits: SFTP's `set_metadata` takes a whole attribute
+/// block, and sending anything else in it would quietly change something the
+/// person did not ask about.
+pub fn chmod(target: &Target, path: &str, mode: u32) -> Result<()> {
+    on_runtime(|| async {
+        let handle = connect(target).await?;
+        let sftp = open_sftp(&handle).await.context("SFTP subsystem unavailable")?;
+        let attrs = russh_sftp::protocol::FileAttributes {
+            permissions: Some(mode & 0o7777),
+            ..Default::default()
+        };
+        let r = sftp
+            .set_metadata(path, attrs)
+            .await
+            .with_context(|| format!("chmod {mode:o} {path}"));
+        let _ = sftp.close().await;
+        r
+    })
+}
+
 pub fn rename(target: &Target, from: &str, to: &str) -> Result<()> {
     on_runtime(|| async {
         let handle = connect(target).await?;
