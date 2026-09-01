@@ -258,6 +258,18 @@ function drawStatus() {
         : [which === 'left' ? 'L' : 'R', ''];
     el.stBadge.textContent = mode[0] + mode[1];
     el.stBadge.className = mode[1] === ' VISUAL' ? 'visual' : mode[1] === ' FILTER' ? 'filter' : '';
+    // …and the same colour on the frame of the surface that has the keys.
+    //
+    // cian-tui paints the *focused pane's border* with the mode's colour
+    // (`focus_badge_color`, render.rs:2134) — so `/` turns the pane you are
+    // narrowing green, and `:` turns it purple. The window painted only the
+    // prompt row at the bottom of the screen, which is the one place the eye
+    // is not: you look at the listing while you narrow it. Reported as the
+    // green being in the wrong place, and it was.
+    el.work.dataset.mode = term.on && term.focused ? 'shell'
+        : visual.on ? 'visual'
+        : filter.on ? (filter.mode === 'cmd' ? 'cmd' : 'search')
+        : '';
     const chips = [];
     const chip = (cls, text) => {
         const s = document.createElement('span');
@@ -1156,6 +1168,10 @@ function openPrompt(mode, seed = '', note = '') {
     el.fCount.textContent = note;
     el.fInput.focus();
     el.fInput.select();
+    // The badge and the frame both come from `drawStatus`, and neither was
+    // called when a prompt opened — so the mode's colour only arrived on the
+    // next thing that happened to `say()` something, and often never.
+    drawStatus();
     drawHints();
 }
 
@@ -1164,6 +1180,7 @@ function closePrompt() {
     filter.mode = null;
     el.fbar.hidden = true;
     el.fInput.blur();
+    drawStatus();
     drawHints();
 }
 
@@ -3381,6 +3398,23 @@ function show(title, about, rows, opts = {}) {
     // Called when the list is dismissed rather than chosen from — for a list
     // that has been changing things while you looked at it.
     report.leave = opts.leave || null;
+    // Line the second column up.
+    //
+    // `.hit .p` grows to fill, so the path beside each name started at a
+    // different x on every row — fine for a list whose second column is a
+    // count, unreadable for one whose second column is a path you are
+    // comparing down. Asked for on the bookmarks (`s`), and true of any list
+    // built this way, so the option lives here rather than there: the widest
+    // name decides one column width for the whole list. Capped, because one
+    // very long name must not push every path off the right-hand edge.
+    if (opts.align) {
+        const widest = rows.reduce((n, r) => Math.max(n, String(r.label || '').length), 0);
+        el.report.dataset.align = '1';
+        el.report.style.setProperty('--name-w', `${Math.min(widest + 2, 34)}ch`);
+    } else {
+        delete el.report.dataset.align;
+        el.report.style.removeProperty('--name-w');
+    }
     el.rName.textContent = title;
     el.rAbout.textContent = about;
     el.rFoot.textContent = opts.foot
@@ -4998,7 +5032,18 @@ async function goTab(which, how) {
 /// column inherited the indent and sat at a margin of its own.
 let scPath = [];
 
-async function cmdShortcuts() {
+/// `s` — the bookmarks.
+///
+/// `keepLevel` is for the calls this function makes to itself: walking into a
+/// group, and re-reading the list after an edit, both want the level they are
+/// already standing in. **Opening it from the key does not.** `scPath` is
+/// module state, so making a group, walking into it and closing the popup
+/// left the path set — and the next `s` opened *inside that group*, with a
+/// 戻る row as the only clue that there was anything above it. A bookmark list
+/// that does not open at the top is a bookmark list you have to navigate out
+/// of before you can use it.
+async function cmdShortcuts(keepLevel = false) {
+    if (!keepLevel) scPath = [];
     const r = await ask('shortcuts', {});
     if (!r) return;
     // The engine hands back a depth-first walk with a depth on each row.
@@ -5043,17 +5088,20 @@ async function cmdShortcuts() {
         say(res.said);
         if (done) done();
         closeReport();
-        cmdShortcuts();
+        cmdShortcuts(true);
     };
     show(tr('Shortcuts', 'ショートカット') + (scPath.length ? ` / ${scPath.join(' / ')}` : ''),
         rows.length ? (r.where || '') : tr('nothing bookmarked yet', '登録がありません'), rows, {
+        // The paths line up under each other; a column you read down has to
+        // start in the same place on every row.
+        align: true,
         foot: tr('Enter open / go   a add   A group   r rename   d delete   p path   Esc close', 'Enter 開く／そこへ   a 追加   A まとめる   r 名前   d 削除   p パス   Esc 閉じる'),
         // Enter on a folder walks into it, as the terminal build's does; on a
         // bookmark it goes there. Nothing else opens a level, so a folder that
         // is not entered stays shut.
         pick: (row) => {
-            if (row.up) { scPath.pop(); closeReport(); cmdShortcuts(); return; }
-            if (row.group) { scPath.push(row.plain); closeReport(); cmdShortcuts(); return; }
+            if (row.up) { scPath.pop(); closeReport(); cmdShortcuts(true); return; }
+            if (row.group) { scPath.push(row.plain); closeReport(); cmdShortcuts(true); return; }
             if (row.target) { closeReport(); revealPath(row.target, true); }
         },
         act: {
@@ -5064,7 +5112,7 @@ async function cmdShortcuts() {
                 if (!made) return;
                 say(tr(`bookmarked ${made.name}`, `${made.name} を登録しました`));
                 closeReport();
-                cmdShortcuts();
+                cmdShortcuts(true);
             },
             A: async () => {
                 const name = await askFor(tr('a name for the group', 'まとめの名前'), '');

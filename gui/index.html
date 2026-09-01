@@ -309,8 +309,19 @@ html, body {
    events of its own, is the same two pixels where they can be seen. */
 #work[data-focus="files"] .pane.active::after {
   content: ""; position: absolute; inset: 0; z-index: 3; pointer-events: none;
-  border: 2px solid var(--accent);
+  border: 2px solid var(--mode-accent);
 }
+/* The mode's colour, on the frame of the surface holding the keys — which is
+   where cian-tui puts it (`focus_badge_color`, render.rs:2134). It was only
+   on the prompt row at the very bottom of the screen, which is the one place
+   the eye is not while you narrow a listing. Same four colours, same
+   meanings; `--mode-accent` falls back to the ordinary accent, so a pane in
+   no particular mode looks exactly as it did. */
+#work { --mode-accent: var(--accent); }
+#work[data-mode="search"]  { --mode-accent: var(--m-search); }
+#work[data-mode="cmd"]     { --mode-accent: var(--m-command); }
+#work[data-mode="visual"]  { --mode-accent: var(--m-visual); }
+#work[data-mode="shell"]   { --mode-accent: var(--m-shell); }
 /* And the pane that is not current steps back rather than merely being a
    shade darker — the eye should land on the live one without being asked. */
 .pane:not(.active) .rows,
@@ -612,7 +623,7 @@ html, body {
    own scrollbars and grids cannot paint over it. */
 #work[data-focus="shell"] #shell::after {
   content: ""; position: absolute; inset: 0; z-index: 4; pointer-events: none;
-  border: 2px solid var(--accent);
+  border: 2px solid var(--mode-accent);
 }
 
 /* F12 — the *focused* surface fills the window, which is what the terminal
@@ -678,10 +689,13 @@ html, body {
 #fbar[data-mode="cmd"] { border-top-color: var(--m-command); }
 #fbar b { color: var(--m-search); font-weight: 600; }
 #fbar[data-mode="cmd"] b { color: var(--m-command); }
+/* The `#fbar b { color: var(--accent) }` that used to sit below these two won
+   on source order and painted the `/` and the `:` the same colour — the very
+   thing the two rules above exist to tell apart. Bug shape ③, in the file
+   that names it. */
 /* `hidden` is the browser's own display:none, and the flex above beats it —
    the bar showed at startup, empty, the day it was added. Bug shape ③. */
 #fbar[hidden] { display: none; }
-#fbar b { color: var(--accent); }
 #fbar input {
   flex: 1 1 auto; border: 0; outline: 0; background: transparent;
   color: var(--text); font: inherit;
@@ -1068,6 +1082,13 @@ html, body {
   direction: rtl; text-align: left; unicode-bidi: plaintext;
 }
 .hit span + span { flex: 0 0 auto; color: var(--dim); }
+/* A list that asked for its second column to line up. The widest name sets
+   `--name-w` in the renderer; every row's name column takes it, so the paths
+   beside them start at the same place and can be read down. */
+#report[data-align] .hit .p {
+  flex: 0 0 var(--name-w); direction: ltr; text-align: left;
+}
+#report[data-align] .hit .sub { flex: 1 1 0; direction: rtl; unicode-bidi: plaintext; }
 /* Help puts the keys in a fixed column so they line up down the page, and
    lets the description take whatever is left. The keys are the thing being
    looked up; a ragged left edge makes them hard to scan. */
