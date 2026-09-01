@@ -44,8 +44,16 @@ NOT_DRIVEN = {
     "Ctrl+クリック",
     # Ranges and prose that name a family rather than one keystroke.
     "F1〜F8",
+    "F1-F8",
     "j/k",
     "gg/G",
+    # 一つの打鍵ではなく回数や向きを言っているもの。押すことはできるが、
+    # 「押した」で満たされる主張ではない。
+    "Esc×3",
+    "Backspace×3",
+    "←→",
+    "Shift+←→",
+    "+/−",
 }
 
 
@@ -66,7 +74,11 @@ def documented() -> set[str]:
     # 説明は素の文字列でも `tr(...)` でもよい。
     pattern = r"\['([^']*(?:Ctrl|Shift|Alt|F\d|Enter|Esc|Space)[^']*)',\s*(?:'|\"|`|tr\()"
     for m in re.finditer(pattern, src):
-        for part in re.split(r"\s*/\s*", m.group(1)):
+        # `/` と `、` の両方で割る。ヘルプは「C 、Ctrl+Shift+P 、Ctrl+,」の
+        # ように読点で三つ並べる書き方をしていて、そこを割らないと
+        # **その三つはどう押しても一致しない** ── 押していないのではなく、
+        # 数え方のせいで永久に未達だった。天井が嘘だと、割合も嘘になる。
+        for part in re.split(r"\s*/\s*|\s*、\s*", m.group(1)):
             part = part.strip()
             # `:theme` and friends are commands, tested by name elsewhere.
             if part and not part.startswith(":"):
@@ -84,9 +96,13 @@ def driven() -> set[str]:
     """Every key gui/drive.js sends, in the spelling the help uses."""
     src = DRIVER.read_text(encoding="utf-8")
     sent: set[str] = set()
+    # 記号も拾う ── `Ctrl+]` や `Ctrl+,` は押しているのに、この正規表現が
+    # 英字とF数字しか見ていなかったので「押していない」と数えられていた。
     token = (
         r"'((?:Ctrl\+|Shift\+|Alt\+|Mod\+)*"
-        r"(?:F\d{1,2}|Enter|Escape|Tab|Space|Arrow\w+|Page\w+|Home|End|[A-Za-z]))'"
+        r"(?:F\d{1,2}|Enter|Escape|Esc|Tab|Space|Arrow\w+|Left|Right|Up|Down"
+        r"|Page\w+|PgUp|PgDn|Home|End|Bksp|Del"
+        r"|[A-Za-z0-9]|[\[\],.;=+\-/?]))'"
     )
     for k in re.findall(token, src):
         sent.add(k)
@@ -96,12 +112,28 @@ def driven() -> set[str]:
     return sent
 
 
+# 同じキーの別の書き方。ヘルパーが押しているのに数えられない、を無くす ──
+# **天井も床も、綴りのせいで動いてはいけない。**
+ALIAS = {
+    "←": "ArrowLeft", "→": "ArrowRight", "↑": "ArrowUp", "↓": "ArrowDown",
+    "+Left": "+ArrowLeft", "+Right": "+ArrowRight", "+Up": "+ArrowUp", "+Down": "+ArrowDown",
+    "Backspace": "Bksp", "PageUp": "PgUp", "PageDown": "PgDn",
+    "Escape": "Esc", "Delete": "Del",
+}
+
+
 def normalise(k: str) -> str:
-    return k.replace("Escape", "Esc").replace(" ", "")
+    k = k.replace("Escape", "Esc").replace(" ", "")
+    for a, b in ALIAS.items():
+        k = k.replace(a, b)
+    return k
 
 
 def main() -> int:
-    want = {k for k in documented() if k not in NOT_DRIVEN}
+    # 除外も綴りを揃えてから当てる ── `Esc ×3` と `Esc×3` が別物として
+    # 扱われて、除外したはずのものが未達に残っていた。
+    skip = {normalise(k) for k in NOT_DRIVEN}
+    want = {k for k in documented() if normalise(k) not in skip}
     have = {normalise(k) for k in driven()}
     # A chord counts as driven if the driver sends it in any spelling; the
     # help writes `Ctrl+E`, the driver `Ctrl+e`.

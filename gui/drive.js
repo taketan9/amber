@@ -33,6 +33,10 @@ const NAMED = {
     Esc: 'Escape', Enter: 'Enter', Tab: 'Tab', Space: ' ',
     Down: 'ArrowDown', Up: 'ArrowUp', Left: 'ArrowLeft', Right: 'ArrowRight',
     Bksp: 'Backspace', F5: 'F5',
+    // 頁送りと行頭・行末。ヘルプが名前を挙げているのに、綴りが無いだけで
+    // 押せなかった ── 押していないキーと、押せないキーは別のこと。
+    PgUp: 'PageUp', PgDn: 'PageDown', Home: 'Home', End: 'End',
+    Del: 'Delete',
 };
 
 function parseKey(spec) {
@@ -436,6 +440,127 @@ async function main() {
         ['i', '挿入モードへ'], ['type:XX', '打つ'], ['Esc', 'ノーマルへ'],
         ['Mod+s', '保存'], ['wait:900', ''],
         ['Esc', ''], ['Esc', ''], ['Esc', '3回で閉じる'],
+
+        // ── ここから下は「押したことがある」を増やすための一周 ───────────
+        //
+        // keycover が 70 種中 13 種と言っていた。押していないキーは
+        // **動く証拠が無いキー**で、実際 Ctrl+E も vim 流の Ctrl+C/X/V も
+        // この集合にいて実機で壊れているのが見つかった。1周が長くなるのは
+        // 承知の上で ── 「プッシュ前の最後に実施するから構わない」。
+        //
+        // 順は面ごと。壊すものは押さない（削除は既存の一周が扱う）。
+        // `Ctrl+Enter` はファイルの上では**外部アプリが起動する**ので、
+        // ディレクトリの上でだけ押す。
+
+        // 移動
+        ['Shift+D', '10行下'], ['Shift+U', '10行上'],
+        ['PgDn', '1頁下'], ['PgUp', '1頁上'], ['Shift+PgUp', 'シェルの巻き戻し'],
+        ['y', 'やり直し（別名）'], ['wait:400', ''],
+        ['Shift+S', 'SSH ピッカー'], ['wait:900', ''], ['Esc', ''], ['wait:400', ''],
+        ['Ctrl+n', '次の行'], ['Ctrl+p', '前の行'],
+        // **この塊は自分の出発点を自分で決める。**
+        //
+        // 最初はここが「砂場のどこか」から始まる前提で書いていて、上の半分が
+        // ペインをどこへ置いたかで結果が変わった ── 単独で試すと通り、周回の
+        // 中では通らない、といういちばん質の悪い形になる。砂場の根に降りて
+        // から歩けば、履歴の中身まで決まる。
+        // **前半が残した画面を閉じてから始める。**
+        //
+        // ここに足した塊は、上の一周が何も開いていない前提で書いてあった ──
+        // 実際にはフィルタのプロンプトが開いたままで、`Backspace` は一覧では
+        // なく入力欄へ行っていた。単独では通り、周回では通らない。周回に足す
+        // ものは、自分の出発点を自分で作る。
+        ['Esc', '前半の残りを閉じる'], ['wait:500', ''],
+        ['Bksp', '親へ'], ['wait:900', ''],
+        ['read:\'親 → \' + state[state.focus].cwd.split(/[\\\\/]/).pop()', ''],
+        ['Alt+Left', '履歴を戻る'], ['wait:900', ''],
+        ['read:\'Alt+← → \' + state[state.focus].cwd.split(/[\\\\/]/).pop()', ''],
+        ['Alt+Right', '進む'], ['wait:900', ''],
+        ['read:\'Alt+→ → \' + state[state.focus].cwd.split(/[\\\\/]/).pop()', ''],
+                ['Shift+L', '右ペインへ'], ['Shift+H', '左ペインへ'],
+        ['b', 'ブランチ表示'], ['wait:900', ''], ['b', '戻る'], ['wait:600', ''],
+
+        // マークとクリップボード（貼り付けはしない ── 既存の一周が扱う）
+        ['Ctrl+a', '全マーク'], ['Shift+Space', 'マークして上へ'],
+        ['Shift+P', 'ファイルをクリップボードへ'], ['wait:400', ''],
+        ['Ctrl+x', '切り取り'], ['wait:400', ''],
+        ['Ctrl+a', '全マーク'], ['Ctrl+a', '解除'],
+
+        // 窓の見た目
+        ['Ctrl+=', '文字を大きく'], ['Ctrl+-', '小さく'], ['Ctrl+0', '戻す'],
+        ['F12', 'ズーム'], ['wait:400', ''], ['F12', '戻す'], ['wait:400', ''],
+        ['F11', '全画面'], ['wait:800', ''], ['F11', '戻す'], ['wait:800', ''],
+
+        // 探す
+        // `.rs` は砂場に必ずある。0件だとシートが開かず、その `top:` は
+        // 「隠れている」ではなく「ない」と鳴って、意味が変わる。
+        ['Shift+F', '名前で探す'], ['wait:600', ''],
+        ['type:.rs'], ['Enter', ''], ['wait:4000', ''],
+        ['read:\'名前で探す → \' + (report.rows||[]).length + \' 件\'', ''],
+        ['top:#report', '結果が最前面'], ['Esc', '閉じる'], ['wait:400', ''],
+        ['Ctrl+g', 'grep（別名）'], ['wait:500', ''], ['Esc', ''], ['wait:300', ''],
+        ['Ctrl+f', 'grep'], ['wait:500', ''], ['type:行目'], ['Enter', ''], ['wait:1800', ''],
+        ['top:#report', '結果が最前面'], ['Esc', '閉じる'], ['wait:400', ''],
+        ['C', 'コマンドパレット'], ['wait:600', ''], ['Esc', ''], ['wait:300', ''],
+        ['Ctrl+Shift+P', '同じものの別名'], ['wait:600', ''], ['Esc', ''], ['wait:300', ''],
+        ['Ctrl+,', '同じものの三つ目'], ['wait:600', ''], ['Esc', ''], ['wait:300', ''],
+
+        // タブ
+        ['F9', '新規タブ'], ['wait:400', ''], ['Enter', '確認'], ['wait:700', ''],
+        ['F2', '次のタブ'], ['wait:400', ''], ['F1', '前のタブ'], ['wait:400', ''],
+        ['w', 'タブを閉じる'], ['wait:600', ''],
+
+        // ディレクトリの上でだけ ── ファイルの上では外部アプリが起動する
+        ['land:from', 'ディレクトリへ'], ['Ctrl+Enter', '反対ペインで開く'], ['wait:800', ''],
+
+        // シェル
+        ['Shift+J', 'シェルへ'], ['wait:1200', ''],
+        ['Shift+F8', '左右に分割'], ['wait:800', ''],
+        ['Shift+F9', '上下に分割'], ['wait:800', ''],
+        ['Shift+F1', '前のペイン'], ['wait:400', ''],
+        ['Shift+F2', '次のペイン'], ['wait:400', ''],
+        ['Shift+F12', 'このペインだけ'], ['wait:500', ''],
+        ['Shift+F12', '分割に戻す'], ['wait:500', ''],
+        ['Shift+F10', '分割を閉じる'], ['wait:500', ''], ['Enter', '確認'], ['wait:700', ''],
+        ['Ctrl+Shift+Enter', 'スニペット'], ['wait:700', ''], ['Esc', ''], ['wait:400', ''],
+        ['Shift+Enter', 'シェルのメニュー'], ['wait:600', ''], ['Esc', ''], ['wait:400', ''],
+        ['F9', 'シェルの新規タブ'], ['wait:800', ''],
+        ['F1', 'タブ1へ'], ['wait:400', ''],
+        ['F10', 'シェルタブを閉じる'], ['wait:500', ''], ['Enter', '確認'], ['wait:800', ''],
+        ['Esc', 'ファイルへ'], ['Esc', ''], ['wait:500', ''],
+
+        // エディタ
+        // 中へ戻る ── 上で親へ上がったままなので、`b.md` はここには無い。
+        // 「その行が無い」と「そのキーが効かない」は別のことで、`land:` は
+        // 前者を「なし」と言って落ちるが、区別は書いた側の仕事。
+        // 素の `l` は「入る」ではない ── ヘルプが `Enter/l` と書くのは
+        // アーカイブの中の行だけで、普通の一覧では割り当てが無い。
+        // 押して何も起きないのを「効かない」と読むところだった。
+        ['land:from', 'from へ'], ['Enter', '入る'], ['wait:900', ''],
+        // 見出しの多いほうを開く ── `zu.md` は見出しが一つで、`Mod+]` が
+        // 「動かない」のか「行き先が無い」のか区別がつかない。
+        ['land:b.md', 'md へ'], ['Enter', '開く'], ['wait:3000', ''],
+        ['top:#view', 'エディタが最前面'],
+        ['Ctrl+e', 'プレビュー'], ['wait:1200', ''],
+        ['Ctrl+e', 'ソースへ'], ['wait:800', ''],
+        // **`Mod+`、`Ctrl+` ではない。** これらは Monaco の `KeyMod.CtrlCmd` で
+        // 束ねてあり、それは Windows では Ctrl、Mac では ⌘。`Ctrl+]` で
+        // 押していたときは三つとも「何も起きない」と出て、危うく壊れて
+        // いると報告するところだった ── 押し方が違うだけだった。
+        ['Mod+]', '次の見出し'], ['wait:400', ''],
+        ['read:\'見出し送り → 行 \' + viewer.ed.getPosition().lineNumber', ''],
+        ['Mod+[', '前の見出し'], ['wait:400', ''],
+        ['Mod+Shift+o', 'アウトライン'], ['wait:1200', ''],
+        ['read:\'アウトライン \' + report.rows.length + \' 行\'', ''],
+        ['top:#report', '最前面'], ['Esc', ''], ['wait:400', ''],
+        ['Mod+Shift+b', 'blame'], ['wait:1200', ''],
+        ['Shift+Enter', 'エディタのメニュー'], ['wait:600', ''], ['Esc', ''], ['wait:400', ''],
+        ['u', 'エディタの外へ出す前に'], ['wait:200', ''],
+        ['Esc', ''], ['Esc', ''], ['Esc', '閉じる'], ['wait:600', ''],
+
+        // 取り消し・やり直し（一周の最後に、砂場を元へ）
+        ['u', '取り消し'], ['wait:600', ''],
+        ['Ctrl+r', 'やり直し'], ['wait:600', ''],
     ];
 
     // Its own config directory, inside the sandbox.
@@ -701,7 +826,13 @@ async function main() {
             const before = await cdp.read(LOOK);
             await cdp.press(key);
             const after = await cdp.read(LOOK);
-            const moved = JSON.stringify(before) !== JSON.stringify(after);
+            // **A wait is not a key.** It was counted with them, so the
+            // number at the bottom grew by one for every `wait:` in the round
+            // — and when the round doubled, so did the noise. The count is
+            // meant to say "this many keys did nothing"; a pause doing
+            // nothing is what a pause is for.
+            const isWait = key.startsWith('wait:');
+            const moved = isWait || JSON.stringify(before) !== JSON.stringify(after);
             const note = what ? `  ${what}` : '';
             // The viewer before the shell. The shell panel is open from
             // startup now, so a report that prefers it can never show the
