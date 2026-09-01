@@ -2327,7 +2327,7 @@ function menuMoved(spec, rows) {
 /// The switches and the sort picker are the same object with different rows,
 /// and a third near-copy of "draw a list, move a cursor, run the row" is how
 /// they would start behaving differently from each other.
-const menu = { spec: null, at: 0 };
+const menu = { spec: null, at: 0, byKey: false };
 
 /// Where a submenu came from, so ← and Esc go back one level rather than
 /// dropping you out of the menu entirely — which in a tree this size means
@@ -2424,10 +2424,18 @@ function menuRows() {
 /// rebuilding the rows is the whole fix: no element is created, so no
 /// synthetic mouseenter exists to be filtered.
 function paintMenuCursor() {
+    // The keyboard has the cursor until the pointer is actually moved. Set
+    // *before* the scroll, because the scroll is the thing that fires the
+    // event this is guarding against.
+    menu.byKey = true;
     const hits = el.findHits.children;
     for (let i = 0; i < hits.length; i += 1) hits[i].classList.toggle('on', i === menu.at);
     hits[menu.at]?.scrollIntoView({ block: 'nearest' });
 }
+
+// A real pointer movement, as opposed to the list moving underneath a
+// stationary one. Captured, so an overlay cannot hide it.
+document.addEventListener('mousemove', () => { menu.byKey = false; }, true);
 
 function drawMenu() {
     const rows = menuRows();
@@ -2450,10 +2458,25 @@ function drawMenu() {
         // The pointer moves the cursor, as it does in cian-tui (mouse.rs:609).
         // Without it the highlight and the pointer disagree about which row
         // a click is going to land on.
+        // The pointer moves the cursor, as it does in cian-tui (mouse.rs:609)
+        // — but only when the pointer is what moved.
+        //
+        // **`mouseenter` fires when the row arrives under the pointer too**,
+        // and there are two ways for that to happen. Rebuilding the list was
+        // the first, and not rebuilding it fixed that one. Scrolling is the
+        // second, and it is the one that bit at the bottom of a long menu:
+        // ↓ past the last visible row scrolls the list, the row under the
+        // resting mouse changes, mouseenter fires, and the cursor jumps back
+        // to the pointer. So the keyboard holds the cursor until a genuine
+        // `mousemove` says otherwise. Coordinates cannot tell these apart —
+        // in both cases the pointer is exactly where it was.
         div.addEventListener('mouseenter', () => {
-            if (menu.at === i) return;
+            if (menu.at === i || menu.byKey) return;
             menu.at = i;
-            paintMenuCursor();
+            // Not `paintMenuCursor()`: that would hand the cursor back to the
+            // keyboard, and the pointer is what just moved it.
+            const hits = el.findHits.children;
+            for (let n = 0; n < hits.length; n += 1) hits[n].classList.toggle('on', n === menu.at);
         });
         // Right-click climbs one level, which is the mouse's Esc here.
         div.addEventListener('contextmenu', (e) => {
@@ -2823,6 +2846,15 @@ async function syncPane(pullToHere) {
     const there = here === 'left' ? 'right' : 'left';
     const [to, from] = pullToHere ? [here, there] : [there, here];
     const path = state[from].cwd;
+    // Said and stopped, as cian-tui says and stops (`sync_active_from_other`).
+    // A move to where you already are is not a move: it used to re-list, and
+    // the engine's `list` then rebuilt the pane, so `o` on two panes already
+    // together threw that pane's history away and put its own directory at
+    // the top of what was left.
+    if (state[to].cwd === path) {
+        say(tr('panes already in the same directory', '両ペインは既に同じディレクトリです'));
+        return;
+    }
     const pane = await ask('list', { pane: to, path });
     if (!pane) return;
     state[to] = pane;
@@ -6930,6 +6962,11 @@ function dividerSpan(d) {
 }
 
 function layoutShell(panes) {
+    // "Which pane has the keys" is a question only a split can ask. With one
+    // pane the answer is the panel's own top edge, already accented, and
+    // drawing the frame as well put a second accent line a few pixels under
+    // the first — see the stylesheet.
+    el.shell.classList.toggle('split', panes.length > 1);
     const have = new Map([...el.sPanes.children].map((n) => [Number(n.dataset.id), n]));
     const want = new Set(panes.map((p) => p.id));
     for (const [id, node] of have) if (!want.has(id)) node.remove();
@@ -8871,6 +8908,19 @@ window.cian.onEvent(async (msg) => {
             // Awaited, because the listings speak too — and whichever of the
             // two says its piece last is the one that stays on screen.
             await reread();
+            // The marks were the *instruction*, and the instruction has been
+            // carried out — cian-tui clears them here too (`actions.rs:3013`,
+            // right after its own `reload_both`). The window never said so:
+            // it relied on the engine's `list` rebuilding the pane from
+            // scratch, which cleared the marks as a side effect and took the
+            // history, the sort and the hidden-file setting with them. With
+            // `list` fixed to walk rather than rebuild, this has to be asked
+            // for out loud, which is where it belonged anyway.
+            await ask('unmarkall', { pane: state.focus }).then((p) => {
+                if (!p) return;
+                state[state.focus] = p;
+                draw(state.focus);
+            });
             if (msg.cancelled) say(tr(`${verb} stopped (${msg.ok} done)`, `${verb}を中止しました（${msg.ok} 件は済み）`), true);
             // Every failure, named. A count of them tells you something went
             // wrong without telling you what, which is the worst of both.

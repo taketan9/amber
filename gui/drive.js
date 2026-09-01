@@ -412,7 +412,18 @@ async function main() {
         ['Tab', '反対ペインへ'],
         ['z', 'パスで移動'], [`type:${sand}/to`, ''], ['Enter', 'to へ'],
         ['Ctrl+v', '貼り付け'],
-        ['Tab', '左へ'], ['Down', ''], ['Enter', 'ファイルを読む'],
+        // Back to the left, marks cleared by the copy that just finished, and
+        // onto `c.rs` by name rather than by counting rows.
+        //
+        // It used to be `Down` and hope. That worked only because the pane
+        // was silently rebuilt on every refresh — which cleared the marks as
+        // a side effect, so `Ctrl+c` had carried one file and the cursor
+        // landed where the round assumed. With the rebuild gone (it was
+        // taking the history and the sort with it) the marks survive, six
+        // files are copied, and `Down` lands on a `.png` — so the whole
+        // second half of the round, the editor and the save, stopped being
+        // tested and said nothing about it.
+        ['Tab', '左へ'], ['land:c.rs', 'c.rs の行へ'], ['Enter', 'ファイルを読む'],
         ['F3', 'エディタで開く'], ['wait:3000', ''],
         // vim style is the default in both builds now, so the round asks for
         // insert mode before typing. It typed `XX` into normal mode instead —
@@ -612,6 +623,21 @@ async function main() {
                     out = `例外: ${err.message}`;
                 }
                 console.log(`  read    ${what || key.slice(5)} = ${JSON.stringify(out)}`);
+                continue;
+            }
+            // `land:<name>` — put the cursor on a named row. A step that
+            // depends on *which* file is under the cursor should say which
+            // file, not a number of Downs.
+            if (key.startsWith('land:')) {
+                const want = key.slice(5);
+                const at = await cdp.read(
+                    `(() => { const p = state[state.focus];
+                       const i = p.entries.findIndex((e) => e.name === ${JSON.stringify(want)});
+                       if (i < 0) return 'なし';
+                       p.cursor = i; draw(state.focus); return String(i); })()`,
+                );
+                console.log(`  land    ${want} → 行 ${at}`);
+                if (at === 'なし') bad++;
                 continue;
             }
             if (key === 'list') {

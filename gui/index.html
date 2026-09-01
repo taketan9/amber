@@ -703,10 +703,15 @@ html, body {
   background: var(--pane); color: var(--text); font-weight: 600;
   border-color: var(--line); border-bottom: 1px solid var(--pane);
 }
-/* The keys are in it: the open tab takes the accent along its top edge
-   rather than filling — a filled chip was the most visible thing on screen
-   while you were typing in a file pane. */
-#shell.on .stabs span.on { color: var(--accent); box-shadow: inset 0 2px 0 var(--accent); }
+/* The keys are in it: the open tab takes the accent along the edge where it
+   meets the panel, not its top.
+   On the top it was a second horizontal accent line four pixels under the
+   panel's own — 2px border, 3px of strip padding, 1px of tab border — and
+   two parallel lines that close together read as one botched edge rather
+   than as two things. ("上辺が2つ線が入ったように見える".) At the bottom it
+   is the shape a tab has always had, and it matches the editor's file tabs,
+   which are the same idea one panel over. */
+#shell.on .stabs span.on { color: var(--accent); box-shadow: inset 0 -2px 0 var(--accent); }
 .stabs span:hover:not(.on) { color: var(--text); background: var(--pane-off); }
 #s-title { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* The strip was 39px for three short words. Its own line-height rather than
@@ -738,8 +743,12 @@ html, body {
    the shell at all. Painted with the accent unconditionally, the panel went
    on wearing the focus colour while you were typing in a file pane, so two
    surfaces claimed the keyboard at once. Quiet when the keys are elsewhere. */
-.sgrid.on { box-shadow: inset 0 0 0 2px var(--line); }
-#shell.on .sgrid.on { box-shadow: inset 0 0 0 2px var(--accent); }
+/* …and only when there is more than one pane to tell apart. A single pane
+   filling the panel wore a frame whose top edge ran the full width a few
+   pixels below the panel's own top border — the third of the three parallel
+   lines that made the top of this panel look broken. */
+#shell.split .sgrid.on { box-shadow: inset 0 0 0 2px var(--line); }
+#shell.on.split .sgrid.on { box-shadow: inset 0 0 0 2px var(--accent); }
 /* The seam between split panes, drawn on each pane's own left/top edge —
    the panes are absolutely placed from engine fractions, so an
    adjacent-sibling border landed on whichever node happened to be second in

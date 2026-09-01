@@ -791,6 +791,41 @@ impl Pane {
         Ok(())
     }
 
+    /// Walk this pane to a directory named from outside — `:cd`, `z`, `o`,
+    /// `O`, a bookmark, the place a grep hit lives.
+    ///
+    /// **This is not `Pane::new`.** The engine's `list` built a whole new
+    /// pane for the path, which meant every one of those keys silently threw
+    /// away the pane's history, its marks, its sort order and whether it was
+    /// showing hidden files. `h` after `o` showed nothing, because `o` had
+    /// just deleted the history it was going to show — reported as "自分の
+    /// 履歴を塗り替えてしまってない？", and it was worse than overwriting.
+    /// F5 went through the same door with the directory it was already in,
+    /// so a plain refresh reset the sort.
+    ///
+    /// Arriving somewhere clears what belonged to the place you left — the
+    /// filter, the marks, the archive or server view. It keeps what belongs
+    /// to the pane: how you like it sorted, whether you want dotfiles, and
+    /// where you have been.
+    ///
+    /// Standing still is not arriving. Asked for the directory it is already
+    /// in, it re-reads and touches nothing else — otherwise `o` with the two
+    /// panes already together would push the current directory onto its own
+    /// history, and `h` would offer to take you where you are.
+    pub fn go_to(&mut self, path: impl Into<PathBuf>) -> Result<()> {
+        let path = dunce::canonicalize(path.into()).context("no such directory")?;
+        if path == self.cwd && matches!(self.view, PaneView::Dir) {
+            return self.reload();
+        }
+        let prev = self.cwd.clone();
+        self.view = PaneView::Dir;
+        self.filter.clear();
+        self.marks.clear();
+        self.push_history(prev);
+        self.cwd = path;
+        self.arrive()
+    }
+
     pub fn jump_to(&mut self, path: PathBuf) -> Result<()> {
         let prev = self.cwd.clone();
         self.push_history(prev);
@@ -1161,6 +1196,42 @@ mod tests {
         assert!(pane.selected().map(|e| e.is_parent).unwrap_or(false), "only `..` remains");
         // `..` is never a target, so acting on the cursor yields nothing.
         assert!(pane.target_paths().is_empty());
+    }
+
+    /// `o`, `O`, `z`, `:cd` and F5 all went through the engine's `list`,
+    /// which built a whole new `Pane` — so each of them silently emptied the
+    /// history, the marks and the sort. Reported as `h` showing nothing after
+    /// `o`.
+    #[test]
+    fn walking_to_a_directory_keeps_what_belongs_to_the_pane() {
+        let (dir, mut pane) = pane_with(&["a.txt", "b.txt"]);
+        let below = dir.path().join("sub");
+        fs::create_dir(&below).unwrap();
+        fs::write(below.join("c.txt"), b"").unwrap();
+
+        pane.sort = Sort { key: SortKey::Size, reverse: true };
+        pane.show_hidden = false;
+        let from = pane.cwd.clone();
+
+        pane.go_to(&below).unwrap();
+
+        assert_eq!(pane.sort.key, SortKey::Size, "the sort is the pane's, not the directory's");
+        assert!(pane.sort.reverse);
+        assert!(!pane.show_hidden);
+        assert_eq!(pane.history.first(), Some(&from), "where we came from is the history");
+        assert!(pane.entries.iter().any(|e| e.name == "c.txt"));
+    }
+
+    /// Standing still is not arriving: `o` with both panes already together
+    /// used to push the current directory onto its own history, so `h`
+    /// offered to take you where you already were.
+    #[test]
+    fn going_where_we_already_are_does_not_touch_the_history() {
+        let (_d, mut pane) = pane_with(&["a.txt"]);
+        let here = pane.cwd.clone();
+        pane.go_to(&here).unwrap();
+        assert!(pane.history.is_empty(), "no move, no history entry");
+        assert!(pane.entries.iter().any(|e| e.name == "a.txt"), "but it did re-read");
     }
 
     /// Regression guard: reload() prunes marks against the *unfiltered* list,

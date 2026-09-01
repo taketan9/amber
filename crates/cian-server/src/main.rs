@@ -607,7 +607,11 @@ impl Session {
                     if !p.is_dir() {
                         anyhow::bail!("not a directory: {}", p.display());
                     }
-                    *pane = Pane::new(p)?;
+                    // `go_to`, not `Pane::new` — see its doc comment. Building
+                    // a fresh pane here discarded the history, the marks, the
+                    // sort and the hidden-file setting on every `:cd`, `z`,
+                    // `o`, `O`, and on every F5.
+                    pane.go_to(p)?;
                 } else {
                     pane.reload()?;
                 }
@@ -1590,14 +1594,19 @@ impl Session {
                 // when a shell has ended by itself. The same close either way
                 // — a pane that is over is a pane that is over.
                 let named = req.params["id"].as_u64();
-                let Some(at) = named
-                    .and_then(|id| self.tabs.iter().position(|t| {
-                        let mut ids = Vec::new();
-                        t.root.leaves(&mut ids);
-                        ids.contains(&id)
-                    }))
-                    .or(Some(self.shell_at))
-                else {
+                let owners: Vec<Vec<u64>> = self.tabs.iter().map(|t| {
+                    let mut ids = Vec::new();
+                    t.root.leaves(&mut ids);
+                    ids
+                }).collect();
+                // The rule, and why a miss is not "the focused tab", is in
+                // `shell::tab_for_close` with its tests.
+                let Some(at) = shell::tab_for_close(&owners, named, self.shell_at) else {
+                    if named.is_some() {
+                        // A pane that has already gone announcing that it has
+                        // gone. Nothing to do, and nothing to report.
+                        return Ok(self.shell_reply());
+                    }
                     anyhow::bail!("シェルが開いていません");
                 };
                 if named.is_some() {

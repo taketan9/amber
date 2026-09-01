@@ -114,7 +114,17 @@ impl Shell {
                 // second, which is often enough to feel immediate and rare
                 // enough not to matter.
                 ticks += 1;
-                if ticks % 8 == 0 && !watch.lock().map(|mut s| s.is_alive()).unwrap_or(false) {
+                // The second `watch_stop` check is not belt and braces: this
+                // thread is asleep for 30ms at a time, and `Drop for Shell`
+                // sets the flag *and kills the shell*. So a deliberate close
+                // makes `is_alive()` answer no on the very next tick, and the
+                // pane the engine has already removed announces its own death
+                // to a window that then asks for it to be closed again. Read
+                // the flag once more, right where it matters.
+                if ticks % 8 == 0
+                    && !watch.lock().map(|mut s| s.is_alive()).unwrap_or(false)
+                    && !watch_stop.load(Ordering::Relaxed)
+                {
                     // A pane whose shell has ended, not a panel to take down:
                     // exactly what Shift+F10 does, which is why one word says
                     // both. The old event said "gone" and the window heard
@@ -584,5 +594,57 @@ impl Node {
                 }
             }
         }
+    }
+}
+
+/// Which tab a pane-close applies to.
+///
+/// `leaves` is each tab's pane ids, in tab order. `named` is the pane the
+/// request asked for — `Some` when a shell announced its own death,
+/// `None` for Shift+F10, which means "the focused one".
+///
+/// **`None` for a named pane nobody owns.** That case is a stale event: the
+/// shell has already been removed, usually by the very close that killed it,
+/// and the announcement arrives afterwards. Treating it as "the focused tab"
+/// — which is what the code did — means the dead pane is looked for in a tab
+/// it was never part of, not found, and read as "this tab had one pane, so
+/// closing it closes the tab". Pressing F10 on the third shell tab therefore
+/// also closed the second, splits and all. Reported twice from Windows before
+/// the race was found; it is in every close and lands about one time in eight
+/// (the watcher checks liveness every eighth 30ms tick, and a deliberate
+/// close is exactly what makes it answer no).
+pub fn tab_for_close(leaves: &[Vec<u64>], named: Option<u64>, focused: usize) -> Option<usize> {
+    match named {
+        Some(id) => leaves.iter().position(|ids| ids.contains(&id)),
+        None => (focused < leaves.len()).then_some(focused),
+    }
+}
+
+#[cfg(test)]
+mod close_tests {
+    use super::*;
+
+    #[test]
+    fn a_named_pane_is_closed_in_the_tab_that_owns_it() {
+        let tabs = vec![vec![1], vec![2, 3, 4], vec![5]];
+        assert_eq!(tab_for_close(&tabs, Some(3), 0), Some(1));
+        assert_eq!(tab_for_close(&tabs, Some(5), 0), Some(2));
+    }
+
+    #[test]
+    fn a_named_pane_nobody_owns_closes_nothing() {
+        // The whole bug: this used to answer `Some(focused)`.
+        let tabs = vec![vec![1], vec![2, 3, 4]];
+        assert_eq!(tab_for_close(&tabs, Some(99), 1), None);
+        assert_eq!(tab_for_close(&tabs, Some(99), 0), None);
+    }
+
+    #[test]
+    fn an_unnamed_close_means_the_focused_tab() {
+        let tabs = vec![vec![1], vec![2, 3]];
+        assert_eq!(tab_for_close(&tabs, None, 1), Some(1));
+        // …and nothing at all when there is no such tab.
+        assert_eq!(tab_for_close(&tabs, None, 7), None);
+        assert_eq!(tab_for_close(&[], None, 0), None);
     }
 }
