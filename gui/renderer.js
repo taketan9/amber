@@ -93,6 +93,7 @@ const el = {
     sTitle: document.getElementById('s-title'),
     sAbout: document.getElementById('s-about'),
     sPanes: document.getElementById('s-panes'),
+    sPreview: document.getElementById('s-preview'),
     report: document.getElementById('report'),
     rName: document.getElementById('r-name'),
     rAbout: document.getElementById('r-about'),
@@ -350,7 +351,42 @@ function markFocus() {
 function setShellFocus(on) {
     term.focused = on;
     el.shell.classList.toggle('on', on);
+    // The preview borrows this panel's pixels; giving the shell the keys
+    // gives them straight back, and taking them away brings the preview
+    // again. cian-tui's bargain exactly (preview.rs): the PTY never stopped.
+    if (preview.on) {
+        if (on) paintPreview(null);
+        else { preview.at = null; showPreview(); }
+    }
     markFocus();
+}
+
+/// Above this many entries a listing draws only what is on screen. Below it,
+/// everything is built exactly as before — see the note in `draw`.
+const VIRTUAL_FROM = 300;
+/// Rows built above and below the visible window, so a small scroll does not
+/// have to wait for a repaint to have something to show.
+const VIRTUAL_PAD = 12;
+/// One pending repaint per pane, cancelled by the next scroll event.
+const scrollSoon = { left: 0, right: 0 };
+
+/// A blank block standing in for rows that were not built. Keeps the
+/// scrollbar the length it would have been.
+function spacer(px) {
+    const d = document.createElement('div');
+    d.style.height = `${px}px`;
+    d.style.flex = '0 0 auto';
+    return d;
+}
+
+/// How tall one row is, measured rather than assumed: `--cell-h` follows the
+/// font size, which Ctrl+= changes.
+function rowHeight(rows) {
+    const probe = rows.querySelector('.row');
+    const h = probe ? probe.getBoundingClientRect().height : 0;
+    if (h > 0) return h;
+    const css = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--cell-h'));
+    return css > 0 ? css : 26;
 }
 
 function draw(which) {
@@ -504,7 +540,42 @@ function draw(which) {
             }
         }
     }
-    pane.entries.forEach((row, i) => {
+    // **Only the rows you can see.**
+    //
+    // Every entry became a DOM node, and `draw()` runs on every cursor move —
+    // so one `j` in `C:\Windows\System32` built five thousand nodes and threw
+    // five thousand away. Measured here: 645ms a keystroke at 5000 rows,
+    // against 2ms at eight. That is the whole of "もっさりする"; the engine
+    // reads the directory once and is not the slow part.
+    //
+    // Rows are a fixed height (`--cell-h`), so the window is arithmetic: two
+    // spacers stand in for what is above and below, and the scrollbar keeps
+    // the size and position it would have had. Below `VIRTUAL_FROM` nothing
+    // changes at all — a directory of forty files was never the problem, and
+    // a mechanism that only runs where it is needed cannot break the case
+    // where it is not.
+    //
+    // Not in the icon view: those tiles wrap, so their count per row depends
+    // on the width, and arithmetic that assumes a fixed row is arithmetic
+    // that will be wrong the first time somebody drags the divider.
+    const virtual = viewMode !== 'icons' && pane.entries.length >= VIRTUAL_FROM;
+    const cellH = virtual ? rowHeight(rows) : 0;
+    let from = 0;
+    let to = pane.entries.length;
+    if (virtual) {
+        const seen = Math.max(1, Math.ceil(rows.clientHeight / cellH));
+        // Centred on whichever of the cursor and the scroll position is
+        // driving: `j` moves the cursor, the wheel moves the scroll, and both
+        // have to end up drawn.
+        const top = Math.floor(rows.scrollTop / cellH);
+        const lo = Math.min(top, pane.cursor);
+        const hi = Math.max(top + seen, pane.cursor);
+        from = Math.max(0, lo - VIRTUAL_PAD);
+        to = Math.min(pane.entries.length, hi + VIRTUAL_PAD);
+        if (from > 0) frag.append(spacer(from * cellH));
+    }
+    pane.entries.slice(from, to).forEach((row, n) => {
+        const i = from + n;
         const div = document.createElement('div');
         div.className = 'row'
             + (row.is_dir ? ' dir' : '')
@@ -616,11 +687,28 @@ function draw(which) {
         });
         frag.append(div);
     });
+    if (virtual && to < pane.entries.length) frag.append(spacer((pane.entries.length - to) * cellH));
     rows.replaceChildren(frag);
 
     // Keep the cursor on screen without yanking the view about.
-    const at = rows.children[pane.cursor];
+    const at = virtual
+        ? rows.querySelector('.row.cursor')
+        : rows.children[pane.cursor];
     if (at) at.scrollIntoView({ block: 'nearest' });
+    // Scrolling reveals rows that were never built. Attached once per pane —
+    // the listener outlives the rows it draws.
+    if (virtual && !rows.dataset.watching) {
+        rows.dataset.watching = '1';
+        rows.addEventListener('scroll', () => {
+            if (scrollSoon[which]) return;
+            // One repaint per frame at most: a wheel spin fires scroll far
+            // faster than anything can usefully be drawn.
+            scrollSoon[which] = requestAnimationFrame(() => {
+                scrollSoon[which] = 0;
+                if (state[which]) draw(which);
+            });
+        }, { passive: true });
+    }
 
     // The chip row follows every repaint — the counts, the marks and the
     // name under the cursor are all things a repaint may have changed — and
@@ -1732,9 +1820,15 @@ function hintsNow() {
             return [['Ctrl+S', tr('save', '保存')], ['Shift+←→', tr('select', '選択')], ['Ctrl+C / V', tr('copy / paste', 'コピー / 貼付')],
                 ['Ctrl+F', tr('search', '検索')], ['Esc ×3', tr('close', '閉じる')], ['Shift+Enter', tr('menu — editor keys', 'メニュー — キー操作切替')]];
         }
+        // `Shift+Enter` is on this row now. The menu is where the encoding,
+        // blame, the preview and the external editor live, and in vim style
+        // it was the one thing the bar never named — so "there is no way to
+        // change the encoding in the editor" was a fair reading of the
+        // screen, though `:enc` and the menu both had it all along.
         return [['Ctrl+S', tr('save', '保存')], ['Esc', tr('leave the editor', '編集終了')], ['/', tr('search', '検索')], ['i', tr('edit', '編集')],
             ['v', tr('select', '選択')], ['y', tr('copy', 'コピー')], ['d c y', tr('+ motion', '＋モーション')], [':q', tr('close', '閉じる')],
-            [':notepad', tr('notepad keys', 'メモ帳ふうに')], ['?', tr('keys', 'キー一覧')]];
+            ['Shift+Enter', tr('menu — encoding, blame, preview', 'メニュー — 文字コード・blame・プレビュー')],
+            ['?', tr('keys', 'キー一覧')]];
     }
     if (term.on && term.focused) {
         // Dynamic, as the terminal build's shell hints are: ^C only while a
@@ -2590,6 +2684,18 @@ document.addEventListener('keydown', (e) => {
 /// evaluated at startup would freeze whichever language the window opened in
 /// — the switch would work everywhere except the two screens made entirely of
 /// words.
+/// The editor's own keys, as a list you can read while the file waits behind
+/// it. cian-tui's `?` in the viewer, over the section the help already has —
+/// one list rather than two that would drift.
+function viewerHelp() {
+    const want = tr("Reading and writing (F3 / Enter)", '読み書き（F3・Enter）');
+    const section = helpRows().find(([name]) => name === want);
+    const rows = (section ? section[1] : []).map(([k, what]) => ({ n: k, label: what }));
+    show(tr('The editor', 'エディタ'),
+        tr('the keys in here — Esc goes back to the file', 'この中のキー ── Esc でファイルに戻ります'),
+        rows, { align: true, foot: tr('↑↓ scroll   Esc back to the file', '↑↓ 送る   Esc ファイルに戻る') });
+}
+
 function helpRows() {
   return [
     [tr("Navigation", '移動'), [
@@ -4491,6 +4597,24 @@ document.addEventListener('keydown', (e) => {
             pic.fit = true; pic.ox = 0; pic.oy = 0; paintPicture(); return;
         }
     }
+    // `?` — what can be done *in here*, which is not the same question as
+    // what cian can do.
+    //
+    // **The hint bar has advertised `? キー一覧` since the bar was written and
+    // nothing was bound to it**, so the key went to vim, which reads `?` as
+    // "search backwards" and put up a box saying `? (javaScript regexp)`.
+    // cian-tui binds it (viewer.rs:1065) to the viewer's own manual; this is
+    // the same idea over the section the window's help already has.
+    //
+    // Only in vim style, and only when the keys are commands: in notepad
+    // style `?` is a character, and so it is in the middle of a word.
+    if (e.key === '?' && viewer.vim && !vimTyping() && !hex.editing
+        && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.stopPropagation();
+        e.preventDefault();
+        viewerHelp();
+        return;
+    }
     // Shift+Enter opens the file's own menu, the key cian-tui puts it on in
     // the viewer as well as in a listing. Before the editor sees it: in
     // notepad style a plain Enter is a newline, and this one is not.
@@ -6297,6 +6421,13 @@ async function cmdCompare() {
     const r = await ask('compare', { folded: diffFolded, enc: diffEnc || undefined });
     if (!r) return;
     if (r.kind === 'dirs') {
+        // Same as the file case, and for the same reason (actions.rs:1276):
+        // two identical folders used to open a list with nothing in it.
+        if (!r.rows.length) {
+            show(tr('The two folders are identical', '2つのディレクトリは同一です'),
+                `${r.left}  ↔  ${r.right}`, [], { foot: tr('Esc close', 'Esc 閉じる') });
+            return;
+        }
         const mark = { left: tr('◀ left only', '◀ 左だけ'), right: tr('right only ▶', '右だけ ▶'), differ: tr('≠ differ', '≠ 違う') };
         const roots = { left: r.left, right: r.right };
         show(tr('Folder comparison', 'ディレクトリ比較'), tr(`${r.left}   ↔   ${r.right}   ${r.rows.length}${r.truncated ? ' (stopped at the cap)' : ''}`, `${r.left}   ↔   ${r.right}   ${r.rows.length} 件${r.truncated ? '（打ち切り）' : ''}`),
@@ -6333,10 +6464,18 @@ async function cmdCompare() {
         return;
     }
     if (r.kind === 'files') {
-        // Nothing to look at when they are the same, and a screen saying
-        // "identical" over an empty list is a screen that wasted a keystroke.
+        // Said in a sheet, not whispered in the status line.
+        //
+        // "a screen saying identical over an empty list is a screen that
+        // wasted a keystroke" was the argument for a one-liner, and the
+        // terminal build had already been through it and come back the other
+        // way: "the compare felt unresponsive when identical folders only
+        // whispered a message" (actions.rs:1276). It is exactly what
+        // happened here — `=` reported as doing nothing at all. The keystroke
+        // is not wasted; "they are the same" is the answer.
         if (!r.added && !r.removed && !r.changed) {
-            say(tr(`${r.left} and ${r.right} have the same contents`, `${r.left} と ${r.right} は同じ内容です`));
+            show(tr('The two files are identical', '2つのファイルは同一です'),
+                `${r.left}  ↔  ${r.right}`, [], { foot: tr('Esc close', 'Esc 閉じる') });
             return;
         }
         // Two files go to the **diff editor**, not to a list of lines.
@@ -8389,30 +8528,105 @@ function resizeSplit(key) {
 /// is a lot of disk for a feature you want on the ten seconds you are looking
 /// for something. On, it is the fastest way to find "the one with the error
 /// in it".
-const preview = { on: false };
+const preview = { on: false, at: null };
 
 function togglePreview() {
     preview.on = !preview.on;
-    say(preview.on ? tr('preview: it follows the cursor', 'プレビュー: カーソルを追います') : tr('preview stopped', 'プレビューを止めました'));
-    if (preview.on) showPreview();
-    else if (viewer.on) closeView(false);
+    if (preview.on) {
+        // The panel is where it draws, so the panel has to be there. cian-tui
+        // always has one; here it is opened, and the shell inside it runs
+        // untouched underneath — Shift+J gives it the keys and the pixels back.
+        if (!term.on) openShell().then(() => { blurShell(); showPreview(); });
+        else showPreview();
+        say(tr('preview on — the shell panel follows the cursor (Shift+J for the shell)',
+               'プレビュー: シェルパネルがカーソルを追います（Shift+J でシェルに戻る）'));
+    } else {
+        preview.at = null;
+        paintPreview(null);
+        say(tr('preview stopped', 'プレビューを止めました'));
+    }
+}
+
+/// Show the preview, or hand the panel back to the shell.
+///
+/// **The whole panel, not the whole screen.** This used to call
+/// `lookInside()`, which opens the editor over everything — that is opening a
+/// file, not glancing at one, and it buried the listing you were walking. The
+/// terminal build borrows the shell panel's area (preview.rs) and leaves the
+/// PTY running behind it; so does this.
+function paintPreview(body) {
+    const showing = preview.on && !!body && !(term.on && term.focused);
+    el.shell.classList.toggle('previewing', showing);
+    el.sPreview.hidden = !showing;
+    if (!showing) { el.sPreview.replaceChildren(); return; }
+    el.sPreview.replaceChildren(body);
+    el.sPreview.scrollTop = 0;
+}
+
+function previewNote(text) {
+    const p = document.createElement('div');
+    p.className = 'note';
+    p.textContent = text;
+    return p;
 }
 
 let previewSoon = null;
 function showPreview() {
     if (!preview.on) return;
-    // A beat behind the cursor. Held down, `j` would otherwise open every file
+    // A beat behind the cursor. Held down, `j` would otherwise read every file
     // it passes, and the one you stop on is the only one that matters.
     clearTimeout(previewSoon);
     previewSoon = setTimeout(async () => {
-        const pane = state[state.focus];
+        if (!preview.on) return;
+        const which = state.focus;
+        const pane = state[which];
         const row = pane && pane.entries[pane.cursor];
-        if (!row || row.parent || row.is_dir) return;
-        if (viewer.on) await closeView(false);
-        await lookInside();
-        // The keys stay with the listing: this is a preview, not an opening.
-        setViewerOn(false);
+        if (!row || row.parent) { paintPreview(null); return; }
+        // A server pane would download every file the cursor passed over,
+        // which is the terminal build's reason for declining it too.
+        if (pane.remote) { paintPreview(previewNote(tr('a server pane — no preview (it would download every file)', 'サーバのペイン ── プレビューしません（毎回ダウンロードになります）'))); return; }
+        if (preview.at === row.path) return;
+        preview.at = row.path;
+        if (row.is_dir) {
+            const r = await ask('peekdir', { path: row.path }).catch(() => null);
+            if (preview.at !== row.path) return;
+            paintPreview(r ? dirPreview(r) : previewNote(tr('cannot read this folder', 'このディレクトリは読めません')));
+            return;
+        }
+        if (/\.(png|jpe?g|gif|webp|bmp|svg|avif|ico)$/i.test(row.name)) {
+            // `bytes` reads the row under this pane's cursor, which is what a
+            // preview is about — no second way of naming the same file.
+            const r = await ask('bytes', { pane: which }).catch(() => null);
+            if (preview.at !== row.path) return;
+            if (!r || !r.kind) { paintPreview(previewNote(row.name)); return; }
+            const img = document.createElement('img');
+            img.src = `data:${r.kind};base64,${r.b64}`;
+            paintPreview(img);
+            return;
+        }
+        const f = await ask('viewpath', { path: row.path }).catch(() => null);
+        if (preview.at !== row.path) return;
+        if (!f) { paintPreview(previewNote(row.name)); return; }
+        // A glance, not a browser: the head of the file is what a preview is.
+        const head = f.lines.slice(0, 400).join('\n');
+        const box = document.createElement('div');
+        box.textContent = head || tr('(empty)', '（空です）');
+        paintPreview(box);
     }, 250);
+}
+
+/// A directory, as rows. Capped for the same reason the terminal build caps
+/// it: a preview is a glance, and entering it is one keypress away.
+function dirPreview(r) {
+    const box = document.createElement('div');
+    for (const e of (r.entries || []).slice(0, 500)) {
+        const line = document.createElement('div');
+        line.className = 'dirrow' + (e.is_dir ? ' d' : '');
+        line.textContent = (e.is_dir ? '▸ ' : '  ') + e.name;
+        box.append(line);
+    }
+    if (!box.childNodes.length) box.append(previewNote(tr('(empty)', '（空です）')));
+    return box;
 }
 
 /// `Ctrl+Shift+Enter` — the commands init.lua keeps, sent to the shell.

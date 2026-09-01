@@ -3745,6 +3745,35 @@ impl Session {
                 cian_core::proc::open_with_desktop(&url)?;
                 Ok(serde_json::json!({ "opened": url }))
             }
+            // A directory's entries, read without walking into it.
+            //
+            // For `:preview`, which shows what the cursor is on — and the
+            // cursor passes over folders. Every other listing method *moves* a
+            // pane, which is exactly what a preview must not do.
+            "peekdir" => {
+                let path = std::path::PathBuf::from(arg(req, "path"));
+                if !path.is_dir() {
+                    anyhow::bail!("ディレクトリではありません");
+                }
+                let mut rows: Vec<(bool, String)> = std::fs::read_dir(&path)?
+                    .filter_map(|e| e.ok())
+                    .filter_map(|e| {
+                        let name = e.file_name().into_string().ok()?;
+                        Some((e.file_type().ok()?.is_dir(), name))
+                    })
+                    // A glance, not a browser. cian-tui caps this at 500 for
+                    // the same reason (preview.rs `LIST_CAP`), and walking in
+                    // is one keypress away.
+                    .take(1000)
+                    .collect();
+                rows.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.to_lowercase().cmp(&b.1.to_lowercase())));
+                Ok(serde_json::json!({
+                    "entries": rows.iter().take(500).map(|(d, n)| serde_json::json!({
+                        "is_dir": d, "name": n,
+                    })).collect::<Vec<_>>(),
+                    "more": rows.len() > 500,
+                }))
+            }
             // The first or last lines of the selection, without opening it.
             "peek" => {
                 let which = req.params["pane"].as_str().unwrap_or("left").to_string();
