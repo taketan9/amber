@@ -79,10 +79,15 @@ function createWindow(ground) {
         // invented lines were offered and all seven were wrong, for the good
         // reason that cian already had one.
         //
+        // Lower-case `x`, on his instruction. The README capitalises it to
+        // mark the letter the acronym takes; a title bar is not an acronym
+        // key, and `eXplorer` in running text reads as a brand doing a trick.
+        // The README keeps its bold — that is where the marking belongs.
+        //
         // `index.html`'s <title> is what Windows draws; this is the frame's
         // title before the page loads, so the two say the same thing rather
         // than the bar changing under you a beat after the window opens.
-        title: 'cian - Comfortable Interface for Agile File eXplorer Navigation',
+        title: 'cian - Comfortable Interface for Agile File explorer Navigation',
         ...iconArg(),
         webPreferences: {
             preload: path.join(__dirname, 'preload.js'),
