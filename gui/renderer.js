@@ -2099,6 +2099,14 @@ function viewerRows() {
     // 「? を押したのに違うものが出た」としか思えない。
     v.push({ label: tr("Keys in here", 'ここのキー一覧'), value: '?', run: viewerHelp });
     v.push({ label: tr("The whole manual", 'cian のキー一覧（全体）'), value: ':help', run: openHelp });
+    // **`:key` に、ここから届く道が無かった。**
+    //
+    // あれは押されたキーを全部飲み込む ── それが目的なので正しい。だが
+    // Enter も飲み込むので、**echo を点けてからファイルを開くことはできない**。
+    // そしてエディタの中では `:` は vim のもので、cian のコマンド行ではない。
+    // つまり「エディタでこのキーが効かない」を調べる道が、エディタの中には
+    // 一本も無かった。ファイルを開いてから、ここで点ける。
+    v.push({ label: tr("Watch the keys", 'キーを見る'), value: ':key', run: toggleKeyEcho });
     return v;
 }
 
@@ -2178,6 +2186,8 @@ function contextRows() {
                 ? { label: tr("Stop session log  \u25cf", 'セッションログ停止  ●'), value: ':sessionlog', run: cmdShellLog }
                 : { label: tr("Start session log", 'セッションログ開始'), value: ':sessionlog', run: cmdShellLog },
             { label: tr("Text encoding", '文字コード'), value: 'e', run: () => cmdEncoding() },
+            // 同じ理由で ── シェルでも `:` は文字なので、ここが唯一の道。
+            { label: tr("Watch the keys", 'キーを見る'), value: ':key', run: toggleKeyEcho },
         ]));
         v.push(group(tr('Window ▸', 'ウィンドウ ▸'), () => [
             { label: tr("Split left / right", '左右に分割'), value: 'S-F8', run: () => splitShell(false) },
