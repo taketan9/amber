@@ -2708,10 +2708,22 @@ document.addEventListener('keydown', (e) => {
 function viewerHelp() {
     const want = tr("Reading and writing (F3 / Enter)", '読み書き（F3・Enter）');
     const section = helpRows().find(([name]) => name === want);
-    const rows = (section ? section[1] : []).map(([k, what]) => ({ n: k, label: what }));
+    // **キーは `label`、説明は `sub`。**
+    //
+    // 前は逆で、キーを `n`（行番号のための右詰め 9ch の列）に入れ、説明を
+    // `label` に入れていた ── だから短いキーは右に寄り、長いキーは列から
+    // はみ出し、`align` は説明のほうを揃えていた。届いた画像がそのまま
+    // 「ぐっちゃぐちゃ」で、そのとおりでした。
+    const rows = (section ? section[1] : []).map(([k, what]) => ({ label: keyLabel(k), sub: what }));
     show(tr('The editor', 'エディタ'),
         tr('the keys in here — Esc goes back to the file', 'この中のキー ── Esc でファイルに戻ります'),
-        rows, { align: true, foot: tr('↑↓ scroll   Esc back to the file', '↑↓ 送る   Esc ファイルに戻る') });
+        rows, {
+            align: true,
+            // 読むための一覧なので、説明は折り返す。1行に詰めて `…` で
+            // 切ると、いちばん知りたい後半が消える。
+            wrap: true,
+            foot: tr('↑↓ scroll   Esc back to the file', '↑↓ 送る   Esc ファイルに戻る'),
+        });
 }
 
 function helpRows() {
@@ -3608,6 +3620,10 @@ function show(title, about, rows, opts = {}) {
         delete el.report.dataset.align;
         el.report.style.removeProperty('--name-w');
     }
+    // 折り返すか、1行で切るか。パスの一覧は切るのが正しく（末尾が効く）、
+    // 説明の一覧は折り返すのが正しい（後半が本文）。
+    if (opts.wrap) el.report.dataset.wrap = '1';
+    else delete el.report.dataset.wrap;
     el.rName.textContent = title;
     el.rAbout.textContent = about;
     el.rFoot.textContent = opts.foot
@@ -8397,7 +8413,22 @@ window.addEventListener('keydown', (e) => {
     // Only while keys are commands. In a text field the composition is the
     // point, and a listing key fired from under it would be a `d` that
     // deletes a file while somebody types a filename.
-    if (e[RESENT] || wantsTextInput()) return;
+    //
+    // **And never in the editor.** This road works because the listing has no
+    // text field: `preventDefault` on the keydown is the whole of it. Monaco
+    // *does* have one, and a composition already under way does not go
+    // through keydown at all — it arrives as `compositionupdate` and `input`
+    // straight into the textarea. So in vim's normal mode with the IME on,
+    // this fired the physical letters as commands (`a`, `i` — both of which
+    // enter insert mode) **and the IME then committed the Japanese into the
+    // buffer it had just opened**. Reported as あいう appearing on the line
+    // and the line below it, which is exactly two of those letters landing.
+    //
+    // Without this, normal mode with the IME on does nothing at all, which is
+    // what vim in a terminal does. Getting the physical key *and* leaving the
+    // IME on is not something a page can do — it needs the input source
+    // switched off, which is `:ime` (see `syncIme`, and cian-ime.swift).
+    if (e[RESENT] || wantsTextInput() || viewer.on) return;
     // 229 is what a browser reports for "the IME has this one"; `isComposing`
     // is the modern spelling and not every platform sets it on the first key.
     if (!e.isComposing && e.keyCode !== 229 && e.key !== 'Process') return;

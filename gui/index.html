@@ -1127,6 +1127,20 @@ html, body {
   flex: 0 0 var(--name-w); direction: ltr; text-align: left;
 }
 #report[data-align] .hit .sub { flex: 1 1 0; direction: rtl; unicode-bidi: plaintext; }
+/* 説明の一覧は折り返す ── パスの一覧と違って、切られて困るのは後半。 */
+#report[data-wrap] .hit {
+  height: auto; min-height: var(--cell-h); align-items: baseline;
+  white-space: normal; padding-top: 5px; padding-bottom: 5px;
+}
+#report[data-wrap] .hit .p {
+  white-space: pre; overflow: visible; text-overflow: clip;
+  color: var(--accent); font-weight: 600;
+}
+#report[data-wrap] .hit.on .p { color: var(--on-accent); }
+#report[data-wrap] .hit .sub {
+  direction: ltr; white-space: normal; overflow: visible;
+  text-overflow: clip; line-height: 1.5;
+}
 /* Help puts the keys in a fixed column so they line up down the page, and
    lets the description take whatever is left. The keys are the thing being
    looked up; a ragged left edge makes them hard to scan. */
