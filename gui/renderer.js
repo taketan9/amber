@@ -3280,9 +3280,22 @@ document.addEventListener('keydown', (e) => {
     ].filter(Boolean);
     // どこで押されたかも言う ── 同じキーが場所によって別の扱いを受けるので、
     // 「どこで」が抜けていると答えが半分になる。
-    const where = viewer.on ? tr('editor', 'エディタ')
-        : (term.on && term.focused) ? tr('shell', 'シェル')
-        : tr('listing', '一覧');
+    // どこで押されたか **と、その面がいまどういう状態か**。
+    //
+    // `code=Slash` まで出ているのに `?` がキー一覧を開かない、という報告が
+    // あった ── キーは届いていて、残る条件は「エディタが vim の流儀か」と
+    // 「挿入モードでないか」の二つだけ。それを言わない限り、一往復ぶん
+    // 当て推量が要る。**押されたキーの話だけでは足りない。**
+    let where;
+    if (viewer.on) {
+        where = `${tr('editor', 'エディタ')}/${STYLES[style][0]}`;
+        if (viewer.vim) where += vimTyping() ? tr('/typing', '/入力中') : tr('/normal', '/ノーマル');
+        if (hex.editing) where += tr('/hex', '/16進');
+    } else if (term.on && term.focused) {
+        where = tr('shell', 'シェル');
+    } else {
+        where = tr('listing', '一覧');
+    }
     say(`[${where}] ${[...bits, e.key].join('+')}   code=${e.code}   keyCode=${e.keyCode}`
         + tr('   — Esc stops it', '   — Esc で止める'));
 }, true);
