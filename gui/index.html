@@ -571,8 +571,19 @@ html, body {
    appear in this file — and the editor, added last, covered the question it
    raises. Closing a file with unsaved edits in it did nothing you could see:
    the confirmation was open, behind the editor. Stated, so that adding a
-   fourth overlay is a decision rather than an accident. */
-#view, #report { z-index: 10; }   /* surfaces: they replace the listing */
+   fourth overlay is a decision rather than an accident.
+
+   **And it happened again**, in this very pair. `#view` and `#report` shared
+   a level, so they stacked by document order — and `#report` is written
+   first, which means the editor covered it. `?` inside the editor therefore
+   opened its key list *behind the file*: `report.on` was true, the title was
+   right, and nothing was on screen. I checked the state and called it
+   verified, which is how this class of bug survives.
+
+   A sheet raised over a surface is above that surface. There is no case where
+   the editor should hide a list opened from inside it. */
+#view   { z-index: 10; }   /* a surface: it replaces the listing */
+#report { z-index: 11; }   /* a sheet: it is raised over whatever is beneath */
 
 /* The shell's sixteen. Named rather than fixed, so each look chooses them —
    a shell frozen to one palette would ignore 白磁 and 陰翳 alike. These are

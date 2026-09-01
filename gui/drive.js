@@ -425,6 +425,10 @@ async function main() {
         // tested and said nothing about it.
         ['Tab', '左へ'], ['land:c.rs', 'c.rs の行へ'], ['Enter', 'ファイルを読む'],
         ['F3', 'エディタで開く'], ['wait:3000', ''],
+        ['top:#view', 'エディタが最前面'],
+        // `?` のキー一覧は、エディタの**上**に出なければ出ていないのと同じ。
+        ['?', 'キー一覧'], ['wait:600', ''], ['top:#report', '一覧が最前面'],
+        ['Esc', 'ファイルへ戻る'], ['wait:400', ''],
         // vim style is the default in both builds now, so the round asks for
         // insert mode before typing. It typed `XX` into normal mode instead —
         // two motions — and then "saved" a file it had not changed, which is a
@@ -623,6 +627,28 @@ async function main() {
                     out = `例外: ${err.message}`;
                 }
                 console.log(`  read    ${what || key.slice(5)} = ${JSON.stringify(out)}`);
+                continue;
+            }
+            // `top:<css>` — その面が**本当にいちばん上に見えているか**。
+            //
+            // 二度やった: 状態（`report.on === true`、題も正しい）だけ見て
+            // 「出た」と判断し、実際には `#view` の**裏**に開いていた。
+            // 同じ z-index の兄弟は文書順で重なるので、後に書いたほうが勝つ
+            // ── index.html のコメントがその事故を書いている場所で、また
+            // 起きた。**状態ではなく画素を見る**。
+            if (key.startsWith('top:')) {
+                const sel = key.slice(4);
+                const out = await cdp.read(
+                    `(() => { const n = document.querySelector(${JSON.stringify(sel)});
+                       if (!n || n.hidden) return 'ない';
+                       const r = n.getBoundingClientRect();
+                       const at = document.elementFromPoint(r.left + r.width / 2, r.top + 40);
+                       if (!at) return '取れない';
+                       return at.closest(${JSON.stringify(sel)}) ? 'ok'
+                           : ('隠れている ← ' + (at.closest('[id]') || at).id); })()`,
+                );
+                console.log(`  top     ${sel} → ${out}`);
+                if (out !== 'ok') bad++;
                 continue;
             }
             // `land:<name>` — put the cursor on a named row. A step that
