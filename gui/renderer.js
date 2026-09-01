@@ -1893,7 +1893,8 @@ function drawHints() {
     el.hints.replaceChildren(...hintsNow().map(([k, what]) => {
         const s = document.createElement('span');
         const b = document.createElement('b');
-        b.textContent = k;
+        // 押す鍵は同じでも、手元のキーボードに書いてある文字は違う。
+        b.textContent = keyLabel(k);
         s.append(b, document.createTextNode(what));
         return s;
     }));
@@ -2560,7 +2561,7 @@ function drawMenu() {
         l.className = 'p';
         l.textContent = row.label;
         const v = document.createElement('span');
-        v.textContent = row.value;
+        v.textContent = keyLabel(row.value);
         div.append(l, v);
         div.addEventListener('mousedown', () => {
             menu.at = i;
@@ -2911,7 +2912,7 @@ function openHelp() {
             div.className = 'hit';
             const l = document.createElement('span');
             l.className = 'k';
-            l.textContent = keys;
+            l.textContent = keyLabel(keys);
             const v = document.createElement('span');
             v.className = 'w';
             v.textContent = what;
@@ -3067,12 +3068,12 @@ document.addEventListener('keydown', (e) => {
     // The cursor still walks while the box is open — the terminal build's
     // filter mode does the same, and it is what makes "type three letters,
     // arrow down, Enter" one motion. In the finder the arrows walk the hits.
-    else if (k === 'ArrowDown' || (e.ctrlKey && k === 'n')) {
+    else if (k === 'ArrowDown' || (mod(e) && k === 'n')) {
         if (mode === 'find') { finder.at = Math.min(finder.rows.length - 1, finder.at + 1); drawHits(finder.rows.length); }
         else if (mode === 'filter') move(1);
         else return;
     }
-    else if (k === 'ArrowUp' || (e.ctrlKey && k === 'p')) {
+    else if (k === 'ArrowUp' || (mod(e) && k === 'p')) {
         if (mode === 'find') { finder.at = Math.max(0, finder.at - 1); drawHits(finder.rows.length); }
         else if (mode === 'filter') move(-1);
         else return;
@@ -3209,6 +3210,30 @@ function keySpec(spec) {
     return (ctrl ? 'ctrl+' : '') + (alt ? 'alt+' : '') + key;
 }
 
+/// **Ctrl と ⌘ は同じ修飾キー。**
+///
+/// 「Windows で Ctrl+なにか としているショートカットを、Mac では
+/// Meta+なにか と一律読み替えて」── そのとおりで、`Ctrl+C` と `⌘C` は
+/// 二つの鍵ではなく、二つの機械が同じ鍵に付けている名前です。
+/// 23 箇所は既に両方を見ていて、残りが Ctrl だけを見ていた ── つまり
+/// Mac では `⌘h` でペインが移らず、`Ctrl+n` だけが下に動いた。ばらついた
+/// のは、site ごとに書いていたから。**一つの関数にすれば、次に足すものも
+/// 迷わない。**
+///
+/// **シェルパネルだけは別。** そこでの Ctrl は端末の制御文字（Ctrl+C は
+/// SIGINT）で、Mac の ⌘C は「コピー」です。名前が同じでも別のものなので、
+/// `shellBytes` は `ctrlKey` だけを見ます。
+function mod(e) {
+    return e.ctrlKey || e.metaKey;
+}
+
+/// キーの見せ方。Mac では `Ctrl+` を `⌘` と書く ── 押す鍵は同じでも、
+/// 手元のキーボードに書いてある文字は違う。
+const MAC = navigator.platform.startsWith('Mac');
+function keyLabel(k) {
+    return MAC ? String(k).replace(/Ctrl\+/g, '⌘') : String(k);
+}
+
 function pressSpec(e) {
     return (e.ctrlKey || e.metaKey ? 'ctrl+' : '') + (e.altKey ? 'alt+' : '') + e.key;
 }
@@ -3276,7 +3301,7 @@ document.addEventListener('keydown', (e) => {
     // The dividers, and *first*: the plain arrows below carry no modifier
     // guard, so tested later this key would have moved the cursor instead —
     // the same shape as the four chords that were dead in this chain before.
-    if (e.ctrlKey && e.shiftKey && k.startsWith('Arrow')) resizeSplit(k);
+    if (mod(e) && e.shiftKey && k.startsWith('Arrow')) resizeSplit(k);
     else if (k === 'ArrowDown' || (k === 'j' && bare)) move(1);
     else if (k === 'ArrowUp' || (k === 'k' && bare)) move(-1);
     else if (k === 'PageDown') move(20);
@@ -3300,16 +3325,16 @@ document.addEventListener('keydown', (e) => {
     else if (k === 'ArrowLeft' && !e.altKey && viewMode === 'icons') { const p = state[state.focus]; p.cursor = Math.max(0, p.cursor - 1); draw(state.focus); }
     else if (k === 'ArrowRight' && !e.altKey && viewMode === 'icons') { const p = state[state.focus]; p.cursor = Math.min(p.entries.length - 1, p.cursor + 1); draw(state.focus); }
     else if (k === 'ArrowLeft' && !e.altKey) focusPane('left');
-    else if (k === 'h' && e.ctrlKey) focusPane('left');
+    else if (k === 'h' && mod(e)) focusPane('left');
     else if (k === 'ArrowRight' && !e.altKey) focusPane('right');
-    else if (k === 'l' && e.ctrlKey) focusPane('right');
+    else if (k === 'l' && mod(e)) focusPane('right');
     // Shift+Tab before Tab, which swallowed it — the same shape as Enter below.
     else if (k === 'Tab' && e.shiftKey) goTab(state.focus, { step: 1 });
     else if (k === 'Tab') { state.focus = state.focus === 'left' ? 'right' : 'left'; draw('left'); draw('right'); }
     // The most-modified Enter first: Ctrl+Shift lands on the Ctrl arm if it
     // is tested second, and the snippet launcher was unreachable for it.
-    else if (k === 'Enter' && (e.ctrlKey || e.metaKey) && e.shiftKey) cmdSnippets();
-    else if (k === 'Enter' && (e.ctrlKey || e.metaKey)) openOut();
+    else if (k === 'Enter' && mod(e) && e.shiftKey) cmdSnippets();
+    else if (k === 'Enter' && mod(e)) openOut();
     // Before the plain Enter, which used to swallow it: the menu was written,
     // listed in the help, and never once opened from this key. A modified key
     // has to be tested before the key it modifies.
@@ -3321,7 +3346,7 @@ document.addEventListener('keydown', (e) => {
     else if (k === 'Backspace' && state[state.focus].remote) remoteStep({ up: true });
     else if (k === 'Backspace') parent();
     else if (k === ' ' && bare) mark(false);
-    else if (k === 'a' && (e.ctrlKey || e.metaKey)) mark(true);
+    else if (k === 'a' && mod(e)) mark(true);
     // `c` is `c` either way: whether it is a copy or an upload is decided by
     // which pane you are standing in, which the program already knows.
     else if (k === 'c' && !e.ctrlKey && !e.metaKey
@@ -3350,9 +3375,9 @@ document.addEventListener('keydown', (e) => {
     else if (k === '@' && bare) cmdMacros();
     else if (k === 'F11') cmdFullscreen();
     else if (k === 'F12') zoomFocused();
-    else if ((k === '=' || k === '+') && (e.ctrlKey || e.metaKey)) { setFont(FONT.at + 1); say(tr(`text ${FONT.at}px`, `文字の大きさ ${FONT.at}px`)); }
-    else if (k === '-' && (e.ctrlKey || e.metaKey)) { setFont(FONT.at - 1); say(tr(`text ${FONT.at}px`, `文字の大きさ ${FONT.at}px`)); }
-    else if (k === '0' && (e.ctrlKey || e.metaKey)) { setFont(baseFont()); say(tr('text back to its base size', '文字の大きさを戻しました')); }
+    else if ((k === '=' || k === '+') && mod(e)) { setFont(FONT.at + 1); say(tr(`text ${FONT.at}px`, `文字の大きさ ${FONT.at}px`)); }
+    else if (k === '-' && mod(e)) { setFont(FONT.at - 1); say(tr(`text ${FONT.at}px`, `文字の大きさ ${FONT.at}px`)); }
+    else if (k === '0' && mod(e)) { setFont(baseFont()); say(tr('text back to its base size', '文字の大きさを戻しました')); }
     else if ((k === 't' && bare) || k === 'F9') tabNew();
     // `w` closes, F10 asks — cian-tui's split (keys.rs:2394 / 2407). An F-key
     // is easy to hit by accident and a tab can be the only thing holding a
@@ -3387,38 +3412,38 @@ document.addEventListener('keydown', (e) => {
     // The window had only `C`, so the two a VS Code hand reaches for first
     // both did nothing. Modified before bare, or `,` would open the sort
     // picker and `P` the file clipboard.
-    else if (k === 'P' && e.shiftKey && (e.ctrlKey || e.metaKey)) openPalette();
-    else if (k === ',' && (e.ctrlKey || e.metaKey)) openPalette();
+    else if (k === 'P' && e.shiftKey && mod(e)) openPalette();
+    else if (k === ',' && mod(e)) openPalette();
     else if (k === 'C' && bare) openPalette();
     // `//` has this as its second name in the terminal build's manual.
-    else if (k === 'p' && (e.ctrlKey || e.metaKey) && !e.shiftKey) openFinder();
+    else if (k === 'p' && mod(e) && !e.shiftKey) openFinder();
     // The modified ones first: `f` on its own would otherwise swallow Ctrl+F.
-    else if ((k === 'f' || k === 'g') && (e.ctrlKey || e.metaKey)) runCommand(findCommand('grep'), '');
+    else if ((k === 'f' || k === 'g') && mod(e)) runCommand(findCommand('grep'), '');
     else if (k === 'f' && bare) searchHere();
     else if (k === 'F' && bare) runCommand(findCommand('find'), '');
     else if (k === 'n' && bare) hopHere(1);
     else if (k === 'N' && bare) hopHere(-1);
     else if (k === 'b' && bare) cmdBranch();
     else if (k === '=' && bare) cmdCompare();
-    else if ((k === 'r' || k === 'y') && (e.ctrlKey || e.metaKey)) redo();
+    else if ((k === 'r' || k === 'y') && mod(e)) redo();
     else if (k === 'h' && bare) cmdHistory();
     else if (k === 'ArrowLeft' && e.altKey) step('back');
     else if (k === 'ArrowRight' && e.altKey) step('forward');
     // The file clipboard holds *local* paths. A remote row's path names a
     // place on the server, and holding it would paste a path that exists
     // nowhere on this disk — quietly, later, somewhere else.
-    else if ((k === 'c' || k === 'x') && (e.ctrlKey || e.metaKey) && state[state.focus].remote) {
+    else if ((k === 'c' || k === 'x') && mod(e) && state[state.focus].remote) {
         say(tr('a file on a server cannot be held on the clipboard — use c', 'サーバ上のファイルはクリップボードに持てません — c で転送してください'), true);
     }
     // Pasting into a server pane uploads what the register holds. The
     // register's paths never travel to the window — the engine owns both
     // halves of the gesture.
-    else if (((k === 'v' && (e.ctrlKey || e.metaKey)) || (k === 'y' && bare)) && state[state.focus].remote) {
+    else if (((k === 'v' && mod(e)) || (k === 'y' && bare)) && state[state.focus].remote) {
         uploadHeld();
     }
-    else if (k === 'c' && (e.ctrlKey || e.metaKey)) hold('copy');
-    else if (k === 'x' && (e.ctrlKey || e.metaKey)) hold('cut');
-    else if ((k === 'v' && (e.ctrlKey || e.metaKey)) || (k === 'y' && bare)) paste();
+    else if (k === 'c' && mod(e)) hold('copy');
+    else if (k === 'x' && mod(e)) hold('cut');
+    else if ((k === 'v' && mod(e)) || (k === 'y' && bare)) paste();
     else if (k === '/' && bare) startFilter();
     else if (k === ',' && bare) openMenu(SORT_MENU);
     // Esc backs out of whatever the listing is showing that is not a
@@ -4641,7 +4666,7 @@ document.addEventListener('keydown', (e) => {
     // The hex editor owns its keys while it is on.
     if (hex.editing) {
         if (e.key === 'Escape') { e.stopPropagation(); e.preventDefault(); stopHex(); return; }
-        if (e.key === 's' && (e.ctrlKey || e.metaKey)) {
+        if (e.key === 's' && mod(e)) {
             e.stopPropagation();
             e.preventDefault();
             saveHex();
@@ -4717,7 +4742,7 @@ document.addEventListener('keydown', (e) => {
     }
     // Between the open files, when there is more than one.
     // The grep's hits, from inside the file one of them opened.
-    if (e.key === 'n' && (e.ctrlKey || e.metaKey)) {
+    if (e.key === 'n' && mod(e)) {
         e.stopPropagation();
         e.preventDefault();
         hopHit(e.shiftKey ? -1 : 1);
@@ -7639,7 +7664,7 @@ async function drawDiagramZones() {
 document.addEventListener('keydown', (e) => {
     if (!viewer.on) return;
     if (e.key !== 'e' && e.key !== 'E') return;
-    if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+    if (!mod(e) || e.altKey) return;
     e.stopPropagation();
     e.preventDefault();
     togglePreview2();
@@ -7663,7 +7688,7 @@ document.addEventListener('keydown', (e) => {
 /// from both of them, which is the bug wearing a different hat.
 document.addEventListener('keydown', (e) => {
     if (!viewer.on || !viewer.vim) return;
-    if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey) return;
+    if (!mod(e) || e.altKey || e.shiftKey) return;
     if (!/^[cxvCXV]$/.test(e.key)) return;
     e.stopPropagation();
 }, true);
@@ -8938,6 +8963,9 @@ function shellBytes(e) {
         return null;
     }
     if (e.altKey && k === '@') return null;
+    // **ここだけは Ctrl のまま。** シェルの Ctrl は端末の制御文字で、
+    // Ctrl+C は SIGINT。Mac の ⌘C は「コピー」── 名前が同じでも別のもの
+    // なので、`mod()` で一緒にしてはいけない。
     if (e.ctrlKey && k.length === 1) {
         const up = k.toUpperCase();
         if (up >= 'A' && up <= 'Z') return String.fromCharCode(up.charCodeAt(0) - 64);
@@ -9021,7 +9049,7 @@ document.addEventListener('keydown', (e) => {
     }
     // Ctrl+S here is not save — there is nothing to save in a shell — it is
     // "say this to all of them", which is what splits are for.
-    if (e.key === 's' && (e.ctrlKey || e.metaKey)) {
+    if (e.key === 's' && mod(e)) {
         e.stopPropagation();
         e.preventDefault();
         ask('shellsync', {}).then((r) => {
@@ -9032,7 +9060,7 @@ document.addEventListener('keydown', (e) => {
         return;
     }
     // Ctrl+Shift+arrow drags the border the focused pane sits against.
-    if (e.ctrlKey && e.shiftKey && e.key.startsWith('Arrow')) {
+    if (mod(e) && e.shiftKey && e.key.startsWith('Arrow')) {
         e.stopPropagation();
         e.preventDefault();
         const down = e.key === 'ArrowUp' || e.key === 'ArrowDown';
@@ -9041,7 +9069,7 @@ document.addEventListener('keydown', (e) => {
         return;
     }
     // F1-F8 go straight to a tab; the pane keys are the Shift ones.
-    if (/^F[1-8]$/.test(e.key) && !e.shiftKey && !e.ctrlKey) {
+    if (/^F[1-8]$/.test(e.key) && !e.shiftKey && !mod(e)) {
         e.stopPropagation();
         e.preventDefault();
         goTabOfShell(Number(e.key.slice(1)) - 1);
