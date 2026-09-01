@@ -8605,6 +8605,21 @@ function styled(run, text) {
 /// arithmetic it has always been: the letter's position in the alphabet.
 function shellBytes(e) {
     const k = e.key;
+    // The input method's own keys are the input method's.
+    //
+    // On a Japanese Windows keyboard **Alt+` is how you turn 全角/半角 on and
+    // off**, and `半角/全角` is the same switch under its own key. Both were
+    // taken here — Alt+backtick became the two bytes `ESC` `` ` `` and went
+    // to the shell, so the IME never saw it and the switch appeared dead.
+    //
+    // `null` rather than an encoding: the caller leaves the browser default
+    // alone for an unencodable key, which is exactly what handing a key back
+    // to Windows means.
+    if (k === 'Zenkaku' || k === 'Hankaku' || k === 'ZenkakuHankaku'
+        || k === 'KanjiMode' || k === 'Convert' || k === 'NonConvert'
+        || (e.altKey && (k === '`' || k === '@'))) {
+        return null;
+    }
     if (e.ctrlKey && k.length === 1) {
         const up = k.toUpperCase();
         if (up >= 'A' && up <= 'Z') return String.fromCharCode(up.charCodeAt(0) - 64);
@@ -8742,7 +8757,9 @@ document.addEventListener('keydown', (e) => {
     if (bytes === null) {
         // A key the shell cannot encode still must not fall through to the
         // listing — F3 used to open the viewer over a shell being typed in.
-        // Propagation stops; the browser default is left alone.
+        // Propagation stops; **the browser default is left alone**, which is
+        // how the input method's own switch (Alt+` and 半角/全角) reaches
+        // Windows rather than being typed into the shell.
         e.stopPropagation();
         return;
     }

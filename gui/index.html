@@ -594,12 +594,26 @@ html, body {
   flex: 0 0 calc(100% - var(--main-pct));
   display: flex; flex-direction: column; min-height: 0;
   background: var(--pane);
+  /* The seam with the listing above. Always neutral: *which* panel has the
+     keys is the frame's job, below, and one border cannot answer both
+     questions — which is what it was trying to do. */
   border-top: 2px solid var(--line);
+  position: relative;   /* the frame below hangs off this */
 }
 #shell[hidden] { display: none; }
-/* Same signal as a file pane: the surface the keys are talking to wears the
-   accent. Two pixels either way, so focus does not move anything. */
-#shell.on { border-top-color: var(--accent); }
+/* Same signal as a file pane, and now the same *shape*.
+   It was one accented line along the top, while a file pane with the keys
+   gets a frame on all four sides — so the two surfaces answered the same
+   question in two different visual languages, and the shell's answer was in
+   a place the eye reads as "the edge between things" rather than as "this
+   one". Reported as the mark being in an odd place and the other three sides
+   missing, which was exactly right: they were never drawn.
+   A pseudo-element above the contents, as the file panes use, so the panel's
+   own scrollbars and grids cannot paint over it. */
+#work[data-focus="shell"] #shell::after {
+  content: ""; position: absolute; inset: 0; z-index: 4; pointer-events: none;
+  border: 2px solid var(--accent);
+}
 
 /* F12 — the *focused* surface fills the window, which is what the terminal
    build's `toggle_zoom` does. It only ever grew the shell here, whichever
@@ -625,6 +639,8 @@ html, body {
   bottom: calc(var(--status-h) + var(--hints-h));
   display: flex; flex-direction: column; min-height: 0;
 }
+/* 状態はキーの居場所と別。同期入力とログはこの上辺で、フォーカスに関係なく
+   いつでも見える ── 枠は「いまキーがここにある」だけを言う。 */
 #shell.sync { border-top-color: var(--mark); }
 /* Recording. The terminal build turns the frame carmine for the same
    reason: a shell being written to a file must not look like one that

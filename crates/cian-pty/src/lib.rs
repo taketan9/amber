@@ -447,7 +447,9 @@ impl PtySession {
         p.screen().scrollback()
     }
 
-    /// Back to live output. Every keystroke does this, as a terminal does.
+    /// Back to live output. `write_input` calls it, so every keystroke does
+    /// this, as a terminal does — which this comment claimed for months while
+    /// nothing called it.
     pub fn scroll_to_bottom(&self) {
         if let Ok(mut p) = self.parser.lock() {
             if p.screen().scrollback() != 0 {
@@ -479,6 +481,24 @@ impl PtySession {
 
     /// Forward raw bytes (already encoded as terminal input) to the shell.
     pub fn write_input(&mut self, bytes: &[u8]) {
+        // **Typing returns you to live output.** The comment on
+        // `scroll_to_bottom` has said "every keystroke does this, as a
+        // terminal does" since it was written, and nothing did it: the wheel
+        // over the panel walks the scrollback, and once back there the view
+        // stayed there for ever.
+        //
+        // That is worse than it sounds, because `vt100` answers the two
+        // halves of the question from different places — `cell()` gives the
+        // scrolled-back grid and `cursor_position()` gives the live cursor.
+        // So the panel showed old text with a cursor blinking and *moving* in
+        // it: a shell that looks broken rather than scrolled, which is
+        // exactly how it was reported ("文字を入力しても記載されている文字が
+        // かわらない。ただ、ぴこぴこしているカーソル位置は変わっている").
+        //
+        // Here rather than in the one caller, because every write is somebody
+        // typing or a program answering a prompt, and both mean "look at what
+        // is happening now".
+        self.scroll_to_bottom();
         let _ = self.writer.write_all(bytes);
         let _ = self.writer.flush();
     }
@@ -623,5 +643,47 @@ mod tests {
         } else {
             assert!(last.iter().any(|s| s == "/bin/sh"));
         }
+    }
+}
+
+#[cfg(test)]
+mod scroll_tests {
+    use super::*;
+
+    /// Typing while scrolled back must bring the view down.
+    ///
+    /// Without it the panel shows the old grid with a cursor blinking and
+    /// *moving* in it, because `vt100` answers `cell()` from the scrollback
+    /// and `cursor_position()` from the live screen. That reads as a frozen
+    /// shell, not a scrolled one — which is how it was reported.
+    #[test]
+    fn writing_returns_the_view_to_the_bottom() {
+        let cwd = std::env::temp_dir();
+        let Ok((session, _note)) = PtySession::start(&cwd, &default_shell(), 24, 80) else {
+            // No pty on this runner: the assertion below has nothing to say.
+            return;
+        };
+        let session = std::sync::Arc::new(std::sync::Mutex::new(session));
+        // Enough output to have something to scroll back through.
+        {
+            let mut s = session.lock().unwrap();
+            for _ in 0..80 {
+                s.write_input(b"echo cian-scroll-test\n");
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(900));
+        {
+            let s = session.lock().unwrap();
+            s.scroll_back(20);
+        }
+        let back = session.lock().unwrap().scrollback_pos();
+        if back == 0 {
+            // The shell produced less than a screen; nothing was scrolled and
+            // there is nothing to assert about coming back.
+            return;
+        }
+        session.lock().unwrap().write_input(b"\n");
+        assert_eq!(session.lock().unwrap().scrollback_pos(), 0,
+                   "a keystroke must return the view to live output");
     }
 }

@@ -102,5 +102,16 @@ if not exist "%HERE%\cian-server.exe" (
     )
 )
 
+rem `start` rather than running it here, so this console window goes away.
+rem
+rem Run in the foreground, cmd.exe stays open for as long as cian does, and
+rem that console is a second taskbar button next to the window -- which is
+rem half of the "two windows open" this was reported as. Everything that can
+rem be checked has been checked by now, so there is nothing left for the
+rem console to say.
+rem
+rem The empty "" is the window title `start` insists on before the command;
+rem without it, a quoted path is read as the title and nothing is launched.
 echo Electron: %FOUND%
-"%FOUND%" "%HERE%" %*
+start "" "%FOUND%" "%HERE%" %*
+exit /b 0

@@ -141,7 +141,29 @@ function installMenu() {
     ]));
 }
 
+/// Who this is, as far as the Windows taskbar is concerned.
+///
+/// **Two buttons appear on the taskbar, and only one of them is the window.**
+/// Reported as "cian-gui というアイコンの窓と、cian という Electron アイコンの
+/// 窓が立ち上がる" — and true since the first build.
+///
+/// Two things were wrong. Electron takes its name from `package.json`, which
+/// says `cian-gui-electron`, so that is what the app called itself. And with
+/// no explicit AppUserModelID, Windows has no way to tie the window to the
+/// app that opened it: it files the window under the *launcher's* identity
+/// and the app under Electron's, which is two buttons for one program. The
+/// ID has to be set before any window exists, so it is the first thing here.
+///
+/// `main.js` creates exactly one `BrowserWindow` (the `activate` handler only
+/// fires when there are none), so a second Electron *window* was never
+/// possible — whatever the taskbar was showing, it was showing it twice.
+function nameSelf() {
+    app.setName('cian');
+    if (process.platform === 'win32') app.setAppUserModelId('jp.cian.cian');
+}
+
 app.whenReady().then(async () => {
+    nameSelf();
     installMenu();
     // The first plain argument is where to start; anything beginning with a
     // dash belongs to Chromium and may turn up anywhere in the line. Taking
