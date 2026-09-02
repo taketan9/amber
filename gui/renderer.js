@@ -389,6 +389,38 @@ function rowHeight(rows) {
     return css > 0 ? css : 26;
 }
 
+/// What the notes in the showing folder say about themselves.
+///
+/// Keyed by path, so drawing a row is a lookup rather than a search, and
+/// refreshed when the folder changes rather than on every paint — reading two
+/// hundred files to move a cursor would make the cursor the slow thing.
+///
+/// The judgement — what a title is, what an excerpt leaves out — is
+/// `cian_core::note`'s, not this file's. That module is the only part of cian
+/// mode that could ever reach an iPhone, and a second opinion written here
+/// would be the one that did not travel.
+const notes = { root: '', by: new Map(), asking: '' };
+
+/// Read the notes for whichever folder the pane is showing.
+///
+/// Called from `draw`, which is called on every keystroke — so the two guards
+/// are the whole design: the folder already read is skipped, and so is the
+/// one being read right now. Without the second, moving into a folder fired a
+/// request per repaint while the first was still in flight. `draw` at the end
+/// is not a loop: by then `notes.root` is this folder and the call returns.
+async function loadNotes(which) {
+    const pane = state[which];
+    if (!pane || viewMode !== 'cian' || pane.remote || pane.archive) return;
+    if (notes.root === pane.cwd || notes.asking === pane.cwd) return;
+    notes.asking = pane.cwd;
+    const r = await ask('notes', { path: pane.cwd });
+    notes.asking = '';
+    if (!r) return;
+    notes.root = r.root;
+    notes.by = new Map(r.notes.map((n) => [n.path, n]));
+    draw(which);
+}
+
 function draw(which) {
     const pane = state[which];
     const root = el[which];
@@ -492,6 +524,11 @@ function draw(which) {
     rows.classList.toggle('icons', viewMode === 'icons');
     rows.classList.toggle('details', viewMode === 'details');
     rows.classList.toggle('classic', viewMode === 'classic');
+    rows.classList.toggle('cian', viewMode === 'cian');
+    // Entering a folder is a different set of notes. Asked for here rather
+    // than at each of the places that change directory — Enter, the address
+    // bar, the sidebar, `:cd`, a bookmark — because they all end up drawing.
+    if (viewMode === 'cian' && which === state.focus) loadNotes(which).catch(() => {});
     // The columns that fit, decided by the pane's real width — the terminal
     // build's progressive drop (render.rs: the date needs ~52 columns, the
     // size ~34), translated through the half-width cell of the current size.
@@ -601,7 +638,29 @@ function draw(which) {
         const name = document.createElement('span');
         name.className = 'name';
         name.textContent = row.parent ? '..' : row.name;
-        if (viewMode === 'icons') {
+        if (viewMode === 'cian') {
+            // A note is a title and a line about it, not a filename and a
+            // size. What the row *says* is `cian_core::note`'s answer, read
+            // once for the folder and kept in `notes` — the pane still holds
+            // the files, so Enter, marks and everything else are unchanged.
+            const n = notes.by.get(row.path);
+            name.textContent = n ? n.title : (row.parent ? '..' : row.name);
+            // Everything else in the folder still shows — this is a pane in a
+            // file manager, and a listing that hides the picture a note links
+            // to would be lying about what is there. It shows quietly: the
+            // eye runs down the titles, and the attachments stay reachable.
+            if (!n) div.classList.add('plain');
+            const sub = document.createElement('span');
+            sub.className = 'sub';
+            sub.textContent = n ? n.excerpt : '';
+            const tg = document.createElement('span');
+            tg.className = 'tags';
+            tg.textContent = n && n.tags.length ? n.tags.map((t) => `#${t}`).join(' ') : '';
+            const w = document.createElement('span');
+            w.className = 'when';
+            w.textContent = when(row);
+            div.append(name, tg, w, sub);
+        } else if (viewMode === 'icons') {
             const g = document.createElement('span');
             g.className = 'glyph';
             g.textContent = glyphFor(row);
@@ -1617,18 +1676,18 @@ function clearPalette() {
 /// 詳細ビューのアドレスバー・パンくず・タブ・サイドバーと同じ関数の中にいて、
 /// 三度ほどいて三度とも詳細ビューを壊しかけた。**入口を閉じるのは安全で、
 /// 分解は別の日にできる。**
-const VIEWS = ['classic', 'details'];
+const VIEWS = ['classic', 'details', 'cian'];
 function viewName(mode) {
-    return { classic: tr("classic", 'クラシック'), details: tr("details", '詳細一覧'), icons: tr("icons", 'アイコン') }[mode];
+    return { classic: tr("classic", 'クラシック'), details: tr("details", '詳細一覧'), cian: tr("cian", 'cian'), icons: tr("icons", 'アイコン') }[mode];
 }
 /// The two that take the whole window. Both are the Explorer arrangement,
 /// where the listing is the thing you are looking at; classic keeps the two
 /// panes, which is what cian is for.
-const ONE_PANE = ['details', 'icons'];
+const ONE_PANE = ['details', 'icons', 'cian'];
 let viewMode = 'classic';
 
 function setView(mode, remember = true) {
-    if (!VIEWS.includes(mode)) { say(`${mode}? — :view details | icons | classic`, true); return; }
+    if (!VIEWS.includes(mode)) { say(`${mode}? — :view details | classic | cian`, true); return; }
     viewMode = mode;
     // Icons take the whole window; the other two keep the two panes. A wall
     // of tiles split down the middle is two narrow columns of icons, which is
@@ -1639,6 +1698,10 @@ function setView(mode, remember = true) {
     // notion of focus.
     draw('left');
     draw('right');
+    // The notes for whichever folder is showing. Asked for on the way *into*
+    // the view rather than on every paint: it reads the head of every
+    // Markdown file underneath, which is not a thing to do to move a cursor.
+    if (mode === 'cian') { notes.root = ''; loadNotes(state.focus).catch(() => {}); }
     if (remember) ask('remember', { key: 'gui_view', value: mode });
 }
 
@@ -2527,6 +2590,7 @@ function contextRows() {
         // switches. Its glyphs too — they are what the corner switcher shows.
         v.push(group(tr("View \u25b8", '表示 ▸'), () => [
             { label: tr("\u25a4 Details", '▤ 詳細一覧'), value: ':view details', run: () => { setView('details'); say(tr('listing: details', '一覧: 詳細一覧')); } },
+            { label: tr("\u25c6 cian (notes)", '◆ cian（ノート）'), value: ':view cian', run: () => { setView('cian'); say(tr('listing: cian', '一覧: cian')); } },
             { label: tr("\u25a5 Classic", '▥ クラシック'), value: ':view classic', run: () => { setView('classic'); say(tr('listing: classic', '一覧: クラシック')); } },
             { label: tr("Show / hide dotfiles", 'ドットファイルの表示切替'), value: ':hidden', run: toggleHidden },
             { label: tr("Theme (this pane)", 'テーマ（このペイン）'), value: '', run: cmdPaneTheme },
@@ -4451,6 +4515,82 @@ async function openAsPicture(which) {
     return true;
 }
 
+/// Put a pasted picture beside the note, and a link to it in the text.
+///
+/// A note that can only hold words is half a note — the thing worth keeping
+/// is often the picture of the screen that went wrong, and the route for it
+/// today is: save the screenshot, find it, copy it in. The clipboard already
+/// hands Chromium the image as a file, so this is the one paste the editor
+/// does not let through: the bytes go beside the note in `attachments/` and
+/// what lands in the text is the Markdown link to them.
+///
+/// Markdown only, and deliberately. `![](…)` means something in a note and
+/// nothing in a `.rs` file, and writing a png next to a source file because
+/// a screenshot happened to be on the clipboard is not a favour. The refusal
+/// says so rather than doing nothing, because a paste that silently drops
+/// what you pasted reads as a bug.
+///
+/// The listener is on the container and in the capture phase: Monaco's own
+/// paste handling lives on a textarea inside it, and by the time that runs
+/// the image has already been turned into no text at all.
+async function onEditorPaste(ev) {
+    if (!viewer.on || !viewer.ed || viewer.readOnly) return;
+    if (!el.vBody.contains(ev.target)) return;
+    const items = Array.from(ev.clipboardData ? ev.clipboardData.items : []);
+    const it = items.find((i) => i.kind === 'file' && i.type.startsWith('image/'));
+    if (!it) return;                 // Words are Monaco's business, not ours.
+    ev.preventDefault();
+    ev.stopPropagation();
+    if (!viewer.path) {
+        say(tr('save the note first — a picture needs a folder to live in',
+               '先に保存を。画像はノートの隣に置くので置き場所が要ります'), true);
+        return;
+    }
+    if (!/\.(md|markdown|mdx)$/i.test(viewer.path)) {
+        say(tr('a picture can be pasted into a Markdown note',
+               '画像を貼れるのは Markdown のノートです'), true);
+        return;
+    }
+    const file = it.getAsFile();
+    // Both of the failures below used to be a bare `return`, and a paste that
+    // silently does nothing is indistinguishable from a paste that was never
+    // wired up — which is exactly how this looked the first time it was run.
+    if (!file) {
+        say(tr('the clipboard would not give up the picture',
+               'クリップボードから画像を取り出せませんでした'), true);
+        return;
+    }
+    const b64 = await new Promise((done) => {
+        const fr = new FileReader();
+        fr.onload = () => done(String(fr.result || '').replace(/^data:[^,]*,/, ''));
+        fr.onerror = () => done('');
+        fr.readAsDataURL(file);
+    });
+    if (!b64) { say(tr('could not read the pasted picture', '貼られた画像を読めませんでした'), true); return; }
+    const ext = (file.type.split('/')[1] || 'png').replace('jpeg', 'jpg').replace(/[^a-z0-9]/g, '');
+    const r = await ask('noteimage', { note: viewer.path, b64, ext });
+    if (!r || !r.link) {
+        say(tr('the picture could not be saved beside the note',
+               '画像をノートの隣に置けませんでした'), true);
+        return;
+    }
+    const ed = viewer.ed;
+    const sel = ed.getSelection();
+    ed.executeEdits('cian-paste-image', [{ range: sel, text: `![](${r.link})`, forceMoveMarkers: true }]);
+    ed.focus();
+    say(tr(`pasted ${r.link}`, `貼りました ${r.link}`));
+}
+
+// On the document, in the capture phase — deliberately, and not on the
+// editor's own container. Monaco puts a capture listener on that container
+// first and ends it with `stopImmediatePropagation`, so a second listener on
+// the same node is never called: the paste arrived, was cancelled, and my
+// handler sat there looking wired up. Capture on an ancestor runs before any
+// of that. Once, at load, rather than inside `makeEditor` — the editor is
+// disposed and remade, and the container outlives it, so registering there
+// stacked up a handler per open and would have pasted the picture twice.
+document.addEventListener('paste', onEditorPaste, true);
+
 /// Make the editor once, or reuse it.
 ///
 /// Extracted because two things open it now — a file, and the list of names
@@ -5444,7 +5584,7 @@ function buildCommands() {
     // lives on two commands reaches only the first — the fuzzy finder its own
     // about-text promised could never open. `:view finder` still works as an
     // argument (cmdView maps it to details).
-    { name: 'view', alias: ['details', 'classic'], about: tr("how the listing is laid out \u2014 :view details | classic", '一覧の見せ方 — :view details | classic'), arg: 'details / classic', optional: true, run: cmdView },
+    { name: 'view', alias: ['details', 'classic', 'cian'], about: tr("how the listing is laid out \u2014 :view details | classic | cian (notes)", '一覧の見せ方 — :view details | classic | cian（ノート）'), arg: 'details / classic / cian', optional: true, run: cmdView },
     { name: 'shell', about: tr("open the shell panel (also Shift+J)", 'シェルパネルを開く（Shift+J でも）'), run: openShell },
     { name: 'remote', alias: ['sftp'], about: tr("open a server in this pane (SFTP)", 'このペインでサーバを開く（SFTP）'), run: cmdSftpPicker },
 

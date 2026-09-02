@@ -86,8 +86,10 @@ python3 scripts/requests.py --list   # 何を見ているか
 | 41 | 2026-09-02 | （同上）`macro/` ディレクトリも読む | 探索の規則（`macro.lua` と `macro/*.lua`、`.en.lua` は飛ばす）を `cian_lua::macros::load_all` に。**窓版は前者しか読まず、同梱の例のように1ファイル1マクロにしている人にはランチャーが空だった** | `crates/cian-lua/src/macros.rs ~ pub fn load_all\(` |
 | 42 | 2026-09-02 | ダークテーマのときもタイトルバーが明るいまま | タイトルバーは OS が描くので CSS では届かない。`nativeTheme.themeSource` を**実際に描かれている `--bg` の輝度**から決めて渡す（配色の名前ではなく）。起動時の地の色もエンジンに訊く ── `main.js` は18ある配色のうち3つしか表を持っていなかった | `gui/renderer.js ~ function tellFrame\(` |
 | 43 | 2026-09-02 | 共有フォルダで複数人が同じものを書きたい（Inkdrop 相談の前提） | **保存前に、開いたときと同じファイルかを見る。**違えば書かずに訊く（差分を見る／別名／それでも上書き）。端末版は `:w` が断り `:w!` で通す。判定は `cian_core::stamp` の1か所 | `crates/cian-core/src/stamp.rs ~ pub fn changed\(` |
-| 44 | 2026-09-02 | ビューは一覧・クラシック・ノートの三つでよい（アイコンは消す） | **入口だけ閉じた** ── 切替バー・メニュー・`:view icons` から外す。描く側は残す: アイコンの当たり判定は詳細ビューのアドレスバー・パンくず・タブ・サイドバーと同じ関数の中にいて、外そうとして三度とも詳細ビューを壊しかけた。**分解は別の日に** | `gui/renderer.js ~ const VIEWS = \['classic', 'details'\];` |
+| 44 | 2026-09-02 | ビューは一覧・クラシック・ノートの三つでよい（アイコンは消す） | **入口だけ閉じた** ── 切替バー・メニュー・`:view icons` から外す。描く側は残す: アイコンの当たり判定は詳細ビューのアドレスバー・パンくず・タブ・サイドバーと同じ関数の中にいて、外そうとして三度とも詳細ビューを壊しかけた。**分解は別の日に** | `gui/renderer.js ~ const VIEWS = \[(?![^\]]*icons)` |
 | 45 | 2026-09-02 | SharePoint の場所を指定できるようにしたい（crmaine と同じやり方で） | **認証しない。**URL を WebDAV の UNC パスに直すだけ（`\\host@SSL\DavWWWRoot\…`）。crmaine の `sharepoint_to_unc` を写した ── 貼られる4つの形と、**場所を持たない共有リンク**の見分けは高くついた知識なので思い出しで書かない。開けないときは crmaine と同じ手順を出す | `crates/cian-core/src/sharepoint.rs ~ pub fn to_unc\(` |
+| 46 | 2026-09-02 | 指定したディレクトリでマークダウンのノートを管理したい（Inkdrop 相談。名前は **cian モード**） | **DB は作らない。**題は front matter の `title`、無ければ最初の見出し、無ければファイル名 ── その判断は `cian_core::note` の1か所にあり、窓版もいずれの iOS も同じ答えを見る（Electron は iPhone で動かないので、判断を窓に置くと二度書くことになる）。二行目に本文の頭。**ノート以外のファイルも並ぶ** ── ペインの一覧だから、リンク先の画像を隠すのは嘘になる | `crates/cian-core/src/note.rs ~ pub fn read\(` |
+| 47 | 2026-09-02 | cian モードでスクリーンショットや画像を貼り付けたい | 貼られた画像はノートの隣の `attachments/` に置き、本文には Markdown のリンクだけが入る。**受け口は `document` の capture** ── Monaco が `#v-body` に先に capture で付いていて `stopImmediatePropagation` するので、同じ節に後から付けた受け口には永久に届かない（配線したつもりで一度も呼ばれず、貼り付けは黙って消えていた）。登録は読み込み時に一度だけ ── エディタは作り直されるが容れ物は残るので、作るたびに付けると画像が二枚入る | `gui/renderer.js ~ document.addEventListener\('paste', onEditorPaste, true\)` |
 
 ## 増やすとき
 

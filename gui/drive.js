@@ -419,6 +419,32 @@ async function main() {
         // 配色を暗くしたら、**窓の縁も**暗くなること。タイトルバーは OS が
         // 描くので CSS では届かない ── 暗い配色に白い枠が乗っていた。
         ['read:\'frame の口: \' + (window.cian && typeof window.cian.frame === \'function\')', ''],
+        // cian モード ── ノートの一覧。題は front matter か見出しか名前、
+        // 二行目に本文の頭。**ファイル名とサイズではない。**
+        ['read:(async()=>{await window.cian.call("shellinput",{text:"printf -- \'---\\\\ntitle: 段取り\\\\ntags: [x]\\\\n---\\\\n# 段取り\\\\n本文です。\\\\n\' > "+state[state.focus].cwd+"/note.md\\n"});return "ノートを1本書いた";})()', ''],
+        ['read:(async()=>{await window.cian.call("shellinput",{text:"mkdir -p sub && printf \'# 中の題\\\\n\' > sub/inner.md"+String.fromCharCode(10)});return "子フォルダに1本";})()', ''],
+        ['wait:1500', ''], ['F5', '読み直し'], ['wait:600', ''],
+        ['read:(()=>{setView("cian");return "cian ビューへ";})()', ''], ['wait:1500', ''],
+        ['read:\'題: \' + [...document.querySelectorAll(".rows.cian .row .name")].map(e=>e.textContent).join(" / ")', ''],
+        ['read:\'二行目: \' + [...document.querySelectorAll(".rows.cian .row .sub")].map(e=>e.textContent).filter(Boolean).join(" / ")', ''],
+        ['shot:cian-view@#work', 'cian ビュー'],
+        ['shot:cian-rows@.rows.cian', 'ノート行 ── 二行分の高さで揃っているか'],
+        // フォルダを移ったら読み直すか。**入るのは Enter だけではない**ので
+        // 読み直しは `draw` にぶら下げてある ── ここはその一本を押している。
+        ['land:sub', '子フォルダへ'], ['Enter', '入る'], ['wait:2000', ''],
+        ['read:\'子の題: \' + [...document.querySelectorAll(".rows.cian .row .name")].map(e=>e.textContent).join(" / ")', ''],
+        ['land:..', '戻る'], ['Enter', ''], ['wait:1500', ''],
+        // 画像の貼り付け ── ノートに撮った画面をそのまま置く。
+        // 本物の `paste` を投げる（Monaco の textarea ではなく容れ物へ、
+        // capture で拾う実装なので）。**入った文字だけでは足りない**ので、
+        // 隣に本当にファイルが出来たかを `stat` で確かめる。
+        ['land:note.md', 'ノートへ'],
+        ['F3', 'エディタで開く'], ['wait:3000', ''],
+        ['read:(async()=>{const u=Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="),c=>c.charCodeAt(0));const dt=new DataTransfer();dt.items.add(new File([u],"x.png",{type:"image/png"}));const at=document.querySelector("#v-body textarea")||document.getElementById("v-body");at.dispatchEvent(new ClipboardEvent("paste",{clipboardData:dt,bubbles:true,cancelable:true}));await new Promise(r=>setTimeout(r,2500));return "言 "+status.msg+" 行 "+viewer.ed.getValue().split(String.fromCharCode(10)).filter(l=>l.indexOf("![")>=0).join(" ");})()', ''],
+        ['read:(async()=>{const m=viewer.ed.getValue().match(/!\\[\\]\\(([^)]+)\\)/);if(!m)return "リンクが無い";const r=await window.cian.call("stat",{path:state[state.focus].cwd+"/"+m[1]});return "画像 "+m[1]+" 実在 "+r.exists+" "+r.len+"B";})()', ''],
+        ['u', '貼ったのを戻して閉じる'], ['wait:300', ''],
+        ['Esc', ''], ['Esc', ''], ['Esc', ''], ['wait:800', ''],
+        ['read:(()=>{setView("classic");return "戻す";})()', ''], ['wait:600', ''],
         ['read:(()=>{setLook(1, false);return \'陰翳に\';})()', ''], ['wait:500', ''],
         ['read:\'陰翳の ground=\' + getComputedStyle(document.documentElement).getPropertyValue(\'--bg\').trim()', ''],
         ['read:(async()=>\'OS に伝えた: \' + await tellFrame())()', ''],

@@ -3,8 +3,10 @@
 //! **cian does not authenticate to SharePoint, and does not need to.** Windows
 //! mounts a library over WebDAV through its WebClient service, so
 //!
-//!     https://jri.sharepoint.com/sites/Team/Shared Documents/勤怠.xlsx
-//!     \\jri.sharepoint.com@SSL\DavWWWRoot\sites\Team\Shared Documents\勤怠.xlsx
+//! ```text
+//! https://jri.sharepoint.com/sites/Team/Shared Documents/勤怠.xlsx
+//! \\jri.sharepoint.com@SSL\DavWWWRoot\sites\Team\Shared Documents\勤怠.xlsx
+//! ```
 //!
 //! are the same place, and the second is *a path* — the panes, the editor,
 //! grep and a notes folder all work on it unchanged. Signing in is the

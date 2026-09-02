@@ -29,6 +29,7 @@ pub mod inspect;
 pub mod log;
 pub mod markdown;
 pub mod mermaid;
+pub mod note;
 pub mod office;
 pub mod ops;
 pub mod os;

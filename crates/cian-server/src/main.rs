@@ -4161,6 +4161,120 @@ impl Session {
                 self.open = Some((to, file, st));
                 Ok(serde_json::json!({ "saved": name }))
             }
+            // A folder read as notes: what each Markdown file says about
+            // itself, for the list cian mode draws.
+            //
+            // Only the head of each file is read — two hundred notes must not
+            // mean two hundred whole files to paint one screen — and the
+            // judgement of what a note's title, tags and excerpt *are* lives
+            // in `cian_core::note`, not here. That module is the only part of
+            // cian mode that could ever reach an iPhone, so nothing about a
+            // note is allowed to be decided in an engine an iPhone cannot run.
+            "notes" => {
+                let dir = std::path::PathBuf::from(shellexpand(&arg(req, "path")));
+                if let Some(why) = cian_core::sharepoint::refuse(&arg(req, "path")) {
+                    anyhow::bail!("{why}");
+                }
+                if !dir.is_dir() {
+                    anyhow::bail!(
+                        "{} を開けません{}",
+                        dir.display(),
+                        if arg(req, "path").starts_with("https://") {
+                            cian_core::sharepoint::hint()
+                        } else {
+                            ""
+                        }
+                    );
+                }
+                let limits = cian_core::survey::Limits {
+                    depth: 6,
+                    rows: 4000,
+                    hidden: false,
+                    ..Default::default()
+                };
+                let stop = std::sync::atomic::AtomicBool::new(false);
+                let found = cian_core::survey::survey(&dir, limits, &stop);
+                let mut rows: Vec<serde_json::Value> = Vec::new();
+                for r in &found.rows {
+                    if r.is_dir {
+                        continue;
+                    }
+                    let md = r
+                        .path
+                        .extension()
+                        .and_then(|e| e.to_str())
+                        .map(|e| e.eq_ignore_ascii_case("md") || e.eq_ignore_ascii_case("markdown"))
+                        .unwrap_or(false);
+                    if !md {
+                        continue;
+                    }
+                    let Some(n) = cian_core::note::read(&r.path, 60) else { continue };
+                    rows.push(serde_json::json!({
+                        "path": n.path.display().to_string(),
+                        // The folder it sits in, relative to the root: a
+                        // notebook is a directory, so this is what the tree
+                        // down the side is drawn from.
+                        "book": r.rel.rsplit_once('/').map(|(d, _)| d).unwrap_or(""),
+                        "title": n.title,
+                        "excerpt": n.excerpt,
+                        "tags": n.tags,
+                        "updated": n.updated,
+                        "bytes": n.bytes,
+                    }));
+                }
+                Ok(serde_json::json!({
+                    "root": dir.display().to_string(),
+                    "notes": rows,
+                    "partial": found.partial().then(|| serde_json::json!({
+                        "whole_to": found.whole_to(),
+                        "stopped": found.stopped_at.is_some(),
+                        "unopened": found.unopened,
+                    })),
+                }))
+            }
+            // A pasted or dropped image, written beside the note that will
+            // point at it.
+            //
+            // **Beside it, not in a store.** The note is a plain file and its
+            // pictures have to travel with it — into a synced folder, into a
+            // zip, into somebody else's checkout. A relative link into
+            // `attachments/` survives all three; a database row does not.
+            "noteimage" => {
+                let note = std::path::PathBuf::from(arg(req, "note"));
+                let Some(dir) = note.parent() else {
+                    anyhow::bail!("そのノートの置き場所が分かりません")
+                };
+                let bytes = b64_decode(&arg(req, "b64"))
+                    .ok_or_else(|| anyhow::anyhow!("画像を読めません"))?;
+                if bytes.is_empty() {
+                    anyhow::bail!("画像が空です");
+                }
+                let ext = match arg(req, "ext").as_str() {
+                    "" => "png".to_string(),
+                    e => e.trim_start_matches('.').to_ascii_lowercase(),
+                };
+                let at = dir.join("attachments");
+                std::fs::create_dir_all(&at)?;
+                // Named from the note and the clock. Not from a counter: the
+                // folder is shared with whatever else is pasted there, and a
+                // counter would eventually name a file that already exists.
+                let stem = note
+                    .file_stem()
+                    .map(|s| s.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| "note".into());
+                let stamp = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_millis())
+                    .unwrap_or(0);
+                let name = format!("{stem}-{stamp}.{ext}");
+                std::fs::write(at.join(&name), &bytes)?;
+                Ok(serde_json::json!({
+                    // Relative, and with forward slashes: it is going into a
+                    // Markdown link, which is a URL and not a Windows path.
+                    "link": format!("attachments/{name}"),
+                    "bytes": bytes.len(),
+                }))
+            }
             "stat" => {
                 let path = std::path::PathBuf::from(arg(req, "path"));
                 let meta = std::fs::metadata(&path).ok();
@@ -5162,6 +5276,40 @@ fn mime_of(path: &std::path::Path) -> Option<&'static str> {
 ///
 /// One dependency avoided is one fewer crate in the offline bundle, and this
 /// is twenty lines that have not changed since 1987.
+/// The other direction, for a pasted image on its way to a file.
+///
+/// Written out rather than pulled in: the encoder above is twelve lines and
+/// this is fifteen, and a dependency that exists to avoid twenty-seven lines
+/// is a dependency the offline bundle has to carry.
+///
+/// Anything that is not base64 — whitespace, a `data:` prefix a caller forgot
+/// to strip — is skipped rather than refused, because the one thing worse than
+/// a picture that does not paste is a picture that does not paste *and* says
+/// the file is corrupt.
+fn b64_decode(text: &str) -> Option<Vec<u8>> {
+    let body = text.rsplit_once(',').map(|(_, b)| b).unwrap_or(text);
+    let mut out = Vec::with_capacity(body.len() / 4 * 3);
+    let mut acc: u32 = 0;
+    let mut have = 0u32;
+    for c in body.bytes() {
+        let v = match c {
+            b'A'..=b'Z' => c - b'A',
+            b'a'..=b'z' => c - b'a' + 26,
+            b'0'..=b'9' => c - b'0' + 52,
+            b'+' => 62,
+            b'/' => 63,
+            _ => continue,
+        } as u32;
+        acc = (acc << 6) | v;
+        have += 6;
+        if have >= 8 {
+            have -= 8;
+            out.push((acc >> have) as u8);
+        }
+    }
+    Some(out)
+}
+
 fn b64(bytes: &[u8]) -> String {
     const A: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);

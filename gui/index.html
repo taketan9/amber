@@ -877,6 +877,36 @@ html, body {
    times in ROADMAP; I walked into it while fixing a width. */
 #ask .sheet.wide { min-width: min(60rem, 84vw); }
 
+/* cian mode: a note is two lines, not a filename in a column.
+   The title carries the row; the excerpt sits under it in the dim colour, so
+   the eye reads down the titles and only drops into the second line when it
+   has stopped somewhere. Tags and the date go to the right, where the size
+   and date sit in the other views — one place for "the small facts". */
+.rows.cian .row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  grid-template-areas: "name tags when" "sub sub sub";
+  row-gap: 1px; padding: 2px 8px;
+  align-items: baseline; align-content: center;
+  /* Two of the ordinary cells, exactly — not `auto`. The list is virtualised
+     against a single measured row height, so a row that shrinks when a note
+     has no excerpt would slide every row below it out of place. Fixing the
+     height here keeps that assumption true whatever the note says. */
+  height: calc(var(--cell-h) * 2);
+}
+.rows.cian .row .name { grid-area: name; font-weight: 600; min-width: 0; }
+/* Not a note: a file that lives in the notes folder. Same row, quieter — the
+   weight is what separates them, not a colour that would read as disabled. */
+.rows.cian .row.plain:not(.cursor):not(.marked) .name {
+  font-weight: 400; color: var(--dim);
+}
+.rows.cian .row .tags { grid-area: tags; color: var(--accent); font-size: .85em; }
+.rows.cian .row .when { grid-area: when; color: var(--dim); font-size: .85em; }
+.rows.cian .row .sub  {
+  grid-area: sub; color: var(--dim); font-size: .9em;
+  min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
 /* The gutter marks: which lines differ from the file on disk.
    A bar in the margin, not a wash behind the text — a colour under the words
    reads as "look here", and an edited line is not more important than the
