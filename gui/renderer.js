@@ -895,9 +895,16 @@ async function operate(kind) {
         say(tr(`added ${done.added} to ${zip}`, `${done.added} 件を ${zip} に追加しました`));
         return;
     }
+    // **A remote pane's `cwd` is where it was before it connected.** Naming
+    // it here told you the copy was going to a local folder while the engine
+    // sent it to a server — the sheet and the machine describing two different
+    // operations, and the sheet is the one you read.
+    const where = dest.remote
+        ? `${dest.remote}:${dest.remote_path ?? ''}`
+        : dest.archive ? dest.archive : dest.cwd;
     const head = kind === 'delete'
         ? tr(`${rows.length} to the trash`, `${rows.length} 件をゴミ箱へ`)
-        : tr(`${verb} ${rows.length}: → ${dest.cwd}`, `${rows.length} 件を${verb}: → ${dest.cwd}`);
+        : tr(`${verb} ${rows.length}: → ${where}`, `${rows.length} 件を${verb}: → ${where}`);
     // Every name, not a summary. "12 件" tells you nothing about whether the
     // twelve are the ones you meant.
     const body = rows.map((r) => r.name).join('\n');
@@ -935,6 +942,21 @@ async function operate(kind) {
         mode: answer === 'a' ? 'permanent' : 'trash',
     });
     if (!started) return;
+    // A move between two directories on the *same* server is a rename: the
+    // engine does it there and back in one call, so there is no job to watch.
+    if (started.renamed !== undefined) {
+        await reread();
+        say(tr(`moved ${started.renamed} on the server`, `サーバ上で ${started.renamed} 件を移しました`));
+        return;
+    }
+    // A transfer reports through the same events as a local copy, so the bar
+    // works unchanged — but the word on it should say which way it went.
+    if (started.remote) {
+        beginOp(started, kind, dest.remote
+            ? tr('upload', 'アップロード')
+            : tr('download', 'ダウンロード'));
+        return;
+    }
     beginOp(started, kind, verb);
 }
 

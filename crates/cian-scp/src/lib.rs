@@ -35,6 +35,15 @@ pub struct Target {
     pub port: u16,
     pub user: String,
     pub password: String,
+    /// A private key file to offer, if there is one.
+    ///
+    /// **cian could only ever log in with a password**, which is not how most
+    /// people reach most servers — and on a host that takes keys only (a
+    /// bastion, an appliance, anything hardened) there was no way in at all.
+    /// `cian.ssh_hosts{ users = { { name = "…", key = "~/.ssh/id_ed25519" } } }`.
+    pub key: Option<std::path::PathBuf>,
+    /// The passphrase on that key, if it has one.
+    pub key_pass: Option<String>,
 }
 
 /// Cancellation and progress, mirroring `cian_core::progress::Ctl`.
@@ -720,6 +729,34 @@ async fn connect(target: &Target) -> Result<client::Handle<BlindClient>> {
         .await
         .with_context(|| format!("connect {}:{}", target.host, target.port))?;
 
+    // The key first when there is one, and the password after it — `ssh`'s own
+    // order, and the one that behaves: a key that is configured was configured
+    // on purpose. A key that is *refused* still falls through to the password
+    // rather than ending the attempt, because the commonest reason a key fails
+    // is that this particular server has never been given it.
+    if let Some(path) = &target.key {
+        let key = russh::keys::load_secret_key(path, target.key_pass.as_deref())
+            .with_context(|| format!("read the key {}", path.display()))?;
+        let with_alg = russh::keys::PrivateKeyWithHashAlg::new(
+            std::sync::Arc::new(key),
+            // SHA-256 where the key is RSA (ignored for every other kind).
+            // russh's default is SHA-1, which a current sshd refuses outright.
+            Some(russh::keys::HashAlg::Sha256),
+        );
+        if let AuthResult::Success = handle
+            .authenticate_publickey(target.user.clone(), with_alg)
+            .await
+            .context("authenticate with the key")?
+        {
+            return Ok(handle);
+        }
+        if target.password.is_empty() {
+            return Err(anyhow!(
+                "the key {} was refused, and there is no password to try",
+                path.display()
+            ));
+        }
+    }
     match handle
         .authenticate_password(target.user.clone(), target.password.clone())
         .await

@@ -105,6 +105,8 @@ impl App {
             port: h.port.unwrap_or(22),
             user: u.name.clone(),
             password,
+            key: u.key_path(),
+            key_pass: u.key_pass.clone(),
         };
         let label = format!("{}@{}", u.name, h.name);
         self.scp_dispatch(target, label);
@@ -168,7 +170,9 @@ impl App {
                 self.scp_dir = None;
                 return;
             }
-            let target = cian_scp::Target { host, port, user, password };
+            // Typed by hand, so no key: the place to keep one is `init.lua`.
+            let target =
+                cian_scp::Target { host, port, user, password, key: None, key_pass: None };
             self.scp_dispatch(target, label);
             return;
         }

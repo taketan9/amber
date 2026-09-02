@@ -145,15 +145,39 @@ pub struct SshUser {
     pub password: Option<String>,
     /// Shell command whose stdout is the password (trailing newline trimmed).
     pub password_cmd: Option<String>,
+    /// A private key to log in with — `key = "~/.ssh/id_ed25519"`.
+    ///
+    /// **cian could only ever offer a password.** That is not how most people
+    /// reach most servers, and on a key-only host there was no way in at all.
+    /// `~` is expanded here rather than at the call site, because a path in a
+    /// config file is written the way a person writes one.
+    pub key: Option<String>,
+    /// The passphrase on that key, when it has one.
+    pub key_pass: Option<String>,
 }
 
 impl SshUser {
     pub fn plain(name: impl Into<String>) -> Self {
-        Self { name: name.into(), password: None, password_cmd: None }
+        Self { name: name.into(), password: None, password_cmd: None, key: None, key_pass: None }
     }
 
     pub fn has_secret(&self) -> bool {
-        self.password.is_some() || self.password_cmd.is_some()
+        self.password.is_some() || self.password_cmd.is_some() || self.key.is_some()
+    }
+
+    /// The key file, with `~` expanded. `None` when none is configured.
+    pub fn key_path(&self) -> Option<std::path::PathBuf> {
+        let raw = self.key.as_deref()?.trim();
+        if raw.is_empty() {
+            return None;
+        }
+        Some(match raw.strip_prefix("~/") {
+            Some(rest) => match std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")) {
+                Some(home) => std::path::PathBuf::from(home).join(rest),
+                None => std::path::PathBuf::from(raw),
+            },
+            None => std::path::PathBuf::from(raw),
+        })
     }
 
     /// Resolve the secret to send, running `password_cmd` if that is the source.
@@ -181,6 +205,10 @@ impl std::fmt::Debug for SshUser {
             .field("name", &self.name)
             .field("password", &self.password.as_ref().map(|_| "<redacted>"))
             .field("password_cmd", &self.password_cmd.as_ref().map(|_| "<redacted>"))
+            // The *path* is safe to print and is the thing you want to see
+            // when a key is refused; the passphrase never is.
+            .field("key", &self.key)
+            .field("key_pass", &self.key_pass.as_ref().map(|_| "<redacted>"))
             .finish()
     }
 }
@@ -683,6 +711,8 @@ fn parse_users(t: Option<Table>) -> mlua::Result<Vec<SshUser>> {
                     name,
                     password: u.get::<Option<String>>("password")?,
                     password_cmd: u.get::<Option<String>>("password_cmd")?,
+                    key: u.get::<Option<String>>("key")?,
+                    key_pass: u.get::<Option<String>>("key_pass")?,
                 });
             }
             _ => {}

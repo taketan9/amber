@@ -324,6 +324,206 @@ fn run(inner: Arc<Inner>, job: Pending) {
     });
 }
 
+/// A transfer that crosses the local/remote boundary.
+///
+/// **`c` between a local pane and a remote one used to copy locally.** A
+/// remote pane's `cwd` still points at the directory it walked in from, so
+/// `other_cwd()` handed back a path on this machine, the file went there, and
+/// the job said "1 copied". The server was never touched and nothing on
+/// screen said so. cian-tui has had `try_remote_pane_transfer` since it grew a
+/// remote pane; this is the same four cases for the engine.
+pub enum Remote {
+    /// Local files up to a directory on the server.
+    Up { target: cian_scp::Target, files: Vec<PathBuf>, dest: String },
+    /// Remote files down to a local directory.
+    Down { target: cian_scp::Target, files: Vec<String>, dest: PathBuf },
+    /// Server to server, relayed through this machine.
+    ///
+    /// There is no server-to-server SFTP, and a segmented network usually
+    /// could not do A→B directly even if there were.
+    Across {
+        src: cian_scp::Target,
+        dst: cian_scp::Target,
+        files: Vec<String>,
+        dest: String,
+    },
+}
+
+impl Remote {
+    fn count(&self) -> usize {
+        match self {
+            Remote::Up { files, .. } => files.len(),
+            Remote::Down { files, .. } | Remote::Across { files, .. } => files.len(),
+        }
+    }
+
+    fn kind(&self) -> &'static str {
+        match self {
+            Remote::Up { .. } => "upload",
+            Remote::Down { .. } => "download",
+            Remote::Across { .. } => "relay",
+        }
+    }
+}
+
+impl Jobs {
+    /// Start a cross-boundary transfer. It reports through the same
+    /// `started` / `progress` / `done` events as a local operation, so the
+    /// window's bar needs to know nothing about SFTP — and it takes an op
+    /// number from the same counter, so `:queue` and cancel keep working.
+    ///
+    /// Off the local queue on purpose: a copy over the network and a copy over
+    /// the disk are not competing for the same thing, and making one wait for
+    /// the other would be a rule with no reason behind it.
+    pub fn start_remote(&self, plan: Remote, cut: bool, out: Out) -> (u64, usize) {
+        let op = self.inner.next.fetch_add(1, Ordering::Relaxed) + 1;
+        let total = plan.count();
+        let kind = plan.kind();
+        let cancel = Arc::new(AtomicBool::new(false));
+        // Registered as the running job so `:queue` lists it and Ctrl+C can
+        // stop it. A transfer nobody can call off is the one thing worse than
+        // a slow transfer.
+        *self.inner.running.lock().unwrap() = Some(Live {
+            op,
+            kind,
+            total,
+            dest: None,
+            cancel: Arc::clone(&cancel),
+        });
+        let inner = Arc::clone(&self.inner);
+        std::thread::spawn(move || {
+            out.event("started", serde_json::json!({ "op": op, "kind": kind, "total": total }));
+            let began = std::time::Instant::now();
+            let mut ok = 0usize;
+            let mut errors: Vec<String> = Vec::new();
+            // Rate limited the same way a local copy is: the callback fires on
+            // every chunk and a screen cannot show that.
+            let mut last = std::time::Instant::now() - std::time::Duration::from_secs(1);
+            let mut report = |done: usize, name: &str, bytes: u64, of: u64, force: bool| {
+                if !force && last.elapsed().as_millis() < REPORT_EVERY_MS {
+                    return;
+                }
+                last = std::time::Instant::now();
+                out.event(
+                    "progress",
+                    serde_json::json!({
+                        "op": op,
+                        "done": done,
+                        "total": total,
+                        "bytes": bytes,
+                        "bytes_total": of,
+                        "path": name,
+                        "ms": began.elapsed().as_millis() as u64,
+                    }),
+                );
+            };
+            match &plan {
+                Remote::Up { target, files, dest } => {
+                    for (i, f) in files.iter().enumerate() {
+                        if cancel.load(Ordering::Relaxed) {
+                            break;
+                        }
+                        let name = f.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+                        let at = cian_scp::remote_join(dest, &name);
+                        let shown = name.clone();
+                        let mut on = |b: u64, of: u64| report(i, &shown, b, of, false);
+                        let mut ctl = cian_scp::Ctl { cancel: &cancel, on_progress: &mut on, limit_bps: None };
+                        match cian_scp::upload(target, f, &at, None, &mut ctl) {
+                            Ok(_) => {
+                                ok += 1;
+                                if cut {
+                                    if let Err(e) = std::fs::remove_file(f) {
+                                        errors.push(format!("{}: {e}", f.display()));
+                                    }
+                                }
+                            }
+                            Err(e) => errors.push(format!("{name}: {e}")),
+                        }
+                    }
+                }
+                Remote::Down { target, files, dest } => {
+                    for (i, f) in files.iter().enumerate() {
+                        if cancel.load(Ordering::Relaxed) {
+                            break;
+                        }
+                        let name = f.rsplit('/').next().unwrap_or(f).to_string();
+                        let at = dest.join(&name);
+                        let shown = name.clone();
+                        let mut on = |b: u64, of: u64| report(i, &shown, b, of, false);
+                        let mut ctl = cian_scp::Ctl { cancel: &cancel, on_progress: &mut on, limit_bps: None };
+                        match cian_scp::download(target, f, &at, &mut ctl) {
+                            Ok(_) => {
+                                ok += 1;
+                                if cut {
+                                    if let Err(e) = cian_scp::remove(target, f, false) {
+                                        errors.push(format!("{name}: {e}"));
+                                    }
+                                }
+                            }
+                            Err(e) => errors.push(format!("{name}: {e}")),
+                        }
+                    }
+                }
+                Remote::Across { src, dst, files, dest } => {
+                    for (i, f) in files.iter().enumerate() {
+                        if cancel.load(Ordering::Relaxed) {
+                            break;
+                        }
+                        let name = f.rsplit('/').next().unwrap_or(f).to_string();
+                        // Through a temporary on this machine, and the
+                        // temporary is removed whichever way the second leg
+                        // goes — a relay that leaves its halves behind fills
+                        // a disk nobody is watching.
+                        let tmp = std::env::temp_dir()
+                            .join(format!("cian-relay-{}-{}-{}", std::process::id(), op, i));
+                        let shown = name.clone();
+                        let step = {
+                            let mut on = |b: u64, of: u64| report(i, &shown, b, of, false);
+                            let mut ctl =
+                                cian_scp::Ctl { cancel: &cancel, on_progress: &mut on, limit_bps: None };
+                            cian_scp::download(src, f, &tmp, &mut ctl).and_then(|_| {
+                                let at = cian_scp::remote_join(dest, &name);
+                                cian_scp::upload(dst, &tmp, &at, None, &mut ctl)
+                            })
+                        };
+                        let _ = std::fs::remove_file(&tmp);
+                        match step {
+                            Ok(_) => {
+                                ok += 1;
+                                if cut {
+                                    if let Err(e) = cian_scp::remove(src, f, false) {
+                                        errors.push(format!("{name}: {e}"));
+                                    }
+                                }
+                            }
+                            Err(e) => errors.push(format!("{name}: {e}")),
+                        }
+                    }
+                }
+            }
+            let stopped = cancel.load(Ordering::Relaxed);
+            report(ok, "", 0, 0, true);
+            out.event(
+                "done",
+                serde_json::json!({
+                    "op": op,
+                    "ok": ok,
+                    "skipped": 0,
+                    "errors": errors,
+                    "cancelled": stopped,
+                    "elevate": serde_json::Value::Null,
+                    "ms": began.elapsed().as_millis() as u64,
+                }),
+            );
+            let mut running = inner.running.lock().unwrap();
+            if running.as_ref().map(|j| j.op) == Some(op) {
+                *running = None;
+            }
+        });
+        (op, 0)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

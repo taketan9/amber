@@ -275,6 +275,12 @@
 --         "readonly",                                    -- 都度入力、自動ログインなし
 --         { name = "admin", password = "hunter2" },      -- 平文（非推奨）
 --         { name = "ci",    password_cmd = "pass show ci/stage" },  -- ストアから取得
+--
+--         -- 鍵で入る（推奨）。パスワードをどこにも置かずに済みます。`~` は
+--         -- 展開されます。**パスワードより先に鍵を試し**、断られたら
+--         -- パスワードに落ちるので、両方書いておけます。
+--         { name = "deploy", key = "~/.ssh/id_ed25519" },
+--         { name = "old",    key = "~/.ssh/id_rsa", key_pass = "…" },
 --       },
 --     },
 --

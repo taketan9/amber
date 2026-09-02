@@ -77,6 +77,11 @@ struct PaneView {
     /// `user@host` when this pane is showing a server. The window needs it to
     /// know that Enter, `..` and `c` all mean something over the network.
     remote: Option<String>,
+    /// …and *where* on it. The window used to name `cwd` when it asked
+    /// "copy 3 → here?", which on a remote pane is the local directory it
+    /// walked in from — so the question described a copy that was not the one
+    /// about to happen.
+    remote_path: Option<String>,
     /// The label of the flat listing showing here, if one is — a branch view
     /// or a panelized search. The window needs it to know that Esc means
     /// "back to the directory" rather than "nothing to cancel".
@@ -141,6 +146,7 @@ impl PaneView {
             tabs: Vec::new(),
             tab: 0,
             remote: pane.remote_view().map(|(host, _)| host.to_string()),
+            remote_path: pane.remote_view().map(|(_, path)| path.to_string()),
             archive: pane.archive_view().map(|(a, _)| a.display().to_string()),
             filter: pane.filter.clone(),
             entries: pane
@@ -746,6 +752,98 @@ impl Session {
                 let paths = if named.is_empty() { self.targets(&which)? } else { named };
                 if paths.is_empty() {
                     anyhow::bail!("nothing to operate on");
+                }
+                // **Does this cross the local/remote boundary?** A remote
+                // pane's `cwd` still points at the directory it walked in
+                // from, so an ordinary copy went *there* and reported "1
+                // copied" while the server was never touched. Same shape as
+                // the zip below, and the same silence.
+                if matches!(req.method.as_str(), "copy" | "move") {
+                    let other = if which == "left" { "right" } else { "left" };
+                    let here_remote = self.pane_mut(&which)?.remote_view().is_some();
+                    let there = {
+                        let p = self.pane_mut(other)?;
+                        (p.remote_view().map(|(_, path)| path.to_string()), p.cwd.clone())
+                    };
+                    let (there_remote, there_local) = there;
+                    if here_remote || there_remote.is_some() {
+                        let cut = req.method == "move";
+                        let src_t = self.remotes.get(&which).cloned();
+                        let dst_t = self.remotes.get(other).cloned();
+                        let plan = match (here_remote, &there_remote) {
+                            // Local → server.
+                            (false, Some(dest)) => {
+                                let Some(target) = dst_t else {
+                                    anyhow::bail!("そのペインはサーバに繋がっていません")
+                                };
+                                // Directories are left out rather than half
+                                // sent: SFTP has no recursive put, and a
+                                // folder that arrives as an empty name is
+                                // worse than one that did not arrive.
+                                let files: Vec<_> =
+                                    paths.iter().filter(|p| p.is_file()).cloned().collect();
+                                if files.is_empty() {
+                                    anyhow::bail!("送れるファイルがありません（ディレクトリはまだ送れません）");
+                                }
+                                jobs::Remote::Up { target, files, dest: dest.clone() }
+                            }
+                            // Server → local.
+                            (true, None) => {
+                                let Some(target) = src_t else {
+                                    anyhow::bail!("このペインはサーバに繋がっていません")
+                                };
+                                jobs::Remote::Down {
+                                    target,
+                                    files: paths.iter().map(|p| p.display().to_string()).collect(),
+                                    dest: there_local,
+                                }
+                            }
+                            // Server → server, relayed through here.
+                            (true, Some(dest)) => {
+                                let (Some(src), Some(dst)) = (src_t, dst_t) else {
+                                    anyhow::bail!("どちらかのペインがサーバに繋がっていません")
+                                };
+                                // **The same server twice is a rename, not a
+                                // round trip.** Relaying a move between two
+                                // directories on one machine would pull every
+                                // byte down and push it back up to end where
+                                // the server could have put it instantly —
+                                // and would break the atomicity a rename has.
+                                let same = src.host == dst.host
+                                    && src.port == dst.port
+                                    && src.user == dst.user;
+                                if same && cut {
+                                    let mut moved = 0usize;
+                                    for p in &paths {
+                                        let from = p.display().to_string();
+                                        let name =
+                                            from.rsplit('/').next().unwrap_or(&from).to_string();
+                                        cian_scp::rename(
+                                            &src,
+                                            &from,
+                                            &cian_scp::remote_join(dest, &name),
+                                        )?;
+                                        moved += 1;
+                                    }
+                                    return Ok(serde_json::json!({
+                                        "renamed": moved, "remote": true,
+                                    }));
+                                }
+                                jobs::Remote::Across {
+                                    src,
+                                    dst,
+                                    files: paths.iter().map(|p| p.display().to_string()).collect(),
+                                    dest: dest.clone(),
+                                }
+                            }
+                            (false, None) => unreachable!("neither side is remote"),
+                        };
+                        let count = paths.len();
+                        let (op, queued) = self.jobs.start_remote(plan, cut, self.out.clone());
+                        return Ok(serde_json::json!({
+                            "op": op, "count": count, "queued": queued, "remote": true,
+                        }));
+                    }
                 }
                 // **Is the other pane inside a zip?** `enter_archive` leaves
                 // `cwd` alone — an archive view is synthetic, and the pane
@@ -2193,6 +2291,8 @@ impl Session {
                         port: h.port.unwrap_or(22),
                         user: u.name.clone(),
                         password,
+                        key: u.key_path(),
+                        key_pass: u.key_pass.clone(),
                     }
                 } else {
                     cian_scp::Target {
@@ -2200,6 +2300,10 @@ impl Session {
                         port: req.params["port"].as_u64().unwrap_or(22) as u16,
                         user: req.params["user"].as_str().unwrap_or("").to_string(),
                         password: req.params["password"].as_str().unwrap_or("").to_string(),
+                        // Typed by hand: a key would have to be typed too, and
+                        // the place to keep one is `init.lua`.
+                        key: req.params["key"].as_str().map(std::path::PathBuf::from),
+                        key_pass: req.params["key_pass"].as_str().map(str::to_string),
                     }
                 };
                 if target.host.is_empty() || target.user.is_empty() {
@@ -2509,6 +2613,32 @@ impl Session {
                             gone += 1;
                         }
                         format!("{gone} 件を消しました")
+                    }
+                    // Move *within* the server: SFTP's rename does it, and
+                    // it is the same call as a rename — the difference is
+                    // only whether the new name has a directory in front of
+                    // it. Crossing hosts is the transfer path above, not this.
+                    "move" => {
+                        let to_dir = arg(req, "to");
+                        if to_dir.is_empty() {
+                            anyhow::bail!("移動先が空です");
+                        }
+                        let paths = self.targets(&which)?;
+                        if paths.is_empty() {
+                            anyhow::bail!("対象がありません");
+                        }
+                        let mut moved = 0usize;
+                        for p in &paths {
+                            let from = p.display().to_string();
+                            let name = from.rsplit('/').next().unwrap_or(&from).to_string();
+                            cian_scp::rename(
+                                &target,
+                                &from,
+                                &cian_scp::remote_join(&to_dir, &name),
+                            )?;
+                            moved += 1;
+                        }
+                        format!("{moved} 件を {to_dir} へ移しました")
                     }
                     other => anyhow::bail!("知らないリモート操作: {other}"),
                 };

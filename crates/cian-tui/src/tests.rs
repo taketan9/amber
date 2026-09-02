@@ -9734,6 +9734,8 @@
                 port: 22,
                 user: "u".into(),
                 password: "p".into(),
+            key: None,
+            key_pass: None,
             },
             label: "u@h".into(),
             locals: vec![
@@ -10593,6 +10595,8 @@
                     name: "postgres".into(),
                     password: Some("hunter2".into()),
                     password_cmd: None,
+            key: None,
+            key_pass: None,
                 }],
                 port: Some(2222),
                 notes: None,
@@ -10726,6 +10730,8 @@
             name: "deploy".into(),
             password: None,
             password_cmd: Some("printf 'from-store'".into()),
+            key: None,
+            key_pass: None,
         };
         assert!(u.has_secret());
         assert_eq!(u.secret().as_deref(), Some("from-store"));
@@ -14960,6 +14966,8 @@ mod remote_pane_opens {
                 port: 1,
                 user: "nobody".into(),
                 password: String::new(),
+            key: None,
+            key_pass: None,
             },
             "srv".into(),
         ));

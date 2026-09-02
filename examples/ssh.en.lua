@@ -25,6 +25,13 @@
 --         "readonly",                                   -- prompts, no auto-login
 --         { name = "admin", password = "hunter2" },     -- clear text (avoid)
 --         { name = "ci",    password_cmd = "pass show ci/stage" }, -- from a store
+--
+--         -- A key (preferred): nothing secret has to live on disk at all.
+--         -- `~` is expanded; `key_pass` is the passphrase if it has one.
+--         -- **The key is tried before the password**, as ssh does it, and a
+--         -- refused key falls through to one — so both can be given.
+--         { name = "deploy", key = "~/.ssh/id_ed25519" },
+--         { name = "old",    key = "~/.ssh/id_rsa", key_pass = "…" },
 --       },
 --     },
 --
