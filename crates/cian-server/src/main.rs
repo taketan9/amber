@@ -274,7 +274,16 @@ struct Session {
     /// encoding, BOM or line ending the file arrived with. Getting those wrong
     /// turns a one-line edit into a diff on every line — and on a Shift_JIS
     /// log, into a file the tool that wrote it can no longer read.
-    open: Option<(std::path::PathBuf, cian_core::grepedit::TextFile)>,
+    /// …and what the file looked like when it was read, so a save can tell
+    /// whether it is still writing over the thing it opened. Kept in the same
+    /// place as the path and the text rather than beside them: three facts
+    /// about one file, and a stamp that can fall out of step with the path it
+    /// belongs to is worse than no stamp.
+    open: Option<(
+        std::path::PathBuf,
+        cian_core::grepedit::TextFile,
+        Option<cian_core::stamp::Stamp>,
+    )>,
     /// Re-read and checksum every file after an SFTP transfer.
     ///
     /// Off by default, as in cian-tui: it doubles the traffic, and the answer
@@ -1030,16 +1039,41 @@ impl Session {
                     self.hex = Some((path.clone(), shown.clone()));
                 } else {
                     self.hex = None;
-                    self.open = file.map(|f| (path.clone(), f));
+                    self.open = file.map(|f| (path.clone(), f, cian_core::stamp::of(&path)));
                 }
                 self.shown = Some((path, shown));
                 Ok(reply)
             }
             // Write the open file back, in the encoding it arrived in.
             "save" => {
-                let Some((path, original)) = self.open.as_ref() else {
+                let Some((path, original, stamp)) = self.open.as_ref() else {
                     anyhow::bail!("開いているファイルがありません");
                 };
+                // **Is this still the file that was opened?**
+                //
+                // It used to write regardless — the encoding, the BOM and the
+                // line endings were all carried faithfully back onto whatever
+                // happened to be there now. On a shared folder (a synced
+                // library, a SharePoint mount, an NFS home) two people saving
+                // one note meant the second silently erased the first, with
+                // nothing on screen to say so, because nothing had looked.
+                //
+                // Refused rather than merged: cian is not a merge tool and
+                // pretending otherwise on somebody else's writing is worse
+                // than stopping. The window offers overwriting, saving
+                // elsewhere, or looking at the difference.
+                let forced = req.params["force"].as_bool().unwrap_or(false);
+                if !forced {
+                    if let Some(st) = stamp {
+                        if cian_core::stamp::changed(path, st) {
+                            let said = cian_core::stamp::describe(path, st);
+                            return Ok(serde_json::json!({
+                                "conflict": said,
+                                "path": path.display().to_string(),
+                            }));
+                        }
+                    }
+                }
                 let lines: Vec<String> = lines_of(req).unwrap_or_default();
                 let file = cian_core::grepedit::TextFile { lines, ..original.clone() };
                 cian_core::grepedit::write_text(path, &file)?;
@@ -1048,7 +1082,10 @@ impl Session {
                     .map(|s| s.to_string_lossy().into_owned())
                     .unwrap_or_default();
                 let lines = file.lines.len();
-                self.open = Some((path.clone(), file));
+                // The stamp is taken *after* the write, so the copy we now
+                // hold is the one on disk.
+                let st = cian_core::stamp::of(path);
+                self.open = Some((path.clone(), file, st));
                 Ok(serde_json::json!({ "saved": name, "lines": lines }))
             }
             // ---- What is here, measured rather than felt ----
@@ -2028,7 +2065,7 @@ impl Session {
             }
             // The headings and definitions in the open file, for jumping.
             "outline" => {
-                let Some((path, file)) = self.open.as_ref() else {
+                let Some((path, file, _)) = self.open.as_ref() else {
                     anyhow::bail!("開いているファイルがありません");
                 };
                 let items = cian_core::outline::outline(path, &file.lines);
@@ -2062,7 +2099,7 @@ impl Session {
             // in particular are a table of Japanese width mappings that nobody
             // should own two copies of.
             "textop" => {
-                let Some((_, file)) = self.open.as_ref() else {
+                let Some((_, file, _)) = self.open.as_ref() else {
                     anyhow::bail!("開いているファイルがありません");
                 };
                 let lines: Vec<String> = lines_of(req).unwrap_or_else(|| file.lines.clone());
@@ -2084,7 +2121,7 @@ impl Session {
             }
             // Change the line endings the open file will be written with.
             "eol" => {
-                let Some((_, file)) = self.open.as_mut() else {
+                let Some((_, file, _)) = self.open.as_mut() else {
                     anyhow::bail!("開いているファイルがありません");
                 };
                 file.eol = match req.params["kind"].as_str() {
@@ -3612,7 +3649,7 @@ impl Session {
                 let which = req.params["pane"].as_str().unwrap_or("left").to_string();
                 let dir = self.pane_mut(&which)?.cwd.clone();
                 let path = match self.open.as_ref() {
-                    Some((p, _)) => p.clone(),
+                    Some((p, ..)) => p.clone(),
                     None => self.selected(&which)?.0,
                 };
                 let lines = if cian_core::git::status(&dir).is_some() {
@@ -3662,7 +3699,8 @@ impl Session {
                         cian_core::viewer::TextEncoding::Utf8 => cian_core::viewer::TextEncoding::Utf8,
                         other => other,
                     };
-                    self.open = Some((path, f));
+                    let st = cian_core::stamp::of(&path);
+                    self.open = Some((path, f, st));
                 }
                 Ok(serde_json::json!({ "lines": lines, "encoding": enc, "eol": eol }))
             }
@@ -3699,7 +3737,7 @@ impl Session {
                 let lang = cian_core::highlight::detect(&lp).map(|x| format!("{x:?}"));
                 // Both remembered, so `save` on either writes back through the
                 // encoding it arrived with.
-                self.open = Some((lp.clone(), l.clone()));
+                self.open = Some((lp.clone(), l.clone(), cian_core::stamp::of(&lp)));
                 self.pair = Some((rp.clone(), r.clone()));
                 Ok(serde_json::json!({
                     "left": { "name": ln, "lines": l.lines, "encoding": format!("{:?}", l.encoding) },
@@ -3940,7 +3978,7 @@ impl Session {
                     self.hex = Some((path.clone(), shown.clone()));
                 } else {
                     self.hex = None;
-                    self.open = file.map(|f| (path.clone(), f));
+                    self.open = file.map(|f| (path.clone(), f, cian_core::stamp::of(&path)));
                 }
                 self.shown = Some((path, shown));
                 Ok(reply)
@@ -4065,6 +4103,38 @@ impl Session {
             // `./CONTRIBUTING.md` has to be told apart from `docs/` and from
             // a link that points at nothing — three different things to do,
             // and the window cannot read a disk to find out which.
+            // Write the buffer somewhere else, leaving what is there alone.
+            //
+            // The way out of a conflict that keeps both: theirs stays where it
+            // is, yours lands beside it under another name. Written through
+            // the *open* file's encoding, BOM and line endings — a copy that
+            // silently becomes UTF-8 is a copy that cannot be compared with
+            // the original it was made from.
+            "saveas" => {
+                let to = std::path::PathBuf::from(arg(req, "path"));
+                if to.as_os_str().is_empty() {
+                    anyhow::bail!("保存先が空です");
+                }
+                if to.exists() {
+                    anyhow::bail!("{} は既にあります", to.display());
+                }
+                let Some((_, original, _)) = self.open.as_ref() else {
+                    anyhow::bail!("開いているファイルがありません");
+                };
+                let lines: Vec<String> = lines_of(req).unwrap_or_default();
+                let file = cian_core::grepedit::TextFile { lines, ..original.clone() };
+                cian_core::grepedit::write_text(&to, &file)?;
+                let name = to
+                    .file_name()
+                    .map(|s| s.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                // The editor is now looking at the new file, not the old one:
+                // a second Ctrl+S must not go back to the one we stepped away
+                // from.
+                let st = cian_core::stamp::of(&to);
+                self.open = Some((to, file, st));
+                Ok(serde_json::json!({ "saved": name }))
+            }
             "stat" => {
                 let path = std::path::PathBuf::from(arg(req, "path"));
                 let meta = std::fs::metadata(&path).ok();
@@ -4697,7 +4767,7 @@ impl Session {
                 let lines: Vec<String> = match lines_of(req) {
                     Some(l) => l,
                     None => match self.open.as_ref() {
-                        Some((_, f)) => f.lines.clone(),
+                        Some((_, f, _)) => f.lines.clone(),
                         None => anyhow::bail!("開いているファイルがありません"),
                     },
                 };

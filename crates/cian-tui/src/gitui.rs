@@ -317,6 +317,9 @@ impl App {
         self.popup = Popup::Viewer {
             title: title.to_string(),
             path: PathBuf::new(),
+            // A rendering of what git holds, not a file: there is nothing on
+            // disk for a save to write over.
+            stamp: None,
             view: Box::new(view),
             scroll: 0,
             line: 0,

@@ -1040,6 +1040,7 @@ impl App {
                 self.popup = Popup::Viewer {
                     title: title.to_string(),
                     path: path.to_path_buf(),
+                    stamp: cian_core::stamp::of(path),
                     view: Box::new(view),
                     scroll: line.saturating_sub(4), // show a little context above
                     line,
@@ -1112,6 +1113,7 @@ impl App {
                 self.popup = Popup::Viewer {
                     title: format!("{}  ·  {}", title, doc.label()),
                     path: path.to_path_buf(),
+                    stamp: cian_core::stamp::of(path),
                     view: Box::new(view),
                     scroll: line.saturating_sub(4),
                     line,

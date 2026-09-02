@@ -1664,6 +1664,45 @@
         assert!(!matches!(app.popup, Popup::Viewer { .. }), "gone, unsaved work and all");
     }
 
+    /// **A save must not write over somebody else's writing.**
+    ///
+    /// Two people on one file over a shared drive: both open it, both save,
+    /// and the second used to erase the first without a word. `:w` refuses
+    /// when the file moved underneath; `:w!` is how to mean it anyway.
+    #[test]
+    fn saving_refuses_a_file_that_changed_underneath() {
+        let (d, mut app) = viewer_on("one\n");
+        let path = match &app.popup {
+            Popup::Viewer { path, .. } => path.clone(),
+            _ => panic!("no viewer"),
+        };
+        // Somebody else writes to it, far enough back in time to be seen.
+        std::fs::write(&path, "theirs, longer\n").unwrap();
+        let old = std::fs::metadata(&path).unwrap().modified().unwrap()
+            - std::time::Duration::from_secs(120);
+        std::fs::OpenOptions::new().write(true).open(&path).unwrap().set_modified(old).unwrap();
+
+        app.handle_key(key('i')).unwrap();
+        app.handle_key(key('X')).unwrap();
+        app.handle_key(code(KeyCode::Esc)).unwrap();
+        app.save_viewer_file();
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "theirs, longer\n",
+            "it did not write"
+        );
+        let said = app.message.clone().unwrap_or_default();
+        assert!(said.contains(":w!"), "and it said how to mean it: {said}");
+
+        // …and `:w!` does write.
+        app.save_viewer_file_forced(true);
+        assert!(
+            std::fs::read_to_string(&path).unwrap().starts_with('X'),
+            "the bang wrote it"
+        );
+        drop(d);
+    }
+
     #[test]
     fn colon_types_a_colon_while_editing() {
         let (_d, mut app) = viewer_on("one\n");

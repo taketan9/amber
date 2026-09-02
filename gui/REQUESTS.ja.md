@@ -85,6 +85,7 @@ python3 scripts/requests.py --list   # 何を見ているか
 | 40 | 2026-09-02 | スクリプトマクロを窓版でも | `macro_script::run` をエンジンから呼ぶ。**それまでは「まだ動かせません」と断っていた** ── `macro.lua` は両方の種類を1ファイルに持つので、半分だけ動く状態だった | `crates/cian-server/src/main.rs ~ macro_script::run\(` |
 | 41 | 2026-09-02 | （同上）`macro/` ディレクトリも読む | 探索の規則（`macro.lua` と `macro/*.lua`、`.en.lua` は飛ばす）を `cian_lua::macros::load_all` に。**窓版は前者しか読まず、同梱の例のように1ファイル1マクロにしている人にはランチャーが空だった** | `crates/cian-lua/src/macros.rs ~ pub fn load_all\(` |
 | 42 | 2026-09-02 | ダークテーマのときもタイトルバーが明るいまま | タイトルバーは OS が描くので CSS では届かない。`nativeTheme.themeSource` を**実際に描かれている `--bg` の輝度**から決めて渡す（配色の名前ではなく）。起動時の地の色もエンジンに訊く ── `main.js` は18ある配色のうち3つしか表を持っていなかった | `gui/renderer.js ~ function tellFrame\(` |
+| 43 | 2026-09-02 | 共有フォルダで複数人が同じものを書きたい（Inkdrop 相談の前提） | **保存前に、開いたときと同じファイルかを見る。**違えば書かずに訊く（差分を見る／別名／それでも上書き）。端末版は `:w` が断り `:w!` で通す。判定は `cian_core::stamp` の1か所 | `crates/cian-core/src/stamp.rs ~ pub fn changed\(` |
 
 ## 増やすとき
 

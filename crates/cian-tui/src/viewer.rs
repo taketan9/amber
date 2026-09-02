@@ -1958,6 +1958,15 @@ impl App {
         // find bar and macOS takes Ctrl+Q for zoom — and a viewer you can edit
         // but cannot save is worse than one you cannot edit.
         match words.first().copied().unwrap_or("") {
+            // `:w!` — write it even though it changed underneath. Only the
+            // bang differs, so it is parsed here rather than as its own verb.
+            "w!" | "write!" | "wq!" | "x!" => {
+                self.save_viewer_file_forced(true);
+                if matches!(words.first().copied(), Some("wq!") | Some("x!")) {
+                    self.close_viewer_file();
+                }
+                return;
+            }
             "w" | "write" | "saveas" | "wa" => {
                 // `:w <name>` writes it there and adopts the name — which is
                 // how a file that started empty gets one.
@@ -3206,6 +3215,43 @@ impl App {
 
     /// Write the edited buffer back to disk in the file's own encoding.
     pub(crate) fn save_viewer_file(&mut self) {
+        self.save_viewer_file_forced(false)
+    }
+
+    /// The same, with `force` meaning "yes, even though it changed".
+    ///
+    /// **A save used to write regardless.** Everything about *how* to write
+    /// was carried faithfully — the encoding, the byte-order mark, the line
+    /// endings — and nothing asked whether the thing about to be written over
+    /// was still the thing that had been read. Two people editing one file on
+    /// a shared drive both saved, and the second erased the first without a
+    /// word, because nothing had looked.
+    ///
+    /// Refused rather than merged: cian is not a merge tool, and guessing on
+    /// top of somebody else's writing is worse than stopping. `:w!` is how to
+    /// mean it anyway, which is the spelling the hands here already know.
+    pub(crate) fn save_viewer_file_forced(&mut self, force: bool) {
+        if !force {
+            let clash = match &self.popup {
+                Popup::Viewer { path, stamp: Some(st), .. } if !path.as_os_str().is_empty() => {
+                    cian_core::stamp::changed(path, st).then(|| {
+                        cian_core::stamp::describe(path, st)
+                    })
+                }
+                _ => None,
+            };
+            if let Some(said) = clash {
+                self.message = Some(match self.lang {
+                    Lang::Ja => format!("{said} — 上書きするなら :w!"),
+                    _ => format!("{said} — :w! to overwrite anyway"),
+                });
+                return;
+            }
+        }
+        self.write_viewer_file()
+    }
+
+    fn write_viewer_file(&mut self) {
         let (path, bytes) = if let Popup::Viewer { path, view, .. } = &self.popup {
             if view.kind == cian_core::viewer::ViewKind::Binary {
                 // Hex edits write the raw bytes back — after keeping a `.bak`
@@ -3251,10 +3297,14 @@ impl App {
                     self.message = Some(err);
                     return;
                 }
-                if let Popup::Viewer { dirty, source, view, .. } = &mut self.popup {
+                let fresh = cian_core::stamp::of(&path);
+                if let Popup::Viewer { dirty, source, view, stamp, .. } = &mut self.popup {
                     *dirty = false;
                     // Keep the preview's source copy in step with what's on disk.
                     *source = view.lines.clone();
+                    // …and the stamp, so the next save compares against what
+                    // we just wrote rather than against what we opened.
+                    *stamp = fresh;
                 }
                 self.message = Some(match self.arc_edits.get(&path) {
                     Some((a, m)) => format!(
@@ -4554,6 +4604,8 @@ impl App {
             // No path: `:w` asks for a name rather than writing somewhere it
             // was never told about.
             path: PathBuf::new(),
+            // …and nothing on disk to have changed under it.
+            stamp: None,
             view: Box::new(view),
             scroll: 0,
             line: 0,

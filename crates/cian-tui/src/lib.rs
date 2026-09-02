@@ -557,6 +557,18 @@ enum Popup {
         title: String,
         /// The file on disk, so `Shift+Enter` can reveal it in the pane.
         path: PathBuf,
+        /// What that file looked like when it was read.
+        ///
+        /// **A save used to write regardless.** It carried the encoding, the
+        /// BOM and the line endings faithfully back onto whatever happened to
+        /// be there *now* — so on a shared folder two people editing one file
+        /// both saved and the second silently erased the first. `:w` refuses
+        /// when this no longer matches; `:w!` is the way to mean it anyway.
+        ///
+        /// Carried in the popup rather than beside it because a viewer tab is
+        /// stashed and restored as a whole `Popup`, and a stamp left behind
+        /// would belong to the wrong file the moment you switched tabs.
+        stamp: Option<cian_core::stamp::Stamp>,
         /// Boxed: `Popup` is one enum and every variant pays for the widest,
         /// so the viewer's biggest single field lives behind a pointer.
         view: Box<cian_core::viewer::View>,

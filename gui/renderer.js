@@ -4946,13 +4946,71 @@ async function saveFile() {
         return ok;
     }
     const lines = viewer.ed.getValue().split(/\r?\n/);
-    const r = await ask('save', { lines });
+    let r = await ask('save', { lines });
     if (!r) return false;
+    // **Somebody else wrote to it while it was open.** The engine refuses
+    // rather than writing, and this is the question that gets asked — because
+    // the alternative is what used to happen: the save went through and their
+    // work was gone, with nothing on screen to say it had been there.
+    //
+    // Not merged. cian is not a merge tool, and guessing on top of somebody
+    // else's writing is worse than stopping.
+    if (r.conflict) {
+        const pick = await confirm(tr('It changed while you had it open', '開いている間に、ファイルが変わりました'),
+            `${r.conflict}\n\n` + tr('Overwriting loses what they wrote.', '上書きすると、向こうの書いたものが消えます。'),
+            {
+                yes: tr('look at the difference', '差分を見る'),
+                extras: [
+                    { key: 'o', label: tr('overwrite anyway', 'それでも上書き') },
+                    { key: 'a', label: tr('save as…', '別名で保存…') },
+                ],
+            });
+        if (!pick) { say(tr('stopped — nothing was written', 'やめました。何も書いていません')); return false; }
+        if (pick === 'a') return saveAsPrompt();
+        if (pick !== 'o') { await showDiskDiff(); return false; }
+        r = await ask('save', { lines, force: true });
+        if (!r) return false;
+    }
     viewer.base = viewer.ed.getModel().getAlternativeVersionId();
     viewer.dirty = false;
+    clearDiskDiff();
     drawViewFoot();
     say(tr(`saved ${r.saved} (${r.lines} lines)`, `${r.saved} を保存しました（${r.lines} 行）`));
     // The listing shows a size and a date; both just changed.
+    await reread();
+    return true;
+}
+
+/// What is on disk now, beside what is in the editor.
+///
+/// The reader's own two-pane comparison, on a copy of the file as it stands —
+/// so the question "what did they change" is answered by the thing that
+/// already answers it, rather than by a second diff written for this dialog.
+async function showDiskDiff() {
+    const fresh = await ask('viewpath', { path: viewer.path });
+    if (!fresh) return;
+    show(tr('What is on disk now', 'いまディスクにあるもの'),
+        tr('yours is still in the editor — nothing has been written', 'あなたの編集はエディタに残っています。まだ何も書いていません'),
+        (fresh.lines || []).map((t, i) => ({ n: String(i + 1), label: t })),
+        { foot: tr('Esc back to your copy', 'Esc 自分の編集に戻る') });
+}
+
+/// Write somewhere else instead, leaving theirs alone.
+async function saveAsPrompt() {
+    const here = (viewer.path || '').replace(/[\\/][^\\/]*$/, '');
+    const name = await askFor(tr('save as', '別名で保存'), `${viewer.name}`, {
+        wide: true,
+        hint: tr('a name beside the original', '元と同じフォルダに、別の名前で'),
+    });
+    if (!name) { say(tr('stopped', 'やめました')); return false; }
+    const sep = here.includes('\\') ? '\\' : '/';
+    const r = await ask('saveas', { path: `${here}${sep}${name}`, lines: viewer.ed.getValue().split(/\r?\n/) });
+    if (!r) return false;
+    viewer.base = viewer.ed.getModel().getAlternativeVersionId();
+    viewer.dirty = false;
+    clearDiskDiff();
+    drawViewFoot();
+    say(tr(`saved as ${r.saved}`, `${r.saved} として保存しました`));
     await reread();
     return true;
 }
