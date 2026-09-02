@@ -2727,11 +2727,54 @@ impl Session {
                         if want.trim().is_empty() {
                             anyhow::bail!("やりたいことを書いてください");
                         }
-                        let cwd = self.pane_mut(&which)?.cwd.display().to_string();
-                        (
-                            "You write a single shell command for the platform named.                              Answer with the command only — no explanation, no code                              fence, no leading prompt character.".to_string(),
+                        // **Which shell, not which operating system.** The old
+                        // prompt said "Platform: windows" and left the model to
+                        // guess between cmd.exe and PowerShell — two languages
+                        // that share almost no syntax. It is the shell cian is
+                        // actually going to run this in, so it is the one fact
+                        // that decides whether the answer even parses.
+                        let shell = cian_pty::default_shell();
+                        let shell = std::path::Path::new(&shell)
+                            .file_name()
+                            .map(|s| s.to_string_lossy().into_owned())
+                            .unwrap_or(shell.clone());
+                        // And what is in front of the person. "delete the old
+                        // logs" is unanswerable without the names, and "zip
+                        // these" means the marks.
+                        let (cwd, listing, marked) = {
+                            let pane = self.pane_mut(&which)?;
+                            let cwd = pane.cwd.display().to_string();
+                            let listing: String = pane
+                                .entries
+                                .iter()
+                                .filter(|e| !e.is_parent)
+                                .take(80)
+                                .map(|e| {
+                                    format!("{}{}\n", e.name, if e.is_dir { "/" } else { "" })
+                                })
+                                .collect();
+                            let marked: Vec<String> = pane
+                                .entries
+                                .iter()
+                                .filter(|e| !e.is_parent && pane.marks.contains(&e.path))
+                                .map(|e| e.name.clone())
+                                .collect();
+                            (cwd, listing, marked)
+                        };
+                        let marks = if marked.is_empty() {
+                            String::new()
+                        } else {
                             format!(
-                                "Platform: {}\nDirectory: {cwd}\nTask: {want}",
+                                "\nMarked right now ({} of them) — \"these\", \"the selected ones\" means exactly this set:\n{}",
+                                marked.len(),
+                                marked.join("\n")
+                            )
+                        };
+                        (
+                            cian_core::aiprompt::CMD
+                                .to_string(),
+                            format!(
+                                "Shell: {shell}\nPlatform: {}\nDirectory: {cwd}\n\nIn this directory:\n{listing}{marks}\nTask: {want}",
                                 std::env::consts::OS
                             ),
                         )
@@ -2747,7 +2790,7 @@ impl Session {
                             anyhow::bail!("{name} は空です");
                         }
                         (
-                            "You triage a log file for an operator (often RHEL/AIX or                              Oracle). From the tail below: list the errors and warnings                              that matter, each with its key line; note a rough timeline                              if the timestamps show one; then give the single most                              likely cause and the next thing to check. Ignore routine                              INFO noise. Be concise; plain text, no markdown headings."
+                            cian_core::aiprompt::LOG
                                 .to_string(),
                             tail,
                         )
@@ -4020,13 +4063,7 @@ impl Session {
                     anyhow::bail!("シェルにまだ何もありません");
                 }
                 let body: String = text.chars().take(8_000).collect();
-                let os = if cfg!(windows) { "Windows" } else if cfg!(target_os = "macos") { "macOS" } else { "Linux" };
-                let system = format!(
-                    "You explain shell/terminal errors for a developer on {os}. Given the \
-             recent terminal output, say plainly what went wrong and the most \
-             likely fix (a command or a change). If there is no error, say the \
-             output looks fine. Be concise; plain text, no markdown headings.",
-                );
+                let system = cian_core::aiprompt::shell_error(cian_core::aiprompt::os_name());
                 ai_in_background(self.out.clone(), cfg, system.to_string(), body.to_string(), |answer| Ok(serde_json::json!({ "answer": answer })));
                 Ok(serde_json::json!({ "asked": true }))
             }
@@ -4041,52 +4078,31 @@ impl Session {
             "aijunk" | "aistructure" => {
                 let which = req.params["pane"].as_str().unwrap_or("left").to_string();
                 let cfg = ai_config()?;
-                let (dir, rows) = {
-                    let pane = self.pane_mut(&which)?;
-                    let rows: Vec<(String, String, bool, u64)> = pane
-                        .entries
-                        .iter()
-                        .filter(|e| !e.is_parent)
-                        .map(|e| (e.name.clone(), e.path.display().to_string(), e.is_dir, e.len))
-                        .collect();
-                    (pane.cwd.clone(), rows)
-                };
-                if rows.is_empty() {
-                    anyhow::bail!("スキャンする対象がありません");
-                }
-                let mut listing = String::new();
-                for (name, _, is_dir, len) in rows.iter().take(400) {
-                    let kind = if *is_dir { "dir " } else { "file" };
-                    let size = if *is_dir { String::new() } else { format!("{len}") };
-                    listing.push_str(&format!("{kind}\t{size}\t{name}\n"));
-                }
+                let dir = self.pane_cwd(&which);
                 let junk = req.method == "aijunk";
-                let system = if junk {
-                    "You spot disposable JUNK in a directory listing: build output \
-             (target, build, dist, node_modules, __pycache__, .gradle), caches, \
-             logs, temp and editor-backup files (*.tmp, *.bak, *~, *.swp), and OS \
-             cruft (.DS_Store, Thumbs.db, desktop.ini). Be CONSERVATIVE — never \
-             flag source code, documents, configs, or anything whose loss would \
-             hurt. Reply with ONLY a JSON array of objects {\"name\": string, \
-             \"reason\": short string}, using names exactly as given. Empty array \
-             if nothing is clearly junk. No prose, no code fences."
+                // **Junk nests and tidying does not.** A `node_modules` two
+                // folders down is the commonest thing anybody wants gone, and
+                // the old survey saw one level, so it was invisible. A
+                // structure proposal, on the other hand, only ever moves the
+                // loose entries of *this* directory — going deeper would show
+                // the model files it is not allowed to touch.
+                let limits = if junk {
+                    cian_core::survey::Limits { depth: 4, rows: 800, hidden: false, ..Default::default() }
                 } else {
-                    "You propose a tidy folder structure for a directory by \
-             grouping loose files into sub-folders (e.g. images/, docs/, src/, \
-             archive/2023/). Only MOVE existing entries into sub-folders — never \
-             rename, never delete, never move a file out of this directory. Group \
-             by obvious type or theme; leave a file where it is if no grouping is \
-             clearly better (omit it). Prefer a few meaningful folders over many \
-             tiny ones. Reply with ONLY a JSON array of objects {\"name\": string \
-             (exactly as given), \"folder\": string (a NEW or existing sub-folder, \
-             a simple relative path, no ..), \"reason\": short string}. Empty array \
-             if the directory is already well organised. No prose, no code fences."
+                    cian_core::survey::Limits { depth: 1, rows: 600, hidden: false, ..Default::default() }
                 };
-                let user = format!("Directory: {}\n\nEntries (kind, size, name):\n{listing}", dir.display());
-                let what = if junk { "junk" } else { "structure" };
-                ai_in_background(self.out.clone(), cfg, system.to_string(), user, move |answer| {
-                    let v = parse_ai_reply(&answer, &rows, "name")?;
-                    Ok(serde_json::json!({ "what": what, "rows": v }))
+                let (system, what) = if junk {
+                    (cian_core::aiprompt::JUNK, "junk")
+                } else {
+                    (cian_core::aiprompt::STRUCTURE, "structure")
+                };
+                ai_survey_in_background(self.out.clone(), cfg, SurveyAsk {
+                    head: format!("Directory: {}", dir.display()),
+                    dir,
+                    limits,
+                    system,
+                    what,
+                    key: "name",
                 });
                 Ok(serde_json::json!({ "asked": true }))
             }
@@ -4112,12 +4128,7 @@ impl Session {
                     anyhow::bail!("対象がありません");
                 }
                 let listing: String = rows.iter().take(400).map(|(n, ..)| format!("{n}\n")).collect();
-                let system = "You propose new file names following the user's instruction. \
-             Keep it a RENAME only: never change the folder, never add a path. \
-             Preserve the extension unless the instruction says otherwise. Reply \
-             with ONLY a JSON array of objects {\"name\": string (exactly as \
-             given), \"new_name\": string (a bare filename, no path)}. Include \
-             only files that should change; omit the rest. No prose, no fences."
+                let system = cian_core::aiprompt::RENAME
                     .to_string();
                 let user = format!("Instruction: {instruction}\n\nFiles:\n{listing}");
                 ai_in_background(self.out.clone(), cfg, system.clone(), user.clone(), move |answer| {
@@ -4134,33 +4145,20 @@ impl Session {
                 }
                 let cfg = ai_config()?;
                 let root = self.pane_cwd(&which);
-                // The tree below here, names only, bounded. Breadth first for
-                // the same reason the finder is.
-                let stop = std::sync::atomic::AtomicBool::new(false);
-                let q = cian_core::search::Query::new("");
-                let mut rows: Vec<(String, String, bool, u64)> = Vec::new();
-                cian_core::search::search(&root, &q, &stop, &mut |h| {
-                    if rows.len() < 2000 {
-                        rows.push((
-                            h.rel.display().to_string(),
-                            h.path.display().to_string(),
-                            h.is_dir,
-                            0,
-                        ));
-                    }
-                });
-                let listing: String = rows.iter().map(|(rel, ..)| format!("{rel}\n")).collect();
-                let system = "You do semantic file search. Given a list of file paths and \
-             a natural-language query, return the paths whose names/locations are \
-             most relevant to the query, most relevant first. Reply with ONLY a \
-             JSON array of objects {\"path\": string (exactly as given), \
-             \"reason\": short string}. Use only paths from the list. Empty array \
-             if none are a good match. No prose, no code fences."
-                    .to_string();
-                let user = format!("Query: {query}\n\nPaths:\n{listing}");
-                ai_in_background(self.out.clone(), cfg, system.clone(), user.clone(), move |answer| {
-                    let v = parse_ai_reply(&answer, &rows, "path")?;
-                    Ok(serde_json::json!({ "what": "search", "rows": v }))
+                // Hidden included: somebody looking for "the eslint config"
+                // means `.eslintrc`, and a search that cannot see dotfiles
+                // fails on exactly the files people cannot remember the name
+                // of. Breadth first, so a cap loses the deepest rather than
+                // everything after the first big folder.
+                let limits =
+                    cian_core::survey::Limits { depth: 6, rows: 2000, hidden: true, ..Default::default() };
+                ai_survey_in_background(self.out.clone(), cfg, SurveyAsk {
+                    dir: root,
+                    limits,
+                    head: format!("Question: {query}"),
+                    system: cian_core::aiprompt::SEARCH,
+                    what: "search",
+                    key: "path",
                 });
                 Ok(serde_json::json!({ "asked": true }))
             }
@@ -4217,12 +4215,7 @@ impl Session {
                     anyhow::bail!("ステージされていません。先に `git add`（:stage でも）");
                 }
                 let diff: String = diff.chars().take(12_000).collect();
-                let system = "You write a git commit message for the given staged diff. \
-             Use the Conventional Commits style: a concise subject line under ~70 \
-             characters (an optional type prefix like feat:/fix:/refactor: is fine), \
-             then a blank line and a short body of bullet points explaining WHY, \
-             only if it adds something. Output ONLY the commit message — no code \
-             fences, no preamble.";
+                let system = cian_core::aiprompt::COMMIT;
                 ai_in_background(self.out.clone(), cfg, system.to_string(), diff.to_string(), |answer| Ok(serde_json::json!({ "answer": answer })));
                 Ok(serde_json::json!({ "asked": true }))
             }
@@ -4784,6 +4777,14 @@ fn paths_of(req: &Request) -> Vec<std::path::PathBuf> {
 /// invented filename must never reach a delete key. Rows that name nothing
 /// real are dropped, not guessed at. `key` is which field carries the name —
 /// the junk and rename prompts answer by `"name"`, the search by `"path"`.
+/// The rows in the shape `parse_ai_reply` matches against: the identifier the
+/// model was shown, then the absolute path the front end will act on.
+fn survey_rows(rows: &[cian_core::survey::Row]) -> Vec<(String, String, bool, u64)> {
+    rows.iter()
+        .map(|r| (r.rel.clone(), r.path.display().to_string(), r.is_dir, r.size))
+        .collect()
+}
+
 fn parse_ai_reply(
     answer: &str,
     rows: &[(String, String, bool, u64)],
@@ -4809,6 +4810,68 @@ fn parse_ai_reply(
         out.push(v);
     }
     Ok(out)
+}
+
+/// Survey a tree *and* ask about it, both on a worker.
+///
+/// **The walk belongs out here for the same reason the chat does.** Totalling
+/// subtree sizes over a Rust checkout is a second of `read_dir` — it was in
+/// the request handler, where a second means every keystroke in the listing
+/// queues behind it, which is the exact failure the note on
+/// [`ai_in_background`] was written about. The old code read `pane.entries`
+/// and was instant; making it recursive made it the slowest thing the engine
+/// does synchronously, and nothing about the request said so.
+///
+/// The person is told the request started before any of this happens, which is
+/// also why the "how much did it see" note now arrives with the *answer*
+/// rather than with the acknowledgement: at acknowledgement time nobody has
+/// looked yet.
+struct SurveyAsk {
+    /// Where to look.
+    dir: std::path::PathBuf,
+    limits: cian_core::survey::Limits,
+    /// The first line of the user message — "Directory: …" or "Question: …".
+    head: String,
+    system: &'static str,
+    /// The tag the front end switches on.
+    what: &'static str,
+    /// Which field of each returned object names a row: the tidy-up features
+    /// answer with `name`, the search with `path`.
+    key: &'static str,
+}
+
+fn ai_survey_in_background(out: Out, cfg: cian_ai::AiConfig, ask: SurveyAsk) {
+    let SurveyAsk { dir, limits, head, system, what, key } = ask;
+    std::thread::spawn(move || {
+        let stop = std::sync::atomic::AtomicBool::new(false);
+        let found = cian_core::survey::survey(&dir, limits, &stop);
+        if found.rows.is_empty() {
+            out.event("ai", serde_json::json!({ "error": "スキャンする対象がありません" }));
+            return;
+        }
+        let rows = survey_rows(&found.rows);
+        // To the person, as numbers: the front end says it in their language.
+        // `limit_note` phrases the same fact in English for the model, and the
+        // two must not become one string.
+        let partial = found.partial().then(|| {
+            serde_json::json!({
+                "whole_to": found.whole_to(),
+                "stopped": found.stopped_at.is_some(),
+                "unopened": found.unopened,
+            })
+        });
+        let user = cian_core::aiprompt::survey_user(&head, &found, std::time::SystemTime::now());
+        match cian_ai::chat(&cfg, system, &user, &[]) {
+            Ok(answer) => match parse_ai_reply(&answer, &rows, key) {
+                Ok(v) => out.event(
+                    "ai",
+                    serde_json::json!({ "what": what, "rows": v, "partial": partial }),
+                ),
+                Err(e) => out.event("ai", serde_json::json!({ "error": e })),
+            },
+            Err(e) => out.event("ai", serde_json::json!({ "error": e.to_string() })),
+        }
+    });
 }
 
 /// One AI request, off the main loop, answered by an event.

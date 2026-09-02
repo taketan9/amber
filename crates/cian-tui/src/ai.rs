@@ -362,13 +362,7 @@ impl App {
             return;
         }
         let body = truncate_text_for_ai(&text, 8_000);
-        let os = if cfg!(windows) { "Windows" } else if cfg!(target_os = "macos") { "macOS" } else { "Linux" };
-        let system = format!(
-            "You explain shell/terminal errors for a developer on {os}. Given the \
-             recent terminal output, say plainly what went wrong and the most \
-             likely fix (a command or a change). If there is no error, say the \
-             output looks fine. Be concise; plain text, no markdown headings.",
-        );
+        let system = cian_core::aiprompt::shell_error(cian_core::aiprompt::os_name());
         self.start_ai_chat_as(
             ChatMode::Ai,
             ChatSkin::simple(tr(self.lang, "Explain the last error", "直近のエラーを説明")),
@@ -435,13 +429,7 @@ impl App {
             self.message = Some(tr(self.lang, "that file is empty", "そのファイルは空です").into());
             return;
         }
-        let system = "You triage a log file for an operator (often RHEL/AIX or \
-             Oracle). From the tail below: list the errors and warnings that \
-             matter, each with its key line; note a rough timeline if the \
-             timestamps show one; then give the single most likely cause and the \
-             next thing to check. Ignore routine INFO noise. Be concise; plain \
-             text, no markdown headings."
-            .to_string();
+        let system = cian_core::aiprompt::LOG.to_string();
         self.start_ai_chat_as(
             ChatMode::Ai,
             ChatSkin::simple(tr(self.lang, "Triage this log", "このログを診断")),
@@ -942,112 +930,128 @@ impl App {
         // Keep the payload bounded: a huge diff would blow the token budget and
         // rarely improves the message. The stat line still names every file.
         let diff = truncate_diff_for_ai(&diff, 12_000);
-        let system = "You write a git commit message for the given staged diff. \
-             Use the Conventional Commits style: a concise subject line under ~70 \
-             characters (an optional type prefix like feat:/fix:/refactor: is fine), \
-             then a blank line and a short body of bullet points explaining WHY, \
-             only if it adds something. Output ONLY the commit message — no code \
-             fences, no preamble."
-            .to_string();
+        let system = cian_core::aiprompt::COMMIT.to_string();
         self.message = Some(tr(self.lang, "asking AI to draft a commit message…", "AI にコミットメッセージを作成させています…").into());
         self.ai_request(AiPurpose::CommitMessage { dir, stat }, system, diff);
     }
 
-    /// Ask the AI which entries in the active pane look like junk (build output,
-    /// caches, temp/backup files, OS cruft), then show them for review. Only
-    /// metadata (names, sizes, dir flags) leaves the machine — never contents.
+    /// Ask the AI which entries below the active pane look like junk (build
+    /// output, caches, temp/backup files, OS cruft), then show them for review.
     pub(crate) fn start_ai_junk(&mut self) {
-        if !self.ai_configured() {
-            return;
-        }
-        // Snapshot the listing up front so the immutable pane borrow is dropped
-        // before `ai_ready()` (which needs &mut self).
-        let Some(pane) = self.active_pane() else { return };
-        let dir = pane.cwd.clone();
-        // Skip the ".." entry; everything else is fair game.
-        let rows: Vec<(String, PathBuf, bool, u64)> = pane
-            .entries
-            .iter()
-            .filter(|e| !e.is_parent)
-            .map(|e| (e.name.clone(), e.path.clone(), e.is_dir, e.len))
-            .collect();
-        if rows.is_empty() {
-            self.message = Some(tr(self.lang, "nothing here to scan", "スキャンする対象がありません").into());
-            return;
-        }
-        if !self.ai_ready() {
-            self.message = Some(tr(self.lang, "AI unavailable (python, packages, or sign-in)", "AI を利用できません（python・パッケージ・サインインのいずれか）").into());
-            return;
-        }
-        // The name→path map used both to build the prompt and to validate the
-        // reply back to real paths.
-        let names: Vec<(String, PathBuf)> =
-            rows.iter().map(|(n, p, _, _)| (n.clone(), p.clone())).collect();
-        // A compact one-line-per-entry listing (name, kind, size).
-        let mut listing = String::new();
-        for (name, _, is_dir, len) in rows.iter().take(400) {
-            let kind = if *is_dir { "dir " } else { "file" };
-            let size = if *is_dir { String::new() } else { cian_core::human_size(*len) };
-            listing.push_str(&format!("{}\t{}\t{}\n", kind, size, name));
-        }
-        let system = "You spot disposable JUNK in a directory listing: build output \
-             (target, build, dist, node_modules, __pycache__, .gradle), caches, \
-             logs, temp and editor-backup files (*.tmp, *.bak, *~, *.swp), and OS \
-             cruft (.DS_Store, Thumbs.db, desktop.ini). Be CONSERVATIVE — never \
-             flag source code, documents, configs, or anything whose loss would \
-             hurt. Reply with ONLY a JSON array of objects {\"name\": string, \
-             \"reason\": short string}, using names exactly as given. Empty array \
-             if nothing is clearly junk. No prose, no code fences."
-            .to_string();
-        let user = format!("Directory: {}\n\nEntries (kind, size, name):\n{}", dir.display(), listing);
-        self.message = Some(tr(self.lang, "asking AI to find junk…", "AI に不要ファイルを探させています…").into());
-        self.ai_request(AiPurpose::Junk { names }, system, user);
+        self.start_ai_survey(true);
     }
 
     /// Ask the AI to propose an organised folder layout for the active pane,
-    /// then show the moves for review. Metadata only (names, sizes, dir flags).
+    /// then show the moves for review.
     pub(crate) fn start_ai_structure(&mut self) {
+        self.start_ai_survey(false);
+    }
+
+    /// The two of them, which are one request with two questions.
+    ///
+    /// They were written out twice and `scripts/audit.py` scored them 0.92
+    /// alike the moment both moved onto the survey — the engine had already
+    /// arrived at the shape they share (`"aijunk" | "aistructure"`), and this
+    /// is the same shape said once. Only metadata (paths, sizes, ages, dir
+    /// flags) leaves the machine either way; contents never do, which is the
+    /// rule that makes these usable at work.
+    fn start_ai_survey(&mut self, junk: bool) {
         if !self.ai_configured() {
             return;
         }
         let Some(pane) = self.active_pane() else { return };
         let dir = pane.cwd.clone();
-        let rows: Vec<(String, PathBuf, bool, u64)> = pane
-            .entries
-            .iter()
-            .filter(|e| !e.is_parent)
-            .map(|e| (e.name.clone(), e.path.clone(), e.is_dir, e.len))
-            .collect();
-        if rows.is_empty() {
-            self.message = Some(tr(self.lang, "nothing here to organise", "整理する対象がありません").into());
-            return;
-        }
         if !self.ai_ready() {
             self.message = Some(tr(self.lang, "AI unavailable (python, packages, or sign-in)", "AI を利用できません（python・パッケージ・サインインのいずれか）").into());
             return;
         }
-        let names: Vec<(String, PathBuf)> =
-            rows.iter().map(|(n, p, _, _)| (n.clone(), p.clone())).collect();
-        let mut listing = String::new();
-        for (name, _, is_dir, len) in rows.iter().take(400) {
-            let kind = if *is_dir { "dir " } else { "file" };
-            let size = if *is_dir { String::new() } else { cian_core::human_size(*len) };
-            listing.push_str(&format!("{}\t{}\t{}\n", kind, size, name));
+        // **Junk nests and tidying does not.** A `node_modules` two folders
+        // down is the commonest thing anybody wants gone, and one level of
+        // names never saw it. A structure proposal only ever moves the loose
+        // entries of *this* directory, so going deeper would show the model
+        // files it is not allowed to touch.
+        //
+        // What both gain over the old name list is the size and age columns.
+        // A directory used to arrive with a blank where its subtree size
+        // should be — so junk was judged on vocabulary alone — and age is what
+        // makes `2023/` a better folder than `misc/`.
+        //
+        // On this thread, unlike the engine's copy, which moved the same walk
+        // to a worker. The difference is what a pause costs: the engine serves
+        // a window over a pipe, so a second spent here queues every keystroke
+        // behind it and the window looks frozen. Here the pause is the same
+        // second on an AI command that is about to wait several more on the
+        // model, in a program whose key loop is one thread by design. If a
+        // repo full of build output ever makes this feel long, `size_budget`
+        // is the dial and a job is the proper answer.
+        let limits = if junk {
+            cian_core::survey::Limits { depth: 4, rows: 800, hidden: false, ..Default::default() }
+        } else {
+            cian_core::survey::Limits { depth: 1, rows: 600, hidden: false, ..Default::default() }
+        };
+        let stop = std::sync::atomic::AtomicBool::new(false);
+        let found = cian_core::survey::survey(&dir, limits, &stop);
+        if found.rows.is_empty() {
+            self.message = Some(if junk {
+                tr(self.lang, "nothing here to scan", "スキャンする対象がありません").into()
+            } else {
+                tr(self.lang, "nothing here to organise", "整理する対象がありません").to_string()
+            });
+            return;
         }
-        let system = "You propose a tidy folder structure for a directory by \
-             grouping loose files into sub-folders (e.g. images/, docs/, src/, \
-             archive/2023/). Only MOVE existing entries into sub-folders — never \
-             rename, never delete, never move a file out of this directory. Group \
-             by obvious type or theme; leave a file where it is if no grouping is \
-             clearly better (omit it). Prefer a few meaningful folders over many \
-             tiny ones. Reply with ONLY a JSON array of objects {\"name\": string \
-             (exactly as given), \"folder\": string (a NEW or existing sub-folder, \
-             a simple relative path, no ..), \"reason\": short string}. Empty array \
-             if the directory is already well organised. No prose, no code fences."
-            .to_string();
-        let user = format!("Directory: {}\n\nEntries (kind, size, name):\n{}", dir.display(), listing);
-        self.message = Some(tr(self.lang, "asking AI to suggest a structure…", "AI に構成を提案させています…").into());
-        self.ai_request(AiPurpose::Structure { names, dir }, system, user);
+        // The path→place map, used both to build the prompt and to validate
+        // the reply back to real paths.
+        let names: Vec<(String, PathBuf)> =
+            found.rows.iter().map(|r| (r.rel.clone(), r.path.clone())).collect();
+        let user = cian_core::aiprompt::survey_user(
+            &format!("Directory: {}", dir.display()),
+            &found,
+            std::time::SystemTime::now(),
+        );
+        self.message = Some(self.survey_shortfall(&found).unwrap_or_else(|| {
+            if junk {
+                tr(self.lang, "asking AI to find junk…", "AI に不要ファイルを探させています…").into()
+            } else {
+                tr(self.lang, "asking AI to suggest a structure…", "AI に構成を提案させています…").to_string()
+            }
+        }));
+        let (purpose, system) = if junk {
+            (AiPurpose::Junk { names }, cian_core::aiprompt::JUNK)
+        } else {
+            (AiPurpose::Structure { names, dir }, cian_core::aiprompt::STRUCTURE)
+        };
+        self.ai_request(purpose, system.to_string(), user);
+    }
+
+    /// What to say when the walk did not reach everything.
+    ///
+    /// **A cap nobody is told about is a lie.** "AI は不要ファイルを見つけま
+    /// せんでした" about a tree two thirds of which was never opened reads as
+    /// a fact about the tree. The model is told the same thing in English by
+    /// `aiprompt::survey_user`; this is the half a person reads.
+    fn survey_shortfall(&self, s: &cian_core::survey::Survey) -> Option<String> {
+        if !s.partial() {
+            return None;
+        }
+        let mut parts: Vec<String> = Vec::new();
+        if s.stopped_at.is_some() {
+            parts.push(match (self.lang, s.whole_to()) {
+                (Lang::Ja, Some(d)) => format!("{d} 階層下までで打ち切りました"),
+                (Lang::Ja, None) => "このディレクトリの途中で打ち切りました".into(),
+                (_, Some(d)) => format!("it stops {d} level(s) down"),
+                (_, None) => "it stops partway through this directory".into(),
+            });
+        }
+        if s.unopened > 0 {
+            parts.push(match self.lang {
+                Lang::Ja => format!("{} 個のディレクトリは深すぎて開いていません", s.unopened),
+                _ => format!("{} directories were too deep", s.unopened),
+            });
+        }
+        Some(match self.lang {
+            Lang::Ja => format!("AI に問い合わせ中 ── ただし {}", parts.join("・")),
+            _ => format!("asking AI — but {}", parts.join("; ")),
+        })
     }
 
     /// Run the checked moves from a structure suggestion on a worker: create
@@ -1149,13 +1153,7 @@ impl App {
             return;
         }
         let listing: String = chosen.iter().take(400).map(|(n, _)| format!("{}\n", n)).collect();
-        let system = "You propose new file names following the user's instruction. \
-             Keep it a RENAME only: never change the folder, never add a path. \
-             Preserve the extension unless the instruction says otherwise. Reply \
-             with ONLY a JSON array of objects {\"name\": string (exactly as \
-             given), \"new_name\": string (a bare filename, no path)}. Include \
-             only files that should change; omit the rest. No prose, no fences."
-            .to_string();
+        let system = cian_core::aiprompt::RENAME.to_string();
         let user = format!("Instruction: {}\n\nFiles:\n{}", instruction, listing);
         let names = chosen;
         self.message = Some(tr(self.lang, "asking AI for new names…", "AI に新しい名前を問い合わせ中…").into());
@@ -1184,41 +1182,43 @@ impl App {
             return;
         }
         let Some(root) = self.cwd() else { return };
-        // Collect up to a bounded number of file paths, breadth-first, stopping
-        // early so a huge tree cannot stall the UI. Files only — the results
-        // preview in F3, and a directory has nothing to preview.
-        const CATALOG_CAP: usize = 600;
-        let cancel = std::sync::Arc::new(AtomicBool::new(false));
-        let mut catalog: Vec<cian_core::search::Hit> = Vec::new();
-        let q = cian_core::search::Query::new("");
-        {
-            let cancel = &cancel;
-            let catalog = &mut catalog;
-            cian_core::search::search(&root, &q, cancel, &mut |h| {
-                if !h.is_dir {
-                    catalog.push(h);
-                    if catalog.len() >= CATALOG_CAP {
-                        cancel.store(true, Ordering::Relaxed);
-                    }
-                }
-            });
-        }
-        if catalog.is_empty() {
+        // Hidden included: somebody looking for "the eslint config" means
+        // `.eslintrc`, and a search that cannot see dotfiles fails on exactly
+        // the files nobody can remember the name of.
+        //
+        // Directories are listed too, and that is a change. The old catalog
+        // was files only, on the grounds that a directory has nothing to
+        // preview — but "where does the auth code live" is a question whose
+        // answer is a folder, and a search that cannot name one cannot answer
+        // it. F3 on a directory row simply does nothing, which is a smaller
+        // cost than the question going unanswered.
+        let limits = cian_core::survey::Limits { depth: 6, rows: 2000, hidden: true, ..Default::default() };
+        let stop = std::sync::atomic::AtomicBool::new(false);
+        let found = cian_core::survey::survey(&root, limits, &stop);
+        if found.rows.is_empty() {
             self.message = Some(tr(self.lang, "no files here to search", "ここに検索対象のファイルがありません").into());
             return;
         }
-        let listing: String = catalog.iter()
-            .map(|h| format!("{}\n", h.rel.display().to_string().replace('\\', "/")))
+        // Back into the shape the results list already knows how to show.
+        let catalog: Vec<cian_core::search::Hit> = found
+            .rows
+            .iter()
+            .map(|r| cian_core::search::Hit {
+                path: r.path.clone(),
+                rel: std::path::PathBuf::from(&r.rel),
+                is_dir: r.is_dir,
+                line: None,
+            })
             .collect();
-        let system = "You do semantic file search. Given a list of file paths and \
-             a natural-language query, return the paths whose names/locations are \
-             most relevant to the query, most relevant first. Reply with ONLY a \
-             JSON array of objects {\"path\": string (exactly as given), \
-             \"reason\": short string}. Use only paths from the list. Empty array \
-             if none are a good match. No prose, no code fences."
-            .to_string();
-        let user = format!("Query: {}\n\nPaths:\n{}", query, listing);
-        self.message = Some(tr(self.lang, "asking AI to find relevant files…", "AI に関連ファイルを探させています…").into());
+        let system = cian_core::aiprompt::SEARCH.to_string();
+        let user = cian_core::aiprompt::survey_user(
+            &format!("Question: {query}"),
+            &found,
+            std::time::SystemTime::now(),
+        );
+        self.message = Some(self.survey_shortfall(&found).unwrap_or_else(|| {
+            tr(self.lang, "asking AI to find relevant files…", "AI に関連ファイルを探させています…").into()
+        }));
         self.ai_request(AiPurpose::SemSearch { hits: catalog }, system, user);
     }
 

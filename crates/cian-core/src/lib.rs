@@ -5,6 +5,7 @@ use std::time::SystemTime;
 
 use anyhow::{Context, Result};
 
+pub mod aiprompt;
 pub mod archive;
 pub mod attrs;
 pub mod auth;
@@ -36,6 +37,7 @@ pub mod progress;
 pub mod rename;
 pub mod search;
 pub mod substitute;
+pub mod survey;
 pub mod textops;
 pub mod svn;
 pub mod theme;

@@ -178,6 +178,45 @@ def gui_verbs():
     return names
 
 
+# ── AI に言う言葉 ────────────────────────────────────────────────────────
+
+AI_CRATES = {
+    "cian-tui": ROOT / "crates/cian-tui/src",
+    "cian-server": ROOT / "crates/cian-server/src",
+}
+
+
+def ai_prompts():
+    """クレートごとの、行内に直書きされた AI システムプロンプト。
+
+    **これも「同じものを同じ言葉で呼んでいるか」の話です。** 人が読むラベルは
+    この表が見張っていたのに、モデルが読む文章は4本とも両前端に別々の写しが
+    あって、誰も見ていませんでした。写しは必ずずれます ── ずれても、どちらが
+    正しいかを言える人がいません。
+
+    見つけ方は「`"You ` で始まる Rust の文字列リテラル」。cian のプロンプトは
+    全部そう始まります（`cian_core::aiprompt` に移したものは定数参照なので、
+    ここには写りません）。
+    """
+    out = {}
+    for crate, src in AI_CRATES.items():
+        found = set()
+        for path in sorted(src.rglob("*.rs")):
+            text = path.read_text(encoding="utf-8")
+            for m in re.finditer(r'"You [^"]{40,}"', text, re.S):
+                # 行継続（`\` + 改行 + 前置空白）を畳んでから比べる。
+                body = re.sub(r"\\\s*\n\s*", " ", m.group(0))
+                found.add(re.sub(r"\s+", " ", body).strip())
+        out[crate] = found
+    return out
+
+
+def shared_prompts():
+    """2つのクレートに同じ文章が出ていたら、その文章。"""
+    p = ai_prompts()
+    return sorted(p["cian-tui"] & p["cian-server"])
+
+
 def head(label):
     """`コピー  (Ctrl+C)` の左半分。窓版は鍵を別の列に出すので、名前だけを見る。"""
     label = re.sub(r"\s\s+\([^)]*\)$", "", label)
@@ -210,6 +249,8 @@ def main():
 
     lost = sorted(v for v in tui_verbs() - gui_verbs() if v not in {"-"})
 
+    doubled = shared_prompts()
+
     retired = []
     for path in TEXTS:
         for n, line in speech(path):
@@ -218,10 +259,13 @@ def main():
                     retired.append((path, n, bad, good))
 
     print("=" * 72)
-    if not missing and not lost and not retired:
+    if not missing and not lost and not retired and not doubled:
+        shared = len(ai_prompts()["cian-tui"] | ai_prompts()["cian-server"])
         print(f"  語 {len(words)} 件・コマンド {len(tui_verbs())} 件・"
               f"退いた言い方 {len(RETIRED)} 件、"
               f"両方の前端で揃っています（免除 {len(KNOWN)} 件）")
+        print(f"  AI に言う言葉のうち、片方にしか無い直書きは {shared} 本"
+              f"（両方に写しがあるものは 0 本）")
         print("=" * 72)
         return 0
     for where, h in missing:
@@ -230,6 +274,10 @@ def main():
         print(f"  ■ 端末版の :{v} が窓版の辞書にありません")
     for path, n, bad, good in retired:
         print(f"  ■ 退いた言い方「{bad}」が {path}:{n} に出ています → 「{good}」")
+    for text in doubled:
+        print(f"  ■ 同じ AI プロンプトが両方のクレートに直書きされています")
+        print(f"    「{text[:70]}…」")
+        print(f"    → cian_core::aiprompt に移して、両方から参照してください")
     print()
     print("  端末版が正です（feedback-gui-keys-from-tui-table）。窓版の言葉を")
     print("  合わせるか、まだ無い機能なら scripts/parity.py の KNOWN に理由を書く。")

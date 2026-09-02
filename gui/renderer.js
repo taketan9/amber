@@ -8364,18 +8364,44 @@ function showCommitDraft(msg) {
 /// which is the terminal build's arrangement and the only sane one for a
 /// model with opinions about other people's files.
 
+/// What to say when the walk behind an AI answer did not reach everything.
+///
+/// **A cap nobody is told about is a lie.** "明らかな不要ファイルは見つかり
+/// ませんでした" about a tree two thirds of which was never opened reads as a
+/// fact about the tree. The engine sends the two counts rather than a
+/// sentence, so this side can say it in the reader's language — and the model
+/// is told the same thing in English, in the prompt.
+function scanShortfall(partial) {
+    if (!partial) return '';
+    const bits = [];
+    if (partial.stopped) {
+        // What *is* complete, not how much is missing. "42160 件が入りません
+        // でした" was true over a Rust checkout, useless, and alarming; the
+        // walk had in fact listed the top two levels in full.
+        bits.push(partial.whole_to
+            ? tr(`it stops ${partial.whole_to} level(s) down`, `${partial.whole_to} 階層下までで打ち切りました`)
+            : tr('it stops partway through this directory', 'このディレクトリの途中で打ち切りました'));
+    }
+    if (partial.unopened > 0) {
+        bits.push(tr(`${partial.unopened} directories were too deep`, `${partial.unopened} 個のディレクトリは深すぎて開いていません`));
+    }
+    if (!bits.length) return '';
+    return tr(` — but ${bits.join('; ')}`, ` ── ただし${bits.join('・')}`);
+}
+
 async function cmdAiScan(what) {
     const r = await ask(what, { pane: state.focus });
     if (!r) return;
     say(what === 'aijunk' ? tr('looking for what might be junk…', '不要そうなものを探しています…') : tr('working out how to tidy it…', '畳み方を考えています…'));
     aiWaiting = async (payload) => {
         const rows = payload.rows || [];
+        const short = scanShortfall(payload.partial);
         if (!rows.length) {
-            say(what === 'aijunk' ? tr('nothing here is obviously junk', '明らかな不要ファイルは見つかりませんでした') : tr('it says this is already tidy', 'もう整っています、と言っています'));
+            say((what === 'aijunk' ? tr('nothing here is obviously junk', '明らかな不要ファイルは見つかりませんでした') : tr('it says this is already tidy', 'もう整っています、と言っています')) + short);
             return;
         }
         if (what === 'aijunk') {
-            show(tr('Possibly junk', '不要かもしれないもの'), tr('the AI’s guess — check before acting', 'AI の見立てです。確かめてから'),
+            show(tr('Possibly junk', '不要かもしれないもの'), tr('the AI’s guess — check before acting', 'AI の見立てです。確かめてから') + short,
                 rows.map((x) => ({ label: x.name, sub: x.reason || '', path: x.path })),
                 {
                     checks: true,
@@ -8394,7 +8420,7 @@ async function cmdAiScan(what) {
                 });
             return;
         }
-        show(tr('A suggested folder structure', 'ディレクトリ構成の提案'), tr('it only moves things; nothing is deleted or renamed', '移すだけ。消しも改名もしません'),
+        show(tr('A suggested folder structure', 'ディレクトリ構成の提案'), tr('it only moves things; nothing is deleted or renamed', '移すだけ。消しも改名もしません') + short,
             rows.map((x) => ({ n: '→ ' + x.folder, label: x.name, sub: x.reason || '', path: x.path, folder: x.folder })),
             {
                 checks: true,
@@ -8470,8 +8496,9 @@ async function cmdAiSearch(query) {
     say(tr('searching by meaning…', '意味で探しています…'));
     aiWaiting = (payload) => {
         const rows = payload.rows || [];
-        if (!rows.length) { say(tr('nothing looks like it', 'それらしいものは見つかりませんでした')); return; }
-        show(tr(`Things like “${query}”`, `「${query}」らしいもの`), tr(`${rows.length} — the AI’s guess`, `${rows.length} 件 — AI の見立てです`),
+        const short = scanShortfall(payload.partial);
+        if (!rows.length) { say(tr('nothing looks like it', 'それらしいものは見つかりませんでした') + short); return; }
+        show(tr(`Things like “${query}”`, `「${query}」らしいもの`), tr(`${rows.length} — the AI’s guess`, `${rows.length} 件 — AI の見立てです`) + short,
             rows.map((x) => ({ label: x.path, sub: x.reason || '', full: x.full })),
             {
                 foot: tr('Enter go there   Esc close', 'Enter そこへ   Esc 閉じる'),
