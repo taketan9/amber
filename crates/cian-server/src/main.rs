@@ -616,15 +616,41 @@ impl Session {
                     // process's directory, which is a different place with the
                     // same name.
                     let p = std::path::PathBuf::from(shellexpand(raw));
-                    if p.is_absolute() {
+                    // A converted SharePoint address is absolute wherever it
+                    // means anything — but only Windows *knows* that
+                    // `\\host@SSL\…` is a root, so off Windows it would be
+                    // joined onto the pane's directory and the error would
+                    // name a path nobody typed.
+                    if p.is_absolute() || raw != cian_core::sharepoint::to_unc(raw) {
                         p
                     } else {
                         self.pane_cwd(&which).join(p)
                     }
                 });
+                // A SharePoint link that cannot become a path, said *before*
+                // trying. "not a directory" would be true and useless — the
+                // useful sentence is which kind of link it is and what to copy
+                // instead. And a link that *is* right but will not open needs
+                // the sign-in steps rather than a shrug.
+                if let Some(raw) = req.params["path"].as_str() {
+                    if let Some(why) = cian_core::sharepoint::refuse(raw) {
+                        anyhow::bail!("{why}");
+                    }
+                }
+                let sp = req.params["path"]
+                    .as_str()
+                    .map(|raw| raw != cian_core::sharepoint::to_unc(raw))
+                    .unwrap_or(false);
                 let pane = self.pane_mut(&which)?;
                 if let Some(p) = path {
                     if !p.is_dir() {
+                        if sp {
+                            anyhow::bail!(
+                                "{} を開けません{}",
+                                p.display(),
+                                cian_core::sharepoint::hint()
+                            );
+                        }
                         anyhow::bail!("not a directory: {}", p.display());
                     }
                     // `go_to`, not `Pane::new` — see its doc comment. Building
@@ -5217,6 +5243,12 @@ fn glob_to_regex(pattern: &str) -> anyhow::Result<regex::Regex> {
 /// `~` at the start means home. Nothing else is expanded: a path typed into a
 /// file manager is a path, not a shell line.
 fn shellexpand(path: &str) -> String {
+    // A SharePoint address is a path once Windows has been told how to read
+    // it — `\\host@SSL\DavWWWRoot\…`, over WebDAV. Converted here because
+    // this is the one door every typed path comes through, so `z`, the config
+    // and anything later that takes a folder all understand one without each
+    // having to learn how.
+    let path = &cian_core::sharepoint::to_unc(path);
     let Some(rest) = path.strip_prefix('~') else { return path.to_string() };
     match std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }) {
         Some(home) => format!("{}{rest}", home.to_string_lossy()),

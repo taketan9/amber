@@ -87,6 +87,7 @@ python3 scripts/requests.py --list   # 何を見ているか
 | 42 | 2026-09-02 | ダークテーマのときもタイトルバーが明るいまま | タイトルバーは OS が描くので CSS では届かない。`nativeTheme.themeSource` を**実際に描かれている `--bg` の輝度**から決めて渡す（配色の名前ではなく）。起動時の地の色もエンジンに訊く ── `main.js` は18ある配色のうち3つしか表を持っていなかった | `gui/renderer.js ~ function tellFrame\(` |
 | 43 | 2026-09-02 | 共有フォルダで複数人が同じものを書きたい（Inkdrop 相談の前提） | **保存前に、開いたときと同じファイルかを見る。**違えば書かずに訊く（差分を見る／別名／それでも上書き）。端末版は `:w` が断り `:w!` で通す。判定は `cian_core::stamp` の1か所 | `crates/cian-core/src/stamp.rs ~ pub fn changed\(` |
 | 44 | 2026-09-02 | ビューは一覧・クラシック・ノートの三つでよい（アイコンは消す） | **入口だけ閉じた** ── 切替バー・メニュー・`:view icons` から外す。描く側は残す: アイコンの当たり判定は詳細ビューのアドレスバー・パンくず・タブ・サイドバーと同じ関数の中にいて、外そうとして三度とも詳細ビューを壊しかけた。**分解は別の日に** | `gui/renderer.js ~ const VIEWS = \['classic', 'details'\];` |
+| 45 | 2026-09-02 | SharePoint の場所を指定できるようにしたい（crmaine と同じやり方で） | **認証しない。**URL を WebDAV の UNC パスに直すだけ（`\\host@SSL\DavWWWRoot\…`）。crmaine の `sharepoint_to_unc` を写した ── 貼られる4つの形と、**場所を持たない共有リンク**の見分けは高くついた知識なので思い出しで書かない。開けないときは crmaine と同じ手順を出す | `crates/cian-core/src/sharepoint.rs ~ pub fn to_unc\(` |
 
 ## 増やすとき
 
