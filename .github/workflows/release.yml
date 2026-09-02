@@ -252,6 +252,9 @@ jobs:
           # The checklist travels with the zip: the machine this is carried to
           # is offline, so a link to it would be a link to nothing.
           Copy-Item packaging/windows/CHECK.ja.txt "$stage/"
+          # How to put this on a shared machine — and the one trap that
+          # breaks everybody's bookmarks quietly if it is walked into.
+          Copy-Item packaging/windows/DEPLOY.ja.txt "$stage/"
           # The window's own icon. `main.js` looks beside itself first and at
           # the repository root second, so this is what makes the packaged
           # copy find one at all.

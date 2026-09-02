@@ -79,6 +79,7 @@ python3 scripts/requests.py --list   # 何を見ているか
 | 34 | 2026-09-02 | Shift+f / Ctrl+f のポップアップの表題が `:find` `:grep` で何をするか分かりづらい | 表題を**何をするか**の文（`about`）に。欄の中に何を打つか（`arg`）、コマンド名は下に小さく残す ── 名前は覚える価値があるので消しはしない | `gui/renderer.js ~ a = await askFor\(cmd\.about,` |
 | 35 | 2026-09-02 | 「z」の宛先入力窓の横幅が小さく、入力した文字列が見切れる | パスを訊く窓は広く（`min(60rem, 84vw)`）。380px は**ファイル名の幅**であってパスの幅ではなかった | `gui/index.html ~ #ask \.sheet\.wide \{ min-width` |
 | 36 | 2026-09-02 | ビューアに対ディスク差分ガター | 編集中の行のうち**ディスクと違う行**を行番号の脇に出す。判定はエンジンの `cian_core::diff`（窓で二つ目の差分器を書かない） | `crates/cian-server/src/main.rs ~ "diskdiff" =>` |
+| 37 | 2026-09-02 | AVD の Program Files に置いて共通デスクトップの run.bat で全員に使わせたい。初回の人には僕の init.lua や ssh 設定を配りたい | `run.bat` が `default-config\` から各自の `~/.config/cian` へ配る。直下は**無い人にだけ**（以後その人のもの）、`always\` は**毎回上書き**（チームのもの）。**exe の隣に置く配り方は罠** ── 書き込み先まで Program Files になり、全員のしおりが保存できなくなる | `gui/run.bat ~ default-config` |
 
 ## 増やすとき
 

@@ -88,6 +88,48 @@ if not defined FOUND (
     exit /b 1
 )
 
+rem ---------------------------------------------------------------------
+rem Shared install: give a first-time user the team's settings.
+rem
+rem For a shared machine (an AVD image, a Citrix host) where this folder sits
+rem in Program Files and everybody launches the same run.bat from the common
+rem desktop. Two folders, two policies:
+rem
+rem   default-config\*.lua          copied only when the user has none.
+rem                                 Theirs afterwards; edits are kept.
+rem   default-config\always\*.lua   copied on every launch.
+rem                                 The team's -- ssh.lua belongs here.
+rem
+rem NEVER put init.lua next to this file to distribute it. cian reads a config
+rem beside the executable first -- and *writes* there too once one exists, so
+rem bookmarks (shortcuts.lua) would be saved into Program Files, where a
+rem standard user cannot write. Everybody's bookmarks would fail, quietly.
+rem `:where` inside cian says which file it is reading and where it would
+rem write; that is the way to check a deployment.
+set "SEED=%HERE%\default-config"
+set "MINE=%USERPROFILE%\.config\cian"
+if defined CIAN_CONFIG_DIR set "MINE=%CIAN_CONFIG_DIR%"
+if exist "%SEED%" (
+    if not exist "%MINE%" mkdir "%MINE%" 2>nul
+    for %%F in ("%SEED%\*.lua") do (
+        if not exist "%MINE%\%%~nxF" copy /y "%%F" "%MINE%\" >nul
+    )
+    if exist "%SEED%\always" (
+        for %%F in ("%SEED%\always\*.lua") do copy /y "%%F" "%MINE%\" >nul
+    )
+)
+
+rem The mistake above, caught rather than explained. A config file here means
+rem this folder is where cian will try to save to.
+for %%N in (init.lua shortcuts.lua macro.lua) do (
+    if exist "%HERE%\%%N" (
+        echo WARNING: %%N is next to the program.
+        echo cian will read it -- and will also try to SAVE bookmarks here.
+        echo On a shared install put it in default-config\ instead.
+        echo.
+    )
+)
+
 rem Say so before showing an empty window, rather than after.
 if not exist "%HERE%\cian-server.exe" (
     if not exist "%HERE%\..\target\release\cian-server.exe" (
