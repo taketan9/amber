@@ -163,6 +163,33 @@ fn find_run(chars: &[char], from: usize, marker: [char; 2]) -> Option<usize> {
 // unchanged.
 
 /// `## Heading` → `(2, "Heading")`.
+/// A heading's anchor, GitHub's way: lowercased, spaces to hyphens, and
+/// punctuation dropped.
+///
+/// **Runs of hyphens are not collapsed, and that is deliberate.** GitHub's
+/// slugger turns `v1.2 — notes` into `v12--notes` — the dash is dropped and
+/// the two spaces around it each become a hyphen — and the links inside a
+/// README were written against *that*. A tidier anchor would be a prettier
+/// string that none of the document's own links point at.
+///
+/// Japanese is *kept*, not stripped. GitHub percent-encodes it in the href and
+/// leaves the characters in the id — strip them and every heading in a
+/// Japanese document collapses to the same empty anchor, which is worse than
+/// no anchor at all. The window decodes the href before it looks the id up.
+pub fn slug(text: &str) -> String {
+    let mut out = String::new();
+    for c in text.trim().chars() {
+        if c.is_whitespace() {
+            out.push('-');
+        } else if c.is_alphanumeric() || c == '-' || c == '_' {
+            out.extend(c.to_lowercase());
+        }
+        // Everything else — `.`, `(`, `:`, an emoji — is dropped, as GitHub
+        // drops it.
+    }
+    out
+}
+
 pub fn heading(line: &str) -> Option<(usize, String)> {
     let t = line.trim_start();
     let hashes = t.chars().take_while(|c| *c == '#').count();
@@ -428,7 +455,15 @@ pub fn to_html(lines: &[String]) -> String {
 
         if let Some((level, text)) = heading(raw) {
             close_all_lists(&mut out, &mut open_lists, &mut li_open);
-            out.push_str(&format!("<h{level}>{}</h{level}>\n", inline_html(&text)));
+            // With an anchor, so `[…](#usage)` in the same file has somewhere
+            // to land. A README is mostly links to itself and its neighbours,
+            // and a preview that cannot follow either opens almost nothing
+            // the document points at.
+            out.push_str(&format!(
+                "<h{level} id=\"{}\">{}</h{level}>\n",
+                slug(&text),
+                inline_html(&text)
+            ));
             i += 1;
             continue;
         }
@@ -648,5 +683,24 @@ mod tests {
         let html = to_html(&lines("- [x] done\n- [ ] not"));
         assert!(html.contains("☑"), "{html}");
         assert!(html.contains("☐"), "{html}");
+    }
+
+    #[test]
+    fn headings_get_an_anchor_to_link_to() {
+        assert_eq!(slug("Usage"), "usage");
+        assert_eq!(slug("Getting started!"), "getting-started");
+        // Two spaces are two hyphens, and so is a dropped dash between them.
+        // GitHub's own slugger does this, and a README's links were written
+        // against GitHub's.
+        assert_eq!(slug("v1.2 — notes (draft)"), "v12--notes-draft");
+        // Japanese is kept: stripping it would collapse every heading in a
+        // Japanese document to the same empty anchor.
+        assert_eq!(slug("使い方"), "使い方");
+        assert_eq!(slug("  trailing  "), "trailing", "the ends are trimmed first");
+        assert_eq!(slug("###"), "");
+
+        let html = to_html(&["# 使い方".to_string(), "## Getting started".to_string()]);
+        assert!(html.contains("<h1 id=\"使い方\">"), "{html}");
+        assert!(html.contains("<h2 id=\"getting-started\">"), "{html}");
     }
 }

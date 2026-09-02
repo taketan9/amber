@@ -747,6 +747,39 @@ impl Session {
                 if paths.is_empty() {
                     anyhow::bail!("nothing to operate on");
                 }
+                // **Is the other pane inside a zip?** `enter_archive` leaves
+                // `cwd` alone — an archive view is synthetic, and the pane
+                // still remembers the directory it walked in from. So the
+                // copy went to *that* directory, dropped the file beside the
+                // archive, and said "copied": right message, wrong place, no
+                // way to tell from the screen. The terminal build has asked
+                // "add to the zip?" since it could read one (actions.rs:92).
+                if matches!(req.method.as_str(), "copy" | "move") {
+                    let into = {
+                        let other = self.pane_mut(if which == "left" { "right" } else { "left" })?;
+                        other.archive_view().map(|(a, sub)| (a.to_path_buf(), sub.to_string()))
+                    };
+                    if let Some((archive, sub)) = into {
+                        if req.method == "move" {
+                            anyhow::bail!("zip へはコピー（追加）のみ — 移動は未対応");
+                        }
+                        if !zip_writable(&archive) {
+                            anyhow::bail!("書き換えられるのは zip だけです（tar はまだ）");
+                        }
+                        // The window asks before this call, the way it asks
+                        // before every other write; the engine answers with
+                        // what it would do so the sheet can name it.
+                        // What it *would* do, so the window can name it in
+                        // the confirmation. Nothing is written until `zipadd`.
+                        return Ok(serde_json::json!({
+                            "zipadd": {
+                                "archive": archive.display().to_string(),
+                                "sub": sub,
+                                "count": paths.len(),
+                            }
+                        }));
+                    }
+                }
                 let (kind, dest) = match req.method.as_str() {
                     "copy" => (Kind::Copy, Some(self.other_cwd(&which))),
                     "move" => (Kind::Move, Some(self.other_cwd(&which))),
@@ -3770,6 +3803,105 @@ impl Session {
             // (arcview.rs) — the half that makes browsing one feel like
             // browsing a folder rather than looking at one through glass. Same
             // `zip_modify`, same reason it rebuilds rather than patches.
+            // Add files to the zip the *other* pane is standing in. Split
+            // from `archiveedit` (which works on a member of the archive you
+            // are looking at) because the archive here is the destination,
+            // not the thing under the cursor.
+            // Redo a transfer that hit "permission denied" with administrator
+            // rights (Windows UAC). The elevated process does the work itself,
+            // so there is no progress to show — cian waits and reports.
+            //
+            // cian-tui has had this since the first Windows session; this
+            // build said "permission denied" and stopped, which on a managed
+            // machine is most of what a copy into Program Files ever says.
+            "elevate" => {
+                let dest = std::path::PathBuf::from(arg(req, "dest"));
+                let move_after = req.params["kind"].as_str() == Some("move");
+                let paths = paths_of(req);
+                if paths.is_empty() || dest.as_os_str().is_empty() {
+                    anyhow::bail!("やり直す対象がありません");
+                }
+                let items: Vec<cian_core::elevate::CopyItem> = paths
+                    .iter()
+                    .map(|src| cian_core::elevate::CopyItem {
+                        src: src.clone(),
+                        dest_dir: dest.clone(),
+                    })
+                    .collect();
+                let n = items.len();
+                cian_core::elevate::elevated_copy(&items, move_after)?;
+                self.left.now().reload()?;
+                self.right.now().reload()?;
+                Ok(serde_json::json!({
+                    "done": n,
+                    "left": PaneView::of(self.left.get()),
+                    "right": PaneView::of(self.right.get()),
+                }))
+            }
+            // Does this path exist, and is it a folder?
+            //
+            // For the markdown preview: a README links to its neighbours, and
+            // `./CONTRIBUTING.md` has to be told apart from `docs/` and from
+            // a link that points at nothing — three different things to do,
+            // and the window cannot read a disk to find out which.
+            "stat" => {
+                let path = std::path::PathBuf::from(arg(req, "path"));
+                let meta = std::fs::metadata(&path).ok();
+                Ok(serde_json::json!({
+                    "exists": meta.is_some(),
+                    "is_dir": meta.as_ref().map(|m| m.is_dir()).unwrap_or(false),
+                    "len": meta.as_ref().map(|m| m.len()).unwrap_or(0),
+                }))
+            }
+            "zipadd" => {
+                // Takes the *source* pane, like `copy` does, and finds the
+                // archive on the other side itself. The window would otherwise
+                // need the sub-path inside the zip, which it has never been
+                // sent — and adding a field for one caller to hand straight
+                // back is a second place for it to be wrong.
+                let which = req.params["pane"].as_str().unwrap_or("left").to_string();
+                let named = paths_of(req);
+                let paths = if named.is_empty() { self.targets(&which)? } else { named };
+                let (archive, sub) = {
+                    let other = self.pane_mut(if which == "left" { "right" } else { "left" })?;
+                    match other.archive_view() {
+                        Some((a, sub)) => (a.to_path_buf(), sub.to_string()),
+                        None => anyhow::bail!("反対のペインはアーカイブを開いていません"),
+                    }
+                };
+                if paths.is_empty() {
+                    anyhow::bail!("追加する対象がありません");
+                }
+                if !zip_writable(&archive) {
+                    anyhow::bail!("書き換えられるのは zip だけです（tar はまだ）");
+                }
+                let report = quietly(|ctl| {
+                    cian_core::archive::zip_modify(&archive, &[], &[], &paths, &sub, ctl)
+                });
+                if !report.errors.is_empty() {
+                    anyhow::bail!("{}", report.errors.join(" / "));
+                }
+                // **Read the zip again, not the directory** — an archive view
+                // is synthetic and `reload()` would only re-sort the rows it
+                // already holds, so the addition would not appear until you
+                // walked out and back in.
+                let members = cian_core::archive::list(&archive)?;
+                for side in ["left", "right"] {
+                    let pane = self.pane_mut(side)?;
+                    let here = pane.archive_view().map(|(a, s)| (a.to_path_buf(), s.to_string()));
+                    if let Some((a, s)) = here {
+                        if a == archive {
+                            let rows = cian_core::archive::archive_rows(&a, &members, &s);
+                            pane.enter_archive(a, s, rows);
+                        }
+                    }
+                }
+                Ok(serde_json::json!({
+                    "added": report.ok,
+                    "left": PaneView::of(self.left.get()),
+                    "right": PaneView::of(self.right.get()),
+                }))
+            }
             "archiveedit" => {
                 let which = req.params["pane"].as_str().unwrap_or("left").to_string();
                 let member = arg(req, "member");

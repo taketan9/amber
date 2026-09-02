@@ -413,6 +413,12 @@ JS_GLOBALS = {
     'Promise', 'Array', 'Object', 'String', 'Number', 'Boolean', 'Math', 'JSON',
     'Date', 'Map', 'Set', 'Error', 'RegExp', 'Intl', 'parseInt', 'parseFloat',
     'isNaN', 'encodeURIComponent', 'decodeURIComponent', 'structuredClone',
+    # `decodeURIComponent` was here and its three siblings were not, so the
+    # first use of `decodeURI` read as a call to nothing. `Symbol` and `CSS`
+    # were the same omission, and both had been sitting in the report as
+    # standing false positives — which is how a report teaches people to
+    # skim it.
+    'decodeURI', 'encodeURI', 'Symbol', 'CSS',
     'require', 'module', 'process', 'Buffer', '__dirname', 'queueMicrotask',
     'getComputedStyle', 'URL', 'Blob', 'TextDecoder', 'TextEncoder',
     'if', 'for', 'while', 'switch', 'catch', 'return', 'typeof', 'function',

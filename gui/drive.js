@@ -628,6 +628,18 @@ async function main() {
         ['land:from', '中のディレクトリへ'],
         ['l', '中へ'], ['wait:900', ''],
         ['read:\'l のあと: \' + (state[state.focus].entries||[]).length + \' 行\'', ''],
+        // zip の中へコピー ── **横に落ちていないこと**を確かめる。
+        //
+        // アーカイブの表示は作り物で、ペインは入る前のディレクトリを `cwd` に
+        // 覚えたままなので、素のコピーは zip の *隣* にファイルを落として
+        // 「コピーしました」と言っていた。合っているのは言葉だけだった。
+        ['Bksp', 'zip の根へ'], ['wait:800', ''],
+        ['Tab', '反対ペインへ'],
+        ['land:k.rs', 'k.rs の行へ'],
+        ['c', 'zip へ追加'], ['wait:700', ''], ['Enter', 'はい'], ['wait:2000', ''],
+        ['read:\'zip の中: \' + (state[state.focus === \'left\' ? \'right\' : \'left\'].entries||[]).map(e=>e.name).join(\' \')', ''],
+        ['read:\'コピー元は変わらず: \' + (state[state.focus].entries||[]).length + \' 行\'', ''],
+        ['Tab', 'zip 側へ戻る'],
         ['Bksp', 'ひとつ戻る'], ['wait:700', ''],
         ['Bksp', 'アーカイブを出る'], ['wait:800', ''],
 

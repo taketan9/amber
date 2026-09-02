@@ -866,6 +866,35 @@ async function operate(kind) {
     }
     const dest = state[which === 'left' ? 'right' : 'left'];
     const verb = { copy: tr('copy', 'コピー'), move: tr('move', '移動'), delete: tr('delete', '削除') }[kind];
+    // **The other pane may be standing inside a zip.** An archive view is
+    // synthetic and the pane still remembers the directory it walked in from,
+    // so an ordinary copy landed the files *beside* the archive and said
+    // "copied" — right message, wrong place, nothing on screen to tell you.
+    // cian-tui has asked "add to the zip?" since it could read one
+    // (actions.rs:92). The engine refuses the plain copy as well; this is the
+    // half that can name the archive in the question.
+    if (kind !== 'delete' && dest.archive) {
+        const zip = dest.archive.split(/[\\/]/).pop();
+        if (kind === 'move') {
+            say(tr('zip takes copies only — move is not supported', 'zip へはコピー（追加）のみ — 移動は未対応'), true);
+            return;
+        }
+        if (!await confirm(tr(`Add ${rows.length} to ${zip}`, `${rows.length} 件を ${zip} に追加`),
+            rows.map((r) => r.name).join('\n')
+            + tr('\n\nthe archive is rebuilt with them in it', '\n\nアーカイブを作り直します'))) {
+            say(tr('stopped', 'やめました'));
+            return;
+        }
+        say(tr('rebuilding the archive…', 'アーカイブを作り直しています…'));
+        const done = await ask('zipadd', { pane: which, paths: rows.map((r) => r.path) });
+        if (!done) return;
+        state.left = done.left;
+        state.right = done.right;
+        draw('left');
+        draw('right');
+        say(tr(`added ${done.added} to ${zip}`, `${done.added} 件を ${zip} に追加しました`));
+        return;
+    }
     const head = kind === 'delete'
         ? tr(`${rows.length} to the trash`, `${rows.length} 件をゴミ箱へ`)
         : tr(`${verb} ${rows.length}: → ${dest.cwd}`, `${rows.length} 件を${verb}: → ${dest.cwd}`);
@@ -907,6 +936,31 @@ async function operate(kind) {
     });
     if (!started) return;
     beginOp(started, kind, verb);
+}
+
+/// Offer to redo a refused transfer with administrator rights.
+///
+/// The elevated process copies on its own, so there is no bar to show — cian
+/// waits on it and says what happened. A declined UAC prompt comes back as an
+/// error, which is the right outcome and is reported as one.
+async function offerElevate(msg, verb) {
+    const what = msg.elevate;
+    const names = (what.paths || []).map((p) => p.split(/[\\/]/).pop());
+    if (!await confirm(
+        tr('Windows refused it — try again as administrator?', 'Windows に拒否されました — 管理者としてやり直しますか'),
+        names.join('\n') + tr('\n\nWindows will ask for permission. The copy runs outside cian, so there is no progress bar.',
+            '\n\nWindows が確認を出します。コピーは cian の外で走るので進捗バーは出ません。'))) {
+        say(msg.errors.join('  /  '), true);
+        return;
+    }
+    say(tr('waiting for the elevated copy…', '管理者権限のコピーを待っています…'));
+    const done = await ask('elevate', what);
+    if (!done) return;
+    state.left = done.left;
+    state.right = done.right;
+    draw('left');
+    draw('right');
+    say(tr(`${verb} ${done.done} as administrator`, `管理者として ${done.done} 件を${verb}しました`));
 }
 
 /// Take up an operation the engine has just accepted — running now, or in
@@ -4355,6 +4409,62 @@ function paintOpenFiles() {
     here?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
 }
 
+
+/// A link in the rendered markdown.
+///
+/// **Relative links used to say "not opened yet".** A README is mostly links
+/// to its neighbours — `./CONTRIBUTING.md`, `docs/setup.md`, `#usage` — so a
+/// preview that opens only `http:` opens almost nothing a repository's own
+/// documentation points at.
+///
+/// Three kinds, and each goes where it means:
+///   * `http:` / `mailto:` — the desktop's browser, as before. A file manager
+///     that navigates away from itself is one you have to restart.
+///   * `#anchor` — inside this preview. The engine's markdown gives headings
+///     an `id`, so this is a scroll, not a load.
+///   * anything else — a path beside the open file. It opens the way F3 does,
+///     so the tab strip and Esc behave as they always do.
+async function followMarkdownLink(href) {
+    if (!href) return;
+    if (/^https?:|^mailto:/i.test(href)) { ask('openurl', { url: href }); return; }
+    if (href.startsWith('#')) {
+        // `decodeURIComponent`, because a Japanese heading arrives percent
+        // encoded and `getElementById` wants the character it stands for.
+        let id = href.slice(1);
+        try { id = decodeURIComponent(id); } catch { /* leave it as typed */ }
+        const to = el.vRead.querySelector(`[id="${CSS.escape(id)}"]`)
+            || el.vRead.querySelector(`[id="${CSS.escape(href.slice(1))}"]`);
+        if (!to) { say(tr(`no heading called ${id}`, `${id} という見出しはありません`), true); return; }
+        to.scrollIntoView({ block: 'start', behavior: 'smooth' });
+        return;
+    }
+    // A path, relative to the file being previewed — and only the path: a
+    // `docs/x.md#usage` link is a file and an anchor, and the file is the
+    // half that has to exist.
+    const here = openFiles.list[openFiles.at] || '';
+    const dir = here.replace(/[\\/][^\\/]*$/, '');
+    const sep = here.includes('\\') ? '\\' : '/';
+    const clean = decodeURI(href.split('#')[0].split('?')[0]);
+    if (!clean) return;
+    const target = /^([a-zA-Z]:[\\/]|[\\/])/.test(clean)
+        ? clean
+        : `${dir}${sep}${clean.replace(/\//g, sep)}`;
+    const r = await ask('stat', { path: target });
+    if (!r) return;
+    if (!r.exists) { say(tr(`${clean} is not there`, `${clean} は見つかりません`), true); return; }
+    if (r.is_dir) {
+        // A folder is a place, not a document: close the reader and go there,
+        // which is what Enter on a folder does everywhere else.
+        await closeView(false);
+        await revealPath(target, true);
+        return;
+    }
+    await closeView(false);
+    if (!await landOn(target)) return;
+    openFiles.list = [target];
+    openFiles.at = 0;
+    await lookInside();
+}
 
 /// Reading a file that only exists inside an archive.
 ///
@@ -7941,9 +8051,7 @@ async function togglePreview2() {
     for (const a2 of el.vRead.querySelectorAll('a[href]')) {
         a2.addEventListener('click', (e) => {
             e.preventDefault();
-            const href = a2.getAttribute('href');
-            if (/^https?:|^mailto:/i.test(href)) ask('openurl', { url: href });
-            else say(tr(`${href} — relative links are not opened yet`, `${href} — 相対リンクはまだ開けません`));
+            followMarkdownLink(a2.getAttribute('href'));
         });
     }
     reading = true;
@@ -9552,6 +9660,13 @@ window.cian.onEvent(async (msg) => {
                 draw(state.focus);
             });
             if (msg.cancelled) say(tr(`${verb} stopped (${msg.ok} done)`, `${verb}を中止しました（${msg.ok} 件は済み）`), true);
+            // **Permission denied on Windows is a question, not a verdict.**
+            // cian-tui raises `ConfirmElevate` here and offers to run the same
+            // transfer as administrator; this build printed the error and
+            // stopped, which on a managed machine is most of what a copy into
+            // Program Files ever says. Asked rather than done: a UAC prompt
+            // nobody asked for is worse than the error.
+            else if (msg.elevate) { await offerElevate(msg, verb); }
             // Every failure, named. A count of them tells you something went
             // wrong without telling you what, which is the worst of both.
             else if (msg.errors.length) say(msg.errors.join('  /  '), true);

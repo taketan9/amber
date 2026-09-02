@@ -293,6 +293,19 @@ fn run(inner: Arc<Inner>, job: Pending) {
                 "skipped": report.skipped,
                 "errors": report.errors,
                 "cancelled": stopped,
+                // **Windows: offer the administrator retry.** cian-tui raises
+                // `ConfirmElevate` here (actions.rs:3206); this build reported
+                // "permission denied" and stopped, which on a managed machine
+                // is most of what a copy into Program Files ever says. The
+                // sources and the destination ride along so the window can ask
+                // without having to remember what it just tried.
+                "elevate": (report.permission_denied && cfg!(windows)).then(|| {
+                    serde_json::json!({
+                        "kind": if matches!(plan.kind, Kind::Move) { "move" } else { "copy" },
+                        "paths": paths.iter().map(|p| p.display().to_string()).collect::<Vec<_>>(),
+                        "dest": dest.as_ref().map(|d| d.display().to_string()),
+                    })
+                }),
                 // How long it took, so the front end can say so and so that
                 // "no progress was reported" can be told apart from "it was
                 // over before there was anything to report".
