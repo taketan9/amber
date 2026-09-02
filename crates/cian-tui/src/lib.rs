@@ -1140,7 +1140,6 @@ enum ZoneKind {
 enum MenuItem {
     /// The three views. What they mean is the front end's — see [`ViewWanted`].
     ViewDetails,
-    ViewIcons,
     ViewClassic,
     Copy,
     Cut,
@@ -1521,7 +1520,6 @@ impl MenuItem {
             MenuItem::ViewMenu => tr(lang, "View ▸", "表示 ▸"),
             MenuItem::TogglesMenu => tr(lang, "Switches…  (T)", "各種スイッチ…  (T)"),
             MenuItem::ViewDetails => tr(lang, "▤ Details  (:view details)", "▤ 詳細一覧  (:view details)"),
-            MenuItem::ViewIcons => tr(lang, "▦ Icons  (:view icons)", "▦ アイコン  (:view icons)"),
             MenuItem::ViewClassic => tr(lang, "▥ Classic  (:view classic)", "▥ クラシック  (:view classic)"),
             MenuItem::SessionMenu => tr(lang, "Session ▸", "セッション ▸"),
             MenuItem::CopyPathText => tr(lang, "Copy path text  (p)", "パスをコピー  (p)"),

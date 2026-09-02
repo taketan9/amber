@@ -893,7 +893,6 @@ pub(crate) fn draw_view_switcher(
     };
     let segments = [
         (" ▤ 詳細 ", crate::ViewWanted::Details),
-        (" ▦ アイコン ", crate::ViewWanted::Icons),
         (" ▥ クラシック ", crate::ViewWanted::Classic),
     ];
     let total: u16 = segments.iter().map(|(l, _)| crate::util::width(l) as u16).sum();

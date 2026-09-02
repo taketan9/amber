@@ -90,10 +90,6 @@ impl App {
                     self.view_request = Some(crate::ViewWanted::Details);
                     self.say_view_is_window_only();
                 }
-                "icons" | "grid" => {
-                    self.view_request = Some(crate::ViewWanted::Icons);
-                    self.say_view_is_window_only();
-                }
                 "classic" => self.view_request = Some(crate::ViewWanted::Classic),
                 other => {
                     self.message = Some(format!(

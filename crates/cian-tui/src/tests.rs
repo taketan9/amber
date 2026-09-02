@@ -16658,17 +16658,16 @@ mod the_view_switcher {
     }
 
     #[test]
-    fn all_three_views_draw_it() {
-        for (icons, finder) in [(false, true), (true, true), (false, false)] {
+    fn both_views_draw_it() {
+        for (icons, finder) in [(false, true), (false, false)] {
             let (_d, mut app) = in_view(icons, finder);
             let text = painted(&mut app);
             assert!(text.contains("詳細"), "icons={icons} finder={finder}: {text:.200}");
-            assert!(text.contains("アイコン"), "icons={icons} finder={finder}");
             assert!(text.contains("クラシック"), "icons={icons} finder={finder}");
             assert_eq!(
                 app.grid_buttons.iter().filter(|(b, _)| matches!(b, GridButton::View(_))).count(),
-                3,
-                "three segments to click",
+                2,
+                "two segments to click",
             );
         }
     }
@@ -16677,13 +16676,13 @@ mod the_view_switcher {
     /// classic one, where the switcher rides the top border row.
     #[test]
     fn clicking_a_segment_asks_for_that_view() {
-        for (icons, finder) in [(false, true), (true, true), (false, false)] {
+        for (icons, finder) in [(false, true), (false, false)] {
             let (_d, mut app) = in_view(icons, finder);
             let _ = painted(&mut app);
             // Every segment, and the middle of each — a control answered only
             // at its left edge is a control that half works.
             for want in
-                [crate::ViewWanted::Details, crate::ViewWanted::Icons, crate::ViewWanted::Classic]
+                [crate::ViewWanted::Details, crate::ViewWanted::Classic]
             {
                 let (_, r) = app
                     .grid_buttons
@@ -16710,9 +16709,9 @@ mod the_view_switcher {
     #[test]
     fn the_command_asks_too_and_leaves_the_viewer_alone() {
         let (_d, mut app) = in_view(false, true);
-        app.command_buffer = "view icons".into();
+        app.command_buffer = "view details".into();
         app.run_command();
-        assert_eq!(app.view_request, Some(crate::ViewWanted::Icons));
+        assert_eq!(app.view_request, Some(crate::ViewWanted::Details));
         assert!(matches!(app.popup, Popup::None), "no file was opened");
 
         // …and bare `:view` still opens the file under the cursor.
@@ -16730,13 +16729,15 @@ mod the_view_switcher {
         assert_eq!(app.view_request, Some(crate::ViewWanted::Classic));
     }
 
-    /// Nothing switches by itself: two of the three views only exist in a
-    /// window, so cian only ever *asks*.
+    /// Nothing switches by itself: the details view only exists in a window,
+    /// so cian only ever *asks*.
     #[test]
     fn asking_does_not_change_the_view_by_itself() {
         let (_d, mut app) = in_view(false, true);
-        app.run_menu_item(MenuItem::ViewIcons).unwrap();
-        assert!(!app.icon_view, "still the detail view until the window says otherwise");
+        let was = app.skin;
+        app.run_menu_item(MenuItem::ViewDetails).unwrap();
+        assert_eq!(app.view_request, Some(crate::ViewWanted::Details), "it asked");
+        assert_eq!(app.skin, was, "and changed nothing itself");
     }
 }
 

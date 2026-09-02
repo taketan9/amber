@@ -1612,7 +1612,12 @@ function clearPalette() {
 /// How the listing is laid out: the terminal build's `:view`, which it
 /// could only ask for — ":view icons" in a terminal answers "window only",
 /// because this is the feature a window exists to have.
-const VIEWS = ['classic', 'details', 'icons'];
+/// **`icons` は入口から外した**（2026-09-02、一覧・クラシック・ノートの三つで
+/// よい、との判断）。描く側のコードは残してある ── アイコン表示の当たり判定は
+/// 詳細ビューのアドレスバー・パンくず・タブ・サイドバーと同じ関数の中にいて、
+/// 三度ほどいて三度とも詳細ビューを壊しかけた。**入口を閉じるのは安全で、
+/// 分解は別の日にできる。**
+const VIEWS = ['classic', 'details'];
 function viewName(mode) {
     return { classic: tr("classic", 'クラシック'), details: tr("details", '詳細一覧'), icons: tr("icons", 'アイコン') }[mode];
 }
@@ -2522,7 +2527,6 @@ function contextRows() {
         // switches. Its glyphs too — they are what the corner switcher shows.
         v.push(group(tr("View \u25b8", '表示 ▸'), () => [
             { label: tr("\u25a4 Details", '▤ 詳細一覧'), value: ':view details', run: () => { setView('details'); say(tr('listing: details', '一覧: 詳細一覧')); } },
-            { label: tr("\u25a6 Icons", '▦ アイコン'), value: ':view icons', run: () => { setView('icons'); say(tr('listing: icons', '一覧: アイコン')); } },
             { label: tr("\u25a5 Classic", '▥ クラシック'), value: ':view classic', run: () => { setView('classic'); say(tr('listing: classic', '一覧: クラシック')); } },
             { label: tr("Show / hide dotfiles", 'ドットファイルの表示切替'), value: ':hidden', run: toggleHidden },
             { label: tr("Theme (this pane)", 'テーマ（このペイン）'), value: '', run: cmdPaneTheme },
@@ -2917,7 +2921,7 @@ function helpRows() {
         ['← → / Ctrl+h / Ctrl+l', tr("focus the left / right pane", '左 / 右のペインにフォーカス')],
         ['Shift+H / Shift+L', tr("move focus between panes (Shift+J goes to the shell, Esc comes back)", 'ペイン間でフォーカス移動（Shift+J はシェルへ、Esc で戻る）')],
         ['F5', tr("reload", '読み直す')],
-        [':view', tr("how the listing is laid out \u2014 classic (two panes) / details / icons. Also on T", '一覧の見せ方 — classic（2画面） / details（詳細一覧） / icons（アイコン）。T でも')],
+        [':view', tr("how the listing is laid out \u2014 classic (two panes) / details. Also on T", '一覧の見せ方 — classic（2画面） / details（詳細一覧）。T でも')],
         ['Ctrl+= / Ctrl+- / Ctrl+0', tr("bigger / smaller / back to the base size", '文字を大きく / 小さく / 元に戻す')],
     ]],
     [tr("Find", '探す'), [
@@ -5440,7 +5444,7 @@ function buildCommands() {
     // lives on two commands reaches only the first — the fuzzy finder its own
     // about-text promised could never open. `:view finder` still works as an
     // argument (cmdView maps it to details).
-    { name: 'view', alias: ['grid', 'icons', 'details', 'classic'], about: tr("how the listing is laid out \u2014 :view details | icons | classic", '一覧の見せ方 — :view details | icons | classic'), arg: 'details / icons / classic', optional: true, run: cmdView },
+    { name: 'view', alias: ['details', 'classic'], about: tr("how the listing is laid out \u2014 :view details | classic", '一覧の見せ方 — :view details | classic'), arg: 'details / classic', optional: true, run: cmdView },
     { name: 'shell', about: tr("open the shell panel (also Shift+J)", 'シェルパネルを開く（Shift+J でも）'), run: openShell },
     { name: 'remote', alias: ['sftp'], about: tr("open a server in this pane (SFTP)", 'このペインでサーバを開く（SFTP）'), run: cmdSftpPicker },
 
@@ -7607,7 +7611,10 @@ async function cmdDedup() {
 /// means `:view icons`, which is how fingers actually type it.
 async function cmdView(arg, invokedAs) {
     const mode = (arg || invokedAs || '').trim();
-    const map = { grid: 'icons', finder: 'details' };
+    // `grid` used to mean the icon view; it is not offered any more, so it
+    // lands on the details view — the nearest thing to what was asked for,
+    // rather than a name that now means nothing.
+    const map = { grid: 'details', icons: 'details', finder: 'details' };
     if (!mode || mode === 'view') {
         setView(VIEWS[(VIEWS.indexOf(viewMode) + 1) % VIEWS.length]);
     } else {
