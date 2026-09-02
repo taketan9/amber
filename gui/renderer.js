@@ -2163,6 +2163,8 @@ function viewerRows() {
     v.push({ label: tr("Draw the mermaid diagrams", 'mermaid 図を描く'), value: ':mermaid', run: cmdMermaid });
     v.push({ label: tr("Mermaid diagrams in a browser", 'mermaid 図をブラウザで開く'), value: ':mermaid!', run: cmdMermaidOut });
     v.push({ label: tr("Jump by heading", '見出しから飛ぶ'), value: 'Ctrl+Shift+O', run: cmdOutline });
+    // The `:` family, which notepad style has no command line to reach.
+    v.push(group(tr("Line operations \u25b8", '行の操作 ▸'), lineOpRows));
     // Where the file lives, for when reading it raises a question about the
     // folder it is in. The cursor is already on it, so this is just the way
     // back out of the viewer.
@@ -2192,6 +2194,41 @@ const VIEWER_MENU = {
     stay: false,
     rows: viewerRows,
 };
+
+/// The line operations, as a menu rather than as `:` commands only.
+///
+/// **They were unreachable in notepad style, in both builds.** Every one of
+/// them has a `:` command and nothing else, and the editor's command line is
+/// vim's — so `:sort` exists for a person using vim keys and does not exist at
+/// all for a person using the other grammar. The default grammar is vim, which
+/// is why this went unnoticed: the style that could not reach them is the one
+/// nobody testing was in.
+///
+/// Nothing new is implemented here. It is the same `textOp` and `setEol` the
+/// commands call, given the second door the menu was already the right place
+/// for.
+function lineOpRows() {
+    return [
+        { label: tr("Sort the lines", '行をソート'), value: ':sort', run: () => textOp('sort') },
+        { label: tr("Sort in reverse", '行を逆順ソート'), value: ':rsort', run: () => textOp('rsort') },
+        { label: tr("Drop duplicate lines", '重複行を落とす'), value: ':uniq', run: () => textOp('uniq') },
+        { label: tr("Replace\u2026", '置換…'), value: ':s/…/…/', run: () => cmdSubstitutePrompt() },
+        { label: tr("Full-width ASCII \u2192 half-width", '全角ASCII → 半角'), value: ':han', run: () => textOp('han') },
+        { label: tr("Half-width kana \u2192 full-width", '半角カナ → 全角'), value: ':zen', run: () => textOp('zen') },
+        { label: tr("Leading tabs \u2192 spaces", '行頭のタブ → スペース'), value: ':expand', run: () => textOp('expand') },
+        { label: tr("Leading spaces \u2192 tabs", '行頭のスペース → タブ'), value: ':unexpand', run: () => textOp('unexpand') },
+        { label: tr("Re-indent to a consistent step", 'インデントを揃える'), value: ':reindent', run: () => textOp('reindent') },
+        { label: tr("Line endings to LF", '改行を LF にする'), value: ':lf', run: () => setEol('lf') },
+        { label: tr("Line endings to CRLF", '改行を CRLF にする'), value: ':crlf', run: () => setEol('crlf') },
+    ];
+}
+
+/// `:s/old/new/g`, asked for rather than typed — the menu's way in.
+async function cmdSubstitutePrompt() {
+    const spec = await askFor(tr('replace s/old/new/g', '置換 s/古い/新しい/g'), 's///g');
+    if (!spec) { say(tr('stopped', 'やめました')); return; }
+    await cmdSubstitute(spec);
+}
 
 /// What init.lua turned on, as far as the menu is concerned. Filled from the
 /// `settings` reply at startup; false until then, which is the safe way round

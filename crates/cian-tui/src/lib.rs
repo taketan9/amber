@@ -1217,6 +1217,23 @@ enum MenuItem {
     ViewerEncoding,
     /// Open the file's mermaid diagrams in a browser (`:mermaid`).
     ViewerMermaid,
+    /// The line-transform family, which had a `:` command each and no other
+    /// way in. **In notepad style there is no command line**, so `:sort`
+    /// existed for a vim hand and did not exist at all for the other — and the
+    /// grammar that could reach them is the default, which is why nobody
+    /// noticed.
+    ViewerLineMenu,
+    ViewerSort,
+    ViewerRsort,
+    ViewerUniq,
+    ViewerSubstitute,
+    ViewerHan,
+    ViewerZen,
+    ViewerExpand,
+    ViewerUnexpand,
+    ViewerReindent,
+    ViewerLf,
+    ViewerCrlf,
     /// Open the file in the external editor (`:edit`).
     ViewerEdit,
     /// Write the panel's file. `Ctrl+S` everywhere, and here too — notepad
@@ -1428,6 +1445,18 @@ impl MenuItem {
             MenuItem::ViewerBlame => tr(lang, "Who changed each line  (:blame)", "各行の最終変更者  (:blame)"),
             MenuItem::ViewerEncoding => tr(lang, "Text encoding…  (:enc)", "文字コードを指定…  (:enc)"),
             MenuItem::ViewerMermaid => tr(lang, "Mermaid diagrams in a browser  (:mermaid)", "mermaid 図をブラウザで開く  (:mermaid)"),
+            MenuItem::ViewerLineMenu => tr(lang, "Line operations ▸", "行の操作 ▸"),
+            MenuItem::ViewerSort => tr(lang, "Sort the lines  (:sort)", "行をソート  (:sort)"),
+            MenuItem::ViewerRsort => tr(lang, "Sort in reverse  (:rsort)", "行を逆順ソート  (:rsort)"),
+            MenuItem::ViewerUniq => tr(lang, "Drop duplicate lines  (:uniq)", "重複行を落とす  (:uniq)"),
+            MenuItem::ViewerSubstitute => tr(lang, "Replace…  (:s/old/new/g)", "置換…  (:s/古い/新しい/g)"),
+            MenuItem::ViewerHan => tr(lang, "Full-width ASCII → half-width  (:han)", "全角ASCII → 半角  (:han)"),
+            MenuItem::ViewerZen => tr(lang, "Half-width kana → full-width  (:zen)", "半角カナ → 全角  (:zen)"),
+            MenuItem::ViewerExpand => tr(lang, "Leading tabs → spaces  (:expand)", "行頭のタブ → スペース  (:expand)"),
+            MenuItem::ViewerUnexpand => tr(lang, "Leading spaces → tabs  (:unexpand)", "行頭のスペース → タブ  (:unexpand)"),
+            MenuItem::ViewerReindent => tr(lang, "Re-indent to a consistent step  (:reindent)", "インデントを揃える  (:reindent)"),
+            MenuItem::ViewerLf => tr(lang, "Line endings to LF  (:lf)", "改行を LF にする  (:lf)"),
+            MenuItem::ViewerCrlf => tr(lang, "Line endings to CRLF  (:crlf)", "改行を CRLF にする  (:crlf)"),
             MenuItem::ViewerEdit => tr(lang, "Open in my editor  (:edit)", "外部エディタで開く  (:edit)"),
             MenuItem::ViewerSave => tr(lang, "Save  (Ctrl+S)", "保存  (Ctrl+S)"),
             MenuItem::ViewerEditStyle => {

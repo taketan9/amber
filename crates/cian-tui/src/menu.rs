@@ -29,6 +29,10 @@ impl App {
         items.push(MenuItem::ViewerEncoding);
         items.push(MenuItem::ViewerBlame);
         items.push(MenuItem::ViewerMermaid);
+        // The `:` family, behind one heading. There is no command line in
+        // notepad style, so this is the only road to them from that grammar —
+        // and the shorter road from either.
+        items.push(MenuItem::ViewerLineMenu);
         // Where the file lives, for when reading it raises a question about
         // the folder it is in. This used to be Shift+Enter's whole job.
         items.push(MenuItem::RevealInPane);
@@ -211,6 +215,20 @@ impl App {
     /// leaf item.
     pub(crate) fn submenu_children(&self, item: MenuItem) -> Option<Vec<MenuItem>> {
         match item {
+            MenuItem::ViewerLineMenu => Some(vec![
+                MenuItem::ViewerSort,
+                MenuItem::ViewerRsort,
+                MenuItem::ViewerUniq,
+                MenuItem::ViewerSubstitute,
+                MenuItem::ViewerHan,
+                MenuItem::ViewerZen,
+                MenuItem::ViewerExpand,
+                MenuItem::ViewerUnexpand,
+                MenuItem::ViewerReindent,
+                MenuItem::ViewerLf,
+                MenuItem::ViewerCrlf,
+                MenuItem::Back,
+            ]),
             MenuItem::AiMenu => {
                 // The local assistant: a plain chat plus the
                 // helpers for whatever it was opened over.
@@ -583,6 +601,39 @@ impl App {
                 self.restore_viewer();
                 self.open_mermaid_in_browser();
             }
+            // One arm for eleven, because they are one thing: the command the
+            // `:` line would have run, run from here instead.
+            MenuItem::ViewerSort
+            | MenuItem::ViewerRsort
+            | MenuItem::ViewerUniq
+            | MenuItem::ViewerHan
+            | MenuItem::ViewerZen
+            | MenuItem::ViewerExpand
+            | MenuItem::ViewerUnexpand
+            | MenuItem::ViewerReindent
+            | MenuItem::ViewerLf
+            | MenuItem::ViewerCrlf => {
+                let cmd = match item {
+                    MenuItem::ViewerSort => "sort",
+                    MenuItem::ViewerRsort => "rsort",
+                    MenuItem::ViewerUniq => "uniq",
+                    MenuItem::ViewerHan => "han",
+                    MenuItem::ViewerZen => "zen",
+                    MenuItem::ViewerExpand => "expand",
+                    MenuItem::ViewerUnexpand => "unexpand",
+                    MenuItem::ViewerReindent => "reindent",
+                    MenuItem::ViewerLf => "lf",
+                    _ => "crlf",
+                };
+                self.restore_viewer();
+                self.run_substitute(cmd);
+            }
+            // The one that needs saying what to replace with.
+            MenuItem::ViewerSubstitute => {
+                self.restore_viewer();
+                self.start_replace_bar();
+            }
+            MenuItem::ViewerLineMenu => {} // a heading; handled above
             MenuItem::ViewerEdit => {
                 self.restore_viewer();
                 self.edit_viewer_file_externally();
