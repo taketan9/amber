@@ -76,6 +76,9 @@ python3 scripts/requests.py --list   # 何を見ているか
 | 31 | 2026-09-02 | （同上）実際に通したい | **127.0.0.1 に自分の sshd を立てて通す**（`scripts/remote.py`）。管理者権限は要らない。これが無かったのでリモートは一度も検証されていなかった | `scripts/remote.py ~ def free_port\(` |
 | 32 | 2026-09-02 | （同上）鍵で入れるようにしたい | `cian.ssh{ users = { { key = "~/.ssh/id_ed25519" } } }`。**設定例は前から鍵認証を勧めていたのに、機能が無かった** | `crates/cian-scp/src/lib.rs ~ \.authenticate_publickey\(` |
 | 33 | 2026-09-02 | （同上）ディレクトリごと送れるようにしたい | `cian_scp::plan_upload` / `plan_download` が木を歩き、ジョブが親から順に mkdir する。**端末版にも無かった**（両方ファイルだけ送っていた）。リンクは辿らない | `crates/cian-scp/src/lib.rs ~ pub fn plan_upload\(` |
+| 34 | 2026-09-02 | Shift+f / Ctrl+f のポップアップの表題が `:find` `:grep` で何をするか分かりづらい | 表題を**何をするか**の文（`about`）に。欄の中に何を打つか（`arg`）、コマンド名は下に小さく残す ── 名前は覚える価値があるので消しはしない | `gui/renderer.js ~ a = await askFor\(cmd\.about,` |
+| 35 | 2026-09-02 | 「z」の宛先入力窓の横幅が小さく、入力した文字列が見切れる | パスを訊く窓は広く（`min(60rem, 84vw)`）。380px は**ファイル名の幅**であってパスの幅ではなかった | `gui/index.html ~ #ask \.sheet\.wide \{ min-width` |
+| 36 | 2026-09-02 | ビューアに対ディスク差分ガター | 編集中の行のうち**ディスクと違う行**を行番号の脇に出す。判定はエンジンの `cian_core::diff`（窓で二つ目の差分器を書かない） | `crates/cian-server/src/main.rs ~ "diskdiff" =>` |
 
 ## 増やすとき
 

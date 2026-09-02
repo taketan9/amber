@@ -538,7 +538,13 @@ async function main() {
         ['read:\'名前で探す → \' + (report.rows||[]).length + \' 件\'', ''],
         ['top:#report', '結果が最前面'], ['Esc', '閉じる'], ['wait:400', ''],
         ['Ctrl+g', 'grep（別名）'], ['wait:500', ''], ['Esc', ''], ['wait:300', ''],
-        ['Ctrl+f', 'grep'], ['wait:500', ''], ['type:行目'], ['Enter', ''], ['wait:1800', ''],
+        // 表題は `:grep` ではなく「何をするか」。横幅も見る ── 入力欄が
+        // 見切れていたのはここ。
+        ['Ctrl+f', 'grep'], ['wait:500', ''],
+        ['read:\'表題: \' + document.querySelector(\'#ask .head\').textContent', ''],
+        ['read:\'欄の幅: \' + Math.round(document.querySelector(\'#ask .field\').getBoundingClientRect().width) + \'px\'', ''],
+        ['shot:ask-grep@#ask .sheet', '入力シート'],
+        ['type:行目'], ['Enter', ''], ['wait:1800', ''],
         ['top:#report', '結果が最前面'], ['Esc', '閉じる'], ['wait:400', ''],
         ['C', 'コマンドパレット'], ['wait:600', ''], ['Esc', ''], ['wait:300', ''],
         ['Ctrl+Shift+P', '同じものの別名'], ['wait:600', ''], ['Esc', ''], ['wait:300', ''],
@@ -582,6 +588,14 @@ async function main() {
         ['top:#view', 'エディタが最前面'],
         ['Ctrl+e', 'プレビュー'], ['wait:1200', ''],
         ['Ctrl+e', 'ソースへ'], ['wait:800', ''],
+        // 対ディスク差分ガター ── 1行足して、脇に印が出るか。
+        // **「dirty」はファイル1つに1ビットしかなく、どこを直したかは
+        // 覚えているしかなかった。**
+        ['read:(()=>{const p=viewer.ed.getPosition();viewer.ed.executeEdits(\'t\',[{range:new monaco.Range(1,1,1,1),text:\'GUTTER TEST\\n\'}]);return \'1行入れた\';})()', ''],
+        ['wait:1200', ''],
+        ['read:\'ガターの印: \' + document.querySelectorAll(\'.gut-new, .gut-changed\').length + \' 本\'', ''],
+        ['shot:gutter@#view', '差分ガター'],
+        ['read:(()=>{viewer.ed.trigger(\'t\',\'undo\');return \'戻した\';})()', ''], ['wait:900', ''],
         // **`Mod+`、`Ctrl+` ではない。** これらは Monaco の `KeyMod.CtrlCmd` で
         // 束ねてあり、それは Windows では Ctrl、Mac では ⌘。`Ctrl+]` で
         // 押していたときは三つとも「何も起きない」と出て、危うく壊れて

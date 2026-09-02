@@ -1118,6 +1118,11 @@ async function parent() {
 function askFor(head, initial = '', opts = {}) {
     const sheet = el.ask.querySelector('.sheet');
     el.ask.querySelector('.head').textContent = head;
+    // **Wide when the answer is long.** The sheet was 380px whatever it was
+    // asking for, and a path does not fit in 380px — you typed into a box that
+    // showed you the last thirty characters of what you had written. A new
+    // name fits either way, so the cost of the wider box is nothing.
+    sheet.classList.toggle('wide', !!opts.wide);
     const body = el.ask.querySelector('.body');
     body.textContent = '';
     const input = document.createElement('input');
@@ -1131,6 +1136,16 @@ function askFor(head, initial = '', opts = {}) {
     // information about what you type, not about what the box is.
     if (opts.hint) input.placeholder = opts.hint;
     body.append(input);
+    // The command this came from, small and under the field. It used to *be*
+    // the title — a box headed `:grep` says which command you are in and not
+    // one word about what it will do. The sentence goes on top now and the
+    // name stays here, because the name is still worth learning.
+    if (opts.note) {
+        const note = document.createElement('div');
+        note.className = 'note';
+        note.textContent = opts.note;
+        body.append(note);
+    }
     el.ask.hidden = false;
     input.focus();
     // The stem, not the suffix: renaming is nearly always about the name and
@@ -3132,7 +3147,10 @@ async function syncPane(pullToHere) {
 }
 
 async function goToPath(given) {
-    const path = given || await askFor(tr('where to', '移動先'), state[state.focus].cwd);
+    const path = given || await askFor(tr('where to', '移動先'), state[state.focus].cwd, {
+        wide: true,
+        hint: tr('a path — ~ and environment variables are expanded', 'パス — ~ や環境変数も展開します'),
+    });
     if (!path) return;
     const which = state.focus;
     const pane = await ask('list', { pane: which, path });
@@ -4136,6 +4154,62 @@ async function lookInside() {
     }
 }
 
+/// Which lines differ from the file on disk, drawn down the gutter.
+///
+/// **The editor knew it was dirty and not where.** One bit for the whole file
+/// — so after ten minutes of typing the only way to find your own edits was to
+/// remember them. Every other editor draws this and it is the cheapest
+/// orientation there is.
+///
+/// The comparison is the engine's (`cian_core::diff`), not one written here.
+/// A second line-differ in JavaScript would eventually disagree with the
+/// first, and then the diff panel, the F7 hop and this gutter would be three
+/// opinions about the same two files.
+///
+/// Debounced, because it reads the file and diffs it: on every keystroke that
+/// is a round trip per character, and the answer is only interesting once the
+/// hands stop.
+let diskDiffAt = null;
+let diskDiffMarks = [];
+
+function markDiskDiff() {
+    clearTimeout(diskDiffAt);
+    diskDiffAt = setTimeout(() => { paintDiskDiff().catch(() => {}); }, 350);
+}
+
+async function paintDiskDiff() {
+    if (!viewer.on || !viewer.ed || !viewer.path) return;
+    const lines = viewer.ed.getModel().getLinesContent();
+    const r = await ask('diskdiff', { path: viewer.path, lines });
+    if (!r || !viewer.ed) return;
+    const monaco = window.monaco;
+    if (!monaco) return;
+    const next = [];
+    (r.marks || []).forEach((m, i) => {
+        if (m === 'same') return;
+        next.push({
+            range: new monaco.Range(i + 1, 1, i + 1, 1),
+            options: {
+                isWholeLine: true,
+                // In the gutter, not over the text: a colour behind the words
+                // is a highlight and means "look here", and these lines are
+                // not more important than the rest of the file — only newer.
+                linesDecorationsClassName: m === 'new' ? 'gut-new' : 'gut-changed',
+            },
+        });
+    });
+    diskDiffMarks = viewer.ed.deltaDecorations(diskDiffMarks, next);
+}
+
+/// After a save the file *is* the disk, so the gutter has nothing to say.
+function clearDiskDiff() {
+    clearTimeout(diskDiffAt);
+    if (viewer.ed && diskDiffMarks.length) {
+        diskDiffMarks = viewer.ed.deltaDecorations(diskDiffMarks, []);
+    }
+    diskDiffMarks = [];
+}
+
 /// `jj` leaves insert mode — **and so do `ｊｊ` and `っｊ`.**
 ///
 /// The first is the mapping half the vim world writes into its config, and
@@ -4350,6 +4424,10 @@ function makeEditor(monaco, text, lang) {
         scrollBeyondLastLine: false,
     });
     viewer.ed.onDidChangeModelContent(() => {
+        // The gutter is asked for on every edit — debounced inside — because
+        // *which* lines changed moves with every keystroke, while `dirty`
+        // only flips twice in a session.
+        markDiskDiff();
         const now = viewer.ed.getModel().getAlternativeVersionId();
         const dirty = now !== viewer.base;
         if (dirty === viewer.dirty) return;
@@ -4611,7 +4689,11 @@ async function showFile(f) {
     // would write the dump, so it opens read-only and says so.
     viewer.readOnly = !!f.binary;
     viewer.name = f.name;
+    // Where it came from, so the gutter can ask the engine what is on disk.
+    // A hex dump has no line-for-line disk to compare against.
+    viewer.path = f.binary ? null : (f.path || null);
     viewer.dirty = false;
+    clearDiskDiff();
     setViewerOn(true);
     if (f.path) noteRecent(f.path, f.name);
     el.view.hidden = false;
@@ -4793,6 +4875,8 @@ async function saveFile() {
         if (!r) return false;
         viewer.base = viewer.ed.getModel().getAlternativeVersionId();
         viewer.dirty = false;
+        // The file *is* the disk now, so the gutter has nothing left to say.
+        clearDiskDiff();
         drawViewFoot();
         say(tr(`${r.saved} written back to the server`, `${r.saved} をサーバへ書き戻しました`));
         return true;
@@ -4803,6 +4887,8 @@ async function saveFile() {
         if (!r) return false;
         viewer.base = viewer.ed.getModel().getAlternativeVersionId();
         viewer.dirty = false;
+        // The file *is* the disk now, so the gutter has nothing left to say.
+        clearDiskDiff();
         drawViewFoot();
         say(tr(`${r.saved} written back into ${r.archive}`, `${r.saved} を ${r.archive} に書き戻しました`));
         return true;
@@ -6505,7 +6591,17 @@ async function runCommand(cmd, arg, invokedAs) {
     // on; stopping to ask would be a prompt with one likely answer, which is
     // the kind of question that trains people to hit Enter.
     if (cmd.arg && !a && !cmd.optional) {
-        a = await askFor(`:${cmd.name}`, '');
+        // What it does, not what it is called. `Shift+F` opened a box headed
+        // `:find` and `Ctrl+F` one headed `:grep`, which are the two names
+        // hardest to tell apart from the outside — and neither says whether it
+        // is about to look at names or inside files. Every command already
+        // carries the sentence (`about`) and the word for its field (`arg`);
+        // they were being thrown away right here.
+        a = await askFor(cmd.about, '', {
+            hint: cmd.arg,
+            note: `:${cmd.name}`,
+            wide: true,
+        });
         if (a === null) return;
     }
     try {

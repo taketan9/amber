@@ -3816,6 +3816,46 @@ impl Session {
             // For a member extracted from an archive: the listing is inside
             // the archive, so the row's path names nothing on this disk and
             // the ordinary read cannot find it.
+            // Which lines of what is on screen differ from what is on disk.
+            //
+            // **Neither build had this.** The editor knew it was dirty — one
+            // bit, for the whole file — and a person who has been typing for
+            // ten minutes wants to know *where*. Every other editor draws it
+            // in the gutter and it is the cheapest orientation there is.
+            //
+            // Asked of the engine rather than worked out in the window,
+            // because `cian_core::diff` is where lines are compared and a
+            // second comparison written in JavaScript would disagree with the
+            // first one eventually — the diff panel, the F7 hop and this would
+            // then be three opinions about the same two files.
+            "diskdiff" => {
+                let path = std::path::PathBuf::from(arg(req, "path"));
+                let now: Vec<String> = req.params["lines"]
+                    .as_array()
+                    .map(|a| {
+                        a.iter().map(|v| v.as_str().unwrap_or("").to_string()).collect()
+                    })
+                    .unwrap_or_default();
+                // A file that is not there yet — a new buffer, or one deleted
+                // under us — is every line new rather than an error. The
+                // gutter is orientation, and refusing to draw it is worse
+                // than drawing "all of this is unsaved".
+                let disk = match cian_core::grepedit::read_text(&path) {
+                    Ok(text) => text.lines,
+                    Err(_) => Vec::new(),
+                };
+                let (_, mine) = cian_core::diff::marks(&disk, &now);
+                Ok(serde_json::json!({
+                    "marks": mine
+                        .iter()
+                        .map(|m| match m {
+                            cian_core::diff::Mark::Same => "same",
+                            cian_core::diff::Mark::Changed => "changed",
+                            cian_core::diff::Mark::Only => "new",
+                        })
+                        .collect::<Vec<_>>(),
+                }))
+            }
             "viewpath" => {
                 let path = std::path::PathBuf::from(arg(req, "path"));
                 if !path.is_file() {
