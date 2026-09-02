@@ -444,7 +444,28 @@ async function main() {
         // files are copied, and `Down` lands on a `.png` — so the whole
         // second half of the round, the editor and the save, stopped being
         // tested and said nothing about it.
-        ['Tab', '左へ'], ['land:c.rs', 'c.rs の行へ'], ['Enter', 'ファイルを読む'],
+        // **Enter を挟まずに F3 ── カーソルの同期が生きているか。**
+        //
+        // 窓版はカーソルを `ask()` の `cursors` に毎回載せている（renderer.js の
+        // その行のコメントに、`j` を3回押したあとの `r` が3行上を改名した、と
+        // 書いてある）。それが外れると、この一周のほとんどは Enter で入るので
+        // 気づかない ── だから Enter を挟まない道を1本だけ通す。
+        //
+        // 測り方でここは2回間違えた。`viewer.name` は前に開いたファイルの
+        // ものが残るし、`openFiles.list` はマーク中なら「マークした全部」に
+        // なる（F3 の仕様）。**どちらも「違うものが開いた」と読める。**
+        // だからマークを外してから、`viewer.on` と一緒に読む。
+        ['Tab', '左へ'],
+        // マークを外してから ── F3 はマーク中なら「マークした全部」を開くので、
+        // 残ったマークを見ていると「カーソルと違うものが開いた」と読める。
+        // 一度そう読んで、無いバグを追いかけた。
+        ['read:(async()=>{const p=await ask(\'unmarkall\',{pane:state.focus});if(p){state[state.focus]=p;draw(state.focus);}return \'マークを外した\';})()', ''],
+        ['read:\'マーク: \' + (state[state.focus].marked||0)', ''],
+        ['land:d1.txt', 'd1.txt の行へ'],
+        ['F3', 'Enter を挟まず開く'], ['wait:2500', ''],
+        ['read:\'F3: on=\' + viewer.on + \' name=\' + (viewer.name||\'?\')', ''],
+        ['Esc', ''], ['Esc', ''], ['Esc', ''], ['wait:600', ''],
+        ['land:c.rs', 'c.rs の行へ'], ['Enter', 'ファイルを読む'],
         ['F3', 'エディタで開く'], ['wait:3000', ''],
         ['top:#view', 'エディタが最前面'],
         // `?` のキー一覧は、エディタの**上**に出なければ出ていないのと同じ。

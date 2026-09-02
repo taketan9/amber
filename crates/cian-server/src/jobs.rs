@@ -375,8 +375,16 @@ impl Jobs {
     /// Off the local queue on purpose: a copy over the network and a copy over
     /// the disk are not competing for the same thing, and making one wait for
     /// the other would be a rule with no reason behind it.
-    pub fn start_remote(&self, plan: Remote, cut: bool, out: Out) -> (u64, usize) {
+    pub fn start_remote(
+        &self,
+        plan: Remote,
+        cut: bool,
+        limit: Option<u64>,
+        out: Out,
+    ) -> (u64, usize) {
         let op = self.inner.next.fetch_add(1, Ordering::Relaxed) + 1;
+        // What was *asked for*. A folder becomes many files once the plan is
+        // built, and the bar is told the real number then.
         let total = plan.count();
         let kind = plan.kind();
         let cancel = Arc::new(AtomicBool::new(false));
@@ -394,12 +402,17 @@ impl Jobs {
         std::thread::spawn(move || {
             out.event("started", serde_json::json!({ "op": op, "kind": kind, "total": total }));
             let began = std::time::Instant::now();
+            let mut total = total;
             let mut ok = 0usize;
             let mut errors: Vec<String> = Vec::new();
             // Rate limited the same way a local copy is: the callback fires on
             // every chunk and a screen cannot show that.
             let mut last = std::time::Instant::now() - std::time::Duration::from_secs(1);
-            let mut report = |done: usize, name: &str, bytes: u64, of: u64, force: bool| {
+            // `of` (the running total) is a parameter rather than something
+            // the closure captures: the plan rewrites it once the tree is
+            // walked, and a closure holding a borrow of it could not be called
+            // afterwards.
+            let mut report = |done: usize, all: usize, name: &str, bytes: u64, of: u64, force: bool| {
                 if !force && last.elapsed().as_millis() < REPORT_EVERY_MS {
                     return;
                 }
@@ -409,7 +422,7 @@ impl Jobs {
                     serde_json::json!({
                         "op": op,
                         "done": done,
-                        "total": total,
+                        "total": all,
                         "bytes": bytes,
                         "bytes_total": of,
                         "path": name,
@@ -419,48 +432,98 @@ impl Jobs {
             };
             match &plan {
                 Remote::Up { target, files, dest } => {
-                    for (i, f) in files.iter().enumerate() {
+                    // **A folder is a plan, not a transfer.** SFTP has no
+                    // recursive put: every directory is its own `mkdir` and
+                    // every file its own call, so the whole tree is worked out
+                    // first — which is also what makes the count on the bar
+                    // true from the start rather than growing as it goes.
+                    let mut steps: Vec<(std::path::PathBuf, String)> = Vec::new();
+                    for f in files {
+                        match cian_scp::plan_upload(f, dest) {
+                            Ok(p) => {
+                                for d in &p.dirs {
+                                    // An existing directory is not a failure:
+                                    // this is `mkdir -p` said one level at a
+                                    // time, and the second run of a transfer
+                                    // finds every one of them already there.
+                                    let _ = cian_scp::make_dir(target, d);
+                                }
+                                steps.extend(p.files);
+                            }
+                            Err(e) => errors.push(format!("{}: {e}", f.display())),
+                        }
+                    }
+                    total = steps.len();
+                    for (i, (from, at)) in steps.iter().enumerate() {
                         if cancel.load(Ordering::Relaxed) {
                             break;
                         }
-                        let name = f.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
-                        let at = cian_scp::remote_join(dest, &name);
-                        let shown = name.clone();
-                        let mut on = |b: u64, of: u64| report(i, &shown, b, of, false);
-                        let mut ctl = cian_scp::Ctl { cancel: &cancel, on_progress: &mut on, limit_bps: None };
-                        match cian_scp::upload(target, f, &at, None, &mut ctl) {
-                            Ok(_) => {
-                                ok += 1;
-                                if cut {
-                                    if let Err(e) = std::fs::remove_file(f) {
-                                        errors.push(format!("{}: {e}", f.display()));
-                                    }
-                                }
+                        let shown = at.rsplit('/').next().unwrap_or(at).to_string();
+                        let mut on = |b: u64, of: u64| report(i, total, &shown, b, of, false);
+                        let mut ctl = cian_scp::Ctl { cancel: &cancel, on_progress: &mut on, limit_bps: limit };
+                        match cian_scp::upload(target, from, at, None, &mut ctl) {
+                            Ok(_) => ok += 1,
+                            Err(e) => errors.push(format!("{shown}: {e}")),
+                        }
+                    }
+                    // The sources go only once everything has landed, and only
+                    // if everything did. A move that deletes as it goes leaves
+                    // a half-moved tree on the far side and a half-deleted one
+                    // here, and no way to tell which halves.
+                    if cut && errors.is_empty() && !cancel.load(Ordering::Relaxed) {
+                        for f in files {
+                            let r = if f.is_dir() {
+                                std::fs::remove_dir_all(f)
+                            } else {
+                                std::fs::remove_file(f)
+                            };
+                            if let Err(e) = r {
+                                errors.push(format!("{}: {e}", f.display()));
                             }
-                            Err(e) => errors.push(format!("{name}: {e}")),
                         }
                     }
                 }
                 Remote::Down { target, files, dest } => {
-                    for (i, f) in files.iter().enumerate() {
+                    let mut steps: Vec<(std::path::PathBuf, String)> = Vec::new();
+                    // Which of the named things turned out to be directories,
+                    // so a move knows which call removes each of them.
+                    let mut dirs: Vec<bool> = Vec::new();
+                    for f in files {
+                        match cian_scp::plan_download(target, f, dest) {
+                            Ok(p) => {
+                                dirs.push(!p.dirs.is_empty());
+                                for d in &p.dirs {
+                                    let _ = std::fs::create_dir_all(d);
+                                }
+                                steps.extend(p.files);
+                            }
+                            Err(e) => {
+                                dirs.push(false);
+                                errors.push(format!("{f}: {e}"));
+                            }
+                        }
+                    }
+                    total = steps.len();
+                    for (i, (at, from)) in steps.iter().enumerate() {
                         if cancel.load(Ordering::Relaxed) {
                             break;
                         }
-                        let name = f.rsplit('/').next().unwrap_or(f).to_string();
-                        let at = dest.join(&name);
-                        let shown = name.clone();
-                        let mut on = |b: u64, of: u64| report(i, &shown, b, of, false);
-                        let mut ctl = cian_scp::Ctl { cancel: &cancel, on_progress: &mut on, limit_bps: None };
-                        match cian_scp::download(target, f, &at, &mut ctl) {
-                            Ok(_) => {
-                                ok += 1;
-                                if cut {
-                                    if let Err(e) = cian_scp::remove(target, f, false) {
-                                        errors.push(format!("{name}: {e}"));
-                                    }
-                                }
+                        let shown = from.rsplit('/').next().unwrap_or(from).to_string();
+                        let mut on = |b: u64, of: u64| report(i, total, &shown, b, of, false);
+                        let mut ctl = cian_scp::Ctl { cancel: &cancel, on_progress: &mut on, limit_bps: limit };
+                        match cian_scp::download(target, from, at, &mut ctl) {
+                            Ok(_) => ok += 1,
+                            Err(e) => errors.push(format!("{shown}: {e}")),
+                        }
+                    }
+                    // Only once everything has landed, and only if it all
+                    // did. `remove` recurses for a directory, so one call per
+                    // named item is the whole cleanup.
+                    if cut && errors.is_empty() && !cancel.load(Ordering::Relaxed) {
+                        for (f, was_dir) in files.iter().zip(dirs.iter()) {
+                            if let Err(e) = cian_scp::remove(target, f, *was_dir) {
+                                errors.push(format!("{f}: {e}"));
                             }
-                            Err(e) => errors.push(format!("{name}: {e}")),
                         }
                     }
                 }
@@ -478,7 +541,7 @@ impl Jobs {
                             .join(format!("cian-relay-{}-{}-{}", std::process::id(), op, i));
                         let shown = name.clone();
                         let step = {
-                            let mut on = |b: u64, of: u64| report(i, &shown, b, of, false);
+                            let mut on = |b: u64, of: u64| report(i, total, &shown, b, of, false);
                             let mut ctl =
                                 cian_scp::Ctl { cancel: &cancel, on_progress: &mut on, limit_bps: None };
                             cian_scp::download(src, f, &tmp, &mut ctl).and_then(|_| {
@@ -502,7 +565,7 @@ impl Jobs {
                 }
             }
             let stopped = cancel.load(Ordering::Relaxed);
-            report(ok, "", 0, 0, true);
+            report(ok, total, "", 0, 0, true);
             out.event(
                 "done",
                 serde_json::json!({

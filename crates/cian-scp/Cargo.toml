@@ -14,3 +14,8 @@ anyhow = { workspace = true }
 russh = "0.62"
 russh-sftp = "2.3"
 tokio = { version = "1", features = ["rt", "io-util", "net", "macros", "fs"] }
+
+[dev-dependencies]
+# The transfer plans are worked out from a real directory tree, so the tests
+# need one to point at.
+tempfile = "3.27.0"

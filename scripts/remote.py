@@ -305,12 +305,98 @@ def main():
         check("rename で済ませた", r.get("renamed"), 1)
         check("戻ってきた", "one.txt" in here(root), True)
 
+        print("ディレクトリごと送る")
+        tree = os.path.join(local, "proj")
+        os.makedirs(os.path.join(tree, "src", "deep"))
+        open(os.path.join(tree, "README.md"), "w").write("r")
+        open(os.path.join(tree, "src", "main.rs"), "w").write("m")
+        open(os.path.join(tree, "src", "deep", "x.rs"), "w").write("x")
+        e.call("list", pane="left", path=local)
+        e.call("setmarks", pane="left", paths=[tree])
+        e.call("copy", pane="left")
+        done = e.wait_done()
+        check("3ファイルとして数えた", (done or {}).get("ok"), 3)
+        check("木ごと届いている",
+              sorted(os.listdir(os.path.join(root, "proj", "src"))), ["deep", "main.rs"])
+        check("一番深いところも", os.path.exists(os.path.join(root, "proj", "src", "deep", "x.rs")), True)
+
+        print("ディレクトリごと降ろす")
+        shutil.rmtree(tree)
+        e.call("list", pane="left", path=local)
+        # 右ペインは proj ができる前の一覧を持っている。読み直さないと
+        # マークが当たる行が無い。
+        e.call("remotelist", pane="right", path=root)
+        e.call("setmarks", pane="right", paths=[os.path.join(root, "proj")])
+        e.call("copy", pane="right")
+        e.wait_done()
+        check("木ごと降りている",
+              os.path.exists(os.path.join(local, "proj", "src", "deep", "x.rs")), True)
+
         print("サーバ → サーバ（コピーは中継）")
+        # 両ペインとも繋ぎ直す ── 上のディレクトリの検査で左は手元に戻して
+        # いる。**足場の前提は毎回書き直すこと**：直前の検査が置いていった
+        # 状態に乗ると、検査は通ったり落ちたりするだけで何も言わなくなる。
+        connect("left", os.path.join(root, "sub"))
+        connect("right", root)
         r = e.call("copy", pane="right", paths=[os.path.join(root, "one.txt")])
         e.wait_done()
         check("中継で届いた", "one.txt" in here(root, "sub"), True)
         check("一時ファイルを残していない",
               [f for f in os.listdir(tempfile.gettempdir()) if f.startswith("cian-relay")], [])
+        print("転送レートの上限")
+        big = os.path.join(local, "big.bin")
+        open(big, "wb").write(b"x" * 400_000)
+        e.call("list", pane="left", path=local)
+        connect("right", root)
+        e.call("limit", spec="200k")
+        e.call("setmarks", pane="left", paths=[big])
+        t0 = time.time()
+        e.call("copy", pane="left")
+        e.wait_done(30)
+        slow = time.time() - t0
+        e.call("limit", spec="off")
+        os.remove(os.path.join(root, "big.bin"))
+        e.call("setmarks", pane="left", paths=[big])
+        t0 = time.time()
+        e.call("copy", pane="left")
+        e.wait_done(30)
+        fast = time.time() - t0
+        # 400KB を 200KB/s で送れば2秒前後。上限なしは loopback なので一瞬。
+        check("上限が実際に効いている", slow > 1.4 and slow > fast * 2,
+              True)
+        print(f"       上限あり {slow:.2f}s / なし {fast:.2f}s")
+
+        print("リモートのファイルを開いて書き戻す")
+        # **カーソルは窓と同じ形で送る。** `remoteview` はマークではなく
+        # カーソルの行を開く（`selected()`）。窓版は `ask()` が毎回
+        # `cursors: {left, right}` を載せているので、足場も同じにしないと
+        # 「エンジンが違う行を開く」と読めてしまう ── 一度そう読んだ。
+        v = e.call("remotelist", pane="right", path=root)
+        rows = [x["name"] for x in v["pane"]["entries"]]
+        at = rows.index("one.txt")
+        v = e.call("remoteview", pane="right", cursors={"left": 0, "right": at})
+        local_copy = v.get("path")
+        check("落として開けた", bool(local_copy) and os.path.exists(local_copy), True)
+        with open(local_copy, "w") as f:
+            f.write("changed\n")
+        e.call("remotesave", pane="right", path=local_copy)
+        check("サーバに書き戻った", open(os.path.join(root, "one.txt")).read(), "changed\n")
+
+        print("リモートの作成・改名・削除")
+        e.call("remoteop", pane="right", what="mkdir", name="made")
+        os.makedirs(os.path.join(root, "made", "inner"), exist_ok=True)
+        open(os.path.join(root, "made", "inner", "f.txt"), "w").write("f")
+        e.call("remotelist", pane="right", path=root)
+        e.call("setmarks", pane="right", paths=[os.path.join(root, "made")])
+        e.call("remoteop", pane="right", what="delete")
+        check("中身ごと消えた", os.path.exists(os.path.join(root, "made")), False)
+
+        print("AI の走査はリモートで断る")
+        try:
+            e.call("aijunk", pane="right")
+            check("断った", "呼べてしまった", "断るはず")
+        except RuntimeError as ex:
+            check("断った", "リモートペインでは使えません" in str(ex), True)
     finally:
         e.close()
         if keep:

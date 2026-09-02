@@ -250,6 +250,120 @@ fn join(dir: &str, name: &str) -> String {
     }
 }
 
+/// Everything a transfer will actually do, worked out before it starts.
+///
+/// **SFTP has no recursive put or get.** Every file is its own call and every
+/// directory has to be made first, so a folder is not one transfer — it is a
+/// plan. Both builds refused folders outright rather than half-sending one,
+/// which was the right refusal and the wrong feature.
+///
+/// Worked out up front for the same reason a local copy counts its files up
+/// front: a progress bar that learns its own total halfway is a bar that goes
+/// backwards.
+#[derive(Debug, Default, Clone)]
+pub struct Plan {
+    /// Directories to create, shallowest first — a parent has to exist before
+    /// its child, and `mkdir -p` is not a thing SFTP offers either.
+    pub dirs: Vec<String>,
+    /// `(local, remote)` for an upload, in the order they should go.
+    pub files: Vec<(std::path::PathBuf, String)>,
+}
+
+/// What uploading `src` into the remote directory `dest_dir` involves.
+///
+/// A file is one entry and no directories. A folder is every file beneath it,
+/// with the folder itself (and each sub-folder) listed to be made. Symlinks
+/// are skipped rather than followed: a link that resolves outside the tree
+/// would copy something the person did not name, and one that resolves inside
+/// it would copy the same bytes twice.
+pub fn plan_upload(src: &Path, dest_dir: &str) -> Result<Plan> {
+    let mut plan = Plan::default();
+    let name = src
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or_else(|| anyhow!("{}: unusable name", src.display()))?;
+    let meta = std::fs::symlink_metadata(src)
+        .with_context(|| format!("read {}", src.display()))?;
+    if meta.file_type().is_symlink() {
+        return Ok(plan);
+    }
+    if meta.is_file() {
+        plan.files.push((src.to_path_buf(), join(dest_dir, name)));
+        return Ok(plan);
+    }
+    // Breadth first, so `dirs` comes out with parents before children and the
+    // caller can create them in order without sorting.
+    let root = join(dest_dir, name);
+    plan.dirs.push(root.clone());
+    let mut queue = std::collections::VecDeque::from([(src.to_path_buf(), root)]);
+    while let Some((here, there)) = queue.pop_front() {
+        let Ok(rd) = std::fs::read_dir(&here) else { continue };
+        let mut kids: Vec<_> = rd.flatten().collect();
+        // A stable order, because a plan that shuffles between runs cannot be
+        // compared with the last one when something goes wrong halfway.
+        kids.sort_by_key(|e| e.file_name());
+        for e in kids {
+            let Some(kid) = e.file_name().to_str().map(str::to_string) else { continue };
+            let ft = match e.file_type() {
+                Ok(ft) => ft,
+                Err(_) => continue,
+            };
+            if ft.is_symlink() {
+                continue;
+            }
+            let at = join(&there, &kid);
+            if ft.is_dir() {
+                plan.dirs.push(at.clone());
+                queue.push_back((e.path(), at));
+            } else {
+                plan.files.push((e.path(), at));
+            }
+        }
+    }
+    Ok(plan)
+}
+
+/// The same for a download: what comes off the server, and which local
+/// directories have to exist first.
+///
+/// `dirs` here are local paths as strings, for symmetry with [`Plan`]; the
+/// caller turns them back into paths. One SFTP round trip per directory, which
+/// is why the plan is built once and kept.
+pub fn plan_download(target: &Target, src: &str, dest_dir: &Path) -> Result<Plan> {
+    let mut plan = Plan::default();
+    let name = src.rsplit('/').next().unwrap_or(src).to_string();
+    if name.is_empty() {
+        return Err(anyhow!("{src}: unusable name"));
+    }
+    // Is it a directory at all? `list_dir` on a file fails, and that failure is
+    // the answer rather than an error to report.
+    let Ok((_, entries)) = list_dir(target, src) else {
+        plan.files.push((dest_dir.join(&name), src.to_string()));
+        return Ok(plan);
+    };
+    let root = dest_dir.join(&name);
+    plan.dirs.push(root.display().to_string());
+    let mut queue = std::collections::VecDeque::from([(src.to_string(), root, entries)]);
+    while let Some((there, here, entries)) = queue.pop_front() {
+        for e in entries {
+            if e.link {
+                continue;
+            }
+            let at_remote = join(&there, &e.name);
+            let at_local = here.join(&e.name);
+            if e.is_dir {
+                plan.dirs.push(at_local.display().to_string());
+                if let Ok((_, kids)) = list_dir(target, &at_remote) {
+                    queue.push_back((at_remote, at_local, kids));
+                }
+            } else {
+                plan.files.push((at_local, at_remote));
+            }
+        }
+    }
+    Ok(plan)
+}
+
 /// List a remote directory over SFTP (browsing needs the SFTP subsystem; the
 /// classic SCP protocol cannot enumerate). Directories sort first, then by name.
 ///
@@ -888,5 +1002,67 @@ mod tests {
             assert!(err.to_string().contains("No such file"), "got: {err}");
             server.await.unwrap();
         });
+    }
+
+    /// A folder is a plan: every file under it, and every directory that has
+    /// to exist first, parents before children.
+    #[test]
+    fn an_upload_plan_covers_the_whole_tree() {
+        let d = tempfile::tempdir().unwrap();
+        let root = d.path().join("proj");
+        std::fs::create_dir_all(root.join("src/deep")).unwrap();
+        std::fs::create_dir(root.join("docs")).unwrap();
+        std::fs::write(root.join("README.md"), b"r").unwrap();
+        std::fs::write(root.join("src/main.rs"), b"m").unwrap();
+        std::fs::write(root.join("src/deep/x.rs"), b"x").unwrap();
+
+        let plan = plan_upload(&root, "/srv/app").unwrap();
+        assert_eq!(
+            plan.dirs,
+            vec!["/srv/app/proj", "/srv/app/proj/docs", "/srv/app/proj/src", "/srv/app/proj/src/deep"],
+            "parents before children"
+        );
+        let remote: Vec<&str> = plan.files.iter().map(|(_, r)| r.as_str()).collect();
+        assert_eq!(
+            remote,
+            vec![
+                "/srv/app/proj/README.md",
+                "/srv/app/proj/src/main.rs",
+                "/srv/app/proj/src/deep/x.rs",
+            ]
+        );
+    }
+
+    /// A plain file is one entry and makes no directories — the same call has
+    /// to serve both, because the caller does not know which it has until it
+    /// asks the disk.
+    #[test]
+    fn a_file_is_a_plan_of_one() {
+        let d = tempfile::tempdir().unwrap();
+        let f = d.path().join("note.txt");
+        std::fs::write(&f, b"hi").unwrap();
+        let plan = plan_upload(&f, "/srv").unwrap();
+        assert!(plan.dirs.is_empty());
+        assert_eq!(plan.files.len(), 1);
+        assert_eq!(plan.files[0].1, "/srv/note.txt");
+    }
+
+    /// **Symlinks are skipped, not followed.** One pointing outside the tree
+    /// would send something nobody named; one pointing inside would send the
+    /// same bytes twice, and on a loop would not finish at all.
+    #[test]
+    fn a_link_is_left_alone() {
+        let d = tempfile::tempdir().unwrap();
+        let root = d.path().join("proj");
+        std::fs::create_dir(&root).unwrap();
+        std::fs::write(root.join("real.txt"), b"r").unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(root.join("real.txt"), root.join("link.txt")).unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&root, root.join("loop")).unwrap();
+        let plan = plan_upload(&root, "/srv").unwrap();
+        let names: Vec<&str> = plan.files.iter().map(|(_, r)| r.as_str()).collect();
+        assert_eq!(names, vec!["/srv/proj/real.txt"], "{plan:?}");
+        assert_eq!(plan.dirs, vec!["/srv/proj"], "the loop was not entered");
     }
 }

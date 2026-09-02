@@ -75,6 +75,7 @@ python3 scripts/requests.py --list   # 何を見ているか
 | 30 | 2026-09-02 | リモートの深さを実装してほしい | ローカル↔サーバの `c`/`m`（**それまでは黙って手元にコピーしていた**）・サーバ内の移動・chmod・サーバ間の中継。同一サーバの移動は rename で済ませる | `crates/cian-server/src/jobs.rs ~ pub fn start_remote\(` |
 | 31 | 2026-09-02 | （同上）実際に通したい | **127.0.0.1 に自分の sshd を立てて通す**（`scripts/remote.py`）。管理者権限は要らない。これが無かったのでリモートは一度も検証されていなかった | `scripts/remote.py ~ def free_port\(` |
 | 32 | 2026-09-02 | （同上）鍵で入れるようにしたい | `cian.ssh{ users = { { key = "~/.ssh/id_ed25519" } } }`。**設定例は前から鍵認証を勧めていたのに、機能が無かった** | `crates/cian-scp/src/lib.rs ~ \.authenticate_publickey\(` |
+| 33 | 2026-09-02 | （同上）ディレクトリごと送れるようにしたい | `cian_scp::plan_upload` / `plan_download` が木を歩き、ジョブが親から順に mkdir する。**端末版にも無かった**（両方ファイルだけ送っていた）。リンクは辿らない | `crates/cian-scp/src/lib.rs ~ pub fn plan_upload\(` |
 
 ## 増やすとき
 

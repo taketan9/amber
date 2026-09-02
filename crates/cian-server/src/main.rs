@@ -776,16 +776,17 @@ impl Session {
                                 let Some(target) = dst_t else {
                                     anyhow::bail!("そのペインはサーバに繋がっていません")
                                 };
-                                // Directories are left out rather than half
-                                // sent: SFTP has no recursive put, and a
-                                // folder that arrives as an empty name is
-                                // worse than one that did not arrive.
-                                let files: Vec<_> =
-                                    paths.iter().filter(|p| p.is_file()).cloned().collect();
-                                if files.is_empty() {
-                                    anyhow::bail!("送れるファイルがありません（ディレクトリはまだ送れません）");
+                                // Directories go too now — `plan_upload`
+                                // walks the tree and the job makes each
+                                // folder before the files in it. They used to
+                                // be filtered out here, because SFTP has no
+                                // recursive put and half a folder is worse
+                                // than none.
+                                jobs::Remote::Up {
+                                    target,
+                                    files: paths.clone(),
+                                    dest: dest.clone(),
                                 }
-                                jobs::Remote::Up { target, files, dest: dest.clone() }
                             }
                             // Server → local.
                             (true, None) => {
@@ -839,7 +840,7 @@ impl Session {
                             (false, None) => unreachable!("neither side is remote"),
                         };
                         let count = paths.len();
-                        let (op, queued) = self.jobs.start_remote(plan, cut, self.out.clone());
+                        let (op, queued) = self.jobs.start_remote(plan, cut, self.limit_bps, self.out.clone());
                         return Ok(serde_json::json!({
                             "op": op, "count": count, "queued": queued, "remote": true,
                         }));

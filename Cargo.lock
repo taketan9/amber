@@ -653,6 +653,7 @@ dependencies = [
  "anyhow",
  "russh",
  "russh-sftp",
+ "tempfile",
  "tokio",
 ]
 
