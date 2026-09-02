@@ -374,6 +374,20 @@ async function main() {
         'fn main() {\n    let x = (1 + 2);\n    println!("hi");\n}\n');
     // A binary, for the hex editor.
     fs.writeFileSync(path.join(sand, 'from', 'z.bin'), Buffer.from('HELLO WORLD\u0000\u0001', 'latin1'));
+    // 差分送り（F7）のための一対。**離れた場所に三つだけ違う。**
+    // まるごと違う二つを比べると差分は一塊になり、「次へ」が動いたのか
+    // 動いていないのか区別がつかない。
+    {
+        const base = Array.from({ length: 12 }, (_, i) => `line ${i + 1}`);
+        fs.writeFileSync(path.join(sand, 'from', 'd1.txt'), `${base.join('\n')}\n`);
+        const other = [...base];
+        other[1] = 'line 2 CHANGED';
+        other[5] = 'line 6 CHANGED';
+        other[9] = 'line 10 CHANGED';
+        // `to/` 側は **`d2.txt`** ── 一周の前半が `from/` を丸ごと `to/` へ
+        // 写すので、同じ名前だと上書きされて「2つは同一です」になる。
+        fs.writeFileSync(path.join(sand, 'to', 'd2.txt'), `${other.join('\n')}\n`);
+    }
     // A picture, for F3 on something the window draws rather than reads.
     fs.writeFileSync(path.join(sand, 'from', 'p.png'), Buffer.from(
         'iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAHElEQVQoz2NgGAWjYBSMglEwCkbB'
@@ -557,6 +571,61 @@ async function main() {
         ['Shift+Enter', 'エディタのメニュー'], ['wait:600', ''], ['Esc', ''], ['wait:400', ''],
         ['u', 'エディタの外へ出す前に'], ['wait:200', ''],
         ['Esc', ''], ['Esc', ''], ['Esc', '閉じる'], ['wait:600', ''],
+
+        // ── 残りの四つ。**どれも「状態を作らないと届かない」キー** ────────
+        //
+        // 押していないキーが4つ残っていた理由は同じで、grep の結果／差分／
+        // アーカイブという、開いていないと存在しない場所のキーだから。
+        // 押すためには先に開く。ここまでの塊と同じで、出発点は自分で作る。
+
+        // grep の結果を渡り歩く（Ctrl+N / Ctrl+Shift+N）
+        ['Esc', '画面を閉じる'], ['wait:500', ''],
+        ['Ctrl+f', 'grep'], ['wait:600', ''], ['type:行目'], ['Enter', ''], ['wait:3000', ''],
+        ['read:\'grep → \' + (report.rows||[]).length + \' 件\'', ''],
+        ['Enter', '最初の一致へ'], ['wait:3000', ''],
+        ['top:#view', 'ファイルが開いた'],
+        ['read:\'一致 \' + (hits.at + 1) + \' / \' + hits.list.length', ''],
+        ['Ctrl+n', '次の一致'], ['wait:1600', ''],
+        ['read:\'Ctrl+N → \' + (hits.at + 1) + \' / \' + hits.list.length', ''],
+        ['Ctrl+Shift+n', '前の一致'], ['wait:1600', ''],
+        ['read:\'Ctrl+Shift+N → \' + (hits.at + 1) + \' / \' + hits.list.length', ''],
+        ['Esc', ''], ['Esc', ''], ['Esc', '閉じる'], ['wait:700', ''],
+
+        // 差分の中を歩く（F7 / Shift+F7）
+        // 三箇所だけ違う一対を比べる ── まるごと違う二つでは差分が一塊に
+        // なり、「次の差分」が動いたかどうかを言えない。
+        ['land:d1.txt', '左'], ['Tab', '右へ'], ['wait:400', ''],
+        ['land:d2.txt', '右'], ['Tab', '左へ'], ['wait:400', ''],
+        ['=', '比較'], ['wait:3500', ''],
+        ['read:\'比較: pair=\' + pair.on', ''],
+        // 差分送りはカーソルを動かすだけで、下端の一行は変わらない ──
+        // 「動かなかったキー」に数えられても、それは動かなかった証拠では
+        // ない。動いたかどうかは差分エディタに訊く。
+        ['read:\'差分 \' + pair.ed.getLineChanges().length + \' 箇所\'', ''],
+        ['F7', '次の差分'], ['wait:700', ''],
+        ['read:\'F7 → \' + (pair.ed.getModifiedEditor().getPosition()||{}).lineNumber + \' 行目\'', ''],
+        ['F7', 'さらに次'], ['wait:700', ''],
+        ['read:\'F7 → \' + (pair.ed.getModifiedEditor().getPosition()||{}).lineNumber + \' 行目\'', ''],
+        ['Shift+F7', '前の差分'], ['wait:700', ''],
+        ['read:\'Shift+F7 → \' + (pair.ed.getModifiedEditor().getPosition()||{}).lineNumber + \' 行目\'', ''],
+        ['Esc', '比較を閉じる'], ['wait:800', ''],
+
+        // アーカイブの中で `l`（素の `l` が「入る」になる唯一の場所）
+        ['Bksp', '砂場の根へ'], ['wait:800', ''],
+        ['land:from', 'ディレクトリを選ぶ'],
+        ['read:(async()=>{const r=await ask(\'compress\',{pane:state.focus,kind:\'zip\',name:\'bag\'});return \'zip: \' + (r ? \'できた\' : \'できず\');})()', ''],
+        ['wait:1200', ''], ['F5', '読み直し'], ['wait:800', ''],
+        ['land:bag.zip', 'zip へ'], ['Enter', '中へ'], ['wait:1500', ''],
+        ['read:\'アーカイブ: \' + (state[state.focus].archive || \'入れていない\').split(/[\\\\/]/).pop()', ''],
+        // 中のディレクトリの行に乗ってから ── アーカイブに入った直後の
+        // カーソルは `..` の上で、そこで `l` を押すと「入る」ではなく
+        // 「出る」になる。行を選ばずに押して、結果を数えても意味がない。
+        ['read:\'中身: \' + (state[state.focus].entries||[]).map(e=>e.name).join(\' \')', ''],
+        ['land:from', '中のディレクトリへ'],
+        ['l', '中へ'], ['wait:900', ''],
+        ['read:\'l のあと: \' + (state[state.focus].entries||[]).length + \' 行\'', ''],
+        ['Bksp', 'ひとつ戻る'], ['wait:700', ''],
+        ['Bksp', 'アーカイブを出る'], ['wait:800', ''],
 
         // 取り消し・やり直し（一周の最後に、砂場を元へ）
         ['u', '取り消し'], ['wait:600', ''],

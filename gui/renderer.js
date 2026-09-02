@@ -3404,6 +3404,10 @@ document.addEventListener('keydown', (e) => {
     else if (k === 'h' && mod(e)) focusPane('left');
     else if (k === 'ArrowRight' && !e.altKey) focusPane('right');
     else if (k === 'l' && mod(e)) focusPane('right');
+    // `l` はアーカイブの中でだけ「入る」── ヒント行が `Enter/l 入る` と
+    // 書いているのはその画面だけで、書いてある以上のことはしない。
+    // 両前端とも、書いてあるのに割り当てが無かった。
+    else if (k === 'l' && bare && state[state.focus].archive) enter();
     // Shift+Tab before Tab, which swallowed it — the same shape as Enter below.
     else if (k === 'Tab' && e.shiftKey) goTab(state.focus, { step: 1 });
     else if (k === 'Tab') { state.focus = state.focus === 'left' ? 'right' : 'left'; draw('left'); draw('right'); }
@@ -4059,6 +4063,41 @@ function armJJ() {
         if (V.exitInsertMode) V.exitInsertMode(viewer.vim);
         else V.handleKey(viewer.vim, '<Esc>');
     });
+}
+
+/// F7 / Shift+F7 — the next and previous difference.
+///
+/// **`editor.action.diffReview.next` does not exist in this Monaco.** The
+/// footer has advertised these two since the diff editor was added, and the
+/// trigger was a no-op the whole time: `getSupportedActions()` on the pair
+/// lists a hundred and one ids and not one of them matches `diff`. It was in
+/// the set of keys the round had never pressed, which is exactly the argument
+/// for pressing them — the same set held Ctrl+E and the vim Ctrl+C/X/V.
+///
+/// `getLineChanges()` is there, so the walk is arithmetic: find the first
+/// change past the line the cursor is on, wrap at the end, and put the cursor
+/// on it. Both editors move, because a difference is a fact about the pair.
+function hopDiff(step) {
+    const changes = (pair.ed.getLineChanges && pair.ed.getLineChanges()) || [];
+    if (!changes.length) {
+        say(tr('the two are identical', '2つに違いはありません'));
+        return;
+    }
+    const mod = pair.ed.getModifiedEditor();
+    const at = (mod.getPosition() || { lineNumber: 1 }).lineNumber;
+    // A change that only deletes has `modifiedEndLineNumber === 0`; its place
+    // in the modified file is the line it would have sat before.
+    const lineOf = (c) => c.modifiedStartLineNumber || c.originalStartLineNumber || 1;
+    let next;
+    if (step > 0) next = changes.find((c) => lineOf(c) > at) || changes[0];
+    else next = [...changes].reverse().find((c) => lineOf(c) < at) || changes[changes.length - 1];
+    const line = lineOf(next);
+    mod.setPosition({ lineNumber: line, column: 1 });
+    mod.revealLineInCenter(line);
+    const org = next.originalStartLineNumber || line;
+    pair.ed.getOriginalEditor().revealLineInCenter(org);
+    const n = changes.indexOf(next) + 1;
+    say(tr(`difference ${n} / ${changes.length}   line ${line}`, `相違 ${n} / ${changes.length}   ${line} 行目`));
 }
 
 /// Zoom and pan a picture.
@@ -4872,7 +4911,7 @@ document.addEventListener('keydown', (e) => {
     if (e.key === 'F7' && pair.ed) {
         e.stopPropagation();
         e.preventDefault();
-        pair.ed.trigger('cian', e.shiftKey ? 'editor.action.diffReview.prev' : 'editor.action.diffReview.next');
+        hopDiff(e.shiftKey ? -1 : 1);
         return;
     }
     // `L` — the same comparison as a list. The editor is the better way to
@@ -6943,6 +6982,15 @@ async function cmdDiffEdit() {
     // A fresh diff editor each time: reusing one across different file pairs
     // means old models hanging on to files nobody has open.
     if (pair.ed) pair.ed.dispose();
+    // **And the plain editor has to let go of this node first.**
+    //
+    // `replaceChildren()` empties the element but tells Monaco nothing, so
+    // the ordinary editor was still holding it — and building the diff editor
+    // on the same node printed `Element already has context attribute:
+    // vbody` into the console every time. It surfaced at the tail of the
+    // standard round, once the round grew far enough to compare two files
+    // after opening one.
+    if (viewer.ed) { viewer.ed.dispose(); viewer.ed = null; viewer.vim = null; }
     el.vBody.replaceChildren();
     pair.ed = monaco.editor.createDiffEditor(el.vBody, {
         theme: editorTheme(),

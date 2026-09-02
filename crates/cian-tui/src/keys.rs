@@ -2340,6 +2340,14 @@ impl App {
             (_, _, KeyCode::Right) if alt => self.pane_go_forward(),
             (_, _, KeyCode::Char('h')) if alt => self.pane_go_back(),
             (_, _, KeyCode::Char('l')) if alt => self.pane_go_forward(),
+            // **`l` inside an archive.** The hint row has advertised
+            // `Enter/l  入る` there since it was written, in both builds, and
+            // neither ever bound it — `Action::EnterDir` handles archives but
+            // is on Enter. A bar that names a key nobody implemented is worse
+            // than a bar that stays quiet: it sends the hand somewhere.
+            (false, _, KeyCode::Char('l')) if self.in_archive() => {
+                self.execute_action(Action::EnterDir)?;
+            }
             // `q` quits — but not in the views that are a desktop rather than
             // a terminal. There, as in the icon grid and as in every file
             // manager, a letter looks for a file starting with it. Someone
