@@ -320,6 +320,12 @@ def main():
               sorted(os.listdir(os.path.join(root, "proj", "src"))), ["deep", "main.rs"])
         check("一番深いところも", os.path.exists(os.path.join(root, "proj", "src", "deep", "x.rs")), True)
 
+        print("転送前に中身を数える")
+        plan = e.call("transferplan", paths=[tree])
+        check("フォルダのファイル数", plan["files"], 3)
+        check("バイト数も出る", plan["bytes"] > 0, True)
+        check("行ごとにも出る", plan["rows"][0]["is_dir"], True)
+
         print("ディレクトリごと降ろす")
         shutil.rmtree(tree)
         e.call("list", pane="left", path=local)

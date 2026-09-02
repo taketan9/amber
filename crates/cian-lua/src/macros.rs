@@ -223,6 +223,63 @@ fn step_from(v: Value) -> Result<Option<Step>, String> {
     }
 }
 
+/// Every macro cian can see, and any file that would not parse.
+///
+/// `macro.lua` first (a list), then each `macro/*.lua` (one macro, or a list,
+/// per file) in filename order. Both are resolved portable-first, like the
+/// rest of the config.
+///
+/// **This lived in the terminal build and the window read only `macro.lua`.**
+/// So a person who had split their macros one-per-file — which the shipped
+/// examples do, and which `examples/macro.lua` tells them they can — opened
+/// the launcher in the window and found it empty, with nothing to say why.
+/// Discovery is a rule about where files are, not a thing a front end decides,
+/// so it belongs here.
+///
+/// Errors come back beside the macros rather than instead of them: one
+/// unparseable file should not hide the nine that are fine, and a short list
+/// with no explanation is the thing that sends people looking in the wrong
+/// place.
+pub fn load_all() -> (Vec<Macro>, Option<String>) {
+    let mut macros = Vec::new();
+    let mut errors: Vec<String> = Vec::new();
+
+    if let Some(path) = crate::config_read_path("macro.lua").filter(|p| p.exists()) {
+        match load(&path) {
+            Ok(mut m) => macros.append(&mut m),
+            Err(e) => errors.push(format!("macro.lua: {e}")),
+        }
+    }
+
+    if let Some(dir) = crate::config_read_path("macro").filter(|p| p.is_dir()) {
+        let mut files: Vec<std::path::PathBuf> = std::fs::read_dir(&dir)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.extension().and_then(|x| x.to_str()) == Some("lua"))
+            // Skip the language reference copies (`Foo.en.lua`, `Foo.ja.lua`):
+            // `Foo.lua` is the one to load. Otherwise dropping the shipped
+            // example set into the config directory loads each macro twice.
+            .filter(|p| {
+                let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                !name.ends_with(".en.lua") && !name.ends_with(".ja.lua")
+            })
+            .collect();
+        files.sort();
+        for f in files {
+            let label = f.file_name().and_then(|n| n.to_str()).unwrap_or("macro").to_string();
+            match load(&f) {
+                Ok(mut m) => macros.append(&mut m),
+                Err(e) => errors.push(format!("{label}: {e}")),
+            }
+        }
+    }
+
+    let error = if errors.is_empty() { None } else { Some(errors.join("; ")) };
+    (macros, error)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

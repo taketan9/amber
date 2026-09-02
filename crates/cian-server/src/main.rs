@@ -863,7 +863,7 @@ impl Session {
                             anyhow::bail!("zip へはコピー（追加）のみ — 移動は未対応");
                         }
                         if !zip_writable(&archive) {
-                            anyhow::bail!("書き換えられるのは zip だけです（tar はまだ）");
+                            anyhow::bail!("これは書き換えられない形式です");
                         }
                         // The window asks before this call, the way it asks
                         // before every other write; the engine answers with
@@ -3252,14 +3252,17 @@ impl Session {
             // than papered over: the shells, their commands and their scripted
             // steps all run, and only the arrangement is lost.
             "macros" => {
+                // `macro.lua` *and* `macro/*.lua`. This read only the first,
+                // so anybody who had split their macros one-per-file — which
+                // is what the shipped examples do — opened an empty launcher.
+                let (list, err) = cian_lua::macros::load_all();
                 let path = cian_lua::config_read_path("macro.lua");
-                let list = path
-                    .as_ref()
-                    .filter(|p| p.exists())
-                    .and_then(|p| cian_lua::macros::load(p).ok())
-                    .unwrap_or_default();
                 Ok(serde_json::json!({
                     "where": path.map(|p| p.display().to_string()),
+                    // Said out loud: a file that would not parse is why the
+                    // list is short, and a short list with no reason sends
+                    // people looking in the wrong place.
+                    "error": err,
                     "macros": list.iter().map(|m| serde_json::json!({
                         "name": m.name,
                         "panes": m.panes.len(),
@@ -3273,15 +3276,45 @@ impl Session {
                 let want = req.params["name"].as_str().unwrap_or("").to_string();
                 let rows = req.params["rows"].as_u64().unwrap_or(24) as u16;
                 let cols = req.params["cols"].as_u64().unwrap_or(80) as u16;
-                let path = cian_lua::config_read_path("macro.lua")
-                    .filter(|p| p.exists())
-                    .ok_or_else(|| anyhow::anyhow!("macro.lua がありません"))?;
-                let list = cian_lua::macros::load(&path).map_err(|e| anyhow::anyhow!(e))?;
+                let (list, err) = cian_lua::macros::load_all();
                 let Some(mac) = list.into_iter().find(|m| m.name == want) else {
+                    if let Some(e) = err {
+                        anyhow::bail!("{want} が見つかりません（{e}）");
+                    }
                     anyhow::bail!("{want} というマクロはありません");
                 };
+                // A script macro is Lua that moves files about, not a shell
+                // layout — so it runs here and answers with what it did,
+                // rather than opening panels.
+                //
+                // **The window used to refuse it.** `macro.lua` is one file
+                // holding both kinds, so half of somebody's macros worked and
+                // half said "not yet" with no way to tell which was which
+                // before pressing.
                 if mac.is_script() {
-                    anyhow::bail!("スクリプトマクロはまだ動かせません（レイアウトのみ）");
+                    let Some(src) = mac.script.clone() else {
+                        anyhow::bail!("{want} に script がありません")
+                    };
+                    let dir = self.pane_mut(&which)?.cwd.clone();
+                    let other = self.other_cwd(&which);
+                    let marked = self.targets(&which).unwrap_or_default();
+                    let cursor = self.selected(&which).ok().map(|(p, ..)| p);
+                    let ctx = cian_lua::macro_script::Ctx { dir, other, marked, cursor };
+                    let outcome = cian_lua::macro_script::run(&src, &want, ctx);
+                    // Reloaded whatever happened: a macro that errored halfway
+                    // has still moved whatever it moved before that, and file
+                    // operations are not transactional.
+                    if outcome.touched {
+                        self.left.now().reload()?;
+                        self.right.now().reload()?;
+                    }
+                    return Ok(serde_json::json!({
+                        "script": true,
+                        "messages": outcome.messages,
+                        "error": outcome.error,
+                        "left": PaneView::of(self.left.get()),
+                        "right": PaneView::of(self.right.get()),
+                    }));
                 }
                 let cwd = self.pane_mut(&which)?.cwd.clone();
                 // The layout the macro actually asked for. `from` names an
@@ -4024,6 +4057,42 @@ impl Session {
                     "len": meta.as_ref().map(|m| m.len()).unwrap_or(0),
                 }))
             }
+            // What a transfer would actually move, before it is agreed to.
+            //
+            // **A folder confirmed as "1 件" is not a confirmation.** The sheet
+            // named the rows and the rows were `proj/` — one line standing for
+            // four thousand files and half a gigabyte over somebody else's
+            // network, and no way to tell from the question.
+            //
+            // Counted with `plan_upload`, the same planner the transfer runs
+            // on, so the sheet cannot promise a number the job then disagrees
+            // with. Local sources only: walking a remote tree to answer a
+            // dialog costs a round trip per directory, and the answer would
+            // arrive after the person had already decided.
+            "transferplan" => {
+                let paths = paths_of(req);
+                let mut files = 0usize;
+                let mut bytes = 0u64;
+                let mut rows = Vec::new();
+                for p in &paths {
+                    let plan = cian_scp::plan_upload(p, "/").unwrap_or_default();
+                    let n = plan.files.len();
+                    let b: u64 = plan
+                        .files
+                        .iter()
+                        .filter_map(|(f, _)| std::fs::metadata(f).ok().map(|m| m.len()))
+                        .sum();
+                    files += n;
+                    bytes += b;
+                    rows.push(serde_json::json!({
+                        "name": p.file_name().map(|s| s.to_string_lossy().into_owned()),
+                        "is_dir": p.is_dir(),
+                        "files": n,
+                        "bytes": b,
+                    }));
+                }
+                Ok(serde_json::json!({ "files": files, "bytes": bytes, "rows": rows }))
+            }
             "zipadd" => {
                 // Takes the *source* pane, like `copy` does, and finds the
                 // archive on the other side itself. The window would otherwise
@@ -4044,11 +4113,9 @@ impl Session {
                     anyhow::bail!("追加する対象がありません");
                 }
                 if !zip_writable(&archive) {
-                    anyhow::bail!("書き換えられるのは zip だけです（tar はまだ）");
+                    anyhow::bail!("これは書き換えられない形式です");
                 }
-                let report = quietly(|ctl| {
-                    cian_core::archive::zip_modify(&archive, &[], &[], &paths, &sub, ctl)
-                });
+                let report = archive_modify(&archive, &[], &[], &paths, &sub);
                 if !report.errors.is_empty() {
                     anyhow::bail!("{}", report.errors.join(" / "));
                 }
@@ -4085,17 +4152,15 @@ impl Session {
                     a.to_path_buf()
                 };
                 if !zip_writable(&archive) {
-                    anyhow::bail!("書き換えられるのは zip だけです（tar はまだ）");
+                    anyhow::bail!("これは書き換えられない形式です");
                 }
                 if member.is_empty() {
                     anyhow::bail!("対象がありません");
                 }
                 let report = if to.is_empty() {
-                    quietly(|ctl| cian_core::archive::zip_modify(
-                        &archive, std::slice::from_ref(&member), &[], &[], "", ctl))
+                    archive_modify(&archive, std::slice::from_ref(&member), &[], &[], "")
                 } else {
-                    quietly(|ctl| cian_core::archive::zip_modify(
-                        &archive, &[], &[(member.clone(), to.clone())], &[], "", ctl))
+                    archive_modify(&archive, &[], &[(member.clone(), to.clone())], &[], "")
                 };
                 if !report.errors.is_empty() {
                     anyhow::bail!("{}", report.errors.join(" / "));
@@ -5112,11 +5177,44 @@ fn quietly<T>(f: impl FnOnce(&mut cian_core::progress::Ctl) -> T) -> T {
 /// `zip_modify` rebuilds zips; handed a tar it would write a zip under a
 /// tar's name. The terminal build draws the same line ("F3 inside a *zip* …
 /// it goes back into the zip"), so the answer is by container, up front.
+/// Can this archive be written back to at all?
+///
+/// Every readable kind, now that a tarball can be rewritten — the name stays
+/// `zip_writable` at the call sites' request rather than being renamed
+/// everywhere at once. What it excludes is what `cian_core::archive::kind`
+/// does not recognise.
 fn zip_writable(archive: &std::path::Path) -> bool {
-    matches!(
-        archive.extension().and_then(|e| e.to_str()).map(|e| e.to_ascii_lowercase()).as_deref(),
-        Some("zip" | "jar")
-    )
+    cian_core::archive::is_archive(archive)
+}
+
+/// Change an archive, whichever kind it is.
+///
+/// **`tar` used to be the answer "no".** Every path into archive editing said
+/// 「書き換えられるのは zip だけです（tar はまだ）」, which is a refusal that
+/// gets written once and read for months. One function so the four call sites
+/// do not each have to learn the difference.
+fn archive_modify(
+    archive: &std::path::Path,
+    drop_members: &[String],
+    rename_members: &[(String, String)],
+    add_sources: &[std::path::PathBuf],
+    add_prefix: &str,
+) -> cian_core::ops::OpReport {
+    let tar = matches!(
+        cian_core::archive::kind(archive),
+        Some(cian_core::archive::Kind::Tar | cian_core::archive::Kind::TarGz)
+    );
+    quietly(|ctl| {
+        if tar {
+            cian_core::archive::tar_modify(
+                archive, drop_members, rename_members, add_sources, add_prefix, ctl,
+            )
+        } else {
+            cian_core::archive::zip_modify(
+                archive, drop_members, rename_members, add_sources, add_prefix, ctl,
+            )
+        }
+    })
 }
 
 /// The `paths` argument. Four handlers take one — panelize, drop, the

@@ -80,6 +80,10 @@ python3 scripts/requests.py --list   # 何を見ているか
 | 35 | 2026-09-02 | 「z」の宛先入力窓の横幅が小さく、入力した文字列が見切れる | パスを訊く窓は広く（`min(60rem, 84vw)`）。380px は**ファイル名の幅**であってパスの幅ではなかった | `gui/index.html ~ #ask \.sheet\.wide \{ min-width` |
 | 36 | 2026-09-02 | ビューアに対ディスク差分ガター | 編集中の行のうち**ディスクと違う行**を行番号の脇に出す。判定はエンジンの `cian_core::diff`（窓で二つ目の差分器を書かない） | `crates/cian-server/src/main.rs ~ "diskdiff" =>` |
 | 37 | 2026-09-02 | AVD の Program Files に置いて共通デスクトップの run.bat で全員に使わせたい。初回の人には僕の init.lua や ssh 設定を配りたい | `run.bat` が `default-config\` から各自の `~/.config/cian` へ配る。**初回だけ配る**（以後その人のもの。ssh.lua も含めて上書きしない ── 使っている最中に設定を書き換えられる道具は信用できない）。**exe の隣に置く配り方は罠** ── 書き込み先まで Program Files になり、全員のしおりが保存できなくなる | `gui/run.bat ~ default-config` |
+| 38 | 2026-09-02 | tar への書き戻し | `tar_modify` ── zip と同じ4つの操作（削除・改名・追加）。tar は差分編集できないので**丸ごと書き直す**が、**新しいものが完成するまで元を消さない**（誰かの唯一のコピーであることがある） | `crates/cian-core/src/archive.rs ~ pub fn tar_modify\(` |
+| 39 | 2026-09-02 | ディレクトリ転送に確認シート | サーバへフォルダを送るとき、**中に何ファイル・何バイトあるか**を確認前に出す。数は転送が使うのと**同じ計画器**（`plan_upload`）から取る ── シートと実行が別々に数えると、約束と結果がずれる | `crates/cian-server/src/main.rs ~ "transferplan" =>` |
+| 40 | 2026-09-02 | スクリプトマクロを窓版でも | `macro_script::run` をエンジンから呼ぶ。**それまでは「まだ動かせません」と断っていた** ── `macro.lua` は両方の種類を1ファイルに持つので、半分だけ動く状態だった | `crates/cian-server/src/main.rs ~ macro_script::run\(` |
+| 41 | 2026-09-02 | （同上）`macro/` ディレクトリも読む | 探索の規則（`macro.lua` と `macro/*.lua`、`.en.lua` は飛ばす）を `cian_lua::macros::load_all` に。**窓版は前者しか読まず、同梱の例のように1ファイル1マクロにしている人にはランチャーが空だった** | `crates/cian-lua/src/macros.rs ~ pub fn load_all\(` |
 
 ## 増やすとき
 

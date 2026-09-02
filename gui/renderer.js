@@ -907,7 +907,27 @@ async function operate(kind) {
         : tr(`${verb} ${rows.length}: → ${where}`, `${rows.length} 件を${verb}: → ${where}`);
     // Every name, not a summary. "12 件" tells you nothing about whether the
     // twelve are the ones you meant.
-    const body = rows.map((r) => r.name).join('\n');
+    //
+    // **And for a folder going to a server, what is inside it.** `proj/` is
+    // one row and can be four thousand files over somebody else's network;
+    // the sheet said "1 件" and the question could not be answered from what
+    // it showed. The count comes from the planner the transfer itself runs
+    // on, so the sheet cannot promise a number the job then disagrees with.
+    // Local sources only — walking a remote tree to answer a dialog costs a
+    // round trip per directory, and the answer would arrive after you had
+    // decided.
+    let body = rows.map((r) => r.name).join('\n');
+    if (dest.remote && !pane.remote && rows.some((r) => r.is_dir)) {
+        const plan = await ask('transferplan', { paths: rows.map((r) => r.path) });
+        if (plan) {
+            body = plan.rows.map((r) => (r.is_dir
+                ? tr(`${r.name}/   (${r.files} files, ${human(r.bytes)})`,
+                     `${r.name}/   （${r.files} ファイル・${human(r.bytes)}）`)
+                : r.name)).join('\n')
+                + tr(`\n\n${plan.files} files in all, ${human(plan.bytes)}`,
+                     `\n\n合計 ${plan.files} ファイル・${human(plan.bytes)}`);
+        }
+    }
     // The terminal build's three answers. The plain yes *skips* what already
     // exists — it used to overwrite, silently, which is the one outcome a
     // confirmation exists to prevent. `a` overwrites on purpose; `r` renames
@@ -5605,9 +5625,11 @@ async function cmdMacros() {
         return;
     }
     show(tr('Macros', 'マクロ'), r.where || '', r.macros.map((m) => ({
-        n: m.script ? 'script' : tr(`${m.panes} panes`, `${m.panes}枚`),
+        n: m.script ? tr('script', 'スクリプト') : tr(`${m.panes} panes`, `${m.panes}枚`),
         label: m.name,
-        sub: m.script ? tr(' (scripted steps are not run yet)', '（スクリプトはまだ動きません）') : tr('opened as tabs', 'タブとして開きます'),
+        sub: m.script
+            ? tr('Lua — it moves files and says what it did', 'Lua ── ファイルを操作して、結果を言います')
+            : tr('opened as tabs', 'タブとして開きます'),
         name: m.name,
         script: m.script,
     })), {
@@ -5619,6 +5641,31 @@ async function cmdMacros() {
                 pane: state.focus, name: row.name, ...shellSize(),
             });
             if (!done) return;
+            // Two kinds behind one name. A layout macro hands back shell
+            // panels; a script macro has already run and hands back what it
+            // did — and it used to be refused outright, so half of anybody's
+            // `macro.lua` worked and half said "not yet".
+            if (done.script) {
+                state.left = done.left;
+                state.right = done.right;
+                draw('left');
+                draw('right');
+                const lines = done.messages || [];
+                if (done.error) {
+                    // The error *and* whatever it managed to say first: a
+                    // macro that stopped halfway has still done what it did.
+                    show(tr(`${row.name} — stopped`, `${row.name} ── 途中で止まりました`),
+                        done.error, lines.map((t) => ({ label: t })),
+                        { foot: tr('Esc close', 'Esc 閉じる') });
+                } else if (lines.length > 1) {
+                    show(row.name, tr('what it did', '結果'),
+                        lines.map((t) => ({ label: t })),
+                        { foot: tr('Esc close', 'Esc 閉じる') });
+                } else {
+                    say(lines[0] || tr(`macro done: ${row.name}`, `マクロ完了: ${row.name}`));
+                }
+                return;
+            }
             takeShell(done);
             setShellFocus(true);
             say(tr(`${done.name} — ${done.opened} panes opened as tabs`, `${done.name} — ${done.opened} 枚をタブで開きました`));

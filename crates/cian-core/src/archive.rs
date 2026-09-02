@@ -29,7 +29,7 @@ pub struct Member {
 
 /// The archive formats cian can look inside.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Kind {
+pub enum Kind {
     Zip,
     Tar,
     TarGz,
@@ -37,7 +37,7 @@ enum Kind {
 
 /// Classify by name. `.tar.gz`/`.tgz` are matched on the whole filename because
 /// `Path::extension` only sees the trailing `.gz`.
-fn kind(path: &Path) -> Option<Kind> {
+pub fn kind(path: &Path) -> Option<Kind> {
     let name = path.file_name()?.to_str()?.to_lowercase();
     if name.ends_with(".tar.gz") || name.ends_with(".tgz") {
         return Some(Kind::TarGz);
@@ -444,6 +444,146 @@ fn extract_zip(
 ///
 /// Password-protected zips are refused: mixing cleartext additions into an
 /// AES archive produces a file that *looks* protected but is not.
+/// Change a tarball: drop members, rename members, add files.
+///
+/// The same four verbs as [`zip_modify`], and the same shape of answer, so the
+/// callers do not have to know which they are holding.
+///
+/// **A tar is rewritten, not edited.** There is no central directory to patch
+/// and no random access — a gzipped one cannot even be seeked. So this streams
+/// the old archive into a new one, leaving out what was dropped and renaming
+/// what was renamed, appends the additions, and swaps the file at the end.
+/// That is also what `zip_modify` does underneath; the difference is only that
+/// a zip *could* have been patched and a tar could not.
+///
+/// The original is replaced only once the new one is complete. A rewrite that
+/// fails halfway leaves the archive it was given, rather than a truncated one:
+/// this is somebody's only copy often enough to be worth the temporary file.
+pub fn tar_modify(
+    archive: &Path,
+    drop_members: &[String],
+    rename_members: &[(String, String)],
+    add_sources: &[PathBuf],
+    add_prefix: &str,
+    ctl: &mut Ctl,
+) -> OpReport {
+    let mut report = OpReport::default();
+    let gz = matches!(kind(archive), Some(Kind::TarGz));
+
+    // The additions, flattened the way `zip_modify` flattens them.
+    let mut jobs: Vec<(PathBuf, String)> = Vec::new();
+    for src in add_sources {
+        let base = match src.file_name().and_then(|n| n.to_str()) {
+            Some(n) => format!("{add_prefix}{n}"),
+            None => {
+                report.note_error(format!("{}: unusable name", src.display()));
+                continue;
+            }
+        };
+        if src.is_dir() {
+            collect_tree(src, &base, &mut jobs, &mut report);
+        } else {
+            jobs.push((src.clone(), base));
+        }
+    }
+
+    let renamed: std::collections::HashMap<&str, &str> =
+        rename_members.iter().map(|(a, b)| (a.as_str(), b.as_str())).collect();
+    let dropped: std::collections::HashSet<&str> =
+        drop_members.iter().map(String::as_str).collect();
+
+    // Beside the archive, so the final rename cannot cross a filesystem —
+    // `/tmp` is a different device often enough that a cross-device rename is
+    // a real failure rather than a theoretical one.
+    let tmp = archive.with_extension(format!(
+        "{}.cian-new",
+        archive.extension().and_then(|e| e.to_str()).unwrap_or("tar")
+    ));
+
+    let outcome = (|| -> Result<()> {
+        let out = fs::File::create(&tmp)
+            .with_context(|| format!("write {}", tmp.display()))?;
+        let mut builder: Box<dyn TarSink> = if gz {
+            Box::new(tar::Builder::new(flate2::write::GzEncoder::new(
+                out,
+                flate2::Compression::default(),
+            )))
+        } else {
+            Box::new(tar::Builder::new(out))
+        };
+
+        let reader = tar_reader(archive, gz)?;
+        let mut ar = tar::Archive::new(reader);
+        for entry in ar.entries().context("read tar")? {
+            if ctl.cancel.load(std::sync::atomic::Ordering::Relaxed) {
+                anyhow::bail!("cancelled");
+            }
+            let mut entry = entry.context("read tar entry")?;
+            let name = entry.path().context("tar entry name")?.to_string_lossy().into_owned();
+            if dropped.contains(name.as_str()) {
+                continue;
+            }
+            // Its own header, so mode and mtime survive the rewrite. A tar
+            // that comes back with everything 0644 and today's date is a tar
+            // that has lost what a tar is for.
+            let mut header = entry.header().clone();
+            let to = renamed.get(name.as_str()).copied().unwrap_or(name.as_str());
+            let mut body = Vec::new();
+            entry.read_to_end(&mut body).context("read tar entry body")?;
+            header.set_size(body.len() as u64);
+            header.set_cksum();
+            builder.append_named(&header, to, &body)?;
+            report.ok += 1;
+        }
+
+        for (from, name) in &jobs {
+            if ctl.cancel.load(std::sync::atomic::Ordering::Relaxed) {
+                anyhow::bail!("cancelled");
+            }
+            let body = fs::read(from).with_context(|| format!("read {}", from.display()))?;
+            let mut header = tar::Header::new_gnu();
+            header.set_size(body.len() as u64);
+            header.set_mode(0o644);
+            header.set_cksum();
+            builder.append_named(&header, name, &body)?;
+            report.ok += 1;
+        }
+        builder.finish()
+    })();
+
+    if let Err(e) = outcome {
+        let _ = fs::remove_file(&tmp);
+        report.ok = 0;
+        report.note_error(format!("{e:#}"));
+        return report;
+    }
+    if let Err(e) = fs::rename(&tmp, archive) {
+        let _ = fs::remove_file(&tmp);
+        report.ok = 0;
+        report.note_error(format!("replace {}: {e}", archive.display()));
+    }
+    report
+}
+
+/// What `tar_modify` writes through, so the gzipped and plain cases are one
+/// loop rather than two copies of it.
+trait TarSink {
+    fn append_named(&mut self, header: &tar::Header, name: &str, body: &[u8]) -> Result<()>;
+    fn finish(self: Box<Self>) -> Result<()>;
+}
+
+impl<W: std::io::Write> TarSink for tar::Builder<W> {
+    fn append_named(&mut self, header: &tar::Header, name: &str, body: &[u8]) -> Result<()> {
+        let mut h = header.clone();
+        h.set_cksum();
+        self.append_data(&mut h, name, body).context("write tar entry")
+    }
+    fn finish(mut self: Box<Self>) -> Result<()> {
+        tar::Builder::finish(&mut *self).context("finish tar")?;
+        Ok(())
+    }
+}
+
 pub fn zip_modify(
     archive: &Path,
     drop_members: &[String],
@@ -1306,5 +1446,76 @@ mod tests {
         let r = zip_modify(&z, &[], &[], &[d.path().join("s.txt")], "", &mut ctl(&cancel, &mut n));
         assert!(!r.errors.is_empty());
         assert!(r.errors[0].contains("password"), "{:?}", r.errors);
+    }
+
+    /// A tarball can be changed the same four ways a zip can — and could not,
+    /// until now: "書き換えられるのは zip だけです（tar はまだ）" was what
+    /// every one of these asked for got back.
+    #[test]
+    fn a_tar_can_be_changed_the_way_a_zip_can() {
+        for gz in [false, true] {
+            let d = tempfile::tempdir().unwrap();
+            let src = d.path().join("tree");
+            fs::create_dir_all(src.join("sub")).unwrap();
+            fs::write(src.join("keep.txt"), b"keep").unwrap();
+            fs::write(src.join("drop.txt"), b"drop").unwrap();
+            fs::write(src.join("sub/old.txt"), b"old").unwrap();
+            let extra = d.path().join("added.txt");
+            fs::write(&extra, b"added").unwrap();
+
+            let name = if gz { "bag.tar.gz" } else { "bag.tar" };
+            let at = d.path().join(name);
+            let stop = AtomicBool::new(false);
+            let mut none = |_: &Progress| {};
+            let mut ctl = Ctl { cancel: &stop, on_progress: &mut none };
+            let made = create_tar(std::slice::from_ref(&src), &at, gz, &mut ctl);
+            assert!(made.errors.is_empty(), "{gz}: {:?}", made.errors);
+
+            let mut ctl = Ctl { cancel: &stop, on_progress: &mut none };
+            let r = tar_modify(
+                &at,
+                &["tree/drop.txt".to_string()],
+                &[("tree/sub/old.txt".to_string(), "tree/sub/new.txt".to_string())],
+                std::slice::from_ref(&extra),
+                "tree/",
+                &mut ctl,
+            );
+            assert!(r.errors.is_empty(), "{gz}: {:?}", r.errors);
+
+            let names: Vec<String> = list(&at).unwrap().into_iter().map(|m| m.name).collect();
+            assert!(!names.iter().any(|n| n.ends_with("drop.txt")), "{gz}: dropped {names:?}");
+            assert!(names.iter().any(|n| n == "tree/sub/new.txt"), "{gz}: renamed {names:?}");
+            assert!(!names.iter().any(|n| n == "tree/sub/old.txt"), "{gz}: old name gone {names:?}");
+            assert!(names.iter().any(|n| n == "tree/added.txt"), "{gz}: added {names:?}");
+            assert!(names.iter().any(|n| n.ends_with("keep.txt")), "{gz}: kept {names:?}");
+        }
+    }
+
+    /// **A failed rewrite leaves the archive it was given.** The whole file is
+    /// rebuilt, so the moment between "old one deleted" and "new one written"
+    /// is the moment somebody's only copy could go — there is no such moment.
+    #[test]
+    fn a_refused_rewrite_leaves_the_original_alone() {
+        let d = tempfile::tempdir().unwrap();
+        let src = d.path().join("t");
+        fs::create_dir(&src).unwrap();
+        fs::write(src.join("a.txt"), b"a").unwrap();
+        let at = d.path().join("bag.tar");
+        let stop = AtomicBool::new(false);
+        let mut none = |_: &Progress| {};
+        let mut ctl = Ctl { cancel: &stop, on_progress: &mut none };
+        create_tar(&[src], &at, false, &mut ctl);
+        let before = fs::read(&at).unwrap();
+
+        // Cancelled partway: the answer is an error and an untouched archive.
+        let stopped = AtomicBool::new(true);
+        let mut ctl = Ctl { cancel: &stopped, on_progress: &mut none };
+        let r = tar_modify(&at, &["t/a.txt".to_string()], &[], &[], "", &mut ctl);
+        assert!(!r.errors.is_empty(), "it said no");
+        assert_eq!(fs::read(&at).unwrap(), before, "and changed nothing");
+        assert!(
+            !d.path().join("bag.tar.cian-new").exists(),
+            "and left no half-written file behind"
+        );
     }
 }

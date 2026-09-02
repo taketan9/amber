@@ -45,49 +45,12 @@ pub(crate) struct MacroRun {
     leaf_ids: Vec<usize>,
 }
 
-/// Load macros (portable-aware): first `macro.lua` (a list of macros), then
-/// each `macro/*.lua` file (one macro — or a list — per file), sorted by
-/// filename. Returns the macros and, separately, any parse errors so the
-/// launcher can explain a short or empty list.
+/// Load macros. The rule — `macro.lua` then `macro/*.lua`, portable-first —
+/// is `cian_lua::macros::load_all`, shared with the window build, which used
+/// to read only the first of the two and showed an empty launcher to anybody
+/// who had split their macros up.
 pub(crate) fn load_macros() -> (Vec<Macro>, Option<String>) {
-    let mut macros = Vec::new();
-    let mut errors: Vec<String> = Vec::new();
-
-    if let Some(path) = cian_lua::config_read_path("macro.lua").filter(|p| p.exists()) {
-        match cian_lua::macros::load(&path) {
-            Ok(mut m) => macros.append(&mut m),
-            Err(e) => errors.push(format!("macro.lua: {}", e)),
-        }
-    }
-
-    // One file per macro, e.g. macro/Adeploy.lua, macro/Bdbcheck.lua.
-    if let Some(dir) = cian_lua::config_read_path("macro").filter(|p| p.is_dir()) {
-        let mut files: Vec<std::path::PathBuf> = std::fs::read_dir(&dir)
-            .into_iter()
-            .flatten()
-            .flatten()
-            .map(|e| e.path())
-            .filter(|p| p.extension().and_then(|x| x.to_str()) == Some("lua"))
-            // Skip language reference copies (`Foo.en.lua`, `Foo.ja.lua`): the
-            // primary `Foo.lua` is the one to load. Otherwise dropping a shipped
-            // example set into the config dir would load each macro twice.
-            .filter(|p| {
-                let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
-                !name.ends_with(".en.lua") && !name.ends_with(".ja.lua")
-            })
-            .collect();
-        files.sort();
-        for f in files {
-            let label = f.file_name().and_then(|n| n.to_str()).unwrap_or("macro").to_string();
-            match cian_lua::macros::load(&f) {
-                Ok(mut m) => macros.append(&mut m),
-                Err(e) => errors.push(format!("{}: {}", label, e)),
-            }
-        }
-    }
-
-    let error = if errors.is_empty() { None } else { Some(errors.join("; ")) };
-    (macros, error)
+    cian_lua::macros::load_all()
 }
 
 impl App {
