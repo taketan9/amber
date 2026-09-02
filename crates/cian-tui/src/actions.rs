@@ -3300,7 +3300,7 @@ impl App {
         // What `Ctrl+Y` would put back. A file that was *created* is the one
         // thing that cannot be: undoing it removed it, and nothing here
         // remembers what was inside.
-        if !matches!(action, UndoAction::Created { .. }) {
+        if !matches!(action, UndoAction::Created { .. } | UndoAction::Copied { .. }) {
             self.redo_stack.push(action.clone());
         }
         let msg = match action {
@@ -3355,6 +3355,27 @@ impl App {
                     format!("undo: moved {} back, {} could not be undone", ok, fail)
                 }
             }
+            UndoAction::Copied { paths } => {
+                // Only what is still there: the list was drawn up before the
+                // copy ran, so a file it never managed to write is on it.
+                let here: Vec<_> = paths.into_iter().filter(|p| p.exists()).collect();
+                let r = cian_core::ops::delete_many(&here, cian_core::ops::DeleteMode::Trash);
+                if r.errors.is_empty() {
+                    format!("undo: {} copied to the trash", r.ok)
+                } else {
+                    // Put back what could not be taken. The step was popped
+                    // before it ran, so stopping here would spend the only
+                    // chance to undo this copy on an attempt that did nothing
+                    // — and the usual cause (a permission the OS is
+                    // withholding) is one the person can fix and try again.
+                    let left: Vec<_> = here.into_iter().filter(|p| p.exists()).collect();
+                    let n = left.len();
+                    if n > 0 {
+                        self.undo_stack.push(UndoAction::Copied { paths: left });
+                    }
+                    format!("undo: {} to the trash, {n} left — {}", r.ok, r.errors[0])
+                }
+            }
         };
         self.reload_both();
         self.message = Some(msg);
@@ -3403,7 +3424,7 @@ impl App {
                 }
             }
             // Never pushed to the redo stack — see `undo_last`.
-            UndoAction::Created { .. } => String::new(),
+            UndoAction::Created { .. } | UndoAction::Copied { .. } => String::new(),
         };
         self.reload_both();
         self.message = Some(msg);
@@ -3457,15 +3478,24 @@ impl App {
         // Remembered so a permission failure can offer an elevated retry; the
         // op-completion handler clears this unless it actually hit that wall.
         self.pending_elevation = Some((op, targets.clone(), dest.clone()));
-        // A move can be undone: each target ends up at dest/<name>, and undo
-        // moves it back. (Copies are additive, so they are not tracked.)
-        let undo = (op == PendingOp::Move).then(|| {
-            let pairs = targets
-                .iter()
-                .filter_map(|t| t.file_name().map(|n| (dest.join(n), t.clone())))
-                .collect();
-            UndoAction::Moved { pairs }
-        });
+        // Both can be undone, and both are worked out before the transfer
+        // runs — afterwards the destination looks the same either way. A move
+        // ends each target at dest/<name> and undo moves it back; a copy is
+        // additive, so undo removes what it added and `copy_creates` decides
+        // what that is (and leaves out anything that was already there).
+        let undo = match op {
+            PendingOp::Move => Some(UndoAction::Moved {
+                pairs: targets
+                    .iter()
+                    .filter_map(|t| t.file_name().map(|n| (dest.join(n), t.clone())))
+                    .collect(),
+            }),
+            // Nothing here is this copy's to take back.
+            PendingOp::Copy => match cian_core::ops::copy_creates(&targets, &dest) {
+                made if made.is_empty() => None,
+                made => Some(UndoAction::Copied { paths: made }),
+            },
+        };
         self.start_op(label, move |ctl| match op {
             PendingOp::Copy => cian_core::progress::copy_many(&targets, &dest, conflict, ctl),
             PendingOp::Move => cian_core::progress::move_many(&targets, &dest, conflict, ctl),

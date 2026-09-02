@@ -30,6 +30,11 @@ cian-scp  = { path = "crates/cian-scp"  }
 cian-ai   = { path = "crates/cian-ai"  }
 cian-lua  = { path = "crates/cian-lua"  }
 
+# The Windows icon, stamped into the exes at link time. Only ever a
+# build-dependency, and only on Windows — see crates/cian-bin/build.rs for why
+# a .ico beside the program is not enough.
+winresource = "0.1"
+
 # External crates (pinned at workspace level so all crates use the same version)
 ratatui   = "0.30"
 crossterm = "0.29"

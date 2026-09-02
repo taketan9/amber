@@ -214,10 +214,12 @@ fn run(inner: Arc<Inner>, job: Pending) {
         );
         let began = std::time::Instant::now();
 
-        // A move can be undone: each target ends up at dest/<name>, and undo
-        // moves it back. Derived before the work, as the terminal build does
-        // (actions.rs finish_transfer) — a copy is additive and is not
-        // tracked, and a delete went to the trash, which has its own way back.
+        // Both transfers can be undone, and both are derived before the work,
+        // as the terminal build does (actions.rs finish_transfer) — afterwards
+        // the destination looks the same either way. A move ends each target
+        // at dest/<name> and undo moves it back; a copy is additive, so undo
+        // removes what it added and `copy_creates` decides what that is. A
+        // delete went to the trash, which has its own way back.
         let undo_step = match (plan.kind, dest.as_ref()) {
             (Kind::Move, Some(d)) => Some(Undo::Moved {
                 pairs: paths
@@ -225,6 +227,13 @@ fn run(inner: Arc<Inner>, job: Pending) {
                     .filter_map(|p| p.file_name().map(|n| (d.join(n), p.clone())))
                     .collect(),
             }),
+            (Kind::Copy, Some(d)) => match ops::copy_creates(&paths, d) {
+                // Everything it was asked to copy is already there. Whatever
+                // the conflict rule does next, none of it is this copy's to
+                // take back, so there is no step rather than an empty one.
+                made if made.is_empty() => None,
+                made => Some(Undo::Copied { paths: made }),
+            },
             _ => None,
         };
 

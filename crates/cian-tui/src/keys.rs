@@ -2538,9 +2538,16 @@ impl App {
             (true, false, KeyCode::Char('x')) => self.clip_targets(ClipOp::Cut),
             (true, false, KeyCode::Char('v')) => { let _ = self.paste_clip(); }
             (false, false, KeyCode::Char('d')) => self.start_delete(),
-            // Undo the last rename / create / move (also `:undo`).
+            // Undo the last rename / create / copy / move (also `:undo`).
             (false, false, KeyCode::Char('u')) => self.undo_last(),
             // …and on the other convention for it, for a hand used to that.
+            //
+            // Ctrl+Z is not the shell's suspend here: raw mode turns ISIG off,
+            // so the key arrives as a key. It is the one undo every other
+            // program on both platforms has, and `u` alone meant reaching for
+            // it did nothing at all.
+            (true, false, KeyCode::Char('z')) => self.undo_last(),
+            (true, true, KeyCode::Char('Z')) => self.redo_last(),
             (true, _, KeyCode::Char('y')) => self.redo_last(),
             (false, false, KeyCode::Char('r')) => self.start_rename(),
             (false, false, KeyCode::Char('a')) => self.start_new_file(),

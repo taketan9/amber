@@ -5,6 +5,20 @@
 use super::*;
 use cian_core::substitute::Pattern as Pat;
 
+/// The two-character sequences that leave insert mode — vim's oldest custom
+/// mapping (`inoremap jj <Esc>`), which enough hands have that it is closer to
+/// a convention than a preference.
+///
+/// Three of them rather than one, because on a Japanese keyboard the two keys
+/// that produce them are the same two keys. With the IME on, `jj` commits as
+/// the full-width `ｊｊ`; and if the second j arrives while the first is still
+/// being composed, the IME hands over `っｊ` — the sokuon it builds from a
+/// doubled consonant. All three are somebody pressing j twice, and only the
+/// ASCII one is what vim itself would ever see.
+///
+/// The window build keeps the same list (`gui/renderer.js`, `const JJ`).
+pub(crate) const JJ_ESCAPES: [&str; 3] = ["jj", "ｊｊ", "っｊ"];
+
 impl App {
     /// Copy the viewer's selected lines (or the whole file when nothing is
     /// selected) to the clipboard.
@@ -39,6 +53,17 @@ impl App {
         if !way_out || self.viewer_escape_key != Some(key.code) {
             self.viewer_escapes = 0;
             self.viewer_escape_key = way_out.then_some(key.code);
+        }
+        // A half-typed `Z` ends here, for the same reason the escape count is
+        // settled here: this is the one place every key passes through exactly
+        // once. Doing it inside the handler covered most keys and not `:`,
+        // which opens the command line from somewhere further up and returns —
+        // so `Z` `:` `Z` would have saved and closed the file. A guard that
+        // holds for most keys is not a guard.
+        if !matches!(key.code, KeyCode::Char('Z') | KeyCode::Char('Q')) {
+            if let Popup::Viewer { pending: pending @ Some('Z'), .. } = &mut self.popup {
+                *pending = None;
+            }
         }
         let r = self.handle_viewer_key_inner(key);
         let editing = matches!(self.popup, Popup::Viewer { editing: true, .. });
@@ -668,6 +693,46 @@ impl App {
             matches!(key.code, KeyCode::F(_)) || (key.code == KeyCode::Enter && shift);
         if !window_key && matches!(self.popup, Popup::Viewer { editing: true, .. }) {
             return self.handle_editor_key(key);
+        }
+
+        // `ZZ` saves and closes, `ZQ` closes without saving: the two ways out
+        // of vim that hands reach for before they reach for `:`. `Z` on its own
+        // commands nothing in vim, so holding it as a prefix displaces nothing —
+        // and anything that is not the second half clears it below.
+        if !ctrl && matches!(key.code, KeyCode::Char('Z' | 'Q')) {
+            let armed = matches!(self.popup, Popup::Viewer { pending: Some('Z'), .. });
+            let c = match key.code {
+                KeyCode::Char(c) => c,
+                _ => unreachable!(),
+            };
+            if !armed {
+                if c == 'Z' {
+                    if let Popup::Viewer { pending, .. } = &mut self.popup {
+                        *pending = Some('Z');
+                    }
+                    return Ok(());
+                }
+                // A bare `Q` is not ours; let the rest of the chain have it.
+            } else {
+                if let Popup::Viewer { pending, .. } = &mut self.popup {
+                    *pending = None;
+                }
+                match c {
+                    'Z' => {
+                        self.save_viewer_file();
+                        // Only if it took. A save that failed has already said
+                        // so, and closing on top of that would throw the work
+                        // away and the message with it.
+                        if !matches!(self.popup, Popup::Viewer { dirty: true, .. }) {
+                            self.close_viewer_file();
+                        }
+                    }
+                    // `ZQ` is "leave, and I mean it" — the door that does not
+                    // ask, which is the whole of what ZQ means.
+                    _ => self.close_viewer_file(),
+                }
+                return Ok(());
+            }
         }
         // `]c` / `[c` — the next and previous difference, vimdiff's own keys,
         // while a comparison is running.
@@ -2881,6 +2946,10 @@ impl App {
             return Ok(());
         }
         let overwrite = matches!(self.popup, Popup::Viewer { replacing: true, .. });
+        // `jj` is vim's mapping, so it applies where vim's grammar does.
+        // Notepad has no mode to leave and typing two j's there means two j's.
+        let vi = !self.notepad_keys();
+        let mut jj = false;
         let body_h = (self.viewer_rect.height as usize).max(1).saturating_sub(1).max(1);
         if let Popup::Viewer { view, line, col, scroll, goal, dirty, hl, .. } = &mut self.popup {
             // Any edit invalidates the cached highlight; it recomputes on exit.
@@ -2908,6 +2977,18 @@ impl App {
                     lines[*line] = chs.into_iter().collect();
                     *col += 1;
                     *dirty = true;
+                    // …unless those two characters were the way out.
+                    if vi && *col >= 2 {
+                        let chs = line_chars(lines, *line);
+                        let pair: String = chs[*col - 2..*col].iter().collect();
+                        if JJ_ESCAPES.contains(&pair.as_str()) {
+                            let mut chs = chs;
+                            chs.drain(*col - 2..*col);
+                            lines[*line] = chs.into_iter().collect();
+                            *col -= 2;
+                            jj = true;
+                        }
+                    }
                 }
                 KeyCode::Tab => {
                     let mut chs = line_chars(lines, *line);
@@ -2998,6 +3079,16 @@ impl App {
             *goal = *col;
             // Keep the cursor on screen (the render also follows it).
             clamp_scroll(*line, scroll, body_h);
+        }
+        // Exactly what Esc does above, said the other way. Written here rather
+        // than by synthesising an Esc key, because a synthetic key would also
+        // walk the notepad branch and the three-press way out.
+        if jj {
+            if let Popup::Viewer { editing, replacing, .. } = &mut self.popup {
+                *editing = false;
+                *replacing = false;
+            }
+            self.message = Some(tr(self.lang, "left edit mode", "編集モード終了").into());
         }
         Ok(())
     }

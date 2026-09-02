@@ -1587,6 +1587,83 @@
     /// In the editor, `:` is a colon. It opened the command line instead —
     /// the binding sat ahead of the editor's own key handling, so a YAML key
     /// or a `foo::bar` could not be typed at all.
+    /// `jj` leaves insert mode and takes both j's with it — in all three of
+    /// the shapes a Japanese keyboard can produce.
+    #[test]
+    fn jj_leaves_insert_mode_and_removes_itself() {
+        for pair in crate::viewer::JJ_ESCAPES {
+            let (_d, mut app) = viewer_on("one\n");
+            app.handle_key(key('i')).unwrap();
+            assert!(
+                matches!(app.popup, Popup::Viewer { editing: true, .. }),
+                "{pair}: in the editor"
+            );
+            for c in pair.chars() {
+                app.handle_key(key(c)).unwrap();
+            }
+            assert!(
+                matches!(app.popup, Popup::Viewer { editing: false, .. }),
+                "{pair}: left insert mode"
+            );
+            let body = match &app.popup {
+                Popup::Viewer { view, .. } => view.lines.join("\n"),
+                _ => panic!("no viewer"),
+            };
+            assert_eq!(body, "one", "{pair}: neither character was left behind");
+        }
+    }
+
+    /// A single j is a j. The way out is two of them in a row, and nothing
+    /// else — a mapping that fired on the first one would make the letter
+    /// untypeable.
+    #[test]
+    fn one_j_is_just_a_j() {
+        let (_d, mut app) = viewer_on("one\n");
+        app.handle_key(key('i')).unwrap();
+        for c in "jaj".chars() {
+            app.handle_key(key(c)).unwrap();
+        }
+        assert!(matches!(app.popup, Popup::Viewer { editing: true, .. }), "still editing");
+        let body = match &app.popup {
+            Popup::Viewer { view, .. } => view.lines.join("\n"),
+            _ => panic!("no viewer"),
+        };
+        assert_eq!(body, "jajone", "all three characters are there");
+    }
+
+    /// A `Z` followed by anything else is not half of `ZZ` any more, and the
+    /// prefix has to say so — or the next `Z` closes the file on its own.
+    ///
+    /// Tested against `:` rather than a motion, and that is the whole point.
+    /// Most keys clear the pending slot on their way past, so a test written
+    /// against `j` passes with the clearing removed and proves nothing; `:`
+    /// opens the command line and returns without touching it. It was found
+    /// by disabling the clear and walking a row of keys past it, which is the
+    /// only way to tell a guard from a decoration.
+    #[test]
+    fn a_half_typed_z_does_not_survive_the_next_key() {
+        let (_d, mut app) = viewer_on("one\n");
+        app.handle_key(key('Z')).unwrap();
+        app.handle_key(key(':')).unwrap();
+        let pending = match &app.popup {
+            Popup::Viewer { pending, .. } => *pending,
+            _ => panic!("no viewer"),
+        };
+        assert_eq!(pending, None, "the half-typed Z did not survive the colon");
+    }
+
+    #[test]
+    fn zq_closes_without_saving() {
+        let (_d, mut app) = viewer_on("one\n");
+        app.handle_key(key('i')).unwrap();
+        app.handle_key(key('x')).unwrap();
+        app.handle_key(code(KeyCode::Esc)).unwrap();
+        assert!(matches!(app.popup, Popup::Viewer { dirty: true, .. }), "unsaved");
+        app.handle_key(key('Z')).unwrap();
+        app.handle_key(key('Q')).unwrap();
+        assert!(!matches!(app.popup, Popup::Viewer { .. }), "gone, unsaved work and all");
+    }
+
     #[test]
     fn colon_types_a_colon_while_editing() {
         let (_d, mut app) = viewer_on("one\n");

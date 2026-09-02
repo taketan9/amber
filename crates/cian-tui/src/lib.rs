@@ -1583,13 +1583,25 @@ const OP_ABANDON_GRACE_SECS: u64 = 5;
 /// A reversible file operation, for the `u` undo stack. Deletes are excluded —
 /// they go to the OS trash, which has its own restore.
 #[derive(Debug, Clone)]
-enum UndoAction {
+pub(crate) enum UndoAction {
     /// Undo by renaming `to` back to `from`.
     Rename { from: PathBuf, to: PathBuf },
     /// Undo by removing what was just created.
     Created { path: PathBuf },
     /// Undo by moving each `.0` (where it is now) back to `.1` (where it was).
     Moved { pairs: Vec<(PathBuf, PathBuf)> },
+    /// Undo by sending these to the trash: what a copy brought into being,
+    /// and nothing else.
+    ///
+    /// A copy went untracked for a long time on the grounds that undoing one
+    /// means deleting, and a key that sometimes deletes is not a key anyone
+    /// can trust. The grounds hold; what they call for is a list that can
+    /// only ever name the copy's own work. [`cian_core::ops::copy_creates`]
+    /// builds it out of the destination names that did not exist a moment
+    /// earlier, so a copy that landed on an existing name is left off the
+    /// stack rather than half-undone — and the removal is to the trash, which
+    /// keeps the one deleting step reversible in its turn.
+    Copied { paths: Vec<PathBuf> },
     /// Undo by taking this pane back to `from`.
     ///
     /// Walking into the wrong folder is the commonest thing to want back, and
@@ -4167,8 +4179,8 @@ fn manual_sections() -> Vec<((&'static str, &'static str), Vec<ManualEntry>)> {
                 entry("  a", None, "  in visual: select all (or gg v G)", "  ビジュアル中：全選択（gg v G でも）"),
                 entry("  gg / G", None, "  in visual: extend to top / bottom", "  ビジュアル中：先頭／末尾まで伸ばす"),
                 entry("V", Some(InvertMarks), "invert all marks", "全マークを反転"),
-                entry("u", None, "undo the last rename / create / move / folder step (also :undo)", "直前のリネーム／作成／移動／ディレクトリ移動を取り消し（:undo でも）"),
-                entry("Ctrl+R", None, "redo what u just undid (Ctrl+Y, :redo)", "u で取り消した操作をやり直し（Ctrl+Y・:redo でも）"),
+                entry("u  Ctrl+Z", None, "undo the last rename / create / copy / move / folder step — an undone copy goes to the trash (also :undo)", "直前のリネーム／作成／コピー／移動／ディレクトリ移動を取り消し ── コピーはゴミ箱へ（:undo でも）"),
+                entry("Ctrl+R  Ctrl+Shift+Z", None, "redo what u just undid (Ctrl+Y, :redo)", "u で取り消した操作をやり直し（Ctrl+Y・:redo でも）"),
                 entry("c", Some(Copy), "copy to opposite pane", "反対ペインへコピー"),
                 entry("m", Some(Move), "move to opposite pane", "反対ペインへ移動"),
                 entry("Ctrl+C", None, "copy to the file clipboard (Windows-style)", "ファイルクリップボードへコピー（Windows流）"),
@@ -4381,6 +4393,8 @@ pub(crate) fn viewer_manual_lines(lang: Lang) -> Vec<String> {
         ("d", "cut the selection", "選択を切り取り"),
         (">>  <<", "shift lines by a tab stop (> and < on a selection)", "行をタブ幅ずらす（選択中は > と <）"),
         ("~", "swap the case under the cursor", "カーソル位置の大小を反転"),
+        ("jj  ｊｊ  っｊ", "leave insert mode — the last two are what a Japanese IME makes of pressing j twice", "挿入モードを抜ける ── 後ろ2つは、IME オンで j を2回押したときに出るもの"),
+        ("ZZ  ZQ", "save and close / close without saving", "保存して閉じる ／ 保存せずに閉じる"),
         ("u", "undo (Ctrl+Z)", "取り消し（Ctrl+Z）"),
         ("Ctrl+R", "redo (Ctrl+Y, :redo)", "やり直し（Ctrl+Y・:redo）"),
         (".", "do that change again", "直前の変更をもう一度"),

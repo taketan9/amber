@@ -4409,6 +4409,38 @@ impl Session {
                             }
                         }
                     }
+                    Undo::Copied { paths } => {
+                        // Only what is still there. The list was drawn up
+                        // before the copy ran, so a file it never managed to
+                        // write is on it — and `delete_many` would report a
+                        // missing one as an error the person cannot act on.
+                        let here: Vec<_> =
+                            paths.iter().filter(|p| p.exists()).cloned().collect();
+                        // To the trash, which is the point: this is the one
+                        // step that undoes by deleting, and it stays a step
+                        // that can itself be walked back.
+                        let r = cian_core::ops::delete_many(
+                            &here,
+                            cian_core::ops::DeleteMode::Trash,
+                        );
+                        if let Some(first) = r.errors.first().cloned() {
+                            // **Put back what could not be taken.** The step
+                            // came off the stack before it ran, so bailing
+                            // here would spend the only chance to undo this
+                            // copy on an attempt that did nothing — and the
+                            // commonest cause is a permission macOS is
+                            // withholding, which is exactly the case where
+                            // the person fixes it and presses the key again.
+                            // Only the survivors: re-listing a file already
+                            // in the trash would fail the retry every time.
+                            let left: Vec<_> =
+                                here.into_iter().filter(|p| p.exists()).collect();
+                            if !left.is_empty() {
+                                self.undo.push(Undo::Copied { paths: left });
+                            }
+                            anyhow::bail!("{first}");
+                        }
+                    }
                     Undo::Navigated { pane, from } => {
                         let p = self.pane_mut(pane)?;
                         *p = Pane::new(from.clone())?;

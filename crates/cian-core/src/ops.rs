@@ -74,6 +74,27 @@ pub fn copy_one(src: &Path, dest_dir: &Path, on_conflict: Conflict) -> Result<bo
     transfer_one(src, dest_dir, on_conflict, false)
 }
 
+/// What copying `srcs` into `dest_dir` would bring into being: the destination
+/// roots that are not there yet.
+///
+/// This is the whole safety argument for undoing a copy. A copy is additive,
+/// so taking one back means deleting — and a key that sometimes deletes is
+/// only trustworthy if it can never reach something that was not the copy's.
+/// A root that already exists was either skipped or written over, and in both
+/// cases what is under that name is partly or wholly somebody else's; it is
+/// left out here and the copy of it is simply not undoable. What is left is
+/// exactly what did not exist a moment ago.
+///
+/// Derived *before* the work, like the pairs a move remembers — afterwards
+/// every root exists and the two cases are indistinguishable.
+pub fn copy_creates(srcs: &[PathBuf], dest_dir: &Path) -> Vec<PathBuf> {
+    srcs.iter()
+        .filter(|src| src.file_name().is_some())
+        .map(|src| dest_for(src, dest_dir))
+        .filter(|root| !root.exists())
+        .collect()
+}
+
 /// The same, but the source does not survive it.
 pub fn move_one(src: &Path, dest_dir: &Path, on_conflict: Conflict) -> Result<bool> {
     transfer_one(src, dest_dir, on_conflict, true)
@@ -277,7 +298,12 @@ pub fn delete_many(srcs: &[PathBuf], mode: DeleteMode) -> OpReport {
     for src in srcs {
         match delete_one(src, mode) {
             Ok(()) => report.ok += 1,
-            Err(e) => report.note_error(format!("{}: {}", src.display(), e)),
+            // `{e:#}` rather than `{e}`: anyhow's plain Display prints only
+            // the outermost context, so every trash failure read "move to
+            // trash: <path>" and named no cause at all. The cause underneath
+            // is the half that says what to do — a permission macOS is
+            // withholding reads nothing like a volume that has no trash.
+            Err(e) => report.note_error(format!("{}: {:#}", src.display(), e)),
         }
     }
     report
@@ -363,5 +389,29 @@ mod make_touch_tests {
         let after = fs::metadata(&p).unwrap().modified().unwrap();
         assert!(after > old, "mtime moved forward");
         assert_eq!(fs::read(&p).unwrap(), b"keep me", "contents untouched");
+    }
+
+    #[test]
+    fn copy_creates_names_only_what_is_not_there_yet() {
+        let src = tempfile::tempdir().unwrap();
+        let dst = tempfile::tempdir().unwrap();
+        fs::write(src.path().join("new.txt"), b"a").unwrap();
+        fs::write(src.path().join("clash.txt"), b"b").unwrap();
+        fs::create_dir(src.path().join("tree")).unwrap();
+        // Already at the destination: whatever happens to it, undoing the copy
+        // must not reach it.
+        fs::write(dst.path().join("clash.txt"), b"theirs").unwrap();
+
+        let srcs = vec![
+            src.path().join("new.txt"),
+            src.path().join("clash.txt"),
+            src.path().join("tree"),
+        ];
+        let made = copy_creates(&srcs, dst.path());
+        assert_eq!(
+            made,
+            vec![dst.path().join("new.txt"), dst.path().join("tree")],
+            "the pre-existing name is left out, in source order"
+        );
     }
 }

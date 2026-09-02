@@ -19,3 +19,8 @@ cian-tui  = { workspace = true }
 cian-pty  = { workspace = true }
 cian-lua  = { workspace = true }
 anyhow    = { workspace = true }
+
+# The icon, stamped into the exe at link time. Windows-only and build-only:
+# off Windows this line is not even resolved.
+[target.'cfg(windows)'.build-dependencies]
+winresource = { workspace = true }

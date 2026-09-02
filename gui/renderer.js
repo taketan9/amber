@@ -2904,7 +2904,8 @@ function helpRows() {
         // because the pair is exactly where a single line invites a mix-up.
         ['o', tr("this pane → the other pane’s directory", 'このペインを反対ペインと同じ場所に')],
         ['O', tr("the other pane → this pane’s directory", '反対ペインをこのペインと同じ場所に')],
-        ['u / Ctrl+R', tr("undo / redo", '取り消し / やり直し')],
+        ['u / Ctrl+z', tr("undo the last operation", '直前の操作を取り消す')],
+        ['Ctrl+r / Ctrl+Shift+z', tr("redo it", 'やり直す')],
         [tr("M / Shift+Enter / right-click", 'M / Shift+Enter / 右クリック'), tr("what can be done to this entry", 'このエントリにできること')],
         ['Esc', tr("clear marks and filter \u2192 then stop what is running", 'マーク・フィルタ解除 → 実行中の操作を中止')],
         [':queue', tr("what is running \u2014 x stops one of them", '実行中の操作を見る — x で1つだけ止める')],
@@ -3476,6 +3477,14 @@ document.addEventListener('keydown', (e) => {
     else if (k === 'A' && bare) {
         if (state[state.focus].remote) remoteOp('mkdir'); else create(true);
     }
+    // Modified before bare, or bare `z` (go to a path) would answer first.
+    //
+    // The undo every other program on both platforms has. `u` was the only
+    // way in, so the key a hand reaches for after a copy went to the one
+    // place in cian that has no undo of its own — nowhere.
+    // Both cases of the letter: with Shift down the key *is* `Z`, and Chromium
+    // does not always agree with itself about that while a modifier is held.
+    else if ((k === 'z' || k === 'Z') && mod(e)) { if (e.shiftKey) redo(); else undo(); }
     else if (k === 'u' && bare) undo();
     else if (k === 'V' && bare) invert();
     else if (k === 'v' && bare) startVisual();

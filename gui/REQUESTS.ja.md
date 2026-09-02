@@ -60,6 +60,10 @@ python3 scripts/requests.py --list   # 何を見ているか
 | 19 | 2026-08-31 | run.bat の文字化けエラー | `chcp` を実行しない。純 ASCII | `gui/run.bat !~ ^\s*chcp` |
 | 20 | 2026-08-31 | cian-tui / cian-gui で表記の揺れ・動きの揺れがあれば揃えたい | 端末版の語を窓版のメニュー・スイッチ・並び替えに写し、**機械で確かめる**（`scripts/parity.py`）。CI にも入れた | `.github/workflows/ci.yml ~ python3 scripts/parity\.py` |
 | 21 | 2026-08-31 | （同上）機能・挙動の違いをなくしていきたい | ビューアの文法の既定を端末版と同じ vim に | `gui/renderer.js ~ ^let style = 1;$` |
+| 22 | 2026-09-02 | コピー・リネーム・移動のあとの Meta+z も戻したい | `Ctrl+z` / `⌘Z` を一覧の取り消しに（`Ctrl+Shift+z` でやり直し）。**コピーも取り消せるようにした** ── そのコピーが新しく作ったものだけをゴミ箱へ | `gui/renderer.js ~ if \(e\.shiftKey\) redo\(\); else undo\(\);` |
+| 23 | 2026-09-02 | コピーの取り消しは、そのコピーが作ったものだけ | 先に存在した名前は上書きでも飛ばしでも対象外。判断は1か所（`copy_creates`）で、両前端が同じものを使う | `crates/cian-core/src/ops.rs ~ pub fn copy_creates` |
+| 24 | 2026-09-02 | jj 系は端末版にも入れて欲しい | `jj` / `ｊｊ` / `っｊ` で挿入モードを抜ける。`ZZ` / `ZQ` も | `crates/cian-tui/src/viewer.rs ~ pub\(crate\) const JJ_ESCAPES` |
+| 25 | 2026-09-02 | アイコンを exe に焼き込むのをやってほしい | `winresource` で `cian-tui.exe` / `cian.exe` / `cian-server.exe` に `cian.ico` を。**無ければビルドを止める**（黙って軽い zip を出した font の再発を防ぐ） | `crates/cian-bin/build.rs ~ res\.set_icon\(icon\)` |
 
 ## 増やすとき
 

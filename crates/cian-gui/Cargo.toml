@@ -75,3 +75,7 @@ bundled-font = []
 
 [dev-dependencies]
 tempfile = "3"
+
+# The icon, stamped into the exe at link time. Windows-only and build-only.
+[target.'cfg(windows)'.build-dependencies]
+winresource = { workspace = true }

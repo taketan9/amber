@@ -43,11 +43,25 @@ def rows() -> list[dict]:
         if not line.startswith("|"):
             continue
         cells = [c.strip() for c in line.strip("|").split("|")]
+        # A row whose first cell is a number is a data row. Anything else is
+        # the header or the separator, and those are walked past.
+        if not cells or not cells[0].isdigit():
+            continue
+        # **A data row with the wrong number of cells is broken, not absent.**
+        # Row 22 was written with `\|\|` in its check — a perfectly good
+        # regex, and two more pipes than a markdown table has room for. It
+        # split into seven cells, fell through the `continue` below, and the
+        # register said "24 件、すべて守られています" while holding 25 rows.
+        # A checker that answers a question it did not read is worse than one
+        # that refuses.
         if len(cells) != 5:
+            out.append({
+                "n": cells[0],
+                "asked": cells[2] if len(cells) > 2 else "",
+                "error": f"5列のはずが {len(cells)} 列です — 検査に `|` は書けません（表が割れます）",
+            })
             continue
         num, date, asked, what, check = cells
-        if not num.isdigit():
-            continue
         m = re.match(r"`([^\s~!]+)\s*(!?~)\s*(.+)`$", check)
         if not m:
             out.append({"n": num, "asked": asked, "error": f"検査の書き方が読めません: {check}"})

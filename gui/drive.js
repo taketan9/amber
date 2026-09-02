@@ -421,7 +421,10 @@ async function main() {
         // IME off; the window reads the physical key instead and leaves the
         // person's input method alone.
         ['ime:j', 'IME 中でも下へ'], ['ime:k', 'IME 中でも上へ'],
-        ['?', 'ヘルプを開く'], ['Esc', '閉じる'],
+        // 一覧のキー表 ── 行が読めているかは絵でしか分からない。
+        // インデントが崩れているのを一度そのまま出している（`?` の表）。
+        ['?', 'ヘルプを開く'], ['wait:500', ''], ['shot:help-list@#find', '一覧のキー表'],
+        ['Esc', '閉じる'],
         ['Space', 'マーク'], ['V', '反転'], ['Ctrl+a', '全マーク'],
         ['Tab', 'ペイン切替'], ['Ctrl+l', '右へ'], ['Ctrl+h', '左へ'],
         ['F5', '読み直し'], ['p', 'パスをコピー'],
@@ -446,6 +449,7 @@ async function main() {
         ['top:#view', 'エディタが最前面'],
         // `?` のキー一覧は、エディタの**上**に出なければ出ていないのと同じ。
         ['?', 'キー一覧'], ['wait:600', ''], ['top:#report', '一覧が最前面'],
+        ['shot:help-editor@#report', 'エディタのキー表'],
         ['Esc', 'ファイルへ戻る'], ['wait:400', ''],
         // vim style is the default in both builds now, so the round asks for
         // insert mode before typing. It typed `XX` into normal mode instead —
@@ -626,6 +630,27 @@ async function main() {
         ['read:\'l のあと: \' + (state[state.focus].entries||[]).length + \' 行\'', ''],
         ['Bksp', 'ひとつ戻る'], ['wait:700', ''],
         ['Bksp', 'アーカイブを出る'], ['wait:800', ''],
+
+        // コピーの取り消し ── 押せた証拠ではなく、**消えた証拠**を取る。
+        //
+        // **行き先は新しく作る。** 一周の前半が `to/` に何本か置いている
+        // ので、同じ名前がすでにあると `copy_creates` は「このコピーが
+        // 作ったものは無い」と正しく答え、取り消しは何もしない ── 通った
+        // のに何も確かめていない一周になる。空の `to/undo` を作って、
+        // そこへ一本だけ写す。
+        ['Tab', '右へ'],
+        ['z', 'パスで移動'], [`type:${sand}/to`, ''], ['Enter', 'to へ'], ['wait:800', ''],
+        ['A', 'ディレクトリを作る'], ['type:undo'], ['Enter', ''], ['wait:900', ''],
+        ['land:undo', 'そこへ'], ['Enter', '入る'], ['wait:900', ''],
+        ['Tab', '左へ'], ['land:from', 'from へ'], ['Enter', '入る'], ['wait:900', ''],
+        ['land:k.rs', 'k.rs の行へ'], ['Space', 'マーク'],
+        ['c', '反対ペインへコピー'], ['wait:700', ''], ['Enter', 'はい'], ['wait:2000', ''],
+        ['read:\'コピー後の行き先 → \' + (state.right.entries||[]).filter(e=>!e.parent).length + \' 行\'', ''],
+        ['Mod+z', 'コピーを取り消す'], ['wait:2000', ''],
+        ['read:\'Ctrl+z のあと → \' + (state.right.entries||[]).filter(e=>!e.parent).length + \' 行\'', ''],
+        // コピーはやり直せない（元の場所を覚えていない）。断られるのが
+        // 正しい ── ここで確かめているのはキーが届くことの方。
+        ['Mod+Shift+z', 'やり直し'], ['wait:900', ''],
 
         // 取り消し・やり直し（一周の最後に、砂場を元へ）
         ['u', '取り消し'], ['wait:600', ''],

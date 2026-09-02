@@ -14,6 +14,7 @@
 use std::process::Command;
 
 fn main() {
+    icon();
     // Re-run when HEAD moves, so the stamp cannot go stale in a cached build.
     for p in [".git/HEAD", ".git/refs/heads"] {
         println!("cargo:rerun-if-changed=../../{p}");
@@ -36,4 +37,27 @@ fn main() {
         .map(|d| d.as_secs())
         .unwrap_or(0);
     println!("cargo:rustc-env=CIAN_BUILT_AT={secs}");
+}
+
+#[cfg(not(windows))]
+fn icon() {}
+
+/// The exe's own icon. The engine is not something anybody double-clicks, but
+/// it *is* downloaded on its own as `cian-server-win-x64.exe` and then sits in
+/// a folder next to the window it serves — where a generic icon reads as a
+/// stray file rather than as part of cian. See `crates/cian-bin/build.rs` for
+/// why a `.ico` beside the program does not cover this.
+#[cfg(windows)]
+fn icon() {
+    let icon = concat!(env!("CARGO_MANIFEST_DIR"), "/../../cian.ico");
+    assert!(
+        std::path::Path::new(icon).exists(),
+        "cian.ico is missing from the repository root — run `python3 packaging/icon.py`"
+    );
+    println!("cargo:rerun-if-changed={icon}");
+    let mut res = winresource::WindowsResource::new();
+    res.set_icon(icon)
+        .set("ProductName", "cian")
+        .set("FileDescription", "cian-server — the engine the window talks to");
+    res.compile().expect("stamping cian-server.exe with its icon");
 }

@@ -1,12 +1,17 @@
 //! Walking the last few things back.
 //!
 //! The shape is the terminal build's, arrived at again rather than invented:
-//! four things are undoable, and two deliberately are not.
+//! five things are undoable, and one deliberately is not.
 //!
-//! **A copy is not undone**, because undoing one means deleting files that now
-//! exist, and a key that sometimes deletes is not a key anyone can trust.
-//! **A delete is not undone either** — it went to the trash, which is the
-//! system's own undo and already has a window for it.
+//! **A copy is undone by deleting**, which needed an argument before it could
+//! be trusted. The argument is in [`cian_core::ops::copy_creates`]: the step
+//! remembers only the destination names that did not exist a moment earlier,
+//! so it can never reach something the copy did not put there — and what it
+//! does reach goes to the trash, not off the disk. A copy that landed on an
+//! existing name is simply not on the stack.
+//!
+//! **A delete is not undone** — it went to the trash, which is the system's
+//! own undo and already has a window for it.
 //!
 //! Where you *are* is on the same stack as what you did, in the order things
 //! happened. Walking into the wrong folder is the commonest thing to want
@@ -25,6 +30,10 @@ pub enum Undo {
     Created { path: PathBuf },
     /// Move each `.0` (where it is now) back to `.1` (where it was).
     Moved { pairs: Vec<(PathBuf, PathBuf)> },
+    /// Send these to the trash: they are what a copy brought into being, and
+    /// nothing else. **Not redoable** — the sources are not remembered here,
+    /// and re-deriving them from the destination would be a guess.
+    Copied { paths: Vec<PathBuf> },
     /// Take this pane back to `from`.
     Navigated { pane: String, from: PathBuf },
 }
@@ -44,6 +53,12 @@ impl Undo {
             }
             Undo::Created { path } => format!("{} を取り消しました", name_of(path)),
             Undo::Moved { pairs } => format!("{} 件の移動を{}", pairs.len(), verb),
+            // Named as a trip to the trash rather than as a deletion, because
+            // that is where they went and it is the difference that matters
+            // to somebody who pressed the key by mistake.
+            Undo::Copied { paths } => {
+                format!("{} 件のコピーを取り消しました（ゴミ箱へ）", paths.len())
+            }
             Undo::Navigated { from, .. } => format!("{} に{}", from.display(), verb),
         }
     }
@@ -108,7 +123,7 @@ impl Undo {
             Undo::Navigated { pane, from } => {
                 Some(Undo::Navigated { pane: pane.clone(), from: from.clone() })
             }
-            Undo::Created { .. } => None,
+            Undo::Created { .. } | Undo::Copied { .. } => None,
         }
     }
 }
