@@ -416,6 +416,17 @@ async function main() {
         // second, which turned input-sync on and left it on for the rest of
         // the round — a label that had drifted from what the key does.
         ['T', 'トグルを開く'], ['Enter', '隠しファイルを切り替える'], ['Esc', '閉じる'],
+        // 配色を暗くしたら、**窓の縁も**暗くなること。タイトルバーは OS が
+        // 描くので CSS では届かない ── 暗い配色に白い枠が乗っていた。
+        ['read:\'frame の口: \' + (window.cian && typeof window.cian.frame === \'function\')', ''],
+        ['read:(()=>{setLook(1, false);return \'陰翳に\';})()', ''], ['wait:500', ''],
+        ['read:\'陰翳の ground=\' + getComputedStyle(document.documentElement).getPropertyValue(\'--bg\').trim()', ''],
+        ['read:(async()=>\'OS に伝えた: \' + await tellFrame())()', ''],
+        ['read:(()=>{setPalette(\'dracula\', false);return \'dracula に\';})()', ''], ['wait:500', ''],
+        ['read:\'dracula の ground=\' + getComputedStyle(document.documentElement).getPropertyValue(\'--bg\').trim()', ''],
+        ['read:(()=>{setLook(0, false);return \'白磁に戻す\';})()', ''], ['wait:400', ''],
+        ['read:\'戻した ground=\' + getComputedStyle(document.documentElement).getPropertyValue(\'--bg\').trim()', ''],
+        ['read:(async()=>\'OS に伝えた: \' + await tellFrame())()', ''],
         // With an input method holding the character. A terminal never sees
         // this event, which is why both builds shipped a helper to switch the
         // IME off; the window reads the physical key instead and leaves the

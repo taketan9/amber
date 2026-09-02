@@ -36,6 +36,12 @@ contextBridge.exposeInMainWorld('cian', {
     /// driver that cannot reach it.
     fullscreen: () => ipcRenderer.invoke('cian-fullscreen'),
 
+    /// Say which way round the palette is, so the OS draws the frame to
+    /// match. The title bar is not the page's to paint — Windows draws it
+    /// from what the app declares its theme to be — so this is the one thing
+    /// about the window's own colour the renderer has to hand outwards.
+    frame: (light) => ipcRenderer.invoke('cian-frame', !!light),
+
     /// Hand these files to the desktop's drag. Fire and forget on purpose —
     /// the drag has to start while the gesture is still happening.
     startDrag: (paths) => ipcRenderer.send('cian-drag', paths),

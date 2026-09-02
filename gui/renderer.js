@@ -1872,6 +1872,29 @@ function clearPaneSkins() {
     }
 }
 
+/// Tell the frame which way round we are.
+///
+/// **The title bar stayed light in every dark palette.** It is drawn by the
+/// OS, not by the page, so no amount of CSS reaches it — Windows reads what
+/// the *application* says its theme is. The window disagreed with itself
+/// along its own top edge.
+///
+/// Read from the ground that is actually painted rather than from the name of
+/// the look: there are eighteen palettes and `is_light` in cian-core judges
+/// them by luminance for the same reason — 宵闇 and 墨 are not dark because of
+/// how they are spelled. One door, called from both places that can change
+/// the ground.
+function tellFrame() {
+    if (!window.cian || !window.cian.frame) return;
+    const raw = getComputedStyle(document.documentElement).getPropertyValue('--bg').trim();
+    const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(raw);
+    if (!m) return;
+    const [r, g, b] = [1, 2, 3].map((i) => parseInt(m[i], 16));
+    // Rec. 601, the same arithmetic `theme.rs` uses, so the two builds never
+    // disagree about which side of the line a palette is on.
+    return window.cian.frame((299 * r + 587 * g + 114 * b) / 1000 > 128);
+}
+
 function setLook(i, remember = true) {
     look = (i + LOOKS.length) % LOOKS.length;
     clearPaneSkins();
@@ -1884,6 +1907,7 @@ function setLook(i, remember = true) {
     else delete document.documentElement.dataset.look;
     if (wasBase) setFont(baseFont(), false);
     if (viewer.ed) viewer.ed.updateOptions({ theme: editorTheme() });
+    tellFrame();
     if (remember) ask('remember', { key: 'gui_look', value: LOOKS[look][0] || 'hakuji' });
 }
 
@@ -1897,6 +1921,7 @@ function setPalette(name, remember = true) {
     paintPalette(t);
     palette = name;
     if (viewer.ed) viewer.ed.updateOptions({ theme: editorTheme() });
+    tellFrame();
     if (remember) {
         ask('remember', { key: 'theme', value: name });
         // Choosing a palette *is* choosing the window's ground. Left in

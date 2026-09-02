@@ -6,7 +6,7 @@
 // the disk hands it; the window that draws the listing has no business being
 // able to read the disk itself.
 
-const { app, BrowserWindow, Menu, ipcMain, nativeImage } = require('electron');
+const { app, BrowserWindow, Menu, ipcMain, nativeImage, nativeTheme } = require('electron');
 
 /// The picture under the pointer when the file type has none of its own. A
 /// 16×16 page, drawn here rather than shipped as a file: `startDrag` refuses
@@ -47,6 +47,14 @@ if (process.env.CIAN_GPU !== '1') app.disableHardwareAcceleration();
 /// The frame's colour before the page paints, matched to the saved look so
 /// the window does not flash the wrong ground on the way up. It was a fixed
 /// dark — right for a dark theme and exactly wrong for 白磁, the default.
+/// The ground to open on before the page has painted, when the engine cannot
+/// be asked in time.
+///
+/// **It used to be the whole answer, and it holds three of eighteen palettes.**
+/// The other fifteen opened on hakuji's near-white and repainted a beat later
+/// — a flash of the wrong colour on every start. The engine answers with the
+/// real one now (`settings.ground`); this is only the fallback for a start
+/// where it did not reply inside a second and a half.
 const GROUNDS = { hakuji: '#f7f8f8', inei: '#14110f', terminal: '#0c0c0c' };
 
 /// cian's own icon, wherever this is running from.
@@ -136,6 +144,22 @@ function createWindow(ground) {
         how(`[${where}] ${message}`);
     });
     return win;
+}
+
+/// Tell the OS which way round this window is.
+///
+/// `nativeTheme.themeSource` is what Windows reads to decide the caption bar,
+/// and what macOS reads for the traffic-light background. It is a global for
+/// the app rather than a window property, which is why this is a function and
+/// not an option in `createWindow` — the palette can change while the window
+/// is open, and the frame has to follow it.
+function setFrameTheme(light) {
+    try {
+        nativeTheme.themeSource = light ? 'light' : 'dark';
+    } catch {
+        // An Electron old enough not to have it still draws a window; it just
+        // draws the frame the OS would have anyway.
+    }
 }
 
 /// The menu bar, decided rather than inherited.
@@ -255,6 +279,22 @@ app.whenReady().then(async () => {
         } catch { /* the gesture ended before we got here */ }
     });
 
+    // The palette changed while the window was open. `T` and `:theme` both end
+    // here, because both end at a different `--bg` and the frame follows the
+    // ground rather than the name of the thing that set it.
+    ipcMain.handle('cian-frame', (_event, light) => {
+        setFrameTheme(!!light);
+        // What it *is*, not that it was asked for. The visible half of this is
+        // a Windows caption bar, which cannot be photographed from here — so
+        // the value read back is the only thing a check on this machine can
+        // stand on, and it is worth returning for that alone.
+        try {
+            return nativeTheme.themeSource;
+        } catch {
+            return 'unknown';
+        }
+    });
+
     ipcMain.handle('cian-fullscreen', (event) => {
         const win = BrowserWindow.fromWebContents(event.sender);
         if (!win) return false;
@@ -265,13 +305,26 @@ app.whenReady().then(async () => {
     // Bounded, because a window that waits on a wedged engine is worse than a
     // window that flashes.
     let ground = GROUNDS.hakuji;
+    let light = true;
     try {
         const s = await Promise.race([
             engine.call('settings', {}),
             new Promise((_, no) => setTimeout(() => no(new Error('slow')), 1500)),
         ]);
-        ground = GROUNDS[s && s.look] || ground;
+        if (s && s.ground && s.ground.bg) {
+            ground = s.ground.bg;
+            light = !!s.ground.light;
+        } else if (s && GROUNDS[s.look]) {
+            ground = GROUNDS[s.look];
+            light = s.look === 'hakuji';
+        }
     } catch { /* the default ground */ }
+    // **The title bar is the OS's, and it was always the light one.** Windows
+    // draws the caption from what the app says its theme is, so a dark palette
+    // sat under a white bar — the window disagreeing with itself along its own
+    // top edge. Set before the frame exists, so it opens right rather than
+    // correcting itself.
+    setFrameTheme(light);
     const win = createWindow(ground);
     // The engine's unasked lines go straight to the window. Nothing here
     // interprets them; a progress count is the renderer's business.

@@ -2766,6 +2766,23 @@ impl Session {
                 let cfg = cian_lua::load();
                 Ok(serde_json::json!({
                 "look": cian_lua::state_get("gui_look"),
+                // The palette's actual ground, and which way round it is.
+                //
+                // **`main.js` kept a table of three grounds and there are
+                // eighteen palettes.** Fifteen of them opened the window on
+                // hakuji's near-white and then repainted — a flash of the
+                // wrong colour on every start, for anybody not using one of
+                // the three that were written down. And the frame around it
+                // is drawn by the OS: on Windows the title bar follows what
+                // the app says its theme is, so a dark palette in a light
+                // caption bar is the window disagreeing with itself.
+                //
+                // Answered from `cian_core::theme`, which is where the
+                // palettes live, rather than from a copy kept somewhere else.
+                // `is_light` reads the background's luminance rather than the
+                // name — 宵闇 and 墨 are not dark because of how they are
+                // spelled.
+                "ground": ground_of(),
                 "style": cian_lua::state_get("gui_editor"),
                 // Whether `cian.ime{}` is configured at all.
                 //
@@ -5183,6 +5200,33 @@ fn quietly<T>(f: impl FnOnce(&mut cian_core::progress::Ctl) -> T) -> T {
 /// `zip_writable` at the call sites' request rather than being renamed
 /// everywhere at once. What it excludes is what `cian_core::archive::kind`
 /// does not recognise.
+/// The ground the window should open on, and which way round it is.
+///
+/// **Two axes, and I conflated them.** `gui_look` is the window's own look —
+/// 白磁 / 陰翳 / 端末譲り, three of them — while `theme` is one of the
+/// eighteen palettes in `cian_core::theme`. `by_name("hakuji")` is `None`
+/// because hakuji is not a palette, and asking for it with `expect` **killed
+/// the engine on a `settings` call**: the window then never opened at all.
+/// A question about a colour must not be able to end the process.
+///
+/// The precedence is the renderer's own (`setPalette` resets `gui_look` to
+/// 白磁, so a surviving non-白磁 look is by definition the later choice).
+fn ground_of() -> serde_json::Value {
+    const HAKUJI: (u32, bool) = (0x00f7_f8f8, true);
+    let look = cian_lua::state_get("gui_look");
+    let (bg, light) = match look.as_deref() {
+        Some("inei") => (0x0014_110f, false),
+        Some("terminal") => (0x000c_0c0c, false),
+        // 白磁 — and then a palette, if one was chosen after it.
+        _ => cian_lua::state_get("theme")
+            .as_deref()
+            .and_then(cian_core::theme::by_name)
+            .map(|s| (s.bg, s.is_light()))
+            .unwrap_or(HAKUJI),
+    };
+    serde_json::json!({ "bg": format!("#{bg:06x}"), "light": light })
+}
+
 fn zip_writable(archive: &std::path::Path) -> bool {
     cian_core::archive::is_archive(archive)
 }

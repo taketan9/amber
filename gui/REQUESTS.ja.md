@@ -84,6 +84,7 @@ python3 scripts/requests.py --list   # 何を見ているか
 | 39 | 2026-09-02 | ディレクトリ転送に確認シート | サーバへフォルダを送るとき、**中に何ファイル・何バイトあるか**を確認前に出す。数は転送が使うのと**同じ計画器**（`plan_upload`）から取る ── シートと実行が別々に数えると、約束と結果がずれる | `crates/cian-server/src/main.rs ~ "transferplan" =>` |
 | 40 | 2026-09-02 | スクリプトマクロを窓版でも | `macro_script::run` をエンジンから呼ぶ。**それまでは「まだ動かせません」と断っていた** ── `macro.lua` は両方の種類を1ファイルに持つので、半分だけ動く状態だった | `crates/cian-server/src/main.rs ~ macro_script::run\(` |
 | 41 | 2026-09-02 | （同上）`macro/` ディレクトリも読む | 探索の規則（`macro.lua` と `macro/*.lua`、`.en.lua` は飛ばす）を `cian_lua::macros::load_all` に。**窓版は前者しか読まず、同梱の例のように1ファイル1マクロにしている人にはランチャーが空だった** | `crates/cian-lua/src/macros.rs ~ pub fn load_all\(` |
+| 42 | 2026-09-02 | ダークテーマのときもタイトルバーが明るいまま | タイトルバーは OS が描くので CSS では届かない。`nativeTheme.themeSource` を**実際に描かれている `--bg` の輝度**から決めて渡す（配色の名前ではなく）。起動時の地の色もエンジンに訊く ── `main.js` は18ある配色のうち3つしか表を持っていなかった | `gui/renderer.js ~ function tellFrame\(` |
 
 ## 増やすとき
 
