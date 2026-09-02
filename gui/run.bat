@@ -93,12 +93,15 @@ rem Shared install: give a first-time user the team's settings.
 rem
 rem For a shared machine (an AVD image, a Citrix host) where this folder sits
 rem in Program Files and everybody launches the same run.bat from the common
-rem desktop. Two folders, two policies:
+rem desktop.
 rem
-rem   default-config\*.lua          copied only when the user has none.
-rem                                 Theirs afterwards; edits are kept.
-rem   default-config\always\*.lua   copied on every launch.
-rem                                 The team's -- ssh.lua belongs here.
+rem   default-config\*.lua   copied only when the user has none.
+rem
+rem One rule: **first launch only**. After that every file is that person's,
+rem including ssh.lua, and nothing here touches it again. A settings file that
+rem is rewritten under somebody while they are using it is a settings file
+rem they cannot trust -- and the first thing anyone does with a server list is
+rem add the one host that is missing from it.
 rem
 rem NEVER put init.lua next to this file to distribute it. cian reads a config
 rem beside the executable first -- and *writes* there too once one exists, so
@@ -113,9 +116,6 @@ if exist "%SEED%" (
     if not exist "%MINE%" mkdir "%MINE%" 2>nul
     for %%F in ("%SEED%\*.lua") do (
         if not exist "%MINE%\%%~nxF" copy /y "%%F" "%MINE%\" >nul
-    )
-    if exist "%SEED%\always" (
-        for %%F in ("%SEED%\always\*.lua") do copy /y "%%F" "%MINE%\" >nul
     )
 )
 
