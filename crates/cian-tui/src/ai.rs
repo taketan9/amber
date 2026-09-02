@@ -86,81 +86,6 @@ fn persona() -> &'static str {
      always refer to yourself as「私」.)"
 }
 
-/// The host from the most recent `ssh …` command visible on a shell's screen —
-/// so a session that logged into a server (whose ksh/AIX prompt never set the
-/// terminal title to `user@host`) is still recognised as remote.
-fn ssh_host_from_screen(screen: &str) -> Option<String> {
-    // Short flags that consume the next token, so its argument isn't mistaken
-    // for the target host (`ssh -p 2222 aix1`).
-    const ARGFLAGS: &[&str] = &[
-        "-p", "-i", "-l", "-o", "-F", "-J", "-b", "-c", "-D", "-e", "-L", "-R", "-W", "-w", "-m",
-        "-O", "-Q", "-S",
-    ];
-    let mut found = None;
-    for line in screen.lines() {
-        let bytes = line.as_bytes();
-        let mut from = 0;
-        while let Some(rel) = line[from..].find("ssh ") {
-            let start = from + rel;
-            from = start + 4;
-            if start != 0 && !bytes[start - 1].is_ascii_whitespace() {
-                continue; // part of a longer word, e.g. "passh "
-            }
-            let toks: Vec<&str> = line[start + 4..].split_whitespace().collect();
-            // A `user@host` token is unambiguous; otherwise the first non-flag,
-            // non-flag-argument token is the target.
-            let mut target = toks.iter().find(|t| t.contains('@') && !t.starts_with('-')).copied();
-            if target.is_none() {
-                let mut skip = false;
-                for tok in &toks {
-                    if skip {
-                        skip = false;
-                        continue;
-                    }
-                    if tok.starts_with('-') {
-                        if ARGFLAGS.contains(tok) {
-                            skip = true;
-                        }
-                        continue;
-                    }
-                    target = Some(tok);
-                    break;
-                }
-            }
-            if let Some(t) = target {
-                let h = t.rsplit('@').next().unwrap_or(t);
-                let h = h.split(':').next().unwrap_or(h);
-                if !h.is_empty() && h.chars().all(|c| c.is_alphanumeric() || matches!(c, '.' | '-' | '_')) {
-                    found = Some(h.to_string());
-                }
-            }
-        }
-    }
-    found
-}
-
-/// Guess whether a shell's visible screen is a Unix/POSIX session (`Some(true)`)
-/// or a Windows one (`Some(false)`), or `None` if it can't tell. Windows signals
-/// win, since a Unix `#`/`$` can appear inside Windows output too.
-fn shell_looks_unix(screen: &str) -> Option<bool> {
-    if screen.contains("PS ") && screen.contains(":\\") {
-        return Some(false);
-    }
-    if screen.contains("Microsoft Windows") || screen.contains("C:\\") || screen.contains("\\Windows\\") {
-        return Some(false);
-    }
-    for line in screen.lines() {
-        let t = line.trim_end();
-        if t.ends_with('$') || t.ends_with('#') {
-            return Some(true); // a typical Unix prompt line
-        }
-    }
-    if ["/usr/", "/home/", "/etc/", "/var/", "/opt/"].iter().any(|p| screen.contains(p)) {
-        return Some(true);
-    }
-    None
-}
-
 /// The viewer's selection as text, or the whole file when nothing is selected
 /// — the same rule the copy key follows.
 fn viewer_selection_text(p: &Popup) -> Option<String> {
@@ -791,71 +716,34 @@ impl App {
         if description.is_empty() {
             return;
         }
-        // Where will this command actually run? The active shell may be local, or
-        // already logged into a server over SSH — the command must suit THAT
-        // system (AIX `ls` vs Windows `dir`, and never an ssh-wrapped command).
-        // Detection, in order: a `user@host` terminal title; an `ssh …` command
-        // still visible on the shell's screen (AIX/ksh often don't set the
-        // title); the screen's prompt style (a Unix `$`/`#` vs PowerShell). A
-        // matched SSH host also hands over its recorded OS via `notes`.
+        // Where will this command actually run? The active shell may be
+        // local, or already logged into a server over SSH — the command must
+        // suit THAT system (AIX `ls` vs Windows `dir`, and never an
+        // ssh-wrapped one). The three signals and the sentence they build are
+        // `cian_core::shellwhere`, shared with the window build, which had
+        // none of them and wrote PowerShell for Linux servers.
         let screen = self
             .shell
             .active_session()
             .and_then(|s| s.parser().lock().ok().map(|p| p.screen().contents()));
-        let host = self
-            .shell
-            .active_title()
-            .and_then(|t| host_from_title(&t))
-            .or_else(|| screen.as_deref().and_then(ssh_host_from_screen));
-        let unix_hint = screen.as_deref().and_then(shell_looks_unix);
-        let target = match &host {
-            Some(h) => {
-                let known = self
-                    .config
-                    .ssh_hosts
-                    .iter()
-                    .find(|x| x.host == *h || x.name == *h)
-                    .and_then(|x| x.notes.as_deref());
-                match known {
-                    Some(notes) => format!(
-                        "a shell already logged in over SSH to the server '{h}'. \
-                         That system: {notes}. Use that system's own commands and flags \
-                         (AIX / Solaris / HP-UX differ from GNU/Linux)."
-                    ),
-                    None => format!(
-                        "a Unix-like shell on '{h}' (it may be a remote server reached over \
-                         SSH). Use POSIX / Unix commands, not Windows ones."
-                    ),
-                }
-            }
-            None if unix_hint == Some(true) => {
-                // No host name, but the shell clearly isn't a Windows one — it's
-                // a Unix/POSIX session (very likely SSH'd into a server).
-                "a Unix / POSIX shell (it looks like a remote or Unix session). Use ls-style \
-                 POSIX commands, not Windows (`dir`/PowerShell) ones."
-                    .to_string()
-            }
-            None => {
-                let os = if cfg!(windows) {
-                    "Windows"
-                } else if cfg!(target_os = "macos") {
-                    "macOS"
-                } else {
-                    "Linux"
-                };
-                format!("your local {os} {} shell", self.shell_cmd_name())
-            }
+        let title = self.shell.active_title();
+        let hosts = self.config.ssh_hosts.clone();
+        let known = |h: &str| {
+            hosts
+                .iter()
+                .find(|x| x.host == h || x.name == h)
+                .and_then(|x| x.notes.clone())
         };
-        let ctx = self.ai_context_block();
-        let system = format!(
-            "Translate the user's request into ONE shell command to run in {target}.\n\
-             The command is pasted into that shell exactly as written and run there, so:\n\
-             - Do NOT wrap it in `ssh` and do NOT add a hostname or any login/connection \
-               step — the shell is already at the right place.\n\
-             - Use the command style and flags native to that system.\n\
-             - Output ONLY the command — no explanation, no markdown, no code fences.\n\
-             {ctx}"
+        let target = cian_core::shellwhere::describe(
+            title.as_deref(),
+            screen.as_deref(),
+            known,
+            cian_core::aiprompt::os_name(),
+            &self.shell_cmd_name(),
         );
+        // No `ai_context_block()` here: `ai_request` prepends it already, and
+        // appending it too sent the same paragraph twice.
+        let system = cian_core::aiprompt::cmd(&target);
         self.message = Some(tr(self.lang, "asking AI for a command…", "AI にコマンドを問い合わせ中…").into());
         self.ai_request(AiPurpose::ShellCommand { description: description.clone() }, system, description);
     }
@@ -960,6 +848,16 @@ impl App {
             return;
         }
         let Some(pane) = self.active_pane() else { return };
+        // **Not on a remote pane.** `cwd` on one of those is whatever local
+        // directory was there before the connection — so this would walk
+        // *this* machine and label the result as the far one's contents.
+        // Wrong quietly, which is the worst way to be wrong.
+        if pane.remote_view().is_some() {
+            self.message = Some(tr(self.lang,
+                "not on a remote pane — this reads the local disk",
+                "リモートペインでは使えません（この機能は手元のディスクを読みます）").into());
+            return;
+        }
         let dir = pane.cwd.clone();
         if !self.ai_ready() {
             self.message = Some(tr(self.lang, "AI unavailable (python, packages, or sign-in)", "AI を利用できません（python・パッケージ・サインインのいずれか）").into());
@@ -1182,6 +1080,12 @@ impl App {
             return;
         }
         let Some(root) = self.cwd() else { return };
+        if self.active_pane().map(|p| p.remote_view().is_some()).unwrap_or(false) {
+            self.message = Some(tr(self.lang,
+                "not on a remote pane — this reads the local disk",
+                "リモートペインでは使えません（この機能は手元のディスクを読みます）").into());
+            return;
+        }
         // Hidden included: somebody looking for "the eslint config" means
         // `.eslintrc`, and a search that cannot see dotfiles fails on exactly
         // the files nobody can remember the name of.
@@ -1597,29 +1501,5 @@ mod ai_history_tests {
         let back: Vec<StoredChat> = serde_json::from_str(json).unwrap();
         assert_eq!(back[0].skin().title, "Chat");
         assert!(back[0].skin().simple);
-    }
-}
-
-#[cfg(test)]
-mod shell_env_tests {
-    use super::{shell_looks_unix, ssh_host_from_screen};
-
-    #[test]
-    fn finds_the_ssh_target_over_flags() {
-        assert_eq!(ssh_host_from_screen("$ ssh admin@aix1\n").as_deref(), Some("aix1"));
-        assert_eq!(ssh_host_from_screen("$ ssh -p 2222 aix1 uptime\n").as_deref(), Some("aix1"));
-        assert_eq!(ssh_host_from_screen("$ ssh -i ~/k user@10.0.0.9\n").as_deref(), Some("10.0.0.9"));
-        // The most recent invocation wins.
-        assert_eq!(ssh_host_from_screen("ssh old1\nsomething\nssh new2\n").as_deref(), Some("new2"));
-        assert_eq!(ssh_host_from_screen("just some text\n"), None);
-    }
-
-    #[test]
-    fn tells_unix_from_windows() {
-        assert_eq!(shell_looks_unix("PS C:\\Users\\me> dir"), Some(false));
-        assert_eq!(shell_looks_unix("Microsoft Windows [Version 10]"), Some(false));
-        assert_eq!(shell_looks_unix("root@aix1:/home/app #"), Some(true));
-        assert_eq!(shell_looks_unix("looking in /usr/local/bin"), Some(true));
-        assert_eq!(shell_looks_unix("nothing telling here"), None);
     }
 }

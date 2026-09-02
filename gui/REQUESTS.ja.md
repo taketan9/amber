@@ -65,7 +65,7 @@ python3 scripts/requests.py --list   # 何を見ているか
 | 24 | 2026-09-02 | jj 系は端末版にも入れて欲しい | `jj` / `ｊｊ` / `っｊ` で挿入モードを抜ける。`ZZ` / `ZQ` も | `crates/cian-tui/src/viewer.rs ~ pub\(crate\) const JJ_ESCAPES` |
 | 25 | 2026-09-02 | アイコンを exe に焼き込むのをやってほしい | `winresource` で `cian-tui.exe` / `cian.exe` / `cian-server.exe` に `cian.ico` を。**無ければビルドを止める**（黙って軽い zip を出した font の再発を防ぐ） | `crates/cian-bin/build.rs ~ res\.set_icon\(icon\)` |
 | 26 | 2026-09-02 | AIの会話枠はいらない。コマンド提案・ディレクトリ検索・ゴミ検索の品質と精度を1段2段あげたい | モデルに渡す事実を増やした ── **種類・サイズ（ディレクトリは配下の合計）・最終更新からの日数・パス**の4列。ゴミ検索は木を4階層下まで見る（前は1階層） | `crates/cian-core/src/survey.rs ~ pub fn survey` |
-| 27 | 2026-09-02 | （同上）コマンド提案の精度 | **OS ではなくシェル名**を渡す（Windows は PowerShell）。いま開いている一覧とマークも。1行で書けないときは `# ` で断らせる | `crates/cian-server/src/main.rs ~ Shell: \{shell\}\\nPlatform` |
+| 27 | 2026-09-02 | （同上）コマンド提案の精度 | **OS ではなく「そのシェルが今どこにいるか」**を渡す ── タイトルの `user@host`／画面に残る `ssh` 行／プロンプトの形、そして `init.lua` の `notes` から**接続先のOS**まで。端末版が持っていたものを窓版にも。一覧とマークも渡し、1行で書けないときは `# ` で断らせる | `crates/cian-server/src/main.rs ~ cian_core::shellwhere::describe\(` |
 | 28 | 2026-09-02 | （同上）見た範囲を偽らない | 打ち切ったら**モデルにも人にも**言う。「N件入らなかった」ではなく「何階層目までは全部見た」 | `crates/cian-core/src/survey.rs ~ pub fn whole_to` |
 
 ## 増やすとき

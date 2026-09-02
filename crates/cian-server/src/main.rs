@@ -553,7 +553,12 @@ impl Session {
     fn new_shell(&mut self, cwd: &std::path::Path, rows: u16, cols: u16) -> anyhow::Result<u64> {
         let id = self.shell_next;
         self.shell_next += 1;
-        let sh = shell::Shell::start(id, cwd, rows, cols, self.out.clone())?;
+        // `cian.set_option("shell", …)`, which the terminal build has honoured
+        // since it had a shell panel and this one never did. Read per panel
+        // rather than cached: `init.lua` is reloadable, and a shell opened
+        // after a reload should be the shell that was just asked for.
+        let program = cian_lua::load().options.shell.unwrap_or_else(cian_pty::default_shell);
+        let sh = shell::Shell::start(id, cwd, rows, cols, &program, self.out.clone())?;
         self.shells.push(sh);
         Ok(id)
     }
@@ -2727,23 +2732,57 @@ impl Session {
                         if want.trim().is_empty() {
                             anyhow::bail!("やりたいことを書いてください");
                         }
-                        // **Which shell, not which operating system.** The old
-                        // prompt said "Platform: windows" and left the model to
-                        // guess between cmd.exe and PowerShell — two languages
-                        // that share almost no syntax. It is the shell cian is
-                        // actually going to run this in, so it is the one fact
-                        // that decides whether the answer even parses.
-                        let shell = cian_pty::default_shell();
-                        let shell = std::path::Path::new(&shell)
+                        // **Where is that shell, actually?** It starts as
+                        // whatever cian launched and then somebody runs `ssh`,
+                        // or `su`, or bash inside PowerShell — and the answer
+                        // is *pasted at that prompt*, so writing PowerShell
+                        // for a Linux server produces a line that cannot run
+                        // in the one place it is going to end up.
+                        //
+                        // The terminal build has read the title, the `ssh`
+                        // line in the scrollback and the prompt's shape since
+                        // it had a shell panel; this build read none of them
+                        // and sent `Platform: windows`. Both call
+                        // `cian_core::shellwhere` now.
+                        let (title, screen) = match self.shell_now() {
+                            Some(sh) => (sh.title(), sh.contents()),
+                            None => (None, None),
+                        };
+                        let started = self
+                            .shell_now()
+                            .map(|sh| sh.program.clone())
+                            .unwrap_or_else(cian_pty::default_shell);
+                        let started = std::path::Path::new(&started)
                             .file_name()
                             .map(|s| s.to_string_lossy().into_owned())
-                            .unwrap_or(shell.clone());
+                            .unwrap_or(started.clone());
+                        let hosts = cian_lua::load().ssh_hosts;
+                        let known = |h: &str| {
+                            hosts
+                                .iter()
+                                .find(|x| x.host == h || x.name == h)
+                                .and_then(|x| x.notes.clone())
+                        };
+                        let target = cian_core::shellwhere::describe(
+                            title.as_deref(),
+                            screen.as_deref(),
+                            known,
+                            cian_core::aiprompt::os_name(),
+                            &started,
+                        );
                         // And what is in front of the person. "delete the old
                         // logs" is unanswerable without the names, and "zip
                         // these" means the marks.
-                        let (cwd, listing, marked) = {
+                        let (cwd, remote, listing, marked) = {
                             let pane = self.pane_mut(&which)?;
                             let cwd = pane.cwd.display().to_string();
+                            // A remote pane is somebody else's disk, and a
+                            // command typed at the local prompt cannot touch
+                            // it. The prompt has a rule for this; it needs the
+                            // fact to apply it to.
+                            let remote = pane
+                                .remote_view()
+                                .map(|(host, path)| format!("{host}:{path}"));
                             let listing: String = pane
                                 .entries
                                 .iter()
@@ -2759,7 +2798,7 @@ impl Session {
                                 .filter(|e| !e.is_parent && pane.marks.contains(&e.path))
                                 .map(|e| e.name.clone())
                                 .collect();
-                            (cwd, listing, marked)
+                            (cwd, remote, listing, marked)
                         };
                         let marks = if marked.is_empty() {
                             String::new()
@@ -2770,13 +2809,15 @@ impl Session {
                                 marked.join("\n")
                             )
                         };
-                        (
-                            cian_core::aiprompt::CMD
-                                .to_string(),
-                            format!(
-                                "Shell: {shell}\nPlatform: {}\nDirectory: {cwd}\n\nIn this directory:\n{listing}{marks}\nTask: {want}",
-                                std::env::consts::OS
+                        let where_ = match &remote {
+                            Some(at) => format!(
+                                "Pane: a REMOTE listing over SFTP at {at}. The shell is NOT on that machine."
                             ),
+                            None => format!("Pane: local, {cwd}"),
+                        };
+                        (
+                            cian_core::aiprompt::cmd(&target),
+                            format!("{where_}\n\nIn the pane:\n{listing}{marks}\nTask: {want}"),
                         )
                     }
                     "log" => {
@@ -4079,6 +4120,16 @@ impl Session {
                 let which = req.params["pane"].as_str().unwrap_or("left").to_string();
                 let cfg = ai_config()?;
                 let dir = self.pane_cwd(&which);
+                // **Not on a remote pane.** `cwd` on one of those is whatever
+                // local directory was there before the connection — so this
+                // would walk *this* machine and label the result as the far
+                // one's contents. Wrong quietly, which is the worst way to be
+                // wrong: every row would look plausible.
+                if self.pane_mut(&which)?.remote_view().is_some() {
+                    anyhow::bail!(
+                        "リモートペインでは使えません（この機能は手元のディスクを読みます）"
+                    );
+                }
                 let junk = req.method == "aijunk";
                 // **Junk nests and tidying does not.** A `node_modules` two
                 // folders down is the commonest thing anybody wants gone, and
@@ -4142,6 +4193,11 @@ impl Session {
                 let query = arg(req, "query");
                 if query.is_empty() {
                     anyhow::bail!("何を探すかを書いてください");
+                }
+                if self.pane_mut(&which)?.remote_view().is_some() {
+                    anyhow::bail!(
+                        "リモートペインでは使えません（この機能は手元のディスクを読みます）"
+                    );
                 }
                 let cfg = ai_config()?;
                 let root = self.pane_cwd(&which);

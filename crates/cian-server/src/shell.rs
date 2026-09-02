@@ -78,17 +78,31 @@ pub struct Shell {
     pub id: u64,
     pub rows: u16,
     pub cols: u16,
+    /// The command line this panel was started with.
+    ///
+    /// Kept so the AI can be told which shell it is writing for. `cmd.exe`
+    /// batch and PowerShell share almost no syntax, and the suggested command
+    /// is *placed at this prompt* — so getting it wrong produces a line that
+    /// cannot run in the one place it is going to end up.
+    pub program: String,
 }
 
 impl Shell {
+    /// `program` is what to run — the caller resolves `cian.set_option("shell",
+    /// …)` and falls back to the platform's own. **It used to be resolved
+    /// here, as `default_shell()` and nothing else**, which meant the option
+    /// worked in the terminal build and was silently ignored in this one:
+    /// a setting that does nothing is worse than a setting that is missing,
+    /// because there is no way to tell from the outside.
     pub fn start(
         id: u64,
         cwd: &std::path::Path,
         rows: u16,
         cols: u16,
+        program: &str,
         out: Out,
     ) -> anyhow::Result<Self> {
-        let shell = cian_pty::default_shell();
+        let shell = program.to_string();
         // `start` rather than `new`: it falls back to something that will run
         // and says which. A panel with cmd.exe in it and a line saying why
         // beats an empty panel every time — which is exactly what `new` alone
@@ -152,7 +166,7 @@ impl Shell {
             // about the window's own request.
         });
 
-        Ok(Shell { session, stop, auth, id, rows, cols })
+        Ok(Shell { session, stop, auth, id, rows, cols, program: shell })
     }
 
     /// A handle a worker can hold: writing and waiting, without the Shell
@@ -209,6 +223,14 @@ impl Shell {
             g["id"] = serde_json::json!(self.id);
             g
         })
+    }
+
+    /// The window title the shell set, if any. A remote login usually puts
+    /// `user@host` here, which is the cheapest way to know where this panel
+    /// actually is.
+    pub fn title(&self) -> Option<String> {
+        let t = self.session.lock().ok().map(|s| s.window_title())?;
+        (!t.trim().is_empty()).then_some(t)
     }
 
     /// The visible screen as plain text, for the AI to read.

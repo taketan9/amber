@@ -36,6 +36,7 @@ pub mod outline;
 pub mod progress;
 pub mod rename;
 pub mod search;
+pub mod shellwhere;
 pub mod substitute;
 pub mod survey;
 pub mod textops;

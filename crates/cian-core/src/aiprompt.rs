@@ -64,21 +64,35 @@ Two names in one directory cannot be the same. If the instruction would collide 
 
 Reply with ONLY a JSON array of objects {"name": string (exactly as given), "new_name": string (a bare filename, no path)}. Include only files that should change; omit the rest. No prose, no fences."#;
 
-/// Write one command line.
+/// Write one command line, for wherever that shell actually is.
+///
+/// `target` comes from [`crate::shellwhere::describe`] — the terminal title,
+/// an `ssh` line in the scrollback, the shape of the prompt, and what
+/// `init.lua` records about a known host. The wording of the first paragraph
+/// and the three bullets is the terminal build's, which had all of this while
+/// the window build had none.
 ///
 /// The refusal clause is the part that earns its place. Asked for something
 /// that is not one command, a model that must answer with a command answers
 /// with a command — and a plausible half-right shell line is worse than
 /// nothing, because it looks like the thing you asked for.
-pub const CMD: &str = r#"You write ONE command line for the named shell, to be run in the named directory.
+pub fn cmd(target: &str) -> String {
+    format!(
+        r#"Translate the user's request into ONE command line to run in {target}.
 
-Answer with the command only — no explanation, no code fence, no leading prompt character, no `cd` to somewhere else (it already runs there).
-
-**Write it for the shell you are told, not for the operating system.** powershell.exe takes PowerShell, not cmd.exe batch; a POSIX shell takes POSIX. Quote paths that contain spaces the way that shell quotes them.
+The command is pasted into that shell exactly as written and run there, so:
+- Do NOT wrap it in `ssh` and do NOT add a hostname or any login/connection step — the shell is already at the right place.
+- Do NOT `cd` somewhere else; it already runs where it runs.
+- Use the command style and flags native to that system, and quote paths with spaces the way that shell quotes them.
+- Output ONLY the command — no explanation, no markdown, no code fences, no leading prompt character.
 
 The directory listing is there so you can use the real names. Prefer naming files over a wildcard when the listing shows you exactly which ones are meant.
 
-**Two refusals, and they matter more than being helpful.** If the task cannot be done as one command line, answer with a single line beginning `# ` that says so in one sentence — do not invent a command that half does it. And never fold a destructive step (delete, overwrite, force-push, reset --hard) into a command that was asked to do something else; if deleting is what was asked for, write it plainly and alone so it can be read before it is run."#;
+**A remote pane is not the shell's disk.** When the pane is a remote listing over SFTP, the shell is still wherever it is — usually the local machine — so a command naming those files would run against paths that are not there. If the task is about the pane's files and the shell cannot reach them, refuse and say which two machines are involved.
+
+**Two refusals, and they matter more than being helpful.** If the task cannot be done as one command line, answer with a single line beginning `# ` that says so in one sentence — do not invent a command that half does it. And never fold a destructive step (delete, overwrite, force-push, reset --hard) into a command that was asked to do something else; if deleting is what was asked for, write it plainly and alone so it can be read before it is run."#
+    )
+}
 
 /// Draft a commit message from the staged diff.
 pub const COMMIT: &str = r#"You write a git commit message for the given staged diff. Use the Conventional Commits style: a concise subject line under ~70 characters (an optional type prefix like feat:/fix:/refactor: is fine), then a blank line and a short body of bullet points explaining WHY, only if it adds something. Output ONLY the commit message — no code fences, no preamble."#;
@@ -242,8 +256,11 @@ mod tests {
         assert!(JUNK.contains("OUTERMOST"), "no nested-duplicate rule");
         assert!(JUNK.contains("CONSERVATIVE"));
         assert!(STRUCTURE.contains("never move anything out of this directory"));
-        assert!(CMD.contains("beginning `# `"), "no refusal path");
-        assert!(CMD.contains("not for the operating system"), "no shell rule");
+        let c = cmd("your local Windows powershell.exe shell");
+        assert!(c.contains("beginning `# `"), "no refusal path");
+        assert!(c.contains("your local Windows powershell.exe shell"), "target not named");
+        assert!(c.contains("Do NOT wrap it in `ssh`"), "no already-there rule");
+        assert!(c.contains("A remote pane is not the shell's disk"), "no remote rule");
         assert!(RENAME.contains("cannot be the same"), "no collision rule");
     }
 
