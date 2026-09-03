@@ -444,6 +444,38 @@ async function main() {
         ['read:(async()=>{const m=viewer.ed.getValue().match(/!\\[\\]\\(([^)]+)\\)/);if(!m)return "リンクが無い";const r=await window.cian.call("stat",{path:state[state.focus].cwd+"/"+m[1]});return "画像 "+m[1]+" 実在 "+r.exists+" "+r.len+"B";})()', ''],
         ['u', '貼ったのを戻して閉じる'], ['wait:300', ''],
         ['Esc', ''], ['Esc', ''], ['Esc', ''], ['wait:800', ''],
+        // 新しいノート ── 題を打つと、前置きつきの .md が出来てエディタに載る。
+        //
+        // **子フォルダの中でやる。**`from` はこの後の一連（コピー・マーク・
+        // 取り消し）の題材なので、そこに増やすと、増えたぶんだけ背景の走査が
+        // 伸びて後ろの手が競合する。一度それで7つの手が「効かない」に化けた。
+        ['land:sub', '子フォルダへ'], ['Enter', ''], ['wait:1500', ''],
+        [':', 'コマンド'], ['type:newnote', ''], ['Enter', ''], ['wait:900', ''],
+        ['type:plan', '題を打つ'], ['Enter', ''], ['wait:2500', ''],
+        ['read:(()=>{const v=viewer.ed?viewer.ed.getValue():"";return "新ノートの頭: "+v.split(String.fromCharCode(10)).slice(0,4).join(" / ");})()', ''],
+        ['read:(async()=>{const r=await window.cian.call("stat",{path:state[state.focus].cwd+"/plan.md"});return "plan.md 実在 "+r.exists+" "+r.len+"B";})()', ''],
+        ['Esc', ''], ['Esc', ''], ['Esc', ''], ['wait:800', ''],
+        ['land:..', '戻る'], ['Enter', ''], ['wait:1500', ''],
+        // ノートの置き場所 ── 2件あるときは訊く。
+        ['read:"設定から届いた置き場所: "+noteRoots.map(r=>r.name+"→"+r.path.split("/").slice(-2).join("/")).join(" / ")', ''],
+        ['read:(async()=>{await cmdNotes();await new Promise(r=>setTimeout(r,600));return "件数 "+noteRoots.length+" / 開 "+report.on+" / 題 "+(report.about||"")+" / 今 "+state[state.focus].cwd.split("/").pop();})()', ''],
+        ['top:#report', '置き場所の一覧が最前面'],
+        ['Esc', 'いったん閉じる'], ['wait:400', ''],
+        // 人が打つ経路 ── `:notes` と Enter。
+        [':', 'コマンドライン'],
+        ['read:"開いた口: "+filter.mode+" / 値 "+el.fInput.value', ''],
+        ['type:notes', ''],
+        ['read:"打った後: "+filter.mode+" / 値 "+el.fInput.value', ''],
+        ['Enter', ''], ['wait:1200', ''],
+        ['read:"打って実行: 開 "+report.on+" / 題 "+(report.about||"")+" / 今 "+state[state.focus].cwd.split("/").pop()', ''],
+        ['Enter', '1つ目を選ぶ'], ['wait:2000', ''],
+        ['read:"選んだ先: "+state[state.focus].cwd.split("/").pop()+" / ビュー "+viewMode+" / 枠 "+report.on', ''],
+        // **元のフォルダに戻す。**ここを置き去りにすると、この後の一連が
+        // 2件しかないフォルダで走り、コピーもマークも対象を失う。
+        ['land:..', '戻る'], ['Enter', ''], ['wait:1500', ''],
+        ['read:\'置き場所の行: \' + [...document.querySelectorAll("#report:not([hidden]) .hit")].map(e=>e.textContent.replace(/\\s+/g," ").trim()).join(" / ")', ''],
+        ['Enter', '1つ目へ'], ['wait:2000', ''],
+        ['read:\'移動先: \' + state[state.focus].cwd.split("/").slice(-2).join("/") + " / ビュー " + viewMode', ''],
         ['read:(()=>{setView("classic");return "戻す";})()', ''], ['wait:600', ''],
         ['read:(()=>{setLook(1, false);return \'陰翳に\';})()', ''], ['wait:500', ''],
         ['read:\'陰翳の ground=\' + getComputedStyle(document.documentElement).getPropertyValue(\'--bg\').trim()', ''],
@@ -764,6 +796,18 @@ async function main() {
     // a keymap.lua can be handed in on purpose.
     const conf = process.env.CIAN_CONFIG_DIR || path.join(sand, 'config');
     fs.mkdirSync(conf, { recursive: true });
+
+    // A real init.lua, because "the setting did not take" is this project's
+    // most repeated bug and the only way to catch it is to write the file and
+    // read it back out of the running window. Seeding `noteRoots` from the
+    // console would have proved the picker and nothing about the config.
+    if (!process.env.CIAN_CONFIG_DIR) {
+        fs.writeFileSync(path.join(conf, 'init.lua'),
+            'cian.notes{\n'
+            + `  { name = "私", path = "${sand}/from/sub" },\n`
+            + `  { name = "元", path = "${sand}/from" },\n`
+            + '}\n', 'utf8');
+    }
 
     const el = spawn(process.env.CIAN_ELECTRON
         || path.join(__dirname, 'node_modules/electron/dist/Electron.app/Contents/MacOS/Electron'),

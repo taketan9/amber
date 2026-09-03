@@ -236,9 +236,135 @@ fn date_secs(s: &str) -> Option<u64> {
     u64::try_from(days.checked_mul(86_400)?).ok()
 }
 
+/// Windows keeps eleven names for devices, and a file cannot have one of them
+/// whatever the extension. A note titled "CON" is not a silly case: it is an
+/// abbreviation people write.
+const RESERVED: [&str; 22] = [
+    "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8",
+    "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+];
+
+/// A title, turned into a filename that every filesystem cian runs on accepts.
+///
+/// Not a slug: the titles here are Japanese as often as not, and stripping a
+/// title to ASCII would leave most notes named `.md`. What it removes is only
+/// what a filesystem refuses — the nine characters Windows reserves, control
+/// characters, and the trailing dot or space Explorer silently eats.
+///
+/// The cap is in **characters and on a char boundary**, but chosen for bytes:
+/// 60 Japanese characters is 180 bytes, comfortably inside the 255 that ext4,
+/// APFS and NTFS all stop at.
+pub fn file_stem(title: &str) -> String {
+    let mut out = String::new();
+    let mut gap = false;
+    for c in title.trim().chars() {
+        let bad = matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|')
+            || c.is_control();
+        if bad {
+            gap = true;
+            continue;
+        }
+        // A run of refused characters collapses to one `-`, and never opens
+        // the name: `?? notes` should be `notes`, not `- notes`.
+        if gap && !out.is_empty() {
+            out.push('-');
+        }
+        gap = false;
+        if out.chars().count() >= 60 {
+            break;
+        }
+        out.push(c);
+    }
+    let out = out.trim_matches([' ', '.', '\u{3000}']).to_string();
+    if out.is_empty() {
+        return String::new();
+    }
+    // `CON.md` is still CON to Windows. So is `con`.
+    let head = out.split('.').next().unwrap_or(&out).to_ascii_uppercase();
+    if RESERVED.contains(&head.as_str()) {
+        return format!("_{out}");
+    }
+    out
+}
+
+/// Today, where the person is sitting.
+///
+/// Local and not UTC: a note written at ten at night in Tokyo is dated that
+/// day, not the next one. Separate from [`new_note`] so that one can be told
+/// what day it is and tested.
+pub fn today() -> String {
+    chrono::Local::now().format("%Y-%m-%d").to_string()
+}
+
+/// The filename and the first bytes of a new note.
+///
+/// Pure, and given the date rather than reading a clock, so the shape of a new
+/// note is a thing tests can state. The engine does the writing and picks a
+/// name that is free; everything about *what a note is* is here, because this
+/// is the module that can travel to a phone.
+///
+/// The body is front matter and nothing else. A `# title` heading under a
+/// `title:` field says the same thing twice, and the second copy is the one
+/// that goes stale when the note is renamed.
+pub fn new_note(title: &str, today: &str) -> (String, String) {
+    let title = title.trim();
+    // An untitled note is named for the day it was made — which is what you
+    // reach for when you are writing before you know what it is about.
+    let shown = if title.is_empty() { today } else { title };
+    let stem = match file_stem(shown) {
+        s if s.is_empty() => today.to_string(),
+        s => s,
+    };
+    let body = format!("---\ntitle: {shown}\ncreated: {today}\ntags: []\n---\n\n");
+    (format!("{stem}.md"), body)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_new_note_reads_back_as_the_note_it_says_it_is() {
+        let (name, body) = new_note("段取り", "2026-09-02");
+        assert_eq!(name, "段取り.md");
+        // The point of the shape: what `new_note` writes, `front` understands.
+        // These two have drifted apart in every notes app that has two.
+        let lines: Vec<String> = body.lines().map(|l| l.to_string()).collect();
+        let f = front(&lines);
+        assert_eq!(f.fields.get("title").map(String::as_str), Some("段取り"));
+        assert_eq!(f.fields.get("created").map(String::as_str), Some("2026-09-02"));
+        assert!(f.tags.is_empty(), "an empty list is empty, not one empty tag: {:?}", f.tags);
+    }
+
+    #[test]
+    fn an_untitled_note_is_named_for_the_day() {
+        let (name, body) = new_note("   ", "2026-09-02");
+        assert_eq!(name, "2026-09-02.md");
+        assert!(body.contains("title: 2026-09-02"));
+    }
+
+    #[test]
+    fn a_title_a_filesystem_would_refuse_is_made_into_one_it_takes() {
+        // Slashes and colons are what people type in a title without thinking
+        // — a date, a path, a ratio.
+        assert_eq!(file_stem("2026/09/02 の予定"), "2026-09-02 の予定");
+        assert_eq!(file_stem("a:b*c?d"), "a-b-c-d");
+        // A run collapses to one dash, and never opens the name.
+        assert_eq!(file_stem("??  なぞ"), "なぞ");
+        // Explorer eats a trailing dot or space, so the name it shows would
+        // not be the name on disk.
+        assert_eq!(file_stem("あとで書く. "), "あとで書く");
+        // Windows device names are still device names with an extension.
+        assert_eq!(file_stem("CON"), "_CON");
+        assert_eq!(file_stem("con.old"), "_con.old");
+        assert_eq!(file_stem("console"), "console", "only the exact name is reserved");
+        // Long enough to matter, cut on a character and not in the middle of
+        // one — 60 characters of Japanese is 180 bytes, inside every limit.
+        let long = "あ".repeat(200);
+        assert_eq!(file_stem(&long).chars().count(), 60);
+        // Nothing usable left: the caller falls back to the date.
+        assert_eq!(file_stem("///"), "");
+    }
 
     fn ls(s: &str) -> Vec<String> {
         s.lines().map(str::to_string).collect()

@@ -2591,6 +2591,8 @@ function contextRows() {
         v.push(group(tr("View \u25b8", '表示 ▸'), () => [
             { label: tr("\u25a4 Details", '▤ 詳細一覧'), value: ':view details', run: () => { setView('details'); say(tr('listing: details', '一覧: 詳細一覧')); } },
             { label: tr("\u25c6 cian (notes)", '◆ cian（ノート）'), value: ':view cian', run: () => { setView('cian'); say(tr('listing: cian', '一覧: cian')); } },
+            { label: tr("\u25c6 Notes folder\u2026", '◆ ノートの置き場所へ…'), value: ':notes', run: cmdNotes },
+            { label: tr("\u25c6 New note", '◆ 新しいノート'), value: ':newnote', run: cmdNewNote },
             { label: tr("\u25a5 Classic", '▥ クラシック'), value: ':view classic', run: () => { setView('classic'); say(tr('listing: classic', '一覧: クラシック')); } },
             { label: tr("Show / hide dotfiles", 'ドットファイルの表示切替'), value: ':hidden', run: toggleHidden },
             { label: tr("Theme (this pane)", 'テーマ（このペイン）'), value: '', run: cmdPaneTheme },
@@ -3323,7 +3325,16 @@ async function reread() {
 /// The filter's keys, while it is up.
 document.addEventListener('keydown', (e) => {
     if (!filter.on) return;
-    e.stopPropagation();
+    // **Immediate**, not `stopPropagation`. The two are not the same thing:
+    // `stopPropagation` stops the event reaching further *nodes*, and every
+    // one of these handlers is on `document`, so the listing's keys ran on
+    // the same keystroke regardless. It did not show while a prompt only ever
+    // closed itself — but a `:` command that opens a list (`:notes`, `:ssh`)
+    // opens it *during* this handler, and the listing's Enter then picked the
+    // first row of the list that had just appeared. You typed `:notes`, were
+    // shown nothing, and landed in whichever folder happened to be first.
+    // While a prompt is up it owns the keyboard; this is that sentence.
+    e.stopImmediatePropagation();
     const k = e.key;
     const mode = filter.mode;
     if (k === 'Escape') {
@@ -5589,6 +5600,8 @@ function buildCommands() {
     { name: 'remote', alias: ['sftp'], about: tr("open a server in this pane (SFTP)", 'このペインでサーバを開く（SFTP）'), run: cmdSftpPicker },
 
     { name: 'ssh', about: tr("ssh to a host, in the shell panel (also Shift+S)", 'ホストへ ssh（シェルパネルで。Shift+S でも）'), run: cmdSshPicker },
+    { name: 'notes', about: tr("go to a notes folder (init.lua’s cian.notes)", 'ノートの置き場所へ（init.lua の cian.notes）'), run: cmdNotes },
+    { name: 'newnote', about: tr("make a note here and open it", 'ここにノートを作って開く'), run: cmdNewNote },
     { name: 'paste', about: tr("paste the held files here (also Ctrl+V / y)", '保持したファイルをここへ貼り付け（Ctrl+V / y でも）'), run: paste },
     { name: 'local', about: tr("close the server and come back to this disk", 'サーバを閉じてローカルへ戻る'), run: cmdDisconnect },
     { name: 'aicmd', about: tr("AI: a shell command from a description", 'AI: 説明からシェルコマンドを作る'), arg: tr('what you want', 'やりたいこと'), run: cmdAiCmd },
@@ -6351,6 +6364,81 @@ function toggleKeyEcho() {
 // `..` climbs, and `c` across to the other pane is an upload or a download
 // depending on which side you are standing on. That is the terminal build's
 // arrangement, and the reason it is worth having at all: nothing new to learn.
+
+/// Where notes live, from `init.lua`'s `cian.notes{}`.
+///
+/// Already expanded by the engine: `~` and a SharePoint URL both mean
+/// something only on the machine the files are on, and the window is not that
+/// machine — on a remote pane it is not even the same operating system.
+let noteRoots = [];
+
+/// `:notes` — go to where the notes are, in the cian view.
+///
+/// One place goes straight there; several ask which. Not a fixed "notes
+/// folder" setting, because the two kinds do not mix: the notes nobody else
+/// should see, and the folder a team writes in together.
+async function cmdNotes() {
+    if (!noteRoots.length) {
+        say(tr('no notes folders — declare them in init.lua: cian.notes{ { name = "me", path = "~/notes" } }',
+               'ノートの置き場所がありません — init.lua に cian.notes{ { name = "私", path = "~/notes" } }'), true);
+        return;
+    }
+    if (noteRoots.length === 1) { await goToNotes(noteRoots[0]); return; }
+    show(tr("Notes", 'ノート'),
+        tr(`${noteRoots.length} places (init.lua’s cian.notes)`, `${noteRoots.length} 件（init.lua の cian.notes）`),
+        noteRoots.map((r, at) => ({ label: r.name, sub: r.path, at })), {
+            filter: true,
+            hint: tr('type to narrow', '打って絞り込み'),
+            foot: tr('type to narrow   Enter open   Esc close', '打って絞る   Enter 開く   Esc 閉じる'),
+            pick: async (row) => { closeReport(); await goToNotes(noteRoots[row.at]); },
+        });
+}
+
+async function goToNotes(root) {
+    if (!root) return;
+    await goToPath(root.path);
+    if (viewMode !== 'cian') setView('cian');
+}
+
+/// `:newnote` — a note, made and opened.
+///
+/// In the folder the pane is showing, which is the folder you are looking at
+/// — including a subfolder of a notes root, because notes come in stacks and
+/// a flat pile of four hundred is what people leave Inkdrop over.
+///
+/// The name and the front matter come from `cian_core::note`; the window does
+/// not decide what a note looks like.
+async function cmdNewNote() {
+    const which = state.focus;
+    const pane = state[which];
+    if (!pane || !pane.cwd) return;
+    if (pane.remote || pane.archive) {
+        say(tr('notes are made on a local folder', 'ノートはローカルのフォルダに作ります'), true);
+        return;
+    }
+    const title = await askFor(tr("title of the note", 'ノートの題'), '', {
+        wide: true,
+        hint: tr('blank names it for today', '空にすると今日の日付が題になります'),
+    });
+    if (title === null) return;
+    const r = await ask('newnote', { dir: pane.cwd, title });
+    if (!r) return;
+    // The listing again, then the cursor on the new note: a note you have to
+    // go and find is a note you did not just make.
+    const fresh = await ask('list', { pane: which, path: pane.cwd });
+    if (fresh) {
+        const at = fresh.entries.findIndex((e) => e.name === r.name);
+        if (at >= 0) fresh.cursor = at;
+        state[which] = fresh;
+        // Entering the folder is a different set of notes, and this one is
+        // brand new — `loadNotes` skips a folder it has already read.
+        notes.root = '';
+        draw(which);
+    }
+    const f = await ask('viewpath', { path: r.path });
+    if (f) await showFile(f);
+    say(tr(`made ${r.name}`, `作りました ${r.name}`));
+}
 
 /// `Shift+S` — the hosts init.lua declares, picked rather than typed.
 ///
@@ -10272,6 +10360,7 @@ async function recall() {
     // Same reason, for the OS group: asked once, used synchronously.
     if (s.os) Object.assign(osCan, s.os);
     if (Array.isArray(s.sharepoint)) sharepoint = s.sharepoint;
+    if (Array.isArray(c.note_roots)) noteRoots = c.note_roots;
     // Lua's own complaints go in the same queue as mine — from where the
     // person stands they are one thing: "my config did not take".
     keymapErrors = [...(s.config_errors || []), ...keymapErrors];

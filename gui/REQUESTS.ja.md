@@ -90,6 +90,8 @@ python3 scripts/requests.py --list   # 何を見ているか
 | 45 | 2026-09-02 | SharePoint の場所を指定できるようにしたい（crmaine と同じやり方で） | **認証しない。**URL を WebDAV の UNC パスに直すだけ（`\\host@SSL\DavWWWRoot\…`）。crmaine の `sharepoint_to_unc` を写した ── 貼られる4つの形と、**場所を持たない共有リンク**の見分けは高くついた知識なので思い出しで書かない。開けないときは crmaine と同じ手順を出す | `crates/cian-core/src/sharepoint.rs ~ pub fn to_unc\(` |
 | 46 | 2026-09-02 | 指定したディレクトリでマークダウンのノートを管理したい（Inkdrop 相談。名前は **cian モード**） | **DB は作らない。**題は front matter の `title`、無ければ最初の見出し、無ければファイル名 ── その判断は `cian_core::note` の1か所にあり、窓版もいずれの iOS も同じ答えを見る（Electron は iPhone で動かないので、判断を窓に置くと二度書くことになる）。二行目に本文の頭。**ノート以外のファイルも並ぶ** ── ペインの一覧だから、リンク先の画像を隠すのは嘘になる | `crates/cian-core/src/note.rs ~ pub fn read\(` |
 | 47 | 2026-09-02 | cian モードでスクリーンショットや画像を貼り付けたい | 貼られた画像はノートの隣の `attachments/` に置き、本文には Markdown のリンクだけが入る。**受け口は `document` の capture** ── Monaco が `#v-body` に先に capture で付いていて `stopImmediatePropagation` するので、同じ節に後から付けた受け口には永久に届かない（配線したつもりで一度も呼ばれず、貼り付けは黙って消えていた）。登録は読み込み時に一度だけ ── エディタは作り直されるが容れ物は残るので、作るたびに付けると画像が二枚入る | `gui/renderer.js ~ document.addEventListener\('paste', onEditorPaste, true\)` |
+| 48 | 2026-09-02 | ノートの置き場所は複数指定できるといい（自分専用と、みんなで書くところ） | `cian.notes{ { name = …, path = … }, … }`。**並びは書いた順** ── Lua は文字列キーの順を保たないので、表にすると起動のたびにピッカーが入れ替わり、同じ位置に違うフォルダが来る。展開（`~`・SharePoint の URL → UNC）は**エンジン側** ── それが意味を持つのは実際にファイルがある機械だけで、窓はその機械ではない | `crates/cian-lua/src/lib.rs ~ pub struct NoteRoot \{` |
+| 49 | 2026-09-02 | 自分のノートを書き足せるようにしたい | `:newnote` ── 題を訊いて、前置き（`title`／`created`／`tags`）だけのノートを作って開く。名前と体裁の判断は `cian_core::note`（iPhone へ運べる側）。ファイル名は**スラグにしない** ── 題は日本語のことが多く、ASCII に削ると `.md` だけが残る。消すのは OS が拒む文字だけ。`CON` は拡張子を付けても `CON`、末尾の点と空白は Explorer が黙って食う | `crates/cian-core/src/note.rs ~ pub fn new_note\(` |
 
 ## 増やすとき
 
