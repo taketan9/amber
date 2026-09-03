@@ -38,3 +38,8 @@ gui/vendor/
 # — a file that ships is a file the next version overwrites, which is the whole
 # reason this exists instead of editing run.bat.
 gui/electron.txt
+
+# Xcode がここに建てる（資材は scripts/ios-build.sh が作り直す）
+ios/build/
+ios/*.xcodeproj/xcuserdata/
+ios/*.xcodeproj/project.xcworkspace/
