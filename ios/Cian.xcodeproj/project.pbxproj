@@ -1,11 +1,4 @@
 // !$*UTF8*$!
-//
-// Written by hand, and kept small on purpose.
-//
-// Xcode 16's synchronized groups mean the source files do not have to be
-// listed here at all: the `Cian` folder *is* the target's sources. A project
-// file that lists every file is a file that conflicts on every merge and
-// silently drops one the day somebody resolves it wrongly.
 {
 	archiveVersion = 1;
 	classes = {
@@ -23,7 +16,11 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
-		1A0000000000000000000008 /* Cian */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = Cian; sourceTree = "<group>"; };
+		1A0000000000000000000008 /* Cian */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = Cian;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -165,9 +162,11 @@
 		1A0000000000000000000010 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				CODE_SIGNING_ALLOWED = NO;
-				CODE_SIGNING_REQUIRED = NO;
+				CODE_SIGNING_ALLOWED = YES;
+				"CODE_SIGNING_ALLOWED[sdk=iphonesimulator*]" = NO;
+				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 99U8AU4P74;
 				ENABLE_PREVIEWS = YES;
 				FRAMEWORK_SEARCH_PATHS = "$(SRCROOT)/../target/ios";
 				HEADER_SEARCH_PATHS = "$(SRCROOT)/../crates/cian-ffi/include";
@@ -177,7 +176,7 @@
 					"-framework",
 					CoreFoundation,
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = "com.taketan.cian";
+				PRODUCT_BUNDLE_IDENTIFIER = com.taketan.cian;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_OBJC_BRIDGING_HEADER = "Cian/Cian-Bridging-Header.h";
@@ -189,9 +188,11 @@
 		1A0000000000000000000011 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				CODE_SIGNING_ALLOWED = NO;
-				CODE_SIGNING_REQUIRED = NO;
+				CODE_SIGNING_ALLOWED = YES;
+				"CODE_SIGNING_ALLOWED[sdk=iphonesimulator*]" = NO;
+				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 99U8AU4P74;
 				ENABLE_PREVIEWS = YES;
 				FRAMEWORK_SEARCH_PATHS = "$(SRCROOT)/../target/ios";
 				HEADER_SEARCH_PATHS = "$(SRCROOT)/../crates/cian-ffi/include";
@@ -201,7 +202,7 @@
 					"-framework",
 					CoreFoundation,
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = "com.taketan.cian";
+				PRODUCT_BUNDLE_IDENTIFIER = com.taketan.cian;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_OBJC_BRIDGING_HEADER = "Cian/Cian-Bridging-Header.h";
