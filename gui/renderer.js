@@ -1386,9 +1386,9 @@ function sorts() {
     return [['name', tr("Name", '名前'), 'n'], ['size', tr("Size", 'サイズ'), 's'],
             ['date', tr("Date", '日時'), 'd'], ['ext', tr('Extension', '拡張子'), 'e']];
 }
-async function applySort(key) {
+async function applySort(key, reverse) {
     const which = state.focus;
-    const r = await ask('sort', { pane: which, key });
+    const r = await ask('sort', { pane: which, key, ...(reverse === undefined ? {} : { reverse }) });
     if (!r) return;
     state[which] = r.pane;
     draw(which);
@@ -1701,7 +1701,15 @@ function setView(mode, remember = true) {
     // The notes for whichever folder is showing. Asked for on the way *into*
     // the view rather than on every paint: it reads the head of every
     // Markdown file underneath, which is not a thing to do to move a cursor.
-    if (mode === 'cian') { notes.root = ''; loadNotes(state.focus).catch(() => {}); }
+    if (mode === 'cian') {
+        notes.root = '';
+        // Newest first, on the way in. A notes list is read from the top and
+        // what you want at the top is what you were last writing — the name
+        // of a note is how you find one you remember, not how you find the
+        // one you had open yesterday. Stated rather than toggled, so entering
+        // the view twice does not give you oldest-first the second time.
+        applySort('date', true).then(() => loadNotes(state.focus)).catch(() => {});
+    }
     if (remember) ask('remember', { key: 'gui_view', value: mode });
 }
 

@@ -5184,8 +5184,14 @@ impl Session {
                 };
                 let pane = self.pane_mut(&which)?;
                 // The same key twice turns it round, which is what a column
-                // heading does everywhere and what the hand expects.
-                let reverse = pane.sort.key == key && !pane.sort.reverse;
+                // heading does everywhere and what the hand expects — but a
+                // caller that wants a *particular* order says so instead. The
+                // cian view opens newest-first, and a toggle would have given
+                // it oldest-first every second time you entered it.
+                let reverse = match req.params["reverse"].as_bool() {
+                    Some(want) => want,
+                    None => pane.sort.key == key && !pane.sort.reverse,
+                };
                 pane.set_sort(Sort { key, reverse });
                 Ok(serde_json::json!({
                     "pane": PaneView::of(pane),

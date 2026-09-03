@@ -426,6 +426,8 @@ async function main() {
         ['wait:1500', ''], ['F5', '読み直し'], ['wait:600', ''],
         ['read:(()=>{setView("cian");return "cian ビューへ";})()', ''], ['wait:1500', ''],
         ['read:\'題: \' + [...document.querySelectorAll(".rows.cian .row .name")].map(e=>e.textContent).join(" / ")', ''],
+        // 新しい順に並んでいるか ── ノートは名前順では読まない。
+        ['read:"並び: "+[...document.querySelectorAll(".rows.cian .row .when")].map(e=>e.textContent).filter(Boolean).join(" ")', ''],
         ['read:\'二行目: \' + [...document.querySelectorAll(".rows.cian .row .sub")].map(e=>e.textContent).filter(Boolean).join(" / ")', ''],
         ['shot:cian-view@#work', 'cian ビュー'],
         ['shot:cian-rows@.rows.cian', 'ノート行 ── 二行分の高さで揃っているか'],
