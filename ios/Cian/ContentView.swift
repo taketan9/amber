@@ -9,6 +9,9 @@ import UniformTypeIdentifiers
 struct ContentView: View {
     @StateObject private var store = NotesStore()
     @State private var picking = false
+    @State private var naming = false
+    @State private var title = ""
+    @State private var made: Note?
     @State private var needle = ""
 
     var body: some View {
@@ -26,12 +29,30 @@ struct ContentView: View {
                     Button { picking = true } label: { Image(systemName: "folder") }
                         .accessibilityLabel("ノートの置き場所")
                 }
+                if !store.rootName.isEmpty {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button { naming = true } label: { Image(systemName: "square.and.pencil") }
+                            .accessibilityLabel("新しいノート")
+                    }
+                }
             }
         }
         .fileImporter(isPresented: $picking, allowedContentTypes: [.folder]) { result in
             if case .success(let url) = result { store.choose(url) }
         }
         .task { store.restore() }
+        // Blank is allowed: cian names an untitled note for the day, which is
+        // what you want when you are writing before you know what it is about.
+        .alert("新しいノート", isPresented: $naming) {
+            TextField("題", text: $title)
+            Button("作る") { make() }
+            Button("やめる", role: .cancel) { title = "" }
+        }
+    }
+
+    private func make() {
+        do { made = try store.make(titled: title) } catch { store.trouble = error.localizedDescription }
+        title = ""
     }
 
     private var empty: some View {
@@ -68,30 +89,71 @@ struct ContentView: View {
     }
 }
 
-/// One note, read.
+/// One note, open for writing.
 ///
-/// Reading only, for now. Writing is the half that needs the conflict check
-/// on the way back — the stamp the engine hands over with the text — and
-/// putting it in before it can be tried on a device is how the other person's
-/// writing gets quietly overwritten.
+/// The stamp read with the text is kept and handed back on save. **That is
+/// the whole of the two-device story**: the same folder is open on a Mac, and
+/// without this the later save wins silently and the earlier writing is gone
+/// with nothing on screen to say it happened.
 struct NoteView: View {
     let note: Note
     let store: NotesStore
     @State private var text = ""
+    @State private var stamp = ""
+    @State private var saved = ""
     @State private var trouble: String?
+    @State private var clash: String?
+    @FocusState private var writing: Bool
+
+    private var dirty: Bool { text != saved }
 
     var body: some View {
-        ScrollView {
-            Text(trouble ?? text)
-                .font(.body.monospaced())
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .textSelection(.enabled)
-                .padding()
-        }
-        .navigationTitle(note.title)
-        .navigationBarTitleDisplayMode(.inline)
-        .task {
-            do { text = try store.text(of: note) } catch { trouble = error.localizedDescription }
-        }
+        TextEditor(text: $text)
+            .font(.body.monospaced())
+            .focused($writing)
+            .padding(.horizontal, 8)
+            .navigationTitle(note.title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("保存") { save(force: false) }.disabled(!dirty)
+                }
+                ToolbarItem(placement: .keyboard) {
+                    Button("閉じる") { writing = false }
+                }
+            }
+            .task {
+                do {
+                    (text, stamp) = try store.open(note)
+                    saved = text
+                } catch { trouble = error.localizedDescription }
+            }
+            // Not a yes/no: overwriting is the thing you do having read what
+            // the other person wrote, so the reason is on screen and the
+            // destructive answer is marked as one.
+            .alert("あちらでも書き換えられています", isPresented: .constant(clash != nil)) {
+                Button("やめる", role: .cancel) { clash = nil }
+                Button("それでも上書き", role: .destructive) { clash = nil; save(force: true) }
+            } message: {
+                Text(clash ?? "")
+            }
+            .alert("保存できません", isPresented: .constant(trouble != nil)) {
+                Button("閉じる") { trouble = nil }
+            } message: {
+                Text(trouble ?? "")
+            }
+    }
+
+    private func save(force: Bool) {
+        do {
+            switch try store.save(note, text: text, stamp: stamp, force: force) {
+            case .ok(let fresh):
+                stamp = fresh
+                saved = text
+                store.reload()
+            case .conflict(let why):
+                clash = why
+            }
+        } catch { trouble = error.localizedDescription }
     }
 }

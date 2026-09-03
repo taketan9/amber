@@ -71,8 +71,40 @@ final class NotesStore: ObservableObject {
         return notes.filter { $0.search.contains(n) }
     }
 
-    func text(of note: Note) throws -> String {
+    /// The text of a note, and the stamp that says which version it was.
+    ///
+    /// The two travel together on purpose. Saving has to hand the stamp back,
+    /// and a caller that has to remember to ask for it separately is a caller
+    /// that will one day forget — and the forgetting is silent until the day
+    /// two devices are open on the same note.
+    func open(_ note: Note) throws -> (String, String) {
         let answer = try Cian.call("read", ["path": note.path])
-        return answer["text"] as? String ?? ""
+        return (answer["text"] as? String ?? "", answer["stamp"] as? String ?? "")
+    }
+
+    enum Saved {
+        case ok(stamp: String)
+        /// Somebody else wrote it first. `why` is cian's own account of the
+        /// difference; nothing has been written.
+        case conflict(why: String)
+    }
+
+    func save(_ note: Note, text: String, stamp: String, force: Bool = false) throws -> Saved {
+        var params: [String: Any] = ["path": note.path, "text": text, "force": force]
+        if !stamp.isEmpty { params["stamp"] = stamp }
+        let answer = try Cian.call("write", params)
+        if answer["conflict"] as? Bool == true {
+            return .conflict(why: answer["why"] as? String ?? "開いたあとで書き換えられています")
+        }
+        return .ok(stamp: answer["stamp"] as? String ?? "")
+    }
+
+    /// A new note in the chosen folder, named and shaped by cian.
+    func make(titled title: String) throws -> Note? {
+        guard let root else { return nil }
+        let made = try Cian.call("new", ["dir": root.path, "title": title])
+        reload()
+        guard let path = made["path"] as? String else { return nil }
+        return notes.first { $0.path == path }
     }
 }
