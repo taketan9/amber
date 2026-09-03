@@ -199,6 +199,15 @@ fn excerpt(body: &[String]) -> String {
         if fenced || t.is_empty() || t.starts_with('#') || t.starts_with("---") {
             continue;
         }
+        // A picture is not a sentence. `![](attachments/note-1788450324680.jpg)`
+        // is forty characters of filename in a line meant to remind you what
+        // the note is about, and a note that opens with a screenshot showed
+        // nothing else at all.
+        let t = strip_images(t);
+        let t = t.trim();
+        if t.is_empty() {
+            continue;
+        }
         if !out.is_empty() {
             out.push(' ');
         }
@@ -208,6 +217,35 @@ fn excerpt(body: &[String]) -> String {
         }
     }
     out.chars().take(120).collect()
+}
+
+/// Take `![alt](link)` out of a line, keeping the alt text if there is any.
+///
+/// Only images — a plain `[text](link)` is words somebody wrote and reads
+/// perfectly well in an excerpt.
+fn strip_images(line: &str) -> String {
+    let mut out = String::with_capacity(line.len());
+    let mut rest = line;
+    while let Some(at) = rest.find("![") {
+        out.push_str(&rest[..at]);
+        let after = &rest[at + 2..];
+        // `![alt](link)` — both halves have to be there, or it is just text
+        // that happens to start with an exclamation mark.
+        let Some(close) = after.find(']') else { break };
+        let tail = &after[close + 1..];
+        if !tail.starts_with('(') {
+            out.push_str(&rest[at..at + 2]);
+            rest = after;
+            continue;
+        }
+        let Some(end) = tail.find(')') else { break };
+        // The alt text is what the writer chose to call the picture, so it
+        // belongs in an excerpt; the filename does not.
+        out.push_str(&after[..close]);
+        rest = &tail[end + 1..];
+    }
+    out.push_str(rest);
+    out
 }
 
 /// `2026-09-02` or `2026-09-02T10:00:00` → seconds since the epoch.
@@ -376,6 +414,49 @@ pub fn create(dir: &std::path::Path, title: &str, today: &str) -> anyhow::Result
     Ok(at)
 }
 
+/// Put a picture beside a note, and say what to write in the text.
+///
+/// `attachments/` next to the note, not a folder of its own per note and not
+/// a database: the whole point of cian mode is that a notes folder is a
+/// folder, and somebody looking at it from the Mac — or from Explorer, or
+/// from a phone's Files — should see what they expect.
+///
+/// The name carries the note's own and the clock. **Not a counter**: the
+/// folder is shared with everything else attached there, and a counter
+/// eventually picks a name that already exists.
+///
+/// Shared with the engine because the phone attaches photos and the window
+/// pastes screenshots, and the two must land in the same place with the same
+/// kind of name — otherwise a notes folder written from both looks like two
+/// folders that happen to overlap.
+pub fn attach(note: &std::path::Path, bytes: &[u8], ext: &str) -> anyhow::Result<String> {
+    if bytes.is_empty() {
+        anyhow::bail!("画像が空です");
+    }
+    let Some(dir) = note.parent() else {
+        anyhow::bail!("そのノートの置き場所が分かりません")
+    };
+    let ext = match ext.trim().trim_start_matches('.') {
+        "" => "png".to_string(),
+        e => e.to_ascii_lowercase(),
+    };
+    let at = dir.join("attachments");
+    std::fs::create_dir_all(&at)?;
+    let stem = note
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "note".into());
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    let name = format!("{}-{stamp}.{ext}", file_stem(&stem));
+    std::fs::write(at.join(&name), bytes)?;
+    // Relative, with forward slashes: this goes into a Markdown link, which is
+    // a URL and not a Windows path.
+    Ok(format!("attachments/{name}"))
+}
+
 /// Today, where the person is sitting.
 ///
 /// Local and not UTC: a note written at ten at night in Tokyo is dated that
@@ -427,6 +508,62 @@ mod tests {
         assert!(h.contains("#仕事"), "the tag, with its hash: {h}");
         assert!(h.contains("#onenote"), "lowercased, so the filter need not be: {h}");
         assert!(h.contains("本文です"), "and the start of it: {h}");
+    }
+
+    #[test]
+    fn a_picture_does_not_fill_the_line_that_says_what_the_note_is_about() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("n.md");
+        std::fs::write(
+            &p,
+            "# 題\n![](attachments/n-1788450324680.jpg)\n本文はこちら。\n",
+        )
+        .unwrap();
+        let n = read(&p, 60).unwrap();
+        assert_eq!(n.excerpt, "本文はこちら。", "got {:?}", n.excerpt);
+
+        // The alt text is words somebody chose, so it stays.
+        std::fs::write(&p, "# 題\n![現場の写真](a.jpg) のとおり。\n").unwrap();
+        assert_eq!(read(&p, 60).unwrap().excerpt, "現場の写真 のとおり。");
+
+        // An ordinary link is words too, and is left alone.
+        std::fs::write(&p, "# 題\n[手順](x.md) を見て。\n").unwrap();
+        assert_eq!(read(&p, 60).unwrap().excerpt, "[手順](x.md) を見て。");
+
+        // A note that is only a picture has no excerpt, rather than an
+        // excerpt made of a filename.
+        std::fs::write(&p, "# 題\n![](a.jpg)\n").unwrap();
+        assert_eq!(read(&p, 60).unwrap().excerpt, "");
+    }
+
+    #[test]
+    fn a_picture_lands_beside_the_note_and_the_link_points_at_it() {
+        let d = tempfile::tempdir().unwrap();
+        let note = d.path().join("段取り.md");
+        std::fs::write(&note, "# 段取り\n").unwrap();
+
+        let link = attach(&note, &[1, 2, 3], "PNG").unwrap();
+        assert!(link.starts_with("attachments/段取り-"), "{link}");
+        assert!(link.ends_with(".png"), "the extension is lowercased: {link}");
+        // The link is relative to the note, so following it from the folder
+        // finds the file — on a Mac, in Explorer, and on a phone.
+        assert_eq!(std::fs::read(d.path().join(&link)).unwrap(), vec![1, 2, 3]);
+
+        // Twice in the same millisecond is the only way to collide, and the
+        // stamp makes that the only case; twice in general must not.
+        let again = attach(&note, &[4], "png").unwrap();
+        assert!(std::fs::read(d.path().join(&link)).is_ok(), "the first is still there");
+        assert!(std::fs::read(d.path().join(&again)).is_ok());
+
+        // A name a filesystem would refuse cannot come back through a note's
+        // own title — `file_stem` is applied to it here too.
+        let odd = d.path().join("a-b.md");
+        std::fs::write(&odd, "x").unwrap();
+        assert!(attach(&odd, &[1], "").unwrap().ends_with(".png"), "no extension means png");
+
+        // Nothing to attach is refused rather than written as an empty file
+        // the link would then point at.
+        assert!(attach(&note, &[], "png").is_err());
     }
 
     #[test]

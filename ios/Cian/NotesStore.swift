@@ -120,6 +120,29 @@ final class NotesStore: ObservableObject {
         return .ok(stamp: answer["stamp"] as? String ?? "")
     }
 
+    /// Put a picture beside a note and hand back the Markdown link for it.
+    ///
+    /// Base64 because that is what fits down a C string. The bytes go over
+    /// once; nothing about where the file lands is decided here.
+    func attach(_ data: Data, ext: String, to note: Note) throws -> String {
+        let answer = try Cian.call("image", [
+            "note": note.path,
+            "b64": data.base64EncodedString(),
+            "ext": ext,
+        ])
+        guard let link = answer["link"] as? String else {
+            throw Cian.Failure.engine("画像を置けませんでした")
+        }
+        return link
+    }
+
+    /// Remove a note. There is no trash on a phone, so this cannot be undone
+    /// — the caller asks first.
+    func remove(_ note: Note) throws {
+        _ = try Cian.call("delete", ["path": note.path])
+        reload()
+    }
+
     /// A new note in the chosen folder, named and shaped by cian.
     func make(titled title: String) throws -> Note? {
         guard let root else { return nil }

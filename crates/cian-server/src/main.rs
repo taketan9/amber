@@ -4275,39 +4275,13 @@ impl Session {
             }
             "noteimage" => {
                 let note = std::path::PathBuf::from(arg(req, "note"));
-                let Some(dir) = note.parent() else {
-                    anyhow::bail!("そのノートの置き場所が分かりません")
-                };
                 let bytes = b64_decode(&arg(req, "b64"))
                     .ok_or_else(|| anyhow::anyhow!("画像を読めません"))?;
-                if bytes.is_empty() {
-                    anyhow::bail!("画像が空です");
-                }
-                let ext = match arg(req, "ext").as_str() {
-                    "" => "png".to_string(),
-                    e => e.trim_start_matches('.').to_ascii_lowercase(),
-                };
-                let at = dir.join("attachments");
-                std::fs::create_dir_all(&at)?;
-                // Named from the note and the clock. Not from a counter: the
-                // folder is shared with whatever else is pasted there, and a
-                // counter would eventually name a file that already exists.
-                let stem = note
-                    .file_stem()
-                    .map(|s| s.to_string_lossy().into_owned())
-                    .unwrap_or_else(|| "note".into());
-                let stamp = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map(|d| d.as_millis())
-                    .unwrap_or(0);
-                let name = format!("{stem}-{stamp}.{ext}");
-                std::fs::write(at.join(&name), &bytes)?;
-                Ok(serde_json::json!({
-                    // Relative, and with forward slashes: it is going into a
-                    // Markdown link, which is a URL and not a Windows path.
-                    "link": format!("attachments/{name}"),
-                    "bytes": bytes.len(),
-                }))
+                // Where it goes and what it is called are `cian_core::note`'s,
+                // so a screenshot pasted here and a photo attached on the
+                // phone land in one folder with one kind of name.
+                let link = cian_core::note::attach(&note, &bytes, &arg(req, "ext"))?;
+                Ok(serde_json::json!({ "link": link, "bytes": bytes.len() }))
             }
             "stat" => {
                 let path = std::path::PathBuf::from(arg(req, "path"));

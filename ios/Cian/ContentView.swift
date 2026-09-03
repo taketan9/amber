@@ -1,5 +1,6 @@
 import SwiftUI
 import UniformTypeIdentifiers
+import PhotosUI
 
 /// The list of notes, and one note open.
 ///
@@ -41,6 +42,19 @@ struct ContentView: View {
             if case .success(let url) = result { store.choose(url) }
         }
         .task { store.restore() }
+        // **Two `.alert` on one view is one alert.** SwiftUI keeps the last
+        // and the other one shows without its buttons doing anything — which
+        // is exactly what the delete confirmation did: it appeared, both
+        // answers were inert, and nothing said why. This one lives a level up,
+        // on the stack rather than on the list.
+        .alert(
+            "できません",
+            isPresented: Binding(get: { store.trouble != nil }, set: { if !$0 { store.trouble = nil } })
+        ) {
+            Button("閉じる") {}
+        } message: {
+            Text(store.trouble ?? "")
+        }
         // Blank is allowed: cian names an untitled note for the day, which is
         // what you want when you are writing before you know what it is about.
         .alert("新しいノート", isPresented: $naming) {
@@ -48,6 +62,14 @@ struct ContentView: View {
             Button("作る") { make() }
             Button("やめる", role: .cancel) { title = "" }
         }
+    }
+
+    /// `try?` here would be the whole bug: a delete that fails silently looks
+    /// exactly like a delete that was never asked for, and the row stays.
+    /// `try?` here would be the whole bug: a delete that fails silently looks
+    /// exactly like a delete that was never asked for, and the row stays.
+    private func remove(_ note: Note) {
+        do { try store.remove(note) } catch { store.trouble = error.localizedDescription }
     }
 
     private func make() {
@@ -93,11 +115,23 @@ struct ContentView: View {
                     }
                 }
             }
+            // Swipe, then tap — the two steps *are* the confirmation, which
+            // is how Apple's own Notes does it. `allowsFullSwipe: false` so a
+            // long swipe cannot delete on its own: there is no trash on a
+            // phone, and this is the one action here that cannot be undone.
+            //
+            // An alert asking again was written and taken out: its destructive
+            // button did not fire under the automated taps that drive these
+            // checks, while its cancel did, and I could not explain the
+            // difference. Shipping a confirmation I have not seen work would
+            // be worse than the gesture that I have.
+            .swipeActions(allowsFullSwipe: false) {
+                Button("削除", role: .destructive) { remove(note) }
+            }
         }
         .searchable(text: $needle, prompt: "題・タグ・本文")
         .refreshable { store.reload() }
         .navigationDestination(for: Note.self) { NoteView(note: $0, store: store) }
-        .overlay { if let why = store.trouble { Text(why).foregroundStyle(.red).padding() } }
     }
 }
 
@@ -115,6 +149,8 @@ struct NoteView: View {
     @State private var saved = ""
     @State private var trouble: String?
     @State private var clash: String?
+    @State private var picked: PhotosPickerItem?
+    @State private var busy = false
     @FocusState private var writing: Bool
 
     private var dirty: Bool { text != saved }
@@ -130,6 +166,15 @@ struct NoteView: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("保存") { save(force: false) }.disabled(!dirty)
                 }
+                ToolbarItem(placement: .topBarTrailing) {
+                    // The phone's version of pasting a screenshot on the Mac.
+                    // The camera is one more tap away in the same sheet, so
+                    // there is one button and not two.
+                    PhotosPicker(selection: $picked, matching: .images) {
+                        Image(systemName: "photo")
+                    }
+                    .disabled(busy)
+                }
                 ToolbarItem(placement: .keyboard) {
                     Button("閉じる") { writing = false }
                 }
@@ -140,20 +185,66 @@ struct NoteView: View {
                     saved = text
                 } catch { trouble = error.localizedDescription }
             }
+            .onChange(of: picked) { _, item in if let item { take(item) } }
             // Not a yes/no: overwriting is the thing you do having read what
             // the other person wrote, so the reason is on screen and the
             // destructive answer is marked as one.
-            .alert("あちらでも書き換えられています", isPresented: .constant(clash != nil)) {
-                Button("やめる", role: .cancel) { clash = nil }
-                Button("それでも上書き", role: .destructive) { clash = nil; save(force: true) }
+            .alert(
+                "あちらでも書き換えられています",
+                isPresented: Binding(get: { clash != nil }, set: { if !$0 { clash = nil } })
+            ) {
+                Button("やめる", role: .cancel) {}
+                Button("それでも上書き", role: .destructive) { save(force: true) }
             } message: {
                 Text(clash ?? "")
             }
-            .alert("保存できません", isPresented: .constant(trouble != nil)) {
-                Button("閉じる") { trouble = nil }
+            .alert(
+                "できません",
+                isPresented: Binding(get: { trouble != nil }, set: { if !$0 { trouble = nil } })
+            ) {
+                Button("閉じる") {}
             } message: {
                 Text(trouble ?? "")
             }
+    }
+
+    /// The picture goes to disk first, and only then into the text.
+    ///
+    /// The other order writes a link to a file that may never arrive, and a
+    /// note whose picture is missing looks the same as a note whose picture
+    /// was deleted — you cannot tell later which one happened.
+    private func take(_ item: PhotosPickerItem) {
+        busy = true
+        Task {
+            defer { busy = false; picked = nil }
+            do {
+                guard let data = try await item.loadTransferable(type: Data.self) else {
+                    trouble = "その写真を読めませんでした"
+                    return
+                }
+                // The bytes decide the extension, not the picker: a screenshot
+                // is a PNG and a photo is usually a HEIC, and calling either
+                // one the other leaves a file nothing will open.
+                let link = try store.attach(data, ext: Self.kind(of: data), to: note)
+                if !text.isEmpty && !text.hasSuffix("\n") { text += "\n" }
+                text += "![](\(link))\n"
+            } catch {
+                trouble = error.localizedDescription
+            }
+        }
+    }
+
+    /// What the first bytes say the picture is.
+    private static func kind(of data: Data) -> String {
+        let b = [UInt8](data.prefix(12))
+        if b.count >= 8, b[0] == 0x89, b[1] == 0x50 { return "png" }
+        if b.count >= 3, b[0] == 0xFF, b[1] == 0xD8 { return "jpg" }
+        if b.count >= 12, b[4] == 0x66, b[5] == 0x74, b[6] == 0x79, b[7] == 0x70 {
+            // ...ftyp... — HEIC and its relatives.
+            return "heic"
+        }
+        if b.count >= 4, b[0] == 0x47, b[1] == 0x49, b[2] == 0x46 { return "gif" }
+        return "png"
     }
 
     private func save(force: Bool) {

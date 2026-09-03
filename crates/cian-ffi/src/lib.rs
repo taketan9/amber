@@ -223,8 +223,63 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
             }))
         }
 
+        // A photo, put beside the note. The phone sends it base64 because
+        // that is what fits down a C string; everything about *where it goes*
+        // is `cian_core::note::attach`, the same call the window makes when a
+        // screenshot is pasted into the editor.
+        "image" => {
+            let note = std::path::PathBuf::from(arg(p, "note"));
+            let bytes = b64(&arg(p, "b64")).ok_or_else(|| anyhow::anyhow!("画像を読めません"))?;
+            let link = cian_core::note::attach(&note, &bytes, &arg(p, "ext"))?;
+            Ok(serde_json::json!({ "link": link, "bytes": bytes.len() }))
+        }
+
+        // Remove a note.
+        //
+        // Outright, because there is no trash on a phone to move it to —
+        // `cian_core::DESKTOP` is false here and `DeleteMode::Trash` refuses
+        // rather than pretending. The caller is expected to have asked first;
+        // this is the part that cannot be taken back.
+        "delete" => {
+            let path = std::path::PathBuf::from(arg(p, "path"));
+            if !path.is_file() {
+                anyhow::bail!("{} がありません", path.display());
+            }
+            std::fs::remove_file(&path)?;
+            Ok(serde_json::json!({ "ok": true }))
+        }
+
         other => anyhow::bail!("知らない操作: {other}"),
     }
+}
+
+/// Base64, in. Written here rather than pulled in: it is twenty lines, and a
+/// dependency that exists to decode one field is a dependency the iOS build
+/// has to carry to a phone.
+fn b64(text: &str) -> Option<Vec<u8>> {
+    // A data: URL is what a browser hands over, and the phone may as well be
+    // allowed to send one.
+    let text = match text.find(',') {
+        Some(at) if text.starts_with("data:") => &text[at + 1..],
+        _ => text,
+    };
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = Vec::with_capacity(text.len() / 4 * 3);
+    let mut acc: u32 = 0;
+    let mut bits = 0u32;
+    for c in text.bytes() {
+        if c == b'=' || c.is_ascii_whitespace() {
+            continue;
+        }
+        let v = TABLE.iter().position(|&t| t == c)? as u32;
+        acc = (acc << 6) | v;
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push((acc >> bits) as u8);
+        }
+    }
+    Some(out)
 }
 
 /// The stamp as the one string the caller stores and hands back.
@@ -255,6 +310,34 @@ mod tests {
         .unwrap();
         std::fs::write(d.path().join("b.txt"), "not a note\n").unwrap();
         d
+    }
+
+    #[test]
+    fn a_photo_is_written_beside_the_note_and_the_link_finds_it() {
+        let d = note_dir();
+        let note = d.path().join("a.md").to_str().unwrap().to_string();
+        // "aGk=" is "hi". Padding and a data: prefix both have to survive the
+        // trip, because that is what the two callers actually send.
+        let r = call("image", &serde_json::json!({
+            "note": note, "b64": "data:image/png;base64,aGk=", "ext": "png",
+        })).unwrap();
+        let link = r["link"].as_str().unwrap();
+        assert_eq!(r["bytes"], 2);
+        assert_eq!(std::fs::read(d.path().join(link)).unwrap(), b"hi");
+        // Nothing to attach does not silently make an empty file that the
+        // link in the note would then point at.
+        assert!(call("image", &serde_json::json!({ "note": note, "b64": "" })).is_err());
+    }
+
+    #[test]
+    fn deleting_removes_the_note_and_says_so_when_there_is_none() {
+        let d = note_dir();
+        let note = d.path().join("a.md").to_str().unwrap().to_string();
+        assert_eq!(call("delete", &serde_json::json!({ "path": note })).unwrap()["ok"], true);
+        assert!(!d.path().join("a.md").exists());
+        // Twice is an error, not a second silent success — the caller asked
+        // to remove something that is not there.
+        assert!(call("delete", &serde_json::json!({ "path": note })).is_err());
     }
 
     #[test]
