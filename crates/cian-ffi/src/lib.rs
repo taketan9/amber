@@ -259,6 +259,51 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
             Ok(serde_json::json!({ "blocks": out }))
         }
 
+        // Look inside the notes, not only at what the listing already knows.
+        //
+        // The listing carries a line per note — title, tags, the first
+        // hundred characters — and that is what the search field narrows
+        // against instantly. It is not enough: the sentence you remember is
+        // usually further down. This walks the files, and it is
+        // `cian_core::search`, the same one `:grep` uses in the window.
+        "find" => {
+            let root = std::path::PathBuf::from(arg(p, "path"));
+            let needle = arg(p, "needle");
+            if needle.trim().is_empty() {
+                return Ok(serde_json::json!({ "hits": [] }));
+            }
+            let q = cian_core::search::Query::content(needle);
+            let cancel = std::sync::atomic::AtomicBool::new(false);
+            let cap = p["limit"].as_u64().unwrap_or(200) as usize;
+            let mut hits: Vec<serde_json::Value> = Vec::new();
+            // One line per note, the first that matched: a phone shows a row
+            // per note, and twenty rows of the same note is a worse answer
+            // than one.
+            let mut seen: std::collections::HashSet<std::path::PathBuf> =
+                std::collections::HashSet::new();
+            cian_core::search::search(&root, &q, &cancel, &mut |h| {
+                if hits.len() >= cap || h.is_dir || !seen.insert(h.path.clone()) {
+                    return;
+                }
+                let md = h
+                    .path
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .map(|e| e.eq_ignore_ascii_case("md") || e.eq_ignore_ascii_case("markdown"))
+                    .unwrap_or(false);
+                if !md {
+                    return;
+                }
+                let (line, text) = h.line.unwrap_or((0, String::new()));
+                hits.push(serde_json::json!({
+                    "path": h.path.display().to_string(),
+                    "line": line,
+                    "text": text.trim(),
+                }));
+            });
+            Ok(serde_json::json!({ "hits": hits }))
+        }
+
         // A photo, put beside the note. The phone sends it base64 because
         // that is what fits down a C string; everything about *where it goes*
         // is `cian_core::note::attach`, the same call the window makes when a
@@ -360,6 +405,33 @@ mod tests {
         assert_eq!(b[2]["kind"], "image");
         assert_eq!(b[2]["link"], "a.jpg");
         assert_eq!(b.len(), 3, "the front matter does not cross");
+    }
+
+    #[test]
+    fn the_sentence_you_remember_is_usually_further_down() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::write(
+            d.path().join("long.md"),
+            // The word is past where an excerpt would stop, which is the whole
+            // reason this method exists.
+            format!("---\ntitle: 長いノート\n---\n{}\n合言葉はここ。\n", "埋草。".repeat(80)),
+        )
+        .unwrap();
+        std::fs::write(d.path().join("other.txt"), "合言葉はここ。\n").unwrap();
+
+        let r = call("find", &serde_json::json!({
+            "path": d.path().to_str().unwrap(), "needle": "合言葉",
+        })).unwrap();
+        let hits = r["hits"].as_array().unwrap();
+        assert_eq!(hits.len(), 1, "the .txt is not a note: {hits:?}");
+        assert!(hits[0]["path"].as_str().unwrap().ends_with("long.md"));
+        assert_eq!(hits[0]["text"], "合言葉はここ。");
+
+        // Nothing to look for is not "every note".
+        let r = call("find", &serde_json::json!({
+            "path": d.path().to_str().unwrap(), "needle": "  ",
+        })).unwrap();
+        assert!(r["hits"].as_array().unwrap().is_empty());
     }
 
     #[test]

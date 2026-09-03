@@ -85,11 +85,47 @@ final class NotesStore: ObservableObject {
         }
     }
 
+    /// Where a word was found inside the notes: path → the line it was on.
+    ///
+    /// Kept apart from `notes` because it answers a different question. The
+    /// listing knows a note's title, tags and first hundred characters and
+    /// narrows against them the instant you type; this walks the files, which
+    /// is slower and finds the sentence you actually remember.
+    @Published var hits: [String: String] = [:]
+
+    private var finding: Task<Void, Never>?
+
+    /// Look inside the notes for `needle`, a moment after you stop typing.
+    ///
+    /// Debounced and cancellable: a search per keystroke would walk the folder
+    /// five times for a five-letter word, and the four thrown away would be
+    /// the four the phone spent its battery on.
+    func find(_ needle: String) {
+        finding?.cancel()
+        let n = needle.trimmingCharacters(in: .whitespaces)
+        guard let root, n.count >= 2 else {
+            hits = [:]
+            return
+        }
+        finding = Task {
+            try? await Task.sleep(for: .milliseconds(250))
+            if Task.isCancelled { return }
+            guard let answer = try? Cian.call("find", ["path": root.path, "needle": n]) else { return }
+            if Task.isCancelled { return }
+            var found: [String: String] = [:]
+            for h in answer["hits"] as? [[String: Any]] ?? [] {
+                if let p = h["path"] as? String { found[p] = h["text"] as? String ?? "" }
+            }
+            hits = found
+        }
+    }
+
     /// Narrow by what a note is *about*, not by what its file is called.
     func matching(_ needle: String) -> [Note] {
         let n = needle.trimmingCharacters(in: .whitespaces).lowercased()
         guard !n.isEmpty else { return notes }
-        return notes.filter { $0.search.contains(n) }
+        // Either half: what the listing knows, or what was found inside.
+        return notes.filter { $0.search.contains(n) || hits[$0.path] != nil }
     }
 
     /// The text of a note, and the stamp that says which version it was.

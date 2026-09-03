@@ -94,7 +94,12 @@ struct ContentView: View {
             NavigationLink(value: note) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(note.title).font(.body.weight(.semibold)).lineLimit(1)
-                    if !note.excerpt.isEmpty {
+                    // The line the word was actually on, when there is one:
+                    // showing the note's opening instead would be answering a
+                    // question nobody asked.
+                    if let hit = store.hits[note.path], !needle.isEmpty {
+                        Text(hit).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    } else if !note.excerpt.isEmpty {
                         Text(note.excerpt).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                     }
                     if !note.tags.isEmpty || !note.book.isEmpty {
@@ -130,6 +135,7 @@ struct ContentView: View {
             }
         }
         .searchable(text: $needle, prompt: "題・タグ・本文")
+        .onChange(of: needle) { _, now in store.find(now) }
         .refreshable { store.reload() }
         .navigationDestination(for: Note.self) { NoteView(note: $0, store: store) }
     }
