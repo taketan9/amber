@@ -17,9 +17,26 @@ final class NotesStore: ObservableObject {
     private var root: URL?
     private static let bookmarkKey = "cian.notes.root"
 
-    /// The folder from last time, if it is still reachable.
+    /// The app's own folder, which is where notes go when nothing else is
+    /// chosen.
+    ///
+    /// It shows in Files as **cian**, because the app declares
+    /// `UIFileSharingEnabled` — so it is a real place you can put a file into
+    /// from anywhere else, not a hidden container. Starting here rather than
+    /// with a picker matters: the picker offers cloud providers, and a
+    /// provider whose app is not installed is *listed but greyed out*, which
+    /// reads as "cian cannot see my Drive" rather than as "Drive is not on
+    /// this phone".
+    private var own: URL? {
+        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
+    }
+
+    /// The folder from last time, or this app's own.
     func restore() {
-        guard let data = UserDefaults.standard.data(forKey: Self.bookmarkKey) else { return }
+        guard let data = UserDefaults.standard.data(forKey: Self.bookmarkKey) else {
+            if let own { adopt(own, remember: false, scoped: false, named: "cian") }
+            return
+        }
         var stale = false
         guard let url = try? URL(
             resolvingBookmarkData: data,
@@ -30,22 +47,26 @@ final class NotesStore: ObservableObject {
         // A folder in a cloud provider can move, be signed out of, or be
         // handed back stale after an update. Saying so beats an empty list
         // that looks like "you have no notes".
-        adopt(url, remember: stale)
+        adopt(url, remember: stale, scoped: true)
     }
 
-    func choose(_ url: URL) { adopt(url, remember: true) }
+    func choose(_ url: URL) { adopt(url, remember: true, scoped: true) }
 
-    private func adopt(_ url: URL, remember: Bool) {
-        // **The permission has to be opened and closed.** Without this the
-        // paths are readable in the picker and refused everywhere else, which
-        // reads as "cian cannot see my notes" rather than as a permission.
-        guard url.startAccessingSecurityScopedResource() else {
+    private func adopt(_ url: URL, remember: Bool, scoped: Bool, named: String? = nil) {
+        // **The permission has to be opened and closed** — for a folder
+        // somebody picked. Not for the app's own: asking to open a scope it
+        // was never given fails, and the failure reads as "cian cannot see my
+        // notes" when the truth is that no permission was needed.
+        if scoped, !url.startAccessingSecurityScopedResource() {
             trouble = "そのフォルダを開く許可がありません"
             return
         }
-        root?.stopAccessingSecurityScopedResource()
+        if scoped { root?.stopAccessingSecurityScopedResource() }
         root = url
-        rootName = url.lastPathComponent
+        // The app's own folder is literally named `Documents`, which is what
+        // the filesystem calls it and not what anybody calls it — Files shows
+        // it as **cian**, and so should the title above it.
+        rootName = named ?? url.lastPathComponent
         if remember, let data = try? url.bookmarkData() {
             UserDefaults.standard.set(data, forKey: Self.bookmarkKey)
         }
