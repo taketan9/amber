@@ -2601,6 +2601,7 @@ function contextRows() {
             { label: tr("\u25c6 cian (notes)", '◆ cian（ノート）'), value: ':view cian', run: () => { setView('cian'); say(tr('listing: cian', '一覧: cian')); } },
             { label: tr("\u25c6 Notes folder\u2026", '◆ ノートの置き場所へ…'), value: ':notes', run: cmdNotes },
             { label: tr("\u25c6 New note", '◆ 新しいノート'), value: ':newnote', run: cmdNewNote },
+            { label: tr("\u25c6 Tags\u2026", '◆ タグで絞る…'), value: ':tag', run: cmdTag },
             { label: tr("\u25a5 Classic", '▥ クラシック'), value: ':view classic', run: () => { setView('classic'); say(tr('listing: classic', '一覧: クラシック')); } },
             { label: tr("Show / hide dotfiles", 'ドットファイルの表示切替'), value: ':hidden', run: toggleHidden },
             { label: tr("Theme (this pane)", 'テーマ（このペイン）'), value: '', run: cmdPaneTheme },
@@ -3711,7 +3712,7 @@ document.addEventListener('keydown', (e) => {
     // `q` — 終了。cian-tui は確認を出してから終わる（keys.rs:2350）。
     // 一画面表示（詳細一覧・アイコン）では**文字**として扱うのも同じ ──
     // そこは端末ではなくデスクトップの見た目で、頭文字でファイルを探すのが
-    // 当たり前だから、フォルダ名を打っている人に「出ますか」と訊かない。
+    // 当たり前だから、ディレクトリ名を打っている人に「出ますか」と訊かない。
     else if (k === 'q' && bare && !ONE_PANE.includes(viewMode)) cmdQuit();
     else if (k === 'Z' && bare) cmdJump();
     else if (k === 's' && bare) cmdShortcuts();
@@ -5610,6 +5611,7 @@ function buildCommands() {
     { name: 'ssh', about: tr("ssh to a host, in the shell panel (also Shift+S)", 'ホストへ ssh（シェルパネルで。Shift+S でも）'), run: cmdSshPicker },
     { name: 'notes', about: tr("go to a notes folder (init.lua’s cian.notes)", 'ノートの置き場所へ（init.lua の cian.notes）'), run: cmdNotes },
     { name: 'newnote', about: tr("make a note here and open it", 'ここにノートを作って開く'), run: cmdNewNote },
+    { name: 'tag', about: tr("narrow the listing to one tag", 'タグで一覧を絞る'), run: cmdTag },
     { name: 'paste', about: tr("paste the held files here (also Ctrl+V / y)", '保持したファイルをここへ貼り付け（Ctrl+V / y でも）'), run: paste },
     { name: 'local', about: tr("close the server and come back to this disk", 'サーバを閉じてローカルへ戻る'), run: cmdDisconnect },
     { name: 'aicmd', about: tr("AI: a shell command from a description", 'AI: 説明からシェルコマンドを作る'), arg: tr('what you want', 'やりたいこと'), run: cmdAiCmd },
@@ -6408,6 +6410,40 @@ async function goToNotes(root) {
     if (viewMode !== 'cian') setView('cian');
 }
 
+/// `:tag` — the tags in this folder, and what each one narrows to.
+///
+/// Asks the engine rather than reading `notes`, so it works from any view:
+/// the same call is what hands the pane the line it filters on, and a tag
+/// picker that only worked once you were already looking at the notes would
+/// be a picker for people who had already found what they were after.
+async function cmdTag() {
+    const which = state.focus;
+    const pane = state[which];
+    if (!pane || !pane.cwd) return;
+    const r = await ask('notes', { path: pane.cwd });
+    if (!r) return;
+    const counts = new Map();
+    for (const n of r.notes) for (const t of n.tags) counts.set(t, (counts.get(t) || 0) + 1);
+    if (!counts.size) {
+        say(tr('no tags here — a note tags itself in its front matter',
+               'ここにタグはありません — ノートは前置きの tags に書きます'), true);
+        return;
+    }
+    // Commonest first: a tag on forty notes is a place you go, and one on two
+    // is a note you are looking for. Ties by name so the order is stable.
+    const rows = [...counts.entries()]
+        .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+        .map(([t, c]) => ({ label: `#${t}`, sub: tr(`${c} notes`, `${c} 件`) }));
+    show(tr("Tags", 'タグ'),
+        tr(`${rows.length} tags in this folder`, `このディレクトリに ${rows.length} 種`),
+        rows, {
+            filter: true,
+            hint: tr('type to narrow', '打って絞り込み'),
+            foot: tr('type to narrow   Enter narrow the listing   Esc close', '打って絞る   Enter 一覧を絞る   Esc 閉じる'),
+            pick: async (row) => { closeReport(); await applyFilter(row.label); },
+        });
+}
+
 /// `:newnote` — a note, made and opened.
 ///
 /// In the folder the pane is showing, which is the folder you are looking at
@@ -6421,7 +6457,7 @@ async function cmdNewNote() {
     const pane = state[which];
     if (!pane || !pane.cwd) return;
     if (pane.remote || pane.archive) {
-        say(tr('notes are made on a local folder', 'ノートはローカルのフォルダに作ります'), true);
+        say(tr('notes are made in a local directory', 'ノートはローカルのディレクトリに作ります'), true);
         return;
     }
     const title = await askFor(tr("title of the note", 'ノートの題'), '', {

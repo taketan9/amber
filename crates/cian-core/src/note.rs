@@ -287,6 +287,28 @@ pub fn file_stem(title: &str) -> String {
     out
 }
 
+/// One line to search a note by: its title, its tags, and the start of it.
+///
+/// A listing filters on the filename, which finds a note only if you named
+/// the file what the note is about. That holds for notes cian made and for
+/// nothing else — an imported page is `page-0012.md` with a title inside it,
+/// and a tag is never in a filename at all.
+///
+/// Tags keep their `#`, so `#仕事` narrows to the tag and `仕事` also finds
+/// the ones that merely say it. Lowercased once here rather than at every
+/// keystroke of the filter.
+pub fn haystack(n: &Note) -> String {
+    let mut s = String::with_capacity(n.title.len() + n.excerpt.len() + 16);
+    s.push_str(&n.title);
+    for t in &n.tags {
+        s.push_str(" #");
+        s.push_str(t);
+    }
+    s.push(' ');
+    s.push_str(&n.excerpt);
+    s.to_lowercase()
+}
+
 /// Today, where the person is sitting.
 ///
 /// Local and not UTC: a note written at ten at night in Tokyo is dated that
@@ -322,6 +344,23 @@ pub fn new_note(title: &str, today: &str) -> (String, String) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_note_is_searchable_by_its_title_and_its_tags_not_its_filename() {
+        let n = Note {
+            path: "/n/page-0012.md".into(),
+            title: "段取り".into(),
+            excerpt: "本文です。".into(),
+            tags: vec!["仕事".into(), "OneNote".into()],
+            updated: Some(0),
+            bytes: 0,
+        };
+        let h = haystack(&n);
+        assert!(h.contains("段取り"), "the title: {h}");
+        assert!(h.contains("#仕事"), "the tag, with its hash: {h}");
+        assert!(h.contains("#onenote"), "lowercased, so the filter need not be: {h}");
+        assert!(h.contains("本文です"), "and the start of it: {h}");
+    }
 
     #[test]
     fn a_new_note_reads_back_as_the_note_it_says_it_is() {

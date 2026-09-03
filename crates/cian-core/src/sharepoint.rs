@@ -168,7 +168,7 @@ pub fn refuse(url: &str) -> Option<String> {
     Some(format!(
         "このリンクにはファイルの場所が入っていません（{what}）。\
          資料を開いて、**アドレス欄の URL** をコピーしてください\
-         （`/sites/.../資料.xlsx` のように、途中にフォルダ名が入っている形です）"
+         （`/sites/.../資料.xlsx` のように、途中にディレクトリ名が入っている形です）"
     ))
 }
 
@@ -179,7 +179,7 @@ pub fn refuse(url: &str) -> Option<String> {
 pub fn hint() -> &'static str {
     "（SharePoint に「つないでよい」と Windows がまだ覚えていないようです。\
      **この接続はサインアウトや再起動で切れます。** \
-     ① Edge でその資料の *フォルダ* を開く \
+     ① Edge でその資料の *ディレクトリ* を開く \
      ② そのタブを Internet Explorer モードで読み直す\
      （「Edge で表示してください」と出ますが、それで正しいです）\
      ③ エクスプローラーのアドレス欄に同じパスを入れて開く。\

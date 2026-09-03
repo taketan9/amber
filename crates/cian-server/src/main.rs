@@ -4203,6 +4203,12 @@ impl Session {
                 let stop = std::sync::atomic::AtomicBool::new(false);
                 let found = cian_core::survey::survey(&dir, limits, &stop);
                 let mut rows: Vec<serde_json::Value> = Vec::new();
+                // What the filter should match, for the notes that are in
+                // *this* folder — the walk goes six deep, but a pane lists one
+                // level, and a map keyed by filename cannot describe two files
+                // with the same name in different books.
+                let mut here: std::collections::HashMap<String, String> =
+                    std::collections::HashMap::new();
                 for r in &found.rows {
                     if r.is_dir {
                         continue;
@@ -4229,6 +4235,18 @@ impl Session {
                         "updated": n.updated,
                         "bytes": n.bytes,
                     }));
+                    if !r.rel.contains('/') {
+                        here.insert(r.rel.clone(), cian_core::note::haystack(&n));
+                    }
+                }
+                // Handed to whichever pane is showing this folder, so `/`
+                // narrows by a title or a `#tag` and not only by a filename.
+                for which in ["left", "right"] {
+                    if let Ok(p) = self.pane_mut(which) {
+                        if p.cwd == dir {
+                            p.set_search_text(here.clone());
+                        }
+                    }
                 }
                 Ok(serde_json::json!({
                     "root": dir.display().to_string(),

@@ -349,6 +349,9 @@ PLURAL_OK = {
     'oldfiles', 'files',
     # 名詞そのもの
     'toggles', 'keys', 'vimkeys', 'colors', 'always',
+    # 置き場所は複数ある（自分専用と、みんなで書くところ）。単数の `:note` は
+    # 「1つのノート」に読めて `:newnote` と紛れる
+    'notes',
     # 複数形ではない。unix のコマンド名と "save as"
     'ls', 'saveas', 'less', 'ps', 'gitstatus', 'status',
 }

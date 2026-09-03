@@ -422,7 +422,7 @@ async function main() {
         // cian モード ── ノートの一覧。題は front matter か見出しか名前、
         // 二行目に本文の頭。**ファイル名とサイズではない。**
         ['read:(async()=>{await window.cian.call("shellinput",{text:"printf -- \'---\\\\ntitle: 段取り\\\\ntags: [x]\\\\n---\\\\n# 段取り\\\\n本文です。\\\\n\' > "+state[state.focus].cwd+"/note.md\\n"});return "ノートを1本書いた";})()', ''],
-        ['read:(async()=>{await window.cian.call("shellinput",{text:"mkdir -p sub && printf \'# 中の題\\\\n\' > sub/inner.md"+String.fromCharCode(10)});return "子フォルダに1本";})()', ''],
+        ['read:(async()=>{await window.cian.call("shellinput",{text:"mkdir -p sub && printf \'# 中の題\\\\n\' > sub/inner.md"+String.fromCharCode(10)});return "子ディレクトリに1本";})()', ''],
         ['wait:1500', ''], ['F5', '読み直し'], ['wait:600', ''],
         ['read:(()=>{setView("cian");return "cian ビューへ";})()', ''], ['wait:1500', ''],
         ['read:\'題: \' + [...document.querySelectorAll(".rows.cian .row .name")].map(e=>e.textContent).join(" / ")', ''],
@@ -431,9 +431,9 @@ async function main() {
         ['read:\'二行目: \' + [...document.querySelectorAll(".rows.cian .row .sub")].map(e=>e.textContent).filter(Boolean).join(" / ")', ''],
         ['shot:cian-view@#work', 'cian ビュー'],
         ['shot:cian-rows@.rows.cian', 'ノート行 ── 二行分の高さで揃っているか'],
-        // フォルダを移ったら読み直すか。**入るのは Enter だけではない**ので
+        // ディレクトリを移ったら読み直すか。**入るのは Enter だけではない**ので
         // 読み直しは `draw` にぶら下げてある ── ここはその一本を押している。
-        ['land:sub', '子フォルダへ'], ['Enter', '入る'], ['wait:2000', ''],
+        ['land:sub', '子ディレクトリへ'], ['Enter', '入る'], ['wait:2000', ''],
         ['read:\'子の題: \' + [...document.querySelectorAll(".rows.cian .row .name")].map(e=>e.textContent).join(" / ")', ''],
         ['land:..', '戻る'], ['Enter', ''], ['wait:1500', ''],
         // 画像の貼り付け ── ノートに撮った画面をそのまま置く。
@@ -448,16 +448,23 @@ async function main() {
         ['Esc', ''], ['Esc', ''], ['Esc', ''], ['wait:800', ''],
         // 新しいノート ── 題を打つと、前置きつきの .md が出来てエディタに載る。
         //
-        // **子フォルダの中でやる。**`from` はこの後の一連（コピー・マーク・
+        // **子ディレクトリの中でやる。**`from` はこの後の一連（コピー・マーク・
         // 取り消し）の題材なので、そこに増やすと、増えたぶんだけ背景の走査が
         // 伸びて後ろの手が競合する。一度それで7つの手が「効かない」に化けた。
-        ['land:sub', '子フォルダへ'], ['Enter', ''], ['wait:1500', ''],
+        ['land:sub', '子ディレクトリへ'], ['Enter', ''], ['wait:1500', ''],
         [':', 'コマンド'], ['type:newnote', ''], ['Enter', ''], ['wait:900', ''],
         ['type:plan', '題を打つ'], ['Enter', ''], ['wait:2500', ''],
         ['read:(()=>{const v=viewer.ed?viewer.ed.getValue():"";return "新ノートの頭: "+v.split(String.fromCharCode(10)).slice(0,4).join(" / ");})()', ''],
         ['read:(async()=>{const r=await window.cian.call("stat",{path:state[state.focus].cwd+"/plan.md"});return "plan.md 実在 "+r.exists+" "+r.len+"B";})()', ''],
         ['Esc', ''], ['Esc', ''], ['Esc', ''], ['wait:800', ''],
         ['land:..', '戻る'], ['Enter', ''], ['wait:1500', ''],
+        // タグで絞る ── **ファイル名にタグは無い。**note.md は `#x` を前置きに
+        // 持っているので、絞り込みが名前しか見ていなければ 0 件になる。
+        [':', 'コマンド'], ['type:tag', ''], ['Enter', ''], ['wait:1500', ''],
+        ['read:"タグの行: "+[...document.querySelectorAll("#report:not([hidden]) .hit")].map(e=>e.textContent.replace(/\\s+/g," ").trim()).join(" / ")', ''],
+        ['Enter', '1つ目のタグで絞る'], ['wait:1200', ''],
+        ['read:"絞った後: "+state[state.focus].entries.filter(e=>!e.parent).map(e=>e.name).join(" ")+" / 絞り "+state[state.focus].filter', ''],
+        ['read:(async()=>{await applyFilter("");return "絞りを解除";})()', ''], ['wait:800', ''],
         // ノートの置き場所 ── 2件あるときは訊く。
         ['read:"設定から届いた置き場所: "+noteRoots.map(r=>r.name+"→"+r.path.split("/").slice(-2).join("/")).join(" / ")', ''],
         ['read:(async()=>{await cmdNotes();await new Promise(r=>setTimeout(r,600));return "件数 "+noteRoots.length+" / 開 "+report.on+" / 題 "+(report.about||"")+" / 今 "+state[state.focus].cwd.split("/").pop();})()', ''],
@@ -472,8 +479,8 @@ async function main() {
         ['read:"打って実行: 開 "+report.on+" / 題 "+(report.about||"")+" / 今 "+state[state.focus].cwd.split("/").pop()', ''],
         ['Enter', '1つ目を選ぶ'], ['wait:2000', ''],
         ['read:"選んだ先: "+state[state.focus].cwd.split("/").pop()+" / ビュー "+viewMode+" / 枠 "+report.on', ''],
-        // **元のフォルダに戻す。**ここを置き去りにすると、この後の一連が
-        // 2件しかないフォルダで走り、コピーもマークも対象を失う。
+        // **元のディレクトリに戻す。**ここを置き去りにすると、この後の一連が
+        // 2件しかないディレクトリで走り、コピーもマークも対象を失う。
         ['land:..', '戻る'], ['Enter', ''], ['wait:1500', ''],
         ['read:\'置き場所の行: \' + [...document.querySelectorAll("#report:not([hidden]) .hit")].map(e=>e.textContent.replace(/\\s+/g," ").trim()).join(" / ")', ''],
         ['Enter', '1つ目へ'], ['wait:2000', ''],
@@ -661,7 +668,7 @@ async function main() {
         ['Ctrl+e', 'ソースへ'], ['wait:800', ''],
         // **横から書き換えられたファイルに保存しない。**
         //
-        // 共有フォルダで2人が同じノートを開いて両方保存すると、後の人が
+        // 共有ディレクトリで2人が同じノートを開いて両方保存すると、後の人が
         // 前の人を黙って消していた。保存は断り、選ばせる。
         // **cian 自身の保存では再現しない** ── エンジンから見れば「自分が
         // 書いた」ので、当然ぶつからない。一度それで「書けてしまった」を
