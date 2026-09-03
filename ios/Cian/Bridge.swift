@@ -52,6 +52,12 @@ struct Note: Identifiable, Hashable {
     let excerpt: String
     let tags: [String]
     let updated: UInt64
+    /// The directory it sits in, relative to the chosen root — a notebook, in
+    /// the sense Inkdrop means. Empty for a note at the top.
+    ///
+    /// Shown because the list reaches six levels down: without it two notes
+    /// called 「打合せ」 in two different months are the same row twice.
+    let book: String
     /// Title, `#tags` and the start of the body, lowercased — **cian's own
     /// answer to "what does this note match"**, so a search here finds the
     /// same notes it finds in the window.
@@ -66,6 +72,7 @@ struct Note: Identifiable, Hashable {
         excerpt = o["excerpt"] as? String ?? ""
         tags = o["tags"] as? [String] ?? []
         updated = o["updated"] as? UInt64 ?? 0
+        book = o["book"] as? String ?? ""
         search = o["search"] as? String ?? ""
     }
 }

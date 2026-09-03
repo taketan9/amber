@@ -75,9 +75,21 @@ struct ContentView: View {
                     if !note.excerpt.isEmpty {
                         Text(note.excerpt).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                     }
-                    if !note.tags.isEmpty {
-                        Text(note.tags.map { "#\($0)" }.joined(separator: " "))
-                            .font(.caption2).foregroundStyle(.tint)
+                    if !note.tags.isEmpty || !note.book.isEmpty {
+                        HStack(spacing: 6) {
+                            if !note.book.isEmpty {
+                                // The notebook first: it says *where*, and
+                                // where is what tells two same-named notes
+                                // apart. Quieter than the tags, which are a
+                                // thing you chose rather than a place.
+                                Label(note.book, systemImage: "folder")
+                                    .font(.caption2).foregroundStyle(.secondary)
+                            }
+                            if !note.tags.isEmpty {
+                                Text(note.tags.map { "#\($0)" }.joined(separator: " "))
+                                    .font(.caption2).foregroundStyle(.tint)
+                            }
+                        }
                     }
                 }
             }
