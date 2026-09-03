@@ -1,0 +1,23 @@
+[package]
+name = "cian-ffi"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "cian's notes, behind a C ABI, for platforms that cannot run the engine"
+
+[lib]
+# `staticlib` is what an Xcode target links; `rlib` is what `cargo test` needs,
+# and the tests here are the only place this code is ever run on a machine
+# that can run it.
+crate-type = ["staticlib", "rlib"]
+
+[dependencies]
+# **No desktop features.** There is no trash on a phone, and a core that
+# always wants one cannot be built for one.
+cian-core = { path = "../cian-core", default-features = false }
+anyhow = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3.27.0"

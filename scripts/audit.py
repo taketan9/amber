@@ -26,8 +26,24 @@ import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-CRATES = ['cian-core', 'cian-tui', 'cian-lua', 'cian-pty', 'cian-scp', 'cian-ai',
-          'cian-bin', 'cian-gui', 'cian-server']
+def _members() -> list:
+    """ワークスペースが持っているクレート全部。
+
+    **手書きの一覧にしない。** ここは長らく9個の名前を並べていて、10個目
+    （cian-ffi）を足したとき、その中身は死にコードも用語のブレも一切
+    見られないまま素通りした。**検査は足したときだけでなく、増えたときにも
+    黙る。**members から取れば、次のクレートは黙って外れようがない。
+    """
+    with open(os.path.join(ROOT, 'Cargo.toml'), encoding='utf-8') as fh:
+        src = fh.read()
+    block = re.search(r'members\s*=\s*\[(.*?)\]', src, re.S)
+    names = re.findall(r'"crates/([^"]+)"', block.group(1) if block else '')
+    if len(names) < 5:
+        raise SystemExit('audit: Cargo.toml から members を読めませんでした')
+    return sorted(names)
+
+
+CRATES = _members()
 #: 本体のソース。tests.rs は読み手が違う（テストが唯一の利用者でも死んではいない）
 SRC = sorted(p for c in CRATES
              for p in glob.glob(os.path.join(ROOT, 'crates', c, 'src', '**', '*.rs'),

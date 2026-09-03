@@ -4201,7 +4201,7 @@ impl Session {
                     ..Default::default()
                 };
                 let stop = std::sync::atomic::AtomicBool::new(false);
-                let found = cian_core::survey::survey(&dir, limits, &stop);
+                let (notes, found) = cian_core::note::list(&dir, limits, &stop);
                 let mut rows: Vec<serde_json::Value> = Vec::new();
                 // What the filter should match, for the notes that are in
                 // *this* folder — the walk goes six deep, but a pane lists one
@@ -4209,34 +4209,22 @@ impl Session {
                 // with the same name in different books.
                 let mut here: std::collections::HashMap<String, String> =
                     std::collections::HashMap::new();
-                for r in &found.rows {
-                    if r.is_dir {
-                        continue;
-                    }
-                    let md = r
-                        .path
-                        .extension()
-                        .and_then(|e| e.to_str())
-                        .map(|e| e.eq_ignore_ascii_case("md") || e.eq_ignore_ascii_case("markdown"))
-                        .unwrap_or(false);
-                    if !md {
-                        continue;
-                    }
-                    let Some(n) = cian_core::note::read(&r.path, 60) else { continue };
+                for f in &notes {
+                    let (rel, n) = (&f.rel, &f.note);
                     rows.push(serde_json::json!({
                         "path": n.path.display().to_string(),
                         // The folder it sits in, relative to the root: a
                         // notebook is a directory, so this is what the tree
                         // down the side is drawn from.
-                        "book": r.rel.rsplit_once('/').map(|(d, _)| d).unwrap_or(""),
+                        "book": rel.rsplit_once('/').map(|(d, _)| d).unwrap_or(""),
                         "title": n.title,
                         "excerpt": n.excerpt,
                         "tags": n.tags,
                         "updated": n.updated,
                         "bytes": n.bytes,
                     }));
-                    if !r.rel.contains('/') {
-                        here.insert(r.rel.clone(), cian_core::note::haystack(&n));
+                    if !rel.contains('/') {
+                        here.insert(rel.clone(), cian_core::note::haystack(n));
                     }
                 }
                 // Handed to whichever pane is showing this folder, so `/`
@@ -4273,35 +4261,13 @@ impl Session {
                 if dir.as_os_str().is_empty() {
                     anyhow::bail!("ノートの置き場所がありません");
                 }
-                // The first note in a configured root arrives before the root
-                // does. Making it is the friendly reading of "notes live here".
-                std::fs::create_dir_all(&dir)?;
-                let (name, body) = cian_core::note::new_note(
+                // The making of it is `cian_core::note`'s, so a phone makes
+                // the same note this does.
+                let at = cian_core::note::create(
+                    &dir,
                     &arg(req, "title"),
                     &cian_core::note::today(),
-                );
-                let stem = name.trim_end_matches(".md").to_string();
-                // Two notes on the same day, or two people with the same idea.
-                // `create_new` rather than a check-then-write: the check and
-                // the write are not one step, and the loser would silently
-                // overwrite the winner.
-                let mut at = dir.join(&name);
-                let mut n = 2;
-                let file = loop {
-                    match std::fs::OpenOptions::new().write(true).create_new(true).open(&at) {
-                        Ok(f) => break f,
-                        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists && n <= 99 => {
-                            at = dir.join(format!("{stem}-{n}.md"));
-                            n += 1;
-                        }
-                        Err(e) => return Err(e.into()),
-                    }
-                };
-                {
-                    use std::io::Write;
-                    let mut file = file;
-                    file.write_all(body.as_bytes())?;
-                }
+                )?;
                 Ok(serde_json::json!({
                     "path": at.to_string_lossy(),
                     "name": at.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default(),

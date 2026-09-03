@@ -47,6 +47,14 @@ pub mod svn;
 pub mod theme;
 pub mod viewer;
 
+/// Whether this build has a desktop under it.
+///
+/// False on a phone, where there is no trash to move a file to and
+/// `DeleteMode::Trash` refuses rather than deleting outright. Asked here
+/// rather than read as a feature by every caller: a feature is the *core's*
+/// fact, and a crate that tested its own would answer about itself.
+pub const DESKTOP: bool = cfg!(feature = "desktop");
+
 #[derive(Debug, Clone)]
 pub struct Entry {
     pub name: String,

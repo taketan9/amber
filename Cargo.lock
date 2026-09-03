@@ -603,6 +603,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "cian-ffi"
+version = "2.1.0"
+dependencies = [
+ "anyhow",
+ "cian-core",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "cian-gui"
 version = "2.1.0"
 dependencies = [

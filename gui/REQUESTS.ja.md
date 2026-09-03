@@ -93,6 +93,7 @@ python3 scripts/requests.py --list   # 何を見ているか
 | 48 | 2026-09-02 | ノートの置き場所は複数指定できるといい（自分専用と、みんなで書くところ） | `cian.notes{ { name = …, path = … }, … }`。**並びは書いた順** ── Lua は文字列キーの順を保たないので、表にすると起動のたびにピッカーが入れ替わり、同じ位置に違うフォルダが来る。展開（`~`・SharePoint の URL → UNC）は**エンジン側** ── それが意味を持つのは実際にファイルがある機械だけで、窓はその機械ではない | `crates/cian-lua/src/lib.rs ~ pub struct NoteRoot \{` |
 | 49 | 2026-09-02 | 自分のノートを書き足せるようにしたい | `:newnote` ── 題を訊いて、前置き（`title`／`created`／`tags`）だけのノートを作って開く。名前と体裁の判断は `cian_core::note`（iPhone へ運べる側）。ファイル名は**スラグにしない** ── 題は日本語のことが多く、ASCII に削ると `.md` だけが残る。消すのは OS が拒む文字だけ。`CON` は拡張子を付けても `CON`、末尾の点と空白は Explorer が黙って食う | `crates/cian-core/src/note.rs ~ pub fn new_note\(` |
 | 50 | 2026-09-02 | タグでノートを絞れるようにしたい | 一覧は名前で絞る ── それはファイルには正しく、ノートには間違い。**タグはファイル名のどこにも無い**し、取り込んだページは `page-0012.md` の中に題を持っている。ペインが項目ごとに「探せる一行」を持ち（`Pane::search_text`）、その中身は `note::haystack`（題＋`#タグ`＋本文の頭）。**iPhone 側も同じ判断を使う**ので窓には置かない。到着時に marks・filter と一緒に捨てる ── 前のフォルダの言葉で次のフォルダを絞ることになる | `crates/cian-core/src/note.rs ~ pub fn haystack\(` |
+| 51 | 2026-09-03 | iPhone でも使えるようにしたい（Mac と iPhone の連携が本命） | ノートの半分を C ABI の向こうへ。**扉は1つ**（`cian_call(method, params)` で JSON を渡して JSON が返る ── 窓がエンジンと交わしているのと同じ会話）。関数を増やすと Xcode の橋渡しヘッダを手で合わせ直すことになり、そこは何も検査できない。**判断は置かない** ── 題も抜粋もタグも命名も `cian_core::note` のまま。`trash` は任意機能にした（iPhone にゴミ箱の API は無い）。stamp は**秒に丸めない** ── 丸めた最初の版は保存のたびに「誰でもない相手」と競合していた | `crates/cian-ffi/src/lib.rs ~ pub unsafe extern "C" fn cian_call\(` |
 
 ## 増やすとき
 

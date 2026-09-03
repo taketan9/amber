@@ -309,6 +309,73 @@ pub fn haystack(n: &Note) -> String {
     s.to_lowercase()
 }
 
+/// A note, and where it sits under the folder that was walked.
+pub struct Found {
+    /// Path relative to the walked folder, with `/` separators.
+    pub rel: String,
+    pub note: Note,
+}
+
+/// Every Markdown note under `dir`, with the walk's own account of itself.
+///
+/// Here rather than in the engine because there are two callers now — the
+/// window asks over a pipe, and a phone will ask over a C ABI — and "what
+/// counts as a note" written twice is two answers that drift. The rules are
+/// the whole content: directories are not notes, a `.md`/`.markdown` suffix
+/// is, and the first sixty lines are enough to know a title from an excerpt.
+pub fn list(
+    dir: &std::path::Path,
+    limits: crate::survey::Limits,
+    stop: &std::sync::atomic::AtomicBool,
+) -> (Vec<Found>, crate::survey::Survey) {
+    let found = crate::survey::survey(dir, limits, stop);
+    let mut out = Vec::new();
+    for r in &found.rows {
+        if r.is_dir {
+            continue;
+        }
+        let md = r
+            .path
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|e| e.eq_ignore_ascii_case("md") || e.eq_ignore_ascii_case("markdown"))
+            .unwrap_or(false);
+        if !md {
+            continue;
+        }
+        let Some(note) = read(&r.path, 60) else { continue };
+        out.push(Found { rel: r.rel.clone(), note });
+    }
+    (out, found)
+}
+
+/// Make a note in `dir` and say where it went.
+///
+/// The name that is free, not the name that was free a moment ago:
+/// `create_new` fails if the file appeared between the check and the write,
+/// and two people on one shared folder is the case this whole mode exists
+/// for. Shared with the engine for the same reason as [`list`].
+pub fn create(dir: &std::path::Path, title: &str, today: &str) -> anyhow::Result<std::path::PathBuf> {
+    use std::io::Write;
+    std::fs::create_dir_all(dir)?;
+    let (name, body) = new_note(title, today);
+    let stem = name.trim_end_matches(".md").to_string();
+    let mut at = dir.join(&name);
+    let mut n = 2;
+    let mut file = loop {
+        match std::fs::OpenOptions::new().write(true).create_new(true).open(&at) {
+            Ok(f) => break f,
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists && n <= 99 => {
+                at = dir.join(format!("{stem}-{n}.md"));
+                n += 1;
+            }
+            Err(e) => return Err(e.into()),
+        }
+    };
+    file.write_all(body.as_bytes())?;
+    Ok(at)
+}
+
 /// Today, where the person is sitting.
 ///
 /// Local and not UTC: a note written at ten at night in Tokyo is dated that

@@ -10,6 +10,7 @@ members = [
     "crates/cian-bin",
     "crates/cian-gui",
     "crates/cian-server",
+    "crates/cian-ffi",
 ]
 
 [workspace.package]

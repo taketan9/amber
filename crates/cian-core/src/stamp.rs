@@ -66,6 +66,38 @@ pub fn describe(path: &Path, since: &Stamp) -> String {
     }
 }
 
+/// The stamp as one string, for a caller that has to hand it back later.
+///
+/// **Not seconds.** A phone reads a note, gets the stamp as JSON, and returns
+/// it on save; a stamp rounded to the second on the way out no longer equals
+/// the file it came from, so every save reports a conflict with nobody. That
+/// is not a hypothetical — it is what the first version of the FFI did, and
+/// the round-trip test caught it.
+///
+/// Opaque on purpose: the caller stores it and gives it back, and nothing
+/// outside this module needs to know that it is a length and a time.
+pub fn token(s: &Stamp) -> String {
+    match s.modified.and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()) {
+        Some(d) => format!("{}:{}.{}", s.len, d.as_secs(), d.subsec_nanos()),
+        // A filesystem that would not say the time. The length alone is
+        // weaker but still catches the common case, and saying so beats
+        // inventing a time that would never match.
+        None => format!("{}:-", s.len),
+    }
+}
+
+/// Read back what [`token`] wrote. Anything else is `None`.
+pub fn from_token(t: &str) -> Option<Stamp> {
+    let (len, time) = t.split_once(':')?;
+    let len: u64 = len.parse().ok()?;
+    if time == "-" {
+        return Some(Stamp { len, modified: None });
+    }
+    let (secs, nanos) = time.split_once('.')?;
+    let d = std::time::Duration::new(secs.parse().ok()?, nanos.parse().ok()?);
+    Some(Stamp { len, modified: Some(std::time::UNIX_EPOCH + d) })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -108,6 +140,24 @@ mod tests {
         std::fs::remove_file(&p).unwrap();
         assert!(changed(&p, &s));
         assert!(describe(&p, &s).contains("消えています"));
+    }
+
+    #[test]
+    fn a_stamp_that_went_out_and_came_back_is_the_same_stamp() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("note.md");
+        write(&p, "one\n");
+        let s = of(&p).unwrap();
+        // Exactly equal, not nearly: `changed` compares for equality, so a
+        // stamp that loses a nanosecond on the trip says the file moved.
+        assert_eq!(from_token(&token(&s)), Some(s.clone()));
+        assert!(!changed(&p, &from_token(&token(&s)).unwrap()));
+        // A filesystem with no time to give still round-trips.
+        let no_time = Stamp { len: 12, modified: None };
+        assert_eq!(from_token(&token(&no_time)), Some(no_time));
+        // Nonsense is refused rather than guessed at.
+        assert_eq!(from_token("あ"), None);
+        assert_eq!(from_token("12:x.y"), None);
     }
 
     /// A rewrite of the same length, far enough apart in time to be seen.
