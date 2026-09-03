@@ -58,6 +58,9 @@ struct Note: Identifiable, Hashable {
     /// Shown because the list reaches six levels down: without it two notes
     /// called 「打合せ」 in two different months are the same row twice.
     let book: String
+    /// Kept at the top of the list whatever the ordering — pinning exists to
+    /// stop you scrolling to the note you keep coming back to.
+    let pinned: Bool
     /// Title, `#tags` and the start of the body, lowercased — **cian's own
     /// answer to "what does this note match"**, so a search here finds the
     /// same notes it finds in the window.
@@ -73,6 +76,7 @@ struct Note: Identifiable, Hashable {
         tags = o["tags"] as? [String] ?? []
         updated = o["updated"] as? UInt64 ?? 0
         book = o["book"] as? String ?? ""
+        pinned = o["pinned"] as? Bool ?? false
         search = o["search"] as? String ?? ""
     }
 }

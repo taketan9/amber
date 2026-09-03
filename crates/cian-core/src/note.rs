@@ -139,6 +139,10 @@ pub struct Note {
     /// seconds since the epoch. Formatting belongs to whoever is drawing.
     pub updated: Option<u64>,
     pub bytes: u64,
+    /// `pinned: true` in the front matter. A pinned note sits at the top of
+    /// the list whatever the ordering — it is the one you keep coming back
+    /// to, and scrolling to it is the thing pinning exists to stop.
+    pub pinned: bool,
 }
 
 /// Read one note. Only the head of the file is looked at — a list of two
@@ -171,6 +175,12 @@ pub fn read(path: &Path, head_lines: usize) -> Option<Note> {
         path: path.to_path_buf(),
         title,
         excerpt: excerpt(body),
+        // `true`, `yes`, `1` — the three ways people write it, because
+        // nobody remembers which one a given app wanted.
+        pinned: matches!(
+            f.fields.get("pinned").map(|v| v.trim().to_ascii_lowercase()).as_deref(),
+            Some("true" | "yes" | "1")
+        ),
         tags: f.tags,
         updated,
         bytes: meta.map(|m| m.len()).unwrap_or(0),
@@ -605,6 +615,62 @@ fn lone_image(t: &str) -> Option<Block> {
     })
 }
 
+/// Set or remove one plain field in a note's front matter, and hand back the
+/// whole note.
+///
+/// Text in, text out, for the same reason as [`set_tags`]: the caller saves
+/// it the ordinary way, so pinning a note is checked against the file on disk
+/// exactly as typing in it is.
+///
+/// `None` takes the field off rather than writing an empty one — a note that
+/// says `pinned:` with nothing after it is a note that will be read as pinned
+/// by the next thing that looks.
+pub fn set_field(text: &str, key: &str, value: Option<&str>) -> String {
+    let lines: Vec<String> = text.lines().map(|l| l.to_string()).collect();
+    let end = text.ends_with('\n');
+    let f = front(&lines);
+    let key_l = key.to_ascii_lowercase();
+    let line = value.map(|v| format!("{key}: {v}"));
+
+    let mut out: Vec<String> = Vec::with_capacity(lines.len() + 4);
+    if f.lines == 0 {
+        let Some(line) = line else { return text.to_string() };
+        out.push("---".into());
+        out.push(line);
+        out.push("---".into());
+        out.extend(lines);
+    } else {
+        let mut wrote = false;
+        out.push(lines[0].clone());
+        for raw in &lines[1..f.lines - 1] {
+            let t = raw.trim_start();
+            let k = t.split_once(':').map(|(k, _)| k.trim().to_ascii_lowercase());
+            if k.as_deref() == Some(key_l.as_str()) {
+                if let Some(line) = &line {
+                    if !wrote {
+                        out.push(line.clone());
+                        wrote = true;
+                    }
+                }
+                continue;
+            }
+            out.push(raw.clone());
+        }
+        if let Some(line) = line {
+            if !wrote {
+                out.push(line);
+            }
+        }
+        out.push(lines[f.lines - 1].clone());
+        out.extend(lines[f.lines..].iter().cloned());
+    }
+    let mut s = out.join("\n");
+    if end {
+        s.push('\n');
+    }
+    s
+}
+
 /// Put a new set of tags on a note, and hand back the whole note.
 ///
 /// Text in, text out: the caller saves it the way it saves any other edit, so
@@ -671,6 +737,67 @@ pub fn set_tags(text: &str, tags: &[String]) -> String {
     s
 }
 
+/// Move a note into another folder, taking its pictures with it.
+///
+/// **The pictures have to come.** A note's links are relative — `![](
+/// attachments/note-1788450324680.jpg)` — so a note that moves on its own
+/// arrives with every picture broken, and the breakage shows up later, when
+/// somebody opens the note and cannot tell whether the image was deleted or
+/// never arrived.
+///
+/// Which pictures are "its" is answerable because of how they were named:
+/// [`attach`] calls them `<the note's stem>-<clock>.<ext>`. A picture some
+/// other note also points at would be moved out from under it — but that can
+/// only happen if somebody wrote the link by hand, and the alternative
+/// (leaving every picture behind) breaks the note that is actually moving.
+///
+/// Nothing is overwritten: a name already taken at the destination stops the
+/// move with the note still where it was.
+pub fn move_to(note: &std::path::Path, dir: &std::path::Path) -> anyhow::Result<std::path::PathBuf> {
+    let Some(name) = note.file_name() else {
+        anyhow::bail!("移せません: {}", note.display())
+    };
+    let Some(from) = note.parent() else {
+        anyhow::bail!("移せません: {}", note.display())
+    };
+    if from == dir {
+        return Ok(note.to_path_buf());
+    }
+    std::fs::create_dir_all(dir)?;
+    let to = dir.join(name);
+    if to.exists() {
+        anyhow::bail!("{} には同じ名前があります", dir.display());
+    }
+
+    let stem = note
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let mut pictures: Vec<std::path::PathBuf> = Vec::new();
+    if let Ok(rd) = std::fs::read_dir(from.join("attachments")) {
+        for e in rd.flatten() {
+            let n = e.file_name().to_string_lossy().into_owned();
+            if n.starts_with(&format!("{stem}-")) {
+                pictures.push(e.path());
+            }
+        }
+    }
+
+    // The note last: if a picture cannot be moved, the note is still where it
+    // was and still points at pictures that are still there.
+    if !pictures.is_empty() {
+        let at = dir.join("attachments");
+        std::fs::create_dir_all(&at)?;
+        for p in &pictures {
+            if let Some(n) = p.file_name() {
+                std::fs::rename(p, at.join(n))?;
+            }
+        }
+    }
+    std::fs::rename(note, &to)?;
+    Ok(to)
+}
+
 /// Today, where the person is sitting.
 ///
 /// Local and not UTC: a note written at ten at night in Tokyo is dated that
@@ -716,6 +843,7 @@ mod tests {
             tags: vec!["仕事".into(), "OneNote".into()],
             updated: Some(0),
             bytes: 0,
+            pinned: false,
         };
         let h = haystack(&n);
         assert!(h.contains("段取り"), "the title: {h}");
@@ -788,6 +916,68 @@ mod tests {
             blocks("```\nx\ny\n"),
             vec![Block::Code { lang: String::new(), text: "x\ny".into() }]
         );
+    }
+
+    #[test]
+    fn a_note_that_moves_takes_its_pictures_with_it() {
+        let d = tempfile::tempdir().unwrap();
+        let note = d.path().join("段取り.md");
+        std::fs::write(&note, "# 段取り\n").unwrap();
+        let link = attach(&note, &[1, 2, 3], "png").unwrap();
+        // Another note's picture, which must stay where it is.
+        let other = d.path().join("他.md");
+        std::fs::write(&other, "x").unwrap();
+        let others = attach(&other, &[9], "png").unwrap();
+
+        let book = d.path().join("仕事");
+        let moved = move_to(&note, &book).unwrap();
+        assert_eq!(moved, book.join("段取り.md"));
+        // The link inside the note is relative, so it has to still find the
+        // picture from where the note now is.
+        assert_eq!(std::fs::read(book.join(&link)).unwrap(), vec![1, 2, 3]);
+        assert!(!d.path().join(&link).exists(), "and not left behind as well");
+        assert!(std::fs::read(d.path().join(&others)).is_ok(), "the other note's picture stays");
+
+        // A name already taken stops the move rather than overwriting.
+        let clash = d.path().join("段取り.md");
+        std::fs::write(&clash, "別物").unwrap();
+        assert!(move_to(&clash, &book).is_err());
+        assert_eq!(std::fs::read_to_string(&clash).unwrap(), "別物", "still where it was");
+
+        // Moving into the folder it is already in is not a failure.
+        assert_eq!(move_to(&moved, &book).unwrap(), moved);
+    }
+
+    #[test]
+    fn a_note_can_be_pinned_and_unpinned_without_losing_anything() {
+        let src = "---\ntitle: 段取り\ntags: [仕事]\n---\n本文。\n";
+        let on = set_field(src, "pinned", Some("true"));
+        assert_eq!(on, "---\ntitle: 段取り\ntags: [仕事]\npinned: true\n---\n本文。\n");
+
+        // Off takes the line away rather than writing `pinned: false` — and
+        // certainly rather than `pinned:` with nothing after it, which the
+        // next thing to read the note would take for pinned.
+        let off = set_field(&on, "pinned", None);
+        assert_eq!(off, src);
+
+        // Setting it twice does not write it twice.
+        let twice = set_field(&set_field(src, "pinned", Some("true")), "pinned", Some("true"));
+        assert_eq!(twice.matches("pinned").count(), 1);
+
+        // Removing a field a note does not have leaves the note alone.
+        assert_eq!(set_field(src, "pinned", None), src);
+        // A note with no front matter and nothing to write stays as it is.
+        assert_eq!(set_field("本文。\n", "pinned", None), "本文。\n");
+    }
+
+    #[test]
+    fn the_three_ways_people_write_yes() {
+        let d = tempfile::tempdir().unwrap();
+        for (v, want) in [("true", true), ("yes", true), ("1", true), ("false", false), ("", false)] {
+            let p = d.path().join("n.md");
+            std::fs::write(&p, format!("---\ntitle: x\npinned: {v}\n---\n本文。\n")).unwrap();
+            assert_eq!(read(&p, 20).unwrap().pinned, want, "pinned: {v:?}");
+        }
     }
 
     #[test]

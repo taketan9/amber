@@ -4222,6 +4222,7 @@ impl Session {
                         "tags": n.tags,
                         "updated": n.updated,
                         "bytes": n.bytes,
+                        "pinned": n.pinned,
                     }));
                     if !rel.contains('/') {
                         here.insert(rel.clone(), cian_core::note::haystack(n));

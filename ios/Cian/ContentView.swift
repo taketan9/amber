@@ -100,6 +100,10 @@ struct ContentView: View {
         do { try store.remove(note) } catch { store.trouble = error.localizedDescription }
     }
 
+    private func moveTo(_ note: Note, _ book: String?) {
+        do { try store.move(note, to: book) } catch { store.trouble = error.localizedDescription }
+    }
+
     private func make() {
         do { made = try store.make(titled: title) } catch { store.trouble = error.localizedDescription }
         title = ""
@@ -121,7 +125,13 @@ struct ContentView: View {
         List(store.matching(needle)) { note in
             NavigationLink(value: note) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(note.title).font(.body.weight(.semibold)).lineLimit(1)
+                    HStack(spacing: 4) {
+                        if note.pinned {
+                            Image(systemName: "pin.fill")
+                                .font(.caption2).foregroundStyle(.orange)
+                        }
+                        Text(note.title).font(.body.weight(.semibold)).lineLimit(1)
+                    }
                     // The line the word was actually on, when there is one:
                     // showing the note's opening instead would be answering a
                     // question nobody asked.
@@ -160,6 +170,29 @@ struct ContentView: View {
             // be worse than the gesture that I have.
             .swipeActions(allowsFullSwipe: false) {
                 Button("削除", role: .destructive) { remove(note) }
+            }
+            // Pinning on the other side, where a swipe that starts left is
+            // for keeping and one that starts right is for losing.
+            .swipeActions(edge: .leading) {
+                Button {
+                    do { try store.pin(note, !note.pinned) }
+                    catch { store.trouble = error.localizedDescription }
+                } label: {
+                    Label(note.pinned ? "外す" : "留める",
+                          systemImage: note.pinned ? "pin.slash" : "pin")
+                }
+                .tint(.orange)
+            }
+            .contextMenu {
+                // Moving lives in the long press: it is the one action here
+                // that needs a second choice (which notebook), and a swipe
+                // cannot ask a question.
+                Menu("ノートブックへ移す") {
+                    Button("（いちばん上）") { moveTo(note, nil) }
+                    ForEach(store.books, id: \.name) { b in
+                        Button(b.name) { moveTo(note, b.name) }
+                    }
+                }
             }
         }
         .searchable(text: $needle, prompt: "題・タグ・本文")

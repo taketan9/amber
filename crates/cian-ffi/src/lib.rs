@@ -134,6 +134,7 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
                         "tags": n.tags,
                         "updated": n.updated,
                         "bytes": n.bytes,
+                        "pinned": n.pinned,
                         // What to match when the phone narrows the list, so
                         // that `#仕事` finds the same notes it finds in the
                         // window. Sent rather than derived on the far side:
@@ -317,6 +318,23 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
             Ok(serde_json::json!({
                 "text": cian_core::note::set_tags(&arg(p, "text"), &tags),
             }))
+        }
+
+        // One plain field on or off — `pinned` today, whatever tomorrow.
+        // Text in, text out, so it saves like any other edit.
+        "setfield" => {
+            let value = p["value"].as_str();
+            Ok(serde_json::json!({
+                "text": cian_core::note::set_field(&arg(p, "text"), &arg(p, "key"), value),
+            }))
+        }
+
+        // Move a note into another notebook, pictures and all.
+        "move" => {
+            let note = std::path::PathBuf::from(arg(p, "path"));
+            let dir = std::path::PathBuf::from(arg(p, "dir"));
+            let at = cian_core::note::move_to(&note, &dir)?;
+            Ok(serde_json::json!({ "path": at.display().to_string() }))
         }
 
         // A photo, put beside the note. The phone sends it base64 because

@@ -157,7 +157,9 @@ final class NotesStore: ObservableObject {
         // note-2 before note-10, which plain string order gets wrong both ways.
         case .title: out.sort { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
         }
-        return out
+        // Pinned first, and *stably*: within the pinned ones the chosen order
+        // still holds. Sorting by `pinned` alone would shuffle them.
+        return out.filter(\.pinned) + out.filter { !$0.pinned }
     }
 
     /// The text of a note, and the stamp that says which version it was.
@@ -230,6 +232,34 @@ final class NotesStore: ObservableObject {
             throw Cian.Failure.engine("画像を置けませんでした")
         }
         return link
+    }
+
+    /// Pin or unpin, by rewriting the note and saving it the ordinary way.
+    ///
+    /// Reads the file rather than taking text from a caller: this is done from
+    /// the list, where nothing has the note open, and inventing a stamp for a
+    /// file nobody is looking at would be pretending to a check that has not
+    /// happened.
+    func pin(_ note: Note, _ on: Bool) throws {
+        let read = try Cian.call("read", ["path": note.path])
+        let text = read["text"] as? String ?? ""
+        let out = try Cian.call("setfield", [
+            "text": text, "key": "pinned", "value": on ? "true" : NSNull(),
+        ])
+        _ = try Cian.call("write", [
+            "path": note.path,
+            "text": out["text"] as? String ?? text,
+            "stamp": read["stamp"] as? String ?? "",
+        ])
+        reload()
+    }
+
+    /// Move a note into another notebook — `nil` means the top of the folder.
+    func move(_ note: Note, to book: String?) throws {
+        guard let root else { return }
+        let dir = book.map { root.appendingPathComponent($0) } ?? root
+        _ = try Cian.call("move", ["path": note.path, "dir": dir.path])
+        reload()
     }
 
     /// Remove a note. There is no trash on a phone, so this cannot be undone
