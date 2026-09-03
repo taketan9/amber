@@ -73,3 +73,21 @@ opt-level = 3
 lto = "thin"
 codegen-units = 1
 strip = "symbols"
+
+# The static library Xcode links.
+#
+# `release` cannot be used for it, for two reasons that both end in a library
+# that will not link and says nothing useful about why:
+#
+#   * `strip = "symbols"` removes `_cian_call` and `_cian_free` — the only two
+#     things the app is linking it for.
+#   * `lto = "thin"` leaves LLVM bitcode in the archive, and Rust's LLVM is
+#     several major versions ahead of the one inside Xcode. Apple's own `nm`
+#     cannot even read it ("Unknown attribute kind"), and its linker is the
+#     same vintage.
+#
+# Same optimisation otherwise: this is the build that goes on a phone.
+[profile.ios]
+inherits = "release"
+lto = false
+strip = false
