@@ -97,6 +97,7 @@ python3 scripts/requests.py --list   # 何を見ているか
 | 52 | 2026-09-03 | iPhone のアプリを作り始めたい（Mac と同じノートを両方から） | SwiftUI ＋ `CianFFI.xcframework`。**Swift には何も判断を書かない** ── 題も抜粋もタグも `cian_call("notes")` の答えをそのまま使い、絞り込みも `search`（`note::haystack`）で当てるので、窓と同じ `#タグ` が同じノートを引く。置き場所は `UIDocumentPicker` で選んで security-scoped bookmark で覚える ── **iCloud も Google Drive も Dropbox も iOS では「ファイル」のプロバイダ**なので、これ1つで三者に届き、同期のコードを1行も書かない。`startAccessingSecurityScopedResource()` を忘れると、選べるのに読めない | `ios/Cian/Bridge.swift ~ static func call\(` |
 | 53 | 2026-09-04 | iPhone でも写真をノートに入れたい（Mac の貼り付けと同じこと） | 置き場所と名前は `cian_core::note::attach` ── **窓が貼るスクリーンショットと電話が付ける写真が、同じ `attachments/` に同じ形の名前で落ちる。**別々に書けば、両方から書いたノートフォルダは「たまたま重なった2つのフォルダ」になる。拡張子は**バイトから見る**（撮影は PNG、写真は大抵 HEIC。取り違えると何でも開けないファイルが残る）。画像は**先にディスクへ、あとから本文へ** ── 逆順だと、届かないかもしれないファイルへのリンクが本文に残り、あとから「無い」のか「消された」のか区別できない | `crates/cian-core/src/note.rs ~ pub fn attach\(` |
 | 54 | 2026-09-04 | （同上）ノートを消せるようにしたい | スワイプして「削除」の二段。**電話にゴミ箱は無い**ので `cian_core::DESKTOP` は false、`DeleteMode::Trash` は断る。消すのはノートだけで、`attachments/` の画像は残す ── 別のノートが同じ画像を指していることがある | `crates/cian-ffi/src/lib.rs ~ "delete" =>` |
+| 55 | 2026-09-04 | Inkdrop のようにノートが「読める形」で出てほしい | 見出し・強調・箇条書き・引用・コード・区切り線・**画像**を組んで出す。**何が見出しかは `cian_core::note::blocks`、どう見えるかは前端** ── 逆に切ると Markdown の解釈が電話の上に載り、テストが一行も届かなくなる。`#仕事` は見出しではない（空白の有無で決まる。誤ると タグ付きのノートが全部 32pt で開く）。閉じていない ``` は残り全部を飲む。前置きは出さない（題もタグも既に画面にある） | `crates/cian-core/src/note.rs ~ pub fn blocks\(` |
 
 ## 増やすとき
 

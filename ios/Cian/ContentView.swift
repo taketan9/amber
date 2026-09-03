@@ -151,20 +151,39 @@ struct NoteView: View {
     @State private var clash: String?
     @State private var picked: PhotosPickerItem?
     @State private var busy = false
+    /// Reading or writing. A notes app is read far more often than it is
+    /// written, so this opens on the reading side.
+    @State private var reading = true
+    @State private var blocks: [Block] = []
     @FocusState private var writing: Bool
 
     private var dirty: Bool { text != saved }
 
     var body: some View {
-        TextEditor(text: $text)
-            .font(.body.monospaced())
-            .focused($writing)
-            .padding(.horizontal, 8)
+        Group {
+            if reading {
+                ScrollView { Reading(blocks: blocks, base: folder) }
+            } else {
+                TextEditor(text: $text)
+                    .font(.body.monospaced())
+                    .focused($writing)
+                    .padding(.horizontal, 8)
+            }
+        }
             .navigationTitle(note.title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("保存") { save(force: false) }.disabled(!dirty)
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        if !reading { redraw() }
+                        reading.toggle()
+                    } label: {
+                        Image(systemName: reading ? "square.and.pencil" : "eye")
+                    }
+                    .accessibilityLabel(reading ? "編集" : "表示")
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     // The phone's version of pasting a screenshot on the Mac.
@@ -183,6 +202,7 @@ struct NoteView: View {
                 do {
                     (text, stamp) = try store.open(note)
                     saved = text
+                    redraw()
                 } catch { trouble = error.localizedDescription }
             }
             .onChange(of: picked) { _, item in if let item { take(item) } }
@@ -247,12 +267,22 @@ struct NoteView: View {
         return "png"
     }
 
+    /// The folder the note sits in — a picture's link is relative to it.
+    private var folder: URL {
+        URL(fileURLWithPath: note.path).deletingLastPathComponent()
+    }
+
+    private func redraw() {
+        do { blocks = try store.blocks(of: text) } catch { trouble = error.localizedDescription }
+    }
+
     private func save(force: Bool) {
         do {
             switch try store.save(note, text: text, stamp: stamp, force: force) {
             case .ok(let fresh):
                 stamp = fresh
                 saved = text
+                redraw()
                 store.reload()
             case .conflict(let why):
                 clash = why

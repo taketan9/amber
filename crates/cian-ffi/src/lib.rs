@@ -223,6 +223,42 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
             }))
         }
 
+        // A note, as things to draw. The reading half of the phone: what a
+        // heading *is* is decided in `cian_core::note`, and what a heading
+        // *looks like* is decided on the phone. Splitting it the other way
+        // would put a Markdown parser somewhere no test can reach.
+        "blocks" => {
+            let text = if p["text"].is_string() {
+                arg(p, "text")
+            } else {
+                let path = std::path::PathBuf::from(arg(p, "path"));
+                cian_core::grepedit::read_text(&path)?.lines.join("\n")
+            };
+            use cian_core::note::Block;
+            let out: Vec<serde_json::Value> = cian_core::note::blocks(&text)
+                .into_iter()
+                .map(|b| match b {
+                    Block::Heading { level, text } => {
+                        serde_json::json!({ "kind": "heading", "level": level, "text": text })
+                    }
+                    Block::Paragraph(text) => serde_json::json!({ "kind": "paragraph", "text": text }),
+                    Block::Bullet(text) => serde_json::json!({ "kind": "bullet", "text": text }),
+                    Block::Numbered { n, text } => {
+                        serde_json::json!({ "kind": "numbered", "n": n, "text": text })
+                    }
+                    Block::Quote(text) => serde_json::json!({ "kind": "quote", "text": text }),
+                    Block::Code { lang, text } => {
+                        serde_json::json!({ "kind": "code", "lang": lang, "text": text })
+                    }
+                    Block::Image { alt, link } => {
+                        serde_json::json!({ "kind": "image", "alt": alt, "link": link })
+                    }
+                    Block::Rule => serde_json::json!({ "kind": "rule" }),
+                })
+                .collect();
+            Ok(serde_json::json!({ "blocks": out }))
+        }
+
         // A photo, put beside the note. The phone sends it base64 because
         // that is what fits down a C string; everything about *where it goes*
         // is `cian_core::note::attach`, the same call the window makes when a
@@ -310,6 +346,20 @@ mod tests {
         .unwrap();
         std::fs::write(d.path().join("b.txt"), "not a note\n").unwrap();
         d
+    }
+
+    #[test]
+    fn a_note_crosses_as_things_to_draw() {
+        let r = call("blocks", &serde_json::json!({
+            "text": "---\ntitle: x\n---\n# 題\n本文。\n![](a.jpg)\n",
+        })).unwrap();
+        let b = r["blocks"].as_array().unwrap();
+        assert_eq!(b[0]["kind"], "heading");
+        assert_eq!(b[0]["level"], 1);
+        assert_eq!(b[1]["text"], "本文。");
+        assert_eq!(b[2]["kind"], "image");
+        assert_eq!(b[2]["link"], "a.jpg");
+        assert_eq!(b.len(), 3, "the front matter does not cross");
     }
 
     #[test]

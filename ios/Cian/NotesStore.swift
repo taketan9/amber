@@ -103,6 +103,16 @@ final class NotesStore: ObservableObject {
         return (answer["text"] as? String ?? "", answer["stamp"] as? String ?? "")
     }
 
+    /// The note, split into things to draw.
+    ///
+    /// Given the text rather than the path, so what is on screen is what the
+    /// preview shows — including edits not saved yet. A preview of the file on
+    /// disk would show yesterday's note while you are looking at today's.
+    func blocks(of text: String) throws -> [Block] {
+        let answer = try Cian.call("blocks", ["text": text])
+        return (answer["blocks"] as? [[String: Any]] ?? []).map(Block.init)
+    }
+
     enum Saved {
         case ok(stamp: String)
         /// Somebody else wrote it first. `why` is cian's own account of the

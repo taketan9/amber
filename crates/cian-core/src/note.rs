@@ -457,6 +457,154 @@ pub fn attach(note: &std::path::Path, bytes: &[u8], ext: &str) -> anyhow::Result
     Ok(format!("attachments/{name}"))
 }
 
+/// One piece of a note, as something that can be drawn.
+///
+/// Blocks, not a tree: a note is read top to bottom, and every renderer this
+/// has to feed — a phone's list of views, the window, whatever a tablet turns
+/// out to be — lays out a sequence. Anything that needs nesting (a list inside
+/// a quote) is rare enough in a notebook to be worth losing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Block {
+    Heading { level: u8, text: String },
+    Paragraph(String),
+    /// One item. `text` keeps its inline markup for the renderer to handle.
+    Bullet(String),
+    Numbered { n: u32, text: String },
+    Quote(String),
+    /// Verbatim, including the blank lines inside it. `lang` may be empty.
+    Code { lang: String, text: String },
+    /// `![alt](link)` on a line of its own — the only image that gets a block.
+    /// One inside a sentence stays in the sentence, where it was written.
+    Image { alt: String, link: String },
+    Rule,
+}
+
+/// Split a note into things to draw, skipping its front matter.
+///
+/// **Here rather than in Swift.** A renderer written on the phone is a
+/// renderer no test can reach, and "what is a heading" is exactly the kind of
+/// question that drifts. What the phone does with a `Heading` is the phone's
+/// business; whether a line *is* one is not.
+///
+/// The front matter goes because it is how the note describes itself, not
+/// something it says — the title and the tags are already on screen.
+pub fn blocks(text: &str) -> Vec<Block> {
+    let lines: Vec<String> = text.lines().map(|l| l.to_string()).collect();
+    let start = front(&lines).lines;
+    let mut out = Vec::new();
+    let mut para: Vec<String> = Vec::new();
+    let mut i = start;
+
+    fn flush(para: &mut Vec<String>, out: &mut Vec<Block>) {
+        if !para.is_empty() {
+            out.push(Block::Paragraph(para.join(" ")));
+            para.clear();
+        }
+    }
+
+    while i < lines.len() {
+        let raw = &lines[i];
+        let t = raw.trim();
+
+        // A fence runs to its closing fence, or to the end of the note — an
+        // unclosed one is a mistake somebody made, and swallowing the rest of
+        // the file is friendlier than pretending each line is a paragraph.
+        if let Some(lang) = t.strip_prefix("```") {
+            flush(&mut para, &mut out);
+            let lang = lang.trim().to_string();
+            let mut body = Vec::new();
+            i += 1;
+            while i < lines.len() && !lines[i].trim().starts_with("```") {
+                body.push(lines[i].clone());
+                i += 1;
+            }
+            i += 1; // the closing fence, or past the end
+            out.push(Block::Code { lang, text: body.join("\n") });
+            continue;
+        }
+
+        if t.is_empty() {
+            flush(&mut para, &mut out);
+            i += 1;
+            continue;
+        }
+
+        // `---` is a rule here and not front matter: the front matter was
+        // taken off the top before this loop began.
+        if t == "---" || t == "***" || t == "___" {
+            flush(&mut para, &mut out);
+            out.push(Block::Rule);
+            i += 1;
+            continue;
+        }
+
+        if let Some(rest) = t.strip_prefix('#') {
+            let level = 1 + rest.chars().take_while(|c| *c == '#').count();
+            let text = rest.trim_start_matches('#').trim();
+            // `#tag` at the start of a line is a tag, not a heading — the
+            // space is what makes it one, which is what Markdown says and
+            // what a notes app has to get right.
+            if level <= 6 && (rest.starts_with(' ') || rest.trim_start_matches('#').starts_with(' ')) {
+                flush(&mut para, &mut out);
+                out.push(Block::Heading { level: level as u8, text: text.to_string() });
+                i += 1;
+                continue;
+            }
+        }
+
+        if let Some(img) = lone_image(t) {
+            flush(&mut para, &mut out);
+            out.push(img);
+            i += 1;
+            continue;
+        }
+
+        if let Some(rest) = t.strip_prefix("> ").or_else(|| t.strip_prefix('>')) {
+            flush(&mut para, &mut out);
+            out.push(Block::Quote(rest.trim().to_string()));
+            i += 1;
+            continue;
+        }
+
+        if let Some(rest) = t.strip_prefix("- ").or_else(|| t.strip_prefix("* ")) {
+            flush(&mut para, &mut out);
+            out.push(Block::Bullet(rest.trim().to_string()));
+            i += 1;
+            continue;
+        }
+
+        if let Some((num, rest)) = t.split_once(". ") {
+            if let Ok(n) = num.parse::<u32>() {
+                flush(&mut para, &mut out);
+                out.push(Block::Numbered { n, text: rest.trim().to_string() });
+                i += 1;
+                continue;
+            }
+        }
+
+        para.push(t.to_string());
+        i += 1;
+    }
+    flush(&mut para, &mut out);
+    out
+}
+
+/// `![alt](link)` and nothing else on the line.
+fn lone_image(t: &str) -> Option<Block> {
+    let rest = t.strip_prefix("![")?;
+    let close = rest.find(']')?;
+    let tail = &rest[close + 1..];
+    let inner = tail.strip_prefix('(')?;
+    let end = inner.find(')')?;
+    if !inner[end + 1..].trim().is_empty() {
+        return None;
+    }
+    Some(Block::Image {
+        alt: rest[..close].to_string(),
+        link: inner[..end].trim().to_string(),
+    })
+}
+
 /// Today, where the person is sitting.
 ///
 /// Local and not UTC: a note written at ten at night in Tokyo is dated that
@@ -534,6 +682,46 @@ mod tests {
         // excerpt made of a filename.
         std::fs::write(&p, "# 題\n![](a.jpg)\n").unwrap();
         assert_eq!(read(&p, 60).unwrap().excerpt, "");
+    }
+
+    #[test]
+    fn a_note_comes_apart_into_things_that_can_be_drawn() {
+        let md = "---\ntitle: 段取り\n---\n# 見出し\n本文の一行目\nと二行目。\n\n- ひとつ\n2. ふたつ\n> 引用\n![現場](a.jpg)\n\n```rust\nfn main() {}\n\nlet x = 1;\n```\n---\nおわり\n";
+        let b = blocks(md);
+        // The front matter is how the note describes itself, not something it
+        // says — and the title is already on screen above this.
+        assert_eq!(b[0], Block::Heading { level: 1, text: "見出し".into() });
+        // Two lines with no blank between them are one paragraph, as Markdown
+        // says and as anybody typing on a phone expects.
+        assert_eq!(b[1], Block::Paragraph("本文の一行目 と二行目。".into()));
+        assert_eq!(b[2], Block::Bullet("ひとつ".into()));
+        assert_eq!(b[3], Block::Numbered { n: 2, text: "ふたつ".into() });
+        assert_eq!(b[4], Block::Quote("引用".into()));
+        assert_eq!(b[5], Block::Image { alt: "現場".into(), link: "a.jpg".into() });
+        // A fence keeps its blank line: losing it would change the code.
+        assert_eq!(b[6], Block::Code { lang: "rust".into(), text: "fn main() {}\n\nlet x = 1;".into() });
+        assert_eq!(b[7], Block::Rule, "`---` below the front matter is a rule");
+        assert_eq!(b[8], Block::Paragraph("おわり".into()));
+        assert_eq!(b.len(), 9);
+    }
+
+    #[test]
+    fn a_hash_without_a_space_is_a_tag_and_not_a_heading() {
+        // `#仕事` on its own line is how people write a tag. Reading it as a
+        // heading would make every tagged note open with its tag in 32pt.
+        assert_eq!(blocks("#仕事\n"), vec![Block::Paragraph("#仕事".into())]);
+        assert_eq!(blocks("# 仕事\n"), vec![Block::Heading { level: 1, text: "仕事".into() }]);
+        // An image with words after it is a sentence, not a picture on its own.
+        assert_eq!(
+            blocks("![a](b.jpg) のとおり\n"),
+            vec![Block::Paragraph("![a](b.jpg) のとおり".into())]
+        );
+        // A fence nobody closed swallows the rest rather than pretending each
+        // line is a paragraph.
+        assert_eq!(
+            blocks("```\nx\ny\n"),
+            vec![Block::Code { lang: String::new(), text: "x\ny".into() }]
+        );
     }
 
     #[test]
