@@ -78,7 +78,7 @@ final class NotesStore: ObservableObject {
         do {
             let answer = try Cian.call("notes", ["path": root.path])
             let rows = answer["notes"] as? [[String: Any]] ?? []
-            notes = rows.compactMap(Note.init).sorted { $0.updated > $1.updated }
+            notes = rows.compactMap(Note.init)
             trouble = nil
         } catch {
             trouble = error.localizedDescription
@@ -120,12 +120,44 @@ final class NotesStore: ObservableObject {
         }
     }
 
+    /// How the list is ordered.
+    ///
+    /// Newest first by default: a notes list is read from the top, and what
+    /// belongs there is what you were last writing. By title is for when you
+    /// know the name and not the day — the same two the window offers.
+    enum Order: String, CaseIterable, Identifiable {
+        case updated, title
+        var id: String { rawValue }
+        var label: String { self == .updated ? "更新順" : "題順" }
+    }
+
+    @Published var order: Order = .updated
+    /// Only this notebook, or all of them when nil.
+    @Published var book: String?
+
+    /// Every notebook in the folder, with how many notes are in each.
+    var books: [(name: String, count: Int)] {
+        var n: [String: Int] = [:]
+        for note in notes where !note.book.isEmpty { n[note.book, default: 0] += 1 }
+        return n.sorted { $0.key < $1.key }.map { ($0.key, $0.value) }
+    }
+
     /// Narrow by what a note is *about*, not by what its file is called.
     func matching(_ needle: String) -> [Note] {
         let n = needle.trimmingCharacters(in: .whitespaces).lowercased()
-        guard !n.isEmpty else { return notes }
-        // Either half: what the listing knows, or what was found inside.
-        return notes.filter { $0.search.contains(n) || hits[$0.path] != nil }
+        var out = notes
+        if let book { out = out.filter { $0.book == book } }
+        if !n.isEmpty {
+            // Either half: what the listing knows, or what was found inside.
+            out = out.filter { $0.search.contains(n) || hits[$0.path] != nil }
+        }
+        switch order {
+        case .updated: out.sort { $0.updated > $1.updated }
+        // `localizedStandardCompare` and not `<`: 「あ」 before 「い」, and
+        // note-2 before note-10, which plain string order gets wrong both ways.
+        case .title: out.sort { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
+        }
+        return out
     }
 
     /// The text of a note, and the stamp that says which version it was.
@@ -137,6 +169,24 @@ final class NotesStore: ObservableObject {
     func open(_ note: Note) throws -> (String, String) {
         let answer = try Cian.call("read", ["path": note.path])
         return (answer["text"] as? String ?? "", answer["stamp"] as? String ?? "")
+    }
+
+    /// The note with a different set of tags on it.
+    ///
+    /// Comes back as text for the caller to save, so this goes through the
+    /// same conflict check as any other edit.
+    func tagged(_ text: String, _ tags: [String]) throws -> String {
+        let answer = try Cian.call("settags", ["text": text, "tags": tags])
+        return answer["text"] as? String ?? text
+    }
+
+    /// Every tag in the folder, commonest first — what to offer rather than
+    /// make somebody type again.
+    var allTags: [String] {
+        var n: [String: Int] = [:]
+        for note in notes { for t in note.tags { n[t, default: 0] += 1 } }
+        return n.sorted { $0.value > $1.value || ($0.value == $1.value && $0.key < $1.key) }
+            .map(\.key)
     }
 
     /// The note, split into things to draw.

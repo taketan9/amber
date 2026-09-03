@@ -304,6 +304,21 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
             Ok(serde_json::json!({ "hits": hits }))
         }
 
+        // Tags on, tags off. Text in and text out: the caller saves the
+        // result the way it saves any other edit, so tagging goes through the
+        // same conflict check as typing. A tagger that wrote the file itself
+        // would be a second way to write a note, and the second way is the one
+        // that loses somebody else's paragraph.
+        "settags" => {
+            let tags: Vec<String> = p["tags"]
+                .as_array()
+                .map(|a| a.iter().filter_map(|t| t.as_str().map(String::from)).collect())
+                .unwrap_or_default();
+            Ok(serde_json::json!({
+                "text": cian_core::note::set_tags(&arg(p, "text"), &tags),
+            }))
+        }
+
         // A photo, put beside the note. The phone sends it base64 because
         // that is what fits down a C string; everything about *where it goes*
         // is `cian_core::note::attach`, the same call the window makes when a

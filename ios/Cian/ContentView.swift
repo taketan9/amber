@@ -24,7 +24,10 @@ struct ContentView: View {
                     list
                 }
             }
-            .navigationTitle(store.rootName.isEmpty ? "cian" : store.rootName)
+            // The notebook, when one is chosen: the title bar is where you
+            // look to know what you are looking at, and a filtered list that
+            // still says the folder's name reads as a list that lost notes.
+            .navigationTitle(store.book ?? (store.rootName.isEmpty ? "cian" : store.rootName))
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { picking = true } label: { Image(systemName: "folder") }
@@ -34,6 +37,31 @@ struct ContentView: View {
                     ToolbarItem(placement: .topBarTrailing) {
                         Button { naming = true } label: { Image(systemName: "square.and.pencil") }
                             .accessibilityLabel("新しいノート")
+                    }
+                    // Both narrowings in one menu: which notebook, and in what
+                    // order. They are the two questions asked of a list that
+                    // has grown, and a toolbar with a button each would leave
+                    // no room for the ones that make a note.
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Menu {
+                            Picker("並び", selection: $store.order) {
+                                ForEach(NotesStore.Order.allCases) { Text($0.label).tag($0) }
+                            }
+                            if !store.books.isEmpty {
+                                Divider()
+                                Picker("ノートブック", selection: $store.book) {
+                                    Text("すべて（\(store.notes.count)）").tag(String?.none)
+                                    ForEach(store.books, id: \.name) { b in
+                                        Text("\(b.name)（\(b.count)）").tag(String?.some(b.name))
+                                    }
+                                }
+                            }
+                        } label: {
+                            Image(systemName: store.book == nil
+                                ? "line.3.horizontal.decrease.circle"
+                                : "line.3.horizontal.decrease.circle.fill")
+                        }
+                        .accessibilityLabel("絞り込みと並び")
                     }
                 }
             }
@@ -161,6 +189,8 @@ struct NoteView: View {
     /// written, so this opens on the reading side.
     @State private var reading = true
     @State private var blocks: [Block] = []
+    @State private var tagging = false
+    @State private var tags: [String] = []
     @FocusState private var writing: Bool
 
     private var dirty: Bool { text != saved }
@@ -192,6 +222,12 @@ struct NoteView: View {
                     .accessibilityLabel(reading ? "編集" : "表示")
                 }
                 ToolbarItem(placement: .topBarTrailing) {
+                    Button { tags = note.tags; tagging = true } label: {
+                        Image(systemName: "tag")
+                    }
+                    .accessibilityLabel("タグ")
+                }
+                ToolbarItem(placement: .topBarTrailing) {
                     // The phone's version of pasting a screenshot on the Mac.
                     // The camera is one more tap away in the same sheet, so
                     // there is one button and not two.
@@ -212,6 +248,12 @@ struct NoteView: View {
                 } catch { trouble = error.localizedDescription }
             }
             .onChange(of: picked) { _, item in if let item { take(item) } }
+            // The tags go into the text, and the text is saved the ordinary
+            // way — so tagging is checked against the file on disk like any
+            // other edit rather than being a second door into the note.
+            .sheet(isPresented: $tagging, onDismiss: applyTags) {
+                Tagging(tags: $tags, known: store.allTags)
+            }
             // Not a yes/no: overwriting is the thing you do having read what
             // the other person wrote, so the reason is on screen and the
             // destructive answer is marked as one.
@@ -280,6 +322,14 @@ struct NoteView: View {
 
     private func redraw() {
         do { blocks = try store.blocks(of: text) } catch { trouble = error.localizedDescription }
+    }
+
+    private func applyTags() {
+        guard tags != note.tags else { return }
+        do {
+            text = try store.tagged(text, tags)
+            redraw()
+        } catch { trouble = error.localizedDescription }
     }
 
     private func save(force: Bool) {

@@ -605,6 +605,72 @@ fn lone_image(t: &str) -> Option<Block> {
     })
 }
 
+/// Put a new set of tags on a note, and hand back the whole note.
+///
+/// Text in, text out: the caller saves it the way it saves any other edit, so
+/// tagging goes through the same conflict check as typing does. A tagger that
+/// wrote the file itself would be a second way to write a note, and the
+/// second way is the one that loses somebody else's paragraph.
+///
+/// A note with no front matter gets one. A note whose front matter has no
+/// `tags:` gets the line added at the end of it — **not the start**: the
+/// order somebody put their own fields in is theirs.
+pub fn set_tags(text: &str, tags: &[String]) -> String {
+    let lines: Vec<String> = text.lines().map(|l| l.to_string()).collect();
+    let end = text.ends_with('\n');
+    let f = front(&lines);
+    let line = format!(
+        "tags: [{}]",
+        tags.iter()
+            .map(|t| t.trim())
+            .filter(|t| !t.is_empty())
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
+
+    let mut out: Vec<String> = Vec::with_capacity(lines.len() + 4);
+    if f.lines == 0 {
+        // No front matter at all. It goes on the top, with nothing else in it.
+        out.push("---".into());
+        out.push(line);
+        out.push("---".into());
+        out.extend(lines);
+    } else {
+        // `f.lines` counts the fences too, so the body of it is 1..f.lines-1.
+        let mut wrote = false;
+        out.push(lines[0].clone());
+        let mut list = false;
+        for raw in &lines[1..f.lines - 1] {
+            let t = raw.trim_start();
+            // A `tags:` written as a list takes its `- item` lines with it.
+            if list && t.starts_with("- ") {
+                continue;
+            }
+            list = false;
+            let key = t.split_once(':').map(|(k, _)| k.trim().to_ascii_lowercase());
+            if key.as_deref() == Some("tags") {
+                if !wrote {
+                    out.push(line.clone());
+                    wrote = true;
+                }
+                list = t.split_once(':').map(|(_, v)| v.trim().is_empty()).unwrap_or(false);
+                continue;
+            }
+            out.push(raw.clone());
+        }
+        if !wrote {
+            out.push(line);
+        }
+        out.push(lines[f.lines - 1].clone());
+        out.extend(lines[f.lines..].iter().cloned());
+    }
+    let mut s = out.join("\n");
+    if end {
+        s.push('\n');
+    }
+    s
+}
+
 /// Today, where the person is sitting.
 ///
 /// Local and not UTC: a note written at ten at night in Tokyo is dated that
@@ -722,6 +788,39 @@ mod tests {
             blocks("```\nx\ny\n"),
             vec![Block::Code { lang: String::new(), text: "x\ny".into() }]
         );
+    }
+
+    #[test]
+    fn tags_go_on_without_disturbing_the_rest_of_the_note() {
+        // The other fields, and the order they were written in, are the
+        // writer's — only the tags line is replaced.
+        let src = "---\ntitle: 段取り\ncreated: 2026-09-04\ntags: [古い]\n---\n本文。\n";
+        let out = set_tags(src, &["仕事".into(), "cian".into()]);
+        assert_eq!(
+            out,
+            "---\ntitle: 段取り\ncreated: 2026-09-04\ntags: [仕事, cian]\n---\n本文。\n"
+        );
+        // And it reads back as those tags, which is the only thing that
+        // actually matters.
+        let lines: Vec<String> = out.lines().map(String::from).collect();
+        assert_eq!(front(&lines).tags, vec!["仕事".to_string(), "cian".into()]);
+
+        // No front matter: one is made, and the note is left below it.
+        let out = set_tags("# 題\n本文。\n", &["あ".into()]);
+        assert_eq!(out, "---\ntags: [あ]\n---\n# 題\n本文。\n");
+
+        // Front matter with no tags: the line is added at the *end* of it.
+        let out = set_tags("---\ntitle: x\n---\n本文。\n", &["あ".into()]);
+        assert_eq!(out, "---\ntitle: x\ntags: [あ]\n---\n本文。\n");
+
+        // Tags written as a list take their items with them, rather than
+        // leaving orphaned `- ` lines behind the new line.
+        let out = set_tags("---\ntags:\n  - 古い\n  - もっと古い\ntitle: x\n---\n本文。\n", &["新しい".into()]);
+        assert_eq!(out, "---\ntags: [新しい]\ntitle: x\n---\n本文。\n");
+
+        // Taking them all off leaves an empty list, not a broken line.
+        let out = set_tags("---\ntags: [あ]\n---\n本文。\n", &[]);
+        assert_eq!(out, "---\ntags: []\n---\n本文。\n");
     }
 
     #[test]
