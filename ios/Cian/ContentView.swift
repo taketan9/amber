@@ -9,12 +9,13 @@ import PhotosUI
 /// only drops into the second line when it has stopped somewhere.
 struct ContentView: View {
     @StateObject private var store = NotesStore()
+    @StateObject private var desk = Desk()
     @State private var picking = false
     @State private var naming = false
     @State private var booking = false
     @State private var choosing = false
     @State private var importing = false
-    @State private var made: Note?
+    @State private var showing = false
     @State private var needle = ""
 
     var body: some View {
@@ -119,7 +120,14 @@ struct ContentView: View {
             Text(store.trouble ?? "")
         }
         .sheet(isPresented: $naming) {
-            Making(make: { title, tags in made = make(title, tags) }, known: store.allTags)
+            Making(make: { title, tags in
+                if let note = make(title, tags) {
+                    // Straight into it, in the writing half — you asked for
+                    // it in order to write in it.
+                    desk.open(note, writing: true)
+                    showing = true
+                }
+            }, known: store.allTags)
         }
 
     }
@@ -134,7 +142,10 @@ struct ContentView: View {
 
     @ViewBuilder
     private func row(_ note: Note) -> some View {
-                NavigationLink(value: note) {
+                Button {
+                desk.open(note)
+                showing = true
+            } label: {
                     VStack(alignment: .leading, spacing: 2) {
                         HStack(spacing: 4) {
                             if note.pinned {
@@ -169,6 +180,10 @@ struct ContentView: View {
                         }
                     }
                 }
+                // The row keeps the colours its own text asked for — a title
+                // in link-blue says "this is a link" about every note in the
+                // list, which is the one thing they all are.
+                .buttonStyle(.plain)
                 // Swipe, then tap — the two steps *are* the confirmation, which
                 // is how Apple's own Notes does it. `allowsFullSwipe: false` so a
                 // long swipe cannot delete on its own: there is no trash on a
@@ -270,187 +285,120 @@ struct ContentView: View {
         .searchable(text: $needle, prompt: "題・タグ・本文")
         .onChange(of: needle) { _, now in store.find(now) }
         .refreshable { store.reload() }
-        .navigationDestination(for: Note.self) { NoteView(note: $0, store: store) }
+        // One screen for every open note, with the tabs above them.
+        .navigationDestination(isPresented: $showing) { DeskView(desk: desk, store: store) }
         // Straight into the note that was just made, and **in the writing
         // half** — you asked for it in order to write in it.
         //
         // **Inside the stack, not on it.** Attached to the `NavigationStack`
         // itself this does nothing at all: the note was made, the sheet
         // closed, and the list just sat there.
-        .navigationDestination(item: $made) { note in
-            NoteView(note: note, store: store, writingFirst: true)
-        }
+
     }
 }
 
-/// One note, open for writing.
+/// One note, open for reading or writing.
 ///
-/// The stamp read with the text is kept and handed back on save. **That is
-/// the whole of the two-device story**: the same folder is open on a Mac, and
-/// without this the later save wins silently and the earlier writing is gone
-/// with nothing on screen to say it happened.
+/// **Its text belongs to the desk, not to this view.** A `TabView` throws its
+/// pages away as you swipe, and a page that owned the text would take your
+/// unsaved paragraph with it. Everything that survives a swipe is in the
+/// binding; everything in `@State` here is about this moment on screen.
 struct NoteView: View {
-    let note: Note
+    @Binding var tab: Desk.Tab
     let store: NotesStore
-    /// Which half it opens on. A note somebody just made opens ready to type
-    /// in; one they tapped in the list opens ready to read.
-    var writingFirst = false
-    @State private var text = ""
-    @State private var stamp = ""
-    @State private var saved = ""
     @State private var trouble: String?
     @State private var clash: String?
     @State private var picked: PhotosPickerItem?
     @State private var busy = false
-    /// Reading or writing. A notes app is read far more often than it is
-    /// written, so this opens on the reading side.
-    @State private var reading = true
-    @State private var blocks: [Block] = []
     @State private var tagging = false
     @State private var tags: [String] = []
     @FocusState private var writing: Bool
 
-    private var dirty: Bool { text != saved }
+    private var note: Note { tab.note }
 
     var body: some View {
         Group {
-            if reading {
-                ScrollView { Reading(blocks: blocks, base: folder) }
+            if tab.reading {
+                ScrollView { Reading(blocks: tab.blocks, base: folder) }
             } else {
                 VStack(spacing: 0) {
-                    TextEditor(text: $text)
+                    TextEditor(text: $tab.text)
                         .font(.body.monospaced())
                         .focused($writing)
                         .padding(.horizontal, 8)
-                    // The marks that are a nuisance to reach on a phone
-                    // keyboard, on a rail above it. Not a formatting toolbar:
-                    // the file stays Markdown, and what these do is type the
-                    // characters you would have typed.
                     marks
                 }
             }
         }
-            .navigationTitle(note.title)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("保存") { save(force: false) }.disabled(!dirty)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button("保存") { save(force: false) }.disabled(!tab.dirty)
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    if !tab.reading { redraw() }
+                    tab.reading.toggle()
+                } label: {
+                    Image(systemName: tab.reading ? "eye.slash" : "eye")
                 }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        if !reading { redraw() }
-                        reading.toggle()
-                    } label: {
-                        // The same eye, open or shut. Two different pictures
-                        // (an eye and a pencil) read as two different
-                        // buttons; one that opens and closes reads as the
-                        // one switch it is.
-                        Image(systemName: reading ? "eye.slash" : "eye")
-                    }
-                    .accessibilityLabel(reading ? "編集" : "表示")
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button { tags = note.tags; tagging = true } label: {
-                        Image(systemName: "tag")
-                    }
+                .accessibilityLabel(tab.reading ? "編集" : "表示")
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                Button { tags = note.tags; tagging = true } label: { Image(systemName: "tag") }
                     .accessibilityLabel("タグ")
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                PhotosPicker(selection: $picked, matching: .images) {
+                    Image(systemName: "photo")
                 }
-                ToolbarItem(placement: .topBarTrailing) {
-                    // The phone's version of pasting a screenshot on the Mac.
-                    // The camera is one more tap away in the same sheet, so
-                    // there is one button and not two.
-                    PhotosPicker(selection: $picked, matching: .images) {
-                        Image(systemName: "photo")
-                    }
-                    .disabled(busy)
-                }
-                ToolbarItem(placement: .keyboard) {
-                    Button("閉じる") { writing = false }
-                }
+                .disabled(busy)
             }
-            .task {
-                do {
-                    (text, stamp) = try store.open(note)
-                    saved = text
-                    redraw()
-                    reading = !writingFirst
-                } catch { trouble = error.localizedDescription }
+            ToolbarItem(placement: .keyboard) {
+                Button("閉じる") { writing = false }
             }
-            .onChange(of: picked) { _, item in if let item { take(item) } }
-            // The tags go into the text, and the text is saved the ordinary
-            // way — so tagging is checked against the file on disk like any
-            // other edit rather than being a second door into the note.
-            .sheet(isPresented: $tagging, onDismiss: applyTags) {
-                Tagging(tags: $tags, known: store.allTags)
-            }
-            // Not a yes/no: overwriting is the thing you do having read what
-            // the other person wrote, so the reason is on screen and the
-            // destructive answer is marked as one.
-            .alert(
-                "あちらでも書き換えられています",
-                isPresented: Binding(get: { clash != nil }, set: { if !$0 { clash = nil } })
-            ) {
-                Button("やめる", role: .cancel) {}
-                Button("それでも上書き", role: .destructive) { save(force: true) }
-            } message: {
-                Text(clash ?? "")
-            }
-            .alert(
-                "できません",
-                isPresented: Binding(get: { trouble != nil }, set: { if !$0 { trouble = nil } })
-            ) {
-                Button("閉じる") {}
-            } message: {
-                Text(trouble ?? "")
-            }
-    }
-
-    /// The picture goes to disk first, and only then into the text.
-    ///
-    /// The other order writes a link to a file that may never arrive, and a
-    /// note whose picture is missing looks the same as a note whose picture
-    /// was deleted — you cannot tell later which one happened.
-    private func take(_ item: PhotosPickerItem) {
-        busy = true
-        Task {
-            defer { busy = false; picked = nil }
+        }
+        // Read once. Coming back to a tab must not throw away what is in it —
+        // that is the whole reason the text lives on the desk.
+        .task(id: tab.id) {
+            guard !tab.loaded else { return }
             do {
-                guard let data = try await item.loadTransferable(type: Data.self) else {
-                    trouble = "その写真を読めませんでした"
-                    return
-                }
-                // The bytes decide the extension, not the picker: a screenshot
-                // is a PNG and a photo is usually a HEIC, and calling either
-                // one the other leaves a file nothing will open.
-                let link = try store.attach(data, ext: Self.kind(of: data), to: note)
-                if !text.isEmpty && !text.hasSuffix("\n") { text += "\n" }
-                text += "![](\(link))\n"
-            } catch {
-                trouble = error.localizedDescription
-            }
+                let (text, stamp) = try store.open(note)
+                tab.text = text
+                tab.saved = text
+                tab.stamp = stamp
+                tab.loaded = true
+                redraw()
+            } catch { trouble = error.localizedDescription }
         }
-    }
-
-    /// What the first bytes say the picture is.
-    private static func kind(of data: Data) -> String {
-        let b = [UInt8](data.prefix(12))
-        if b.count >= 8, b[0] == 0x89, b[1] == 0x50 { return "png" }
-        if b.count >= 3, b[0] == 0xFF, b[1] == 0xD8 { return "jpg" }
-        if b.count >= 12, b[4] == 0x66, b[5] == 0x74, b[6] == 0x79, b[7] == 0x70 {
-            // ...ftyp... — HEIC and its relatives.
-            return "heic"
+        .onChange(of: picked) { _, item in if let item { take(item) } }
+        .sheet(isPresented: $tagging, onDismiss: applyTags) {
+            Tagging(tags: $tags, known: store.allTags)
         }
-        if b.count >= 4, b[0] == 0x47, b[1] == 0x49, b[2] == 0x46 { return "gif" }
-        return "png"
+        .alert(
+            "あちらでも書き換えられています",
+            isPresented: Binding(get: { clash != nil }, set: { if !$0 { clash = nil } })
+        ) {
+            Button("やめる", role: .cancel) {}
+            Button("それでも上書き", role: .destructive) { save(force: true) }
+        } message: {
+            Text(clash ?? "")
+        }
+        .alert(
+            "できません",
+            isPresented: Binding(get: { trouble != nil }, set: { if !$0 { trouble = nil } })
+        ) {
+            Button("閉じる") {}
+        } message: {
+            Text(trouble ?? "")
+        }
     }
 
     /// The Markdown a phone keyboard makes you hunt for.
     ///
-    /// Line marks (`#`, `- `, `- [ ] `, `> `) go on the **start of the line
-    /// the cursor is in**, and toggle: pressing 見出し twice takes it off
-    /// again, which is what you want the moment you press it by mistake.
-    /// Wrapping marks (`**`, `` ` ``) go around the selection, or leave the
-    /// cursor between them when there is none.
+    /// Line marks go on the start of the line and toggle: pressing 見出し
+    /// twice takes it off again, which is what you want the moment you press
+    /// it by mistake. Their honest limit: `TextEditor` does not hand over a
+    /// cursor, so they work on the last line.
     private var marks: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 6) {
@@ -479,55 +427,79 @@ struct NoteView: View {
             .accessibilityLabel(name)
     }
 
-    /// Put `prefix` on the line the cursor is in, or take it off again.
-    ///
-    /// Without a selection to work from — `TextEditor` does not hand one over
-    /// — this works on the **last line**, which is where somebody typing is.
-    /// It is the honest limit of a plain `TextEditor`: a proper cursor needs
-    /// UIKit, and that is a bigger change than these buttons are worth today.
     private func line(_ prefix: String) {
-        var lines = text.components(separatedBy: "\n")
+        var lines = tab.text.components(separatedBy: "\n")
         let at = max(0, lines.count - 1)
         if lines[at].hasPrefix(prefix) {
             lines[at].removeFirst(prefix.count)
         } else {
             lines[at] = prefix + lines[at]
         }
-        text = lines.joined(separator: "\n")
+        tab.text = lines.joined(separator: "\n")
     }
 
-    private func wrap(_ mark: String) {
-        text += "\(mark)\(mark)"
-    }
+    private func wrap(_ mark: String) { tab.text += "\(mark)\(mark)" }
 
     private func block(_ s: String) {
-        if !text.isEmpty && !text.hasSuffix("\n") { text += "\n" }
-        text += s
+        if !tab.text.isEmpty && !tab.text.hasSuffix("\n") { tab.text += "\n" }
+        tab.text += s
     }
 
-    /// The folder the note sits in — a picture's link is relative to it.
     private var folder: URL {
         URL(fileURLWithPath: note.path).deletingLastPathComponent()
     }
 
     private func redraw() {
-        do { blocks = try store.blocks(of: text) } catch { trouble = error.localizedDescription }
+        do { tab.blocks = try store.blocks(of: tab.text) }
+        catch { trouble = error.localizedDescription }
+    }
+
+    /// The picture goes to disk first, and only then into the text: the other
+    /// order writes a link to a file that may never arrive.
+    private func take(_ item: PhotosPickerItem) {
+        busy = true
+        Task {
+            defer { busy = false; picked = nil }
+            do {
+                guard let data = try await item.loadTransferable(type: Data.self) else {
+                    trouble = "その写真を読めませんでした"
+                    return
+                }
+                let link = try store.attach(data, ext: Self.kind(of: data), to: note)
+                if !tab.text.isEmpty && !tab.text.hasSuffix("\n") { tab.text += "\n" }
+                tab.text += "![](\(link))\n"
+            } catch {
+                trouble = error.localizedDescription
+            }
+        }
+    }
+
+    /// What the first bytes say the picture is — a screenshot is a PNG and a
+    /// photo is usually a HEIC, and calling either one the other leaves a
+    /// file nothing will open.
+    private static func kind(of data: Data) -> String {
+        let b = [UInt8](data.prefix(12))
+        if b.count >= 8, b[0] == 0x89, b[1] == 0x50 { return "png" }
+        if b.count >= 3, b[0] == 0xFF, b[1] == 0xD8 { return "jpg" }
+        if b.count >= 12, b[4] == 0x66, b[5] == 0x74, b[6] == 0x79, b[7] == 0x70 { return "heic" }
+        if b.count >= 4, b[0] == 0x47, b[1] == 0x49, b[2] == 0x46 { return "gif" }
+        return "png"
     }
 
     private func applyTags() {
         guard tags != note.tags else { return }
         do {
-            text = try store.tagged(text, tags)
+            tab.text = try store.tagged(tab.text, tags)
             redraw()
         } catch { trouble = error.localizedDescription }
     }
 
     private func save(force: Bool) {
         do {
-            switch try store.save(note, text: text, stamp: stamp, force: force) {
+            switch try store.save(note, text: tab.text, stamp: tab.stamp, force: force) {
             case .ok(let fresh):
-                stamp = fresh
-                saved = text
+                tab.stamp = fresh
+                tab.saved = tab.text
                 redraw()
                 store.reload()
             case .conflict(let why):
