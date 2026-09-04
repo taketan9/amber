@@ -27,14 +27,53 @@ final class NotesStore: ObservableObject {
     /// provider whose app is not installed is *listed but greyed out*, which
     /// reads as "cian cannot see my Drive" rather than as "Drive is not on
     /// this phone".
-    private var own: URL? {
+    private var ownFolder: URL? {
         FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
+    }
+
+    /// Whether the notes are in the app's own folder rather than one picked.
+    @Published var own = true
+    /// The chosen folder's path, for the one screen that should say it.
+    var rootPath: String { root?.path ?? "" }
+    var rootURL: URL? { root }
+
+    /// Go back to the app's own folder.
+    func useOwn() {
+        UserDefaults.standard.removeObject(forKey: Self.bookmarkKey)
+        if let own = ownFolder { adopt(own, remember: false, scoped: false, named: "cian") }
+    }
+
+    /// Copy Markdown files in from somewhere else.
+    ///
+    /// **Copied, not moved.** Whatever exported them still has them, which is
+    /// the answer somebody wants the first time they try this and are not yet
+    /// sure cian is where the notes are going to live.
+    func bring(_ urls: [URL]) {
+        guard let root else { return }
+        var brought = 0
+        for url in urls {
+            let scoped = url.startAccessingSecurityScopedResource()
+            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+            var to = root.appendingPathComponent(url.lastPathComponent)
+            // A name already here is not a reason to overwrite somebody's
+            // note; it is a reason to keep both.
+            var n = 2
+            let stem = to.deletingPathExtension().lastPathComponent
+            let ext = to.pathExtension
+            while FileManager.default.fileExists(atPath: to.path), n <= 99 {
+                to = root.appendingPathComponent("\(stem)-\(n).\(ext)")
+                n += 1
+            }
+            do { try FileManager.default.copyItem(at: url, to: to); brought += 1 }
+            catch { trouble = error.localizedDescription }
+        }
+        if brought > 0 { reload() }
     }
 
     /// The folder from last time, or this app's own.
     func restore() {
         guard let data = UserDefaults.standard.data(forKey: Self.bookmarkKey) else {
-            if let own { adopt(own, remember: false, scoped: false, named: "cian") }
+            if let ownFolder { adopt(ownFolder, remember: false, scoped: false, named: "cian") }
             return
         }
         var stale = false
@@ -67,6 +106,7 @@ final class NotesStore: ObservableObject {
         // the filesystem calls it and not what anybody calls it — Files shows
         // it as **cian**, and so should the title above it.
         rootName = named ?? url.lastPathComponent
+        own = named != nil
         if remember, let data = try? url.bookmarkData() {
             UserDefaults.standard.set(data, forKey: Self.bookmarkKey)
         }
@@ -270,11 +310,24 @@ final class NotesStore: ObservableObject {
     }
 
     /// A new note in the chosen folder, named and shaped by cian.
-    func make(titled title: String) throws -> Note? {
+    func make(titled title: String, tags: [String] = []) throws -> Note? {
         guard let root else { return nil }
         let made = try Cian.call("new", ["dir": root.path, "title": title])
-        reload()
         guard let path = made["path"] as? String else { return nil }
+        // The tags go on by rewriting the note that was just written, rather
+        // than by teaching `new` about tags: one place decides what a note's
+        // front matter looks like, and it is already `note::set_tags`.
+        if !tags.isEmpty {
+            let read = try Cian.call("read", ["path": path])
+            let text = read["text"] as? String ?? ""
+            let out = try Cian.call("settags", ["text": text, "tags": tags])
+            _ = try Cian.call("write", [
+                "path": path,
+                "text": out["text"] as? String ?? text,
+                "stamp": read["stamp"] as? String ?? "",
+            ])
+        }
+        reload()
         return notes.first { $0.path == path }
     }
 }

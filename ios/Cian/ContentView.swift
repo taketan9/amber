@@ -11,7 +11,6 @@ struct ContentView: View {
     @StateObject private var store = NotesStore()
     @State private var picking = false
     @State private var naming = false
-    @State private var title = ""
     @State private var made: Note?
     @State private var needle = ""
 
@@ -30,7 +29,7 @@ struct ContentView: View {
             .navigationTitle(store.book ?? (store.rootName.isEmpty ? "cian" : store.rootName))
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button { picking = true } label: { Image(systemName: "folder") }
+                    Button { picking = true } label: { Image(systemName: "externaldrive") }
                         .accessibilityLabel("ノートの置き場所")
                 }
                 if !store.rootName.isEmpty {
@@ -66,9 +65,7 @@ struct ContentView: View {
                 }
             }
         }
-        .fileImporter(isPresented: $picking, allowedContentTypes: [.folder]) { result in
-            if case .success(let url) = result { store.choose(url) }
-        }
+        .sheet(isPresented: $picking) { Where(store: store) }
         .task { store.restore() }
         // **Two `.alert` on one view is one alert.** SwiftUI keeps the last
         // and the other one shows without its buttons doing anything — which
@@ -83,13 +80,10 @@ struct ContentView: View {
         } message: {
             Text(store.trouble ?? "")
         }
-        // Blank is allowed: cian names an untitled note for the day, which is
-        // what you want when you are writing before you know what it is about.
-        .alert("新しいノート", isPresented: $naming) {
-            TextField("題", text: $title)
-            Button("作る") { make() }
-            Button("やめる", role: .cancel) { title = "" }
+        .sheet(isPresented: $naming) {
+            Making(make: { title, tags in made = make(title, tags) }, known: store.allTags)
         }
+
     }
 
     /// `try?` here would be the whole bug: a delete that fails silently looks
@@ -104,9 +98,9 @@ struct ContentView: View {
         do { try store.move(note, to: book) } catch { store.trouble = error.localizedDescription }
     }
 
-    private func make() {
-        do { made = try store.make(titled: title) } catch { store.trouble = error.localizedDescription }
-        title = ""
+    private func make(_ title: String, _ tags: [String]) -> Note? {
+        do { return try store.make(titled: title, tags: tags) }
+        catch { store.trouble = error.localizedDescription; return nil }
     }
 
     private var empty: some View {
@@ -117,7 +111,7 @@ struct ContentView: View {
             // the folder the Mac already has, wherever it is kept.
             Text("マークダウンのノートがあるフォルダを選びます。iCloud Drive・Google Drive・Dropbox のどれでも構いません。")
         } actions: {
-            Button("選ぶ") { picking = true }.buttonStyle(.borderedProminent)
+            Button("置き場所を見る") { picking = true }.buttonStyle(.borderedProminent)
         }
     }
 
@@ -199,6 +193,15 @@ struct ContentView: View {
         .onChange(of: needle) { _, now in store.find(now) }
         .refreshable { store.reload() }
         .navigationDestination(for: Note.self) { NoteView(note: $0, store: store) }
+        // Straight into the note that was just made, and **in the writing
+        // half** — you asked for it in order to write in it.
+        //
+        // **Inside the stack, not on it.** Attached to the `NavigationStack`
+        // itself this does nothing at all: the note was made, the sheet
+        // closed, and the list just sat there.
+        .navigationDestination(item: $made) { note in
+            NoteView(note: note, store: store, writingFirst: true)
+        }
     }
 }
 
@@ -211,6 +214,9 @@ struct ContentView: View {
 struct NoteView: View {
     let note: Note
     let store: NotesStore
+    /// Which half it opens on. A note somebody just made opens ready to type
+    /// in; one they tapped in the list opens ready to read.
+    var writingFirst = false
     @State private var text = ""
     @State private var stamp = ""
     @State private var saved = ""
@@ -233,10 +239,17 @@ struct NoteView: View {
             if reading {
                 ScrollView { Reading(blocks: blocks, base: folder) }
             } else {
-                TextEditor(text: $text)
-                    .font(.body.monospaced())
-                    .focused($writing)
-                    .padding(.horizontal, 8)
+                VStack(spacing: 0) {
+                    TextEditor(text: $text)
+                        .font(.body.monospaced())
+                        .focused($writing)
+                        .padding(.horizontal, 8)
+                    // The marks that are a nuisance to reach on a phone
+                    // keyboard, on a rail above it. Not a formatting toolbar:
+                    // the file stays Markdown, and what these do is type the
+                    // characters you would have typed.
+                    marks
+                }
             }
         }
             .navigationTitle(note.title)
@@ -250,7 +263,11 @@ struct NoteView: View {
                         if !reading { redraw() }
                         reading.toggle()
                     } label: {
-                        Image(systemName: reading ? "square.and.pencil" : "eye")
+                        // The same eye, open or shut. Two different pictures
+                        // (an eye and a pencil) read as two different
+                        // buttons; one that opens and closes reads as the
+                        // one switch it is.
+                        Image(systemName: reading ? "eye.slash" : "eye")
                     }
                     .accessibilityLabel(reading ? "編集" : "表示")
                 }
@@ -278,6 +295,7 @@ struct NoteView: View {
                     (text, stamp) = try store.open(note)
                     saved = text
                     redraw()
+                    reading = !writingFirst
                 } catch { trouble = error.localizedDescription }
             }
             .onChange(of: picked) { _, item in if let item { take(item) } }
@@ -346,6 +364,67 @@ struct NoteView: View {
         }
         if b.count >= 4, b[0] == 0x47, b[1] == 0x49, b[2] == 0x46 { return "gif" }
         return "png"
+    }
+
+    /// The Markdown a phone keyboard makes you hunt for.
+    ///
+    /// Line marks (`#`, `- `, `- [ ] `, `> `) go on the **start of the line
+    /// the cursor is in**, and toggle: pressing 見出し twice takes it off
+    /// again, which is what you want the moment you press it by mistake.
+    /// Wrapping marks (`**`, `` ` ``) go around the selection, or leave the
+    /// cursor between them when there is none.
+    private var marks: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                mark("見出し", "number") { line("# ") }
+                mark("箇条書き", "list.bullet") { line("- ") }
+                mark("チェック", "checklist") { line("- [ ] ") }
+                mark("引用", "text.quote") { line("> ") }
+                Divider().frame(height: 20)
+                mark("太字", "bold") { wrap("**") }
+                mark("斜体", "italic") { wrap("*") }
+                mark("コード", "chevron.left.forwardslash.chevron.right") { wrap("`") }
+                Divider().frame(height: 20)
+                mark("区切り", "minus") { block("\n---\n") }
+                mark("表", "tablecells") { block("\n| 　 | 　 |\n| --- | --- |\n| 　 | 　 |\n") }
+                mark("コード枠", "curlybraces") { block("\n```\n\n```\n") }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+        }
+        .background(.bar)
+    }
+
+    private func mark(_ name: String, _ icon: String, _ act: @escaping () -> Void) -> some View {
+        Button(action: act) { Image(systemName: icon) }
+            .buttonStyle(.bordered)
+            .accessibilityLabel(name)
+    }
+
+    /// Put `prefix` on the line the cursor is in, or take it off again.
+    ///
+    /// Without a selection to work from — `TextEditor` does not hand one over
+    /// — this works on the **last line**, which is where somebody typing is.
+    /// It is the honest limit of a plain `TextEditor`: a proper cursor needs
+    /// UIKit, and that is a bigger change than these buttons are worth today.
+    private func line(_ prefix: String) {
+        var lines = text.components(separatedBy: "\n")
+        let at = max(0, lines.count - 1)
+        if lines[at].hasPrefix(prefix) {
+            lines[at].removeFirst(prefix.count)
+        } else {
+            lines[at] = prefix + lines[at]
+        }
+        text = lines.joined(separator: "\n")
+    }
+
+    private func wrap(_ mark: String) {
+        text += "\(mark)\(mark)"
+    }
+
+    private func block(_ s: String) {
+        if !text.isEmpty && !text.hasSuffix("\n") { text += "\n" }
+        text += s
     }
 
     /// The folder the note sits in — a picture's link is relative to it.
