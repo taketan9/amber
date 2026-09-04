@@ -22,14 +22,14 @@ struct Making: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("題") {
+                Section("タイトル") {
                     TextField("あたらしいノート", text: $title)
                         .focused($naming)
                         // Return moves on to the tags rather than making the
                         // note: the note is made by the button that says so.
                         .submitLabel(.next)
                         .onSubmit { naming = false }
-                    Text("空のままなら今日の日付が題になります")
+                    Text("空のままなら今日の日付がタイトルになります")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 Section("タグ") {

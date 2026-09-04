@@ -138,6 +138,11 @@ pub struct Note {
     /// `updated` from the front matter if it has one, else the file's mtime as
     /// seconds since the epoch. Formatting belongs to whoever is drawing.
     pub updated: Option<u64>,
+    /// `created` from the front matter if it has one, else the file's own
+    /// birth time. **A different question from `updated`** — "when did I
+    /// start this" and "when did I last touch it" put a note in two
+    /// different places in a list, and both are things people look for.
+    pub created: Option<u64>,
     pub bytes: u64,
     /// `pinned: true` in the front matter. A pinned note sits at the top of
     /// the list whatever the ordering — it is the one you keep coming back
@@ -171,6 +176,16 @@ pub fn read(path: &Path, head_lines: usize) -> Option<Note> {
                 .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
                 .map(|d| d.as_secs())
         });
+    // `created` on a filesystem that does not keep one falls back to the
+    // mtime rather than to nothing: a note with no date at all drops out of
+    // a list grouped by date, which looks like a lost note.
+    let created = f.get("created").and_then(date_secs).or_else(|| {
+        meta.as_ref()
+            .and_then(|m| m.created().ok())
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_secs())
+            .or(updated)
+    });
     Some(Note {
         path: path.to_path_buf(),
         title,
@@ -183,6 +198,7 @@ pub fn read(path: &Path, head_lines: usize) -> Option<Note> {
         ),
         tags: f.tags,
         updated,
+        created,
         bytes: meta.map(|m| m.len()).unwrap_or(0),
     })
 }
@@ -479,6 +495,11 @@ pub enum Block {
     Paragraph(String),
     /// One item. `text` keeps its inline markup for the renderer to handle.
     Bullet(String),
+    /// `- [ ] milk`. Carries the line it came from, because the only useful
+    /// thing to do with a checkbox is press it — and pressing it has to say
+    /// *which* one without the caller re-deriving an index that the next
+    /// edit will move.
+    Check { done: bool, text: String, line: usize },
     Numbered { n: u32, text: String },
     Quote(String),
     /// Verbatim, including the blank lines inside it. `lang` may be empty.
@@ -578,7 +599,17 @@ pub fn blocks(text: &str) -> Vec<Block> {
 
         if let Some(rest) = t.strip_prefix("- ").or_else(|| t.strip_prefix("* ")) {
             flush(&mut para, &mut out);
-            out.push(Block::Bullet(rest.trim().to_string()));
+            // A task before a bullet: `- [ ] x` is both, and the one that
+            // can be pressed is the more useful answer.
+            if let Some(done) = ticked(rest) {
+                out.push(Block::Check {
+                    done,
+                    text: rest[3..].trim().to_string(),
+                    line: i,
+                });
+            } else {
+                out.push(Block::Bullet(rest.trim().to_string()));
+            }
             i += 1;
             continue;
         }
@@ -596,6 +627,48 @@ pub fn blocks(text: &str) -> Vec<Block> {
         i += 1;
     }
     flush(&mut para, &mut out);
+    out
+}
+
+/// Whether `[ ] x` / `[x] x` starts this bullet's text, and which.
+///
+/// `[X]` counts too: a note typed on somebody else's machine is still a note.
+fn ticked(rest: &str) -> Option<bool> {
+    let b = rest.as_bytes();
+    if b.len() < 3 || b[0] != b'[' || b[2] != b']' {
+        return None;
+    }
+    match b[1] {
+        b' ' => Some(false),
+        b'x' | b'X' => Some(true),
+        _ => None,
+    }
+}
+
+/// Tick or untick the checkbox on one line, and hand the whole note back.
+///
+/// **By line number, not by which checkbox it is.** The list on screen was
+/// drawn from a `blocks()` that may be a moment old; counting boxes would
+/// tick the wrong one the first time a note gains a task above the one you
+/// pressed. A line that is not a checkbox is left exactly as it was — the
+/// screen and the file can disagree, and when they do nothing should happen.
+pub fn set_check(text: &str, line: usize, done: bool) -> String {
+    let mut lines: Vec<String> = text.lines().map(|l| l.to_string()).collect();
+    let Some(row) = lines.get_mut(line) else { return text.to_string() };
+    let indent: String = row.chars().take_while(|c| c.is_whitespace()).collect();
+    let t = row.trim_start();
+    let Some(rest) = t.strip_prefix("- ").or_else(|| t.strip_prefix("* ")) else {
+        return text.to_string();
+    };
+    if ticked(rest).is_none() {
+        return text.to_string();
+    }
+    let lead = &t[..t.len() - rest.len()];
+    *row = format!("{indent}{lead}[{}]{}", if done { "x" } else { " " }, &rest[3..]);
+    let mut out = lines.join("\n");
+    if text.ends_with('\n') {
+        out.push('\n');
+    }
     out
 }
 
@@ -832,6 +905,36 @@ pub fn new_note(title: &str, today: &str) -> (String, String) {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn a_task_is_a_block_you_can_press_and_a_bullet_is_not() {
+        let text = "---\ntitle: x\n---\n\n- [ ] 牛乳\n- [x] 珈琲\n- ふつうの箇条書き\n";
+        let bs = blocks(text);
+        let mut checks = Vec::new();
+        for b in &bs {
+            if let Block::Check { done, text, line } = b {
+                checks.push((*done, text.clone(), *line));
+            }
+        }
+        assert_eq!(checks.len(), 2, "{bs:?}");
+        assert_eq!(checks[0], (false, "牛乳".to_string(), 4));
+        assert_eq!(checks[1], (true, "珈琲".to_string(), 5));
+        assert!(matches!(&bs[2], Block::Bullet(t) if t == "ふつうの箇条書き"));
+    }
+
+    #[test]
+    fn pressing_a_task_changes_that_line_and_nothing_else() {
+        let text = "- [ ] 牛乳\n- [ ] 珈琲\n";
+        let on = set_check(text, 1, true);
+        assert_eq!(on, "- [ ] 牛乳\n- [x] 珈琲\n");
+        assert_eq!(set_check(&on, 1, false), text);
+        // 行がずれていた・そこは箇条書きだった、のときは何もしない ──
+        // 画面とファイルが食い違っているのに書き込むのが一番悪い。
+        assert_eq!(set_check(text, 9, true), text);
+        assert_eq!(set_check("- ふつう\n", 0, true), "- ふつう\n");
+        // 字下げは字下げのまま
+        assert_eq!(set_check("  - [ ] 中\n", 0, true), "  - [x] 中\n");
+    }
     use super::*;
 
     #[test]
@@ -842,6 +945,7 @@ mod tests {
             excerpt: "本文です。".into(),
             tags: vec!["仕事".into(), "OneNote".into()],
             updated: Some(0),
+            created: Some(0),
             bytes: 0,
             pinned: false,
         };

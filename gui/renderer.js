@@ -6460,9 +6460,9 @@ async function cmdNewNote() {
         say(tr('notes are made in a local directory', 'ノートはローカルのディレクトリに作ります'), true);
         return;
     }
-    const title = await askFor(tr("title of the note", 'ノートの題'), '', {
+    const title = await askFor(tr("title of the note", 'ノートのタイトル'), '', {
         wide: true,
-        hint: tr('blank names it for today', '空にすると今日の日付が題になります'),
+        hint: tr('blank names it for today', '空にすると今日の日付がタイトルになります'),
     });
     if (title === null) return;
     const r = await ask('newnote', { dir: pane.cwd, title });

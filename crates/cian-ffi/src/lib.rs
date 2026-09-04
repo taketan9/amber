@@ -133,6 +133,7 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
                         "excerpt": n.excerpt,
                         "tags": n.tags,
                         "updated": n.updated,
+                        "created": n.created,
                         "bytes": n.bytes,
                         "pinned": n.pinned,
                         // What to match when the phone narrows the list, so
@@ -258,6 +259,9 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
                     }
                     Block::Paragraph(text) => serde_json::json!({ "kind": "paragraph", "text": text }),
                     Block::Bullet(text) => serde_json::json!({ "kind": "bullet", "text": text }),
+                    Block::Check { done, text, line } => serde_json::json!({
+                        "kind": "check", "done": done, "text": text, "line": line,
+                    }),
                     Block::Numbered { n, text } => {
                         serde_json::json!({ "kind": "numbered", "n": n, "text": text })
                     }
@@ -272,6 +276,20 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
                 })
                 .collect();
             Ok(serde_json::json!({ "blocks": out }))
+        }
+
+        // Tick or untick one task, by the line it is on.
+        //
+        // Text in, text out, like every other edit here: the caller saves it
+        // the ordinary way, so pressing a checkbox goes through the same
+        // check against the file on disk as typing does. That matters more
+        // here than anywhere — a checkbox is the one edit somebody makes
+        // without looking at the note.
+        "check" => {
+            let text = arg(p, "text");
+            let line = p["line"].as_u64().unwrap_or(0) as usize;
+            let done = p["done"].as_bool().unwrap_or(false);
+            Ok(serde_json::json!({ "text": cian_core::note::set_check(&text, line, done) }))
         }
 
         // Look inside the notes, not only at what the listing already knows.
@@ -823,6 +841,24 @@ mod tests {
         )
         .unwrap();
         assert_eq!(r2["name"], "段取り-2.md");
+    }
+
+    #[test]
+    fn a_task_comes_back_pressable_and_pressing_it_writes_the_line() {
+        let text = "- [ ] 牛乳\n- [x] 珈琲\n";
+        let bs = call("blocks", &serde_json::json!({ "text": text })).unwrap();
+        let bs = bs["blocks"].as_array().unwrap();
+        assert_eq!(bs[0]["kind"], "check");
+        assert_eq!(bs[0]["done"], false);
+        assert_eq!(bs[0]["line"], 0);
+        assert_eq!(bs[1]["done"], true);
+
+        let out = call(
+            "check",
+            &serde_json::json!({ "text": text, "line": 0, "done": true }),
+        )
+        .unwrap();
+        assert_eq!(out["text"], "- [x] 牛乳\n- [x] 珈琲\n");
     }
 
     #[test]

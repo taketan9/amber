@@ -77,6 +77,10 @@ enum Bell {
         body.title = note.title
         body.body = note.excerpt.isEmpty ? "cian" : note.excerpt
         body.sound = .default
+        // Which note this was about. Without it a notification can only say
+        // "open cian", and the person then has to find the note the phone
+        // just interrupted them about.
+        body.userInfo = ["path": note.path]
 
         if !r.once.isEmpty, let at = parts(r.once) {
             let t = UNCalendarNotificationTrigger(dateMatching: at, repeats: false)
@@ -115,5 +119,42 @@ enum Bell {
         var c = DateComponents()
         c.year = y; c.month = mo; c.day = d; c.hour = h; c.minute = mi
         return c
+    }
+}
+
+/// The note a notification was about, from the moment it is pressed until
+/// the list has opened it.
+///
+/// A tiny object rather than a callback: the notification can be pressed
+/// while the app is not running, in which case the answer arrives *before*
+/// there is a view to hand it to. Somewhere to put it until somebody asks is
+/// the whole job.
+@MainActor
+final class Ring: NSObject, ObservableObject, UNUserNotificationCenterDelegate {
+    static let shared = Ring()
+    /// The path pressed, cleared by whoever acts on it.
+    @Published var wanted: String?
+
+    /// Start listening. Must happen before the app finishes launching, or a
+    /// notification pressed from the lock screen is delivered to nobody.
+    static func listen() {
+        UNUserNotificationCenter.current().delegate = shared
+    }
+
+    nonisolated func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse
+    ) async {
+        let path = response.notification.request.content.userInfo["path"] as? String
+        await MainActor.run { Ring.shared.wanted = path }
+    }
+
+    /// Show it even while cian is open. The alternative is a routine that
+    /// comes due, rings nowhere, and looks broken.
+    nonisolated func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification
+    ) async -> UNNotificationPresentationOptions {
+        [.banner, .sound]
     }
 }

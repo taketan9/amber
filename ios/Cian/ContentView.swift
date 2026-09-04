@@ -10,6 +10,7 @@ import PhotosUI
 struct ContentView: View {
     @StateObject private var store = NotesStore()
     @StateObject private var desk = Desk()
+    @ObservedObject private var ring = Ring.shared
     @State private var picking = false
     @State private var naming = false
     @State private var booking = false
@@ -43,8 +44,8 @@ struct ContentView: View {
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button { picking = true } label: { Image(systemName: "externaldrive") }
-                        .accessibilityLabel("ノートの置き場所")
+                    Button { picking = true } label: { Image(systemName: "gearshape") }
+                        .accessibilityLabel("設定")
                 }
                 if !store.rootName.isEmpty {
                     // Making a folder is a top-level thing to do and was
@@ -99,6 +100,12 @@ struct ContentView: View {
                 catch { store.trouble = error.localizedDescription }
             }
         }
+        // A notification pressed opens the note it was about. It can arrive
+        // before the notes are loaded (pressed from the lock screen, cold
+        // start), so this watches the store as well as the ring: whichever
+        // is second does the opening.
+        .onChange(of: ring.wanted) { _, _ in answer() }
+        .onChange(of: store.notes) { _, _ in answer() }
         .task {
             store.restore()
             // What the routines owed while the phone was doing something
@@ -189,6 +196,12 @@ struct ContentView: View {
                             }
                         }
                     }
+                    // The whole row, not the words in it. A label is as wide
+                    // as its longest line, so a short title left most of the
+                    // row dead to the finger — and a row that answers in one
+                    // place and not the one beside it reads as a bug.
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
                 }
                 // The row keeps the colours its own text asked for — a title
                 // in link-blue says "this is a link" about every note in the
@@ -257,6 +270,15 @@ struct ContentView: View {
         into = nil
         outside = false
         return moved
+    }
+
+    /// Open the note a notification was about, once it is known.
+    private func answer() {
+        guard let want = ring.wanted else { return }
+        guard let note = store.notes.first(where: { $0.path == want }) else { return }
+        ring.wanted = nil
+        desk.open(note)
+        showing = true
     }
 
     private func moveTo(_ note: Note, _ book: String?) {
@@ -341,9 +363,40 @@ struct ContentView: View {
                     }
                 }
             }
-            ForEach(store.matching(needle)) { row($0) }
+            // The tags this pile actually has, to press instead of type.
+            if !store.tagsHere.isEmpty {
+                Section {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 7) {
+                            ForEach(store.tagsHere, id: \.self) { t in
+                                let on = store.only.contains(t)
+                                Button {
+                                    if on { store.only.remove(t) } else { store.only.insert(t) }
+                                } label: {
+                                    Text("#\(t)").font(.caption)
+                                }
+                                .buttonStyle(.bordered)
+                                .tint(on ? Color.accentColor : nil)
+                            }
+                            if !store.only.isEmpty {
+                                Button("すべて外す") { store.only.removeAll() }
+                                    .font(.caption)
+                                    .buttonStyle(.borderless)
+                            }
+                        }
+                        .padding(.vertical, 2)
+                    }
+                    .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
+                }
+            }
+            // Under headings that follow the ordering — see `bands`.
+            ForEach(store.bands(store.matching(needle))) { band in
+                Section(band.name) {
+                    ForEach(band.notes) { row($0) }
+                }
+            }
         }
-        .searchable(text: $needle, prompt: "題・タグ・本文")
+        .searchable(text: $needle, prompt: "タイトル・タグ・本文")
         .onChange(of: needle) { _, now in store.find(now) }
         .refreshable { store.reload() }
         // One screen for every open note, with the tabs above them.
@@ -367,9 +420,20 @@ struct ContentView: View {
 struct NoteView: View {
     @Binding var tab: Desk.Tab
     let store: NotesStore
+    /// Whether this is the page you are looking at.
+    ///
+    /// **A `TabView` keeps the neighbouring page alive**, and two live pages
+    /// hand SwiftUI two toolbars, which it merges by pushing the overflow
+    /// into a 「⋯」 that appears for the length of a swipe and goes away
+    /// again. Nothing is wrong; there are just briefly twice as many buttons
+    /// as fit. So only the page in front asks for a toolbar.
+    let current: Bool
     @State private var trouble: String?
     @State private var clash: String?
     @State private var picked: PhotosPickerItem?
+    @State private var picking = false
+    /// Whether the seldom-used half of the writing bar is unfolded.
+    @State private var more = false
     @State private var busy = false
     @State private var tagging = false
     @State private var ringing = false
@@ -381,50 +445,58 @@ struct NoteView: View {
     var body: some View {
         Group {
             if tab.reading {
-                ScrollView { Reading(blocks: tab.blocks, base: folder) }
+                ScrollView { Reading(blocks: tab.blocks, base: folder, tick: tick) }
             } else {
                 VStack(spacing: 0) {
                     TextEditor(text: $tab.text)
                         .font(.body.monospaced())
                         .focused($writing)
                         .padding(.horizontal, 8)
-                    marks
+                    // Only while the keyboard is up, which is the only time
+                    // it is *above the keyboard* rather than sitting at the
+                    // bottom of a page nobody is typing into.
+                    if writing { marks }
                 }
             }
         }
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button("保存") { save(force: false) }.disabled(!tab.dirty)
-            }
-            ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    if !tab.reading { redraw() }
-                    tab.reading.toggle()
-                } label: {
-                    Image(systemName: tab.reading ? "eye.slash" : "eye")
+            if current {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("保存") { save(force: false) }.disabled(!tab.dirty)
                 }
-                .accessibilityLabel(tab.reading ? "編集" : "表示")
-            }
-            ToolbarItem(placement: .topBarTrailing) {
-                Button { tags = note.tags; tagging = true } label: { Image(systemName: "tag") }
-                    .accessibilityLabel("タグ")
-            }
-            ToolbarItem(placement: .topBarTrailing) {
-                Button { ringing = true } label: {
-                    Image(systemName: reminded ? "bell.fill" : "bell")
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        if !tab.reading { redraw() }
+                        tab.reading.toggle()
+                    } label: {
+                        Image(systemName: tab.reading ? "eye.slash" : "eye")
+                    }
+                    .accessibilityLabel(tab.reading ? "編集" : "表示")
                 }
-                .accessibilityLabel("通知")
-            }
-            ToolbarItem(placement: .topBarTrailing) {
-                PhotosPicker(selection: $picked, matching: .images) {
-                    Image(systemName: "photo")
+                // The three that are *about* the note rather than in it.
+                // They have to stay up here and not on the keyboard bar:
+                // there is no keyboard while you are reading, and setting a
+                // reminder is something you do having just read the thing.
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
+                        Button { tags = note.tags; tagging = true } label: {
+                            Label("タグ", systemImage: "tag")
+                        }
+                        Button { ringing = true } label: {
+                            Label("通知", systemImage: reminded ? "bell.fill" : "bell")
+                        }
+                        Button { picking = true } label: {
+                            Label("写真", systemImage: "photo")
+                        }
+                        .disabled(busy)
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                    }
+                    .accessibilityLabel("その他")
                 }
-                .disabled(busy)
-            }
-            ToolbarItem(placement: .keyboard) {
-                Button("閉じる") { writing = false }
             }
         }
+        .photosPicker(isPresented: $picking, selection: $picked, matching: .images)
         // Read once. Coming back to a tab must not throw away what is in it —
         // that is the whole reason the text lives on the desk.
         .task(id: tab.id) {
@@ -466,36 +538,81 @@ struct NoteView: View {
 
     /// The Markdown a phone keyboard makes you hunt for.
     ///
-    /// Line marks go on the start of the line and toggle: pressing 見出し
-    /// twice takes it off again, which is what you want the moment you press
-    /// it by mistake. Their honest limit: `TextEditor` does not hand over a
-    /// cursor, so they work on the last line.
+    /// Two rows, the second folded away. The first row is what a note is
+    /// actually made of; the rest are real Markdown and really occasional,
+    /// and a bar of fourteen icons costs you the five you use every time.
+    /// Their honest limit: `TextEditor` does not hand over a cursor, so these
+    /// work on the last line and at the end of the text.
     private var marks: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 6) {
-                mark("見出し", "number") { line("# ") }
-                mark("箇条書き", "list.bullet") { line("- ") }
-                mark("チェック", "checklist") { line("- [ ] ") }
-                mark("引用", "text.quote") { line("> ") }
-                Divider().frame(height: 20)
-                mark("太字", "bold") { wrap("**") }
-                mark("斜体", "italic") { wrap("*") }
-                mark("コード", "chevron.left.forwardslash.chevron.right") { wrap("`") }
-                Divider().frame(height: 20)
-                mark("区切り", "minus") { block("\n---\n") }
-                mark("表", "tablecells") { block("\n| 　 | 　 |\n| --- | --- |\n| 　 | 　 |\n") }
-                mark("コード枠", "curlybraces") { block("\n```\n\n```\n") }
+        VStack(spacing: 0) {
+            if more {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        mark("斜体", "italic") { wrap("*") }
+                        mark("取り消し線", "strikethrough") { wrap("~~") }
+                        mark("コード", "chevron.left.forwardslash.chevron.right") { wrap("`") }
+                        Divider().frame(height: 20)
+                        mark("リンク", "link") { block("[](https://)") }
+                        mark("表", "tablecells") { block("\n| \u{3000} | \u{3000} |\n| --- | --- |\n| \u{3000} | \u{3000} |\n") }
+                        mark("コード枠", "curlybraces") { block("\n```\n\n```\n") }
+                        mark("水平線", "minus") { block("\n---\n") }
+                        Divider().frame(height: 20)
+                        mark("引用", "text.quote") { line("> ") }
+                        mark("番号つき", "list.number") { line("1. ") }
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                }
+                Divider()
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    // Pressing it again goes deeper: # → ## → ### → none.
+                    // Three buttons would be three names for one idea, and
+                    // the idea is "this line is a heading, this much of one".
+                    mark("見出し", "number", on: heads > 0) { deepen() }
+                    mark("箇条書き", "list.bullet") { line("- ") }
+                    mark("チェック", "checklist") { line("- [ ] ") }
+                    mark("太字", "bold") { wrap("**") }
+                    Divider().frame(height: 20)
+                    mark(more ? "たたむ" : "ほかの記号", "ellipsis", on: more) {
+                        withAnimation(.easeOut(duration: 0.15)) { more.toggle() }
+                    }
+                    Spacer(minLength: 0)
+                    Button("閉じる") { writing = false }.font(.callout)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+            }
         }
         .background(.bar)
     }
 
-    private func mark(_ name: String, _ icon: String, _ act: @escaping () -> Void) -> some View {
+    private func mark(_ name: String, _ icon: String, on: Bool = false,
+                      _ act: @escaping () -> Void) -> some View {
         Button(action: act) { Image(systemName: icon) }
             .buttonStyle(.bordered)
+            .tint(on ? Color.accentColor : nil)
             .accessibilityLabel(name)
+    }
+
+    /// How many `#` the last line already carries.
+    private var heads: Int {
+        let last = tab.text.components(separatedBy: "\n").last ?? ""
+        return last.prefix(while: { $0 == "#" }).count
+    }
+
+    /// One `#` deeper, and back to none after three.
+    private func deepen() {
+        var lines = tab.text.components(separatedBy: "\n")
+        let at = max(0, lines.count - 1)
+        var body = lines[at]
+        let n = body.prefix(while: { $0 == "#" }).count
+        body.removeFirst(n)
+        if body.hasPrefix(" ") { body.removeFirst() }
+        let next = (n + 1) % 4
+        lines[at] = next == 0 ? body : String(repeating: "#", count: next) + " " + body
+        tab.text = lines.joined(separator: "\n")
     }
 
     private func line(_ prefix: String) {
@@ -523,6 +640,19 @@ struct NoteView: View {
 
     private var folder: URL {
         URL(fileURLWithPath: note.path).deletingLastPathComponent()
+    }
+
+    /// A task pressed in the reading view.
+    ///
+    /// Written straight to disk rather than left dirty: nobody presses a
+    /// checkbox and then goes looking for a save button, and a tick that
+    /// only lived on screen would be gone by the next reload.
+    private func tick(_ b: Block) {
+        guard b.line >= 0 else { return }
+        do {
+            tab.text = try store.checked(tab.text, line: b.line, done: !b.done)
+            save(force: false)
+        } catch { trouble = error.localizedDescription }
     }
 
     private func redraw() {

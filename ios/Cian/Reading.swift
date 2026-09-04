@@ -14,6 +14,9 @@ struct Block: Identifiable {
     let lang: String
     let alt: String
     let link: String
+    /// A task, and the line of the note it is written on.
+    let done: Bool
+    let line: Int
 
     init(_ o: [String: Any]) {
         kind = o["kind"] as? String ?? "paragraph"
@@ -23,6 +26,8 @@ struct Block: Identifiable {
         lang = o["lang"] as? String ?? ""
         alt = o["alt"] as? String ?? ""
         link = o["link"] as? String ?? ""
+        done = o["done"] as? Bool ?? false
+        line = o["line"] as? Int ?? -1
     }
 }
 
@@ -31,6 +36,10 @@ struct Reading: View {
     let blocks: [Block]
     /// The folder the note is in — a picture's link is relative to it.
     let base: URL
+    /// What to do when a task is pressed. Reading is not only reading: a
+    /// shopping list is read *while* it is being crossed off, and going back
+    /// to the editor to type an `x` between two brackets is not that.
+    var tick: ((Block) -> Void)?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -54,6 +63,23 @@ struct Reading: View {
                 }
             }
             .padding(.top, b.level <= 2 ? 8 : 2)
+        case "check":
+            Button {
+                tick?(b)
+            } label: {
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    Image(systemName: b.done ? "checkmark.square.fill" : "square")
+                        .foregroundStyle(b.done ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
+                        .imageScale(.large)
+                    inline(b.text)
+                        .strikethrough(b.done)
+                        .foregroundStyle(b.done ? .secondary : .primary)
+                    Spacer(minLength: 0)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(tick == nil)
         case "bullet":
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text("•").foregroundStyle(.secondary)

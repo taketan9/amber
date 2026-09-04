@@ -182,12 +182,40 @@ final class NotesStore: ObservableObject {
     /// belongs there is what you were last writing. By title is for when you
     /// know the name and not the day — the same two the window offers.
     enum Order: String, CaseIterable, Identifiable {
-        case updated, title
+        case updated, created, title
         var id: String { rawValue }
-        var label: String { self == .updated ? "更新順" : "題順" }
+        var label: String {
+            switch self {
+            case .updated: return "更新順"
+            case .created: return "作成順"
+            case .title: return "タイトル順"
+            }
+        }
     }
 
     @Published var order: Order = .updated
+
+    /// Tags being narrowed by, pressed rather than typed.
+    ///
+    /// Several at once means **all of them** — the note that is both 仕事 and
+    /// 定型. Any-of would grow the list as you press, which is the opposite of
+    /// what pressing a filter is for.
+    @Published var only: Set<String> = []
+
+    /// The tags on the notes you can see from here, most used first.
+    ///
+    /// From what is in front of you and not from the whole folder: a bar of
+    /// forty tags is a bar nobody reads, and the ones worth pressing are the
+    /// ones this pile actually has.
+    var tagsHere: [String] {
+        var count: [String: Int] = [:]
+        for n in notes where flat || n.book == at || at.isEmpty {
+            for t in n.tags { count[t, default: 0] += 1 }
+        }
+        return count.keys.sorted {
+            count[$0] == count[$1] ? $0 < $1 : count[$0]! > count[$1]!
+        }
+    }
 
     /// Which notebook is open, as a path relative to the root. `""` is the
     /// top. This is *where you are*, not a filter — the two look the same on
@@ -243,11 +271,15 @@ final class NotesStore: ObservableObject {
         var out = notes
         // Searching looks everywhere, whatever notebook is open: the note you
         // are looking for is the one you have forgotten where you put.
-        if !flat && n.isEmpty { out = out.filter { $0.book == at } }
+        // A tag narrows like a search does — everywhere, not just here.
+        // Pressing 「#仕事」 while standing in one folder and being shown only
+        // that folder's 仕事 notes is the answer to a question nobody asked.
+        if !flat && n.isEmpty && only.isEmpty { out = out.filter { $0.book == at } }
         if !n.isEmpty {
             // Either half: what the listing knows, or what was found inside.
             out = out.filter { $0.search.contains(n) || hits[$0.path] != nil }
         }
+        if !only.isEmpty { out = out.filter { only.isSubset(of: Set($0.tags)) } }
         // The pinned ones are drawn in their own section above this, so they
         // come out here rather than being sorted to the front: a note in two
         // places at once is a note somebody deletes twice.
@@ -262,15 +294,60 @@ final class NotesStore: ObservableObject {
     /// reach without going to find it. Inside a notebook, only that
     /// notebook's, because there you are looking at one place on purpose.
     func pinnedHere(_ needle: String) -> [Note] {
-        guard needle.trimmingCharacters(in: .whitespaces).isEmpty, !flat else { return [] }
+        guard needle.trimmingCharacters(in: .whitespaces).isEmpty, !flat, only.isEmpty else { return [] }
         let all = notes.filter(\.pinned)
         return sorted(at.isEmpty ? all : all.filter { $0.book == at })
+    }
+
+    /// A run of notes under one heading.
+    struct Band: Identifiable {
+        let name: String
+        let notes: [Note]
+        var id: String { name }
+    }
+
+    /// The list, cut into the runs a person actually reads it in.
+    ///
+    /// **The headings follow the ordering.** Grouped by date while sorted by
+    /// title would put 「今日」 above a note from March, which is worse than
+    /// no headings at all — so by title the headings are first letters, and
+    /// by date they are days.
+    func bands(_ list: [Note]) -> [Band] {
+        var names: [String] = []
+        var rows: [String: [Note]] = [:]
+        for n in list {
+            let name = order == .title ? initial(n.title) : when(order == .created ? n.created : n.updated)
+            if rows[name] == nil { names.append(name) }
+            rows[name, default: []].append(n)
+        }
+        return names.map { Band(name: $0, notes: rows[$0] ?? []) }
+    }
+
+    /// 今日 / 昨日 / 今週 / 今月 / それ以前.
+    private func when(_ secs: UInt64) -> String {
+        guard secs > 0 else { return "日付なし" }
+        let cal = Calendar.current
+        let day = Date(timeIntervalSince1970: TimeInterval(secs))
+        if cal.isDateInToday(day) { return "今日" }
+        if cal.isDateInYesterday(day) { return "昨日" }
+        if cal.isDate(day, equalTo: Date(), toGranularity: .weekOfYear) { return "今週" }
+        if cal.isDate(day, equalTo: Date(), toGranularity: .month) { return "今月" }
+        if cal.isDate(day, equalTo: Date(), toGranularity: .year) {
+            return "\(cal.component(.month, from: day)) 月"
+        }
+        return "\(cal.component(.year, from: day)) 年"
+    }
+
+    private func initial(_ title: String) -> String {
+        guard let c = title.first else { return "—" }
+        return String(c).uppercased()
     }
 
     private func sorted(_ list: [Note]) -> [Note] {
         var out = list
         switch order {
         case .updated: out.sort { $0.updated > $1.updated }
+        case .created: out.sort { $0.created > $1.created }
         // `localizedStandardCompare` and not `<`: 「あ」 before 「い」, and
         // note-2 before note-10, which plain string order gets wrong both ways.
         case .title: out.sort { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
@@ -287,6 +364,14 @@ final class NotesStore: ObservableObject {
     func open(_ note: Note) throws -> (String, String) {
         let answer = try Cian.call("read", ["path": note.path])
         return (answer["text"] as? String ?? "", answer["stamp"] as? String ?? "")
+    }
+
+    /// The note with one task ticked or unticked, as text to save.
+    ///
+    /// By the line it is on, not by which box it is — see `note::set_check`.
+    func checked(_ text: String, line: Int, done: Bool) throws -> String {
+        let out = try Cian.call("check", ["text": text, "line": line, "done": done])
+        return out["text"] as? String ?? text
     }
 
     /// The note with a different set of tags on it.

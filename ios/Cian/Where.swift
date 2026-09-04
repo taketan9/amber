@@ -21,11 +21,12 @@ struct Where: View {
     @Environment(\.dismiss) private var dismiss
     @State private var zip: URL?
     @State private var trouble: String?
+    @AppStorage("cian.look") private var look = Look.auto
 
     var body: some View {
         NavigationStack {
             List {
-                Section("いま") {
+                Section("ノートの置き場所") {
                     // The path, as the trail of names it is. "cian" alone
                     // answers "what is it called" when the question was
                     // "where is it" — and on a phone, where a folder can be
@@ -100,6 +101,21 @@ struct Where: View {
                 } footer: {
                     Text("インポートした .md はこのフォルダにコピーされます。元のファイルはそのまま。同じ名前があるときは番号を付けて、いまあるノートは上書きしません。")
                 }
+
+                Section {
+                    Picker("見た目", selection: $look) {
+                        ForEach(Look.allCases) { Text($0.label).tag($0) }
+                    }
+                    .pickerStyle(.inline)
+                    .labelsHidden()
+                } header: {
+                    Text("見た目")
+                } footer: {
+                    // Three and not two: a phone that goes dark at sunset is
+                    // the common case, and a switch with no way back to it
+                    // is a switch that gets set once and regretted.
+                    Text("「iPhone に合わせる」は、夜になると暗くなる設定にしているときに一緒に暗くなります。")
+                }
             }
             // The zip exists before the share sheet opens, so what is being
             // handed over is a file that is already there — not a promise.
@@ -114,7 +130,7 @@ struct Where: View {
             } message: {
                 Text(trouble ?? "")
             }
-            .navigationTitle("ノートの置き場所")
+            .navigationTitle("設定")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) { Button("閉じる") { dismiss() } }

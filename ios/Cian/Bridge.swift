@@ -52,6 +52,9 @@ struct Note: Identifiable, Hashable {
     let excerpt: String
     let tags: [String]
     let updated: UInt64
+    /// When it was started, as against when it was last touched. Two
+    /// different questions, and people look for notes by both.
+    let created: UInt64
     /// The directory it sits in, relative to the chosen root — a notebook, in
     /// the sense Inkdrop means. Empty for a note at the top.
     ///
@@ -75,6 +78,7 @@ struct Note: Identifiable, Hashable {
         excerpt = o["excerpt"] as? String ?? ""
         tags = o["tags"] as? [String] ?? []
         updated = o["updated"] as? UInt64 ?? 0
+        created = o["created"] as? UInt64 ?? o["updated"] as? UInt64 ?? 0
         book = o["book"] as? String ?? ""
         pinned = o["pinned"] as? Bool ?? false
         search = o["search"] as? String ?? ""

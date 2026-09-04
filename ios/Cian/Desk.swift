@@ -82,7 +82,8 @@ struct DeskView: View {
             TabView(selection: $desk.showing) {
                 ForEach(desk.tabs) { tab in
                     if let bound = desk.binding(tab.id) {
-                        NoteView(tab: bound, store: store).tag(tab.id)
+                        NoteView(tab: bound, store: store, current: tab.id == desk.showing)
+                            .tag(tab.id)
                     }
                 }
             }
