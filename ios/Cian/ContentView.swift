@@ -11,6 +11,7 @@ struct ContentView: View {
     @StateObject private var store = NotesStore()
     @State private var picking = false
     @State private var naming = false
+    @State private var booking = false
     @State private var made: Note?
     @State private var needle = ""
 
@@ -26,8 +27,15 @@ struct ContentView: View {
             // The notebook, when one is chosen: the title bar is where you
             // look to know what you are looking at, and a filtered list that
             // still says the folder's name reads as a list that lost notes.
-            .navigationTitle(store.book ?? (store.rootName.isEmpty ? "cian" : store.rootName))
+            .navigationTitle(store.rootName.isEmpty ? "cian" : store.here)
             .toolbar {
+                if let up = store.up {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button { store.at = up } label: {
+                            Label("上へ", systemImage: "chevron.backward")
+                        }
+                    }
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { picking = true } label: { Image(systemName: "externaldrive") }
                         .accessibilityLabel("ノートの置き場所")
@@ -46,26 +54,33 @@ struct ContentView: View {
                             Picker("並び", selection: $store.order) {
                                 ForEach(NotesStore.Order.allCases) { Text($0.label).tag($0) }
                             }
-                            if !store.books.isEmpty {
-                                Divider()
-                                Picker("ノートブック", selection: $store.book) {
-                                    Text("すべて（\(store.notes.count)）").tag(String?.none)
-                                    ForEach(store.books, id: \.name) { b in
-                                        Text("\(b.name)（\(b.count)）").tag(String?.some(b.name))
-                                    }
-                                }
+                            Divider()
+                            Toggle(isOn: $store.flat) {
+                                Label("全部まとめて見る", systemImage: "list.bullet")
+                            }
+                            Divider()
+                            Button {
+                                booking = true
+                            } label: {
+                                Label("新しいフォルダ…", systemImage: "folder.badge.plus")
                             }
                         } label: {
-                            Image(systemName: store.book == nil
-                                ? "line.3.horizontal.decrease.circle"
-                                : "line.3.horizontal.decrease.circle.fill")
+                            Image(systemName: store.flat
+                                ? "line.3.horizontal.decrease.circle.fill"
+                                : "line.3.horizontal.decrease.circle")
                         }
-                        .accessibilityLabel("絞り込みと並び")
+                        .accessibilityLabel("並びとフォルダ")
                     }
                 }
             }
         }
         .sheet(isPresented: $picking) { Where(store: store) }
+        .sheet(isPresented: $booking) {
+            Booking(inside: store.here) { name in
+                do { try store.makeBook(name) }
+                catch { store.trouble = error.localizedDescription }
+            }
+        }
         .task { store.restore() }
         // **Two `.alert` on one view is one alert.** SwiftUI keeps the last
         // and the other one shows without its buttons doing anything — which
@@ -116,7 +131,27 @@ struct ContentView: View {
     }
 
     private var list: some View {
-        List(store.matching(needle)) { note in
+        List {
+            // The notebooks first, then the notes in this one. Folders above
+            // files is what every file manager since the first one has done,
+            // and this is the same gesture: go in, come back.
+            if !store.flat && needle.isEmpty {
+                ForEach(store.books, id: \.path) { b in
+                    Button {
+                        store.at = b.path
+                    } label: {
+                        HStack {
+                            Label(b.name, systemImage: "folder")
+                            Spacer()
+                            Text("\(b.count)").foregroundStyle(.secondary)
+                            Image(systemName: "chevron.right")
+                                .font(.caption).foregroundStyle(.tertiary)
+                        }
+                    }
+                    .tint(.primary)
+                }
+            }
+            ForEach(store.matching(needle)) { note in
             NavigationLink(value: note) {
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 4) {
@@ -180,13 +215,15 @@ struct ContentView: View {
             .contextMenu {
                 // Moving lives in the long press: it is the one action here
                 // that needs a second choice (which notebook), and a swipe
-                // cannot ask a question.
+                // cannot ask a question. Every notebook, not just the ones
+                // beside this note — filing is often filing *away*.
                 Menu("ノートブックへ移す") {
                     Button("（いちばん上）") { moveTo(note, nil) }
-                    ForEach(store.books, id: \.name) { b in
-                        Button(b.name) { moveTo(note, b.name) }
+                    ForEach(store.allBooks, id: \.self) { b in
+                        Button(b) { moveTo(note, b) }
                     }
                 }
+            }
             }
         }
         .searchable(text: $needle, prompt: "題・タグ・本文")

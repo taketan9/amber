@@ -119,6 +119,7 @@ final class NotesStore: ObservableObject {
             let answer = try Cian.call("notes", ["path": root.path])
             let rows = answer["notes"] as? [[String: Any]] ?? []
             notes = rows.compactMap(Note.init)
+            allBooks = answer["books"] as? [String] ?? []
             trouble = nil
         } catch {
             trouble = error.localizedDescription
@@ -172,21 +173,62 @@ final class NotesStore: ObservableObject {
     }
 
     @Published var order: Order = .updated
-    /// Only this notebook, or all of them when nil.
-    @Published var book: String?
 
-    /// Every notebook in the folder, with how many notes are in each.
-    var books: [(name: String, count: Int)] {
-        var n: [String: Int] = [:]
-        for note in notes where !note.book.isEmpty { n[note.book, default: 0] += 1 }
-        return n.sorted { $0.key < $1.key }.map { ($0.key, $0.value) }
+    /// Which notebook is open, as a path relative to the root. `""` is the
+    /// top. This is *where you are*, not a filter — the two look the same on
+    /// screen for one level and stop looking the same the moment there is a
+    /// notebook inside a notebook.
+    @Published var at = ""
+
+    /// Show everything at once, folders ignored.
+    ///
+    /// Both ways of keeping notes are real. Some people put four hundred in
+    /// one pile and find them by searching; some want them filed. Neither is
+    /// a mistake to be corrected by an app, so this is a switch.
+    @Published var flat = false
+
+    /// Every notebook there is, as paths relative to the root — including the
+    /// empty ones, which is why this comes from the engine's walk of the
+    /// directories rather than from the notes.
+    @Published var allBooks: [String] = []
+
+    /// The notebooks directly inside the one that is open, with how many
+    /// notes are anywhere underneath each.
+    var books: [(name: String, path: String, count: Int)] {
+        let prefix = at.isEmpty ? "" : at + "/"
+        var seen: [String] = []
+        for b in allBooks where b.hasPrefix(prefix) {
+            let rest = String(b.dropFirst(prefix.count))
+            guard !rest.isEmpty else { continue }
+            let head = rest.split(separator: "/").first.map(String.init) ?? rest
+            let full = prefix + head
+            if !seen.contains(full) { seen.append(full) }
+        }
+        return seen.map { full in
+            let n = notes.filter { $0.book == full || $0.book.hasPrefix(full + "/") }.count
+            return (String(full.dropFirst(prefix.count)), full, n)
+        }
+    }
+
+    /// The name to put above the list.
+    var here: String {
+        at.isEmpty ? rootName : (at.split(separator: "/").last.map(String.init) ?? at)
+    }
+
+    /// One level up, or nil at the top.
+    var up: String? {
+        guard !at.isEmpty else { return nil }
+        let parts = at.split(separator: "/").dropLast()
+        return parts.joined(separator: "/")
     }
 
     /// Narrow by what a note is *about*, not by what its file is called.
     func matching(_ needle: String) -> [Note] {
         let n = needle.trimmingCharacters(in: .whitespaces).lowercased()
         var out = notes
-        if let book { out = out.filter { $0.book == book } }
+        // Searching looks everywhere, whatever notebook is open: the note you
+        // are looking for is the one you have forgotten where you put.
+        if !flat && n.isEmpty { out = out.filter { $0.book == at } }
         if !n.isEmpty {
             // Either half: what the listing knows, or what was found inside.
             out = out.filter { $0.search.contains(n) || hits[$0.path] != nil }
@@ -294,6 +336,16 @@ final class NotesStore: ObservableObject {
         reload()
     }
 
+    /// Make a notebook inside the one that is open.
+    func makeBook(_ name: String) throws {
+        guard let root else { return }
+        let clean = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !clean.isEmpty else { return }
+        let dir = root.appendingPathComponent(at).appendingPathComponent(clean)
+        _ = try Cian.call("mkbook", ["dir": dir.path])
+        reload()
+    }
+
     /// Move a note into another notebook — `nil` means the top of the folder.
     func move(_ note: Note, to book: String?) throws {
         guard let root else { return }
@@ -312,7 +364,10 @@ final class NotesStore: ObservableObject {
     /// A new note in the chosen folder, named and shaped by cian.
     func make(titled title: String, tags: [String] = []) throws -> Note? {
         guard let root else { return nil }
-        let made = try Cian.call("new", ["dir": root.path, "title": title])
+        // In the notebook that is open, not always at the top — otherwise
+        // filing is something you do afterwards, every time.
+        let dir = root.appendingPathComponent(at)
+        let made = try Cian.call("new", ["dir": dir.path, "title": title])
         guard let path = made["path"] as? String else { return nil }
         // The tags go on by rewriting the note that was just written, rather
         // than by teaching `new` about tags: one place decides what a note's

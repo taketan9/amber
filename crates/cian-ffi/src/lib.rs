@@ -143,8 +143,22 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
                     })
                 })
                 .collect();
+            // The folders, from the same walk. **Derived from the
+            // directories and not from the notes**: a notebook somebody just
+            // made is empty, and a list built out of the notes inside would
+            // not show it — which looks exactly like the folder not having
+            // been made.
+            let mut books: Vec<String> = walk
+                .rows
+                .iter()
+                .filter(|r| r.is_dir && r.rel != "attachments")
+                .filter(|r| !r.rel.split('/').any(|p| p == "attachments"))
+                .map(|r| r.rel.clone())
+                .collect();
+            books.sort();
             Ok(serde_json::json!({
                 "root": dir.display().to_string(),
+                "books": books,
                 "notes": notes,
                 "partial": walk.partial().then(|| serde_json::json!({
                     "whole_to": walk.whole_to(),
@@ -337,6 +351,20 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
             Ok(serde_json::json!({ "path": at.display().to_string() }))
         }
 
+        // Make a notebook. A folder, because that is what a notebook is
+        // here — somebody looking at the same place from a Mac sees folders.
+        "mkbook" => {
+            let dir = std::path::PathBuf::from(arg(p, "dir"));
+            if dir.as_os_str().is_empty() {
+                anyhow::bail!("名前がありません");
+            }
+            if dir.exists() {
+                anyhow::bail!("{} はもうあります", dir.display());
+            }
+            std::fs::create_dir_all(&dir)?;
+            Ok(serde_json::json!({ "path": dir.display().to_string() }))
+        }
+
         // A photo, put beside the note. The phone sends it base64 because
         // that is what fits down a C string; everything about *where it goes*
         // is `cian_core::note::attach`, the same call the window makes when a
@@ -465,6 +493,35 @@ mod tests {
             "path": d.path().to_str().unwrap(), "needle": "  ",
         })).unwrap();
         assert!(r["hits"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn an_empty_notebook_is_still_a_notebook() {
+        let d = note_dir();
+        let made = call("mkbook", &serde_json::json!({
+            "dir": d.path().join("仕事").to_str().unwrap(),
+        })).unwrap();
+        assert!(made["path"].as_str().unwrap().ends_with("仕事"));
+
+        let r = call("notes", &serde_json::json!({ "path": d.path().to_str().unwrap() })).unwrap();
+        let books: Vec<String> = r["books"].as_array().unwrap()
+            .iter().map(|b| b.as_str().unwrap().to_string()).collect();
+        // Nothing is in it yet, and it still has to show — otherwise making a
+        // folder looks exactly like the folder not having been made.
+        assert!(books.contains(&"仕事".to_string()), "{books:?}");
+        // `attachments` is where the pictures live, not a notebook.
+        let note = d.path().join("a.md");
+        cian_core::note::attach(&note, &[1], "png").unwrap();
+        let r = call("notes", &serde_json::json!({ "path": d.path().to_str().unwrap() })).unwrap();
+        let books: Vec<String> = r["books"].as_array().unwrap()
+            .iter().map(|b| b.as_str().unwrap().to_string()).collect();
+        assert!(!books.iter().any(|b| b.contains("attachments")), "{books:?}");
+
+        // Making one that is already there is refused rather than silently
+        // doing nothing, which would read as success.
+        assert!(call("mkbook", &serde_json::json!({
+            "dir": d.path().join("仕事").to_str().unwrap(),
+        })).is_err());
     }
 
     #[test]
