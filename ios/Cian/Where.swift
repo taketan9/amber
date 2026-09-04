@@ -10,28 +10,41 @@ import UniformTypeIdentifiers
 /// do about it.
 struct Where: View {
     @ObservedObject var store: NotesStore
+    /// Asked for after this sheet has closed.
+    ///
+    /// **A file picker cannot be opened from inside a sheet** — it is a
+    /// presentation over a presentation, and it silently does nothing, which
+    /// is exactly how 「保存場所を選ぶ」 behaved: pressed, and no answer at
+    /// all. So the sheet closes first and the screen underneath opens it.
+    let choose: () -> Void
+    let bringIn: () -> Void
     @Environment(\.dismiss) private var dismiss
-    @State private var picking = false
-    @State private var importing = false
 
     var body: some View {
         NavigationStack {
             List {
                 Section("いま") {
-                    LabeledContent("場所", value: store.rootName)
-                    LabeledContent("ノート", value: "\(store.notes.count) 本")
-                    if store.own {
-                        Text("この iPhone の中（「ファイル」からは **cian** として見えます）")
-                            .font(.caption).foregroundStyle(.secondary)
-                    } else {
-                        Text(store.rootPath).font(.caption).foregroundStyle(.secondary)
-                            .lineLimit(3)
+                    // The path, as the trail of names it is. "cian" alone
+                    // answers "what is it called" when the question was
+                    // "where is it" — and on a phone, where a folder can be
+                    // in three different clouds, that is the whole question.
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(store.trail.joined(separator: "  ›  "))
+                            .font(.callout)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text(store.own
+                             ? "この iPhone の中。「ファイル」→ この iPhone 内 → cian で開けます"
+                             : store.rootPath)
+                            .font(.caption2).foregroundStyle(.secondary)
+                            .lineLimit(4)
                     }
+                    LabeledContent("ノート", value: "\(store.notes.count) 本")
                 }
 
                 Section {
                     Button {
-                        picking = true
+                        dismiss()
+                        choose()
                     } label: {
                         Label("保存場所を選ぶ…", systemImage: "folder")
                     }
@@ -52,36 +65,25 @@ struct Where: View {
 
                 Section {
                     Button {
-                        importing = true
+                        dismiss()
+                        bringIn()
                     } label: {
-                        Label("マークダウンを取り込む…", systemImage: "square.and.arrow.down")
+                        Label("インポート…", systemImage: "square.and.arrow.down")
                     }
                     ShareLink(item: store.rootURL ?? URL(fileURLWithPath: "/")) {
-                        Label("このフォルダを書き出す…", systemImage: "square.and.arrow.up")
+                        Label("すべてバックアップ…", systemImage: "square.and.arrow.up")
                     }
                     .disabled(store.rootURL == nil)
                 } header: {
-                    Text("出し入れ")
+                    Text("バックアップとインポート")
                 } footer: {
-                    Text("取り込んだ .md はこのフォルダにコピーされます。元のファイルはそのままです。")
+                    Text("インポートした .md はこのフォルダにコピーされます。元のファイルはそのまま。同じ名前があるときは番号を付けて、いまあるノートは上書きしません。")
                 }
             }
             .navigationTitle("ノートの置き場所")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) { Button("閉じる") { dismiss() } }
-            }
-            .fileImporter(isPresented: $picking, allowedContentTypes: [.folder]) { r in
-                if case .success(let url) = r { store.choose(url) }
-            }
-            // `allowsMultipleSelection`: bringing notes in is nearly always
-            // more than one — a folder somebody exported from somewhere else.
-            .fileImporter(
-                isPresented: $importing,
-                allowedContentTypes: [UTType(filenameExtension: "md") ?? .plainText, .plainText],
-                allowsMultipleSelection: true
-            ) { r in
-                if case .success(let urls) = r { store.bring(urls) }
             }
         }
     }

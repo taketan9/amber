@@ -33,6 +33,21 @@ final class NotesStore: ObservableObject {
 
     /// Whether the notes are in the app's own folder rather than one picked.
     @Published var own = true
+    /// The path as a trail of names — 「この iPhone › cian › 仕事」.
+    ///
+    /// A phone hides paths, which is usually kind and here is not: the same
+    /// folder name can exist in three different clouds, and "cian" on its own
+    /// answers *what is it called* when the question is *where is it*.
+    var trail: [String] {
+        guard let root else { return [] }
+        if own { return ["この iPhone", "cian"] }
+        // The tail of the path, which is the part that means anything: the
+        // front of it is the provider's own bookkeeping.
+        let parts = root.pathComponents.filter { $0 != "/" }
+        let keep = parts.suffix(4)
+        return (parts.count > keep.count ? ["…"] : []) + keep
+    }
+
     /// The chosen folder's path, for the one screen that should say it.
     var rootPath: String { root?.path ?? "" }
     var rootURL: URL? { root }
@@ -233,15 +248,34 @@ final class NotesStore: ObservableObject {
             // Either half: what the listing knows, or what was found inside.
             out = out.filter { $0.search.contains(n) || hits[$0.path] != nil }
         }
+        // The pinned ones are drawn in their own section above this, so they
+        // come out here rather than being sorted to the front: a note in two
+        // places at once is a note somebody deletes twice.
+        let stuck = Set(pinnedHere(needle).map(\.path))
+        return sorted(out.filter { !stuck.contains($0.path) })
+    }
+
+    /// The pinned notes to show above the list.
+    ///
+    /// At the top of the folder, **every** pinned note wherever it lives —
+    /// that is what pinning is for: the note you keep coming back to, within
+    /// reach without going to find it. Inside a notebook, only that
+    /// notebook's, because there you are looking at one place on purpose.
+    func pinnedHere(_ needle: String) -> [Note] {
+        guard needle.trimmingCharacters(in: .whitespaces).isEmpty, !flat else { return [] }
+        let all = notes.filter(\.pinned)
+        return sorted(at.isEmpty ? all : all.filter { $0.book == at })
+    }
+
+    private func sorted(_ list: [Note]) -> [Note] {
+        var out = list
         switch order {
         case .updated: out.sort { $0.updated > $1.updated }
         // `localizedStandardCompare` and not `<`: 「あ」 before 「い」, and
         // note-2 before note-10, which plain string order gets wrong both ways.
         case .title: out.sort { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
         }
-        // Pinned first, and *stably*: within the pinned ones the chosen order
-        // still holds. Sorting by `pinned` alone would shuffle them.
-        return out.filter(\.pinned) + out.filter { !$0.pinned }
+        return out
     }
 
     /// The text of a note, and the stamp that says which version it was.
