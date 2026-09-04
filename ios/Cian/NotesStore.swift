@@ -135,6 +135,8 @@ final class NotesStore: ObservableObject {
             let rows = answer["notes"] as? [[String: Any]] ?? []
             notes = rows.compactMap(Note.init)
             allBooks = answer["books"] as? [String] ?? []
+            stars = answer["stars"] as? [String] ?? []
+            colors = answer["colors"] as? [String: String] ?? [:]
             trouble = nil
         } catch {
             trouble = error.localizedDescription
@@ -235,6 +237,62 @@ final class NotesStore: ObservableObject {
     /// directories rather than from the notes.
     @Published var allBooks: [String] = []
 
+    /// Every favourite shelf, including the empty ones.
+    @Published var stars: [String] = []
+    /// Folder path → the colour it was given.
+    @Published var colors: [String: String] = [:]
+
+    /// The shelves directly inside `shelf`, with how many notes are under each.
+    func shelves(in shelf: String) -> [(name: String, path: String, count: Int)] {
+        let prefix = shelf.isEmpty ? "" : shelf + "/"
+        var seen: [String] = []
+        for s in stars where s.hasPrefix(prefix) {
+            let rest = String(s.dropFirst(prefix.count))
+            guard !rest.isEmpty else { continue }
+            let head = rest.split(separator: "/").first.map(String.init) ?? rest
+            let full = prefix + head
+            if !seen.contains(full) { seen.append(full) }
+        }
+        return seen.map { full in
+            let n = notes.filter { $0.star == full || ($0.star?.hasPrefix(full + "/") ?? false) }.count
+            return (String(full.dropFirst(prefix.count)), full, n)
+        }
+    }
+
+    /// The favourites standing directly on one shelf.
+    func starred(on shelf: String) -> [Note] {
+        sorted(notes.filter { $0.star == shelf })
+    }
+
+    /// Put a note on a shelf, or take it off the favourites entirely.
+    ///
+    /// Reads the file rather than taking text from a caller: this is done
+    /// from the list, where nothing has the note open, and the stamp that
+    /// comes back with the text is the one the save is checked against — so
+    /// starring a note goes through the same check as typing in it.
+    func star(_ note: Note, on shelf: String?) throws {
+        let (text, stamp) = try open(note)
+        var p: [String: Any] = ["text": text]
+        if let shelf { p["shelf"] = shelf }
+        let out = try Cian.call("star", p)
+        _ = try save(note, text: out["text"] as? String ?? text, stamp: stamp)
+        reload()
+    }
+
+    /// Make a favourite shelf, or forget one and everything under it.
+    func shelf(_ name: String, drop: Bool = false) throws {
+        guard let root else { return }
+        _ = try Cian.call("shelf", ["path": root.path, "name": name, "drop": drop])
+        reload()
+    }
+
+    /// Give a folder a colour, or take it away.
+    func color(_ folder: String, _ hex: String?) throws {
+        guard let root else { return }
+        _ = try Cian.call("color", ["path": root.path, "folder": folder, "color": hex ?? NSNull()])
+        reload()
+    }
+
     /// The notebooks directly inside the one that is open, with how many
     /// notes are anywhere underneath each.
     var books: [(name: String, path: String, count: Int)] {
@@ -280,22 +338,22 @@ final class NotesStore: ObservableObject {
             out = out.filter { $0.search.contains(n) || hits[$0.path] != nil }
         }
         if !only.isEmpty { out = out.filter { only.isSubset(of: Set($0.tags)) } }
-        // The pinned ones are drawn in their own section above this, so they
+        // The favourites are drawn in their own section above this, so they
         // come out here rather than being sorted to the front: a note in two
         // places at once is a note somebody deletes twice.
         let stuck = Set(pinnedHere(needle).map(\.path))
         return sorted(out.filter { !stuck.contains($0.path) })
     }
 
-    /// The pinned notes to show above the list.
+    /// The favourites to show above the list.
     ///
-    /// At the top of the folder, **every** pinned note wherever it lives —
-    /// that is what pinning is for: the note you keep coming back to, within
-    /// reach without going to find it. Inside a notebook, only that
-    /// notebook's, because there you are looking at one place on purpose.
+    /// At the top of the folder, **every** favourite wherever it lives — that
+    /// is what a favourite is for: the note you keep coming back to, within
+    /// reach without going to find it. Inside a folder, only that folder's,
+    /// because there you are looking at one place on purpose.
     func pinnedHere(_ needle: String) -> [Note] {
         guard needle.trimmingCharacters(in: .whitespaces).isEmpty, !flat, only.isEmpty else { return [] }
-        let all = notes.filter(\.pinned)
+        let all = notes.filter { $0.star != nil }
         return sorted(at.isEmpty ? all : all.filter { $0.book == at })
     }
 
@@ -474,26 +532,6 @@ final class NotesStore: ObservableObject {
             throw Cian.Failure.engine("画像を置けませんでした")
         }
         return link
-    }
-
-    /// Pin or unpin, by rewriting the note and saving it the ordinary way.
-    ///
-    /// Reads the file rather than taking text from a caller: this is done from
-    /// the list, where nothing has the note open, and inventing a stamp for a
-    /// file nobody is looking at would be pretending to a check that has not
-    /// happened.
-    func pin(_ note: Note, _ on: Bool) throws {
-        let read = try Cian.call("read", ["path": note.path])
-        let text = read["text"] as? String ?? ""
-        let out = try Cian.call("setfield", [
-            "text": text, "key": "pinned", "value": on ? "true" : NSNull(),
-        ])
-        _ = try Cian.call("write", [
-            "path": note.path,
-            "text": out["text"] as? String ?? text,
-            "stamp": read["stamp"] as? String ?? "",
-        ])
-        reload()
     }
 
     /// Make a notebook inside the one that is open.

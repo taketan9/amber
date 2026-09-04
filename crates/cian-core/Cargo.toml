@@ -20,6 +20,7 @@ default = ["desktop"]
 desktop = ["dep:trash"]
 
 [dependencies]
+serde_json = { workspace = true }
 anyhow   = { workspace = true }
 chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
 dunce = "1.0.5"

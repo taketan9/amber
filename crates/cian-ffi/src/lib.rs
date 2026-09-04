@@ -119,6 +119,24 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
             };
             let stop = std::sync::atomic::AtomicBool::new(false);
             let (found, walk) = cian_core::note::list(&dir, limits, &stop);
+            let book = cian_core::notebook::read(&dir);
+            // The favourite shelves: the ones notes are standing on, plus the
+            // ones that were made and are still empty. Without the second
+            // half a shelf vanishes the moment its last note leaves it, which
+            // reads as cian losing the folder.
+            let mut shelves: Vec<String> = book.stars.clone();
+            for f in &found {
+                if let Some(sh) = f.note.star.clone() {
+                    // Every level of it: a note on 買い物/週次 means 買い物
+                    // exists too, whether or not anything stands on it.
+                    let parts: Vec<&str> = sh.split('/').filter(|p| !p.is_empty()).collect();
+                    for n in 1..=parts.len() {
+                        shelves.push(parts[..n].join("/"));
+                    }
+                }
+            }
+            shelves.sort();
+            shelves.dedup();
             let notes: Vec<serde_json::Value> = found
                 .iter()
                 .map(|f| {
@@ -135,7 +153,7 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
                         "updated": n.updated,
                         "created": n.created,
                         "bytes": n.bytes,
-                        "pinned": n.pinned,
+                        "star": n.star,
                         // What to match when the phone narrows the list, so
                         // that `#仕事` finds the same notes it finds in the
                         // window. Sent rather than derived on the far side:
@@ -160,6 +178,8 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
             Ok(serde_json::json!({
                 "root": dir.display().to_string(),
                 "books": books,
+                "stars": shelves,
+                "colors": book.colors,
                 "notes": notes,
                 "partial": walk.partial().then(|| serde_json::json!({
                     "whole_to": walk.whole_to(),
@@ -276,6 +296,49 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
                 })
                 .collect();
             Ok(serde_json::json!({ "blocks": out }))
+        }
+
+        // Put a note on a favourite shelf, or take it off.
+        //
+        // Text in, text out, like every other edit: a favourite is a line in
+        // the note's own front matter, so it travels with the note and the
+        // Mac reads the same word.
+        "star" => {
+            let text = arg(p, "text");
+            let shelf = p["shelf"].as_str();
+            let out = match shelf {
+                // `star: true` rather than `star:` — a field with nothing
+                // after it reads as yes to the next thing that looks.
+                Some("") => cian_core::note::set_field(&text, "star", Some("true")),
+                Some(sh) => cian_core::note::set_field(&text, "star", Some(sh)),
+                None => cian_core::note::set_field(&text, "star", None),
+            };
+            // The one written before favourites had a name. Left behind, it
+            // would keep the note a favourite after it was taken off one.
+            let out = cian_core::note::set_field(&out, "pinned", None);
+            Ok(serde_json::json!({ "text": out }))
+        }
+
+        // Make or forget a favourite shelf. Only the empty ones need saying
+        // out loud — the rest are named by the notes standing on them.
+        "shelf" => {
+            let root = std::path::PathBuf::from(arg(p, "path"));
+            let name = arg(p, "name");
+            if p["drop"].as_bool().unwrap_or(false) {
+                cian_core::notebook::drop_star(&root, &name)?;
+            } else {
+                cian_core::notebook::add_star(&root, &name)?;
+            }
+            Ok(serde_json::json!({ "stars": cian_core::notebook::read(&root).stars }))
+        }
+
+        // What colour a folder is. His to choose — cian offers a palette and
+        // does not insist on it.
+        "color" => {
+            let root = std::path::PathBuf::from(arg(p, "path"));
+            let folder = arg(p, "folder");
+            cian_core::notebook::set_color(&root, &folder, p["color"].as_str())?;
+            Ok(serde_json::json!({ "colors": cian_core::notebook::read(&root).colors }))
         }
 
         // Tick or untick one task, by the line it is on.
@@ -841,6 +904,46 @@ mod tests {
         )
         .unwrap();
         assert_eq!(r2["name"], "段取り-2.md");
+    }
+
+    #[test]
+    fn a_favourite_is_a_second_place_and_not_a_move() {
+        let d = tempfile::tempdir().unwrap();
+        let root = d.path();
+        std::fs::create_dir_all(root.join("仕事")).unwrap();
+        let note = root.join("仕事").join("週報.md");
+        std::fs::write(&note, "---\ntitle: 週報\n---\n本文。\n").unwrap();
+
+        // 棚に載せても、ノートは 仕事 フォルダから動かない。
+        let text = std::fs::read_to_string(&note).unwrap();
+        let out = call("star", &serde_json::json!({ "text": text, "shelf": "買い物/週次" })).unwrap();
+        std::fs::write(&note, out["text"].as_str().unwrap()).unwrap();
+
+        let all = call("notes", &serde_json::json!({ "path": root.display().to_string() })).unwrap();
+        let n = &all["notes"].as_array().unwrap()[0];
+        assert_eq!(n["book"], "仕事", "実体のフォルダは変わらない");
+        assert_eq!(n["star"], "買い物/週次");
+        // 途中の棚も存在する。
+        let stars: Vec<String> = all["stars"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap().to_string())
+            .collect();
+        assert_eq!(stars, vec!["買い物".to_string(), "買い物/週次".to_string()]);
+
+        // 空の棚は、設定ファイルが憶えている。
+        call("shelf", &serde_json::json!({ "path": root.display().to_string(), "name": "あとで" })).unwrap();
+        let all = call("notes", &serde_json::json!({ "path": root.display().to_string() })).unwrap();
+        assert!(all["stars"].as_array().unwrap().iter().any(|v| v == "あとで"));
+
+        // 外すと、古い `pinned` も一緒に消える。
+        let text = std::fs::read_to_string(&note).unwrap();
+        let text = text.replace("---\ntitle:", "---\npinned: true\ntitle:");
+        let out = call("star", &serde_json::json!({ "text": text })).unwrap();
+        let text = out["text"].as_str().unwrap();
+        assert!(!text.contains("pinned"), "{text}");
+        assert!(!text.contains("star"), "{text}");
     }
 
     #[test]

@@ -61,9 +61,10 @@ struct Note: Identifiable, Hashable {
     /// Shown because the list reaches six levels down: without it two notes
     /// called 「打合せ」 in two different months are the same row twice.
     let book: String
-    /// Kept at the top of the list whatever the ordering — pinning exists to
-    /// stop you scrolling to the note you keep coming back to.
-    let pinned: Bool
+    /// A favourite, and which favourite shelf it stands on — `""` is the top
+    /// of the favourites. **A second place, not a move**: the note stays in
+    /// the folder it was written in, and this says where it also shows up.
+    let star: String?
     /// Title, `#tags` and the start of the body, lowercased — **cian's own
     /// answer to "what does this note match"**, so a search here finds the
     /// same notes it finds in the window.
@@ -80,7 +81,7 @@ struct Note: Identifiable, Hashable {
         updated = o["updated"] as? UInt64 ?? 0
         created = o["created"] as? UInt64 ?? o["updated"] as? UInt64 ?? 0
         book = o["book"] as? String ?? ""
-        pinned = o["pinned"] as? Bool ?? false
+        star = o["star"] as? String
         search = o["search"] as? String ?? ""
     }
 }

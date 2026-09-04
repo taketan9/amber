@@ -21,6 +21,8 @@ struct ContentView: View {
     @State private var into: String?
     @State private var outside = false
     @State private var needle = ""
+    @State private var shelving: Note?
+    @State private var colouring: String?
 
     var body: some View {
         NavigationStack {
@@ -94,6 +96,8 @@ struct ContentView: View {
         .fileImporter(isPresented: $choosing, allowedContentTypes: [.folder]) { r in
             if case .success(let url) = r { store.choose(url) }
         }
+        .sheet(item: $shelving) { note in Shelving(store: store, note: note) }
+        .sheet(item: $colouring) { f in Colouring(store: store, folder: f) }
         .sheet(isPresented: $booking) {
             Booking(inside: store.here) { name in
                 do { try store.makeBook(name) }
@@ -165,8 +169,8 @@ struct ContentView: View {
             } label: {
                     VStack(alignment: .leading, spacing: 2) {
                         HStack(spacing: 4) {
-                            if note.pinned {
-                                Image(systemName: "pin.fill")
+                            if note.star != nil {
+                                Image(systemName: "star.fill")
                                     .font(.caption2).foregroundStyle(.orange)
                             }
                             Text(note.title).font(.body.weight(.semibold)).lineLimit(1)
@@ -228,11 +232,11 @@ struct ContentView: View {
                 // for keeping and one that starts right is for losing.
                 .swipeActions(edge: .leading) {
                     Button {
-                        do { try store.pin(note, !note.pinned) }
+                        do { try store.star(note, on: note.star == nil ? "" : nil) }
                         catch { store.trouble = error.localizedDescription }
                     } label: {
-                        Label(note.pinned ? "外す" : "留める",
-                              systemImage: note.pinned ? "pin.slash" : "pin")
+                        Label(note.star == nil ? "お気に入り" : "外す",
+                              systemImage: note.star == nil ? "star" : "star.slash")
                     }
                     .tint(.orange)
                 }
@@ -246,6 +250,9 @@ struct ContentView: View {
                 // to know any of them by name.
                 ShareLink(item: URL(fileURLWithPath: note.path)) {
                     Label("書き出す…", systemImage: "square.and.arrow.up")
+                }
+                Button { shelving = note } label: {
+                    Label(note.star == nil ? "お気に入りに入れる" : "棚を変える", systemImage: "star")
                 }
                 Menu("ノートブックへ移す") {
                         Button("（いちばん上）") { moveTo(note, nil) }
@@ -330,7 +337,9 @@ struct ContentView: View {
                             Label {
                                 Text(b.name)
                             } icon: {
-                                Image(systemName: "folder.fill").foregroundStyle(.tint)
+                                Image(systemName: "folder.fill")
+                                    .foregroundStyle(store.colors[b.path].flatMap { Color(hex: $0) }
+                                        .map { AnyShapeStyle($0) } ?? AnyShapeStyle(.tint))
                             }
                             Spacer()
                             Text("\(b.count)").foregroundStyle(.secondary).monospacedDigit()
@@ -346,6 +355,11 @@ struct ContentView: View {
                         drop(paths, into: b.path)
                     } isTargeted: { over in into = over ? b.path : nil }
                     .listRowBackground(into == b.path ? Color.accentColor.opacity(0.15) : nil)
+                    .contextMenu {
+                        Button { colouring = b.path } label: {
+                            Label("色をつける", systemImage: "paintpalette")
+                        }
+                    }
                 }
             }
             // Pinned notes under a heading that says what pinning did.
@@ -356,10 +370,21 @@ struct ContentView: View {
                 Section {
                     ForEach(stuck) { row($0) }
                 } header: {
-                    Label {
-                        Text("上に固定")
-                    } icon: {
-                        Image(systemName: "pin.fill").foregroundStyle(.orange)
+                    HStack {
+                        Label {
+                            Text("お気に入り")
+                        } icon: {
+                            Image(systemName: "star.fill").foregroundStyle(.orange)
+                        }
+                        Spacer()
+                        NavigationLink("ぜんぶ見る") {
+                            Stars(store: store) { note in
+                                desk.open(note)
+                                showing = true
+                            }
+                        }
+                        .font(.caption)
+                        .textCase(nil)
                     }
                 }
             }
@@ -713,4 +738,12 @@ struct NoteView: View {
             }
         } catch { trouble = error.localizedDescription }
     }
+}
+
+/// A folder path, so a sheet can be presented for one.
+///
+/// `String` is not `Identifiable` and should not be made so app-wide — this
+/// is the one place that needs it, and only for the sheet.
+extension String: @retroactive Identifiable {
+    public var id: String { self }
 }

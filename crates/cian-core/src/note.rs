@@ -144,10 +144,18 @@ pub struct Note {
     /// different places in a list, and both are things people look for.
     pub created: Option<u64>,
     pub bytes: u64,
-    /// `pinned: true` in the front matter. A pinned note sits at the top of
-    /// the list whatever the ordering — it is the one you keep coming back
-    /// to, and scrolling to it is the thing pinning exists to stop.
-    pub pinned: bool,
+    /// A favourite, and **which favourite folder it is in** — `Some("")` is
+    /// the top of the favourites, `Some("買い物/週次")` is a shelf inside it.
+    ///
+    /// A favourite is a *second* place a note is, not a move: it stays in the
+    /// folder it was written in, and `star` says where it also appears. That
+    /// is the whole difference between this and filing, and it is why it
+    /// lives on the note rather than in a list somewhere — a note that is
+    /// moved, renamed or synced takes its favourite place with it.
+    ///
+    /// Written as `star: true` or `star: 買い物`. `pinned: true` is still
+    /// read, because notes written before this existed say that.
+    pub star: Option<String>,
 }
 
 /// Read one note. Only the head of the file is looked at — a list of two
@@ -190,17 +198,31 @@ pub fn read(path: &Path, head_lines: usize) -> Option<Note> {
         path: path.to_path_buf(),
         title,
         excerpt: excerpt(body),
-        // `true`, `yes`, `1` — the three ways people write it, because
-        // nobody remembers which one a given app wanted.
-        pinned: matches!(
-            f.fields.get("pinned").map(|v| v.trim().to_ascii_lowercase()).as_deref(),
-            Some("true" | "yes" | "1")
-        ),
+        star: star(&f),
         tags: f.tags,
         updated,
         created,
         bytes: meta.map(|m| m.len()).unwrap_or(0),
     })
+}
+
+/// Where a note sits in the favourites, if it is one.
+///
+/// `true`/`yes`/`1` are the three ways people write yes, because nobody
+/// remembers which one a given app wanted; anything else is the name of a
+/// shelf. `false` is a note that says, in writing, that it is not one.
+fn star(f: &Front) -> Option<String> {
+    let raw = f
+        .fields
+        .get("star")
+        .or_else(|| f.fields.get("favorite"))
+        .or_else(|| f.fields.get("pinned"))?;
+    let v = raw.trim();
+    match v.to_ascii_lowercase().as_str() {
+        "true" | "yes" | "1" => Some(String::new()),
+        "false" | "no" | "0" | "" => None,
+        _ => Some(v.trim_matches(['"', '\'']).to_string()),
+    }
 }
 
 /// The first `# heading`, if the note leads with one.
@@ -947,7 +969,7 @@ mod tests {
             updated: Some(0),
             created: Some(0),
             bytes: 0,
-            pinned: false,
+            star: None,
         };
         let h = haystack(&n);
         assert!(h.contains("段取り"), "the title: {h}");
@@ -1158,10 +1180,25 @@ mod tests {
     #[test]
     fn the_three_ways_people_write_yes() {
         let d = tempfile::tempdir().unwrap();
-        for (v, want) in [("true", true), ("yes", true), ("1", true), ("false", false), ("", false)] {
-            let p = d.path().join("n.md");
-            std::fs::write(&p, format!("---\ntitle: x\npinned: {v}\n---\n本文。\n")).unwrap();
-            assert_eq!(read(&p, 20).unwrap().pinned, want, "pinned: {v:?}");
+        let p = d.path().join("n.md");
+        // `pinned` is what notes written before favourites existed say, and
+        // they must not quietly stop being favourites.
+        for key in ["star", "favorite", "pinned"] {
+            for (v, want) in [
+                ("true", Some("")),
+                ("yes", Some("")),
+                ("1", Some("")),
+                ("false", None),
+                ("", None),
+                ("買い物/週次", Some("買い物/週次")),
+            ] {
+                std::fs::write(&p, format!("---\ntitle: x\n{key}: {v}\n---\n本文。\n")).unwrap();
+                assert_eq!(
+                    read(&p, 20).unwrap().star.as_deref(),
+                    want,
+                    "{key}: {v:?}"
+                );
+            }
         }
     }
 

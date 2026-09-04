@@ -30,6 +30,7 @@ pub mod log;
 pub mod markdown;
 pub mod mermaid;
 pub mod note;
+pub mod notebook;
 pub mod office;
 pub mod ops;
 pub mod os;
