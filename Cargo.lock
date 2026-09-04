@@ -607,6 +607,7 @@ name = "cian-ffi"
 version = "2.1.0"
 dependencies = [
  "anyhow",
+ "chrono",
  "cian-core",
  "serde_json",
  "tempfile",

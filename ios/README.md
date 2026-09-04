@@ -38,6 +38,19 @@ xcrun devicectl device install app --device <UDID> ios/build/Debug-iphoneos/Cian
 Xcode より新しい LLVM のビットコードを残す。どちらもリンクエラーとしてしか
 現れず、原因がここを指さない。
 
+**Xcode のビルドは Rust を建て直さない。** リンクするのは出来合いの
+`target/ios/CianFFI.xcframework` なので、`cian-core` や `cian-ffi` を直した
+あとに Xcode だけ回すと、ビルドは通り、アプリは入り、起動もして、**新しい
+ボタンを押した瞬間に「知らない操作: remind」と答える**。証拠が Swift を
+指すので、そこを何時間でも読める。だから `Engine freshness` というビルド
+フェーズ（`scripts/ios-fresh.sh`）が最初に走り、ソースがライブラリより
+新しければ**その場でビルドを落とす**。id は使っていない24桁を選ぶこと ──
+既存と衝突すると Xcode は「プロジェクトを読めません」としか言わない。
+
+**アクセントは `Assets.xcassets/AccentColor`**（明暗それぞれ）。
+`ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME` と `CianApp` の `.tint` の
+両方で効かせている。前者は Xcode のプレビューやシステム UI 用、後者が本番。
+
 **無料の Apple ID の署名は7日で切れる。** 切れたら上の install をやり直す。
 ノートは同期先にあるので何も失われない。
 

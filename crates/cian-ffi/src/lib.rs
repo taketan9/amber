@@ -365,6 +365,134 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
             Ok(serde_json::json!({ "path": dir.display().to_string() }))
         }
 
+        // A backup, as a zip somebody can put anywhere.
+        //
+        // The scope is chosen by the caller and the answer is a file: cian
+        // does not know about clouds, and the phone's own share sheet knows
+        // about all of them. `zip` and not a folder copy, because a folder is
+        // not a thing you can hand to a mail app.
+        //
+        // `all` — everything under the notes root, pictures included.
+        // `book` — one notebook and what is under it.
+        // `tag`  — every note carrying a tag, wherever it lives.
+        // `note` — one file.
+        "backup" => {
+            let root = std::path::PathBuf::from(arg(p, "path"));
+            let scope = arg(p, "scope");
+            let what = arg(p, "what");
+            let mut sources: Vec<std::path::PathBuf> = Vec::new();
+            let mut name = String::from("cian");
+            match scope.as_str() {
+                "all" => sources.push(root.clone()),
+                "book" => {
+                    sources.push(root.join(&what));
+                    name = what.replace('/', "-");
+                }
+                "note" => {
+                    sources.push(std::path::PathBuf::from(&what));
+                    name = std::path::Path::new(&what)
+                        .file_stem()
+                        .map(|s| s.to_string_lossy().into_owned())
+                        .unwrap_or_else(|| "note".into());
+                }
+                "tag" => {
+                    let limits = cian_core::survey::Limits {
+                        depth: 6, rows: 4000, hidden: false, ..Default::default()
+                    };
+                    let stop = std::sync::atomic::AtomicBool::new(false);
+                    let (found, _) = cian_core::note::list(&root, limits, &stop);
+                    for f in &found {
+                        if f.note.tags.iter().any(|t| t == &what) {
+                            sources.push(f.note.path.clone());
+                        }
+                    }
+                    if sources.is_empty() {
+                        anyhow::bail!("#{what} のノートがありません");
+                    }
+                    name = format!("tag-{what}");
+                }
+                other => anyhow::bail!("知らない範囲: {other}"),
+            }
+            for s in &sources {
+                if !s.exists() {
+                    anyhow::bail!("{} がありません", s.display());
+                }
+            }
+            // Beside the app's own temporary files, named for what is in it
+            // and the day — a folder of `backup.zip` is a folder of one
+            // question: which one is which.
+            let dir = std::path::PathBuf::from(arg(p, "into"));
+            let dir = if dir.as_os_str().is_empty() { std::env::temp_dir() } else { dir };
+            std::fs::create_dir_all(&dir)?;
+            let at = dir.join(format!("{name}-{}.zip", cian_core::note::today()));
+            let _ = std::fs::remove_file(&at);
+            let cancel = std::sync::atomic::AtomicBool::new(false);
+            let mut nothing = |_: &cian_core::progress::Progress| {};
+            let mut ctl = cian_core::progress::Ctl { cancel: &cancel, on_progress: &mut nothing };
+            let report = cian_core::archive::create_zip(&sources, &at, None, &mut ctl);
+            if !report.errors.is_empty() {
+                anyhow::bail!("{}", report.errors.join(" / "));
+            }
+            Ok(serde_json::json!({
+                "path": at.display().to_string(),
+                "files": report.ok,
+            }))
+        }
+
+        // What a note wants to be reminded about, and what its routine owes.
+        "remind" => {
+            let text = if p["text"].is_string() {
+                arg(p, "text")
+            } else {
+                cian_core::grepedit::read_text(&std::path::PathBuf::from(arg(p, "path")))?
+                    .lines
+                    .join("\n")
+            };
+            let r = cian_core::note::remind(&text);
+            let today = chrono_today();
+            let due: Vec<String> = match r.every {
+                Some((every, _, _)) => cian_core::note::due_since(every, r.last, today)
+                    .iter()
+                    .map(|d| d.to_string())
+                    .collect(),
+                None => Vec::new(),
+            };
+            Ok(serde_json::json!({
+                "once": r.once.map(|t| t.format("%Y-%m-%d %H:%M").to_string()),
+                "every": r.every.map(|(e, h, m)| serde_json::json!({
+                    "kind": match e {
+                        cian_core::note::Every::Daily => "daily",
+                        cian_core::note::Every::Weekly(_) => "weekly",
+                        cian_core::note::Every::Monthly(_) => "monthly",
+                    },
+                    "n": match e {
+                        cian_core::note::Every::Daily => 0,
+                        cian_core::note::Every::Weekly(w) => w,
+                        cian_core::note::Every::Monthly(d) => d,
+                    },
+                    "hour": h,
+                    "minute": m,
+                })),
+                "last": r.last.map(|d| d.to_string()),
+                "due": due,
+            }))
+        }
+
+        // Carry out a routine for a day it came due, and write down that it
+        // was done. Two steps in one call: a copy made without the note of it
+        // is a copy that gets made again tomorrow.
+        "carryout" => {
+            let path = std::path::PathBuf::from(arg(p, "path"));
+            let on = arg(p, "on");
+            let Some(day) = chrono::NaiveDate::parse_from_str(&on, "%Y-%m-%d").ok() else {
+                anyhow::bail!("日付が読めません: {on}")
+            };
+            let made = cian_core::note::carry_out(&path, day)?;
+            let text = std::fs::read_to_string(&path)?;
+            std::fs::write(&path, cian_core::note::set_field(&text, "last", Some(&on)))?;
+            Ok(serde_json::json!({ "path": made.display().to_string() }))
+        }
+
         // A photo, put beside the note. The phone sends it base64 because
         // that is what fits down a C string; everything about *where it goes*
         // is `cian_core::note::attach`, the same call the window makes when a
@@ -393,6 +521,10 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
 
         other => anyhow::bail!("知らない操作: {other}"),
     }
+}
+
+fn chrono_today() -> chrono::NaiveDate {
+    chrono::Local::now().date_naive()
 }
 
 /// Base64, in. Written here rather than pulled in: it is twenty lines, and a
@@ -522,6 +654,58 @@ mod tests {
         assert!(call("mkbook", &serde_json::json!({
             "dir": d.path().join("仕事").to_str().unwrap(),
         })).is_err());
+    }
+
+    #[test]
+    fn a_backup_is_a_file_somebody_can_hand_to_something_else() {
+        let d = note_dir();
+        std::fs::create_dir_all(d.path().join("仕事")).unwrap();
+        std::fs::write(
+            d.path().join("仕事/x.md"),
+            "---\ntitle: x\ntags: [家]\n---\n本文\n",
+        )
+        .unwrap();
+        let out = tempfile::tempdir().unwrap();
+        let root = d.path().to_str().unwrap();
+
+        for (scope, what) in [("all", ""), ("book", "仕事"), ("tag", "家")] {
+            let r = call("backup", &serde_json::json!({
+                "path": root, "scope": scope, "what": what,
+                "into": out.path().to_str().unwrap(),
+            })).unwrap();
+            let at = std::path::PathBuf::from(r["path"].as_str().unwrap());
+            assert!(at.is_file(), "{scope}: {at:?}");
+            // Named for what is in it and the day: a folder of `backup.zip`
+            // is a folder of one question.
+            assert!(at.to_string_lossy().contains(&cian_core::note::today()), "{at:?}");
+            assert!(std::fs::metadata(&at).unwrap().len() > 0, "{scope} は空でした");
+        }
+
+        // A tag nobody used is an error, not an empty zip that looks like a
+        // backup until the day somebody needs it.
+        assert!(call("backup", &serde_json::json!({
+            "path": root, "scope": "tag", "what": "ない",
+            "into": out.path().to_str().unwrap(),
+        })).is_err());
+    }
+
+    #[test]
+    fn a_routine_is_carried_out_once_and_written_down() {
+        let d = tempfile::tempdir().unwrap();
+        let t = d.path().join("ごみ.md");
+        std::fs::write(&t, "---\ntitle: ごみ\nrepeat: weekly wed 09:00\nlast: 2026-08-30\n---\n本文\n").unwrap();
+        let path = t.to_str().unwrap();
+
+        let r = call("remind", &serde_json::json!({ "path": path })).unwrap();
+        assert_eq!(r["every"]["kind"], "weekly");
+        assert_eq!(r["every"]["hour"], 9);
+        assert_eq!(r["last"], "2026-08-30");
+
+        let made = call("carryout", &serde_json::json!({ "path": path, "on": "2026-09-02" })).unwrap();
+        assert!(made["path"].as_str().unwrap().ends_with("ごみ 2026-09-02.md"));
+        // Written down, or it happens again tomorrow.
+        let after = call("remind", &serde_json::json!({ "path": path })).unwrap();
+        assert_eq!(after["last"], "2026-09-02");
     }
 
     #[test]

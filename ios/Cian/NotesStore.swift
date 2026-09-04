@@ -307,6 +307,47 @@ final class NotesStore: ObservableObject {
             .map(\.key)
     }
 
+    /// What a note asked to be reminded about.
+    func reminder(of text: String) throws -> Reminder {
+        Reminder(try Cian.call("remind", ["text": text]))
+    }
+
+    /// Set or clear one front-matter field, coming back as text to save.
+    func field(_ text: String, _ key: String, _ value: String?) throws -> String {
+        let out = try Cian.call("setfield", [
+            "text": text, "key": key, "value": value ?? NSNull(),
+        ])
+        return out["text"] as? String ?? text
+    }
+
+    /// Make the copies every routine owes, and write down that they were made.
+    ///
+    /// Done on opening the app, because that is the only moment a phone gives
+    /// an app to do it — see `Bell`. Quiet when there is nothing owed, which
+    /// is almost always.
+    func catchUp() {
+        guard root != nil else { return }
+        var made = 0
+        for note in notes {
+            guard let r = try? Cian.call("remind", ["path": note.path]),
+                  let due = r["due"] as? [String], !due.isEmpty else { continue }
+            for day in due {
+                if (try? Cian.call("carryout", ["path": note.path, "on": day])) != nil { made += 1 }
+            }
+        }
+        if made > 0 { reload() }
+    }
+
+    /// A zip of some or all of the notes, for handing to something else.
+    func backup(scope: String, what: String) throws -> URL {
+        guard let root else { throw Cian.Failure.engine("置き場所がありません") }
+        let r = try Cian.call("backup", [
+            "path": root.path, "scope": scope, "what": what,
+        ])
+        guard let at = r["path"] as? String else { throw Cian.Failure.engine("作れませんでした") }
+        return URL(fileURLWithPath: at)
+    }
+
     /// The note, split into things to draw.
     ///
     /// Given the text rather than the path, so what is on screen is what the

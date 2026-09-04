@@ -949,6 +949,87 @@ mod tests {
     }
 
     #[test]
+    fn a_routine_makes_a_task_and_not_another_template() {
+        use chrono::NaiveDate;
+        let d = tempfile::tempdir().unwrap();
+        let t = d.path().join("ごみ出し.md");
+        std::fs::write(
+            &t,
+            "---\ntitle: ごみ出し\nrepeat: weekly wed 09:00\nlast: 2026-08-30\ntags: [家]\n---\n- [ ] 燃えるゴミ\n",
+        )
+        .unwrap();
+
+        let made = carry_out(&t, NaiveDate::from_ymd_opt(2026, 9, 2).unwrap()).unwrap();
+        assert_eq!(made.file_name().unwrap(), "ごみ出し 2026-09-02.md");
+        let copy = std::fs::read_to_string(&made).unwrap();
+        // A task, not another template: it must not spawn copies of its own.
+        assert!(!copy.contains("repeat"), "{copy}");
+        assert!(!copy.contains("last"), "{copy}");
+        assert!(copy.contains("title: ごみ出し 2026-09-02"), "{copy}");
+        assert!(copy.contains("created: 2026-09-02"), "{copy}");
+        // What the task is stays: the tags and the checklist.
+        assert!(copy.contains("tags: [家]"), "{copy}");
+        assert!(copy.contains("- [ ] 燃えるゴミ"), "{copy}");
+        // And the template is untouched.
+        assert!(std::fs::read_to_string(&t).unwrap().contains("repeat: weekly wed 09:00"));
+
+        // Twice for the same day is once — otherwise two devices catching up
+        // put two Wednesdays in the list.
+        let again = carry_out(&t, NaiveDate::from_ymd_opt(2026, 9, 2).unwrap()).unwrap();
+        assert_eq!(again, made);
+        assert_eq!(std::fs::read_dir(d.path()).unwrap().count(), 2);
+    }
+
+    #[test]
+    fn the_three_shapes_a_reminder_is_written_in() {
+        use chrono::NaiveDate;
+        let r = remind("---\nremind: 2026-09-10 09:00\n---\n本文\n");
+        assert_eq!(r.once, NaiveDate::from_ymd_opt(2026, 9, 10).unwrap().and_hms_opt(9, 0, 0));
+
+        assert_eq!(remind("---\nrepeat: daily 07:30\n---\n").every, Some((Every::Daily, 7, 30)));
+        // Monday is 0, as chrono counts from Monday — wed is 2.
+        assert_eq!(remind("---\nrepeat: weekly wed 09:00\n---\n").every, Some((Every::Weekly(2), 9, 0)));
+        // The character people actually type in Japanese.
+        assert_eq!(remind("---\nrepeat: weekly 水 09:00\n---\n").every, Some((Every::Weekly(2), 9, 0)));
+        assert_eq!(remind("---\nrepeat: monthly 1 09:00\n---\n").every, Some((Every::Monthly(1), 9, 0)));
+
+        // Nonsense is nothing, not a guess: a reminder invented from a typo
+        // goes off at a time nobody chose.
+        assert_eq!(remind("---\nrepeat: weekly ときどき 09:00\n---\n").every, None);
+        assert_eq!(remind("---\nremind: あした\n---\n").once, None);
+        assert_eq!(remind("---\nrepeat: daily 25:00\n---\n").every, None);
+        assert_eq!(remind("本文だけ\n"), Remind::default());
+    }
+
+    #[test]
+    fn a_routine_says_what_it_missed_while_the_phone_was_off() {
+        use chrono::NaiveDate;
+        let d = |y, m, day| NaiveDate::from_ymd_opt(y, m, day).unwrap();
+
+        // 2026-09-02 is a Wednesday. Away for two weeks, two Wednesdays owed.
+        let due = due_since(Every::Weekly(2), Some(d(2026, 8, 30)), d(2026, 9, 10));
+        assert_eq!(due, vec![d(2026, 9, 2), d(2026, 9, 9)]);
+
+        // Nothing owed between one Wednesday and the next day.
+        assert!(due_since(Every::Weekly(2), Some(d(2026, 9, 2)), d(2026, 9, 3)).is_empty());
+
+        // Never carried out: today counts, if today is the day.
+        assert_eq!(due_since(Every::Weekly(2), None, d(2026, 9, 2)), vec![d(2026, 9, 2)]);
+        assert!(due_since(Every::Weekly(2), None, d(2026, 9, 3)).is_empty());
+
+        // A 31st in a short month lands on the last day rather than being
+        // skipped — a monthly routine that misses February is worse than one
+        // that is a day early.
+        assert_eq!(
+            due_since(Every::Monthly(31), Some(d(2026, 1, 31)), d(2026, 2, 28)),
+            vec![d(2026, 2, 28)]
+        );
+
+        // A `last` from long ago produces a handful, not seven hundred.
+        assert!(due_since(Every::Daily, Some(d(2024, 1, 1)), d(2026, 9, 10)).len() <= 32);
+    }
+
+    #[test]
     fn a_note_can_be_pinned_and_unpinned_without_losing_anything() {
         let src = "---\ntitle: 段取り\ntags: [仕事]\n---\n本文。\n";
         let on = set_field(src, "pinned", Some("true"));
@@ -1161,4 +1242,214 @@ mod tests {
         assert_eq!(date_secs("nonsense"), None);
         assert_eq!(date_secs("2026-13-01"), None, "no thirteenth month");
     }
+}
+
+/// Carry out a routine: make today's copy of a template note.
+///
+/// The copy is the note without its `repeat` and `last` — it is a task, not
+/// another template — with `created` set to the day it stands for and the day
+/// appended to its title, so a month of them reads as a list of days rather
+/// than the same word twelve times.
+///
+/// **Not scheduled by cian.** A phone does not let an app wake at nine on a
+/// Wednesday to write a file. The notification arrives on time; the copy is
+/// made the next time the app is opened, from `last`, which is why `last`
+/// exists. Say so plainly rather than implying a clock nobody has.
+pub fn carry_out(
+    template: &std::path::Path,
+    on: chrono::NaiveDate,
+) -> anyhow::Result<std::path::PathBuf> {
+    let text = std::fs::read_to_string(template)?;
+    let lines: Vec<String> = text.lines().map(|l| l.to_string()).collect();
+    let f = front(&lines);
+    let title = f
+        .fields
+        .get("title")
+        .cloned()
+        .or_else(|| heading(&lines[f.lines..]))
+        .unwrap_or_else(|| {
+            template.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default()
+        });
+    let day = on.format("%Y-%m-%d").to_string();
+
+    let mut copy = set_field(&text, "repeat", None);
+    copy = set_field(&copy, "last", None);
+    copy = set_field(&copy, "remind", None);
+    copy = set_field(&copy, "created", Some(&day));
+    copy = set_field(&copy, "title", Some(&format!("{title} {day}")));
+
+    let Some(dir) = template.parent() else {
+        anyhow::bail!("置き場所が分かりません: {}", template.display())
+    };
+    let name = format!("{}.md", file_stem(&format!("{title} {day}")));
+    let at = dir.join(&name);
+    // Already carried out — by another device, or by this one before `last`
+    // was written. Doing it again would put two of the same day in the list.
+    if at.exists() {
+        return Ok(at);
+    }
+    std::fs::write(&at, copy)?;
+    Ok(at)
+}
+
+// ---- Reminders and routines ----------------------------------------------
+
+/// How often a routine comes round.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Every {
+    Daily,
+    /// 0 = Monday, as `chrono::Weekday::num_days_from_monday` counts.
+    Weekly(u32),
+    /// Day of the month. A 31 in a short month lands on the last day rather
+    /// than being skipped — a monthly routine that silently misses February
+    /// is worse than one that is a day early.
+    Monthly(u32),
+}
+
+/// When a note wants to be brought up.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Remind {
+    /// `remind: 2026-09-10 09:00` — once.
+    pub once: Option<chrono::NaiveDateTime>,
+    /// `repeat: weekly wed 09:00` — again and again.
+    pub every: Option<(Every, u32, u32)>,
+    /// `last: 2026-09-03` — the last day this routine was carried out. Kept
+    /// in the note because that is where everything else about the note is,
+    /// and because a phone that is off for a week must be able to work out
+    /// what it missed.
+    pub last: Option<chrono::NaiveDate>,
+}
+
+/// Read the reminder out of a note's front matter.
+///
+/// Written by hand rather than by a date library's parser: the three shapes
+/// below are what a person types, and a parser that also accepts eleven other
+/// shapes accepts eleven ways to be surprised.
+///
+/// ```text
+/// remind: 2026-09-10 09:00
+/// repeat: daily 07:30
+/// repeat: weekly wed 09:00
+/// repeat: monthly 1 09:00
+/// ```
+pub fn remind(text: &str) -> Remind {
+    let lines: Vec<String> = text.lines().map(|l| l.to_string()).collect();
+    let f = front(&lines);
+    let mut out = Remind::default();
+
+    if let Some(v) = f.fields.get("remind") {
+        out.once = when(v);
+    }
+    if let Some(v) = f.fields.get("last") {
+        out.last = day(v.trim());
+    }
+    if let Some(v) = f.fields.get("repeat") {
+        let mut it = v.split_whitespace();
+        let kind = it.next().unwrap_or("").to_ascii_lowercase();
+        match kind.as_str() {
+            "daily" => {
+                if let Some((h, m)) = clock(it.next().unwrap_or("")) {
+                    out.every = Some((Every::Daily, h, m));
+                }
+            }
+            "weekly" => {
+                let d = weekday(it.next().unwrap_or(""));
+                if let (Some(d), Some((h, m))) = (d, clock(it.next().unwrap_or(""))) {
+                    out.every = Some((Every::Weekly(d), h, m));
+                }
+            }
+            "monthly" => {
+                let d: Option<u32> = it.next().and_then(|s| s.parse().ok());
+                if let (Some(d), Some((h, m))) = (d, clock(it.next().unwrap_or(""))) {
+                    if (1..=31).contains(&d) {
+                        out.every = Some((Every::Monthly(d), h, m));
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+/// `2026-09-10 09:00` or `2026-09-10T09:00`.
+fn when(s: &str) -> Option<chrono::NaiveDateTime> {
+    let s = s.trim();
+    let (d, t) = s.split_once(['T', ' '])?;
+    let d = day(d)?;
+    let (h, m) = clock(t)?;
+    d.and_hms_opt(h, m, 0)
+}
+
+fn day(s: &str) -> Option<chrono::NaiveDate> {
+    let mut it = s.trim().split('-');
+    let y: i32 = it.next()?.parse().ok()?;
+    let m: u32 = it.next()?.parse().ok()?;
+    let d: u32 = it.next()?.parse().ok()?;
+    chrono::NaiveDate::from_ymd_opt(y, m, d)
+}
+
+fn clock(s: &str) -> Option<(u32, u32)> {
+    let (h, m) = s.trim().split_once(':')?;
+    let h: u32 = h.parse().ok()?;
+    let m: u32 = m.parse().ok()?;
+    (h < 24 && m < 60).then_some((h, m))
+}
+
+/// `mon`…`sun`, and the Japanese single characters people actually type.
+fn weekday(s: &str) -> Option<u32> {
+    let s = s.trim().to_ascii_lowercase();
+    let names = [
+        ("mon", "月"), ("tue", "火"), ("wed", "水"), ("thu", "木"),
+        ("fri", "金"), ("sat", "土"), ("sun", "日"),
+    ];
+    names.iter().position(|(en, ja)| s.starts_with(en) || s == *ja).map(|i| i as u32)
+}
+
+/// The days a routine came due between `last` and `today`, inclusive of
+/// today.
+///
+/// **Catching up matters.** A phone that was off for a week, or an app that
+/// was not opened, must be able to say what it missed — otherwise a weekly
+/// routine quietly becomes "whenever you happen to open cian".
+///
+/// Capped, because a note whose `last` is two years old should produce a
+/// handful of copies and not seven hundred.
+pub fn due_since(
+    every: Every,
+    last: Option<chrono::NaiveDate>,
+    today: chrono::NaiveDate,
+) -> Vec<chrono::NaiveDate> {
+    use chrono::Datelike;
+    let from = match last {
+        // Never carried out: today counts if today is a day it falls on.
+        None => today,
+        Some(l) => l.succ_opt().unwrap_or(today),
+    };
+    let mut out = Vec::new();
+    let mut d = from;
+    while d <= today && out.len() < 32 {
+        let hit = match every {
+            Every::Daily => true,
+            Every::Weekly(w) => d.weekday().num_days_from_monday() == w,
+            Every::Monthly(day) => {
+                let last_of_month = last_day(d.year(), d.month());
+                d.day() == day.min(last_of_month)
+            }
+        };
+        if hit {
+            out.push(d);
+        }
+        let Some(next) = d.succ_opt() else { break };
+        d = next;
+    }
+    out
+}
+
+fn last_day(year: i32, month: u32) -> u32 {
+    let (y, m) = if month == 12 { (year + 1, 1) } else { (year, month + 1) };
+    chrono::NaiveDate::from_ymd_opt(y, m, 1)
+        .and_then(|d| d.pred_opt())
+        .map(|d| chrono::Datelike::day(&d))
+        .unwrap_or(28)
 }

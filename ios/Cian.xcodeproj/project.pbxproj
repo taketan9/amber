@@ -59,6 +59,7 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = 1A000000000000000000000D /* Build configuration list for PBXNativeTarget "Cian" */;
 			buildPhases = (
+				1A0000000000000000000031 /* Engine freshness */,
 				1A0000000000000000000005 /* Sources */,
 				1A0000000000000000000006 /* Frameworks */,
 				1A0000000000000000000007 /* Resources */,
@@ -120,6 +121,24 @@
 		};
 /* End PBXResourcesBuildPhase section */
 
+/* Begin PBXShellScriptBuildPhase section */
+		1A0000000000000000000031 /* Engine freshness */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+			);
+			name = "Engine freshness";
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "\"$SRCROOT/../scripts/ios-fresh.sh\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
+
 /* Begin PBXSourcesBuildPhase section */
 		1A0000000000000000000005 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
@@ -163,6 +182,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGNING_ALLOWED = YES;
 				"CODE_SIGNING_ALLOWED[sdk=iphonesimulator*]" = NO;
 				CODE_SIGN_STYLE = Automatic;
@@ -190,6 +210,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGNING_ALLOWED = YES;
 				"CODE_SIGNING_ALLOWED[sdk=iphonesimulator*]" = NO;
 				CODE_SIGN_STYLE = Automatic;

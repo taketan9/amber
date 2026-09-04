@@ -19,6 +19,8 @@ struct Where: View {
     let choose: () -> Void
     let bringIn: () -> Void
     @Environment(\.dismiss) private var dismiss
+    @State private var zip: URL?
+    @State private var trouble: String?
 
     var body: some View {
         NavigationStack {
@@ -70,15 +72,47 @@ struct Where: View {
                     } label: {
                         Label("インポート…", systemImage: "square.and.arrow.down")
                     }
-                    ShareLink(item: store.rootURL ?? URL(fileURLWithPath: "/")) {
-                        Label("すべてバックアップ…", systemImage: "square.and.arrow.up")
+                    // The scope is a choice because backing up is
+                    // something people do *before* something — before a
+                    // reinstall, before handing a folder to somebody, before
+                    // tidying. Each of those wants a different amount.
+                    Menu {
+                        Button("すべて") { make("all", "") }
+                        if !store.allBooks.isEmpty {
+                            Menu("フォルダ") {
+                                ForEach(store.allBooks, id: \.self) { b in
+                                    Button(b) { make("book", b) }
+                                }
+                            }
+                        }
+                        if !store.allTags.isEmpty {
+                            Menu("タグ") {
+                                ForEach(store.allTags, id: \.self) { t in
+                                    Button("#\(t)") { make("tag", t) }
+                                }
+                            }
+                        }
+                    } label: {
+                        Label("バックアップ…", systemImage: "square.and.arrow.up")
                     }
-                    .disabled(store.rootURL == nil)
                 } header: {
                     Text("バックアップとインポート")
                 } footer: {
                     Text("インポートした .md はこのフォルダにコピーされます。元のファイルはそのまま。同じ名前があるときは番号を付けて、いまあるノートは上書きしません。")
                 }
+            }
+            // The zip exists before the share sheet opens, so what is being
+            // handed over is a file that is already there — not a promise.
+            .sheet(item: $zip) { at in
+                ActivityView(item: at)
+            }
+            .alert(
+                "作れませんでした",
+                isPresented: Binding(get: { trouble != nil }, set: { if !$0 { trouble = nil } })
+            ) {
+                Button("閉じる") {}
+            } message: {
+                Text(trouble ?? "")
             }
             .navigationTitle("ノートの置き場所")
             .navigationBarTitleDisplayMode(.inline)
@@ -87,4 +121,25 @@ struct Where: View {
             }
         }
     }
+
+    private func make(_ scope: String, _ what: String) {
+        do { zip = try store.backup(scope: scope, what: what) }
+        catch { trouble = error.localizedDescription }
+    }
+}
+
+extension URL: @retroactive Identifiable {
+    public var id: String { absoluteString }
+}
+
+/// The system's own share sheet, for a file that already exists.
+///
+/// `ShareLink` wants its item when the view is built; a backup is made when
+/// the button is pressed, which is a different moment.
+struct ActivityView: UIViewControllerRepresentable {
+    let item: URL
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: [item], applicationActivities: nil)
+    }
+    func updateUIViewController(_ vc: UIActivityViewController, context: Context) {}
 }

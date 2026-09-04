@@ -18,6 +18,8 @@ crate-type = ["staticlib", "rlib"]
 cian-core = { path = "../cian-core", default-features = false }
 anyhow = { workspace = true }
 serde_json = { workspace = true }
+# Only for the two date fields the reminder methods hand across.
+chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
 
 [dev-dependencies]
 tempfile = "3.27.0"

@@ -44,9 +44,16 @@ struct Reading: View {
     private func draw(_ b: Block) -> some View {
         switch b.kind {
         case "heading":
-            inline(b.text)
-                .font(heading(b.level))
-                .padding(.top, b.level <= 2 ? 8 : 2)
+            VStack(alignment: .leading, spacing: 4) {
+                inline(b.text)
+                    .font(heading(b.level))
+                if b.level <= 2 {
+                    Rectangle()
+                        .frame(width: 44, height: 2)
+                        .foregroundStyle(.tint)
+                }
+            }
+            .padding(.top, b.level <= 2 ? 8 : 2)
         case "bullet":
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text("•").foregroundStyle(.secondary)
@@ -72,7 +79,7 @@ struct Reading: View {
             }
             .padding(10)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+            .background(Color.accentColor.opacity(0.10), in: RoundedRectangle(cornerRadius: 8))
         case "image":
             picture(b)
         case "rule":

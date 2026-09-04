@@ -99,7 +99,14 @@ struct ContentView: View {
                 catch { store.trouble = error.localizedDescription }
             }
         }
-        .task { store.restore() }
+        .task {
+            store.restore()
+            // What the routines owed while the phone was doing something
+            // else. Asked for once, on the way in — see `Bell` for why this
+            // is the moment and not nine on a Wednesday.
+            _ = await Bell.ask()
+            store.catchUp()
+        }
         // One `.fileImporter` per view: two on the same one is one importer,
         // and the loser's button does nothing at all.
         .fileImporter(
@@ -173,7 +180,7 @@ struct ContentView: View {
                                     // apart. Quieter than the tags, which are a
                                     // thing you chose rather than a place.
                                     Label(note.book, systemImage: "folder")
-                                        .font(.caption2).foregroundStyle(.secondary)
+                                        .font(.caption2).foregroundStyle(.tint.opacity(0.8))
                                 }
                                 if !note.tags.isEmpty {
                                     Text(note.tags.map { "#\($0)" }.joined(separator: " "))
@@ -285,7 +292,7 @@ struct ContentView: View {
                 if let up = store.up {
                     Button { store.at = up } label: {
                         Label("..", systemImage: "arrow.up.left")
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(.tint)
                     }
                     .buttonStyle(.plain)
                     .dropDestination(for: String.self) { paths, _ in
@@ -298,9 +305,13 @@ struct ContentView: View {
                         store.at = b.path
                     } label: {
                         HStack {
-                            Label(b.name, systemImage: "folder")
+                            Label {
+                                Text(b.name)
+                            } icon: {
+                                Image(systemName: "folder.fill").foregroundStyle(.tint)
+                            }
                             Spacer()
-                            Text("\(b.count)").foregroundStyle(.secondary)
+                            Text("\(b.count)").foregroundStyle(.secondary).monospacedDigit()
                             Image(systemName: "chevron.right")
                                 .font(.caption).foregroundStyle(.tertiary)
                         }
@@ -320,8 +331,14 @@ struct ContentView: View {
             // no reason you can see.
             let stuck = store.pinnedHere(needle)
             if !stuck.isEmpty {
-                Section("上に固定") {
+                Section {
                     ForEach(stuck) { row($0) }
+                } header: {
+                    Label {
+                        Text("上に固定")
+                    } icon: {
+                        Image(systemName: "pin.fill").foregroundStyle(.orange)
+                    }
                 }
             }
             ForEach(store.matching(needle)) { row($0) }
@@ -355,6 +372,7 @@ struct NoteView: View {
     @State private var picked: PhotosPickerItem?
     @State private var busy = false
     @State private var tagging = false
+    @State private var ringing = false
     @State private var tags: [String] = []
     @FocusState private var writing: Bool
 
@@ -392,6 +410,12 @@ struct NoteView: View {
                     .accessibilityLabel("タグ")
             }
             ToolbarItem(placement: .topBarTrailing) {
+                Button { ringing = true } label: {
+                    Image(systemName: reminded ? "bell.fill" : "bell")
+                }
+                .accessibilityLabel("通知")
+            }
+            ToolbarItem(placement: .topBarTrailing) {
                 PhotosPicker(selection: $picked, matching: .images) {
                     Image(systemName: "photo")
                 }
@@ -417,6 +441,9 @@ struct NoteView: View {
         .onChange(of: picked) { _, item in if let item { take(item) } }
         .sheet(isPresented: $tagging, onDismiss: applyTags) {
             Tagging(tags: $tags, known: store.allTags)
+        }
+        .sheet(isPresented: $ringing) {
+            Ringing(note: note, text: $tab.text, store: store)
         }
         .alert(
             "あちらでも書き換えられています",
@@ -487,6 +514,11 @@ struct NoteView: View {
     private func block(_ s: String) {
         if !tab.text.isEmpty && !tab.text.hasSuffix("\n") { tab.text += "\n" }
         tab.text += s
+    }
+
+    /// Whether this note has a reminder on it, for the bell to say so.
+    private var reminded: Bool {
+        (try? store.reminder(of: tab.text)).map { !$0.once.isEmpty || $0.repeats } ?? false
     }
 
     private var folder: URL {
