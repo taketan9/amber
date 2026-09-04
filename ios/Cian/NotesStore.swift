@@ -432,6 +432,16 @@ final class NotesStore: ObservableObject {
         return out["text"] as? String ?? text
     }
 
+    /// A piece of text wrapped in a colour, written the way cian writes it.
+    ///
+    /// Through the engine rather than a format string here: the notation is
+    /// one decision, and two places that write it are two notations one edit
+    /// apart.
+    func painted(_ text: String, _ color: String) throws -> String {
+        let out = try Cian.call("paint", ["text": text, "color": color])
+        return out["text"] as? String ?? text
+    }
+
     /// The note with a different set of tags on it.
     ///
     /// Comes back as text for the caller to save, so this goes through the

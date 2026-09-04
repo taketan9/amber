@@ -27,6 +27,12 @@ pub enum Inline {
         text: String,
         url: String,
     },
+    /// `<span style="color:#rrggbb">…</span>` — the one piece of HTML cian
+    /// reads, because Markdown has no colour and this is the notation the
+    /// most other tools already understand. **Only a validated hex colour
+    /// ever gets through**, so the promise made at `html` — that everything
+    /// from the file is escaped — still holds.
+    Colored { text: String, color: String },
 }
 
 impl Inline {
@@ -40,6 +46,7 @@ impl Inline {
             | Inline::Italic(t)
             | Inline::Strike(t) => t,
             Inline::Link { text, .. } => text,
+            Inline::Colored { text, .. } => text,
         }
     }
 }
@@ -73,6 +80,18 @@ pub fn inline(text: &str) -> Vec<Inline> {
 
     while i < chars.len() {
         let c = chars[i];
+
+        // A colour span. Recognised by `note::spans`, so the window and the
+        // phone cannot end up with two opinions about what a note says.
+        if c == '<' {
+            let rest: String = chars[i..].iter().collect();
+            if let Some((inner, color, took)) = crate::note::first_color(&rest) {
+                flush(&mut out, &mut buf);
+                out.push(Inline::Colored { text: inner, color });
+                i += took;
+                continue;
+            }
+        }
 
         // Inline code first: everything inside a backtick pair is literal, so
         // a `*` in there is an asterisk and not the start of emphasis.
@@ -353,6 +372,15 @@ fn inline_html(text: &str) -> String {
                 out.push_str(&esc(&t));
                 out.push_str("</del>");
             }
+            // The colour was validated as six hex digits before it got
+            // here, so this is the one place a style attribute is written
+            // and it cannot carry anything else.
+            Inline::Colored { text, color } => {
+                out.push_str(&format!(
+                    "<span style=\"color:{color}\">{}</span>",
+                    esc(&text)
+                ));
+            }
             Inline::Link { text, url } => match safe_url(&url) {
                 Some(href) => {
                     out.push_str(&format!("<a href=\"{href}\">{}</a>", esc(&text)));
@@ -565,6 +593,19 @@ pub fn to_html(lines: &[String]) -> String {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn a_colour_survives_the_escaping_and_nothing_else_does() {
+        let out = to_html(&lines("ふつうと<span style=\"color:#0E93A8\">シアン</span>。"));
+        assert!(out.contains("<span style=\"color:#0e93a8\">シアン</span>"), "{out}");
+        // 他の HTML は、これまで通り字にする。
+        let out = to_html(&lines("<span onclick=\"x\">あ</span>"));
+        assert!(out.contains("&lt;span"), "{out}");
+        assert!(!out.contains("onclick=\"x\""), "{out}");
+        // 色でない span も字のまま。
+        let out = to_html(&lines("<span class=\"x\">あ</span>"));
+        assert!(out.contains("&lt;span"), "{out}");
+    }
     use super::*;
 
     fn lines(s: &str) -> Vec<String> {

@@ -271,21 +271,37 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
                 cian_core::grepedit::read_text(&path)?.lines.join("\n")
             };
             use cian_core::note::Block;
+            // The coloured pieces of a line, worked out here so the window
+            // and the phone cannot disagree about what a note says.
+            fn runs(text: &str) -> serde_json::Value {
+                serde_json::Value::Array(
+                    cian_core::note::spans(text)
+                        .into_iter()
+                        .map(|s| serde_json::json!({ "text": s.text, "color": s.color }))
+                        .collect(),
+                )
+            }
             let out: Vec<serde_json::Value> = cian_core::note::blocks(&text)
                 .into_iter()
                 .map(|b| match b {
-                    Block::Heading { level, text } => {
-                        serde_json::json!({ "kind": "heading", "level": level, "text": text })
-                    }
-                    Block::Paragraph(text) => serde_json::json!({ "kind": "paragraph", "text": text }),
-                    Block::Bullet(text) => serde_json::json!({ "kind": "bullet", "text": text }),
-                    Block::Check { done, text, line } => serde_json::json!({
-                        "kind": "check", "done": done, "text": text, "line": line,
+                    Block::Heading { level, text } => serde_json::json!({
+                        "kind": "heading", "level": level, "runs": runs(&text), "text": text,
                     }),
-                    Block::Numbered { n, text } => {
-                        serde_json::json!({ "kind": "numbered", "n": n, "text": text })
-                    }
-                    Block::Quote(text) => serde_json::json!({ "kind": "quote", "text": text }),
+                    Block::Paragraph(text) => serde_json::json!({
+                        "kind": "paragraph", "runs": runs(&text), "text": text,
+                    }),
+                    Block::Bullet(text) => serde_json::json!({
+                        "kind": "bullet", "runs": runs(&text), "text": text,
+                    }),
+                    Block::Check { done, text, line } => serde_json::json!({
+                        "kind": "check", "done": done, "runs": runs(&text), "text": text, "line": line,
+                    }),
+                    Block::Numbered { n, text } => serde_json::json!({
+                        "kind": "numbered", "n": n, "runs": runs(&text), "text": text,
+                    }),
+                    Block::Quote(text) => serde_json::json!({
+                        "kind": "quote", "runs": runs(&text), "text": text,
+                    }),
                     Block::Code { lang, text } => {
                         serde_json::json!({ "kind": "code", "lang": lang, "text": text })
                     }
@@ -339,6 +355,15 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
             let folder = arg(p, "folder");
             cian_core::notebook::set_color(&root, &folder, p["color"].as_str())?;
             Ok(serde_json::json!({ "colors": cian_core::notebook::read(&root).colors }))
+        }
+
+        // Wrap a piece of text in a colour, the way cian writes it. Here
+        // and not in the front ends: the notation is one decision, and two
+        // places that write it are two notations one edit apart.
+        "paint" => {
+            Ok(serde_json::json!({
+                "text": cian_core::note::paint(&arg(p, "text"), &arg(p, "color")),
+            }))
         }
 
         // Tick or untick one task, by the line it is on.
@@ -904,6 +929,21 @@ mod tests {
         )
         .unwrap();
         assert_eq!(r2["name"], "段取り-2.md");
+    }
+
+    #[test]
+    fn a_coloured_word_comes_back_as_pieces_the_drawer_can_use() {
+        let text = "ふつうと<span style=\"color:#0E93A8\">シアン</span>。\n";
+        let bs = call("blocks", &serde_json::json!({ "text": text })).unwrap();
+        let runs = bs["blocks"][0]["runs"].as_array().unwrap();
+        assert_eq!(runs.len(), 3);
+        assert_eq!(runs[0]["color"], serde_json::Value::Null);
+        assert_eq!(runs[1]["text"], "シアン");
+        assert_eq!(runs[1]["color"], "#0e93a8");
+
+        // 書く側も同じ1か所から。
+        let out = call("paint", &serde_json::json!({ "text": "ここ", "color": "#d9822b" })).unwrap();
+        assert_eq!(out["text"], "<span style=\"color:#d9822b\">ここ</span>");
     }
 
     #[test]

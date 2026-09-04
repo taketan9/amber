@@ -463,7 +463,9 @@ struct NoteView: View {
     @State private var tagging = false
     @State private var ringing = false
     @State private var tags: [String] = []
-    @FocusState private var writing: Bool
+    /// Where the cursor is, so the writing tools work where you are looking.
+    @State private var pick = NSRange(location: 0, length: 0)
+    @State private var writing = false
 
     private var note: Note { tab.note }
 
@@ -473,10 +475,7 @@ struct NoteView: View {
                 ScrollView { Reading(blocks: tab.blocks, base: folder, tick: tick) }
             } else {
                 VStack(spacing: 0) {
-                    TextEditor(text: $tab.text)
-                        .font(.body.monospaced())
-                        .focused($writing)
-                        .padding(.horizontal, 8)
+                    Editor(text: $tab.text, pick: $pick, editing: $writing)
                     // Only while the keyboard is up, which is the only time
                     // it is *above the keyboard* rather than sitting at the
                     // bottom of a page nobody is typing into.
@@ -577,10 +576,37 @@ struct NoteView: View {
                         mark("取り消し線", "strikethrough") { wrap("~~") }
                         mark("コード", "chevron.left.forwardslash.chevron.right") { wrap("`") }
                         Divider().frame(height: 20)
-                        mark("リンク", "link") { block("[](https://)") }
-                        mark("表", "tablecells") { block("\n| \u{3000} | \u{3000} |\n| --- | --- |\n| \u{3000} | \u{3000} |\n") }
-                        mark("コード枠", "curlybraces") { block("\n```\n\n```\n") }
-                        mark("水平線", "minus") { block("\n---\n") }
+                        // Inside the brackets, which is where the words go.
+                        mark("リンク", "link") { block("[](https://)\n", caret: 1) }
+                        mark("表", "tablecells") { block("| \u{3000} | \u{3000} |\n| --- | --- |\n| \u{3000} | \u{3000} |\n") }
+                        // Between the fences, not after them.
+                        mark("コード枠", "curlybraces") { block("```\n\n```\n", caret: 4) }
+                        mark("水平線", "minus") { block("---\n") }
+                        Divider().frame(height: 20)
+                        // Markdown has no colour; this is the notation the
+                        // most other tools already read, and the one place
+                        // that writes it is `note::paint`. The palette is
+                        // the folder palette on purpose — a note whose
+                        // meaning is only in its colours is a note that
+                        // cannot be searched, read aloud, or seen by
+                        // somebody who does not see colour.
+                        Menu {
+                            ForEach(Colouring.palette, id: \.0) { hex, name in
+                                Button {
+                                    paint(hex)
+                                } label: {
+                                    Label {
+                                        Text(name)
+                                    } icon: {
+                                        Image(uiImage: Colouring.dot(hex))
+                                    }
+                                }
+                            }
+                        } label: {
+                            Image(systemName: "paintpalette")
+                        }
+                        .buttonStyle(.bordered)
+                        .accessibilityLabel("文字色")
                         Divider().frame(height: 20)
                         mark("引用", "text.quote") { line("> ") }
                         mark("番号つき", "list.number") { line("1. ") }
@@ -621,41 +647,40 @@ struct NoteView: View {
             .accessibilityLabel(name)
     }
 
-    /// How many `#` the last line already carries.
+    /// How many `#` the cursor's line already carries.
     private var heads: Int {
-        let last = tab.text.components(separatedBy: "\n").last ?? ""
-        return last.prefix(while: { $0 == "#" }).count
+        let r = Marks.lineRange(tab.text, pick)
+        let row = (tab.text as NSString).substring(with: r)
+        return row.prefix(while: { $0 == "#" }).count
     }
 
-    /// One `#` deeper, and back to none after three.
-    private func deepen() {
-        var lines = tab.text.components(separatedBy: "\n")
-        let at = max(0, lines.count - 1)
-        var body = lines[at]
-        let n = body.prefix(while: { $0 == "#" }).count
-        body.removeFirst(n)
-        if body.hasPrefix(" ") { body.removeFirst() }
-        let next = (n + 1) % 4
-        lines[at] = next == 0 ? body : String(repeating: "#", count: next) + " " + body
-        tab.text = lines.joined(separator: "\n")
+    private func deepen() { put(Marks.deepen(tab.text, pick)) }
+    private func line(_ prefix: String) { put(Marks.line(tab.text, pick, prefix)) }
+    private func wrap(_ mark: String) { put(Marks.wrap(tab.text, pick, mark)) }
+    private func block(_ body: String, caret: Int? = nil) {
+        put(Marks.block(tab.text, pick, body, caret: caret))
     }
 
-    private func line(_ prefix: String) {
-        var lines = tab.text.components(separatedBy: "\n")
-        let at = max(0, lines.count - 1)
-        if lines[at].hasPrefix(prefix) {
-            lines[at].removeFirst(prefix.count)
-        } else {
-            lines[at] = prefix + lines[at]
-        }
-        tab.text = lines.joined(separator: "\n")
+    /// Wrap what is selected in a colour.
+    ///
+    /// With nothing selected there is nothing to paint, so this opens an
+    /// empty pair and leaves the cursor inside it — the same thing 太字 does,
+    /// for the same reason.
+    private func paint(_ hex: String) {
+        let s = tab.text as NSString
+        let inner = pick.length > 0 ? s.substring(with: pick) : ""
+        guard let out = try? store.painted(inner, hex) else { return }
+        let whole = s.replacingCharacters(in: pick, with: out)
+        // Between the tags when there was nothing to wrap.
+        let inside = (out as NSString).range(of: inner.isEmpty ? ">" : inner)
+        let at = pick.location + inside.location + (inner.isEmpty ? 1 : 0)
+        tab.text = whole
+        pick = NSRange(location: at, length: (inner as NSString).length)
     }
 
-    private func wrap(_ mark: String) { tab.text += "\(mark)\(mark)" }
-
-    private func block(_ s: String) {
-        if !tab.text.isEmpty && !tab.text.hasSuffix("\n") { tab.text += "\n" }
-        tab.text += s
+    private func put(_ out: (String, NSRange)) {
+        tab.text = out.0
+        pick = out.1
     }
 
     /// Whether this note has a reminder on it, for the bell to say so.
@@ -697,8 +722,9 @@ struct NoteView: View {
                     return
                 }
                 let link = try store.attach(data, ext: Self.kind(of: data), to: note)
-                if !tab.text.isEmpty && !tab.text.hasSuffix("\n") { tab.text += "\n" }
-                tab.text += "![](\(link))\n"
+                // Where you were, not at the end: a picture belongs in the
+                // paragraph you were writing when you reached for it.
+                put(Marks.block(tab.text, pick, "![](\(link))\n"))
             } catch {
                 trouble = error.localizedDescription
             }

@@ -210,6 +210,24 @@ struct Colouring: View {
     }
 }
 
+extension Colouring {
+    /// A dot of one colour, for a menu.
+    ///
+    /// **`.alwaysOriginal` or it comes out cyan.** A menu tints its images
+    /// with the accent like any other symbol, so a palette drawn with
+    /// `systemImage:` is eleven identical cyan dots — which is exactly what
+    /// it was, until somebody looked.
+    static func dot(_ hex: String) -> UIImage {
+        let side = 16.0
+        let r = UIGraphicsImageRenderer(size: CGSize(width: side, height: side))
+        let img = r.image { ctx in
+            (UIColor(Color(hex: hex) ?? .gray)).setFill()
+            ctx.cgContext.fillEllipse(in: CGRect(x: 0, y: 0, width: side, height: side))
+        }
+        return img.withRenderingMode(.alwaysOriginal)
+    }
+}
+
 extension Color {
     /// `#RRGGBB` as written in the settings file. `nil` for anything else —
     /// a colour somebody typed by hand into the file should not take the

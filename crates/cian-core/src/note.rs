@@ -252,6 +252,11 @@ fn excerpt(body: &[String]) -> String {
         // the note is about, and a note that opens with a screenshot showed
         // nothing else at all.
         let t = strip_images(t);
+        // A colour is not a sentence either. `<span style="color:#D9822B">`
+        // is thirty characters of notation in the one line meant to remind
+        // you what the note is about — and it is the line the search runs
+        // against, so a coloured word would stop being findable.
+        let t = plain(&t);
         let t = t.trim();
         if t.is_empty() {
             continue;
@@ -652,6 +657,119 @@ pub fn blocks(text: &str) -> Vec<Block> {
     out
 }
 
+/// A piece of a line, and the colour it was written in.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Span {
+    pub text: String,
+    /// `#rrggbb`, lowercased, or `None` for the colour the reader is using.
+    pub color: Option<String>,
+}
+
+/// Split a line into coloured and uncoloured pieces.
+///
+/// **Markdown has no colour**, so this reads the one notation the most tools
+/// already understand: `<span style="color:#rrggbb">…</span>`. VS Code's
+/// preview, Obsidian, Typora and pandoc all render it; GitHub strips the
+/// `style` attribute and shows the words plainly. That last part is the
+/// reason for choosing it over the `$\color{red}{...}$` trick, which renders
+/// on GitHub and leaves an unreadable pile of symbols everywhere else — a
+/// note has to degrade into *the sentence*, not into notation.
+///
+/// **Here rather than in either front end.** Two parsers for one notation is
+/// two answers, and the window and the phone would start disagreeing about
+/// what a note says the first time either was touched.
+///
+/// Anything that is not a well-formed colour span is left exactly as typed,
+/// including a `<span>` with some other style on it: cian is not an HTML
+/// renderer and should not pretend to be one.
+pub fn spans(line: &str) -> Vec<Span> {
+    let mut out: Vec<Span> = Vec::new();
+    let mut rest = line;
+
+    while let Some(at) = rest.find("<span") {
+        let (before, from) = rest.split_at(at);
+        let Some(gt) = from.find('>') else { break };
+        let open = &from[..=gt];
+        let Some(color) = color_of(open) else {
+            // Not ours. Keep the tag as text and carry on past it, or a
+            // `<span class=…>` would swallow the rest of the line.
+            push(&mut out, &rest[..at + gt + 1], None);
+            rest = &from[gt + 1..];
+            continue;
+        };
+        let after = &from[gt + 1..];
+        let Some(end) = after.find("</span>") else { break };
+        push(&mut out, before, None);
+        push(&mut out, &after[..end], Some(color));
+        rest = &after[end + "</span>".len()..];
+    }
+    push(&mut out, rest, None);
+    out
+}
+
+/// A colour span at the very start of `s`: its text, its colour, and how
+/// many bytes it took.
+///
+/// For a scanner that is walking a line character by character and needs to
+/// know whether *this* is the start of one. The recognising is the same as
+/// [`spans`] — one notation, one place that knows it.
+pub fn first_color(s: &str) -> Option<(String, String, usize)> {
+    let gt = s.find('>')?;
+    if !s.starts_with("<span") {
+        return None;
+    }
+    let color = color_of(&s[..=gt])?;
+    let after = &s[gt + 1..];
+    let end = after.find("</span>")?;
+    Some((after[..end].to_string(), color, gt + 1 + end + "</span>".len()))
+}
+
+fn push(out: &mut Vec<Span>, text: &str, color: Option<String>) {
+    if text.is_empty() {
+        return;
+    }
+    // Two runs of the same colour side by side are one run — the renderer
+    // should not have to care how the line was cut up.
+    if let Some(last) = out.last_mut() {
+        if last.color == color {
+            last.text.push_str(text);
+            return;
+        }
+    }
+    out.push(Span { text: text.to_string(), color });
+}
+
+/// `#rrggbb` out of `<span style="color:#0e93a8">`, if that is what this is.
+///
+/// Only hex, and only six digits: a name like `red` means a different colour
+/// in every renderer, and cian writing one would be writing something it
+/// cannot promise the Mac will draw the same.
+fn color_of(open: &str) -> Option<String> {
+    let lower = open.to_ascii_lowercase();
+    let at = lower.find("color:")?;
+    let rest = lower[at + "color:".len()..].trim_start();
+    let hex = rest.strip_prefix('#')?;
+    let digits: String = hex.chars().take(6).collect();
+    if digits.len() == 6 && digits.chars().all(|c| c.is_ascii_hexdigit()) {
+        Some(format!("#{digits}"))
+    } else {
+        None
+    }
+}
+
+/// The words, with the colour notation taken off.
+///
+/// For the places that want a sentence rather than a drawing: the second line
+/// of a row, and what a search matches against.
+pub fn plain(line: &str) -> String {
+    spans(line).into_iter().map(|s| s.text).collect()
+}
+
+/// Wrap a piece of text in a colour, the way cian writes it.
+pub fn paint(text: &str, color: &str) -> String {
+    format!("<span style=\"color:{color}\">{text}</span>")
+}
+
 /// Whether `[ ] x` / `[x] x` starts this bullet's text, and which.
 ///
 /// `[X]` counts too: a note typed on somebody else's machine is still a note.
@@ -927,6 +1045,42 @@ pub fn new_note(title: &str, today: &str) -> (String, String) {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn a_colour_is_a_span_and_everything_else_is_left_as_typed() {
+        let one = spans("ふつうの<span style=\"color:#0E93A8\">シアン</span>あと");
+        assert_eq!(one.len(), 3);
+        assert_eq!(one[0], Span { text: "ふつうの".into(), color: None });
+        assert_eq!(one[1], Span { text: "シアン".into(), color: Some("#0e93a8".into()) });
+        assert_eq!(one[2], Span { text: "あと".into(), color: None });
+
+        // 色の無い span は、cian のものではない。字として残す。
+        let asis = spans("<span class=\"x\">そのまま</span>");
+        assert_eq!(asis.iter().filter(|s| s.color.is_some()).count(), 0);
+        assert_eq!(asis.iter().map(|s| s.text.as_str()).collect::<String>(),
+                   "<span class=\"x\">そのまま</span>");
+
+        // 名前の色は読まない ── 描く側ごとに違う色になるので。
+        assert!(spans("<span style=\"color:red\">あか</span>")
+            .iter()
+            .all(|s| s.color.is_none()));
+
+        // 閉じていないものは、書いた通りに。
+        assert_eq!(spans("<span style=\"color:#123456\">とじ忘れ").len(), 1);
+
+        // 色の無い行は1つの塊。
+        assert_eq!(spans("ただの行"), vec![Span { text: "ただの行".into(), color: None }]);
+        assert!(spans("").is_empty());
+
+        // 一覧の二行目と検索は、字だけを見る ── 色を付けた語が
+        // 探せなくなるのが一番困る。
+        assert_eq!(plain("あ<span style=\"color:#0e93a8\">い</span>う"), "あいう");
+
+        // 書いたものが読める。
+        let painted = paint("ここ", "#d9822b");
+        let back = spans(&painted);
+        assert_eq!(back, vec![Span { text: "ここ".into(), color: Some("#d9822b".into()) }]);
+    }
 
     #[test]
     fn a_task_is_a_block_you_can_press_and_a_bullet_is_not() {

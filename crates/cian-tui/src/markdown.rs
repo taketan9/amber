@@ -627,6 +627,18 @@ fn inline(text: &str, base: Style, _width: usize) -> Vec<Span<'static>> {
     // dressing. Two front ends with two parsers would be two opinions about
     // what `*a_b*` means, which reads as carelessness in a program's own
     // README.
+    fn hex_rgb(hex: &str) -> Option<(u8, u8, u8)> {
+        let h = hex.strip_prefix('#')?;
+        if h.len() != 6 {
+            return None;
+        }
+        Some((
+            u8::from_str_radix(&h[0..2], 16).ok()?,
+            u8::from_str_radix(&h[2..4], 16).ok()?,
+            u8::from_str_radix(&h[4..6], 16).ok()?,
+        ))
+    }
+
     let mut spans: Vec<Span<'static>> = cian_core::markdown::inline(text)
         .into_iter()
         .map(|piece| match piece {
@@ -642,6 +654,15 @@ fn inline(text: &str, base: Style, _width: usize) -> Vec<Span<'static>> {
                 Span::styled(t, base.add_modifier(Modifier::CROSSED_OUT))
             }
             cian_core::markdown::Inline::Link { text, .. } => Span::styled(text, link_style),
+            // The terminal draws it in the colour that was written down.
+            // A terminal that cannot do 24-bit colour degrades on its own —
+            // crossterm falls back, and the words are readable either way.
+            cian_core::markdown::Inline::Colored { text, color } => {
+                match hex_rgb(&color) {
+                    Some((r, g, b)) => Span::styled(text, base.fg(Color::Rgb(r, g, b))),
+                    None => Span::styled(text, base),
+                }
+            }
         })
         .collect();
     if spans.is_empty() {
