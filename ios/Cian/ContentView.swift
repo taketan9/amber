@@ -59,8 +59,14 @@ struct ContentView: View {
                         .accessibilityLabel("新しいフォルダ")
                     }
                     ToolbarItem(placement: .topBarTrailing) {
-                        Button { naming = true } label: { Image(systemName: "square.and.pencil") }
-                            .accessibilityLabel("新しいノート")
+                        // The same `.badge.plus` as the folder beside it:
+                        // two buttons that both mean "a new one of these"
+                        // should be built the same way, or the pair reads as
+                        // two unrelated things that happen to sit together.
+                        Button { naming = true } label: {
+                            Image(systemName: "note.text.badge.plus")
+                        }
+                        .accessibilityLabel("新しいノート")
                     }
                     // Both narrowings in one menu: which notebook, and in what
                     // order. They are the two questions asked of a list that
