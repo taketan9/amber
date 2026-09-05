@@ -3296,7 +3296,7 @@ pub(crate) fn key_hints(app: &App) -> Vec<(&'static str, &'static str)> {
             return vec![
                 ("Ctrl+S", d("save", "保存")),
                 ("Shift+←→", d("select", "選択")),
-                ("Ctrl+C / V", d("copy / paste", "コピー / 貼付")),
+                ("Ctrl+C / V", d("copy / paste", "コピー / 貼り付け")),
                 ("Ctrl+F", d("search", "検索")),
                 ("Esc", d("close", "閉じる")),
                 // Not `T`: that is a character in this grammar and a vi motion
@@ -4735,7 +4735,7 @@ fn draw_ai_chat(f: &mut Frame, area: Rect, app: &mut App) {
         .title_bottom(tr(
             lang,
             " Enter=send  Shift+Enter=newline  Ctrl+V=paste  Ctrl+R=history  Ctrl+D=what it read  Esc=stop/close ",
-            " Enter=送信  Shift+Enter=改行  Ctrl+V=貼付  Ctrl+R=履歴  Ctrl+D=拾った断片  Esc=中断/閉じる ",
+            " Enter=送信  Shift+Enter=改行  Ctrl+V=貼り付け  Ctrl+R=履歴  Ctrl+D=拾った断片  Esc=中断/閉じる ",
         ));
     let inner = rect.inner(Margin { vertical: 1, horizontal: 2 });
     f.render_widget(block, rect);
@@ -8367,10 +8367,10 @@ fn draw_viewer(
                         after_find,
                         ed,
                         shape_hint,
-                        tr(lang, " p paste  :preview  ", " p 貼付  :preview  "))
+                        tr(lang, " p paste  :preview  ", " p 貼り付け  :preview  "))
                 } else {
                     format!("{}{}{}{}{}",
-                        tr(lang, " / f search  n/N  v/V select  y copy  p paste ", " / f 検索  n/N  v/V 選択  y コピー  p 貼付 "),
+                        tr(lang, " / f search  n/N  v/V select  y copy  p paste ", " / f 検索  n/N  v/V 選択  y コピー  p 貼り付け "),
                         after_find,
                         ed,
                         shape_hint,

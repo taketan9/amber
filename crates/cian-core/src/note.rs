@@ -498,7 +498,7 @@ pub fn attach(note: &std::path::Path, bytes: &[u8], ext: &str) -> anyhow::Result
         anyhow::bail!("画像が空です");
     }
     let Some(dir) = note.parent() else {
-        anyhow::bail!("そのノートの置き場所が分かりません")
+        anyhow::bail!("そのノートの保存場所が分かりません")
     };
     let ext = match ext.trim().trim_start_matches('.') {
         "" => "png".to_string(),
@@ -1846,7 +1846,7 @@ pub fn carry_out(
     copy = set_field(&copy, "title", Some(&format!("{title} {day}")));
 
     let Some(dir) = template.parent() else {
-        anyhow::bail!("置き場所が分かりません: {}", template.display())
+        anyhow::bail!("保存場所が分かりません: {}", template.display())
     };
     let name = format!("{}.md", file_stem(&format!("{title} {day}")));
     let at = dir.join(&name);

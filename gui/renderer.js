@@ -1769,7 +1769,7 @@ function extOf(row) {
 /// extension is already right there in the name.
 function kindOf(row) {
     if (row.parent) return '';
-    if (row.is_dir) return tr('Folder', 'フォルダー');
+    if (row.is_dir) return tr('Folder', 'ディレクトリ');
     const ext = extOf(row);
     if (!ext) return tr('File', 'ファイル');
     const known = {
@@ -2073,7 +2073,7 @@ function hintsNow() {
             // `メニュー — キー操作切替` as cian-tui names it here: from inside
             // notepad style `T` is a character, so this menu is the only way
             // back to the other grammar and the bar should say so.
-            return [['Ctrl+S', tr('save', '保存')], ['Shift+←→', tr('select', '選択')], ['Ctrl+C / V', tr('copy / paste', 'コピー / 貼付')],
+            return [['Ctrl+S', tr('save', '保存')], ['Shift+←→', tr('select', '選択')], ['Ctrl+C / V', tr('copy / paste', 'コピー / 貼り付け')],
                 ['Ctrl+F', tr('search', '検索')], ['Esc ×3', tr('close', '閉じる')], ['Shift+Enter', tr('menu — editor keys', 'メニュー — キー操作切替')]];
         }
         // `Shift+Enter` is on this row now. The menu is where the encoding,
@@ -2465,7 +2465,7 @@ function contextRows() {
         // Under the switch that leads to them, because that is the order they
         // are needed in: choose the view, then say where its notes are.
         v.push(group(tr('Notes ▸', 'ノート ▸'), () => [
-            { label: tr("Go to the notes", 'ノートの置き場所へ'), value: ':notes', run: () => { closeMenu(); cmdNotes(); } },
+            { label: tr("Go to the notes", 'ノートの保存場所へ'), value: ':notes', run: () => { closeMenu(); cmdNotes(); } },
             { label: tr("Choose the folder\u2026", '保存場所を選ぶ…'), value: '', run: () => { closeMenu(); cmdNotesRoot(); } },
             { label: tr("Import\u2026 (the other pane's .md)", 'インポート…（反対のペインの .md）'), value: '', run: () => { closeMenu(); cmdNotesImport(); } },
             { label: tr("Backup\u2026", 'バックアップ…'), value: ':backup', run: () => { closeMenu(); cmdBackup(); } },
@@ -2557,7 +2557,7 @@ function contextRows() {
         // copies scattered, which is a different menu wearing the same words.
         v.push({ label: tr("Copy", 'コピー'), value: 'Ctrl+C', run: () => hold('copy') });
         v.push({ label: tr("Copy path text", 'パスをコピー'), value: 'p', run: copyPaths });
-        v.push({ label: tr("Copy file(s) \u2014 paste into Finder/Explorer", 'ファイルをコピー — Finder/エクスプローラに貼付'), value: 'Shift+P', run: clipFiles });
+        v.push({ label: tr("Copy file(s) \u2014 paste into Finder/Explorer", 'ファイルをコピー — Finder/エクスプローラに貼り付け'), value: 'Shift+P', run: clipFiles });
         v.push({ label: tr("Cut", '切り取り'), value: 'Ctrl+X', run: () => hold('cut') });
         v.push({ label: tr("Paste", '貼り付け'), value: 'Ctrl+V', run: paste });
         v.push({ label: tr("Rename", 'リネーム'), value: 'r', run: rename });
@@ -2674,7 +2674,7 @@ function contextRows() {
         v.push(group(tr("View \u25b8", '表示 ▸'), () => [
             { label: tr("\u25a4 Details", '▤ 詳細一覧'), value: ':view details', run: () => { setView('details'); say(tr('listing: details', '一覧: 詳細一覧')); } },
             { label: tr("\u25c6 cian (notes)", '◆ cian（ノート）'), value: ':view cian', run: () => { setView('cian'); say(tr('listing: cian', '一覧: cian')); } },
-            { label: tr("\u25c6 Notes folder\u2026", '◆ ノートの置き場所へ…'), value: ':notes', run: cmdNotes },
+            { label: tr("\u25c6 Notes folder\u2026", '◆ ノートの保存場所へ…'), value: ':notes', run: cmdNotes },
             { label: tr("\u25c6 New note", '◆ 新しいノート'), value: ':newnote', run: cmdNewNote },
             { label: tr("\u25c6 Tags\u2026", '◆ タグで絞る…'), value: ':tag', run: cmdTag },
             { label: tr("\u25a5 Classic", '▥ クラシック'), value: ':view classic', run: () => { setView('classic'); say(tr('listing: classic', '一覧: クラシック')); } },
@@ -4659,7 +4659,7 @@ async function onEditorPaste(ev) {
     ev.stopPropagation();
     if (!viewer.path) {
         say(tr('save the note first — a picture needs a folder to live in',
-               '先に保存を。画像はノートの隣に置くので置き場所が要ります'), true);
+               '先に保存を。画像はノートの隣に置くので保存場所が要ります'), true);
         return;
     }
     if (!/\.(md|markdown|mdx)$/i.test(viewer.path)) {
@@ -5711,7 +5711,7 @@ function buildCommands() {
     { name: 'remote', alias: ['sftp'], about: tr("open a server in this pane (SFTP)", 'このペインでサーバを開く（SFTP）'), run: cmdSftpPicker },
 
     { name: 'ssh', about: tr("ssh to a host, in the shell panel (also Shift+S)", 'ホストへ ssh（シェルパネルで。Shift+S でも）'), run: cmdSshPicker },
-    { name: 'notes', about: tr("go to a notes folder (init.lua’s cian.notes)", 'ノートの置き場所へ（init.lua の cian.notes）'), run: cmdNotes },
+    { name: 'notes', about: tr("go to a notes folder (init.lua’s cian.notes)", 'ノートの保存場所へ（init.lua の cian.notes）'), run: cmdNotes },
     { name: 'newnote', about: tr("make a note here and open it", 'ここにノートを作って開く'), run: cmdNewNote },
     { name: 'tag', about: tr("narrow the listing to one tag", 'タグで一覧を絞る'), run: cmdTag },
     { name: 'star', about: tr("put this note on a favourite shelf (or take it off)", 'このノートをお気に入りの棚へ（外すのも）'), run: cmdStar },
@@ -6517,7 +6517,7 @@ async function cmdNotes() {
         chosenRoot = r.path;
         await ask('remember', { key: 'gui_notes', value: r.path });
         say(r.made
-            ? tr(`notes live in ${r.path} — change it in the menu`, `ノートの置き場所を作りました: ${r.path}（メニューで変えられます）`)
+            ? tr(`notes live in ${r.path} — change it in the menu`, `ノートの保存場所を作りました: ${r.path}（メニューで変えられます）`)
             : tr(`notes: ${r.path}`, `ノート: ${r.path}`));
         await goToNotes({ name: 'cian', path: r.path });
         return;
@@ -6543,7 +6543,7 @@ async function cmdNotesRoot() {
         say(tr('this build cannot open a folder chooser', 'この版ではフォルダを選べません'), true);
         return;
     }
-    const at = await window.cian.pickDir(tr('Where the notes live', 'ノートの置き場所'));
+    const at = await window.cian.pickDir(tr('Where the notes live', 'ノートの保存場所'));
     if (!at) return;
     const r = await ask('notesroot', { path: at });
     if (!r) return;

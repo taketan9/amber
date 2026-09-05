@@ -345,7 +345,7 @@ impl App {
                         tr(
                             self.lang,
                             "The change is in this session only. `:where` says which file it would go to",
-                            "変更はこのセッション限りです。保存先は `:where` で確認できます",
+                            "変更はこのセッション限りです。保存場所は `:where` で確認できます",
                         )
                         .to_string(),
                     ],

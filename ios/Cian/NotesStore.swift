@@ -615,7 +615,7 @@ final class NotesStore: ObservableObject {
 
     /// A zip of some or all of the notes, for handing to something else.
     func backup(scope: String, what: String) throws -> URL {
-        guard let root else { throw Cian.Failure.engine("置き場所がありません") }
+        guard let root else { throw Cian.Failure.engine("保存場所がありません") }
         let r = try Cian.call("backup", [
             "path": root.path, "scope": scope, "what": what,
         ])

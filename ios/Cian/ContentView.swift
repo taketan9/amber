@@ -327,7 +327,7 @@ struct ContentView: View {
                     }
                     // Every notebook, not just the ones beside this note —
                     // filing is often filing *away*.
-                    Menu("ノートブックへ移す") {
+                    Menu("フォルダへ移す") {
                         Button("デフォルト") { moveTo(note, nil) }
                         ForEach(store.allBooks, id: \.self) { b in
                             Button(b) { moveTo(note, b) }
@@ -378,13 +378,13 @@ struct ContentView: View {
 
     private var empty: some View {
         ContentUnavailableView {
-            Label("ノートの置き場所", systemImage: "folder.badge.questionmark")
+            Label("ノートの保存場所", systemImage: "folder.badge.questionmark")
         } description: {
             // Named rather than "choose a folder": the point is that it can be
             // the folder the Mac already has, wherever it is kept.
             Text("マークダウンのノートがあるフォルダを選びます。iCloud Drive・Google Drive・Dropbox のどれでも構いません。")
         } actions: {
-            Button("置き場所を見る") { picking = true }.buttonStyle(.borderedProminent)
+            Button("保存場所を見る") { picking = true }.buttonStyle(.borderedProminent)
         }
     }
 

@@ -27,7 +27,7 @@ struct Where: View {
     var body: some View {
         NavigationStack {
             List {
-                Section("ノートの置き場所") {
+                Section("ノートの保存場所") {
                     // The path, as the trail of names it is. "cian" alone
                     // answers "what is it called" when the question was
                     // "where is it" — and on a phone, where a folder can be

@@ -3149,7 +3149,7 @@ impl Session {
             // popup (`a A d r p`), and the window could only ever append.
             "shortcutedit" => {
                 let path = cian_lua::config_write_path("shortcuts.lua")
-                    .ok_or_else(|| anyhow::anyhow!("設定の置き場所が分かりません"))?;
+                    .ok_or_else(|| anyhow::anyhow!("設定の保存場所が分かりません"))?;
                 let mut nodes = if path.exists() {
                     cian_lua::shortcuts::load(&path).unwrap_or_default()
                 } else {
@@ -3263,7 +3263,7 @@ impl Session {
                     name
                 };
                 let path = cian_lua::config_write_path("shortcuts.lua")
-                    .ok_or_else(|| anyhow::anyhow!("設定の置き場所が分かりません"))?;
+                    .ok_or_else(|| anyhow::anyhow!("設定の保存場所が分かりません"))?;
                 let mut nodes = if path.exists() {
                     cian_lua::shortcuts::load(&path).unwrap_or_default()
                 } else {
@@ -4148,7 +4148,7 @@ impl Session {
             "saveas" => {
                 let to = std::path::PathBuf::from(arg(req, "path"));
                 if to.as_os_str().is_empty() {
-                    anyhow::bail!("保存先が空です");
+                    anyhow::bail!("保存場所が空です");
                 }
                 if to.exists() {
                     anyhow::bail!("{} は既にあります", to.display());
@@ -4277,7 +4277,7 @@ impl Session {
             "newnote" => {
                 let dir = std::path::PathBuf::from(shellexpand(&arg(req, "dir")));
                 if dir.as_os_str().is_empty() {
-                    anyhow::bail!("ノートの置き場所がありません");
+                    anyhow::bail!("ノートの保存場所がありません");
                 }
                 // The making of it is `cian_core::note`'s, so a phone makes
                 // the same note this does.
