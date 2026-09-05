@@ -1104,6 +1104,7 @@ function jumpTo(at) {
     draw(state.focus);
     if (visual.on) paintVisual();
     if (preview.on) showPreview();
+    if (viewMode === 'cian') followNote();
 }
 
 async function clearMarksAndFilter() {
@@ -1143,6 +1144,7 @@ function move(delta) {
     draw(state.focus);
     if (visual.on) paintVisual();
     if (preview.on) showPreview();
+    if (viewMode === 'cian') followNote();
 }
 
 async function enter() {
@@ -1721,7 +1723,18 @@ function setView(mode, remember = true) {
         // one you had open yesterday. Stated rather than toggled, so entering
         // the view twice does not give you oldest-first the second time.
         applySort('date', true).then(() => loadNotes(state.focus)).catch(() => {});
+        // The shell goes. A notes window is not a terminal with notes in it,
+        // and the panel is the pixels the note wants.
+        if (term.on) closeShell();
     }
+    // The two halves, or the one surface. Set on `#work` so the CSS decides
+    // where `#view` sits — the editor itself is the same box either way.
+    document.body.dataset.cian = mode === 'cian' ? 'on' : 'off';
+    const pad = document.getElementById('cianpad');
+    if (pad) {
+        pad.textContent = tr('choose a note on the left', '左でノートを選ぶと、ここに出ます');
+    }
+    if (mode === 'cian') followNote();
     if (remember) ask('remember', { key: 'gui_view', value: mode });
 }
 
@@ -2063,6 +2076,7 @@ function hintsNow() {
         const split = el.sPanes.querySelectorAll('.sgrid').length > 1;
         return [['Esc', tr('files', 'ファイル')],
             hasSel ? ['Ctrl+C', tr('copy the selection', '選択をコピー')] : [tr('drag', 'ドラッグ選択'), tr('select = copy', '= コピー')],
+            ['Ctrl+V', tr('paste', '貼り付け')],
             ...(split ? [['Shift+F1/F2', tr('prev/next pane', '前/次のペイン')]] : []),
             ['F9', tr('new tab', '新規タブ')], ['F10', tr('close tab', 'タブを閉じる')], ['Shift+F8', tr('v-split', '左右分割')],
             ['Shift+F9', tr('h-split', '上下分割')],
@@ -2429,6 +2443,19 @@ function contextRows() {
     // Bookmarks are a launcher too, so cian-tui keeps them in this cluster
     // rather than down among the connect rows — but only in a file pane.
     if (!inShell) v.push({ label: tr("Shortcuts", 'ショートカット'), value: 's', run: cmdShortcuts });
+    // How the listing is laid out, here as well as under `T`.
+    //
+    // 2026-09-05: 「今後めっちゃ使うことになりそう」. It is the switch that
+    // changes what the window *is* — a file manager, a wall of tiles, or a
+    // notes app — and a switch you reach for that often should be on the
+    // menu you already have open, not one key further away.
+    if (!inShell) {
+        v.push(group(tr('How the listing is laid out ▸', '一覧の見せ方 ▸'), () => VIEWS.map((m) => ({
+            label: viewName(m) + (m === viewMode ? '  \u25cf' : ''),
+            value: `:view ${m}`,
+            run: () => { closeMenu(); setView(m); say(tr(`listing: ${viewName(m)}`, `一覧: ${viewName(m)}`)); },
+        }))));
+    }
 
     if (inShell) {
         // `:` is a character in a shell, so the command line needs a way in
@@ -2437,7 +2464,13 @@ function contextRows() {
         // that duplicates a working key is a row in the way.
         v.push({ label: tr("Command", 'コマンド入力'), value: 'Ctrl+Enter', run: () => commandLine() });
         // The shell's own menu: what can be done to a terminal, not to a file.
-        v.push({ label: tr("Paste", '貼り付け'), value: ':paste', run: () => document.execCommand('paste') });
+        v.push({ label: tr("Paste", '貼り付け'), value: 'Ctrl+V', run: shellPaste });
+        v.push({ label: tr("Copy the selection", '選択をコピー'), value: 'Ctrl+C', run: shellCopy });
+        // **Where Ctrl+C went.** 2026-09-05: the shell's Ctrl+C/X/V are the
+        // clipboard now, which is what hands coming from Windows expect —
+        // so the interrupt needs somewhere to live, and this is the menu
+        // that is already one keystroke away. Right-click opens the same one.
+        v.push({ label: tr("Interrupt  (sends Ctrl+C)", '中断  （Ctrl+C を送る）'), value: '', run: () => ask('shellinput', { text: '\x03' }) });
         v.push(group(tr('Session ▸', 'セッション ▸'), () => [
             // Named for what it will do, as cian-tui names it (`StartLog` /
             // `StopLog`, chosen in `submenu_children` from whether this pane is
@@ -3621,7 +3654,13 @@ document.addEventListener('keydown', (e) => {
     // Not while a file is open. The editor no longer stops every key on its
     // way past — it cannot, or its own bindings never fire — so the listing's
     // keys have to decline for themselves.
-    if (viewer.on) return;
+    //
+    // **Except in cian mode**, where the note is beside the list rather than
+    // over it, and the keys belong to whichever half has them. The editor
+    // takes them when it is focused; until then `j` walks the list, which is
+    // the whole point of a list beside a note. Without this the second `j`
+    // was typed into the note that the first one opened.
+    if (viewer.on && !(viewMode === 'cian' && !viewerHasKeys())) return;
     // **And not before there is a listing to steer.**
     //
     // Twenty-seven branches below read a field off a pane — `.remote`,
@@ -4219,8 +4258,23 @@ const viewer = {
 /// ペイン, マーク, 並替, F3 閲覧 — none of which do anything while the editor
 /// has the keyboard. cian-tui swaps its bar for the panel's; this is the one
 /// door that makes the window do the same, rather than eight remembered calls.
+/// Whether the keys are in the editor rather than the list.
+///
+/// Asked of the document rather than remembered: Monaco takes and gives up
+/// focus on its own (a click, a `:` prompt closing), and a flag set beside it
+/// would be a second opinion that goes stale the first time it is not
+/// updated.
+function viewerHasKeys() {
+    return !!(el.view && !el.view.hidden && el.view.contains(document.activeElement));
+}
+
 function setViewerOn(on) {
     viewer.on = on;
+    // In cian mode the right half is either a note or the line saying to
+    // pick one. **One door for both**, here, because the last time this
+    // window had two ways to decide whether something was on screen it spent
+    // three rounds insisting a sheet was open behind the editor.
+    document.body.classList.toggle('reading', on);
     // A diagram parked in the editor belongs to the file that was open. Left
     // behind, the next file inherits somebody else's picture at whatever line
     // number it happened to be on.
@@ -4884,7 +4938,13 @@ async function openInEditor(which) {
 /// Split out because two things reach here now — a file in the listing,
 /// and a member extracted from an archive — and the second was going to
 /// need a copy of all of it.
-async function showFile(f) {
+/// `quiet` opens the file without taking the keys.
+///
+/// **For cian mode's right half.** Walking the list opens a note on every
+/// step, and an editor that grabs the cursor each time is a list you cannot
+/// walk — the second `j` would be typed into the note. Enter still opens it
+/// properly, and that is the moment you meant to start writing.
+async function showFile(f, quiet = false) {
 
     let monaco;
     try {
@@ -4933,7 +4993,7 @@ async function showFile(f) {
     el.vName.textContent = f.name;
     el.vAbout.textContent = viewer.about;
     viewer.ed.setPosition({ lineNumber: 1, column: 1 });
-    viewer.ed.focus();
+    if (!quiet) viewer.ed.focus();
     drawViewFoot();
 }
 
@@ -6422,6 +6482,9 @@ async function goToNotes(root) {
     if (!root) return;
     await goToPath(root.path);
     if (viewMode !== 'cian') setView('cian');
+    // Already in cian mode, so `setView` did not run and did not close it.
+    // A notes window is not a terminal with notes in it.
+    else if (term.on) closeShell();
 }
 
 /// `:tag` — the tags in this folder, and what each one narrows to.
@@ -9800,6 +9863,38 @@ function previewNote(text) {
 }
 
 let previewSoon = null;
+/// In cian mode, the note under the cursor is shown in the right half.
+///
+/// **The whole note, in the editor** — not a glance like `showPreview`. That
+/// is the difference between a file manager looking at a file and a notes app
+/// reading a note: here the right half is where you read *and* write, and
+/// moving the cursor changes which note that is.
+///
+/// A beat behind the cursor, for the same reason as the preview: held down,
+/// `j` would otherwise open every note it passes.
+let followSoon = null;
+function followNote() {
+    if (viewMode !== 'cian') return;
+    clearTimeout(followSoon);
+    followSoon = setTimeout(async () => {
+        if (viewMode !== 'cian') return;
+        const pane = state[state.focus];
+        const row = pane && pane.entries && pane.entries[pane.cursor];
+        // **A note, not whatever is under the cursor.** cian view can be
+        // pointed at any folder, and a right half that opened `c.rs` because
+        // the cursor passed it is a file manager reading your source code at
+        // you. `notes.by` is the engine's answer to "is this a note".
+        if (!row || row.parent || row.is_dir || !notes.by.has(row.path)) return;
+        if (viewer.on && viewer.path === row.path) return;
+        // Not while there is something unsaved in the one already open: a
+        // cursor that walks past would take the words with it.
+        if (viewer.on && viewer.ed && viewer.dirty) return;
+        const f = await ask('viewpath', { path: row.path }).catch(() => null);
+        if (!f || viewMode !== 'cian') return;
+        await showFile(f, true);
+    }, 180);
+}
+
 function showPreview() {
     if (!preview.on) return;
     // A beat behind the cursor. Held down, `j` would otherwise read every file
@@ -10152,8 +10247,52 @@ document.addEventListener('mouseup', () => {
     say(tr(`${text.length} characters copied`, `${text.length} 文字をコピー`));
 });
 
+/// The selection in the shell, onto the clipboard.
+function shellCopy() {
+    const sel = window.getSelection();
+    const text = sel && !sel.isCollapsed && el.sPanes.contains(sel.anchorNode) ? sel.toString() : '';
+    if (!text) {
+        say(tr('nothing selected — drag to select, or use the menu to interrupt',
+               '選択がありません ── ドラッグで選ぶか、メニューから中断できます'), true);
+        return;
+    }
+    navigator.clipboard.writeText(text);
+    say(tr(`${text.length} characters copied`, `${text.length} 文字をコピー`));
+}
+
+/// The clipboard, into the shell.
+async function shellPaste() {
+    const text = await navigator.clipboard.readText().catch(() => '');
+    if (!text) {
+        say(tr('the clipboard is empty', 'クリップボードが空です'), true);
+        return;
+    }
+    await ask('shellinput', { text });
+}
+
 document.addEventListener('keydown', (e) => {
     if (!term.on || !term.focused) return;
+    // **Ctrl+C / X / V are the clipboard here, not control characters.**
+    //
+    // 2026-09-05: 「Shell パネルで Ctrl+c/x/v などの Ctrl シリーズを許可して
+    // ほしい。デフォルトの Ctrl+C のキャンセルは右クリックおよび Shift+Enter
+    // で表示できる中に含めて」. So the interrupt moved to the menu and these
+    // three do what they do everywhere else in the window.
+    //
+    // **Only these three.** Ctrl+A is the start of the line, Ctrl+R is the
+    // history, Ctrl+U throws the line away — a shell without them is not a
+    // shell, and none of them is what anybody means by 「Ctrl シリーズ」.
+    //
+    // Nothing can be cut out of what has already scrolled past, so Ctrl+X
+    // copies. Silently doing nothing would be worse; pretending to cut and
+    // leaving the text there would be worse still.
+    if (e.ctrlKey && !e.altKey && !e.metaKey && /^[cxvCXV]$/.test(e.key)) {
+        e.stopPropagation();
+        e.preventDefault();
+        if (e.key.toLowerCase() === 'v') shellPaste();
+        else shellCopy();
+        return;
+    }
     // Esc hands the keys back to the files. A shell wants Esc too — vi lives
     // in one — so it is the one key that has to be pressed twice to reach it,
     // the same bargain the terminal build makes.
@@ -10675,7 +10814,9 @@ recall().then(() => {
     // and a window where the shell only exists after Shift+J is a window
     // where the shell is not part of the program. Opened without focus: the
     // keys still belong to the listing until Shift+J asks for them.
-    if (!term.on) openShell({ focus: false });
+    // …except in cian mode, where the note wants those pixels. 2026-09-05:
+    // 「下のシェルパネルも閉じて欲しい」. Shift+J still opens one.
+    if (!term.on && viewMode !== 'cian') openShell({ focus: false });
 });
 
 /// Keep the PTY's size equal to the box it is drawn in.

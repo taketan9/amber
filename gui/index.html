@@ -587,6 +587,39 @@ html, body {
    A sheet raised over a surface is above that surface. There is no case where
    the editor should hide a list opened from inside it. */
 #view   { z-index: 10; }   /* a surface: it replaces the listing */
+
+/* ── cian mode: the list on the left, the note on the right ──
+   2026-09-05: 「左にノートの一覧 右にノートっていう Inkdrop の構成そのまま」.
+   In every other view the editor is a *surface* that replaces the listing,
+   which is right for a file manager: you went to look at one thing. Notes are
+   the other shape — the list is where you are, and the note is what you are
+   reading, and you go back and forth between them without leaving either.
+
+   So here `#view` is inset instead of covering, and the panes give up the
+   right half. Nothing about the editor changes; it is the same box in a
+   different place. */
+/* **On `body`, not on `#work`.** `#view` is written *after* `#work` closes —
+   it is a fixed overlay, so nesting never mattered until a selector needed
+   both. Put on `#work` this rule matched nothing at all, and the editor
+   covered the list exactly as before with no sign that anything was wrong. */
+/* `width`, and **`flex` left alone** — `#work` is a column, so `flex` there
+   is the *height*. Setting `flex: 0 0 auto` to make the list narrower made it
+   short instead: the rows stopped and the rest of the left side was empty. */
+body[data-cian="on"] #panes { width: var(--cian-left, 38%); }
+body[data-cian="on"] #view { left: var(--cian-left, 38%); border-left: 1px solid var(--line); }
+body[data-cian="on"] #panes.one .pane.active { flex: 1 1 100%; }
+/* The right half before a note is chosen. Without it the window looks like
+   a listing that has been squeezed for no reason — an empty half of a
+   two-half layout has to say that it is waiting, not that it is broken. */
+#cianpad {
+  position: fixed; top: 0; right: 0; left: var(--cian-left, 38%);
+  bottom: calc(var(--status-h) + var(--hints-h));
+  display: none; align-items: center; justify-content: center;
+  background: var(--pane); border-left: 1px solid var(--line);
+  color: var(--dim); font-size: .9em; z-index: 9;
+}
+body[data-cian="on"] #cianpad { display: flex; }
+body[data-cian="on"].reading #cianpad { display: none; }
 #report { z-index: 11; }   /* a sheet: it is raised over whatever is beneath */
 
 /* The shell's sixteen. Named rather than fixed, so each look chooses them —
@@ -1340,6 +1373,7 @@ html, body {
        than the whole file, the way the terminal build does: a listing of a
        hundred thousand rows is a hundred thousand elements otherwise, and the
        scroll goes to treacle on exactly the files worth opening this way. -->
+  <div id="cianpad"></div>
   <div id="view" hidden>
     <div class="vhead"><span id="v-name"></span><span id="v-about"></span></div>
     <div class="vbody" id="v-body"></div>
