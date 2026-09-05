@@ -625,11 +625,7 @@ body[data-cian="on"] #cianpad { left: calc(var(--cian-rail, 186px) + var(--cian-
 }
 #cianrail .brand { display: flex; align-items: center; gap: 9px; padding: 2px 13px 14px; }
 #cianrail .mk { width: 26px; height: 26px; flex: none; }
-#cianrail .mk .ground { fill: var(--accent); }
-#cianrail .mk .brackets {
-  fill: none; stroke: var(--pane-off); stroke-width: 11;
-  stroke-linecap: round; stroke-linejoin: round;
-}
+/* 印は自分で色を持つ（amber.svg と同じ琥珀）。CSS の fill で塗ると色替えに引かれる */
 #cianrail .bname { font-weight: 800; font-size: 1.35em; letter-spacing: -.02em; }
 #cianrail .rhead {
   font-size: .72em; letter-spacing: .1em; color: var(--dim);

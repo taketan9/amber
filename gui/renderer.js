@@ -1957,19 +1957,33 @@ function drawRail() {
 }
 
 /// アイコンと同じ2つの括弧。左の列と、一覧の頭と、ドックの中で同じもの。
+let markSeq = 0;
 function cianMark() {
-    const mark = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    mark.setAttribute('viewBox', '0 0 100 100');
+    // 案 S4「生成りの葉」。多羅葉に字を書いたのが「葉書」の語源。
+    // **数字は packaging/amber.svg と packaging/amber.py と同じ** ── どれか
+    // 一つだけ直すと、窓とアプリアイコンで別の葉になる。
+    // ロゴなので配色は色替えに追従させない（前の印は --accent を拾っていた）。
+    const id = 'am' + (++markSeq);
+    const box = document.createElement('div');
+    box.innerHTML = `<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="${id}g" gradientUnits="userSpaceOnUse" x1="15" y1="0" x2="85" y2="100">
+      <stop offset="0" stop-color="#ffd97f"/><stop offset="1" stop-color="#f2a62c"/>
+    </linearGradient>
+    <clipPath id="${id}c"><rect width="100" height="100" rx="26"/></clipPath>
+  </defs>
+  <rect width="100" height="100" rx="26" fill="url(#${id}g)"/>
+  <g clip-path="url(#${id}c)">
+    <path d="M12 66 C6 74 0 84 -4 96" fill="none" stroke="#fff4de" stroke-width="7" stroke-linecap="round"/>
+    <path d="M10 62 C6 38 26 18 50 15 C74 12 90 24 97 35 C88 50 66 68 44 77 C26 84 12 78 10 62 Z" fill="#fff4de"/>
+    <g fill="none" stroke="url(#${id}g)" stroke-width="8" stroke-linecap="round">
+      <path d="M24 46 C42 36 60 30 78 27"/>
+      <path d="M24 66 C40 57 54 51 66 47"/>
+    </g>
+  </g>
+</svg>`;
+    const mark = box.firstElementChild;
     mark.setAttribute('class', 'mk');
-    const bg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-    bg.setAttribute('x', '0'); bg.setAttribute('y', '0');
-    bg.setAttribute('width', '100'); bg.setAttribute('height', '100');
-    bg.setAttribute('rx', '26');
-    bg.setAttribute('class', 'ground');
-    const pen = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-    pen.setAttribute('d', 'M30 56 L30 28 L58 28 M70 44 L70 72 L42 72');
-    pen.setAttribute('class', 'brackets');
-    mark.append(bg, pen);
     return mark;
 }
 
