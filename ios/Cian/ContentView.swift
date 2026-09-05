@@ -23,6 +23,10 @@ struct ContentView: View {
     @State private var needle = ""
     @State private var shelving: Note?
     @State private var colouring: String?
+    /// The folder the list is drawn for, and which way it last moved.
+    @State private var walked = ""
+    @State private var deeper = true
+    @State private var wide: CGFloat = 393
 
     var body: some View {
         NavigationStack {
@@ -36,11 +40,14 @@ struct ContentView: View {
             // The notebook, when one is chosen: the title bar is where you
             // look to know what you are looking at, and a filtered list that
             // still says the folder's name reads as a list that lost notes.
-            .navigationTitle(store.rootName.isEmpty ? "cian" : store.here)
+            // At the top the name is drawn in the list, so the bar stays
+            // out of the way; inside a folder the bar says where you are.
+            .navigationTitle(store.at.isEmpty ? "" : store.here)
+            .navigationBarTitleDisplayMode(store.at.isEmpty ? .inline : .large)
             .toolbar {
                 if let up = store.up {
                     ToolbarItem(placement: .topBarLeading) {
-                        Button { store.at = up } label: {
+                        Button { go { store.leave(for: up) } } label: {
                             Label("上へ", systemImage: "chevron.backward")
                         }
                     }
@@ -316,8 +323,31 @@ struct ContentView: View {
         }
     }
 
+    /// Move, and let it be seen moving.
+    ///
+    /// **A list that changes instantly reads as a list that did not change.**
+    /// The finger lands, the contents are already different, and the eye has
+    /// nothing to follow — so you press again to check whether it worked.
+    /// Which way it slides says which way you went; sliding the same way in
+    /// both directions would be worse than not sliding at all.
+    private func go(_ act: () -> Void) {
+        let was = store.at
+        act()
+        guard store.at != was else { return }
+        deeper = store.at.count > was.count
+        withAnimation(.easeOut(duration: 0.24)) { walked = store.at }
+    }
+
     private var list: some View {
         List {
+            if store.at.isEmpty, needle.isEmpty, store.only.isEmpty {
+                Section {
+                    Wordmark(notes: store.notes.count, books: store.allBooks.count)
+                        .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 14, trailing: 16))
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                }
+            }
             // The notebooks first, then the notes in this one. Folders above
             // files is what every file manager since the first one has done,
             // and this is the same gesture: go in, come back.
@@ -326,7 +356,7 @@ struct ContentView: View {
                 // own panes have had a `..` row since the beginning, and it
                 // has always meant both: go up, and put this up there.
                 if let up = store.up {
-                    Button { store.at = up } label: {
+                    Button { go { store.leave(for: up) } } label: {
                         Label("..", systemImage: "arrow.up.left")
                             .foregroundStyle(.tint)
                     }
@@ -338,7 +368,7 @@ struct ContentView: View {
                 }
                 ForEach(store.books, id: \.path) { b in
                     Button {
-                        store.at = b.path
+                        go { store.into(b.path) }
                     } label: {
                         HStack {
                             Label {
@@ -428,7 +458,42 @@ struct ContentView: View {
                 }
             }
         }
-        .searchable(text: $needle, prompt: "タイトル・タグ・本文")
+        // The whole list is replaced when the folder changes, so it can
+        // slide in from the side it came from.
+        .id(walked)
+        .transition(.asymmetric(
+            insertion: .move(edge: deeper ? .trailing : .leading).combined(with: .opacity),
+            removal: .move(edge: deeper ? .leading : .trailing).combined(with: .opacity)
+        ))
+        // **Only from the edges.** A whole-screen horizontal swipe is the
+        // rows' own gesture — that is how a note is starred or deleted — so
+        // the way out lives where the phone already puts it. Simultaneous
+        // rather than exclusive: scrolling must still win, and this only
+        // decides anything once the finger is up.
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 30).onEnded { g in
+                guard abs(g.translation.width) > abs(g.translation.height) * 1.5 else { return }
+                if g.startLocation.x < 28, g.translation.width > 48, let up = store.up {
+                    go { store.leave(for: up) }
+                } else if g.startLocation.x > wide - 28, g.translation.width < -48 {
+                    go { _ = store.back() }
+                }
+            }
+        )
+        .background {
+            GeometryReader { geo in
+                Color.clear.onChange(of: geo.size.width, initial: true) { _, w in wide = w }
+            }
+        }
+        // Somebody else may move us — restoring a folder, or coming back
+        // from a note. The slide is for moves you made; this keeps the two
+        // in step when it was not one.
+        .onChange(of: store.at, initial: true) { _, now in if walked != now { walked = now } }
+        // Always shown, not hidden until you pull down: with the bar set
+        // to `.inline` so the wordmark can have the top of the list, the
+        // search field would otherwise be somewhere you have to know about.
+        .searchable(text: $needle, placement: .navigationBarDrawer(displayMode: .always),
+                    prompt: "タイトル・タグ・本文")
         .onChange(of: needle) { _, now in store.find(now) }
         .refreshable { store.reload() }
         // One screen for every open note, with the tabs above them.

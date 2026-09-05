@@ -220,21 +220,46 @@ final class Pen: ObservableObject {
 
     /// Make one edit, in a way the phone's own undo understands.
     ///
+    /// **Through the text storage, not `replace(_:withText:)`.** That one
+    /// goes in by the same door as typing, and the door applies smart
+    /// substitution — so a table's `| --- |` came out as `| — |`, em dashes,
+    /// and the table stopped being a table. Writing to the storage skips
+    /// that, and the undo step is registered here instead of by UIKit.
+    ///
     /// Falls back to a plain string swap when there is no live view — the
     /// reading half has none, and an edit that silently did nothing there
     /// would be worse than one that cannot be undone.
     func apply(_ e: Edit, to text: inout String, pick: inout NSRange) {
-        if let v = view, let r = range(v, e.at) {
-            v.replace(r, withText: e.with)
-            v.selectedRange = clamp(e.then, in: v.text)
-            text = v.text
-            pick = v.selectedRange
-            refresh()
+        guard let v = view else {
+            let s = text as NSString
+            text = s.replacingCharacters(in: e.at, with: e.with)
+            pick = clamp(e.then, in: text)
             return
         }
-        let s = text as NSString
-        text = s.replacingCharacters(in: e.at, with: e.with)
-        pick = clamp(e.then, in: text)
+        let was = v.text ?? ""
+        let wasPick = v.selectedRange
+        v.textStorage.replaceCharacters(in: e.at, with: e.with)
+        v.selectedRange = clamp(e.then, in: v.text)
+        remember(v, was, wasPick)
+        text = v.text
+        pick = v.selectedRange
+        refresh()
+    }
+
+    /// One undo step: put the whole note back as it was.
+    ///
+    /// Coarse on purpose — a tool press is one thing that happened, and
+    /// undoing half of a table is not something anybody wants. Registering
+    /// the opposite from inside the undo is what makes it redoable.
+    private func remember(_ v: UITextView, _ was: String, _ pick: NSRange) {
+        v.undoManager?.registerUndo(withTarget: v) { [weak self] tv in
+            let now = tv.text ?? ""
+            let nowPick = tv.selectedRange
+            tv.text = was
+            tv.selectedRange = self?.clamp(pick, in: was) ?? NSRange(location: 0, length: 0)
+            self?.remember(tv, now, nowPick)
+            tv.delegate?.textViewDidChange?(tv)
+        }
     }
 
     /// Move the cursor one step. **The arrow keys a phone keyboard does not

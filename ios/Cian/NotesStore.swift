@@ -225,6 +225,33 @@ final class NotesStore: ObservableObject {
     /// notebook inside a notebook.
     @Published var at = ""
 
+    /// The folders stepped out of, newest last.
+    ///
+    /// **So that going back can be undone.** Swiping one way is "up", and a
+    /// gesture that cannot be taken back is a gesture people stop trusting —
+    /// so swiping the other way walks back down the way you came.
+    @Published private(set) var forward: [String] = []
+
+    /// Up one, remembering where we were.
+    func leave(for to: String) {
+        forward.append(at)
+        at = to
+    }
+
+    /// Into a folder chosen by hand. That is a new direction, so whatever
+    /// was ahead is no longer ahead of anything.
+    func into(_ book: String) {
+        forward.removeAll()
+        at = book
+    }
+
+    /// Back down the way we came, if there is a way.
+    func back() -> Bool {
+        guard let last = forward.popLast() else { return false }
+        at = last
+        return true
+    }
+
     /// Show everything at once, folders ignored.
     ///
     /// Both ways of keeping notes are real. Some people put four hundred in

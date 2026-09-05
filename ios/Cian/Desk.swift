@@ -128,6 +128,7 @@ struct DeskView: View {
     @State private var tags: [String] = []
     @State private var writing = false
     @State private var saving: Task<Void, Never>?
+    @State private var tabling = false
 
     private var here: Desk.Tab? { desk.current }
 
@@ -140,7 +141,8 @@ struct DeskView: View {
             TabView(selection: $desk.showing) {
                 ForEach(desk.tabs) { tab in
                     if let bound = desk.binding(tab.id) {
-                        NoteView(tab: bound, store: store, pen: pen, writing: $writing)
+                        NoteView(tab: bound, store: store, pen: pen, writing: $writing,
+                                 table: { tabling = true })
                             .tag(tab.id)
                     }
                 }
@@ -151,6 +153,17 @@ struct DeskView: View {
 
     var body: some View {
         wired
+            .sheet(isPresented: $tabling) {
+                Tabling { body in
+                    guard let id = here?.id,
+                          let at = desk.tabs.firstIndex(where: { $0.id == id }) else { return }
+                    var text = desk.tabs[at].text
+                    var pick = desk.tabs[at].pick
+                    pen.apply(Marks.block(text, pick, body, caret: 2), to: &text, pick: &pick)
+                    desk.tabs[at].text = text
+                    desk.tabs[at].pick = pick
+                }
+            }
             .sheet(isPresented: $tagging, onDismiss: applyTags) {
                 Tagging(tags: $tags, known: store.allTags)
             }

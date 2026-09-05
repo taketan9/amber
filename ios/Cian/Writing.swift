@@ -16,10 +16,13 @@ struct NoteView: View {
     let store: NotesStore
     @ObservedObject var pen: Pen
     @Binding var writing: Bool
+    /// Asks the desk for the table sheet. **Presented up there, not here** —
+    /// a sheet put on a `TabView` page is a sheet on a view the TabView is
+    /// free to rebuild, and it does not open.
+    let table: () -> Void
     /// Whether the seldom-used half of the writing bar is unfolded.
     @State private var more = false
     @State private var trouble: String?
-    @State private var making = false
 
     var body: some View {
         Group {
@@ -34,9 +37,6 @@ struct NoteView: View {
                     if writing { marks }
                 }
             }
-        }
-        .sheet(isPresented: $making) {
-            Tabling { body in put(Marks.block(tab.text, tab.pick, body, caret: 2)) }
         }
         .alert(
             "できません",
@@ -66,7 +66,7 @@ struct NoteView: View {
                         mark("コード", "chevron.left.forwardslash.chevron.right") { wrap("`") }
                         Divider().frame(height: 20)
                         mark("リンク", "link") { block("[](https://)\n", caret: 1) }
-                        mark("表", "tablecells") { making = true }
+                        mark("表", "tablecells", act: table)
                         mark("コード枠", "curlybraces") { block("```\n\n```\n", caret: 4) }
                         mark("水平線", "minus") { block("---\n") }
                         Divider().frame(height: 20)
@@ -136,7 +136,7 @@ struct NoteView: View {
     }
 
     private func mark(_ name: String, _ icon: String, on: Bool = false,
-                      _ act: @escaping () -> Void) -> some View {
+                      act: @escaping () -> Void) -> some View {
         Button(action: act) { Image(systemName: icon) }
             .buttonStyle(.bordered)
             .tint(on ? Color.accentColor : nil)
@@ -197,5 +197,67 @@ struct NoteView: View {
 
     private var folder: URL {
         URL(fileURLWithPath: tab.note.path).deletingLastPathComponent()
+    }
+}
+
+/// The name of the thing, at the top of its own list.
+///
+/// **A navigation bar's large title is somebody else's typography.** cian
+/// gets one screen where its name is the first thing you see, so it is set
+/// the way the icon is set — the mark, the word, and one quiet line of what
+/// is inside. Below the top folder the bar takes over again: there the
+/// question is *where am I*, and a wordmark does not answer it.
+struct Wordmark: View {
+    let notes: Int
+    let books: Int
+
+    var body: some View {
+        HStack(spacing: 14) {
+            Mark().frame(width: 38, height: 38)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("cian")
+                    .font(.system(size: 34, weight: .heavy, design: .rounded))
+                    .kerning(-0.5)
+                Text("\(notes) のノート ・ \(books) のフォルダ")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+            }
+            Spacer(minLength: 0)
+        }
+    }
+}
+
+/// The icon, drawn rather than loaded.
+///
+/// The same two brackets as the app icon, so the thing on the home screen
+/// and the thing at the top of the list are recognisably one thing.
+struct Mark: View {
+    var body: some View {
+        GeometryReader { geo in
+            let s = min(geo.size.width, geo.size.height)
+            let bar = s * 0.11
+            ZStack {
+                RoundedRectangle(cornerRadius: s * 0.26, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [Color.accentColor, Color.accentColor.opacity(0.72)],
+                            startPoint: .topLeading, endPoint: .bottomTrailing
+                        )
+                    )
+                Path { p in
+                    // Top-left bracket.
+                    p.move(to: CGPoint(x: s * 0.30, y: s * 0.56))
+                    p.addLine(to: CGPoint(x: s * 0.30, y: s * 0.28))
+                    p.addLine(to: CGPoint(x: s * 0.58, y: s * 0.28))
+                    // Bottom-right bracket.
+                    p.move(to: CGPoint(x: s * 0.70, y: s * 0.44))
+                    p.addLine(to: CGPoint(x: s * 0.70, y: s * 0.72))
+                    p.addLine(to: CGPoint(x: s * 0.42, y: s * 0.72))
+                }
+                .stroke(Color.white, style: StrokeStyle(lineWidth: bar, lineCap: .round, lineJoin: .round))
+            }
+        }
+        .accessibilityHidden(true)
     }
 }
