@@ -112,6 +112,48 @@ final class NotesStore: ObservableObject {
         adopt(url, remember: true, scoped: true)
     }
 
+    /// Everything that is here now, moved to a folder that was just chosen.
+    ///
+    /// **Copy, check, then remove** — see the engine's `migrate`. Between two
+    /// providers this is not a rename, and a note lost halfway is the worst
+    /// thing this app could do.
+    func migrate(from old: URL, to fresh: URL) throws -> Int {
+        let scoped = old.startAccessingSecurityScopedResource()
+        defer { if scoped { old.stopAccessingSecurityScopedResource() } }
+        let out = try Cian.call("migrate", ["from": old.path, "to": fresh.path])
+        reload()
+        return out["moved"] as? Int ?? 0
+    }
+
+    /// A backup, put back into the notes folder. Nothing already there is
+    /// overwritten — the count of what was left alone comes back too.
+    func restore(_ zip: URL) throws -> (Int, Int) {
+        guard let root else { throw Cian.Failure.engine("保存場所がありません") }
+        let scoped = zip.startAccessingSecurityScopedResource()
+        defer { if scoped { zip.stopAccessingSecurityScopedResource() } }
+        let out = try Cian.call("restore", ["zip": zip.path, "to": root.path])
+        reload()
+        return (out["put"] as? Int ?? 0, out["kept"] as? Int ?? 0)
+    }
+
+    /// How many notes are in a folder that is not the current one — asked
+    /// before offering to move them, because 「N 件」 is the difference
+    /// between a question and a shrug.
+    func notesAt(_ url: URL) -> Int {
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        guard let out = try? Cian.call("notes", ["path": url.path]) else { return 0 }
+        return (out["notes"] as? [[String: Any]])?.count ?? 0
+    }
+
+    /// This app's own folder, as one of the places — so the history is the
+    /// whole answer to 「どこを開いてきたか」 and there is no separate button
+    /// saying something nobody could parse.
+    var ownPlace: Place? {
+        guard let at = ownFolder, let data = try? at.bookmarkData() else { return nil }
+        return Place(name: "この iPhone の中（cian）", trail: "ファイル → この iPhone 内 → cian", data: data)
+    }
+
     /// Somewhere notes have been kept, and the way back to it.
     struct Place: Identifiable, Equatable {
         let name: String

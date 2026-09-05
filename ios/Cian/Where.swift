@@ -18,6 +18,7 @@ struct Where: View {
     /// all. So the sheet closes first and the screen underneath opens it.
     let choose: () -> Void
     let bringIn: () -> Void
+    let restore: () -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var zip: URL?
     @State private var trouble: String?
@@ -52,13 +53,6 @@ struct Where: View {
                     } label: {
                         Label("保存場所を選ぶ…", systemImage: "folder")
                     }
-                    if !store.own {
-                        Button {
-                            store.useOwn()
-                        } label: {
-                            Label("この iPhone の中に戻す", systemImage: "iphone")
-                        }
-                    }
                 } header: {
                     Text("場所")
                 } footer: {
@@ -75,9 +69,32 @@ struct Where: View {
                 }
 
                 // Once found, never looked for again.
-                if !store.places.isEmpty {
-                    Section {
-                        ForEach(store.places) { place in
+                Section {
+                    // **This app's own folder is one of the places.** It used
+                    // to be a button saying 「この iPhone の中に戻す」, which
+                    // says nothing about where that is or why you would.
+                    // 2026-09-05: 「元々開いてきたディレクトリの履歴っていう
+                    // 表現にしてほしい」 ── so: everywhere the notes have
+                    // been, this one included, newest first.
+                    if let own = store.ownPlace {
+                        Button {
+                            store.useOwn()
+                        } label: {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(own.name)
+                                    Text(own.trail).font(.caption2).foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                if store.own {
+                                    Image(systemName: "checkmark").foregroundStyle(.tint)
+                                }
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    ForEach(store.places) { place in
                             Button {
                                 store.revisit(place)
                             } label: {
@@ -100,12 +117,11 @@ struct Where: View {
                             .swipeActions {
                                 Button("忘れる", role: .destructive) { store.forget(place) }
                             }
-                        }
-                    } header: {
-                        Text("前に選んだ場所")
-                    } footer: {
-                        Text("一度見つければ、次からはここから1回で戻れます。")
                     }
+                } header: {
+                    Text("開いてきた場所")
+                } footer: {
+                    Text("一度見つければ、次からはここから1回で戻れます。左スワイプで履歴から消せます。")
                 }
 
                 Section {
@@ -114,6 +130,15 @@ struct Where: View {
                         bringIn()
                     } label: {
                         Label("インポート…", systemImage: "square.and.arrow.down")
+                    }
+                    // The other half of 「バックアップ」. Without it a zip is
+                    // a thing you can make and never use, which is not a
+                    // backup — it is a file.
+                    Button {
+                        dismiss()
+                        restore()
+                    } label: {
+                        Label("バックアップから戻す…", systemImage: "clock.arrow.circlepath")
                     }
                     // The scope is a choice because backing up is
                     // something people do *before* something — before a

@@ -26,7 +26,10 @@ struct ContentView: View {
     /// callback needed, and the second time I called it verified after
     /// watching only the half that opens.
     @State private var asked: Fetching?
-    enum Fetching { case folder, notes }
+    enum Fetching { case folder, notes, zip }
+    /// The folder we just left, while asking whether to bring its notes.
+    @State private var moving: URL?
+    @State private var moved: String?
     @State private var showing = false
     /// Which folder row the finger is over, and whether it is over `..`.
     @State private var into: String?
@@ -129,8 +132,26 @@ struct ContentView: View {
             // here, where there is no presentation in the way.
             Where(store: store,
                   choose: { DispatchQueue.main.async { asked = .folder; fetching = .folder } },
-                  bringIn: { DispatchQueue.main.async { asked = .notes; fetching = .notes } })
+                  bringIn: { DispatchQueue.main.async { asked = .notes; fetching = .notes } },
+                  restore: { DispatchQueue.main.async { asked = .zip; fetching = .zip } })
         }
+        .alert("いままでのノートを持っていきますか", isPresented: Binding(
+            get: { moving != nil }, set: { if !$0 { moving = nil } }
+        )) {
+            Button("そのままにする", role: .cancel) {}
+            Button("丸ごと移す") {
+                guard let old = moving, let fresh = store.rootURL else { return }
+                do { moved = "\(try store.migrate(from: old, to: fresh)) 件を移しました。" }
+                catch { store.trouble = error.localizedDescription }
+            }
+        } message: {
+            if let old = moving {
+                Text("フォルダの構成ごと、新しい保存場所へ移します（\(store.notesAt(old)) 件）。元の場所には残りません。同じ名前があるときは、何も動かしません。")
+            }
+        }
+        .alert("できました", isPresented: Binding(
+            get: { moved != nil }, set: { if !$0 { moved = nil } }
+        )) { Button("閉じる") {} } message: { Text(moved ?? "") }
         .sheet(item: $shelving) { note in Shelving(store: store, note: note) }
         .sheet(item: $colouring) { f in Colouring(store: store, folder: f) }
         .sheet(isPresented: $treeing) {
@@ -198,16 +219,36 @@ struct ContentView: View {
         .fileImporter(
             isPresented: Binding(get: { fetching != nil },
                                  set: { if !$0 { fetching = nil } }),
-            allowedContentTypes: asked == .folder
-                ? [.folder]
-                : [UTType(filenameExtension: "md") ?? .plainText, .plainText],
+            allowedContentTypes: {
+                switch asked {
+                case .folder: return [.folder]
+                case .zip: return [.zip]
+                default: return [UTType(filenameExtension: "md") ?? .plainText, .plainText]
+                }
+            }(),
             allowsMultipleSelection: asked == .notes
         ) { r in
             switch (asked, r) {
             case (.folder, .success(let urls)):
-                if let url = urls.first { store.choose(url) }
+                // **Ask before moving, and ask before switching.** The notes
+                // that are here now do not follow by themselves: a new folder
+                // is an empty folder, and somebody who did not expect that
+                // has just lost sight of everything they wrote.
+                if let url = urls.first {
+                    let old = store.rootURL
+                    store.choose(url)
+                    if let old, store.notesAt(old) > 0 { moving = old }
+                }
             case (.notes, .success(let urls)):
                 store.bring(urls)
+            case (.zip, .success(let urls)):
+                guard let zip = urls.first else { break }
+                do {
+                    let (put, kept) = try store.restore(zip)
+                    moved = kept > 0
+                        ? "\(put) 件を戻しました。同じ名前の \(kept) 件は、いまのノートを残しました。"
+                        : "\(put) 件を戻しました。"
+                } catch { store.trouble = error.localizedDescription }
             case (_, .failure(let why)):
                 store.trouble = why.localizedDescription
             case (nil, _):
