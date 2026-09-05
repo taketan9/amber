@@ -644,7 +644,12 @@ function draw(which) {
             // once for the folder and kept in `notes` — the pane still holds
             // the files, so Enter, marks and everything else are unchanged.
             const n = notes.by.get(row.path);
-            name.textContent = n ? n.title : (row.parent ? '..' : row.name);
+            // A favourite says so here too. **The same word and the same
+            // mark as the phone** — `star` is written on the note, so both
+            // ends read it, and a note that is starred on one and plain on
+            // the other would be two answers to one question.
+            name.textContent = (n && n.star != null ? '\u2605 ' : '')
+                + (n ? n.title : (row.parent ? '..' : row.name));
             // Everything else in the folder still shows — this is a pane in a
             // file manager, and a listing that hides the picture a note links
             // to would be lying about what is there. It shows quietly: the

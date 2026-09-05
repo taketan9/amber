@@ -399,7 +399,12 @@ fn inline_html(text: &str) -> String {
 /// the Markdown people write, not the Markdown a specification describes.
 pub fn to_html(lines: &[String]) -> String {
     let mut out = String::new();
-    let mut i = 0;
+    // The front matter goes, if there is one: it is how a note describes
+    // itself, not something it says, and the title and tags are already on
+    // screen wherever this is being drawn. `note::front` decides whether the
+    // leading `---` is a front matter or a rule — one answer, so the phone
+    // and the window agree about where a note starts.
+    let mut i = crate::note::front(lines).lines;
     // Which list levels are open, by indent. Markdown's nesting is indentation
     // and nothing else, so this is the whole of it.
     let mut open_lists: Vec<usize> = Vec::new();
@@ -593,6 +598,30 @@ pub fn to_html(lines: &[String]) -> String {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn two_coloured_words_on_one_line_both_survive() {
+        // 一度これで壊れた: `find` はバイトを数え、走査は文字を数えていたので、
+        // 日本語を挟むと span の**先まで**飛び越えて、次の span の途中から
+        // 字が出ていた。
+        let line = "ふつうの字と<span style=\"color:#D9822B\">だいだいの字</span>と、\
+<span style=\"color:#0E93A8\">シアン</span>。";
+        let out = to_html(&lines(line));
+        assert!(out.contains("<span style=\"color:#d9822b\">だいだいの字</span>"), "{out}");
+        assert!(out.contains("<span style=\"color:#0e93a8\">シアン</span>"), "{out}");
+        assert!(!out.contains("e=&quot;color"), "span の途中から字が出ている: {out}");
+        assert!(out.contains("と、"), "間の字が食われた: {out}");
+    }
+
+    #[test]
+    fn front_matter_is_how_a_note_describes_itself_not_something_it_says() {
+        let out = to_html(&lines("---\ntitle: 週報\ntags: [仕事]\n---\n\n# 見出し\n"));
+        assert!(!out.contains("title:"), "{out}");
+        assert!(out.contains("見出し"), "{out}");
+        // 先頭の `---` が前書きでないなら、これまで通り区切り線。
+        let rule = to_html(&lines("---\n\n本文。\n"));
+        assert!(rule.contains("<hr"), "{rule}");
+    }
 
     #[test]
     fn a_colour_survives_the_escaping_and_nothing_else_does() {

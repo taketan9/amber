@@ -247,6 +247,12 @@ fn excerpt(body: &[String]) -> String {
         if fenced || t.is_empty() || t.starts_with('#') || t.starts_with("---") {
             continue;
         }
+        // A table is not a sentence. `| 名前 | 状態 |` in the one line meant
+        // to remind you what the note is about tells you the note has a
+        // table, which you can see, and nothing about what is in it.
+        if t.starts_with('|') {
+            continue;
+        }
         // A picture is not a sentence. `![](attachments/note-1788450324680.jpg)`
         // is forty characters of filename in a line meant to remind you what
         // the note is about, and a note that opens with a screenshot showed
@@ -708,20 +714,27 @@ pub fn spans(line: &str) -> Vec<Span> {
 }
 
 /// A colour span at the very start of `s`: its text, its colour, and how
-/// many bytes it took.
+/// many **characters** it took.
 ///
 /// For a scanner that is walking a line character by character and needs to
 /// know whether *this* is the start of one. The recognising is the same as
 /// [`spans`] — one notation, one place that knows it.
+///
+/// **Characters and not bytes.** `find` counts bytes; the caller counts
+/// characters. With Japanese inside the span the two are three times apart,
+/// so the scanner jumped past the span *and* the text after it — which
+/// showed up as a second coloured word on a line coming out as
+/// `e="color:#0E93A8">シアン</span>` in the middle of a sentence.
 pub fn first_color(s: &str) -> Option<(String, String, usize)> {
-    let gt = s.find('>')?;
     if !s.starts_with("<span") {
         return None;
     }
+    let gt = s.find('>')?;
     let color = color_of(&s[..=gt])?;
     let after = &s[gt + 1..];
     let end = after.find("</span>")?;
-    Some((after[..end].to_string(), color, gt + 1 + end + "</span>".len()))
+    let bytes = gt + 1 + end + "</span>".len();
+    Some((after[..end].to_string(), color, s[..bytes].chars().count()))
 }
 
 fn push(out: &mut Vec<Span>, text: &str, color: Option<String>) {
@@ -1071,6 +1084,14 @@ mod tests {
         // 色の無い行は1つの塊。
         assert_eq!(spans("ただの行"), vec![Span { text: "ただの行".into(), color: None }]);
         assert!(spans("").is_empty());
+
+        // 表の行も二行目には出さない ── 「表がある」は見れば分かる。
+        {
+            let d = tempfile::tempdir().unwrap();
+            let p = d.path().join("t.md");
+            std::fs::write(&p, "---\ntitle: x\n---\n\n本文です。\n\n| 名前 | 状態 |\n| --- | --- |\n| 通知 | 済 |\n").unwrap();
+            assert_eq!(read(&p, 40).unwrap().excerpt, "本文です。");
+        }
 
         // 一覧の二行目と検索は、字だけを見る ── 色を付けた語が
         // 探せなくなるのが一番困る。
