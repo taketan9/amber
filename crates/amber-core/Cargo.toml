@@ -1,0 +1,26 @@
+[package]
+name = "amber-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+# amber の判断ぜんぶ。**cian を知らない。**
+#
+# 依存の向きは `amber ← cian` の一方向。cian-core がこのクレートに依存し、
+# 昔からの `crate::note::…` が動き続けるように再輸出している。逆向きにすると、
+# ノートのアプリがファイラの git や svn や SharePoint を積むことになる ──
+# 実際、分ける前の iPhone は 18,128 行の cian-core を丸ごと積んでいた。
+#
+# ここに置いてよいのは「ノートについての判断」だけ。I/O と UI に依存しない、
+# という cian-core の規則はそのまま引き継ぐ。
+[dependencies]
+anyhow = { workspace = true }
+serde_json = { workspace = true }
+chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
+# バックアップの zip を書く・読む。cian-core の `archive` は 7z も tar も rar も
+# 見る 1,521 行で、amber が要るのは**自分が書いた zip を読み書きすること**だけ。
+# 引きずると、ノートのアプリがアーカイバを積むことになる。
+zip = { version = "8", default-features = false, features = ["deflate"] }
+
+[dev-dependencies]
+tempfile = "3.27.0"

@@ -27,10 +27,7 @@ pub mod highlight;
 pub mod image;
 pub mod inspect;
 pub mod log;
-pub mod markdown;
 pub mod mermaid;
-pub mod note;
-pub mod notebook;
 pub mod office;
 pub mod ops;
 pub mod os;
@@ -40,12 +37,22 @@ pub mod rename;
 pub mod search;
 pub mod sharepoint;
 pub mod shellwhere;
-pub mod stamp;
 pub mod substitute;
-pub mod survey;
 pub mod textops;
 pub mod svn;
 pub mod theme;
+
+// ── ここから下は amber-core のもの ──
+//
+// **依存の向きは `amber ← cian` の一方向。** ノートについての判断は
+// `crates/amber-core` に移した ── ノートのアプリが git や svn や SharePoint を
+// 積む理由は無く、実際 iPhone は分ける前 18,128 行の cian-core を丸ごと
+// 積んでいた。cian はその上に乗る側なので、こちらが向こうを知る。
+//
+// 再輸出しているのは、`crate::note::…` と書いてある百数十か所を書き換えない
+// ため。**引っ越しと書き換えを同じコミットでやると、どちらが壊したのか
+// 言えなくなる。** 呼び名を `amber_core::note::…` に寄せるのは別の日に。
+pub use amber_core::{markdown, note, notebook, stamp, survey};
 pub mod viewer;
 
 /// Whether this build has a desktop under it.

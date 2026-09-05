@@ -169,17 +169,14 @@ pub fn migrate(from: &Path, to: &Path) -> anyhow::Result<usize> {
 /// would be a restore that could lose today's work to last week's copy.
 pub fn restore(zip: &Path, to: &Path) -> anyhow::Result<(usize, usize)> {
     std::fs::create_dir_all(to)?;
-    let cancel = std::sync::atomic::AtomicBool::new(false);
-    let mut nothing = |_: &crate::progress::Progress| {};
-    let mut ctl = crate::progress::Ctl { cancel: &cancel, on_progress: &mut nothing };
 
     // Into a room of its own first, so a half-unpacked archive never stands
     // among the notes.
-    let hold = std::env::temp_dir().join(format!("cian-restore-{}", std::process::id()));
+    let hold = std::env::temp_dir().join(format!("amber-restore-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&hold);
     std::fs::create_dir_all(&hold)?;
 
-    let members: Vec<String> = crate::archive::list(zip)?.into_iter().map(|m| m.name).collect();
+    let members = crate::zipbox::list(zip)?;
     // **The folder's own name comes off.** A backup of the notes folder is a
     // zip *of that folder*, so every member is `ノート/…` — put back as-is it
     // makes a `ノート` inside the notes, and every note in it looks new.
@@ -193,10 +190,9 @@ pub fn restore(zip: &Path, to: &Path) -> anyhow::Result<(usize, usize)> {
     } else {
         String::new()
     };
-    let report = crate::archive::extract(zip, &members, &hold, None, &strip, &mut ctl);
-    if !report.errors.is_empty() {
+    if let Err(e) = crate::zipbox::extract(zip, &hold, &strip) {
         let _ = std::fs::remove_dir_all(&hold);
-        anyhow::bail!("{}", report.errors.join(" / "));
+        return Err(e);
     }
 
     let mut put = 0usize;
