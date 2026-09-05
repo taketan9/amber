@@ -621,12 +621,18 @@ impl Pane {
             .iter()
             .filter(|e| show_hidden || !e.name.starts_with('.'))
             .filter(|e| {
+                // **An OR of ANDs**, the same reading the phone's search box
+                // gets (`note::terms`): `仕事 週報` wants both, `仕事 OR 家`
+                // takes either. One decision about what a query means, in one
+                // place, so the two do not agree only until somebody types
+                // two words. A plain one-word filter goes down the same road
+                // and comes out where it always did.
                 needle.is_empty()
-                    || e.name_lower.contains(&needle)
+                    || crate::note::hits(&e.name_lower, &needle)
                     || self
                         .search_text
                         .get(&e.name)
-                        .is_some_and(|t| t.contains(&needle))
+                        .is_some_and(|t| crate::note::hits(t, &needle))
             })
             .cloned()
             .collect();

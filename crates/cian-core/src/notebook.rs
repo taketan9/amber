@@ -92,6 +92,140 @@ pub fn drop_star(root: &Path, folder: &str) -> anyhow::Result<()> {
     write(root, &b)
 }
 
+/// Everything under `from`, moved to `to`.
+///
+/// **Copy, check, then remove — in that order.** Between two cloud providers
+/// this is not a rename: the bytes have to be written on the far side before
+/// anything is taken off this one, and if any of it fails the originals are
+/// still there. A note lost in the middle of moving is the worst thing a
+/// notes app can do.
+///
+/// Nothing is overwritten. A name already taken on the far side stops the
+/// whole move — merging two folders of notes is a decision, and this is not
+/// the moment to make it for somebody.
+///
+/// Everything, not only the notes: the pictures live in `attachments/` beside
+/// them and `.cian` holds the colours and the empty shelves. A move that took
+/// the notes and left the pictures would break every note with a picture.
+pub fn migrate(from: &Path, to: &Path) -> anyhow::Result<usize> {
+    let from = from.canonicalize()?;
+    let to = to.canonicalize()?;
+    if from == to {
+        return Ok(0);
+    }
+    if to.starts_with(&from) {
+        anyhow::bail!("移す先が、いまの場所の中にあります");
+    }
+
+    let mut jobs: Vec<(PathBuf, PathBuf)> = Vec::new();
+    let mut walk = vec![from.clone()];
+    while let Some(dir) = walk.pop() {
+        for e in std::fs::read_dir(&dir)? {
+            let at = e?.path();
+            let Ok(rel) = at.strip_prefix(&from) else { continue };
+            let dest = to.join(rel);
+            if at.is_dir() {
+                walk.push(at);
+                std::fs::create_dir_all(&dest)?;
+            } else {
+                if dest.exists() {
+                    anyhow::bail!("移す先に同じ名前があります: {}", rel.display());
+                }
+                jobs.push((at, dest));
+            }
+        }
+    }
+    for (src, dest) in &jobs {
+        if let Some(dir) = dest.parent() {
+            std::fs::create_dir_all(dir)?;
+        }
+        std::fs::copy(src, dest)?;
+    }
+    // Only now. Every byte is on the far side.
+    for (src, _) in &jobs {
+        let _ = std::fs::remove_file(src);
+    }
+    let mut dirs: Vec<PathBuf> = Vec::new();
+    let mut walk = vec![from.clone()];
+    while let Some(dir) = walk.pop() {
+        for e in std::fs::read_dir(&dir)? {
+            let at = e?.path();
+            if at.is_dir() {
+                walk.push(at.clone());
+                dirs.push(at);
+            }
+        }
+    }
+    dirs.sort_by_key(|d| std::cmp::Reverse(d.components().count()));
+    for d in dirs {
+        let _ = std::fs::remove_dir(d);
+    }
+    Ok(jobs.len())
+}
+
+/// A backup, put back. Returns (put in, left alone).
+///
+/// **Into the notes folder, never over a note.** A restore that overwrote
+/// would be a restore that could lose today's work to last week's copy.
+pub fn restore(zip: &Path, to: &Path) -> anyhow::Result<(usize, usize)> {
+    std::fs::create_dir_all(to)?;
+    let cancel = std::sync::atomic::AtomicBool::new(false);
+    let mut nothing = |_: &crate::progress::Progress| {};
+    let mut ctl = crate::progress::Ctl { cancel: &cancel, on_progress: &mut nothing };
+
+    // Into a room of its own first, so a half-unpacked archive never stands
+    // among the notes.
+    let hold = std::env::temp_dir().join(format!("cian-restore-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&hold);
+    std::fs::create_dir_all(&hold)?;
+
+    let members: Vec<String> = crate::archive::list(zip)?.into_iter().map(|m| m.name).collect();
+    // **The folder's own name comes off.** A backup of the notes folder is a
+    // zip *of that folder*, so every member is `ノート/…` — put back as-is it
+    // makes a `ノート` inside the notes, and every note in it looks new.
+    // Stripped only when the whole archive is under one name.
+    let top = members
+        .iter()
+        .filter_map(|m| m.split('/').next())
+        .collect::<std::collections::BTreeSet<_>>();
+    let strip = if top.len() == 1 && members.iter().any(|m| m.contains('/')) {
+        top.into_iter().next().unwrap_or("").to_string()
+    } else {
+        String::new()
+    };
+    let report = crate::archive::extract(zip, &members, &hold, None, &strip, &mut ctl);
+    if !report.errors.is_empty() {
+        let _ = std::fs::remove_dir_all(&hold);
+        anyhow::bail!("{}", report.errors.join(" / "));
+    }
+
+    let mut put = 0usize;
+    let mut kept = 0usize;
+    let mut walk = vec![hold.clone()];
+    while let Some(dir) = walk.pop() {
+        for e in std::fs::read_dir(&dir)? {
+            let at = e?.path();
+            let Ok(rel) = at.strip_prefix(&hold) else { continue };
+            let dest = to.join(rel);
+            if at.is_dir() {
+                walk.push(at);
+                std::fs::create_dir_all(&dest)?;
+            } else if dest.exists() {
+                kept += 1;
+            } else {
+                if let Some(d) = dest.parent() {
+                    std::fs::create_dir_all(d)?;
+                }
+                std::fs::copy(&at, &dest)?;
+                put += 1;
+            }
+        }
+    }
+    let _ = std::fs::remove_dir_all(&hold);
+    Ok((put, kept))
+}
+
+
 #[cfg(test)]
 mod tests {
     use super::*;

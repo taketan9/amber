@@ -370,152 +370,24 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
                 "text": cian_core::note::paint(&arg(p, "text"), &arg(p, "color")),
             }))
         }
-
-        // Everything, moved to a new home.
-        //
-        // **Copy, check, then remove — in that order.** Between two providers
-        // this is not a rename: the bytes have to be written on the far side
-        // before anything is taken off this one, and if any of it fails the
-        // originals are still there. A note lost in the middle of moving is
-        // the worst thing this app could do.
-        //
-        // Nothing is overwritten. A name already taken on the far side stops
-        // the whole move — merging two folders of notes is a decision, and
-        // this is not the moment to make it for somebody.
+        // Everything, moved to a new home — `notebook::migrate`, the
+        // same one the window calls. Copy, check, then remove; and
+        // nothing is overwritten.
         "migrate" => {
-            let from = std::path::PathBuf::from(arg(p, "from")).canonicalize()?;
-            let to = std::path::PathBuf::from(arg(p, "to")).canonicalize()?;
-            if from == to {
-                return Ok(serde_json::json!({ "moved": 0 }));
-            }
-            if to.starts_with(&from) {
-                anyhow::bail!("移す先が、いまの場所の中にあります");
-            }
-            // Everything, not only the notes: the pictures live in
-            // `attachments/` beside them and `.cian` holds the colours and
-            // the empty shelves. A move that took the notes and left the
-            // pictures would be a move that broke every note with a picture.
-            let mut jobs: Vec<(std::path::PathBuf, std::path::PathBuf)> = Vec::new();
-            let mut walk = vec![from.clone()];
-            while let Some(dir) = walk.pop() {
-                for e in std::fs::read_dir(&dir)? {
-                    let at = e?.path();
-                    let Ok(rel) = at.strip_prefix(&from) else { continue };
-                    let dest = to.join(rel);
-                    if at.is_dir() {
-                        walk.push(at);
-                        std::fs::create_dir_all(&dest)?;
-                    } else {
-                        if dest.exists() {
-                            anyhow::bail!("移す先に同じ名前があります: {}", rel.display());
-                        }
-                        jobs.push((at, dest));
-                    }
-                }
-            }
-            for (src, dest) in &jobs {
-                if let Some(dir) = dest.parent() {
-                    std::fs::create_dir_all(dir)?;
-                }
-                std::fs::copy(src, dest)?;
-            }
-            // Only now. Every byte is on the far side.
-            for (src, _) in &jobs {
-                let _ = std::fs::remove_file(src);
-            }
-            // The empty shells left behind, deepest first.
-            let mut dirs: Vec<std::path::PathBuf> = Vec::new();
-            let mut walk = vec![from.clone()];
-            while let Some(dir) = walk.pop() {
-                for e in std::fs::read_dir(&dir)? {
-                    let at = e?.path();
-                    if at.is_dir() {
-                        walk.push(at.clone());
-                        dirs.push(at);
-                    }
-                }
-            }
-            dirs.sort_by_key(|d| std::cmp::Reverse(d.components().count()));
-            for d in dirs {
-                let _ = std::fs::remove_dir(d);
-            }
-            Ok(serde_json::json!({ "moved": jobs.len() }))
+            let from = std::path::PathBuf::from(arg(p, "from"));
+            let to = std::path::PathBuf::from(arg(p, "to"));
+            Ok(serde_json::json!({ "moved": cian_core::notebook::migrate(&from, &to)? }))
         }
 
-        // A backup, put back.
-        //
-        // **Into the notes folder, never over a note.** A restore that
-        // overwrote would be a restore that could lose today's work to last
-        // week's copy — so a name already taken is skipped and said out loud.
+        // A backup, put back — `notebook::restore`, the same one the
+        // window calls.
         "restore" => {
             let zip = std::path::PathBuf::from(arg(p, "zip"));
             let to = std::path::PathBuf::from(arg(p, "to"));
-            std::fs::create_dir_all(&to)?;
-            let cancel = std::sync::atomic::AtomicBool::new(false);
-            let mut nothing = |_: &cian_core::progress::Progress| {};
-            let mut ctl = cian_core::progress::Ctl { cancel: &cancel, on_progress: &mut nothing };
-            // Into a room of its own first, so a half-unpacked archive never
-            // stands among the notes.
-            let hold = std::env::temp_dir().join(format!("cian-restore-{}", std::process::id()));
-            let _ = std::fs::remove_dir_all(&hold);
-            std::fs::create_dir_all(&hold)?;
-            let members: Vec<String> = cian_core::archive::list(&zip)?
-                .into_iter()
-                .map(|m| m.name)
-                .collect();
-            // **The folder's own name comes off.** A backup of the notes
-            // folder is a zip *of that folder*, so every member is
-            // `ノート/…` — put back as-is it makes a `ノート` inside the
-            // notes, and every note in it looks new. Stripped only when the
-            // whole archive is under one name; a zip of loose notes has
-            // nothing to strip.
-            let top = members
-                .iter()
-                .filter_map(|m| m.split('/').next())
-                .collect::<std::collections::BTreeSet<_>>();
-            let strip = if top.len() == 1 && members.iter().any(|m| m.contains('/')) {
-                top.into_iter().next().unwrap_or("").to_string()
-            } else {
-                String::new()
-            };
-            let report = cian_core::archive::extract(&zip, &members, &hold, None, &strip, &mut ctl);
-            if !report.errors.is_empty() {
-                let _ = std::fs::remove_dir_all(&hold);
-                anyhow::bail!("{}", report.errors.join(" / "));
-            }
-            let mut put = 0usize;
-            let mut kept = 0usize;
-            let mut walk = vec![hold.clone()];
-            while let Some(dir) = walk.pop() {
-                for e in std::fs::read_dir(&dir)? {
-                    let at = e?.path();
-                    let Ok(rel) = at.strip_prefix(&hold) else { continue };
-                    let dest = to.join(rel);
-                    if at.is_dir() {
-                        walk.push(at);
-                        std::fs::create_dir_all(&dest)?;
-                    } else if dest.exists() {
-                        kept += 1;
-                    } else {
-                        if let Some(d) = dest.parent() {
-                            std::fs::create_dir_all(d)?;
-                        }
-                        std::fs::copy(&at, &dest)?;
-                        put += 1;
-                    }
-                }
-            }
-            let _ = std::fs::remove_dir_all(&hold);
+            let (put, kept) = cian_core::notebook::restore(&zip, &to)?;
             Ok(serde_json::json!({ "put": put, "kept": kept }))
         }
 
-        // Rename a folder, or throw it away with everything in it.
-        //
-        // **Both are kept inside the chosen folder**, checked after the paths
-        // are made absolute: a name with `..` in it would otherwise rename or
-        // delete something that is not a note at all. A phone has no wastepaper
-        // basket, so `drop` is the real thing — the asking is the caller's job
-        // and there is nothing here that can undo it.
         "book" => {
             let root = std::path::PathBuf::from(arg(p, "path"));
             let root = root.canonicalize()?;

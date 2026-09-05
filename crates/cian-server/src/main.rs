@@ -2865,6 +2865,7 @@ impl Session {
                 "font": cian_lua::state_get("gui_font"),
                 "view": cian_lua::state_get("gui_view"),
                 "notes": cian_lua::state_get("gui_notes"),
+                "notes_seen": cian_lua::state_get("gui_notes_seen"),
                 "hints": cian_lua::state_get("gui_hints"),
                 // Where the two dividers were left. GUI-only keys: the
                 // terminal build has `main_pct` and `panes_pct` too but does
@@ -2960,7 +2961,8 @@ impl Session {
                 // opens with, because they are one program.
                 if !matches!(key,
                     "gui_look" | "gui_editor" | "gui_font" | "gui_view" | "gui_hints"
-                    | "gui_main_pct" | "gui_panes_pct" | "gui_notes" | "theme")
+                    | "gui_main_pct" | "gui_panes_pct" | "gui_notes" | "gui_notes_seen"
+                    | "theme")
                 {
                     anyhow::bail!("覚えられない項目です: {key}");
                 }
@@ -4930,6 +4932,25 @@ impl Session {
             // terminal build draws, turned into a document instead of into
             // styled lines. The window is handed markup it did not have to
             // understand, which is also what keeps a README from running.
+            // Everything, moved to a new home. The same
+            // `notebook::migrate` the phone calls: copy, check, then remove,
+            // and nothing overwritten.
+            "migrate" => {
+                let from = std::path::PathBuf::from(arg(req, "from"));
+                let to = std::path::PathBuf::from(arg(req, "to"));
+                Ok(serde_json::json!({
+                    "moved": cian_core::notebook::migrate(&from, &to)?,
+                }))
+            }
+
+            // A backup, put back. Never over a note that is there.
+            "restore" => {
+                let zip = std::path::PathBuf::from(arg(req, "zip"));
+                let to = std::path::PathBuf::from(arg(req, "to"));
+                let (put, kept) = cian_core::notebook::restore(&zip, &to)?;
+                Ok(serde_json::json!({ "put": put, "kept": kept }))
+            }
+
             // Markdown files copied in from somewhere else.
             //
             // **Copied, never moved, never overwriting.** Whatever exported

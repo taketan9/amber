@@ -2467,6 +2467,21 @@ function contextRows() {
         v.push(group(tr('Notes ▸', 'ノート ▸'), () => [
             { label: tr("Go to the notes", 'ノートの保存場所へ'), value: ':notes', run: () => { closeMenu(); cmdNotes(); } },
             { label: tr("Choose the folder\u2026", '保存場所を選ぶ…'), value: '', run: () => { closeMenu(); cmdNotesRoot(); } },
+            ...(notePlaces.length
+                ? [group(tr('Where it has been \u25b8', '開いてきた場所 ▸'), () => notePlaces.map((at) => ({
+                    label: at.split(/[\\/]/).pop() + (at === chosenRoot ? '  \u25cf' : ''),
+                    value: at,
+                    run: async () => {
+                        closeMenu();
+                        chosenRoot = at;
+                        await ask('remember', { key: 'gui_notes', value: at });
+                        notes.root = '';
+                        await goToNotes({ name: at.split(/[\\/]/).pop() || 'cian', path: at });
+                    },
+                })))]
+                : []),
+            { label: tr("Move the notes here\u2026", 'いまのノートをここへ移す…'), value: '', run: () => { closeMenu(); cmdNotesMove(); } },
+            { label: tr("Restore from a backup\u2026", 'バックアップから戻す…'), value: '', run: () => { closeMenu(); cmdNotesRestore(); } },
             { label: tr("Import\u2026 (the other pane's .md)", 'インポート…（反対のペインの .md）'), value: '', run: () => { closeMenu(); cmdNotesImport(); } },
             { label: tr("Backup\u2026", 'バックアップ…'), value: ':backup', run: () => { closeMenu(); cmdBackup(); } },
             { label: tr("New note", '新しいノート'), value: ':newnote', run: () => { closeMenu(); cmdNewNote(); } },
@@ -6499,6 +6514,20 @@ let noteRoots = [];
 /// it will hold a note is a desktop nobody takes a note in.
 let chosenRoot = '';
 
+/// Everywhere the notes have been, newest first.
+///
+/// **Because finding it is the hard part.** The phone learned this first:
+/// iCloud Drive, Google Drive and Dropbox are all several taps down inside a
+/// picker, and the answer is not a better picker — it is never having to use
+/// it twice. Found once, listed for ever.
+let notePlaces = [];
+
+function rememberPlace(at) {
+    if (!at) return;
+    notePlaces = [at, ...notePlaces.filter((x) => x !== at)].slice(0, 8);
+    ask('remember', { key: 'gui_notes_seen', value: notePlaces.join('\n') });
+}
+
 /// Everywhere notes can be: what init.lua declares, plus the one chosen here.
 function allNoteRoots() {
     const v = noteRoots.slice();
@@ -6516,6 +6545,7 @@ async function cmdNotes() {
         if (!r) return;
         chosenRoot = r.path;
         await ask('remember', { key: 'gui_notes', value: r.path });
+        rememberPlace(r.path);
         say(r.made
             ? tr(`notes live in ${r.path} — change it in the menu`, `ノートの保存場所を作りました: ${r.path}（メニューで変えられます）`)
             : tr(`notes: ${r.path}`, `ノート: ${r.path}`));
@@ -6549,9 +6579,75 @@ async function cmdNotesRoot() {
     if (!r) return;
     chosenRoot = r.path;
     await ask('remember', { key: 'gui_notes', value: r.path });
+    rememberPlace(r.path);
     notes.root = '';
     await goToNotes({ name: r.path.split(/[\\/]/).pop() || 'cian', path: r.path });
     say(tr(`notes: ${r.path}`, `ノート: ${r.path}`));
+}
+
+/// Move every note from where they were to where they are now.
+///
+/// **The question the phone asks when you change folders**, asked here as a
+/// command instead: a window has two panes and no moment where it can be
+/// sure you did not mean to point at an empty folder on purpose.
+async function cmdNotesMove() {
+    const which = state.focus;
+    const pane = state[which];
+    if (!pane || !pane.cwd) return;
+    const from = notePlaces.find((at) => at !== pane.cwd);
+    if (!from) {
+        say(tr('nowhere to move from — this is the only notes folder there has been',
+               '移してくる元がありません（ここしか開いていません）'), true);
+        return;
+    }
+    const rows = notePlaces.filter((at) => at !== pane.cwd).map((at) => ({ label: at, at }));
+    show(tr("Move the notes here", 'いまのノートをここへ移す'),
+        tr(`into ${pane.cwd}`, `${pane.cwd} へ`),
+        rows, {
+            filter: true,
+            foot: tr('Enter move (copy, check, then remove)   Esc close', 'Enter 移す（写して、確かめて、消す）   Esc 閉じる'),
+            pick: async (row) => {
+                closeReport();
+                const yes = await confirm(
+                    tr('Move every note?', 'ノートを丸ごと移しますか'),
+                    tr(`from ${row.at} — nothing is left behind, and nothing is overwritten`,
+                       `${row.at} から。元の場所には残りません。同じ名前があるときは、何も動かしません`));
+                if (!yes) return;
+                const out = await ask('migrate', { from: row.at, to: pane.cwd });
+                if (!out) return;
+                notes.root = '';
+                const fresh = await ask('list', { pane: which, path: pane.cwd });
+                if (fresh) { state[which] = fresh; draw(which); }
+                say(tr(`${out.moved} file(s) moved`, `${out.moved} 件を移しました`));
+            },
+        });
+}
+
+/// A backup zip, put back into this folder.
+async function cmdNotesRestore() {
+    const which = state.focus;
+    const pane = state[which];
+    const other = state[which === 'left' ? 'right' : 'left'];
+    if (!pane || !pane.cwd) return;
+    const row = other && other.entries && other.entries[other.cursor];
+    const zip = row && !row.is_dir && /\.zip$/i.test(row.name) ? row.path : null;
+    if (!zip) {
+        say(tr('put the cursor on a .zip in the other pane', '反対のペインで zip にカーソルを置いてください'), true);
+        return;
+    }
+    const yes = await confirm(
+        tr('Restore from this backup?', 'このバックアップから戻しますか'),
+        tr(`${row.name} — notes already here are left alone`,
+           `${row.name} ── いまあるノートは上書きしません`));
+    if (!yes) return;
+    const out = await ask('restore', { zip, to: pane.cwd });
+    if (!out) return;
+    notes.root = '';
+    const fresh = await ask('list', { pane: which, path: pane.cwd });
+    if (fresh) { state[which] = fresh; draw(which); }
+    say(out.kept
+        ? tr(`${out.put} restored, ${out.kept} left alone`, `${out.put} 件を戻し、同じ名前の ${out.kept} 件はそのままにしました`)
+        : tr(`${out.put} restored`, `${out.put} 件を戻しました`));
 }
 
 /// Copy Markdown files in from somewhere else.
@@ -10814,6 +10910,7 @@ async function recall() {
         if (px >= FONT.min && px <= FONT.max) setFont(px, false);
     }
     if (s.notes) chosenRoot = s.notes;
+    if (s.notes_seen) notePlaces = s.notes_seen.split('\n').filter(Boolean);
     if (s.view && VIEWS.includes(s.view)) setView(s.view, false);
     if (s.hints === '0') { hintsOn = false; drawHints(); }
     // Where the dividers were left. Applied without saving them straight back.
