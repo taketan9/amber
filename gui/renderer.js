@@ -422,6 +422,9 @@ async function loadNotes(which) {
     // `.cian/settings.json` because a shelf with nothing on it cannot be
     // named by the notes.
     notes.shelves = r.stars || [];
+    // While we are here: the routines this folder owes, and the timers for
+    // what it is going to want.
+    armRings(pane.cwd).catch(() => {});
     draw(which);
 }
 
@@ -5622,6 +5625,7 @@ function buildCommands() {
     { name: 'newnote', about: tr("make a note here and open it", 'ここにノートを作って開く'), run: cmdNewNote },
     { name: 'tag', about: tr("narrow the listing to one tag", 'タグで一覧を絞る'), run: cmdTag },
     { name: 'star', about: tr("put this note on a favourite shelf (or take it off)", 'このノートをお気に入りの棚へ（外すのも）'), run: cmdStar },
+    { name: 'backup', about: tr("zip the notes into the other pane", 'ノートを zip にして反対のペインへ'), run: cmdBackup },
     { name: 'paste', about: tr("paste the held files here (also Ctrl+V / y)", '保持したファイルをここへ貼り付け（Ctrl+V / y でも）'), run: paste },
     { name: 'local', about: tr("close the server and come back to this disk", 'サーバを閉じてローカルへ戻る'), run: cmdDisconnect },
     { name: 'aicmd', about: tr("AI: a shell command from a description", 'AI: 説明からシェルコマンドを作る'), arg: tr('what you want', 'やりたいこと'), run: cmdAiCmd },
@@ -6530,6 +6534,120 @@ async function cmdStar() {
 /// The row that means "type a name", told apart from a shelf actually called
 /// that by being a string nobody can type.
 const NEW_SHELF = '\u0000new';
+
+/// The reminders, kept by the window itself.
+///
+/// **Only while cian is open.** 2026-09-05: 「窓版はアプリ起動中だけでいいよ。
+/// 常駐させるし、起動していない時は通知なしでよい」. So there is no daemon and
+/// no login item — a timer per reminder, and they go when the window does.
+/// The phone is the one that rings when nothing is running.
+const rings = { timers: [], root: '' };
+
+function clearRings() {
+    for (const t of rings.timers) clearTimeout(t);
+    rings.timers = [];
+}
+
+/// Read the folder's reminders, carry out what the routines owe, and set the
+/// timers.
+///
+/// The catching-up happens here rather than on a clock: this is the moment
+/// cian is looking at the folder, and a routine that came due while the
+/// window was shut has to be made *some* time. `cian_core::note::carry_out`
+/// writes down that it did, so opening the folder twice does not make two.
+async function armRings(dir) {
+    if (!dir || rings.root === dir) return;
+    rings.root = dir;
+    clearRings();
+    const r = await ask('rings', { path: dir });
+    if (!r) return;
+    if (r.made && r.made.length) {
+        say(tr(`made ${r.made.length} note(s) the routines owed`,
+               `定型の分を ${r.made.length} 件作りました`));
+        notes.root = '';
+    }
+    const now = Date.now();
+    for (const ring of r.rings || []) {
+        // `2026-09-09 09:00` — parsed as local time, which is what it was
+        // written as. `new Date("… …")` is not portable; the parts are.
+        const m = /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2})$/.exec(ring.at || '');
+        if (!m) continue;
+        const when = new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]).getTime();
+        const wait = when - now;
+        // A day at a time: `setTimeout` is milliseconds in a 32-bit number
+        // and anything past ~24.8 days fires *immediately*, which would be a
+        // window that shouts about next month's routine on startup.
+        if (wait <= 0 || wait > 20 * 24 * 3600 * 1000) continue;
+        rings.timers.push(setTimeout(() => {
+            try {
+                const n = new Notification(ring.title || 'cian', {
+                    body: tr('cian — a note wants you', 'cian — ノートが呼んでいます'),
+                });
+                // Pressing it opens the note, which is the only reason to
+                // put a name on a notification.
+                n.onclick = async () => {
+                    const f = await ask('viewpath', { path: ring.path });
+                    if (f) await showFile(f);
+                };
+            } catch (e) {
+                say(tr(`could not show a notification: ${e.message}`,
+                       `通知を出せませんでした: ${e.message}`), true);
+            }
+            // Whatever it was, ask again: a daily routine has another one
+            // tomorrow and this is the cheapest moment to find out.
+            rings.root = '';
+            armRings(dir).catch(() => {});
+        }, wait));
+    }
+}
+
+/// `:backup` — a zip of some or all of the notes, into the other pane.
+///
+/// **The other pane is where things go.** That is what a two-pane file
+/// manager means, and it saves inventing a save dialog for a question the
+/// window already has an answer to.
+async function cmdBackup() {
+    const which = state.focus;
+    const pane = state[which];
+    const other = state[which === 'left' ? 'right' : 'left'];
+    if (!pane || !pane.cwd) return;
+    if (!other || !other.cwd || other.remote || other.archive) {
+        say(tr('the other pane has to be a local folder', '反対側のペインをローカルのディレクトリにしてください'), true);
+        return;
+    }
+    const r = await ask('notes', { path: pane.cwd });
+    if (!r) return;
+    const row = pane.entries && pane.entries[pane.cursor];
+    const here = row && !row.dir && !row.parent ? r.notes.find((n) => n.path === row.path) : null;
+    const tags = [...new Set(r.notes.flatMap((n) => n.tags))].sort();
+    const rows = [
+        { label: tr('everything', 'すべて'), scope: 'all', what: '' },
+        ...(row && row.dir && !row.parent
+            ? [{ label: tr(`the folder ${row.name}`, `フォルダ ${row.name}`), scope: 'book', what: row.name }]
+            : []),
+        ...(here ? [{ label: tr(`this note — ${here.title}`, `このノート — ${here.title}`), scope: 'note', what: here.path }] : []),
+        ...tags.map((t) => ({ label: `#${t}`, scope: 'tag', what: t })),
+    ];
+    show(tr("Backup", 'バックアップ'),
+        tr(`into ${other.cwd}`, `${other.cwd} へ`),
+        rows, {
+            filter: true,
+            foot: tr('type to narrow   Enter make the zip   Esc close', '打って絞る   Enter zip を作る   Esc 閉じる'),
+            pick: async (pick) => {
+                closeReport();
+                const out = await ask('backup', {
+                    path: r.root, scope: pick.scope, what: pick.what, into: other.cwd,
+                });
+                if (!out) return;
+                const fresh = await ask('list', { pane: which === 'left' ? 'right' : 'left', path: other.cwd });
+                if (fresh) {
+                    state[which === 'left' ? 'right' : 'left'] = fresh;
+                    draw(which === 'left' ? 'right' : 'left');
+                }
+                say(tr(`${out.name} — ${out.files} file(s)`, `${out.name} — ${out.files} 件`));
+            },
+        });
+}
 
 async function cmdNewNote() {
     const which = state.focus;

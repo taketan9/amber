@@ -1038,6 +1038,16 @@ pub fn today() -> String {
     chrono::Local::now().format("%Y-%m-%d").to_string()
 }
 
+/// Now, as the clock on this machine reads it.
+///
+/// Here so that a front end which has to keep its own timers does not have to
+/// depend on a date library to ask what time it is — the two things it needs
+/// (this and [`next_ring`]) then come from the same place, and cannot end up
+/// disagreeing about which day it is.
+pub fn now_local() -> chrono::NaiveDateTime {
+    chrono::Local::now().naive_local()
+}
+
 /// The moment, to the second — what an untitled note is called.
 ///
 /// The day alone is not enough: three notes made in one afternoon were
@@ -1074,6 +1084,62 @@ pub fn new_note(title: &str, today: &str, now: &str) -> (String, String) {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn catching_up_writes_down_that_it_caught_up() {
+        use chrono::NaiveDate;
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("週報.md");
+        std::fs::write(
+            &p,
+            "---\ntitle: 週報\nrepeat: weekly wed 09:00\nlast: 2026-08-30\n---\n本文。\n",
+        )
+        .unwrap();
+
+        let made = catch_up(&p, NaiveDate::from_ymd_opt(2026, 9, 5).unwrap()).unwrap();
+        assert_eq!(made.len(), 1, "2026-09-02 は水曜: {made:?}");
+        assert!(std::fs::read_to_string(&p).unwrap().contains("last: 2026-09-02"));
+
+        // **二度目は何も作らない。** これを忘れると、フォルダを開くたびに
+        // 「作りました」と言い続ける。
+        assert!(catch_up(&p, NaiveDate::from_ymd_opt(2026, 9, 5).unwrap()).unwrap().is_empty());
+
+        // 定型でないノートは、何も作らないしエラーでもない。
+        let plain = d.path().join("ただのノート.md");
+        std::fs::write(&plain, "---\ntitle: x\n---\n本文。\n").unwrap();
+        assert!(catch_up(&plain, NaiveDate::from_ymd_opt(2026, 9, 5).unwrap()).unwrap().is_empty());
+    }
+
+    #[test]
+    fn the_next_time_a_routine_comes_round() {
+        use chrono::NaiveDate;
+        let at = |y, m, d, h, mi| NaiveDate::from_ymd_opt(y, m, d).unwrap().and_hms_opt(h, mi, 0).unwrap();
+
+        // 今日の時刻がまだなら今日、過ぎていれば明日。
+        assert_eq!(next_ring(Every::Daily, 9, 0, at(2026, 9, 5, 8, 0)), Some(at(2026, 9, 5, 9, 0)));
+        assert_eq!(next_ring(Every::Daily, 9, 0, at(2026, 9, 5, 9, 0)), Some(at(2026, 9, 6, 9, 0)));
+
+        // 2026-09-05 は土曜。水曜は 09-09。
+        assert_eq!(
+            next_ring(Every::Weekly(2), 9, 0, at(2026, 9, 5, 12, 0)),
+            Some(at(2026, 9, 9, 9, 0))
+        );
+        // 当日の朝、時刻の前なら今日。
+        assert_eq!(
+            next_ring(Every::Weekly(2), 9, 0, at(2026, 9, 9, 8, 0)),
+            Some(at(2026, 9, 9, 9, 0))
+        );
+
+        // 31日は、30日しかない月では末日へ寄る ── そうしないと
+        // 「毎月31日」が「7か月だけ」になる。
+        assert_eq!(
+            next_ring(Every::Monthly(31), 9, 0, at(2026, 11, 1, 0, 0)),
+            Some(at(2026, 11, 30, 9, 0))
+        );
+        // 鳴った直後に訊いても、同じものを返さない。
+        let fired = at(2026, 9, 5, 9, 0);
+        assert!(next_ring(Every::Daily, 9, 0, fired).unwrap() > fired);
+    }
 
     #[test]
     fn a_colour_is_a_span_and_everything_else_is_left_as_typed() {
@@ -1591,6 +1657,100 @@ mod tests {
 /// Wednesday to write a file. The notification arrives on time; the copy is
 /// made the next time the app is opened, from `last`, which is why `last`
 /// exists. Say so plainly rather than implying a clock nobody has.
+/// Make every copy a routine owes, and write down that it was made.
+///
+/// **The writing down is the whole point.** The copy is easy; remembering
+/// that it happened is what stops tomorrow making it again — and the first
+/// version of this in the window did the first half only, so opening the
+/// folder said 「1 件作りました」 every single time. One function, called by
+/// both front ends, so there is one answer to "has this been done".
+///
+/// Returns what it made. A note with no routine makes nothing and is not an
+/// error — most notes have no routine.
+pub fn catch_up(path: &Path, today: chrono::NaiveDate) -> anyhow::Result<Vec<PathBuf>> {
+    let text = std::fs::read_to_string(path)?;
+    let r = remind(&text);
+    let Some((every, _, _)) = r.every else { return Ok(Vec::new()) };
+    let owed = due_since(every, r.last, today);
+    let mut made = Vec::new();
+    let mut last = None;
+    for day in owed {
+        made.push(carry_out(path, day)?);
+        last = Some(day);
+    }
+    if let Some(day) = last {
+        // Read again: `carry_out` did not touch this file, but somebody else
+        // may have, and the field goes onto what is there now.
+        let now = std::fs::read_to_string(path)?;
+        std::fs::write(path, set_field(&now, "last", Some(&day.to_string())))?;
+    }
+    Ok(made)
+}
+
+/// When a routine next comes round, from a given moment.
+///
+/// **For a front end that has to keep its own clock.** The phone hands the
+/// times to iOS and forgets them; a window has no such thing, so it sets a
+/// timer — and the moment to set it for is a judgement about what "every
+/// Wednesday at nine" means, which belongs here rather than in JavaScript.
+///
+/// `from` is exclusive: called again the instant after one fires, it gives
+/// the one after, not the same one for ever.
+pub fn next_ring(
+    every: Every,
+    hour: u32,
+    minute: u32,
+    from: chrono::NaiveDateTime,
+) -> Option<chrono::NaiveDateTime> {
+    let day = from.date();
+    match every {
+        Every::Daily => {
+            let today = day.and_hms_opt(hour, minute, 0)?;
+            if today > from {
+                Some(today)
+            } else {
+                day.succ_opt()?.and_hms_opt(hour, minute, 0)
+            }
+        }
+        Every::Weekly(w) => {
+            // The note counts Monday as 0; chrono counts it as 0 too
+            // (`num_days_from_monday`), which is the one place these two
+            // agree and worth saying out loud.
+            use chrono::Datelike;
+            let mut d = day;
+            for _ in 0..8 {
+                if d.weekday().num_days_from_monday() == w {
+                    if let Some(at) = d.and_hms_opt(hour, minute, 0) {
+                        if at > from {
+                            return Some(at);
+                        }
+                    }
+                }
+                d = d.succ_opt()?;
+            }
+            None
+        }
+        Every::Monthly(want) => {
+            let mut d = day;
+            // Two months of days is enough to find the next one, and it
+            // handles a 31st in a month that has thirty — `last_day` is what
+            // decides where that lands, so this asks the same question the
+            // catching-up does rather than a second opinion.
+            for _ in 0..64 {
+                if due_on(want, d) {
+                    if let Some(at) = d.and_hms_opt(hour, minute, 0) {
+                        if at > from {
+                            return Some(at);
+                        }
+                    }
+                }
+                d = d.succ_opt()?;
+            }
+            None
+        }
+    }
+}
+
 pub fn carry_out(
     template: &std::path::Path,
     on: chrono::NaiveDate,
@@ -1768,10 +1928,7 @@ pub fn due_since(
         let hit = match every {
             Every::Daily => true,
             Every::Weekly(w) => d.weekday().num_days_from_monday() == w,
-            Every::Monthly(day) => {
-                let last_of_month = last_day(d.year(), d.month());
-                d.day() == day.min(last_of_month)
-            }
+            Every::Monthly(day) => due_on(day, d),
         };
         if hit {
             out.push(d);
@@ -1780,6 +1937,16 @@ pub fn due_since(
         d = next;
     }
     out
+}
+
+/// Whether a monthly routine falls on this day.
+///
+/// The 31st in a month of thirty lands on the last day of it — otherwise
+/// 「毎月31日」 quietly means 「7か月だけ」. One answer, asked by both the
+/// catching-up and the next-time-round.
+fn due_on(want: u32, d: chrono::NaiveDate) -> bool {
+    use chrono::Datelike;
+    d.day() == want.min(last_day(d.year(), d.month()))
 }
 
 fn last_day(year: i32, month: u32) -> u32 {
