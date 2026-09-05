@@ -431,11 +431,16 @@ async function main() {
         ['read:\'二行目: \' + [...document.querySelectorAll(".rows.cian .row .sub")].map(e=>e.textContent).filter(Boolean).join(" / ")', ''],
         ['shot:cian-view@#work', 'cian ビュー'],
         ['shot:cian-rows@.rows.cian', 'ノート行 ── 二行分の高さで揃っているか'],
-        // ディレクトリを移ったら読み直すか。**入るのは Enter だけではない**ので
-        // 読み直しは `draw` にぶら下げてある ── ここはその一本を押している。
-        ['land:sub', '子ディレクトリへ'], ['Enter', '入る'], ['wait:2000', ''],
+        // **フォルダは「入る」ものではなく「絞る」もの**（2026-09-05）。
+        // 左の列で選ぶと真ん中がそのフォルダのノートになる ── `land:sub` /
+        // `Enter` はもう当たらない（そこに `sub` の行が無いので）。台本を
+        // 新しい契約の形に書き直した：確かめていることは同じ、
+        // 「フォルダを選ぶと一覧がそのフォルダのノートになる」。
+        ['read:(async()=>{await pickRail("book","sub");return "sub を選んだ";})()', '子フォルダで絞る'],
+        ['wait:1500', ''],
         ['read:\'子の題: \' + [...document.querySelectorAll(".rows.cian .row .name")].map(e=>e.textContent).join(" / ")', ''],
-        ['land:..', '戻る'], ['Enter', ''], ['wait:1500', ''],
+        ['read:(async()=>{await pickRail("all","");return "すべてへ";})()', '全部に戻す'],
+        ['wait:1500', ''],
         // 画像の貼り付け ── ノートに撮った画面をそのまま置く。
         // 本物の `paste` を投げる（Monaco の textarea ではなく容れ物へ、
         // capture で拾う実装なので）。**入った文字だけでは足りない**ので、

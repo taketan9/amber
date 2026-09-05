@@ -422,6 +422,11 @@ async function loadNotes(which) {
     // `.cian/settings.json` because a shelf with nothing on it cannot be
     // named by the notes.
     notes.shelves = r.stars || [];
+    notes.books = r.books || [];
+    drawRail();
+    // **入ったら「すべてのノート」。** 行き先を選ぶ前の真ん中がディレクトリ
+    // 一覧のままだと、三列に見えて中身はファイラのままになる。
+    if (viewMode === 'cian' && !pane.flat) pickRail(rail.kind, rail.what).catch(() => {});
     // While we are here: the routines this folder owes, and the timers for
     // what it is going to want.
     armRings(pane.cwd).catch(() => {});
@@ -544,7 +549,7 @@ function draw(which) {
     // [左] やパスの表示も不要」。ファイラの頭（どちら側か・どこにいるか・
     // 履歴の矢印）は、ファイルを操るための道具で、ノートを読むための
     // ものではない。ノートの側は**名前と、何本あるか**だけでいい。
-    if (viewMode === 'cian' && notes.root === pane.cwd) {
+    if (viewMode === 'cian' && (notes.root === pane.cwd || pane.flat)) {
         crumb.replaceChildren(cianHead(pane));
     } else {
         crumb.replaceChildren(nav, path);
@@ -1815,6 +1820,7 @@ function setView(mode, remember = true) {
     // The two halves, or the one surface. Set on `#work` so the CSS decides
     // where `#view` sits — the editor itself is the same box either way.
     document.body.dataset.cian = mode === 'cian' ? 'on' : 'off';
+    drawRail();
     const pad = document.getElementById('cianpad');
     if (pad) {
         pad.textContent = tr('choose a note on the left', '左でノートを選ぶと、ここに出ます');
@@ -1826,17 +1832,135 @@ function setView(mode, remember = true) {
 /// The lower-cased extension, or ''. Four functions asked this question with
 /// the same regex on four lines — the audit's "same line four times" — and
 /// four copies of one rule is how one of them starts answering differently.
-/// cian モードの頭 ── 描いた印と、名前と、中身の数。
+/// 真ん中の列の頭 ── **いま何を見ているか**。
 ///
-/// アイコンと同じ2つの括弧を描く（`Mark` は電話の側にもある）。
-/// ホーム画面のアイコンと、一覧の頭と、同じものに見えるように。
+/// ロゴと名前は左の列が言っているので、ここで繰り返さない。ここが答える
+/// のは「絞っている最中かどうか」で、それは左の反転だけでは足りない ──
+/// 目は真ん中を見ているので。
 function cianHead(pane) {
     const box = document.createElement('span');
     box.className = 'cianhead';
 
+    const name = document.createElement('span');
+    name.className = 'ciantitle';
+    name.textContent = pane.flat || tr("All notes", 'すべてのノート');
+
+    const sub = document.createElement('span');
+    sub.className = 'ciansub';
+    const n = (pane.entries || []).filter((e) => !e.parent && !e.is_dir).length;
+    sub.textContent = tr(`${n} notes`, `${n} 本`);
+
+    const words = document.createElement('span');
+    words.className = 'cianwords';
+    words.append(name, sub);
+    box.append(words);
+    return box;
+}
+
+/// 左の列 ── 行き先の一覧。
+///
+/// **歩く場所ではない。** ファイラの一覧はディレクトリを一階層ずつ見せる
+/// もので、それはファイルを操るための形。ノートを読む人が知りたいのは
+/// 「どこに何があるか」で、フォルダもタグも★も**同じ種類の答え**
+/// （＝この条件のノートを見せて）── だからひとつの列に並ぶ。
+///
+/// 中身は毎回 `notes` から組み立てる。**索引は持たない** ── ノートは
+/// ただのファイルで、フォルダと front matter がそのまま索引だから。
+const rail = { kind: 'all', what: '' };
+
+function drawRail() {
+    const el2 = document.getElementById('cianrail');
+    if (!el2) return;
+    el2.hidden = viewMode !== 'cian';
+    if (el2.hidden) return;
+
+    const all = [...notes.by.values()];
+    const frag = document.createDocumentFragment();
+
+    const brand = document.createElement('div');
+    brand.className = 'brand';
+    brand.append(cianMark(), Object.assign(document.createElement('span'), {
+        className: 'bname', textContent: 'cian',
+    }));
+    frag.append(brand);
+
+    const head = (text) => {
+        const h = document.createElement('div');
+        h.className = 'rhead';
+        h.textContent = text;
+        frag.append(h);
+    };
+    const item = (label, n, kind, what, opts = {}) => {
+        const d = document.createElement('div');
+        d.className = 'ritem' + (rail.kind === kind && rail.what === what ? ' on' : '');
+        if (opts.depth) d.dataset.depth = String(opts.depth);
+        if (opts.star) {
+            const st = document.createElement('span');
+            st.className = 'st';
+            st.textContent = '\u2605';
+            d.append(st);
+        }
+        if (opts.colour !== undefined) {
+            const sq = document.createElement('span');
+            sq.className = 'sq';
+            if (opts.colour) sq.style.background = opts.colour;
+            d.append(sq);
+        }
+        const name = document.createElement('span');
+        name.className = 'name';
+        name.textContent = label;
+        const count = document.createElement('span');
+        count.className = 'n';
+        count.textContent = String(n);
+        d.append(name, count);
+        d.addEventListener('mousedown', (e) => {
+            e.preventDefault();
+            pickRail(kind, what);
+        });
+        frag.append(d);
+        return d;
+    };
+
+    item(tr("All notes", 'すべてのノート'), all.length, 'all', '');
+    item(tr("Favourites", 'お気に入り'), all.filter((n) => n.star != null).length, 'star', '', { star: true });
+
+    // フォルダ ── `allBooks` は engine の歩いた結果で、空のフォルダも入る。
+    const books = notes.books || [];
+    if (books.length) {
+        head(tr("Folders", 'フォルダ'));
+        for (const b of books) {
+            const under = all.filter((n) => n.book === b || n.book.startsWith(`${b}/`)).length;
+            const depth = b.split('/').length - 1;
+            item(b.split('/').pop(), under, 'book', b, {
+                depth, colour: (notes.colors || {})[b] || '',
+            });
+        }
+    }
+
+    // タグ ── 多い順。ノートが実際に持っているものだけ。
+    const count = new Map();
+    for (const n of all) for (const t of n.tags) count.set(t, (count.get(t) || 0) + 1);
+    if (count.size) {
+        head(tr("Tags", 'タグ'));
+        for (const [t, n] of [...count.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))) {
+            item(`#${t}`, n, 'tag', t);
+        }
+    }
+
+    const make = document.createElement('div');
+    make.className = 'newnote';
+    make.textContent = tr("+ New note", '＋ 新しいノート');
+    make.addEventListener('mousedown', (e) => { e.preventDefault(); cmdNewNote(); });
+    frag.append(make);
+
+    el2.replaceChildren(frag);
+}
+
+/// アイコンと同じ2つの括弧。左の列と、一覧の頭と、ドックの中で同じもの。
+function cianMark() {
     const mark = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
     mark.setAttribute('viewBox', '0 0 100 100');
-    mark.setAttribute('class', 'cianmark');
+    mark.setAttribute('class', 'mk');
     const bg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
     bg.setAttribute('x', '0'); bg.setAttribute('y', '0');
     bg.setAttribute('width', '100'); bg.setAttribute('height', '100');
@@ -1846,24 +1970,44 @@ function cianHead(pane) {
     pen.setAttribute('d', 'M30 56 L30 28 L58 28 M70 44 L70 72 L42 72');
     pen.setAttribute('class', 'brackets');
     mark.append(bg, pen);
+    return mark;
+}
 
-    const name = document.createElement('span');
-    name.className = 'ciantitle';
-    // 根の名前ではなく `cian`。ノートの置き場所が `Documents/cian` でも
-    // `メモ` でも、このアプリの名前は cian で、そこは変わらない。
-    name.textContent = 'cian';
-
-    const sub = document.createElement('span');
-    sub.className = 'ciansub';
-    const n = notes.by.size;
-    const dirs = (pane.entries || []).filter((e) => e.is_dir && !e.parent).length;
-    sub.textContent = tr(`${n} notes · ${dirs} folders`, `${n} のノート ・ ${dirs} のフォルダ`);
-
-    const words = document.createElement('span');
-    words.className = 'cianwords';
-    words.append(name, sub);
-    box.append(mark, words);
-    return box;
+/// 行き先をひとつ選ぶ。
+///
+/// **真ん中の列を作り直す。** ペインを `panelize` で「このノートたち」に
+/// 差し替えるので、マークも Enter も F3 もドラッグも、そのまま使える ──
+/// ノートの一覧を自前で描き直すと、それが全部作り直しになる。
+async function pickRail(kind, what) {
+    rail.kind = kind;
+    rail.what = what;
+    const which = state.focus;
+    const all = [...notes.by.values()];
+    const pick = {
+        all: () => all,
+        star: () => all.filter((n) => n.star != null),
+        book: () => all.filter((n) => n.book === what || n.book.startsWith(`${what}/`)),
+        tag: () => all.filter((n) => n.tags.includes(what)),
+    }[kind] || (() => all);
+    const rows = pick();
+    const label = {
+        all: tr("All notes", 'すべてのノート'),
+        star: tr("Favourites", 'お気に入り'),
+        book: what,
+        tag: `#${what}`,
+    }[kind] || '';
+    drawRail();
+    if (!rows.length) {
+        // 空でも `panelize` は「読み込むものがありません」で断る。行き先を
+        // 選んだのに何も起きないのが一番分からないので、こちらで言う。
+        say(tr(`${label} — no notes`, `${label} ── ノートがありません`));
+        return;
+    }
+    const r = await ask('panelize', { pane: which, paths: rows.map((n) => n.path), label });
+    if (r) {
+        state[which] = r;
+        draw(which);
+    }
 }
 
 function extOf(row) {
@@ -2230,11 +2374,11 @@ function hintsNow() {
         return [['Esc', tr('disconnect', '切断')], ['Space', tr('mark', 'マーク')], ['c', tr('transfer', '転送')], ['r', tr('rename', 'リネーム')],
             ['d', tr('delete', '削除')], ['Enter', tr('open', '開く')], ['?', tr('help', 'ヘルプ')]];
     }
-    if (pane && pane.flat) {
-        return [['b/Esc', tr('out', '戻る')], ['Space', tr('mark', 'マーク')], ['/', tr('narrow', '絞込')],
-            ['Enter', tr('open', '開く')], ['F3', tr('view', '閲覧')], ['?', tr('help', 'ヘルプ')]];
-    }
     // ── cian モードのキーは、ノートのキーだけ ──
+    //
+    // **平坦一覧の帯より先に。** 行き先を選ぶと真ん中は `pane.flat` に
+    // なるので、後ろに置くと「b/Esc 戻る」の帯が出てしまう ── 戻る先が
+    // 無いところで。
     //
     // 2026-09-05:「cian モードのキーのヘルプは、cian モードに特化した内容に
     // 絞って欲しい」。ブランチも差分も grep も、ノートを書いている人が
@@ -2249,6 +2393,10 @@ function hintsNow() {
             [',', tr('sort', '並替')], ['F3', tr('read / write', '読む・書く')],
             ['Ctrl+E', tr('preview', 'プレビュー')],
             ['M', tr('menu', 'メニュー')], ['T', tr('mode', 'モード')], ['?', tr('help', 'ヘルプ')]];
+    }
+    if (pane && pane.flat) {
+        return [['b/Esc', tr('out', '戻る')], ['Space', tr('mark', 'マーク')], ['/', tr('narrow', '絞込')],
+            ['Enter', tr('open', '開く')], ['F3', tr('view', '閲覧')], ['?', tr('help', 'ヘルプ')]];
     }
     return [['←→', tr('panes', 'ペイン')], ['Shift+J', tr('shell', 'シェル')], ['Space', tr('mark', 'マーク')], ['/', tr('narrow', '絞込')],
         [',', tr('sort', '並替')], ['Shift+F', tr('search', '検索')], ['Ctrl+F', 'grep'], ['b', tr('branch', 'ブランチ')],

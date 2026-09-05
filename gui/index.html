@@ -605,7 +605,57 @@ html, body {
 /* `width`, and **`flex` left alone** — `#work` is a column, so `flex` there
    is the *height*. Setting `flex: 0 0 auto` to make the list narrower made it
    short instead: the rows stopped and the rest of the left side was empty. */
-body[data-cian="on"] #panes { width: var(--cian-left, 38%); }
+/* ── 三列 ──
+   左＝行き先、真ん中＝ノート、右＝ノートの中身。いまの窓の骨格は
+   「2つのペイン＋シェル」なので、cian モードのときだけ左に1列足して、
+   ペインを真ん中の幅に押し込む。 */
+body[data-cian="on"] #panes {
+  width: var(--cian-list, 330px);
+  margin-left: var(--cian-rail, 186px);
+}
+body[data-cian="on"] #view { left: calc(var(--cian-rail, 186px) + var(--cian-list, 330px)); }
+body[data-cian="on"] #cianpad { left: calc(var(--cian-rail, 186px) + var(--cian-list, 330px)); }
+
+#cianrail {
+  position: fixed; left: 0; top: 0; width: var(--cian-rail, 186px);
+  bottom: calc(var(--status-h) + var(--hints-h));
+  background: var(--pane-off); border-right: 1px solid var(--line);
+  overflow-y: auto; z-index: 4; padding: 12px 0 16px;
+  font-size: .92em;
+}
+#cianrail .brand { display: flex; align-items: center; gap: 9px; padding: 2px 13px 14px; }
+#cianrail .mk { width: 26px; height: 26px; flex: none; }
+#cianrail .mk .ground { fill: var(--accent); }
+#cianrail .mk .brackets {
+  fill: none; stroke: var(--pane-off); stroke-width: 11;
+  stroke-linecap: round; stroke-linejoin: round;
+}
+#cianrail .bname { font-weight: 800; font-size: 1.35em; letter-spacing: -.02em; }
+#cianrail .rhead {
+  font-size: .72em; letter-spacing: .1em; color: var(--dim);
+  padding: 12px 13px 3px;
+}
+#cianrail .ritem {
+  display: flex; align-items: center; gap: 8px;
+  padding: 3px 13px; white-space: nowrap; cursor: pointer;
+}
+#cianrail .ritem:hover { background: var(--row-hover); }
+#cianrail .ritem.on { background: var(--sel-strong); }
+#cianrail .ritem .n { margin-left: auto; color: var(--dim); font-size: .82em; font-variant-numeric: tabular-nums; }
+#cianrail .ritem .sq { width: 9px; height: 9px; border-radius: 2px; flex: none; background: var(--dir); }
+#cianrail .ritem .st { color: var(--mark); }
+#cianrail .ritem .name { overflow: hidden; text-overflow: ellipsis; }
+/* 深さは字下げで。折り畳みは付けない ── ノートの置き場所は数階層で、
+   畳んだ先を思い出すより、全部見えている方が速い。 */
+#cianrail .ritem[data-depth="1"] { padding-left: 26px; }
+#cianrail .ritem[data-depth="2"] { padding-left: 38px; }
+#cianrail .ritem[data-depth="3"] { padding-left: 50px; }
+#cianrail .newnote {
+  margin: 14px 13px 0; padding: 5px 0; text-align: center;
+  border: 1px dashed var(--line); border-radius: 7px;
+  color: var(--accent); font-size: .86em; cursor: pointer;
+}
+#cianrail .newnote:hover { background: var(--row-hover); }
 body[data-cian="on"] #view { left: var(--cian-left, 38%); border-left: 1px solid var(--line); }
 body[data-cian="on"] #panes.one .pane.active { flex: 1 1 100%; }
 /* **No frame here.** The frame says which of two panes has the keys; in cian
@@ -958,6 +1008,10 @@ body[data-cian="on"] .rows.cian .row .tags {
   font-size: .78em; color: var(--accent);
   background: color-mix(in srgb, var(--accent) 12%, transparent);
   border-radius: 999px; padding: 1px 8px; white-space: nowrap;
+  /* **縮んでいい。** 真ん中の列は 330px しかないので、タグを縮まない
+     ものにすると題を押し出して、両方が読めなくなる。名前が先、タグは
+     入るだけ。 */
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; max-width: 45%;
 }
 body[data-cian="on"] .rows.cian .row .when { align-self: center; font-size: .78em; }
 body[data-cian="on"] .rows.cian .row .sub { padding-top: 2px; }
@@ -979,14 +1033,14 @@ body[data-cian="on"] .pane .crumb { padding: 14px 14px 10px; }
    ここはパスではないので、向きを戻す。 */
 body[data-cian="on"] .pane .crumb { direction: ltr; text-align: left; }
 .cianhead { display: flex; align-items: center; gap: 11px; direction: ltr; }
-.cianmark { width: 34px; height: 34px; flex: none; }
+.cianmark { display: none; }
 .cianmark .ground { fill: var(--accent); }
 .cianmark .brackets {
   fill: none; stroke: var(--pane); stroke-width: 11;
   stroke-linecap: round; stroke-linejoin: round;
 }
 .cianwords { display: flex; flex-direction: column; line-height: 1.15; min-width: 0; }
-.ciantitle { font-size: 1.5em; font-weight: 800; letter-spacing: -.02em; color: var(--fg); }
+.ciantitle { font-size: 1.15em; font-weight: 700; letter-spacing: -.01em; }
 .ciansub { font-size: .78em; color: var(--dim); }
 /* The column headings are a file manager's furniture. A notes list has two
    lines per row and no columns to head. */
@@ -1426,6 +1480,8 @@ body[data-cian="on"] .pane .dhead { display: none; }
        than the whole file, the way the terminal build does: a listing of a
        hundred thousand rows is a hundred thousand elements otherwise, and the
        scroll goes to treacle on exactly the files worth opening this way. -->
+  <!-- cian モードの左列。行き先の一覧であって、歩く場所ではない。 -->
+  <div id="cianrail" hidden></div>
   <div id="cianpad"></div>
   <div id="view" hidden>
     <div class="vhead"><span id="v-name"></span><span id="v-about"></span></div>

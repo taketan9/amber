@@ -4255,8 +4255,25 @@ impl Session {
                 }
                 shelves.sort();
                 shelves.dedup();
+                // 歩いて見つけたフォルダ全部 ── 空のものも含む。左の列は
+                // 「どこに何があるか」を出すので、いま中身が無いフォルダも
+                // 場所としては在る。
+                let mut books: Vec<String> = notes
+                    .iter()
+                    .filter(|f| !f.rel.split('/').any(|p| p == "attachments"))
+                    .filter_map(|f| f.rel.rsplit_once('/').map(|(d, _)| d.to_string()))
+                    .collect();
+                for b in books.clone() {
+                    let parts: Vec<&str> = b.split('/').collect();
+                    for n in 1..parts.len() {
+                        books.push(parts[..n].join("/"));
+                    }
+                }
+                books.sort();
+                books.dedup();
                 Ok(serde_json::json!({
                     "root": dir.display().to_string(),
+                    "books": books,
                     "stars": shelves,
                     "notes": rows,
                     "partial": found.partial().then(|| serde_json::json!({
