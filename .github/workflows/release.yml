@@ -1,0 +1,129 @@
+name: release
+
+# amber のエンジン（`amber-server`）を三つの機械ぶん組んで、リリースに上げる。
+#
+# **窓の中身（`gui/`）は入れない。** あれは Electron が読むただのファイルで、
+# 組む必要が無い ── 同梱する側（crmaine）が写せばよい。ここが配るのは
+# 「組まないと手に入らないもの」だけ。
+#
+# 版の札（`v2.1.0`）を押すとリリースが出る。**手で走らせたときはリリースを
+# 作らず、資材だけ残す** ── announce せずに組み方だけ確かめられる。
+#
+#     git tag v2.1.0 && git push --tags     # 出す
+#     gh workflow run release.yml           # 組み方だけ確かめる
+
+on:
+  push:
+    tags:
+      - "v[0-9]*"
+      - "[0-9]*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  # 札と `Cargo.toml` が食い違うと、`version` が別の数字を返す実行ファイルが
+  # そのリリースに付く。**直せるのは札を動かせるこの瞬間だけ。**
+  version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: 札と Cargo.toml が合っているか
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          crate=$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)
+          echo "札 $tag / Cargo.toml $crate"
+          [ "$tag" = "$crate" ] || { echo "食い違っています"; exit 1; }
+
+  build:
+    needs: version
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # **Windows が本命。** 配布先は会社の Windows 端末で、
+          # そこはネットに出られない ── 落として置くだけで動く一枚が要る。
+          - os: windows-latest
+            name: amber-server-win-x64.exe
+            from: target/release/amber-server.exe
+          - os: macos-latest
+            name: amber-server-mac-arm64
+            from: target/release/amber-server
+          - os: ubuntu-latest
+            name: amber-server-linux-x64
+            from: target/release/amber-server
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: 組む
+        run: cargo build --release -p amber-server
+
+      # **一往復して、本当に話すか見る。** 組めたことと動くことは別で、
+      # 動かないほうは配ったあとにしか出ない。`version` は何も要らない
+      # 唯一の問いなので、煙を見るのにちょうどいい。
+      - name: 一往復してみる（Windows）
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $out = '{"id":1,"method":"version","params":{}}' | & "${{ matrix.from }}"
+          Write-Host $out
+          if ($out -notmatch '"amber"') { throw "返事が version になっていません: $out" }
+
+      - name: 一往復してみる（mac / Linux）
+        if: runner.os != 'Windows'
+        run: |
+          out=$(echo '{"id":1,"method":"version","params":{}}' | ${{ matrix.from }})
+          echo "$out"
+          echo "$out" | grep -q '"amber"' || { echo "返事が version になっていません"; exit 1; }
+
+      # **同梱する側は DLL を置けない。** 落として置くだけ、という運びなので、
+      # 隣に何かが要る一枚を配ると、そこで止まる。
+      - name: 余分な DLL を連れていないか（Windows）
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $dumpbin = Get-ChildItem -Recurse -Filter dumpbin.exe `
+            "C:\Program Files\Microsoft Visual Studio" -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+          if (-not $dumpbin) { Write-Host "dumpbin が見つからないので飛ばします"; exit 0 }
+          $deps = & $dumpbin.FullName /dependents "${{ matrix.from }}" |
+            Select-String -Pattern '\.dll$' | ForEach-Object { $_.ToString().Trim() }
+          Write-Host ($deps -join "`n")
+          $bad = $deps | Where-Object { $_ -match 'libgcc|libwinpthread|libstdc\+\+|vcruntime|msvcp' }
+          if ($bad) { throw "同梱の要る DLL を連れています: $bad" }
+
+      - name: 名前を付けて残す
+        shell: bash
+        run: |
+          mkdir -p out
+          cp "${{ matrix.from }}" "out/${{ matrix.name }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: out/${{ matrix.name }}
+          if-no-files-found: error
+
+  # **札を押したときだけ出す。** 手で走らせた回は資材だけ残る。
+  publish:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dl
+      - name: 一つにまとめて、指紋を書く
+        run: |
+          mkdir -p out
+          find dl -type f -exec cp {} out/ \;
+          cd out && sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: out/*
+          generate_release_notes: true
