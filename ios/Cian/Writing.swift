@@ -240,78 +240,29 @@ struct Wordmark: View {
     }
 }
 
-/// The icon, drawn rather than loaded.
+/// The icon, loaded rather than drawn.
 ///
-/// The same two brackets as the app icon, so the thing on the home screen
-/// and the thing at the top of the list are recognisably one thing.
+/// Literally the app icon, so the thing on the home screen and the thing at
+/// the top of the list cannot drift apart.
 struct Mark: View {
-    // 案 S4「生成りの葉」。多羅葉に字を書いたのが「葉書」の語源。
-    // **数字は packaging/amber.svg と同じ** ── `packaging/amber.py`（焼く）と
-    // `gui/renderer.js` の `cianMark()`（窓の左列）も同じものを持っている。
-    // どれか一つだけ直すと、三つの葉が別のものになる。
+    // **アプリのアイコンそのもの**を小さくして出す。案2「琥珀の中の
+    // Markdown」で、`packaging/amber_icon.py` が焼いた 128px の一枚。
     //
-    // 配色は色替えに追従させない（前の印は `Color.accentColor` を拾っていた）。
-    // ロゴが端末の気分で色を変えるのは、ロゴではない。
-    private static let amber = LinearGradient(
-        colors: [Color(red: 1.000, green: 0.851, blue: 0.498),   // #ffd97f
-                 Color(red: 0.949, green: 0.651, blue: 0.173)],  // #f2a62c
-        startPoint: UnitPoint(x: 0.15, y: 0), endPoint: UnitPoint(x: 0.85, y: 1))
-    /// 生成り。**純白は琥珀の上でわずかに青く見える。**
-    private static let cream = Color(red: 1.000, green: 0.957, blue: 0.871)  // #fff4de
-
-    private static func at(_ x: CGFloat, _ y: CGFloat, _ s: CGFloat) -> CGPoint {
-        CGPoint(x: s * x / 100, y: s * y / 100)
-    }
-
-    private static func leaf(_ s: CGFloat) -> Path {
-        Path { p in
-            p.move(to: at(10, 62, s))
-            p.addCurve(to: at(50, 15, s), control1: at(6, 38, s), control2: at(26, 18, s))
-            p.addCurve(to: at(97, 35, s), control1: at(74, 12, s), control2: at(90, 24, s))
-            p.addCurve(to: at(44, 77, s), control1: at(88, 50, s), control2: at(66, 68, s))
-            p.addCurve(to: at(10, 62, s), control1: at(26, 84, s), control2: at(12, 78, s))
-            p.closeSubpath()
-        }
-    }
-
-    /// 尻尾（葉柄）。タイルの左下の角へ抜ける ── **これがあると、小さくしても
-    /// 人は必ず「葉」と読む。**
-    private static func tail(_ s: CGFloat) -> Path {
-        Path { p in
-            p.move(to: at(12, 66, s))
-            p.addCurve(to: at(-4, 96, s), control1: at(6, 74, s), control2: at(0, 84, s))
-        }
-    }
-
-    /// 書いた二行。**葉脈は描かない** ── 二行のあいだの隙間が勝手に葉脈に
-    /// 見えるので、描くと一本多い。
-    private static func lines(_ s: CGFloat) -> Path {
-        Path { p in
-            p.move(to: at(24, 46, s))
-            p.addCurve(to: at(78, 27, s), control1: at(42, 36, s), control2: at(60, 30, s))
-            p.move(to: at(24, 66, s))
-            p.addCurve(to: at(66, 47, s), control1: at(40, 57, s), control2: at(54, 51, s))
-        }
-    }
-
+    // 前はここに葉（案 S4）を `Path` で描いていた。同じ形が
+    // `packaging/amber.svg`・`packaging/amber.py`・`gui/renderer.js` にもあり、
+    // 四か所が揃っているかを `agree()` が見張っていた ── それでも**アイコンを
+    // 替えた日に、中の印だけが前の絵のまま残った**。見張れていたのは「四つの
+    // 写しが揃っているか」であって、「アイコンと同じか」ではなかった。
+    // 同じ一枚を渡せば、ずれようがない。
+    //
+    // 色替えには追従させない（前の印は `Color.accentColor` を拾っていた）。
+    // **ロゴが端末の気分で色を変えるのは、ロゴではない。**
     var body: some View {
-        GeometryReader { geo in
-            let s = min(geo.size.width, geo.size.height)
-            ZStack {
-                Rectangle().fill(Self.amber)
-                Self.tail(s).stroke(Self.cream,
-                                    style: StrokeStyle(lineWidth: s * 0.07, lineCap: .round))
-                Self.leaf(s).fill(Self.cream)
-                // 字は塗りではなく**地を透かす** ── 同じ階調で抜くので、
-                // 葉に彫った線に見える。
-                Self.amber.mask {
-                    Self.lines(s).stroke(style: StrokeStyle(lineWidth: s * 0.08, lineCap: .round))
-                }
-            }
-            .frame(width: s, height: s)
-            .clipShape(RoundedRectangle(cornerRadius: s * 0.26, style: .continuous))
-        }
-        .accessibilityHidden(true)
+        Image("Mark")
+            .resizable()
+            .interpolation(.high)
+            .aspectRatio(contentMode: .fit)
+            .accessibilityHidden(true)
     }
 }
 

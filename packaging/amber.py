@@ -285,43 +285,47 @@ def leaf_d():
 
 
 def agree():
-    """葉の形が三か所で同じか。**ここが黙ると、窓とアプリで別の葉になる。**
+    """葉の形が、この file と `packaging/amber.svg` で同じか。
 
-    数字は `packaging/amber.svg`（原本）、この file（焼く）、
-    `ios/Cian/Writing.swift` の `Mark()`、`gui/renderer.js` の `mark()` の四か所にある。増やしたくは
-    なかったが、SVG を読む道具がこの機械に無い以上どこかで写すしかない。
-    ならば**写しがずれたときに焼けなくする**のが筋。
+    **見張る先は二か所に減った。** 以前は四か所 ── ここ、`amber.svg`、
+    `gui/renderer.js` の `mark()`、`ios/Cian/Writing.swift` の `Mark` ── に
+    同じ数字が写してあり、揃っているかをここが見ていた。
+
+    それでも、**アイコンを案2「琥珀の中の Markdown」に替えた日に、アプリの
+    中の印だけが葉のまま残った。** 見張れていたのは「四つの写しが揃っているか」
+    であって、「アイコンと同じか」ではなかった ── 揃ったまま、全部が古く
+    なれる。いまは窓も iPhone も `packaging/amber-mark.png`（アイコンを
+    小さくした一枚）を出すので、写しは無く、ずれようがない。
+
+    残っている二か所は**この葉の記録**そのもの。案 S4 は捨てていない。
     """
     d = leaf_d()
-    for path in ('packaging/amber.svg', 'gui/renderer.js'):
-        if d not in (ROOT / path).read_text(encoding='utf-8'):
-            raise SystemExit(
-                f'葉の形が {path} と食い違っています。\n'
-                f'  ここ  : {d}\n'
-                '四か所すべて同じにしてください。')
-
-    # iPhone は SwiftUI なので `d` 属性を持たない。`addCurve` は**終点が先**で
-    # 制御点が後ろに来るので、同じ点を SwiftUI の順に並べ直して突き合わせる。
-    want = [LEAF[0][0]]
-    for c in LEAF:
-        want += [c[3], c[1], c[2]]
-    want += [TAIL[0], TAIL[3], TAIL[1], TAIL[2]]
-    for c in CUTS:
-        want += [c[0], c[3], c[1], c[2]]
-    swift = ROOT / 'ios/Cian/Writing.swift'
-    got = [(float(x), float(y)) for x, y in
-           re.findall(r'at\((-?[\d.]+), (-?[\d.]+),', swift.read_text(encoding='utf-8'))]
-    if got != [(float(a), float(b)) for a, b in want]:
+    path = 'packaging/amber.svg'
+    if d not in (ROOT / path).read_text(encoding='utf-8'):
         raise SystemExit(
-            '葉の形が ios/Cian/Writing.swift と食い違っています。\n'
-            f'  ここ  : {want}\n'
-            f'  むこう: {got}\n'
-            '四か所すべて同じにしてください。')
+            f'葉の形が {path} と食い違っています。\n'
+            f'  ここ  : {d}\n'
+            '二か所とも同じにしてください。')
     return d
 
 
 if __name__ == '__main__':
-    print('葉の形は四か所で一致:', agree())
+    # **アイコンの扉は `amber_icon.py` に移った。**
+    #
+    # 案 S4 の葉はアプリの印ではなくなり、いまのアイコンは案2「琥珀の中の
+    # Markdown」── 画素そのものを原本として持つので、ここでは焼けない。
+    # 窓と iPhone の中の印も、いまは `packaging/amber-mark.png`（アイコンを
+    # 小さくした一枚）を出す。**この file と `amber.svg` は案 S4 の記録**で、
+    # `agree()` はその二枚が食い違わないことだけを見る。
+    #
+    # うっかり走らせると `amber.ico` と `amber.png` を葉で上書きしてしまう。
+    # それが本当にしたいときだけ `--overwrite` を付ける。
+    import sys
+    print('葉の形は二か所で一致:', agree())
+    if '--overwrite' not in sys.argv:
+        raise SystemExit(
+            '\nアイコンは `packaging/amber_icon.py` が焼きます。\n'
+            'ここで葉を焼き直してアイコンを上書きするなら --overwrite を付けてください。')
     made = []
     for s in SIZES:
         rgba, _ = render(s)

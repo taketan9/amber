@@ -11,6 +11,8 @@
     "electron": "^33.0.0"
   },
   "dependencies": {
-    "monaco-editor": "^0.52.2"
+    "mermaid": "^11.17.2",
+    "monaco-editor": "^0.52.2",
+    "monaco-vim": "^0.4.4"
   }
 }

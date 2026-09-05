@@ -28,6 +28,17 @@ const WANTED = [
     // 日本語だけ。英語は editor.main.js の中にある。
     ['monaco-editor/min/vs/nls.messages.ja.js', 'monaco/vs/nls.messages.ja.js'],
     ['monaco-editor/LICENSE', 'monaco-editor.LICENSE'],
+    // vim。**UMD の一枚だけ。** AMD の枝を通るので、Monaco のローダに
+    // `monaco-vim` という名前で置けばそのまま読める（`renderer.js` の
+    // `require.config`）。中で `monaco-editor/esm/…/editor.api` を要求して
+    // くるが、そこは既に読んである `monaco` を返す偽物を先に定義して渡す。
+    ['monaco-vim/dist/monaco-vim.umd.js', 'monaco-vim/monaco-vim.umd.js'],
+    ['monaco-vim/LICENSE', 'monaco-vim.LICENSE'],
+    // 図。**一枚で完結している版**（`min` は chunks を要らない）。3.4MB
+    // あるので、読むのは図のあるノートを開いたときだけ ── `renderer.js` の
+    // `loadMermaid` が初めて要るまで触らない。
+    ['mermaid/dist/mermaid.min.js', 'mermaid/mermaid.min.js'],
+    ['mermaid/LICENSE', 'mermaid.LICENSE'],
 ];
 
 let made = 0;

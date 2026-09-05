@@ -551,11 +551,44 @@ final class NotesStore: ObservableObject {
     /// asked once when the text changes, not once per note. Three front ends
     /// each deciding what two words mean is three search boxes that agree
     /// until somebody types two words.
-    private var groups: [[String]] = []
+    private var groups: [[Term]] = []
+
+    /// 絞り込みの一語。**どれが見出しでどれが字かは `note::terms` が決める。**
+    ///
+    /// `tag:定型` `book:仕事` `title:週報`（`タグ:` `フォルダ:` `題:` も同じ）と
+    /// `-` の打ち消し。電話が自分で `:` を数えはじめると、窓と別のものが
+    /// 見つかる検索窓が二つできる。
+    private struct Term {
+        let field: String
+        let word: String
+        let not: Bool
+    }
 
     func read(_ needle: String) {
         let q = needle.trimmingCharacters(in: .whitespaces)
-        groups = (try? Cian.call("terms", ["q": q])["groups"] as? [[String]]) ?? []
+        let raw = (try? Cian.call("terms", ["q": q])["groups"] as? [[[String: Any]]]) ?? []
+        groups = raw.map { g in
+            g.compactMap { d in
+                guard let w = d["word"] as? String else { return nil }
+                return Term(field: d["field"] as? String ?? "any",
+                            word: w,
+                            not: d["not"] as? Bool ?? false)
+            }
+        }
+    }
+
+    /// 一語が当たるか。**見出しごとに探し先が違う。**
+    ///
+    /// `search` は `note::haystack`（題＋`#タグ`＋本文の頭）で、既に小文字。
+    private func hit(_ note: Note, _ t: Term) -> Bool {
+        let hay: String
+        switch t.field {
+        case "title": hay = note.title.lowercased()
+        case "tag": hay = note.tags.joined(separator: " ").lowercased()
+        case "book": hay = note.book.lowercased()
+        default: hay = note.search
+        }
+        return hay.contains(t.word) != t.not
     }
 
     /// Narrow by what a note is *about*, not by what its file is called.
@@ -574,7 +607,7 @@ final class NotesStore: ObservableObject {
             out = out.filter { note in
                 if hits[note.path] != nil { return true }
                 guard !groups.isEmpty else { return note.search.contains(n) }
-                return groups.contains { g in g.allSatisfy { note.search.contains($0) } }
+                return groups.contains { g in g.allSatisfy { hit(note, $0) } }
             }
         }
         if !only.isEmpty { out = out.filter { only.isSubset(of: Set($0.tags)) } }

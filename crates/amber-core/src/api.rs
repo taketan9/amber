@@ -204,8 +204,9 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
             let out: Vec<serde_json::Value> = crate::note::blocks(&text)
                 .into_iter()
                 .map(|b| match b {
-                    Block::Heading { level, text } => serde_json::json!({
-                        "kind": "heading", "level": level, "runs": runs(&text), "text": text,
+                    Block::Heading { level, text, line } => serde_json::json!({
+                        "kind": "heading", "level": level, "runs": runs(&text),
+                        "text": text, "line": line,
                     }),
                     Block::Paragraph(text) => serde_json::json!({
                         "kind": "paragraph", "runs": runs(&text), "text": text,
@@ -232,6 +233,72 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
                 })
                 .collect();
             Ok(serde_json::json!({ "blocks": out }))
+        }
+
+        // 書く道具の一押し。**押したときに何が起きるかは、ここが決める。**
+        //
+        // 渡すのは**選んだ字だけ**で、位置は渡さない ── JS は UTF-16 の桁で
+        // 数え、Rust は文字で数えるので、絵文字が一つ混ざれば境目がずれる。
+        // 返ってきた字を、選んだところに置き換えてもらう。
+        "mark" => {
+            let text = arg(p, "text");
+            let with = arg(p, "with");
+            let out = match arg(p, "kind").as_str() {
+                "wrap" => crate::markdown::marks::wrap(&text, &with),
+                "line" => crate::markdown::marks::prefix(&text, &with),
+                "heading" => crate::markdown::marks::deepen(&text),
+                other => anyhow::bail!("知らない印です: {other}"),
+            };
+            Ok(serde_json::json!({ "text": out }))
+        }
+
+        // 一本だけ、ノートとして読む。
+        //
+        // `notes` はフォルダを歩くもので、**amber の外にある一本**には
+        // 使えない。かといって前端が題を自分で決めはじめると、そこだけ
+        // 別の題になる ── 題は `title:` → 最初の見出し → 書き出しの一行 →
+        // ファイル名、という一つの答えが `note::read` にある。
+        "note" => {
+            let path = std::path::PathBuf::from(arg(p, "path"));
+            let Some(n) = crate::note::read(&path, 40) else {
+                anyhow::bail!("{} を読めません", path.display());
+            };
+            Ok(serde_json::json!({
+                "path": n.path.display().to_string(),
+                "rel": n.path.file_name().map(|s| s.to_string_lossy().into_owned())
+                    .unwrap_or_default(),
+                "book": "",
+                "title": n.title,
+                "excerpt": n.excerpt,
+                "search": crate::note::haystack(&n),
+                "star": n.star,
+                "tags": n.tags,
+                "updated": n.updated,
+                "created": n.created,
+                "bytes": n.bytes,
+            }))
+        }
+
+        // 読める形。**組み方は core、見た目は前端。**
+        //
+        // `blocks` の隣にもう一つ扉を開けるのは、窓と iPhone で描き方が違う
+        // から ── iPhone は SwiftUI の View を積むので `blocks` が要り、窓は
+        // HTML を流し込むほうが速い。**解釈は一つ**（どちらも
+        // `note::blocks` と同じ行単位の読み方を通る）で、分かれるのは
+        // 最後の組み立てだけ。
+        //
+        // 逃がし（`javascript:` を落とす、`onclick` も `class` も字にする、
+        // 色は検査済みの6桁だけ通す）は `markdown::to_html` の中にある。
+        // **ここで足すと二か所になる。**
+        "html" => {
+            let text = if p["text"].is_string() {
+                arg(p, "text")
+            } else {
+                let path = std::path::PathBuf::from(arg(p, "path"));
+                crate::text::read(&path)?.lines.join("\n")
+            };
+            let lines: Vec<String> = text.lines().map(|l| l.to_string()).collect();
+            Ok(serde_json::json!({ "html": crate::markdown::to_html(&lines) }))
         }
 
         // Put a note on a favourite shelf, or take it off.
@@ -348,7 +415,22 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
         // the query is the decision, and it belongs here; running it over a
         // list that is already in the phone's memory does not.
         "terms" => {
-            Ok(serde_json::json!({ "groups": crate::note::terms(&arg(p, "q")) }))
+            // 前端は **見出しごとに探し分ける**（題だけ・タグだけ・
+            // フォルダだけ）。字だけを渡していた頃は、`tag:定型` と打っても
+            // 「tag:定型」という字を本文から探していた。
+            let groups: Vec<serde_json::Value> = crate::note::terms(&arg(p, "q"))
+                .into_iter()
+                .map(|g| {
+                    serde_json::Value::Array(
+                        g.into_iter()
+                            .map(|t| serde_json::json!({
+                                "field": t.field, "word": t.word, "not": t.not,
+                            }))
+                            .collect(),
+                    )
+                })
+                .collect();
+            Ok(serde_json::json!({ "groups": groups }))
         }
 
         // Split a note into how it describes itself and what it says.
@@ -700,6 +782,63 @@ mod tests {
         assert_eq!(b[2]["kind"], "image");
         assert_eq!(b[2]["link"], "a.jpg");
         assert_eq!(b.len(), 3, "the front matter does not cross");
+    }
+
+    #[test]
+    fn 書く道具は_押し直すと外れる() {
+        let m = |kind: &str, with: &str, text: &str| -> String {
+            call("mark", &serde_json::json!({ "kind": kind, "with": with, "text": text }))
+                .unwrap()["text"].as_str().unwrap().to_string()
+        };
+        // 挟む・外す
+        assert_eq!(m("wrap", "**", "太字"), "**太字**");
+        assert_eq!(m("wrap", "**", "**太字**"), "太字");
+        // 選んでいないときは印だけ ── 中に入って打てるように。
+        assert_eq!(m("wrap", "`", ""), "``");
+
+        // 行頭。**すべてに付いていれば外れる。**
+        assert_eq!(m("line", "- ", "あ\nい"), "- あ\n- い");
+        assert_eq!(m("line", "- ", "- あ\n- い"), "あ\nい");
+        // 一つでも無ければ、揃える。
+        assert_eq!(m("line", "- ", "- あ\nい"), "- あ\n- い");
+        // 別の印は付け替える ── `> - もの` はたいてい望んだことではない。
+        assert_eq!(m("line", "> ", "- あ"), "> あ");
+        // チェックは `[x]` でも「付いている」。
+        assert_eq!(m("line", "- [ ] ", "- [x] 済み"), "済み");
+        // 番号は振り直す。
+        assert_eq!(m("line", "1. ", "あ\nい\nう"), "1. あ\n2. い\n3. う");
+        // 空行は数に入れない。
+        assert_eq!(m("line", "- ", "- あ\n\n- い"), "あ\n\nい");
+
+        // 見出しは押すたびに深くなり、四度目で戻る。
+        assert_eq!(m("heading", "", "題"), "# 題");
+        assert_eq!(m("heading", "", "# 題"), "## 題");
+        assert_eq!(m("heading", "", "## 題"), "### 題");
+        assert_eq!(m("heading", "", "### 題"), "題");
+
+        assert!(call("mark", &serde_json::json!({ "kind": "なにか", "text": "あ" })).is_err());
+    }
+
+    #[test]
+    fn 窓に渡す読める形は_前書きを出さず_危ないものを字にする() {
+        let r = call("html", &serde_json::json!({
+            "text": "---\ntitle: x\ntags: [仕事]\n---\n# 題\n- [ ] やること\n",
+        })).unwrap();
+        let h = r["html"].as_str().unwrap();
+        assert!(h.contains("<h1"), "見出しが組まれていない: {h}");
+        assert!(!h.contains("title: x"), "前書きが漏れている: {h}");
+        // チェックは行番号を積んで渡る ── 何番目の升かを数えると、
+        // 前書きのあるノートでずれる。
+        assert!(h.contains("data-line="), "チェックに行番号が無い: {h}");
+
+        // 逃がしは `markdown::to_html` の中にある。**ここでも効くこと**を
+        // 見ておかないと、扉を増やしたときに素通りする道ができる。
+        let bad = call("html", &serde_json::json!({
+            "text": "<script>alert(1)</script>\n\n[押す](javascript:alert(1))\n",
+        })).unwrap();
+        let h = bad["html"].as_str().unwrap();
+        assert!(!h.contains("<script"), "script が生きている: {h}");
+        assert!(!h.contains("javascript:"), "javascript: が生きている: {h}");
     }
 
     #[test]

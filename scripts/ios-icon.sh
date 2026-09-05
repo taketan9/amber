@@ -3,7 +3,7 @@
 #
 #   ./scripts/ios-icon.sh
 #
-# **中身は `packaging/amber.py` に移した。** ここは扉を1つに保つためだけに残る
+# **中身は `packaging/amber_icon.py` に移した。** ここは扉を1つに保つためだけに残る
 # ── 以前は `cian.ico`（二画面ファイラの印）を iOS のアイコンにしていたので、
 # このまま走らせると amber のアイコンを cian のもので上書きしてしまう。
 #
@@ -11,7 +11,7 @@
 #
 #   * **iOS はアイコンに自分で角丸を被せる。** 角が透明な絵を渡すと角が二重に
 #     丸まり、透明だったところが黒くなる。だから 1024 は**角丸なしの真四角**で
-#     書く（amber.py の `render(..., square=True)`）。以前ここでやっていた
+#     書く（`amber-master-square.png`）。以前ここでやっていた
 #     「1.18 倍して中央を切る」小細工は、そのぶん要らなくなった。
 #   * **App Store はアルファのあるアイコンを受け付けない。** 以前は sips で
 #     JPEG を経由してアルファを落としていたが、いまは PNG を色型 2（RGB）で
@@ -21,7 +21,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-python3 packaging/amber.py
+python3 packaging/amber_icon.py
 
 OUT=ios/Cian/Assets.xcassets/AppIcon.appiconset/AppIcon.png
 # 出来たものが本当に正方形でアルファ無しか。どちらも外すとアイコンが黒くなる。

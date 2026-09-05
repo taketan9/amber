@@ -3,11 +3,24 @@
 <head>
 <meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy"
-      content="default-src 'none'; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: file:; font-src 'self'; connect-src 'self'">
+      content="default-src 'none'; script-src 'self' 'unsafe-eval'; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: file:; font-src 'self'; connect-src 'self'">
+<!-- `worker-src` を足したのは Monaco のため。**無いと色分けが本体スレッドで
+     走る** ── 動くので気づかないが、長いノートで窓が固まる。`script-src` が
+     `worker-src` の代わりに使われ、Monaco は自分の worker を `blob:` で
+     組み立てるので弾かれていた（`console-message` を端末へ流して初めて
+     見えた）。通すのは `blob:` だけで、外の道は開けない。 -->
 <title>amber</title>
 <style>
-/* 琥珀と生成り。**アイコンと同じ色**（packaging/amber.svg）── 窓とアプリで
-   別の琥珀にすると、同じものに見えなくなる。 */
+/* ── 色 ──
+   既定は「琥珀」── アイコンと同じ色（packaging/amber-master.png）。窓と
+   アプリで別の琥珀にすると、同じものに見えなくなる。
+
+   **明暗を切り替えるのは OS。** 琥珀だけは `prefers-color-scheme` に従い、
+   名前で選んだテーマは、選んだとおりに出る ── 「ayu-dark にしたのに昼は
+   明るい」は、選んだことにならない。
+
+   足すときは 15 の変数を全部埋める。**一つ抜けると、そこだけ前のテーマの
+   色が残る**（変数は継承するので、抜けは崩れではなく“混ざり”として出る）。 */
 :root {
   color-scheme: light;
   --amber:      #f0a52b;
@@ -26,7 +39,7 @@
   --hover:   #f1e6cf;
 }
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme]) {
     color-scheme: dark;
     --bg:      #17140f;
     --rail:    #1d1913;
@@ -40,6 +53,63 @@
     --sel:     #3b2f16;
     --hover:   #262017;
   }
+}
+
+/* 琥珀を名指しで（OS が暗くても明るいまま／暗いまま） */
+:root[data-theme="amber-light"] {
+  color-scheme: light;
+  --amber: #f0a52b; --amber-soft: #ffd97f; --amber-deep: #b5760f;
+  --bg: #fbf7ef; --rail: #f3ecdf; --list: #f8f3e8; --paper: #fffdf8;
+  --line: #e4d9c4; --line-2: #efe6d4;
+  --ink: #2a2011; --ink-2: #6b5a41; --ink-3: #9a8a6f;
+  --sel: #f7e2b6; --hover: #f1e6cf;
+}
+:root[data-theme="amber-dark"] {
+  color-scheme: dark;
+  --amber: #f0a52b; --amber-soft: #ffd97f; --amber-deep: #e0a94e;
+  --bg: #17140f; --rail: #1d1913; --list: #1a1611; --paper: #14110c;
+  --line: #302a20; --line-2: #262017;
+  --ink: #f0e7d6; --ink-2: #bcac91; --ink-3: #8a7d66;
+  --sel: #3b2f16; --hover: #262017;
+}
+
+/* ayu ── 明るいほう。`--amber-deep` はリンクと升に乗るので、
+   ayu の accent `#FF9940`（白の上で 2.1:1）ではなく読める濃さにする。 */
+:root[data-theme="ayu-light"] {
+  color-scheme: light;
+  --amber: #ff9940; --amber-soft: #ffd9b3; --amber-deep: #a05a00;
+  --bg: #f8f9fa; --rail: #f3f4f5; --list: #fcfcfc; --paper: #ffffff;
+  --line: #dcdfe4; --line-2: #eaecef;
+  --ink: #5c6166; --ink-2: #787b80; --ink-3: #8a9199;
+  --sel: #ffe7d1; --hover: #eef0f2;
+}
+/* ayu ── 中間（mirage）。金は `#FFCC66`。 */
+:root[data-theme="ayu-mirage"] {
+  color-scheme: dark;
+  --amber: #ffcc66; --amber-soft: #ffe0a3; --amber-deep: #ffcc66;
+  --bg: #1f2430; --rail: #232834; --list: #1f2430; --paper: #242936;
+  --line: #343b4d; --line-2: #2b3242;
+  --ink: #cccac2; --ink-2: #a6a29a; --ink-3: #707a8c;
+  --sel: #3d4457; --hover: #2b3242;
+}
+/* ayu ── 暗いほう。金は `#E6B450`（iPhone のアクセントと同じ）。 */
+:root[data-theme="ayu-dark"] {
+  color-scheme: dark;
+  --amber: #e6b450; --amber-soft: #f2d59a; --amber-deep: #e6b450;
+  --bg: #0b0e14; --rail: #0d1017; --list: #0b0e14; --paper: #0f131a;
+  --line: #1f2430; --line-2: #171b24;
+  --ink: #bfbdb6; --ink-2: #9a9891; --ink-3: #565b66;
+  --sel: #26334d; --hover: #171b24;
+}
+/* 紙 ── 白と黒だけ。**刷るため、そして読むだけのため。**
+   色で意味を運ばない画面が一つ要る ── 色が見えない人にも同じものが届く。 */
+:root[data-theme="paper"] {
+  color-scheme: light;
+  --amber: #444444; --amber-soft: #dddddd; --amber-deep: #1a1a1a;
+  --bg: #ffffff; --rail: #f6f6f6; --list: #fbfbfb; --paper: #ffffff;
+  --line: #d4d4d4; --line-2: #e8e8e8;
+  --ink: #111111; --ink-2: #444444; --ink-3: #767676;
+  --sel: #ebebeb; --hover: #f2f2f2;
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -62,15 +132,11 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
   background: var(--rail); border-right: 1px solid var(--line);
   overflow-y: auto; padding-bottom: 12px;
 }
-#brand {
-  display: flex; align-items: center; gap: 10px;
-  padding: 16px 14px 12px;
-  /* mac は信号機のボタンがここに乗る */
-  -webkit-app-region: drag;
-}
-body.mac #brand { padding-top: 30px; }
-#brand svg { width: 26px; height: 26px; flex: none; border-radius: 7px; }
-#brand .name { font-size: 19px; font-weight: 800; letter-spacing: -.01em; }
+/* **左上に名前は出さない。** アプリの名前は窓の外（Dock・タスクバー・
+   ⌘Tab）が既に言っている。中で二度言うと、そのぶんノートが下がる。
+   mac の信号機のぶんだけ、列の上を空ける。 */
+#railtop { height: 14px; flex: none; -webkit-app-region: drag; }
+body.mac #railtop { height: 34px; }
 #new {
   margin: 2px 12px 14px; padding: 8px 12px; border-radius: 9px;
   background: var(--amber); color: #3a2408; font-weight: 700;
@@ -112,6 +178,33 @@ body.mac #listhead { padding-top: 30px; }
   font: inherit; font-size: 13px; -webkit-app-region: no-drag;
 }
 #find:focus { outline: 2px solid var(--amber); outline-offset: -1px; }
+/* 並び順。**押すたびに次へ** ── 三つしかないものに、開いて閉じる幕は要らない。 */
+#order {
+  margin-top: 7px; font-size: 11.5px; color: var(--ink-3);
+  -webkit-app-region: no-drag; padding: 1px 6px; border-radius: 6px;
+}
+#order:hover { background: var(--hover); color: var(--ink-2); }
+/* **書き方を覚えていなくても探せるように。** 選ぶと、その書き方が
+   絞り込みの欄に入る ── 隠すのではなく、一度見せる。 */
+#findhow {
+  margin-top: 7px; margin-left: 10px; font-size: 11.5px; color: var(--ink-3);
+  -webkit-app-region: no-drag; padding: 1px 6px; border-radius: 6px;
+}
+#findhow:hover { background: var(--hover); color: var(--ink-2); }
+/* 期間は札で出して、札で外す ── 記法をもう一つ覚えさせない。 */
+#whenchip {
+  margin-top: 7px; margin-left: 8px; font-size: 11.5px; padding: 1px 7px;
+  border-radius: 999px; background: var(--sel); color: var(--ink-2);
+  -webkit-app-region: no-drag;
+}
+#whenchip:hover { background: var(--amber); color: #3a2408; }
+/* 段の見出しの ＋ */
+.head { display: flex; align-items: center; }
+.head .plus {
+  margin-left: auto; padding: 0 5px; border-radius: 5px; font-size: 13px;
+  color: var(--ink-3); line-height: 1.4;
+}
+.head .plus:hover { background: var(--hover); color: var(--ink); }
 #rows { flex: 1; overflow-y: auto; }
 .row {
   padding: 10px 16px; border-bottom: 1px solid var(--line-2); cursor: pointer;
@@ -134,6 +227,11 @@ body.mac #listhead { padding-top: 30px; }
   background: var(--line-2); color: var(--ink-2); white-space: nowrap;
 }
 .row .star { color: var(--amber); flex: none; }
+/* いくつ済んだか。**数えるだけ** ── 進み具合は既にノートの中に書いてある。 */
+.row .done {
+  font-size: 10.5px; padding: 0 5px; border-radius: 999px; flex: none;
+  background: var(--sel); color: var(--ink-2); font-variant-numeric: tabular-nums;
+}
 #empty { padding: 34px 20px; color: var(--ink-3); font-size: 13px; text-align: center; }
 
 /* ── 右: 中身 ── */
@@ -148,13 +246,373 @@ body.mac #top { padding-top: 30px; }
   font-size: 17px; font-weight: 700; flex: 1; min-width: 0;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
+/* ノートを開いていないときは、帯に ⚙ だけが残る ── 右端に寄せる。 */
+#title[hidden] ~ #gear { margin-left: auto; }
 #state { font-size: 11.5px; color: var(--ink-3); flex: none; -webkit-app-region: no-drag; }
-#ed { flex: 1; min-height: 0; }
+/* いま何字か。**題の隣ではなく右端** ── 書いている間ずっと動く数字が
+   題のとなりにあると、視線が題に戻るたびに数字を読んでしまう。 */
+/* **⋯ と ⚙ の区別を、形ではなく言葉で付ける。**
+   前は点三つと歯車が並んでいて、どちらがノートの話でどちらがアプリの話か
+   画面のどこにも書いていなかった。片方に名前を付ける。 */
+#dots, #gear {
+  flex: none; padding: 3px 10px; border-radius: 8px;
+  color: var(--ink-2); -webkit-app-region: no-drag; line-height: 1.3;
+}
+#dots { font-size: 12.5px; font-weight: 600; }
+/* 歯車は絵なので、字と同じ大きさだと小さく見える。 */
+#gear { font-size: 19px; padding: 0 9px; }
+#dots:hover, #gear:hover { background: var(--hover); color: var(--ink); }
+
+/* 書く面の絵。**字は消さず、行の下に空きを作って置く** ── 消して絵に
+   すると、パスを一文字直したいだけのときに直しようがない。 */
+.zoneimg {
+  display: flex; align-items: center; padding: 6px 0 6px 34px;
+}
+.zoneimg img {
+  max-height: 112px; max-width: 60%; border-radius: 8px;
+  border: 1px solid var(--line); background: var(--paper);
+  box-shadow: 0 1px 3px rgba(0,0,0,.08);
+}
+.zoneimg.bad {
+  font-size: 12px; color: #C4564E; padding-left: 34px;
+}
+
+/* ── 読む面で書く ── */
+/* **面ぜんぶが入力欄。** 置いて打てる ── 押して開く一手は挟まない。 */
+#read { outline: none; caret-color: var(--amber-deep); cursor: text; }
+#read:focus { outline: none; }
+/* 触れないかたまりだけ、指を乗せると分かるようにする ── そこは押すと
+   書く面へ行く（打てるのに保存されない、を作らないため）。 */
+#read pre, #read table, #read figure, #read .alert, #read .mermaid { cursor: pointer; }
+#read pre:hover, #read table:hover, #read figure:hover,
+#read .alert:hover, #read .mermaid:hover {
+  outline: 2px solid color-mix(in srgb, var(--amber) 45%, transparent);
+  outline-offset: 3px; border-radius: 8px;
+}
+#count2 {
+  font-size: 11.5px; color: var(--ink-3); flex: none;
+  font-variant-numeric: tabular-nums; -webkit-app-region: no-drag;
+}
+#count2:empty { display: none; }
+/* 書く・読む・並べる。**キーだけにしない** ── ⌘E を知らない人には
+   無い機能と同じで、あることを画面が言わないと誰も押さない。 */
+#views {
+  display: flex; gap: 2px; flex: none; padding: 2px; border-radius: 8px;
+  background: var(--rail); border: 1px solid var(--line-2);
+  -webkit-app-region: no-drag;
+}
+#views button {
+  padding: 3px 9px; border-radius: 6px; font-size: 11.5px; color: var(--ink-2);
+  white-space: nowrap;
+}
+#views button:hover { background: var(--hover); }
+#views button.on { background: var(--paper); color: var(--ink); font-weight: 700;
+  box-shadow: 0 1px 2px rgba(0,0,0,.06); }
+/* 書く面と読む面。**同じ場所に重ねず、横に並べる** ── 重ねると
+   Monaco の `automaticLayout` が幅ゼロのまま測り、戻したとき行が折り返し
+   直されるまで一瞬崩れる。 */
+#work { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+#panes { flex: 1; min-height: 0; display: flex; }
+#ed { flex: 1; min-width: 0; }
+/* ── 読める形 ──
+
+   直したのは三つ。
+
+   1. **一行の長さ。** 前は面の幅いっぱいに流していた。窓を広げるほど一行が
+      長くなり、行を折り返すたびに目が左端を探す ── 読みにくさの半分はこれ
+      で、字体や色の話ではない。34em（およそ日本語 40〜45字）で止める。
+   2. **見出しの上下。** 前は上下が同じだけ空いていたので、見出しがどちらの
+      段落のものか決まらなかった。**上を厚く、下を薄く** ── 見出しは次の
+      かたまりの持ち物。
+   3. **絵。** 前は裸で置いていた。地と同じ白い絵を貼ると、どこからが絵なのか
+      分からない。細い枠と丸みと薄い影を付け、`alt` があれば下に添える。 */
+#read {
+  flex: 1; min-width: 0; overflow-y: auto;
+  padding: 26px 32px 64px; font-size: 14.5px; line-height: 1.9;
+}
+#read > * { max-width: 34em; margin-left: auto; margin-right: auto; }
+#read > :first-child { margin-top: 0; }
+body.split #read { border-left: 1px solid var(--line-2); }
+
+#read h1, #read h2, #read h3, #read h4, #read h5, #read h6 {
+  line-height: 1.45; margin: 1.9em auto .55em; font-weight: 700;
+  letter-spacing: .002em;
+}
+#read h1 { font-size: 1.72em; letter-spacing: -.012em; margin-top: 0; }
+#read h2 {
+  font-size: 1.32em; letter-spacing: -.008em;
+  padding-bottom: .3em; border-bottom: 1px solid var(--line-2);
+}
+#read h3 { font-size: 1.13em; }
+#read h4, #read h5, #read h6 { font-size: 1em; color: var(--ink-2); }
+#read p { margin: .8em auto; }
+#read ul, #read ol { margin: .7em auto; padding-left: 1.5em; max-width: 34em; }
+#read li { margin: .2em 0; }
+#read li::marker { color: var(--ink-3); }
+#read li > ul, #read li > ol { margin: .2em 0; max-width: none; }
+
+/* チェックは押せる。**押せると分かる形にする** ── 読める形の中で
+   ただ一つ触れるものなので、触れないものと同じ見た目では見つからない。 */
+#read li.task { list-style: none; margin-left: -1.3em; }
+#read .box {
+  display: inline-block; width: 1.3em; cursor: pointer;
+  color: var(--amber-deep); font-size: 1.05em; user-select: none;
+  font-family: inherit; line-height: inherit; text-align: left;
+}
+#read .box:hover { color: var(--amber); }
+#read .box:focus-visible { outline: 2px solid var(--amber); outline-offset: 1px; border-radius: 4px; }
+
+#read blockquote {
+  margin: 1em auto; padding: .2em 0 .2em 1.1em;
+  border-left: 3px solid var(--line); color: var(--ink-2);
+}
+#read blockquote > :first-child { margin-top: 0; }
+#read blockquote > :last-child { margin-bottom: 0; }
+
+#read code {
+  font: .87em/1.7 ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  background: var(--rail); border: 1px solid var(--line-2);
+  border-radius: 5px; padding: .12em .38em;
+}
+#read pre {
+  margin: 1.1em auto; padding: 13px 16px; overflow-x: auto;
+  background: var(--rail); border: 1px solid var(--line-2); border-radius: 10px;
+}
+#read pre code { background: none; border: 0; padding: 0; font-size: .86em; }
+
+/* 区切り線は端まで引かない ── 全幅の線は「ここで終わり」に見えるが、
+   Markdown の `---` は「話が変わる」でしかない。 */
+#read hr {
+  margin: 2.2em auto; border: 0; height: 1px; width: 30%;
+  background: var(--line);
+}
+
+#read a {
+  color: var(--amber-deep); text-decoration: underline;
+  text-decoration-color: var(--line); text-underline-offset: .18em;
+  text-decoration-thickness: 1px;
+}
+#read a:hover { text-decoration-color: currentColor; }
+
+/* ── 絵 ──
+   裸で置かない。**地と同じ色の絵は、どこからが絵か分からない。** */
+#read figure { margin: 1.4em auto; text-align: center; }
+#read img {
+  max-width: 100%; height: auto; border-radius: 10px;
+  border: 1px solid var(--line); background: var(--paper);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, .07), 0 6px 18px rgba(0, 0, 0, .05);
+}
+#read figcaption {
+  margin-top: .55em; font-size: 12px; color: var(--ink-3); line-height: 1.6;
+}
+
+#read table {
+  border-collapse: collapse; margin: 1.1em auto; display: block;
+  overflow-x: auto; max-width: 34em; font-size: .95em;
+}
+#read th, #read td { border: 1px solid var(--line-2); padding: 6px 12px; }
+#read th { background: var(--rail); font-weight: 700; text-align: left; }
+#read tbody tr:nth-child(even) { background: color-mix(in srgb, var(--rail) 45%, transparent); }
+#read del { color: var(--ink-3); }
+
+#read .mermaid { margin: 1.4em auto; overflow-x: auto; text-align: center; max-width: 34em; }
+#read .mermaid svg { max-width: 100%; height: auto; }
+/* 描けなかった図は、書いた字のまま残す ── 消すと直しようがない。 */
+#read pre.bad { border-color: #C4564E; }
+
+/* GitHub 風の注記。**色だけで区別しない** ── 見出しの語を必ず出す。
+   色が見えない人にも、白黒で刷ったときにも、種類が残る。 */
+#read .alert {
+  margin: 1.2em auto; padding: .1em 1.1em .1em 1em;
+  border-left: 4px solid var(--ink-3);
+  background: var(--rail); border-radius: 0 9px 9px 0;
+}
+#read .alert-h {
+  margin: .7em auto .25em; font-weight: 700; font-size: .9em; letter-spacing: .05em;
+  color: var(--ink-2);
+}
+#read .alert > :last-child { margin-bottom: .7em; }
+#read .alert.note { border-left-color: #3D7FA8; }
+#read .alert.tip { border-left-color: #5E8C42; }
+#read .alert.important { border-left-color: #9A6FB5; }
+#read .alert.warning { border-left-color: #D07A2E; }
+#read .alert.caution { border-left-color: #C4564E; }
+#read .alert.note .alert-h { color: #3D7FA8; }
+#read .alert.tip .alert-h { color: #5E8C42; }
+#read .alert.important .alert-h { color: #9A6FB5; }
+#read .alert.warning .alert-h { color: #D07A2E; }
+#read .alert.caution .alert-h { color: #C4564E; }
+
+/* 最大化（Inkdrop の distraction free）。**畳むのは左の二列だけ** ──
+   上の帯を消すと、いま何を開いているのか分からない画面になる。 */
+body.zen #rail, body.zen #list { display: none; }
+/* 左の列だけ畳む（⌘/）。一覧は残す ── 行き先と一覧は別の問いで、
+   狭いときに先に要らなくなるのは「どこにいるか」のほう。 */
+body.norail #rail { display: none; }
+body.zen #read, body.zen #ed { max-width: 760px; margin: 0 auto; width: 100%; }
+
+/* vim の状態行。`-- INSERT --` と `:` の入力欄がここに出る。
+   **道具の帯より下、画面のいちばん下** ── vim を使う人が目を落とす場所。 */
+#vim {
+  flex: none; display: none; padding: 3px 12px;
+  border-top: 1px solid var(--line-2); background: var(--rail);
+  font: 12px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--ink-2); white-space: pre;
+}
+body.vim #vim { display: block; }
+#vim input {
+  font: inherit; color: var(--ink); background: none; border: 0;
+  outline: none; width: 60%;
+}
+
+/* ── 書く道具。**キーボードの手前に置く** ── iPhone と同じ並び順 ── */
+#marks {
+  flex: none; border-top: 1px solid var(--line-2); background: var(--rail);
+  -webkit-app-region: no-drag;
+}
+#marks .r { display: flex; gap: 4px; padding: 5px 8px; overflow-x: auto; }
+#marks .r + .r { border-top: 1px solid var(--line-2); }
+#marks button {
+  flex: none; padding: 3px 9px; border-radius: 7px; font-size: 12.5px;
+  color: var(--ink-2); white-space: nowrap; border: 1px solid transparent;
+}
+#marks button:hover { background: var(--hover); border-color: var(--line-2); }
+#marks button:active { background: var(--sel); }
+#marks button.on { background: var(--sel); color: var(--ink); }
+#marks .sep { flex: none; width: 1px; background: var(--line); margin: 3px 3px; }
+/* **読む面でも道具の帯は出す。** 記号を覚えていない人の道具なので、
+   記号の見えない面でこそ要る。 */
+
+
 #blank {
   flex: 1; display: flex; flex-direction: column; align-items: center;
   justify-content: center; gap: 10px; color: var(--ink-3);
 }
-#blank svg { width: 54px; height: 54px; opacity: .5; border-radius: 14px; }
+#blank img { width: 54px; height: 54px; opacity: .5; }
+
+/* ── 小窓 ── 命令を選ぶ・字を打つ・一つ選ぶ、を一つで賄う ──
+   別々に作ると、三つの微妙に違う「Esc で閉じる」ができる。 */
+#veil {
+  position: fixed; inset: 0; z-index: 30; display: flex;
+  justify-content: center; align-items: flex-start; padding-top: 12vh;
+  background: rgba(0,0,0,.28);
+}
+#veil[hidden] { display: none !important; }
+#sheet {
+  width: min(560px, 88vw); max-height: 70vh; display: flex; flex-direction: column;
+  background: var(--paper); border: 1px solid var(--line); border-radius: 13px;
+  box-shadow: 0 18px 48px rgba(0,0,0,.3); overflow: hidden;
+}
+#sheet .hd { padding: 11px 15px 0; font-size: 12px; color: var(--ink-3); }
+#sheet input {
+  margin: 7px 12px 10px; padding: 8px 11px; border-radius: 9px; font: inherit;
+  font-size: 14.5px; background: var(--bg); border: 1px solid var(--line);
+  color: var(--ink); outline: none;
+}
+#sheet input:focus { border-color: var(--amber); }
+#sheet .items { overflow-y: auto; border-top: 1px solid var(--line-2); }
+#sheet .items:empty { display: none; }
+#sheet .it {
+  padding: 8px 15px; cursor: pointer; display: flex; align-items: center; gap: 10px;
+  font-size: 13.5px;
+}
+#sheet .it .k { margin-left: auto; font-size: 11px; color: var(--ink-3); white-space: nowrap; }
+#sheet .it .sub { font-size: 11.5px; color: var(--ink-3); }
+#sheet .it.on { background: var(--sel); }
+#sheet .foot { padding: 8px 15px; font-size: 11.5px; color: var(--ink-3);
+  border-top: 1px solid var(--line-2); }
+
+/* ── ⋯ の献立 ── */
+#more {
+  position: fixed; z-index: 25; min-width: 200px; padding: 5px;
+  background: var(--paper); border: 1px solid var(--line); border-radius: 11px;
+  box-shadow: 0 12px 32px rgba(0,0,0,.24);
+}
+#more[hidden] { display: none !important; }
+#more button {
+  display: flex; width: 100%; align-items: center; gap: 10px;
+  padding: 6px 10px; border-radius: 7px; font-size: 13.5px; text-align: left;
+}
+#more button:hover { background: var(--hover); }
+#more button .k { margin-left: auto; font-size: 11px; color: var(--ink-3); }
+#more button .sub { font-size: 11.5px; color: var(--ink-3); }
+#more .sep { height: 1px; background: var(--line-2); margin: 4px 6px; }
+
+/* 表の道具。**縦棒を数えさせない** ── 打ち込む表は縦棒を数え続ける表で、
+   揃え方の行（`:---` `---:`）の形は誰も覚えていない。 */
+#tablebar {
+  position: fixed; z-index: 22; display: flex; align-items: center; gap: 2px;
+  padding: 3px 5px; border-radius: 9px;
+  background: var(--paper); border: 1px solid var(--line);
+  box-shadow: 0 6px 18px rgba(0,0,0,.18);
+}
+#tablebar[hidden] { display: none !important; }
+#tablebar button {
+  padding: 2px 8px; border-radius: 6px; font-size: 12px; color: var(--ink-2);
+  white-space: nowrap;
+}
+#tablebar button:hover { background: var(--hover); color: var(--ink); }
+#tablebar .sep { width: 1px; height: 15px; background: var(--line-2); margin: 0 3px; }
+
+/* 外から来た一本。**異例な開き方だと、画面が言う** ── 言わないと、
+   いつもの一本と見分けが付かないまま別のフォルダへ書く。 */
+#guestbar {
+  flex: none; display: flex; align-items: center; gap: 10px;
+  padding: 7px 18px; font-size: 12px;
+  background: var(--sel); color: var(--ink-2);
+  border-bottom: 1px solid var(--line);
+  -webkit-app-region: drag;
+}
+body.mac.guest #guestbar { padding-top: 30px; }
+#guestbar[hidden] { display: none !important; }
+#guestbar .what { font-weight: 700; color: var(--ink); flex: none; }
+/* **末尾から削らない。** 道は後ろのほうが効くので、`direction: rtl` で
+   逃げると `/` の位置まで入れ替わって別の道に見える（一度そうなった）。
+   長い道は真ん中を落として渡す（`shortPath`）。 */
+#guestwhere {
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; font-variant-numeric: tabular-nums;
+}
+#guestclose {
+  flex: none; padding: 2px 10px; border-radius: 7px; font-size: 12px;
+  background: var(--paper); border: 1px solid var(--line); color: var(--ink);
+  -webkit-app-region: no-drag;
+}
+#guestclose:hover { background: var(--amber); color: #3a2408; }
+/* 単発のときは、左の二列を出さない ── 索引の外にあるものなので。 */
+body.guest #rail, body.guest #list { display: none; }
+body.guest #top { padding-top: 12px; }
+
+/* 落としている間、受け取ると分かるように。 */
+body.dropping::after {
+  content: ''; position: fixed; inset: 8px; z-index: 40; pointer-events: none;
+  border: 3px dashed var(--amber); border-radius: 14px;
+  background: color-mix(in srgb, var(--amber) 8%, transparent);
+}
+
+/* ── 目次 ── */
+#toc {
+  width: 210px; flex: none; overflow-y: auto; padding: 16px 10px 40px;
+  border-left: 1px solid var(--line-2); background: var(--rail);
+}
+#toc[hidden] { display: none !important; }
+#toc .h {
+  display: block; width: 100%; text-align: left; padding: 3px 8px;
+  border-radius: 6px; font-size: 12.5px; color: var(--ink-2);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+#toc .h:hover { background: var(--hover); color: var(--ink); }
+#toc .h[data-l="2"] { padding-left: 18px; }
+#toc .h[data-l="3"] { padding-left: 28px; font-size: 12px; }
+#toc .h[data-l="4"], #toc .h[data-l="5"], #toc .h[data-l="6"] { padding-left: 38px; font-size: 12px; }
+#toc .none { padding: 6px 8px; font-size: 12px; color: var(--ink-3); }
+
+/* ── 一覧の上のお気に入り ── */
+.sect {
+  font-size: 10.5px; letter-spacing: .12em; color: var(--ink-3);
+  padding: 9px 16px 3px; text-transform: uppercase;
+  background: var(--list); border-bottom: 1px solid var(--line-2);
+}
 
 #say {
   position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%);
@@ -171,20 +629,64 @@ body.mac #top { padding-top: 30px; }
     <div id="listhead">
       <div id="where">すべてのノート</div>
       <div id="count"></div>
-      <input id="find" type="text" placeholder="絞り込む（空白で AND、OR も）" spellcheck="false">
+      <input id="find" type="text" placeholder="ノートを探す" spellcheck="false">
+      <button id="order" title="並び順を変える"></button>
+      <button id="findhow" title="タグ・フォルダ・期間で絞る">フィルタ</button>
+      <button id="whenchip" title="押すと外します" hidden></button>
     </div>
     <div id="rows"></div>
   </div>
   <div id="pane">
+    <div id="guestbar" hidden>
+      <span class="what">amber の外にあるノートを、単発で開いています</span>
+      <span id="guestwhere"></span>
+      <button id="guestclose">閉じて一覧に戻る</button>
+    </div>
     <div id="top" hidden>
       <div id="title"></div>
+      <div id="views">
+        <button data-view="read" title="表示（⌘E で入れ替え）">表示</button>
+        <button data-view="split" title="並べて表示（⌘P）">並べて表示</button>
+        <button data-view="write" title="コード ── Markdown そのもの（⌘E）">コード</button>
+        <button id="tocbtn" title="目次（⌘⇧O）">☰</button>
+        <button id="zenbtn" title="ノートだけを大きく（F12・戻るのは F12 か Esc）">⤢</button>
+      </div>
+      <button id="dots" title="このノートにすること（右押しでも同じ）">ノート ▾</button>
+      <button id="gear" title="amber の設定と見た目（⌘⇧P で全部）">⚙</button>
+      <div id="count2"></div>
       <div id="state"></div>
     </div>
     <div id="blank">
       <div id="blankmark"></div>
       <div>左からノートを選ぶか、<b>新しいノート</b>で書きはじめてください</div>
     </div>
-    <div id="ed" hidden></div>
+    <div id="work" hidden>
+      <div id="panes">
+        <div id="ed"></div>
+        <div id="read" hidden></div>
+        <div id="toc" hidden></div>
+      </div>
+      <div id="marks"></div>
+      <div id="vim"></div>
+    </div>
+  </div>
+  <div id="veil" hidden><div id="sheet">
+    <div class="hd"></div>
+    <input type="text" spellcheck="false">
+    <div class="items"></div>
+    <div class="foot"></div>
+  </div></div>
+  <div id="more" hidden></div>
+  <div id="tablebar" hidden>
+    <button data-do="row+">行を足す</button>
+    <button data-do="row-">行を消す</button>
+    <span class="sep"></span>
+    <button data-do="col+">列を足す</button>
+    <button data-do="col-">列を消す</button>
+    <span class="sep"></span>
+    <button data-do="align:left" title="左に寄せる">⇤</button>
+    <button data-do="align:center" title="真ん中に寄せる">⇔</button>
+    <button data-do="align:right" title="右に寄せる">⇥</button>
   </div>
   <div id="say"></div>
   <script src="vendor/monaco/vs/loader.js"></script>

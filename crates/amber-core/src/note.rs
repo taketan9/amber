@@ -166,11 +166,23 @@ pub fn read(path: &Path, head_lines: usize) -> Option<Note> {
     let meta = std::fs::metadata(path).ok();
     let f = front(&lines);
     let body = &lines[f.lines.min(lines.len())..];
+    // 題は **`title:` → 最初の見出し → 書き出しの一行 → ファイル名**。
+    //
+    // 書き出しの一行を挟むのは、雑なメモのため ── 「牛乳」とだけ書いた
+    // ノートに題を付けさせるのは、書くことより多い。ファイル名まで落ちる
+    // のは**中身がまだ何も無いとき**だけで、そのときは他に呼びようがない。
+    let from_line = f
+        .get("title")
+        .map(str::to_string)
+        .filter(|t| !t.trim().is_empty())
+        .is_none()
+        && heading(body).is_none();
     let title = f
         .get("title")
         .map(str::to_string)
         .filter(|t| !t.trim().is_empty())
         .or_else(|| heading(body))
+        .or_else(|| first_line(body))
         .or_else(|| {
             path.file_stem().map(|s| s.to_string_lossy().into_owned())
         })
@@ -197,7 +209,9 @@ pub fn read(path: &Path, head_lines: usize) -> Option<Note> {
     Some(Note {
         path: path.to_path_buf(),
         title,
-        excerpt: excerpt(body),
+        // **題が書き出しの一行から来たなら、その行は二行目に出さない。**
+        // 同じ字が二段に並ぶと、一行のノートが二行に見える。
+        excerpt: if from_line { excerpt(&body[first_at(body)..]) } else { excerpt(body) },
         star: star(&f),
         tags: f.tags,
         updated,
@@ -232,6 +246,70 @@ fn heading(body: &[String]) -> Option<String> {
         .find(|l| l.starts_with('#'))
         .map(|l| l.trim_start_matches('#').trim().to_string())
         .filter(|t| !t.is_empty())
+}
+
+/// 前書きも見出しも無いノートの題は、**書き出しの一行**。
+///
+/// 「牛乳」とだけ書きたいときに題を付けさせるのは、書くことより多い。
+/// そして題を書かなかったノートが**日付で並ぶ**のは、書いた人が一度も
+/// 言っていない名前が一覧を埋めるということ。
+///
+/// 行頭の印は外す ── `- 牛乳` の題は「牛乳」。強調やコードの印も外す
+/// （題は読むもので、記法ではない）。長い一行は切る ── 段落をそのまま
+/// 題にすると、一覧の一行をそれだけで食い尽くす。
+fn first_line(body: &[String]) -> Option<String> {
+    let mut fenced = false;
+    for line in body {
+        let t = line.trim();
+        if t.starts_with("```") {
+            fenced = !fenced;
+            continue;
+        }
+        // 枠の中は書いた人の字ではあるが、題にはならない（`fn main() {`）。
+        if fenced || t.is_empty() || crate::markdown::is_rule(t) {
+            continue;
+        }
+        let bare = match crate::markdown::list_item(t) {
+            Some((_, rest, _)) => match crate::markdown::task_item(&rest) {
+                Some((_, r)) => r,
+                None => rest,
+            },
+            None => t.strip_prefix('>').map(|r| r.trim_start().to_string())
+                .unwrap_or_else(|| t.to_string()),
+        };
+        let flat: String = crate::markdown::inline(&bare).iter().map(|i| i.text()).collect();
+        let flat = flat.trim();
+        if flat.is_empty() {
+            continue;
+        }
+        return Some(clip(flat, 60));
+    }
+    None
+}
+
+/// `first_line` が採った行の、次の行。
+fn first_at(body: &[String]) -> usize {
+    let mut fenced = false;
+    for (n, line) in body.iter().enumerate() {
+        let t = line.trim();
+        if t.starts_with("```") {
+            fenced = !fenced;
+            continue;
+        }
+        if fenced || t.is_empty() || crate::markdown::is_rule(t) {
+            continue;
+        }
+        return (n + 1).min(body.len());
+    }
+    body.len()
+}
+
+/// 長い字を切る。**文字で数える** ── バイトで切ると多バイトの字が割れる。
+fn clip(s: &str, n: usize) -> String {
+    if s.chars().count() <= n {
+        return s.to_string();
+    }
+    s.chars().take(n).collect::<String>() + "…"
 }
 
 /// A line of body text, flattened.
@@ -529,7 +607,10 @@ pub fn attach(note: &std::path::Path, bytes: &[u8], ext: &str) -> anyhow::Result
 /// a quote) is rare enough in a notebook to be worth losing.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Block {
-    Heading { level: u8, text: String },
+    /// `line` は**ファイルの行番号**（前書きを含めて数えた 0 起点）。
+    /// 目次から飛ぶのに要る ── チェックの升と同じ理由で、何番目の見出しかを
+    /// 数えると、前書きのあるノートでずれる。
+    Heading { level: u8, text: String, line: usize },
     Paragraph(String),
     /// One item. `text` keeps its inline markup for the renderer to handle.
     Bullet(String),
@@ -615,7 +696,7 @@ pub fn blocks(text: &str) -> Vec<Block> {
             // what a notes app has to get right.
             if level <= 6 && (rest.starts_with(' ') || rest.trim_start_matches('#').starts_with(' ')) {
                 flush(&mut para, &mut out);
-                out.push(Block::Heading { level: level as u8, text: text.to_string() });
+                out.push(Block::Heading { level: level as u8, text: text.to_string(), line: i });
                 i += 1;
                 continue;
             }
@@ -790,11 +871,46 @@ fn color_of(open: &str) -> Option<String> {
 /// `OR`, `or`, `|` and `｜` all mean the same thing: nobody remembers which
 /// one an app wanted, and the full-width bar is what a Japanese keyboard
 /// gives you without switching.
-pub fn terms(query: &str) -> Vec<Vec<String>> {
-    let mut out: Vec<Vec<String>> = Vec::new();
-    let mut group: Vec<String> = Vec::new();
-    for word in query.split_whitespace() {
-        if matches!(word, "OR" | "or" | "|" | "｜") {
+/// 絞り込みの一語。
+///
+/// `field` は `any`（どこでも）/ `title` / `tag` / `book`。**`body` は無い** ──
+/// 一覧が持っているのは本文の頭 100 字だけなので、`body:` を受けると
+/// 「本文を探したのに見つからない」を作る。奥の一文は `find` の仕事。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Term {
+    pub field: String,
+    pub word: String,
+    /// `-` を頭に付けたもの。**当たったら落とす。**
+    pub not: bool,
+}
+
+/// 二重引用符を尊重して切る。`title:"週次 報告"` が一語で通るように。
+fn shatter(query: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut cur = String::new();
+    let mut quoted = false;
+    for c in query.chars() {
+        match c {
+            '"' | '”' => quoted = !quoted,
+            c if c.is_whitespace() && !quoted => {
+                if !cur.is_empty() {
+                    out.push(std::mem::take(&mut cur));
+                }
+            }
+            c => cur.push(c),
+        }
+    }
+    if !cur.is_empty() {
+        out.push(cur);
+    }
+    out
+}
+
+pub fn terms(query: &str) -> Vec<Vec<Term>> {
+    let mut out: Vec<Vec<Term>> = Vec::new();
+    let mut group: Vec<Term> = Vec::new();
+    for word in shatter(query) {
+        if matches!(word.as_str(), "OR" | "or" | "|" | "｜") {
             // A bare `OR` at the start, or two in a row, is somebody still
             // typing — not an empty group that matches everything.
             if !group.is_empty() {
@@ -802,7 +918,30 @@ pub fn terms(query: &str) -> Vec<Vec<String>> {
             }
             continue;
         }
-        group.push(word.to_lowercase());
+        let (not, rest) = match word.strip_prefix('-') {
+            // `-` だけ、あるいは `-` のあとが空なら、それはまだ打ちかけ。
+            Some(r) if !r.is_empty() => (true, r.to_string()),
+            _ => (false, word),
+        };
+        // `tag:定型` のような綴じ。**知らない見出しは字として扱う** ──
+        // `http://…` や「10:30」を書いただけで消える語ができると、
+        // 探せなくなったことに気づけない。
+        let (field, w) = match rest.split_once(':') {
+            Some((f, v)) if !v.is_empty() && matches!(f, "title" | "tag" | "book" | "題" | "タグ" | "フォルダ") => {
+                let f = match f {
+                    "題" => "title",
+                    "タグ" => "tag",
+                    "フォルダ" => "book",
+                    other => other,
+                };
+                (f.to_string(), v.to_string())
+            }
+            _ => ("any".to_string(), rest),
+        };
+        if w.is_empty() {
+            continue;
+        }
+        group.push(Term { field, word: w.to_lowercase(), not });
     }
     if !group.is_empty() {
         out.push(group);
@@ -817,7 +956,12 @@ pub fn hits(hay: &str, query: &str) -> bool {
         return true;
     }
     let hay = hay.to_lowercase();
-    groups.iter().any(|g| g.iter().all(|w| hay.contains(w)))
+    // ここには一本の藁束しか無いので、見出しの区別は付けられない ──
+    // どの見出しの語も、この束の中を探す。見出しごとに探し分けるのは、
+    // 題もタグも別々に持っている一覧の側（`Term::field` を見る）。
+    groups
+        .iter()
+        .any(|g| g.iter().all(|t| hay.contains(&t.word) != t.not))
 }
 
 /// The words, with the colour notation taken off.
@@ -876,7 +1020,11 @@ pub fn set_check(text: &str, line: usize, done: bool) -> String {
 }
 
 /// `![alt](link)` and nothing else on the line.
-fn lone_image(t: &str) -> Option<Block> {
+///
+/// `markdown::to_html` asks this too. **どこからが絵かは一か所** ── 窓が
+/// 自分で `![` を探しはじめると、iPhone が絵として積む行を窓が字で出す、
+/// という食い違いが静かに育つ。
+pub(crate) fn lone_image(t: &str) -> Option<Block> {
     let rest = t.strip_prefix("![")?;
     let close = rest.find(']')?;
     let tail = &rest[close + 1..];
@@ -1123,30 +1271,50 @@ pub fn new_note(title: &str, today: &str, now: &str) -> (String, String) {
         s if s.is_empty() => today.to_string(),
         s => s,
     };
-    let body = format!("---\ntitle: {shown}\ncreated: {today}\ntags: []\n---\n\n");
+    // **題を書かなかったなら、`title:` を書かない。**
+    //
+    // 前は作った時刻を題として書き込んでいた。書いた人が一度も言って
+    // いない名前が入り、あとから「牛乳」と書いても題は時刻のままになる
+    // ── 直すには前書きを開いて消すしかなく、その前書きは書く画面に
+    // 出していない。題が無ければ `read` が書き出しの一行を採る。
+    //
+    // `tags: []` も書かない ── タグの無いノートが空の配列を持ち歩く理由は
+    // 無く、`settags` が要るときに足す。`created` だけは残す: これは
+    // 人が読む名前ではなく、並べ替えが読む欄。
+    let body = if title.is_empty() {
+        format!("---\ncreated: {today}\n---\n\n")
+    } else {
+        format!("---\ntitle: {shown}\ncreated: {today}\n---\n\n")
+    };
     (format!("{stem}.md"), body)
 }
 
 #[cfg(test)]
 mod tests {
 
+    /// 読みやすさのため、`Term` を `見出し:語` の一本の字に畳む。
+    fn flat(q: &str) -> Vec<Vec<String>> {
+        terms(q)
+            .into_iter()
+            .map(|g| {
+                g.into_iter()
+                    .map(|t| format!("{}{}:{}", if t.not { "-" } else { "" }, t.field, t.word))
+                    .collect()
+            })
+            .collect()
+    }
+
     #[test]
     fn a_search_box_is_an_or_of_ands() {
-        assert_eq!(terms("仕事 週報"), vec![vec!["仕事".to_string(), "週報".to_string()]]);
-        assert_eq!(
-            terms("仕事 OR 家"),
-            vec![vec!["仕事".to_string()], vec!["家".to_string()]]
-        );
+        assert_eq!(flat("仕事 週報"), vec![vec!["any:仕事", "any:週報"]]);
+        assert_eq!(flat("仕事 OR 家"), vec![vec!["any:仕事"], vec!["any:家"]]);
         // OR のほうが弱い綴じ ── (仕事 AND 週報) OR (家)。
-        assert_eq!(
-            terms("仕事 週報 or 家"),
-            vec![vec!["仕事".to_string(), "週報".to_string()], vec!["家".to_string()]]
-        );
+        assert_eq!(flat("仕事 週報 or 家"), vec![vec!["any:仕事", "any:週報"], vec!["any:家"]]);
         // 打ちかけの OR は、何にでも当たる空の組にしない。
-        assert_eq!(terms("OR"), Vec::<Vec<String>>::new());
-        assert_eq!(terms("仕事 OR OR 家").len(), 2);
+        assert!(flat("OR").is_empty());
+        assert_eq!(flat("仕事 OR OR 家").len(), 2);
         // 全角の縦棒も同じ ── 日本語キーボードで切り替えずに出るのはこちら。
-        assert_eq!(terms("あ ｜ い").len(), 2);
+        assert_eq!(flat("あ ｜ い").len(), 2);
 
         assert!(hits("週報 仕事 定型", "仕事 週報"));
         assert!(!hits("週報 仕事", "仕事 買い物"));
@@ -1154,6 +1322,31 @@ mod tests {
         assert!(hits("なんでも", ""), "空の問いは全部に当たる");
         // 大文字小文字は問わない。
         assert!(hits("Weekly Report", "weekly"));
+    }
+
+    #[test]
+    fn 探す先を名指しできる() {
+        // Inkdrop と同じ綴じ。日本語の見出しも通す ── `tag:` を打つのに
+        // 英字へ切り替えるのは、日本語で書いている最中には高い。
+        assert_eq!(flat("tag:定型"), vec![vec!["tag:定型"]]);
+        assert_eq!(flat("タグ:定型"), vec![vec!["tag:定型"]]);
+        assert_eq!(flat("book:仕事 題:週報"), vec![vec!["book:仕事", "title:週報"]]);
+        // 二重引用符で、空白を含む一語。
+        assert_eq!(flat("title:\"週次 報告\""), vec![vec!["title:週次 報告"]]);
+        assert_eq!(flat("\"AND を含む句\"").len(), 1);
+
+        // `-` は落とす。
+        assert_eq!(flat("-tag:雑"), vec![vec!["-tag:雑"]]);
+        assert!(hits("週報 仕事", "仕事 -買い物"));
+        assert!(!hits("週報 仕事 買い物", "仕事 -買い物"));
+
+        // **知らない見出しは字のまま。** `http://…` や「10:30」を打っただけで
+        // 消える語ができると、探せなくなったことに気づけない。
+        assert_eq!(flat("http://example.com"), vec![vec!["any:http://example.com"]]);
+        assert_eq!(flat("10:30"), vec![vec!["any:10:30"]]);
+        // `-` だけ、`tag:` だけは、まだ打ちかけ。
+        assert!(flat("-").is_empty() || flat("-") == vec![vec!["any:-"]]);
+        assert_eq!(flat("tag:"), vec![vec!["any:tag:"]]);
     }
 
     #[test]
@@ -1338,7 +1531,7 @@ mod tests {
         let b = blocks(md);
         // The front matter is how the note describes itself, not something it
         // says — and the title is already on screen above this.
-        assert_eq!(b[0], Block::Heading { level: 1, text: "見出し".into() });
+        assert_eq!(b[0], Block::Heading { level: 1, text: "見出し".into(), line: 3 });
         // Two lines with no blank between them are one paragraph, as Markdown
         // says and as anybody typing on a phone expects.
         assert_eq!(b[1], Block::Paragraph("本文の一行目 と二行目。".into()));
@@ -1358,7 +1551,7 @@ mod tests {
         // `#仕事` on its own line is how people write a tag. Reading it as a
         // heading would make every tagged note open with its tag in 32pt.
         assert_eq!(blocks("#仕事\n"), vec![Block::Paragraph("#仕事".into())]);
-        assert_eq!(blocks("# 仕事\n"), vec![Block::Heading { level: 1, text: "仕事".into() }]);
+        assert_eq!(blocks("# 仕事\n"), vec![Block::Heading { level: 1, text: "仕事".into(), line: 0 }]);
         // An image with words after it is a sentence, not a picture on its own.
         assert_eq!(
             blocks("![a](b.jpg) のとおり\n"),
@@ -1607,14 +1800,25 @@ mod tests {
     }
 
     #[test]
-    fn an_untitled_note_is_named_for_the_moment_it_was_made() {
+    fn 題を書かなかったノートには_題を書かない() {
         let (name, body) = new_note("   ", "2026-09-02", "2026-09-02 14:03:09");
-        // 題の無いノートは、その瞬間の名前。日付だけだと、午後に3本作ると
-        // 「-2」「-3」が付くだけで、どれがどれか分からない。
-        assert!(body.contains("title: 2026-09-02 14:03:09"), "{body}");
+        // **書いた人が一度も言っていない名前を、前書きに入れない。**
+        // 前は作った時刻を `title:` に書き込んでいて、あとから「牛乳」と
+        // 書いても題は時刻のまま残った ── 直すには前書きを開いて消すしか
+        // なく、その前書きは書く画面に出していない。
+        assert!(!body.contains("title:"), "題が書き込まれている: {body}");
+        // タグの無いノートが、空の配列を持ち歩く理由も無い。
+        assert!(!body.contains("tags:"), "空のタグが書き込まれている: {body}");
+        // `created` は残す ── 人が読む名前ではなく、並べ替えが読む欄。
         assert!(body.contains("created: 2026-09-02\n"), "{body}");
-        // ファイル名からは `:` が落ちる（Windows で作れない）。
+        // **ファイル名はその瞬間のまま。** 日付だけだと、午後に3本作ると
+        // 「-2」「-3」が付くだけで、どれがどれか分からない。`:` は落とす
+        // （Windows で作れない）。
         assert_eq!(name, "2026-09-02 14-03-09.md");
+
+        // 題を書いたなら、書いたとおりに入る。
+        let (_, body) = new_note("段取り", "2026-09-02", "2026-09-02 14:03:09");
+        assert!(body.contains("title: 段取り"), "{body}");
     }
 
     #[test]
@@ -1678,7 +1882,34 @@ mod tests {
         std::fs::write(&p, "# 見出し\n本文\n").unwrap();
         assert_eq!(read(&p, 40).unwrap().title, "見出し", "then the heading");
 
+        // **そして書き出しの一行。** 「牛乳」とだけ書きたいときに題を
+        // 付けさせるのは、書くことより多い。
         std::fs::write(&p, "本文だけ\n").unwrap();
+        assert_eq!(read(&p, 40).unwrap().title, "本文だけ", "then the first line");
+
+        // 行頭の印は外す ── `- 牛乳` の題は「牛乳」。
+        std::fs::write(&p, "- 牛乳\n- パン\n").unwrap();
+        let n = read(&p, 40).unwrap();
+        assert_eq!(n.title, "牛乳");
+        // **題になった行は、二行目に出さない。** 一行のノートが二行に見える。
+        assert!(!n.excerpt.starts_with("牛乳"), "二度言っている: {}", n.excerpt);
+
+        // チェックの印も、強調の印も外す。
+        std::fs::write(&p, "- [ ] **急ぎ**の用\n").unwrap();
+        assert_eq!(read(&p, 40).unwrap().title, "急ぎの用");
+
+        // 枠の中は題にしない ── `fn main() {` はノートの名前ではない。
+        std::fs::write(&p, "```rust\nfn main() {}\n```\nあとがき\n").unwrap();
+        assert_eq!(read(&p, 40).unwrap().title, "あとがき");
+
+        // 長い一行は切る ── 段落をそのまま題にすると一覧の一行を食い尽くす。
+        std::fs::write(&p, "あ".repeat(200)).unwrap();
+        let t = read(&p, 40).unwrap().title;
+        assert_eq!(t.chars().count(), 61, "60字＋…: {t}");
+
+        // **ファイル名まで落ちるのは、中身がまだ何も無いときだけ。**
+        // そのときは他に呼びようがない。
+        std::fs::write(&p, "---\ncreated: 2026-09-06\n---\n\n").unwrap();
         assert_eq!(read(&p, 40).unwrap().title, "kickoff", "then the file name");
     }
 
@@ -2059,7 +2290,14 @@ pub fn find(
     if query.trim().is_empty() {
         return Vec::new();
     }
-    let words: Vec<String> = terms(query).into_iter().flatten().collect();
+    // 抜粋を切るのに使う語 ── **落とす語（`-`）は要らない**。
+    // 「無い語」の周りは切り出せない。
+    let words: Vec<String> = terms(query)
+        .into_iter()
+        .flatten()
+        .filter(|t| !t.not)
+        .map(|t| t.word)
+        .collect();
     let (found, _) = list(dir, limits, stop);
     let mut out = Vec::new();
     for f in found {

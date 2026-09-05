@@ -393,11 +393,221 @@ fn inline_html(text: &str) -> String {
     out
 }
 
+/// 書く道具。**選んだところだけを渡してもらい、置き換えたものを返す。**
+///
+/// 位置（何文字目か）は受け取らない ── JS は UTF-16 の桁で数え、Rust は
+/// 文字で数えるので、絵文字が一つ混ざるだけで境目がずれる。選んだ字そのものを
+/// もらえば、その食い違いは起きようがない。
+///
+/// **意味はここにある。** iPhone の `Marks.deepen` と窓が別々に「見出しを
+/// 深くする」を持つと、二つの前端で押し心地が分かれる。いまは窓だけが
+/// ここを通っており、iPhone は Swift の写しを持ったままなので、**揃えるのは
+/// これから**（`REQUESTS.ja.md` に置いた）。
+pub mod marks {
+    /// 挟む。**もう挟まっているなら外す。** 間違えて押した瞬間に欲しくなる。
+    pub fn wrap(text: &str, mark: &str) -> String {
+        if mark.is_empty() {
+            return text.to_string();
+        }
+        // 選んでいないときは印だけ置く ── 中に入って打てるように。
+        if text.is_empty() {
+            return format!("{mark}{mark}");
+        }
+        if let Some(inner) = text
+            .strip_prefix(mark)
+            .and_then(|t| t.strip_suffix(mark))
+            .filter(|_| text.len() >= mark.len() * 2)
+        {
+            return inner.to_string();
+        }
+        format!("{mark}{text}{mark}")
+    }
+
+    /// 行頭の印。**すべての行に付いていれば外し、一つでも無ければ付ける。**
+    ///
+    /// 付けるときは、先に**別の行頭の印を外す** ── 箇条書きを引用にすると
+    /// `> - もの` になるのは、たいてい望んだことではない。
+    pub fn prefix(text: &str, mark: &str) -> String {
+        let lines: Vec<&str> = text.split('\n').collect();
+        let numbered = mark.starts_with(|c: char| c.is_ascii_digit());
+        let has = |l: &str| -> bool {
+            let t = l.trim_start();
+            if numbered {
+                let d = t.chars().take_while(|c| c.is_ascii_digit()).count();
+                return d > 0 && t[d..].starts_with(". ");
+            }
+            t.starts_with(mark)
+                // `- [ ] ` は `- [x] ` でも付いている。
+                || (mark == "- [ ] " && (t.starts_with("- [x] ") || t.starts_with("- [X] ")))
+        };
+        // 空行は数に入れない ── 一行だけ空いているせいで外れない、を防ぐ。
+        let live: Vec<&&str> = lines.iter().filter(|l| !l.trim().is_empty()).collect();
+        let all = !live.is_empty() && live.iter().all(|l| has(l));
+
+        let mut n = 0usize;
+        lines
+            .iter()
+            .map(|l| {
+                if l.trim().is_empty() {
+                    return l.to_string();
+                }
+                let indent = &l[..l.len() - l.trim_start().len()];
+                let body = strip_any(l.trim_start());
+                if all {
+                    return format!("{indent}{body}");
+                }
+                n += 1;
+                if numbered {
+                    format!("{indent}{n}. {body}")
+                } else {
+                    format!("{indent}{mark}{body}")
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    /// 行頭に付いている印を、どれでも外す。
+    fn strip_any(t: &str) -> &str {
+        for m in ["- [ ] ", "- [x] ", "- [X] ", "> ", "- ", "* ", "+ "] {
+            if let Some(r) = t.strip_prefix(m) {
+                return r;
+            }
+        }
+        let d = t.chars().take_while(|c| c.is_ascii_digit()).count();
+        if d > 0 {
+            if let Some(r) = t[d..].strip_prefix(". ") {
+                return r;
+            }
+        }
+        t
+    }
+
+    /// 見出し。**押すたびに深くなる** ── `#` → `##` → `###` → 無し。
+    ///
+    /// ボタンを三つ置くと、一つの考えに三つの名前が付く。
+    pub fn deepen(text: &str) -> String {
+        text.split('\n')
+            .map(|l| {
+                let t = l.trim_start();
+                let indent = &l[..l.len() - t.len()];
+                let n = t.chars().take_while(|c| *c == '#').count();
+                let body = t[n..].trim_start();
+                if body.is_empty() && n == 0 {
+                    return l.to_string();
+                }
+                match n {
+                    0 => format!("{indent}# {body}"),
+                    1 => format!("{indent}## {body}"),
+                    2 => format!("{indent}### {body}"),
+                    _ => format!("{indent}{body}"),
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+}
+
+/// 置いた印を `data-line` / `data-span` に変える。
+///
+/// 印は `\u{1}` 行番号 `\u{2}`。**次の印までが、そのかたまりが食べた行**。
+/// 何も出さなかった周（空行など）は印が続くだけなので、そのまま落とす。
+///
+/// 差す先は**印のすぐ後ろの開き札**。表や引用のように中に札を持つものでも、
+/// 外側の一枚だけに差さる ── 中まで差すと、押した場所によって違う行が
+/// 返ることになる。
+fn stamps(raw: &str, total: usize) -> String {
+    // まず (印の位置, 行番号, 印の長さ) を集める。
+    let mut marks: Vec<(usize, usize, usize)> = Vec::new();
+    let b = raw.as_bytes();
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == 1 {
+            if let Some(end) = raw[i..].find('\u{2}') {
+                let n: usize = raw[i + 1..i + end].parse().unwrap_or(0);
+                marks.push((i, n, end + 1));
+                i += end + 1;
+                continue;
+            }
+        }
+        i += 1;
+    }
+
+    let mut out = String::with_capacity(raw.len());
+    let mut cut = 0;
+    for (k, &(at, line, len)) in marks.iter().enumerate() {
+        out.push_str(&raw[cut..at]);
+        cut = at + len;
+        // 次の印の行番号までが、このかたまりの行数。
+        let next = marks.get(k + 1).map(|m| m.1).unwrap_or(total);
+        let span = next.saturating_sub(line).max(1);
+        // **閉じ札は飛ばして、次の開き札に差す。**
+        //
+        // 箇条書きの二つ目以降は、前の項目を閉じてから始まる ── そこで
+        // 最初に見つかる `>` は `</li>` のもので、そこに差すと
+        // `</li data-line="10">` という札にならない札ができる（一度作った）。
+        let rest = &raw[cut..];
+        let mut j = 0;
+        loop {
+            let r = &rest[j..];
+            j += r.len() - r.trim_start().len();
+            let r = &rest[j..];
+            if r.starts_with("</") {
+                match r.find('>') {
+                    Some(p) => {
+                        j += p + 1;
+                        continue;
+                    }
+                    None => break,
+                }
+            }
+            break;
+        }
+        if rest[j..].starts_with('<') && !rest[j..].starts_with("</") {
+            if let Some(p) = rest[j..].find('>') {
+                out.push_str(&rest[..j + p]);
+                out.push_str(&format!(" data-line=\"{line}\" data-span=\"{span}\""));
+                cut += j + p;
+            }
+        }
+    }
+    out.push_str(&raw[cut..]);
+    out
+}
+
+/// `> [!NOTE]` の一行を、注記の種類に。**GitHub が読める五つだけ。**
+///
+/// 増やすと、ここでだけ見える記法になり、同じノートが GitHub で壊れる。
+fn alert_kind(t: &str) -> Option<String> {
+    let rest = t.strip_prefix('>')?.trim_start();
+    let inner = rest.strip_prefix("[!")?.strip_suffix(']')?;
+    let k = inner.to_ascii_lowercase();
+    matches!(k.as_str(), "note" | "tip" | "important" | "warning" | "caution").then_some(k)
+}
+
 /// Render Markdown as HTML.
 ///
 /// Line-based, like the terminal renderer it shares a parser with: cian reads
 /// the Markdown people write, not the Markdown a specification describes.
 pub fn to_html(lines: &[String]) -> String {
+    render(lines, true)
+}
+
+/// 各かたまりに、**元の何行目から何行ぶんか**を差す。
+///
+/// 読む面で直に書き換えるのに要る ── 押したかたまりの元の字が取れなければ、
+/// 読む面は読むだけの面のままになる。チェックの升が `data-line` を積んで
+/// いるのと同じ理由で、**何番目のかたまりかを数えると前書きのあるノートで
+/// ずれる**。
+///
+/// 印はいったん制御文字で置き、最後に属性に変える ── かたまりが何行
+/// 食べたかは、**次のかたまりが始まる場所**を見るまで分からない（枠も
+/// 表も引用も、閉じるまで進む）。開始は毎周の頭で分かるので、印だけ先に
+/// 置いておけば `continue` で抜ける枝も漏れない。
+///
+/// 引用や注記の中で呼び直すときは差さない（`stamp = false`）── 中の行番号は
+/// 切り出したあとの数え方で、ファイルの行番号ではない。
+fn render(lines: &[String], stamp: bool) -> String {
     let mut out = String::new();
     // The front matter goes, if there is one: it is how a note describes
     // itself, not something it says, and the title and tags are already on
@@ -405,9 +615,14 @@ pub fn to_html(lines: &[String]) -> String {
     // leading `---` is a front matter or a rule — one answer, so the phone
     // and the window agree about where a note starts.
     let mut i = crate::note::front(lines).lines;
-    // Which list levels are open, by indent. Markdown's nesting is indentation
-    // and nothing else, so this is the whole of it.
-    let mut open_lists: Vec<usize> = Vec::new();
+    // Which list levels are open, by indent, and whether each is numbered.
+    // Markdown's nesting is indentation and nothing else, so the indent is
+    // the whole of the nesting; the flag is only about which tag closes it.
+    //
+    // **番号は `<ol>` で出す。** ここが `<ul>` のままだと、書いた `1. 2. 3.`
+    // が黒丸で出る ── 書いたものと読めるものが違うので、Markdown が壊れて
+    // いるように見える。何番から始めるかは `list_item` が返す印から取る。
+    let mut open_lists: Vec<(usize, bool)> = Vec::new();
 
     // A list item stays open until something ends it, because a deeper list
     // belongs *inside* the item above it. Closing each `<li>` as it is written
@@ -421,25 +636,24 @@ pub fn to_html(lines: &[String]) -> String {
     let mut li_open = false;
     /// Close every open list. Anything that is not a list item ends all of
     /// them — a paragraph after a list is not inside it.
-    fn close_all_lists(out: &mut String, open: &mut Vec<usize>, li: &mut bool) {
-        while !open.is_empty() {
+    fn close_all_lists(out: &mut String, open: &mut Vec<(usize, bool)>, li: &mut bool) {
+        while let Some((_, ord)) = open.pop() {
             if *li {
                 out.push_str("</li>\n");
             }
-            out.push_str("</ul>\n");
-            open.pop();
+            out.push_str(if ord { "</ol>\n" } else { "</ul>\n" });
             *li = !open.is_empty();
         }
         *li = false;
     }
 
-    fn close_lists_to(out: &mut String, open: &mut Vec<usize>, li: &mut bool, indent: usize) {
-        while open.last().is_some_and(|d| *d > indent) {
+    fn close_lists_to(out: &mut String, open: &mut Vec<(usize, bool)>, li: &mut bool, indent: usize) {
+        while open.last().is_some_and(|(d, _)| *d > indent) {
             if *li {
                 out.push_str("</li>\n");
             }
-            out.push_str("</ul>\n");
-            open.pop();
+            let (_, ord) = open.pop().unwrap();
+            out.push_str(if ord { "</ol>\n" } else { "</ul>\n" });
             // The item this list was nested inside is still open.
             *li = !open.is_empty();
         }
@@ -450,6 +664,11 @@ pub fn to_html(lines: &[String]) -> String {
     }
 
     while i < lines.len() {
+        if stamp {
+            out.push('\u{1}');
+            out.push_str(&i.to_string());
+            out.push('\u{2}');
+        }
         let raw = &lines[i];
         let t = raw.trim();
 
@@ -529,6 +748,55 @@ pub fn to_html(lines: &[String]) -> String {
             continue;
         }
 
+        // 行そのものが絵なら、絵として出す。**どこからが絵かは
+        // `note::lone_image` の1か所** ── iPhone が絵として積む行を窓が
+        // 字で出すと、同じノートが二つの見た目を持つ。
+        if let Some(crate::note::Block::Image { alt, link }) = crate::note::lone_image(t) {
+            close_all_lists(&mut out, &mut open_lists, &mut li_open);
+            match safe_url(&link) {
+                Some(src) => out.push_str(&format!(
+                    "<img src=\"{src}\" alt=\"{}\">\n",
+                    esc(&alt)
+                )),
+                // 出せない先なら、書いてあったものをそのまま字で。
+                // **隠して失うより、出して残す。**
+                None => out.push_str(&format!("<p>{}</p>\n", esc(t))),
+            }
+            i += 1;
+            continue;
+        }
+
+        // GitHub 風の注記。`> [!NOTE]` に続く引用を、色の付いた枠にする。
+        //
+        // **引用の中の一行目でしか始まらない。** 本文に `[!NOTE]` と書いた
+        // だけで枠になると、角括弧を書いただけの行が消える。GitHub が
+        // 読めるものと同じ五つだけを受ける ── 増やすと、ここでだけ見える
+        // 記法になり、ノートが GitHub で壊れる。
+        if let Some(kind) = alert_kind(t) {
+            close_all_lists(&mut out, &mut open_lists, &mut li_open);
+            let mut body = Vec::new();
+            i += 1;
+            while i < lines.len() {
+                let q = lines[i].trim();
+                let Some(rest) = q.strip_prefix('>') else { break };
+                body.push(rest.trim_start().to_string());
+                i += 1;
+            }
+            let name = match kind.as_str() {
+                "note" => "ノート",
+                "tip" => "こつ",
+                "important" => "大事",
+                "warning" => "注意",
+                _ => "危険",
+            };
+            out.push_str(&format!(
+                "<div class=\"alert {kind}\"><p class=\"alert-h\">{name}</p>\n"
+            ));
+            out.push_str(&render(&body, false));
+            out.push_str("</div>\n");
+            continue;
+        }
+
         if t.starts_with("> ") || t == ">" {
             close_all_lists(&mut out, &mut open_lists, &mut li_open);
             let mut body = Vec::new();
@@ -539,21 +807,41 @@ pub fn to_html(lines: &[String]) -> String {
                 i += 1;
             }
             out.push_str("<blockquote>\n");
-            out.push_str(&to_html(&body));
+            out.push_str(&render(&body, false));
             out.push_str("</blockquote>\n");
             continue;
         }
 
-        if let Some((_, text, indent)) = list_item(raw) {
-            if open_lists.last().is_some_and(|d| indent > *d) {
+        if let Some((mark, text, indent)) = list_item(raw) {
+            // `list_item` は印をそのまま返す ── 黒丸なら "•"、番号なら "1."。
+            let ord = mark != "•";
+            // 1 から始まらない番号は `start` で渡す。書いた番号で出ないと、
+            // 途中から続ける箇条書き（手順の続き）が毎回 1 に戻る。
+            let open_tag = |o: bool| -> String {
+                if !o {
+                    return "<ul>\n".to_string();
+                }
+                let n: usize = mark.trim_end_matches(['.', ')']).parse().unwrap_or(1);
+                if n == 1 {
+                    "<ol>\n".to_string()
+                } else {
+                    format!("<ol start=\"{n}\">\n")
+                }
+            };
+            if open_lists.last().is_some_and(|(d, _)| indent > *d) {
                 // Deeper: the parent's item stays open and this list goes in it.
-                open_lists.push(indent);
-                out.push_str("<ul>\n");
+                open_lists.push((indent, ord));
+                out.push_str(&open_tag(ord));
             } else {
                 close_lists_to(&mut out, &mut open_lists, &mut li_open, indent);
+                // 同じ深さで印が変わったら、別のリスト ── 黒丸の続きに
+                // 番号を混ぜると、片方の記法がもう片方の見た目で出る。
+                if open_lists.last().is_some_and(|(_, o)| *o != ord) {
+                    close_all_lists(&mut out, &mut open_lists, &mut li_open);
+                }
                 if open_lists.is_empty() {
-                    open_lists.push(indent);
-                    out.push_str("<ul>\n");
+                    open_lists.push((indent, ord));
+                    out.push_str(&open_tag(ord));
                 }
             }
             match task_item(&text) {
@@ -562,9 +850,15 @@ pub fn to_html(lines: &[String]) -> String {
                 // the line yourself — and `note::set_check` takes a line
                 // number, so this is the whole of what a window needs to
                 // make it work.
+                // **`<button>` で出す。`<span>` ではない。** 押せるものは
+                // 操作できるものとして名乗るべきで、そうでないと読み上げは
+                // ただの字として読み、Tab では辿り着けず、キーボードだけの
+                // 人には「無い」のと同じになる。押せる升が一つ出せない
+                // だけで、ノートの半分が触れなくなる。
                 Some((done, rest)) => out.push_str(&format!(
-                    "<li class=\"task\"><span class=\"box\" data-line=\"{}\">{}</span>{}",
+                    "<li class=\"task\"><button type=\"button\" class=\"box\" data-line=\"{}\" aria-pressed=\"{}\">{}</button>{}",
                     i,
+                    done,
                     if done { "☑" } else { "☐" },
                     inline_html(&rest),
                 )),
@@ -599,11 +893,33 @@ pub fn to_html(lines: &[String]) -> String {
         out.push_str(&format!("<p>{}</p>\n", inline_html(&para.join(" "))));
     }
     close_all_lists(&mut out, &mut open_lists, &mut li_open);
+    if stamp {
+        return stamps(&out, lines.len());
+    }
     out
 }
 
 #[cfg(test)]
 mod tests {
+
+    /// 組み方を確かめるときは、**行の印を外して見る。**
+    ///
+    /// `data-line` / `data-span` は「元の何行目か」という覚書で、組み方の
+    /// 一部ではない。文字列でそのまま比べると、印を足した日に組み方の
+    /// テストが全部落ちる ── 落ちたのは組み方ではないのに。
+    ///
+    /// `super::to_html` を覆っているので、この段のテストは自動でこちらを
+    /// 通る。印そのものを確かめるテストだけ `super::to_html` を名指しする。
+    fn to_html(lines: &[String]) -> String {
+        let mut out = super::to_html(lines);
+        for key in [" data-line=\"", " data-span=\""] {
+            while let Some(at) = out.find(key) {
+                let Some(end) = out[at + key.len()..].find('"') else { break };
+                out.replace_range(at..at + key.len() + end + 1, "");
+            }
+        }
+        out
+    }
 
     #[test]
     fn two_coloured_words_on_one_line_both_survive() {
@@ -686,6 +1002,98 @@ mod tests {
     }
 
     #[test]
+    fn 押せる升は_押せるものとして名乗る() {
+        // `<span>` で出していた頃、読み上げはただの字として読み、Tab では
+        // 辿り着けなかった ── 押せる升が一つ出せないだけで、ノートの
+        // 半分が触れなくなる。
+        let out = super::to_html(&lines("- [ ] やること\n- [x] 済んだ\n"));
+        assert!(out.contains("<button type=\"button\" class=\"box\""), "升が押せない: {out}");
+        assert!(out.contains("aria-pressed=\"false\""), "入り切りが伝わらない: {out}");
+        assert!(out.contains("aria-pressed=\"true\""), "入り切りが伝わらない: {out}");
+        // 行番号は残す ── `note::set_check` が取るのはこれ。
+        assert!(out.contains("data-line=\"0\"") && out.contains("data-line=\"1\""), "{out}");
+    }
+
+    #[test]
+    fn github_の注記は五つだけ受ける() {
+        let out = to_html(&lines("> [!NOTE]\n> 覚えておくこと。\n"));
+        assert!(out.contains("<div class=\"alert note\">"), "枠にならない: {out}");
+        assert!(out.contains("覚えておくこと。"), "中身が消えた: {out}");
+        let out = to_html(&lines("> [!WARNING]\n> 気をつける。\n"));
+        assert!(out.contains("alert warning"), "{out}");
+
+        // ふつうの引用は、ふつうの引用のまま。
+        let out = to_html(&lines("> ふつう\n"));
+        assert!(out.contains("<blockquote>") && !out.contains("alert"), "{out}");
+        // **引用の中の一行目でしか始まらない。** 本文に書いた角括弧が
+        // 消えると、書いたものが読めるものと違う。
+        let out = to_html(&lines("本文に [!NOTE] と書いた\n"));
+        assert!(out.contains("[!NOTE]"), "本文の角括弧が消えた: {out}");
+        // 知らない種類は、ふつうの引用。ここでだけ見える記法を増やさない。
+        let out = to_html(&lines("> [!SPICY]\n> から\n"));
+        assert!(!out.contains("alert"), "知らない種類が枠になった: {out}");
+    }
+
+    #[test]
+    fn かたまりは元の行を持って出る() {
+        // 読む面で直に書き換えるのに要る ── 押したかたまりの元の字が
+        // 取れなければ、読む面は読むだけの面のままになる。
+        let out = super::to_html(&lines("---\ntitle: t\n---\n\n# 題\n\n本文。\n続き。\n"));
+        assert!(out.contains("<h1 id=\"題\" data-line=\"4\" data-span=\"1\">"), "{out}");
+        // 折り返した段落は**一つのかたまりで二行ぶん**。
+        assert!(out.contains("<p data-line=\"6\" data-span=\"2\">"), "{out}");
+
+        // 枠は閉じるまでが一つ。
+        let out = super::to_html(&lines("```\na\nb\n```\nあと\n"));
+        assert!(out.contains("<pre data-line=\"0\" data-span=\"4\">"), "{out}");
+
+        // **閉じ札には差さない。** 箇条書きの二つ目は前の項目を閉じてから
+        // 始まるので、素朴に「次の `>`」を探すと `</li data-line=…>` に
+        // なる（一度そうなった）。
+        let out = super::to_html(&lines("- あ\n- い\n"));
+        assert!(!out.contains("</li data-line"), "閉じ札に差さっている: {out}");
+        assert!(out.contains("<li data-line=\"1\""), "二つ目に差さっていない: {out}");
+
+        // 引用の中で数え直さない ── 中の行番号はファイルの行番号ではない。
+        let out = super::to_html(&lines("> 引用\n> の中\n"));
+        assert_eq!(out.matches("data-line").count(), 1, "中まで差さっている: {out}");
+    }
+
+    #[test]
+    fn 番号つきは番号で出る() {
+        // 書いた `1. 2.` が黒丸で出ると、書いたものと読めるものが違う。
+        let out = to_html(&lines("1. 一つ\n2. 二つ\n"));
+        assert!(out.contains("<ol>"), "番号つきが <ol> で出ていない: {out}");
+        assert!(!out.contains("<ul>"), "黒丸が混ざっている: {out}");
+        assert!(out.contains("</ol>"), "閉じていない: {out}");
+
+        // 途中から続ける手順は、書いた番号から始まる。
+        let out = to_html(&lines("3. 三つめから\n"));
+        assert!(out.contains("<ol start=\"3\">"), "始まりが渡っていない: {out}");
+
+        // 黒丸は黒丸のまま。
+        let out = to_html(&lines("- 黒丸\n"));
+        assert!(out.contains("<ul>") && !out.contains("<ol"), "{out}");
+
+        // 同じ深さで印が変われば、別のリスト。
+        let out = to_html(&lines("- 黒丸\n1. 番号\n"));
+        assert!(out.contains("</ul>") && out.contains("<ol>"), "混ざっている: {out}");
+    }
+
+    #[test]
+    fn 行そのものが絵なら絵で出る() {
+        let out = to_html(&lines("![猫](cat.jpg)\n"));
+        assert!(out.contains("<img src=\"cat.jpg\" alt=\"猫\">"), "絵になっていない: {out}");
+        assert!(!out.contains("!<a"), "`!` が字のまま残っている: {out}");
+
+        // 出せない先は、隠さずに字で残す。
+        let out = to_html(&lines("![だめ](javascript:alert(1))\n"));
+        assert!(!out.contains("<img"), "危ない絵が出ている: {out}");
+        assert!(!out.contains("javascript:alert(1)</"), "そのまま href になっている: {out}");
+        assert!(out.contains("だめ"), "書いてあったものが消えている: {out}");
+    }
+
+    #[test]
     fn a_javascript_link_is_not_a_link() {
         // The oldest trick there is, and a README is a file from somewhere.
         // The text still shows; it just does not go anywhere.
@@ -756,14 +1164,14 @@ mod tests {
 
     #[test]
     fn task_boxes_are_marked_and_carry_the_line_they_came_from() {
-        let html = to_html(&lines("- [x] done\n- [ ] not"));
+        let html = super::to_html(&lines("- [x] done\n- [ ] not"));
         assert!(html.contains("☑"), "{html}");
         assert!(html.contains("☐"), "{html}");
         // 押せるようにするのに要るのはこれだけ ── `note::set_check` は
         // 行番号を取る。前書きの分もちゃんと数える。
         assert!(html.contains("data-line=\"0\""), "{html}");
         assert!(html.contains("data-line=\"1\""), "{html}");
-        let with_front = to_html(&lines("---\ntitle: x\n---\n\n- [ ] a\n"));
+        let with_front = super::to_html(&lines("---\ntitle: x\n---\n\n- [ ] a\n"));
         assert!(with_front.contains("data-line=\"4\""), "{with_front}");
     }
 
