@@ -71,7 +71,7 @@ struct Where: View {
                     // is a thing cian cannot do for him — the sidebar is the
                     // Files app's own setting — so the least it can do is say
                     // exactly where it is.
-                    Text("選ぶ画面が開いたら、左上の「ブラウズ」から辿ります。\n\n・iCloud Drive → そのまま一覧にあります\n・Google Drive / Dropbox → 「場所」の下に並びます\n\n出てこないときは、その並びの下の「…」→「サイドバーを編集」で、使いたいものをオンにしてください（「ファイル」アプリ側の設定なので、cian からは変えられません）。\n\nMac の cian に同じフォルダを指定すれば、両方から同じノートを触れます。")
+                    Text("選ぶ画面が開いたら、左上の「ブラウズ」から辿ります。\n\n・iCloud Drive → そのまま一覧にあります\n・Google Drive / Dropbox → 「場所」の下に並びます\n\n出てこないときは、その並びの下の「…」→「サイドバーを編集」で、使いたいものをオンにしてください（「ファイル」アプリ側の設定なので、cian からは変えられません）。\n\n灰色で選べないものがあります。フォルダを丸ごと他のアプリに渡せるかどうかは、そのアプリ側の作りによるもので、cian からは変えられません（2026-09 現在、「ドライブ」は灰色、iCloud Drive と Dropbox は選べます）。\n\nMac の cian に同じフォルダを指定すれば、両方から同じノートを触れます。")
                 }
 
                 // Once found, never looked for again.
