@@ -14,8 +14,9 @@ struct ContentView: View {
     @State private var picking = false
     @State private var naming = false
     @State private var booking = false
-    @State private var choosing = false
-    @State private var importing = false
+    /// What the one file picker is being asked for this time.
+    @State private var fetching: Fetching?
+    enum Fetching { case folder, notes }
     @State private var showing = false
     /// Which folder row the finger is over, and whether it is over `..`.
     @State private var into: String?
@@ -23,6 +24,10 @@ struct ContentView: View {
     @State private var needle = ""
     @State private var shelving: Note?
     @State private var colouring: String?
+    @State private var renaming: String?
+    @State private var dropping: String?
+    @State private var fresh = ""
+    @State private var treeing = false
     /// The folder the list is drawn for, and which way it last moved.
     @State private var walked = ""
     @State private var deeper = true
@@ -42,8 +47,11 @@ struct ContentView: View {
             // still says the folder's name reads as a list that lost notes.
             // At the top the name is drawn in the list, so the bar stays
             // out of the way; inside a folder the bar says where you are.
-            .navigationTitle(store.at.isEmpty ? "" : store.here)
-            .navigationBarTitleDisplayMode(store.at.isEmpty ? .inline : .large)
+            // The trail is drawn in the list, so the bar stays out of the
+            // way — a large title saying the folder's name *and* a
+            // breadcrumb saying the same name is the name twice.
+            .navigationTitle("")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 if let up = store.up {
                     ToolbarItem(placement: .topBarLeading) {
@@ -88,6 +96,10 @@ struct ContentView: View {
                             Toggle(isOn: $store.flat) {
                                 Label("全部まとめて見る", systemImage: "list.bullet")
                             }
+                            Divider()
+                            Button { treeing = true } label: {
+                                Label("フォルダの構成…", systemImage: "list.bullet.indent")
+                            }
 
                         } label: {
                             Image(systemName: store.flat
@@ -103,14 +115,47 @@ struct ContentView: View {
             // The sheet closes itself first; these open a beat later, from
             // here, where there is no presentation in the way.
             Where(store: store,
-                  choose: { DispatchQueue.main.async { choosing = true } },
-                  bringIn: { DispatchQueue.main.async { importing = true } })
-        }
-        .fileImporter(isPresented: $choosing, allowedContentTypes: [.folder]) { r in
-            if case .success(let url) = r { store.choose(url) }
+                  choose: { DispatchQueue.main.async { fetching = .folder } },
+                  bringIn: { DispatchQueue.main.async { fetching = .notes } })
         }
         .sheet(item: $shelving) { note in Shelving(store: store, note: note) }
         .sheet(item: $colouring) { f in Colouring(store: store, folder: f) }
+        .sheet(isPresented: $treeing) {
+            Tree(store: store) { to in go { store.into(to) } }
+        }
+        .alert("名前を変える", isPresented: Binding(
+            get: { renaming != nil }, set: { if !$0 { renaming = nil } }
+        )) {
+            TextField("名前", text: $fresh)
+            Button("やめる", role: .cancel) {}
+            Button("変える") {
+                guard let b = renaming else { return }
+                do { try store.rename(b, to: fresh) }
+                catch { store.trouble = error.localizedDescription }
+            }
+        } message: {
+            Text("中のノートはそのままです。")
+        }
+        // **Said before it is done, and said in numbers.** There is no
+        // wastepaper basket on a phone: this is the real thing, and 「中の
+        // ノートごと」 is not a figure of speech.
+        .alert("このフォルダを削除しますか", isPresented: Binding(
+            get: { dropping != nil }, set: { if !$0 { dropping = nil } }
+        )) {
+            Button("やめる", role: .cancel) {}
+            Button("中のノートごと削除", role: .destructive) {
+                guard let b = dropping else { return }
+                do { try store.drop(b) }
+                catch { store.trouble = error.localizedDescription }
+            }
+        } message: {
+            if let b = dropping {
+                let n = store.under(b)
+                Text(n == 0
+                     ? "「\(b.split(separator: "/").last.map(String.init) ?? b)」は空です。元には戻せません。"
+                     : "「\(b.split(separator: "/").last.map(String.init) ?? b)」の中のノート \(n) 本も一緒に消えます。元には戻せません。")
+            }
+        }
         .sheet(isPresented: $booking) {
             Booking(inside: store.here) { name in
                 do { try store.makeBook(name) }
@@ -131,14 +176,31 @@ struct ContentView: View {
             _ = await Bell.ask()
             store.catchUp()
         }
-        // One `.fileImporter` per view: two on the same one is one importer,
-        // and the loser's button does nothing at all.
+        // **One `.fileImporter`, and one only.** Two on the same view is one
+        // importer — SwiftUI keeps the last and the other button does
+        // nothing at all. That is written two lines above where it happened
+        // for the second time: 「保存場所を選ぶ」 lost to 「インポート」 and
+        // pressing it looked like a button that was never wired up. So there
+        // is one, and what it is picking decides what it accepts.
         .fileImporter(
-            isPresented: $importing,
-            allowedContentTypes: [UTType(filenameExtension: "md") ?? .plainText, .plainText],
-            allowsMultipleSelection: true
+            isPresented: Binding(get: { fetching != nil },
+                                 set: { if !$0 { fetching = nil } }),
+            allowedContentTypes: fetching == .folder
+                ? [.folder]
+                : [UTType(filenameExtension: "md") ?? .plainText, .plainText],
+            allowsMultipleSelection: fetching == .notes
         ) { r in
-            if case .success(let urls) = r { store.bring(urls) }
+            switch (fetching, r) {
+            case (.folder, .success(let urls)):
+                if let url = urls.first { store.choose(url) }
+            case (.notes, .success(let urls)):
+                store.bring(urls)
+            case (_, .failure(let why)):
+                store.trouble = why.localizedDescription
+            case (nil, _):
+                break
+            }
+            fetching = nil
         }
         // **Two `.alert` on one view is one alert.** SwiftUI keeps the last
         // and the other one shows without its buttons doing anything — which
@@ -263,7 +325,7 @@ struct ContentView: View {
                     // Every notebook, not just the ones beside this note —
                     // filing is often filing *away*.
                     Menu("ノートブックへ移す") {
-                        Button("（いちばん上）") { moveTo(note, nil) }
+                        Button("デフォルト") { moveTo(note, nil) }
                         ForEach(store.allBooks, id: \.self) { b in
                             Button(b) { moveTo(note, b) }
                         }
@@ -340,13 +402,23 @@ struct ContentView: View {
 
     private var list: some View {
         List {
-            if store.at.isEmpty, needle.isEmpty, store.only.isEmpty {
+            if needle.isEmpty, store.only.isEmpty {
                 Section {
-                    Wordmark(notes: store.notes.count, books: store.allBooks.count)
-                        .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 14, trailing: 16))
-                        .listRowBackground(Color.clear)
-                        .listRowSeparator(.hidden)
+                    if store.at.isEmpty {
+                        Wordmark(notes: store.notes.count, books: store.allBooks.count)
+                            .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 14, trailing: 16))
+                    } else {
+                        // A folder's own name does not say where it is, and
+                        // two folders called 「2026」 look identical at the
+                        // top of a list.
+                        Crumbs(at: store.at, root: store.rootName) { to in
+                            go { store.leave(for: to) }
+                        }
+                        .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 8, trailing: 16))
+                    }
                 }
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
             }
             // The notebooks first, then the notes in this one. Folders above
             // files is what every file manager since the first one has done,
@@ -395,6 +467,15 @@ struct ContentView: View {
                     .contextMenu {
                         Button { colouring = b.path } label: {
                             Label("色をつける", systemImage: "paintpalette")
+                        }
+                        Button {
+                            renaming = b.path
+                            fresh = b.name
+                        } label: {
+                            Label("名前を変える", systemImage: "pencil")
+                        }
+                        Button(role: .destructive) { dropping = b.path } label: {
+                            Label("削除する", systemImage: "trash")
                         }
                     }
                 }

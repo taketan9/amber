@@ -303,13 +303,21 @@ struct DeskView: View {
             }
             .accessibilityLabel(here?.reading == true ? "編集" : "表示")
         }
+        // The bell on the bar and not in the menu: whether a note is going
+        // to ring is something you want to *see* without opening anything —
+        // it is a state, and a state hidden behind a menu is a state nobody
+        // knows about.
+        ToolbarItem(id: "bell", placement: .topBarTrailing) {
+            Button { ringing = true } label: {
+                Image(systemName: reminded ? "bell.fill" : "bell")
+                    .foregroundStyle(reminded ? AnyShapeStyle(.orange) : AnyShapeStyle(.tint))
+            }
+            .accessibilityLabel(reminded ? "通知あり" : "通知")
+        }
         ToolbarItem(id: "more", placement: .topBarTrailing) {
             Menu {
                 Button { tags = here?.note.tags ?? []; tagging = true } label: {
                     Label("タグ", systemImage: "tag")
-                }
-                Button { ringing = true } label: {
-                    Label("通知", systemImage: reminded ? "bell.fill" : "bell")
                 }
             } label: {
                 Image(systemName: "ellipsis.circle")

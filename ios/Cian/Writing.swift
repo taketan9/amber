@@ -273,3 +273,117 @@ struct Mark: View {
         .accessibilityHidden(true)
     }
 }
+
+/// Where you are, as the trail of names it is.
+///
+/// **A folder's own name is not an answer to "where am I".** Two folders
+/// called 「2026」 in two different places look identical at the top of a
+/// list, and the one thing the title bar had room to say was the half that
+/// does not tell them apart. Each name is a step back to that level.
+struct Crumbs: View {
+    /// The path from the root, `""` for the root itself.
+    let at: String
+    let root: String
+    /// Called with the path to walk back to.
+    let go: (String) -> Void
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 4) {
+                step(root, "")
+                ForEach(Array(parts.enumerated()), id: \.offset) { i, name in
+                    Image(systemName: "chevron.right")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                    step(String(name), parts[...i].joined(separator: "/"))
+                }
+            }
+            .padding(.vertical, 2)
+        }
+    }
+
+    private var parts: [String] {
+        at.split(separator: "/").map(String.init)
+    }
+
+    /// The one you are in is in the text colour; the way back is the accent.
+    /// Colouring them the same would make the last name look like something
+    /// to press, and pressing it does nothing.
+    private func step(_ name: String, _ path: String) -> some View {
+        let here = path == at
+        return Button {
+            if !here { go(path) }
+        } label: {
+            Text(name)
+                .font(.subheadline.weight(here ? .semibold : .regular))
+                .foregroundStyle(here ? AnyShapeStyle(.primary) : AnyShapeStyle(.tint))
+                .lineLimit(1)
+        }
+        .buttonStyle(.plain)
+        .disabled(here)
+    }
+}
+
+/// Every folder there is, laid out as the shape it is.
+///
+/// A list shows one level at a time, which is the right way to *use* a
+/// folder and the wrong way to *understand* one. This is the other question:
+/// what is in here, and how deep does it go.
+struct Tree: View {
+    @ObservedObject var store: NotesStore
+    let go: (String) -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    row(store.rootName, "", 0, store.notes.count)
+                    ForEach(store.allBooks, id: \.self) { b in
+                        row(b.split(separator: "/").last.map(String.init) ?? b,
+                            b,
+                            b.split(separator: "/").count,
+                            store.under(b))
+                    }
+                } footer: {
+                    Text("数字は、そのフォルダの中にあるノートの本数です（下の階層も数えます）。")
+                }
+            }
+            .navigationTitle("フォルダの構成")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) { Button("閉じる") { dismiss() } }
+            }
+        }
+    }
+
+    private func row(_ name: String, _ path: String, _ depth: Int, _ count: Int) -> some View {
+        Button {
+            go(path)
+            dismiss()
+        } label: {
+            HStack(spacing: 8) {
+                // The indent *is* the structure — `allBooks` is already every
+                // folder in order, so the depth of the path is the depth of
+                // the row and nothing has to be assembled.
+                if depth > 0 {
+                    Spacer().frame(width: CGFloat(depth - 1) * 18)
+                    Image(systemName: "arrow.turn.down.right")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+                Image(systemName: depth == 0 ? "tray.full.fill" : "folder.fill")
+                    .foregroundStyle(store.colors[path].flatMap { Color(hex: $0) }
+                        .map { AnyShapeStyle($0) } ?? AnyShapeStyle(.tint))
+                Text(name).lineLimit(1)
+                Spacer(minLength: 6)
+                Text("\(count)").foregroundStyle(.secondary).monospacedDigit()
+                if path == store.at {
+                    Image(systemName: "location.fill").font(.caption2).foregroundStyle(.tint)
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+}

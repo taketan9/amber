@@ -371,6 +371,52 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
             }))
         }
 
+        // Rename a folder, or throw it away with everything in it.
+        //
+        // **Both are kept inside the chosen folder**, checked after the paths
+        // are made absolute: a name with `..` in it would otherwise rename or
+        // delete something that is not a note at all. A phone has no wastepaper
+        // basket, so `drop` is the real thing — the asking is the caller's job
+        // and there is nothing here that can undo it.
+        "book" => {
+            let root = std::path::PathBuf::from(arg(p, "path"));
+            let root = root.canonicalize()?;
+            let from = root.join(arg(p, "book"));
+            let inside = |at: &std::path::Path| -> anyhow::Result<std::path::PathBuf> {
+                let full = at.canonicalize()?;
+                if !full.starts_with(&root) {
+                    anyhow::bail!("ノートの外は触れません");
+                }
+                Ok(full)
+            };
+            let from = inside(&from)?;
+            if p["drop"].as_bool().unwrap_or(false) {
+                let n = cian_core::note::list(
+                    &from,
+                    cian_core::survey::Limits { depth: 9, rows: 9999, hidden: false, ..Default::default() },
+                    &std::sync::atomic::AtomicBool::new(false),
+                )
+                .0
+                .len();
+                std::fs::remove_dir_all(&from)?;
+                return Ok(serde_json::json!({ "gone": n }));
+            }
+            let name = arg(p, "name");
+            let name = name.trim();
+            if name.is_empty() || name.contains('/') || name.contains('\\') {
+                anyhow::bail!("フォルダの名前に使えません");
+            }
+            let to = from
+                .parent()
+                .map(|d| d.join(name))
+                .ok_or_else(|| anyhow::anyhow!("いちばん外側は変えられません"))?;
+            if to.exists() {
+                anyhow::bail!("{name} はもうあります");
+            }
+            std::fs::rename(&from, &to)?;
+            Ok(serde_json::json!({ "path": to.display().to_string() }))
+        }
+
         // Split a note into how it describes itself and what it says.
         //
         // **So the writing half can show only the second part.** The front
@@ -1014,6 +1060,34 @@ mod tests {
         let text = out["text"].as_str().unwrap();
         assert!(!text.contains("pinned"), "{text}");
         assert!(!text.contains("star"), "{text}");
+    }
+
+    #[test]
+    fn a_folder_can_be_renamed_or_thrown_away_but_only_inside_the_notes() {
+        let d = tempfile::tempdir().unwrap();
+        let root = d.path().canonicalize().unwrap();
+        std::fs::create_dir_all(root.join("仕事")).unwrap();
+        std::fs::write(root.join("仕事").join("a.md"), "---\ntitle: a\n---\n本文\n").unwrap();
+        let at = root.display().to_string();
+
+        // 名前を変える。
+        call("book", &serde_json::json!({ "path": at, "book": "仕事", "name": "しごと" })).unwrap();
+        assert!(root.join("しごと").is_dir());
+        assert!(!root.join("仕事").exists());
+
+        // 外へは出られない ── `..` を渡しても。
+        std::fs::create_dir_all(d.path().join("よそ")).unwrap();
+        assert!(call("book", &serde_json::json!({ "path": at, "book": "../よそ", "drop": true })).is_err()
+            || d.path().join("よそ").is_dir());
+
+        // 使えない名前。
+        assert!(call("book", &serde_json::json!({ "path": at, "book": "しごと", "name": "a/b" })).is_err());
+        assert!(call("book", &serde_json::json!({ "path": at, "book": "しごと", "name": "  " })).is_err());
+
+        // 捨てる ── 何本が道連れになるかを先に言う。
+        let out = call("book", &serde_json::json!({ "path": at, "book": "しごと", "drop": true })).unwrap();
+        assert_eq!(out["gone"], 1);
+        assert!(!root.join("しごと").exists());
     }
 
     #[test]

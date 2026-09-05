@@ -313,6 +313,35 @@ final class NotesStore: ObservableObject {
         reload()
     }
 
+    /// How many notes are anywhere under one folder — what a delete would
+    /// take with it, said before it is done.
+    func under(_ book: String) -> Int {
+        notes.filter { $0.book == book || $0.book.hasPrefix(book + "/") }.count
+    }
+
+    /// Rename a folder. The notes inside keep their names and their words.
+    func rename(_ book: String, to name: String) throws {
+        guard let root else { return }
+        _ = try Cian.call("book", ["path": root.path, "book": book, "name": name])
+        // Standing in the folder that was renamed, the old path is a place
+        // that no longer exists — so step up rather than show nothing.
+        if at == book || at.hasPrefix(book + "/") {
+            at = book.split(separator: "/").dropLast().joined(separator: "/")
+        }
+        reload()
+    }
+
+    /// Throw a folder away with everything in it. **There is no wastepaper
+    /// basket on a phone** — the asking happens before this is called.
+    func drop(_ book: String) throws {
+        guard let root else { return }
+        _ = try Cian.call("book", ["path": root.path, "book": book, "drop": true])
+        if at == book || at.hasPrefix(book + "/") {
+            at = book.split(separator: "/").dropLast().joined(separator: "/")
+        }
+        reload()
+    }
+
     /// Give a folder a colour, or take it away.
     func color(_ folder: String, _ hex: String?) throws {
         guard let root else { return }

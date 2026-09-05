@@ -119,17 +119,49 @@ struct Shelving: View {
     @ObservedObject var store: NotesStore
     let note: Note
     @Environment(\.dismiss) private var dismiss
+    @State private var making = false
+    @State private var name = ""
 
     var body: some View {
         NavigationStack {
             List {
-                row("（いちばん上）", "")
-                ForEach(store.stars, id: \.self) { s in row(s, s) }
+                Section {
+                    row("デフォルト", "")
+                    ForEach(store.stars, id: \.self) { s in row(s, s) }
+                }
+                // **Making a shelf from where you need one.** It was only
+                // possible from inside the favourites screen, which is only
+                // reachable once something is already a favourite — so the
+                // first shelf could not be made at the moment anybody wanted
+                // one, and the list looked like it had no shelves at all.
+                Section {
+                    Button {
+                        name = ""
+                        making = true
+                    } label: {
+                        Label("新しい棚…", systemImage: "plus.rectangle.on.folder")
+                    }
+                }
             }
             .navigationTitle("棚を選ぶ")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("やめる") { dismiss() } }
+            }
+            .alert("新しい棚", isPresented: $making) {
+                TextField("名前", text: $name)
+                Button("やめる", role: .cancel) {}
+                Button("作る") {
+                    let n = name.trimmingCharacters(in: .whitespaces)
+                    guard !n.isEmpty else { return }
+                    do {
+                        try store.shelf(n)
+                        try store.star(note, on: n)
+                        dismiss()
+                    } catch { store.trouble = error.localizedDescription }
+                }
+            } message: {
+                Text("作ってから、このノートをそこに入れます。「棚/中の棚」と書けば階層になります。")
             }
         }
     }
