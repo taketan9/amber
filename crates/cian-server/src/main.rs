@@ -2864,6 +2864,7 @@ impl Session {
                 // wrong for somebody.
                 "font": cian_lua::state_get("gui_font"),
                 "view": cian_lua::state_get("gui_view"),
+                "notes": cian_lua::state_get("gui_notes"),
                 "hints": cian_lua::state_get("gui_hints"),
                 // Where the two dividers were left. GUI-only keys: the
                 // terminal build has `main_pct` and `panes_pct` too but does
@@ -2959,7 +2960,7 @@ impl Session {
                 // opens with, because they are one program.
                 if !matches!(key,
                     "gui_look" | "gui_editor" | "gui_font" | "gui_view" | "gui_hints"
-                    | "gui_main_pct" | "gui_panes_pct" | "theme")
+                    | "gui_main_pct" | "gui_panes_pct" | "gui_notes" | "theme")
                 {
                     anyhow::bail!("覚えられない項目です: {key}");
                 }
@@ -4929,6 +4930,63 @@ impl Session {
             // terminal build draws, turned into a document instead of into
             // styled lines. The window is handed markup it did not have to
             // understand, which is also what keeps a README from running.
+            // Markdown files copied in from somewhere else.
+            //
+            // **Copied, never moved, never overwriting.** Whatever exported
+            // them still has them — that is the answer somebody wants the
+            // first time they try this and are not yet sure cian is where the
+            // notes are going to live. A name already taken gets a number;
+            // the note that is there is not somebody's to replace. The same
+            // promise the phone makes, in the same words.
+            "bring" => {
+                let to = std::path::PathBuf::from(arg(req, "to"));
+                std::fs::create_dir_all(&to)?;
+                let mut brought = 0usize;
+                for p in req.params["from"].as_array().cloned().unwrap_or_default() {
+                    let Some(from) = p.as_str().map(std::path::PathBuf::from) else { continue };
+                    let Some(name) = from.file_name() else { continue };
+                    let mut at = to.join(name);
+                    let stem = at.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+                    let ext = at.extension().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+                    let mut n = 2;
+                    while at.exists() && n <= 99 {
+                        at = to.join(format!("{stem}-{n}.{ext}"));
+                        n += 1;
+                    }
+                    if at.exists() {
+                        continue;
+                    }
+                    std::fs::copy(&from, &at)?;
+                    brought += 1;
+                }
+                Ok(serde_json::json!({ "brought": brought }))
+            }
+
+            // Where the notes live, and make it if it is not there yet.
+            //
+            // **The phone does not ask either.** It starts with a folder of
+            // its own and offers to point somewhere else; a desktop that
+            // demands a line of Lua before it will hold a note is a desktop
+            // nobody takes a note in. `~/Documents/cian` because that is
+            // where a person looks for their documents, and because iCloud
+            // Drive syncs it on a Mac that has iCloud Drive on — which is the
+            // shortest road to the same folder the phone is reading.
+            "notesroot" => {
+                let want = arg(req, "path");
+                let at = if want.is_empty() {
+                    let home = cian_lua::home_dir()
+                        .ok_or_else(|| anyhow::anyhow!("ホームディレクトリが分かりません"))?;
+                    home.join("Documents").join("cian")
+                } else {
+                    std::path::PathBuf::from(want)
+                };
+                std::fs::create_dir_all(&at)?;
+                Ok(serde_json::json!({
+                    "path": at.display().to_string(),
+                    "made": std::fs::read_dir(&at).map(|d| d.count()).unwrap_or(0) == 0,
+                }))
+            }
+
             // What every note in a folder wants to be reminded about, and
             // when the window should set its timer for.
             //

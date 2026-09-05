@@ -6,7 +6,7 @@
 // the disk hands it; the window that draws the listing has no business being
 // able to read the disk itself.
 
-const { app, BrowserWindow, Menu, ipcMain, nativeImage, nativeTheme } = require('electron');
+const { app, BrowserWindow, Menu, ipcMain, nativeImage, nativeTheme, dialog } = require('electron');
 
 /// The picture under the pointer when the file type has none of its own. A
 /// 16×16 page, drawn here rather than shipped as a file: `startDrag` refuses
@@ -245,6 +245,21 @@ app.whenReady().then(async () => {
     //
     // The renderer asks per *extension*, not per file, so a folder of two
     // thousand files is a handful of calls.
+    // The desktop's own folder chooser.
+    //
+    // **The engine cannot do this one.** Picking a folder is a thing the
+    // operating system draws — the same reason the phone hands it to Files —
+    // and a text prompt asking somebody to type the path to their Google
+    // Drive folder is not a way to change where notes live.
+    ipcMain.handle('cian-pickdir', async (event, title) => {
+        const win = BrowserWindow.fromWebContents(event.sender);
+        const r = await dialog.showOpenDialog(win, {
+            title: title || 'cian',
+            properties: ['openDirectory', 'createDirectory'],
+        });
+        return r.canceled || !r.filePaths.length ? null : r.filePaths[0];
+    });
+
     ipcMain.handle('cian-fileicon', async (_event, path) => {
         try {
             const img = await app.getFileIcon(path, { size: 'normal' });

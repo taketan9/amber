@@ -608,6 +608,11 @@ html, body {
 body[data-cian="on"] #panes { width: var(--cian-left, 38%); }
 body[data-cian="on"] #view { left: var(--cian-left, 38%); border-left: 1px solid var(--line); }
 body[data-cian="on"] #panes.one .pane.active { flex: 1 1 100%; }
+/* **No frame here.** The frame says which of two panes has the keys; in cian
+   mode there is one list and one note, and which has the keys is obvious from
+   where the cursor is. A box drawn round the list as well is a box round the
+   only thing there. 2026-09-05: 「cian モードは枠の強調表示は不要」. */
+body[data-cian="on"] #work[data-focus="files"] .pane.active::after { content: none; }
 /* The right half before a note is chosen. Without it the window looks like
    a listing that has been squeezed for no reason — an empty half of a
    two-half layout has to say that it is waiting, not that it is broken. */
@@ -938,6 +943,38 @@ body[data-cian="on"].reading #cianpad { display: none; }
   font-weight: 400; color: var(--dim);
 }
 .rows.cian .row .tags { grid-area: tags; color: var(--accent); font-size: .85em; }
+/* ── the notes half, dressed as a notes app ──
+   2026-09-05: 「iPhone みたいにかっちょ良く」. The rest of this window is a
+   file manager and looks like one: dense rows, a column of dates, a frame
+   round the pane with the keys. A note is not a file you are managing, and
+   「メモとるかぁ」 is not a filing mood — so in this one view the rows get
+   air, the tags become chips, and the pane says what it is at the top. */
+body[data-cian="on"] .rows.cian .row { height: calc(var(--cell-h) * 2.6); padding: 6px 12px; }
+body[data-cian="on"] .rows.cian .row .name { font-size: 1.05em; letter-spacing: .01em; }
+/* Chips, not a run of words. `#仕事 #定型` reads as one string; two chips
+   read as two things you could press. */
+body[data-cian="on"] .rows.cian .row .tags {
+  align-self: center;
+  font-size: .78em; color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border-radius: 999px; padding: 1px 8px; white-space: nowrap;
+}
+body[data-cian="on"] .rows.cian .row .when { align-self: center; font-size: .78em; }
+body[data-cian="on"] .rows.cian .row .sub { padding-top: 2px; }
+/* The favourite's star, warm — the one colour in here that is not the
+   accent, because 「留めてある」 is not 「触れる」. */
+.rows.cian .row .name .star { color: var(--mark); font-weight: 400; }
+
+/* What this half is, above the list. The phone puts the name and the count
+   at the top of its list for the same reason: you arrive here on purpose,
+   and the first thing that should be true is that you are in the right
+   place. */
+body[data-cian="on"] .pane .crumb { padding: 10px 12px 8px; }
+body[data-cian="on"] .pane .crumb .here { font-size: 1.35em; font-weight: 800; letter-spacing: -.01em; }
+#note-count { color: var(--dim); font-size: .8em; margin-left: .6em; }
+/* The column headings are a file manager's furniture. A notes list has two
+   lines per row and no columns to head. */
+body[data-cian="on"] .pane .dhead { display: none; }
 .rows.cian .row .when { grid-area: when; color: var(--dim); font-size: .85em; }
 .rows.cian .row .sub  {
   grid-area: sub; color: var(--dim); font-size: .9em;

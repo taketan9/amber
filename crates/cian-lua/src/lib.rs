@@ -468,7 +468,7 @@ pub fn glob_match(pat: &str, name: &str) -> bool {
 
 /// The user's home directory. `HOME` everywhere but Windows, which sets
 /// `USERPROFILE` instead.
-pub(crate) fn home_dir() -> Option<PathBuf> {
+pub fn home_dir() -> Option<PathBuf> {
     std::env::var_os("HOME")
         .or_else(|| std::env::var_os("USERPROFILE"))
         .map(PathBuf::from)

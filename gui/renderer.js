@@ -522,6 +522,18 @@ function draw(which) {
         });
         nav.append(b);
     }
+    // How many notes are here, beside the name. The phone says it under its
+    // wordmark; this is the same sentence in the space this window has.
+    //
+    // **Inside `path`, not beside it.** The crumb is one right-to-left run so
+    // that a long path is clipped at the head; a sibling after it lands
+    // outside that box and is clipped away entirely.
+    if (viewMode === 'cian' && notes.root === pane.cwd) {
+        const n = document.createElement('span');
+        n.id = 'note-count';
+        n.textContent = tr(`${notes.by.size} notes`, `${notes.by.size} のノート`);
+        path.append(n);
+    }
     crumb.replaceChildren(nav, path);
 
     const rows = root.querySelector('.rows');
@@ -655,8 +667,15 @@ function draw(which) {
             // mark as the phone** — `star` is written on the note, so both
             // ends read it, and a note that is starred on one and plain on
             // the other would be two answers to one question.
-            name.textContent = (n && n.star != null ? '\u2605 ' : '')
-                + (n ? n.title : (row.parent ? '..' : row.name));
+            name.textContent = n ? n.title : (row.parent ? '..' : row.name);
+            // A favourite says so, in the one warm colour this view has —
+            // 「留めてある」 is not 「触れる」, so it is not the accent.
+            if (n && n.star != null) {
+                const star = document.createElement('span');
+                star.className = 'star';
+                star.textContent = '\u2605 ';
+                name.prepend(star);
+            }
             // Everything else in the folder still shows — this is a pane in a
             // file manager, and a listing that hides the picture a note links
             // to would be lying about what is there. It shows quietly: the
@@ -2162,6 +2181,22 @@ const TOGGLES = {
         const pane = state[state.focus];
         const onoff = (b) => (b ? 'ON' : 'OFF');
         return [
+            // ── the window's own three ──
+            //
+            // Put where it can be found. A view you can only leave by knowing
+            // the words `:view classic` is a view you are stuck in — and
+            // icons is the one that hides the listing you would have read the
+            // help from.
+            {
+                label: tr("How the listing is laid out", '一覧の見せ方'),
+                value: viewName(viewMode),
+                run: () => {
+                    const next = VIEWS[(VIEWS.indexOf(viewMode) + 1) % VIEWS.length];
+                    setView(next);
+                    drawMenu();
+                    say(tr(`listing: ${viewName(next)}`, `一覧: ${viewName(next)}`));
+                },
+            },
             {
                 label: tr("Dotfiles", '隠しファイル'),
                 value: onoff(pane && pane.hidden_shown),
@@ -2225,22 +2260,6 @@ const TOGGLES = {
                 label: tr("Editor keys", 'エディタのキー操作'),
                 value: styleName(style),
                 run: () => { setStyle(style + 1); drawMenu(); say(tr(`editor: ${styleName(style)}`, `エディタ: ${styleName(style)}`)); },
-            },
-            // ── the window's own three ──
-            //
-            // Put where it can be found. A view you can only leave by knowing
-            // the words `:view classic` is a view you are stuck in — and
-            // icons is the one that hides the listing you would have read the
-            // help from.
-            {
-                label: tr("How the listing is laid out", '一覧の見せ方'),
-                value: viewName(viewMode),
-                run: () => {
-                    const next = VIEWS[(VIEWS.indexOf(viewMode) + 1) % VIEWS.length];
-                    setView(next);
-                    drawMenu();
-                    say(tr(`listing: ${viewName(next)}`, `一覧: ${viewName(next)}`));
-                },
             },
             {
                 label: tr("Theme (whole app)", 'テーマ（全体）'),
@@ -2430,6 +2449,30 @@ function contextRows() {
     const inShell = term.on && term.focused;
     const v = [];
 
+    // ── first, because it is the switch reached for most ──
+    //
+    // 2026-09-05: 「クラシックやアイコン・cian モードへの遷移はトグル・
+    // メニューの最上位に移動してほしい」. It changes what the window *is* —
+    // a file manager, a wall of tiles, or a notes app — and everything below
+    // is a thing to do inside whichever one you are in.
+    if (!inShell) {
+        v.push(group(tr('How the listing is laid out ▸', '一覧の見せ方 ▸'), () => VIEWS.map((m) => ({
+            label: viewName(m) + (m === viewMode ? '  \u25cf' : ''),
+            value: `:view ${m}`,
+            run: () => { closeMenu(); setView(m); say(tr(`listing: ${viewName(m)}`, `一覧: ${viewName(m)}`)); },
+        }))));
+        // Where the notes live, and the two ways things come in and go out.
+        // Under the switch that leads to them, because that is the order they
+        // are needed in: choose the view, then say where its notes are.
+        v.push(group(tr('Notes ▸', 'ノート ▸'), () => [
+            { label: tr("Go to the notes", 'ノートの置き場所へ'), value: ':notes', run: () => { closeMenu(); cmdNotes(); } },
+            { label: tr("Choose the folder\u2026", '保存場所を選ぶ…'), value: '', run: () => { closeMenu(); cmdNotesRoot(); } },
+            { label: tr("Import\u2026 (the other pane's .md)", 'インポート…（反対のペインの .md）'), value: '', run: () => { closeMenu(); cmdNotesImport(); } },
+            { label: tr("Backup\u2026", 'バックアップ…'), value: ':backup', run: () => { closeMenu(); cmdBackup(); } },
+            { label: tr("New note", '新しいノート'), value: ':newnote', run: () => { closeMenu(); cmdNewNote(); } },
+        ]));
+    }
+
     // ── launchers ──
     //
     // Each only when it has something to offer, which is the rule cian-tui
@@ -2443,19 +2486,6 @@ function contextRows() {
     // Bookmarks are a launcher too, so cian-tui keeps them in this cluster
     // rather than down among the connect rows — but only in a file pane.
     if (!inShell) v.push({ label: tr("Shortcuts", 'ショートカット'), value: 's', run: cmdShortcuts });
-    // How the listing is laid out, here as well as under `T`.
-    //
-    // 2026-09-05: 「今後めっちゃ使うことになりそう」. It is the switch that
-    // changes what the window *is* — a file manager, a wall of tiles, or a
-    // notes app — and a switch you reach for that often should be on the
-    // menu you already have open, not one key further away.
-    if (!inShell) {
-        v.push(group(tr('How the listing is laid out ▸', '一覧の見せ方 ▸'), () => VIEWS.map((m) => ({
-            label: viewName(m) + (m === viewMode ? '  \u25cf' : ''),
-            value: `:view ${m}`,
-            run: () => { closeMenu(); setView(m); say(tr(`listing: ${viewName(m)}`, `一覧: ${viewName(m)}`)); },
-        }))));
-    }
 
     if (inShell) {
         // `:` is a character in a shell, so the command line needs a way in
@@ -6461,13 +6491,39 @@ let noteRoots = [];
 /// One place goes straight there; several ask which. Not a fixed "notes
 /// folder" setting, because the two kinds do not mix: the notes nobody else
 /// should see, and the folder a team writes in together.
+/// The place notes live when nobody has said otherwise.
+///
+/// **Made, not demanded.** 2026-09-05: 「Mac や Windows でも iPhone と同じく
+/// cian の初回起動フォルダを勝手に作るようにしてくれないかな？」. The phone
+/// starts with a folder of its own; a desktop that wants a line of Lua before
+/// it will hold a note is a desktop nobody takes a note in.
+let chosenRoot = '';
+
+/// Everywhere notes can be: what init.lua declares, plus the one chosen here.
+function allNoteRoots() {
+    const v = noteRoots.slice();
+    if (chosenRoot && !v.some((r) => r.path === chosenRoot)) {
+        v.unshift({ name: chosenRoot.split(/[\\/]/).pop() || 'cian', path: chosenRoot });
+    }
+    return v;
+}
+
 async function cmdNotes() {
-    if (!noteRoots.length) {
-        say(tr('no notes folders — declare them in init.lua: cian.notes{ { name = "me", path = "~/notes" } }',
-               'ノートの置き場所がありません — init.lua に cian.notes{ { name = "私", path = "~/notes" } }'), true);
+    const roots = allNoteRoots();
+    if (!roots.length) {
+        // Nothing declared and nothing chosen: make the default and go.
+        const r = await ask('notesroot', { path: '' });
+        if (!r) return;
+        chosenRoot = r.path;
+        await ask('remember', { key: 'gui_notes', value: r.path });
+        say(r.made
+            ? tr(`notes live in ${r.path} — change it in the menu`, `ノートの置き場所を作りました: ${r.path}（メニューで変えられます）`)
+            : tr(`notes: ${r.path}`, `ノート: ${r.path}`));
+        await goToNotes({ name: 'cian', path: r.path });
         return;
     }
-    if (noteRoots.length === 1) { await goToNotes(noteRoots[0]); return; }
+    if (roots.length === 1) { await goToNotes(roots[0]); return; }
+    const noteRoots = roots;
     show(tr("Notes", 'ノート'),
         tr(`${noteRoots.length} places (init.lua’s cian.notes)`, `${noteRoots.length} 件（init.lua の cian.notes）`),
         noteRoots.map((r, at) => ({ label: r.name, sub: r.path, at })), {
@@ -6476,6 +6532,55 @@ async function cmdNotes() {
             foot: tr('type to narrow   Enter open   Esc close', '打って絞る   Enter 開く   Esc 閉じる'),
             pick: async (row) => { closeReport(); await goToNotes(noteRoots[row.at]); },
         });
+}
+
+/// Point cian at a different folder — a Google Drive one, a Dropbox one, the
+/// same one the phone is reading.
+///
+/// The desktop draws the chooser; nothing here types a path at anybody.
+async function cmdNotesRoot() {
+    if (!window.cian.pickDir) {
+        say(tr('this build cannot open a folder chooser', 'この版ではフォルダを選べません'), true);
+        return;
+    }
+    const at = await window.cian.pickDir(tr('Where the notes live', 'ノートの置き場所'));
+    if (!at) return;
+    const r = await ask('notesroot', { path: at });
+    if (!r) return;
+    chosenRoot = r.path;
+    await ask('remember', { key: 'gui_notes', value: r.path });
+    notes.root = '';
+    await goToNotes({ name: r.path.split(/[\\/]/).pop() || 'cian', path: r.path });
+    say(tr(`notes: ${r.path}`, `ノート: ${r.path}`));
+}
+
+/// Copy Markdown files in from somewhere else.
+///
+/// **Copied, not moved** — whatever exported them still has them, which is
+/// the answer somebody wants the first time they try this and are not yet
+/// sure cian is where the notes are going to live. The same words the phone
+/// uses, because it is the same act.
+async function cmdNotesImport() {
+    const which = state.focus;
+    const pane = state[which];
+    const other = state[which === 'left' ? 'right' : 'left'];
+    if (!pane || !pane.cwd) return;
+    if (!other || !other.cwd || other.remote || other.archive) {
+        say(tr('put the files in the other pane, then import', '取り込みたいものを反対のペインに出してから、もう一度'), true);
+        return;
+    }
+    const r = await ask('list', { pane: which === 'left' ? 'right' : 'left', path: other.cwd });
+    const mds = (r && r.entries || []).filter((e) => !e.is_dir && /\.(md|markdown|mdx)$/i.test(e.name));
+    if (!mds.length) {
+        say(tr(`no .md files in ${other.cwd}`, `${other.cwd} に .md がありません`), true);
+        return;
+    }
+    const out = await ask('bring', { from: mds.map((e) => e.path), to: pane.cwd });
+    if (!out) return;
+    notes.root = '';
+    const fresh = await ask('list', { pane: which, path: pane.cwd });
+    if (fresh) { state[which] = fresh; draw(which); }
+    say(tr(`${out.brought} note(s) brought in`, `${out.brought} 件を取り込みました`));
 }
 
 async function goToNotes(root) {
@@ -10708,6 +10813,7 @@ async function recall() {
         const px = Number(s.font);
         if (px >= FONT.min && px <= FONT.max) setFont(px, false);
     }
+    if (s.notes) chosenRoot = s.notes;
     if (s.view && VIEWS.includes(s.view)) setView(s.view, false);
     if (s.hints === '0') { hintsOn = false; drawHints(); }
     // Where the dividers were left. Applied without saving them straight back.
