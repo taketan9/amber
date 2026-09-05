@@ -11,6 +11,15 @@ import PhotosUI
 final class Desk: ObservableObject {
     struct Tab: Identifiable, Equatable {
         let note: Note
+        /// How the note describes itself: the `---` block at the top.
+        ///
+        /// **Kept apart from the text so the writing half never shows it.**
+        /// The title, the date and the tags are cian's bookkeeping — a person
+        /// who did not type them should not have to scroll past them to reach
+        /// their own first line. Typing cannot change it; the sheets can, and
+        /// they go through `whole`.
+        var head = ""
+        /// What the note says. This is what the editor holds.
         var text = ""
         /// What was on disk when it was opened or last saved.
         var stamp = ""
@@ -25,6 +34,8 @@ final class Desk: ObservableObject {
         var pick = NSRange(location: 0, length: 0)
 
         var id: String { note.path }
+        /// The file, as it would be written.
+        var whole: String { head + text }
         var dirty: Bool { loaded && text != saved }
 
         static func == (a: Tab, b: Tab) -> Bool { a.id == b.id && a.text == b.text && a.reading == b.reading }
@@ -66,16 +77,28 @@ final class Desk: ObservableObject {
     func load(_ id: String, _ store: NotesStore) throws {
         guard let at = tabs.firstIndex(where: { $0.id == id }), !tabs[at].loaded else { return }
         let (text, stamp) = try store.open(tabs[at].note)
-        tabs[at].text = text
-        tabs[at].saved = text
+        let (head, body) = (try? store.split(text)) ?? ("", text)
+        tabs[at].head = head
+        tabs[at].text = body
+        tabs[at].saved = body
         tabs[at].stamp = stamp
         tabs[at].loaded = true
         tabs[at].blocks = (try? store.blocks(of: text)) ?? []
     }
 
+    /// Take a whole note back apart — after a sheet has changed a field.
+    func adopt(_ id: String, _ whole: String, _ store: NotesStore) {
+        guard let at = tabs.firstIndex(where: { $0.id == id }) else { return }
+        let (head, body) = (try? store.split(whole)) ?? ("", whole)
+        tabs[at].head = head
+        tabs[at].text = body
+    }
+
+    /// The blocks are drawn from the **whole** note, because a task's line
+    /// number is a line number in the file — that is what `set_check` takes.
     func redraw(_ id: String, _ store: NotesStore) {
         guard let at = tabs.firstIndex(where: { $0.id == id }) else { return }
-        tabs[at].blocks = (try? store.blocks(of: tabs[at].text)) ?? []
+        tabs[at].blocks = (try? store.blocks(of: tabs[at].whole)) ?? []
     }
 
     /// Save, and say what happened. `nil` is "nothing to do".
@@ -87,7 +110,7 @@ final class Desk: ObservableObject {
     func save(_ id: String, _ store: NotesStore, force: Bool = false) throws -> String? {
         guard let at = tabs.firstIndex(where: { $0.id == id }), tabs[at].loaded else { return nil }
         guard force || tabs[at].dirty else { return nil }
-        switch try store.save(tabs[at].note, text: tabs[at].text, stamp: tabs[at].stamp, force: force) {
+        switch try store.save(tabs[at].note, text: tabs[at].whole, stamp: tabs[at].stamp, force: force) {
         case .ok(let fresh):
             guard let now = tabs.firstIndex(where: { $0.id == id }) else { return nil }
             tabs[now].stamp = fresh
@@ -128,7 +151,12 @@ struct DeskView: View {
     @State private var tags: [String] = []
     @State private var writing = false
     @State private var saving: Task<Void, Never>?
+    @State private var leaving = false
     @State private var tabling = false
+    /// On by default. Off is for people who want to decide when a note is
+    /// written — and then the button has to be there, because nothing else
+    /// will write it.
+    @AppStorage("cian.autosave") private var autosave = true
 
     private var here: Desk.Tab? { desk.current }
 
@@ -142,7 +170,7 @@ struct DeskView: View {
                 ForEach(desk.tabs) { tab in
                     if let bound = desk.binding(tab.id) {
                         NoteView(tab: bound, store: store, pen: pen, writing: $writing,
-                                 table: { tabling = true })
+                                 table: { tabling = true }, photo: { picking = true })
                             .tag(tab.id)
                     }
                 }
@@ -168,8 +196,18 @@ struct DeskView: View {
                 Tagging(tags: $tags, known: store.allTags)
             }
             .sheet(isPresented: $ringing) {
-                if let bound = desk.binding(desk.showing), let note = here?.note {
-                    Ringing(note: note, text: bound.text, store: store)
+                if let note = here?.note, let whole = here?.whole {
+                    // The sheet reads and writes the *whole* note — a
+                    // reminder lives in the front matter, which the editor
+                    // does not hold.
+                    Ringing(
+                        note: note,
+                        text: Binding(
+                            get: { whole },
+                            set: { desk.adopt(note.path, $0, store) }
+                        ),
+                        store: store
+                    )
                 }
             }
             .alert(
@@ -183,6 +221,12 @@ struct DeskView: View {
                 "できません",
                 isPresented: Binding(get: { trouble != nil }, set: { if !$0 { trouble = nil } })
             ) { Button("閉じる") {} } message: { Text(trouble ?? "") }
+            .alert("保存していません", isPresented: $leaving) {
+                Button("保存する") { now() }
+                Button("そのままにする", role: .cancel) {}
+            } message: {
+                Text("自動保存を切っているので、書いたものはまだファイルになっていません。")
+            }
     }
 
     /// The chrome, and the things that keep the note written down.
@@ -208,23 +252,34 @@ struct DeskView: View {
             // do. Debounced: a save per keystroke is a file rewritten forty
             // times a sentence, and on a synced folder that is forty things
             // for the other device to notice.
-            .onChange(of: here?.text ?? "") { _, _ in later() }
+            .onChange(of: here?.text ?? "") { _, _ in if autosave { later() } }
             // Leaving is the other moment worth saving at — the phone can
             // stop the app without asking, so a save that only happened on a
             // timer would lose the last thing typed.
-            .onChange(of: phase) { _, going in if going != .active { now() } }
-            .onDisappear { saving?.cancel(); now() }
+            // Even with automatic saving off, leaving is not the moment to
+            // lose what was typed — so this is not a save, it is the last
+            // chance to *offer* one. With it on, it is the save.
+            .onChange(of: phase) { _, going in if going != .active, autosave { now() } }
+            .onDisappear {
+                saving?.cancel()
+                if autosave { now() } else if here?.dirty == true { leaving = true }
+            }
     }
 
     @ToolbarContentBuilder
     private var chrome: some ToolbarContent {
+        if !autosave {
+            ToolbarItem(id: "save", placement: .topBarTrailing) {
+                Button("保存") { now() }.disabled(here?.dirty != true)
+            }
+        }
         ToolbarItem(id: "state", placement: .topBarTrailing) {
             // Not a button any more: it saves itself. This says which of the
             // two states it is in, because a note that says nothing about
             // whether it is written down is a note you cannot walk away from.
             Group {
                 if here?.dirty == true {
-                    Label("保存中", systemImage: "circle.fill")
+                    Label(autosave ? "保存中" : "未保存", systemImage: "circle.fill")
                         .font(.caption2)
                         .foregroundStyle(.orange)
                 } else {
@@ -256,8 +311,6 @@ struct DeskView: View {
                 Button { ringing = true } label: {
                     Label("通知", systemImage: reminded ? "bell.fill" : "bell")
                 }
-                Button { picking = true } label: { Label("写真", systemImage: "photo") }
-                    .disabled(busy)
             } label: {
                 Image(systemName: "ellipsis.circle")
             }
@@ -266,7 +319,7 @@ struct DeskView: View {
     }
 
     private var reminded: Bool {
-        guard let text = here?.text else { return false }
+        guard let text = here?.whole else { return false }
         return (try? store.reminder(of: text)).map { !$0.once.isEmpty || $0.repeats } ?? false
     }
 
@@ -301,9 +354,9 @@ struct DeskView: View {
 
     private func applyTags() {
         guard let id = here?.id, let note = here?.note, tags != note.tags,
-              let at = desk.tabs.firstIndex(where: { $0.id == id }) else { return }
+              let whole = here?.whole else { return }
         do {
-            desk.tabs[at].text = try store.tagged(desk.tabs[at].text, tags)
+            desk.adopt(id, try store.tagged(whole, tags), store)
             desk.redraw(id, store)
         } catch { trouble = error.localizedDescription }
     }

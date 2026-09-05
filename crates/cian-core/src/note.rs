@@ -452,10 +452,15 @@ pub fn list(
 /// `create_new` fails if the file appeared between the check and the write,
 /// and two people on one shared folder is the case this whole mode exists
 /// for. Shared with the engine for the same reason as [`list`].
-pub fn create(dir: &std::path::Path, title: &str, today: &str) -> anyhow::Result<std::path::PathBuf> {
+pub fn create(
+    dir: &std::path::Path,
+    title: &str,
+    today: &str,
+    now: &str,
+) -> anyhow::Result<std::path::PathBuf> {
     use std::io::Write;
     std::fs::create_dir_all(dir)?;
-    let (name, body) = new_note(title, today);
+    let (name, body) = new_note(title, today, now);
     let stem = name.trim_end_matches(".md").to_string();
     let mut at = dir.join(&name);
     let mut n = 2;
@@ -1033,6 +1038,15 @@ pub fn today() -> String {
     chrono::Local::now().format("%Y-%m-%d").to_string()
 }
 
+/// The moment, to the second — what an untitled note is called.
+///
+/// The day alone is not enough: three notes made in one afternoon were
+/// 「2026-09-05」, 「2026-09-05-2」 and 「2026-09-05-3」, and the number says
+/// nothing about which is which. The time does.
+pub fn now_stamp() -> String {
+    chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string()
+}
+
 /// The filename and the first bytes of a new note.
 ///
 /// Pure, and given the date rather than reading a clock, so the shape of a new
@@ -1043,11 +1057,13 @@ pub fn today() -> String {
 /// The body is front matter and nothing else. A `# title` heading under a
 /// `title:` field says the same thing twice, and the second copy is the one
 /// that goes stale when the note is renamed.
-pub fn new_note(title: &str, today: &str) -> (String, String) {
+pub fn new_note(title: &str, today: &str, now: &str) -> (String, String) {
     let title = title.trim();
-    // An untitled note is named for the day it was made — which is what you
-    // reach for when you are writing before you know what it is about.
-    let shown = if title.is_empty() { today } else { title };
+    // An untitled note is named for the *moment* it was made — the day alone
+    // gives three notes one afternoon the same name and a number after it,
+    // and the number says nothing about which is which. `created` stays a
+    // date: it is a field things parse, and a title is a thing people read.
+    let shown = if title.is_empty() { now } else { title };
     let stem = match file_stem(shown) {
         s if s.is_empty() => today.to_string(),
         s => s,
@@ -1442,7 +1458,7 @@ mod tests {
 
     #[test]
     fn a_new_note_reads_back_as_the_note_it_says_it_is() {
-        let (name, body) = new_note("段取り", "2026-09-02");
+        let (name, body) = new_note("段取り", "2026-09-02", "2026-09-02 14:03:09");
         assert_eq!(name, "段取り.md");
         // The point of the shape: what `new_note` writes, `front` understands.
         // These two have drifted apart in every notes app that has two.
@@ -1454,10 +1470,14 @@ mod tests {
     }
 
     #[test]
-    fn an_untitled_note_is_named_for_the_day() {
-        let (name, body) = new_note("   ", "2026-09-02");
-        assert_eq!(name, "2026-09-02.md");
-        assert!(body.contains("title: 2026-09-02"));
+    fn an_untitled_note_is_named_for_the_moment_it_was_made() {
+        let (name, body) = new_note("   ", "2026-09-02", "2026-09-02 14:03:09");
+        // 題の無いノートは、その瞬間の名前。日付だけだと、午後に3本作ると
+        // 「-2」「-3」が付くだけで、どれがどれか分からない。
+        assert!(body.contains("title: 2026-09-02 14:03:09"), "{body}");
+        assert!(body.contains("created: 2026-09-02\n"), "{body}");
+        // ファイル名からは `:` が落ちる（Windows で作れない）。
+        assert_eq!(name, "2026-09-02 14-03-09.md");
     }
 
     #[test]

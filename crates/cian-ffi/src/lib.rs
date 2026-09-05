@@ -252,7 +252,12 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
         // A new note, named and shaped by the same rules the window uses.
         "new" => {
             let dir = std::path::PathBuf::from(arg(p, "dir"));
-            let at = cian_core::note::create(&dir, &arg(p, "title"), &cian_core::note::today())?;
+            let at = cian_core::note::create(
+                &dir,
+                &arg(p, "title"),
+                &cian_core::note::today(),
+                &cian_core::note::now_stamp(),
+            )?;
             Ok(serde_json::json!({
                 "path": at.display().to_string(),
                 "name": at.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default(),
@@ -364,6 +369,31 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
             Ok(serde_json::json!({
                 "text": cian_core::note::paint(&arg(p, "text"), &arg(p, "color")),
             }))
+        }
+
+        // Split a note into how it describes itself and what it says.
+        //
+        // **So the writing half can show only the second part.** The front
+        // matter is cian's bookkeeping — the title it derived, the date it
+        // stamped, the tags set from a sheet — and a person who did not type
+        // it should not have to scroll past it to reach their own first line.
+        // Where it ends is `note::front`'s answer, the same one the reading
+        // half and the window use.
+        "split" => {
+            let text = arg(p, "text");
+            let lines: Vec<String> = text.lines().map(str::to_string).collect();
+            let n = cian_core::note::front(&lines).lines;
+            // Rebuilt from the lines rather than sliced by bytes: the note
+            // may end without a newline, and the head must keep its own.
+            let head = if n == 0 {
+                String::new()
+            } else {
+                let mut h = lines[..n].join("\n");
+                h.push('\n');
+                h
+            };
+            let body = text.get(head.len()..).unwrap_or("").to_string();
+            Ok(serde_json::json!({ "head": head, "body": body }))
         }
 
         // Tick or untick one task, by the line it is on.
@@ -984,6 +1014,22 @@ mod tests {
         let text = out["text"].as_str().unwrap();
         assert!(!text.contains("pinned"), "{text}");
         assert!(!text.contains("star"), "{text}");
+    }
+
+    #[test]
+    fn a_note_splits_into_its_bookkeeping_and_its_words() {
+        let text = "---\ntitle: x\ntags: [a]\n---\n\n本文。\n";
+        let out = call("split", &serde_json::json!({ "text": text })).unwrap();
+        assert_eq!(out["head"], "---\ntitle: x\ntags: [a]\n---\n");
+        assert_eq!(out["body"], "\n本文。\n");
+        // くっつけると元に戻る ── ここがずれると、書いた字が消える。
+        let back = format!("{}{}", out["head"].as_str().unwrap(), out["body"].as_str().unwrap());
+        assert_eq!(back, text);
+
+        // 前書きの無いノートは、まるごと本文。
+        let plain = call("split", &serde_json::json!({ "text": "ただの本文\n" })).unwrap();
+        assert_eq!(plain["head"], "");
+        assert_eq!(plain["body"], "ただの本文\n");
     }
 
     #[test]

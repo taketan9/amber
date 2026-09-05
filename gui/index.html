@@ -307,9 +307,13 @@ html, body {
    scrollbar and simply was not there. macOS never showed it because an
    overlay scrollbar takes no layout. A pseudo-element on top, with no pointer
    events of its own, is the same two pixels where they can be seen. */
+/* Three, not two. At two it is tasteful and easy to miss, and the frame's
+   whole job is to be seen without being looked for — on a light palette
+   especially, where the two grounds are a couple of percent apart and the
+   frame is the only thing saying which side has the keys. */
 #work[data-focus="files"] .pane.active::after {
   content: ""; position: absolute; inset: 0; z-index: 3; pointer-events: none;
-  border: 2px solid var(--mode-accent);
+  border: 3px solid var(--mode-accent);
 }
 /* The mode's colour, on the frame of the surface holding the keys — which is
    where cian-tui puts it (`focus_badge_color`, render.rs:2134). It was only

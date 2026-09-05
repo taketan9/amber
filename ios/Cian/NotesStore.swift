@@ -451,6 +451,16 @@ final class NotesStore: ObservableObject {
         return (answer["text"] as? String ?? "", answer["stamp"] as? String ?? "")
     }
 
+    /// A note split into its bookkeeping and its words.
+    ///
+    /// The writing half shows only the second part — see the engine's
+    /// `split`. Where the front matter ends is decided there, so the phone,
+    /// the window and the terminal all agree where a note starts.
+    func split(_ text: String) throws -> (String, String) {
+        let out = try Cian.call("split", ["text": text])
+        return (out["head"] as? String ?? "", out["body"] as? String ?? text)
+    }
+
     /// The note with one task ticked or unticked, as text to save.
     ///
     /// By the line it is on, not by which box it is — see `note::set_check`.

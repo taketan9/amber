@@ -20,6 +20,8 @@ struct NoteView: View {
     /// a sheet put on a `TabView` page is a sheet on a view the TabView is
     /// free to rebuild, and it does not open.
     let table: () -> Void
+    /// Likewise the photo picker.
+    let photo: () -> Void
     /// Whether the seldom-used half of the writing bar is unfolded.
     @State private var more = false
     @State private var trouble: String?
@@ -96,41 +98,45 @@ struct NoteView: View {
                 }
                 Divider()
             }
+            // What a note is made of. Pressing 見出し again goes deeper:
+            // # → ## → ### → none. Three buttons would be three names for
+            // one idea.
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 6) {
-                    // **The arrows a phone keyboard does not have.** Moving
-                    // the cursor by dragging a magnifying glass around is the
-                    // single most miserable part of writing anything longer
-                    // than a line on a phone. In vim's order, because that is
-                    // the order his hands know.
-                    mark("左", "arrow.left") { pen.step(.left) }
-                    mark("下", "arrow.down") { pen.step(.down) }
-                    mark("上", "arrow.up") { pen.step(.up) }
-                    mark("右", "arrow.right") { pen.step(.right) }
-                    Divider().frame(height: 20)
-                    // The phone's own undo, not a second one written here —
-                    // this is the same stack the shake gesture and the
-                    // three-finger swipe use.
-                    mark("元に戻す", "arrow.uturn.backward") { pen.undo() }
-                        .disabled(!pen.canUndo)
-                    mark("やり直す", "arrow.uturn.forward") { pen.redo() }
-                        .disabled(!pen.canRedo)
-                    Divider().frame(height: 20)
-                    // Pressing it again goes deeper: # → ## → ### → none.
-                    // Three buttons would be three names for one idea.
                     mark("見出し", "number", on: heads > 0) { put(Marks.deepen(tab.text, tab.pick)) }
                     mark("箇条書き", "list.bullet") { line("- ") }
                     mark("チェック", "checklist") { line("- [ ] ") }
                     mark("太字", "bold") { wrap("**") }
+                    mark("画像", "photo", act: photo)
                     Divider().frame(height: 20)
                     mark(more ? "たたむ" : "ほかの記号", "ellipsis", on: more) {
                         withAnimation(.easeOut(duration: 0.15)) { more.toggle() }
                     }
-                    Button("閉じる") { writing = false }.font(.callout)
                 }
                 .padding(.horizontal, 10)
-                .padding(.vertical, 6)
+                .padding(.top, 6)
             }
+            // Moving about, on its own row and pushed to the right — the
+            // side the thumb is on, and away from the marks so a press meant
+            // for one is never a press on the other.
+            HStack(spacing: 6) {
+                Button("閉じる") { writing = false }.font(.callout)
+                Spacer(minLength: 0)
+                // The phone's own undo, not a second one written here.
+                mark("元に戻す", "arrow.uturn.backward") { pen.undo() }
+                    .disabled(!pen.canUndo)
+                mark("やり直す", "arrow.uturn.forward") { pen.redo() }
+                    .disabled(!pen.canRedo)
+                Spacer().frame(width: 18)
+                // **The arrows a phone keyboard does not have.** In vim's
+                // order, because that is the order his hands know.
+                mark("左", "arrow.left") { pen.step(.left) }
+                mark("下", "arrow.down") { pen.step(.down) }
+                mark("上", "arrow.up") { pen.step(.up) }
+                mark("右", "arrow.right") { pen.step(.right) }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
         }
         .background(.bar)
     }
@@ -190,8 +196,14 @@ struct NoteView: View {
     private func tick(_ b: Block) {
         guard b.line >= 0 else { return }
         do {
-            tab.text = try store.checked(tab.text, line: b.line, done: !b.done)
-            tab.blocks = try store.blocks(of: tab.text)
+            // **The whole note, because a task's line number is a line
+            // number in the file.** The editor holds only the body; the
+            // front matter is still up there taking lines.
+            let whole = try store.checked(tab.whole, line: b.line, done: !b.done)
+            let (head, body) = try store.split(whole)
+            tab.head = head
+            tab.text = body
+            tab.blocks = try store.blocks(of: whole)
         } catch { trouble = error.localizedDescription }
     }
 

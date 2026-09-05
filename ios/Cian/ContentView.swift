@@ -471,11 +471,16 @@ struct ContentView: View {
         // rather than exclusive: scrolling must still win, and this only
         // decides anything once the finger is up.
         .simultaneousGesture(
-            DragGesture(minimumDistance: 30).onEnded { g in
-                guard abs(g.translation.width) > abs(g.translation.height) * 1.5 else { return }
-                if g.startLocation.x < 28, g.translation.width > 48, let up = store.up {
+            DragGesture(minimumDistance: 12).onEnded { g in
+                // A flick counts for more than it travelled: the finger that
+                // is still moving when it leaves the glass meant to go
+                // further. Without this the gesture wanted a deliberate drag
+                // across a third of the screen, which is not what a swipe is.
+                let went = max(abs(g.translation.width), abs(g.predictedEndTranslation.width) * 0.6)
+                guard went > abs(g.translation.height) * 1.4, went > 22 else { return }
+                if g.startLocation.x < 36, g.translation.width > 0, let up = store.up {
                     go { store.leave(for: up) }
-                } else if g.startLocation.x > wide - 28, g.translation.width < -48 {
+                } else if g.startLocation.x > wide - 36, g.translation.width < 0 {
                     go { _ = store.back() }
                 }
             }

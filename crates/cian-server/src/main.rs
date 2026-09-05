@@ -4268,6 +4268,7 @@ impl Session {
                     &dir,
                     &arg(req, "title"),
                     &cian_core::note::today(),
+                    &cian_core::note::now_stamp(),
                 )?;
                 Ok(serde_json::json!({
                     "path": at.to_string_lossy(),

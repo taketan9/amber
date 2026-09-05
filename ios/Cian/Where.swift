@@ -22,6 +22,7 @@ struct Where: View {
     @State private var zip: URL?
     @State private var trouble: String?
     @AppStorage("cian.look") private var look = Look.auto
+    @AppStorage("cian.autosave") private var autosave = true
 
     var body: some View {
         NavigationStack {
@@ -100,6 +101,12 @@ struct Where: View {
                     Text("バックアップとインポート")
                 } footer: {
                     Text("インポートした .md はこのフォルダにコピーされます。元のファイルはそのまま。同じ名前があるときは番号を付けて、いまあるノートは上書きしません。")
+                }
+
+                Section {
+                    Toggle("自動保存", isOn: $autosave)
+                } footer: {
+                    Text("切ると、書く画面に「保存」が出ます。切っていても、画面を離れるときに一度だけ訊きます。")
                 }
 
                 Section {

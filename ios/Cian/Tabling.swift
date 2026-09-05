@@ -56,24 +56,13 @@ struct Tabling: View {
                             .labelsHidden()
                         }
                     }
-                    HStack {
-                        Button {
-                            heads.append("")
-                            ways.append(.left)
-                        } label: {
-                            Label("列を足す", systemImage: "plus")
-                        }
-                        .disabled(heads.count >= 6)
-                        Spacer()
-                        Button(role: .destructive) {
-                            heads.removeLast()
-                            ways.removeLast()
-                        } label: {
-                            Label("減らす", systemImage: "minus")
-                        }
-                        .disabled(heads.count <= 1)
-                    }
-                    .buttonStyle(.borderless)
+                    // The same pair of words and the same shape as the rows
+                    // below: two controls that do the same thing to two
+                    // different numbers should not look like two different
+                    // ideas.
+                    more(add: { heads.append(""); ways.append(.left) },
+                         drop: { heads.removeLast(); ways.removeLast() },
+                         canAdd: heads.count < 6, canDrop: heads.count > 1)
                 } header: {
                     Text("列")
                 } footer: {
@@ -81,7 +70,9 @@ struct Tabling: View {
                 }
 
                 Section("行") {
-                    Stepper("空の行 \(rows)", value: $rows, in: 0...20)
+                    LabeledContent("空の行", value: "\(rows)")
+                    more(add: { rows += 1 }, drop: { rows -= 1 },
+                         canAdd: rows < 20, canDrop: rows > 0)
                 }
 
                 Section("できるもの") {
@@ -108,6 +99,19 @@ struct Tabling: View {
                 }
             }
         }
+    }
+
+    /// 増やす / 減らす — one shape, used for both.
+    private func more(add: @escaping () -> Void, drop: @escaping () -> Void,
+                      canAdd: Bool, canDrop: Bool) -> some View {
+        HStack {
+            Button { add() } label: { Label("増やす", systemImage: "plus") }
+                .disabled(!canAdd)
+            Spacer()
+            Button { drop() } label: { Label("減らす", systemImage: "minus") }
+                .disabled(!canDrop)
+        }
+        .buttonStyle(.borderless)
     }
 
     private func binding(_ i: Int) -> Binding<String> {
