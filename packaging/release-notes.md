@@ -3,13 +3,13 @@
 | 使いたいもの | 落とすもの |
 |---|---|
 | **Windows で窓版（Electron）** | **`cian-gui-win-x64.zip`** — Electron 本体だけ別途必要 |
-| エンジンだけ差し替えたい | `cian-server-win-x64.exe`（9MB） |
+| **Mac で窓版（Electron）** | **`cian-gui-macos.zip`** — 同上。エンジンは Intel と Apple Silicon の両方入り |
+| エンジンだけ差し替えたい | `cian-server-win-x64.exe`（9MB）／`cian-server-macos.bin` |
 | 壊れずに届いたかの確認 | `SHA256SUMS` — `sha256sum -c SHA256SUMS` / `Get-FileHash` |
 
-**いまは Windows の窓版だけを出しています。** 端末版・Mac・Linux・
-オフラインビルド用のソース一式は、必要になったら
-Actions から `release` を **everything = true** で手動実行すれば、
-同じ7点が揃ったリリースになります。
+**いまは窓版（Windows と Mac）を出しています。** 端末版・Mac の `.app`・
+Linux・オフラインビルド用のソース一式は、必要になったら Actions から
+`release` を **everything = true** で手動実行すれば揃います。
 
 ### Windows で落としたら、まずブロックを外す
 
@@ -20,5 +20,16 @@ zip を右クリック →「プロパティ」→ 下に「セキュリティ: 
 （窓は出るのに中身が空、という形で出ます）。
 
 窓版の詳しい手順は zip の中の `GUI.txt` にあります。
+
+### Mac で落としたら
+
+macOS は落としたものに「隔離」の印を付けます。cian は公証していないので、
+展開したフォルダで一度だけ:
+
+```
+xattr -dr com.apple.quarantine .
+```
+
+詳しい手順は zip の中の `GUI.ja.txt` にあります。
 
 ---

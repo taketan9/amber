@@ -67,8 +67,12 @@ jobs:
   # zip for the terminal.
   macos:
     needs: version
-    # Only when asked for — see the note above `jobs:`.
-    if: inputs.everything
+    # **Not gated any more.** The window front end is what he actually uses,
+    # and until now the only way to get it onto a Mac was to clone the
+    # repository and run `npm start` — which is fine for the person who wrote
+    # it and is not a way to hand somebody a program. The heavy half (the
+    # winit build, the terminal build, the universal package) is still behind
+    # `everything`; what always runs is the engine and the window.
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v5
@@ -94,21 +98,41 @@ jobs:
         env:
           FONT_URL: https://github.com/yuru7/HackGen/releases/download/v2.10.0/HackGen_NF_v2.10.0.zip
 
-      - name: Build (release, both architectures)
+      # The engine, always: it is what the window in the zip talks to.
+      # **Both architectures**, because his Mac is Intel and the runner is
+      # not — a single-slice binary does not fail to run on the other one, it
+      # fails to *open*, with nothing on screen to say which Mac it was for.
+      - name: Build the engine (both architectures)
+        run: |
+          for target in aarch64-apple-darwin x86_64-apple-darwin; do
+            cargo build --release --target "$target" --bin cian-server
+          done
+
+      - name: Build the terminal build and the winit one
+        if: inputs.everything
         run: |
           for target in aarch64-apple-darwin x86_64-apple-darwin; do
             cargo build --release --target "$target" --bin cian-tui
-            cargo build --release --target "$target" --bin cian-server
             cargo build --release --target "$target" --bin cian --features cian-gui/bundled-font
           done
 
       # One binary that holds both, where the bundler and the zip expect to
       # find it. `lipo` is what "universal" means: the two builds glued into
       # one file, and macOS picks the slice it can run.
-      - name: Make them universal
+      - name: Make the engine universal
         run: |
           mkdir -p target/release
-          for bin in cian cian-tui cian-server; do
+          lipo -create \
+            target/aarch64-apple-darwin/release/cian-server \
+            target/x86_64-apple-darwin/release/cian-server \
+            -output target/release/cian-server
+          lipo -info target/release/cian-server
+
+      - name: Make the rest universal
+        if: inputs.everything
+        run: |
+          mkdir -p target/release
+          for bin in cian cian-tui; do
             lipo -create \
               "target/aarch64-apple-darwin/release/$bin" \
               "target/x86_64-apple-darwin/release/$bin" \
@@ -117,6 +141,7 @@ jobs:
           done
 
       - name: Bundle and stage
+        if: inputs.everything
         run: |
           ./packaging/macos/bundle.sh
           stage=cian-macos
@@ -134,10 +159,61 @@ jobs:
           ditto -c -k --sequesterRsrc --keepParent "$stage" cian-macos.zip
 
       - name: Upload artifact
+        if: inputs.everything
         uses: actions/upload-artifact@v6
         with:
           name: cian-macos
           path: cian-macos.zip
+
+      # The engine on its own, the same courtesy the Windows job does: the
+      # window front end is JavaScript and needs no compiler, so somebody
+      # updating it should not have to take a whole package for one file.
+      - name: Stage the engine on its own
+        run: cp target/release/cian-server cian-server-macos.bin
+
+      - name: Upload the engine
+        uses: actions/upload-artifact@v6
+        with:
+          name: cian-server-macos
+          path: cian-server-macos.bin
+
+      # The window front end for macOS — the same contents as the Windows
+      # one, with the universal engine beside it. Everything except Electron
+      # itself: the front end, its vendored runtime (Monaco, monaco-vim,
+      # mermaid, the font), and the engine, which is the first place
+      # `engine.js` looks.
+      - name: Fetch the editor's runtime
+        run: |
+          cd gui
+          npm install --omit=dev --no-audit --no-fund
+          node vendor.js
+
+      - name: Stage the window front end
+        run: |
+          stage=cian-gui-macos
+          mkdir -p "$stage"
+          # `rsync` rather than `cp -R`: node_modules is a hundred megabytes
+          # of the untrimmed originals that gui/vendor/ already replaces.
+          rsync -a --exclude node_modules gui/ "$stage/"
+          cp target/release/cian-server "$stage/"
+          # **The font, or stop.** `vendor.js` prints a line and carries on
+          # when it cannot find one, so a build can quietly ship a package
+          # with no face in it and nothing fails. That happened once on the
+          # Windows side; it is not going to happen twice.
+          test -f "$stage/vendor/fonts/cian.ttf" \
+            || { echo "vendor/fonts/cian.ttf is missing — the window would draw the listing in a proportional face"; exit 1; }
+          cp packaging/macos/GUI.ja.txt "$stage/"
+          cp README.md README.ja.md LICENSE "$stage/"
+          mkdir -p "$stage/examples"
+          cp examples/init.lua "$stage/examples/"
+          ditto -c -k --sequesterRsrc --keepParent "$stage" cian-gui-macos.zip
+          ls -lh cian-gui-macos.zip
+
+      - name: Upload the window front end
+        uses: actions/upload-artifact@v6
+        with:
+          name: cian-gui-macos
+          path: cian-gui-macos.zip
 
   windows-x64:
     needs: version
@@ -438,7 +514,7 @@ jobs:
     # `always()`, because a skipped need would otherwise skip this too, and
     # three of the four are skipped on an ordinary tag now. The one that must
     # have succeeded is named explicitly.
-    if: always() && startsWith(github.ref, 'refs/tags/') && needs.windows-x64.result == 'success'
+    if: always() && startsWith(github.ref, 'refs/tags/') && needs.windows-x64.result == 'success' && needs.macos.result == 'success'
     runs-on: ubuntu-latest
     steps:
       # The generated notes are a list of commits, which answers a question

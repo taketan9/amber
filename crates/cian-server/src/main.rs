@@ -4237,8 +4237,24 @@ impl Session {
                         }
                     }
                 }
+                // The favourite shelves: the ones notes are standing on,
+                // plus the ones that were made and are still empty. Without
+                // the second half a shelf vanishes the moment its last note
+                // leaves it, which reads as cian losing the folder.
+                let mut shelves = cian_core::notebook::read(&dir).stars;
+                for f in notes.iter() {
+                    if let Some(sh) = f.note.star.clone() {
+                        let parts: Vec<&str> = sh.split('/').filter(|p| !p.is_empty()).collect();
+                        for n in 1..=parts.len() {
+                            shelves.push(parts[..n].join("/"));
+                        }
+                    }
+                }
+                shelves.sort();
+                shelves.dedup();
                 Ok(serde_json::json!({
                     "root": dir.display().to_string(),
+                    "stars": shelves,
                     "notes": rows,
                     "partial": found.partial().then(|| serde_json::json!({
                         "whole_to": found.whole_to(),
@@ -4913,6 +4929,49 @@ impl Session {
             // terminal build draws, turned into a document instead of into
             // styled lines. The window is handed markup it did not have to
             // understand, which is also what keeps a README from running.
+            // Put a note on a favourite shelf, or take it off.
+            //
+            // The whole file, read and written here rather than through the
+            // editor: this is done from the listing, where nothing has the
+            // note open. `star` is a line in the note's own front matter, so
+            // it travels with the note and the phone reads the same word.
+            "star" => {
+                let at = std::path::PathBuf::from(arg(req, "path"));
+                let text = std::fs::read_to_string(&at)?;
+                let out = match req.params["shelf"].as_str() {
+                    // `star: true` rather than `star:` — a field with nothing
+                    // after it reads as yes to the next thing that looks.
+                    Some("") => cian_core::note::set_field(&text, "star", Some("true")),
+                    Some(sh) => cian_core::note::set_field(&text, "star", Some(sh)),
+                    None => cian_core::note::set_field(&text, "star", None),
+                };
+                // The one written before favourites had a name. Left behind,
+                // it would keep the note a favourite after it was taken off.
+                let out = cian_core::note::set_field(&out, "pinned", None);
+                std::fs::write(&at, out)?;
+                Ok(serde_json::json!({ "ok": true }))
+            }
+
+            // Tick or untick one task, by the line it is on — the same
+            // `note::set_check` the phone presses. Lines in, lines out: the
+            // window puts them back into the editor and saves the ordinary
+            // way, so a checkbox goes through the same conflict check as
+            // typing does.
+            "check" => {
+                let lines: Vec<String> = match lines_of(req) {
+                    Some(l) => l,
+                    None => match self.open.as_ref() {
+                        Some((_, f, _)) => f.lines.clone(),
+                        None => anyhow::bail!("開いているファイルがありません"),
+                    },
+                };
+                let line = req.params["line"].as_u64().unwrap_or(0) as usize;
+                let done = req.params["done"].as_bool().unwrap_or(false);
+                let out = cian_core::note::set_check(&lines.join("\n"), line, done);
+                Ok(serde_json::json!({
+                    "lines": out.lines().map(str::to_string).collect::<Vec<_>>(),
+                }))
+            }
             "markdown" => {
                 let lines: Vec<String> = match lines_of(req) {
                     Some(l) => l,

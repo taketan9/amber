@@ -1077,6 +1077,11 @@ html, body {
 .vread li > ul { margin: .3em 0 .3em; }
 .vread li.task { list-style: none; margin-left: -1.4em; }
 .vread li.task .box { display: inline-block; width: 1.4em; color: var(--accent); }
+/* A box you can press should say so before you press it — the cursor and a
+   little lift on hover. Without them it is a character that happens to be
+   clickable, which nobody finds. */
+.vread li.task .box.press { cursor: pointer; border-radius: 3px; }
+.vread li.task .box.press:hover { background: var(--sel-strong); }
 
 .vread a { color: var(--dir); text-underline-offset: .18em; }
 .vread a:hover { color: var(--accent); }

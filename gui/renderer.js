@@ -399,7 +399,7 @@ function rowHeight(rows) {
 /// `cian_core::note`'s, not this file's. That module is the only part of cian
 /// mode that could ever reach an iPhone, and a second opinion written here
 /// would be the one that did not travel.
-const notes = { root: '', by: new Map(), asking: '' };
+const notes = { root: '', by: new Map(), asking: '', shelves: [] };
 
 /// Read the notes for whichever folder the pane is showing.
 ///
@@ -418,6 +418,10 @@ async function loadNotes(which) {
     if (!r) return;
     notes.root = r.root;
     notes.by = new Map(r.notes.map((n) => [n.path, n]));
+    // The shelves, including the empty ones — they live in the folder's own
+    // `.cian/settings.json` because a shelf with nothing on it cannot be
+    // named by the notes.
+    notes.shelves = r.stars || [];
     draw(which);
 }
 
@@ -5617,6 +5621,7 @@ function buildCommands() {
     { name: 'notes', about: tr("go to a notes folder (init.lua’s cian.notes)", 'ノートの置き場所へ（init.lua の cian.notes）'), run: cmdNotes },
     { name: 'newnote', about: tr("make a note here and open it", 'ここにノートを作って開く'), run: cmdNewNote },
     { name: 'tag', about: tr("narrow the listing to one tag", 'タグで一覧を絞る'), run: cmdTag },
+    { name: 'star', about: tr("put this note on a favourite shelf (or take it off)", 'このノートをお気に入りの棚へ（外すのも）'), run: cmdStar },
     { name: 'paste', about: tr("paste the held files here (also Ctrl+V / y)", '保持したファイルをここへ貼り付け（Ctrl+V / y でも）'), run: paste },
     { name: 'local', about: tr("close the server and come back to this disk", 'サーバを閉じてローカルへ戻る'), run: cmdDisconnect },
     { name: 'aicmd', about: tr("AI: a shell command from a description", 'AI: 説明からシェルコマンドを作る'), arg: tr('what you want', 'やりたいこと'), run: cmdAiCmd },
@@ -6457,6 +6462,75 @@ async function cmdTag() {
 ///
 /// The name and the front matter come from `cian_core::note`; the window does
 /// not decide what a note looks like.
+/// Put the note under the cursor on a favourite shelf, or take it off.
+///
+/// **The same `star` field the phone writes**, so a note starred here is
+/// starred there. The shelves offered are the ones that already exist plus
+/// one to type — a shelf is made by putting something on it, which is the
+/// only moment anybody wants one.
+async function cmdStar() {
+    const which = state.focus;
+    const pane = state[which];
+    const row = pane && pane.entries && pane.entries[pane.cursor];
+    if (!row || row.parent || row.dir) {
+        say(tr('put the cursor on a note', 'ノートの上でどうぞ'), true);
+        return;
+    }
+    const n = notes.by.get(row.path);
+    if (!n) {
+        say(tr('that is not a note', 'ノートではありません'), true);
+        return;
+    }
+    const shelves = [...new Set((notes.shelves || []).concat(
+        [...notes.by.values()].map((x) => x.star).filter((x) => x)))].sort();
+    const rows = [
+        { label: tr('the top', 'デフォルト'), value: '', path: row.path },
+        ...shelves.map((sh) => ({ label: sh, value: sh, path: row.path })),
+        { label: tr('a new shelf…', '新しい棚…'), value: NEW_SHELF, path: row.path },
+    ];
+    if (n.star != null) {
+        rows.push({ label: tr('take it off', 'お気に入りから外す'), value: null, path: row.path });
+    }
+    // `show` is answered per row, with a callback — it is not a prompt that
+    // returns a value, and treating it as one is how this first came out
+    // opening a picker that did nothing when you pressed Enter.
+    show(tr("Favourite", 'お気に入り'), n.title, rows, {
+        filter: true,
+        foot: tr('type to narrow   Enter choose   Esc close', '打って絞る   Enter 選ぶ   Esc 閉じる'),
+        pick: async (row) => {
+            closeReport();
+            let shelf = row.value;
+            if (shelf === NEW_SHELF) {
+                shelf = await askFor(tr("name of the shelf", '棚の名前'), '', {
+                    hint: tr('use a / for a shelf inside a shelf', '「棚/中の棚」で階層になります'),
+                });
+                if (shelf === null || !String(shelf).trim()) return;
+                shelf = String(shelf).trim();
+            }
+            const r = await ask('star', shelf === null
+                ? { path: row.path }
+                : { path: row.path, shelf });
+            if (!r) return;
+            // The folder has to be read again — `loadNotes` skips one it has
+            // already read, and the star it is being asked about is new.
+            notes.root = '';
+            const fresh = await ask('list', { pane: which, path: pane.cwd });
+            if (fresh) {
+                fresh.cursor = pane.cursor;
+                state[which] = fresh;
+                draw(which);
+            }
+            say(shelf === null
+                ? tr('taken off the favourites', 'お気に入りから外しました')
+                : tr(`starred${shelf ? ` on ${shelf}` : ''}`, `お気に入りに入れました${shelf ? ` — ${shelf}` : ''}`));
+        },
+    });
+}
+
+/// The row that means "type a name", told apart from a shelf actually called
+/// that by being a string nobody can type.
+const NEW_SHELF = '\u0000new';
+
 async function cmdNewNote() {
     const which = state.focus;
     const pane = state[which];
@@ -8614,6 +8688,31 @@ async function togglePreview2() {
     // `innerHTML` on purpose, and only here: the engine escaped every piece of
     // text on the way out, and the markup is its own — not the file's.
     el.vRead.innerHTML = r.html;
+    // The checkboxes are pressable here, the same as on the phone. Reading a
+    // list is not a separate activity from crossing things off it, and going
+    // back to the source to type an `x` between two brackets is not that.
+    //
+    // The line number came from the engine (`data-line`), so nothing here has
+    // to work out which box this is — and it stays right when the note has a
+    // front matter above it, which counting boxes would not.
+    for (const box of el.vRead.querySelectorAll('.box[data-line]')) {
+        box.classList.add('press');
+        box.addEventListener('click', async () => {
+            const line = Number(box.dataset.line);
+            if (!Number.isInteger(line)) return;
+            const done = box.textContent !== '☑';
+            const out = await ask('check', {
+                lines: viewer.ed.getValue().split(/\r?\n/), line, done,
+            });
+            if (!out) return;
+            // Through the editor, so ⌘Z takes it back and the save is the
+            // ordinary one — with its conflict check.
+            viewer.ed.setValue(out.lines.join('\n'));
+            await saveFile();
+            await togglePreview2();
+            await togglePreview2();
+        });
+    }
     // Links go to the desktop's browser rather than replacing the preview.
     // A file manager that navigates away from itself is a file manager you
     // have to restart.

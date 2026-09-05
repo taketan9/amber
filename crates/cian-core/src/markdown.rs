@@ -557,8 +557,14 @@ pub fn to_html(lines: &[String]) -> String {
                 }
             }
             match task_item(&text) {
+                // The line it came from travels with it. A checkbox you can
+                // see and not press is a checkbox that makes you go and find
+                // the line yourself — and `note::set_check` takes a line
+                // number, so this is the whole of what a window needs to
+                // make it work.
                 Some((done, rest)) => out.push_str(&format!(
-                    "<li class=\"task\"><span class=\"box\">{}</span>{}",
+                    "<li class=\"task\"><span class=\"box\" data-line=\"{}\">{}</span>{}",
+                    i,
                     if done { "☑" } else { "☐" },
                     inline_html(&rest),
                 )),
@@ -749,10 +755,16 @@ mod tests {
     }
 
     #[test]
-    fn task_boxes_are_marked() {
+    fn task_boxes_are_marked_and_carry_the_line_they_came_from() {
         let html = to_html(&lines("- [x] done\n- [ ] not"));
         assert!(html.contains("☑"), "{html}");
         assert!(html.contains("☐"), "{html}");
+        // 押せるようにするのに要るのはこれだけ ── `note::set_check` は
+        // 行番号を取る。前書きの分もちゃんと数える。
+        assert!(html.contains("data-line=\"0\""), "{html}");
+        assert!(html.contains("data-line=\"1\""), "{html}");
+        let with_front = to_html(&lines("---\ntitle: x\n---\n\n- [ ] a\n"));
+        assert!(with_front.contains("data-line=\"4\""), "{with_front}");
     }
 
     #[test]
