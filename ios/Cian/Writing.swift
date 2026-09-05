@@ -227,7 +227,7 @@ struct Wordmark: View {
         HStack(spacing: 14) {
             Mark().frame(width: 38, height: 38)
             VStack(alignment: .leading, spacing: 1) {
-                Text("cian")
+                Text("amber")
                     .font(.system(size: 34, weight: .heavy, design: .rounded))
                     .kerning(-0.5)
                 Text("\(notes) のノート ・ \(books) のフォルダ")
@@ -245,30 +245,71 @@ struct Wordmark: View {
 /// The same two brackets as the app icon, so the thing on the home screen
 /// and the thing at the top of the list are recognisably one thing.
 struct Mark: View {
+    // 案 S4「生成りの葉」。多羅葉に字を書いたのが「葉書」の語源。
+    // **数字は packaging/amber.svg と同じ** ── `packaging/amber.py`（焼く）と
+    // `gui/renderer.js` の `cianMark()`（窓の左列）も同じものを持っている。
+    // どれか一つだけ直すと、三つの葉が別のものになる。
+    //
+    // 配色は色替えに追従させない（前の印は `Color.accentColor` を拾っていた）。
+    // ロゴが端末の気分で色を変えるのは、ロゴではない。
+    private static let amber = LinearGradient(
+        colors: [Color(red: 1.000, green: 0.851, blue: 0.498),   // #ffd97f
+                 Color(red: 0.949, green: 0.651, blue: 0.173)],  // #f2a62c
+        startPoint: UnitPoint(x: 0.15, y: 0), endPoint: UnitPoint(x: 0.85, y: 1))
+    /// 生成り。**純白は琥珀の上でわずかに青く見える。**
+    private static let cream = Color(red: 1.000, green: 0.957, blue: 0.871)  // #fff4de
+
+    private static func at(_ x: CGFloat, _ y: CGFloat, _ s: CGFloat) -> CGPoint {
+        CGPoint(x: s * x / 100, y: s * y / 100)
+    }
+
+    private static func leaf(_ s: CGFloat) -> Path {
+        Path { p in
+            p.move(to: at(10, 62, s))
+            p.addCurve(to: at(50, 15, s), control1: at(6, 38, s), control2: at(26, 18, s))
+            p.addCurve(to: at(97, 35, s), control1: at(74, 12, s), control2: at(90, 24, s))
+            p.addCurve(to: at(44, 77, s), control1: at(88, 50, s), control2: at(66, 68, s))
+            p.addCurve(to: at(10, 62, s), control1: at(26, 84, s), control2: at(12, 78, s))
+            p.closeSubpath()
+        }
+    }
+
+    /// 尻尾（葉柄）。タイルの左下の角へ抜ける ── **これがあると、小さくしても
+    /// 人は必ず「葉」と読む。**
+    private static func tail(_ s: CGFloat) -> Path {
+        Path { p in
+            p.move(to: at(12, 66, s))
+            p.addCurve(to: at(-4, 96, s), control1: at(6, 74, s), control2: at(0, 84, s))
+        }
+    }
+
+    /// 書いた二行。**葉脈は描かない** ── 二行のあいだの隙間が勝手に葉脈に
+    /// 見えるので、描くと一本多い。
+    private static func lines(_ s: CGFloat) -> Path {
+        Path { p in
+            p.move(to: at(24, 46, s))
+            p.addCurve(to: at(78, 27, s), control1: at(42, 36, s), control2: at(60, 30, s))
+            p.move(to: at(24, 66, s))
+            p.addCurve(to: at(66, 47, s), control1: at(40, 57, s), control2: at(54, 51, s))
+        }
+    }
+
     var body: some View {
         GeometryReader { geo in
             let s = min(geo.size.width, geo.size.height)
-            let bar = s * 0.11
             ZStack {
-                RoundedRectangle(cornerRadius: s * 0.26, style: .continuous)
-                    .fill(
-                        LinearGradient(
-                            colors: [Color.accentColor, Color.accentColor.opacity(0.72)],
-                            startPoint: .topLeading, endPoint: .bottomTrailing
-                        )
-                    )
-                Path { p in
-                    // Top-left bracket.
-                    p.move(to: CGPoint(x: s * 0.30, y: s * 0.56))
-                    p.addLine(to: CGPoint(x: s * 0.30, y: s * 0.28))
-                    p.addLine(to: CGPoint(x: s * 0.58, y: s * 0.28))
-                    // Bottom-right bracket.
-                    p.move(to: CGPoint(x: s * 0.70, y: s * 0.44))
-                    p.addLine(to: CGPoint(x: s * 0.70, y: s * 0.72))
-                    p.addLine(to: CGPoint(x: s * 0.42, y: s * 0.72))
+                Rectangle().fill(Self.amber)
+                Self.tail(s).stroke(Self.cream,
+                                    style: StrokeStyle(lineWidth: s * 0.07, lineCap: .round))
+                Self.leaf(s).fill(Self.cream)
+                // 字は塗りではなく**地を透かす** ── 同じ階調で抜くので、
+                // 葉に彫った線に見える。
+                Self.amber.mask {
+                    Self.lines(s).stroke(style: StrokeStyle(lineWidth: s * 0.08, lineCap: .round))
                 }
-                .stroke(Color.white, style: StrokeStyle(lineWidth: bar, lineCap: .round, lineJoin: .round))
             }
+            .frame(width: s, height: s)
+            .clipShape(RoundedRectangle(cornerRadius: s * 0.26, style: .continuous))
         }
         .accessibilityHidden(true)
     }

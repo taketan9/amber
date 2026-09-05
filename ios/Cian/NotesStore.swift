@@ -27,7 +27,7 @@ final class NotesStore: ObservableObject {
     /// from anywhere else, not a hidden container. Starting here rather than
     /// with a picker matters: the picker offers cloud providers, and a
     /// provider whose app is not installed is *listed but greyed out*, which
-    /// reads as "cian cannot see my Drive" rather than as "Drive is not on
+    /// reads as "amber cannot see my Drive" rather than as "Drive is not on
     /// this phone".
     private var ownFolder: URL? {
         FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
@@ -35,14 +35,14 @@ final class NotesStore: ObservableObject {
 
     /// Whether the notes are in the app's own folder rather than one picked.
     @Published var own = true
-    /// The path as a trail of names — 「この iPhone › cian › 仕事」.
+    /// The path as a trail of names — 「この iPhone › amber › 仕事」.
     ///
     /// A phone hides paths, which is usually kind and here is not: the same
-    /// folder name can exist in three different clouds, and "cian" on its own
+    /// folder name can exist in three different clouds, and "amber" on its own
     /// answers *what is it called* when the question is *where is it*.
     var trail: [String] {
         guard let root else { return [] }
-        if own { return ["この iPhone", "cian"] }
+        if own { return ["この iPhone", "amber"] }
         // The tail of the path, which is the part that means anything: the
         // front of it is the provider's own bookkeeping.
         let parts = root.pathComponents.filter { $0 != "/" }
@@ -57,7 +57,7 @@ final class NotesStore: ObservableObject {
     /// Go back to the app's own folder.
     func useOwn() {
         UserDefaults.standard.removeObject(forKey: Self.bookmarkKey)
-        if let own = ownFolder { adopt(own, remember: false, scoped: false, named: "cian") }
+        if let own = ownFolder { adopt(own, remember: false, scoped: false, named: "amber") }
     }
 
     /// Copy Markdown files in from somewhere else.
@@ -91,7 +91,7 @@ final class NotesStore: ObservableObject {
     func restore() {
         loadPlaces()
         guard let data = UserDefaults.standard.data(forKey: Self.bookmarkKey) else {
-            if let ownFolder { adopt(ownFolder, remember: false, scoped: false, named: "cian") }
+            if let ownFolder { adopt(ownFolder, remember: false, scoped: false, named: "amber") }
             return
         }
         var stale = false
@@ -151,7 +151,7 @@ final class NotesStore: ObservableObject {
     /// saying something nobody could parse.
     var ownPlace: Place? {
         guard let at = ownFolder, let data = try? at.bookmarkData() else { return nil }
-        return Place(name: "この iPhone の中（cian）", trail: "ファイル → この iPhone 内 → cian", data: data)
+        return Place(name: "この iPhone の中（amber）", trail: "ファイル → この iPhone 内 → amber", data: data)
     }
 
     /// Somewhere notes have been kept, and the way back to it.

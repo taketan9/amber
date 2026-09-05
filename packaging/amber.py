@@ -24,6 +24,7 @@
 """
 
 import math
+import re
 import struct
 import zlib
 from pathlib import Path
@@ -277,12 +278,30 @@ def agree():
             raise SystemExit(
                 f'葉の形が {path} と食い違っています。\n'
                 f'  ここ  : {d}\n'
-                'どちらかを直して、三か所すべて同じにしてください。')
+                'どちらかを直して、四か所すべて同じにしてください。')
+
+    # iPhone は SwiftUI なので `d` 属性を持たない。`addCurve` は**終点が先**で
+    # 制御点が後ろに来るので、同じ点を SwiftUI の順に並べ直して突き合わせる。
+    want = [LEAF[0][0]]
+    for c in LEAF:
+        want += [c[3], c[1], c[2]]
+    want += [TAIL[0], TAIL[3], TAIL[1], TAIL[2]]
+    for c in CUTS:
+        want += [c[0], c[3], c[1], c[2]]
+    swift = ROOT / 'ios/Cian/Writing.swift'
+    got = [(float(x), float(y)) for x, y in
+           re.findall(r'at\((-?[\d.]+), (-?[\d.]+),', swift.read_text(encoding='utf-8'))]
+    if got != [(float(a), float(b)) for a, b in want]:
+        raise SystemExit(
+            '葉の形が ios/Cian/Writing.swift と食い違っています。\n'
+            f'  ここ  : {want}\n'
+            f'  むこう: {got}\n'
+            '四か所すべて同じにしてください。')
     return d
 
 
 if __name__ == '__main__':
-    print('葉の形は三か所で一致:', agree())
+    print('葉の形は四か所で一致:', agree())
     made = []
     for s in SIZES:
         rgba, _ = render(s)

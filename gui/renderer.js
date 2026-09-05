@@ -1728,6 +1728,11 @@ function clearPalette() {
 /// 詳細ビューのアドレスバー・パンくず・タブ・サイドバーと同じ関数の中にいて、
 /// 三度ほどいて三度とも詳細ビューを壊しかけた。**入口を閉じるのは安全で、
 /// 分解は別の日にできる。**
+// モードの順番はここ一つ。`モード ▸` も T トグルの巡回も `表示 ▸` も
+// この順に従う（クラシック → 詳細一覧 → amber）。**`'cian'` は amber の
+// 内部の名前**で、画面には `amber` としか出ない ── 中の名前まで変えると
+// `body[data-cian]`・`.rows.cian`・`#cianrail`・drive.js の台本まで一度に
+// 動くので、それはプロジェクトを分けるときにまとめてやる。
 const VIEWS = ['classic', 'details', 'cian'];
 function viewName(mode) {
     // 「モード」と呼ぶと決めたので、名前にも付ける ── メニューが
@@ -1735,7 +1740,9 @@ function viewName(mode) {
     return {
         classic: tr("classic mode", 'クラシックモード'),
         details: tr("details mode", '詳細一覧モード'),
-        cian: tr("cian mode", 'cian モード'),
+        cian: tr("amber mode", 'amber モード'),
+        // 引退済み。`VIEWS` に無いので選べないが、名前は残す ── `:view icons`
+        // と打った人に「そんなモードは無い」ではなく、詳細一覧へ案内するため。
         icons: tr("icons mode", 'アイコンモード'),
     }[mode];
 }
@@ -1752,7 +1759,7 @@ let wasAt = '';
 let autoOpened = false;
 
 function setView(mode, remember = true) {
-    if (!VIEWS.includes(mode)) { say(`${mode}? — :view details | classic | cian`, true); return; }
+    if (!VIEWS.includes(mode)) { say(`${mode}? — :view classic | details | amber`, true); return; }
     const was = viewMode;
     viewMode = mode;
     // Icons take the whole window; the other two keep the two panes. A wall
@@ -1880,7 +1887,7 @@ function drawRail() {
     const brand = document.createElement('div');
     brand.className = 'brand';
     brand.append(cianMark(), Object.assign(document.createElement('span'), {
-        className: 'bname', textContent: 'cian',
+        className: 'bname', textContent: 'amber',
     }));
     frag.append(brand);
 
@@ -2812,7 +2819,9 @@ function contextRows() {
     if (!inShell) {
         v.push(group(tr('Mode ▸', 'モード ▸'), () => VIEWS.map((m) => ({
             label: viewName(m) + (m === viewMode ? '  \u25cf' : ''),
-            value: `:view ${m}`,
+            // **打つ綴りであって、中の名前ではない。** `cian` は amber の
+            // 内部の名前なので、右端に出すと「そんなモードは無い」と読める。
+            value: `:view ${m === 'cian' ? 'amber' : m}`,
             run: () => { closeMenu(); setView(m); say(tr(`listing: ${viewName(m)}`, `一覧: ${viewName(m)}`)); },
         }))));
         // Where the notes live, and the two ways things come in and go out.
@@ -3017,15 +3026,24 @@ function contextRows() {
     // The listing's own groups, and the OS group: both act on a file under a
     // cursor, so cian-tui leaves them out of the shell menu.
     if (!inShell) {
-        // cian-tui's ViewMenu order: the three views, dotfiles, then the
-        // switches. Its glyphs too — they are what the corner switcher shows.
+        // cian-tui's ViewMenu, dotfiles, then the switches. Its glyphs too —
+        // they are what the corner switcher shows.
+        //
+        // **並びは一つに揃えた**（2026-09-05）: クラシック → 詳細一覧 → amber。
+        // 最上位の `モード ▸` は `VIEWS` を並べ、ここは同じ順を写す。以前は
+        // ここだけ「詳細一覧 → cian → …ノートの用事… → クラシック」で、
+        // クラシックがノートの行の下に取り残されていた。端末版の
+        // `menu.rs` も同じ順に直してある ── 順番が二つあるのは順番が無いのと
+        // 同じで、どちらが「正しい並び」か言えなくなる。
         v.push(group(tr("View \u25b8", '表示 ▸'), () => [
+            { label: tr("\u25a5 Classic", '▥ クラシック'), value: ':view classic', run: () => { setView('classic'); say(tr('listing: classic', '一覧: クラシック')); } },
             { label: tr("\u25a4 Details", '▤ 詳細一覧'), value: ':view details', run: () => { setView('details'); say(tr('listing: details', '一覧: 詳細一覧')); } },
-            { label: tr("\u25c6 cian (notes)", '◆ cian（ノート）'), value: ':view cian', run: () => { setView('cian'); say(tr('listing: cian', '一覧: cian')); } },
-            { label: tr("\u25c6 Notes folder\u2026", '◆ ノートの保存場所へ…'), value: ':notes', run: cmdNotes },
+            { label: tr("\u25c6 amber (notes)", '◆ amber（ノート）'), value: ':view amber', run: () => { setView('cian'); say(tr('listing: amber', '一覧: amber')); } },
+            // 「◆ ノートの保存場所へ…」はここにあった。台帳 142 が「不要」と
+            // 書いたのに、`ノート ▸` から消したときこちらの写しが残っていた。
+            // 場所を渡り歩く道は `ノート ▸` の「開いてきた場所」1本。
             { label: tr("\u25c6 New note", '◆ 新しいノート'), value: ':newnote', run: cmdNewNote },
             { label: tr("\u25c6 Tags\u2026", '◆ タグで絞る…'), value: ':tag', run: cmdTag },
-            { label: tr("\u25a5 Classic", '▥ クラシック'), value: ':view classic', run: () => { setView('classic'); say(tr('listing: classic', '一覧: クラシック')); } },
             { label: tr("Show / hide dotfiles", 'ドットファイルの表示切替'), value: ':hidden', run: toggleHidden },
             { label: tr("Theme (this pane)", 'テーマ（このペイン）'), value: '', run: cmdPaneTheme },
             { label: tr("Switches\u2026", '各種スイッチ…'), value: 'T', run: () => openMenu(TOGGLES) },
@@ -6056,7 +6074,7 @@ function buildCommands() {
     // lives on two commands reaches only the first — the fuzzy finder its own
     // about-text promised could never open. `:view finder` still works as an
     // argument (cmdView maps it to details).
-    { name: 'view', alias: ['details', 'classic', 'cian'], about: tr("how the listing is laid out \u2014 :view details | classic | cian (notes)", '一覧の見せ方 — :view details | classic | cian（ノート）'), arg: 'details / classic / cian', optional: true, run: cmdView },
+    { name: 'view', alias: ['classic', 'details', 'amber', 'cian'], about: tr("which mode the window is in \u2014 :view classic | details | amber (notes)", 'モード — :view classic | details | amber（ノート）'), arg: 'classic / details / amber', optional: true, run: cmdView },
     { name: 'shell', about: tr("open the shell panel (also Shift+J)", 'シェルパネルを開く（Shift+J でも）'), run: openShell },
     { name: 'remote', alias: ['sftp'], about: tr("open a server in this pane (SFTP)", 'このペインでサーバを開く（SFTP）'), run: cmdSftpPicker },
 
@@ -7199,8 +7217,8 @@ async function armRings(dir) {
         if (wait <= 0 || wait > 20 * 24 * 3600 * 1000) continue;
         rings.timers.push(setTimeout(() => {
             try {
-                const n = new Notification(ring.title || 'cian', {
-                    body: tr('cian — a note wants you', 'cian — ノートが呼んでいます'),
+                const n = new Notification(ring.title || 'amber', {
+                    body: tr('amber — a note wants you', 'amber — ノートが呼んでいます'),
                 });
                 // Pressing it opens the note, which is the only reason to
                 // put a name on a notification.
@@ -8701,16 +8719,23 @@ async function cmdDedup() {
 /// means `:view icons`, which is how fingers actually type it.
 async function cmdView(arg, invokedAs) {
     const mode = (arg || invokedAs || '').trim();
-    // `grid` used to mean the icon view; it is not offered any more, so it
-    // lands on the details view — the nearest thing to what was asked for,
-    // rather than a name that now means nothing.
-    const map = { grid: 'details', icons: 'details', finder: 'details' };
+    // `grid` と `icons` はアイコンモードのこと。**引退させたのは彼の判断**
+    // （2026-09-05）── クラシックが基本、Explorer/Finder ふうが要るなら詳細
+    // 一覧で足りる。アイコンモードは「くどい」うえ、Windows で OS のアイコンを
+    // 出すのに手間が掛かっていたので、そこにコストを掛けないと決めた。
+    // **描画の分岐はまだ動く**（試すと正しく描ける）が、戻すのは彼の判断。
+    // 打った人を「そんなモードは無い」で突き放さず、詳細一覧へ案内する。
+    //
+    // `amber` が正しい綴り。`cian` はモードの内部の名前で、打ち慣れた人と
+    // 古い台本のために受け続ける ── 名前を変えたからといって、指が憶えた
+    // 綴りが動かなくなる理由は無い。
+    const map = { grid: 'details', icons: 'details', finder: 'details', amber: 'cian' };
     if (!mode || mode === 'view') {
         setView(VIEWS[(VIEWS.indexOf(viewMode) + 1) % VIEWS.length]);
     } else {
         setView(map[mode] || mode);
     }
-    say(tr(`view: ${viewMode}`, `表示: ${viewMode}`));
+    say(tr(`mode: ${viewName(viewMode)}`, `モード: ${viewName(viewMode)}`));
 }
 
 async function redo() {

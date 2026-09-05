@@ -27,7 +27,7 @@ enum Cian {
             encoding: .utf8
         ) ?? "{}"
         guard let out = method.withCString({ m in body.withCString { p in cian_call(m, p) } }) else {
-            throw Failure.engine("cian が答えませんでした")
+            throw Failure.engine("amber が答えませんでした")
         }
         defer { cian_free(out) }
         let text = String(cString: out)
