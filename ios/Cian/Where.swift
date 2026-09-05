@@ -62,9 +62,50 @@ struct Where: View {
                 } header: {
                     Text("場所")
                 } footer: {
-                    // The one sentence that makes the whole thing make sense,
-                    // and the reason there is no Google Drive code in here.
-                    Text("iCloud Drive・Google Drive・Dropbox のフォルダを選べます。iPhone に そのアプリが入っていないものは灰色で選べません。Mac の cian に同じフォルダを指定すれば、両方から同じノートを触れます。")
+                    // **The thing that is actually hard.** 2026-09-05:
+                    // 「どこのディレクトリなのかが単純にわからないんだ。
+                    // 探せなくて困っている」. The providers are all in the
+                    // picker and all several taps down inside it, and none of
+                    // them is where a person would guess. So: where to tap,
+                    // in order, and what to do when one is not listed. This
+                    // is a thing cian cannot do for him — the sidebar is the
+                    // Files app's own setting — so the least it can do is say
+                    // exactly where it is.
+                    Text("選ぶ画面が開いたら、左上の「ブラウズ」から辿ります。\n\n・iCloud Drive → そのまま一覧にあります\n・Google Drive / Dropbox → 「場所」の下に並びます\n\n出てこないときは、その並びの下の「…」→「サイドバーを編集」で、使いたいものをオンにしてください（「ファイル」アプリ側の設定なので、cian からは変えられません）。\n\nMac の cian に同じフォルダを指定すれば、両方から同じノートを触れます。")
+                }
+
+                // Once found, never looked for again.
+                if !store.places.isEmpty {
+                    Section {
+                        ForEach(store.places) { place in
+                            Button {
+                                store.revisit(place)
+                            } label: {
+                                HStack {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(place.name)
+                                        Text(place.trail)
+                                            .font(.caption2)
+                                            .foregroundStyle(.secondary)
+                                            .lineLimit(1)
+                                    }
+                                    Spacer()
+                                    if place.name == store.rootName {
+                                        Image(systemName: "checkmark").foregroundStyle(.tint)
+                                    }
+                                }
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .swipeActions {
+                                Button("忘れる", role: .destructive) { store.forget(place) }
+                            }
+                        }
+                    } header: {
+                        Text("前に選んだ場所")
+                    } footer: {
+                        Text("一度見つければ、次からはここから1回で戻れます。")
+                    }
                 }
 
                 Section {

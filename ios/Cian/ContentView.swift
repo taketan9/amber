@@ -16,6 +16,16 @@ struct ContentView: View {
     @State private var booking = false
     /// What the one file picker is being asked for this time.
     @State private var fetching: Fetching?
+    /// **The same thing, kept for the answer.**
+    ///
+    /// Dismissing the picker sets `isPresented` to false, whose setter
+    /// clears `fetching` — and *then* the completion runs and reads it, by
+    /// which time it is `nil`. So the picker opened, a folder was chosen, and
+    /// nothing happened: the answer fell into the `nil` case. This is the
+    /// third time a SwiftUI presentation has cleared the thing its own
+    /// callback needed, and the second time I called it verified after
+    /// watching only the half that opens.
+    @State private var asked: Fetching?
     enum Fetching { case folder, notes }
     @State private var showing = false
     /// Which folder row the finger is over, and whether it is over `..`.
@@ -118,8 +128,8 @@ struct ContentView: View {
             // The sheet closes itself first; these open a beat later, from
             // here, where there is no presentation in the way.
             Where(store: store,
-                  choose: { DispatchQueue.main.async { fetching = .folder } },
-                  bringIn: { DispatchQueue.main.async { fetching = .notes } })
+                  choose: { DispatchQueue.main.async { asked = .folder; fetching = .folder } },
+                  bringIn: { DispatchQueue.main.async { asked = .notes; fetching = .notes } })
         }
         .sheet(item: $shelving) { note in Shelving(store: store, note: note) }
         .sheet(item: $colouring) { f in Colouring(store: store, folder: f) }
@@ -188,12 +198,12 @@ struct ContentView: View {
         .fileImporter(
             isPresented: Binding(get: { fetching != nil },
                                  set: { if !$0 { fetching = nil } }),
-            allowedContentTypes: fetching == .folder
+            allowedContentTypes: asked == .folder
                 ? [.folder]
                 : [UTType(filenameExtension: "md") ?? .plainText, .plainText],
-            allowsMultipleSelection: fetching == .notes
+            allowsMultipleSelection: asked == .notes
         ) { r in
-            switch (fetching, r) {
+            switch (asked, r) {
             case (.folder, .success(let urls)):
                 if let url = urls.first { store.choose(url) }
             case (.notes, .success(let urls)):
@@ -203,7 +213,7 @@ struct ContentView: View {
             case (nil, _):
                 break
             }
-            fetching = nil
+            asked = nil
         }
         // **Two `.alert` on one view is one alert.** SwiftUI keeps the last
         // and the other one shows without its buttons doing anything — which
