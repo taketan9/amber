@@ -60,8 +60,19 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
 
+      # **Windows は CRT ごと静的に取り込む。**
+      #
+      # 既定の MSVC ビルドは `VCRUNTIME140.dll` を要る ── 素の Windows には
+      # 入っていない（Visual C++ の再頒布可能パッケージが要る）。配布先は
+      # ネットに出られない会社の端末で、**落として置くだけ**という運びなので、
+      # 隣に何かが要る一枚は配れない。
+      #
+      # 走らせるだけなら runner の上では通ってしまう（runner には redist が
+      # 入っている）── 下の DLL の検査だけが、これを捕まえた。
       - name: 組む
         run: cargo build --release -p amber-server
+        env:
+          RUSTFLAGS: ${{ runner.os == 'Windows' && '-C target-feature=+crt-static' || '' }}
 
       # **一往復して、本当に話すか見る。** 組めたことと動くことは別で、
       # 動かないほうは配ったあとにしか出ない。`version` は何も要らない
@@ -94,7 +105,9 @@ jobs:
           $deps = & $dumpbin.FullName /dependents "${{ matrix.from }}" |
             Select-String -Pattern '\.dll$' | ForEach-Object { $_.ToString().Trim() }
           Write-Host ($deps -join "`n")
-          $bad = $deps | Where-Object { $_ -match 'libgcc|libwinpthread|libstdc\+\+|vcruntime|msvcp' }
+          # `api-ms-win-crt-*` は Windows 10 以降に元からある API セット。
+          # 連れて歩けないのは、再頒布可能パッケージが要るものだけ。
+          $bad = $deps | Where-Object { $_ -match 'libgcc|libwinpthread|libstdc\+\+|vcruntime|msvcp|msvcr\d' }
           if ($bad) { throw "同梱の要る DLL を連れています: $bad" }
 
       - name: 名前を付けて残す
