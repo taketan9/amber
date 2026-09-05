@@ -73,35 +73,41 @@ fn under(root: &Path, rest: &str) -> Option<PathBuf> {
     (at != root).then_some(at)
 }
 
-/// `root` の下をぜんぶ、`root` の名前を頭に付けて zip にする。
+/// `sources` をぜんぶ、それぞれの名前を頭に付けて zip にする。
 ///
-/// 頭を付けるのは、戻すときに「ノートの置き場所そのもの」だと分かるため
-/// （`extract` の `strip` がこれを外す）。付けないと、展開した人の作業
-/// ディレクトリにノートが散らばる。
-pub fn create(root: &Path, dest: &Path, ctl: &mut crate::Ctl) -> Result<usize> {
-    let head = root
-        .file_name()
-        .map(|n| n.to_string_lossy().to_string())
-        .unwrap_or_default();
-    let files = walk(root);
+/// 頭を付けるのは、戻すときに「何の zip か」が名前から分かるため
+/// （`extract` の `strip` が、全部が一つの山の下にあるときだけ外す）。
+/// 付けないと、展開した人の作業ディレクトリにノートが散らばる。
+pub fn create(sources: &[PathBuf], dest: &Path, ctl: &mut crate::Ctl) -> Result<usize> {
+    let mut jobs: Vec<(PathBuf, String)> = Vec::new();
+    for src in sources {
+        let head = src
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default();
+        if src.is_dir() {
+            for (at, rel) in walk(src) {
+                let rel = rel.to_string_lossy().replace('\\', "/");
+                jobs.push((at, if head.is_empty() { rel } else { format!("{head}/{rel}") }));
+            }
+        } else if src.is_file() {
+            jobs.push((src.clone(), head));
+        }
+    }
     let mut w = zip::ZipWriter::new(std::fs::File::create(dest)?);
     let opts: zip::write::FileOptions<()> =
         zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
     let mut done = 0usize;
-    for (at, rel) in &files {
+    for (at, name) in &jobs {
         if ctl.stopped() {
             break;
         }
-        let name = match head.is_empty() {
-            true => rel.to_string_lossy().replace('\\', "/"),
-            false => format!("{head}/{}", rel.to_string_lossy().replace('\\', "/")),
-        };
-        w.start_file(name, opts)?;
+        w.start_file(name.clone(), opts)?;
         let mut body = Vec::new();
         std::fs::File::open(at)?.read_to_end(&mut body)?;
         w.write_all(&body)?;
         done += 1;
-        ctl.step(done, files.len());
+        ctl.step(done, jobs.len());
     }
     w.finish()?;
     Ok(done)

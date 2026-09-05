@@ -2027,3 +2027,110 @@ fn last_day(year: i32, month: u32) -> u32 {
         .map(|d| chrono::Datelike::day(&d))
         .unwrap_or(28)
 }
+
+/// A note the search matched, and the first line worth showing for it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Hit {
+    pub path: std::path::PathBuf,
+    /// 1-based, as it is shown. 0 when nothing on one line matched.
+    pub line: usize,
+    pub text: String,
+}
+
+/// ノートを本文ごと探す。**一本につき一行**。
+///
+/// 前は cian の `search`（総当たりの grep）を借りていた。借りるのをやめた
+/// 理由は二つ。**ひとつ、あちらは `cloud` を引きずる** ── ノートのアプリが
+/// OneDrive のプレースホルダ判定を積む理由が無い。**ふたつ、探し方が違った** ──
+/// あちらは打った文字列をそのまま含むかを見る。こちらは [`hits`] を通すので、
+/// 窓の `/` 絞り込みと同じ **AND と OR**（`OR` / `or` / `|` / `｜`）が効く。
+/// 同じ言葉で探して同じものが出る、が二つの前端の間で成り立つ。
+///
+/// 探す先は題・タグ・本文。一行に全部の語が揃っている必要は無いので、
+/// 見せる行は「どれか一語を含む最初の行」── 揃っていないから出せない、より
+/// 一行でも見せたほうが「なぜ当たったか」に近い。
+pub fn find(
+    dir: &std::path::Path,
+    query: &str,
+    limit: usize,
+    limits: crate::survey::Limits,
+    stop: &std::sync::atomic::AtomicBool,
+) -> Vec<Hit> {
+    if query.trim().is_empty() {
+        return Vec::new();
+    }
+    let words: Vec<String> = terms(query).into_iter().flatten().collect();
+    let (found, _) = list(dir, limits, stop);
+    let mut out = Vec::new();
+    for f in found {
+        if out.len() >= limit || stop.load(std::sync::atomic::Ordering::Relaxed) {
+            break;
+        }
+        let Ok(file) = crate::text::read(&f.note.path) else { continue };
+        let body = file.lines.join("\n");
+        let hay = format!("{}\n{}\n{}", f.note.title, f.note.tags.join(" "), body);
+        if !hits(&hay, query) {
+            continue;
+        }
+        let (line, text) = file
+            .lines
+            .iter()
+            .enumerate()
+            .find(|(_, l)| {
+                let low = l.to_lowercase();
+                words.iter().any(|w| low.contains(&w.to_lowercase()))
+            })
+            .map(|(i, l)| (i + 1, l.trim().to_string()))
+            .unwrap_or((0, String::new()));
+        out.push(Hit { path: f.note.path.clone(), line, text });
+    }
+    out
+}
+
+#[cfg(test)]
+mod find_tests {
+    use super::*;
+
+    fn write(dir: &std::path::Path, name: &str, body: &str) {
+        std::fs::write(dir.join(name), body).unwrap();
+    }
+
+    #[test]
+    fn 本文とタグと題から探す() {
+        let d = tempfile::tempdir().unwrap();
+        write(d.path(), "a.md", "---\ntitle: 段取り\ntags: [仕事]\n---\n明日は会議。\n");
+        write(d.path(), "b.md", "# 買い物\n牛乳とパン\n");
+        let stop = std::sync::atomic::AtomicBool::new(false);
+        let lim = crate::survey::Limits::default();
+
+        let r = find(d.path(), "会議", 20, lim, &stop);
+        assert_eq!(r.len(), 1);
+        assert_eq!(r[0].text, "明日は会議。");
+        assert_eq!(r[0].line, 5, "front matter を数えた行番号であること");
+
+        // 題からも、タグからも当たる。
+        assert_eq!(find(d.path(), "段取り", 20, lim, &stop).len(), 1);
+        assert_eq!(find(d.path(), "仕事", 20, lim, &stop).len(), 1);
+    }
+
+    #[test]
+    fn and_と_or_が効く() {
+        let d = tempfile::tempdir().unwrap();
+        write(d.path(), "a.md", "# 一\n牛乳とパン\n");
+        write(d.path(), "b.md", "# 二\n牛乳だけ\n");
+        let stop = std::sync::atomic::AtomicBool::new(false);
+        let lim = crate::survey::Limits::default();
+        // AND ── 両方ある一本だけ。**借りていた grep はこれができなかった。**
+        assert_eq!(find(d.path(), "牛乳 パン", 20, lim, &stop).len(), 1);
+        // OR ── どちらかで二本とも。
+        assert_eq!(find(d.path(), "パン OR だけ", 20, lim, &stop).len(), 2);
+    }
+
+    #[test]
+    fn 空の問いでは何も返さない() {
+        let d = tempfile::tempdir().unwrap();
+        write(d.path(), "a.md", "# 一\n本文\n");
+        let stop = std::sync::atomic::AtomicBool::new(false);
+        assert!(find(d.path(), "   ", 20, crate::survey::Limits::default(), &stop).is_empty());
+    }
+}

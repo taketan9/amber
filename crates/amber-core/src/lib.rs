@@ -11,10 +11,19 @@ pub mod markdown;
 pub mod note;
 pub mod notebook;
 pub mod stamp;
+pub mod text;
 pub mod survey;
 pub mod zipbox;
 
 use std::sync::atomic::{AtomicBool, Ordering};
+
+/// この版の下に机があるか。**iPhone には無い。**
+///
+/// ゴミ箱がそう。`trash` は Windows と macOS と Linux 向けで、電話には
+/// `NSFileManager trashItemAtURL` が無い。消すなら消すと言うのが答えで、
+/// ゴミ箱へ入れたふりをするのはいちばん悪い。cian-core にも同じ名前の
+/// ものがあるが、あちらは向こうの話 ── **amber は cian を知らない。**
+pub const DESKTOP: bool = cfg!(feature = "desktop");
 
 /// 途中でやめるための旗と、進んだぶんを伝える口。
 ///

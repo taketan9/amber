@@ -15,7 +15,9 @@ crate-type = ["staticlib", "rlib"]
 [dependencies]
 # **No desktop features.** There is no trash on a phone, and a core that
 # always wants one cannot be built for one.
-cian-core = { path = "../cian-core", default-features = false }
+# **cian-core はもう要らない。** 2026-09-05 に切った ── それまで iPhone は
+# git も svn も SharePoint も差分もアーカイバも積んでいた（18,128 行）。
+amber-core = { path = "../amber-core" }
 anyhow = { workspace = true }
 serde_json = { workspace = true }
 # Only for the two date fields the reminder methods hand across.

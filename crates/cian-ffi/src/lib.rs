@@ -12,7 +12,7 @@
 //!
 //! **The judgement is not here.** What a title is, what an excerpt leaves
 //! out, what a note is called when it is made — all of that is
-//! `cian_core::note`, which the window uses too. This crate is the doorway:
+//! `amber_core::note`, which the window uses too. This crate is the doorway:
 //! strings in, strings out, and nothing decided on the way past. That is the
 //! whole reason the notes half of cian was written in the core rather than in
 //! the renderer.
@@ -102,7 +102,7 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
             // Whether this build has a desktop under it. The phone's does
             // not, and `delete` to the trash refuses there rather than
             // deleting outright.
-            "desktop": cian_core::DESKTOP,
+            "desktop": amber_core::DESKTOP,
         })),
 
         // Every note under a directory. The same walk the window asks for.
@@ -111,15 +111,15 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
             if !dir.is_dir() {
                 anyhow::bail!("{} を開けません", dir.display());
             }
-            let limits = cian_core::survey::Limits {
+            let limits = amber_core::survey::Limits {
                 depth: p["depth"].as_u64().unwrap_or(6) as usize,
                 rows: 4000,
                 hidden: false,
                 ..Default::default()
             };
             let stop = std::sync::atomic::AtomicBool::new(false);
-            let (found, walk) = cian_core::note::list(&dir, limits, &stop);
-            let book = cian_core::notebook::read(&dir);
+            let (found, walk) = amber_core::note::list(&dir, limits, &stop);
+            let book = amber_core::notebook::read(&dir);
             // The favourite shelves: the ones notes are standing on, plus the
             // ones that were made and are still empty. Without the second
             // half a shelf vanishes the moment its last note leaves it, which
@@ -158,7 +158,7 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
                         // that `#仕事` finds the same notes it finds in the
                         // window. Sent rather than derived on the far side:
                         // deriving it there is how the two answers drift.
-                        "search": cian_core::note::haystack(n),
+                        "search": amber_core::note::haystack(n),
                     })
                 })
                 .collect();
@@ -197,8 +197,8 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
         // not a question the caller should have to know how to ask.
         "read" => {
             let path = std::path::PathBuf::from(arg(p, "path"));
-            let f = cian_core::grepedit::read_text(&path)?;
-            let stamp = cian_core::stamp::of(&path);
+            let f = amber_core::text::read(&path)?;
+            let stamp = amber_core::stamp::of(&path);
             Ok(serde_json::json!({
                 "text": f.lines.join("\n"),
                 "encoding": format!("{:?}", f.encoding),
@@ -221,42 +221,33 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
             let force = p["force"].as_bool().unwrap_or(false);
             if !force {
                 if let Some(expect) = p.get("stamp").and_then(json_stamp) {
-                    if cian_core::stamp::changed(&path, &expect) {
+                    if amber_core::stamp::changed(&path, &expect) {
                         return Ok(serde_json::json!({
                             "conflict": true,
-                            "why": cian_core::stamp::describe(&path, &expect),
+                            "why": amber_core::stamp::describe(&path, &expect),
                         }));
                     }
                 }
             }
-            let mut f = match cian_core::grepedit::read_text(&path) {
-                Ok(f) => f,
-                // A note that is not there yet is a new note, not a failure:
-                // the phone writes one it has only just made.
-                Err(_) => cian_core::grepedit::TextFile {
-                    lines: Vec::new(),
-                    encoding: cian_core::viewer::TextEncoding::Utf8,
-                    bom: false,
-                    eol: cian_core::viewer::Eol::Lf,
-                    trailing_eol: true,
-                },
-            };
+            // A note that is not there yet is a new note, not a failure:
+            // the phone writes one it has only just made.
+            let mut f = amber_core::text::read(&path).unwrap_or_default();
             f.lines = text.split('\n').map(|l| l.to_string()).collect();
-            cian_core::grepedit::write_text(&path, &f)?;
+            amber_core::text::write(&path, &f)?;
             Ok(serde_json::json!({
                 "ok": true,
-                "stamp": cian_core::stamp::of(&path).as_ref().map(stamp_json),
+                "stamp": amber_core::stamp::of(&path).as_ref().map(stamp_json),
             }))
         }
 
         // A new note, named and shaped by the same rules the window uses.
         "new" => {
             let dir = std::path::PathBuf::from(arg(p, "dir"));
-            let at = cian_core::note::create(
+            let at = amber_core::note::create(
                 &dir,
                 &arg(p, "title"),
-                &cian_core::note::today(),
-                &cian_core::note::now_stamp(),
+                &amber_core::note::today(),
+                &amber_core::note::now_stamp(),
             )?;
             Ok(serde_json::json!({
                 "path": at.display().to_string(),
@@ -265,7 +256,7 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
         }
 
         // A note, as things to draw. The reading half of the phone: what a
-        // heading *is* is decided in `cian_core::note`, and what a heading
+        // heading *is* is decided in `amber_core::note`, and what a heading
         // *looks like* is decided on the phone. Splitting it the other way
         // would put a Markdown parser somewhere no test can reach.
         "blocks" => {
@@ -273,20 +264,20 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
                 arg(p, "text")
             } else {
                 let path = std::path::PathBuf::from(arg(p, "path"));
-                cian_core::grepedit::read_text(&path)?.lines.join("\n")
+                amber_core::text::read(&path)?.lines.join("\n")
             };
-            use cian_core::note::Block;
+            use amber_core::note::Block;
             // The coloured pieces of a line, worked out here so the window
             // and the phone cannot disagree about what a note says.
             fn runs(text: &str) -> serde_json::Value {
                 serde_json::Value::Array(
-                    cian_core::note::spans(text)
+                    amber_core::note::spans(text)
                         .into_iter()
                         .map(|s| serde_json::json!({ "text": s.text, "color": s.color }))
                         .collect(),
                 )
             }
-            let out: Vec<serde_json::Value> = cian_core::note::blocks(&text)
+            let out: Vec<serde_json::Value> = amber_core::note::blocks(&text)
                 .into_iter()
                 .map(|b| match b {
                     Block::Heading { level, text } => serde_json::json!({
@@ -330,13 +321,13 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
             let out = match shelf {
                 // `star: true` rather than `star:` — a field with nothing
                 // after it reads as yes to the next thing that looks.
-                Some("") => cian_core::note::set_field(&text, "star", Some("true")),
-                Some(sh) => cian_core::note::set_field(&text, "star", Some(sh)),
-                None => cian_core::note::set_field(&text, "star", None),
+                Some("") => amber_core::note::set_field(&text, "star", Some("true")),
+                Some(sh) => amber_core::note::set_field(&text, "star", Some(sh)),
+                None => amber_core::note::set_field(&text, "star", None),
             };
             // The one written before favourites had a name. Left behind, it
             // would keep the note a favourite after it was taken off one.
-            let out = cian_core::note::set_field(&out, "pinned", None);
+            let out = amber_core::note::set_field(&out, "pinned", None);
             Ok(serde_json::json!({ "text": out }))
         }
 
@@ -346,11 +337,11 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
             let root = std::path::PathBuf::from(arg(p, "path"));
             let name = arg(p, "name");
             if p["drop"].as_bool().unwrap_or(false) {
-                cian_core::notebook::drop_star(&root, &name)?;
+                amber_core::notebook::drop_star(&root, &name)?;
             } else {
-                cian_core::notebook::add_star(&root, &name)?;
+                amber_core::notebook::add_star(&root, &name)?;
             }
-            Ok(serde_json::json!({ "stars": cian_core::notebook::read(&root).stars }))
+            Ok(serde_json::json!({ "stars": amber_core::notebook::read(&root).stars }))
         }
 
         // What colour a folder is. His to choose — cian offers a palette and
@@ -358,8 +349,8 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
         "color" => {
             let root = std::path::PathBuf::from(arg(p, "path"));
             let folder = arg(p, "folder");
-            cian_core::notebook::set_color(&root, &folder, p["color"].as_str())?;
-            Ok(serde_json::json!({ "colors": cian_core::notebook::read(&root).colors }))
+            amber_core::notebook::set_color(&root, &folder, p["color"].as_str())?;
+            Ok(serde_json::json!({ "colors": amber_core::notebook::read(&root).colors }))
         }
 
         // Wrap a piece of text in a colour, the way cian writes it. Here
@@ -367,7 +358,7 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
         // places that write it are two notations one edit apart.
         "paint" => {
             Ok(serde_json::json!({
-                "text": cian_core::note::paint(&arg(p, "text"), &arg(p, "color")),
+                "text": amber_core::note::paint(&arg(p, "text"), &arg(p, "color")),
             }))
         }
         // Everything, moved to a new home — `notebook::migrate`, the
@@ -376,7 +367,7 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
         "migrate" => {
             let from = std::path::PathBuf::from(arg(p, "from"));
             let to = std::path::PathBuf::from(arg(p, "to"));
-            Ok(serde_json::json!({ "moved": cian_core::notebook::migrate(&from, &to)? }))
+            Ok(serde_json::json!({ "moved": amber_core::notebook::migrate(&from, &to)? }))
         }
 
         // A backup, put back — `notebook::restore`, the same one the
@@ -384,7 +375,7 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
         "restore" => {
             let zip = std::path::PathBuf::from(arg(p, "zip"));
             let to = std::path::PathBuf::from(arg(p, "to"));
-            let (put, kept) = cian_core::notebook::restore(&zip, &to)?;
+            let (put, kept) = amber_core::notebook::restore(&zip, &to)?;
             Ok(serde_json::json!({ "put": put, "kept": kept }))
         }
 
@@ -401,9 +392,9 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
             };
             let from = inside(&from)?;
             if p["drop"].as_bool().unwrap_or(false) {
-                let n = cian_core::note::list(
+                let n = amber_core::note::list(
                     &from,
-                    cian_core::survey::Limits { depth: 9, rows: 9999, hidden: false, ..Default::default() },
+                    amber_core::survey::Limits { depth: 9, rows: 9999, hidden: false, ..Default::default() },
                     &std::sync::atomic::AtomicBool::new(false),
                 )
                 .0
@@ -433,7 +424,7 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
         // the query is the decision, and it belongs here; running it over a
         // list that is already in the phone's memory does not.
         "terms" => {
-            Ok(serde_json::json!({ "groups": cian_core::note::terms(&arg(p, "q")) }))
+            Ok(serde_json::json!({ "groups": amber_core::note::terms(&arg(p, "q")) }))
         }
 
         // Split a note into how it describes itself and what it says.
@@ -447,7 +438,7 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
         "split" => {
             let text = arg(p, "text");
             let lines: Vec<String> = text.lines().map(str::to_string).collect();
-            let n = cian_core::note::front(&lines).lines;
+            let n = amber_core::note::front(&lines).lines;
             // Rebuilt from the lines rather than sliced by bytes: the note
             // may end without a newline, and the head must keep its own.
             let head = if n == 0 {
@@ -472,7 +463,7 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
             let text = arg(p, "text");
             let line = p["line"].as_u64().unwrap_or(0) as usize;
             let done = p["done"].as_bool().unwrap_or(false);
-            Ok(serde_json::json!({ "text": cian_core::note::set_check(&text, line, done) }))
+            Ok(serde_json::json!({ "text": amber_core::note::set_check(&text, line, done) }))
         }
 
         // Look inside the notes, not only at what the listing already knows.
@@ -484,39 +475,28 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
         // `cian_core::search`, the same one `:grep` uses in the window.
         "find" => {
             let root = std::path::PathBuf::from(arg(p, "path"));
-            let needle = arg(p, "needle");
-            if needle.trim().is_empty() {
-                return Ok(serde_json::json!({ "hits": [] }));
-            }
-            let q = cian_core::search::Query::content(needle);
-            let cancel = std::sync::atomic::AtomicBool::new(false);
             let cap = p["limit"].as_u64().unwrap_or(200) as usize;
-            let mut hits: Vec<serde_json::Value> = Vec::new();
-            // One line per note, the first that matched: a phone shows a row
-            // per note, and twenty rows of the same note is a worse answer
-            // than one.
-            let mut seen: std::collections::HashSet<std::path::PathBuf> =
-                std::collections::HashSet::new();
-            cian_core::search::search(&root, &q, &cancel, &mut |h| {
-                if hits.len() >= cap || h.is_dir || !seen.insert(h.path.clone()) {
-                    return;
-                }
-                let md = h
-                    .path
-                    .extension()
-                    .and_then(|e| e.to_str())
-                    .map(|e| e.eq_ignore_ascii_case("md") || e.eq_ignore_ascii_case("markdown"))
-                    .unwrap_or(false);
-                if !md {
-                    return;
-                }
-                let (line, text) = h.line.unwrap_or((0, String::new()));
-                hits.push(serde_json::json!({
+            let cancel = std::sync::atomic::AtomicBool::new(false);
+            // 判断は core に。**借りていた cian の grep をやめた** ── あちらは
+            // 打った文字列をそのまま含むかを見るだけで、窓の `/` 絞り込みの
+            // AND / OR が効かなかった。同じ言葉で探して同じものが出る、が
+            // 二つの前端の間で成り立つようになる。一本につき一行なのは前と同じ。
+            let hits: Vec<serde_json::Value> = amber_core::note::find(
+                &root,
+                &arg(p, "needle"),
+                cap,
+                amber_core::survey::Limits::default(),
+                &cancel,
+            )
+            .into_iter()
+            .map(|h| {
+                serde_json::json!({
                     "path": h.path.display().to_string(),
-                    "line": line,
-                    "text": text.trim(),
-                }));
-            });
+                    "line": h.line,
+                    "text": h.text,
+                })
+            })
+            .collect();
             Ok(serde_json::json!({ "hits": hits }))
         }
 
@@ -531,7 +511,7 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
                 .map(|a| a.iter().filter_map(|t| t.as_str().map(String::from)).collect())
                 .unwrap_or_default();
             Ok(serde_json::json!({
-                "text": cian_core::note::set_tags(&arg(p, "text"), &tags),
+                "text": amber_core::note::set_tags(&arg(p, "text"), &tags),
             }))
         }
 
@@ -540,7 +520,7 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
         "setfield" => {
             let value = p["value"].as_str();
             Ok(serde_json::json!({
-                "text": cian_core::note::set_field(&arg(p, "text"), &arg(p, "key"), value),
+                "text": amber_core::note::set_field(&arg(p, "text"), &arg(p, "key"), value),
             }))
         }
 
@@ -548,7 +528,7 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
         "move" => {
             let note = std::path::PathBuf::from(arg(p, "path"));
             let dir = std::path::PathBuf::from(arg(p, "dir"));
-            let at = cian_core::note::move_to(&note, &dir)?;
+            let at = amber_core::note::move_to(&note, &dir)?;
             Ok(serde_json::json!({ "path": at.display().to_string() }))
         }
 
@@ -597,11 +577,11 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
                         .unwrap_or_else(|| "note".into());
                 }
                 "tag" => {
-                    let limits = cian_core::survey::Limits {
+                    let limits = amber_core::survey::Limits {
                         depth: 6, rows: 4000, hidden: false, ..Default::default()
                     };
                     let stop = std::sync::atomic::AtomicBool::new(false);
-                    let (found, _) = cian_core::note::list(&root, limits, &stop);
+                    let (found, _) = amber_core::note::list(&root, limits, &stop);
                     for f in &found {
                         if f.note.tags.iter().any(|t| t == &what) {
                             sources.push(f.note.path.clone());
@@ -625,18 +605,15 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
             let dir = std::path::PathBuf::from(arg(p, "into"));
             let dir = if dir.as_os_str().is_empty() { std::env::temp_dir() } else { dir };
             std::fs::create_dir_all(&dir)?;
-            let at = dir.join(format!("{name}-{}.zip", cian_core::note::today()));
+            let at = dir.join(format!("{name}-{}.zip", amber_core::note::today()));
             let _ = std::fs::remove_file(&at);
             let cancel = std::sync::atomic::AtomicBool::new(false);
-            let mut nothing = |_: &cian_core::progress::Progress| {};
-            let mut ctl = cian_core::progress::Ctl { cancel: &cancel, on_progress: &mut nothing };
-            let report = cian_core::archive::create_zip(&sources, &at, None, &mut ctl);
-            if !report.errors.is_empty() {
-                anyhow::bail!("{}", report.errors.join(" / "));
-            }
+            let mut nothing = |_: usize, _: usize| {};
+            let mut ctl = amber_core::Ctl { cancel: &cancel, on_progress: &mut nothing };
+            let files = amber_core::zipbox::create(&sources, &at, &mut ctl)?;
             Ok(serde_json::json!({
                 "path": at.display().to_string(),
-                "files": report.ok,
+                "files": files,
             }))
         }
 
@@ -645,14 +622,14 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
             let text = if p["text"].is_string() {
                 arg(p, "text")
             } else {
-                cian_core::grepedit::read_text(&std::path::PathBuf::from(arg(p, "path")))?
+                amber_core::text::read(&std::path::PathBuf::from(arg(p, "path")))?
                     .lines
                     .join("\n")
             };
-            let r = cian_core::note::remind(&text);
+            let r = amber_core::note::remind(&text);
             let today = chrono_today();
             let due: Vec<String> = match r.every {
-                Some((every, _, _)) => cian_core::note::due_since(every, r.last, today)
+                Some((every, _, _)) => amber_core::note::due_since(every, r.last, today)
                     .iter()
                     .map(|d| d.to_string())
                     .collect(),
@@ -662,14 +639,14 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
                 "once": r.once.map(|t| t.format("%Y-%m-%d %H:%M").to_string()),
                 "every": r.every.map(|(e, h, m)| serde_json::json!({
                     "kind": match e {
-                        cian_core::note::Every::Daily => "daily",
-                        cian_core::note::Every::Weekly(_) => "weekly",
-                        cian_core::note::Every::Monthly(_) => "monthly",
+                        amber_core::note::Every::Daily => "daily",
+                        amber_core::note::Every::Weekly(_) => "weekly",
+                        amber_core::note::Every::Monthly(_) => "monthly",
                     },
                     "n": match e {
-                        cian_core::note::Every::Daily => 0,
-                        cian_core::note::Every::Weekly(w) => w,
-                        cian_core::note::Every::Monthly(d) => d,
+                        amber_core::note::Every::Daily => 0,
+                        amber_core::note::Every::Weekly(w) => w,
+                        amber_core::note::Every::Monthly(d) => d,
                     },
                     "hour": h,
                     "minute": m,
@@ -688,27 +665,27 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
             let Some(day) = chrono::NaiveDate::parse_from_str(&on, "%Y-%m-%d").ok() else {
                 anyhow::bail!("日付が読めません: {on}")
             };
-            let made = cian_core::note::carry_out(&path, day)?;
+            let made = amber_core::note::carry_out(&path, day)?;
             let text = std::fs::read_to_string(&path)?;
-            std::fs::write(&path, cian_core::note::set_field(&text, "last", Some(&on)))?;
+            std::fs::write(&path, amber_core::note::set_field(&text, "last", Some(&on)))?;
             Ok(serde_json::json!({ "path": made.display().to_string() }))
         }
 
         // A photo, put beside the note. The phone sends it base64 because
         // that is what fits down a C string; everything about *where it goes*
-        // is `cian_core::note::attach`, the same call the window makes when a
+        // is `amber_core::note::attach`, the same call the window makes when a
         // screenshot is pasted into the editor.
         "image" => {
             let note = std::path::PathBuf::from(arg(p, "note"));
             let bytes = b64(&arg(p, "b64")).ok_or_else(|| anyhow::anyhow!("画像を読めません"))?;
-            let link = cian_core::note::attach(&note, &bytes, &arg(p, "ext"))?;
+            let link = amber_core::note::attach(&note, &bytes, &arg(p, "ext"))?;
             Ok(serde_json::json!({ "link": link, "bytes": bytes.len() }))
         }
 
         // Remove a note.
         //
         // Outright, because there is no trash on a phone to move it to —
-        // `cian_core::DESKTOP` is false here and `DeleteMode::Trash` refuses
+        // `amber_core::DESKTOP` is false here and `DeleteMode::Trash` refuses
         // rather than pretending. The caller is expected to have asked first;
         // this is the part that cannot be taken back.
         "delete" => {
@@ -762,14 +739,14 @@ fn b64(text: &str) -> Option<Vec<u8>> {
 /// It used to go out as `{len, modified: <seconds>}`, which read well and was
 /// wrong: a time rounded to the second no longer equals the file it came
 /// from, so **every** save came back as a conflict with nobody. The test
-/// below caught it. `cian_core::stamp::token` keeps it exact, and the phone
+/// below caught it. `amber_core::stamp::token` keeps it exact, and the phone
 /// never has to know what is inside.
-fn stamp_json(s: &cian_core::stamp::Stamp) -> serde_json::Value {
-    serde_json::Value::String(cian_core::stamp::token(s))
+fn stamp_json(s: &amber_core::stamp::Stamp) -> serde_json::Value {
+    serde_json::Value::String(amber_core::stamp::token(s))
 }
 
-fn json_stamp(v: &serde_json::Value) -> Option<cian_core::stamp::Stamp> {
-    cian_core::stamp::from_token(v.as_str()?)
+fn json_stamp(v: &serde_json::Value) -> Option<amber_core::stamp::Stamp> {
+    amber_core::stamp::from_token(v.as_str()?)
 }
 
 #[cfg(test)]
@@ -844,7 +821,7 @@ mod tests {
         assert!(books.contains(&"仕事".to_string()), "{books:?}");
         // `attachments` is where the pictures live, not a notebook.
         let note = d.path().join("a.md");
-        cian_core::note::attach(&note, &[1], "png").unwrap();
+        amber_core::note::attach(&note, &[1], "png").unwrap();
         let r = call("notes", &serde_json::json!({ "path": d.path().to_str().unwrap() })).unwrap();
         let books: Vec<String> = r["books"].as_array().unwrap()
             .iter().map(|b| b.as_str().unwrap().to_string()).collect();
@@ -878,7 +855,7 @@ mod tests {
             assert!(at.is_file(), "{scope}: {at:?}");
             // Named for what is in it and the day: a folder of `backup.zip`
             // is a folder of one question.
-            assert!(at.to_string_lossy().contains(&cian_core::note::today()), "{at:?}");
+            assert!(at.to_string_lossy().contains(&amber_core::note::today()), "{at:?}");
             assert!(std::fs::metadata(&at).unwrap().len() > 0, "{scope} は空でした");
         }
 

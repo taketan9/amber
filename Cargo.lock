@@ -96,6 +96,7 @@ version = "2.1.0"
 dependencies = [
  "anyhow",
  "chrono",
+ "encoding_rs",
  "serde_json",
  "tempfile",
  "zip",
@@ -619,9 +620,9 @@ dependencies = [
 name = "cian-ffi"
 version = "2.1.0"
 dependencies = [
+ "amber-core",
  "anyhow",
  "chrono",
- "cian-core",
  "serde_json",
  "tempfile",
 ]
