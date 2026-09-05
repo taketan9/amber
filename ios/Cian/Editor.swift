@@ -14,6 +14,9 @@ import UIKit
 /// half-typed word jumps or vanishes — so nothing is pushed in either
 /// direction until the composition ends.
 struct Editor: UIViewRepresentable {
+    /// The box itself, for the things only UIKit can do: undo, and moving
+    /// the cursor a line at a time.
+    let pen: Pen
     @Binding var text: String
     /// The selection, in UTF-16 units — the units `NSString` counts in, and
     /// therefore the ones every edit below is written in.
@@ -39,6 +42,7 @@ struct Editor: UIViewRepresentable {
         v.smartQuotesType = .no
         v.smartDashesType = .no
         v.text = text
+        pen.view = v
         return v
     }
 
@@ -74,6 +78,7 @@ struct Editor: UIViewRepresentable {
             guard v.markedTextRange == nil else { return }
             owner.text = v.text
             owner.pick = v.selectedRange
+            owner.pen.refresh()
         }
 
         func textViewDidChangeSelection(_ v: UITextView) {
@@ -86,11 +91,23 @@ struct Editor: UIViewRepresentable {
     }
 }
 
+/// One replacement: what to take out, what to put in, and where the cursor
+/// lands afterwards.
+///
+/// **An edit rather than a whole new text.** A tool that hands back the
+/// entire note has thrown away what changed, and UIKit's undo works on
+/// changes — so 見出し could not be undone, only the typing around it.
+struct Edit {
+    let at: NSRange
+    let with: String
+    let then: NSRange
+}
+
 /// The writing tools, as edits on text and a selection.
 ///
 /// Kept apart from the view so each one is a plain function of (text,
-/// selection) → (text, selection): that is the whole of what a Markdown
-/// button does, and it is the shape a test can hold.
+/// selection) → edit: that is the whole of what a Markdown button does, and
+/// it is the shape a test can hold.
 enum Marks {
     /// The line the cursor is on, as a range over `text`.
     static func lineRange(_ text: String, _ pick: NSRange) -> NSRange {
@@ -102,7 +119,7 @@ enum Marks {
     /// Put `prefix` on the cursor's line, or take it off if it is already
     /// there. Toggling matters: the moment you press it by mistake, pressing
     /// it again is what you reach for.
-    static func line(_ text: String, _ pick: NSRange, _ prefix: String) -> (String, NSRange) {
+    static func line(_ text: String, _ pick: NSRange, _ prefix: String) -> Edit {
         let s = text as NSString
         let r = lineRange(text, pick)
         var row = s.substring(with: r)
@@ -117,12 +134,12 @@ enum Marks {
             out = prefix + row
             shift = (prefix as NSString).length
         }
-        let whole = s.replacingCharacters(in: r, with: out + end)
-        return (whole, NSRange(location: max(r.location, pick.location + shift), length: 0))
+        return Edit(at: r, with: out + end,
+                    then: NSRange(location: max(r.location, pick.location + shift), length: 0))
     }
 
     /// One `#` deeper on the cursor's line, and back to none after three.
-    static func deepen(_ text: String, _ pick: NSRange) -> (String, NSRange) {
+    static func deepen(_ text: String, _ pick: NSRange) -> Edit {
         let s = text as NSString
         let r = lineRange(text, pick)
         var row = s.substring(with: r)
@@ -133,23 +150,23 @@ enum Marks {
         if body.hasPrefix(" ") { body.removeFirst() }
         let next = (had + 1) % 4
         let out = next == 0 ? body : String(repeating: "#", count: next) + " " + body
-        let whole = s.replacingCharacters(in: r, with: out + end)
         let before = (row as NSString).length
         let after = (out as NSString).length
-        return (whole, NSRange(location: max(r.location, pick.location + after - before), length: 0))
+        return Edit(at: r, with: out + end,
+                    then: NSRange(location: max(r.location, pick.location + after - before), length: 0))
     }
 
     /// Wrap the selection, or open an empty pair with the cursor inside it.
-    static func wrap(_ text: String, _ pick: NSRange, _ mark: String) -> (String, NSRange) {
+    static func wrap(_ text: String, _ pick: NSRange, _ mark: String) -> Edit {
         let s = text as NSString
         let n = (mark as NSString).length
         if pick.length > 0 {
             let inner = s.substring(with: pick)
-            let whole = s.replacingCharacters(in: pick, with: mark + inner + mark)
-            return (whole, NSRange(location: pick.location + n, length: pick.length))
+            return Edit(at: pick, with: mark + inner + mark,
+                        then: NSRange(location: pick.location + n, length: pick.length))
         }
-        let whole = s.replacingCharacters(in: pick, with: mark + mark)
-        return (whole, NSRange(location: pick.location + n, length: 0))
+        return Edit(at: pick, with: mark + mark,
+                    then: NSRange(location: pick.location + n, length: 0))
     }
 
     /// Drop a block in below the cursor's line.
@@ -157,10 +174,10 @@ enum Marks {
     /// `caret` is how far into what was inserted the cursor should land —
     /// inside the fence rather than after it, which is where you were going
     /// to type anyway.
-    static func block(_ text: String, _ pick: NSRange, _ body: String, caret: Int? = nil) -> (String, NSRange) {
+    static func block(_ text: String, _ pick: NSRange, _ body: String, caret: Int? = nil) -> Edit {
         let s = text as NSString
         let r = lineRange(text, pick)
-        var at = r.location + r.length
+        var at = min(r.location + r.length, s.length)
         var insert = body
         // A note whose last line has no newline would otherwise get the
         // block welded onto the end of that line.
@@ -168,15 +185,77 @@ enum Marks {
             insert = "\n" + insert
         }
         if at > s.length { at = s.length }
-        let whole = s.replacingCharacters(in: NSRange(location: at, length: 0), with: insert)
         let landing = caret ?? (insert as NSString).length
-        return (whole, NSRange(location: at + landing, length: 0))
+        return Edit(at: NSRange(location: at, length: 0), with: insert,
+                    then: NSRange(location: at + landing, length: 0))
     }
 
     /// Put text in at the cursor, replacing whatever is selected.
-    static func insert(_ text: String, _ pick: NSRange, _ body: String) -> (String, NSRange) {
+    static func insert(_ text: String, _ pick: NSRange, _ body: String) -> Edit {
+        Edit(at: pick, with: body,
+             then: NSRange(location: pick.location + (body as NSString).length, length: 0))
+    }
+}
+
+/// The box, held from outside it.
+///
+/// Undo belongs to UIKit — it is the same undo three-finger-swipe and the
+/// shake gesture use, and reimplementing it in Swift would be a second,
+/// worse one that disagrees with the phone. So the tools reach the text
+/// through the view (`replace(_:withText:)` registers an undo step) rather
+/// than by swapping the whole string, and this is how they reach it.
+@MainActor
+final class Pen: ObservableObject {
+    weak var view: UITextView?
+    @Published var canUndo = false
+    @Published var canRedo = false
+
+    func refresh() {
+        canUndo = view?.undoManager?.canUndo ?? false
+        canRedo = view?.undoManager?.canRedo ?? false
+    }
+
+    func undo() { view?.undoManager?.undo(); refresh() }
+    func redo() { view?.undoManager?.redo(); refresh() }
+
+    /// Make one edit, in a way the phone's own undo understands.
+    ///
+    /// Falls back to a plain string swap when there is no live view — the
+    /// reading half has none, and an edit that silently did nothing there
+    /// would be worse than one that cannot be undone.
+    func apply(_ e: Edit, to text: inout String, pick: inout NSRange) {
+        if let v = view, let r = range(v, e.at) {
+            v.replace(r, withText: e.with)
+            v.selectedRange = clamp(e.then, in: v.text)
+            text = v.text
+            pick = v.selectedRange
+            refresh()
+            return
+        }
         let s = text as NSString
-        let whole = s.replacingCharacters(in: pick, with: body)
-        return (whole, NSRange(location: pick.location + (body as NSString).length, length: 0))
+        text = s.replacingCharacters(in: e.at, with: e.with)
+        pick = clamp(e.then, in: text)
+    }
+
+    /// Move the cursor one step. **The arrow keys a phone keyboard does not
+    /// have** — and the reason writing anything longer than a line on a
+    /// phone is miserable. Up and down are `.layout` moves, so they follow
+    /// the line as it is *drawn*, wrapping included.
+    func step(_ way: UITextLayoutDirection) {
+        guard let v = view, let from = v.selectedTextRange?.start else { return }
+        guard let to = v.position(from: from, in: way, offset: 1) else { return }
+        v.selectedTextRange = v.textRange(from: to, to: to)
+    }
+
+    private func range(_ v: UITextView, _ r: NSRange) -> UITextRange? {
+        guard let a = v.position(from: v.beginningOfDocument, offset: r.location),
+              let b = v.position(from: a, offset: r.length) else { return nil }
+        return v.textRange(from: a, to: b)
+    }
+
+    private func clamp(_ r: NSRange, in s: String) -> NSRange {
+        let n = (s as NSString).length
+        let at = min(max(0, r.location), n)
+        return NSRange(location: at, length: min(r.length, n - at))
     }
 }
