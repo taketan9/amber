@@ -7,12 +7,12 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		1A000000000000000000000B /* CianFFI.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1A000000000000000000000A /* CianFFI.xcframework */; };
+		1A000000000000000000000B /* AmberFFI.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1A000000000000000000000A /* AmberFFI.xcframework */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		1A0000000000000000000009 /* Cian.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Cian.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		1A000000000000000000000A /* CianFFI.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = CianFFI.xcframework; path = ../target/ios/CianFFI.xcframework; sourceTree = "<group>"; };
+		1A000000000000000000000A /* AmberFFI.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = AmberFFI.xcframework; path = ../target/ios/AmberFFI.xcframework; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -28,7 +28,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				1A000000000000000000000B /* CianFFI.xcframework in Frameworks */,
+				1A000000000000000000000B /* AmberFFI.xcframework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -39,7 +39,7 @@
 			isa = PBXGroup;
 			children = (
 				1A0000000000000000000008 /* Cian */,
-				1A000000000000000000000A /* CianFFI.xcframework */,
+				1A000000000000000000000A /* AmberFFI.xcframework */,
 				1A0000000000000000000003 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -190,7 +190,7 @@
 				DEVELOPMENT_TEAM = 99U8AU4P74;
 				ENABLE_PREVIEWS = YES;
 				FRAMEWORK_SEARCH_PATHS = "$(SRCROOT)/../target/ios";
-				HEADER_SEARCH_PATHS = "$(SRCROOT)/../crates/cian-ffi/include";
+				HEADER_SEARCH_PATHS = "$(SRCROOT)/../crates/amber-ffi/include";
 				INFOPLIST_FILE = Info.plist;
 				MARKETING_VERSION = 0.1;
 				OTHER_LDFLAGS = (
@@ -218,7 +218,7 @@
 				DEVELOPMENT_TEAM = 99U8AU4P74;
 				ENABLE_PREVIEWS = YES;
 				FRAMEWORK_SEARCH_PATHS = "$(SRCROOT)/../target/ios";
-				HEADER_SEARCH_PATHS = "$(SRCROOT)/../crates/cian-ffi/include";
+				HEADER_SEARCH_PATHS = "$(SRCROOT)/../crates/amber-ffi/include";
 				INFOPLIST_FILE = Info.plist;
 				MARKETING_VERSION = 0.1;
 				OTHER_LDFLAGS = (

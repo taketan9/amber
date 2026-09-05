@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build cian-ffi for iPhone and for the simulator.
+# Build amber-ffi for iPhone and for the simulator.
 #
 # Does as much as the machine allows and says exactly what it could not do.
 # The three static libraries need only rustup; turning them into an
@@ -42,16 +42,16 @@ rm -rf "$OUT"; mkdir -p "$OUT"
 # for, and its thin LTO leaves bitcode Xcode's older LLVM cannot read.
 for t in $TARGETS; do
     echo "== $t"
-    "$TC/cargo" build -p cian-ffi --profile ios --target "$t"
+    "$TC/cargo" build -p amber-ffi --profile ios --target "$t"
 done
 
 # The simulator needs both architectures in one library: his Mac is Intel and
 # the CI's is not, and a library with only one of them fails to link on the
 # other with a message about architectures rather than about the missing half.
 lipo -create \
-  target/aarch64-apple-ios-sim/ios/libcian_ffi.a \
-  target/x86_64-apple-ios/ios/libcian_ffi.a \
-  -output "$OUT/libcian_ffi_sim.a"
+  target/aarch64-apple-ios-sim/ios/libamber_ffi.a \
+  target/x86_64-apple-ios/ios/libamber_ffi.a \
+  -output "$OUT/libamber_ffi_sim.a"
 
 # `|| true` because `nm` exits non-zero on an archive that has any member
 # with no symbols in it — which every Rust archive has — and `pipefail` then
@@ -65,24 +65,24 @@ lipo -create \
 # there and really readable by Apple's tools. Both have been false — stripped
 # by the release profile, and unreadable bitcode — and both failures show up
 # as a link error in Xcode with nothing pointing back here.
-for f in target/aarch64-apple-ios/ios/libcian_ffi.a "$OUT/libcian_ffi_sim.a"; do
-    for sym in _cian_call _cian_free; do
+for f in target/aarch64-apple-ios/ios/libamber_ffi.a "$OUT/libamber_ffi_sim.a"; do
+    for sym in _amber_call _amber_free; do
         { nm -g -arch all "$f" 2>/dev/null || true; } | grep -q "T $sym" \
             || { echo "記号がありません: $sym in $f"; exit 1; }
     done
 done
-echo "記号 ok: _cian_call / _cian_free"
+echo "記号 ok: _amber_call / _amber_free"
 
 if xcodebuild -version >/dev/null 2>&1; then
     xcodebuild -create-xcframework \
-      -library target/aarch64-apple-ios/ios/libcian_ffi.a -headers crates/cian-ffi/include \
-      -library "$OUT/libcian_ffi_sim.a" -headers crates/cian-ffi/include \
-      -output "$OUT/CianFFI.xcframework"
-    echo "できました: $OUT/CianFFI.xcframework"
+      -library target/aarch64-apple-ios/ios/libamber_ffi.a -headers crates/amber-ffi/include \
+      -library "$OUT/libamber_ffi_sim.a" -headers crates/amber-ffi/include \
+      -output "$OUT/AmberFFI.xcframework"
+    echo "できました: $OUT/AmberFFI.xcframework"
 else
     echo
     echo "ライブラリはできました:"
-    echo "  実機         target/aarch64-apple-ios/ios/libcian_ffi.a"
-    echo "  シミュレータ $OUT/libcian_ffi_sim.a"
+    echo "  実機         target/aarch64-apple-ios/ios/libamber_ffi.a"
+    echo "  シミュレータ $OUT/libamber_ffi_sim.a"
     echo "XCFramework にまとめるには Xcode が要ります（Command Line Tools だけでは足りません）。"
 fi

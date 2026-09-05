@@ -3,7 +3,7 @@
 
     python3 packaging/amber.py          # amber.ico / amber.png / iOS の 1024
 
-`icon.py` と同じ理由で外部ライブラリを使わない ── **この機械に無いものを
+cian の `icon.py` と同じ理由で外部ライブラリを使わない ── **この機械に無いものを
 要求しない**。rsvg も ImageMagick も PIL も入っていない。
 
 ただし cian のアイコンと違い、こちらは角丸長方形だけでは描けない（葉は
@@ -29,7 +29,6 @@ import struct
 import zlib
 from pathlib import Path
 
-from icon import ico
 
 OUT = Path(__file__).resolve().parent
 ROOT = OUT.parent
@@ -54,6 +53,27 @@ CUTS = [
     ((24, 66), (40, 57), (54, 51), (66, 47)),
 ]
 CUT_W = 8.0
+
+
+
+def ico(pngs):
+    """PNG を並べた .ico（全部 PNG、32bpp）。
+
+    cian の `packaging/icon.py` から写した ── 分かれたので、向こうを消しても
+    こちらは焼ける。8行の仕様（`.ico` のヘッダ）で、判断は入っていない。
+    """
+    n = len(pngs)
+    head = struct.pack('<HHH', 0, 1, n)
+    off = 6 + 16 * n
+    dirs, body = b'', b''
+    for size, data in pngs:
+        dirs += struct.pack('<BBBBHHII',
+                            0 if size == 256 else size,
+                            0 if size == 256 else size,
+                            0, 0, 1, 32, len(data), off)
+        off += len(data)
+        body += data
+    return head + dirs + body
 
 
 def flatten(curve, n):
@@ -268,17 +288,19 @@ def agree():
     """葉の形が三か所で同じか。**ここが黙ると、窓とアプリで別の葉になる。**
 
     数字は `packaging/amber.svg`（原本）、この file（焼く）、
-    `gui/renderer.js` の `cianMark()`（窓の左列）の三か所にある。増やしたくは
+    `ios/Cian/Writing.swift` の `Mark()` の三か所にある。増やしたくは
     なかったが、SVG を読む道具がこの機械に無い以上どこかで写すしかない。
     ならば**写しがずれたときに焼けなくする**のが筋。
     """
     d = leaf_d()
-    for path in ('packaging/amber.svg', 'gui/renderer.js'):
+    # 窓版はまだ無い。**出来たらここに足す** ── 足し忘れると、窓だけ別の葉に
+    # なってから気づくことになる（分ける前は `gui/renderer.js` も見ていた）。
+    for path in ('packaging/amber.svg',):
         if d not in (ROOT / path).read_text(encoding='utf-8'):
             raise SystemExit(
                 f'葉の形が {path} と食い違っています。\n'
                 f'  ここ  : {d}\n'
-                'どちらかを直して、四か所すべて同じにしてください。')
+                'どちらも同じにしてください。')
 
     # iPhone は SwiftUI なので `d` 属性を持たない。`addCurve` は**終点が先**で
     # 制御点が後ろに来るので、同じ点を SwiftUI の順に並べ直して突き合わせる。
@@ -296,12 +318,12 @@ def agree():
             '葉の形が ios/Cian/Writing.swift と食い違っています。\n'
             f'  ここ  : {want}\n'
             f'  むこう: {got}\n'
-            '四か所すべて同じにしてください。')
+            '三か所すべて同じにしてください。')
     return d
 
 
 if __name__ == '__main__':
-    print('葉の形は四か所で一致:', agree())
+    print('葉の形は三か所で一致:', agree())
     made = []
     for s in SIZES:
         rgba, _ = render(s)

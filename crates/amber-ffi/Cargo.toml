@@ -1,0 +1,25 @@
+[package]
+name = "amber-ffi"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "amber — Markdown のノートを、C ABI の向こうへ。エンジンを走らせられない場所のために"
+
+[lib]
+# `staticlib` is what an Xcode target links; `rlib` is what `cargo test` needs,
+# and the tests here are the only place this code is ever run on a machine
+# that can run it.
+crate-type = ["staticlib", "rlib"]
+
+[dependencies]
+# **机の機能は入れない。** 電話にゴミ箱は無く、いつもそれを欲しがる core は
+# 電話向けに建たない。
+amber-core = { workspace = true }
+anyhow = { workspace = true }
+serde_json = { workspace = true }
+# Only for the two date fields the reminder methods hand across.
+chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
+
+[dev-dependencies]
+tempfile = "3.27.0"

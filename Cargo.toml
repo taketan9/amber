@@ -1,75 +1,22 @@
 [workspace]
 resolver = "2"
 members = [
-    # amber は先に書く ── 依存の向きが `amber ← cian` の一方向であること
-    # を、並びでも言っておく。
     "crates/amber-core",
-    "crates/cian-core",
-    "crates/cian-tui",
-    "crates/cian-pty",
-    "crates/cian-scp",
-    "crates/cian-ai",
-    "crates/cian-lua",
-    "crates/cian-bin",
-    "crates/cian-gui",
-    "crates/cian-server",
-    "crates/cian-ffi",
+    "crates/amber-ffi",
 ]
 
 [workspace.package]
-# Bumped by hand as work lands: patch for fixes, minor for features. `:version`
-# (and `cian --version`) report it with the commit, so "which build is this"
-# has an answer from inside a running session.
+# **番号を決めるのは Taketan。** 自分からは上げない。
+# cian と別勘定 ── 分かれた日にどちらも 2.1.0 だったが、これ以降は別に進む。
 version = "2.1.0"
 edition = "2021"
 rust-version = "1.75"
 license = "MIT"
-repository = "https://github.com/taketan9/cian"
 
 [workspace.dependencies]
-cian-core = { path = "crates/cian-core" }
-cian-tui  = { path = "crates/cian-tui"  }
-cian-pty  = { path = "crates/cian-pty"  }
-cian-scp  = { path = "crates/cian-scp"  }
-cian-ai   = { path = "crates/cian-ai"  }
-cian-lua  = { path = "crates/cian-lua"  }
-
-# The Windows icon, stamped into the exes at link time. Only ever a
-# build-dependency, and only on Windows — see crates/cian-bin/build.rs for why
-# a .ico beside the program is not enough.
-winresource = "0.1"
-
-# External crates (pinned at workspace level so all crates use the same version)
-ratatui   = "0.30"
-crossterm = "0.29"
-anyhow    = "1"
-arboard   = "3"
-fs_extra  = "1.3"
-toml       = "0.8"
-# serde_yml is the maintained fork of the (now-archived) serde_yaml.
-serde_yml  = "0.0.12"
-serde     = { version = "1", features = ["derive"] }
+amber-core = { path = "crates/amber-core" }
+anyhow     = "1"
 serde_json = "1"
-# Only the PNG encoder: pasted clipboard images are written out as PNG.
-image = { version = "0.25", default-features = false, features = ["png"] }
-# Embedded shell pane. tui-term, ratatui and vt100 move together: tui-term
-# renders vt100's `Screen` into ratatui's buffer, so all three have to agree
-# on those two types. Bump them as a set.
-# Pinned, and this one has a reason that must not be lost.
-#
-# 0.9.0 added `PSEUDOCONSOLE_INHERIT_CURSOR` to its `CreatePseudoConsole` call.
-# That flag makes ConPTY ask the terminal where the cursor is — `ESC[6n` — and
-# *wait for the answer* before it renders anything. cian does not answer
-# terminal queries, so ConPTY waited forever: the shell panel showed sixteen
-# bytes of mode-setting and then nothing, on Windows, in both front ends, with
-# PowerShell alive and silent behind it. It looked for all the world like a
-# shell that would not start.
-#
-# Unpinning means teaching cian's shell panel to answer a Device Status Report,
-# which is the right thing to do and is not a dependency bump.
-portable-pty = "=0.8.1"
-vt100        = "0.16"
-tui-term     = { version = "0.3", features = ["vt100"] }
 
 [profile.release]
 opt-level = 3
@@ -77,19 +24,18 @@ lto = "thin"
 codegen-units = 1
 strip = "symbols"
 
-# The static library Xcode links.
+# Xcode が繋ぐ静的ライブラリ。
 #
-# `release` cannot be used for it, for two reasons that both end in a library
-# that will not link and says nothing useful about why:
+# `release` は使えない。二つとも「繋がらないのに、理由を何も言わない
+# ライブラリ」で終わる:
 #
-#   * `strip = "symbols"` removes `_cian_call` and `_cian_free` — the only two
-#     things the app is linking it for.
-#   * `lto = "thin"` leaves LLVM bitcode in the archive, and Rust's LLVM is
-#     several major versions ahead of the one inside Xcode. Apple's own `nm`
-#     cannot even read it ("Unknown attribute kind"), and its linker is the
-#     same vintage.
+#   * `strip = "symbols"` が `_cian_call` と `_cian_free` を消す ── アプリが
+#     繋いでいる理由そのものの二つ
+#   * `lto = "thin"` が LLVM のビットコードを残す。Rust の LLVM は Xcode の
+#     中のものより何世代も新しく、Apple の `nm` すら読めない
+#     （"Unknown attribute kind"）。リンカも同じ年代
 #
-# Same optimisation otherwise: this is the build that goes on a phone.
+# 最適化はそのまま: これが電話に載るビルド。
 [profile.ios]
 inherits = "release"
 lto = false

@@ -2,7 +2,7 @@
 # Is the engine in the app older than the engine in the sources?
 #
 # Xcode links a prebuilt `CianFFI.xcframework`; nothing in an Xcode build
-# rebuilds the Rust. So a build after a change to `cian-core` or `cian-ffi`
+# rebuilds the Rust. So a build after a change to `amber-core` or `amber-ffi`
 # succeeds, installs, launches, and then answers 「知らない操作: remind」 the
 # first time you press the new button — at which point the evidence points at
 # the Swift, which is fine.
@@ -18,7 +18,7 @@ if [ ! -f "$FW" ]; then
     exit 1
 fi
 
-NEWER=$(find crates/cian-core/src crates/cian-ffi/src -name '*.rs' -newer "$FW" | head -5)
+NEWER=$(find crates/amber-core/src crates/amber-ffi/src -name '*.rs' -newer "$FW" | head -5)
 if [ -n "$NEWER" ]; then
     echo "error: エンジンがソースより古いです。scripts/ios-build.sh を実行してください。"
     echo "$NEWER" | while read -r f; do echo "error:   $f"; done

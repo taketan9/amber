@@ -26,10 +26,10 @@ enum Cian {
             data: try JSONSerialization.data(withJSONObject: params),
             encoding: .utf8
         ) ?? "{}"
-        guard let out = method.withCString({ m in body.withCString { p in cian_call(m, p) } }) else {
+        guard let out = method.withCString({ m in body.withCString { p in amber_call(m, p) } }) else {
             throw Failure.engine("amber が答えませんでした")
         }
-        defer { cian_free(out) }
+        defer { amber_free(out) }
         let text = String(cString: out)
         guard let obj = try JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any] else {
             throw Failure.engine("答えを読めません: \(text)")
