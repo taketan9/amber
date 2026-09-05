@@ -969,9 +969,25 @@ body[data-cian="on"] .rows.cian .row .sub { padding-top: 2px; }
    at the top of its list for the same reason: you arrive here on purpose,
    and the first thing that should be true is that you are in the right
    place. */
-body[data-cian="on"] .pane .crumb { padding: 10px 12px 8px; }
-body[data-cian="on"] .pane .crumb .here { font-size: 1.35em; font-weight: 800; letter-spacing: -.01em; }
-#note-count { color: var(--dim); font-size: .8em; margin-left: .6em; }
+body[data-cian="on"] .pane .crumb { padding: 14px 14px 10px; }
+/* The mark, the name, the count — the phone's header, in the space a window
+   has. Drawn rather than loaded: the same two brackets as the app icon, so
+   the thing on the dock and the thing at the top of the list are one thing. */
+/* **左から右に。** パンくずは長いパスの*頭*を切るために右から左の箱に
+   なっていて、その中に置いたものは並びが反転する ── 印が右端に飛び、
+   「7 のノート ・ 3 のフォルダ」が「のノート ・ 3 のフォルダ 7」になった。
+   ここはパスではないので、向きを戻す。 */
+body[data-cian="on"] .pane .crumb { direction: ltr; text-align: left; }
+.cianhead { display: flex; align-items: center; gap: 11px; direction: ltr; }
+.cianmark { width: 34px; height: 34px; flex: none; }
+.cianmark .ground { fill: var(--accent); }
+.cianmark .brackets {
+  fill: none; stroke: var(--pane); stroke-width: 11;
+  stroke-linecap: round; stroke-linejoin: round;
+}
+.cianwords { display: flex; flex-direction: column; line-height: 1.15; min-width: 0; }
+.ciantitle { font-size: 1.5em; font-weight: 800; letter-spacing: -.02em; color: var(--fg); }
+.ciansub { font-size: .78em; color: var(--dim); }
 /* The column headings are a file manager's furniture. A notes list has two
    lines per row and no columns to head. */
 body[data-cian="on"] .pane .dhead { display: none; }

@@ -812,8 +812,13 @@ async function main() {
     // console would have proved the picker and nothing about the config.
     if (!process.env.CIAN_CONFIG_DIR) {
         fs.writeFileSync(path.join(conf, 'init.lua'),
+            // **1つだけ。** 2026-09-05 から cian モードは「入ったら必ず
+            // ノートの保存場所へ行く」ので、ここに2つ書くと、モードに
+            // 入った瞬間に1つ目（`from/sub`）へ飛ぶ ── この後の
+            // `land:sub` / `Enter` はもう `from` に居る前提で書かれていて、
+            // 以後の打鍵が全部ずれる（実際、動かなかったキーが 47 から
+            // 140 に跳ねた）。台本の前提ではなく**設定**を合わせる。
             'cian.notes{\n'
-            + `  { name = "私", path = "${sand}/from/sub" },\n`
             + `  { name = "元", path = "${sand}/from" },\n`
             + '}\n', 'utf8');
     }

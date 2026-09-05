@@ -260,6 +260,33 @@ app.whenReady().then(async () => {
         return r.canceled || !r.filePaths.length ? null : r.filePaths[0];
     });
 
+    // One file, chosen by the person rather than by where a cursor happens
+    // to be. **A restore is not a two-pane operation** — 2026-09-05:
+    // 「反対のペインの zip にカーソルをおいてから、は現実的なオペレーション
+    // じゃない」. Right: you go and find the backup, wherever it is.
+    ipcMain.handle('cian-pickfile', async (event, title, ext) => {
+        const win = BrowserWindow.fromWebContents(event.sender);
+        const r = await dialog.showOpenDialog(win, {
+            title: title || 'cian',
+            properties: ['openFile'],
+            filters: ext ? [{ name: ext.toUpperCase(), extensions: [ext] }] : [],
+        });
+        return r.canceled || !r.filePaths.length ? null : r.filePaths[0];
+    });
+
+    // Where a backup should land. `showSaveDialog` rather than the other
+    // pane: a backup is a thing you put somewhere on purpose, and the other
+    // pane is wherever you left it.
+    ipcMain.handle('cian-savefile', async (event, title, name) => {
+        const win = BrowserWindow.fromWebContents(event.sender);
+        const r = await dialog.showSaveDialog(win, {
+            title: title || 'cian',
+            defaultPath: name || 'cian.zip',
+            filters: [{ name: 'ZIP', extensions: ['zip'] }],
+        });
+        return r.canceled || !r.filePath ? null : r.filePath;
+    });
+
     ipcMain.handle('cian-fileicon', async (_event, path) => {
         try {
             const img = await app.getFileIcon(path, { size: 'normal' });
