@@ -157,6 +157,8 @@ Taketan が頼んだことが、いまも満たされているか。`python3 scr
 | 205 | 2026-09-06 | 図を続けて入れると、前の図が消える | 組み直しで `<pre>` を `<div class="mermaid">` に**掛け替えるとき、元の字を持っていかなかった** ── 字に戻すとき中身がどこにも無く、保存のたびに図が消えた（絵も同じ）。掛け替えるところは必ず持っていく。札を配るのは掛け替えより**先**。そして**元の字が取れないときは書き戻さない** ── 空を返すと黙って消え、気づくのは何回か保存したあと | `gui/renderer.js ~ function keepMark` |
 | 206 | 2026-09-06 | 太字にしても保存されない | `styleWithCSS` を真にしていたので、太字が `<b>` ではなく `<span style="font-weight">` になり、字に戻すとき飾りが落ちていた（色のために真にしていた）。**飾りは札で、色は `<font color>` で読む** | `gui/renderer.js ~ styleWithCSS` |
 | 207 | 2026-09-06 | 円グラフの見た目が悪い | 既定の派手な12色は琥珀の隣で喧嘩する ── **フォルダと文字色に使っている11色と同じ並び**を渡し、アプリのどこを見ても同じ色の家族にする。境目は地の色で抜き、割合は中に置く | `gui/renderer.js ~ pieStrokeColor` |
+| 208 | 2026-09-06 | crmaine に同梱するので、Windows 用の `amber-server.exe` が要る（配布先はネットに出られない社内端末） | 依存はすべて純 Rust だった（`zlib-rs` で C の zlib すら要らない）── `chrono` の Windows 経路だけが `dlltool` を要るので mingw が要る。**本筋は CI**（Windows の上で組み、その場で一往復させ、DLL も見る）。mac からのクロスビルドは近道として `scripts/win-build.sh` に残すが、**走るところは確かめられない**（mac の上で Windows の実行ファイルは動かない） | `.github/workflows/release.yml ~ amber-server-win-x64.exe` |
+| 209 | 2026-09-06 | 落として置くだけで動くこと（DLL を連れていないこと） | 既定の MSVC ビルドは `VCRUNTIME140.dll` を要求していた ── 素の Windows には無い。**`crt-static` で CRT ごと取り込む**。この食い違いは**走らせるだけでは出ない**（CI の runner には再頒布可能パッケージが入っていて、往復試験は通ってしまった）── 捕まえたのは DLL の検査だけで、入れておいてよかったもの | `.github/workflows/release.yml ~ crt-static` |
 
 ## 増やすとき
 

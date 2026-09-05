@@ -4,10 +4,18 @@
 #     ./scripts/win-build.sh                 # 組む
 #     ./scripts/win-build.sh どこか/gui/      # 組んで、そこへ置く
 #
-# **本筋は CI**（`.github/workflows/release.yml`）── 版と資材が結び付くし、
-# 出来た一枚は Windows の上で一往復して確かめてある。ここは「次の社内
-# ビルドに間に合わせる」ための近道で、**確かめられるのは形までで、
-# 走るところは見ていない**（mac の上で Windows の実行ファイルは動かない）。
+# **本筋は CI**（`.github/workflows/release.yml`）。ここは近道で、
+# **確かめられるのは形まで ── 走るところは見ていない**（mac の上で
+# Windows の実行ファイルは動かない）。
+#
+# 出来上がりも CI のほうが良い:
+#
+#   * CI（MSVC ＋ `crt-static`）が見る DLL は `kernel32` / `ntdll` /
+#     `bcryptprimitives` / `api-ms-win-core-synch` の四つだけ
+#   * ここ（mingw）は加えて `api-ms-win-crt-*` の九つを見る。どれも
+#     Windows 10 以降には元からあるが、**少ないほうが安心できる**
+#
+# 急がないなら `gh workflow run release.yml` で組んで、資材を落とすほうがよい。
 #
 # 要るもの:
 #
