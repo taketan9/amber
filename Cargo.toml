@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/amber-core",
     "crates/amber-ffi",
+    "crates/amber-server",
 ]
 
 [workspace.package]

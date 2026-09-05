@@ -26,6 +26,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "amber-server"
+version = "2.1.0"
+dependencies = [
+ "amber-core",
+ "anyhow",
+ "serde_json",
+]
+
+[[package]]
 name = "android_system_properties"
 version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"

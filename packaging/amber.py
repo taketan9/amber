@@ -288,19 +288,17 @@ def agree():
     """葉の形が三か所で同じか。**ここが黙ると、窓とアプリで別の葉になる。**
 
     数字は `packaging/amber.svg`（原本）、この file（焼く）、
-    `ios/Cian/Writing.swift` の `Mark()` の三か所にある。増やしたくは
+    `ios/Cian/Writing.swift` の `Mark()`、`gui/renderer.js` の `mark()` の四か所にある。増やしたくは
     なかったが、SVG を読む道具がこの機械に無い以上どこかで写すしかない。
     ならば**写しがずれたときに焼けなくする**のが筋。
     """
     d = leaf_d()
-    # 窓版はまだ無い。**出来たらここに足す** ── 足し忘れると、窓だけ別の葉に
-    # なってから気づくことになる（分ける前は `gui/renderer.js` も見ていた）。
-    for path in ('packaging/amber.svg',):
+    for path in ('packaging/amber.svg', 'gui/renderer.js'):
         if d not in (ROOT / path).read_text(encoding='utf-8'):
             raise SystemExit(
                 f'葉の形が {path} と食い違っています。\n'
                 f'  ここ  : {d}\n'
-                'どちらも同じにしてください。')
+                '四か所すべて同じにしてください。')
 
     # iPhone は SwiftUI なので `d` 属性を持たない。`addCurve` は**終点が先**で
     # 制御点が後ろに来るので、同じ点を SwiftUI の順に並べ直して突き合わせる。
@@ -318,12 +316,12 @@ def agree():
             '葉の形が ios/Cian/Writing.swift と食い違っています。\n'
             f'  ここ  : {want}\n'
             f'  むこう: {got}\n'
-            '三か所すべて同じにしてください。')
+            '四か所すべて同じにしてください。')
     return d
 
 
 if __name__ == '__main__':
-    print('葉の形は三か所で一致:', agree())
+    print('葉の形は四か所で一致:', agree())
     made = []
     for s in SIZES:
         rgba, _ = render(s)

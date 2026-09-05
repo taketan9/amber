@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: file:; font-src 'self'; connect-src 'self'">
+<title>amber</title>
+<style>
+/* 琥珀と生成り。**アイコンと同じ色**（packaging/amber.svg）── 窓とアプリで
+   別の琥珀にすると、同じものに見えなくなる。 */
+:root {
+  color-scheme: light;
+  --amber:      #f0a52b;
+  --amber-soft: #ffd97f;
+  --amber-deep: #b5760f;
+  --bg:      #fbf7ef;
+  --rail:    #f3ecdf;
+  --list:    #f8f3e8;
+  --paper:   #fffdf8;
+  --line:    #e4d9c4;
+  --line-2:  #efe6d4;
+  --ink:     #2a2011;
+  --ink-2:   #6b5a41;
+  --ink-3:   #9a8a6f;
+  --sel:     #f7e2b6;
+  --hover:   #f1e6cf;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --bg:      #17140f;
+    --rail:    #1d1913;
+    --list:    #1a1611;
+    --paper:   #14110c;
+    --line:    #302a20;
+    --line-2:  #262017;
+    --ink:     #f0e7d6;
+    --ink-2:   #bcac91;
+    --ink-3:   #8a7d66;
+    --sel:     #3b2f16;
+    --hover:   #262017;
+  }
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+/* **`hidden` は `display:flex` に負ける。** 属性は付いているのに出ている、
+   という形で必ず一度は踏む（cian で踏んだ）。ここで勝たせておく。 */
+[hidden] { display: none !important; }
+html, body { height: 100%; }
+body {
+  display: flex; overflow: hidden;
+  background: var(--bg); color: var(--ink);
+  font: 14px/1.7 -apple-system, BlinkMacSystemFont, "Hiragino Sans",
+        "Hiragino Kaku Gothic ProN", "Yu Gothic UI", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
+
+/* ── 左: 行き先 ── */
+#rail {
+  width: 208px; flex: none; display: flex; flex-direction: column;
+  background: var(--rail); border-right: 1px solid var(--line);
+  overflow-y: auto; padding-bottom: 12px;
+}
+#brand {
+  display: flex; align-items: center; gap: 10px;
+  padding: 16px 14px 12px;
+  /* mac は信号機のボタンがここに乗る */
+  -webkit-app-region: drag;
+}
+body.mac #brand { padding-top: 30px; }
+#brand svg { width: 26px; height: 26px; flex: none; border-radius: 7px; }
+#brand .name { font-size: 19px; font-weight: 800; letter-spacing: -.01em; }
+#new {
+  margin: 2px 12px 14px; padding: 8px 12px; border-radius: 9px;
+  background: var(--amber); color: #3a2408; font-weight: 700;
+  display: flex; align-items: center; gap: 8px;
+}
+#new:hover { filter: brightness(1.06); }
+.head {
+  font-size: 10.5px; letter-spacing: .13em; color: var(--ink-3);
+  padding: 12px 15px 4px; text-transform: uppercase;
+}
+.dest {
+  display: flex; align-items: center; gap: 8px;
+  padding: 5px 14px; cursor: pointer; font-size: 13.5px;
+  color: var(--ink-2); border-radius: 0;
+}
+.dest:hover { background: var(--hover); }
+.dest.on { background: var(--sel); color: var(--ink); font-weight: 600; }
+.dest .n { margin-left: auto; font-size: 11.5px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.dest .sq { width: 9px; height: 9px; border-radius: 3px; flex: none; background: var(--amber); }
+.dest .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dest[data-depth="1"] { padding-left: 28px; }
+.dest[data-depth="2"] { padding-left: 42px; }
+
+/* ── 中: ノートの一覧 ── */
+#list {
+  width: 336px; flex: none; display: flex; flex-direction: column;
+  background: var(--list); border-right: 1px solid var(--line);
+}
+#listhead {
+  padding: 14px 16px 10px; border-bottom: 1px solid var(--line-2);
+  -webkit-app-region: drag;
+}
+body.mac #listhead { padding-top: 30px; }
+#where { font-size: 15px; font-weight: 700; }
+#count { font-size: 11.5px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+#find {
+  width: 100%; margin-top: 9px; padding: 6px 10px; border-radius: 8px;
+  background: var(--paper); border: 1px solid var(--line); color: var(--ink);
+  font: inherit; font-size: 13px; -webkit-app-region: no-drag;
+}
+#find:focus { outline: 2px solid var(--amber); outline-offset: -1px; }
+#rows { flex: 1; overflow-y: auto; }
+.row {
+  padding: 10px 16px; border-bottom: 1px solid var(--line-2); cursor: pointer;
+}
+.row:hover { background: var(--hover); }
+.row.on { background: var(--sel); }
+.row .t {
+  font-weight: 600; font-size: 13.5px; line-height: 1.45;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.row .x {
+  font-size: 12px; color: var(--ink-2); line-height: 1.5;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.row .m { display: flex; align-items: center; gap: 6px; margin-top: 3px; }
+.row .d { font-size: 11px; color: var(--ink-3); font-variant-numeric: tabular-nums; flex: none; }
+.row .tags { display: flex; gap: 4px; overflow: hidden; min-width: 0; }
+.row .tag {
+  font-size: 10.5px; padding: 0 6px; border-radius: 999px;
+  background: var(--line-2); color: var(--ink-2); white-space: nowrap;
+}
+.row .star { color: var(--amber); flex: none; }
+#empty { padding: 34px 20px; color: var(--ink-3); font-size: 13px; text-align: center; }
+
+/* ── 右: 中身 ── */
+#pane { flex: 1; display: flex; flex-direction: column; min-width: 0; background: var(--paper); }
+#top {
+  display: flex; align-items: center; gap: 10px;
+  padding: 12px 18px; border-bottom: 1px solid var(--line-2);
+  -webkit-app-region: drag;
+}
+body.mac #top { padding-top: 30px; }
+#title {
+  font-size: 17px; font-weight: 700; flex: 1; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+#state { font-size: 11.5px; color: var(--ink-3); flex: none; -webkit-app-region: no-drag; }
+#ed { flex: 1; min-height: 0; }
+#blank {
+  flex: 1; display: flex; flex-direction: column; align-items: center;
+  justify-content: center; gap: 10px; color: var(--ink-3);
+}
+#blank svg { width: 54px; height: 54px; opacity: .5; border-radius: 14px; }
+
+#say {
+  position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%);
+  background: var(--ink); color: var(--bg); padding: 7px 15px;
+  border-radius: 999px; font-size: 12.5px; opacity: 0;
+  transition: opacity .18s; pointer-events: none; z-index: 20;
+}
+#say.on { opacity: .94; }
+</style>
+</head>
+<body>
+  <div id="rail"></div>
+  <div id="list">
+    <div id="listhead">
+      <div id="where">すべてのノート</div>
+      <div id="count"></div>
+      <input id="find" type="text" placeholder="絞り込む（空白で AND、OR も）" spellcheck="false">
+    </div>
+    <div id="rows"></div>
+  </div>
+  <div id="pane">
+    <div id="top" hidden>
+      <div id="title"></div>
+      <div id="state"></div>
+    </div>
+    <div id="blank">
+      <div id="blankmark"></div>
+      <div>左からノートを選ぶか、<b>新しいノート</b>で書きはじめてください</div>
+    </div>
+    <div id="ed" hidden></div>
+  </div>
+  <div id="say"></div>
+  <script src="vendor/monaco/vs/loader.js"></script>
+  <script src="renderer.js"></script>
+</body>
+</html>

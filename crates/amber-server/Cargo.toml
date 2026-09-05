@@ -1,0 +1,14 @@
+[package]
+name = "amber-server"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "amber の窓が話す相手。標準入出力に JSON を一行ずつ"
+
+[dependencies]
+# **机の上で動く。** ゴミ箱があるので `desktop` を立てる ── 電話の側
+# （`amber-ffi`）は立てない。`version` が返す `desktop` はその違い。
+amber-core = { workspace = true, features = ["desktop"] }
+anyhow = { workspace = true }
+serde_json = { workspace = true }

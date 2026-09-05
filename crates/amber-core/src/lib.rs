@@ -7,6 +7,7 @@
 //! 前端（iPhone の Swift、窓の JS、端末の Rust）は描くだけ。**同じ判断を
 //! 二か所に書いたら、それは一度の編集で食い違う二つの答えになる。**
 
+pub mod api;
 pub mod markdown;
 pub mod note;
 pub mod notebook;
